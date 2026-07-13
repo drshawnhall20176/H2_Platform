@@ -1,0 +1,73 @@
+# Auto-refresh the Statcast batter cache — entirely in the cloud, no local step.
+#
+# WHAT IT DOES:
+#   Once a day (and on demand) this pulls the season's barrel-rate / exit-velo data from
+#   Baseball Savant via pybaseball, writes data/statcast_batters.csv, and commits it back
+#   to the repo. That commit triggers a Streamlit Cloud redeploy, so the deployed app picks
+#   up the fresh file and flips from "Statcast off" to "Statcast on" with zero manual work.
+#
+# ONE-TIME SETUP (do this before the first run):
+#   1) Commit the updated .gitignore that un-ignores data/statcast_batters.csv
+#      (folder stays ignored; only this one file is allowed through — see .gitignore).
+#   2) Commit this workflow file at .github/workflows/refresh-statcast.yml
+#   3) Go to the repo's Actions tab -> "refresh-statcast" -> "Run workflow" to populate the
+#      file immediately (otherwise it first runs at the scheduled time below).
+#
+# NOTES:
+#   - No app dependency added: Streamlit only READS the CSV. pybaseball is installed here,
+#     in the runner, not in the app's requirements — the app stays lightweight.
+#   - Barrel rates are stable over a season, so daily is plenty (GitHub may delay scheduled
+#     runs under load; that's fine for this).
+#   - If a future pybaseball version drifts on column names, pin it below (e.g.
+#     pip install "pybaseball==2.2.7") and tell Claude so we can adjust the parser.
+
+name: refresh-statcast
+
+on:
+  schedule:
+    - cron: "0 11 * * *"     # 11:00 UTC daily (~6–7am ET), before first pitch
+  workflow_dispatch: {}       # manual "Run workflow" button in the Actions tab
+
+permissions:
+  contents: write             # allow the job to commit the refreshed CSV back to the repo
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pybaseball pandas
+
+      - name: Pull Statcast data and write the cache
+        run: python refresh_statcast.py     # defaults to the current season
+
+      - name: Validate the cache with the app's own loader
+        # Use the SAME load() the dashboard uses, so if this passes the app WILL see
+        # "Statcast on". Guards against an empty or column-drifted pull being committed.
+        run: |
+          python - <<'PY'
+          import sys
+          import statcast_data as SC
+          lookup, k = SC.load()
+          print(f"Loaded {len(lookup)} batters, calibration k = {k}")
+          if len(lookup) < 50 or not k:
+              print("Cache looks empty or invalid — refusing to commit.")
+              sys.exit(1)
+          PY
+
+      - name: Commit the refreshed cache (only if it changed)
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/statcast_batters.csv
+          if git diff --staged --quiet; then
+            echo "No change in Statcast cache — nothing to commit."
+          else
+            git commit -m "Auto-refresh Statcast cache ($(date -u +%Y-%m-%d))"
+            git push
+          fi
