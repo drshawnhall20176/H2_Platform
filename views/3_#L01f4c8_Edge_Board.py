@@ -18,6 +18,7 @@ import pytz
 import streamlit as st
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
  
+import sports
 import mlb_engine as E
 import projections as P
 import odds_api as O
@@ -25,9 +26,14 @@ import statcast_data as SC
 import weather as WX
 import betlog as B
 import bet_sizing as BS
- 
+
+_active = sports.active()
 st.title("📈 Edge Board")
-st.caption("Model probabilities, fair prices, and live edges for every prop on the slate")
+st.caption(f"Model probabilities, fair prices, and live edges for every prop on the slate "
+           f"— {_active.icon} {_active.label}")
+
+if not sports.require_live_engine("Edge Board"):
+    st.stop()
  
 eastern = pytz.timezone("US/Eastern")
  
@@ -369,7 +375,8 @@ else:
                             B.add_bet(slate_date=date_str, game=r.get("Game"), player=r["Player"],
                                       market=r["Market"], side=r["Side"], line=float(r["Line"]),
                                       entry_odds=int(r["Price"]), model_prob=float(r["ModelProb"]),
-                                      stake=float(r.get("Stake $", 0) or 0), book=r.get("Book"))
+                                      stake=float(r.get("Stake $", 0) or 0), book=r.get("Book"),
+                                      sport=_active.key)
                             logged_sigs.add(sig)
                             n += 1
                         msg = f"Logged {n} bet(s) to the Bet Log — settle them there after the games."

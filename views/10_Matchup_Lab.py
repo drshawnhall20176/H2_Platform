@@ -107,7 +107,7 @@ if have_hitter:
     st.caption(f"{pitcher['Pitcher']} throws it {best['usage']*100:.0f}% of the time and misses "
                f"bats {best['p_whiff']*100:.0f}% per swing. {hitter['Hitter']} whiffs "
                f"{(best['h_whiff'] or 0)*100:.0f}% vs {best['family'].lower()} and slugs "
-               f"{best['h_slg'] or 0:.3f} against it. Matchup score is a scouting sort, not a "
+               f"{best['h_slg'] or 0:.2f} against it. Matchup score is a scouting sort, not a "
                "probability.")
 else:
     st.info(f"We have {pitcher['Pitcher']}'s arsenal, but no cached pitch-family data for "
@@ -133,17 +133,19 @@ for c in ["Usage", "Velo", "P Whiff%", "P PutAway%", "H Whiff% (fam)", "H SLG (f
     grid[c] = pd.to_numeric(grid[c], errors="coerce")
 
 styler = (grid.style
-          .format({"Usage": "{:.0%}", "Velo": "{:.1f}", "P Whiff%": "{:.0%}", "P PutAway%": "{:.0%}",
-                   "H Whiff% (fam)": "{:.0%}", "H SLG (fam)": "{:.3f}", "H xwOBA (fam)": "{:.3f}",
-                   "Score": "{:.3f}"}, na_rep="—")
-          # green = good FOR THE PITCHER: high pitcher-whiff, high hitter-whiff, high score
-          .theme_gradient(cmap="Greens", subset=["P Whiff%", "P PutAway%", "H Whiff% (fam)", "Score"])
-          # red = damage the hitter does: high SLG/xwOBA against is bad for the pitcher
-          .theme_gradient(cmap="Reds", subset=["H SLG (fam)", "H xwOBA (fam)"]))
+          .format({"Usage": "{:.0%}", "Velo": "{:.2f}", "P Whiff%": "{:.0%}", "P PutAway%": "{:.0%}",
+                   "H Whiff% (fam)": "{:.0%}", "H SLG (fam)": "{:.2f}", "H xwOBA (fam)": "{:.2f}",
+                   "Score": "{:.2f}"}, na_rep="—")
+          # Green = high value on that stat, everywhere on the platform (same convention as the
+          # Dinger Engine). P Whiff%/P PutAway%/Score stay pitcher-framed (green = good for the
+          # pitcher); SLG/xwOBA are a hitter-quality stat, so they share Dinger's direction too.
+          .theme_gradient(cmap="RdYlGn", subset=["P Whiff%", "P PutAway%", "H Whiff% (fam)", "Score"])
+          .theme_gradient(cmap="RdYlGn", subset=["H SLG (fam)", "H xwOBA (fam)"]))
 st.dataframe(styler, use_container_width=True, hide_index=True)
-st.caption("Green favors the pitcher (whiffs, put-aways, matchup score). Red is damage the hitter "
-           "does to that pitch family (SLG / xwOBA against). Hitter columns are by pitch **family** "
-           "(Fastball / Breaking / Offspeed) for a stable sample; the pitch is mapped to its family.")
+st.caption("Green favors the pitcher on Whiff%/PutAway%/Score. SLG/xwOBA color the same direction "
+           "as every other page on the platform (high = green), so a hitter's power reads the same "
+           "here as on the Dinger Engine. Hitter columns are by pitch **family** (Fastball / "
+           "Breaking / Offspeed) for a stable sample; the pitch is mapped to its family.")
 
 # --- table 2 + 3 side by side: raw arsenal and raw hitter splits -----------------------------
 c1, c2 = st.columns(2)
@@ -156,9 +158,9 @@ with c1:
     if len(ars):
         for c in ["Usage", "Velo", "Whiff%", "PutAway%"]:
             ars[c] = pd.to_numeric(ars[c], errors="coerce")
-        st.dataframe(ars.style.format({"Usage": "{:.0%}", "Velo": "{:.1f}", "Whiff%": "{:.0%}",
+        st.dataframe(ars.style.format({"Usage": "{:.0%}", "Velo": "{:.2f}", "Whiff%": "{:.0%}",
                                        "PutAway%": "{:.0%}"}, na_rep="—")
-                     .theme_gradient(cmap="Greens", subset=["Whiff%", "PutAway%"]),
+                     .theme_gradient(cmap="RdYlGn", subset=["Whiff%", "PutAway%"]),
                      use_container_width=True, hide_index=True)
 
 with c2:
@@ -171,10 +173,10 @@ with c2:
         } for fam, v in hs.items()])
         for c in ["Whiff%", "SLG", "xwOBA"]:
             hrows[c] = pd.to_numeric(hrows[c], errors="coerce")
-        st.dataframe(hrows.style.format({"Whiff%": "{:.0%}", "SLG": "{:.3f}", "xwOBA": "{:.3f}"},
+        st.dataframe(hrows.style.format({"Whiff%": "{:.0%}", "SLG": "{:.2f}", "xwOBA": "{:.2f}"},
                                         na_rep="—")
-                     .theme_gradient(cmap="Reds", subset=["SLG", "xwOBA"])
-                     .theme_gradient(cmap="Greens", subset=["Whiff%"]),
+                     .theme_gradient(cmap="RdYlGn", subset=["SLG", "xwOBA"])
+                     .theme_gradient(cmap="RdYlGn", subset=["Whiff%"]),
                      use_container_width=True, hide_index=True)
     else:
         st.caption("No cached pitch-family splits for this hitter yet.")
@@ -193,10 +195,10 @@ if ht:
     } for r in ht])
     for c in ["Whiff%", "SLG", "xwOBA"]:
         htype[c] = pd.to_numeric(htype[c], errors="coerce")
-    st.dataframe(htype.style.format({"Whiff%": "{:.0%}", "SLG": "{:.3f}", "xwOBA": "{:.3f}"},
+    st.dataframe(htype.style.format({"Whiff%": "{:.0%}", "SLG": "{:.2f}", "xwOBA": "{:.2f}"},
                                     na_rep="—")
-                 .theme_gradient(cmap="Greens", subset=["Whiff%"])
-                 .theme_gradient(cmap="Reds", subset=["SLG", "xwOBA"]),
+                 .theme_gradient(cmap="RdYlGn", subset=["Whiff%"])
+                 .theme_gradient(cmap="RdYlGn", subset=["SLG", "xwOBA"]),
                  use_container_width=True, hide_index=True)
     st.caption("Green = the hitter whiffs on it (good for the pitcher). Red = damage the hitter "
                "does (SLG / xwOBA against). Sorted by pitches seen.")

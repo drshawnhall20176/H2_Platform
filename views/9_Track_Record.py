@@ -13,6 +13,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
+import sports
 import betlog as B
 import retro as R
 
@@ -22,24 +23,26 @@ PALETTE = {"pos": "#16a34a", "neg": "#dc2626", "model": "#2563eb", "muted": "#94
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _load_bets():
+def _load_bets(sport_key: str):
     try:
-        return B.list_bets()
+        return B.list_bets(sport=sport_key)
     except Exception:
         return []
 
 
-st.title("📊 Track Record")
+_active = sports.active()
+st.title(f"📊 Track Record  ·  {_active.icon} {_active.label}")
 st.markdown("**Every bet we log, graded against the closing line — no cherry-picking, no deleting "
             "the losers.** This is our forward-tested record, updated as results come in. "
             "The single number we care about most is **CLV** (closing-line value): whether we "
             "consistently get better prices than where the market closes. Beating the close is the "
             "most reliable early sign of a real edge — long before win-rate or profit stabilize.")
 
-bets = _load_bets()
+bets = _load_bets(_active.key)
 if not bets:
-    st.info("📈 We're building our track record. Once bets are logged and settled, the proof shows "
-            "up here — CLV, per-market performance, and calibration.")
+    st.info(f"📈 We're building our {_active.label} track record. Once bets are logged and settled, "
+            "the proof shows up here — CLV, per-market performance, and calibration. Switch sports "
+            "in the sidebar to see another league's record.")
     st.stop()
 
 summ = B.summary(bets)

@@ -12,10 +12,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
  
+import sports
 import betlog as B
- 
-st.title("📒 Bet Log — proof layer")
-st.caption("Track CLV, ROI, and calibration. The record that proves the model works.")
+
+_active = sports.active()
+st.title(f"📒 Bet Log — proof layer  ·  {_active.icon} {_active.label}")
+st.caption("Track CLV, ROI, and calibration. The record that proves the model works. "
+           "Switch sports in the sidebar to see that sport's bets — every bet is logged with "
+           "the sport it was placed under.")
  
 if B.USING_POSTGRES:
     st.success("**Durable storage: connected.** Bets are saved to your Postgres/Supabase database — "
@@ -27,8 +31,7 @@ else:
                "logged bets can be lost.** Set a `DATABASE_URL` secret (Supabase) for durable storage; "
                "see SUPABASE_SETUP.md.", icon="⚠️")
  
-MARKETS = ["Batter HR", "Batter Total Bases", "Batter Total Hits", "Batter Strikeouts",
-           "Pitcher Strikeouts", "Pitcher Outs", "Pitcher Walks", "Other"]
+MARKETS = list(_active.market_map.keys()) + ["Other"] if _active.market_map else ["Other"]
  
 # --- Log a bet --------------------------------------------------------------
 with st.expander("➕ Log a bet", expanded=False):
@@ -59,15 +62,16 @@ with st.expander("➕ Log a bet", expanded=False):
             if player and game:
                 B.add_bet(slate_date=d.isoformat(), game=game, player=player, market=market,
                           side=side, line=line, entry_odds=int(entry_odds), model_prob=model_prob,
-                          stake=stake, book=book, notes=notes, ticket=ticket.strip())
+                          stake=stake, book=book, notes=notes, ticket=ticket.strip(),
+                          sport=_active.key)
                 st.success(f"Logged: {player} {market} {side} {line}"
                            + (f"  ·  ticket “{ticket.strip()}”" if ticket.strip() else ""))
             else:
                 st.warning("Player and game are required.")
  
-bets = B.list_bets()
+bets = B.list_bets(sport=_active.key)
 if not bets:
-    st.info("No bets logged yet. Use **Log a bet** above to start your record.")
+    st.info(f"No {_active.label} bets logged yet. Use **Log a bet** above to start your record.")
     st.stop()
  
 s = B.summary(bets)

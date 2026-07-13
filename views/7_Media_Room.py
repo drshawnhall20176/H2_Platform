@@ -13,6 +13,7 @@ import os
 import streamlit as st
 from datetime import datetime
  
+import sports
 import mlb_engine as E
 import projections as P
 import statcast_data as SC
@@ -20,8 +21,11 @@ import weather as WX
 import odds_api as O
 import selections as SEL
 import retro as R
- 
- 
+
+_active = sports.active()
+if not sports.require_live_engine("Media Room"):
+    st.stop()
+
 st.markdown("""
 <style>
 .sel-card {background:#f8fafc;border:1px solid #e2e8f0;border-left:5px solid #7c3aed;
@@ -36,7 +40,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
  
-st.title("📣 H2 Sports Media — Selections")
+st.title(f"📣 H2 Sports Media — Selections  ·  {_active.icon} {_active.label}")
 st.caption("Curated plays we found interesting, with the reasoning — ready for the show and the Discord")
  
 SIDE_PHRASE = {

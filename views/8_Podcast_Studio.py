@@ -11,6 +11,7 @@ import os
 import streamlit as st
 from datetime import datetime, timedelta
 
+import sports
 import mlb_engine as E
 import projections as P
 import statcast_data as SC
@@ -19,6 +20,10 @@ import odds_api as O
 import retro as R
 import podcast as PC
 import selections as SEL
+
+_active = sports.active()
+if not sports.require_live_engine("Podcast Studio"):
+    st.stop()
 
 
 def get_key():
@@ -39,7 +44,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🎙️ H2 Podcast Studio")
+st.title(f"🎙️ H2 Podcast Studio  ·  {_active.icon} {_active.label}")
 st.caption("A full ~hour show rundown for Dr. Hall & Deezy — rebuilt every day from the slate")
 
 

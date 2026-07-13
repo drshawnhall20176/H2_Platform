@@ -123,8 +123,8 @@ def style_hitters(data: pd.DataFrame):
         if c in view.columns:
             view[c] = pd.to_numeric(view[c], errors="coerce")
     pct = [c for c in ("HR%", "Hit%", "TB1.5%", "SO Prob", "K%", "Barrel%", "xHR/PA") if c in view.columns]
-    fmt = {"HR": "{:.0f}", "TB": "{:.0f}", "SLG": "{:.3f}", "OPS": "{:.3f}",
-           "ISO": "{:.3f}", "PowerIndex": "{:.1f}", "Opp HR/9": "{:.2f}"}
+    fmt = {"HR": "{:.0f}", "TB": "{:.0f}", "SLG": "{:.2f}", "OPS": "{:.2f}",
+           "ISO": "{:.2f}", "PowerIndex": "{:.1f}", "Opp HR/9": "{:.2f}"}
     fmt.update({c: "{:.1%}" for c in pct})
     styler = view.style.format(fmt, na_rep="—")
     # High is good for a hitter -> green. Barrel%/xHR/PA (more power) belong here too.
@@ -174,7 +174,7 @@ if "Due" in df.columns:
         ["Hitter", "Team", "Opp Pitcher", "Barrel%", "xHR/PA", "HR%", "Due"]]
     st.dataframe(
         due.style.format({"Barrel%": "{:.1%}", "xHR/PA": "{:.1%}", "HR%": "{:.1%}", "Due": "{:+.1%}"})
-        .theme_gradient(cmap="Oranges", subset=["Due"]),
+        .theme_gradient(cmap="RdYlGn", subset=["Due"]),
         hide_index=True, use_container_width=True)
  
 # --- Per-game detail --------------------------------------------------------
