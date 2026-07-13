@@ -62,8 +62,8 @@ def test_owner_only_pages_match_expected_titles():
     # titles that exist in _META (a typo here would silently fail to hide a page from the public
     # build).
     src = (_HERE / "streamlit_app.py").read_text()
-    m = re.search(r'_OWNER_ONLY_TITLES = \{([^}]*)\}', src)
-    assert m, "streamlit_app.py must define _OWNER_ONLY_TITLES"
+    m = re.search(r'owner_only_titles = \{([^}]*)\}', src)
+    assert m, "streamlit_app.py must define owner_only_titles"
     gated = {t.strip().strip('"') for t in m.group(1).split(",") if t.strip()}
     assert gated == {"Bet Log", "Media Room", "Podcast Studio", "Edge Board"}, gated
     all_titles = set(re.findall(r'\("([^"]+)",\s*"[^"]*",\s*"[^"]*"\)', src))
@@ -78,6 +78,26 @@ def test_public_audience_defaults_safe():
     src = (_HERE / "streamlit_app.py").read_text()
     assert 'st.secrets.get("AUDIENCE", "owner")' in src
     print("✓ AUDIENCE defaults to 'owner' when unset (safe default for local/dev runs)")
+
+
+def test_streamlit_app_guards_direct_run():
+    # streamlit_app.py must only call run() under __main__, or importing it from the second
+    # entrypoint (streamlit_app_discord.py) would execute the whole app twice.
+    src = (_HERE / "streamlit_app.py").read_text()
+    assert 'if __name__ == "__main__":\n    run()' in src, \
+        "run() must be guarded by __main__, or the Discord entrypoint double-executes it"
+    print("✓ streamlit_app.py's run() is guarded — safe to import from a second entrypoint")
+
+
+def test_discord_entrypoint_has_no_duplicated_logic():
+    # The whole point of streamlit_app_discord.py is to hold ZERO page-building logic (that would
+    # be exactly the drift this two-file setup exists to avoid). It should just import and call
+    # run() from streamlit_app.py.
+    src = (_HERE / "streamlit_app_discord.py").read_text()
+    assert "from streamlit_app import run" in src and "run()" in src
+    for forbidden in ("st.navigation", "st.Page", "_META", "OWNER_ONLY", "MLB_ONLY"):
+        assert forbidden not in src, f"logic leaked into the thin entrypoint: {forbidden}"
+    print("✓ streamlit_app_discord.py stays a 2-line pass-through, no duplicated page logic")
 
 
 if __name__ == "__main__":
