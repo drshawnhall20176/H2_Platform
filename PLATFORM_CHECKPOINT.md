@@ -80,7 +80,12 @@ second real, priced sport — not a placeholder.
   self-migrates via `ADD COLUMN IF NOT EXISTS` — verify on first deploy).
 - Discord/public app's own Settings → Secrets needs `AUDIENCE = "public"` plus the same DB/API
   secrets as the owner app.
-- **First-deploy WNBA checklist:** confirm a real WNBA slate loads on Edge Board without errors —
-  the live nba_api calls were never exercised outside this sandbox. If `LeagueGameFinder` /
-  `PlayerGameLog` / `CommonTeamRoster` come back empty instead of erroring (their failure mode is
-  silent), the most likely culprit is `config_wnba.current_season()`'s season-string format.
+- **First-deploy WNBA checklist:** confirmed via screenshot on 2026-07-13 that Edge Board showed
+  "No projectable props" for WNBA despite real games that night (LA Sparks @ Atlanta Dream,
+  Lynx vs Mercury) — a live-only bug, since it couldn't be caught from the build sandbox.
+  `wnba_engine.py` now tries multiple strategies for both suspected causes (WNBA season-string
+  format, and `LeagueGameFinder`'s documented date-filter flakiness — github.com/swar/nba_api/
+  issues/95) before giving up. If Edge Board is STILL empty for a real WNBA slate after this fix,
+  the fallback chain itself needs a look — check Streamlit Cloud's logs for
+  `WNBA LeagueGameFinder attempt failed` / `WNBA game log fetch failed` entries, which show
+  exactly which strategies were tried and why each failed.

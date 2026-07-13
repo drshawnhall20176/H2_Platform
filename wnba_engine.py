@@ -12,12 +12,21 @@ Data source: nba_api (https://github.com/swar/nba_api), wrapping stats.wnba.com 
 the same "public stats API" pattern MLB (MLB Stats API) and NFL (nfl_data_py) already use here.
 
 IMPORTANT — this module's live HTTP calls could not be exercised from the build sandbox
-(stats.wnba.com is outside its network allowlist). Endpoint choice was made deliberately for
-stability under that constraint: LeagueGameFinder, PlayerGameLog, and CommonTeamRoster are
-nba_api's oldest and most widely-documented endpoints, with long-stable column names — chosen
-over the newer ScoreboardV3 specifically to reduce the risk of a field-name mismatch that
-couldn't be caught until first live run. Verify against a real slate on first deploy; if a column
-name has drifted, these functions return empty rather than raising, which is easy to miss.
+(stats.wnba.com is outside its network allowlist). Two specific unknowns can't be resolved without
+a live response, so rather than guess a single answer, both are handled defensively:
+
+  1. WNBA's season STRING format. WNBA-specific wrappers (wehoop's wnba_playergamelog) suggest a
+     plain year ("2026"); general stats.nba.com docs (py_ball) describe a cross-year "YYYY-YY"
+     shape used elsewhere on the same backend. `_season_candidates()` tries both, in that order,
+     and every season-dependent fetch below stops at the first one that returns data.
+  2. `LeagueGameFinder`'s date_from/date_to filters have a documented history of returning empty
+     results even when used correctly (github.com/swar/nba_api/issues/95, issues/207).
+     `get_schedule` therefore also falls back to pulling the whole season and filtering by date
+     client-side if the server-side date filter comes back empty.
+
+Verify against a real slate on first deploy. If a column name has drifted instead, these
+functions still return empty rather than raising, which is easy to miss — the first-deploy
+checklist in PLATFORM_CHECKPOINT.md covers what to check.
 """
 
 from __future__ import annotations
@@ -36,20 +45,19 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _season_candidates() -> List[str]:
+    """Season strings to try, in order, until one returns data. See module docstring."""
+    primary = CFG.current_season()          # e.g. "2026"
+    y = int(primary)
+    cross_year = f"{y}-{str(y + 1)[-2:]}"    # e.g. "2026-27"
+    return [primary, cross_year]
+
+
 # --------------------------------------------------------------------------- schedule
 def get_schedule(date_str: str) -> List[Dict[str, Any]]:
     """Games scheduled for date_str (YYYY-MM-DD). One dict per game with both team ids/names."""
-    try:
-        finder = leaguegamefinder.LeagueGameFinder(
-            league_id_nullable=CFG.LEAGUE_ID,
-            date_from_nullable=date_str, date_to_nullable=date_str,
-            season_nullable=CFG.current_season(),
-        )
-        df = finder.get_data_frames()[0]
-    except Exception:
-        logger.exception("WNBA schedule fetch failed for %s", date_str)
-        return []
-    if df.empty:
+    df = _fetch_schedule_frame(date_str)
+    if df is None or df.empty:
         return []
 
     games: Dict[str, Dict[str, Any]] = {}
@@ -67,17 +75,57 @@ def get_schedule(date_str: str) -> List[Dict[str, Any]]:
     return [g for g in games.values() if "home_id" in g and "away_id" in g]
 
 
+def _fetch_schedule_frame(date_str: str):
+    """Tries several strategies in order and returns the first non-empty result — see the
+    module docstring for why (documented LeagueGameFinder date-filter flakiness + unverifiable
+    WNBA season string format). Returns None if every strategy comes back empty."""
+    attempts = [dict(date_from_nullable=date_str, date_to_nullable=date_str)]   # no season guess
+    for season in _season_candidates():
+        attempts.append(dict(date_from_nullable=date_str, date_to_nullable=date_str, season_nullable=season))
+    whole_season_attempts = [dict(season_nullable=s, season_type_nullable="Regular Season")
+                             for s in _season_candidates()]
+
+    for kwargs in attempts:
+        df = _try_game_finder(kwargs)
+        if df is not None and not df.empty:
+            return df
+    for kwargs in whole_season_attempts:
+        df = _try_game_finder(kwargs)
+        if df is not None and not df.empty:
+            df = df[df["GAME_DATE"].astype(str).str[:10] == date_str]
+            if not df.empty:
+                return df
+    return None
+
+
+def _try_game_finder(kwargs: Dict):
+    try:
+        finder = leaguegamefinder.LeagueGameFinder(league_id_nullable=CFG.LEAGUE_ID, **kwargs)
+        return finder.get_data_frames()[0]
+    except Exception:
+        logger.exception("WNBA LeagueGameFinder attempt failed: %s", kwargs)
+        return None
+
+
 # --------------------------------------------------------------------------- rosters
 def get_team_roster(team_id: int) -> List[Dict[str, Any]]:
     """A team's roster: [{id, name}, ...]. Empty list (not an exception) on any fetch failure,
-    so one bad team doesn't take down the whole slate build."""
-    try:
-        roster = commonteamroster.CommonTeamRoster(
-            team_id=team_id, season=CFG.current_season(), league_id_nullable=CFG.LEAGUE_ID,
-        )
-        df = roster.get_data_frames()[0]
-    except Exception:
-        logger.exception("WNBA roster fetch failed for team_id=%s", team_id)
+    so one bad team doesn't take down the whole slate build. Tries both season-string candidates
+    (see module docstring)."""
+    df = None
+    for season in _season_candidates():
+        try:
+            roster = commonteamroster.CommonTeamRoster(
+                team_id=team_id, season=season, league_id_nullable=CFG.LEAGUE_ID,
+            )
+            candidate = roster.get_data_frames()[0]
+        except Exception:
+            logger.exception("WNBA roster fetch failed for team_id=%s season=%s", team_id, season)
+            continue
+        if not candidate.empty:
+            df = candidate
+            break
+    if df is None:
         return []
     out = []
     for _, r in df.iterrows():
@@ -91,16 +139,22 @@ def get_team_roster(team_id: int) -> List[Dict[str, Any]]:
 # --------------------------------------------------------------------------- recent form
 def get_player_recent_games(player_id: int, last_n: int = CFG.RECENT_GAMES_N) -> List[Dict[str, float]]:
     """Last N regular-season game logs for a player: [{pts, reb, ast, fg3m, min}, ...], most
-    recent first (PlayerGameLog is already ordered that way). Empty list on any failure."""
-    try:
-        log = playergamelog.PlayerGameLog(
-            player_id=player_id, season=CFG.current_season(), league_id_nullable=CFG.LEAGUE_ID,
-        )
-        df = log.get_data_frames()[0]
-    except Exception:
-        logger.exception("WNBA game log fetch failed for player_id=%s", player_id)
-        return []
-    if df.empty:
+    recent first (PlayerGameLog is already ordered that way). Empty list on any failure. Tries
+    both season-string candidates (see module docstring)."""
+    df = None
+    for season in _season_candidates():
+        try:
+            log = playergamelog.PlayerGameLog(
+                player_id=player_id, season=season, league_id_nullable=CFG.LEAGUE_ID,
+            )
+            candidate = log.get_data_frames()[0]
+        except Exception:
+            logger.exception("WNBA game log fetch failed for player_id=%s season=%s", player_id, season)
+            continue
+        if not candidate.empty:
+            df = candidate
+            break
+    if df is None:
         return []
     out = []
     for _, r in df.iterrows():

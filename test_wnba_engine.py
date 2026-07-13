@@ -98,6 +98,48 @@ def test_build_slate_assembles_rows_from_mocked_fetches(monkeypatch):
     print("✓ build_slate wires schedule -> rosters -> game logs -> filtered rows correctly")
 
 
+# ----------------------------------------------------------------- season-format hedge
+def test_season_candidates_tries_plain_year_then_cross_year(monkeypatch):
+    monkeypatch.setattr(E.CFG, "current_season", lambda: "2026")
+    assert E._season_candidates() == ["2026", "2026-27"]
+
+
+def test_fetch_schedule_frame_falls_back_through_strategies(monkeypatch):
+    import pandas as pd
+
+    # Simulate: date-filter attempts all come back empty, but the whole-season pull (2nd
+    # season-format candidate) succeeds and contains the target date among other games.
+    calls = []
+
+    def fake_try(kwargs):
+        calls.append(kwargs)
+        if kwargs.get("season_nullable") == "2026-27" and "date_from_nullable" not in kwargs:
+            return pd.DataFrame([
+                {"GAME_ID": "1", "GAME_DATE": "2026-07-13", "MATCHUP": "ATL vs. CHI",
+                 "TEAM_ID": 1611661330, "TEAM_NAME": "Atlanta Dream"},
+                {"GAME_ID": "1", "GAME_DATE": "2026-07-13", "MATCHUP": "CHI @ ATL",
+                 "TEAM_ID": 1611661329, "TEAM_NAME": "Chicago Sky"},
+                {"GAME_ID": "2", "GAME_DATE": "2026-07-14", "MATCHUP": "SEA vs. LV",
+                 "TEAM_ID": 1611661328, "TEAM_NAME": "Seattle Storm"},
+            ])
+        return pd.DataFrame()   # every other strategy comes back empty
+
+    monkeypatch.setattr(E, "_try_game_finder", fake_try)
+    monkeypatch.setattr(E.CFG, "current_season", lambda: "2026")
+
+    df = E._fetch_schedule_frame("2026-07-13")
+    assert df is not None
+    assert len(df) == 2                          # only the 2026-07-13 game's 2 team rows
+    assert set(df["GAME_DATE"]) == {"2026-07-13"}
+    assert len(calls) > 1, "should have tried more than one strategy before succeeding"
+    print("✓ _fetch_schedule_frame falls through to the whole-season+client-filter strategy")
+
+
+def test_fetch_schedule_frame_returns_none_when_every_strategy_fails(monkeypatch):
+    monkeypatch.setattr(E, "_try_game_finder", lambda kwargs: None)
+    assert E._fetch_schedule_frame("2026-07-13") is None
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
