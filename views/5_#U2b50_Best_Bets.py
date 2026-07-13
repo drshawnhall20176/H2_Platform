@@ -12,9 +12,13 @@ import mlb_engine as E
 import projections as P
 import statcast_data as SC
 import weather as WX
+import sports
 
 st.title("⭐ Best Bets")
 st.caption("The model's strongest leans across the slate — ranked, reasoned, and by time slot")
+
+if not sports.require_sport("MLB", "Best Bets"):
+    st.stop()
 
 eastern = pytz.timezone("US/Eastern")
 

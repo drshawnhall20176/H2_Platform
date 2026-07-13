@@ -16,9 +16,13 @@ import projections as P
 import statcast_data as SC
 import weather as WX
 import retro as R
- 
+import sports
+
 st.title("🔍 Retrospective")
 st.caption("How the model's pre-game board lined up with what actually happened")
+
+if not sports.require_sport("MLB", "Retrospective"):
+    st.stop()
  
  
 @st.cache_data(ttl=3600, show_spinner=False)

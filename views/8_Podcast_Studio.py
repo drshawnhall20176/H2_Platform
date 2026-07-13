@@ -22,7 +22,7 @@ import podcast as PC
 import selections as SEL
 
 _active = sports.active()
-if not sports.require_live_engine("Podcast Studio"):
+if not sports.require_sport("MLB", "Podcast Studio"):
     st.stop()
 
 

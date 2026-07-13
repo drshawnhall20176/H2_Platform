@@ -23,7 +23,7 @@ import selections as SEL
 import retro as R
 
 _active = sports.active()
-if not sports.require_live_engine("Media Room"):
+if not sports.require_sport("MLB", "Media Room"):
     st.stop()
 
 st.markdown("""

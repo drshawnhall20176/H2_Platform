@@ -21,6 +21,7 @@ import statcast_data as SC
 import weather as WX
 import retro as R
 import betlog as B
+import sports
  
  
 st.markdown("""
@@ -42,6 +43,9 @@ st.markdown("""
      discipline, and proves itself with closing-line value and calibration.</p>
 </div>
 """, unsafe_allow_html=True)
+
+if not sports.require_sport("MLB", "Command Center"):
+    st.stop()
  
  
 # ---------- loaders ----------

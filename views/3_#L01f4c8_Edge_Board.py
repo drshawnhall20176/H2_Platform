@@ -19,15 +19,13 @@ import streamlit as st
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
  
 import sports
-import mlb_engine as E
-import projections as P
 import odds_api as O
-import statcast_data as SC
-import weather as WX
 import betlog as B
 import bet_sizing as BS
 
 _active = sports.active()
+E, P = _active.engine, _active.projections   # sport-routed: MLB -> mlb_engine/projections,
+                                              # WNBA -> wnba_engine/wnba_projections, etc.
 st.title("📈 Edge Board")
 st.caption(f"Model probabilities, fair prices, and live edges for every prop on the slate "
            f"— {_active.icon} {_active.label}")
@@ -37,12 +35,10 @@ if not sports.require_live_engine("Edge Board"):
  
 eastern = pytz.timezone("US/Eastern")
  
-MARKET_LABEL = {
-    "batter_home_runs": "Batter HR", "batter_total_bases": "Batter Total Bases",
-    "batter_hits": "Batter Total Hits", "batter_strikeouts": "Batter Strikeouts",
-    "pitcher_strikeouts": "Pitcher Strikeouts", "pitcher_outs": "Pitcher Outs",
-    "pitcher_walks": "Pitcher Walks",
-}
+# Odds-API-market-key -> display label, built from the active sport's OWN market_map (Stage 1),
+# not a hardcoded per-sport dict. Adding a sport's markets to sports.py is now sufficient; this
+# page needs no further edits.
+MARKET_LABEL = {v: k for k, v in _active.market_map.items()}
  
  
 def get_api_key():
@@ -54,11 +50,13 @@ def get_api_key():
  
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_statcast():
+    import statcast_data as SC
     return SC.load()  # (lookup, k); ({}, None) if no cache file
  
  
 @st.cache_data(ttl=1800, show_spinner=False)
 def load_weather(meta_keys: tuple):
+    import weather as WX
     out = {}
     for vid, gdate, vname in meta_keys:
         if vid is not None and vid not in out:
@@ -70,21 +68,31 @@ def load_weather(meta_keys: tuple):
  
  
 @st.cache_data(ttl=300, show_spinner=False)
-def load_index(date_str: str, fip_constant: float, sims: int, seed: int):
-    rows, meta = E.build_slate(date_str, fip_constant)
-    sc, k = load_statcast()
-    wx = load_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
-    for r in rows:
-        w = wx.get(r.get("_venue_id"))
-        r["_weather_hr"] = w["hr_factor"] if w else 1.0   # temp + wind on HR, matches Dinger Engine
-    # Statcast + weather attached -> HR probabilities here are consistent with the Dinger Engine.
-    return P.build_projection_index(rows, meta, sims=sims, seed=seed, statcast=sc, statcast_k=k)
+def load_index(sport_key: str, date_str: str, sims: int, seed: int):
+    """Sport-routed: dispatches to that sport's own engine/projections modules. MLB additionally
+    layers in Statcast + weather enrichment (its own model inputs, unique to baseball); other
+    sports don't have those and build their projection index straight from the engine's rows."""
+    sport = sports.get(sport_key)
+    engine, proj = sport.engine, sport.projections
+    rows, meta = engine.build_slate(date_str)
+    extra = {}
+    if sport_key == "MLB":
+        sc, k = load_statcast()
+        wx = load_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
+        for r in rows:
+            w = wx.get(r.get("_venue_id"))
+            r["_weather_hr"] = w["hr_factor"] if w else 1.0   # temp + wind on HR, matches Dinger Engine
+        extra = {"statcast": sc, "statcast_k": k}
+    # Statcast + weather attached (MLB only) -> HR probabilities here are consistent with Dinger Engine.
+    return proj.build_projection_index(rows, meta, sims=sims, seed=seed, **extra)
  
  
 @st.cache_data(ttl=300, show_spinner=False)
-def load_edges(date_str: str, markets_tuple: tuple, _index: dict, _api_key: str):
-    offers, info = O.fetch_slate_props(date_str, _api_key, list(markets_tuple))
-    edges, stats = O.compute_edges(_index, offers)
+def load_edges(sport_key: str, date_str: str, markets_tuple: tuple, _index: dict, _api_key: str):
+    sport = sports.get(sport_key)
+    offers, info = O.fetch_slate_props(date_str, _api_key, list(markets_tuple),
+                                       sport=sport.odds_sport_key)
+    edges, stats = O.compute_edges(_index, offers, projections_module=sport.projections)
     return edges, {**info, **stats}
  
  
@@ -103,10 +111,10 @@ with c3:
 date_str = target_date.strftime("%Y-%m-%d")
  
 with st.spinner("Projecting the slate..."):
-    index = load_index(date_str, E.FIP_CONSTANT_DEFAULT, P.DEFAULT_SIMS, seed=7)
+    index = load_index(_active.key, date_str, P.DEFAULT_SIMS, seed=7)
  
 if not index:
-    st.info("No projectable props for this date. Pick a date with scheduled MLB games.")
+    st.info(f"No projectable props for this date. Pick a date with scheduled {_active.label} games.")
     st.stop()
  
 board = pd.DataFrame(P.default_board_from_index(index))
@@ -129,7 +137,7 @@ else:
     with ec1:
         chosen = st.multiselect(
             "Markets to price (each market × each game = 1 quota unit)",
-            O.SUPPORTED_MARKETS, default=O.SUPPORTED_MARKETS,
+            _active.markets, default=_active.markets,
             format_func=lambda k: MARKET_LABEL.get(k, k),
         )
     with ec2:
@@ -203,7 +211,7 @@ else:
     if st.session_state.get("do_fetch"):
         try:
             with st.spinner("Fetching odds and computing edges..."):
-                edges, info = load_edges(date_str, tuple(sorted(chosen)), index, api_key)
+                edges, info = load_edges(_active.key, date_str, tuple(sorted(chosen)), index, api_key)
         except O.OddsAPIError as e:
             st.error(f"Odds API error: {e}")
             edges, info = [], {}
