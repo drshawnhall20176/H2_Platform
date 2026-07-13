@@ -83,7 +83,15 @@ REGISTRY: Dict[str, Sport] = {
         enabled=False,                          # engine present; not yet live end-to-end
     ),
     # ---- vision placeholders (become live as each engine is built) ----
-    "WNBA":   Sport("WNBA",  "WNBA — Basketball",       "🏀", "basketball_wnba",      [], {}, enabled=False),
+    "WNBA":   Sport(
+        key="WNBA", label="WNBA — Basketball", icon="🏀", odds_sport_key="basketball_wnba",
+        markets=["player_points", "player_rebounds", "player_assists", "player_threes"],
+        market_map={"Points": "player_points", "Rebounds": "player_rebounds",
+                    "Assists": "player_assists", "Threes Made": "player_threes"},
+        engine_module="wnba_engine", projections_module="wnba_projections",
+        config_module="config_wnba",
+        enabled=True,   # live as of Stage 2's WNBA build — Core 4 markets (Pts/Reb/Ast/3PM)
+    ),
     "NBA":    Sport("NBA",   "NBA — Basketball",        "🏀", "basketball_nba",       [], {}, enabled=False),
     "NHL":    Sport("NHL",   "NHL — Hockey",            "🏒", "icehockey_nhl",        [], {}, enabled=False),
     "NCAAF":  Sport("NCAAF", "NCAA Football",           "🏈", "americanfootball_ncaaf", [], {}, enabled=False),
@@ -113,6 +121,29 @@ def active_key() -> str:
 
 def active() -> Sport:
     return get(active_key())
+
+
+def require_sport(required_key: str, feature_name: str = "This page") -> bool:
+    """Stricter than require_live_engine. Use this for pages that have NOT been ported to
+    dispatch through sports.active().engine/.projections and still hardcode one specific sport's
+    engine internally (e.g. `import mlb_engine as E`). require_live_engine alone is NOT enough
+    here — it only checks that the ACTIVE sport has markets configured, which used to imply "and
+    therefore it's MLB" back when MLB was the only sport with markets. That stopped being true the
+    moment a second sport (WNBA) got real markets: a require_live_engine-only guard would let a
+    WNBA-selecting user land on a page that silently runs MLB's engine and mislabels the output as
+    WNBA — worse than just not being available. Returns False (caller should st.stop()) when the
+    active sport isn't the one this page actually supports."""
+    import streamlit as st
+    s = active()
+    if s.key != required_key:
+        req = get(required_key)
+        st.info(
+            f"🚧 {feature_name} is only wired for {req.icon} {req.label} so far. "
+            f"Pick {req.icon} {req.label} from the sidebar — support for {s.label} here is "
+            f"planned but not yet built for this specific page."
+        )
+        return False
+    return True
 
 
 def require_live_engine(feature_name: str = "This page") -> bool:

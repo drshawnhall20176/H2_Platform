@@ -193,18 +193,18 @@ def compute_edges(index: Dict, offers: List[Dict],
     return rows, {"matched": matched, "unmatched": unmatched}
 
 
-def fetch_slate_props(date_str: str, api_key: str, markets: List[str]) -> Tuple[List[Dict], Dict]:
+def fetch_slate_props(date_str: str, api_key: str, markets: List[str], sport: str = SPORT) -> Tuple[List[Dict], Dict]:
     """Pull props for every event on the slate date. Returns (offers, info).
 
     info includes remaining quota and event counts so the UI can show cost."""
-    events = fetch_events(api_key)
+    events = fetch_events(api_key, sport=sport)
     todays = [e for e in events if str(e.get("commence_time", ""))[:10] == date_str]
     offers: List[Dict] = []
     remaining = None
     fetched = 0
     for e in todays:
         try:
-            ej, hdr = fetch_event_props(e["id"], api_key, markets)
+            ej, hdr = fetch_event_props(e["id"], api_key, markets, sport=sport)
         except OddsAPIError:
             continue
         remaining = hdr.get("remaining") or remaining

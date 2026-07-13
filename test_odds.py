@@ -104,6 +104,42 @@ def test_kelly_stake_caps_and_fractions():
     assert O.kelly_stake(0.58, 120, 50, fraction=0.5, cap_pct=0.05) > 0
 
 
+def test_fetch_slate_props_threads_sport_through():
+    # Regression test: fetch_slate_props used to call fetch_events()/fetch_event_props() with no
+    # sport arg, silently defaulting to MLB no matter what the caller asked for. Monkeypatch both
+    # to record what sport they actually received.
+    calls = {"events_sport": None, "props_sport": None}
+
+    def fake_fetch_events(api_key, sport=O.SPORT):
+        calls["events_sport"] = sport
+        return [{"id": "evt1", "commence_time": "2026-07-13T23:00:00Z"}]
+
+    def fake_fetch_event_props(event_id, api_key, markets, regions="us", sport=O.SPORT):
+        calls["props_sport"] = sport
+        return {"bookmakers": []}, {"remaining": "42"}
+
+    orig_events, orig_props = O.fetch_events, O.fetch_event_props
+    O.fetch_events, O.fetch_event_props = fake_fetch_events, fake_fetch_event_props
+    try:
+        offers, info = O.fetch_slate_props("2026-07-13", "fake_key", ["player_points"],
+                                           sport="basketball_wnba")
+    finally:
+        O.fetch_events, O.fetch_event_props = orig_events, orig_props
+
+    assert calls["events_sport"] == "basketball_wnba"
+    assert calls["props_sport"] == "basketball_wnba"
+    assert info["events_fetched"] == 1
+    print("✓ fetch_slate_props actually forwards sport to both fetch_events and fetch_event_props")
+
+
+def test_fetch_slate_props_defaults_to_mlb_for_backward_compat():
+    # Existing MLB call sites that don't pass sport= must keep working unchanged.
+    import inspect
+    sig = inspect.signature(O.fetch_slate_props)
+    assert sig.parameters["sport"].default == "baseball_mlb"
+    print("✓ fetch_slate_props still defaults to MLB when sport isn't specified")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

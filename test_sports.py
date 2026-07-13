@@ -15,10 +15,10 @@ def test_registry_has_all_seven_leagues():
     print("✓ all 7 leagues registered")
 
 
-def test_only_mlb_enabled_today():
-    live = [s.key for s in S.enabled_sports()]
-    assert live == ["MLB"], f"expected only MLB live, got {live}"
-    print("✓ MLB is the only enabled/live sport (NFL engine present but not flipped on)")
+def test_mlb_and_wnba_enabled_today():
+    live = {s.key for s in S.enabled_sports()}
+    assert live == {"MLB", "WNBA"}, f"expected MLB + WNBA live, got {live}"
+    print("✓ MLB and WNBA are the enabled/live sports (WNBA built out in Stage 2)")
 
 
 def test_get_falls_back_to_default_for_unknown_key():
@@ -41,6 +41,14 @@ def test_require_live_engine_true_for_mlb(monkeypatch):
     print("✓ require_live_engine passes for MLB (markets configured)")
 
 
+def test_require_live_engine_true_for_wnba(monkeypatch):
+    import streamlit as st
+    st.session_state["sport"] = "WNBA"
+    assert S.require_live_engine("Edge Board") is True
+    st.session_state["sport"] = "MLB"   # reset for other tests
+    print("✓ require_live_engine passes for WNBA now that Core 4 markets are wired")
+
+
 def test_require_live_engine_false_for_unwired_sport(monkeypatch):
     import streamlit as st
     st.session_state["sport"] = "NFL"   # engine module present, but markets=[] (not wired)
@@ -49,11 +57,12 @@ def test_require_live_engine_false_for_unwired_sport(monkeypatch):
     print("✓ require_live_engine blocks a sport with no markets configured yet, no crash")
 
 
-def test_market_map_present_only_for_mlb():
-    assert S.REGISTRY["MLB"].market_map, "MLB must have a market_map (CLV capture depends on it)"
-    for key in ("NFL", "WNBA", "NBA", "NHL", "NCAAF", "NCAAMB"):
+def test_market_map_present_for_live_sports_only():
+    for key in ("MLB", "WNBA"):
+        assert S.REGISTRY[key].market_map, f"{key} must have a market_map (CLV capture depends on it)"
+    for key in ("NFL", "NBA", "NHL", "NCAAF", "NCAAMB"):
         assert S.REGISTRY[key].market_map == {}, f"{key} should still be a placeholder"
-    print("✓ only MLB has a filled market_map; the rest are honest placeholders")
+    print("✓ MLB and WNBA have filled market_maps; the rest are honest placeholders")
 
 
 def test_owner_only_pages_match_expected_titles():
@@ -98,6 +107,23 @@ def test_discord_entrypoint_has_no_duplicated_logic():
     for forbidden in ("st.navigation", "st.Page", "_META", "OWNER_ONLY", "MLB_ONLY"):
         assert forbidden not in src, f"logic leaked into the thin entrypoint: {forbidden}"
     print("✓ streamlit_app_discord.py stays a 2-line pass-through, no duplicated page logic")
+
+
+def test_require_sport_blocks_wrong_sport_even_with_markets():
+    # The whole point of require_sport: unlike require_live_engine, it must block WNBA even
+    # though WNBA now has real markets configured — because the page itself hasn't been ported.
+    import streamlit as st
+    st.session_state["sport"] = "WNBA"
+    assert S.require_sport("MLB", "Media Room") is False
+    st.session_state["sport"] = "MLB"
+    print("✓ require_sport blocks a page for WNBA even though WNBA passes require_live_engine")
+
+
+def test_require_sport_allows_matching_sport():
+    import streamlit as st
+    st.session_state["sport"] = "MLB"
+    assert S.require_sport("MLB", "Media Room") is True
+    print("✓ require_sport allows the page when the active sport matches")
 
 
 if __name__ == "__main__":
