@@ -13,10 +13,22 @@ import re
 import streamlit as st
 from pathlib import Path
 
+import sports
+
 st.set_page_config(page_title="H2 Sports MLB Dashboard", page_icon="⚾", layout="wide")
+
+# Sidebar sport picker — sets st.session_state["sport"], read by every shared page below.
+sports.render_sport_selector()
+_ACTIVE_SPORT = sports.active_key()
 
 _HERE = Path(__file__).parent
 _VIEWS = _HERE / "views"
+
+# Pages that only make sense for baseball (concepts like HR/pitching don't generalize) are
+# hidden entirely — not shown greyed-out — when a non-MLB sport is active. Shared proof pages
+# (Edge Board, Bet Log, Track Record, Media Room, Podcast, Retrospective) stay visible for every
+# sport and handle "engine not wired yet" gracefully inside the page itself.
+_MLB_ONLY_LEADS = {"1", "2", "10"}  # Pitching Lab, Dinger Engine, Matchup Lab
 
 # leading page-number -> (title, icon, stable url slug). The url_path is the key fix: it pins each
 # page to a predictable URL so reruns keep you on the same page instead of defaulting to Home.
@@ -50,6 +62,8 @@ _view_files = sorted(_VIEWS.glob("*.py"),
 pages = [st.Page(str(_HERE / "Home.py"), title="Home", icon="⚾", url_path="home")]
 for f in _view_files:
     key = _lead(f.name)
+    if key in _MLB_ONLY_LEADS and _ACTIVE_SPORT != "MLB":
+        continue  # e.g. Dinger Engine makes no sense once NFL/NBA/etc. is selected
     title, icon, slug = _META.get(key, (f.stem, "📄", f"page_{key}"))
     pages.append(st.Page(str(f), title=title, icon=icon, url_path=slug))
 

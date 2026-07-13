@@ -115,6 +115,25 @@ def active() -> Sport:
     return get(active_key())
 
 
+def require_live_engine(feature_name: str = "This page") -> bool:
+    """Call at the top of a page that pulls real slate data from an engine (Edge Board, Media
+    Room, Podcast Studio, Retrospective, Best Bets, Command Center). Returns True when the active
+    sport has markets configured (i.e. its engine is actually wired end-to-end, not just a
+    placeholder registry entry). When False, shows a friendly notice — the caller should st.stop()
+    right after. This is what lets these pages be sport-routed today and "just work" the moment a
+    future stage fills in a sport's markets/market_map, with no further page changes needed."""
+    import streamlit as st
+    s = active()
+    if not s.markets:
+        st.info(
+            f"🚧 {feature_name} isn't wired up for {s.icon} {s.label} yet. "
+            f"Pick {REGISTRY[DEFAULT_SPORT].icon} {REGISTRY[DEFAULT_SPORT].label} from the sidebar "
+            f"— {s.label} is on the roadmap (see PLATFORM_CHECKPOINT.md)."
+        )
+        return False
+    return True
+
+
 def render_sport_selector():
     """Sidebar sport picker, shared by every page. Sets st.session_state['sport']. Only enabled
     sports are selectable; the rest are listed as 'coming soon' so the full vision is visible."""

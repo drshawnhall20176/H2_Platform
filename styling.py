@@ -50,6 +50,63 @@ _RAMPS = {
 _NEUTRAL_TEXT = "#6b7280"
 
 
+# ============================================================================================
+# BENCHMARK-ANCHORED COLORING — consistent color MEANING across every page and every sport.
+#
+# Each stat has fixed (low, mid, high) anchors grounded in the league's real distribution:
+# low ~ poor (red end), mid ~ league-average (yellow), high ~ elite (green end). Every table
+# everywhere colors a stat against ITS anchors, so a given value is the SAME color no matter
+# which page it's on — that's the professional, trustworthy behavior.
+#
+# DIRECTION is per-column, not per-stat: some pages want "high = green" (RdYlGn) and others want
+# "high = red" (RdYlGn_r) for the SAME stat (a hitter's whiff% is good for the pitcher but bad for
+# the bettor). Callers pick the ramp; the ANCHORS stay identical either way.
+#
+# Adding a sport = add its stats here. One source of truth for the whole platform.
+#
+# Thresholds are the starting calibration (MLB distributions). Tune any anchor here and it
+# propagates to every table automatically.
+# ============================================================================================
+THRESHOLDS: Dict[str, tuple] = {
+    # ---- MLB hitter quality (green = good for the hitter) ----
+    "SLG":      (0.350, 0.410, 0.500),
+    "xwOBA":    (0.290, 0.320, 0.370),
+    "Barrel%":  (0.04,  0.08,  0.14),
+    "HR%":      (0.02,  0.035, 0.06),
+    "Hard-hit%":(0.30,  0.38,  0.48),
+    "xHR/PA":   (0.02,  0.035, 0.06),
+    # ---- whiff / strikeout (same anchors; DIRECTION set per page via the ramp) ----
+    "Whiff%":   (0.18,  0.25,  0.33),
+    "K%":       (0.15,  0.22,  0.30),
+    # ---- MLB pitcher arsenal (green = good for the pitcher) ----
+    "Pitch Whiff%": (0.08, 0.15, 0.28),
+    "PutAway%":     (0.12, 0.18, 0.26),
+}
+
+# Map a table's column label -> the THRESHOLDS stat it should use. Different pages label the same
+# underlying stat differently (e.g. "H SLG (fam)" and "SLG" are both SLG); this keeps them anchored
+# to ONE benchmark. Unmapped columns fall back to relative (per-table) scaling.
+COLUMN_TO_STAT: Dict[str, str] = {
+    # slugging / xwOBA variants
+    "SLG": "SLG", "H SLG (fam)": "SLG",
+    "xwOBA": "xwOBA", "H xwOBA (fam)": "xwOBA",
+    # whiff variants (pitch-level whiff shares the Pitch Whiff% benchmark)
+    "Whiff%": "Pitch Whiff%", "P Whiff%": "Pitch Whiff%",
+    "H Whiff% (fam)": "Whiff%",
+    "PutAway%": "PutAway%", "P PutAway%": "PutAway%",
+    # hitter power
+    "HR%": "HR%", "Barrel%": "Barrel%", "xHR/PA": "xHR/PA", "Hard-hit%": "Hard-hit%",
+    "K%": "K%", "SO Prob": "K%",
+}
+
+
+def register_thresholds(new: Dict[str, tuple], column_map: Optional[Dict[str, str]] = None):
+    """Let a sport add its own stat anchors (and column aliases) to the shared system."""
+    THRESHOLDS.update(new)
+    if column_map:
+        COLUMN_TO_STAT.update(column_map)
+
+
 def _lerp(a: Sequence[float], b: Sequence[float], t: float):
     return tuple(a[i] + (b[i] - a[i]) * t for i in range(3))
 
@@ -76,22 +133,46 @@ def _text_for(rgb: Sequence[float]) -> str:
     return "#111111" if _luminance(rgb) > 150 else "#ffffff"
 
 
-def _col_styles(series: pd.Series, ramp_name: str) -> List[str]:
-    """Per-cell 'background-color + color' for one column, normalized within that column."""
+def _norm_position(v: float, anchors: tuple) -> float:
+    """Map a value to 0..1 against fixed (low, mid, high) anchors, so the SAME value is the SAME
+    color everywhere. Piecewise: low->0.0, mid->0.5, high->1.0, clamped outside the range."""
+    lo, mid, hi = anchors
+    if v <= lo:
+        return 0.0
+    if v >= hi:
+        return 1.0
+    if v <= mid:
+        return 0.5 * (v - lo) / ((mid - lo) or 1.0)
+    return 0.5 + 0.5 * (v - mid) / ((hi - mid) or 1.0)
+
+
+def _col_styles(series: pd.Series, ramp_name: str, col_name: Optional[str] = None) -> List[str]:
+    """Per-cell 'background-color + color' for one column.
+
+    If `col_name` maps to a benchmark in THRESHOLDS, the color position is computed against those
+    FIXED anchors (consistent meaning across pages). Otherwise it falls back to relative min/max
+    scaling within the column. Text color is always chosen per cell for light/dark readability."""
     stops = _RAMPS.get(ramp_name, _RAMPS["Greens"])
     vals = pd.to_numeric(series, errors="coerce")
     finite = vals[np.isfinite(vals)]
     out: List[str] = []
     if len(finite) == 0:
-        # nothing to scale — just make text readable
         return [f"color: {_NEUTRAL_TEXT}"] * len(series)
-    vmin, vmax = float(finite.min()), float(finite.max())
-    span = (vmax - vmin) or 1.0
+
+    stat = COLUMN_TO_STAT.get(col_name or "")
+    anchors = THRESHOLDS.get(stat) if stat else None
+    if anchors is None:                       # relative fallback (no benchmark for this column)
+        vmin, vmax = float(finite.min()), float(finite.max())
+        span = (vmax - vmin) or 1.0
+
     for v in vals:
         if not np.isfinite(v):
             out.append(f"color: {_NEUTRAL_TEXT}")
             continue
-        t = (float(v) - vmin) / span
+        if anchors is not None:               # absolute: same value -> same color everywhere
+            t = _norm_position(float(v), anchors)
+        else:                                 # relative: scaled within this table
+            t = (float(v) - vmin) / span
         rgb = _ramp_color(stops, t)
         bg = f"rgb({int(rgb[0])},{int(rgb[1])},{int(rgb[2])})"
         out.append(f"background-color: {bg}; color: {_text_for(rgb)}")
@@ -109,7 +190,7 @@ def gradient(styler: "pd.io.formats.style.Styler", ramp: str,
         return styler
     cols = [c for c in subset if c in styler.data.columns]
     for c in cols:
-        styler = styler.apply(lambda s, _c=c: _col_styles(s, ramp), subset=[c])
+        styler = styler.apply(lambda s, _c=c: _col_styles(s, ramp, _c), subset=[c])
     return styler
 
 
