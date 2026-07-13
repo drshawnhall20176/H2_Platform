@@ -1,8 +1,13 @@
 """Tests for sports.py — the sport registry and Stage 2 routing helpers (active sport lookup,
 the require_live_engine guard that lets engine-backed pages degrade gracefully for sports that
-aren't wired end-to-end yet)."""
+aren't wired end-to-end yet) — plus the owner/public audience gate in streamlit_app.py."""
+
+import re
+from pathlib import Path
 
 import sports as S
+
+_HERE = Path(__file__).parent
 
 
 def test_registry_has_all_seven_leagues():
@@ -49,6 +54,30 @@ def test_market_map_present_only_for_mlb():
     for key in ("NFL", "WNBA", "NBA", "NHL", "NCAAF", "NCAAMB"):
         assert S.REGISTRY[key].market_map == {}, f"{key} should still be a placeholder"
     print("✓ only MLB has a filled market_map; the rest are honest placeholders")
+
+
+def test_owner_only_pages_match_expected_titles():
+    # Regression guard for the Discord/public split: Bet Log, Media Room, Podcast Studio, and
+    # Edge Board must stay in the owner-only gate, and the gate must resolve against real page
+    # titles that exist in _META (a typo here would silently fail to hide a page from the public
+    # build).
+    src = (_HERE / "streamlit_app.py").read_text()
+    m = re.search(r'_OWNER_ONLY_TITLES = \{([^}]*)\}', src)
+    assert m, "streamlit_app.py must define _OWNER_ONLY_TITLES"
+    gated = {t.strip().strip('"') for t in m.group(1).split(",") if t.strip()}
+    assert gated == {"Bet Log", "Media Room", "Podcast Studio", "Edge Board"}, gated
+    all_titles = set(re.findall(r'\("([^"]+)",\s*"[^"]*",\s*"[^"]*"\)', src))
+    assert gated <= all_titles, f"gated titles not found in _META: {gated - all_titles}"
+    print("✓ owner-only gate targets exactly Bet Log / Media Room / Podcast Studio / Edge Board, "
+          "by real title")
+
+
+def test_public_audience_defaults_safe():
+    # Missing/unset AUDIENCE secret must default to "owner" (fail toward showing the owner
+    # everything on unconfigured/local runs), never silently default to "public".
+    src = (_HERE / "streamlit_app.py").read_text()
+    assert 'st.secrets.get("AUDIENCE", "owner")' in src
+    print("✓ AUDIENCE defaults to 'owner' when unset (safe default for local/dev runs)")
 
 
 if __name__ == "__main__":

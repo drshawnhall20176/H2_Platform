@@ -21,6 +21,18 @@ st.set_page_config(page_title="H2 Sports MLB Dashboard", page_icon="⚾", layout
 sports.render_sport_selector()
 _ACTIVE_SPORT = sports.active_key()
 
+# Audience gate: same codebase, deployed twice on Streamlit Cloud, differing only in one secret.
+# The owner deployment's secrets.toml has no AUDIENCE (or AUDIENCE = "owner") -> sees everything.
+# The Discord-facing deployment sets AUDIENCE = "public" in ITS secrets.toml -> Bet Log, Media
+# Room, Podcast Studio, and Edge Board are dropped from st.navigation() entirely, so they're not
+# just hidden from the sidebar, they have no route at all — visiting the URL directly finds
+# nothing to run. Edge Board is gated because it's tonight's live board (the actionable, priced
+# plays) — Track Record stays public as the proof layer, per its own docstring: "this page sells
+# the evidence of edge, not the edge itself."
+_AUDIENCE = st.secrets.get("AUDIENCE", "owner")
+if _AUDIENCE == "public":
+    st.sidebar.caption("🌐 Public build — some tools are owner-only")
+
 _HERE = Path(__file__).parent
 _VIEWS = _HERE / "views"
 
@@ -29,6 +41,10 @@ _VIEWS = _HERE / "views"
 # (Edge Board, Bet Log, Track Record, Media Room, Podcast, Retrospective) stay visible for every
 # sport and handle "engine not wired yet" gracefully inside the page itself.
 _MLB_ONLY_LEADS = {"1", "2", "10"}  # Pitching Lab, Dinger Engine, Matchup Lab
+
+# Internal tools kept off the Discord/public build — matched by TITLE (not page number) so a
+# future re-numbering of the views/ files can't silently un-gate one of these by accident.
+_OWNER_ONLY_TITLES = {"Bet Log", "Media Room", "Podcast Studio", "Edge Board"}
 
 # leading page-number -> (title, icon, stable url slug). The url_path is the key fix: it pins each
 # page to a predictable URL so reruns keep you on the same page instead of defaulting to Home.
@@ -65,6 +81,8 @@ for f in _view_files:
     if key in _MLB_ONLY_LEADS and _ACTIVE_SPORT != "MLB":
         continue  # e.g. Dinger Engine makes no sense once NFL/NBA/etc. is selected
     title, icon, slug = _META.get(key, (f.stem, "📄", f"page_{key}"))
+    if title in _OWNER_ONLY_TITLES and _AUDIENCE != "owner":
+        continue  # Bet Log / Media Room / Podcast Studio: owner deployment only
     pages.append(st.Page(str(f), title=title, icon=icon, url_path=slug))
 
 st.navigation(pages).run()
