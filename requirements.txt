@@ -1,0 +1,16 @@
+# Fully pinned for stable Streamlit Cloud deploys. Pair with Python 3.11 (set in the app's
+# Advanced settings). The unpinned scientific/C packages kept going bleeding-edge and crashing:
+# a pyarrow/matplotlib segfault while rendering the Best Bets dataframe (both are compiled C libs
+# that Streamlit's st.dataframe + Styler.background_gradient depend on). Pinning them to stable,
+# widely-used versions fixes it.
+
+streamlit==1.59.1
+pandas==2.2.3
+numpy==1.26.4
+pyarrow==16.1.0          # st.dataframe serialization — 25.x segfaulted; 16.x is stable
+matplotlib==3.9.2        # Styler.background_gradient colormaps — 3.11 was bleeding-edge
+plotly==5.24.1           # Track Record / Command Center charts
+requests==2.32.3
+pytz==2024.2
+pybaseball==2.2.7
+psycopg2-binary==2.9.9
