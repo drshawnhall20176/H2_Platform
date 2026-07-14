@@ -279,11 +279,17 @@ def get_game_boxscore(game_id: str) -> Dict[int, Dict[str, float]]:
                     }
 
     # One-time deep dump (not per-game — every game has the same shape, so print it once) when
-    # extraction comes up empty despite team blocks being present, so the exact divergence point
-    # is visible without another live-response round-trip.
+    # extraction comes up empty despite team blocks being present. Both site.api.espn.com and
+    # site.web.api.espn.com have now been confirmed (via live logs) to return the identical
+    # team-only shape, so this dump goes wider: full top-level response keys, a check for a
+    # sibling 'rosters' key (MLB's summary endpoint carries per-player data there instead of
+    # nested in boxscore — WNBA's may too), AND a parallel probe of the CDN boxscore endpoint
+    # (cdn.espn.com), a genuinely different data pathway, not just another subdomain of the same
+    # "site" API family. This fetch is diagnostic-only — not wired into `out` yet.
     if not out and teams and "_boxscore_shape_dump" not in _diag_seen:
         _diag_seen.add("_boxscore_shape_dump")
         tb0 = teams[0]
+        _diag(f"get_game_boxscore shape dump: top-level response keys = {list(data.keys())}")
         _diag(f"get_game_boxscore shape dump: team_block keys = {list(tb0.keys())}")
         players_val = tb0.get("players")
         _diag(f"get_game_boxscore shape dump: team_block['players'] = "
@@ -292,6 +298,33 @@ def get_game_boxscore(game_id: str) -> Dict[int, Dict[str, float]]:
             pg0 = players_val[0]
             _diag(f"get_game_boxscore shape dump: players[0] keys = "
                  f"{list(pg0.keys()) if isinstance(pg0, dict) else type(pg0).__name__}")
+        if "rosters" in data:
+            rosters_val = data["rosters"]
+            _diag(f"get_game_boxscore shape dump: top-level 'rosters' key IS present! "
+                 f"type={type(rosters_val).__name__}, len={len(rosters_val) if hasattr(rosters_val, '__len__') else 'n/a'}")
+            if rosters_val and isinstance(rosters_val, list):
+                r0 = rosters_val[0]
+                _diag(f"get_game_boxscore shape dump: rosters[0] keys = "
+                     f"{list(r0.keys()) if isinstance(r0, dict) else type(r0).__name__}")
+        else:
+            _diag("get_game_boxscore shape dump: no top-level 'rosters' key either")
+
+        cdn_data = _get_json_cached("https://cdn.espn.com/core/wnba/boxscore",
+                                    params={"xhr": "1", "gameId": game_id})
+        if cdn_data:
+            gp = cdn_data.get("gamepackageJSON") or {}
+            _diag(f"get_game_boxscore shape dump (CDN): gamepackageJSON top keys = {list(gp.keys())}")
+            cdn_box = gp.get("boxscore") or {}
+            _diag(f"get_game_boxscore shape dump (CDN): boxscore keys = {list(cdn_box.keys())}")
+            cdn_players = cdn_box.get("players")
+            if cdn_players:
+                _diag(f"get_game_boxscore shape dump (CDN): boxscore['players'] "
+                     f"type={type(cdn_players).__name__}, len={len(cdn_players)}")
+                if isinstance(cdn_players, list) and cdn_players:
+                    _diag(f"get_game_boxscore shape dump (CDN): players[0] keys = "
+                         f"{list(cdn_players[0].keys()) if isinstance(cdn_players[0], dict) else type(cdn_players[0]).__name__}")
+        else:
+            _diag("get_game_boxscore shape dump (CDN): fetch returned nothing")
 
     if game_id not in _diag_seen:
         _diag(f"get_game_boxscore({game_id}): {len(out)} player(s) extracted "
