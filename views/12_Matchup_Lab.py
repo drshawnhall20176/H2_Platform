@@ -83,35 +83,53 @@ st.markdown(f"### {row['Player']} vs {row['Opp']}")
 st.caption(f"{row['GameLabel']}  ·  averaging {row['AvgMin']:.0f} min/game over their last "
            f"{len(row.get('_game_log') or [])} games")
 
+st.info(
+    "**What 'Defense Trend' actually measures — read this before the table:** it's "
+    f"{row['Opp']}'s **whole team's combined total** at each stat, allowed to whoever they've "
+    "played recently, compared to their own season-long average. It is NOT specific to "
+    f"{row['Player']}, and NOT specific to her position — there's no per-position or "
+    "per-defender data here, just \"has this team's overall defense at this stat been "
+    "trending looser or tighter than their own norm lately.\" 🟢 **Green / 📈 Looser lately** "
+    f"= the opponent has been allowing MORE than usual — good news for {row['Player']}'s "
+    "counting stats. 🔴 **Red / 📉 Tighter lately** = they've been allowing less — a tougher "
+    "recent stretch for whoever they're facing. Each row (Points/Rebounds/Assists/Threes) has "
+    "its own independent trend — a team can be trending looser on points and tighter on "
+    "rebounds at the same time.", icon="ℹ️")
+
 # --- the matchup grid --------------------------------------------------------
 df = pd.DataFrame(profile)[["Market", "Recent Avg", "H2H Avg", "H2H Games", "Opp Recent Allowed",
                             "Opp Season Allowed", "Defense Trend", "Trend Tag"]]
+df = df.rename(columns={"Opp Recent Allowed": "Opp Team Total (recent)",
+                        "Opp Season Allowed": "Opp Team Total (season)"})
 st.dataframe(
-    df.style.format({"Recent Avg": "{:.1f}", "H2H Avg": "{:.1f}", "Opp Recent Allowed": "{:.1f}",
-                     "Opp Season Allowed": "{:.1f}", "Defense Trend": "{:.2f}×"}, na_rep="—")
+    df.style.format({"Recent Avg": "{:.1f}", "H2H Avg": "{:.1f}", "Opp Team Total (recent)": "{:.1f}",
+                     "Opp Team Total (season)": "{:.1f}", "Defense Trend": "{:.2f}×"}, na_rep="—")
     .theme_gradient(cmap="RdYlGn", subset=["Defense Trend"]),
     hide_index=True, use_container_width=True,
 )
+st.caption(f"\"Opp Team Total\" = {row['Opp']}'s entire team combined, not a per-player or "
+           "per-position figure. \"Defense Trend\" = Team Total (recent) ÷ Team Total (season) "
+           "— above 1.08 is tagged looser/green, below 0.92 is tighter/red, in between is steady.")
 
 if not h2h_log:
     st.caption(f"ℹ️ {row['Team']} and {row['Opp']} haven't played each other yet this season — "
                "H2H columns are honestly blank rather than a guess. Recent form and defense "
                "trend are still real signals on their own.")
 
-with st.expander("How to read this"):
+with st.expander("Full column reference"):
     st.markdown("""
 - **Recent Avg** — the player's own bootstrap-model average over their last 10 games, no
   opponent adjustment (the same number Best Bets/Edge Board price off).
 - **H2H Avg / H2H Games** — this player's actual average in every game their team has played
   against tonight's specific opponent *this season*. Teams typically meet 2-4 times a season, so
   a small sample here is expected, not a bug — read it as a data point, not a verdict.
-- **Opp Recent Allowed** — what tonight's opponent has been giving up at this stat over *their*
-  last 10 games (same number Hot Hand Engine uses).
-- **Opp Season Allowed** — the same thing, but over a season-wide window instead of just their
+- **Opp Team Total (recent)** — tonight's opponent's WHOLE TEAM combined total at this stat, over
+  *their* last 10 games (same number Hot Hand Engine uses). Not player- or position-specific.
+- **Opp Team Total (season)** — the same thing, over a season-wide window instead of just their
   last 10. The gap between these two is the actual signal: a defense trending different from
   their own established norm.
-- **Defense Trend** — Opp Recent Allowed ÷ Opp Season Allowed. Above 1.08 is tagged 📈 looser
-  lately, below 0.92 is 📉 tighter lately, in between is ➡️ steady.
+- **Defense Trend** — Team Total (recent) ÷ Team Total (season). See the note above the table for
+  what the color and tags mean.
     """)
 
 # --- supporting detail: recent game log + H2H game log ----------------------
