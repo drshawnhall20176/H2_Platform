@@ -4,7 +4,7 @@
 one sport-selector foundation). MLB runs exactly as the standalone did originally; WNBA is now a
 second real, priced sport — not a placeholder.
 
-## What's in this checkpoint (all tested — 192/192 tests green)
+## What's in this checkpoint (all tested — 196/196 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -198,6 +198,25 @@ uninformative "Game #").
 - Gated WNBA-only via a new generalized `sport_only_leads` mechanism in `streamlit_app.py`
   (replacing the old MLB-specific `mlb_only_leads`), so this pattern is ready for any future
   sport-specific analysis page without another refactor.
+
+### Closing-line capture made sport-aware (2026-07-14)
+`capture_closing_lines.py` (the GitHub Action that auto-populates CLV — see
+`.github/workflows/capture-closing-lines.yml`) was still fully MLB-hardcoded in three separate
+spots, discovered when asked directly whether the scheduled workflows update both sports:
+`fetch_events`/`fetch_event_props` with no `sport=` (silently defaulted to MLB), and bet markets
+filtered through `clv_capture.MARKET_TO_ODDS_KEY` (MLB's 7 markets only) with no
+`supported_markets=` passed to `parse_event_offers` either — the same class of gap
+`fetch_slate_props` had before it was fixed for Edge Board, just in a script that hadn't been
+touched yet. **Practical effect: WNBA bets were never getting a closing line captured at all,
+silently.** `clv_capture.py` itself already supported a `market_map`/`single_line_markets`
+override per sport (unused by the runner) — no changes needed there. The runner now groups open
+bets by their `sport` column and calls a new `capture_for_sport(sport_key, bets, api_key)` once
+per represented sport, using that sport's own `odds_sport_key`/`market_map`/`single_line_markets`
+from the registry. Legacy bets with no `sport` column default to MLB, matching `betlog.py`'s own
+convention. Also widened the workflow's cron schedule — it only ran during MLB's typical 5-11pm ET
+window, which would have missed WNBA day games (an 11am ET tip-off showed up earlier this season)
+even with the code fixed. Locked in with `test_main_groups_open_bets_by_sport` and
+`test_capture_for_sport_uses_that_sports_own_odds_key_and_market_map`.
 
 ### Theme-proof gradients
 - **`styling.py`** — per-cell text contrast (dark on pale, white on deep), benchmark-anchored
