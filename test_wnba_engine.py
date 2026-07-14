@@ -278,6 +278,22 @@ def test_get_team_recent_game_ids_empty_on_fetch_failure(monkeypatch):
 
 
 # ----------------------------------------------------------------- get_game_boxscore
+def test_get_game_boxscore_uses_web_subdomain(monkeypatch):
+    # Regression guard: site.api.espn.com's summary response for real WNBA games came back with
+    # team-level stats only (no 'players' key at all, confirmed via a live diagnostic dump).
+    # site.web.api.espn.com is the confirmed-working host for the full per-player boxscore.
+    captured = {}
+
+    def fake_get_json(url, params=None):
+        captured["url"] = url
+        return {"boxscore": {"teams": []}}
+
+    monkeypatch.setattr(E, "_get_json", fake_get_json)
+    E.get_game_boxscore("g1")
+    assert captured["url"].startswith("https://site.web.api.espn.com/")
+    print("✓ get_game_boxscore hits site.web.api.espn.com, not site.api.espn.com")
+
+
 def test_get_game_boxscore_extracts_every_player_from_both_teams(monkeypatch):
     E._response_cache.clear()
     fake_summary = {

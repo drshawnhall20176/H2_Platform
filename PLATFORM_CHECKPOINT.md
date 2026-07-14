@@ -77,6 +77,15 @@ second real, priced sport — not a placeholder.
   no "missing key" warning — meaning `athletes` was present but not shaped as the documented
   `{"position", "items": [...]}` groups. `get_team_roster` now handles both that shape AND a flat
   list of player objects directly (the more likely real WNBA shape), rather than assuming one.
+- **Boxscore hostname fix (2026-07-14):** with rosters fixed, the same diagnostic approach showed
+  `get_game_boxscore` reaching real team blocks (`keys = ['team', 'statistics', 'displayOrder',
+  'homeAway']`) but with no `players` key at all — a genuinely different response shape than the
+  one this module's parsing was built against, not just a naming mismatch. Root cause: the
+  `summary` endpoint was being called on `site.api.espn.com`, but every independently-verified
+  example of the full `boxscore.teams[].players[]` structure (including the one originally used
+  to write this parsing code) is hosted on `site.web.api.espn.com` — a different subdomain this
+  module wasn't using. Fixed by adding `WEB_SUMMARY_API` and pointing `get_game_boxscore` at it.
+  Locked in with `test_get_game_boxscore_uses_web_subdomain`.
 
 ### Theme-proof gradients
 - **`styling.py`** — per-cell text contrast (dark on pale, white on deep), benchmark-anchored

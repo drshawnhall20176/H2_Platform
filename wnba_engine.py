@@ -45,6 +45,12 @@ import config_wnba as CFG
 logger = logging.getLogger(__name__)
 
 SITE_API = "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba"
+# The summary/boxscore call specifically needs the "web." subdomain — site.api.espn.com's summary
+# response for these games came back with team-level stats only (confirmed via a live diagnostic
+# dump: team blocks had keys ['team', 'statistics', 'displayOrder', 'homeAway'], no 'players' at
+# all). Every independently-verified example of the full boxscore.teams[].players[] structure
+# (the one this module's parsing is built against) uses site.web.api.espn.com instead.
+WEB_SUMMARY_API = "https://site.web.api.espn.com/apis/site/v2/sports/basketball/wnba"
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; H2Sports/1.0)"}
 _TIMEOUT = 15
 
@@ -235,7 +241,7 @@ def get_game_boxscore(game_id: str) -> Dict[int, Dict[str, float]]:
     """{player_id: {pts, reb, ast, fg3m, min}} for every player who appeared in a game — one
     fetch covers both teams, shared across every player on the slate who played that game (see
     _get_json_cached). Empty dict on any failure or if a player didn't play (didNotPlay=True)."""
-    data = _get_json_cached(f"{SITE_API}/summary", params={"event": game_id})
+    data = _get_json_cached(f"{WEB_SUMMARY_API}/summary", params={"event": game_id})
     if not data:
         if game_id not in _diag_seen:
             _diag(f"get_game_boxscore({game_id}): summary fetch returned nothing")
