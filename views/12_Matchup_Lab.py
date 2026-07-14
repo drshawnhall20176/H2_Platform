@@ -42,9 +42,10 @@ def load_slate(date_str: str):
 @st.cache_data(ttl=300, show_spinner=False)
 def load_matchup(date_str: str, player_id: int, team_id: int, opp_id: int):
     h2h_log = E.get_player_history_vs_opponent(player_id, team_id, opp_id, date_str)
+    season_log = E.get_player_season_games(player_id, team_id, date_str)              # full season, any opponent
     opp_recent = E.get_team_recent_allowed_stats(opp_id, date_str)                    # last 10
     opp_season = E.get_team_recent_allowed_stats(opp_id, date_str, n=82, days_back=200)  # season-wide
-    return h2h_log, opp_recent, opp_season
+    return h2h_log, season_log, opp_recent, opp_season
 
 
 # --- controls ----------------------------------------------------------------
@@ -75,61 +76,96 @@ if team_id is None or opp_id is None:
     st.stop()
 
 with st.spinner(f"Pulling {row['Opp']}'s matchup history and defensive trend..."):
-    h2h_log, opp_recent, opp_season = load_matchup(date_str, pid, team_id, opp_id)
+    h2h_log, season_log, opp_recent, opp_season = load_matchup(date_str, pid, team_id, opp_id)
 
-profile = P.build_matchup_profile(row, h2h_log, opp_recent, opp_season)
+profile = P.build_matchup_profile(row, h2h_log, opp_recent, opp_season, season_log=season_log)
 
 st.markdown(f"### {row['Player']} vs {row['Opp']}")
 st.caption(f"{row['GameLabel']}  ·  averaging {row['AvgMin']:.0f} min/game over their last "
            f"{len(row.get('_game_log') or [])} games")
 
 st.info(
-    "**What 'Defense Trend' actually measures — read this before the table:** it's "
-    f"{row['Opp']}'s **whole team's combined total** at each stat, allowed to whoever they've "
-    "played recently, compared to their own season-long average. It is NOT specific to "
-    f"{row['Player']}, and NOT specific to her position — there's no per-position or "
-    "per-defender data here, just \"has this team's overall defense at this stat been "
-    "trending looser or tighter than their own norm lately.\" 🟢 **Green / 📈 Looser lately** "
-    f"= the opponent has been allowing MORE than usual — good news for {row['Player']}'s "
-    "counting stats. 🔴 **Red / 📉 Tighter lately** = they've been allowing less — a tougher "
-    "recent stretch for whoever they're facing. Each row (Points/Rebounds/Assists/Threes) has "
-    "its own independent trend — a team can be trending looser on points and tighter on "
-    "rebounds at the same time.", icon="ℹ️")
+    f"**How {row['Player']} does against {row['Opp']} specifically, vs. how she's played "
+    "overall:** the table below compares her head-to-head average against this exact opponent "
+    "to her SEASON average (not just her last-10 recent form) — that isolates what THIS TEAM "
+    "does to her specifically from her just being generally hot or cold lately. A wide swing "
+    "between her H2H games (⚠️ flagged) is a real but less trustworthy signal than a small, "
+    "consistent one. 🎯 A flagged market means her performance in THAT specific stat is "
+    "distinctly lower against this team than her other stats are — the closest honest read on "
+    "\"how do they play her\" that box-score data supports (not a scheme detail — just which "
+    "specific stat category dips more than the others).", icon="🎯")
 
-# --- the matchup grid --------------------------------------------------------
-df = pd.DataFrame(profile)[["Market", "Recent Avg", "H2H Avg", "H2H Games", "Opp Recent Allowed",
-                            "Opp Season Allowed", "Defense Trend", "Trend Tag"]]
-df = df.rename(columns={"Opp Recent Allowed": "Opp Team Total (recent)",
-                        "Opp Season Allowed": "Opp Team Total (season)"})
+# --- table 1: player signals (recent form / season form / this matchup) -----
+pdf = pd.DataFrame(profile)[["Market", "Recent Avg", "Season Avg", "H2H Avg", "H2H Games",
+                             "H2H Spread", "High Variance", "Suppressed"]]
+
+
+def _notes(r):
+    bits = []
+    if r["Suppressed"]:
+        bits.append("🎯 Suppressed vs her other markets")
+    if r["High Variance"]:
+        bits.append(f"⚠️ Wide swing ({r['H2H Spread']})")
+    return " · ".join(bits) if bits else "—"
+
+
+pdf["Notes"] = pdf.apply(_notes, axis=1)
+pdf = pdf[["Market", "Recent Avg", "Season Avg", "H2H Avg", "H2H Games", "Notes"]]
+st.markdown(f"**{row['Player']} — recent form, season form, and this matchup**")
 st.dataframe(
-    df.style.format({"Recent Avg": "{:.1f}", "H2H Avg": "{:.1f}", "Opp Team Total (recent)": "{:.1f}",
-                     "Opp Team Total (season)": "{:.1f}", "Defense Trend": "{:.2f}×"}, na_rep="—")
-    .theme_gradient(cmap="RdYlGn", subset=["Defense Trend"]),
+    pdf.style.format({"Recent Avg": "{:.1f}", "Season Avg": "{:.1f}", "H2H Avg": "{:.1f}"}, na_rep="—"),
     hide_index=True, use_container_width=True,
 )
-st.caption(f"\"Opp Team Total\" = {row['Opp']}'s entire team combined, not a per-player or "
-           "per-position figure. \"Defense Trend\" = Team Total (recent) ÷ Team Total (season) "
-           "— above 1.08 is tagged looser/green, below 0.92 is tighter/red, in between is steady.")
 
 if not h2h_log:
     st.caption(f"ℹ️ {row['Team']} and {row['Opp']} haven't played each other yet this season — "
                "H2H columns are honestly blank rather than a guess. Recent form and defense "
                "trend are still real signals on their own.")
+if not season_log:
+    st.caption("ℹ️ No season-long log available yet for Season Avg — early in the season this "
+               "may just equal her recent form.")
+
+# --- table 2: opponent's whole-team defensive trend --------------------------
+st.markdown(f"**{row['Opp']} — whole-team defensive trend (not player- or position-specific)**")
+odf = pd.DataFrame(profile)[["Market", "Opp Recent Allowed", "Opp Season Allowed", "Defense Trend",
+                             "Trend Tag"]]
+odf = odf.rename(columns={"Opp Recent Allowed": "Opp Team Total (recent)",
+                          "Opp Season Allowed": "Opp Team Total (season)"})
+st.dataframe(
+    odf.style.format({"Opp Team Total (recent)": "{:.1f}", "Opp Team Total (season)": "{:.1f}",
+                      "Defense Trend": "{:.2f}×"}, na_rep="—")
+    .theme_gradient(cmap="RdYlGn", subset=["Defense Trend"]),
+    hide_index=True, use_container_width=True,
+)
+st.caption(
+    f"\"Opp Team Total\" = {row['Opp']}'s **entire team combined**, not a per-player or "
+    "per-position figure — there's no per-position or per-defender data here, just whether "
+    "this team's overall defense at each stat has been trending looser or tighter than their "
+    "own norm. 🟢 Green / looser lately = they've been allowing MORE than usual — good news for "
+    f"{row['Player']}'s counting stats. 🔴 Red / tighter lately = allowing less. Each market has "
+    "its own independent trend.")
 
 with st.expander("Full column reference"):
     st.markdown("""
-- **Recent Avg** — the player's own bootstrap-model average over their last 10 games, no
-  opponent adjustment (the same number Best Bets/Edge Board price off).
-- **H2H Avg / H2H Games** — this player's actual average in every game their team has played
-  against tonight's specific opponent *this season*. Teams typically meet 2-4 times a season, so
-  a small sample here is expected, not a bug — read it as a data point, not a verdict.
-- **Opp Team Total (recent)** — tonight's opponent's WHOLE TEAM combined total at this stat, over
-  *their* last 10 games (same number Hot Hand Engine uses). Not player- or position-specific.
-- **Opp Team Total (season)** — the same thing, over a season-wide window instead of just their
-  last 10. The gap between these two is the actual signal: a defense trending different from
-  their own established norm.
-- **Defense Trend** — Team Total (recent) ÷ Team Total (season). See the note above the table for
-  what the color and tags mean.
+**Player signals**
+- **Recent Avg** — the player's own bootstrap-model average over her last 10 games, no opponent
+  adjustment (the same number Best Bets/Edge Board price off).
+- **Season Avg** — her full-season average (any opponent). H2H Avg is compared against THIS, not
+  Recent Avg — that separates "this team's specific effect on her" from "she's just been hot or
+  cold lately," which a 10-game recency window alone can't distinguish.
+- **H2H Avg / H2H Games** — her actual average in every game her team has played against this
+  specific opponent *this season*. Teams typically meet 2-4 times a season, so a small sample
+  here is expected, not a bug — read it as a data point, not a verdict.
+- **Notes** — 🎯 flags the one market (if any) where her H2H performance is distinctly lower than
+  her other markets against this same opponent. ⚠️ flags a wide swing between her H2H meetings
+  (shown as the min–max spread) — a real signal, but a less trustworthy one than a consistent
+  small sample.
+
+**Opponent signals**
+- **Opp Team Total (recent / season)** — tonight's opponent's WHOLE TEAM combined total at each
+  stat, over their last 10 games vs. their full season (same recent number Hot Hand Engine uses).
+- **Defense Trend** — Team Total (recent) ÷ Team Total (season). See the note above that table
+  for what the color and tags mean.
     """)
 
 # --- supporting detail: recent game log + H2H game log ----------------------
