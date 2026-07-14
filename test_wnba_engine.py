@@ -271,6 +271,26 @@ def test_get_team_recent_game_ids_filters_to_completed_games_for_that_team(monke
     print("✓ get_team_recent_game_ids keeps only this team's completed games, newest first")
 
 
+def test_get_team_recent_game_ids_excludes_games_on_the_target_date_itself(monkeypatch):
+    # Lookahead-bias guard: a game happening ON before_date (e.g. retrospective grading called
+    # after that date's games finished) must never appear in its own "recent form" sample.
+    E._response_cache.clear()
+    fake_scoreboard = {
+        "events": [
+            {"id": "g_before", "date": "2026-07-13T00:00Z",
+             "status": {"type": {"completed": True}},
+             "competitions": [{"competitors": [{"team": {"id": "20"}}, {"team": {"id": "19"}}]}]},
+            {"id": "g_same_day", "date": "2026-07-14T00:00Z",   # same calendar day as before_date
+             "status": {"type": {"completed": True}},
+             "competitions": [{"competitors": [{"team": {"id": "20"}}, {"team": {"id": "16"}}]}]},
+        ]
+    }
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_scoreboard)
+    ids = E.get_team_recent_game_ids(20, "2026-07-14", n=10)
+    assert ids == ["g_before"]
+    print("✓ get_team_recent_game_ids excludes games on before_date itself, not just future ones")
+
+
 def test_get_team_recent_game_ids_empty_on_fetch_failure(monkeypatch):
     E._response_cache.clear()
     monkeypatch.setattr(E, "_get_json", lambda url, params=None: None)
@@ -366,6 +386,27 @@ def test_get_player_recent_games_pulls_from_team_games_via_boxscore(monkeypatch)
         {"pts": 18.0, "reb": 6.0, "ast": 3.0, "fg3m": 1.0, "min": 28.0},
     ]
     print("✓ get_player_recent_games pulls this player's line out of each recent game's shared boxscore")
+
+
+# ----------------------------------------------------------------- get_player_results
+def test_get_player_results_merges_across_games(monkeypatch):
+    schedule = [{"gameId": "g1"}, {"gameId": "g2"}]
+    boxscores = {
+        "g1": {111: {"pts": 20.0, "reb": 5.0, "ast": 4.0, "fg3m": 2.0, "min": 30.0}},
+        "g2": {222: {"pts": 15.0, "reb": 7.0, "ast": 2.0, "fg3m": 1.0, "min": 25.0}},
+    }
+    monkeypatch.setattr(E, "get_schedule", lambda date_str: schedule)
+    monkeypatch.setattr(E, "get_game_boxscore", lambda gid: boxscores.get(gid, {}))
+
+    results = E.get_player_results("2026-07-13")
+    assert set(results.keys()) == {111, 222}
+    assert results[111]["pts"] == 20.0
+    print("✓ get_player_results merges per-player results across every game on the date")
+
+
+def test_get_player_results_empty_when_no_games(monkeypatch):
+    monkeypatch.setattr(E, "get_schedule", lambda date_str: [])
+    assert E.get_player_results("2026-07-13") == {}
 
 
 if __name__ == "__main__":

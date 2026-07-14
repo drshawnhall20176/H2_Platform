@@ -94,13 +94,68 @@ TEACHING_SEGMENTS = [
 ]
 
 
-def rotating_teaching(date_str: str) -> Dict:
+TEACHING_SEGMENTS_WNBA = [
+    {
+        "topic": "What CLV is (why we 'win' even when the bet loses)",
+        "beats": [
+            _line("Deezy", "Dad, you keep sayin' we 'beat the number' on a bet that LOST. That makes zero sense. We lost. L. Loss."),
+            _line("Dr. Hall", "Right, but here's the thing — closing-line value. We took a points prop in the morning at one number. By tip-off the whole market moved past it. We got a better price than everyone who bet it later."),
+            _line("Deezy", "Okay but the shot didn't fall. We still lost the money."),
+            _line("Dr. Hall", "One night, yeah. But if we consistently get better numbers than where the line closes, the math says we win long-term — even with cold nights mixed in. CLV is the proof we're on the right side."),
+            _note("Land it: results are one night of luck; beating the close, over and over, is skill. That's why we track CLV, not just W/L."),
+        ],
+    },
+    {
+        "topic": "Why parlays quietly bleed you",
+        "beats": [
+            _line("Deezy", "Parlays are where the money's at though! Hit a 5-leg and we're eating good."),
+            _line("Dr. Hall", "And how often does that 5-leg hit? Every leg multiplies the book's juice against you. A bet that's smart as a single can turn into a money-loser the second you stack it."),
+            _line("Deezy", "So you're telling me no parlays, ever? That's boring, bro."),
+            _line("Dr. Hall", "I'm saying know what you're doing. Parlays are entertainment with a tax. Singles are where the actual edge lives. Bet the fun one small, grind the singles."),
+            _note("Land it: the books push parlays because they're the house's best product. Sharps mostly bet straight."),
+        ],
+    },
+    {
+        "topic": "Why recent form beats season averages",
+        "beats": [
+            _line("Deezy", "Why you always talkin' 'last 10 games' instead of just the season average? Ain't that more data?"),
+            _line("Dr. Hall", "More data, but staler data. A role change, a new starting five, coming back from an injury — season averages blend all of that together. The last 10 games are what she's actually doing right now."),
+            _line("Deezy", "So the season average is basically lying to us?"),
+            _line("Dr. Hall", "Not lying — just slow. Recent form catches a hot streak or a shrinking role before the box score average does. That's the whole model, honestly: what's she actually been doing lately."),
+            _note("Land it: recency isn't a gimmick, it's the model refusing to trust a number that's months out of date."),
+        ],
+    },
+    {
+        "topic": "Rotation minutes and blowout risk",
+        "beats": [
+            _line("Deezy", "Why'd we skip that girl, she's a walking bucket when she plays."),
+            _line("Dr. Hall", "'When she plays' is doing a lot of work there. If her minutes have been inconsistent — foul trouble, a blowout, a coach shortening the bench — we can't trust the average enough to price a line on it."),
+            _line("Deezy", "So no minutes, no bet, simple as that?"),
+            _line("Dr. Hall", "Basically. Twelve solid minutes a night, every night, is worth more to the model than one huge outlier game off the bench. Consistency of role is its own signal."),
+            _note("Land it: a rotation player with steady minutes is more projectable than a boom-or-bust bench piece, even if the bench piece has the higher ceiling."),
+        ],
+    },
+    {
+        "topic": "Variance and cold streaks (the board didn't 'fail' you)",
+        "beats": [
+            _line("Deezy", "Real talk — the board went 0-fer the other night. The comments were BRUTAL."),
+            _line("Dr. Hall", "Yep, and that's sports betting. A genuinely good process has losing nights all the time. If a model never had a cold night, it'd be a scam."),
+            _line("Deezy", "Try explainin' THAT to the group chat at 11pm."),
+            _line("Dr. Hall", "That's literally why we teach this. Judge us over fifty plays, not one slate. The night the board looks dumb is the night discipline matters most."),
+            _note("Land it: variance is the price of admission. Bankroll management and patience are the actual skills."),
+        ],
+    },
+]
+
+
+def rotating_teaching(date_str: str, sport: str = "MLB") -> Dict:
     """Deterministically rotate the teaching topic by date, so each show gets a fresh one."""
     try:
         doy = datetime.fromisoformat(date_str).timetuple().tm_yday
     except (ValueError, TypeError):
         doy = 0
-    return TEACHING_SEGMENTS[doy % len(TEACHING_SEGMENTS)]
+    segments = TEACHING_SEGMENTS if sport == "MLB" else TEACHING_SEGMENTS_WNBA
+    return segments[doy % len(segments)]
 
 
 # --- per-selection banter beats --------------------------------------------
@@ -112,6 +167,10 @@ _DEEZY_PUSH = {
     "Pitcher Strikeouts": "So this dude just mows down the whole lineup? What if he gets shelled in the 3rd and they yank him?",
     "Pitcher Outs": "Outs? We're betting on a guy to record OUTS? Riveting television right here, folks.",
     "Pitcher Walks": "Walks?? Now we're handicappin' ball four. Who hurt you, Dad?",
+    "Points": "{prob}% to clear that? So she's UNDER it {inv}% of the time and we're pumped about that?",
+    "Rebounds": "Rebounds, really? We're out here bettin' on boxing out. Thrilling stuff.",
+    "Assists": "So we need her to be UNSELFISH tonight specifically? What if she just goes bucket mode instead?",
+    "Threes Made": "Threes are the most streaky shot in the sport and THAT'S the one we're leanin' on?",
 }
 
 
@@ -141,16 +200,26 @@ def selection_beats(p: Dict) -> List[Dict]:
 
 # --- full script assembly --------------------------------------------------
 def assemble_script(date_str: str, headliners: List[Dict], sleepers: List[Dict],
-                    retro: Optional[Dict], caught_homers: Optional[List[Dict]]) -> List[Dict]:
-    """Return ordered sections: {title, time, beats[]}. Pure — no Streamlit, fully testable."""
-    teaching = rotating_teaching(date_str)
+                    retro: Optional[Dict], caught_homers: Optional[List[Dict]],
+                    sport: str = "MLB") -> List[Dict]:
+    """Return ordered sections: {title, time, beats[]}. Pure — no Streamlit, fully testable.
+
+    `sport` swaps the handful of baseball-flavored phrases (park/weather, "went deep", the
+    generic "that's baseball" line) for basketball-appropriate ones — everything else (the
+    Dr. Hall/Deezy dynamic, section structure, teaching-segment slot) is genuinely sport-agnostic.
+    `caught_homers` keeps its MLB-origin name but holds the same shape for whichever market is
+    the sport's marquee single-event market (Points, for WNBA)."""
+    is_mlb = sport == "MLB"
+    teaching = rotating_teaching(date_str, sport)
     S = []
 
     # 1) Yesterday in Review (the cold open)
     review = [
         _line("Deezy", "Yo what's good everybody, welcome back to H2 Sports! Before we touch tonight — "
                        "we GOTTA talk about last night, because it was a MOVIE."),
-        _fill("⚡ Wild moment of the night? (ejection, walk-off, meltdown — whatever you actually saw)"),
+        _fill(("⚡ Wild moment of the night? (ejection, walk-off, meltdown — whatever you actually saw)")
+             if is_mlb else
+             ("⚡ Wild moment of the night? (buzzer-beater, blowout, meltdown — whatever you actually saw)")),
         _fill("⚡ Who let us down? (the team/player that went ice cold)"),
         _fill("⚡ Any robbery? (a great play, a blown call, something that made you yell)"),
     ]
@@ -161,27 +230,40 @@ def assemble_script(date_str: str, headliners: List[Dict], sleepers: List[Dict],
                             + (f" ({hr*100:.0f}%)." if hr is not None else ".")))
         if caught_homers:
             names = ", ".join(f"{c['Player']} (ranked #{c['Rank']})" for c in caught_homers[:3])
-            review.append(_line("Dr. Hall", f"And a little flex — the model had {names} as top power "
-                                            f"plays before the game, and they went deep. That's the model "
-                                            f"finding bats before the names pop."))
+            if is_mlb:
+                review.append(_line("Dr. Hall", f"And a little flex — the model had {names} as top power "
+                                                f"plays before the game, and they went deep. That's the model "
+                                                f"finding bats before the names pop."))
+            else:
+                review.append(_line("Dr. Hall", f"And a little flex — the model had {names} as top scoring "
+                                                f"plays before the game, and they cashed. That's the model "
+                                                f"finding form before the names pop."))
         review.append(_line("Deezy", "Okay but we also got cooked on some, keep it a buck."))
-        review.append(_line("Dr. Hall", "Always keep it a buck. That's baseball — one night's variance. "
-                                        "We'll get into why a cold night isn't a broken board later."))
+        if is_mlb:
+            review.append(_line("Dr. Hall", "Always keep it a buck. That's baseball — one night's variance. "
+                                            "We'll get into why a cold night isn't a broken board later."))
+        else:
+            review.append(_line("Dr. Hall", "Always keep it a buck. That's variance — one cold night. "
+                                            "We'll get into why that doesn't mean the board's broken later."))
     else:
         review.append(_fill("📊 THE BOARD: results not pulled yet — recap how last night's flagged plays did "
                             "(this fills in automatically once yesterday's games are final)."))
-    review.append(_note("Reframe for the subs: nights like that are baseball, not a broken model. "
+    review.append(_note("Reframe for the subs: nights like that are the game, not a broken model. "
                         "Acknowledge the pain, then move on — don't dwell, don't make excuses."))
     S.append({"title": "🎬 Yesterday in Review", "time": "0:00–8:00", "beats": review})
 
     # 2) Slate overview
     overview = [
         _line("Dr. Hall", "Alright, enough cryin' about yesterday. Let's set the table for tonight."),
-        _fill("🗓️ Headline storyline of the slate? (marquee arm, big series, a weather game)"),
-        _line("Deezy", "How many games we workin' with and what's the vibe — pitchers' duels or are we "
-                       "hittin' bombs tonight?"),
-        _note("Dr. Hall: give the shape of the slate — number of games, any obvious park/weather spots, "
-              "the one matchup you're most fired up about."),
+        _fill("🗓️ Headline storyline of the slate? (marquee arm, big series, a weather game)" if is_mlb
+             else "🗓️ Headline storyline of the slate? (marquee matchup, a big rivalry, a player to watch)"),
+        _line("Deezy", ("How many games we workin' with and what's the vibe — pitchers' duels or are we "
+                        "hittin' bombs tonight?") if is_mlb else
+             "How many games we workin' with and what's the vibe tonight?"),
+        _note(("Dr. Hall: give the shape of the slate — number of games, any obvious park/weather spots, "
+              "the one matchup you're most fired up about.") if is_mlb else
+             ("Dr. Hall: give the shape of the slate — number of games, any rest/back-to-back spots, "
+              "the one matchup you're most fired up about.")),
     ]
     S.append({"title": "🗒️ Slate Overview", "time": "8:00–13:00", "beats": overview})
 
@@ -198,8 +280,10 @@ def assemble_script(date_str: str, headliners: List[Dict], sleepers: List[Dict],
     # 4) Sleepers & fades
     sleeper_beats = [
         _line("Deezy", "Now hit me with the under-the-radar stuff — the ones nobody's talkin' about."),
-        _note("Interesting plays that didn't crack the headline list — a sleeper bat, a fade, a "
-              "weather/platoon angle worth a mention. Lighter touch than the top tier."),
+        _note(("Interesting plays that didn't crack the headline list — a sleeper bat, a fade, a "
+              "weather/platoon angle worth a mention. Lighter touch than the top tier.") if is_mlb else
+             ("Interesting plays that didn't crack the headline list — a role player heating up, a "
+              "minutes-trend worth a mention. Lighter touch than the top tier.")),
     ]
     for p in sleepers:
         opp = f" vs {p['Opp']}" if p.get("Opp") else ""
@@ -227,8 +311,10 @@ def assemble_script(date_str: str, headliners: List[Dict], sleepers: List[Dict],
 
     # 7) Sign-off + banter button
     signoff = [
-        _fill("🏀 Banter button: tonight's hot-take/GOAT debate to tease next show "
-              "(LeBron/Jordan, Lamar slander, Skubal's a cheat code, etc.)"),
+        _fill(("🏀 Banter button: tonight's hot-take/GOAT debate to tease next show "
+              "(LeBron/Jordan, Lamar slander, Skubal's a cheat code, etc.)") if is_mlb else
+             ("🏀 Banter button: tonight's hot-take/GOAT debate to tease next show "
+              "(an MVP-race take, a coaching decision, a trade rumor, etc.)")),
         _line("Deezy", "Smash that follow, hit us on the TikTok lives, and we'll see you tomorrow!"),
         _line("Dr. Hall", "Quick reminder, and we mean it: this is for entertainment. Selections we found "
                           "interesting with our reasoning — not locks, not advice. Variance is real. "

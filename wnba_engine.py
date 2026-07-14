@@ -185,13 +185,18 @@ def _parse_stat_value(raw) -> float:
 
 def get_team_recent_game_ids(team_id: int, before_date: str,
                              n: int = CFG.RECENT_GAMES_N) -> List[str]:
-    """A team's last n COMPLETED game IDs at/before before_date (YYYY-MM-DD), most recent first.
-    Found by scanning the scoreboard across a 45-day trailing window and filtering to games where
-    this team appears as a competitor — reuses get_schedule's already-verified scoreboard parsing
-    rather than the separate, unverified teams/{id}/schedule endpoint. 45 days comfortably covers
-    n=10 games at the WNBA's ~2-4 games/week pace. The "completed" filter naturally excludes the
-    game currently being projected (still STATUS_SCHEDULED), so no separate date-cutoff math is
-    needed."""
+    """A team's last n COMPLETED game IDs STRICTLY BEFORE before_date (YYYY-MM-DD), most recent
+    first. Found by scanning the scoreboard across a 45-day trailing window and filtering to
+    games where this team appears as a competitor — reuses get_schedule's already-verified
+    scoreboard parsing rather than the separate, unverified teams/{id}/schedule endpoint. 45 days
+    comfortably covers n=10 games at the WNBA's ~2-4 games/week pace.
+
+    "Strictly before" (not "at or before") matters beyond tonight's live board: called for
+    tonight's date, the game being projected is still STATUS_SCHEDULED, so "completed" alone
+    would exclude it anyway. But this function is also reused for retrospective grading of a PAST
+    date, called AFTER that date's games have finished — at that point they're "completed" too,
+    and without an explicit date cutoff they'd leak into their own pre-game sample (a real
+    lookahead-bias bug, not just a hypothetical one)."""
     end = datetime.strptime(before_date, "%Y-%m-%d")
     start = end - timedelta(days=45)
     date_range = f"{start.strftime('%Y%m%d')}-{end.strftime('%Y%m%d')}"
@@ -207,6 +212,9 @@ def get_team_recent_game_ids(team_id: int, before_date: str,
     for event in data.get("events", []):
         status = ((event.get("status") or {}).get("type") or {})
         if not status.get("completed"):
+            continue
+        ev_date = (event.get("date") or "")[:10]
+        if not ev_date or ev_date >= before_date:   # strictly before, not at-or-before
             continue
         comps = event.get("competitions") or []
         if not comps:
@@ -303,6 +311,20 @@ def get_game_boxscore(game_id: str) -> Dict[int, Dict[str, float]]:
              f"({len(player_groups)} player group(s) in response)")
         _diag_seen.add(game_id)
     return out
+
+
+def get_player_results(date_str: str) -> Dict[int, Dict[str, float]]:
+    """Actual per-player results for all games on date_str, keyed by player id — same contract as
+    mlb_engine.get_player_results, so retro.py's grading logic (grade_play/grade_slate) works
+    identically for either sport without modification. Empty for dates with no games, or games
+    that haven't been played yet (their boxscore comes back with no player stats, contributing
+    nothing rather than erroring — no separate "is this game final" check needed)."""
+    results: Dict[int, Dict[str, float]] = {}
+    for g in get_schedule(date_str):
+        box = get_game_boxscore(g["gameId"])
+        for pid, rec in box.items():
+            results.setdefault(pid, {}).update(rec)
+    return results
 
 
 def get_player_recent_games(player_id: int, last_n: int = CFG.RECENT_GAMES_N,

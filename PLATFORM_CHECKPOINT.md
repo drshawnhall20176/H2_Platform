@@ -4,7 +4,7 @@
 one sport-selector foundation). MLB runs exactly as the standalone did originally; WNBA is now a
 second real, priced sport — not a placeholder.
 
-## What's in this checkpoint (all tested — 130/130 tests green)
+## What's in this checkpoint (all tested — 180/180 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -40,10 +40,11 @@ second real, priced sport — not a placeholder.
   actually runs a second sport's live board end-to-end.
 - **Bet Log / Track Record** — filter by active sport; markets list and ledger both sport-aware.
 - **`sports.require_sport(key, feature_name)`** — a STRICTER guard than `require_live_engine`, for
-  pages that haven't been individually ported yet and still hardcode MLB's engine internally
-  (Media Room, Podcast Studio, Retrospective, Best Bets, Command Center). Blocks any sport but the
-  required one, even one with real markets configured — `require_live_engine` alone stopped being
-  a safe proxy for "this page supports the active sport" the moment WNBA got real markets too.
+  pages that haven't been individually ported and still hardcode one sport's engine internally.
+  Used in Stage 2 to gate Media Room/Podcast Studio/Retrospective/Best Bets/Command Center to MLB
+  before they had real WNBA support (see Stage 3 below — all five now use `require_live_engine`
+  instead, since they're genuinely sport-routed). Still the right tool for any future page that
+  hardcodes one sport before it's been ported.
 
 ### WNBA — the second live sport (Core 4 markets: Points, Rebounds, Assists, Threes Made)
 - **`config_wnba.py`** — 15-team reference list (2026 season, incl. Portland Fire / Toronto Tempo
@@ -98,6 +99,67 @@ second real, priced sport — not a placeholder.
   entry per team) rather than nested inside each team block the way the "site" family's schema
   assumed. `get_game_boxscore` now calls `cdn.espn.com/core/wnba/boxscore?xhr=1&gameId=...`
   instead. Locked in with `test_get_game_boxscore_uses_cdn_endpoint`.
+- **Live-verified end to end (2026-07-14):** real WNBA slate, real rosters, real boxscores, real
+  Odds API props, real edges computed and displayed on Edge Board — confirmed via screenshot.
+
+### Stage 3 — the other five pages made genuinely WNBA-aware (2026-07-14)
+Media Room, Podcast Studio, Retrospective, Best Bets, and Command Center were gated MLB-only via
+`require_sport` in Stage 2. All five are now real ports, not just an unlocked guard — each was
+checked for what's actually MLB-specific vs. genuinely shared logic before touching it:
+- **`wnba_engine.get_team_recent_game_ids` lookahead-bias fix** — excludes games ON before_date
+  itself, not just future ones. Mattered beyond tonight's board: called for a PAST date (retro
+  grading, after that date's games are done), the target game would otherwise leak into its own
+  "recent form" sample. A genuine correctness bug, not just plumbing — locked in with
+  `test_get_team_recent_game_ids_excludes_games_on_the_target_date_itself`.
+- **`wnba_engine.get_player_results(date_str)`** — added, matching `mlb_engine.get_player_results`'s
+  exact contract (`Dict[player_id, Dict[stat_key, value]]`), so `retro.py`'s grading logic works
+  identically for either sport with zero changes to the grading code itself.
+- **`wnba_projections.build_best_bets(rows)`** — new. Ranks plays by conviction (model prob ÷ a
+  0.5 reference — the WNBA default lines aren't book-calibrated the way MLB's per-market
+  reference rates are, so treating them as genuinely even is the honest choice, not an
+  approximation). "Why" reasoning comes from the player's own recent-game log (hit-rate at the
+  line, hot/cold trend) since no park/weather/platoon signals exist for basketball. Output schema
+  matches `projections.build_best_bets` exactly (Player/PlayerId/Team/Game/Opp/Market/Side/Line/
+  ModelProb/Fair/Conviction/Why) so every consuming page renders either sport's plays through the
+  same code.
+- **`wnba_projections.explain_miss(row, market)`** — WNBA equivalent of `retro.explain_miss`.
+  "Catchable" means trending up over the last 3 games before this one (recency weighting hadn't
+  caught up); "genuine outlier" means no such trend, just variance.
+- **`retro.market_report(plays, results, market)`** — new, generalizes the four near-identical
+  MLB-specific report functions (`homer_report`/`pitcher_k_report`/`batter_tb_report`/
+  `batter_hits_report`) into one function parameterized by market. Works for any market in
+  `MARKET_STAT` (extended with WNBA's four). `grade_play`/`grade_slate`/`_calibration` needed no
+  changes at all — already fully market-agnostic underneath.
+- **`selections.attach_live_ev`** — gained an optional `market_map` parameter (same pattern as
+  `odds_api.compute_edges`), defaulting to MLB's `MARKET_TO_ODDS_KEY`. `filter_known_pitcher`
+  needed no change — WNBA plays always carry a real opponent team name, so it's a harmless no-op
+  there rather than something needing its own version.
+- **`podcast.py`** — `TEACHING_SEGMENTS_WNBA`, a 5-segment library (CLV, parlays, recent-form-vs-
+  season-average, rotation-minutes/blowout-risk, variance) parallel to MLB's 6. `assemble_script`
+  and `rotating_teaching` both take a `sport` parameter that swaps every baseball-flavored phrase
+  (park/weather, "went deep", the Aaron-Judge-style real-player example, "that's baseball") for a
+  basketball-appropriate one — the Dr. Hall/Deezy dynamic, section structure, and teaching slot
+  are unchanged, since that personality format is genuinely sport-agnostic. `_DEEZY_PUSH` gained
+  entries for all four WNBA markets. Swept the full WNBA script output for leaked MLB terms
+  (`test_assemble_script_wnba_has_no_leaked_mlb_terms`) — zero found.
+- **Each page's loader was split, not just swapped** — an MLB branch (unchanged, still uses
+  statcast/weather/FIP) and a generic branch (any sport whose engine/projections don't need that
+  enrichment — currently just WNBA). Best Bets' MLB-only "Diagnostic Inspector" (PA/park/weather
+  decomposition) is replaced for WNBA with an honest equivalent: the player's actual last-N-games
+  table for that exact stat — real receipts, not fabricated park/weather signals that don't apply
+  to basketball.
+- **A real integration bug caught by testing the full chain, not just each piece in isolation:**
+  `curate_selections` (used by Media Room and Podcast Studio) is genuinely sport-agnostic and
+  already lived in `projections.py` — but wasn't re-exported from `wnba_projections.py`, so every
+  WNBA page calling `sport.projections.curate_selections(...)` would have crashed with
+  `AttributeError` on first real use. Caught by running the actual build_best_bets → 
+  curate_selections → grade_slate → market_report → explain_miss → assemble_script chain
+  end-to-end with synthetic data before shipping, not just each function's own unit tests — none
+  of which would have caught a missing re-export. Fixed and locked in with
+  `test_curate_selections_is_reachable_via_wnba_projections`.
+- **`Command Center` also picked up a small, separate correctness fix**: `bets = B.list_bets()`
+  had no sport filter (a Stage 1/2 gap, same shape as the earlier Track Record/Bet Log fix) — now
+  `B.list_bets(sport=_active.key)`.
 
 ### Theme-proof gradients
 - **`styling.py`** — per-cell text contrast (dark on pale, white on deep), benchmark-anchored
@@ -106,21 +168,21 @@ second real, priced sport — not a placeholder.
   test (`test_slg_xwoba_same_direction_on_every_page`) locks it in).
 
 ## NOT YET DONE (next stages)
-- **Media Room / Podcast Studio / Retrospective / Best Bets / Command Center for WNBA** — currently
-  MLB-only by explicit guard (see above). Porting these means real content work, not just an
-  import swap (Podcast Studio's script generation is written in baseball terms throughout).
-- **WNBA opponent/pace adjustment** — v1 projection model is recent-form-only.
-- **Stage 3:** flip NFL on (engine/projections modules exist — `nfl_engine.py`/`nfl_projections.py`
-  — but are untested and `nfl_data_py` isn't in `requirements.txt` yet; markets/market_map in the
-  registry are still empty).
-- **Stage 4+:** NBA, NHL, NCAAF, NCAAMB as their engines are built.
+- **WNBA opponent/pace adjustment** — v1 projection model is recent-form-only (no opponent
+  defensive strength, no pace adjustment). Best Bets/Media Room/Podcast Studio's "Why" reasoning
+  is honest about this being recent-form-only, not a claim of a more sophisticated model.
+- **`nfl_engine.py`/`nfl_projections.py`** exist but are untested and `nfl_data_py` isn't in
+  `requirements.txt` yet; markets/market_map in the registry are still empty. Flipping NFL on is
+  Stage 4, not started.
+- **NBA, NHL, NCAAF, NCAAMB** — no engines built yet.
 
 ## Deploy notes
 - Main file path = `streamlit_app.py` for the owner app, `streamlit_app_discord.py` for the
   Discord/public app (same repo/branch, both apps — Streamlit Cloud requires distinct entrypoints
   per app, see Stage 2 above).
 - Python 3.11 via the app's Advanced-settings dropdown (runtime.txt alone is ignored on Cloud)
-- Requirements are pinned; keep them pinned. `nba_api==1.11.4` added for WNBA.
+- Requirements are pinned; keep them pinned. No new dependency for WNBA — the ESPN engine only
+  uses `requests`, already required elsewhere (nba_api was tried and removed — see WNBA section).
 - Add the `sport` column to the live Supabase `bets` table if it isn't there already (betlog
   self-migrates via `ADD COLUMN IF NOT EXISTS` — verify on first deploy).
 - Discord/public app's own Settings → Secrets needs `AUDIENCE = "public"` plus the same DB/API

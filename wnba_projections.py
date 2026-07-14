@@ -28,7 +28,7 @@ import numpy as np
 
 from projections import (  # genuinely sport-agnostic — reused, not duplicated
     prob_over, prob_for_side, normalize_name, format_et,
-    prob_to_decimal, prob_to_american,
+    prob_to_decimal, prob_to_american, curate_selections,
 )
 
 DEFAULT_SIMS = 10000
@@ -112,3 +112,104 @@ def default_board_from_index(index: Dict) -> List[Dict]:
                            entry["mean"], Opp=ctx.get("opp"), Lineup=ctx.get("lineup"),
                            GameTime=ctx.get("game_date")))
     return out
+
+
+# --------------------------------------------------------------------------- Best Bets
+# Reference (typical/coin-flip) hit-rate per market, used the same way MLB's BEST_BET_REF is:
+# Conviction = model probability / reference probability for the favored side. All four WNBA
+# markets use 0.5 rather than a calibrated figure — the default lines themselves (config_wnba /
+# _MARKET_SPEC) are round-number estimates, not book-calibrated, so treating them as genuinely
+# even is the honest choice here, not an approximation of some better-known true rate the way
+# MLB's per-market figures are (derived from real league-wide hit rates at those lines).
+BEST_BET_REF = {"Points": 0.5, "Rebounds": 0.5, "Assists": 0.5, "Threes Made": 0.5}
+
+
+def _favored_side(prob_over: float, ref: float):
+    """Return (side, prob_of_that_side, ref_for_that_side) — same logic as projections.py's
+    private helper of the same name; reimplemented locally (a few lines) rather than reaching
+    into another module's underscore-prefixed internals."""
+    if prob_over >= ref:
+        return "Over", prob_over, ref
+    return "Under", 1.0 - prob_over, 1.0 - ref
+
+
+def _player_reasons(values: List[float], line: float, side: str) -> str:
+    """'Why' text built from the player's own recent-game log — no park/weather/platoon inputs
+    exist for basketball the way they do for MLB, so this leans on what's actually available:
+    how consistently they've cleared this exact line recently, and whether their last few games
+    are trending away from their own average (hot/cold streak)."""
+    n = len(values)
+    if n == 0:
+        return "no recent-game data available"
+    hits = sum(1 for v in values if v > line) if side == "Over" else sum(1 for v in values if v < line)
+    avg = sum(values) / n
+    recent = values[:3]                       # most recent first (see wnba_engine.get_player_recent_games)
+    recent_avg = sum(recent) / len(recent) if recent else avg
+    trend = ""
+    if recent and avg > 0 and abs(recent_avg - avg) >= max(0.75, avg * 0.20):
+        trend = ", trending up" if recent_avg > avg else ", trending down"
+    return f"cleared {line:g} in {hits} of last {n} games (avg {avg:.1f}{trend})"
+
+
+def explain_miss(row: Optional[Dict], market: str = "Points") -> str:
+    """WNBA equivalent of retro.explain_miss's role: explain a result the model ranked LOW. No
+    park/weather/platoon signals exist for basketball, so this leans on the same recent-form
+    signal build_best_bets/_player_reasons already use — was the player trending up before this
+    game (a real signal the ranking under-weighted), or is this a genuine outlier against their
+    own established form (variance, not a systematic miss)? `row` is a build_slate row looked up
+    by player id; None means the player wasn't on the projected slate at all (below the
+    rotation-minutes bar, or a late addition the model never saw)."""
+    if not row:
+        return ("Not on the projected slate (recent minutes below the rotation bar, or a late "
+                "addition) — the model never saw this player.")
+    log = row.get("_game_log") or []
+    col = next((c for c, disp, _l in _MARKET_SPEC.values() if disp == market), None)
+    stat_key = _STAT_KEY.get(col)
+    if not log or not stat_key:
+        return "No recent-game data available for this player."
+    values = [g.get(stat_key, 0) for g in log]
+    avg = sum(values) / len(values)
+    recent = values[:3]
+    recent_avg = sum(recent) / len(recent) if recent else avg
+    if avg > 0 and recent_avg >= avg * 1.15:
+        return (f"Catchable — trending up over the last {len(recent)} games (avg {recent_avg:.1f} "
+                f"vs {avg:.1f} in the full recent sample) before this one; recency weighting "
+                "hadn't fully caught up yet.")
+    return (f"Genuine outlier — averaging {avg:.1f} over the last {len(values)} games with no "
+            "recent uptick; this result sits above their established form. Variance, not a "
+            "systematic miss.")
+
+
+def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
+                    seed: Optional[int] = None) -> List[Dict]:
+    """Rank candidate plays across all four markets by conviction (model prob vs the reference
+    prob for that market), each with recent-form reasoning. No odds required — mirrors
+    projections.build_best_bets's role and output schema (Player/PlayerId/Team/Game/Opp/Versus/
+    Market/Side/Line/ModelProb/Fair/Conviction/Why) so Best Bets, Command Center, Media Room, and
+    Podcast Studio can render either sport's plays through the same code."""
+    rng = np.random.default_rng(seed)
+    plays: List[Dict] = []
+
+    for r in rows:
+        log = r.get("_game_log") or []
+        if not log:
+            continue
+        for mkey, (col, disp, line) in _MARKET_SPEC.items():
+            values = [g[_STAT_KEY[col]] for g in log]
+            sim = simulate_player_stat(values, sims, rng)
+            if sim.size == 0:
+                continue
+            over = prob_over(_dist(sim), line)
+            side, sp, ref_s = _favored_side(over, BEST_BET_REF.get(disp, 0.5))
+            plays.append({
+                "Player": r["Player"], "PlayerId": r.get("_pid"), "Team": r["Team"],
+                "Game": r["GameLabel"], "Opp": r.get("Opp"), "Versus": r.get("Opp"),
+                "Market": disp, "Side": side, "Line": line,
+                "ModelProb": round(sp, 4), "Fair": prob_to_american(sp),
+                "Conviction": round(sp / ref_s, 2) if ref_s > 0 else 0.0,
+                "Why": _player_reasons(values, line, side),
+                "_stat_key": _STAT_KEY[col], "_game_log": log,
+            })
+
+    plays.sort(key=lambda x: x["Conviction"], reverse=True)
+    return plays

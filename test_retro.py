@@ -62,6 +62,40 @@ def test_boxscore_parsing():
     assert res[2]["p_k"] == 8 and res[2]["p_outs"] == 20  # 6.2 IP -> 20 outs
 
 
+def test_market_report_matches_homer_report_for_mlb():
+    # market_report must reproduce homer_report's exact behavior for the market it generalizes.
+    plays = [
+        dict(Player="Top", PlayerId=1, Market="Batter HR", Side="Over", Line=0.5, ModelProb=0.25, Conviction=2.3),
+        dict(Player="Mid", PlayerId=2, Market="Batter HR", Side="Over", Line=0.5, ModelProb=0.15, Conviction=1.4),
+        dict(Player="Low", PlayerId=3, Market="Batter HR", Side="Over", Line=0.5, ModelProb=0.04, Conviction=0.4),
+    ]
+    results = {2: {"hr": 1}, 3: {"hr": 1}, 99: {"hr": 1}}
+    rep = R.market_report(plays, results, "Batter HR", top_n=2, default_line=0.5)
+    assert [c["Player"] for c in rep["caught"]] == ["Mid"]
+    assert [m["Player"] for m in rep["missed"]] == ["Low"]
+    assert rep["unprojected"] == 1
+    print("✓ market_report reproduces homer_report's exact behavior for Batter HR")
+
+
+def test_market_report_works_for_wnba_markets():
+    plays = [
+        dict(Player="Star", PlayerId=1, Market="Points", Side="Over", Line=15.5, ModelProb=0.72, Conviction=1.44),
+        dict(Player="Role Player", PlayerId=2, Market="Points", Side="Over", Line=8.5, ModelProb=0.55, Conviction=1.1),
+    ]
+    results = {1: {"pts": 24}, 2: {"pts": 6}, 55: {"pts": 30}}   # Star cleared, Role Player didn't, 55 unprojected
+    rep = R.market_report(plays, results, "Points", top_n=5, default_line=10.5)
+    caught_names = [c["Player"] for c in rep["caught"]]
+    assert "Star" in caught_names
+    assert "Role Player" not in caught_names   # 6 < 8.5, didn't clear its own line
+    assert rep["unprojected"] == 1             # player 55 scored 30 (> default_line) but wasn't projected
+    print("✓ market_report works identically for WNBA markets via MARKET_STAT")
+
+
+def test_market_report_unknown_market_returns_empty_shape():
+    rep = R.market_report([], {}, "Not A Real Market")
+    assert rep == {"caught": [], "missed": [], "unprojected": 0, "cutoff": 0, "total_ranked": 0}
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

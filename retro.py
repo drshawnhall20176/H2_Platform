@@ -21,6 +21,8 @@ MARKET_STAT = {
     "Batter HR": "hr", "Batter Total Bases": "tb", "Batter Total Hits": "hits",
     "Batter Strikeouts": "so", "Pitcher Strikeouts": "p_k", "Pitcher Outs": "p_outs",
     "Pitcher Walks": "p_bb",
+    # WNBA — keys match wnba_engine.get_player_results()'s result dict exactly.
+    "Points": "pts", "Rebounds": "reb", "Assists": "ast", "Threes Made": "fg3m",
 }
  
  
@@ -80,6 +82,52 @@ def grade_slate(plays: List[Dict], results: Dict[int, Dict]) -> Tuple[List[Dict]
     return graded, summary
  
  
+def market_report(plays: List[Dict], results: Dict[int, Dict], market: str, top_n: int = 15,
+                  default_line: Optional[float] = None) -> Dict:
+    """Of players whose actual result CLEARED the model's line for `market`, where did the model
+    rank them pre-game? Generic version of homer_report/pitcher_k_report/batter_tb_report/
+    batter_hits_report below — those four differ only in which market/stat key/default line they
+    use, so this single function covers any market present in MARKET_STAT (MLB or WNBA) rather
+    than needing a fifth near-duplicate for every future sport's markets. grade_play/grade_slate
+    were already market-agnostic; this brings the report layer to the same standard.
+
+    default_line: threshold used ONLY for the 'unprojected' bucket (a player who cleared a
+    plausible line but wasn't in a projected slate at all, so there's no play-specific line to
+    check against). Defaults to the median Line among this market's plays when not given — a
+    reasonable per-slate stand-in that doesn't require a market-specific constant."""
+    stat_key = MARKET_STAT.get(market)
+    if stat_key is None:
+        return {"caught": [], "missed": [], "unprojected": 0, "cutoff": 0, "total_ranked": 0}
+
+    mkt_plays = sorted([p for p in plays if p["Market"] == market], key=lambda x: -x["ModelProb"])
+    total = len(mkt_plays)
+    cutoff = max(top_n, int(total * 0.10))
+    rank_by_pid = {p.get("PlayerId"): (i + 1, p["ModelProb"], p["Player"], p["Line"], p.get("Conviction"))
+                   for i, p in enumerate(mkt_plays)}
+
+    if default_line is None:
+        lines = sorted(p["Line"] for p in mkt_plays)
+        default_line = lines[len(lines) // 2] if lines else 0.5
+
+    caught, missed, unprojected = [], [], 0
+    for pid, actuals in results.items():
+        val = actuals.get(stat_key, 0) or 0
+        if pid in rank_by_pid:
+            rank, prob, name, line, conv = rank_by_pid[pid]
+            if val <= line:            # the over didn't clear -> not a catch/miss candidate
+                continue
+            entry = {"Player": name, "PlayerId": pid, "Value": val, "Line": line, "ModelProb": prob,
+                     "Conviction": conv, "Rank": rank, "OfTotal": total, "HitLine": True}
+            (caught if rank <= cutoff else missed).append(entry)
+        elif val > default_line:
+            unprojected += 1
+
+    caught.sort(key=lambda x: x["Rank"])
+    missed.sort(key=lambda x: x["Rank"])
+    return {"caught": caught, "missed": missed, "unprojected": unprojected,
+            "cutoff": cutoff, "total_ranked": total}
+
+
 def homer_report(plays: List[Dict], results: Dict[int, Dict], top_n: int = 15) -> Dict:
     """Of the players who actually homered, where did the model rank them in HR probability?
  

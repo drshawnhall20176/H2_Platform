@@ -116,6 +116,84 @@ def test_compute_edges_works_with_wnba_projections_module():
     print("✓ odds_api.compute_edges works end-to-end with wnba_projections as the projections_module")
 
 
+# ----------------------------------------------------------------- _favored_side
+def test_favored_side_picks_over_when_prob_above_ref():
+    side, prob, ref = WP._favored_side(0.65, 0.5)
+    assert side == "Over" and prob == 0.65 and ref == 0.5
+
+
+def test_favored_side_picks_under_when_prob_below_ref():
+    side, prob, ref = WP._favored_side(0.35, 0.5)
+    assert side == "Under" and prob == 0.65 and ref == 0.5
+
+
+# ----------------------------------------------------------------- _player_reasons
+def test_player_reasons_reports_hit_rate_and_average():
+    values = [20, 18, 22, 19, 21]   # avg 20, all clear a 15.5 line
+    why = WP._player_reasons(values, 15.5, "Over")
+    assert "cleared 15.5 in 5 of last 5 games" in why
+    assert "avg 20.0" in why
+
+
+def test_player_reasons_handles_empty_log():
+    assert WP._player_reasons([], 10.5, "Over") == "no recent-game data available"
+
+
+# ----------------------------------------------------------------- build_best_bets
+def test_build_best_bets_covers_all_four_markets_and_ranks_by_conviction():
+    log_hot = [_log(p, 3, 2, 4) for p in (28, 30, 26, 29, 31, 27, 30, 28, 29, 27)]   # very consistent scorer
+    rows = [_row("Hot Scorer", "Las Vegas Aces", "Seattle Storm", "Seattle Storm @ Las Vegas Aces", log_hot)]
+    plays = WP.build_best_bets(rows, sims=8000, seed=3)
+
+    assert {p["Market"] for p in plays} == {"Points", "Rebounds", "Assists", "Threes Made"}
+    assert all(p["Player"] == "Hot Scorer" for p in plays)
+    # plays sorted by Conviction, descending
+    assert all(plays[i]["Conviction"] >= plays[i + 1]["Conviction"] for i in range(len(plays) - 1))
+    pts_play = next(p for p in plays if p["Market"] == "Points")
+    assert pts_play["Side"] == "Over"          # a ~28ppg scorer clears the 12.5 default line
+    assert pts_play["Conviction"] > 1.0         # meaningfully above the 0.5 reference
+    assert "cleared 12.5" in pts_play["Why"]
+    print("✓ build_best_bets covers all 4 markets, ranks by conviction, includes recent-form reasoning")
+
+
+def test_build_best_bets_skips_players_with_no_game_log():
+    rows = [_row("No Log", "Atlanta Dream", "Chicago Sky", "Chicago Sky @ Atlanta Dream", [])]
+    assert WP.build_best_bets(rows, sims=1000, seed=1) == []
+
+
+# ----------------------------------------------------------------- explain_miss
+def test_explain_miss_no_row_means_not_on_slate():
+    assert "never saw this player" in WP.explain_miss(None, "Points")
+
+
+def test_explain_miss_catchable_when_trending_up():
+    # last 3 games well above the fuller-sample average -> catchable
+    log = [_log(v, 3, 2, 1) for v in (30, 28, 26, 15, 14, 16, 15, 14, 13, 15)]
+    row = {"_game_log": log}
+    why = WP.explain_miss(row, "Points")
+    assert why.startswith("Catchable")
+
+
+def test_explain_miss_genuine_outlier_when_no_uptick():
+    log = [_log(v, 3, 2, 1) for v in (15, 16, 14, 15, 15, 14, 16, 15, 14, 15)]   # flat, consistent
+    row = {"_game_log": log}
+    why = WP.explain_miss(row, "Points")
+    assert why.startswith("Genuine outlier")
+
+
+def test_curate_selections_is_reachable_via_wnba_projections():
+    # Regression test for a real bug caught by a full-pipeline integration check: Media Room and
+    # Podcast Studio call sport.projections.curate_selections(...) uniformly regardless of active
+    # sport. curate_selections is genuinely sport-agnostic (already lives in projections.py) but
+    # must be re-exported here too, or WNBA pages crash with AttributeError.
+    assert hasattr(WP, "curate_selections")
+    plays = [{"Market": "Points", "Conviction": 2.0}, {"Market": "Points", "Conviction": 1.5},
+             {"Market": "Rebounds", "Conviction": 1.8}]
+    out = WP.curate_selections(plays, n=5, per_market_cap=1, rank_key="Conviction")
+    assert len(out) == 2   # capped at 1 per market
+    print("✓ curate_selections is reachable via wnba_projections (re-exported from projections.py)")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
