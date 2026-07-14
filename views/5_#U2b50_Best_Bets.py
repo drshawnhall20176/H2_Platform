@@ -128,7 +128,8 @@ view = [p for p in plays
 df = pd.DataFrame(view)[["Conviction", "Time", "Slot", "Player", "Team", "Market", "Side",
                          "Line", "ModelProb", "Fair", "Game", "Why"]]
 df = df.rename(columns={"ModelProb": "Model %", "Why": "Why the model likes it"})
-st.dataframe(df.style.format({"Model %": "{:.0%}", "Line": "{:g}", "Conviction": "{:.2f}×", "Fair": "{:+d}"})
+st.dataframe(df.style.format({"Model %": "{:.0%}", "Line": "{:g}", "Conviction": "{:.2f}×", "Fair": "{:+d}"},
+                             na_rep="—")
              .theme_gradient(cmap="Greens", subset=["Conviction"]),
              use_container_width=True, hide_index=True, height=400)
 
