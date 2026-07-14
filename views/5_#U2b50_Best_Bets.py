@@ -221,11 +221,19 @@ with st.expander("Diagnostic Inspector", expanded=True):
             if n < 6:
                 st.warning(f"⚠️ Short sample: only {n} recent games — the model can't yet see outcomes "
                            "this player hasn't produced in that window. Treat with extra caution.")
-            log_df = pd.DataFrame([{"Game #": i + 1, stat_key.upper(): g.get(stat_key, 0),
-                                    "Minutes": g.get("min", 0)} for i, g in enumerate(log)])
+
+            def _fmt_date(iso):
+                try:
+                    return datetime.fromisoformat(iso.replace("Z", "+00:00")).strftime("%b %-d")
+                except (ValueError, TypeError, AttributeError):
+                    return iso or "—"
+
+            log_df = pd.DataFrame([{"Date": _fmt_date(g.get("date")), "Opponent": g.get("opp") or "—",
+                                    stat_key.upper(): g.get(stat_key, 0), "Minutes": g.get("min", 0)}
+                                   for g in log])
             st.dataframe(log_df, hide_index=True, use_container_width=True)
-            st.caption("Game #1 is most recent. This is the exact data the bootstrap resampled from — "
-                       "no park factor, weather, or opponent adjustment yet (v1 model).")
+            st.caption("Most recent game first. This is the exact data the bootstrap resampled from — "
+                       "no park factor, weather, or opponent-strength adjustment yet (v1 model).")
 
 # --- footer ----------------------------------------------------------------
 st.caption("Conviction shades darker for stronger leans. ...")
