@@ -11,39 +11,47 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
  
-import mlb_engine as E
-import projections as P
-import statcast_data as SC
-import weather as WX
 import retro as R
 import sports
 
-st.title("🔍 Retrospective")
-st.caption("How the model's pre-game board lined up with what actually happened")
+_active = sports.active()
+E, P = _active.engine, _active.projections
 
-if not sports.require_sport("MLB", "Retrospective"):
+st.title("🔍 Retrospective")
+st.caption(f"How the model's pre-game board lined up with what actually happened — "
+           f"{_active.icon} {_active.label}")
+
+if not sports.require_live_engine("Retrospective"):
     st.stop()
- 
- 
-@st.cache_data(ttl=3600, show_spinner=False)
-def load_statcast():
-    return SC.load()
- 
- 
-@st.cache_data(ttl=1800, show_spinner=False)
-def load_weather(meta_keys: tuple):
-    out = {}
-    for vid, gdate, vname in meta_keys:
-        if vid is not None and vid not in out:
-            try:
-                out[vid] = WX.get_game_weather(vid, gdate, vname)
-            except Exception:
-                out[vid] = None
-    return out
- 
- 
+
+_MARKET_ICONS = {
+    "Batter HR": "🏠", "Pitcher Strikeouts": "⚡", "Batter Total Bases": "📊",
+    "Batter Total Hits": "✅", "Batter Strikeouts": "🌀", "Pitcher Outs": "🎯", "Pitcher Walks": "🚶",
+    "Points": "🏀", "Rebounds": "🔁", "Assists": "🤝", "Threes Made": "3️⃣",
+}
+_active_markets = list(_active.market_map.keys())
+
+
 @st.cache_data(ttl=600, show_spinner=False)
-def load_retro(date_str: str, fip_constant: float):
+def load_retro_mlb(date_str: str, fip_constant: float):
+    import statcast_data as SC
+    import weather as WX
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def load_statcast():
+        return SC.load()
+
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def load_weather(meta_keys: tuple):
+        out = {}
+        for vid, gdate, vname in meta_keys:
+            if vid is not None and vid not in out:
+                try:
+                    out[vid] = WX.get_game_weather(vid, gdate, vname)
+                except Exception:
+                    out[vid] = None
+        return out
+
     rows, meta = E.build_slate(date_str, fip_constant)
     sc, k = load_statcast()
     wx = load_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
@@ -55,32 +63,50 @@ def load_retro(date_str: str, fip_constant: float):
     plays = P.build_best_bets(rows, pitcher_rows)
     results = E.get_player_results(date_str)
     graded, summary = R.grade_slate(plays, results)
-    reports = {
-        "Batter HR": R.homer_report(plays, results),
-        "Pitcher Strikeouts": R.pitcher_k_report(plays, results),
-        "Batter Total Bases": R.batter_tb_report(plays, results),
-        "Batter Total Hits": R.batter_hits_report(plays, results),
-    }
+    reports = {m: R.market_report(plays, results, m) for m in _active_markets}
     rows_by_pid = {r.get("_pid"): r for r in rows}
     for pr in pitcher_rows:                     # so pitcher-K misses can be explained too
         rows_by_pid.setdefault(pr.get("_pid"), pr)
     return graded, summary, reports, rows_by_pid, len(meta), len(results)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_retro_generic(sport_key: str, date_str: str):
+    sport = sports.get(sport_key)
+    rows, meta = sport.engine.build_slate(date_str)
+    plays = sport.projections.build_best_bets(rows)
+    results = sport.engine.get_player_results(date_str)
+    graded, summary = R.grade_slate(plays, results)
+    reports = {m: R.market_report(plays, results, m) for m in _active_markets}
+    rows_by_pid = {r.get("_pid"): r for r in rows}
+    return graded, summary, reports, rows_by_pid, len(meta), len(results)
  
  
-c1, c2 = st.columns([2, 1])
-with c1:
+if _active.key == "MLB":
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        target = st.date_input("Slate to review", datetime.now() - timedelta(days=1))
+    with c2:
+        fip_constant = st.number_input("FIP constant", value=E.FIP_CONSTANT_DEFAULT, step=0.01)
+    date_str = target.strftime("%Y-%m-%d")
+
+    st.warning("**Approximate, for exploration.** Rebuilding a past slate uses *current*-season "
+               "rates, so recent dates have little look-ahead but older dates have more. For "
+               "rigorous, point-in-time proof, the **Bet Log** (which saved the model's probability "
+               "at bet time) is the real scorecard. Read this as a model review, not a P&L.", icon="⚠️")
+
+    with st.spinner("Rebuilding the board and pulling results..."):
+        graded, summary, reports, rows_by_pid, n_games, n_results = load_retro_mlb(date_str, fip_constant)
+else:
     target = st.date_input("Slate to review", datetime.now() - timedelta(days=1))
-with c2:
-    fip_constant = st.number_input("FIP constant", value=E.FIP_CONSTANT_DEFAULT, step=0.01)
-date_str = target.strftime("%Y-%m-%d")
- 
-st.warning("**Approximate, for exploration.** Rebuilding a past slate uses *current*-season "
-           "rates, so recent dates have little look-ahead but older dates have more. For "
-           "rigorous, point-in-time proof, the **Bet Log** (which saved the model's probability "
-           "at bet time) is the real scorecard. Read this as a model review, not a P&L.", icon="⚠️")
- 
-with st.spinner("Rebuilding the board and pulling results..."):
-    graded, summary, reports, rows_by_pid, n_games, n_results = load_retro(date_str, fip_constant)
+    date_str = target.strftime("%Y-%m-%d")
+
+    st.info("Rebuilt using only games completed **strictly before** this date — genuinely "
+            "point-in-time, not a look-ahead approximation. (MLB's version above rebuilds from "
+            "current-season rates; WNBA's recency-window model naturally avoids that.)", icon="✅")
+
+    with st.spinner("Rebuilding the board and pulling results..."):
+        graded, summary, reports, rows_by_pid, n_games, n_results = load_retro_generic(_active.key, date_str)
  
 if not summary["graded"]:
     st.info("No completed games with results for this date yet. Pick a date whose games are final.")
@@ -94,9 +120,12 @@ st.caption("For each market we cast, of the players whose result *cleared the li
            "the model rank them **before** the game — and for the ones it ranked low, an honest "
            "reason. High rank = the model surfaced it; deep in the list = the data says it was "
            "largely random.")
- 
- 
-def _render_market_review(rep, market, val_col, prob_label, rows_by_pid):
+
+
+_explain_miss = R.explain_miss if _active.key == "MLB" else P.explain_miss
+
+
+def _render_market_review(rep, market, rows_by_pid):
     m1, m2, m3 = st.columns(3)
     m1.metric("Caught", len(rep["caught"]),
               help=f"Cleared the line AND ranked in the model's top {rep['cutoff']} "
@@ -107,12 +136,12 @@ def _render_market_review(rep, market, val_col, prob_label, rows_by_pid):
     if rep["caught"]:
         cdf = pd.DataFrame(rep["caught"])
         cdf["Rank"] = cdf.apply(lambda r: f"#{r['Rank']} of {r['OfTotal']}", axis=1)
-        cols = [c for c in ["Player", val_col, "Line", "ModelProb", "Conviction", "Rank"]
+        cols = [c for c in ["Player", "Value", "Line", "ModelProb", "Conviction", "Rank"]
                 if c in cdf.columns]
         st.markdown("**Caught — ranked high and delivered**")
         st.dataframe(
-            cdf[cols].rename(columns={"ModelProb": prob_label}).style.format(
-                {prob_label: "{:.0%}", "Conviction": "{:.2f}×", "Line": "{:g}"}, na_rep="—"),
+            cdf[cols].rename(columns={"ModelProb": "Model %", "Value": market}).style.format(
+                {"Model %": "{:.0%}", "Conviction": "{:.2f}×", "Line": "{:g}"}, na_rep="—"),
             hide_index=True, use_container_width=True)
  
     if rep["missed"]:
@@ -121,14 +150,14 @@ def _render_market_review(rep, market, val_col, prob_label, rows_by_pid):
         for m in rep["missed"]:
             row = rows_by_pid.get(m.get("PlayerId"))
             mrows.append({
-                "Player": m["Player"], val_col: m.get(val_col), prob_label: m["ModelProb"],
+                "Player": m["Player"], market: m.get("Value"), "Model %": m["ModelProb"],
                 "Conviction": m.get("Conviction") if m.get("Conviction") is not None else float("nan"),
                 "Rank": f"#{m['Rank']} of {m['OfTotal']}",
-                "Reason": R.explain_miss(row, market),
+                "Reason": _explain_miss(row, market),
             })
         mdf = pd.DataFrame(mrows)
         st.dataframe(
-            mdf.style.format({prob_label: "{:.0%}", "Conviction": "{:.2f}×"}, na_rep="—"),
+            mdf.style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×"}, na_rep="—"),
             hide_index=True, use_container_width=True)
  
     if rep["unprojected"]:
@@ -138,27 +167,28 @@ def _render_market_review(rep, market, val_col, prob_label, rows_by_pid):
         st.caption("Nothing cleared the line to review for this market on this date.")
  
  
-_MARKET_TABS = [
-    ("🏠 Home Runs", "Batter HR", "HR", "Model HR%"),
-    ("⚡ Pitcher K", "Pitcher Strikeouts", "K", "Model %"),
-    ("📊 Total Bases", "Batter Total Bases", "TB", "Model %"),
-    ("✅ Hits", "Batter Total Hits", "Hits", "Model %"),
-]
-tabs = st.tabs([t[0] for t in _MARKET_TABS])
-for tab, (_label, market, val_col, prob_label) in zip(tabs, _MARKET_TABS):
+tabs = st.tabs([f"{_MARKET_ICONS.get(m, '🔹')} {m}" for m in _active_markets])
+for tab, market in zip(tabs, _active_markets):
     with tab:
-        _render_market_review(reports[market], market, val_col, prob_label, rows_by_pid)
+        _render_market_review(reports[market], market, rows_by_pid)
         if market == "Batter Total Hits":
             st.caption("⚠️ Reminder: 1+ hits lands well over half the time, so a 'miss' here is closer "
                        "to a coin flip than a called shot — most are simply variance, not something the "
                        "model should have caught.")
- 
-st.caption("**\"Catchable\" does not mean the model was wrong** — it means a real, market-specific "
-           "signal (barrels or a homer-prone matchup for power; a hittable/whiff-prone opposing "
-           "pitcher for hits and strikeouts; platoon edge; park/weather) was present that the ranking "
-           "under-weighted, worth reviewing. **\"Genuine long shot / over\"** means no such edge: the "
-           "model was right to rank it low, and chasing these is the overfitting we avoid. Most misses "
-           "are simply variance — that's baseball, not a flaw.")
+
+if _active.key == "MLB":
+    st.caption("**\"Catchable\" does not mean the model was wrong** — it means a real, market-specific "
+               "signal (barrels or a homer-prone matchup for power; a hittable/whiff-prone opposing "
+               "pitcher for hits and strikeouts; platoon edge; park/weather) was present that the ranking "
+               "under-weighted, worth reviewing. **\"Genuine long shot / over\"** means no such edge: the "
+               "model was right to rank it low, and chasing these is the overfitting we avoid. Most misses "
+               "are simply variance — that's baseball, not a flaw.")
+else:
+    st.caption("**\"Catchable\" does not mean the model was wrong** — it means the player was already "
+               "trending up over their last few games before this one, a real signal the recency "
+               "weighting hadn't fully caught up to yet. **\"Genuine outlier\"** means no such trend: "
+               "the result sits above their established form with no warning sign, and chasing these "
+               "after the fact is the overfitting the model avoids. Most misses are simply variance.")
  
 # --- model accuracy --------------------------------------------------------
 st.divider()
@@ -237,13 +267,7 @@ def _render_graded(subset):
         st.dataframe(styler, use_container_width=False, hide_index=True, height=480)
  
  
-_GRADED_TABS = [
-    ("All markets", None),
-    ("🏠 HR", "Batter HR"),
-    ("⚡ Pitcher K", "Pitcher Strikeouts"),
-    ("📊 Total Bases", "Batter Total Bases"),
-    ("✅ Hits", "Batter Total Hits"),
-]
+_GRADED_TABS = [("All markets", None)] + [(f"{_MARKET_ICONS.get(m, '🔹')} {m}", m) for m in _active_markets]
 gtabs = st.tabs([t[0] for t in _GRADED_TABS])
 for tab, (_label, mkt) in zip(gtabs, _GRADED_TABS):
     with tab:

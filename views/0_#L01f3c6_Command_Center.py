@@ -15,14 +15,12 @@ import pandas as pd
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
  
-import mlb_engine as E
-import projections as P
-import statcast_data as SC
-import weather as WX
 import retro as R
 import betlog as B
 import sports
  
+_active = sports.active()
+E, P = _active.engine, _active.projections
  
 st.markdown("""
 <style>
@@ -36,37 +34,46 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
  
-st.markdown("""
+st.markdown(f"""
 <div class="h2-hero">
   <h1>🏆 H2 Sports — Command Center</h1>
   <p>Trade sports, don't bet sports. A layered model that prices every prop, sizes with
-     discipline, and proves itself with closing-line value and calibration.</p>
+     discipline, and proves itself with closing-line value and calibration. — {_active.icon} {_active.label}</p>
 </div>
 """, unsafe_allow_html=True)
 
-if not sports.require_sport("MLB", "Command Center"):
+if not sports.require_live_engine("Command Center"):
     st.stop()
- 
- 
+
+# Icon per market, for the tab strips below — falls back to a generic icon for anything not
+# listed (future sports don't need an entry here to render correctly, just less decoratively).
+_MARKET_ICONS = {
+    "Batter HR": "🏠", "Pitcher Strikeouts": "⚡", "Batter Total Bases": "📊",
+    "Batter Total Hits": "✅", "Batter Strikeouts": "🌀", "Pitcher Outs": "🎯", "Pitcher Walks": "🚶",
+    "Points": "🏀", "Rebounds": "🔁", "Assists": "🤝", "Threes Made": "3️⃣",
+}
+
+
 # ---------- loaders ----------
-@st.cache_data(ttl=3600, show_spinner=False)
-def _statcast():
-    return SC.load()
- 
- 
-@st.cache_data(ttl=1800, show_spinner=False)
-def _weather(keys):
-    out = {}
-    for vid, gdate, vname in keys:
-        if vid is not None and vid not in out:
-            try:
-                out[vid] = WX.get_game_weather(vid, gdate, vname)
-            except Exception:
-                out[vid] = None
-    return out
- 
- 
-def _board(date_str):
+def _board_mlb(date_str):
+    import statcast_data as SC
+    import weather as WX
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def _statcast():
+        return SC.load()
+
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def _weather(keys):
+        out = {}
+        for vid, gdate, vname in keys:
+            if vid is not None and vid not in out:
+                try:
+                    out[vid] = WX.get_game_weather(vid, gdate, vname)
+                except Exception:
+                    out[vid] = None
+        return out
+
     rows, meta = E.build_slate(date_str)
     sc, k = _statcast()
     wx = _weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
@@ -76,36 +83,41 @@ def _board(date_str):
     P.enrich_hitter_rows(rows, seed=7, statcast=sc, statcast_k=k)
     pr = P.build_pitcher_projection_rows(rows, meta, seed=11)
     return P.build_best_bets(rows, pr), meta
- 
- 
+
+
+def _board_generic(sport_key, date_str):
+    sport = sports.get(sport_key)
+    rows, meta = sport.engine.build_slate(date_str)
+    return sport.projections.build_best_bets(rows), meta
+
+
+def _board(sport_key, date_str):
+    return _board_mlb(date_str) if sport_key == "MLB" else _board_generic(sport_key, date_str)
+
+
 @st.cache_data(ttl=300, show_spinner=False)
-def today_board(date_str):
-    plays, meta = _board(date_str)
+def today_board(sport_key, date_str):
+    plays, meta = _board(sport_key, date_str)
     return plays, len(meta)
- 
- 
+
+
 @st.cache_data(ttl=900, show_spinner=False)
-def yesterday_catches(date_str):
-    plays, _ = _board(date_str)
-    results = E.get_player_results(date_str)
-    return {
-        "Batter HR": R.homer_report(plays, results)["caught"],
-        "Pitcher Strikeouts": R.pitcher_k_report(plays, results)["caught"],
-        "Batter Total Bases": R.batter_tb_report(plays, results)["caught"],
-        "Batter Total Hits": R.batter_hits_report(plays, results)["caught"],
-    }, len(results)
- 
- 
+def yesterday_catches(sport_key, date_str, markets):
+    plays, _ = _board(sport_key, date_str)
+    results = sports.get(sport_key).engine.get_player_results(date_str)
+    return {m: R.market_report(plays, results, m)["caught"] for m in markets}, len(results)
+
+
 today = datetime.now().strftime("%Y-%m-%d")
 yest = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
- 
+
 with st.spinner("Loading tonight's board..."):
     try:
-        plays, n_games = today_board(today)
+        plays, n_games = today_board(_active.key, today)
     except Exception:
         plays, n_games = [], 0
- 
-bets = B.list_bets()
+
+bets = B.list_bets(sport=_active.key)
 s = B.summary(bets)
  
 # ---------- KPI row ----------
@@ -121,15 +133,26 @@ k5.metric("Avg CLV", f"{s['avg_clv']:+.2f}%" if s["avg_clv"] is not None else "�
  
 # ---------- the model pipeline (the pitch) ----------
 st.markdown("##### How every play is built")
-st.markdown(
-    '<span class="pipe">Matchup (odds-ratio)</span><span class="pipe-arrow">→</span>'
-    '<span class="pipe">Handedness splits</span><span class="pipe-arrow">→</span>'
-    '<span class="pipe">Statcast expected power</span><span class="pipe-arrow">→</span>'
-    '<span class="pipe">Weather & wind</span><span class="pipe-arrow">→</span>'
-    '<span class="pipe">Live EV vs market</span><span class="pipe-arrow">→</span>'
-    '<span class="pipe">Kelly sizing</span><span class="pipe-arrow">→</span>'
-    '<span class="pipe">Logged · CLV · calibration</span>',
-    unsafe_allow_html=True)
+if _active.key == "MLB":
+    st.markdown(
+        '<span class="pipe">Matchup (odds-ratio)</span><span class="pipe-arrow">→</span>'
+        '<span class="pipe">Handedness splits</span><span class="pipe-arrow">→</span>'
+        '<span class="pipe">Statcast expected power</span><span class="pipe-arrow">→</span>'
+        '<span class="pipe">Weather & wind</span><span class="pipe-arrow">→</span>'
+        '<span class="pipe">Live EV vs market</span><span class="pipe-arrow">→</span>'
+        '<span class="pipe">Kelly sizing</span><span class="pipe-arrow">→</span>'
+        '<span class="pipe">Logged · CLV · calibration</span>',
+        unsafe_allow_html=True)
+else:
+    st.markdown(
+        '<span class="pipe">Last 10 games</span><span class="pipe-arrow">→</span>'
+        '<span class="pipe">Bootstrap resample</span><span class="pipe-arrow">→</span>'
+        '<span class="pipe">Rotation-minutes filter</span><span class="pipe-arrow">→</span>'
+        '<span class="pipe">Live EV vs market</span><span class="pipe-arrow">→</span>'
+        '<span class="pipe">Kelly sizing</span><span class="pipe-arrow">→</span>'
+        '<span class="pipe">Logged · CLV · calibration</span>',
+        unsafe_allow_html=True)
+    st.caption("v1 model — opponent defense and pace aren't incorporated yet.")
  
 st.divider()
 left, right = st.columns([3, 2])
@@ -138,15 +161,16 @@ left, right = st.columns([3, 2])
 with left:
     st.subheader("⭐ Tonight's top leans")
     if plays:
-        _TOP_TABS = [("All", None), ("🏠 HR", "Batter HR"), ("⚡ K", "Pitcher Strikeouts"),
-                     ("📊 TB", "Batter Total Bases"), ("✅ Hits", "Batter Total Hits")]
+        _TOP_TABS = [("All", None)] + [(f"{_MARKET_ICONS.get(m, '🔹')} {m}", m)
+                                       for m in _active.market_map.keys()]
         _ttabs = st.tabs([t[0] for t in _TOP_TABS])
         for _tb, (_lab, _mkt) in zip(_ttabs, _TOP_TABS):
             with _tb:
                 if _mkt is None:
-                    # "All" = a cross-market summary, NOT a raw conviction sort. Since HR is the
-                    # rarest event it always wins conviction, so sorting everything by conviction
-                    # just reproduces the HR tab. Instead show the best 2 leans from each market.
+                    # "All" = a cross-market summary, NOT a raw conviction sort. Since the rarest
+                    # event in any market family tends to win conviction, sorting everything by
+                    # conviction just reproduces that one tab. Instead show the best 2 leans from
+                    # each market.
                     picks, seen = [], {}
                     for p in plays:                       # plays are already conviction-sorted
                         m = p["Market"]
@@ -154,7 +178,7 @@ with left:
                             picks.append(p)
                             seen[m] = seen.get(m, 0) + 1
                     subset = sorted(picks, key=lambda p: -p.get("Conviction", 0))
-                    st.caption("Best two leans from each market — so this isn't just the HR tab again.")
+                    st.caption("Best two leans from each market — so this isn't just one market's tab again.")
                 else:
                     subset = [p for p in plays if p["Market"] == _mkt][:8]
                 if subset:
@@ -207,33 +231,34 @@ with right:
 # ---------- model-caught highlight (yesterday) ----------
 st.divider()
 st.subheader("🎯 The model caught these — last night's non-obvious plays")
-st.caption("Players whose result cleared the line AND sat in the model's top plays before the game. "
-           "Surfaced by matchup, platoon, Statcast, and weather — not name value. (Exploratory; see Retrospective.)")
+if _active.key == "MLB":
+    st.caption("Players whose result cleared the line AND sat in the model's top plays before the game. "
+               "Surfaced by matchup, platoon, Statcast, and weather — not name value. (Exploratory; see Retrospective.)")
+else:
+    st.caption("Players whose result cleared the line AND sat in the model's top plays before the game. "
+               "Surfaced by recent form, not name value. (Exploratory; see Retrospective.)")
 try:
-    catches, _ = yesterday_catches(yest)
+    catches, _ = yesterday_catches(_active.key, yest, tuple(_active.market_map.keys()))
 except Exception:
     catches = {}
- 
-_CAUGHT_TABS = [("🏠 HR", "Batter HR", "HR", "Model HR%"),
-                ("⚡ Pitcher K", "Pitcher Strikeouts", "K", "Model %"),
-                ("📊 Total Bases", "Batter Total Bases", "TB", "Model %"),
-                ("✅ Hits", "Batter Total Hits", "Hits", "Model %")]
-_ctabs = st.tabs([t[0] for t in _CAUGHT_TABS])
-for _tb, (_lab, _mkt, _val, _plabel) in zip(_ctabs, _CAUGHT_TABS):
+
+_caught_markets = list(_active.market_map.keys())
+_ctabs = st.tabs([f"{_MARKET_ICONS.get(m, '🔹')} {m}" for m in _caught_markets])
+for _tb, _mkt in zip(_ctabs, _caught_markets):
     with _tb:
         caught = catches.get(_mkt, [])
         if caught:
             cdf = pd.DataFrame(caught[:6])
             cdf["Pre-game rank"] = cdf.apply(lambda r: f"#{r['Rank']} of {r['OfTotal']}", axis=1)
-            cols = [c for c in ["Player", _val, "Line", "ModelProb", "Pre-game rank"] if c in cdf.columns]
-            st.dataframe(
-                cdf[cols].rename(columns={"ModelProb": _plabel})
-                .style.format({_plabel: "{:.0%}", "Line": "{:g}"}, na_rep="—"),
-                hide_index=True, use_container_width=True)
+            cols = [c for c in ["Player", "Value", "Line", "ModelProb", "Pre-game rank"] if c in cdf.columns]
+            cdf = cdf[cols].rename(columns={"ModelProb": "Model %", "Value": _mkt})
+            fmt = {"Model %": "{:.0%}", "Line": "{:g}"}
+            st.dataframe(cdf.style.format({k: v for k, v in fmt.items() if k in cdf.columns}, na_rep="—"),
+                        hide_index=True, use_container_width=True)
         else:
             st.caption("Nothing cleared the line in the model's top plays for this market last night, "
                        "or results aren't final yet.")
- 
+
 st.divider()
 st.caption("⚖️ For analysis and entertainment. Not financial advice and not a guarantee — outcomes "
            "are uncertain and variance is real. Proof metrics reflect logged activity only; empty "

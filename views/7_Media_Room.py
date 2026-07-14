@@ -6,6 +6,7 @@ Not picks, not locks, not advice. Each selection shows the side/line, the plain-
   • Conviction (free)      — ranks by how far the model diverges from a typical line; shows fair price.
   • Live value (uses odds) — ranks by real EV% against live prices, identical math to the Edge Board.
 Plays whose opposing starter is undetermined (TBD) are excluded — the matchup can't be priced.
+(For WNBA this filter is a harmless no-op — see selections.filter_known_pitcher's docstring.)
 """
  
 import os
@@ -14,16 +15,14 @@ import streamlit as st
 from datetime import datetime
  
 import sports
-import mlb_engine as E
-import projections as P
-import statcast_data as SC
-import weather as WX
 import odds_api as O
 import selections as SEL
 import retro as R
 
 _active = sports.active()
-if not sports.require_sport("MLB", "Media Room"):
+E, P = _active.engine, _active.projections
+
+if not sports.require_live_engine("Media Room"):
     st.stop()
 
 st.markdown("""
@@ -51,6 +50,10 @@ SIDE_PHRASE = {
     ("Pitcher Strikeouts", "Under"): "Under on strikeouts", ("Pitcher Outs", "Over"): "Over on outs",
     ("Pitcher Outs", "Under"): "Under on outs", ("Pitcher Walks", "Over"): "Over on walks",
     ("Pitcher Walks", "Under"): "Under on walks",
+    ("Points", "Over"): "Over on points", ("Points", "Under"): "Under on points",
+    ("Rebounds", "Over"): "Over on rebounds", ("Rebounds", "Under"): "Under on rebounds",
+    ("Assists", "Over"): "Over on assists", ("Assists", "Under"): "Under on assists",
+    ("Threes Made", "Over"): "Over on threes", ("Threes Made", "Under"): "Under on threes",
 }
  
  
@@ -86,25 +89,26 @@ def get_key():
         return os.environ.get("ODDS_API_KEY")
  
  
-@st.cache_data(ttl=3600, show_spinner=False)
-def load_statcast():
-    return SC.load()
- 
- 
-@st.cache_data(ttl=1800, show_spinner=False)
-def load_weather(keys):
-    out = {}
-    for vid, gdate, vname in keys:
-        if vid is not None and vid not in out:
-            try:
-                out[vid] = WX.get_game_weather(vid, gdate, vname)
-            except Exception:
-                out[vid] = None
-    return out
- 
- 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_selections(date_str, n, cap, ev_mode):
+def load_selections_mlb(date_str, n, cap, ev_mode):
+    import statcast_data as SC
+    import weather as WX
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def load_statcast():
+        return SC.load()
+
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def load_weather(keys):
+        out = {}
+        for vid, gdate, vname in keys:
+            if vid is not None and vid not in out:
+                try:
+                    out[vid] = WX.get_game_weather(vid, gdate, vname)
+                except Exception:
+                    out[vid] = None
+        return out
+
     rows, meta = E.build_slate(date_str)
     sc, k = load_statcast()
     wx = load_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
@@ -114,7 +118,7 @@ def load_selections(date_str, n, cap, ev_mode):
     P.enrich_hitter_rows(rows, seed=7, statcast=sc, statcast_k=k)
     pr = P.build_pitcher_projection_rows(rows, meta, seed=11)
     plays = SEL.filter_known_pitcher(P.build_best_bets(rows, pr))   # drop TBD-pitcher plays
- 
+
     ev_used = False
     if ev_mode:
         key = get_key()
@@ -126,9 +130,31 @@ def load_selections(date_str, n, cap, ev_mode):
             SEL.attach_live_ev(plays, edges)
             plays = [p for p in plays if p.get("EV") is not None]
             ev_used = True
- 
+
     rank = "EV" if ev_used else "Conviction"
     return P.curate_selections(plays, n=n, per_market_cap=cap, rank_key=rank), len(meta), ev_used
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_selections_generic(sport_key, date_str, n, cap, ev_mode):
+    sport = sports.get(sport_key)
+    engine, proj = sport.engine, sport.projections
+    rows, meta = engine.build_slate(date_str)
+    plays = SEL.filter_known_pitcher(proj.build_best_bets(rows))
+
+    ev_used = False
+    if ev_mode:
+        key = get_key()
+        if key:
+            index = proj.build_projection_index(rows, meta)
+            offers, _ = O.fetch_slate_props(date_str, key, sport.markets, sport=sport.odds_sport_key)
+            edges, _ = O.compute_edges(index, offers, projections_module=proj)
+            SEL.attach_live_ev(plays, edges, market_map=sport.market_map)
+            plays = [p for p in plays if p.get("EV") is not None]
+            ev_used = True
+
+    rank = "EV" if ev_used else "Conviction"
+    return proj.curate_selections(plays, n=n, per_market_cap=cap, rank_key=rank), len(meta), ev_used
  
  
 c1, c2, c3 = st.columns([2, 1, 1])
@@ -144,7 +170,10 @@ ev_mode = st.toggle("Rank by live value (uses odds quota)", value=False,
 date_str = target.strftime("%Y-%m-%d")
  
 with st.spinner("Curating selections..."):
-    sel, n_games, ev_used = load_selections(date_str, n, cap, ev_mode)
+    if _active.key == "MLB":
+        sel, n_games, ev_used = load_selections_mlb(date_str, n, cap, ev_mode)
+    else:
+        sel, n_games, ev_used = load_selections_generic(_active.key, date_str, n, cap, ev_mode)
  
 if not sel:
     msg = ("No live-value plays cleared the filters today." if ev_mode
