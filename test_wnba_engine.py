@@ -98,46 +98,150 @@ def test_build_slate_assembles_rows_from_mocked_fetches(monkeypatch):
     print("✓ build_slate wires schedule -> rosters -> game logs -> filtered rows correctly")
 
 
-# ----------------------------------------------------------------- season-format hedge
-def test_season_candidates_tries_plain_year_then_cross_year(monkeypatch):
-    monkeypatch.setattr(E.CFG, "current_season", lambda: "2026")
-    assert E._season_candidates() == ["2026", "2026-27"]
+# ----------------------------------------------------------------- ESPN fetch layer
+def test_get_json_returns_none_on_http_error(monkeypatch):
+    class FakeResp:
+        def raise_for_status(self):
+            raise E.requests.exceptions.HTTPError("500")
+
+    monkeypatch.setattr(E.requests, "get", lambda *a, **k: FakeResp())
+    assert E._get_json("https://example.com") is None
 
 
-def test_fetch_schedule_frame_falls_back_through_strategies(monkeypatch):
-    import pandas as pd
+def test_get_json_returns_none_on_timeout(monkeypatch):
+    def raise_timeout(*a, **k):
+        raise E.requests.exceptions.ReadTimeout("timed out")
 
-    # Simulate: date-filter attempts all come back empty, but the whole-season pull (2nd
-    # season-format candidate) succeeds and contains the target date among other games.
-    calls = []
-
-    def fake_try(kwargs):
-        calls.append(kwargs)
-        if kwargs.get("season_nullable") == "2026-27" and "date_from_nullable" not in kwargs:
-            return pd.DataFrame([
-                {"GAME_ID": "1", "GAME_DATE": "2026-07-13", "MATCHUP": "ATL vs. CHI",
-                 "TEAM_ID": 1611661330, "TEAM_NAME": "Atlanta Dream"},
-                {"GAME_ID": "1", "GAME_DATE": "2026-07-13", "MATCHUP": "CHI @ ATL",
-                 "TEAM_ID": 1611661329, "TEAM_NAME": "Chicago Sky"},
-                {"GAME_ID": "2", "GAME_DATE": "2026-07-14", "MATCHUP": "SEA vs. LV",
-                 "TEAM_ID": 1611661328, "TEAM_NAME": "Seattle Storm"},
-            ])
-        return pd.DataFrame()   # every other strategy comes back empty
-
-    monkeypatch.setattr(E, "_try_game_finder", fake_try)
-    monkeypatch.setattr(E.CFG, "current_season", lambda: "2026")
-
-    df = E._fetch_schedule_frame("2026-07-13")
-    assert df is not None
-    assert len(df) == 2                          # only the 2026-07-13 game's 2 team rows
-    assert set(df["GAME_DATE"]) == {"2026-07-13"}
-    assert len(calls) > 1, "should have tried more than one strategy before succeeding"
-    print("✓ _fetch_schedule_frame falls through to the whole-season+client-filter strategy")
+    monkeypatch.setattr(E.requests, "get", raise_timeout)
+    assert E._get_json("https://example.com") is None
 
 
-def test_fetch_schedule_frame_returns_none_when_every_strategy_fails(monkeypatch):
-    monkeypatch.setattr(E, "_try_game_finder", lambda kwargs: None)
-    assert E._fetch_schedule_frame("2026-07-13") is None
+def test_get_json_returns_parsed_body_on_success(monkeypatch):
+    class FakeResp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"ok": True}
+
+    monkeypatch.setattr(E.requests, "get", lambda *a, **k: FakeResp())
+    assert E._get_json("https://example.com") == {"ok": True}
+
+
+# ----------------------------------------------------------------- gamelog value parsing
+def test_parse_gamelog_value_plain_number():
+    assert E._parse_gamelog_value("32") == 32.0
+
+
+def test_parse_gamelog_value_made_attempted_combo():
+    assert E._parse_gamelog_value("12-24") == 12.0   # makes, not attempts
+
+
+def test_parse_gamelog_value_handles_junk():
+    assert E._parse_gamelog_value(None) == 0.0
+    assert E._parse_gamelog_value("DNP") == 0.0
+    assert E._parse_gamelog_value("") == 0.0
+
+
+# ----------------------------------------------------------------- get_schedule (ESPN scoreboard)
+def test_get_schedule_parses_espn_scoreboard_shape(monkeypatch):
+    fake_response = {
+        "events": [
+            {
+                "id": "401810001",
+                "date": "2026-07-14T00:00Z",
+                "competitions": [{
+                    "competitors": [
+                        {"homeAway": "home", "team": {"id": "20", "displayName": "Atlanta Dream"}},
+                        {"homeAway": "away", "team": {"id": "19", "displayName": "Chicago Sky"}},
+                    ]
+                }],
+            },
+            {"id": "bad_event", "competitions": []},   # malformed -> must be skipped, not crash
+        ]
+    }
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_response)
+
+    games = E.get_schedule("2026-07-14")
+    assert len(games) == 1
+    g = games[0]
+    assert g["home_id"] == 20 and g["home_name"] == "Atlanta Dream"
+    assert g["away_id"] == 19 and g["away_name"] == "Chicago Sky"
+    assert g["game_date"] == "2026-07-14T00:00Z"
+    print("✓ get_schedule parses ESPN's scoreboard shape and skips malformed events")
+
+
+def test_get_schedule_uses_yyyymmdd_date_param(monkeypatch):
+    captured = {}
+
+    def fake_get_json(url, params=None):
+        captured["params"] = params
+        return {"events": []}
+
+    monkeypatch.setattr(E, "_get_json", fake_get_json)
+    E.get_schedule("2026-07-14")
+    assert captured["params"] == {"dates": "20260714"}
+
+
+def test_get_schedule_returns_empty_on_fetch_failure(monkeypatch):
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: None)
+    assert E.get_schedule("2026-07-14") == []
+
+
+# ----------------------------------------------------------------- get_team_roster (ESPN roster)
+def test_get_team_roster_flattens_position_groups(monkeypatch):
+    fake_response = {
+        "athletes": [
+            {"position": "G", "items": [{"id": "1", "displayName": "Guard One"},
+                                        {"id": "2", "displayName": "Guard Two"}]},
+            {"position": "F", "items": [{"id": "3", "displayName": "Forward One"}]},
+        ]
+    }
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_response)
+    roster = E.get_team_roster(20)
+    assert {p["name"] for p in roster} == {"Guard One", "Guard Two", "Forward One"}
+    assert all(isinstance(p["id"], int) for p in roster)
+
+
+def test_get_team_roster_empty_on_fetch_failure(monkeypatch):
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: None)
+    assert E.get_team_roster(20) == []
+
+
+# ----------------------------------------------------------------- get_player_recent_games (ESPN gamelog)
+def test_get_player_recent_games_aligns_names_from_the_right(monkeypatch):
+    # Mirrors the documented ESPN shape: `names` includes meta fields (date/opponent/gameResult)
+    # BEFORE the stat columns, but `stats` only holds the stat-column values.
+    fake_response = {
+        "names": ["date", "opponent", "gameResult", "minutes", "fieldGoalsMade",
+                 "threePointsMade", "freeThrowsMade", "rebounds", "assists", "steals",
+                 "blocks", "points"],
+        "events": [
+            {"id": "1", "date": "2026-07-13T00:00Z", "gameResult": "W",
+             "stats": ["32", "8-15", "3-6", "4-4", "6", "5", "2", "1", "23"]},
+        ],
+    }
+
+    def fake_get_json(url, params=None):
+        assert "/athletes/555/gamelog" in url
+        return fake_response
+
+    monkeypatch.setattr(E, "_get_json", fake_get_json)
+    games = E.get_player_recent_games(555)
+
+    assert len(games) == 1
+    g = games[0]
+    assert g["min"] == 32.0
+    assert g["fg3m"] == 3.0     # from "3-6" -> makes
+    assert g["reb"] == 6.0
+    assert g["ast"] == 5.0
+    assert g["pts"] == 23.0
+    print("✓ get_player_recent_games correctly aligns names/stats and parses made-attempted combos")
+
+
+def test_get_player_recent_games_empty_on_fetch_failure(monkeypatch):
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: None)
+    assert E.get_player_recent_games(555) == []
 
 
 if __name__ == "__main__":

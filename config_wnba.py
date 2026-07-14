@@ -1,32 +1,18 @@
 """
 config_wnba.py — WNBA sport configuration.
 
-Single source of truth for team IDs and the handful of tuning constants wnba_engine.py needs.
-Markets and market_map live in sports.py's registry (Stage 1 decision — one place for market
-definitions across every sport), not duplicated here.
-
-Team list + numeric team IDs verified live against wnba.com/teams on 2026-07-13 — NOT pulled from
-training data, which would have been stale (the league expanded from 13 to 15 teams for the 2026
-season: Portland Fire and Toronto Tempo). Re-verify at the start of a future season in case of
-further expansion/relocation.
+Single source of truth for the tuning constants wnba_engine.py needs. Markets and market_map
+live in sports.py's registry (Stage 1 decision — one place for market definitions across every
+sport), not duplicated here.
 """
 
-# nba_api league_id for the WNBA (vs '00' for NBA, '20' for G League).
-LEAGUE_ID = "10"
-
-# WNBA seasons run within a single calendar year (unlike the NBA's cross-year "2025-26" seasons),
-# so the season string passed to nba_api endpoints is just the 4-digit year. NOTE: this format is
-# based on documented WNBA community convention (py_ball/wehoop), not a live-verified API response
-# — stats.wnba.com calls are blocked from the build sandbox (see PLATFORM_CHECKPOINT.md). Confirm
-# against a real response on first live run; if it's wrong, PlayerGameLog/CommonTeamRoster will
-# come back empty rather than erroring, which is an easy thing to miss.
-def current_season() -> str:
-    from datetime import date
-    return str(date.today().year)
-
-
 # Team ID -> (full name, abbreviation, conference). Verified live from https://www.wnba.com/teams
-# on 2026-07-13. 15 teams for the 2026 season.
+# on 2026-07-13. 15 teams for the 2026 season (incl. Portland Fire / Toronto Tempo expansion).
+# Reference data only — wnba_engine.py (ESPN's API) gets team IDs and names directly from each
+# scoreboard/roster response rather than cross-referencing this table, since ESPN's team ID space
+# is its own numbering, unrelated to wnba.com's. Kept here for anywhere else that wants the
+# league's real team list without a network call. Re-verify at the start of a future season in
+# case of further expansion/relocation.
 TEAMS = {
     1611661330: ("Atlanta Dream", "ATL", "East"),
     1611661329: ("Chicago Sky", "CHI", "East"),

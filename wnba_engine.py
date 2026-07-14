@@ -1,5 +1,5 @@
 """
-wnba_engine.py — WNBA data layer using nba_api (league_id='10').
+wnba_engine.py — WNBA data layer using ESPN's public (unofficial) API.
 
 Provides:
   - get_schedule(date_str) -> games scheduled for a date
@@ -8,25 +8,20 @@ Provides:
   - build_slate(date_str) -> (rows, meta), matching the platform's cross-sport engine contract
     (see mlb_engine.build_slate / sports.py's Sport.engine)
 
-Data source: nba_api (https://github.com/swar/nba_api), wrapping stats.wnba.com — free, no key,
-the same "public stats API" pattern MLB (MLB Stats API) and NFL (nfl_data_py) already use here.
+DATA SOURCE CHANGE (from the original nba_api build): nba_api wraps stats.nba.com, which has a
+long-documented history (github.com/swar/nba_api/issues/182, /320, /498, and others going back to
+2020) of blocking or throttling requests from cloud-hosting IP ranges — confirmed here by a
+production ReadTimeout from Streamlit Cloud. That's a network-level block, not something request
+headers or retries fix. Switched to ESPN's public API (site.api.espn.com / site.web.api.espn.com)
+instead: unofficial and undocumented like nba_api, but with no comparable pattern of cloud-IP
+blocking in its own issue history. Endpoint choices and field names below come from
+github.com/pseudo-r/Public-ESPN-API's documented response schemas (WNBA gamelog explicitly listed
+as verified working), not from live testing — this sandbox can't reach either API, so the same
+honesty applies as before: verify against a real slate on first deploy.
 
-IMPORTANT — this module's live HTTP calls could not be exercised from the build sandbox
-(stats.wnba.com is outside its network allowlist). Two specific unknowns can't be resolved without
-a live response, so rather than guess a single answer, both are handled defensively:
-
-  1. WNBA's season STRING format. WNBA-specific wrappers (wehoop's wnba_playergamelog) suggest a
-     plain year ("2026"); general stats.nba.com docs (py_ball) describe a cross-year "YYYY-YY"
-     shape used elsewhere on the same backend. `_season_candidates()` tries both, in that order,
-     and every season-dependent fetch below stops at the first one that returns data.
-  2. `LeagueGameFinder`'s date_from/date_to filters have a documented history of returning empty
-     results even when used correctly (github.com/swar/nba_api/issues/95, issues/207).
-     `get_schedule` therefore also falls back to pulling the whole season and filtering by date
-     client-side if the server-side date filter comes back empty.
-
-Verify against a real slate on first deploy. If a column name has drifted instead, these
-functions still return empty rather than raising, which is easy to miss — the first-deploy
-checklist in PLATFORM_CHECKPOINT.md covers what to check.
+Notably simpler than the nba_api version: no team-ID cross-reference table needed (ESPN's
+scoreboard response already carries each game's team IDs + display names inline), and no WNBA
+season-string guessing (the gamelog endpoint defaults to the current season server-side).
 """
 
 from __future__ import annotations
@@ -35,139 +30,131 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Tuple
 
-import config_wnba as CFG
+import requests
 
-try:
-    from nba_api.stats.endpoints import leaguegamefinder, playergamelog, commonteamroster
-except ImportError:
-    raise ImportError("Install nba_api: pip install nba_api")
+import config_wnba as CFG
 
 logger = logging.getLogger(__name__)
 
+SITE_API = "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba"
+WEB_API = "https://site.web.api.espn.com/apis/common/v3/sports/basketball/wnba"
+_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; H2Sports/1.0)"}
+_TIMEOUT = 15
 
-def _season_candidates() -> List[str]:
-    """Season strings to try, in order, until one returns data. See module docstring."""
-    primary = CFG.current_season()          # e.g. "2026"
-    y = int(primary)
-    cross_year = f"{y}-{str(y + 1)[-2:]}"    # e.g. "2026-27"
-    return [primary, cross_year]
+
+def _get_json(url: str, params: Optional[Dict] = None) -> Optional[Dict]:
+    """Shared fetch helper: returns the parsed JSON body, or None on any failure (bad status,
+    timeout, malformed JSON). Every caller below treats None the same way it treats an empty
+    result — fail soft, log, move on — so one bad request can't take down the whole slate build."""
+    try:
+        resp = requests.get(url, params=params, headers=_HEADERS, timeout=_TIMEOUT)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception:
+        logger.exception("WNBA ESPN API request failed: %s params=%s", url, params)
+        return None
 
 
 # --------------------------------------------------------------------------- schedule
 def get_schedule(date_str: str) -> List[Dict[str, Any]]:
-    """Games scheduled for date_str (YYYY-MM-DD). One dict per game with both team ids/names."""
-    df = _fetch_schedule_frame(date_str)
-    if df is None or df.empty:
+    """Games scheduled for date_str (YYYY-MM-DD). One dict per game with both team ids/names —
+    both pulled directly from the scoreboard response, no separate team lookup needed."""
+    espn_date = date_str.replace("-", "")   # ESPN wants YYYYMMDD; we use YYYY-MM-DD everywhere else
+    data = _get_json(f"{SITE_API}/scoreboard", params={"dates": espn_date})
+    if not data:
         return []
 
-    games: Dict[str, Dict[str, Any]] = {}
-    for _, row in df.iterrows():
-        gid = row["GAME_ID"]
-        is_home = "vs." in str(row.get("MATCHUP", ""))
-        team_id = int(row["TEAM_ID"])
-        team_name = CFG.TEAMS.get(team_id, (row.get("TEAM_NAME", "Unknown"),))[0]
-        g = games.setdefault(gid, {"gameId": gid, "game_date": row.get("GAME_DATE")})
-        if is_home:
-            g["home_id"], g["home_name"] = team_id, team_name
-        else:
-            g["away_id"], g["away_name"] = team_id, team_name
-    # Only keep games where both sides resolved (guards against a partial/odd API response).
-    return [g for g in games.values() if "home_id" in g and "away_id" in g]
-
-
-def _fetch_schedule_frame(date_str: str):
-    """Tries several strategies in order and returns the first non-empty result — see the
-    module docstring for why (documented LeagueGameFinder date-filter flakiness + unverifiable
-    WNBA season string format). Returns None if every strategy comes back empty."""
-    attempts = [dict(date_from_nullable=date_str, date_to_nullable=date_str)]   # no season guess
-    for season in _season_candidates():
-        attempts.append(dict(date_from_nullable=date_str, date_to_nullable=date_str, season_nullable=season))
-    whole_season_attempts = [dict(season_nullable=s, season_type_nullable="Regular Season")
-                             for s in _season_candidates()]
-
-    for kwargs in attempts:
-        df = _try_game_finder(kwargs)
-        if df is not None and not df.empty:
-            return df
-    for kwargs in whole_season_attempts:
-        df = _try_game_finder(kwargs)
-        if df is not None and not df.empty:
-            df = df[df["GAME_DATE"].astype(str).str[:10] == date_str]
-            if not df.empty:
-                return df
-    return None
-
-
-def _try_game_finder(kwargs: Dict):
-    try:
-        finder = leaguegamefinder.LeagueGameFinder(league_id_nullable=CFG.LEAGUE_ID, **kwargs)
-        return finder.get_data_frames()[0]
-    except Exception:
-        logger.exception("WNBA LeagueGameFinder attempt failed: %s", kwargs)
-        return None
+    games = []
+    for event in data.get("events", []):
+        comps = event.get("competitions") or []
+        if not comps:
+            continue
+        competitors = comps[0].get("competitors") or []
+        home = next((c for c in competitors if c.get("homeAway") == "home"), None)
+        away = next((c for c in competitors if c.get("homeAway") == "away"), None)
+        if not home or not away:
+            continue
+        try:
+            games.append({
+                "gameId": event.get("id"),
+                "game_date": event.get("date"),
+                "home_id": int(home["team"]["id"]),
+                "home_name": home["team"].get("displayName", "Unknown"),
+                "away_id": int(away["team"]["id"]),
+                "away_name": away["team"].get("displayName", "Unknown"),
+            })
+        except (KeyError, TypeError, ValueError):
+            logger.exception("WNBA scoreboard event had an unexpected shape: %s", event.get("id"))
+            continue
+    return games
 
 
 # --------------------------------------------------------------------------- rosters
 def get_team_roster(team_id: int) -> List[Dict[str, Any]]:
-    """A team's roster: [{id, name}, ...]. Empty list (not an exception) on any fetch failure,
-    so one bad team doesn't take down the whole slate build. Tries both season-string candidates
-    (see module docstring)."""
-    df = None
-    for season in _season_candidates():
-        try:
-            roster = commonteamroster.CommonTeamRoster(
-                team_id=team_id, season=season, league_id_nullable=CFG.LEAGUE_ID,
-            )
-            candidate = roster.get_data_frames()[0]
-        except Exception:
-            logger.exception("WNBA roster fetch failed for team_id=%s season=%s", team_id, season)
-            continue
-        if not candidate.empty:
-            df = candidate
-            break
-    if df is None:
+    """A team's roster: [{id, name}, ...]. ESPN groups the roster by position (`athletes` is a
+    list of {position, items: [...]} groups) — flattened here into one player list. Empty list
+    (not an exception) on any fetch failure, so one bad team doesn't take down the whole build."""
+    data = _get_json(f"{SITE_API}/teams/{team_id}/roster")
+    if not data:
         return []
     out = []
-    for _, r in df.iterrows():
-        pid = r.get("PLAYER_ID")
-        if pid is None:
-            continue
-        out.append({"id": int(pid), "name": r.get("PLAYER", "Unknown")})
+    for group in data.get("athletes", []):
+        for item in group.get("items", []):
+            pid = item.get("id")
+            if pid is None:
+                continue
+            try:
+                out.append({"id": int(pid), "name": item.get("displayName", "Unknown")})
+            except (TypeError, ValueError):
+                continue
     return out
 
 
 # --------------------------------------------------------------------------- recent form
+def _parse_gamelog_value(raw) -> float:
+    """ESPN's gamelog stats are strings. Combo fields report made-attempted ('12-24' for FG,
+    3PT) — we want the makes (left side) for the bootstrap model. Plain numeric fields (PTS, REB,
+    AST, MIN) pass through as-is. Anything unparseable becomes 0.0 — the safe default for a
+    missed/DNP game, since it gets filtered out downstream by the minutes bar anyway."""
+    if raw is None:
+        return 0.0
+    s = str(raw).strip()
+    if "-" in s and not s.startswith("-"):
+        s = s.split("-", 1)[0]
+    try:
+        return float(s)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def get_player_recent_games(player_id: int, last_n: int = CFG.RECENT_GAMES_N) -> List[Dict[str, float]]:
-    """Last N regular-season game logs for a player: [{pts, reb, ast, fg3m, min}, ...], most
-    recent first (PlayerGameLog is already ordered that way). Empty list on any failure. Tries
-    both season-string candidates (see module docstring)."""
-    df = None
-    for season in _season_candidates():
-        try:
-            log = playergamelog.PlayerGameLog(
-                player_id=player_id, season=season, league_id_nullable=CFG.LEAGUE_ID,
-            )
-            candidate = log.get_data_frames()[0]
-        except Exception:
-            logger.exception("WNBA game log fetch failed for player_id=%s season=%s", player_id, season)
-            continue
-        if not candidate.empty:
-            df = candidate
-            break
-    if df is None:
+    """Last N game logs for a player: [{pts, reb, ast, fg3m, min}, ...], most recent first
+    (ESPN's gamelog is already ordered that way). Empty list on any failure.
+
+    ESPN's gamelog response uses parallel arrays: `names` lists every column (meta fields like
+    date/opponent/result FIRST, then the actual stat columns), but each event's `stats` array only
+    holds the stat-column values — the meta fields are separate top-level keys on the event
+    instead. Aligning `names[-len(stats):]` against `stats` (from the right, not the left) handles
+    however many meta fields there are without hardcoding which specific ones."""
+    data = _get_json(f"{WEB_API}/athletes/{player_id}/gamelog")
+    if not data:
         return []
+    names = data.get("names") or []
+    events = data.get("events") or []
     out = []
-    for _, r in df.iterrows():
-        try:
-            out.append({
-                "pts": float(r.get("PTS", 0) or 0),
-                "reb": float(r.get("REB", 0) or 0),
-                "ast": float(r.get("AST", 0) or 0),
-                "fg3m": float(r.get("FG3M", 0) or 0),
-                "min": float(r.get("MIN", 0) or 0),
-            })
-        except (TypeError, ValueError):
+    for ev in events:
+        stats = ev.get("stats") or []
+        if not stats or not names:
             continue
+        stat_names = names[-len(stats):]
+        row = {n: _parse_gamelog_value(v) for n, v in zip(stat_names, stats)}
+        out.append({
+            "pts": row.get("points", 0.0),
+            "reb": row.get("rebounds", 0.0),
+            "ast": row.get("assists", 0.0),
+            "fg3m": row.get("threePointsMade", 0.0),
+            "min": row.get("minutes", 0.0),
+        })
     return out[:last_n]
 
 

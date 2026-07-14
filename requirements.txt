@@ -13,5 +13,4 @@ plotly==5.24.1           # Track Record / Command Center charts
 requests==2.32.3
 pytz==2024.2
 pybaseball==2.2.7
-nba_api==1.11.4          # WNBA data layer (wnba_engine.py) — league_id='10'
 psycopg2-binary==2.9.9

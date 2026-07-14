@@ -36,20 +36,35 @@ second real, priced sport — not a placeholder.
   a safe proxy for "this page supports the active sport" the moment WNBA got real markets too.
 
 ### WNBA — the second live sport (Core 4 markets: Points, Rebounds, Assists, Threes Made)
-- **`config_wnba.py`** — 15-team registry (2026 season, incl. Portland Fire / Toronto Tempo
-  expansion) with real WNBA.com team IDs, verified live on 2026-07-13 (not from training data).
-- **`wnba_engine.py`** — data layer on `nba_api` (`league_id='10'`), free/no-key, same pattern as
-  MLB Stats API / `nfl_data_py`. Uses `LeagueGameFinder` / `PlayerGameLog` / `CommonTeamRoster` —
-  nba_api's oldest, most stable endpoints, chosen deliberately over the newer `ScoreboardV3` to
-  minimize field-name risk, since **live calls could not be tested from the build sandbox**
-  (stats.wnba.com is outside its network allowlist). Verify against a real slate on first deploy.
-- **`wnba_projections.py`** — empirical bootstrap model: resamples each player's last 10 games
-  (`config_wnba.RECENT_GAMES_N`) with replacement to build a probability distribution per stat.
-  Documented v1 limitation: no opponent/pace adjustment yet, and a short game log undersamples tail
-  outcomes. Reuses the genuinely sport-agnostic math from `projections.py` (`prob_over`,
-  `prob_for_side`, `normalize_name`, `format_et`) rather than duplicating it.
+- **`config_wnba.py`** — 15-team reference list (2026 season, incl. Portland Fire / Toronto Tempo
+  expansion), verified live on 2026-07-13. Reference data only — no longer used for team-ID
+  cross-referencing (see below).
+- **`wnba_engine.py`** — data layer on **ESPN's public API** (`site.api.espn.com` /
+  `site.web.api.espn.com`), NOT `nba_api`. **Data source was switched mid-Stage-2** after a live
+  deploy hit `requests.exceptions.ReadTimeout: HTTPSConnectionPool(host='stats.nba.com', ...)` —
+  confirmed via `nba_api`'s own GitHub issue history (#182, #320, #498, going back to 2020) as a
+  long-standing, structural block on cloud-hosting IP ranges (AWS/Heroku/GCP/Streamlit Cloud), not
+  a parameter bug. No amount of retries or header-tuning fixes an IP-level block, so rather than
+  patch around it, the engine was rewritten against ESPN's endpoint family instead — same
+  "unofficial API" risk category as nba_api, but with no comparable cloud-blocking pattern in its
+  own issue history. Endpoints and field names came from github.com/pseudo-r/Public-ESPN-API's
+  documented schemas (WNBA gamelog explicitly listed as verified working), not live testing — same
+  sandbox network limitation as before. The rewrite only touched the fetch layer; `avg_minutes`,
+  `player_row`, and `build_slate` (the pure orchestration logic) are untouched, and all their
+  existing tests passed unchanged — the payoff of keeping those two layers separate. Simpler than
+  the nba_api version in two ways: no team-ID cross-reference table needed (ESPN's scoreboard
+  response carries team IDs + names inline) and no WNBA season-string guessing (gamelog defaults
+  to the current season server-side).
+- **`wnba_projections.py`** — unchanged by the data-source switch (operates only on `rows`/`meta`
+  from `build_slate`, doesn't know or care which API produced them). Empirical bootstrap model:
+  resamples each player's last 10 games (`config_wnba.RECENT_GAMES_N`) with replacement to build a
+  probability distribution per stat. Documented v1 limitation: no opponent/pace adjustment yet.
+  Reuses the genuinely sport-agnostic math from `projections.py` (`prob_over`, `prob_for_side`,
+  `normalize_name`, `format_et`) rather than duplicating it.
 - Registry: `sports.py`'s WNBA entry is `enabled=True` with real `markets`/`market_map`. WNBA
   player props confirmed on the free tier of the-odds-api.com (not gated behind a paid plan).
+- `requirements.txt`: `nba_api` removed (no longer a dependency). No new dependency needed — the
+  ESPN engine only uses `requests`, already required elsewhere in the platform.
 - Media Room, Podcast Studio, Retrospective, Best Bets, Command Center are **not** WNBA-aware yet —
   explicitly gated to MLB-only via `require_sport`, so picking WNBA shows a clear "not built for
   this page yet" message instead of silently running MLB content under a WNBA label.
@@ -80,12 +95,10 @@ second real, priced sport — not a placeholder.
   self-migrates via `ADD COLUMN IF NOT EXISTS` — verify on first deploy).
 - Discord/public app's own Settings → Secrets needs `AUDIENCE = "public"` plus the same DB/API
   secrets as the owner app.
-- **First-deploy WNBA checklist:** confirmed via screenshot on 2026-07-13 that Edge Board showed
-  "No projectable props" for WNBA despite real games that night (LA Sparks @ Atlanta Dream,
-  Lynx vs Mercury) — a live-only bug, since it couldn't be caught from the build sandbox.
-  `wnba_engine.py` now tries multiple strategies for both suspected causes (WNBA season-string
-  format, and `LeagueGameFinder`'s documented date-filter flakiness — github.com/swar/nba_api/
-  issues/95) before giving up. If Edge Board is STILL empty for a real WNBA slate after this fix,
-  the fallback chain itself needs a look — check Streamlit Cloud's logs for
-  `WNBA LeagueGameFinder attempt failed` / `WNBA game log fetch failed` entries, which show
-  exactly which strategies were tried and why each failed.
+- **First-deploy WNBA checklist:** confirmed via screenshot on 2026-07-13 that the `nba_api`-based
+  build hit a real production `ReadTimeout` against `stats.nba.com` — a known cloud-IP-blocking
+  issue with that data source, not fixable via retries (see WNBA section above). `wnba_engine.py`
+  was rewritten against ESPN's public API instead, from documented response schemas rather than
+  live testing (same sandbox limitation as before). Confirm a real WNBA slate loads on Edge Board
+  without errors. If it's still empty, check Streamlit Cloud's logs for `WNBA ESPN API request
+  failed` entries — every fetch failure is logged with the exact URL and params that failed.
