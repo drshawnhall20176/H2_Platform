@@ -47,8 +47,9 @@ def run():
     # Record, Media Room, Podcast, Retrospective) stay visible for every sport and handle "engine
     # not wired yet" gracefully inside the page itself.
     sport_only_leads = {
-        "1": "MLB", "2": "MLB", "10": "MLB",   # Pitching Lab, Dinger Engine, Matchup Lab
+        "1": "MLB", "2": "MLB", "10": "MLB",   # Pitching Lab, Dinger Engine, Matchup Lab (MLB)
         "11": "WNBA",                          # Hot Hand Engine (opponent-adjusted leaderboard)
+        "12": "WNBA",                          # Matchup Lab (WNBA) — same slot as page 10, different sport
     }
 
     # Internal tools kept off the Discord/public build — matched by TITLE (not page number) so a
@@ -71,6 +72,7 @@ def run():
         "9": ("Track Record",   "📊", "track_record"),
         "10": ("Matchup Lab",   "🔬", "matchup_lab"),
         "11": ("Hot Hand Engine", "🔥", "hot_hand_engine"),
+        "12": ("Matchup Lab",   "🔬", "matchup_lab"),   # WNBA version — same slot as page 10
     }
 
     def lead(name: str) -> str:

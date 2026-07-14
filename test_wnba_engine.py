@@ -97,8 +97,10 @@ def test_build_slate_assembles_rows_from_mocked_fetches(monkeypatch):
     home_row = next(r for r in rows if r["Player"] == "Home Starter")
     assert home_row["Team"] == "Atlanta Dream" and home_row["Opp"] == "Chicago Sky"
     assert home_row["_opp_id"] == 1611661329   # Chicago Sky's id -- needed for Hot Hand Engine's defense lookup
+    assert home_row["_team_id"] == 1611661330  # Atlanta Dream's own id -- needed for Matchup Lab's H2H lookup
     away_row = next(r for r in rows if r["Player"] == "Away Starter")
     assert away_row["_opp_id"] == 1611661330
+    assert away_row["_team_id"] == 1611661329
     print("✓ build_slate wires schedule -> rosters -> game logs -> filtered rows correctly")
 
 
@@ -463,7 +465,7 @@ def test_get_game_team_totals_empty_on_fetch_failure(monkeypatch):
 def test_get_team_recent_allowed_stats_averages_opponent_totals(monkeypatch):
     E._response_cache.clear()
     monkeypatch.setattr(E, "get_team_recent_game_ids",
-                        lambda team_id, before_date, n=E.CFG.RECENT_GAMES_N: [
+                        lambda team_id, before_date, n=E.CFG.RECENT_GAMES_N, days_back=45: [
                             {"gameId": "g1", "date": "2026-07-12T00:00Z", "opp_id": 19, "opp_name": "Chicago Sky"},
                             {"gameId": "g2", "date": "2026-07-10T00:00Z", "opp_id": 16, "opp_name": "Washington Mystics"},
                         ])
@@ -484,9 +486,61 @@ def test_get_team_recent_allowed_stats_averages_opponent_totals(monkeypatch):
 
 def test_get_team_recent_allowed_stats_empty_when_no_recent_games(monkeypatch):
     E._response_cache.clear()
-    monkeypatch.setattr(E, "get_team_recent_game_ids", lambda team_id, before_date, n=10: [])
+    monkeypatch.setattr(E, "get_team_recent_game_ids",
+                        lambda team_id, before_date, n=10, days_back=45: [])
     allowed = E.get_team_recent_allowed_stats(20, "2026-07-14")
     assert allowed == {"pts": 0.0, "reb": 0.0, "ast": 0.0, "fg3m": 0.0}
+
+
+# ----------------------------------------------------------------- get_player_history_vs_opponent
+def test_get_player_history_vs_opponent_filters_to_that_opponent_only(monkeypatch):
+    E._response_cache.clear()
+    # opp_id here is a STRING, exactly like the real JSON shape from get_team_recent_game_ids —
+    # this is the exact type mismatch that was caught and fixed (comparing against an int param).
+    games_info = [
+        {"gameId": "g1", "date": "2026-06-01T00:00Z", "opp_id": "19", "opp_name": "Chicago Sky"},
+        {"gameId": "g2", "date": "2026-05-15T00:00Z", "opp_id": "16", "opp_name": "Washington Mystics"},
+        {"gameId": "g3", "date": "2026-05-01T00:00Z", "opp_id": "19", "opp_name": "Chicago Sky"},
+    ]
+    monkeypatch.setattr(E, "get_team_recent_game_ids",
+                        lambda team_id, before_date, n=82, days_back=45: games_info)
+    boxscores = {
+        "g1": {111: {"pts": 22.0, "reb": 5.0, "ast": 3.0, "fg3m": 2.0, "min": 30.0}},
+        "g3": {111: {"pts": 18.0, "reb": 6.0, "ast": 4.0, "fg3m": 1.0, "min": 28.0}},
+    }
+    monkeypatch.setattr(E, "get_game_boxscore", lambda gid: boxscores.get(gid, {}))
+
+    history = E.get_player_history_vs_opponent(111, team_id=20, opp_id=19, before_date="2026-07-14")
+    assert len(history) == 2   # only g1 and g3 (vs Chicago Sky, opp_id 19) — not g2 (Mystics)
+    assert history[0]["pts"] == 22.0 and history[0]["opp"] == "Chicago Sky"
+    assert history[1]["pts"] == 18.0
+    print("✓ get_player_history_vs_opponent correctly filters to one opponent, handling the "
+          "string-vs-int opp_id type mismatch")
+
+
+def test_get_player_history_vs_opponent_empty_when_teams_havent_met(monkeypatch):
+    E._response_cache.clear()
+    games_info = [{"gameId": "g1", "date": "2026-06-01T00:00Z", "opp_id": "16", "opp_name": "Washington Mystics"}]
+    monkeypatch.setattr(E, "get_team_recent_game_ids",
+                        lambda team_id, before_date, n=82, days_back=45: games_info)
+    history = E.get_player_history_vs_opponent(111, team_id=20, opp_id=19, before_date="2026-07-14")
+    assert history == []
+
+
+def test_get_player_history_vs_opponent_days_back_spans_season_start(monkeypatch):
+    captured = {}
+
+    def fake_get_team_recent_game_ids(team_id, before_date, n=82, days_back=45):
+        captured["days_back"] = days_back
+        return []
+
+    monkeypatch.setattr(E, "get_team_recent_game_ids", fake_get_team_recent_game_ids)
+    E.get_player_history_vs_opponent(111, team_id=20, opp_id=19, before_date="2026-07-14")
+    # from SEASON_START (2026-04-01) to 2026-07-14 is ~104 days -> comfortably wider than the
+    # 45-day "recent form" default, confirming this really does scan back to the season start.
+    assert captured["days_back"] > 90
+    print(f"✓ get_player_history_vs_opponent scans back to season start "
+          f"(days_back={captured['days_back']}), not just the 45-day recent-form window")
 
 
 if __name__ == "__main__":

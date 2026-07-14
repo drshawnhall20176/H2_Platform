@@ -283,6 +283,63 @@ def test_build_hot_hand_board_covers_all_players_and_markets():
     print("✓ build_hot_hand_board covers every player across every market")
 
 
+# ----------------------------------------------------------------- build_matchup_profile
+def test_build_matchup_profile_covers_all_markets():
+    row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
+    profile = WP.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={})
+    assert {p["Market"] for p in profile} == {"Points", "Rebounds", "Assists", "Threes Made"}
+    print("✓ build_matchup_profile covers all 4 markets")
+
+
+def test_build_matchup_profile_honest_empty_h2h():
+    row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
+    profile = WP.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={})
+    pts = next(p for p in profile if p["Market"] == "Points")
+    assert pts["H2H Games"] == 0
+    assert pts["H2H Avg"] is None   # never fabricated when teams haven't met
+    print("✓ build_matchup_profile honestly reports zero H2H games rather than guessing")
+
+
+def test_build_matchup_profile_computes_h2h_average():
+    row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
+    h2h = [{"pts": 25.0, "reb": 4.0, "ast": 2.0, "fg3m": 3.0},
+          {"pts": 19.0, "reb": 6.0, "ast": 4.0, "fg3m": 1.0}]
+    profile = WP.build_matchup_profile(row, h2h_log=h2h, opp_recent_allowed={}, opp_season_allowed={})
+    pts = next(p for p in profile if p["Market"] == "Points")
+    assert pts["H2H Games"] == 2
+    assert pts["H2H Avg"] == 22.0
+    print("✓ build_matchup_profile correctly averages head-to-head games")
+
+
+def test_build_matchup_profile_tags_defense_trend_correctly():
+    row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
+    # opponent has been allowing MORE lately than their season norm -> looser defense
+    looser = WP.build_matchup_profile(row, h2h_log=[],
+                                      opp_recent_allowed={"pts": 90.0},
+                                      opp_season_allowed={"pts": 80.0})
+    pts = next(p for p in looser if p["Market"] == "Points")
+    assert pts["Defense Trend"] > 1.08
+    assert pts["Trend Tag"] == "📈 Looser lately"
+
+    # opponent has tightened up recently -> lower trend
+    tighter = WP.build_matchup_profile(row, h2h_log=[],
+                                       opp_recent_allowed={"pts": 70.0},
+                                       opp_season_allowed={"pts": 80.0})
+    pts2 = next(p for p in tighter if p["Market"] == "Points")
+    assert pts2["Defense Trend"] < 0.92
+    assert pts2["Trend Tag"] == "📉 Tighter lately"
+    print("✓ build_matchup_profile correctly tags looser/tighter defensive trends")
+
+
+def test_build_matchup_profile_neutral_when_no_season_allowed_data():
+    row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
+    profile = WP.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={"pts": 90.0},
+                                       opp_season_allowed={})   # no season data -> can't compute a trend
+    pts = next(p for p in profile if p["Market"] == "Points")
+    assert pts["Defense Trend"] == 1.0
+    assert pts["Trend Tag"] == "➡️ Steady"
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

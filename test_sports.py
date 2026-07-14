@@ -127,16 +127,16 @@ def test_require_sport_allows_matching_sport():
 
 
 def test_sport_only_page_visibility_matches_expected_config():
-    # Regression guard: Pitching Lab/Dinger Engine/Matchup Lab must stay MLB-only, and Hot Hand
-    # Engine must stay WNBA-only. A future page renumbering could silently break this if nothing
-    # locks in which lead numbers map to which sport.
+    # Regression guard: Pitching Lab/Dinger Engine/Matchup Lab(MLB) must stay MLB-only, and Hot
+    # Hand Engine/Matchup Lab(WNBA) must stay WNBA-only. A future page renumbering could silently
+    # break this if nothing locks in which lead numbers map to which sport.
     src = (_HERE / "streamlit_app.py").read_text()
     m = re.search(r"sport_only_leads = \{([^}]*)\}", src, re.DOTALL)
     assert m, "streamlit_app.py must define sport_only_leads"
     pairs = dict(re.findall(r'"(\d+)":\s*"(\w+)"', m.group(1)))
-    assert pairs == {"1": "MLB", "2": "MLB", "10": "MLB", "11": "WNBA"}, pairs
-    print("✓ sport_only_leads matches expected config (Pitching Lab/Dinger Engine/Matchup Lab -> "
-          "MLB, Hot Hand Engine -> WNBA)")
+    assert pairs == {"1": "MLB", "2": "MLB", "10": "MLB", "11": "WNBA", "12": "WNBA"}, pairs
+    print("✓ sport_only_leads matches expected config (Pitching Lab/Dinger Engine/Matchup Lab(MLB) "
+          "-> MLB, Hot Hand Engine/Matchup Lab(WNBA) -> WNBA)")
 
 
 if __name__ == "__main__":

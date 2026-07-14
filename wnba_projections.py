@@ -283,3 +283,48 @@ def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[int, Dict[str, floa
 
     out.sort(key=lambda x: -x["Matchup Score"])
     return out
+
+
+# --------------------------------------------------------------------------- Matchup Lab
+def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_recent_allowed: Dict[str, float],
+                          opp_season_allowed: Dict[str, float]) -> List[Dict]:
+    """One row per market (Points/Rebounds/Assists/Threes Made) for Matchup Lab's deep-dive on a
+    single player vs their tonight's opponent, combining three real signals:
+      - Recent Avg: the player's own last-10-game average (the same number the model prices off).
+      - H2H Avg: how this exact player has done against THIS SPECIFIC opponent this season, if
+        they've met (WNBA teams typically play each other 2-4 times a season — h2h_log can
+        legitimately be empty, which is reported honestly, not padded with a guess).
+      - Defense Trend: this opponent's recent (last 10) allowed rate vs. their own season-long
+        allowed rate — are they trending looser or tighter defensively lately, independent of how
+        they've done over the full season.
+    Pure synthesis, no network calls — the caller (the page) fetches h2h_log / opp_recent_allowed
+    / opp_season_allowed via wnba_engine and passes them in already-fetched."""
+    out: List[Dict] = []
+    for _mkey, (col, disp, _line) in _MARKET_SPEC.items():
+        stat_key = _STAT_KEY[col]
+        recent_avg = row.get(col, 0.0)
+
+        h2h_values = [g.get(stat_key, 0.0) for g in h2h_log]
+        h2h_avg = (sum(h2h_values) / len(h2h_values)) if h2h_values else None
+
+        recent_allowed = opp_recent_allowed.get(stat_key, 0.0)
+        season_allowed = opp_season_allowed.get(stat_key, 0.0)
+        trend = (recent_allowed / season_allowed) if season_allowed > 0 else 1.0
+        if trend >= 1.08:
+            trend_tag = "📈 Looser lately"
+        elif trend <= 0.92:
+            trend_tag = "📉 Tighter lately"
+        else:
+            trend_tag = "➡️ Steady"
+
+        out.append({
+            "Market": disp,
+            "Recent Avg": recent_avg,
+            "H2H Games": len(h2h_values),
+            "H2H Avg": round(h2h_avg, 1) if h2h_avg is not None else None,
+            "Opp Recent Allowed": round(recent_allowed, 1) if recent_allowed else None,
+            "Opp Season Allowed": round(season_allowed, 1) if season_allowed else None,
+            "Defense Trend": round(trend, 2),
+            "Trend Tag": trend_tag,
+        })
+    return out

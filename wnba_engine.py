@@ -184,14 +184,19 @@ def _parse_stat_value(raw) -> float:
 
 
 def get_team_recent_game_ids(team_id: int, before_date: str,
-                             n: int = CFG.RECENT_GAMES_N) -> List[Dict[str, Any]]:
+                             n: int = CFG.RECENT_GAMES_N, days_back: int = 45) -> List[Dict[str, Any]]:
     """A team's last n COMPLETED games STRICTLY BEFORE before_date (YYYY-MM-DD), most recent
     first: [{"gameId", "date", "opp_id", "opp_name"}, ...]. Found by scanning the scoreboard
-    across a 45-day trailing window and filtering to games where this team appears as a
-    competitor — reuses get_schedule's already-verified scoreboard parsing rather than the
-    separate, unverified teams/{id}/schedule endpoint. 45 days comfortably covers n=10 games at
-    the WNBA's ~2-4 games/week pace. Opponent name/id are captured here (not looked up
+    across a trailing window and filtering to games where this team appears as a competitor —
+    reuses get_schedule's already-verified scoreboard parsing rather than the separate,
+    unverified teams/{id}/schedule endpoint. Opponent name/id are captured here (not looked up
     separately) since the scoreboard response already has them for free.
+
+    days_back defaults to 45 (comfortably covers n=10 games at the WNBA's ~2-4 games/week pace —
+    the "recent form" use case build_slate/get_player_recent_games rely on). Matchup Lab's
+    head-to-head lookup calls this with a much wider days_back (~200, back to the season start)
+    and a large n, then filters the result to one specific opponent — reusing this exact function
+    rather than a second implementation of the same scoreboard-scanning logic.
 
     "Strictly before" (not "at or before") matters beyond tonight's live board: called for
     tonight's date, the game being projected is still STATUS_SCHEDULED, so "completed" alone
@@ -200,10 +205,13 @@ def get_team_recent_game_ids(team_id: int, before_date: str,
     and without an explicit date cutoff they'd leak into their own pre-game sample (a real
     lookahead-bias bug, not just a hypothetical one)."""
     end = datetime.strptime(before_date, "%Y-%m-%d")
-    start = end - timedelta(days=45)
+    start = end - timedelta(days=days_back)
     date_range = f"{start.strftime('%Y%m%d')}-{end.strftime('%Y%m%d')}"
-    data = _get_json_cached(f"{SITE_API}/scoreboard", params={"dates": date_range, "limit": 200})
-    diag_key = (team_id, before_date)
+    # limit=500 (not the original 200): a full-season window (days_back~200) can hold ~300+ league
+    # games across all 15 teams, and a truncated result here would silently under-count a
+    # head-to-head history rather than error — better to ask for enough headroom than guess wrong.
+    data = _get_json_cached(f"{SITE_API}/scoreboard", params={"dates": date_range, "limit": 500})
+    diag_key = (team_id, before_date, days_back)
     if not data:
         if diag_key not in _diag_seen:
             _diag(f"get_team_recent_game_ids(team={team_id}): trailing-window scoreboard fetch returned nothing")
@@ -242,8 +250,8 @@ def get_team_recent_game_ids(team_id: int, before_date: str,
     found.sort(key=lambda g: g["date"], reverse=True)
     result = found[:n]
     if diag_key not in _diag_seen:
-        _diag(f"get_team_recent_game_ids(team={team_id}, before={before_date}): "
-             f"{len(result)} completed game(s) found in trailing 45-day window "
+        _diag(f"get_team_recent_game_ids(team={team_id}, before={before_date}, days_back={days_back}): "
+             f"{len(result)} completed game(s) found "
              f"({len(data.get('events', []))} raw events scanned)")
         _diag_seen.add(diag_key)
     return result
@@ -373,12 +381,17 @@ def get_game_team_totals(game_id: str) -> Dict[int, Dict[str, float]]:
 
 
 def get_team_recent_allowed_stats(team_id: int, before_date: str,
-                                  n: int = CFG.RECENT_GAMES_N) -> Dict[str, float]:
+                                  n: int = CFG.RECENT_GAMES_N, days_back: int = 45) -> Dict[str, float]:
     """Average PTS/REB/AST/FG3M this team has ALLOWED over their last n completed games —
     i.e., their opponents' team totals in those same games. Built entirely from box score data
     already fetched for build_slate; costs zero new network calls when Hot Hand Engine runs
-    alongside a normal slate build (get_game_team_totals shares get_game_boxscore's cache)."""
-    games = get_team_recent_game_ids(team_id, before_date, n)
+    alongside a normal slate build (get_game_team_totals shares get_game_boxscore's cache).
+
+    days_back defaults to 45 (Hot Hand Engine's "recent form" use). Matchup Lab calls this twice
+    per opponent — once with the default (recent) and once with a season-wide window — to show
+    whether a team's defense is trending better or worse than their own season norm, not just a
+    single snapshot number."""
+    games = get_team_recent_game_ids(team_id, before_date, n, days_back=days_back)
     totals = {"pts": [], "reb": [], "ast": [], "fg3m": []}
     for g in games:
         opp_id = g.get("opp_id")
@@ -431,6 +444,46 @@ def get_player_recent_games(player_id: int, last_n: int = CFG.RECENT_GAMES_N,
     return out[:last_n]
 
 
+# WNBA regular season start (2026-04-03, confirmed live from ESPN) plus a small buffer. Used only
+# to bound the head-to-head scan so it doesn't request an unnecessarily huge date range once the
+# season is well underway — get_team_recent_game_ids clips date_from at "today - days_back"
+# regardless, this just keeps days_back reasonable rather than guessing a huge fixed number.
+SEASON_START = "2026-04-01"
+
+
+def get_player_history_vs_opponent(player_id: int, team_id: int, opp_id: int, before_date: str,
+                                   max_games: int = 20) -> List[Dict[str, float]]:
+    """This player's stats in every game THIS SEASON their team has played against one specific
+    opponent, most recent first: [{pts, reb, ast, fg3m, min, opp, date}, ...]. Genuinely
+    different from get_player_recent_games (which is "last N games, any opponent" — the model's
+    recency signal); this is "every game vs THIS opponent, however long ago" — the head-to-head
+    signal Matchup Lab is built around. Reuses get_team_recent_game_ids with a season-wide
+    days_back rather than a second scoreboard-scanning implementation; empty list (not an error)
+    if the two teams haven't played yet this season, which is common and expected — WNBA teams
+    typically meet only 2-4 times across a full season."""
+    try:
+        days_back = max((datetime.strptime(before_date, "%Y-%m-%d")
+                        - datetime.strptime(SEASON_START, "%Y-%m-%d")).days + 1, 1)
+    except ValueError:
+        days_back = 200
+    games = get_team_recent_game_ids(team_id, before_date, n=82, days_back=days_back)
+    matchups = []
+    for g in games:
+        try:
+            gid_opp = int(g.get("opp_id"))
+        except (TypeError, ValueError):
+            continue
+        if gid_opp == opp_id:
+            matchups.append(g)
+    out = []
+    for g in matchups[:max_games]:
+        box = get_game_boxscore(g["gameId"])
+        line = box.get(player_id)
+        if line:
+            out.append({**line, "opp": g.get("opp_name"), "date": g.get("date")})
+    return out
+
+
 # --------------------------------------------------------------------------- pure logic (no network)
 def avg_minutes(game_log: List[Dict[str, float]]) -> float:
     return (sum(g["min"] for g in game_log) / len(game_log)) if game_log else 0.0
@@ -439,7 +492,7 @@ def avg_minutes(game_log: List[Dict[str, float]]) -> float:
 def player_row(player: Dict, team_name: str, opp_name: str, game_label: str,
                game_date: Optional[str], game_log: List[Dict[str, float]],
                min_avg_minutes: float = CFG.MIN_AVG_MINUTES,
-               opp_id: Optional[int] = None) -> Optional[Dict]:
+               opp_id: Optional[int] = None, team_id: Optional[int] = None) -> Optional[Dict]:
     """Flat row for one player on the slate (mirrors mlb_engine._hitter_row: public display
     columns + private '_'-prefixed fields consumed by wnba_projections.py). None if the player
     doesn't clear the rotation-minutes bar — filters deep-bench noise off the slate, the same
@@ -462,7 +515,8 @@ def player_row(player: Dict, team_name: str, opp_name: str, game_label: str,
         "_pid": player["id"],
         "_game_log": game_log,
         "_game_date": game_date,
-        "_opp_id": opp_id,   # for opponent-defense lookups (Hot Hand Engine)
+        "_opp_id": opp_id,     # for opponent-defense lookups (Hot Hand Engine, Matchup Lab)
+        "_team_id": team_id,   # this player's own team — needed for the H2H lookup (Matchup Lab)
     }
 
 
@@ -500,7 +554,8 @@ def build_slate(date_str: str, min_avg_minutes: float = CFG.MIN_AVG_MINUTES,
         player, team_name, opp_name, label, game_date, team_id, opp_id = item
         log = get_player_recent_games(player["id"], last_n_games, team_id=team_id,
                                       before_date=date_str)
-        return player_row(player, team_name, opp_name, label, game_date, log, min_avg_minutes, opp_id)
+        return player_row(player, team_name, opp_name, label, game_date, log, min_avg_minutes,
+                          opp_id, team_id)
 
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         rows = [r for r in ex.map(fetch_one, tasks) if r is not None]

@@ -4,7 +4,7 @@
 one sport-selector foundation). MLB runs exactly as the standalone did originally; WNBA is now a
 second real, priced sport — not a placeholder.
 
-## What's in this checkpoint (all tested — 196/196 tests green)
+## What's in this checkpoint (all tested — 204/204 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -217,6 +217,41 @@ convention. Also widened the workflow's cron schedule — it only ran during MLB
 window, which would have missed WNBA day games (an 11am ET tip-off showed up earlier this season)
 even with the code fixed. Locked in with `test_main_groups_open_bets_by_sport` and
 `test_capture_for_sport_uses_that_sports_own_odds_key_and_market_map`.
+
+### Matchup Lab — WNBA player-vs-opponent deep-dive (2026-07-14)
+New WNBA-only page (`views/12_Matchup_Lab.py`), the second half of the Dinger Engine/Matchup Lab
+conceptualization — built deliberately after Hot Hand Engine (not in parallel), since it reuses
+Hot Hand Engine's opponent-defense foundation rather than re-deriving it.
+- **Three real signals, shown separately, not blended into one number** (unlike Hot Hand Engine's
+  single Matchup Score) — deliberate: this page is meant to let you weigh the signals yourself.
+  1. Recent form — the player's own last-10 average (same number Best Bets/Edge Board price off).
+  2. Head-to-head history — this exact player's stats in every game their team has played against
+     tonight's SPECIFIC opponent this season. Genuinely new capability, not reused from Hot Hand
+     Engine: `get_team_recent_game_ids` gained a `days_back` parameter (defaulting to 45,
+     unchanged for every existing caller) so the same tested scoreboard-scanning logic can also
+     run a season-wide scan instead of a second implementation. `get_player_history_vs_opponent`
+     filters that scan to one specific opponent. Honestly empty (not guessed) when two teams
+     haven't met yet — normal, since WNBA teams typically play each other only 2-4 times a season.
+  3. Opponent defense trend — `get_team_recent_allowed_stats` (Hot Hand Engine's function) called
+     twice with different `days_back` — last-10 vs. season-wide — to show whether a defense is
+     trending looser or tighter than their own established norm, not just a single snapshot.
+- **A real type-mismatch bug caught before shipping, not after:** ESPN's JSON gives team IDs as
+  strings; `get_team_recent_game_ids`'s `opp_id` field was never converted, so a naive `==`
+  comparison against a properly-typed `int` opp_id parameter would have silently matched zero
+  games, every time. Caught by writing a test with the EXACT string-shaped fixture the real data
+  actually has, not a conveniently-already-int test fixture — `test_get_player_history_vs_opponent_
+  filters_to_that_opponent_only` locks in the fix.
+- **`player_row`/`build_slate` gained a `_team_id` field** (the player's own team, not just
+  `_opp_id`) — needed to call the H2H lookup at all, since a row previously only knew the
+  opponent's ID, not its own.
+- Occupies the same nav slot as MLB's Matchup Lab (same title/icon/url_path) rather than a
+  differently-named page — consistent with how every other shared page (Best Bets, Command
+  Center, etc.) doesn't rename itself per sport; they're mutually exclusive via `sport_only_leads`
+  so there's no actual collision, just a deliberately consistent UX slot.
+- Full pipeline (build_slate → H2H lookup → opponent trend → build_matchup_profile) verified
+  end-to-end with synthetic data before shipping, including a genuine head-to-head match
+  correctly filtered from other non-matching opponents — the same integration-test discipline
+  that caught the `curate_selections` bug earlier in Stage 3.
 
 ### Theme-proof gradients
 - **`styling.py`** — per-cell text contrast (dark on pale, white on deep), benchmark-anchored
