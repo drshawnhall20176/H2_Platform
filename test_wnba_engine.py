@@ -278,56 +278,61 @@ def test_get_team_recent_game_ids_empty_on_fetch_failure(monkeypatch):
 
 
 # ----------------------------------------------------------------- get_game_boxscore
-def test_get_game_boxscore_uses_web_subdomain(monkeypatch):
-    # Regression guard: site.api.espn.com's summary response for real WNBA games came back with
-    # team-level stats only (no 'players' key at all, confirmed via a live diagnostic dump).
-    # site.web.api.espn.com is the confirmed-working host for the full per-player boxscore.
+def test_get_game_boxscore_uses_cdn_endpoint(monkeypatch):
+    # Regression guard: both site.api.espn.com AND site.web.api.espn.com's summary responses came
+    # back with team-level stats only for real WNBA games (no 'players' key anywhere, confirmed
+    # via two separate live diagnostic dumps). cdn.espn.com is the confirmed-working source —
+    # verified live: gamepackageJSON.boxscore.players is a real sibling array to boxscore.teams,
+    # each entry with a genuine 'statistics' key.
     captured = {}
 
     def fake_get_json(url, params=None):
         captured["url"] = url
-        return {"boxscore": {"teams": []}}
+        captured["params"] = params
+        return {"gamepackageJSON": {"boxscore": {"teams": [], "players": []}}}
 
     monkeypatch.setattr(E, "_get_json", fake_get_json)
     E.get_game_boxscore("g1")
-    assert captured["url"].startswith("https://site.web.api.espn.com/")
-    print("✓ get_game_boxscore hits site.web.api.espn.com, not site.api.espn.com")
+    assert captured["url"] == "https://cdn.espn.com/core/wnba/boxscore"
+    assert captured["params"] == {"xhr": "1", "gameId": "g1"}
+    print("✓ get_game_boxscore hits cdn.espn.com with xhr=1, not the site API summary endpoint")
 
 
 def test_get_game_boxscore_extracts_every_player_from_both_teams(monkeypatch):
     E._response_cache.clear()
-    fake_summary = {
-        "boxscore": {
-            "teams": [
-                {"team": {"id": "20"}, "players": [{
-                    "statistics": [{
+    # CDN shape, confirmed live: boxscore.players is a SIBLING to boxscore.teams (one entry per
+    # team), not nested inside each team block the way the "site" API family's docs assumed.
+    fake_cdn_response = {
+        "gamepackageJSON": {
+            "boxscore": {
+                "teams": [{"team": {"id": "20"}}, {"team": {"id": "19"}}],
+                "players": [
+                    {"team": {"id": "20"}, "statistics": [{
                         "names": ["MIN", "FG", "3PT", "FT", "REB", "AST", "STL", "BLK", "TO", "PTS"],
                         "athletes": [
                             {"athlete": {"id": "111"}, "didNotPlay": False,
                              "stats": ["32", "8-15", "3-6", "4-4", "6", "5", "1", "0", "2", "23"]},
                             {"athlete": {"id": "112"}, "didNotPlay": True, "stats": []},
                         ],
-                    }],
-                }]},
-                {"team": {"id": "19"}, "players": [{
-                    "statistics": [{
+                    }]},
+                    {"team": {"id": "19"}, "statistics": [{
                         "names": ["MIN", "FG", "3PT", "FT", "REB", "AST", "STL", "BLK", "TO", "PTS"],
                         "athletes": [
                             {"athlete": {"id": "222"}, "didNotPlay": False,
                              "stats": ["28", "5-12", "1-4", "2-2", "9", "3", "0", "1", "3", "13"]},
                         ],
-                    }],
-                }]},
-            ]
+                    }]},
+                ],
+            }
         }
     }
-    monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_summary)
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_cdn_response)
 
     box = E.get_game_boxscore("g1")
     assert set(box.keys()) == {111, 222}   # 112 excluded (didNotPlay)
     assert box[111] == {"pts": 23.0, "reb": 6.0, "ast": 5.0, "fg3m": 3.0, "min": 32.0}
     assert box[222]["pts"] == 13.0 and box[222]["min"] == 28.0
-    print("✓ get_game_boxscore extracts both teams' players in one call, skips DNPs")
+    print("✓ get_game_boxscore extracts both teams' players from the CDN's sibling players array, skips DNPs")
 
 
 def test_get_game_boxscore_empty_on_fetch_failure(monkeypatch):

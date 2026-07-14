@@ -45,12 +45,6 @@ import config_wnba as CFG
 logger = logging.getLogger(__name__)
 
 SITE_API = "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba"
-# The summary/boxscore call specifically needs the "web." subdomain — site.api.espn.com's summary
-# response for these games came back with team-level stats only (confirmed via a live diagnostic
-# dump: team blocks had keys ['team', 'statistics', 'displayOrder', 'homeAway'], no 'players' at
-# all). Every independently-verified example of the full boxscore.teams[].players[] structure
-# (the one this module's parsing is built against) uses site.web.api.espn.com instead.
-WEB_SUMMARY_API = "https://site.web.api.espn.com/apis/site/v2/sports/basketball/wnba"
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; H2Sports/1.0)"}
 _TIMEOUT = 15
 
@@ -237,98 +231,76 @@ def get_team_recent_game_ids(team_id: int, before_date: str,
     return result
 
 
+CDN_API = "https://cdn.espn.com/core/wnba/boxscore"
+
+
 def get_game_boxscore(game_id: str) -> Dict[int, Dict[str, float]]:
     """{player_id: {pts, reb, ast, fg3m, min}} for every player who appeared in a game — one
     fetch covers both teams, shared across every player on the slate who played that game (see
-    _get_json_cached). Empty dict on any failure or if a player didn't play (didNotPlay=True)."""
-    data = _get_json_cached(f"{WEB_SUMMARY_API}/summary", params={"event": game_id})
+    _get_json_cached). Empty dict on any failure or if a player didn't play (didNotPlay=True).
+
+    DATA SOURCE: cdn.espn.com, not site.api.espn.com/site.web.api.espn.com. Both "site" API
+    subdomains were tried first (matching this module's original schema docs) and both were
+    confirmed via live diagnostic logs to return only team-level stats for these WNBA games —
+    `boxscore.teams[]` blocks with keys ['team', 'statistics', 'displayOrder', 'homeAway'], no
+    'players' key anywhere, on either host. The CDN endpoint's response shape puts per-player
+    data at `gamepackageJSON.boxscore.players` — a SIBLING array to `boxscore.teams`, not nested
+    inside each team block the way the "site" family's documented schema assumes. Confirmed live:
+    `boxscore.players` has one entry per team, each with a real `statistics` key."""
+    data = _get_json_cached(CDN_API, params={"xhr": "1", "gameId": game_id})
     if not data:
         if game_id not in _diag_seen:
-            _diag(f"get_game_boxscore({game_id}): summary fetch returned nothing")
+            _diag(f"get_game_boxscore({game_id}): CDN fetch returned nothing")
             _diag_seen.add(game_id)
         return {}
     out: Dict[int, Dict[str, float]] = {}
-    boxscore = data.get("boxscore") or {}
-    if "boxscore" not in data:
+    gp = data.get("gamepackageJSON") or {}
+    if "gamepackageJSON" not in data:
         if game_id not in _diag_seen:
-            _diag(f"get_game_boxscore({game_id}): response had no 'boxscore' key — keys were {list(data.keys())}")
-    teams = boxscore.get("teams") or []
-    for team_block in teams:
-        for player_group in team_block.get("players", []):
-            for stat_group in player_group.get("statistics", []):
-                names = stat_group.get("names") or []
-                for a in stat_group.get("athletes", []):
-                    if a.get("didNotPlay") or not names:
-                        continue
-                    athlete = a.get("athlete") or {}
-                    pid = athlete.get("id")
-                    stats = a.get("stats") or []
-                    if pid is None or not stats:
-                        continue
-                    try:
-                        pid_int = int(pid)
-                    except (TypeError, ValueError):
-                        continue
-                    row = {n: _parse_stat_value(v) for n, v in zip(names, stats)}
-                    out[pid_int] = {
-                        "pts": row.get("PTS", 0.0),
-                        "reb": row.get("REB", 0.0),
-                        "ast": row.get("AST", 0.0),
-                        "fg3m": row.get("3PT", 0.0),
-                        "min": row.get("MIN", 0.0),
-                    }
+            _diag(f"get_game_boxscore({game_id}): response had no 'gamepackageJSON' key — keys were {list(data.keys())}")
+    box = gp.get("boxscore") or {}
+    player_groups = box.get("players") or []
+    for player_group in player_groups:
+        for stat_group in player_group.get("statistics", []):
+            names = stat_group.get("names") or []
+            for a in stat_group.get("athletes", []):
+                if a.get("didNotPlay") or not names:
+                    continue
+                athlete = a.get("athlete") or {}
+                pid = athlete.get("id")
+                stats = a.get("stats") or []
+                if pid is None or not stats:
+                    continue
+                try:
+                    pid_int = int(pid)
+                except (TypeError, ValueError):
+                    continue
+                row = {n: _parse_stat_value(v) for n, v in zip(names, stats)}
+                out[pid_int] = {
+                    "pts": row.get("PTS", 0.0),
+                    "reb": row.get("REB", 0.0),
+                    "ast": row.get("AST", 0.0),
+                    "fg3m": row.get("3PT", 0.0),
+                    "min": row.get("MIN", 0.0),
+                }
 
-    # One-time deep dump (not per-game — every game has the same shape, so print it once) when
-    # extraction comes up empty despite team blocks being present. Both site.api.espn.com and
-    # site.web.api.espn.com have now been confirmed (via live logs) to return the identical
-    # team-only shape, so this dump goes wider: full top-level response keys, a check for a
-    # sibling 'rosters' key (MLB's summary endpoint carries per-player data there instead of
-    # nested in boxscore — WNBA's may too), AND a parallel probe of the CDN boxscore endpoint
-    # (cdn.espn.com), a genuinely different data pathway, not just another subdomain of the same
-    # "site" API family. This fetch is diagnostic-only — not wired into `out` yet.
-    if not out and teams and "_boxscore_shape_dump" not in _diag_seen:
-        _diag_seen.add("_boxscore_shape_dump")
-        tb0 = teams[0]
-        _diag(f"get_game_boxscore shape dump: top-level response keys = {list(data.keys())}")
-        _diag(f"get_game_boxscore shape dump: team_block keys = {list(tb0.keys())}")
-        players_val = tb0.get("players")
-        _diag(f"get_game_boxscore shape dump: team_block['players'] = "
-             f"{type(players_val).__name__}, len={len(players_val) if hasattr(players_val, '__len__') else 'n/a'}")
-        if players_val:
-            pg0 = players_val[0]
-            _diag(f"get_game_boxscore shape dump: players[0] keys = "
-                 f"{list(pg0.keys()) if isinstance(pg0, dict) else type(pg0).__name__}")
-        if "rosters" in data:
-            rosters_val = data["rosters"]
-            _diag(f"get_game_boxscore shape dump: top-level 'rosters' key IS present! "
-                 f"type={type(rosters_val).__name__}, len={len(rosters_val) if hasattr(rosters_val, '__len__') else 'n/a'}")
-            if rosters_val and isinstance(rosters_val, list):
-                r0 = rosters_val[0]
-                _diag(f"get_game_boxscore shape dump: rosters[0] keys = "
-                     f"{list(r0.keys()) if isinstance(r0, dict) else type(r0).__name__}")
-        else:
-            _diag("get_game_boxscore shape dump: no top-level 'rosters' key either")
-
-        cdn_data = _get_json_cached("https://cdn.espn.com/core/wnba/boxscore",
-                                    params={"xhr": "1", "gameId": game_id})
-        if cdn_data:
-            gp = cdn_data.get("gamepackageJSON") or {}
-            _diag(f"get_game_boxscore shape dump (CDN): gamepackageJSON top keys = {list(gp.keys())}")
-            cdn_box = gp.get("boxscore") or {}
-            _diag(f"get_game_boxscore shape dump (CDN): boxscore keys = {list(cdn_box.keys())}")
-            cdn_players = cdn_box.get("players")
-            if cdn_players:
-                _diag(f"get_game_boxscore shape dump (CDN): boxscore['players'] "
-                     f"type={type(cdn_players).__name__}, len={len(cdn_players)}")
-                if isinstance(cdn_players, list) and cdn_players:
-                    _diag(f"get_game_boxscore shape dump (CDN): players[0] keys = "
-                         f"{list(cdn_players[0].keys()) if isinstance(cdn_players[0], dict) else type(cdn_players[0]).__name__}")
-        else:
-            _diag("get_game_boxscore shape dump (CDN): fetch returned nothing")
+    # One more diagnostic layer in case `statistics[].names/athletes/stats` isn't quite the right
+    # shape at this new location either — this fires only if extraction is still empty.
+    if not out and player_groups and "_cdn_stat_shape_dump" not in _diag_seen:
+        _diag_seen.add("_cdn_stat_shape_dump")
+        pg0 = player_groups[0]
+        _diag(f"get_game_boxscore CDN shape dump: player_group keys = {list(pg0.keys())}")
+        stats_val = pg0.get("statistics")
+        _diag(f"get_game_boxscore CDN shape dump: player_group['statistics'] = "
+             f"{type(stats_val).__name__}, len={len(stats_val) if hasattr(stats_val, '__len__') else 'n/a'}")
+        if stats_val:
+            sg0 = stats_val[0]
+            _diag(f"get_game_boxscore CDN shape dump: statistics[0] keys = "
+                 f"{list(sg0.keys()) if isinstance(sg0, dict) else type(sg0).__name__}")
 
     if game_id not in _diag_seen:
         _diag(f"get_game_boxscore({game_id}): {len(out)} player(s) extracted "
-             f"({len(teams)} team block(s) in response)")
+             f"({len(player_groups)} player group(s) in response)")
         _diag_seen.add(game_id)
     return out
 
