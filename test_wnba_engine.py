@@ -85,7 +85,8 @@ def test_build_slate_assembles_rows_from_mocked_fetches(monkeypatch):
         2: [_log(2, 1, 0, 0, 6)] * 5,       # deep bench -> filtered out
         3: [_log(15, 7, 3, 1, 28)] * 5,     # rotation player
     }
-    monkeypatch.setattr(E, "get_player_recent_games", lambda player_id, last_n: logs.get(player_id, []))
+    monkeypatch.setattr(E, "get_player_recent_games",
+                        lambda player_id, last_n, team_id=None, before_date=None: logs.get(player_id, []))
 
     rows, meta = E.build_slate("2026-07-13", min_avg_minutes=12.0, last_n_games=5)
 
@@ -128,19 +129,19 @@ def test_get_json_returns_parsed_body_on_success(monkeypatch):
     assert E._get_json("https://example.com") == {"ok": True}
 
 
-# ----------------------------------------------------------------- gamelog value parsing
-def test_parse_gamelog_value_plain_number():
-    assert E._parse_gamelog_value("32") == 32.0
+# ----------------------------------------------------------------- boxscore stat-value parsing
+def test_parse_stat_value_plain_number():
+    assert E._parse_stat_value("32") == 32.0
 
 
-def test_parse_gamelog_value_made_attempted_combo():
-    assert E._parse_gamelog_value("12-24") == 12.0   # makes, not attempts
+def test_parse_stat_value_made_attempted_combo():
+    assert E._parse_stat_value("12-24") == 12.0   # makes, not attempts
 
 
-def test_parse_gamelog_value_handles_junk():
-    assert E._parse_gamelog_value(None) == 0.0
-    assert E._parse_gamelog_value("DNP") == 0.0
-    assert E._parse_gamelog_value("") == 0.0
+def test_parse_stat_value_handles_junk():
+    assert E._parse_stat_value(None) == 0.0
+    assert E._parse_stat_value("DNP") == 0.0
+    assert E._parse_stat_value("") == 0.0
 
 
 # ----------------------------------------------------------------- get_schedule (ESPN scoreboard)
@@ -208,40 +209,126 @@ def test_get_team_roster_empty_on_fetch_failure(monkeypatch):
     assert E.get_team_roster(20) == []
 
 
-# ----------------------------------------------------------------- get_player_recent_games (ESPN gamelog)
-def test_get_player_recent_games_aligns_names_from_the_right(monkeypatch):
-    # Mirrors the documented ESPN shape: `names` includes meta fields (date/opponent/gameResult)
-    # BEFORE the stat columns, but `stats` only holds the stat-column values.
-    fake_response = {
-        "names": ["date", "opponent", "gameResult", "minutes", "fieldGoalsMade",
-                 "threePointsMade", "freeThrowsMade", "rebounds", "assists", "steals",
-                 "blocks", "points"],
-        "events": [
-            {"id": "1", "date": "2026-07-13T00:00Z", "gameResult": "W",
-             "stats": ["32", "8-15", "3-6", "4-4", "6", "5", "2", "1", "23"]},
-        ],
-    }
+# ----------------------------------------------------------------- request caching
+def test_get_json_cached_dedupes_identical_requests(monkeypatch):
+    E._response_cache.clear()
+    calls = []
 
     def fake_get_json(url, params=None):
-        assert "/athletes/555/gamelog" in url
-        return fake_response
+        calls.append((url, params))
+        return {"n": len(calls)}
 
     monkeypatch.setattr(E, "_get_json", fake_get_json)
-    games = E.get_player_recent_games(555)
+    r1 = E._get_json_cached("https://example.com/x", params={"a": 1})
+    r2 = E._get_json_cached("https://example.com/x", params={"a": 1})
+    r3 = E._get_json_cached("https://example.com/x", params={"a": 2})   # different params -> new call
 
-    assert len(games) == 1
-    g = games[0]
-    assert g["min"] == 32.0
-    assert g["fg3m"] == 3.0     # from "3-6" -> makes
-    assert g["reb"] == 6.0
-    assert g["ast"] == 5.0
-    assert g["pts"] == 23.0
-    print("✓ get_player_recent_games correctly aligns names/stats and parses made-attempted combos")
+    assert r1 == r2 == {"n": 1}
+    assert r3 == {"n": 2}
+    assert len(calls) == 2
+    print("✓ _get_json_cached dedupes identical (url, params) requests within a process")
 
 
-def test_get_player_recent_games_empty_on_fetch_failure(monkeypatch):
+# ----------------------------------------------------------------- get_team_recent_game_ids
+def test_get_team_recent_game_ids_filters_to_completed_games_for_that_team(monkeypatch):
+    E._response_cache.clear()
+    fake_scoreboard = {
+        "events": [
+            {"id": "g1", "date": "2026-07-10T00:00Z",
+             "status": {"type": {"completed": True}},
+             "competitions": [{"competitors": [{"team": {"id": "20"}}, {"team": {"id": "19"}}]}]},
+            {"id": "g2", "date": "2026-07-12T00:00Z",   # not this team -> excluded
+             "status": {"type": {"completed": True}},
+             "competitions": [{"competitors": [{"team": {"id": "5"}}, {"team": {"id": "19"}}]}]},
+            {"id": "g3", "date": "2026-07-14T00:00Z",   # this team, but not completed -> excluded
+             "status": {"type": {"completed": False}},
+             "competitions": [{"competitors": [{"team": {"id": "20"}}, {"team": {"id": "16"}}]}]},
+            {"id": "g4", "date": "2026-07-13T00:00Z",
+             "status": {"type": {"completed": True}},
+             "competitions": [{"competitors": [{"team": {"id": "20"}}, {"team": {"id": "9"}}]}]},
+        ]
+    }
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_scoreboard)
+
+    ids = E.get_team_recent_game_ids(20, "2026-07-14", n=10)
+    assert ids == ["g4", "g1"]   # both g1/g4 involve team 20 and are completed, newest first
+    print("✓ get_team_recent_game_ids keeps only this team's completed games, newest first")
+
+
+def test_get_team_recent_game_ids_empty_on_fetch_failure(monkeypatch):
+    E._response_cache.clear()
     monkeypatch.setattr(E, "_get_json", lambda url, params=None: None)
-    assert E.get_player_recent_games(555) == []
+    assert E.get_team_recent_game_ids(20, "2026-07-14") == []
+
+
+# ----------------------------------------------------------------- get_game_boxscore
+def test_get_game_boxscore_extracts_every_player_from_both_teams(monkeypatch):
+    E._response_cache.clear()
+    fake_summary = {
+        "boxscore": {
+            "teams": [
+                {"team": {"id": "20"}, "players": [{
+                    "statistics": [{
+                        "names": ["MIN", "FG", "3PT", "FT", "REB", "AST", "STL", "BLK", "TO", "PTS"],
+                        "athletes": [
+                            {"athlete": {"id": "111"}, "didNotPlay": False,
+                             "stats": ["32", "8-15", "3-6", "4-4", "6", "5", "1", "0", "2", "23"]},
+                            {"athlete": {"id": "112"}, "didNotPlay": True, "stats": []},
+                        ],
+                    }],
+                }]},
+                {"team": {"id": "19"}, "players": [{
+                    "statistics": [{
+                        "names": ["MIN", "FG", "3PT", "FT", "REB", "AST", "STL", "BLK", "TO", "PTS"],
+                        "athletes": [
+                            {"athlete": {"id": "222"}, "didNotPlay": False,
+                             "stats": ["28", "5-12", "1-4", "2-2", "9", "3", "0", "1", "3", "13"]},
+                        ],
+                    }],
+                }]},
+            ]
+        }
+    }
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_summary)
+
+    box = E.get_game_boxscore("g1")
+    assert set(box.keys()) == {111, 222}   # 112 excluded (didNotPlay)
+    assert box[111] == {"pts": 23.0, "reb": 6.0, "ast": 5.0, "fg3m": 3.0, "min": 32.0}
+    assert box[222]["pts"] == 13.0 and box[222]["min"] == 28.0
+    print("✓ get_game_boxscore extracts both teams' players in one call, skips DNPs")
+
+
+def test_get_game_boxscore_empty_on_fetch_failure(monkeypatch):
+    E._response_cache.clear()
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: None)
+    assert E.get_game_boxscore("g1") == {}
+
+
+# ----------------------------------------------------------------- get_player_recent_games
+def test_get_player_recent_games_requires_team_id_and_before_date():
+    # Without these there's no way to know which games to look at -> empty, not a guess.
+    assert E.get_player_recent_games(111) == []
+    assert E.get_player_recent_games(111, team_id=20) == []
+    assert E.get_player_recent_games(111, before_date="2026-07-14") == []
+
+
+def test_get_player_recent_games_pulls_from_team_games_via_boxscore(monkeypatch):
+    E._response_cache.clear()
+    monkeypatch.setattr(E, "get_team_recent_game_ids",
+                        lambda team_id, before_date, n=E.CFG.RECENT_GAMES_N: ["g1", "g2"])
+    boxscores = {
+        "g1": {111: {"pts": 20.0, "reb": 5.0, "ast": 4.0, "fg3m": 2.0, "min": 30.0}},
+        "g2": {111: {"pts": 18.0, "reb": 6.0, "ast": 3.0, "fg3m": 1.0, "min": 28.0},
+               999: {"pts": 10.0, "reb": 2.0, "ast": 1.0, "fg3m": 0.0, "min": 15.0}},
+    }
+    monkeypatch.setattr(E, "get_game_boxscore", lambda gid: boxscores.get(gid, {}))
+
+    games = E.get_player_recent_games(111, last_n=10, team_id=20, before_date="2026-07-14")
+    assert games == [
+        {"pts": 20.0, "reb": 5.0, "ast": 4.0, "fg3m": 2.0, "min": 30.0},
+        {"pts": 18.0, "reb": 6.0, "ast": 3.0, "fg3m": 1.0, "min": 28.0},
+    ]
+    print("✓ get_player_recent_games pulls this player's line out of each recent game's shared boxscore")
 
 
 if __name__ == "__main__":

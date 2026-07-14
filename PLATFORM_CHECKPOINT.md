@@ -39,22 +39,26 @@ second real, priced sport — not a placeholder.
 - **`config_wnba.py`** — 15-team reference list (2026 season, incl. Portland Fire / Toronto Tempo
   expansion), verified live on 2026-07-13. Reference data only — no longer used for team-ID
   cross-referencing (see below).
-- **`wnba_engine.py`** — data layer on **ESPN's public API** (`site.api.espn.com` /
-  `site.web.api.espn.com`), NOT `nba_api`. **Data source was switched mid-Stage-2** after a live
-  deploy hit `requests.exceptions.ReadTimeout: HTTPSConnectionPool(host='stats.nba.com', ...)` —
-  confirmed via `nba_api`'s own GitHub issue history (#182, #320, #498, going back to 2020) as a
-  long-standing, structural block on cloud-hosting IP ranges (AWS/Heroku/GCP/Streamlit Cloud), not
-  a parameter bug. No amount of retries or header-tuning fixes an IP-level block, so rather than
-  patch around it, the engine was rewritten against ESPN's endpoint family instead — same
-  "unofficial API" risk category as nba_api, but with no comparable cloud-blocking pattern in its
-  own issue history. Endpoints and field names came from github.com/pseudo-r/Public-ESPN-API's
-  documented schemas (WNBA gamelog explicitly listed as verified working), not live testing — same
-  sandbox network limitation as before. The rewrite only touched the fetch layer; `avg_minutes`,
-  `player_row`, and `build_slate` (the pure orchestration logic) are untouched, and all their
-  existing tests passed unchanged — the payoff of keeping those two layers separate. Simpler than
-  the nba_api version in two ways: no team-ID cross-reference table needed (ESPN's scoreboard
-  response carries team IDs + names inline) and no WNBA season-string guessing (gamelog defaults
-  to the current season server-side).
+- **`wnba_engine.py`** — data layer on **ESPN's public API**, NOT `nba_api`. Went through TWO
+  data-source pivots during Stage 2, both driven by live debugging with real deploy output rather
+  than guesswork:
+  1. `nba_api`/`stats.nba.com` → ESPN, after a production `ReadTimeout` confirmed `nba_api`'s
+     long-documented cloud-IP-blocking problem (see git history / earlier checkpoint text).
+  2. Within the ESPN rewrite itself: `.../athletes/{id}/gamelog` → `.../summary?event={id}`
+     (per-game boxscore), after live responses (pasted back from the deployed app) showed the
+     gamelog endpoint's real WNBA shape diverges from its own documentation — `events` is a dict
+     keyed by game ID, not a list, and individual events carry game context (opponent, score,
+     result) but no per-player stat line at all. wehoop (SportsDataverse's R package built
+     specifically for ESPN's WNBA/WBB data) independently documents that exact endpoint family as
+     "less stable than the rest of the surface," which matches what was found. The boxscore
+     endpoint pulls every player's stats for a game in one call — fetched once per game and shared
+     across every player on the slate who played it (`_get_json_cached`, ~12x fewer requests than
+     one gamelog call per player).
+  Team-level boxscore fields were confirmed against a real independent example (ScrapeCreators'
+  walkthrough); the player-level `statistics[].names/athletes/stats` shape is still sourced from
+  documentation, not a confirmed live WNBA response — verify on first deploy after this fix, same
+  as before. `_get_json`/`_get_json_cached` log every failed request with the exact URL/params, so
+  a mismatch shows up in Streamlit Cloud's logs rather than silently as an empty slate.
 - **`wnba_projections.py`** — unchanged by the data-source switch (operates only on `rows`/`meta`
   from `build_slate`, doesn't know or care which API produced them). Empirical bootstrap model:
   resamples each player's last 10 games (`config_wnba.RECENT_GAMES_N`) with replacement to build a
@@ -95,10 +99,12 @@ second real, priced sport — not a placeholder.
   self-migrates via `ADD COLUMN IF NOT EXISTS` — verify on first deploy).
 - Discord/public app's own Settings → Secrets needs `AUDIENCE = "public"` plus the same DB/API
   secrets as the owner app.
-- **First-deploy WNBA checklist:** confirmed via screenshot on 2026-07-13 that the `nba_api`-based
-  build hit a real production `ReadTimeout` against `stats.nba.com` — a known cloud-IP-blocking
-  issue with that data source, not fixable via retries (see WNBA section above). `wnba_engine.py`
-  was rewritten against ESPN's public API instead, from documented response schemas rather than
-  live testing (same sandbox limitation as before). Confirm a real WNBA slate loads on Edge Board
-  without errors. If it's still empty, check Streamlit Cloud's logs for `WNBA ESPN API request
-  failed` entries — every fetch failure is logged with the exact URL and params that failed.
+- **First-deploy WNBA checklist:** confirmed live (schedule endpoint verified directly, gamelog
+  endpoint's real shape captured via live responses pasted back from the deployed app) that the
+  athlete-gamelog approach didn't carry per-player stats for WNBA the way documented — rewritten
+  to pull from the per-game boxscore instead (see WNBA section above). Confirm a real WNBA slate
+  loads on Edge Board without errors. If it's still empty, check Streamlit Cloud's logs for `WNBA
+  ESPN API request failed` entries — every fetch failure logs the exact URL and params. If there
+  are NO such entries but the slate is still empty, the boxscore's `players[].statistics[].
+  athletes[]` shape is the next thing to verify live — that part is still sourced from
+  documentation, not a confirmed WNBA response.

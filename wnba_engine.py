@@ -4,30 +4,38 @@ wnba_engine.py — WNBA data layer using ESPN's public (unofficial) API.
 Provides:
   - get_schedule(date_str) -> games scheduled for a date
   - get_team_roster(team_id) -> a team's roster
-  - get_player_recent_games(player_id, last_n) -> last N game logs (PTS/REB/AST/FG3M/MIN)
+  - get_player_recent_games(player_id, last_n, team_id, before_date) -> last N game logs
+    (PTS/REB/AST/FG3M/MIN)
   - build_slate(date_str) -> (rows, meta), matching the platform's cross-sport engine contract
     (see mlb_engine.build_slate / sports.py's Sport.engine)
 
-DATA SOURCE CHANGE (from the original nba_api build): nba_api wraps stats.nba.com, which has a
-long-documented history (github.com/swar/nba_api/issues/182, /320, /498, and others going back to
-2020) of blocking or throttling requests from cloud-hosting IP ranges — confirmed here by a
-production ReadTimeout from Streamlit Cloud. That's a network-level block, not something request
-headers or retries fix. Switched to ESPN's public API (site.api.espn.com / site.web.api.espn.com)
-instead: unofficial and undocumented like nba_api, but with no comparable pattern of cloud-IP
-blocking in its own issue history. Endpoint choices and field names below come from
-github.com/pseudo-r/Public-ESPN-API's documented response schemas (WNBA gamelog explicitly listed
-as verified working), not from live testing — this sandbox can't reach either API, so the same
-honesty applies as before: verify against a real slate on first deploy.
+DATA SOURCE CHANGE #1 (from the original nba_api build): nba_api wraps stats.nba.com, which has a
+long-documented history (github.com/swar/nba_api/issues/182, /320, /498, going back to 2020) of
+blocking/throttling cloud-hosting IP ranges — confirmed here by a production ReadTimeout from
+Streamlit Cloud. Switched to ESPN's public API instead.
 
-Notably simpler than the nba_api version: no team-ID cross-reference table needed (ESPN's
-scoreboard response already carries each game's team IDs + display names inline), and no WNBA
-season-string guessing (the gamelog endpoint defaults to the current season server-side).
+DATA SOURCE CHANGE #2 (within the ESPN rewrite itself): the first version of this file used
+`.../athletes/{id}/gamelog`, following github.com/pseudo-r/Public-ESPN-API's documented example.
+Live testing (with Dr. Hall pasting real responses back) showed that endpoint's real shape
+diverges from the doc in two ways for WNBA: `events` is a dict keyed by game ID, not a list, and —
+more importantly — individual events carry game CONTEXT (opponent, score, result) but no
+per-player stat line at all. wehoop (the R package SportsDataverse built specifically for ESPN's
+WNBA/WBB data) independently documents this exact endpoint family as "less stable than the rest of
+the surface," which matches. Rewritten here to pull stats from the per-GAME boxscore instead
+(`.../summary?event={id}`) — one fetch covers every player in that game, for both teams, so it's
+also fetched once per game and reused (see `_get_json`'s cache) rather than once per player.
+Team-level fields in that endpoint were confirmed against a real independent example (a live NBA
+boxscore shown in a ScrapeCreators walkthrough); the player-level `statistics[].names/athletes/
+stats` shape is still sourced from documentation rather than a live WNBA response — same honesty
+as before: verify on first deploy, and this module fails soft (empty result, logged) rather than
+crashing if that shape is also off in some way not yet caught.
 """
 
 from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -37,9 +45,14 @@ import config_wnba as CFG
 logger = logging.getLogger(__name__)
 
 SITE_API = "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba"
-WEB_API = "https://site.web.api.espn.com/apis/common/v3/sports/basketball/wnba"
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; H2Sports/1.0)"}
 _TIMEOUT = 15
+
+# Simple per-process cache so fetching 10 games' worth of boxscores for a 12-player roster costs
+# 10 requests, not 120 (every player on both teams shares the same game's boxscore). No TTL —
+# fine for the lifetime of a single slate build. Tests should not rely on this persisting; see
+# test_wnba_engine.py's use of monkeypatch on _get_json_cached directly where caching matters.
+_response_cache: Dict[Tuple[str, Tuple], Optional[Dict]] = {}
 
 
 def _get_json(url: str, params: Optional[Dict] = None) -> Optional[Dict]:
@@ -53,6 +66,14 @@ def _get_json(url: str, params: Optional[Dict] = None) -> Optional[Dict]:
     except Exception:
         logger.exception("WNBA ESPN API request failed: %s params=%s", url, params)
         return None
+
+
+def _get_json_cached(url: str, params: Optional[Dict] = None) -> Optional[Dict]:
+    """_get_json, but de-duplicated within this process — see _response_cache above."""
+    key = (url, tuple(sorted((params or {}).items())))
+    if key not in _response_cache:
+        _response_cache[key] = _get_json(url, params)
+    return _response_cache[key]
 
 
 # --------------------------------------------------------------------------- schedule
@@ -111,11 +132,11 @@ def get_team_roster(team_id: int) -> List[Dict[str, Any]]:
 
 
 # --------------------------------------------------------------------------- recent form
-def _parse_gamelog_value(raw) -> float:
-    """ESPN's gamelog stats are strings. Combo fields report made-attempted ('12-24' for FG,
-    3PT) — we want the makes (left side) for the bootstrap model. Plain numeric fields (PTS, REB,
-    AST, MIN) pass through as-is. Anything unparseable becomes 0.0 — the safe default for a
-    missed/DNP game, since it gets filtered out downstream by the minutes bar anyway."""
+def _parse_stat_value(raw) -> float:
+    """ESPN's boxscore stats are strings. Combo fields report made-attempted ('12-24') — we want
+    the makes (left side) for the bootstrap model. Plain numeric fields (PTS, REB, AST, MIN) pass
+    through as-is. Anything unparseable becomes 0.0 — the safe default for a missed/DNP game,
+    since it gets filtered out downstream by the minutes bar anyway."""
     if raw is None:
         return 0.0
     s = str(raw).strip()
@@ -127,34 +148,95 @@ def _parse_gamelog_value(raw) -> float:
         return 0.0
 
 
-def get_player_recent_games(player_id: int, last_n: int = CFG.RECENT_GAMES_N) -> List[Dict[str, float]]:
-    """Last N game logs for a player: [{pts, reb, ast, fg3m, min}, ...], most recent first
-    (ESPN's gamelog is already ordered that way). Empty list on any failure.
-
-    ESPN's gamelog response uses parallel arrays: `names` lists every column (meta fields like
-    date/opponent/result FIRST, then the actual stat columns), but each event's `stats` array only
-    holds the stat-column values — the meta fields are separate top-level keys on the event
-    instead. Aligning `names[-len(stats):]` against `stats` (from the right, not the left) handles
-    however many meta fields there are without hardcoding which specific ones."""
-    data = _get_json(f"{WEB_API}/athletes/{player_id}/gamelog")
+def get_team_recent_game_ids(team_id: int, before_date: str,
+                             n: int = CFG.RECENT_GAMES_N) -> List[str]:
+    """A team's last n COMPLETED game IDs at/before before_date (YYYY-MM-DD), most recent first.
+    Found by scanning the scoreboard across a 45-day trailing window and filtering to games where
+    this team appears as a competitor — reuses get_schedule's already-verified scoreboard parsing
+    rather than the separate, unverified teams/{id}/schedule endpoint. 45 days comfortably covers
+    n=10 games at the WNBA's ~2-4 games/week pace. The "completed" filter naturally excludes the
+    game currently being projected (still STATUS_SCHEDULED), so no separate date-cutoff math is
+    needed."""
+    end = datetime.strptime(before_date, "%Y-%m-%d")
+    start = end - timedelta(days=45)
+    date_range = f"{start.strftime('%Y%m%d')}-{end.strftime('%Y%m%d')}"
+    data = _get_json_cached(f"{SITE_API}/scoreboard", params={"dates": date_range, "limit": 200})
     if not data:
         return []
-    names = data.get("names") or []
-    events = data.get("events") or []
-    out = []
-    for ev in events:
-        stats = ev.get("stats") or []
-        if not stats or not names:
+
+    found: List[Tuple[str, str]] = []   # (game_id, date) so we can sort by date
+    for event in data.get("events", []):
+        status = ((event.get("status") or {}).get("type") or {})
+        if not status.get("completed"):
             continue
-        stat_names = names[-len(stats):]
-        row = {n: _parse_gamelog_value(v) for n, v in zip(stat_names, stats)}
-        out.append({
-            "pts": row.get("points", 0.0),
-            "reb": row.get("rebounds", 0.0),
-            "ast": row.get("assists", 0.0),
-            "fg3m": row.get("threePointsMade", 0.0),
-            "min": row.get("minutes", 0.0),
-        })
+        comps = event.get("competitions") or []
+        if not comps:
+            continue
+        competitors = comps[0].get("competitors") or []
+        ids = set()
+        for c in competitors:
+            try:
+                ids.add(int(c["team"]["id"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+        if team_id in ids and event.get("id"):
+            found.append((event["id"], event.get("date") or ""))
+
+    found.sort(key=lambda g: g[1], reverse=True)
+    return [gid for gid, _ in found[:n]]
+
+
+def get_game_boxscore(game_id: str) -> Dict[int, Dict[str, float]]:
+    """{player_id: {pts, reb, ast, fg3m, min}} for every player who appeared in a game — one
+    fetch covers both teams, shared across every player on the slate who played that game (see
+    _get_json_cached). Empty dict on any failure or if a player didn't play (didNotPlay=True)."""
+    data = _get_json_cached(f"{SITE_API}/summary", params={"event": game_id})
+    if not data:
+        return {}
+    out: Dict[int, Dict[str, float]] = {}
+    teams = ((data.get("boxscore") or {}).get("teams")) or []
+    for team_block in teams:
+        for player_group in team_block.get("players", []):
+            for stat_group in player_group.get("statistics", []):
+                names = stat_group.get("names") or []
+                for a in stat_group.get("athletes", []):
+                    if a.get("didNotPlay") or not names:
+                        continue
+                    athlete = a.get("athlete") or {}
+                    pid = athlete.get("id")
+                    stats = a.get("stats") or []
+                    if pid is None or not stats:
+                        continue
+                    try:
+                        pid_int = int(pid)
+                    except (TypeError, ValueError):
+                        continue
+                    row = {n: _parse_stat_value(v) for n, v in zip(names, stats)}
+                    out[pid_int] = {
+                        "pts": row.get("PTS", 0.0),
+                        "reb": row.get("REB", 0.0),
+                        "ast": row.get("AST", 0.0),
+                        "fg3m": row.get("3PT", 0.0),
+                        "min": row.get("MIN", 0.0),
+                    }
+    return out
+
+
+def get_player_recent_games(player_id: int, last_n: int = CFG.RECENT_GAMES_N,
+                            team_id: Optional[int] = None,
+                            before_date: Optional[str] = None) -> List[Dict[str, float]]:
+    """Last N game logs for a player: [{pts, reb, ast, fg3m, min}, ...], most recent first.
+    Requires team_id and before_date (build_slate always supplies both) — without them there's no
+    way to know which games to look at, so this returns an empty list rather than guessing."""
+    if team_id is None or before_date is None:
+        return []
+    game_ids = get_team_recent_game_ids(team_id, before_date, last_n)
+    out = []
+    for gid in game_ids:
+        box = get_game_boxscore(gid)
+        line = box.get(player_id)
+        if line:
+            out.append(line)
     return out[:last_n]
 
 
@@ -201,12 +283,13 @@ def build_slate(date_str: str, min_avg_minutes: float = CFG.MIN_AVG_MINUTES,
       rows : list of flat per-player dicts ready for a DataFrame / the projections module
       meta : list of per-game dicts (label, names, game_date)
     """
+    _response_cache.clear()   # don't serve a previous slate-date's cached scoreboard/boxscores
     games = get_schedule(date_str)
     if not games:
         return [], []
 
     meta: List[Dict] = []
-    tasks: List[Tuple[Dict, str, str, str, Optional[str]]] = []
+    tasks: List[Tuple[Dict, str, str, str, Optional[str], int]] = []
     for g in games:
         label = f"{g['away_name']} @ {g['home_name']}"
         meta.append({"label": label, "away_name": g["away_name"], "home_name": g["home_name"],
@@ -214,11 +297,12 @@ def build_slate(date_str: str, min_avg_minutes: float = CFG.MIN_AVG_MINUTES,
         for team_id, team_name, opp_name in ((g["home_id"], g["home_name"], g["away_name"]),
                                               (g["away_id"], g["away_name"], g["home_name"])):
             for player in get_team_roster(team_id):
-                tasks.append((player, team_name, opp_name, label, g.get("game_date")))
+                tasks.append((player, team_name, opp_name, label, g.get("game_date"), team_id))
 
     def fetch_one(item):
-        player, team_name, opp_name, label, game_date = item
-        log = get_player_recent_games(player["id"], last_n_games)
+        player, team_name, opp_name, label, game_date, team_id = item
+        log = get_player_recent_games(player["id"], last_n_games, team_id=team_id,
+                                      before_date=date_str)
         return player_row(player, team_name, opp_name, label, game_date, log, min_avg_minutes)
 
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
