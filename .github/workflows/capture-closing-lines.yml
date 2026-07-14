@@ -14,15 +14,20 @@
 #   Without DATABASE_URL the runner writes to an ephemeral SQLite file that vanishes — it will
 #   refuse to run and tell you so.
 #
-# SCHEDULE: MLB games mostly start 5-10pm ET, so this runs every 30 minutes across the evening
-#   (in UTC that spans the day boundary, hence two cron blocks). Adjust the windows if your slate
-#   skews earlier/later. Your Odds API quota easily covers this (only the markets your open bets
-#   use are fetched, and only for not-yet-started games).
+# SCHEDULE: MLB games mostly start 5-10pm ET, so the evening cron block covers that. WNBA games
+#   are more spread out — some start as early as 11am ET (a day game showed up earlier this
+#   season) — so a midday/afternoon block is included too, or those closing lines would never get
+#   captured no matter how correct the runner's code is. In UTC that's 15:00-21:00 (~11am-5pm ET)
+#   for the day block, then the existing 21-23/0-4 UTC blocks for the evening (spans the day
+#   boundary, hence two cron lines). Adjust the windows if either sport's slate shifts. Your Odds
+#   API quota easily covers this (only the markets your open bets use are fetched, and only for
+#   not-yet-started games).
 
 name: capture-closing-lines
 
 on:
   schedule:
+    - cron: "*/30 15-20 * * *"   # 15:00-20:59 UTC  (~11am-4:59pm ET) — WNBA day games
     - cron: "*/30 21-23 * * *"   # 21:00-23:59 UTC  (~5-7pm ET)
     - cron: "*/30 0-4 * * *"     # 00:00-04:59 UTC  (~7-11pm ET, incl. West Coast starts)
   workflow_dispatch: {}          # manual "Run workflow" button (handy for testing)
@@ -41,6 +46,9 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
+        # Install the app's full pinned deps so every module the runner imports (odds_api,
+        # clv_capture, betlog and their transitive imports) is guaranteed present. Listing a
+        # subset risked a crash-on-import when a transitive package was missing.
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
