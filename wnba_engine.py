@@ -139,8 +139,20 @@ def get_team_roster(team_id: int) -> List[Dict[str, Any]]:
     if "athletes" not in data:
         _diag(f"get_team_roster({team_id}): response had no 'athletes' key — keys were {list(data.keys())}")
     out = []
-    for group in data.get("athletes", []):
-        for item in group.get("items", []):
+    flat_count = 0
+    for entry in data.get("athletes", []):
+        # Documented shape: entry is a position GROUP with a nested "items" list of players.
+        # Observed-in-practice shape (WNBA, confirmed via diagnostic: 'athletes' present but 0
+        # players extracted under the grouped assumption): entry IS the player object directly,
+        # no grouping. Handle both rather than guess which is "correct" — a groups-shaped entry
+        # has no "id" of its own, a player-shaped entry has no "items", so this can't double-count.
+        items = entry.get("items")
+        if items is not None:
+            candidates = items
+        else:
+            candidates = [entry]
+            flat_count += 1
+        for item in candidates:
             pid = item.get("id")
             if pid is None:
                 continue
@@ -148,6 +160,8 @@ def get_team_roster(team_id: int) -> List[Dict[str, Any]]:
                 out.append({"id": int(pid), "name": item.get("displayName", "Unknown")})
             except (TypeError, ValueError):
                 continue
+    if flat_count and flat_count == len(data.get("athletes", [])):
+        _diag(f"get_team_roster({team_id}): 'athletes' was a flat player list, not grouped by position")
     _diag(f"get_team_roster({team_id}): {len(out)} player(s) found")
     return out
 

@@ -204,6 +204,22 @@ def test_get_team_roster_flattens_position_groups(monkeypatch):
     assert all(isinstance(p["id"], int) for p in roster)
 
 
+def test_get_team_roster_handles_flat_player_list_shape(monkeypatch):
+    # The shape that actually explains the live bug: 'athletes' present, but each entry IS a
+    # player directly, no {"position", "items"} grouping wrapper like the docs show.
+    fake_response = {
+        "athletes": [
+            {"id": "1", "displayName": "Player One"},
+            {"id": "2", "displayName": "Player Two"},
+        ]
+    }
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_response)
+    roster = E.get_team_roster(18)
+    assert {p["name"] for p in roster} == {"Player One", "Player Two"}
+    assert all(isinstance(p["id"], int) for p in roster)
+    print("✓ get_team_roster handles the flat (ungrouped) athletes shape, not just the documented one")
+
+
 def test_get_team_roster_empty_on_fetch_failure(monkeypatch):
     monkeypatch.setattr(E, "_get_json", lambda url, params=None: None)
     assert E.get_team_roster(20) == []

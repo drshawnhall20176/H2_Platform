@@ -72,6 +72,11 @@ second real, priced sport — not a placeholder.
 - Media Room, Podcast Studio, Retrospective, Best Bets, Command Center are **not** WNBA-aware yet —
   explicitly gated to MLB-only via `require_sport`, so picking WNBA shows a clear "not built for
   this page yet" message instead of silently running MLB content under a WNBA label.
+- **Roster shape fix (2026-07-14):** `_diag` instrumentation (see below) showed `get_schedule`
+  correctly finding both real games for the date, but all 4 team rosters returning 0 players with
+  no "missing key" warning — meaning `athletes` was present but not shaped as the documented
+  `{"position", "items": [...]}` groups. `get_team_roster` now handles both that shape AND a flat
+  list of player objects directly (the more likely real WNBA shape), rather than assuming one.
 
 ### Theme-proof gradients
 - **`styling.py`** — per-cell text contrast (dark on pale, white on deep), benchmark-anchored
