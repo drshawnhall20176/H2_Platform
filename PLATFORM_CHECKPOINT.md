@@ -4,7 +4,7 @@
 one sport-selector foundation). MLB runs exactly as the standalone did originally; WNBA is now a
 second real, priced sport — not a placeholder.
 
-## What's in this checkpoint (all tested — 205/205 tests green)
+## What's in this checkpoint (all tested — 216/216 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -252,6 +252,39 @@ Hot Hand Engine's opponent-defense foundation rather than re-deriving it.
   end-to-end with synthetic data before shipping, including a genuine head-to-head match
   correctly filtered from other non-matching opponents — the same integration-test discipline
   that caught the `curate_selections` bug earlier in Stage 3.
+
+### Matchup Lab: sharpened "how does this team play her" (2026-07-14)
+Prompted by thinking ahead to an NBA build (same question would apply there): the original H2H
+Avg was a real signal but a blunt one — no proper baseline, no visibility into variance within a
+small sample, and no way to tell "one specific stat is being targeted" from "everything dipped a
+little." Three real fixes, not a new section:
+- **`wnba_engine.get_player_season_games(player_id, team_id, before_date)`** — the player's
+  full-season log (any opponent), which H2H Avg is now compared against instead of Recent Avg.
+  Comparing against a 10-game recency window conflates "this team's specific effect on her" with
+  "she's just been hot/cold lately in general" — the season baseline isolates the former.
+  Refactored the shared season-start-date logic (`_days_since_season_start`) out of
+  `get_player_history_vs_opponent` so both functions use it, rather than duplicating it.
+  `get_player_recent_games` gained a `days_back` parameter (default 45, backward compatible) to
+  make this possible without a second scoreboard-scanning implementation.
+- **H2H variance flagging** — the min–max spread across her head-to-head meetings, flagged as
+  "High Variance" when it's wide relative to her season norm. A small H2H sample that's wildly
+  inconsistent game-to-game is a different, less trustworthy signal than a small sample that's
+  been consistent, and the page now says so explicitly instead of showing a single flat average.
+- **Cross-market suppression detection** — `build_matchup_profile` now looks across all four
+  markets together (not each independently) and flags the ONE market, if any, where her H2H
+  performance is distinctly lower (not just "a bit lower," genuinely separated from her other
+  markets) than the rest. This is the honest answer to "how do they play her": not scheme detail
+  (not buildable from free box-score data, and this doesn't pretend otherwise), but which specific
+  stat category — not just her scoring overall — actually gets suppressed against this team.
+  Deliberately conservative: requires both an absolute threshold (ratio < 0.75 vs season) AND
+  clear separation from the next-lowest market (≥0.15 gap), so an evenly tough game across every
+  stat doesn't get mis-flagged as one targeted effect. Tested against both failure modes directly.
+- Page restructured into two focused tables (player signals vs. opponent whole-team defensive
+  trend) instead of one increasingly wide one — each table's scope is now stated in its own
+  header, addressing real user confusion (screenshot-confirmed) about whether "Defense Trend" was
+  player-specific, position-specific, or team-wide (it's team-wide — see the Stage 3 clarity fix
+  above this one, which added scope callouts but hadn't yet added the season-baseline/suppression
+  layer this entry covers).
 
 ### Production fix: team-level stat field names (2026-07-14)
 Hot Hand Engine showed `Opp Allows = 0.0` and `Matchup Factor = 1.00×` for every single row on a

@@ -442,16 +442,20 @@ def get_player_results(date_str: str) -> Dict[int, Dict[str, float]]:
 
 def get_player_recent_games(player_id: int, last_n: int = CFG.RECENT_GAMES_N,
                             team_id: Optional[int] = None,
-                            before_date: Optional[str] = None) -> List[Dict[str, float]]:
+                            before_date: Optional[str] = None, days_back: int = 45) -> List[Dict[str, float]]:
     """Last N game logs for a player: [{pts, reb, ast, fg3m, min, opp, date}, ...], most recent
     first. `opp`/`date` come from get_team_recent_game_ids (free — already fetched for the
     schedule scan) so any consumer (the Best Bets diagnostic inspector, a future matchup tool)
     can show which actual game a number came from, not just "game #3". Requires team_id and
     before_date (build_slate always supplies both) — without them there's no way to know which
-    games to look at, so this returns an empty list rather than guessing."""
+    games to look at, so this returns an empty list rather than guessing.
+
+    days_back defaults to 45 (the model's own recency window). Matchup Lab's season-baseline
+    comparison calls this with a season-wide days_back and a large last_n instead — see
+    get_player_season_games, which wraps that specific call."""
     if team_id is None or before_date is None:
         return []
-    games_info = get_team_recent_game_ids(team_id, before_date, last_n)
+    games_info = get_team_recent_game_ids(team_id, before_date, last_n, days_back=days_back)
     out = []
     for g in games_info:
         box = get_game_boxscore(g["gameId"])
@@ -462,10 +466,32 @@ def get_player_recent_games(player_id: int, last_n: int = CFG.RECENT_GAMES_N,
 
 
 # WNBA regular season start (2026-04-03, confirmed live from ESPN) plus a small buffer. Used only
-# to bound the head-to-head scan so it doesn't request an unnecessarily huge date range once the
-# season is well underway — get_team_recent_game_ids clips date_from at "today - days_back"
-# regardless, this just keeps days_back reasonable rather than guessing a huge fixed number.
+# to bound season-wide scans (head-to-head, season-baseline) so they don't request an
+# unnecessarily huge date range once the season is well underway — get_team_recent_game_ids
+# clips date_from at "today - days_back" regardless, this just keeps days_back reasonable rather
+# than guessing a huge fixed number.
 SEASON_START = "2026-04-01"
+
+
+def _days_since_season_start(before_date: str) -> int:
+    try:
+        return max((datetime.strptime(before_date, "%Y-%m-%d")
+                   - datetime.strptime(SEASON_START, "%Y-%m-%d")).days + 1, 1)
+    except ValueError:
+        return 200
+
+
+def get_player_season_games(player_id: int, team_id: int, before_date: str,
+                            max_games: int = 82) -> List[Dict[str, float]]:
+    """This player's full game log for the season so far (any opponent), most recent first —
+    the baseline Matchup Lab compares a head-to-head sample against. Deliberately separate from
+    get_player_recent_games's 45-day "what the model actually prices off" window: comparing a
+    head-to-head average against the player's LAST 10 games conflates "this team's specific
+    effect on her" with "she's just been hot/cold lately in general." Comparing against the full
+    season isolates the team-specific signal from general form drift."""
+    days_back = _days_since_season_start(before_date)
+    return get_player_recent_games(player_id, last_n=max_games, team_id=team_id,
+                                   before_date=before_date, days_back=days_back)
 
 
 def get_player_history_vs_opponent(player_id: int, team_id: int, opp_id: int, before_date: str,
@@ -478,11 +504,7 @@ def get_player_history_vs_opponent(player_id: int, team_id: int, opp_id: int, be
     days_back rather than a second scoreboard-scanning implementation; empty list (not an error)
     if the two teams haven't played yet this season, which is common and expected — WNBA teams
     typically meet only 2-4 times across a full season."""
-    try:
-        days_back = max((datetime.strptime(before_date, "%Y-%m-%d")
-                        - datetime.strptime(SEASON_START, "%Y-%m-%d")).days + 1, 1)
-    except ValueError:
-        days_back = 200
+    days_back = _days_since_season_start(before_date)
     games = get_team_recent_game_ids(team_id, before_date, n=82, days_back=days_back)
     matchups = []
     for g in games:

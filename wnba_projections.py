@@ -287,25 +287,75 @@ def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[int, Dict[str, floa
 
 # --------------------------------------------------------------------------- Matchup Lab
 def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_recent_allowed: Dict[str, float],
-                          opp_season_allowed: Dict[str, float]) -> List[Dict]:
+                          opp_season_allowed: Dict[str, float],
+                          season_log: Optional[List[Dict]] = None) -> List[Dict]:
     """One row per market (Points/Rebounds/Assists/Threes Made) for Matchup Lab's deep-dive on a
-    single player vs their tonight's opponent, combining three real signals:
+    single player vs their tonight's opponent, combining real signals:
       - Recent Avg: the player's own last-10-game average (the same number the model prices off).
-      - H2H Avg: how this exact player has done against THIS SPECIFIC opponent this season, if
-        they've met (WNBA teams typically play each other 2-4 times a season — h2h_log can
-        legitimately be empty, which is reported honestly, not padded with a guess).
+      - Season Avg: the player's full-season average (any opponent) — the baseline H2H Avg is
+        actually compared against, so a below-norm H2H reading reflects this SPECIFIC opponent's
+        effect on her, not just general hot/cold form drift (which Recent Avg alone can't
+        distinguish, since it's a moving 10-game window that could easily overlap with or exclude
+        the H2H games themselves).
+      - H2H Avg / Spread: how this exact player has done against THIS SPECIFIC opponent this
+        season, if they've met (WNBA teams typically play each other 2-4 times a season — h2h_log
+        can legitimately be empty, reported honestly, not padded with a guess). Spread is the
+        min-max range across those meetings; High Variance flags when that range is wide relative
+        to her season norm — a small H2H sample with wildly different games each time is a
+        different, less trustworthy signal than a small sample that's been consistent.
+      - Suppressed: True for at most one market — the one where her H2H performance is
+        distinctly LOWER (relative to her season norm) than her other markets are against this
+        same opponent. This is the closest honest answer to "how does this team specifically
+        defend her" that box-score data supports: not scheme detail, just which specific stat
+        category dips more than the others when she plays this team.
       - Defense Trend: this opponent's recent (last 10) allowed rate vs. their own season-long
         allowed rate — are they trending looser or tighter defensively lately, independent of how
         they've done over the full season.
     Pure synthesis, no network calls — the caller (the page) fetches h2h_log / opp_recent_allowed
-    / opp_season_allowed via wnba_engine and passes them in already-fetched."""
+    / opp_season_allowed / season_log via wnba_engine and passes them in already-fetched."""
+    # First pass: season averages and H2H-vs-season ratios for every market, needed up front so
+    # the "which market is disproportionately suppressed" comparison can see all four at once.
+    season_avgs: Dict[str, Optional[float]] = {}
+    h2h_avgs: Dict[str, Optional[float]] = {}
+    ratios: Dict[str, float] = {}
+    for _mkey, (col, _disp, _line) in _MARKET_SPEC.items():
+        stat_key = _STAT_KEY[col]
+        if season_log:
+            svals = [g.get(stat_key, 0.0) for g in season_log]
+            season_avgs[stat_key] = (sum(svals) / len(svals)) if svals else None
+        else:
+            season_avgs[stat_key] = None
+        hvals = [g.get(stat_key, 0.0) for g in h2h_log]
+        h2h_avgs[stat_key] = (sum(hvals) / len(hvals)) if hvals else None
+        sa = season_avgs[stat_key]
+        ha = h2h_avgs[stat_key]
+        if sa and sa > 0 and ha is not None:
+            ratios[stat_key] = ha / sa
+
+    # A market is "suppressed" only if it's the clear outlier: meaningfully below her season norm
+    # AND distinctly lower than her other markets against this same opponent — not just "every
+    # market dipped a little," which is more likely ordinary variance than a targeted effect.
+    suppressed_key = None
+    if len(ratios) >= 2:
+        ranked = sorted(ratios.items(), key=lambda kv: kv[1])
+        lowest_key, lowest_val = ranked[0]
+        next_val = ranked[1][1]
+        if lowest_val < 0.75 and (next_val - lowest_val) >= 0.15:
+            suppressed_key = lowest_key
+
     out: List[Dict] = []
     for _mkey, (col, disp, _line) in _MARKET_SPEC.items():
         stat_key = _STAT_KEY[col]
         recent_avg = row.get(col, 0.0)
+        season_avg = season_avgs.get(stat_key)
+        h2h_avg = h2h_avgs.get(stat_key)
 
-        h2h_values = [g.get(stat_key, 0.0) for g in h2h_log]
-        h2h_avg = (sum(h2h_values) / len(h2h_values)) if h2h_values else None
+        hvals = [g.get(stat_key, 0.0) for g in h2h_log]
+        h2h_spread = f"{min(hvals):.0f}\u2013{max(hvals):.0f}" if len(hvals) >= 2 else None
+        high_variance = False
+        if len(hvals) >= 2 and season_avg and season_avg > 0:
+            spread = max(hvals) - min(hvals)
+            high_variance = spread > season_avg * 0.75   # a wide swing relative to her own norm
 
         recent_allowed = opp_recent_allowed.get(stat_key, 0.0)
         season_allowed = opp_season_allowed.get(stat_key, 0.0)
@@ -320,8 +370,12 @@ def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_recent_allowed: Di
         out.append({
             "Market": disp,
             "Recent Avg": recent_avg,
-            "H2H Games": len(h2h_values),
+            "Season Avg": round(season_avg, 1) if season_avg is not None else None,
+            "H2H Games": len(hvals),
             "H2H Avg": round(h2h_avg, 1) if h2h_avg is not None else None,
+            "H2H Spread": h2h_spread,
+            "High Variance": high_variance,
+            "Suppressed": stat_key == suppressed_key,
             "Opp Recent Allowed": round(recent_allowed, 1) if recent_allowed else None,
             "Opp Season Allowed": round(season_allowed, 1) if season_allowed else None,
             "Defense Trend": round(trend, 2),

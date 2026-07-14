@@ -340,6 +340,104 @@ def test_build_matchup_profile_neutral_when_no_season_allowed_data():
     assert pts["Trend Tag"] == "➡️ Steady"
 
 
+# ----------------------------------------------------------------- season baseline
+def test_build_matchup_profile_reports_season_avg_alongside_recent_and_h2h():
+    row = {"PTS": 24.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}   # recent form running hot
+    season_log = [{"pts": p, "reb": 5, "ast": 3, "fg3m": 2} for p in (18, 20, 19, 21, 20)]  # season norm ~19.6
+    profile = WP.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={},
+                                       season_log=season_log)
+    pts = next(p for p in profile if p["Market"] == "Points")
+    assert pts["Season Avg"] == 19.6
+    assert pts["Recent Avg"] == 24.0   # confirms Season Avg is a genuinely separate baseline
+    print("✓ build_matchup_profile reports Season Avg as a real, separate baseline from Recent Avg")
+
+
+def test_build_matchup_profile_season_avg_none_without_season_log():
+    row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
+    profile = WP.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={})
+    pts = next(p for p in profile if p["Market"] == "Points")
+    assert pts["Season Avg"] is None
+
+
+# ----------------------------------------------------------------- H2H spread / high variance
+def test_build_matchup_profile_flags_high_variance_h2h():
+    row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
+    season_log = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2}] * 10   # season avg 20
+    # wild H2H swing: 4 and 32 across 2 games — spread of 28, way more than 75% of season avg (15)
+    h2h = [{"pts": 32, "reb": 5, "ast": 3, "fg3m": 2}, {"pts": 4, "reb": 5, "ast": 3, "fg3m": 2}]
+    profile = WP.build_matchup_profile(row, h2h_log=h2h, opp_recent_allowed={}, opp_season_allowed={},
+                                       season_log=season_log)
+    pts = next(p for p in profile if p["Market"] == "Points")
+    assert pts["High Variance"] is True
+    assert pts["H2H Spread"] == "4\u201332"
+    print("✓ build_matchup_profile flags a wide H2H swing as high variance, with the actual spread shown")
+
+
+def test_build_matchup_profile_no_variance_flag_for_consistent_h2h():
+    row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
+    season_log = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2}] * 10
+    h2h = [{"pts": 19, "reb": 5, "ast": 3, "fg3m": 2}, {"pts": 21, "reb": 5, "ast": 3, "fg3m": 2}]
+    profile = WP.build_matchup_profile(row, h2h_log=h2h, opp_recent_allowed={}, opp_season_allowed={},
+                                       season_log=season_log)
+    pts = next(p for p in profile if p["Market"] == "Points")
+    assert pts["High Variance"] is False
+
+
+def test_build_matchup_profile_no_spread_with_fewer_than_two_h2h_games():
+    row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
+    h2h = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2}]   # only 1 meeting -> no spread to report
+    profile = WP.build_matchup_profile(row, h2h_log=h2h, opp_recent_allowed={}, opp_season_allowed={})
+    pts = next(p for p in profile if p["Market"] == "Points")
+    assert pts["H2H Spread"] is None
+    assert pts["High Variance"] is False
+
+
+# ----------------------------------------------------------------- suppressed-market detection
+def test_build_matchup_profile_flags_the_one_suppressed_market():
+    row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
+    season_log = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2}] * 10
+    # Threes specifically get shut down (0.5 vs season avg 2 -> ratio 0.25); everything else ~normal.
+    h2h = [{"pts": 19, "reb": 5, "ast": 3, "fg3m": 0}, {"pts": 21, "reb": 5, "ast": 3, "fg3m": 1}]
+    profile = WP.build_matchup_profile(row, h2h_log=h2h, opp_recent_allowed={}, opp_season_allowed={},
+                                       season_log=season_log)
+    threes = next(p for p in profile if p["Market"] == "Threes Made")
+    others = [p for p in profile if p["Market"] != "Threes Made"]
+    assert threes["Suppressed"] is True
+    assert all(not p["Suppressed"] for p in others)
+    print("✓ build_matchup_profile correctly isolates the one market that's distinctly suppressed")
+
+
+def test_build_matchup_profile_no_suppression_flag_when_everything_dips_evenly():
+    # If EVERY market is a little lower vs this opponent, that's not a targeted effect on one
+    # skill — it's more likely just a tougher game/team overall. Nothing should be flagged.
+    row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
+    season_log = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2}] * 10
+    h2h = [{"pts": 17, "reb": 4.3, "ast": 2.6, "fg3m": 1.7}]   # all ~85% of season norm, evenly
+    profile = WP.build_matchup_profile(row, h2h_log=h2h, opp_recent_allowed={}, opp_season_allowed={},
+                                       season_log=season_log)
+    assert all(not p["Suppressed"] for p in profile)
+    print("✓ build_matchup_profile does not flag suppression when every market dips evenly (not a targeted effect)")
+
+
+def test_build_matchup_profile_no_suppression_when_all_low_but_not_distinctly_separated():
+    # A tougher variant of the evenly-dipping case: every market IS below the 0.75 absolute
+    # threshold this time, but they're all close to each other (within 0.15) — still not a
+    # targeted single-market effect, just a genuinely tough game across the board.
+    row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
+    season_log = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2}] * 10
+    h2h = [{"pts": 13, "reb": 3.2, "ast": 1.9, "fg3m": 1.3}]   # all ~62-65% of season norm
+    profile = WP.build_matchup_profile(row, h2h_log=h2h, opp_recent_allowed={}, opp_season_allowed={},
+                                       season_log=season_log)
+    assert all(not p["Suppressed"] for p in profile)
+    print("✓ build_matchup_profile requires distinct separation, not just a low absolute ratio, to flag suppression")
+
+
+def test_build_matchup_profile_no_suppression_flag_without_enough_data():
+    row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
+    profile = WP.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={})
+    assert all(not p["Suppressed"] for p in profile)   # no h2h/season data at all -> nothing to flag
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

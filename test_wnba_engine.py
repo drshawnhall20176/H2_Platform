@@ -385,7 +385,7 @@ def test_get_player_recent_games_requires_team_id_and_before_date():
 def test_get_player_recent_games_pulls_from_team_games_via_boxscore(monkeypatch):
     E._response_cache.clear()
     monkeypatch.setattr(E, "get_team_recent_game_ids",
-                        lambda team_id, before_date, n=E.CFG.RECENT_GAMES_N: [
+                        lambda team_id, before_date, n=E.CFG.RECENT_GAMES_N, days_back=45: [
                             {"gameId": "g1", "date": "2026-07-13T23:00Z", "opp_id": 19, "opp_name": "Chicago Sky"},
                             {"gameId": "g2", "date": "2026-07-11T23:00Z", "opp_id": 16, "opp_name": "Washington Mystics"},
                         ])
@@ -577,6 +577,30 @@ def test_get_player_history_vs_opponent_days_back_spans_season_start(monkeypatch
     assert captured["days_back"] > 90
     print(f"✓ get_player_history_vs_opponent scans back to season start "
           f"(days_back={captured['days_back']}), not just the 45-day recent-form window")
+
+
+# ----------------------------------------------------------------- get_player_season_games
+def test_get_player_season_games_uses_wide_days_back(monkeypatch):
+    captured = {}
+
+    def fake_get_player_recent_games(player_id, last_n=10, team_id=None, before_date=None, days_back=45):
+        captured["last_n"] = last_n
+        captured["days_back"] = days_back
+        return []
+
+    monkeypatch.setattr(E, "get_player_recent_games", fake_get_player_recent_games)
+    E.get_player_season_games(111, team_id=20, before_date="2026-07-14")
+    assert captured["last_n"] == 82        # a full season's worth of games, not just 10
+    assert captured["days_back"] > 90      # spans back to season start, not the 45-day recency window
+    print(f"✓ get_player_season_games requests a season-wide window (days_back={captured['days_back']})")
+
+
+def test_get_player_season_games_delegates_correctly(monkeypatch):
+    season_log = [{"pts": 20.0, "reb": 5.0, "ast": 3.0, "fg3m": 2.0, "min": 30.0, "opp": "X", "date": "d"}] * 15
+    monkeypatch.setattr(E, "get_player_recent_games",
+                        lambda player_id, last_n=10, team_id=None, before_date=None, days_back=45: season_log)
+    result = E.get_player_season_games(111, team_id=20, before_date="2026-07-14")
+    assert result == season_log
 
 
 if __name__ == "__main__":
