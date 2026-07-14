@@ -53,6 +53,19 @@ _TIMEOUT = 15
 # fine for the lifetime of a single slate build. Tests should not rely on this persisting; see
 # test_wnba_engine.py's use of monkeypatch on _get_json_cached directly where caching matters.
 _response_cache: Dict[Tuple[str, Tuple], Optional[Dict]] = {}
+_diag_seen: set = set()   # keys already printed about — avoids repeating the same diagnostic line
+                          # once per player when a team/game is looked at by every player on it
+
+
+def _diag(msg: str) -> None:
+    """Stage-by-stage visibility for the ONE failure mode logging.exception can't catch: every
+    request succeeding (200 OK, valid JSON) while the parsing code quietly extracts nothing,
+    because the real shape doesn't match what was coded against. print() (not the `logging`
+    module) specifically because Streamlit Cloud's log viewer reliably captures stdout — a prior
+    round of debugging this exact module found zero logger.exception output even after a
+    confirmed-fresh rebuild+refresh, which points at logging-module output not surfacing on this
+    platform the way stdout does, not at zero problems existing."""
+    print(f"[WNBA] {msg}", flush=True)
 
 
 def _get_json(url: str, params: Optional[Dict] = None) -> Optional[Dict]:
@@ -83,7 +96,10 @@ def get_schedule(date_str: str) -> List[Dict[str, Any]]:
     espn_date = date_str.replace("-", "")   # ESPN wants YYYYMMDD; we use YYYY-MM-DD everywhere else
     data = _get_json(f"{SITE_API}/scoreboard", params={"dates": espn_date})
     if not data:
+        _diag(f"get_schedule({date_str}): scoreboard fetch returned nothing (request failed)")
         return []
+    if "events" not in data:
+        _diag(f"get_schedule({date_str}): response had no 'events' key — keys were {list(data.keys())}")
 
     games = []
     for event in data.get("events", []):
@@ -107,6 +123,7 @@ def get_schedule(date_str: str) -> List[Dict[str, Any]]:
         except (KeyError, TypeError, ValueError):
             logger.exception("WNBA scoreboard event had an unexpected shape: %s", event.get("id"))
             continue
+    _diag(f"get_schedule({date_str}): {len(games)} game(s) found ({len(data.get('events', []))} raw events)")
     return games
 
 
@@ -117,7 +134,10 @@ def get_team_roster(team_id: int) -> List[Dict[str, Any]]:
     (not an exception) on any fetch failure, so one bad team doesn't take down the whole build."""
     data = _get_json(f"{SITE_API}/teams/{team_id}/roster")
     if not data:
+        _diag(f"get_team_roster({team_id}): roster fetch returned nothing (request failed)")
         return []
+    if "athletes" not in data:
+        _diag(f"get_team_roster({team_id}): response had no 'athletes' key — keys were {list(data.keys())}")
     out = []
     for group in data.get("athletes", []):
         for item in group.get("items", []):
@@ -128,6 +148,7 @@ def get_team_roster(team_id: int) -> List[Dict[str, Any]]:
                 out.append({"id": int(pid), "name": item.get("displayName", "Unknown")})
             except (TypeError, ValueError):
                 continue
+    _diag(f"get_team_roster({team_id}): {len(out)} player(s) found")
     return out
 
 
@@ -161,7 +182,11 @@ def get_team_recent_game_ids(team_id: int, before_date: str,
     start = end - timedelta(days=45)
     date_range = f"{start.strftime('%Y%m%d')}-{end.strftime('%Y%m%d')}"
     data = _get_json_cached(f"{SITE_API}/scoreboard", params={"dates": date_range, "limit": 200})
+    diag_key = (team_id, before_date)
     if not data:
+        if diag_key not in _diag_seen:
+            _diag(f"get_team_recent_game_ids(team={team_id}): trailing-window scoreboard fetch returned nothing")
+            _diag_seen.add(diag_key)
         return []
 
     found: List[Tuple[str, str]] = []   # (game_id, date) so we can sort by date
@@ -183,7 +208,13 @@ def get_team_recent_game_ids(team_id: int, before_date: str,
             found.append((event["id"], event.get("date") or ""))
 
     found.sort(key=lambda g: g[1], reverse=True)
-    return [gid for gid, _ in found[:n]]
+    result = [gid for gid, _ in found[:n]]
+    if diag_key not in _diag_seen:
+        _diag(f"get_team_recent_game_ids(team={team_id}, before={before_date}): "
+             f"{len(result)} completed game(s) found in trailing 45-day window "
+             f"({len(data.get('events', []))} raw events scanned)")
+        _diag_seen.add(diag_key)
+    return result
 
 
 def get_game_boxscore(game_id: str) -> Dict[int, Dict[str, float]]:
@@ -192,9 +223,16 @@ def get_game_boxscore(game_id: str) -> Dict[int, Dict[str, float]]:
     _get_json_cached). Empty dict on any failure or if a player didn't play (didNotPlay=True)."""
     data = _get_json_cached(f"{SITE_API}/summary", params={"event": game_id})
     if not data:
+        if game_id not in _diag_seen:
+            _diag(f"get_game_boxscore({game_id}): summary fetch returned nothing")
+            _diag_seen.add(game_id)
         return {}
     out: Dict[int, Dict[str, float]] = {}
-    teams = ((data.get("boxscore") or {}).get("teams")) or []
+    boxscore = data.get("boxscore") or {}
+    if "boxscore" not in data:
+        if game_id not in _diag_seen:
+            _diag(f"get_game_boxscore({game_id}): response had no 'boxscore' key — keys were {list(data.keys())}")
+    teams = boxscore.get("teams") or []
     for team_block in teams:
         for player_group in team_block.get("players", []):
             for stat_group in player_group.get("statistics", []):
@@ -219,6 +257,10 @@ def get_game_boxscore(game_id: str) -> Dict[int, Dict[str, float]]:
                         "fg3m": row.get("3PT", 0.0),
                         "min": row.get("MIN", 0.0),
                     }
+    if game_id not in _diag_seen:
+        _diag(f"get_game_boxscore({game_id}): {len(out)} player(s) extracted "
+             f"({len(teams)} team block(s) in response)")
+        _diag_seen.add(game_id)
     return out
 
 
@@ -284,8 +326,10 @@ def build_slate(date_str: str, min_avg_minutes: float = CFG.MIN_AVG_MINUTES,
       meta : list of per-game dicts (label, names, game_date)
     """
     _response_cache.clear()   # don't serve a previous slate-date's cached scoreboard/boxscores
+    _diag_seen.clear()
     games = get_schedule(date_str)
     if not games:
+        _diag(f"build_slate({date_str}): 0 games -> nothing to build, stopping here")
         return [], []
 
     meta: List[Dict] = []
@@ -298,6 +342,7 @@ def build_slate(date_str: str, min_avg_minutes: float = CFG.MIN_AVG_MINUTES,
                                               (g["away_id"], g["away_name"], g["home_name"])):
             for player in get_team_roster(team_id):
                 tasks.append((player, team_name, opp_name, label, g.get("game_date"), team_id))
+    _diag(f"build_slate({date_str}): {len(games)} game(s) -> {len(tasks)} roster slot(s) to project")
 
     def fetch_one(item):
         player, team_name, opp_name, label, game_date, team_id = item
@@ -308,4 +353,6 @@ def build_slate(date_str: str, min_avg_minutes: float = CFG.MIN_AVG_MINUTES,
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         rows = [r for r in ex.map(fetch_one, tasks) if r is not None]
 
+    _diag(f"build_slate({date_str}): {len(rows)} player(s) cleared the {min_avg_minutes}-min "
+         f"rotation bar and made the final slate (of {len(tasks)} roster slots checked)")
     return rows, meta
