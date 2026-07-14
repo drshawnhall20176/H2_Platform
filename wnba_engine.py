@@ -331,6 +331,23 @@ def get_game_boxscore(game_id: str) -> Dict[int, Dict[str, float]]:
     return out
 
 
+def _find_team_stat(stats_by_name: Dict[str, str], *candidates: str) -> float:
+    """Look up a team stat by trying each candidate name, exact match first, falling back to a
+    prefix match. The prefix fallback exists because a real CDN boxscore example (confirmed live,
+    ScrapeCreators' walkthrough) showed made-count stats under COMBO names —
+    "threePointFieldGoalsMade-threePointFieldGoalsAttempted", not a bare "threePointFieldGoalsMade"
+    key — the same naming pattern already found and handled for player-level stats. _parse_stat_
+    value's existing "X-Y -> take X" logic handles the combo correctly once the right key is
+    found; the fix here is finding it. Returns 0.0 if nothing matches any candidate."""
+    for c in candidates:
+        if c in stats_by_name:
+            return _parse_stat_value(stats_by_name[c])
+    for name, raw in stats_by_name.items():
+        if any(name.startswith(c) for c in candidates):
+            return _parse_stat_value(raw)
+    return 0.0
+
+
 def get_game_team_totals(game_id: str) -> Dict[int, Dict[str, float]]:
     """{team_id: {pts, reb, ast, fg3m}} TEAM-level totals for a game — from `boxscore.teams[]`
     (the same CDN response get_game_boxscore already fetches and caches; calling both for the
@@ -338,12 +355,12 @@ def get_game_team_totals(game_id: str) -> Dict[int, Dict[str, float]]:
     foundation for "stats allowed" (Hot Hand Engine's opponent-adjustment signal): a team's
     defensive profile is just the OTHER team's totals in each of their recent games.
 
-    Team-level `statistics[].name` values ("points", "rebounds", "assists",
-    "threePointFieldGoalsMade") are inferred from the same naming convention confirmed live on
-    the scoreboard endpoint's season-cumulative team statistics — not yet confirmed against a
-    real *boxscore* team-stats block specifically. Same honesty as every other endpoint in this
-    module: verify on first live use; diagnostic dump fires automatically if extraction is empty
-    despite team blocks being present."""
+    Field-name matching is defensive (see _find_team_stat) because the exact naming convention
+    for THIS specific block (team-level, inside a boxscore, as opposed to player-level or
+    season-cumulative scoreboard stats) hasn't been fully confirmed live — every other endpoint
+    in this module has had at least one naming surprise, so multiple candidates are tried rather
+    than a single guess. Diagnostic dump still fires automatically if extraction stays empty
+    despite team blocks being present, for whatever surprise turns up next."""
     data = _get_json_cached(CDN_API, params={"xhr": "1", "gameId": game_id})
     if not data:
         return {}
@@ -357,16 +374,16 @@ def get_game_team_totals(game_id: str) -> Dict[int, Dict[str, float]]:
             tid = int(team_info.get("id"))
         except (TypeError, ValueError):
             continue
-        stats = {}
+        stats_by_name = {}
         for s in team_block.get("statistics", []):
             name = s.get("name")
             if name:
-                stats[name] = _parse_stat_value(s.get("displayValue"))
+                stats_by_name[name] = s.get("displayValue")
         out[tid] = {
-            "pts": stats.get("points", 0.0),
-            "reb": stats.get("rebounds", 0.0),
-            "ast": stats.get("assists", 0.0),
-            "fg3m": stats.get("threePointFieldGoalsMade", 0.0),
+            "pts": _find_team_stat(stats_by_name, "points"),
+            "reb": _find_team_stat(stats_by_name, "totalRebounds", "rebounds"),
+            "ast": _find_team_stat(stats_by_name, "assists"),
+            "fg3m": _find_team_stat(stats_by_name, "threePointFieldGoalsMade"),
         }
 
     dump_key = f"_team_totals_shape_dump:{game_id}"

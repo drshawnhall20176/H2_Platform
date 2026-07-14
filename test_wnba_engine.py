@@ -461,6 +461,42 @@ def test_get_game_team_totals_empty_on_fetch_failure(monkeypatch):
     assert E.get_game_team_totals("g1") == {}
 
 
+def test_get_game_team_totals_handles_real_combo_named_fields(monkeypatch):
+    # Regression test for a real production bug: Hot Hand Engine showed "Opp Allows" = 0.0 for
+    # EVERY player on a real slate. Root cause, confirmed against a live example (ScrapeCreators'
+    # documented CDN boxscore walkthrough): team-level made-count stats use COMBO names —
+    # "threePointFieldGoalsMade-threePointFieldGoalsAttempted" — not the bare
+    # "threePointFieldGoalsMade" key this module originally guessed. This fixture uses that exact
+    # real shape, plus "totalRebounds" instead of "rebounds" (the same naming split already found
+    # for player-level stats), to confirm the fallback matching actually handles both surprises.
+    E._response_cache.clear()
+    fake_cdn = {
+        "gamepackageJSON": {
+            "boxscore": {
+                "teams": [
+                    {"team": {"id": "20"}, "statistics": [
+                        {"name": "fieldGoalsMade-fieldGoalsAttempted", "displayValue": "33-82", "label": "FG"},
+                        {"name": "fieldGoalPct", "displayValue": "40.2"},
+                        {"name": "threePointFieldGoalsMade-threePointFieldGoalsAttempted",
+                         "displayValue": "9-25", "label": "3PT"},
+                        {"name": "threePointFieldGoalPct", "displayValue": "36.0"},
+                        {"name": "totalRebounds", "displayValue": "36"},
+                        {"name": "assists", "displayValue": "20"},
+                        {"name": "points", "displayValue": "88"},
+                    ]},
+                ]
+            }
+        }
+    }
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_cdn)
+    totals = E.get_game_team_totals("g1")
+    assert totals[20]["fg3m"] == 9.0     # from the combo key, makes (left side), not attempts
+    assert totals[20]["reb"] == 36.0     # from "totalRebounds", not a "rebounds" key that isn't there
+    assert totals[20]["pts"] == 88.0
+    assert totals[20]["ast"] == 20.0
+    print("✓ get_game_team_totals correctly handles combo-named keys and totalRebounds/rebounds naming split")
+
+
 # ----------------------------------------------------------------- get_team_recent_allowed_stats
 def test_get_team_recent_allowed_stats_averages_opponent_totals(monkeypatch):
     E._response_cache.clear()

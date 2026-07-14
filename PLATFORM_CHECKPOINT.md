@@ -4,7 +4,7 @@
 one sport-selector foundation). MLB runs exactly as the standalone did originally; WNBA is now a
 second real, priced sport — not a placeholder.
 
-## What's in this checkpoint (all tested — 204/204 tests green)
+## What's in this checkpoint (all tested — 205/205 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -252,6 +252,22 @@ Hot Hand Engine's opponent-defense foundation rather than re-deriving it.
   end-to-end with synthetic data before shipping, including a genuine head-to-head match
   correctly filtered from other non-matching opponents — the same integration-test discipline
   that caught the `curate_selections` bug earlier in Stage 3.
+
+### Production fix: team-level stat field names (2026-07-14)
+Hot Hand Engine showed `Opp Allows = 0.0` and `Matchup Factor = 1.00×` for every single row on a
+real slate — confirmed as a systematic bug, not per-team randomness. Root cause: `get_game_team_
+totals`'s field-name guesses for `boxscore.teams[].statistics[].name` were wrong, the same class
+of surprise found repeatedly throughout the WNBA build. Confirmed live this time (not another
+blind guess) against a real documented CDN boxscore example (ScrapeCreators' walkthrough):
+made-count stats use COMBO names — `"threePointFieldGoalsMade-threePointFieldGoalsAttempted"`,
+not a bare `"threePointFieldGoalsMade"` key. Fixed with `_find_team_stat`, which tries multiple
+candidate names (exact match, then prefix match) per stat rather than a single guess — also
+covers the `"totalRebounds"` vs `"rebounds"` naming split already found for player-level stats,
+in case it recurs here too. **This fix benefits Matchup Lab as well as Hot Hand Engine** — both
+pages' opponent-defense signals (`Opp Recent Allowed`/`Opp Season Allowed`/`Defense Trend`) are
+built on this exact function, so both were silently returning all-zero opponent data. Locked in
+with `test_get_game_team_totals_handles_real_combo_named_fields`, using the exact real-world
+combo-key shape rather than a synthetic simple-name fixture that wouldn't have caught this.
 
 ### Theme-proof gradients
 - **`styling.py`** — per-cell text contrast (dark on pale, white on deep), benchmark-anchored
