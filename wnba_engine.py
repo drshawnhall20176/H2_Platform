@@ -271,6 +271,22 @@ def get_game_boxscore(game_id: str) -> Dict[int, Dict[str, float]]:
                         "fg3m": row.get("3PT", 0.0),
                         "min": row.get("MIN", 0.0),
                     }
+
+    # One-time deep dump (not per-game — every game has the same shape, so print it once) when
+    # extraction comes up empty despite team blocks being present, so the exact divergence point
+    # is visible without another live-response round-trip.
+    if not out and teams and "_boxscore_shape_dump" not in _diag_seen:
+        _diag_seen.add("_boxscore_shape_dump")
+        tb0 = teams[0]
+        _diag(f"get_game_boxscore shape dump: team_block keys = {list(tb0.keys())}")
+        players_val = tb0.get("players")
+        _diag(f"get_game_boxscore shape dump: team_block['players'] = "
+             f"{type(players_val).__name__}, len={len(players_val) if hasattr(players_val, '__len__') else 'n/a'}")
+        if players_val:
+            pg0 = players_val[0]
+            _diag(f"get_game_boxscore shape dump: players[0] keys = "
+                 f"{list(pg0.keys()) if isinstance(pg0, dict) else type(pg0).__name__}")
+
     if game_id not in _diag_seen:
         _diag(f"get_game_boxscore({game_id}): {len(out)} player(s) extracted "
              f"({len(teams)} team block(s) in response)")
