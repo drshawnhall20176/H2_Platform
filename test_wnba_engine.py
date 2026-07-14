@@ -96,6 +96,9 @@ def test_build_slate_assembles_rows_from_mocked_fetches(monkeypatch):
     assert names == {"Home Starter", "Away Starter"}   # bench player filtered by minutes
     home_row = next(r for r in rows if r["Player"] == "Home Starter")
     assert home_row["Team"] == "Atlanta Dream" and home_row["Opp"] == "Chicago Sky"
+    assert home_row["_opp_id"] == 1611661329   # Chicago Sky's id -- needed for Hot Hand Engine's defense lookup
+    away_row = next(r for r in rows if r["Player"] == "Away Starter")
+    assert away_row["_opp_id"] == 1611661330
     print("✓ build_slate wires schedule -> rosters -> game logs -> filtered rows correctly")
 
 
@@ -252,23 +255,29 @@ def test_get_team_recent_game_ids_filters_to_completed_games_for_that_team(monke
         "events": [
             {"id": "g1", "date": "2026-07-10T00:00Z",
              "status": {"type": {"completed": True}},
-             "competitions": [{"competitors": [{"team": {"id": "20"}}, {"team": {"id": "19"}}]}]},
+             "competitions": [{"competitors": [{"team": {"id": "20", "displayName": "Atlanta Dream"}},
+                                               {"team": {"id": "19", "displayName": "Chicago Sky"}}]}]},
             {"id": "g2", "date": "2026-07-12T00:00Z",   # not this team -> excluded
              "status": {"type": {"completed": True}},
-             "competitions": [{"competitors": [{"team": {"id": "5"}}, {"team": {"id": "19"}}]}]},
+             "competitions": [{"competitors": [{"team": {"id": "5", "displayName": "Dallas Wings"}},
+                                               {"team": {"id": "19", "displayName": "Chicago Sky"}}]}]},
             {"id": "g3", "date": "2026-07-14T00:00Z",   # this team, but not completed -> excluded
              "status": {"type": {"completed": False}},
-             "competitions": [{"competitors": [{"team": {"id": "20"}}, {"team": {"id": "16"}}]}]},
+             "competitions": [{"competitors": [{"team": {"id": "20", "displayName": "Atlanta Dream"}},
+                                               {"team": {"id": "16", "displayName": "Washington Mystics"}}]}]},
             {"id": "g4", "date": "2026-07-13T00:00Z",
              "status": {"type": {"completed": True}},
-             "competitions": [{"competitors": [{"team": {"id": "20"}}, {"team": {"id": "9"}}]}]},
+             "competitions": [{"competitors": [{"team": {"id": "20", "displayName": "Atlanta Dream"}},
+                                               {"team": {"id": "9", "displayName": "New York Liberty"}}]}]},
         ]
     }
     monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_scoreboard)
 
-    ids = E.get_team_recent_game_ids(20, "2026-07-14", n=10)
-    assert ids == ["g4", "g1"]   # both g1/g4 involve team 20 and are completed, newest first
-    print("✓ get_team_recent_game_ids keeps only this team's completed games, newest first")
+    games = E.get_team_recent_game_ids(20, "2026-07-14", n=10)
+    assert [g["gameId"] for g in games] == ["g4", "g1"]   # both involve team 20, completed, newest first
+    assert games[0]["opp_name"] == "New York Liberty"
+    assert games[1]["opp_name"] == "Chicago Sky"
+    print("✓ get_team_recent_game_ids keeps only this team's completed games, newest first, with opponent")
 
 
 def test_get_team_recent_game_ids_excludes_games_on_the_target_date_itself(monkeypatch):
@@ -279,15 +288,17 @@ def test_get_team_recent_game_ids_excludes_games_on_the_target_date_itself(monke
         "events": [
             {"id": "g_before", "date": "2026-07-13T00:00Z",
              "status": {"type": {"completed": True}},
-             "competitions": [{"competitors": [{"team": {"id": "20"}}, {"team": {"id": "19"}}]}]},
+             "competitions": [{"competitors": [{"team": {"id": "20", "displayName": "Atlanta Dream"}},
+                                               {"team": {"id": "19", "displayName": "Chicago Sky"}}]}]},
             {"id": "g_same_day", "date": "2026-07-14T00:00Z",   # same calendar day as before_date
              "status": {"type": {"completed": True}},
-             "competitions": [{"competitors": [{"team": {"id": "20"}}, {"team": {"id": "16"}}]}]},
+             "competitions": [{"competitors": [{"team": {"id": "20", "displayName": "Atlanta Dream"}},
+                                               {"team": {"id": "16", "displayName": "Washington Mystics"}}]}]},
         ]
     }
     monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_scoreboard)
-    ids = E.get_team_recent_game_ids(20, "2026-07-14", n=10)
-    assert ids == ["g_before"]
+    games = E.get_team_recent_game_ids(20, "2026-07-14", n=10)
+    assert [g["gameId"] for g in games] == ["g_before"]
     print("✓ get_team_recent_game_ids excludes games on before_date itself, not just future ones")
 
 
@@ -372,7 +383,10 @@ def test_get_player_recent_games_requires_team_id_and_before_date():
 def test_get_player_recent_games_pulls_from_team_games_via_boxscore(monkeypatch):
     E._response_cache.clear()
     monkeypatch.setattr(E, "get_team_recent_game_ids",
-                        lambda team_id, before_date, n=E.CFG.RECENT_GAMES_N: ["g1", "g2"])
+                        lambda team_id, before_date, n=E.CFG.RECENT_GAMES_N: [
+                            {"gameId": "g1", "date": "2026-07-13T23:00Z", "opp_id": 19, "opp_name": "Chicago Sky"},
+                            {"gameId": "g2", "date": "2026-07-11T23:00Z", "opp_id": 16, "opp_name": "Washington Mystics"},
+                        ])
     boxscores = {
         "g1": {111: {"pts": 20.0, "reb": 5.0, "ast": 4.0, "fg3m": 2.0, "min": 30.0}},
         "g2": {111: {"pts": 18.0, "reb": 6.0, "ast": 3.0, "fg3m": 1.0, "min": 28.0},
@@ -381,11 +395,11 @@ def test_get_player_recent_games_pulls_from_team_games_via_boxscore(monkeypatch)
     monkeypatch.setattr(E, "get_game_boxscore", lambda gid: boxscores.get(gid, {}))
 
     games = E.get_player_recent_games(111, last_n=10, team_id=20, before_date="2026-07-14")
-    assert games == [
-        {"pts": 20.0, "reb": 5.0, "ast": 4.0, "fg3m": 2.0, "min": 30.0},
-        {"pts": 18.0, "reb": 6.0, "ast": 3.0, "fg3m": 1.0, "min": 28.0},
-    ]
-    print("✓ get_player_recent_games pulls this player's line out of each recent game's shared boxscore")
+    assert len(games) == 2
+    assert games[0]["pts"] == 20.0 and games[0]["opp"] == "Chicago Sky" and games[0]["date"] == "2026-07-13T23:00Z"
+    assert games[1]["pts"] == 18.0 and games[1]["opp"] == "Washington Mystics"
+    print("✓ get_player_recent_games pulls this player's line out of each recent game's shared "
+          "boxscore, tagged with the actual opponent and date")
 
 
 # ----------------------------------------------------------------- get_player_results
@@ -407,6 +421,72 @@ def test_get_player_results_merges_across_games(monkeypatch):
 def test_get_player_results_empty_when_no_games(monkeypatch):
     monkeypatch.setattr(E, "get_schedule", lambda date_str: [])
     assert E.get_player_results("2026-07-13") == {}
+
+
+# ----------------------------------------------------------------- get_game_team_totals
+def test_get_game_team_totals_parses_both_teams(monkeypatch):
+    E._response_cache.clear()
+    fake_cdn = {
+        "gamepackageJSON": {
+            "boxscore": {
+                "teams": [
+                    {"team": {"id": "20"}, "statistics": [
+                        {"name": "points", "displayValue": "88"},
+                        {"name": "rebounds", "displayValue": "36"},
+                        {"name": "assists", "displayValue": "20"},
+                        {"name": "threePointFieldGoalsMade", "displayValue": "9"},
+                    ]},
+                    {"team": {"id": "19"}, "statistics": [
+                        {"name": "points", "displayValue": "81"},
+                        {"name": "rebounds", "displayValue": "31"},
+                        {"name": "assists", "displayValue": "17"},
+                        {"name": "threePointFieldGoalsMade", "displayValue": "7"},
+                    ]},
+                ]
+            }
+        }
+    }
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_cdn)
+    totals = E.get_game_team_totals("g1")
+    assert totals[20] == {"pts": 88.0, "reb": 36.0, "ast": 20.0, "fg3m": 9.0}
+    assert totals[19]["pts"] == 81.0
+    print("✓ get_game_team_totals parses team-level totals for both teams")
+
+
+def test_get_game_team_totals_empty_on_fetch_failure(monkeypatch):
+    E._response_cache.clear()
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: None)
+    assert E.get_game_team_totals("g1") == {}
+
+
+# ----------------------------------------------------------------- get_team_recent_allowed_stats
+def test_get_team_recent_allowed_stats_averages_opponent_totals(monkeypatch):
+    E._response_cache.clear()
+    monkeypatch.setattr(E, "get_team_recent_game_ids",
+                        lambda team_id, before_date, n=E.CFG.RECENT_GAMES_N: [
+                            {"gameId": "g1", "date": "2026-07-12T00:00Z", "opp_id": 19, "opp_name": "Chicago Sky"},
+                            {"gameId": "g2", "date": "2026-07-10T00:00Z", "opp_id": 16, "opp_name": "Washington Mystics"},
+                        ])
+    game_totals = {
+        "g1": {20: {"pts": 90.0, "reb": 35.0, "ast": 20.0, "fg3m": 8.0},
+              19: {"pts": 78.0, "reb": 30.0, "ast": 16.0, "fg3m": 6.0}},
+        "g2": {20: {"pts": 85.0, "reb": 33.0, "ast": 19.0, "fg3m": 9.0},
+              16: {"pts": 82.0, "reb": 32.0, "ast": 18.0, "fg3m": 8.0}},
+    }
+    monkeypatch.setattr(E, "get_game_team_totals", lambda gid: game_totals.get(gid, {}))
+
+    allowed = E.get_team_recent_allowed_stats(20, "2026-07-14", n=10)
+    # team 20's opponents scored 78 and 82 -> allowed avg pts = 80.0
+    assert allowed["pts"] == 80.0
+    assert allowed["reb"] == 31.0
+    print("✓ get_team_recent_allowed_stats correctly averages the OPPONENT's totals, not this team's own")
+
+
+def test_get_team_recent_allowed_stats_empty_when_no_recent_games(monkeypatch):
+    E._response_cache.clear()
+    monkeypatch.setattr(E, "get_team_recent_game_ids", lambda team_id, before_date, n=10: [])
+    allowed = E.get_team_recent_allowed_stats(20, "2026-07-14")
+    assert allowed == {"pts": 0.0, "reb": 0.0, "ast": 0.0, "fg3m": 0.0}
 
 
 if __name__ == "__main__":

@@ -42,11 +42,14 @@ def run():
     here = Path(__file__).parent
     views_dir = here / "views"
 
-    # Pages that only make sense for baseball (concepts like HR/pitching don't generalize) are
-    # hidden entirely — not shown greyed-out — when a non-MLB sport is active. Shared proof pages
-    # (Edge Board, Bet Log, Track Record, Media Room, Podcast, Retrospective) stay visible for
-    # every sport and handle "engine not wired yet" gracefully inside the page itself.
-    mlb_only_leads = {"1", "2", "10"}  # Pitching Lab, Dinger Engine, Matchup Lab
+    # Pages that only make sense for ONE specific sport are hidden entirely — not shown greyed
+    # out — when a different sport is active. Shared proof pages (Edge Board, Bet Log, Track
+    # Record, Media Room, Podcast, Retrospective) stay visible for every sport and handle "engine
+    # not wired yet" gracefully inside the page itself.
+    sport_only_leads = {
+        "1": "MLB", "2": "MLB", "10": "MLB",   # Pitching Lab, Dinger Engine, Matchup Lab
+        "11": "WNBA",                          # Hot Hand Engine (opponent-adjusted leaderboard)
+    }
 
     # Internal tools kept off the Discord/public build — matched by TITLE (not page number) so a
     # future re-numbering of the views/ files can't silently un-gate one of these by accident.
@@ -67,6 +70,7 @@ def run():
         "8": ("Podcast Studio", "🎙️", "podcast_studio"),
         "9": ("Track Record",   "📊", "track_record"),
         "10": ("Matchup Lab",   "🔬", "matchup_lab"),
+        "11": ("Hot Hand Engine", "🔥", "hot_hand_engine"),
     }
 
     def lead(name: str) -> str:
@@ -83,8 +87,9 @@ def run():
     pages = [st.Page(str(here / "Home.py"), title="Home", icon="⚾", url_path="home")]
     for f in view_files:
         key = lead(f.name)
-        if key in mlb_only_leads and active_sport != "MLB":
-            continue  # e.g. Dinger Engine makes no sense once NFL/NBA/etc. is selected
+        required_sport = sport_only_leads.get(key)
+        if required_sport and active_sport != required_sport:
+            continue  # e.g. Dinger Engine makes no sense once WNBA is selected, and vice versa
         title, icon, slug = meta.get(key, (f.stem, "📄", f"page_{key}"))
         if title in owner_only_titles and audience != "owner":
             continue  # Bet Log / Media Room / Podcast Studio / Edge Board: owner deployment only

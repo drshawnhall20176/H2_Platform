@@ -4,7 +4,7 @@
 one sport-selector foundation). MLB runs exactly as the standalone did originally; WNBA is now a
 second real, priced sport — not a placeholder.
 
-## What's in this checkpoint (all tested — 184/184 tests green)
+## What's in this checkpoint (all tested — 192/192 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -168,6 +168,36 @@ checked for what's actually MLB-specific vs. genuinely shared logic before touch
   `default_board_from_index`) — a small sample shouldn't claim 100% certainty anyway, not just a
   display-crash workaround — plus `na_rep="—"` on the Best Bets format call as a second line of
   defense. Locked in with `test_build_best_bets_never_produces_a_none_fair_price`.
+
+### Hot Hand Engine — WNBA's opponent-adjustment layer (2026-07-14)
+New WNBA-only page (`views/11_Hot_Hand_Engine.py`), plus a small Best Bets fix requested alongside
+it (the Diagnostic Inspector's WNBA game log now shows real opponent + date instead of an
+uninformative "Game #").
+- **Not a literal Dinger Engine/Matchup Lab port** — those lean on Statcast (pitch-level tracking
+  data with no free WNBA equivalent). Conceptualized instead around a real signal that already
+  exists unused: every slate build fetches both teams' box scores, meaning opponent defensive
+  strength (recent PTS/REB/AST/3PM allowed) was sitting in already-fetched data.
+- **`wnba_engine.get_game_team_totals(game_id)`** — team-level per-game stats from
+  `boxscore.teams[]`, reusing the SAME cached CDN response `get_game_boxscore` already fetches for
+  that game (zero extra network cost when both are called for the same game).
+- **`wnba_engine.get_team_recent_allowed_stats(team_id, before_date, n)`** — averages the
+  OPPONENT's totals across a team's last n games (what they've been allowing, not scoring).
+- **`get_team_recent_game_ids` now returns richer dicts** (`{gameId, date, opp_id, opp_name}`, not
+  just IDs) — needed for the allowed-stats lookup, and incidentally what let the Best Bets
+  inspector fix show real opponent/date. `get_player_recent_games`'s game-log entries now carry
+  `opp`/`date` too. `build_slate`'s rows carry a new `_opp_id` field.
+- **`wnba_projections.build_hot_hand_board(rows, opp_allowed)`** — Matchup Score = player's recent
+  average × (opponent's allowed rate ÷ the average allowed rate across every opponent actually on
+  tonight's slate). Deliberately NOT a full-league scan (cheap, and honestly labeled as "relative
+  to tonight's other matchups," not a season-calibrated defensive rating). Missing opponent data
+  stays neutral (1.00×) rather than fabricating a boost or penalty.
+- **Deliberately kept separate from the priced probabilities** — Edge Board and Best Bets stay
+  recent-form-only on purpose. This is a new analytical signal on its own page, not something
+  silently folded into what a live betting board prices — a more conservative design choice given
+  the stakes of the latter.
+- Gated WNBA-only via a new generalized `sport_only_leads` mechanism in `streamlit_app.py`
+  (replacing the old MLB-specific `mlb_only_leads`), so this pattern is ready for any future
+  sport-specific analysis page without another refactor.
 
 ### Theme-proof gradients
 - **`styling.py`** — per-cell text contrast (dark on pale, white on deep), benchmark-anchored

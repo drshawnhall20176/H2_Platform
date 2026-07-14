@@ -184,12 +184,14 @@ def _parse_stat_value(raw) -> float:
 
 
 def get_team_recent_game_ids(team_id: int, before_date: str,
-                             n: int = CFG.RECENT_GAMES_N) -> List[str]:
-    """A team's last n COMPLETED game IDs STRICTLY BEFORE before_date (YYYY-MM-DD), most recent
-    first. Found by scanning the scoreboard across a 45-day trailing window and filtering to
-    games where this team appears as a competitor — reuses get_schedule's already-verified
-    scoreboard parsing rather than the separate, unverified teams/{id}/schedule endpoint. 45 days
-    comfortably covers n=10 games at the WNBA's ~2-4 games/week pace.
+                             n: int = CFG.RECENT_GAMES_N) -> List[Dict[str, Any]]:
+    """A team's last n COMPLETED games STRICTLY BEFORE before_date (YYYY-MM-DD), most recent
+    first: [{"gameId", "date", "opp_id", "opp_name"}, ...]. Found by scanning the scoreboard
+    across a 45-day trailing window and filtering to games where this team appears as a
+    competitor — reuses get_schedule's already-verified scoreboard parsing rather than the
+    separate, unverified teams/{id}/schedule endpoint. 45 days comfortably covers n=10 games at
+    the WNBA's ~2-4 games/week pace. Opponent name/id are captured here (not looked up
+    separately) since the scoreboard response already has them for free.
 
     "Strictly before" (not "at or before") matters beyond tonight's live board: called for
     tonight's date, the game being projected is still STATUS_SCHEDULED, so "completed" alone
@@ -208,7 +210,7 @@ def get_team_recent_game_ids(team_id: int, before_date: str,
             _diag_seen.add(diag_key)
         return []
 
-    found: List[Tuple[str, str]] = []   # (game_id, date) so we can sort by date
+    found: List[Dict[str, Any]] = []
     for event in data.get("events", []):
         status = ((event.get("status") or {}).get("type") or {})
         if not status.get("completed"):
@@ -220,17 +222,25 @@ def get_team_recent_game_ids(team_id: int, before_date: str,
         if not comps:
             continue
         competitors = comps[0].get("competitors") or []
-        ids = set()
+        this_team, opp_team = None, None
         for c in competitors:
             try:
-                ids.add(int(c["team"]["id"]))
+                cid = int(c["team"]["id"])
             except (KeyError, TypeError, ValueError):
                 continue
-        if team_id in ids and event.get("id"):
-            found.append((event["id"], event.get("date") or ""))
+            if cid == team_id:
+                this_team = c
+            else:
+                opp_team = c
+        if this_team is not None and event.get("id"):
+            opp_info = (opp_team or {}).get("team") or {}
+            found.append({
+                "gameId": event["id"], "date": event.get("date") or "",
+                "opp_id": opp_info.get("id"), "opp_name": opp_info.get("displayName", "Unknown"),
+            })
 
-    found.sort(key=lambda g: g[1], reverse=True)
-    result = [gid for gid, _ in found[:n]]
+    found.sort(key=lambda g: g["date"], reverse=True)
+    result = found[:n]
     if diag_key not in _diag_seen:
         _diag(f"get_team_recent_game_ids(team={team_id}, before={before_date}): "
              f"{len(result)} completed game(s) found in trailing 45-day window "
@@ -313,6 +323,79 @@ def get_game_boxscore(game_id: str) -> Dict[int, Dict[str, float]]:
     return out
 
 
+def get_game_team_totals(game_id: str) -> Dict[int, Dict[str, float]]:
+    """{team_id: {pts, reb, ast, fg3m}} TEAM-level totals for a game — from `boxscore.teams[]`
+    (the same CDN response get_game_boxscore already fetches and caches; calling both for the
+    same game_id costs one network request total, not two, via _get_json_cached). This is the
+    foundation for "stats allowed" (Hot Hand Engine's opponent-adjustment signal): a team's
+    defensive profile is just the OTHER team's totals in each of their recent games.
+
+    Team-level `statistics[].name` values ("points", "rebounds", "assists",
+    "threePointFieldGoalsMade") are inferred from the same naming convention confirmed live on
+    the scoreboard endpoint's season-cumulative team statistics — not yet confirmed against a
+    real *boxscore* team-stats block specifically. Same honesty as every other endpoint in this
+    module: verify on first live use; diagnostic dump fires automatically if extraction is empty
+    despite team blocks being present."""
+    data = _get_json_cached(CDN_API, params={"xhr": "1", "gameId": game_id})
+    if not data:
+        return {}
+    gp = data.get("gamepackageJSON") or {}
+    box = gp.get("boxscore") or {}
+    teams = box.get("teams") or []
+    out: Dict[int, Dict[str, float]] = {}
+    for team_block in teams:
+        team_info = team_block.get("team") or {}
+        try:
+            tid = int(team_info.get("id"))
+        except (TypeError, ValueError):
+            continue
+        stats = {}
+        for s in team_block.get("statistics", []):
+            name = s.get("name")
+            if name:
+                stats[name] = _parse_stat_value(s.get("displayValue"))
+        out[tid] = {
+            "pts": stats.get("points", 0.0),
+            "reb": stats.get("rebounds", 0.0),
+            "ast": stats.get("assists", 0.0),
+            "fg3m": stats.get("threePointFieldGoalsMade", 0.0),
+        }
+
+    dump_key = f"_team_totals_shape_dump:{game_id}"
+    if teams and all(v == {"pts": 0.0, "reb": 0.0, "ast": 0.0, "fg3m": 0.0} for v in out.values()) \
+            and dump_key not in _diag_seen:
+        _diag_seen.add(dump_key)
+        tb0 = teams[0]
+        _diag(f"get_game_team_totals({game_id}) shape dump: team_block keys = {list(tb0.keys())}")
+        stat_names = [s.get("name") for s in tb0.get("statistics", [])]
+        _diag(f"get_game_team_totals({game_id}) shape dump: statistics[].name values = {stat_names}")
+    return out
+
+
+def get_team_recent_allowed_stats(team_id: int, before_date: str,
+                                  n: int = CFG.RECENT_GAMES_N) -> Dict[str, float]:
+    """Average PTS/REB/AST/FG3M this team has ALLOWED over their last n completed games —
+    i.e., their opponents' team totals in those same games. Built entirely from box score data
+    already fetched for build_slate; costs zero new network calls when Hot Hand Engine runs
+    alongside a normal slate build (get_game_team_totals shares get_game_boxscore's cache)."""
+    games = get_team_recent_game_ids(team_id, before_date, n)
+    totals = {"pts": [], "reb": [], "ast": [], "fg3m": []}
+    for g in games:
+        opp_id = g.get("opp_id")
+        if opp_id is None:
+            continue
+        try:
+            opp_id = int(opp_id)
+        except (TypeError, ValueError):
+            continue
+        game_totals = get_game_team_totals(g["gameId"])
+        opp_totals = game_totals.get(opp_id)
+        if opp_totals:
+            for k in totals:
+                totals[k].append(opp_totals.get(k, 0.0))
+    return {k: (sum(v) / len(v) if v else 0.0) for k, v in totals.items()}
+
+
 def get_player_results(date_str: str) -> Dict[int, Dict[str, float]]:
     """Actual per-player results for all games on date_str, keyed by player id — same contract as
     mlb_engine.get_player_results, so retro.py's grading logic (grade_play/grade_slate) works
@@ -330,18 +413,21 @@ def get_player_results(date_str: str) -> Dict[int, Dict[str, float]]:
 def get_player_recent_games(player_id: int, last_n: int = CFG.RECENT_GAMES_N,
                             team_id: Optional[int] = None,
                             before_date: Optional[str] = None) -> List[Dict[str, float]]:
-    """Last N game logs for a player: [{pts, reb, ast, fg3m, min}, ...], most recent first.
-    Requires team_id and before_date (build_slate always supplies both) — without them there's no
-    way to know which games to look at, so this returns an empty list rather than guessing."""
+    """Last N game logs for a player: [{pts, reb, ast, fg3m, min, opp, date}, ...], most recent
+    first. `opp`/`date` come from get_team_recent_game_ids (free — already fetched for the
+    schedule scan) so any consumer (the Best Bets diagnostic inspector, a future matchup tool)
+    can show which actual game a number came from, not just "game #3". Requires team_id and
+    before_date (build_slate always supplies both) — without them there's no way to know which
+    games to look at, so this returns an empty list rather than guessing."""
     if team_id is None or before_date is None:
         return []
-    game_ids = get_team_recent_game_ids(team_id, before_date, last_n)
+    games_info = get_team_recent_game_ids(team_id, before_date, last_n)
     out = []
-    for gid in game_ids:
-        box = get_game_boxscore(gid)
+    for g in games_info:
+        box = get_game_boxscore(g["gameId"])
         line = box.get(player_id)
         if line:
-            out.append(line)
+            out.append({**line, "opp": g.get("opp_name"), "date": g.get("date")})
     return out[:last_n]
 
 
@@ -352,7 +438,8 @@ def avg_minutes(game_log: List[Dict[str, float]]) -> float:
 
 def player_row(player: Dict, team_name: str, opp_name: str, game_label: str,
                game_date: Optional[str], game_log: List[Dict[str, float]],
-               min_avg_minutes: float = CFG.MIN_AVG_MINUTES) -> Optional[Dict]:
+               min_avg_minutes: float = CFG.MIN_AVG_MINUTES,
+               opp_id: Optional[int] = None) -> Optional[Dict]:
     """Flat row for one player on the slate (mirrors mlb_engine._hitter_row: public display
     columns + private '_'-prefixed fields consumed by wnba_projections.py). None if the player
     doesn't clear the rotation-minutes bar — filters deep-bench noise off the slate, the same
@@ -375,6 +462,7 @@ def player_row(player: Dict, team_name: str, opp_name: str, game_label: str,
         "_pid": player["id"],
         "_game_log": game_log,
         "_game_date": game_date,
+        "_opp_id": opp_id,   # for opponent-defense lookups (Hot Hand Engine)
     }
 
 
@@ -396,22 +484,23 @@ def build_slate(date_str: str, min_avg_minutes: float = CFG.MIN_AVG_MINUTES,
         return [], []
 
     meta: List[Dict] = []
-    tasks: List[Tuple[Dict, str, str, str, Optional[str], int]] = []
+    tasks: List[Tuple[Dict, str, str, str, Optional[str], int, int]] = []
     for g in games:
         label = f"{g['away_name']} @ {g['home_name']}"
         meta.append({"label": label, "away_name": g["away_name"], "home_name": g["home_name"],
                      "game_date": g.get("game_date")})
-        for team_id, team_name, opp_name in ((g["home_id"], g["home_name"], g["away_name"]),
-                                              (g["away_id"], g["away_name"], g["home_name"])):
+        for team_id, team_name, opp_name, opp_id in (
+                (g["home_id"], g["home_name"], g["away_name"], g["away_id"]),
+                (g["away_id"], g["away_name"], g["home_name"], g["home_id"])):
             for player in get_team_roster(team_id):
-                tasks.append((player, team_name, opp_name, label, g.get("game_date"), team_id))
+                tasks.append((player, team_name, opp_name, label, g.get("game_date"), team_id, opp_id))
     _diag(f"build_slate({date_str}): {len(games)} game(s) -> {len(tasks)} roster slot(s) to project")
 
     def fetch_one(item):
-        player, team_name, opp_name, label, game_date, team_id = item
+        player, team_name, opp_name, label, game_date, team_id, opp_id = item
         log = get_player_recent_games(player["id"], last_n_games, team_id=team_id,
                                       before_date=date_str)
-        return player_row(player, team_name, opp_name, label, game_date, log, min_avg_minutes)
+        return player_row(player, team_name, opp_name, label, game_date, log, min_avg_minutes, opp_id)
 
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         rows = [r for r in ex.map(fetch_one, tasks) if r is not None]

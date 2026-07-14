@@ -17,7 +17,10 @@ count stats using the player's own recent games as the empirical distribution in
 per-plate-appearance model. Known limitation: with a short game log (early season, new team), the
 bootstrap can't see tail outcomes the player hasn't produced yet in that sample — it will
 undersample volatility for players with fewer than ~5-6 games logged. Opponent defensive strength
-and pace are NOT yet incorporated (v1 scope); a natural next step once this is live.
+and pace are NOT incorporated into the probability model itself (Edge Board/Best Bets stay
+recent-form-only, deliberately — see build_projection_index/build_best_bets). A separate,
+transparent opponent-adjustment SIGNAL (not folded into the probabilities) lives in
+build_hot_hand_board below, for the Hot Hand Engine page.
 """
 
 from __future__ import annotations
@@ -224,3 +227,59 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
 
     plays.sort(key=lambda x: x["Conviction"], reverse=True)
     return plays
+
+
+# --------------------------------------------------------------------------- Hot Hand Engine
+def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[int, Dict[str, float]]) -> List[Dict]:
+    """Matchup-adjusted leaderboard: each rotation player's recent-form average, scaled by how
+    much their tonight's opponent has been allowing at that stat, RELATIVE to the average allowed
+    rate across every opponent actually on tonight's slate (not a full-league scan — deliberately
+    cheap and honest: "is this a good matchup relative to tonight's other games," not a claim
+    calibrated against the full season). `opp_allowed` is {team_id: {pts,reb,ast,fg3m}} from
+    wnba_engine.get_team_recent_allowed_stats, one call per unique opponent on the slate — the
+    caller's job, not this function's, to keep this module free of its own network fetching.
+
+    This is a SEPARATE, clearly-labeled signal, not folded into build_best_bets/
+    build_projection_index's probabilities — Edge Board and Best Bets stay recent-form-only on
+    purpose. Silently changing what's priced into a live betting board is a bigger, more
+    consequential decision than adding a new analytical page, and shouldn't happen without
+    reviewing this signal's quality on its own first."""
+    baseline_samples = {"pts": [], "reb": [], "ast": [], "fg3m": []}
+    for stats in opp_allowed.values():
+        for k in baseline_samples:
+            if stats.get(k, 0) > 0:
+                baseline_samples[k].append(stats[k])
+    baseline = {k: (sum(v) / len(v) if v else 0.0) for k, v in baseline_samples.items()}
+
+    out: List[Dict] = []
+    for r in rows:
+        opp_id = r.get("_opp_id")
+        opp_stats = opp_allowed.get(opp_id) if opp_id is not None else None
+        for _mkey, (col, disp, _line) in _MARKET_SPEC.items():
+            stat_key = _STAT_KEY[col]
+            player_avg = r.get(col, 0.0)
+            base = baseline.get(stat_key, 0.0)
+            allowed = (opp_stats or {}).get(stat_key, 0.0)
+            if base > 0 and allowed > 0:
+                factor = allowed / base
+            else:
+                factor = 1.0   # no opponent data yet -> neutral, never a fabricated boost/penalty
+            if factor >= 1.08:
+                tag = "🟢 Plus matchup"
+            elif factor <= 0.92:
+                tag = "🔴 Tough matchup"
+            else:
+                tag = "🟡 Neutral"
+            out.append({
+                "Player": r["Player"], "Team": r["Team"], "Opp": r.get("Opp"),
+                "Game": r["GameLabel"], "Market": disp,
+                "Recent Avg": player_avg,
+                "Opp Allows": round(allowed, 1) if opp_stats else None,
+                "Slate Avg Allowed": round(base, 1) if base else None,
+                "Matchup Factor": round(factor, 2),
+                "Matchup Score": round(player_avg * factor, 1),
+                "Tag": tag,
+            })
+
+    out.sort(key=lambda x: -x["Matchup Score"])
+    return out

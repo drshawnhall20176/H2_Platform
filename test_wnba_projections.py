@@ -235,6 +235,54 @@ def test_default_board_from_index_never_produces_prob_at_the_boundary():
     print("✓ default_board_from_index also stays clear of the 0/1 probability boundary")
 
 
+# ----------------------------------------------------------------- build_hot_hand_board
+def test_build_hot_hand_board_tags_plus_matchup_correctly():
+    rows = [{"Player": "Star", "Team": "Atlanta Dream", "Opp": "Chicago Sky",
+            "GameLabel": "Chicago Sky @ Atlanta Dream", "PTS": 20.0, "REB": 5.0, "AST": 3.0,
+            "FG3M": 2.0, "_opp_id": 19}]
+    # Two opponents on the slate: Chicago Sky allows way more PTS than average -> plus matchup.
+    opp_allowed = {
+        19: {"pts": 95.0, "reb": 34.0, "ast": 19.0, "fg3m": 8.0},   # Chicago Sky (weak defense)
+        16: {"pts": 70.0, "reb": 30.0, "ast": 16.0, "fg3m": 6.0},   # Washington Mystics (strong)
+    }
+    board = WP.build_hot_hand_board(rows, opp_allowed)
+    pts_row = next(b for b in board if b["Market"] == "Points")
+    assert pts_row["Opp Allows"] == 95.0
+    assert pts_row["Slate Avg Allowed"] == 82.5   # (95+70)/2
+    assert pts_row["Matchup Factor"] > 1.08
+    assert pts_row["Tag"] == "🟢 Plus matchup"
+    assert pts_row["Matchup Score"] > pts_row["Recent Avg"]   # boosted above raw recent form
+    print("✓ build_hot_hand_board correctly identifies and tags a plus matchup")
+
+
+def test_build_hot_hand_board_neutral_when_no_opponent_data():
+    rows = [{"Player": "Star", "Team": "Atlanta Dream", "Opp": "Unknown Team",
+            "GameLabel": "Unknown Team @ Atlanta Dream", "PTS": 20.0, "REB": 5.0, "AST": 3.0,
+            "FG3M": 2.0, "_opp_id": 999}]
+    board = WP.build_hot_hand_board(rows, opp_allowed={})   # no data for any opponent
+    pts_row = next(b for b in board if b["Market"] == "Points")
+    assert pts_row["Matchup Factor"] == 1.0
+    assert pts_row["Tag"] == "🟡 Neutral"
+    assert pts_row["Matchup Score"] == pts_row["Recent Avg"]   # no fabricated boost/penalty
+    print("✓ build_hot_hand_board stays neutral (no fabricated signal) when opponent data is missing")
+
+
+def test_build_hot_hand_board_covers_all_players_and_markets():
+    rows = [
+        {"Player": "A", "Team": "T1", "Opp": "T2", "GameLabel": "T2 @ T1",
+         "PTS": 15.0, "REB": 4.0, "AST": 2.0, "FG3M": 1.0, "_opp_id": 2},
+        {"Player": "B", "Team": "T2", "Opp": "T1", "GameLabel": "T2 @ T1",
+         "PTS": 12.0, "REB": 6.0, "AST": 5.0, "FG3M": 0.5, "_opp_id": 1},
+    ]
+    opp_allowed = {1: {"pts": 80.0, "reb": 32.0, "ast": 18.0, "fg3m": 7.0},
+                  2: {"pts": 78.0, "reb": 30.0, "ast": 17.0, "fg3m": 6.5}}
+    board = WP.build_hot_hand_board(rows, opp_allowed)
+    assert len(board) == 8   # 2 players x 4 markets
+    assert {b["Player"] for b in board} == {"A", "B"}
+    assert {b["Market"] for b in board} == {"Points", "Rebounds", "Assists", "Threes Made"}
+    print("✓ build_hot_hand_board covers every player across every market")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
