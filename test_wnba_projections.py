@@ -194,6 +194,47 @@ def test_curate_selections_is_reachable_via_wnba_projections():
     print("✓ curate_selections is reachable via wnba_projections (re-exported from projections.py)")
 
 
+# ----------------------------------------------------------------- _clip_prob
+def test_clip_prob_bounds_extremes():
+    assert WP._clip_prob(1.0) == 0.98
+    assert WP._clip_prob(0.0) == 0.02
+    assert WP._clip_prob(1.5) == 0.98   # already out of [0,1] -> still clamped
+    assert WP._clip_prob(-0.5) == 0.02
+
+
+def test_clip_prob_leaves_normal_values_alone():
+    assert WP._clip_prob(0.5) == 0.5
+    assert WP._clip_prob(0.73) == 0.73
+
+
+def test_build_best_bets_never_produces_a_none_fair_price():
+    # Regression test for a real production crash: a perfectly consistent player (cleared every
+    # line in all 10 recent games) drove prob_over to exactly 1.0, so prob_to_american returned
+    # None, which broke Best Bets' strict "{:+d}" format string on the Fair column.
+    log = [_log(30, 3, 2, 4)] * 10   # identical every game -> would hit prob_over == 1.0 uncapped
+    rows = [_row("Perfectly Consistent", "Las Vegas Aces", "Seattle Storm",
+                "Seattle Storm @ Las Vegas Aces", log)]
+    plays = WP.build_best_bets(rows, sims=8000, seed=5)
+    assert plays, "should still produce plays, just capped probabilities"
+    for p in plays:
+        assert p["Fair"] is not None
+        assert 0.0 < p["ModelProb"] < 1.0
+        format(p["Fair"], "+d")   # must not raise — this exact call crashed in production
+    print("✓ build_best_bets never produces a None Fair price, even for a maximally consistent player")
+
+
+def test_default_board_from_index_never_produces_prob_at_the_boundary():
+    log = [_log(30, 3, 2, 4)] * 10
+    rows = [_row("Perfectly Consistent", "Las Vegas Aces", "Seattle Storm",
+                "Seattle Storm @ Las Vegas Aces", log)]
+    index = WP.build_projection_index(rows, meta=[], sims=8000, seed=5)
+    board = WP.default_board_from_index(index)
+    for b in board:
+        assert 0.0 < b["ModelProb"] < 1.0
+        assert b["FairAm"] is not None
+    print("✓ default_board_from_index also stays clear of the 0/1 probability boundary")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

@@ -4,7 +4,7 @@
 one sport-selector foundation). MLB runs exactly as the standalone did originally; WNBA is now a
 second real, priced sport — not a placeholder.
 
-## What's in this checkpoint (all tested — 180/180 tests green)
+## What's in this checkpoint (all tested — 184/184 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -160,6 +160,14 @@ checked for what's actually MLB-specific vs. genuinely shared logic before touch
 - **`Command Center` also picked up a small, separate correctness fix**: `bets = B.list_bets()`
   had no sport filter (a Stage 1/2 gap, same shape as the earlier Track Record/Bet Log fix) — now
   `B.list_bets(sport=_active.key)`.
+- **Production crash fix (2026-07-14):** Best Bets threw `ValueError` on a real WNBA slate — a
+  perfectly consistent player (cleared a line in all 10 recent games) drove the bootstrap's
+  `prob_over` to exactly `1.0`, so `prob_to_american` returned `None`, which broke the `"{:+d}"`
+  format string on the Fair-price column. Two-layer fix: `wnba_projections._clip_prob` keeps every
+  probability strictly inside `(0.02, 0.98)` at the source (both `build_best_bets` and
+  `default_board_from_index`) — a small sample shouldn't claim 100% certainty anyway, not just a
+  display-crash workaround — plus `na_rep="—"` on the Best Bets format call as a second line of
+  defense. Locked in with `test_build_best_bets_never_produces_a_none_fair_price`.
 
 ### Theme-proof gradients
 - **`styling.py`** — per-cell text contrast (dark on pale, white on deep), benchmark-anchored

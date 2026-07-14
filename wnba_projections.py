@@ -98,6 +98,17 @@ def build_projection_index(rows: List[Dict], meta: List[Dict],
     return index
 
 
+def _clip_prob(p: float) -> float:
+    """Keep probabilities strictly inside (0, 1). A bootstrap resample over a short recent-game
+    log (as few as 6-10 games) can genuinely produce exact 0.0 or 1.0 — every resampled game
+    happened to clear (or miss) the line — but that's the small sample talking, not real
+    certainty; MLB's larger-sample binomial-style model doesn't hit this the same way. Two
+    reasons this matters: (1) claiming 100%/0% is overconfident for a v1 recent-form-only model,
+    (2) `prob_to_american` returns None at the exact boundary, which breaks a strict `{:+d}`
+    format string wherever a Fair price gets displayed — a real crash this caught in production."""
+    return min(max(p, 0.02), 0.98)
+
+
 def default_board_from_index(index: Dict) -> List[Dict]:
     """Model-only board (favored side at default lines) from the index — identical shape/logic
     to projections.default_board_from_index (no MLB-style Yes/No special case needed here; every
@@ -106,7 +117,7 @@ def default_board_from_index(index: Dict) -> List[Dict]:
     for (nm, mkey), entry in index.items():
         _col, disp, line = _MARKET_SPEC.get(mkey, (mkey, mkey, 0.5))
         dist, ctx = entry["dist"], entry["ctx"]
-        over = prob_over(dist, line)
+        over = _clip_prob(prob_over(dist, line))
         side, prob = ("Over", over) if over >= 0.5 else ("Under", 1 - over)
         out.append(_signal(ctx["player"], ctx["team"], ctx["game"], disp, side, line, prob,
                            entry["mean"], Opp=ctx.get("opp"), Lineup=ctx.get("lineup"),
@@ -199,7 +210,7 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
             sim = simulate_player_stat(values, sims, rng)
             if sim.size == 0:
                 continue
-            over = prob_over(_dist(sim), line)
+            over = _clip_prob(prob_over(_dist(sim), line))
             side, sp, ref_s = _favored_side(over, BEST_BET_REF.get(disp, 0.5))
             plays.append({
                 "Player": r["Player"], "PlayerId": r.get("_pid"), "Team": r["Team"],
