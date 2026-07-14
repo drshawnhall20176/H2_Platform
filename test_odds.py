@@ -140,6 +140,48 @@ def test_fetch_slate_props_defaults_to_mlb_for_backward_compat():
     print("✓ fetch_slate_props still defaults to MLB when sport isn't specified")
 
 
+def test_fetch_slate_props_threads_markets_into_parsing():
+    # Regression test for a real bug found in a live WNBA test: fetch_slate_props correctly
+    # passed `markets` into fetch_event_props (the actual API call), but never passed it into
+    # parse_event_offers (the parsing step) — which has its OWN independent default of MLB's
+    # SUPPORTED_MARKETS. Result: every real WNBA offer the API returned got silently filtered out
+    # during parsing, because none of player_points/player_rebounds/etc. are in MLB's list.
+    # compute_edges then saw an empty offers list -> matched=0 AND unmatched=0, indistinguishable
+    # from "no props posted yet" without reading the source.
+    wnba_event_json = {
+        "bookmakers": [{
+            "key": "fanduel",
+            "markets": [{
+                "key": "player_points",
+                "outcomes": [
+                    {"description": "A. Player", "name": "Over", "point": 15.5, "price": -110},
+                    {"description": "A. Player", "name": "Under", "point": 15.5, "price": -110},
+                ],
+            }],
+        }],
+    }
+
+    def fake_fetch_events(api_key, sport=O.SPORT):
+        return [{"id": "evt1", "commence_time": "2026-07-14T23:00:00Z"}]
+
+    def fake_fetch_event_props(event_id, api_key, markets, regions="us", sport=O.SPORT):
+        return wnba_event_json, {"remaining": "100"}
+
+    orig_events, orig_props = O.fetch_events, O.fetch_event_props
+    O.fetch_events, O.fetch_event_props = fake_fetch_events, fake_fetch_event_props
+    try:
+        offers, info = O.fetch_slate_props("2026-07-14", "fake_key", ["player_points"],
+                                           sport="basketball_wnba")
+    finally:
+        O.fetch_events, O.fetch_event_props = orig_events, orig_props
+
+    assert len(offers) == 1, "the WNBA player_points offer must survive parsing, not be silently dropped"
+    assert offers[0]["market"] == "player_points"
+    assert offers[0]["player"] == "A. Player"
+    print("✓ fetch_slate_props threads the caller's markets list into parse_event_offers too, "
+          "not just fetch_event_props")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

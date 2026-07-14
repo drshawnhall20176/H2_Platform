@@ -12,7 +12,17 @@ second real, priced sport — not a placeholder.
   of hardcoding `mlb_engine`.
 - **`odds_api.py`** — sport-agnostic: `sport`, `markets`, `projections_module` are parameters.
   `fetch_slate_props` (the function Edge Board actually calls) now threads `sport` all the way
-  through — Stage 1 had left this one silently hardcoded to MLB; fixed in Stage 2.
+  through — Stage 1 had left this one silently hardcoded to MLB; fixed in Stage 2. **A second,
+  related bug found via a live WNBA odds fetch (2026-07-14):** `fetch_slate_props` passed
+  `markets` into the API call (`fetch_event_props`) correctly, but never into the *parsing* step
+  (`parse_event_offers`), which has its own independent default of MLB's `SUPPORTED_MARKETS`.
+  Real WNBA offers were being fetched successfully and then silently discarded during parsing —
+  every market key got filtered out because none of `player_points`/`player_rebounds`/etc. are in
+  MLB's list. Symptom was `Props matched: 0` **and** `Unmatched: 0` together (not a name-mismatch
+  count > 0), which is the tell that the offers list itself was empty before matching ever ran.
+  This bug was latent since Stage 1 — invisible for MLB purely because MLB's markets happened to
+  equal the hardcoded default, so nothing exposed it until a second sport's markets genuinely
+  differed. Locked in with `test_fetch_slate_props_threads_markets_into_parsing`.
 - **`betlog.py`** — `sport` column on every bet, with a `sport` filter on `list_bets` (legacy rows
   with no sport are treated as MLB).
 

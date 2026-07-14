@@ -208,7 +208,7 @@ def fetch_slate_props(date_str: str, api_key: str, markets: List[str], sport: st
         except OddsAPIError:
             continue
         remaining = hdr.get("remaining") or remaining
-        offers.extend(parse_event_offers(ej))
+        offers.extend(parse_event_offers(ej, supported_markets=markets))
         fetched += 1
     return offers, {"events_total": len(todays), "events_fetched": fetched,
                     "remaining": remaining}
