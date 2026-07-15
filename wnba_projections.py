@@ -259,9 +259,27 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
     return plays
 
 
+def blowout_risk_tag(spread: Optional[float], threshold: float = 10.0) -> str:
+    """Simple heuristic label for game-competitiveness risk from a team's point spread (negative
+    = favorite, positive = underdog — the Odds API's own convention). NOT a calibrated model —
+    just a threshold on a number that's already available once spreads are fetched. |spread| >=
+    threshold flags elevated blowout risk: the favorite's stars risk reduced 4th-quarter minutes,
+    the underdog's bench risks extended run. This tag intentionally doesn't try to say WHICH
+    player role is affected (that needs a starter/bench classification this data doesn't cleanly
+    support) — just that the game itself carries that risk, for the trader to weigh against who
+    they're actually looking at. threshold defaults to 10 points: a reasonable WNBA-scale
+    starting point (40-minute games, lower-scoring than the NBA, so a double-digit spread is
+    already a real edge), not a backtested cutoff — worth tuning empirically over time. Returns
+    "—" (not a fabricated "competitive") when spread is None — no data, not a claim."""
+    if spread is None:
+        return "—"
+    return "⚠️ Blowout risk" if abs(spread) >= threshold else "Competitive"
+
+
 # --------------------------------------------------------------------------- Hot Hand Engine
 def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[int, Dict[str, float]],
-                         team_rest: Optional[Dict[int, Dict]] = None) -> List[Dict]:
+                         team_rest: Optional[Dict[int, Dict]] = None,
+                         team_spreads: Optional[Dict[str, float]] = None) -> List[Dict]:
     """Matchup-adjusted leaderboard: each rotation player's recent-form average, scaled by how
     much their tonight's opponent has been allowing at that stat, RELATIVE to the average allowed
     rate across every opponent actually on tonight's slate (not a full-league scan — deliberately
@@ -292,12 +310,19 @@ def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[int, Dict[str, floa
     its own, not one silently baked into a score that already means something else. Omitted or
     missing team_id entries show as unknown (None), never a fabricated "well-rested" default.
 
+    `team_spreads` (optional) is {team_name: spread} from odds_api.fetch_slate_spreads — keyed by
+    TEAM NAME, not team_id, since that's the join key the Odds API's response actually gives us
+    (unlike team_rest/opp_allowed, which come from wnba_engine's own team_id-keyed data). Surfaced
+    as "Spread" and "Blowout Risk" via blowout_risk_tag, same "separate column, not folded into
+    the score" philosophy as Rest.
+
     This is a SEPARATE, clearly-labeled signal, not folded into build_best_bets/
     build_projection_index's probabilities — Edge Board and Best Bets stay recent-form-only on
     purpose. Silently changing what's priced into a live betting board is a bigger, more
     consequential decision than adding a new analytical page, and shouldn't happen without
     reviewing this signal's quality on its own first."""
     team_rest = team_rest or {}
+    team_spreads = team_spreads or {}
     baseline_samples = {"pts": [], "reb": [], "ast": [], "fg3m": []}
     for stats in opp_allowed.values():
         poss = stats.get("poss", 0)
@@ -314,6 +339,7 @@ def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[int, Dict[str, floa
         opp_stats = opp_allowed.get(opp_id) if opp_id is not None else None
         opp_poss = (opp_stats or {}).get("poss", 0.0)
         rest = team_rest.get(r.get("_team_id")) or {}
+        spread = team_spreads.get(r["Team"])
         for _mkey, (col, disp, _line) in _MARKET_SPEC.items():
             stat_key = _STAT_KEY[col]
             player_avg = r.get(col, 0.0)
@@ -343,6 +369,8 @@ def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[int, Dict[str, floa
                 "Tag": tag,
                 "Rest Days": rest.get("rest_days"),
                 "B2B": bool(rest.get("is_back_to_back", False)),
+                "Spread": round(spread, 1) if spread is not None else None,
+                "Blowout Risk": blowout_risk_tag(spread),
             })
 
     out.sort(key=lambda x: -x["Matchup Score"])

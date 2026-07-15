@@ -399,16 +399,43 @@ well-documented real fatigue effect; computable entirely from game dates already
   for fatigue risk, and the opponent's, for symmetry/context), reusing the same
   `get_team_rest_info` call.
 
+### WNBA blowout / minutes risk (2026-07-15)
+Fourth item on the WNBA model-enhancement priority list. When a game's a big mismatch, the
+favorite's stars often see reduced 4th-quarter minutes while the underdog's bench gets extended
+run — real, staking-relevant risk, tied to game spreads the platform already has Odds API access
+to but wasn't fetching yet.
+
+- **`odds_api.py`** — new `parse_game_spread(event_json)`: a purpose-built parser for the
+  "spreads" market's per-team shape (one point per team, no over/under split) — a spreads market
+  can't be forced through `parse_event_offers`, which is built for the player-prop over/under
+  shape and would silently drop every spread outcome. New `fetch_slate_spreads(date_str, api_key,
+  sport)`: `{team_name: spread}` for the whole slate, fetching ONLY the "spreads" market — 1 unit
+  per event, far cheaper than the 4-market player-prop fetch, since Hot Hand Engine needs
+  game-level spreads only, not player-level odds.
+- **`wnba_projections.py`** — `blowout_risk_tag(spread, threshold=10.0)`: a plain threshold on the
+  spread, explicitly NOT a calibrated model. Stated honestly in the docstring: 10 points is a
+  reasonable WNBA-scale starting point (40-minute games, lower-scoring than the NBA), not a
+  backtested cutoff — worth tuning empirically over time. `build_hot_hand_board` takes an
+  optional `team_spreads` param (keyed by TEAM NAME, since that's the Odds API's own join key —
+  unlike team_rest/opp_allowed, which are keyed by wnba_engine's team_id), adding "Spread"/
+  "Blowout Risk" columns. Doesn't try to say which player role is affected (needs a starter/bench
+  classification the data doesn't cleanly support) — just flags that the game itself carries
+  elevated risk, for the trader to weigh against who they're actually looking at.
+- **`views/11_Hot_Hand_Engine.py`** — a "📡 Fetch game spreads" button (same quota-safe,
+  button-gated, cached-once-per-slate pattern as Matchup Lab's live-line fetch), a "Blowout" risk
+  filter, and Spread/Blowout Risk columns. Before a fetch (or with no API key), both show "—",
+  never a fabricated "competitive" guess.
+
 ## NOT YET DONE (next stages)
-- **Blowout/minutes risk, injury/availability context** — the two remaining model-enhancement
-  items from the original priority list, not yet built. Blowout/minutes risk ties into game
-  spreads (already available via the Odds API); injury/availability has no clean free data source
-  the way box scores do for the others, so it needs its own scoping pass.
-- **Real line movement history (candlestick-proper)** — the trend chart above overlays a single
-  CURRENT line on historical game values; a true line-movement view (the line itself moving over
-  time, the closer stock-candlestick analog) still needs `capture_closing_lines.py` changed to
-  log every snapshot instead of overwriting the latest one. Bigger lift, sequenced after the
-  two items above.
+- **Injury/availability context** — the one remaining model-enhancement item from the original
+  priority list. Genuinely valuable but the hardest of the five: there's no clean free data
+  source for "who's out tonight" the way there is for box scores or game spreads, so it needs its
+  own scoping pass rather than a quick build.
+- **Real line movement history (candlestick-proper)** — the Matchup Lab trend chart overlays a
+  single CURRENT line on historical game values; a true line-movement view (the line itself
+  moving over time, the closer stock-candlestick analog) still needs `capture_closing_lines.py`
+  changed to log every snapshot instead of overwriting the latest one. Bigger lift, sequenced
+  after injury/availability.
 - **`nfl_engine.py`/`nfl_projections.py`** exist but are untested and `nfl_data_py` isn't in
   `requirements.txt` yet; markets/market_map in the registry are still empty. Flipping NFL on is
   Stage 4, not started.

@@ -135,6 +135,51 @@ def _best_price(book_prices: Dict[str, float]) -> Optional[Tuple[str, float]]:
     return book, price
 
 
+def parse_game_spread(event_json: Dict) -> Dict[str, float]:
+    """{team_name: spread} for one game's "spreads" market, averaged across books that post it.
+    Negative = favorite, positive = underdog — the Odds API's own convention. This is a separate,
+    purpose-built parser from parse_event_offers: a spreads market's outcomes are shaped
+    differently from a player prop's (one point per TEAM, identified by `name`, with no
+    over/under split and no `description` field), so forcing it through parse_event_offers would
+    silently drop every outcome rather than parse them. Returns {} if no bookmaker posted a
+    spreads market for this event."""
+    samples: Dict[str, List[float]] = {}
+    for bm in event_json.get("bookmakers", []):
+        for mk in bm.get("markets", []):
+            if mk.get("key") != "spreads":
+                continue
+            for oc in mk.get("outcomes", []):
+                team = oc.get("name")
+                point = oc.get("point")
+                if team is None or point is None:
+                    continue
+                samples.setdefault(team, []).append(point)
+    return {team: sum(pts) / len(pts) for team, pts in samples.items()}
+
+
+def fetch_slate_spreads(date_str: str, api_key: str, sport: str = SPORT) -> Tuple[Dict[str, float], Dict]:
+    """{team_name: spread} for every team playing on date_str, plus (info) with remaining quota —
+    same (result, info) contract as fetch_slate_props so pages can show cost the same way. Only
+    the "spreads" market is requested (1 unit/event, far cheaper than the 4-market player-prop
+    fetch), since this exists for game-level blowout-risk context, not player pricing — pages
+    that need both call this separately from fetch_slate_props rather than this function trying
+    to do double duty."""
+    events = fetch_events(api_key, sport=sport)
+    todays = [e for e in events if str(e.get("commence_time", ""))[:10] == date_str]
+    spreads: Dict[str, float] = {}
+    remaining = None
+    fetched = 0
+    for e in todays:
+        try:
+            ej, hdr = fetch_event_props(e["id"], api_key, ["spreads"], sport=sport)
+        except OddsAPIError:
+            continue
+        remaining = hdr.get("remaining") or remaining
+        spreads.update(parse_game_spread(ej))
+        fetched += 1
+    return spreads, {"events_total": len(todays), "events_fetched": fetched, "remaining": remaining}
+
+
 def market_lines_for_player(offers: List[Dict], player_name: str, projections_module=None) -> Dict[str, float]:
     """{market_key: point} — the actual sportsbook prop line(s) for one player, picked from
     `offers` (already fetched via fetch_slate_props). This is a display/reference lookup, distinct

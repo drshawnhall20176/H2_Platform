@@ -350,6 +350,51 @@ def test_build_hot_hand_board_rest_unknown_when_team_rest_omitted():
     print("✓ build_hot_hand_board reports Rest as honestly unknown (not fabricated) when team_rest isn't supplied")
 
 
+# ----------------------------------------------------------------- blowout_risk_tag
+def test_blowout_risk_tag_flags_large_spreads_either_direction():
+    assert WP.blowout_risk_tag(-14.5) == "⚠️ Blowout risk"   # heavy favorite
+    assert WP.blowout_risk_tag(14.5) == "⚠️ Blowout risk"    # heavy underdog
+    assert WP.blowout_risk_tag(-10.0) == "⚠️ Blowout risk"   # exactly at threshold
+
+
+def test_blowout_risk_tag_competitive_below_threshold():
+    assert WP.blowout_risk_tag(-6.5) == "Competitive"
+    assert WP.blowout_risk_tag(0.0) == "Competitive"
+
+
+def test_blowout_risk_tag_respects_custom_threshold():
+    assert WP.blowout_risk_tag(-7.0, threshold=6.0) == "⚠️ Blowout risk"
+    assert WP.blowout_risk_tag(-7.0, threshold=8.0) == "Competitive"
+
+
+def test_blowout_risk_tag_unknown_when_no_spread():
+    assert WP.blowout_risk_tag(None) == "—"
+
+
+# ----------------------------------------------------------------- build_hot_hand_board: spreads
+def test_build_hot_hand_board_surfaces_team_spread_and_blowout_tag():
+    rows = [{"Player": "Star", "Team": "Atlanta Dream", "Opp": "Chicago Sky",
+            "GameLabel": "Chicago Sky @ Atlanta Dream", "PTS": 20.0, "REB": 5.0, "AST": 3.0,
+            "FG3M": 2.0, "_opp_id": 19, "_team_id": 20}]
+    team_spreads = {"Atlanta Dream": -13.5, "Chicago Sky": 13.5}
+    board = WP.build_hot_hand_board(rows, opp_allowed={}, team_spreads=team_spreads)
+    pts_row = next(b for b in board if b["Market"] == "Points")
+    assert pts_row["Spread"] == -13.5
+    assert pts_row["Blowout Risk"] == "⚠️ Blowout risk"
+    print("✓ build_hot_hand_board surfaces the player's own team spread and blowout tag")
+
+
+def test_build_hot_hand_board_spread_unknown_when_team_spreads_omitted():
+    rows = [{"Player": "Star", "Team": "Atlanta Dream", "Opp": "Chicago Sky",
+            "GameLabel": "Chicago Sky @ Atlanta Dream", "PTS": 20.0, "REB": 5.0, "AST": 3.0,
+            "FG3M": 2.0, "_opp_id": 19, "_team_id": 20}]
+    board = WP.build_hot_hand_board(rows, opp_allowed={})   # no team_spreads passed at all
+    pts_row = next(b for b in board if b["Market"] == "Points")
+    assert pts_row["Spread"] is None
+    assert pts_row["Blowout Risk"] == "—"
+    print("✓ build_hot_hand_board reports Spread/Blowout Risk as honestly unknown when team_spreads isn't supplied")
+
+
 # ----------------------------------------------------------------- build_matchup_profile
 def test_build_matchup_profile_covers_all_markets():
     row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}

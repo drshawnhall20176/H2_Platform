@@ -218,6 +218,65 @@ def test_fetch_slate_props_threads_markets_into_parsing():
           "not just fetch_event_props")
 
 
+# ----------------------------------------------------------------- parse_game_spread
+def test_parse_game_spread_averages_across_books():
+    event = {
+        "bookmakers": [
+            {"key": "fanduel", "markets": [{"key": "spreads", "outcomes": [
+                {"name": "Atlanta Dream", "point": -8.5, "price": -110},
+                {"name": "Chicago Sky", "point": 8.5, "price": -110},
+            ]}]},
+            {"key": "draftkings", "markets": [{"key": "spreads", "outcomes": [
+                {"name": "Atlanta Dream", "point": -9.5, "price": -105},
+                {"name": "Chicago Sky", "point": 9.5, "price": -115},
+            ]}]},
+        ]
+    }
+    spreads = O.parse_game_spread(event)
+    assert spreads["Atlanta Dream"] == -9.0    # avg(-8.5, -9.5)
+    assert spreads["Chicago Sky"] == 9.0       # avg(8.5, 9.5)
+    print("✓ parse_game_spread averages the point across every book that posted a spreads market")
+
+
+def test_parse_game_spread_ignores_non_spread_markets():
+    event = {"bookmakers": [{"key": "fanduel", "markets": [
+        {"key": "h2h", "outcomes": [{"name": "Atlanta Dream", "price": -400}]},
+        {"key": "totals", "outcomes": [{"name": "Over", "point": 165.5, "price": -110}]},
+    ]}]}
+    assert O.parse_game_spread(event) == {}
+    print("✓ parse_game_spread ignores h2h/totals markets, only reads 'spreads'")
+
+
+def test_parse_game_spread_empty_when_no_bookmakers():
+    assert O.parse_game_spread({"bookmakers": []}) == {}
+
+
+# ----------------------------------------------------------------- fetch_slate_spreads
+def test_fetch_slate_spreads_only_requests_the_spreads_market():
+    calls = {"markets_requested": None}
+
+    def fake_fetch_events(api_key, sport=O.SPORT):
+        return [{"id": "evt1", "commence_time": "2026-07-14T23:00:00Z"}]
+
+    def fake_fetch_event_props(event_id, api_key, markets, regions="us", sport=O.SPORT):
+        calls["markets_requested"] = markets
+        return {"bookmakers": [{"key": "fd", "markets": [{"key": "spreads", "outcomes": [
+            {"name": "Atlanta Dream", "point": -6.5}, {"name": "Chicago Sky", "point": 6.5},
+        ]}]}]}, {"remaining": "500"}
+
+    orig_events, orig_props = O.fetch_events, O.fetch_event_props
+    O.fetch_events, O.fetch_event_props = fake_fetch_events, fake_fetch_event_props
+    try:
+        spreads, info = O.fetch_slate_spreads("2026-07-14", "fake_key", sport="basketball_wnba")
+    finally:
+        O.fetch_events, O.fetch_event_props = orig_events, orig_props
+
+    assert calls["markets_requested"] == ["spreads"]   # not the 4-market player-prop list — cheap fetch
+    assert spreads == {"Atlanta Dream": -6.5, "Chicago Sky": 6.5}
+    assert info["events_fetched"] == 1 and info["remaining"] == "500"
+    print("✓ fetch_slate_spreads requests only the 'spreads' market (cheap) and returns {team: spread}")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
