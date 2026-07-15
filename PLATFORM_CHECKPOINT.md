@@ -637,7 +637,33 @@ start moving before the real CDN JSON came through directly.
 315/315 tests passing, smoke test still clean (0 games — correctly, since the regular season is
 in its July off-season; the app is live and correct, just nothing to show until October).
 
-**Post-launch polish, not launch blockers — worth revisiting once real slate data is flowing:**
+### Post-launch bug found and fixed: Hot Hand Engine/Matchup Lab missing for NBA (2026-07-15)
+Shawn reported these two pages simply weren't showing up when NBA was selected (Retrospective
+correctly pulled 2025-26 historical stats, confirming the data layer itself is fine — this was
+purely a navigation/visibility bug). Root cause: a THIRD gate, separate from both `require_sport`
+(inside each page) and `sports.py`'s `enabled` flag — `streamlit_app.py`'s own `sport_only_leads`
+dict, which decides which pages appear in the sidebar navigation AT ALL, based on the active
+sport. It still mapped pages 11/12 (Hot Hand Engine, Matchup Lab) to the single string `"WNBA"`,
+so `active_sport != required_sport` was `True` for NBA and the pages were filtered out of the
+menu entirely before a user could ever reach `require_sport`'s in-page check — a gate I'd updated
+correctly but hadn't realized had an earlier, page-existence-level counterpart.
+
+- **`streamlit_app.py`** — `sport_only_leads` values changed from a single string to a tuple of
+  acceptable sports (`"11": ("WNBA", "NBA")` instead of `"11": "WNBA"`), and the filter check
+  updated to `active_sport not in required_sports`.
+- **`test_sports.py`** — `test_sport_only_page_visibility_matches_expected_config`'s regex-based
+  source-scraping updated to parse the new tuple structure instead of a single quoted string.
+- Directly verified the filtering logic in isolation: for `active_sport in ("MLB","WNBA","NBA")`,
+  pages 11/12 are now visible for both WNBA and NBA, hidden for MLB — matching pages 1/2/10
+  (MLB-only) staying correctly hidden for WNBA/NBA. 315/315 tests passing.
+
+**This is the second time in one session a "the code inside the page is right" fix wasn't
+sufficient** — the first was the pts field-name fix needing a second correction once the real
+CDN response revealed `team_block["score"]` doesn't exist either. Both are the same underlying
+lesson: a fix that looks complete from reasoning about a system's DOCUMENTED behavior can still
+miss a layer that's only visible once someone actually exercises the real, deployed thing.
+
+
 - Re-verify `SEASON_START` once the 2026-27 schedule is officially announced.
 - Sanity-check `config_nba.MIN_AVG_MINUTES`/`RECENT_GAMES_N` against real NBA rotation patterns —
   carried over from WNBA's values as a starting point only.
