@@ -367,18 +367,48 @@ the direct, honest analog of a stock trader's candlestick: a value moving over t
   a live quote it isn't.
 - Uses `plotly.graph_objects`, already pinned in `requirements.txt` and the established charting
   convention on this platform (Track Record, Command Center) — no new dependency added.
+- **Bug fix, same day:** the first version let Plotly auto-detect the x-axis type from the "MM-DD"
+  date-label strings, which Plotly mis-parsed as full dates and resolved to a nonsense range
+  (confirmed by reproducing it: `full_figure_for_development` resolved to `type: "date"`, range
+  `2006-12-14` to `2007-10-18`, for input as ordinary as `["07-01", "07-05", "07-10"]`). Likely
+  also explained an "only one point showing" report — with real dates close together, the same
+  bad parsing can collapse the axis into a near-zero range, stacking real points on top of each
+  other rather than actually losing them. Fixed by forcing `fig.update_xaxes(type="category")` so
+  the labels are never date-parsed at all.
+
+### WNBA rest / back-to-back fatigue (2026-07-15)
+Third item on the WNBA model-enhancement priority list. Second night of a back-to-back is a
+well-documented real fatigue effect; computable entirely from game dates already fetched for
+`get_team_recent_game_ids` — zero new network calls.
+
+- **`wnba_engine.py`** — new `get_team_rest_info(team_id, before_date, days_back=10)`: days since
+  a team's last completed game, and whether tonight is a back-to-back (`rest_days <= 1`). A short
+  10-day lookback (not the 45-day "recent form" window) since rest only cares about the
+  immediately prior game. No prior game found in the window (start of season) reports an honest
+  `rest_days=None`, never a fabricated "well-rested" default.
+- **`wnba_projections.py`** — `build_hot_hand_board` takes an optional `team_rest` param, keyed by
+  the PLAYER'S OWN team (not the opponent — fatigue is about her legs, not theirs). Adds "Rest
+  Days"/"B2B" to every output row. Deliberately NOT folded into Matchup Factor/Score: pace
+  adjustment corrected a real measurement conflation in an existing number, while rest is a
+  genuinely separate risk a trader should weigh on its own, not silently baked into a score that
+  already means something else.
+- **`views/11_Hot_Hand_Engine.py`** — per-team rest computed once per unique team on the slate
+  (not per player), a "Rest" filter ("⚠️ Back-to-back only"), and a human-readable "Rest" column
+  ("⚠️ B2B" / "3d rest" / "—" for unknown).
+- **`views/12_Matchup_Lab.py`** — both teams' rest shown under the player header (her own team's,
+  for fatigue risk, and the opponent's, for symmetry/context), reusing the same
+  `get_team_rest_info` call.
 
 ## NOT YET DONE (next stages)
-- **WNBA rest/back-to-back fatigue, blowout/minutes risk, injury/availability context** — the
-  three remaining model-enhancement items from the original priority list, not yet built. Rest/
-  back-to-back is computable today from game dates already in the data; blowout/minutes risk
-  ties into game spreads (already available via the Odds API); injury/availability has no clean
-  free data source the way box scores do for the others, so it needs its own scoping pass.
+- **Blowout/minutes risk, injury/availability context** — the two remaining model-enhancement
+  items from the original priority list, not yet built. Blowout/minutes risk ties into game
+  spreads (already available via the Odds API); injury/availability has no clean free data source
+  the way box scores do for the others, so it needs its own scoping pass.
 - **Real line movement history (candlestick-proper)** — the trend chart above overlays a single
   CURRENT line on historical game values; a true line-movement view (the line itself moving over
   time, the closer stock-candlestick analog) still needs `capture_closing_lines.py` changed to
   log every snapshot instead of overwriting the latest one. Bigger lift, sequenced after the
-  three items above.
+  two items above.
 - **`nfl_engine.py`/`nfl_projections.py`** exist but are untested and `nfl_data_py` isn't in
   `requirements.txt` yet; markets/market_map in the registry are still empty. Flipping NFL on is
   Stage 4, not started.

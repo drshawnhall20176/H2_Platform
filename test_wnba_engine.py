@@ -600,6 +600,39 @@ def test_get_team_recent_allowed_stats_empty_when_no_recent_games(monkeypatch):
     assert allowed == {"pts": 0.0, "reb": 0.0, "ast": 0.0, "fg3m": 0.0, "poss": 0.0}
 
 
+# ----------------------------------------------------------------- get_team_rest_info
+def test_get_team_rest_info_flags_back_to_back(monkeypatch):
+    monkeypatch.setattr(E, "get_team_recent_game_ids",
+                        lambda team_id, before_date, n=1, days_back=10: [
+                            {"gameId": "g1", "date": "2026-07-13T00:00Z", "opp_id": 19, "opp_name": "Chicago Sky"},
+                        ])
+    info = E.get_team_rest_info(20, "2026-07-14")   # played 07-13, tonight is 07-14 -> 1 day rest
+    assert info["rest_days"] == 1
+    assert info["is_back_to_back"] is True
+    assert info["last_game_date"] == "2026-07-13"
+    assert info["last_opp_name"] == "Chicago Sky"
+    print("✓ get_team_rest_info correctly flags a back-to-back (1 day rest)")
+
+
+def test_get_team_rest_info_normal_rest_not_flagged(monkeypatch):
+    monkeypatch.setattr(E, "get_team_recent_game_ids",
+                        lambda team_id, before_date, n=1, days_back=10: [
+                            {"gameId": "g1", "date": "2026-07-10T00:00Z", "opp_id": 19, "opp_name": "Chicago Sky"},
+                        ])
+    info = E.get_team_rest_info(20, "2026-07-14")   # last played 4 days ago -> not a back-to-back
+    assert info["rest_days"] == 4
+    assert info["is_back_to_back"] is False
+    print("✓ get_team_rest_info doesn't flag a normal 4-day rest gap as a back-to-back")
+
+
+def test_get_team_rest_info_unknown_when_no_recent_game(monkeypatch):
+    monkeypatch.setattr(E, "get_team_recent_game_ids",
+                        lambda team_id, before_date, n=1, days_back=10: [])
+    info = E.get_team_rest_info(20, "2026-07-14")
+    assert info == {"rest_days": None, "is_back_to_back": False, "last_game_date": None, "last_opp_name": None}
+    print("✓ get_team_rest_info reports an honest unknown (not a fabricated 'well-rested' guess) when no recent game is found")
+
+
 # ----------------------------------------------------------------- get_player_history_vs_opponent
 def test_get_player_history_vs_opponent_filters_to_that_opponent_only(monkeypatch):
     E._response_cache.clear()

@@ -310,6 +310,46 @@ def test_build_hot_hand_board_covers_all_players_and_markets():
     print("✓ build_hot_hand_board covers every player across every market")
 
 
+# ----------------------------------------------------------------- build_hot_hand_board: rest/B2B
+def test_build_hot_hand_board_surfaces_own_team_back_to_back():
+    rows = [{"Player": "Star", "Team": "Atlanta Dream", "Opp": "Chicago Sky",
+            "GameLabel": "Chicago Sky @ Atlanta Dream", "PTS": 20.0, "REB": 5.0, "AST": 3.0,
+            "FG3M": 2.0, "_opp_id": 19, "_team_id": 20}]
+    team_rest = {20: {"rest_days": 1, "is_back_to_back": True,
+                      "last_game_date": "2026-07-14", "last_opp_name": "New York Liberty"}}
+    board = WP.build_hot_hand_board(rows, opp_allowed={}, team_rest=team_rest)
+    pts_row = next(b for b in board if b["Market"] == "Points")
+    assert pts_row["Rest Days"] == 1
+    assert pts_row["B2B"] is True
+    print("✓ build_hot_hand_board surfaces the PLAYER'S OWN team's back-to-back status")
+
+
+def test_build_hot_hand_board_rest_is_the_players_own_team_not_the_opponents():
+    # Player's team (20) is well-rested; the OPPONENT (19) is on a back-to-back — the Rest column
+    # must reflect team 20 (her own team), not team 19, since fatigue is about her legs.
+    rows = [{"Player": "Star", "Team": "Atlanta Dream", "Opp": "Chicago Sky",
+            "GameLabel": "Chicago Sky @ Atlanta Dream", "PTS": 20.0, "REB": 5.0, "AST": 3.0,
+            "FG3M": 2.0, "_opp_id": 19, "_team_id": 20}]
+    team_rest = {20: {"rest_days": 3, "is_back_to_back": False, "last_game_date": None, "last_opp_name": None},
+                19: {"rest_days": 1, "is_back_to_back": True, "last_game_date": None, "last_opp_name": None}}
+    board = WP.build_hot_hand_board(rows, opp_allowed={}, team_rest=team_rest)
+    pts_row = next(b for b in board if b["Market"] == "Points")
+    assert pts_row["Rest Days"] == 3
+    assert pts_row["B2B"] is False
+    print("✓ build_hot_hand_board's Rest column reflects the player's own team, not the opponent's")
+
+
+def test_build_hot_hand_board_rest_unknown_when_team_rest_omitted():
+    rows = [{"Player": "Star", "Team": "Atlanta Dream", "Opp": "Chicago Sky",
+            "GameLabel": "Chicago Sky @ Atlanta Dream", "PTS": 20.0, "REB": 5.0, "AST": 3.0,
+            "FG3M": 2.0, "_opp_id": 19, "_team_id": 20}]
+    board = WP.build_hot_hand_board(rows, opp_allowed={})   # no team_rest passed at all
+    pts_row = next(b for b in board if b["Market"] == "Points")
+    assert pts_row["Rest Days"] is None
+    assert pts_row["B2B"] is False
+    print("✓ build_hot_hand_board reports Rest as honestly unknown (not fabricated) when team_rest isn't supplied")
+
+
 # ----------------------------------------------------------------- build_matchup_profile
 def test_build_matchup_profile_covers_all_markets():
     row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}

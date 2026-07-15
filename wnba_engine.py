@@ -462,6 +462,37 @@ def get_team_recent_allowed_stats(team_id: int, before_date: str,
     return {k: (sum(v) / len(v) if v else 0.0) for k, v in totals.items()}
 
 
+def get_team_rest_info(team_id: int, before_date: str, days_back: int = 10) -> Dict[str, Any]:
+    """Rest context for a team heading into `before_date`: how many days since their last
+    completed game, and whether tonight is the second night of a back-to-back. Built entirely
+    from game dates already available via get_team_recent_game_ids — zero new network calls.
+
+    days_back defaults to a short 10 days (not the 45-day "recent form" window) — rest only cares
+    about the IMMEDIATELY prior game, so a short scan is both cheap and sufficient. A team with no
+    completed game in the last 10 days (start of season, All-Star break) reports rest_days=None
+    rather than a fabricated "well-rested" guess — an honest unknown, not a default.
+
+    Returns {"rest_days": int|None, "is_back_to_back": bool, "last_game_date": str|None,
+    "last_opp_name": str|None}. is_back_to_back is True when rest_days <= 1 (played yesterday, or
+    — in the data-glitch case of a same-day double-count — today)."""
+    games = get_team_recent_game_ids(team_id, before_date, n=1, days_back=days_back)
+    empty = {"rest_days": None, "is_back_to_back": False, "last_game_date": None, "last_opp_name": None}
+    if not games:
+        return empty
+    last = games[0]
+    last_date_str = (last.get("date") or "")[:10]
+    if not last_date_str:
+        return empty
+    try:
+        d_before = datetime.strptime(before_date, "%Y-%m-%d")
+        d_last = datetime.strptime(last_date_str, "%Y-%m-%d")
+    except ValueError:
+        return empty
+    rest_days = (d_before - d_last).days
+    return {"rest_days": rest_days, "is_back_to_back": rest_days <= 1,
+            "last_game_date": last_date_str, "last_opp_name": last.get("opp_name")}
+
+
 def get_player_results(date_str: str) -> Dict[int, Dict[str, float]]:
     """Actual per-player results for all games on date_str, keyed by player id — same contract as
     mlb_engine.get_player_results, so retro.py's grading logic (grade_play/grade_slate) works

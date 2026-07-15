@@ -260,7 +260,8 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
 
 
 # --------------------------------------------------------------------------- Hot Hand Engine
-def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[int, Dict[str, float]]) -> List[Dict]:
+def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[int, Dict[str, float]],
+                         team_rest: Optional[Dict[int, Dict]] = None) -> List[Dict]:
     """Matchup-adjusted leaderboard: each rotation player's recent-form average, scaled by how
     much their tonight's opponent has been allowing at that stat, RELATIVE to the average allowed
     rate across every opponent actually on tonight's slate (not a full-league scan — deliberately
@@ -283,11 +284,20 @@ def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[int, Dict[str, floa
     being a real reference point). A team with too few recent games to have a poss reading falls
     back to neutral (1.00×), same as the existing "no data yet" behavior.
 
+    `team_rest` (optional) is {team_id: {rest_days, is_back_to_back, ...}} from wnba_engine.
+    get_team_rest_info, keyed by the PLAYER'S OWN team (not the opponent — fatigue is about her
+    team's legs, not theirs). Surfaced as its own "Rest Days"/"B2B" columns, deliberately NOT
+    folded into Matchup Factor/Score: pace-adjustment corrects a real measurement conflation in
+    an existing number, while rest is a genuinely separate risk factor a trader should weigh on
+    its own, not one silently baked into a score that already means something else. Omitted or
+    missing team_id entries show as unknown (None), never a fabricated "well-rested" default.
+
     This is a SEPARATE, clearly-labeled signal, not folded into build_best_bets/
     build_projection_index's probabilities — Edge Board and Best Bets stay recent-form-only on
     purpose. Silently changing what's priced into a live betting board is a bigger, more
     consequential decision than adding a new analytical page, and shouldn't happen without
     reviewing this signal's quality on its own first."""
+    team_rest = team_rest or {}
     baseline_samples = {"pts": [], "reb": [], "ast": [], "fg3m": []}
     for stats in opp_allowed.values():
         poss = stats.get("poss", 0)
@@ -303,6 +313,7 @@ def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[int, Dict[str, floa
         opp_id = r.get("_opp_id")
         opp_stats = opp_allowed.get(opp_id) if opp_id is not None else None
         opp_poss = (opp_stats or {}).get("poss", 0.0)
+        rest = team_rest.get(r.get("_team_id")) or {}
         for _mkey, (col, disp, _line) in _MARKET_SPEC.items():
             stat_key = _STAT_KEY[col]
             player_avg = r.get(col, 0.0)
@@ -330,6 +341,8 @@ def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[int, Dict[str, floa
                 "Matchup Factor": round(factor, 2),
                 "Matchup Score": round(player_avg * factor, 1),
                 "Tag": tag,
+                "Rest Days": rest.get("rest_days"),
+                "B2B": bool(rest.get("is_back_to_back", False)),
             })
 
     out.sort(key=lambda x: -x["Matchup Score"])
