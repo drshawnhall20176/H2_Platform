@@ -1,8 +1,8 @@
 """
-Matchup Lab — WNBA player-vs-opponent deep-dive.
+Matchup Lab — WNBA/NBA player-vs-opponent deep-dive.
 
-The honest WNBA counterpart to MLB's Matchup Lab: MLB's version is pitch-type granular
-(Statcast tracks every pitch), which has no free WNBA equivalent. This is built on three real,
+The honest basketball counterpart to MLB's Matchup Lab: MLB's version is pitch-type granular
+(Statcast tracks every pitch), which has no free WNBA/NBA equivalent. This is built on three real,
 computable signals instead — recent form (what the model already prices off), head-to-head
 history vs this exact opponent this season, and the opponent's recent-vs-season defensive trend
 (built on the same box-score infrastructure Hot Hand Engine uses, extended with a season-wide
@@ -24,13 +24,13 @@ import odds_api as O
 _active = sports.active()
 
 st.title("🔬 Matchup Lab")
-st.caption("One player, one opponent, three real signals: recent form, head-to-head history "
-           "this season, and whether the opponent's defense has been trending looser or "
-           "tighter lately — the honest WNBA counterpart to Dinger Engine's pitch-type "
-           "Matchup Lab (no free WNBA equivalent to Statcast exists, so this leans on box-score "
-           "signals instead, the same foundation Hot Hand Engine is built on).")
+st.caption(f"One player, one opponent, three real signals: recent form, head-to-head history "
+           f"this season, and whether the opponent's defense has been trending looser or "
+           f"tighter lately — the honest {_active.key} counterpart to Dinger Engine's pitch-type "
+           f"Matchup Lab (no free {_active.key} equivalent to Statcast exists, so this leans on "
+           f"box-score signals instead, the same foundation Hot Hand Engine is built on).")
 
-if not sports.require_sport("WNBA", "Matchup Lab"):
+if not sports.require_sport(["WNBA", "NBA"], "Matchup Lab"):
     st.stop()
 
 E, P = _active.engine, _active.projections

@@ -1,8 +1,8 @@
 """
-Hot Hand Engine — WNBA matchup-adjusted leaderboard.
+Hot Hand Engine — WNBA/NBA matchup-adjusted leaderboard.
 
-The honest WNBA counterpart to Dinger Engine: Dinger Engine leans on Statcast (pitch-level
-tracking data with no free WNBA equivalent), so this isn't a literal port. Instead it uses a
+The honest basketball counterpart to Dinger Engine: Dinger Engine leans on Statcast (pitch-level
+tracking data with no free WNBA/NBA equivalent), so this isn't a literal port. Instead it uses a
 real signal that IS available for free — every slate build already pulls both teams' box
 scores, which means opponent defensive strength (how much a team has been allowing at each
 stat recently) is sitting right there, unused, in data already fetched. This page puts it to
@@ -28,12 +28,12 @@ import odds_api as O
 _active = sports.active()
 
 st.title("🔥 Hot Hand Engine")
-st.caption("Recent-form leaders, adjusted for how generous tonight's opponent has actually "
-           "been — the honest WNBA counterpart to Dinger Engine (no Statcast-equivalent data "
-           "exists for basketball, so this leans on a real signal that does: opponent defense "
-           "from box scores already being pulled for every slate).")
+st.caption(f"Recent-form leaders, adjusted for how generous tonight's opponent has actually "
+           f"been — the honest {_active.key} counterpart to Dinger Engine (no Statcast-"
+           f"equivalent data exists for basketball, so this leans on a real signal that does: "
+           f"opponent defense from box scores already being pulled for every slate).")
 
-if not sports.require_sport("WNBA", "Hot Hand Engine"):
+if not sports.require_sport(["WNBA", "NBA"], "Hot Hand Engine"):
     st.stop()
 
 E, P = _active.engine, _active.projections
