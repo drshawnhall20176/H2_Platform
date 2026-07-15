@@ -149,6 +149,26 @@ def test_parse_stat_value_handles_junk():
     assert E._parse_stat_value("") == 0.0
 
 
+def test_parse_stat_value_side_right_returns_attempts():
+    assert E._parse_stat_value("12-24", side="right") == 24.0
+
+
+def test_parse_stat_value_side_right_on_plain_field_unaffected():
+    # No '-' present -> side has no combo to split, same value either way
+    assert E._parse_stat_value("32", side="right") == 32.0
+
+
+def test_parse_stat_value_side_left_is_still_the_default():
+    assert E._parse_stat_value("12-24") == 12.0
+
+
+def test_find_team_stat_side_right_pulls_attempts_from_combo_key():
+    stats = {"fieldGoalsMade-fieldGoalsAttempted": "33-82"}
+    assert E._find_team_stat(stats, "fieldGoalsMade-fieldGoalsAttempted", side="right") == 82.0
+    # default side is unaffected -> still makes
+    assert E._find_team_stat(stats, "fieldGoalsMade-fieldGoalsAttempted") == 33.0
+
+
 # ----------------------------------------------------------------- get_schedule (ESPN scoreboard)
 def test_get_schedule_parses_espn_scoreboard_shape(monkeypatch):
     fake_response = {
@@ -450,7 +470,7 @@ def test_get_game_team_totals_parses_both_teams(monkeypatch):
     }
     monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_cdn)
     totals = E.get_game_team_totals("g1")
-    assert totals[20] == {"pts": 88.0, "reb": 36.0, "ast": 20.0, "fg3m": 9.0}
+    assert totals[20] == {"pts": 88.0, "reb": 36.0, "ast": 20.0, "fg3m": 9.0, "poss": 0.0}
     assert totals[19]["pts"] == 81.0
     print("✓ get_game_team_totals parses team-level totals for both teams")
 
@@ -497,6 +517,56 @@ def test_get_game_team_totals_handles_real_combo_named_fields(monkeypatch):
     print("✓ get_game_team_totals correctly handles combo-named keys and totalRebounds/rebounds naming split")
 
 
+def test_get_game_team_totals_estimates_possessions(monkeypatch):
+    # Poss = FGA - OREB + TOV + 0.44*FTA. FGA=82 (right side of the combo), OREB=10, TOV=15,
+    # FTA=20 (right side of the free-throw combo) -> 82 - 10 + 15 + 0.44*20 = 95.8
+    E._response_cache.clear()
+    fake_cdn = {
+        "gamepackageJSON": {
+            "boxscore": {
+                "teams": [
+                    {"team": {"id": "20"}, "statistics": [
+                        {"name": "fieldGoalsMade-fieldGoalsAttempted", "displayValue": "33-82"},
+                        {"name": "freeThrowsMade-freeThrowsAttempted", "displayValue": "14-20"},
+                        {"name": "offensiveRebounds", "displayValue": "10"},
+                        {"name": "totalTurnovers", "displayValue": "15"},
+                        {"name": "totalRebounds", "displayValue": "36"},
+                        {"name": "assists", "displayValue": "20"},
+                        {"name": "points", "displayValue": "88"},
+                    ]},
+                ]
+            }
+        }
+    }
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_cdn)
+    totals = E.get_game_team_totals("g1")
+    assert abs(totals[20]["poss"] - 95.8) < 1e-6
+    print("✓ get_game_team_totals estimates possessions from FGA/OREB/TOV/FTA")
+
+
+def test_get_game_team_totals_poss_zero_when_fields_unmatched(monkeypatch):
+    # If the possession-input field names don't match anything (no FGA/FTA/OREB/TOV keys present),
+    # poss should come back 0.0 rather than a bogus negative number or a crash.
+    E._response_cache.clear()
+    fake_cdn = {
+        "gamepackageJSON": {
+            "boxscore": {
+                "teams": [
+                    {"team": {"id": "20"}, "statistics": [
+                        {"name": "points", "displayValue": "88"},
+                        {"name": "totalRebounds", "displayValue": "36"},
+                        {"name": "assists", "displayValue": "20"},
+                    ]},
+                ]
+            }
+        }
+    }
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_cdn)
+    totals = E.get_game_team_totals("g1")
+    assert totals[20]["poss"] == 0.0
+    print("✓ get_game_team_totals returns poss=0.0 (not negative) when possession inputs don't match")
+
+
 # ----------------------------------------------------------------- get_team_recent_allowed_stats
 def test_get_team_recent_allowed_stats_averages_opponent_totals(monkeypatch):
     E._response_cache.clear()
@@ -506,10 +576,10 @@ def test_get_team_recent_allowed_stats_averages_opponent_totals(monkeypatch):
                             {"gameId": "g2", "date": "2026-07-10T00:00Z", "opp_id": 16, "opp_name": "Washington Mystics"},
                         ])
     game_totals = {
-        "g1": {20: {"pts": 90.0, "reb": 35.0, "ast": 20.0, "fg3m": 8.0},
-              19: {"pts": 78.0, "reb": 30.0, "ast": 16.0, "fg3m": 6.0}},
-        "g2": {20: {"pts": 85.0, "reb": 33.0, "ast": 19.0, "fg3m": 9.0},
-              16: {"pts": 82.0, "reb": 32.0, "ast": 18.0, "fg3m": 8.0}},
+        "g1": {20: {"pts": 90.0, "reb": 35.0, "ast": 20.0, "fg3m": 8.0, "poss": 96.0},
+              19: {"pts": 78.0, "reb": 30.0, "ast": 16.0, "fg3m": 6.0, "poss": 94.0}},
+        "g2": {20: {"pts": 85.0, "reb": 33.0, "ast": 19.0, "fg3m": 9.0, "poss": 90.0},
+              16: {"pts": 82.0, "reb": 32.0, "ast": 18.0, "fg3m": 8.0, "poss": 92.0}},
     }
     monkeypatch.setattr(E, "get_game_team_totals", lambda gid: game_totals.get(gid, {}))
 
@@ -517,7 +587,9 @@ def test_get_team_recent_allowed_stats_averages_opponent_totals(monkeypatch):
     # team 20's opponents scored 78 and 82 -> allowed avg pts = 80.0
     assert allowed["pts"] == 80.0
     assert allowed["reb"] == 31.0
-    print("✓ get_team_recent_allowed_stats correctly averages the OPPONENT's totals, not this team's own")
+    # opponents' own possessions in those same games -> avg poss = (94 + 92) / 2 = 93.0
+    assert allowed["poss"] == 93.0
+    print("✓ get_team_recent_allowed_stats correctly averages the OPPONENT's totals (incl. poss), not this team's own")
 
 
 def test_get_team_recent_allowed_stats_empty_when_no_recent_games(monkeypatch):
@@ -525,7 +597,7 @@ def test_get_team_recent_allowed_stats_empty_when_no_recent_games(monkeypatch):
     monkeypatch.setattr(E, "get_team_recent_game_ids",
                         lambda team_id, before_date, n=10, days_back=45: [])
     allowed = E.get_team_recent_allowed_stats(20, "2026-07-14")
-    assert allowed == {"pts": 0.0, "reb": 0.0, "ast": 0.0, "fg3m": 0.0}
+    assert allowed == {"pts": 0.0, "reb": 0.0, "ast": 0.0, "fg3m": 0.0, "poss": 0.0}
 
 
 # ----------------------------------------------------------------- get_player_history_vs_opponent

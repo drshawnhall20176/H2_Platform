@@ -167,16 +167,19 @@ def get_team_roster(team_id: int) -> List[Dict[str, Any]]:
 
 
 # --------------------------------------------------------------------------- recent form
-def _parse_stat_value(raw) -> float:
-    """ESPN's boxscore stats are strings. Combo fields report made-attempted ('12-24') — we want
-    the makes (left side) for the bootstrap model. Plain numeric fields (PTS, REB, AST, MIN) pass
-    through as-is. Anything unparseable becomes 0.0 — the safe default for a missed/DNP game,
-    since it gets filtered out downstream by the minutes bar anyway."""
+def _parse_stat_value(raw, side: str = "left") -> float:
+    """ESPN's boxscore stats are strings. Combo fields report made-attempted ('12-24'). Default
+    side="left" returns the makes, unchanged behavior for every existing caller (the bootstrap
+    model, PTS/REB/AST/FG3M). side="right" returns the attempts instead — needed for the
+    possession estimate (FGA/FTA), which cares about attempts, not makes. Plain numeric fields
+    (PTS, REB, AST, MIN, TOV) have no '-' and pass through the same regardless of side. Anything
+    unparseable becomes 0.0 — the safe default for a missed/DNP game or an unmatched field."""
     if raw is None:
         return 0.0
     s = str(raw).strip()
     if "-" in s and not s.startswith("-"):
-        s = s.split("-", 1)[0]
+        parts = s.split("-", 1)
+        s = parts[1] if side == "right" and len(parts) > 1 else parts[0]
     try:
         return float(s)
     except (TypeError, ValueError):
@@ -331,36 +334,49 @@ def get_game_boxscore(game_id: str) -> Dict[int, Dict[str, float]]:
     return out
 
 
-def _find_team_stat(stats_by_name: Dict[str, str], *candidates: str) -> float:
+def _find_team_stat(stats_by_name: Dict[str, str], *candidates: str, side: str = "left") -> float:
     """Look up a team stat by trying each candidate name, exact match first, falling back to a
     prefix match. The prefix fallback exists because a real CDN boxscore example (confirmed live,
     ScrapeCreators' walkthrough) showed made-count stats under COMBO names —
     "threePointFieldGoalsMade-threePointFieldGoalsAttempted", not a bare "threePointFieldGoalsMade"
     key — the same naming pattern already found and handled for player-level stats. _parse_stat_
     value's existing "X-Y -> take X" logic handles the combo correctly once the right key is
-    found; the fix here is finding it. Returns 0.0 if nothing matches any candidate."""
+    found; the fix here is finding it. side is forwarded to _parse_stat_value unchanged — "left"
+    (default) for makes, "right" for attempts (needed by the possession estimate). Returns 0.0 if
+    nothing matches any candidate."""
     for c in candidates:
         if c in stats_by_name:
-            return _parse_stat_value(stats_by_name[c])
+            return _parse_stat_value(stats_by_name[c], side=side)
     for name, raw in stats_by_name.items():
         if any(name.startswith(c) for c in candidates):
-            return _parse_stat_value(raw)
+            return _parse_stat_value(raw, side=side)
     return 0.0
 
 
 def get_game_team_totals(game_id: str) -> Dict[int, Dict[str, float]]:
-    """{team_id: {pts, reb, ast, fg3m}} TEAM-level totals for a game — from `boxscore.teams[]`
-    (the same CDN response get_game_boxscore already fetches and caches; calling both for the
-    same game_id costs one network request total, not two, via _get_json_cached). This is the
-    foundation for "stats allowed" (Hot Hand Engine's opponent-adjustment signal): a team's
-    defensive profile is just the OTHER team's totals in each of their recent games.
+    """{team_id: {pts, reb, ast, fg3m, poss}} TEAM-level totals for a game — from
+    `boxscore.teams[]` (the same CDN response get_game_boxscore already fetches and caches;
+    calling both for the same game_id costs one network request total, not two, via
+    _get_json_cached). This is the foundation for "stats allowed" (Hot Hand Engine's
+    opponent-adjustment signal): a team's defensive profile is just the OTHER team's totals in
+    each of their recent games.
+
+    poss is an ESTIMATED POSSESSION count for that team's own box score in this game, using the
+    standard formula FGA - OREB + TOV + 0.44*FTA (the same estimate used throughout basketball
+    analytics for games without official play-by-play possession tracking). This exists to fix a
+    real conflation in the "allowed" signal: "this team allows a lot" and "this team just plays
+    fast, so everyone accumulates more against them" look identical in raw per-game allowed
+    totals. Dividing an allowed stat by poss (done downstream, in get_team_recent_allowed_stats
+    and build_hot_hand_board) turns it into a per-possession rate, which isn't fooled by pace.
 
     Field-name matching is defensive (see _find_team_stat) because the exact naming convention
     for THIS specific block (team-level, inside a boxscore, as opposed to player-level or
-    season-cumulative scoreboard stats) hasn't been fully confirmed live — every other endpoint
-    in this module has had at least one naming surprise, so multiple candidates are tried rather
-    than a single guess. Diagnostic dump still fires automatically if extraction stays empty
-    despite team blocks being present, for whatever surprise turns up next."""
+    season-cumulative scoreboard stats) hasn't been fully confirmed live for every field — the
+    pts/reb/ast/fg3m names were confirmed live (see PLATFORM_CHECKPOINT), but the possession
+    inputs (FGA, FTA, OREB, TOV field names) are still an educated guess based on ESPN's other
+    documented naming conventions (the made-attempted combo pattern, the "total" prefix already
+    seen on totalRebounds). The diagnostic dump below fires if poss comes back 0 despite the team
+    block being present, the same safety net already proven for the pts/reb/ast/fg3m fix."""
     data = _get_json_cached(CDN_API, params={"xhr": "1", "gameId": game_id})
     if not data:
         return {}
@@ -379,21 +395,36 @@ def get_game_team_totals(game_id: str) -> Dict[int, Dict[str, float]]:
             name = s.get("name")
             if name:
                 stats_by_name[name] = s.get("displayValue")
+        fga = _find_team_stat(stats_by_name, "fieldGoalsMade-fieldGoalsAttempted",
+                              "fieldGoalsAttempted", side="right")
+        fta = _find_team_stat(stats_by_name, "freeThrowsMade-freeThrowsAttempted",
+                              "freeThrowsAttempted", side="right")
+        oreb = _find_team_stat(stats_by_name, "offensiveRebounds")
+        tov = _find_team_stat(stats_by_name, "totalTurnovers", "turnovers")
+        poss = fga - oreb + tov + 0.44 * fta
         out[tid] = {
             "pts": _find_team_stat(stats_by_name, "points"),
             "reb": _find_team_stat(stats_by_name, "totalRebounds", "rebounds"),
             "ast": _find_team_stat(stats_by_name, "assists"),
             "fg3m": _find_team_stat(stats_by_name, "threePointFieldGoalsMade"),
+            "poss": poss if poss > 0 else 0.0,
         }
 
     dump_key = f"_team_totals_shape_dump:{game_id}"
-    if teams and all(v == {"pts": 0.0, "reb": 0.0, "ast": 0.0, "fg3m": 0.0} for v in out.values()) \
-            and dump_key not in _diag_seen:
+    all_core_zero = teams and all(
+        v["pts"] == 0.0 and v["reb"] == 0.0 and v["ast"] == 0.0 and v["fg3m"] == 0.0
+        for v in out.values()
+    )
+    any_poss_zero = teams and any(v["poss"] == 0.0 for v in out.values())
+    if (all_core_zero or any_poss_zero) and dump_key not in _diag_seen:
         _diag_seen.add(dump_key)
         tb0 = teams[0]
         _diag(f"get_game_team_totals({game_id}) shape dump: team_block keys = {list(tb0.keys())}")
         stat_names = [s.get("name") for s in tb0.get("statistics", [])]
         _diag(f"get_game_team_totals({game_id}) shape dump: statistics[].name values = {stat_names}")
+        if any_poss_zero and not all_core_zero:
+            _diag(f"get_game_team_totals({game_id}): poss=0 while pts/reb/ast/fg3m parsed fine — "
+                 f"FGA/FTA/OREB/TOV candidate field names likely wrong, see values above")
     return out
 
 
@@ -407,9 +438,14 @@ def get_team_recent_allowed_stats(team_id: int, before_date: str,
     days_back defaults to 45 (Hot Hand Engine's "recent form" use). Matchup Lab calls this twice
     per opponent — once with the default (recent) and once with a season-wide window — to show
     whether a team's defense is trending better or worse than their own season norm, not just a
-    single snapshot number."""
+    single snapshot number.
+
+    Also averages "poss" — the opponent's own estimated possessions in each of those same games
+    (see get_game_team_totals). This is what turns a raw "allowed" total into a pace-adjusted
+    rate downstream (build_hot_hand_board divides by it) — without it, a fast-paced team looks
+    like a bad defense simply because there were more possessions to allow stats in."""
     games = get_team_recent_game_ids(team_id, before_date, n, days_back=days_back)
-    totals = {"pts": [], "reb": [], "ast": [], "fg3m": []}
+    totals = {"pts": [], "reb": [], "ast": [], "fg3m": [], "poss": []}
     for g in games:
         opp_id = g.get("opp_id")
         if opp_id is None:

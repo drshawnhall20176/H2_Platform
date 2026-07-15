@@ -240,19 +240,46 @@ def test_build_hot_hand_board_tags_plus_matchup_correctly():
     rows = [{"Player": "Star", "Team": "Atlanta Dream", "Opp": "Chicago Sky",
             "GameLabel": "Chicago Sky @ Atlanta Dream", "PTS": 20.0, "REB": 5.0, "AST": 3.0,
             "FG3M": 2.0, "_opp_id": 19}]
-    # Two opponents on the slate: Chicago Sky allows way more PTS than average -> plus matchup.
+    # Two opponents on the slate, pace-adjusted: Chicago Sky allows 99pts/90poss = 110/100poss;
+    # Washington Mystics allows 68pts/85poss = 80/100poss. Baseline = (110+80)/2 = 95/100poss.
+    # Chicago's rate (110) is well above baseline (95) -> plus matchup, on the RATE, not raw pts.
     opp_allowed = {
-        19: {"pts": 95.0, "reb": 34.0, "ast": 19.0, "fg3m": 8.0},   # Chicago Sky (weak defense)
-        16: {"pts": 70.0, "reb": 30.0, "ast": 16.0, "fg3m": 6.0},   # Washington Mystics (strong)
+        19: {"pts": 99.0, "reb": 34.0, "ast": 19.0, "fg3m": 8.0, "poss": 90.0},   # Chicago Sky
+        16: {"pts": 68.0, "reb": 30.0, "ast": 16.0, "fg3m": 6.0, "poss": 85.0},   # Washington Mystics
     }
     board = WP.build_hot_hand_board(rows, opp_allowed)
     pts_row = next(b for b in board if b["Market"] == "Points")
-    assert pts_row["Opp Allows"] == 95.0
-    assert pts_row["Slate Avg Allowed"] == 82.5   # (95+70)/2
+    assert pts_row["Opp Allows"] == 99.0            # raw per-game, unchanged/still shown for context
+    assert pts_row["Opp Pace"] == 90.0
+    assert pts_row["Opp Allows /100 Poss"] == 110.0  # 99 / 90 * 100
+    assert pts_row["Slate Avg /100 Poss"] == 95.0    # (110 + 80) / 2
     assert pts_row["Matchup Factor"] > 1.08
     assert pts_row["Tag"] == "🟢 Plus matchup"
     assert pts_row["Matchup Score"] > pts_row["Recent Avg"]   # boosted above raw recent form
-    print("✓ build_hot_hand_board correctly identifies and tags a plus matchup")
+    print("✓ build_hot_hand_board correctly identifies and tags a plus matchup, pace-adjusted")
+
+
+def test_build_hot_hand_board_pace_adjustment_flips_a_naive_raw_read():
+    # The exact conflation the pace fix targets: a fast-paced team can look like a bad defense on
+    # RAW allowed totals while actually being average or better per possession, and vice versa.
+    # Team 19 allows more raw points but does so over far more possessions (just plays fast) —
+    # its true per-possession rate is actually BELOW the slate average, unlike the raw number.
+    rows = [{"Player": "Star", "Team": "Atlanta Dream", "Opp": "Fast Team",
+            "GameLabel": "Fast Team @ Atlanta Dream", "PTS": 20.0, "REB": 5.0, "AST": 3.0,
+            "FG3M": 2.0, "_opp_id": 19}]
+    opp_allowed = {
+        19: {"pts": 90.0, "reb": 34.0, "ast": 19.0, "fg3m": 8.0, "poss": 100.0},  # fast pace: 90/100poss = 90.0
+        16: {"pts": 80.0, "reb": 30.0, "ast": 16.0, "fg3m": 6.0, "poss": 80.0},   # slow pace: 80/80poss = 100.0
+    }
+    # Raw totals alone (90 vs 80) would flag team 19 as the worse (higher-allowing) defense.
+    # Pace-adjusted (90.0 vs 100.0 per-100-poss), team 19 is actually the TIGHTER defense.
+    board = WP.build_hot_hand_board(rows, opp_allowed)
+    pts_row = next(b for b in board if b["Market"] == "Points")
+    assert pts_row["Opp Allows"] == 90.0             # raw number alone looks like the "worse" defense
+    assert pts_row["Opp Allows /100 Poss"] == 90.0    # 90 / 100 * 100
+    assert pts_row["Slate Avg /100 Poss"] == 95.0     # (90 + 100) / 2
+    assert pts_row["Matchup Factor"] < 1.0            # correctly reads as a TOUGHER matchup, not easier
+    print("✓ build_hot_hand_board's pace adjustment correctly reverses a naive raw-total read")
 
 
 def test_build_hot_hand_board_neutral_when_no_opponent_data():
@@ -274,8 +301,8 @@ def test_build_hot_hand_board_covers_all_players_and_markets():
         {"Player": "B", "Team": "T2", "Opp": "T1", "GameLabel": "T2 @ T1",
          "PTS": 12.0, "REB": 6.0, "AST": 5.0, "FG3M": 0.5, "_opp_id": 1},
     ]
-    opp_allowed = {1: {"pts": 80.0, "reb": 32.0, "ast": 18.0, "fg3m": 7.0},
-                  2: {"pts": 78.0, "reb": 30.0, "ast": 17.0, "fg3m": 6.5}}
+    opp_allowed = {1: {"pts": 80.0, "reb": 32.0, "ast": 18.0, "fg3m": 7.0, "poss": 92.0},
+                  2: {"pts": 78.0, "reb": 30.0, "ast": 17.0, "fg3m": 6.5, "poss": 90.0}}
     board = WP.build_hot_hand_board(rows, opp_allowed)
     assert len(board) == 8   # 2 players x 4 markets
     assert {b["Player"] for b in board} == {"A", "B"}

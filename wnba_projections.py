@@ -235,9 +235,23 @@ def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[int, Dict[str, floa
     much their tonight's opponent has been allowing at that stat, RELATIVE to the average allowed
     rate across every opponent actually on tonight's slate (not a full-league scan — deliberately
     cheap and honest: "is this a good matchup relative to tonight's other games," not a claim
-    calibrated against the full season). `opp_allowed` is {team_id: {pts,reb,ast,fg3m}} from
+    calibrated against the full season). `opp_allowed` is {team_id: {pts,reb,ast,fg3m,poss}} from
     wnba_engine.get_team_recent_allowed_stats, one call per unique opponent on the slate — the
     caller's job, not this function's, to keep this module free of its own network fetching.
+
+    PACE-ADJUSTED: the Matchup Factor compares PER-100-POSSESSION allowed rates (allowed stat ÷
+    opp's own estimated possessions in those games, ×100 — the standard basketball-analytics
+    convention for a readable rate), not raw per-game allowed totals. Raw totals conflate two
+    different things that look identical in a box score — "this team has a bad defense" and
+    "this team just plays fast, so everyone accumulates more against them." Dividing by
+    possessions removes the pace component, so the factor reflects defensive generosity, not
+    tempo. "Opp Allows" keeps showing the raw per-game number (the figure Shawn actually
+    recognizes) for context; "Opp Allows /100 Poss" and "Slate Avg /100 Poss" are the new,
+    genuinely pace-adjusted figures the Matchup Factor is actually computed from — both are rates,
+    so "Slate Avg /100 Poss" stays one true constant across every row, unlike a naive rescale of
+    the old raw baseline (which would have silently varied per opponent's own pace instead of
+    being a real reference point). A team with too few recent games to have a poss reading falls
+    back to neutral (1.00×), same as the existing "no data yet" behavior.
 
     This is a SEPARATE, clearly-labeled signal, not folded into build_best_bets/
     build_projection_index's probabilities — Edge Board and Best Bets stay recent-form-only on
@@ -246,24 +260,29 @@ def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[int, Dict[str, floa
     reviewing this signal's quality on its own first."""
     baseline_samples = {"pts": [], "reb": [], "ast": [], "fg3m": []}
     for stats in opp_allowed.values():
+        poss = stats.get("poss", 0)
+        if poss <= 0:
+            continue
         for k in baseline_samples:
             if stats.get(k, 0) > 0:
-                baseline_samples[k].append(stats[k])
+                baseline_samples[k].append(stats[k] / poss * 100)   # per-100-poss, not raw total
     baseline = {k: (sum(v) / len(v) if v else 0.0) for k, v in baseline_samples.items()}
 
     out: List[Dict] = []
     for r in rows:
         opp_id = r.get("_opp_id")
         opp_stats = opp_allowed.get(opp_id) if opp_id is not None else None
+        opp_poss = (opp_stats or {}).get("poss", 0.0)
         for _mkey, (col, disp, _line) in _MARKET_SPEC.items():
             stat_key = _STAT_KEY[col]
             player_avg = r.get(col, 0.0)
-            base = baseline.get(stat_key, 0.0)
-            allowed = (opp_stats or {}).get(stat_key, 0.0)
-            if base > 0 and allowed > 0:
-                factor = allowed / base
+            base_rate = baseline.get(stat_key, 0.0)          # per-100-poss, constant across rows
+            allowed = (opp_stats or {}).get(stat_key, 0.0)   # raw per-game, for display context
+            allowed_rate = (allowed / opp_poss * 100) if opp_poss > 0 else 0.0
+            if base_rate > 0 and allowed_rate > 0:
+                factor = allowed_rate / base_rate
             else:
-                factor = 1.0   # no opponent data yet -> neutral, never a fabricated boost/penalty
+                factor = 1.0   # no opponent/pace data yet -> neutral, never a fabricated boost/penalty
             if factor >= 1.08:
                 tag = "🟢 Plus matchup"
             elif factor <= 0.92:
@@ -275,7 +294,9 @@ def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[int, Dict[str, floa
                 "Game": r["GameLabel"], "Market": disp,
                 "Recent Avg": player_avg,
                 "Opp Allows": round(allowed, 1) if opp_stats else None,
-                "Slate Avg Allowed": round(base, 1) if base else None,
+                "Opp Pace": round(opp_poss, 1) if opp_poss else None,
+                "Opp Allows /100 Poss": round(allowed_rate, 1) if allowed_rate else None,
+                "Slate Avg /100 Poss": round(base_rate, 1) if base_rate else None,
                 "Matchup Factor": round(factor, 2),
                 "Matchup Score": round(player_avg * factor, 1),
                 "Tag": tag,

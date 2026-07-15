@@ -308,10 +308,47 @@ combo-key shape rather than a synthetic simple-name fixture that wouldn't have c
   that colors them (Matchup Lab used to reverse this vs. Dinger Engine — fixed, and a regression
   test (`test_slg_xwoba_same_direction_on_every_page`) locks it in).
 
+### Hot Hand Engine pace adjustment (2026-07-15)
+Fixed the pace/defense conflation identified as the top-priority WNBA model gap: Hot Hand
+Engine's "Opp Allows" signal previously couldn't tell "this team has a bad defense" apart from
+"this team just plays fast, so everyone accumulates more counting stats against them" — those
+look identical in raw per-game allowed totals.
+
+- **`wnba_engine.py`** — `_parse_stat_value` and `_find_team_stat` both gained a `side` param
+  ("left"/default = makes, "right" = attempts) so combo fields like
+  `fieldGoalsMade-fieldGoalsAttempted` can yield FGA, not just makes. `get_game_team_totals` now
+  also returns `poss`, an estimated-possessions figure per team per game (standard
+  `FGA − OREB + TOV + 0.44×FTA` formula). `get_team_recent_allowed_stats` averages `poss`
+  alongside pts/reb/ast/fg3m. **Caveat, stated honestly:** the pts/reb/ast/fg3m field names were
+  confirmed live (see the combo-key fix above); the FGA/FTA/OREB/TOV field names are an educated
+  guess based on ESPN's established naming conventions, not yet confirmed against a live example.
+  A diagnostic dump fires automatically if `poss` comes back 0 while the other fields parse fine
+  — the same safety net that caught the original combo-key bug — so a wrong guess here surfaces
+  in the diagnostics rather than silently reverting to neutral factors everywhere.
+- **`wnba_projections.py`** — `build_hot_hand_board`'s Matchup Factor is now computed from
+  per-100-possession allowed rates, not raw per-game allowed totals. Two new columns, "Opp
+  Allows /100 Poss" and "Slate Avg /100 Poss", carry the actual pace-adjusted numbers; "Opp
+  Allows" and the new "Opp Pace" column stay as raw, human-recognizable context. A team with too
+  few recent games to have a possession reading falls back to neutral (1.00×), same as the
+  existing "no data yet" behavior — never a fabricated adjustment.
+- **`views/11_Hot_Hand_Engine.py`** — banner and column reference updated to explain the
+  pace-adjusted rate driving the color/tag, and to stop claiming "no pace adjustment yet."
+- Matchup Lab's own "Opp Recent/Season Allowed" and "Defense Trend" columns are unaffected by
+  this fix and intentionally left as-is: that page compares one team's own allowed rate across
+  two time windows (recent vs. season), not across different opponents with different paces, so
+  the conflation this fix addresses doesn't apply there the same way. Its "no pace adjustment"
+  caption is still accurate and left in place.
+
 ## NOT YET DONE (next stages)
-- **WNBA opponent/pace adjustment** — v1 projection model is recent-form-only (no opponent
-  defensive strength, no pace adjustment). Best Bets/Media Room/Podcast Studio's "Why" reasoning
-  is honest about this being recent-form-only, not a claim of a more sophisticated model.
+- **WNBA injury/availability context, rest/back-to-back fatigue, blowout/minutes risk** — the
+  other three model enhancements identified alongside the pace fix above, not yet built. Rest/
+  back-to-back is computable today from game dates already in the data; blowout/minutes risk
+  ties into game spreads (already available via the Odds API); injury/availability has no clean
+  free data source the way box scores do for the others, so it needs its own scoping pass.
+- **Line movement history ("candlestick" chart analog)** — `capture_closing_lines.py` currently
+  overwrites the latest snapshot instead of logging every one; building real line-movement charts
+  means changing that workflow to append rather than overwrite. Bigger lift than the items above,
+  sequenced after them.
 - **`nfl_engine.py`/`nfl_projections.py`** exist but are untested and `nfl_data_py` isn't in
   `requirements.txt` yet; markets/market_map in the registry are still empty. Flipping NFL on is
   Stage 4, not started.
