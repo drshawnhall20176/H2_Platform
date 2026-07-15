@@ -590,12 +590,24 @@ NBA or WNBA. Both fixed in `basketball_engine.py`:
   precisely because this verification pass looked at real data closely enough to notice a missing
   field, not just check that a call succeeded.
 
-**Still not verified:** the actual CDN endpoint (`cdn.espn.com/core/nba/boxscore`) itself and its
-player-level `boxscore.players[]` shape — the piece `get_game_boxscore` (per-player stats)
-actually depends on, and the single biggest unknown remaining. Could not get a fetchable URL for
-it in this session (ESPN's boxscore HTML pages disallow automated fetching per robots.txt, and the
-raw CDN JSON endpoint didn't surface as an indexable page). This is the concrete next step: hit it
-directly from a real deploy environment (unlike this sandbox) against a 2025-26 season date.
+**Still not fully verified, but a real step closer:** the actual CDN endpoint
+(`cdn.espn.com/core/nba/boxscore`) and its player-level `boxscore.players[]` shape — the piece
+`get_game_boxscore` (per-player stats) actually depends on, and still the single biggest unknown.
+Two attempts: the raw CDN JSON itself never surfaced as a fetchable URL in this session (it's an
+API response, not an indexed page, and ESPN's rendered boxscore HTML pages block automated
+fetching via robots.txt for the *regular-season* path specifically). The Summer League HTML
+boxscore path did NOT block fetching, though, and pulling a real, live, current game (Grizzlies
+106, Warriors 85 — July 14, 2026, gameId 401881861, league `nba-summer-las-vegas`) confirmed the
+full per-player stat categories exist and match what `get_game_boxscore` expects: MIN/PTS/FG/3PT/
+FT/REB/AST/TO/STL/BLK/OREB/DREB/PF, FG/3PT/FT in made-attempted combo format, real "DNP-COACH'S
+DECISION" entries (confirms the didNotPlay-skip logic is exercising a real case, not a
+hypothetical), plus a team-totals row. **Caveat, stated precisely:** this confirms the rendered
+HTML derived from that data — not the literal raw JSON key names (`names`/`athletes`/`stats`
+arrays, etc.) the parsing code actually depends on. Meaningfully stronger evidence than before,
+short of the same "pasted a real JSON response back" bar WNBA's build cleared. The concrete next
+step is unchanged: someone with real network access (unlike this sandbox, which can't reach ESPN
+at all) hitting the actual CDN JSON directly — against Summer League (fastest, live now),
+historical 2025-26 data, or October's tip-off.
 
 **On NBA Summer League, in case it's useful:** confirmed via ESPN's own endpoint-slug listing that
 Summer League is a genuinely SEPARATE set of leagues in ESPN's system — `nba-summer-las-vegas`,
@@ -606,14 +618,14 @@ scoreboard showed a result from "12 hours ago" during this session). Two differe
   fringe prospects, not the core rotation players Shawn's model prices, it's a short exhibition
   tournament (not the 82-game season `SEASON_START`/`RECENT_GAMES_N` assume), and the Odds API
   almost certainly doesn't carry meaningful prop markets for it.
-- **Could be genuinely useful for verification, though NOT done here** — since it's live RIGHT
-  NOW (unlike the regular season, which is in its off-season), it's a real, currently-fetchable
-  NBA-adjacent data source. Pointing `nba_engine.py`'s `SITE_API`/`CDN_API` at
-  `nba-summer-las-vegas` temporarily would let someone WITH real network access confirm the CDN
-  boxscore shape live today, rather than waiting for either historical-2025-26-season access or
-  October's regular-season tip-off. Not pursued in this session since the sandbox can't reach
-  ESPN directly either way — flagged here as a legitimately faster verification path than either
-  alternative in the checklist below, worth using if convenient.
+- **Genuinely useful for verification, and actually used above** — since it's live RIGHT NOW
+  (unlike the regular season, which is in its off-season), it's a real, currently-fetchable
+  NBA-adjacent data source, and its HTML boxscore path (unlike the regular season's) didn't block
+  automated fetching, which is how the confirmation above happened. Pointing `nba_engine.py`'s
+  `SITE_API`/`CDN_API` at `nba-summer-las-vegas` temporarily and hitting the actual CDN *JSON*
+  (not just the HTML page, which is all this session could reach) is still the fastest remaining
+  path to full confirmation — worth doing before either waiting for historical-2025-26-season
+  access or October's regular-season tip-off.
 
 **Checklist before flipping `sports.py`'s NBA entry to `enabled=True`:**
 1. Live-verify `get_game_boxscore`'s CDN endpoint against a real NBA game — the biggest remaining
