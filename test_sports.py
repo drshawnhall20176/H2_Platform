@@ -126,6 +126,18 @@ def test_require_sport_allows_matching_sport():
     print("✓ require_sport allows the page when the active sport matches")
 
 
+def test_require_sport_accepts_a_list_of_keys():
+    import streamlit as st
+    st.session_state["sport"] = "NBA"
+    assert S.require_sport(["WNBA", "NBA"], "Hot Hand Engine") is True
+    st.session_state["sport"] = "WNBA"
+    assert S.require_sport(["WNBA", "NBA"], "Hot Hand Engine") is True
+    st.session_state["sport"] = "MLB"
+    assert S.require_sport(["WNBA", "NBA"], "Hot Hand Engine") is False
+    st.session_state["sport"] = "MLB"
+    print("✓ require_sport accepts a list of acceptable sport keys, not just a single one")
+
+
 def test_sport_only_page_visibility_matches_expected_config():
     # Regression guard: Pitching Lab/Dinger Engine/Matchup Lab(MLB) must stay MLB-only, and Hot
     # Hand Engine/Matchup Lab(WNBA) must stay WNBA-only. A future page renumbering could silently

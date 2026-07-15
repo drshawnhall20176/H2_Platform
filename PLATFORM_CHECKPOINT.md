@@ -4,7 +4,7 @@
 one sport-selector foundation). MLB runs exactly as the standalone did originally; WNBA is now a
 second real, priced sport — not a placeholder.
 
-## What's in this checkpoint (all tested — 314/314 tests green)
+## What's in this checkpoint (all tested — 315/315 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -626,20 +626,24 @@ blocking automated fetching (unlike the regular season's) is what let some of th
 start moving before the real CDN JSON came through directly.
 
 **Remaining before flipping `sports.py`'s NBA entry to `enabled=True`:**
-1. **`views/11_Hot_Hand_Engine.py`** and **`views/12_Matchup_Lab.py`** both still hardcode
-   `sports.require_sport("WNBA", ...)` — written before NBA existed as a real option. These need
-   updating to accept NBA too (or generalize to "any basketball sport"), or NBA will appear
-   enabled in the sidebar while these two pages still refuse to show it.
+1. ~~`views/11_Hot_Hand_Engine.py` and `views/12_Matchup_Lab.py` hardcode `sports.require_sport
+   ("WNBA", ...)`~~ — **done.** `require_sport` now accepts a list of acceptable sport keys
+   (backward-compatible with existing single-string callers), and both pages call it with
+   `["WNBA", "NBA"]`. Their user-visible captions also now read `_active.key` dynamically instead
+   of hardcoding "WNBA". New test (`test_require_sport_accepts_a_list_of_keys`). 315/315 passing.
 2. Re-verify `SEASON_START` once the 2026-27 schedule is officially announced.
 3. Sanity-check `config_nba.MIN_AVG_MINUTES`/`RECENT_GAMES_N` against real NBA rotation patterns
    once real slate data is available — carried over from WNBA's values as a starting point only.
 4. Optional, not blocking: independently confirm `get_team_roster`'s exact shape live (same
    pattern already proven for WNBA, so low risk, just not independently checked this session).
 
+Items 2-4 are tuning/polish, not launch blockers — nothing left would stop `enabled=True` from
+working, just from being fully dialed in. That's a real decision point, not made unilaterally here.
+
 ## NOT YET DONE (next stages)
-- **NBA go-live checklist** — see above. The build exists; live verification of the CDN boxscore
-  endpoint specifically doesn't yet (everything else about the build was either confirmed live or
-  fixed during this pass — see the verification section above for what was actually found).
+- **NBA go-live decision** — the data layer is confirmed live, the view-gating blocker is fixed;
+  what's left (SEASON_START, tuning constants, roster shape) is calibration, not a launch blocker.
+  Flipping `sports.py`'s NBA entry to `enabled=True` is a real decision, not made unilaterally.
 - **Injury/availability "opportunity boost" (Stage B)** — see above. Deferred as a genuinely
   separate, harder modeling decision, not a quick follow-on to Stage A's data-fetch.
 - **Real line movement history (candlestick-proper)** — the Matchup Lab trend chart overlays a

@@ -140,23 +140,30 @@ def active() -> Sport:
     return get(active_key())
 
 
-def require_sport(required_key: str, feature_name: str = "This page") -> bool:
-    """Stricter than require_live_engine. Use this for pages that have NOT been ported to
-    dispatch through sports.active().engine/.projections and still hardcode one specific sport's
-    engine internally (e.g. `import mlb_engine as E`). require_live_engine alone is NOT enough
-    here — it only checks that the ACTIVE sport has markets configured, which used to imply "and
-    therefore it's MLB" back when MLB was the only sport with markets. That stopped being true the
-    moment a second sport (WNBA) got real markets: a require_live_engine-only guard would let a
-    WNBA-selecting user land on a page that silently runs MLB's engine and mislabels the output as
-    WNBA — worse than just not being available. Returns False (caller should st.stop()) when the
-    active sport isn't the one this page actually supports."""
+def require_sport(required_keys, feature_name: str = "This page") -> bool:
+    """Stricter than require_live_engine. Use this for pages whose LOGIC (specific columns,
+    market assumptions, display contract) has only been validated against certain sports' shapes
+    — even if the page itself already dispatches cleanly through sports.active().engine/
+    .projections. require_live_engine alone is NOT enough here — it only checks that the ACTIVE
+    sport has markets configured, which used to imply "and therefore it's MLB" back when MLB was
+    the only sport with markets. That stopped being true the moment a second sport (WNBA) got
+    real markets: a require_live_engine-only guard would let a WNBA-selecting user land on a page
+    that silently runs MLB's engine and mislabels the output as WNBA — worse than just not being
+    available.
+
+    required_keys: a single sport key (str, e.g. "WNBA") or an iterable of keys (list/tuple/set,
+    e.g. ["WNBA", "NBA"]) — any one of which is acceptable for this page. A single string is
+    still accepted directly (not wrapped in a list by the caller) for backward compatibility with
+    existing single-sport call sites. Returns False (caller should st.stop()) when the active
+    sport isn't one of the supported ones."""
     import streamlit as st
+    keys = [required_keys] if isinstance(required_keys, str) else list(required_keys)
     s = active()
-    if s.key != required_key:
-        req = get(required_key)
+    if s.key not in keys:
+        labels = " or ".join(f"{get(k).icon} {get(k).label}" for k in keys)
         st.info(
-            f"🚧 {feature_name} is only wired for {req.icon} {req.label} so far. "
-            f"Pick {req.icon} {req.label} from the sidebar — support for {s.label} here is "
+            f"🚧 {feature_name} is only wired for {labels} so far. "
+            f"Pick one of those from the sidebar — support for {s.label} here is "
             f"planned but not yet built for this specific page."
         )
         return False
