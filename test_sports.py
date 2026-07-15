@@ -58,11 +58,11 @@ def test_require_live_engine_false_for_unwired_sport(monkeypatch):
 
 
 def test_market_map_present_for_live_sports_only():
-    for key in ("MLB", "WNBA"):
+    for key in ("MLB", "WNBA", "NBA"):
         assert S.REGISTRY[key].market_map, f"{key} must have a market_map (CLV capture depends on it)"
-    for key in ("NFL", "NBA", "NHL", "NCAAF", "NCAAMB"):
+    for key in ("NFL", "NHL", "NCAAF", "NCAAMB"):
         assert S.REGISTRY[key].market_map == {}, f"{key} should still be a placeholder"
-    print("✓ MLB and WNBA have filled market_maps; the rest are honest placeholders")
+    print("✓ MLB, WNBA, and NBA have filled market_maps; the rest are honest placeholders")
 
 
 def test_owner_only_pages_match_expected_titles():

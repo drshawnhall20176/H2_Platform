@@ -92,7 +92,24 @@ REGISTRY: Dict[str, Sport] = {
         config_module="config_wnba",
         enabled=True,   # live as of Stage 2's WNBA build — Core 4 markets (Pts/Reb/Ast/3PM)
     ),
-    "NBA":    Sport("NBA",   "NBA — Basketball",        "🏀", "basketball_nba",       [], {}, enabled=False),
+    "NBA":    Sport(
+        key="NBA", label="NBA — Basketball", icon="🏀", odds_sport_key="basketball_nba",
+        markets=["player_points", "player_rebounds", "player_assists", "player_threes"],
+        market_map={"Points": "player_points", "Rebounds": "player_rebounds",
+                    "Assists": "player_assists", "Threes Made": "player_threes"},
+        engine_module="nba_engine", projections_module="nba_projections",
+        config_module="config_nba",
+        enabled=False,   # engine present, built as a copy-adapt of the live WNBA engine (see
+                          # basketball_engine.py's module docstring for the extraction plan this
+                          # follows) — but NOT yet confirmed against a live NBA slate the way WNBA
+                          # was before ITS launch. Specifically unconfirmed: the CDN boxscore
+                          # endpoint's real shape for NBA (get_game_boxscore's biggest risk area —
+                          # this was the one WNBA endpoint whose real shape genuinely surprised the
+                          # documented schema). Verify before flipping this to True: NBA's 2025-26
+                          # season ran through April 2026, so real historical games exist to test
+                          # nba_engine.build_slate/get_game_boxscore against RIGHT NOW even during
+                          # the current (2026-07) off-season — no need to wait for October's tip-off.
+    ),
     "NHL":    Sport("NHL",   "NHL — Hockey",            "🏒", "icehockey_nhl",        [], {}, enabled=False),
     "NCAAF":  Sport("NCAAF", "NCAA Football",           "🏈", "americanfootball_ncaaf", [], {}, enabled=False),
     "NCAAMB": Sport("NCAAMB","NCAA Men's Basketball",   "🏀", "basketball_ncaab",     [], {}, enabled=False),

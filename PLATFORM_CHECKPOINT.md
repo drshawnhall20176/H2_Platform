@@ -4,7 +4,7 @@
 one sport-selector foundation). MLB runs exactly as the standalone did originally; WNBA is now a
 second real, priced sport — not a placeholder.
 
-## What's in this checkpoint (all tested — 277/277 tests green)
+## What's in this checkpoint (all tested — 310/310 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -516,10 +516,63 @@ that build starts, and extract further once real duplication is provable, not sp
   code directly, not just through WNBA's wrapper. Total: 277/277 passing, up from 255 (0 existing
   tests modified, 22 added).
 
+### nba_engine.py / nba_projections.py — built, NOT yet live (2026-07-15)
+Built as a copy-adapt of `wnba_engine.py`/`wnba_projections.py`, wired to
+`basketball_engine.py`/`basketball_projections.py` for pace/rest/blowout/injury logic exactly the
+way WNBA now is. Registry-wired in `sports.py` with real markets/market_map (Core 4: Points/
+Rebounds/Assists/Threes, same Odds API market keys as WNBA) — but **`enabled=False`**, on purpose.
+
+**Why not live yet — stated plainly, not hedging:** the single biggest risk area in WNBA's own
+build was `get_game_boxscore`'s CDN endpoint (`cdn.espn.com/core/wnba/boxscore`) — ESPN's "site"
+API family was confirmed to return team-level stats only, no player-level, forcing that CDN
+detour, and the exact player-stats shape there needed a live response pasted back to get right.
+The equivalent for NBA (`cdn.espn.com/core/nba/boxscore`) has NOT been hit live in this session —
+only researched (a generic `cdn.espn.com/core/{sport}/boxscore` pattern is documented and
+confirmed live for NFL; NBA's own combo-key team-stat naming was independently confirmed live via
+a *different* endpoint). That's real but secondhand evidence, not the same as WNBA's own
+paste-a-real-response verification. Flipping `enabled=True` before that check risks presenting an
+untested integration as live.
+
+- **`config_nba.py`** — `RECENT_GAMES_N`/`MIN_AVG_MINUTES`/`DEFAULT_SIMS` carried over from
+  WNBA's values as starting points, flagged for re-checking once real NBA slate data exists. No
+  hardcoded team-ID reference table (unlike `config_wnba.TEAMS`) — deliberately: that table isn't
+  actually used by the engine either way (both engines get team ids/names live from ESPN), and
+  wasn't worth transcribing 30 team IDs from memory when it isn't required for anything to work.
+- **`nba_engine.py`** — `get_team_recent_game_ids`, `get_game_team_totals`, `get_team_injuries`
+  thin-wrap `basketball_engine.py` exactly like WNBA's do. `get_team_injuries` IS confirmed live
+  for NBA specifically (the original injury-availability scoping pass fetched
+  `site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries?team=ATL` directly and got real
+  data) — the CDN boxscore endpoint is the one real gap. `SEASON_START = "2026-10-01"` is an
+  honestly-flagged **placeholder**: this build happened during the NBA's off-season (2025-26
+  season ran Oct 21, 2025 – Apr 12, 2026, confirmed live; 2026-27's schedule wasn't announced yet
+  at build time) — re-verify once it is.
+- **`nba_projections.py`** — `_MARKET_SPEC` uses NBA-scale default lines (22.5/7.5/5.5/2.5 vs.
+  WNBA's 12.5/5.5/3.5/1.5 — 48-minute games, faster pace, meaningfully higher counting stats) and
+  its own `BLOWOUT_THRESHOLD = 12.0` (vs. the shared function's WNBA-tuned 10.0 default) — both
+  round-number starting points, not backtested, same honesty as every other tuning constant here.
+- **New tests**: `test_nba_engine.py` (mirrors `test_wnba_engine.py` for the functions this
+  module implements independently, plus wiring smoke tests confirming the basketball_engine.py
+  delegation passes NBA's own SITE_API/CDN_API through correctly) and `test_nba_projections.py`.
+  33 new tests. Total: 310/310 passing.
+- **`test_sports.py`** updated: NBA moved from the "still a placeholder" market_map group to the
+  "genuinely wired" group alongside MLB/WNBA — a legitimate assertion update reflecting NBA's
+  real new state, not a compatibility workaround.
+
+**Checklist before flipping `sports.py`'s NBA entry to `enabled=True`:**
+1. Live-verify `get_game_boxscore` against a real NBA game — the 2025-26 season's historical
+   games (Oct 2025 – Apr 2026) are queryable RIGHT NOW even during the current off-season, no
+   need to wait for October's tip-off. Paste a real response back the same way WNBA's build did.
+2. Re-verify `SEASON_START` once the 2026-27 schedule is officially announced.
+3. **`views/11_Hot_Hand_Engine.py`** and **`views/12_Matchup_Lab.py`** both still hardcode
+   `sports.require_sport("WNBA", ...)` — written before NBA existed as a real option. These need
+   updating to accept NBA too (or generalize to "any basketball sport") once NBA is confirmed
+   live, or NBA will appear enabled in the sidebar while these two pages still refuse to show it.
+   Deliberately NOT changed yet — no point widening a gate to a codepath that isn't verified.
+4. Sanity-check `config_nba.MIN_AVG_MINUTES`/`RECENT_GAMES_N` against real NBA rotation patterns
+   once real slate data is available — carried over from WNBA's values as a starting point only.
+
 ## NOT YET DONE (next stages)
-- **`nba_engine.py`** — not started. When it is, start by copying `wnba_engine.py`'s remaining
-  (non-extracted) functions as a template and wiring them to `basketball_engine.py` the same way
-  `wnba_engine.py` now does, rather than writing from scratch.
+- **NBA go-live checklist** — see above. The build exists; live verification doesn't yet.
 - **Injury/availability "opportunity boost" (Stage B)** — see above. Deferred as a genuinely
   separate, harder modeling decision, not a quick follow-on to Stage A's data-fetch.
 - **Real line movement history (candlestick-proper)** — the Matchup Lab trend chart overlays a
