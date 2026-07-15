@@ -192,8 +192,20 @@ def get_game_team_totals(game_id: str, cdn_api: str, fetch: FetchFn,
         oreb = find_team_stat(stats_by_name, "offensiveRebounds")
         tov = find_team_stat(stats_by_name, "totalTurnovers", "turnovers")
         poss = fga - oreb + tov + 0.44 * fta
+        # "pts" fallback: a live NBA sample (a different ESPN endpoint, not this exact CDN one,
+        # but showing the same team-level statistics[] shape) had NO "points" entry in
+        # statistics[] at all — team score can live as a sibling "score" field on the team block
+        # itself instead. Try the stats lookup first (this IS confirmed live for WNBA), fall back
+        # to team_block["score"] rather than silently reporting 0.0 if the stats-based path comes
+        # up empty despite the team block being present.
+        pts = find_team_stat(stats_by_name, "points")
+        if pts == 0.0:
+            try:
+                pts = float(team_block.get("score", 0) or 0)
+            except (TypeError, ValueError):
+                pts = 0.0
         out[tid] = {
-            "pts": find_team_stat(stats_by_name, "points"),
+            "pts": pts,
             "reb": find_team_stat(stats_by_name, "totalRebounds", "rebounds"),
             "ast": find_team_stat(stats_by_name, "assists"),
             "fg3m": find_team_stat(stats_by_name, "threePointFieldGoalsMade"),
@@ -206,13 +218,27 @@ def get_game_team_totals(game_id: str, cdn_api: str, fetch: FetchFn,
         v["pts"] == 0.0 and v["reb"] == 0.0 and v["ast"] == 0.0 and v["fg3m"] == 0.0
         for v in out.values()
     )
+    # Catches a PARTIAL failure too — e.g. only "pts" silently wrong while reb/ast/fg3m parse
+    # fine — not just the case where every field fails at once. A single bad field name would
+    # otherwise produce a wrong number with zero diagnostic signal, the exact gap a live NBA
+    # sample surfaced during verification (points wasn't found in statistics[] there, but the
+    # other three fields were) — this fires the same safety net for that case, not just total
+    # failure.
+    any_core_zero = teams and any(
+        v["pts"] == 0.0 or v["reb"] == 0.0 or v["ast"] == 0.0 or v["fg3m"] == 0.0
+        for v in out.values()
+    )
     any_poss_zero = teams and any(v["poss"] == 0.0 for v in out.values())
-    if (all_core_zero or any_poss_zero) and dump_key not in seen:
+    if (all_core_zero or any_core_zero or any_poss_zero) and dump_key not in seen:
         seen.add(dump_key)
         tb0 = teams[0]
         diag(f"get_game_team_totals({game_id}) shape dump: team_block keys = {list(tb0.keys())}")
         stat_names = [s.get("name") for s in tb0.get("statistics", [])]
         diag(f"get_game_team_totals({game_id}) shape dump: statistics[].name values = {stat_names}")
+        if any_core_zero and not all_core_zero:
+            zero_fields = sorted({k for v in out.values() for k in ("pts", "reb", "ast", "fg3m") if v[k] == 0.0})
+            diag(f"get_game_team_totals({game_id}): PARTIAL failure — {zero_fields} came back 0 while "
+                f"other core fields parsed fine — those specific candidate field names are likely wrong")
         if any_poss_zero and not all_core_zero:
             diag(f"get_game_team_totals({game_id}): poss=0 while pts/reb/ast/fg3m parsed fine — "
                 f"FGA/FTA/OREB/TOV candidate field names likely wrong, see values above")

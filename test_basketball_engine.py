@@ -113,6 +113,42 @@ def test_get_game_team_totals_empty_on_fetch_failure():
     assert BB.get_game_team_totals("g1", CDN_API, lambda url, params=None: None) == {}
 
 
+def test_get_game_team_totals_falls_back_to_team_score_when_points_stat_missing():
+    # Real finding from NBA verification: a live NBA sample had NO "points" entry anywhere in
+    # statistics[] (only FG/3PT/FT/rebounds/assists/turnovers etc.) — team score can live as a
+    # sibling "score" field on the team block itself instead of inside statistics[].
+    fake_cdn = {"gamepackageJSON": {"boxscore": {"teams": [
+        {"team": {"id": "5"}, "score": "112", "statistics": [
+            {"name": "totalRebounds", "displayValue": "45"},
+            {"name": "assists", "displayValue": "24"},
+            {"name": "threePointFieldGoalsMade-threePointFieldGoalsAttempted", "displayValue": "12-30"},
+            # deliberately no "points" entry anywhere
+        ]},
+    ]}}}
+    totals = BB.get_game_team_totals("g1", CDN_API, lambda url, params=None: fake_cdn)
+    assert totals[5]["pts"] == 112.0   # recovered from team_block["score"], not silently 0.0
+    print("✓ get_game_team_totals falls back to team_block['score'] when 'points' isn't in statistics[]")
+
+
+def test_get_game_team_totals_diagnostic_fires_on_partial_failure():
+    # A PARTIAL failure (only one field wrong) must still trigger the diagnostic dump, not just a
+    # total failure — this was a real gap: the old condition only fired when ALL FOUR core fields
+    # were zero simultaneously, so one silently-wrong field name (like "points" being absent)
+    # produced a wrong number with zero diagnostic signal.
+    calls = []
+    fake_cdn = {"gamepackageJSON": {"boxscore": {"teams": [
+        {"team": {"id": "5"}, "statistics": [   # no "score" fallback here either -> pts stays 0.0
+            {"name": "totalRebounds", "displayValue": "45"},
+            {"name": "assists", "displayValue": "24"},
+            {"name": "threePointFieldGoalsMade-threePointFieldGoalsAttempted", "displayValue": "12-30"},
+        ]},
+    ]}}}
+    BB.get_game_team_totals("g1", CDN_API, lambda url, params=None: fake_cdn, diag=calls.append)
+    assert any("PARTIAL failure" in c for c in calls)
+    assert any("pts" in c for c in calls if "PARTIAL failure" in c)
+    print("✓ get_game_team_totals's diagnostic dump now fires on a partial (not just total) failure")
+
+
 # ----------------------------------------------------------------- get_team_recent_allowed_stats
 def test_get_team_recent_allowed_stats_averages_opponent_totals():
     events = {"events": [
