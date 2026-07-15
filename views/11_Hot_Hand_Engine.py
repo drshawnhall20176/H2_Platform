@@ -14,6 +14,8 @@ wnba_projections.build_hot_hand_board's docstring for why keeping this a separat
 labeled signal is the more conservative, honest choice for a live betting board.
 """
 
+import os
+
 import streamlit as st
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
 import pandas as pd
@@ -21,6 +23,7 @@ from datetime import datetime
 import pytz
 
 import sports
+import odds_api as O
 
 _active = sports.active()
 
@@ -37,6 +40,13 @@ E, P = _active.engine, _active.projections
 eastern = pytz.timezone("US/Eastern")
 
 
+def get_api_key():
+    try:
+        return st.secrets["ODDS_API_KEY"]
+    except Exception:
+        return os.environ.get("ODDS_API_KEY")
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def load_board(date_str: str):
     rows, meta = E.build_slate(date_str)
@@ -47,8 +57,18 @@ def load_board(date_str: str):
     opp_allowed = {oid: E.get_team_recent_allowed_stats(oid, date_str) for oid in opp_ids}
     team_ids = sorted({r["_team_id"] for r in rows if r.get("_team_id") is not None})
     team_rest = {tid: E.get_team_rest_info(tid, date_str) for tid in team_ids}
-    board = P.build_hot_hand_board(rows, opp_allowed, team_rest)
+    board = P.build_hot_hand_board(rows, opp_allowed, team_rest)   # no team_spreads yet — Spread/
+                                                                   # Blowout Risk are merged in below,
+                                                                   # only after a live, button-gated fetch
     return board, len(meta)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_spreads(sport_key: str, date_str: str, _api_key: str):
+    # "spreads" only (not player props) — cheap: 1 market unit/event vs. the 4-market player-prop
+    # fetch. Cached by (date, key) so re-rendering after the button click never re-fetches.
+    sport = sports.get(sport_key)
+    return O.fetch_slate_spreads(date_str, _api_key, sport=sport.odds_sport_key)
 
 
 # --- controls ----------------------------------------------------------------
@@ -68,14 +88,41 @@ if not board:
     st.info(f"No projectable players for this date. Pick a date with scheduled {_active.label} games.")
     st.stop()
 
+api_key = get_api_key()
+sc1, sc2 = st.columns([1, 3])
+with sc1:
+    if api_key and st.button("📡 Fetch game spreads",
+                             help="Adds blowout-risk context (game spread) to every row. One "
+                                  "cheap fetch covers the whole slate."):
+        st.session_state["hot_hand_fetch_spreads"] = True
+with sc2:
+    if not api_key:
+        st.caption("🔑 No `ODDS_API_KEY` found — Blowout Risk will show as unknown (`—`).")
+
+if api_key and st.session_state.get("hot_hand_fetch_spreads"):
+    try:
+        with st.spinner("Fetching game spreads..."):
+            team_spreads, spreads_info = load_spreads(_active.key, date_str, api_key)
+        for b in board:
+            spread = team_spreads.get(b["Team"])
+            b["Spread"] = round(spread, 1) if spread is not None else None
+            b["Blowout Risk"] = P.blowout_risk_tag(spread)
+        if spreads_info:
+            st.caption(f"Quota remaining: {spreads_info.get('remaining', '—')} · "
+                      f"games priced: {spreads_info.get('events_fetched', '—')}/{spreads_info.get('events_total', '—')}")
+    except O.OddsAPIError as e:
+        st.error(f"Odds API error: {e}")
+
 markets = sorted({b["Market"] for b in board})
-mc1, mc2, mc3 = st.columns([2, 1, 1])
+mc1, mc2, mc3, mc4 = st.columns([2, 1, 1, 1])
 with mc1:
     chosen_markets = st.multiselect("Markets", markets, default=markets)
 with mc2:
     tag_filter = st.selectbox("Matchup", ["All", "🟢 Plus matchup only", "🔴 Tough matchup only"])
 with mc3:
     rest_filter = st.selectbox("Rest", ["All", "⚠️ Back-to-back only"])
+with mc4:
+    blowout_filter = st.selectbox("Blowout", ["All", "⚠️ Risk only"])
 
 view = [b for b in board if b["Market"] in chosen_markets]
 if tag_filter == "🟢 Plus matchup only":
@@ -84,6 +131,8 @@ elif tag_filter == "🔴 Tough matchup only":
     view = [b for b in view if b["Tag"] == "🔴 Tough matchup"]
 if rest_filter == "⚠️ Back-to-back only":
     view = [b for b in view if b["B2B"]]
+if blowout_filter == "⚠️ Risk only":
+    view = [b for b in view if b.get("Blowout Risk") == "⚠️ Blowout risk"]
 
 st.caption(f"{n_games} game(s) · {len(view)} of {len(board)} player-market rows shown")
 
@@ -98,10 +147,13 @@ st.info(
     "other opponents on tonight's slate — good news for whoever's playing them. 🔴 **Red / Tough "
     "matchup** = they've been allowing less, pace-adjusted. Each market (Points/Rebounds/"
     "Assists/Threes) is scored independently — a team can be a plus matchup on points and a "
-    "tough one on rebounds at the same time. **Rest** is a separate, unrelated signal: whether "
-    "the PLAYER'S OWN team (not the opponent) is on the second night of a back-to-back — real "
-    "fatigue risk, kept as its own column rather than folded into the matchup color, which is "
-    "about the opponent, not her legs.", icon="ℹ️")
+    "tough one on rebounds at the same time. **Rest** and **Blowout Risk** are separate, "
+    "unrelated signals, not folded into the matchup color: Rest is whether the PLAYER'S OWN team "
+    "is on a back-to-back (real fatigue risk); Blowout Risk is whether tonight's game spread is "
+    "wide enough that garbage time becomes a real possibility — a heavy favorite's stars can see "
+    "reduced 4th-quarter minutes, a heavy underdog's bench can see extended run. Neither says "
+    "which specific player is affected — that's still a judgment call based on her role.",
+    icon="ℹ️")
 
 # --- the board -----------------------------------------------------------------
 def _rest_display(r):
@@ -115,12 +167,13 @@ for b in view:
 
 df = pd.DataFrame(view)[["Player", "Team", "Opp", "Market", "Recent Avg", "Opp Allows", "Opp Pace",
                          "Opp Allows /100 Poss", "Slate Avg /100 Poss", "Matchup Factor",
-                         "Matchup Score", "Tag", "Rest", "Game"]]
+                         "Matchup Score", "Tag", "Rest", "Spread", "Blowout Risk", "Game"]]
 df = df.rename(columns={"Opp Allows": "Opp Team Total"})
 st.dataframe(
     df.style.format({"Recent Avg": "{:.1f}", "Opp Team Total": "{:.1f}", "Opp Pace": "{:.1f}",
                      "Opp Allows /100 Poss": "{:.1f}", "Slate Avg /100 Poss": "{:.1f}",
-                     "Matchup Factor": "{:.2f}×", "Matchup Score": "{:.1f}"}, na_rep="—")
+                     "Matchup Factor": "{:.2f}×", "Matchup Score": "{:.1f}", "Spread": "{:+.1f}"},
+                    na_rep="—")
     .theme_gradient(cmap="RdYlGn", subset=["Matchup Factor"]),
     hide_index=True, use_container_width=True, height=520,
 )
@@ -130,7 +183,8 @@ st.caption("\"Opp Team Total\" = that opponent's entire team combined for that s
            "the pace-adjusted rate driving color and sort — above 1.08 is 🟢, below 0.92 is 🔴, "
            "in between is 🟡 neutral. \"Rest\" = her OWN team's rest, separate from the matchup "
            "read entirely — \"—\" means no recent game was found to compute it from (start of "
-           "season, not a claim she's fresh).")
+           "season, not a claim she's fresh). \"Spread\"/\"Blowout Risk\" need the button above "
+           "clicked once — until then they show \"—\", not a fabricated \"competitive\" guess.")
 
 with st.expander("Full column reference"):
     st.markdown("""
@@ -160,10 +214,15 @@ with st.expander("Full column reference"):
   entirely about the opponent's defense — rest is a different kind of risk, not another input into
   the same number. "—" means no recent game was found in the lookback window (start of season),
   reported honestly as unknown rather than assumed "well-rested."
+- **Spread / Blowout Risk** — her OWN team's live game spread (negative = favorite, positive =
+  underdog) and a simple ±10-point threshold flag on it. Needs the "📡 Fetch game spreads" button
+  clicked once (a cheap, slate-wide fetch, cached — switching players/markets afterward doesn't
+  re-fetch). NOT a claim about which specific player is affected: a wide spread means the
+  favorite's stars risk reduced 4th-quarter minutes AND the underdog's bench risks extended run —
+  read it alongside her own role (AvgMin), not as a directional adjustment to her number.
     """)
 
-st.caption("v1 signal, now pace- and rest-aware — still no positional matchup data (who's "
-           "actually likely to guard this player), no blowout/minutes-risk or injury/"
-           "availability context yet. This measures team-wide generosity at a stat, per "
-           "possession, not a specific positional mismatch. A reasonable next layer, not built "
-           "yet.")
+st.caption("v1 signal, now pace-, rest-, and blowout-aware — still no positional matchup data "
+           "(who's actually likely to guard this player) or injury/availability context. This "
+           "measures team-wide generosity at a stat, per possession, not a specific positional "
+           "mismatch. A reasonable next layer, not built yet.")
