@@ -56,7 +56,9 @@ def load_matchup(date_str: str, player_id: int, team_id: int, opp_id: int):
     season_log = E.get_player_season_games(player_id, team_id, date_str)              # full season, any opponent
     opp_recent = E.get_team_recent_allowed_stats(opp_id, date_str)                    # last 10
     opp_season = E.get_team_recent_allowed_stats(opp_id, date_str, n=82, days_back=200)  # season-wide
-    return h2h_log, season_log, opp_recent, opp_season
+    team_rest = E.get_team_rest_info(team_id, date_str)
+    opp_rest = E.get_team_rest_info(opp_id, date_str)
+    return h2h_log, season_log, opp_recent, opp_season, team_rest, opp_rest
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -98,13 +100,30 @@ if team_id is None or opp_id is None:
     st.stop()
 
 with st.spinner(f"Pulling {row['Opp']}'s matchup history and defensive trend..."):
-    h2h_log, season_log, opp_recent, opp_season = load_matchup(date_str, pid, team_id, opp_id)
+    h2h_log, season_log, opp_recent, opp_season, team_rest, opp_rest = load_matchup(
+        date_str, pid, team_id, opp_id)
 
 profile = P.build_matchup_profile(row, h2h_log, opp_recent, opp_season, season_log=season_log)
 
 st.markdown(f"### {row['Player']} vs {row['Opp']}")
 st.caption(f"{row['GameLabel']}  ·  averaging {row['AvgMin']:.0f} min/game over their last "
            f"{len(row.get('_game_log') or [])} games")
+
+
+def _rest_line(label: str, rest: dict) -> str:
+    days = rest.get("rest_days")
+    if days is None:
+        return f"{label}: rest unknown (no recent game on file)"
+    if rest.get("is_back_to_back"):
+        return f"⚠️ {label}: back-to-back (played yesterday)"
+    return f"{label}: {days} day{'s' if days != 1 else ''} rest"
+
+
+rc1, rc2 = st.columns(2)
+with rc1:
+    st.caption(_rest_line(row["Team"], team_rest))
+with rc2:
+    st.caption(_rest_line(row["Opp"], opp_rest))
 
 st.info(
     f"**How {row['Player']} does against {row['Opp']} specifically, vs. how she's played "
