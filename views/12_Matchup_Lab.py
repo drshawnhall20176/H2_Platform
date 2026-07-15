@@ -9,13 +9,17 @@ history vs this exact opponent this season, and the opponent's recent-vs-season 
 scan for the head-to-head piece).
 """
 
+import os
+
 import streamlit as st
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
 import pandas as pd
+import plotly.graph_objects as go
 from datetime import datetime
 import pytz
 
 import sports
+import odds_api as O
 
 _active = sports.active()
 
@@ -33,6 +37,13 @@ E, P = _active.engine, _active.projections
 eastern = pytz.timezone("US/Eastern")
 
 
+def get_api_key():
+    try:
+        return st.secrets["ODDS_API_KEY"]
+    except Exception:
+        return os.environ.get("ODDS_API_KEY")
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def load_slate(date_str: str):
     rows, meta = E.build_slate(date_str)
@@ -46,6 +57,17 @@ def load_matchup(date_str: str, player_id: int, team_id: int, opp_id: int):
     opp_recent = E.get_team_recent_allowed_stats(opp_id, date_str)                    # last 10
     opp_season = E.get_team_recent_allowed_stats(opp_id, date_str, n=82, days_back=200)  # season-wide
     return h2h_log, season_log, opp_recent, opp_season
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_offers(sport_key: str, date_str: str, markets_tuple: tuple, _api_key: str):
+    # One fetch covers the WHOLE slate (every game, every player) — cached by (date, markets, key)
+    # so switching between players on this page never re-fetches; only a genuinely new date/key
+    # combination costs quota. Same button-gated, cached pattern as Edge Board's live-odds fetch.
+    sport = sports.get(sport_key)
+    offers, info = O.fetch_slate_props(date_str, _api_key, list(markets_tuple),
+                                       sport=sport.odds_sport_key)
+    return offers, info
 
 
 # --- controls ----------------------------------------------------------------
@@ -94,6 +116,64 @@ st.info(
     "distinctly lower against this team than her other stats are — the closest honest read on "
     "\"how do they play her\" that box-score data supports (not a scheme detail — just which "
     "specific stat category dips more than the others).", icon="🎯")
+
+# --- trend charts: is she trending toward or away from the number? ----------
+st.markdown(f"**{row['Player']} — recent-form trend vs. the line**")
+
+api_key = get_api_key()
+if not api_key:
+    st.caption("🔑 No `ODDS_API_KEY` found — charts below show the model's own default line "
+               "instead of tonight's actual sportsbook number. Add the key to `.streamlit/"
+               "secrets.toml` or the `ODDS_API_KEY` environment variable, then reload, to see "
+               "the real line.")
+elif st.button("📡 Fetch live lines", help="One fetch covers every player/market on tonight's "
+               "slate — switching players afterward reuses it at no extra API cost."):
+    st.session_state["matchup_lab_fetch_odds"] = True
+
+offers, offers_info = [], {}
+if api_key and st.session_state.get("matchup_lab_fetch_odds"):
+    try:
+        with st.spinner("Fetching live lines..."):
+            offers, offers_info = load_offers(_active.key, date_str, tuple(_active.markets), api_key)
+    except O.OddsAPIError as e:
+        st.error(f"Odds API error: {e}")
+
+if offers_info:
+    st.caption(f"Quota remaining: {offers_info.get('remaining', '—')} · "
+               f"games priced: {offers_info.get('events_fetched', '—')}/{offers_info.get('events_total', '—')}")
+
+live_lines = O.market_lines_for_player(offers, row["Player"], projections_module=P) if offers else {}
+
+log = row.get("_game_log") or []
+trend_log = P.build_trend_series(log)   # oldest -> newest, for left-to-right reading
+tc1, tc2 = st.columns(2)
+tc3, tc4 = st.columns(2)
+for (mkey, col, disp), slot in zip(P.market_list(), (tc1, tc2, tc3, tc4)):
+    stat_key = P.stat_key_for(col)
+    with slot:
+        if not trend_log:
+            st.caption(f"{disp}: no recent games on file yet.")
+            continue
+        line_val = live_lines.get(mkey)
+        is_live = line_val is not None
+        if line_val is None:
+            line_val = P.default_line(mkey)
+        xs = [g.get("date", "—")[5:10] for g in trend_log]   # MM-DD, short enough for a small chart
+        ys = [g.get(stat_key, 0.0) for g in trend_log]
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines+markers", name=disp,
+                                 line=dict(color="#3b82f6"), marker=dict(size=6)))
+        if line_val is not None:
+            fig.add_hline(y=line_val, line_dash="dash", line_color="#f97316",
+                         annotation_text=f"{'Line' if is_live else 'Model default'}: {line_val:g}",
+                         annotation_position="top left")
+        fig.update_layout(template="plotly_white", height=220,
+                          margin=dict(l=10, r=10, t=30, b=10), title=disp,
+                          showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+st.caption("Dashed line is tonight's actual sportsbook number once fetched above; otherwise it's "
+           "the model's own default line, clearly labeled as such, never presented as a live "
+           "quote it isn't.")
 
 # --- table 1: player signals (recent form / season form / this matchup) -----
 pdf = pd.DataFrame(profile)[["Market", "Recent Avg", "Season Avg", "H2H Avg", "H2H Games",
