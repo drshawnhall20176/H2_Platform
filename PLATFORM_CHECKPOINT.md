@@ -434,16 +434,50 @@ to but wasn't fetching yet.
   successfully, rather than leaning on the Styler for a column that's 100% unfetched (`None`)
   until the button is clicked.
 
+### WNBA injury/availability — Stage A: informational display (2026-07-15)
+Fifth and final item on the original WNBA model-enhancement priority list. The original scoping
+assumption — "no clean free data source for this" — turned out to be WRONG, corrected via a live
+scoping pass: ESPN's own `injuries` endpoint, same base API this platform already runs on, gives
+real per-player injury status, sourced from Rotowire. Confirmed live during scoping (not just
+secondhand docs): fetched `site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries?team=ATL`
+directly and got real, current structured records; separately confirmed `espn.com/wnba/injuries`
+is live and current for the 2026 WNBA season (recap-fresh, "7h"/"11h"-old game references at fetch
+time). The WNBA JSON endpoint itself (as opposed to the NBA one + the WNBA HTML page) hasn't been
+hit live yet — flagged honestly in the docstring as a real, if likely, gap to close on first live
+check.
+
+- **`wnba_engine.py`** — `get_schedule`/`build_slate`'s `meta` now also carry each team's ESPN
+  abbreviation (e.g. "ATL") alongside its numeric id — captured from the SAME scoreboard response
+  already being fetched, since the injuries endpoint keys by abbreviation, not team_id (and
+  `config_wnba.TEAMS`' ids are wnba.com's own numbering, unrelated to ESPN's — a real trap almost
+  fallen into during this build; the comment in that file already flags it). New
+  `team_abbrs_from_meta(meta)` derives `{team_id: abbr}` at zero extra network cost. New
+  `get_team_injuries(team_abbr)` fetches and parses one team's report into
+  `[{player, status, position, return_date, comment}, ...]`. `status` (e.g. "Out"/"Day-To-Day")
+  is left as ESPN's own raw text, deliberately not collapsed into a boolean playing/not-playing
+  call the data doesn't reliably support. An empty list is treated as "no news reported" (healthy),
+  the honest default since there's no way to distinguish that from a fetch problem at this
+  endpoint alone.
+- **`views/11_Hot_Hand_Engine.py`** — a "🏥 Team injury report" expander covering every team on
+  tonight's slate, grouped by team, free (no API key needed).
+- **`views/12_Matchup_Lab.py`** — the same, scoped to just the selected player's team and her
+  opponent, shown alongside the existing Rest context.
+- **Deliberately NOT built (Stage B, deferred):** quantifying an "opportunity boost" for
+  teammates when a key player is out. This is a genuine modeling decision, not a data-fetch —
+  usage doesn't redistribute evenly across a roster, and guessing at a redistribution heuristic
+  risks fabricating false precision the way the rest of this platform has consistently avoided.
+  Revisit after Stage A has been live for a while.
+
+This closes out all five items from the original WNBA model-enhancement priority list (pace,
+trend chart, rest, blowout risk, injury/availability).
+
 ## NOT YET DONE (next stages)
-- **Injury/availability context** — the one remaining model-enhancement item from the original
-  priority list. Genuinely valuable but the hardest of the five: there's no clean free data
-  source for "who's out tonight" the way there is for box scores or game spreads, so it needs its
-  own scoping pass rather than a quick build.
+- **Injury/availability "opportunity boost" (Stage B)** — see above. Deferred as a genuinely
+  separate, harder modeling decision, not a quick follow-on to Stage A's data-fetch.
 - **Real line movement history (candlestick-proper)** — the Matchup Lab trend chart overlays a
   single CURRENT line on historical game values; a true line-movement view (the line itself
   moving over time, the closer stock-candlestick analog) still needs `capture_closing_lines.py`
-  changed to log every snapshot instead of overwriting the latest one. Bigger lift, sequenced
-  after injury/availability.
+  changed to log every snapshot instead of overwriting the latest one.
 - **`nfl_engine.py`/`nfl_projections.py`** exist but are untested and `nfl_data_py` isn't in
   `requirements.txt` yet; markets/market_map in the registry are still empty. Flipping NFL on is
   Stage 4, not started.

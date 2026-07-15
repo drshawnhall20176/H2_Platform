@@ -178,8 +178,8 @@ def test_get_schedule_parses_espn_scoreboard_shape(monkeypatch):
                 "date": "2026-07-14T00:00Z",
                 "competitions": [{
                     "competitors": [
-                        {"homeAway": "home", "team": {"id": "20", "displayName": "Atlanta Dream"}},
-                        {"homeAway": "away", "team": {"id": "19", "displayName": "Chicago Sky"}},
+                        {"homeAway": "home", "team": {"id": "20", "displayName": "Atlanta Dream", "abbreviation": "ATL"}},
+                        {"homeAway": "away", "team": {"id": "19", "displayName": "Chicago Sky", "abbreviation": "CHI"}},
                     ]
                 }],
             },
@@ -191,10 +191,10 @@ def test_get_schedule_parses_espn_scoreboard_shape(monkeypatch):
     games = E.get_schedule("2026-07-14")
     assert len(games) == 1
     g = games[0]
-    assert g["home_id"] == 20 and g["home_name"] == "Atlanta Dream"
-    assert g["away_id"] == 19 and g["away_name"] == "Chicago Sky"
+    assert g["home_id"] == 20 and g["home_name"] == "Atlanta Dream" and g["home_abbr"] == "ATL"
+    assert g["away_id"] == 19 and g["away_name"] == "Chicago Sky" and g["away_abbr"] == "CHI"
     assert g["game_date"] == "2026-07-14T00:00Z"
-    print("✓ get_schedule parses ESPN's scoreboard shape and skips malformed events")
+    print("✓ get_schedule parses ESPN's scoreboard shape (incl. abbreviations) and skips malformed events")
 
 
 def test_get_schedule_uses_yyyymmdd_date_param(monkeypatch):
@@ -631,6 +631,64 @@ def test_get_team_rest_info_unknown_when_no_recent_game(monkeypatch):
     info = E.get_team_rest_info(20, "2026-07-14")
     assert info == {"rest_days": None, "is_back_to_back": False, "last_game_date": None, "last_opp_name": None}
     print("✓ get_team_rest_info reports an honest unknown (not a fabricated 'well-rested' guess) when no recent game is found")
+
+
+# ----------------------------------------------------------------- get_team_injuries
+def test_get_team_injuries_parses_confirmed_live_shape(monkeypatch):
+    # Shape confirmed live against site.api.espn.com/.../nba/injuries?team=ATL during scoping.
+    E._response_cache.clear()
+    fake_response = {
+        "injuries": [
+            {"id": "-50368", "status": "Out", "shortComment": "Gilbert signed a two-way contract.",
+             "athlete": {"displayName": "Keshon Gilbert", "position": {"abbreviation": "G"}},
+             "details": {"returnDate": "2026-07-02"}},
+            {"id": "529408", "status": "Day-To-Day", "shortComment": "Landale (ankle) re-evaluated in two weeks.",
+             "athlete": {"displayName": "Jock Landale", "position": {"abbreviation": "C"}},
+             "details": {"returnDate": "2026-10-01"}},
+        ]
+    }
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_response)
+    injuries = E.get_team_injuries("ATL")
+    assert len(injuries) == 2
+    assert injuries[0] == {"player": "Keshon Gilbert", "status": "Out", "position": "G",
+                          "return_date": "2026-07-02", "comment": "Gilbert signed a two-way contract."}
+    assert injuries[1]["status"] == "Day-To-Day"
+    print("✓ get_team_injuries parses the confirmed-live ESPN injuries shape correctly")
+
+
+def test_get_team_injuries_empty_team_healthy():
+    E._response_cache.clear()
+    assert E.get_team_injuries("") == []
+
+
+def test_get_team_injuries_empty_list_when_no_injuries_reported(monkeypatch):
+    E._response_cache.clear()
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: {"injuries": []})
+    assert E.get_team_injuries("SEA") == []
+    print("✓ get_team_injuries returns [] (treated as healthy) when the team has no reported injuries")
+
+
+def test_get_team_injuries_empty_on_fetch_failure(monkeypatch):
+    E._response_cache.clear()
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: None)
+    assert E.get_team_injuries("SEA") == []
+
+
+# ----------------------------------------------------------------- team_abbrs_from_meta
+def test_team_abbrs_from_meta_derives_from_build_slate_meta():
+    meta = [
+        {"label": "Chicago Sky @ Atlanta Dream", "home_id": 20, "home_abbr": "ATL",
+        "away_id": 19, "away_abbr": "CHI"},
+        {"label": "Seattle Storm @ Indiana Fever", "home_id": 25, "home_abbr": "IND",
+        "away_id": 30, "away_abbr": "SEA"},
+    ]
+    assert E.team_abbrs_from_meta(meta) == {20: "ATL", 19: "CHI", 25: "IND", 30: "SEA"}
+    print("✓ team_abbrs_from_meta derives the abbreviation map from build_slate's meta with no extra fetch")
+
+
+def test_team_abbrs_from_meta_skips_missing_abbreviations():
+    meta = [{"label": "X @ Y", "home_id": 20, "home_abbr": None, "away_id": 19, "away_abbr": "CHI"}]
+    assert E.team_abbrs_from_meta(meta) == {19: "CHI"}   # missing abbr omitted, not guessed
 
 
 # ----------------------------------------------------------------- get_player_history_vs_opponent

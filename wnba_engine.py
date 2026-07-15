@@ -91,8 +91,12 @@ def _get_json_cached(url: str, params: Optional[Dict] = None) -> Optional[Dict]:
 
 # --------------------------------------------------------------------------- schedule
 def get_schedule(date_str: str) -> List[Dict[str, Any]]:
-    """Games scheduled for date_str (YYYY-MM-DD). One dict per game with both team ids/names —
-    both pulled directly from the scoreboard response, no separate team lookup needed."""
+    """Games scheduled for date_str (YYYY-MM-DD). One dict per game with both team ids/names/
+    abbreviations — all pulled directly from the scoreboard response, no separate team lookup
+    needed. Abbreviations (e.g. "ATL") exist alongside id/displayName in the same competitor
+    "team" object ESPN already returns here — captured because get_team_injuries needs one (the
+    injuries endpoint keys by abbreviation, not ESPN's numeric team id), not because anything
+    else in this module needs it yet."""
     espn_date = date_str.replace("-", "")   # ESPN wants YYYYMMDD; we use YYYY-MM-DD everywhere else
     data = _get_json(f"{SITE_API}/scoreboard", params={"dates": espn_date})
     if not data:
@@ -117,14 +121,33 @@ def get_schedule(date_str: str) -> List[Dict[str, Any]]:
                 "game_date": event.get("date"),
                 "home_id": int(home["team"]["id"]),
                 "home_name": home["team"].get("displayName", "Unknown"),
+                "home_abbr": home["team"].get("abbreviation"),
                 "away_id": int(away["team"]["id"]),
                 "away_name": away["team"].get("displayName", "Unknown"),
+                "away_abbr": away["team"].get("abbreviation"),
             })
         except (KeyError, TypeError, ValueError):
             logger.exception("WNBA scoreboard event had an unexpected shape: %s", event.get("id"))
             continue
     _diag(f"get_schedule({date_str}): {len(games)} game(s) found ({len(data.get('events', []))} raw events)")
     return games
+
+
+def team_abbrs_from_meta(meta: List[Dict]) -> Dict[int, str]:
+    """{team_id: abbreviation} for every team on the slate, derived from build_slate's own
+    `meta` return value — genuinely zero extra network cost, since meta already carries
+    home_id/home_abbr/away_id/away_abbr from the same scoreboard fetch build_slate already made.
+    (An earlier version of this function called get_schedule() a second time to get the same
+    data — a real, avoidable duplicate live request — deriving from meta instead of re-fetching
+    fixes that.) Entries with no abbreviation in the source response are simply omitted, not
+    guessed."""
+    out: Dict[int, str] = {}
+    for g in meta:
+        if g.get("home_abbr"):
+            out[g["home_id"]] = g["home_abbr"]
+        if g.get("away_abbr"):
+            out[g["away_id"]] = g["away_abbr"]
+    return out
 
 
 # --------------------------------------------------------------------------- rosters
@@ -493,6 +516,56 @@ def get_team_rest_info(team_id: int, before_date: str, days_back: int = 10) -> D
             "last_game_date": last_date_str, "last_opp_name": last.get("opp_name")}
 
 
+def get_team_injuries(team_abbr: str) -> List[Dict[str, Any]]:
+    """Team injury report for one team, by ESPN abbreviation (e.g. "ATL") — NOT team_id, since
+    this endpoint keys by abbreviation. Confirmed live during scoping: `site.api.espn.com/apis/
+    site/v2/sports/basketball/nba/injuries?team=ATL` returns real, current per-player injury
+    records, sourced from Rotowire (same as espn.com/wnba/injuries, confirmed live and current for
+    the 2026 WNBA season during the same scoping pass). WNBA follows the identical site.api.espn.
+    com/apis/site/v2/sports/basketball/{league} pattern this module already relies on everywhere
+    else — league="wnba" here, same as every other call in this file — but the WNBA JSON shape
+    specifically hasn't been hit live yet (only the NBA JSON + the WNBA HTML page were), so the
+    diagnostic dump below is a real safety net here, not just standard caution.
+
+    Returns [{"player", "status", "position", "return_date", "comment"}, ...] — one entry per
+    currently-listed injury. An empty list is a team with no news reported, treated as healthy —
+    there's no reliable way to distinguish "confirmed healthy" from "fetch problem" from this
+    endpoint alone, and treating silence as good news is the honest default here (the inverse of
+    get_team_rest_info's "no data -> None, not a guess": there, silence means unknown; here,
+    silence IS the informative case).
+
+    "status" (e.g. "Out", "Day-To-Day", "Questionable") is intentionally left as the raw text
+    ESPN/Rotowire assigned, not translated into a boolean playing/not-playing call — "Day-To-Day"
+    isn't a hard out, and collapsing it into one wouldn't be honest. This is informational display
+    only (Stage A of the injury/availability scoping) — it does NOT feed into Matchup Factor,
+    Recent Avg, or any other computed signal. Quantifying an "opportunity boost" for teammates
+    when a key player sits is a genuinely separate, harder modeling decision, deferred rather than
+    guessed at here."""
+    if not team_abbr:
+        return []
+    data = _get_json_cached(f"{SITE_API}/injuries", params={"team": team_abbr})
+    if not data:
+        return []
+    out = []
+    for inj in data.get("injuries", []):
+        athlete = inj.get("athlete") or {}
+        details = inj.get("details") or {}
+        out.append({
+            "player": athlete.get("displayName"),
+            "status": inj.get("status"),
+            "position": (athlete.get("position") or {}).get("abbreviation"),
+            "return_date": details.get("returnDate"),
+            "comment": inj.get("shortComment"),
+        })
+
+    dump_key = f"_injuries_shape_dump:{team_abbr}"
+    if data.get("injuries") and not any(o["player"] for o in out) and dump_key not in _diag_seen:
+        _diag_seen.add(dump_key)
+        _diag(f"get_team_injuries({team_abbr}) shape dump: first injury item keys = "
+             f"{list(data['injuries'][0].keys())}")
+    return out
+
+
 def get_player_results(date_str: str) -> Dict[int, Dict[str, float]]:
     """Actual per-player results for all games on date_str, keyed by player id — same contract as
     mlb_engine.get_player_results, so retro.py's grading logic (grade_play/grade_slate) works
@@ -648,7 +721,9 @@ def build_slate(date_str: str, min_avg_minutes: float = CFG.MIN_AVG_MINUTES,
     for g in games:
         label = f"{g['away_name']} @ {g['home_name']}"
         meta.append({"label": label, "away_name": g["away_name"], "home_name": g["home_name"],
-                     "game_date": g.get("game_date")})
+                     "game_date": g.get("game_date"),
+                     "home_id": g["home_id"], "home_abbr": g.get("home_abbr"),
+                     "away_id": g["away_id"], "away_abbr": g.get("away_abbr")})
         for team_id, team_name, opp_name, opp_id in (
                 (g["home_id"], g["home_name"], g["away_name"], g["away_id"]),
                 (g["away_id"], g["away_name"], g["home_name"], g["home_id"])):
