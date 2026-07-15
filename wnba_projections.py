@@ -25,7 +25,7 @@ build_hot_hand_board below, for the Hot Hand Engine page.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -44,6 +44,36 @@ _MARKET_SPEC = {
     "player_threes":   ("FG3M", "Threes Made", 1.5),
 }
 _STAT_KEY = {"PTS": "pts", "REB": "reb", "AST": "ast", "FG3M": "fg3m"}
+
+
+def market_list() -> List[Tuple[str, str, str]]:
+    """[(market_key, row_column, display_name), ...] for all four Core markets, in a stable
+    order — the public, iterable form of _MARKET_SPEC for callers outside this module (Matchup
+    Lab's trend chart) that need to loop over markets without reaching into a private dict."""
+    return [(mkey, col, disp) for mkey, (col, disp, _line) in _MARKET_SPEC.items()]
+
+
+def stat_key_for(col: str) -> str:
+    """Row-column ('PTS'/'REB'/'AST'/'FG3M') -> game-log dict key ('pts'/'reb'/'ast'/'fg3m').
+    Public form of _STAT_KEY, for the same reason as market_list."""
+    return _STAT_KEY[col]
+
+
+def default_line(market_key: str) -> Optional[float]:
+    """The model-only board's default line for one market (_MARKET_SPEC's third element),
+    exposed as its own function so callers outside this module — Matchup Lab's trend chart, when
+    no live odds have been fetched — don't need to reach into a private module-level dict
+    directly. Returns None for an unrecognized market key rather than guessing."""
+    spec = _MARKET_SPEC.get(market_key)
+    return spec[2] if spec else None
+
+
+def build_trend_series(log: List[Dict]) -> List[Dict]:
+    """Chronological (oldest-to-newest) copy of a player's recent-game log, for a trend chart
+    that reads left-to-right as time moving forward — the opposite of get_player_recent_games/
+    get_player_season_games's own most-recent-first contract (documented there for retro-grading
+    lookahead-bias reasons, so this reverses rather than asking the engine to change order)."""
+    return list(reversed(log))
 
 
 def _dist(samples: np.ndarray) -> np.ndarray:

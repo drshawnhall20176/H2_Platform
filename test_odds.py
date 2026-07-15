@@ -86,6 +86,42 @@ def test_compute_edges_matches_and_ranks():
     assert edges[0]["Player"] == "José Ramírez"
 
 
+# ----------------------------------------------------------------- market_lines_for_player
+def test_market_lines_for_player_matches_by_normalized_name():
+    offers = [
+        # book sends de-accented name; should still match, same as compute_edges
+        {"market": "batter_hits", "player": "Jose Ramirez", "point": 1.5,
+         "over": {"fd": -150}, "under": {"fd": 120}},
+        {"market": "batter_home_runs", "player": "Someone Else", "point": 0.5,
+         "over": {"fd": -110}, "under": {"fd": -110}},
+    ]
+    lines = O.market_lines_for_player(offers, "José Ramírez")
+    assert lines == {"batter_hits": 1.5}
+    print("✓ market_lines_for_player matches names the same accent/spelling-insensitive way compute_edges does")
+
+
+def test_market_lines_for_player_picks_the_most_booked_point():
+    # Two books disagree on the point (1.5 vs 2.5) for the same market/player. The one backed by
+    # MORE total book quotes should win -> 1.5 has 2 books total (1 over + 1 under from "fd" plus
+    # 1 more from "dk" on the over side = 3), 2.5 only has 1.
+    offers = [
+        {"market": "batter_hits", "player": "Jose Ramirez", "point": 1.5,
+         "over": {"fd": -150, "dk": -140}, "under": {"fd": 120}},
+        {"market": "batter_hits", "player": "Jose Ramirez", "point": 2.5,
+         "over": {"mgm": 250}, "under": {}},
+    ]
+    lines = O.market_lines_for_player(offers, "Jose Ramirez")
+    assert lines == {"batter_hits": 1.5}
+    print("✓ market_lines_for_player picks the point with the most total book quotes as consensus")
+
+
+def test_market_lines_for_player_absent_when_no_match():
+    offers = [{"market": "batter_hits", "player": "Nobody Here", "point": 1.5,
+              "over": {"fd": -150}, "under": {"fd": 120}}]
+    assert O.market_lines_for_player(offers, "Jose Ramirez") == {}
+    print("✓ market_lines_for_player returns {} (not a guess) when nothing matches")
+
+
 def test_kelly_fraction():
     # p=0.60 at even money (+100): f* = (0.6*2 - 1)/(2-1) = 0.20
     assert abs(O.kelly_fraction(0.60, 100) - 0.20) < 1e-9

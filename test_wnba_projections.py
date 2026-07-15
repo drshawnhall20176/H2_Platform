@@ -465,6 +465,51 @@ def test_build_matchup_profile_no_suppression_flag_without_enough_data():
     assert all(not p["Suppressed"] for p in profile)   # no h2h/season data at all -> nothing to flag
 
 
+# ----------------------------------------------------------------- trend-chart helpers
+def test_default_line_returns_the_model_only_board_default():
+    assert WP.default_line("player_points") == 12.5
+    assert WP.default_line("player_threes") == 1.5
+
+
+def test_default_line_none_for_unknown_market():
+    assert WP.default_line("not_a_real_market") is None
+
+
+def test_market_list_covers_all_four_core_markets():
+    lst = WP.market_list()
+    assert {mkey for mkey, _col, _disp in lst} == {"player_points", "player_rebounds",
+                                                    "player_assists", "player_threes"}
+    # spot-check one full tuple
+    assert ("player_points", "PTS", "Points") in lst
+
+
+def test_stat_key_for_maps_row_columns_to_game_log_keys():
+    assert WP.stat_key_for("PTS") == "pts"
+    assert WP.stat_key_for("FG3M") == "fg3m"
+
+
+def test_build_trend_series_reverses_to_chronological_order():
+    log = [{"date": "2026-07-14", "pts": 30}, {"date": "2026-07-10", "pts": 20},
+          {"date": "2026-07-08", "pts": 18}]   # most-recent-first, per get_player_recent_games
+    trend = WP.build_trend_series(log)
+    assert [g["date"] for g in trend] == ["2026-07-08", "2026-07-10", "2026-07-14"]  # oldest -> newest
+    print("✓ build_trend_series reverses most-recent-first into chronological (plotting) order")
+
+
+def test_build_trend_series_empty_log():
+    assert WP.build_trend_series([]) == []
+
+
+def test_market_lines_for_player_works_with_wnba_projections_module():
+    # market_lines_for_player takes projections_module explicitly (Matchup Lab passes P, the
+    # active sport's own module) so WNBA name normalization is used, not MLB's default.
+    offers = [{"market": "player_points", "player": "A'ja Wilson", "point": 22.5,
+              "over": {"fd": -115}, "under": {"fd": -105}}]
+    lines = O.market_lines_for_player(offers, "A'ja Wilson", projections_module=WP)
+    assert lines == {"player_points": 22.5}
+    print("✓ market_lines_for_player works correctly when passed wnba_projections as the projections_module")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

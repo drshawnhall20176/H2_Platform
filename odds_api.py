@@ -135,6 +135,41 @@ def _best_price(book_prices: Dict[str, float]) -> Optional[Tuple[str, float]]:
     return book, price
 
 
+def market_lines_for_player(offers: List[Dict], player_name: str, projections_module=None) -> Dict[str, float]:
+    """{market_key: point} — the actual sportsbook prop line(s) for one player, picked from
+    `offers` (already fetched via fetch_slate_props). This is a display/reference lookup, distinct
+    from compute_edges (which prices every offer against the model) — for a page like Matchup Lab
+    that just wants "what's the line on her tonight" for a trend chart, not a full edge board.
+
+    Matches by normalize_name (sport-specific, same as compute_edges) so a book's spelling of a
+    player's name doesn't cause a miss. `projections_module` supplies normalize_name for the
+    sport, same convention as compute_edges — defaults to MLB's if not given.
+
+    If a market has offers at more than one point (different books posting different numbers),
+    the point backed by the MOST total book quotes (over+under combined) wins — a simple, honest
+    proxy for market consensus, not a claim of a more sophisticated line-shopping model. A market
+    with no matching offer is just absent from the result, not a fabricated guess."""
+    if projections_module is None:
+        import projections as projections_module
+    P = projections_module
+    target = P.normalize_name(player_name)
+    best: Dict[str, Tuple[float, int]] = {}   # market -> (point, book_count) with the highest book_count so far
+    for off in offers:
+        if P.normalize_name(off.get("player", "")) != target:
+            continue
+        mkey = off.get("market")
+        point = off.get("point")
+        if mkey is None or point is None:
+            continue
+        book_count = len(off.get("over") or {}) + len(off.get("under") or {})
+        if book_count == 0:
+            continue
+        cur = best.get(mkey)
+        if cur is None or book_count > cur[1]:
+            best[mkey] = (point, book_count)
+    return {mkey: point for mkey, (point, _cnt) in best.items()}
+
+
 def compute_edges(index: Dict, offers: List[Dict],
                   projections_module=None) -> Tuple[List[Dict], Dict]:
     """Join book offers to the model index and compute EV/edge per playable side.

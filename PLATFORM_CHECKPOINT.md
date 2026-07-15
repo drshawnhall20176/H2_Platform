@@ -339,16 +339,46 @@ look identical in raw per-game allowed totals.
   the conflation this fix addresses doesn't apply there the same way. Its "no pace adjustment"
   caption is still accurate and left in place.
 
+### Matchup Lab recent-form trend chart (2026-07-15)
+Second item on the WNBA model-enhancement priority list (pace adjustment above was #1). "Is she
+trending toward or away from the number" as a glance-able chart instead of scanning a table —
+the direct, honest analog of a stock trader's candlestick: a value moving over time, plotted.
+
+- **`odds_api.py`** — new `market_lines_for_player(offers, player_name, projections_module=None)`:
+  a pure, sport-agnostic lookup that picks the actual sportsbook prop line(s) for one player from
+  already-fetched offers, reusing `compute_edges`'s name-normalization matching. If a market has
+  offers at more than one point (different books), the point backed by the most total book quotes
+  wins — a simple, honest consensus proxy, not a claim of real line-shopping logic.
+- **`wnba_projections.py`** — `default_line(market_key)`, `market_list()`, `stat_key_for(col)`
+  expose `_MARKET_SPEC`/`_STAT_KEY` publicly for callers outside the module (instead of reaching
+  into private dicts). `build_trend_series(log)` reverses a player's most-recent-first game log
+  into chronological order for left-to-right plotting.
+- **`views/12_Matchup_Lab.py`** — a new 2×2 grid of small Plotly line charts (Points/Rebounds/
+  Assists/Threes), one per market, showing the player's last 10 games with a dashed reference
+  line at the current prop number. **Honest scope correction from how this was originally
+  described:** the actual live sportsbook line does NOT already exist in Matchup Lab's data the
+  way the original brainstorm assumed — `build_slate` is pure box-score/roster data, no odds.
+  Getting the real number means a live Odds API fetch, the same one Edge Board already does.
+  Built it the same way: **button-gated** ("📡 Fetch live lines"), not automatic on player switch,
+  and **cached for the whole slate at once** (`load_offers`, ttl=300) — switching between players
+  after the first fetch costs zero extra API quota, only a genuinely new date does. Before a fetch
+  (or with no `ODDS_API_KEY` configured), the chart falls back to the model-only board's own
+  default line, clearly labeled "Model default" in the chart annotation rather than presented as
+  a live quote it isn't.
+- Uses `plotly.graph_objects`, already pinned in `requirements.txt` and the established charting
+  convention on this platform (Track Record, Command Center) — no new dependency added.
+
 ## NOT YET DONE (next stages)
-- **WNBA injury/availability context, rest/back-to-back fatigue, blowout/minutes risk** — the
-  other three model enhancements identified alongside the pace fix above, not yet built. Rest/
+- **WNBA rest/back-to-back fatigue, blowout/minutes risk, injury/availability context** — the
+  three remaining model-enhancement items from the original priority list, not yet built. Rest/
   back-to-back is computable today from game dates already in the data; blowout/minutes risk
   ties into game spreads (already available via the Odds API); injury/availability has no clean
   free data source the way box scores do for the others, so it needs its own scoping pass.
-- **Line movement history ("candlestick" chart analog)** — `capture_closing_lines.py` currently
-  overwrites the latest snapshot instead of logging every one; building real line-movement charts
-  means changing that workflow to append rather than overwrite. Bigger lift than the items above,
-  sequenced after them.
+- **Real line movement history (candlestick-proper)** — the trend chart above overlays a single
+  CURRENT line on historical game values; a true line-movement view (the line itself moving over
+  time, the closer stock-candlestick analog) still needs `capture_closing_lines.py` changed to
+  log every snapshot instead of overwriting the latest one. Bigger lift, sequenced after the
+  three items above.
 - **`nfl_engine.py`/`nfl_projections.py`** exist but are untested and `nfl_data_py` isn't in
   `requirements.txt` yet; markets/market_map in the registry are still empty. Flipping NFL on is
   Stage 4, not started.
