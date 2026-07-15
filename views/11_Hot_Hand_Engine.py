@@ -162,8 +162,14 @@ def _rest_display(r):
     return "⚠️ B2B" if r["B2B"] else f"{r['Rest Days']}d rest"
 
 
+def _spread_display(r):
+    s = r.get("Spread")
+    return "—" if s is None else f"{s:+.1f}"
+
+
 for b in view:
     b["Rest"] = _rest_display(b)
+    b["Spread"] = _spread_display(b)
 
 df = pd.DataFrame(view)[["Player", "Team", "Opp", "Market", "Recent Avg", "Opp Allows", "Opp Pace",
                          "Opp Allows /100 Poss", "Slate Avg /100 Poss", "Matchup Factor",
@@ -172,8 +178,7 @@ df = df.rename(columns={"Opp Allows": "Opp Team Total"})
 st.dataframe(
     df.style.format({"Recent Avg": "{:.1f}", "Opp Team Total": "{:.1f}", "Opp Pace": "{:.1f}",
                      "Opp Allows /100 Poss": "{:.1f}", "Slate Avg /100 Poss": "{:.1f}",
-                     "Matchup Factor": "{:.2f}×", "Matchup Score": "{:.1f}", "Spread": "{:+.1f}"},
-                    na_rep="—")
+                     "Matchup Factor": "{:.2f}×", "Matchup Score": "{:.1f}"}, na_rep="—")
     .theme_gradient(cmap="RdYlGn", subset=["Matchup Factor"]),
     hide_index=True, use_container_width=True, height=520,
 )
