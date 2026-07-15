@@ -160,13 +160,18 @@ for (mkey, col, disp), slot in zip(P.market_list(), (tc1, tc2, tc3, tc4)):
             line_val = P.default_line(mkey)
         xs = [g.get("date", "—")[5:10] for g in trend_log]   # MM-DD, short enough for a small chart
         ys = [g.get(stat_key, 0.0) for g in trend_log]
+        hover = [f"{disp}: {y:g}<br>vs {g.get('opp', '—')}" for y, g in zip(ys, trend_log)]
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines+markers", name=disp,
-                                 line=dict(color="#3b82f6"), marker=dict(size=6)))
+                                 line=dict(color="#3b82f6"), marker=dict(size=8),
+                                 text=hover, hoverinfo="text"))
         if line_val is not None:
             fig.add_hline(y=line_val, line_dash="dash", line_color="#f97316",
                          annotation_text=f"{'Line' if is_live else 'Model default'}: {line_val:g}",
                          annotation_position="top left")
+        fig.update_xaxes(type="category")   # MM-DD strings are LABELS, not dates — stops Plotly
+                                            # from auto-parsing them as full dates (which produced
+                                            # nonsense years like "Sep 1, 2007" on a single point)
         fig.update_layout(template="plotly_white", height=220,
                           margin=dict(l=10, r=10, t=30, b=10), title=disp,
                           showlegend=False)
