@@ -425,6 +425,14 @@ to but wasn't fetching yet.
   button-gated, cached-once-per-slate pattern as Matchup Lab's live-line fetch), a "Blowout" risk
   filter, and Spread/Blowout Risk columns. Before a fetch (or with no API key), both show "—",
   never a fabricated "competitive" guess.
+- **Bug fix, same day:** the first version left "Spread" as a raw `None`/float column and relied
+  on `Styler.format(..., na_rep="—")` to render the unfetched state — this rendered as a literal
+  "None" in the deployed app's live table, not "—". Reproduced: `Styler.to_html()` handles an
+  all-`None` object-dtype column's `na_rep` correctly, but Streamlit's interactive `st.dataframe`
+  apparently doesn't apply it the same way. Fixed by pre-formatting "Spread" into a display string
+  before the table is built — the same approach "Rest" and "Blowout Risk" already used
+  successfully, rather than leaning on the Styler for a column that's 100% unfetched (`None`)
+  until the button is clicked.
 
 ## NOT YET DONE (next stages)
 - **Injury/availability context** — the one remaining model-enhancement item from the original
