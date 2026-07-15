@@ -99,16 +99,18 @@ REGISTRY: Dict[str, Sport] = {
                     "Assists": "player_assists", "Threes Made": "player_threes"},
         engine_module="nba_engine", projections_module="nba_projections",
         config_module="config_nba",
-        enabled=False,   # engine present, built as a copy-adapt of the live WNBA engine (see
-                          # basketball_engine.py's module docstring for the extraction plan this
-                          # follows) — but NOT yet confirmed against a live NBA slate the way WNBA
-                          # was before ITS launch. Specifically unconfirmed: the CDN boxscore
-                          # endpoint's real shape for NBA (get_game_boxscore's biggest risk area —
-                          # this was the one WNBA endpoint whose real shape genuinely surprised the
-                          # documented schema). Verify before flipping this to True: NBA's 2025-26
-                          # season ran through April 2026, so real historical games exist to test
-                          # nba_engine.build_slate/get_game_boxscore against RIGHT NOW even during
-                          # the current (2026-07) off-season — no need to wait for October's tip-off.
+        enabled=True,   # live as of 2026-07-15 — built as a copy-adapt of the WNBA engine (see
+                        # basketball_engine.py's module docstring for the extraction plan), then
+                        # confirmed against a real live game (Nets @ Clippers, Jan 25 2026,
+                        # gameId 401810511): both get_game_team_totals and get_game_boxscore
+                        # verified correct against the actual CDN response, the same bar WNBA's
+                        # build cleared before its own launch (see PLATFORM_CHECKPOINT.md for the
+                        # full verification writeup, including a real "points" field bug caught
+                        # and fixed along the way). Hot Hand Engine/Matchup Lab's require_sport
+                        # gates updated to accept NBA too. Not yet independently re-verified:
+                        # get_team_roster's exact live shape (same pattern already proven for
+                        # WNBA, low risk); SEASON_START is a placeholder pending the 2026-27
+                        # schedule announcement — re-check both once real slate data is flowing.
     ),
     "NHL":    Sport("NHL",   "NHL — Hockey",            "🏒", "icehockey_nhl",        [], {}, enabled=False),
     "NCAAF":  Sport("NCAAF", "NCAA Football",           "🏈", "americanfootball_ncaaf", [], {}, enabled=False),

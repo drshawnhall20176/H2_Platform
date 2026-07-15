@@ -1,8 +1,8 @@
 # H2 Sports Platform — Build Checkpoint
 
-**This is the multi-sport platform build.** It is the live source of truth (merged MLB + WNBA on
-one sport-selector foundation). MLB runs exactly as the standalone did originally; WNBA is now a
-second real, priced sport — not a placeholder.
+**This is the multi-sport platform build.** It is the live source of truth (MLB + WNBA + NBA on
+one sport-selector foundation). MLB runs exactly as the standalone did originally; WNBA and NBA
+are both real, priced sports now — not placeholders.
 
 ## What's in this checkpoint (all tested — 315/315 tests green)
 
@@ -516,7 +516,7 @@ that build starts, and extract further once real duplication is provable, not sp
   code directly, not just through WNBA's wrapper. Total: 277/277 passing, up from 255 (0 existing
   tests modified, 22 added).
 
-### nba_engine.py / nba_projections.py — built, CDN endpoints confirmed live (2026-07-15)
+### nba_engine.py / nba_projections.py — LIVE (2026-07-15)
 Built as a copy-adapt of `wnba_engine.py`/`wnba_projections.py`, wired to
 `basketball_engine.py`/`basketball_projections.py` for pace/rest/blowout/injury logic exactly the
 way WNBA now is. Registry-wired in `sports.py` with real markets/market_map (Core 4: Points/
@@ -625,27 +625,32 @@ almost certainly doesn't carry meaningful prop markets for it) — its HTML boxs
 blocking automated fetching (unlike the regular season's) is what let some of this verification
 start moving before the real CDN JSON came through directly.
 
-**Remaining before flipping `sports.py`'s NBA entry to `enabled=True`:**
-1. ~~`views/11_Hot_Hand_Engine.py` and `views/12_Matchup_Lab.py` hardcode `sports.require_sport
-   ("WNBA", ...)`~~ — **done.** `require_sport` now accepts a list of acceptable sport keys
-   (backward-compatible with existing single-string callers), and both pages call it with
-   `["WNBA", "NBA"]`. Their user-visible captions also now read `_active.key` dynamically instead
-   of hardcoding "WNBA". New test (`test_require_sport_accepts_a_list_of_keys`). 315/315 passing.
-2. Re-verify `SEASON_START` once the 2026-27 schedule is officially announced.
-3. Sanity-check `config_nba.MIN_AVG_MINUTES`/`RECENT_GAMES_N` against real NBA rotation patterns
-   once real slate data is available — carried over from WNBA's values as a starting point only.
-4. Optional, not blocking: independently confirm `get_team_roster`'s exact shape live (same
-   pattern already proven for WNBA, so low risk, just not independently checked this session).
+**NBA is now LIVE — `sports.py`'s NBA entry flipped to `enabled=True` on 2026-07-15,** after:
+1. `views/11_Hot_Hand_Engine.py`/`views/12_Matchup_Lab.py`'s `require_sport` gates updated to
+   accept `["WNBA", "NBA"]` (backward-compatible list support added to `require_sport` itself),
+   captions now read `_active.key` dynamically instead of hardcoding "WNBA".
+2. `test_mlb_and_wnba_enabled_today` → `test_mlb_wnba_nba_enabled_today`, updated to assert all
+   three are live — a genuine assertion update reflecting the real new state, not a workaround.
+3. Confirmed: `sports.get("NBA").enabled is True`, `enabled_sports()` returns
+   `["MLB", "WNBA", "NBA"]`, NBA no longer appears in the sidebar's "Coming soon" list.
 
-Items 2-4 are tuning/polish, not launch blockers — nothing left would stop `enabled=True` from
-working, just from being fully dialed in. That's a real decision point, not made unilaterally here.
+315/315 tests passing, smoke test still clean (0 games — correctly, since the regular season is
+in its July off-season; the app is live and correct, just nothing to show until October).
+
+**Post-launch polish, not launch blockers — worth revisiting once real slate data is flowing:**
+- Re-verify `SEASON_START` once the 2026-27 schedule is officially announced.
+- Sanity-check `config_nba.MIN_AVG_MINUTES`/`RECENT_GAMES_N` against real NBA rotation patterns —
+  carried over from WNBA's values as a starting point only.
+- Independently confirm `get_team_roster`'s exact live shape (same pattern already proven for
+  WNBA, so low risk, just not independently checked this session).
 
 ## NOT YET DONE (next stages)
-- **NBA go-live decision** — the data layer is confirmed live, the view-gating blocker is fixed;
-  what's left (SEASON_START, tuning constants, roster shape) is calibration, not a launch blocker.
-  Flipping `sports.py`'s NBA entry to `enabled=True` is a real decision, not made unilaterally.
+- **NBA post-launch polish** — see above (SEASON_START, tuning constants, roster shape). NBA
+  itself is live; these are calibration items to revisit once real slate data exists to check
+  against, not things currently known to be broken.
 - **Injury/availability "opportunity boost" (Stage B)** — see above. Deferred as a genuinely
   separate, harder modeling decision, not a quick follow-on to Stage A's data-fetch.
+
 - **Real line movement history (candlestick-proper)** — the Matchup Lab trend chart overlays a
   single CURRENT line on historical game values; a true line-movement view (the line itself
   moving over time, the closer stock-candlestick analog) still needs `capture_closing_lines.py`
