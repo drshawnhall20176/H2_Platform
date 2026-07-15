@@ -141,7 +141,7 @@ def _render_market_review(rep, market, rows_by_pid):
         st.markdown("**Caught — ranked high and delivered**")
         st.dataframe(
             cdf[cols].rename(columns={"ModelProb": "Model %", "Value": market}).style.format(
-                {"Model %": "{:.0%}", "Conviction": "{:.2f}×", "Line": "{:g}"}, na_rep="—"),
+                {"Model %": "{:.0%}", "Conviction": "{:.2f}×", "Line": "{:g}", market: "{:.1f}"}, na_rep="—"),
             hide_index=True, use_container_width=True)
  
     if rep["missed"]:
@@ -157,7 +157,7 @@ def _render_market_review(rep, market, rows_by_pid):
             })
         mdf = pd.DataFrame(mrows)
         st.dataframe(
-            mdf.style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×"}, na_rep="—"),
+            mdf.style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×", market: "{:.1f}"}, na_rep="—"),
             hide_index=True, use_container_width=True)
  
     if rep["unprojected"]:
@@ -253,7 +253,8 @@ def _render_graded(subset):
     show = g[["Conviction", "Player", "Market", "Side", "Line", "ModelProb", "Actual",
               "Result", "Why it missed", "Why"]]
     styler = (show.rename(columns={"ModelProb": "Model %", "Why": "Why the model liked it"})
-              .style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×", "Line": "{:g}"}))
+              .style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×", "Line": "{:g}",
+                            "Actual": "{:.1f}"}, na_rep="—"))
     # Natural width + wide text columns -> horizontal scroll for the two long reason columns.
     try:
         st.dataframe(

@@ -189,8 +189,10 @@ else:
                         f"upside case, when every leg hits. It's the rarer outcome.")
         legdf = pd.DataFrame(cmp["legs"])
         legdf["as single"] = legdf["pnl"].apply(lambda v: f"${v:+.2f}" if v is not None else "—")
-        st.dataframe(legdf[["player", "market", "side", "line", "entry_odds", "result", "as single"]],
-                     hide_index=True, use_container_width=True)
+        st.dataframe(
+            legdf[["player", "market", "side", "line", "entry_odds", "result", "as single"]]
+            .style.format({"line": "{:.1f}", "entry_odds": "{:.0f}"}, na_rep="—"),
+            hide_index=True, use_container_width=True)
  
 # --- Full ledger ------------------------------------------------------------
 st.divider()
@@ -202,7 +204,9 @@ cols = ["slate_date", "game", "player", "market", "side", "line", "entry_odds", 
         "stake", "book", "close_odds", "CLV%", "result", "P&L", "ticket"]
 show = df[[c for c in cols if c in df.columns]]
 st.dataframe(
-    show.style.format({"model_prob": "{:.2f}", "CLV%": "{:+.1f}", "P&L": "${:+.2f}"}, na_rep="—")
+    show.style.format({"model_prob": "{:.2f}", "CLV%": "{:+.1f}", "P&L": "${:+.2f}",
+                       "line": "{:.1f}", "stake": "${:.2f}", "entry_odds": "{:.0f}",
+                       "close_odds": "{:.0f}"}, na_rep="—")
     .theme_gradient(cmap="RdYlGn", subset=["CLV%"]),
     use_container_width=True, hide_index=True)
  

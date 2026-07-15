@@ -252,7 +252,7 @@ for _tb, _mkt in zip(_ctabs, _caught_markets):
             cdf["Pre-game rank"] = cdf.apply(lambda r: f"#{r['Rank']} of {r['OfTotal']}", axis=1)
             cols = [c for c in ["Player", "Value", "Line", "ModelProb", "Pre-game rank"] if c in cdf.columns]
             cdf = cdf[cols].rename(columns={"ModelProb": "Model %", "Value": _mkt})
-            fmt = {"Model %": "{:.0%}", "Line": "{:g}"}
+            fmt = {"Model %": "{:.0%}", "Line": "{:g}", _mkt: "{:.1f}"}
             st.dataframe(cdf.style.format({k: v for k, v in fmt.items() if k in cdf.columns}, na_rep="—"),
                         hide_index=True, use_container_width=True)
         else:
