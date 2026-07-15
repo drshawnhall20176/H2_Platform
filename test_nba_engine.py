@@ -107,6 +107,27 @@ def test_get_game_boxscore_parses_cdn_shape(monkeypatch):
     print("✓ get_game_boxscore correctly parses the CDN player-stats shape")
 
 
+def test_get_game_boxscore_real_confirmed_live_shape(monkeypatch):
+    # Built directly from a real, live CDN response pasted back during verification: Nets @
+    # Clippers, Jan 25 2026 (gameId 401810511). This is Michael Porter Jr.'s actual real line —
+    # confirms the full 14-field names/stats shape (MIN/PTS/FG/3PT/FT/REB/AST/TO/STL/BLK/OREB/
+    # DREB/PF/+/-) genuinely matches what get_game_boxscore parses, not just the synthetic
+    # 5-field fixture above. The single biggest unconfirmed piece of the NBA build before this.
+    E._response_cache.clear()
+    names = ["MIN", "PTS", "FG", "3PT", "FT", "REB", "AST", "TO", "STL", "BLK", "OREB", "DREB", "PF", "+/-"]
+    fake_cdn = {"gamepackageJSON": {"boxscore": {"players": [
+        {"team": {"id": "17"}, "statistics": [{"names": names, "athletes": [
+            {"athlete": {"id": "4278104"}, "didNotPlay": False,
+            "stats": ["22", "9", "3-11", "0-4", "3-3", "2", "4", "1", "0", "0", "0", "2", "2", "-25"]},
+        ]}]},
+    ]}}}
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_cdn)
+    box = E.get_game_boxscore("g1")
+    # Michael Porter Jr.'s real confirmed line: 22 MIN, 9 PTS, 3-11 FG, 0-4 3PT (0 makes), 2 REB, 4 AST
+    assert box[4278104] == {"pts": 9.0, "reb": 2.0, "ast": 4.0, "fg3m": 0.0, "min": 22.0}
+    print("✓ get_game_boxscore correctly parses the real, confirmed-live Nets/Clippers player data")
+
+
 def test_get_game_boxscore_skips_did_not_play(monkeypatch):
     E._response_cache.clear()
     fake_cdn = {"gamepackageJSON": {"boxscore": {"players": [

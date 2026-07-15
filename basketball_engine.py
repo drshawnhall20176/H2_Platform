@@ -173,6 +173,23 @@ def get_game_team_totals(game_id: str, cdn_api: str, fetch: FetchFn,
     gp = data.get("gamepackageJSON") or {}
     box = gp.get("boxscore") or {}
     teams = box.get("teams") or []
+
+    # "pts" fallback data: CONFIRMED LIVE (twice — a 2016 NBA Finals game and a real 2026 Nets/
+    # Clippers game, both pasted back during verification) that "points" does NOT exist anywhere
+    # in boxscore.teams[].statistics[] for NBA. The team's final score instead lives in a
+    # completely different part of the response: gamepackageJSON.header.competitions[0].
+    # competitors[], each with its own "score" (string) and "id" (team id) — NOT a sibling field
+    # on the boxscore.teams[] block itself, which was wrong in an earlier version of this fix.
+    score_by_team: Dict[int, float] = {}
+    header = gp.get("header") or {}
+    comps = header.get("competitions") or []
+    if comps:
+        for c in comps[0].get("competitors", []):
+            try:
+                score_by_team[int(c.get("id"))] = float(c.get("score", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+
     out: Dict[int, Dict[str, float]] = {}
     for team_block in teams:
         team_info = team_block.get("team") or {}
@@ -192,18 +209,13 @@ def get_game_team_totals(game_id: str, cdn_api: str, fetch: FetchFn,
         oreb = find_team_stat(stats_by_name, "offensiveRebounds")
         tov = find_team_stat(stats_by_name, "totalTurnovers", "turnovers")
         poss = fga - oreb + tov + 0.44 * fta
-        # "pts" fallback: a live NBA sample (a different ESPN endpoint, not this exact CDN one,
-        # but showing the same team-level statistics[] shape) had NO "points" entry in
-        # statistics[] at all — team score can live as a sibling "score" field on the team block
-        # itself instead. Try the stats lookup first (this IS confirmed live for WNBA), fall back
-        # to team_block["score"] rather than silently reporting 0.0 if the stats-based path comes
-        # up empty despite the team block being present.
+        # "points" isn't in statistics[] for NBA (see above) — fall back to the header-derived
+        # score map rather than silently reporting 0.0. Tried second, not first, since a stats-
+        # based "points" entry IS confirmed live for WNBA — this keeps that path working exactly
+        # as before for the sport where it's real, and only falls through where it genuinely isn't.
         pts = find_team_stat(stats_by_name, "points")
         if pts == 0.0:
-            try:
-                pts = float(team_block.get("score", 0) or 0)
-            except (TypeError, ValueError):
-                pts = 0.0
+            pts = score_by_team.get(tid, 0.0)
         out[tid] = {
             "pts": pts,
             "reb": find_team_stat(stats_by_name, "totalRebounds", "rebounds"),

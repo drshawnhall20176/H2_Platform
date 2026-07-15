@@ -4,7 +4,7 @@
 one sport-selector foundation). MLB runs exactly as the standalone did originally; WNBA is now a
 second real, priced sport — not a placeholder.
 
-## What's in this checkpoint (all tested — 312/312 tests green)
+## What's in this checkpoint (all tested — 314/314 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -516,22 +516,22 @@ that build starts, and extract further once real duplication is provable, not sp
   code directly, not just through WNBA's wrapper. Total: 277/277 passing, up from 255 (0 existing
   tests modified, 22 added).
 
-### nba_engine.py / nba_projections.py — built, NOT yet live (2026-07-15)
+### nba_engine.py / nba_projections.py — built, CDN endpoints confirmed live (2026-07-15)
 Built as a copy-adapt of `wnba_engine.py`/`wnba_projections.py`, wired to
 `basketball_engine.py`/`basketball_projections.py` for pace/rest/blowout/injury logic exactly the
 way WNBA now is. Registry-wired in `sports.py` with real markets/market_map (Core 4: Points/
-Rebounds/Assists/Threes, same Odds API market keys as WNBA) — but **`enabled=False`**, on purpose.
+Rebounds/Assists/Threes, same Odds API market keys as WNBA) — still **`enabled=False`** for now,
+but for a narrower reason than originally: the data layer is confirmed (see below), the remaining
+gap is two view files that don't know NBA exists yet, not an unverified endpoint.
 
-**Why not live yet — stated plainly, not hedging:** the single biggest risk area in WNBA's own
+**Original concern, stated plainly, then resolved:** the single biggest risk area in WNBA's own
 build was `get_game_boxscore`'s CDN endpoint (`cdn.espn.com/core/wnba/boxscore`) — ESPN's "site"
 API family was confirmed to return team-level stats only, no player-level, forcing that CDN
 detour, and the exact player-stats shape there needed a live response pasted back to get right.
-The equivalent for NBA (`cdn.espn.com/core/nba/boxscore`) has NOT been hit live in this session —
-only researched (a generic `cdn.espn.com/core/{sport}/boxscore` pattern is documented and
-confirmed live for NFL; NBA's own combo-key team-stat naming was independently confirmed live via
-a *different* endpoint). That's real but secondhand evidence, not the same as WNBA's own
-paste-a-real-response verification. Flipping `enabled=True` before that check risks presenting an
-untested integration as live.
+The equivalent for NBA (`cdn.espn.com/core/nba/boxscore`) was NOT hit live earlier in this
+session — only researched. Shawn then fetched it directly and pasted the real response back (see
+the detailed section further down) — confirming both `get_game_team_totals` and
+`get_game_boxscore` against real live data, the exact same bar WNBA's build cleared.
 
 - **`config_nba.py`** — `RECENT_GAMES_N`/`MIN_AVG_MINUTES`/`DEFAULT_SIMS` carried over from
   WNBA's values as starting points, flagged for re-checking once real NBA slate data exists. No
@@ -578,70 +578,63 @@ anywhere in that sample's statistics[] array — the single field name `get_game
 for `pts`, with no fallback. Worse, a SEPARATE bug this surfaced: the diagnostic dump only fired
 when *all four* core stats came back zero at once — a single silently-wrong field name (exactly
 this "points" case) would have produced a wrong number with **zero diagnostic signal**, on either
-NBA or WNBA. Both fixed in `basketball_engine.py`:
-- `get_game_team_totals` now falls back to `team_block["score"]` (a plausible sibling field for
-  total score, common in ESPN's JSON shape) if the statistics[]-based "points" lookup comes back
-  empty, instead of silently reporting 0.0.
-- The diagnostic dump now fires on a PARTIAL failure (any one core field zero) in addition to a
-  total one, and names which specific field(s) came back zero — not just "something's wrong."
-- 2 new tests lock this in (`test_get_game_team_totals_falls_back_to_team_score_when_points_stat_
-  missing`, `test_get_game_team_totals_diagnostic_fires_on_partial_failure`). Total: 312/312
-  passing. This fix benefits WNBA too, not just NBA — a latent gap in already-live code, found
-  precisely because this verification pass looked at real data closely enough to notice a missing
-  field, not just check that a call succeeded.
+NBA or WNBA.
 
-**Still not fully verified, but a real step closer:** the actual CDN endpoint
-(`cdn.espn.com/core/nba/boxscore`) and its player-level `boxscore.players[]` shape — the piece
-`get_game_boxscore` (per-player stats) actually depends on, and still the single biggest unknown.
-Two attempts: the raw CDN JSON itself never surfaced as a fetchable URL in this session (it's an
-API response, not an indexed page, and ESPN's rendered boxscore HTML pages block automated
-fetching via robots.txt for the *regular-season* path specifically). The Summer League HTML
-boxscore path did NOT block fetching, though, and pulling a real, live, current game (Grizzlies
-106, Warriors 85 — July 14, 2026, gameId 401881861, league `nba-summer-las-vegas`) confirmed the
-full per-player stat categories exist and match what `get_game_boxscore` expects: MIN/PTS/FG/3PT/
-FT/REB/AST/TO/STL/BLK/OREB/DREB/PF, FG/3PT/FT in made-attempted combo format, real "DNP-COACH'S
-DECISION" entries (confirms the didNotPlay-skip logic is exercising a real case, not a
-hypothetical), plus a team-totals row. **Caveat, stated precisely:** this confirms the rendered
-HTML derived from that data — not the literal raw JSON key names (`names`/`athletes`/`stats`
-arrays, etc.) the parsing code actually depends on. Meaningfully stronger evidence than before,
-short of the same "pasted a real JSON response back" bar WNBA's build cleared. The concrete next
-step is unchanged: someone with real network access (unlike this sandbox, which can't reach ESPN
-at all) hitting the actual CDN JSON directly — against Summer League (fastest, live now),
-historical 2025-26 data, or October's tip-off.
+**Update — Shawn pasted back a real, live CDN response** (`cdn.espn.com/core/nba/boxscore?xhr=1&
+gameId=401810511`, Nets @ Clippers, Jan 25 2026 — a completed regular-season game), the exact same
+bar WNBA's own verification cleared. This resolved everything below, including one real bug in the
+FIRST fix attempt:
 
-**On NBA Summer League, in case it's useful:** confirmed via ESPN's own endpoint-slug listing that
-Summer League is a genuinely SEPARATE set of leagues in ESPN's system — `nba-summer-las-vegas`,
-`nba-summer-utah`, `nba-summer-orlando`, `nba-summer-sacramento` — not the same as the regular
-`nba` slug this build targets, and it's live and active right now (confirmed: ESPN's Summer League
-scoreboard showed a result from "12 hours ago" during this session). Two different implications:
-- **Not useful as a production data source** — Summer League rosters are mostly rookies/two-way/
-  fringe prospects, not the core rotation players Shawn's model prices, it's a short exhibition
-  tournament (not the 82-game season `SEASON_START`/`RECENT_GAMES_N` assume), and the Odds API
-  almost certainly doesn't carry meaningful prop markets for it.
-- **Genuinely useful for verification, and actually used above** — since it's live RIGHT NOW
-  (unlike the regular season, which is in its off-season), it's a real, currently-fetchable
-  NBA-adjacent data source, and its HTML boxscore path (unlike the regular season's) didn't block
-  automated fetching, which is how the confirmation above happened. Pointing `nba_engine.py`'s
-  `SITE_API`/`CDN_API` at `nba-summer-las-vegas` temporarily and hitting the actual CDN *JSON*
-  (not just the HTML page, which is all this session could reach) is still the fastest remaining
-  path to full confirmation — worth doing before either waiting for historical-2025-26-season
-  access or October's regular-season tip-off.
+- **Team-level `boxscore.teams[].statistics[]` — confirmed correct**, all 25 fields present,
+  matching every field name `get_game_team_totals` was already coded against: the FGA/FTA/3PT
+  combo-key format, `totalRebounds`, `offensiveRebounds`, `assists`, `totalTurnovers`. The
+  possession-estimate formula's inputs are genuinely right.
+- **`"points"` confirmed genuinely absent** from that same statistics[] array (25 fields listed,
+  no points — confirmed twice now, a 2016 game and this real 2026 one). The FIRST fix attempt for
+  this (falling back to `team_block["score"]`) was itself WRONG — that field doesn't exist there
+  either. The real location, only visible once the actual live response was in hand:
+  `gamepackageJSON.header.competitions[0].competitors[].score`, matched by team id — a completely
+  different part of the response than `boxscore.teams[]`. Fixed for real this time in
+  `basketball_engine.py`, with a test built directly from the real Nets/Clippers scores (126–89).
+- **Player-level `boxscore.players[].statistics[0]` — confirmed correct**, the single biggest
+  unknown going into this and now fully resolved: the real `names` array is exactly
+  `["MIN","PTS","FG","3PT","FT","REB","AST","TO","STL","BLK","OREB","DREB","PF","+/-"]`, `stats`
+  align positionally, `didNotPlay` is a real field ESPN actually sets. Verified against Michael
+  Porter Jr.'s real line (22 MIN, 9 PTS, 3-11 FG, 0-4 3PT, 2 REB, 4 AST) — `get_game_boxscore`
+  parses it to exactly `{"pts": 9.0, "reb": 2.0, "ast": 4.0, "fg3m": 0.0, "min": 22.0}`, correct.
+- The diagnostic dump now also fires on a PARTIAL failure (any one core field zero), not just a
+  total one, and names which specific field(s) came back zero — a real, independent gap found
+  during this same pass (the OLD condition would have missed a lone bad field name silently). This
+  benefits WNBA's already-live code too, not just NBA.
+- 4 new tests lock all of this in, two built directly from the real pasted response
+  (`test_get_game_team_totals_real_confirmed_live_shape`,
+  `test_get_game_boxscore_real_confirmed_live_shape`). Total: 314/314 passing.
 
-**Checklist before flipping `sports.py`'s NBA entry to `enabled=True`:**
-1. Live-verify `get_game_boxscore`'s CDN endpoint against a real NBA game — the biggest remaining
-   unknown (see above). Three options, fastest first: (a) point `SITE_API`/`CDN_API` at
-   `nba-summer-las-vegas` temporarily — live and fetchable RIGHT NOW, though a different
-   competition; (b) the 2025-26 season's historical games (Oct 2025 – Apr 2026) — queryable now
-   too, and the actually-representative data; (c) wait for October's regular-season tip-off. Paste
-   a real response back the same way WNBA's build did — this sandbox couldn't reach ESPN directly.
-2. Re-verify `SEASON_START` once the 2026-27 schedule is officially announced.
-3. **`views/11_Hot_Hand_Engine.py`** and **`views/12_Matchup_Lab.py`** both still hardcode
+**Net result: `get_game_boxscore` and `get_game_team_totals` — the two functions this whole
+verification effort was about — are now confirmed live against a real NBA game, the same bar
+WNBA's build cleared before its own launch.** Team injuries were already confirmed live in an
+earlier session. Schedule/roster fetching use the identical, already-proven `site.api.espn.com`
+pattern WNBA relies on, not independently verified this session but low-risk by construction.
+
+**On NBA Summer League, in case it's useful going forward:** confirmed via ESPN's own endpoint-
+slug listing that Summer League is a genuinely SEPARATE set of leagues in ESPN's system —
+`nba-summer-las-vegas`, `nba-summer-utah`, `nba-summer-orlando`, `nba-summer-sacramento` — not the
+same as the regular `nba` slug this build targets. Not useful as a production data source
+(rosters are mostly rookies/two-way players, a short exhibition tournament, and the Odds API
+almost certainly doesn't carry meaningful prop markets for it) — its HTML boxscore page not
+blocking automated fetching (unlike the regular season's) is what let some of this verification
+start moving before the real CDN JSON came through directly.
+
+**Remaining before flipping `sports.py`'s NBA entry to `enabled=True`:**
+1. **`views/11_Hot_Hand_Engine.py`** and **`views/12_Matchup_Lab.py`** both still hardcode
    `sports.require_sport("WNBA", ...)` — written before NBA existed as a real option. These need
-   updating to accept NBA too (or generalize to "any basketball sport") once NBA is confirmed
-   live, or NBA will appear enabled in the sidebar while these two pages still refuse to show it.
-   Deliberately NOT changed yet — no point widening a gate to a codepath that isn't verified.
-4. Sanity-check `config_nba.MIN_AVG_MINUTES`/`RECENT_GAMES_N` against real NBA rotation patterns
+   updating to accept NBA too (or generalize to "any basketball sport"), or NBA will appear
+   enabled in the sidebar while these two pages still refuse to show it.
+2. Re-verify `SEASON_START` once the 2026-27 schedule is officially announced.
+3. Sanity-check `config_nba.MIN_AVG_MINUTES`/`RECENT_GAMES_N` against real NBA rotation patterns
    once real slate data is available — carried over from WNBA's values as a starting point only.
+4. Optional, not blocking: independently confirm `get_team_roster`'s exact shape live (same
+   pattern already proven for WNBA, so low risk, just not independently checked this session).
 
 ## NOT YET DONE (next stages)
 - **NBA go-live checklist** — see above. The build exists; live verification of the CDN boxscore

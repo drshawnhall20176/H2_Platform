@@ -113,31 +113,72 @@ def test_get_game_team_totals_empty_on_fetch_failure():
     assert BB.get_game_team_totals("g1", CDN_API, lambda url, params=None: None) == {}
 
 
-def test_get_game_team_totals_falls_back_to_team_score_when_points_stat_missing():
-    # Real finding from NBA verification: a live NBA sample had NO "points" entry anywhere in
-    # statistics[] (only FG/3PT/FT/rebounds/assists/turnovers etc.) — team score can live as a
-    # sibling "score" field on the team block itself instead of inside statistics[].
-    fake_cdn = {"gamepackageJSON": {"boxscore": {"teams": [
-        {"team": {"id": "5"}, "score": "112", "statistics": [
-            {"name": "totalRebounds", "displayValue": "45"},
-            {"name": "assists", "displayValue": "24"},
-            {"name": "threePointFieldGoalsMade-threePointFieldGoalsAttempted", "displayValue": "12-30"},
-            # deliberately no "points" entry anywhere
+def test_get_game_team_totals_falls_back_to_header_score_when_points_stat_missing():
+    # Real finding from NBA verification (confirmed live, twice — a 2016 game and a real 2026
+    # Nets/Clippers game, both pasted back during verification): "points" does NOT exist anywhere
+    # in boxscore.teams[].statistics[]. The team's score instead lives in a completely different
+    # part of the response: gamepackageJSON.header.competitions[0].competitors[], matched by
+    # team id — NOT a sibling "score" field on the boxscore.teams[] block itself (an earlier,
+    # wrong version of this fix assumed that; this fixture uses the real, confirmed location).
+    fake_cdn = {"gamepackageJSON": {
+        "header": {"competitions": [{"competitors": [
+            {"id": "5", "score": "112"}, {"id": "9", "score": "108"},
+        ]}]},
+        "boxscore": {"teams": [
+            {"team": {"id": "5"}, "statistics": [
+                {"name": "totalRebounds", "displayValue": "45"},
+                {"name": "assists", "displayValue": "24"},
+                {"name": "threePointFieldGoalsMade-threePointFieldGoalsAttempted", "displayValue": "12-30"},
+                # deliberately no "points" entry anywhere, matching the real confirmed shape
+            ]},
         ]},
-    ]}}}
+    }}
     totals = BB.get_game_team_totals("g1", CDN_API, lambda url, params=None: fake_cdn)
-    assert totals[5]["pts"] == 112.0   # recovered from team_block["score"], not silently 0.0
-    print("✓ get_game_team_totals falls back to team_block['score'] when 'points' isn't in statistics[]")
+    assert totals[5]["pts"] == 112.0   # recovered from header.competitions[0].competitors[], not silently 0.0
+    print("✓ get_game_team_totals falls back to the real header-derived score, not team_block['score']")
+
+
+def test_get_game_team_totals_real_confirmed_live_shape():
+    # Built directly from a real, live CDN response pasted back during verification: Nets @
+    # Clippers, Jan 25 2026 (gameId 401810511). Team-level statistics[] trimmed to the fields
+    # get_game_team_totals actually reads; "points" genuinely absent, exactly as confirmed live.
+    clippers_stats = [
+        {"displayValue": "44-78", "name": "fieldGoalsMade-fieldGoalsAttempted", "label": "FG"},
+        {"displayValue": "12-25", "name": "threePointFieldGoalsMade-threePointFieldGoalsAttempted", "label": "3PT"},
+        {"displayValue": "26-29", "name": "freeThrowsMade-freeThrowsAttempted", "label": "FT"},
+        {"displayValue": "51", "name": "totalRebounds", "label": "Rebounds"},
+        {"displayValue": "7", "name": "offensiveRebounds", "label": "Offensive Rebounds"},
+        {"displayValue": "20", "name": "assists", "label": "Assists"},
+        {"displayValue": "19", "name": "totalTurnovers", "label": "Total Turnovers"},
+    ]
+    fake_cdn = {"gamepackageJSON": {
+        "header": {"competitions": [{"competitors": [
+            {"id": "12", "score": "126"}, {"id": "17", "score": "89"},
+        ]}]},
+        "boxscore": {"teams": [
+            {"homeAway": "away", "team": {"id": "17"}, "statistics": []},   # Nets: stats trimmed for brevity
+            {"homeAway": "home", "team": {"id": "12"}, "statistics": clippers_stats},   # Clippers
+        ]},
+    }}
+    totals = BB.get_game_team_totals("g1", CDN_API, lambda url, params=None: fake_cdn)
+    assert totals[12]["pts"] == 126.0                     # recovered via header fallback
+    assert totals[12]["reb"] == 51.0
+    assert totals[12]["fg3m"] == 12.0
+    # Poss = FGA - OREB + TOV + 0.44*FTA = 78 - 7 + 19 + 0.44*29 = 102.76
+    assert abs(totals[12]["poss"] - 102.76) < 1e-6
+    print("✓ get_game_team_totals correctly parses the real, confirmed-live Nets/Clippers CDN response")
 
 
 def test_get_game_team_totals_diagnostic_fires_on_partial_failure():
     # A PARTIAL failure (only one field wrong) must still trigger the diagnostic dump, not just a
     # total failure — this was a real gap: the old condition only fired when ALL FOUR core fields
     # were zero simultaneously, so one silently-wrong field name (like "points" being absent)
-    # produced a wrong number with zero diagnostic signal.
+    # produced a wrong number with zero diagnostic signal. No header/score data here either, so
+    # the pts fallback also comes up empty — pts genuinely stays 0.0, which is what should trip
+    # the diagnostic dump.
     calls = []
     fake_cdn = {"gamepackageJSON": {"boxscore": {"teams": [
-        {"team": {"id": "5"}, "statistics": [   # no "score" fallback here either -> pts stays 0.0
+        {"team": {"id": "5"}, "statistics": [
             {"name": "totalRebounds", "displayValue": "45"},
             {"name": "assists", "displayValue": "24"},
             {"name": "threePointFieldGoalsMade-threePointFieldGoalsAttempted", "displayValue": "12-30"},
