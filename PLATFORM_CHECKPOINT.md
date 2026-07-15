@@ -4,7 +4,7 @@
 one sport-selector foundation). MLB runs exactly as the standalone did originally; WNBA is now a
 second real, priced sport — not a placeholder.
 
-## What's in this checkpoint (all tested — 216/216 tests green)
+## What's in this checkpoint (all tested — 277/277 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -471,7 +471,55 @@ check.
 This closes out all five items from the original WNBA model-enhancement priority list (pace,
 trend chart, rest, blowout risk, injury/availability).
 
+### basketball_engine.py / basketball_projections.py extraction (2026-07-15)
+Pulled the genuinely league-agnostic pieces of today's four WNBA additions (pace/possession math,
+rest calc, blowout tag, injury parsing) into new shared modules, so a future NBA build reuses them
+instead of duplicating.
+
+**Scope call, made deliberately narrow:** `wnba_engine.py` has ~15 functions; only four (plus
+their minimal direct plumbing — game-ids lookup, team-totals parsing, the stat-value helpers) were
+extracted. Schedule fetching, roster fetching, player game-log assembly, and `build_slate`'s
+orchestration stayed in `wnba_engine.py` untouched — those are also basketball-generic in
+principle, but which parts would need to diverge for NBA isn't known yet (real endpoint quirks in
+`wnba_engine.py` — the CDN-vs-site-API boxscore split, the made-attempted combo-key naming, the
+flat-vs-grouped roster shape — were only discovered by building WNBA the hard way, not
+predictable in advance). Extracting those now would mean guessing NBA's needs before NBA exists —
+a premature-abstraction risk. Plan: write `nba_engine.py` as a copy-adapt of `wnba_engine.py` when
+that build starts, and extract further once real duplication is provable, not speculatively now.
+
+- **`basketball_engine.py`** (new) — `parse_stat_value`, `find_team_stat`,
+  `get_team_recent_game_ids`, `get_game_team_totals` (the possession-estimate formula and its
+  diagnostic dump), `get_team_recent_allowed_stats`, `get_team_rest_info`, `get_team_injuries`.
+  Every function takes `fetch`/`diag` as explicit parameters (dependency injection) rather than
+  owning its own HTTP client or cache — this is what let the extraction happen with **zero test
+  file changes**: `wnba_engine.py`'s 255 existing tests, many of which do
+  `monkeypatch.setattr(E, "_get_json", ...)` or `E._response_cache.clear()` directly against
+  `wnba_engine`'s own module state, kept passing unchanged, because `wnba_engine.py` still owns
+  and exposes its own `_get_json`/`_get_json_cached`/`_diag`/`_response_cache` exactly as before —
+  its public functions became thin wrappers that pass those same objects into the shared layer.
+- **`basketball_projections.py`** (new) — `blowout_risk_tag`. `build_hot_hand_board` itself stayed
+  in `wnba_projections.py`: it iterates `_MARKET_SPEC`, whose default-line values (12.5 pts, 5.5
+  reb, ...) are WNBA-scale tuning constants, not basketball-generic ones — NBA's would be
+  meaningfully different (longer games, faster pace, higher counting stats), and a shared
+  default-line table would be the same kind of premature guess as above.
+- **`wnba_engine.py`** — `get_team_recent_game_ids`, `get_game_team_totals`, `get_team_injuries`
+  became thin wrappers delegating to `basketball_engine.py`. `_parse_stat_value`/`_find_team_stat`
+  became plain aliases. Every OTHER function that calls these (`get_team_rest_info`,
+  `get_team_recent_allowed_stats`, `get_player_recent_games`, `get_player_history_vs_opponent`)
+  was left **completely untouched** — they still call the extracted functions by bare name, which
+  Python resolves fresh at call time, so `monkeypatch.setattr(E, "get_team_recent_game_ids", ...)`
+  keeps working exactly as before regardless of what that name now points to internally.
+- **`wnba_projections.py`** — `blowout_risk_tag` became a plain alias to
+  `basketball_projections.blowout_risk_tag`.
+- New direct test coverage for the shared layer itself (`test_basketball_engine.py`,
+  `test_basketball_projections.py`, 22 tests) — matters for when `nba_engine.py` consumes this
+  code directly, not just through WNBA's wrapper. Total: 277/277 passing, up from 255 (0 existing
+  tests modified, 22 added).
+
 ## NOT YET DONE (next stages)
+- **`nba_engine.py`** — not started. When it is, start by copying `wnba_engine.py`'s remaining
+  (non-extracted) functions as a template and wiring them to `basketball_engine.py` the same way
+  `wnba_engine.py` now does, rather than writing from scratch.
 - **Injury/availability "opportunity boost" (Stage B)** — see above. Deferred as a genuinely
   separate, harder modeling decision, not a quick follow-on to Stage A's data-fetch.
 - **Real line movement history (candlestick-proper)** — the Matchup Lab trend chart overlays a
@@ -481,7 +529,7 @@ trend chart, rest, blowout risk, injury/availability).
 - **`nfl_engine.py`/`nfl_projections.py`** exist but are untested and `nfl_data_py` isn't in
   `requirements.txt` yet; markets/market_map in the registry are still empty. Flipping NFL on is
   Stage 4, not started.
-- **NBA, NHL, NCAAF, NCAAMB** — no engines built yet.
+- **NHL, NCAAF, NCAAMB** — no engines built yet.
 
 ## Deploy notes
 - Main file path = `streamlit_app.py` for the owner app, `streamlit_app_discord.py` for the

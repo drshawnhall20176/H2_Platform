@@ -35,12 +35,13 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
 import config_wnba as CFG
+import basketball_engine as BB
 
 logger = logging.getLogger(__name__)
 
@@ -190,97 +191,27 @@ def get_team_roster(team_id: int) -> List[Dict[str, Any]]:
 
 
 # --------------------------------------------------------------------------- recent form
-def _parse_stat_value(raw, side: str = "left") -> float:
-    """ESPN's boxscore stats are strings. Combo fields report made-attempted ('12-24'). Default
-    side="left" returns the makes, unchanged behavior for every existing caller (the bootstrap
-    model, PTS/REB/AST/FG3M). side="right" returns the attempts instead — needed for the
-    possession estimate (FGA/FTA), which cares about attempts, not makes. Plain numeric fields
-    (PTS, REB, AST, MIN, TOV) have no '-' and pass through the same regardless of side. Anything
-    unparseable becomes 0.0 — the safe default for a missed/DNP game or an unmatched field."""
-    if raw is None:
-        return 0.0
-    s = str(raw).strip()
-    if "-" in s and not s.startswith("-"):
-        parts = s.split("-", 1)
-        s = parts[1] if side == "right" and len(parts) > 1 else parts[0]
-    try:
-        return float(s)
-    except (TypeError, ValueError):
-        return 0.0
+# Thin alias — the actual logic now lives in basketball_engine.py (shared with a future NBA
+# build). A plain alias (not a wrapper function) is safe here: get_game_boxscore below still
+# calls `_parse_stat_value(...)` by bare name, which Python resolves fresh at call time, so
+# `monkeypatch.setattr(E, "_parse_stat_value", fake)` still works exactly as before.
+_parse_stat_value = BB.parse_stat_value
 
 
 def get_team_recent_game_ids(team_id: int, before_date: str,
                              n: int = CFG.RECENT_GAMES_N, days_back: int = 45) -> List[Dict[str, Any]]:
     """A team's last n COMPLETED games STRICTLY BEFORE before_date (YYYY-MM-DD), most recent
-    first: [{"gameId", "date", "opp_id", "opp_name"}, ...]. Found by scanning the scoreboard
-    across a trailing window and filtering to games where this team appears as a competitor —
-    reuses get_schedule's already-verified scoreboard parsing rather than the separate,
-    unverified teams/{id}/schedule endpoint. Opponent name/id are captured here (not looked up
-    separately) since the scoreboard response already has them for free.
+    first: [{"gameId", "date", "opp_id", "opp_name"}, ...]. Thin WNBA wrapper — the actual
+    scoreboard-scanning logic now lives in basketball_engine.get_team_recent_game_ids (shared with
+    a future NBA build); this just supplies WNBA's SITE_API and this module's own cache/diag
+    objects so behavior (including diagnostic dedup) is unchanged from before the extraction.
 
-    days_back defaults to 45 (comfortably covers n=10 games at the WNBA's ~2-4 games/week pace —
-    the "recent form" use case build_slate/get_player_recent_games rely on). Matchup Lab's
-    head-to-head lookup calls this with a much wider days_back (~200, back to the season start)
-    and a large n, then filters the result to one specific opponent — reusing this exact function
-    rather than a second implementation of the same scoreboard-scanning logic.
-
-    "Strictly before" (not "at or before") matters beyond tonight's live board: called for
-    tonight's date, the game being projected is still STATUS_SCHEDULED, so "completed" alone
-    would exclude it anyway. But this function is also reused for retrospective grading of a PAST
-    date, called AFTER that date's games have finished — at that point they're "completed" too,
-    and without an explicit date cutoff they'd leak into their own pre-game sample (a real
-    lookahead-bias bug, not just a hypothetical one)."""
-    end = datetime.strptime(before_date, "%Y-%m-%d")
-    start = end - timedelta(days=days_back)
-    date_range = f"{start.strftime('%Y%m%d')}-{end.strftime('%Y%m%d')}"
-    # limit=500 (not the original 200): a full-season window (days_back~200) can hold ~300+ league
-    # games across all 15 teams, and a truncated result here would silently under-count a
-    # head-to-head history rather than error — better to ask for enough headroom than guess wrong.
-    data = _get_json_cached(f"{SITE_API}/scoreboard", params={"dates": date_range, "limit": 500})
-    diag_key = (team_id, before_date, days_back)
-    if not data:
-        if diag_key not in _diag_seen:
-            _diag(f"get_team_recent_game_ids(team={team_id}): trailing-window scoreboard fetch returned nothing")
-            _diag_seen.add(diag_key)
-        return []
-
-    found: List[Dict[str, Any]] = []
-    for event in data.get("events", []):
-        status = ((event.get("status") or {}).get("type") or {})
-        if not status.get("completed"):
-            continue
-        ev_date = (event.get("date") or "")[:10]
-        if not ev_date or ev_date >= before_date:   # strictly before, not at-or-before
-            continue
-        comps = event.get("competitions") or []
-        if not comps:
-            continue
-        competitors = comps[0].get("competitors") or []
-        this_team, opp_team = None, None
-        for c in competitors:
-            try:
-                cid = int(c["team"]["id"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            if cid == team_id:
-                this_team = c
-            else:
-                opp_team = c
-        if this_team is not None and event.get("id"):
-            opp_info = (opp_team or {}).get("team") or {}
-            found.append({
-                "gameId": event["id"], "date": event.get("date") or "",
-                "opp_id": opp_info.get("id"), "opp_name": opp_info.get("displayName", "Unknown"),
-            })
-
-    found.sort(key=lambda g: g["date"], reverse=True)
-    result = found[:n]
-    if diag_key not in _diag_seen:
-        _diag(f"get_team_recent_game_ids(team={team_id}, before={before_date}, days_back={days_back}): "
-             f"{len(result)} completed game(s) found "
-             f"({len(data.get('events', []))} raw events scanned)")
-        _diag_seen.add(diag_key)
-    return result
+    days_back defaults to 45 (comfortably covers n=10 games at the WNBA's ~2-4 games/week pace).
+    Matchup Lab's head-to-head lookup calls this with a much wider days_back (~200) and a large n,
+    then filters the result to one specific opponent, reusing this rather than a second
+    scoreboard-scanning implementation."""
+    return BB.get_team_recent_game_ids(team_id, before_date, SITE_API, _get_json_cached, _diag,
+                                       n=n, days_back=days_back, diag_seen=_diag_seen)
 
 
 CDN_API = "https://cdn.espn.com/core/wnba/boxscore"
@@ -357,98 +288,25 @@ def get_game_boxscore(game_id: str) -> Dict[int, Dict[str, float]]:
     return out
 
 
-def _find_team_stat(stats_by_name: Dict[str, str], *candidates: str, side: str = "left") -> float:
-    """Look up a team stat by trying each candidate name, exact match first, falling back to a
-    prefix match. The prefix fallback exists because a real CDN boxscore example (confirmed live,
-    ScrapeCreators' walkthrough) showed made-count stats under COMBO names —
-    "threePointFieldGoalsMade-threePointFieldGoalsAttempted", not a bare "threePointFieldGoalsMade"
-    key — the same naming pattern already found and handled for player-level stats. _parse_stat_
-    value's existing "X-Y -> take X" logic handles the combo correctly once the right key is
-    found; the fix here is finding it. side is forwarded to _parse_stat_value unchanged — "left"
-    (default) for makes, "right" for attempts (needed by the possession estimate). Returns 0.0 if
-    nothing matches any candidate."""
-    for c in candidates:
-        if c in stats_by_name:
-            return _parse_stat_value(stats_by_name[c], side=side)
-    for name, raw in stats_by_name.items():
-        if any(name.startswith(c) for c in candidates):
-            return _parse_stat_value(raw, side=side)
-    return 0.0
+# Thin alias — the actual logic now lives in basketball_engine.py.
+_find_team_stat = BB.find_team_stat
 
 
 def get_game_team_totals(game_id: str) -> Dict[int, Dict[str, float]]:
-    """{team_id: {pts, reb, ast, fg3m, poss}} TEAM-level totals for a game — from
-    `boxscore.teams[]` (the same CDN response get_game_boxscore already fetches and caches;
-    calling both for the same game_id costs one network request total, not two, via
-    _get_json_cached). This is the foundation for "stats allowed" (Hot Hand Engine's
-    opponent-adjustment signal): a team's defensive profile is just the OTHER team's totals in
-    each of their recent games.
+    """{team_id: {pts, reb, ast, fg3m, poss}} TEAM-level totals for a game — from `boxscore.
+    teams[]` (the same CDN response get_game_boxscore already fetches and caches; calling both
+    for the same game_id costs one network request total, not two, via _get_json_cached). This is
+    the foundation for "stats allowed" (Hot Hand Engine's opponent-adjustment signal) and the
+    pace/possession estimate used to correct it. Thin WNBA wrapper — the actual parsing and
+    possession-formula logic now lives in basketball_engine.get_game_team_totals (shared with a
+    future NBA build); this just supplies WNBA's CDN_API and this module's own cache/diag objects.
 
-    poss is an ESTIMATED POSSESSION count for that team's own box score in this game, using the
-    standard formula FGA - OREB + TOV + 0.44*FTA (the same estimate used throughout basketball
-    analytics for games without official play-by-play possession tracking). This exists to fix a
-    real conflation in the "allowed" signal: "this team allows a lot" and "this team just plays
-    fast, so everyone accumulates more against them" look identical in raw per-game allowed
-    totals. Dividing an allowed stat by poss (done downstream, in get_team_recent_allowed_stats
-    and build_hot_hand_board) turns it into a per-possession rate, which isn't fooled by pace.
-
-    Field-name matching is defensive (see _find_team_stat) because the exact naming convention
-    for THIS specific block (team-level, inside a boxscore, as opposed to player-level or
-    season-cumulative scoreboard stats) hasn't been fully confirmed live for every field — the
-    pts/reb/ast/fg3m names were confirmed live (see PLATFORM_CHECKPOINT), but the possession
-    inputs (FGA, FTA, OREB, TOV field names) are still an educated guess based on ESPN's other
-    documented naming conventions (the made-attempted combo pattern, the "total" prefix already
-    seen on totalRebounds). The diagnostic dump below fires if poss comes back 0 despite the team
-    block being present, the same safety net already proven for the pts/reb/ast/fg3m fix."""
-    data = _get_json_cached(CDN_API, params={"xhr": "1", "gameId": game_id})
-    if not data:
-        return {}
-    gp = data.get("gamepackageJSON") or {}
-    box = gp.get("boxscore") or {}
-    teams = box.get("teams") or []
-    out: Dict[int, Dict[str, float]] = {}
-    for team_block in teams:
-        team_info = team_block.get("team") or {}
-        try:
-            tid = int(team_info.get("id"))
-        except (TypeError, ValueError):
-            continue
-        stats_by_name = {}
-        for s in team_block.get("statistics", []):
-            name = s.get("name")
-            if name:
-                stats_by_name[name] = s.get("displayValue")
-        fga = _find_team_stat(stats_by_name, "fieldGoalsMade-fieldGoalsAttempted",
-                              "fieldGoalsAttempted", side="right")
-        fta = _find_team_stat(stats_by_name, "freeThrowsMade-freeThrowsAttempted",
-                              "freeThrowsAttempted", side="right")
-        oreb = _find_team_stat(stats_by_name, "offensiveRebounds")
-        tov = _find_team_stat(stats_by_name, "totalTurnovers", "turnovers")
-        poss = fga - oreb + tov + 0.44 * fta
-        out[tid] = {
-            "pts": _find_team_stat(stats_by_name, "points"),
-            "reb": _find_team_stat(stats_by_name, "totalRebounds", "rebounds"),
-            "ast": _find_team_stat(stats_by_name, "assists"),
-            "fg3m": _find_team_stat(stats_by_name, "threePointFieldGoalsMade"),
-            "poss": poss if poss > 0 else 0.0,
-        }
-
-    dump_key = f"_team_totals_shape_dump:{game_id}"
-    all_core_zero = teams and all(
-        v["pts"] == 0.0 and v["reb"] == 0.0 and v["ast"] == 0.0 and v["fg3m"] == 0.0
-        for v in out.values()
-    )
-    any_poss_zero = teams and any(v["poss"] == 0.0 for v in out.values())
-    if (all_core_zero or any_poss_zero) and dump_key not in _diag_seen:
-        _diag_seen.add(dump_key)
-        tb0 = teams[0]
-        _diag(f"get_game_team_totals({game_id}) shape dump: team_block keys = {list(tb0.keys())}")
-        stat_names = [s.get("name") for s in tb0.get("statistics", [])]
-        _diag(f"get_game_team_totals({game_id}) shape dump: statistics[].name values = {stat_names}")
-        if any_poss_zero and not all_core_zero:
-            _diag(f"get_game_team_totals({game_id}): poss=0 while pts/reb/ast/fg3m parsed fine — "
-                 f"FGA/FTA/OREB/TOV candidate field names likely wrong, see values above")
-    return out
+    Field-name matching is defensive (see basketball_engine.find_team_stat) because the exact
+    naming convention for team-level boxscore fields hasn't been fully confirmed live for every
+    field — pts/reb/ast/fg3m names were confirmed live (see PLATFORM_CHECKPOINT), but the
+    possession inputs (FGA, FTA, OREB, TOV field names) are still an educated guess. The
+    diagnostic dump fires if poss comes back 0 despite the team block being present."""
+    return BB.get_game_team_totals(game_id, CDN_API, _get_json_cached, _diag, diag_seen=_diag_seen)
 
 
 def get_team_recent_allowed_stats(team_id: int, before_date: str,
@@ -521,49 +379,16 @@ def get_team_injuries(team_abbr: str) -> List[Dict[str, Any]]:
     this endpoint keys by abbreviation. Confirmed live during scoping: `site.api.espn.com/apis/
     site/v2/sports/basketball/nba/injuries?team=ATL` returns real, current per-player injury
     records, sourced from Rotowire (same as espn.com/wnba/injuries, confirmed live and current for
-    the 2026 WNBA season during the same scoping pass). WNBA follows the identical site.api.espn.
-    com/apis/site/v2/sports/basketball/{league} pattern this module already relies on everywhere
-    else — league="wnba" here, same as every other call in this file — but the WNBA JSON shape
-    specifically hasn't been hit live yet (only the NBA JSON + the WNBA HTML page were), so the
-    diagnostic dump below is a real safety net here, not just standard caution.
+    the 2026 WNBA season during the same scoping pass) — but the WNBA JSON shape specifically
+    hasn't been hit live yet (only the NBA JSON + the WNBA HTML page were), so the diagnostic dump
+    is a real safety net here, not just standard caution. Thin WNBA wrapper — the actual fetch/
+    parse logic now lives in basketball_engine.get_team_injuries (shared with a future NBA build).
 
-    Returns [{"player", "status", "position", "return_date", "comment"}, ...] — one entry per
-    currently-listed injury. An empty list is a team with no news reported, treated as healthy —
-    there's no reliable way to distinguish "confirmed healthy" from "fetch problem" from this
-    endpoint alone, and treating silence as good news is the honest default here (the inverse of
-    get_team_rest_info's "no data -> None, not a guess": there, silence means unknown; here,
-    silence IS the informative case).
-
-    "status" (e.g. "Out", "Day-To-Day", "Questionable") is intentionally left as the raw text
-    ESPN/Rotowire assigned, not translated into a boolean playing/not-playing call — "Day-To-Day"
-    isn't a hard out, and collapsing it into one wouldn't be honest. This is informational display
-    only (Stage A of the injury/availability scoping) — it does NOT feed into Matchup Factor,
-    Recent Avg, or any other computed signal. Quantifying an "opportunity boost" for teammates
-    when a key player sits is a genuinely separate, harder modeling decision, deferred rather than
-    guessed at here."""
-    if not team_abbr:
-        return []
-    data = _get_json_cached(f"{SITE_API}/injuries", params={"team": team_abbr})
-    if not data:
-        return []
-    out = []
-    for inj in data.get("injuries", []):
-        athlete = inj.get("athlete") or {}
-        details = inj.get("details") or {}
-        out.append({
-            "player": athlete.get("displayName"),
-            "status": inj.get("status"),
-            "position": (athlete.get("position") or {}).get("abbreviation"),
-            "return_date": details.get("returnDate"),
-            "comment": inj.get("shortComment"),
-        })
-
-    dump_key = f"_injuries_shape_dump:{team_abbr}"
-    if data.get("injuries") and not any(o["player"] for o in out) and dump_key not in _diag_seen:
-        _diag_seen.add(dump_key)
-        _diag(f"get_team_injuries({team_abbr}) shape dump: first injury item keys = "
-             f"{list(data['injuries'][0].keys())}")
-    return out
+    Returns [{"player", "status", "position", "return_date", "comment"}, ...]. An empty list is a
+    team with no news reported, treated as healthy — see basketball_engine.get_team_injuries for
+    the full reasoning. This is informational display only (Stage A of the injury/availability
+    scoping) — does NOT feed into Matchup Factor, Recent Avg, or any other computed signal."""
+    return BB.get_team_injuries(team_abbr, SITE_API, _get_json_cached, _diag, diag_seen=_diag_seen)
 
 
 def get_player_results(date_str: str) -> Dict[int, Dict[str, float]]:

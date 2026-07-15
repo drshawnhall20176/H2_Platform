@@ -33,6 +33,7 @@ from projections import (  # genuinely sport-agnostic — reused, not duplicated
     prob_over, prob_for_side, normalize_name, format_et,
     prob_to_decimal, prob_to_american, curate_selections,
 )
+import basketball_projections as BB_P  # league-agnostic basketball logic, shared with a future NBA build
 
 DEFAULT_SIMS = 10000
 
@@ -259,21 +260,10 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
     return plays
 
 
-def blowout_risk_tag(spread: Optional[float], threshold: float = 10.0) -> str:
-    """Simple heuristic label for game-competitiveness risk from a team's point spread (negative
-    = favorite, positive = underdog — the Odds API's own convention). NOT a calibrated model —
-    just a threshold on a number that's already available once spreads are fetched. |spread| >=
-    threshold flags elevated blowout risk: the favorite's stars risk reduced 4th-quarter minutes,
-    the underdog's bench risks extended run. This tag intentionally doesn't try to say WHICH
-    player role is affected (that needs a starter/bench classification this data doesn't cleanly
-    support) — just that the game itself carries that risk, for the trader to weigh against who
-    they're actually looking at. threshold defaults to 10 points: a reasonable WNBA-scale
-    starting point (40-minute games, lower-scoring than the NBA, so a double-digit spread is
-    already a real edge), not a backtested cutoff — worth tuning empirically over time. Returns
-    "—" (not a fabricated "competitive") when spread is None — no data, not a claim."""
-    if spread is None:
-        return "—"
-    return "⚠️ Blowout risk" if abs(spread) >= threshold else "Competitive"
+# Thin alias — the actual logic now lives in basketball_projections.py (shared with a future NBA
+# build). See basketball_projections.blowout_risk_tag for the full reasoning, including why the
+# default 10-point threshold is WNBA-scale and worth reconsidering for NBA's higher-scoring games.
+blowout_risk_tag = BB_P.blowout_risk_tag
 
 
 # --------------------------------------------------------------------------- Hot Hand Engine
