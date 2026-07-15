@@ -47,7 +47,14 @@ def get_api_key():
 @st.cache_data(ttl=300, show_spinner=False)
 def load_slate(date_str: str):
     rows, meta = E.build_slate(date_str)
-    return rows, len(meta)
+    team_abbrs = E.team_abbrs_from_meta(meta)   # zero extra cost — meta already has this
+    return rows, len(meta), team_abbrs
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_injuries(team_abbr, opp_abbr):
+    # Small, free fetch (no API key needed) — one call per team, cached per (team, opp) pair.
+    return E.get_team_injuries(team_abbr), E.get_team_injuries(opp_abbr)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -83,7 +90,7 @@ with c2:
 date_str = target_date.strftime("%Y-%m-%d")
 
 with st.spinner("Loading tonight's slate..."):
-    rows, n_games = load_slate(date_str)
+    rows, n_games, team_abbrs = load_slate(date_str)
 
 if not rows:
     st.info(f"No projectable players for this date. Pick a date with scheduled {_active.label} games.")
@@ -124,6 +131,21 @@ with rc1:
     st.caption(_rest_line(row["Team"], team_rest))
 with rc2:
     st.caption(_rest_line(row["Opp"], opp_rest))
+
+team_abbr, opp_abbr = team_abbrs.get(team_id), team_abbrs.get(opp_id)
+team_injuries, opp_injuries = load_injuries(team_abbr, opp_abbr)
+if team_injuries or opp_injuries:
+    with st.expander("🏥 Injury report — both teams"):
+        for label, injuries in ((row["Team"], team_injuries), (row["Opp"], opp_injuries)):
+            if not injuries:
+                continue
+            st.markdown(f"**{label}**")
+            idf = pd.DataFrame(injuries)[["player", "position", "status", "return_date", "comment"]]
+            idf = idf.rename(columns={"player": "Player", "position": "Pos", "status": "Status",
+                                      "return_date": "Est. Return", "comment": "Comment"})
+            st.dataframe(idf, hide_index=True, use_container_width=True)
+        st.caption("Sourced from ESPN/Rotowire — informational only, not folded into any signal "
+                   "on this page. \"Day-To-Day\"/\"Questionable\" isn't a hard out.")
 
 st.info(
     f"**How {row['Player']} does against {row['Opp']} specifically, vs. how she's played "

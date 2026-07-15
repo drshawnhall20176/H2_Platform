@@ -51,7 +51,7 @@ def get_api_key():
 def load_board(date_str: str):
     rows, meta = E.build_slate(date_str)
     if not rows:
-        return [], 0
+        return [], 0, {}
 
     opp_ids = sorted({r["_opp_id"] for r in rows if r.get("_opp_id") is not None})
     opp_allowed = {oid: E.get_team_recent_allowed_stats(oid, date_str) for oid in opp_ids}
@@ -60,7 +60,15 @@ def load_board(date_str: str):
     board = P.build_hot_hand_board(rows, opp_allowed, team_rest)   # no team_spreads yet — Spread/
                                                                    # Blowout Risk are merged in below,
                                                                    # only after a live, button-gated fetch
-    return board, len(meta)
+    team_abbrs = E.team_abbrs_from_meta(meta)   # zero extra cost — meta already has this
+    return board, len(meta), team_abbrs
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_injuries(team_abbrs_tuple: tuple):
+    # One small fetch per team on the slate (not the league) — cached, so switching filters/
+    # markets afterward never re-fetches. Injuries are free (no API key needed, unlike spreads).
+    return {abbr: E.get_team_injuries(abbr) for abbr in team_abbrs_tuple}
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -82,11 +90,31 @@ with c2:
 date_str = target_date.strftime("%Y-%m-%d")
 
 with st.spinner("Building the matchup-adjusted board..."):
-    board, n_games = load_board(date_str)
+    board, n_games, team_abbrs = load_board(date_str)
 
 if not board:
     st.info(f"No projectable players for this date. Pick a date with scheduled {_active.label} games.")
     st.stop()
+
+with st.expander("🏥 Team injury report (tonight's slate)"):
+    injuries_by_abbr = load_injuries(tuple(sorted(set(team_abbrs.values()))))
+    any_reported = False
+    for abbr in sorted(set(team_abbrs.values())):
+        team_injuries = injuries_by_abbr.get(abbr) or []
+        if not team_injuries:
+            continue
+        any_reported = True
+        st.markdown(f"**{abbr}**")
+        idf = pd.DataFrame(team_injuries)[["player", "position", "status", "return_date", "comment"]]
+        idf = idf.rename(columns={"player": "Player", "position": "Pos", "status": "Status",
+                                  "return_date": "Est. Return", "comment": "Comment"})
+        st.dataframe(idf, hide_index=True, use_container_width=True)
+    if not any_reported:
+        st.caption("No injuries currently reported for any team on tonight's slate.")
+    st.caption("Sourced from ESPN/Rotowire — informational only, not folded into any score on "
+               "this page. \"Day-To-Day\"/\"Questionable\" isn't a hard out; treat this as context "
+               "to weigh yourself, not a playing/not-playing call. Silence for a team means no "
+               "news reported, not a confirmed-healthy guarantee.")
 
 api_key = get_api_key()
 sc1, sc2 = st.columns([1, 3])
