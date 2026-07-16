@@ -14,6 +14,7 @@ refresh_matchups.py / the nightly Action.
 import pandas as pd
 import streamlit as st
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
+import plotly.graph_objects as go
 
 import mlb_engine as E
 import matchup_data as MD
@@ -146,6 +147,55 @@ st.caption("Green favors the pitcher on Whiff%/PutAway%/Score. SLG/xwOBA color t
            "as every other page on the platform (high = green), so a hitter's power reads the same "
            "here as on the Dinger Engine. Hitter columns are by pitch **family** (Fastball / "
            "Breaking / Offspeed) for a stable sample; the pitch is mapped to its family.")
+
+# --- pitch mix, visualized -------------------------------------------------------------------
+# NOT a WNBA/NBA-style trend chart on purpose: that chart works because there's a real per-game
+# time axis (10 dated recent games) to plot against. This data has no equivalent — arsenals/
+# hitter_splits are season-aggregate snapshots PER PITCH, not a dated sequence, so there's no
+# "recent form over time" to trend. What genuinely maps here is the same instinct (see it, don't
+# just read a table) applied to what this data actually is: a COMPOSITION (pitch mix) and a
+# MATCHUP (whiff rates compared), so a bar chart, not a line chart.
+st.markdown("**Pitch mix, colored by matchup score**")
+mix_rows = sorted(rows, key=lambda r: r["usage"] or 0, reverse=True)
+mix_fig = go.Figure(go.Bar(
+    x=[r["usage"] or 0 for r in mix_rows], y=[r["pitch_name"] for r in mix_rows],
+    orientation="h",
+    marker=dict(color=[r["score"] if r["score"] is not None else 0 for r in mix_rows],
+               colorscale=[[0, "#c84242"], [0.5, "#f0d660"], [1, "#2e964e"]],
+               cmin=0, cmax=1, showscale=have_hitter,
+               colorbar=dict(title="Score", thickness=12) if have_hitter else None),
+    text=[f"{(r['usage'] or 0)*100:.0f}%" for r in mix_rows], textposition="outside",
+    hovertext=[f"{r['pitch_name']}: {(r['usage'] or 0)*100:.0f}% usage"
+              + (f", score {r['score']:.2f}" if r["score"] is not None else "") for r in mix_rows],
+    hoverinfo="text",
+))
+mix_fig.update_layout(template="plotly_white", height=max(220, 60 * len(mix_rows)),
+                      margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Usage%",
+                      xaxis_tickformat=".0%", yaxis=dict(autorange="reversed"), showlegend=False)
+st.plotly_chart(mix_fig, use_container_width=True)
+
+if have_hitter:
+    st.markdown("**Whiff rate: this pitch (pitcher) vs this family (hitter)**")
+    wf_rows = sorted(rows, key=lambda r: (r["score"] if r["score"] is not None else -1), reverse=True)
+    wf_fig = go.Figure()
+    wf_fig.add_trace(go.Bar(x=[r["p_whiff"] or 0 for r in wf_rows], y=[r["pitch_name"] for r in wf_rows],
+                            orientation="h", name=f"{pitcher['Pitcher']} whiff% (this pitch)",
+                            marker=dict(color="#2563eb")))
+    wf_fig.add_trace(go.Bar(x=[r["h_whiff"] or 0 for r in wf_rows], y=[r["pitch_name"] for r in wf_rows],
+                            orientation="h", name=f"{hitter['Hitter']} whiff% (this family)",
+                            marker=dict(color="#f97316")))
+    wf_fig.update_layout(template="plotly_white", height=max(220, 60 * len(wf_rows)),
+                         margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Whiff%",
+                         xaxis_tickformat=".0%", yaxis=dict(autorange="reversed"),
+                         barmode="group", legend=dict(orientation="h", y=-0.15))
+    st.plotly_chart(wf_fig, use_container_width=True)
+    st.caption("Both bars long = the strongest case to attack with that pitch (misses bats for "
+               "the pitcher AND against this hitter). Blue long / orange short = a pitch that "
+               "misses bats generally but not particularly against this hitter — usage and "
+               "Score above already account for this, this just makes it visible at a glance.")
+else:
+    st.caption("Blue bars only — no cached hitter-side whiff data to pair against yet, showing "
+               "arsenal mix alone.")
 
 # --- table 2 + 3 side by side: raw arsenal and raw hitter splits -----------------------------
 c1, c2 = st.columns(2)
