@@ -846,6 +846,24 @@ come) makes "just scroll to find your player" genuinely painful.
   a source-scraping regression guard confirming both pages actually use the shared helpers rather
   than a re-duplicated local copy. 330/330 passing.
 
+### Matchup Lab: added a Game filter alongside Time slot (2026-07-16, same day follow-up)
+Shawn's right call: a busy slate can pack several games into the same time slot, so slot alone
+doesn't always get you to a specific game quickly — NBA/NCAAMB will have exactly this. Confirmed
+MLB already has the pattern (Edge Board's two "Filter by game" multiselects) and reused its
+convention exactly rather than inventing a new one: sorted by real tip-off time, labeled with the
+ET clock via `format_et` (not the raw game label) — same as Edge Board's own game filters, just
+a single-select here since Matchup Lab drills down to ONE player, not a filterable table.
+
+- **`views/12_Matchup_Lab.py`** — "Game" selectbox sits next to "Time slot" (two columns), options
+  scoped to whichever games fall in the currently-selected slot, sorted chronologically, labeled
+  `"7:00 PM — Celtics @ Lakers"` style. `format_et` came for free — every basketball projections
+  module already imports it from the same sport-agnostic `projections.py` MLB's own pages use.
+- Verified by direct simulation (view files aren't unit-tested in this codebase's pattern): a
+  3-game slate with two games in the same nominal slot correctly split into distinct, chronologically-
+  ordered, ET-labeled options; a missing-`_game_date` (TBD) game degraded gracefully to the plain
+  game label instead of crashing or showing a blank time.
+- No test/behavior changes elsewhere; 330/330 unaffected.
+
 ## NOT YET DONE (next stages)
 - **NBA post-launch polish** — see above (SEASON_START, tuning constants, roster shape). NBA
   itself is live; these are calibration items to revisit once real slate data exists to check
