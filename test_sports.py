@@ -154,6 +154,30 @@ def test_sport_only_page_visibility_matches_expected_config():
           "-> MLB, Hot Hand Engine/Matchup Lab(WNBA/NBA) -> WNBA+NBA)")
 
 
+def test_hot_hand_and_matchup_lab_loaders_key_their_cache_by_sport():
+    # Regression guard for a real bug found live: selecting NBA on Matchup Lab showed a WNBA
+    # player ("Aliyah Boston, Indiana Fever") because @st.cache_data's cache key only considers a
+    # function's own arguments — a cached loader that reads the sport-specific E/P modules via a
+    # module-level closure, without sport_key as an explicit argument, silently returns the OTHER
+    # sport's cached result when only the sidebar dropdown (not date_str) changed. Every other
+    # sport-dispatching page (Edge Board, Best Bets, Retrospective, Media Room, Podcast Studio)
+    # already follows the sport_key-as-first-arg convention; this locks in that Hot Hand Engine
+    # and Matchup Lab do too, so a future edit can't silently drop the parameter again.
+    for path, loaders in (
+        ("views/11_Hot_Hand_Engine.py", ["load_board", "load_injuries"]),
+        ("views/12_Matchup_Lab.py", ["load_slate", "load_injuries", "load_matchup"]),
+    ):
+        src = (_HERE / path).read_text()
+        for fn in loaders:
+            m = re.search(rf"@st\.cache_data\([^)]*\)\s*\ndef {fn}\(([^)]*)\)", src)
+            assert m, f"{path}: couldn't find cached def {fn}(...)"
+            first_param = m.group(1).split(",")[0].strip()
+            assert first_param.startswith("sport_key"), (
+                f"{path}:{fn} must take sport_key as its first param to key the cache by sport, "
+                f"got: {first_param!r}")
+    print("✓ Hot Hand Engine's and Matchup Lab's sport-dependent loaders all key their cache by sport_key")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

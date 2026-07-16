@@ -4,7 +4,7 @@
 one sport-selector foundation). MLB runs exactly as the standalone did originally; WNBA and NBA
 are both real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 315/315 tests green)
+## What's in this checkpoint (all tested — 316/316 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -662,6 +662,56 @@ sufficient** — the first was the pts field-name fix needing a second correctio
 CDN response revealed `team_block["score"]` doesn't exist either. Both are the same underlying
 lesson: a fix that looks complete from reasoning about a system's DOCUMENTED behavior can still
 miss a layer that's only visible once someone actually exercises the real, deployed thing.
+
+### Post-launch bug found and fixed: NBA and WNBA showing the same data (2026-07-15)
+Third one, and the most consequential: after the navigation fix above, Shawn confirmed Hot Hand
+Engine/Matchup Lab now APPEAR for NBA — but pasted screenshots showing the exact same player
+("Aliyah Boston, Indiana Fever" — a real WNBA player/team) under BOTH the WNBA and NBA dropdown
+selections on Matchup Lab. The "Model default" line on the trend chart DID correctly update
+(12.5 → 22.5, WNBA's default vs. NBA's), which was the tell: the projections layer was correctly
+re-resolving to the active sport, but the underlying player/game DATA wasn't.
+
+**Root cause:** `st.cache_data`'s cache key is built ONLY from a function's own arguments.
+`load_slate(date_str)`, `load_matchup(date_str, player_id, team_id, opp_id)`, and `load_board
+(date_str)` all read the sport-specific `E`/`P` modules via a module-level closure (`E, P =
+_active.engine, _active.projections`) — but since neither `E` nor `P` nor anything sport-related
+was part of the function's own PARAMETERS, calling `load_slate("2026-07-15")` under NBA looked
+IDENTICAL to Streamlit's cache as the earlier WNBA call with the same date — so it returned the
+stale WNBA result without ever re-executing the function body (which would have correctly used
+the current `E`/`P`). This is a well-known Streamlit caching pitfall: a cached function whose
+behavior depends on global/closure state not reflected in its own arguments can silently serve
+another context's cached result.
+
+**Not a new problem, and not something reasoned out from scratch** — a source audit of every
+other sport-dispatching page found the fix already existed as an established convention: Edge
+Board's `load_index(sport_key, date_str, ...)`/`load_edges(sport_key, ...)`, Best Bets' and
+Retrospective's `*_generic(sport_key, date_str)`, Media Room's `load_selections_generic(sport_key,
+...)`, Podcast Studio's `load_today`/`load_yesterday(sport_key, ...)` — all already take
+`sport_key` as their first argument specifically to force cache differentiation by sport.
+Command Center and Track Record were independently checked too and already correct (Command
+Center's generic loader doesn't even touch the module-level `E`/`P` closure at all — fully
+self-contained via `sports.get(sport_key)`, an even more robust pattern). Hot Hand Engine and
+Matchup Lab were the only two pages that never got this convention, because they were built when
+WNBA was the only basketball sport — there was nothing to differentiate from until NBA started
+sharing the same page today.
+
+- **`views/12_Matchup_Lab.py`** — `load_slate`, `load_injuries`, `load_matchup` all gained
+  `sport_key` as their first parameter (unused inside the function body — `E`/`P` are already
+  correctly re-resolved each rerun — it exists solely to key the cache correctly). `load_offers`
+  needed no change; it was already self-contained via `sports.get(sport_key)`, not a closure.
+- **`views/11_Hot_Hand_Engine.py`** — same fix for `load_board`/`load_injuries`. `load_spreads`
+  already correct for the same reason as `load_offers` above.
+- All call sites updated to pass `_active.key`.
+- **New regression test** (`test_hot_hand_and_matchup_lab_loaders_key_their_cache_by_sport`,
+  source-scraping, no Streamlit runtime needed) asserts every cache-decorated loader on these two
+  pages takes `sport_key` as its first parameter — so a future edit can't silently drop it again
+  the way it was silently absent in the first place. 316/316 tests passing.
+
+**Third time using the same phrase, because it keeps being true:** this is the third fix this
+session where reasoning about the code in isolation wasn't enough — pattern-matching against how
+the REST of the platform already solved the same class of problem is what actually found it.
+Worth remembering for whatever's next: if something in the WNBA/NBA build still looks "half
+there," check what the equivalent MLB-path or the other sport-dispatching pages already do first.
 
 
 - Re-verify `SEASON_START` once the 2026-27 schedule is officially announced.
