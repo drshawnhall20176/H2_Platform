@@ -4,7 +4,7 @@
 one sport-selector foundation). MLB runs exactly as the standalone did originally; WNBA and NBA
 are both real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 325/325 tests green)
+## What's in this checkpoint (all tested — 330/330 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -825,6 +825,26 @@ table), applied honestly to what this data actually is: a composition (pitch mix
 - No test suite changes — view files aren't unit-tested in this codebase's established pattern
   (engine/projections logic is); 325/325 existing tests unaffected, confirming nothing else was
   touched.
+
+### Matchup Lab: time-slot filter (2026-07-16)
+Shawn asked for a way to narrow Matchup Lab's player picker by game time — WNBA's small nightly
+slate never needed it, but a full NBA slate (and especially NCAAMB's much bigger one, still to
+come) makes "just scroll to find your player" genuinely painful.
+
+- **`sports.py`** — extracted `game_dt`/`slot_of`/`SLOT_ORDER` from Best Bets, which already had
+  this exact logic as a private, page-local copy. Matchup Lab needed the identical thing — a real
+  second consumer, not a speculative one — so this is the same "extract once a second real need
+  exists" call the whole basketball_engine.py extraction already followed, applied here to a much
+  smaller piece of shared infrastructure. Fixed hour boundaries (5pm/8pm ET), sport-agnostic.
+- **`views/5_#U2b50_Best_Bets.py`** — its own local `game_dt`/`slot_of`/`SLOT_ORDER` removed,
+  replaced with a two-line alias to the shared version. No behavior change, same convention.
+- **`views/12_Matchup_Lab.py`** — new "Time slot" selectbox (All slate / Afternoon / Evening /
+  Late / TBD, only the slots actually present that night) sits above the Player picker and
+  narrows it before the player list is even built, computed from each row's own `_game_date`.
+- **5 new tests**: `game_dt` parsing (incl. malformed/missing input), `slot_of`'s four buckets
+  with real DST-aware UTC→Eastern math, `SLOT_ORDER` covering every possible `slot_of` output, and
+  a source-scraping regression guard confirming both pages actually use the shared helpers rather
+  than a re-duplicated local copy. 330/330 passing.
 
 ## NOT YET DONE (next stages)
 - **NBA post-launch polish** — see above (SEASON_START, tuning constants, roster shape). NBA

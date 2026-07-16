@@ -178,6 +178,51 @@ def test_hot_hand_and_matchup_lab_loaders_key_their_cache_by_sport():
     print("✓ Hot Hand Engine's and Matchup Lab's sport-dependent loaders all key their cache by sport_key")
 
 
+def test_game_dt_parses_iso_utc_to_eastern():
+    dt = S.game_dt("2026-07-16T23:00:00Z")
+    assert dt is not None
+    assert dt.tzinfo is not None
+    # 23:00 UTC on Jul 16 is 19:00 (7pm) ET the same day, during EDT (summer)
+    assert dt.hour == 19
+
+
+def test_game_dt_none_for_missing_or_malformed():
+    assert S.game_dt(None) is None
+    assert S.game_dt("") is None
+    assert S.game_dt("not-a-date") is None
+
+
+def test_slot_of_buckets_correctly():
+    afternoon = S.game_dt("2026-07-16T19:00:00Z")   # 3pm ET (summer/EDT)
+    evening = S.game_dt("2026-07-16T23:00:00Z")      # 7pm ET
+    late = S.game_dt("2026-07-17T02:00:00Z")         # 10pm ET
+    assert S.slot_of(afternoon) == "Afternoon"
+    assert S.slot_of(evening) == "Evening"
+    assert S.slot_of(late) == "Late"
+    assert S.slot_of(None) == "TBD"
+    print("✓ slot_of correctly buckets Afternoon/Evening/Late/TBD from a US/Eastern datetime")
+
+
+def test_slot_order_covers_every_slot_of_output():
+    # Every possible slot_of() output must have a sort position, or a future page's sorted()
+    # call would silently mis-order (or crash without the .get(s, 9) fallback other pages use).
+    possible_slots = {"Afternoon", "Evening", "Late", "TBD"}
+    assert possible_slots <= set(S.SLOT_ORDER.keys())
+
+
+def test_best_bets_and_matchup_lab_use_the_shared_time_slot_helpers():
+    # Regression guard: these were duplicated in Best Bets originally, then Matchup Lab needed
+    # the identical logic — extracted into sports.py specifically so a second/third copy never
+    # has to exist (and never quietly drifts from the original). This checks the source actually
+    # imports from sports rather than redefining its own copy.
+    for path in ("views/5_#U2b50_Best_Bets.py", "views/12_Matchup_Lab.py"):
+        src = (_HERE / path).read_text()
+        assert "sports.game_dt" in src or "S.game_dt" in src, f"{path} should use the shared game_dt"
+        assert re.search(r"^def game_dt", src, re.MULTILINE) is None, (
+            f"{path} should not redefine its own game_dt — it exists in sports.py")
+    print("✓ Best Bets and Matchup Lab both use the shared sports.py time-slot helpers, no local duplicates")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

@@ -209,3 +209,52 @@ def render_sport_selector():
         if coming:
             st.caption("Coming soon: " + " · ".join(f"{s.icon} {s.key}" for s in coming))
     return choice
+
+
+# ================================================================================================
+# TIME-SLOT HELPERS — shared by every page that needs to bucket/filter games by tip-off time.
+#
+# Originally lived only in Best Bets (its own private game_dt/slot_of/SLOT_ORDER). Extracted here
+# once Matchup Lab needed the identical logic for a real reason: with WNBA's small nightly slate,
+# scrolling a player picker was fine, but a full NBA slate (and especially a much bigger NCAAMB
+# one, still to come) makes "just scroll to find your player" genuinely painful — a time-slot
+# filter narrows the picker to a manageable set first. Rather than copy Best Bets' three functions
+# a second time (a third, when Hot Hand Engine likely wants this too for the same reason), this is
+# the one shared home — matching the same "extract once a second real consumer exists, not before"
+# philosophy basketball_engine.py's own extraction already follows.
+# ================================================================================================
+import pytz as _pytz
+from datetime import datetime as _datetime
+
+_EASTERN = _pytz.timezone("US/Eastern")
+
+SLOT_ORDER: Dict[str, int] = {"Afternoon": 0, "Evening": 1, "Late": 2, "TBD": 3}
+
+
+def game_dt(iso_utc: Optional[str]):
+    """Parse an ISO-8601 UTC game-date string (as already stored in every sport's build_slate row/
+    meta `game_date`/`_game_date` fields) into US/Eastern local time. Returns None for missing or
+    malformed input — callers treat that as a real "we don't know the time" case (bucketed as
+    "TBD" by slot_of below), not something to silently paper over with a guessed time."""
+    if not iso_utc:
+        return None
+    try:
+        return _datetime.fromisoformat(iso_utc.replace("Z", "+00:00")).astimezone(_EASTERN)
+    except (ValueError, TypeError):
+        return None
+
+
+def slot_of(dt) -> str:
+    """Bucket a US/Eastern game datetime into a coarse time-slot label: Afternoon (<5pm ET),
+    Evening (5-8pm ET), Late (8pm ET+), or TBD (no known time). Fixed hour boundaries, not
+    sport-specific — the same buckets read naturally whether it's an MLB afternoon getaway game
+    or a WNBA/NBA evening tip-off, and the boundaries are coarse enough not to need per-sport
+    tuning."""
+    if dt is None:
+        return "TBD"
+    h = dt.hour
+    if h < 17:
+        return "Afternoon"
+    if h < 20:
+        return "Evening"
+    return "Late"
