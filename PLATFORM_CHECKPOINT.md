@@ -796,6 +796,36 @@ real, deliberate change to what a LIVE board prices, not a cosmetic fix — flag
 rather than described as a pure bug fix, matching the "silently changing what's priced into a live
 betting board is a bigger decision" principle this build has followed throughout.
 
+### MLB Matchup Lab: pitch-mix visualized (2026-07-16)
+Shawn asked if WNBA/NBA Matchup Lab's line-chart concept could extend to MLB's pitch-mix table.
+Honest answer worked out first: the literal trend-chart shape doesn't map — that chart works
+because there's a real per-game time axis (10 dated recent games) to plot against, and MLB's
+`arsenals`/`hitter_splits` data has no equivalent; it's a season-aggregate snapshot PER PITCH
+TYPE, not a dated sequence. Forcing a line chart onto that would mean inventing an x-axis the
+data doesn't have. What genuinely does map is the underlying instinct (see it, don't just read a
+table), applied honestly to what this data actually is: a composition (pitch mix) and a matchup
+(whiff rates compared) — bar charts, not a line chart.
+
+- **`views/10_Matchup_Lab.py`** — two new Plotly charts added after the matchup grid table:
+  1. **Pitch mix** — horizontal bar per pitch, length = usage%, color = matchup Score (same
+     red-yellow-green convention as the existing table), sorted by usage descending.
+  2. **Whiff-rate matchup** — paired horizontal bars per pitch: the pitcher's own whiff% on that
+     specific pitch vs. the hitter's whiff% against that pitch's family, sorted by Score
+     descending. Only shown when hitter-side data exists (`have_hitter`); falls back to the mix
+     chart alone (arsenal-only, no colorbar) when it doesn't, same graceful-degradation posture
+     the rest of this page already has for missing cache data.
+  3. Uses `plotly.graph_objects`, already pinned and the established charting convention on this
+     platform — no new dependency.
+- Verified by direct simulation (no real cached pitch data exists in this sandbox to smoke-test
+  against live): realistic multi-pitch data, the no-hitter-data case, and a single-pitch arsenal
+  edge case all build cleanly via `full_figure_for_development`, the same verification method
+  that caught the WNBA/NBA trend chart's date-mis-parsing bug earlier — confirmed here that
+  pitch-name labels don't hit that same issue (they resolve to `type: category` cleanly, no
+  numeric-looking substrings for Plotly to misinterpret as dates the way "MM-DD" strings did).
+- No test suite changes — view files aren't unit-tested in this codebase's established pattern
+  (engine/projections logic is); 325/325 existing tests unaffected, confirming nothing else was
+  touched.
+
 ## NOT YET DONE (next stages)
 - **NBA post-launch polish** — see above (SEASON_START, tuning constants, roster shape). NBA
   itself is live; these are calibration items to revisit once real slate data exists to check
