@@ -21,20 +21,7 @@ if not sports.require_live_engine("Best Bets"):
     st.stop()
 
 eastern = pytz.timezone("US/Eastern")
-
-def game_dt(iso_utc):
-    if not iso_utc: return None
-    try: return datetime.fromisoformat(iso_utc.replace("Z", "+00:00")).astimezone(eastern)
-    except (ValueError, TypeError): return None
-
-def slot_of(dt):
-    if dt is None: return "TBD"
-    h = dt.hour
-    if h < 17: return "Afternoon"
-    if h < 20: return "Evening"
-    return "Late"
-
-SLOT_ORDER = {"Afternoon": 0, "Evening": 1, "Late": 2, "TBD": 3}
+game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER   # now shared — see sports.py
 
 
 @st.cache_data(ttl=300, show_spinner=False)

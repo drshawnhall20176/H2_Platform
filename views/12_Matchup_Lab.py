@@ -22,6 +22,7 @@ import sports
 import odds_api as O
 
 _active = sports.active()
+game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER   # shared with Best Bets
 
 st.title("🔬 Matchup Lab")
 st.caption(f"One player, one opponent, three real signals: recent form, head-to-head history "
@@ -108,6 +109,23 @@ if not rows:
     st.stop()
 
 rows_sorted = sorted(rows, key=lambda r: (r["GameLabel"], r["Player"]))
+
+# Time slot filter — narrows the player picker before it, not after. WNBA's small nightly slate
+# never needed this (a handful of games, easy to scroll), but a full NBA slate — and especially
+# NCAAMB's much bigger one, still to come — makes "just scroll to find your player" genuinely
+# painful. Slot is computed from each row's own _game_date, same game_dt/slot_of convention Best
+# Bets already established (now shared via sports.py rather than duplicated a second time here).
+for r in rows_sorted:
+    r["_slot"] = slot_of(game_dt(r.get("_game_date")))
+slots_present = sorted({r["_slot"] for r in rows_sorted}, key=lambda s: SLOT_ORDER.get(s, 9))
+slot_pick = st.selectbox("Time slot", ["All slate"] + slots_present)
+if slot_pick != "All slate":
+    rows_sorted = [r for r in rows_sorted if r["_slot"] == slot_pick]
+
+if not rows_sorted:
+    st.info(f"No players in the {slot_pick} slot — try a different time slot or \"All slate\".")
+    st.stop()
+
 options = {f"{r['Player']} ({r['Team']}) — {r['GameLabel']}": r for r in rows_sorted}
 choice = st.selectbox("Player", list(options.keys()))
 row = options[choice]
