@@ -48,7 +48,14 @@ def get_api_key():
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_board(date_str: str):
+def load_board(sport_key: str, date_str: str):
+    # sport_key is unused inside the function body (E/P are already correctly re-resolved to the
+    # active sport on every script rerun) — it exists SOLELY to make st.cache_data's cache key
+    # differentiate by sport. Without it, switching the sidebar sport dropdown while keeping the
+    # same date_str returned the PREVIOUS sport's cached board — the same real bug found live on
+    # Matchup Lab (see that file's load_slate for the full story), fixed here the same way,
+    # matching the sport_key-as-first-arg convention every other sport-dispatching page already
+    # uses (Edge Board, Best Bets, Retrospective, Media Room, Podcast Studio).
     rows, meta = E.build_slate(date_str)
     if not rows:
         return [], 0, {}
@@ -65,9 +72,10 @@ def load_board(date_str: str):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_injuries(team_abbrs_tuple: tuple):
-    # One small fetch per team on the slate (not the league) — cached, so switching filters/
-    # markets afterward never re-fetches. Injuries are free (no API key needed, unlike spreads).
+def load_injuries(sport_key: str, team_abbrs_tuple: tuple):
+    # sport_key: same cache-differentiation reason as load_board above. One small fetch per team
+    # on the slate (not the league) — cached, so switching filters/markets afterward never
+    # re-fetches. Injuries are free (no API key needed, unlike spreads).
     return {abbr: E.get_team_injuries(abbr) for abbr in team_abbrs_tuple}
 
 
@@ -90,14 +98,14 @@ with c2:
 date_str = target_date.strftime("%Y-%m-%d")
 
 with st.spinner("Building the matchup-adjusted board..."):
-    board, n_games, team_abbrs = load_board(date_str)
+    board, n_games, team_abbrs = load_board(_active.key, date_str)
 
 if not board:
     st.info(f"No projectable players for this date. Pick a date with scheduled {_active.label} games.")
     st.stop()
 
 with st.expander("🏥 Team injury report (tonight's slate)"):
-    injuries_by_abbr = load_injuries(tuple(sorted(set(team_abbrs.values()))))
+    injuries_by_abbr = load_injuries(_active.key, tuple(sorted(set(team_abbrs.values()))))
     any_reported = False
     for abbr in sorted(set(team_abbrs.values())):
         team_injuries = injuries_by_abbr.get(abbr) or []

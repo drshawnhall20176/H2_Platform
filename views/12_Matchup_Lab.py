@@ -45,20 +45,31 @@ def get_api_key():
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_slate(date_str: str):
+def load_slate(sport_key: str, date_str: str):
+    # sport_key is unused inside the function body (E/P are already correctly re-resolved to the
+    # active sport on every script rerun) — it exists SOLELY to make st.cache_data's cache key
+    # differentiate by sport. Without it, switching the sidebar sport dropdown while keeping the
+    # same date_str returned the PREVIOUS sport's cached rows (a real bug found live: selecting
+    # NBA showed a WNBA player, "Aliyah Boston (Indiana Fever)," because load_slate("2026-07-15")
+    # was treated as an identical call to the earlier WNBA one). Every other sport-dispatching
+    # page (Edge Board's load_index/load_edges, Best Bets/Retrospective/Media Room/Podcast
+    # Studio's *_generic loaders) already follows this same sport_key-as-first-arg convention —
+    # this page and Hot Hand Engine were the two built when WNBA was the only basketball sport,
+    # so the convention was never needed until NBA started sharing them.
     rows, meta = E.build_slate(date_str)
     team_abbrs = E.team_abbrs_from_meta(meta)   # zero extra cost — meta already has this
     return rows, len(meta), team_abbrs
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_injuries(team_abbr, opp_abbr):
-    # Small, free fetch (no API key needed) — one call per team, cached per (team, opp) pair.
+def load_injuries(sport_key: str, team_abbr, opp_abbr):
+    # sport_key: same cache-differentiation reason as load_slate above.
     return E.get_team_injuries(team_abbr), E.get_team_injuries(opp_abbr)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_matchup(date_str: str, player_id: int, team_id: int, opp_id: int):
+def load_matchup(sport_key: str, date_str: str, player_id: int, team_id: int, opp_id: int):
+    # sport_key: same cache-differentiation reason as load_slate above.
     h2h_log = E.get_player_history_vs_opponent(player_id, team_id, opp_id, date_str)
     season_log = E.get_player_season_games(player_id, team_id, date_str)              # full season, any opponent
     opp_recent = E.get_team_recent_allowed_stats(opp_id, date_str)                    # last 10
@@ -90,7 +101,7 @@ with c2:
 date_str = target_date.strftime("%Y-%m-%d")
 
 with st.spinner("Loading tonight's slate..."):
-    rows, n_games, team_abbrs = load_slate(date_str)
+    rows, n_games, team_abbrs = load_slate(_active.key, date_str)
 
 if not rows:
     st.info(f"No projectable players for this date. Pick a date with scheduled {_active.label} games.")
@@ -108,7 +119,7 @@ if team_id is None or opp_id is None:
 
 with st.spinner(f"Pulling {row['Opp']}'s matchup history and defensive trend..."):
     h2h_log, season_log, opp_recent, opp_season, team_rest, opp_rest = load_matchup(
-        date_str, pid, team_id, opp_id)
+        _active.key, date_str, pid, team_id, opp_id)
 
 profile = P.build_matchup_profile(row, h2h_log, opp_recent, opp_season, season_log=season_log)
 
@@ -133,7 +144,7 @@ with rc2:
     st.caption(_rest_line(row["Opp"], opp_rest))
 
 team_abbr, opp_abbr = team_abbrs.get(team_id), team_abbrs.get(opp_id)
-team_injuries, opp_injuries = load_injuries(team_abbr, opp_abbr)
+team_injuries, opp_injuries = load_injuries(_active.key, team_abbr, opp_abbr)
 if team_injuries or opp_injuries:
     with st.expander("🏥 Injury report — both teams"):
         for label, injuries in ((row["Team"], team_injuries), (row["Opp"], opp_injuries)):
