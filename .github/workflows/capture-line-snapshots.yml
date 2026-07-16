@@ -1,0 +1,73 @@
+# Auto-capture LINE MOVEMENT HISTORY — every player-prop line on the slate, not just your own
+# open bets, so a future line-movement chart has real data to plot instead of none.
+#
+# WHAT IT DOES:
+#   Runs capture_line_snapshots.py a handful of times a day. Each run fetches current odds for
+#   every not-yet-started game across every ENABLED sport (see sports.py), and records a new
+#   snapshot ONLY when a line or price actually moved since the last capture for that exact
+#   player/market/side/book (see line_history.py) — so storage stays proportional to real
+#   movement, not to how often this workflow happens to run.
+#
+# THIS IS A DIFFERENT JOB FROM capture-closing-lines.yml, DELIBERATELY KEPT SEPARATE, NOT MERGED:
+#   That workflow tracks ONE closing price per your own open bet (for CLV) and only fetches props
+#   for games tied to bets you've actually placed — a small, bounded set, which is why it can
+#   afford to run every 15-30 minutes all evening. This workflow fetches props for EVERY
+#   not-yet-started game across every sport, every run — a materially bigger Odds API footprint,
+#   independent of whether anyone has bet anything. Running it on the SAME tight cadence as CLV
+#   capture would multiply API usage for a purpose (seeing broad movement over the course of a
+#   day) that doesn't need 15-minute resolution the way "catch the closing line before tip-off"
+#   genuinely does.
+#
+# SCHEDULE, deliberately coarse — 4 runs/day, spread across when lines actually tend to move
+#   (morning open, midday, pre-evening-slate, early evening) — not the CLV workflow's dense
+#   per-evening cadence. This is a reasonable STARTING cadence, not a backtested one (no line-
+#   movement history exists yet to check it against — that's exactly what this workflow is for).
+#   Worth revisiting once there's real captured history to look at: if movement clusters at times
+#   this cadence misses, add a run there; if two consecutive captures are consistently identical
+#   for most props, the cadence can likely go coarser instead. In UTC: 14:00 (~10am ET, morning
+#   line), 18:00 (~2pm ET, midday), 21:00 (~5pm ET, pre-evening slate), 00:00 (~8pm ET, evening).
+#
+# IMPORTANT — this writes to your DATABASE, not to a file (so there is NO git commit step). It
+#   needs BOTH secrets set in the repo (Settings -> Secrets and variables -> Actions):
+#     ODDS_API_KEY   — to fetch odds
+#     DATABASE_URL   — your Supabase/Postgres URL, so history lands where the app reads it
+#   Without DATABASE_URL the runner writes to an ephemeral SQLite file that vanishes — it will
+#   refuse to run and tell you so, same discipline as capture-closing-lines.yml.
+
+name: capture-line-snapshots
+
+on:
+  schedule:
+    - cron: "0 14 * * *"   # 14:00 UTC (~10am ET) — morning line
+    - cron: "0 18 * * *"   # 18:00 UTC (~2pm ET)  — midday
+    - cron: "0 21 * * *"   # 21:00 UTC (~5pm ET)  — pre-evening slate
+    - cron: "0 0 * * *"    # 00:00 UTC (~8pm ET)  — evening
+  workflow_dispatch: {}    # manual "Run workflow" button (handy for testing)
+
+permissions:
+  contents: read           # no commit needed — snapshots are written to the database
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        # Install the app's full pinned deps so every module the runner imports (odds_api,
+        # line_history, sports and their transitive imports) is guaranteed present. Listing a
+        # subset risked a crash-on-import when a transitive package was missing — same reasoning
+        # capture-closing-lines.yml already documents.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Capture line movement snapshots for every enabled sport
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python capture_line_snapshots.py
