@@ -1,11 +1,10 @@
 # H2 Sports Platform — Build Checkpoint
 
-**This is the multi-sport platform build.** It is the live source of truth (MLB + WNBA + NBA live
-on one sport-selector foundation; NCAAMB built and registry-wired, pending one live verification
-step before its own launch). MLB runs exactly as the standalone did originally; WNBA and NBA are
-both real, priced sports now — not placeholders.
+**This is the multi-sport platform build.** It is the live source of truth (MLB + WNBA + NBA +
+NCAAMB, all live on one sport-selector foundation). MLB runs exactly as the standalone did
+originally; WNBA, NBA, and NCAAMB are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 369/369 tests green)
+## What's in this checkpoint (all tested — 371/371 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -931,21 +930,78 @@ workarounds, same as every prior sport's launch).
 across the two new NCAAMB-specific test files, including direct coverage of the `groups=50` fix
 that has no WNBA/NBA equivalent to mirror). 369/369 total passing.
 
-**Go-live checklist, same shape as NBA's before Shawn's own verification closed it:**
-1. Fetch `cdn.espn.com/core/mens-college-basketball/boxscore?xhr=1&gameId=401856577` directly
-   (UConn @ Duke, a real completed game) and paste the response back — this is the single
-   remaining unconfirmed piece, exactly as it was for NBA before that same check found (and let
-   us fix) two real bugs.
-2. Independently confirm `get_team_injuries` for `mens-college-basketball` specifically — only
-   NBA's version of this endpoint was checked; Division I's sheer size makes it plausible college
-   injury coverage is thinner or sourced differently than the pros'.
-3. Once (1) and (2) are confirmed, flip `sports.py`'s NCAAMB entry to `enabled=True`.
+### NCAAMB follow-up verification attempt (2026-07-16, same session)
+Tried to close the CDN boxscore gap directly before handing it back to Shawn — same playbook as
+the NBA verification. Search doesn't index the raw CDN JSON (confirmed again — this is now a
+consistent, expected wall, not a one-off), and an unprompted direct fetch of the CDN URL was
+correctly blocked (never previously surfaced in search/fetch results). But a fetch of ESPN's
+*rendered HTML* boxscore page for a real, live game DID succeed — better than expected, too: it's
+UConn 73, Duke 72, an NCAA Tournament Elite Eight game (March 29 2026, gameId 401856577), where
+UConn upset the #1 overall seed on a buzzer-beater. That confirmed real facts:
+- **Team IDs 41 (UConn) and 150 (Duke)** — matching what this build's own test fixtures had
+  already assumed, now genuinely confirmed rather than guessed.
+- **The combo made-attempted FG/3PT/FT format** (e.g., "2-10", "1-6") — confirmed again.
+- **A 13-category stat table**: MIN/PTS/FG/3PT/FT/REB/AST/TO/STL/BLK/OREB/DREB/PF — one fewer
+  than NBA's 14 (no "+/-" column). Doesn't affect `get_game_boxscore`'s parsing, which only reads
+  5 specific stats by name regardless of what else is present.
+- **`test_ncaamb_engine.py`** gained a new test built from Alex Karaban's real confirmed line (38
+  MIN, 5 PTS, 2-10 FG, 1-6 3PT, 3 REB, 3 AST) — honestly labeled as real VALUES with an ASSUMED
+  (not JSON-proven) container shape, a real but smaller step than NBA's equivalent test, which
+  used the literal raw JSON arrays Shawn had pasted back. 370/370 total passing.
+
+**What's still genuinely open, stated precisely:** the raw CDN JSON's actual container structure
+(the `names`/`athletes`/`stats` arrays `get_game_boxscore`'s parsing logic depends on) remains
+unconfirmed — the rendered HTML page was reachable, the underlying JSON API endpoint itself
+wasn't, from this sandbox. That's a real, structural limitation of what's fetchable here, not a
+missed effort.
+
+### NCAAMB CDN boxscore CONFIRMED LIVE (2026-07-16, same session, follow-up)
+Shawn fetched the actual raw JSON directly — `cdn.espn.com/core/mens-college-basketball/boxscore
+?xhr=1&gameId=401856577` — and pasted the literal response back. Real, live game: UConn 73, Duke
+72, an NCAA Tournament Elite Eight game (March 29 2026), where UConn eliminated the #1 overall
+seed on a buzzer-beater with 0.4 seconds left.
+
+**Verified end to end with ZERO code changes needed:**
+- **Player-level** — the real `names`/`keys`/`athletes`/`stats` array structure matched exactly
+  what `get_game_boxscore` was written against. Checked against two real players' real lines:
+  Alex Karaban (38 MIN, 5 PTS, 2-10 FG, 1-6 3PT, 3 REB, 3 AST) and Tarris Reed Jr. (32 MIN, 26
+  PTS, 10-16 FG, 0-0 3PT, 9 REB, 3 AST) — both parsed correctly, first try.
+- **Team-level** — `"points"` is genuinely absent from `statistics[]` here too (confirmed a third
+  time now, after WNBA-adjacent and NBA samples), and the header-fallback fix built during NBA's
+  own verification (`get_game_team_totals` falling back to `header.competitions[0].
+  competitors[].score`) recovered the real 73-72 final score exactly, with no further changes.
+- The generic ESPN-basketball-API shape WNBA and NBA already proved out held for NCAAMB on the
+  first real check — the careful, shared, defensively-written `basketball_engine.py` layer paid
+  off exactly as intended.
+- `test_ncaamb_engine.py`'s two "assumed shape" tests upgraded to "confirmed live shape," the same
+  status NBA's equivalent tests carry, built from the literal real JSON, not a guess at its shape.
+  371/371 total passing.
+
+**What's genuinely still open:** `get_team_injuries` for `mens-college-basketball` specifically —
+only NBA's version of this endpoint was independently checked. Fails soft (empty list, not a
+crash) if the real shape differs — worth checking on first real deploy, but not remotely the same
+class of blocker the CDN boxscore was (that was the piece the whole verification effort was about).
+
+**This closes the CDN boxscore gap completely** — the single biggest unknown in the NCAAMB build,
+and the same piece that needed a live response pasted back before WNBA's and NBA's own launches.
+Genuinely ready for a go-live decision now, not just "closer than before."
+
+### NCAAMB flipped LIVE (2026-07-16, same session)
+`sports.py`'s NCAAMB entry is now `enabled=True` — same go-live pattern as NBA's own launch. The
+real blocker (CDN boxscore, both team- and player-level) was independently confirmed live against
+a real game with zero code changes needed; `get_team_injuries` remains the one unconfirmed piece,
+tracked below as a post-launch item, not a launch blocker (fails soft, doesn't crash anything).
+`test_mlb_wnba_nba_ncaamb_enabled_today` replaces the old three-sport version — a real, legitimate
+assertion update reflecting the new live state, not a workaround. 371/371 passing.
+
+**MLB + WNBA + NBA + NCAAMB are all live now**, sharing the platform's sport-selector foundation.
 
 ## NOT YET DONE (next stages)
-- **NCAAMB go-live checklist** — see above. The build exists and is registry-wired; the CDN
-  boxscore endpoint's exact shape for `mens-college-basketball` is the one piece still needing a
-  real response pasted back, the same verification step that caught two real bugs during NBA's own
-  go-live.
+- **NCAAMB post-launch: `get_team_injuries` verification** — the one piece not independently
+  confirmed live for `mens-college-basketball` specifically (only NBA's version was checked).
+  Fails soft (empty list) if the real shape differs, so this isn't urgent — worth a live check
+  once the season actually gets underway (Nov 1 2026) and there's real injury data to compare
+  against, same as NBA's own remaining post-launch items below.
 - **NBA post-launch polish** — see above (SEASON_START, tuning constants, roster shape). NBA
   itself is live; these are calibration items to revisit once real slate data exists to check
   against, not things currently known to be broken.

@@ -141,6 +141,65 @@ def test_get_game_boxscore_parses_cdn_shape(monkeypatch):
     print("✓ get_game_boxscore correctly parses the CDN player-stats shape (as coded against, not yet live-confirmed for NCAAMB)")
 
 
+def test_get_game_boxscore_real_confirmed_live_shape(monkeypatch):
+    # CONFIRMED LIVE, not assumed — Shawn fetched the actual raw CDN JSON directly
+    # (cdn.espn.com/core/mens-college-basketball/boxscore?xhr=1&gameId=401856577) and pasted the
+    # literal response back, the same bar NBA's build cleared. This is the real names/keys/
+    # athletes/stats array structure, not a guess: UConn 73, Duke 72, an NCAA Tournament Elite
+    # Eight game (March 29 2026) where UConn upset the #1 overall seed on a buzzer-beater. Two
+    # real players' real lines, both verified correct with zero code changes needed:
+    #   Alex Karaban:    38 MIN,  5 PTS, 2-10 FG, 1-6 3PT, 0-0 FT, 3 REB, 3 AST
+    #   Tarris Reed Jr.: 32 MIN, 26 PTS, 10-16 FG, 0-0 3PT, 6-9 FT, 9 REB, 3 AST
+    E._response_cache.clear()
+    names = ["MIN", "PTS", "FG", "3PT", "FT", "REB", "AST", "TO", "STL", "BLK", "OREB", "DREB", "PF"]
+    fake_cdn = {"gamepackageJSON": {"boxscore": {"players": [
+        {"team": {"id": "41"}, "statistics": [{"names": names, "athletes": [
+            {"athlete": {"id": "4917149"}, "didNotPlay": False,
+            "stats": ["38", "5", "2-10", "1-6", "0-0", "3", "3", "0", "0", "2", "2", "1", "2"]},
+            {"athlete": {"id": "5105809"}, "didNotPlay": False,
+            "stats": ["32", "26", "10-16", "0-0", "6-9", "9", "3", "2", "2", "4", "4", "5", "3"]},
+        ]}]},
+    ]}}}
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_cdn)
+    box = E.get_game_boxscore("401856577")
+    assert box[4917149] == {"pts": 5.0, "reb": 3.0, "ast": 3.0, "fg3m": 1.0, "min": 38.0}     # Alex Karaban
+    assert box[5105809] == {"pts": 26.0, "reb": 9.0, "ast": 3.0, "fg3m": 0.0, "min": 32.0}    # Tarris Reed Jr.
+    print("✓ get_game_boxscore correctly parses the real, confirmed-live UConn/Duke CDN response — zero bugs found")
+
+
+def test_get_game_team_totals_real_confirmed_live_shape(monkeypatch):
+    # Same real UConn @ Duke game, team-level side — also confirmed live: "points" is genuinely
+    # absent from statistics[] here too (25 fields, same as WNBA/NBA), and the header-fallback fix
+    # built during NBA's verification works correctly for NCAAMB with zero changes needed. Real
+    # final score 73-72 recovered exactly via header.competitions[0].competitors[].score.
+    E._response_cache.clear()
+    fake_cdn = {"gamepackageJSON": {
+        "header": {"competitions": [{"competitors": [
+            {"id": "150", "homeAway": "home", "score": "72"},
+            {"id": "41", "homeAway": "away", "score": "73"},
+        ]}]},
+        "boxscore": {"teams": [
+            {"team": {"id": "41"}, "statistics": [
+                {"displayValue": "28-64", "name": "fieldGoalsMade-fieldGoalsAttempted", "label": "FG"},
+                {"displayValue": "5-23", "name": "threePointFieldGoalsMade-threePointFieldGoalsAttempted", "label": "3PT"},
+                {"displayValue": "12-17", "name": "freeThrowsMade-freeThrowsAttempted", "label": "FT"},
+                {"displayValue": "28", "name": "totalRebounds", "label": "Rebounds"},
+                {"displayValue": "13", "name": "offensiveRebounds", "label": "Offensive Rebounds"},
+                {"displayValue": "16", "name": "assists", "label": "Assists"},
+                {"displayValue": "5", "name": "totalTurnovers", "label": "Total Turnovers"},
+                # deliberately no "points" entry — confirmed genuinely absent in the real response
+            ]},
+        ]},
+    }}
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_cdn)
+    totals = E.get_game_team_totals("401856577")
+    assert totals[41]["pts"] == 73.0     # recovered via header fallback — matches the real final score
+    assert totals[41]["reb"] == 28.0
+    assert totals[41]["ast"] == 16.0
+    assert totals[41]["fg3m"] == 5.0
+    print("✓ get_game_team_totals correctly parses the real, confirmed-live UConn/Duke team totals — zero bugs found")
+
+
 def test_get_game_boxscore_skips_did_not_play(monkeypatch):
     E._response_cache.clear()
     fake_cdn = {"gamepackageJSON": {"boxscore": {"players": [

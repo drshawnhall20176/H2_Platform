@@ -15,10 +15,10 @@ def test_registry_has_all_seven_leagues():
     print("✓ all 7 leagues registered")
 
 
-def test_mlb_wnba_nba_enabled_today():
+def test_mlb_wnba_nba_ncaamb_enabled_today():
     live = {s.key for s in S.enabled_sports()}
-    assert live == {"MLB", "WNBA", "NBA"}, f"expected MLB + WNBA + NBA live, got {live}"
-    print("✓ MLB, WNBA, and NBA are the enabled/live sports (NBA confirmed live 2026-07-15)")
+    assert live == {"MLB", "WNBA", "NBA", "NCAAMB"}, f"expected MLB + WNBA + NBA + NCAAMB live, got {live}"
+    print("✓ MLB, WNBA, NBA, and NCAAMB are the enabled/live sports (NCAAMB confirmed live 2026-07-16)")
 
 
 def test_get_falls_back_to_default_for_unknown_key():

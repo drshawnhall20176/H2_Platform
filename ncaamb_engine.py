@@ -32,17 +32,25 @@ previously, and MTE/tournament exemption requirements were dropped) — noted he
 how wide a "full season" scan should reasonably be, even though get_team_recent_game_ids clips its
 own window regardless.
 
-NOT YET LIVE-CONFIRMED (same honest posture as NBA's build before Shawn's own live verification
-caught two real bugs there): the CDN boxscore endpoint's exact shape for mens-college-basketball
-specifically. The generic cdn.espn.com/core/{sport}/boxscore?xhr=1&gameId={id} pattern and the
-team-level statistics[] combo-key naming are both independently confirmed for the broader ESPN
-basketball API family (WNBA, NBA), and a real, recent, completed game is ready to test against
-(UConn 73-72 Duke, March 29 2026, gameId 401856577) — but this module hasn't had a real response
-pasted back the way WNBA's and NBA's did. Diagnostic dumps carry over from basketball_engine.py to
-surface a wrong guess loudly rather than silently returning empty results. Also not independently
-confirmed: get_team_injuries for mens-college-basketball specifically (confirmed for NBA, not
-re-checked here) — Division I's sheer size (350+ teams) makes it plausible ESPN's injury coverage
-is thinner or differently sourced for college than for the pros; worth checking on first deploy.
+CDN BOXSCORE ENDPOINT: CONFIRMED LIVE, both team- and player-level (2026-07-16) — Shawn fetched
+the actual raw JSON directly (cdn.espn.com/core/mens-college-basketball/boxscore?xhr=1&
+gameId=401856577) and pasted the literal response back, the same bar WNBA's and NBA's builds
+cleared before their own launches. This was a real, live NCAA Tournament Elite Eight game (UConn
+73, Duke 72, March 29 2026 — UConn upset the #1 overall seed on a buzzer-beater with 0.4 seconds
+left). Verified end to end with ZERO code changes needed: the player-level names/keys/athletes/
+stats array shape matched exactly (confirmed against two real players' real lines, Alex Karaban
+and Tarris Reed Jr.), and the team-level pts-via-header-fallback fix built during NBA's own
+verification (get_game_team_totals falling back to header.competitions[0].competitors[].score
+when "points" isn't in statistics[], which it genuinely isn't here either) recovered the real
+73-72 final score exactly. The generic ESPN-basketball-API shape WNBA/NBA already proved out
+turned out to hold for NCAAMB too, on the first real check.
+
+NOT YET INDEPENDENTLY CONFIRMED: get_team_injuries for mens-college-basketball specifically
+(confirmed for NBA during that build's own scoping pass, not re-checked here — though ESPN does
+list an "Injuries" page for NCAAM in its own navigation, a secondary signal the feature exists,
+just not the live JSON confirmation this function itself needs). Fails soft (empty list, not a
+crash) if the shape differs, same discipline as everywhere else in this build — worth checking on
+first real deploy, not a launch blocker the way the CDN boxscore was.
 """
 
 from __future__ import annotations
