@@ -304,14 +304,19 @@ else:
                 show = show[[c for c in cols if c in show.columns]]
  
                 def _tier_style(col):
+                    # Text color set explicitly on every tier, matching styling.py's own "black
+                    # on light backgrounds" convention (#C8E6C9/#FFF3E0/#ECEFF1 are all light
+                    # enough — luminance > 150 — that the app theme's default text color applies
+                    # otherwise, which is near-white in dark mode: pale background + white text
+                    # is nearly invisible, exactly the dark-mode bug reported live on this page).
                     out = []
                     for v in col:
                         if v == "Bet":
-                            out.append("background-color: #C8E6C9")            # green: put money on it
+                            out.append("background-color: #C8E6C9; color: #111111")   # green: put money on it
                         elif v == "Dust":
-                            out.append("background-color: #FFF3E0")            # amber: real but negligible
+                            out.append("background-color: #FFF3E0; color: #111111")   # amber: real but negligible
                         elif v == "No bet":
-                            out.append("background-color: #ECEFF1; color: #888")  # muted: shaded out
+                            out.append("background-color: #ECEFF1; color: #111111")   # muted: shaded out
                         else:
                             out.append("")
                     return out

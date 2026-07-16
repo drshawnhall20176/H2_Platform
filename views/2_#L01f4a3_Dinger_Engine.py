@@ -94,7 +94,14 @@ DISPLAY_COLS = ["Hitter", "Team", "Hand", "Opp Pitcher", "Opp Hand", "Advantage"
  
 def hr9_band(v):
     """Fixed-threshold coloring for pitcher HR/9 (absolute, not slate-relative).
-    <0.8 excellent · 0.8-1.1 solid · 1.1-1.3 average · 1.3-1.5 below avg · >1.5 homer-prone."""
+    <0.8 excellent · 0.8-1.1 solid · 1.1-1.3 average · 1.3-1.5 below avg · >1.5 homer-prone.
+
+    Text color is set explicitly on EVERY band, not just the two deep/saturated ones — the three
+    lighter bands (#a6d96a/#fee08b/#fdae61) are all light enough (luminance > 150, same threshold
+    styling.py's theme-proof gradient uses) that leaving text color unset lets it inherit the
+    app's theme default, which is near-white in dark mode: pale background + white text is nearly
+    invisible. #111111 matches styling.py's own "black on light backgrounds" convention exactly,
+    so this reads the same as every other colored table on the platform, in either theme."""
     try:
         x = float(v)
     except (TypeError, ValueError):
@@ -102,14 +109,14 @@ def hr9_band(v):
     if x != x:          # NaN (opposing pitcher has no season line) -> no color
         return ""
     if x < 0.8:
-        return "background-color:#1a9850;color:white"   # excellent (elite arm)
+        return "background-color:#1a9850;color:white"           # excellent (elite arm)
     if x < 1.1:
-        return "background-color:#a6d96a"               # above average to solid
+        return "background-color:#a6d96a;color:#111111"         # above average to solid
     if x < 1.3:
-        return "background-color:#fee08b"               # average
+        return "background-color:#fee08b;color:#111111"         # average
     if x < 1.5:
-        return "background-color:#fdae61"               # below average
-    return "background-color:#d73027;color:white"       # bad / home-run prone
+        return "background-color:#fdae61;color:#111111"         # below average
+    return "background-color:#d73027;color:white"                # bad / home-run prone
  
  
 def style_hitters(data: pd.DataFrame):
