@@ -114,7 +114,32 @@ REGISTRY: Dict[str, Sport] = {
     ),
     "NHL":    Sport("NHL",   "NHL — Hockey",            "🏒", "icehockey_nhl",        [], {}, enabled=False),
     "NCAAF":  Sport("NCAAF", "NCAA Football",           "🏈", "americanfootball_ncaaf", [], {}, enabled=False),
-    "NCAAMB": Sport("NCAAMB","NCAA Men's Basketball",   "🏀", "basketball_ncaab",     [], {}, enabled=False),
+    "NCAAMB": Sport(
+        key="NCAAMB", label="NCAA Men's Basketball", icon="🏀", odds_sport_key="basketball_ncaab",
+        markets=["player_points", "player_rebounds", "player_assists", "player_threes"],
+        market_map={"Points": "player_points", "Rebounds": "player_rebounds",
+                    "Assists": "player_assists", "Threes Made": "player_threes"},
+        engine_module="ncaamb_engine", projections_module="ncaamb_projections",
+        config_module="config_ncaamb",
+        enabled=False,   # engine present, built as a copy-adapt of the live NBA engine (see
+                        # basketball_engine.py's module docstring for the extraction plan) — but
+                        # NOT yet confirmed against a live NCAAMB slate the way WNBA/NBA were
+                        # before THEIR launches. Specifically unconfirmed: the CDN boxscore
+                        # endpoint's exact shape for mens-college-basketball (get_game_boxscore's
+                        # biggest risk area every time — this is the piece that needed a real
+                        # response pasted back for both WNBA and NBA before going live). A real,
+                        # recent, completed game is ready to test against right now: UConn 73,
+                        # Duke 72 (Mar 29 2026), gameId 401856577. Also NOT independently
+                        # confirmed: get_team_injuries for mens-college-basketball specifically
+                        # (only NBA's version was checked). Genuinely CONFIRMED, not guessed,
+                        # during this build: the 2026-27 season starts Nov 1 2026 (NCAA's own
+                        # published calendar); Odds API's basketball_ncaab sport key with real
+                        # player_points/player_rebounds props already live; and a real, load-
+                        # bearing quirk — the scoreboard endpoint silently truncates Division I's
+                        # 350+ teams unless groups=50 is included, confirmed live 2026-07-04 (12
+                        # events without it vs. 36 with it, same date) — already baked into
+                        # ncaamb_engine.py's get_schedule and get_team_recent_game_ids.
+    ),
 }
 
 DEFAULT_SPORT = "MLB"

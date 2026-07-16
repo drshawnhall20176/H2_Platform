@@ -89,6 +89,38 @@ def test_get_team_recent_game_ids_empty_on_fetch_failure():
     assert games == []
 
 
+def test_get_team_recent_game_ids_extra_params_merged_into_request():
+    # Added for NCAAMB: the scoreboard endpoint truncates by default for a 350+-team league,
+    # confirmed live to need groups=50 to return the full slate. extra_params is how a caller
+    # (NCAAMB's engine) opts into that without changing WNBA/NBA's existing request shape at all.
+    captured = {}
+
+    def fake_fetch(url, params=None):
+        captured["params"] = params
+        return {"events": []}
+
+    BB.get_team_recent_game_ids(20, "2026-07-14", SITE_API, fake_fetch, n=10,
+                                extra_params={"groups": 50})
+    assert captured["params"]["groups"] == 50
+    assert captured["params"]["limit"] == 500   # the existing param is still present, not replaced
+    print("✓ get_team_recent_game_ids merges extra_params into the scoreboard request without dropping existing params")
+
+
+def test_get_team_recent_game_ids_extra_params_none_by_default():
+    # Confirms omitting extra_params (WNBA/NBA's existing call pattern) produces the exact same
+    # request shape as before this parameter was added — a real regression guard, not just a
+    # smoke test, since this function is shared and already live for two sports.
+    captured = {}
+
+    def fake_fetch(url, params=None):
+        captured["params"] = params
+        return {"events": []}
+
+    BB.get_team_recent_game_ids(20, "2026-07-14", SITE_API, fake_fetch, n=10)
+    assert "groups" not in captured["params"]
+    assert captured["params"] == {"dates": captured["params"]["dates"], "limit": 500}
+
+
 # ----------------------------------------------------------------- get_game_team_totals
 def test_get_game_team_totals_estimates_possessions():
     # Poss = FGA - OREB + TOV + 0.44*FTA = 82 - 10 + 15 + 0.44*20 = 95.8

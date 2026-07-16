@@ -58,11 +58,11 @@ def test_require_live_engine_false_for_unwired_sport(monkeypatch):
 
 
 def test_market_map_present_for_live_sports_only():
-    for key in ("MLB", "WNBA", "NBA"):
+    for key in ("MLB", "WNBA", "NBA", "NCAAMB"):
         assert S.REGISTRY[key].market_map, f"{key} must have a market_map (CLV capture depends on it)"
-    for key in ("NFL", "NHL", "NCAAF", "NCAAMB"):
+    for key in ("NFL", "NHL", "NCAAF"):
         assert S.REGISTRY[key].market_map == {}, f"{key} should still be a placeholder"
-    print("✓ MLB, WNBA, and NBA have filled market_maps; the rest are honest placeholders")
+    print("✓ MLB, WNBA, NBA, and NCAAMB have filled market_maps; the rest are honest placeholders")
 
 
 def test_owner_only_pages_match_expected_titles():
@@ -140,8 +140,9 @@ def test_require_sport_accepts_a_list_of_keys():
 
 def test_sport_only_page_visibility_matches_expected_config():
     # Regression guard: Pitching Lab/Dinger Engine/Matchup Lab(MLB) must stay MLB-only, and Hot
-    # Hand Engine/Matchup Lab(WNBA/NBA) must stay basketball-only. A future page renumbering could
-    # silently break this if nothing locks in which lead numbers map to which sport(s).
+    # Hand Engine/Matchup Lab(WNBA/NBA/NCAAMB) must stay basketball-only. A future page
+    # renumbering could silently break this if nothing locks in which lead numbers map to which
+    # sport(s).
     src = (_HERE / "streamlit_app.py").read_text()
     m = re.search(r"sport_only_leads = \{([^}]*)\}", src, re.DOTALL)
     assert m, "streamlit_app.py must define sport_only_leads"
@@ -149,9 +150,9 @@ def test_sport_only_page_visibility_matches_expected_config():
     for key, vals in re.findall(r'"(\d+)":\s*\(([^)]*)\)', m.group(1)):
         pairs[key] = tuple(re.findall(r'"(\w+)"', vals))
     assert pairs == {"1": ("MLB",), "2": ("MLB",), "10": ("MLB",),
-                     "11": ("WNBA", "NBA"), "12": ("WNBA", "NBA")}, pairs
+                     "11": ("WNBA", "NBA", "NCAAMB"), "12": ("WNBA", "NBA", "NCAAMB")}, pairs
     print("✓ sport_only_leads matches expected config (Pitching Lab/Dinger Engine/Matchup Lab(MLB) "
-          "-> MLB, Hot Hand Engine/Matchup Lab(WNBA/NBA) -> WNBA+NBA)")
+          "-> MLB, Hot Hand Engine/Matchup Lab(WNBA/NBA/NCAAMB) -> WNBA+NBA+NCAAMB)")
 
 
 def test_hot_hand_and_matchup_lab_loaders_key_their_cache_by_sport():

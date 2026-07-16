@@ -48,8 +48,8 @@ def run():
     # "engine not wired yet" gracefully inside the page itself.
     sport_only_leads = {
         "1": ("MLB",), "2": ("MLB",), "10": ("MLB",),   # Pitching Lab, Dinger Engine, Matchup Lab (MLB)
-        "11": ("WNBA", "NBA"),                          # Hot Hand Engine (opponent-adjusted leaderboard)
-        "12": ("WNBA", "NBA"),                          # Matchup Lab (WNBA/NBA) — same slot as page 10, different sport
+        "11": ("WNBA", "NBA", "NCAAMB"),                # Hot Hand Engine (opponent-adjusted leaderboard)
+        "12": ("WNBA", "NBA", "NCAAMB"),                # Matchup Lab (WNBA/NBA/NCAAMB) — same slot as page 10, different sport
     }
 
     # Internal tools kept off the Discord/public build — matched by TITLE (not page number) so a

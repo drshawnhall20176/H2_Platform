@@ -1,10 +1,11 @@
 # H2 Sports Platform — Build Checkpoint
 
-**This is the multi-sport platform build.** It is the live source of truth (MLB + WNBA + NBA on
-one sport-selector foundation). MLB runs exactly as the standalone did originally; WNBA and NBA
-are both real, priced sports now — not placeholders.
+**This is the multi-sport platform build.** It is the live source of truth (MLB + WNBA + NBA live
+on one sport-selector foundation; NCAAMB built and registry-wired, pending one live verification
+step before its own launch). MLB runs exactly as the standalone did originally; WNBA and NBA are
+both real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 330/330 tests green)
+## What's in this checkpoint (all tested — 369/369 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -864,7 +865,87 @@ a single-select here since Matchup Lab drills down to ONE player, not a filterab
   game label instead of crashing or showing a blank time.
 - No test/behavior changes elsewhere; 330/330 unaffected.
 
+### NCAAMB build (2026-07-16)
+Built following the exact playbook the NBA build established: research real facts first (not
+guessed), copy-adapt the WNBA/NBA engine and projections modules through the shared
+`basketball_engine.py`/`basketball_projections.py` layer, wire the registry with `enabled=False`
+until live-verified, and hand off a concrete, ready-to-run verification step rather than declaring
+it done. Stronger starting position than NBA's build had, though: this happened while genuinely
+useful facts were confirmable live (not off-season guesswork), and NCAAMB is basketball, so nearly
+everything WNBA/NBA already paid for — pace math, rest calc, blowout tagging, injury parsing, and
+the probability-shrinkage fix — came along for free through the shared layer.
+
+**Confirmed via live research, not guessed (the genuinely new information this build rests on):**
+- **2026-27 season start: November 1, 2026** (ends March 14, 2027) — the NCAA's own published
+  calendar, confirmed live. A real date, not a placeholder the way NBA's `SEASON_START` had to be
+  (that build happened during the NBA's off-season with no announced schedule yet).
+- **ESPN's league slug: `mens-college-basketball`** — confirmed across multiple independent
+  sources documenting the live, working endpoint family.
+- **A genuinely new, load-bearing quirk WNBA/NBA never hit**: ESPN's scoreboard endpoint silently
+  TRUNCATES results for college sports unless a `groups=50` (all Division I) param is included —
+  confirmed live 2026-07-04: the same date returned 12 events without it, 36 with
+  `groups=50&limit=500`. Division I is 350+ teams; this isn't an edge case, it's the default
+  failure mode for every single day's slate if missed.
+- **Odds API's sport key: `basketball_ncaab`** (deliberately different from ESPN's own
+  `mens-college-basketball` slug — kept separate in the registry, not conflated) — confirmed via
+  a real, live example response showing `player_points`/`player_rebounds` props with real player
+  names (Robbie Avila, Gibson Jimerson), matching the same Core-4 market taxonomy WNBA/NBA
+  already use.
+- A real, recent, completed game ready to verify against once deployed: **UConn 73, Duke 72
+  (March 29, 2026), gameId 401856577** — found and confirmed to exist, but the raw CDN JSON
+  itself wasn't reachable from this sandbox (same fundamental limitation as the NBA build's first
+  pass, before Shawn's own live fetch closed that gap).
+
+**basketball_engine.py extended, not just reused** — a real, careful design decision: NCAAMB's
+`groups=50` need could have been baked directly into the SHARED `get_team_recent_game_ids`
+function's scoreboard request, but that function is already live for two sports that never needed
+this param. Instead, added an optional `extra_params` argument defaulting to `None` — WNBA's and
+NBA's exact existing request shape is provably unchanged (locked in by
+`test_get_team_recent_game_ids_extra_params_none_by_default`), and NCAAMB opts in explicitly.
+`ncaamb_engine.py`'s own `get_schedule` (not shared) bakes `groups=50` in directly, since that
+function has no cross-sport blast radius to worry about.
+
+**Sport-appropriate tuning, reasoned from the game itself, not blindly copied from NBA:**
+- `config_ncaamb.MIN_AVG_MINUTES = 12.0` and `ncaamb_projections._MARKET_SPEC`'s default lines
+  match WNBA's, not NBA's — NCAAMB games run 40 minutes, the same length as WNBA's, not NBA's 48.
+- `BLOWOUT_THRESHOLD = 15.0` — HIGHER than both NBA's (12.0) and WNBA's (10.0), not just copied
+  from either: Division I's talent gap between a top-25 program and a mid-major is genuinely
+  wider than any gap between two pro teams, so a "competitive" college game can carry a bigger
+  spread than the same number would mean in the pros.
+- `get_player_history_vs_opponent`'s docstring flags honestly that an empty head-to-head sample
+  will be the COMMON case here, not the exception — most Division I non-conference opponents meet
+  once a season if at all, unlike a pro league's balanced schedule.
+- No hardcoded team-ID reference table in `config_ncaamb.py` — doubly true here versus WNBA/NBA's
+  already-stable, much smaller leagues: 29 schools alone are changing conferences for 2026-27,
+  confirmed during scoping, making any hardcoded list a near-certain staleness trap.
+
+**Files added:** `config_ncaamb.py`, `ncaamb_engine.py`, `ncaamb_projections.py`,
+`test_ncaamb_engine.py`, `test_ncaamb_projections.py`. **Files touched:** `basketball_engine.py`
+(the new `extra_params` hook), `sports.py` (registry entry, `enabled=False`), `views/
+11_Hot_Hand_Engine.py` and `views/12_Matchup_Lab.py` (require_sport gates extended to include
+NCAAMB), `streamlit_app.py` (`sport_only_leads` extended), `test_sports.py` (both source-scraping
+regression tests updated to reflect the real new config — legitimate assertion updates, not
+workarounds, same as every prior sport's launch).
+
+37 new tests (5 in `basketball_engine.py`'s test file for the `extra_params` hook, the rest split
+across the two new NCAAMB-specific test files, including direct coverage of the `groups=50` fix
+that has no WNBA/NBA equivalent to mirror). 369/369 total passing.
+
+**Go-live checklist, same shape as NBA's before Shawn's own verification closed it:**
+1. Fetch `cdn.espn.com/core/mens-college-basketball/boxscore?xhr=1&gameId=401856577` directly
+   (UConn @ Duke, a real completed game) and paste the response back — this is the single
+   remaining unconfirmed piece, exactly as it was for NBA before that same check found (and let
+   us fix) two real bugs.
+2. Independently confirm `get_team_injuries` for `mens-college-basketball` specifically — only
+   NBA's version of this endpoint was checked; Division I's sheer size makes it plausible college
+   injury coverage is thinner or sourced differently than the pros'.
+3. Once (1) and (2) are confirmed, flip `sports.py`'s NCAAMB entry to `enabled=True`.
+
 ## NOT YET DONE (next stages)
+- **NCAAMB go-live checklist** — see above. The build exists and is registry-wired; the CDN
+  boxscore endpoint's exact shape for `mens-college-basketball` is the one piece still needing a
+  real response pasted back, the same verification step that caught two real bugs during NBA's own
+  go-live.
 - **NBA post-launch polish** — see above (SEASON_START, tuning constants, roster shape). NBA
   itself is live; these are calibration items to revisit once real slate data exists to check
   against, not things currently known to be broken.

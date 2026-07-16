@@ -78,7 +78,8 @@ def find_team_stat(stats_by_name: Dict[str, str], *candidates: str, side: str = 
 def get_team_recent_game_ids(team_id: int, before_date: str, site_api: str,
                              fetch: FetchFn, diag: DiagFn = _noop_diag,
                              n: int = 10, days_back: int = 45,
-                             diag_seen: Optional[set] = None) -> List[Dict[str, Any]]:
+                             diag_seen: Optional[set] = None,
+                             extra_params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """A team's last n COMPLETED games STRICTLY BEFORE before_date (YYYY-MM-DD), most recent
     first: [{"gameId", "date", "opp_id", "opp_name"}, ...]. Found by scanning the scoreboard
     across a trailing window and filtering to games where this team appears as a competitor.
@@ -91,13 +92,22 @@ def get_team_recent_game_ids(team_id: int, before_date: str, site_api: str,
     the game being projected is still STATUS_SCHEDULED anyway, but this function is also reused
     for retrospective grading of a PAST date, called AFTER that date's games have finished — at
     that point they're "completed" too, and without an explicit date cutoff they'd leak into their
-    own pre-game sample (a real lookahead-bias bug, not just a hypothetical one)."""
+    own pre-game sample (a real lookahead-bias bug, not just a hypothetical one).
+
+    extra_params: merged into the scoreboard request, defaulting to None (no change from before)
+    — added specifically for NCAAMB, whose scoreboard endpoint silently TRUNCATES to a partial
+    slate unless a `groups=50` (all Division I) param is included, confirmed live: the same date
+    returned 12 events without it vs. 36 with it. WNBA/NBA never needed this (far fewer teams per
+    day), so rather than risk changing their already-live behavior, this stays opt-in per caller."""
     end = datetime.strptime(before_date, "%Y-%m-%d")
     start = end - timedelta(days=days_back)
     date_range = f"{start.strftime('%Y%m%d')}-{end.strftime('%Y%m%d')}"
     # limit=500: a full-season window can hold hundreds of league games across every team, and a
     # truncated result here would silently under-count a head-to-head history rather than error.
-    data = fetch(f"{site_api}/scoreboard", params={"dates": date_range, "limit": 500})
+    params = {"dates": date_range, "limit": 500}
+    if extra_params:
+        params.update(extra_params)
+    data = fetch(f"{site_api}/scoreboard", params=params)
     seen = diag_seen if diag_seen is not None else set()
     diag_key = (team_id, before_date, days_back)
     if not data:
