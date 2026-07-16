@@ -720,7 +720,29 @@ there," check what the equivalent MLB-path or the other sport-dispatching pages 
 - Independently confirm `get_team_roster`'s exact live shape (same pattern already proven for
   WNBA, so low risk, just not independently checked this session).
 
-## NOT YET DONE (next stages)
+### Dark-mode contrast bug fixed: Edge Board Tier column, Dinger Engine HR/9 bands (2026-07-16)
+Shawn reported Edge Board's Tier column (Bet/Dust/No bet) was nearly unreadable in dark mode.
+Root cause: `_tier_style` set only `background-color` (pale green/amber/gray) with no explicit
+text color for "Bet"/"Dust", inheriting the app theme's default text — near-white in dark mode,
+invisible against a pale background. This is exactly the problem `styling.py`'s `theme_gradient`
+already solves platform-wide (per-cell black-on-light/white-on-dark contrast) — but Tier is
+categorical, not a numeric gradient, so it was hand-rolled outside that shared mechanism and
+never got the same treatment. A search for the same hand-rolled `background-color:` pattern found
+one more instance with the identical gap: Dinger Engine's `hr9_band`, where 3 of 5 color bands had
+no explicit text color either (the two most-saturated bands already had `color:white`, correctly).
+
+- **`views/3_#L01f4c8_Edge_Board.py`** — `_tier_style` now sets `color: #111111` alongside every
+  background (all three Tier colors are light enough — luminance > 150 — that this is the
+  correct choice per `styling.py`'s own threshold, not a new convention).
+- **`views/2_#L01f4a3_Dinger_Engine.py`** — `hr9_band`'s three lighter bands
+  (`#a6d96a`/`#fee08b`/`#fdae61`) now also get `color: #111111`; the two already-correct deep
+  bands are untouched.
+- Checked for duplication first: no other page reuses this Bet/Dust/No bet tier concept, and no
+  other hand-rolled `background-color:` styling exists outside these two files.
+- No test changes needed (pure styling strings, no existing test asserted the old color output).
+  316/316 passing.
+
+
 - **NBA post-launch polish** — see above (SEASON_START, tuning constants, roster shape). NBA
   itself is live; these are calibration items to revisit once real slate data exists to check
   against, not things currently known to be broken.
