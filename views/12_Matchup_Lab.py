@@ -110,23 +110,44 @@ if not rows:
 
 rows_sorted = sorted(rows, key=lambda r: (r["GameLabel"], r["Player"]))
 
-# Time slot filter — narrows the player picker before it, not after. WNBA's small nightly slate
-# never needed this (a handful of games, easy to scroll), but a full NBA slate — and especially
-# NCAAMB's much bigger one, still to come — makes "just scroll to find your player" genuinely
-# painful. Slot is computed from each row's own _game_date, same game_dt/slot_of convention Best
-# Bets already established (now shared via sports.py rather than duplicated a second time here).
+# Time slot + Game filters — narrow the player picker before it, not after. WNBA's small nightly
+# slate never needed this (a handful of games, easy to scroll), but a full NBA slate — and
+# especially NCAAMB's much bigger one, still to come — can have several games packed into the
+# SAME time slot, so slot alone isn't always enough to get to a specific game quickly. Slot uses
+# the game_dt/slot_of convention Best Bets already established (shared via sports.py). Game
+# reuses Edge Board's own convention exactly: sorted by real tip-off time, labeled with the ET
+# clock via format_et (already available on P — every basketball projections module imports it
+# from the same sport-agnostic projections.py MLB's pages use), not just the raw game label.
 for r in rows_sorted:
     r["_slot"] = slot_of(game_dt(r.get("_game_date")))
 slots_present = sorted({r["_slot"] for r in rows_sorted}, key=lambda s: SLOT_ORDER.get(s, 9))
-slot_pick = st.selectbox("Time slot", ["All slate"] + slots_present)
-if slot_pick != "All slate":
-    rows_sorted = [r for r in rows_sorted if r["_slot"] == slot_pick]
 
-if not rows_sorted:
+c_slot, c_game = st.columns(2)
+with c_slot:
+    slot_pick = st.selectbox("Time slot", ["All slate"] + slots_present)
+slot_rows = rows_sorted if slot_pick == "All slate" else [r for r in rows_sorted if r["_slot"] == slot_pick]
+
+if not slot_rows:
     st.info(f"No players in the {slot_pick} slot — try a different time slot or \"All slate\".")
     st.stop()
 
-options = {f"{r['Player']} ({r['Team']}) — {r['GameLabel']}": r for r in rows_sorted}
+game_date_by_label = {}
+for r in slot_rows:
+    game_date_by_label.setdefault(r["GameLabel"], r.get("_game_date"))
+games_present = sorted(game_date_by_label, key=lambda g: game_date_by_label[g] or "~")
+game_labels = {g: (f"{P.format_et(game_date_by_label[g])} — {g}" if P.format_et(game_date_by_label[g]) else g)
+              for g in games_present}
+
+with c_game:
+    game_pick = st.selectbox("Game", ["All games in this slot"] + games_present,
+                             format_func=lambda g: game_labels.get(g, g))
+final_rows = slot_rows if game_pick == "All games in this slot" else [r for r in slot_rows if r["GameLabel"] == game_pick]
+
+if not final_rows:
+    st.info("No players match the current filters — try a different time slot or game.")
+    st.stop()
+
+options = {f"{r['Player']} ({r['Team']}) — {r['GameLabel']}": r for r in final_rows}
 choice = st.selectbox("Player", list(options.keys()))
 row = options[choice]
 
