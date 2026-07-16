@@ -33,7 +33,7 @@ st.caption(f"Recent-form leaders, adjusted for how generous tonight's opponent h
            f"equivalent data exists for basketball, so this leans on a real signal that does: "
            f"opponent defense from box scores already being pulled for every slate).")
 
-if not sports.require_sport(["WNBA", "NBA"], "Hot Hand Engine"):
+if not sports.require_sport(["WNBA", "NBA", "NCAAMB"], "Hot Hand Engine"):
     st.stop()
 
 E, P = _active.engine, _active.projections

@@ -31,7 +31,7 @@ st.caption(f"One player, one opponent, three real signals: recent form, head-to-
            f"Matchup Lab (no free {_active.key} equivalent to Statcast exists, so this leans on "
            f"box-score signals instead, the same foundation Hot Hand Engine is built on).")
 
-if not sports.require_sport(["WNBA", "NBA"], "Matchup Lab"):
+if not sports.require_sport(["WNBA", "NBA", "NCAAMB"], "Matchup Lab"):
     st.stop()
 
 E, P = _active.engine, _active.projections
