@@ -4,7 +4,7 @@
 NCAAMB, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, and NCAAMB are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 371/371 tests green)
+## What's in this checkpoint (all tested — 384/384 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -996,7 +996,65 @@ assertion update reflecting the new live state, not a workaround. 371/371 passin
 
 **MLB + WNBA + NBA + NCAAMB are all live now**, sharing the platform's sport-selector foundation.
 
+### Line movement history: capture infrastructure built (2026-07-16)
+Started this deliberately before the charting UI, not after — this is the one item on the roadmap
+where waiting has a real cost: real line-movement history only exists from whenever capture
+starts, so the earlier that begins, the sooner there's something real to chart.
+
+**Scoping finding worth recording:** `capture_closing_lines.py`'s actual job is narrower than
+"the line movement piece" — it tracks ONE closing price per your own OPEN BET, for CLV ("did I
+beat the close on MY bet?"), overwriting on purpose (CLV is inherently a single before/after
+comparison, not a time series). Modifying IT to "log every snapshot" would have been the wrong
+fix — it would conflate two genuinely different questions. Built as new, separate infrastructure
+instead:
+
+- **`line_history.py`** — new storage module, same dual-backend pattern as `betlog.py`
+  (SQLite local / Postgres via `DATABASE_URL`), but its own file and table
+  (`data/line_history.db`, `line_snapshots`) — this is market data (many rows per slate, not tied
+  to a person's decisions), a different shape and growth rate than a personal bet log, so kept
+  separate rather than bolted onto `betlog.py`'s schema. `record_snapshot()` is
+  **de-duplicated on write**: a new row is only inserted when the (line, price) for a given
+  (sport, player, market, side, book) actually changed since the last capture — an unchanged line
+  at the next run doesn't add a redundant row, which is what keeps both storage and any future
+  chart meaningfully sparse (real movement only) instead of noisy (a point every time the script
+  happened to run).
+- **`capture_line_snapshots.py`** — new runner, sport-aware like `capture_closing_lines.py`
+  (every ENABLED sport gets its own slate captured via that sport's own `odds_sport_key`/
+  `markets`), but genuinely different in scope: it captures EVERY not-yet-started game's props,
+  not just games tied to open bets, because it's tracking the whole market, not one person's
+  positions.
+- **Real cost tradeoff, stated plainly, not buried:** this is a materially bigger Odds API
+  footprint than CLV capture (which only fetches props for a small, bounded set of games tied to
+  actual bets). Given that, `.github/workflows/capture-line-snapshots.yml` runs on a deliberately
+  coarser cadence — 4 times a day (morning/midday/pre-evening/evening) — not
+  `capture-closing-lines.yml`'s dense every-15-30-minutes evening schedule. Flagged honestly as a
+  reasonable starting cadence, not a backtested one — there's no line-movement history yet to
+  check it against (that's exactly what this infrastructure is for); worth revisiting once real
+  captured data shows where movement actually clusters.
+- **A real bug found and fixed during testing, not just a passing note:** `record_snapshot`'s and
+  `line_series`'s `db_path` parameters originally defaulted to the module-level `DB_PATH` value
+  directly (`db_path: str = DB_PATH`) — a classic Python gotcha, since default parameter values
+  bind ONCE at function-definition time. A caller (a test, or any future code) that monkeypatches
+  `LH.DB_PATH` afterward would silently keep writing to the ORIGINAL path. Caught because a test
+  built to verify this exact isolation instead wrote to the REAL `data/line_history.db` file on
+  disk in the sandbox — found, the stray file was deleted, and both functions were fixed to
+  resolve `DB_PATH` dynamically inside the function body instead of via an early-bound default.
+- **13 new tests** across `test_line_history.py` (de-duplication behavior: first observation,
+  unchanged skip, line-moved write, price-only-moved write, independent per-book/per-side
+  tracking) and `test_capture_line_snapshots.py` (sport-aware wiring, game-label construction,
+  end-to-end de-dup across two real capture runs, `main()` iterating every enabled sport
+  regardless of bets, refuses-without-secrets discipline). 384/384 total passing.
+
+**Deliberately NOT built yet, and why:** the actual line-movement chart (Matchup Lab's
+stock-candlestick analog). There's no real captured history to visualize right now — this
+checkpoint is the capture starting, not the chart. Building the chart before real data exists
+would mean either an empty chart or a synthetic one, neither of which is worth shipping. Comes
+back into scope once the capture has been running long enough to have something real to show.
+
 ## NOT YET DONE (next stages)
+- **Line-movement chart** — see above. The capture infrastructure is live; the actual
+  stock-candlestick-style chart in Matchup Lab is the natural next step once there's real
+  captured history to plot, not before.
 - **NCAAMB post-launch: `get_team_injuries` verification** — the one piece not independently
   confirmed live for `mens-college-basketball` specifically (only NBA's version was checked).
   Fails soft (empty list) if the real shape differs, so this isn't urgent — worth a live check
@@ -1007,14 +1065,12 @@ assertion update reflecting the new live state, not a workaround. 371/371 passin
   against, not things currently known to be broken.
 - **Injury/availability "opportunity boost" (Stage B)** — see above. Deferred as a genuinely
   separate, harder modeling decision, not a quick follow-on to Stage A's data-fetch.
-- **Real line movement history (candlestick-proper)** — the Matchup Lab trend chart overlays a
-  single CURRENT line on historical game values; a true line-movement view (the line itself
-  moving over time, the closer stock-candlestick analog) still needs `capture_closing_lines.py`
-  changed to log every snapshot instead of overwriting the latest one.
 - **`nfl_engine.py`/`nfl_projections.py`** exist but are untested and `nfl_data_py` isn't in
   `requirements.txt` yet; markets/market_map in the registry are still empty. Flipping NFL on is
   Stage 4, not started.
-- **NHL, NCAAF, NCAAMB** — no engines built yet.
+- **NHL, NCAAF** — no engines built yet. (NCAAWB considered and deliberately deferred — Odds API
+  doesn't currently offer player props for WNCAAB, so there's no live market for Edge Board to
+  price against yet; worth revisiting if that coverage gap closes.)
 
 ## Deploy notes
 - Main file path = `streamlit_app.py` for the owner app, `streamlit_app_discord.py` for the
