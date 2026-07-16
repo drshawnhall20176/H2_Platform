@@ -100,6 +100,48 @@ def test_build_hot_hand_board_pace_adjustment_same_as_wnba():
     print("✓ build_hot_hand_board's pace-adjustment math matches WNBA's (copy-adapt, not a new design)")
 
 
+# ----------------------------------------------------------------- shrinkage (same fix as WNBA)
+def _log(pts, reb, ast, fg3m):
+    return {"pts": pts, "reb": reb, "ast": ast, "fg3m": fg3m, "min": 30}
+
+
+def test_default_board_no_longer_clusters_different_streak_lengths_identically():
+    # Same regression as WNBA's — confirms the shrinkage fix was actually wired into
+    # nba_projections.py too, not just wnba_projections.py, since this is a copy-adapt file.
+    short_log = [_log(30, 8, 6, 3) for _ in range(4)]     # 4/4 games clear any reasonable line
+    long_log = [_log(30, 8, 6, 3) for _ in range(10)]     # 10/10 games clear the same line
+    rows = [
+        {"Player": "Short Streak", "Team": "Lakers", "Opp": "Celtics",
+        "GameLabel": "Celtics @ Lakers", "_game_date": "2026-01-14T00:00Z", "_game_log": short_log},
+        {"Player": "Long Streak", "Team": "Lakers", "Opp": "Celtics",
+        "GameLabel": "Celtics @ Lakers", "_game_date": "2026-01-14T00:00Z", "_game_log": long_log},
+    ]
+    index = NP.build_projection_index(rows, meta=[], sims=8000, seed=5)
+    board = NP.default_board_from_index(index)
+    short_pts = next(b for b in board if b["Player"] == "Short Streak" and b["Market"] == "Points")
+    long_pts = next(b for b in board if b["Player"] == "Long Streak" and b["Market"] == "Points")
+    assert short_pts["ModelProb"] != long_pts["ModelProb"]
+    assert long_pts["ModelProb"] > short_pts["ModelProb"]
+    print("✓ NBA's default board also no longer clusters different streak lengths identically")
+
+
+def test_build_best_bets_no_longer_clusters_different_streak_lengths_identically():
+    short_log = [_log(30, 8, 6, 3) for _ in range(4)]
+    long_log = [_log(30, 8, 6, 3) for _ in range(10)]
+    rows = [
+        {"Player": "Short Streak", "Team": "Lakers", "Opp": "Celtics",
+        "GameLabel": "Celtics @ Lakers", "_pid": 1, "_game_log": short_log},
+        {"Player": "Long Streak", "Team": "Lakers", "Opp": "Celtics",
+        "GameLabel": "Celtics @ Lakers", "_pid": 2, "_game_log": long_log},
+    ]
+    plays = NP.build_best_bets(rows, sims=8000, seed=5)
+    short_pts = next(p for p in plays if p["Player"] == "Short Streak" and p["Market"] == "Points")
+    long_pts = next(p for p in plays if p["Player"] == "Long Streak" and p["Market"] == "Points")
+    assert short_pts["ModelProb"] != long_pts["ModelProb"]
+    assert short_pts["Conviction"] != long_pts["Conviction"]
+    print("✓ NBA's build_best_bets Conviction ranking also no longer ties streak lengths together")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

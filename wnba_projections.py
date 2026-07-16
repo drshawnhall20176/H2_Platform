@@ -109,9 +109,10 @@ def simulate_player_stat(recent_values: List[float], sims: int, rng: np.random.G
 
 def build_projection_index(rows: List[Dict], meta: List[Dict],
                            sims: int = DEFAULT_SIMS, seed: Optional[int] = None) -> Dict:
-    """Return {(normalized_name, odds_market_key): {dist, mean, ctx}} for the slate — identical
-    shape to projections.build_projection_index, so downstream code (Edge Board, odds_api.compute_
-    edges) doesn't need to know which sport it's looking at."""
+    """Return {(normalized_name, odds_market_key): {dist, mean, n_games, ctx}} for the slate —
+    identical shape to projections.build_projection_index (plus n_games, needed for
+    basketball_projections.shrink_prob downstream), so downstream code (Edge Board, odds_api.
+    compute_edges) doesn't need to know which sport it's looking at."""
     rng = np.random.default_rng(seed)
     index: Dict = {}
 
@@ -127,31 +128,35 @@ def build_projection_index(rows: List[Dict], meta: List[Dict],
             sim = simulate_player_stat(values, sims, rng)
             if sim.size == 0:
                 continue
-            index[(nm, mkey)] = {"dist": _dist(sim), "mean": float(sim.mean()), "ctx": ctx}
+            index[(nm, mkey)] = {"dist": _dist(sim), "mean": float(sim.mean()),
+                                 "n_games": len(values), "ctx": ctx}
 
     return index
 
 
 def _clip_prob(p: float) -> float:
-    """Keep probabilities strictly inside (0, 1). A bootstrap resample over a short recent-game
-    log (as few as 6-10 games) can genuinely produce exact 0.0 or 1.0 — every resampled game
-    happened to clear (or miss) the line — but that's the small sample talking, not real
-    certainty; MLB's larger-sample binomial-style model doesn't hit this the same way. Two
-    reasons this matters: (1) claiming 100%/0% is overconfident for a v1 recent-form-only model,
-    (2) `prob_to_american` returns None at the exact boundary, which breaks a strict `{:+d}`
-    format string wherever a Fair price gets displayed — a real crash this caught in production."""
+    """Final safety net: keep probabilities strictly inside (0, 1) so `prob_to_american` never
+    hits its exact-boundary None case (which breaks a strict `{:+d}` format string wherever a
+    Fair price gets displayed — a real crash this caught in production). This runs AFTER
+    basketball_projections.shrink_prob, which does the actual statistical correction for
+    small-sample overconfidence (a short recent-game log can genuinely produce a raw 0.0 or 1.0);
+    this function is just the last-resort clamp for whatever shrinkage doesn't fully catch."""
     return min(max(p, 0.02), 0.98)
 
 
 def default_board_from_index(index: Dict) -> List[Dict]:
     """Model-only board (favored side at default lines) from the index — identical shape/logic
     to projections.default_board_from_index (no MLB-style Yes/No special case needed here; every
-    WNBA market in _MARKET_SPEC is a plain Over/Under)."""
+    WNBA market in _MARKET_SPEC is a plain Over/Under). Probabilities are shrunk toward a neutral
+    baseline by sample size (see basketball_projections.shrink_prob) before being clipped — a
+    4-game "perfect" streak and a 40-game one no longer produce the identical number."""
     out: List[Dict] = []
     for (nm, mkey), entry in index.items():
         _col, disp, line = _MARKET_SPEC.get(mkey, (mkey, mkey, 0.5))
         dist, ctx = entry["dist"], entry["ctx"]
-        over = _clip_prob(prob_over(dist, line))
+        raw = prob_over(dist, line)
+        shrunk = BB_P.shrink_prob(raw, entry.get("n_games", 0))
+        over = _clip_prob(shrunk)
         side, prob = ("Over", over) if over >= 0.5 else ("Under", 1 - over)
         out.append(_signal(ctx["player"], ctx["team"], ctx["game"], disp, side, line, prob,
                            entry["mean"], Opp=ctx.get("opp"), Lineup=ctx.get("lineup"),
@@ -231,7 +236,11 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
     prob for that market), each with recent-form reasoning. No odds required — mirrors
     projections.build_best_bets's role and output schema (Player/PlayerId/Team/Game/Opp/Versus/
     Market/Side/Line/ModelProb/Fair/Conviction/Why) so Best Bets, Command Center, Media Room, and
-    Podcast Studio can render either sport's plays through the same code."""
+    Podcast Studio can render either sport's plays through the same code. Probabilities are shrunk
+    toward a neutral baseline by sample size (see basketball_projections.shrink_prob) before being
+    clipped — without this, a run of players who all cleared their line in every recent game
+    (common early season with short logs) all land on the exact same clipped 98%/Conviction,
+    collapsing the ranking among them into an arbitrary tie instead of a real ordering."""
     rng = np.random.default_rng(seed)
     plays: List[Dict] = []
 
@@ -244,7 +253,9 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
             sim = simulate_player_stat(values, sims, rng)
             if sim.size == 0:
                 continue
-            over = _clip_prob(prob_over(_dist(sim), line))
+            raw = prob_over(_dist(sim), line)
+            shrunk = BB_P.shrink_prob(raw, len(values))
+            over = _clip_prob(shrunk)
             side, sp, ref_s = _favored_side(over, BEST_BET_REF.get(disp, 0.5))
             plays.append({
                 "Player": r["Player"], "PlayerId": r.get("_pid"), "Team": r["Team"],

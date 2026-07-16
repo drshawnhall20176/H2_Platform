@@ -4,7 +4,7 @@
 one sport-selector foundation). MLB runs exactly as the standalone did originally; WNBA and NBA
 are both real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 316/316 tests green)
+## What's in this checkpoint (all tested — 325/325 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -742,13 +742,66 @@ no explicit text color either (the two most-saturated bands already had `color:w
 - No test changes needed (pure styling strings, no existing test asserted the old color output).
   316/316 passing.
 
+### Bootstrap probability shrinkage: fixing identical Model%/Conviction across the board (2026-07-16)
+Shawn spotted Best Bets showing 98% / -4900 fair odds / 1.96× conviction on EVERY visible row,
+across completely different players and markets. Confirmed with real computation, not
+speculation: `prob_to_american(0.98) == -4900` exactly, and `Conviction = ModelProb / 0.5`, so
+`0.98 / 0.5 = 1.96` — both numbers were mechanically forced identical by the same root cause.
 
+**Root cause:** the bootstrap model estimates P(stat > line) as, in the large-`sims` limit, the
+empirical fraction of a player's last N recent games that cleared the line. Several rows in the
+screenshot had literally "cleared X in 9 of 9" or "10 of 10" games — a perfect recent hit rate,
+which the bootstrap resamples into a raw probability of exactly 1.0. `_clip_prob` (built and
+already documented as a safety net against exactly this) caps that at 98% — but every DIFFERENT
+player/market that independently hit a perfect streak landed on the exact same 98%, and since
+Conviction is a direct function of ModelProb, they tied there too. The ranking among them
+degenerated into an arbitrary sort order, not a real one — a 4-game "perfect" streak and a
+40-game one were indistinguishable, despite genuinely different amounts of evidence behind them.
+
+**The fix, scoped for WNBA + NBA + the upcoming NCAAMB build, not just WNBA:** added
+`basketball_projections.shrink_prob(raw_prob, n_games, prior_strength=4.0, reference=0.5)` — the
+same conceptual empirical-Bayes shrinkage `projections.py` already uses for MLB's small-sample
+rates (pulling an observed rate toward a league baseline, weighted by how much data backs it),
+adapted from "rate per plate appearance" to "rate per recent game." A 4-game streak gets pulled
+hard toward 50/50; a 40-game streak barely moves — the correction fades out on its own as real
+evidence accumulates. Runs BEFORE `_clip_prob`, which still matters afterward as a final
+boundary-value safety net, not a replacement.
+
+- **`basketball_projections.py`** — new `shrink_prob`, built once in the shared layer specifically
+  so NBA and NCAAMB inherit the fix without duplicating it, matching the extraction philosophy
+  `basketball_engine.py`'s own docstring already lays out.
+- **`wnba_projections.py`** / **`nba_projections.py`** — both updated identically:
+  `build_projection_index` now stores `n_games` per index entry; `default_board_from_index` (Edge
+  Board's path) and `build_best_bets` (Best Bets' path) both shrink the raw bootstrap probability
+  before clipping. `_clip_prob`'s docstring updated to describe its narrower remaining job.
+- **MLB deliberately left untouched** — it already has its own, more sophisticated shrinkage
+  (research-based per-stat priors applied at the rate level, before simulation) via
+  `projections.py`'s existing regression-to-the-mean machinery. Not a gap to fix, a different
+  system that already solves this.
+- **9 new tests**: 5 direct unit tests for `shrink_prob` (small-sample pull, large-sample
+  stability, the exact "two different streak lengths, two different outputs" case, zero-games
+  edge case, reference-value no-op) plus 2 integration tests each for WNBA and NBA proving the
+  ORIGINAL bug is actually fixed end-to-end in both `default_board_from_index` and
+  `build_best_bets` — not just that the helper function works in isolation.
+- **One existing test's expectation corrected, not just patched around**: a WNBA test asserted a
+  9/10 raw bootstrap rate lands in a 0.85–0.95 band — mathematically no longer true post-
+  shrinkage (`(0.9×10 + 4×0.5)/14 ≈ 0.786`), so the band was updated to the new, correct expected
+  value with the arithmetic shown inline, not just loosened until it happened to pass.
+- 325/325 tests passing (316 + 9 new).
+
+**Honest caveat, stated plainly:** `prior_strength=4.0` is a reasonable starting constant, not
+backtested — worth checking against real calibration once there's a track record to compare
+against, the same caveat every other tuning constant on this platform carries. This is also a
+real, deliberate change to what a LIVE board prices, not a cosmetic fix — flagged here explicitly
+rather than described as a pure bug fix, matching the "silently changing what's priced into a live
+betting board is a bigger decision" principle this build has followed throughout.
+
+## NOT YET DONE (next stages)
 - **NBA post-launch polish** — see above (SEASON_START, tuning constants, roster shape). NBA
   itself is live; these are calibration items to revisit once real slate data exists to check
   against, not things currently known to be broken.
 - **Injury/availability "opportunity boost" (Stage B)** — see above. Deferred as a genuinely
   separate, harder modeling decision, not a quick follow-on to Stage A's data-fetch.
-
 - **Real line movement history (candlestick-proper)** — the Matchup Lab trend chart overlays a
   single CURRENT line on historical game values; a true line-movement view (the line itself
   moving over time, the closer stock-candlestick analog) still needs `capture_closing_lines.py`

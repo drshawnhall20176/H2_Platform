@@ -85,9 +85,52 @@ def test_default_board_uses_expected_display_names_and_lines():
     pts_row = next(b for b in board if b["Market"] == "Points")
     assert pts_row["Line"] == 12.5          # default line from _MARKET_SPEC
     assert pts_row["Side"] == "Over"        # 9 of 10 games clear a 12.5 line
-    assert 0.85 <= pts_row["ModelProb"] <= 0.95   # true bootstrap prob = 9/10, loose band for sim noise
+    # Raw bootstrap prob = 9/10 = 0.9, but shrink_prob pulls it toward 0.5 by sample size:
+    # (0.9*10 + 4*0.5)/(10+4) ≈ 0.786 — this is shrinkage working as designed, not sim noise,
+    # so the band is centered there rather than on the old unshrunk ~0.9.
+    assert 0.74 <= pts_row["ModelProb"] <= 0.83
     assert pts_row["FairDec"] is not None and pts_row["FairAm"] is not None
-    print("✓ default board produces correct market labels, lines, and a sane favored side")
+    print("✓ default board produces correct market labels, lines, and a sane (shrunk) favored side")
+
+
+def test_default_board_no_longer_clusters_different_streak_lengths_identically():
+    # THE bug found live: a Best Bets board where many different players all showed identical
+    # 98% / -4900 / 1.96x simultaneously, because a "perfect" 4-game streak and a "perfect"
+    # 10-game streak both produced a raw bootstrap probability of exactly 1.0, clipped to the
+    # same 98% ceiling. After shrinkage, they should be genuinely different numbers.
+    short_log = [_log(20, 5, 3, 2) for _ in range(4)]     # 4/4 games clear any reasonable line
+    long_log = [_log(20, 5, 3, 2) for _ in range(10)]     # 10/10 games clear the same line
+    rows = [
+        _row("Short Streak", "Las Vegas Aces", "Seattle Storm", "Seattle Storm @ Las Vegas Aces", short_log),
+        _row("Long Streak", "Las Vegas Aces", "Seattle Storm", "Seattle Storm @ Las Vegas Aces", long_log),
+    ]
+    index = WP.build_projection_index(rows, meta=[], sims=8000, seed=5)
+    board = WP.default_board_from_index(index)
+
+    short_pts = next(b for b in board if b["Player"] == "Short Streak" and b["Market"] == "Points")
+    long_pts = next(b for b in board if b["Player"] == "Long Streak" and b["Market"] == "Points")
+    assert short_pts["ModelProb"] != long_pts["ModelProb"]
+    assert long_pts["ModelProb"] > short_pts["ModelProb"]   # more real games -> less shrinkage
+    print("✓ a 4-game and a 10-game perfect streak no longer produce the identical clipped ModelProb")
+
+
+def test_build_best_bets_no_longer_clusters_different_streak_lengths_identically():
+    # Same regression, but for build_best_bets (the actual function backing the Best Bets page,
+    # separate code path from default_board_from_index/Edge Board).
+    short_log = [_log(20, 5, 3, 2) for _ in range(4)]
+    long_log = [_log(20, 5, 3, 2) for _ in range(10)]
+    rows = [
+        {"Player": "Short Streak", "Team": "Las Vegas Aces", "Opp": "Seattle Storm",
+        "GameLabel": "Seattle Storm @ Las Vegas Aces", "_pid": 1, "_game_log": short_log},
+        {"Player": "Long Streak", "Team": "Las Vegas Aces", "Opp": "Seattle Storm",
+        "GameLabel": "Seattle Storm @ Las Vegas Aces", "_pid": 2, "_game_log": long_log},
+    ]
+    plays = WP.build_best_bets(rows, sims=8000, seed=5)
+    short_pts = next(p for p in plays if p["Player"] == "Short Streak" and p["Market"] == "Points")
+    long_pts = next(p for p in plays if p["Player"] == "Long Streak" and p["Market"] == "Points")
+    assert short_pts["ModelProb"] != long_pts["ModelProb"]
+    assert short_pts["Conviction"] != long_pts["Conviction"]   # the ranking itself now differentiates too
+    print("✓ build_best_bets' Conviction ranking no longer ties different streak lengths together")
 
 
 # ----------------------------------------------------------------- full odds_api integration
