@@ -76,9 +76,15 @@ def load_matchup(date_str: str, player_id: str, opp_abbr: str, team_abbr: str):
     opp_season = E.get_team_allowed_stats(opp_abbr, date_str, n=None)
     opp_recent_tds = E.get_team_tds_allowed(opp_abbr, date_str, n=5)
     opp_season_tds = E.get_team_tds_allowed(opp_abbr, date_str, n=None)
+    opp_recent_pass_tds = E.get_team_passing_tds_allowed(opp_abbr, date_str, n=5)
+    opp_season_pass_tds = E.get_team_passing_tds_allowed(opp_abbr, date_str, n=None)
+    opp_recent_rush_tds = E.get_team_rushing_tds_allowed(opp_abbr, date_str, n=5)
+    opp_season_rush_tds = E.get_team_rushing_tds_allowed(opp_abbr, date_str, n=None)
     team_rest = E.get_team_rest_info(team_abbr, date_str)
     opp_rest = E.get_team_rest_info(opp_abbr, date_str)
-    return h2h_log, season_log, opp_recent, opp_season, opp_recent_tds, opp_season_tds, team_rest, opp_rest
+    return (h2h_log, season_log, opp_recent, opp_season, opp_recent_tds, opp_season_tds,
+           opp_recent_pass_tds, opp_season_pass_tds, opp_recent_rush_tds, opp_season_rush_tds,
+           team_rest, opp_rest)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -150,11 +156,16 @@ if not row.get("_markets"):
     st.stop()
 
 with st.spinner(f"Pulling {row['Opp']}'s matchup history and defensive trend..."):
-    h2h_log, season_log, opp_recent, opp_season, opp_recent_tds, opp_season_tds, team_rest, opp_rest = load_matchup(
-        date_str, pid, opp_abbr, team_abbr)
+    (h2h_log, season_log, opp_recent, opp_season, opp_recent_tds, opp_season_tds,
+    opp_recent_pass_tds, opp_season_pass_tds, opp_recent_rush_tds, opp_season_rush_tds,
+    team_rest, opp_rest) = load_matchup(date_str, pid, opp_abbr, team_abbr)
 
 profile = P.build_matchup_profile(row, h2h_log, opp_recent, opp_season, season_log=season_log,
-                                  opp_recent_tds_allowed=opp_recent_tds, opp_season_tds_allowed=opp_season_tds)
+                                  opp_recent_tds_allowed=opp_recent_tds, opp_season_tds_allowed=opp_season_tds,
+                                  opp_recent_passing_tds_allowed=opp_recent_pass_tds,
+                                  opp_season_passing_tds_allowed=opp_season_pass_tds,
+                                  opp_recent_rushing_tds_allowed=opp_recent_rush_tds,
+                                  opp_season_rushing_tds_allowed=opp_season_rush_tds)
 
 st.markdown(f"### {row['Player']} vs {row['Opp']}")
 st.caption(f"{row['GameLabel']}  ·  {row['Position']}  ·  averaging over their last "
@@ -233,10 +244,45 @@ log = row.get("_recent_games") or []
 trend_log = P.build_trend_series(log)   # oldest -> newest, for left-to-right reading
 market_slots = P.market_list()          # only 1-3 entries for a real row, position-gated already
 active_markets = [(mkey, col, disp) for mkey, col, disp in market_slots if mkey in row["_markets"]]
-show_td_chart = P.is_td_eligible_position(row.get("Position"))
-n_charts = len(active_markets) + (1 if show_td_chart else 0)
+is_qb = row.get("Position") == "QB"
+show_td_chart = (not is_qb) and P.is_td_eligible_position(row.get("Position"))
+# QB gets three extra bar charts (Rush Yards/Passing TDs/Rushing TDs, the same split as the
+# Touchdowns-row breakout below) instead of the one combined Touchdowns chart every other
+# TD-eligible position gets — same reasoning as build_matchup_profile's own QB branch: a QB's
+# rushing yards has no shared betting line to conflict with here, and lumping passing_tds +
+# rushing_tds together would bury the QB's actual primary scoring signal (passing).
+extra_bar_charts = (
+    [("Rush Yards", lambda g: g.get("rushing_yards") or 0),
+    ("Passing TDs", lambda g: g.get("passing_tds") or 0),
+    ("Rushing TDs", lambda g: g.get("rushing_tds") or 0)] if is_qb
+    else [("Touchdowns", lambda g: (g.get("rushing_tds") or 0) + (g.get("receiving_tds") or 0))]
+    if show_td_chart else []
+)
+n_charts = len(active_markets) + len(extra_bar_charts)
 chart_cols = st.columns(n_charts) if n_charts else []
 col_iter = iter(chart_cols)
+
+
+def _render_bar_chart(title: str, stat_fn, slot) -> None:
+    # Bar, not a line-plus-dashed-line-value chart like the yardage markets — these are all low,
+    # discrete counts (or, for QB Rush Yards, a stat with no shared betting line to show a
+    # reference against here — see build_matchup_profile's own QB-branch docstring for why), so a
+    # bar reads honestly rather than inventing a reference line that isn't real.
+    with slot:
+        if not trend_log:
+            st.caption(f"{title}: no recent games on file yet.")
+            return
+        xs = [f"Wk {g.get('week', '—')}" for g in trend_log]
+        ys = [stat_fn(g) for g in trend_log]
+        hover = [f"{title}: {y:g}<br>vs {g.get('opponent_team', '—')}" for y, g in zip(ys, trend_log)]
+        fig = go.Figure(go.Bar(x=xs, y=ys, marker=dict(color="#3b82f6"), text=hover, hoverinfo="text"))
+        fig.update_xaxes(type="category")
+        if "TD" in title:
+            fig.update_yaxes(dtick=1)   # TD counts are integers — don't let Plotly show 0.5 ticks
+        fig.update_layout(template="plotly_white", height=220,
+                          margin=dict(l=10, r=10, t=30, b=10), title=title, showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+
 
 for (mkey, col, disp), slot in zip(active_markets, col_iter):
     stat_key = P.stat_key_for(col)
@@ -267,35 +313,13 @@ for (mkey, col, disp), slot in zip(active_markets, col_iter):
                           showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
 
-if show_td_chart:
-    slot = next(col_iter, None)
-    if slot is not None:
-        with slot:
-            if not trend_log:
-                st.caption("Touchdowns: no recent games on file yet.")
-            else:
-                xs = [f"Wk {g.get('week', '—')}" for g in trend_log]
-                ys = [(g.get("rushing_tds") or 0) + (g.get("receiving_tds") or 0) for g in trend_log]
-                hover = [f"Touchdowns: {y:g}<br>vs {g.get('opponent_team', '—')}"
-                        for y, g in zip(ys, trend_log)]
-                # Bar, not a line-plus-dashed-line-value chart like the yardage markets — TDs is a
-                # low, discrete count (mostly 0/1/2), and there's no live sportsbook line to show
-                # here yet (see nfl_projections.build_anytime_td_board's own docstring for why —
-                # Anytime TD's real offer shape isn't verified here, so this shows the raw recent
-                # count honestly rather than inventing a reference line that isn't real).
-                fig = go.Figure(go.Bar(x=xs, y=ys, marker=dict(color="#3b82f6"),
-                                       text=hover, hoverinfo="text"))
-                fig.update_xaxes(type="category")
-                fig.update_yaxes(dtick=1)   # TD counts are integers — don't let Plotly show 0.5 ticks
-                fig.update_layout(template="plotly_white", height=220,
-                                  margin=dict(l=10, r=10, t=30, b=10), title="Touchdowns",
-                                  showlegend=False)
-                st.plotly_chart(fig, use_container_width=True)
+for (title, stat_fn), slot in zip(extra_bar_charts, col_iter):
+    _render_bar_chart(title, stat_fn, slot)
 
 st.caption("Dashed line is this week's actual sportsbook number once fetched above; otherwise "
           "it's the model's own default line, clearly labeled as such, never presented as a "
-          "live quote it isn't. Touchdowns has no live line yet — see the Anytime TD Engine page "
-          "for the model's own scoring-probability board.")
+          "live quote it isn't. Touchdowns/QB Rush Yards have no live line yet — see the "
+          "Anytime TD Engine page for the model's own scoring-probability board.")
 
 # --- table 1: player signals (recent form / season form / this matchup) -----
 if profile:
