@@ -74,9 +74,11 @@ def load_matchup(date_str: str, player_id: str, opp_abbr: str, team_abbr: str):
     season_log = E.get_player_season_games(player_id, date_str)
     opp_recent = E.get_team_allowed_stats(opp_abbr, date_str, n=5)
     opp_season = E.get_team_allowed_stats(opp_abbr, date_str, n=None)
+    opp_recent_tds = E.get_team_tds_allowed(opp_abbr, date_str, n=5)
+    opp_season_tds = E.get_team_tds_allowed(opp_abbr, date_str, n=None)
     team_rest = E.get_team_rest_info(team_abbr, date_str)
     opp_rest = E.get_team_rest_info(opp_abbr, date_str)
-    return h2h_log, season_log, opp_recent, opp_season, team_rest, opp_rest
+    return h2h_log, season_log, opp_recent, opp_season, opp_recent_tds, opp_season_tds, team_rest, opp_rest
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -148,10 +150,11 @@ if not row.get("_markets"):
     st.stop()
 
 with st.spinner(f"Pulling {row['Opp']}'s matchup history and defensive trend..."):
-    h2h_log, season_log, opp_recent, opp_season, team_rest, opp_rest = load_matchup(
+    h2h_log, season_log, opp_recent, opp_season, opp_recent_tds, opp_season_tds, team_rest, opp_rest = load_matchup(
         date_str, pid, opp_abbr, team_abbr)
 
-profile = P.build_matchup_profile(row, h2h_log, opp_recent, opp_season, season_log=season_log)
+profile = P.build_matchup_profile(row, h2h_log, opp_recent, opp_season, season_log=season_log,
+                                  opp_recent_tds_allowed=opp_recent_tds, opp_season_tds_allowed=opp_season_tds)
 
 st.markdown(f"### {row['Player']} vs {row['Opp']}")
 st.caption(f"{row['GameLabel']}  ·  {row['Position']}  ·  averaging over their last "
@@ -230,8 +233,12 @@ log = row.get("_recent_games") or []
 trend_log = P.build_trend_series(log)   # oldest -> newest, for left-to-right reading
 market_slots = P.market_list()          # only 1-3 entries for a real row, position-gated already
 active_markets = [(mkey, col, disp) for mkey, col, disp in market_slots if mkey in row["_markets"]]
-chart_cols = st.columns(len(active_markets)) if active_markets else []
-for (mkey, col, disp), slot in zip(active_markets, chart_cols):
+show_td_chart = P.is_td_eligible_position(row.get("Position"))
+n_charts = len(active_markets) + (1 if show_td_chart else 0)
+chart_cols = st.columns(n_charts) if n_charts else []
+col_iter = iter(chart_cols)
+
+for (mkey, col, disp), slot in zip(active_markets, col_iter):
     stat_key = P.stat_key_for(col)
     with slot:
         if not trend_log:
@@ -259,9 +266,36 @@ for (mkey, col, disp), slot in zip(active_markets, chart_cols):
                           margin=dict(l=10, r=10, t=30, b=10), title=disp,
                           showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
+
+if show_td_chart:
+    slot = next(col_iter, None)
+    if slot is not None:
+        with slot:
+            if not trend_log:
+                st.caption("Touchdowns: no recent games on file yet.")
+            else:
+                xs = [f"Wk {g.get('week', '—')}" for g in trend_log]
+                ys = [(g.get("rushing_tds") or 0) + (g.get("receiving_tds") or 0) for g in trend_log]
+                hover = [f"Touchdowns: {y:g}<br>vs {g.get('opponent_team', '—')}"
+                        for y, g in zip(ys, trend_log)]
+                # Bar, not a line-plus-dashed-line-value chart like the yardage markets — TDs is a
+                # low, discrete count (mostly 0/1/2), and there's no live sportsbook line to show
+                # here yet (see nfl_projections.build_anytime_td_board's own docstring for why —
+                # Anytime TD's real offer shape isn't verified here, so this shows the raw recent
+                # count honestly rather than inventing a reference line that isn't real).
+                fig = go.Figure(go.Bar(x=xs, y=ys, marker=dict(color="#3b82f6"),
+                                       text=hover, hoverinfo="text"))
+                fig.update_xaxes(type="category")
+                fig.update_yaxes(dtick=1)   # TD counts are integers — don't let Plotly show 0.5 ticks
+                fig.update_layout(template="plotly_white", height=220,
+                                  margin=dict(l=10, r=10, t=30, b=10), title="Touchdowns",
+                                  showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
+
 st.caption("Dashed line is this week's actual sportsbook number once fetched above; otherwise "
           "it's the model's own default line, clearly labeled as such, never presented as a "
-          "live quote it isn't.")
+          "live quote it isn't. Touchdowns has no live line yet — see the Anytime TD Engine page "
+          "for the model's own scoring-probability board.")
 
 # --- table 1: player signals (recent form / season form / this matchup) -----
 if profile:
