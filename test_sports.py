@@ -225,6 +225,33 @@ def test_best_bets_and_matchup_lab_use_the_shared_time_slot_helpers():
     print("✓ Best Bets and Matchup Lab both use the shared sports.py time-slot helpers, no local duplicates")
 
 
+# ----------------------------------------------------------------- cross-sport shared contract
+# THE regression guard for a real bug class found live: NFL launched with build_slate/build_best_
+# bets/build_projection_index/curate_selections (what Edge Board and Best Bets need), but
+# Retrospective, Podcast Studio, and Media Room ALSO call get_player_results and explain_miss —
+# functions that exist on every OTHER live sport's engine/projections module, so nothing caught
+# their absence until a real person hit the real crash, twice, in the same page. This test
+# enumerates the full contract explicitly and checks every currently-live sport against it, so a
+# future sport's launch (or a future shared page's new function call) gets caught here first.
+_ENGINE_CONTRACT = ["build_slate", "get_player_results"]
+_PROJECTIONS_CONTRACT = ["build_best_bets", "build_projection_index", "curate_selections", "explain_miss"]
+
+
+def test_every_live_sport_implements_the_full_shared_page_contract():
+    for sport in S.enabled_sports():
+        if sport.key == "MLB":
+            continue   # MLB uses its own dedicated *_mlb code paths in every shared page, never
+                       # the generic contract these functions belong to — a different, deliberate
+                       # design, not a gap (see e.g. views/6_..._Retrospective.py's load_retro_mlb
+                       # vs load_retro_generic split).
+        engine, proj = sport.engine, sport.projections
+        missing_engine = [fn for fn in _ENGINE_CONTRACT if not callable(getattr(engine, fn, None))]
+        missing_proj = [fn for fn in _PROJECTIONS_CONTRACT if not callable(getattr(proj, fn, None))]
+        assert not missing_engine, f"{sport.key}'s engine is missing: {missing_engine}"
+        assert not missing_proj, f"{sport.key}'s projections module is missing: {missing_proj}"
+    print("✓ every live non-MLB sport implements the full engine/projections contract every shared page needs")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

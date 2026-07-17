@@ -188,6 +188,34 @@ def _player_reasons(values: List[float], line: float, side: str) -> str:
     return f"cleared {line:g} in {hits} of last {n} games (avg {avg:.1f}{trend})"
 
 
+def explain_miss(row: Optional[Dict], market: str = "Pass Yards") -> str:
+    """NFL equivalent of retro.explain_miss's role: explain a result the model ranked LOW.
+    `row` is a build_slate row looked up by player id; None means the player wasn't on the
+    projected slate at all (didn't clear a rotation floor, or a late roster addition the model
+    never saw). Same contract as WNBA/NBA/NCAAMB's own explain_miss — Retrospective calls this
+    unconditionally for every non-MLB sport (`P.explain_miss` where P is whichever sport is
+    active), so a missing implementation here is a real crash, not a cosmetic gap; this was
+    exactly that crash, found live and fixed."""
+    if not row:
+        return ("Not on the projected slate (didn't clear a rotation floor, or a late roster "
+                "addition) — the model never saw this player.")
+    log = row.get("_recent_games") or []
+    col = next((c for c, disp, _l in _MARKET_SPEC.values() if disp == market), None)
+    if not log or not col:
+        return "No recent-game data available for this player."
+    values = [g.get(col) or 0 for g in log]
+    avg = sum(values) / len(values)
+    recent = values[:2]     # most recent first (see nfl_engine.player_recent_games)
+    recent_avg = sum(recent) / len(recent) if recent else avg
+    if avg > 0 and recent_avg >= avg * 1.15:
+        return (f"Catchable — trending up over the last {len(recent)} games (avg {recent_avg:.1f} "
+                f"vs {avg:.1f} in the full recent sample) before this one; recency weighting "
+                "hadn't fully caught up yet.")
+    return (f"Genuine outlier — averaging {avg:.1f} over the last {len(values)} games with no "
+            "recent uptick; this result sits above their established form. Variance, not a "
+            "systematic miss.")
+
+
 def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
                     seed: Optional[int] = None) -> List[Dict]:
     """Rank candidate plays across every position-relevant market by conviction (model prob vs

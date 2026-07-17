@@ -109,6 +109,30 @@ def test_build_best_bets_only_produces_plays_for_a_rows_own_markets():
     print("✓ build_best_bets only produces plays for a row's own gated markets, no phantom markets")
 
 
+# ----------------------------------------------------------------- explain_miss
+def test_explain_miss_none_row_explains_not_on_slate():
+    msg = NP.explain_miss(None, "Pass Yards")
+    assert "never saw this player" in msg
+
+
+def test_explain_miss_catchable_when_trending_up():
+    row = {"_recent_games": [{"passing_yards": 320}, {"passing_yards": 310},
+                             {"passing_yards": 180}, {"passing_yards": 170}]}
+    msg = NP.explain_miss(row, "Pass Yards")
+    assert "Catchable" in msg and "trending up" in msg
+
+
+def test_explain_miss_genuine_outlier_when_no_recent_trend():
+    row = {"_recent_games": [{"passing_yards": 200}] * 4}
+    msg = NP.explain_miss(row, "Pass Yards")
+    assert "Genuine outlier" in msg
+
+
+def test_explain_miss_no_data_for_unknown_market():
+    row = {"_recent_games": [{"passing_yards": 200}]}
+    assert NP.explain_miss(row, "Not A Real Market") == "No recent-game data available for this player."
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

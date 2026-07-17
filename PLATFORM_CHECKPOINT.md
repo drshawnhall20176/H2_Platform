@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 420/420 tests green)
+## What's in this checkpoint (all tested — 425/425 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -1199,6 +1199,54 @@ bin, 70.4% vs. 70% in another). 8 new tests added (`test_nfl_engine.py`: `_infer
 `MARKET_STAT` entry — the exact pairing gap that caused bug #2, now guarded explicitly rather than
 left to be caught by chance in an individual market's test). 420/420 total passing.
 
+### NFL Retrospective, second crash: found and fixed properly this time (2026-07-17, same session)
+Same page, same day, a second real crash: `AttributeError` on `P.explain_miss` — another function
+every other live sport's projections module has that `nfl_projections.py` genuinely didn't. The
+first fix (`get_player_results`) was correct but incomplete: the audit behind it grepped for the
+literal string `sport.projections.xxx`, which missed every call written as the locally-aliased
+`P.xxx` instead (`E, P = _active.engine, _active.projections`, set once near the top of
+Retrospective — and Command Center, Media Room, and Podcast Studio all follow the identical
+pattern). `explain_miss` was exactly that kind of call, gated correctly (`R.explain_miss if
+_active.key == "MLB" else P.explain_miss`) but assuming every non-MLB sport already had it, which
+was true for WNBA/NBA/NCAAMB and simply hadn't been built for NFL yet.
+
+**Fixed properly this time**: added `nfl_projections.explain_miss`, matching WNBA/NBA/NCAAMB's
+exact contract. Then, rather than patch the one reported symptom again, did an EXHAUSTIVE
+function-by-function audit instead of another partial grep:
+- Diffed every public function name in `ncaamb_projections.py`/`ncaamb_engine.py` (the fullest-
+  featured live sport) against NFL's — the only gaps were Hot Hand Engine/Matchup Lab-specific
+  functions (`build_hot_hand_board`, `build_matchup_profile`, `get_team_recent_allowed_stats`,
+  etc.), confirmed genuinely safe because both those pages gate to `["WNBA", "NBA", "NCAAMB"]`
+  and correctly exclude NFL — verified directly in both files, not assumed from memory.
+- Read (not grepped) Command Center, Media Room, and Podcast Studio in full. All three follow the
+  same clean split Retrospective does — an `_mlb`-suffixed function containing MLB-only calls
+  (`enrich_hitter_rows`, `build_pitcher_projection_rows`), called ONLY when `_active.key ==
+  "MLB"`, versus a `_generic` function every other sport actually uses. Confirmed NFL's generic
+  path only ever needs `build_slate`/`get_player_results`/`build_best_bets`/
+  `build_projection_index`/`curate_selections` — all present now. `selections.
+  filter_known_pitcher` (named for MLB but checked directly): despite the name, it only reads the
+  sport-agnostic `Opp` field every sport's plays already have — confirmed safe for NFL by reading
+  its actual implementation, not inferring safety from the function name.
+- Confirmed Track Record and Bet Log do no per-sport engine/projections routing at all (only read
+  `_active.key`/`.label`/`.icon`/`.market_map` — plain attributes every registry entry has) — so
+  there was nothing to check there in the first place.
+
+**A real regression guard added, not just a fix**: `test_sports.py::test_every_live_sport_
+implements_the_full_shared_page_contract` explicitly enumerates the full engine/projections
+contract every shared page needs (`build_slate`, `get_player_results`, `build_best_bets`,
+`build_projection_index`, `curate_selections`, `explain_miss`) and checks every currently-enabled
+non-MLB sport against it. Confirmed this test would have caught BOTH bugs before they ever shipped,
+not just the second one — a future sport's launch, or a future shared page calling a new function,
+gets caught here first instead of by a real person hitting a real crash.
+
+**Verified against real live 2025 data, the actual Retrospective code path simulated exactly**,
+not just unit tests in isolation: `build_slate` → `build_best_bets` → `get_player_results` →
+`grade_slate` → `market_report` → `explain_miss` for each of a missed play in all four markets,
+with real recognizable players (Aaron Rodgers, Isiah Pacheco, Tee Higgins, Christian McCaffrey)
+and sensible reasoning for each. 5 new tests in `test_nfl_projections.py` (`explain_miss`'s
+none-row/catchable/outlier/unknown-market cases) plus the new cross-sport contract guard.
+425/425 total passing.
+
 ## NOT YET DONE (next stages)
 - **Line-movement chart** — see above. The capture infrastructure is live; the actual
   stock-candlestick-style chart in Matchup Lab is the natural next step once there's real
@@ -1213,14 +1261,14 @@ left to be caught by chance in an individual market's test). 420/420 total passi
   against, not things currently known to be broken.
 - **Injury/availability "opportunity boost" (Stage B)** — see above. Deferred as a genuinely
   separate, harder modeling decision, not a quick follow-on to Stage A's data-fetch.
-- **NFL post-launch: full page-by-page audit beyond function existence** — this session's audit
-  confirmed every shared page's `sport.engine`/`sport.projections` calls now resolve to real
-  functions (Command Center, Edge Board, Best Bets, Retrospective, Podcast Studio, Media Room all
-  checked), and the actual Retrospective grading path was verified end to end against real data.
-  NOT yet checked: whether each of those pages' UI actually RENDERS sensibly for NFL's different
-  shape (position-gated markets, weekly not daily slates) — a function existing and returning the
-  right shape doesn't guarantee the page built around it reads well for a different sport's data.
-  Worth a first real look once Shawn is clicking through each page with real season data.
+- **NFL post-launch: UI rendering pass, beyond function existence** — the full engine/projections
+  contract is now exhaustively audited and function-verified (see above — a real regression guard
+  now exists for this specific bug class), and the actual Retrospective grading path was
+  simulated end to end against real data across all four markets. NOT yet checked: whether each
+  page's UI actually RENDERS sensibly for NFL's different shape (position-gated markets, weekly
+  not daily slates) — a function existing and returning the right shape doesn't guarantee the
+  page built around it reads well for a different sport's data. Worth a first real look once
+  Shawn is clicking through each page with real season data.
 - **NFL post-launch: real Streamlit Cloud deploy check** — see above. The one thing not checkable
   from this sandbox; worth a first look once the 2026 season is close enough for real data to
   browse (season starts Sep 9, 2026).
