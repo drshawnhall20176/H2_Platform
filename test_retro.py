@@ -91,6 +91,38 @@ def test_market_report_works_for_wnba_markets():
     print("✓ market_report works identically for WNBA markets via MARKET_STAT")
 
 
+def test_market_report_works_for_nfl_markets():
+    # NFL's display names are entirely different from basketball's ("Pass Yards" vs "Points"),
+    # so unlike WNBA/NBA/NCAAMB sharing one set of MARKET_STAT entries, NFL needed its own — this
+    # is the regression guard for the bug found live: Retrospective crashed with an AttributeError
+    # before nfl_engine.get_player_results existed at all, and even after adding it, grading would
+    # have silently produced zero graded plays without these MARKET_STAT entries too.
+    plays = [
+        dict(Player="Star QB", PlayerId="p1", Market="Pass Yards", Side="Over", Line=224.5,
+            ModelProb=0.65, Conviction=1.3),
+        dict(Player="Backup QB", PlayerId="p2", Market="Pass Yards", Side="Over", Line=180.5,
+            ModelProb=0.55, Conviction=1.1),
+    ]
+    results = {"p1": {"passing_yards": 285.0}, "p2": {"passing_yards": 150.0}}
+    rep = R.market_report(plays, results, "Pass Yards", top_n=5, default_line=200.0)
+    caught_names = [c["Player"] for c in rep["caught"]]
+    assert "Star QB" in caught_names
+    assert "Backup QB" not in caught_names   # 150 < 180.5, didn't clear its own line
+    print("✓ market_report works for NFL's Pass Yards market via MARKET_STAT")
+
+
+def test_market_stat_covers_every_nfl_display_market():
+    # Confirms all four of nfl_projections._MARKET_SPEC's display names have a MARKET_STAT entry
+    # — a market present in one but not the other is exactly the silent-zero-graded-plays bug
+    # this whole fix was about, so this locks the pairing in explicitly rather than relying on
+    # each individual market_report test to happen to cover all four.
+    import nfl_projections as NP
+    nfl_display_names = {disp for _mkey, _col, disp in NP.market_list()}
+    assert nfl_display_names <= set(R.MARKET_STAT.keys()), (
+        f"missing from MARKET_STAT: {nfl_display_names - set(R.MARKET_STAT.keys())}")
+    print("✓ every NFL display market has a MARKET_STAT entry, no silent grading gaps")
+
+
 def test_market_report_unknown_market_returns_empty_shape():
     rep = R.market_report([], {}, "Not A Real Market")
     assert rep == {"caught": [], "missed": [], "unprojected": 0, "cutoff": 0, "total_ranked": 0}

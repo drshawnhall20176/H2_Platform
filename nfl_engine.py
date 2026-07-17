@@ -203,7 +203,15 @@ def load_season_weekly_stats(season: int) -> pd.DataFrame:
         return pd.DataFrame()
     if df.empty:
         _diag(f"load_season_weekly_stats({season}): load_player_stats returned 0 rows")
-    df["_touches"] = df.get("carries", 0).fillna(0) + df.get("targets", 0).fillna(0)
+    # NOT df.get("carries", 0).fillna(0): DataFrame.get() returns the literal default (an int,
+    # not a Series) when the column is entirely absent from the response, and .fillna() on an int
+    # crashes — a real pandas gotcha, not a hypothetical one (caught by this module's own test
+    # suite). Ensuring the columns exist first, defaulting to 0, keeps this correct whether or not
+    # a real nflreadpy response happens to include them.
+    for col in ("carries", "targets"):
+        if col not in df.columns:
+            df[col] = 0
+    df["_touches"] = df["carries"].fillna(0) + df["targets"].fillna(0)
     return df
 
 
@@ -296,6 +304,67 @@ def player_row(player: Dict, team: str, opp: str, game_label: str, game_date: Op
 
 
 # --------------------------------------------------------------------------- orchestration
+def _infer_season(date_str: str) -> Optional[int]:
+    """Which NFL season a calendar date belongs to — NOT nflreadpy's get_current_season(), which
+    (confirmed live during scoping) reports the LAST COMPLETED season during the off-season, not
+    "the season currently being browsed." A January 2027 date should resolve to the 2026 season's
+    playoff weeks, not have that silently coerced to whatever get_current_season() returns that
+    day. Shared by build_slate and get_player_results — both need the identical rule, and having
+    it in two places risked them quietly drifting apart."""
+    try:
+        season = int(date_str[:4])
+        # NFL's season "year" runs Sep-Feb; a January/February date belongs to the PRIOR year's
+        # season (e.g. "2027-01-16" is a 2026-season playoff game).
+        if int(date_str[5:7]) <= 2:
+            season -= 1
+        return season
+    except (ValueError, TypeError):
+        return None
+
+
+def get_player_results(date_str: str) -> Dict[str, Dict[str, float]]:
+    """Actual per-player results for date_str's resolved WEEK, keyed by player id — same contract
+    as mlb_engine.get_player_results/every basketball engine's own version, so retro.py's grading
+    logic (grade_play/grade_slate) works identically for NFL without modification.
+
+    RETURNS A WHOLE WEEK'S RESULTS, DELIBERATELY, NOT JUST GAMES ON THE LITERAL CALENDAR DATE —
+    matches build_slate's own weekly resolution exactly, and has to: grading compares this
+    function's output against a slate build_slate(date_str) already produced for a WHOLE WEEK, so
+    returning only the literal date's games would silently show "no result" for most of that
+    week's players whose games happened to fall on a different day within it (Thursday/Monday
+    games in particular, which are common and NOT edge cases).
+
+    Empty for weeks that haven't been played yet — the weekly-stats fetch simply won't have those
+    rows (nflverse hasn't published them), which reads to grading code as "no results yet", the
+    same honest degradation every other sport's get_player_results already has for future dates."""
+    season = _infer_season(date_str)
+    if season is None:
+        _diag(f"get_player_results({date_str}): could not infer season from date_str")
+        return {}
+    schedule = get_schedule(season)
+    week = _resolve_week(schedule, date_str)
+    if week is None:
+        return {}
+    weekly = load_season_weekly_stats(season)
+    if weekly.empty:
+        return {}
+
+    rows = weekly[weekly["week"] == week]
+    out: Dict[str, Dict[str, float]] = {}
+    for _, r in rows.iterrows():
+        pid = r.get("player_id")
+        if not pid:
+            continue
+        out[pid] = {
+            "passing_yards": float(r.get("passing_yards") or 0),
+            "rushing_yards": float(r.get("rushing_yards") or 0),
+            "receptions": float(r.get("receptions") or 0),
+            "receiving_yards": float(r.get("receiving_yards") or 0),
+        }
+    _diag(f"get_player_results({date_str}): season {season} week {week}, {len(out)} player result(s)")
+    return out
+
+
 def build_slate(date_str: str, season: Optional[int] = None) -> Tuple[List[Dict], List[Dict]]:
     """Fetch and assemble the full NFL slate for whichever week date_str resolves into (see
     _resolve_week's own docstring for the resolution rule).
@@ -303,19 +372,11 @@ def build_slate(date_str: str, season: Optional[int] = None) -> Tuple[List[Dict]
     Returns (rows, meta), matching every other sport's engine contract — Edge Board/Best Bets/
     Hot Hand Engine/Matchup Lab don't need to know NFL's slate is weekly under the hood.
 
-    season defaults to inferring from date_str's own year — NOT from nflreadpy's get_current_
-    season(), which (confirmed live during scoping) reports the LAST COMPLETED season during the
-    off-season, not "the season currently being browsed." A person picking a January 2027 date
-    should get the 2026 season's playoff weeks, not have that silently coerced to whatever
-    get_current_season() happens to return that day."""
+    season defaults to _infer_season(date_str) — see that function's own docstring for why this
+    is NOT nflreadpy's get_current_season()."""
     if season is None:
-        try:
-            season = int(date_str[:4])
-            # NFL's season "year" runs Sep-Feb; a January/February date belongs to the PRIOR
-            # year's season (e.g. "2027-01-16" is a 2026-season playoff game).
-            if int(date_str[5:7]) <= 2:
-                season -= 1
-        except (ValueError, TypeError):
+        season = _infer_season(date_str)
+        if season is None:
             _diag(f"build_slate({date_str}): could not infer season from date_str, aborting")
             return [], []
 

@@ -161,6 +161,76 @@ def test_player_recent_games_playoff_week_pulls_from_regular_season_tail():
     print("✓ player_recent_games correctly pulls a Wild Card week's recent form from the regular season's tail")
 
 
+# ----------------------------------------------------------------- _infer_season / get_player_results
+def test_infer_season_regular_season_month():
+    assert E._infer_season("2025-10-13") == 2025
+
+
+def test_infer_season_january_belongs_to_prior_years_season():
+    # NFL's season "year" runs Sep-Feb — a January date is the PRIOR year's season's playoffs.
+    assert E._infer_season("2026-01-16") == 2025
+
+
+def test_infer_season_none_for_bad_date():
+    assert E._infer_season("not-a-date") is None
+
+
+def test_get_player_results_returns_whole_week_not_just_literal_date(monkeypatch):
+    # THE actual bug this exists to fix: Retrospective crashed because get_player_results didn't
+    # exist at all (AttributeError). Once added, it ALSO has to return the WHOLE resolved week's
+    # results, not just games on the literal calendar date — build_slate(date_str) already
+    # produces a whole week's slate, so grading needs the matching whole week's results, or most
+    # of the week's Thursday/Monday-game players would silently show "no result".
+    fake_sched_df = pd.DataFrame([
+        {"game_id": "2025_06_A_B", "week": 6, "gameday": "2025-10-09", "home_team": "B",
+        "away_team": "A", "home_score": 20, "away_score": 17, "home_rest": 7, "away_rest": 7},
+        {"game_id": "2025_06_C_D", "week": 6, "gameday": "2025-10-13", "home_team": "D",
+        "away_team": "C", "home_score": 24, "away_score": 21, "home_rest": 7, "away_rest": 7},
+    ])
+    fake_weekly_df = pd.DataFrame([
+        {"player_id": "p_thu", "week": 6, "passing_yards": 300, "rushing_yards": 0,
+        "receptions": 0, "receiving_yards": 0},   # Thursday game (2025-10-09)
+        {"player_id": "p_mon", "week": 6, "passing_yards": 0, "rushing_yards": 80,
+        "receptions": 0, "receiving_yards": 0},   # Monday game (2025-10-13)
+    ])
+    monkeypatch.setattr(E.nfl, "load_schedules", lambda seasons: _FakePolarsDF(fake_sched_df))
+    monkeypatch.setattr(E.nfl, "load_player_stats",
+                        lambda seasons, summary_level="week": _FakePolarsDF(fake_weekly_df))
+    # Query using the Thursday game's own date — should still return the Monday player's result too
+    results = E.get_player_results("2025-10-09")
+    assert "p_thu" in results and "p_mon" in results
+    assert results["p_mon"]["rushing_yards"] == 80.0
+    print("✓ get_player_results returns the WHOLE resolved week, not just games on the literal date")
+
+
+def test_get_player_results_empty_for_unplayed_week(monkeypatch):
+    fake_sched_df = pd.DataFrame([{"game_id": "2026_01_A_B", "week": 1, "gameday": "2026-09-09",
+                                  "home_team": "B", "away_team": "A", "home_score": None,
+                                  "away_score": None, "home_rest": 7, "away_rest": 7}])
+    monkeypatch.setattr(E.nfl, "load_schedules", lambda seasons: _FakePolarsDF(fake_sched_df))
+    monkeypatch.setattr(E.nfl, "load_player_stats",
+                        lambda seasons, summary_level="week": _FakePolarsDF(pd.DataFrame()))
+    assert E.get_player_results("2026-09-09") == {}
+    print("✓ get_player_results returns empty (not an error) for a week that hasn't been played yet")
+
+
+def test_get_player_results_skips_rows_with_no_player_id(monkeypatch):
+    fake_weekly_df = pd.DataFrame([
+        {"player_id": "", "week": 6, "passing_yards": 100},
+        {"player_id": "p1", "week": 6, "passing_yards": 200, "rushing_yards": 0,
+        "receptions": 0, "receiving_yards": 0},
+    ])
+    fake_sched_df = pd.DataFrame([{"game_id": "2025_06_A_B", "week": 6, "gameday": "2025-10-13",
+                                  "home_team": "B", "away_team": "A", "home_score": 1,
+                                  "away_score": 1, "home_rest": 7, "away_rest": 7}])
+    monkeypatch.setattr(E.nfl, "load_schedules", lambda seasons: _FakePolarsDF(fake_sched_df))
+    monkeypatch.setattr(E.nfl, "load_player_stats",
+                        lambda seasons, summary_level="week": _FakePolarsDF(fake_weekly_df))
+    results = E.get_player_results("2025-10-13")
+    assert list(results.keys()) == ["p1"]
+    print("✓ get_player_results correctly skips rows with no player_id")
+
+
 # ----------------------------------------------------------------- get_team_injuries
 def test_get_team_injuries_real_confirmed_shape(monkeypatch):
     fake_df = pd.DataFrame([

@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 412/412 tests green)
+## What's in this checkpoint (all tested — 420/420 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -1158,6 +1158,47 @@ foundation. The one thing genuinely only checkable on Shawn's end: `nflreadpy`'s
 behavior once actually running on Streamlit Cloud — worth a first look at a real slate once the
 season is close enough that real data exists to browse (2026 season starts Sep 9).
 
+### NFL Retrospective crash: found and fixed (2026-07-17, same session)
+Shawn hit a real crash immediately after go-live: `AttributeError` in Retrospective, traceback
+pointing to `sport.engine.get_player_results(date_str)` — a function every other sport's engine
+has, that `nfl_engine.py` genuinely never had. A direct consequence of this build's own staged-
+scope note ("covers what Edge Board and Best Bets need") not accounting for what flipping
+`enabled=True` actually exposes: NFL becomes selectable on EVERY shared page, not just the two it
+was scoped for, and Retrospective (plus Podcast Studio and Media Room, confirmed via the same
+audit) all call `get_player_results`.
+
+**Two real bugs, not one, found by auditing rather than just patching the reported crash:**
+1. **`get_player_results` didn't exist at all** — added it. One genuine design decision worth
+   recording: it returns the WHOLE resolved week's results, not just games on the literal
+   calendar date, matching `build_slate`'s own weekly resolution — needed, not optional, since
+   grading compares this function's output against a slate `build_slate` already built for a
+   whole week; returning only the literal date's games would silently show "no result" for every
+   player whose game fell on a different day within that week (Thursday/Monday games especially,
+   not an edge case).
+2. **`retro.py`'s `MARKET_STAT` dict had no NFL entries at all.** WNBA/NBA/NCAAMB all share one
+   set of entries because their display market names are identical (the Core-4 convention); NFL's
+   names ("Pass Yards", "Rush Yards", etc.) are entirely different and needed their own. Without
+   this, `get_player_results` alone would have stopped the crash but silently graded ZERO NFL
+   plays — caught by auditing the full grading path end to end, not just re-running the exact
+   failure that was reported.
+
+**A third, smaller bug found while testing the fix, not the original crash**: `load_season_weekly_
+stats`'s `_touches` computation used `df.get("carries", 0).fillna(0)` — a real pandas gotcha:
+`DataFrame.get()` returns the literal default (an int) when a column is entirely absent from the
+response, not a Series of that default, and calling `.fillna()` on an int crashes. Fixed by
+ensuring both columns exist before computing `_touches`, so this is correct whether or not a real
+response happens to include them, not just in the shape it happened to return during the original
+live verification.
+
+**Verified against real live 2025 data, full pipeline, not just unit tests**: `build_slate` →
+`build_best_bets` → `get_player_results` → `retro.grade_slate`, end to end. 513 plays graded, 404
+with real results, 267 hits — a real, sensible calibration (55% predicted vs. 59% actual in one
+bin, 70.4% vs. 70% in another). 8 new tests added (`test_nfl_engine.py`: `_infer_season`,
+`get_player_results`'s whole-week behavior, empty-for-unplayed-weeks, skip-no-id rows;
+`test_retro.py`: NFL's `market_report`, and a direct assertion that every NFL display market has a
+`MARKET_STAT` entry — the exact pairing gap that caused bug #2, now guarded explicitly rather than
+left to be caught by chance in an individual market's test). 420/420 total passing.
+
 ## NOT YET DONE (next stages)
 - **Line-movement chart** — see above. The capture infrastructure is live; the actual
   stock-candlestick-style chart in Matchup Lab is the natural next step once there's real
@@ -1172,6 +1213,14 @@ season is close enough that real data exists to browse (2026 season starts Sep 9
   against, not things currently known to be broken.
 - **Injury/availability "opportunity boost" (Stage B)** — see above. Deferred as a genuinely
   separate, harder modeling decision, not a quick follow-on to Stage A's data-fetch.
+- **NFL post-launch: full page-by-page audit beyond function existence** — this session's audit
+  confirmed every shared page's `sport.engine`/`sport.projections` calls now resolve to real
+  functions (Command Center, Edge Board, Best Bets, Retrospective, Podcast Studio, Media Room all
+  checked), and the actual Retrospective grading path was verified end to end against real data.
+  NOT yet checked: whether each of those pages' UI actually RENDERS sensibly for NFL's different
+  shape (position-gated markets, weekly not daily slates) — a function existing and returning the
+  right shape doesn't guarantee the page built around it reads well for a different sport's data.
+  Worth a first real look once Shawn is clicking through each page with real season data.
 - **NFL post-launch: real Streamlit Cloud deploy check** — see above. The one thing not checkable
   from this sandbox; worth a first look once the 2026 season is close enough for real data to
   browse (season starts Sep 9, 2026).

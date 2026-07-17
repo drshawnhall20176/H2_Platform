@@ -21,8 +21,16 @@ MARKET_STAT = {
     "Batter HR": "hr", "Batter Total Bases": "tb", "Batter Total Hits": "hits",
     "Batter Strikeouts": "so", "Pitcher Strikeouts": "p_k", "Pitcher Outs": "p_outs",
     "Pitcher Walks": "p_bb",
-    # WNBA — keys match wnba_engine.get_player_results()'s result dict exactly.
+    # WNBA/NBA/NCAAMB — all three basketball sports share the same display market names (the
+    # Core-4 convention), so one entry per name covers all of them; no separate NBA/NCAAMB rows
+    # needed. Keys match wnba_engine.get_player_results()'s (and NBA's/NCAAMB's) result dict exactly.
     "Points": "pts", "Rebounds": "reb", "Assists": "ast", "Threes Made": "fg3m",
+    # NFL — display names are entirely different from basketball's, so these DO need their own
+    # entries (unlike the three basketball sports above). Keys match nfl_engine.get_player_
+    # results()'s result dict exactly — confirmed the pairing explicitly, not just assumed, since
+    # this dict is the one place a mismatch would silently grade zero plays rather than crash.
+    "Pass Yards": "passing_yards", "Rush Yards": "rushing_yards",
+    "Receptions": "receptions", "Receiving Yards": "receiving_yards",
 }
  
  
