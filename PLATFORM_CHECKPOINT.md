@@ -1,9 +1,8 @@
 # H2 Sports Platform — Build Checkpoint
 
 **This is the multi-sport platform build.** It is the live source of truth (MLB + WNBA + NBA +
-NCAAMB, all live on one sport-selector foundation; NFL built and verified against real live data,
-pending a final go-live decision). MLB runs exactly as the standalone did originally; WNBA, NBA,
-and NCAAMB are all real, priced sports now — not placeholders.
+NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
+originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
 ## What's in this checkpoint (all tested — 412/412 tests green)
 
@@ -1142,7 +1141,22 @@ reflecting the real new state, same as every other sport's launch). 411/411 tota
    result from scoping research), 19 real players, 36 real projected plays.
 2. Live-deploy check once actually running on Streamlit Cloud (confirms `nflreadpy`'s real network
    behavior in that environment, not just this sandbox) — the one item only checkable there, not here.
-3. Once (2) is done, flip `sports.py`'s NFL entry to `enabled=True`.
+3. ~~Once (2) is done, flip `sports.py`'s NFL entry to `enabled=True`~~ — DONE, same session,
+   flipped live for Shawn to check against the real Streamlit Cloud deployment.
+
+### NFL flipped LIVE (2026-07-17, same session)
+`sports.py`'s NFL entry is now `enabled=True` — same go-live pattern as WNBA/NBA/NCAAMB's own
+launches, and the same honest sequencing: real research first (catching the deprecated-library and
+fabricated-market-key issues before any code was written), a full rewrite verified against real
+live data, a genuine review pass (team abbreviations, playoff-week boundaries, the smallest
+possible slate), then the flip — not skipping straight to "on." `test_mlb_wnba_nba_ncaamb_nfl_
+enabled_today` replaces the four-sport version — a real, legitimate assertion update reflecting
+the new live state, not a workaround. 412/412 passing.
+
+**MLB + WNBA + NBA + NCAAMB + NFL are all live now**, sharing the platform's sport-selector
+foundation. The one thing genuinely only checkable on Shawn's end: `nflreadpy`'s real network
+behavior once actually running on Streamlit Cloud — worth a first look at a real slate once the
+season is close enough that real data exists to browse (2026 season starts Sep 9).
 
 ## NOT YET DONE (next stages)
 - **Line-movement chart** — see above. The capture infrastructure is live; the actual
@@ -1158,9 +1172,9 @@ reflecting the real new state, same as every other sport's launch). 411/411 tota
   against, not things currently known to be broken.
 - **Injury/availability "opportunity boost" (Stage B)** — see above. Deferred as a genuinely
   separate, harder modeling decision, not a quick follow-on to Stage A's data-fetch.
-- **NFL go-live checklist** — see above. The engine, projections, registry wiring, and a real
-  review pass are all done; a live-deploy check on Streamlit Cloud is the one thing left before
-  flipping it on.
+- **NFL post-launch: real Streamlit Cloud deploy check** — see above. The one thing not checkable
+  from this sandbox; worth a first look once the 2026 season is close enough for real data to
+  browse (season starts Sep 9, 2026).
 - **NFL Hot Hand Engine / Matchup Lab equivalents** — deliberately deferred (see above), the same
   staged-build pattern MLB and WNBA both followed before their own Hot Hand Engine/Matchup Lab
   pages existed.

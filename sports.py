@@ -82,8 +82,8 @@ REGISTRY: Dict[str, Sport] = {
                     "Receptions": "player_receptions", "Receiving Yards": "player_reception_yds"},
         engine_module="nfl_engine", projections_module="nfl_projections",
         config_module="config_nfl",
-        enabled=False,   # engine rebuilt from scratch this session — the ORIGINAL draft's
-                        # SUPPORTED_MARKETS were entirely fabricated market keys
+        enabled=True,    # LIVE as of 2026-07-17. Engine rebuilt from scratch this session — the
+                        # ORIGINAL draft's SUPPORTED_MARKETS were entirely fabricated market keys
                         # ("quarterback_passing_yards" etc.) that don't exist in Odds API's real
                         # taxonomy at all; Edge Board would have silently fetched zero real NFL
                         # odds. The real, confirmed keys above (player_pass_yds/player_rush_yds/
@@ -96,9 +96,13 @@ REGISTRY: Dict[str, Sport] = {
                         # projections -> Edge Board/Best Bets shape) was verified end to end
                         # against REAL, LIVE 2025-season data during this build — not just
                         # documentation — producing real, sensible results (513 real projected
-                        # offers from 270 real players on a real Week 6 slate). Kept at
-                        # enabled=False anyway pending a final review pass and live-deploy check,
-                        # the same honest launch posture every other sport here has carried.
+                        # offers from 270 real players on a real Week 6 slate), plus a real review
+                        # pass (team abbreviations confirmed matching across schedule/roster data,
+                        # playoff weeks confirmed non-colliding with the regular season, the real
+                        # Super Bowl week slate confirmed working end to end). Flipped live after
+                        # that review — the only thing not checkable from this sandbox is
+                        # nflreadpy's real network behavior once actually deployed on Streamlit
+                        # Cloud, worth a first look once it's up.
                         # NOT yet built: a Hot Hand Engine-equivalent or Matchup Lab-equivalent
                         # (see nfl_projections.py's own staged-scope note) — this covers what
                         # Edge Board and Best Bets need, deliberately, not the full page set yet.
