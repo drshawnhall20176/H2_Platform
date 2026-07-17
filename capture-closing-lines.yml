@@ -1,0 +1,80 @@
+# Auto-capture CLOSING LINES for your open bets — the automation behind the CLV proof.
+#
+# WHAT IT DOES:
+#   Runs capture_closing_lines.py on a timer through the evening. Each run fetches current odds
+#   for games that HAVEN'T started yet, matches them to your open bets at the SAME book, and writes
+#   the latest pre-game price into each bet's close_odds. The last update before a game starts
+#   becomes that game's closing line (once a game starts it drops out and its close freezes). This
+#   is what makes your Track Record's CLV populate automatically instead of by hand.
+#
+# IMPORTANT — this writes to your DATABASE, not to a file (so there is NO git commit step). It
+#   needs BOTH secrets set in the repo (Settings -> Secrets and variables -> Actions):
+#     ODDS_API_KEY   — to fetch odds
+#     DATABASE_URL   — your Supabase/Postgres URL, so closes land where the app reads them
+#   Without DATABASE_URL the runner writes to an ephemeral SQLite file that vanishes — it will
+#   refuse to run and tell you so.
+#
+# SCHEDULE: MLB games mostly start 5-10pm ET, so the evening cron block covers that. WNBA games
+#   are more spread out — some start as early as 11am ET (a day game showed up earlier this
+#   season) — so a midday/afternoon block is included too, or those closing lines would never get
+#   captured no matter how correct the runner's code is.
+#
+#   The day block starts at 9am ET, not 11am — confirmed by a real miss: 5 WNBA bets logged ahead
+#   of an 11am tip never got a closing line, because the schedule's first run of the day was AT
+#   11am, and GitHub Actions cron jobs aren't guaranteed to fire exactly on the minute (GitHub's
+#   own docs note delays during high load). A run scheduled for the same minute a game starts can
+#   easily land a few minutes late and find the game already underway — "not yet started" filters
+#   it out, and that bet's closing-line window is gone for good, permanently, since a closing line
+#   can only be captured before tip-off. Starting 2 hours early (four run attempts before an 11am
+#   game, not one run exactly at it) is the actual fix, not just a wider window on paper.
+#
+#   The late-night block runs every 15 minutes (not 30) and extends to 06:59 UTC, not 04:59 —
+#   confirmed against Hawai'i's real 2026 home schedule (espn.com), where 4 of 6 home games are
+#   listed at 11:59pm ET. Hawai'i is 6 hours behind ET (not the 2-3 hours of mainland Pacific/
+#   Mountain schools), so their prime-time-for-TV home kickoffs land right at the edge of ET's
+#   day. A 30-minute cadence stopping at 11:30pm EST left only a ~29-minute buffer before an
+#   11:59pm kickoff, with no second attempt closer to it — the same class of risk (thin/zero
+#   buffer before a real kickoff) that already caused a confirmed miss once, just less severe.
+#   15-minute intervals through ~2am ET cut the worst-case gap before ANY late kickoff to ~14
+#   minutes and give a genuine second chance close to it, not just a wider window on paper.
+#
+#   In UTC: 13:00-20:59 (~9am-4:59pm ET) day block, 21:00-23:59 (~5-7pm ET) early evening,
+#   00:00-06:59 (~7pm-1:59am ET) late block (spans the day boundary, hence separate cron lines).
+#   Adjust the windows if any sport's slate shifts further. Your Odds API quota easily covers
+#   this (only the markets your open bets use are fetched, only for not-yet-started games).
+
+name: capture-closing-lines
+
+on:
+  schedule:
+    - cron: "*/30 13-20 * * *"   # 13:00-20:59 UTC  (~9am-4:59pm ET) — WNBA day games, 2hr buffer before 11am tips
+    - cron: "*/30 21-23 * * *"   # 21:00-23:59 UTC  (~5-7pm ET)
+    - cron: "*/15 0-6 * * *"     # 00:00-06:59 UTC  (~7pm-1:59am ET) — tighter cadence for late West Coast/Hawaii starts
+  workflow_dispatch: {}          # manual "Run workflow" button (handy for testing)
+
+permissions:
+  contents: read                 # no commit needed — closes are written to the database
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        # Install the app's full pinned deps so every module the runner imports (odds_api,
+        # clv_capture, betlog and their transitive imports) is guaranteed present. Listing a
+        # subset risked a crash-on-import when a transitive package was missing.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Capture closing lines for open bets
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python capture_closing_lines.py
