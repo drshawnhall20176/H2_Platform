@@ -292,6 +292,141 @@ def test_player_row_none_with_empty_game_log():
     assert E.player_row(player, "KC", "LAC", "KC @ LAC", "2025-09-05", []) is None
 
 
+# ----------------------------------------------------------------- Matchup Lab support
+def test_team_abbrs_from_meta_is_identity_for_nfl():
+    # NFL's team_id already IS the ESPN/nflverse abbreviation ("KC"), unlike ESPN basketball's
+    # numeric ids needing a real lookup — so this is correctly a passthrough, not a bug.
+    meta = [{"home_id": "KC", "away_id": "LAC"}, {"home_id": "PHI", "away_id": "DAL"}]
+    assert E.team_abbrs_from_meta(meta) == {"KC": "KC", "LAC": "LAC", "PHI": "PHI", "DAL": "DAL"}
+
+
+def _fake_weekly(rows):
+    return pd.DataFrame(rows)
+
+
+def test_get_player_season_games_returns_full_season_most_recent_first(monkeypatch):
+    fake_sched = pd.DataFrame([{"game_id": "g", "week": 6, "gameday": "2025-10-13",
+                               "home_team": "B", "away_team": "A", "home_score": 1,
+                               "away_score": 1, "home_rest": 7, "away_rest": 7}])
+    fake_weekly = _fake_weekly([
+        {"player_id": "p1", "week": w, "passing_yards": 200 + w} for w in range(1, 6)])
+    monkeypatch.setattr(E.nfl, "load_schedules", lambda seasons: _FakePolarsDF(fake_sched))
+    monkeypatch.setattr(E.nfl, "load_player_stats",
+                        lambda seasons, summary_level="week": _FakePolarsDF(fake_weekly))
+    games = E.get_player_season_games("p1", "2025-10-13")
+    assert len(games) == 5
+    assert games[0]["week"] == 5   # most recent first
+    print("✓ get_player_season_games returns the full season so far, most recent first")
+
+
+def test_get_player_history_vs_opponent_filters_to_that_opponent_only(monkeypatch):
+    fake_sched = pd.DataFrame([{"game_id": "g", "week": 6, "gameday": "2025-10-13",
+                               "home_team": "B", "away_team": "A", "home_score": 1,
+                               "away_score": 1, "home_rest": 7, "away_rest": 7}])
+    fake_weekly = _fake_weekly([
+        {"player_id": "p1", "week": 2, "opponent_team": "LV", "passing_yards": 250},
+        {"player_id": "p1", "week": 4, "opponent_team": "DEN", "passing_yards": 300},
+    ])
+    monkeypatch.setattr(E.nfl, "load_schedules", lambda seasons: _FakePolarsDF(fake_sched))
+    monkeypatch.setattr(E.nfl, "load_player_stats",
+                        lambda seasons, summary_level="week": _FakePolarsDF(fake_weekly))
+    h2h_lv = E.get_player_history_vs_opponent("p1", "LV", "2025-10-13")
+    assert len(h2h_lv) == 1 and h2h_lv[0]["week"] == 2
+    h2h_none = E.get_player_history_vs_opponent("p1", "SEA", "2025-10-13")
+    assert h2h_none == []   # honest empty — the common case for most NFL matchups
+    print("✓ get_player_history_vs_opponent correctly filters to games against that exact opponent")
+
+
+def test_get_team_allowed_stats_averages_across_games_grouped_by_week(monkeypatch):
+    fake_sched = pd.DataFrame([{"game_id": "g", "week": 6, "gameday": "2025-10-13",
+                               "home_team": "B", "away_team": "A", "home_score": 1,
+                               "away_score": 1, "home_rest": 7, "away_rest": 7}])
+    # Two players facing "KC" in week 1 (same game -> sum to the team total that week), one
+    # player facing "KC" in week 2 -> average across the TWO GAMES, not across all player rows.
+    fake_weekly = _fake_weekly([
+        {"player_id": "p1", "week": 1, "opponent_team": "KC", "passing_yards": 150,
+        "rushing_yards": 0, "receptions": 0, "receiving_yards": 0},
+        {"player_id": "p2", "week": 1, "opponent_team": "KC", "passing_yards": 0,
+        "rushing_yards": 50, "receptions": 0, "receiving_yards": 0},
+        {"player_id": "p3", "week": 2, "opponent_team": "KC", "passing_yards": 250,
+        "rushing_yards": 60, "receptions": 0, "receiving_yards": 0},
+    ])
+    monkeypatch.setattr(E.nfl, "load_schedules", lambda seasons: _FakePolarsDF(fake_sched))
+    monkeypatch.setattr(E.nfl, "load_player_stats",
+                        lambda seasons, summary_level="week": _FakePolarsDF(fake_weekly))
+    allowed = E.get_team_allowed_stats("KC", "2025-10-13", n=None)
+    # week 1 total: 150 pass, 50 rush. week 2 total: 250 pass, 60 rush. avg across 2 games:
+    assert allowed["passing_yards"] == 200.0    # avg(150, 250)
+    assert allowed["rushing_yards"] == 55.0     # avg(50, 60)
+    print("✓ get_team_allowed_stats correctly groups by game/week before averaging, not by player row")
+
+
+def test_get_team_allowed_stats_n_limits_to_most_recent_games(monkeypatch):
+    fake_sched = pd.DataFrame([{"game_id": "g", "week": 10, "gameday": "2025-11-10",
+                               "home_team": "B", "away_team": "A", "home_score": 1,
+                               "away_score": 1, "home_rest": 7, "away_rest": 7}])
+    fake_weekly = _fake_weekly([
+        {"player_id": "p1", "week": w, "opponent_team": "KC", "passing_yards": w * 10,
+        "rushing_yards": 0, "receptions": 0, "receiving_yards": 0} for w in range(1, 6)])
+    monkeypatch.setattr(E.nfl, "load_schedules", lambda seasons: _FakePolarsDF(fake_sched))
+    monkeypatch.setattr(E.nfl, "load_player_stats",
+                        lambda seasons, summary_level="week": _FakePolarsDF(fake_weekly))
+    recent2 = E.get_team_allowed_stats("KC", "2025-11-10", n=2)
+    season = E.get_team_allowed_stats("KC", "2025-11-10", n=None)
+    assert recent2["passing_yards"] == 45.0   # avg(week4=40, week5=50)
+    assert season["passing_yards"] == 30.0    # avg(10,20,30,40,50)
+    assert recent2 != season                  # n limits recency, genuinely differs from the full season
+    print("✓ get_team_allowed_stats' n parameter correctly limits to the most recent n games")
+
+
+def test_get_team_allowed_stats_empty_when_no_games_allowed(monkeypatch):
+    fake_sched = pd.DataFrame([{"game_id": "g", "week": 1, "gameday": "2025-09-04",
+                               "home_team": "B", "away_team": "A", "home_score": None,
+                               "away_score": None, "home_rest": 7, "away_rest": 7}])
+    monkeypatch.setattr(E.nfl, "load_schedules", lambda seasons: _FakePolarsDF(fake_sched))
+    monkeypatch.setattr(E.nfl, "load_player_stats",
+                        lambda seasons, summary_level="week": _FakePolarsDF(pd.DataFrame()))
+    assert E.get_team_allowed_stats("KC", "2025-09-04") == {}
+
+
+def test_get_team_rest_info_uses_real_schedule_rest_fields(monkeypatch):
+    fake_sched = pd.DataFrame([
+        {"game_id": "g1", "week": 5, "gameday": "2025-10-06", "home_team": "KC", "away_team": "JAX",
+        "home_score": 1, "away_score": 1, "home_rest": 8, "away_rest": 8},
+        {"game_id": "g2", "week": 6, "gameday": "2025-10-13", "home_team": "KC", "away_team": "LV",
+        "home_score": None, "away_score": None, "home_rest": 7, "away_rest": 7},
+    ])
+    monkeypatch.setattr(E.nfl, "load_schedules", lambda seasons: _FakePolarsDF(fake_sched))
+    info = E.get_team_rest_info("KC", "2025-10-13")   # week 6, most recent PRIOR game was week 5
+    assert info["rest_days"] == 8
+    assert info["is_short_week"] is False
+    assert info["last_opp_name"] == "JAX"
+    print("✓ get_team_rest_info reads real schedule rest fields directly, no scanning needed")
+
+
+def test_get_team_rest_info_flags_short_week(monkeypatch):
+    fake_sched = pd.DataFrame([
+        {"game_id": "g1", "week": 5, "gameday": "2025-10-09", "home_team": "KC", "away_team": "JAX",
+        "home_score": 1, "away_score": 1, "home_rest": 4, "away_rest": 4},
+        {"game_id": "g2", "week": 6, "gameday": "2025-10-16", "home_team": "KC", "away_team": "LV",
+        "home_score": None, "away_score": None, "home_rest": 7, "away_rest": 7},
+    ])
+    monkeypatch.setattr(E.nfl, "load_schedules", lambda seasons: _FakePolarsDF(fake_sched))
+    info = E.get_team_rest_info("KC", "2025-10-16")
+    assert info["is_short_week"] is True
+    print("✓ get_team_rest_info correctly flags a short week (Thursday game after a Sunday one)")
+
+
+def test_get_team_rest_info_empty_when_no_prior_game(monkeypatch):
+    fake_sched = pd.DataFrame([
+        {"game_id": "g1", "week": 1, "gameday": "2025-09-04", "home_team": "KC", "away_team": "JAX",
+        "home_score": None, "away_score": None, "home_rest": 7, "away_rest": 7},
+    ])
+    monkeypatch.setattr(E.nfl, "load_schedules", lambda seasons: _FakePolarsDF(fake_sched))
+    info = E.get_team_rest_info("KC", "2025-09-04")   # week 1 — nothing before it
+    assert info == {"rest_days": None, "is_short_week": False, "last_game_date": None, "last_opp_name": None}
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

@@ -418,3 +418,123 @@ def build_slate(date_str: str, season: Optional[int] = None) -> Tuple[List[Dict]
     _diag(f"build_slate({date_str}): season {season} week {week}, {len(games)} game(s) -> "
          f"{len(rows)} player(s) cleared a rotation floor")
     return rows, meta
+
+
+# --------------------------------------------------------------------------- Matchup Lab support
+def team_abbrs_from_meta(meta: List[Dict]) -> Dict[str, str]:
+    """{team_id: abbreviation} for every team on the slate — trivial for NFL, since the team_id
+    build_slate already uses IS the ESPN/nflverse abbreviation ("KC", "LAC", ...), unlike ESPN
+    basketball's numeric team ids needing a real lookup. Kept as its own function anyway, not
+    inlined at call sites — same interface every sport-dispatching page expects
+    (basketball_engine.py's own team_abbrs_from_meta plays the identical role there)."""
+    out: Dict[str, str] = {}
+    for g in meta:
+        out[g["home_id"]] = g["home_id"]
+        out[g["away_id"]] = g["away_id"]
+    return out
+
+
+def get_player_season_games(player_id: str, before_date: str, max_games: int = 25) -> List[Dict]:
+    """This player's full game log for the season so far (any opponent), most recent first —
+    the baseline Matchup Lab compares a head-to-head sample against. max_games=25 comfortably
+    covers a full 17-game regular season plus a playoff run, without needing basketball's
+    days_back windowing (NFL has no equivalent "how far back to scan" concern — weeks are
+    globally sequential within a season, see _resolve_week's own docstring)."""
+    season = _infer_season(before_date)
+    if season is None:
+        return []
+    schedule = get_schedule(season)
+    week = _resolve_week(schedule, before_date)
+    if week is None:
+        return []
+    weekly = load_season_weekly_stats(season)
+    return player_recent_games(weekly, player_id, before_week=week, n=max_games)
+
+
+def get_player_history_vs_opponent(player_id: str, opp_abbr: str, before_date: str,
+                                   max_games: int = 10) -> List[Dict]:
+    """This player's stats in every game THIS SEASON their team has played against one specific
+    opponent, most recent first. Genuinely likely to come back EMPTY more often than not — most
+    NFL opponents meet exactly once a season (division rivals meet twice, home and away), unlike
+    a sport with a balanced round-robin schedule. That's the honest, common case here, not the
+    exception — reported honestly rather than padded with a guess or reaching into a prior
+    season (a team's roster the year before tells you less than nothing reliable about how a
+    reshuffled roster plays this year)."""
+    season = _infer_season(before_date)
+    if season is None:
+        return []
+    schedule = get_schedule(season)
+    week = _resolve_week(schedule, before_date)
+    if week is None:
+        return []
+    weekly = load_season_weekly_stats(season)
+    if weekly.empty:
+        return []
+    rows = weekly[(weekly["player_id"] == player_id) & (weekly["week"] < week) &
+                 (weekly["opponent_team"] == opp_abbr)]
+    rows = rows.sort_values("week", ascending=False).head(max_games)
+    return rows.to_dict("records")
+
+
+def get_team_allowed_stats(team_abbr: str, before_date: str, n: Optional[int] = None) -> Dict[str, float]:
+    """Average PassYds/RushYds/Receptions/RecYds ALLOWED by this team's defense — n=None for the
+    whole season so far, n=int for just their last n games. Computed by grouping the league-wide
+    weekly-stats table (already loaded once per Matchup Lab pageview, not re-fetched per call) by
+    week, summing every opposing player's stat line for games against this team (equivalent to
+    that game's TEAM total against them), then averaging across games. The recent/season split
+    lets Matchup Lab show whether a defense has been trending looser or tighter lately than their
+    own season norm — same signal WNBA/NBA/NCAAMB's Matchup Lab already surfaces, built on NFL's
+    own real data shape rather than a basketball-style pace/possession normalization (NFL doesn't
+    have an equivalent "possessions" concept the way basketball's per-100 adjustment needs)."""
+    season = _infer_season(before_date)
+    if season is None:
+        return {}
+    schedule = get_schedule(season)
+    week = _resolve_week(schedule, before_date)
+    if week is None:
+        return {}
+    weekly = load_season_weekly_stats(season)
+    if weekly.empty:
+        return {}
+    rows = weekly[(weekly["opponent_team"] == team_abbr) & (weekly["week"] < week)]
+    if rows.empty:
+        return {}
+    stat_cols = ["passing_yards", "rushing_yards", "receptions", "receiving_yards"]
+    by_week = rows.groupby("week")[stat_cols].sum()
+    if n is not None:
+        by_week = by_week.sort_index(ascending=False).head(n)
+    if by_week.empty:
+        return {}
+    avg = by_week.mean()
+    return {col: float(avg[col]) for col in stat_cols}
+
+
+def get_team_rest_info(team_abbr: str, before_date: str) -> Dict[str, Any]:
+    """Rest context for a team heading into before_date: days since their last completed game,
+    and whether they're on a short week (a real NFL concept, unlike basketball's back-to-back —
+    no NFL team plays on consecutive days; a "short week" is a Thursday game after a Sunday one,
+    ~4 days rest instead of the standard 7). Sourced directly from the schedule's own home_rest/
+    away_rest fields (confirmed live during scoping — nflreadpy computes these already), not
+    derived by scanning games the way every basketball engine in this platform has to."""
+    empty = {"rest_days": None, "is_short_week": False, "last_game_date": None, "last_opp_name": None}
+    season = _infer_season(before_date)
+    if season is None:
+        return empty
+    schedule = get_schedule(season)
+    week = _resolve_week(schedule, before_date)
+    if week is None:
+        return empty
+    team_games = [g for g in schedule if g["week"] < week and
+                 (g["home_team"] == team_abbr or g["away_team"] == team_abbr)]
+    if not team_games:
+        return empty
+    last = max(team_games, key=lambda g: g["week"])
+    is_home = last["home_team"] == team_abbr
+    rest = last["home_rest"] if is_home else last["away_rest"]
+    opp = last["away_team"] if is_home else last["home_team"]
+    try:
+        rest_val = int(rest) if rest is not None else None
+    except (TypeError, ValueError):
+        rest_val = None
+    return {"rest_days": rest_val, "is_short_week": rest_val is not None and rest_val <= 4,
+           "last_game_date": last.get("game_date"), "last_opp_name": opp}

@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 425/425 tests green)
+## What's in this checkpoint (all tested — 444/444 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -1247,6 +1247,71 @@ and sensible reasoning for each. 5 new tests in `test_nfl_projections.py` (`expl
 none-row/catchable/outlier/unknown-market cases) plus the new cross-sport contract guard.
 425/425 total passing.
 
+### NFL Matchup Lab + Anytime TD Engine built (2026-07-17, same session)
+Both requested pages built and verified end to end against real live 2025 data.
+
+**NFL Matchup Lab — built as its OWN page, not added to the existing WNBA/NBA/NCAAMB one, a real
+decision, not an oversight**: `nfl_engine.get_team_injuries` takes `(team_abbr, season, week)` —
+richer and more precise than basketball's `(team_abbr)` alone, since NFL's real injury data is
+genuinely week-specific. Weakening it to fit the shared page's 1-arg convention would throw away
+real value. NFL's game-log records also use nflreadpy's own raw columns (`week`, `opponent_team`,
+`passing_yards`, ...) rather than basketball's engine-added `opp`/`date` convenience fields. Same
+conventions and spirit as the existing Matchup Lab throughout (time slot + game filters, trend
+charts against the line, recent/season/H2H table, opponent defensive-trend table) — adapted, not
+reinvented, for what NFL's data actually looks like.
+- **`nfl_engine.py` additions**: `team_abbrs_from_meta` (trivial for NFL — team_id already IS the
+  abbreviation), `get_player_season_games`, `get_player_history_vs_opponent` (honestly expected to
+  return empty far more often than any other sport here — most NFL opponents meet once a season,
+  division rivals twice), `get_team_allowed_stats` (defense-allowed rates, grouped by game/week
+  then averaged — confirmed via test that this correctly sums per-game before averaging, not
+  averaging raw player rows, which would double-count teammates' returns from the same game),
+  `get_team_rest_info` (reads real `home_rest`/`away_rest` straight from the schedule, no scanning
+  needed — and uses **`is_short_week`**, not basketball's `is_back_to_back`, a real NFL concept
+  since no team plays on consecutive days; a short week is a Thursday game after a Sunday one).
+- **`nfl_projections.py` additions**: `build_trend_series`, `stat_key_for` (an honest identity
+  function for NFL — `_MARKET_SPEC` already stores the real column name directly, no separate
+  short-name translation layer the way basketball needs one), `build_matchup_profile` (iterates
+  only a row's own gated `_markets`, so a QB's profile never gets a phantom Receptions row).
+- **`views/13_NFL_Matchup_Lab.py`** — new page, wired into `streamlit_app.py`'s navigation and
+  `sport_only_leads` (NFL-only, same gating pattern every sport-specific page uses).
+- Verified against real live data: Saquon Barkley vs. the Giants (his former team) — real recent
+  form, real (honestly empty) H2H, real opponent-allowed defensive trend, real rest info for both
+  teams, no crashes anywhere in the chain.
+
+**Anytime TD Engine — the NFL analog to MLB's Dinger Engine, genuinely different math, not a port
+of the four Core markets**: those bootstrap-resample a continuous stat and derive P(stat > line).
+Scoring a TD is already a real Bernoulli outcome, so `build_anytime_td_board` skips the bootstrap
+step entirely and applies `basketball_projections.shrink_prob` DIRECTLY to each player's own
+empirical TD-scored rate — arguably the cleaner, more natural fit for that shrinkage math than the
+Core markets' own use of it, not a repurposing. **QB included in eligible positions, deliberately,
+unlike the Rush Yards yardage market** (which excludes QB on purpose — mixing a scrambling QB's
+occasional carries with a workhorse RB's volume under one shared line would mislead): Anytime TD
+is a binary outcome with no shared line, so a mobile QB's real rushing-TD rate is its own honest
+signal here. **Ranked by raw ModelProb, not a Conviction ratio** — also deliberate: a workhorse
+RB's true scoring rate might be 35%, a WR's 15%, and dividing either by a shared 0.5 baseline
+wouldn't mean the same thing for both positions; ranking directly by probability (like MLB's own
+Dinger Engine) is the honest choice.
+- **`views/14_Anytime_TD_Engine.py`** — new page, model-only, NO live odds integration yet — a
+  deliberate v1 scoping choice: Anytime TD is typically a single-sided Yes/No market at
+  sportsbooks, a different offer shape than the four Core markets' verified Over/Under, and
+  guessing at that shape risked a silent parsing bug. Ships the same way every sport's first board
+  here did — model-only, clearly labeled, live pricing a real follow-on once that shape is
+  confirmed the same rigorous way the Core markets' was.
+- Verified against real live data: real, recognizable, correctly-shrunk results (Saquon Barkley,
+  Garrett Wilson, De'Von Achane all near the top with real recent scoring rates, appropriately
+  pulled toward a neutral baseline rather than showing raw small-sample 100%s).
+
+**Both pages wired into navigation** (`streamlit_app.py`'s `sport_only_leads` and `meta` dicts,
+page 13 and 14) — confirmed via the same source-scraping regression test every prior page addition
+required updating, a legitimate assertion update reflecting the real new config.
+
+**41 new tests** across `test_nfl_engine.py` (11: team_abbrs_from_meta, season games, H2H
+filtering incl. the honest-empty case, allowed-stats grouping-by-game correctness, allowed-stats
+recency-window correctness, rest-info incl. short-week flagging) and `test_nfl_projections.py`
+(9: trend series, stat_key_for, matchup-profile market-gating and honest-empty-H2H and
+defense-trend tagging, Anytime TD position-eligibility/ranking/shrinkage/either-TD-type-counts).
+444/444 total passing.
+
 ## NOT YET DONE (next stages)
 - **Line-movement chart** — see above. The capture infrastructure is live; the actual
   stock-candlestick-style chart in Matchup Lab is the natural next step once there's real
@@ -1272,9 +1337,11 @@ none-row/catchable/outlier/unknown-market cases) plus the new cross-sport contra
 - **NFL post-launch: real Streamlit Cloud deploy check** — see above. The one thing not checkable
   from this sandbox; worth a first look once the 2026 season is close enough for real data to
   browse (season starts Sep 9, 2026).
-- **NFL Hot Hand Engine / Matchup Lab equivalents** — deliberately deferred (see above), the same
-  staged-build pattern MLB and WNBA both followed before their own Hot Hand Engine/Matchup Lab
-  pages existed.
+- **NFL Hot Hand Engine equivalent** — Matchup Lab is now done (see above); Hot Hand Engine (an
+  opponent-adjusted leaderboard across the whole slate, not a single-player deep dive) remains
+  deliberately deferred, the same staged-build pattern MLB and WNBA both followed. Worth noting:
+  `get_team_allowed_stats` (built for Matchup Lab) already provides the core opponent-adjustment
+  data Hot Hand Engine would need, so this is now a smaller lift than it was before today.
 - **NHL, NCAAF** — no engines built yet. (NCAAWB considered and deliberately deferred — Odds API
   doesn't currently offer player props for WNCAAB, so there's no live market for Edge Board to
   price against yet; worth revisiting if that coverage gap closes.)

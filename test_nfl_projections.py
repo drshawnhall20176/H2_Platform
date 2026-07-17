@@ -133,6 +133,98 @@ def test_explain_miss_no_data_for_unknown_market():
     assert NP.explain_miss(row, "Not A Real Market") == "No recent-game data available for this player."
 
 
+# ----------------------------------------------------------------- Matchup Lab support
+def test_build_trend_series_reverses_to_chronological_order():
+    log = [{"week": 6, "passing_yards": 250}, {"week": 5, "passing_yards": 300}]
+    trend = NP.build_trend_series(log)
+    assert [g["week"] for g in trend] == [5, 6]
+
+
+def test_stat_key_for_is_identity_for_nfl():
+    # Deliberate — NFL's _MARKET_SPEC already stores the real nflreadpy column name directly,
+    # unlike basketball's separate short-name translation layer.
+    assert NP.stat_key_for("passing_yards") == "passing_yards"
+
+
+def test_build_matchup_profile_only_covers_a_rows_own_markets():
+    qb_row = {"Player": "Test QB", "_markets": ["player_pass_yds"],
+             "_recent_games": [{"passing_yards": 260}, {"passing_yards": 240}]}
+    profile = NP.build_matchup_profile(qb_row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={})
+    assert len(profile) == 1
+    assert profile[0]["Market"] == "Pass Yards"
+    assert profile[0]["Recent Avg"] == 250.0
+    print("✓ build_matchup_profile only builds rows for a player's own gated markets")
+
+
+def test_build_matchup_profile_honest_empty_h2h():
+    qb_row = {"Player": "Test QB", "_markets": ["player_pass_yds"],
+             "_recent_games": [{"passing_yards": 250}]}
+    profile = NP.build_matchup_profile(qb_row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={})
+    assert profile[0]["H2H Games"] == 0
+    assert profile[0]["H2H Avg"] is None
+    print("✓ build_matchup_profile reports an honest empty H2H rather than a guess")
+
+
+def test_build_matchup_profile_defense_trend_tags():
+    row = {"Player": "Test QB", "_markets": ["player_pass_yds"],
+          "_recent_games": [{"passing_yards": 250}]}
+    looser = NP.build_matchup_profile(row, [], {"passing_yards": 280.0}, {"passing_yards": 250.0})
+    tighter = NP.build_matchup_profile(row, [], {"passing_yards": 220.0}, {"passing_yards": 250.0})
+    steady = NP.build_matchup_profile(row, [], {"passing_yards": 255.0}, {"passing_yards": 250.0})
+    assert "Looser" in looser[0]["Trend Tag"]
+    assert "Tighter" in tighter[0]["Trend Tag"]
+    assert "Steady" in steady[0]["Trend Tag"]
+
+
+# ----------------------------------------------------------------- Anytime TD
+def _td_row(position, games):
+    return {"Player": f"Test {position}", "_pid": position, "Team": "KC", "Opp": "LAC",
+           "GameLabel": "KC @ LAC", "Position": position, "_recent_games": games}
+
+
+def test_anytime_td_board_only_eligible_positions():
+    rows = [
+        _td_row("QB", [{"rushing_tds": 1, "receiving_tds": 0}] * 3),
+        _td_row("RB", [{"rushing_tds": 1, "receiving_tds": 0}] * 3),
+        _td_row("OL", [{"rushing_tds": 0, "receiving_tds": 0}] * 3),   # not eligible at all
+    ]
+    board = NP.build_anytime_td_board(rows, seed=1)
+    positions = {b["Position"] for b in board}
+    assert positions == {"QB", "RB"}
+    print("✓ build_anytime_td_board only includes TD-eligible positions (QB deliberately included)")
+
+
+def test_anytime_td_board_ranked_by_raw_probability_not_conviction():
+    rows = [
+        _td_row("RB", [{"rushing_tds": 1, "receiving_tds": 0}] * 5),    # 5/5 -> high rate
+        _td_row("WR", [{"rushing_tds": 0, "receiving_tds": 0}] * 5),    # 0/5 -> low rate
+    ]
+    board = NP.build_anytime_td_board(rows, seed=1)
+    assert board[0]["Position"] == "RB"   # higher scoring rate ranked first
+    assert "Conviction" not in board[0]   # deliberately no conviction ratio — see module docstring
+    print("✓ build_anytime_td_board ranks by raw probability, no conviction ratio")
+
+
+def test_anytime_td_board_shrinks_small_samples():
+    # A 2/2 "perfect" streak shouldn't show 100% — same shrinkage discipline as everywhere else.
+    rows = [_td_row("RB", [{"rushing_tds": 1, "receiving_tds": 0}] * 2)]
+    board = NP.build_anytime_td_board(rows, seed=1)
+    assert 0.5 < board[0]["ModelProb"] < 1.0
+    print("✓ build_anytime_td_board shrinks a small-sample 'perfect' streak below 100%")
+
+
+def test_anytime_td_board_skips_empty_game_log():
+    rows = [_td_row("RB", [])]
+    assert NP.build_anytime_td_board(rows) == []
+
+
+def test_anytime_td_board_counts_either_rushing_or_receiving_td():
+    rows = [_td_row("TE", [{"rushing_tds": 0, "receiving_tds": 1}, {"rushing_tds": 1, "receiving_tds": 0},
+                           {"rushing_tds": 0, "receiving_tds": 0}])]
+    board = NP.build_anytime_td_board(rows, seed=1)
+    assert board[0]["TDGames"] == 2   # both a rushing-TD game and a receiving-TD game count
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

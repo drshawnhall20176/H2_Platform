@@ -50,6 +50,8 @@ def run():
         "1": ("MLB",), "2": ("MLB",), "10": ("MLB",),   # Pitching Lab, Dinger Engine, Matchup Lab (MLB)
         "11": ("WNBA", "NBA", "NCAAMB"),                # Hot Hand Engine (opponent-adjusted leaderboard)
         "12": ("WNBA", "NBA", "NCAAMB"),                # Matchup Lab (WNBA/NBA/NCAAMB) — same slot as page 10, different sport
+        "13": ("NFL",),                                 # Matchup Lab (NFL) — own page, not the shared basketball one (see its own module docstring for why)
+        "14": ("NFL",),                                 # Anytime TD Engine — NFL's Dinger Engine analog
     }
 
     # Internal tools kept off the Discord/public build — matched by TITLE (not page number) so a
@@ -73,6 +75,8 @@ def run():
         "10": ("Matchup Lab",   "🔬", "matchup_lab"),
         "11": ("Hot Hand Engine", "🔥", "hot_hand_engine"),
         "12": ("Matchup Lab",   "🔬", "matchup_lab"),   # WNBA version — same slot as page 10
+        "13": ("Matchup Lab",   "🔬", "nfl_matchup_lab"),   # NFL version — same title, distinct url_path
+        "14": ("Anytime TD Engine", "🎯", "anytime_td_engine"),
     }
 
     def lead(name: str) -> str:
