@@ -5,7 +5,7 @@ NCAAMB, all live on one sport-selector foundation; NFL built and verified agains
 pending a final go-live decision). MLB runs exactly as the standalone did originally; WNBA, NBA,
 and NCAAMB are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 411/411 tests green)
+## What's in this checkpoint (all tested — 412/412 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -1120,7 +1120,7 @@ equivalent and a Matchup Lab-equivalent do NOT exist yet, deliberately deferred,
 oversight.
 
 **Files rewritten from scratch**: `nfl_engine.py`, `nfl_projections.py`, `config_nfl.py`. **Files
-added**: `test_nfl_engine.py` (18 tests, including real-confirmed-value tests built from the live
+added**: `test_nfl_engine.py` (19 tests, including real-confirmed-value tests built from the live
 Mahomes/schedule/injury data above), `test_nfl_projections.py` (9 tests, including the same
 streak-length-clustering shrinkage regression every other sport's suite carries). **Files
 touched**: `sports.py` (real markets/market_map wired in, `enabled=False` pending final review —
@@ -1130,12 +1130,19 @@ NFL as their "still unwired" example, since NFL now has real markets — legitim
 reflecting the real new state, same as every other sport's launch). 411/411 total passing.
 
 **Go-live checklist:**
-1. A final review pass on the actual numbers/output (the pipeline runs correctly and produces
-   sensible results, but hasn't had the same "Shawn checks a real response line-by-line" pass
-   WNBA/NBA/NCAAMB each got before their own launches).
+1. ~~A final review pass on the actual numbers/output~~ — DONE, same session. Checked things a
+   quick glance wouldn't catch: team abbreviations match exactly across schedule and roster data
+   (32/32 teams, both consistently using "LA" for the Rams, "WAS" for Washington — no silent
+   join-mismatch risk); playoff weeks (19-22, Wild Card through Super Bowl) are numbered
+   sequentially after the regular season's 1-18, not colliding with it, so "strictly before this
+   week" naturally handles the regular-season-to-playoffs boundary with no special-casing needed;
+   zero duplicate player+week rows in the real data (a mid-season trade doesn't corrupt a
+   player's recent-form sample); and the smallest-possible slate (Super Bowl week, exactly one
+   game) ran cleanly end to end — real matchup (Seahawks @ Patriots, matching the real confirmed
+   result from scoping research), 19 real players, 36 real projected plays.
 2. Live-deploy check once actually running on Streamlit Cloud (confirms `nflreadpy`'s real network
-   behavior in that environment, not just this sandbox).
-3. Once (1) and (2) are done, flip `sports.py`'s NFL entry to `enabled=True`.
+   behavior in that environment, not just this sandbox) — the one item only checkable there, not here.
+3. Once (2) is done, flip `sports.py`'s NFL entry to `enabled=True`.
 
 ## NOT YET DONE (next stages)
 - **Line-movement chart** — see above. The capture infrastructure is live; the actual
@@ -1151,9 +1158,9 @@ reflecting the real new state, same as every other sport's launch). 411/411 tota
   against, not things currently known to be broken.
 - **Injury/availability "opportunity boost" (Stage B)** — see above. Deferred as a genuinely
   separate, harder modeling decision, not a quick follow-on to Stage A's data-fetch.
-- **NFL go-live checklist** — see above. The engine, projections, and registry wiring are done and
-  verified against real live data; a final review pass and a live-deploy check are what's left
-  before flipping it on.
+- **NFL go-live checklist** — see above. The engine, projections, registry wiring, and a real
+  review pass are all done; a live-deploy check on Streamlit Cloud is the one thing left before
+  flipping it on.
 - **NFL Hot Hand Engine / Matchup Lab equivalents** — deliberately deferred (see above), the same
   staged-build pattern MLB and WNBA both followed before their own Hot Hand Engine/Matchup Lab
   pages existed.

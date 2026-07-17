@@ -147,6 +147,20 @@ def test_player_recent_games_excludes_the_before_week_itself():
     print("✓ player_recent_games correctly excludes the target week itself (no lookahead bias)")
 
 
+def test_player_recent_games_playoff_week_pulls_from_regular_season_tail():
+    # Confirmed live during the go-live review pass: playoff weeks (19 Wild Card, 20 Divisional,
+    # 21 Conference, 22 Super Bowl) are numbered SEQUENTIALLY after the regular season's 1-18, not
+    # colliding with it or restarting — so building a Wild Card week 19 slate should pull recent
+    # form from the regular season's actual last games (weeks 14-18), with no special-casing
+    # needed for the boundary. This locks that real behavior in as a regression, not just a
+    # one-off fact noted about the external data.
+    df = pd.DataFrame([{"player_id": "p1", "week": wk, "passing_yards": 200 + wk} for wk in range(14, 19)])
+    games = E.player_recent_games(df, "p1", before_week=19, n=5)   # week 19 = Wild Card
+    assert len(games) == 5
+    assert [g["week"] for g in games] == [18, 17, 16, 15, 14]   # most recent regular-season week first
+    print("✓ player_recent_games correctly pulls a Wild Card week's recent form from the regular season's tail")
+
+
 # ----------------------------------------------------------------- get_team_injuries
 def test_get_team_injuries_real_confirmed_shape(monkeypatch):
     fake_df = pd.DataFrame([
