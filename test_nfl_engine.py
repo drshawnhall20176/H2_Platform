@@ -482,6 +482,40 @@ def test_league_average_pass_yards_allowed_zero_when_no_data(monkeypatch):
     assert E.get_league_average_pass_yards_allowed("2025-09-04") == 0.0
 
 
+def test_get_team_passing_tds_allowed_real_confirmed(monkeypatch):
+    fake_sched = pd.DataFrame([{"game_id": "g", "week": 6, "gameday": "2025-10-13",
+                               "home_team": "B", "away_team": "A", "home_score": 1,
+                               "away_score": 1, "home_rest": 7, "away_rest": 7}])
+    fake_weekly = _fake_weekly([
+        {"player_id": "qb1", "week": 1, "opponent_team": "KC", "passing_tds": 2, "rushing_tds": 0},
+        {"player_id": "rb1", "week": 1, "opponent_team": "KC", "passing_tds": 0, "rushing_tds": 1},
+    ])
+    monkeypatch.setattr(E.nfl, "load_schedules", lambda seasons: _FakePolarsDF(fake_sched))
+    monkeypatch.setattr(E.nfl, "load_player_stats",
+                        lambda seasons, summary_level="week": _FakePolarsDF(fake_weekly))
+    passing = E.get_team_passing_tds_allowed("KC", "2025-10-13", n=None)
+    rushing = E.get_team_rushing_tds_allowed("KC", "2025-10-13", n=None)
+    assert passing == 2.0   # only the QB's passing_tds counted
+    assert rushing == 1.0   # only the RB's rushing_tds counted
+    print("✓ get_team_passing_tds_allowed and get_team_rushing_tds_allowed correctly isolate their own stat")
+
+
+def test_league_average_rush_yards_allowed_averages_across_all_games(monkeypatch):
+    fake_sched = pd.DataFrame([{"game_id": "g", "week": 6, "gameday": "2025-10-13",
+                               "home_team": "B", "away_team": "A", "home_score": 1,
+                               "away_score": 1, "home_rest": 7, "away_rest": 7}])
+    fake_weekly = _fake_weekly([
+        {"player_id": "p1", "week": 1, "opponent_team": "KC", "rushing_yards": 100},
+        {"player_id": "p2", "week": 1, "opponent_team": "DAL", "rushing_yards": 140},
+    ])
+    monkeypatch.setattr(E.nfl, "load_schedules", lambda seasons: _FakePolarsDF(fake_sched))
+    monkeypatch.setattr(E.nfl, "load_player_stats",
+                        lambda seasons, summary_level="week": _FakePolarsDF(fake_weekly))
+    avg = E.get_league_average_rush_yards_allowed("2025-10-13")
+    assert avg == 120.0   # avg(100, 140)
+    print("✓ get_league_average_rush_yards_allowed correctly averages across every team's games league-wide")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

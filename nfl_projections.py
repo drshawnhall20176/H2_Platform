@@ -273,11 +273,74 @@ def stat_key_for(col: str) -> str:
     return col
 
 
+def _extra_profile_row(market_name: str, log: List[Dict], season_log: Optional[List[Dict]],
+                       h2h_log: List[Dict], opp_recent_allowed_val: Optional[float],
+                       opp_season_allowed_val: Optional[float], stat_fn,
+                       round_digits: int = 1, variance_floor: float = 0.75,
+                       variance_min_abs: float = 0.0) -> Dict:
+    """Build one Matchup Lab profile row for a stat OUTSIDE the four core yardage markets'
+    _MARKET_SPEC-driven loop in build_matchup_profile — shared by the combined Touchdowns row
+    (RB/WR/TE/FB) and QB's split Rush Yards/Passing TDs/Rushing TDs rows, so those four don't each
+    repeat the same Recent/Season/H2H/Allowed/Trend construction separately. Deliberately NOT used
+    by the core yardage-market loop itself, which stays untouched — that loop has extra cross-
+    market Suppressed-ratio logic this simpler per-stat shape doesn't need, and refactoring
+    already-shipped, tested code for cosmetic DRY wasn't worth the regression risk.
+
+    stat_fn computes the per-game value (e.g. `lambda g: g.get("passing_tds") or 0`, or a
+    combined `lambda g: (g.get("rushing_tds") or 0) + (g.get("receiving_tds") or 0)` for the
+    Touchdowns row) — every one of this helper's callers passes a stat_fn, not a raw column name,
+    since some (Touchdowns) need a synthetic combination, not a direct lookup.
+
+    variance_min_abs adds an ABSOLUTE floor on top of the relative variance_floor (season_avg *
+    variance_floor) — matters for low-count stats like TDs, where "75% of a 0.3 season average"
+    is too small a bar to mean anything; a 1.0 absolute floor for TD-type rows means a genuine
+    1+ TD swing is required before flagging high variance, not a fraction of a fraction."""
+    recent_vals = [stat_fn(g) for g in log]
+    recent_avg = (sum(recent_vals) / len(recent_vals)) if recent_vals else 0.0
+    season_vals = [stat_fn(g) for g in season_log] if season_log else []
+    season_avg = (sum(season_vals) / len(season_vals)) if season_vals else None
+    h2h_vals = [stat_fn(g) for g in h2h_log]
+    h2h_avg = (sum(h2h_vals) / len(h2h_vals)) if h2h_vals else None
+    h2h_spread = f"{min(h2h_vals):.0f}\u2013{max(h2h_vals):.0f}" if len(h2h_vals) >= 2 else None
+    high_variance = False
+    if len(h2h_vals) >= 2 and season_avg and season_avg > 0:
+        high_variance = (max(h2h_vals) - min(h2h_vals)) > max(season_avg * variance_floor, variance_min_abs)
+
+    recent_allowed = opp_recent_allowed_val or 0.0
+    season_allowed = opp_season_allowed_val or 0.0
+    trend = (recent_allowed / season_allowed) if season_allowed > 0 else 1.0
+    if trend >= 1.08:
+        trend_tag = "📈 Looser lately"
+    elif trend <= 0.92:
+        trend_tag = "📉 Tighter lately"
+    else:
+        trend_tag = "➡️ Steady"
+
+    return {
+        "Market": market_name,
+        "Recent Avg": round(recent_avg, round_digits),
+        "Season Avg": round(season_avg, round_digits) if season_avg is not None else None,
+        "H2H Games": len(h2h_vals),
+        "H2H Avg": round(h2h_avg, round_digits) if h2h_avg is not None else None,
+        "H2H Spread": h2h_spread,
+        "High Variance": high_variance,
+        "Suppressed": False,   # not part of the yardage-market H2H-comparison logic
+        "Opp Recent Allowed": round(recent_allowed, round_digits) if recent_allowed else None,
+        "Opp Season Allowed": round(season_allowed, round_digits) if season_allowed else None,
+        "Defense Trend": round(trend, 2),
+        "Trend Tag": trend_tag,
+    }
+
+
 def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_recent_allowed: Dict[str, float],
                           opp_season_allowed: Dict[str, float],
                           season_log: Optional[List[Dict]] = None,
                           opp_recent_tds_allowed: Optional[float] = None,
-                          opp_season_tds_allowed: Optional[float] = None) -> List[Dict]:
+                          opp_season_tds_allowed: Optional[float] = None,
+                          opp_recent_passing_tds_allowed: Optional[float] = None,
+                          opp_season_passing_tds_allowed: Optional[float] = None,
+                          opp_recent_rushing_tds_allowed: Optional[float] = None,
+                          opp_season_rushing_tds_allowed: Optional[float] = None) -> List[Dict]:
     """One row per market for Matchup Lab's deep-dive on a single player vs their upcoming
     opponent — see wnba_projections.build_matchup_profile's docstring for the shared reasoning
     behind each signal (identical spirit here; adapted, not copy-pasted, for two real NFL
@@ -296,20 +359,30 @@ def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_recent_allowed: Di
     OVERWHELMINGLY common case for most matchups here, not an edge case worth softening.
 
     TOUCHDOWNS, IF THE PLAYER'S POSITION IS TD-ELIGIBLE (see nfl_projections._TD_ELIGIBLE_
-    POSITIONS), GETS ITS OWN ROW, BUILT SEPARATELY FROM THE MARKET LOOP ABOVE, NOT FOLDED IN: TDs
-    is a fundamentally different KIND of stat from the four yardage markets — a low, often
+    POSITIONS), GETS ITS OWN ROW(S), BUILT SEPARATELY FROM THE MARKET LOOP ABOVE, NOT FOLDED IN:
+    TDs is a fundamentally different KIND of stat from the four yardage markets — a low, often
     zero-inflated count (most games: 0 or 1), not a continuous yardage total, and it isn't one of
-    the odds-market-keyed entries in _MARKET_SPEC at all (see build_anytime_td_board's own
-    docstring for why TD probability is modeled with direct rate-shrinkage instead of the yardage
-    markets' bootstrap approach — this Matchup Lab row reuses that same "count of games with a TD"
-    framing for display, not the yardage markets' machinery). Deliberately excluded from the
+    the odds-market-keyed entries in _MARKET_SPEC at all. Deliberately excluded from the
     Suppressed-market flagging logic below (which specifically compares H2H performance ACROSS
-    the yardage markets against each other) — TDs isn't part of that same-unit comparison."""
+    the yardage markets against each other) — TDs isn't part of that same-unit comparison.
+
+    QB GETS THREE ROWS INSTEAD OF ONE COMBINED TOUCHDOWNS ROW, A REAL DESIGN CHOICE: a QB's
+    touchdown production is overwhelmingly through PASSING, not rushing — folding rushing_tds +
+    receiving_tds into one "Touchdowns" number (receiving_tds is always ~0 for a QB) would
+    silently miss the QB's actual primary scoring signal entirely. So QB gets "Rush Yards"
+    (deliberately shown here even though QB doesn't get the shared player_rush_yds MARKET on
+    Edge Board/Best Bets — that exclusion was about not mixing a scrambling QB's occasional
+    carries with a workhorse RB's volume under ONE shared betting line; showing the QB's own
+    rushing yards as a Matchup Lab DISPLAY signal has no such conflict, since it's not shared
+    with anyone else's number here), "Passing TDs", and "Rushing TDs" — all three built via the
+    shared _extra_profile_row helper, same one the combined Touchdowns row (for RB/WR/TE/FB)
+    uses, just with different stat columns and opponent-allowed context."""
     season_avgs: Dict[str, Optional[float]] = {}
     h2h_avgs: Dict[str, Optional[float]] = {}
     ratios: Dict[str, float] = {}
     markets = row.get("_markets") or []
     log = row.get("_recent_games") or []
+    position = row.get("Position")
 
     for mkey in markets:
         col, _disp, _line = _MARKET_SPEC[mkey]
@@ -372,46 +445,27 @@ def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_recent_allowed: Di
             "Trend Tag": trend_tag,
         })
 
-    if row.get("Position") in _TD_ELIGIBLE_POSITIONS:
-        def _td_count(g: Dict) -> float:
-            return (g.get("rushing_tds") or 0) + (g.get("receiving_tds") or 0)
-
-        td_recent_vals = [_td_count(g) for g in log]
-        td_recent_avg = (sum(td_recent_vals) / len(td_recent_vals)) if td_recent_vals else 0.0
-        td_season_vals = [_td_count(g) for g in season_log] if season_log else []
-        td_season_avg = (sum(td_season_vals) / len(td_season_vals)) if td_season_vals else None
-        td_h2h_vals = [_td_count(g) for g in h2h_log]
-        td_h2h_avg = (sum(td_h2h_vals) / len(td_h2h_vals)) if td_h2h_vals else None
-        td_h2h_spread = (f"{min(td_h2h_vals):.0f}\u2013{max(td_h2h_vals):.0f}"
-                        if len(td_h2h_vals) >= 2 else None)
-        td_high_variance = False
-        if len(td_h2h_vals) >= 2 and td_season_avg and td_season_avg > 0:
-            td_high_variance = (max(td_h2h_vals) - min(td_h2h_vals)) > max(td_season_avg * 0.75, 1.0)
-
-        td_recent_allowed = opp_recent_tds_allowed or 0.0
-        td_season_allowed = opp_season_tds_allowed or 0.0
-        td_trend = (td_recent_allowed / td_season_allowed) if td_season_allowed > 0 else 1.0
-        if td_trend >= 1.08:
-            td_trend_tag = "📈 Looser lately"
-        elif td_trend <= 0.92:
-            td_trend_tag = "📉 Tighter lately"
-        else:
-            td_trend_tag = "➡️ Steady"
-
-        out.append({
-            "Market": "Touchdowns",
-            "Recent Avg": round(td_recent_avg, 2),
-            "Season Avg": round(td_season_avg, 2) if td_season_avg is not None else None,
-            "H2H Games": len(td_h2h_vals),
-            "H2H Avg": round(td_h2h_avg, 2) if td_h2h_avg is not None else None,
-            "H2H Spread": td_h2h_spread,
-            "High Variance": td_high_variance,
-            "Suppressed": False,   # not part of the yardage-market H2H-comparison logic above
-            "Opp Recent Allowed": round(td_recent_allowed, 2) if td_recent_allowed else None,
-            "Opp Season Allowed": round(td_season_allowed, 2) if td_season_allowed else None,
-            "Defense Trend": round(td_trend, 2),
-            "Trend Tag": td_trend_tag,
-        })
+    if position == "QB":
+        out.append(_extra_profile_row(
+            "Rush Yards", log, season_log, h2h_log,
+            opp_recent_allowed.get("rushing_yards"), opp_season_allowed.get("rushing_yards"),
+            stat_fn=lambda g: g.get("rushing_yards") or 0, round_digits=1, variance_floor=0.75))
+        out.append(_extra_profile_row(
+            "Passing TDs", log, season_log, h2h_log,
+            opp_recent_passing_tds_allowed, opp_season_passing_tds_allowed,
+            stat_fn=lambda g: g.get("passing_tds") or 0, round_digits=2,
+            variance_floor=0.75, variance_min_abs=1.0))
+        out.append(_extra_profile_row(
+            "Rushing TDs", log, season_log, h2h_log,
+            opp_recent_rushing_tds_allowed, opp_season_rushing_tds_allowed,
+            stat_fn=lambda g: g.get("rushing_tds") or 0, round_digits=2,
+            variance_floor=0.75, variance_min_abs=1.0))
+    elif position in _TD_ELIGIBLE_POSITIONS:
+        out.append(_extra_profile_row(
+            "Touchdowns", log, season_log, h2h_log,
+            opp_recent_tds_allowed, opp_season_tds_allowed,
+            stat_fn=lambda g: (g.get("rushing_tds") or 0) + (g.get("receiving_tds") or 0),
+            round_digits=2, variance_floor=0.75, variance_min_abs=1.0))
     return out
 
 
@@ -477,19 +531,29 @@ def build_anytime_td_board(rows: List[Dict], seed: Optional[int] = None) -> List
 
 # --------------------------------------------------------------------------- QB Lab
 def build_qb_matchup_projections(rows: List[Dict], opp_pass_yards_allowed: Dict[str, float],
-                                 league_avg_pass_yards_allowed: float) -> List[Dict]:
-    """QB matchup-aware Pass Yards projections: each QB's own recent-form average, scaled by how
-    much this week's opponent's pass defense allows relative to the league average — the same
-    odds-ratio-style matchup adjustment Pitching Lab's own Proj K applies to a strikeout
-    projection, adapted here to a yardage stat instead. A QB facing a defense that allows 15%
-    more than league-average passing yards gets a correspondingly scaled-UP projection; a tough
-    pass defense scales it down.
+                                 league_avg_pass_yards_allowed: float,
+                                 opp_rush_yards_allowed: Optional[Dict[str, float]] = None,
+                                 league_avg_rush_yards_allowed: float = 0.0) -> List[Dict]:
+    """QB matchup-aware Pass Yards AND Rush Yards projections: each QB's own recent-form average
+    for both stats, each scaled by how much this week's opponent allows relative to the league
+    average for that stat — the same odds-ratio-style matchup adjustment Pitching Lab's own
+    Proj K applies to a strikeout projection, adapted here to two yardage stats instead.
 
-    opp_pass_yards_allowed: {opp_abbr: season pass yards allowed}, the CALLER's job to build —
-    one nfl_engine.get_team_allowed_stats(opp, date, n=None) call per unique opponent actually on
-    the slate (far cheaper than one call per QB, since a given week has far fewer distinct
-    opponents than QBs sharing them). league_avg_pass_yards_allowed comes from nfl_engine.
-    get_league_average_pass_yards_allowed, also the caller's job (one call covers the whole slate)."""
+    RUSH YARDS INCLUDED HERE DELIBERATELY, EVEN THOUGH QB DOESN'T GET THE SHARED player_rush_yds
+    MARKET ON EDGE BOARD/BEST BETS: that exclusion was about not mixing a scrambling QB's
+    occasional carries with a workhorse RB's volume under ONE shared betting line (see
+    _MARKETS_FOR_POSITION's own docstring in nfl_engine.py). Showing a QB's OWN rushing yards
+    projection here has no such conflict — it's not shared with anyone else's number, same
+    reasoning build_matchup_profile's QB branch already uses for its own Rush Yards row.
+
+    opp_pass_yards_allowed / opp_rush_yards_allowed: {opp_abbr: season stat allowed}, the
+    CALLER's job to build — one nfl_engine.get_team_allowed_stats(opp, date, n=None) call per
+    unique opponent covers BOTH stats at once (that function already returns a dict with both
+    keys), so this doesn't cost the caller a second round of per-opponent calls.
+    league_avg_pass_yards_allowed / league_avg_rush_yards_allowed come from nfl_engine.
+    get_league_average_pass_yards_allowed / get_league_average_rush_yards_allowed, also the
+    caller's job (one call each covers the whole slate)."""
+    opp_rush_yards_allowed = opp_rush_yards_allowed or {}
     out: List[Dict] = []
     for r in rows:
         if r.get("Position") != "QB" or "player_pass_yds" not in (r.get("_markets") or []):
@@ -497,27 +561,39 @@ def build_qb_matchup_projections(rows: List[Dict], opp_pass_yards_allowed: Dict[
         log = r.get("_recent_games") or []
         if not log:
             continue
-        recent_avg = sum(g.get("passing_yards") or 0 for g in log) / len(log)
-        opp_allowed = opp_pass_yards_allowed.get(r.get("Opp"), 0.0)
-        if league_avg_pass_yards_allowed > 0 and opp_allowed > 0:
-            factor = opp_allowed / league_avg_pass_yards_allowed
+        recent_pass_avg = sum(g.get("passing_yards") or 0 for g in log) / len(log)
+        opp_pass_allowed = opp_pass_yards_allowed.get(r.get("Opp"), 0.0)
+        if league_avg_pass_yards_allowed > 0 and opp_pass_allowed > 0:
+            pass_factor = opp_pass_allowed / league_avg_pass_yards_allowed
         else:
-            factor = 1.0   # no opponent/league data yet -> neutral, never a fabricated boost/penalty
+            pass_factor = 1.0   # no opponent/league data yet -> neutral, never a fabricated boost/penalty
+
+        recent_rush_avg = sum(g.get("rushing_yards") or 0 for g in log) / len(log)
+        opp_rush_allowed = opp_rush_yards_allowed.get(r.get("Opp"), 0.0)
+        if league_avg_rush_yards_allowed > 0 and opp_rush_allowed > 0:
+            rush_factor = opp_rush_allowed / league_avg_rush_yards_allowed
+        else:
+            rush_factor = 1.0
+
         out.append({
             "Player": r["Player"], "Team": r["Team"], "Opp": r.get("Opp"), "Game": r["GameLabel"],
-            "Recent Avg": round(recent_avg, 1),
-            "Opp Pass Yds Allowed (season)": round(opp_allowed, 1) if opp_allowed else None,
-            "Matchup Factor": round(factor, 2),
-            "Proj Pass Yds": round(recent_avg * factor, 1),
+            "Recent Avg": round(recent_pass_avg, 1),
+            "Opp Pass Yds Allowed (season)": round(opp_pass_allowed, 1) if opp_pass_allowed else None,
+            "Matchup Factor": round(pass_factor, 2),
+            "Proj Pass Yds": round(recent_pass_avg * pass_factor, 1),
+            "Recent Rush Yds": round(recent_rush_avg, 1),
+            "Opp Rush Yds Allowed (season)": round(opp_rush_allowed, 1) if opp_rush_allowed else None,
+            "Rush Matchup Factor": round(rush_factor, 2),
+            "Proj Rush Yds": round(recent_rush_avg * rush_factor, 1),
         })
     out.sort(key=lambda x: x["Proj Pass Yds"], reverse=True)
     return out
 
 
 def build_qb_efficiency_table(rows: List[Dict], season_logs_by_pid: Dict[str, List[Dict]]) -> List[Dict]:
-    """TD:INT regression signal: each QB's recent TD/INT rates against their own season-long
-    rates, flagging a meaningful divergence — the honest NFL counterpart to Pitching Lab's ERA-
-    vs-FIP framing, built entirely from real confirmed data (TD/INT counts) rather than a
+    """TD:INT regression signal: each QB's recent PASSING TD/INT rates against their own season-
+    long rates, flagging a meaningful divergence — the honest NFL counterpart to Pitching Lab's
+    ERA-vs-FIP framing, built entirely from real confirmed data (TD/INT counts) rather than a
     fabricated "NFL FIP." Worth being explicit this is a DIFFERENT axis of regression than ERA-
     vs-FIP, not the same formula ported over: ERA-vs-FIP compares a luck-affected RESULTS metric
     against a more-predictive PERIPHERALS metric over the SAME window. This compares a small,
@@ -528,7 +604,14 @@ def build_qb_efficiency_table(rows: List[Dict], season_logs_by_pid: Dict[str, Li
     ABOVE their season TD:INT rate is flagged as possibly NOT sustainable (their season rate is
     the larger, steadier sample) — this is deliberately NOT phrased as a buy/fade recommendation
     the way Pitching Lab's does, just a description of which number is the more reliable
-    baseline, leaving the read to the person looking at it."""
+    baseline, leaving the read to the person looking at it.
+
+    RUSHING TD RATE SHOWN ALONGSIDE, DELIBERATELY NOT BLENDED INTO THE DELTA/TAG: the TD:INT
+    regression signal above is specifically a PASSING efficiency read (TDs against INTs is a
+    passing-game concept — there's no "rushing INT" to compare a rushing TD rate against the same
+    way). Rushing TD Rate is included as its own additional, raw signal — same "show the signals
+    side by side, don't hand back one blended number" philosophy Matchup Lab already follows —
+    not folded into the passing-specific delta/tag above."""
     out: List[Dict] = []
     for r in rows:
         if r.get("Position") != "QB":
@@ -548,6 +631,10 @@ def build_qb_efficiency_table(rows: List[Dict], season_logs_by_pid: Dict[str, Li
         season_diff = (season_td - season_int) if season_td is not None and season_int is not None else None
         delta = (recent_diff - season_diff) if season_diff is not None else None
 
+        recent_rush_td = sum(g.get("rushing_tds") or 0 for g in log) / len(log)
+        season_rush_td = (sum(g.get("rushing_tds") or 0 for g in season_log) / len(season_log)
+                          if season_log else None)
+
         tag = "—"
         if delta is not None:
             if delta >= 0.5:
@@ -559,10 +646,12 @@ def build_qb_efficiency_table(rows: List[Dict], season_logs_by_pid: Dict[str, Li
 
         out.append({
             "Player": r["Player"], "Team": r["Team"], "Opp": r.get("Opp"),
-            "Recent TD Rate": round(recent_td, 2), "Recent INT Rate": round(recent_int, 2),
-            "Season TD Rate": round(season_td, 2) if season_td is not None else None,
+            "Recent Passing TD Rate": round(recent_td, 2), "Recent INT Rate": round(recent_int, 2),
+            "Season Passing TD Rate": round(season_td, 2) if season_td is not None else None,
             "Season INT Rate": round(season_int, 2) if season_int is not None else None,
             "TD-INT Delta (recent vs season)": round(delta, 2) if delta is not None else None,
+            "Recent Rushing TD Rate": round(recent_rush_td, 2),
+            "Season Rushing TD Rate": round(season_rush_td, 2) if season_rush_td is not None else None,
             "Tag": tag,
         })
     out.sort(key=lambda x: (x["TD-INT Delta (recent vs season)"]

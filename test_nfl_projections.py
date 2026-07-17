@@ -315,7 +315,7 @@ def test_qb_efficiency_table_in_line_with_season_norm():
 def test_qb_efficiency_table_honest_none_without_season_log():
     row = _qb_row("Test QB", "LAC", [{"passing_tds": 2, "passing_interceptions": 0}])
     eff = NP.build_qb_efficiency_table([row], {})   # no season log available for this player
-    assert eff[0]["Season TD Rate"] is None
+    assert eff[0]["Season Passing TD Rate"] is None
     assert eff[0]["TD-INT Delta (recent vs season)"] is None
     assert eff[0]["Tag"] == "—"
     print("✓ build_qb_efficiency_table honestly reports no delta when no season log is available")
@@ -324,6 +324,91 @@ def test_qb_efficiency_table_honest_none_without_season_log():
 def test_qb_efficiency_table_skips_non_qb_rows():
     rb_row = {"Player": "Test RB", "Position": "RB", "_recent_games": [{"passing_tds": 0}]}
     assert NP.build_qb_efficiency_table([rb_row], {}) == []
+
+
+def test_build_matchup_profile_qb_gets_split_rows_not_combined_touchdowns():
+    qb_row = {"Player": "Test QB", "Position": "QB", "_markets": ["player_pass_yds"],
+             "_recent_games": [
+                 {"passing_yards": 250, "rushing_yards": 20, "passing_tds": 2, "rushing_tds": 0},
+                 {"passing_yards": 230, "rushing_yards": 40, "passing_tds": 1, "rushing_tds": 1},
+             ]}
+    profile = NP.build_matchup_profile(qb_row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={})
+    markets = [p["Market"] for p in profile]
+    assert "Touchdowns" not in markets   # QB gets split rows, never the combined one
+    assert "Rush Yards" in markets
+    assert "Passing TDs" in markets
+    assert "Rushing TDs" in markets
+    print("✓ build_matchup_profile gives a QB split Rush Yards/Passing TDs/Rushing TDs rows, never a combined Touchdowns row")
+
+
+def test_build_matchup_profile_qb_rush_yards_uses_opp_recent_allowed_dict():
+    # QB Rush Yards reuses the SAME opp_recent_allowed/opp_season_allowed dicts already fetched
+    # for the yardage markets — no separate opponent-rushing-yards-allowed call needed.
+    qb_row = {"Player": "Test QB", "Position": "QB", "_markets": ["player_pass_yds"],
+             "_recent_games": [{"passing_yards": 250, "rushing_yards": 30}]}
+    profile = NP.build_matchup_profile(qb_row, h2h_log=[],
+                                       opp_recent_allowed={"rushing_yards": 140.0},
+                                       opp_season_allowed={"rushing_yards": 100.0})
+    rush_row = next(p for p in profile if p["Market"] == "Rush Yards")
+    assert rush_row["Recent Avg"] == 30.0
+    assert rush_row["Opp Recent Allowed"] == 140.0
+    assert "Looser" in rush_row["Trend Tag"]   # 140/100 = 1.4 >= 1.08
+    print("✓ build_matchup_profile's QB Rush Yards row correctly reuses the existing opponent-allowed dicts")
+
+
+def test_build_matchup_profile_qb_passing_tds_vs_rushing_tds_correctly_split():
+    qb_row = {"Player": "Test QB", "Position": "QB", "_markets": ["player_pass_yds"],
+             "_recent_games": [{"passing_tds": 3, "rushing_tds": 0}, {"passing_tds": 1, "rushing_tds": 1}]}
+    profile = NP.build_matchup_profile(qb_row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={},
+                                       opp_recent_passing_tds_allowed=2.0, opp_season_passing_tds_allowed=1.5,
+                                       opp_recent_rushing_tds_allowed=0.5, opp_season_rushing_tds_allowed=0.8)
+    passing_row = next(p for p in profile if p["Market"] == "Passing TDs")
+    rushing_row = next(p for p in profile if p["Market"] == "Rushing TDs")
+    assert passing_row["Recent Avg"] == 2.0   # (3+1)/2
+    assert rushing_row["Recent Avg"] == 0.5   # (0+1)/2
+    assert passing_row["Opp Recent Allowed"] == 2.0
+    assert rushing_row["Opp Recent Allowed"] == 0.5
+    print("✓ build_matchup_profile correctly splits Passing TDs and Rushing TDs into independent rows")
+
+
+def test_build_matchup_profile_non_qb_still_gets_combined_touchdowns_row():
+    # Regression guard: the refactor to add QB's split rows must not change RB/WR/TE/FB's
+    # existing combined Touchdowns row behavior.
+    rb_row = {"Player": "Test RB", "Position": "RB", "_markets": ["player_rush_yds"],
+             "_recent_games": [{"rushing_yards": 60, "rushing_tds": 1, "receiving_tds": 0}]}
+    profile = NP.build_matchup_profile(rb_row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={})
+    markets = [p["Market"] for p in profile]
+    assert "Touchdowns" in markets
+    assert "Passing TDs" not in markets and "Rushing TDs" not in markets
+    print("✓ RB/WR/TE/FB still get the combined Touchdowns row, unaffected by the QB-specific split")
+
+
+# ----------------------------------------------------------------- QB Lab: rushing extensions
+def test_qb_matchup_projections_includes_rush_yards_projection():
+    rows = [_qb_row("Test QB", "LAC", [{"passing_yards": 250, "rushing_yards": 25}] * 2)]
+    proj = NP.build_qb_matchup_projections(rows, {"LAC": 250.0}, 250.0, {"LAC": 150.0}, 100.0)
+    assert proj[0]["Recent Rush Yds"] == 25.0
+    assert proj[0]["Rush Matchup Factor"] == 1.5   # 150/100
+    assert proj[0]["Proj Rush Yds"] == 37.5         # 25 * 1.5
+    print("✓ build_qb_matchup_projections correctly adds a matchup-adjusted rushing projection")
+
+
+def test_qb_matchup_projections_rush_neutral_without_rush_data():
+    rows = [_qb_row("Test QB", "LAC", [{"passing_yards": 250, "rushing_yards": 25}])]
+    proj = NP.build_qb_matchup_projections(rows, {"LAC": 250.0}, 250.0)   # no rush args at all
+    assert proj[0]["Rush Matchup Factor"] == 1.0
+    assert proj[0]["Proj Rush Yds"] == 25.0
+
+
+def test_qb_efficiency_table_includes_rushing_td_rate_alongside_passing():
+    log = [{"passing_tds": 2, "passing_interceptions": 0, "rushing_tds": 1},
+          {"passing_tds": 2, "passing_interceptions": 0, "rushing_tds": 0}]
+    row = _qb_row("Test QB", "LAC", log)
+    eff = NP.build_qb_efficiency_table([row], {})
+    assert eff[0]["Recent Rushing TD Rate"] == 0.5
+    # renamed keys, not the old ambiguous "Recent TD Rate"/"Season TD Rate"
+    assert "Recent Passing TD Rate" in eff[0] and "Recent TD Rate" not in eff[0]
+    print("✓ build_qb_efficiency_table includes Rushing TD Rate alongside the renamed Passing TD Rate")
 
 
 if __name__ == "__main__":

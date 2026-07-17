@@ -509,15 +509,14 @@ def get_team_allowed_stats(team_abbr: str, before_date: str, n: Optional[int] = 
     return {col: float(avg[col]) for col in stat_cols}
 
 
-def get_team_tds_allowed(team_abbr: str, before_date: str, n: Optional[int] = None) -> float:
-    """Average TOTAL touchdowns (rushing + receiving combined) ALLOWED by this team's defense per
-    game — n=None for the whole season so far, n=int for just their last n games. Same grouped-
-    by-game-then-averaged construction as get_team_allowed_stats (see that function's own
-    docstring for the full reasoning), kept as its OWN function rather than folded into that
-    one's return dict: touchdowns is a fundamentally different kind of stat from the four yardage
-    markets there (a low, often zero-inflated count, not a continuous yardage total), and
-    Matchup Lab's Touchdowns row needs a single number, not a dict of four unrelated stats a
-    caller would have to reach into."""
+def _get_team_stat_sum_allowed(team_abbr: str, before_date: str, stat_cols: List[str],
+                               n: Optional[int] = None) -> float:
+    """Shared helper: average of stat_cols SUMMED per game then averaged across games, allowed by
+    this team's defense — the same grouped-by-game-then-averaged construction get_team_allowed_
+    stats uses, generalized to an arbitrary set of columns so get_team_tds_allowed/get_team_
+    passing_tds_allowed/get_team_rushing_tds_allowed don't each duplicate this logic separately.
+    Private — not part of this module's public contract, just the shared implementation the three
+    public *_allowed functions above call."""
     season = _infer_season(before_date)
     if season is None:
         return 0.0
@@ -533,17 +532,44 @@ def get_team_tds_allowed(team_abbr: str, before_date: str, n: Optional[int] = No
         return 0.0
     # Same pandas gotcha fixed in load_season_weekly_stats's _touches computation: DataFrame.get()
     # returns the literal default (an int) when a column is entirely absent, not a Series of that
-    # default, and .fillna() on an int crashes. Ensuring both columns exist first, same fix.
-    for col in ("rushing_tds", "receiving_tds"):
+    # default, and .fillna() on an int crashes. Ensuring every needed column exists first.
+    for col in stat_cols:
         if col not in rows.columns:
             rows[col] = 0
-    rows["_tds"] = rows["rushing_tds"].fillna(0) + rows["receiving_tds"].fillna(0)
-    by_week = rows.groupby("week")["_tds"].sum()
+    rows["_sum"] = sum(rows[col].fillna(0) for col in stat_cols)
+    by_week = rows.groupby("week")["_sum"].sum()
     if n is not None:
         by_week = by_week.sort_index(ascending=False).head(n)
     if by_week.empty:
         return 0.0
     return float(by_week.mean())
+
+
+def get_team_tds_allowed(team_abbr: str, before_date: str, n: Optional[int] = None) -> float:
+    """Average TOTAL touchdowns (rushing + receiving combined) ALLOWED by this team's defense per
+    game — n=None for the whole season so far, n=int for just their last n games. Kept as its OWN
+    function rather than folded into get_team_allowed_stats's return dict: touchdowns is a
+    fundamentally different kind of stat from the four yardage markets there (a low, often
+    zero-inflated count, not a continuous yardage total), and Matchup Lab's Touchdowns row needs a
+    single number, not a dict of four unrelated stats a caller would have to reach into."""
+    return _get_team_stat_sum_allowed(team_abbr, before_date, ["rushing_tds", "receiving_tds"], n)
+
+
+def get_team_passing_tds_allowed(team_abbr: str, before_date: str, n: Optional[int] = None) -> float:
+    """Average PASSING touchdowns ALLOWED by this team's PASS defense per game — the opponent
+    context for QB Lab's/Matchup Lab's Passing TDs row, kept separate from get_team_tds_allowed
+    (rushing + receiving) since a QB's passing TDs and a defense's pass-defense performance are a
+    genuinely different signal than how many rushing/receiving TDs that same defense allows."""
+    return _get_team_stat_sum_allowed(team_abbr, before_date, ["passing_tds"], n)
+
+
+def get_team_rushing_tds_allowed(team_abbr: str, before_date: str, n: Optional[int] = None) -> float:
+    """Average RUSHING touchdowns ALLOWED by this team's run defense per game — the opponent
+    context for Matchup Lab's QB-specific Rushing TDs row. Kept separate from get_team_tds_
+    allowed (which combines rushing + receiving) since a QB's rushing TDs specifically compares
+    most honestly against rushing TDs allowed, not a number that's partly about receiving TDs
+    allowed to totally different positions."""
+    return _get_team_stat_sum_allowed(team_abbr, before_date, ["rushing_tds"], n)
 
 
 def get_team_rest_info(team_abbr: str, before_date: str) -> Dict[str, Any]:
@@ -578,17 +604,19 @@ def get_team_rest_info(team_abbr: str, before_date: str) -> Dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- QB Lab support
-def get_league_average_pass_yards_allowed(before_date: str) -> float:
-    """League-wide average pass yards allowed per team-game, SEASON-WIDE ONLY (no recent-N-games
-    version, deliberately) — the baseline QB Lab's matchup-adjusted projection compares one
-    opponent's own allowed rate against. A "recent league average" doesn't translate as cleanly
-    as a single team's own recent-vs-season split does: different teams have played a different
-    number of games by any given week, so "the league's last N games" is genuinely ambiguous in a
-    way "this ONE team's last N games" isn't. Season-wide is also the more defensible choice for
-    a matchup BASELINE specifically — it's a stable comparison point, not a moving target that
-    would make the same opponent look tougher or easier depending only on when you happened to
-    check, the same reasoning Pitching Lab's own matchup adjustment leans on a full-season
-    opposing-lineup sample rather than that lineup's own last-10-games form."""
+def _get_league_average_allowed(before_date: str, stat_col: str) -> float:
+    """Shared helper: league-wide average of stat_col allowed per team-game, SEASON-WIDE ONLY (no
+    recent-N-games version, deliberately) — the baseline QB Lab's matchup-adjusted projections
+    compare one opponent's own allowed rate against. A "recent league average" doesn't translate
+    as cleanly as a single team's own recent-vs-season split does: different teams have played a
+    different number of games by any given week, so "the league's last N games" is genuinely
+    ambiguous in a way "this ONE team's last N games" isn't. Season-wide is also the more
+    defensible choice for a matchup BASELINE specifically — a stable comparison point, not a
+    moving target that would make the same opponent look tougher or easier depending only on when
+    you happened to check, the same reasoning Pitching Lab's own matchup adjustment leans on a
+    full-season opposing-lineup sample rather than that lineup's own last-10-games form. Private —
+    get_league_average_pass_yards_allowed/get_league_average_rush_yards_allowed both call this
+    rather than duplicating the same grouped-by-real-game construction separately."""
     season = _infer_season(before_date)
     if season is None:
         return 0.0
@@ -605,7 +633,20 @@ def get_league_average_pass_yards_allowed(before_date: str) -> float:
     # Group by (opponent_team, week) = one row per real game, from the DEFENSE's perspective —
     # same "sum per game, then average across games" construction as get_team_allowed_stats,
     # just not restricted to one team first.
-    by_game = rows.groupby(["opponent_team", "week"])["passing_yards"].sum()
+    by_game = rows.groupby(["opponent_team", "week"])[stat_col].sum()
     if by_game.empty:
         return 0.0
     return float(by_game.mean())
+
+
+def get_league_average_pass_yards_allowed(before_date: str) -> float:
+    """League-wide average pass yards allowed per team-game — see _get_league_average_allowed's
+    own docstring for the full reasoning (season-wide only, not a recent-N-games version)."""
+    return _get_league_average_allowed(before_date, "passing_yards")
+
+
+def get_league_average_rush_yards_allowed(before_date: str) -> float:
+    """League-wide average rush yards allowed per team-game — the baseline QB Lab's matchup-
+    adjusted Rush Yards projection compares one opponent's own allowed rate against, same role
+    get_league_average_pass_yards_allowed plays for the Pass Yards projection."""
+    return _get_league_average_allowed(before_date, "rushing_yards")

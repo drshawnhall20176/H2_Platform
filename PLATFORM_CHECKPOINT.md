@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 459/459 tests green)
+## What's in this checkpoint (all tested — 468/468 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -1361,6 +1361,58 @@ league-average grouping-across-all-teams correctness, both with real-data-shaped
 `test_nfl_projections.py` (13: Touchdowns-row market-gating and Suppressed-exclusion, TD-
 eligibility wrapper, matchup-factor scaling and neutral-fallback, efficiency-table trending/
 in-line/honest-none cases). 459/459 total passing.
+
+### QB touchdown breakout + rushing yards, in both Matchup Lab and QB Lab (2026-07-17, same session)
+Two real enhancements to the QB experience specifically, verified end to end against real live
+Patrick Mahomes data throughout.
+
+**Matchup Lab: QB gets split rows, not the combined Touchdowns row.** A QB's touchdown
+production is overwhelmingly through PASSING, not rushing — the existing combined "Touchdowns"
+row (rushing_tds + receiving_tds) would have silently missed a QB's actual primary scoring
+signal entirely (receiving_tds is always ~0 for a QB). QB now gets three rows instead: **Rush
+Yards** (shown here even though QB doesn't get the shared `player_rush_yds` MARKET on Edge
+Board/Best Bets — that original exclusion was specifically about not mixing a scrambling QB's
+occasional carries with a workhorse RB's volume under ONE shared betting line; a Matchup Lab
+DISPLAY row has no such conflict, since it isn't shared with anyone else's number), **Passing
+TDs**, and **Rushing TDs**. Confirmed live: Mahomes shows 38.0 recent rush yards/game (genuinely
+mobile) and a real passing-vs-rushing TD split (1.6 vs 0.6/game) that would have been invisible
+under the old combined row.
+
+**Two new engine functions, `get_team_passing_tds_allowed`/`get_team_rushing_tds_allowed`**,
+refactored alongside the existing `get_team_tds_allowed` into a shared private
+`_get_team_stat_sum_allowed` helper — verified via the existing test suite that the refactor
+produced zero behavior change to the already-shipped function before extending it.
+
+**A new shared `_extra_profile_row` helper in `nfl_projections.py`**, used by the combined
+Touchdowns row (RB/WR/TE/FB, refactored to use it — again verified via existing tests that this
+produced byte-identical output to the pre-refactor version) and now the three QB rows, avoiding
+writing the same Recent/Season/H2H/Allowed/Trend construction four separate times. Deliberately
+NOT applied to the core yardage-market loop itself (Pass Yards/Rush Yards for RB/Receptions/
+Receiving Yards) — that loop's extra cross-market Suppressed-ratio logic doesn't fit this
+simpler per-stat shape, and refactoring already-shipped, tested code for cosmetic DRY wasn't
+worth the risk.
+
+**QB Lab extended with the same two signals.** `build_qb_matchup_projections` now returns a
+second matchup-adjusted projection (Rush Yards, using the exact same odds-ratio construction as
+the existing Pass Yards one) alongside the original — needed a new engine function,
+`get_league_average_rush_yards_allowed`, refactored alongside the existing pass-yards version
+into a shared `_get_league_average_allowed` helper (same verify-no-regression discipline).
+`build_qb_efficiency_table`'s two TD-rate columns were **renamed** for honesty once a rushing
+sibling existed alongside them — "Recent/Season TD Rate" (always implicitly passing-only) became
+"Recent/Season Passing TD Rate", with new "Recent/Season Rushing TD Rate" columns added
+alongside, deliberately NOT folded into the passing-specific TD:INT delta/tag (there's no
+rushing equivalent of an interception to regress a rushing TD rate against the same way) — same
+"raw signals side by side, not one blended number" philosophy Matchup Lab already follows. The
+one test and the view file that referenced the old key names were updated in the same change, so
+nothing broke in the transition.
+
+**9 new tests** across `test_nfl_engine.py` (2: passing/rushing TDs allowed correctly isolate
+their own stat from a combined-looking dataset; league-average rushing yards allowed) and
+`test_nfl_projections.py` (7: QB gets split rows never a combined one; QB Rush Yards reuses the
+existing opponent-allowed dicts with no extra fetch; Passing TDs vs Rushing TDs correctly
+isolated from each other; RB/WR/TE/FB's existing combined row unaffected — the actual regression
+guard for the refactor; QB Lab's rushing projection and neutral-fallback; the renamed efficiency
+columns). 468/468 total passing.
 
 ## NOT YET DONE (next stages)
 - **Line-movement chart** — see above. The capture infrastructure is live; the actual
