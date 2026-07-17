@@ -152,10 +152,10 @@ def test_sport_only_page_visibility_matches_expected_config():
         pairs[key] = tuple(re.findall(r'"(\w+)"', vals))
     assert pairs == {"1": ("MLB",), "2": ("MLB",), "10": ("MLB",),
                      "11": ("WNBA", "NBA", "NCAAMB"), "12": ("WNBA", "NBA", "NCAAMB"),
-                     "13": ("NFL",), "14": ("NFL",)}, pairs
+                     "13": ("NFL",), "14": ("NFL",), "15": ("NFL",)}, pairs
     print("✓ sport_only_leads matches expected config (Pitching Lab/Dinger Engine/Matchup Lab(MLB) "
           "-> MLB, Hot Hand Engine/Matchup Lab(WNBA/NBA/NCAAMB) -> WNBA+NBA+NCAAMB, "
-          "Matchup Lab(NFL)/Anytime TD Engine -> NFL)")
+          "Matchup Lab(NFL)/Anytime TD Engine/QB Lab -> NFL)")
 
 
 def test_hot_hand_and_matchup_lab_loaders_key_their_cache_by_sport():

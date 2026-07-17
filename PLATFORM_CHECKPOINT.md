@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 444/444 tests green)
+## What's in this checkpoint (all tested — 459/459 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -1311,6 +1311,56 @@ recency-window correctness, rest-info incl. short-week flagging) and `test_nfl_p
 (9: trend series, stat_key_for, matchup-profile market-gating and honest-empty-H2H and
 defense-trend tagging, Anytime TD position-eligibility/ranking/shrinkage/either-TD-type-counts).
 444/444 total passing.
+
+### QB Lab + Touchdowns in Matchup Lab (2026-07-17, same session)
+Two enhancements requested together, both verified end to end against real live 2025 data.
+
+**Touchdowns added to Matchup Lab** — new engine function `get_team_tds_allowed` (same grouped-
+by-game-then-averaged construction as `get_team_allowed_stats`, kept as its own function rather
+than folded into that one's return dict since TDs is a fundamentally different KIND of stat — a
+low, often zero-inflated count, not a continuous yardage total). `build_matchup_profile` extended
+with two new optional params (`opp_recent_tds_allowed`, `opp_season_tds_allowed`) and now appends
+a "Touchdowns" row for any TD-eligible position, built separately from the yardage-market loop
+and deliberately excluded from the ratio-based Suppressed-market flagging (which specifically
+compares H2H performance across the yardage markets against each other — TDs isn't part of that
+same-unit comparison). Both of Matchup Lab's existing tables pick up the new row automatically,
+since they already select columns generically from whatever's in the profile list. Added a
+dedicated Touchdowns trend chart too (a bar chart, not the yardage markets' line-plus-dashed-
+line style — TDs is a low discrete count with no live line to show yet, so a bar reads more
+honestly than inventing a reference line that isn't real). One real code-hygiene fix along the
+way: caught the view directly reaching into a private `_TD_ELIGIBLE_POSITIONS` set, which breaks
+the established convention (view files only touch public wrappers like `market_list`/
+`stat_key_for`/`default_line`) — added `is_td_eligible_position()` as the proper public wrapper
+instead of leaving the shortcut in.
+
+**QB Lab built** — the honest NFL counterpart to MLB's Pitching Lab, two real signals:
+- **Matchup-aware Pass Yards projections** — each QB's own recent-form average scaled by how much
+  this week's opponent's pass defense has allowed relative to league average, the same odds-
+  ratio-style adjustment Pitching Lab's own Proj K applies, just to a yardage stat instead of
+  strikeouts. New engine function `get_league_average_pass_yards_allowed` — deliberately SEASON-
+  WIDE ONLY, no recent-N-games version: a league-wide "recent" baseline is genuinely ambiguous in
+  a way one team's own recent-vs-season split isn't (different teams have played different
+  numbers of games by any given week), and a stable baseline is the more defensible choice for a
+  matchup comparison point anyway.
+- **TD:INT regression table** — each QB's recent TD/INT rates against their OWN season-long
+  rates, flagging a meaningful divergence. Explicitly NOT a ported "NFL FIP": ERA-vs-FIP compares
+  a luck-affected results metric against a more-predictive peripherals metric over the SAME
+  window; this compares a small, noisy recent window against a larger, steadier season window —
+  a real but different axis of the same underlying mean-reversion idea, built entirely from real
+  confirmed TD/INT counts rather than fabricating a tracking-data-dependent formula this platform
+  doesn't have the data to support honestly. Tag direction deliberately stated as description, not
+  a buy/fade call the way Pitching Lab's is — "trending above/below season norm," not "buy/fade."
+- Discussion hooks, same auto-generated-talking-points pattern as Pitching Lab's own.
+
+**Both new pages wired into navigation** (`streamlit_app.py`, pages 13-15 all NFL-only via
+`sport_only_leads`) — the same source-scraping regression test every prior page addition required
+updating caught this one too, a legitimate assertion update reflecting the real new config.
+
+**35 new tests** across `test_nfl_engine.py` (6: TDs-allowed grouping-by-game correctness,
+league-average grouping-across-all-teams correctness, both with real-data-shaped edge cases) and
+`test_nfl_projections.py` (13: Touchdowns-row market-gating and Suppressed-exclusion, TD-
+eligibility wrapper, matchup-factor scaling and neutral-fallback, efficiency-table trending/
+in-line/honest-none cases). 459/459 total passing.
 
 ## NOT YET DONE (next stages)
 - **Line-movement chart** — see above. The capture infrastructure is live; the actual

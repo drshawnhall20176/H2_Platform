@@ -225,6 +225,107 @@ def test_anytime_td_board_counts_either_rushing_or_receiving_td():
     assert board[0]["TDGames"] == 2   # both a rushing-TD game and a receiving-TD game count
 
 
+def test_is_td_eligible_position():
+    assert NP.is_td_eligible_position("RB") is True
+    assert NP.is_td_eligible_position("QB") is True
+    assert NP.is_td_eligible_position("OL") is False
+
+
+def test_build_matchup_profile_adds_touchdowns_row_for_eligible_position():
+    rb_row = {"Player": "Test RB", "Position": "RB", "_markets": ["player_rush_yds"],
+             "_recent_games": [{"rushing_yards": 60, "rushing_tds": 1, "receiving_tds": 0},
+                               {"rushing_yards": 40, "rushing_tds": 0, "receiving_tds": 0}]}
+    profile = NP.build_matchup_profile(rb_row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={},
+                                       opp_recent_tds_allowed=2.5, opp_season_tds_allowed=2.0)
+    markets = [p["Market"] for p in profile]
+    assert "Touchdowns" in markets
+    td_row = next(p for p in profile if p["Market"] == "Touchdowns")
+    assert td_row["Recent Avg"] == 0.5   # 1 TD in 2 games
+    assert td_row["Opp Recent Allowed"] == 2.5
+    assert "Looser" in td_row["Trend Tag"]   # 2.5/2.0 = 1.25 >= 1.08
+    print("✓ build_matchup_profile adds a Touchdowns row for a TD-eligible position")
+
+
+def test_build_matchup_profile_no_touchdowns_row_for_ineligible_position():
+    ol_row = {"Player": "Test OL", "Position": "OL", "_markets": [], "_recent_games": []}
+    profile = NP.build_matchup_profile(ol_row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={})
+    assert profile == []
+    print("✓ build_matchup_profile adds no Touchdowns row for a non-eligible position")
+
+
+def test_build_matchup_profile_touchdowns_row_not_suppressed_by_yardage_market_logic():
+    # The Touchdowns row is deliberately excluded from the ratio-based Suppressed flagging that
+    # compares the yardage markets against each other.
+    row = {"Player": "Test RB", "Position": "RB", "_markets": ["player_rush_yds"],
+          "_recent_games": [{"rushing_yards": 5, "rushing_tds": 0, "receiving_tds": 0}] * 3}
+    profile = NP.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={},
+                                       opp_recent_tds_allowed=1.0, opp_season_tds_allowed=1.0)
+    td_row = next(p for p in profile if p["Market"] == "Touchdowns")
+    assert td_row["Suppressed"] is False
+
+
+# ----------------------------------------------------------------- QB Lab
+def _qb_row(name, opp, log):
+    return {"Player": name, "Position": "QB", "Team": "KC", "Opp": opp, "GameLabel": f"KC @ {opp}",
+           "_pid": name, "_markets": ["player_pass_yds"], "_recent_games": log}
+
+
+def test_qb_matchup_projections_scales_by_opponent_relative_to_league_average():
+    rows = [_qb_row("Test QB", "LAC", [{"passing_yards": 250}, {"passing_yards": 250}])]
+    # opponent allows 20% more than league average -> projection should scale up ~20%
+    proj = NP.build_qb_matchup_projections(rows, {"LAC": 300.0}, league_avg_pass_yards_allowed=250.0)
+    assert proj[0]["Matchup Factor"] == 1.2
+    assert proj[0]["Proj Pass Yds"] == 300.0   # 250 * 1.2
+    print("✓ build_qb_matchup_projections correctly scales the projection by the matchup factor")
+
+
+def test_qb_matchup_projections_neutral_when_no_opponent_data():
+    rows = [_qb_row("Test QB", "LAC", [{"passing_yards": 250}])]
+    proj = NP.build_qb_matchup_projections(rows, {}, league_avg_pass_yards_allowed=250.0)
+    assert proj[0]["Matchup Factor"] == 1.0   # no fabricated boost/penalty without real data
+    assert proj[0]["Proj Pass Yds"] == 250.0
+
+
+def test_qb_matchup_projections_only_includes_qbs_with_pass_yards_market():
+    rb_row = {"Player": "Test RB", "Position": "RB", "Team": "KC", "Opp": "LAC",
+             "GameLabel": "KC @ LAC", "_markets": ["player_rush_yds"],
+             "_recent_games": [{"passing_yards": 0}]}
+    assert NP.build_qb_matchup_projections([rb_row], {}, 250.0) == []
+
+
+def test_qb_efficiency_table_flags_trending_above_season_norm():
+    log = [{"passing_tds": 3, "passing_interceptions": 0}] * 3   # recent TD-INT diff = 3.0
+    season_log = [{"passing_tds": 1, "passing_interceptions": 0.5}] * 10   # season diff = 0.5
+    row = _qb_row("Test QB", "LAC", log)
+    eff = NP.build_qb_efficiency_table([row], {"Test QB": season_log})
+    assert eff[0]["TD-INT Delta (recent vs season)"] == 2.5
+    assert "above season norm" in eff[0]["Tag"]
+    print("✓ build_qb_efficiency_table correctly flags a QB trending well above their season norm")
+
+
+def test_qb_efficiency_table_in_line_with_season_norm():
+    log = [{"passing_tds": 2, "passing_interceptions": 1}] * 3
+    season_log = [{"passing_tds": 2, "passing_interceptions": 1}] * 10
+    row = _qb_row("Test QB", "LAC", log)
+    eff = NP.build_qb_efficiency_table([row], {"Test QB": season_log})
+    assert eff[0]["TD-INT Delta (recent vs season)"] == 0.0
+    assert "In line" in eff[0]["Tag"]
+
+
+def test_qb_efficiency_table_honest_none_without_season_log():
+    row = _qb_row("Test QB", "LAC", [{"passing_tds": 2, "passing_interceptions": 0}])
+    eff = NP.build_qb_efficiency_table([row], {})   # no season log available for this player
+    assert eff[0]["Season TD Rate"] is None
+    assert eff[0]["TD-INT Delta (recent vs season)"] is None
+    assert eff[0]["Tag"] == "—"
+    print("✓ build_qb_efficiency_table honestly reports no delta when no season log is available")
+
+
+def test_qb_efficiency_table_skips_non_qb_rows():
+    rb_row = {"Player": "Test RB", "Position": "RB", "_recent_games": [{"passing_tds": 0}]}
+    assert NP.build_qb_efficiency_table([rb_row], {}) == []
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

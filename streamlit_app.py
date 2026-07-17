@@ -52,6 +52,7 @@ def run():
         "12": ("WNBA", "NBA", "NCAAMB"),                # Matchup Lab (WNBA/NBA/NCAAMB) — same slot as page 10, different sport
         "13": ("NFL",),                                 # Matchup Lab (NFL) — own page, not the shared basketball one (see its own module docstring for why)
         "14": ("NFL",),                                 # Anytime TD Engine — NFL's Dinger Engine analog
+        "15": ("NFL",),                                 # QB Lab — NFL's Pitching Lab analog
     }
 
     # Internal tools kept off the Discord/public build — matched by TITLE (not page number) so a
@@ -77,6 +78,7 @@ def run():
         "12": ("Matchup Lab",   "🔬", "matchup_lab"),   # WNBA version — same slot as page 10
         "13": ("Matchup Lab",   "🔬", "nfl_matchup_lab"),   # NFL version — same title, distinct url_path
         "14": ("Anytime TD Engine", "🎯", "anytime_td_engine"),
+        "15": ("QB Lab",        "🏈", "qb_lab"),
     }
 
     def lead(name: str) -> str:

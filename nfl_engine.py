@@ -509,6 +509,43 @@ def get_team_allowed_stats(team_abbr: str, before_date: str, n: Optional[int] = 
     return {col: float(avg[col]) for col in stat_cols}
 
 
+def get_team_tds_allowed(team_abbr: str, before_date: str, n: Optional[int] = None) -> float:
+    """Average TOTAL touchdowns (rushing + receiving combined) ALLOWED by this team's defense per
+    game — n=None for the whole season so far, n=int for just their last n games. Same grouped-
+    by-game-then-averaged construction as get_team_allowed_stats (see that function's own
+    docstring for the full reasoning), kept as its OWN function rather than folded into that
+    one's return dict: touchdowns is a fundamentally different kind of stat from the four yardage
+    markets there (a low, often zero-inflated count, not a continuous yardage total), and
+    Matchup Lab's Touchdowns row needs a single number, not a dict of four unrelated stats a
+    caller would have to reach into."""
+    season = _infer_season(before_date)
+    if season is None:
+        return 0.0
+    schedule = get_schedule(season)
+    week = _resolve_week(schedule, before_date)
+    if week is None:
+        return 0.0
+    weekly = load_season_weekly_stats(season)
+    if weekly.empty:
+        return 0.0
+    rows = weekly[(weekly["opponent_team"] == team_abbr) & (weekly["week"] < week)].copy()
+    if rows.empty:
+        return 0.0
+    # Same pandas gotcha fixed in load_season_weekly_stats's _touches computation: DataFrame.get()
+    # returns the literal default (an int) when a column is entirely absent, not a Series of that
+    # default, and .fillna() on an int crashes. Ensuring both columns exist first, same fix.
+    for col in ("rushing_tds", "receiving_tds"):
+        if col not in rows.columns:
+            rows[col] = 0
+    rows["_tds"] = rows["rushing_tds"].fillna(0) + rows["receiving_tds"].fillna(0)
+    by_week = rows.groupby("week")["_tds"].sum()
+    if n is not None:
+        by_week = by_week.sort_index(ascending=False).head(n)
+    if by_week.empty:
+        return 0.0
+    return float(by_week.mean())
+
+
 def get_team_rest_info(team_abbr: str, before_date: str) -> Dict[str, Any]:
     """Rest context for a team heading into before_date: days since their last completed game,
     and whether they're on a short week (a real NFL concept, unlike basketball's back-to-back —
@@ -538,3 +575,37 @@ def get_team_rest_info(team_abbr: str, before_date: str) -> Dict[str, Any]:
         rest_val = None
     return {"rest_days": rest_val, "is_short_week": rest_val is not None and rest_val <= 4,
            "last_game_date": last.get("game_date"), "last_opp_name": opp}
+
+
+# --------------------------------------------------------------------------- QB Lab support
+def get_league_average_pass_yards_allowed(before_date: str) -> float:
+    """League-wide average pass yards allowed per team-game, SEASON-WIDE ONLY (no recent-N-games
+    version, deliberately) — the baseline QB Lab's matchup-adjusted projection compares one
+    opponent's own allowed rate against. A "recent league average" doesn't translate as cleanly
+    as a single team's own recent-vs-season split does: different teams have played a different
+    number of games by any given week, so "the league's last N games" is genuinely ambiguous in a
+    way "this ONE team's last N games" isn't. Season-wide is also the more defensible choice for
+    a matchup BASELINE specifically — it's a stable comparison point, not a moving target that
+    would make the same opponent look tougher or easier depending only on when you happened to
+    check, the same reasoning Pitching Lab's own matchup adjustment leans on a full-season
+    opposing-lineup sample rather than that lineup's own last-10-games form."""
+    season = _infer_season(before_date)
+    if season is None:
+        return 0.0
+    schedule = get_schedule(season)
+    week = _resolve_week(schedule, before_date)
+    if week is None:
+        return 0.0
+    weekly = load_season_weekly_stats(season)
+    if weekly.empty:
+        return 0.0
+    rows = weekly[weekly["week"] < week]
+    if rows.empty:
+        return 0.0
+    # Group by (opponent_team, week) = one row per real game, from the DEFENSE's perspective —
+    # same "sum per game, then average across games" construction as get_team_allowed_stats,
+    # just not restricted to one team first.
+    by_game = rows.groupby(["opponent_team", "week"])["passing_yards"].sum()
+    if by_game.empty:
+        return 0.0
+    return float(by_game.mean())

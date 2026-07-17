@@ -427,6 +427,61 @@ def test_get_team_rest_info_empty_when_no_prior_game(monkeypatch):
     assert info == {"rest_days": None, "is_short_week": False, "last_game_date": None, "last_opp_name": None}
 
 
+def test_get_team_tds_allowed_groups_by_game_then_averages(monkeypatch):
+    fake_sched = pd.DataFrame([{"game_id": "g", "week": 6, "gameday": "2025-10-13",
+                               "home_team": "B", "away_team": "A", "home_score": 1,
+                               "away_score": 1, "home_rest": 7, "away_rest": 7}])
+    fake_weekly = _fake_weekly([
+        {"player_id": "p1", "week": 1, "opponent_team": "KC", "rushing_tds": 1, "receiving_tds": 0},
+        {"player_id": "p2", "week": 1, "opponent_team": "KC", "rushing_tds": 0, "receiving_tds": 1},
+        {"player_id": "p3", "week": 2, "opponent_team": "KC", "rushing_tds": 0, "receiving_tds": 2},
+    ])
+    monkeypatch.setattr(E.nfl, "load_schedules", lambda seasons: _FakePolarsDF(fake_sched))
+    monkeypatch.setattr(E.nfl, "load_player_stats",
+                        lambda seasons, summary_level="week": _FakePolarsDF(fake_weekly))
+    allowed = E.get_team_tds_allowed("KC", "2025-10-13", n=None)
+    # week 1 total: 2 TDs (1+1). week 2 total: 2 TDs. avg across 2 games = 2.0
+    assert allowed == 2.0
+    print("✓ get_team_tds_allowed correctly sums per game before averaging, not per player row")
+
+
+def test_get_team_tds_allowed_zero_when_no_data(monkeypatch):
+    fake_sched = pd.DataFrame([{"game_id": "g", "week": 1, "gameday": "2025-09-04",
+                               "home_team": "B", "away_team": "A", "home_score": None,
+                               "away_score": None, "home_rest": 7, "away_rest": 7}])
+    monkeypatch.setattr(E.nfl, "load_schedules", lambda seasons: _FakePolarsDF(fake_sched))
+    monkeypatch.setattr(E.nfl, "load_player_stats",
+                        lambda seasons, summary_level="week": _FakePolarsDF(pd.DataFrame()))
+    assert E.get_team_tds_allowed("KC", "2025-09-04") == 0.0
+
+
+def test_league_average_pass_yards_allowed_averages_across_all_games(monkeypatch):
+    fake_sched = pd.DataFrame([{"game_id": "g", "week": 6, "gameday": "2025-10-13",
+                               "home_team": "B", "away_team": "A", "home_score": 1,
+                               "away_score": 1, "home_rest": 7, "away_rest": 7}])
+    # Two DIFFERENT defenses (KC, DAL), each with their own game — league average spans both.
+    fake_weekly = _fake_weekly([
+        {"player_id": "p1", "week": 1, "opponent_team": "KC", "passing_yards": 200},
+        {"player_id": "p2", "week": 1, "opponent_team": "DAL", "passing_yards": 300},
+    ])
+    monkeypatch.setattr(E.nfl, "load_schedules", lambda seasons: _FakePolarsDF(fake_sched))
+    monkeypatch.setattr(E.nfl, "load_player_stats",
+                        lambda seasons, summary_level="week": _FakePolarsDF(fake_weekly))
+    avg = E.get_league_average_pass_yards_allowed("2025-10-13")
+    assert avg == 250.0   # avg(200, 300) across the two real games
+    print("✓ get_league_average_pass_yards_allowed correctly averages across every team's games league-wide")
+
+
+def test_league_average_pass_yards_allowed_zero_when_no_data(monkeypatch):
+    fake_sched = pd.DataFrame([{"game_id": "g", "week": 1, "gameday": "2025-09-04",
+                               "home_team": "B", "away_team": "A", "home_score": None,
+                               "away_score": None, "home_rest": 7, "away_rest": 7}])
+    monkeypatch.setattr(E.nfl, "load_schedules", lambda seasons: _FakePolarsDF(fake_sched))
+    monkeypatch.setattr(E.nfl, "load_player_stats",
+                        lambda seasons, summary_level="week": _FakePolarsDF(pd.DataFrame()))
+    assert E.get_league_average_pass_yards_allowed("2025-09-04") == 0.0
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
