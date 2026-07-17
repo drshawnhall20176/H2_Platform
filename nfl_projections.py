@@ -1,391 +1,226 @@
 """
-nfl_projections.py — NFL projection model using usage-first approach with heavy shrinkage.
+nfl_projections.py — turns nfl_engine's slate rows into priced probabilities.
 
-The key insight: football is volume × efficiency, not one-on-one matchups.
-- Model USAGE (targets, carries, pass attempts) with heavy regression toward league baseline.
-- Model EFFICIENCY (yards per target, etc.) separately with shrinkage.
-- Combine for outcome distribution.
+Matches projections.py's OUTPUT CONTRACT (build_projection_index / default_board_from_index /
+DEFAULT_SIMS) — the same contract every other sport's projections module follows, which is what
+lets Edge Board consume MLB, WNBA, NBA, NCAAMB, and now NFL through the same code path via
+sports.active().projections. The genuinely sport-agnostic pieces (prob_over, prob_for_side,
+normalize_name, format_et, prob_to_decimal, prob_to_american, curate_selections) are imported
+straight from projections.py, not re-implemented — same convention every sport follows.
 
-With only 17 games, shrinkage is critical. We use empirical Bayes (Stein-like) to pull
-individual estimates toward the prior, weighted by sample size uncertainty.
+POSITION-AWARE, NOT ONE-SIZE-FITS-ALL: unlike basketball's Core 4 (every rotation player gets all
+four markets), a market here only applies to the positions that actually generate that stat — see
+nfl_engine.py's _MARKETS_FOR_POSITION and this module's own _MARKET_SPEC. build_projection_index/
+build_best_bets both iterate a row's OWN `_markets` list (set by nfl_engine.player_row, already
+gated per-position AND per-opportunity-floor), not a blanket set applied to everyone.
 
-Markets:
-  - QB Passing Yards (attempts × yards per attempt)
-  - RB Rushing Yards (carries × yards per carry)
-  - WR Receptions (targets × catch rate)
-  - WR Receiving Yards (receptions × yards per reception)
+METHOD: same bootstrap-then-shrink approach as every basketball sport on this platform — each of a
+player's last N games (config_nfl.RECENT_GAMES_N — 5, not basketball's 10; an NFL season is only
+17 games, so a 10-game window would be over half the season, diluting the recency signal it exists
+to capture) is treated as one draw from their true talent distribution, resampled with replacement,
+then SHRUNK toward a neutral baseline by sample size before being clipped. shrink_prob is imported
+directly from basketball_projections.py — not duplicated, and not moved into a differently-named
+shared module either, despite the cross-domain-sounding import: the function itself is pure
+probability math with zero basketball-specific assumptions (confirmed by reading it), and moving
+it would mean touching three already-shipped, tested modules (WNBA/NBA/NCAAMB's own imports of it)
+for a purely cosmetic rename. Reusing it as-is is the lower-risk choice.
+
+STAGED SCOPE, HONEST ABOUT WHAT'S NOT HERE YET: this module covers what Edge Board and Best Bets
+need — the platform's core "find a priced edge" pages. A Hot Hand Engine-equivalent (opponent-
+adjusted leaderboard) and a Matchup Lab-equivalent (single-player deep dive vs. their own
+head-to-head history) do NOT exist here yet — deliberately deferred, not silently missing, the
+same staged-build pattern every other sport on this platform followed (MLB and WNBA both shipped
+their core pricing pages before their own Hot Hand Engine/Matchup Lab equivalents).
 """
 
 from __future__ import annotations
 
-import logging
-import re
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-import pandas as pd
-from scipy.stats import norm, lognorm
 
-import nfl_engine as engine
+from projections import (  # genuinely sport-agnostic — reused, not duplicated
+    prob_over, prob_for_side, normalize_name, format_et,
+    prob_to_decimal, prob_to_american, curate_selections,
+)
+import basketball_projections as BB_P   # shrink_prob only — see module docstring for why this
+                                        # cross-domain-sounding import is the right call, not a mistake
+import config_nfl as CFG
 
-logger = logging.getLogger(__name__)
+DEFAULT_SIMS = CFG.DEFAULT_SIMS
 
-# ============================================================================
-# CONSTANTS & PRIORS
-# ============================================================================
-
-# League baseline priors (2023-2024 data, tuned from real NFL stats)
-LEAGUE_PRIORS = {
-    "qb_pass_yards": {
-        "attempts_per_game": 38.0,
-        "yards_per_attempt": 7.2,
-    },
-    "rb_rush_yards": {
-        "carries_per_game": 15.0,
-        "yards_per_carry": 4.2,
-    },
-    "wr_receptions": {
-        "targets_per_game": 8.0,
-        "catch_rate": 0.68,
-    },
-    "wr_rec_yards": {
-        "targets_per_game": 8.0,
-        "yards_per_target": 9.5,
-    },
-}
-
-# Uncertainty in priors (standard deviation) — games played is the shrinkage scale
-PRIOR_STD = {
-    "qb_pass_yards": {"attempts": 8.0, "efficiency": 0.8},
-    "rb_rush_yards": {"usage": 4.0, "efficiency": 0.5},
-    "wr_receptions": {"usage": 3.0, "efficiency": 0.15},
-    "wr_rec_yards": {"usage": 3.0, "efficiency": 1.2},
+# odds_market_key -> (weekly-stats column, display name, default line for the model-only board).
+# Default lines are round-number, model-only-board fallbacks (used only before a live line is
+# fetched) — NOT calibrated book numbers, worth tuning empirically once real usage exists, same
+# honest caveat every other sport's defaults on this platform carry. Anchored to real, confirmed
+# 2025-season per-game norms for a rotation player at each position (not guessed from nothing):
+# ~225 pass yards/game for a starting QB, ~45 rush yards for a rotation RB, ~3.5 catches / 40
+# yards for a target-share WR/TE.
+_MARKET_SPEC: Dict[str, Tuple[str, str, float]] = {
+    "player_pass_yds":      ("passing_yards",   "Pass Yards",      224.5),
+    "player_rush_yds":      ("rushing_yards",   "Rush Yards",      44.5),
+    "player_receptions":    ("receptions",      "Receptions",      3.5),
+    "player_reception_yds": ("receiving_yards", "Receiving Yards", 39.5),
 }
 
 
-# ============================================================================
-# NAME NORMALIZATION
-# ============================================================================
-def normalize_name(name: str) -> str:
-    """Normalize player name to match rosters.
-    
-    Handles: "Josh Allen" → "josh allen", removes punctuation, etc.
-    """
-    if not name:
-        return ""
-    # Lowercase, remove leading/trailing space
-    s = name.strip().lower()
-    # Remove punctuation except apostrophes
-    s = re.sub(r"[^\w\s']", "", s)
-    # Collapse multiple spaces
-    s = re.sub(r"\s+", " ", s)
-    return s
+def market_list() -> List[Tuple[str, str, str]]:
+    """[(market_key, stat_column, display_name), ...] — public, iterable form of _MARKET_SPEC."""
+    return [(mkey, col, disp) for mkey, (col, disp, _line) in _MARKET_SPEC.items()]
 
 
-def _shrink_mean(observed: float, prior: float, n_samples: int, prior_std: float) -> float:
-    """Stein-like shrinkage: pull observed toward prior based on sample size.
-    
-    The idea: with few samples, the observed mean is noisy. We shrink it toward
-    the prior (league baseline) with weight proportional to uncertainty.
-    
-    Formula: shrunk = observed * w + prior * (1 - w)
-    where w = n_samples / (n_samples + (prior_std)^2)
-    
-    Args:
-        observed: Observed mean from player's recent games.
-        prior: League baseline prior.
-        n_samples: Number of games observed.
-        prior_std: Prior standard deviation (uncertainty in the prior).
-    
-    Returns:
-        Shrunken estimate.
-    """
-    if n_samples <= 0:
-        return prior
-    # Weight toward observed increases with sample size
-    weight = n_samples / (n_samples + prior_std ** 2)
-    return observed * weight + prior * (1.0 - weight)
+def default_line(market_key: str) -> Optional[float]:
+    spec = _MARKET_SPEC.get(market_key)
+    return spec[2] if spec else None
 
 
-def _build_usage_efficiency(player_id: str, season: int, market: str, rosters: Dict) -> Tuple[float, float, int]:
-    """Extract usage and efficiency for a player in a market.
-    
-    Returns (usage_mean, efficiency_mean, n_games) where:
-      - usage_mean: expected targets/carries/attempts per game
-      - efficiency_mean: expected yards per target/carry/attempt
-      - n_games: games observed
-    
-    Args:
-        player_id: nflverse player_id.
-        season: NFL season.
-        market: One of {qb_pass_yards, rb_rush_yards, wr_receptions, wr_rec_yards}.
-        rosters: Roster dict to identify position.
-    
-    Returns:
-        (usage, efficiency, games) or (0, 0, 0) if insufficient data.
-    """
-    games = engine.player_game_log(player_id, season, rosters)
-    if not games or len(games) < 3:  # Require at least 3 games
-        logger.debug(f"Player {player_id} has < 3 games for {market}")
-        return 0.0, 0.0, 0
-    
-    df = pd.DataFrame(games)
-    n_games = len(df)
-    
-    # Extract usage and efficiency by market
-    if market == "qb_pass_yards":
-        usage = df["pass_attempts"].mean()  # attempts per game
-        ypa = df[df["pass_attempts"] > 0]["pass_yards"].sum() / max(df["pass_attempts"].sum(), 1)
-        efficiency = ypa
-    elif market == "rb_rush_yards":
-        usage = df["carries"].mean()  # carries per game
-        ypc = df[df["carries"] > 0]["rush_yards"].sum() / max(df["carries"].sum(), 1)
-        efficiency = ypc
-    elif market == "wr_receptions":
-        usage = df["targets"].mean()  # targets per game
-        catch_rate = df[df["targets"] > 0]["receptions"].sum() / max(df["targets"].sum(), 1)
-        efficiency = catch_rate
-    elif market == "wr_rec_yards":
-        usage = df["targets"].mean()  # targets per game
-        ypt = df[df["targets"] > 0]["rec_yards"].sum() / max(df["targets"].sum(), 1)
-        efficiency = ypt
-    else:
-        return 0.0, 0.0, 0
-    
-    return float(usage), float(efficiency), int(n_games)
+def _dist(samples: np.ndarray) -> np.ndarray:
+    """Normalized histogram: index i -> P(outcome == i). Same shape/semantics as
+    projections._dist, so odds_api.compute_edges works identically for every sport."""
+    counts = np.bincount(samples.astype(np.int64)).astype(np.float64)
+    total = counts.sum()
+    return counts / total if total > 0 else counts
 
 
-def _fit_lognormal_distribution(mean: float, std: float) -> Tuple[float, float]:
-    """Fit a lognormal distribution to a mean and std.
-    
-    For counts (targets, carries) and yards, lognormal fits better than normal.
-    Given E[X] and Var[X], solve for mu and sigma of ln(X).
-    
-    Args:
-        mean: Expected value.
-        std: Standard deviation.
-    
-    Returns:
-        (mu, sigma) for scipy.stats.lognorm(s=sigma, scale=exp(mu)).
-    """
-    if mean <= 0 or std < 0:
-        return 0.0, 0.1
-    cv = std / mean if mean > 0 else 0.1  # coefficient of variation
-    sigma = np.sqrt(np.log(cv ** 2 + 1))
-    mu = np.log(mean) - 0.5 * sigma ** 2
-    return float(mu), float(sigma)
-
-
-# ============================================================================
-# PROJECTION INDEX
-# ============================================================================
-def proj_index(date_str: str, season: int = 2024, week: Optional[int] = None) -> Dict:
-    """Build projection index for a slate date.
-    
-    Returns dict keyed by (normalized_player_name, market):
-      {(name, market): {
-         dist: scipy.stats distribution,
-         mean: float,
-         std: float,
-         usage: float,
-         efficiency: float,
-         ctx: {player_id, player_name, team, position, game_id, opponent, ...}
-      }, ...}
-    
-    This index is consumed by odds_api.compute_edges() to compute edge metrics.
-    
-    Args:
-        date_str: Date in YYYY-MM-DD format.
-        season: NFL season.
-        week: Optional week override. If None, inferred from date and schedule.
-    
-    Returns:
-        Projection index. Empty dict if no games or data issues.
-    """
-    try:
-        rosters = engine.load_rosters(season)
-        schedule = engine.load_schedule(season)
-        
-        if not rosters or not schedule:
-            logger.error("Failed to load rosters or schedule")
-            return {}
-        
-        # Get games on this date
-        games_today = engine.games_on_date(schedule, date_str)
-        if not games_today:
-            logger.warning(f"No games on {date_str}")
-            return {}
-        
-        index = {}
-        
-        for game in games_today:
-            game_id = game.get("game_id")
-            week_num = game.get("week")
-            home_team = game.get("home_team")
-            away_team = game.get("away_team")
-            
-            # Process both teams' rosters
-            for team in [home_team, away_team]:
-                opponent = away_team if team == home_team else home_team
-                
-                # Find QBs, RBs, WRs on this team
-                team_players = [p for pid, p in rosters.items() if p.get("team") == team]
-                
-                for player in team_players:
-                    pid = player.get("player_id")
-                    pname = player.get("name", "")
-                    pos = player.get("position", "")
-                    
-                    if not pid or not pname:
-                        continue
-                    
-                    markets_for_pos = []
-                    if pos == "QB":
-                        markets_for_pos = ["qb_pass_yards"]
-                    elif pos == "RB":
-                        markets_for_pos = ["rb_rush_yards"]
-                    elif pos == "WR" or pos == "TE":
-                        markets_for_pos = ["wr_receptions", "wr_rec_yards"]
-                    
-                    for market in markets_for_pos:
-                        # Build projection
-                        usage, efficiency, n_games = _build_usage_efficiency(
-                            pid, season, market, rosters
-                        )
-                        
-                        if n_games < 3:
-                            # Not enough data — skip
-                            continue
-                        
-                        # Shrink toward priors
-                        prior = LEAGUE_PRIORS.get(market, {})
-                        prior_std_usage = PRIOR_STD.get(market, {}).get("usage", 3.0)
-                        prior_std_eff = PRIOR_STD.get(market, {}).get("efficiency", 0.5)
-                        
-                        if market == "qb_pass_yards":
-                            prior_usage = prior.get("attempts_per_game", 38.0)
-                            prior_eff = prior.get("yards_per_attempt", 7.2)
-                        elif market == "rb_rush_yards":
-                            prior_usage = prior.get("carries_per_game", 15.0)
-                            prior_eff = prior.get("yards_per_carry", 4.2)
-                        elif market == "wr_receptions":
-                            prior_usage = prior.get("targets_per_game", 8.0)
-                            prior_eff = prior.get("catch_rate", 0.68)
-                        else:  # wr_rec_yards
-                            prior_usage = prior.get("targets_per_game", 8.0)
-                            prior_eff = prior.get("yards_per_target", 9.5)
-                        
-                        # Shrink usage and efficiency
-                        shrunk_usage = _shrink_mean(usage, prior_usage, n_games, prior_std_usage)
-                        shrunk_eff = _shrink_mean(efficiency, prior_eff, n_games, prior_std_eff)
-                        
-                        # Compute final outcome mean and std
-                        if market == "wr_receptions":
-                            # Receptions = targets × catch_rate
-                            outcome_mean = shrunk_usage * shrunk_eff
-                            # Std is binomial-like
-                            outcome_std = np.sqrt(shrunk_usage * shrunk_eff * (1 - shrunk_eff))
-                        else:
-                            # Yards = usage × efficiency
-                            outcome_mean = shrunk_usage * shrunk_eff
-                            # Std is empirical; assume 15% of mean
-                            outcome_std = max(outcome_mean * 0.15, 2.0)
-                        
-                        # Fit lognormal distribution
-                        mu, sigma = _fit_lognormal_distribution(outcome_mean, outcome_std)
-                        dist = lognorm(s=sigma, scale=np.exp(mu))
-                        
-                        # Build context
-                        ctx = {
-                            "player_id": pid,
-                            "player": pname,
-                            "team": team,
-                            "position": pos,
-                            "opponent": opponent,
-                            "game_id": game_id,
-                            "is_home": team == home_team,
-                            "usage_mean": round(usage, 2),
-                            "efficiency_mean": round(efficiency, 4),
-                            "usage_games": n_games,
-                        }
-                        
-                        key = (normalize_name(pname), market)
-                        index[key] = {
-                            "dist": dist,
-                            "mean": round(outcome_mean, 2),
-                            "std": round(outcome_std, 2),
-                            "usage": round(shrunk_usage, 2),
-                            "efficiency": round(shrunk_eff, 4),
-                            "ctx": ctx,
-                        }
-        
-        logger.info(f"Built projection index for {date_str}: {len(index)} entries")
-        return index
-    
-    except Exception as e:
-        logger.error(f"Error building projection index: {e}")
-        return {}
-
-
-# ============================================================================
-# PROBABILITY COMPUTATION (for Edge Board)
-# ============================================================================
-def prob_for_side(dist, point: float, side: str) -> float:
-    """Compute P(outcome > line) or P(outcome < line) for a distribution.
-    
-    Args:
-        dist: scipy.stats distribution (e.g., lognorm).
-        point: The line (e.g., 250.5 for passing yards).
-        side: "Over" or "Under".
-    
-    Returns:
-        Probability. Clipped to [0.01, 0.99].
-    """
-    try:
-        if side.lower().startswith("o"):
-            # P(X > point)
-            prob = dist.sf(point)
-        else:
-            # P(X < point)
-            prob = dist.cdf(point)
-        return float(np.clip(prob, 0.01, 0.99))
-    except Exception as e:
-        logger.warning(f"Error computing prob_for_side: {e}")
-        return 0.5
-
-
-# ============================================================================
-# UTILITIES FOR TESTING
-# ============================================================================
-def sample_distribution(dist, n: int = 10000) -> np.ndarray:
-    """Draw samples from a distribution for testing/visualization.
-    
-    Args:
-        dist: scipy.stats distribution.
-        n: Number of samples.
-    
-    Returns:
-        Array of samples.
-    """
-    return dist.rvs(size=n)
-
-
-def distribution_summary(dist) -> Dict:
-    """Summarize a distribution's key statistics.
-    
-    Args:
-        dist: scipy.stats distribution.
-    
-    Returns:
-        Dict with mean, std, percentiles, etc.
-    """
-    samples = sample_distribution(dist, 10000)
-    return {
-        "mean": float(np.mean(samples)),
-        "std": float(np.std(samples)),
-        "p10": float(np.percentile(samples, 10)),
-        "p25": float(np.percentile(samples, 25)),
-        "median": float(np.median(samples)),
-        "p75": float(np.percentile(samples, 75)),
-        "p90": float(np.percentile(samples, 90)),
+def _signal(player, team, game, market, side, line, prob, projection, **extra) -> Dict:
+    prob = float(round(prob, 4))
+    sig = {
+        "Player": player, "Team": team, "Game": game, "Market": market,
+        "Side": side, "Line": line, "ModelProb": prob, "Projection": round(float(projection), 2),
+        "FairDec": prob_to_decimal(prob), "FairAm": prob_to_american(prob),
+        "BookOdds": None, "Implied": None, "EdgePct": None,
     }
+    sig.update(extra)
+    return sig
+
+
+def simulate_player_stat(recent_values: List[float], sims: int, rng: np.random.Generator) -> np.ndarray:
+    """Bootstrap `sims` draws (with replacement) from a player's recent-game values for one stat.
+    Values are rounded to the nearest non-negative integer (counting/yardage stats can't be
+    fractional or negative). Returns an empty array if there's no game log to sample from."""
+    if not recent_values:
+        return np.array([], dtype=np.int64)
+    draws = rng.choice(np.asarray(recent_values, dtype=np.float64), size=sims, replace=True)
+    return np.clip(np.round(draws), 0, None).astype(np.int64)
+
+
+def _clip_prob(p: float) -> float:
+    """Final safety net: keep probabilities strictly inside (0, 1) so `prob_to_american` never
+    hits its exact-boundary None case. Runs AFTER basketball_projections.shrink_prob, which does
+    the actual statistical correction for small-sample overconfidence — same division of labor
+    every other sport's projections module uses."""
+    return min(max(p, 0.02), 0.98)
+
+
+def build_projection_index(rows: List[Dict], meta: List[Dict],
+                           sims: int = DEFAULT_SIMS, seed: Optional[int] = None) -> Dict:
+    """Return {(normalized_name, odds_market_key): {dist, mean, n_games, ctx}} for the slate —
+    identical shape to every other sport's build_projection_index, so Edge Board doesn't need to
+    know which sport it's looking at. Only iterates each row's OWN `_markets` — a QB's row never
+    contributes a "player_receptions" entry, unlike basketball's blanket four-markets-for-everyone."""
+    rng = np.random.default_rng(seed)
+    index: Dict = {}
+
+    for r in rows:
+        log = r.get("_recent_games") or []
+        markets = r.get("_markets") or []
+        if not log or not markets:
+            continue
+        nm = normalize_name(r["Player"])
+        ctx = {"player": r["Player"], "team": r["Team"], "game": r["GameLabel"],
+              "opp": r.get("Opp"), "lineup": "Active", "game_date": r.get("_game_date")}
+        for mkey in markets:
+            col, _disp, _line = _MARKET_SPEC[mkey]
+            values = [g.get(col) or 0 for g in log]
+            sim = simulate_player_stat(values, sims, rng)
+            if sim.size == 0:
+                continue
+            index[(nm, mkey)] = {"dist": _dist(sim), "mean": float(sim.mean()),
+                                 "n_games": len(values), "ctx": ctx}
+    return index
+
+
+def default_board_from_index(index: Dict) -> List[Dict]:
+    """Model-only board (favored side at default lines) from the index — every NFL market in
+    _MARKET_SPEC is a plain Over/Under, no special-case needed. Probabilities are shrunk toward a
+    neutral baseline by sample size before being clipped, same fix every other sport carries."""
+    out: List[Dict] = []
+    for (nm, mkey), entry in index.items():
+        _col, disp, line = _MARKET_SPEC.get(mkey, (mkey, mkey, 0.5))
+        dist, ctx = entry["dist"], entry["ctx"]
+        raw = prob_over(dist, line)
+        shrunk = BB_P.shrink_prob(raw, entry.get("n_games", 0))
+        over = _clip_prob(shrunk)
+        side, prob = ("Over", over) if over >= 0.5 else ("Under", 1 - over)
+        out.append(_signal(ctx["player"], ctx["team"], ctx["game"], disp, side, line, prob,
+                           entry["mean"], Opp=ctx.get("opp"), Lineup=ctx.get("lineup"),
+                           GameTime=ctx.get("game_date")))
+    return out
+
+
+# --------------------------------------------------------------------------- Best Bets
+# Reference (typical/coin-flip) hit-rate per market — 0.5 for all four, honest given the default
+# lines above are round-number estimates, not book-calibrated (same reasoning every sport uses).
+BEST_BET_REF = {"Pass Yards": 0.5, "Rush Yards": 0.5, "Receptions": 0.5, "Receiving Yards": 0.5}
+
+
+def _favored_side(prob_over: float, ref: float):
+    if prob_over >= ref:
+        return "Over", prob_over, ref
+    return "Under", 1.0 - prob_over, 1.0 - ref
+
+
+def _player_reasons(values: List[float], line: float, side: str) -> str:
+    """'Why' text built from the player's own recent-game log — no opponent/weather/game-script
+    inputs exist in v1 (see module docstring's staged-scope note), so this leans on what's
+    actually available: how consistently they've cleared this exact line recently, and whether
+    their last couple games are trending away from their own average."""
+    n = len(values)
+    if n == 0:
+        return "no recent-game data available"
+    hits = sum(1 for v in values if v > line) if side == "Over" else sum(1 for v in values if v < line)
+    avg = sum(values) / n
+    recent = values[:2]     # most recent first (see nfl_engine.player_recent_games)
+    recent_avg = sum(recent) / len(recent) if recent else avg
+    trend = ""
+    if recent and avg > 0 and abs(recent_avg - avg) >= max(1.0, avg * 0.20):
+        trend = ", trending up" if recent_avg > avg else ", trending down"
+    return f"cleared {line:g} in {hits} of last {n} games (avg {avg:.1f}{trend})"
+
+
+def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
+                    seed: Optional[int] = None) -> List[Dict]:
+    """Rank candidate plays across every position-relevant market by conviction (model prob vs
+    the reference prob for that market), each with recent-form reasoning. No odds required — same
+    output schema every sport's build_best_bets uses. Probabilities are shrunk toward a neutral
+    baseline by sample size before being clipped, same fix every other sport carries."""
+    rng = np.random.default_rng(seed)
+    plays: List[Dict] = []
+
+    for r in rows:
+        log = r.get("_recent_games") or []
+        markets = r.get("_markets") or []
+        if not log or not markets:
+            continue
+        for mkey in markets:
+            col, disp, line = _MARKET_SPEC[mkey]
+            values = [g.get(col) or 0 for g in log]
+            sim = simulate_player_stat(values, sims, rng)
+            if sim.size == 0:
+                continue
+            raw = prob_over(_dist(sim), line)
+            shrunk = BB_P.shrink_prob(raw, len(values))
+            over = _clip_prob(shrunk)
+            side, sp, ref_s = _favored_side(over, BEST_BET_REF.get(disp, 0.5))
+            plays.append({
+                "Player": r["Player"], "PlayerId": r.get("_pid"), "Team": r["Team"],
+                "Game": r["GameLabel"], "Opp": r.get("Opp"), "Versus": r.get("Opp"),
+                "Market": disp, "Side": side, "Line": line,
+                "ModelProb": round(sp, 4), "Fair": prob_to_american(sp),
+                "Conviction": round(sp / ref_s, 2) if ref_s > 0 else 0.0,
+                "Why": _player_reasons(values, line, side),
+                "_stat_key": col, "_game_log": log,
+            })
+
+    plays.sort(key=lambda x: x["Conviction"], reverse=True)
+    return plays

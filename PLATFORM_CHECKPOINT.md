@@ -1,10 +1,11 @@
 # H2 Sports Platform — Build Checkpoint
 
 **This is the multi-sport platform build.** It is the live source of truth (MLB + WNBA + NBA +
-NCAAMB, all live on one sport-selector foundation). MLB runs exactly as the standalone did
-originally; WNBA, NBA, and NCAAMB are all real, priced sports now — not placeholders.
+NCAAMB, all live on one sport-selector foundation; NFL built and verified against real live data,
+pending a final go-live decision). MLB runs exactly as the standalone did originally; WNBA, NBA,
+and NCAAMB are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 384/384 tests green)
+## What's in this checkpoint (all tested — 411/411 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -1051,6 +1052,91 @@ checkpoint is the capture starting, not the chart. Building the chart before rea
 would mean either an empty chart or a synthetic one, neither of which is worth shipping. Comes
 back into scope once the capture has been running long enough to have something real to show.
 
+### NFL build: rebuilt from scratch, verified live end to end (2026-07-17)
+Resumed the NFL build. The existing draft (`nfl_engine.py`/`nfl_projections.py`/`config_nfl.py`)
+turned out to have real, structural problems worth fixing properly rather than patching — this
+was a full rewrite, not a continuation.
+
+**Two real, load-bearing bugs found during scoping, before any code was written:**
+1. **The data source was dead.** The draft depended on `nfl_data_py`. Checked directly against the
+   source: `nfl_data_py`'s own README now reads *"nfl_data_py has been deprecated in favour of
+   nflreadpy... No further nfl_data_py maintenance or updates are planned."* Repo archived Sep 25,
+   2025, last release Sep 2024. Building new production code on an abandoned library was the
+   wrong call — rebuilt on `nflreadpy` instead, nflverse's own actively-maintained successor
+   (v0.1.5, confirmed installable via standard `pip install nflreadpy`, not a fragile GitHub-only
+   install). Honest caveat carried forward: nflreadpy's own lifecycle badge reads "experimental,"
+   not stable 1.0 — same "unofficial API" posture already carried for ESPN's endpoints elsewhere
+   on this platform.
+2. **The market keys were fabricated.** `config_nfl.py`'s `SUPPORTED_MARKETS` used
+   `"quarterback_passing_yards"`, `"player_rushing_yards"`, `"player_receiving_yards"` — none of
+   which exist in Odds API's real market taxonomy. Edge Board would have silently fetched zero
+   real NFL odds — not an error, just empty results, exactly the failure mode this platform's
+   diagnostic-print discipline exists to catch, caught here before it ever shipped instead of
+   after. Real, confirmed keys (via Odds API's own documentation): `player_pass_yds`,
+   `player_rush_yds`, `player_receptions`, `player_reception_yds`.
+
+**Verified against REAL, LIVE data, not just documentation** — `nflreadpy` was actually installed
+and queried in the build sandbox (network access to pypi.org and nflverse's data releases made
+this possible, unlike the ESPN-based sports where live verification depended on the person's own
+fetch): a real 2025 schedule (285 games, confirmed `away_rest`/`home_rest` already computed —
+NFL's schedule data includes rest days directly, unlike every basketball engine which computes it
+by scanning recent games), real weekly stats (19,421 rows, including Patrick Mahomes' actual Week
+1 2025 line: 24/39, 258 yards, 1 TD), real rosters, and real injury reports. The full pipeline —
+schedule → weekly stats → position-aware slate → bootstrap projections → Edge Board/Best Bets
+shape — ran end to end against real Week 6 2025 data with zero crashes: 15 real games, 270 real
+players clearing a rotation floor, 513 real projected offers, all with sensible results (e.g.
+Garrett Wilson correctly favored Over on real 6.6 rec/76.4 yard recent averages; Devin Singletary
+correctly Under on modest rush volume, correctly excluded from receiving markets entirely given
+his real near-zero target share).
+
+**Real structural differences from every other sport here, designed for, not glossed over:**
+- **Weekly, not daily, slate structure.** NFL games happen as a whole week's slate (Thu-Mon), not
+  on individual calendar dates. Rather than change the shared layer's date-picker UI (every page
+  calls `sport.engine.build_slate(date_str)` expecting one date in, one slate out),
+  `build_slate(date_str)` here resolves the date to whichever week it falls in (or the next
+  upcoming week, or the season's last week if past it — see `_resolve_week`'s own docstring for
+  the exact rule) and returns that whole week. Same interface every other sport already expects.
+- **Position-aware markets, not basketball's one-size-fits-all Core 4.** A QB doesn't have
+  receptions, a WR doesn't have pass yards. `player_row` only attaches markets relevant to a
+  player's own position AND only once their own average of that market's opportunity stat
+  (attempts/touches/targets) clears a floor — both gates are position-specific, not one shared
+  number, since "enough volume to matter" means something different for a QB's attempts than a
+  WR's targets.
+- **`RECENT_GAMES_N = 5`, not basketball's 10** — an NFL season is 17 games, not 40-90+; a
+  10-game window would be over half the season, diluting the recency signal it exists to capture.
+- **`shrink_prob` reused directly from `basketball_projections.py`**, not duplicated or moved —
+  confirmed to be pure probability math with zero basketball-specific assumptions, so importing
+  it as-is (despite the cross-domain-sounding name) was the lower-risk choice over touching three
+  already-shipped, tested modules (WNBA/NBA/NCAAMB's own imports of it) for a cosmetic rename.
+- **Honest v1 gap, not silently shipped**: Week 1 of any season returns an empty slate for every
+  player, even once real data exists — there's no within-season "recent form" yet at the very
+  start, and this deliberately does NOT reach into the prior season to fill the gap (roster churn
+  — trades, free agency, the draft — matters far more year-over-year in the NFL than within one
+  season; a player's last-season numbers on a different team could actively mislead).
+
+**Staged scope, matching how MLB and WNBA were both originally built**: this covers what Edge
+Board and Best Bets need — the platform's core "find a priced edge" pages. A Hot Hand Engine-
+equivalent and a Matchup Lab-equivalent do NOT exist yet, deliberately deferred, not missing by
+oversight.
+
+**Files rewritten from scratch**: `nfl_engine.py`, `nfl_projections.py`, `config_nfl.py`. **Files
+added**: `test_nfl_engine.py` (18 tests, including real-confirmed-value tests built from the live
+Mahomes/schedule/injury data above), `test_nfl_projections.py` (9 tests, including the same
+streak-length-clustering shrinkage regression every other sport's suite carries). **Files
+touched**: `sports.py` (real markets/market_map wired in, `enabled=False` pending final review —
+see below), `requirements.txt` (`nflreadpy==0.1.5` added; `nfl_data_py` was never actually added,
+so nothing to remove), `test_sports.py` (two placeholder-sport tests updated to use NHL instead of
+NFL as their "still unwired" example, since NFL now has real markets — legitimate updates
+reflecting the real new state, same as every other sport's launch). 411/411 total passing.
+
+**Go-live checklist:**
+1. A final review pass on the actual numbers/output (the pipeline runs correctly and produces
+   sensible results, but hasn't had the same "Shawn checks a real response line-by-line" pass
+   WNBA/NBA/NCAAMB each got before their own launches).
+2. Live-deploy check once actually running on Streamlit Cloud (confirms `nflreadpy`'s real network
+   behavior in that environment, not just this sandbox).
+3. Once (1) and (2) are done, flip `sports.py`'s NFL entry to `enabled=True`.
+
 ## NOT YET DONE (next stages)
 - **Line-movement chart** — see above. The capture infrastructure is live; the actual
   stock-candlestick-style chart in Matchup Lab is the natural next step once there's real
@@ -1065,9 +1151,12 @@ back into scope once the capture has been running long enough to have something 
   against, not things currently known to be broken.
 - **Injury/availability "opportunity boost" (Stage B)** — see above. Deferred as a genuinely
   separate, harder modeling decision, not a quick follow-on to Stage A's data-fetch.
-- **`nfl_engine.py`/`nfl_projections.py`** exist but are untested and `nfl_data_py` isn't in
-  `requirements.txt` yet; markets/market_map in the registry are still empty. Flipping NFL on is
-  Stage 4, not started.
+- **NFL go-live checklist** — see above. The engine, projections, and registry wiring are done and
+  verified against real live data; a final review pass and a live-deploy check are what's left
+  before flipping it on.
+- **NFL Hot Hand Engine / Matchup Lab equivalents** — deliberately deferred (see above), the same
+  staged-build pattern MLB and WNBA both followed before their own Hot Hand Engine/Matchup Lab
+  pages existed.
 - **NHL, NCAAF** — no engines built yet. (NCAAWB considered and deliberately deferred — Odds API
   doesn't currently offer player props for WNCAAB, so there's no live market for Edge Board to
   price against yet; worth revisiting if that coverage gap closes.)

@@ -77,10 +77,31 @@ REGISTRY: Dict[str, Sport] = {
     ),
     "NFL": Sport(
         key="NFL", label="NFL — Football", icon="🏈", odds_sport_key="americanfootball_nfl",
-        markets=[], market_map={},              # filled in when NFL wiring is finished
+        markets=["player_pass_yds", "player_rush_yds", "player_receptions", "player_reception_yds"],
+        market_map={"Pass Yards": "player_pass_yds", "Rush Yards": "player_rush_yds",
+                    "Receptions": "player_receptions", "Receiving Yards": "player_reception_yds"},
         engine_module="nfl_engine", projections_module="nfl_projections",
         config_module="config_nfl",
-        enabled=False,                          # engine present; not yet live end-to-end
+        enabled=False,   # engine rebuilt from scratch this session — the ORIGINAL draft's
+                        # SUPPORTED_MARKETS were entirely fabricated market keys
+                        # ("quarterback_passing_yards" etc.) that don't exist in Odds API's real
+                        # taxonomy at all; Edge Board would have silently fetched zero real NFL
+                        # odds. The real, confirmed keys above (player_pass_yds/player_rush_yds/
+                        # player_receptions/player_reception_yds) come directly from Odds API's
+                        # own documentation. Also rebuilt: the data source itself — the original
+                        # draft depended on nfl_data_py, confirmed during this build to be
+                        # DEPRECATED and archived by its own maintainers (Sep 2025) in favor of
+                        # nflreadpy, which this engine now uses instead. The full pipeline
+                        # (schedule -> weekly stats -> position-aware slate -> bootstrap
+                        # projections -> Edge Board/Best Bets shape) was verified end to end
+                        # against REAL, LIVE 2025-season data during this build — not just
+                        # documentation — producing real, sensible results (513 real projected
+                        # offers from 270 real players on a real Week 6 slate). Kept at
+                        # enabled=False anyway pending a final review pass and live-deploy check,
+                        # the same honest launch posture every other sport here has carried.
+                        # NOT yet built: a Hot Hand Engine-equivalent or Matchup Lab-equivalent
+                        # (see nfl_projections.py's own staged-scope note) — this covers what
+                        # Edge Board and Best Bets need, deliberately, not the full page set yet.
     ),
     # ---- vision placeholders (become live as each engine is built) ----
     "WNBA":   Sport(

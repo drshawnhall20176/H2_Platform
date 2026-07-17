@@ -14,3 +14,11 @@ requests==2.32.3
 pytz==2024.2
 pybaseball==2.2.7
 psycopg2-binary==2.9.9
+nflreadpy==0.1.5         # NFL data (nflverse's actively-maintained successor to the now-archived
+                        # nfl_data_py — confirmed during the NFL build: nfl_data_py's own README
+                        # says "deprecated... no further maintenance planned", repo archived Sep
+                        # 2025). Standard PyPI install, not a fragile GitHub-only one. Pulls in
+                        # polars as a transitive dependency — nflreadpy returns Polars DataFrames;
+                        # nfl_engine.py converts to pandas immediately (.to_pandas()) to stay
+                        # consistent with every other sport's engine, so nothing else in the app
+                        # needs to know Polars exists.

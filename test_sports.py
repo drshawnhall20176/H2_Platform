@@ -51,18 +51,19 @@ def test_require_live_engine_true_for_wnba(monkeypatch):
 
 def test_require_live_engine_false_for_unwired_sport(monkeypatch):
     import streamlit as st
-    st.session_state["sport"] = "NFL"   # engine module present, but markets=[] (not wired)
+    st.session_state["sport"] = "NHL"   # markets=[] (not wired) — NFL now has real markets, so
+                                        # this test needs a genuinely-still-unwired sport instead
     assert S.require_live_engine("Edge Board") is False
     st.session_state["sport"] = "MLB"   # reset for other tests
     print("✓ require_live_engine blocks a sport with no markets configured yet, no crash")
 
 
 def test_market_map_present_for_live_sports_only():
-    for key in ("MLB", "WNBA", "NBA", "NCAAMB"):
+    for key in ("MLB", "WNBA", "NBA", "NCAAMB", "NFL"):
         assert S.REGISTRY[key].market_map, f"{key} must have a market_map (CLV capture depends on it)"
-    for key in ("NFL", "NHL", "NCAAF"):
+    for key in ("NHL", "NCAAF"):
         assert S.REGISTRY[key].market_map == {}, f"{key} should still be a placeholder"
-    print("✓ MLB, WNBA, NBA, and NCAAMB have filled market_maps; the rest are honest placeholders")
+    print("✓ MLB, WNBA, NBA, NCAAMB, and NFL have filled market_maps; the rest are honest placeholders")
 
 
 def test_owner_only_pages_match_expected_titles():
