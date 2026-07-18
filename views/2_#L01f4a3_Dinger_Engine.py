@@ -184,6 +184,28 @@ if "Due" in df.columns:
         .theme_gradient(cmap="RdYlGn", subset=["Due"]),
         hide_index=True, use_container_width=True)
  
+# --- Statcast: overall hitter regression (wOBA vs xwOBA) --------------------
+# The honest hitter counterpart to Pitching Lab's ERA-vs-FIP table — same underlying idea (a
+# results metric can be noisy; a quality-of-contact-based expected metric is a steadier read on
+# true talent), but OVERALL offensive value, not just the HR-specific "Due to homer" board above.
+# Reuses the SAME statcast lookup Dinger Engine already loaded for this pageview — zero extra fetch.
+sc, _k = load_statcast()
+if sc:
+    reg_table = SC.build_hitter_regression_table(rows, sc)
+    if reg_table:
+        st.markdown("**📊 Results vs. contact quality** — actual wOBA against expected wOBA "
+                    "(quality-of-contact-implied). 🟢 Green = underperforming his contact quality, "
+                    "due for positive regression. 🔴 Red = outperforming it, due for negative "
+                    "regression. A different question from \"Due to homer\" above — this is about "
+                    "OVERALL offensive value (every batted ball and walk), not power specifically.")
+        rdf = pd.DataFrame(reg_table)[["Hitter", "Team", "PA", "wOBA", "xwOBA", "Delta", "Tag"]]
+        st.dataframe(
+            rdf.style.format({"wOBA": "{:.3f}", "xwOBA": "{:.3f}", "Delta": "{:+.3f}"})
+            .theme_gradient(cmap="RdYlGn_r", subset=["Delta"]),   # reversed: negative delta = green (good)
+            hide_index=True, use_container_width=True)
+        st.caption(f"Qualified hitters only (≥{SC.MIN_PA_QUALIFIED} PA) — small samples produce "
+                  "noisy wOBA/xwOBA on both sides, not a real signal worth surfacing.")
+
 # --- Per-game detail --------------------------------------------------------
 st.divider()
 st.subheader("Game-by-game")
