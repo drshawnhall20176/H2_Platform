@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 582/582 tests green)
+## What's in this checkpoint (all tested — 586/586 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -2478,6 +2478,52 @@ the real Murakami/Bieber scenario through the complete pipeline — including co
 `exclude_pid` is correctly passed through to exclude the starter from his own bullpen's
 aggregate — producing the same direction and comparable magnitude to the real, reported finding.
 582/582 total passing.
+
+### Real drift bug found: Command Center's top leans didn't match Best Bets' conviction (2026-07-18)
+Shawn reported Command Center's "Tonight's top leans" showing different conviction than Best
+Bets for what should be the same plays. Confirmed the real cause directly rather than guessing:
+Command Center had its OWN separate, nearly-identical copy of the board-loading logic
+(`_board_mlb`), written before the bullpen-blend fix existed. When that fix landed, it only went
+into Best Bets' own copy — Command Center's separate copy silently kept using the old, unblended
+numbers, no error, no warning, just two pages quietly disagreeing about the same play's real
+conviction.
+
+**Fixed at the root, not by patching both copies separately** — patching both would leave the
+exact same drift risk for the next change to either one. Created `best_bets_data.py`, a single
+shared module housing `load_mlb_best_bets_board(date_str, fip_constant)`, and rewired both Best
+Bets and Command Center to call it instead of maintaining their own independent copies. If a
+third page ever needs this board, it calls this too — not a new copy.
+
+**A real, separate risk found and fixed while building the shared module, not shipped by
+accident**: the natural approach would route the module's engine/projections references through
+`sports.active()`, matching how both original view files did it. But Python only executes a
+module's top-level code on its FIRST import, not on every subsequent one — if this shared module
+happened to be first imported while a different sport was active, its engine/projections
+references would stay frozen to that sport's modules for the rest of the process, silently wrong
+for every later MLB call. The original inline code never had this risk, since each Streamlit view
+file re-runs fresh on every page load. Fixed by importing `mlb_engine`/`projections` directly by
+name instead — this function is explicitly MLB-only anyway, so there was no real need to route
+through the generic sport-dispatch registry at all.
+
+**A real interface bug caught while wiring the two callers in, not shipped**: an early draft of
+the shared function returned `len(meta)` instead of the full `meta` list. Command Center's own
+code never did Slot/Time enrichment on plays at all (it doesn't need it), while Best Bets needs
+the full meta to build its own — returning just a count would have silently broken Best Bets'
+own Slot/Time column. Caught by checking each caller's ACTUAL pre-existing interface expectations
+directly against the codebase, not assumed from memory.
+
+**5 new tests** in `test_best_bets_data.py`: confirms the module's engine/projections references
+are bound directly to `mlb_engine`/`projections`, not routed through sport-dispatch (locking in
+the fix for the real risk described above); confirms the function's exact signature; a full
+offline pipeline run confirming the bullpen blend still fires correctly through the consolidated
+path; and a dedicated test locking in the `(plays, meta)` return shape specifically, since that
+was the exact bug caught while wiring this in. 586/586 total passing.
+
+**One honest caveat surfaced, not hidden**: Best Bets exposes a FIP-constant input a person can
+adjust; Command Center doesn't expose that control and always uses the default. If that input is
+changed away from default on Best Bets, the two pages will still show different numbers for that
+reason specifically — a real, intentional design difference, not a bug, but worth knowing rather
+than assuming the fix makes the two pages identical under every possible setting.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
