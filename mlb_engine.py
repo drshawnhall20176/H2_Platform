@@ -367,27 +367,30 @@ def build_pitching_slate(date_str: str, fip_constant: float = FIP_CONSTANT_DEFAU
     Returns one row per probable starter, including Delta = ERA - FIP (positive =
     underlying performance better than results = positive-regression candidate)."""
     games = [g for g in get_schedule(date_str) if g.get("gamePk")]
-    tasks = []  # (pitcher_id, team_name, opponent, game_label)
+    tasks = []  # (pitcher_id, team_name, opponent, game_label, game_date, team_id, opp_id)
     for g in games:
         label = f"{g['away_name']} @ {g['home_name']}"
-        tasks.append((g["home_pitcher_id"], g["home_name"], g["away_name"], label))
-        tasks.append((g["away_pitcher_id"], g["away_name"], g["home_name"], label))
+        gd = g.get("game_date")
+        tasks.append((g["home_pitcher_id"], g["home_name"], g["away_name"], label, gd,
+                     g.get("home_id"), g.get("away_id")))
+        tasks.append((g["away_pitcher_id"], g["away_name"], g["home_name"], label, gd,
+                     g.get("away_id"), g.get("home_id")))
  
     def fetch(t):
-        pid, team, opp, label = t
+        pid, team, opp, label, gd, team_id, opp_id = t
         pm = get_pitcher_metrics(pid, fip_constant)
-        return pm, team, opp, label
+        return pm, team, opp, label, gd, team_id, opp_id
  
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         results = list(ex.map(fetch, tasks))
  
     rows = []
-    for pm, team, opp, label in results:
+    for pm, team, opp, label, gd, team_id, opp_id in results:
         if pm.id is None or pm.era == 0:
             continue
         rows.append({
             "Pitcher": pm.name, "_pid": pm.id, "Team": team, "Opponent": opp, "Game": label,
-            "Hand": pm.hand,
+            "Hand": pm.hand, "_game_date": gd, "_team_id": team_id, "_opp_id": opp_id,
             "ERA": round(pm.era, 2), "FIP": pm.fip, "Delta": round(pm.era - pm.fip, 2),
             "K/9": round(pm.k9, 1), "WHIP": round(pm.whip, 2), "HR/9": round(pm.hr9, 2), "OBA": pm.oba,
         })
@@ -494,3 +497,58 @@ def get_player_results(date_str: str) -> Dict[int, Dict]:
         for pid, rec in _parse_boxscore_results(box).items():
             results.setdefault(pid, {}).update(rec)
     return results
+
+
+def get_team_injuries(team_id: int) -> List[Dict[str, Any]]:
+    """Team injury/roster-restriction report: [{"player", "status", "position", "return_date",
+    "comment"}, ...] — same shape basketball_engine.get_team_injuries and nfl_engine.
+    get_team_injuries both return, so any shared display code works unchanged.
+
+    HONEST FLAG, GENUINELY DIFFERENT CONFIDENCE LEVEL THAN EVERY OTHER INJURY FUNCTION BUILT ON
+    THIS PLATFORM: every other sport's version of this function was checked against a REAL live
+    response before shipping (ESPN's endpoints via a person's own fetch for WNBA/NBA/NCAAMB;
+    nflreadpy installed directly in the build sandbox for NFL). This one could NOT be — MLB Stats
+    API (statsapi.mlb.com) isn't reachable from this sandbox's network allowlist (confirmed
+    directly: a live request from this environment returned 403). Built from MLB Stats API's
+    documented structure instead (the roster endpoint's own status.code/status.description
+    fields), not a live-verified response. Worth an early, deliberate manual check once actually
+    deployed — pull up one real team's roster and compare — before trusting this the way every
+    other sport's injury data on this platform has already been trusted.
+
+    Fetches rosterType=fullRoster specifically, not the default "active" roster: the active
+    roster by definition EXCLUDES injured players, so a plain roster call would return nothing
+    useful here. fullRoster was the most defensible documented choice for "the broadest set of
+    players, including every IL variant" — but whether it genuinely includes 60-day IL players
+    specifically (who by rule fall OFF the 40-man roster, a materially narrower option this
+    deliberately avoids using) is the one specific detail that stayed unconfirmed during
+    research and is exactly the kind of thing worth checking against a real response early.
+
+    Filters to any roster entry whose status code isn't "A" (Active) — every other status
+    (10/15/60-day IL, restricted, bereavement, paternity, etc.) surfaces here using the roster's
+    own human-readable status description, rather than this code hardcoding an interpretation of
+    every possible status value. return_date/comment are always None — the roster endpoint gives
+    a STATUS, not the detailed injury description (body part, expected return) a dedicated
+    injury-report source might have; reported honestly empty rather than guessed."""
+    try:
+        data = fetch_json(f"{BASE}/teams/{team_id}/roster/fullRoster")
+    except Exception:
+        return []
+    if not data or not data.get("roster"):
+        return []
+
+    out: List[Dict[str, Any]] = []
+    for entry in data.get("roster", []):
+        status = entry.get("status") or {}
+        code = status.get("code")
+        if not code or code == "A":
+            continue   # active, not an injury/roster-restriction entry
+        person = entry.get("person") or {}
+        pos = entry.get("position") or {}
+        out.append({
+            "player": person.get("fullName"),
+            "status": status.get("description") or code,
+            "position": pos.get("abbreviation"),
+            "return_date": None,
+            "comment": None,
+        })
+    return out

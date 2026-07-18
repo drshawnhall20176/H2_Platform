@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 468/468 tests green)
+## What's in this checkpoint (all tested — 473/473 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -1414,6 +1414,66 @@ isolated from each other; RB/WR/TE/FB's existing combined row unaffected — the
 guard for the refactor; QB Lab's rushing projection and neutral-fallback; the renamed efficiency
 columns). 468/468 total passing.
 
+### MLB Matchup Lab: Time slot + Game filters added (2026-07-17, same session)
+Shawn asked to bring NFL Matchup Lab's format over to MLB's. Worth recording the scoping call made
+before touching anything: MLB's Matchup Lab is a genuinely different KIND of page — pitch-level
+arsenal vs. hitter vulnerability (which specific pitches to attack with), not "player vs. opponent
+team" the way WNBA/NBA/NCAAMB/NFL's Matchup Lab is. It already has a deliberate, documented reason
+for NOT having a recency trend chart (arsenals/hitter_splits are season-aggregate snapshots per
+pitch, not a dated sequence — there's no "recent form over time" to plot), and an H2H-vs-opponent-
+team box doesn't fit the actual question this page answers either (pitcher vs. hitter, not batter
+vs. a specific team). Forcing the full NFL layout on would have meant either breaking that
+established design decision or bolting on boxes that don't answer MLB's real question.
+
+**What DID transfer cleanly**: Time slot + Game filters, narrowing a busy night's probable-starter
+list before picking one — a pure navigation improvement with no analytical-framework conflict,
+reusing the exact same shared helpers (`sports.game_dt`/`slot_of`/`SLOT_ORDER`) every other
+Matchup-Lab-style page and Best Bets already use. Needed one small, backward-compatible engine
+change: `mlb_engine.build_pitching_slate` didn't carry a game date/time field at all before (only
+a "Game" label); now threads `_game_date` through from the schedule data it already fetches, at
+zero extra cost. Confirmed no regression to the existing function's shape or behavior (only a
+key added, existing callers unaffected) via the full test suite before and after.
+
+**Flagged, and Shawn confirmed navigation + injury report were the two pieces he actually wanted**
+— pitcher "days rest since last start" was NOT pursued further (MLB doesn't have a pre-computed
+rest field the way NFL's schedule does; would need a real new pitcher-game-log fetch this
+platform doesn't have). The injury report WAS built as a same-day follow-up — see below.
+
+### MLB Matchup Lab: Injury report added (2026-07-17, same session, follow-up)
+New `mlb_engine.get_team_injuries(team_id)`, matching the exact shape basketball_engine's and
+nfl_engine's own versions return, wired into a collapsible "🏥 Injury report — both teams"
+expander right after both a pitcher and hitter are picked — same placement and framing as the
+NFL screenshot this whole change was modeled on.
+
+**Genuinely different, lower confidence than every other injury function built this session, and
+stated as such rather than glossed over**: every other sport's version was checked against a real
+live response before shipping — ESPN's endpoints via a person's own fetch for WNBA/NBA/NCAAMB,
+nflreadpy installed directly in the build sandbox for NFL. This one could not be — the same
+network restriction as the filter change above (`statsapi.mlb.com` returns 403 from this sandbox).
+Built from MLB Stats API's documented structure (real, but secondary, sources — the roster
+endpoint's own `status.code`/`status.description` fields, confirmed via MLB-StatsAPI's own
+documentation and cross-checked against multiple independent sources), not a live-verified
+response. One specific detail stayed genuinely uncertain through the research: `rosterType=
+fullRoster` was the most defensible documented choice for capturing every IL variant, but whether
+it specifically includes 60-day IL players (who by rule fall OFF the narrower 40-man roster) never
+got fully confirmed. Filters to any roster status that isn't "A" (Active), using MLB's own
+human-readable status description rather than this code hardcoding an interpretation of every
+possible status value — `return_date`/`comment` are always None, honestly, since the roster
+endpoint reports a status, not a detailed injury description.
+
+Needed `build_pitching_slate` to also carry each side's real numeric team_id through (only had
+team NAMES before, and the roster endpoint needs a numeric id) — same backward-compatible
+"only adds keys" pattern as the `_game_date` addition. 5 new tests: 3 for `get_team_injuries`
+(non-Active filtering against the documented shape, empty-on-failure, falls back to the status
+code when no description is present) and 2 extending the `build_pitching_slate` coverage (team
+IDs thread through correctly for both sides). A full offline simulation of the whole chain
+(`build_pitching_slate` → `get_team_injuries` for both teams) ran clean with real-shaped mock
+data. 473/473 total passing.
+
+**Worth a real, deliberate manual check once deployed** — pull up one actual team's roster and
+compare against what this shows, specifically checking whether a real 60-day IL player appears.
+This is the one piece on the whole platform shipped without any live confirmation at all.
+
 ## NOT YET DONE (next stages)
 - **Line-movement chart** — see above. The capture infrastructure is live; the actual
   stock-candlestick-style chart in Matchup Lab is the natural next step once there's real
@@ -1444,6 +1504,9 @@ columns). 468/468 total passing.
   deliberately deferred, the same staged-build pattern MLB and WNBA both followed. Worth noting:
   `get_team_allowed_stats` (built for Matchup Lab) already provides the core opponent-adjustment
   data Hot Hand Engine would need, so this is now a smaller lift than it was before today.
+- **MLB pitcher rest days / injury report in Matchup Lab** — see above. Both would need genuinely
+  new data plumbing (a pitcher game-log fetch for the former, an injury-status fetch for the
+  latter) this platform doesn't have for MLB yet, not a quick follow-on to the filter addition.
 - **NHL, NCAAF** — no engines built yet. (NCAAWB considered and deliberately deferred — Odds API
   doesn't currently offer player props for WNCAAB, so there's no live market for Edge Board to
   price against yet; worth revisiting if that coverage gap closes.)

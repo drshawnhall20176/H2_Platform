@@ -117,6 +117,96 @@ def test_aggregate_pitching_splits():
     assert round(E.parse_innings(agg["inningsPitched"]), 2) == 121.0
 
 
+# ----------------------------------------------------------------- build_pitching_slate (Matchup Lab filters)
+def test_build_pitching_slate_threads_game_date_through(monkeypatch):
+    # Regression guard for the Matchup Lab time-slot/game filter addition: build_pitching_slate's
+    # row dict must carry _game_date through from the schedule, unchanged for every OTHER field.
+    # Mocked, not live: MLB Stats API isn't reachable from this sandbox's network allowlist
+    # (unlike nflreadpy's PyPI/GitHub-hosted data, which could be verified live during the NFL
+    # build) — confirmed via a direct request returning 403, not assumed.
+    fake_games = [{
+        "gamePk": 12345, "game_date": "2026-06-28T17:10:00Z",
+        "home_name": "Yankees", "away_name": "Red Sox",
+        "home_pitcher_id": 111, "away_pitcher_id": 222,
+    }]
+
+    def fake_get_pitcher_metrics(pid, fip_constant):
+        return E.PitcherMetrics(id=pid, name=f"Pitcher {pid}", era=3.50, fip=3.20, k9=9.0,
+                                whip=1.10, hr9=1.0, oba=0.240)
+
+    monkeypatch.setattr(E, "get_schedule", lambda date_str: fake_games)
+    monkeypatch.setattr(E, "get_pitcher_metrics", fake_get_pitcher_metrics)
+
+    rows = E.build_pitching_slate("2026-06-28")
+    assert len(rows) == 2   # home + away starter
+    assert all(r["_game_date"] == "2026-06-28T17:10:00Z" for r in rows)
+    assert all(r["Game"] == "Red Sox @ Yankees" for r in rows)
+    home_row = next(r for r in rows if r["Team"] == "Yankees")
+    assert home_row["_team_id"] is None and home_row["_opp_id"] is None   # fake_games has no home_id/away_id
+    print("✓ build_pitching_slate correctly threads _game_date through for every row, matching every other sport's own field")
+
+
+def test_build_pitching_slate_threads_team_ids_through(monkeypatch):
+    # Needed for the Matchup Lab injury report — get_team_injuries takes a numeric team_id, not
+    # a team name, so build_pitching_slate has to carry both team's real ids through.
+    fake_games = [{
+        "gamePk": 12345, "game_date": "2026-06-28T17:10:00Z",
+        "home_name": "Yankees", "away_name": "Red Sox", "home_id": 147, "away_id": 111,
+        "home_pitcher_id": 111, "away_pitcher_id": 222,
+    }]
+
+    def fake_get_pitcher_metrics(pid, fip_constant):
+        return E.PitcherMetrics(id=pid, name=f"Pitcher {pid}", era=3.50, fip=3.20, k9=9.0,
+                                whip=1.10, hr9=1.0, oba=0.240)
+
+    monkeypatch.setattr(E, "get_schedule", lambda date_str: fake_games)
+    monkeypatch.setattr(E, "get_pitcher_metrics", fake_get_pitcher_metrics)
+
+    rows = E.build_pitching_slate("2026-06-28")
+    home_row = next(r for r in rows if r["Team"] == "Yankees")
+    away_row = next(r for r in rows if r["Team"] == "Red Sox")
+    assert home_row["_team_id"] == 147 and home_row["_opp_id"] == 111
+    assert away_row["_team_id"] == 111 and away_row["_opp_id"] == 147
+    print("✓ build_pitching_slate correctly threads each side's own team_id and their opponent's through")
+
+
+# ----------------------------------------------------------------- get_team_injuries
+def test_get_team_injuries_filters_to_non_active_status(monkeypatch):
+    # Documented roster response shape (MLB Stats API's own roster endpoint structure), not a
+    # live-verified one — see get_team_injuries' own docstring for the real, honest limitation.
+    fake_roster = {"roster": [
+        {"person": {"fullName": "Active Player"}, "position": {"abbreviation": "SS"},
+        "status": {"code": "A", "description": "Active"}},
+        {"person": {"fullName": "Hurt Player"}, "position": {"abbreviation": "OF"},
+        "status": {"code": "D10", "description": "10-Day-IL"}},
+        {"person": {"fullName": "Long Term Player"}, "position": {"abbreviation": "P"},
+        "status": {"code": "D60", "description": "60-Day-IL"}},
+    ]}
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake_roster)
+    injuries = E.get_team_injuries(147)
+    names = {i["player"] for i in injuries}
+    assert names == {"Hurt Player", "Long Term Player"}   # Active Player correctly excluded
+    hurt = next(i for i in injuries if i["player"] == "Hurt Player")
+    assert hurt == {"player": "Hurt Player", "status": "10-Day-IL", "position": "OF",
+                   "return_date": None, "comment": None}
+    print("✓ get_team_injuries correctly filters to non-Active roster statuses, matching the shared injury shape")
+
+
+def test_get_team_injuries_empty_on_fetch_failure(monkeypatch):
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: {})
+    assert E.get_team_injuries(147) == []
+
+
+def test_get_team_injuries_falls_back_to_code_when_no_description(monkeypatch):
+    fake_roster = {"roster": [
+        {"person": {"fullName": "Hurt Player"}, "position": {"abbreviation": "OF"},
+        "status": {"code": "RM"}},   # no description field this time
+    ]}
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake_roster)
+    injuries = E.get_team_injuries(147)
+    assert injuries[0]["status"] == "RM"
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
