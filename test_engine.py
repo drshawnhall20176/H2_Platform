@@ -503,6 +503,41 @@ def test_enrich_bullpen_fatigue_preserves_order_and_count(monkeypatch):
     assert [e["player_id"] for e in enriched] == [0, 1, 2]
 
 
+# ----------------------------------------------------------------- get_bullpen_handedness_mix
+def test_bullpen_handedness_mix_counts_correctly(monkeypatch):
+    fake_roster = {"roster": [
+        {"person": {"id": 1, "fullName": "Lefty A"}, "position": {"abbreviation": "P"}},
+        {"person": {"id": 2, "fullName": "Righty A"}, "position": {"abbreviation": "P"}},
+        {"person": {"id": 3, "fullName": "Righty B"}, "position": {"abbreviation": "P"}},
+    ]}
+    hands = {1: "L", 2: "R", 3: "R"}
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake_roster)
+    monkeypatch.setattr(E, "get_pitcher_metrics",
+                        lambda pid, fc=E.FIP_CONSTANT_DEFAULT: E.PitcherMetrics(id=pid, hand=hands[pid]))
+    mix = E.get_bullpen_handedness_mix(117)
+    assert mix == {"L": 1, "R": 2, "total": 3, "pct_L": 1 / 3, "pct_R": 2 / 3}
+    print("✓ get_bullpen_handedness_mix correctly counts L/R across the active bullpen")
+
+
+def test_bullpen_handedness_mix_excludes_given_pid(monkeypatch):
+    fake_roster = {"roster": [
+        {"person": {"id": 1, "fullName": "Starter"}, "position": {"abbreviation": "P"}},
+        {"person": {"id": 2, "fullName": "Reliever"}, "position": {"abbreviation": "P"}},
+    ]}
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake_roster)
+    monkeypatch.setattr(E, "get_pitcher_metrics",
+                        lambda pid, fc=E.FIP_CONSTANT_DEFAULT: E.PitcherMetrics(id=pid, hand="R"))
+    mix = E.get_bullpen_handedness_mix(117, exclude_pid=1)
+    assert mix["total"] == 1   # starter excluded, only the one reliever counted
+
+
+def test_bullpen_handedness_mix_all_zero_when_no_staff(monkeypatch):
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: {})
+    mix = E.get_bullpen_handedness_mix(117)
+    assert mix == {"L": 0, "R": 0, "total": 0, "pct_L": 0.0, "pct_R": 0.0}
+    print("✓ get_bullpen_handedness_mix returns safe all-zero counts, not None, when no staff data exists")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

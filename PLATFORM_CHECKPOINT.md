@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 505/505 tests green)
+## What's in this checkpoint (all tested — 508/508 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -1692,12 +1692,49 @@ mechanism this whole feature depends on), and 3 for `build_bullpen_matchup_rows`
 the target team's rows, never mutates the originals, and produces a genuinely different —
 correctly directional — read than the starter). 505/505 total passing.
 
+### GM/analyst gap-filling, item 3 of 5: lineup-wide platoon view (2026-07-18, same session)
+Confirmed the original scoping call before building: `platoon_advantage` and per-hitter Hand/
+Opp Hand/Advantage columns already existed (used inside Dinger Engine's own hitter rows) —
+this genuinely was a surfacing exercise, not new modeling, for the starter-based half of it.
+
+**Part 1 — starter-based platoon map, zero extra cost.** New "🔄 Platoon map" section in each
+Dinger Engine game expander, right after the SP lines and before the detailed stat tables: for
+each lineup, "X of Y hitters have the platoon edge vs [hand]HP [starter]," plus the actual names.
+Pure view-layer work reusing columns every hitter row already has — no new engine function needed
+for this half.
+
+**Part 2 — bullpen handedness mix, a genuinely different signal, not a bullpen-side "platoon
+edge."** New `mlb_engine.get_bullpen_handedness_mix(team_id, exclude_pid)` — L/R counts and
+percentages across a team's active bullpen. Stated explicitly why this ISN'T a per-hitter platoon
+computation against "the bullpen": a bullpen has multiple pitchers of mixed hands, and which
+specific reliever a hitter actually faces depends on in-game decisions this platform can't know
+in advance — the honest available signal is the bullpen's overall handedness composition, not a
+guess at a specific matchup.
+
+**Real cost discipline, consistent with the whole bullpen-feature line of work this session**:
+handedness mix is only fetched when that side's "🔄 Bullpen" toggle (built for item 2's Dinger
+Engine work) is ALREADY checked — not proactively for every game's expander, which would have
+meant a full roster+pitcher-metrics fetch cycle for every team on a busy slate before anyone had
+asked to see it.
+
+**Kept deliberately separate from `get_bullpen_aggregate_stat`**, even though both loop the same
+roster calling `get_pitcher_metrics` per reliever (an accepted, real duplicate-fetch cost, not an
+oversight): that function's stat-dict return shape is already relied on by the bullpen-matchup
+toggle shipped earlier this same session, and changing it to also carry handedness data would
+mean touching an already-shipped contract for a genuinely different UI use case (a platoon-context
+glance that's useful even when the matchup toggle itself is off).
+
+**6 new tests**: 3 for `get_bullpen_handedness_mix` (correct L/R counting, exclude_pid honored,
+safe all-zero counts rather than None when no staff data exists) plus a full offline simulation
+combining both halves — a real lineup's platoon-edge count against a simulated RHP starter, and a
+simulated bullpen's handedness split, both producing the exact "2 of 3 have the edge" / "67% RHP"
+style read the feature is meant to give. 508/508 total passing.
+
 ## NOT YET DONE (next stages)
-- **GM/analyst gaps, items 3-5 of 5** — hitter regression table (item 1) and reliever fatigue
-  (item 2) are done, see above. Still to build, in order: (3) lineup-wide platoon view — the
-  underlying math (`platoon_advantage`) already exists, this is mostly a surfacing exercise, not
-  new modeling; (4) starter rest + times-through-the-order penalty; (5) umpire tendencies /
-  catcher framing — real signals, but genuinely new data sources, lower priority than the rest.
+- **GM/analyst gaps, items 4-5 of 5** — hitter regression (1), reliever fatigue (2), and the
+  lineup-wide platoon view (3) are all done, see above. Still to build: (4) starter rest +
+  times-through-the-order penalty; (5) umpire tendencies / catcher framing — real signals, but
+  genuinely new data sources, lower priority than the rest.
 - **Line-movement chart** — see above. The capture infrastructure is live; the actual
   stock-candlestick-style chart in Matchup Lab is the natural next step once there's real
   captured history to plot, not before.

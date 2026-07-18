@@ -788,3 +788,39 @@ def enrich_bullpen_fatigue_with_metrics(fatigue: List[Dict[str, Any]],
         enriched.update(ERA=round(pm.era, 2), FIP=pm.fip, K9=round(pm.k9, 1), has_stats=pm.has_stats)
         out.append(enriched)
     return out
+
+
+def get_bullpen_handedness_mix(team_id: int, exclude_pid: Optional[int] = None) -> Dict[str, Any]:
+    """Handedness composition of a team's active bullpen (every active pitcher except
+    exclude_pid, typically that night's starter): {"L", "R", "total", "pct_L", "pct_R"}.
+
+    A bullpen has MULTIPLE pitchers of mixed hands, unlike a single confirmed starter — there's
+    no one "platoon advantage" the way there is against a starter, since which specific reliever
+    a hitter actually faces depends on real-time in-game decisions this platform can't know in
+    advance. This is the honest available alternative: the bullpen's OVERALL handedness mix, so a
+    lineup stacked with left-handed bats can be read against "how right-handed does this pen skew"
+    context, without pretending to know which specific arm comes in.
+
+    KEPT SEPARATE FROM get_bullpen_aggregate_stat, NOT MERGED IN, even though both loop through
+    the same roster calling get_pitcher_metrics per reliever (a real, accepted duplicate-fetch
+    cost, not an oversight): that function's return shape (a stat dict) is already relied on by
+    Dinger Engine's bullpen-matchup toggle from earlier this session, and changing it to also
+    carry handedness data would mean touching that already-shipped contract. This is also a
+    genuinely different UI use case — a quick platoon-context glance that's useful even when the
+    bullpen-matchup toggle itself is off — not something that belongs bundled with the stat
+    aggregation specifically.
+
+    Returns all-zero counts (not None) when no staff data is available — a composition summary
+    is safe to always render even when empty, unlike get_bullpen_aggregate_stat's stat dict,
+    which genuinely shouldn't be shown at all if missing."""
+    staff = get_team_pitching_staff(team_id, exclude_pid=exclude_pid)
+    left = right = 0
+    for p in staff:
+        pm = get_pitcher_metrics(p["id"])
+        if pm.hand == "L":
+            left += 1
+        elif pm.hand == "R":
+            right += 1
+    total = left + right
+    return {"L": left, "R": right, "total": total,
+           "pct_L": (left / total) if total else 0.0, "pct_R": (right / total) if total else 0.0}
