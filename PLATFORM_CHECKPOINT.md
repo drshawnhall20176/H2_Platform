@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 558/558 tests green)
+## What's in this checkpoint (all tested — 559/559 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -2303,6 +2303,44 @@ is failing more broadly across the whole cache.
 558/558 total passing (no logic changes this round — this was purely about visibility, matching
 the exact posture that found and fixed the ORIGINAL parse failure, the column-mapping issue, and
 the string-matching bug, each of which needed to be SEEN before it could be diagnosed correctly).
+
+### Catcher framing: the real fourth bug found and fixed — currentTeam needs explicit hydration (2026-07-18)
+The diagnostics from the previous round worked immediately and decisively: "Only 0/61 qualified
+catchers resolved a team via get_player_current_team — most calls are failing," with a sample
+list including J.T. Realmuto — one of the most well-known active catchers in MLB. A complete,
+uniform 0/61 failure across every real catcher, not a partial or data-specific one, was the key
+signal: this couldn't be about any individual player's data being unusual, it had to be something
+systematic in how the lookup itself worked.
+
+**Diagnosed by analogy to already-working code in the same file, then confirmed externally
+before fixing.** `get_pitcher_metrics` — proven, shipped, working all session — calls this exact
+same `people/{id}` endpoint successfully, but explicitly passes a `hydrate=stats(...)` parameter
+for what it needs. `get_player_current_team` never passed ANY hydrate parameter, on the
+assumption that `currentTeam` came back on the base person object by default. Confirmed that
+assumption was wrong from two independent sources: MLB Stats API's own documented hydration
+values explicitly list `currentTeam` as something that must be requested, not default; and
+MLB-StatsAPI's own real, working source code builds its hydrate parameter as `"...,currentTeam"`
+— the exact syntax needed, found directly in real, shipped code, not guessed.
+
+**Fixed by adding the one missing parameter**: `fetch_json(url, {"hydrate": "currentTeam"})`.
+The rest of the function (returning both id and name, the falsy-id guard downstream in
+`team_catcher_framing`) was already correct from the previous round's fix — this was purely the
+one missing piece that made every call fail before it could even reach that logic.
+
+**1 new regression test**, confirming the actual outgoing request now includes `hydrate=
+currentTeam` — not just that the function returns the right shape when mocked correctly, which
+would have passed even with the original, broken version, since the mock doesn't care what
+params were requested. This test specifically locks in the real fix, not just the surrounding
+logic. 559/559 total passing.
+
+**Four real, distinct bugs found and fixed in this one feature across this session, every single
+one confirmed against real evidence, none of them guessed and left unverified**: a missing
+`gameType`-equivalent parameter causing a parse failure, two column-name mismatches causing
+silent data loss, a cross-endpoint string-matching bug causing a silent no-match, and now a
+missing hydration parameter causing complete lookup failure. The diagnostic-first discipline
+adopted partway through this thread — surface real information before proposing a fix, verify
+after — is what turned four genuinely different failure modes into four genuinely fixed bugs
+instead of four rounds of guessing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

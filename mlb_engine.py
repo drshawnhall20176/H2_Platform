@@ -1066,18 +1066,29 @@ def get_pitcher_batting_order_splits(pitcher_id: int, season: int,
 
 def get_player_current_team(player_id: int) -> Optional[Dict[str, Any]]:
     """A general person -> current team lookup, returning BOTH the numeric id and the display
-    name — {BASE}/people/{id} returns a "currentTeam" object with both on the base person
-    object for an active player, no special hydration needed.
+    name — {BASE}/people/{id} with hydrate=currentTeam explicitly requested.
 
-    RETURNS BOTH, DELIBERATELY, NOT JUST THE NAME (an earlier version of this function returned
-    only the name — changed after a real production issue): team NAME strings in this codebase
-    can come from DIFFERENT MLB Stats API endpoints (this one, people/{id}.currentTeam.name; vs.
-    the schedule endpoint's teams.home/away.team.name, used to build pitcher["Team"] elsewhere)
-    — two different endpoints returning superficially similar strings is exactly the kind of
-    thing that can silently NOT match in a straight string comparison, with no error, just a
-    quiet "no data found" result that looks like a data gap rather than a matching bug. The
-    numeric id is unambiguous across endpoints in a way a display string isn't guaranteed to be;
-    callers doing any MATCHING should use "id", and reserve "name" for display only.
+    hydrate=currentTeam IS REQUIRED, NOT OPTIONAL — a real bug found via a real production
+    failure, not caught in review: an earlier version of this function assumed currentTeam came
+    back on the base person object with no special hydration, and every single call failed as a
+    result (confirmed live: 0/61 real, well-known active catchers — including J.T. Realmuto —
+    resolved a team, a complete and uniform failure across every single one, not a data-specific
+    issue for any particular player). Confirmed directly from two independent sources during the
+    fix: MLB Stats API's own documented hydration values list "currentTeam" explicitly as
+    something that must be requested; and MLB-StatsAPI's own real, working source code builds its
+    hydrate parameter as "...,currentTeam" (appended as a bare term after any stats hydration,
+    not a function call like stats(...) needs). This function's own hydrate string mirrors that
+    confirmed-real syntax directly, not a fresh guess.
+
+    RETURNS BOTH id AND name, DELIBERATELY, NOT JUST THE NAME (a separate, earlier fix — kept
+    here since both problems affected the same function): team NAME strings in this codebase can
+    come from DIFFERENT MLB Stats API endpoints (this one, people/{id}.currentTeam.name; vs. the
+    schedule endpoint's teams.home/away.team.name, used to build pitcher["Team"] elsewhere) — two
+    different endpoints returning superficially similar strings is exactly the kind of thing that
+    can silently NOT match in a straight string comparison, with no error, just a quiet "no data
+    found" result that looks like a data gap rather than a matching bug. The numeric id is
+    unambiguous across endpoints in a way a display string isn't guaranteed to be; callers doing
+    any MATCHING should use "id", and reserve "name" for display only.
 
     BUILT SPECIFICALLY BECAUSE Baseball Savant's catcher-framing leaderboard turned out to have
     NO team column at all — confirmed directly from a real response's own column list during a
@@ -1091,10 +1102,13 @@ def get_player_current_team(player_id: int) -> Optional[Dict[str, Any]]:
     failure) — callers should treat this as "unknown team," not silently attribute the player to
     a wrong or default team.
 
-    HONEST LIMITATION, same posture as this file's other roster-based functions: not verified
-    against a live response (statsapi.mlb.com unreachable from this sandbox)."""
+    HONEST LIMITATION, same posture as this file's other roster-based functions: the hydrate=
+    currentTeam fix itself is confirmed from real MLB-StatsAPI source code, real confidence — but
+    still not directly verified against a live response from THIS platform's own network
+    (statsapi.mlb.com unreachable from this sandbox). Worth a real check on the next run, same as
+    every other fix in this thread."""
     try:
-        data = fetch_json(f"{BASE}/people/{player_id}")
+        data = fetch_json(f"{BASE}/people/{player_id}", {"hydrate": "currentTeam"})
     except Exception:
         return None
     try:

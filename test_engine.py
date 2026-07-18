@@ -819,6 +819,27 @@ def test_get_player_current_team_none_on_empty_people(monkeypatch):
     assert E.get_player_current_team(123) is None
 
 
+def test_get_player_current_team_requests_hydrate_currentTeam(monkeypatch):
+    # Regression guard for the real, confirmed production bug: currentTeam requires explicit
+    # hydration on MLB Stats API's people endpoint, not something included by default. An
+    # earlier version of this function never requested it, causing a complete 0/61 failure rate
+    # across every real catcher in production, including well-known active players. Confirmed
+    # from two independent sources (MLB Stats API's own documented hydration values, and
+    # MLB-StatsAPI's own real, working source code building "...,currentTeam" into its hydrate
+    # string) before this fix, not guessed a second time.
+    captured = {}
+
+    def fake_fetch(url, params=None, retries=2):
+        captured["params"] = params
+        return {"people": [{"id": 123, "currentTeam": {"id": 109, "name": "Arizona Diamondbacks"}}]}
+
+    monkeypatch.setattr(E, "fetch_json", fake_fetch)
+    team = E.get_player_current_team(123)
+    assert captured["params"] == {"hydrate": "currentTeam"}
+    assert team == {"id": 109, "name": "Arizona Diamondbacks"}
+    print("✓ get_player_current_team correctly requests hydrate=currentTeam, the actual fix for the real 0/61 production failure")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
