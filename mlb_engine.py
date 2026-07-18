@@ -918,16 +918,28 @@ def get_pitcher_starts_this_season(pitcher_id: int, season: int,
     starting-pitcher work (gamesStarted, or the same >=9-outs floor this file's other functions
     use as a fallback if that field isn't present in a given response).
 
+    gameType="R" (regular season only) IS EXPLICITLY PASSED, not left to the API's own default —
+    a real bug found and fixed after Shawn compared this platform's output against ESPN's own
+    batting-order splits for a real pitcher and found a systematic ~11 AB overcount in EVERY
+    slot, not random noise. Without gameType pinned down, "season" alone can span more than
+    regular-season games under MLB Stats API's own conventions (spring training among them) —
+    a handful of spring-training starts, each contributing a few PA per lineup slot, is exactly
+    the size and SHAPE of overcount that showed up (uniform across all 9 slots, consistent with
+    2-3 extra whole games, not a per-row parsing bug, which would have produced uneven gaps).
+
     HONEST CONFIDENCE NOTE, worth stating plainly rather than presenting this as equally certain
     to code built on already-proven shapes: gameLog is one of the most standard, widely-used MLB
     Stats API capabilities (used throughout the broader MLB-StatsAPI wrapper ecosystem for
     exactly this "find a player's own games" purpose) — real precedent, not a guess — but it is
     still genuinely unverified against a live response from this sandbox, same statsapi.mlb.com
     restriction as every other function in this file. Lower risk than a novel assumption, higher
-    risk than code reusing an already-shipped, tested shape."""
+    risk than code reusing an already-shipped, tested shape. The gameType fix specifically is
+    reasoned from the SIZE and UNIFORMITY of a real, reported discrepancy, not confirmed by
+    directly inspecting a live response — worth Shawn's own follow-up check once redeployed to
+    confirm the gap actually closes, not just that the fix is well-reasoned."""
     try:
         data = fetch_json(f"{BASE}/people/{pitcher_id}/stats",
-                          {"stats": "gameLog", "group": "pitching", "season": season})
+                          {"stats": "gameLog", "group": "pitching", "season": season, "gameType": "R"})
     except Exception:
         return []
     try:

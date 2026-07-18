@@ -773,6 +773,23 @@ def test_batting_order_splits_skips_slot_with_no_real_pa(monkeypatch):
     print("✓ get_pitcher_batting_order_splits correctly omits slots with zero real plate appearances")
 
 
+def test_get_pitcher_starts_requests_regular_season_only(monkeypatch):
+    # Regression guard for the real bug found comparing this platform's output against ESPN's
+    # own batting-order splits (a systematic ~11 AB overcount in every slot) — gameType="R" must
+    # be explicitly requested, not left to the API's own default, which can otherwise pull in
+    # spring training or other non-regular-season starts under the same season identifier.
+    captured = {}
+
+    def fake_fetch(url, params=None, retries=2):
+        captured["params"] = params
+        return _fake_gamelog([])
+
+    monkeypatch.setattr(E, "fetch_json", fake_fetch)
+    E.get_pitcher_starts_this_season(111, 2026)
+    assert captured["params"].get("gameType") == "R"
+    print("✓ get_pitcher_starts_this_season explicitly requests regular-season-only games")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

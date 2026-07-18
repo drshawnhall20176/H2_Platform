@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 538/538 tests green)
+## What's in this checkpoint (all tested — 539/539 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -1911,6 +1911,37 @@ build — the function was right both times, my own expected-value math checking
 recording rather than quietly fixing without a note. A full realistic simulation across 3 starts
 and a real 9-slot lineup ran clean, producing a table shape matching the original screenshot.
 538/538 total passing.
+
+### Batting order splits: real bug found comparing against ESPN, fixed (2026-07-18)
+Shawn compared this platform's freshly-shipped batting-order splits output against ESPN's own
+splits page for a real pitcher (Brandon Pfaadt) and found a disparity, asking whether it was
+intentional and — if so — for it to be documented clearly.
+
+**It wasn't intentional — a real bug, found through a genuinely useful verification method this
+sandbox couldn't have caught on its own.** Quantified the gap before guessing at a cause: AB
+overcounted by roughly +8 to +14 in EVERY one of the 9 slots, averaging +10.8 — a systematic,
+uniform offset, not random noise. That shape matters: an uneven, per-row discrepancy would point
+to a parsing bug; a UNIFORM offset across every slot points to whole EXTRA GAMES being included,
+consistent with roughly 2-3 additional starts' worth of at-bats leaking in everywhere at once.
+
+**Root cause: `get_pitcher_starts_this_season` never pinned `gameType` down.** Left to the API's
+own default, `stats=gameLog&season=X` can span more than regular-season games under MLB Stats
+API's own conventions — spring training among them. Fixed by explicitly requesting `gameType=
+"R"` (regular season only), a real, documented MLB Stats API parameter. Reasoned from the size
+and uniformity of the reported gap, not confirmed by inspecting a live response — stated
+honestly in the function's own docstring as reasoned-but-unconfirmed, with an explicit ask for
+Shawn's own follow-up check once redeployed to confirm the gap actually closes.
+
+**Added the detailed explanation requested, as its own expander right under the results table**
+(not just a one-line caption) covering: why this is computed here rather than pulled from a
+native split at all (none was found to exist), the regular-season-only scoping and the real bug
+that prompted it, "as-of" timing differences from a third-party site's own refresh cadence, the
+existing OBP approximation caveat, and the small-sample caution — all in one place, addressing
+exactly the comparison Shawn made rather than a generic disclaimer.
+
+**1 new test** locking in the fix (`test_get_pitcher_starts_requests_regular_season_only`,
+confirming `gameType: "R"` is actually present in the outgoing request params, not just claimed
+in a comment). 539/539 total passing.
 
 ## NOT YET DONE (next stages)
 - **GM/analyst gap, item 5 of 5** — hitter regression (1), reliever fatigue (2), lineup-wide
