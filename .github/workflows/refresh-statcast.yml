@@ -81,7 +81,7 @@ jobs:
           lookup = SC.load_catcher_framing()
           print(f"Loaded {len(lookup)} catchers.")
           if len(lookup) < 10:
-              print("Catcher framing cache looks thin or missing — committing anyway (non-fatal).")
+              print("::warning::Catcher framing cache looks thin or missing after this run — see the earlier 'Pull Statcast batter + catcher-framing data' step's own log for the actual error. Committing the batter cache anyway (non-fatal).")
           PY
         continue-on-error: true
 
