@@ -216,7 +216,43 @@ if team_injuries or opp_injuries:
 
 st.divider()
 
-# --- the matchup: arsenal joined to the hitter's family vulnerability ------------------------
+# --- Batting order splits: how this pitcher performs against each lineup slot -----------------
+# A real GM/rotation-planning question: does this arm get hit hard by the middle of the order
+# specifically, or is he equally tough top to bottom? Also directly useful scouting a pitcher
+# being considered in a trade against real lineup construction, not just his aggregate line.
+# Behind an expander with an explicit button, not auto-computed: scanning a season's worth of a
+# pitcher's own starts (bounded to his real starts via his own game log, not his whole team's
+# season) still means one boxscore fetch per start — a real cost worth gating behind a person
+# actually asking to see it, not fired automatically every time this page loads.
+with st.expander(f"📋 {pitcher['Pitcher']} vs. the batting order (season)"):
+    st.caption("Cumulative stats this pitcher has allowed this season, broken down by the "
+              "OPPOSING hitter's own lineup spot — computed from his real starts this season, "
+              "not a live query. Small samples are the norm here, not the exception: a single "
+              "season of starts often means each slot only has 15-25 AB against him total. A "
+              "real signal worth a look, not one worth trusting blindly.")
+    if st.button("Load batting order splits", key="load_bo_splits"):
+        with st.spinner(f"Scanning {pitcher['Pitcher']}'s starts this season..."):
+            season = int(date_str[:4])
+            bo_splits = E.get_pitcher_batting_order_splits(pitcher_pid, season, before_date=date_str)
+        if not bo_splits:
+            st.info("No batting-order data available yet — either no starts found this season, "
+                    "or the data couldn't be aggregated.")
+        else:
+            bo_rows = [{"Slot": slot, **stats} for slot, stats in sorted(bo_splits.items())]
+            bo_df = pd.DataFrame(bo_rows).rename(columns={
+                "ab": "AB", "r": "R", "h": "H", "2b": "2B", "3b": "3B", "hr": "HR", "rbi": "RBI",
+                "bb": "BB", "hbp": "HBP", "so": "SO", "avg": "AVG", "obp": "OBP", "slg": "SLG", "ops": "OPS"})
+            int_cols = ["AB", "R", "H", "2B", "3B", "HR", "RBI", "BB", "HBP", "SO"]
+            st.dataframe(
+                bo_df.style.format({**{c: "{:.0f}" for c in int_cols},
+                                   "AVG": "{:.3f}", "OBP": "{:.3f}", "SLG": "{:.3f}", "OPS": "{:.3f}"})
+                .theme_gradient(cmap="RdYlGn", subset=["OPS"]),
+                hide_index=True, use_container_width=True)
+            st.caption("OBP here is simplified (H+BB+HBP over AB+BB+HBP) — sacrifice flies aren't "
+                      "tracked at this level of aggregation, so treat as a close approximation, "
+                      "not exact official OBP.")
+
+
 rows = MD.build_matchup(pitcher_pid, hitter_hid, arsenals, hitter_splits)
 if not rows:
     st.warning(f"No cached pitch data for **{pitcher['Pitcher']}** — pick another starter, or the "
