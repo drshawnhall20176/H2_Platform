@@ -98,7 +98,19 @@ def main():
         if enriched_rows:
             pd.DataFrame(enriched_rows).to_csv(cf_path, index=False)
             with_team = sum(1 for r in enriched_rows if r["team_id"])
+            without_team = [r["name"] for r in enriched_rows if not r["team_id"]]
             print(f"Wrote {len(enriched_rows)} qualified catchers, {with_team} with a resolved team.")
+            if with_team < len(enriched_rows) * 0.5:
+                # A REAL diagnostic gap otherwise: "N with a resolved team" alone doesn't say
+                # WHICH catchers failed or WHY, and a low resolution rate is exactly the kind of
+                # thing that would explain "no qualified data" for a specific team even with a
+                # correctly-working id-based match — if a team's own catcher never resolved a
+                # team_id at all, no id comparison can ever succeed for that team, real bug or not.
+                print(f"::warning::Only {with_team}/{len(enriched_rows)} qualified catchers resolved "
+                     f"a team via get_player_current_team — most calls are failing. Sample of "
+                     f"catchers with NO resolved team: {without_team[:10]}")
+            resolved_sample = [(r["name"], r["team_id"], r["team"]) for r in enriched_rows if r["team_id"]][:5]
+            print(f"Sample of resolved catchers (name, team_id, team): {resolved_sample}")
         else:
             print("No catchers met the called-pitches floor for team enrichment — "
                  "leaving the unqualified cache as-is.")

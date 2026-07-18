@@ -2275,6 +2275,35 @@ string-matching bug causing a silent "no data" result. Worth noting as a pattern
 these was invisible from a green checkmark alone, and each was only found because Shawn actually
 checked the deployed output against what was expected, not just the workflow status.
 
+### Catcher framing: stale-cache theory ruled out with a real confirmed fresh run, added real diagnostics for round 4 (2026-07-18)
+Shawn confirmed the workflow was genuinely re-run (not just the page refreshed) and Arizona
+Diamondbacks still showed "no qualified data" — ruling out the stale-cache explanation directly,
+not just assuming it away. A real, different issue, worth diagnosing rather than guessing a
+fourth time.
+
+**Applied the same discipline that found the previous three bugs: add real visibility before
+proposing another fix.** Two places, not one — either side of the id comparison could be the
+culprit, and guessing which one wastes a round:
+
+- `refresh_statcast.py`'s enrichment step now reports HOW MANY qualified catchers actually
+  resolved a team_id (not just a summary count as before) — if under half resolve, a `::warning::`
+  fires listing which catchers came back with no team, surfacing a systemic resolution problem
+  directly instead of leaving it to be inferred from a downstream symptom. A sample of (name,
+  team_id, team) for catchers that DID resolve is also printed, so the actual id VALUES are
+  visible for a sanity check, not just their presence.
+- Matchup Lab's own "no qualified data" message now shows the actual queried team_id, how many
+  catchers are in the cache overall, and the full list of distinct team ids that DID resolve —
+  turning a bare "no data" message into something that directly answers "is this team's id
+  simply missing from the resolved list, or is something else going on."
+
+Both are genuinely diagnostic, not decorative — the NEXT report should make clear within seconds
+whether Arizona's own catcher(s) failed to resolve a team specifically, or whether team resolution
+is failing more broadly across the whole cache.
+
+558/558 total passing (no logic changes this round — this was purely about visibility, matching
+the exact posture that found and fixed the ORIGINAL parse failure, the column-mapping issue, and
+the string-matching bug, each of which needed to be SEEN before it could be diagnosed correctly).
+
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
   framing/item 5 writeup above for why: no confirmed way to find every game a specific umpire
