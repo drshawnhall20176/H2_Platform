@@ -23,6 +23,10 @@ import best_bets_data as BBD
 
 _active = sports.active()
 E, P = _active.engine, _active.projections
+game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER   # shared with
+                                                                                   # Best Bets and
+                                                                                   # every Matchup
+                                                                                   # Lab variant
 
 st.title("🏅 Graded Picks")
 st.caption(f"Every game on the slate, graded — sorted with the most interesting first, not a "
@@ -50,6 +54,47 @@ else:
 
 if not plays:
     st.info("No games on the board right now. Graded picks appear here on an active slate.")
+    st.stop()
+
+# Time slot + Game filters — the same shared helpers (game_dt/slot_of/SLOT_ORDER) Best Bets and
+# every Matchup Lab variant already use, narrowing a busy night's full slate down to one part of
+# it. Filters on meta (already generic across every sport in Best Bets' own existing code, not a
+# new assumption for this page) rather than pitcher rows, since Graded Picks works from the
+# flattened plays/meta shape, not per-pitcher rows the way Matchup Lab does.
+for m in meta:
+    m["_slot"] = slot_of(game_dt(m.get("game_date")))
+slots_present = sorted({m["_slot"] for m in meta}, key=lambda s: SLOT_ORDER.get(s, 9))
+
+c_slot, c_game = st.columns(2)
+with c_slot:
+    slot_pick = st.selectbox("Time slot", ["All slate"] + slots_present)
+slot_meta = meta if slot_pick == "All slate" else [m for m in meta if m["_slot"] == slot_pick]
+
+if not slot_meta:
+    st.info(f"No games in the {slot_pick} slot — try a different time slot or \"All slate\".")
+    st.stop()
+
+game_date_by_label = {m["label"]: m.get("game_date") for m in slot_meta}
+games_present = sorted(game_date_by_label, key=lambda g: game_date_by_label[g] or "~")
+
+
+def _game_label_fmt(g: str) -> str:
+    dt = game_dt(game_date_by_label.get(g))   # already Eastern-localized by game_dt itself
+    if dt is None:
+        return g
+    return f"{dt.strftime('%-I:%M %p ET')} — {g}"
+
+
+with c_game:
+    game_pick = st.selectbox("Game", ["All games in this slot"] + games_present,
+                             format_func=lambda g: _game_label_fmt(g) if g != "All games in this slot" else g)
+
+selected_labels = ({m["label"] for m in slot_meta} if game_pick == "All games in this slot"
+                   else {game_pick})
+plays = [pl for pl in plays if pl.get("Game") in selected_labels]
+
+if not plays:
+    st.info("No graded plays match the current filters — try a different time slot or game.")
     st.stop()
 
 # organize_graded_picks (projections.py) does the grading, grouping, and sorting — kept as a

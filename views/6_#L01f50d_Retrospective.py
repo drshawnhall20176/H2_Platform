@@ -204,6 +204,21 @@ if summary["tiers"]:
         columns={"tier": "Conviction", "n": "Plays", "hit_rate": "Hit rate"})
         .style.format({"Hit rate": "{:.0%}"}), hide_index=True, use_container_width=True)
  
+# Letter-grade accuracy -- does Graded Picks' own A/B/C/D actually mean anything, using real
+# settled outcomes. MLB-only: conviction_to_grade lives in MLB's own projections.py, matching
+# Graded Picks' own "priority is MLB" scope -- calling it for another sport's P (a different
+# module entirely) would crash, so this is gated the same way every other MLB-only branch on
+# this page already is, not left to fail silently or crash for WNBA/NBA/NFL/NCAAMB.
+if _active.key == "MLB":
+    grade_accuracy = P.grade_accuracy_by_letter(graded)
+    if grade_accuracy:
+        st.markdown("**Hit rate by Graded Picks letter grade** \u2014 does an A actually hit more "
+                   "than a C? The direct test of whether that page's own grades mean anything, "
+                   "not a hypothetical.")
+        st.dataframe(pd.DataFrame(grade_accuracy).rename(
+            columns={"letter": "Grade", "tier": "Label", "n": "Plays", "hit_rate": "Hit rate"})
+            .style.format({"Hit rate": "{:.0%}"}), hide_index=True, use_container_width=True)
+
 cal = summary["calibration"]
 if cal:
     fig, ax = plt.subplots(figsize=(3.6, 3.0), dpi=110)
