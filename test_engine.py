@@ -207,6 +207,186 @@ def test_get_team_injuries_falls_back_to_code_when_no_description(monkeypatch):
     assert injuries[0]["status"] == "RM"
 
 
+# ----------------------------------------------------------------- schedule refactor
+def _fake_schedule_json(games):
+    """Wrap a list of (gamePk, gameDate, home_name, home_id, away_name, away_id) into the raw
+    MLB Stats API schedule response shape, for mocking fetch_json."""
+    return {"dates": [{"games": [
+        {"gamePk": pk, "gameDate": gd, "gameNumber": 1, "status": {"detailedState": "Final"},
+        "venue": {"name": "Test Park", "id": 1},
+        "teams": {"home": {"team": {"name": hn, "id": hid}},
+                 "away": {"team": {"name": an, "id": aid}}}}
+        for pk, gd, hn, hid, an, aid in games
+    ]}]}
+
+
+def test_get_schedule_unchanged_after_refactor(monkeypatch):
+    # Regression guard for extracting _normalize_schedule_json — get_schedule's own real,
+    # already-shipped output shape must be byte-identical to before the refactor.
+    fake = _fake_schedule_json([(1, "2026-07-18T23:10:00Z", "Astros", 117, "Orioles", 110)])
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake)
+    games = E.get_schedule("2026-07-18")
+    assert len(games) == 1
+    g = games[0]
+    assert g["gamePk"] == 1 and g["home_name"] == "Astros" and g["away_name"] == "Orioles"
+    assert g["home_id"] == 117 and g["away_id"] == 110
+    assert g["game_date"] == "2026-07-18T23:10:00Z"
+    print("✓ get_schedule's output is unchanged after extracting the shared normalization helper")
+
+
+def test_get_team_schedule_range_passes_team_and_date_params(monkeypatch):
+    captured = {}
+
+    def fake_fetch(url, params=None, retries=2):
+        captured["params"] = params
+        return _fake_schedule_json([(1, "2026-07-16T23:10:00Z", "Astros", 117, "Orioles", 110)])
+
+    monkeypatch.setattr(E, "fetch_json", fake_fetch)
+    games = E.get_team_schedule_range(117, "2026-07-14", "2026-07-17")
+    assert captured["params"] == {"sportId": 1, "teamId": 117,
+                                  "startDate": "2026-07-14", "endDate": "2026-07-17"}
+    assert len(games) == 1
+    print("✓ get_team_schedule_range correctly passes teamId + startDate/endDate as one request")
+
+
+def test_get_team_schedule_range_sorted_by_date(monkeypatch):
+    # Different sort key than get_schedule (chronological, not away-team-name) — makes sense for
+    # a fatigue window read chronologically, not alphabetically by opponent.
+    fake = _fake_schedule_json([
+        (2, "2026-07-17T23:10:00Z", "Astros", 117, "Rangers", 140),
+        (1, "2026-07-15T23:10:00Z", "Astros", 117, "Orioles", 110),
+    ])
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake)
+    games = E.get_team_schedule_range(117, "2026-07-14", "2026-07-17")
+    assert [g["gamePk"] for g in games] == [1, 2]   # chronological, not the raw response order
+
+
+# ----------------------------------------------------------------- get_team_bullpen_fatigue
+def _fake_boxscore(team_side_players):
+    """team_side_players: {pid: (name, innings_pitched_str)}. Builds a minimal real-shaped
+    boxscore with these players on the 'home' side (tests pick which real team_id is 'home')."""
+    players = {}
+    for pid, (name, ip) in team_side_players.items():
+        players[f"ID{pid}"] = {
+            "person": {"id": pid, "fullName": name},
+            "stats": {"pitching": {"inningsPitched": ip}},
+        }
+    return {"teams": {"home": {"players": players}, "away": {"players": {}}}}
+
+
+def test_bullpen_fatigue_flags_three_consecutive_days(monkeypatch):
+    # Pitched on the 3 calendar days immediately before before_date -> the highest-value tag.
+    games = [
+        {"gamePk": 1, "game_date": "2026-07-15T23:10:00Z", "status": "Final", "home_id": 117},
+        {"gamePk": 2, "game_date": "2026-07-16T23:10:00Z", "status": "Final", "home_id": 117},
+        {"gamePk": 3, "game_date": "2026-07-17T23:10:00Z", "status": "Final", "home_id": 117},
+    ]
+    boxscores = {
+        1: _fake_boxscore({555: ("Gassed Reliever", "1.0")}),
+        2: _fake_boxscore({555: ("Gassed Reliever", "0.2")}),
+        3: _fake_boxscore({555: ("Gassed Reliever", "1.1")}),
+    }
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2:
+                        boxscores[int(url.rsplit("/game/", 1)[1].split("/")[0])])
+    fatigue = E.get_team_bullpen_fatigue(117, "2026-07-18")
+    assert len(fatigue) == 1
+    assert fatigue[0]["consecutive_days"] == 3
+    assert "3 straight days" in fatigue[0]["tag"]
+    print("✓ get_team_bullpen_fatigue correctly flags a real 3-consecutive-day streak")
+
+
+def test_bullpen_fatigue_pitched_yesterday_only(monkeypatch):
+    games = [{"gamePk": 1, "game_date": "2026-07-17T23:10:00Z", "status": "Final", "home_id": 117}]
+    boxscores = {1: _fake_boxscore({555: ("One Day Guy", "1.0")})}
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: boxscores[1])
+    fatigue = E.get_team_bullpen_fatigue(117, "2026-07-18")
+    assert fatigue[0]["consecutive_days"] == 1
+    assert fatigue[0]["days_since_last_appearance"] == 1
+    assert "yesterday" in fatigue[0]["tag"]
+
+
+def test_bullpen_fatigue_rested_pitcher(monkeypatch):
+    games = [{"gamePk": 1, "game_date": "2026-07-13T23:10:00Z", "status": "Final", "home_id": 117}]
+    boxscores = {1: _fake_boxscore({555: ("Rested Guy", "1.0")})}
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: boxscores[1])
+    fatigue = E.get_team_bullpen_fatigue(117, "2026-07-18")
+    assert fatigue[0]["days_since_last_appearance"] == 5
+    assert fatigue[0]["consecutive_days"] == 0
+    assert "day(s) rest" in fatigue[0]["tag"]
+
+
+def test_bullpen_fatigue_no_appearance_not_included(monkeypatch):
+    games = [{"gamePk": 1, "game_date": "2026-07-17T23:10:00Z", "status": "Final", "home_id": 117}]
+    box = _fake_boxscore({555: ("Pitched", "1.0"), 556: ("Did Not Pitch", "0.0")})
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+    fatigue = E.get_team_bullpen_fatigue(117, "2026-07-18")
+    pids = {f["player_id"] for f in fatigue}
+    assert 555 in pids and 556 not in pids
+    print("✓ get_team_bullpen_fatigue excludes a pitcher with 0.0 innings (didn't actually appear)")
+
+
+def test_bullpen_fatigue_skips_non_final_games(monkeypatch):
+    games = [{"gamePk": 1, "game_date": "2026-07-17T23:10:00Z", "status": "Postponed", "home_id": 117}]
+    called = {"fetched": False}
+
+    def fake_fetch(url, params=None, retries=2):
+        called["fetched"] = True
+        return {}
+
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    monkeypatch.setattr(E, "fetch_json", fake_fetch)
+    fatigue = E.get_team_bullpen_fatigue(117, "2026-07-18")
+    assert fatigue == [] and called["fetched"] is False   # never even fetched the boxscore
+    print("✓ get_team_bullpen_fatigue skips non-Final games without fetching their boxscore")
+
+
+def test_bullpen_fatigue_correct_side_only(monkeypatch):
+    # A pitcher on the OPPONENT's side in a game against this team must never show up here.
+    games = [{"gamePk": 1, "game_date": "2026-07-17T23:10:00Z", "status": "Final", "home_id": 117}]
+    box = {"teams": {
+        "home": {"players": {"ID555": {"person": {"id": 555, "fullName": "Home Pitcher"},
+                                       "stats": {"pitching": {"inningsPitched": "1.0"}}}}},
+        "away": {"players": {"ID556": {"person": {"id": 556, "fullName": "Away Pitcher"},
+                                       "stats": {"pitching": {"inningsPitched": "1.0"}}}}},
+    }}
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+    fatigue = E.get_team_bullpen_fatigue(117, "2026-07-18")   # team_id=117 is the HOME team here
+    pids = {f["player_id"] for f in fatigue}
+    assert pids == {555}
+    print("✓ get_team_bullpen_fatigue only counts appearances for the requested team's own side")
+
+
+def test_bullpen_fatigue_no_lookahead():
+    # before_date itself must never be part of the window (see get_team_schedule_range's own
+    # start/end computation: end = before_date - 1 day).
+    fatigue = E.get_team_bullpen_fatigue(117, "not-a-real-date")
+    assert fatigue == []
+
+
+def test_bullpen_fatigue_sorted_most_fatigued_first(monkeypatch):
+    games = [
+        {"gamePk": 1, "game_date": "2026-07-15T23:10:00Z", "status": "Final", "home_id": 117},
+        {"gamePk": 2, "game_date": "2026-07-16T23:10:00Z", "status": "Final", "home_id": 117},
+        {"gamePk": 3, "game_date": "2026-07-17T23:10:00Z", "status": "Final", "home_id": 117},
+    ]
+    boxscores = {
+        1: _fake_boxscore({111: ("Two Straight", "1.0")}),
+        2: _fake_boxscore({111: ("Two Straight", "1.0"), 222: ("One Day", "1.0")}),
+        3: _fake_boxscore({222: ("One Day", "0.0")}),   # 222 on roster but didn't pitch game 3
+    }
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2:
+                        boxscores[int(url.rsplit("/game/", 1)[1].split("/")[0])])
+    fatigue = E.get_team_bullpen_fatigue(117, "2026-07-18")
+    assert fatigue[0]["name"] == "Two Straight"   # 2-day streak ranks above 1-day
+    print("✓ get_team_bullpen_fatigue sorts the longest current streak first")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

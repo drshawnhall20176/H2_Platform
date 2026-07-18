@@ -17,7 +17,7 @@ from __future__ import annotations
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
  
 import requests
@@ -246,10 +246,10 @@ def get_hitter_raw(player_id: int) -> Optional[Dict[str, Any]]:
     }
  
  
-def get_schedule(date_str: str) -> List[Dict[str, Any]]:
-    """Normalized game list with probable pitchers and venue."""
-    sched = fetch_json(f"{BASE}/schedule",
-                       {"sportId": 1, "date": date_str, "hydrate": "probablePitcher,venue"})
+def _normalize_schedule_json(sched: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Shared normalization for both get_schedule (single date) and get_team_schedule_range
+    (a team across a date window) — same output shape either way, so callers of one don't need
+    to know which query produced it."""
     games: List[Dict[str, Any]] = []
     for d in sched.get("dates", []):
         for g in d.get("games", []):
@@ -269,7 +269,28 @@ def get_schedule(date_str: str) -> List[Dict[str, Any]]:
                 "home_pitcher_id": (home.get("probablePitcher") or {}).get("id"),
                 "away_pitcher_id": (away.get("probablePitcher") or {}).get("id"),
             })
+    return games
+
+
+def get_schedule(date_str: str) -> List[Dict[str, Any]]:
+    """Normalized game list with probable pitchers and venue."""
+    sched = fetch_json(f"{BASE}/schedule",
+                       {"sportId": 1, "date": date_str, "hydrate": "probablePitcher,venue"})
+    games = _normalize_schedule_json(sched)
     return sorted(games, key=lambda x: (x["away_name"], x["gameNumber"]))
+
+
+def get_team_schedule_range(team_id: int, start_date: str, end_date: str) -> List[Dict[str, Any]]:
+    """One team's games between start_date and end_date (both YYYY-MM-DD, inclusive), same
+    normalized shape get_schedule returns. A real, documented MLB Stats API capability — a single
+    schedule request accepts teamId + startDate/endDate together — used here instead of one
+    get_schedule() call per calendar date, which would mean days_back+1 separate requests for
+    what's really one query. Built for get_team_bullpen_fatigue below, not schedule browsing
+    (get_schedule stays the right call for "what's happening across the league on date X")."""
+    sched = fetch_json(f"{BASE}/schedule",
+                       {"sportId": 1, "teamId": team_id, "startDate": start_date, "endDate": end_date})
+    games = _normalize_schedule_json(sched)
+    return sorted(games, key=lambda x: (x["game_date"] or "", x["gameNumber"]))
  
  
 def _team_starters(game: Dict, team_key: str, box: Dict) -> Tuple[List[int], bool]:
@@ -345,6 +366,8 @@ def build_slate(date_str: str, fip_constant: float = FIP_CONSTANT_DEFAULT,
             "game_date": s["game"].get("game_date"),
             "away_name": s["game"]["away_name"],
             "home_name": s["game"]["home_name"],
+            "home_id": s["game"].get("home_id"),
+            "away_id": s["game"].get("away_id"),
             "home_pm": s["home_pm"],
             "away_pm": s["away_pm"],
         })
@@ -559,4 +582,113 @@ def get_team_injuries(team_id: int) -> List[Dict[str, Any]]:
             "return_date": None,
             "comment": None,
         })
+    return out
+
+
+def get_team_bullpen_fatigue(team_id: int, before_date: str, days_back: int = 5) -> List[Dict[str, Any]]:
+    """Per-pitcher recent-appearance workload for this team, over the days_back calendar days
+    STRICTLY BEFORE before_date (before_date itself, and anything on/after it, is never included
+    — no lookahead, same discipline every other sport's engine on this platform follows).
+
+    Returns one row per pitcher who actually recorded outs in ANY game in the window:
+    [{"player_id", "name", "days_since_last_appearance", "appearances_in_window",
+      "consecutive_days", "total_outs_in_window", "tag"}, ...], sorted with the most fatigued
+    arms first (longest current streak, then most recent appearance).
+
+    METHOD: fetches the team's real games in the window via get_team_schedule_range (one request
+    covering the whole window, not days_back separate get_schedule() calls), then for each FINAL
+    game in it fetches that game's boxscore and scans every player with a non-empty
+    stats.pitching entry — reusing the EXACT SAME parsing shape _parse_boxscore_results already
+    has proven in production for grading (get_player_results), not new, unverified parsing logic.
+
+    DELIBERATELY DOES NOT TRY TO DISTINGUISH "STARTER" FROM "RELIEVER" WITHIN A SINGLE BOXSCORE —
+    a real design choice, not a gap: that would need assuming something about the raw JSON's
+    pitcher-listing order that couldn't be confirmed with confidence during scoping. Instead, this
+    returns EVERY pitcher who appeared, full stop — the CALLER cross-references against tonight's
+    OWN confirmed starter (already known from build_pitching_slate, no guessing needed) to know
+    which of these appearances were relief outings. Simpler and more certain than the alternative.
+
+    CONSECUTIVE-DAYS FLAG is the clearest, single highest-value signal here: appeared on 3+
+    calendar days in a row, ending the day immediately before before_date. MLB bullpens are
+    heavily leash-restricted after 3 straight days by real, well-established convention.
+
+    ONE KNOWN, ACCEPTED IMPRECISION, stated plainly rather than silently shipped: game_date is
+    bucketed to its UTC calendar date, not converted to Eastern first. For the large majority of
+    games this is a distinction without a difference; a late West Coast start crossing midnight
+    UTC could bucket to the "wrong" calendar day by this method. Not worth a timezone-conversion
+    dependency for what would be, at most, a rare one-day misread on the least important part of
+    this signal (appearances_in_window's exact date, not the days_since/consecutive-streak reads
+    that matter most, which are far more often correct even in that edge case).
+
+    HONEST LIMITATION, same posture as get_team_injuries: NOT verified against a live response —
+    same statsapi.mlb.com network restriction from this sandbox applies here too. Built on the
+    SAME confirmed, already-shipped boxscore-parsing shape used elsewhere in this file, so this
+    carries less fresh uncertainty than get_team_injuries did — but the date-range schedule query
+    specifically (get_team_schedule_range) is new and hasn't been checked against a live response."""
+    try:
+        before_dt = datetime.strptime(before_date, "%Y-%m-%d")
+    except ValueError:
+        return []
+    start = (before_dt - timedelta(days=days_back)).strftime("%Y-%m-%d")
+    end = (before_dt - timedelta(days=1)).strftime("%Y-%m-%d")
+    if end < start:
+        return []
+
+    games = get_team_schedule_range(team_id, start, end)
+    by_pitcher: Dict[int, Dict[str, Any]] = {}
+    for g in games:
+        if "final" not in (g.get("status", "") or "").lower():
+            continue
+        game_date = (g.get("game_date") or "")[:10]
+        if not game_date:
+            continue
+        try:
+            box = fetch_json(f"{BASE}/game/{g['gamePk']}/boxscore")
+        except Exception:
+            continue
+        side = "home" if g.get("home_id") == team_id else "away"
+        players = (((box.get("teams", {}) or {}).get(side, {}) or {}).get("players", {}) or {})
+        for pdata in players.values():
+            pid = (pdata.get("person", {}) or {}).get("id")
+            if pid is None:
+                continue
+            pit = (pdata.get("stats", {}) or {}).get("pitching", {}) or {}
+            if not pit:
+                continue
+            outs = _ip_to_outs(pit.get("inningsPitched", "0.0"))
+            if outs <= 0:
+                continue   # on the pitching staff but didn't actually appear in this game
+            name = (pdata.get("person", {}) or {}).get("fullName", "")
+            rec = by_pitcher.setdefault(int(pid), {"name": name, "dates": set(), "total_outs": 0})
+            rec["dates"].add(game_date)
+            rec["total_outs"] += outs
+
+    out: List[Dict[str, Any]] = []
+    for pid, rec in by_pitcher.items():
+        date_objs = sorted((datetime.strptime(d, "%Y-%m-%d").date() for d in rec["dates"]), reverse=True)
+        days_since = (before_dt.date() - date_objs[0]).days
+
+        streak = 0
+        cursor = before_dt.date() - timedelta(days=1)
+        date_set = set(date_objs)
+        while cursor in date_set:
+            streak += 1
+            cursor -= timedelta(days=1)
+
+        if streak >= 3:
+            tag = f"🔴 {streak} straight days — likely unavailable tonight"
+        elif days_since <= 1:
+            tag = "🟡 Pitched yesterday — some fatigue risk"
+        else:
+            tag = f"🟢 {days_since} day(s) rest"
+
+        out.append({
+            "player_id": pid, "name": rec["name"],
+            "days_since_last_appearance": days_since,
+            "appearances_in_window": len(rec["dates"]),
+            "consecutive_days": streak,
+            "total_outs_in_window": rec["total_outs"],
+            "tag": tag,
+        })
+    out.sort(key=lambda x: (-x["consecutive_days"], x["days_since_last_appearance"]))
     return out

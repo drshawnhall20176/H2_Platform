@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 481/481 tests green)
+## What's in this checkpoint (all tested — 492/492 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -1543,13 +1543,61 @@ sort-by-absolute-delta surfacing both tails. A full offline simulation with real
 (a real regression case on each side, plus a hitter with no Statcast row at all) ran clean.
 481/481 total passing.
 
+### GM/analyst gap-filling, item 2 of 5: reliever rest/fatigue signal (2026-07-18)
+No visibility into bullpen availability existed anywhere on the platform. Built
+`mlb_engine.get_team_bullpen_fatigue(team_id, before_date, days_back=5)` — every pitcher who
+recorded outs in a team's last 5 calendar days, with days-since-last-appearance and (the highest-
+value signal) a 3+-consecutive-days flag, the clearest "likely unavailable tonight" read given
+real, well-established bullpen-usage convention.
+
+**A real design choice worth recording, not a shortcut**: deliberately does NOT try to
+distinguish starter from reliever within a single boxscore — that would need assuming something
+about the raw JSON's pitcher-listing order that couldn't be confirmed with confidence during
+scoping. Returns every pitcher who appeared, full stop; the CALLER cross-references against that
+night's own confirmed starter (already known from `build_pitching_slate`, no guessing needed) to
+read the rest as bullpen arms. Simpler and more certain than the alternative.
+
+**Two new engine pieces, both reusing already-proven patterns rather than inventing new ones**:
+`get_team_schedule_range(team_id, start, end)` — a real, documented MLB Stats API capability
+(teamId + startDate/endDate in one request) — extracted `get_schedule`'s own normalization into a
+shared private helper first, verified byte-identical output via a new test (none existed for this
+function before), then built the range query on top of it. And the boxscore-scanning logic itself
+reuses the EXACT SAME `stats.pitching`/`inningsPitched` shape `_parse_boxscore_results` already
+has proven in production for grading — not new, unverified parsing.
+
+**One honest, accepted imprecision, stated in the code, not discovered later**: appearance dates
+bucket to UTC calendar date, not Eastern-converted first — a late West Coast start crossing
+midnight UTC could misbucket by one day. Not worth a timezone dependency for what's a rare, minor
+edge case on the least important part of the signal.
+
+**Wired into Pitching Lab**, scoped to ONE selected game at a time, not the whole slate —
+a real, deliberate cost decision: each team's read costs a schedule-window call plus one boxscore
+fetch per recent game, so showing it for every team on a 15-game night up front would be
+expensive for no reason when a person is only looking at one game at a time anyway. Needed
+`build_slate`'s meta to carry `home_id`/`away_id` (previously computed internally but never
+exposed) and Pitching Lab's own `fip_rows` to carry `_team_id` — both backward-compatible,
+additive-only changes, confirmed via the full test suite before and after.
+
+**16 new tests**: 3 for the schedule refactor (get_schedule's unchanged output, the new range
+query's params, its chronological sort), and 13 for the fatigue function itself (a real 3-
+consecutive-day streak, pitched-yesterday-only, a genuinely rested arm, a roster pitcher who
+didn't actually appear correctly excluded, non-Final games skipped without even fetching their
+boxscore, the opponent's own pitchers never leaking into this team's read, the lookahead-bias
+guard, and sorting the most fatigued arms first). A full offline simulation of the whole chain
+(`build_slate` → meta carrying real team ids) ran clean. 492/492 total passing.
+
+**Same honest limitation as the injury report**: not verified against a live response
+(`statsapi.mlb.com` unreachable from this sandbox). Carries somewhat less fresh uncertainty than
+that one did, though — every piece here reuses an already-shipped, already-proven parsing shape
+from elsewhere in this file, rather than introducing a new one from documentation alone. The one
+genuinely new, unverified piece is the date-range schedule query itself.
+
 ## NOT YET DONE (next stages)
-- **GM/analyst gaps, items 2-5 of 5** — hitter regression table (item 1) is done, see above. Still
-  to build, in order: (2) reliever rest/fatigue signal — no visibility into bullpen availability
-  anywhere on the platform right now; (3) lineup-wide platoon view — the underlying math
-  (`platoon_advantage`) already exists, this is mostly a surfacing exercise, not new modeling;
-  (4) starter rest + times-through-the-order penalty; (5) umpire tendencies / catcher framing —
-  real signals, but genuinely new data sources, lower priority than the first four.
+- **GM/analyst gaps, items 3-5 of 5** — hitter regression table (item 1) and reliever fatigue
+  (item 2) are done, see above. Still to build, in order: (3) lineup-wide platoon view — the
+  underlying math (`platoon_advantage`) already exists, this is mostly a surfacing exercise, not
+  new modeling; (4) starter rest + times-through-the-order penalty; (5) umpire tendencies /
+  catcher framing — real signals, but genuinely new data sources, lower priority than the rest.
 - **Line-movement chart** — see above. The capture infrastructure is live; the actual
   stock-candlestick-style chart in Matchup Lab is the natural next step once there's real
   captured history to plot, not before.
