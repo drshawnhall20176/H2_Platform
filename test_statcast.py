@@ -339,6 +339,36 @@ def test_refresh_catcher_framing_uses_numeric_min_by_default(monkeypatch):
     print("✓ refresh_catcher_framing requests a numeric min_called_p by default, not the string 'q'")
 
 
+def test_refresh_catcher_framing_warns_on_column_mismatch_data_loss(monkeypatch, capsys):
+    # Regression guard for the SECOND real production issue found (after the parse-failure fix
+    # resolved the first one): the fetch and CSV parse can both succeed while almost every row
+    # still gets silently dropped, if the actual response's column names don't match any of
+    # _build_catcher_frame's hedged candidates. A green checkmark run wouldn't reveal this on its
+    # own — this test confirms the diagnostic actually fires and includes the REAL column names,
+    # not just a generic "something's wrong" message.
+    csv_with_unrecognized_columns = "some_id_field,player_name,squad\n" + "\n".join(
+        f"{i},Player {i},NYY" for i in range(15)
+    )
+
+    class FakeResponse:
+        content = csv_with_unrecognized_columns.encode("utf-8")
+        def raise_for_status(self):
+            pass
+
+    import requests as _requests
+    monkeypatch.setattr(_requests, "get", lambda *a, **k: FakeResponse())
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out_path = os.path.join(tmp, "catcher_framing.csv")
+        SC.refresh_catcher_framing(2026, out_path=out_path, min_called_p=0)
+    captured = capsys.readouterr()
+    assert "::warning::" in captured.out
+    assert "column mapping" in captured.out
+    assert "some_id_field" in captured.out   # the REAL raw column names are surfaced, not hidden
+    assert "player_name" in captured.out
+    print("✓ refresh_catcher_framing warns on silent column-mismatch data loss, surfacing the real raw column names")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

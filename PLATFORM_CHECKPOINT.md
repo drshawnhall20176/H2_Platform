@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 550/550 tests green)
+## What's in this checkpoint (all tested — 551/551 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -2146,6 +2146,35 @@ pipeline still produces correct, sensible output. 550/550 total passing.
 Worth checking the next time the workflow runs (whenever that fits around live analysis work) —
 if catcher_framing.csv shows up, this was the fix. If a NEW error appears instead, its own
 message will now include the real response content, which is real, actionable progress either way.
+
+### Catcher framing: real progress confirmed, a second, different issue found and made diagnosable (2026-07-18)
+Shawn ran the workflow again after the min_called_p/direct-fetch fix. Genuinely good news first:
+the original crash is gone — no "Catcher framing refresh failed" warning from the pull step at
+all this time, meaning the fetch and CSV parse both succeeded. The earlier diagnosis was right.
+
+**But the cache is still coming back thin/missing — a different problem than the one just fixed,
+not the same one persisting.** The validate step's own warning still fired. Reasoned through why
+before writing more speculative fixes: if the fetch had failed, the pull step's own warning would
+have fired too — it didn't. That means parsing succeeded but almost nothing survived `_build_
+catcher_frame`'s own column-hedging and `player_id > 0` filter — the signature of the real
+response using column names that don't match ANY of the hedged candidates guessed at during
+scoping, so every row's player_id silently defaulted to 0 and got dropped. A genuinely silent
+failure mode: nothing throws, the workflow shows green, and the cache just quietly ends up empty.
+
+**Made this diagnosable the same way the parse failure was**, rather than guess at column names a
+third time: `refresh_catcher_framing` now checks whether the CSV parsed with real rows but ended
+up with suspiciously few (<10) surviving the column mapping, and if so prints a `::warning::`
+with the RAW response's actual column names attached directly. This is the exact information
+needed to fix the real mismatch — no more guessing candidate names blind.
+
+**1 new test**, confirming the diagnostic genuinely fires and surfaces the real raw column names
+(not a generic "something's wrong" message) — built with an intentionally-mismatched synthetic
+CSV (`some_id_field`, `player_name`, `squad` — plausible-looking but wrong names) to verify the
+detection logic itself, independent of what Savant's actual real column names turn out to be.
+551/551 total passing.
+
+**Next run's annotations should show the real column names directly** — that's the piece needed
+to write the actual, final, confirmed fix rather than another reasoned-but-unverified attempt.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

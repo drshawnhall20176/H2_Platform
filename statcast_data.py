@@ -317,6 +317,21 @@ def refresh_catcher_framing(year: int, out_path: str = CATCHER_FRAMING_PATH,
         ) from e
 
     out = _build_catcher_frame(raw)
+    if len(out) < 10 and len(raw) >= 10:
+        # A GENUINELY DIFFERENT failure mode than the one this function's own docstring already
+        # covers: the fetch and CSV parse both succeeded (raw has real rows), but almost nothing
+        # survived _build_catcher_frame's own column-hedging and player_id>0 filter — the classic
+        # sign that the actual column names in this response don't match ANY of the hedged
+        # candidates, so every row's player_id silently defaulted to 0 and got dropped. This is
+        # a SILENT data-loss mode, not a thrown exception — nothing in the try/except above would
+        # have caught it, and the workflow's own "green checkmark" wouldn't reveal it either.
+        # Printed here (not raised) so this doesn't turn a partially-working pull into a hard
+        # failure — but the raw column names ARE the exact piece of information needed to fix
+        # the real mismatch, so they're surfaced directly rather than requiring another guess.
+        print(f"::warning::Catcher framing CSV parsed ({len(raw)} raw rows) but only {len(out)} "
+             f"survived column mapping — likely a column-name mismatch, not a fetch failure. "
+             f"Raw response columns: {list(raw.columns)}")
+
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     out.to_csv(out_path, index=False)
     print(f"Wrote {len(out)} catchers to {out_path}")
