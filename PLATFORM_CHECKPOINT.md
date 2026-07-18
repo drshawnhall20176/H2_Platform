@@ -2025,6 +2025,49 @@ parses correctly and the step sequence is what's intended, not just written and 
 
 545/545 total passing (no Python code changed — this was a workflow/gitignore-only fix).
 
+### Real workflow run failed — a critical regression fixed, root cause of the underlying catcher-framing failure still open (2026-07-18)
+Shawn actually ran the fixed workflow and it failed: `git add data/statcast_batters.csv data/
+catcher_framing.csv` → `fatal: pathspec 'data/catcher_framing.csv' did not match any files` →
+exit 128.
+
+**A more serious bug than the one being fixed, found via a real run, not caught in review.**
+`git add` with multiple pathspecs fails ATOMICALLY if any one of them doesn't exist — so this
+didn't just fail to add the (missing) catcher-framing file, it blocked the ENTIRE commit,
+including the batter cache, which was working fine before this session's changes and has nothing
+to do with catcher framing at all. A real regression to something previously solid, not a minor
+issue. Fixed by staging the batter cache unconditionally first, then only adding catcher_
+framing.csv if it actually exists on disk — matching the "catcher framing failing should never
+block the batter cache" philosophy the workflow's own comments already stated, but hadn't
+actually been implemented correctly in the shell command itself until this fix. Verified directly
+with a real git repo and the real failure scenario (batter cache present, catcher-framing file
+absent) rather than trusted on inspection alone — confirmed the batter cache commits successfully
+either way.
+
+**The underlying question — why did the catcher-framing pull fail in the first place — is still
+open, not resolved.** The file never existing on disk confirms `refresh_catcher_framing()` threw
+an exception that its own non-fatal try/except correctly caught and swallowed (working as
+designed), but the actual exception message wasn't visible in the screenshot shared (only the
+downstream commit failure was expanded). Researched the most likely cause: pybaseball's own docs
+confirm `__init__.py` re-exports ~90 functions including `statcast_catcher_framing`, alongside
+its already-working siblings (`statcast_batter_exitvelo_barrels` etc.) using the same pattern —
+making an import failure less likely than first suspected, not ruled out entirely.
+
+**One real, plausible bug found and fixed by re-reading the code, not by guessing further**:
+`_build_catcher_frame` called `.astype(int)` on the player_id column without first handling a
+raw NaN — Savant's CSV having even one row with a missing id would have crashed this outright.
+Fixed with `.fillna(0)` before the cast, matching the "drop rows without a real id" filter that
+was already there but couldn't be reached if the cast itself crashed first. A real test locks
+this in (a NaN-id row correctly dropped, not crashing the whole parse).
+
+**Honestly flagged rather than declared fixed**: this may or may not be THE root cause of the
+original failure — it's a real bug worth fixing regardless, but confirming it explains the
+specific failure needs the actual error text from the "Pull Statcast batter + catcher-framing
+data and write the caches" step's own log, which hasn't been seen yet. Worth checking on the
+next run — if catcher_framing.csv is produced now, this was it (or close to it); if not, the
+step's own printed error message is the next thing to look at together.
+
+546/546 total passing.
+
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
   framing/item 5 writeup above for why: no confirmed way to find every game a specific umpire

@@ -253,8 +253,14 @@ def _build_catcher_frame(raw: pd.DataFrame) -> pd.DataFrame:
     across multiple reasonable candidates, the same resilience-to-drift pattern _series already
     uses elsewhere in this file, since they could not be confirmed with the same certainty."""
     df = _norm_cols(raw)
+    pid_series = _series(df, "player_id", "playerid", "mlbam", "key_mlbam", "catcher_id", fill=0)
     out = pd.DataFrame({
-        "player_id": _series(df, "player_id", "playerid", "mlbam", "key_mlbam", "catcher_id", fill=0).astype(int),
+        "player_id": pid_series.fillna(0).astype(int),   # fillna BEFORE astype(int) — a raw NaN
+                                                          # (a real possibility in Savant's own
+                                                          # CSV, not just a hedge-column miss)
+                                                          # would otherwise crash astype(int)
+                                                          # outright, a real bug found by re-
+                                                          # reading this code, not just a guess
         "name": _build_name(df),
         "team": _series(df, "team", "team_abbrev", "team_abbr", "team_name", fill="").astype(str),
         "called_pitches": _series(df, "n_called_pitches", "called_pitches", "pitches", fill=0.0),

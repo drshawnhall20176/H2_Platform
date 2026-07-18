@@ -261,6 +261,21 @@ def test_build_catcher_frame_resilient_to_column_names():
     print("✓ _build_catcher_frame correctly parses the confirmed real rv_tot column alongside hedged candidates")
 
 
+def test_build_catcher_frame_handles_nan_player_id_without_crashing():
+    # A real, plausible crash found by re-reading the code, not just a guess: a raw NaN in the
+    # player_id column would have crashed astype(int) outright before the fillna(0) fix.
+    raw = pd.DataFrame([
+        {"player_id": 5, "last_name, first_name": "Real, Player", "team": "PHI",
+        "n_called_pitches": 5000, "strike_rate": 0.52, "rv_tot": 10.0},
+        {"player_id": None, "last_name, first_name": "No Id, Player", "team": "PHI",
+        "n_called_pitches": 10, "strike_rate": 0.50, "rv_tot": 0.1},
+    ])
+    out = SC._build_catcher_frame(raw)
+    assert len(out) == 1   # the NaN-id row is correctly dropped by the player_id > 0 filter
+    assert out.iloc[0]["player_id"] == 5
+    print("✓ _build_catcher_frame handles a raw NaN player_id without crashing, dropping that row instead")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
