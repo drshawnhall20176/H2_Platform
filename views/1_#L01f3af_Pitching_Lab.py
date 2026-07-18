@@ -198,6 +198,52 @@ if game_options:
             st.markdown(f"**{label}** — {sp.name}")
             st.caption(rest["rest_tag"] if rest["last_start_date"] is None else
                       f"{rest['rest_tag']} · last started {rest['last_start_date']}")
+
+    # === Mid-season catcher change: does this starter's own BB/K rate actually shift? ---------
+    st.markdown("**🧤 Catcher change check**")
+    st.caption("A pitcher's season-long BB/K rates already happened WITH his real catcher(s) "
+              "behind him — a good framer's contribution is usually already baked in, "
+              "indistinguishable from \"the pitcher got better.\" The place a season average "
+              "genuinely misleads is a MID-SEASON catcher change specifically — the full-season "
+              "rate is a blend of before and after, quietly wrong for projecting him going "
+              "forward. This checks for a real, clean transition (not routine catcher rotation) "
+              "and shows this pitcher's own actual BB%/K% split before vs. after, using his real "
+              "results, not a projected adjustment. Costs a real fetch per start scanned, so it's "
+              "on-demand, not automatic.")
+    cc1, cc2 = st.columns(2)
+    for col, label, sp, team_id in ((cc1, picked["home_name"], picked["home_pm"], picked["home_id"]),
+                                    (cc2, picked["away_name"], picked["away_pm"], picked["away_id"])):
+        with col:
+            st.markdown(f"**{label}** — {sp.name}")
+            if st.button("Check for a catcher change", key=f"catcher_change_{sp.id}"):
+                with st.spinner(f"Scanning {sp.name}'s starts for a catcher change..."):
+                    season = int(date_str[:4])
+                    cc = E.get_pitcher_catcher_change_split(sp.id, team_id, season, before_date=date_str)
+                if not cc:
+                    st.caption("No clean mid-season catcher change detected — either the same "
+                              "catcher has caught him all year, usage has rotated without one "
+                              "clear transition, or there isn't a big enough sample on both "
+                              "sides yet.")
+                else:
+                    st.markdown(f"**{cc['old_catcher']['name']}** → **{cc['new_catcher']['name']}**, "
+                               f"{cc['change_date']}")
+                    bc1, bc2 = st.columns(2)
+                    with bc1:
+                        st.metric(f"BB% ({cc['old_catcher']['name']}, {cc['before']['starts']} starts)",
+                                 f"{cc['before']['bb_pct']:.1%}")
+                        st.metric(f"K% ({cc['old_catcher']['name']}, {cc['before']['starts']} starts)",
+                                 f"{cc['before']['k_pct']:.1%}")
+                    with bc2:
+                        bb_delta = cc['after']['bb_pct'] - cc['before']['bb_pct']
+                        k_delta = cc['after']['k_pct'] - cc['before']['k_pct']
+                        st.metric(f"BB% ({cc['new_catcher']['name']}, {cc['after']['starts']} starts)",
+                                 f"{cc['after']['bb_pct']:.1%}", delta=f"{bb_delta:+.1%}",
+                                 delta_color="inverse")
+                        st.metric(f"K% ({cc['new_catcher']['name']}, {cc['after']['starts']} starts)",
+                                 f"{cc['after']['k_pct']:.1%}", delta=f"{k_delta:+.1%}")
+                    st.caption("Real, summed outcomes across each block of starts, not a "
+                              "projected adjustment. A small sample on either side — read with "
+                              "the same caution any small-sample split deserves.")
 else:
     st.caption("No games with both team ids available for this date.")
 
