@@ -276,6 +276,69 @@ def test_build_catcher_frame_handles_nan_player_id_without_crashing():
     print("✓ _build_catcher_frame handles a raw NaN player_id without crashing, dropping that row instead")
 
 
+def test_refresh_catcher_framing_parse_failure_includes_response_preview(monkeypatch):
+    # Regression guard for the real production failure this fix addresses: a parse failure must
+    # surface WHAT Savant actually sent back, not just an opaque pandas tokenizing error, so a
+    # future failure is diagnosable from the exception message alone.
+    #
+    # Mocks pd.read_csv directly to fail, rather than trying to construct fake CSV content that
+    # organically reproduces pandas' exact "Expected N fields... saw M" C-parser error — that
+    # error depends on the C engine's internal chunking behavior in ways that proved genuinely
+    # hard to trigger deterministically with synthetic content during test-writing (confirmed by
+    # trying — a naive "1-field header then a multi-field row" case did NOT raise on this
+    # pandas version). This tests what actually matters: does THIS code's own try/except around
+    # read_csv correctly wrap whatever exception occurs with the real response content attached.
+    class FakeResponse:
+        content = b"Not Found - Baseball Savant returned something other than a CSV this time"
+        def raise_for_status(self):
+            pass
+
+    import requests as _requests
+    monkeypatch.setattr(_requests, "get", lambda *a, **k: FakeResponse())
+    monkeypatch.setattr(pd, "read_csv", lambda *a, **k: (_ for _ in ()).throw(
+        __import__("pandas").errors.ParserError("Error tokenizing data. C error: Expected 1 fields in line 38, saw 4")))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out_path = os.path.join(tmp, "catcher_framing.csv")
+        try:
+            SC.refresh_catcher_framing(2026, out_path=out_path)
+            raised = False
+            msg = ""
+        except ValueError as e:
+            raised = True
+            msg = str(e)
+    assert raised
+    assert "Not Found" in msg   # the actual response content is visible in the exception
+    assert "First 500 chars" in msg
+    assert "Expected 1 fields" in msg   # the original pandas error is preserved too
+    print("✓ refresh_catcher_framing's parse failure includes a real preview of Savant's actual response")
+
+
+def test_refresh_catcher_framing_uses_numeric_min_by_default(monkeypatch):
+    # Regression guard for the real fix: min_called_p must default to a real number (0), not
+    # pybaseball's own "q" string default, which is the prime suspect for the original failure.
+    captured = {}
+
+    class FakeResponse:
+        content = b"player_id,name,team,n_called_pitches,strike_rate,rv_tot\n1,Test Catcher,NYY,5000,0.52,10.0\n"
+        def raise_for_status(self):
+            pass
+
+    def fake_get(url, timeout=30):
+        captured["url"] = url
+        return FakeResponse()
+
+    import requests as _requests
+    monkeypatch.setattr(_requests, "get", fake_get)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out_path = os.path.join(tmp, "catcher_framing.csv")
+        SC.refresh_catcher_framing(2026, out_path=out_path)
+    assert "min=0" in captured["url"]
+    assert "min=q" not in captured["url"]
+    print("✓ refresh_catcher_framing requests a numeric min_called_p by default, not the string 'q'")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

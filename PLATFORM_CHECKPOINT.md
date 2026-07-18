@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 548/548 tests green)
+## What's in this checkpoint (all tested — 550/550 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -2099,6 +2099,53 @@ firing when it shouldn't. 548/548 total passing.
 actual error text will be sitting right on the run's summary page — that's what's needed to
 diagnose the real root cause (an import path issue, a Savant response shape mismatch, or
 something else entirely), rather than continuing to guess at plausible causes one at a time.
+
+### Catcher framing: real root cause finally visible, real fix attempted (2026-07-18)
+The visibility fix worked exactly as intended — the next run's Annotations panel showed the real
+error: `Error tokenizing data. C error: Expected 1 fields in line 38, saw 4`. Shawn noted he'd
+need to wait to re-run the workflow since Deezy was actively using the deployment for a live
+game; used the window to build and test a well-reasoned fix in the meantime rather than wait idle.
+
+**Diagnosed before fixing, not just pattern-matched to a familiar-looking error.** "Expected 1
+fields... saw 4" means pandas' C parser inferred a ONE-COLUMN structure from the early rows, then
+hit a row with several fields later — the classic shape of parsing something that ISN'T a real
+multi-column CSV (an error page, a different response type), not a genuinely malformed
+multi-column file with one bad row. A real catcher-framing leaderboard has many columns from row
+one; a response that reads as one column at first is a strong sign Savant didn't return the CSV
+that was expected.
+
+**Prime suspect: `min_called_p`.** pybaseball's own `statcast_catcher_framing` defaults this to
+the STRING `"q"` (confirmed from its real source during earlier scoping) — plausible the
+catcher-framing leaderboard's own URL parameter doesn't resolve `"q"` the way other Savant
+leaderboards apparently do, returning something other than the expected CSV. Reasoned from the
+actual error text, not a blind guess — but stated honestly as still unconfirmed live, same
+posture as everything else built without network access this session.
+
+**The fix goes further than just changing a parameter — replaced the opaque pybaseball call with
+a direct, controlled fetch.** Reused the exact confirmed URL construction from pybaseball's own
+source, but with two real changes: `min_called_p` now defaults to `0` (an explicit number, not
+the suspect string), and any parse failure now re-raises with the first 500 characters of
+Savant's ACTUAL raw response attached to the exception message. The original tokenizing error
+never said WHAT Savant sent back — an HTML error page, a redirect, something else entirely — and
+guessing at that blind is how a wrong fix gets shipped with confidence it doesn't deserve. If
+`min_called_p=0` doesn't resolve this, the next failure's own error message will show the real
+content directly, not another opaque parser error requiring another round of guessing.
+
+**Verified honestly, not with a fragile synthetic reproduction.** Tried to construct fake CSV
+content that organically reproduces pandas' exact "Expected N fields... saw M" error first — it
+didn't reproduce cleanly (confirmed by actually trying, not assumed), which is itself informative
+about how specific and chunking-dependent that exact error is. Pivoted to testing what actually
+matters: mocking `pd.read_csv` to fail directly, confirming THIS code's own try/except correctly
+wraps whatever exception occurs with the real response content attached, regardless of the exact
+underlying trigger. 2 new tests (the diagnostic-preview behavior, and the numeric-not-string `min`
+parameter actually present in the outgoing request URL) plus a full offline simulation with
+realistic multi-word catcher names (the "Lastname, Firstname" format) confirming the whole
+pipeline still produces correct, sensible output. 550/550 total passing.
+
+**Still honestly unconfirmed live** — this is a well-reasoned, tested fix, not a verified one.
+Worth checking the next time the workflow runs (whenever that fits around live analysis work) —
+if catcher_framing.csv shows up, this was the fix. If a NEW error appears instead, its own
+message will now include the real response content, which is real, actionable progress either way.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

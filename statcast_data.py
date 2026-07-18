@@ -270,21 +270,52 @@ def _build_catcher_frame(raw: pd.DataFrame) -> pd.DataFrame:
     return out[out["player_id"] > 0].reset_index(drop=True)
 
 
-def refresh_catcher_framing(year: int, out_path: str = CATCHER_FRAMING_PATH) -> str:
-    """Pull Savant's catcher-framing leaderboard via pybaseball and write a compact CSV to disk.
-    Same nightly-refresh architecture already proven for hitter Statcast data above — the
-    dashboard reads the cached file instantly and never blocks on Savant.
+def refresh_catcher_framing(year: int, out_path: str = CATCHER_FRAMING_PATH,
+                            min_called_p: int = 0) -> str:
+    """Pull Savant's catcher-framing leaderboard and write a compact CSV to disk. Same
+    nightly-refresh architecture already proven for hitter Statcast data above — the dashboard
+    reads the cached file instantly and never blocks on Savant.
 
-    Uses pybaseball.statcast_catcher_framing(year) — a real, confirmed function (verified
-    directly against pybaseball's own source during scoping, not assumed from a wrapper's
-    description) that scrapes Baseball Savant's catcher-framing leaderboard: Shadow Strike % and
-    Catcher Framing Runs per catcher, qualified at Savant's own default of ~6 called pitches in
-    the shadow zone per team game.
+    FETCHES DIRECTLY (requests + pd.read_csv) RATHER THAN CALLING pybaseball.statcast_catcher_
+    framing(), a real, deliberate change made after a real failure: the pybaseball call was
+    throwing "Error tokenizing data. C error: Expected 1 fields in line 38, saw 4" in production
+    — a pandas C-parser error whose shape (expecting ONE field per row, then hitting a row with
+    several) is the classic signature of parsing something that ISN'T a clean CSV, not a
+    genuinely malformed multi-column file. The confirmed URL construction (from pybaseball's own
+    source, seen during scoping) is reused as-is; what changed is HOW it's called and diagnosed:
+
+    1. min_called_p defaults to 0 here (a real, explicit number), not pybaseball's own default
+       of the STRING "q" — plausible that Savant's catcher-framing leaderboard's own `min` URL
+       parameter doesn't resolve "q" the way other Savant leaderboards do, returning something
+       other than the expected CSV (an error page, a different view) that only breaks pandas'
+       parser partway through, matching the observed error's shape. Reasoned from the actual
+       error text, not a blind guess — but still not confirmed live, stated honestly as such.
+    2. A parse failure now re-raises with the first 500 characters of the RAW response body
+       attached to the exception message. The tokenizing error alone didn't say WHAT Savant
+       actually sent back — an HTML error page, a redirect, a genuinely different CSV shape —
+       and guessing at that blind is how the wrong fix gets shipped. If min_called_p=0 doesn't
+       resolve this, the next failure's own error message will show the actual content, not
+       another opaque parser error.
 
     Returns the path written. Run nightly alongside refresh_statcast.py."""
-    from pybaseball import statcast_catcher_framing
+    import io
+    import requests
 
-    raw = statcast_catcher_framing(year)
+    url = (f"https://baseballsavant.mlb.com/leaderboard/catcher-framing"
+          f"?type=catcher&seasonStart={year}&seasonEnd={year}&team="
+          f"&min={min_called_p}&sortColumn=rv_tot&sortDirection=desc&csv=true")
+    resp = requests.get(url, timeout=30)
+    resp.raise_for_status()
+    raw_text = resp.content.decode("utf-8", errors="replace")
+    try:
+        raw = pd.read_csv(io.StringIO(raw_text))
+    except Exception as e:
+        preview = raw_text[:500].replace("\n", "\\n")
+        raise ValueError(
+            f"Could not parse Savant's catcher-framing response as CSV ({type(e).__name__}: {e}). "
+            f"First 500 chars of the actual response: {preview!r}"
+        ) from e
+
     out = _build_catcher_frame(raw)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     out.to_csv(out_path, index=False)
