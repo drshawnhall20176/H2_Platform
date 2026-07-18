@@ -19,6 +19,7 @@ import plotly.graph_objects as go
 import sports
 import mlb_engine as E
 import matchup_data as MD
+import statcast_data as SC
 from datetime import datetime
 
 game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER   # shared with Best Bets
@@ -277,6 +278,39 @@ with st.expander(f"📋 {pitcher['Pitcher']} vs. the batting order (season)"):
                     "Worth checking against a second source before leaning on any one slot's "
                     "number too heavily, the same way any small-sample stat deserves."
                 )
+
+# --- Catcher framing: does this pitcher's own team's catching help or hurt his real numbers? --
+# Real, well-known effect independent of stuff: a catcher who steals extra strikes makes his own
+# pitcher's real results look better than his "true" performance would suggest on pure stuff
+# alone. Team-level, not tied to a specific start or specific catcher — see team_catcher_framing's
+# own docstring for why that's a real, deliberate scoping choice, not a shortcut.
+with st.expander(f"🧤 {pitcher['Team']}'s catcher framing"):
+    cf_lookup = SC.load_catcher_framing()
+    if not cf_lookup:
+        st.info("No catcher framing data cached yet — run `python refresh_statcast.py` to "
+                "populate it. Refreshed alongside the hitter Statcast data Dinger Engine uses.")
+    else:
+        team_cf = SC.team_catcher_framing(cf_lookup, pitcher["Team"])
+        if not team_cf:
+            st.caption(f"No qualified catcher framing data found for {pitcher['Team']} yet.")
+        else:
+            st.markdown(f"**{pitcher['Team']}'s catching corps** (weighted by each catcher's "
+                       f"own called-pitch volume): **{team_cf['strike_rate']:.1%}** shadow-zone "
+                       f"strike rate, **{team_cf['framing_runs']:+.1f}** combined framing runs.")
+            cf_rows = [{"Catcher": c["name"], "Called Pitches": int(c["called_pitches"]),
+                       "Strike Rate": c["strike_rate"], "Framing Runs": c["framing_runs"]}
+                      for c in team_cf["catchers"]]
+            st.dataframe(
+                pd.DataFrame(cf_rows).style.format({"Strike Rate": "{:.1%}", "Framing Runs": "{:+.1f}"})
+                .theme_gradient(cmap="RdYlGn", subset=["Framing Runs"]),
+                hide_index=True, use_container_width=True)
+            st.caption("A team-level read, not tied to this specific start or one specific "
+                      "catcher — Savant's own framing data is a SEASON-LONG aggregate per "
+                      "catcher, not a per-game split, and catchers rotate the same way relievers "
+                      "do. Positive framing runs = this catching corps steals extra strikes "
+                      "(helps the pitcher's real results look better than pure stuff alone would "
+                      "suggest); negative = the opposite. Qualified at Baseball Savant's own "
+                      "default (~6 called pitches in the shadow zone per team game).")
 
 
 rows = MD.build_matchup(pitcher_pid, hitter_hid, arsenals, hitter_splits)
