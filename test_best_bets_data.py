@@ -97,6 +97,23 @@ def test_load_mlb_best_bets_board_returns_meta_not_just_count():
     print("✓ load_mlb_best_bets_board returns the full meta list, not just its count")
 
 
+def test_load_mlb_graded_picks_board_returns_rows_too():
+    fake_row, fake_meta = _fake_row_and_meta()
+
+    with patch.object(BBD.E, "build_slate", lambda date_str, fip: ([fake_row], fake_meta)), \
+        patch.object(BBD.E, "get_bullpen_aggregate_stat", lambda *a, **k: None), \
+        patch("statcast_data.load", lambda: ({}, None)), \
+        patch("weather.get_game_weather", lambda *a, **k: None):
+        plays, meta, rows = BBD.load_mlb_graded_picks_board("2026-07-18", BBD.E.FIP_CONSTANT_DEFAULT)
+
+    assert len(plays) > 0
+    assert len(meta) == 1
+    assert len(rows) == 1
+    assert rows[0]["Hitter"] == "Test Slugger"
+    assert rows[0]["Opp HR/9"] == 1.8
+    print("✓ load_mlb_graded_picks_board returns the raw hitter rows, needed for the one-sided banner")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

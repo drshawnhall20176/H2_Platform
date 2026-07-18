@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 586/586 tests green)
+## What's in this checkpoint (all tested — 603/603 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -2524,6 +2524,80 @@ adjust; Command Center doesn't expose that control and always uses the default. 
 changed away from default on Best Bets, the two pages will still show different numbers for that
 reason specifically — a real, intentional design difference, not a bug, but worth knowing rather
 than assuming the fix makes the two pages identical under every possible setting.
+
+### New page: Graded Picks — game-by-game, not a flat top-10 (2026-07-18)
+Deezy wanted something similar to a competitor app's "graded picks" UI (letter grades, tiered
+lean labels, Fair odds, real reasoning, per-game context banners). Went through it screenshot by
+screenshot before building anything: most of it mapped directly to signals this platform already
+computes (Conviction, Fair odds via `prob_to_american`, the `Why` reasoning field, park/weather
+factors, lineup confirmation status) — a few terms ("Blast Match," "Pitcher Leak," "Built
+Different") were unclear, proprietary-sounding badges from the other product, deliberately left
+out entirely rather than fabricated with a guessed meaning. Explicitly designed this platform's
+OWN wording for the tiered labels ("Top Lean" / "Strong Lean" / "Lean" / "Watch") rather than
+reusing the other app's badge text, directly addressing the "don't want to duplicate someone
+else's badges" concern raised during scoping.
+
+**Real design decision, reasoned through with Shawn, not defaulted to**: game-by-game with each
+game sorted by its own best play, not a flat top-N ranked list. A flat list naturally clusters on
+whichever 2-3 games have the juiciest matchups and leaves the rest of the slate invisible to
+anyone specifically interested in a different game — the "ONE-SIDED" banner concept from the
+reference screenshots only even makes sense at the game level to begin with (comparing two
+starting pitchers within one matchup), which was itself part of the case for this structure.
+Placement was also reasoned through, not assumed: a dedicated page, not grafted onto Command
+Center, since Command Center's whole job is a 10-second glance and this is a browsing experience
+— two different jobs that would conflict on one page, especially since Command Center already has
+its own compact top-leans table showing the same underlying data in a different format.
+
+**`projections.conviction_to_grade(conviction)`** — maps Conviction to a letter grade (A/B/C/D)
++ tier label. Thresholds are this platform's own, grounded in its own already-established
+Conviction scale (Best Bets' own min-conviction slider already treats 1.2x as the floor worth
+showing; real observed top plays cluster 2.7-4.25x), not reverse-engineered from another
+product's scoring. Deliberately shows the raw Conviction number ALONGSIDE the grade, not instead
+of it — a fabricated 0-100 score would hide what's actually driving the label; the real number is
+already interpretable on its own.
+
+**`mlb_engine.compute_one_sided_banner(hitter_rows, game_label)`** — compares both starting
+pitchers' HR/9 allowed (already computed on every hitter row via "Opp HR/9" — the right metric
+for this specific question, not a proxy) to flag a real, stated-threshold (0.4 HR/9) advantage.
+Returns None for most games, on purpose — most games are genuinely not one-sided, and manufacturing
+a marginal signal out of noise would be worse than saying nothing. A real bug caught by testing,
+not shipped: comparing the raw float difference against the threshold could silently exclude a
+value that's conceptually exactly at the threshold (1.40 - 1.00 evaluates to 0.3999999999999999
+in float arithmetic) — fixed by rounding to the same precision HR/9 is actually reported at
+before the comparison.
+
+**`projections.organize_graded_picks(plays)`** — the core, testable logic behind the page:
+grades every play, drops what doesn't clear the floor, groups by game then by player within each
+game, sorts both levels by best-conviction-first. Deliberately extracted as a separate, pure
+function rather than left embedded in the view file, so this real logic is actually unit tested
+rather than only trusted by eye in the browser — a discipline applied consistently this session,
+not a one-off.
+
+**Real architectural consolidation done proactively, not reactively**: `best_bets_data.py`
+gained `load_mlb_graded_picks_board` (shares its cached result with `load_mlb_best_bets_board`
+when called with the same arguments — refactored `_build_mlb_board` into one shared, cached
+inner builder so a second page doesn't mean a second slate fetch) and `load_generic_best_bets_
+board` (consolidating the THIRD copy of the non-MLB board-loading pattern that was explicitly
+flagged as a latent risk in the previous round — fixed now, before a real bug forced it the way
+the MLB version did, not after). Best Bets and Command Center's own generic-sport loaders were
+updated to use this too, closing that gap for every sport, not just MLB.
+
+**New page `views/16_Graded_Picks.py`**, registered publicly (matching Best Bets, not gated like
+Matchup Lab/Track Record) with a native `st.page_link` pointer from Command Center's own top-leans
+section, so the two pages connect without merging. Works for any sport via the generic path;
+MLB gets the additional one-sided banner, since that's the one piece genuinely specific to
+baseball's starter-vs-bullpen structure — no equivalent exists in basketball or football's
+current models, confirmed by checking, not assumed.
+
+**24 new tests**: 3 for `conviction_to_grade` (exact threshold boundaries, the real floor, None
+handling), 6 for `compute_one_sided_banner` (a real gap correctly flagged, a close game correctly
+producing nothing, the exact floating-point boundary bug found and fixed, missing-game and NaN
+handling, a malformed single-team input), 7 for `organize_graded_picks` (grouping, both sort
+orders, the grading-floor filter, empty output, grade attachment, a single player's own multiple
+plays sorted correctly), 5 for `best_bets_data.py`'s expanded interface (including the new
+graded-picks board returning rows), plus a full offline end-to-end simulation covering one
+one-sided game and one close game together, confirming the whole pipeline — load, grade, organize,
+banner — produces the correct combined result. 603/603 total passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

@@ -97,6 +97,7 @@ def run():
         "13": ("Matchup Lab",   "🔬", "nfl_matchup_lab"),   # NFL version — same title, distinct url_path
         "14": ("Anytime TD Engine", "🎯", "anytime_td_engine"),
         "15": ("QB Lab",        "🏈", "qb_lab"),
+        "16": ("Graded Picks",  "🏅", "graded_picks"),
     }
 
     def lead(name: str) -> str:

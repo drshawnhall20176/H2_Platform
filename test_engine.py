@@ -972,6 +972,61 @@ def test_catcher_change_split_requires_min_starts_each_side(monkeypatch):
     print("✓ get_pitcher_catcher_change_split respects the min_starts_each_side floor")
 
 
+# ----------------------------------------------------------------- compute_one_sided_banner
+def _rows_for_game(game_label, team_a, hr9_a, team_b, hr9_b, n_each=3):
+    rows = []
+    for i in range(n_each):
+        rows.append({"GameLabel": game_label, "Team": team_a, "Opp HR/9": hr9_a})
+    for i in range(n_each):
+        rows.append({"GameLabel": game_label, "Team": team_b, "Opp HR/9": hr9_b})
+    return rows
+
+
+def test_one_sided_banner_flags_real_gap():
+    rows = _rows_for_game("TB @ BOS (Game 1)", "Tampa Bay Rays", 1.10, "Boston Red Sox", 1.65)
+    result = E.compute_one_sided_banner(rows, "TB @ BOS (Game 1)")
+    assert result is not None
+    assert result["favored_team"] == "Boston Red Sox"   # faces the WEAKER (higher HR/9) pitcher
+    assert result["favored_opp_hr9"] == 1.65
+    assert result["other_team"] == "Tampa Bay Rays"
+    assert result["diff"] == 0.55
+    print("✓ compute_one_sided_banner correctly identifies the favored side facing the weaker pitcher")
+
+
+def test_one_sided_banner_none_when_gap_too_small():
+    rows = _rows_for_game("TB @ BOS (Game 1)", "Tampa Bay Rays", 1.20, "Boston Red Sox", 1.35)
+    assert E.compute_one_sided_banner(rows, "TB @ BOS (Game 1)") is None
+    print("✓ compute_one_sided_banner correctly says nothing for a genuinely close matchup")
+
+
+def test_one_sided_banner_exactly_at_threshold_not_flagged():
+    # diff == threshold exactly should NOT be excluded (uses < for the skip check, i.e. >=
+    # threshold required) -- confirms the boundary itself, not just values clearly on either side.
+    rows = _rows_for_game("TB @ BOS (Game 1)", "Tampa Bay Rays", 1.00, "Boston Red Sox", 1.40)
+    result = E.compute_one_sided_banner(rows, "TB @ BOS (Game 1)")
+    assert result is not None   # diff of exactly 0.4 should clear (>=), not be excluded
+    assert result["diff"] == 0.4
+
+
+def test_one_sided_banner_none_when_game_not_found():
+    rows = _rows_for_game("TB @ BOS (Game 1)", "Tampa Bay Rays", 1.10, "Boston Red Sox", 1.65)
+    assert E.compute_one_sided_banner(rows, "NYY @ HOU (Game 1)") is None
+
+
+def test_one_sided_banner_none_when_nan_hr9():
+    rows = [
+        {"GameLabel": "G1", "Team": "A", "Opp HR/9": float("nan")},
+        {"GameLabel": "G1", "Team": "B", "Opp HR/9": 1.50},
+    ]
+    assert E.compute_one_sided_banner(rows, "G1") is None
+    print("✓ compute_one_sided_banner correctly handles a NaN HR/9 (no stats yet) without crashing or fabricating")
+
+
+def test_one_sided_banner_none_when_only_one_team_present():
+    rows = [{"GameLabel": "G1", "Team": "Team A", "Opp HR/9": 1.10}] * 5
+    assert E.compute_one_sided_banner(rows, "G1") is None
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

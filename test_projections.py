@@ -631,6 +631,107 @@ def test_apply_blend_resorts_by_updated_conviction():
     print("✓ apply_bullpen_blend_to_top_plays correctly re-sorts when blending changes the ranking")
 
 
+# ----------------------------------------------------------------- conviction_to_grade
+def test_conviction_to_grade_thresholds():
+    assert P.conviction_to_grade(3.5) == {"letter": "A", "tier": "Top Lean", "conviction": 3.5}
+    assert P.conviction_to_grade(3.0) == {"letter": "A", "tier": "Top Lean", "conviction": 3.0}
+    assert P.conviction_to_grade(2.99) == {"letter": "B", "tier": "Strong Lean", "conviction": 2.99}
+    assert P.conviction_to_grade(2.0) == {"letter": "B", "tier": "Strong Lean", "conviction": 2.0}
+    assert P.conviction_to_grade(1.99) == {"letter": "C", "tier": "Lean", "conviction": 1.99}
+    assert P.conviction_to_grade(1.5) == {"letter": "C", "tier": "Lean", "conviction": 1.5}
+    assert P.conviction_to_grade(1.49) == {"letter": "D", "tier": "Watch", "conviction": 1.49}
+    assert P.conviction_to_grade(1.2) == {"letter": "D", "tier": "Watch", "conviction": 1.2}
+    print("✓ conviction_to_grade correctly applies threshold boundaries")
+
+
+def test_conviction_to_grade_none_below_floor():
+    assert P.conviction_to_grade(1.19) is None
+    assert P.conviction_to_grade(0.5) is None
+    assert P.conviction_to_grade(0.0) is None
+    print("✓ conviction_to_grade returns None below the real floor, not a fabricated low grade")
+
+
+def test_conviction_to_grade_none_for_none_input():
+    assert P.conviction_to_grade(None) is None
+
+
+# ----------------------------------------------------------------- organize_graded_picks
+def _pick(player, team, game, conviction, market="Batter HR"):
+    return {"Player": player, "Team": team, "Game": game, "Market": market, "Side": "Over",
+           "Line": 0.5, "ModelProb": 0.3, "Fair": -100, "Conviction": conviction, "Why": "x"}
+
+
+def test_organize_graded_picks_groups_by_game_and_player():
+    plays = [
+        _pick("A", "TB", "TB @ BOS", 3.5),
+        _pick("B", "BOS", "TB @ BOS", 2.0),
+        _pick("C", "NYY", "SEA @ NYY", 4.0),
+    ]
+    result = P.organize_graded_picks(plays)
+    assert len(result) == 2
+    games = {g["game"]: g for g in result}
+    assert len(games["TB @ BOS"]["players"]) == 2
+    assert len(games["SEA @ NYY"]["players"]) == 1
+    print("✓ organize_graded_picks correctly groups plays by game and by player within each game")
+
+
+def test_organize_graded_picks_sorts_games_by_best_conviction():
+    plays = [
+        _pick("A", "TB", "Game Low", 1.3),
+        _pick("B", "NYY", "Game High", 4.5),
+    ]
+    result = P.organize_graded_picks(plays)
+    assert result[0]["game"] == "Game High"
+    assert result[1]["game"] == "Game Low"
+    print("✓ organize_graded_picks sorts games with the most interesting (highest conviction) first")
+
+
+def test_organize_graded_picks_sorts_players_within_game():
+    plays = [
+        _pick("Low Player", "TB", "TB @ BOS", 1.3),
+        _pick("High Player", "BOS", "TB @ BOS", 3.8),
+    ]
+    result = P.organize_graded_picks(plays)
+    assert result[0]["players"][0]["player"] == "High Player"
+    assert result[0]["players"][1]["player"] == "Low Player"
+
+
+def test_organize_graded_picks_filters_ungraded_plays():
+    plays = [
+        _pick("Real Play", "TB", "TB @ BOS", 2.0),
+        _pick("Too Weak", "TB", "TB @ BOS", 1.0),   # below the 1.2 floor
+    ]
+    result = P.organize_graded_picks(plays)
+    all_players = [p["player"] for g in result for p in g["players"]]
+    assert "Real Play" in all_players
+    assert "Too Weak" not in all_players
+    print("✓ organize_graded_picks correctly excludes plays below the real grading floor")
+
+
+def test_organize_graded_picks_empty_when_nothing_graded():
+    plays = [_pick("A", "TB", "TB @ BOS", 1.0), _pick("B", "TB", "TB @ BOS", 0.8)]
+    assert P.organize_graded_picks(plays) == []
+
+
+def test_organize_graded_picks_each_play_carries_grade():
+    plays = [_pick("A", "TB", "TB @ BOS", 3.2)]
+    result = P.organize_graded_picks(plays)
+    play = result[0]["players"][0]["plays"][0]
+    assert play["_grade"] == {"letter": "A", "tier": "Top Lean", "conviction": 3.2}
+
+
+def test_organize_graded_picks_multiple_plays_per_player_sorted():
+    plays = [
+        _pick("Multi Play", "TB", "TB @ BOS", 1.5, market="Batter Total Hits"),
+        _pick("Multi Play", "TB", "TB @ BOS", 3.0, market="Batter HR"),
+    ]
+    result = P.organize_graded_picks(plays)
+    player_plays = result[0]["players"][0]["plays"]
+    assert player_plays[0]["Market"] == "Batter HR"        # higher conviction first
+    assert player_plays[1]["Market"] == "Batter Total Hits"
+    print("✓ organize_graded_picks sorts a single player's own multiple plays by conviction too")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

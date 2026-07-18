@@ -1266,3 +1266,69 @@ def get_pitcher_catcher_change_split(pitcher_id: int, team_id: int, season: int,
         "before": _rates(before_group),
         "after": _rates(after_group),
     }
+
+
+ONE_SIDED_HR9_THRESHOLD = 0.4   # A stated, reasoned choice, not empirically derived: MLB starter
+                               # HR/9 allowed typically sits in a ~0.8-1.8 range across a season,
+                               # so a 0.4 gap between two starters in the same game is a real,
+                               # meaningful quality difference — not indistinguishable from noise
+                               # — but this hasn't been backtested against real outcomes, and is
+                               # honestly presented as a reasonable default, not a proven cutoff.
+
+
+def compute_one_sided_banner(hitter_rows: List[Dict[str, Any]], game_label: str) -> Optional[Dict[str, Any]]:
+    """For one game, compares both starting pitchers' HR/9 allowed to flag when one side's
+    hitters have a real, stated-threshold advantage worth calling out — "concentrate HR plays on
+    this side" — rather than treating every game as equally worth digging into.
+
+    WHY HR/9 SPECIFICALLY, NOT A BROADER COMPOSITE METRIC: this banner exists to guide HR-prop
+    attention specifically (matching the exact framing this feature was scoped from — "concentrate
+    HR plays on that side"), and HR/9 allowed is already computed on every hitter row via "Opp
+    HR/9" — the exact rate that matters for that specific question, not a proxy for it. Reusing
+    it here isn't a shortcut, it's the right metric for the right question.
+
+    METHOD: every hitter on one team shares the SAME opposing starter, so "Opp HR/9" is constant
+    across all of a team's hitters in a given game — this reads it directly off any one of them
+    per team rather than doing a second pitcher lookup. If the two teams' opposing-starter HR/9
+    values differ by less than ONE_SIDED_HR9_THRESHOLD, returns None — most games are genuinely
+    NOT one-sided, and this should say nothing rather than manufacture a marginal one out of noise.
+
+    Returns None if: the game isn't found in hitter_rows, either team's rate is missing/NaN
+    (thin sample or no stats yet), or the gap doesn't clear the threshold. Otherwise returns
+    {"favored_team", "favored_opp_hr9" (the WEAKER, higher-HR9 pitcher the favored team faces),
+    "other_team", "other_opp_hr9", "diff"} — the favored team is the one whose hitters face the
+    pitcher allowing MORE home runs, a real advantage for their own HR props specifically."""
+    game_rows = [r for r in hitter_rows if r.get("GameLabel") == game_label]
+    if not game_rows:
+        return None
+    team_hr9: Dict[str, float] = {}
+    for r in game_rows:
+        team = r.get("Team")
+        hr9 = r.get("Opp HR/9")
+        if not team or hr9 is None:
+            continue
+        try:
+            if hr9 != hr9:   # NaN check without importing math — NaN is the only value != itself
+                continue
+        except TypeError:
+            continue
+        team_hr9.setdefault(team, float(hr9))
+    if len(team_hr9) != 2:
+        return None
+    (team_a, hr9_a), (team_b, hr9_b) = list(team_hr9.items())
+    diff = round(abs(hr9_a - hr9_b), 2)   # rounded BEFORE the threshold check — a real bug found
+                                          # via testing, not assumed: comparing the raw float diff
+                                          # can silently exclude a value that's conceptually
+                                          # exactly at the threshold (e.g. 1.40 - 1.00 evaluates to
+                                          # 0.3999999999999999 in float arithmetic, not 0.4)
+    if diff < ONE_SIDED_HR9_THRESHOLD:
+        return None
+    if hr9_a > hr9_b:
+        favored_team, favored_hr9, other_team, other_hr9 = team_a, hr9_a, team_b, hr9_b
+    else:
+        favored_team, favored_hr9, other_team, other_hr9 = team_b, hr9_b, team_a, hr9_a
+    return {
+        "favored_team": favored_team, "favored_opp_hr9": round(favored_hr9, 2),
+        "other_team": other_team, "other_opp_hr9": round(other_hr9, 2),
+        "diff": diff,
+    }
