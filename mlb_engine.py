@@ -904,3 +904,149 @@ def get_starter_rest_info(pitcher_id: int, team_id: int, before_date: str,
     else:
         tag = f"🟡 Extra rest — {days_rest} days"
     return {"days_rest": days_rest, "last_start_date": last_start_date, "rest_tag": tag}
+
+
+def get_pitcher_starts_this_season(pitcher_id: int, season: int,
+                                   before_date: Optional[str] = None) -> List[Dict[str, Any]]:
+    """This pitcher's own STARTS this season: [{"gamePk", "game_date"}, ...] — the bounded set of
+    games get_pitcher_batting_order_splits below actually needs to fetch boxscores for.
+
+    DELIBERATELY NOT built by scanning the team's whole-season schedule (which would mean a
+    boxscore fetch for every one of a team's ~130-160 games just to find the ~20-30 this specific
+    pitcher started) — instead, one call to his own game log (stats=gameLog), which returns his
+    own per-game lines with each game's id already attached, then filtered to games with real
+    starting-pitcher work (gamesStarted, or the same >=9-outs floor this file's other functions
+    use as a fallback if that field isn't present in a given response).
+
+    HONEST CONFIDENCE NOTE, worth stating plainly rather than presenting this as equally certain
+    to code built on already-proven shapes: gameLog is one of the most standard, widely-used MLB
+    Stats API capabilities (used throughout the broader MLB-StatsAPI wrapper ecosystem for
+    exactly this "find a player's own games" purpose) — real precedent, not a guess — but it is
+    still genuinely unverified against a live response from this sandbox, same statsapi.mlb.com
+    restriction as every other function in this file. Lower risk than a novel assumption, higher
+    risk than code reusing an already-shipped, tested shape."""
+    try:
+        data = fetch_json(f"{BASE}/people/{pitcher_id}/stats",
+                          {"stats": "gameLog", "group": "pitching", "season": season})
+    except Exception:
+        return []
+    try:
+        splits = (data.get("stats") or [{}])[0].get("splits", [])
+    except (IndexError, AttributeError):
+        return []
+
+    out: List[Dict[str, Any]] = []
+    for sp in splits:
+        game = sp.get("game") or {}
+        game_pk = game.get("gamePk")
+        game_date = sp.get("date")
+        if game_pk is None:
+            continue
+        if before_date and game_date and game_date >= before_date:
+            continue   # no lookahead — never include a game on/after the date being analyzed
+        stat = sp.get("stat") or {}
+        gs = safe_float(stat.get("gamesStarted"))
+        outs = _ip_to_outs(stat.get("inningsPitched", "0.0"))
+        if gs >= 1 or outs >= 9:
+            out.append({"gamePk": game_pk, "game_date": game_date})
+    return out
+
+
+def get_pitcher_batting_order_splits(pitcher_id: int, season: int,
+                                     before_date: Optional[str] = None) -> Dict[int, Dict[str, Any]]:
+    """Cumulative hitting stats THIS PITCHER has allowed this season, broken down by the
+    OPPOSING hitter's own batting-order slot (1 = leadoff ... 9 = bottom of the order) — a real
+    scouting/rotation-planning question: does this arm get hit hard by the middle of the order
+    specifically, or is he equally tough top to bottom? Directly useful for deciding who starts
+    against a specific lineup, and for evaluating a pitcher being scouted in a trade against real
+    lineup construction, not just his aggregate season line.
+
+    METHOD: NOT a query against some MLB Stats API "batting order split" endpoint — no evidence
+    one is directly queryable was found during scoping. Computed by this platform itself: finds
+    this pitcher's own real starts this season (get_pitcher_starts_this_season, bounded to his
+    ~20-30 actual starts, not his team's whole ~130-160 game season), then for each start's
+    boxscore, reads every OPPOSING hitter's own "battingOrder" field (a real MLB Stats API
+    boxscore field) alongside their GAME-level batting line, and sums by slot across every start.
+    Same "aggregate real per-game data across multiple boxscores" approach get_team_bullpen_
+    fatigue and get_starter_rest_info already use for other stats, not a new pattern.
+
+    battingOrder PARSING, AN HONEST CAVEAT: MLB's own boxscore convention encodes this as a
+    3-digit code where the FIRST digit is the actual lineup slot (e.g. "100" = leadoff, "900" =
+    9th) and the remaining digits handle in-game substitutions within that slot. Parsed here as
+    int(battingOrder) // 100. This exact format could not be verified against a live response
+    (same statsapi.mlb.com restriction as this file's other functions) — built from documented/
+    understood MLB convention, not a live-confirmed shape. Worth an early manual check once
+    deployed, same posture as this file's other unverified pieces.
+
+    Returns {slot (1-9): {"ab", "r", "h", "2b", "3b", "hr", "rbi", "bb", "hbp", "so", "avg",
+    "obp", "slg", "ops"}, ...} for slots with at least one plate appearance. OBP here is
+    simplified (hits + walks + HBP over at-bats + walks + HBP — sacrifice flies aren't tracked at
+    this aggregation level), a real, stated approximation, not exact official OBP.
+
+    SMALL SAMPLES ARE THE NORM HERE, NOT THE EXCEPTION, STATED PLAINLY: a single pitcher's single
+    season of starts might mean each slot only has 15-25 AB against him total. No artificial
+    floor is applied — the raw cumulative is shown honestly — but every number here deserves the
+    same skepticism any small sample does; this is a real signal worth looking at, not a stable
+    one worth trusting blindly."""
+    starts = get_pitcher_starts_this_season(pitcher_id, season, before_date)
+    if not starts:
+        return {}
+
+    totals = {slot: {"ab": 0.0, "r": 0.0, "h": 0.0, "2b": 0.0, "3b": 0.0, "hr": 0.0,
+                     "rbi": 0.0, "bb": 0.0, "hbp": 0.0, "so": 0.0} for slot in range(1, 10)}
+    for g in starts:
+        try:
+            box = fetch_json(f"{BASE}/game/{g['gamePk']}/boxscore")
+        except Exception:
+            continue
+        teams = box.get("teams", {}) or {}
+        pitcher_side = None
+        for side in ("home", "away"):
+            players = (teams.get(side, {}) or {}).get("players", {}) or {}
+            if any((p.get("person", {}) or {}).get("id") == pitcher_id for p in players.values()):
+                pitcher_side = side
+                break
+        if pitcher_side is None:
+            continue
+        opp_side = "away" if pitcher_side == "home" else "home"
+        opp_players = (teams.get(opp_side, {}) or {}).get("players", {}) or {}
+        for pdata in opp_players.values():
+            bat = (pdata.get("stats", {}) or {}).get("batting", {}) or {}
+            if not bat:
+                continue
+            bo = pdata.get("battingOrder")
+            if not bo:
+                continue
+            try:
+                slot = int(bo) // 100
+            except (TypeError, ValueError):
+                continue
+            if slot < 1 or slot > 9:
+                continue
+            t = totals[slot]
+            t["ab"] += safe_float(bat.get("atBats"))
+            t["r"] += safe_float(bat.get("runs"))
+            t["h"] += safe_float(bat.get("hits"))
+            t["2b"] += safe_float(bat.get("doubles"))
+            t["3b"] += safe_float(bat.get("triples"))
+            t["hr"] += safe_float(bat.get("homeRuns"))
+            t["rbi"] += safe_float(bat.get("rbi"))
+            t["bb"] += safe_float(bat.get("baseOnBalls"))
+            t["hbp"] += safe_float(bat.get("hitByPitch"))
+            t["so"] += safe_float(bat.get("strikeOuts"))
+
+    out: Dict[int, Dict[str, Any]] = {}
+    for slot, t in totals.items():
+        ab = t["ab"]
+        if ab <= 0 and t["bb"] <= 0 and t["hbp"] <= 0:
+            continue   # no real plate appearances recorded for this slot — leave it out, not zero
+        singles = max(t["h"] - t["2b"] - t["3b"] - t["hr"], 0.0)
+        tb = singles + 2 * t["2b"] + 3 * t["3b"] + 4 * t["hr"]
+        avg = (t["h"] / ab) if ab > 0 else 0.0
+        obp_denom = ab + t["bb"] + t["hbp"]
+        obp = ((t["h"] + t["bb"] + t["hbp"]) / obp_denom) if obp_denom > 0 else 0.0
+        slg = (tb / ab) if ab > 0 else 0.0
+        out[slot] = {**{k: round(v, 0) for k, v in t.items()},
+                    "avg": round(avg, 3), "obp": round(obp, 3), "slg": round(slg, 3),
+                    "ops": round(obp + slg, 3)}
+    return out

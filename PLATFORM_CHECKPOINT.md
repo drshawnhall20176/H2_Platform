@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 528/528 tests green)
+## What's in this checkpoint (all tested — 538/538 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -1860,6 +1860,57 @@ worth recording since catching that is exactly what the test suite is for) — p
 caching genuinely verified via a call-count check, missing-data rows honestly left unset rather
 than fabricated, and a non-starter/thin-sample stat line correctly produces no exposure split at
 all, matching `project_pitcher`'s own starter gate). 528/528 total passing.
+
+### MLB Matchup Lab: pitcher performance by batting order slot (2026-07-18, same session)
+Shawn brought a real screenshot (AB/R/H/2B/3B/HR/RBI/BB/HBP/SO/AVG/OBP/SLG/OPS by "Batting #1"
+through "Batting #9") and asked for this in Matchup Lab, framed explicitly as a rotation-planning
+and trade-evaluation tool — does this arm get hit hard by the middle of the order specifically,
+or is he equally tough top to bottom.
+
+**Researched before building, and the research changed the design for the better**: could not
+confirm MLB Stats API has a directly-queryable "batting order split" endpoint the way it has
+`vsTeam`/`byDateRange` — no evidence of one was found. Rather than treat that as a dead end, built
+it the same way `get_team_bullpen_fatigue`/`get_starter_rest_info` already build other stats this
+session — by computing the aggregation from real per-game boxscore data this platform already
+knows how to read, not depending on an unconfirmed native split.
+
+**A real cost problem solved before it became one**: naively finding "this pitcher's own starts"
+by scanning his team's whole season schedule would mean a boxscore fetch for every one of a
+team's ~130-160 games just to find the ~20-30 he actually started. Solved with `get_pitcher_
+starts_this_season(pitcher_id, season, before_date)` — one call to the pitcher's own game log
+(`stats=gameLog`, a genuinely standard, widely-used MLB Stats API capability across the broader
+MLB-StatsAPI wrapper ecosystem — real precedent, stated as a *confidence level* rather than
+presented as equally certain to code reusing already-proven shapes), filtered to games with real
+starting-pitcher work. Bounds the actual boxscore fetching to only his real starts.
+
+**`get_pitcher_batting_order_splits(pitcher_id, season, before_date)`** — for each of his real
+starts, reads every OPPOSING hitter's own `battingOrder` boxscore field (MLB's documented 3-digit
+convention: first digit = lineup slot, remaining digits handle in-game substitutions — parsed as
+`int(battingOrder) // 100`, an honest, stated, unverified-live parsing choice) alongside their
+game-level batting line, summing by slot across every start. Correctly identifies which boxscore
+side is the OPPONENT by searching both sides for the pitcher himself, not by assuming home/away —
+confirmed via a dedicated test that a hitter on the PITCHER's OWN team never leaks into the
+totals. Slots with zero real plate appearances are omitted, not shown as a fabricated zero.
+OBP is a stated, honest approximation (no sacrifice-fly tracking at this aggregation level).
+
+**Wired into Matchup Lab as an on-demand expander**, not auto-computed on page load — scanning a
+season's worth of a pitcher's starts still costs one boxscore fetch per start, a real cost worth
+gating behind an explicit button, same principle as every bullpen/rest feature this session.
+Works for whoever's currently selected — starter or the bullpen-toggle reliever, since the
+function itself has no starter-specific assumption baked in.
+
+**14 new tests**: 4 for `get_pitcher_starts_this_season` (correctly filters to real starts vs. a
+relief cameo, no-lookahead, falls back to the outs floor when gamesStarted is absent, empty on
+fetch failure) and 6 for `get_pitcher_batting_order_splits` (aggregates correctly across multiple
+starts, the opponent-side-only guard actually verified — not just asserted — against a fake
+own-team hitter, a substitution code parses to its real slot, AVG/OBP/SLG/OPS computed correctly
+against a hand-verified example, empty with no starts, zero-PA slots correctly omitted). Two of
+these tests caught real hand-arithmetic errors in my OWN first-draft test fixtures during this
+build — the function was right both times, my own expected-value math checking it was wrong, same
+"the test suite doing its job" pattern as the TTO-exposure work earlier this session, worth
+recording rather than quietly fixing without a note. A full realistic simulation across 3 starts
+and a real 9-slot lineup ran clean, producing a table shape matching the original screenshot.
+538/538 total passing.
 
 ## NOT YET DONE (next stages)
 - **GM/analyst gap, item 5 of 5** — hitter regression (1), reliever fatigue (2), lineup-wide

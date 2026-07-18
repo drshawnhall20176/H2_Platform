@@ -618,6 +618,161 @@ def test_starter_rest_picks_most_recent_qualifying_start(monkeypatch):
     assert info["last_start_date"] == "2026-07-13"   # the MORE recent of the two, not the older one
 
 
+# ----------------------------------------------------------------- get_pitcher_starts_this_season
+def _fake_gamelog(entries):
+    """entries: list of (gamePk, date, gamesStarted, innings_pitched_str)."""
+    return {"stats": [{"splits": [
+        {"game": {"gamePk": pk}, "date": d,
+        "stat": {"gamesStarted": gs, "inningsPitched": ip}}
+        for pk, d, gs, ip in entries
+    ]}]}
+
+
+def test_get_pitcher_starts_filters_to_real_starts(monkeypatch):
+    fake = _fake_gamelog([
+        (1, "2026-04-05", 1, "6.0"),   # real start
+        (2, "2026-04-11", 1, "5.1"),   # real start
+        (3, "2026-04-15", 0, "1.0"),   # relief cameo, not a start
+    ])
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake)
+    starts = E.get_pitcher_starts_this_season(111, 2026)
+    assert {s["gamePk"] for s in starts} == {1, 2}
+    print("✓ get_pitcher_starts_this_season correctly filters to real starts, excluding a relief cameo")
+
+
+def test_get_pitcher_starts_no_lookahead(monkeypatch):
+    fake = _fake_gamelog([
+        (1, "2026-04-05", 1, "6.0"),
+        (2, "2026-07-20", 1, "6.0"),   # AFTER before_date, must be excluded
+    ])
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake)
+    starts = E.get_pitcher_starts_this_season(111, 2026, before_date="2026-07-18")
+    assert {s["gamePk"] for s in starts} == {1}
+    print("✓ get_pitcher_starts_this_season correctly excludes games on/after before_date")
+
+
+def test_get_pitcher_starts_falls_back_to_outs_floor(monkeypatch):
+    # gamesStarted missing/0 but real innings pitched (a data-shape variance) still counts.
+    fake = _fake_gamelog([(1, "2026-04-05", 0, "7.0")])
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake)
+    starts = E.get_pitcher_starts_this_season(111, 2026)
+    assert len(starts) == 1
+    print("✓ get_pitcher_starts_this_season falls back to the outs floor when gamesStarted is absent/zero")
+
+
+def test_get_pitcher_starts_empty_on_fetch_failure(monkeypatch):
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: {})
+    assert E.get_pitcher_starts_this_season(111, 2026) == []
+
+
+# ----------------------------------------------------------------- get_pitcher_batting_order_splits
+def _fake_bo_box(pitcher_id, pitcher_side, opp_batters):
+    """opp_batters: list of (pid, name, battingOrder_code, batting_stat_dict)."""
+    opp_side = "away" if pitcher_side == "home" else "home"
+    opp_players = {f"ID{pid}": {"person": {"id": pid, "fullName": name}, "battingOrder": bo,
+                                "stats": {"batting": stat}}
+                  for pid, name, bo, stat in opp_batters}
+    pitcher_players = {f"ID{pitcher_id}": {"person": {"id": pitcher_id, "fullName": "The Pitcher"},
+                                           "stats": {"pitching": {"inningsPitched": "6.0"}}}}
+    return {"teams": {pitcher_side: {"players": pitcher_players}, opp_side: {"players": opp_players}}}
+
+
+def test_batting_order_splits_aggregates_across_multiple_starts(monkeypatch):
+    starts = [{"gamePk": 1, "game_date": "2026-04-05"}, {"gamePk": 2, "game_date": "2026-04-11"}]
+    boxes = {
+        1: _fake_bo_box(111, "home", [(201, "Leadoff Guy", "100",
+                                       dict(atBats=4, hits=2, doubles=1, triples=0, homeRuns=0,
+                                           rbi=1, baseOnBalls=0, hitByPitch=0, strikeOuts=1, runs=1))]),
+        2: _fake_bo_box(111, "away", [(201, "Leadoff Guy", "100",
+                                       dict(atBats=3, hits=1, doubles=0, triples=0, homeRuns=1,
+                                           rbi=1, baseOnBalls=1, hitByPitch=0, strikeOuts=0, runs=1))]),
+    }
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda pid, s, bd=None: starts)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2:
+                        boxes[int(url.rsplit("/game/", 1)[1].split("/")[0])])
+    splits = E.get_pitcher_batting_order_splits(111, 2026)
+    assert splits[1]["ab"] == 7.0    # 4 + 3
+    assert splits[1]["h"] == 3.0     # 2 + 1
+    assert splits[1]["hr"] == 1.0
+    print("✓ get_pitcher_batting_order_splits correctly aggregates across multiple starts")
+
+
+def test_batting_order_splits_only_counts_opponent_side(monkeypatch):
+    # A hitter on the PITCHER's OWN team must never be counted, even if they'd have a
+    # battingOrder field (e.g. an AL pitcher's own team's hitters in an NL park).
+    starts = [{"gamePk": 1, "game_date": "2026-04-05"}]
+    own_team_hitter_box = {"teams": {
+        "home": {"players": {
+            "ID111": {"person": {"id": 111, "fullName": "The Pitcher"},
+                     "stats": {"pitching": {"inningsPitched": "6.0"}}},
+            "ID999": {"person": {"id": 999, "fullName": "Own Team Hitter"}, "battingOrder": "300",
+                     "stats": {"batting": dict(atBats=4, hits=2, doubles=0, triples=0, homeRuns=0,
+                                              rbi=0, baseOnBalls=0, hitByPitch=0, strikeOuts=0, runs=0)}},
+        }},
+        "away": {"players": {
+            "ID201": {"person": {"id": 201, "fullName": "Real Opponent"}, "battingOrder": "100",
+                     "stats": {"batting": dict(atBats=4, hits=1, doubles=0, triples=0, homeRuns=0,
+                                              rbi=0, baseOnBalls=0, hitByPitch=0, strikeOuts=0, runs=0)}},
+        }},
+    }}
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda pid, s, bd=None: starts)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: own_team_hitter_box)
+    splits = E.get_pitcher_batting_order_splits(111, 2026)
+    assert 3 not in splits    # the pitcher's own teammate never appears
+    assert splits[1]["ab"] == 4.0
+    print("✓ get_pitcher_batting_order_splits only counts the OPPONENT side, never the pitcher's own team")
+
+
+def test_batting_order_splits_parses_substitution_codes_to_same_slot(monkeypatch):
+    # "101" (a substitute who took over the leadoff spot mid-game) must still count as slot 1.
+    starts = [{"gamePk": 1, "game_date": "2026-04-05"}]
+    box = _fake_bo_box(111, "home", [(201, "Sub Leadoff", "101",
+                                      dict(atBats=2, hits=1, doubles=0, triples=0, homeRuns=0,
+                                          rbi=0, baseOnBalls=0, hitByPitch=0, strikeOuts=0, runs=0))])
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda pid, s, bd=None: starts)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+    splits = E.get_pitcher_batting_order_splits(111, 2026)
+    assert 1 in splits and splits[1]["ab"] == 2.0
+    print("✓ get_pitcher_batting_order_splits correctly parses a substitution code (101) to its real slot (1)")
+
+
+def test_batting_order_splits_computes_rate_stats_correctly(monkeypatch):
+    starts = [{"gamePk": 1, "game_date": "2026-04-05"}]
+    box = _fake_bo_box(111, "home", [(201, "Hitter", "100",
+                                      dict(atBats=4, hits=2, doubles=1, triples=0, homeRuns=1,
+                                          rbi=2, baseOnBalls=1, hitByPitch=0, strikeOuts=1, runs=1))])
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda pid, s, bd=None: starts)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+    splits = E.get_pitcher_batting_order_splits(111, 2026)
+    row = splits[1]
+    assert row["avg"] == round(2 / 4, 3)
+    assert row["obp"] == round((2 + 1 + 0) / (4 + 1 + 0), 3)
+    # hits=2 total: 1 double + 1 HR accounts for both, leaving 0 singles.
+    # TB = 0 singles + 2*1 double + 3*0 triples + 4*1 HR = 6, SLG = 6/4
+    assert row["slg"] == round(6 / 4, 3)
+    assert row["ops"] == round(row["obp"] + row["slg"], 3)
+    print("✓ get_pitcher_batting_order_splits computes AVG/OBP/SLG/OPS correctly from a known example")
+
+
+def test_batting_order_splits_empty_when_no_starts(monkeypatch):
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda pid, s, bd=None: [])
+    assert E.get_pitcher_batting_order_splits(111, 2026) == {}
+
+
+def test_batting_order_splits_skips_slot_with_no_real_pa(monkeypatch):
+    # A slot that never came up against this pitcher (e.g. only 8 opposing hitters ever batted in
+    # a given game due to a pitcher batting spot in an NL park) shouldn't appear at all.
+    starts = [{"gamePk": 1, "game_date": "2026-04-05"}]
+    box = _fake_bo_box(111, "home", [(201, "Hitter", "100",
+                                      dict(atBats=4, hits=1, doubles=0, triples=0, homeRuns=0,
+                                          rbi=0, baseOnBalls=0, hitByPitch=0, strikeOuts=0, runs=0))])
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda pid, s, bd=None: starts)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+    splits = E.get_pitcher_batting_order_splits(111, 2026)
+    assert 9 not in splits
+    print("✓ get_pitcher_batting_order_splits correctly omits slots with zero real plate appearances")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
