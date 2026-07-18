@@ -39,17 +39,17 @@ def load(date_str: str, fip_constant: float):
     # FIP regression table, rebuilt from the probable starters in meta.
     fip_rows = []
     for m in meta:
-        for pm, team, opp in ((m["home_pm"], m["home_name"], m["away_name"]),
-                              (m["away_pm"], m["away_name"], m["home_name"])):
+        for pm, team, opp, team_id in ((m["home_pm"], m["home_name"], m["away_name"], m.get("home_id")),
+                                       (m["away_pm"], m["away_name"], m["home_name"], m.get("away_id"))):
             if pm.id is None or pm.era == 0:
                 continue
             fip_rows.append({
                 "Pitcher": pm.name, "Team": team, "Opponent": opp, "Hand": pm.hand,
                 "ERA": round(pm.era, 2), "FIP": pm.fip, "Delta": round(pm.era - pm.fip, 2),
                 "K/9": round(pm.k9, 1), "WHIP": round(pm.whip, 2), "HR/9": round(pm.hr9, 2), "OBA": pm.oba,
-                "_game_date": m.get("game_date"),
+                "_game_date": m.get("game_date"), "_team_id": team_id,
             })
-    return fip_rows, projections
+    return fip_rows, projections, meta
 
 
 col_a, col_b = st.columns([2, 1])
@@ -62,7 +62,7 @@ with col_b:
 date_str = target_date.strftime("%Y-%m-%d")
 
 with st.spinner("Loading starters and opposing lineups..."):
-    fip_rows, proj_rows = load(date_str, fip_constant)
+    fip_rows, proj_rows, meta = load(date_str, fip_constant)
 
 if not fip_rows:
     st.info("No probable starters found for this date. Pick a date with scheduled games.")
@@ -115,6 +115,52 @@ styled = (
     .theme_gradient(cmap="RdYlGn_r", subset=["ERA", "FIP", "WHIP", "HR/9"])
 )
 st.dataframe(styled, use_container_width=True, hide_index=True)
+
+# === Bullpen fatigue =========================================================
+st.divider()
+st.subheader("💪 Bullpen fatigue")
+st.caption("Which relievers on each side have real recent workload — pitched on 3+ straight "
+          "days is the clearest \"likely unavailable tonight\" signal. Scoped to one game at a "
+          "time, not the whole slate — each team's read costs several real API calls (a "
+          "schedule window plus one boxscore per recent game), so this narrows first rather "
+          "than fetching bullpen data for every team on a busy night up front.")
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def load_bullpen_fatigue(team_id, date_str_inner):
+    if not team_id:
+        return []
+    return E.get_team_bullpen_fatigue(team_id, date_str_inner)
+
+
+game_options = {m["label"]: m for m in meta if m.get("home_id") and m.get("away_id")}
+if game_options:
+    game_pick = st.selectbox("Game", sorted(game_options.keys()))
+    picked = game_options[game_pick]
+
+    with st.spinner("Checking recent bullpen usage for both teams..."):
+        home_fatigue = load_bullpen_fatigue(picked["home_id"], date_str)
+        away_fatigue = load_bullpen_fatigue(picked["away_id"], date_str)
+
+    bc1, bc2 = st.columns(2)
+    for col, label, fatigue in ((bc1, picked["home_name"], home_fatigue),
+                                (bc2, picked["away_name"], away_fatigue)):
+        with col:
+            st.markdown(f"**{label}**")
+            if not fatigue:
+                st.caption("No pitchers with recent appearances found in the last 5 days.")
+                continue
+            bdf = pd.DataFrame(fatigue)[["name", "days_since_last_appearance", "consecutive_days",
+                                        "total_outs_in_window", "tag"]]
+            bdf = bdf.rename(columns={"name": "Pitcher", "days_since_last_appearance": "Days Since",
+                                      "consecutive_days": "Streak", "total_outs_in_window": "Outs (window)"})
+            st.dataframe(bdf, hide_index=True, use_container_width=True)
+    st.caption("Every pitcher who recorded an out in either team's last 5 games, not just "
+              "confirmed relievers — cross-reference against the probable starter above to "
+              "read the rest as bullpen arms. \"Outs (window)\" is total workload across the "
+              "whole 5-day window, not per game.")
+else:
+    st.caption("No games with both team ids available for this date.")
 
 # === Discussion hooks ======================================================
 st.divider()
