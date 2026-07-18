@@ -1777,6 +1777,40 @@ confirming Proj TTO and each pitcher's own `_team_id` are present and correct. A
 simulation of both pieces together — a realistic ace projecting 2.67 trips through the order, and
 a correctly-flagged 3-day short-rest scenario — ran clean. 518/518 total passing.
 
+### Matchup Lab + Track Record moved to owner-only (2026-07-18)
+Both removed from the public Discord build via the existing `owner_only_titles` audience gate
+(same mechanism Bet Log/Media Room/Podcast Studio/Edge Board already use) — no new gating
+infrastructure needed, just extending the existing set. Matched by TITLE, not page number, which
+usefully covers all three Matchup Lab variants (MLB, WNBA/NBA/NCAAMB, NFL) with one entry, since
+they share the exact title string.
+
+**Two genuinely different reasons, not one blanket call — corrected after an initial
+mischaracterization, worth recording honestly rather than papering over**: this was first written
+up as a single "paid features" monetization decision for both pages. Shawn corrected that —
+Track Record's real reason is different: there isn't enough real graded bet history logged yet
+for the page to show anything meaningful, so a public visitor would just find an empty page.
+That's "not ready yet," not "not for you," and worth revisiting (likely un-gating) once there's
+enough real logged history to actually demonstrate something. Matchup Lab's own reasoning stays
+what it was — a real paid-feature call, the analysis is genuinely valuable and working.
+
+This distinction also matters for what it does and doesn't reverse: the code (and Track Record's
+own docstring) had explicitly argued Track Record should stay public specifically because it only
+shows historical, already-graded results ("the evidence of edge, not the edge itself"), genuinely
+different from handing over tonight's live board. That analytical reasoning about what's SAFE to
+show publicly hasn't changed and isn't being contradicted by either the original or corrected
+version of this change — it just isn't why the gate exists now. Updated both `streamlit_app.py`'s
+own comment and Track Record's docstring twice in the same session to get this right: first to
+remove the stale "built for subscribers first / stays public" language, then again to correct the
+"paid feature" framing to the real "not enough content yet" one once Shawn clarified it.
+
+**1 test updated** (`test_owner_only_pages_match_expected_titles`, the existing regression guard
+for this exact gate) — a real, legitimate assertion update reflecting the new gated set, same
+pattern every registry/config change this session has required. Verified with a direct simulation
+of the real page-filtering logic (not just the unit test) confirming both are correctly hidden for
+`audience="public"` and correctly visible for `audience="owner"` — across every sport, since
+Matchup Lab's title-based match needed to be confirmed working for all three variants at once, not
+assumed. 518/518 total passing.
+
 ## NOT YET DONE (next stages)
 - **GM/analyst gap, item 5 of 5** — hitter regression (1), reliever fatigue (2), lineup-wide
   platoon view (3), and starter rest + times-through-the-order (4) are all done, see above. Still

@@ -30,11 +30,26 @@ def run():
     # Audience gate: same codebase, deployed twice on Streamlit Cloud, differing only in one
     # secret. The owner deployment's secrets.toml has no AUDIENCE (or AUDIENCE = "owner") -> sees
     # everything. The Discord-facing deployment sets AUDIENCE = "public" in ITS secrets.toml ->
-    # Bet Log, Media Room, Podcast Studio, and Edge Board are dropped from st.navigation()
-    # entirely, so they're not just hidden from the sidebar, they have no route at all —
-    # visiting the URL directly finds nothing to run. Edge Board is gated because it's tonight's
-    # live board (the actionable, priced plays) — Track Record stays public as the proof layer,
-    # per its own docstring: "this page sells the evidence of edge, not the edge itself."
+    # Bet Log, Media Room, Podcast Studio, Edge Board, Matchup Lab, and Track Record are dropped
+    # from st.navigation() entirely, so they're not just hidden from the sidebar, they have no
+    # route at all — visiting the URL directly finds nothing to run.
+    #
+    # Matchup Lab and Track Record moved to this list on 2026-07-18, for two GENUINELY DIFFERENT
+    # reasons, not one blanket monetization call — worth keeping straight since they point to
+    # different futures for each page:
+    #   - Matchup Lab: a real paid-feature decision. The analysis is genuinely valuable and
+    #     working; it's being reserved for payers.
+    #   - Track Record: NOT primarily monetization. Shawn's own call — there isn't enough real
+    #     graded bet history logged yet for this page to show anything meaningful, so a public
+    #     visitor would just find an empty page. Gated because it currently has nothing to show,
+    #     not because the content itself is being held back from public view on purpose. Worth
+    #     revisiting once there's enough real logged history for it to actually demonstrate
+    #     something — this is closer to "not ready" than "not for you."
+    # This doesn't reverse the earlier ANALYTICAL reasoning for why Track Record had been public
+    # in the first place: it's still true that a track record only shows historical, already-
+    # graded results ("the evidence of edge, not the edge itself") — that reasoning about what's
+    # SAFE to show publicly hasn't changed, and isn't why it's gated now. Track Record's own
+    # docstring was updated to match, not left describing a public-facing purpose it no longer has.
     audience = st.secrets.get("AUDIENCE", "owner")
     if audience == "public":
         st.sidebar.caption("🌐 Public build — some tools are owner-only")
@@ -55,9 +70,12 @@ def run():
         "15": ("NFL",),                                 # QB Lab — NFL's Pitching Lab analog
     }
 
-    # Internal tools kept off the Discord/public build — matched by TITLE (not page number) so a
-    # future re-numbering of the views/ files can't silently un-gate one of these by accident.
-    owner_only_titles = {"Bet Log", "Media Room", "Podcast Studio", "Edge Board"}
+    # Internal/paid tools kept off the Discord/public build — matched by TITLE (not page number)
+    # so a future re-numbering of the views/ files can't silently un-gate one of these by
+    # accident. Matching by title is also what makes gating "Matchup Lab" here correctly cover
+    # all three variants (MLB, WNBA/NBA/NCAAMB, NFL) with one entry, since they share the title.
+    owner_only_titles = {"Bet Log", "Media Room", "Podcast Studio", "Edge Board",
+                         "Matchup Lab", "Track Record"}
 
     # leading page-number -> (title, icon, stable url slug). The url_path is the key fix: it pins
     # each page to a predictable URL so reruns keep you on the same page instead of defaulting to
@@ -100,7 +118,7 @@ def run():
             continue  # e.g. Dinger Engine makes no sense once WNBA/NBA is selected, and vice versa
         title, icon, slug = meta.get(key, (f.stem, "📄", f"page_{key}"))
         if title in owner_only_titles and audience != "owner":
-            continue  # Bet Log / Media Room / Podcast Studio / Edge Board: owner deployment only
+            continue  # Bet Log / Media Room / Podcast Studio / Edge Board / Matchup Lab / Track Record: owner deployment only
         pages.append(st.Page(str(f), title=title, icon=icon, url_path=slug))
 
     st.navigation(pages).run()

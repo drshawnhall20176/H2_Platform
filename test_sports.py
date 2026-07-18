@@ -67,19 +67,20 @@ def test_market_map_present_for_live_sports_only():
 
 
 def test_owner_only_pages_match_expected_titles():
-    # Regression guard for the Discord/public split: Bet Log, Media Room, Podcast Studio, and
-    # Edge Board must stay in the owner-only gate, and the gate must resolve against real page
-    # titles that exist in _META (a typo here would silently fail to hide a page from the public
-    # build).
+    # Regression guard for the Discord/public split: Bet Log, Media Room, Podcast Studio, Edge
+    # Board, Matchup Lab, and Track Record must stay in the owner-only gate, and the gate must
+    # resolve against real page titles that exist in _META (a typo here would silently fail to
+    # hide a page from the public build).
     src = (_HERE / "streamlit_app.py").read_text()
     m = re.search(r'owner_only_titles = \{([^}]*)\}', src)
     assert m, "streamlit_app.py must define owner_only_titles"
     gated = {t.strip().strip('"') for t in m.group(1).split(",") if t.strip()}
-    assert gated == {"Bet Log", "Media Room", "Podcast Studio", "Edge Board"}, gated
+    assert gated == {"Bet Log", "Media Room", "Podcast Studio", "Edge Board",
+                     "Matchup Lab", "Track Record"}, gated
     all_titles = set(re.findall(r'\("([^"]+)",\s*"[^"]*",\s*"[^"]*"\)', src))
     assert gated <= all_titles, f"gated titles not found in _META: {gated - all_titles}"
-    print("✓ owner-only gate targets exactly Bet Log / Media Room / Podcast Studio / Edge Board, "
-          "by real title")
+    print("✓ owner-only gate targets exactly Bet Log / Media Room / Podcast Studio / Edge Board / "
+          "Matchup Lab / Track Record, by real title")
 
 
 def test_public_audience_defaults_safe():
