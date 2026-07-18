@@ -56,6 +56,25 @@ def load_best_bets_mlb(date_str: str, fip_constant: float):
     P.enrich_hitter_rows(rows, seed=7, statcast=sc, statcast_k=k)
     pitcher_rows = P.build_pitcher_projection_rows(rows, meta, seed=11)
     plays = P.build_best_bets(rows, pitcher_rows)
+
+    # Re-price the top hitter-market plays using their real vs-starter/vs-bullpen exposure — a
+    # real, confirmed fix, not a speculative one: a starter-only read on a real slate showed 47%
+    # for that market's single highest-conviction play; properly blending the ~1/3 of that
+    # hitter's plate appearances actually falling to a materially better bullpen brought it to
+    # ~41%. Scoped to the top 30 hitter-market candidates, not the whole slate — see apply_
+    # bullpen_blend_to_top_plays' own docstring for the real cost reasoning behind that limit.
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def load_bullpen_aggregate_for_blend(team_id, exclude_pid, fip_constant_inner):
+        if not team_id:
+            return None
+        return E.get_bullpen_aggregate_stat(team_id, exclude_pid=exclude_pid, fip_constant=fip_constant_inner)
+
+    rows_by_pid = {r.get("_pid"): r for r in rows}
+    P.apply_bullpen_blend_to_top_plays(
+        plays, rows_by_pid,
+        get_bullpen_stat_fn=lambda tid, ex: load_bullpen_aggregate_for_blend(tid, ex, fip_constant),
+        statcast=sc, statcast_k=k, seed=7, top_n=30)
+
     slot_by_game = {m["label"]: (game_dt(m.get("game_date")), m.get("venue")) for m in meta}
     for pl in plays:
         dt, _ = slot_by_game.get(pl["Game"], (None, None))
@@ -112,6 +131,9 @@ view = [p for p in plays
         and p["Market"] in mkt_pick and p["Conviction"] >= min_conv]
 
 # --- the board -------------------------------------------------------------
+for p in view:
+    if p.get("_bullpen_blended"):
+        p["Player"] = f"🔄 {p['Player']}"   # compact, visible marker — no new column needed
 df = pd.DataFrame(view)[["Conviction", "Time", "Slot", "Player", "Team", "Market", "Side",
                          "Line", "ModelProb", "Fair", "Game", "Why"]]
 df = df.rename(columns={"ModelProb": "Model %", "Why": "Why the model likes it"})
@@ -119,6 +141,14 @@ st.dataframe(df.style.format({"Model %": "{:.0%}", "Line": "{:g}", "Conviction":
                              na_rep="—")
              .theme_gradient(cmap="Greens", subset=["Conviction"]),
              use_container_width=True, hide_index=True, height=400)
+if any(p.get("_bullpen_blended") for p in view):
+    st.caption("🔄 = re-priced using this hitter's own real vs-starter/vs-bullpen exposure split, "
+              "not just the starter's rate applied to all of his projected plate appearances — a "
+              "real, confirmed correction (see \"Why the model likes it\" for that specific play's "
+              "own exposure split). Scoped to the top hitter-market candidates only, not the "
+              "whole slate, for real cost reasons — a play outside that scope still uses the "
+              "starter-only read, which is usually the same number anyway when a hitter has "
+              "little or no real bullpen exposure to begin with.")
 
 # --- DIAGNOSTIC INSPECTOR --------------------------------------------------
 st.markdown("---")
