@@ -127,10 +127,11 @@ st.caption("Which relievers on each side have real recent workload — pitched o
 
 
 @st.cache_data(ttl=900, show_spinner=False)
-def load_bullpen_fatigue(team_id, date_str_inner):
+def load_bullpen_fatigue(team_id, date_str_inner, fip_constant_inner):
     if not team_id:
         return []
-    return E.get_team_bullpen_fatigue(team_id, date_str_inner)
+    fatigue = E.get_team_bullpen_fatigue(team_id, date_str_inner)
+    return E.enrich_bullpen_fatigue_with_metrics(fatigue, fip_constant_inner)
 
 
 game_options = {m["label"]: m for m in meta if m.get("home_id") and m.get("away_id")}
@@ -138,9 +139,9 @@ if game_options:
     game_pick = st.selectbox("Game", sorted(game_options.keys()))
     picked = game_options[game_pick]
 
-    with st.spinner("Checking recent bullpen usage for both teams..."):
-        home_fatigue = load_bullpen_fatigue(picked["home_id"], date_str)
-        away_fatigue = load_bullpen_fatigue(picked["away_id"], date_str)
+    with st.spinner("Checking recent bullpen usage and quality for both teams..."):
+        home_fatigue = load_bullpen_fatigue(picked["home_id"], date_str, fip_constant)
+        away_fatigue = load_bullpen_fatigue(picked["away_id"], date_str, fip_constant)
 
     bc1, bc2 = st.columns(2)
     for col, label, fatigue in ((bc1, picked["home_name"], home_fatigue),
@@ -151,14 +152,21 @@ if game_options:
                 st.caption("No pitchers with recent appearances found in the last 5 days.")
                 continue
             bdf = pd.DataFrame(fatigue)[["name", "days_since_last_appearance", "consecutive_days",
-                                        "total_outs_in_window", "tag"]]
+                                        "total_outs_in_window", "ERA", "FIP", "K9", "tag"]]
             bdf = bdf.rename(columns={"name": "Pitcher", "days_since_last_appearance": "Days Since",
-                                      "consecutive_days": "Streak", "total_outs_in_window": "Outs (window)"})
-            st.dataframe(bdf, hide_index=True, use_container_width=True)
+                                      "consecutive_days": "Streak", "total_outs_in_window": "Outs (window)",
+                                      "K9": "K/9"})
+            st.dataframe(
+                bdf.style.format({"ERA": "{:.2f}", "FIP": "{:.2f}", "K/9": "{:.1f}"}, na_rep="—")
+                .theme_gradient(cmap="RdYlGn", subset=["K/9"])
+                .theme_gradient(cmap="RdYlGn_r", subset=["ERA", "FIP"]),
+                hide_index=True, use_container_width=True)
     st.caption("Every pitcher who recorded an out in either team's last 5 games, not just "
               "confirmed relievers — cross-reference against the probable starter above to "
               "read the rest as bullpen arms. \"Outs (window)\" is total workload across the "
-              "whole 5-day window, not per game.")
+              "whole 5-day window, not per game. ERA/FIP/K9 are each pitcher's own SEASON line — "
+              "\"available AND good\" vs. \"available but mediocre\" in one table, not two "
+              "separate lookups.")
 else:
     st.caption("No games with both team ids available for this date.")
 

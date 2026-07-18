@@ -51,6 +51,13 @@ def load_slate(date_str: str, fip_constant: float):
     return rows, meta, (len(sc) if sc else 0), wx_by_venue
  
  
+@st.cache_data(ttl=1800, show_spinner=False)
+def load_bullpen_aggregate(team_id, exclude_pid):
+    if not team_id:
+        return None
+    return E.get_bullpen_aggregate_stat(team_id, exclude_pid=exclude_pid)
+
+
 eastern = pytz.timezone("US/Eastern")
 default_date = datetime.now(eastern)
  
@@ -240,22 +247,77 @@ for m in meta_sorted:
                     f"🔴 {(f - 1) * 100:.0f}% HR" if f < 0.98 else "⚪ neutral")
                 approx = " · _wind orientation approximate_" if wx.get("approx_wind") else ""
                 st.markdown(f"🌤️ **{wx['summary']}** → {tag}{approx}")
-        st.markdown(
-            f"✈️ **{m['away_name']}** SP {ap.name}: K/9 {ap.k9:.1f} · ERA {ap.era:.2f} · "
-            f"FIP {ap.fip:.2f} · WHIP {ap.whip:.2f}"
-        )
-        st.markdown(
-            f"🏠 **{m['home_name']}** SP {hp.name}: K/9 {hp.k9:.1f} · ERA {hp.era:.2f} · "
-            f"FIP {hp.fip:.2f} · WHIP {hp.whip:.2f}"
-        )
+
+        # --- SP line + bullpen toggle, each side --------------------------------
+        # A lineup that struggles against the confirmed starter can look very different once his
+        # bullpen takes over — this toggle swaps which pitcher's stat line feeds the OPPOSING
+        # team's hitter probabilities, reusing the exact same matchup math (see
+        # projections.build_bullpen_matchup_rows' own docstring), not a second model.
+        sp_col, toggle_col = st.columns([3, 1])
+        with sp_col:
+            st.markdown(
+                f"✈️ **{m['away_name']}** SP {ap.name}: K/9 {ap.k9:.1f} · ERA {ap.era:.2f} · "
+                f"FIP {ap.fip:.2f} · WHIP {ap.whip:.2f}"
+            )
+        with toggle_col:
+            away_bullpen_on = st.checkbox("🔄 Bullpen", key=f"away_bp_{m['label']}",
+                                          help=f"Show {m['home_name']} hitters vs {m['away_name']}'s "
+                                              "bullpen instead of the confirmed starter.")
+        sp_col2, toggle_col2 = st.columns([3, 1])
+        with sp_col2:
+            st.markdown(
+                f"🏠 **{m['home_name']}** SP {hp.name}: K/9 {hp.k9:.1f} · ERA {hp.era:.2f} · "
+                f"FIP {hp.fip:.2f} · WHIP {hp.whip:.2f}"
+            )
+        with toggle_col2:
+            home_bullpen_on = st.checkbox("🔄 Bullpen", key=f"home_bp_{m['label']}",
+                                          help=f"Show {m['away_name']} hitters vs {m['home_name']}'s "
+                                              "bullpen instead of the confirmed starter.")
+
         t_away, t_home = st.tabs([f"✈️ {m['away_name']} bats", f"🏠 {m['home_name']} bats"])
         game_df = df[df["GameLabel"] == m["label"]]
         sort_col = "HR%" if "HR%" in game_df.columns else "PowerIndex"
+
+        def _bullpen_sub(rows_source: pd.DataFrame, opp_team: str, opp_team_id, exclude_pid) -> pd.DataFrame:
+            """Recompute opp_team's hitter rows vs opp_team's OWN opponent's bullpen, or fall back
+            to the starter-based rows (with a visible warning) if the bullpen read isn't available."""
+            agg = load_bullpen_aggregate(opp_team_id, exclude_pid)
+            base_rows = rows_source[rows_source["Team"] == opp_team].to_dict("records")
+            if agg is None:
+                st.warning(f"No usable bullpen data for the opposing team — showing the "
+                          f"vs-starter read for {opp_team} instead.")
+                return rows_source[rows_source["Team"] == opp_team].sort_values(sort_col, ascending=False)
+            bp_rows = P.build_bullpen_matchup_rows(base_rows, opp_team, agg, seed=7,
+                                                    statcast=sc, statcast_k=_k)
+            bp_df = pd.DataFrame(bp_rows)
+            # "Opp Pitcher"/"Opp Hand"/"Advantage" describe the SINGLE starter — showing them
+            # unchanged next to a bullpen-wide read would misleadingly imply one specific
+            # opposing arm, when the numbers now reflect the whole relief corps combined.
+            # "Opp HR/9" gets the REAL aggregate bullpen rate instead (already computed by
+            # _aggregate_pitching_splits), not blanked — a genuinely useful number, not a gap.
+            for col, val in (("Opp Pitcher", "Bullpen (combined)"), ("Opp Hand", "Mixed"),
+                             ("Advantage", "—")):
+                if col in bp_df.columns:
+                    bp_df[col] = val
+            if "Opp HR/9" in bp_df.columns:
+                bp_df["Opp HR/9"] = agg.get("homeRunsPer9", 0.0)
+            return bp_df.sort_values(sort_col, ascending=False) if sort_col in bp_df.columns else bp_df
+
         with t_away:
-            sub = game_df[game_df["Team"] == m["away_name"]].sort_values(sort_col, ascending=False)
+            if home_bullpen_on:
+                sub = _bullpen_sub(game_df, m["away_name"], m.get("home_id"), hp.id)
+                st.caption(f"Showing {m['away_name']} hitters vs {m['home_name']}'s combined "
+                          "bullpen, not the confirmed starter.")
+            else:
+                sub = game_df[game_df["Team"] == m["away_name"]].sort_values(sort_col, ascending=False)
             st.dataframe(style_hitters(sub), use_container_width=True, hide_index=True)
         with t_home:
-            sub = game_df[game_df["Team"] == m["home_name"]].sort_values(sort_col, ascending=False)
+            if away_bullpen_on:
+                sub = _bullpen_sub(game_df, m["home_name"], m.get("away_id"), ap.id)
+                st.caption(f"Showing {m['home_name']} hitters vs {m['away_name']}'s combined "
+                          "bullpen, not the confirmed starter.")
+            else:
+                sub = game_df[game_df["Team"] == m["home_name"]].sort_values(sort_col, ascending=False)
             st.dataframe(style_hitters(sub), use_container_width=True, hide_index=True)
  
 st.caption("HR% / Hit% / TB1.5% / SO Prob are matchup-aware model probabilities for TODAY's game: "

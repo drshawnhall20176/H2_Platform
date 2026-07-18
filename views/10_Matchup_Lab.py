@@ -123,6 +123,54 @@ p_label = st.selectbox("Pitcher (type to search)", sorted(p_by_label.keys()))
 pitcher = p_by_label[p_label]
 pitcher_pid = pitcher.get("_pid")
 
+# --- Bullpen instead of the starter -----------------------------------------
+# The whole point: a lineup can struggle against a real ace and still erupt once his team's
+# bullpen takes over — a genuinely different matchup once the starter leaves. The underlying
+# arsenal/hitter-vulnerability data already covers every pitcher who threw a pitch that season,
+# not just probable starters (confirmed during scoping — matchup_data.py's refresh pulls Savant's
+# whole-league pitch log), so this needed a picker extension, not new modeling.
+st.caption("💡 A lineup that struggles against tonight's starter can look very different once "
+          "his bullpen takes over — check a specific reliever below instead.")
+use_bullpen = st.checkbox(f"🔄 Look at {pitcher['Team']}'s bullpen instead of {pitcher['Pitcher']}")
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def load_pitching_staff(team_id, exclude_pid):
+    if not team_id:
+        return []
+    return E.get_team_pitching_staff(team_id, exclude_pid=exclude_pid)
+
+
+if use_bullpen:
+    staff = load_pitching_staff(pitcher.get("_team_id"), pitcher_pid)
+    if not staff:
+        st.warning(f"No active pitching staff found for {pitcher['Team']} — showing "
+                  f"{pitcher['Pitcher']} instead.")
+    else:
+        staff_by_label = {}
+        for s in staff:
+            has = s["id"] in arsenals
+            staff_by_label[f"{s['name']}{'' if has else '  — no pitch data'}"] = s
+        reliever_label = st.selectbox("Reliever (type to search)", sorted(staff_by_label.keys()))
+        reliever = staff_by_label[reliever_label]
+        with st.spinner(f"Loading {reliever['name']}'s season stats..."):
+            rm = E.get_pitcher_metrics(reliever["id"], E.FIP_CONSTANT_DEFAULT)
+        # Same field shape build_pitching_slate's rows use, so every downstream reference below
+        # (pitcher["Pitcher"]/["Team"]/.get("_team_id") etc.) works unchanged for a reliever too —
+        # this is a swap of WHICH pitcher feeds the rest of the page, not a second code path.
+        pitcher = {
+            "Pitcher": rm.name, "_pid": rm.id, "Team": pitcher["Team"],
+            "Opponent": pitcher["Opponent"], "Game": pitcher["Game"], "Hand": rm.hand,
+            "_game_date": pitcher.get("_game_date"), "_team_id": pitcher.get("_team_id"),
+            "_opp_id": pitcher.get("_opp_id"),
+            "ERA": round(rm.era, 2), "FIP": rm.fip, "Delta": round(rm.era - rm.fip, 2),
+            "K/9": round(rm.k9, 1), "WHIP": round(rm.whip, 2), "HR/9": round(rm.hr9, 2), "OBA": rm.oba,
+        }
+        pitcher_pid = pitcher["_pid"]
+        if not rm.has_stats:
+            st.caption(f"⚪ No season pitching line found for {rm.name} yet — arsenal data below "
+                      "may still be useful, but ERA/FIP won't be.")
+
 # Hitters: default to the pitcher's opponent, fall back to the whole slate.
 hitters = load_hitters(date_str)
 opp = pitcher.get("Opponent")
