@@ -1,12 +1,19 @@
 """
-Track Record — the public-facing proof page.
+Track Record — the proof page.
 
-Built for SUBSCRIBERS first: plain-English, honesty-forward evidence that the model finds real
-value, without handing over the product. It shows our CLV curve, per-market strengths/weaknesses,
-calibration, and *historical* graded selections (safe to show — the games are over). Tonight's
-live board stays members-only; this page sells the evidence of edge, not the edge itself.
+Plain-English, honesty-forward evidence that the model finds real value: our CLV curve,
+per-market strengths/weaknesses, calibration, and *historical* graded selections. All numbers
+come straight from the logged bet database — nothing here is hand-picked or mocked.
 
-All numbers come straight from the logged bet database — nothing here is hand-picked or mocked.
+OWNER-ONLY as of 2026-07-18 — NOT primarily a monetization call, unlike Matchup Lab's own move to
+owner-only the same day. There isn't yet enough real graded bet history logged for this page to
+show anything meaningful, so a public visitor would just find an empty page — gated because it
+currently has nothing to demonstrate, not because the content is being held back on purpose. This
+doesn't reverse the earlier analytical case for showing it publicly once it DOES have real
+history: a track record only shows historical, already-graded results, genuinely different from
+handing over tonight's live board — that reasoning still holds, and is exactly why this is worth
+revisiting (and likely un-gating) once there's enough real logged history for it to actually
+demonstrate something. Closer to "not ready yet" than "not for you."
 """
 
 import streamlit as st
