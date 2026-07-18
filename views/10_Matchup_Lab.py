@@ -60,7 +60,13 @@ if not arsenals or not hitter_splits:
             "This page will light up once those exist.")
     st.stop()
 
-date_str = st.date_input("Slate date", datetime.now()).strftime("%Y-%m-%d")
+c1, c2 = st.columns([3, 1])
+with c1:
+    date_str = st.date_input("Slate date", datetime.now()).strftime("%Y-%m-%d")
+with c2:
+    if st.button("🔄 Refresh"):
+        st.cache_data.clear()
+        st.rerun()
 
 pitchers = load_pitchers(date_str)
 if not pitchers:
