@@ -1996,6 +1996,35 @@ passing.
 **This closes out the original 5-item GM/analyst gap list**, with umpire tendencies as the one
 honestly deferred item — flagged clearly rather than shipped as a weaker version of itself.
 
+### Real gap caught: catcher framing wasn't wired into the automated refresh workflow (2026-07-18)
+Shawn saw "No catcher framing data cached yet" in the deployed app and asked whether the
+automation actually covers it. It didn't — a real gap, not a timing issue waiting to resolve
+itself.
+
+**Two separate things both had to be fixed, not one.** `refresh_statcast.py`'s own `main()`
+already calls the new catcher framing refresh (built earlier this session) — that part was fine.
+But `.github/workflows/refresh-statcast.yml`'s commit step only ever staged `data/statcast_
+batters.csv`, never `data/catcher_framing.csv` — so even a fully successful workflow run would
+produce the file on the runner and then never commit it back to the repo. And separately,
+`.gitignore` uses a `data/* ` blanket-ignore with individual files explicitly un-ignored
+(`!data/statcast_batters.csv` etc.) — `catcher_framing.csv` was never added to that allowlist,
+so even fixing the workflow's `git add` alone wouldn't have been enough; git would still have
+silently refused to track the file.
+
+**Fixed both, and verified the .gitignore fix directly rather than trusting the syntax** — ran a
+real `git add -A` in an isolated test repo using the actual `.gitignore` file, confirming `data/
+catcher_framing.csv` is now tracked while an arbitrary stray `data/` file stays correctly
+ignored (the blanket rule still does its job for everything else).
+
+**Workflow updated with a deliberate asymmetry, not just an added `git add`**: the batter-cache
+validation step stays a hard failure (exits nonzero, refuses to commit) since it's Dinger
+Engine's core dependency — but the new catcher-framing validation step is explicit `continue-on-
+error: true`, matching `refresh_statcast.py`'s own already-established philosophy that a catcher-
+framing pull failing shouldn't block the batter cache's own commit. Confirmed the YAML itself
+parses correctly and the step sequence is what's intended, not just written and assumed correct.
+
+545/545 total passing (no Python code changed — this was a workflow/gitignore-only fix).
+
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
   framing/item 5 writeup above for why: no confirmed way to find every game a specific umpire
