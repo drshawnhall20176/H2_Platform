@@ -732,6 +732,61 @@ def test_organize_graded_picks_multiple_plays_per_player_sorted():
     print("✓ organize_graded_picks sorts a single player's own multiple plays by conviction too")
 
 
+# ----------------------------------------------------------------- grade_accuracy_by_letter
+def _graded_play(conviction, hit):
+    return {"Conviction": conviction, "Hit": hit, "Player": "X", "Market": "Batter HR"}
+
+
+def test_grade_accuracy_computes_hit_rate_per_letter():
+    plays = [
+        _graded_play(3.5, True), _graded_play(3.2, True), _graded_play(3.1, False),   # A: 2/3
+        _graded_play(2.5, True), _graded_play(2.1, False),                            # B: 1/2
+    ]
+    result = P.grade_accuracy_by_letter(plays)
+    by_letter = {r["letter"]: r for r in result}
+    assert by_letter["A"]["n"] == 3
+    assert by_letter["A"]["hit_rate"] == round(2 / 3, 3)
+    assert by_letter["B"]["n"] == 2
+    assert by_letter["B"]["hit_rate"] == 0.5
+    print("✓ grade_accuracy_by_letter correctly computes real hit rate per letter grade")
+
+
+def test_grade_accuracy_excludes_unsettled_plays():
+    plays = [_graded_play(3.0, True), _graded_play(3.0, None)]   # one play still pending
+    result = P.grade_accuracy_by_letter(plays)
+    a = next(r for r in result if r["letter"] == "A")
+    assert a["n"] == 1   # only the settled play counted
+    print("✓ grade_accuracy_by_letter excludes unsettled (Hit=None) plays from the count")
+
+
+def test_grade_accuracy_excludes_below_floor():
+    plays = [_graded_play(3.0, True), _graded_play(0.8, True)]   # second play never gets a grade
+    result = P.grade_accuracy_by_letter(plays)
+    total_n = sum(r["n"] for r in result)
+    assert total_n == 1
+
+
+def test_grade_accuracy_absent_grade_not_fabricated():
+    plays = [_graded_play(3.0, True)]   # only an A-grade play exists in this window
+    result = P.grade_accuracy_by_letter(plays)
+    letters = {r["letter"] for r in result}
+    assert letters == {"A"}   # B/C/D simply absent, not shown as a fabricated 0%
+    print("✓ grade_accuracy_by_letter omits grades with zero settled plays rather than faking a rate")
+
+
+def test_grade_accuracy_empty_when_nothing_settled():
+    plays = [_graded_play(3.0, None), _graded_play(2.0, None)]
+    assert P.grade_accuracy_by_letter(plays) == []
+
+
+def test_grade_accuracy_preserves_grade_order():
+    plays = [_graded_play(1.3, True), _graded_play(3.5, True), _graded_play(2.2, False)]
+    result = P.grade_accuracy_by_letter(plays)
+    letters_in_order = [r["letter"] for r in result]
+    assert letters_in_order == ["A", "B", "D"]   # A, B, D present (no C plays) — stays A->D order
+    print("✓ grade_accuracy_by_letter preserves A->D order regardless of input order")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

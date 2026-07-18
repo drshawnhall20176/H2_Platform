@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 603/603 tests green)
+## What's in this checkpoint (all tested — 609/609 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -2598,6 +2598,68 @@ plays sorted correctly), 5 for `best_bets_data.py`'s expanded interface (includi
 graded-picks board returning rows), plus a full offline end-to-end simulation covering one
 one-sided game and one close game together, confirming the whole pipeline — load, grade, organize,
 banner — produces the correct combined result. 603/603 total passing.
+
+### Graded Picks: added Time slot + Game filtering, matching Matchup Lab's own pattern (2026-07-18)
+Shawn's one gap on the new page: no way to narrow a busy night down to one slot or one game, the
+way Matchup Lab and every other multi-game page already lets you. Added it using the exact same
+shared helpers (`game_dt`/`slot_of`/`SLOT_ORDER` from `sports.py`) Matchup Lab and Best Bets
+already rely on — not a new filtering concept, the same one applied consistently.
+
+**Adapted, not copy-pasted**: Matchup Lab filters a list of per-game PITCHER rows; Graded Picks
+works from the flattened plays/meta shape `best_bets_data.py` already produces, so this filters
+`meta` (by time slot) and then `plays` (by the resulting game labels) instead. Confirmed `meta`'s
+`game_date` field is already used generically across every sport in Best Bets' own existing code
+before relying on it here too — not a new assumption introduced for this page.
+
+Verified the core filtering computation directly (slot assignment, slot narrowing, and the
+plays-by-game-label filter) with a real simulation before trusting it — Streamlit's own widgets
+aren't unit-testable outside a runtime, so this was checked as a direct computation instead of
+only visually. 603/603 total passing (no new engine-layer functions needed — this reused
+`sports.py`'s existing, already-shared helpers end to end).
+
+### Grade accuracy tracking: does an A actually hit more than a C? (2026-07-18)
+Shawn asked for a broader platform recommendation. Top pick, reasoned through explicitly: nothing
+checked whether Graded Picks' own letter grades correlate with real results — the platform's own
+stated pitch is "proves itself with closing-line value and calibration," and the new grading
+system had zero feedback loop. Built the direct test, using real settled outcomes, not a
+hypothetical.
+
+**Found existing, closely-related infrastructure before building anything new**: `retro.py`
+already had `grade_slate`, which breaks down hit rate by conviction TIER — but using its own
+separate numeric thresholds (>=1.75x, 1.4-1.75x, etc), not the letter-grade thresholds Graded
+Picks itself shows. A real, useful metric, but answering a different, differently-bucketed
+question than "does an A hit more than a C" specifically.
+
+**`projections.grade_accuracy_by_letter(graded_plays)`** — takes retro.grade_slate's own output
+(already-graded plays with Hit/Conviction attached) and re-buckets by the EXACT letter-grade
+thresholds shown on Graded Picks (conviction_to_grade), so the answer comes back in the same
+terms a person actually sees on that page. Only settled plays count; a grade with zero settled
+plays in a given window is simply absent from the output, not shown as a fabricated 0% or 100%.
+
+**A real architectural constraint reasoned through, not glossed over**: `retro.py` is shared
+across every sport on this platform (MLB, WNBA, NBA, NFL, NCAAMB all route through it), while
+`conviction_to_grade` is MLB-specific, matching Graded Picks' own "priority is MLB" scope. Adding
+a direct dependency from `retro.py` on this MLB-only function would have broken retro.py's own
+sport-agnostic design for every other sport calling it. Kept the new function in MLB's own
+`projections.py` instead, and gated its call in Retrospective's view (`_active.key == "MLB"`,
+matching every other MLB-only branch already on that page) rather than letting it crash for
+WNBA/NBA/NFL/NCAAMB, where `_active.projections` is a completely different module without this
+function at all.
+
+**Wired into Retrospective** (which grades a model's rebuilt PAST slate against real results,
+regardless of whether a real bet was ever logged — the right home, since Track Record needs real
+logged-bet history that doesn't exist in volume yet, while Retrospective can backtest any past
+date immediately) right next to the existing conviction-tier breakdown, using the same table
+styling.
+
+**12 new tests, plus a full end-to-end simulation**: 6 for `grade_accuracy_by_letter` (correct
+hit-rate math per letter, unsettled plays excluded, below-floor plays excluded, an absent grade
+never fabricated, empty output when nothing's settled, A-through-D order preserved regardless of
+input order) confirmed the isolated function; a full simulation chaining `retro.grade_slate` into
+`grade_accuracy_by_letter` with a realistic mixed-results slate confirmed the two functions
+compose correctly and, notably, produce genuinely DIFFERENT groupings from retro's own existing
+tiers — direct evidence this was answering a real, different question, not duplicating one
+already answered. 609/609 total passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

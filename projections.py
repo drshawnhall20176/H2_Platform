@@ -1192,6 +1192,48 @@ def organize_graded_picks(plays: List[Dict]) -> List[Dict[str, Any]]:
     return out
 
 
+def grade_accuracy_by_letter(graded_plays: List[Dict]) -> List[Dict]:
+    """Takes ALREADY-GRADED plays (each carrying "Hit": True/False/None and "Conviction" -- e.g.
+    retro.grade_slate's own output) and breaks down REAL hit rate by letter grade
+    (conviction_to_grade) -- the direct test of whether Graded Picks' own letter grades mean
+    anything: does an A actually hit more often than a C, using real settled outcomes, not a
+    hypothetical.
+
+    WHY THIS EXISTS, THE ACTUAL QUESTION IT ANSWERS: Graded Picks shows a letter grade on every
+    play, but nothing previously checked whether that grade correlates with real results.
+    retro.grade_slate already breaks down hit rate by conviction tier using its own separate
+    numeric thresholds (>=1.75x, 1.4-1.75x, etc) -- a real, useful metric, but a DIFFERENT one.
+    This uses the SAME letter-grade thresholds Graded Picks itself shows, so the answer comes
+    back in the exact terms a person actually sees on that page, not a parallel, differently-
+    bucketed one that doesn't map onto what's displayed there.
+
+    DELIBERATELY LIVES HERE, NOT IN retro.py: retro.py is shared across every sport on this
+    platform (MLB, WNBA, NBA, NFL, NCAAMB all route through it), while conviction_to_grade is
+    MLB-specific right now, matching Graded Picks' own "priority is MLB" scope. Adding a direct
+    dependency from retro.py on this MLB-only function would break retro.py's own sport-agnostic
+    design for every other sport. Callers (Retrospective's own view) are expected to call
+    retro.grade_slate first, then pass its own "graded" list here -- and to gate the call itself
+    to MLB specifically, the same way every other MLB-only branch on that page already does.
+
+    Only settled plays (Hit is not None) count. A grade with zero settled plays in this window is
+    simply absent from the output -- not shown as a fabricated 0% or 100%."""
+    settled = [g for g in graded_plays if g.get("Hit") is not None]
+    by_letter: Dict[str, List[Dict]] = {}
+    for g in settled:
+        grade = conviction_to_grade(g.get("Conviction"))
+        if grade:
+            by_letter.setdefault(grade["letter"], []).append(g)
+    out = []
+    for threshold, letter, tier in GRADE_THRESHOLDS:
+        grp = by_letter.get(letter, [])
+        if grp:
+            out.append({
+                "letter": letter, "tier": tier, "n": len(grp),
+                "hit_rate": round(sum(1 for g in grp if g["Hit"]) / len(grp), 3),
+            })
+    return out
+
+
 def curate_selections(plays: List[Dict], n: int = 6, per_market_cap: int = 2,
                       rank_key: str = "Conviction") -> List[Dict]:
     """Pick a tight, VARIED set of the most interesting plays for a media segment.
