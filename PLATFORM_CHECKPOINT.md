@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 518/518 tests green)
+## What's in this checkpoint (all tested — 528/528 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -1810,6 +1810,56 @@ of the real page-filtering logic (not just the unit test) confirming both are co
 `audience="public"` and correctly visible for `audience="owner"` — across every sport, since
 Matchup Lab's title-based match needed to be confirmed working for all three variants at once, not
 assumed. 518/518 total passing.
+
+### Connecting TTO to hitter stats and the bullpen toggle (2026-07-18)
+Shawn asked a genuinely important status-check question before moving to umpires: does times-
+through-the-order reach the hitter side, and does it connect to the bullpen work? Honest answer
+at the time: no to both — Proj TTO existed only as informational context on the pitcher side
+(Pitching Lab), never wired into Dinger Engine's hitter probabilities or explicitly tied to the
+bullpen-matchup toggle. Built the missing connective piece rather than leave it as three separate
+features.
+
+**The key realization: the genuinely derivable half of this was never built.** A specific
+hitter's own exposure to repeat looks at a starter — as opposed to a pitcher-specific wOBA
+adjustment, which the earlier TTOP research already flagged as overclaiming precision at the
+individual level — IS honestly computable from data already sitting on every hitter row: which
+batting-order spot they're in (now newly exposed via `_lineup_idx`, previously used internally by
+`mlb_engine._hitter_row` to compute `_exp_pa` but never stored on the row itself) and the
+starter's own projected batters faced (`project_pitcher`'s `exp_bf`, already computed for
+Pitching Lab).
+
+- **`projections.hitter_starter_exposures(lineup_idx, starter_proj_bf, exp_pa)`** — pure
+  arithmetic (which "batter number" this lineup spot represents each time through, checked
+  against the starter's own projected total) splitting a hitter's own expected PA into `vs_
+  starter` and `vs_bullpen`. Deliberately still not a probability adjustment — same reasoning
+  `times_through_order` already gives for why baking a specific magnitude into HR%/Hit%/etc.
+  would overclaim precision the real research doesn't support pitcher-by-pitcher. This is the
+  honest, derivable half: WHO gets exposed to multiple looks, not exactly what each look costs.
+- **`projections.add_starter_exposure_context(rows)`** — wires this onto every hitter row,
+  computing the starter's own projection ONCE per unique opponent (not once per hitter — verified
+  via an actual call-count test, not just asserted) and attaching `vs SP`/`vs Pen` fields.
+- **Wired into Dinger Engine** as two new display columns, with an explicit caption connecting
+  all three pieces by name: Pitching Lab's Proj TTO (the starter's own overall trip count), this
+  hitter's own vs SP/vs Pen split (who specifically is exposed), and the 🔄 Bullpen toggle
+  (exactly which of a hitter's own PA that toggle's numbers actually speak to) — stated plainly
+  as one coherent picture, not left for someone to infer the connection themselves.
+
+**Verified with a full realistic 9-hitter lineup simulation, not just unit tests in isolation**:
+against a real ace-shaped projection (20 starts, 120 IP), the top of the order (spots 1-6) came
+back with 3 real looks at the starter while the bottom (spots 7-9) got only 2 — the actual,
+well-known "top of the order sees the starter more" effect, reproduced correctly through the real
+arithmetic, not asserted in the abstract.
+
+**11 new tests**: 6 for `hitter_starter_exposures` (leadoff gets multiple exposures, bottom-of-
+order gets fewer than leadoff against the same starter, a short outing sends a deep-lineup hitter
+entirely to the bullpen, the two components always sum back to the hitter's own exp_pa, capped
+correctly, safe at zero) — one of these caught a real error in my own FIRST DRAFT test (I'd hand-
+computed a wrong expected value; the function was right, my arithmetic checking it was wrong,
+worth recording since catching that is exactly what the test suite is for) — plus 4 for
+`add_starter_exposure_context` (fields correctly added and sum to exp_pa, the shared-projection
+caching genuinely verified via a call-count check, missing-data rows honestly left unset rather
+than fabricated, and a non-starter/thin-sample stat line correctly produces no exposure split at
+all, matching `project_pitcher`'s own starter gate). 528/528 total passing.
 
 ## NOT YET DONE (next stages)
 - **GM/analyst gap, item 5 of 5** — hitter regression (1), reliever fatigue (2), lineup-wide

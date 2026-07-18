@@ -468,6 +468,10 @@ def _hitter_row(raw: Dict, opp: PitcherMetrics, team_name: str,
         "_venue_id": venue_id,
         "_opp_stat": opp.stat,                       # opposing pitcher's season line (matchup)
         "_split_stat": (raw.get("vs_l") if opp.hand == "L" else raw.get("vs_r")),  # platoon split
+        "_lineup_idx": lineup_idx,                    # batting order spot (0=leadoff) — connects
+                                                       # this hitter to how many times they'd face
+                                                       # the starter specifically vs. the bullpen
+                                                       # (see projections.hitter_starter_exposures)
     }
  
  

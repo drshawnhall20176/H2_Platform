@@ -352,6 +352,47 @@ def times_through_order(exp_bf: float, lineup_size: int = 9) -> float:
     return exp_bf / lineup_size
 
 
+def hitter_starter_exposures(lineup_idx: int, starter_proj_bf: float, exp_pa: float,
+                             lineup_size: int = 9) -> Dict[str, float]:
+    """How many of THIS hitter's own expected plate appearances (exp_pa) fall against the
+    STARTER specifically, vs. against the bullpen once the starter's own projected work
+    (starter_proj_bf, from project_pitcher's exp_bf) is exhausted — the genuine connective
+    tissue between times_through_order (a STARTER-side number) and a SPECIFIC hitter's own
+    exposure to it, and between the starter projection and Dinger Engine's own bullpen-matchup
+    toggle: a hitter whose later PA fall past the starter's projected work are, correctly, facing
+    a FRESH bullpen arm for those PA — not carrying the same repeat-look exposure a hitter who
+    keeps seeing the starter would. This is the answer to "does TTO reach the hitter side, and
+    does it connect to the bullpen toggle": yes to both, through this shared, derived number —
+    not two disconnected features.
+
+    DERIVED FROM REAL INPUTS ALREADY IN THE ROW, NOT A NEW FABRICATED NUMBER: lineup_idx (0 =
+    leadoff, already stored on every hitter row) tells us which "batter number" (1st, 10th, 19th,
+    ... for the leadoff hitter) this hitter is for the starter, each time through the lineup.
+    starter_proj_bf (project_pitcher's own exp_bf, already computed for Pitching Lab) tells us
+    how many total batters the starter is projected to face before being pulled. A hitter's own
+    PA fall against the starter for as long as their own batter-number sequence stays within that
+    window, and against the bullpen once it doesn't — pure arithmetic on numbers this platform
+    already computes elsewhere, not a new assumption.
+
+    Returns {"vs_starter": float, "vs_bullpen": float} summing to exp_pa (rounding may leave a
+    negligible difference). DELIBERATELY DOES NOT RETURN A PROBABILITY ADJUSTMENT — same
+    reasoning times_through_order's own docstring already gives: baking a specific per-pitcher
+    wOBA adjustment into hitter probabilities would overclaim precision the underlying TTOP
+    research doesn't support at the individual-pitcher level. This is the honest, genuinely
+    derivable half of the question — WHO gets multiple looks at the starter and WHO mostly
+    faces the bullpen instead — not exactly how much each look is worth."""
+    if lineup_size <= 0 or exp_pa <= 0:
+        return {"vs_starter": 0.0, "vs_bullpen": round(max(exp_pa, 0.0), 2)}
+    if starter_proj_bf <= lineup_idx:
+        # This hitter's own FIRST plate appearance already exceeds the starter's projected work
+        # (a very short outing, or a hitter batting deep in the order) -> entirely bullpen.
+        return {"vs_starter": 0.0, "vs_bullpen": round(exp_pa, 2)}
+    exposures_to_starter = int((starter_proj_bf - lineup_idx - 1) // lineup_size) + 1
+    vs_starter = min(float(exposures_to_starter), exp_pa)
+    vs_bullpen = max(exp_pa - vs_starter, 0.0)
+    return {"vs_starter": round(vs_starter, 2), "vs_bullpen": round(vs_bullpen, 2)}
+
+
 def simulate_pitcher(proj: Dict, sims: int, rng) -> Dict[str, np.ndarray]:
     k = rng.poisson(proj["exp_k"], size=sims)
     bb = rng.poisson(proj["exp_bb"], size=sims)
@@ -637,6 +678,48 @@ def enrich_hitter_rows(rows: List[Dict], sims: int = DEFAULT_SIMS, seed: Optiona
             r["Barrel%"] = sc.get("brl_pct", 0.0)
             r["xHR/PA"] = xhr
             r["Due"] = xhr - actual_hr_pa   # positive = hitting better than HR results show
+    return rows
+
+
+def add_starter_exposure_context(rows: List[Dict]) -> List[Dict]:
+    """Attach "vs SP" / "vs Pen" plate-appearance breakdown to each hitter row in place — the
+    connective tissue tying times_through_order (a starter-side number) to the hitter side, and
+    to Dinger Engine's own bullpen-matchup toggle, so the three pieces read as one coherent
+    picture rather than three disconnected features:
+      * times_through_order (Pitching Lab) says how many times THIS START overall is expected to
+        cycle through the lineup.
+      * This function says, for a SPECIFIC hitter at a SPECIFIC lineup spot, how many of THEIR
+        OWN plate appearances actually fall against that starter vs. against the bullpen once his
+        projected work is exhausted — reusing hitter_starter_exposures, which needs nothing this
+        row doesn't already carry (_lineup_idx, _exp_pa, _opp_stat).
+      * "vs Pen" PA are exactly the PA the bullpen-matchup toggle's own numbers apply to — a
+        hitter with real "vs Pen" exposure genuinely has some of their night riding on the
+        bullpen read, not just a hypothetical "what if" toggle.
+
+    project_pitcher(opp_stat) is called ONCE PER UNIQUE OPPONENT STAT DICT (cached within this
+    call, not per hitter row) — every hitter facing the same starter shares the same projection,
+    so this doesn't redundantly recompute it 9 times per lineup. Pure, no network calls of its
+    own — opp_stat is already sitting on every row from build_slate.
+
+    Rows missing usable data (no _opp_stat, or project_pitcher can't project a real starter from
+    it — a thin sample or genuine reliever) are left without vs SP/vs Pen fields, not given a
+    fabricated split."""
+    proj_cache: Dict[int, Optional[Dict]] = {}
+    for r in rows:
+        opp_stat = r.get("_opp_stat")
+        exp_pa = r.get("_exp_pa")
+        lineup_idx = r.get("_lineup_idx")
+        if not opp_stat or exp_pa is None or lineup_idx is None:
+            continue
+        cache_key = id(opp_stat)
+        if cache_key not in proj_cache:
+            proj_cache[cache_key] = project_pitcher(opp_stat)
+        starter_proj = proj_cache[cache_key]
+        if not starter_proj:
+            continue
+        exposures = hitter_starter_exposures(lineup_idx, starter_proj["exp_bf"], exp_pa)
+        r["vs SP"] = exposures["vs_starter"]
+        r["vs Pen"] = exposures["vs_bullpen"]
     return rows
  
  

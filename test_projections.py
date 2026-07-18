@@ -306,6 +306,117 @@ def test_build_pitcher_projection_rows_includes_tto_and_team_id():
     print("✓ build_pitcher_projection_rows includes Proj TTO (matching Proj BF / 9) and each pitcher's own _team_id")
 
 
+# ----------------------------------------------------------------- hitter_starter_exposures
+def test_hitter_starter_exposures_leadoff_sees_starter_multiple_times():
+    # Leadoff (idx=0) comes up as batter #1, #10, #19, #28... A starter projecting 27 BF means
+    # the leadoff hitter faces him 3 full times (batters 1, 10, 19 all <= 27).
+    exp = P.hitter_starter_exposures(lineup_idx=0, starter_proj_bf=27.0, exp_pa=4.25)
+    assert exp["vs_starter"] == 3.0
+    assert round(exp["vs_starter"] + exp["vs_bullpen"], 2) == 4.25
+    print("✓ hitter_starter_exposures correctly gives the leadoff hitter 3 starter exposures at 27 projected BF")
+
+
+def test_hitter_starter_exposures_bottom_of_order_sees_starter_less():
+    # 9-hole (idx=8) comes up as batter #9, #18, #27... Same 27 BF starter -> only reaches him
+    # for the 3rd time right at the edge (batter 27), still 3, but with much less BUFFER than
+    # the leadoff hitter — the real, well-known "bottom of the order sees the starter less" effect
+    # should show up as LESS bullpen-vs-starter margin, not necessarily a different raw count here.
+    top = P.hitter_starter_exposures(lineup_idx=0, starter_proj_bf=20.0, exp_pa=4.25)
+    bottom = P.hitter_starter_exposures(lineup_idx=8, starter_proj_bf=20.0, exp_pa=4.25)
+    assert top["vs_starter"] > bottom["vs_starter"]
+    print("✓ hitter_starter_exposures correctly gives a bottom-of-the-order hitter fewer starter looks than a leadoff hitter, same starter")
+
+
+def test_hitter_starter_exposures_short_start_means_mostly_bullpen():
+    # A starter projecting only 12 BF still reaches the leadoff hitter's SECOND PA (batter #10,
+    # since 10 <= 12) — a real, correct consequence of the math, not a bug: even a short-ish start
+    # gives the top of the order a second look. A genuinely short start (6 BF) is needed before
+    # someone at the bottom of the order (8th spot, batter #8) gets zero starter exposure at all.
+    leadoff = P.hitter_starter_exposures(lineup_idx=0, starter_proj_bf=12.0, exp_pa=4.25)
+    assert leadoff["vs_starter"] == 2.0   # batters 1 and 10 both <= 12
+    late = P.hitter_starter_exposures(lineup_idx=7, starter_proj_bf=6.0, exp_pa=4.25)
+    assert late["vs_starter"] == 0.0 and late["vs_bullpen"] == 4.25
+    print("✓ hitter_starter_exposures correctly sends a hitter entirely to the bullpen when the starter's own projected work doesn't reach them at all")
+
+
+def test_hitter_starter_exposures_caps_at_exp_pa():
+    # vs_starter can never exceed the hitter's own total expected PA, even if the arithmetic
+    # would otherwise suggest more exposures than plate appearances physically available.
+    exp = P.hitter_starter_exposures(lineup_idx=0, starter_proj_bf=999.0, exp_pa=4.25)
+    assert exp["vs_starter"] == 4.25 and exp["vs_bullpen"] == 0.0
+
+
+def test_hitter_starter_exposures_always_sums_to_exp_pa():
+    for idx in range(9):
+        for bf in (12.0, 18.0, 22.5, 27.0, 33.0):
+            exp = P.hitter_starter_exposures(lineup_idx=idx, starter_proj_bf=bf, exp_pa=4.25)
+            assert round(exp["vs_starter"] + exp["vs_bullpen"], 2) == 4.25
+    print("✓ hitter_starter_exposures' two components always sum back to the hitter's own exp_pa")
+
+
+def test_hitter_starter_exposures_zero_exp_pa_safe():
+    exp = P.hitter_starter_exposures(lineup_idx=0, starter_proj_bf=27.0, exp_pa=0.0)
+    assert exp == {"vs_starter": 0.0, "vs_bullpen": 0.0}
+
+
+# ----------------------------------------------------------------- add_starter_exposure_context
+def _ace_stat():
+    return dict(gamesStarted=20, inningsPitched="120.0", battersFaced=480,
+               strikeOuts=140, baseOnBalls=35)
+
+
+def test_add_starter_exposure_context_adds_vs_sp_and_vs_pen():
+    row = {"Hitter": "Leadoff Guy", "_opp_stat": _ace_stat(), "_exp_pa": 4.25, "_lineup_idx": 0}
+    out = P.add_starter_exposure_context([row])
+    assert "vs SP" in out[0] and "vs Pen" in out[0]
+    assert round(out[0]["vs SP"] + out[0]["vs Pen"], 2) == 4.25
+    print("✓ add_starter_exposure_context adds vs SP / vs Pen fields that sum to the hitter's own exp_pa")
+
+
+def test_add_starter_exposure_context_shares_projection_across_same_opponent():
+    # Two hitters facing the SAME starter (same stat dict) should get project_pitcher called
+    # only ONCE, not once per hitter — confirmed via a real call-count check, not just asserted.
+    shared_stat = _ace_stat()
+    rows = [
+        {"Hitter": "Leadoff", "_opp_stat": shared_stat, "_exp_pa": 4.25, "_lineup_idx": 0},
+        {"Hitter": "Cleanup", "_opp_stat": shared_stat, "_exp_pa": 4.25, "_lineup_idx": 3},
+    ]
+    calls = {"n": 0}
+    real_project_pitcher = P.project_pitcher
+
+    def counting_project_pitcher(stat, opp_lineup=None):
+        calls["n"] += 1
+        return real_project_pitcher(stat, opp_lineup)
+
+    orig = P.project_pitcher
+    P.project_pitcher = counting_project_pitcher
+    try:
+        P.add_starter_exposure_context(rows)
+    finally:
+        P.project_pitcher = orig
+    assert calls["n"] == 1
+    print("✓ add_starter_exposure_context computes the starter projection once per opponent, not once per hitter")
+
+
+def test_add_starter_exposure_context_skips_rows_missing_data():
+    rows = [
+        {"Hitter": "No Opp Stat", "_exp_pa": 4.25, "_lineup_idx": 0},
+        {"Hitter": "No Exp PA", "_opp_stat": _ace_stat(), "_lineup_idx": 0},
+        {"Hitter": "No Lineup Idx", "_opp_stat": _ace_stat(), "_exp_pa": 4.25},
+    ]
+    out = P.add_starter_exposure_context(rows)
+    for r in out:
+        assert "vs SP" not in r and "vs Pen" not in r
+    print("✓ add_starter_exposure_context leaves rows with missing data honestly unset, no fabricated split")
+
+
+def test_add_starter_exposure_context_skips_when_not_a_real_starter():
+    thin_stat = dict(gamesStarted=1, inningsPitched="2.0", battersFaced=10, strikeOuts=2, baseOnBalls=1)
+    row = {"Hitter": "Test", "_opp_stat": thin_stat, "_exp_pa": 4.25, "_lineup_idx": 0}
+    out = P.add_starter_exposure_context([row])
+    assert "vs SP" not in out[0]   # project_pitcher's own starter gate correctly returns None here
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
