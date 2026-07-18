@@ -394,6 +394,14 @@ def build_pitching_slate(date_str: str, fip_constant: float = FIP_CONSTANT_DEFAU
             "ERA": round(pm.era, 2), "FIP": pm.fip, "Delta": round(pm.era - pm.fip, 2),
             "K/9": round(pm.k9, 1), "WHIP": round(pm.whip, 2), "HR/9": round(pm.hr9, 2), "OBA": pm.oba,
         })
+    if rows and not any(r["_game_date"] for r in rows):
+        # Every row has real pitcher data (ERA/FIP etc. all populated, or they'd have been
+        # skipped above) but NONE has a game_date — worth a visible signal, not a silent "every
+        # game shows TBD in the time-slot filter" mystery. Most likely a stale cached result from
+        # before this field existed (see the page's own Refresh button); if this prints on a
+        # FRESH fetch, that points to a genuine gap in what the schedule endpoint returned instead.
+        print(f"[MLB] build_pitching_slate({date_str}): {len(rows)} pitcher(s) loaded but NONE "
+             "have a game_date — check get_schedule's raw response for this date.", flush=True)
     return rows
  
  

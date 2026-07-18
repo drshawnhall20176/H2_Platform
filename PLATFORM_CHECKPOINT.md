@@ -1474,6 +1474,27 @@ data. 473/473 total passing.
 compare against what this shows, specifically checking whether a real 60-day IL player appears.
 This is the one piece on the whole platform shipped without any live confirmation at all.
 
+### MLB Matchup Lab: real bug report — every game showing "TBD" for time slot (2026-07-18)
+Shawn's real deployment showed only "All slate"/"TBD" in the Time slot dropdown — no real
+Afternoon/Evening/Late buckets, even though the Game dropdown correctly showed a real matchup
+(Baltimore Orioles @ Houston Astros). Reviewed `build_pitching_slate`'s threading logic line by
+line — it's correct, no unpacking mismatch, `_game_date` flows through cleanly. Most likely
+explanation, not fully confirmable from this sandbox: `load_pitchers` is wrapped in `@st.cache_
+data(ttl=300, ...)`, and this page had NO refresh button — unlike NFL Matchup Lab/Anytime TD
+Engine/QB Lab, which all got one when they were built. If Shawn loaded the page shortly after
+this deploy, he could easily have been looking at a still-cached result from before `_game_date`
+existed on these rows at all, with no way to force a fresh fetch except waiting out the TTL.
+
+Fixed the actual gap, not just the symptom: added the missing 🔄 Refresh button (`st.cache_data.
+clear()` + `st.rerun()`), matching the convention every other similarly-structured page already
+has — this page was the one built/extended this session that never got one. Also added a real
+diagnostic: if `build_pitching_slate` ever returns rows with real pitcher data but NONE of them
+carry a `game_date`, it now prints a visible signal instead of silently manifesting as a
+confusing "every game shows TBD" report with no way to debug it from the logs. If clicking
+Refresh resolves it, that confirms the stale-cache theory; if the diagnostic still fires on a
+genuinely fresh fetch, that would point to a real gap in what MLB's schedule endpoint returned
+for that date — worth reporting back either way.
+
 ## NOT YET DONE (next stages)
 - **Line-movement chart** — see above. The capture infrastructure is live; the actual
   stock-candlestick-style chart in Matchup Lab is the natural next step once there's real
