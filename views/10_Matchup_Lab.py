@@ -248,9 +248,35 @@ with st.expander(f"📋 {pitcher['Pitcher']} vs. the batting order (season)"):
                                    "AVG": "{:.3f}", "OBP": "{:.3f}", "SLG": "{:.3f}", "OPS": "{:.3f}"})
                 .theme_gradient(cmap="RdYlGn", subset=["OPS"]),
                 hide_index=True, use_container_width=True)
-            st.caption("OBP here is simplified (H+BB+HBP over AB+BB+HBP) — sacrifice flies aren't "
-                      "tracked at this level of aggregation, so treat as a close approximation, "
-                      "not exact official OBP.")
+            with st.expander("Why these numbers might not match ESPN or other sites exactly"):
+                st.markdown(
+                    "**These are computed here, not pulled from a pre-built \"batting order "
+                    "split.\"** MLB Stats API doesn't expose one directly (confirmed during "
+                    "scoping — no such endpoint was found). Instead, this platform finds this "
+                    "pitcher's own real starts this season, pulls each start's boxscore, reads "
+                    "every opposing hitter's own lineup-slot field, and sums by slot itself. "
+                    "ESPN, Baseball-Reference, and similar sites build the same kind of split "
+                    "from their own pipelines — usually landing very close, but a small gap is "
+                    "normal, not a sign either side is wrong.\n\n"
+                    "**Regular season only, by design.** Only games with `gameType = \"R\"` are "
+                    "included — spring training and any other non-regular-season starts are "
+                    "excluded on purpose, matching what a standard stat page like ESPN's shows. "
+                    "(This was a real, fixed bug: an earlier version of this page didn't pin "
+                    "that filter down, and picked up a few extra non-regular-season starts, "
+                    "producing a consistent overcount across every slot — caught by comparing "
+                    "this page's own output against ESPN's for a real pitcher.)\n\n"
+                    "**\"As of\" timing can differ.** This reads as of the slate date selected "
+                    "above; a third-party site's own page may have been generated at a slightly "
+                    "different moment (their last refresh vs. this page's). A start or two of "
+                    "difference near the edges of a comparison is expected, not a red flag.\n\n"
+                    "**OBP is a stated approximation** (H + BB + HBP over AB + BB + HBP) — "
+                    "sacrifice flies aren't tracked at this level of aggregation, so it'll read "
+                    "very close to, but not always bit-for-bit identical to, official OBP.\n\n"
+                    "**Small samples are the norm, not the exception**, on top of all of the "
+                    "above — a single season's worth of starts often means 15-25 AB per slot. "
+                    "Worth checking against a second source before leaning on any one slot's "
+                    "number too heavily, the same way any small-sample stat deserves."
+                )
 
 
 rows = MD.build_matchup(pitcher_pid, hitter_hid, arsenals, hitter_splits)
