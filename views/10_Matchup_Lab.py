@@ -290,7 +290,7 @@ with st.expander(f"🧤 {pitcher['Team']}'s catcher framing"):
         st.info("No catcher framing data cached yet — run `python refresh_statcast.py` to "
                 "populate it. Refreshed alongside the hitter Statcast data Dinger Engine uses.")
     else:
-        team_cf = SC.team_catcher_framing(cf_lookup, pitcher["Team"])
+        team_cf = SC.team_catcher_framing(cf_lookup, pitcher.get("_team_id"))
         if not team_cf:
             st.caption(f"No qualified catcher framing data found for {pitcher['Team']} yet.")
         else:
