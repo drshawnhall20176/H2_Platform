@@ -1,23 +1,29 @@
-# Auto-refresh the Statcast batter cache — entirely in the cloud, no local step.
+# Auto-refresh the Statcast batter + catcher-framing caches — entirely in the cloud, no local step.
 #
 # WHAT IT DOES:
-#   Once a day (and on demand) this pulls the season's barrel-rate / exit-velo data from
-#   Baseball Savant via pybaseball, writes data/statcast_batters.csv, and commits it back
-#   to the repo. That commit triggers a Streamlit Cloud redeploy, so the deployed app picks
-#   up the fresh file and flips from "Statcast off" to "Statcast on" with zero manual work.
+#   Once a day (and on demand) this pulls the season's barrel-rate / exit-velo data AND catcher
+#   framing data from Baseball Savant via pybaseball, writes data/statcast_batters.csv and
+#   data/catcher_framing.csv, and commits both back to the repo. That commit triggers a
+#   Streamlit Cloud redeploy, so the deployed app picks up the fresh files with zero manual work.
 #
 # ONE-TIME SETUP (do this before the first run):
-#   1) Commit the updated .gitignore that un-ignores data/statcast_batters.csv
-#      (folder stays ignored; only this one file is allowed through — see .gitignore).
+#   1) Commit the updated .gitignore that un-ignores data/statcast_batters.csv and
+#      data/catcher_framing.csv (folder stays ignored; only these files are allowed through —
+#      see .gitignore).
 #   2) Commit this workflow file at .github/workflows/refresh-statcast.yml
-#   3) Go to the repo's Actions tab -> "refresh-statcast" -> "Run workflow" to populate the
-#      file immediately (otherwise it first runs at the scheduled time below).
+#   3) Go to the repo's Actions tab -> "refresh-statcast" -> "Run workflow" to populate both
+#      files immediately (otherwise they first populate at the scheduled time below).
 #
 # NOTES:
-#   - No app dependency added: Streamlit only READS the CSV. pybaseball is installed here,
+#   - No app dependency added: Streamlit only READS the CSVs. pybaseball is installed here,
 #     in the runner, not in the app's requirements — the app stays lightweight.
-#   - Barrel rates are stable over a season, so daily is plenty (GitHub may delay scheduled
-#     runs under load; that's fine for this).
+#   - Barrel rates and framing numbers are stable over a season, so daily is plenty (GitHub may
+#     delay scheduled runs under load; that's fine for this).
+#   - Catcher framing refresh failures are non-fatal to the whole job — refresh_statcast.py's own
+#     main() already treats it that way (a catcher-framing pull failing shouldn't block the
+#     batter cache, Dinger Engine's core dependency, from refreshing and committing). This
+#     workflow mirrors that: the batter-cache commit still happens even if catcher framing didn't
+#     produce a file this run.
 #   - If a future pybaseball version drifts on column names, pin it below (e.g.
 #     pip install "pybaseball==2.2.7") and tell Claude so we can adjust the parser.
 
@@ -29,7 +35,7 @@ on:
   workflow_dispatch: {}       # manual "Run workflow" button in the Actions tab
 
 permissions:
-  contents: write             # allow the job to commit the refreshed CSV back to the repo
+  contents: write             # allow the job to commit the refreshed CSVs back to the repo
 
 jobs:
   refresh:
@@ -43,12 +49,16 @@ jobs:
       - name: Install dependencies
         run: pip install pybaseball pandas
 
-      - name: Pull Statcast data and write the cache
-        run: python refresh_statcast.py     # defaults to the current season
+      - name: Pull Statcast batter + catcher-framing data and write the caches
+        run: python refresh_statcast.py     # defaults to the current season; pulls both, catcher
+                                            # framing failures are non-fatal (see main()'s own
+                                            # try/except) so this step still succeeds either way
 
-      - name: Validate the cache with the app's own loader
+      - name: Validate the batter cache with the app's own loader
         # Use the SAME load() the dashboard uses, so if this passes the app WILL see
         # "Statcast on". Guards against an empty or column-drifted pull being committed.
+        # This one stays a HARD failure (exits nonzero) — the batter cache is Dinger Engine's
+        # core dependency, worth blocking the whole commit over if it looks wrong.
         run: |
           python - <<'PY'
           import sys
@@ -56,18 +66,33 @@ jobs:
           lookup, k = SC.load()
           print(f"Loaded {len(lookup)} batters, calibration k = {k}")
           if len(lookup) < 50 or not k:
-              print("Cache looks empty or invalid — refusing to commit.")
+              print("Batter cache looks empty or invalid — refusing to commit.")
               sys.exit(1)
           PY
 
-      - name: Commit the refreshed cache (only if it changed)
+      - name: Validate the catcher framing cache (non-fatal — logs only, never blocks the commit)
+        # Deliberately does NOT exit nonzero on a bad/missing catcher framing cache — unlike the
+        # batter cache above, a thin or missing catcher-framing pull shouldn't hold back the
+        # batter cache's own commit. Matchup Lab's own catcher framing section already handles a
+        # missing file gracefully (shows "not cached yet" instead of crashing).
+        run: |
+          python - <<'PY'
+          import statcast_data as SC
+          lookup = SC.load_catcher_framing()
+          print(f"Loaded {len(lookup)} catchers.")
+          if len(lookup) < 10:
+              print("Catcher framing cache looks thin or missing — committing anyway (non-fatal).")
+          PY
+        continue-on-error: true
+
+      - name: Commit the refreshed caches (only if something changed)
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/statcast_batters.csv
+          git add data/statcast_batters.csv data/catcher_framing.csv
           if git diff --staged --quiet; then
-            echo "No change in Statcast cache — nothing to commit."
+            echo "No change in Statcast caches — nothing to commit."
           else
-            git commit -m "Auto-refresh Statcast cache ($(date -u +%Y-%m-%d))"
+            git commit -m "Auto-refresh Statcast + catcher framing caches ($(date -u +%Y-%m-%d))"
             git push
           fi
