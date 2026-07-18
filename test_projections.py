@@ -223,6 +223,49 @@ def test_build_best_bets_ranks_and_reasons():
     assert not any(p["Market"] == "Batter HR" and p["Side"] == "Under" for p in plays)
 
 
+# ----------------------------------------------------------------- build_bullpen_matchup_rows
+def _hitter_row_for_bullpen_test(team, opp_stat):
+    return {
+        "Hitter": "Test Slugger", "Team": team, "_pid": 1, "_stat": _slugger(),
+        "_opp_stat": opp_stat, "_venue_id": None, "_split_stat": None,
+        "_exp_pa": 4.25, "_weather_hr": 1.0,
+    }
+
+
+def test_bullpen_matchup_rows_only_touches_the_target_teams_rows():
+    home_row = _hitter_row_for_bullpen_test("Home", dict(battersFaced=700, homeRuns=15,
+                                                         strikeOuts=150, baseOnBalls=50, hits=150))
+    away_row = _hitter_row_for_bullpen_test("Away", dict(battersFaced=700, homeRuns=15,
+                                                         strikeOuts=150, baseOnBalls=50, hits=150))
+    bullpen_stat = dict(battersFaced=700, homeRuns=10, strikeOuts=210, baseOnBalls=40, hits=130)
+    out = P.build_bullpen_matchup_rows([home_row, away_row], "Away", bullpen_stat, seed=1)
+    assert len(out) == 1 and out[0]["Team"] == "Away"   # Home's row never appears in the output
+    print("✓ build_bullpen_matchup_rows only recomputes rows for the requested opponent team")
+
+
+def test_bullpen_matchup_rows_never_mutates_original_rows():
+    starter_stat = dict(battersFaced=700, homeRuns=28, strikeOuts=120, baseOnBalls=70, hits=180)
+    away_row = _hitter_row_for_bullpen_test("Away", starter_stat)
+    bullpen_stat = dict(battersFaced=700, homeRuns=10, strikeOuts=210, baseOnBalls=40, hits=130)
+    P.build_bullpen_matchup_rows([away_row], "Away", bullpen_stat, seed=1)
+    assert away_row["_opp_stat"] is starter_stat   # original row's _opp_stat untouched
+    assert "HR%" not in away_row   # enrich_hitter_rows mutates in place — the COPY, not the original
+    print("✓ build_bullpen_matchup_rows works on copies, never mutating the original slate rows")
+
+
+def test_bullpen_matchup_rows_produces_a_genuinely_different_read_than_the_starter():
+    # THE actual point of the toggle: a hitter who looks tough to homer against the ace should
+    # look like a real, different (easier) matchup once the bullpen_stat is a homer-prone pen.
+    away_row = _hitter_row_for_bullpen_test(
+        "Away", dict(battersFaced=700, homeRuns=10, strikeOuts=210, baseOnBalls=40, hits=130))  # vs ace
+    bullpen_stat = dict(battersFaced=700, homeRuns=28, strikeOuts=120, baseOnBalls=70, hits=180)  # homer-prone pen
+    starter_read = P.enrich_hitter_rows([dict(away_row)], seed=1)
+    bullpen_read = P.build_bullpen_matchup_rows([away_row], "Away", bullpen_stat, seed=1)
+    assert bullpen_read[0]["HR%"] > starter_read[0]["HR%"]
+    print("✓ build_bullpen_matchup_rows produces a genuinely different (and correctly higher, "
+         "vs. a homer-prone pen) HR% than the same hitter's vs-starter read")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

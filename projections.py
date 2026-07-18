@@ -561,6 +561,32 @@ def xhr_from_statcast(pid, statcast: Optional[Dict], k: Optional[float]) -> Opti
     return max(k * brl, 0.0) if brl is not None else None
  
  
+def build_bullpen_matchup_rows(rows: List[Dict], opp_team_name: str, bullpen_stat: Dict,
+                               sims: int = DEFAULT_SIMS, seed: Optional[int] = None,
+                               statcast: Optional[Dict] = None,
+                               statcast_k: Optional[float] = None) -> List[Dict]:
+    """Recompute HR%/Hit%/TB1.5%/SO Prob for the hitters on opp_team_name — the team that WOULD
+    face this bullpen — using bullpen_stat (an aggregate bullpen stat dict from mlb_engine.
+    get_bullpen_aggregate_stat) as the opposing-pitcher input, instead of each hitter's own
+    stored "_opp_stat" (that night's confirmed starter). Powers Dinger Engine's "flip to the
+    bullpen read" toggle.
+
+    NOT NEW MODELING — a thin wrapper around enrich_hitter_rows, the exact same function that
+    already computes the "vs starter" read. The only change is which opposing-pitcher stat dict
+    feeds pitcher_allowed_rates() inside it; every other input (park, platoon split, Statcast,
+    weather, expected PA) stays identical to the hitter's own already-loaded row.
+
+    WORKS ON COPIES, NEVER MUTATES THE ORIGINAL SLATE ROWS: those still need to reflect the
+    vs-starter read for the rest of the page (leaderboards, season-long context, other games'
+    tables) regardless of whether this one game's toggle happens to be on. enrich_hitter_rows
+    mutates in place, so copying first is what keeps this toggle's effect scoped to just the
+    table that asked for it."""
+    target_rows = [dict(r) for r in rows if r.get("Team") == opp_team_name]
+    for r in target_rows:
+        r["_opp_stat"] = bullpen_stat
+    return enrich_hitter_rows(target_rows, sims=sims, seed=seed, statcast=statcast, statcast_k=statcast_k)
+
+
 def enrich_hitter_rows(rows: List[Dict], sims: int = DEFAULT_SIMS, seed: Optional[int] = None,
                        statcast: Optional[Dict] = None, statcast_k: Optional[float] = None) -> List[Dict]:
     """Attach matchup-aware model probabilities to each hitter row in place:

@@ -692,3 +692,99 @@ def get_team_bullpen_fatigue(team_id: int, before_date: str, days_back: int = 5)
         })
     out.sort(key=lambda x: (-x["consecutive_days"], x["days_since_last_appearance"]))
     return out
+
+
+def get_team_pitching_staff(team_id: int, exclude_pid: Optional[int] = None) -> List[Dict[str, Any]]:
+    """A team's active pitching staff: [{"id", "name"}, ...] sorted by name, optionally
+    excluding one pitcher (typically that night's confirmed starter) — the picker list for
+    Matchup Lab's "look at the bullpen instead" option.
+
+    rosterType=active (this module's roster fetches otherwise use fullRoster for get_team_
+    injuries, which deliberately wants EVERY roster status including the injured list — this one
+    wants the opposite: only pitchers who could actually take the mound tonight). "active" is
+    also the more confidently-documented rosterType of the two (MLB Stats API's own default),
+    unlike fullRoster's own uncertain 60-day-IL coverage noted in get_team_injuries' docstring.
+
+    DELIBERATELY DOES NOT TRY TO FURTHER SPLIT "TRUE RELIEVERS" FROM "THE OTHER FOUR STARTERS
+    ALSO ON THE ACTIVE ROSTER" — a real design choice, not a gap: a roster entry's position field
+    is just "P" for every pitcher, with no reliable role distinction available from this endpoint,
+    and guessing at one risks exactly the kind of unconfirmed assumption get_team_bullpen_
+    fatigue's own docstring already explains avoiding for a related reason. Returns the whole
+    staff (minus whoever's excluded); a person who knows their own team's personnel can tell a
+    long man from a true reliever from the name alone far more reliably than this code could
+    guess from a bare position code.
+
+    HONEST LIMITATION, same posture as this file's other roster/injury functions: not verified
+    against a live response (statsapi.mlb.com unreachable from this sandbox)."""
+    try:
+        data = fetch_json(f"{BASE}/teams/{team_id}/roster/active")
+    except Exception:
+        return []
+    if not data or not data.get("roster"):
+        return []
+    out: List[Dict[str, Any]] = []
+    for entry in data.get("roster", []):
+        pos = entry.get("position") or {}
+        if pos.get("abbreviation") != "P":
+            continue
+        person = entry.get("person") or {}
+        pid = person.get("id")
+        if pid is None or pid == exclude_pid:
+            continue
+        out.append({"id": pid, "name": person.get("fullName")})
+    return sorted(out, key=lambda p: p["name"] or "")
+
+
+def get_bullpen_aggregate_stat(team_id: int, exclude_pid: Optional[int] = None,
+                               fip_constant: float = FIP_CONSTANT_DEFAULT) -> Optional[Dict[str, Any]]:
+    """Combined season pitching line for a team's ENTIRE active bullpen (every active pitcher
+    except exclude_pid, typically that night's starter) — the same flat stat-dict shape a single
+    pitcher's PitcherMetrics.stat has, so it's a drop-in replacement anywhere a starter's own
+    stat dict is normally used.
+
+    Built by reusing _aggregate_pitching_splits — already proven combining a traded pitcher's two
+    stints into one stat line — applied here to a roster's worth of relievers instead. Not new
+    aggregation logic, the same "sum multiple stat lines into one" operation on a different set
+    of inputs (each entry wrapped as {"stat": ...} to match that function's own expected shape).
+
+    THE ACTUAL MECHANISM for Dinger Engine's "flip to the bullpen read" toggle: hitter HR%/Hit%/
+    TB1.5% probabilities are already computed by feeding an opposing pitcher's raw stat dict into
+    projections.pitcher_allowed_rates() (see enrich_hitter_rows' own "_opp_stat" field). Feeding
+    THIS aggregate bullpen stat dict into that exact same function instead of the starter's own
+    stat dict is the entire mechanism — no new hitter-probability modeling needed, just a
+    different opposing-pitcher input to the SAME existing pipeline.
+
+    Returns None if the team has no active relievers with a usable stat line (fetch failure, or a
+    roster genuinely returning nothing) — callers should fall back to the starter's own read
+    rather than show a fabricated all-zero bullpen line."""
+    staff = get_team_pitching_staff(team_id, exclude_pid=exclude_pid)
+    if not staff:
+        return None
+    wrapped = []
+    for p in staff:
+        pm = get_pitcher_metrics(p["id"], fip_constant)
+        if pm.stat:
+            wrapped.append({"stat": pm.stat})
+    if not wrapped:
+        return None
+    return _aggregate_pitching_splits(wrapped)
+
+
+def enrich_bullpen_fatigue_with_metrics(fatigue: List[Dict[str, Any]],
+                                        fip_constant: float = FIP_CONSTANT_DEFAULT) -> List[Dict[str, Any]]:
+    """Add ERA/FIP/K9 to each row from get_team_bullpen_fatigue, one get_pitcher_metrics call
+    per pitcher — so Pitching Lab's bullpen table shows "available AND good" vs. "available but
+    mediocre" in one place, not two separate lookups a person has to mentally combine themselves.
+
+    Kept as its own function rather than folded into get_team_bullpen_fatigue itself: that
+    function's job is workload/availability specifically, and stays unit-testable in isolation
+    without needing get_pitcher_metrics' own network calls mocked too — this is a separate, thin
+    composition step layered on top, the same "small functions that combine cleanly" shape
+    get_bullpen_aggregate_stat above already uses."""
+    out = []
+    for row in fatigue:
+        pm = get_pitcher_metrics(row["player_id"], fip_constant)
+        enriched = dict(row)
+        enriched.update(ERA=round(pm.era, 2), FIP=pm.fip, K9=round(pm.k9, 1), has_stats=pm.has_stats)
+        out.append(enriched)
+    return out

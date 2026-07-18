@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 492/492 tests green)
+## What's in this checkpoint (all tested — 505/505 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -1591,6 +1591,106 @@ guard, and sorting the most fatigued arms first). A full offline simulation of t
 that one did, though — every piece here reuses an already-shipped, already-proven parsing shape
 from elsewhere in this file, rather than introducing a new one from documentation alone. The one
 genuinely new, unverified piece is the date-range schedule query itself.
+
+### MLB Matchup Lab: bullpen arm as an alternative to the starter (2026-07-18, same session)
+Shawn raised a real, well-known dynamic: a lineup can struggle against a real ace (his own
+example: Paul Skenes) and erupt once the bullpen takes over — a genuinely different matchup once
+the starter leaves. Asked whether Matchup Lab's pitch-mix/arsenal analysis could extend to the
+bullpen.
+
+**Turned out to be mostly a picker extension, not new modeling — confirmed before writing any
+code, not assumed**: `matchup_data.py`'s cache is built from `pybaseball.statcast()` pulling the
+WHOLE LEAGUE's pitches for the season, not filtered to probable starters — so `arsenals`/
+`hitter_splits` already cover every pitcher who threw a pitch that year, relievers included.
+`MD.build_matchup(pitcher_id, ...)` and `get_pitcher_metrics(pitcher_id, ...)` are both already
+fully generic (confirmed by reading them, not assumed) — the existing page just never offered a
+way to POINT them at anyone other than that day's confirmed starter.
+
+**New engine function, `get_team_pitching_staff(team_id, exclude_pid=None)`** — a team's active
+pitching staff, excluding whichever pitcher is passed (typically that night's starter). Uses
+`rosterType=active`, deliberately different from `get_team_injuries`'s `fullRoster` — this one
+wants the opposite (only pitchers who could actually take the mound tonight, not the injured
+list), and `active` is also the MORE confidently-documented of the two rosterTypes (MLB Stats
+API's own default), unlike `fullRoster`'s noted 60-day-IL uncertainty. Deliberately does NOT try
+to further split "true relievers" from "the other four starters also on the active roster" — a
+roster entry's position field is just "P" for everyone, no reliable role distinction available
+from this endpoint, and guessing at one risked the same class of unconfirmed assumption
+`get_team_bullpen_fatigue`'s own docstring already explains avoiding for a related reason.
+
+**Wired into Matchup Lab as a checkbox right after the starter is picked**: "🔄 Look at
+{team}'s bullpen instead of {starter}." Checking it fetches that team's staff (excluding the
+starter, one on-demand fetch, not proactively for the whole slate), and picking a reliever
+REBUILDS the page's `pitcher` dict using `get_pitcher_metrics` for real ERA/FIP/K9 context, in
+the exact same field shape `build_pitching_slate`'s own rows already use — every downstream
+reference in the rest of the page (the matchup grid, arsenal tables, the "Attack X with the Y"
+headline) works unchanged, because this is a swap of WHICH pitcher feeds the page, not a second
+code path bolted on next to the first. Opposing lineup context (hitter, team, game) carries
+through unchanged, since it's the same game regardless of which of this team's arms is on the mound.
+
+**6 new tests**: 3 for `get_team_pitching_staff` (position-filtering + exclusion + name sort,
+no-exclude case, empty-on-failure) and a full offline simulation using a realistic Skenes-style
+example — a real team's roster with the ace excluded, a reliever's own (meaningfully worse) ERA/
+FIP fetched, and the reconstructed pitcher dict verified field-for-field to match what the rest
+of the page expects. 495/495 total passing.
+
+**Same honest limitation as this file's other roster-based functions**: not verified against a
+live response (`statsapi.mlb.com` unreachable from this sandbox). `rosterType=active` is the
+more confidently-documented choice of any roster fetch built this session, though — MLB Stats
+API's own stated default, not a hedge between uncertain options the way `fullRoster` was.
+
+### Bullpen quality: Pitching Lab enrichment + Dinger Engine matchup toggle (2026-07-18, same session)
+Two follow-ups to item 2's bullpen fatigue work, both requested together.
+
+**Pitching Lab: "available AND good" in one table.** New `mlb_engine.enrich_bullpen_fatigue_
+with_metrics(fatigue, fip_constant)` — a thin composition step (one `get_pitcher_metrics` call
+per pitcher already in the fatigue list) adding ERA/FIP/K9 to the existing bullpen fatigue table.
+Kept as its own function rather than folded into `get_team_bullpen_fatigue` itself, so that
+function stays testable in isolation without needing `get_pitcher_metrics`' own calls mocked too
+— same "small functions that combine cleanly" shape `get_bullpen_aggregate_stat` already uses.
+One real caching bug caught and fixed before shipping: the view's cached loader initially closed
+over `fip_constant` instead of taking it as an explicit parameter, meaning `st.cache_data` would
+never notice the FIP constant input had changed and would keep serving stale ERA/FIP values.
+Fixed by making it an explicit parameter, matching the same convention `load()`'s own
+`fip_constant` handling already established elsewhere in this exact file.
+
+**Dinger Engine: Shawn's own real example (Skenes) was the design target.** A lineup that
+struggles against a real ace can look completely different once his bullpen takes over — a
+genuinely different matchup, not noise. Turned out to be mostly a picker/plumbing extension, not
+new modeling, confirmed BEFORE writing code: `matchup_data.py`'s Statcast cache already pulls the
+whole league's pitches for the season (not scoped to starters), and the hitter-probability
+pipeline already takes an opposing pitcher's raw stat dict as input (`pitcher_allowed_rates`,
+consumed inside `enrich_hitter_rows` via each row's own `_opp_stat`) — so feeding it a DIFFERENT
+stat dict was always going to work, the question was just how to build that dict for a whole
+bullpen.
+
+- **`get_bullpen_aggregate_stat(team_id, exclude_pid, fip_constant)`** — combines a team's entire
+  active bullpen into ONE stat dict shaped exactly like a single pitcher's own `.stat`, by reusing
+  `_aggregate_pitching_splits` (already proven correct combining a traded pitcher's two stints —
+  not new aggregation logic, the same operation on a roster's worth of relievers instead).
+- **`projections.build_bullpen_matchup_rows(rows, opp_team_name, bullpen_stat, ...)`** — a thin
+  wrapper around the EXISTING `enrich_hitter_rows`, just pointed at the bullpen's aggregate stat
+  instead of the starter's. Works on copies, never mutates the original slate rows — the rest of
+  the page (leaderboards, other games) still needs the vs-starter read regardless of this one
+  game's toggle state.
+- **The actual toggle**: a "🔄 Bullpen" checkbox next to each side's SP line in Game-by-game.
+  Checking it recomputes the OPPOSING team's hitter tab against that team's combined bullpen.
+  Three columns that describe a single starter (`Opp Pitcher`/`Opp Hand`/`Advantage`) get
+  relabeled rather than left stale and misleading; `Opp HR/9` gets the REAL aggregate bullpen
+  rate (already computed by `_aggregate_pitching_splits`), not blanked — a genuinely useful
+  number, not a gap.
+- **Verified with a realistic Skenes-shaped scenario**, not just unit tests in isolation: a
+  hitter's HR% against a simulated ace-quality stat line (13.0%) nearly DOUBLED against a
+  simulated homer-prone bullpen aggregate (25.0%), with the shown Opp HR/9 correctly landing in
+  the existing fixed-band "homer-prone" red zone — the exact effect described, reproduced
+  end to end through the real code path, not asserted in the abstract.
+
+**13 new tests**: 3 for `enrich_bullpen_fatigue_with_metrics` (metrics added correctly, no-stats
+flagged honestly, order/count preserved), 4 for `get_bullpen_aggregate_stat` (sums correctly
+across relievers, None on no staff, None on no usable stats rather than a fabricated line, and a
+direct confirmation its output shape works as real input to `pitcher_allowed_rates` — the actual
+mechanism this whole feature depends on), and 3 for `build_bullpen_matchup_rows` (only touches
+the target team's rows, never mutates the originals, and produces a genuinely different —
+correctly directional — read than the starter). 505/505 total passing.
 
 ## NOT YET DONE (next stages)
 - **GM/analyst gaps, items 3-5 of 5** — hitter regression table (item 1) and reliever fatigue

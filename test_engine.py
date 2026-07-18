@@ -387,6 +387,122 @@ def test_bullpen_fatigue_sorted_most_fatigued_first(monkeypatch):
     print("✓ get_team_bullpen_fatigue sorts the longest current streak first")
 
 
+# ----------------------------------------------------------------- get_team_pitching_staff
+def test_get_team_pitching_staff_filters_to_pitchers_and_excludes_given_id(monkeypatch):
+    fake_roster = {"roster": [
+        {"person": {"id": 111, "fullName": "Todays Starter"}, "position": {"abbreviation": "P"}},
+        {"person": {"id": 222, "fullName": "Reliever B"}, "position": {"abbreviation": "P"}},
+        {"person": {"id": 333, "fullName": "Reliever A"}, "position": {"abbreviation": "P"}},
+        {"person": {"id": 444, "fullName": "Some Shortstop"}, "position": {"abbreviation": "SS"}},
+    ]}
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake_roster)
+    staff = E.get_team_pitching_staff(117, exclude_pid=111)
+    ids = {p["id"] for p in staff}
+    assert ids == {222, 333}   # non-pitcher excluded, given exclude_pid excluded
+    assert [p["name"] for p in staff] == ["Reliever A", "Reliever B"]   # sorted by name
+    print("✓ get_team_pitching_staff correctly filters to pitchers and excludes the given id")
+
+
+def test_get_team_pitching_staff_no_exclude(monkeypatch):
+    fake_roster = {"roster": [
+        {"person": {"id": 111, "fullName": "A Pitcher"}, "position": {"abbreviation": "P"}},
+    ]}
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake_roster)
+    staff = E.get_team_pitching_staff(117)
+    assert len(staff) == 1
+
+
+def test_get_team_pitching_staff_empty_on_fetch_failure(monkeypatch):
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: {})
+    assert E.get_team_pitching_staff(117) == []
+
+
+# ----------------------------------------------------------------- get_bullpen_aggregate_stat
+def test_get_bullpen_aggregate_stat_sums_across_relievers(monkeypatch):
+    fake_roster = {"roster": [
+        {"person": {"id": 222, "fullName": "Reliever A"}, "position": {"abbreviation": "P"}},
+        {"person": {"id": 333, "fullName": "Reliever B"}, "position": {"abbreviation": "P"}},
+    ]}
+    stats = {
+        222: {"strikeOuts": 40, "baseOnBalls": 15, "hitByPitch": 2, "homeRuns": 5,
+             "battersFaced": 200, "hits": 45, "atBats": 180, "earnedRuns": 20, "inningsPitched": "50.0"},
+        333: {"strikeOuts": 30, "baseOnBalls": 10, "hitByPitch": 1, "homeRuns": 3,
+             "battersFaced": 150, "hits": 35, "atBats": 135, "earnedRuns": 15, "inningsPitched": "38.0"},
+    }
+
+    def fake_metrics(pid, fip_constant):
+        return E.PitcherMetrics(id=pid, name=f"P{pid}", stat=stats[pid])
+
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake_roster)
+    monkeypatch.setattr(E, "get_pitcher_metrics", fake_metrics)
+    agg = E.get_bullpen_aggregate_stat(117, exclude_pid=111)
+    assert agg["strikeOuts"] == 70    # 40 + 30
+    assert agg["homeRuns"] == 8       # 5 + 3
+    assert agg["battersFaced"] == 350  # 200 + 150
+    print("✓ get_bullpen_aggregate_stat correctly sums counting stats across the whole bullpen")
+
+
+def test_get_bullpen_aggregate_stat_none_when_no_staff(monkeypatch):
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: {})
+    assert E.get_bullpen_aggregate_stat(117) is None
+
+
+def test_get_bullpen_aggregate_stat_none_when_no_usable_stats(monkeypatch):
+    fake_roster = {"roster": [
+        {"person": {"id": 222, "fullName": "No Data Guy"}, "position": {"abbreviation": "P"}},
+    ]}
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake_roster)
+    monkeypatch.setattr(E, "get_pitcher_metrics", lambda pid, fc: E.PitcherMetrics(id=pid, stat={}))
+    assert E.get_bullpen_aggregate_stat(117) is None
+    print("✓ get_bullpen_aggregate_stat returns None rather than a fabricated empty line")
+
+
+def test_get_bullpen_aggregate_stat_output_is_valid_pitcher_allowed_rates_input():
+    # Confirms the shape really is a drop-in replacement for a single pitcher's own .stat —
+    # the actual mechanism the Dinger Engine toggle depends on.
+    import projections as P
+    agg = {"strikeOuts": 70.0, "baseOnBalls": 25.0, "hitByPitch": 3.0, "homeRuns": 8.0,
+          "battersFaced": 350.0, "hits": 80.0, "atBats": 315.0, "earnedRuns": 35.0,
+          "inningsPitched": "88.0"}
+    rates = P.pitcher_allowed_rates(agg)
+    assert rates is not None
+    assert 0 < rates["hr"] < 1
+    print("✓ get_bullpen_aggregate_stat's output shape works directly with pitcher_allowed_rates")
+
+
+# ----------------------------------------------------------------- enrich_bullpen_fatigue_with_metrics
+def test_enrich_bullpen_fatigue_adds_era_fip_k9(monkeypatch):
+    fatigue = [{"player_id": 555, "name": "Gassed Reliever", "days_since_last_appearance": 0,
+               "consecutive_days": 3, "total_outs_in_window": 9, "tag": "🔴 3 straight days"}]
+
+    def fake_metrics(pid, fip_constant):
+        return E.PitcherMetrics(id=pid, name="Gassed Reliever", era=3.10, fip=2.95, k9=11.2,
+                                whip=1.05, hr9=0.7, oba=0.210, has_stats=True)
+
+    monkeypatch.setattr(E, "get_pitcher_metrics", fake_metrics)
+    enriched = E.enrich_bullpen_fatigue_with_metrics(fatigue)
+    assert enriched[0]["ERA"] == 3.10 and enriched[0]["FIP"] == 2.95 and enriched[0]["K9"] == 11.2
+    assert enriched[0]["tag"] == "🔴 3 straight days"   # original fatigue fields preserved
+    print("✓ enrich_bullpen_fatigue_with_metrics correctly adds quality metrics alongside fatigue data")
+
+
+def test_enrich_bullpen_fatigue_flags_no_stats(monkeypatch):
+    fatigue = [{"player_id": 999, "name": "No Data Guy", "days_since_last_appearance": 1,
+               "consecutive_days": 1, "total_outs_in_window": 3, "tag": "🟡 Pitched yesterday"}]
+    monkeypatch.setattr(E, "get_pitcher_metrics",
+                        lambda pid, fc: E.PitcherMetrics(id=pid, name="No Data Guy", has_stats=False))
+    enriched = E.enrich_bullpen_fatigue_with_metrics(fatigue)
+    assert enriched[0]["has_stats"] is False
+
+
+def test_enrich_bullpen_fatigue_preserves_order_and_count(monkeypatch):
+    fatigue = [{"player_id": i, "name": f"P{i}", "days_since_last_appearance": i,
+               "consecutive_days": 0, "total_outs_in_window": 3, "tag": "—"} for i in range(3)]
+    monkeypatch.setattr(E, "get_pitcher_metrics", lambda pid, fc: E.PitcherMetrics(id=pid, name=f"P{pid}"))
+    enriched = E.enrich_bullpen_fatigue_with_metrics(fatigue)
+    assert [e["player_id"] for e in enriched] == [0, 1, 2]
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
