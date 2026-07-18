@@ -60,9 +60,7 @@ def _board_mlb(date_str):
 
 
 def _board_generic(sport_key, date_str):
-    sport = sports.get(sport_key)
-    rows, meta = sport.engine.build_slate(date_str)
-    return sport.projections.build_best_bets(rows), meta
+    return BBD.load_generic_best_bets_board(sport_key, date_str)
 
 
 def _board(sport_key, date_str):
@@ -134,6 +132,8 @@ left, right = st.columns([3, 2])
 # ---------- tonight's top plays ----------
 with left:
     st.subheader("⭐ Tonight's top leans")
+    st.page_link("views/16_Graded_Picks.py", label="See the full slate, graded game by game →",
+                icon="🏅")
     if plays:
         _TOP_TABS = [("All", None)] + [(f"{_MARKET_ICONS.get(m, '🔹')} {m}", m)
                                        for m in _active.market_map.keys()]

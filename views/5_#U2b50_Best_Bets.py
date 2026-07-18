@@ -40,10 +40,7 @@ def load_best_bets_mlb(date_str: str, fip_constant: float):
 def load_best_bets_generic(sport_key: str, date_str: str):
     """Any sport whose engine/projections don't need MLB's statcast/weather enrichment path —
     currently WNBA, and any future sport built the same way."""
-    sport = sports.get(sport_key)
-    engine, proj = sport.engine, sport.projections
-    rows, meta = engine.build_slate(date_str)
-    plays = proj.build_best_bets(rows)
+    plays, meta = BBD.load_generic_best_bets_board(sport_key, date_str)
     slot_by_game = {m["label"]: game_dt(m.get("game_date")) for m in meta}
     for pl in plays:
         dt = slot_by_game.get(pl["Game"])
