@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 559/559 tests green)
+## What's in this checkpoint (all tested — 567/567 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -2341,6 +2341,47 @@ missing hydration parameter causing complete lookup failure. The diagnostic-firs
 adopted partway through this thread — surface real information before proposing a fix, verify
 after — is what turned four genuinely different failure modes into four genuinely fixed bugs
 instead of four rounds of guessing.
+
+### Mid-season catcher change detector (2026-07-18, follow-up to catcher framing work)
+Shawn asked how catcher framing connects to hitter props. Honest answer: it doesn't right now —
+Matchup Lab's framing section is display-only, not wired into any probability. Talked through the
+actual mechanism (framing shifts count leverage, not outcomes directly) and landed on the real
+recommendation: don't bake a blanket framing adjustment into every pitcher's numbers, since a
+pitcher's season-long BB/K rates already happened WITH his real catcher(s) behind him — whatever
+a good framer contributed is usually already sitting inside those numbers, indistinguishable from
+"the pitcher got better." The place a season aggregate genuinely lies is a MID-SEASON catcher
+change specifically, using the very Patrick Bailey trade surfaced during this session's own
+debugging as the illustrating example. Built that instead.
+
+**`mlb_engine.get_pitcher_catcher_change_split(pitcher_id, team_id, season, before_date,
+min_starts_each_side=3)`** — reuses the exact "scan a pitcher's own real starts via his game log,
+then read each boxscore" pattern already proven for batting-order splits and bullpen fatigue, not
+a new pattern. New piece: `_find_catcher_in_boxscore_side`, identifying who caught each start on
+the pitcher's OWN side (position "C", preferring whoever had the most plate appearances if a
+mid-game substitution happened).
+
+**Only reports a change if it looks like a REAL transition, not routine catcher rotation** — a
+real, deliberate design constraint, not a missing feature: requires the most recent starts to be
+consistently one catcher, and an earlier block of at least `min_starts_each_side` starts
+consistently a DIFFERENT one. A team platooning two catchers all year with no single clean
+transition point correctly returns None — this looks for one real personnel change, not a general
+usage-variance report, which would be a much noisier, less trustworthy signal.
+
+**Returns this pitcher's own real, summed BB%/K% split before vs. after** — not a projected or
+derived adjustment, actual outcomes from actual starts. Wired into Pitching Lab right after
+starter rest, reusing the same game-scoped picker, gated behind an explicit per-side button given
+the real cost of scanning a full season of starts.
+
+**11 new tests**: 3 for the catcher-identification helper (position-C selection, preferring more
+plate appearances when two catchers appeared, honest None when no catcher is found) and 5 for the
+main split detector (a clean transition correctly detected with hand-verified BB%/K% math, None
+when only one catcher ever caught him, None when usage was rotation rather than one clean
+transition — the specific guard against false positives — None on too few total starts, and the
+`min_starts_each_side` floor actually enforced). Plus a full realistic simulation using the exact
+real Cleveland scenario from this session's own catcher-framing debugging (Bo Naylor → Patrick
+Bailey, May 15 transition) — walk rate correctly dropping from 12.5% to 5.1% and strikeout rate
+rising from 20.8% to 30.8% after the switch to a confirmed elite framer, the real direction this
+effect should move in. 567/567 total passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

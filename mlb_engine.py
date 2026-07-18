@@ -908,7 +908,8 @@ def get_starter_rest_info(pitcher_id: int, team_id: int, before_date: str,
 
 def get_pitcher_starts_this_season(pitcher_id: int, season: int,
                                    before_date: Optional[str] = None) -> List[Dict[str, Any]]:
-    """This pitcher's own STARTS this season: [{"gamePk", "game_date"}, ...] — the bounded set of
+    """This pitcher's own STARTS this season: [{"gamePk", "game_date", "stat"}, ...] — the
+    bounded set of
     games get_pitcher_batting_order_splits below actually needs to fetch boxscores for.
 
     DELIBERATELY NOT built by scanning the team's whole-season schedule (which would mean a
@@ -960,7 +961,7 @@ def get_pitcher_starts_this_season(pitcher_id: int, season: int,
         gs = safe_float(stat.get("gamesStarted"))
         outs = _ip_to_outs(stat.get("inningsPitched", "0.0"))
         if gs >= 1 or outs >= 9:
-            out.append({"gamePk": game_pk, "game_date": game_date})
+            out.append({"gamePk": game_pk, "game_date": game_date, "stat": stat})
     return out
 
 
@@ -1119,3 +1120,137 @@ def get_player_current_team(player_id: int) -> Optional[Dict[str, Any]]:
     if "id" not in team:
         return None
     return {"id": team.get("id"), "name": team.get("name")}
+
+
+def _find_catcher_in_boxscore_side(players: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Which player caught (position "C") for one side of a boxscore, preferring whoever had the
+    most plate appearances if more than one catcher appeared (a mid-game defensive substitution,
+    or a pinch-hitter for the starting catcher) — the one who did most of the game's catching,
+    not necessarily whoever's listed first. Returns None if no catcher is found on this side at
+    all (a genuinely possible, if rare, boxscore gap — an interleague DH-rule edge case, or a
+    parsing miss — better to report "unknown" than guess)."""
+    candidates = []
+    for pdata in players.values():
+        pos = (pdata.get("position") or {}).get("abbreviation")
+        if pos != "C":
+            continue
+        person = pdata.get("person") or {}
+        pid = person.get("id")
+        if pid is None:
+            continue
+        bat = (pdata.get("stats") or {}).get("batting") or {}
+        pa = safe_float(bat.get("plateAppearances")) or safe_float(bat.get("atBats"))
+        candidates.append({"id": pid, "name": person.get("fullName"), "pa": pa})
+    if not candidates:
+        return None
+    candidates.sort(key=lambda c: c["pa"], reverse=True)
+    return {"id": candidates[0]["id"], "name": candidates[0]["name"]}
+
+
+def get_pitcher_catcher_change_split(pitcher_id: int, team_id: int, season: int,
+                                     before_date: Optional[str] = None,
+                                     min_starts_each_side: int = 3) -> Optional[Dict[str, Any]]:
+    """Detects a REAL mid-season primary-catcher change behind this specific pitcher, and if
+    found, returns his own actual BB/K rates split before vs. after — not a derived team-wide
+    framing adjustment applied to every pitcher, but this one pitcher's own real outcomes on
+    either side of a real personnel change.
+
+    WHY THIS INSTEAD OF A BLANKET FRAMING ADJUSTMENT, THE ACTUAL RECOMMENDATION THIS WAS BUILT
+    FROM: a pitcher's season-long BB/K rates already happened WITH his real catcher(s) behind
+    him — whatever a good framer contributed over the season is already sitting inside those
+    numbers, indistinguishable from "the pitcher got better." Baking a SEPARATE team-wide framing
+    adjustment on top would risk double-counting an effect that's usually already there. The
+    place a season aggregate genuinely misleads is a MID-SEASON catcher change specifically — the
+    full-season rate is a blend of before and after, quietly wrong for projecting the pitcher
+    going forward. This targets exactly that gap, using this pitcher's own real results, not a
+    projected/derived number.
+
+    METHOD: scans this pitcher's own real starts (get_pitcher_starts_this_season, already bounded
+    to his real starts, not his team's whole season), and for each one fetches the boxscore and
+    identifies who caught it on his OWN team's side (_find_catcher_in_boxscore_side above) — same
+    "scan real per-game boxscore data" approach get_pitcher_batting_order_splits already uses for
+    a different question.
+
+    A CHANGE IS ONLY REPORTED IF IT LOOKS REAL, NOT ROUTINE ROTATION: requires the most recent
+    starts to be consistently caught by one catcher (the "new" one) and an earlier block of at
+    least min_starts_each_side starts consistently caught by a DIFFERENT one (the "old" one).
+    Ordinary in-season catcher rotation (a team platooning two catchers all year, with no real
+    single transition point) deliberately does NOT qualify — this looks for one clean transition,
+    not a general "how does usage vary." Returns None if fewer than min_starts_each_side*2 starts
+    exist yet, if only one catcher has ever caught this pitcher, or if no clean single transition
+    point can be identified (mixed/rotating usage on both sides of any candidate split).
+
+    Returns {"changed": True, "old_catcher": {"id","name"}, "new_catcher": {"id","name"},
+    "change_date": str, "before": {"starts","bb_pct","k_pct"}, "after": {...}} or None.
+    bb_pct/k_pct are BB/batters-faced and K/batters-faced across the grouped starts — real,
+    summed outcomes, not model output.
+
+    HONEST LIMITATION, same posture as this file's other roster/boxscore-based functions: not
+    verified against a live response (statsapi.mlb.com unreachable from this sandbox)."""
+    starts = get_pitcher_starts_this_season(pitcher_id, season, before_date)
+    if len(starts) < min_starts_each_side * 2:
+        return None
+
+    starts_sorted = sorted(starts, key=lambda s: s.get("game_date") or "")
+    with_catcher = []
+    for s in starts_sorted:
+        try:
+            box = fetch_json(f"{BASE}/game/{s['gamePk']}/boxscore")
+        except Exception:
+            continue
+        teams = box.get("teams", {}) or {}
+        side = None
+        for candidate_side in ("home", "away"):
+            players = (teams.get(candidate_side, {}) or {}).get("players", {}) or {}
+            if any((p.get("person", {}) or {}).get("id") == pitcher_id for p in players.values()):
+                side = candidate_side
+                break
+        if side is None:
+            continue
+        catcher = _find_catcher_in_boxscore_side((teams.get(side, {}) or {}).get("players", {}) or {})
+        if catcher is None:
+            continue
+        with_catcher.append({**s, "catcher": catcher})
+
+    unique_catchers = {c["catcher"]["id"] for c in with_catcher}
+    if len(unique_catchers) < 2 or len(with_catcher) < min_starts_each_side * 2:
+        return None
+
+    new_catcher_id = with_catcher[-1]["catcher"]["id"]
+    # Walk backward from the most recent start while the catcher stays the "new" one.
+    split_idx = len(with_catcher)
+    for i in range(len(with_catcher) - 1, -1, -1):
+        if with_catcher[i]["catcher"]["id"] == new_catcher_id:
+            split_idx = i
+        else:
+            break
+    after_group = with_catcher[split_idx:]
+    before_group = with_catcher[:split_idx]
+    if len(after_group) < min_starts_each_side or len(before_group) < min_starts_each_side:
+        return None
+
+    old_catcher_id = before_group[-1]["catcher"]["id"]
+    # The "before" block must ALSO be consistently the old catcher, not mixed rotation —
+    # otherwise this isn't a clean transition, it's routine variation, and shouldn't be reported
+    # as one.
+    if any(g["catcher"]["id"] != old_catcher_id for g in before_group):
+        return None
+
+    def _rates(group):
+        bb = sum(safe_float(g["stat"].get("baseOnBalls")) for g in group)
+        k = sum(safe_float(g["stat"].get("strikeOuts")) for g in group)
+        bf = sum(safe_float(g["stat"].get("battersFaced")) for g in group)
+        return {
+            "starts": len(group),
+            "bb_pct": round(bb / bf, 4) if bf > 0 else 0.0,
+            "k_pct": round(k / bf, 4) if bf > 0 else 0.0,
+        }
+
+    return {
+        "changed": True,
+        "old_catcher": before_group[-1]["catcher"],
+        "new_catcher": after_group[0]["catcher"],
+        "change_date": after_group[0].get("game_date"),
+        "before": _rates(before_group),
+        "after": _rates(after_group),
+    }

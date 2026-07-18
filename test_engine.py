@@ -840,6 +840,137 @@ def test_get_player_current_team_requests_hydrate_currentTeam(monkeypatch):
     print("✓ get_player_current_team correctly requests hydrate=currentTeam, the actual fix for the real 0/61 production failure")
 
 
+# ----------------------------------------------------------------- _find_catcher_in_boxscore_side
+def test_find_catcher_picks_position_c():
+    players = {
+        "ID1": {"person": {"id": 1, "fullName": "The Catcher"}, "position": {"abbreviation": "C"},
+               "stats": {"batting": {"plateAppearances": 4}}},
+        "ID2": {"person": {"id": 2, "fullName": "The Shortstop"}, "position": {"abbreviation": "SS"},
+               "stats": {"batting": {"plateAppearances": 4}}},
+    }
+    result = E._find_catcher_in_boxscore_side(players)
+    assert result == {"id": 1, "name": "The Catcher"}
+    print("✓ _find_catcher_in_boxscore_side correctly picks the position-C player")
+
+
+def test_find_catcher_prefers_most_plate_appearances_when_multiple():
+    players = {
+        "ID1": {"person": {"id": 1, "fullName": "Backup Catcher"}, "position": {"abbreviation": "C"},
+               "stats": {"batting": {"plateAppearances": 1}}},
+        "ID2": {"person": {"id": 2, "fullName": "Starting Catcher"}, "position": {"abbreviation": "C"},
+               "stats": {"batting": {"plateAppearances": 4}}},
+    }
+    result = E._find_catcher_in_boxscore_side(players)
+    assert result["name"] == "Starting Catcher"
+    print("✓ _find_catcher_in_boxscore_side prefers the catcher with the most plate appearances when two appeared")
+
+
+def test_find_catcher_none_when_no_catcher_present():
+    players = {"ID1": {"person": {"id": 1, "fullName": "Shortstop"}, "position": {"abbreviation": "SS"}}}
+    assert E._find_catcher_in_boxscore_side(players) is None
+
+
+# ----------------------------------------------------------------- get_pitcher_catcher_change_split
+def _fake_start_with_stat(gamePk, date, bb, k, bf):
+    return {"gamePk": gamePk, "game_date": date,
+           "stat": {"baseOnBalls": bb, "strikeOuts": k, "battersFaced": bf}}
+
+
+def _fake_box_with_catcher(pitcher_id, catcher_id, catcher_name):
+    return {"teams": {"home": {"players": {
+        f"ID{pitcher_id}": {"person": {"id": pitcher_id, "fullName": "The Pitcher"},
+                            "stats": {"pitching": {"inningsPitched": "6.0"}}},
+        f"ID{catcher_id}": {"person": {"id": catcher_id, "fullName": catcher_name},
+                            "position": {"abbreviation": "C"},
+                            "stats": {"batting": {"plateAppearances": 4}}},
+    }}, "away": {"players": {}}}}
+
+
+def test_catcher_change_split_detects_clean_transition(monkeypatch):
+    # 4 starts with the OLD catcher, 4 starts with the NEW catcher — a clean transition.
+    starts = [
+        _fake_start_with_stat(1, "2026-04-05", bb=2, k=6, bf=25),
+        _fake_start_with_stat(2, "2026-04-11", bb=3, k=5, bf=24),
+        _fake_start_with_stat(3, "2026-04-17", bb=2, k=7, bf=26),
+        _fake_start_with_stat(4, "2026-04-23", bb=4, k=4, bf=23),
+        _fake_start_with_stat(5, "2026-05-09", bb=1, k=8, bf=26),   # new catcher starts here
+        _fake_start_with_stat(6, "2026-05-15", bb=0, k=9, bf=27),
+        _fake_start_with_stat(7, "2026-05-21", bb=1, k=8, bf=25),
+        _fake_start_with_stat(8, "2026-05-27", bb=1, k=9, bf=26),
+    ]
+    boxes = {
+        1: _fake_box_with_catcher(111, 201, "Old Catcher"), 2: _fake_box_with_catcher(111, 201, "Old Catcher"),
+        3: _fake_box_with_catcher(111, 201, "Old Catcher"), 4: _fake_box_with_catcher(111, 201, "Old Catcher"),
+        5: _fake_box_with_catcher(111, 202, "New Catcher"), 6: _fake_box_with_catcher(111, 202, "New Catcher"),
+        7: _fake_box_with_catcher(111, 202, "New Catcher"), 8: _fake_box_with_catcher(111, 202, "New Catcher"),
+    }
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda pid, s, bd=None: starts)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2:
+                        boxes[int(url.rsplit("/game/", 1)[1].split("/")[0])])
+    result = E.get_pitcher_catcher_change_split(111, 999, 2026)
+    assert result is not None
+    assert result["changed"] is True
+    assert result["old_catcher"]["name"] == "Old Catcher"
+    assert result["new_catcher"]["name"] == "New Catcher"
+    assert result["change_date"] == "2026-05-09"
+    assert result["before"]["starts"] == 4
+    assert result["after"]["starts"] == 4
+    # before: BB=2+3+2+4=11, BF=25+24+26+23=98 -> 11/98
+    assert result["before"]["bb_pct"] == round(11 / 98, 4)
+    # after: K=8+9+8+9=34, BF=26+27+25+26=104 -> 34/104
+    assert result["after"]["k_pct"] == round(34 / 104, 4)
+    print("✓ get_pitcher_catcher_change_split correctly detects a clean transition and computes real before/after rates")
+
+
+def test_catcher_change_split_none_when_only_one_catcher(monkeypatch):
+    starts = [_fake_start_with_stat(i, f"2026-04-{i:02d}", bb=2, k=6, bf=25) for i in range(1, 9)]
+    box = _fake_box_with_catcher(111, 201, "Only Catcher")
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda pid, s, bd=None: starts)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+    assert E.get_pitcher_catcher_change_split(111, 999, 2026) is None
+    print("✓ get_pitcher_catcher_change_split correctly returns None when only one catcher ever appeared")
+
+
+def test_catcher_change_split_none_when_rotation_not_clean_transition(monkeypatch):
+    # Alternating catchers every start — real rotation, not a clean one-time transition.
+    starts = [_fake_start_with_stat(i, f"2026-04-{i:02d}", bb=2, k=6, bf=25) for i in range(1, 9)]
+    boxes = {i: _fake_box_with_catcher(111, 201 if i % 2 == 0 else 202, "Catcher A" if i % 2 == 0 else "Catcher B")
+            for i in range(1, 9)}
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda pid, s, bd=None: starts)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2:
+                        boxes[int(url.rsplit("/game/", 1)[1].split("/")[0])])
+    assert E.get_pitcher_catcher_change_split(111, 999, 2026) is None
+    print("✓ get_pitcher_catcher_change_split correctly refuses to report routine rotation as a clean transition")
+
+
+def test_catcher_change_split_none_when_too_few_starts(monkeypatch):
+    starts = [_fake_start_with_stat(1, "2026-04-05", bb=2, k=6, bf=25)]
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda pid, s, bd=None: starts)
+    assert E.get_pitcher_catcher_change_split(111, 999, 2026) is None
+
+
+def test_catcher_change_split_requires_min_starts_each_side(monkeypatch):
+    # A transition exists but the "before" block only has 2 starts, below the default floor of 3.
+    starts = [
+        _fake_start_with_stat(1, "2026-04-05", bb=2, k=6, bf=25),
+        _fake_start_with_stat(2, "2026-04-11", bb=2, k=6, bf=25),
+        _fake_start_with_stat(3, "2026-04-17", bb=2, k=6, bf=25),
+        _fake_start_with_stat(4, "2026-04-23", bb=2, k=6, bf=25),
+        _fake_start_with_stat(5, "2026-04-29", bb=2, k=6, bf=25),
+        _fake_start_with_stat(6, "2026-05-05", bb=2, k=6, bf=25),
+    ]
+    boxes = {
+        1: _fake_box_with_catcher(111, 201, "Old Catcher"), 2: _fake_box_with_catcher(111, 201, "Old Catcher"),
+        3: _fake_box_with_catcher(111, 202, "New Catcher"), 4: _fake_box_with_catcher(111, 202, "New Catcher"),
+        5: _fake_box_with_catcher(111, 202, "New Catcher"), 6: _fake_box_with_catcher(111, 202, "New Catcher"),
+    }
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda pid, s, bd=None: starts)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2:
+                        boxes[int(url.rsplit("/game/", 1)[1].split("/")[0])])
+    assert E.get_pitcher_catcher_change_split(111, 999, 2026) is None   # only 2 "before" starts, below floor of 3
+    print("✓ get_pitcher_catcher_change_split respects the min_starts_each_side floor")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
