@@ -86,10 +86,24 @@ jobs:
         continue-on-error: true
 
       - name: Commit the refreshed caches (only if something changed)
+        # CRITICAL: git add with multiple pathspecs fails ATOMICALLY if any one of them doesn't
+        # match a file on disk — a real bug found via a real failed run, not caught in review.
+        # The batter cache's own commit (previously working, unaffected by anything catcher-
+        # framing-related) got silently blocked by this too, since a single failed `git add`
+        # call aborts before staging ANYTHING. Fixed by staging the batter cache unconditionally
+        # first, then only adding the catcher-framing file if it actually exists — matching the
+        # "catcher framing failing should never block the batter cache" philosophy that was
+        # already stated in this workflow's comments, but not actually implemented correctly in
+        # the shell command itself until this fix.
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/statcast_batters.csv data/catcher_framing.csv
+          git add data/statcast_batters.csv
+          if [ -f data/catcher_framing.csv ]; then
+            git add data/catcher_framing.csv
+          else
+            echo "::warning::data/catcher_framing.csv was not produced this run (see the pull step's own log for why) — committing the batter cache only."
+          fi
           if git diff --staged --quiet; then
             echo "No change in Statcast caches — nothing to commit."
           else
