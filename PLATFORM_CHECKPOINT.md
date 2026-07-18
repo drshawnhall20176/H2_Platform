@@ -2383,6 +2383,32 @@ Bailey, May 15 transition) — walk rate correctly dropping from 12.5% to 5.1% a
 rising from 20.8% to 30.8% after the switch to a confirmed elite framer, the real direction this
 effect should move in. 567/567 total passing.
 
+### Batting order splits: today's actual lineup added (2026-07-18)
+Shawn flagged a real gap in the batting-order splits table: it showed historical per-slot
+performance but never said WHO'S actually standing in each slot tonight. First interpretation
+attempted was wrong — "who has historically occupied this slot across the pitcher's past starts"
+— corrected directly to what was actually wanted: today's real, confirmed (or projected) lineup
+for the specific game being viewed, so the historical numbers can be read against a real name,
+not an abstract slot number.
+
+**Zero extra fetch — the data was already sitting on the page.** Matchup Lab's hitter picker
+already loads the full slate's hitters via `build_slate`, and those rows already carry
+`_lineup_idx` (added earlier this session for the times-through-the-order work) and a `Lineup`
+status field ("Confirmed" vs "Projected", already used elsewhere on this platform). This was
+purely a cross-referencing exercise in the view layer — filter the already-loaded hitters to the
+opposing team, map by lineup index, done.
+
+**Honest about lineup confirmation status, not just adding a name column.** A caption states
+plainly whether today's lineup shown is officially confirmed or still just a projection — a
+projected lineup can still change before first pitch, and burying that distinction would let
+someone treat a guess as settled fact. A slot with no matching hitter (lineup not posted yet, or
+a genuine data gap) shows an honest "—", never a fabricated guess at who's batting there.
+
+Verified with a full offline simulation of the real cross-referencing logic, including a
+deliberately unmatched slot (confirming the honest "—" fallback) and a hitter from the wrong team
+mixed into the input (confirming the team filter correctly excludes him). 567/567 total passing
+(pure view-layer logic — no new engine functions needed for this one, everything reused).
+
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
   framing/item 5 writeup above for why: no confirmed way to find every game a specific umpire
