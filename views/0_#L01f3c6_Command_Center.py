@@ -102,6 +102,17 @@ k3.metric("Top lean", f"{top['Conviction']:.1f}×" if top else "—",
 k4.metric("Beat-close rate", f"{s['beat_close_rate']:.0f}%" if s["beat_close_rate"] is not None else "—",
           help="Share of bets that beat the closing line. The core proof metric.")
 k5.metric("Avg CLV", f"{s['avg_clv']:+.2f}%" if s["avg_clv"] is not None else "—")
+
+# Owner-only data-health pointer — the Data Health page itself is gated the same way, so this
+# stays hidden for a public/Discord audience rather than linking to a page they can't open.
+if st.secrets.get("AUDIENCE", "owner") == "owner":
+    import data_freshness as DF
+    _dh_results = DF.check_all_sources()
+    _dh_overall = DF.overall_status(_dh_results)
+    _DH_ICON = {"green": "🟢", "yellow": "🟡", "red": "🔴"}
+    st.page_link("views/17_Data_Health.py",
+                label=f"{_DH_ICON[_dh_overall]} Data health — see what's behind these numbers →",
+                icon="🩺")
  
 # ---------- the model pipeline (the pitch) ----------
 st.markdown("##### How every play is built")
