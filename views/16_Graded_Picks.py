@@ -20,6 +20,7 @@ import pytz
 
 import sports
 import best_bets_data as BBD
+import grading
 
 _active = sports.active()
 E, P = _active.engine, _active.projections
@@ -97,10 +98,12 @@ if not plays:
     st.info("No graded plays match the current filters — try a different time slot or game.")
     st.stop()
 
-# organize_graded_picks (projections.py) does the grading, grouping, and sorting — kept as a
-# separate, testable function rather than embedded here, so this real logic is actually unit
-# tested, not just trusted by eye in the browser.
-organized = P.organize_graded_picks(plays)
+# grading.py's organize_graded_picks does the grading, grouping, and sorting — a shared,
+# sport-agnostic module (a real fix, not a style choice: this used to be MLB-only, and calling it
+# via P.organize_graded_picks would crash immediately for every non-MLB sport, confirmed directly
+# during a later cross-sport audit) — kept separate from any Streamlit rendering code so this
+# real logic is actually unit tested, not just trusted by eye in the browser.
+organized = grading.organize_graded_picks(plays)
 
 if not organized:
     st.info("Nothing on tonight's slate clears the grading floor yet — check back closer to "

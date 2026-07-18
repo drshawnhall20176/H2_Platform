@@ -13,6 +13,8 @@ from datetime import datetime, timedelta
  
 import retro as R
 import sports
+import grading as G
+import best_bets_data as BBD
 
 _active = sports.active()
 E, P = _active.engine, _active.projections
@@ -34,37 +36,22 @@ _active_markets = list(_active.market_map.keys())
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_retro_mlb(date_str: str, fip_constant: float):
-    import statcast_data as SC
-    import weather as WX
-
-    @st.cache_data(ttl=3600, show_spinner=False)
-    def load_statcast():
-        return SC.load()
-
-    @st.cache_data(ttl=1800, show_spinner=False)
-    def load_weather(meta_keys: tuple):
-        out = {}
-        for vid, gdate, vname in meta_keys:
-            if vid is not None and vid not in out:
-                try:
-                    out[vid] = WX.get_game_weather(vid, gdate, vname)
-                except Exception:
-                    out[vid] = None
-        return out
-
-    rows, meta = E.build_slate(date_str, fip_constant)
-    sc, k = load_statcast()
-    wx = load_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
-    for r in rows:
-        w = wx.get(r.get("_venue_id"))
-        r["_weather_hr"] = w["hr_factor"] if w else 1.0
-    P.enrich_hitter_rows(rows, seed=7, statcast=sc, statcast_k=k)
-    pitcher_rows = P.build_pitcher_projection_rows(rows, meta, seed=11)
-    plays = P.build_best_bets(rows, pitcher_rows)
+    # build_mlb_board (best_bets_data.py) is the SAME shared pipeline Best Bets and Graded Picks
+    # use — a real consolidation, not just deduplication for its own sake: Retrospective used to
+    # have its OWN separate, third copy of this pipeline, which meant it graded the model against
+    # UNBLENDED probabilities while the actual board shown to a person used the bullpen-blended
+    # ones. That's a real accuracy gap now closed, not just fewer lines of code — this now grades
+    # the SAME numbers a person actually sees.
+    rows, meta, plays = BBD.build_mlb_board(date_str, fip_constant)
     results = E.get_player_results(date_str)
     graded, summary = R.grade_slate(plays, results)
     reports = {m: R.market_report(plays, results, m) for m in _active_markets}
     rows_by_pid = {r.get("_pid"): r for r in rows}
+    # pitcher_rows themselves aren't returned by build_mlb_board (only used internally to build
+    # plays) — rebuilding them here is cheap, pure computation (no network calls; every pitcher's
+    # own stats are already sitting in rows' own "_opp_stat" fields), not a real duplication of
+    # the expensive part of the pipeline (build_slate, statcast, weather, the bullpen blend).
+    pitcher_rows = P.build_pitcher_projection_rows(rows, meta, seed=11)
     for pr in pitcher_rows:                     # so pitcher-K misses can be explained too
         rows_by_pid.setdefault(pr.get("_pid"), pr)
     return graded, summary, reports, rows_by_pid, len(meta), len(results)
@@ -205,19 +192,19 @@ if summary["tiers"]:
         .style.format({"Hit rate": "{:.0%}"}), hide_index=True, use_container_width=True)
  
 # Letter-grade accuracy -- does Graded Picks' own A/B/C/D actually mean anything, using real
-# settled outcomes. MLB-only: conviction_to_grade lives in MLB's own projections.py, matching
-# Graded Picks' own "priority is MLB" scope -- calling it for another sport's P (a different
-# module entirely) would crash, so this is gated the same way every other MLB-only branch on
-# this page already is, not left to fail silently or crash for WNBA/NBA/NFL/NCAAMB.
-if _active.key == "MLB":
-    grade_accuracy = P.grade_accuracy_by_letter(graded)
-    if grade_accuracy:
-        st.markdown("**Hit rate by Graded Picks letter grade** \u2014 does an A actually hit more "
-                   "than a C? The direct test of whether that page's own grades mean anything, "
-                   "not a hypothetical.")
-        st.dataframe(pd.DataFrame(grade_accuracy).rename(
-            columns={"letter": "Grade", "tier": "Label", "n": "Plays", "hit_rate": "Hit rate"})
-            .style.format({"Hit rate": "{:.0%}"}), hide_index=True, use_container_width=True)
+# settled outcomes. NOW SPORT-AGNOSTIC, a real change from when this first shipped: grading.py
+# (not MLB's own projections.py) is where conviction_to_grade actually lives now, confirmed
+# during a later cross-sport audit that the MLB-only version would have crashed Graded Picks
+# outright for every non-MLB sport. No gate needed here anymore -- this works for any sport's
+# own graded plays directly.
+grade_accuracy = G.grade_accuracy_by_letter(graded)
+if grade_accuracy:
+    st.markdown("**Hit rate by Graded Picks letter grade** \u2014 does an A actually hit more "
+               "than a C? The direct test of whether that page's own grades mean anything, "
+               "not a hypothetical.")
+    st.dataframe(pd.DataFrame(grade_accuracy).rename(
+        columns={"letter": "Grade", "tier": "Label", "n": "Plays", "hit_rate": "Hit rate"})
+        .style.format({"Hit rate": "{:.0%}"}), hide_index=True, use_container_width=True)
 
 cal = summary["calibration"]
 if cal:
