@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 609/609 tests green)
+## What's in this checkpoint (all tested — 611/611 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -2660,6 +2660,37 @@ input order) confirmed the isolated function; a full simulation chaining `retro.
 compose correctly and, notably, produce genuinely DIFFERENT groupings from retro's own existing
 tiers — direct evidence this was answering a real, different question, not duplicating one
 already answered. 609/609 total passing.
+
+### Real bug found in production: the one-sided banner contradicted the actual grades (2026-07-18)
+Shawn caught a real, concrete inconsistency on a live Graded Picks output: Pittsburgh @ Cleveland
+Game 2's banner declared Cleveland's hitters favored (facing a "weaker" starter, 0.97 vs 0.00
+HR/9), but the actual highest-conviction HR play on the whole board was a Pittsburgh hitter
+(Esmerlyn Valdez, A-grade, 3.09x) — with Cleveland's own HR plays only reaching D-grade. The
+banner and the real grades directly contradicted each other on the same page.
+
+**Traced to the exact root cause, not patched around the symptom.** `pitcher_allowed_rates` —
+which drives every individual hitter's real HR% probability — has always required a pitcher to
+have faced >=40 batters before trusting his rates at all, falling back to a neutral matchup
+otherwise. `compute_one_sided_banner` used raw "Opp HR/9" directly, with NO such floor. A starter
+with a genuinely thin sample (a call-up, a handful of relief innings) can show a misleadingly
+"elite" 0.00 HR/9 that's really just small-sample noise — Cleveland's own starter here had almost
+certainly faced too few batters to trust that number at all, while the properly-gated per-hitter
+math correctly ignored the same thin signal. Two different parts of the same page using two
+different standards for how much sample to trust — the banner using none at all.
+
+**Fixed with the exact same floor already established elsewhere**, not a new number invented for
+this: `MIN_BATTERS_FACED_FOR_ONE_SIDED = 40`, matching `pitcher_allowed_rates`' own constant
+precisely. Reads `battersFaced` from each team's own `_opp_stat` (the opposing starter's raw stat
+dict — already present on every hitter row, no new data pulled). If either starter's sample is
+too thin, the banner now correctly says nothing rather than confidently asserting something the
+real grades on the same page don't support.
+
+**8 tests total for this function now** (2 new): a dedicated regression test reproducing the
+exact real-world numbers reported (0.97 vs 0.00 HR/9, one thin sample) confirming it's now
+correctly rejected; and a companion test confirming the SAME HR/9 gap still fires correctly when
+both samples are real — proving the fix rejects thin samples specifically, not HR/9 gaps in
+general. Also directly re-ran the exact reported scenario as a standalone confirmation, not just
+inside the test suite. 611/611 total passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

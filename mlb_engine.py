@@ -1276,6 +1276,12 @@ ONE_SIDED_HR9_THRESHOLD = 0.4   # A stated, reasoned choice, not empirically der
                                # honestly presented as a reasonable default, not a proven cutoff.
 
 
+MIN_BATTERS_FACED_FOR_ONE_SIDED = 40   # Matches pitcher_allowed_rates' own floor exactly — not a
+                                       # new number invented for this function, the same
+                                       # threshold the platform's real per-hitter HR% math already
+                                       # requires before trusting a pitcher's rates at all.
+
+
 def compute_one_sided_banner(hitter_rows: List[Dict[str, Any]], game_label: str) -> Optional[Dict[str, Any]]:
     """For one game, compares both starting pitchers' HR/9 allowed to flag when one side's
     hitters have a real, stated-threshold advantage worth calling out — "concentrate HR plays on
@@ -1287,21 +1293,36 @@ def compute_one_sided_banner(hitter_rows: List[Dict[str, Any]], game_label: str)
     HR/9" — the exact rate that matters for that specific question, not a proxy for it. Reusing
     it here isn't a shortcut, it's the right metric for the right question.
 
-    METHOD: every hitter on one team shares the SAME opposing starter, so "Opp HR/9" is constant
-    across all of a team's hitters in a given game — this reads it directly off any one of them
-    per team rather than doing a second pitcher lookup. If the two teams' opposing-starter HR/9
-    values differ by less than ONE_SIDED_HR9_THRESHOLD, returns None — most games are genuinely
-    NOT one-sided, and this should say nothing rather than manufacture a marginal one out of noise.
+    A REAL BUG FIXED HERE, FOUND VIA A REAL REPORTED DISCREPANCY, NOT A HYPOTHETICAL: an earlier
+    version trusted "Opp HR/9" directly with NO minimum-sample guard at all — but the platform's
+    own individual hitter HR% math (pitcher_allowed_rates) has ALWAYS required >=40 batters faced
+    before trusting a pitcher's rates, falling back to a neutral matchup otherwise. A starter with
+    a genuinely thin sample (a recent call-up, a handful of relief innings) can show a misleadingly
+    "elite" 0.00 HR/9 that's really just small-sample noise, not real skill — and the banner would
+    confidently declare that side favored while the properly-gated per-hitter grades correctly
+    ignored the same thin signal, producing a banner that directly CONTRADICTED the real grades
+    sitting right below it on the page. Now applies the SAME >=40 batters-faced floor
+    pitcher_allowed_rates already uses, reading it from each team's own "_opp_stat" (the opposing
+    pitcher's own raw stat dict — already present on every hitter row, no new data needed).
 
-    Returns None if: the game isn't found in hitter_rows, either team's rate is missing/NaN
-    (thin sample or no stats yet), or the gap doesn't clear the threshold. Otherwise returns
-    {"favored_team", "favored_opp_hr9" (the WEAKER, higher-HR9 pitcher the favored team faces),
-    "other_team", "other_opp_hr9", "diff"} — the favored team is the one whose hitters face the
-    pitcher allowing MORE home runs, a real advantage for their own HR props specifically."""
+    METHOD: every hitter on one team shares the SAME opposing starter, so "Opp HR/9" (and that
+    starter's own "_opp_stat") is constant across all of a team's hitters in a given game — this
+    reads both directly off any one of them per team rather than doing a second pitcher lookup.
+    If the two teams' opposing-starter HR/9 values differ by less than ONE_SIDED_HR9_THRESHOLD,
+    returns None — most games are genuinely NOT one-sided, and this should say nothing rather
+    than manufacture a marginal one out of noise.
+
+    Returns None if: the game isn't found in hitter_rows, either team's rate is missing/NaN, EITHER
+    starter's sample is below MIN_BATTERS_FACED_FOR_ONE_SIDED (the fix described above), or the gap
+    doesn't clear the threshold. Otherwise returns {"favored_team", "favored_opp_hr9" (the WEAKER,
+    higher-HR9 pitcher the favored team faces), "other_team", "other_opp_hr9", "diff"} — the
+    favored team is the one whose hitters face the pitcher allowing MORE home runs, a real
+    advantage for their own HR props specifically."""
     game_rows = [r for r in hitter_rows if r.get("GameLabel") == game_label]
     if not game_rows:
         return None
     team_hr9: Dict[str, float] = {}
+    team_bf: Dict[str, float] = {}
     for r in game_rows:
         team = r.get("Team")
         hr9 = r.get("Opp HR/9")
@@ -1313,8 +1334,12 @@ def compute_one_sided_banner(hitter_rows: List[Dict[str, Any]], game_label: str)
         except TypeError:
             continue
         team_hr9.setdefault(team, float(hr9))
+        opp_stat = r.get("_opp_stat") or {}
+        team_bf.setdefault(team, safe_float(opp_stat.get("battersFaced")))
     if len(team_hr9) != 2:
         return None
+    if any(bf < MIN_BATTERS_FACED_FOR_ONE_SIDED for bf in team_bf.values()):
+        return None   # at least one starter's sample is too thin to trust for this specific claim
     (team_a, hr9_a), (team_b, hr9_b) = list(team_hr9.items())
     diff = round(abs(hr9_a - hr9_b), 2)   # rounded BEFORE the threshold check — a real bug found
                                           # via testing, not assumed: comparing the raw float diff

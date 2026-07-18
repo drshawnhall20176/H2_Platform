@@ -973,12 +973,14 @@ def test_catcher_change_split_requires_min_starts_each_side(monkeypatch):
 
 
 # ----------------------------------------------------------------- compute_one_sided_banner
-def _rows_for_game(game_label, team_a, hr9_a, team_b, hr9_b, n_each=3):
+def _rows_for_game(game_label, team_a, hr9_a, team_b, hr9_b, n_each=3, bf_a=400, bf_b=400):
     rows = []
     for i in range(n_each):
-        rows.append({"GameLabel": game_label, "Team": team_a, "Opp HR/9": hr9_a})
+        rows.append({"GameLabel": game_label, "Team": team_a, "Opp HR/9": hr9_a,
+                    "_opp_stat": {"battersFaced": bf_a}})
     for i in range(n_each):
-        rows.append({"GameLabel": game_label, "Team": team_b, "Opp HR/9": hr9_b})
+        rows.append({"GameLabel": game_label, "Team": team_b, "Opp HR/9": hr9_b,
+                    "_opp_stat": {"battersFaced": bf_b}})
     return rows
 
 
@@ -991,6 +993,28 @@ def test_one_sided_banner_flags_real_gap():
     assert result["other_team"] == "Tampa Bay Rays"
     assert result["diff"] == 0.55
     print("✓ compute_one_sided_banner correctly identifies the favored side facing the weaker pitcher")
+
+
+def test_one_sided_banner_none_when_thin_sample():
+    # Regression guard for the real, reported bug: a starter with a thin sample (a call-up, a
+    # handful of innings) can show a misleadingly "elite" HR/9 that's really just noise, not
+    # skill -- the exact real-world case that produced a banner contradicting the actual per-
+    # hitter grades shown right below it. Must be rejected the same way pitcher_allowed_rates
+    # already rejects a thin sample for the real HR% math (same >=40 BF floor).
+    rows = _rows_for_game("PIT @ CLE (Game 2)", "Pittsburgh Pirates", 0.00, "Cleveland Guardians", 0.97,
+                          bf_a=15, bf_b=380)   # Pittsburgh's opposing starter has a real, thin sample
+    assert E.compute_one_sided_banner(rows, "PIT @ CLE (Game 2)") is None
+    print("✓ compute_one_sided_banner correctly refuses to trust a thin-sample starter's misleadingly elite HR/9")
+
+
+def test_one_sided_banner_flags_when_both_samples_real():
+    # The same real-world gap (0.97 vs 0.00), but now BOTH starters have a real sample -- should
+    # correctly fire, confirming the fix rejects thin samples specifically, not HR/9 gaps in general.
+    rows = _rows_for_game("PIT @ CLE (Game 2)", "Pittsburgh Pirates", 0.00, "Cleveland Guardians", 0.97,
+                          bf_a=350, bf_b=380)
+    result = E.compute_one_sided_banner(rows, "PIT @ CLE (Game 2)")
+    assert result is not None
+    assert result["favored_team"] == "Cleveland Guardians"
 
 
 def test_one_sided_banner_none_when_gap_too_small():
@@ -1015,15 +1039,15 @@ def test_one_sided_banner_none_when_game_not_found():
 
 def test_one_sided_banner_none_when_nan_hr9():
     rows = [
-        {"GameLabel": "G1", "Team": "A", "Opp HR/9": float("nan")},
-        {"GameLabel": "G1", "Team": "B", "Opp HR/9": 1.50},
+        {"GameLabel": "G1", "Team": "A", "Opp HR/9": float("nan"), "_opp_stat": {"battersFaced": 400}},
+        {"GameLabel": "G1", "Team": "B", "Opp HR/9": 1.50, "_opp_stat": {"battersFaced": 400}},
     ]
     assert E.compute_one_sided_banner(rows, "G1") is None
     print("✓ compute_one_sided_banner correctly handles a NaN HR/9 (no stats yet) without crashing or fabricating")
 
 
 def test_one_sided_banner_none_when_only_one_team_present():
-    rows = [{"GameLabel": "G1", "Team": "Team A", "Opp HR/9": 1.10}] * 5
+    rows = [{"GameLabel": "G1", "Team": "Team A", "Opp HR/9": 1.10, "_opp_stat": {"battersFaced": 400}}] * 5
     assert E.compute_one_sided_banner(rows, "G1") is None
 
 
