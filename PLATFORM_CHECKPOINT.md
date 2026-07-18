@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 545/545 tests green)
+## What's in this checkpoint (all tested — 548/548 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -2067,6 +2067,38 @@ next run — if catcher_framing.csv is produced now, this was it (or close to it
 step's own printed error message is the next thing to look at together.
 
 546/546 total passing.
+
+### Catcher framing still failing silently after the atomicity fix — made it impossible to miss (2026-07-18)
+Shawn ran the workflow again after the atomicity fix: it succeeded (green checkmark, batter cache
+committed), but Matchup Lab still showed "No catcher framing data cached yet." Confirmed this is
+exactly what a still-silently-failing catcher framing pull looks like — the non-fatal design
+means a green checkmark in the Actions run list tells you the batter cache is fine, nothing about
+whether catcher framing actually worked. That's a real diagnosis gap, not a resolved issue.
+
+**Root cause of the underlying catcher-framing failure is STILL not confirmed** — worth stating
+plainly rather than implying otherwise. What's fixed this round is the fact that the failure was
+invisible, not the failure itself.
+
+**Made the failure impossible to miss next time.** `refresh_statcast.py`'s exception handler now
+prints `::warning::` — a real GitHub Actions workflow command that surfaces as an annotation on
+the run's own summary page, not buried in one step's raw log requiring a manual click-and-scroll
+to find — along with the FULL traceback (`traceback.format_exc()`), not just `str(e)`, which can
+be too terse to diagnose depending on the exception type. The workflow's own validation step got
+the same upgrade, as a second layer: even if the pull step's warning is missed, the validation
+step re-checks the cache immediately after and emits its own visible warning pointing back at the
+pull step's log for the real detail.
+
+**Verified the annotation actually fires, not just written and assumed correct** — new
+`test_refresh_statcast.py`, 2 tests: a simulated catcher-framing exception confirmed to produce
+the `::warning::` line, the exception's own message, AND a real traceback header in the output
+(not just the accepted string), while still returning exit code 0 (the script itself must not
+fail); and a success case confirmed to produce NO warning at all, guarding against the message
+firing when it shouldn't. 548/548 total passing.
+
+**Next real step is still open**: once the workflow runs again with this visibility fix, the
+actual error text will be sitting right on the run's summary page — that's what's needed to
+diagnose the real root cause (an import path issue, a Savant response shape mismatch, or
+something else entirely), rather than continuing to guess at plausible causes one at a time.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

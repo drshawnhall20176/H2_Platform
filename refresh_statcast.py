@@ -12,6 +12,7 @@ Requires pybaseball:  pip install pybaseball
 """
 
 import sys
+import traceback
 from datetime import date
 
 import statcast_data as SC
@@ -43,7 +44,20 @@ def main():
         # a failure here shouldn't block the batter data (Dinger Engine's own core dependency)
         # from refreshing successfully. Matchup Lab's catcher framing section just shows nothing
         # until this succeeds, same "optional, fails soft" posture as the batter data itself.
-        print(f"Catcher framing refresh failed (non-fatal): {e}")
+        #
+        # BUT non-fatal must not mean invisible — a plain print() here was a real diagnosis gap:
+        # a run can show a green checkmark in the Actions list (the batter cache committed fine)
+        # while catcher framing silently failed again underneath, exactly the same way twice in a
+        # row, with no easy way to tell from the run list alone. "::warning::" is a real GitHub
+        # Actions workflow command — any line printed with this prefix surfaces as an annotation
+        # on the run's own summary page, not just buried in one step's raw log that has to be
+        # opened and scrolled to find. The full traceback (not just str(e)) is also printed to
+        # the regular log right after, for whoever does open the step and needs the real detail.
+        tb = traceback.format_exc()
+        first_line = str(e).replace("\n", " ")[:200]
+        print(f"::warning::Catcher framing refresh failed (non-fatal, batter cache unaffected): {first_line}")
+        print("Full traceback:")
+        print(tb)
 
     print("\nThe dashboard will use this automatically on its next refresh.")
     return 0
