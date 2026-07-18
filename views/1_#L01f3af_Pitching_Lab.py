@@ -247,6 +247,46 @@ if game_options:
 else:
     st.caption("No games with both team ids available for this date.")
 
+# === Hitter workload =========================================================
+st.divider()
+st.subheader("🏃 Hitter workload")
+st.caption("Which hitters on each side have started every recent game with no day off \u2014 a "
+          "real, well-documented fatigue concern teams actually manage, not yet covered by "
+          "anything else on this platform (pitcher rest and bullpen fatigue are, this is the "
+          "hitter-side sibling). Counts backward through each TEAM's own most recent games, not "
+          "consecutive calendar days \u2014 a team's own off-day is real rest regardless of how "
+          "many calendar days it spans. Same real per-game cost as bullpen fatigue above, so "
+          "this is scoped to one game at a time too, not the whole slate up front.")
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def load_hitter_workload(team_id, date_str_inner):
+    if not team_id:
+        return []
+    return E.get_team_hitter_workload(team_id, date_str_inner)
+
+
+if game_options:
+    with st.spinner("Checking recent games-started for both lineups..."):
+        home_workload = load_hitter_workload(picked["home_id"], date_str)
+        away_workload = load_hitter_workload(picked["away_id"], date_str)
+
+    wc1, wc2 = st.columns(2)
+    for col, label, workload in ((wc1, picked["home_name"], home_workload),
+                                 (wc2, picked["away_name"], away_workload)):
+        with col:
+            st.markdown(f"**{label}**")
+            flagged = [w for w in workload if w["consecutive_games_started"] >= 5]
+            if not flagged:
+                st.caption("No hitters with 5+ straight games started in this window.")
+            else:
+                st.dataframe(
+                    pd.DataFrame(flagged)[["name", "consecutive_games_started", "tag"]]
+                    .rename(columns={"name": "Hitter", "consecutive_games_started": "Streak", "tag": "Tag"}),
+                    hide_index=True, use_container_width=True)
+else:
+    st.caption("No games with both team ids available for this date.")
+
 # === Discussion hooks ======================================================
 st.divider()
 st.subheader("🤳 Discussion hooks (auto-generated)")
