@@ -85,13 +85,23 @@ if proj_rows:
         pdf = pdf.sort_values("Proj K", ascending=False, kind="stable")
     show = pdf.rename(columns={"K over%": "SO o5.5", "K fair": "SO fair"})
     cols = ["Time", "Pitcher", "Team", "Opp", "Hand", "Proj IP", "Proj K", "SO o5.5", "SO fair",
-            "Proj BB", "Proj Outs", "ERA", "FIP"]
+            "Proj BB", "Proj Outs", "Proj TTO", "ERA", "FIP"]
     show = show[[c for c in cols if c in show.columns]]
     st.dataframe(
         show.style.format({"SO o5.5": "{:.1%}", "Proj IP": "{:.1f}", "Proj K": "{:.1f}",
-                           "Proj BB": "{:.1f}", "Proj Outs": "{:.1f}", "ERA": "{:.2f}", "FIP": "{:.2f}"})
+                           "Proj BB": "{:.1f}", "Proj Outs": "{:.1f}", "Proj TTO": "{:.2f}",
+                           "ERA": "{:.2f}", "FIP": "{:.2f}"})
         .theme_gradient(cmap="RdYlGn", subset=["Proj K", "SO o5.5"]),
         use_container_width=True, hide_index=True, height=420)
+    st.caption("**Proj TTO** = expected times through the order (Proj BF ÷ 9). Well-documented "
+              "industry research (Baseball Prospectus, SABR) shows pitcher performance meaningfully "
+              "degrades each additional trip through the same lineup within a game — roughly an "
+              "8-12 point wOBA-against increase per trip, more for fastball-heavy pitchers, based "
+              "on league-wide studies, NOT this pitcher specifically (that range varies enough by "
+              "repertoire that baking one number into every projection would overclaim precision "
+              "the research itself doesn't support at the individual level). A start projecting a "
+              "real 3rd trip carries meaningfully more of this exposure than one that doesn't — "
+              "read Proj TTO as that context, not a separate line to bet.")
 else:
     st.write("No projectable starters (need 3+ starts of data).")
 
@@ -167,6 +177,27 @@ if game_options:
               "whole 5-day window, not per game. ERA/FIP/K9 are each pitcher's own SEASON line — "
               "\"available AND good\" vs. \"available but mediocre\" in one table, not two "
               "separate lookups.")
+
+    # === Starter rest, same selected game, no second picker ------------------
+    st.markdown("**😴 Starter rest**")
+    st.caption("Short rest (4 days or fewer) is genuinely unusual and the well-established "
+              "effectiveness concern; extra rest has more mixed evidence, shown as context, "
+              "not asserted as a clean positive.")
+
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def load_starter_rest(pitcher_id, team_id, date_str_inner):
+        if not pitcher_id or not team_id:
+            return {"days_rest": None, "last_start_date": None, "rest_tag": "Unknown"}
+        return E.get_starter_rest_info(pitcher_id, team_id, date_str_inner)
+
+    rc1, rc2 = st.columns(2)
+    for col, label, sp, team_id in ((rc1, picked["home_name"], picked["home_pm"], picked["home_id"]),
+                                    (rc2, picked["away_name"], picked["away_pm"], picked["away_id"])):
+        with col:
+            rest = load_starter_rest(sp.id, team_id, date_str)
+            st.markdown(f"**{label}** — {sp.name}")
+            st.caption(rest["rest_tag"] if rest["last_start_date"] is None else
+                      f"{rest['rest_tag']} · last started {rest['last_start_date']}")
 else:
     st.caption("No games with both team ids available for this date.")
 
