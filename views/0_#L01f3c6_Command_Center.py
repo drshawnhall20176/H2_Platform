@@ -18,9 +18,9 @@ import plotly.graph_objects as go
 import retro as R
 import betlog as B
 import sports
+import best_bets_data as BBD
  
 _active = sports.active()
-E, P = _active.engine, _active.projections
  
 st.markdown("""
 <style>
@@ -56,33 +56,7 @@ _MARKET_ICONS = {
 
 # ---------- loaders ----------
 def _board_mlb(date_str):
-    import statcast_data as SC
-    import weather as WX
-
-    @st.cache_data(ttl=3600, show_spinner=False)
-    def _statcast():
-        return SC.load()
-
-    @st.cache_data(ttl=1800, show_spinner=False)
-    def _weather(keys):
-        out = {}
-        for vid, gdate, vname in keys:
-            if vid is not None and vid not in out:
-                try:
-                    out[vid] = WX.get_game_weather(vid, gdate, vname)
-                except Exception:
-                    out[vid] = None
-        return out
-
-    rows, meta = E.build_slate(date_str)
-    sc, k = _statcast()
-    wx = _weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
-    for r in rows:
-        w = wx.get(r.get("_venue_id"))
-        r["_weather_hr"] = w["hr_factor"] if w else 1.0
-    P.enrich_hitter_rows(rows, seed=7, statcast=sc, statcast_k=k)
-    pr = P.build_pitcher_projection_rows(rows, meta, seed=11)
-    return P.build_best_bets(rows, pr), meta
+    return BBD.load_mlb_best_bets_board(date_str, BBD.E.FIP_CONSTANT_DEFAULT)
 
 
 def _board_generic(sport_key, date_str):

@@ -9,6 +9,7 @@ from datetime import datetime
 import pytz
 
 import sports
+import best_bets_data as BBD
 
 _active = sports.active()
 E, P = _active.engine, _active.projections
@@ -26,55 +27,7 @@ game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER
 
 @st.cache_data(ttl=300, show_spinner=False)
 def load_best_bets_mlb(date_str: str, fip_constant: float):
-    import statcast_data as SC
-    import weather as WX
-
-    @st.cache_data(ttl=3600, show_spinner=False)
-    def load_statcast():
-        return SC.load()
-
-    @st.cache_data(ttl=1800, show_spinner=False)
-    def load_weather(meta_keys: tuple):
-        out = {}
-        for vid, gdate, vname in meta_keys:
-            if vid is not None and vid not in out:
-                try: out[vid] = WX.get_game_weather(vid, gdate, vname)
-                except Exception: out[vid] = None
-        return out
-
-    rows, meta = E.build_slate(date_str, fip_constant)
-    sc, k = load_statcast()
-    wx = load_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
-    for r in rows:
-        w = wx.get(r.get("_venue_id"))
-        r["_weather_hr"] = w["hr_factor"] if w else 1.0
-        if w:                              # keep the pieces so the inspector can decompose weather
-            r["_wx_temp"] = w.get("temp_f")
-            r["_wx_outwind"] = w.get("out_wind_mph", 0.0)
-            r["_wx_desc"] = w.get("wind_desc")
-            r["_wx_roof"] = w.get("roof", "open")
-    P.enrich_hitter_rows(rows, seed=7, statcast=sc, statcast_k=k)
-    pitcher_rows = P.build_pitcher_projection_rows(rows, meta, seed=11)
-    plays = P.build_best_bets(rows, pitcher_rows)
-
-    # Re-price the top hitter-market plays using their real vs-starter/vs-bullpen exposure — a
-    # real, confirmed fix, not a speculative one: a starter-only read on a real slate showed 47%
-    # for that market's single highest-conviction play; properly blending the ~1/3 of that
-    # hitter's plate appearances actually falling to a materially better bullpen brought it to
-    # ~41%. Scoped to the top 30 hitter-market candidates, not the whole slate — see apply_
-    # bullpen_blend_to_top_plays' own docstring for the real cost reasoning behind that limit.
-    @st.cache_data(ttl=1800, show_spinner=False)
-    def load_bullpen_aggregate_for_blend(team_id, exclude_pid, fip_constant_inner):
-        if not team_id:
-            return None
-        return E.get_bullpen_aggregate_stat(team_id, exclude_pid=exclude_pid, fip_constant=fip_constant_inner)
-
-    rows_by_pid = {r.get("_pid"): r for r in rows}
-    P.apply_bullpen_blend_to_top_plays(
-        plays, rows_by_pid,
-        get_bullpen_stat_fn=lambda tid, ex: load_bullpen_aggregate_for_blend(tid, ex, fip_constant),
-        statcast=sc, statcast_k=k, seed=7, top_n=30)
-
+    plays, meta = BBD.load_mlb_best_bets_board(date_str, fip_constant)
     slot_by_game = {m["label"]: (game_dt(m.get("game_date")), m.get("venue")) for m in meta}
     for pl in plays:
         dt, _ = slot_by_game.get(pl["Game"], (None, None))
