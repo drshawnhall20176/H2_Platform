@@ -48,6 +48,8 @@ def load_slate(date_str: str, fip_constant: float):
         wx = wx_by_venue.get(r.get("_venue_id"))
         r["_weather_hr"] = wx["hr_factor"] if wx else 1.0
     P.enrich_hitter_rows(rows, seed=7, statcast=sc, statcast_k=k)  # matchup/platoon/Statcast/weather
+    P.add_starter_exposure_context(rows)  # vs SP / vs Pen PA split — ties times-through-the-order
+                                          # to specific hitters and to the bullpen-matchup toggle
     return rows, meta, (len(sc) if sc else 0), wx_by_venue
  
  
@@ -103,7 +105,7 @@ else:
  
 # --- Styling ----------------------------------------------------------------
 DISPLAY_COLS = ["Hitter", "Team", "Hand", "Opp Pitcher", "Opp Hand", "Advantage", "Lineup",
-                "Opp HR/9", "HR%", "Hit%", "TB1.5%", "SO Prob", "Barrel%", "xHR/PA", "K%", "HR", "TB", "SLG", "OPS", "ISO", "PowerIndex"]
+                "Opp HR/9", "vs SP", "vs Pen", "HR%", "Hit%", "TB1.5%", "SO Prob", "Barrel%", "xHR/PA", "K%", "HR", "TB", "SLG", "OPS", "ISO", "PowerIndex"]
  
  
 def hr9_band(v):
@@ -140,12 +142,13 @@ def style_hitters(data: pd.DataFrame):
     # low sample). As a mixed object column that (a) breaks the color gradient for the whole column
     # and (b) renders "None" instead of "—". Coerce to numeric so None -> NaN: the gradient then
     # colors the real values and leaves the no-Statcast cells blank ("—"), instead of faking a number.
-    for c in ("Barrel%", "xHR/PA"):
+    for c in ("Barrel%", "xHR/PA", "vs SP", "vs Pen"):
         if c in view.columns:
             view[c] = pd.to_numeric(view[c], errors="coerce")
     pct = [c for c in ("HR%", "Hit%", "TB1.5%", "SO Prob", "K%", "Barrel%", "xHR/PA") if c in view.columns]
     fmt = {"HR": "{:.0f}", "TB": "{:.0f}", "SLG": "{:.2f}", "OPS": "{:.2f}",
-           "ISO": "{:.2f}", "PowerIndex": "{:.1f}", "Opp HR/9": "{:.2f}"}
+           "ISO": "{:.2f}", "PowerIndex": "{:.1f}", "Opp HR/9": "{:.2f}",
+           "vs SP": "{:.2f}", "vs Pen": "{:.2f}"}
     fmt.update({c: "{:.1%}" for c in pct})
     styler = view.style.format(fmt, na_rep="—")
     # High is good for a hitter -> green. Barrel%/xHR/PA (more power) belong here too.
@@ -368,3 +371,15 @@ st.caption("Opp HR/9 = the opposing starter's home runs allowed per 9 innings, c
            "(not slate-relative): 🟢 under 0.80 excellent · 🟩 0.80–1.10 solid · 🟡 1.10–1.30 average · "
            "🟠 1.30–1.50 below average · 🔴 over 1.50 homer-prone. A redder arm is a better power spot "
            "for the hitter.")
+st.caption("**vs SP / vs Pen** = how many of this hitter's own expected plate appearances fall "
+          "against the starter specifically vs. against the bullpen once his projected work is "
+          "exhausted — derived from this hitter's own lineup spot and the starter's own projected "
+          "batters faced (see Pitching Lab's Proj TTO for that same starter's own trip count). "
+          "This is the connection between three things that would otherwise read as separate: a "
+          "starter projecting a real 3rd trip through the order (Pitching Lab), which SPECIFIC "
+          "hitters actually get exposed to that repeat look (a leadoff hitter far more than a "
+          "7-9 spot), and which of a hitter's own PA the 🔄 Bullpen toggle above actually speaks "
+          "to — a hitter with real \"vs Pen\" plate appearances genuinely has some of their night "
+          "riding on that bullpen read, not just a hypothetical what-if. Not a probability "
+          "adjustment — HR%/Hit%/TB1.5%/SO Prob above are still the season-long vs-starter read "
+          "either way; this is honest context about exposure, not a recomputed number.")
