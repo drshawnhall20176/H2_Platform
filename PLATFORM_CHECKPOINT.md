@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 623/623 tests green)
+## What's in this checkpoint (all tested — 632/632 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -2741,6 +2741,53 @@ own `data/` directory as an honest test — correctly reported red across the bo
 deployed data exists here), even catching a stray leftover test artifact from earlier session
 work as a real below-floor row-count failure — then separately confirmed a simulated healthy
 deployment correctly reports all-green. 623/623 total passing.
+
+### Hitter-side rest and fatigue — recommendation #3 built (2026-07-18)
+Third and last of the platform recommendations. Pitcher rest and bullpen fatigue were already
+built; hitters had no equivalent, despite it being a real, well-documented thing teams actually
+manage (real roster/lineup decisions get made specifically around it).
+
+**`mlb_engine.get_team_hitter_workload(team_id, before_date, days_back=10)`** — mirrors
+`get_team_bullpen_fatigue`'s exact cost-efficiency pattern (one schedule fetch, one boxscore
+fetch per game in the window, covering the WHOLE lineup's workload in that single scan, not one
+fetch per hitter) but with a real, deliberate difference in what the streak actually counts: a
+GAMES-based streak, not a calendar-days-based one. A pitcher's fatigue signal cares about
+calendar proximity (arm recovery time); a hitter's workload concern is about how many of the
+TEAM's own games he's started in a row, since a team's own off-day is real rest regardless of how
+many calendar days it spans — matching how this is actually discussed in real coverage ("hasn't
+had a day off in N games," not N calendar days).
+
+**A real parsing distinction, not a minor detail**: only counts a game where a player was the
+ORIGINAL starter in his slot (battingOrder ending in "00"), not a late-game substitute (ending in
+a non-zero suffix) — a defensive replacement or pinch-hitter who entered in the 8th shouldn't
+count as a real day's workload the same way an original starter's full game does. Same 3-digit
+battingOrder convention already established this session, applied here with the opposite
+filtering intent than batting-order splits needed.
+
+**Tagging threshold (8+ consecutive starts, no rest day) stated honestly as reasoned, not
+proven** — matching the same posture as this session's other stated-not-backtested thresholds
+(the one-sided banner's HR/9 gap, catcher-change's minimum sample size).
+
+**Wired into Pitching Lab**, alongside bullpen fatigue and starter rest — that page functions as
+the real "game context" page regardless of its name, not strictly pitcher-only, and this is the
+natural hitter-side sibling to what's already there. Same real cost, same game-scoped picker
+already in use, not a new UI pattern.
+
+**9 new tests**: a real 8-game iron-man streak correctly flagged; a streak correctly breaking
+(counting backward) at a real missed game in the middle of the window, not just at the start or
+end; late substitutes correctly excluded from ever counting as a start; all three tag thresholds;
+correct handling of the away side (not just home, confirmed separately); non-final games never
+fetched at all (a hard assertion in the test itself, not just an unused mock); empty-window
+handling; and sort order (least-rested first) confirmed with a genuinely mixed scenario, not just
+two extremes. Plus a full realistic end-to-end simulation with three different hitter usage
+patterns (an iron man, a player with a real mid-window rest day, and a true platoon bat) —
+producing exactly the right streak for each, including the platoon player's short streak
+correctly reflecting his real alternating usage, not an averaged or misleading number. 632/632
+total passing.
+
+**This closes out all three platform recommendations** — grade accuracy tracking, data health,
+and hitter-side fatigue — each one built, tested, and verified against realistic scenarios before
+being called done.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

@@ -1357,3 +1357,120 @@ def compute_one_sided_banner(hitter_rows: List[Dict[str, Any]], game_label: str)
         "other_team": other_team, "other_opp_hr9": round(other_hr9, 2),
         "diff": diff,
     }
+
+
+def get_team_hitter_workload(team_id: int, before_date: str, days_back: int = 10) -> List[Dict[str, Any]]:
+    """Per-hitter recent games-STARTED workload for this team, over the days_back calendar days
+    STRICTLY BEFORE before_date (before_date itself, and anything on/after it, is never included
+    — same no-lookahead discipline every other function in this file follows).
+
+    Returns one row per hitter who started (was the ORIGINAL starter in his slot, not a
+    late-game substitute — see battingOrder parsing note below) in at least one game in the
+    window: [{"player_id", "name", "games_started_in_window", "team_games_in_window",
+    "consecutive_games_started", "tag"}, ...], sorted with the least-rested hitters first.
+
+    A GAMES-BASED STREAK, NOT A CALENDAR-DAYS-BASED ONE — A REAL, DELIBERATE DIFFERENCE FROM
+    get_team_bullpen_fatigue's OWN STREAK, not an oversight: a pitcher's fatigue is about arm
+    recovery time, so calendar proximity is what matters. A hitter's workload concern is
+    different — real coverage of this (beat writers, team statements) talks about "hasn't had a
+    day off in N games," not N calendar days, since a team's own off-day is real rest regardless
+    of how many calendar days it spans. This counts backward through the TEAM's own most recent
+    games in the window (whichever calendar dates those actually fall on) until the first one
+    this hitter did NOT start, not backward through consecutive calendar dates.
+
+    BATTINGORDER PARSING: only counts a game where this player was the ORIGINAL starter in his
+    slot (battingOrder ending in "00", e.g. "100" for the leadoff spot) — not a late-game
+    substitute who entered mid-game (e.g. "101"), who shouldn't count as a real, full day's
+    workload the way an original starter's appearance does. Same 3-digit convention already
+    established and used elsewhere in this file (get_pitcher_batting_order_splits).
+
+    THE REAL TAGGING THRESHOLD (8+ consecutive games started, no rest day): a stated, reasoned
+    choice, not empirically derived or backtested — MLB teams explicitly manage this in practice
+    (real, well-documented roster/lineup decisions), but the exact number where it starts
+    mattering for performance hasn't been validated against real outcomes here. Presented
+    honestly as a reasonable default, the same posture as this file's other stated thresholds.
+
+    METHOD: fetches the team's real games in the window via get_team_schedule_range (one request
+    covering the whole window), then for each FINAL game fetches that game's boxscore ONCE and
+    scans every player on this team's side with a real battingOrder — one scan covers the WHOLE
+    lineup's workload, not one fetch per hitter, the same cost-efficiency get_team_bullpen_
+    fatigue already established for pitchers.
+
+    HONEST LIMITATION, same posture as this file's other boxscore-based functions: not verified
+    against a live response (statsapi.mlb.com unreachable from this sandbox)."""
+    try:
+        before_dt = datetime.strptime(before_date, "%Y-%m-%d")
+    except ValueError:
+        return []
+    start = (before_dt - timedelta(days=days_back)).strftime("%Y-%m-%d")
+    end = (before_dt - timedelta(days=1)).strftime("%Y-%m-%d")
+    if end < start:
+        return []
+
+    games = get_team_schedule_range(team_id, start, end)
+    team_game_pks: List[str] = []      # chronological order of this team's own FINAL games
+    started_by_game: Dict[str, set] = {}   # gamePk -> set of player_ids who started
+    names: Dict[int, str] = {}
+
+    games_sorted = sorted(
+        [g for g in games if "final" in (g.get("status", "") or "").lower()],
+        key=lambda g: g.get("game_date") or ""
+    )
+    for g in games_sorted:
+        game_pk = g.get("gamePk")
+        if game_pk is None:
+            continue
+        try:
+            box = fetch_json(f"{BASE}/game/{game_pk}/boxscore")
+        except Exception:
+            continue
+        side = "home" if g.get("home_id") == team_id else "away"
+        players = (((box.get("teams", {}) or {}).get(side, {}) or {}).get("players", {}) or {})
+        starters = set()
+        for pdata in players.values():
+            pid = (pdata.get("person", {}) or {}).get("id")
+            bo = pdata.get("battingOrder")
+            if pid is None or not bo:
+                continue
+            try:
+                if int(bo) % 100 != 0:   # a substitute who entered mid-game, not the original starter
+                    continue
+            except (TypeError, ValueError):
+                continue
+            starters.add(int(pid))
+            names[int(pid)] = (pdata.get("person", {}) or {}).get("fullName", "")
+        team_game_pks.append(game_pk)
+        started_by_game[game_pk] = starters
+
+    if not team_game_pks:
+        return []
+
+    all_starters = set().union(*started_by_game.values()) if started_by_game else set()
+    out: List[Dict[str, Any]] = []
+    for pid in all_starters:
+        games_started = sum(1 for gp in team_game_pks if pid in started_by_game[gp])
+        if games_started == 0:
+            continue
+        streak = 0
+        for gp in reversed(team_game_pks):   # walk backward from the most recent team game
+            if pid in started_by_game[gp]:
+                streak += 1
+            else:
+                break
+
+        if streak >= 8:
+            tag = f"🔴 Started {streak} straight games — no rest day in this window"
+        elif streak >= 5:
+            tag = f"🟡 Started {streak} straight games — extended run without a day off"
+        else:
+            tag = f"🟢 {streak} straight games started"
+
+        out.append({
+            "player_id": pid, "name": names.get(pid, ""),
+            "games_started_in_window": games_started,
+            "team_games_in_window": len(team_game_pks),
+            "consecutive_games_started": streak,
+            "tag": tag,
+        })
+    out.sort(key=lambda x: -x["consecutive_games_started"])
+    return out

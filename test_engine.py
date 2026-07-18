@@ -1051,6 +1051,137 @@ def test_one_sided_banner_none_when_only_one_team_present():
     assert E.compute_one_sided_banner(rows, "G1") is None
 
 
+# ----------------------------------------------------------------- get_team_hitter_workload
+def _fake_hitter_boxscore(starters, subs=None):
+    """starters: {pid: (name, slot_1_to_9)} -> battingOrder ending in "00".
+    subs: {pid: (name, slot_1_to_9)} -> battingOrder ending in "01" (a late-game substitute)."""
+    players = {}
+    for pid, (name, slot) in starters.items():
+        players[f"ID{pid}"] = {"person": {"id": pid, "fullName": name},
+                               "battingOrder": str(slot * 100)}
+    for pid, (name, slot) in (subs or {}).items():
+        players[f"ID{pid}"] = {"person": {"id": pid, "fullName": name},
+                               "battingOrder": str(slot * 100 + 1)}
+    return {"teams": {"home": {"players": players}, "away": {"players": {}}}}
+
+
+def test_hitter_workload_flags_iron_man_streak(monkeypatch):
+    # Started all 8 of the team's last 8 games -> the highest-value tag.
+    games = [{"gamePk": i, "game_date": f"2026-07-{10+i:02d}T23:10:00Z", "status": "Final",
+             "home_id": 117} for i in range(1, 9)]
+    boxscores = {i: _fake_hitter_boxscore({501: ("Iron Man", 3)}) for i in range(1, 9)}
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2:
+                        boxscores[int(url.rsplit("/game/", 1)[1].split("/")[0])])
+    workload = E.get_team_hitter_workload(117, "2026-07-18", days_back=10)
+    assert len(workload) == 1
+    assert workload[0]["consecutive_games_started"] == 8
+    assert "8 straight games" in workload[0]["tag"]
+    assert "🔴" in workload[0]["tag"]
+    print("✓ get_team_hitter_workload correctly flags a real 8-game iron-man streak")
+
+
+def test_hitter_workload_streak_breaks_at_a_missed_game(monkeypatch):
+    # Started games 3-5 (the 3 most recent), but sat out games 1-2 -> streak of 3, not 5.
+    games = [{"gamePk": i, "game_date": f"2026-07-{10+i:02d}T23:10:00Z", "status": "Final",
+             "home_id": 117} for i in range(1, 6)]
+    boxscores = {
+        1: _fake_hitter_boxscore({}),   # sat out
+        2: _fake_hitter_boxscore({}),   # sat out
+        3: _fake_hitter_boxscore({501: ("Rested Now", 3)}),
+        4: _fake_hitter_boxscore({501: ("Rested Now", 3)}),
+        5: _fake_hitter_boxscore({501: ("Rested Now", 3)}),
+    }
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2:
+                        boxscores[int(url.rsplit("/game/", 1)[1].split("/")[0])])
+    workload = E.get_team_hitter_workload(117, "2026-07-18", days_back=10)
+    assert workload[0]["consecutive_games_started"] == 3
+    assert workload[0]["games_started_in_window"] == 3
+    print("✓ get_team_hitter_workload correctly counts the streak backward from the most recent game, stopping at a real miss")
+
+
+def test_hitter_workload_excludes_late_substitutes(monkeypatch):
+    # A player who only ever entered as a late-game sub (battingOrder ending in a non-zero
+    # suffix) should never count as having "started" -- a real distinction, not noise.
+    games = [{"gamePk": 1, "game_date": "2026-07-17T23:10:00Z", "status": "Final", "home_id": 117}]
+    boxscores = {1: _fake_hitter_boxscore(starters={}, subs={601: ("Late Sub", 3)})}
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2:
+                        boxscores[int(url.rsplit("/game/", 1)[1].split("/")[0])])
+    workload = E.get_team_hitter_workload(117, "2026-07-18", days_back=10)
+    assert workload == []
+    print("✓ get_team_hitter_workload correctly excludes a player who only ever entered as a late substitute")
+
+
+def test_hitter_workload_tag_thresholds(monkeypatch):
+    # 6 straight starts -> the middle "extended run" tag, not the highest-severity one.
+    games = [{"gamePk": i, "game_date": f"2026-07-{10+i:02d}T23:10:00Z", "status": "Final",
+             "home_id": 117} for i in range(1, 7)]
+    boxscores = {i: _fake_hitter_boxscore({501: ("Regular", 3)}) for i in range(1, 7)}
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2:
+                        boxscores[int(url.rsplit("/game/", 1)[1].split("/")[0])])
+    workload = E.get_team_hitter_workload(117, "2026-07-18", days_back=10)
+    assert workload[0]["consecutive_games_started"] == 6
+    assert "🟡" in workload[0]["tag"]
+    assert "extended run" in workload[0]["tag"]
+
+
+def test_hitter_workload_low_streak_green_tag(monkeypatch):
+    games = [{"gamePk": 1, "game_date": "2026-07-17T23:10:00Z", "status": "Final", "home_id": 117}]
+    boxscores = {1: _fake_hitter_boxscore({501: ("Fresh Guy", 3)})}
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2:
+                        boxscores[int(url.rsplit("/game/", 1)[1].split("/")[0])])
+    workload = E.get_team_hitter_workload(117, "2026-07-18", days_back=10)
+    assert "🟢" in workload[0]["tag"]
+
+
+def test_hitter_workload_works_for_away_side(monkeypatch):
+    games = [{"gamePk": 1, "game_date": "2026-07-17T23:10:00Z", "status": "Final", "home_id": 999}]
+    box = {"teams": {"home": {"players": {}},
+                     "away": {"players": {"ID501": {"person": {"id": 501, "fullName": "Away Starter"},
+                                                    "battingOrder": "300"}}}}}
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+    workload = E.get_team_hitter_workload(117, "2026-07-18", days_back=10)   # 117 is the AWAY team here
+    assert len(workload) == 1
+    assert workload[0]["name"] == "Away Starter"
+    print("✓ get_team_hitter_workload correctly reads the away side when the tracked team is the visitor")
+
+
+def test_hitter_workload_skips_non_final_games(monkeypatch):
+    games = [{"gamePk": 1, "game_date": "2026-07-17T23:10:00Z", "status": "In Progress", "home_id": 117}]
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2:
+                        (_ for _ in ()).throw(AssertionError("should not fetch a non-final game's boxscore")))
+    workload = E.get_team_hitter_workload(117, "2026-07-18", days_back=10)
+    assert workload == []
+
+
+def test_hitter_workload_empty_when_no_games(monkeypatch):
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: [])
+    assert E.get_team_hitter_workload(117, "2026-07-18", days_back=10) == []
+
+
+def test_hitter_workload_sorted_by_streak_descending(monkeypatch):
+    games = [{"gamePk": i, "game_date": f"2026-07-{10+i:02d}T23:10:00Z", "status": "Final",
+             "home_id": 117} for i in range(1, 4)]
+    boxscores = {
+        1: _fake_hitter_boxscore({501: ("Low Streak", 3), 502: ("High Streak", 4)}),
+        2: _fake_hitter_boxscore({502: ("High Streak", 4)}),   # 501 sat this one out
+        3: _fake_hitter_boxscore({501: ("Low Streak", 3), 502: ("High Streak", 4)}),
+    }
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2:
+                        boxscores[int(url.rsplit("/game/", 1)[1].split("/")[0])])
+    workload = E.get_team_hitter_workload(117, "2026-07-18", days_back=10)
+    assert workload[0]["name"] == "High Streak"   # 3-game streak (never missed) ranked first
+    assert workload[1]["name"] == "Low Streak"    # 1-game streak (missed game 2) ranked second
+    print("✓ get_team_hitter_workload correctly sorts the least-rested hitters first")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
