@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 632/632 tests green)
+## What's in this checkpoint (all tested — 636/636 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -2788,6 +2788,59 @@ total passing.
 **This closes out all three platform recommendations** — grade accuracy tracking, data health,
 and hitter-side fatigue — each one built, tested, and verified against realistic scenarios before
 being called done.
+
+### Cross-sport audit: one real bug found and fixed, one latent risk found and consolidated (2026-07-18)
+Shawn asked to check whether everything built this session actually works correctly across every
+sport, not just MLB. Went through it systematically rather than spot-checking.
+
+**One real, confirmed bug, not a hypothetical concern**: Graded Picks called
+`P.organize_graded_picks(plays)`, where `P` is whichever sport's own projections module happens
+to be active — but `organize_graded_picks`/`conviction_to_grade` only ever lived in MLB's own
+`projections.py`. Confirmed directly, not assumed: opening Graded Picks on WNBA, NBA, NFL, or
+NCAAMB would have crashed immediately with an `AttributeError` the moment someone tried it. The
+grading logic itself never actually depended on anything MLB-specific — it operates purely on
+`Conviction`, a number every sport's own `build_best_bets` already produces in the same shape.
+
+**Fixed by extracting the genuinely sport-agnostic logic into its own module, `grading.py`** —
+`GRADE_THRESHOLDS`, `conviction_to_grade`, `organize_graded_picks`, `grade_accuracy_by_letter` all
+moved there. MLB's `projections.py` re-exports all four for backward compatibility with existing
+callers (`best_bets_data.py`, and this session's own earlier tests) that reference them via `P.*`
+where `P` happens to be MLB's own module — confirmed the re-export resolves to the exact same
+object, not a stale copy, with a dedicated test. Both `views/16_Graded_Picks.py` and
+`views/6_#L01f50d_Retrospective.py` updated to import `grading` directly rather than through
+`P` — Retrospective's own MLB-only gate on the letter-grade accuracy breakdown is gone entirely
+now, since the function it depends on is genuinely sport-agnostic, not because the gate was wrong
+before (it was the correct call at the time, given the real constraint that existed then).
+
+**A systematic audit, not just fixing the one bug found by accident**: extracted every `P.<call>`
+across every view file and cross-checked each against every sport's own projections/engine
+module. Confirmed the NFL-specific pages (NFL Matchup Lab, Anytime TD Engine, QB Lab) are safely
+built with hardcoded sport-specific imports plus an explicit `require_sport(["NFL"], ...)` gate,
+not the pattern that caused the Graded Picks bug. Confirmed the shared basketball pages (Hot Hand
+Engine, Matchup Lab for WNBA/NBA/NCAAMB) have every function they call present and consistent
+across all three sports' own modules. Two apparent gaps (`blowout_risk_tag`, `format_et`) turned
+out to be false alarms on closer inspection — both are real, working shared utilities via
+patterns a shallow grep missed (an assignment-based re-export from `basketball_projections.py`,
+and a direct cross-module import from MLB's `projections.py`), not actual bugs.
+
+**A second, related consolidation, done proactively rather than after a bug forced it**:
+Retrospective had its own separate, third copy of the full MLB board-building pipeline
+(`load_retro_mlb`) — structurally the same duplication-drift risk that caused the real Command
+Center/Best Bets conviction mismatch earlier this session, just not yet triggered into a visible
+bug. Consolidated it to call `best_bets_data.build_mlb_board` (promoted from an internal,
+underscore-prefixed helper to a real shared function) instead of duplicating the pipeline.
+**This is a genuine accuracy improvement, not just fewer lines of code**: Retrospective was
+previously grading the model against UNBLENDED probabilities while the actual board a person
+sees uses the bullpen-blended ones — confirmed directly with a full offline simulation that
+Retrospective's own graded plays now carry `_bullpen_blended: True`, the same real correction
+already shipped to Best Bets and Graded Picks.
+
+**4 new tests in `test_grading.py`** specifically proving the fix works, not just that it doesn't
+crash: `organize_graded_picks`/`grade_accuracy_by_letter` both tested against genuinely
+WNBA-shaped plays (Points/Rebounds markets, not Batter HR/Pitcher Strikeouts), confirming correct
+grading and sorting for a real non-MLB sport's own market names — plus a re-export identity check
+in `test_projections.py` confirming `P.conviction_to_grade` resolves to the exact same object as
+`grading.conviction_to_grade`. 636/636 total passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

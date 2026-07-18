@@ -35,17 +35,28 @@ import sports
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _build_mlb_board(date_str: str, fip_constant: float):
-    """Internal, shared board-building step — slate -> statcast/weather enrichment -> hitter/
-    pitcher projections -> ranked plays -> bullpen-blend re-pricing. Returns (rows, meta, plays).
+def build_mlb_board(date_str: str, fip_constant: float):
+    """The ONE shared MLB board-building pipeline — slate -> statcast/weather enrichment ->
+    hitter/pitcher projections -> ranked plays -> bullpen-blend re-pricing. Returns
+    (rows, meta, plays).
 
-    Cached here (not just at each public function's own level) so load_mlb_best_bets_board and
-    load_mlb_graded_picks_board, when called with the same (date_str, fip_constant) in the same
-    session, share ONE result instead of each re-running build_slate and everything downstream of
-    it — real network cost avoided, not just a style preference. rows is exposed here (not by the
-    original load_mlb_best_bets_board) because Graded Picks needs it directly for compute_one_
-    sided_banner, which reads real per-hitter fields (Opp HR/9) that don't survive into the
-    flattened plays list."""
+    PUBLIC, NOT INTERNAL — a real, deliberate widening of scope, not the original design:
+    Retrospective had its own separate, third copy of this exact pipeline (load_retro_mlb),
+    found during a later cross-sport audit — structurally the same duplication-drift risk that
+    caused the real Command Center/Best Bets conviction mismatch earlier, just not yet triggered
+    into a visible bug. Consolidating this here means Retrospective now grades against the SAME
+    bullpen-blended probabilities actually shown on Best Bets and Graded Picks, not a duplicate,
+    unblended computation — a real accuracy improvement for Retrospective, not just deduplication
+    for its own sake.
+
+    Cached here (not just at each public function's own level) so every caller — Best Bets,
+    Graded Picks, and now Retrospective — when called with the same (date_str, fip_constant) in
+    the same session, share ONE result instead of each re-running build_slate and everything
+    downstream of it — real network cost avoided, not just a style preference. rows is exposed
+    (not just plays) because both Graded Picks (compute_one_sided_banner, which reads real
+    per-hitter fields like "Opp HR/9" that don't survive into the flattened plays list) and
+    Retrospective (pitcher-K miss explanations, which need the pitcher rows themselves) need more
+    than just the ranked plays."""
     import statcast_data as SC
     import weather as WX
 
@@ -105,7 +116,7 @@ def load_mlb_best_bets_board(date_str: str, fip_constant: float):
     Returns (plays, meta) — the RAW ranked plays (no Slot/Time enrichment; Best Bets adds that
     itself for its own table, Command Center doesn't need it at all) and the full per-game
     metadata list, matching what both callers' own pre-existing interfaces already expected."""
-    _, meta, plays = _build_mlb_board(date_str, fip_constant)
+    _, meta, plays = build_mlb_board(date_str, fip_constant)
     return plays, meta
 
 
@@ -117,7 +128,7 @@ def load_mlb_graded_picks_board(date_str: str, fip_constant: float):
     into the flattened plays list.
 
     Returns (plays, meta, rows)."""
-    rows, meta, plays = _build_mlb_board(date_str, fip_constant)
+    rows, meta, plays = build_mlb_board(date_str, fip_constant)
     return plays, meta, rows
 
 
