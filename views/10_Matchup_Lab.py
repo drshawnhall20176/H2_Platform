@@ -292,7 +292,12 @@ with st.expander(f"🧤 {pitcher['Team']}'s catcher framing"):
     else:
         team_cf = SC.team_catcher_framing(cf_lookup, pitcher.get("_team_id"))
         if not team_cf:
-            st.caption(f"No qualified catcher framing data found for {pitcher['Team']} yet.")
+            queried_id = pitcher.get("_team_id")
+            resolved_ids = sorted({c.get("team_id") for c in cf_lookup.values() if c.get("team_id")})
+            st.caption(f"No qualified catcher framing data found for {pitcher['Team']} yet. "
+                      f"(Queried team_id={queried_id!r} against {len(cf_lookup)} cached catchers, "
+                      f"{len(resolved_ids)} distinct resolved team ids on file"
+                      f"{': ' + str(resolved_ids[:10]) if resolved_ids else ''}.)")
         else:
             st.markdown(f"**{pitcher['Team']}'s catching corps** (weighted by each catcher's "
                        f"own called-pitch volume): **{team_cf['strike_rate']:.1%}** shadow-zone "
