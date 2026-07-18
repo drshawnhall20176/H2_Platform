@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 611/611 tests green)
+## What's in this checkpoint (all tested — 623/623 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -2691,6 +2691,56 @@ correctly rejected; and a companion test confirming the SAME HR/9 gap still fire
 both samples are real — proving the fix rejects thin samples specifically, not HR/9 gaps in
 general. Also directly re-ran the exact reported scenario as a standalone confirmation, not just
 inside the test suite. 611/611 total passing.
+
+### New page: Data Health — recommendation #2 built (2026-07-18)
+Second of the platform recommendations, built as promised. Direct motivation: this session found
+four separate real bugs in the catcher-framing refresh pipeline alone, and every single one was
+invisible until someone opened a page and noticed a downstream symptom looked off. No single
+place answered "is the data behind this platform actually current" — this closes that gap.
+
+**Tracks the exact five files that caused this session's real bugs**: statcast_batters.csv,
+catcher_framing.csv (both from refresh-statcast.yml), pitcher_arsenals.csv, hitter_pitch_
+splits.csv, hitter_pitch_type_splits.csv (from refresh-matchups.yml). Both workflows' real cron
+schedules were checked directly, not guessed — both currently daily. Line-history/CLV data lives
+in a database rather than a committed file, a genuinely different mechanism (a live query, not a
+file check); deliberately left out of this v1 rather than forcing it into the same shape.
+
+**A file's own modification time is the freshness signal, deliberately, not a new status log
+added to every refresh script**: these files are committed to git by their own workflow and
+pulled fresh on each deploy — if a refresh silently fails, the file is never rewritten, so its
+mtime honestly stays exactly where it was after the last real success. That's a real signal
+already sitting on disk, reusable without touching any of the refresh scripts themselves.
+
+**`data_freshness.py`** — `check_source`/`check_all_sources`/`overall_status`, pure and fully
+testable (a real unix timestamp is injectable, so tests are deterministic rather than depending
+on wall-clock time). Three real status tiers, not just present/missing: red (file missing,
+unreadable, or below a reasoned minimum row floor — the same "committing anyway would be worse
+than refusing" standard already used inside the refresh scripts, applied here as a read-time
+check), yellow (present and readable, but old enough — 2x its own expected cadence — that its
+refresh has very likely failed silently at least once, not just run a little late), green
+(present, readable, real row count, recently refreshed). The 2x-cadence stale threshold is a
+real, stated design choice: GitHub Actions queue delays are common and real, so a source that's
+merely a few hours late shouldn't alarm the same way a genuinely stale one should.
+
+**New page `views/17_Data_Health.py`**, gated owner-only (matching Bet Log/Edge Board/Matchup
+Lab/Track Record — this is an operational tool, not user-facing betting content, and a public/
+Discord audience has no use for "is our CSV refresh pipeline healthy"). A compact pointer was
+added to Command Center too, following the same pattern established for Graded Picks — but this
+one is conditionally shown only for the owner audience specifically (checked directly via
+`st.secrets`, since Command Center doesn't otherwise know the audience), so a public viewer never
+sees a link to a page they can't open.
+
+**14 new tests plus two full honest end-to-end runs**: 12 for `data_freshness.py` (missing file,
+healthy file, below-row-floor, unreadable content never crashing or reporting green, genuinely
+stale correctly yellow, a real boundary check just under the stale threshold staying green, a
+merely-late refresh NOT falsely flagged, multi-source ordering, all three `overall_status`
+combinations, and a direct confirmation that `TRACKED_SOURCES`' paths match the real, current
+constants in each module rather than stale hardcoded copies) plus the `owner_only_titles`
+regression test updated for the new page. Ran the real function against this actual sandbox's
+own `data/` directory as an honest test — correctly reported red across the board (no real
+deployed data exists here), even catching a stray leftover test artifact from earlier session
+work as a real below-floor row-count failure — then separately confirmed a simulated healthy
+deployment correctly reports all-green. 623/623 total passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
