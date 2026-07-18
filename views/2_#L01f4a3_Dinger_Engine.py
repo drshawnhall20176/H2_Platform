@@ -58,6 +58,13 @@ def load_bullpen_aggregate(team_id, exclude_pid):
     return E.get_bullpen_aggregate_stat(team_id, exclude_pid=exclude_pid)
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def load_bullpen_handedness(team_id, exclude_pid):
+    if not team_id:
+        return {"L": 0, "R": 0, "total": 0, "pct_L": 0.0, "pct_R": 0.0}
+    return E.get_bullpen_handedness_mix(team_id, exclude_pid=exclude_pid)
+
+
 eastern = pytz.timezone("US/Eastern")
 default_date = datetime.now(eastern)
  
@@ -274,9 +281,42 @@ for m in meta_sorted:
                                           help=f"Show {m['away_name']} hitters vs {m['home_name']}'s "
                                               "bullpen instead of the confirmed starter.")
 
-        t_away, t_home = st.tabs([f"✈️ {m['away_name']} bats", f"🏠 {m['home_name']} bats"])
         game_df = df[df["GameLabel"] == m["label"]]
         sort_col = "HR%" if "HR%" in game_df.columns else "PowerIndex"
+
+        # --- Lineup platoon map ---------------------------------------------
+        # A quick "lineup construction" read before the detailed stat tables below — how many
+        # hitters in EACH lineup hold the platoon edge against tonight's confirmed starter.
+        # Reuses the Hand/Advantage columns every hitter row already has (mlb_engine.
+        # platoon_advantage), zero extra fetches — a surfacing exercise, not new modeling.
+        # Bullpen handedness mix is a genuinely separate signal (a bullpen has mixed hands, no
+        # single "advantage" the way one starter has) and only fetched when that side's bullpen
+        # toggle is ALREADY on, to keep this section at zero extra cost otherwise.
+        st.markdown("**🔄 Platoon map**")
+        pc1, pc2 = st.columns(2)
+        for col, lineup_team, opp_sp, bullpen_on, bullpen_team_id, bullpen_exclude_pid in (
+            (pc1, m["away_name"], hp, home_bullpen_on, m.get("home_id"), hp.id),
+            (pc2, m["home_name"], ap, away_bullpen_on, m.get("away_id"), ap.id),
+        ):
+            with col:
+                side_df = game_df[game_df["Team"] == lineup_team]
+                if "Advantage" in side_df.columns and len(side_df):
+                    adv_names = side_df[side_df["Advantage"] == "Advantage"]["Hitter"].tolist()
+                    st.markdown(f"**{lineup_team}** vs {opp_sp.hand}HP {opp_sp.name}: "
+                              f"{len(adv_names)} of {len(side_df)} hitters have the platoon edge")
+                    if adv_names:
+                        st.caption("✅ " + ", ".join(adv_names))
+                else:
+                    st.caption("No platoon data available for this lineup yet.")
+                if bullpen_on:
+                    mix = load_bullpen_handedness(bullpen_team_id, bullpen_exclude_pid)
+                    if mix["total"]:
+                        opp_name = m["home_name"] if lineup_team == m["away_name"] else m["away_name"]
+                        st.caption(f"🎯 If it gets to the pen: {opp_name}'s bullpen is "
+                                  f"{mix['pct_R']:.0%} RHP / {mix['pct_L']:.0%} LHP "
+                                  f"({mix['R']}R / {mix['L']}L, {mix['total']} active arms)")
+
+        t_away, t_home = st.tabs([f"✈️ {m['away_name']} bats", f"🏠 {m['home_name']} bats"])
 
         def _bullpen_sub(rows_source: pd.DataFrame, opp_team: str, opp_team_id, exclude_pid) -> pd.DataFrame:
             """Recompute opp_team's hitter rows vs opp_team's OWN opponent's bullpen, or fall back
