@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 567/567 tests green)
+## What's in this checkpoint (all tested — 582/582 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -2408,6 +2408,76 @@ Verified with a full offline simulation of the real cross-referencing logic, inc
 deliberately unmatched slot (confirming the honest "—" fallback) and a hitter from the wrong team
 mixed into the input (confirming the team filter correctly excludes him). 567/567 total passing
 (pure view-layer logic — no new engine functions needed for this one, everything reused).
+
+### Best Bets: bullpen-blended hitter probabilities, built from a real confirmed finding (2026-07-18)
+Shawn asked to validate that Best Bets reflects this session's work. Rather than guess, went
+through tonight's actual board against Command Center, Pitching Lab's bullpen fatigue, and Dinger
+Engine's own bullpen toggle — and found a real, material, QUANTIFIED issue: the slate's single
+highest-conviction play (Munetaka Murakami, Batter HR Over 0.5, 4.25× conviction, 47% model
+probability) was priced entirely off a starter with a 7.64 season ERA, using his rate for the
+hitter's ENTIRE projected plate-appearance count. Dinger Engine's own bullpen toggle showed his
+real HR% drops to 27% against the actual bullpen. Properly blending by his real ~3.0-PA-vs-
+starter / ~1.55-PA-vs-bullpen exposure split (hand-verified with real math, not eyeballed) gave
+41%, not 47% — a 6-point, ~15% relative overstatement on the single most prominent play of the
+night. That concrete finding, not a hypothetical, is what this was built to fix.
+
+**`projections.blend_hitter_probs_with_bullpen(row, bullpen_stat, ...)`** — the core correction.
+Runs `simulate_batter` TWICE with the SAME rng (once for the hitter's real vs-starter PA against
+the starter's own rates, once for his real vs-bullpen PA against the bullpen's aggregate rates)
+and SUMS each simulated trial's outcomes across both phases before computing HR%/Hit%/TB1.5%/SO
+Prob. Deliberately NOT a linear blend of the two probabilities — a real, stated distinction: P(at
+least one HR across two phases) isn't a weighted average of each phase's own P(≥1 HR), since the
+math for a ">=1 occurrence" outcome is genuinely non-linear. Returns None (never fabricates a
+blend) when there's no real bullpen exposure to begin with, the row or starter can't be
+projected, or the bullpen sample is too thin — a real bug caught while testing: `batter_pa_probs`
+itself accepts a `None` opponent-rates input gracefully (a silent neutral fallback), so checking
+its OUTPUT for None would never actually catch a too-thin bullpen sample; needed an EXPLICIT
+check on the rates themselves before that silent fallback could kick in unnoticed.
+
+**`projections.apply_bullpen_blend_to_top_plays(plays, rows_by_pid, get_bullpen_stat_fn, ...,
+top_n=30)`** — the real cost-scoping layer. Blending every hitter-market play on a full slate
+would mean fetching a bullpen aggregate for every opposing team on the board — potentially 250+
+real network calls just to load the page. Scoped to the top 30 hitter-market candidates by
+CURRENT conviction instead — re-pricing a play near the bottom of a 1,274-play list can't change
+what actually gets surfaced as a top lean, so there's no real value in paying that cost for it.
+Recomputes confidence in the SAME side a play is already on (a deliberate choice — a play like
+"Batter HR Over 0.5" is already fixed by the time this runs; this isn't meant to flip sides, just
+to correct how confident the model should be in the side already chosen). `get_bullpen_stat_fn`
+is dependency-injected, keeping this function itself network-free and testable with a plain fake
+— the real caller in Best Bets' own view passes a Streamlit-cached wrapper, so repeated calls for
+the same opponent across multiple candidate hitters are free, not refetched per hitter.
+
+**Two new hitter-row fields threaded through `mlb_engine._hitter_row`**, both additive and
+backward compatible: `_opp_id` (the opposing TEAM's numeric id, needed to look up their bullpen
+at all) and `_opp_pid` (the opposing STARTER's own player id, needed to EXCLUDE him from the
+bullpen aggregate — without it, his own stats would be double-counted: once directly for the
+vs-SP phase, and again folded into the vs-Pen aggregate alongside every other pitcher on the
+roster).
+
+**Wired into Best Bets' own view** with a visible 🔄 marker on any blended play's name (no new
+column needed) and an honest caption explaining the scope and the correction, not just a silently
+different number. The pre-blend conviction is preserved on the play itself, matching this
+platform's own "show what actually drove it" transparency standard already promised by the Bet
+Diagnostics inspector — a blended play's "Why" text states its own real exposure split directly,
+not just a changed number with no explanation.
+
+**19 new tests total, two real bugs caught in the process, not just written and assumed
+correct**: 7 for `blend_hitter_probs_with_bullpen` (a realistic reconstruction of the real
+reported scenario confirming the correction moves the right direction; the no-exposure, thin-
+starter-sample, and thin-bullpen-sample None cases; the vs-SP/vs-Pen split summing back to
+exp_pa; determinism with a fixed seed) — writing these caught a genuine test-fixture bug (`{}` is
+falsy in Python, so `opp_stat={}` was silently getting replaced by the fixture's own `or
+dict(...)` fallback, meaning the intended test never actually ran what it claimed to) and a real
+gap in the function's own None-handling (the silent-neutral-fallback issue described above,
+fixed before shipping, not after). 8 for `apply_bullpen_blend_to_top_plays` (updates the top
+candidate while preserving its side, respects `top_n` with a verified call-count check — not just
+asserted — never touches pitcher markets, leaves a play untouched for every real "can't blend"
+reason individually, and correctly re-sorts when a blend changes the ranking). 1 for `_hitter_row`
+confirming `_opp_id` threads through correctly. Plus a full end-to-end simulation reconstructing
+the real Murakami/Bieber scenario through the complete pipeline — including confirming
+`exclude_pid` is correctly passed through to exclude the starter from his own bullpen's
+aggregate — producing the same direction and comparable magnitude to the real, reported finding.
+582/582 total passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

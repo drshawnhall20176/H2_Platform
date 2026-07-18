@@ -80,12 +80,13 @@ def test_hitter_row_assembly():
         "stat": dict(homeRuns=30, hits=160, totalBases=300, avg="0.280", obp="0.360",
                      slg="0.520", ops="0.880", strikeOuts=90, plateAppearances=650),
     }
-    row = E._hitter_row(raw, opp, "Guardians", "CLE @ DET (Game 1)", projected=False)
+    row = E._hitter_row(raw, opp, "Guardians", "CLE @ DET (Game 1)", projected=False, opp_team_id=116)
     assert row["ISO"] == 0.24                 # .520 - .280
     assert round(row["K%"], 3) == 0.138       # 90 / 650
     assert row["Advantage"] == "Advantage"    # switch vs RHP
     assert row["Lineup"] == "Confirmed"       # projected=False
     assert row["Opp Pitcher"] == "Ace"
+    assert row["_opp_id"] == 116               # the opposing TEAM's id, not the pitcher's own player id
 
 
 def test_hitter_row_missing_pa_no_crash():

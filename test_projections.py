@@ -417,6 +417,220 @@ def test_add_starter_exposure_context_skips_when_not_a_real_starter():
     assert "vs SP" not in out[0]   # project_pitcher's own starter gate correctly returns None here
 
 
+# ----------------------------------------------------------------- blend_hitter_probs_with_bullpen
+def _blendable_row(lineup_idx=0, exp_pa=4.25, opp_stat=None, weather_hr=1.0):
+    return {
+        "Hitter": "Test Slugger", "_pid": 1, "_stat": _slugger(), "_venue_id": None,
+        "_opp_stat": opp_stat or dict(gamesStarted=20, inningsPitched="120.0", battersFaced=480,
+                                     strikeOuts=140, baseOnBalls=35, homeRuns=8, hits=95),
+        "_split_stat": None, "_exp_pa": exp_pa, "_weather_hr": weather_hr, "_lineup_idx": lineup_idx,
+    }
+
+
+def test_blend_reproduces_real_slate_direction_ace_starter_weak_pen():
+    # A rough reproduction of the real, reported scenario: a genuinely BAD starter (high HR/K
+    # allowed) with a short projected outing, and a MUCH BETTER bullpen. The blended HR%
+    # should come out LOWER than a starter-only read would show, not higher and not identical —
+    # confirming the correction moves in the right direction on a case shaped like the real one.
+    bad_starter_stat = dict(gamesStarted=15, inningsPitched="70.0", battersFaced=380,
+                            strikeOuts=55, baseOnBalls=40, homeRuns=22, hits=110)  # ~7+ ERA shape
+    good_pen_stat = dict(strikeOuts=300, baseOnBalls=90, hitByPitch=10, homeRuns=35,
+                         battersFaced=1800, hits=380, atBats=1600, earnedRuns=180,
+                         inningsPitched="450.0")  # a much better run-prevention shape
+    row = _blendable_row(lineup_idx=0, exp_pa=4.55, opp_stat=bad_starter_stat)
+
+    starter_only = P.enrich_hitter_rows([dict(row)], seed=7)[0]
+    blended = P.blend_hitter_probs_with_bullpen(row, good_pen_stat, seed=7)
+
+    assert blended is not None
+    assert blended["HR%"] < starter_only["HR%"]
+    print(f"✓ blend_hitter_probs_with_bullpen correctly lowers HR% ({starter_only['HR%']:.3f} -> "
+         f"{blended['HR%']:.3f}) when the real bullpen is meaningfully better than a bad starter, "
+         f"matching the direction of the real reported case")
+
+
+def test_blend_returns_none_when_no_bullpen_exposure():
+    # A leadoff hitter with a LOW exp_pa (3.0, artificially trimmed for this test) against a
+    # starter genuinely projected to cover the whole game (exp_bf=30, well past 3 full trips
+    # through a 9-batter lineup) leaves zero real bullpen exposure — hand-verified via
+    # hitter_starter_exposures directly: exposures_to_starter = floor((30-0-1)/9)+1 = 4, capped
+    # at min(4, 3.0) = 3.0, so vs_pen = 3.0 - 3.0 = 0. Nothing to blend, starter-only is correct.
+    workhorse_stat = dict(gamesStarted=30, inningsPitched="220.0", battersFaced=900,
+                          strikeOuts=200, baseOnBalls=50, homeRuns=15, hits=180)
+    row = _blendable_row(lineup_idx=0, exp_pa=3.0, opp_stat=workhorse_stat)
+    pen_stat = dict(strikeOuts=300, baseOnBalls=90, hitByPitch=10, homeRuns=35,
+                    battersFaced=1800, hits=380, atBats=1600, earnedRuns=180, inningsPitched="450.0")
+    result = P.blend_hitter_probs_with_bullpen(row, pen_stat, seed=1)
+    assert result is None
+    print("✓ blend_hitter_probs_with_bullpen correctly returns None when there's no real bullpen exposure to blend")
+
+
+def test_blend_none_when_row_not_projectable():
+    row = _blendable_row()
+    row["_stat"] = None   # can't project this hitter at all
+    pen_stat = dict(strikeOuts=300, baseOnBalls=90, hitByPitch=10, homeRuns=35,
+                    battersFaced=1800, hits=380, atBats=1600, earnedRuns=180, inningsPitched="450.0")
+    assert P.blend_hitter_probs_with_bullpen(row, pen_stat, seed=1) is None
+
+
+def test_blend_none_when_starter_not_projectable():
+    # {"gamesStarted": 1} — real dict, so it survives the fixture's own `opp_stat or dict(...)`
+    # fallback (an empty {} would be falsy and get silently replaced, a real mistake caught while
+    # writing this test) — but still genuinely fails project_pitcher's own gs>=3 starter gate.
+    row = _blendable_row(opp_stat={"gamesStarted": 1, "inningsPitched": "4.0", "battersFaced": 18})
+    pen_stat = dict(strikeOuts=300, baseOnBalls=90, hitByPitch=10, homeRuns=35,
+                    battersFaced=1800, hits=380, atBats=1600, earnedRuns=180, inningsPitched="450.0")
+    assert P.blend_hitter_probs_with_bullpen(row, pen_stat, seed=1) is None
+    print("✓ blend_hitter_probs_with_bullpen correctly returns None when the opposing starter can't be projected")
+
+
+def test_blend_none_when_bullpen_stat_too_thin():
+    row = _blendable_row()
+    thin_pen_stat = dict(strikeOuts=5, baseOnBalls=2, homeRuns=1, battersFaced=20, hits=6)  # < 40 BF floor
+    assert P.blend_hitter_probs_with_bullpen(row, thin_pen_stat, seed=1) is None
+    print("✓ blend_hitter_probs_with_bullpen correctly returns None for a bullpen sample too thin to trust")
+
+
+def test_blend_vs_sp_vs_pen_sum_to_exp_pa():
+    row = _blendable_row(lineup_idx=0, exp_pa=4.55)
+    pen_stat = dict(strikeOuts=300, baseOnBalls=90, hitByPitch=10, homeRuns=35,
+                    battersFaced=1800, hits=380, atBats=1600, earnedRuns=180, inningsPitched="450.0")
+    result = P.blend_hitter_probs_with_bullpen(row, pen_stat, seed=1)
+    assert result is not None
+    assert round(result["vs SP"] + result["vs Pen"], 2) == 4.55
+
+
+def test_blend_is_deterministic_with_same_seed():
+    row = _blendable_row()
+    pen_stat = dict(strikeOuts=300, baseOnBalls=90, hitByPitch=10, homeRuns=35,
+                    battersFaced=1800, hits=380, atBats=1600, earnedRuns=180, inningsPitched="450.0")
+    r1 = P.blend_hitter_probs_with_bullpen(row, pen_stat, seed=42)
+    r2 = P.blend_hitter_probs_with_bullpen(row, pen_stat, seed=42)
+    assert r1 == r2
+
+
+# ----------------------------------------------------------------- apply_bullpen_blend_to_top_plays
+def _hr_play(player_id, conviction, side="Over"):
+    return {"Player": f"P{player_id}", "PlayerId": player_id, "Market": "Batter HR",
+           "Side": side, "Line": 0.5, "ModelProb": 0.30, "Fair": -100,
+           "Conviction": conviction, "Why": "some reason"}
+
+
+def _pitcher_play(conviction):
+    return {"Player": "Some Pitcher", "PlayerId": 999, "Market": "Pitcher Strikeouts",
+           "Side": "Over", "Line": 5.5, "ModelProb": 0.55, "Fair": -110,
+           "Conviction": conviction, "Why": "projects X K"}
+
+
+def _bad_starter_row(pid, opp_id, lineup_idx=0):
+    r = _blendable_row(lineup_idx=lineup_idx, exp_pa=4.55,
+                       opp_stat=dict(gamesStarted=15, inningsPitched="70.0", battersFaced=380,
+                                    strikeOuts=55, baseOnBalls=40, homeRuns=22, hits=110))
+    r["_pid"] = pid
+    r["_opp_id"] = opp_id
+    return r
+
+
+_GOOD_PEN_STAT = dict(strikeOuts=300, baseOnBalls=90, hitByPitch=10, homeRuns=35,
+                      battersFaced=1800, hits=380, atBats=1600, earnedRuns=180, inningsPitched="450.0")
+
+
+def test_apply_blend_updates_top_candidate_and_preserves_side():
+    play = _hr_play(1, conviction=4.25)
+    row = _bad_starter_row(1, opp_id=114)
+    calls = []
+
+    def fake_get_bullpen(team_id, exclude_pid):
+        calls.append(team_id)
+        return _GOOD_PEN_STAT
+
+    out = P.apply_bullpen_blend_to_top_plays([play], {1: row}, fake_get_bullpen, seed=7)
+    assert out[0]["_bullpen_blended"] is True
+    assert out[0]["_pre_blend_conviction"] == 4.25
+    assert out[0]["Conviction"] != 4.25   # actually recomputed, not left untouched
+    assert out[0]["Side"] == "Over"        # side preserved, not re-derived
+    assert "bullpen-blended" in out[0]["Why"]
+    assert calls == [114]
+    print("✓ apply_bullpen_blend_to_top_plays correctly updates a top candidate and preserves its existing side")
+
+
+def test_apply_blend_respects_top_n_limit():
+    plays = [_hr_play(i, conviction=10 - i) for i in range(5)]   # 5 plays, descending conviction
+    rows = {i: _bad_starter_row(i, opp_id=100 + i) for i in range(5)}
+    calls = []
+
+    def fake_get_bullpen(team_id, exclude_pid):
+        calls.append(team_id)
+        return _GOOD_PEN_STAT
+
+    P.apply_bullpen_blend_to_top_plays(plays, rows, fake_get_bullpen, seed=1, top_n=2)
+    blended = [p for p in plays if p.get("_bullpen_blended")]
+    assert len(blended) == 2   # only the top 2 by conviction got touched
+    assert set(calls) == {100, 101}   # only the top 2 hitters' opponents were ever looked up
+    print("✓ apply_bullpen_blend_to_top_plays respects top_n, never fetching bullpen data beyond it")
+
+
+def test_apply_blend_never_touches_non_hitter_markets():
+    plays = [_pitcher_play(conviction=5.0)]
+    out = P.apply_bullpen_blend_to_top_plays(plays, {}, lambda tid, ex: _GOOD_PEN_STAT, seed=1)
+    assert "_bullpen_blended" not in out[0]
+    assert out[0]["Conviction"] == 5.0
+    print("✓ apply_bullpen_blend_to_top_plays never touches pitcher-market plays")
+
+
+def test_apply_blend_leaves_play_unchanged_when_no_matching_row():
+    play = _hr_play(1, conviction=4.25)
+    out = P.apply_bullpen_blend_to_top_plays([play], {}, lambda tid, ex: _GOOD_PEN_STAT, seed=1)
+    assert "_bullpen_blended" not in out[0]
+    assert out[0]["Conviction"] == 4.25
+
+
+def test_apply_blend_leaves_play_unchanged_when_no_opp_id():
+    play = _hr_play(1, conviction=4.25)
+    row = _bad_starter_row(1, opp_id=None)
+    out = P.apply_bullpen_blend_to_top_plays([play], {1: row}, lambda tid, ex: _GOOD_PEN_STAT, seed=1)
+    assert "_bullpen_blended" not in out[0]
+
+
+def test_apply_blend_leaves_play_unchanged_when_bullpen_lookup_returns_none():
+    play = _hr_play(1, conviction=4.25)
+    row = _bad_starter_row(1, opp_id=114)
+    out = P.apply_bullpen_blend_to_top_plays([play], {1: row}, lambda tid, ex: None, seed=1)
+    assert "_bullpen_blended" not in out[0]
+    assert out[0]["Conviction"] == 4.25
+    print("✓ apply_bullpen_blend_to_top_plays leaves a play untouched when the bullpen lookup itself fails")
+
+
+def test_apply_blend_leaves_play_unchanged_when_no_real_exposure():
+    # A hitter with zero real bullpen exposure (the common case) — blend_hitter_probs_with_
+    # bullpen itself returns None, and this must be handled the same as any other None case.
+    row = _blendable_row(lineup_idx=0, exp_pa=3.0,
+                         opp_stat=dict(gamesStarted=30, inningsPitched="220.0", battersFaced=900,
+                                      strikeOuts=200, baseOnBalls=50, homeRuns=15, hits=180))
+    row["_pid"] = 1
+    row["_opp_id"] = 114
+    play = _hr_play(1, conviction=4.25)
+    out = P.apply_bullpen_blend_to_top_plays([play], {1: row}, lambda tid, ex: _GOOD_PEN_STAT, seed=1)
+    assert "_bullpen_blended" not in out[0]
+    assert out[0]["Conviction"] == 4.25
+    print("✓ apply_bullpen_blend_to_top_plays correctly leaves the common no-exposure case untouched")
+
+
+def test_apply_blend_resorts_by_updated_conviction():
+    # Play A starts with LOWER conviction but gets no real blend adjustment (no bullpen data
+    # available for its opponent); Play B starts with HIGHER conviction but its blend correctly
+    # lowers it. After blending, A should end up ranked ABOVE B.
+    play_a = _hr_play(1, conviction=3.0)
+    play_b = _hr_play(2, conviction=5.0)
+    row_a = _bad_starter_row(1, opp_id=None)   # no opp_id -> never touched, stays at 3.0
+    row_b = _bad_starter_row(2, opp_id=114)    # gets blended down
+
+    out = P.apply_bullpen_blend_to_top_plays([play_a, play_b], {1: row_a, 2: row_b},
+                                             lambda tid, ex: _GOOD_PEN_STAT, seed=7)
+    assert out[0]["PlayerId"] == 1   # A is now ranked first after B's conviction dropped
+    print("✓ apply_bullpen_blend_to_top_plays correctly re-sorts when blending changes the ranking")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

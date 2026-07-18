@@ -336,10 +336,12 @@ def build_slate(date_str: str, fip_constant: float = FIP_CONSTANT_DEFAULT,
         sides = []
         for team_key, opp_pm in (("away", home_pm), ("home", away_pm)):
             pids, projected = _team_starters(game, team_key, box)
+            opp_key = "home" if team_key == "away" else "away"
             sides.append({
                 "team_key": team_key,
                 "team_name": game[f"{team_key}_name"],
                 "opp_pm": opp_pm,
+                "opp_team_id": game.get(f"{opp_key}_id"),
                 "pids": pids,
                 "projected": projected,
             })
@@ -378,7 +380,8 @@ def build_slate(date_str: str, fip_constant: float = FIP_CONSTANT_DEFAULT,
                 if not raw:
                     continue
                 rows.append(_hitter_row(raw, opp, side["team_name"], s["label"],
-                                        side["projected"], idx, s["game"].get("venue_id")))
+                                        side["projected"], idx, s["game"].get("venue_id"),
+                                        side.get("opp_team_id")))
     return rows, meta
  
  
@@ -430,7 +433,7 @@ def build_pitching_slate(date_str: str, fip_constant: float = FIP_CONSTANT_DEFAU
  
 def _hitter_row(raw: Dict, opp: PitcherMetrics, team_name: str,
                 game_label: str, projected: bool, lineup_idx: int = 0,
-                venue_id: int = None) -> Dict:
+                venue_id: int = None, opp_team_id: int = None) -> Dict:
     stat = raw["stat"]
     avg = safe_float(stat.get("avg"))
     slg = safe_float(stat.get("slg"))
@@ -467,6 +470,15 @@ def _hitter_row(raw: Dict, opp: PitcherMetrics, team_name: str,
         "_exp_pa": exp_pa,
         "_venue_id": venue_id,
         "_opp_stat": opp.stat,                       # opposing pitcher's season line (matchup)
+        "_opp_pid": opp.id,                           # opposing STARTER's own player id — lets
+                                                       # a bullpen-aggregate lookup exclude him,
+                                                       # avoiding double-counting his own stats in
+                                                       # both the vs-SP and vs-Pen blend phases
+        "_opp_id": opp_team_id,                       # opposing TEAM's numeric id (not the
+                                                       # opposing pitcher's own player id) — for
+                                                       # bullpen-aggregate lookups (Best Bets'
+                                                       # bullpen-blended read, Dinger Engine's own
+                                                       # toggle already had this via a separate path)
         "_split_stat": (raw.get("vs_l") if opp.hand == "L" else raw.get("vs_r")),  # platoon split
         "_lineup_idx": lineup_idx,                    # batting order spot (0=leadoff) — connects
                                                        # this hitter to how many times they'd face

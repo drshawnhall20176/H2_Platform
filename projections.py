@@ -25,7 +25,7 @@ from __future__ import annotations
 import math
 import re
 import unicodedata
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
  
 import numpy as np
  
@@ -723,6 +723,94 @@ def add_starter_exposure_context(rows: List[Dict]) -> List[Dict]:
     return rows
  
  
+def blend_hitter_probs_with_bullpen(row: Dict, bullpen_stat: Dict, sims: int = DEFAULT_SIMS,
+                                    seed: Optional[int] = None, statcast: Optional[Dict] = None,
+                                    statcast_k: Optional[float] = None) -> Optional[Dict]:
+    """Recompute a hitter's HR%/Hit%/TB1.5%/SO Prob as a BLEND of two real phases of his night —
+    his own actual vs-starter and vs-bullpen plate-appearance exposure (hitter_starter_exposures),
+    each simulated against its OWN real opposing pitching quality (the starter's own stat line
+    for the vs-SP phase, bullpen_stat for the vs-Pen phase) — instead of the platform's own
+    long-standing default of applying the starter's rate to ALL of a hitter's projected PA, which
+    silently overstates (or understates) his real probability whenever the starter is projected
+    for a short outing.
+
+    WHY THIS EXISTS, CONFIRMED WITH REAL NUMBERS FROM A REAL SLATE, NOT A HYPOTHETICAL: checked
+    directly by Shawn against Dinger Engine's own bullpen-toggle output — a hitter whose
+    starter-only HR% showed 47% (driven by a starter with a 7.64 season ERA, a legitimately
+    disastrous line) dropped to a properly-blended ~41% once his real ~1/3 exposure to a
+    materially better bullpen was accounted for — a 6-point, ~15% relative overstatement on what
+    was the single highest-conviction play on the whole slate that night. This function is that
+    exact correction, generalized.
+
+    METHOD: runs simulate_batter TWICE with the SAME rng — once for his vs-starter PA using the
+    starter's own opp_allowed rates, once for his vs-bullpen PA using bullpen_stat's rates — then
+    SUMS each simulated trial's outcomes across both phases before computing HR%/Hit%/TB1.5%/SO
+    Prob. This is the statistically correct way to combine two phases with different PA counts
+    and different matchup quality — NOT a linear blend of the two probabilities themselves, which
+    would be a real approximation error for a ">=1 occurrence" outcome like HR% (the math isn't
+    linear: P(at least one HR across two phases) != a weighted average of each phase's own P(>=1
+    HR)).
+
+    Returns None (not a fabricated blend) if: the row can't be projected at all (missing _stat/
+    _venue_id/_opp_stat/etc — same gate enrich_hitter_rows itself uses), the starter can't be
+    projected (project_pitcher's own gate), there's no real bullpen exposure to blend in the
+    first place (vs_pen <= 0 — the starter-only read is ALREADY correct for that hitter, nothing
+    to correct), or bullpen_stat itself is too thin a sample to trust (pitcher_allowed_rates'
+    own >=40 batters-faced floor — checked EXPLICITLY here, not left to batter_pa_probs' own
+    silent "no adjustment" fallback for a None opp_allowed, which would otherwise produce a
+    blend that quietly dropped the bullpen adjustment entirely rather than honestly refusing).
+    Callers should keep the existing enrich_hitter_rows output when this returns None, not treat
+    a None as an error."""
+    stat = row.get("_stat")
+    lineup_idx = row.get("_lineup_idx")
+    exp_pa = row.get("_exp_pa")
+    if not stat or lineup_idx is None or exp_pa is None:
+        return None
+    starter_proj = project_pitcher(row.get("_opp_stat"))
+    if not starter_proj:
+        return None
+    exposures = hitter_starter_exposures(lineup_idx, starter_proj["exp_bf"], exp_pa)
+    vs_sp_pa, vs_pen_pa = exposures["vs_starter"], exposures["vs_bullpen"]
+    if vs_pen_pa <= 0:
+        return None   # no real bullpen exposure projected — the starter-only read is already correct
+
+    park = PARK_FACTORS.get(row.get("_venue_id"), NEUTRAL_PARK)
+    xhr = xhr_from_statcast(row.get("_pid"), statcast, statcast_k)
+    weather_hr = row.get("_weather_hr", 1.0)
+    split_stat = row.get("_split_stat")
+
+    opp_sp_rates = pitcher_allowed_rates(row.get("_opp_stat"))
+    opp_pen_rates = pitcher_allowed_rates(bullpen_stat)
+    if opp_sp_rates is None or opp_pen_rates is None:
+        # batter_pa_probs itself accepts opp_allowed=None gracefully (a silent, neutral,
+        # unadjusted fallback) — checking ITS output for None would never actually catch a
+        # too-thin sample here, since it would still happily return A probability, just one that
+        # silently dropped the bullpen adjustment entirely. That's exactly the wrong failure mode
+        # for a function whose whole purpose is providing a real bullpen-aware read — an explicit
+        # check here, not a downstream one, is what actually prevents a silently-neutral "blend."
+        return None
+    probs_sp = batter_pa_probs(stat, park, opp_sp_rates, split_stat, xhr, weather_hr)
+    probs_pen = batter_pa_probs(stat, park, opp_pen_rates, split_stat, xhr, weather_hr)
+    if probs_sp is None or probs_pen is None:
+        return None
+
+    rng = np.random.default_rng(seed)
+    sim_sp = simulate_batter(probs_sp, vs_sp_pa, sims, rng)
+    sim_pen = simulate_batter(probs_pen, vs_pen_pa, sims, rng)
+    combined_hr = sim_sp["hr"] + sim_pen["hr"]
+    combined_hits = sim_sp["hits"] + sim_pen["hits"]
+    combined_tb = sim_sp["tb"] + sim_pen["tb"]
+    combined_k = sim_sp["k"] + sim_pen["k"]
+
+    return {
+        "HR%": float(np.mean(combined_hr >= 1)),
+        "Hit%": float(np.mean(combined_hits >= 1)),
+        "TB1.5%": float(np.mean(combined_tb > 1.5)),
+        "SO Prob": float(np.mean(combined_k >= 1)),
+        "vs SP": round(vs_sp_pa, 2), "vs Pen": round(vs_pen_pa, 2),
+    }
+
+
 def build_pitcher_projection_rows(rows: List[Dict], meta: List[Dict],
                                   sims: int = DEFAULT_SIMS, seed: Optional[int] = None) -> List[Dict]:
     """Matchup-aware starter projections for the Pitching Lab: expected IP/K/BB/outs plus
@@ -914,6 +1002,101 @@ def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict]) -> List[D
     return plays
  
  
+BULLPEN_BLEND_MARKET_COLS = {
+    "Batter HR": "HR%", "Batter Total Bases": "TB1.5%",
+    "Batter Total Hits": "Hit%", "Batter Strikeouts": "SO Prob",
+}
+
+
+def apply_bullpen_blend_to_top_plays(plays: List[Dict], rows_by_pid: Dict[Any, Dict],
+                                     get_bullpen_stat_fn, statcast: Optional[Dict] = None,
+                                     statcast_k: Optional[float] = None, seed: Optional[int] = None,
+                                     top_n: int = 30) -> List[Dict]:
+    """Re-price the top N hitter-market plays using their real vs-starter/vs-bullpen exposure,
+    instead of leaving Best Bets' whole board priced off the starter's rate for every projected
+    PA — the fix for a real, confirmed issue: a starter-only read on a real slate showed 47% for
+    a market's single highest-conviction play, when properly blending the ~1/3 of that hitter's
+    plate appearances that actually fall to a materially better bullpen brought it to ~41%, a
+    6-point overstatement on the top play of the night.
+
+    SCOPED TO THE TOP N CANDIDATES, NOT THE WHOLE SLATE — a real, deliberate cost decision, not
+    a shortcut: blending every hitter-market play on a full slate would mean fetching a bullpen
+    aggregate (itself several real calls) for every opposing team on the board, potentially 250+
+    calls just to load the page. Only the plays that could plausibly rank at the top are worth
+    that cost — re-pricing a play sitting at the bottom of a 1,274-play list can't change
+    anything about what actually gets surfaced as a top lean.
+
+    DOES NOT RE-DERIVE WHICH SIDE A PLAY IS ON — a real, deliberate design choice: the play
+    (e.g. "Batter HR Over 0.5") is already fixed by the time this runs. This recomputes how
+    confident the model is in that SAME side, using the blended probability, rather than letting
+    a large swing flip a play to the opposite side of its own posted line, which would be a
+    different, more disruptive kind of change than "how sure are we," not what this function is
+    for.
+
+    get_bullpen_stat_fn(team_id, exclude_pid) -> Optional[Dict] is DEPENDENCY-INJECTED, not
+    called directly from here — keeps this function itself network-free and testable with a
+    plain fake, the same "pure, testable, network calls injected by the caller" discipline this
+    file already follows elsewhere. exclude_pid is the OPPOSING STARTER's own player id (from the
+    row's own "_opp_pid"), passed through so the real implementation can exclude him from the
+    bullpen aggregate — without it, his own stats would be double-counted, once directly for the
+    vs-SP phase and again folded into the vs-Pen aggregate alongside every other pitcher on the
+    roster. The real caller (Best Bets' own view) passes a Streamlit-cached wrapper around
+    mlb_engine.get_bullpen_aggregate_stat, so repeated calls for the same opponent across
+    multiple candidate hitters are free, not refetched per hitter.
+
+    Plays that can't be blended (no matching row, no opponent id, bullpen data unavailable, or
+    blend_hitter_probs_with_bullpen's own None cases — including "no real bullpen exposure to
+    blend," the common, expected case for most plays) are left exactly as build_best_bets
+    produced them — never silently dropped, never given a fabricated adjustment. Blended plays
+    get a "_bullpen_blended": True marker and their pre-blend conviction preserved under
+    "_pre_blend_conviction", so the UI can show what changed, not just the new number alone —
+    the same "show what actually drove it" transparency this platform's Bet Diagnostics inspector
+    already promises for the rest of the board.
+
+    Returns the SAME plays list, mutated in place and re-sorted by the (possibly updated)
+    Conviction — blending a top play can change its rank relative to plays that weren't blended."""
+    candidates = sorted([p for p in plays if p.get("Market") in BULLPEN_BLEND_MARKET_COLS],
+                        key=lambda x: x.get("Conviction") or 0, reverse=True)[:top_n]
+
+    for play in candidates:
+        pid = play.get("PlayerId")
+        row = rows_by_pid.get(pid)
+        if not row:
+            continue
+        opp_id = row.get("_opp_id")
+        if not opp_id:
+            continue
+        bullpen_stat = get_bullpen_stat_fn(opp_id, row.get("_opp_pid"))
+        if not bullpen_stat:
+            continue
+        blended = blend_hitter_probs_with_bullpen(row, bullpen_stat, seed=seed,
+                                                   statcast=statcast, statcast_k=statcast_k)
+        if not blended:
+            continue
+
+        market = play["Market"]
+        col = BULLPEN_BLEND_MARKET_COLS[market]
+        blended_prob_over = blended[col]
+        side = play["Side"]
+        ref = BEST_BET_REF[market]
+        # Recompute confidence in the SAME side already chosen, not a fresh favored-side pick.
+        new_side_prob = blended_prob_over if side == "Over" else (1.0 - blended_prob_over)
+        ref_for_side = ref if side == "Over" else (1.0 - ref)
+
+        play["_pre_blend_conviction"] = play.get("Conviction")
+        play["_pre_blend_model_prob"] = play.get("ModelProb")
+        play["ModelProb"] = round(new_side_prob, 4)
+        play["Fair"] = prob_to_american(new_side_prob)
+        play["Conviction"] = round(new_side_prob / ref_for_side, 2) if ref_for_side > 0 else 0.0
+        play["Why"] = (play.get("Why", "") +
+                       f"; bullpen-blended ({blended['vs SP']:.1f} PA vs starter, "
+                       f"{blended['vs Pen']:.1f} vs pen)")
+        play["_bullpen_blended"] = True
+
+    plays.sort(key=lambda x: x.get("Conviction") or 0, reverse=True)
+    return plays
+
+
 def curate_selections(plays: List[Dict], n: int = 6, per_market_cap: int = 2,
                       rank_key: str = "Conviction") -> List[Dict]:
     """Pick a tight, VARIED set of the most interesting plays for a media segment.
