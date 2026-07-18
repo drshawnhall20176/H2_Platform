@@ -239,16 +239,38 @@ with st.expander(f"📋 {pitcher['Pitcher']} vs. the batting order (season)"):
             st.info("No batting-order data available yet — either no starts found this season, "
                     "or the data couldn't be aggregated.")
         else:
+            # Cross-reference TODAY's actual (or projected) lineup for the opposing team, so the
+            # historical per-slot performance above can be read against who's actually standing
+            # in each slot tonight, not just an abstract "Slot 2" — this is what the person
+            # actually asked for: not who's historically hit in a slot, but who's in it TODAY.
+            # Reuses hitters/opp already loaded earlier on this page — zero extra fetch.
+            opp_hitters = [h for h in hitters if h.get("Team") == opp and h.get("_lineup_idx") is not None]
+            today_lineup = {h["_lineup_idx"] + 1: h for h in opp_hitters}   # 0-indexed -> 1-indexed slot
+            lineup_is_projected = any(h.get("Lineup") == "Projected" for h in opp_hitters)
+
             bo_rows = [{"Slot": slot, **stats} for slot, stats in sorted(bo_splits.items())]
+            for row in bo_rows:
+                today_hitter = today_lineup.get(row["Slot"])
+                row["Today"] = today_hitter["Hitter"] if today_hitter else "—"
             bo_df = pd.DataFrame(bo_rows).rename(columns={
                 "ab": "AB", "r": "R", "h": "H", "2b": "2B", "3b": "3B", "hr": "HR", "rbi": "RBI",
                 "bb": "BB", "hbp": "HBP", "so": "SO", "avg": "AVG", "obp": "OBP", "slg": "SLG", "ops": "OPS"})
+            bo_df = bo_df[["Slot", "Today", "AB", "R", "H", "2B", "3B", "HR", "RBI", "BB", "HBP",
+                          "SO", "AVG", "OBP", "SLG", "OPS"]]
             int_cols = ["AB", "R", "H", "2B", "3B", "HR", "RBI", "BB", "HBP", "SO"]
             st.dataframe(
                 bo_df.style.format({**{c: "{:.0f}" for c in int_cols},
                                    "AVG": "{:.3f}", "OBP": "{:.3f}", "SLG": "{:.3f}", "OPS": "{:.3f}"})
                 .theme_gradient(cmap="RdYlGn", subset=["OPS"]),
                 hide_index=True, use_container_width=True)
+            if not today_lineup:
+                st.caption("⚪ No lineup data found for this game yet — the \"Today\" column will "
+                          "fill in once one's available.")
+            elif lineup_is_projected:
+                st.caption("🟡 Lineup not officially posted yet — \"Today\" shows a projected "
+                          "batting order, not a confirmed one.")
+            else:
+                st.caption("🟢 Confirmed batting order for this game.")
             with st.expander("Why these numbers might not match ESPN or other sites exactly"):
                 st.markdown(
                     "**These are computed here, not pulled from a pre-built \"batting order "
