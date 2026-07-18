@@ -80,6 +80,114 @@ def test_statcast_regresses_lucky_hitter_down():
     assert pulled[P.HR] < base[P.HR]
 
 
+# ----------------------------------------------------------------- woba/xwoba + regression table
+def _write_cache_with_woba(tmp):
+    df = pd.DataFrame([
+        # Underperforming his contact quality (wOBA well below xwOBA) -> "due for positive regression"
+        dict(player_id=10, name="Cold But Crushing It", pa=300, brl_pa=0.10, brl_pct=0.20,
+            hardhit=0.55, avg_ev=93.0, slg=0.400, xslg=0.480, xiso=0.180,
+            woba=0.310, xwoba=0.365),
+        # Overperforming his contact quality (wOBA well above xwOBA) -> "due for negative regression"
+        dict(player_id=11, name="Hot But Empty Contact", pa=300, brl_pa=0.03, brl_pct=0.05,
+            hardhit=0.25, avg_ev=87.0, slg=0.380, xslg=0.330, xiso=0.090,
+            woba=0.360, xwoba=0.300),
+        # Results in line with contact quality -> no real signal
+        dict(player_id=12, name="Steady", pa=300, brl_pa=0.07, brl_pct=0.12,
+            hardhit=0.40, avg_ev=90.0, slg=0.420, xslg=0.415, xiso=0.150,
+            woba=0.330, xwoba=0.328),
+        # Below the PA floor -> excluded regardless of how extreme the delta looks
+        dict(player_id=13, name="Small Sample", pa=40, brl_pa=0.20, brl_pct=0.35,
+            hardhit=0.65, avg_ev=96.0, slg=0.700, xslg=0.500, xiso=0.250,
+            woba=0.420, xwoba=0.310),
+    ])
+    path = os.path.join(tmp, "statcast_batters.csv")
+    df.to_csv(path, index=False)
+    return path
+
+
+def test_load_extracts_woba_and_xwoba():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _write_cache_with_woba(tmp)
+        lookup, _k = SC.load(path)
+    assert lookup[10]["woba"] == 0.310 and lookup[10]["xwoba"] == 0.365
+    print("✓ load() correctly extracts both actual and expected wOBA")
+
+
+def test_regression_table_flags_underperforming_hitter_for_positive_regression():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _write_cache_with_woba(tmp)
+        lookup, _k = SC.load(path)
+    rows = [{"Hitter": "Cold But Crushing It", "_pid": 10, "Team": "NYY"}]
+    table = SC.build_hitter_regression_table(rows, lookup)
+    assert len(table) == 1
+    assert table[0]["Delta"] < 0
+    assert "positive regression" in table[0]["Tag"]
+    print("✓ a hitter underperforming his contact quality is correctly flagged for positive regression")
+
+
+def test_regression_table_flags_overperforming_hitter_for_negative_regression():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _write_cache_with_woba(tmp)
+        lookup, _k = SC.load(path)
+    rows = [{"Hitter": "Hot But Empty Contact", "_pid": 11, "Team": "BOS"}]
+    table = SC.build_hitter_regression_table(rows, lookup)
+    assert table[0]["Delta"] > 0
+    assert "negative regression" in table[0]["Tag"]
+    print("✓ a hitter outperforming his contact quality is correctly flagged for negative regression")
+
+
+def test_regression_table_steady_hitter_no_signal():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _write_cache_with_woba(tmp)
+        lookup, _k = SC.load(path)
+    rows = [{"Hitter": "Steady", "_pid": 12, "Team": "LAD"}]
+    table = SC.build_hitter_regression_table(rows, lookup)
+    assert "in line" in table[0]["Tag"]
+
+
+def test_regression_table_excludes_below_pa_floor():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _write_cache_with_woba(tmp)
+        lookup, _k = SC.load(path)
+    rows = [{"Hitter": "Small Sample", "_pid": 13, "Team": "SF"}]
+    table = SC.build_hitter_regression_table(rows, lookup)
+    assert table == []   # 40 PA < MIN_PA_QUALIFIED, correctly excluded despite the extreme delta
+    print("✓ build_hitter_regression_table correctly excludes hitters below the PA floor")
+
+
+def test_regression_table_excludes_hitter_with_no_statcast_data():
+    rows = [{"Hitter": "Not In Cache", "_pid": 999, "Team": "SEA"}]
+    assert SC.build_hitter_regression_table(rows, {}) == []
+
+
+def test_regression_table_excludes_stale_cache_missing_woba_field():
+    # A cache written BEFORE this feature existed has no woba/xwoba columns at all — load()
+    # defaults those to 0.0, and this must be treated as "no real data" (skip), not a fabricated
+    # 0.000 vs 0.000 "perfectly in line" or a nonsensical extreme delta.
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _write_cache(tmp)   # the OLD helper, no woba/xwoba columns
+        lookup, _k = SC.load(path)
+    rows = [{"Hitter": "Elite Barrel", "_pid": 1, "Team": "NYY"}]
+    assert SC.build_hitter_regression_table(rows, lookup) == []
+    print("✓ build_hitter_regression_table correctly skips a pre-refresh cache instead of fabricating a 0.000 signal")
+
+
+def test_regression_table_sorted_by_absolute_delta_both_directions():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _write_cache_with_woba(tmp)
+        lookup, _k = SC.load(path)
+    rows = [
+        {"Hitter": "Steady", "_pid": 12, "Team": "LAD"},
+        {"Hitter": "Cold But Crushing It", "_pid": 10, "Team": "NYY"},
+        {"Hitter": "Hot But Empty Contact", "_pid": 11, "Team": "BOS"},
+    ]
+    table = SC.build_hitter_regression_table(rows, lookup)
+    names = [t["Hitter"] for t in table]
+    assert names[0] in ("Cold But Crushing It", "Hot But Empty Contact")   # biggest |delta| first
+    assert names[-1] == "Steady"   # smallest |delta| last
+    print("✓ build_hitter_regression_table sorts by absolute delta, surfacing both directions' extremes first")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

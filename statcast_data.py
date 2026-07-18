@@ -104,6 +104,13 @@ def _build_statcast_frame(ev: pd.DataFrame, xs: pd.DataFrame) -> pd.DataFrame:
         "slg": _series(merged, "slg", fill=0.0),
         "xslg": _series(merged, "est_slg", "xslg", fill=0.0),
         "xiso": _series(merged, "est_slg", "xslg", fill=0.0) - _series(merged, "est_ba", "xba", fill=0.0),
+        # ACTUAL and EXPECTED wOBA — same leaderboard row as xSLG above (Savant's expected-stats
+        # export returns "actual BA, SLG, wOBA for comparison" alongside the expected versions,
+        # confirmed during scoping), same column-name hedging convention already proven for xSLG
+        # (pybaseball's column names have drifted between versions before; _series' multi-
+        # candidate fallback is exactly the guard against that, not new to this addition).
+        "woba": _series(merged, "woba", fill=0.0),
+        "xwoba": _series(merged, "est_woba", "xwoba", fill=0.0),
     })
     return out
  
@@ -172,6 +179,8 @@ def load(path: str = DEFAULT_PATH) -> Tuple[Dict[int, Dict], Optional[float]]:
             "xiso": float(d.get("xiso", 0) or 0),
             "slg": float(d.get("slg", 0) or 0),
             "xslg": float(d.get("xslg", 0) or 0),
+            "woba": float(d.get("woba", 0) or 0),
+            "xwoba": float(d.get("xwoba", 0) or 0),
         }
     return lookup, k
  
@@ -181,3 +190,52 @@ def expected_hr_rate(brl_pa: float, k: Optional[float]) -> Optional[float]:
     if k is None or brl_pa is None:
         return None
     return max(k * brl_pa, 0.0)
+
+
+def build_hitter_regression_table(rows: list, statcast: Dict[int, Dict],
+                                  min_pa: int = MIN_PA_QUALIFIED) -> list:
+    """Actual wOBA vs. expected wOBA (quality-of-contact-implied) for the hitters on tonight's
+    slate — the honest hitter counterpart to Pitching Lab's ERA-vs-FIP table. Same underlying
+    idea (a results metric can be noisy/luck-affected; a quality-of-contact-based expected metric
+    is a steadier read on true talent), applied to the other side of the ball.
+
+    SIGN FLIPS RELATIVE TO ERA-VS-FIP, WORTH STATING EXPLICITLY: for a pitcher, LOWER ERA is
+    better, so Delta = ERA - FIP > 0 (actual worse than deserved) is the "expect improvement"
+    read. For a hitter, HIGHER wOBA is better, so here Delta = wOBA - xwOBA is inverted: a
+    NEGATIVE Delta (actual wOBA below what his contact quality supports) is the "expect
+    improvement" read, and a POSITIVE Delta (outperforming his contact quality) is the "expect
+    regression" read. Getting this backwards would flag exactly the wrong hitters, so the Tag
+    text spells out the direction in words rather than relying on a sign convention alone.
+
+    rows: hitter rows from mlb_engine.build_slate (or any list of dicts with "Hitter"/"_pid").
+    statcast: the {player_id: {...}} lookup from load() above — same object Dinger Engine already
+    loads once per pageview, reused here at zero extra fetch cost, not a second Statcast pull.
+    min_pa defaults to this module's own MIN_PA_QUALIFIED (the same PA floor already used to
+    calibrate the barrel-rate-to-HR-rate constant elsewhere in this file) — small-PA samples
+    produce noisy wOBA/xwOBA on both sides, not a real signal worth surfacing."""
+    out = []
+    for r in rows:
+        pid = r.get("_pid")
+        sc = statcast.get(pid) if pid is not None else None
+        if not sc or sc.get("pa", 0) < min_pa:
+            continue
+        woba, xwoba = sc.get("woba", 0.0), sc.get("xwoba", 0.0)
+        if woba <= 0 or xwoba <= 0:
+            continue   # cache predates this field (pre-refresh), or genuinely no data — don't
+                       # show a fabricated 0.000 vs 0.000 "regression candidate"
+        delta = round(woba - xwoba, 3)
+        if delta <= -0.020:
+            tag = "🟢 Underperforming contact quality — due for positive regression"
+        elif delta >= 0.020:
+            tag = "🔴 Outperforming contact quality — due for negative regression"
+        else:
+            tag = "➡️ Results in line with contact quality"
+        out.append({
+            "Hitter": r.get("Hitter"), "_pid": pid, "Team": r.get("Team"),
+            "PA": int(sc.get("pa", 0)), "wOBA": round(woba, 3), "xwOBA": round(xwoba, 3),
+            "Delta": delta, "Tag": tag,
+        })
+    # Most extreme divergence first, either direction — a person scanning for "who's most out of
+    # line with their real performance" wants both tails, not just one.
+    out.sort(key=lambda x: abs(x["Delta"]), reverse=True)
+    return out

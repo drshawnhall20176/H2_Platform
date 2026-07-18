@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 473/473 tests green)
+## What's in this checkpoint (all tested — 481/481 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -1495,7 +1495,61 @@ Refresh resolves it, that confirms the stale-cache theory; if the diagnostic sti
 genuinely fresh fetch, that would point to a real gap in what MLB's schedule endpoint returned
 for that date — worth reporting back either way.
 
+### GM/analyst gap-filling, item 1 of 5: hitter regression table (wOBA vs. xwOBA) (2026-07-18)
+Shawn asked, wearing both an analyst and a GM hat, what's missing from the dashboard for
+pinpointing matchup advantages and lineup decisions. Landed on five real gaps, prioritized by
+value; building them in that order. First: Pitching Lab has ERA-vs-FIP (results vs. deserved
+performance); there was no hitter equivalent anywhere on the platform.
+
+**Built on an already-strong foundation, not from scratch**: `statcast_data.py` already pulled
+Savant's expected-stats leaderboard for Dinger Engine's HR model, but only extracted xSLG, not
+xwOBA — even though the same leaderboard row returns "actual BA, SLG, wOBA for comparison"
+alongside the expected versions (confirmed during scoping). Extended `_build_statcast_frame`/
+`load()` to also extract actual `woba` and expected `xwoba`, using the EXACT SAME column-name-
+hedging convention already proven working for `xslg` (`_series(df, "est_woba", "xwoba", ...)`) —
+low-risk by construction, not a new pattern.
+
+**`SC.build_hitter_regression_table(rows, statcast)`** — the actual table, living in
+`statcast_data.py` itself (matching that module's own stated "pure and testable" philosophy).
+**One sign-flip worth being explicit about, since getting it backwards would flag exactly the
+wrong hitters**: for a pitcher, LOWER ERA is better, so ERA − FIP > 0 means "expect improvement."
+For a hitter, HIGHER wOBA is better, so here Delta = wOBA − xwOBA is inverted — a NEGATIVE delta
+(underperforming contact quality) is the "expect improvement" read. The Tag text spells this out
+in words rather than leaning on the sign alone. Reuses `MIN_PA_QUALIFIED` (already used elsewhere
+in this file to calibrate the barrel-to-HR constant) as the same PA floor here — small-sample
+wOBA/xwOBA on either side isn't a real signal.
+
+**A real operational note, not a bug**: an EXISTING cached `statcast_batters.csv` (written before
+this change) has no woba/xwoba columns at all. `load()` correctly defaults those to 0.0 for a
+stale cache — and `build_hitter_regression_table` treats woba/xwoba ≤ 0 as "no real data," never
+showing a fabricated 0.000-vs-0.000 row. The table will genuinely show nothing until the next
+`refresh_statcast.py` run regenerates the cache with the new columns — worth knowing before
+wondering why it's empty on first deploy.
+
+**Wired into Dinger Engine** (not a new page) — the natural home, since it already loads the
+Statcast lookup for this exact pageview at zero extra fetch cost. Placed right after the existing
+HR-specific "Due to homer" board, as its explicit complement: "Due to homer" is about power
+specifically; this is about overall offensive value (every batted ball and walk). Color scale
+deliberately reversed (`RdYlGn_r`) from the "Due to homer" board next to it — there, positive Due
+is green (good, HR-specific under-luck); here, negative Delta is green (good, the "expect
+improvement" direction) — same reversed-polarity reasoning already called out in the code itself,
+not an inconsistency.
+
+**8 new tests** in `test_statcast.py`: wOBA/xwOBA extraction, both regression directions flagged
+correctly (with an explicit test locking in the sign-flip direction, not just "a delta exists"),
+in-line/no-signal case, PA-floor exclusion, no-statcast-data exclusion, the stale-pre-refresh-
+cache exclusion (the "operational note" above, tested as real behavior, not just documented), and
+sort-by-absolute-delta surfacing both tails. A full offline simulation with realistic mixed data
+(a real regression case on each side, plus a hitter with no Statcast row at all) ran clean.
+481/481 total passing.
+
 ## NOT YET DONE (next stages)
+- **GM/analyst gaps, items 2-5 of 5** — hitter regression table (item 1) is done, see above. Still
+  to build, in order: (2) reliever rest/fatigue signal — no visibility into bullpen availability
+  anywhere on the platform right now; (3) lineup-wide platoon view — the underlying math
+  (`platoon_advantage`) already exists, this is mostly a surfacing exercise, not new modeling;
+  (4) starter rest + times-through-the-order penalty; (5) umpire tendencies / catcher framing —
+  real signals, but genuinely new data sources, lower priority than the first four.
 - **Line-movement chart** — see above. The capture infrastructure is live; the actual
   stock-candlestick-style chart in Matchup Lab is the natural next step once there's real
   captured history to plot, not before.
