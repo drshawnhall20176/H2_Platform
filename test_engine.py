@@ -538,6 +538,86 @@ def test_bullpen_handedness_mix_all_zero_when_no_staff(monkeypatch):
     print("✓ get_bullpen_handedness_mix returns safe all-zero counts, not None, when no staff data exists")
 
 
+# ----------------------------------------------------------------- get_starter_rest_info
+def _fake_box_for_pitcher(pid, name, ip):
+    return {"teams": {"home": {"players": {f"ID{pid}": {
+        "person": {"id": pid, "fullName": name},
+        "stats": {"pitching": {"inningsPitched": ip}},
+    }}}, "away": {"players": {}}}}
+
+
+def test_starter_rest_standard_five_days(monkeypatch):
+    games = [{"gamePk": 1, "game_date": "2026-07-13T23:10:00Z", "status": "Final", "home_id": 117}]
+    box = _fake_box_for_pitcher(111, "Ace Starter", "6.0")
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+    info = E.get_starter_rest_info(111, 117, "2026-07-18")
+    assert info["days_rest"] == 5
+    assert "Standard rest" in info["rest_tag"]
+    assert info["last_start_date"] == "2026-07-13"
+    print("✓ get_starter_rest_info correctly identifies standard 5-day rest")
+
+
+def test_starter_rest_short_rest_flagged(monkeypatch):
+    games = [{"gamePk": 1, "game_date": "2026-07-15T23:10:00Z", "status": "Final", "home_id": 117}]
+    box = _fake_box_for_pitcher(111, "Ace Starter", "6.0")
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+    info = E.get_starter_rest_info(111, 117, "2026-07-18")
+    assert info["days_rest"] == 3
+    assert "Short rest" in info["rest_tag"]
+    print("✓ get_starter_rest_info correctly flags short rest")
+
+
+def test_starter_rest_extra_rest_flagged(monkeypatch):
+    games = [{"gamePk": 1, "game_date": "2026-07-10T23:10:00Z", "status": "Final", "home_id": 117}]
+    box = _fake_box_for_pitcher(111, "Ace Starter", "6.0")
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+    info = E.get_starter_rest_info(111, 117, "2026-07-18")
+    assert info["days_rest"] == 8
+    assert "Extra rest" in info["rest_tag"]
+
+
+def test_starter_rest_ignores_brief_relief_cameo(monkeypatch):
+    # A 1-inning relief appearance right before today shouldn't count as "his last start" — the
+    # 9-outs floor exists exactly for this case. His REAL last start (6 innings) is further back.
+    games = [
+        {"gamePk": 1, "game_date": "2026-07-16T23:10:00Z", "status": "Final", "home_id": 117},  # cameo
+        {"gamePk": 2, "game_date": "2026-07-12T23:10:00Z", "status": "Final", "home_id": 117},  # real start
+    ]
+    boxes = {1: _fake_box_for_pitcher(111, "Ace Starter", "1.0"),
+            2: _fake_box_for_pitcher(111, "Ace Starter", "6.0")}
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2:
+                        boxes[int(url.rsplit("/game/", 1)[1].split("/")[0])])
+    info = E.get_starter_rest_info(111, 117, "2026-07-18")
+    assert info["last_start_date"] == "2026-07-12"   # not the 1-inning cameo on 07-16
+    assert info["days_rest"] == 6
+    print("✓ get_starter_rest_info correctly ignores a brief relief cameo, finding the real last start")
+
+
+def test_starter_rest_none_when_no_qualifying_start_found(monkeypatch):
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: [])
+    info = E.get_starter_rest_info(111, 117, "2026-07-18")
+    assert info == {"days_rest": None, "last_start_date": None, "rest_tag": "No recent start found"}
+    print("✓ get_starter_rest_info returns an honest None, not a fabricated number, when no start is found")
+
+
+def test_starter_rest_picks_most_recent_qualifying_start(monkeypatch):
+    games = [
+        {"gamePk": 1, "game_date": "2026-07-08T23:10:00Z", "status": "Final", "home_id": 117},
+        {"gamePk": 2, "game_date": "2026-07-13T23:10:00Z", "status": "Final", "home_id": 117},
+    ]
+    boxes = {1: _fake_box_for_pitcher(111, "Ace Starter", "6.0"),
+            2: _fake_box_for_pitcher(111, "Ace Starter", "7.0")}
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2:
+                        boxes[int(url.rsplit("/game/", 1)[1].split("/")[0])])
+    info = E.get_starter_rest_info(111, 117, "2026-07-18")
+    assert info["last_start_date"] == "2026-07-13"   # the MORE recent of the two, not the older one
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

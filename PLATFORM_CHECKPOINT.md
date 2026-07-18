@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 508/508 tests green)
+## What's in this checkpoint (all tested — 518/518 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -1730,11 +1730,58 @@ combining both halves — a real lineup's platoon-edge count against a simulated
 simulated bullpen's handedness split, both producing the exact "2 of 3 have the edge" / "67% RHP"
 style read the feature is meant to give. 508/508 total passing.
 
+### GM/analyst gap-filling, item 4 of 5: starter rest + times-through-the-order (2026-07-18)
+Genuinely two different builds, not one — researched both before writing code, since they turned
+out to have very different data realities.
+
+**Starter rest — fully buildable, real data, real infrastructure to reuse.** New
+`mlb_engine.get_starter_rest_info(pitcher_id, team_id, before_date, lookback_days=15)`. Same
+proven schedule-range + boxscore-scan pattern `get_team_bullpen_fatigue` already uses, with two
+real adaptations: a LONGER lookback window (15 days, not 5) — a starter's normal rotation cycle
+IS ~5 days, so a 5-day-only window risks missing a completely normal turn if there's any real
+schedule irregularity (a skipped turn, a rain delay, a doubleheader). And a ≥9-outs (3 full
+innings) floor to identify "his last START" specifically, not any appearance — filters out the
+rare case of a brief relief cameo (a true starter essentially never makes one mid-rotation, so
+this is a defensive safety net more than a load-bearing distinction, same honest framing
+`get_team_bullpen_fatigue`'s own start-vs-relief note already uses). Short rest (≤4 days) tagged
+as the well-established effectiveness concern it is; extra rest (6+) tagged more neutrally,
+since the research is genuinely more mixed there — not asserted as a clean positive to match
+short rest's clean negative.
+
+**Times-through-the-order — researched, and the research itself changed the plan.** Confirmed
+directly that TTOP splits are a FanGraphs-specific presentation, not a queryable MLB Stats API
+split type — building a true PITCHER-SPECIFIC TTOP metric would need either FanGraphs scraping
+(a new, more fragile data source) or processing pitch-level Statcast data at at-bat granularity
+(a much heavier lift, its own refresh-job-scale project). Rather than fabricate false precision
+or skip the concept, found the honest middle: `projections.times_through_order(exp_bf)` — pure,
+already-available math (expected batters faced ÷ 9, and `exp_bf` was already computed by
+`project_pitcher`) surfacing how many times THIS start is even expected to reach the lineup,
+paired with a clearly-sourced caption citing real research (Baseball Prospectus, SABR/Lichtman:
+roughly 8-12 wOBA points worse per trip, more for fastball-heavy pitchers) as GENERAL context —
+explicitly labeled as league-wide research, not baked into this pitcher's own Proj K/BB numbers,
+since the real range varies enough by repertoire that doing so would overclaim precision the
+research itself doesn't support at the individual level.
+
+**Wired in with real cost discipline**: Proj TTO added to the full-slate matchup-aware
+projections table at zero extra cost (pure derived math, no new fetch). Starter rest reuses the
+EXISTING game-scoped picker built for Bullpen fatigue — no second selector, no proactive
+per-starter fetching across a whole slate, same cost principle as every bullpen feature this
+session.
+
+**10 new tests**: 6 for `get_starter_rest_info` (standard/short/extra rest correctly tagged, the
+relief-cameo filter actually verified — not just asserted — against a real 1-inning-vs-6-inning
+scenario, honest None when no start is found, and picking the more recent of two qualifying
+starts) and 4 for `times_through_order` (basic math, a fractional trip read, a custom lineup
+size, safe zero-division handling) plus a locked-in test on `build_pitcher_projection_rows`
+confirming Proj TTO and each pitcher's own `_team_id` are present and correct. A full offline
+simulation of both pieces together — a realistic ace projecting 2.67 trips through the order, and
+a correctly-flagged 3-day short-rest scenario — ran clean. 518/518 total passing.
+
 ## NOT YET DONE (next stages)
-- **GM/analyst gaps, items 4-5 of 5** — hitter regression (1), reliever fatigue (2), and the
-  lineup-wide platoon view (3) are all done, see above. Still to build: (4) starter rest +
-  times-through-the-order penalty; (5) umpire tendencies / catcher framing — real signals, but
-  genuinely new data sources, lower priority than the rest.
+- **GM/analyst gap, item 5 of 5** — hitter regression (1), reliever fatigue (2), lineup-wide
+  platoon view (3), and starter rest + times-through-the-order (4) are all done, see above. Still
+  to build: umpire tendencies / catcher framing — real signals, but genuinely new data sources
+  not currently wired into this platform at all.
 - **Line-movement chart** — see above. The capture infrastructure is live; the actual
   stock-candlestick-style chart in Matchup Lab is the natural next step once there's real
   captured history to plot, not before.

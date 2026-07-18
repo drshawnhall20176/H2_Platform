@@ -266,6 +266,46 @@ def test_bullpen_matchup_rows_produces_a_genuinely_different_read_than_the_start
          "vs. a homer-prone pen) HR% than the same hitter's vs-starter read")
 
 
+# ----------------------------------------------------------------- times_through_order
+def test_times_through_order_basic():
+    assert P.times_through_order(27.0) == 3.0    # exactly 3 full trips through a 9-batter lineup
+    assert P.times_through_order(18.0) == 2.0
+    assert P.times_through_order(22.5) == 2.5     # partial trip, a real fractional read
+
+
+def test_times_through_order_custom_lineup_size():
+    assert P.times_through_order(24.0, lineup_size=8) == 3.0
+
+
+def test_times_through_order_zero_lineup_size_safe():
+    assert P.times_through_order(20.0, lineup_size=0) == 0.0
+
+
+# ----------------------------------------------------------------- build_pitcher_projection_rows
+def _fake_pm(pid, name, hand, era, fip, stat):
+    from types import SimpleNamespace
+    return SimpleNamespace(id=pid, name=name, hand=hand, era=era, fip=fip, stat=stat)
+
+
+def test_build_pitcher_projection_rows_includes_tto_and_team_id():
+    ace_stat = dict(gamesStarted=20, inningsPitched="120.0", battersFaced=480,
+                    strikeOuts=140, baseOnBalls=35)
+    hp = _fake_pm(111, "Home Ace", "R", 3.20, 3.10, ace_stat)
+    ap = _fake_pm(222, "Away Ace", "L", 3.80, 3.70, ace_stat)
+    meta = [{"label": "Away @ Home", "home_name": "Home", "away_name": "Away",
+            "home_id": 117, "away_id": 111, "home_pm": hp, "away_pm": ap, "game_date": None}]
+    rows = []   # empty lineup rate map -> neutral matchup, still projects fine
+    out = P.build_pitcher_projection_rows(rows, meta, sims=2000, seed=1)
+    assert len(out) == 2
+    home_row = next(r for r in out if r["Pitcher"] == "Home Ace")
+    assert "Proj TTO" in home_row
+    assert home_row["Proj TTO"] == round(home_row["Proj BF"] / 9, 2)
+    assert home_row["_team_id"] == 117   # the home pitcher's OWN team id, not the opponent's
+    away_row = next(r for r in out if r["Pitcher"] == "Away Ace")
+    assert away_row["_team_id"] == 111
+    print("✓ build_pitcher_projection_rows includes Proj TTO (matching Proj BF / 9) and each pitcher's own _team_id")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

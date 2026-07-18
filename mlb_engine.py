@@ -824,3 +824,79 @@ def get_bullpen_handedness_mix(team_id: int, exclude_pid: Optional[int] = None) 
     total = left + right
     return {"L": left, "R": right, "total": total,
            "pct_L": (left / total) if total else 0.0, "pct_R": (right / total) if total else 0.0}
+
+
+def get_starter_rest_info(pitcher_id: int, team_id: int, before_date: str,
+                          lookback_days: int = 15) -> Dict[str, Any]:
+    """Days of rest for a probable starter heading into before_date: when he last started, and
+    whether that's short rest (<=4 days — genuinely unusual and the well-established effectiveness
+    concern), standard rest (5 days — the normal rotation cycle), or extra rest (6+ days, e.g.
+    coming off an All-Star break or a rain-delayed turn — more mixed evidence on effect, stated
+    honestly as such, not asserted as a clean positive the way short rest is a clean negative).
+
+    Same proven schedule-range + boxscore-scan pattern get_team_bullpen_fatigue already uses, just
+    a LONGER lookback window (15 days by default, not 5): a starter's normal rotation cycle IS
+    ~5 days, so a 5-day-only window risks missing his last start entirely on a completely normal,
+    unremarkable turn if there was any real-world schedule irregularity (a skipped turn, a
+    doubleheader, a genuine off day) — 15 days comfortably covers even a skipped-turn starter
+    without over-fetching for a normal case (rest_days will just come back small and correct).
+
+    "LAST START" IDENTIFIED BY A >=9-OUTS (3 full innings) FLOOR ON THIS PITCHER'S OWN
+    APPEARANCES, not by trying to distinguish start-from-relief in the raw boxscore data (the
+    same unconfirmed-assumption risk get_team_bullpen_fatigue's own docstring already explains
+    avoiding). A true starter essentially never makes a brief relief cameo mid-rotation, so this
+    floor is a defensive safety net more than a load-bearing distinction — but it's honest about
+    being a heuristic, not a confirmed "role" field from the data itself.
+
+    Returns {"days_rest": int|None, "last_start_date": str|None, "rest_tag": str}. days_rest is
+    None (not a fabricated number) when no qualifying start is found in the window at all — a
+    real, legitimate case: an MLB debut, a long-injured pitcher's return, or a genuinely unusual
+    layoff longer than the lookback window covers.
+
+    HONEST LIMITATION, same posture as this file's other roster/schedule-based functions: not
+    verified against a live response (statsapi.mlb.com unreachable from this sandbox)."""
+    try:
+        before_dt = datetime.strptime(before_date, "%Y-%m-%d")
+    except ValueError:
+        return {"days_rest": None, "last_start_date": None, "rest_tag": "Unknown"}
+    start = (before_dt - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+    end = (before_dt - timedelta(days=1)).strftime("%Y-%m-%d")
+    if end < start:
+        return {"days_rest": None, "last_start_date": None, "rest_tag": "Unknown"}
+
+    games = get_team_schedule_range(team_id, start, end)
+    last_start_date = None
+    for g in sorted(games, key=lambda x: x.get("game_date") or "", reverse=True):
+        if "final" not in (g.get("status", "") or "").lower():
+            continue
+        game_date = (g.get("game_date") or "")[:10]
+        if not game_date:
+            continue
+        try:
+            box = fetch_json(f"{BASE}/game/{g['gamePk']}/boxscore")
+        except Exception:
+            continue
+        side = "home" if g.get("home_id") == team_id else "away"
+        players = (((box.get("teams", {}) or {}).get(side, {}) or {}).get("players", {}) or {})
+        for pdata in players.values():
+            pid = (pdata.get("person", {}) or {}).get("id")
+            if pid != pitcher_id:
+                continue
+            pit = (pdata.get("stats", {}) or {}).get("pitching", {}) or {}
+            if pit and _ip_to_outs(pit.get("inningsPitched", "0.0")) >= 9:
+                last_start_date = game_date
+                break
+        if last_start_date:
+            break
+
+    if last_start_date is None:
+        return {"days_rest": None, "last_start_date": None, "rest_tag": "No recent start found"}
+
+    days_rest = (before_dt.date() - datetime.strptime(last_start_date, "%Y-%m-%d").date()).days
+    if days_rest <= 4:
+        tag = f"🔴 Short rest — {days_rest} days"
+    elif days_rest == 5:
+        tag = "🟢 Standard rest — 5 days"
+    else:
+        tag = f"🟡 Extra rest — {days_rest} days"
+    return {"days_rest": days_rest, "last_start_date": last_start_date, "rest_tag": tag}

@@ -332,6 +332,26 @@ def project_pitcher(stat: Dict, opp_lineup: Optional[Dict] = None) -> Optional[D
     }
  
  
+def times_through_order(exp_bf: float, lineup_size: int = 9) -> float:
+    """Expected number of times a starter cycles through the lineup, given his own expected
+    batters faced (exp_bf, already computed by project_pitcher above) — a simple derived read
+    (exp_bf / lineup_size), not a new data source or a new model.
+
+    POWERS PITCHING LAB'S TIMES-THROUGH-THE-ORDER CONTEXT, DELIBERATELY NOT A PER-PITCHER
+    ADJUSTMENT TO exp_k/exp_bb THEMSELVES: the times-through-the-order penalty (TTOP) is real and
+    well-documented (Baseball Prospectus, SABR/Lichtman) — roughly an 8-12 wOBA-point-against
+    increase per additional trip through the order, more for fastball-heavy pitchers, less for
+    pitchers who mix more — but that range varies enough by a pitcher's own repertoire that baking
+    one specific number into every starter's projection would overclaim precision the underlying
+    research itself doesn't support at the individual-pitcher level. This number — how many times
+    THIS start is even expected to reach the order — is the honest, genuinely pitcher-specific
+    piece: a start projecting under 2 trips carries much less TTOP exposure than one projecting a
+    real 3rd trip, regardless of the exact per-point magnitude for that specific pitcher."""
+    if lineup_size <= 0:
+        return 0.0
+    return exp_bf / lineup_size
+
+
 def simulate_pitcher(proj: Dict, sims: int, rng) -> Dict[str, np.ndarray]:
     k = rng.poisson(proj["exp_k"], size=sims)
     bb = rng.poisson(proj["exp_bb"], size=sims)
@@ -628,8 +648,8 @@ def build_pitcher_projection_rows(rows: List[Dict], meta: List[Dict],
     lineup_map = build_lineup_rate_map(rows)
     out: List[Dict] = []
     for m in meta:
-        for pm, team, opp in ((m["home_pm"], m["home_name"], m["away_name"]),
-                              (m["away_pm"], m["away_name"], m["home_name"])):
+        for pm, team, opp, team_id in ((m["home_pm"], m["home_name"], m["away_name"], m.get("home_id")),
+                                       (m["away_pm"], m["away_name"], m["home_name"], m.get("away_id"))):
             if pm.id is None or not pm.stat:
                 continue
             opp_rates = lineup_map.get((m["label"], opp))
@@ -646,11 +666,12 @@ def build_pitcher_projection_rows(rows: List[Dict], meta: List[Dict],
                 "ERA": round(pm.era, 2), "FIP": pm.fip,
                 "Proj IP": round(proj["exp_ip"], 1), "Proj K": round(proj["exp_k"], 1),
                 "Proj BB": round(proj["exp_bb"], 1), "Proj Outs": round(proj["exp_outs"], 1),
-                "Proj BF": round(proj["exp_bf"], 1),
+                "Proj BF": round(proj["exp_bf"], 1), "Proj TTO": round(times_through_order(proj["exp_bf"]), 2),
                 "K line": k_line, "K over%": round(k_over, 4), "K fair": prob_to_american(k_over),
                 "Outs over%": round(outs_over, 4), "BB over%": round(bb_over, 4),
                 "_opp_k": (opp_rates or {}).get("k"), "_opp_bb": (opp_rates or {}).get("bb"),
                 "_game": m["label"], "_pid": pm.id, "_game_date": m.get("game_date"),
+                "_team_id": team_id,
             })
     out.sort(key=lambda r: r["Proj K"], reverse=True)
     return out
