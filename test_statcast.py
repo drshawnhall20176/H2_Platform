@@ -188,6 +188,79 @@ def test_regression_table_sorted_by_absolute_delta_both_directions():
     print("✓ build_hitter_regression_table sorts by absolute delta, surfacing both directions' extremes first")
 
 
+# ----------------------------------------------------------------- catcher framing
+def _write_catcher_framing_cache(tmp):
+    df = pd.DataFrame([
+        dict(player_id=1, name="Good Framer", team="NYY", called_pitches=4000,
+            strike_rate=0.550, framing_runs=15.0),
+        dict(player_id=2, name="Backup Catcher", team="NYY", called_pitches=800,
+            strike_rate=0.480, framing_runs=1.0),
+        dict(player_id=3, name="Bad Framer", team="BOS", called_pitches=3500,
+            strike_rate=0.470, framing_runs=-12.0),
+        dict(player_id=4, name="Unqualified", team="LAD", called_pitches=0,
+            strike_rate=0.0, framing_runs=0.0),
+    ])
+    path = os.path.join(tmp, "catcher_framing.csv")
+    df.to_csv(path, index=False)
+    return path
+
+
+def test_load_catcher_framing_reads_cache():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _write_catcher_framing_cache(tmp)
+        lookup = SC.load_catcher_framing(path)
+    assert lookup[1]["name"] == "Good Framer"
+    assert lookup[1]["framing_runs"] == 15.0
+    print("✓ load_catcher_framing correctly reads a cached CSV")
+
+
+def test_load_catcher_framing_missing_file_graceful():
+    assert SC.load_catcher_framing("/nonexistent/path.csv") == {}
+
+
+def test_team_catcher_framing_weights_by_called_pitches():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _write_catcher_framing_cache(tmp)
+        lookup = SC.load_catcher_framing(path)
+    result = SC.team_catcher_framing(lookup, "NYY")
+    assert result is not None
+    # weighted average: (0.550*4000 + 0.480*800) / 4800
+    expected = (0.550 * 4000 + 0.480 * 800) / 4800
+    assert abs(result["strike_rate"] - round(expected, 4)) < 1e-6
+    assert result["framing_runs"] == 16.0   # 15.0 + 1.0, summed not averaged
+    assert len(result["catchers"]) == 2
+    print("✓ team_catcher_framing correctly weights strike rate by called-pitch volume across the whole corps")
+
+
+def test_team_catcher_framing_none_when_team_not_found():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _write_catcher_framing_cache(tmp)
+        lookup = SC.load_catcher_framing(path)
+    assert SC.team_catcher_framing(lookup, "SEA") is None
+    print("✓ team_catcher_framing returns None rather than a fabricated average for an unmatched team")
+
+
+def test_team_catcher_framing_none_when_all_unqualified():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _write_catcher_framing_cache(tmp)
+        lookup = SC.load_catcher_framing(path)
+    assert SC.team_catcher_framing(lookup, "LAD") is None   # only catcher has 0 called_pitches
+    print("✓ team_catcher_framing returns None when every matching catcher has zero real sample")
+
+
+def test_build_catcher_frame_resilient_to_column_names():
+    # Confirms the resilient _series-based parsing handles the confirmed real column (rv_tot)
+    # alongside hedged candidates for the less-certain ones.
+    raw = pd.DataFrame([
+        {"player_id": 5, "last_name, first_name": "Realmuto, J.T.", "team": "PHI",
+        "n_called_pitches": 5000, "strike_rate": 0.52, "rv_tot": 10.0},
+    ])
+    out = SC._build_catcher_frame(raw)
+    assert out.iloc[0]["player_id"] == 5
+    assert out.iloc[0]["framing_runs"] == 10.0
+    print("✓ _build_catcher_frame correctly parses the confirmed real rv_tot column alongside hedged candidates")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

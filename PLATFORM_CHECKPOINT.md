@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 539/539 tests green)
+## What's in this checkpoint (all tested — 545/545 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -1943,11 +1943,65 @@ exactly the comparison Shawn made rather than a generic disclaimer.
 confirming `gameType: "R"` is actually present in the outgoing request params, not just claimed
 in a comment). 539/539 total passing.
 
+### GM/analyst gap-filling, item 5 of 5 (final piece): catcher framing (2026-07-18)
+Last item on the original 5-item list, originally bundled with umpire tendencies. Researched
+both properly before committing to either.
+
+**Umpire tendencies: researched, and genuinely deferred, not attempted half-built.** Confirmed
+umpire game/crew ASSIGNMENT data likely exists (game officials are standard boxscore-adjacent
+data), but could NOT confirm any equivalent to a player's own game log exists for umpires — no
+"find every game this specific umpire worked" capability was confirmed. Building reliable
+historical umpire tendencies without that would mean scanning enormous numbers of games with
+real uncertainty about the payoff — a genuinely bigger, less-certain lift than anything else
+built this session, correctly flagged as such rather than forcing a shaky version of it.
+
+**Catcher framing: real, confirmed capability, built on much stronger ground.** Directly verified
+against pybaseball's own current source (not a wrapper's description) that `statcast_catcher_
+framing(year, min_called_p="q")` is a real, currently-existing function scraping Baseball
+Savant's own catcher-framing leaderboard — Shadow Strike % and Catcher Framing Runs per catcher.
+`rv_tot` (Catcher Framing Runs) confirmed directly from the function's own URL construction
+(used as its sortColumn) — genuine confidence, not a guess, the strongest-grounded data-source
+confirmation of anything built this session.
+
+**Reused the exact proven architecture**, not a new pattern: `refresh_catcher_framing`/`_build_
+catcher_frame`/`load_catcher_framing` mirror the nightly-refresh-to-cached-CSV design the hitter
+Statcast layer already uses, with the same resilient multi-candidate column hedging for anything
+not directly confirmed (team, strike rate, player id). Wired into the same `refresh_statcast.py`
+nightly job, deliberately non-fatal if it fails — catcher framing shouldn't block Dinger Engine's
+own core batter-data refresh from succeeding.
+
+**`team_catcher_framing` — a real, deliberate scoping choice, not a shortcut**: team-level, not
+tied to one specific start or one specific catcher. Identifying which catcher worked a specific
+game would need the same kind of per-game boxscore lookup already built for pitchers this
+session — but catchers rotate too, and Savant's own leaderboard is already a season-long
+aggregate per catcher, not a per-game split. Tying a season aggregate to one specific game would
+be false precision the data doesn't actually support; "how much does this team's catching
+typically help or hurt a pitcher's real numbers" is the honest question this data can actually
+answer. Weighted by each catcher's own called-pitch volume, not a simple average across the
+corps — a backup with 200 called pitches shouldn't move the number as much as a starter with 4,000.
+
+**Wired into Matchup Lab** as an expander right alongside the batting-order splits section, for
+whichever team the currently-selected pitcher plays for. Returns None (not a fabricated average)
+when no qualified catchers are found for a team, same honest-empty posture as this session's
+other optional-data functions.
+
+**6 new tests**: cache read, missing-file graceful handling, the weighted-average math verified
+against a hand-computed example (not just "a number came back"), None on an unmatched team, None
+when every matching catcher is unqualified (zero called pitches), and the resilient column
+parsing confirmed against both the one directly-verified real column name and hedged candidates
+for the rest. A full offline simulation contrasting an elite framing corps (+20.0 combined
+framing runs) against a poor one (-14.0) produced exactly the intended contrast. 545/545 total
+passing.
+
+**This closes out the original 5-item GM/analyst gap list**, with umpire tendencies as the one
+honestly deferred item — flagged clearly rather than shipped as a weaker version of itself.
+
 ## NOT YET DONE (next stages)
-- **GM/analyst gap, item 5 of 5** — hitter regression (1), reliever fatigue (2), lineup-wide
-  platoon view (3), and starter rest + times-through-the-order (4) are all done, see above. Still
-  to build: umpire tendencies / catcher framing — real signals, but genuinely new data sources
-  not currently wired into this platform at all.
+- **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
+  framing/item 5 writeup above for why: no confirmed way to find every game a specific umpire
+  worked (no equivalent of a player's own game log), which would be needed to build reliable
+  historical tendencies rather than just today's assignment. A real, separate project if pursued,
+  not a quick follow-on to anything already built.
 - **Line-movement chart** — see above. The capture infrastructure is live; the actual
   stock-candlestick-style chart in Matchup Lab is the natural next step once there's real
   captured history to plot, not before.

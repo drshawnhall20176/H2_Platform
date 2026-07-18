@@ -24,6 +24,7 @@ import pandas as pd
  
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 DEFAULT_PATH = os.path.join(DATA_DIR, "statcast_batters.csv")
+CATCHER_FRAMING_PATH = os.path.join(DATA_DIR, "catcher_framing.csv")
  
 LG_HR_PA = 0.033          # league HR per PA, the anchor for calibration
 MIN_PA_QUALIFIED = 100    # PA floor for computing the league barrel->HR calibration
@@ -239,3 +240,101 @@ def build_hitter_regression_table(rows: list, statcast: Dict[int, Dict],
     # line with their real performance" wants both tails, not just one.
     out.sort(key=lambda x: abs(x["Delta"]), reverse=True)
     return out
+
+
+# --------------------------------------------------------------- catcher framing
+def _build_catcher_frame(raw: pd.DataFrame) -> pd.DataFrame:
+    """Normalize Savant's catcher-framing leaderboard into a compact, resilient frame.
+
+    Pure and Savant-free so it can be unit-tested, same discipline _build_statcast_frame above
+    already follows. rv_tot (Catcher Framing Runs) is confirmed directly from pybaseball's own
+    statcast_catcher_framing source (used as the sortColumn in its own URL construction) — real
+    confidence, not a guess. The other column names (strike rate, team, player id) are hedged
+    across multiple reasonable candidates, the same resilience-to-drift pattern _series already
+    uses elsewhere in this file, since they could not be confirmed with the same certainty."""
+    df = _norm_cols(raw)
+    out = pd.DataFrame({
+        "player_id": _series(df, "player_id", "playerid", "mlbam", "key_mlbam", "catcher_id", fill=0).astype(int),
+        "name": _build_name(df),
+        "team": _series(df, "team", "team_abbrev", "team_abbr", "team_name", fill="").astype(str),
+        "called_pitches": _series(df, "n_called_pitches", "called_pitches", "pitches", fill=0.0),
+        "strike_rate": _series(df, "strike_rate", "shadow_strike_pct", "csr", "zone_strike_rate", fill=0.0),
+        "framing_runs": _series(df, "rv_tot", "framing_runs", "catcher_framing_runs", fill=0.0),
+    })
+    return out[out["player_id"] > 0].reset_index(drop=True)
+
+
+def refresh_catcher_framing(year: int, out_path: str = CATCHER_FRAMING_PATH) -> str:
+    """Pull Savant's catcher-framing leaderboard via pybaseball and write a compact CSV to disk.
+    Same nightly-refresh architecture already proven for hitter Statcast data above — the
+    dashboard reads the cached file instantly and never blocks on Savant.
+
+    Uses pybaseball.statcast_catcher_framing(year) — a real, confirmed function (verified
+    directly against pybaseball's own source during scoping, not assumed from a wrapper's
+    description) that scrapes Baseball Savant's catcher-framing leaderboard: Shadow Strike % and
+    Catcher Framing Runs per catcher, qualified at Savant's own default of ~6 called pitches in
+    the shadow zone per team game.
+
+    Returns the path written. Run nightly alongside refresh_statcast.py."""
+    from pybaseball import statcast_catcher_framing
+
+    raw = statcast_catcher_framing(year)
+    out = _build_catcher_frame(raw)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    out.to_csv(out_path, index=False)
+    print(f"Wrote {len(out)} catchers to {out_path}")
+    return out_path
+
+
+def load_catcher_framing(path: str = CATCHER_FRAMING_PATH) -> Dict[int, Dict]:
+    """Read the cached catcher-framing CSV. Returns {player_id: {...}}, or {} if the file is
+    missing — callers must treat this as optional, same posture as load() above for hitters."""
+    if not os.path.exists(path):
+        return {}
+    df = pd.read_csv(path)
+    if df.empty:
+        return {}
+    lookup: Dict[int, Dict] = {}
+    for r in df.itertuples(index=False):
+        d = r._asdict()
+        lookup[int(d["player_id"])] = {
+            "name": d.get("name"),
+            "team": d.get("team"),
+            "called_pitches": float(d.get("called_pitches", 0) or 0),
+            "strike_rate": float(d.get("strike_rate", 0) or 0),
+            "framing_runs": float(d.get("framing_runs", 0) or 0),
+        }
+    return lookup
+
+
+def team_catcher_framing(framing_lookup: Dict[int, Dict], team: str) -> Optional[Dict]:
+    """Team-level catcher-framing read: this team's catching corps combined, weighted by each
+    catcher's own called-pitch volume — NOT tied to a specific start or a specific catcher on a
+    specific date.
+
+    A REAL, DELIBERATE SCOPING CHOICE, not a shortcut: identifying which specific catcher caught
+    a specific past start (or will catch tonight) would need the same kind of per-game boxscore
+    lookup this file already does elsewhere for pitchers — but catchers rotate too, and Savant's
+    leaderboard itself is already a SEASON-LONG aggregate per catcher, not a per-game one. Trying
+    to tie a season-aggregate metric to one specific game would be a false precision this data
+    doesn't actually support. A team-level read — "how much does this team's catching typically
+    help or hurt a pitcher's real numbers" — is the honest, supportable question to ask instead.
+
+    Returns None if no catchers with real called-pitch volume were found for this team (a team
+    filter that matched nothing, or every candidate is a thin, unqualified sample) — callers
+    should treat this as "no data," not show a fabricated average."""
+    team_catchers = [c for c in framing_lookup.values()
+                     if c.get("team") == team and c.get("called_pitches", 0) > 0]
+    if not team_catchers:
+        return None
+    total_pitches = sum(c["called_pitches"] for c in team_catchers)
+    if total_pitches <= 0:
+        return None
+    weighted_strike_rate = sum(c["strike_rate"] * c["called_pitches"] for c in team_catchers) / total_pitches
+    total_framing_runs = sum(c["framing_runs"] for c in team_catchers)
+    return {
+        "team": team,
+        "catchers": sorted(team_catchers, key=lambda c: c["called_pitches"], reverse=True),
+        "strike_rate": round(weighted_strike_rate, 4),
+        "framing_runs": round(total_framing_runs, 1),
+    }
