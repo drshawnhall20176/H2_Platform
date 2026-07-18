@@ -191,13 +191,13 @@ def test_regression_table_sorted_by_absolute_delta_both_directions():
 # ----------------------------------------------------------------- catcher framing
 def _write_catcher_framing_cache(tmp):
     df = pd.DataFrame([
-        dict(player_id=1, name="Good Framer", team="NYY", called_pitches=4000,
+        dict(player_id=1, name="Good Framer", team_id=147, team="New York Yankees", called_pitches=4000,
             strike_rate=0.550, framing_runs=15.0),
-        dict(player_id=2, name="Backup Catcher", team="NYY", called_pitches=800,
+        dict(player_id=2, name="Backup Catcher", team_id=147, team="New York Yankees", called_pitches=800,
             strike_rate=0.480, framing_runs=1.0),
-        dict(player_id=3, name="Bad Framer", team="BOS", called_pitches=3500,
+        dict(player_id=3, name="Bad Framer", team_id=111, team="Boston Red Sox", called_pitches=3500,
             strike_rate=0.470, framing_runs=-12.0),
-        dict(player_id=4, name="Unqualified", team="LAD", called_pitches=0,
+        dict(player_id=4, name="Unqualified", team_id=119, team="Los Angeles Dodgers", called_pitches=0,
             strike_rate=0.0, framing_runs=0.0),
     ])
     path = os.path.join(tmp, "catcher_framing.csv")
@@ -211,24 +211,40 @@ def test_load_catcher_framing_reads_cache():
         lookup = SC.load_catcher_framing(path)
     assert lookup[1]["name"] == "Good Framer"
     assert lookup[1]["framing_runs"] == 15.0
-    print("✓ load_catcher_framing correctly reads a cached CSV")
+    assert lookup[1]["team_id"] == 147
+    print("✓ load_catcher_framing correctly reads a cached CSV, including the enriched team_id")
 
 
 def test_load_catcher_framing_missing_file_graceful():
     assert SC.load_catcher_framing("/nonexistent/path.csv") == {}
 
 
+def test_load_catcher_framing_team_id_none_when_column_absent():
+    # A cache written BEFORE the team-enrichment step ran (or before this feature existed) has
+    # no team_id column at all — must come back as None, not a fabricated 0 that could
+    # coincidentally match some real team's id.
+    df = pd.DataFrame([dict(player_id=1, name="No Team Yet", called_pitches=500,
+                           strike_rate=0.50, framing_runs=1.0)])
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "catcher_framing.csv")
+        df.to_csv(path, index=False)
+        lookup = SC.load_catcher_framing(path)
+    assert lookup[1]["team_id"] is None
+    print("✓ load_catcher_framing gives an honest None team_id, not a fabricated 0, for a pre-enrichment cache")
+
+
 def test_team_catcher_framing_weights_by_called_pitches():
     with tempfile.TemporaryDirectory() as tmp:
         path = _write_catcher_framing_cache(tmp)
         lookup = SC.load_catcher_framing(path)
-    result = SC.team_catcher_framing(lookup, "NYY")
+    result = SC.team_catcher_framing(lookup, 147)
     assert result is not None
     # weighted average: (0.550*4000 + 0.480*800) / 4800
     expected = (0.550 * 4000 + 0.480 * 800) / 4800
     assert abs(result["strike_rate"] - round(expected, 4)) < 1e-6
     assert result["framing_runs"] == 16.0   # 15.0 + 1.0, summed not averaged
     assert len(result["catchers"]) == 2
+    assert result["team"] == "New York Yankees"   # display name still correctly surfaced
     print("✓ team_catcher_framing correctly weights strike rate by called-pitch volume across the whole corps")
 
 
@@ -236,7 +252,7 @@ def test_team_catcher_framing_none_when_team_not_found():
     with tempfile.TemporaryDirectory() as tmp:
         path = _write_catcher_framing_cache(tmp)
         lookup = SC.load_catcher_framing(path)
-    assert SC.team_catcher_framing(lookup, "SEA") is None
+    assert SC.team_catcher_framing(lookup, 999) is None
     print("✓ team_catcher_framing returns None rather than a fabricated average for an unmatched team")
 
 
@@ -244,8 +260,18 @@ def test_team_catcher_framing_none_when_all_unqualified():
     with tempfile.TemporaryDirectory() as tmp:
         path = _write_catcher_framing_cache(tmp)
         lookup = SC.load_catcher_framing(path)
-    assert SC.team_catcher_framing(lookup, "LAD") is None   # only catcher has 0 called_pitches
+    assert SC.team_catcher_framing(lookup, 119) is None   # only catcher has 0 called_pitches
     print("✓ team_catcher_framing returns None when every matching catcher has zero real sample")
+
+
+def test_team_catcher_framing_none_when_team_id_falsy():
+    # Regression guard for the real bug: pitcher.get("_team_id") can legitimately be None if
+    # that field isn't populated — must not silently match against everything.
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _write_catcher_framing_cache(tmp)
+        lookup = SC.load_catcher_framing(path)
+    assert SC.team_catcher_framing(lookup, None) is None
+    print("✓ team_catcher_framing returns None for a falsy team_id rather than matching everything")
 
 
 def test_build_catcher_frame_resilient_to_column_names():

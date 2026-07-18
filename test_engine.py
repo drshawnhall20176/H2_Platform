@@ -790,33 +790,33 @@ def test_get_pitcher_starts_requests_regular_season_only(monkeypatch):
     print("✓ get_pitcher_starts_this_season explicitly requests regular-season-only games")
 
 
-# ----------------------------------------------------------------- get_player_current_team_name
-def test_get_player_current_team_name_real_shape(monkeypatch):
+# ----------------------------------------------------------------- get_player_current_team
+def test_get_player_current_team_real_shape(monkeypatch):
     fake_response = {"people": [{"id": 123, "fullName": "Test Catcher",
                                  "currentTeam": {"id": 109, "name": "Arizona Diamondbacks"}}]}
     monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake_response)
-    name = E.get_player_current_team_name(123)
-    assert name == "Arizona Diamondbacks"
-    print("✓ get_player_current_team_name correctly extracts the team name from currentTeam")
+    team = E.get_player_current_team(123)
+    assert team == {"id": 109, "name": "Arizona Diamondbacks"}
+    print("✓ get_player_current_team correctly extracts both id and name from currentTeam")
 
 
-def test_get_player_current_team_name_none_when_no_current_team(monkeypatch):
+def test_get_player_current_team_none_when_no_current_team(monkeypatch):
     fake_response = {"people": [{"id": 123, "fullName": "Retired Player"}]}   # no currentTeam key
     monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake_response)
-    assert E.get_player_current_team_name(123) is None
-    print("✓ get_player_current_team_name returns None, not a fabricated team, for a player with no current team")
+    assert E.get_player_current_team(123) is None
+    print("✓ get_player_current_team returns None, not a fabricated team, for a player with no current team")
 
 
-def test_get_player_current_team_name_none_on_fetch_failure(monkeypatch):
+def test_get_player_current_team_none_on_fetch_failure(monkeypatch):
     def fake_fetch(url, params=None, retries=2):
         raise ConnectionError("simulated network failure")
     monkeypatch.setattr(E, "fetch_json", fake_fetch)
-    assert E.get_player_current_team_name(123) is None
+    assert E.get_player_current_team(123) is None
 
 
-def test_get_player_current_team_name_none_on_empty_people(monkeypatch):
+def test_get_player_current_team_none_on_empty_people(monkeypatch):
     monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: {"people": []})
-    assert E.get_player_current_team_name(123) is None
+    assert E.get_player_current_team(123) is None
 
 
 if __name__ == "__main__":

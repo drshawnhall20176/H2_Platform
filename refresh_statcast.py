@@ -83,16 +83,21 @@ def main():
         for pid, c in cf_lookup.items():
             if c.get("called_pitches", 0) < MIN_CALLED_PITCHES_FOR_TEAM_LOOKUP:
                 continue
-            team_name = E.get_player_current_team_name(pid)
+            team = E.get_player_current_team(pid)
             enriched_rows.append({
-                "player_id": pid, "name": c.get("name"), "team": team_name or "",
+                "player_id": pid, "name": c.get("name"),
+                "team_id": (team or {}).get("id") or "",   # the real matching key
+                "team": (team or {}).get("name") or "",    # display only — see team_catcher_
+                                                           # framing's own docstring for why
+                                                           # matching by name specifically caused
+                                                           # a real production bug
                 "called_pitches": c.get("called_pitches", 0.0),
                 "strike_rate": c.get("strike_rate", 0.0),
                 "framing_runs": c.get("framing_runs", 0.0),
             })
         if enriched_rows:
             pd.DataFrame(enriched_rows).to_csv(cf_path, index=False)
-            with_team = sum(1 for r in enriched_rows if r["team"])
+            with_team = sum(1 for r in enriched_rows if r["team_id"])
             print(f"Wrote {len(enriched_rows)} qualified catchers, {with_team} with a resolved team.")
         else:
             print("No catchers met the called-pitches floor for team enrichment — "

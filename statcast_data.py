@@ -341,7 +341,12 @@ def refresh_catcher_framing(year: int, out_path: str = CATCHER_FRAMING_PATH,
 
 def load_catcher_framing(path: str = CATCHER_FRAMING_PATH) -> Dict[int, Dict]:
     """Read the cached catcher-framing CSV. Returns {player_id: {...}}, or {} if the file is
-    missing — callers must treat this as optional, same posture as load() above for hitters."""
+    missing — callers must treat this as optional, same posture as load() above for hitters.
+
+    "team_id" is None (not fabricated as 0 or "") for a cache written before refresh_statcast.py's
+    own team-enrichment step ran, or for a catcher who didn't resolve a team during that step —
+    team_catcher_framing below correctly treats a None team_id as "can't match this row to any
+    team," not a coincidental match against some real team's id of 0."""
     if not os.path.exists(path):
         return {}
     df = pd.read_csv(path)
@@ -350,9 +355,12 @@ def load_catcher_framing(path: str = CATCHER_FRAMING_PATH) -> Dict[int, Dict]:
     lookup: Dict[int, Dict] = {}
     for r in df.itertuples(index=False):
         d = r._asdict()
+        raw_team_id = d.get("team_id")
+        team_id = int(raw_team_id) if pd.notna(raw_team_id) and str(raw_team_id) != "" else None
         lookup[int(d["player_id"])] = {
             "name": d.get("name"),
             "team": d.get("team"),
+            "team_id": team_id,
             "called_pitches": float(d.get("called_pitches", 0) or 0),
             "strike_rate": float(d.get("strike_rate", 0) or 0),
             "framing_runs": float(d.get("framing_runs", 0) or 0),
@@ -360,17 +368,28 @@ def load_catcher_framing(path: str = CATCHER_FRAMING_PATH) -> Dict[int, Dict]:
     return lookup
 
 
-def team_catcher_framing(framing_lookup: Dict[int, Dict], team: str) -> Optional[Dict]:
+def team_catcher_framing(framing_lookup: Dict[int, Dict], team_id: Optional[int]) -> Optional[Dict]:
     """Team-level catcher-framing read: this team's catching corps combined, weighted by each
     catcher's own called-pitch volume — NOT tied to a specific start or a specific catcher on a
     specific date.
 
-    "team" IS NOT SOURCED FROM SAVANT ITSELF — confirmed directly from a real response's own
+    MATCHES BY NUMERIC team_id, NOT TEAM NAME — a real fix after a real production bug, not a
+    hypothetical concern: an earlier version matched by name, and Cleveland Guardians came back
+    "no qualified catcher framing data found" despite the cache genuinely having real, enriched
+    data. Team name strings in this codebase can come from DIFFERENT MLB Stats API endpoints
+    (people/{id}.currentTeam.name here vs. the schedule endpoint's teams.home/away.team.name
+    building pitcher["Team"] elsewhere) — two endpoints returning superficially similar strings
+    is exactly the kind of thing that can silently fail a straight string comparison with no
+    error, just a quiet "no data" result indistinguishable from a genuine data gap. Numeric ids
+    are unambiguous across endpoints in a way display strings aren't guaranteed to be. Callers
+    should pass a numeric team_id (e.g. pitcher["_team_id"] in Matchup Lab), not pitcher["Team"].
+
+    "team_id" IS NOT SOURCED FROM SAVANT ITSELF — confirmed directly from a real response's own
     column list that Baseball Savant's catcher-framing leaderboard has no team column at all.
-    This lookup's "team" values come from refresh_statcast.py's own team-enrichment step
-    (mlb_engine.get_player_current_team_name, a separate MLB Stats API lookup run once per
-    qualified catcher during the nightly refresh), not from anything in this module's own Savant
-    pull. A cache read before that enrichment step has run will have every catcher's team blank,
+    This lookup's "team_id" values come from refresh_statcast.py's own team-enrichment step
+    (mlb_engine.get_player_current_team, a separate MLB Stats API lookup run once per qualified
+    catcher during the nightly refresh), not from anything in this module's own Savant pull. A
+    cache read before that enrichment step has run will have every catcher's team_id as None,
     and this function will correctly return None for every team until it has.
 
     A REAL, DELIBERATE SCOPING CHOICE, not a shortcut: identifying which specific catcher caught
@@ -381,11 +400,13 @@ def team_catcher_framing(framing_lookup: Dict[int, Dict], team: str) -> Optional
     doesn't actually support. A team-level read — "how much does this team's catching typically
     help or hurt a pitcher's real numbers" — is the honest, supportable question to ask instead.
 
-    Returns None if no catchers with real called-pitch volume were found for this team (a team
-    filter that matched nothing, or every candidate is a thin, unqualified sample) — callers
-    should treat this as "no data," not show a fabricated average."""
+    Returns None if team_id is falsy, or if no catchers with real called-pitch volume were found
+    for this team (a team filter that matched nothing, or every candidate is a thin, unqualified
+    sample) — callers should treat this as "no data," not show a fabricated average."""
+    if not team_id:
+        return None
     team_catchers = [c for c in framing_lookup.values()
-                     if c.get("team") == team and c.get("called_pitches", 0) > 0]
+                     if c.get("team_id") == team_id and c.get("called_pitches", 0) > 0]
     if not team_catchers:
         return None
     total_pitches = sum(c["called_pitches"] for c in team_catchers)
@@ -394,7 +415,13 @@ def team_catcher_framing(framing_lookup: Dict[int, Dict], team: str) -> Optional
     weighted_strike_rate = sum(c["strike_rate"] * c["called_pitches"] for c in team_catchers) / total_pitches
     total_framing_runs = sum(c["framing_runs"] for c in team_catchers)
     return {
-        "team": team,
+        "team_id": team_id,
+        "team": next((c.get("team") for c in team_catchers if c.get("team")), ""),  # display
+                                                                                     # name, pulled
+                                                                                     # from a
+                                                                                     # matched
+                                                                                     # catcher's
+                                                                                     # own record
         "catchers": sorted(team_catchers, key=lambda c: c["called_pitches"], reverse=True),
         "strike_rate": round(weighted_strike_rate, 4),
         "framing_runs": round(total_framing_runs, 1),

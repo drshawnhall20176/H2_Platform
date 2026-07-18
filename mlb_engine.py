@@ -1064,14 +1064,20 @@ def get_pitcher_batting_order_splits(pitcher_id: int, season: int,
     return out
 
 
-def get_player_current_team_name(player_id: int) -> Optional[str]:
-    """A general person -> current team NAME lookup — {BASE}/people/{id} returns a "currentTeam"
-    object (with both id and name) on the base person object for an active player, no special
-    hydration needed. Returns the NAME specifically (e.g. "Arizona Diamondbacks"), not just the
-    numeric id, because that's the format every other "Team" field in this codebase already uses
-    (mlb_engine's own hitter/pitcher rows, build_pitching_slate, etc.) — returning just an id
-    would need a second lookup to convert it into the string callers actually need to match
-    against.
+def get_player_current_team(player_id: int) -> Optional[Dict[str, Any]]:
+    """A general person -> current team lookup, returning BOTH the numeric id and the display
+    name — {BASE}/people/{id} returns a "currentTeam" object with both on the base person
+    object for an active player, no special hydration needed.
+
+    RETURNS BOTH, DELIBERATELY, NOT JUST THE NAME (an earlier version of this function returned
+    only the name — changed after a real production issue): team NAME strings in this codebase
+    can come from DIFFERENT MLB Stats API endpoints (this one, people/{id}.currentTeam.name; vs.
+    the schedule endpoint's teams.home/away.team.name, used to build pitcher["Team"] elsewhere)
+    — two different endpoints returning superficially similar strings is exactly the kind of
+    thing that can silently NOT match in a straight string comparison, with no error, just a
+    quiet "no data found" result that looks like a data gap rather than a matching bug. The
+    numeric id is unambiguous across endpoints in a way a display string isn't guaranteed to be;
+    callers doing any MATCHING should use "id", and reserve "name" for display only.
 
     BUILT SPECIFICALLY BECAUSE Baseball Savant's catcher-framing leaderboard turned out to have
     NO team column at all — confirmed directly from a real response's own column list during a
@@ -1096,4 +1102,6 @@ def get_player_current_team_name(player_id: int) -> Optional[str]:
     except (IndexError, AttributeError):
         return None
     team = person.get("currentTeam") or {}
-    return team.get("name")
+    if "id" not in team:
+        return None
+    return {"id": team.get("id"), "name": team.get("name")}

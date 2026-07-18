@@ -98,14 +98,14 @@ def test_team_enrichment_respects_called_pitches_floor_and_writes_team_names(tmp
 
     def fake_get_team(pid):
         team_lookup_calls.append(pid)
-        return "Arizona Diamondbacks" if pid == 111 else None
+        return {"id": 109, "name": "Arizona Diamondbacks"} if pid == 111 else None
 
     buf = io.StringIO()
     with patch.object(SC, "refresh", fake_refresh), \
         patch.object(SC, "load", fake_load), \
         patch.object(SC, "refresh_catcher_framing", fake_refresh_catcher_framing), \
         patch.object(SC, "load_catcher_framing", fake_load_catcher_framing), \
-        patch.object(RS.E, "get_player_current_team_name", fake_get_team), \
+        patch.object(RS.E, "get_player_current_team", fake_get_team), \
         patch.object(sys, "argv", ["refresh_statcast.py", "2026"]), \
         redirect_stdout(buf):
         rc = RS.main()
@@ -118,8 +118,9 @@ def test_team_enrichment_respects_called_pitches_floor_and_writes_team_names(tmp
     written = pd.read_csv(cf_path)
     assert len(written) == 1   # the thin-sample catcher was dropped, not just left with a blank team
     assert written.iloc[0]["name"] == "Qualified Catcher"
-    assert written.iloc[0]["team"] == "Arizona Diamondbacks"
-    print("✓ team enrichment respects the called-pitches floor and correctly writes resolved team names")
+    assert written.iloc[0]["team_id"] == 109   # the real matching key
+    assert written.iloc[0]["team"] == "Arizona Diamondbacks"   # the display name
+    print("✓ team enrichment respects the called-pitches floor and correctly writes both the resolved team_id and display name")
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 556/556 tests green)
+## What's in this checkpoint (all tested — 558/558 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -2229,6 +2229,51 @@ is the test that caught the hardcoded-path bug above. 556/556 total passing.
 **Next run's result will show whether this closes it out.** If catcher framing data appears in
 Matchup Lab with real team names attached, this was the fix. Genuinely more confident this time —
 every piece was confirmed against the real response, not reasoned from a plausible hypothesis.
+
+### Catcher framing: real production bug in team matching, fixed by switching to numeric ids (2026-07-18)
+A clean workflow run (no warnings beyond the unrelated Node.js notice) confirmed the pipeline
+itself was finally working. But checking the actual page showed "No qualified catcher framing
+data found for Cleveland Guardians" despite real, enriched data existing in the cache — a genuine
+new bug, not the same one recurring.
+
+**Diagnosed before patching**: `team_catcher_framing` was matching by team NAME string
+(`pitcher["Team"]` against the enrichment step's own resolved name). Those two strings come from
+DIFFERENT MLB Stats API endpoints — the schedule endpoint (building `pitcher["Team"]` elsewhere
+in this codebase) and the people endpoint's own `currentTeam.name` (used by the new enrichment
+lookup). Two endpoints returning superficially similar strings for the same team is exactly the
+kind of thing that can silently fail a straight string comparison with zero error — no exception,
+no warning, just a quiet "no data" that looks identical to a genuine data gap.
+
+**Fixed at the design level, not with a targeted patch.** Rather than try to normalize or
+fuzzy-match strings (a real path to a DIFFERENT kind of silent bug later), switched the entire
+chain to numeric team ids, which are unambiguous across MLB Stats API endpoints in a way display
+strings aren't guaranteed to be:
+- `mlb_engine.get_player_current_team` (renamed from `get_player_current_team_name`) now returns
+  BOTH id and name — id for matching, name kept for display only.
+- `refresh_statcast.py`'s enrichment step writes both `team_id` and `team` to the cache.
+- `load_catcher_framing` reads `team_id` back honestly as `None` (not a fabricated 0) for a
+  pre-enrichment cache or an unresolved catcher.
+- `team_catcher_framing` matches by `team_id` now, with an explicit falsy-id guard (`if not
+  team_id: return None`) so a missing id can never accidentally match against everything —
+  returning both the id AND a real display name (pulled from a matched catcher's own record) so
+  callers still get something readable, not just a number.
+- Matchup Lab's call site updated to pass `pitcher.get("_team_id")`, already available on every
+  pitcher row from earlier session work, instead of the string `pitcher["Team"]`.
+
+**6 tests updated, 3 new ones added** — the fixture itself now carries both `team_id` and `team`
+(matching the real enriched CSV shape), every existing assertion updated to match by numeric id,
+plus new coverage for the pre-enrichment None-team_id case, the falsy-id guard specifically (the
+exact class of bug a careless id-based redesign could reintroduce), and the display name still
+being correctly surfaced in the returned dict. A full realistic simulation of the whole redesigned
+chain — fetch, parse, enrich, and match — ran clean with two different teams and a deliberately
+unmatched id. 558/558 total passing.
+
+**Three real, distinct bugs found and fixed in this catcher framing feature across this session,
+each confirmed against real evidence rather than guessed**: a missing `gameType`-style parameter
+causing a parse failure, two column-name mismatches causing silent data loss, and a cross-endpoint
+string-matching bug causing a silent "no data" result. Worth noting as a pattern: every one of
+these was invisible from a green checkmark alone, and each was only found because Shawn actually
+checked the deployed output against what was expected, not just the workflow status.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
