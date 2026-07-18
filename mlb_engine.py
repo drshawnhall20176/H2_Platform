@@ -1062,3 +1062,38 @@ def get_pitcher_batting_order_splits(pitcher_id: int, season: int,
                     "avg": round(avg, 3), "obp": round(obp, 3), "slg": round(slg, 3),
                     "ops": round(obp + slg, 3)}
     return out
+
+
+def get_player_current_team_name(player_id: int) -> Optional[str]:
+    """A general person -> current team NAME lookup — {BASE}/people/{id} returns a "currentTeam"
+    object (with both id and name) on the base person object for an active player, no special
+    hydration needed. Returns the NAME specifically (e.g. "Arizona Diamondbacks"), not just the
+    numeric id, because that's the format every other "Team" field in this codebase already uses
+    (mlb_engine's own hitter/pitcher rows, build_pitching_slate, etc.) — returning just an id
+    would need a second lookup to convert it into the string callers actually need to match
+    against.
+
+    BUILT SPECIFICALLY BECAUSE Baseball Savant's catcher-framing leaderboard turned out to have
+    NO team column at all — confirmed directly from a real response's own column list during a
+    real production debugging session (['id', 'name', 'pitches', 'rv_tot', 'pct_tot', 'rv_11',
+    'pct_11', ...] — no 'team' anywhere), not assumed from documentation. Every other roster/
+    team-scoped function in this file goes team_id -> player list; this is the one place so far
+    that needs the OPPOSITE direction, player_id -> team, so it's a genuinely new, general
+    capability, not a specialization of an existing one.
+
+    Returns None if the player has no current team (retired, minor leagues, or a lookup
+    failure) — callers should treat this as "unknown team," not silently attribute the player to
+    a wrong or default team.
+
+    HONEST LIMITATION, same posture as this file's other roster-based functions: not verified
+    against a live response (statsapi.mlb.com unreachable from this sandbox)."""
+    try:
+        data = fetch_json(f"{BASE}/people/{player_id}")
+    except Exception:
+        return None
+    try:
+        person = data.get("people", [{}])[0]
+    except (IndexError, AttributeError):
+        return None
+    team = person.get("currentTeam") or {}
+    return team.get("name")

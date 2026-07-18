@@ -15,7 +15,17 @@ import sys
 import traceback
 from datetime import date
 
+import pandas as pd
+
+import mlb_engine as E
 import statcast_data as SC
+
+# Catchers below this called-pitch floor get dropped during team enrichment, not just left with
+# a blank team — a token handful of called pitches wouldn't move team_catcher_framing's own
+# weighted average meaningfully anyway (it already weights by called_pitches), so there's no real
+# value in spending a lookup on them, and real value in NOT spending ~100+ network calls on
+# catchers who'll barely register in the result.
+MIN_CALLED_PITCHES_FOR_TEAM_LOOKUP = 100
 
 
 def main():
@@ -58,6 +68,35 @@ def main():
         print(f"::warning::Catcher framing refresh failed (non-fatal, batter cache unaffected): {first_line}")
         print("Full traceback:")
         print(tb)
+        cf_lookup = {}
+
+    if cf_lookup:
+        print(f"\nLooking up each qualified catcher's current team (>= "
+             f"{MIN_CALLED_PITCHES_FOR_TEAM_LOOKUP} called pitches)...")
+        # Savant's catcher-framing leaderboard has NO team column at all — confirmed directly
+        # from a real response's own column list during a real production debugging session, not
+        # assumed. team_catcher_framing (statcast_data.py) needs a real team to group by, so this
+        # fills that gap with a genuinely different data source (MLB Stats API's own per-player
+        # currentTeam), one lookup per qualified catcher — bounded by the called-pitches floor
+        # above, not run against the full, unqualified (min_called_p=0) catcher list.
+        enriched_rows = []
+        for pid, c in cf_lookup.items():
+            if c.get("called_pitches", 0) < MIN_CALLED_PITCHES_FOR_TEAM_LOOKUP:
+                continue
+            team_name = E.get_player_current_team_name(pid)
+            enriched_rows.append({
+                "player_id": pid, "name": c.get("name"), "team": team_name or "",
+                "called_pitches": c.get("called_pitches", 0.0),
+                "strike_rate": c.get("strike_rate", 0.0),
+                "framing_runs": c.get("framing_runs", 0.0),
+            })
+        if enriched_rows:
+            pd.DataFrame(enriched_rows).to_csv(cf_path, index=False)
+            with_team = sum(1 for r in enriched_rows if r["team"])
+            print(f"Wrote {len(enriched_rows)} qualified catchers, {with_team} with a resolved team.")
+        else:
+            print("No catchers met the called-pitches floor for team enrichment — "
+                 "leaving the unqualified cache as-is.")
 
     print("\nThe dashboard will use this automatically on its next refresh.")
     return 0

@@ -253,7 +253,7 @@ def _build_catcher_frame(raw: pd.DataFrame) -> pd.DataFrame:
     across multiple reasonable candidates, the same resilience-to-drift pattern _series already
     uses elsewhere in this file, since they could not be confirmed with the same certainty."""
     df = _norm_cols(raw)
-    pid_series = _series(df, "player_id", "playerid", "mlbam", "key_mlbam", "catcher_id", fill=0)
+    pid_series = _series(df, "id", "player_id", "playerid", "mlbam", "key_mlbam", "catcher_id", fill=0)
     out = pd.DataFrame({
         "player_id": pid_series.fillna(0).astype(int),   # fillna BEFORE astype(int) — a raw NaN
                                                           # (a real possibility in Savant's own
@@ -264,7 +264,8 @@ def _build_catcher_frame(raw: pd.DataFrame) -> pd.DataFrame:
         "name": _build_name(df),
         "team": _series(df, "team", "team_abbrev", "team_abbr", "team_name", fill="").astype(str),
         "called_pitches": _series(df, "n_called_pitches", "called_pitches", "pitches", fill=0.0),
-        "strike_rate": _series(df, "strike_rate", "shadow_strike_pct", "csr", "zone_strike_rate", fill=0.0),
+        "strike_rate": _series(df, "pct_tot", "strike_rate", "shadow_strike_pct", "csr",
+                               "zone_strike_rate", fill=0.0),
         "framing_runs": _series(df, "rv_tot", "framing_runs", "catcher_framing_runs", fill=0.0),
     })
     return out[out["player_id"] > 0].reset_index(drop=True)
@@ -363,6 +364,14 @@ def team_catcher_framing(framing_lookup: Dict[int, Dict], team: str) -> Optional
     """Team-level catcher-framing read: this team's catching corps combined, weighted by each
     catcher's own called-pitch volume — NOT tied to a specific start or a specific catcher on a
     specific date.
+
+    "team" IS NOT SOURCED FROM SAVANT ITSELF — confirmed directly from a real response's own
+    column list that Baseball Savant's catcher-framing leaderboard has no team column at all.
+    This lookup's "team" values come from refresh_statcast.py's own team-enrichment step
+    (mlb_engine.get_player_current_team_name, a separate MLB Stats API lookup run once per
+    qualified catcher during the nightly refresh), not from anything in this module's own Savant
+    pull. A cache read before that enrichment step has run will have every catcher's team blank,
+    and this function will correctly return None for every team until it has.
 
     A REAL, DELIBERATE SCOPING CHOICE, not a shortcut: identifying which specific catcher caught
     a specific past start (or will catch tonight) would need the same kind of per-game boxscore

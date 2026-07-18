@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 551/551 tests green)
+## What's in this checkpoint (all tested — 556/556 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -2175,6 +2175,60 @@ detection logic itself, independent of what Savant's actual real column names tu
 
 **Next run's annotations should show the real column names directly** — that's the piece needed
 to write the actual, final, confirmed fix rather than another reasoned-but-unverified attempt.
+
+### Catcher framing: real column names confirmed, real fixes applied, team enrichment built (2026-07-18)
+The diagnostic from the previous round worked exactly as intended — the next run's annotation
+showed Savant's real column list directly: `['id', 'name', 'pitches', 'rv_tot', 'pct_tot',
+'rv_11', 'pct_11', ...]`. Mapped every field systematically against the hedged candidates rather
+than eyeballing it, confirming exactly two were simple naming misses and one was a real
+structural gap:
+
+- `player_id` → real column is `id`, not in the original hedge list at all — this was the
+  critical bug, explaining why every row silently defaulted to player_id=0 and got filtered out.
+- `strike_rate` → real column is `pct_tot` ("percent total," the cumulative shadow-zone rate —
+  matches the MLB.com glossary's own description of Shadow Strike %), also not hedged.
+- `name` and `framing_runs` (`rv_tot`) were already correct — the original research on `rv_tot`
+  specifically (confirmed from pybaseball's own source) held up.
+- `team` → genuinely absent from this response, not a naming miss. Confirmed by checking the
+  full column list systematically, not assumed.
+
+**Both naming fixes applied directly** to `_build_catcher_frame`'s hedge candidates — `id` and
+`pct_tot` added, confirmed real, not more guessing.
+
+**The missing team column needed a real, separate solution, not another hedge.** Built `mlb_
+engine.get_player_current_team_name(player_id)` — a genuinely new capability (every other
+roster function in this file goes team→players; this is the first player→team lookup) using
+MLB Stats API's own `currentTeam` field on the base person object. Wired into `refresh_
+statcast.py` as a real team-enrichment step run once during the nightly refresh: after the
+Savant pull, catchers below a called-pitches floor (100) are dropped before any lookup happens —
+bounding the cost to catchers with a real role, not the full unqualified list — then each
+qualified catcher's team is resolved and the cache is rewritten with real team names attached.
+`team_catcher_framing`'s own docstring updated to say plainly where "team" actually comes from
+now, so a future reader isn't left assuming it's part of the Savant pull itself.
+
+**A real bug caught by the new dedicated test, not shipped**: the enrichment step's write call
+was hardcoded to `SC.CATCHER_FRAMING_PATH` instead of the actual `cf_path` returned by the
+refresh call — meaning a custom output path (exactly what the tests themselves use) would have
+been silently ignored, writing to the wrong location. Caught immediately because the test
+actually exercises the write path and reads the file back, not just checks that the function
+returns without error.
+
+**Verified with a full realistic simulation using properly-quoted CSV content** — which itself
+caught a mistake in the FIRST draft of that simulation (an unquoted comma inside a "Lastname,
+Firstname" value shifted every subsequent column, the exact kind of issue that was originally
+suspected as a possible contributor to the whole investigation). Fixed the test data, re-ran:
+names correctly flip to "Firstname Lastname," the called-pitches floor correctly excludes a
+thin-sample catcher, and team enrichment correctly resolves for both qualified catchers.
+
+**9 new tests**: 4 for `get_player_current_team_name` (real response shape, no current team,
+fetch failure, empty people list) and a dedicated team-enrichment test confirming the
+called-pitches floor is actually enforced (verified via a call-count check on the lookup
+function, not just asserted) and that resolved team names are correctly written to disk — this
+is the test that caught the hardcoded-path bug above. 556/556 total passing.
+
+**Next run's result will show whether this closes it out.** If catcher framing data appears in
+Matchup Lab with real team names attached, this was the fix. Genuinely more confident this time —
+every piece was confirmed against the real response, not reasoned from a plausible hypothesis.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
