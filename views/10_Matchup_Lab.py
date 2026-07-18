@@ -16,9 +16,12 @@ import streamlit as st
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
 import plotly.graph_objects as go
 
+import sports
 import mlb_engine as E
 import matchup_data as MD
 from datetime import datetime
+
+game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER   # shared with Best Bets
 
 st.title("🔬 Matchup Lab")
 st.caption("Pitch-level arsenal vs. hitter vulnerability — the specific pitches to attack with. "
@@ -64,9 +67,48 @@ if not pitchers:
     st.warning("No probable starters found for this date yet — check back closer to game time.")
     st.stop()
 
+# Time slot + Game filters — same shared helpers Best Bets and the WNBA/NBA/NCAAMB/NFL Matchup
+# Lab pages already use, narrowing a busy night's pitcher list before picking one. Two pitchers
+# share a game (home/away starter), so filtering is by the shared "Game" label, not per-pitcher.
+for r in pitchers:
+    r["_slot"] = slot_of(game_dt(r.get("_game_date")))
+slots_present = sorted({r["_slot"] for r in pitchers}, key=lambda s: SLOT_ORDER.get(s, 9))
+
+c_slot, c_game = st.columns(2)
+with c_slot:
+    slot_pick = st.selectbox("Time slot", ["All slate"] + slots_present)
+slot_pitchers = pitchers if slot_pick == "All slate" else [r for r in pitchers if r["_slot"] == slot_pick]
+
+if not slot_pitchers:
+    st.info(f"No probable starters in the {slot_pick} slot — try a different time slot or \"All slate\".")
+    st.stop()
+
+game_date_by_label: dict = {}
+for r in slot_pitchers:
+    game_date_by_label.setdefault(r["Game"], r.get("_game_date"))
+games_present = sorted(game_date_by_label, key=lambda g: game_date_by_label[g] or "~")
+
+
+def _game_label_fmt(g: str) -> str:
+    dt = game_dt(game_date_by_label.get(g))   # already Eastern-localized by game_dt itself
+    if dt is None:
+        return g
+    return f"{dt.strftime('%-I:%M %p ET')} — {g}"
+
+
+with c_game:
+    game_pick = st.selectbox("Game", ["All games in this slot"] + games_present,
+                             format_func=lambda g: _game_label_fmt(g) if g != "All games in this slot" else g)
+final_pitchers = (slot_pitchers if game_pick == "All games in this slot"
+                 else [r for r in slot_pitchers if r["Game"] == game_pick])
+
+if not final_pitchers:
+    st.info("No probable starters match the current filters — try a different time slot or game.")
+    st.stop()
+
 # Pitcher picker (only those we have arsenal data for are useful, but show all with a flag).
 p_by_label = {}
-for r in pitchers:
+for r in final_pitchers:
     pid = r.get("_pid")
     has = pid in arsenals
     label = f"{r['Pitcher']} ({r['Team']}){'' if has else '  — no pitch data'}"
@@ -89,6 +131,34 @@ h_label = st.selectbox(f"Hitter (opposing {opp or 'lineup'} — type to search)"
                        sorted(h_by_label.keys()))
 hitter = h_by_label[h_label]
 hitter_hid = hitter.get("_pid")
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def load_injuries(team_id):
+    if not team_id:
+        return []
+    return E.get_team_injuries(team_id)
+
+
+team_injuries = load_injuries(pitcher.get("_team_id"))
+opp_injuries = load_injuries(pitcher.get("_opp_id"))
+if team_injuries or opp_injuries:
+    with st.expander("🏥 Injury report — both teams"):
+        for label, injuries in ((pitcher["Team"], team_injuries), (opp or "Opponent", opp_injuries)):
+            if not injuries:
+                continue
+            st.markdown(f"**{label}**")
+            idf = pd.DataFrame(injuries)[["player", "position", "status", "return_date", "comment"]]
+            idf = idf.rename(columns={"player": "Player", "position": "Pos", "status": "Status",
+                                      "return_date": "Est. Return", "comment": "Comment"})
+            st.dataframe(idf, hide_index=True, use_container_width=True)
+        st.caption("Sourced from MLB Stats API's own roster status field — any player not on "
+                  "Active status (10/15/60-day IL, restricted, bereavement, paternity, etc.), "
+                  "using MLB's own description for that status. \"Est. Return\" and \"Comment\" "
+                  "are always blank — the roster endpoint reports a status, not a detailed "
+                  "injury description (body part, expected return), so this stays honestly "
+                  "empty rather than guessed. Informational only, not folded into any signal "
+                  "on this page.")
 
 st.divider()
 
