@@ -45,13 +45,21 @@ CREATE TABLE IF NOT EXISTS bets (
     result     TEXT,
     notes      TEXT,
     ticket     TEXT,
-    sport      TEXT
+    sport      TEXT,
+    trader     TEXT
 );
 """
+# trader: a real, deliberate first step toward future multi-user support, not multi-user support
+# itself — there's no login system asking "who are you" yet (see sports.require_trading_access,
+# a single shared password, not per-person identity), so nothing currently POPULATES this
+# reliably. Added now specifically so a future real login system doesn't need a schema migration
+# on top of everything else it'll need to build — the column already exists, even though nothing
+# meaningfully fills it in yet. Optional on every call (add_bet/update_bet), same as every other
+# field here.
 
 _FIELDS = ["ts_placed", "slate_date", "game", "player", "market", "side", "line",
            "entry_odds", "model_prob", "stake", "book", "close_odds", "result", "notes",
-           "ticket", "sport"]
+           "ticket", "sport", "trader"]
  
  
 # ===========================================================================
@@ -94,6 +102,8 @@ def _sqlite_conn(db_path: str = DB_PATH):
             con.execute("ALTER TABLE bets ADD COLUMN ticket TEXT")
         if "sport" not in cols:             # migrate DBs that predate multi-sport
             con.execute("ALTER TABLE bets ADD COLUMN sport TEXT")
+        if "trader" not in cols:            # migrate DBs that predate multi-user support
+            con.execute("ALTER TABLE bets ADD COLUMN trader TEXT")
         yield con
         con.commit()
     finally:
@@ -133,9 +143,10 @@ CREATE TABLE IF NOT EXISTS bets (
     ts_placed  TEXT NOT NULL,
     slate_date TEXT, game TEXT, player TEXT, market TEXT, side TEXT,
     line REAL, entry_odds INTEGER, model_prob REAL, stake REAL, book TEXT,
-    close_odds INTEGER, result TEXT, notes TEXT, ticket TEXT, sport TEXT
+    close_odds INTEGER, result TEXT, notes TEXT, ticket TEXT, sport TEXT, trader TEXT
 );
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS sport TEXT;
+ALTER TABLE bets ADD COLUMN IF NOT EXISTS trader TEXT;
 """
  
  

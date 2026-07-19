@@ -59,12 +59,18 @@ class Sport:
 _MLB_MARKETS = [
     "batter_home_runs", "batter_total_bases", "batter_hits", "batter_strikeouts",
     "pitcher_strikeouts", "pitcher_outs", "pitcher_walks",
+    "batter_runs_scored", "batter_rbis", "batter_stolen_bases", "pitcher_earned_runs",
 ]
 _MLB_MARKET_MAP = {
     "Batter HR": "batter_home_runs", "Batter Total Bases": "batter_total_bases",
     "Batter Total Hits": "batter_hits", "Batter Strikeouts": "batter_strikeouts",
     "Pitcher Strikeouts": "pitcher_strikeouts", "Pitcher Outs": "pitcher_outs",
     "Pitcher Walks": "pitcher_walks",
+    # Market keys confirmed directly against the-odds-api.com's own live "Betting Markets"
+    # documentation (the exact provider odds_api.py integrates with) -- not guessed or inferred
+    # from naming convention alone.
+    "Batter Runs": "batter_runs_scored", "Batter RBIs": "batter_rbis",
+    "Batter Stolen Bases": "batter_stolen_bases", "Pitcher Earned Runs": "pitcher_earned_runs",
 }
 
 REGISTRY: Dict[str, Sport] = {
@@ -310,3 +316,52 @@ def slot_of(dt) -> str:
     if h < 20:
         return "Evening"
     return "Late"
+
+
+def _check_trading_password(entered: str, expected) -> bool:
+    """Pure, testable comparison — the actual widget/session-state handling lives in
+    require_trading_access below, which needs a real Streamlit context this doesn't.
+
+    FAILS CLOSED, NOT OPEN, ON A MISSING SECRET: if TRADING_PASSWORD isn't configured at all
+    (expected is falsy), this returns False regardless of what's entered — an unconfigured
+    secret should never silently grant access. Same "refuse rather than fabricate a pass"
+    discipline already used throughout this platform's own data-quality checks (e.g.
+    data_freshness.py refusing to report "green" for a file that doesn't exist)."""
+    if not expected:
+        return False
+    return entered == str(expected)
+
+
+def require_trading_access(page_name: str = "This page") -> bool:
+    """A second, narrower gate specifically for Bet Log and Track Record — a person's own real
+    trading/betting history, separate from the existing owner/public audience split (which
+    governs the WHOLE deployment, not one page). Someone with owner access sees Best Bets,
+    Graded Picks, Matchup Lab, everything — but Bet Log/Track Record additionally ask for a
+    second, narrower password before showing anything.
+
+    A REAL, DELIBERATE FIRST STEP TOWARD FUTURE MULTI-USER LOGIN, NOT A FULL LOGIN SYSTEM ITSELF:
+    this is one shared password, not per-person identity — there's no concept of "which person"
+    entered it. betlog.py's own new "trader" column is the other half of this same forward-
+    looking step: the DATA MODEL can already record whose bet something is, even though nothing
+    yet asks a real per-person login question to populate it correctly. Building a full
+    multi-user auth system now would be scope creep beyond what was actually asked for; this
+    closes the real, current gap (Bet Log/Track Record visible to anyone with owner access, full
+    stop) without pretending to solve a broader problem that hasn't been scoped yet.
+
+    Reuses st.session_state so a correct password only needs to be entered once per browser
+    session, not re-typed on every page navigation within it. Returns True once unlocked (caller
+    proceeds normally); returns False and renders the password prompt itself (caller should
+    st.stop() right after, matching require_live_engine/require_sport's own return contract)."""
+    import streamlit as st
+    if st.session_state.get("trading_unlocked"):
+        return True
+    st.warning(f"🔒 {page_name} needs a separate password — this is real trading history, kept "
+              f"apart from the rest of the owner build.")
+    entered = st.text_input("Password", type="password", key="trading_password_input")
+    if entered:
+        if _check_trading_password(entered, st.secrets.get("TRADING_PASSWORD")):
+            st.session_state["trading_unlocked"] = True
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+    return False

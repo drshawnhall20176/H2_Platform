@@ -26,6 +26,32 @@ def test_crud():
         assert len(B.list_bets(db)) == 0
 
 
+def test_trader_field():
+    # A real, deliberate first step toward future multi-user support (see the field's own
+    # comment in betlog.py) -- confirms it round-trips correctly through the real add/list/
+    # update flow, and that it stays genuinely optional (an existing caller that never mentions
+    # it, like test_crud above, must keep working unchanged).
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "bets.db")
+        bid = B.add_bet(db, player="Ohtani", game="LAD @ SF", market="Batter HR",
+                        side="Over", line=0.5, entry_odds=350, stake=5.0, trader="Shawn")
+        bet = B.list_bets(db)[0]
+        assert bet["trader"] == "Shawn"
+        B.update_bet(bid, db, trader="Deezy")
+        assert B.list_bets(db)[0]["trader"] == "Deezy"
+        print("✓ trader field round-trips correctly through add_bet/list_bets/update_bet")
+
+
+def test_trader_field_is_optional():
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "bets.db")
+        # No trader specified at all -- must not raise, must not silently break existing callers
+        bid = B.add_bet(db, player="Judge", game="NYY @ BOS", market="Batter HR",
+                        side="Over", line=0.5, entry_odds=280, stake=5.0)
+        assert B.list_bets(db)[0]["trader"] is None
+        print("✓ trader field is genuinely optional, defaulting to None when never specified")
+
+
 def test_clv_pct():
     assert B.clv_pct(120, 100) == 10.0       # +120 vs +100 close -> beat by 10%
     assert B.clv_pct(-150, -150) == 0.0      # flat

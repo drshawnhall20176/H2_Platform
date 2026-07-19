@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 636/636 tests green)
+## What's in this checkpoint (all tested — 670/670 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -2841,6 +2841,136 @@ WNBA-shaped plays (Points/Rebounds markets, not Batter HR/Pitcher Strikeouts), c
 grading and sorting for a real non-MLB sport's own market names — plus a re-export identity check
 in `test_projections.py` confirming `P.conviction_to_grade` resolves to the exact same object as
 `grading.conviction_to_grade`. 636/636 total passing.
+
+### Bet Log / Track Record access gate + a forward-compatible schema field (2026-07-18)
+Shawn asked how to keep his personal trading Ledger separate from Deezy if it gets migrated onto
+the platform, recognizing this points toward eventually needing real user login. Investigated the
+actual current access model before proposing anything: `AUDIENCE` (owner vs. public) is a
+deployment-level secret, not a per-person login — there's no concept of "who is viewing" beyond
+that binary switch, and `betlog.py`'s `DATABASE_URL` is the same, a single per-deployment secret.
+So anyone on the "owner" build today shares the exact same Bet Log database, with no field
+distinguishing whose bet is whose. Confirmed the concern was real, not building a fix for a
+non-problem.
+
+**Recommended, and built, the narrower fix over a full separate deployment**: a second password
+gate specifically in front of Bet Log and Track Record, not a whole second app. A full separate
+instance would mean either duplicating the entire platform (wasteful) or still sharing
+infrastructure anyway just to avoid that duplication — while the actual thing being protected is
+two specific pages, not the whole deployment.
+
+**`sports.require_trading_access(page_name)`** — matches the exact style and return contract of
+the existing `require_live_engine`/`require_sport` gates (returns True to proceed, False with the
+prompt already rendered, caller does `st.stop()`). The actual comparison logic is split into a
+separate, pure `_check_trading_password(entered, expected)` specifically so it's unit-testable
+without a real Streamlit runtime — the same "extract the testable core" discipline used
+throughout this session for view-layer logic. **Fails closed on a missing secret, not open**: if
+`TRADING_PASSWORD` isn't configured at all, the gate denies access regardless of what's typed,
+the same "refuse rather than fabricate a pass" posture already used in `data_freshness.py`'s own
+checks. Reuses `st.session_state` so a correct password is only needed once per browser session,
+not re-entered on every page navigation.
+
+**A real, deliberate first step toward the future multi-user need, not a full login system built
+prematurely**: `betlog.py`'s schema gained a `trader` column (SQLite migration matching the exact
+existing pattern used for `sport`/`ticket`; Postgres schema and its own `ALTER TABLE ADD COLUMN
+IF NOT EXISTS` updated identically). Nothing populates it reliably yet — there's no real
+per-person login asking "who are you" — but a future login system won't need a schema migration
+on top of everything else it has to build; the column already exists, genuinely optional on every
+call today, exactly like every other field in this table.
+
+**9 new tests**: 4 for `_check_trading_password` (correct/incorrect, failing closed on a missing
+secret — including the specific empty-string edge case that could slip through a careless
+truthiness check, and correctly coercing a non-string secret since `st.secrets` can return other
+types depending on how a value was declared), 1 confirming both Bet Log and Track Record actually
+call the gate by reading their real source (not just trusting the edit landed correctly — the
+exact same class of "wired in or not" verification used for the Command Center pointer earlier
+this session), 2 confirming the `trader` field round-trips correctly through the real add/list/
+update flow and stays genuinely optional, plus a direct, real verification of the SQLite migration
+path against a simulated pre-existing database (a real bet surviving the upgrade with the new
+column correctly defaulting to None, not lost or corrupted). 643/643 total passing.
+
+**Real deployment step still needed, not yet done**: `TRADING_PASSWORD` has to be added to the
+owner build's Streamlit Cloud secrets for the gate to open at all — until it's set, `_check_
+trading_password`'s fail-closed design means Bet Log and Track Record are locked out for
+everyone, Shawn included. Flagged directly rather than left to be discovered as a surprise.
+
+### Four new MLB props markets: Runs, RBIs, Stolen Bases, Earned Runs (2026-07-18)
+Shawn wanted these four markets added to round out MLB coverage — the platform previously
+modeled seven markets (HR/TB/Hits/K for batters, K/Outs/Walks for pitchers), missing several
+common, real, bettable MLB props entirely.
+
+**A real, deliberate methodology split, reasoned through before writing any code**: HR/Hits/TB
+are determined ENTIRELY by a batter's own PA outcome, which is why the existing `batter_pa_probs`/
+`simulate_batter` pipeline works for them. Runs and RBIs are NOT — a run needs a teammate to
+drive the batter in, an RBI needs a teammate already on base. Modeling that properly would mean
+simulating a whole lineup's baserunning state across an inning, a real, much bigger undertaking
+than fit this scope. Instead built `batter_counting_rate` — the batter's own season Runs/RBI/SB
+rate (already reflecting his real team context over a real season), regressed toward league
+average for thin samples, scaled to tonight's real projected PA, and — for Runs/RBI specifically
+— adjusted for the opposing starter's ERA relative to league average (a real, reasoned proxy, not
+a fabricated precision the data doesn't support). Modeled via Poisson, using the exact closed
+form for the standard "Over 0.5" line these markets are quoted at (`poisson_over_half_prob`,
+`P(X>=1) = 1 - e^(-lambda)`) rather than Monte Carlo simulation — more precise, no simulation
+noise, and cheaper for a single well-defined question.
+
+**Stolen Bases deliberately gets no opponent adjustment at all** — SB success depends much more
+on the catcher's arm/pop time than the pitcher's own run prevention, and that signal isn't
+modeled on this platform yet. An honest, simpler read of the batter's own rate, not a fabricated
+matchup factor.
+
+**Pitcher Earned Runs extends the existing pitcher pipeline directly** (`project_pitcher`/
+`simulate_pitcher`, the same functions already producing K/BB/Outs) rather than building a
+separate mechanism — genuinely the same kind of market as those three (one pitcher, one "over a
+line" question). Shrinks the pitcher's own earned-runs-per-inning rate toward league average
+(innings-pitched-based, since ERA is itself an innings-based rate), with NO opposing-lineup
+adjustment — `lineup_k_bb_rates` only has K/BB rates, not a real "how much does this lineup
+score" signal, and fabricating one from K/BB alone would overclaim a precision the data doesn't
+support. Same honest posture as SB on the hitter side, for the same underlying reason.
+
+**Real market keys confirmed against live documentation, not guessed**: searched and fetched
+the-odds-api.com's own "Betting Markets" page directly (the exact provider `odds_api.py`
+integrates with) — `batter_runs_scored`, `batter_rbis`, `batter_stolen_bases`, `pitcher_earned_
+runs` all confirmed to exist exactly as assumed. `sports.py`'s `_MLB_MARKETS`/`_MLB_MARKET_MAP`
+updated with these real, confirmed keys, feeding Bet Log's market dropdown, CLV capture, and live
+odds fetching across Media Room/Podcast Studio/Matchup Lab.
+
+**Honest, market-specific "Why" reasoning added, not left to a generic fallback**: `_hitter_
+reasons`/`_pitcher_reasons` extended so Runs/RBI reference the real opposing-starter-ERA
+adjustment the model actually applies, SB honestly states it's reading the batter's own rate with
+no matchup factor (since the model genuinely has none), and Earned Runs references the pitcher's
+own ERA/projected innings — each reason describing what the model actually does, not a
+one-size-fits-all "leans Over of a typical line" placeholder every new market would otherwise
+have silently fallen through to.
+
+**A confirmed, deliberate non-extension**: `apply_bullpen_blend_to_top_plays`/`BULLPEN_BLEND_
+MARKET_COLS` were NOT extended to the new markets. That mechanism sums `simulate_batter`'s
+PA-outcome counts across two phases — a method specific to HR/Hits/TB/SO, genuinely mismatched
+with the new Poisson-rate methodology. Confirmed directly that omitting the new markets from that
+dict is safe, documented behavior (plays with markets not in it are simply left untouched, never
+silently dropped or miscomputed) rather than a gap — extending the blend to these markets would
+be real, separate future work, not squeezed into this scope.
+
+**Also confirmed, not assumed**: Dinger Engine is intentionally, permanently HR-specific by
+design (confirmed by reading its own module docstring) — correctly out of scope for these new
+markets, which are surfaced through Best Bets/Graded Picks/Command Center/Retrospective instead,
+all of which already route through the shared `build_best_bets`/`market_map` infrastructure.
+
+**18 new tests across 3 files**: `batter_counting_rate`/`poisson_over_half_prob` (10 tests —
+PA-floor gating, linear PA-scaling, real shrinkage toward league average on a thin sample, the
+opposing-ERA adjustment raising/lowering expected count correctly, the closed-form Poisson
+formula hand-verified against Python's own `math.exp`, monotonicity, and a real floating-point
+edge case caught and fixed in the test itself — an unrealistic exp_count=100 where float64
+genuinely can't distinguish the result from 1.0, not a bug in the implementation); `enrich_
+hitter_rows` integration (3 tests, including the real edge case of a stat dict entirely missing
+runs/rbi/stolenBases, confirming graceful defaults rather than a crash); `project_pitcher`/
+`simulate_pitcher` earned-runs extension (5 tests, including a hand-verified expected value from
+a real 3.25 ERA calculation — caught and fixed a wrong assumption in the test's own expected
+bounds, not the implementation); market-specific reasoning (5 tests); a full `build_best_bets`
+integration test confirming all four new markets produce real, correctly-shaped plays; and 2
+`sports.py` consistency tests (every `market_map` value is a real, fetched market key; all four
+new keys match the confirmed Odds API documentation exactly). Plus a full, realistic end-to-end
+simulation through the entire `load_mlb_graded_picks_board` pipeline — all 11 markets present on
+one simulated board, each new market's play carrying real Fair odds, a real letter grade, and
+honest reasoning text. 670/670 total passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

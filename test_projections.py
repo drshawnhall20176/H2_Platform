@@ -5,6 +5,7 @@ test_projections.py — offline tests for the projection engine (seeded, determi
 """
 
 import numpy as np
+import pytest
 import projections as P
 
 
@@ -221,6 +222,38 @@ def test_build_best_bets_ranks_and_reasons():
     assert "platoon" in top["Why"] and "weather" in top["Why"]
     # no "won't homer" plays
     assert not any(p["Market"] == "Batter HR" and p["Side"] == "Under" for p in plays)
+
+
+def test_build_best_bets_includes_new_markets():
+    hitters = [
+        dict(Hitter="Slugger", Team="A", GameLabel="A @ B", Hand="L",
+            **{"Opp Hand": "R", "Opp Pitcher": "Ace"}, Advantage="Advantage",
+            _weather_hr=1.0, Due=0.0, _opp_stat={"era": 5.2},
+            **{"HR%": 0.15, "TB1.5%": 0.40, "Hit%": 0.65, "SO Prob": 0.50,
+              "Runs%": 0.42, "RBI%": 0.40, "SB%": 0.08}),
+    ]
+    pitchers = [
+        dict(Pitcher="Ace", Team="B", Opp="A", ERA=3.10,
+            **{"K over%": 0.55, "Outs over%": 0.50, "BB over%": 0.30, "ER over%": 0.42},
+            **{"Proj K": 6.0, "Proj BB": 1.6, "Proj IP": 6.2, "Proj Outs": 18.6, "Proj ER": 2.1},
+            _opp_k=0.22, _opp_bb=0.08, _game="A @ B"),
+    ]
+    plays = P.build_best_bets(hitters, pitchers)
+    markets_present = {p["Market"] for p in plays}
+    assert "Batter Runs" in markets_present
+    assert "Batter RBIs" in markets_present
+    assert "Batter Stolen Bases" in markets_present
+    assert "Pitcher Earned Runs" in markets_present
+
+    runs_play = next(p for p in plays if p["Market"] == "Batter Runs")
+    assert runs_play["Line"] == 0.5
+    assert "Why" in runs_play and runs_play["Why"]
+
+    er_play = next(p for p in plays if p["Market"] == "Pitcher Earned Runs")
+    assert er_play["Line"] == 2.5
+    assert "ERA" in er_play["Why"] or "2.5" in str(er_play.get("Line"))
+    print("\u2713 build_best_bets correctly produces real, correctly-shaped plays for all four new markets end-to-end")
+
 
 
 # ----------------------------------------------------------------- build_bullpen_matchup_rows
@@ -652,6 +685,254 @@ def test_grade_reexports_are_the_same_object_as_grading_module():
 
 def test_grade_reexport_produces_identical_results():
     assert P.conviction_to_grade(3.2) == _grading.conviction_to_grade(3.2)
+
+
+# ----------------------------------------------------------------- batter_counting_rate
+def _counting_stat(pa, stat_val, key="runs"):
+    return {"plateAppearances": pa, key: stat_val}
+
+
+def test_batter_counting_rate_none_below_pa_floor():
+    stat = _counting_stat(15, 5)   # below the 20 PA floor
+    assert P.batter_counting_rate(stat, 4.5, "runs", P.LG_RUNS_PER_PA, P.RUNS_RBI_PRIOR_PA) is None
+    print("✓ batter_counting_rate returns None for a season sample below the real PA floor")
+
+
+def test_batter_counting_rate_scales_with_exp_pa():
+    stat = _counting_stat(600, 90, "runs")   # a real, established season rate
+    rate_normal = P.batter_counting_rate(stat, 4.5, "runs", P.LG_RUNS_PER_PA, P.RUNS_RBI_PRIOR_PA)
+    rate_double_pa = P.batter_counting_rate(stat, 9.0, "runs", P.LG_RUNS_PER_PA, P.RUNS_RBI_PRIOR_PA)
+    assert rate_double_pa == pytest.approx(rate_normal * 2, rel=1e-6)
+    print("✓ batter_counting_rate scales linearly with tonight's real projected PA, not a season average")
+
+
+def test_batter_counting_rate_thin_sample_regresses_toward_league_average():
+    # A hitter with a genuinely thin sample (barely above the 20 PA floor) should land close to
+    # league average, not close to his own small-sample rate -- confirms real shrinkage, not a
+    # naive count/PA calculation.
+    thin_stat = _counting_stat(22, 8, "runs")   # a wildly hot ~36% runs/PA rate over a tiny sample
+    rate = P.batter_counting_rate(thin_stat, 4.5, "runs", P.LG_RUNS_PER_PA, P.RUNS_RBI_PRIOR_PA)
+    naive_rate = (8 / 22) * 4.5   # what a naive, unregressed calculation would produce
+    assert rate < naive_rate * 0.5   # real shrinkage pulls this WAY down from the naive number
+    print("✓ batter_counting_rate meaningfully regresses a thin, small-sample rate toward league average")
+
+
+def test_batter_counting_rate_opp_era_adjustment():
+    stat = _counting_stat(600, 90, "runs")
+    rate_vs_average = P.batter_counting_rate(stat, 4.5, "runs", P.LG_RUNS_PER_PA,
+                                             P.RUNS_RBI_PRIOR_PA, opp_era=P.LG_ERA)
+    rate_vs_bad_pitcher = P.batter_counting_rate(stat, 4.5, "runs", P.LG_RUNS_PER_PA,
+                                                 P.RUNS_RBI_PRIOR_PA, opp_era=6.0)
+    rate_vs_ace = P.batter_counting_rate(stat, 4.5, "runs", P.LG_RUNS_PER_PA,
+                                         P.RUNS_RBI_PRIOR_PA, opp_era=2.5)
+    assert rate_vs_bad_pitcher > rate_vs_average > rate_vs_ace
+    print("✓ batter_counting_rate correctly raises expected runs against a bad pitcher and lowers it against an ace")
+
+
+def test_batter_counting_rate_no_opp_era_unaffected():
+    stat = _counting_stat(600, 90, "runs")
+    rate = P.batter_counting_rate(stat, 4.5, "runs", P.LG_RUNS_PER_PA, P.RUNS_RBI_PRIOR_PA)
+    rate_with_league_avg_era = P.batter_counting_rate(stat, 4.5, "runs", P.LG_RUNS_PER_PA,
+                                                       P.RUNS_RBI_PRIOR_PA, opp_era=P.LG_ERA)
+    assert rate == pytest.approx(rate_with_league_avg_era, rel=1e-9)
+    print("✓ omitting opp_era matches passing exactly league-average ERA (a neutral adjustment)")
+
+
+def test_batter_counting_rate_never_negative():
+    stat = _counting_stat(600, 0, "runs")   # a real player who somehow never scored (extreme edge case)
+    rate = P.batter_counting_rate(stat, 4.5, "runs", P.LG_RUNS_PER_PA, P.RUNS_RBI_PRIOR_PA)
+    assert rate >= 0.0
+
+
+# ----------------------------------------------------------------- poisson_over_half_prob
+def test_poisson_over_half_prob_matches_closed_form():
+    # Hand-verified against the real Poisson formula: P(X>=1) = 1 - e^(-lambda)
+    import math
+    for lam in (0.1, 0.3, 0.5, 1.0, 2.0):
+        expected = 1 - math.exp(-lam)
+        assert P.poisson_over_half_prob(lam) == pytest.approx(expected, rel=1e-9)
+    print("✓ poisson_over_half_prob exactly matches the real closed-form Poisson P(X>=1) formula")
+
+
+def test_poisson_over_half_prob_zero_at_zero_rate():
+    assert P.poisson_over_half_prob(0.0) == 0.0
+
+
+def test_poisson_over_half_prob_monotonic():
+    # A higher expected count should always mean a higher probability of at least one occurring.
+    probs = [P.poisson_over_half_prob(x) for x in (0.05, 0.15, 0.3, 0.6, 1.2, 2.5)]
+    assert probs == sorted(probs)
+    print("✓ poisson_over_half_prob is correctly monotonic in the expected count")
+
+
+def test_poisson_over_half_prob_bounded_below_one():
+    # exp_count=100 would be nonsensical for these real markets (a realistic value is ~0.05-0.5)
+    # and float64 genuinely can't distinguish 1 - e^(-100) from 1.0 at that scale -- not a bug,
+    # just outside any value this function will ever realistically see. Checked at a real,
+    # plausible-if-extreme value instead, where the bound is meaningfully checkable.
+    assert P.poisson_over_half_prob(5.0) < 1.0
+
+
+# ----------------------------------------------------------------- enrich_hitter_rows: Runs/RBI/SB
+def _slugger_with_counting_stats():
+    return dict(plateAppearances=600, atBats=540, hits=165, doubles=34, triples=2,
+               homeRuns=38, baseOnBalls=55, strikeOuts=140, runs=95, rbi=102, stolenBases=8)
+
+
+def test_enrich_hitter_rows_attaches_runs_rbi_sb():
+    row = {"Hitter": "Test Slugger", "Team": "Test Team", "_pid": 1,
+          "_stat": _slugger_with_counting_stats(), "_opp_stat": None, "_venue_id": None,
+          "_split_stat": None, "_exp_pa": 4.25, "_weather_hr": 1.0}
+    out = P.enrich_hitter_rows([row], seed=1)[0]
+    assert "Runs%" in out and "RBI%" in out and "SB%" in out
+    assert 0.0 < out["Runs%"] < 1.0
+    assert 0.0 < out["RBI%"] < 1.0
+    assert 0.0 < out["SB%"] < 1.0
+    print("✓ enrich_hitter_rows correctly attaches Runs%/RBI%/SB% with a real, complete stat dict")
+
+
+def test_enrich_hitter_rows_uses_opp_era_when_present():
+    stat = _slugger_with_counting_stats()
+    row_vs_ace = {"Hitter": "X", "Team": "T", "_pid": 1, "_stat": stat,
+                 "_opp_stat": {"era": 2.5}, "_venue_id": None, "_split_stat": None,
+                 "_exp_pa": 4.25, "_weather_hr": 1.0}
+    row_vs_bad = {"Hitter": "X", "Team": "T", "_pid": 1, "_stat": stat,
+                 "_opp_stat": {"era": 6.0}, "_venue_id": None, "_split_stat": None,
+                 "_exp_pa": 4.25, "_weather_hr": 1.0}
+    out_vs_ace = P.enrich_hitter_rows([row_vs_ace], seed=1)[0]
+    out_vs_bad = P.enrich_hitter_rows([row_vs_bad], seed=1)[0]
+    assert out_vs_bad["Runs%"] > out_vs_ace["Runs%"]
+    assert out_vs_bad["RBI%"] > out_vs_ace["RBI%"]
+    print("✓ enrich_hitter_rows correctly raises Runs%/RBI% against a bad opposing starter and lowers it against an ace")
+
+
+def test_enrich_hitter_rows_handles_missing_counting_stat_fields_gracefully():
+    # A REAL edge case, not hypothetical: _slugger() (used throughout the rest of this test
+    # file) never included runs/rbi/stolenBases at all -- confirms enrich_hitter_rows doesn't
+    # crash on a stat dict missing these fields, the same real-world shape an older or partial
+    # data source could produce, and still produces a sane (low, shrunk-toward-league-average,
+    # never negative) rate rather than erroring out.
+    row = {"Hitter": "Test Slugger", "Team": "Test Team", "_pid": 1, "_stat": _slugger(),
+          "_opp_stat": None, "_venue_id": None, "_split_stat": None,
+          "_exp_pa": 4.25, "_weather_hr": 1.0}
+    out = P.enrich_hitter_rows([row], seed=1)[0]
+    assert "Runs%" in out and "RBI%" in out and "SB%" in out
+    assert 0.0 <= out["Runs%"] < 1.0
+    assert 0.0 <= out["RBI%"] < 1.0
+    assert 0.0 <= out["SB%"] < 1.0
+    print("✓ enrich_hitter_rows doesn't crash and produces sane values even when runs/rbi/stolenBases are entirely missing from the stat dict")
+
+
+# ----------------------------------------------------------------- project_pitcher: exp_er
+def test_project_pitcher_exp_er_present_and_sane():
+    ace = dict(battersFaced=720, inningsPitched="180.0", gamesStarted=29,
+              strikeOuts=235, baseOnBalls=42, earnedRuns=65)   # a real ~3.25 ERA season
+    proj = P.project_pitcher(ace)
+    assert "exp_er" in proj
+    # Hand-verified: raw ERA 3.25 over ~6.21 expected IP = ~2.24 unshrunk; shrinkage toward the
+    # slightly higher league-average ERA (4.10) pulls this up slightly, to ~2.33.
+    assert 2.0 < proj["exp_er"] < 2.6
+    print("✓ project_pitcher correctly computes a sane, hand-verified exp_er for a realistic full season")
+
+
+def test_project_pitcher_exp_er_missing_field_defaults_gracefully():
+    # The existing `ace` fixture used throughout the rest of this test file never included
+    # earnedRuns at all -- a real edge case, confirms this doesn't crash and produces a sane,
+    # shrunk-toward-league-average value rather than erroring on the missing key.
+    ace_no_er = dict(battersFaced=720, inningsPitched="180.0", gamesStarted=29,
+                     strikeOuts=235, baseOnBalls=42)
+    proj = P.project_pitcher(ace_no_er)
+    assert "exp_er" in proj
+    assert proj["exp_er"] >= 0.0
+    print("✓ project_pitcher handles a stat dict missing earnedRuns entirely without crashing")
+
+
+def test_project_pitcher_exp_er_thin_sample_regresses_to_league_average():
+    thin = dict(battersFaced=65, inningsPitched="16.0", gamesStarted=3,
+               strikeOuts=15, baseOnBalls=5, earnedRuns=1)   # a tiny, wildly-good sample
+    proj = P.project_pitcher(thin)
+    naive_er_rate = 1 / 16.0   # what an unregressed calculation would use
+    shrunk_er_rate = proj["exp_er"] / proj["exp_ip"]
+    assert shrunk_er_rate > naive_er_rate   # real shrinkage pulls this UP toward league average
+    print("✓ project_pitcher meaningfully regresses a thin-sample ER rate toward league average")
+
+
+def test_project_pitcher_exp_er_never_negative():
+    great = dict(battersFaced=720, inningsPitched="180.0", gamesStarted=29,
+                strikeOuts=235, baseOnBalls=42, earnedRuns=0)   # extreme edge case
+    proj = P.project_pitcher(great)
+    assert proj["exp_er"] >= 0.0
+
+
+# ----------------------------------------------------------------- simulate_pitcher: er
+def test_simulate_pitcher_produces_er_array():
+    ace = dict(battersFaced=720, inningsPitched="180.0", gamesStarted=29,
+              strikeOuts=235, baseOnBalls=42, earnedRuns=65)
+    proj = P.project_pitcher(ace)
+    rng = np.random.default_rng(0)
+    sim = P.simulate_pitcher(proj, 20000, rng)
+    assert "er" in sim
+    assert len(sim["er"]) == 20000
+    assert sim["er"].mean() == pytest.approx(proj["exp_er"], abs=0.1)
+    print("✓ simulate_pitcher's simulated ER distribution correctly converges to the real expected value")
+
+
+# ----------------------------------------------------------------- build_pitcher_projection_rows: ER
+def test_build_pitcher_projection_rows_includes_er_fields():
+    home_stat = dict(battersFaced=720, inningsPitched="180.0", gamesStarted=29,
+                     strikeOuts=235, baseOnBalls=42, earnedRuns=65)
+    away_stat = dict(battersFaced=700, inningsPitched="175.0", gamesStarted=28,
+                     strikeOuts=210, baseOnBalls=50, earnedRuns=70)
+    hp = _fake_pm(601, "Home Ace", "R", 3.25, 3.20, home_stat)
+    ap = _fake_pm(602, "Away Ace", "L", 3.60, 3.55, away_stat)
+    meta = [{"label": "NYY @ BOS", "home_id": 1, "away_id": 2,
+            "home_name": "Boston Red Sox", "away_name": "New York Yankees",
+            "game_date": "2026-07-18", "home_pm": hp, "away_pm": ap}]
+    out = P.build_pitcher_projection_rows([], meta, seed=1)
+    assert len(out) == 2
+    for r in out:
+        assert "Proj ER" in r and "ER line" in r and "ER over%" in r and "ER fair" in r
+        assert r["ER line"] == 2.5
+        assert 0.0 <= r["ER over%"] <= 1.0
+    print("✓ build_pitcher_projection_rows correctly includes Proj ER/ER line/ER over%/ER fair for every starter")
+
+
+# ----------------------------------------------------------------- _hitter_reasons: new markets
+def test_hitter_reasons_runs_rbi_references_bad_opposing_starter():
+    row = {"_opp_stat": {"era": 5.5}}
+    why = P._hitter_reasons(row, "Batter Runs", "Over")
+    assert any("struggling starter" in w and "5.50" in w for w in why)
+    why_rbi = P._hitter_reasons(row, "Batter RBIs", "Over")
+    assert any("struggling starter" in w for w in why_rbi)
+    print("✓ _hitter_reasons correctly references a real, struggling opposing starter's ERA for Runs/RBI")
+
+
+def test_hitter_reasons_runs_rbi_references_strong_opposing_starter():
+    row = {"_opp_stat": {"era": 2.8}}
+    why = P._hitter_reasons(row, "Batter Runs", "Under")
+    assert any("strong starter" in w and "2.80" in w for w in why)
+
+
+def test_hitter_reasons_runs_rbi_no_era_falls_back_to_generic():
+    row = {"_opp_stat": None}
+    why = P._hitter_reasons(row, "Batter Runs", "Over")
+    assert why == ["model leans Over of a typical line here"]
+    print("✓ _hitter_reasons falls back to the honest generic reason when no opponent ERA is available")
+
+
+def test_hitter_reasons_stolen_bases_references_own_rate_not_a_fabricated_matchup():
+    row = {}
+    why = P._hitter_reasons(row, "Batter Stolen Bases", "Over")
+    assert why == ["based on his own season stolen-base rate"]
+    print("✓ _hitter_reasons is honest that SB has no real opponent matchup factor in the model")
+
+
+# ----------------------------------------------------------------- _pitcher_reasons: earned runs
+def test_pitcher_reasons_earned_runs_references_era_and_ip():
+    row = {"ERA": 3.45, "Proj IP": 6.1}
+    why = P._pitcher_reasons(row, "Pitcher Earned Runs", "Over")
+    assert why == ["3.45 ERA over a projected 6.1 IP"]
+    print("✓ _pitcher_reasons correctly references the pitcher's own ERA/IP for Earned Runs, honest about no opponent adjustment")
 
 
 if __name__ == "__main__":

@@ -255,6 +255,68 @@ def test_every_live_sport_implements_the_full_shared_page_contract():
     print("✓ every live non-MLB sport implements the full engine/projections contract every shared page needs")
 
 
+# ----------------------------------------------------------------- _check_trading_password
+def test_check_trading_password_correct():
+    assert S._check_trading_password("hunter2", "hunter2") is True
+
+
+def test_check_trading_password_incorrect():
+    assert S._check_trading_password("wrong", "hunter2") is False
+
+
+def test_check_trading_password_fails_closed_when_no_secret_configured():
+    # Regression guard for a real, deliberate design choice: an UNconfigured secret must never
+    # silently grant access, regardless of what's entered -- including an empty string, which
+    # could otherwise slip through a careless "not expected" check.
+    assert S._check_trading_password("", None) is False
+    assert S._check_trading_password("anything", None) is False
+    assert S._check_trading_password("", "") is False
+    print("\u2713 _check_trading_password fails closed (denies access) when no real password is configured")
+
+
+def test_check_trading_password_coerces_secret_to_string():
+    # st.secrets can return non-string types depending on how the secret was declared (e.g. a
+    # bare number in secrets.toml parses as an int) -- comparison must not silently fail just
+    # because the configured secret happens to be a different type than the typed-in string.
+    assert S._check_trading_password("1234", 1234) is True
+
+
+def test_bet_log_and_track_record_call_the_trading_gate():
+    # Regression guard confirming the gate is actually WIRED IN, not just that the function
+    # exists and works in isolation -- a real risk otherwise: sports.require_trading_access
+    # could be perfectly correct and simply never called from either page, leaving Bet Log/
+    # Track Record just as open as before with no error anywhere to reveal it.
+    bet_log_src = (_HERE / "views" / "4_#L01f4d2_Bet_Log.py").read_text()
+    track_record_src = (_HERE / "views" / "9_Track_Record.py").read_text()
+    assert "sports.require_trading_access(" in bet_log_src
+    assert "sports.require_trading_access(" in track_record_src
+    print("\u2713 both Bet Log and Track Record actually call sports.require_trading_access, confirmed by reading the real source, not assumed")
+
+
+def test_mlb_market_map_values_all_present_in_markets():
+    # A real, meaningful consistency property: every display-market -> Odds API key mapping in
+    # market_map must point at a key that's actually IN the fetched markets list -- otherwise a
+    # display market could silently reference a key the platform never actually queries live
+    # odds for, a real, silent bug (e.g. Bet Log showing "Batter Runs" as loggable while the
+    # live-odds fetch never requests batter_runs_scored at all).
+    mlb = S.get("MLB")
+    assert set(mlb.market_map.values()) <= set(mlb.markets)
+    print("\u2713 every MLB market_map value is a real key present in the fetched markets list")
+
+
+def test_mlb_new_props_markets_present():
+    # Regression guard for the real, confirmed Odds API market keys added for Runs/RBI/SB/ER --
+    # confirmed directly against the-odds-api.com's own live documentation, not guessed.
+    mlb = S.get("MLB")
+    assert mlb.market_map["Batter Runs"] == "batter_runs_scored"
+    assert mlb.market_map["Batter RBIs"] == "batter_rbis"
+    assert mlb.market_map["Batter Stolen Bases"] == "batter_stolen_bases"
+    assert mlb.market_map["Pitcher Earned Runs"] == "pitcher_earned_runs"
+    for key in ("batter_runs_scored", "batter_rbis", "batter_stolen_bases", "pitcher_earned_runs"):
+        assert key in mlb.markets
+    print("\u2713 all four new MLB prop markets are correctly registered with their real, confirmed Odds API keys")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
