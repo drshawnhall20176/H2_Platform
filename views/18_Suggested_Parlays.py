@@ -54,6 +54,25 @@ if not plays:
     st.info("No games on the board right now. Parlay suggestions appear here on an active slate.")
     st.stop()
 
+# --- market selection --------------------------------------------------------
+# A REAL, DELIBERATE PRODUCT DECISION, not just a nice-to-have filter: an early version of this
+# page auto-selected legs purely by conviction, and on a real slate three different real base
+# stealers' Stolen Bases legs alone filled the Safer tier before any other market appeared —
+# mathematically defensible (Stolen Bases genuinely is a more skewed market than Home Runs, so an
+# elite burner's conviction ratio can legitimately run higher than an elite slugger's for a
+# similar raw probability), but it read as far less realistic than what a person would actually
+# build themselves. Rather than Claude unilaterally re-tuning the model's own reference
+# probabilities to "fix" a skew that isn't actually wrong, the honest fix is letting a person
+# choose what they want to see — the same principle behind grading.build_parlay_leg_pool's own
+# max_per_market default (also tightened from 3 to 2 for the same real reason).
+markets_present = sorted({pl.get("Market") for pl in plays if pl.get("Market")})
+selected_markets = st.multiselect("Markets to include", options=markets_present,
+                                  default=markets_present)
+if not selected_markets:
+    st.info("Select at least one market above to see parlay suggestions.")
+    st.stop()
+plays = [pl for pl in plays if pl.get("Market") in selected_markets]
+
 # Deliberately NO time-slot/game filter here, unlike Graded Picks — a parlay is meant to draw
 # from the WHOLE slate at once (that's the point: a diverse handful of the night's best plays,
 # not one game's worth), narrowing to a single game would usually make it impossible to fill the
@@ -61,8 +80,8 @@ if not plays:
 parlays = grading.build_suggested_parlays(plays)
 
 if not parlays:
-    st.info("Not enough diverse graded plays on tonight's board yet to safely build a parlay — "
-            "check back closer to first pitch as lineups and matchups firm up.")
+    st.info("Not enough diverse graded plays match the selected markets to safely build a "
+            "parlay — try including more markets, or check back closer to first pitch.")
     st.stop()
 
 st.info(
