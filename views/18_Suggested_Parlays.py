@@ -2,6 +2,14 @@
 Suggested Parlays — ready-made parlay options for people who don't want to comb through the
 graded board themselves, built directly from the model's own top graded plays.
 
+Five tiers by risk (Safer/Steady/Balanced/Bold/Longshot, 2 through 6 legs), each with its OWN
+real objective, not just a different slice of the same ranking — Safer/Steady rank by real
+probability of hitting, Balanced uses the original Conviction metric, and Bold/Longshot rank by
+real payout size among plays that still cleared the actual grading floor. No leg, and no player,
+ever appears in more than one tier. Two earlier versions of this feature (cumulative tiers, then
+non-overlapping slices of one ranking) both got real feedback that led here — see
+grading.build_suggested_parlays' own docstring for the full history and reasoning.
+
 THE CORE SAFEGUARD, NOT AN AFTERTHOUGHT: a parlay's combined probability is only honestly the
 product of each leg's own probability if the legs are independent. Two legs on the same player
 almost never are (a home run leg and a total-bases leg on the same hitter are so tightly coupled
@@ -89,11 +97,16 @@ st.info(
     "6 legs is still only about a 5% chance of hitting all six — the odds below reflect that "
     "real math, not a guarantee. Combined odds assume each leg is independent; legs here never "
     "share a player (the single biggest way that assumption breaks), but two legs from the same "
-    "game can still carry some real, smaller correlation the math below doesn't fully capture."
+    "game can still carry some real, smaller correlation the math below doesn't fully capture.\n\n"
+    "📊 **What \"Fair\" means**: Fair odds are what a bet would need to pay to be break-even, "
+    "given the model's own probability — not what a sportsbook is actually offering. A big "
+    "negative number (like -480) means the model thinks this is VERY likely to happen, which is "
+    "exactly why it can still earn a high grade — it's not a bad price, it's the model saying "
+    "it's confident. Compare it to what your book actually offers to see if there's real value."
 )
 
 GRADE_COLOR = {"A": "#16783c", "B": "#2e7d32", "C": "#b8860b", "D": "#6b7280"}
-TIER_ICON = {"Safer": "🟢", "Balanced": "🟡", "Longshot": "🔴"}
+TIER_ICON = {"Safer": "🟢", "Steady": "🔵", "Balanced": "🟡", "Bold": "🟠", "Longshot": "🔴"}
 
 
 def _grade_badge(grade: dict) -> str:
@@ -121,7 +134,7 @@ for parlay in parlays:
             leg_fair_str = f"{leg_fair:+d}" if leg_fair is not None else "—"
             st.markdown(
                 f"{grade_html} **{leg['Player']}** ({leg['Team']}) — {leg['Market']} "
-                f"{leg['Side']} {leg['Line']:g} · Fair {leg_fair_str}",
+                f"{leg['Side']} {leg['Line']:g} · Fair odds {leg_fair_str}",
                 unsafe_allow_html=True,
             )
             st.caption(f"{leg.get('Game', '')} · {leg.get('Why', '')}")
