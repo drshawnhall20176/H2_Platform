@@ -32,6 +32,8 @@ game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER
 st.title("🏅 Graded Picks")
 st.caption(f"Every game on the slate, graded — sorted with the most interesting first, not a "
           f"flat top-10 that hides the rest of the board — {_active.icon} {_active.label}")
+st.page_link("views/18_Suggested_Parlays.py", label="Want it pre-combined into a parlay? See Suggested Parlays →",
+            icon="🎫")
 
 if not sports.require_live_engine("Graded Picks"):
     st.stop()
