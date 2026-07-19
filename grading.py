@@ -214,31 +214,85 @@ def grade_accuracy_by_letter(graded_plays: List[Dict]) -> List[Dict]:
 # not less, on a page built specifically for people who explicitly don't want to dig into why a
 # number is what it is -- they're trusting it at face value.
 PARLAY_TIER_SIZES = [
-    (2, "Safer"),
-    (4, "Balanced"),
-    (6, "Longshot"),
-]   # cumulative from the SAME ranked pool below (the 4-leg tier's first two legs are the exact
-   # same two legs as the 2-leg tier) -- a real, deliberate choice: "safer" means fewer of the
-   # model's own top picks chained together, "longshot" means more of those SAME picks chained
-   # together, so the risk difference comes honestly from the math of multiplying more legs
-   # together, not from quietly swapping in worse plays for the bigger tiers.
+    (2, "Safer", "safety"),
+    (3, "Steady", "safety"),
+    (4, "Balanced", "conviction"),
+    (5, "Bold", "payout"),
+    (6, "Longshot", "payout"),
+]   # A REAL, SECOND REDESIGN, not the original approach: the first version (non-overlapping
+   # slices of ONE ranked-by-conviction list) fixed leg reuse, but every tier was still
+   # optimizing for the exact same thing -- just handing out consecutive chunks of the same
+   # queue. Real feedback was that this could still read as mechanical, not genuinely
+   # differentiated: a sharp person could notice Longshot's legs were simply Safer's leftovers,
+   # not picks chosen FOR being longshots. Each tier now has its OWN real objective (see
+   # _tier_sort_key below for exactly what each one optimizes for), so "Safer" actually means
+   # "ranked by real probability of hitting" and "Longshot" actually means "ranked by real
+   # payout size, among plays that still clear the grading floor" -- not just "fewer vs more of
+   # the identical ranking." Leg/player uniqueness across tiers is still a hard rule (see
+   # build_suggested_parlays), unchanged from the first redesign -- that part was never the
+   # problem, only "every tier ranks the same way" was.
+
+
+def _tier_sort_key(objective: str):
+    """Returns a sort key function for one tier's real objective, all oriented so LARGER key
+    value sorts FIRST under sort(..., reverse=True) -- a consistent convention across all three
+    objectives, not three different sort directions to keep straight.
+
+    "safety": raw ModelProb descending -- the actual probability of the leg hitting, NOT
+    Conviction. This is a real, deliberate distinction: Conviction measures edge relative to a
+    market-typical reference rate, not how likely a play is in absolute terms. A rare-market prop
+    with huge relative edge (say a 25% HR chance vs an ~11% typical rate) can carry real
+    Conviction while still being a genuinely risky, likely-to-lose single leg -- exactly wrong for
+    a tier that's supposed to mean "safe." Ranking by raw ModelProb instead means Safer/Steady
+    actually surface the plays most likely to simply happen, which is what "safer" should mean.
+
+    "payout": raw ModelProb ASCENDING (achieved by negating it, so the sort stays reverse=True
+    throughout) -- among plays that still cleared the real grading floor (a real edge, not a
+    fabricated one), favor the ones with the LOWEST probability, since lower probability means a
+    bigger real payout. This is deliberately different from "worst available play with no edge
+    at all" -- every candidate here already passed conviction_to_grade, so this chases genuine
+    upside within real, validated picks, the way a person actually building a longshot parlay
+    would: real analytical backing, bigger number attached.
+
+    "conviction": the ORIGINAL metric (edge relative to reference, ceiling-normalized into a real
+    letter grade) -- Balanced sits in the middle, a genuine blend of "likely to hit" and "real
+    value," not leaning hard toward either end the way Safer/Longshot now deliberately do."""
+    if objective == "safety":
+        return lambda p: p.get("ModelProb", 0.0)
+    if objective == "payout":
+        return lambda p: -p.get("ModelProb", 1.0)
+    return lambda p: p.get("Conviction", 0.0)   # "conviction" / any unrecognized objective
 
 
 def build_parlay_leg_pool(plays: List[Dict], max_per_game: int = 2, max_per_market: int = 2,
-                          min_pool_size: int = 0) -> List[Dict]:
-    """Rank graded plays by Conviction, then walk them building a pool that's actually SAFE to
-    combine into parlays: at most ONE leg per player (a hard constraint -- see this section's own
-    module-level comment for why this is the single most important rule here, not a minor
-    detail), at most max_per_game legs sharing a game (a real but weaker correlation concern --
-    two different hitters on opposing teams in the same game can share some game-script/weather
-    correlation, but nowhere near as severe as a same-player pairing), and at most max_per_market
-    legs sharing a market (keeps a parlay from reading as six home-run bets in a trenchcoat --
-    default tightened from 3 to 2 after a real, concrete example: Stolen Bases is a genuinely
-    high-variance market, so an elite base stealer's conviction ratio can run well above an elite
-    slugger's HR conviction for a similar raw probability, not because either model is wrong, but
-    because SB really is a more skewed market than HR. Left unconstrained, that skew let three
-    different burners' SB legs alone fill an entire tier before any other market appeared,
-    reading as far less realistic than what a person would actually build themselves).
+                          min_pool_size: int = 0, sort_key=None,
+                          exclude_players: Optional[set] = None) -> List[Dict]:
+    """Rank graded plays (by sort_key, defaulting to Conviction descending), then walk them
+    building a pool that's actually SAFE to combine into parlays: at most ONE leg per player (a
+    hard constraint -- see this section's own module-level comment for why this is the single
+    most important rule here, not a minor detail), at most max_per_game legs sharing a game (a
+    real but weaker correlation concern -- two different hitters on opposing teams in the same
+    game can share some game-script/weather correlation, but nowhere near as severe as a
+    same-player pairing), and at most max_per_market legs sharing a market (keeps a parlay from
+    reading as six home-run bets in a trenchcoat -- default tightened from 3 to 2 after a real,
+    concrete example: Stolen Bases is a genuinely high-variance market, so an elite base
+    stealer's conviction ratio can run well above an elite slugger's HR conviction for a similar
+    raw probability, not because either model is wrong, but because SB really is a more skewed
+    market than HR. Left unconstrained, that skew let three different burners' SB legs alone fill
+    an entire tier before any other market appeared, reading as far less realistic than what a
+    person would actually build themselves).
+
+    sort_key: how to rank candidates before applying the diversity caps -- defaults to Conviction
+    descending (the original behavior) when not supplied. A caller building several tiers with
+    genuinely different RISK OBJECTIVES (not just different sizes) passes its own sort_key here
+    -- see _tier_sort_key for the real objectives this platform actually uses (safety/payout/
+    conviction). Always used with reverse=True, so a sort_key should orient its own values so
+    LARGER means "should be picked first" for whatever this tier is optimizing for.
+
+    exclude_players: an optional set of (Player, Team) tuples to skip entirely -- e.g. players
+    already used by an earlier-built tier. Lets a caller build several DISTINCT, non-overlapping
+    tiers (each with its own objective) without this function needing to know anything about
+    "tiers" itself; it just excludes whatever it's told to.
 
     min_pool_size: a REAL, reported bug this parameter fixes -- fixed caps alone silently strand
     a person who deliberately narrows Suggested Parlays down to one market (or a thin slate with
@@ -247,13 +301,13 @@ def build_parlay_leg_pool(plays: List[Dict], max_per_game: int = 2, max_per_mark
     designed to force diversity ACROSS markets, not to punish someone who already chose to narrow
     to one. When min_pool_size > 0, max_per_game and/or max_per_market are LOOSENED (never
     tightened) just enough to make a pool of that size achievable, given how many DISTINCT games
-    and markets are actually present among the graded plays -- e.g. with only 1 distinct market
-    graded and min_pool_size=6, max_per_market effectively becomes 6, not because 2 stopped
-    mattering, but because there's nothing left to diversify into. If there are genuinely enough
-    distinct games/markets already, the original caps are used unchanged.
+    and markets are actually present among the CANDIDATE plays (after exclude_players has already
+    been applied, so this reflects what's genuinely still available to this specific tier, not
+    the whole board). If there are genuinely enough distinct games/markets already, the original
+    caps are used unchanged.
 
-    Returns a FLAT, conviction-ranked list -- not grouped by game the way organize_graded_picks
-    is, since parlay legs are chosen across the WHOLE board at once, not within one game.
+    Returns a FLAT, ranked list -- not grouped by game the way organize_graded_picks is, since
+    parlay legs are chosen across the WHOLE board at once, not within one game.
 
     Player uniqueness is keyed on (Player, Team), not Player alone -- two genuinely different
     people can share a common name across different teams, and keying on name alone could
@@ -263,7 +317,12 @@ def build_parlay_leg_pool(plays: List[Dict], max_per_game: int = 2, max_per_mark
         grade = conviction_to_grade(pl.get("Conviction"), pl.get("_ceiling"))
         if grade:
             graded.append({**pl, "_grade": grade})
-    graded.sort(key=lambda p: p["Conviction"], reverse=True)
+
+    exclude_players = exclude_players or set()
+    graded = [p for p in graded if (p.get("Player"), p.get("Team")) not in exclude_players]
+
+    key_fn = sort_key if sort_key is not None else (lambda p: p.get("Conviction", 0.0))
+    graded.sort(key=key_fn, reverse=True)
 
     if min_pool_size > 0:
         distinct_games = len({p.get("Game") for p in graded})
@@ -312,30 +371,42 @@ def build_suggested_parlays(plays: List[Dict], tier_sizes: Optional[List] = None
     """Build tiered parlay suggestions from a graded plays list -- the actual feature: someone
     who doesn't want to comb through the board themselves gets a few ready-made options instead.
 
-    tier_sizes defaults to PARLAY_TIER_SIZES ((2, "Safer"), (4, "Balanced"), (6, "Longshot")).
-    Each tier's legs are the top N (by Conviction) from the SAME pool build_parlay_leg_pool
-    produces -- so a 4-leg tier's first two legs are literally the same two legs as the 2-leg
-    tier, not a different, re-optimized set. This is a deliberate simplicity choice: the risk
-    difference between tiers comes honestly from chaining more legs together (probabilities
-    multiply down as you add legs, even when every individual leg is a real, graded pick), not
-    from quietly substituting worse plays into the bigger tiers to make them "feel" different.
+    tier_sizes defaults to PARLAY_TIER_SIZES: (2, "Safer", "safety"), (3, "Steady", "safety"),
+    (4, "Balanced", "conviction"), (5, "Bold", "payout"), (6, "Longshot", "payout"). Each tier is
+    built as its OWN, independently-ranked pool (build_parlay_leg_pool, called once per tier with
+    that tier's own sort key from _tier_sort_key) -- not slices of one shared ranking. Legs
+    already used by an earlier (smaller) tier are excluded from every later tier's own pool, so
+    no leg or player ever appears in more than one tier, but each tier's remaining candidates are
+    ranked by what THAT tier actually cares about, not by a single universal metric.
 
-    A tier is SKIPPED ENTIRELY, not padded with weaker plays, when the pool doesn't have enough
-    genuinely diverse legs to fill it honestly (e.g. a thin slate with only 3 real graded plays
-    across 3 different players can't honestly support a 4-leg tier) -- silently forcing a 6-leg
-    parlay out of a pool that only had 3 safe options would defeat the entire point of the
-    diversity safeguards above.
+    A REAL, SECOND DELIBERATE REDESIGN, not the original approach: an earlier version made every
+    tier a non-overlapping SLICE of one Conviction-ranked list -- a real fix for the previous
+    problem (identical picks reappearing across every tier), but every tier was still optimizing
+    for the exact same thing, just handing out consecutive chunks of the same queue. That could
+    still read as mechanical: a sharp person could notice Longshot's legs were simply whatever was
+    left over from Safer, not picks chosen FOR being longshots. Each tier now has a genuinely
+    different objective -- Safer/Steady rank by real probability of hitting (raw ModelProb, not
+    Conviction, which measures relative edge rather than absolute likelihood), Balanced uses the
+    original Conviction metric as a real middle ground, and Bold/Longshot rank by payout size
+    (lowest ModelProb, i.e. the biggest real price) AMONG plays that still cleared the actual
+    grading floor -- chasing genuine upside within real, validated picks, not just grabbing
+    whatever has no edge at all. See _tier_sort_key's own docstring for the full reasoning behind
+    each objective.
 
-    Calls build_parlay_leg_pool with min_pool_size set to the LARGEST requested tier size -- a
-    real, reported fix: without this, selecting a single market (e.g. only "Pitcher Strikeouts")
-    silently capped the whole pool at max_per_market (2) regardless of how many real, different
-    pitchers were actually graded that night, since the per-market cap has nothing left to
-    diversify into once only one market is selected. See build_parlay_leg_pool's own docstring
-    for the full mechanism.
+    Tiers are still processed smallest-to-largest, and a tier is SKIPPED ENTIRELY, not padded
+    with weaker plays, when its own pool (after excluding players already claimed by earlier
+    tiers) can't reach its size -- but unlike the earlier slice-based design, one tier failing
+    does NOT automatically doom every later tier, since each has its own independent ranking and
+    might find enough real candidates even if an earlier tier's narrower objective didn't.
+
+    Calls build_parlay_leg_pool once per tier with min_pool_size set to that tier's own size (not
+    the sum across every tier, since each tier now draws from its own independently-filtered
+    pool, not a single shared one) -- still fixes the same real reported bug where selecting a
+    narrow set of markets could otherwise silently cap a pool below what's actually achievable.
 
     Returns a list of {"tier": str, "size": int, "legs": [play, ...], "combined_prob": float,
     "combined_fair_decimal": float, "combined_fair_american": int}, one entry per tier that could
-    actually be filled."""
+    actually be filled, in ascending size order."""
     from projections import prob_to_decimal, prob_to_american   # lazy, not module-level -- avoids
                                                                  # a real circular import
                                                                  # (projections.py itself imports
@@ -350,15 +421,21 @@ def build_suggested_parlays(plays: List[Dict], tier_sizes: Optional[List] = None
                                                                  # other sport's own projections
                                                                  # module already does -- not
                                                                  # duplicated, just imported late.
-    sizes = tier_sizes if tier_sizes is not None else PARLAY_TIER_SIZES
-    largest_tier = max((size for size, _ in sizes), default=0)
-    pool = build_parlay_leg_pool(plays, max_per_game, max_per_market, min_pool_size=largest_tier)
+    sizes = sorted(tier_sizes if tier_sizes is not None else PARLAY_TIER_SIZES, key=lambda x: x[0])
 
     out = []
-    for size, label in sizes:
-        if len(pool) < size:
-            continue
-        legs = pool[:size]
+    used_players: set = set()
+    for size, label, objective in sizes:
+        key_fn = _tier_sort_key(objective)
+        candidates = build_parlay_leg_pool(plays, max_per_game, max_per_market,
+                                           min_pool_size=size, sort_key=key_fn,
+                                           exclude_players=used_players)
+        if len(candidates) < size:
+            continue   # this specific tier can't be honestly filled -- but a LATER tier, with
+                      # its own different objective, might still find enough real candidates
+        legs = candidates[:size]
+        for pl in legs:
+            used_players.add((pl.get("Player"), pl.get("Team")))
         combined_prob = combined_parlay_prob(legs)
         out.append({
             "tier": label, "size": size, "legs": legs,

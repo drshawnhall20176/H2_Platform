@@ -415,6 +415,90 @@ def test_parlay_pool_sorted_by_conviction_descending():
     assert [p["Player"] for p in pool] == ["High", "Mid", "Low"]
 
 
+# ----------------------------------------------------------------- _tier_sort_key
+def test_tier_sort_key_safety_ranks_by_raw_model_prob_not_conviction():
+    # THE real, deliberate distinction: a play with LOWER Conviction but HIGHER raw ModelProb
+    # should rank ABOVE a play with higher Conviction but lower ModelProb under "safety" --
+    # Conviction measures relative edge, not absolute likelihood, and "safer" should mean the
+    # play most likely to simply happen.
+    high_conv_low_prob = _leg("A", "T1", "G1", conviction=4.0, model_prob=0.20)   # rare, high-edge
+    low_conv_high_prob = _leg("B", "T2", "G2", conviction=1.3, model_prob=0.85)   # common, safe
+    key = grading._tier_sort_key("safety")
+    ranked = sorted([high_conv_low_prob, low_conv_high_prob], key=key, reverse=True)
+    assert ranked[0]["Player"] == "B"   # the higher-probability play ranks first for "safety"
+    print("\u2713 _tier_sort_key('safety') correctly ranks by raw probability, not Conviction")
+
+
+def test_tier_sort_key_payout_ranks_by_inverse_model_prob():
+    # The mirror case: "payout" should favor the LOWER-probability (bigger real price) play,
+    # even though it has lower Conviction here too -- confirms payout genuinely chases price,
+    # not just re-deriving whatever conviction would have picked anyway.
+    high_conv_low_prob = _leg("A", "T1", "G1", conviction=4.0, model_prob=0.20)
+    low_conv_high_prob = _leg("B", "T2", "G2", conviction=1.3, model_prob=0.85)
+    key = grading._tier_sort_key("payout")
+    ranked = sorted([high_conv_low_prob, low_conv_high_prob], key=key, reverse=True)
+    assert ranked[0]["Player"] == "A"   # the LOWER-probability (bigger payout) play ranks first
+    print("\u2713 _tier_sort_key('payout') correctly ranks by lowest probability (biggest real price)")
+
+
+def test_tier_sort_key_conviction_unchanged_for_balanced():
+    high_conv_low_prob = _leg("A", "T1", "G1", conviction=4.0, model_prob=0.20)
+    low_conv_high_prob = _leg("B", "T2", "G2", conviction=1.3, model_prob=0.85)
+    key = grading._tier_sort_key("conviction")
+    ranked = sorted([high_conv_low_prob, low_conv_high_prob], key=key, reverse=True)
+    assert ranked[0]["Player"] == "A"   # the higher-Conviction play ranks first, the original metric
+    print("\u2713 _tier_sort_key('conviction') correctly preserves the original Conviction-based ranking for Balanced")
+
+
+# ----------------------------------------------------------------- build_suggested_parlays: per-tier objectives
+def test_suggested_parlays_safer_tier_picks_by_probability_not_conviction():
+    # A real, end-to-end proof: give Safer a genuine choice between a high-Conviction/low-prob
+    # play and a low-Conviction/high-prob play -- Safer must pick the SAFE one, even though a
+    # pure Conviction ranking would have picked the other.
+    plays = [
+        _leg("Longshot Play", "T1", "G1", conviction=4.0, model_prob=0.20),
+        _leg("Safe Play A", "T2", "G2", conviction=1.3, model_prob=0.85),
+        _leg("Safe Play B", "T3", "G3", conviction=1.25, model_prob=0.80),
+    ]
+    parlays = grading.build_suggested_parlays(plays, tier_sizes=[(2, "Safer", "safety")])
+    safer = next(p for p in parlays if p["tier"] == "Safer")
+    picked_players = {leg["Player"] for leg in safer["legs"]}
+    assert picked_players == {"Safe Play A", "Safe Play B"}
+    assert "Longshot Play" not in picked_players
+    print("\u2713 build_suggested_parlays' Safer tier correctly picks by real probability, ignoring a higher-Conviction but riskier play")
+
+
+def test_suggested_parlays_longshot_tier_picks_by_payout_not_just_conviction():
+    plays = [
+        _leg("Big Price Play", "T1", "G1", conviction=1.4, model_prob=0.15),   # low prob, real edge
+        _leg("Safe But Boring", "T2", "G2", conviction=1.35, model_prob=0.88),  # high prob, low edge
+    ]
+    parlays = grading.build_suggested_parlays(plays, tier_sizes=[(2, "Longshot", "payout")])
+    longshot = next(p for p in parlays if p["tier"] == "Longshot")
+    picked_players = [leg["Player"] for leg in longshot["legs"]]
+    assert picked_players[0] == "Big Price Play"   # the lower-probability, bigger-price play ranks first
+    print("\u2713 build_suggested_parlays' Longshot tier correctly favors real payout size among genuinely graded plays")
+
+
+def test_suggested_parlays_different_tiers_can_pick_genuinely_different_legs():
+    # The actual concern this whole redesign addresses: with a real spread of probabilities and
+    # convictions, Safer and Longshot should be able to pick DIFFERENT legs, not just different
+    # SLICES of the same ranking -- confirmed here with a real, deliberately mixed pool.
+    plays = [
+        _leg("HighProbLowEdge", "T1", "G1", conviction=1.25, model_prob=0.82),
+        _leg("LowProbHighEdge", "T2", "G2", conviction=3.8, model_prob=0.18),
+        _leg("Middling", "T3", "G3", conviction=2.0, model_prob=0.50),
+    ]
+    parlays = grading.build_suggested_parlays(
+        plays, tier_sizes=[(1, "Safer", "safety"), (1, "Longshot", "payout")])
+    safer_pick = next(p for p in parlays if p["tier"] == "Safer")["legs"][0]["Player"]
+    longshot_pick = next(p for p in parlays if p["tier"] == "Longshot")["legs"][0]["Player"]
+    assert safer_pick == "HighProbLowEdge"
+    assert longshot_pick == "LowProbHighEdge"
+    assert safer_pick != longshot_pick
+    print("\u2713 build_suggested_parlays' Safer and Longshot tiers genuinely diverge, driven by real, different objectives")
+
+
 # ----------------------------------------------------------------- combined_parlay_prob
 def test_combined_parlay_prob_multiplies_correctly():
     legs = [_leg("A", "T", "G", 3.0, model_prob=0.5), _leg("B", "T2", "G2", 2.5, model_prob=0.4)]
@@ -435,33 +519,55 @@ def test_combined_parlay_prob_decreases_with_more_legs():
 
 # ----------------------------------------------------------------- build_suggested_parlays
 def _big_diverse_pool(n=8):
-    return [_leg(f"Player{i}", f"Team{i}", f"Game{i}", 3.5 - i * 0.15, market=f"Market{i % 4}",
+    return [_leg(f"Player{i}", f"Team{i}", f"Game{i}", 3.5 - i * 0.1, market=f"Market{i % 5}",
                 model_prob=0.55) for i in range(n)]
 
 
-def test_suggested_parlays_builds_all_three_tiers_with_enough_legs():
-    plays = _big_diverse_pool(8)
+def test_suggested_parlays_builds_all_five_tiers_with_enough_legs():
+    # 2+3+4+5+6 = 20 total legs needed to fill every tier
+    plays = _big_diverse_pool(20)
     parlays = grading.build_suggested_parlays(plays)
     tiers = {p["tier"]: p for p in parlays}
-    assert set(tiers.keys()) == {"Safer", "Balanced", "Longshot"}
+    assert set(tiers.keys()) == {"Safer", "Steady", "Balanced", "Bold", "Longshot"}
     assert tiers["Safer"]["size"] == 2
+    assert tiers["Steady"]["size"] == 3
     assert tiers["Balanced"]["size"] == 4
+    assert tiers["Bold"]["size"] == 5
     assert tiers["Longshot"]["size"] == 6
-    print("✓ build_suggested_parlays correctly builds all three tiers when the pool is large enough")
+    print("✓ build_suggested_parlays correctly builds all five tiers when the pool is large enough")
 
 
-def test_suggested_parlays_tiers_are_cumulative_from_the_same_pool():
-    plays = _big_diverse_pool(8)
+def test_suggested_parlays_tiers_are_non_overlapping():
+    # THE real, requested fix: no leg (and therefore no player) should ever appear in more than
+    # one tier -- each tier is a genuinely distinct combination, not the same core picks reused
+    # with extras bolted on.
+    plays = _big_diverse_pool(20)
+    parlays = grading.build_suggested_parlays(plays)
+    seen_players = set()
+    for p in parlays:
+        for leg in p["legs"]:
+            key = (leg["Player"], leg["Team"])
+            assert key not in seen_players, f"{key} appeared in more than one tier"
+            seen_players.add(key)
+    assert len(seen_players) == 20   # every one of the 20 real legs used exactly once total
+    print("✓ build_suggested_parlays tiers are correctly non-overlapping — no leg reused across tiers")
+
+
+def test_suggested_parlays_earlier_tiers_get_higher_conviction_legs():
+    # A real, honest consequence of non-overlapping allocation: since Safer gets first pick of
+    # the ranked pool, its own legs should never have LOWER average conviction than a later,
+    # bigger tier's legs.
+    plays = _big_diverse_pool(20)
     parlays = grading.build_suggested_parlays(plays)
     tiers = {p["tier"]: p for p in parlays}
-    safer_players = [leg["Player"] for leg in tiers["Safer"]["legs"]]
-    balanced_players = [leg["Player"] for leg in tiers["Balanced"]["legs"]]
-    assert balanced_players[:2] == safer_players   # the 4-leg tier's first two legs ARE the 2-leg tier
-    print("✓ build_suggested_parlays tiers are correctly cumulative, not independently re-optimized sets")
+    safer_avg = sum(leg["Conviction"] for leg in tiers["Safer"]["legs"]) / 2
+    longshot_avg = sum(leg["Conviction"] for leg in tiers["Longshot"]["legs"]) / 6
+    assert safer_avg > longshot_avg
+    print("✓ build_suggested_parlays' earlier (smaller) tiers get first pick of the highest-conviction legs")
 
 
 def test_suggested_parlays_skips_tier_when_pool_too_small():
-    plays = _big_diverse_pool(3)   # enough for a 2-leg tier, not enough for 4 or 6
+    plays = _big_diverse_pool(3)   # enough for Safer (2), not enough for Steady (3) or bigger
     parlays = grading.build_suggested_parlays(plays)
     tiers = {p["tier"] for p in parlays}
     assert tiers == {"Safer"}
@@ -500,15 +606,15 @@ def test_suggested_parlays_works_for_non_mlb_shaped_plays():
 
 def test_suggested_parlays_single_market_selection_still_fills_all_tiers():
     # The exact real, reported scenario: a person filters the page down to a single market
-    # (e.g. "Pitcher Strikeouts" only) and still expects Balanced/Longshot to build, given
-    # enough real, different pitchers exist that night -- not silently stuck at Safer only
-    # because a market-diversity cap has nothing left to diversify into.
-    plays = [_leg(f"Pitcher{i}", f"Team{i}", f"Game{i}", 3.5 - i * 0.15, market="Pitcher Strikeouts")
-            for i in range(8)]
+    # (e.g. "Pitcher Strikeouts" only) and still expects every tier to build, given enough real,
+    # different pitchers exist that night -- not silently stuck at Safer only because a
+    # market-diversity cap has nothing left to diversify into.
+    plays = [_leg(f"Pitcher{i}", f"Team{i}", f"Game{i}", 3.5 - i * 0.1, market="Pitcher Strikeouts")
+            for i in range(20)]
     parlays = grading.build_suggested_parlays(plays)
     tiers = {p["tier"] for p in parlays}
-    assert tiers == {"Safer", "Balanced", "Longshot"}
-    print("✓ build_suggested_parlays fills all three tiers even with only one market selected, given enough real graded plays")
+    assert tiers == {"Safer", "Steady", "Balanced", "Bold", "Longshot"}
+    print("✓ build_suggested_parlays fills all five tiers even with only one market selected, given enough real graded plays")
 
 
 if __name__ == "__main__":

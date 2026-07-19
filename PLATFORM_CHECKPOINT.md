@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 702/702 tests green)
+## What's in this checkpoint (all tested — 709/709 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -3180,6 +3180,101 @@ honestly return 3, not fabricate legs that don't exist. Plus a full, realistic e
 simulation — an 8-pitcher, 4-game board filtered to "Pitcher Strikeouts" only — confirming all
 three tiers (Safer/Balanced/Longshot) now build correctly, exactly reproducing what was reported
 as broken. 702/702 total passing.
+
+### Suggested Parlays: non-overlapping tiers, 2 new tiers, and "Fair" odds clarity (2026-07-19)
+Three real pieces of feedback in one pass. First: "Fair" odds could read as confusing next to an
+"A" grade, since a big negative number (e.g. -480) looks like a bad price to someone who doesn't
+know it actually reflects high model confidence. Second: tiers were reusing the exact same legs
+from the prior, smaller tier — real user feedback that this read as broken, not as the deliberate
+design choice it originally was. Third: users specifically asked for 3-leg and 5-leg options.
+
+**Fair odds clarity**: the info box at the top of the page now directly explains what "Fair"
+means in plain language — that it reflects the model's own break-even probability, not what a
+book is offering, and that a big negative number is a sign of confidence, not a bad price. The
+per-leg display was also relabeled from "Fair" to "Fair odds," a small but real reduction in
+ambiguity (a bare "Fair" could read as an adjective describing the bet itself, not a noun
+referring to the odds).
+
+**Tier redesign, not a bug fix — a real, deliberate change to intended behavior**: `PARLAY_TIER_
+SIZES` expanded to five tiers (Safer/Steady/Balanced/Bold/Longshot, 2 through 6 legs), and
+`build_suggested_parlays` now allocates legs SEQUENTIALLY and NON-OVERLAPPING from one shared,
+ranked pool — Safer gets the pool's best 2 legs, Steady gets the next-best 3 (not the same 2 plus
+one more), and so on, with no leg or player ever appearing in more than one tier. This trades away
+one honest property (every tier contained only the model's single best N picks) for another
+(every tier is a genuinely distinct combination) — a real, considered tradeoff, not a compromise;
+the later tiers now carry somewhat lower average conviction per leg too, which is itself an
+honest, additional reason bigger tiers carry more risk, not just the multiplicative effect of
+chaining more legs together. `build_parlay_leg_pool`'s `min_pool_size` mechanism (from last
+turn's fix) now receives the SUM of every tier's size (up to 20, not just the largest tier's 6),
+since non-overlapping allocation means every tier's legs have to come from somewhere new.
+
+**9 tests updated/added**: three pre-existing tests updated for the new 5-tier, non-overlapping
+design (rewritten rather than deleted, since the underlying behavior they were protecting —
+correct tier sizes, correct market-selection resilience — is still real, just implemented
+differently now); a new test explicitly confirming zero leg overlap across all five tiers on a
+20-leg pool; a new test confirming the honest consequence of sequential allocation — earlier,
+smaller tiers get first pick of the highest-conviction legs, so Safer's average conviction is
+never lower than Longshot's. Plus a full, realistic end-to-end simulation on an 8-game board:
+four tiers built correctly (14 total legs used, zero overlap confirmed directly), and the
+Longshot tier correctly skipped rather than padded when the pool ran two legs short of the 20
+needed to fill every tier — exactly the intended "skip, don't fabricate" behavior working as
+designed on a real, realistic board size. 703/703 total passing.
+
+### Suggested Parlays: per-tier objectives, a real second redesign (2026-07-19)
+Shawn pushed back on the previous turn's fix, directly: non-overlapping legs were right, but
+every tier still ranked by the same metric (Conviction) — just handed out in consecutive chunks.
+That could still read as a tool with limited analytical range, since a sharp person could notice
+Longshot's legs were simply Safer's leftovers, not picks chosen FOR being longshots. Talked
+through the direction before touching code: give each tier a genuinely different objective,
+safety-first at the low end, payout-conscious at the high end, confirmed with Shawn before
+building it.
+
+**A real, deliberate distinction made explicit for the first time**: Conviction measures edge
+relative to a market-typical reference rate, not absolute likelihood. A rare-market prop with
+huge relative edge (a 25% chance vs an ~11% typical rate) can carry real Conviction while still
+being a genuinely risky single leg — exactly wrong for a tier that's supposed to mean "safe."
+`grading._tier_sort_key(objective)` now provides three real, different rankings: "safety" (raw
+ModelProb descending — the actual chance of hitting), "payout" (ModelProb ascending, i.e. the
+biggest real price, but only among plays that already cleared the real grading floor — chasing
+genuine upside within validated picks, not grabbing whatever has zero edge), and "conviction"
+(the original metric, unchanged, for Balanced as a genuine middle ground). `PARLAY_TIER_SIZES`
+now carries each tier's real objective: Safer/Steady use "safety," Balanced uses "conviction,"
+Bold/Longshot use "payout."
+
+**`build_parlay_leg_pool` generalized, not replaced**: gained `sort_key` (defaults to Conviction
+descending, preserving old behavior for any caller not yet passing one) and `exclude_players` (a
+set of already-claimed (Player, Team) pairs). `build_suggested_parlays` now calls it ONCE PER
+TIER with that tier's own objective and a growing exclusion set — no leg or player still ever
+appears in more than one tier (the hard rule from the prior redesign, unchanged), but each tier's
+own remaining candidates are ranked by what that tier actually cares about, not by one universal
+metric sliced five ways.
+
+**A real, honest interaction confirmed directly, not hidden**: on a full 5-tier board, Longshot's
+average probability can land higher than Balanced's — because Balanced (processed first, being
+the smaller tier) can claim some of the same low-probability, high-Conviction plays Longshot
+would have wanted, since high Conviction and low raw probability often correlate for skewed
+markets like HR. Confirmed this is a genuine, honest consequence of the non-overlap constraint
+interacting with processing order, not a flaw in the objective logic — verified by running Safer
+and Longshot in isolation (no competing tiers), where they correctly produced starkly different
+average probabilities (0.86 vs 0.22).
+
+**A real testing gap caught and fixed before it mattered**: the existing test fixtures used a
+constant `model_prob=0.55` for every leg, meaning "safety" and "payout" objectives would have
+fallen back to stable tie-break order and accidentally still passed without genuinely exercising
+the new logic. Wrote dedicated tests that deliberately misalign ModelProb from Conviction (a
+high-Conviction/low-probability play vs a low-Conviction/high-probability one) to prove each
+objective picks what it's actually supposed to, not what a coincidental test fixture would have
+produced anyway.
+
+**6 new tests**: `_tier_sort_key` confirmed directly for all three objectives using deliberately
+misaligned Conviction/ModelProb pairs; a full `build_suggested_parlays` proof that Safer correctly
+ignores a higher-Conviction-but-riskier play in favor of two genuinely safer ones; Longshot
+confirmed to favor real payout size over a safer, lower-edge alternative; and a direct,
+side-by-side proof that Safer and Longshot can pick genuinely different legs from the same mixed
+pool, the exact concern this whole redesign was meant to address. Plus a full, realistic
+end-to-end simulation on an 8-game board (all 5 tiers built, 20 unique legs, zero overlap
+confirmed) and a follow-up isolation check confirming each objective's real behavior when not
+competing with other tiers for the same candidates. 709/709 total passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
