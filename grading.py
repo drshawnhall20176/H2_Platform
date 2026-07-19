@@ -214,11 +214,11 @@ def grade_accuracy_by_letter(graded_plays: List[Dict]) -> List[Dict]:
 # not less, on a page built specifically for people who explicitly don't want to dig into why a
 # number is what it is -- they're trusting it at face value.
 PARLAY_TIER_SIZES = [
-    (2, "Safer", "safety"),
-    (3, "Steady", "safety"),
-    (4, "Balanced", "conviction"),
-    (5, "Bold", "payout"),
-    (6, "Longshot", "payout"),
+    (2, "Safer", "safety", None),
+    (3, "Steady", "safety", None),
+    (4, "Balanced", "conviction", None),
+    (5, "Bold", "payout", "C"),
+    (6, "Longshot", "payout", "C"),
 ]   # A REAL, SECOND REDESIGN, not the original approach: the first version (non-overlapping
    # slices of ONE ranked-by-conviction list) fixed leg reuse, but every tier was still
    # optimizing for the exact same thing -- just handing out consecutive chunks of the same
@@ -231,6 +231,20 @@ PARLAY_TIER_SIZES = [
    # the identical ranking." Leg/player uniqueness across tiers is still a hard rule (see
    # build_suggested_parlays), unchanged from the first redesign -- that part was never the
    # problem, only "every tier ranks the same way" was.
+   #
+   # The 4th element (min_grade) is a REAL, second fix, found via a real reported example: with
+   # only Batter HR selected, "payout" tiers were picking the WORST, barely-D-grade HR legs
+   # specifically because they had the longest odds, with zero regard for whether the play had
+   # any real edge at all -- chaining several genuinely bad, barely-qualifying longshots produced
+   # combined odds no real book would offer and no real person would bet (seven-figure American
+   # odds). "Payout-conscious" was always meant to mean "real, validated picks that happen to
+   # have bigger prices," not "the worst plays that still technically clear the floor" -- Bold/
+   # Longshot now require at least a real "C" grade before a play is even eligible for the
+   # payout ranking, so the biggest-payout search happens within a pool of genuinely
+   # well-graded plays, not the bottom of the barrel.
+GRADE_RANK = {letter: len(GRADE_THRESHOLDS) - i for i, (_, letter, _) in enumerate(GRADE_THRESHOLDS)}
+# {"A": 4, "B": 3, "C": 2, "D": 1} -- higher is better, derived directly from GRADE_THRESHOLDS'
+# own real order rather than a second, separately-maintained ranking that could drift out of sync.
 
 
 def _tier_sort_key(objective: str):
@@ -266,7 +280,8 @@ def _tier_sort_key(objective: str):
 
 def build_parlay_leg_pool(plays: List[Dict], max_per_game: int = 2, max_per_market: int = 2,
                           min_pool_size: int = 0, sort_key=None,
-                          exclude_players: Optional[set] = None) -> List[Dict]:
+                          exclude_players: Optional[set] = None,
+                          min_grade_letter: Optional[str] = None) -> List[Dict]:
     """Rank graded plays (by sort_key, defaulting to Conviction descending), then walk them
     building a pool that's actually SAFE to combine into parlays: at most ONE leg per player (a
     hard constraint -- see this section's own module-level comment for why this is the single
@@ -311,12 +326,24 @@ def build_parlay_leg_pool(plays: List[Dict], max_per_game: int = 2, max_per_mark
 
     Player uniqueness is keyed on (Player, Team), not Player alone -- two genuinely different
     people can share a common name across different teams, and keying on name alone could
-    wrongly treat them as the same person and drop one for no real reason."""
+    wrongly treat them as the same person and drop one for no real reason.
+
+    min_grade_letter: a REAL, second fix found via a real reported example -- restricts the
+    candidate pool to plays graded at or above this letter (A/B/C/D) BEFORE any sort_key ranking
+    happens. Without this, a "payout" objective ranking purely by lowest probability would pick
+    the WORST, barely-qualifying plays specifically because they have the longest odds, with zero
+    regard for whether they have any real edge -- on a narrow market selection (e.g. only Batter
+    HR), this produced parlays built entirely from barely-D-grade legs and seven-figure American
+    odds no real book would offer. See PARLAY_TIER_SIZES' own comment for the full story."""
     graded = []
     for pl in plays:
         grade = conviction_to_grade(pl.get("Conviction"), pl.get("_ceiling"))
         if grade:
             graded.append({**pl, "_grade": grade})
+
+    if min_grade_letter:
+        min_rank = GRADE_RANK.get(min_grade_letter, 0)
+        graded = [p for p in graded if GRADE_RANK.get(p["_grade"]["letter"], 0) >= min_rank]
 
     exclude_players = exclude_players or set()
     graded = [p for p in graded if (p.get("Player"), p.get("Team")) not in exclude_players]
@@ -371,10 +398,11 @@ def build_suggested_parlays(plays: List[Dict], tier_sizes: Optional[List] = None
     """Build tiered parlay suggestions from a graded plays list -- the actual feature: someone
     who doesn't want to comb through the board themselves gets a few ready-made options instead.
 
-    tier_sizes defaults to PARLAY_TIER_SIZES: (2, "Safer", "safety"), (3, "Steady", "safety"),
-    (4, "Balanced", "conviction"), (5, "Bold", "payout"), (6, "Longshot", "payout"). Each tier is
-    built as its OWN, independently-ranked pool (build_parlay_leg_pool, called once per tier with
-    that tier's own sort key from _tier_sort_key) -- not slices of one shared ranking. Legs
+    tier_sizes defaults to PARLAY_TIER_SIZES: (2, "Safer", "safety", None), (3, "Steady",
+    "safety", None), (4, "Balanced", "conviction", None), (5, "Bold", "payout", "C"), (6,
+    "Longshot", "payout", "C"). Each tier is built as its OWN, independently-ranked pool
+    (build_parlay_leg_pool, called once per tier with that tier's own sort key from
+    _tier_sort_key and its own min_grade_letter floor) -- not slices of one shared ranking. Legs
     already used by an earlier (smaller) tier are excluded from every later tier's own pool, so
     no leg or player ever appears in more than one tier, but each tier's remaining candidates are
     ranked by what THAT tier actually cares about, not by a single universal metric.
@@ -388,16 +416,19 @@ def build_suggested_parlays(plays: List[Dict], tier_sizes: Optional[List] = None
     different objective -- Safer/Steady rank by real probability of hitting (raw ModelProb, not
     Conviction, which measures relative edge rather than absolute likelihood), Balanced uses the
     original Conviction metric as a real middle ground, and Bold/Longshot rank by payout size
-    (lowest ModelProb, i.e. the biggest real price) AMONG plays that still cleared the actual
-    grading floor -- chasing genuine upside within real, validated picks, not just grabbing
-    whatever has no edge at all. See _tier_sort_key's own docstring for the full reasoning behind
-    each objective.
+    (lowest ModelProb, i.e. the biggest real price) AMONG plays that clear a real "C" grade floor
+    -- chasing genuine upside within real, validated picks, not just grabbing whatever has the
+    longest odds regardless of quality (see PARLAY_TIER_SIZES' own comment for the real reported
+    example that made the "C" floor necessary: without it, a narrow market selection could
+    produce parlays built entirely from the worst, barely-qualifying legs). See _tier_sort_key's
+    own docstring for the full reasoning behind each objective.
 
     Tiers are still processed smallest-to-largest, and a tier is SKIPPED ENTIRELY, not padded
     with weaker plays, when its own pool (after excluding players already claimed by earlier
-    tiers) can't reach its size -- but unlike the earlier slice-based design, one tier failing
-    does NOT automatically doom every later tier, since each has its own independent ranking and
-    might find enough real candidates even if an earlier tier's narrower objective didn't.
+    tiers, and after its own min_grade_letter floor) can't reach its size -- but unlike the
+    earlier slice-based design, one tier failing does NOT automatically doom every later tier,
+    since each has its own independent ranking and might find enough real candidates even if an
+    earlier tier's narrower objective didn't.
 
     Calls build_parlay_leg_pool once per tier with min_pool_size set to that tier's own size (not
     the sum across every tier, since each tier now draws from its own independently-filtered
@@ -425,11 +456,12 @@ def build_suggested_parlays(plays: List[Dict], tier_sizes: Optional[List] = None
 
     out = []
     used_players: set = set()
-    for size, label, objective in sizes:
+    for size, label, objective, min_grade in sizes:
         key_fn = _tier_sort_key(objective)
         candidates = build_parlay_leg_pool(plays, max_per_game, max_per_market,
                                            min_pool_size=size, sort_key=key_fn,
-                                           exclude_players=used_players)
+                                           exclude_players=used_players,
+                                           min_grade_letter=min_grade)
         if len(candidates) < size:
             continue   # this specific tier can't be honestly filled -- but a LATER tier, with
                       # its own different objective, might still find enough real candidates

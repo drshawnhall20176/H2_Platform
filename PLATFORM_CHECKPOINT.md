@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 738/738 tests green)
+## What's in this checkpoint (all tested — 742/742 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -3390,6 +3390,48 @@ showing real Fair odds, a real letter grade, and the honest reasoning text. 738/
 **Still deliberately unattempted**: First HR, Record a Win, and Fantasy Score — each a
 structurally different problem (cross-player joint probability, team-context dependence, and an
 undefined external scoring formula respectively), not variations on an established pattern.
+
+### Suggested Parlays: Bold/Longshot no longer chase the worst-quality legs (2026-07-19)
+Shawn reported the 5/6-leg tiers producing absurd combined odds (+2,480,221 and +16,855,282)
+when only "Batter HR" was selected as the market filter — while 2-4 legs looked reasonable.
+
+**Root cause, traced directly**: the "payout" objective (Bold/Longshot) ranked purely by lowest
+raw probability among plays clearing only the base "D" grading floor (1.2x normalized
+conviction) — with zero regard for how much real edge a play actually had. Restricted to a
+single high-variance market like HR, this meant the objective was actively hunting for the
+WORST, barely-qualifying HR legs specifically because they had the longest odds, not because
+they had any real analytical backing. Chaining several of these genuinely bad picks together
+produced seven-figure American odds no real book would offer and no real person would bet.
+
+**The fix**: `PARLAY_TIER_SIZES` gained a 4th field (`min_grade`) per tier — Bold/Longshot now
+require at least a real "C" grade (1.5x normalized conviction) before a play is even eligible
+for the payout ranking, so the "biggest price" search happens within a pool of genuinely
+well-graded plays, not the bottom of the barrel. Safer/Steady/Balanced are unaffected (`None`),
+since their own objectives (raw probability, Conviction) already directly measure what those
+tiers care about. `build_parlay_leg_pool` gained a new `min_grade_letter` parameter and a
+`GRADE_RANK` ordering derived directly from `GRADE_THRESHOLDS`' own real order (A=4, B=3, C=2,
+D=1), rather than a second, separately-maintained ranking that could drift out of sync.
+
+**Confirmed honestly, not just declared fixed**: reproduced the exact reported scenario (a
+realistic 20-hitter board, HR-only market filter) and confirmed Bold/Longshot's legs are now
+exclusively B/C grade, never D — a real, direct proof the fix works, not just that the numbers
+changed. The odds did tighten meaningfully (a real 7-11x reduction versus the original
+screenshot's numbers), but they're still genuinely long in absolute terms — confirmed directly
+this is an honest mathematical consequence of chaining several real, independent rare events
+together (even 6 genuinely good HR plays at 20-25% each combine to seven-figure odds purely from
+the math), not a remaining quality bug. The real problem reported — worst-quality legs chosen
+specifically for their long odds — is fixed; a narrow, single rare-event market will still
+produce long combined odds by nature, and that's honest, not broken.
+
+**7 new tests**: `min_grade_letter` confirmed directly (excludes below-floor plays correctly,
+`None` matches old unconstrained behavior, an "A"-only floor excludes everything else) — with a
+real self-caught test-fixture bug along the way: an early version of the exclusion test
+accidentally used the same market for every leg, meaning the unrelated `max_per_market` cap was
+excluding a valid C-grade play before the grade filter even mattered, caught and fixed by giving
+each leg a distinct market. Plus a full `build_suggested_parlays` test reproducing the exact
+mechanism with a realistic mix of well-graded and barely-D-grade-but-longest-odds legs,
+confirming Bold/Longshot never include the D-grade ones even though "payout" alone would have
+picked them first. 742/742 total passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

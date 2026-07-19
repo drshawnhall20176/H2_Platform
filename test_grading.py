@@ -407,6 +407,34 @@ def test_parlay_pool_excludes_below_floor_plays():
     assert len(pool) == 1 and pool[0]["Player"] == "Real Play"
 
 
+# ----------------------------------------------------------------- build_parlay_leg_pool: min_grade_letter
+def test_parlay_pool_min_grade_letter_excludes_d_grade_plays():
+    plays = [
+        _leg("A-Grade Play", "T1", "G1", conviction=3.5, market="Batter HR"),
+        _leg("B-Grade Play", "T2", "G2", conviction=2.2, market="Batter Total Bases"),
+        _leg("C-Grade Play", "T3", "G3", conviction=1.6, market="Batter Strikeouts"),
+        _leg("D-Grade Play", "T4", "G4", conviction=1.25, market="Batter Walks"),
+    ]
+    pool = grading.build_parlay_leg_pool(plays, min_grade_letter="C")
+    players = {p["Player"] for p in pool}
+    assert players == {"A-Grade Play", "B-Grade Play", "C-Grade Play"}
+    assert "D-Grade Play" not in players
+    print("✓ build_parlay_leg_pool's min_grade_letter correctly excludes plays below the real floor")
+
+
+def test_parlay_pool_min_grade_letter_none_matches_old_behavior():
+    plays = [_leg("D-Grade Play", "T1", "G1", conviction=1.25)]
+    assert (grading.build_parlay_leg_pool(plays, min_grade_letter=None)
+           == grading.build_parlay_leg_pool(plays))
+
+
+def test_parlay_pool_min_grade_letter_a_only_excludes_everything_below_a():
+    plays = [_leg("A-Grade Play", "T1", "G1", conviction=3.5),
+            _leg("B-Grade Play", "T2", "G2", conviction=2.2)]
+    pool = grading.build_parlay_leg_pool(plays, min_grade_letter="A")
+    assert len(pool) == 1 and pool[0]["Player"] == "A-Grade Play"
+
+
 def test_parlay_pool_sorted_by_conviction_descending():
     plays = [_leg("Low", "A", "A @ B", 1.3, market="Batter Total Bases"),
             _leg("High", "C", "C @ D", 3.5, market="Batter HR"),
@@ -460,7 +488,7 @@ def test_suggested_parlays_safer_tier_picks_by_probability_not_conviction():
         _leg("Safe Play A", "T2", "G2", conviction=1.3, model_prob=0.85),
         _leg("Safe Play B", "T3", "G3", conviction=1.25, model_prob=0.80),
     ]
-    parlays = grading.build_suggested_parlays(plays, tier_sizes=[(2, "Safer", "safety")])
+    parlays = grading.build_suggested_parlays(plays, tier_sizes=[(2, "Safer", "safety", None)])
     safer = next(p for p in parlays if p["tier"] == "Safer")
     picked_players = {leg["Player"] for leg in safer["legs"]}
     assert picked_players == {"Safe Play A", "Safe Play B"}
@@ -473,7 +501,7 @@ def test_suggested_parlays_longshot_tier_picks_by_payout_not_just_conviction():
         _leg("Big Price Play", "T1", "G1", conviction=1.4, model_prob=0.15),   # low prob, real edge
         _leg("Safe But Boring", "T2", "G2", conviction=1.35, model_prob=0.88),  # high prob, low edge
     ]
-    parlays = grading.build_suggested_parlays(plays, tier_sizes=[(2, "Longshot", "payout")])
+    parlays = grading.build_suggested_parlays(plays, tier_sizes=[(2, "Longshot", "payout", None)])
     longshot = next(p for p in parlays if p["tier"] == "Longshot")
     picked_players = [leg["Player"] for leg in longshot["legs"]]
     assert picked_players[0] == "Big Price Play"   # the lower-probability, bigger-price play ranks first
@@ -490,7 +518,7 @@ def test_suggested_parlays_different_tiers_can_pick_genuinely_different_legs():
         _leg("Middling", "T3", "G3", conviction=2.0, model_prob=0.50),
     ]
     parlays = grading.build_suggested_parlays(
-        plays, tier_sizes=[(1, "Safer", "safety"), (1, "Longshot", "payout")])
+        plays, tier_sizes=[(1, "Safer", "safety", None), (1, "Longshot", "payout", None)])
     safer_pick = next(p for p in parlays if p["tier"] == "Safer")["legs"][0]["Player"]
     longshot_pick = next(p for p in parlays if p["tier"] == "Longshot")["legs"][0]["Player"]
     assert safer_pick == "HighProbLowEdge"
@@ -615,6 +643,29 @@ def test_suggested_parlays_single_market_selection_still_fills_all_tiers():
     tiers = {p["tier"] for p in parlays}
     assert tiers == {"Safer", "Steady", "Balanced", "Bold", "Longshot"}
     print("✓ build_suggested_parlays fills all five tiers even with only one market selected, given enough real graded plays")
+
+
+def test_suggested_parlays_bold_longshot_never_all_d_grade():
+    # THE exact real, reported issue: with only Batter HR selected, Bold/Longshot were building
+    # parlays entirely out of the WORST, barely-D-grade legs specifically because they had the
+    # longest odds -- producing seven-figure American odds no real book would offer. Confirms
+    # directly, using a realistic mix of grades within a single market, that Bold/Longshot now
+    # never include a D-grade leg, even though "payout" would otherwise have picked exactly the
+    # low-probability D-grade legs first.
+    plays = (
+        [_leg(f"Real{i}", f"TeamR{i}", f"GameR{i}", 2.5 - i * 0.05, market="Batter HR",
+             model_prob=0.30 - i * 0.005) for i in range(8)]   # real, well-graded (B/C) plays
+        + [_leg(f"Longshot{i}", f"TeamL{i}", f"GameL{i}", 1.25, market="Batter HR",
+                model_prob=0.05) for i in range(8)]   # barely-D-grade, but with the LOWEST
+                                                       # probability -- exactly what "payout"
+                                                       # alone would have chased first
+    )
+    parlays = grading.build_suggested_parlays(plays)
+    for p in parlays:
+        if p["tier"] in ("Bold", "Longshot"):
+            grades = {leg["_grade"]["letter"] for leg in p["legs"]}
+            assert "D" not in grades, f"{p['tier']} included a D-grade leg despite the min_grade floor"
+    print("✓ build_suggested_parlays' Bold/Longshot tiers never include a D-grade leg, even when D-grade legs have the longest odds")
 
 
 if __name__ == "__main__":
