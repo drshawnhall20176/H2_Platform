@@ -187,14 +187,20 @@ PARLAY_TIER_SIZES = [
    # together, not from quietly swapping in worse plays for the bigger tiers.
 
 
-def build_parlay_leg_pool(plays: List[Dict], max_per_game: int = 2, max_per_market: int = 3) -> List[Dict]:
+def build_parlay_leg_pool(plays: List[Dict], max_per_game: int = 2, max_per_market: int = 2) -> List[Dict]:
     """Rank graded plays by Conviction, then walk them building a pool that's actually SAFE to
     combine into parlays: at most ONE leg per player (a hard constraint -- see this section's own
     module-level comment for why this is the single most important rule here, not a minor
     detail), at most max_per_game legs sharing a game (a real but weaker correlation concern --
     two different hitters on opposing teams in the same game can share some game-script/weather
     correlation, but nowhere near as severe as a same-player pairing), and at most max_per_market
-    legs sharing a market (keeps a parlay from reading as six home-run bets in a trenchcoat).
+    legs sharing a market (keeps a parlay from reading as six home-run bets in a trenchcoat --
+    default tightened from 3 to 2 after a real, concrete example: Stolen Bases is a genuinely
+    high-variance market, so an elite base stealer's conviction ratio can run well above an elite
+    slugger's HR conviction for a similar raw probability, not because either model is wrong, but
+    because SB really is a more skewed market than HR. Left unconstrained, that skew let three
+    different burners' SB legs alone fill an entire tier before any other market appeared,
+    reading as far less realistic than what a person would actually build themselves).
 
     Returns a FLAT, conviction-ranked list -- not grouped by game the way organize_graded_picks
     is, since parlay legs are chosen across the WHOLE board at once, not within one game.
@@ -244,7 +250,7 @@ def combined_parlay_prob(legs: List[Dict]) -> float:
 
 
 def build_suggested_parlays(plays: List[Dict], tier_sizes: Optional[List] = None,
-                            max_per_game: int = 2, max_per_market: int = 3) -> List[Dict]:
+                            max_per_game: int = 2, max_per_market: int = 2) -> List[Dict]:
     """Build tiered parlay suggestions from a graded plays list -- the actual feature: someone
     who doesn't want to comb through the board themselves gets a few ready-made options instead.
 

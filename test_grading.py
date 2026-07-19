@@ -261,6 +261,19 @@ def test_parlay_pool_respects_max_per_market():
     print("✓ build_parlay_leg_pool respects the max-per-market cap")
 
 
+def test_parlay_pool_default_caps_a_single_skewed_market_at_two_legs():
+    # Regression guard for a real, reported issue: three different real base-stealers' Stolen
+    # Bases legs alone filled an entire early tier before any other market appeared, because SB
+    # is a genuinely more skewed market than HR (an elite burner's conviction ratio can run well
+    # above an elite slugger's for a similar raw probability). Confirms the DEFAULT (not an
+    # explicitly passed cap) now limits this to 2, using the exact market name involved.
+    plays = [_leg(f"Burner{i}", f"Team{i}", f"Game{i}", 4.0 - i * 0.3, market="Batter Stolen Bases")
+            for i in range(5)]
+    pool = grading.build_parlay_leg_pool(plays)   # no max_per_market passed -- testing the DEFAULT
+    assert len(pool) == 2
+    print("✓ build_parlay_leg_pool's default correctly caps a single skewed market (e.g. Stolen Bases) at 2 legs")
+
+
 def test_parlay_pool_excludes_below_floor_plays():
     plays = [_leg("Real Play", "A", "A @ B", 2.0), _leg("Too Weak", "C", "C @ D", 1.0)]
     pool = grading.build_parlay_leg_pool(plays)
@@ -268,7 +281,9 @@ def test_parlay_pool_excludes_below_floor_plays():
 
 
 def test_parlay_pool_sorted_by_conviction_descending():
-    plays = [_leg("Low", "A", "A @ B", 1.3), _leg("High", "C", "C @ D", 3.5), _leg("Mid", "E", "E @ F", 2.0)]
+    plays = [_leg("Low", "A", "A @ B", 1.3, market="Batter Total Bases"),
+            _leg("High", "C", "C @ D", 3.5, market="Batter HR"),
+            _leg("Mid", "E", "E @ F", 2.0, market="Batter Strikeouts")]
     pool = grading.build_parlay_leg_pool(plays)
     assert [p["Player"] for p in pool] == ["High", "Mid", "Low"]
 

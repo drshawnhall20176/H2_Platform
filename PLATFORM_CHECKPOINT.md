@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 686/686 tests green)
+## What's in this checkpoint (all tested — 687/687 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -3040,6 +3040,46 @@ because the file still compiled. Plus a full, realistic end-to-end simulation ac
 7-hitter, 4-game board confirming all three tiers build correctly with zero same-player
 duplicates anywhere, asserted directly in the simulation itself, not just eyeballed. 686/686
 total passing.
+
+### Suggested Parlays: market-selection UI, after a real reported issue (2026-07-18)
+Shawn caught something real on the live page: the auto-built Safer/Balanced tiers were
+dominated by three different real base stealers' Stolen Bases legs before any other market
+appeared, and flagged it as looking unrealistic — proposing a market-selection UI (dropdowns or
+toggles) as the fix.
+
+**Investigated the actual cause before changing anything**, rather than assuming it was a bug:
+compared a real elite base stealer's SB conviction (a genuine ~24% Over-0.5 chance) against a
+real elite slugger's HR conviction (a nearly identical ~22% chance) using this platform's own
+functions directly — 4.78x vs 2.03x, more than double for essentially the same raw probability.
+Confirmed this isn't obviously a calibration bug: Stolen Bases genuinely is a more skewed market
+than Home Runs (most hitters rarely or never attempt one, a handful attempt many), so an elite
+burner really can be more of an outlier relative to a typical player than an elite slugger is —
+the math isn't necessarily wrong, but it produced a real UX problem regardless. Deliberately did
+NOT unilaterally re-tune `BEST_BET_REF["Batter Stolen Bases"]` to "fix" a skew that isn't clearly
+wrong and that also feeds Best Bets/Graded Picks, not just this page — that's a bigger, separate
+question belonging to Shawn's own call, not something to change quietly as a side effect of a
+parlay-page fix.
+
+**Two real fixes, not one**: (1) `grading.build_parlay_leg_pool`'s/`build_suggested_parlays`'s
+`max_per_market` default tightened from 3 to 2 — a real, low-risk improvement independent of the
+Stolen Bases question, since letting any single market fill 3 of a parlay's legs before another
+market appears reads as unrealistic regardless of which market it happens to be. (2) A market-
+selection `st.multiselect` added to the top of the page, defaulting to every market present on
+the board (not silently hiding Stolen Bases by default, since its conviction level isn't
+confidently wrong) — giving people direct control over what they see, the actual fix Shawn asked
+for. Filtering happens on the flattened plays list before `grading.build_suggested_parlays` is
+called, so the tested, core parlay logic needed zero changes — only the view layer changed.
+
+**3 new/updated tests**: a dedicated regression test locking in the new default specifically
+using Stolen Bases as the example market (5 real burners, confirming only 2 make the pool by
+default, no cap explicitly passed); a fixed pre-existing sort-order test that had accidentally
+been exercising the old default (three same-market legs, silently relying on max_per_market=3)
+— caught and corrected to use three different markets instead, so it tests sort order
+specifically rather than colliding with the cap it wasn't meant to be testing. Plus a full,
+realistic end-to-end simulation reproducing the exact reported scenario (multiple real burners
+plus real sluggers) twice — once confirming the tightened default naturally diversifies the
+board without any user action, once confirming the market filter correctly excludes Stolen Bases
+entirely when deselected. 687/687 total passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
