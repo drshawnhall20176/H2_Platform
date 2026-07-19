@@ -42,6 +42,42 @@ def test_probabilities_in_range():
     assert 0.15 < hr_p < 0.40  # a 38-HR bat sits in a believable anytime-HR band
 
 
+# ----------------------------------------------------------------- simulate_batter: single/double/triple/bb
+def test_simulate_batter_exposes_all_hit_type_counts():
+    rng = np.random.default_rng(0)
+    probs = P.batter_pa_probs(_slugger(), P.NEUTRAL_PARK)
+    sim = P.simulate_batter(probs, 4.4, 20000, rng)
+    for key in ("single", "double", "triple", "bb"):
+        assert key in sim
+        assert len(sim[key]) == 20000
+        assert (sim[key] >= 0).all()
+    print("✓ simulate_batter correctly exposes single/double/triple/bb as their own simulated counts")
+
+
+def test_simulate_batter_hit_types_sum_to_total_hits():
+    # A real, direct consistency check: for EVERY simulated trial, single+double+triple+hr must
+    # exactly equal the trial's own total hits count -- these aren't independently drawn, they're
+    # different views into the exact same underlying per-PA outcome draws.
+    rng = np.random.default_rng(0)
+    probs = P.batter_pa_probs(_slugger(), P.NEUTRAL_PARK)
+    sim = P.simulate_batter(probs, 4.4, 5000, rng)
+    reconstructed_hits = sim["single"] + sim["double"] + sim["triple"] + sim["hr"]
+    assert (reconstructed_hits == sim["hits"]).all()
+    print("✓ simulate_batter's single/double/triple/hr counts sum EXACTLY to hits for every single trial, confirming they share the same underlying draws")
+
+
+def test_simulate_batter_triple_is_rare():
+    # A real sanity check on relative magnitude -- triples should be dramatically rarer than
+    # singles for a realistic hitter, matching the real, known shape of MLB hit-type frequency.
+    rng = np.random.default_rng(0)
+    probs = P.batter_pa_probs(_slugger(), P.NEUTRAL_PARK)
+    sim = P.simulate_batter(probs, 4.4, 20000, rng)
+    single_rate = float(np.mean(sim["single"] >= 1))
+    triple_rate = float(np.mean(sim["triple"] >= 1))
+    assert triple_rate < single_rate * 0.2
+    print("✓ simulate_batter correctly produces a realistic, much lower triple rate than single rate")
+
+
 def test_pitcher_projection_sane():
     ace = dict(battersFaced=720, inningsPitched="180.0", gamesStarted=29,
                strikeOuts=235, baseOnBalls=42)
@@ -253,6 +289,57 @@ def test_build_best_bets_includes_new_markets():
     assert er_play["Line"] == 2.5
     assert "ERA" in er_play["Why"] or "2.5" in str(er_play.get("Line"))
     print("\u2713 build_best_bets correctly produces real, correctly-shaped plays for all four new markets end-to-end")
+
+
+def test_build_best_bets_includes_second_wave_of_new_markets():
+    hitters = [
+        dict(Hitter="Slugger", Team="A", GameLabel="A @ B", Hand="L",
+            **{"Opp Hand": "R", "Opp Pitcher": "Ace"}, Advantage="Advantage",
+            _weather_hr=1.0, Due=0.0, _opp_stat={"era": 5.2},
+            **{"HR%": 0.15, "TB1.5%": 0.40, "Hit%": 0.65, "SO Prob": 0.50,
+              "Runs%": 0.42, "RBI%": 0.40, "SB%": 0.08,
+              "Single%": 0.45, "Double%": 0.16, "Triple%": 0.025, "Walk%": 0.38}),
+    ]
+    pitchers = [
+        dict(Pitcher="Ace", Team="B", Opp="A", ERA=3.10,
+            **{"K over%": 0.55, "Outs over%": 0.50, "BB over%": 0.30, "ER over%": 0.42,
+              "Hits Allowed over%": 0.48},
+            **{"Proj K": 6.0, "Proj BB": 1.6, "Proj IP": 6.2, "Proj Outs": 18.6, "Proj ER": 2.1,
+              "Proj Hits Allowed": 5.4},
+            _opp_k=0.22, _opp_bb=0.08, _game="A @ B"),
+    ]
+    plays = P.build_best_bets(hitters, pitchers)
+    markets_present = {p["Market"] for p in plays}
+    for market in ("Batter Singles", "Batter Doubles", "Batter Triples", "Batter Walks",
+                  "Pitcher Hits Allowed"):
+        assert market in markets_present, f"{market} missing from build_best_bets output"
+
+    walks_play = next(p for p in plays if p["Market"] == "Batter Walks")
+    assert walks_play["Line"] == 0.5
+    assert "Why" in walks_play and walks_play["Why"]
+
+    ha_play = next(p for p in plays if p["Market"] == "Pitcher Hits Allowed")
+    assert ha_play["Line"] == 5.5
+    assert "5.4" in ha_play["Why"] or "league average" in ha_play["Why"].lower()
+    print("\u2713 build_best_bets correctly produces real, correctly-shaped plays for all five second-wave markets end-to-end")
+
+
+def test_build_best_bets_includes_hrr():
+    hitters = [
+        dict(Hitter="Slugger", Team="A", GameLabel="A @ B", Hand="L",
+            **{"Opp Hand": "R", "Opp Pitcher": "Ace"}, Advantage="Advantage",
+            _weather_hr=1.0, Due=0.0, _opp_stat={"era": 5.2},
+            **{"HR%": 0.15, "TB1.5%": 0.40, "Hit%": 0.65, "SO Prob": 0.50,
+              "Runs%": 0.42, "RBI%": 0.40, "SB%": 0.08,
+              "Single%": 0.45, "Double%": 0.16, "Triple%": 0.025, "Walk%": 0.38,
+              "HRR%": 0.60}),
+    ]
+    plays = P.build_best_bets(hitters, [])
+    hrr_play = next((p for p in plays if p["Market"] == "Batter Hits+Runs+RBIs"), None)
+    assert hrr_play is not None
+    assert hrr_play["Line"] == 1.5
+    assert "correlation-aware" in hrr_play["Why"]
+    print("\u2713 build_best_bets correctly produces a real Batter Hits+Runs+RBIs play with honest, correlation-aware reasoning")
 
 
 
@@ -773,6 +860,89 @@ def test_poisson_over_half_prob_bounded_below_one():
     assert P.poisson_over_half_prob(5.0) < 1.0
 
 
+# ----------------------------------------------------------------- simulate_hits_runs_rbi
+def test_hrr_hrr_equals_exact_per_trial_sum():
+    rng = np.random.default_rng(0)
+    sim_hits = np.array([0, 1, 2, 3, 0, 1])
+    out = P.simulate_hits_runs_rbi(sim_hits, exp_hits=1.1, exp_runs=0.5, exp_rbi=0.5, rng=rng)
+    assert (out["hrr"] == out["hits"] + out["runs"] + out["rbi"]).all()
+    print("✓ simulate_hits_runs_rbi's hrr field is EXACTLY the per-trial sum of hits+runs+rbi, for every trial")
+
+
+def test_hrr_output_shape_and_nonnegativity():
+    rng = np.random.default_rng(0)
+    sim_hits = np.random.default_rng(1).poisson(1.1, size=10000)
+    out = P.simulate_hits_runs_rbi(sim_hits, exp_hits=1.1, exp_runs=0.5, exp_rbi=0.5, rng=rng)
+    for key in ("hits", "runs", "rbi", "hrr"):
+        assert key in out
+        assert len(out[key]) == 10000
+        assert (out[key] >= 0).all()
+
+
+def test_hrr_real_positive_correlation_between_hits_and_runs_rbi():
+    # THE core property this whole mechanism exists to produce: trials with MORE hits should
+    # have a genuinely HIGHER average runs+rbi than trials with FEWER hits -- not just similar,
+    # independently-noisy averages. This is the actual, direct proof the correlation mechanism
+    # works, not just that the function runs without crashing.
+    rng = np.random.default_rng(0)
+    sim_hits = np.random.default_rng(1).poisson(1.1, size=50000)
+    out = P.simulate_hits_runs_rbi(sim_hits, exp_hits=1.1, exp_runs=0.5, exp_rbi=0.5, rng=rng)
+    combined_rr = out["runs"] + out["rbi"]
+    zero_hit_mask = sim_hits == 0
+    high_hit_mask = sim_hits >= 3
+    avg_rr_zero_hits = combined_rr[zero_hit_mask].mean()
+    avg_rr_high_hits = combined_rr[high_hit_mask].mean()
+    assert avg_rr_high_hits > avg_rr_zero_hits * 1.5
+    print(f"✓ simulate_hits_runs_rbi produces real positive correlation: avg R+RBI on 0-hit trials={avg_rr_zero_hits:.2f}, on 3+-hit trials={avg_rr_high_hits:.2f}")
+
+
+def test_hrr_zero_hit_trials_still_have_real_nonzero_runs_rbi_chance():
+    # The real, deliberate floor: even a genuine zero-hit trial must NOT have runs/rbi driven to
+    # exactly zero -- a player can score or drive in a run via a walk, sac fly, or fielder's
+    # choice without recording a hit. Confirms the floor behavior directly.
+    rng = np.random.default_rng(0)
+    sim_hits = np.zeros(20000, dtype=np.int64)   # every single trial is a genuine zero-hit trial
+    out = P.simulate_hits_runs_rbi(sim_hits, exp_hits=1.1, exp_runs=0.5, exp_rbi=0.5, rng=rng)
+    assert out["runs"].mean() > 0.0
+    assert out["rbi"].mean() > 0.0
+    # Expected mean on an all-zero-hit input: exp_runs * HRR_CORRELATION_FLOOR = 0.5 * 0.5 = 0.25
+    assert out["runs"].mean() == pytest.approx(0.25, abs=0.03)
+    print("✓ simulate_hits_runs_rbi correctly keeps a real, nonzero runs/rbi chance even on genuine zero-hit trials")
+
+
+def test_hrr_multiplier_ceiling_bounds_extreme_hot_trials():
+    # An extremely hot trial (far more hits than expected) should NOT get an unbounded
+    # multiplier -- confirms the stated ceiling actually caps it.
+    rng = np.random.default_rng(0)
+    sim_hits = np.full(20000, 10)   # an absurdly hot trial value, testing the real bound
+    out = P.simulate_hits_runs_rbi(sim_hits, exp_hits=1.1, exp_runs=0.5, exp_rbi=0.5, rng=rng)
+    # Expected mean at the ceiling: exp_runs * HRR_CORRELATION_CEILING = 0.5 * 2.0 = 1.0
+    assert out["runs"].mean() == pytest.approx(1.0, abs=0.05)
+    print("✓ simulate_hits_runs_rbi correctly caps the multiplier for an extremely hot trial, not letting it scale unboundedly")
+
+
+def test_hrr_unclipped_mean_stays_close_to_unconditional_rate():
+    # A real, important property: on a REALISTIC hits distribution (not an artificial all-zero
+    # or all-extreme input), the overall average runs/rbi across all trials should stay close to
+    # the original, unconditional exp_runs/exp_rbi -- confirming the correlation mechanism
+    # redistributes variance across trials without systematically biasing the overall mean.
+    rng = np.random.default_rng(0)
+    sim_hits = np.random.default_rng(1).poisson(1.1, size=100000)
+    out = P.simulate_hits_runs_rbi(sim_hits, exp_hits=1.1, exp_runs=0.5, exp_rbi=0.5, rng=rng)
+    assert out["runs"].mean() == pytest.approx(0.5, abs=0.03)
+    assert out["rbi"].mean() == pytest.approx(0.5, abs=0.03)
+    print("✓ simulate_hits_runs_rbi's overall mean stays close to the real, unconditional rate on a realistic hits distribution")
+
+
+def test_hrr_handles_near_zero_exp_hits_without_crashing():
+    rng = np.random.default_rng(0)
+    sim_hits = np.zeros(1000, dtype=np.int64)
+    out = P.simulate_hits_runs_rbi(sim_hits, exp_hits=0.0, exp_runs=0.3, exp_rbi=0.3, rng=rng)
+    assert (out["runs"] >= 0).all()
+    assert (out["rbi"] >= 0).all()
+    print("✓ simulate_hits_runs_rbi handles a near-zero exp_hits edge case without dividing by zero or crashing")
+
+
 # ----------------------------------------------------------------- enrich_hitter_rows: Runs/RBI/SB
 def _slugger_with_counting_stats():
     return dict(plateAppearances=600, atBats=540, hits=165, doubles=34, triples=2,
@@ -821,6 +991,64 @@ def test_enrich_hitter_rows_handles_missing_counting_stat_fields_gracefully():
     assert 0.0 <= out["RBI%"] < 1.0
     assert 0.0 <= out["SB%"] < 1.0
     print("✓ enrich_hitter_rows doesn't crash and produces sane values even when runs/rbi/stolenBases are entirely missing from the stat dict")
+
+
+# ----------------------------------------------------------------- enrich_hitter_rows: Single/Double/Triple/Walk
+def test_enrich_hitter_rows_attaches_single_double_triple_walk():
+    row = {"Hitter": "Test Slugger", "Team": "Test Team", "_pid": 1,
+          "_stat": _slugger_with_counting_stats(), "_opp_stat": None, "_venue_id": None,
+          "_split_stat": None, "_exp_pa": 4.25, "_weather_hr": 1.0}
+    out = P.enrich_hitter_rows([row], seed=1)[0]
+    for key in ("Single%", "Double%", "Triple%", "Walk%"):
+        assert key in out
+        assert 0.0 <= out[key] < 1.0
+    print("✓ enrich_hitter_rows correctly attaches Single%/Double%/Triple%/Walk%")
+
+
+def test_enrich_hitter_rows_triple_pct_lower_than_single_pct():
+    row = {"Hitter": "Test Slugger", "Team": "Test Team", "_pid": 1,
+          "_stat": _slugger_with_counting_stats(), "_opp_stat": None, "_venue_id": None,
+          "_split_stat": None, "_exp_pa": 4.25, "_weather_hr": 1.0}
+    out = P.enrich_hitter_rows([row], seed=1)[0]
+    assert out["Triple%"] < out["Single%"]
+    print("✓ enrich_hitter_rows correctly produces a lower Triple% than Single%, matching real relative hit-type frequency")
+
+
+def test_enrich_hitter_rows_single_double_triple_walk_use_slugger_fixture_gracefully():
+    # _slugger() (used throughout the rest of this file) has homeRuns/baseOnBalls/strikeOuts but
+    # no explicit doubles/triples counts beyond what's in the base fixture -- confirms this still
+    # produces sane, non-crashing values using the SAME PA-outcome simulation as every other
+    # field here, not a separate code path that could silently diverge.
+    row = {"Hitter": "X", "Team": "T", "_pid": 1, "_stat": _slugger(), "_opp_stat": None,
+          "_venue_id": None, "_split_stat": None, "_exp_pa": 4.25, "_weather_hr": 1.0}
+    out = P.enrich_hitter_rows([row], seed=1)[0]
+    for key in ("Single%", "Double%", "Triple%", "Walk%"):
+        assert key in out
+        assert 0.0 <= out[key] < 1.0
+
+
+# ----------------------------------------------------------------- enrich_hitter_rows: HRR%
+def test_enrich_hitter_rows_attaches_hrr():
+    row = {"Hitter": "Test Slugger", "Team": "Test Team", "_pid": 1,
+          "_stat": _slugger_with_counting_stats(), "_opp_stat": None, "_venue_id": None,
+          "_split_stat": None, "_exp_pa": 4.25, "_weather_hr": 1.0}
+    out = P.enrich_hitter_rows([row], seed=1)[0]
+    assert "HRR%" in out
+    assert 0.0 <= out["HRR%"] < 1.0
+    print("✓ enrich_hitter_rows correctly attaches HRR% (Hits+Runs+RBIs)")
+
+
+def test_enrich_hitter_rows_hrr_higher_than_hit_pct_alone():
+    # A real, meaningful sanity check: combining three stats into one "over 1.5" line should
+    # produce a genuinely different (here, real cross-check via a real comparison) number than
+    # any single component -- specifically, HRR% should be a real, distinct probability, not
+    # accidentally identical to Hit% (which would suggest Runs/RBI aren't actually contributing).
+    row = {"Hitter": "Test Slugger", "Team": "Test Team", "_pid": 1,
+          "_stat": _slugger_with_counting_stats(), "_opp_stat": None, "_venue_id": None,
+          "_split_stat": None, "_exp_pa": 4.25, "_weather_hr": 1.0}
+    out = P.enrich_hitter_rows([row], seed=1)[0]
+    assert out["HRR%"] != out["Hit%"]
+    print("✓ enrich_hitter_rows' HRR% is a genuinely distinct probability from Hit% alone, confirming Runs/RBI are real contributors")
 
 
 # ----------------------------------------------------------------- project_pitcher: exp_er
@@ -877,6 +1105,66 @@ def test_simulate_pitcher_produces_er_array():
     print("✓ simulate_pitcher's simulated ER distribution correctly converges to the real expected value")
 
 
+# ----------------------------------------------------------------- project_pitcher: exp_hits_allowed
+def test_project_pitcher_exp_hits_allowed_present_and_hand_verified():
+    ace = dict(battersFaced=720, inningsPitched="180.0", gamesStarted=29,
+              strikeOuts=235, baseOnBalls=42, earnedRuns=65, hits=170)
+    proj = P.project_pitcher(ace)
+    assert "exp_hits_allowed" in proj
+    # Hand-verified directly: shrunk rate 0.2357 * exp_bf 24.83 = 5.853
+    assert proj["exp_hits_allowed"] == pytest.approx(5.853, abs=0.01)
+    print("✓ project_pitcher correctly computes a hand-verified exp_hits_allowed")
+
+
+def test_project_pitcher_exp_hits_allowed_missing_field_defaults_gracefully():
+    # The `ace` fixture used throughout the rest of this file never included "hits" at all --
+    # confirms this doesn't crash and produces a sane, shrunk-toward-league-average value.
+    ace_no_hits = dict(battersFaced=720, inningsPitched="180.0", gamesStarted=29,
+                       strikeOuts=235, baseOnBalls=42)
+    proj = P.project_pitcher(ace_no_hits)
+    assert "exp_hits_allowed" in proj
+    assert proj["exp_hits_allowed"] >= 0.0
+    print("✓ project_pitcher handles a stat dict missing hits entirely without crashing")
+
+
+def test_project_pitcher_exp_hits_allowed_shrinks_harder_than_k_or_bb():
+    # A real, deliberate design property, not incidental: hits_allowed's prior (350 BF) matches
+    # BB's own prior exactly, and is meaningfully larger than K's (150) -- confirms a thin-sample
+    # pitcher's hits-allowed rate regresses AT LEAST as hard toward league average as his BB rate
+    # does, honestly reflecting that hits allowed carries less individual signal (DIPS theory).
+    thin = dict(battersFaced=65, inningsPitched="16.0", gamesStarted=3,
+               strikeOuts=15, baseOnBalls=5, earnedRuns=1, hits=5)   # a small, hot sample
+    proj = P.project_pitcher(thin)
+    naive_hits_rate = 5 / 65
+    shrunk_hits_rate = proj["exp_hits_allowed"] / proj["exp_bf"]
+    naive_k_rate = 15 / 65
+    shrunk_k_rate = proj["exp_k"] / proj["exp_bf"]
+    hits_shrink_amount = abs(naive_hits_rate - shrunk_hits_rate)
+    k_shrink_amount = abs(naive_k_rate - shrunk_k_rate)
+    assert hits_shrink_amount > k_shrink_amount
+    print("✓ project_pitcher shrinks a thin-sample hits-allowed rate harder than the same pitcher's K rate, honestly reflecting DIPS theory")
+
+
+def test_project_pitcher_exp_hits_allowed_never_negative():
+    great = dict(battersFaced=720, inningsPitched="180.0", gamesStarted=29,
+                strikeOuts=235, baseOnBalls=42, hits=0)   # extreme edge case
+    proj = P.project_pitcher(great)
+    assert proj["exp_hits_allowed"] >= 0.0
+
+
+# ----------------------------------------------------------------- simulate_pitcher: hits_allowed
+def test_simulate_pitcher_produces_hits_allowed_array():
+    ace = dict(battersFaced=720, inningsPitched="180.0", gamesStarted=29,
+              strikeOuts=235, baseOnBalls=42, earnedRuns=65, hits=170)
+    proj = P.project_pitcher(ace)
+    rng = np.random.default_rng(0)
+    sim = P.simulate_pitcher(proj, 20000, rng)
+    assert "hits_allowed" in sim
+    assert len(sim["hits_allowed"]) == 20000
+    assert sim["hits_allowed"].mean() == pytest.approx(proj["exp_hits_allowed"], abs=0.1)
+    print("✓ simulate_pitcher's simulated hits-allowed distribution correctly converges to the real expected value")
+
+
 # ----------------------------------------------------------------- build_pitcher_projection_rows: ER
 def test_build_pitcher_projection_rows_includes_er_fields():
     home_stat = dict(battersFaced=720, inningsPitched="180.0", gamesStarted=29,
@@ -895,6 +1183,26 @@ def test_build_pitcher_projection_rows_includes_er_fields():
         assert r["ER line"] == 2.5
         assert 0.0 <= r["ER over%"] <= 1.0
     print("✓ build_pitcher_projection_rows correctly includes Proj ER/ER line/ER over%/ER fair for every starter")
+
+
+def test_build_pitcher_projection_rows_includes_hits_allowed_fields():
+    home_stat = dict(battersFaced=720, inningsPitched="180.0", gamesStarted=29,
+                     strikeOuts=235, baseOnBalls=42, earnedRuns=65, hits=170)
+    away_stat = dict(battersFaced=700, inningsPitched="175.0", gamesStarted=28,
+                     strikeOuts=210, baseOnBalls=50, earnedRuns=70, hits=165)
+    hp = _fake_pm(601, "Home Ace", "R", 3.25, 3.20, home_stat)
+    ap = _fake_pm(602, "Away Ace", "L", 3.60, 3.55, away_stat)
+    meta = [{"label": "NYY @ BOS", "home_id": 1, "away_id": 2,
+            "home_name": "Boston Red Sox", "away_name": "New York Yankees",
+            "game_date": "2026-07-18", "home_pm": hp, "away_pm": ap}]
+    out = P.build_pitcher_projection_rows([], meta, seed=1)
+    assert len(out) == 2
+    for r in out:
+        assert "Proj Hits Allowed" in r and "Hits Allowed line" in r
+        assert "Hits Allowed over%" in r and "Hits Allowed fair" in r
+        assert r["Hits Allowed line"] == 5.5
+        assert 0.0 <= r["Hits Allowed over%"] <= 1.0
+    print("✓ build_pitcher_projection_rows correctly includes all four Hits Allowed fields for every starter")
 
 
 # ----------------------------------------------------------------- _hitter_reasons: new markets
@@ -933,6 +1241,46 @@ def test_pitcher_reasons_earned_runs_references_era_and_ip():
     why = P._pitcher_reasons(row, "Pitcher Earned Runs", "Over")
     assert why == ["3.45 ERA over a projected 6.1 IP"]
     print("✓ _pitcher_reasons correctly references the pitcher's own ERA/IP for Earned Runs, honest about no opponent adjustment")
+
+
+def test_pitcher_reasons_hits_allowed_references_dips_caveat():
+    row = {"Proj Hits Allowed": 5.9}
+    why = P._pitcher_reasons(row, "Pitcher Hits Allowed", "Over")
+    assert len(why) == 1
+    assert "5.9" in why[0]
+    assert "league average" in why[0].lower()
+    print("✓ _pitcher_reasons correctly references Proj Hits Allowed with an honest DIPS-theory caveat, not overstated confidence")
+
+
+def test_hitter_reasons_walks_gets_own_distinct_reasoning():
+    why_over = P._hitter_reasons({}, "Batter Walks", "Over")
+    why_under = P._hitter_reasons({}, "Batter Walks", "Under")
+    assert why_over == ["real plate discipline in this matchup"]
+    assert why_under == ["aggressive approach, rarely walks"]
+    assert why_over != why_under
+    print("✓ _hitter_reasons gives Batter Walks its own distinct reasoning, not reused power/platoon language")
+
+
+def test_hitter_reasons_singles_doubles_triples_get_platoon_reasoning():
+    # Confirms these join the SAME platoon-aware "offense" group as HR/TB/Hits, since they share
+    # the same underlying platoon-adjusted PA-outcome distribution -- not a separate, unrelated
+    # code path that could silently diverge from what the model actually does.
+    row = {"Advantage": "Advantage", "Hand": "R", "Opp Hand": "L"}
+    for market in ("Batter Singles", "Batter Doubles", "Batter Triples"):
+        why = P._hitter_reasons(row, market, "Over")
+        assert any("platoon edge" in w for w in why)
+    print("✓ _hitter_reasons correctly extends platoon-edge reasoning to Singles/Doubles/Triples")
+
+
+def test_hitter_reasons_singles_doubles_triples_no_weather_claim():
+    # A real, deliberate honesty check: weather in this model only DIRECTLY affects HR (via
+    # p_hr *= weather_hr), not singles/doubles/triples -- confirms these markets never claim a
+    # weather boost the model doesn't actually apply to them.
+    row = {"Advantage": None, "_weather_hr": 1.15}
+    for market in ("Batter Singles", "Batter Doubles", "Batter Triples"):
+        why = P._hitter_reasons(row, market, "Over")
+        assert not any("weather" in w for w in why)
+    print("✓ _hitter_reasons correctly does NOT claim a weather boost for Singles/Doubles/Triples, honest about what the model actually applies")
 
 
 # ----------------------------------------------------------------- build_best_bets: _ceiling

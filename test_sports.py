@@ -317,6 +317,28 @@ def test_mlb_new_props_markets_present():
     print("\u2713 all four new MLB prop markets are correctly registered with their real, confirmed Odds API keys")
 
 
+def test_mlb_second_wave_props_markets_present():
+    # Same regression guard, second wave: Singles/Doubles/Triples/Walks/Hits Allowed, also
+    # confirmed directly against the-odds-api.com's own live documentation, not guessed.
+    mlb = S.get("MLB")
+    assert mlb.market_map["Batter Singles"] == "batter_singles"
+    assert mlb.market_map["Batter Doubles"] == "batter_doubles"
+    assert mlb.market_map["Batter Triples"] == "batter_triples"
+    assert mlb.market_map["Batter Walks"] == "batter_walks"
+    assert mlb.market_map["Pitcher Hits Allowed"] == "pitcher_hits_allowed"
+    for key in ("batter_singles", "batter_doubles", "batter_triples", "batter_walks",
+               "pitcher_hits_allowed"):
+        assert key in mlb.markets
+    print("\u2713 all five second-wave MLB prop markets are correctly registered with their real, confirmed Odds API keys")
+
+
+def test_mlb_hrr_market_present():
+    mlb = S.get("MLB")
+    assert mlb.market_map["Batter Hits+Runs+RBIs"] == "batter_hits_runs_rbis"
+    assert "batter_hits_runs_rbis" in mlb.markets
+    print("\u2713 Batter Hits+Runs+RBIs is correctly registered with its real, confirmed Odds API key")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

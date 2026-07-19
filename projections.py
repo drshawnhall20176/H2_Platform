@@ -59,10 +59,16 @@ DEFAULT_LINES = {
     "Batter Runs": 0.5,
     "Batter RBIs": 0.5,
     "Batter Stolen Bases": 0.5,
+    "Batter Singles": 0.5,
+    "Batter Doubles": 0.5,
+    "Batter Triples": 0.5,
+    "Batter Walks": 0.5,
+    "Batter Hits+Runs+RBIs": 1.5,
     "Pitcher Strikeouts": 5.5,
     "Pitcher Outs": 17.5,
     "Pitcher Walks": 1.5,
     "Pitcher Earned Runs": 2.5,
+    "Pitcher Hits Allowed": 5.5,
 }
  
 DEFAULT_SIMS = 12000
@@ -124,6 +130,13 @@ LG_BATTER = {  # rate, prior_pa
 }
 LG_PITCHER = {  # rate per batter faced, prior_bf
     "k": (0.222, 150), "bb": (0.082, 350),
+    # A real, established baseball-analytics principle honestly reflected in the shrinkage
+    # magnitude, not just a guessed number: hits allowed on balls in play is largely OUT OF a
+    # pitcher's own control (DIPS theory -- driven far more by defense and plain luck than by
+    # the pitcher himself, unlike K/BB which are much more pitcher-skill-driven). Shrunk at
+    # least as hard as BB, not less, to honestly reflect that a pitcher's own recent hits-
+    # allowed rate carries less real signal about him specifically than his K or BB rate does.
+    "hits_allowed": (0.235, 350),
 }
  
  
@@ -259,7 +272,15 @@ def simulate_batter(probs: np.ndarray, exp_pa: float, sims: int, rng) -> Dict[st
     hits = np.where(valid, HIT_FLAG[draws], 0).sum(axis=1)
     hr = np.where(valid, (draws == HR), 0).sum(axis=1)
     k = np.where(valid, (draws == K), 0).sum(axis=1)
-    return {"tb": tb, "hits": hits, "hr": hr, "k": k}
+    # single/double/triple/bb: the underlying draws array already carries this -- OUT_PLAY,
+    # K, BB, SINGLE, DOUBLE, TRIPLE, HR were already real, defined index constants, just not
+    # yet surfaced as their own simulated counts the way hr/k already were.
+    single = np.where(valid, (draws == SINGLE), 0).sum(axis=1)
+    double = np.where(valid, (draws == DOUBLE), 0).sum(axis=1)
+    triple = np.where(valid, (draws == TRIPLE), 0).sum(axis=1)
+    bb = np.where(valid, (draws == BB), 0).sum(axis=1)
+    return {"tb": tb, "hits": hits, "hr": hr, "k": k,
+           "single": single, "double": double, "triple": triple, "bb": bb}
  
  
 # ---- pitcher model ---------------------------------------------------------
@@ -293,8 +314,8 @@ def build_lineup_rate_map(rows: list) -> Dict:
  
  
 def project_pitcher(stat: Dict, opp_lineup: Optional[Dict] = None) -> Optional[Dict]:
-    """Project a STARTER's K / outs / walks / earned runs. Returns None for non-starters or thin
-    samples.
+    """Project a STARTER's K / outs / walks / earned runs / hits allowed. Returns None for
+    non-starters or thin samples.
 
     Guards against the inflation bug:
       1. Starter gate: needs real starts, else it's a bullpen game/opener -> skip.
@@ -313,6 +334,15 @@ def project_pitcher(stat: Dict, opp_lineup: Optional[Dict] = None) -> Optional[D
     score" signal, and fabricating one from K/BB alone would overclaim a precision the data
     doesn't support. An honest, simpler read of the pitcher's own rate, the same posture SB gets
     on the hitter side for the same underlying reason (see batter_counting_rate's own comment).
+
+    Hits allowed (exp_hits_allowed) uses the SAME per-batter-faced shrinkage as K/BB (unlike ER,
+    since hits allowed is genuinely a per-PA outcome, not an innings-normalized rate the way ERA
+    is), but with a real, deliberately STRONGER shrinkage prior -- a real, established baseball-
+    analytics principle (DIPS theory), not an arbitrary choice: hits on balls in play are largely
+    out of a pitcher's own control, driven far more by defense and plain luck than by the pitcher
+    himself, so his own recent hits-allowed rate carries less real signal about him specifically
+    than his K or BB rate does. Also gets NO opponent-lineup adjustment, for the same honest
+    reason ER doesn't.
     """
     bf = _f(stat, "battersFaced")
     ip = _parse_ip(stat.get("inningsPitched"))
@@ -320,6 +350,7 @@ def project_pitcher(stat: Dict, opp_lineup: Optional[Dict] = None) -> Optional[D
     so = _f(stat, "strikeOuts")
     bb = _f(stat, "baseOnBalls")
     er = _f(stat, "earnedRuns")
+    h_allowed = _f(stat, "hits")
 
     # 1. Starter gate. A genuine probable starter has multiple starts and real innings.
     if gs < 3 or ip < 15 or bf < 60:
@@ -334,20 +365,25 @@ def project_pitcher(stat: Dict, opp_lineup: Optional[Dict] = None) -> Optional[D
     k_rate = _shrink(so, bf, *LG_PITCHER["k"])
     bb_rate = _shrink(bb, bf, *LG_PITCHER["bb"])
     er_rate = _shrink(er, ip, LG_ER_PER_IP, ER_PRIOR_IP)   # earned runs per INNING, not per BF
+    h_rate = _shrink(h_allowed, bf, *LG_PITCHER["hits_allowed"])   # per BATTER FACED, like K/BB
 
     # 2b. Matchup: combine with the opposing lineup's rates via odds-ratio.
     if opp_lineup:
         k_rate = odds_ratio(k_rate, opp_lineup["k"], LG_RATE["k"])
         bb_rate = odds_ratio(bb_rate, opp_lineup["bb"], LG_RATE["bb"])
+        # NO opponent-lineup adjustment for hits_allowed -- lineup_k_bb_rates only has K/BB, not
+        # a real "how often does this lineup get hits" signal, and fabricating one from K/BB
+        # alone would overclaim a precision the data doesn't support. Same honest posture as ER.
 
     # 3. Clamp expected counts to realistic ceilings (backstop against any residual noise).
     exp_k = float(min(k_rate * exp_bf, 0.45 * exp_bf))
     exp_bb = float(min(bb_rate * exp_bf, 0.25 * exp_bf))
     exp_er = float(max(er_rate * exp_ip, 0.0))
+    exp_hits_allowed = float(min(h_rate * exp_bf, 0.45 * exp_bf))
 
     return {
         "exp_ip": exp_ip, "exp_outs": exp_ip * 3.0, "exp_bf": exp_bf,
-        "exp_k": exp_k, "exp_bb": exp_bb, "exp_er": exp_er,
+        "exp_k": exp_k, "exp_bb": exp_bb, "exp_er": exp_er, "exp_hits_allowed": exp_hits_allowed,
     }
 
 
@@ -418,7 +454,8 @@ def simulate_pitcher(proj: Dict, sims: int, rng) -> Dict[str, np.ndarray]:
     sigma = max(3.0, proj["exp_outs"] * 0.22)
     outs = np.clip(np.round(rng.normal(proj["exp_outs"], sigma, size=sims)), 0, 27).astype(np.int64)
     er = rng.poisson(proj["exp_er"], size=sims)
-    return {"k": k, "bb": bb, "outs": outs, "er": er}
+    hits_allowed = rng.poisson(proj["exp_hits_allowed"], size=sims)
+    return {"k": k, "bb": bb, "outs": outs, "er": er, "hits_allowed": hits_allowed}
  
  
 # ---- signal assembly -------------------------------------------------------
@@ -685,7 +722,13 @@ def enrich_hitter_rows(rows: List[Dict], sims: int = DEFAULT_SIMS, seed: Optiona
     success depends much more on the CATCHER's arm/pop time than the pitcher's own run
     prevention, and that signal isn't modeled on this platform yet, so SB stays an honest,
     simpler read of the batter's own rate rather than pretending an opponent adjustment it
-    doesn't actually have."""
+    doesn't actually have.
+
+    Also attaches HRR% (Hits+Runs+RBIs clearing the real 1.5 default line) via simulate_hits_
+    runs_rbi -- the one market here needing a full per-trial simulated distribution rather than
+    a closed-form probability, and the one deliberately built to be CORRELATION-AWARE (a hot
+    game trial for Hits also boosts that same trial's Runs/RBI), not three independently-drawn
+    components -- see that function's own docstring for the full reasoning."""
     rng = np.random.default_rng(seed)
     for r in rows:
         stat = r.get("_stat")
@@ -702,6 +745,13 @@ def enrich_hitter_rows(rows: List[Dict], sims: int = DEFAULT_SIMS, seed: Optiona
         r["Hit%"] = float(np.mean(sim["hits"] >= 1))
         r["TB1.5%"] = float(np.mean(sim["tb"] > 1.5))
         r["SO Prob"] = float(np.mean(sim["k"] >= 1))
+        # Single%/Double%/Triple%/Walk%: the SAME PA-outcome simulation already used for HR/Hits/
+        # TB/K, not a new methodology -- these were already being drawn, simulate_batter just
+        # didn't surface them as their own counts before this.
+        r["Single%"] = float(np.mean(sim["single"] >= 1))
+        r["Double%"] = float(np.mean(sim["double"] >= 1))
+        r["Triple%"] = float(np.mean(sim["triple"] >= 1))
+        r["Walk%"] = float(np.mean(sim["bb"] >= 1))
         if xhr is not None:
             sc = statcast.get(r.get("_pid")) or {}
             actual_hr_pa = _f(stat, "homeRuns") / max(_f(stat, "plateAppearances"), 1)
@@ -721,6 +771,14 @@ def enrich_hitter_rows(rows: List[Dict], sims: int = DEFAULT_SIMS, seed: Optiona
             r["RBI%"] = poisson_over_half_prob(exp_rbi)
         if exp_sb is not None:
             r["SB%"] = poisson_over_half_prob(exp_sb)
+        # Hits+Runs+RBIs (H-R-R): the ONE market on this platform needing a per-trial simulated
+        # distribution rather than a closed-form probability, since its line (1.5, not 0.5) isn't
+        # a simple "at least one" question -- see simulate_hits_runs_rbi's own docstring for the
+        # full correlation-aware methodology this specifically exists to support.
+        if exp_runs is not None and exp_rbi is not None:
+            exp_hits = float(np.mean(sim["hits"]))
+            hrr_sim = simulate_hits_runs_rbi(sim["hits"], exp_hits, exp_runs, exp_rbi, rng)
+            r["HRR%"] = float(np.mean(hrr_sim["hrr"] > DEFAULT_LINES["Batter Hits+Runs+RBIs"]))
     return rows
 
 
@@ -806,6 +864,66 @@ def poisson_over_half_prob(exp_count: float) -> float:
     simulation noise) and cheaper (no random sampling at all) for that single, well-defined
     question."""
     return float(1.0 - np.exp(-max(exp_count, 0.0)))
+
+
+# ---- Hits + Runs + RBIs (H-R-R) -- a real, deliberate correlation-aware approach --------------
+# THE actual problem this section exists to solve: Hits comes from the real, per-trial PA-outcome
+# simulation (simulate_batter); Runs and RBIs come from a separate, Poisson-RATE model
+# (batter_counting_rate) that only ever produces a single expected value, not a per-trial array.
+# Naively summing three INDEPENDENTLY drawn components for a combined stat would be mathematically
+# fine for the MEAN (linearity of expectation holds regardless of correlation) but would badly
+# understate real-world clustering: a genuinely great offensive game for one player tends to boost
+# hits, runs, and RBIs together (a home run alone is simultaneously a hit, a run, and almost
+# always an RBI), not independently. Treating them as independent draws would understate how often
+# an especially good or especially quiet game pushes the combined total to a real extreme.
+HRR_CORRELATION_FLOOR = 0.5   # the minimum "hot/cold" multiplier a trial can apply to Runs/RBI,
+                             # even on a genuine zero-hit trial -- deliberately NOT zero. A
+                             # player can still score a run or drive one in without recording a
+                             # hit (a walk plus advancement, a sacrifice fly, a fielder's choice),
+                             # so forcing Runs/RBI to zero whenever a trial's hits happen to be
+                             # zero would overstate the real correlation, not just capture it.
+HRR_CORRELATION_CEILING = 2.0   # caps how much a single hot trial can inflate the Runs/RBI mean
+                               # for that same trial -- a real, stated bound against an
+                               # unrealistically extreme correlation assumption, not a
+                               # empirically-derived precise value.
+
+
+def simulate_hits_runs_rbi(sim_hits: np.ndarray, exp_hits: float, exp_runs: float, exp_rbi: float,
+                           rng) -> Dict[str, np.ndarray]:
+    """Per-trial, CORRELATION-AWARE simulation of Hits + Runs + RBI combined, built directly on
+    top of simulate_batter's own already-simulated per-trial hits array (sim_hits) -- not a
+    separate, independent draw.
+
+    THE MECHANISM: for each trial, computes a real "hot/cold" multiplier from how that SPECIFIC
+    trial's hits compares to the batter's own expected hits (exp_hits) -- a trial with more hits
+    than expected gets a multiplier above 1.0, scaling UP that same trial's Runs/RBI Poisson mean;
+    a quieter trial gets a multiplier below 1.0. Runs and RBI are then drawn from Poisson using
+    THIS PER-TRIAL, hits-informed mean, not the flat, unconditional exp_runs/exp_rbi every trial
+    would otherwise share. This introduces REAL, positive correlation between a trial's hits and
+    that same trial's runs/RBI -- a hot game trial tends to also be a good runs/RBI trial for the
+    same underlying reason (more real chances to drive in a run and score one), matching how these
+    stats actually move together in a real game, not perfectly independently.
+
+    HONEST ABOUT WHAT THIS IS NOT: this is a real, deliberate approximation, not a rigorous joint
+    model of actual base-out states, teammates on base, or lineup context -- building that would
+    mean simulating a full lineup's baserunning, the same scope boundary batter_counting_rate's
+    own docstring already draws for Runs/RBI individually. The multiplier is bounded (HRR_
+    CORRELATION_FLOOR to HRR_CORRELATION_CEILING) specifically so a real, positive correlation
+    exists without claiming a level of precision the data doesn't support -- even a genuine
+    zero-hit trial keeps a real, nonzero chance at Runs/RBI (a walk plus advancement, a sacrifice
+    fly), since a hit isn't the only way to score or drive in a run.
+
+    Returns {"hits": sim_hits (unchanged, passed through), "runs": per-trial array, "rbi":
+    per-trial array, "hrr": the per-trial SUM of all three}."""
+    safe_exp_hits = max(exp_hits, 0.3)   # avoid dividing by a near-zero expectation, which would
+                                         # otherwise produce wild, unstable multipliers
+    raw_ratio = sim_hits / safe_exp_hits
+    multiplier = np.clip(HRR_CORRELATION_FLOOR + HRR_CORRELATION_FLOOR * raw_ratio,
+                         HRR_CORRELATION_FLOOR, HRR_CORRELATION_CEILING)
+    runs = rng.poisson(np.maximum(exp_runs * multiplier, 0.0))
+    rbi = rng.poisson(np.maximum(exp_rbi * multiplier, 0.0))
+    hrr = sim_hits + runs + rbi
+    return {"hits": sim_hits, "runs": runs, "rbi": rbi, "hrr": hrr}
 
 
 def add_starter_exposure_context(rows: List[Dict]) -> List[Dict]:
@@ -940,9 +1058,9 @@ def blend_hitter_probs_with_bullpen(row: Dict, bullpen_stat: Dict, sims: int = D
 
 def build_pitcher_projection_rows(rows: List[Dict], meta: List[Dict],
                                   sims: int = DEFAULT_SIMS, seed: Optional[int] = None) -> List[Dict]:
-    """Matchup-aware starter projections for the Pitching Lab: expected IP/K/BB/outs/earned runs
-    plus the strikeout-over (and, now, earned-runs-over) probability and fair odds at the
-    default line."""
+    """Matchup-aware starter projections for the Pitching Lab: expected IP/K/BB/outs/earned runs/
+    hits allowed, plus the strikeout-over (and, now, earned-runs-over and hits-allowed-over)
+    probability and fair odds at the default line."""
     rng = np.random.default_rng(seed)
     lineup_map = build_lineup_rate_map(rows)
     out: List[Dict] = []
@@ -962,16 +1080,21 @@ def build_pitcher_projection_rows(rows: List[Dict], meta: List[Dict],
             bb_over = float(np.mean(sim["bb"] > DEFAULT_LINES["Pitcher Walks"]))
             er_line = DEFAULT_LINES["Pitcher Earned Runs"]
             er_over = float(np.mean(sim["er"] > er_line))
+            ha_line = DEFAULT_LINES["Pitcher Hits Allowed"]
+            ha_over = float(np.mean(sim["hits_allowed"] > ha_line))
             out.append({
                 "Pitcher": pm.name, "Team": team, "Opp": opp, "Hand": pm.hand,
                 "ERA": round(pm.era, 2), "FIP": pm.fip,
                 "Proj IP": round(proj["exp_ip"], 1), "Proj K": round(proj["exp_k"], 1),
                 "Proj BB": round(proj["exp_bb"], 1), "Proj Outs": round(proj["exp_outs"], 1),
                 "Proj ER": round(proj["exp_er"], 2),
+                "Proj Hits Allowed": round(proj["exp_hits_allowed"], 1),
                 "Proj BF": round(proj["exp_bf"], 1), "Proj TTO": round(times_through_order(proj["exp_bf"]), 2),
                 "K line": k_line, "K over%": round(k_over, 4), "K fair": prob_to_american(k_over),
                 "Outs over%": round(outs_over, 4), "BB over%": round(bb_over, 4),
                 "ER line": er_line, "ER over%": round(er_over, 4), "ER fair": prob_to_american(er_over),
+                "Hits Allowed line": ha_line, "Hits Allowed over%": round(ha_over, 4),
+                "Hits Allowed fair": prob_to_american(ha_over),
                 "_opp_k": (opp_rates or {}).get("k"), "_opp_bb": (opp_rates or {}).get("bb"),
                 "_game": m["label"], "_pid": pm.id, "_game_date": m.get("game_date"),
                 "_team_id": team_id,
@@ -1000,6 +1123,17 @@ BEST_BET_REF = {
                                    # average sits low, dragged down heavily by non-basestealers
     "Pitcher Earned Runs": 0.48,   # 2.5 ER sits close to a median expectation for a real
                                    # starter's per-start outing, so this stays near a coin flip
+    "Batter Singles": 0.45,   # the most common hit type; a real, meaningfully high floor
+    "Batter Doubles": 0.16,   # a real, well-known drop-off in frequency from singles
+    "Batter Triples": 0.025,  # the rarest hit type in modern MLB by a wide margin
+    "Batter Walks": 0.38,     # a typical everyday hitter draws a walk in a real, sizable share of games
+    "Pitcher Hits Allowed": 0.50,   # 5.5 sits close to a league-average starter's real expected
+                                   # hits allowed over a real start, so this stays near a coin flip
+    "Batter Hits+Runs+RBIs": 0.62,   # a real, combined-stat estimate: typical expected hits
+                                    # (~1.1) + runs (~0.5) + RBI (~0.5) sums to roughly 2.1, above
+                                    # the 1.5 default line, so this stays a real, meaningful
+                                    # favorite for a typical everyday hitter, similar in
+                                    # magnitude to Total Hits' own 0.65 for the same reason
 }
  
  
@@ -1012,7 +1146,8 @@ def _favored_side(prob_over: float, ref: float):
  
 def _hitter_reasons(r: Dict, market: str, side: str) -> List[str]:
     why = []
-    offense = market in ("Batter HR", "Batter Total Bases", "Batter Total Hits")
+    offense = market in ("Batter HR", "Batter Total Bases", "Batter Total Hits",
+                         "Batter Singles", "Batter Doubles", "Batter Triples")
     if side == "Over" and offense and r.get("Advantage") == "Advantage":
         why.append(f"platoon edge ({r.get('Hand')} bat vs {r.get('Opp Hand')}HP)")
     if market in ("Batter HR", "Batter Total Bases") and (r.get("_weather_hr") or 1.0) >= 1.05:
@@ -1022,6 +1157,13 @@ def _hitter_reasons(r: Dict, market: str, side: str) -> List[str]:
     if market == "Batter Strikeouts":
         why.append("elevated whiff risk in this matchup" if side == "Over"
                    else "strong contact profile (rarely strikes out)")
+    if market == "Batter Walks":
+        # Honest to what the model actually does: walks come from the SAME PA-outcome
+        # distribution as HR/Hits, but driven by plate discipline (his own walk rate,
+        # matchup-adjusted against the pitcher's own control), not power or platoon the way
+        # HR/TB are -- a genuinely different real driver, not the same reasoning relabeled.
+        why.append("real plate discipline in this matchup" if side == "Over"
+                   else "aggressive approach, rarely walks")
     if market in ("Batter Runs", "Batter RBIs"):
         # Honest to what the model actually does for these two markets specifically (see
         # batter_counting_rate's own docstring): the opposing starter's ERA is the one real
@@ -1037,6 +1179,11 @@ def _hitter_reasons(r: Dict, market: str, side: str) -> List[str]:
         # arm/pop time isn't captured on this platform yet), so the honest reason is just his
         # own real season rate driving this, not a fabricated matchup factor.
         why.append("based on his own season stolen-base rate")
+    if market == "Batter Hits+Runs+RBIs":
+        # Honest about what's actually different here: this is the one market combining three
+        # correlated stats (a hot game tends to boost all three together, not independently),
+        # not a fabricated claim of precision the underlying model doesn't have.
+        why.append("combined hits/runs/RBI projection (correlation-aware, not treated as three independent stats)")
     if not why:
         why.append(f"model leans {side} of a typical line here")
     return why
@@ -1064,6 +1211,13 @@ def _pitcher_reasons(r: Dict, market: str, side: str) -> List[str]:
         # project_pitcher's own docstring for why), so the real driver is this pitcher's own
         # ERA and projected innings, not a matchup factor the model doesn't actually apply.
         why.append(f"{r.get('ERA')} ERA over a projected {r.get('Proj IP')} IP")
+    elif market == "Pitcher Hits Allowed":
+        # Honest about a real, established limitation: hits allowed is heavily shrunk toward
+        # league average (DIPS theory -- largely out of a pitcher's own control), so this is a
+        # real but genuinely softer signal than K/BB, and the reason says so rather than
+        # overstating it as a strong individual read.
+        why.append(f"projects {r.get('Proj Hits Allowed')} hits allowed (regressed toward "
+                  f"league average — largely defense/luck-driven, not just this pitcher)")
     if not why:
         why.append(f"model leans {side} of a typical line here")
     return why
@@ -1121,7 +1275,10 @@ def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict]) -> List[D
     batter_specs = [("Batter HR", "HR%", 0.5), ("Batter Total Bases", "TB1.5%", 1.5),
                     ("Batter Total Hits", "Hit%", 0.5), ("Batter Strikeouts", "SO Prob", 0.5),
                     ("Batter Runs", "Runs%", 0.5), ("Batter RBIs", "RBI%", 0.5),
-                    ("Batter Stolen Bases", "SB%", 0.5)]
+                    ("Batter Stolen Bases", "SB%", 0.5),
+                    ("Batter Singles", "Single%", 0.5), ("Batter Doubles", "Double%", 0.5),
+                    ("Batter Triples", "Triple%", 0.5), ("Batter Walks", "Walk%", 0.5),
+                    ("Batter Hits+Runs+RBIs", "HRR%", DEFAULT_LINES["Batter Hits+Runs+RBIs"])]
     for r in hitter_rows:
         for market, col, line in batter_specs:
             p = r.get(col)
@@ -1150,7 +1307,8 @@ def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict]) -> List[D
     pitcher_specs = [("Pitcher Strikeouts", "K over%", DEFAULT_LINES["Pitcher Strikeouts"]),
                      ("Pitcher Outs", "Outs over%", DEFAULT_LINES["Pitcher Outs"]),
                      ("Pitcher Walks", "BB over%", DEFAULT_LINES["Pitcher Walks"]),
-                     ("Pitcher Earned Runs", "ER over%", DEFAULT_LINES["Pitcher Earned Runs"])]
+                     ("Pitcher Earned Runs", "ER over%", DEFAULT_LINES["Pitcher Earned Runs"]),
+                     ("Pitcher Hits Allowed", "Hits Allowed over%", DEFAULT_LINES["Pitcher Hits Allowed"])]
     for r in pitcher_rows:
         for market, col, line in pitcher_specs:
             p = r.get(col)

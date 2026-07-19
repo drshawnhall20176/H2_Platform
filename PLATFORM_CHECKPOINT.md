@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 709/709 tests green)
+## What's in this checkpoint (all tested — 738/738 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -3275,6 +3275,121 @@ pool, the exact concern this whole redesign was meant to address. Plus a full, r
 end-to-end simulation on an 8-game board (all 5 tiers built, 20 unique legs, zero overlap
 confirmed) and a follow-up isolation check confirming each objective's real behavior when not
 competing with other tiers for the same candidates. 709/709 total passing.
+
+### Five more MLB props markets: Singles, Doubles, Triples, Walks, Pitcher Hits Allowed (2026-07-19)
+Shawn asked why H-R-R (Hits+Runs+RBIs) wasn't included when the first four new markets were
+built, and directed adding the full remaining set of real, confirmed-but-unbuilt markets at once
+rather than piecemeal — with the explicit reasoning that this should be the standing approach for
+every sport going forward, not a market added only when a user happens to ask for it by name.
+
+**Confirmed every remaining market directly against the-odds-api.com's own live "Betting
+Markets" documentation before building anything** — fetched the full page, not just recalled it
+from memory. Found `batter_singles`, `batter_doubles`, `batter_triples`, `batter_walks`,
+`batter_first_home_run`, `pitcher_hits_allowed`, `pitcher_record_a_win`, `batter_fantasy_score`,
+and `batter_hits_runs_rbis` as real, existing, unbuilt markets — a bigger list than just H-R-R.
+
+**Split the list by whether it fits the platform's own established, proven methodology, not by
+convenience** — Singles/Doubles/Triples/Walks/Hits Allowed all do; H-R-R needs a genuinely
+different, correlation-aware approach (still pending); First HR, Record a Win, and Fantasy Score
+are structurally different problems entirely (cross-player joint probability, team-context
+dependence, and an undefined external scoring formula respectively) and were deliberately NOT
+attempted with weak, rushed models just to complete a list.
+
+**Singles/Doubles/Triples/Walks needed zero new methodology, only exposure of what already
+existed**: `simulate_batter`'s underlying per-PA draws already carried real index constants for
+SINGLE/DOUBLE/TRIPLE/BB (`OUT_PLAY, K, BB, SINGLE, DOUBLE, TRIPLE, HR = range(7)`), just never
+surfaced as their own simulated counts the way HR/K already were. Confirmed directly with a
+per-trial consistency test that single+double+triple+hr sums EXACTLY to hits for every single
+simulated trial — proof they share the same underlying draws, not independently modeled.
+Extended the "offense" platoon-reasoning group to include Singles/Doubles/Triples (they share
+the same platoon-aware PA-outcome distribution as HR/TB/Hits), but deliberately did NOT extend
+the weather-boost reasoning to them — weather in this model only directly multiplies HR
+probability (`p_hr *= weather_hr`), and claiming a weather boost for Singles/Doubles/Triples
+would have been dishonest about what the model actually applies. Confirmed with a dedicated test.
+Walks got its OWN distinct reasoning ("real plate discipline") rather than reusing the
+power/platoon language, since a walk is a genuinely different real driver.
+
+**Pitcher Hits Allowed uses per-batters-faced shrinkage like K/BB (not innings-based like ER),
+but with a real, deliberately stronger shrinkage prior reflecting DIPS theory** — hits allowed
+on balls in play is largely out of a pitcher's own control, driven far more by defense and plain
+luck than by pitcher skill, an established baseball-analytics principle, not an arbitrary
+choice. Confirmed directly with a test comparing shrinkage magnitude: a thin-sample pitcher's
+hits-allowed rate regresses measurably HARDER toward league average than the same pitcher's own
+K rate does. Gets no opponent-lineup adjustment, for the same honest reason ER doesn't
+(`lineup_k_bb_rates` has no real "how many hits does this lineup get" signal to draw on).
+
+**Real market keys confirmed, not guessed, for all five** — `sports.py`'s `_MLB_MARKETS`/
+`_MLB_MARKET_MAP` updated with the exact keys from the-odds-api.com's own documentation.
+
+**19 new tests**: `simulate_batter` extension (3 tests, including the exact per-trial sum
+consistency check and a real relative-frequency sanity check confirming triples are
+dramatically rarer than singles); `project_pitcher`/`simulate_pitcher` hits-allowed modeling (5
+tests, including a hand-verified exact value — 5.853, confirmed by independent calculation
+before writing the assertion, the same discipline established earlier this session after an ER
+test bound was caught wrong — and the DIPS-theory shrinkage-magnitude comparison); `enrich_
+hitter_rows` (3 tests); `build_pitcher_projection_rows` integration (1 test); reasoning
+extensions (4 tests, including the explicit "no weather claim" honesty check); a full `build_
+best_bets` integration test for all five markets at once; and 1 `sports.py` market-key
+consistency test. Plus a full, realistic end-to-end simulation through the complete `load_mlb_
+graded_picks_board` pipeline — 16 total markets present on one simulated board (the original 7,
+the first wave of 4, and this second wave of 5), each with real Fair odds, a real letter grade
+now correctly reaching "A" via the ceiling normalization, and honest, market-specific
+reasoning text, including Triples' Under side correctly falling back to a generic reason rather
+than fabricating one that doesn't apply to that side. 727/727 total passing.
+
+**Still not started**: H-R-R (needs the same-simulated-trial correlation approach), and First
+HR/Record a Win/Fantasy Score remain deliberately unattempted pending further design discussion.
+
+### Batter Hits+Runs+RBIs (H-R-R) — the correlation-aware market, completing this round (2026-07-19)
+The one market flagged as needing genuinely new methodology, not just extending an established
+pattern, now built. H-R-R sums three stats that are positively correlated within a single game
+for the same player — a home run alone is simultaneously a hit, a run, and almost always an RBI.
+Naively summing three independently-modeled components would be mathematically fine for the
+mean (linearity of expectation holds regardless of correlation) but would understate real
+clustering: an especially great or especially quiet game pushes all three together, not
+independently.
+
+**`simulate_hits_runs_rbi`, built directly on top of `simulate_batter`'s own already-simulated
+per-trial hits array**, not a separate independent draw: for each trial, computes a real
+"hot/cold" multiplier from how that specific trial's hits compares to the batter's own expected
+hits, then draws that same trial's Runs/RBI from Poisson using this per-trial, hits-informed
+mean — a hot trial gets scaled-up Runs/RBI, a quiet trial gets scaled-down Runs/RBI, introducing
+genuine positive correlation.
+
+**A real, deliberate floor preventing an overcorrection**: even a genuine zero-hit trial keeps a
+real, nonzero multiplier (0.5, not 0.0) — a player can still score a run or drive one in without
+recording a hit (a walk plus advancement, a sacrifice fly, a fielder's choice), so forcing
+Runs/RBI to exactly zero whenever a trial's hits happen to be zero would overstate the real
+correlation, not just capture it. A stated ceiling (2.0) likewise bounds how much a single hot
+trial can inflate the same-trial Runs/RBI mean, an honest limit against claiming a level of
+correlation precision the data doesn't support.
+
+**8 tests directly proving the correlation mechanism works, not just that it runs**: an exact
+per-trial sum consistency check (hrr always equals hits+runs+rbi for the same trial); the core
+proof — trials with 3+ hits show real, meaningfully higher average combined runs+RBI than
+zero-hit trials, not just similarly-noisy averages; the floor confirmed directly (an all-
+zero-hit input still produces a real, nonzero runs/rbi mean, hand-verified against the exact
+expected value at the floor); the ceiling confirmed directly (an artificially extreme hot-trial
+input caps at the exact expected value the stated ceiling implies, not an unbounded scale-up);
+and a real, important property confirmed on a realistic (not artificial) hits distribution — the
+overall mean stays close to the original, unconditional rate, proving the mechanism redistributes
+variance across trials without systematically biasing the total.
+
+**Wired through the full pipeline**: `DEFAULT_LINES`/`BEST_BET_REF` (a real, combined-stat
+reference estimate — ~1.1 expected hits + ~0.5 runs + ~0.5 RBI sums to roughly 2.1, above the 1.5
+default line, similar magnitude to Total Hits' own reference for the same underlying reason),
+`build_best_bets`, honest "Why" reasoning naming the correlation-aware approach explicitly rather
+than presenting it as an ordinary independent stat, and `sports.py`'s market registration using
+`batter_hits_runs_rbis` — confirmed directly against the-odds-api.com's own documentation, not
+guessed. 4 more tests cover the full integration (enrichment attaching a genuinely distinct
+probability from Hit% alone, `build_best_bets` producing a real play with the correlation-aware
+reasoning text, and the market-key registration). Plus a full, realistic end-to-end simulation
+through the complete pipeline — 17 total markets now present on one simulated board, with H-R-R
+showing real Fair odds, a real letter grade, and the honest reasoning text. 738/738 total passing.
+
+**Still deliberately unattempted**: First HR, Record a Win, and Fantasy Score — each a
+structurally different problem (cross-player joint probability, team-context dependence, and an
+undefined external scoring formula respectively), not variations on an established pattern.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

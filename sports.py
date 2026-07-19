@@ -60,6 +60,8 @@ _MLB_MARKETS = [
     "batter_home_runs", "batter_total_bases", "batter_hits", "batter_strikeouts",
     "pitcher_strikeouts", "pitcher_outs", "pitcher_walks",
     "batter_runs_scored", "batter_rbis", "batter_stolen_bases", "pitcher_earned_runs",
+    "batter_singles", "batter_doubles", "batter_triples", "batter_walks", "pitcher_hits_allowed",
+    "batter_hits_runs_rbis",
 ]
 _MLB_MARKET_MAP = {
     "Batter HR": "batter_home_runs", "Batter Total Bases": "batter_total_bases",
@@ -71,6 +73,10 @@ _MLB_MARKET_MAP = {
     # from naming convention alone.
     "Batter Runs": "batter_runs_scored", "Batter RBIs": "batter_rbis",
     "Batter Stolen Bases": "batter_stolen_bases", "Pitcher Earned Runs": "pitcher_earned_runs",
+    "Batter Singles": "batter_singles", "Batter Doubles": "batter_doubles",
+    "Batter Triples": "batter_triples", "Batter Walks": "batter_walks",
+    "Pitcher Hits Allowed": "pitcher_hits_allowed",
+    "Batter Hits+Runs+RBIs": "batter_hits_runs_rbis",
 }
 
 REGISTRY: Dict[str, Sport] = {
