@@ -144,8 +144,13 @@ left, right = st.columns([3, 2])
 # ---------- tonight's top plays ----------
 with left:
     st.subheader("⭐ Tonight's top leans")
-    st.page_link("views/16_Graded_Picks.py", label="See the full slate, graded game by game →",
-                icon="🏅")
+    # Owner-only Graded Picks pointer — Graded Picks itself is gated the same way (moved to
+    # owner-only directly on request, to guarantee no broken public links as the subscriber
+    # split hardens), so this stays hidden for a public/Discord audience rather than linking to
+    # a page they can't open, the same pattern already used just below for Data Health.
+    if st.secrets.get("AUDIENCE", "owner") == "owner":
+        st.page_link("views/16_Graded_Picks.py", label="See the full slate, graded game by game →",
+                    icon="🏅")
     if plays:
         _TOP_TABS = [("All", None)] + [(f"{_MARKET_ICONS.get(m, '🔹')} {m}", m)
                                        for m in _active.market_map.keys()]

@@ -32,6 +32,9 @@ game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER
 st.title("🏅 Graded Picks")
 st.caption(f"Every game on the slate, graded — sorted with the most interesting first, not a "
           f"flat top-10 that hides the rest of the board — {_active.icon} {_active.label}")
+# Restored after Graded Picks itself moved to owner-only -- both this page and Suggested Parlays
+# now share the same owner-only audience, so this pointer no longer risks a broken public link
+# the way it did when Graded Picks was still public and Suggested Parlays was already gated.
 st.page_link("views/18_Suggested_Parlays.py", label="Want it pre-combined into a parlay? See Suggested Parlays →",
             icon="🎫")
 

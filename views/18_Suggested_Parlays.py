@@ -33,6 +33,12 @@ import sports
 import best_bets_data as BBD
 import grading
 
+game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER   # shared with
+                                                                                   # Graded Picks
+                                                                                   # and every
+                                                                                   # Matchup Lab
+                                                                                   # variant
+
 _active = sports.active()
 E, P = _active.engine, _active.projections
 
@@ -64,6 +70,50 @@ if not plays:
     st.info("No games on the board right now. Parlay suggestions appear here on an active slate.")
     st.stop()
 
+# --- time slot + game filter --------------------------------------------------
+# The same shared helpers (game_dt/slot_of/SLOT_ORDER) Best Bets, every Matchup Lab variant, and
+# Graded Picks already use -- added directly on request, to match Matchup Lab's own filtering
+# here too. A REAL, DELIBERATE REVERSAL of an earlier decision, not an oversight: an earlier
+# version of this page deliberately omitted this filter, reasoned that narrowing to one game
+# would usually make it impossible to fill the bigger tiers. That's still true and still honest
+# -- build_suggested_parlays already skips a tier it can't fill rather than padding it, so a
+# narrow slot/game selection will naturally produce fewer or smaller tiers, not broken ones.
+for m in meta:
+    m["_slot"] = slot_of(game_dt(m.get("game_date")))
+slots_present = sorted({m["_slot"] for m in meta}, key=lambda s: SLOT_ORDER.get(s, 9))
+
+c_slot, c_game = st.columns(2)
+with c_slot:
+    slot_pick = st.selectbox("Time slot", ["All slate"] + slots_present)
+slot_meta = meta if slot_pick == "All slate" else [m for m in meta if m["_slot"] == slot_pick]
+
+if not slot_meta:
+    st.info(f"No games in the {slot_pick} slot — try a different time slot or \"All slate\".")
+    st.stop()
+
+game_date_by_label = {m["label"]: m.get("game_date") for m in slot_meta}
+games_present = sorted(game_date_by_label, key=lambda g: game_date_by_label[g] or "~")
+
+
+def _game_label_fmt(g: str) -> str:
+    dt = game_dt(game_date_by_label.get(g))   # already Eastern-localized by game_dt itself
+    if dt is None:
+        return g
+    return f"{dt.strftime('%-I:%M %p ET')} — {g}"
+
+
+with c_game:
+    game_pick = st.selectbox("Game", ["All games in this slot"] + games_present,
+                             format_func=lambda g: _game_label_fmt(g) if g != "All games in this slot" else g)
+
+selected_labels = ({m["label"] for m in slot_meta} if game_pick == "All games in this slot"
+                   else {game_pick})
+plays = [pl for pl in plays if pl.get("Game") in selected_labels]
+
+if not plays:
+    st.info("No graded plays match the current time slot/game filter — try a different selection.")
+    st.stop()
+
 # --- market selection --------------------------------------------------------
 # A REAL, DELIBERATE PRODUCT DECISION, not just a nice-to-have filter: an early version of this
 # page auto-selected legs purely by conviction, and on a real slate three different real base
@@ -83,10 +133,6 @@ if not selected_markets:
     st.stop()
 plays = [pl for pl in plays if pl.get("Market") in selected_markets]
 
-# Deliberately NO time-slot/game filter here, unlike Graded Picks — a parlay is meant to draw
-# from the WHOLE slate at once (that's the point: a diverse handful of the night's best plays,
-# not one game's worth), narrowing to a single game would usually make it impossible to fill the
-# bigger tiers at all.
 parlays = grading.build_suggested_parlays(plays)
 
 if not parlays:
