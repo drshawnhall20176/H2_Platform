@@ -39,6 +39,8 @@ E, P = _active.engine, _active.projections
 st.title("🎫 Suggested Parlays")
 st.caption(f"A few ready-made parlay options built from tonight's graded board — no digging "
           f"required — {_active.icon} {_active.label}")
+st.page_link("views/19_Speculative_Basket.py", label="Prefer independent positions over a chained parlay? See Speculative Basket →",
+            icon="🧺")
 
 if not sports.require_live_engine("Suggested Parlays"):
     st.stop()
