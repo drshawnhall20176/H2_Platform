@@ -20,6 +20,10 @@ st.title(f"📒 Bet Log — proof layer  ·  {_active.icon} {_active.label}")
 st.caption("Track CLV, ROI, and calibration. The record that proves the model works. "
            "Switch sports in the sidebar to see that sport's bets — every bet is logged with "
            "the sport it was placed under.")
+
+if not sports.require_trading_access("Bet Log"):
+    st.stop()
+
  
 if B.USING_POSTGRES:
     st.success("**Durable storage: connected.** Bets are saved to your Postgres/Supabase database — "

@@ -45,6 +45,10 @@ st.markdown("**Every bet we log, graded against the closing line — no cherry-p
             "consistently get better prices than where the market closes. Beating the close is the "
             "most reliable early sign of a real edge — long before win-rate or profit stabilize.")
 
+if not sports.require_trading_access("Track Record"):
+    st.stop()
+
+
 bets = _load_bets(_active.key)
 if not bets:
     st.info(f"📈 We're building our {_active.label} track record. Once bets are logged and settled, "
