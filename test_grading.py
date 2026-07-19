@@ -545,6 +545,97 @@ def test_combined_parlay_prob_decreases_with_more_legs():
     print("✓ combined_parlay_prob correctly decreases as more legs are chained together")
 
 
+# ----------------------------------------------------------------- basket_prob_at_least_one_hits
+def test_basket_prob_at_least_one_matches_hand_calculation():
+    legs = [_leg("A", "T1", "G1", 3.0, model_prob=0.3), _leg("B", "T2", "G2", 2.5, model_prob=0.4)]
+    # P(at least one) = 1 - (1-0.3)(1-0.4) = 1 - 0.7*0.6 = 1 - 0.42 = 0.58
+    assert grading.basket_prob_at_least_one_hits(legs) == pytest.approx(0.58, rel=1e-9)
+    print("✓ basket_prob_at_least_one_hits exactly matches the hand-calculated OR probability")
+
+
+def test_basket_prob_at_least_one_increases_with_more_legs():
+    # THE core, opposite behavior from a parlay: adding MORE independent positions makes "at
+    # least one hits" MORE likely, not less -- the exact reason a basket of positions is a
+    # fundamentally different, less punishing structure than a parlay chaining the same legs.
+    legs = [_leg(f"P{i}", f"T{i}", f"G{i}", 2.0, model_prob=0.2) for i in range(6)]
+    probs = [grading.basket_prob_at_least_one_hits(legs[:n]) for n in range(1, 7)]
+    assert probs == sorted(probs)   # strictly INCREASING, the opposite of combined_parlay_prob
+    print("✓ basket_prob_at_least_one_hits correctly INCREASES as more independent positions are added, the opposite of parlay math")
+
+
+def test_basket_prob_at_least_one_empty_legs():
+    assert grading.basket_prob_at_least_one_hits([]) == 0.0
+
+
+def test_basket_prob_at_least_one_single_leg_equals_its_own_prob():
+    legs = [_leg("A", "T1", "G1", 2.5, model_prob=0.35)]
+    assert grading.basket_prob_at_least_one_hits(legs) == pytest.approx(0.35, rel=1e-9)
+
+
+# ----------------------------------------------------------------- build_speculative_basket
+def test_speculative_basket_reuses_the_payout_objective():
+    # Confirms the basket picks the SAME kind of legs Longshot would -- lowest real probability
+    # among plays clearing the grade floor, not just any graded plays.
+    plays = [
+        _leg("Safe Play", "T1", "G1", conviction=2.0, model_prob=0.80, market="Batter HR"),
+        _leg("Long Odds Play", "T2", "G2", conviction=1.6, model_prob=0.15, market="Batter Total Bases"),
+    ]
+    basket = grading.build_speculative_basket(plays, size=1)
+    assert basket["legs"][0]["Player"] == "Long Odds Play"
+    print("✓ build_speculative_basket correctly reuses the payout objective, favoring the real long-odds play")
+
+
+def test_speculative_basket_respects_min_grade_floor():
+    # The same real fix Bold/Longshot needed applies here too -- a D-grade play must never be
+    # selected purely for having the longest odds.
+    plays = [
+        _leg("D-Grade Longshot", "T1", "G1", conviction=1.25, model_prob=0.05, market="Batter HR"),
+        _leg("C-Grade Real Play", "T2", "G2", conviction=1.6, model_prob=0.20, market="Batter Total Bases"),
+    ]
+    basket = grading.build_speculative_basket(plays, size=2)
+    grades = {leg["_grade"]["letter"] for leg in basket["legs"]}
+    assert "D" not in grades
+    print("✓ build_speculative_basket correctly excludes D-grade plays, even ones with the longest odds")
+
+
+def test_speculative_basket_never_reuses_a_player():
+    # The same core correlation safeguard build_parlay_leg_pool already enforces -- confirmed
+    # here too, since the basket reuses that exact mechanism.
+    plays = [
+        _leg("Same Player", "TeamX", "G1", conviction=2.0, model_prob=0.20, market="Batter HR"),
+        _leg("Same Player", "TeamX", "G1", conviction=1.8, model_prob=0.15, market="Batter Total Bases"),
+    ]
+    basket = grading.build_speculative_basket(plays, size=5)
+    assert len(basket["legs"]) == 1
+    print("✓ build_speculative_basket never includes the same player twice, reusing build_parlay_leg_pool's core safeguard")
+
+
+def test_speculative_basket_size_controls_leg_count():
+    plays = [_leg(f"P{i}", f"T{i}", f"G{i}", 2.0, model_prob=0.20, market=f"Market{i}") for i in range(10)]
+    basket_small = grading.build_speculative_basket(plays, size=3)
+    basket_large = grading.build_speculative_basket(plays, size=8)
+    assert len(basket_small["legs"]) == 3
+    assert len(basket_large["legs"]) == 8
+    print("✓ build_speculative_basket's size parameter correctly controls the number of independent positions")
+
+
+def test_speculative_basket_returns_real_summary_stats():
+    plays = [_leg(f"P{i}", f"T{i}", f"G{i}", 2.0, model_prob=0.20, market=f"Market{i}") for i in range(5)]
+    basket = grading.build_speculative_basket(plays, size=5)
+    assert "prob_at_least_one_hits" in basket
+    assert "expected_hits" in basket
+    assert 0.0 < basket["prob_at_least_one_hits"] < 1.0
+    assert basket["expected_hits"] == pytest.approx(1.0, abs=0.01)   # 5 legs * 0.20 each
+    print("✓ build_speculative_basket correctly returns real, hand-verifiable summary stats")
+
+
+def test_speculative_basket_honestly_returns_fewer_legs_when_not_enough_exist():
+    plays = [_leg("Only One", "T1", "G1", conviction=2.0, model_prob=0.20, market="Batter HR")]
+    basket = grading.build_speculative_basket(plays, size=8)
+    assert len(basket["legs"]) == 1
+    print("✓ build_speculative_basket honestly returns fewer positions than requested rather than padding with weaker plays")
+
+
 # ----------------------------------------------------------------- build_suggested_parlays
 def _big_diverse_pool(n=8):
     return [_leg(f"Player{i}", f"Team{i}", f"Game{i}", 3.5 - i * 0.1, market=f"Market{i % 5}",
@@ -666,6 +757,113 @@ def test_suggested_parlays_bold_longshot_never_all_d_grade():
             grades = {leg["_grade"]["letter"] for leg in p["legs"]}
             assert "D" not in grades, f"{p['tier']} included a D-grade leg despite the min_grade floor"
     print("✓ build_suggested_parlays' Bold/Longshot tiers never include a D-grade leg, even when D-grade legs have the longest odds")
+
+
+# ----------------------------------------------------------------- basket_prob_at_least_one_hits
+def test_basket_prob_at_least_one_hits_hand_verified():
+    # Hand-verified: P(none hit) = (1-0.3)*(1-0.5) = 0.35, P(at least one) = 1 - 0.35 = 0.65
+    legs = [_leg("A", "T1", "G1", conviction=2.0, model_prob=0.3),
+           _leg("B", "T2", "G2", conviction=2.0, model_prob=0.5)]
+    assert grading.basket_prob_at_least_one_hits(legs) == pytest.approx(0.65, abs=1e-9)
+    print("✓ basket_prob_at_least_one_hits matches a hand-verified exact value")
+
+
+def test_basket_prob_at_least_one_hits_empty_legs():
+    assert grading.basket_prob_at_least_one_hits([]) == 0.0
+
+
+def test_basket_prob_at_least_one_hits_single_leg_equals_its_own_prob():
+    legs = [_leg("A", "T1", "G1", conviction=2.0, model_prob=0.42)]
+    assert grading.basket_prob_at_least_one_hits(legs) == pytest.approx(0.42, abs=1e-9)
+
+
+def test_basket_prob_at_least_one_hits_increases_with_more_legs():
+    # A real, honest property: adding more independent positions to the basket should only ever
+    # RAISE (or hold, never lower) the chance that at least one hits.
+    legs = [_leg(f"P{i}", f"T{i}", f"G{i}", conviction=2.0, model_prob=0.2) for i in range(6)]
+    probs = [grading.basket_prob_at_least_one_hits(legs[:n]) for n in range(1, 7)]
+    assert probs == sorted(probs)   # strictly non-decreasing as more legs are added
+    print("✓ basket_prob_at_least_one_hits correctly increases as more independent positions are added to the basket")
+
+
+# ----------------------------------------------------------------- build_speculative_basket
+def test_speculative_basket_reuses_payout_objective():
+    # Same real proof pattern used for Bold/Longshot's own payout objective: a lower-Conviction,
+    # lower-probability play should rank ABOVE a higher-Conviction, higher-probability play,
+    # confirming the basket genuinely reuses the "payout" ranking, not just any ranking.
+    plays = [
+        _leg("Big Price Play", "T1", "G1", conviction=1.4, model_prob=0.15),
+        _leg("Safe But Boring", "T2", "G2", conviction=1.35, model_prob=0.88),
+    ]
+    basket = grading.build_speculative_basket(plays, size=2, min_grade_letter=None)
+    picked_players = [leg["Player"] for leg in basket["legs"]]
+    assert picked_players[0] == "Big Price Play"
+    print("✓ build_speculative_basket correctly reuses the payout objective, favoring real price over safety")
+
+
+def test_speculative_basket_reuses_c_grade_floor_by_default():
+    # THE same real fix from Bold/Longshot, reused here by default -- confirms a D-grade leg
+    # with the longest odds is still excluded, even though "payout" alone would pick it first.
+    plays = [
+        _leg("Real Play", "T1", "G1", conviction=1.6, model_prob=0.30),   # C grade
+        _leg("Worst Longshot", "T2", "G2", conviction=1.25, model_prob=0.05),   # D grade, longest odds
+    ]
+    basket = grading.build_speculative_basket(plays, size=2)   # default min_grade_letter="C"
+    picked_players = {leg["Player"] for leg in basket["legs"]}
+    assert "Worst Longshot" not in picked_players
+    assert picked_players == {"Real Play"}
+    print("✓ build_speculative_basket's default C-grade floor correctly excludes the worst, barely-qualifying longshot")
+
+
+def test_speculative_basket_min_grade_letter_configurable():
+    plays = [_leg(f"P{i}", f"T{i}", f"G{i}", conviction=1.6 - i * 0.05, model_prob=0.20 + i * 0.01)
+            for i in range(6)]   # a mix spanning roughly C down to D grade
+    basket_c = grading.build_speculative_basket(plays, size=6, min_grade_letter="C")
+    basket_b = grading.build_speculative_basket(plays, size=6, min_grade_letter="B")
+    assert len(basket_b["legs"]) <= len(basket_c["legs"])
+    print("✓ build_speculative_basket's min_grade_letter is genuinely configurable, tightening the pool as expected")
+
+
+def test_speculative_basket_size_controls_leg_count():
+    plays = [_leg(f"P{i}", f"T{i}", f"G{i}", conviction=2.5, model_prob=0.30) for i in range(10)]
+    basket_small = grading.build_speculative_basket(plays, size=3)
+    basket_large = grading.build_speculative_basket(plays, size=8)
+    assert len(basket_small["legs"]) == 3
+    assert len(basket_large["legs"]) == 8
+    print("✓ build_speculative_basket's size parameter correctly controls how many positions are returned")
+
+
+def test_speculative_basket_stats_match_actual_selected_legs():
+    plays = [_leg(f"P{i}", f"T{i}", f"G{i}", conviction=2.5, model_prob=0.25) for i in range(4)]
+    basket = grading.build_speculative_basket(plays, size=4)
+    expected_expected_hits = sum(leg["ModelProb"] for leg in basket["legs"])
+    expected_at_least_one = grading.basket_prob_at_least_one_hits(basket["legs"])
+    assert basket["expected_hits"] == pytest.approx(round(expected_expected_hits, 2), abs=0.01)
+    assert basket["prob_at_least_one_hits"] == pytest.approx(expected_at_least_one, abs=0.001)
+    print("✓ build_speculative_basket's summary stats are computed directly from the actual selected legs, not a separate, potentially-inconsistent calculation")
+
+
+def test_speculative_basket_no_combined_fair_fields():
+    # A real, deliberate honesty check: since these are INDEPENDENT positions, not a chained
+    # parlay, there is no meaningful single "combined fair odds" the way a parlay has -- confirms
+    # the basket doesn't fabricate one.
+    plays = [_leg(f"P{i}", f"T{i}", f"G{i}", conviction=2.5, model_prob=0.30) for i in range(3)]
+    basket = grading.build_speculative_basket(plays, size=3)
+    assert "combined_fair_american" not in basket
+    assert "combined_fair_decimal" not in basket
+    print("✓ build_speculative_basket correctly avoids fabricating a parlay-style combined fair odds for independent positions")
+
+
+def test_speculative_basket_works_for_non_mlb_shaped_plays():
+    plays = [
+        {"Player": "Star Guard", "Team": "Aces", "Game": "Aces @ Liberty", "Market": "Points",
+        "Side": "Over", "Line": 20.5, "ModelProb": 0.30, "Fair": -100, "Conviction": 1.8, "Why": "x"},
+        {"Player": "Role Player", "Team": "Liberty", "Game": "Aces @ Liberty", "Market": "Rebounds",
+        "Side": "Over", "Line": 6.5, "ModelProb": 0.25, "Fair": -100, "Conviction": 1.6, "Why": "y"},
+    ]
+    basket = grading.build_speculative_basket(plays, size=2)
+    assert len(basket["legs"]) == 2
+    print("✓ build_speculative_basket correctly handles WNBA-shaped plays, confirming cross-sport support")
 
 
 if __name__ == "__main__":

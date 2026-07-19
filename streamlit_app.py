@@ -100,6 +100,7 @@ def run():
         "16": ("Graded Picks",  "🏅", "graded_picks"),
         "17": ("Data Health",   "🩺", "data_health"),
         "18": ("Suggested Parlays", "🎫", "suggested_parlays"),
+        "19": ("Speculative Basket", "🧺", "speculative_basket"),
     }
 
     def lead(name: str) -> str:

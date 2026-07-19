@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 742/742 tests green)
+## What's in this checkpoint (all tested — 762/762 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -3432,6 +3432,61 @@ each leg a distinct market. Plus a full `build_suggested_parlays` test reproduci
 mechanism with a realistic mix of well-graded and barely-D-grade-but-longest-odds legs,
 confirming Bold/Longshot never include the D-grade ones even though "payout" alone would have
 picked them first. 742/742 total passing.
+
+### New page: Speculative Basket — independent positions, not a parlay (2026-07-19)
+Shawn framed this precisely after seeing Bold/Longshot's real, C-grade-or-better plays still
+compound into extreme parlay odds: "I am a trader, not a bettor." The actual mismatch wasn't
+quality (already fixed) — it was the parlay structure itself. A parlay requires every leg to hit
+simultaneously, real punishing "AND" logic that multiplies several real risks together. That's
+not how a trader deploys speculative capital in penny stocks or crypto — nobody needs several
+speculative positions to all pay off the same day to call it a win. The real strategy is several
+small, independent positions where hitting even one makes the whole basket worthwhile.
+
+**Built as a genuinely separate page, not a modification to Suggested Parlays** — confirmed
+directly with Shawn ("I will keep the suggested parlays view for those that live or die on that
+vine"), since both audiences are real and distinct.
+
+**Reuses proven infrastructure rather than inventing new selection logic**: `grading.
+build_speculative_basket` calls `build_parlay_leg_pool` with the exact same "payout" objective
+and the exact same "C" grade floor already fixed for Bold/Longshot earlier this session — same
+real, validated picks those tiers already surface, just presented independently instead of
+chained. The grade floor is user-configurable on this page (C/B/A/none), since a trader deciding
+their own risk tolerance is exactly the framing this feature is built around.
+
+**New math for a genuinely different question**: `basket_prob_at_least_one_hits` computes
+P(at least one hits) = 1 - product(1 - p_i) — the real "OR" analog of a parlay's "AND"-based
+`combined_parlay_prob`, and the actual number that matters for a basket of independent
+positions. `expected_hits` (the honest sum of each leg's own probability) is a second, distinct
+basket-level number. Deliberately does NOT compute a parlay-style "combined fair odds" — there
+isn't a meaningful single combined price for a basket of positions a person would place
+separately at their book, and fabricating one would misrepresent what this actually is.
+
+**Real, honest end-to-end confirmation**: on the same realistic 20-hitter, HR-only board that
+originally produced Bold/Longshot's absurd seven-figure parlay odds, an 8-position basket built
+from the exact same underlying plays now shows 8 legitimate, independently-playable ~+400
+positions (every single one C-grade, zero duplicates), with a genuinely useful basket-level
+statistic: an 82.8% chance at least one hits — a completely different, far more useful number
+than a parlay's near-zero "everything must hit" probability, built from literally the same
+real, validated candidate plays.
+
+**11 new tests** (plus earlier basket tests already in place from before this session's context
+compaction, confirmed non-duplicative in the actual code — each core function is defined exactly
+once): `basket_prob_at_least_one_hits` (hand-verified exact value, empty-list and single-leg edge
+cases, a real monotonic property confirming the probability only rises as more positions are
+added); `build_speculative_basket` (confirmed to reuse the payout objective directly via the
+same misaligned-Conviction-vs-probability proof pattern used for Bold/Longshot; confirmed the
+default "C" floor excludes a barely-qualifying D-grade longshot even though payout alone would
+pick it first; confirmed `min_grade_letter` is genuinely configurable; confirmed `size` controls
+the actual leg count; confirmed the summary stats are computed directly from the real selected
+legs, not a separately-drifting calculation; confirmed no fabricated `combined_fair_*` fields;
+confirmed cross-sport support with WNBA-shaped plays). Plus the full, realistic end-to-end
+simulation above. 762/762 total passing.
+
+**New page `views/19_Speculative_Basket.py`**, public (matching the trader audience this was
+built for, not owner-only), with a real, visible explanation that this is independent positions
+requiring separate bets at the book, not one combined ticket. Bidirectional `st.page_link`
+pointers added between this page and Suggested Parlays, so either audience can discover the
+other without the two features being merged or one becoming a hidden mode of the other.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

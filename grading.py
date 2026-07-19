@@ -393,6 +393,63 @@ def combined_parlay_prob(legs: List[Dict]) -> float:
     return p
 
 
+# ===========================================================================
+# SPECULATIVE BASKET -- a real, deliberate DIFFERENT product from Suggested Parlays, not a
+# variation on it. A parlay requires every single leg to hit simultaneously -- real, punishing
+# "AND" logic that multiplies several real risks together. That's not how a trader actually
+# deploys speculative capital in penny stocks or crypto: nobody buys several speculative
+# positions and needs ALL of them to pay off on the same day to call it a win. The real strategy
+# is several small, INDEPENDENT, high-upside positions, sized small, where hitting even ONE
+# makes the whole basket worthwhile -- diversifying across real risk, not multiplying it.
+#
+# Reuses the EXACT SAME leg-selection mechanism already proven for Suggested Parlays' own Bold/
+# Longshot tiers (the "payout" objective from _tier_sort_key, ranking by lowest real probability
+# among plays that still clear a real grade floor) -- same real, validated picks Bold/Longshot
+# already surface, just presented as their own independent things instead of chained together.
+def basket_prob_at_least_one_hits(legs: List[Dict]) -> float:
+    """P(at least one leg hits), ASSUMING INDEPENDENCE -- the actual "basket" analog of a
+    parlay's combined_parlay_prob, but for the opposite question: not "did everything hit"
+    (an AND of every leg), but "did ANYTHING hit" (an OR across every leg) -- the real question
+    that matters for a basket of independent positions, where a single winner makes the whole
+    basket worthwhile. P(at least one) = 1 - P(none hit) = 1 - product(1 - p_i for each leg).
+
+    Same independence caveat as combined_parlay_prob: build_parlay_leg_pool's own same-player
+    exclusion removes the worst, most severe correlation violation before this math runs, but
+    same-game-different-player legs can still share weaker correlation this doesn't capture."""
+    prob_none_hit = 1.0
+    for leg in legs:
+        prob_none_hit *= (1.0 - leg.get("ModelProb", 0.0))
+    return 1.0 - prob_none_hit
+
+
+def build_speculative_basket(plays: List[Dict], size: int = 8, min_grade_letter: Optional[str] = "C",
+                             max_per_game: int = 2, max_per_market: int = 2) -> Dict[str, Any]:
+    """Build a basket of INDEPENDENT, single high-upside positions -- not a chained parlay.
+    Reuses build_parlay_leg_pool's exact same mechanism already proven for Suggested Parlays'
+    own Bold/Longshot tiers: ranks candidates by the "payout" objective (lowest real probability,
+    i.e. the biggest real price) among plays that clear min_grade_letter (defaults to "C", the
+    same real floor Bold/Longshot use, added specifically after a real reported issue where an
+    unconstrained payout search picked the worst, barely-qualifying legs purely for their long
+    odds -- see PARLAY_TIER_SIZES' own comment for the full story this floor exists to prevent).
+
+    size: how many independent positions to include -- a real, user-controlled choice (a trader
+    decides how many positions to hold), not a fixed tier the way parlay sizes are.
+
+    Returns {"legs": [play, ...], "prob_at_least_one_hits": float, "expected_hits": float}.
+    "expected_hits" is the real, honest sum of each leg's own probability (linearity of
+    expectation holds regardless of correlation) -- "on average, about this many of these
+    positions would hit," a real, useful basket-level number distinct from "at least one."""
+    key_fn = _tier_sort_key("payout")
+    pool = build_parlay_leg_pool(plays, max_per_game, max_per_market, min_pool_size=size,
+                                 sort_key=key_fn, min_grade_letter=min_grade_letter)
+    legs = pool[:size]
+    return {
+        "legs": legs,
+        "prob_at_least_one_hits": round(basket_prob_at_least_one_hits(legs), 4),
+        "expected_hits": round(sum(leg.get("ModelProb", 0.0) for leg in legs), 2),
+    }
+
+
 def build_suggested_parlays(plays: List[Dict], tier_sizes: Optional[List] = None,
                             max_per_game: int = 2, max_per_market: int = 2) -> List[Dict]:
     """Build tiered parlay suggestions from a graded plays list -- the actual feature: someone
