@@ -75,7 +75,8 @@ def run():
     # accident. Matching by title is also what makes gating "Matchup Lab" here correctly cover
     # all three variants (MLB, WNBA/NBA/NCAAMB, NFL) with one entry, since they share the title.
     owner_only_titles = {"Bet Log", "Media Room", "Podcast Studio", "Edge Board",
-                         "Matchup Lab", "Track Record", "Data Health"}
+                         "Matchup Lab", "Track Record", "Data Health",
+                         "Suggested Parlays", "Speculative Basket", "Graded Picks"}
 
     # leading page-number -> (title, icon, stable url slug). The url_path is the key fix: it pins
     # each page to a predictable URL so reruns keep you on the same page instead of defaulting to

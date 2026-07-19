@@ -3488,6 +3488,56 @@ requiring separate bets at the book, not one combined ticket. Bidirectional `st.
 pointers added between this page and Suggested Parlays, so either audience can discover the
 other without the two features being merged or one becoming a hidden mode of the other.
 
+### Suggested Parlays and Speculative Basket moved to owner-only (2026-07-19)
+Shawn asked to restrict both pages to owner deployment. `streamlit_app.py`'s `owner_only_titles`
+set gained both titles — the gate is checked centrally when building the page list passed to
+`st.navigation`, so a gated title is excluded from a non-owner session's navigation entirely
+before Streamlit ever registers it (the same mechanism already used for Bet Log, Data Health,
+and every other owner-only page), not a per-page check that could be missed on one of them.
+
+**Caught and fixed a real follow-up before it shipped as a broken experience**: Graded Picks
+(still public) had a `st.page_link` pointing directly at Suggested Parlays from an earlier
+session — with Suggested Parlays now owner-only, that link would have sent a public/Discord user
+toward a page no longer in their own navigation. Removed that one pointer; the two pointers
+between Suggested Parlays and Speculative Basket themselves were left in place, since both pages
+now share the same owner-only audience and neither link crosses the boundary. Swept the rest of
+`views/` for any other stray references before considering this done — none found.
+
+**1 test updated**: the existing `test_owner_only_pages_match_expected_titles` regression guard
+(which asserts the exact gated title set against `streamlit_app.py`'s real source) updated to
+include both new titles — it correctly caught the change as a failure before the update, exactly
+what it's there for. 762/762 total passing.
+
+### Graded Picks moved to owner-only too, closing the subscriber-model gap (2026-07-19)
+Shawn's own framing: gating Graded Picks guarantees no broken public links going forward, and
+supports the subscriber model direction. Added to `owner_only_titles` alongside last turn's
+additions.
+
+**Found and fixed the actual real link this would have broken, before it shipped broken**:
+Command Center (still public, the landing dashboard) had an unconditional `st.page_link`
+straight to Graded Picks. Rather than deleting it (the approach taken last turn for a similar
+case), used the BETTER, already-established pattern sitting right next to it in the same file —
+Command Center already wraps its Data Health pointer in `if st.secrets.get("AUDIENCE", "owner")
+== "owner":` specifically so it stays hidden from a public/Discord audience instead of linking
+to a page they can't open. Applied that exact same wrapping to the Graded Picks pointer instead
+of removing it, preserving the owner's own convenience rather than losing it.
+
+**A real, welcome side effect worth naming directly**: last turn's fix removed the Graded Picks
+→ Suggested Parlays pointer because Graded Picks was still public while Suggested Parlays had
+already gone owner-only, making that link broken for public users. With Graded Picks now
+ALSO owner-only, both sides of that link share the same audience again — restored it, since it's
+now genuinely safe and useful again, not left removed as an unnecessary leftover.
+
+**Full sweep confirmed clean**: every `st.page_link` across the whole `views/` directory checked
+by hand — all 5 now either connect two owner-only pages directly (Graded Picks↔Suggested
+Parlays, Suggested Parlays↔Speculative Basket) or are explicitly wrapped in the owner-audience
+check (Command Center→Data Health, Command Center→Graded Picks). None cross the public/owner-
+only boundary unconditionally.
+
+**1 test updated**: `test_owner_only_pages_match_expected_titles` extended to include Graded
+Picks — caught the change as an expected failure before the update, exactly what a regression
+guard is for. 762/762 total passing.
+
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
   framing/item 5 writeup above for why: no confirmed way to find every game a specific umpire
