@@ -37,14 +37,36 @@ GRADE_THRESHOLDS = [
     (1.2, "D", "Watch"),
 ]
 
+# A real, confirmed finding, not a hypothetical: Conviction = ModelProb / RefProb has a hard
+# ceiling of 1/RefProb (the favored side's probability can never exceed 1.0). MLB's own
+# BEST_BET_REF["Batter HR"] = 0.11 gives HR a ceiling near 9.09x, comfortably above the 3.0x "A"
+# threshold -- but checked directly against every OTHER market on this platform, 9 of MLB's own
+# 11 markets have a ceiling BELOW 3.0x, meaning an "A" grade is mathematically impossible for
+# them no matter how good the play is. Checked cross-sport too: every other sport (WNBA, NBA,
+# NFL, NCAAMB) uses ref=0.5 for every single one of its markets, giving a ceiling of exactly
+# 2.0x -- meaning NO play on any of those sports could ever reach even a "B" grade, let alone
+# "A", under the raw-conviction thresholds alone. GRADE_THRESHOLDS were set by watching real
+# Best Bets output that was itself dominated by HR (the market with by far the most headroom),
+# so the thresholds ended up implicitly calibrated to HR's own range without anyone realizing
+# every other market was structurally locked out of the top grades.
+REFERENCE_CEILING = 1.0 / 0.11   # ~9.09 -- MLB Batter HR's own theoretical ceiling, kept as the
+                                 # fixed benchmark every OTHER market's own ceiling gets
+                                 # normalized against below, so HR's own grades don't change at
+                                 # all under this normalization -- everything else gets scaled
+                                 # fairly relative to the market the thresholds were already,
+                                 # if unintentionally, calibrated around, not a new arbitrary
+                                 # number invented for this fix.
 
-def conviction_to_grade(conviction: Optional[float]) -> Optional[Dict[str, Any]]:
+
+def conviction_to_grade(conviction: Optional[float], ceiling: Optional[float] = None) -> Optional[Dict[str, Any]]:
     """Map a play's Conviction number to a letter grade + tier label for quick visual scanning --
     NOT a fabricated 0-100 "score" that doesn't map to anything real. The raw Conviction number
     (e.g. "3.2x") is a genuinely interpretable value on its own -- "this play's real probability
     is 3.2x the market-typical rate for this prop" -- so the grade is presented ALONGSIDE it, not
     instead of it, honest about what's actually driving the label rather than hiding it behind an
-    opaque score.
+    opaque score. The DISPLAYED conviction in the returned dict is always the real, raw number --
+    never the normalized one used only internally to pick the letter, so nothing shown to a
+    person is a value that doesn't actually mean what it says.
 
     A REAL, DELIBERATE NAMING CHOICE: labels here ("Top Lean" / "Strong Lean" / "Lean" / "Watch")
     are this platform's own wording, chosen specifically to describe the SAME underlying concept
@@ -53,18 +75,32 @@ def conviction_to_grade(conviction: Optional[float]) -> Optional[Dict[str, Any]]
     just applied to the genuinely unclear proprietary terms ("Blast Match" etc, deliberately left
     out entirely) but to the clearer ones too.
 
-    SPORT-AGNOSTIC BY DESIGN: takes a plain Conviction number, not a sport-specific row shape --
-    works identically whether the play came from MLB, WNBA, NBA, NFL, or NCAAMB's own build_best_
-    bets, since Conviction means the same thing (ModelProb / a market-typical reference rate) in
-    every one of them.
+    ceiling: this SPECIFIC play's own theoretical maximum possible conviction (1/RefProb for
+    whichever side is favored) -- when supplied, conviction is normalized against it (scaled by
+    REFERENCE_CEILING / ceiling) BEFORE comparing to GRADE_THRESHOLDS, so a market with a
+    genuinely lower ceiling than HR's isn't structurally locked out of ever reaching a high
+    grade, and a market with a HIGHER ceiling than HR's (Stolen Bases, whose rarity gives it even
+    more headroom than HR) gets appropriately compressed rather than dominating every ranking for
+    reasons that have nothing to do with how good the actual play is. When ceiling is None (a
+    play with no such info, or an older caller not yet passing it), falls back to comparing the
+    RAW conviction directly -- stays backward compatible rather than silently reinterpreting a
+    caller's numbers it wasn't given enough context to normalize correctly.
 
-    Returns None for anything below the lowest real threshold (1.2x, matching Best Bets' own
-    established "worth showing at all" floor) -- a play that isn't notable shouldn't get a grade
-    that implies it is."""
+    SPORT-AGNOSTIC BY DESIGN: takes a plain Conviction number (and optional ceiling), not a
+    sport-specific row shape -- works identically whether the play came from MLB, WNBA, NBA, NFL,
+    or NCAAMB's own build_best_bets, since Conviction and ceiling mean the same thing (ModelProb
+    / a market-typical reference rate; 1 / that reference rate) in every one of them.
+
+    Returns None for anything below the lowest real threshold (1.2x on the NORMALIZED value,
+    matching Best Bets' own established "worth showing at all" floor) -- a play that isn't
+    notable shouldn't get a grade that implies it is."""
     if conviction is None:
         return None
+    graded_value = conviction
+    if ceiling and ceiling > 0:
+        graded_value = conviction * (REFERENCE_CEILING / ceiling)
     for threshold, letter, tier in GRADE_THRESHOLDS:
-        if conviction >= threshold:
+        if graded_value >= threshold:
             return {"letter": letter, "tier": tier, "conviction": conviction}
     return None
 
@@ -96,7 +132,7 @@ def organize_graded_picks(plays: List[Dict]) -> List[Dict[str, Any]]:
     filter applied on top of it elsewhere."""
     graded = []
     for pl in plays:
-        grade = conviction_to_grade(pl.get("Conviction"))
+        grade = conviction_to_grade(pl.get("Conviction"), pl.get("_ceiling"))
         if grade:
             graded.append({**pl, "_grade": grade})
     if not graded:
@@ -152,7 +188,7 @@ def grade_accuracy_by_letter(graded_plays: List[Dict]) -> List[Dict]:
     settled = [g for g in graded_plays if g.get("Hit") is not None]
     by_letter: Dict[str, List[Dict]] = {}
     for g in settled:
-        grade = conviction_to_grade(g.get("Conviction"))
+        grade = conviction_to_grade(g.get("Conviction"), g.get("_ceiling"))
         if grade:
             by_letter.setdefault(grade["letter"], []).append(g)
     out = []
@@ -210,7 +246,7 @@ def build_parlay_leg_pool(plays: List[Dict], max_per_game: int = 2, max_per_mark
     wrongly treat them as the same person and drop one for no real reason."""
     graded = []
     for pl in plays:
-        grade = conviction_to_grade(pl.get("Conviction"))
+        grade = conviction_to_grade(pl.get("Conviction"), pl.get("_ceiling"))
         if grade:
             graded.append({**pl, "_grade": grade})
     graded.sort(key=lambda p: p["Conviction"], reverse=True)

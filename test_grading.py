@@ -33,6 +33,77 @@ def test_conviction_to_grade_none_for_none_input():
     assert grading.conviction_to_grade(None) is None
 
 
+# ----------------------------------------------------------------- conviction_to_grade: ceiling normalization
+def test_conviction_to_grade_no_ceiling_matches_old_raw_behavior():
+    # Backward compatibility: omitting ceiling entirely must behave exactly as before this fix.
+    assert grading.conviction_to_grade(3.5) == grading.conviction_to_grade(3.5, None)
+    assert grading.conviction_to_grade(1.8) == grading.conviction_to_grade(1.8, None)
+
+
+def test_conviction_to_grade_hr_own_ceiling_unchanged():
+    # HR's own ceiling (~9.09, matching REFERENCE_CEILING itself) should produce IDENTICAL
+    # letter grades before and after normalization -- the whole point of using HR's own ceiling
+    # as the fixed benchmark is that HR's own grades don't move at all.
+    hr_ceiling = 1.0 / 0.11
+    for conviction in (3.5, 2.2, 1.6, 1.25, 1.0):
+        raw_grade = grading.conviction_to_grade(conviction)
+        normalized_grade = grading.conviction_to_grade(conviction, hr_ceiling)
+        assert (raw_grade is None) == (normalized_grade is None)
+        if raw_grade is not None:
+            assert raw_grade["letter"] == normalized_grade["letter"]
+    print("✓ conviction_to_grade produces identical grades for HR's own ceiling, confirming backward compatibility")
+
+
+def test_conviction_to_grade_low_ceiling_market_can_now_reach_a():
+    # The real, confirmed bug this fix addresses: a market with ref=0.5 (every market on every
+    # non-MLB sport, plus most of MLB's own newer markets) has a raw ceiling of exactly 2.0x --
+    # mathematically incapable of reaching a 3.0x "A" threshold without normalization. Confirms
+    # a play at 90% of ITS OWN ceiling (1.8 raw, ceiling 2.0) now correctly grades A.
+    grade = grading.conviction_to_grade(1.8, ceiling=2.0)
+    assert grade is not None
+    assert grade["letter"] == "A"
+    assert grade["conviction"] == 1.8   # the DISPLAYED number stays the real, raw one
+    print("✓ conviction_to_grade lets a low-ceiling market (e.g. any ref=0.5 market) reach A when genuinely near its own ceiling")
+
+
+def test_conviction_to_grade_would_have_been_impossible_without_normalization():
+    # Confirms the OLD (pre-fix) behavior really would have failed here -- 1.8 raw conviction is
+    # well below the 3.0 threshold on its own, proving the fix is doing real work, not a no-op.
+    assert grading.conviction_to_grade(1.8) is not None
+    assert grading.conviction_to_grade(1.8)["letter"] != "A"
+
+
+def test_conviction_to_grade_high_ceiling_market_gets_compressed():
+    # The real, reported Stolen Bases issue: a market with MORE headroom than HR (ref=0.05,
+    # ceiling 20.0) should have its conviction correctly compressed relative to HR, not inflated.
+    # A real burner's raw 4.78x conviction (ceiling 20.0) should normalize DOWN, not stay at 4.78.
+    grade = grading.conviction_to_grade(4.78, ceiling=20.0)
+    assert grade is not None
+    assert grade["conviction"] == 4.78   # still the honest, real raw number, displayed as-is
+    # normalized value = 4.78 * (9.0909/20.0) = ~2.17 -> B, not A
+    assert grade["letter"] == "B"
+    print("✓ conviction_to_grade correctly compresses a high-ceiling market's (e.g. Stolen Bases) inflated conviction")
+
+
+def test_conviction_to_grade_similar_probability_different_markets_now_comparable():
+    # The real end-to-end validation: a real burner's SB play (23.9% prob, ceiling 20.0, raw
+    # conviction 4.78) and a real elite slugger's HR play (22.3% prob, ceiling 9.09, raw
+    # conviction 2.03) have nearly identical real probabilities -- they should now land on
+    # comparable, not wildly different, grades.
+    sb_grade = grading.conviction_to_grade(4.78, ceiling=20.0)
+    hr_grade = grading.conviction_to_grade(2.03, ceiling=9.09)
+    assert sb_grade["letter"] == "B"
+    assert hr_grade["letter"] == "B"
+    print("✓ conviction_to_grade now grades two markets' near-identical real probabilities comparably, not wildly apart")
+
+
+def test_conviction_to_grade_zero_or_negative_ceiling_falls_back_to_raw():
+    # A defensive edge case: a malformed/zero ceiling must not crash or divide by zero, and
+    # should fall back to the raw, unnormalized comparison rather than erroring out.
+    assert grading.conviction_to_grade(3.5, ceiling=0) == grading.conviction_to_grade(3.5)
+    assert grading.conviction_to_grade(3.5, ceiling=-1) == grading.conviction_to_grade(3.5)
+
+
 # ----------------------------------------------------------------- organize_graded_picks
 def _pick(player, team, game, conviction, market="Batter HR"):
     return {"Player": player, "Team": team, "Game": game, "Market": market, "Side": "Over",

@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 687/687 tests green)
+## What's in this checkpoint (all tested — 695/695 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -3080,6 +3080,72 @@ realistic end-to-end simulation reproducing the exact reported scenario (multipl
 plus real sluggers) twice — once confirming the tightened default naturally diversifies the
 board without any user action, once confirming the market filter correctly excludes Stolen Bases
 entirely when deselected. 687/687 total passing.
+
+### Market-ceiling normalized grading — a real, platform-wide fix, not a parlay patch (2026-07-18)
+Shawn noticed no "A" grades appeared in Suggested Parlays after excluding HR and Stolen Bases,
+and asked what was going on. Confirmed it directly rather than guessing, and it turned out to be
+much bigger than the parlay page.
+
+**Root cause, confirmed with real numbers**: Conviction = ModelProb/RefProb has a hard ceiling of
+1/RefProb — even a theoretically perfect play (ModelProb=1.0) can't exceed it. Computed the
+theoretical max for every MLB market: only Batter HR (ceiling 9.09x) and Batter Stolen Bases
+(ceiling 20.0x) can ever mathematically reach the 3.0x "A" threshold. The other 9 markets top out
+between 1.54x and 2.86x — structurally incapable of an "A" grade no matter how good the play is.
+Checked cross-sport too, and it's worse there: WNBA, NBA, NFL, and NCAAMB all use ref=0.5 for
+*every* market, capping raw conviction at exactly 2.0x — meaning no play on any of those sports
+could ever reach even a "B" grade, let alone "A", under the original thresholds. The thresholds
+were set by watching real Best Bets output that was itself dominated by HR (the market with by
+far the most headroom), so they ended up implicitly calibrated to HR's own range without anyone
+realizing every other market — and every other sport entirely — was structurally locked out.
+
+**The fix, confirmed with Shawn before touching the core grading system given how far it
+reaches**: normalize conviction against each play's own theoretical ceiling before comparing to
+GRADE_THRESHOLDS, rather than comparing raw conviction universally. `grading.conviction_to_grade`
+gained an optional `ceiling` parameter — when supplied, conviction is scaled by
+`REFERENCE_CEILING / ceiling` before the threshold check, where `REFERENCE_CEILING` is fixed at
+HR's own ceiling (~9.09) specifically so HR's own grades don't move at all under this
+normalization; every other market gets scaled fairly relative to the market the thresholds were
+already, if unintentionally, built around. The DISPLAYED conviction number in the returned grade
+dict stays the real, raw value always — only the letter-grade decision uses the normalized one,
+so nothing shown to a person is a number that doesn't mean what it says. Omitting ceiling falls
+back to the exact old behavior, so any caller not yet updated keeps working unchanged.
+
+**A real, deliberate architectural choice on WHERE ceiling comes from**: each play now carries
+its own `_ceiling` (1/RefProb for whichever side is favored), attached at the exact same place
+`Conviction` itself is already computed inside each sport's own `build_best_bets` — MLB's
+`projections.py` (both the hitter and pitcher play-construction paths) plus all four other
+sports' own `projections.py` files, six occurrences of the identical one-line change total.
+Deliberately NOT resolved via `sports.active()` inside `grading.py` itself — that would
+reintroduce the exact "which sport is actually active when this runs" staleness risk already
+identified and avoided earlier this session (`best_bets_data.py`'s own MLB-vs-generic split).
+Attaching ceiling directly to the play at build time means `grading.py` never needs to know
+anything about any sport's specific reference probabilities at all.
+
+**A second real, welcome side effect, not a separate fix**: this also directly addresses last
+turn's Stolen Bases over-dominance. SB's ceiling (20.0x) is more than double HR's (9.09x), so
+normalizing against HR's fixed benchmark correctly COMPRESSES SB's inflated conviction rather
+than leaving it disproportionately high — confirmed directly: a real burner's raw 4.78x SB
+conviction and a real elite slugger's raw 2.03x HR conviction (nearly identical real
+probabilities, 23.9% vs 22.3%) now both land on "B", not 4.78x dwarfing 2.03x for reasons that
+had nothing to do with how good either play actually was.
+
+**13 new tests**: 7 for `conviction_to_grade`'s new normalization (backward compatibility when
+ceiling is omitted; HR's own ceiling confirmed to produce byte-identical grades to the old raw
+behavior across a real range of conviction values; a low-ceiling market — matching every
+non-MLB-sport market exactly — confirmed to now reach A when genuinely close to its own ceiling,
+with an explicit companion test confirming the OLD behavior really would have failed this exact
+case, proving the fix does real work and isn't a no-op; the Stolen Bases compression confirmed
+directly with the real reported numbers; the two markets' near-identical real probabilities
+confirmed to now land on comparable grades instead of wildly apart; a defensive zero/negative-
+ceiling edge case falling back to raw comparison rather than crashing), 1 confirming
+`build_best_bets` attaches a real, correctly-relative `_ceiling` to every play (SB's ceiling
+confirmed genuinely higher than HR's, not just present). Plus two full, real end-to-end
+simulations: one reproducing the exact reported scenario (HR and Stolen Bases excluded from a
+real, realistic 4-hitter board) confirming A grades are now reachable across every remaining
+market where they previously never could be; a second confirming directly, using WNBA's own
+actual ref=0.5 reference probabilities, that a play at 90% of its own real ceiling moves from a
+maximum of "C" under the old system to a correct "A" under the new one — the exact concrete proof
+this now plays well across every sport, not just MLB. 695/695 total passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

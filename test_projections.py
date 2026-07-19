@@ -935,6 +935,26 @@ def test_pitcher_reasons_earned_runs_references_era_and_ip():
     print("✓ _pitcher_reasons correctly references the pitcher's own ERA/IP for Earned Runs, honest about no opponent adjustment")
 
 
+# ----------------------------------------------------------------- build_best_bets: _ceiling
+def test_build_best_bets_attaches_correct_ceiling():
+    hitters = [
+        dict(Hitter="Slugger", Team="A", GameLabel="A @ B", Hand="L",
+            **{"Opp Hand": "R", "Opp Pitcher": "Ace"}, Advantage="Advantage",
+            _weather_hr=1.0, Due=0.0, _opp_stat={"era": 4.0},
+            **{"HR%": 0.15, "TB1.5%": 0.40, "Hit%": 0.65, "SO Prob": 0.50,
+              "Runs%": 0.42, "RBI%": 0.40, "SB%": 0.08}),
+    ]
+    plays = P.build_best_bets(hitters, [])
+    hr_play = next(p for p in plays if p["Market"] == "Batter HR")
+    sb_play = next(p for p in plays if p["Market"] == "Batter Stolen Bases")
+    # HR's ref is 0.11 -> ceiling should be 1/0.11 ~ 9.09; SB's ref is 0.05 -> ceiling ~20.0
+    # (or their real Under-side complements, whichever side is actually favored for this fixture)
+    assert hr_play["_ceiling"] is not None
+    assert sb_play["_ceiling"] is not None
+    assert sb_play["_ceiling"] > hr_play["_ceiling"]   # SB genuinely has more headroom than HR
+    print("✓ build_best_bets correctly attaches each play's own real theoretical ceiling")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

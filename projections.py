@@ -1137,6 +1137,10 @@ def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict]) -> List[D
                 "Market": market, "Side": side, "Line": line,
                 "ModelProb": round(sp, 4), "Fair": prob_to_american(sp),
                 "Conviction": round(sp / ref_s, 2) if ref_s > 0 else 0.0,
+                # this play's own theoretical max conviction (1/RefProb) -- lets
+                # grading.conviction_to_grade normalize fairly across markets with very
+                # different reference rates, see that function's own docstring
+                "_ceiling": round(1.0 / ref_s, 2) if ref_s > 0 else None,
                 "Why": "; ".join(_hitter_reasons(r, market, side)),
                 "Lineup": r.get("Lineup"),   # "Confirmed" / "Projected" -- real lineup-confidence
                                              # status, not previously exposed on a play
@@ -1160,6 +1164,10 @@ def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict]) -> List[D
                 "Market": market, "Side": side, "Line": line,
                 "ModelProb": round(sp, 4), "Fair": prob_to_american(sp),
                 "Conviction": round(sp / ref_s, 2) if ref_s > 0 else 0.0,
+                # this play's own theoretical max conviction (1/RefProb) -- lets
+                # grading.conviction_to_grade normalize fairly across markets with very
+                # different reference rates, see that function's own docstring
+                "_ceiling": round(1.0 / ref_s, 2) if ref_s > 0 else None,
                 "Why": "; ".join(_pitcher_reasons(r, market, side)),
                 **_pitcher_diag(r),
             })

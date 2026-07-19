@@ -264,6 +264,10 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
                 "Market": disp, "Side": side, "Line": line,
                 "ModelProb": round(sp, 4), "Fair": prob_to_american(sp),
                 "Conviction": round(sp / ref_s, 2) if ref_s > 0 else 0.0,
+                # this play's own theoretical max conviction (1/RefProb) -- lets
+                # grading.conviction_to_grade normalize fairly across markets with very
+                # different reference rates, see that function's own docstring
+                "_ceiling": round(1.0 / ref_s, 2) if ref_s > 0 else None,
                 "Why": _player_reasons(values, line, side),
                 "_stat_key": _STAT_KEY[col], "_game_log": log,
             })
