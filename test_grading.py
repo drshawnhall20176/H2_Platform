@@ -345,6 +345,62 @@ def test_parlay_pool_default_caps_a_single_skewed_market_at_two_legs():
     print("✓ build_parlay_leg_pool's default correctly caps a single skewed market (e.g. Stolen Bases) at 2 legs")
 
 
+# ----------------------------------------------------------------- build_parlay_leg_pool: min_pool_size
+def test_parlay_pool_min_pool_size_zero_matches_old_behavior():
+    plays = [_leg(f"P{i}", f"T{i}", f"G{i}", 3.0 - i * 0.1, market="Pitcher Strikeouts") for i in range(6)]
+    assert grading.build_parlay_leg_pool(plays) == grading.build_parlay_leg_pool(plays, min_pool_size=0)
+
+
+def test_parlay_pool_min_pool_size_loosens_market_cap_for_single_market():
+    # THE exact real, reported bug: selecting only "Pitcher Strikeouts" (a single market) with
+    # the default max_per_market=2 silently capped the whole pool at 2 legs, even with 6 real,
+    # different graded pitchers on the board. Confirms min_pool_size=6 correctly loosens the
+    # market cap (there's nothing else to diversify into with only one market present) while the
+    # game cap stays real (each leg is its own distinct game here, so it was never the bottleneck).
+    plays = [_leg(f"Pitcher{i}", f"Team{i}", f"Game{i}", 3.0 - i * 0.1, market="Pitcher Strikeouts")
+            for i in range(6)]
+    pool = grading.build_parlay_leg_pool(plays, min_pool_size=6)
+    assert len(pool) == 6
+    print("✓ build_parlay_leg_pool correctly loosens the market cap when only one market is selected but enough real legs exist")
+
+
+def test_parlay_pool_min_pool_size_does_not_loosen_when_already_diverse_enough():
+    # When there's already enough real diversity to hit min_pool_size under the ORIGINAL caps,
+    # nothing should loosen -- confirms this doesn't just always widen caps regardless of need.
+    plays = [_leg(f"P{i}", f"T{i}", f"G{i}", 3.0 - i * 0.1, market=f"Market{i % 3}") for i in range(6)]
+    pool_normal = grading.build_parlay_leg_pool(plays)
+    pool_with_min = grading.build_parlay_leg_pool(plays, min_pool_size=6)
+    assert pool_normal == pool_with_min
+    print("✓ build_parlay_leg_pool doesn't loosen caps unnecessarily when the original caps already support the requested size")
+
+
+def test_parlay_pool_min_pool_size_loosens_game_cap_too():
+    # The same real mechanism applies symmetrically to games, not just markets -- a thin slate
+    # with few games shouldn't strand the bigger tiers either.
+    plays = [_leg(f"Player{i}", f"Team{i}", "OnlyGame", 3.0 - i * 0.1, market=f"Market{i}") for i in range(6)]
+    pool = grading.build_parlay_leg_pool(plays, min_pool_size=6)
+    assert len(pool) == 6
+    print("✓ build_parlay_leg_pool correctly loosens the game cap too when only one game is available")
+
+
+def test_parlay_pool_min_pool_size_still_respects_same_player_exclusion():
+    # THE core safeguard must never be loosened by this mechanism, no matter how large
+    # min_pool_size is -- confirms same-player exclusion stays a hard constraint regardless.
+    plays = [_leg("OnlyPlayer", "TeamX", f"Game{i}", 3.0 - i * 0.1, market=f"Market{i}") for i in range(6)]
+    pool = grading.build_parlay_leg_pool(plays, min_pool_size=6)
+    assert len(pool) == 1   # still just the one real distinct player, regardless of min_pool_size
+    print("✓ build_parlay_leg_pool never loosens the same-player exclusion, even to satisfy min_pool_size")
+
+
+def test_parlay_pool_min_pool_size_cannot_exceed_real_available_legs():
+    # If there genuinely aren't enough distinct players even with loosened caps, the pool stays
+    # honestly smaller than min_pool_size rather than fabricating legs that don't exist.
+    plays = [_leg(f"P{i}", f"T{i}", "G1", 3.0 - i * 0.1, market="Market1") for i in range(3)]
+    pool = grading.build_parlay_leg_pool(plays, min_pool_size=6)
+    assert len(pool) == 3
+    print("✓ build_parlay_leg_pool honestly returns fewer legs than min_pool_size when that's all that genuinely exists")
+
+
 def test_parlay_pool_excludes_below_floor_plays():
     plays = [_leg("Real Play", "A", "A @ B", 2.0), _leg("Too Weak", "C", "C @ D", 1.0)]
     pool = grading.build_parlay_leg_pool(plays)
@@ -440,6 +496,19 @@ def test_suggested_parlays_works_for_non_mlb_shaped_plays():
     assert len(parlays) == 1   # only enough diverse legs for the Safer (2-leg) tier
     assert parlays[0]["tier"] == "Safer"
     print("✓ build_suggested_parlays correctly handles WNBA-shaped plays, confirming cross-sport support from day one")
+
+
+def test_suggested_parlays_single_market_selection_still_fills_all_tiers():
+    # The exact real, reported scenario: a person filters the page down to a single market
+    # (e.g. "Pitcher Strikeouts" only) and still expects Balanced/Longshot to build, given
+    # enough real, different pitchers exist that night -- not silently stuck at Safer only
+    # because a market-diversity cap has nothing left to diversify into.
+    plays = [_leg(f"Pitcher{i}", f"Team{i}", f"Game{i}", 3.5 - i * 0.15, market="Pitcher Strikeouts")
+            for i in range(8)]
+    parlays = grading.build_suggested_parlays(plays)
+    tiers = {p["tier"] for p in parlays}
+    assert tiers == {"Safer", "Balanced", "Longshot"}
+    print("✓ build_suggested_parlays fills all three tiers even with only one market selected, given enough real graded plays")
 
 
 if __name__ == "__main__":

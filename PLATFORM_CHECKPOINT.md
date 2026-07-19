@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 695/695 tests green)
+## What's in this checkpoint (all tested — 702/702 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -3146,6 +3146,40 @@ market where they previously never could be; a second confirming directly, using
 actual ref=0.5 reference probabilities, that a play at 90% of its own real ceiling moves from a
 maximum of "C" under the old system to a correct "A" under the new one — the exact concrete proof
 this now plays well across every sport, not just MLB. 695/695 total passing.
+
+### Suggested Parlays: fixed a single-market selection silently capping at the Safer tier only (2026-07-19)
+Shawn caught another real one: selecting only "Pitcher Strikeouts" in the market filter produced
+just the Safer (2-leg) tier — Balanced and Longshot never appeared, even though plenty of real,
+different graded pitchers existed that night.
+
+**Root cause, confirmed directly**: `max_per_market` (tightened to 2 last turn specifically to
+stop one market from dominating when MULTIPLE markets are available) had a real, unintended
+side effect — it applied unconditionally, so narrowing the page down to a SINGLE market capped
+the entire pool at 2 legs total, since the cap had nothing left to diversify into. The same
+mechanism that fixed the Stolen Bases over-dominance issue was, in the single-market case,
+punishing someone for a choice they'd already deliberately made.
+
+**The fix**: `build_parlay_leg_pool` gained a `min_pool_size` parameter. When set, it loosens
+(never tightens) `max_per_game` and/or `max_per_market` just enough to make a pool of that size
+achievable, based on how many DISTINCT games and markets are actually present among the graded
+plays — with only 1 distinct market graded, the market cap effectively becomes however many legs
+are needed, since there's nothing left to diversify into; with plenty of distinct markets already
+present, nothing loosens at all. `build_suggested_parlays` now calls this with the largest
+requested tier size (6, by default) as `min_pool_size`. The same-player exclusion — the actual
+core safeguard — is never loosened by this mechanism regardless of how large `min_pool_size` is,
+confirmed with a dedicated test.
+
+**7 new tests**: `min_pool_size=0` confirmed to exactly match the old, unmodified behavior;
+the exact reported single-market scenario reproduced directly (6 real, different pitchers, one
+market, confirming the pool correctly reaches all 6); confirmed the loosening does NOT engage
+when the original caps already support the requested size (not an unconditional widening); the
+same mechanism confirmed to work symmetrically for a thin-game slate, not just narrow market
+selection; the same-player hard constraint confirmed to hold regardless of `min_pool_size`; and a
+genuine scarcity case (only 3 real distinct players exist even with loosened caps) confirmed to
+honestly return 3, not fabricate legs that don't exist. Plus a full, realistic end-to-end
+simulation — an 8-pitcher, 4-game board filtered to "Pitcher Strikeouts" only — confirming all
+three tiers (Safer/Balanced/Longshot) now build correctly, exactly reproducing what was reported
+as broken. 702/702 total passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

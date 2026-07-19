@@ -22,6 +22,7 @@ separate copies waiting to drift.
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Optional
 
 # Conviction -> letter grade + tier label. Thresholds are this platform's OWN, grounded in its
@@ -223,7 +224,8 @@ PARLAY_TIER_SIZES = [
    # together, not from quietly swapping in worse plays for the bigger tiers.
 
 
-def build_parlay_leg_pool(plays: List[Dict], max_per_game: int = 2, max_per_market: int = 2) -> List[Dict]:
+def build_parlay_leg_pool(plays: List[Dict], max_per_game: int = 2, max_per_market: int = 2,
+                          min_pool_size: int = 0) -> List[Dict]:
     """Rank graded plays by Conviction, then walk them building a pool that's actually SAFE to
     combine into parlays: at most ONE leg per player (a hard constraint -- see this section's own
     module-level comment for why this is the single most important rule here, not a minor
@@ -238,6 +240,18 @@ def build_parlay_leg_pool(plays: List[Dict], max_per_game: int = 2, max_per_mark
     different burners' SB legs alone fill an entire tier before any other market appeared,
     reading as far less realistic than what a person would actually build themselves).
 
+    min_pool_size: a REAL, reported bug this parameter fixes -- fixed caps alone silently strand
+    a person who deliberately narrows Suggested Parlays down to one market (or a thin slate with
+    few games): with max_per_market=2, selecting ONLY "Pitcher Strikeouts" caps the whole pool at
+    2 legs total, even if 6 different real, graded pitchers exist that night, because the cap was
+    designed to force diversity ACROSS markets, not to punish someone who already chose to narrow
+    to one. When min_pool_size > 0, max_per_game and/or max_per_market are LOOSENED (never
+    tightened) just enough to make a pool of that size achievable, given how many DISTINCT games
+    and markets are actually present among the graded plays -- e.g. with only 1 distinct market
+    graded and min_pool_size=6, max_per_market effectively becomes 6, not because 2 stopped
+    mattering, but because there's nothing left to diversify into. If there are genuinely enough
+    distinct games/markets already, the original caps are used unchanged.
+
     Returns a FLAT, conviction-ranked list -- not grouped by game the way organize_graded_picks
     is, since parlay legs are chosen across the WHOLE board at once, not within one game.
 
@@ -250,6 +264,14 @@ def build_parlay_leg_pool(plays: List[Dict], max_per_game: int = 2, max_per_mark
         if grade:
             graded.append({**pl, "_grade": grade})
     graded.sort(key=lambda p: p["Conviction"], reverse=True)
+
+    if min_pool_size > 0:
+        distinct_games = len({p.get("Game") for p in graded})
+        distinct_markets = len({p.get("Market") for p in graded})
+        if distinct_games > 0:
+            max_per_game = max(max_per_game, math.ceil(min_pool_size / distinct_games))
+        if distinct_markets > 0:
+            max_per_market = max(max_per_market, math.ceil(min_pool_size / distinct_markets))
 
     pool: List[Dict] = []
     seen_players = set()
@@ -304,6 +326,13 @@ def build_suggested_parlays(plays: List[Dict], tier_sizes: Optional[List] = None
     parlay out of a pool that only had 3 safe options would defeat the entire point of the
     diversity safeguards above.
 
+    Calls build_parlay_leg_pool with min_pool_size set to the LARGEST requested tier size -- a
+    real, reported fix: without this, selecting a single market (e.g. only "Pitcher Strikeouts")
+    silently capped the whole pool at max_per_market (2) regardless of how many real, different
+    pitchers were actually graded that night, since the per-market cap has nothing left to
+    diversify into once only one market is selected. See build_parlay_leg_pool's own docstring
+    for the full mechanism.
+
     Returns a list of {"tier": str, "size": int, "legs": [play, ...], "combined_prob": float,
     "combined_fair_decimal": float, "combined_fair_american": int}, one entry per tier that could
     actually be filled."""
@@ -322,7 +351,8 @@ def build_suggested_parlays(plays: List[Dict], tier_sizes: Optional[List] = None
                                                                  # module already does -- not
                                                                  # duplicated, just imported late.
     sizes = tier_sizes if tier_sizes is not None else PARLAY_TIER_SIZES
-    pool = build_parlay_leg_pool(plays, max_per_game, max_per_market)
+    largest_tier = max((size for size, _ in sizes), default=0)
+    pool = build_parlay_leg_pool(plays, max_per_game, max_per_market, min_pool_size=largest_tier)
 
     out = []
     for size, label in sizes:
