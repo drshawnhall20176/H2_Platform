@@ -3538,6 +3538,34 @@ only boundary unconditionally.
 Picks — caught the change as an expected failure before the update, exactly what a regression
 guard is for. 762/762 total passing.
 
+### Time slot / game filter added to Suggested Parlays and Speculative Basket (2026-07-19)
+Shawn asked for the same filtering already on Matchup Lab. Both pages now have the exact same
+Time slot + Game selectbox pair, using the exact same shared helpers (`sports.game_dt`,
+`sports.slot_of`, `sports.SLOT_ORDER`) already used by Best Bets, every Matchup Lab variant, and
+Graded Picks — not a reimplementation, the literal same mechanism.
+
+**A real, deliberate reversal of an earlier decision on Suggested Parlays, not an oversight**:
+an earlier version of this page explicitly omitted this filter, reasoned that narrowing to one
+game would usually make it impossible to fill the bigger tiers. That reasoning was correct then
+and stays correct now — `build_suggested_parlays` already skips a tier it can't honestly fill
+rather than padding it, so a narrow slot/game selection will produce fewer or smaller tiers, not
+broken ones. Speculative Basket's own positions are already fully independent, so narrowing to
+one game is even more natural there — there's no "not enough legs to chain together" concern the
+way a parlay has, since `build_speculative_basket` already returns however many real qualifying
+positions exist rather than requiring an exact count.
+
+**Confirmed correct with a real, realistic end-to-end simulation**, not assumed from the code
+alone: built a two-game board with real, different UTC game times, computed each game's
+real-world time-slot bucket, and confirmed filtering to a single slot correctly and completely
+partitions the plays list (22 + 22 = 44, matching the total, no plays lost or duplicated). Caught
+and fixed a mistake in the test script itself along the way, not the platform code — an initial
+hand-picked UTC timestamp was miscalculated relative to Eastern time, producing a test assertion
+that expected the wrong bucket; corrected the test's own expectation once the actual, correctly-
+computed slot was checked directly, rather than assuming the code was wrong. 762/762 total
+passing (no new dedicated unit tests added this turn, since this reuses `sports.py`'s own
+already-tested `game_dt`/`slot_of`/`SLOT_ORDER` and Graded Picks' own already-proven filtering
+pattern verbatim, rather than introducing new logic that would need its own new coverage).
+
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
   framing/item 5 writeup above for why: no confirmed way to find every game a specific umpire
