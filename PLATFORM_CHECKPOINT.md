@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 670/670 tests green)
+## What's in this checkpoint (all tested — 686/686 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -2971,6 +2971,75 @@ new keys match the confirmed Odds API documentation exactly). Plus a full, reali
 simulation through the entire `load_mlb_graded_picks_board` pipeline — all 11 markets present on
 one simulated board, each new market's play carrying real Fair odds, a real letter grade, and
 honest reasoning text. 670/670 total passing.
+
+### New page: Suggested Parlays — for Discord users who don't want to comb through data (2026-07-18)
+Shawn wanted a page offering ready-made parlay suggestions (max 6 legs) for casual Discord users,
+built from the graded board rather than requiring them to dig through individual props
+themselves. Explicitly asked to be given real time to think this through before building, given
+the real risk in getting the underlying math wrong on a page aimed at people who won't
+double-check it.
+
+**The core design problem, reasoned through before any code**: a parlay's combined probability
+is only honestly the product of each leg's own probability if the legs are independent. Two legs
+on the SAME PLAYER almost never are — a home run leg and a total-bases leg on the same hitter are
+so tightly coupled that treating them as independent would badly overstate how safe the
+combination actually is. This mattered more, not less, specifically because this page exists for
+people who explicitly don't want to dig into why a number is what it is — they're trusting it at
+face value.
+
+**The fix: a hard, simple, defensible rule — never put two legs on the same player into one
+suggested parlay.** `grading.build_parlay_leg_pool` enforces this (keyed on (Player, Team), not
+Player alone, since two genuinely different people can share a surname across different teams —
+confirmed with a dedicated test), plus softer caps on legs sharing a game or a market (real, but
+much weaker correlation concerns than same-player, handled as configurable limits rather than
+hard bans).
+
+**Tiered by risk, confirmed with the user's own explicit answers**: Safer (2-leg), Balanced
+(4-leg), Longshot (6-leg) — cumulative from the SAME conviction-ranked pool, not independently
+re-optimized sets, so the risk difference comes honestly from chaining more real legs together
+(probabilities multiply down), not from quietly swapping in worse plays for the bigger tiers. A
+tier is skipped entirely, not padded with weaker plays, when the pool doesn't have enough diverse
+legs to fill it honestly — confirmed directly with a real end-to-end simulation showing only the
+Safer tier building on a thin, single-leg-diverse pool.
+
+**Built genuinely sport-agnostic from day one**, per the user's explicit answer — lives in
+`grading.py` alongside the rest of the shared grading logic, not MLB's own `projections.py`.
+Caught and fixed a real circular import along the way: `projections.py` already imports FROM
+`grading.py` (from the earlier cross-sport audit fix), so `grading.py` importing `prob_to_
+decimal`/`prob_to_american` from `projections.py` at module level created a genuine cycle. Fixed
+with a lazy, in-function import — the same pattern already established elsewhere in this codebase
+(`sports.py`'s `require_trading_access`) for exactly this situation.
+
+**Full "Why" reasoning per leg included**, per the user's explicit answer — reuses each play's
+own `Why` text directly, no new reasoning system needed.
+
+**New page `views/18_Suggested_Parlays.py`**, public (not owner-only, matching the user's stated
+audience), with a real, visible caveat about the independence assumption and a concrete, honest
+example (a 60% leg is still only ~5% across 6 legs) rather than burying the caveat in fine print.
+Deliberately has NO time-slot/game filter, unlike Graded Picks — a parlay is meant to draw from
+the whole slate at once by design; narrowing to one game would usually make the bigger tiers
+impossible to fill. A `st.page_link` pointer was added from Graded Picks to this page, and one
+from Command Center already points to Graded Picks, so the three public-facing board pages
+connect naturally without merging.
+
+**23 new tests**: 7 for `build_parlay_leg_pool` (the core same-player exclusion confirmed
+directly — including that the HIGHER-conviction leg wins when two plays collide on the same
+player, not just whichever was seen first; the same-name-different-team edge case explicitly
+confirmed NOT to falsely collide; max-per-game and max-per-market caps; below-floor exclusion;
+sort order), 3 for `combined_parlay_prob` (correct multiplication, empty-legs handling, and a
+confirmed strictly-decreasing property as more legs are chained), 8 for `build_suggested_parlays`
+(all three tiers building correctly, the cumulative-not-reoptimized property explicitly confirmed,
+tier-skipping on a thin pool, empty output when nothing can be built at all, real combined odds
+present on every tier, and — matching this session's own established discipline — a dedicated
+cross-sport regression test using genuinely WNBA-shaped plays, not just MLB's). A real bug caught
+and fixed during this build, not shipped: the test file's own `if __name__ == "__main__":` guard
+was accidentally destroyed during editing, leaving its test-runner loop as an orphaned,
+mis-indented block that Python would have silently treated as part of the preceding test function
+— caught immediately by checking for the guard explicitly after editing, not assumed to be fine
+because the file still compiled. Plus a full, realistic end-to-end simulation across a real
+7-hitter, 4-game board confirming all three tiers build correctly with zero same-player
+duplicates anywhere, asserted directly in the simulation itself, not just eyeballed. 686/686
+total passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

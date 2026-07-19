@@ -99,6 +99,7 @@ def run():
         "15": ("QB Lab",        "🏈", "qb_lab"),
         "16": ("Graded Picks",  "🏅", "graded_picks"),
         "17": ("Data Health",   "🩺", "data_health"),
+        "18": ("Suggested Parlays", "🎫", "suggested_parlays"),
     }
 
     def lead(name: str) -> str:

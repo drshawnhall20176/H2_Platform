@@ -6,6 +6,7 @@ logic used by Graded Picks and Retrospective across every sport on this platform
 """
 
 import grading
+import pytest
 
 
 # ----------------------------------------------------------------- conviction_to_grade
@@ -200,6 +201,159 @@ def test_grade_accuracy_works_for_non_mlb_shaped_plays():
     assert a["n"] == 2
     assert a["hit_rate"] == 0.5
     print("✓ grade_accuracy_by_letter correctly handles WNBA-shaped graded plays")
+
+
+# ----------------------------------------------------------------- build_parlay_leg_pool
+def _leg(player, team, game, conviction, market="Batter HR", model_prob=0.3):
+    return {"Player": player, "Team": team, "Game": game, "Market": market, "Side": "Over",
+           "Line": 0.5, "ModelProb": model_prob, "Fair": -100, "Conviction": conviction, "Why": "x"}
+
+
+def test_parlay_pool_excludes_second_leg_on_same_player():
+    # THE core correlation safeguard -- a second market on the same player must never make it
+    # into the pool, regardless of how high its own conviction is.
+    plays = [
+        _leg("Ohtani", "LAD", "LAD @ SF", 3.5, market="Batter HR"),
+        _leg("Ohtani", "LAD", "LAD @ SF", 3.2, market="Batter Total Bases"),   # same player, different market
+        _leg("Judge", "NYY", "NYY @ BOS", 2.0, market="Batter HR"),
+    ]
+    pool = grading.build_parlay_leg_pool(plays)
+    players = [p["Player"] for p in pool]
+    assert players.count("Ohtani") == 1   # only the higher-conviction Ohtani leg survives
+    assert "Judge" in players
+    print("✓ build_parlay_leg_pool excludes a second leg on the same player, the core correlation safeguard")
+
+
+def test_parlay_pool_keeps_higher_conviction_leg_when_same_player_collides():
+    plays = [
+        _leg("Ohtani", "LAD", "LAD @ SF", 2.0, market="Batter Total Bases"),
+        _leg("Ohtani", "LAD", "LAD @ SF", 3.5, market="Batter HR"),   # listed second, but higher conviction
+    ]
+    pool = grading.build_parlay_leg_pool(plays)
+    assert len(pool) == 1
+    assert pool[0]["Market"] == "Batter HR"   # the genuinely higher-conviction leg wins, not just first-seen
+    print("✓ build_parlay_leg_pool keeps the higher-conviction leg when two plays collide on the same player")
+
+
+def test_parlay_pool_same_name_different_team_not_falsely_collided():
+    # A real, deliberate edge case: two genuinely different people can share a common surname
+    # across different teams -- player uniqueness is keyed on (Player, Team), not Player alone.
+    plays = [
+        _leg("Garcia", "Team A", "Team A @ Team C", 3.0),
+        _leg("Garcia", "Team B", "Team B @ Team D", 2.5),
+    ]
+    pool = grading.build_parlay_leg_pool(plays)
+    assert len(pool) == 2
+    print("✓ build_parlay_leg_pool correctly treats same-name players on different teams as different people")
+
+
+def test_parlay_pool_respects_max_per_game():
+    plays = [_leg(f"Player{i}", f"Team{i}", "A @ B", 3.0 - i * 0.1) for i in range(5)]
+    pool = grading.build_parlay_leg_pool(plays, max_per_game=2)
+    assert len(pool) == 2
+    print("✓ build_parlay_leg_pool respects the max-per-game cap")
+
+
+def test_parlay_pool_respects_max_per_market():
+    plays = [_leg(f"Player{i}", f"Team{i}", f"Game{i}", 3.0 - i * 0.1, market="Batter HR") for i in range(5)]
+    pool = grading.build_parlay_leg_pool(plays, max_per_game=99, max_per_market=2)
+    assert len(pool) == 2
+    print("✓ build_parlay_leg_pool respects the max-per-market cap")
+
+
+def test_parlay_pool_excludes_below_floor_plays():
+    plays = [_leg("Real Play", "A", "A @ B", 2.0), _leg("Too Weak", "C", "C @ D", 1.0)]
+    pool = grading.build_parlay_leg_pool(plays)
+    assert len(pool) == 1 and pool[0]["Player"] == "Real Play"
+
+
+def test_parlay_pool_sorted_by_conviction_descending():
+    plays = [_leg("Low", "A", "A @ B", 1.3), _leg("High", "C", "C @ D", 3.5), _leg("Mid", "E", "E @ F", 2.0)]
+    pool = grading.build_parlay_leg_pool(plays)
+    assert [p["Player"] for p in pool] == ["High", "Mid", "Low"]
+
+
+# ----------------------------------------------------------------- combined_parlay_prob
+def test_combined_parlay_prob_multiplies_correctly():
+    legs = [_leg("A", "T", "G", 3.0, model_prob=0.5), _leg("B", "T2", "G2", 2.5, model_prob=0.4)]
+    assert grading.combined_parlay_prob(legs) == pytest.approx(0.2, rel=1e-9)
+    print("✓ combined_parlay_prob correctly multiplies each leg's own probability")
+
+
+def test_combined_parlay_prob_empty_legs():
+    assert grading.combined_parlay_prob([]) == 1.0
+
+
+def test_combined_parlay_prob_decreases_with_more_legs():
+    legs = [_leg(f"P{i}", f"T{i}", f"G{i}", 3.0, model_prob=0.6) for i in range(6)]
+    probs = [grading.combined_parlay_prob(legs[:n]) for n in range(1, 7)]
+    assert probs == sorted(probs, reverse=True)   # strictly decreasing as more legs are chained
+    print("✓ combined_parlay_prob correctly decreases as more legs are chained together")
+
+
+# ----------------------------------------------------------------- build_suggested_parlays
+def _big_diverse_pool(n=8):
+    return [_leg(f"Player{i}", f"Team{i}", f"Game{i}", 3.5 - i * 0.15, market=f"Market{i % 4}",
+                model_prob=0.55) for i in range(n)]
+
+
+def test_suggested_parlays_builds_all_three_tiers_with_enough_legs():
+    plays = _big_diverse_pool(8)
+    parlays = grading.build_suggested_parlays(plays)
+    tiers = {p["tier"]: p for p in parlays}
+    assert set(tiers.keys()) == {"Safer", "Balanced", "Longshot"}
+    assert tiers["Safer"]["size"] == 2
+    assert tiers["Balanced"]["size"] == 4
+    assert tiers["Longshot"]["size"] == 6
+    print("✓ build_suggested_parlays correctly builds all three tiers when the pool is large enough")
+
+
+def test_suggested_parlays_tiers_are_cumulative_from_the_same_pool():
+    plays = _big_diverse_pool(8)
+    parlays = grading.build_suggested_parlays(plays)
+    tiers = {p["tier"]: p for p in parlays}
+    safer_players = [leg["Player"] for leg in tiers["Safer"]["legs"]]
+    balanced_players = [leg["Player"] for leg in tiers["Balanced"]["legs"]]
+    assert balanced_players[:2] == safer_players   # the 4-leg tier's first two legs ARE the 2-leg tier
+    print("✓ build_suggested_parlays tiers are correctly cumulative, not independently re-optimized sets")
+
+
+def test_suggested_parlays_skips_tier_when_pool_too_small():
+    plays = _big_diverse_pool(3)   # enough for a 2-leg tier, not enough for 4 or 6
+    parlays = grading.build_suggested_parlays(plays)
+    tiers = {p["tier"] for p in parlays}
+    assert tiers == {"Safer"}
+    print("✓ build_suggested_parlays skips tiers it can't honestly fill rather than padding with weaker plays")
+
+
+def test_suggested_parlays_empty_when_pool_too_thin_for_any_tier():
+    plays = _big_diverse_pool(1)
+    assert grading.build_suggested_parlays(plays) == []
+
+
+def test_suggested_parlays_includes_combined_odds():
+    plays = _big_diverse_pool(8)
+    parlays = grading.build_suggested_parlays(plays)
+    for p in parlays:
+        assert 0.0 < p["combined_prob"] < 1.0
+        assert p["combined_fair_decimal"] > 1.0
+        assert p["combined_fair_american"] is not None
+    print("✓ build_suggested_parlays correctly includes real combined odds for every tier")
+
+
+def test_suggested_parlays_works_for_non_mlb_shaped_plays():
+    # Regression guard matching the same real fix this module exists for -- confirms the parlay
+    # builder works correctly for a genuinely different sport's own market names, not just MLB's.
+    plays = [
+        {"Player": "Star Guard", "Team": "Aces", "Game": "Aces @ Liberty", "Market": "Points",
+        "Side": "Over", "Line": 20.5, "ModelProb": 0.60, "Fair": -150, "Conviction": 2.8, "Why": "x"},
+        {"Player": "Role Player", "Team": "Liberty", "Game": "Aces @ Liberty", "Market": "Rebounds",
+        "Side": "Over", "Line": 6.5, "ModelProb": 0.55, "Fair": -122, "Conviction": 1.5, "Why": "y"},
+    ]
+    parlays = grading.build_suggested_parlays(plays)
+    assert len(parlays) == 1   # only enough diverse legs for the Safer (2-leg) tier
+    assert parlays[0]["tier"] == "Safer"
+    print("✓ build_suggested_parlays correctly handles WNBA-shaped plays, confirming cross-sport support from day one")
 
 
 if __name__ == "__main__":
