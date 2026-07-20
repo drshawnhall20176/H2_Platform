@@ -11,14 +11,14 @@ import pytest
 
 # ----------------------------------------------------------------- conviction_to_grade
 def test_conviction_to_grade_thresholds():
-    assert grading.conviction_to_grade(3.5) == {"letter": "A", "tier": "Top Lean", "conviction": 3.5}
-    assert grading.conviction_to_grade(3.0) == {"letter": "A", "tier": "Top Lean", "conviction": 3.0}
-    assert grading.conviction_to_grade(2.99) == {"letter": "B", "tier": "Strong Lean", "conviction": 2.99}
-    assert grading.conviction_to_grade(2.0) == {"letter": "B", "tier": "Strong Lean", "conviction": 2.0}
-    assert grading.conviction_to_grade(1.99) == {"letter": "C", "tier": "Lean", "conviction": 1.99}
-    assert grading.conviction_to_grade(1.5) == {"letter": "C", "tier": "Lean", "conviction": 1.5}
-    assert grading.conviction_to_grade(1.49) == {"letter": "D", "tier": "Watch", "conviction": 1.49}
-    assert grading.conviction_to_grade(1.2) == {"letter": "D", "tier": "Watch", "conviction": 1.2}
+    assert grading.conviction_to_grade(3.5) == {"letter": "A", "tier": "Top Lean", "conviction": 3.5, "rank_value": 3.5}
+    assert grading.conviction_to_grade(3.0) == {"letter": "A", "tier": "Top Lean", "conviction": 3.0, "rank_value": 3.0}
+    assert grading.conviction_to_grade(2.99) == {"letter": "B", "tier": "Strong Lean", "conviction": 2.99, "rank_value": 2.99}
+    assert grading.conviction_to_grade(2.0) == {"letter": "B", "tier": "Strong Lean", "conviction": 2.0, "rank_value": 2.0}
+    assert grading.conviction_to_grade(1.99) == {"letter": "C", "tier": "Lean", "conviction": 1.99, "rank_value": 1.99}
+    assert grading.conviction_to_grade(1.5) == {"letter": "C", "tier": "Lean", "conviction": 1.5, "rank_value": 1.5}
+    assert grading.conviction_to_grade(1.49) == {"letter": "D", "tier": "Watch", "conviction": 1.49, "rank_value": 1.49}
+    assert grading.conviction_to_grade(1.2) == {"letter": "D", "tier": "Watch", "conviction": 1.2, "rank_value": 1.2}
     print("✓ conviction_to_grade correctly applies threshold boundaries")
 
 
@@ -206,10 +206,79 @@ def test_conviction_to_grade_amplification_cap_trivial_edge_still_excluded():
     print("✓ conviction_to_grade's amplification cap still correctly excludes the original trivial-edge bug case")
 
 
+# ----------------------------------------------------------------- conviction_to_grade: rank_value
+def test_conviction_to_grade_rank_value_resolves_real_cross_market_inversion():
+    # THE exact real, confirmed problem this field exists to solve: sorting by raw Conviction
+    # alone can rank a lower-letter-grade play ABOVE a higher-letter-grade one, purely because
+    # different markets' raw numbers run at different scales. Confirmed directly: a genuinely
+    # great near-50%-reference play (raw 1.8, ceiling 2.0, real letter A) has a LOWER raw
+    # Conviction than a merely decent HR play (raw 2.5, ceiling 9.09, real letter B) -- sorting
+    # by raw Conviction inverts them; sorting by rank_value correctly does not.
+    a_grade_play = grading.conviction_to_grade(1.8, ceiling=2.0)
+    b_grade_play = grading.conviction_to_grade(2.5, ceiling=9.0909)
+    assert a_grade_play["letter"] == "A"
+    assert b_grade_play["letter"] == "B"
+    # The real, confirmed inversion in raw terms:
+    assert a_grade_play["conviction"] < b_grade_play["conviction"]
+    # rank_value correctly reverses this, matching the real letter grades:
+    assert a_grade_play["rank_value"] > b_grade_play["rank_value"]
+    print("✓ conviction_to_grade's rank_value correctly resolves the real cross-market ranking inversion raw Conviction alone produces")
+
+
+def test_conviction_to_grade_rank_value_equals_conviction_without_ceiling():
+    grade = grading.conviction_to_grade(2.4)
+    assert grade["rank_value"] == grade["conviction"] == 2.4
+
+
+# ----------------------------------------------------------------- rank_flat_plays
+def test_rank_flat_plays_by_rank_value_resolves_cross_market_inversion():
+    plays = [
+        {"Player": "A", "Conviction": 2.5, "_ceiling": 9.0909, "_grade": grading.conviction_to_grade(2.5, 9.0909)},
+        {"Player": "B", "Conviction": 1.8, "_ceiling": 2.0, "_grade": grading.conviction_to_grade(1.8, 2.0)},
+    ]
+    ranked = grading.rank_flat_plays(plays, key="rank_value")
+    assert ranked[0]["Player"] == "B"   # the real A-grade play ranks first, despite lower raw Conviction
+    assert ranked[0]["_rank"] == 1
+    assert ranked[1]["Player"] == "A"
+    assert ranked[1]["_rank"] == 2
+    print("✓ rank_flat_plays by rank_value correctly resolves the real cross-market inversion")
+
+
+def test_rank_flat_plays_by_model_prob():
+    plays = [
+        {"Player": "LowProb", "ModelProb": 0.30},
+        {"Player": "HighProb", "ModelProb": 0.70},
+        {"Player": "MidProb", "ModelProb": 0.50},
+    ]
+    ranked = grading.rank_flat_plays(plays, key="ModelProb")
+    assert [p["Player"] for p in ranked] == ["HighProb", "MidProb", "LowProb"]
+    assert [p["_rank"] for p in ranked] == [1, 2, 3]
+    print("✓ rank_flat_plays by ModelProb correctly orders by real probability of hitting")
+
+
+def test_rank_flat_plays_missing_grade_sorts_last_not_crash():
+    plays = [
+        {"Player": "Graded", "_grade": grading.conviction_to_grade(2.0)},
+        {"Player": "Ungraded"},   # no _grade at all
+    ]
+    ranked = grading.rank_flat_plays(plays, key="rank_value")
+    assert ranked[0]["Player"] == "Graded"
+    assert ranked[1]["Player"] == "Ungraded"
+    print("✓ rank_flat_plays handles a play missing _grade gracefully, sorting it last rather than crashing")
+
+
+def test_rank_flat_plays_does_not_mutate_input_list_order():
+    plays = [{"Player": "A", "ModelProb": 0.2}, {"Player": "B", "ModelProb": 0.8}]
+    grading.rank_flat_plays(plays, key="ModelProb")
+    assert plays[0]["Player"] == "A"   # original list order unchanged, only a new list returned
+    print("✓ rank_flat_plays returns a new, sorted list without reordering the caller's own list in place")
+
+
 # ----------------------------------------------------------------- organize_graded_picks
-def _pick(player, team, game, conviction, market="Batter HR"):
+def _pick(player, team, game, conviction, market="Batter HR", ceiling=None):
     return {"Player": player, "Team": team, "Game": game, "Market": market, "Side": "Over",
-           "Line": 0.5, "ModelProb": 0.3, "Fair": -100, "Conviction": conviction, "Why": "x"}
+           "Line": 0.5, "ModelProb": 0.3, "Fair": -100, "Conviction": conviction, "Why": "x",
+           "_ceiling": ceiling}
 
 
 def test_organize_graded_picks_groups_by_game_and_player():
@@ -268,7 +337,7 @@ def test_organize_graded_picks_each_play_carries_grade():
     plays = [_pick("A", "TB", "TB @ BOS", 3.2)]
     result = grading.organize_graded_picks(plays)
     play = result[0]["players"][0]["plays"][0]
-    assert play["_grade"] == {"letter": "A", "tier": "Top Lean", "conviction": 3.2}
+    assert play["_grade"] == {"letter": "A", "tier": "Top Lean", "conviction": 3.2, "rank_value": 3.2}
 
 
 def test_organize_graded_picks_multiple_plays_per_player_sorted():
@@ -281,6 +350,35 @@ def test_organize_graded_picks_multiple_plays_per_player_sorted():
     assert player_plays[0]["Market"] == "Batter HR"        # higher conviction first
     assert player_plays[1]["Market"] == "Batter Total Hits"
     print("✓ organize_graded_picks sorts a single player's own multiple plays by conviction too")
+
+
+def test_organize_graded_picks_sorts_by_rank_value_not_raw_conviction():
+    # THE exact real, confirmed cross-market inversion, now checked inside organize_graded_picks
+    # itself: a play with a genuinely LOWER raw Conviction but a HIGHER real letter grade (a
+    # near-50%-reference market with a compressed ceiling) must sort ABOVE a play with a higher
+    # raw Conviction but a LOWER real letter grade (HR, whose raw numbers run much bigger).
+    plays = [
+        _pick("Same Player", "T1", "G1", conviction=1.8, market="Points", ceiling=2.0),      # A
+        _pick("Same Player", "T1", "G1", conviction=2.5, market="Batter HR", ceiling=9.0909),  # B
+    ]
+    result = grading.organize_graded_picks(plays)
+    player_plays = result[0]["players"][0]["plays"]
+    assert player_plays[0]["Market"] == "Points"       # the real A-grade play, despite lower raw Conviction
+    assert player_plays[0]["_grade"]["letter"] == "A"
+    assert player_plays[1]["Market"] == "Batter HR"
+    assert player_plays[1]["_grade"]["letter"] == "B"
+    print("✓ organize_graded_picks correctly sorts by rank_value, resolving the real cross-market inversion raw Conviction alone would produce")
+
+
+def test_organize_graded_picks_game_order_uses_rank_value():
+    plays = [
+        _pick("Player A", "T1", "Game Alpha", conviction=1.8, market="Points", ceiling=2.0),      # A
+        _pick("Player B", "T2", "Game Beta", conviction=2.5, market="Batter HR", ceiling=9.0909),  # B
+    ]
+    result = grading.organize_graded_picks(plays)
+    assert result[0]["game"] == "Game Alpha"   # the game with the real A-grade play comes first
+    assert result[1]["game"] == "Game Beta"
+    print("✓ organize_graded_picks correctly orders GAMES by rank_value too, not just plays within one player")
 
 
 def test_organize_graded_picks_works_for_non_mlb_shaped_plays():
@@ -647,12 +745,12 @@ def test_combined_parlay_prob_decreases_with_more_legs():
     print("✓ combined_parlay_prob correctly decreases as more legs are chained together")
 
 
-# ----------------------------------------------------------------- basket_prob_at_least_one_hits
+# ----------------------------------------------------------------- basket_prob_at_least_one_wins
 def test_basket_prob_at_least_one_matches_hand_calculation():
     legs = [_leg("A", "T1", "G1", 3.0, model_prob=0.3), _leg("B", "T2", "G2", 2.5, model_prob=0.4)]
     # P(at least one) = 1 - (1-0.3)(1-0.4) = 1 - 0.7*0.6 = 1 - 0.42 = 0.58
-    assert grading.basket_prob_at_least_one_hits(legs) == pytest.approx(0.58, rel=1e-9)
-    print("✓ basket_prob_at_least_one_hits exactly matches the hand-calculated OR probability")
+    assert grading.basket_prob_at_least_one_wins(legs) == pytest.approx(0.58, rel=1e-9)
+    print("✓ basket_prob_at_least_one_wins exactly matches the hand-calculated OR probability")
 
 
 def test_basket_prob_at_least_one_increases_with_more_legs():
@@ -660,18 +758,18 @@ def test_basket_prob_at_least_one_increases_with_more_legs():
     # least one hits" MORE likely, not less -- the exact reason a basket of positions is a
     # fundamentally different, less punishing structure than a parlay chaining the same legs.
     legs = [_leg(f"P{i}", f"T{i}", f"G{i}", 2.0, model_prob=0.2) for i in range(6)]
-    probs = [grading.basket_prob_at_least_one_hits(legs[:n]) for n in range(1, 7)]
+    probs = [grading.basket_prob_at_least_one_wins(legs[:n]) for n in range(1, 7)]
     assert probs == sorted(probs)   # strictly INCREASING, the opposite of combined_parlay_prob
-    print("✓ basket_prob_at_least_one_hits correctly INCREASES as more independent positions are added, the opposite of parlay math")
+    print("✓ basket_prob_at_least_one_wins correctly INCREASES as more independent positions are added, the opposite of parlay math")
 
 
 def test_basket_prob_at_least_one_empty_legs():
-    assert grading.basket_prob_at_least_one_hits([]) == 0.0
+    assert grading.basket_prob_at_least_one_wins([]) == 0.0
 
 
 def test_basket_prob_at_least_one_single_leg_equals_its_own_prob():
     legs = [_leg("A", "T1", "G1", 2.5, model_prob=0.35)]
-    assert grading.basket_prob_at_least_one_hits(legs) == pytest.approx(0.35, rel=1e-9)
+    assert grading.basket_prob_at_least_one_wins(legs) == pytest.approx(0.35, rel=1e-9)
 
 
 # ----------------------------------------------------------------- build_speculative_basket
@@ -724,10 +822,10 @@ def test_speculative_basket_size_controls_leg_count():
 def test_speculative_basket_returns_real_summary_stats():
     plays = [_leg(f"P{i}", f"T{i}", f"G{i}", 2.0, model_prob=0.20, market=f"Market{i}") for i in range(5)]
     basket = grading.build_speculative_basket(plays, size=5)
-    assert "prob_at_least_one_hits" in basket
-    assert "expected_hits" in basket
-    assert 0.0 < basket["prob_at_least_one_hits"] < 1.0
-    assert basket["expected_hits"] == pytest.approx(1.0, abs=0.01)   # 5 legs * 0.20 each
+    assert "prob_at_least_one_wins" in basket
+    assert "expected_winners" in basket
+    assert 0.0 < basket["prob_at_least_one_wins"] < 1.0
+    assert basket["expected_winners"] == pytest.approx(1.0, abs=0.01)   # 5 legs * 0.20 each
     print("✓ build_speculative_basket correctly returns real, hand-verifiable summary stats")
 
 
@@ -861,31 +959,31 @@ def test_suggested_parlays_bold_longshot_never_all_d_grade():
     print("✓ build_suggested_parlays' Bold/Longshot tiers never include a D-grade leg, even when D-grade legs have the longest odds")
 
 
-# ----------------------------------------------------------------- basket_prob_at_least_one_hits
-def test_basket_prob_at_least_one_hits_hand_verified():
+# ----------------------------------------------------------------- basket_prob_at_least_one_wins
+def test_basket_prob_at_least_one_wins_hand_verified():
     # Hand-verified: P(none hit) = (1-0.3)*(1-0.5) = 0.35, P(at least one) = 1 - 0.35 = 0.65
     legs = [_leg("A", "T1", "G1", conviction=2.0, model_prob=0.3),
            _leg("B", "T2", "G2", conviction=2.0, model_prob=0.5)]
-    assert grading.basket_prob_at_least_one_hits(legs) == pytest.approx(0.65, abs=1e-9)
-    print("✓ basket_prob_at_least_one_hits matches a hand-verified exact value")
+    assert grading.basket_prob_at_least_one_wins(legs) == pytest.approx(0.65, abs=1e-9)
+    print("✓ basket_prob_at_least_one_wins matches a hand-verified exact value")
 
 
-def test_basket_prob_at_least_one_hits_empty_legs():
-    assert grading.basket_prob_at_least_one_hits([]) == 0.0
+def test_basket_prob_at_least_one_wins_empty_legs():
+    assert grading.basket_prob_at_least_one_wins([]) == 0.0
 
 
-def test_basket_prob_at_least_one_hits_single_leg_equals_its_own_prob():
+def test_basket_prob_at_least_one_wins_single_leg_equals_its_own_prob():
     legs = [_leg("A", "T1", "G1", conviction=2.0, model_prob=0.42)]
-    assert grading.basket_prob_at_least_one_hits(legs) == pytest.approx(0.42, abs=1e-9)
+    assert grading.basket_prob_at_least_one_wins(legs) == pytest.approx(0.42, abs=1e-9)
 
 
-def test_basket_prob_at_least_one_hits_increases_with_more_legs():
+def test_basket_prob_at_least_one_wins_increases_with_more_legs():
     # A real, honest property: adding more independent positions to the basket should only ever
     # RAISE (or hold, never lower) the chance that at least one hits.
     legs = [_leg(f"P{i}", f"T{i}", f"G{i}", conviction=2.0, model_prob=0.2) for i in range(6)]
-    probs = [grading.basket_prob_at_least_one_hits(legs[:n]) for n in range(1, 7)]
+    probs = [grading.basket_prob_at_least_one_wins(legs[:n]) for n in range(1, 7)]
     assert probs == sorted(probs)   # strictly non-decreasing as more legs are added
-    print("✓ basket_prob_at_least_one_hits correctly increases as more independent positions are added to the basket")
+    print("✓ basket_prob_at_least_one_wins correctly increases as more independent positions are added to the basket")
 
 
 # ----------------------------------------------------------------- build_speculative_basket
@@ -938,10 +1036,10 @@ def test_speculative_basket_size_controls_leg_count():
 def test_speculative_basket_stats_match_actual_selected_legs():
     plays = [_leg(f"P{i}", f"T{i}", f"G{i}", conviction=2.5, model_prob=0.25) for i in range(4)]
     basket = grading.build_speculative_basket(plays, size=4)
-    expected_expected_hits = sum(leg["ModelProb"] for leg in basket["legs"])
-    expected_at_least_one = grading.basket_prob_at_least_one_hits(basket["legs"])
-    assert basket["expected_hits"] == pytest.approx(round(expected_expected_hits, 2), abs=0.01)
-    assert basket["prob_at_least_one_hits"] == pytest.approx(expected_at_least_one, abs=0.001)
+    expected_winners_hand = sum(leg["ModelProb"] for leg in basket["legs"])
+    expected_at_least_one = grading.basket_prob_at_least_one_wins(basket["legs"])
+    assert basket["expected_winners"] == pytest.approx(round(expected_winners_hand, 2), abs=0.01)
+    assert basket["prob_at_least_one_wins"] == pytest.approx(expected_at_least_one, abs=0.001)
     print("✓ build_speculative_basket's summary stats are computed directly from the actual selected legs, not a separate, potentially-inconsistent calculation")
 
 

@@ -1306,6 +1306,8 @@ def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict]) -> List[D
                     ("Batter Triples", "Triple%", 0.5), ("Batter Walks", "Walk%", 0.5),
                     ("Batter Hits+Runs+RBIs", "HRR%", DEFAULT_LINES["Batter Hits+Runs+RBIs"])]
     for r in hitter_rows:
+        opp_era_raw = (r.get("_opp_stat") or {}).get("era")
+        opp_era_display = round(float(opp_era_raw), 2) if opp_era_raw not in (None, "") else None
         for market, col, line in batter_specs:
             p = r.get(col)
             if p is None:
@@ -1317,6 +1319,12 @@ def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict]) -> List[D
                 "Player": r["Hitter"], "PlayerId": r.get("_pid"), "Team": r["Team"], "Game": r["GameLabel"],
                 "Opp": r.get("Opp Pitcher"),
                 "Versus": r.get("Opp Pitcher"),
+                # The opposing starter's real ERA, straight from the same _opp_stat this whole
+                # matchup is already built from -- added directly on request, so a person doesn't
+                # have to separately cross-reference Pitching Lab to see who they're actually up
+                # against and how good/bad that pitcher really is. None (not 0.0) when unknown,
+                # so an absent ERA is never mistaken for a genuinely great one.
+                "OppERA": opp_era_display,
                 "Market": market, "Side": side, "Line": line,
                 "ModelProb": round(sp, 4), "Fair": prob_to_american(sp),
                 "Conviction": round(sp / ref_s, 2) if ref_s > 0 else 0.0,

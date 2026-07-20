@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 776/776 tests green)
+## What's in this checkpoint (all tested — 786/786 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -3723,6 +3723,130 @@ pattern shows up again on a genuinely different market or reference shape — th
 approach (does it span one game or many unrelated ones, and what's the actual raw conviction and
 ceiling behind the number) is what found all three, in order, and is the fastest path to the
 next one if it exists.
+
+### Speculative Basket: fixed a genuinely misleading label, flagged a real, unresolved data question (2026-07-19)
+Shawn pushed back hard on a real basket example — all 8 positions were New York Mets hitters,
+all "Batter Hits+Runs+RBIs Under 1.5," all A grade, with "Expected hits: 5.7" displayed above
+them. Two separate things came out of this, one fixed directly, one honestly flagged as
+unresolved.
+
+**Fixed: "Expected hits" and "P(at least one hits)" were genuinely misleading labels, not just
+awkward wording.** Both summed/derived from `ModelProb` — the probability of whichever side each
+leg favors, which could be Over or Under, on any market, not literally "hits" as a baseball
+stat. A basket full of Under bets on a non-hits combined market showing "Expected hits: 5.7"
+reads as "these players will get 5.7 real hits," which is backwards from what the number
+actually means: "5.7 of these 8 bets are expected to settle correctly." Renamed both the
+internal field names (`expected_hits` → `expected_winners`, `prob_at_least_one_hits` →
+`prob_at_least_one_wins`, plus the underlying `basket_prob_at_least_one_hits` function) and the
+displayed UI text consistently across `grading.py`, `views/19_Speculative_Basket.py`, and every
+test — not just the visible label, since a developer reading the code would hit the identical
+confusion the UI caused. Added an explicit caption stating directly that neither number is a
+baseball statistic.
+
+**Investigated, but honestly unresolved: why every Mets hitter showed the same strong "Under"
+signal in that specific game.** Checked the actual real-world matchup via live web search rather
+than assuming: Milwaukee's real probable starter for that game was Brandon Sproat, a 5.16-ERA
+pitcher — a BELOW-average matchup that, if anything, should have favored Mets hitters leaning
+Over, not Under. Confirmed the platform sources its probable-starter data directly from MLB's own
+API (`probablePitcher` field via the schedule endpoint hydrate), not a platform-side guess or
+heuristic — so if the wrong pitcher's stats were used, the most likely explanation is that MLB's
+own API had stale or since-superseded data at the exact moment the platform's data pull happened,
+not a bug in how the platform chooses who to use. This is NOT confirmed — the sandbox has no live
+access to see exactly what `_opp_stat` the platform actually pulled for this specific game at
+that moment, so this is a well-supported hypothesis, not a proven root cause. Flagged directly to
+Shawn rather than either dismissing the pattern or claiming a fix I couldn't verify.
+
+**0 new tests this turn for the rename** (a pure naming change with no logic difference — the
+existing, already-passing tests for both functions were updated in place to use the new names,
+not supplemented with new coverage, since nothing about the underlying behavior changed).
+776/776 total passing, same count as before this turn.
+
+### Opposing pitcher's real ERA now shown directly on every batter leg (2026-07-19)
+Shawn's follow-up question, in response to being asked to cross-check Pitching Lab manually:
+since that pitcher data is already captured, why not just show it directly here? A genuinely
+better fix than what was asked for last turn — instead of requiring a manual cross-check to
+diagnose a potential mismatched-pitcher issue, the actual matchup data should just be visible
+where the play already is.
+
+**Confirmed the data already existed, just wasn't surfaced**: `build_best_bets`'s batter play
+dict already carried `Opp` (the opposing starter's name, from `Opp Pitcher`), but never their
+ERA, even though `_opp_stat` (the same raw stat dict driving the whole matchup) was already
+sitting right there on the hitter row. Added `OppERA`, computed once per hitter row (not
+recomputed per market inside the inner loop) directly from `_opp_stat`, and refactored an
+initial inline-lambda version into a clean, pre-computed variable to match this codebase's
+established style. Returns `None`, never a fabricated `0.0`, when the real ERA isn't available —
+an absent number should never accidentally read as "a genuinely elite 0.00 ERA pitcher."
+
+**Surfaced directly on both Suggested Parlays and Speculative Basket**: each leg's caption now
+reads "vs [Pitcher Name] ([ERA] ERA)" alongside the game and reasoning text, using the exact same
+data already computed for Pitching Lab — no cross-referencing required, and no separate lookup
+needed to sanity-check whether the model's read on the opposing pitcher matches who's actually
+expected to start. This directly addresses last turn's real, unresolved question: if the platform
+had used the wrong pitcher's stats for a specific game, that mismatch would now be visible
+immediately, right on the leg, rather than requiring a person to manually check a different page
+and compare.
+
+**5 new tests**: `build_best_bets` confirmed to attach the real ERA from `_opp_stat` to every
+batter play; confirmed `OppERA` stays `None` (not fabricated) when the real ERA is genuinely
+unavailable. Plus a full, realistic end-to-end simulation reproducing the exact real scenario
+from the prior turn — Brandon Sproat's real 5.16 ERA, confirmed flowing all the way through the
+full pipeline to the final play dict, ready for direct display. 778/778 total passing.
+
+### Cross-page consistency, market filter parity, and ranking across Graded Picks/Suggested Parlays/Speculative Basket (2026-07-19)
+Shawn's core thesis: with the infrastructure already built, the real work now is making sure
+"intra-page functionality and predictions... agree within the model itself" — since that, not
+new features, is what actually builds subscriber confidence. This surfaced two real, confirmed
+bugs beyond what was asked for, both the same underlying problem in different places.
+
+**`rank_value` exposed on `conviction_to_grade`'s return dict** — the ceiling-normalized number
+already computed internally to pick the letter grade, now returned directly so any caller
+ranking plays across multiple markets has a number that won't invert against the letter grades
+themselves. Confirmed directly: a raw 2.5x on HR (ceiling ~9.09, only a "B") has a HIGHER raw
+Conviction than a raw 1.8x on a near-50%-reference market (ceiling ~2.0, a genuine "A") — sorting
+by raw Conviction alone ranks the worse play first.
+
+**Found and fixed two real, live instances of exactly that inversion, neither previously known**:
+(1) Command Center's "Tonight's top leans" was sorting by raw Conviction directly — could show a
+B-grade play above an A-grade one, disagreeing with what Graded Picks itself would say about the
+same plays. Fixed to grade every play and sort/filter by `rank_value`, with the letter grade now
+shown directly in the table. (2) `organize_graded_picks` itself — the core function behind
+Graded Picks — sorted games, players within a game, AND each player's own multiple plays by raw
+Conviction at all three levels. This was the same bug living inside the letter-grade page's own
+logic. Fixed all three levels to sort by `rank_value` instead.
+
+**Market-selection multiselect added to Graded Picks**, matching Suggested Parlays/Speculative
+Basket exactly, closing a real functional gap between the three pages that draw from the same
+graded board.
+
+**`grading.rank_flat_plays` built as shared, testable ranking logic**, used with a real,
+deliberate difference in key depending on what each page is actually for: Graded Picks ranks by
+`rank_value` (agrees with its own letter grades — the right choice, since a rank that disagreed
+would reintroduce the same inversion just fixed above), Suggested Parlays and Speculative Basket
+rank by `ModelProb` (real probability of hitting — the right choice, since those pages are
+explicitly framed around "which is more likely to actually hit," a different question than "which
+has the better edge"). Wired into all three pages: an explicit "#1, #2, #3..." prefix on each
+play/leg. On Graded Picks specifically, ranking is scoped ONLY to when a specific game is
+selected (not "All games in this slot") — a deliberate choice matching the page's own reason for
+being organized game-by-game in the first place (a flat, slate-wide rank would bury most of the
+board behind whichever 2-3 games look juiciest, exactly what game-by-game organization exists to
+avoid; ranking within one already-selected game doesn't have that problem).
+
+**11 new tests**: `rank_value` confirmed to resolve a real cross-market inversion directly (plus
+a control confirming it equals raw Conviction when no ceiling is passed); `organize_graded_picks`
+confirmed to sort by `rank_value` at both the per-player-plays level and the game-order level
+(with a real, self-caught fixture bug along the way — an early version of the player-plays test
+used two different player names when it needed one player's two plays, caught via an IndexError
+before trusting the result); `rank_flat_plays` confirmed for both key modes, a missing-grade
+edge case sorting last rather than crashing, and confirmed to return a new sorted list without
+reordering the caller's own list in place. Plus a full, realistic end-to-end simulation across
+all three pages confirming ranking works correctly end to end — including a second real,
+self-caught mistake in the verification script itself (assumed a basket's leg list was already
+in descending-ModelProb order, when it's actually in the "payout" objective's own ascending
+order; `rank_flat_plays` correctly annotates `_rank` without reordering the list, caught and
+fixed in the verification logic, not the actual code). 786/786 total passing.
+
+**Still pending from this same request, not yet started**: TTO display and the bullpen-blend
+toggle across all three pages.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

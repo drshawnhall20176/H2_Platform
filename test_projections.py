@@ -1357,6 +1357,36 @@ def test_build_best_bets_attaches_correct_ceiling():
     print("✓ build_best_bets correctly attaches each play's own real theoretical ceiling")
 
 
+# ----------------------------------------------------------------- build_best_bets: OppERA
+def test_build_best_bets_attaches_opp_era():
+    hitters = [
+        dict(Hitter="Slugger", Team="A", GameLabel="A @ B", Hand="L",
+            **{"Opp Hand": "R", "Opp Pitcher": "Some Starter"}, Advantage="Advantage",
+            _weather_hr=1.0, Due=0.0, _opp_stat={"era": 5.16},
+            **{"HR%": 0.15, "TB1.5%": 0.40, "Hit%": 0.65, "SO Prob": 0.50,
+              "Runs%": 0.42, "RBI%": 0.40, "SB%": 0.08}),
+    ]
+    plays = P.build_best_bets(hitters, [])
+    for p in plays:
+        assert p["OppERA"] == 5.16
+        assert p["Opp"] == "Some Starter"
+    print("✓ build_best_bets correctly attaches the real opposing starter's ERA to every batter play, straight from _opp_stat")
+
+
+def test_build_best_bets_opp_era_none_when_unavailable():
+    hitters = [
+        dict(Hitter="Slugger", Team="A", GameLabel="A @ B", Hand="L",
+            **{"Opp Hand": "R", "Opp Pitcher": "Unknown Starter"}, Advantage="Advantage",
+            _weather_hr=1.0, Due=0.0, _opp_stat={},   # no era field at all
+            **{"HR%": 0.15, "TB1.5%": 0.40, "Hit%": 0.65, "SO Prob": 0.50,
+              "Runs%": 0.42, "RBI%": 0.40, "SB%": 0.08}),
+    ]
+    plays = P.build_best_bets(hitters, [])
+    for p in plays:
+        assert p["OppERA"] is None   # never fabricated as 0.0, which would misleadingly look elite
+    print("✓ build_best_bets correctly leaves OppERA as None (not a fabricated 0.0) when the real ERA isn't available")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

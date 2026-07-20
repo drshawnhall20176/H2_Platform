@@ -109,7 +109,16 @@ def conviction_to_grade(conviction: Optional[float], ceiling: Optional[float] = 
 
     Returns None for anything below the lowest real threshold (1.2x on the NORMALIZED value,
     matching Best Bets' own established "worth showing at all" floor) -- a play that isn't
-    notable shouldn't get a grade that implies it is."""
+    notable shouldn't get a grade that implies it is.
+
+    The returned dict also includes "rank_value" -- the internal, ceiling-normalized number used
+    to pick the letter, exposed directly (not just used internally) for a real, confirmed reason:
+    a caller sorting plays by raw Conviction alone (e.g. an "across every market" leaderboard)
+    can produce a genuine INVERSION against this function's own letter grades -- a raw 2.5x on
+    HR (ceiling ~9.09, only a "B") can outrank a raw 1.8x on a near-50%-reference market (ceiling
+    ~2.0, a genuine "A") purely because HR's raw numbers run bigger, even though the SECOND play
+    is the actually stronger one by this function's own grading logic. Any ranking across
+    multiple markets should sort by "rank_value", never by the bare Conviction number alone."""
     if conviction is None:
         return None
     graded_value = conviction
@@ -143,8 +152,40 @@ def conviction_to_grade(conviction: Optional[float], ceiling: Optional[float] = 
         graded_value = 1.0 + (conviction - 1.0) * amplification
     for threshold, letter, tier in GRADE_THRESHOLDS:
         if graded_value >= threshold:
-            return {"letter": letter, "tier": tier, "conviction": conviction}
+            return {"letter": letter, "tier": tier, "conviction": conviction,
+                    "rank_value": round(graded_value, 4)}
     return None
+
+
+def rank_flat_plays(plays: List[Dict], key: str = "rank_value") -> List[Dict]:
+    """Attach an explicit, 1-indexed "_rank" to a flat list of plays, sorted by the given key --
+    shared, testable logic behind the ranking shown on Graded Picks (once a specific game is
+    selected), Suggested Parlays (within each tier), and Speculative Basket, added directly on
+    request: multiple plays can share the same letter grade while still having meaningfully
+    different real numbers behind them, and an explicit rank helps someone pick among several
+    same-grade options rather than treating them as interchangeable.
+
+    key: "rank_value" (default) reads each play's own "_grade" dict, matching the SAME ceiling-
+    normalized ordering that determines the letter grades themselves -- the right choice for
+    Graded Picks specifically, since that page's entire identity IS its letter grades, and a
+    ranking that disagreed with them would reintroduce the exact cross-market inversion problem
+    just fixed in organize_graded_picks and Command Center. "ModelProb" reads the play's own raw
+    probability directly instead -- the right choice for Suggested Parlays/Speculative Basket,
+    which are explicitly framed around "which of these is more likely to actually hit," a
+    genuinely different question than "which has the better edge relative to typical."
+
+    Plays missing the requested key (e.g. no "_grade" attached, for the "rank_value" case) sort
+    last, never crash -- a defensive floor, not a claim that they're actually the weakest."""
+    def _sort_key(p: Dict) -> float:
+        if key == "rank_value":
+            grade = p.get("_grade")
+            return grade["rank_value"] if grade else float("-inf")
+        return p.get(key, float("-inf"))
+
+    ranked = sorted(plays, key=_sort_key, reverse=True)
+    for i, p in enumerate(ranked, start=1):
+        p["_rank"] = i
+    return ranked
 
 
 def organize_graded_picks(plays: List[Dict]) -> List[Dict[str, Any]]:
@@ -159,9 +200,16 @@ def organize_graded_picks(plays: List[Dict]) -> List[Dict[str, Any]]:
     different game. Every game with at least one graded play gets its own section here; nothing
     is silently dropped for not being in a top-N cut.
 
-    SORT ORDER, at both levels: games are ordered by their own single BEST play's Conviction
-    (most interesting game first), and players within a game are ordered by their own best play's
-    Conviction the same way -- "most interesting first," not alphabetical or arbitrary.
+    SORT ORDER, at all three levels -- games, players within a game, and each player's own
+    plays -- is by rank_value (the ceiling-normalized number conviction_to_grade already exposes
+    for exactly this reason), NOT raw Conviction. A REAL, CONFIRMED FIX, not the original design:
+    sorting by raw Conviction can genuinely invert against this function's own letter grades --
+    a raw 2.5x on HR (ceiling ~9.09, a "B") can rank above a raw 1.8x on a near-50%-reference
+    market (ceiling ~2.0, a genuine "A") purely because HR's own raw numbers run bigger, even
+    though the SECOND play is the stronger one by conviction_to_grade's own logic. This page's
+    entire identity is its letter grades, so "most interesting first" has to mean "highest real
+    grade first," not "biggest raw number from whichever market happens to have the most
+    headroom first."
 
     SPORT-AGNOSTIC BY DESIGN, same reasoning as conviction_to_grade: operates purely on each
     play's own Game/Player/Team/Conviction fields, present in the same shape regardless of which
@@ -184,7 +232,7 @@ def organize_graded_picks(plays: List[Dict]) -> List[Dict[str, Any]]:
     for pl in graded:
         games.setdefault(pl["Game"], []).append(pl)
 
-    game_order = sorted(games.keys(), key=lambda g: max(p["Conviction"] for p in games[g]), reverse=True)
+    game_order = sorted(games.keys(), key=lambda g: max(p["_grade"]["rank_value"] for p in games[g]), reverse=True)
 
     out = []
     for game_label in game_order:
@@ -193,11 +241,11 @@ def organize_graded_picks(plays: List[Dict]) -> List[Dict[str, Any]]:
         for pl in game_plays:
             by_player.setdefault(pl["Player"], []).append(pl)
         player_order = sorted(by_player.keys(),
-                              key=lambda pn: max(p["Conviction"] for p in by_player[pn]),
+                              key=lambda pn: max(p["_grade"]["rank_value"] for p in by_player[pn]),
                               reverse=True)
         players = []
         for player in player_order:
-            player_plays = sorted(by_player[player], key=lambda p: p["Conviction"], reverse=True)
+            player_plays = sorted(by_player[player], key=lambda p: p["_grade"]["rank_value"], reverse=True)
             players.append({"player": player, "team": player_plays[0].get("Team", ""),
                            "plays": player_plays})
         out.append({"game": game_label, "players": players})
@@ -447,7 +495,7 @@ def combined_parlay_prob(legs: List[Dict]) -> float:
 # Longshot tiers (the "payout" objective from _tier_sort_key, ranking by lowest real probability
 # among plays that still clear a real grade floor) -- same real, validated picks Bold/Longshot
 # already surface, just presented as their own independent things instead of chained together.
-def basket_prob_at_least_one_hits(legs: List[Dict]) -> float:
+def basket_prob_at_least_one_wins(legs: List[Dict]) -> float:
     """P(at least one leg hits), ASSUMING INDEPENDENCE -- the actual "basket" analog of a
     parlay's combined_parlay_prob, but for the opposite question: not "did everything hit"
     (an AND of every leg), but "did ANYTHING hit" (an OR across every leg) -- the real question
@@ -476,18 +524,23 @@ def build_speculative_basket(plays: List[Dict], size: int = 8, min_grade_letter:
     size: how many independent positions to include -- a real, user-controlled choice (a trader
     decides how many positions to hold), not a fixed tier the way parlay sizes are.
 
-    Returns {"legs": [play, ...], "prob_at_least_one_hits": float, "expected_hits": float}.
-    "expected_hits" is the real, honest sum of each leg's own probability (linearity of
+    Returns {"legs": [play, ...], "prob_at_least_one_wins": float, "expected_winners": float}.
+    "expected_winners" is the real, honest sum of each leg's own probability (linearity of
     expectation holds regardless of correlation) -- "on average, about this many of these
-    positions would hit," a real, useful basket-level number distinct from "at least one."""
+    positions would settle correctly," a real, useful basket-level number distinct from "at
+    least one." Deliberately NOT named "expected_hits" (an earlier version was) -- that name
+    reads as "expected baseball hits," which is actively wrong and confusing when the basket
+    contains Under legs, non-hits markets like Runs/RBI/H-R-R, or any mix of sides: this number
+    is "how many of these bets are expected to WIN," regardless of which side each one favors,
+    not a baseball statistic."""
     key_fn = _tier_sort_key("payout")
     pool = build_parlay_leg_pool(plays, max_per_game, max_per_market, min_pool_size=size,
                                  sort_key=key_fn, min_grade_letter=min_grade_letter)
     legs = pool[:size]
     return {
         "legs": legs,
-        "prob_at_least_one_hits": round(basket_prob_at_least_one_hits(legs), 4),
-        "expected_hits": round(sum(leg.get("ModelProb", 0.0) for leg in legs), 2),
+        "prob_at_least_one_wins": round(basket_prob_at_least_one_wins(legs), 4),
+        "expected_winners": round(sum(leg.get("ModelProb", 0.0) for leg in legs), 2),
     }
 
 
