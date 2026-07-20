@@ -482,13 +482,13 @@ with c2:
     hs = hitter_splits.get(hitter_hid, {})
     if hs:
         hrows = pd.DataFrame([{
-            "Family": fam, "Pitches": v["pitches"], "Whiff%": v["whiff"],
-            "Contact%": v.get("contact"), "Exit Velo": v.get("exit_velo"),
+            "Family": fam, "Pitches": v["pitches"], "Zone%": v.get("zone_pct"),
+            "Whiff%": v["whiff"], "Contact%": v.get("contact"), "Exit Velo": v.get("exit_velo"),
             "SLG": v["slg"], "xwOBA": v["xwoba"],
         } for fam, v in hs.items()])
-        for c in ["Whiff%", "Contact%", "Exit Velo", "SLG", "xwOBA"]:
+        for c in ["Zone%", "Whiff%", "Contact%", "Exit Velo", "SLG", "xwOBA"]:
             hrows[c] = pd.to_numeric(hrows[c], errors="coerce")
-        st.dataframe(hrows.style.format({"Whiff%": "{:.0%}", "Contact%": "{:.0%}",
+        st.dataframe(hrows.style.format({"Zone%": "{:.0%}", "Whiff%": "{:.0%}", "Contact%": "{:.0%}",
                                          "Exit Velo": "{:.1f}", "SLG": "{:.2f}", "xwOBA": "{:.2f}"},
                                         na_rep="—")
                      .theme_gradient(cmap="RdYlGn", subset=["SLG", "xwOBA"])
@@ -497,7 +497,12 @@ with c2:
                      # scouts the PITCHER's attack plan, so Whiff% is already colored "high =
                      # pitcher-favorable" (a real hitter weakness). Contact%/Exit Velo are the
                      # hitter's own quality-of-contact complement -- low is the same
-                     # pitcher-favorable direction (weak or no contact), so these reverse.
+                     # pitcher-favorable direction (weak or no contact), so these reverse. Zone%
+                     # left uncolored, same reasoning as the pitcher's own arsenal zone%: a high
+                     # zone rate against this hitter can mean pitchers are confident challenging
+                     # him (fine, if he doesn't punish it) or that they've been careless (bad, if
+                     # he does) -- the direction depends on what SLG/xwOBA/Contact% on this same
+                     # row already show, not something zone% communicates on its own.
                      .theme_gradient(cmap="RdYlGn_r", subset=["Contact%", "Exit Velo"]),
                      use_container_width=True, hide_index=True)
     else:
@@ -513,12 +518,12 @@ ht = hitter_types.get(hitter_hid, [])
 if ht:
     htype = pd.DataFrame([{
         "Pitch": r["pitch_name"], "Family": r["family"], "Pitches": r["pitches"],
-        "Whiff%": r["whiff"], "Contact%": r.get("contact"), "Exit Velo": r.get("exit_velo"),
-        "SLG": r["slg"], "xwOBA": r["xwoba"],
+        "Zone%": r.get("zone_pct"), "Whiff%": r["whiff"], "Contact%": r.get("contact"),
+        "Exit Velo": r.get("exit_velo"), "SLG": r["slg"], "xwOBA": r["xwoba"],
     } for r in ht])
-    for c in ["Whiff%", "Contact%", "Exit Velo", "SLG", "xwOBA"]:
+    for c in ["Zone%", "Whiff%", "Contact%", "Exit Velo", "SLG", "xwOBA"]:
         htype[c] = pd.to_numeric(htype[c], errors="coerce")
-    st.dataframe(htype.style.format({"Whiff%": "{:.0%}", "Contact%": "{:.0%}",
+    st.dataframe(htype.style.format({"Zone%": "{:.0%}", "Whiff%": "{:.0%}", "Contact%": "{:.0%}",
                                      "Exit Velo": "{:.1f}", "SLG": "{:.2f}", "xwOBA": "{:.2f}"},
                                     na_rep="—")
                  .theme_gradient(cmap="RdYlGn", subset=["Whiff%"])
@@ -527,7 +532,10 @@ if ht:
                  use_container_width=True, hide_index=True)
     st.caption("Green = the hitter whiffs on it, or makes weak/no contact (good for the pitcher) "
               "— Contact%/Exit Velo are reversed from Whiff% since low is the same "
-              "pitcher-favorable direction. Red = damage the hitter does (SLG / xwOBA against). "
+              "pitcher-favorable direction. Zone% is left uncolored — a high rate against this "
+              "hitter can mean pitchers are confidently challenging him (fine, if he doesn't "
+              "punish it) or being careless (bad, if he does), a direction Contact%/SLG/xwOBA on "
+              "this same row already show. Red = damage the hitter does (SLG / xwOBA against). "
               "Sorted by pitches seen.")
 else:
     st.caption("No by-pitch-type data cached for this hitter yet — the nightly refresh needs enough "
