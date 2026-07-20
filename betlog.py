@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS bets (
     slate_date TEXT,
     game       TEXT,
     player     TEXT,
+    player_id  INTEGER,
     market     TEXT,
     side       TEXT,
     line       REAL,
@@ -49,6 +50,17 @@ CREATE TABLE IF NOT EXISTS bets (
     trader     TEXT
 );
 """
+# player_id: added directly on request, for automated result settlement -- retro.py's existing,
+# already-tested grade_play/get_player_results (the same machinery Retrospective/Media Room/
+# Podcast Studio already use to grade the model's own picks against real results) matches by
+# numeric player ID, not name, since name matching is genuinely fragile (accents, suffixes,
+# nicknames, two players sharing a surname). A bet logged with only a text player name can't be
+# reliably auto-matched to its real result; one logged with player_id can. Populated
+# automatically by quick_log.py (every play it logs already carries PlayerId from build_best_
+# bets), optional everywhere else (older bets, or ones logged manually via the Bet Log page
+# itself, simply won't auto-settle until this is backfilled or entered by hand) -- same
+# gradual-rollout posture as "trader" below, not a breaking requirement.
+#
 # trader: a real, deliberate first step toward future multi-user support, not multi-user support
 # itself — there's no login system asking "who are you" yet (see sports.require_trading_access,
 # a single shared password, not per-person identity), so nothing currently POPULATES this
@@ -57,7 +69,7 @@ CREATE TABLE IF NOT EXISTS bets (
 # meaningfully fills it in yet. Optional on every call (add_bet/update_bet), same as every other
 # field here.
 
-_FIELDS = ["ts_placed", "slate_date", "game", "player", "market", "side", "line",
+_FIELDS = ["ts_placed", "slate_date", "game", "player", "player_id", "market", "side", "line",
            "entry_odds", "model_prob", "stake", "book", "close_odds", "result", "notes",
            "ticket", "sport", "trader"]
  
@@ -104,6 +116,8 @@ def _sqlite_conn(db_path: str = DB_PATH):
             con.execute("ALTER TABLE bets ADD COLUMN sport TEXT")
         if "trader" not in cols:            # migrate DBs that predate multi-user support
             con.execute("ALTER TABLE bets ADD COLUMN trader TEXT")
+        if "player_id" not in cols:         # migrate DBs that predate automated result settlement
+            con.execute("ALTER TABLE bets ADD COLUMN player_id INTEGER")
         yield con
         con.commit()
     finally:
@@ -141,12 +155,13 @@ _PG_SCHEMA = """
 CREATE TABLE IF NOT EXISTS bets (
     id BIGSERIAL PRIMARY KEY,
     ts_placed  TEXT NOT NULL,
-    slate_date TEXT, game TEXT, player TEXT, market TEXT, side TEXT,
+    slate_date TEXT, game TEXT, player TEXT, player_id INTEGER, market TEXT, side TEXT,
     line REAL, entry_odds INTEGER, model_prob REAL, stake REAL, book TEXT,
     close_odds INTEGER, result TEXT, notes TEXT, ticket TEXT, sport TEXT, trader TEXT
 );
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS sport TEXT;
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS trader TEXT;
+ALTER TABLE bets ADD COLUMN IF NOT EXISTS player_id INTEGER;
 """
  
  

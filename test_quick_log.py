@@ -35,9 +35,9 @@ def test_stake_quick_picks_no_duplicates():
 
 
 def _play(player="Ohtani", market="Batter HR", side="Over", line=0.5, fair=-150,
-         model_prob=0.60, game="LAD @ SF"):
+         model_prob=0.60, game="LAD @ SF", player_id=None):
     return {"Player": player, "Team": "LAD", "Game": game, "Market": market, "Side": side,
-           "Line": line, "ModelProb": model_prob, "Fair": fair, "Why": "x"}
+           "Line": line, "ModelProb": model_prob, "Fair": fair, "Why": "x", "PlayerId": player_id}
 
 
 # ----------------------------------------------------------------- bet_log_fields_from_play
@@ -89,12 +89,28 @@ def test_bet_log_fields_from_play_entry_odds_is_the_model_fair_price():
     print("✓ bet_log_fields_from_play correctly uses the model's own Fair price as entry_odds")
 
 
+def test_bet_log_fields_from_play_maps_player_id():
+    # Added directly on request, for automated result settlement -- confirms the play's own
+    # PlayerId (set on every play by build_best_bets) flows through correctly.
+    play = _play(player_id=660271)
+    fields = Q.bet_log_fields_from_play(play, "2026-07-20", "MLB")
+    assert fields["player_id"] == 660271
+    print("✓ bet_log_fields_from_play correctly maps the play's own PlayerId")
+
+
+def test_bet_log_fields_from_play_player_id_none_when_absent():
+    play = _play()   # player_id defaults to None in the _play fixture
+    fields = Q.bet_log_fields_from_play(play, "2026-07-20", "MLB")
+    assert fields["player_id"] is None
+    print("✓ bet_log_fields_from_play correctly leaves player_id as None when the play has none, not fabricated")
+
+
 def test_bet_log_fields_from_play_only_real_betlog_fields():
     # Confirms every key returned is a real, valid betlog.py field, not a typo or extra key that
     # would silently be dropped (or worse, rejected) by add_bet.
-    real_betlog_fields = {"ts_placed", "slate_date", "game", "player", "market", "side", "line",
-                          "entry_odds", "model_prob", "stake", "book", "close_odds", "result",
-                          "notes", "ticket", "sport", "trader"}
+    real_betlog_fields = {"ts_placed", "slate_date", "game", "player", "player_id", "market",
+                          "side", "line", "entry_odds", "model_prob", "stake", "book",
+                          "close_odds", "result", "notes", "ticket", "sport", "trader"}
     fields = Q.bet_log_fields_from_play(_play(), "2026-07-20", "MLB")
     assert set(fields.keys()) <= real_betlog_fields
     print("✓ bet_log_fields_from_play returns only real, valid betlog.py field names")

@@ -52,6 +52,63 @@ def test_trader_field_is_optional():
         print("✓ trader field is genuinely optional, defaulting to None when never specified")
 
 
+def test_player_id_field():
+    # Added directly on request, for automated result settlement -- retro.py's existing,
+    # already-tested grade_play/get_player_results match by numeric player ID, not name.
+    # Confirms it round-trips correctly through the real add/list/update flow.
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "bets.db")
+        bid = B.add_bet(db, player="Ohtani", player_id=660271, game="LAD @ SF", market="Batter HR",
+                        side="Over", line=0.5, entry_odds=350, stake=5.0)
+        bet = B.list_bets(db)[0]
+        assert bet["player_id"] == 660271
+        B.update_bet(bid, db, player_id=605141)
+        assert B.list_bets(db)[0]["player_id"] == 605141
+        print("✓ player_id field round-trips correctly through add_bet/list_bets/update_bet")
+
+
+def test_player_id_field_is_optional():
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "bets.db")
+        # No player_id specified at all -- must not raise, must not silently break existing
+        # callers (older manually-logged bets never had this field at all).
+        bid = B.add_bet(db, player="Judge", game="NYY @ BOS", market="Batter HR",
+                        side="Over", line=0.5, entry_odds=280, stake=5.0)
+        assert B.list_bets(db)[0]["player_id"] is None
+        print("✓ player_id field is genuinely optional, defaulting to None when never specified")
+
+
+def test_player_id_migrates_existing_database():
+    # A REAL, CONFIRMED regression guard: a database created BEFORE player_id existed (simulated
+    # here by creating the table with the OLD schema directly, bypassing add_bet/_sqlite_conn's
+    # own migration check) must still work correctly once opened by the current code -- the
+    # migration path (ALTER TABLE bets ADD COLUMN player_id) must actually run, not just exist
+    # in the source.
+    import sqlite3
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "bets.db")
+        os.makedirs(os.path.dirname(db), exist_ok=True)
+        con = sqlite3.connect(db)
+        con.execute("""CREATE TABLE bets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, ts_placed TEXT NOT NULL, slate_date TEXT,
+            game TEXT, player TEXT, market TEXT, side TEXT, line REAL, entry_odds INTEGER,
+            model_prob REAL, stake REAL, book TEXT, close_odds INTEGER, result TEXT,
+            notes TEXT, ticket TEXT, sport TEXT, trader TEXT)""")   # the OLD schema, no player_id
+        con.execute("INSERT INTO bets (ts_placed, player, market) VALUES ('2026-01-01', 'Old Bet', 'Batter HR')")
+        con.commit()
+        con.close()
+
+        # Now use the REAL add_bet/list_bets path against this pre-existing, old-schema database
+        bid = B.add_bet(db, player="New Bet", player_id=12345, market="Batter HR")
+        bets = B.list_bets(db)
+        assert len(bets) == 2
+        new_bet = next(b for b in bets if b["player"] == "New Bet")
+        old_bet = next(b for b in bets if b["player"] == "Old Bet")
+        assert new_bet["player_id"] == 12345
+        assert old_bet["player_id"] is None   # pre-existing row, column simply absent -> None
+        print("✓ player_id correctly migrates onto a real, pre-existing database created before this column existed")
+
+
 def test_clv_pct():
     assert B.clv_pct(120, 100) == 10.0       # +120 vs +100 close -> beat by 10%
     assert B.clv_pct(-150, -150) == 0.0      # flat

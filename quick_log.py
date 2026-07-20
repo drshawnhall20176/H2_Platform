@@ -49,11 +49,18 @@ def bet_log_fields_from_play(play: Dict, date_str: str, sport_key: str,
     (see this module's own docstring for why that distinction matters). model_prob and line
     default to 0.0 rather than raising if genuinely absent, since a play missing one of these
     fields should still be loggable (a person can fill in the gap in Bet Log itself) rather than
-    crash the whole logging flow over one incomplete field."""
+    crash the whole logging flow over one incomplete field.
+
+    player_id comes straight from the play's own "PlayerId" (set on every play by build_best_
+    bets, present all the way through every downstream function in grading.py) -- this is what
+    lets a logged bet be automatically settled later: retro.py's existing, already-tested grade_
+    play/get_player_results match by numeric player ID, not by name, since name matching alone
+    is genuinely fragile."""
     return {
         "slate_date": date_str,
         "game": play.get("Game"),
         "player": play.get("Player"),
+        "player_id": play.get("PlayerId"),
         "market": play.get("Market"),
         "side": play.get("Side"),
         "line": float(play.get("Line") or 0.0),

@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 815/815 tests green)
+## What's in this checkpoint (all tested — 831/831 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -4049,6 +4049,86 @@ end-to-end simulation across four games — one chained ticket, `combined_prob` 
 against `math.prod` of the real per-leg probabilities, `combined_fair_american` computed
 correctly, directly matching the real boost slip's own combined-ticket structure. 815/815 total
 passing.
+
+### Automated result settlement, mirroring the existing CLV automation exactly (2026-07-20)
+Shawn asked whether bet results could be automated the same way closing lines already are — a
+30-minute cache/timer that keeps CLV current without manual entry.
+
+**Investigated the real, existing pattern before building anything**: `capture_closing_lines.py`
+isn't a Streamlit cache decorator — it's a standalone script woken by a GitHub Actions cron
+schedule (`capture-closing-lines.yml`, roughly every 30 minutes through the evening), which
+writes directly to the database the app reads from. That's the actual architecture to mirror,
+not a guess at one.
+
+**Found that most of the hard part already existed and was already tested**: `mlb_engine.
+get_player_results` (and every other sport's own version) already pulls real, final per-player
+box score actuals, already used by Retrospective/Media Room/Podcast Studio to grade the model's
+own picks against reality. `retro.py`'s `grade_play`/`MARKET_STAT` already implement the exact
+Over/Under win-determination logic, across every market on every sport. Settlement didn't need
+new logic — it needed a runner that calls the existing, already-shipped machinery on a schedule,
+the same way `capture_closing_lines.py` calls existing odds-matching machinery.
+
+**One real gap found and fixed first**: `retro.grade_play`'s matching is keyed by numeric player
+ID, but Bet Log's schema had no `player_id` column at all, only a text name — and name-only
+matching is genuinely fragile (accents, suffixes, nicknames, two players sharing a surname).
+Added `player_id` to both SQLite and Postgres schemas with real migration logic for existing
+databases, tested directly against an actual pre-existing old-schema database (not just a fresh
+one) to confirm the migration genuinely runs, not just exists in source. `quick_log.py` now
+populates it automatically on every bet it logs, since every play it works from already carries
+`PlayerId` — confirmed this flows through the full pipeline (build_best_bets through every
+downstream grading.py function) before relying on it.
+
+**`settle_results.py` built as a new runner, structured to mirror `capture_closing_lines.py`
+directly** — reuses `retro.grade_play`/`MARKET_STAT` rather than reimplementing win/loss logic,
+groups open bets by slate date (one `get_player_results` call per real date present, not one per
+bet), and only ever settles "win"/"loss", never "push" — a stated, honest limitation, since
+`grade_play`'s own design (built for .5 lines, which virtually every market here uses) can't
+push, and a whole-number-line edge case would incorrectly resolve as a loss for both sides if it
+ever occurred.
+
+**A deliberate, stated safety boundary, not an oversight**: a bet without `player_id` is skipped,
+never guessed at by name — a wrong automated settlement would silently corrupt a real trade
+record, which is worse than no automation at all. Older bets, or anything logged manually
+through the Bet Log page itself, stay available for manual settlement; new bets close this gap
+on their own since `quick_log` now tags them automatically.
+
+**New GitHub Actions workflow** (`settle-results.yml`), YAML-validated, on a deliberately
+different cadence than closing lines: overnight (covering when games actually finish, not when
+they start) plus a morning catch-up block — settlement isn't time-critical the way a closing
+line is, since a missed run just gets caught on the next one rather than losing the window
+permanently.
+
+**11 new tests** for `settle_results.py` (real win, real loss, Under-side settlement, missing
+`player_id` correctly refused, a player absent from results correctly returns `None`, an
+unrecognized market correctly returns `None`, confirmed push is never fabricated, correct
+per-date grouping, a full settlement report with all three real outcomes represented, correctly
+settling nothing when no games are final yet, and a missing `slate_date` handled without
+crashing) plus 5 new tests for the `player_id` field itself in `betlog.py` (round-trip,
+optionality, and the real migration test). Plus a full, realistic end-to-end simulation against
+an actual temporary database — a real win, a real loss, a bet correctly held back for missing
+`player_id`, and a bet correctly held back because its game wasn't final yet, all in the same
+run. 831/831 total passing.
+
+**Open question for Shawn, not yet decided**: whether older, already-logged bets without
+`player_id` should be backfilled (matching by name against historical box scores, with real risk
+of ambiguity) or simply left to settle manually going forward.
+
+### Decision: pre-automation spreadsheet history archived, not imported (2026-07-20)
+Following automated result settlement going live, Shawn confirmed his prior spreadsheet trading
+record will be archived rather than backfilled into Bet Log. Resolves the open question from the
+previous entry (whether to attempt a name-based historical backfill) — no backfill needed;
+that historical ledger stays a separate, standalone archive, not merged into the automated log.
+
+Checked directly rather than assumed clean: nothing in the codebase currently depends on or
+expects that spreadsheet import (grepped for every reference — the only hits were `bet_sizing.py`
+porting a column-naming CONVENTION from the spreadsheet's own methodology, unrelated to importing
+its actual data). Track Record's own messaging already frames its sample as "early" and growing
+from real logged history ("We're building our track record," "🌱 Early sample") rather than
+assuming continuity with a longer prior history, so no page needed updating either — the
+automated log's own history now simply starts from when `player_id`-based settlement went live,
+which the page already communicates honestly on its own terms. No code changes required for this
+entry; recorded here so the decision itself, and the fact it was checked against the actual
+codebase rather than assumed to be a no-op, isn't lost.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
