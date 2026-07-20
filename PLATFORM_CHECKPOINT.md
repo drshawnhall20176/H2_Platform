@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 811/811 tests green)
+## What's in this checkpoint (all tested — 815/815 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -4011,6 +4011,44 @@ omitted rather than fabricated, correct ModelProb-descending sort, and confirmat
 strong pick still gets a real grade when it has one. Plus a full, realistic end-to-end simulation
 across five games confirming exactly one pick per game, with grades in the real range (mostly
 "D" or ungraded) matching the actual reported numbers. 811/811 total passing.
+
+### Game Coverage parlay: chaining the same methodology into Suggested Parlays (2026-07-20)
+Shawn asked for the same Game Coverage methodology on Suggested Parlays, since chasing payout
+isn't really that page's intent either — even its Safer/Steady tiers still require clearing the
+same edge floor that excluded most of the real boost-slip picks from Speculative Basket.
+
+**A genuinely different design than Speculative Basket's own Game Coverage, not a copy**:
+Speculative Basket shows independent positions (hitting even one is a win); Suggested Parlays is
+about a single, chained, all-must-hit ticket — matching the real boost slip's own structure (one
+combined $5 → $35 ticket, not separate bets). Built `grading.build_game_coverage_parlay`, which
+chains `build_game_coverage_picks`' one-per-game selection into a single parlay using the
+already-existing `combined_parlay_prob` (a straight product of each leg's own ModelProb).
+Confirmed directly this is safe to do, unlike the same-player SGP case from the same
+conversation: `build_game_coverage_picks` already guarantees at most one leg per game, so every
+leg here comes from a genuinely different game — the same level of independence every other
+Suggested Parlays tier already accepts, not the same-player correlation problem that made the
+Gavin Williams/Jared Jones SGP unbuildable.
+
+**Wired into Suggested Parlays as a new "Parlay mode" toggle** — "Suggested tiers" (unchanged
+original behavior) vs "Game Coverage parlay" (market/side selectable, same defaults as
+Speculative Basket). Returns the exact same shape as one entry from `build_suggested_parlays`'
+own output, so the existing tier-rendering view code needed no restructuring — just wrapped in a
+single-element list. A real, second instance of the exact `_grade_badge` crash-on-`None` bug
+already fixed on Speculative Basket, found and fixed here too before it could ship broken — Game
+Coverage legs can legitimately have no grade, and the badge renderer needed to handle that
+honestly (a "No edge floor" badge) instead of crashing. Also confirmed, by directly executing
+the module rather than trusting `py_compile` alone, that dropping the `Optional[dict]` type hint
+here (rather than importing `Optional`, unlike the fix on Speculative Basket) avoided
+reintroducing the same import bug from that page in a new file.
+
+**4 new tests**: confirmed the returned shape exactly matches a normal `build_suggested_parlays`
+tier; confirmed `combined_prob` is a real, hand-verifiable product of each game's own pick;
+confirmed an honestly empty parlay (not a fabricated one) when nothing matches the requested
+market/side; confirmed every leg always comes from a distinct game. Plus a full, realistic
+end-to-end simulation across four games — one chained ticket, `combined_prob` hand-verified
+against `math.prod` of the real per-leg probabilities, `combined_fair_american` computed
+correctly, directly matching the real boost slip's own combined-ticket structure. 815/815 total
+passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

@@ -615,6 +615,45 @@ def build_game_coverage_picks(plays: List[Dict], market: str = "Batter Total Hit
     return sorted(picks, key=lambda p: p.get("ModelProb", 0.0), reverse=True)
 
 
+def build_game_coverage_parlay(plays: List[Dict], market: str = "Batter Total Hits",
+                               side: str = "Over") -> Dict[str, Any]:
+    """Chains build_game_coverage_picks' one-safest-pick-per-game selection into a SINGLE,
+    all-must-hit parlay -- added directly on request: Suggested Parlays' own tiers chase either
+    safety or payout as an OBJECTIVE among plays that already clear a real edge floor, but a
+    real, reported strategy (covering every game with its own safest pick) isn't really chasing
+    payout at all, and mostly doesn't clear that floor to begin with -- the same real gap
+    Speculative Basket's own Game Coverage mode was built to answer, but chained into one ticket
+    instead of shown as independent positions, since Suggested Parlays' whole page is about a
+    combined, all-must-hit parlay.
+
+    SAFE to combine this way, unlike the same-player, cross-market case a real reported SGP
+    example surfaced (a pitcher's own Strikeouts and Outs combined, which this platform
+    deliberately refuses to price since they're not close to independent): build_game_coverage_
+    picks already guarantees at most one leg per game, so every leg here comes from a genuinely
+    different game -- the same level of independence Suggested Parlays' own tiers already accept
+    (see combined_parlay_prob's own docstring for the honest caveat that even different-game
+    legs can share weaker correlation this doesn't fully capture, which still applies here).
+
+    Returns the same shape as one entry from build_suggested_parlays' own output --
+    {"tier": "Game Coverage", "size": int, "legs": [...], "combined_prob": float,
+    "combined_fair_decimal": float, "combined_fair_american": int} -- so Suggested Parlays' own
+    view can render this exactly like any other tier, no new display logic needed. "legs" is
+    empty (and combined_prob is 0.0) when no game in `plays` has a play matching the requested
+    market/side -- never a fabricated parlay."""
+    from projections import prob_to_decimal, prob_to_american   # same lazy-import pattern as
+                                                                 # build_suggested_parlays, for
+                                                                 # the same real circular-import
+                                                                 # reason
+    legs = build_game_coverage_picks(plays, market=market, side=side)
+    combined_prob = combined_parlay_prob(legs) if legs else 0.0
+    return {
+        "tier": "Game Coverage", "size": len(legs), "legs": legs,
+        "combined_prob": round(combined_prob, 4),
+        "combined_fair_decimal": prob_to_decimal(combined_prob) if legs else None,
+        "combined_fair_american": prob_to_american(combined_prob) if legs else None,
+    }
+
+
 def build_speculative_basket(plays: List[Dict], size: int = 8, min_grade_letter: Optional[str] = "C",
                              max_per_game: int = 2, max_per_market: int = 2) -> Dict[str, Any]:
     """Build a basket of INDEPENDENT, single high-upside positions -- not a chained parlay.

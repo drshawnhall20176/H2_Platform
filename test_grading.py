@@ -901,6 +901,42 @@ def test_build_game_coverage_picks_attaches_real_grade_when_it_exists():
     print("✓ build_game_coverage_picks still attaches a real grade when a pick genuinely has one, not always None")
 
 
+# ----------------------------------------------------------------- build_game_coverage_parlay
+def test_build_game_coverage_parlay_matches_suggested_parlays_output_shape():
+    plays = [_hit_pick("A", "G1", 0.70), _hit_pick("B", "G2", 0.72), _hit_pick("C", "G3", 0.68)]
+    parlay = grading.build_game_coverage_parlay(plays)
+    assert set(parlay.keys()) == {"tier", "size", "legs", "combined_prob",
+                                  "combined_fair_decimal", "combined_fair_american"}
+    assert parlay["tier"] == "Game Coverage"
+    assert parlay["size"] == 3
+    print("✓ build_game_coverage_parlay returns the exact same shape as a build_suggested_parlays tier")
+
+
+def test_build_game_coverage_parlay_combined_prob_is_real_product():
+    plays = [_hit_pick("A", "G1", 0.70), _hit_pick("B", "G2", 0.80)]
+    parlay = grading.build_game_coverage_parlay(plays)
+    assert parlay["combined_prob"] == pytest.approx(0.70 * 0.80, abs=0.001)
+    print("✓ build_game_coverage_parlay's combined_prob is a real, hand-verifiable product of each game's own pick")
+
+
+def test_build_game_coverage_parlay_empty_when_no_matching_plays():
+    plays = [_hit_pick("Off Market", "G1", 0.70, market="Batter HR")]
+    parlay = grading.build_game_coverage_parlay(plays, market="Batter Total Hits", side="Over")
+    assert parlay["legs"] == []
+    assert parlay["size"] == 0
+    assert parlay["combined_prob"] == 0.0
+    assert parlay["combined_fair_american"] is None
+    print("✓ build_game_coverage_parlay returns an honestly empty parlay rather than fabricating one when nothing matches")
+
+
+def test_build_game_coverage_parlay_legs_always_from_distinct_games():
+    plays = [_hit_pick("A", "G1", 0.70), _hit_pick("A_weaker", "G1", 0.60), _hit_pick("B", "G2", 0.75)]
+    parlay = grading.build_game_coverage_parlay(plays)
+    games = [leg["Game"] for leg in parlay["legs"]]
+    assert len(games) == len(set(games))   # every leg from a genuinely different game
+    print("✓ build_game_coverage_parlay's legs always come from distinct games, safe to combine via combined_parlay_prob")
+
+
 def test_speculative_basket_reuses_the_payout_objective():
     # Confirms the basket picks the SAME kind of legs Longshot would -- lowest real probability
     # among plays clearing the grade floor, not just any graded plays.
