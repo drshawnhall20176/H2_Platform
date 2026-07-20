@@ -483,14 +483,22 @@ with c2:
     if hs:
         hrows = pd.DataFrame([{
             "Family": fam, "Pitches": v["pitches"], "Whiff%": v["whiff"],
+            "Contact%": v.get("contact"), "Exit Velo": v.get("exit_velo"),
             "SLG": v["slg"], "xwOBA": v["xwoba"],
         } for fam, v in hs.items()])
-        for c in ["Whiff%", "SLG", "xwOBA"]:
+        for c in ["Whiff%", "Contact%", "Exit Velo", "SLG", "xwOBA"]:
             hrows[c] = pd.to_numeric(hrows[c], errors="coerce")
-        st.dataframe(hrows.style.format({"Whiff%": "{:.0%}", "SLG": "{:.2f}", "xwOBA": "{:.2f}"},
+        st.dataframe(hrows.style.format({"Whiff%": "{:.0%}", "Contact%": "{:.0%}",
+                                         "Exit Velo": "{:.1f}", "SLG": "{:.2f}", "xwOBA": "{:.2f}"},
                                         na_rep="—")
                      .theme_gradient(cmap="RdYlGn", subset=["SLG", "xwOBA"])
-                     .theme_gradient(cmap="RdYlGn", subset=["Whiff%"]),
+                     .theme_gradient(cmap="RdYlGn", subset=["Whiff%"])
+                     # Reversed on purpose, same real logic as the main grid: this whole page
+                     # scouts the PITCHER's attack plan, so Whiff% is already colored "high =
+                     # pitcher-favorable" (a real hitter weakness). Contact%/Exit Velo are the
+                     # hitter's own quality-of-contact complement -- low is the same
+                     # pitcher-favorable direction (weak or no contact), so these reverse.
+                     .theme_gradient(cmap="RdYlGn_r", subset=["Contact%", "Exit Velo"]),
                      use_container_width=True, hide_index=True)
     else:
         st.caption("No cached pitch-family splits for this hitter yet.")
@@ -505,20 +513,25 @@ ht = hitter_types.get(hitter_hid, [])
 if ht:
     htype = pd.DataFrame([{
         "Pitch": r["pitch_name"], "Family": r["family"], "Pitches": r["pitches"],
-        "Whiff%": r["whiff"], "SLG": r["slg"], "xwOBA": r["xwoba"],
+        "Whiff%": r["whiff"], "Contact%": r.get("contact"), "Exit Velo": r.get("exit_velo"),
+        "SLG": r["slg"], "xwOBA": r["xwoba"],
     } for r in ht])
-    for c in ["Whiff%", "SLG", "xwOBA"]:
+    for c in ["Whiff%", "Contact%", "Exit Velo", "SLG", "xwOBA"]:
         htype[c] = pd.to_numeric(htype[c], errors="coerce")
-    st.dataframe(htype.style.format({"Whiff%": "{:.0%}", "SLG": "{:.2f}", "xwOBA": "{:.2f}"},
+    st.dataframe(htype.style.format({"Whiff%": "{:.0%}", "Contact%": "{:.0%}",
+                                     "Exit Velo": "{:.1f}", "SLG": "{:.2f}", "xwOBA": "{:.2f}"},
                                     na_rep="—")
                  .theme_gradient(cmap="RdYlGn", subset=["Whiff%"])
-                 .theme_gradient(cmap="RdYlGn", subset=["SLG", "xwOBA"]),
+                 .theme_gradient(cmap="RdYlGn", subset=["SLG", "xwOBA"])
+                 .theme_gradient(cmap="RdYlGn_r", subset=["Contact%", "Exit Velo"]),
                  use_container_width=True, hide_index=True)
-    st.caption("Green = the hitter whiffs on it (good for the pitcher). Red = damage the hitter "
-               "does (SLG / xwOBA against). Sorted by pitches seen.")
+    st.caption("Green = the hitter whiffs on it, or makes weak/no contact (good for the pitcher) "
+              "— Contact%/Exit Velo are reversed from Whiff% since low is the same "
+              "pitcher-favorable direction. Red = damage the hitter does (SLG / xwOBA against). "
+              "Sorted by pitches seen.")
 else:
     st.caption("No by-pitch-type data cached for this hitter yet — the nightly refresh needs enough "
-               "of each pitch to clear the sample floor. The family view above is the stable read.")
+              "of each pitch to clear the sample floor. The family view above is the stable read.")
 
 st.divider()
 st.caption("⚖️ A scouting tool, not a projection. Pitch-level rates are descriptive of the past and "
