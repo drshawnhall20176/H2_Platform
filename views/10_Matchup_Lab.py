@@ -367,6 +367,9 @@ grid = pd.DataFrame([{
     "Pitch": r["pitch_name"],
     "Usage": r["usage"],
     "Velo": r["velo"],
+    "Zone%": r.get("zone_pct"),
+    "Contact%": r.get("contact_pct"),
+    "Exit Velo": r.get("exit_velo"),
     "P Whiff%": r["p_whiff"],
     "P PutAway%": r["p_putaway"],
     "H Whiff% (fam)": r["h_whiff"],
@@ -376,24 +379,35 @@ grid = pd.DataFrame([{
 } for r in rows])
 
 # Coerce numeric (None-safe) so the gradient never chokes — the lesson from the Dinger fix.
-for c in ["Usage", "Velo", "P Whiff%", "P PutAway%", "H Whiff% (fam)", "H SLG (fam)",
-          "H xwOBA (fam)", "Score"]:
+for c in ["Usage", "Velo", "Zone%", "Contact%", "Exit Velo", "P Whiff%", "P PutAway%",
+          "H Whiff% (fam)", "H SLG (fam)", "H xwOBA (fam)", "Score"]:
     grid[c] = pd.to_numeric(grid[c], errors="coerce")
 
 styler = (grid.style
-          .format({"Usage": "{:.0%}", "Velo": "{:.2f}", "P Whiff%": "{:.0%}", "P PutAway%": "{:.0%}",
+          .format({"Usage": "{:.0%}", "Velo": "{:.2f}", "Zone%": "{:.0%}", "Contact%": "{:.0%}",
+                   "Exit Velo": "{:.1f}", "P Whiff%": "{:.0%}", "P PutAway%": "{:.0%}",
                    "H Whiff% (fam)": "{:.0%}", "H SLG (fam)": "{:.2f}", "H xwOBA (fam)": "{:.2f}",
                    "Score": "{:.2f}"}, na_rep="—")
           # Green = high value on that stat, everywhere on the platform (same convention as the
           # Dinger Engine). P Whiff%/P PutAway%/Score stay pitcher-framed (green = good for the
           # pitcher); SLG/xwOBA are a hitter-quality stat, so they share Dinger's direction too.
+          # Contact%/Exit Velo use the REVERSED colormap (same convention already established
+          # for ERA/FIP/WHIP on Pitching Lab) — LOWER is good for the pitcher on both: less
+          # contact allowed, softer contact when it happens. Zone% deliberately left uncolored:
+          # unlike whiff/contact, it isn't a directional good/bad metric on its own — a low-zone
+          # breaking ball that lives off the plate can be a great weapon, not a weak one, so
+          # coloring it would imply a direction the number doesn't actually support.
           .theme_gradient(cmap="RdYlGn", subset=["P Whiff%", "P PutAway%", "H Whiff% (fam)", "Score"])
-          .theme_gradient(cmap="RdYlGn", subset=["H SLG (fam)", "H xwOBA (fam)"]))
+          .theme_gradient(cmap="RdYlGn", subset=["H SLG (fam)", "H xwOBA (fam)"])
+          .theme_gradient(cmap="RdYlGn_r", subset=["Contact%", "Exit Velo"]))
 st.dataframe(styler, use_container_width=True, hide_index=True)
-st.caption("Green favors the pitcher on Whiff%/PutAway%/Score. SLG/xwOBA color the same direction "
-           "as every other page on the platform (high = green), so a hitter's power reads the same "
-           "here as on the Dinger Engine. Hitter columns are by pitch **family** (Fastball / "
-           "Breaking / Offspeed) for a stable sample; the pitch is mapped to its family.")
+st.caption("Green favors the pitcher on Whiff%/PutAway%/Score, and (reversed) on Contact%/Exit "
+          "Velo — lower is good for the pitcher on both, same convention as ERA/FIP on Pitching "
+          "Lab. SLG/xwOBA color the same direction as every other page on the platform (high = "
+          "green), so a hitter's power reads the same here as on the Dinger Engine. Zone% is "
+          "left uncolored — it describes where a pitch lives, not whether that's good or bad on "
+          "its own. Hitter columns are by pitch **family** (Fastball / Breaking / Offspeed) for "
+          "a stable sample; the pitch is mapped to its family.")
 
 # --- pitch mix, visualized -------------------------------------------------------------------
 # NOT a WNBA/NBA-style trend chart on purpose: that chart works because there's a real per-game
@@ -450,14 +464,17 @@ with c1:
     st.subheader(f"{pitcher['Pitcher']} — full arsenal")
     ars = pd.DataFrame([{
         "Pitch": p["pitch_name"], "Family": p["family"], "Usage": p["usage"],
-        "Velo": p["velo"], "Whiff%": p["whiff"], "PutAway%": p["putaway"],
+        "Velo": p["velo"], "Zone%": p.get("zone_pct"), "Contact%": p.get("contact_pct"),
+        "Exit Velo": p.get("exit_velo"), "Whiff%": p["whiff"], "PutAway%": p["putaway"],
     } for p in arsenals.get(pitcher_pid, [])])
     if len(ars):
-        for c in ["Usage", "Velo", "Whiff%", "PutAway%"]:
+        for c in ["Usage", "Velo", "Zone%", "Contact%", "Exit Velo", "Whiff%", "PutAway%"]:
             ars[c] = pd.to_numeric(ars[c], errors="coerce")
-        st.dataframe(ars.style.format({"Usage": "{:.0%}", "Velo": "{:.2f}", "Whiff%": "{:.0%}",
-                                       "PutAway%": "{:.0%}"}, na_rep="—")
-                     .theme_gradient(cmap="RdYlGn", subset=["Whiff%", "PutAway%"]),
+        st.dataframe(ars.style.format({"Usage": "{:.0%}", "Velo": "{:.2f}", "Zone%": "{:.0%}",
+                                       "Contact%": "{:.0%}", "Exit Velo": "{:.1f}",
+                                       "Whiff%": "{:.0%}", "PutAway%": "{:.0%}"}, na_rep="—")
+                     .theme_gradient(cmap="RdYlGn", subset=["Whiff%", "PutAway%"])
+                     .theme_gradient(cmap="RdYlGn_r", subset=["Contact%", "Exit Velo"]),
                      use_container_width=True, hide_index=True)
 
 with c2:
