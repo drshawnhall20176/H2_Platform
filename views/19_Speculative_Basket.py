@@ -179,10 +179,19 @@ with st.container(border=True):
         grade_html = _grade_badge(leg["_grade"])
         leg_fair = leg.get("Fair")
         leg_fair_str = f"{leg_fair:+d}" if leg_fair is not None else "—"
+        lineup = leg.get("Lineup")
+        lineup_icon = "🟡 " if lineup == "Projected" else ("🟢 " if lineup == "Confirmed" else "")
         st.markdown(
-            f"{grade_html} **{leg['Player']}** ({leg['Team']}) — {leg['Market']} "
+            f"{grade_html} {lineup_icon}**{leg['Player']}** ({leg['Team']}) — {leg['Market']} "
             f"{leg['Side']} {leg['Line']:g} · Fair odds {leg_fair_str}",
             unsafe_allow_html=True,
         )
         st.caption(f"{leg.get('Game', '')} · {leg.get('Why', '')}")
+        if lineup == "Projected":
+            # Same real, confirmed reason this matters as Suggested Parlays -- this platform's
+            # own lineup source falls back to a team's full active roster when the actual posted
+            # batting order for THIS specific game isn't available yet, so a player shown here
+            # could still be scratched before first pitch.
+            st.caption("🟡 Lineup not yet confirmed for this game — a player shown here could "
+                      "still be scratched before first pitch.")
         st.markdown("")

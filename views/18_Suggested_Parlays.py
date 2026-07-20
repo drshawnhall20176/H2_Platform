@@ -180,9 +180,20 @@ for parlay in parlays:
             grade_html = _grade_badge(leg["_grade"])
             leg_fair = leg.get("Fair")
             leg_fair_str = f"{leg_fair:+d}" if leg_fair is not None else "—"
+            lineup = leg.get("Lineup")
+            lineup_icon = "🟡 " if lineup == "Projected" else ("🟢 " if lineup == "Confirmed" else "")
             st.markdown(
-                f"{grade_html} **{leg['Player']}** ({leg['Team']}) — {leg['Market']} "
+                f"{grade_html} {lineup_icon}**{leg['Player']}** ({leg['Team']}) — {leg['Market']} "
                 f"{leg['Side']} {leg['Line']:g} · Fair odds {leg_fair_str}",
                 unsafe_allow_html=True,
             )
             st.caption(f"{leg.get('Game', '')} · {leg.get('Why', '')}")
+            if lineup == "Projected":
+                # A REAL, confirmed reason this matters, not a routine caveat: this platform's
+                # own lineup source falls back to a team's full active roster when the actual
+                # posted batting order for THIS specific game isn't available yet -- a real,
+                # confirmed doubleheader case showed a player still appearing here despite
+                # reportedly being questionable for that specific game, since he was still on
+                # the active roster even though he may not have been in that game's own lineup.
+                st.caption("🟡 Lineup not yet confirmed for this game — a player shown here "
+                          "could still be scratched before first pitch.")
