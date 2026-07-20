@@ -274,6 +274,62 @@ def test_rank_flat_plays_does_not_mutate_input_list_order():
     print("✓ rank_flat_plays returns a new, sorted list without reordering the caller's own list in place")
 
 
+# ----------------------------------------------------------------- build_top_leans
+def test_build_top_leans_exact_reported_scenario_longshot_does_not_win():
+    # THE exact real, reported case: a genuine longshot Triples play (11% real chance, raw
+    # Conviction 4.44x purely because Triples' own reference is so low) must NOT rank above a
+    # genuinely likely, high-probability play, even though the longshot has the bigger raw
+    # Conviction number.
+    plays = [
+        {"Player": "Longshot Triples", "Market": "Batter Triples", "ModelProb": 0.11,
+        "Conviction": 4.44, "_ceiling": 40.0},
+        {"Player": "Real Favorite", "Market": "Batter Strikeouts", "ModelProb": 0.85,
+        "Conviction": 2.23, "_ceiling": 2.63},
+    ]
+    leans = grading.build_top_leans(plays)
+    assert leans[0]["Player"] == "Real Favorite"
+    assert leans[1]["Player"] == "Longshot Triples"
+    print("✓ build_top_leans correctly ranks the genuinely likely play above the longshot, despite its lower raw Conviction")
+
+
+def test_build_top_leans_excludes_ungraded_plays():
+    plays = [
+        {"Player": "Real Play", "Market": "Batter HR", "ModelProb": 0.80, "Conviction": 2.0, "_ceiling": 9.09},
+        {"Player": "No Real Edge", "Market": "Batter HR", "ModelProb": 0.95, "Conviction": 1.0, "_ceiling": 9.09},
+    ]
+    leans = grading.build_top_leans(plays)
+    players = {p["Player"] for p in leans}
+    assert "No Real Edge" not in players   # conviction 1.0 doesn't clear the real D-grade floor
+    assert players == {"Real Play"}
+    print("✓ build_top_leans still requires a real, validated grade — high probability alone with zero edge doesn't qualify")
+
+
+def test_build_top_leans_per_market_diversity_cap():
+    plays = [{"Player": f"P{i}", "Market": "Batter HR", "ModelProb": 0.9 - i * 0.05,
+             "Conviction": 2.0, "_ceiling": 9.09} for i in range(6)]
+    leans = grading.build_top_leans(plays, per_market=2)
+    assert len(leans) == 2   # only 2 from the single market, even though 6 real graded plays exist
+    print("✓ build_top_leans correctly caps how many of the same market can appear, preserving diversity")
+
+
+def test_build_top_leans_sorted_by_model_prob_descending():
+    plays = [
+        {"Player": "Low", "Market": "M1", "ModelProb": 0.60, "Conviction": 2.0, "_ceiling": 9.09},
+        {"Player": "High", "Market": "M2", "ModelProb": 0.90, "Conviction": 2.0, "_ceiling": 9.09},
+        {"Player": "Mid", "Market": "M3", "ModelProb": 0.75, "Conviction": 2.0, "_ceiling": 9.09},
+    ]
+    leans = grading.build_top_leans(plays)
+    assert [p["Player"] for p in leans] == ["High", "Mid", "Low"]
+    print("✓ build_top_leans returns a flat list correctly sorted by real probability of hitting")
+
+
+def test_build_top_leans_each_play_carries_grade():
+    plays = [{"Player": "A", "Market": "Batter HR", "ModelProb": 0.80, "Conviction": 2.0, "_ceiling": 9.09}]
+    leans = grading.build_top_leans(plays)
+    assert leans[0]["_grade"]["letter"] is not None
+    print("✓ build_top_leans attaches _grade to every returned play")
+
+
 # ----------------------------------------------------------------- organize_graded_picks
 def _pick(player, team, game, conviction, market="Batter HR", ceiling=None):
     return {"Player": player, "Team": team, "Game": game, "Market": market, "Side": "Over",

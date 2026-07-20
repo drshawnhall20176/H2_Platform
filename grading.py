@@ -188,6 +188,60 @@ def rank_flat_plays(plays: List[Dict], key: str = "rank_value") -> List[Dict]:
     return ranked
 
 
+def build_top_leans(plays: List[Dict], per_market: int = 2) -> List[Dict]:
+    """Grade every play, then pick the best `per_market` from EACH market, all sorted by real
+    probability of hitting (ModelProb) -- the actual, testable logic behind Command Center's
+    "Tonight's top leans" widget, pulled out of the view layer for the same reason every other
+    piece of real logic on this platform lives here: so it's genuinely unit tested, not just
+    trusted by eye in the browser.
+
+    A REAL, CONFIRMED FIX to the original design, not a style choice: ranking by rank_value
+    (this platform's own ceiling-normalized Conviction metric) sounds reasonable but produces
+    the wrong answer for what "leans" actually means to a real person. Confirmed directly with a
+    real, reported example: a genuine longshot Triples play (an actual 11% chance of happening,
+    an 89% chance it doesn't) can carry a raw Conviction of 4.44x purely because Triples' own
+    reference rate is so low (~2.5%) that even a modest real probability looks enormous relative
+    to it. rank_value would still call this a real, valid grade -- and it is, as an EDGE -- but
+    "leans" colloquially means "I lean toward this happening," a probability question, not an
+    edge-relative-to-typical one. This is the exact same distinction already built into Suggested
+    Parlays' Safer/Steady tiers (_tier_sort_key("safety") ranks by raw ModelProb for precisely
+    this reason) -- this widget just never got the same treatment until now.
+
+    Graded Picks itself stays rank_value-sorted ON PURPOSE (see organize_graded_picks' own
+    docstring) -- its entire identity IS the letter-grade system, so ranking any other way there
+    would reintroduce the cross-market inversion that was fixed for it directly. This widget's
+    own name and purpose are different: someone glancing at "Tonight's top leans" is asking
+    "what's likely to hit," not "what has the biggest edge relative to a market-typical rate."
+
+    Still only draws from plays that clear conviction_to_grade's own real floor (a play must
+    already have SOME real, validated edge to be graded at all) -- this isn't "any probability,
+    no matter how thin the edge," it's "the most likely to hit, among plays that already have
+    real edge behind them."
+
+    per_market caps how many of the SAME market can appear, so one especially safe-looking
+    market (e.g. a high-probability, low-edge one) can't fill the entire list by itself -- the
+    real reason "Best two leans from each market" exists as a design choice, not just this
+    function's own default.
+
+    Returns a flat list, already sorted by ModelProb descending, with each play carrying its own
+    "_grade" (from conviction_to_grade) attached."""
+    graded = []
+    for p in plays:
+        g = conviction_to_grade(p.get("Conviction"), p.get("_ceiling"))
+        if g:
+            graded.append({**p, "_grade": g})
+    graded.sort(key=lambda p: p.get("ModelProb", 0.0), reverse=True)
+
+    picks: List[Dict] = []
+    seen: Dict[str, int] = {}
+    for p in graded:
+        m = p.get("Market")
+        if seen.get(m, 0) < per_market:
+            picks.append(p)
+            seen[m] = seen.get(m, 0) + 1
+    return sorted(picks, key=lambda p: p.get("ModelProb", 0.0), reverse=True)
+
+
 def organize_graded_picks(plays: List[Dict]) -> List[Dict[str, Any]]:
     """Grade every play, drop what doesn't clear the real floor, and organize what's left into a
     game-by-game structure ready to render -- the core, testable logic behind the Graded Picks

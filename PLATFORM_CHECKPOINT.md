@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 786/786 tests green)
+## What's in this checkpoint (all tested — 805/805 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -3847,6 +3847,123 @@ fixed in the verification logic, not the actual code). 786/786 total passing.
 
 **Still pending from this same request, not yet started**: TTO display and the bullpen-blend
 toggle across all three pages.
+
+### Top Leans: a real, deeper fix to what "leans" should actually mean (2026-07-19)
+Shawn caught a second, more fundamental issue in the same widget just fixed for cross-market
+consistency: even after sorting by `rank_value` (correctly resolving the letter-grade inversion),
+"Tonight's top leans" could still surface genuine longshots — a real screenshot showed a Corbin
+Carroll Triples play at 4.44x Conviction but only an 11% real chance of happening, ranked above
+plays with 75-89% real probability. His framing was direct and correct: "I would not expect to
+see Batter Home Runs or Batter Stolen Bases high on a top leans list."
+
+**Confirmed the exact mechanism by hand before changing anything**: Triples' own reference
+probability is so low (~2.5%) that its theoretical ceiling is 40.0x — meaning even a genuine
+11%-probability play (an 89% chance of NOT happening) produces a real, valid Conviction of 4.44x.
+`rank_value` was never wrong about the grade; the deeper problem is that Conviction (and its
+normalized form) measures edge relative to a market-typical rate, not absolute likelihood — and
+"leans," colloquially, means "I lean toward this happening." Those are genuinely different
+questions, and this widget was answering the wrong one for what its own name promises.
+
+**This is the exact same distinction already built into Suggested Parlays' Safer/Steady tiers**
+(`_tier_sort_key("safety")` ranks by raw ModelProb, not Conviction, for precisely this reason,
+confirmed earlier this session) — Top Leans just never got the same treatment. Graded Picks
+itself deliberately stays `rank_value`-sorted, and correctly so — its entire identity IS the
+letter-grade system, so changing its ranking there would reintroduce the inversion just fixed.
+Top Leans is a different kind of page: a landing-page summary widget where "what's likely to hit"
+is the actual, honest question being asked.
+
+**`grading.build_top_leans` built as shared, testable logic**, pulled out of the view for the
+same reason as everything else this session — grades every play, then sorts by ModelProb (real
+probability), keeping the existing "best N per market" diversity cap so one especially safe-
+looking market can't fill the whole list. Still requires every play to clear
+`conviction_to_grade`'s own real floor first — this isn't "any probability regardless of edge,"
+it's "the most likely to hit, among plays that already have real, validated edge behind them."
+Command Center's view rewired to call this directly instead of the inline logic from the
+previous fix. Displayed columns reordered (Model % now leads, right after Grade) and the
+highlight gradient moved from Conviction to Model %, matching the new sort priority.
+
+**5 new tests**, including the exact reported case reproduced directly (an 11%-probability
+Triples play with a real 4.44x Conviction must NOT outrank an 85%-probability play with lower
+Conviction) — passed on the first run, confirming the fix's real mechanism matches the actual
+reported bug precisely. Plus the diversity cap, the grading-floor requirement (high probability
+alone with zero real edge still doesn't qualify), correct descending sort order, and grade
+attachment on every returned play. Plus a full, realistic end-to-end simulation through the real
+pipeline — confirmed the top of a real board is now genuinely high-probability plays (79%, 78%,
+67%...) regardless of raw Conviction multiple, with none of HR/Stolen Bases/Triples' structural
+ceiling advantage dominating the list. 791/791 total passing.
+
+### Best Bets ModelProb fix, and a shared "log this pick" feature across every picks page (2026-07-20)
+Shawn confirmed the same real distinction from Top Leans applies to Best Bets ("betting decisions
+are being made, so it should be how likely is this"), and asked for a second, separate feature:
+the ability to write a pick straight to the Bet Log from wherever it's shown, for two real,
+stated reasons — a future paid "role ability" once multi-user login exists, and a genuinely more
+urgent one right now: a narrow real-money pick-making window where manually re-entering a pick
+into Bet Log is friction real enough that it gets skipped in favor of just making the pick.
+
+**Best Bets fixed, Edge Board confirmed already correct**: Best Bets now sorts by `ModelProb`
+instead of the plays list's own Conviction-descending order, same real reasoning as Top Leans —
+`min_conv` still requires real, validated edge before a play is eligible, this just reorders
+within that already-graded set. Column order and the diagnostic-picker label both updated to
+lead with Model %. Checked Edge Board directly before assuming it needed the same fix: its "Live
+edges" table already correctly sorts by EV% (a genuinely different, correct metric — the model's
+own price against a REAL, live sportsbook price, not an internal reference), and its "Model
+board" section was already sorting by ModelProb. Neither needed changing.
+
+**`quick_log.py` built as a new, shared module** — a pure, testable field mapping
+(`bet_log_fields_from_play`, `bet_log_signature`) separated from the Streamlit UI specifically
+because a wrong mapping here would silently corrupt real trade-log data, the one thing on this
+platform that must never be wrong. `render_quick_log` is the actual reusable widget: a
+multiselect of the plays/legs on screen, a stake input, and a log button — modeled directly on
+Edge Board's own pre-existing (and until now, unique) bet-logging flow, generalized so every page
+gets the same behavior instead of a copy-pasted, subtly-different version. Session-scoped dedup
+(`logged_sigs`) matches Edge Board's own existing approach exactly.
+
+**Owner-only, deliberately, everywhere it's wired in** — `render_quick_log` checks `st.secrets.
+get("AUDIENCE", "owner")` itself and renders nothing at all for a non-owner session, regardless
+of whether the calling page is otherwise public (Command Center) or already owner-only (the
+other four). Bet Log is personal trade tracking; a public page showing picks doesn't mean a
+public visitor should be able to write into the owner's own log.
+
+**Honest about what actually gets logged**: unlike Edge Board's flow, none of these five pages
+have live sportsbook odds integration. `entry_odds` is explicitly the model's own fair price,
+labeled as such directly in the widget's own caption — not presented as if it were a real,
+live book price a person actually got filled at.
+
+**Wired into all five pages that surface picks**: Command Center's Top Leans (using the same
+curated "best 2 per market" set already shown in the All tab, not a redundant copy per market
+tab), Best Bets (the whole board), Graded Picks (per game — the page's own natural organizing
+unit), Suggested Parlays (per tier), Speculative Basket (the whole basket). A real, self-caught
+bug along the way: Command Center uses `today` as its own slate-date variable, not `date_str`
+like the other four pages — caught by explicitly checking the actual variable name on each page
+rather than assuming consistency, since `py_compile` doesn't catch a wrong-variable-name bug at
+all (it's only a runtime `NameError`, invisible until the page actually loads).
+
+**10 new tests** for `quick_log.py`'s pure functions: correct field mapping, default stake,
+graceful handling of a play missing `Line` or `ModelProb`, confirmation that `entry_odds` always
+comes from the model's own `Fair` price, confirmation every returned key is a real, valid
+`betlog.py` field (not a typo that would silently be dropped or rejected), and dedup-signature
+correctness across different players/dates/sides. Plus a full, realistic end-to-end simulation —
+a real play from the actual board-building pipeline, mapped through `bet_log_fields_from_play`,
+written to a real temporary SQLite database via `betlog.add_bet`, and read back to confirm every
+field matches exactly. 801/801 total passing.
+
+### Quick-log stake: a dropdown quick-pick alongside free entry (2026-07-20)
+Shawn asked for the stake field to stay free entry but also offer a $0.50-increment dropdown
+from $0-$500, covering typical unit sizes as bankroll grows.
+
+**A real, deliberate two-widget design, not a single control**: a `st.selectbox` quick-picks a
+common unit size from `STAKE_QUICK_PICKS` (0.0, 0.5, 1.0, ..., 500.0 — exactly 1001 real, distinct
+values), while a separate `st.number_input` stays freely editable for an exact, arbitrary amount
+(e.g. $37.23) the dropdown's fixed 0.5 grid can't represent. Uses a real, established Streamlit
+pattern to link them without fighting over ownership of the value: the number_input's own key
+includes the dropdown's current selection, so picking a new quick-pick gives the number_input a
+fresh widget instance that re-initializes to that value — while still allowing free typing right
+after, since it's a genuinely normal number_input once rendered.
+
+**4 new tests** on the `STAKE_QUICK_PICKS` constant itself: confirmed the range starts at exactly
+0.0 and ends at exactly 500.0, confirmed every consecutive step is exactly 0.5 throughout (not
+just at the endpoints), confirmed the exact expected count (1001 real, distinct values for a
+0-500 range in 0.5 steps), and confirmed no duplicates. 805/805 total passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
