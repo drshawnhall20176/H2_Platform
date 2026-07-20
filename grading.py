@@ -98,8 +98,20 @@ def conviction_to_grade(conviction: Optional[float], ceiling: Optional[float] = 
     if conviction is None:
         return None
     graded_value = conviction
-    if ceiling and ceiling > 0:
-        graded_value = conviction * (REFERENCE_CEILING / ceiling)
+    if ceiling and ceiling > 1.0:
+        # A REAL, CONFIRMED FIX to the normalization itself, not the original design intent --
+        # anchored at 1.0 (the universal "no real edge at all" baseline every market shares),
+        # scaling only the EDGE ABOVE 1.0 by how much headroom this market's own ceiling has
+        # relative to HR's, not the whole raw number. The original version (conviction * ratio)
+        # scaled the 1.0 baseline itself along with the real edge, which meant a market with a
+        # low ceiling (H-R-R's Under side, ceiling ~2.63) could turn a TRIVIAL, barely-above-
+        # breakeven raw conviction (1.03x -- essentially no real edge) into a normalized value
+        # over 3.5, reaching "A" purely from the ratio, not from the play actually being good.
+        # Confirmed directly: this fix drops that exact case back below the D-grade floor, while
+        # leaving HR's own grades byte-identical (ceiling == REFERENCE_CEILING makes this
+        # formula reduce to graded_value == conviction exactly) and still letting a genuinely
+        # good low-ceiling play (a real, large edge above 1.0, not a token one) reach A.
+        graded_value = 1.0 + (conviction - 1.0) * (REFERENCE_CEILING - 1.0) / (ceiling - 1.0)
     for threshold, letter, tier in GRADE_THRESHOLDS:
         if graded_value >= threshold:
             return {"letter": letter, "tier": tier, "conviction": conviction}

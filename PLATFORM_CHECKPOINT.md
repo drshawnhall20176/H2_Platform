@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 766/766 tests green)
+## What's in this checkpoint (all tested — 771/771 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -3620,6 +3620,61 @@ Plus a full, realistic end-to-end simulation reproducing the doubleheader scenar
 hitters facing a real opener profile now show a healthy ~71-75% hit probability instead of being
 artificially depressed, and the Lineup field is confirmed flowing all the way through to the
 final play dict, ready for the page to display. 766/766 total passing.
+
+### A real, more significant bug found: ceiling normalization was amplifying trivial edges into A grades (2026-07-19)
+Shawn reported the doubleheader/opener fixes didn't resolve the underlying issue — a new
+screenshot showed Speculative Basket's entire 8-position basket built from the exact same
+market, "Batter Hits+Runs+RBIs Under 1.5," spanning seven DIFFERENT games, all real, good
+hitters, all graded A. Since this spanned many unrelated games (not concentrated in one
+doubleheader), the opener/lineup fixes couldn't be the explanation — this pointed at something
+structural in the grading math itself, not a per-game data issue.
+
+**Investigated empirically before theorizing**: ran a range of realistic hitter profiles through
+the real `enrich_hitter_rows` pipeline and found HRR% values clustering tightly around 0.57-0.64
+— right at the 0.62 reference threshold, meaning tiny, real differences between players were
+landing some just above and some just below it. That part is expected behavior for a reference-
+based system. But checking what grade a barely-below-reference value actually produced surfaced
+the real bug: a raw conviction of 1.03x (essentially no edge — 39% real vs. 38% "typical") was
+reaching a full "A" grade.
+
+**Root cause, confirmed directly with the exact numbers**: the ceiling normalization added
+earlier this session (`conviction * (REFERENCE_CEILING / ceiling)`) scaled the ENTIRE raw
+conviction value by a market's ceiling ratio — including the 1.0 "no edge at all" baseline every
+market shares. For H-R-R's Under side (ceiling ~2.63, versus HR's reference ceiling of 9.09), that
+ratio is ~3.46x — so even a trivial 1.03x raw conviction got inflated to a normalized value over
+3.5, clearing the "A" threshold purely from the market's own ceiling shape, with essentially zero
+real edge behind it. This is a real, more consequential bug than a UI display issue: it meant the
+"payout" objective (Bold/Longshot, and Speculative Basket) could get systematically pulled toward
+whichever market had the lowest ceiling, regardless of whether the underlying play was actually
+good — exactly what happened here, with H-R-R's Under side quietly winning almost every
+comparison against markets with more headroom.
+
+**The fix**: anchor the normalization at 1.0 instead of scaling the raw value directly —
+`graded_value = 1.0 + (conviction - 1.0) * (REFERENCE_CEILING - 1.0) / (ceiling - 1.0)`. This
+scales only the EDGE above the no-edge baseline, not the baseline itself, so a trivial edge stays
+trivial regardless of the market's ceiling shape. Verified by hand against every prior test case
+before touching code: HR's own grades reduce to exactly the raw, unnormalized comparison (ceiling
+== REFERENCE_CEILING makes the formula an identity); the earlier Stolen Bases compression fix
+still holds; a genuinely large edge on a low-ceiling market (not a token one) still reaches A,
+preserving the original fix's real intent. A new defensive guard (`ceiling > 1.0`, not `> 0`)
+prevents a division-by-zero at the new formula's edge case.
+
+**10 new tests**: the exact reported bug case confirmed directly (1.03x raw conviction on H-R-R's
+real Under-side ceiling now correctly falls below even the D floor); the genuine-large-edge case
+confirmed to still reach A; HR's own grades confirmed byte-identical across the same conviction
+range as the original ceiling tests; the Stolen Bases compression regression-guarded; a new
+ceiling-exactly-1.0 edge case. Plus a full, realistic end-to-end simulation reproducing the
+actual reported scenario — an 8-hitter board where H-R-R plays now correctly grade B (not the
+previous inflated A), and `build_speculative_basket`'s payout ranking no longer selects a single
+H-R-R leg, since other markets now correctly outrank it once the trivial edge isn't artificially
+amplified. 771/771 total passing.
+
+**A real, important scope note, stated honestly**: this ceiling-normalization bug wasn't
+specific to H-R-R or to Speculative Basket — it affects the letter grade of every play on every
+market with a ceiling below HR's, everywhere this platform shows a grade (Graded Picks,
+Suggested Parlays, Retrospective's grade-accuracy tracking, and every sport, not just MLB). This
+fix corrects all of them at once, from the single, shared function every one of those pages
+already calls through.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

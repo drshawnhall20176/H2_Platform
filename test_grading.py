@@ -104,6 +104,57 @@ def test_conviction_to_grade_zero_or_negative_ceiling_falls_back_to_raw():
     assert grading.conviction_to_grade(3.5, ceiling=-1) == grading.conviction_to_grade(3.5)
 
 
+def test_conviction_to_grade_ceiling_of_exactly_one_falls_back_to_raw():
+    # A real, deliberate guard added alongside the anchor fix: ceiling=1.0 would divide by zero
+    # in the new (ceiling - 1.0) denominator -- an extreme, unrealistic edge case (it would
+    # require a reference probability of exactly 0 or 1), but must not crash.
+    assert grading.conviction_to_grade(3.5, ceiling=1.0) == grading.conviction_to_grade(3.5)
+
+
+# ----------------------------------------------------------------- conviction_to_grade: anchor-at-1.0 fix
+def test_conviction_to_grade_trivial_edge_on_low_ceiling_market_no_longer_reaches_a():
+    # THE exact real, reported bug: a trivial, barely-above-breakeven raw conviction (1.03x --
+    # essentially no real edge at all) on a low-ceiling market (H-R-R's Under side, ceiling
+    # ~2.63) was reaching "A" purely because the OLD normalization scaled the whole raw number,
+    # including its 1.0 no-edge baseline, by the market's ceiling ratio. Confirmed directly this
+    # exact case now correctly falls below even the D-grade floor.
+    grade = grading.conviction_to_grade(1.03, ceiling=2.6315789473684212)
+    assert grade is None
+    print("✓ conviction_to_grade no longer lets a trivial, near-breakeven edge on a low-ceiling market reach A")
+
+
+def test_conviction_to_grade_anchor_fix_still_lets_genuine_low_ceiling_edge_reach_a():
+    # Confirms the fix doesn't overcorrect -- a REAL, substantial edge (not a token one) on a
+    # low-ceiling market must still be able to reach A, the original intent of ceiling
+    # normalization in the first place.
+    grade = grading.conviction_to_grade(1.8, ceiling=2.0)
+    assert grade is not None
+    assert grade["letter"] == "A"
+    print("✓ conviction_to_grade's anchor fix still lets a genuinely large edge on a low-ceiling market reach A")
+
+
+def test_conviction_to_grade_anchor_fix_hr_still_byte_identical():
+    # HR's own ceiling equals REFERENCE_CEILING exactly, so the new formula must reduce to
+    # graded_value == conviction exactly, same as before this fix -- confirmed across the same
+    # range of values the original ceiling-normalization tests already used.
+    hr_ceiling = 1.0 / 0.11
+    for conviction in (3.5, 2.2, 1.6, 1.25, 1.0):
+        with_ceiling = grading.conviction_to_grade(conviction, hr_ceiling)
+        without_ceiling = grading.conviction_to_grade(conviction)
+        assert with_ceiling == without_ceiling
+    print("✓ conviction_to_grade's anchor fix leaves HR's own grades exactly byte-identical to the raw, unnormalized comparison")
+
+
+def test_conviction_to_grade_anchor_fix_sb_compression_still_holds():
+    # Regression guard: the real Stolen Bases compression fix from earlier this session must
+    # still hold under the corrected formula, not regress back to the original over-inflation.
+    sb_grade = grading.conviction_to_grade(4.78, ceiling=20.0)
+    hr_grade = grading.conviction_to_grade(2.03, ceiling=9.09)
+    assert sb_grade["letter"] == "B"
+    assert hr_grade["letter"] == "B"
+    print("✓ conviction_to_grade's anchor fix preserves the earlier Stolen Bases compression fix")
+
+
 # ----------------------------------------------------------------- organize_graded_picks
 def _pick(player, team, game, conviction, market="Batter HR"):
     return {"Player": player, "Team": team, "Game": game, "Market": market, "Side": "Over",
