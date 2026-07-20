@@ -4176,6 +4176,44 @@ genuinely coherent scouting story (a zone-pounding fastball vs. a classic out-of
 slider with a correspondingly high whiff/low contact rate), not just mechanically correct math.
 841/841 total passing.
 
+### Real, live bug found via an actual screenshot: fabricated 0.0 fallback for zone%/contact% (2026-07-20)
+Shawn reported Zone%/Contact%/Exit Velo showing no real values on the live page. Investigated the
+actual screenshot rather than assuming: Contact% showed 0% for every pitch, colored GREEN (the
+reversed colormap treats low as good for the pitcher) — while P Whiff% showed real, varied
+numbers (55%/31%/24%/13%/37%). That pattern confirmed two separate things at once.
+
+**Expected part, exactly as flagged when this feature shipped**: the cached `pitcher_arsenals.
+csv` predates this feature — it was written before `zone_pct`/`contact_pct`/`exit_velo` existed,
+so those columns are entirely absent from the file. The nightly refresh job hasn't re-run since.
+
+**Real bug found in the process, not just the expected stale-cache gap**: `exit_velo` was
+already handled honestly (falls back to `None` when the column is absent), but `zone_pct`/
+`contact_pct` were NOT treated the same way — both fell back to a fabricated `0.0` in both
+`load()` and `build_matchup()`. That's a real, own inconsistency, not just a missing-data
+display issue: a 0.0 doesn't just look wrong, it actively misleads once styled, since the
+reversed colormap reads a low Contact% as EXCELLENT for the pitcher — the exact opposite of what
+"no data at all" should communicate. Confirmed directly this is what the screenshot showed.
+
+**Fixed at both fallback sites**: `load()`'s CSV-reading fallback and `build_matchup()`'s
+dict-key fallback now both treat `zone_pct`/`contact_pct` the same honest way `exit_velo`
+already was — `None`, never a fabricated `0.0`, when genuinely absent. Extracted the shared
+None/NaN-check logic (previously duplicated ad hoc for `exit_velo` alone) into one local
+`_none_safe_float` helper inside `load()`, used consistently for all three fields now rather
+than risking the same inconsistency recurring for a future field.
+
+**2 existing tests corrected** (not just extended) — both had explicitly asserted the OLD,
+now-recognized-as-wrong `0.0` fallback behavior; updated to assert the honest `None` instead,
+with the test's own comment now naming the real, screenshot-confirmed bug this guards against.
+Plus a full, direct reproduction of the exact reported scenario — an old-schema CSV with real
+whiff data already present (matching the real 55%/31%/24%/13%/37% seen in the screenshot),
+confirming Zone%/Contact%/Exit Velo now render as honest `—` instead of a misleading green `0%`,
+while the pre-existing whiff data continues to flow through correctly. 841/841 total passing.
+
+**Still true, and still the actual remaining step for Shawn**: this fix makes the "no data yet"
+state honest, it does NOT make real data appear — that still requires the nightly `refresh_
+matchups.py` job (or a manual run) to actually re-pull and re-aggregate Statcast with the new
+columns included, exactly as stated when this feature first shipped.
+
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
   framing/item 5 writeup above for why: no confirmed way to find every game a specific umpire

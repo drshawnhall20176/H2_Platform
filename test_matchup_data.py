@@ -174,17 +174,21 @@ def test_build_matchup_passes_through_zone_contact_exit_velo():
 
 
 def test_build_matchup_exit_velo_none_when_arsenal_lacks_it():
-    # A real, honest default: an arsenal entry with no exit_velo key at all (e.g. an older
-    # cached CSV, per load()'s own backward-compatibility handling) must surface as None here
-    # too, not crash or fabricate a 0.0.
+    # A real, honest default: an arsenal entry with no zone_pct/contact_pct/exit_velo keys at
+    # all (e.g. an older cached CSV, per load()'s own backward-compatibility handling) must
+    # surface ALL THREE as None here, not crash and not fabricate a misleading 0.0 -- a real,
+    # confirmed bug found via an actual screenshot: a fabricated 0.0 doesn't just look wrong, it
+    # actively misleads once styled (0% contact rate reads as excellent for the pitcher under
+    # the reversed colormap, the exact opposite of "no data").
     arsenals = {100: [
         {"pitch_type": "FF", "pitch_name": "4-Seam FB", "family": "Fastball", "usage": 1.0,
          "whiff": 0.20, "putaway": 0.2, "velo": 95.0},   # no zone_pct/contact_pct/exit_velo keys
     ]}
     rows = M.build_matchup(100, 999, arsenals, {})
     assert rows[0]["exit_velo"] is None
-    assert rows[0]["zone_pct"] == 0.0
-    print("✓ build_matchup handles an arsenal entry missing the new fields gracefully")
+    assert rows[0]["zone_pct"] is None
+    assert rows[0]["contact_pct"] is None
+    print("✓ build_matchup honestly surfaces zone_pct/contact_pct/exit_velo as None when an arsenal entry lacks them, never a fabricated 0.0")
 
 
 def test_empty_inputs_dont_crash():
@@ -232,9 +236,12 @@ def test_load_reads_zone_contact_exit_velo_from_a_real_csv():
 
 def test_load_backward_compatible_with_older_csv_missing_new_columns():
     # A REAL, CONFIRMED regression guard: a cache file written BEFORE this feature existed (no
-    # zone_pct/contact_pct/exit_velo columns at all) must still load without crashing -- the
-    # exact same "drift-safe against an older/different schema" posture this whole module
-    # already follows for pybaseball's own occasional column drift.
+    # zone_pct/contact_pct/exit_velo columns at all) must still load without crashing, AND must
+    # surface all three as honest None -- not the fabricated 0.0 an earlier version of this fix
+    # produced, confirmed as a real, live bug via an actual screenshot (Zone%/Contact% showing
+    # 0% and getting colored as if that were real, excellent data for the pitcher, when it
+    # actually meant "no data at all"). Same drift-safe posture this whole module already
+    # follows for pybaseball's own occasional column drift, now applied honestly to values too.
     import tempfile
     import os
     with tempfile.TemporaryDirectory() as tmp:
@@ -244,11 +251,9 @@ def test_load_backward_compatible_with_older_csv_missing_new_columns():
                       "putaway": 0.5, "velo": 86.0}]).to_csv(path, index=False)   # OLD schema
         arsenals, _ = M.load(arsenal_path=path, hitter_path="/nonexistent")
         row = arsenals[501][0]
-        assert row["zone_pct"] == 0.0    # honestly absent, not a crash
-        assert row["contact_pct"] == 0.0
-        assert row["exit_velo"] is None  # None, not a fabricated 0.0 -- distinguishable from a
-                                        # real "no batted-ball sample" NaN case read from a
-                                        # current-schema CSV
+        assert row["zone_pct"] is None   # honestly absent, never a fabricated 0.0
+        assert row["contact_pct"] is None
+        assert row["exit_velo"] is None
     print("✓ load() stays backward-compatible with a cached CSV written before this feature existed")
 
 

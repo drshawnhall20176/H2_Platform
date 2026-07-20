@@ -289,8 +289,13 @@ def build_matchup(pitcher_id: int, hitter_id: int,
             "velo": pitch.get("velo", 0.0),
             "p_whiff": pitch.get("whiff", 0.0),
             "p_putaway": pitch.get("putaway", 0.0),
-            "zone_pct": pitch.get("zone_pct", 0.0),
-            "contact_pct": pitch.get("contact_pct", 0.0),
+            # None (not 0.0) when genuinely absent -- a REAL, CONFIRMED FIX: a fabricated 0.0
+            # here doesn't just look wrong, it actively misleads, since it gets STYLED as if it
+            # were real data (a 0% contact rate reads as excellent for the pitcher under the
+            # reversed colormap, when it actually means "no data," the exact opposite of what
+            # it displays as). Same honest-fallback principle already applied to exit_velo below.
+            "zone_pct": pitch.get("zone_pct"),
+            "contact_pct": pitch.get("contact_pct"),
             "exit_velo": pitch.get("exit_velo"),
             "h_whiff": h_whiff,
             "h_slg": h_slg,
@@ -347,19 +352,28 @@ def load(arsenal_path: str = ARSENAL_PATH, hitter_path: str = HITTER_PATH
     if os.path.exists(arsenal_path):
         try:
             a = pd.read_csv(arsenal_path)
+
+            def _none_safe_float(raw):
+                # Shared by zone_pct/contact_pct/exit_velo below -- None on an older CSV that
+                # predates a given field entirely (the key is simply absent from this row's
+                # dict), NaN once the column exists but this specific pitch has no real value
+                # for it (e.g. no batted-ball sample for exit_velo). Both cases surface as
+                # Python None to the caller, never a fabricated 0.0 -- a REAL, CONFIRMED FIX
+                # for zone_pct/contact_pct specifically: a fabricated 0.0 doesn't just look
+                # wrong, it actively misleads once styled (a 0% contact rate reads as excellent
+                # for the pitcher under the reversed colormap, the exact opposite of "no data").
+                return None if raw is None or pd.isna(raw) else float(raw)
+
             for r in a.itertuples(index=False):
                 d = r._asdict()
-                exit_velo_raw = d.get("exit_velo")   # None on an older CSV that predates this
-                                                     # field entirely; NaN once present but no
-                                                     # real batted-ball sample for that pitch
                 arsenals.setdefault(int(d["pitcher"]), []).append({
                     "pitch_type": d.get("pitch_type"), "pitch_name": d.get("pitch_name"),
                     "family": d.get("family"), "pitches": int(d.get("pitches", 0) or 0),
                     "usage": float(d.get("usage", 0) or 0), "whiff": float(d.get("whiff", 0) or 0),
                     "putaway": float(d.get("putaway", 0) or 0), "velo": float(d.get("velo", 0) or 0),
-                    "zone_pct": float(d.get("zone_pct", 0) or 0),
-                    "contact_pct": float(d.get("contact_pct", 0) or 0),
-                    "exit_velo": None if exit_velo_raw is None or pd.isna(exit_velo_raw) else float(exit_velo_raw),
+                    "zone_pct": _none_safe_float(d.get("zone_pct")),
+                    "contact_pct": _none_safe_float(d.get("contact_pct")),
+                    "exit_velo": _none_safe_float(d.get("exit_velo")),
                 })
         except Exception:
             pass
