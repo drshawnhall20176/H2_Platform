@@ -103,6 +103,23 @@ if not plays:
     st.info("No graded plays match the current filters — try a different time slot or game.")
     st.stop()
 
+# --- market selection --------------------------------------------------------
+# Added directly on request, for consistency with Suggested Parlays/Speculative Basket — same
+# real reasoning as those pages: letting a person choose what they want exposure to here too,
+# rather than this page silently differing in scope from the other two that draw from the exact
+# same graded board.
+markets_present = sorted({pl.get("Market") for pl in plays if pl.get("Market")})
+selected_markets = st.multiselect("Markets to include", options=markets_present,
+                                  default=markets_present)
+if not selected_markets:
+    st.info("Select at least one market above to see graded picks.")
+    st.stop()
+plays = [pl for pl in plays if pl.get("Market") in selected_markets]
+
+if not plays:
+    st.info("No graded plays match the current filters — try including more markets.")
+    st.stop()
+
 # grading.py's organize_graded_picks does the grading, grouping, and sorting — a shared,
 # sport-agnostic module (a real fix, not a style choice: this used to be MLB-only, and calling it
 # via P.organize_graded_picks would crash immediately for every non-MLB sport, confirmed directly
@@ -115,6 +132,25 @@ if not organized:
             "first pitch as lineups and matchups firm up.")
     st.stop()
 
+# Ranking, added directly on request -- but ONLY once a specific game is selected, not across
+# "All games in this slot". A real, deliberate scoping choice: this page's own reason for being
+# organized game-by-game (see the module docstring) is that a flat, slate-wide rank would bury
+# most of the board behind whichever 2-3 games happen to have the juiciest plays that night --
+# exactly what game-by-game organization exists to avoid. Ranking WITHIN one already-selected
+# game doesn't have that problem, since a person has already chosen to focus there. Uses
+# rank_value (not raw Conviction, not ModelProb) specifically because this page's entire identity
+# is its letter grades -- a rank that disagreed with them would reintroduce the same cross-market
+# inversion just fixed in organize_graded_picks and Command Center.
+show_ranking = game_pick != "All games in this slot"
+if show_ranking:
+    all_plays_in_game = [play for entry in organized for player_entry in entry["players"]
+                         for play in player_entry["plays"]]
+    grading.rank_flat_plays(all_plays_in_game, key="rank_value")   # mutates each play's own dict
+                                                                   # with "_rank" in place, so the
+                                                                   # existing nested game/player
+                                                                   # loop below picks it up
+                                                                   # automatically, no restructuring
+
 GRADE_COLOR = {"A": "#16783c", "B": "#2e7d32", "C": "#b8860b", "D": "#6b7280"}
 
 
@@ -125,6 +161,11 @@ def _grade_badge(grade: dict) -> str:
            f"<span style='color:{color};font-weight:600;'>{grade['tier']}</span> "
            f"<span style='opacity:0.7;'>({grade['conviction']:.2f}×)</span>")
 
+
+if show_ranking:
+    st.caption("🔢 Ranked #1 (strongest) to weakest within this game, by the same real grading "
+              "this page already uses — not raw Conviction, so the ranking always agrees with "
+              "the letter grades shown.")
 
 for game in organized:
     game_label = game["game"]
@@ -148,8 +189,9 @@ for game in organized:
                 grade_html = _grade_badge(pl["_grade"])
                 fair = pl.get("Fair")
                 fair_str = f"{fair:+d}" if fair is not None else "—"
+                rank_prefix = f"**#{pl['_rank']}** · " if show_ranking and pl.get("_rank") else ""
                 st.markdown(
-                    f"{grade_html} — {pl['Market']} {pl['Side']} {pl['Line']:g} · Fair {fair_str}",
+                    f"{rank_prefix}{grade_html} — {pl['Market']} {pl['Side']} {pl['Line']:g} · Fair {fair_str}",
                     unsafe_allow_html=True,
                 )
                 st.caption(pl.get("Why", ""))

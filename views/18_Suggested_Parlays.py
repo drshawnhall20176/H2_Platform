@@ -176,18 +176,33 @@ for parlay in parlays:
         st.caption(f"Model's combined win probability: {parlay['combined_prob']:.1%} "
                   f"(assuming independent legs — see the note above)")
 
+        # Ranking, added directly on request: multiple legs can share the same letter grade
+        # while still having meaningfully different real probabilities behind them. Ranked by
+        # ModelProb (real probability of hitting), not rank_value/letter grade -- this page is
+        # explicitly framed around "which of these is more likely to actually hit," a different
+        # question than "which has the better edge relative to typical," so the ranking follows
+        # the question this page actually answers, not Graded Picks' own letter-grade framing.
+        grading.rank_flat_plays(parlay["legs"], key="ModelProb")
+
         for leg in parlay["legs"]:
             grade_html = _grade_badge(leg["_grade"])
             leg_fair = leg.get("Fair")
             leg_fair_str = f"{leg_fair:+d}" if leg_fair is not None else "—"
             lineup = leg.get("Lineup")
             lineup_icon = "🟡 " if lineup == "Projected" else ("🟢 " if lineup == "Confirmed" else "")
+            rank_prefix = f"**#{leg['_rank']}** · " if leg.get("_rank") else ""
             st.markdown(
-                f"{grade_html} {lineup_icon}**{leg['Player']}** ({leg['Team']}) — {leg['Market']} "
+                f"{rank_prefix}{grade_html} {lineup_icon}**{leg['Player']}** ({leg['Team']}) — {leg['Market']} "
                 f"{leg['Side']} {leg['Line']:g} · Fair odds {leg_fair_str}",
                 unsafe_allow_html=True,
             )
-            st.caption(f"{leg.get('Game', '')} · {leg.get('Why', '')}")
+            # The opposing starter's real name/ERA, straight from the same play dict, added
+            # directly on request -- so the actual matchup being faced is visible right here,
+            # without needing to separately cross-reference Pitching Lab to check whether the
+            # model's read on that pitcher matches who's actually expected to start.
+            opp_name, opp_era = leg.get("Opp"), leg.get("OppERA")
+            opp_str = f" · vs {opp_name} ({opp_era:.2f} ERA)" if opp_name and opp_era is not None else ""
+            st.caption(f"{leg.get('Game', '')}{opp_str} · {leg.get('Why', '')}")
             if lineup == "Projected":
                 # A REAL, confirmed reason this matters, not a routine caveat: this platform's
                 # own lineup source falls back to a team's full active roster when the actual

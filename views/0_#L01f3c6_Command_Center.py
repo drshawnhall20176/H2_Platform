@@ -19,6 +19,7 @@ import retro as R
 import betlog as B
 import sports
 import best_bets_data as BBD
+import grading
  
 _active = sports.active()
  
@@ -152,28 +153,48 @@ with left:
         st.page_link("views/16_Graded_Picks.py", label="See the full slate, graded game by game →",
                     icon="🏅")
     if plays:
+        # A REAL, CONFIRMED FIX, not the original design -- this used to sort by raw Conviction
+        # directly, which can genuinely INVERT against the letter-grade system every other page
+        # (Graded Picks, Suggested Parlays, Speculative Basket) already uses: a raw 2.5x on HR
+        # (ceiling ~9.09, a "B") can outrank a raw 1.8x on a near-50%-reference market (ceiling
+        # ~2.0, a genuine "A") purely because HR's own raw numbers run bigger, even though the
+        # SECOND play is the stronger one by every other page's own grading logic. Grading every
+        # play here too, and sorting/filtering by the SAME ceiling-normalized rank_value grading.
+        # conviction_to_grade already exposes for exactly this reason, means "Tonight's top
+        # leans" now agrees with what Graded Picks itself would show for the same slate --
+        # intra-page consistency, not a second, silently different ranking of "the same" model.
+        graded_plays = []
+        for p in plays:
+            g = grading.conviction_to_grade(p.get("Conviction"), p.get("_ceiling"))
+            if g:
+                graded_plays.append({**p, "_grade": g})
+        graded_plays.sort(key=lambda p: p["_grade"]["rank_value"], reverse=True)
+
         _TOP_TABS = [("All", None)] + [(f"{_MARKET_ICONS.get(m, '🔹')} {m}", m)
                                        for m in _active.market_map.keys()]
         _ttabs = st.tabs([t[0] for t in _TOP_TABS])
         for _tb, (_lab, _mkt) in zip(_ttabs, _TOP_TABS):
             with _tb:
                 if _mkt is None:
-                    # "All" = a cross-market summary, NOT a raw conviction sort. Since the rarest
-                    # event in any market family tends to win conviction, sorting everything by
-                    # conviction just reproduces that one tab. Instead show the best 2 leans from
-                    # each market.
+                    # "All" = a cross-market summary, NOT a raw rank_value sort. Since the rarest
+                    # event in any market family tends to win conviction (and, before this fix,
+                    # could still dominate even after normalization), sorting everything by
+                    # rank_value alone just reproduces whichever single market has the most
+                    # headroom. Instead show the best 2 leans from each market.
                     picks, seen = [], {}
-                    for p in plays:                       # plays are already conviction-sorted
+                    for p in graded_plays:                # already rank_value-sorted
                         m = p["Market"]
                         if seen.get(m, 0) < 2:
                             picks.append(p)
                             seen[m] = seen.get(m, 0) + 1
-                    subset = sorted(picks, key=lambda p: -p.get("Conviction", 0))
+                    subset = sorted(picks, key=lambda p: -p["_grade"]["rank_value"])
                     st.caption("Best two leans from each market — so this isn't just one market's tab again.")
                 else:
-                    subset = [p for p in plays if p["Market"] == _mkt][:8]
+                    subset = [p for p in graded_plays if p["Market"] == _mkt][:8]
                 if subset:
-                    tdf = pd.DataFrame(subset)[["Conviction", "Player", "Market", "Side",
+                    for p in subset:
+                        p["Grade"] = p["_grade"]["letter"]
+                    tdf = pd.DataFrame(subset)[["Grade", "Conviction", "Player", "Market", "Side",
                                                 "Line", "ModelProb", "Why"]]
                     st.dataframe(
                         tdf.rename(columns={"ModelProb": "Model %", "Why": "Reasoning"})
@@ -182,7 +203,8 @@ with left:
                         hide_index=True, use_container_width=True, height=330)
                 else:
                     st.caption("No leans in this market on tonight's board.")
-        st.caption("Model conviction, not guaranteed value — priced against the live market on the Edge Board.")
+        st.caption("Grade and rank reflect the same ceiling-normalized methodology as Graded Picks — "
+                  "not guaranteed value, priced against the live market on the Edge Board.")
     else:
         st.info("No games on the board right now. Top leans appear here on an active slate.")
  

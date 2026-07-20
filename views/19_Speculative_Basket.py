@@ -157,13 +157,14 @@ c1, c2, c3 = st.columns(3)
 with c1:
     st.metric("Positions in basket", len(basket["legs"]))
 with c2:
-    st.metric("P(at least one hits)", f"{basket['prob_at_least_one_hits']:.1%}")
+    st.metric("P(at least one wins)", f"{basket['prob_at_least_one_wins']:.1%}")
 with c3:
-    st.metric("Expected hits", f"{basket['expected_hits']:.1f}")
-st.caption("\"P(at least one hits)\" and \"Expected hits\" assume independence across positions "
+    st.metric("Expected winners", f"{basket['expected_winners']:.1f}")
+st.caption("\"P(at least one wins)\" and \"Expected winners\" assume independence across positions "
           "— the same-player exclusion below removes the single biggest way that assumption "
           "breaks, but positions sharing a game can still carry some real, smaller correlation "
-          "this doesn't fully capture.")
+          "this doesn't fully capture. Neither number is a baseball statistic — both describe "
+          "how many of these BETS are expected to settle correctly, not actual hits/runs/RBIs.")
 
 GRADE_COLOR = {"A": "#16783c", "B": "#2e7d32", "C": "#b8860b", "D": "#6b7280"}
 
@@ -175,18 +176,30 @@ def _grade_badge(grade: dict) -> str:
 
 
 with st.container(border=True):
+    # Ranking, added directly on request: multiple positions can share the same letter grade
+    # while still having meaningfully different real probabilities behind them. Ranked by
+    # ModelProb (real probability of hitting), same reasoning as Suggested Parlays -- this page
+    # is explicitly framed around "which of these is more likely to actually hit."
+    grading.rank_flat_plays(basket["legs"], key="ModelProb")
+
     for leg in basket["legs"]:
         grade_html = _grade_badge(leg["_grade"])
         leg_fair = leg.get("Fair")
         leg_fair_str = f"{leg_fair:+d}" if leg_fair is not None else "—"
         lineup = leg.get("Lineup")
         lineup_icon = "🟡 " if lineup == "Projected" else ("🟢 " if lineup == "Confirmed" else "")
+        rank_prefix = f"**#{leg['_rank']}** · " if leg.get("_rank") else ""
         st.markdown(
-            f"{grade_html} {lineup_icon}**{leg['Player']}** ({leg['Team']}) — {leg['Market']} "
+            f"{rank_prefix}{grade_html} {lineup_icon}**{leg['Player']}** ({leg['Team']}) — {leg['Market']} "
             f"{leg['Side']} {leg['Line']:g} · Fair odds {leg_fair_str}",
             unsafe_allow_html=True,
         )
-        st.caption(f"{leg.get('Game', '')} · {leg.get('Why', '')}")
+        # Same real, direct fix as Suggested Parlays -- the opposing starter's real name/ERA,
+        # straight from the same play dict, so the actual matchup is visible right here without
+        # needing to separately cross-reference Pitching Lab.
+        opp_name, opp_era = leg.get("Opp"), leg.get("OppERA")
+        opp_str = f" · vs {opp_name} ({opp_era:.2f} ERA)" if opp_name and opp_era is not None else ""
+        st.caption(f"{leg.get('Game', '')}{opp_str} · {leg.get('Why', '')}")
         if lineup == "Projected":
             # Same real, confirmed reason this matters as Suggested Parlays -- this platform's
             # own lineup source falls back to a team's full active roster when the actual posted
