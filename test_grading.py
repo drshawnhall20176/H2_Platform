@@ -829,6 +829,78 @@ def test_basket_prob_at_least_one_single_leg_equals_its_own_prob():
 
 
 # ----------------------------------------------------------------- build_speculative_basket
+# ----------------------------------------------------------------- build_game_coverage_picks
+def _hit_pick(player, game, model_prob, market="Batter Total Hits", side="Over", ceiling=1.5385):
+    conviction = round(model_prob / 0.65, 4)
+    return {"Player": player, "Game": game, "Market": market, "Side": side, "Line": 0.5,
+           "ModelProb": model_prob, "Conviction": conviction, "Fair": -150, "_ceiling": ceiling}
+
+
+def test_build_game_coverage_picks_exact_reported_scenario():
+    # THE exact real, reported case: real book-implied probabilities from an actual placed
+    # boost slip. Half of these don't clear conviction_to_grade's own floor at all -- but a
+    # coverage strategy still wants each game's safest option regardless.
+    plays = [
+        _hit_pick("Juan Soto", "NYM @ PHI", 0.694),
+        _hit_pick("Jonathan Aranda", "TB @ BOS", 0.712),
+        _hit_pick("Chase DeLauter", "PIT @ CLE", 0.664),
+    ]
+    picks = grading.build_game_coverage_picks(plays)
+    assert len(picks) == 3   # every game gets a pick, regardless of whether it clears the floor
+    players = {p["Player"] for p in picks}
+    assert players == {"Juan Soto", "Jonathan Aranda", "Chase DeLauter"}
+    # Confirmed: Juan Soto's real pick has no grade at all under the platform's own edge floor
+    soto_pick = next(p for p in picks if p["Player"] == "Juan Soto")
+    assert soto_pick["_grade"] is None
+    print("✓ build_game_coverage_picks returns every game's safest pick regardless of grade, matching the exact real reported scenario")
+
+
+def test_build_game_coverage_picks_one_per_game_picks_highest_prob():
+    plays = [
+        _hit_pick("Weaker Option", "NYM @ PHI", 0.60),
+        _hit_pick("Stronger Option", "NYM @ PHI", 0.75),
+    ]
+    picks = grading.build_game_coverage_picks(plays)
+    assert len(picks) == 1
+    assert picks[0]["Player"] == "Stronger Option"
+    print("✓ build_game_coverage_picks correctly picks the single highest-ModelProb play within one game")
+
+
+def test_build_game_coverage_picks_filters_to_exact_market_and_side():
+    plays = [
+        _hit_pick("Right Market", "G1", 0.70, market="Batter Total Hits", side="Over"),
+        _hit_pick("Wrong Side", "G1", 0.95, market="Batter Total Hits", side="Under"),
+        _hit_pick("Wrong Market", "G1", 0.95, market="Batter HR", side="Over"),
+    ]
+    picks = grading.build_game_coverage_picks(plays, market="Batter Total Hits", side="Over")
+    assert len(picks) == 1
+    assert picks[0]["Player"] == "Right Market"
+    print("✓ build_game_coverage_picks filters to the exact requested market/side, not whichever side happens to be favored")
+
+
+def test_build_game_coverage_picks_missing_game_omitted_not_fabricated():
+    plays = [_hit_pick("Only Player", "G1", 0.70, market="Batter HR")]   # no Total Hits play at all for this game
+    picks = grading.build_game_coverage_picks(plays, market="Batter Total Hits", side="Over")
+    assert picks == []
+    print("✓ build_game_coverage_picks correctly omits a game with no matching play, never fabricating a pick")
+
+
+def test_build_game_coverage_picks_sorted_by_model_prob_descending():
+    plays = [
+        _hit_pick("Low", "G1", 0.65), _hit_pick("High", "G2", 0.85), _hit_pick("Mid", "G3", 0.75),
+    ]
+    picks = grading.build_game_coverage_picks(plays)
+    assert [p["Player"] for p in picks] == ["High", "Mid", "Low"]
+    print("✓ build_game_coverage_picks returns results sorted by real probability, highest first")
+
+
+def test_build_game_coverage_picks_attaches_real_grade_when_it_exists():
+    plays = [_hit_pick("Elite Hitter", "G1", 0.85)]   # comfortably clears the floor
+    picks = grading.build_game_coverage_picks(plays)
+    assert picks[0]["_grade"] is not None
+    print("✓ build_game_coverage_picks still attaches a real grade when a pick genuinely has one, not always None")
+
+
 def test_speculative_basket_reuses_the_payout_objective():
     # Confirms the basket picks the SAME kind of legs Longshot would -- lowest real probability
     # among plays clearing the grade floor, not just any graded plays.

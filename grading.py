@@ -565,6 +565,56 @@ def basket_prob_at_least_one_wins(legs: List[Dict]) -> float:
     return 1.0 - prob_none_hit
 
 
+def build_game_coverage_picks(plays: List[Dict], market: str = "Batter Total Hits",
+                              side: str = "Over") -> List[Dict]:
+    """For EACH distinct game in `plays`, pick the SINGLE highest-ModelProb play matching the
+    given market/side -- "who is the safest hitter to get at least one hit, in each game,"
+    added directly on request after a real, reported gap: a real strategy (one safe hit pick
+    per game, within a time window, confirmed against actual placed bets at real book prices --
+    -175 to -329, 64-77% real implied probability) produced picks that mostly didn't clear
+    conviction_to_grade's own floor at all, or barely registered as a "D." Half of those real
+    picks graded None outright.
+
+    A REAL, DELIBERATE DEPARTURE from every other selection function in this module: this does
+    NOT require clearing conviction_to_grade's own floor, and does not use "whichever side is
+    favored" the way build_best_bets and everything downstream of it does. That floor and that
+    side-selection both measure REAL EDGE relative to a market-typical reference -- but "given
+    I'm making one pick per game regardless, who's the safest option available" is a genuinely
+    different question the edge-based grading system was never built to answer. Total Hits'
+    own reference (0.65) is already high, so even a real, good 70-77% pick barely beats
+    "typical" -- it can be a perfectly sound, safe pick and still show almost no edge, since edge
+    is the only thing conviction_to_grade measures.
+
+    Still attaches "_grade" (from conviction_to_grade, honestly None when a pick doesn't clear
+    the real floor) so a caller can show it -- "this is the safest option in this specific game,
+    even though it doesn't carry a validated edge by this platform's own definition" is an
+    honest, useful thing to display, not something to hide.
+
+    Filters to the EXACT specified market/side, not the play's own favored side, since a
+    coverage strategy specifically wants the Over side on a hits-type market for every game, not
+    whichever side happens to carry more edge in each individual matchup. A game with no play at
+    all for the given market/side is simply absent from the result -- never a fabricated pick.
+
+    Returns one play per game, sorted by ModelProb descending (highest-probability coverage
+    picks first), each carrying "_grade" (possibly None)."""
+    best_by_game: Dict[str, Dict] = {}
+    for pl in plays:
+        if pl.get("Market") != market or pl.get("Side") != side:
+            continue
+        g = pl.get("Game")
+        if g is None:
+            continue
+        current_best = best_by_game.get(g)
+        if current_best is None or pl.get("ModelProb", 0.0) > current_best.get("ModelProb", 0.0):
+            best_by_game[g] = pl
+
+    picks = []
+    for pl in best_by_game.values():
+        grade = conviction_to_grade(pl.get("Conviction"), pl.get("_ceiling"))
+        picks.append({**pl, "_grade": grade})
+    return sorted(picks, key=lambda p: p.get("ModelProb", 0.0), reverse=True)
+
+
 def build_speculative_basket(plays: List[Dict], size: int = 8, min_grade_letter: Optional[str] = "C",
                              max_per_game: int = 2, max_per_market: int = 2) -> Dict[str, Any]:
     """Build a basket of INDEPENDENT, single high-upside positions -- not a chained parlay.

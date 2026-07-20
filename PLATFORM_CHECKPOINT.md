@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 805/805 tests green)
+## What's in this checkpoint (all tested — 811/811 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -3964,6 +3964,53 @@ after, since it's a genuinely normal number_input once rendered.
 0.0 and ends at exactly 500.0, confirmed every consecutive step is exactly 0.5 throughout (not
 just at the endpoints), confirmed the exact expected count (1001 real, distinct values for a
 0-500 range in 0.5 steps), and confirmed no duplicates. 805/805 total passing.
+
+### Game Coverage mode: a real gap between the edge-based system and a real, proven strategy (2026-07-20)
+Shawn shared a real boost slip from actual placed bets the night before (8 "Hits" picks, one per
+game, -175 to -329) built manually via Dinger Engine and Matchup Lab, then asked why none of
+those picks showed up on Suggested Parlays or Speculative Basket.
+
+**Confirmed the exact mechanism directly, with the real numbers from the real slip**: computed
+each pick's raw Conviction against the platform's own Batter Total Hits reference (0.65). Half
+(Juan Soto -227/69%, Chase DeLauter -198/66%, Pedro Ramirez -175/64%, Dane Myers -186/65%) graded
+`None` outright — didn't clear the floor at all. The rest barely registered as "D." This isn't a
+bug in Suggested Parlays or Speculative Basket — it's that everything built this session answers
+"does this play have real edge over what's typical," and Total Hits' own typical reference is
+already high (65%), so even a genuinely good, real 65-77% pick shows almost no edge by that
+measure. The user's actual strategy was answering a different question entirely: "given I'm
+making one pick per game regardless, who's the safest option in each game" — never something
+the edge-based grading system was built to surface.
+
+**`grading.build_game_coverage_picks` built as a genuinely different selection function**, not a
+variant of anything else in the module: for each distinct game, picks the single highest-
+ModelProb play matching an exact requested market/side (not "whichever side is favored," which
+every other selection function in grading.py uses). Deliberately does NOT require clearing
+`conviction_to_grade`'s floor — still attaches `_grade` (honestly `None` when there isn't one),
+so the UI can show "this is the safest real option in this game" without pretending it has a
+validated edge it doesn't. A game with no matching play is simply absent from the result, never
+a fabricated pick.
+
+**Wired into Speculative Basket as a new "Basket mode" toggle** — "Speculative (chase payout)"
+(the original, unchanged behavior) vs "Game Coverage (one safest pick per game)" (market/side
+selectable, defaulting to Batter Total Hits/Over, matching the real reported strategy exactly).
+The coverage result gets reshaped into the same `{"legs", "prob_at_least_one_wins",
+"expected_winners"}` structure the rest of the page already renders, so no downstream display
+code needed rewriting. A real, self-caught bug along the way: `_grade_badge` would crash on a
+`None` grade (which Game Coverage picks can legitimately have) — fixed to render an honest "No
+edge floor" badge instead of hiding or crashing. A second real bug, caught only by actually
+executing the module rather than trusting `py_compile`: the fix's own `Optional[dict]` type hint
+referenced a name never imported in this file — `py_compile` only checks syntax, not name
+resolution, so this would have been a silent `NameError` the moment the page actually loaded.
+Caught by directly exec'ing the module and confirming the traceback, not by inspection alone.
+
+**6 new tests**, including the exact reported scenario reproduced directly with the real book-
+implied probabilities from the actual slip (confirming Juan Soto's real pick correctly comes back
+with no grade, exactly matching the real observed gap) — passed on the first run. Plus one-per-
+game selection, exact market/side filtering (not favored-side), a missing-game case correctly
+omitted rather than fabricated, correct ModelProb-descending sort, and confirmation a genuinely
+strong pick still gets a real grade when it has one. Plus a full, realistic end-to-end simulation
+across five games confirming exactly one pick per game, with grades in the real range (mostly
+"D" or ungraded) matching the actual reported numbers. 811/811 total passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
