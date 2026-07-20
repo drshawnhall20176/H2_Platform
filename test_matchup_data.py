@@ -128,6 +128,48 @@ def test_hitter_splits_by_family():
     print("✓ hitter splits: SLG-against and whiff by family")
 
 
+def _mock_pitches_hitter_contact_ev():
+    """60 pitches for batter 200 vs Fastball (clears MIN_PITCHES_FAMILY=40), with explicit
+    real values to hand-verify contact% and exit velo against: 30 swings (10 whiff, 12 foul,
+    8 hit_into_play) -> whiff = 10/30, contact = 20/30. 8 balls in play with launch_speed
+    92-106 (step 2) -> avg exit velo = 99.0."""
+    descs = (["swinging_strike"] * 10 + ["foul"] * 12 + ["hit_into_play"] * 8) + (["ball"] * 20 + ["called_strike"] * 10)
+    launch_speeds = [None] * 22 + [92.0, 94.0, 96.0, 98.0, 100.0, 102.0, 104.0, 106.0] + [None] * 30
+    rows = [{"batter": 200, "pitcher": 100, "pitch_type": "FF", "description": descs[i],
+            "launch_speed": launch_speeds[i], "events": "", "estimated_woba_using_speedangle": None}
+           for i in range(60)]
+    return pd.DataFrame(rows)
+
+
+def test_hitter_splits_contact_pct_and_exit_velo():
+    hs = M.build_hitter_splits(_mock_pitches_hitter_contact_ev())
+    row = hs.iloc[0]
+    assert abs(row["whiff"] - 10 / 30) < 1e-9
+    assert abs(row["contact"] - 20 / 30) < 1e-9
+    assert abs((row["whiff"] + row["contact"]) - 1.0) < 1e-9   # real, internally-consistent complement
+    assert abs(row["exit_velo"] - 99.0) < 1e-9
+    print("✓ hitter splits (by family): contact% is the honest complement of whiff%, exit velo hand-verified")
+
+
+def test_hitter_splits_exit_velo_nan_when_no_balls_in_play():
+    rows = [{"batter": 201, "pitcher": 100, "pitch_type": "SL", "description": "swinging_strike" if i < 10 else "ball",
+            "launch_speed": None, "events": "", "estimated_woba_using_speedangle": None} for i in range(45)]
+    hs = M.build_hitter_splits(pd.DataFrame(rows))
+    row = hs.iloc[0]
+    assert pd.isna(row["exit_velo"])
+    print("✓ hitter splits (by family): exit velo is honestly NaN, never a fabricated 0.0, with no real batted-ball sample")
+
+
+def test_hitter_pitch_type_splits_contact_pct_and_exit_velo():
+    df = _mock_pitches_hitter_contact_ev()
+    df["pitch_type"] = "FF"   # already FF, but explicit for clarity
+    hts = M.build_hitter_pitch_type_splits(df)
+    row = hts.iloc[0]
+    assert abs(row["contact"] - 20 / 30) < 1e-9
+    assert abs(row["exit_velo"] - 99.0) < 1e-9
+    print("✓ hitter pitch-type splits: contact%/exit velo hand-verified, same math as the family-level split")
+
+
 def test_matchup_score_direction():
     # A pitch the pitcher misses bats with (high p_whiff) vs a hitter who whiffs a lot and does
     # little damage should score HIGHER than the same pitch vs a hitter who crushes that family.
@@ -189,6 +231,35 @@ def test_build_matchup_exit_velo_none_when_arsenal_lacks_it():
     assert rows[0]["zone_pct"] is None
     assert rows[0]["contact_pct"] is None
     print("✓ build_matchup honestly surfaces zone_pct/contact_pct/exit_velo as None when an arsenal entry lacks them, never a fabricated 0.0")
+
+
+def test_build_matchup_passes_through_hitter_contact_and_exit_velo():
+    # Added directly on request: the hitter-side mirror of zone%/contact%/exit velo, added to
+    # build_hitter_splits, must flow through build_matchup's join the same way h_whiff/h_slg
+    # already do.
+    arsenals = {100: [
+        {"pitch_type": "SL", "pitch_name": "Slider", "family": "Breaking", "usage": 0.4,
+         "whiff": 0.60, "putaway": 0.5, "velo": 86.0},
+    ]}
+    hitter_splits = {200: {
+        "Breaking": {"whiff": 0.45, "slg": 0.230, "xwoba": 0.250, "pitches": 120,
+                    "contact": 0.55, "exit_velo": 89.3},
+    }}
+    rows = M.build_matchup(100, 200, arsenals, hitter_splits)
+    assert rows[0]["h_contact"] == 0.55
+    assert rows[0]["h_exit_velo"] == 89.3
+    print("✓ build_matchup correctly passes through the hitter's own contact%/exit velo for the matched family")
+
+
+def test_build_matchup_hitter_contact_and_exit_velo_none_when_hitter_missing():
+    arsenals = {100: [
+        {"pitch_type": "SL", "pitch_name": "Slider", "family": "Breaking", "usage": 0.4,
+         "whiff": 0.60, "putaway": 0.5, "velo": 86.0},
+    ]}
+    rows = M.build_matchup(100, 999, arsenals, {})   # hitter 999 has no cached splits at all
+    assert rows[0]["h_contact"] is None
+    assert rows[0]["h_exit_velo"] is None
+    print("✓ build_matchup correctly leaves h_contact/h_exit_velo as None when the hitter has no cached data, not a crash")
 
 
 def test_empty_inputs_dont_crash():

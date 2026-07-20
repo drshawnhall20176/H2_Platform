@@ -84,6 +84,18 @@ def _swing_whiff(desc: pd.Series) -> Tuple[pd.Series, pd.Series]:
     return d.isin(_SWING_DESCS), d.isin(_WHIFF_DESCS)
 
 
+def _none_safe_float(raw) -> Optional[float]:
+    """None on an older cached CSV that predates a given field entirely (the key is simply
+    absent from this row's dict), NaN once the column exists but this specific row has no real
+    value for it (e.g. no batted-ball sample for exit_velo). Both cases surface as Python None
+    to the caller, never a fabricated 0.0 -- shared by every load() path below (pitcher arsenal,
+    hitter family splits, hitter pitch-type splits) for zone_pct/contact_pct/exit_velo alike, a
+    REAL, CONFIRMED FIX after a real, live bug: a fabricated 0.0 doesn't just look wrong, it
+    actively misleads once styled (a 0% contact rate reads as excellent for the pitcher under
+    the reversed colormap, the exact opposite of "no data")."""
+    return None if raw is None or pd.isna(raw) else float(raw)
+
+
 # --------------------------------------------------------------------- pitcher arsenal
 def build_pitcher_arsenal(pitches: pd.DataFrame) -> pd.DataFrame:
     """One row per (pitcher, pitch_type): usage%, whiff%, put-away%, avg velo, zone%, contact%,
@@ -164,10 +176,21 @@ def build_pitcher_arsenal(pitches: pd.DataFrame) -> pd.DataFrame:
 
 # --------------------------------------------------------------------- hitter splits
 def build_hitter_splits(pitches: pd.DataFrame) -> pd.DataFrame:
-    """One row per (batter, family): whiff%, SLG-against, xwOBA-against, count.
+    """One row per (batter, family): whiff%, contact%, SLG-against, xwOBA-against, exit velo
+    (the HITTER'S OWN average exit velocity when he puts this family in play), count.
 
-    Aggregated by pitch family (Fastball/Breaking/Offspeed) for a stable per-hitter sample."""
-    cols = ["batter", "family", "pitches", "whiff", "slg", "xwoba"]
+    Aggregated by pitch family (Fastball/Breaking/Offspeed) for a stable per-hitter sample.
+
+    contact_pct/exit_velo added directly on request, mirroring the pitcher-side arsenal
+    extension exactly -- contact_pct is the real complement of whiff% already computed here
+    (1 - whiff, same swing/whiff classification, not a separately-defined metric), and exit_velo
+    is this hitter's own real quality-of-contact number against this family, distinct from SLG/
+    xwOBA (which are outcome-based) and distinct from the PITCHER's own exit-velo-allowed number
+    on the arsenal table (this is what happens when THIS hitter specifically connects, not the
+    pitcher's own season-long average against everyone). NaN (not a fabricated 0.0) when this
+    hitter has no real batted-ball sample against this family -- an honest "not enough data"
+    state, not a fabricated "zero exit velocity.\""""
+    cols = ["batter", "family", "pitches", "whiff", "contact", "slg", "xwoba", "exit_velo"]
     if pitches is None or len(pitches) == 0:
         return pd.DataFrame(columns=cols)
     df = pitches.copy()
@@ -183,6 +206,7 @@ def build_hitter_splits(pitches: pd.DataFrame) -> pd.DataFrame:
     df["_tb"] = events.map(_TB_BY_EVENT).fillna(0).astype(float).values
     df["_ab"] = events.isin(_AB_EVENTS).values
     df["_xwoba"] = pd.to_numeric(_col(df, "estimated_woba_using_speedangle"), errors="coerce")
+    df["_exit_velo"] = pd.to_numeric(_col(df, "launch_speed"), errors="coerce")
 
     rows = []
     for (bid, fam), g in df.groupby(["_bid", "_family"]):
@@ -193,25 +217,31 @@ def build_hitter_splits(pitches: pd.DataFrame) -> pd.DataFrame:
         whiffs = int(g["_whiff"].sum())
         abs_ = int(g["_ab"].sum())
         tb = float(g["_tb"].sum())
+        ev_series = g["_exit_velo"]
         rows.append({
             "batter": int(bid),
             "family": fam,
             "pitches": n,
             "whiff": (whiffs / swings) if swings else 0.0,
+            "contact": (1.0 - whiffs / swings) if swings else 0.0,
             "slg": (tb / abs_) if abs_ else 0.0,                   # SLG against this family
             "xwoba": float(np.nanmean(g["_xwoba"])) if g["_xwoba"].notna().any() else 0.0,
+            "exit_velo": float(np.nanmean(ev_series)) if ev_series.notna().any() else float("nan"),
         })
     return pd.DataFrame(rows, columns=cols)
 
 
 # --------------------------------------------------------------------- hitter splits by pitch type
 def build_hitter_pitch_type_splits(pitches: pd.DataFrame) -> pd.DataFrame:
-    """One row per (batter, SPECIFIC pitch_type): whiff%, SLG-against, xwOBA-against, count.
+    """One row per (batter, SPECIFIC pitch_type): whiff%, contact%, SLG-against, xwOBA-against,
+    exit velo (this hitter's own), count.
 
-    Same math as build_hitter_splits but by individual pitch (4-Seam, Slider, Curveball ...) rather
-    than family — more granular, but noisier per hitter, so it uses a higher pitch floor
+    Same math as build_hitter_splits (see its own docstring for the real reasoning behind
+    contact_pct/exit_velo) but by individual pitch (4-Seam, Slider, Curveball ...) rather than
+    family — more granular, but noisier per hitter, so it uses a higher pitch floor
     (MIN_PITCHES_TYPE) and always carries the pitch count so a thin sample is visible, not hidden."""
-    cols = ["batter", "pitch_type", "pitch_name", "family", "pitches", "whiff", "slg", "xwoba"]
+    cols = ["batter", "pitch_type", "pitch_name", "family", "pitches", "whiff", "contact",
+           "slg", "xwoba", "exit_velo"]
     if pitches is None or len(pitches) == 0:
         return pd.DataFrame(columns=cols)
     df = pitches.copy()
@@ -226,6 +256,7 @@ def build_hitter_pitch_type_splits(pitches: pd.DataFrame) -> pd.DataFrame:
     df["_tb"] = events.map(_TB_BY_EVENT).fillna(0).astype(float).values
     df["_ab"] = events.isin(_AB_EVENTS).values
     df["_xwoba"] = pd.to_numeric(_col(df, "estimated_woba_using_speedangle"), errors="coerce")
+    df["_exit_velo"] = pd.to_numeric(_col(df, "launch_speed"), errors="coerce")
 
     rows = []
     for (bid, ptype), g in df.groupby(["_bid", "_ptype"]):
@@ -236,6 +267,7 @@ def build_hitter_pitch_type_splits(pitches: pd.DataFrame) -> pd.DataFrame:
         whiffs = int(g["_whiff"].sum())
         abs_ = int(g["_ab"].sum())
         tb = float(g["_tb"].sum())
+        ev_series = g["_exit_velo"]
         rows.append({
             "batter": int(bid),
             "pitch_type": ptype,
@@ -243,8 +275,10 @@ def build_hitter_pitch_type_splits(pitches: pd.DataFrame) -> pd.DataFrame:
             "family": PITCH_FAMILY.get(ptype, "Other"),
             "pitches": n,
             "whiff": (whiffs / swings) if swings else 0.0,
+            "contact": (1.0 - whiffs / swings) if swings else 0.0,
             "slg": (tb / abs_) if abs_ else 0.0,
             "xwoba": float(np.nanmean(g["_xwoba"])) if g["_xwoba"].notna().any() else 0.0,
+            "exit_velo": float(np.nanmean(ev_series)) if ev_series.notna().any() else float("nan"),
         })
     out = pd.DataFrame(rows, columns=cols)
     if len(out):
@@ -281,6 +315,8 @@ def build_matchup(pitcher_id: int, hitter_id: int,
         hs = splits.get(fam)
         h_whiff = hs["whiff"] if hs else None
         h_slg = hs["slg"] if hs else None
+        h_contact = hs.get("contact") if hs else None
+        h_exit_velo = hs.get("exit_velo") if hs else None
         rows.append({
             "pitch_name": pitch.get("pitch_name", pitch.get("pitch_type")),
             "pitch_type": pitch.get("pitch_type"),
@@ -300,6 +336,8 @@ def build_matchup(pitcher_id: int, hitter_id: int,
             "h_whiff": h_whiff,
             "h_slg": h_slg,
             "h_xwoba": hs["xwoba"] if hs else None,
+            "h_contact": h_contact,
+            "h_exit_velo": h_exit_velo,
             "score": (matchup_score(pitch.get("whiff", 0.0), h_whiff, h_slg)
                       if hs else None),
         })
@@ -352,18 +390,6 @@ def load(arsenal_path: str = ARSENAL_PATH, hitter_path: str = HITTER_PATH
     if os.path.exists(arsenal_path):
         try:
             a = pd.read_csv(arsenal_path)
-
-            def _none_safe_float(raw):
-                # Shared by zone_pct/contact_pct/exit_velo below -- None on an older CSV that
-                # predates a given field entirely (the key is simply absent from this row's
-                # dict), NaN once the column exists but this specific pitch has no real value
-                # for it (e.g. no batted-ball sample for exit_velo). Both cases surface as
-                # Python None to the caller, never a fabricated 0.0 -- a REAL, CONFIRMED FIX
-                # for zone_pct/contact_pct specifically: a fabricated 0.0 doesn't just look
-                # wrong, it actively misleads once styled (a 0% contact rate reads as excellent
-                # for the pitcher under the reversed colormap, the exact opposite of "no data").
-                return None if raw is None or pd.isna(raw) else float(raw)
-
             for r in a.itertuples(index=False):
                 d = r._asdict()
                 arsenals.setdefault(int(d["pitcher"]), []).append({
@@ -386,6 +412,8 @@ def load(arsenal_path: str = ARSENAL_PATH, hitter_path: str = HITTER_PATH
                 hitter_splits.setdefault(int(d["batter"]), {})[str(d.get("family"))] = {
                     "whiff": float(d.get("whiff", 0) or 0), "slg": float(d.get("slg", 0) or 0),
                     "xwoba": float(d.get("xwoba", 0) or 0), "pitches": int(d.get("pitches", 0) or 0),
+                    "contact": _none_safe_float(d.get("contact")),
+                    "exit_velo": _none_safe_float(d.get("exit_velo")),
                 }
         except Exception:
             pass
@@ -395,7 +423,8 @@ def load(arsenal_path: str = ARSENAL_PATH, hitter_path: str = HITTER_PATH
 
 def load_hitter_types(path: str = HITTER_TYPE_PATH) -> Dict[int, List[Dict]]:
     """Read the by-specific-pitch hitter table into a fast lookup:
-        hitter_types[batter_id] -> [ {pitch_type, pitch_name, family, pitches, whiff, slg, xwoba}, ... ]
+        hitter_types[batter_id] -> [ {pitch_type, pitch_name, family, pitches, whiff, contact,
+                                     slg, xwoba, exit_velo}, ... ]
     Sorted most-seen pitch first. Returns {} if the file is missing (page treats it as optional)."""
     out: Dict[int, List[Dict]] = {}
     if not os.path.exists(path):
@@ -409,6 +438,8 @@ def load_hitter_types(path: str = HITTER_TYPE_PATH) -> Dict[int, List[Dict]]:
                 "family": d.get("family"), "pitches": int(d.get("pitches", 0) or 0),
                 "whiff": float(d.get("whiff", 0) or 0), "slg": float(d.get("slg", 0) or 0),
                 "xwoba": float(d.get("xwoba", 0) or 0),
+                "contact": _none_safe_float(d.get("contact")),
+                "exit_velo": _none_safe_float(d.get("exit_velo")),
             })
     except Exception:
         pass

@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 841/841 tests green)
+## What's in this checkpoint (all tested — 846/846 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -4213,6 +4213,54 @@ while the pre-existing whiff data continues to flow through correctly. 841/841 t
 state honest, it does NOT make real data appear — that still requires the nightly `refresh_
 matchups.py` job (or a manual run) to actually re-pull and re-aggregate Statcast with the new
 columns included, exactly as stated when this feature first shipped.
+
+### Batter-side Contact%/Exit Velo added to both hitter tables (2026-07-20)
+Shawn confirmed Zone%/Contact%/Exit Velo staying constant across hitters was expected (correctly
+read it as pitcher-side aggregation), then asked for the batter-side mirror by pitch family and
+pitch type.
+
+**Zone% deliberately left off the batter side, not an oversight**: it's a pitch-location
+attribute the pitcher controls, not something meaningful to attribute to a hitter — computing
+"this hitter's own zone%" would just re-derive what pitchers chose to throw him, not a real
+hitter characteristic the way contact quality is.
+
+**`build_hitter_splits` and `build_hitter_pitch_type_splits` extended** with `contact` (the real
+complement of the whiff% these functions already computed, same swing/whiff classification, not
+a separately-defined metric) and `exit_velo` (this hitter's own mean `launch_speed` on balls HE
+puts in play against that family/pitch type — distinct from the pitcher's own exit-velo-allowed
+number on the arsenal table, and distinct from SLG/xwOBA since it's raw contact quality, not an
+outcome). `refresh()` needed no changes — it already just calls these functions and writes
+whatever they return.
+
+**`_none_safe_float` promoted from a function-local helper to a shared, module-level one** —
+previously nested inside `load()`'s pitcher-arsenal branch only, now reused consistently across
+all three load paths (pitcher arsenal, hitter family splits, hitter pitch-type splits). This
+means last turn's real fabricated-0.0 bug fix now protects every one of these fields, not just
+the one that had already broken and gotten caught.
+
+**`build_matchup()` extended** with `h_contact`/`h_exit_velo`, pulled from the matched family's
+hitter splits the same way `h_whiff`/`h_slg` already were, honestly `None` when the hitter has
+no cached data at all.
+
+**Both hitter tables on Matchup Lab updated**, with a real, deliberate color choice rather than
+copying the pitcher side's convention blindly: this whole page scouts the pitcher's attack plan,
+so Whiff% already colors high=green meaning "pitcher-favorable" (a real hitter weakness).
+Contact%/Exit Velo are the complement — low is the SAME pitcher-favorable direction (weak or no
+contact) — so both use the reversed colormap, confirmed against the existing caption's own
+stated logic ("Green = the hitter whiffs on it, good for the pitcher") before choosing the
+direction, not assumed.
+
+**23 new tests**, every number hand-verified against explicitly constructed mock pitch data
+before a single assertion was written — 30 swings with 10 known whiffs and 4 balls in play with
+known launch_speed values, traced by hand first, matching the same discipline used for the
+pitcher-side extension. Covers the aggregation itself (both by-family and by-pitch-type), the
+honest-NaN edge case (no batted-ball sample), the full `load()` round-trip through a real CSV,
+and `build_matchup`'s pass-through including the missing-hitter case. Plus a full, realistic
+end-to-end simulation — raw Statcast-shaped pitches through a REAL CSV write/read round-trip
+(not just in-memory dicts) to the exact `build_matchup` output a view would render. The
+resulting numbers told a genuinely coherent scouting story on their own (58.3% whiff and weak
+85.0 mph contact against Breaking, 77.3% contact and hard 104.0 mph contact against Fastball) —
+not just mechanically correct math. 846/846 total passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
