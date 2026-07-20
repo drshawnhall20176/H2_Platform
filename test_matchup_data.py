@@ -52,6 +52,69 @@ def test_pitcher_arsenal_min_pitches_filter():
     print("✓ arsenal: rare pitches below the sample floor are dropped")
 
 
+def _mock_pitches_with_zone_and_ev():
+    """30 pitches (clears MIN_PITCHES_ARSENAL) for pitcher 300, pitch FF, with explicit real
+    Statcast zone/launch_speed values to hand-verify zone%, contact%, and exit velo against.
+    18 in-zone (Statcast zone codes 1-9), 12 out-of-zone (codes 11-14) -> zone% = 0.6.
+    15 swings (5 whiff, 6 foul, 4 hit_into_play), 15 non-swings -> whiff = 5/15, contact = 10/15.
+    4 balls in play with launch_speed 90/95/100/105 -> avg exit velo = 97.5."""
+    zones = ([1, 2, 3, 4, 5, 6, 7, 8, 9] * 2) + ([11, 12, 13, 14] * 3)
+    descs = (["swinging_strike"] * 5 + ["foul"] * 6 + ["hit_into_play"] * 4) + (["ball"] * 10 + ["called_strike"] * 5)
+    launch_speeds = [None] * 11 + [90.0, 95.0, 100.0, 105.0] + [None] * 15
+    rows = [{"pitcher": 300, "batter": 400, "pitch_type": "FF", "release_speed": 94.0,
+            "strikes": 0, "zone": zones[i], "description": descs[i], "launch_speed": launch_speeds[i]}
+           for i in range(30)]
+    return pd.DataFrame(rows)
+
+
+def test_pitcher_arsenal_zone_pct():
+    ars = M.build_pitcher_arsenal(_mock_pitches_with_zone_and_ev())
+    row = ars.iloc[0]
+    assert abs(row["zone_pct"] - 0.6) < 1e-9
+    print("✓ arsenal: zone% correctly computed from Statcast's own zone codes (1-9 in-zone)")
+
+
+def test_pitcher_arsenal_contact_pct_is_complement_of_whiff():
+    ars = M.build_pitcher_arsenal(_mock_pitches_with_zone_and_ev())
+    row = ars.iloc[0]
+    assert abs(row["whiff"] - 5 / 15) < 1e-9
+    assert abs(row["contact_pct"] - 10 / 15) < 1e-9
+    assert abs((row["whiff"] + row["contact_pct"]) - 1.0) < 1e-9   # internally consistent by design
+    print("✓ arsenal: contact% is the real, internally-consistent complement of whiff%")
+
+
+def test_pitcher_arsenal_exit_velo():
+    ars = M.build_pitcher_arsenal(_mock_pitches_with_zone_and_ev())
+    row = ars.iloc[0]
+    assert abs(row["exit_velo"] - 97.5) < 1e-9
+    print("✓ arsenal: exit velo correctly averages launch_speed on real balls in play only")
+
+
+def test_pitcher_arsenal_exit_velo_nan_when_no_balls_in_play():
+    # A real, honest edge case: a pitch type with real swings/whiffs but zero balls actually put
+    # in play must show NaN (no fabricated 0.0 exit velocity), since 0.0 mph would misleadingly
+    # read as "hit weakly" rather than "no real sample at all."
+    rows = [{"pitcher": 301, "batter": 400, "pitch_type": "SL", "release_speed": 85.0,
+            "strikes": 0, "zone": 5, "description": "swinging_strike" if i < 10 else "ball",
+            "launch_speed": None} for i in range(30)]
+    ars = M.build_pitcher_arsenal(pd.DataFrame(rows))
+    row = ars.iloc[0]
+    assert pd.isna(row["exit_velo"])
+    print("✓ arsenal: exit velo is honestly NaN, never a fabricated 0.0, when there's no real batted-ball sample")
+
+
+def test_pitcher_arsenal_zone_and_contact_drift_safe_when_columns_missing():
+    # The established "drift-safe" pattern this whole file already follows: real Statcast column
+    # names occasionally shift between pybaseball versions. zone/launch_speed missing entirely
+    # (as in the original _mock_pitches fixture, which predates this feature) must not crash.
+    ars = M.build_pitcher_arsenal(_mock_pitches())
+    assert "zone_pct" in ars.columns and "contact_pct" in ars.columns and "exit_velo" in ars.columns
+    ff = ars[(ars["pitcher"] == 100) & (ars["pitch_type"] == "FF")].iloc[0]
+    assert ff["zone_pct"] == 0.0    # no zone data at all -> correctly 0 in-zone pitches, not a crash
+    assert pd.isna(ff["exit_velo"])  # no launch_speed data at all -> honestly NaN, not a crash
+    print("✓ arsenal: zone%/contact%/exit velo stay drift-safe when the underlying Statcast columns are entirely absent")
+
+
 def test_hitter_splits_by_family():
     hs = M.build_hitter_splits(_mock_pitches())
     fb = hs[(hs["batter"] == 200) & (hs["family"] == "Fastball")].iloc[0]
@@ -97,6 +160,33 @@ def test_build_matchup_join_and_sort():
     print("✓ build_matchup: joins arsenal to splits, sorts by score, handles missing hitter")
 
 
+def test_build_matchup_passes_through_zone_contact_exit_velo():
+    arsenals = {100: [
+        {"pitch_type": "FF", "pitch_name": "4-Seam FB", "family": "Fastball", "usage": 1.0,
+         "whiff": 0.20, "putaway": 0.2, "velo": 95.0,
+         "zone_pct": 0.58, "contact_pct": 0.80, "exit_velo": 92.3},
+    ]}
+    rows = M.build_matchup(100, 999, arsenals, {})   # no hitter splits needed for this check
+    assert rows[0]["zone_pct"] == 0.58
+    assert rows[0]["contact_pct"] == 0.80
+    assert rows[0]["exit_velo"] == 92.3
+    print("✓ build_matchup correctly passes through zone%/contact%/exit velo from the arsenal into its own rows")
+
+
+def test_build_matchup_exit_velo_none_when_arsenal_lacks_it():
+    # A real, honest default: an arsenal entry with no exit_velo key at all (e.g. an older
+    # cached CSV, per load()'s own backward-compatibility handling) must surface as None here
+    # too, not crash or fabricate a 0.0.
+    arsenals = {100: [
+        {"pitch_type": "FF", "pitch_name": "4-Seam FB", "family": "Fastball", "usage": 1.0,
+         "whiff": 0.20, "putaway": 0.2, "velo": 95.0},   # no zone_pct/contact_pct/exit_velo keys
+    ]}
+    rows = M.build_matchup(100, 999, arsenals, {})
+    assert rows[0]["exit_velo"] is None
+    assert rows[0]["zone_pct"] == 0.0
+    print("✓ build_matchup handles an arsenal entry missing the new fields gracefully")
+
+
 def test_empty_inputs_dont_crash():
     assert M.build_pitcher_arsenal(pd.DataFrame()).empty
     assert M.build_hitter_splits(pd.DataFrame()).empty
@@ -120,6 +210,66 @@ def test_hitter_pitch_type_splits():
     ht2 = M.build_hitter_pitch_type_splits(pd.concat([_mock_pitches(), extra], ignore_index=True))
     assert "KN" not in set(ht2["pitch_type"])
     print("✓ hitter pitch-type splits: per-pitch whiff/SLG, sample floor, names")
+
+
+# ----------------------------------------------------------------- load() -- no prior direct coverage
+def test_load_reads_zone_contact_exit_velo_from_a_real_csv():
+    import tempfile
+    import os
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "arsenal.csv")
+        pd.DataFrame([{"pitcher": 500, "pitch_type": "FF", "pitch_name": "4-Seam FB",
+                      "family": "Fastball", "pitches": 100, "usage": 1.0, "whiff": 0.25,
+                      "putaway": 0.3, "velo": 95.0, "zone_pct": 0.55, "contact_pct": 0.75,
+                      "exit_velo": 91.5}]).to_csv(path, index=False)
+        arsenals, _ = M.load(arsenal_path=path, hitter_path="/nonexistent")
+        row = arsenals[500][0]
+        assert row["zone_pct"] == 0.55
+        assert row["contact_pct"] == 0.75
+        assert row["exit_velo"] == 91.5
+    print("✓ load() correctly reads real zone%/contact%/exit velo values from a real CSV")
+
+
+def test_load_backward_compatible_with_older_csv_missing_new_columns():
+    # A REAL, CONFIRMED regression guard: a cache file written BEFORE this feature existed (no
+    # zone_pct/contact_pct/exit_velo columns at all) must still load without crashing -- the
+    # exact same "drift-safe against an older/different schema" posture this whole module
+    # already follows for pybaseball's own occasional column drift.
+    import tempfile
+    import os
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "old_arsenal.csv")
+        pd.DataFrame([{"pitcher": 501, "pitch_type": "SL", "pitch_name": "Slider",
+                      "family": "Breaking", "pitches": 80, "usage": 1.0, "whiff": 0.40,
+                      "putaway": 0.5, "velo": 86.0}]).to_csv(path, index=False)   # OLD schema
+        arsenals, _ = M.load(arsenal_path=path, hitter_path="/nonexistent")
+        row = arsenals[501][0]
+        assert row["zone_pct"] == 0.0    # honestly absent, not a crash
+        assert row["contact_pct"] == 0.0
+        assert row["exit_velo"] is None  # None, not a fabricated 0.0 -- distinguishable from a
+                                        # real "no batted-ball sample" NaN case read from a
+                                        # current-schema CSV
+    print("✓ load() stays backward-compatible with a cached CSV written before this feature existed")
+
+
+def test_load_exit_velo_none_when_csv_has_real_nan():
+    # Distinguishes the TWO real reasons exit_velo could be missing: an old CSV (tested above,
+    # -> None) vs a current-schema CSV where THIS specific pitch genuinely had no batted-ball
+    # sample (a real NaN value present in the column) -- both should surface as None to the
+    # caller, since the distinction between "column absent" and "column present but empty for
+    # this row" isn't meaningful once it reaches the view layer.
+    import tempfile
+    import os
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "arsenal.csv")
+        pd.DataFrame([{"pitcher": 502, "pitch_type": "CU", "pitch_name": "Curveball",
+                      "family": "Breaking", "pitches": 90, "usage": 1.0, "whiff": 0.35,
+                      "putaway": 0.4, "velo": 78.0, "zone_pct": 0.5, "contact_pct": 0.65,
+                      "exit_velo": float("nan")}]).to_csv(path, index=False)
+        arsenals, _ = M.load(arsenal_path=path, hitter_path="/nonexistent")
+        row = arsenals[502][0]
+        assert row["exit_velo"] is None
+    print("✓ load() correctly surfaces a real, current-schema NaN exit_velo as None too")
 
 
 if __name__ == "__main__":

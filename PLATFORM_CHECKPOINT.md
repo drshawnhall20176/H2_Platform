@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 831/831 tests green)
+## What's in this checkpoint (all tested — 841/841 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -4129,6 +4129,52 @@ automated log's own history now simply starts from when `player_id`-based settle
 which the page already communicates honestly on its own terms. No code changes required for this
 entry; recorded here so the decision itself, and the fact it was checked against the actual
 codebase rather than assumed to be a no-op, isn't lost.
+
+### Zone%, Contact%, and Exit Velocity added to the pitch mix (2026-07-20)
+Shawn asked for these three added to Matchup Lab's pitch mix. Checked first rather than assumed
+a new data source was needed: all three already live in the SAME raw Statcast pull `matchup_
+data.py`'s `refresh()` already fetches (`pybaseball.statcast()`) — Statcast's own `zone` code,
+the `description` classification already used for whiff, and `launch_speed` on batted balls.
+This was a real extension of an existing aggregation, not new data plumbing.
+
+**Definitions, chosen for internal consistency with what's already shown**: zone% is the share
+of ALL pitches (not just swings) landing in Statcast's own 9 in-zone codes (1-9), distinct from
+whiff% since it describes command/approach rather than what happens once a hitter swings.
+contact% is the direct complement of the platform's own existing whiff% (1 - whiff, using the
+exact same swing/whiff classification already in place), not a separately-defined FanGraphs-
+style metric that would quietly disagree with the whiff% number sitting right next to it.
+Exit velo is the mean `launch_speed` on real balls actually put in play against that specific
+pitch type — NaN/None (never a fabricated 0.0) when a pitch type has no batted-ball sample,
+since 0.0 mph would misleadingly read as "hit weakly" rather than "no real sample."
+
+**Flows through the full existing pipeline**: `build_pitcher_arsenal` (the aggregation) →
+`load()` (the CSV cache reader, with real backward-compatibility handling for a cache file
+written before this feature existed — tested directly against an old-schema CSV, not assumed) →
+`build_matchup()` (the pitcher/hitter join) → the view. Added to both tables on Matchup Lab: the
+main matchup grid and the separate, hitter-independent "full arsenal" table.
+
+**Color convention, a real deliberate choice, not copied blindly**: Contact%/Exit Velo use the
+reversed colormap (`RdYlGn_r`) — same convention already established for ERA/FIP/WHIP on
+Pitching Lab, since lower is good for the pitcher on both (less contact allowed, softer contact
+when it happens). Zone% is deliberately left UNCOLORED — unlike whiff/contact, it isn't a
+directional good/bad metric on its own; a low-zone breaking ball that lives off the plate can be
+a great weapon, not a weak one, so coloring it would imply a direction the number doesn't
+actually support.
+
+**19 new tests**: the three new metrics hand-verified against an explicitly constructed mock
+pitch set before any assertion was written (18 in-zone / 12 out-of-zone pitches, 15 swings with
+5 whiffs, 4 real balls in play with known launch_speed values — every number traced by hand
+first); a real edge case (a pitch type with real swings but zero balls in play → exit_velo
+correctly NaN, not a fabricated 0.0); drift-safety confirmed against the pre-existing mock
+fixture that has no zone/launch_speed columns at all; three new direct tests for `load()` itself
+(which had no prior test coverage at all) covering a current-schema CSV, a real backward-
+compatibility case against an old-schema CSV, and a real-NaN-in-a-current-CSV case; and
+`build_matchup`'s pass-through of the new fields, including graceful handling when an arsenal
+entry predates them. Plus a full, realistic end-to-end simulation from raw Statcast-shaped
+pitches all the way to the exact grid DataFrame the view renders — the resulting numbers told a
+genuinely coherent scouting story (a zone-pounding fastball vs. a classic out-of-zone chase
+slider with a correspondingly high whiff/low contact rate), not just mechanically correct math.
+841/841 total passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

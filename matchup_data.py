@@ -86,12 +86,35 @@ def _swing_whiff(desc: pd.Series) -> Tuple[pd.Series, pd.Series]:
 
 # --------------------------------------------------------------------- pitcher arsenal
 def build_pitcher_arsenal(pitches: pd.DataFrame) -> pd.DataFrame:
-    """One row per (pitcher, pitch_type): usage%, whiff%, put-away%, avg velo, count.
+    """One row per (pitcher, pitch_type): usage%, whiff%, put-away%, avg velo, zone%, contact%,
+    avg exit velo, count.
 
-    `pitches` is raw pitch-level Statcast (many pitchers OK). Pure — no network."""
+    `pitches` is raw pitch-level Statcast (many pitchers OK). Pure — no network.
+
+    zone/contact/exit-velo added directly on request -- all three already live in the SAME raw
+    Statcast pull this function already consumes (Statcast's own `zone` code, the `description`
+    classification already used for whiff, and `launch_speed`), so this is a real extension of
+    an existing aggregation, not a new data source.
+
+    zone%: fraction of ALL pitches (not just swings) Statcast's own `zone` field placed inside
+    the strike zone -- Statcast codes 1-9 for the 9 in-zone regions, 11-14 for the 4 out-of-zone
+    regions, so zone% = share of pitches with zone in 1..9. A command/approach metric, distinct
+    from whiff% (which only asks what happens once a hitter swings).
+
+    contact%: the complement of whiff% on the SAME swing/whiff classification already used
+    (1 - whiff, not a separately-defined FanGraphs-style metric), so it stays internally
+    consistent with the whiff% number already shown right next to it rather than quietly
+    using a different definition of "swing."
+
+    avg exit velo: mean `launch_speed` on balls actually put in play against this specific pitch
+    type -- the direct, real quality-of-contact number when a hitter DOES connect, complementing
+    whiff%/contact% (which only describe whether contact happened, not how hard). NaN (not 0.0)
+    when a pitch type has no batted-ball sample at all -- a real, honest "not enough data" state,
+    not a fabricated "zero exit velocity.\""""
     if pitches is None or len(pitches) == 0:
         return pd.DataFrame(columns=["pitcher", "pitch_type", "pitch_name", "family",
-                                     "pitches", "usage", "whiff", "putaway", "velo"])
+                                     "pitches", "usage", "whiff", "putaway", "velo",
+                                     "zone_pct", "contact_pct", "exit_velo"])
     df = pitches.copy()
     df["_pid"] = pd.to_numeric(_col(df, "pitcher"), errors="coerce")
     df["_ptype"] = _col(df, "pitch_type").astype("string").fillna("")
@@ -103,6 +126,9 @@ def build_pitcher_arsenal(pitches: pd.DataFrame) -> pd.DataFrame:
     df["_velo"] = pd.to_numeric(_col(df, "release_speed"), errors="coerce")
     strikes = pd.to_numeric(_col(df, "strikes"), errors="coerce").fillna(0)
     df["_two_strk"] = (strikes >= 2).values
+    zone_code = pd.to_numeric(_col(df, "zone"), errors="coerce")
+    df["_in_zone"] = zone_code.between(1, 9)   # Statcast's own 9 in-zone region codes
+    df["_exit_velo"] = pd.to_numeric(_col(df, "launch_speed"), errors="coerce")
 
     total_by_pitcher = df.groupby("_pid").size().rename("_tot")
     rows = []
@@ -115,6 +141,7 @@ def build_pitcher_arsenal(pitches: pd.DataFrame) -> pd.DataFrame:
         two_strk = g[g["_two_strk"]]
         two_swings = int(two_strk["_swing"].sum())
         two_whiffs = int(two_strk["_whiff"].sum())
+        ev_series = g["_exit_velo"]
         rows.append({
             "pitcher": int(pid),
             "pitch_type": ptype,
@@ -125,6 +152,9 @@ def build_pitcher_arsenal(pitches: pd.DataFrame) -> pd.DataFrame:
             "whiff": (whiffs / swings) if swings else 0.0,          # whiff per swing
             "putaway": (two_whiffs / two_swings) if two_swings else 0.0,  # 2-strike whiff/swing
             "velo": float(np.nanmean(g["_velo"])) if g["_velo"].notna().any() else 0.0,
+            "zone_pct": float(g["_in_zone"].sum()) / n,
+            "contact_pct": (1.0 - whiffs / swings) if swings else 0.0,
+            "exit_velo": float(np.nanmean(ev_series)) if ev_series.notna().any() else float("nan"),
         })
     out = pd.DataFrame(rows)
     if len(out):
@@ -259,6 +289,9 @@ def build_matchup(pitcher_id: int, hitter_id: int,
             "velo": pitch.get("velo", 0.0),
             "p_whiff": pitch.get("whiff", 0.0),
             "p_putaway": pitch.get("putaway", 0.0),
+            "zone_pct": pitch.get("zone_pct", 0.0),
+            "contact_pct": pitch.get("contact_pct", 0.0),
+            "exit_velo": pitch.get("exit_velo"),
             "h_whiff": h_whiff,
             "h_slg": h_slg,
             "h_xwoba": hs["xwoba"] if hs else None,
@@ -316,11 +349,17 @@ def load(arsenal_path: str = ARSENAL_PATH, hitter_path: str = HITTER_PATH
             a = pd.read_csv(arsenal_path)
             for r in a.itertuples(index=False):
                 d = r._asdict()
+                exit_velo_raw = d.get("exit_velo")   # None on an older CSV that predates this
+                                                     # field entirely; NaN once present but no
+                                                     # real batted-ball sample for that pitch
                 arsenals.setdefault(int(d["pitcher"]), []).append({
                     "pitch_type": d.get("pitch_type"), "pitch_name": d.get("pitch_name"),
                     "family": d.get("family"), "pitches": int(d.get("pitches", 0) or 0),
                     "usage": float(d.get("usage", 0) or 0), "whiff": float(d.get("whiff", 0) or 0),
                     "putaway": float(d.get("putaway", 0) or 0), "velo": float(d.get("velo", 0) or 0),
+                    "zone_pct": float(d.get("zone_pct", 0) or 0),
+                    "contact_pct": float(d.get("contact_pct", 0) or 0),
+                    "exit_velo": None if exit_velo_raw is None or pd.isna(exit_velo_raw) else float(exit_velo_raw),
                 })
         except Exception:
             pass
