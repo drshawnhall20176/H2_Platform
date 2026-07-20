@@ -82,9 +82,30 @@ def build_mlb_board(date_str: str, fip_constant: float):
         return E.get_bullpen_aggregate_stat(team_id, exclude_pid=exclude_pid,
                                             fip_constant=fip_constant_inner)
 
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def load_starter_rest(pitcher_id, team_id, date_str_inner):
+        if not pitcher_id or not team_id:
+            return None
+        return E.get_starter_rest_info(pitcher_id, team_id, date_str_inner).get("days_rest")
+
     rows, meta = E.build_slate(date_str, fip_constant)
     sc, k = load_statcast()
     wx = load_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
+    # Starter rest, added directly on request -- one cached fetch per real starter (home/away
+    # per game), not per hitter row. Attached to meta (home_days_rest/away_days_rest) for
+    # build_pitcher_projection_rows' own use, and mirrored into a pitcher_id -> days_rest lookup
+    # so every hitter row can carry its OPPOSING starter's rest via the same _opp_pid it already
+    # has -- the same per-row metadata convention as _opp_stat.
+    rest_by_pitcher_id: Dict[int, Optional[int]] = {}
+    for m in meta:
+        home_pid = m["home_pm"].id
+        away_pid = m["away_pm"].id
+        m["home_days_rest"] = load_starter_rest(home_pid, m.get("home_id"), date_str)
+        m["away_days_rest"] = load_starter_rest(away_pid, m.get("away_id"), date_str)
+        if home_pid is not None:
+            rest_by_pitcher_id[home_pid] = m["home_days_rest"]
+        if away_pid is not None:
+            rest_by_pitcher_id[away_pid] = m["away_days_rest"]
     for r in rows:
         w = wx.get(r.get("_venue_id"))
         r["_weather_hr"] = w["hr_factor"] if w else 1.0
@@ -93,6 +114,7 @@ def build_mlb_board(date_str: str, fip_constant: float):
             r["_wx_outwind"] = w.get("out_wind_mph", 0.0)
             r["_wx_desc"] = w.get("wind_desc")
             r["_wx_roof"] = w.get("roof", "open")
+        r["_opp_days_rest"] = rest_by_pitcher_id.get(r.get("_opp_pid"))
     P.enrich_hitter_rows(rows, seed=7, statcast=sc, statcast_k=k)
     pitcher_rows = P.build_pitcher_projection_rows(rows, meta, seed=11)
     plays = P.build_best_bets(rows, pitcher_rows)

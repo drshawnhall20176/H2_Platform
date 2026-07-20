@@ -170,9 +170,87 @@ def test_matchup_moves_hr_with_pitcher_quality():
     assert p_hard[P.K] > p_easy[P.K]
 
 
+# ----------------------------------------------------------------- rest_adjustment_multipliers
+def test_rest_adjustment_multipliers_short_rest():
+    m = P.rest_adjustment_multipliers(4)
+    assert m["k_mult"] == P.REST_K_MULT
+    assert m["bb_mult"] == P.REST_BB_MULT
+    assert m["er_mult"] == P.REST_ER_MULT
+    assert m["hr_mult"] == P.REST_HR_MULT
+    assert m["k_mult"] < 1.0    # K down -- reduced dominance
+    assert m["bb_mult"] > 1.0   # BB up -- control suffers
+    assert m["er_mult"] > 1.0   # ER up -- worse overall
+    assert m["hr_mult"] > 1.0   # HR-allowed up -- worse command
+    print("✓ rest_adjustment_multipliers applies the real, stated short-rest penalty in the correct direction on every rate")
+
+
+def test_rest_adjustment_multipliers_boundary_at_4_and_5():
+    # THE exact boundary mlb_engine.get_starter_rest_info itself uses (<=4 short, 5 standard).
+    short = P.rest_adjustment_multipliers(4)
+    standard = P.rest_adjustment_multipliers(5)
+    assert short["k_mult"] != 1.0
+    assert standard == {"k_mult": 1.0, "bb_mult": 1.0, "er_mult": 1.0, "hr_mult": 1.0}
+    print("✓ rest_adjustment_multipliers' boundary exactly matches get_starter_rest_info's own <=4/5 threshold")
+
+
+def test_rest_adjustment_multipliers_extra_rest_no_adjustment():
+    # A real, deliberate choice: extra rest (6+ days) gets NO adjustment, not a naive "more rest
+    # = better" assumption -- get_starter_rest_info's own docstring is explicit this has "more
+    # mixed evidence," not a clean positive.
+    m = P.rest_adjustment_multipliers(7)
+    assert m == {"k_mult": 1.0, "bb_mult": 1.0, "er_mult": 1.0, "hr_mult": 1.0}
+    print("✓ rest_adjustment_multipliers correctly applies no adjustment for extra rest, honoring the mixed real-world evidence")
+
+
+def test_rest_adjustment_multipliers_none_treated_as_normal():
+    # Unknown rest (None -- e.g. an MLB debut, or a live fetch failure) must NOT be assumed to be
+    # short rest just because it's unknown -- the safe, conservative default is no adjustment.
+    m = P.rest_adjustment_multipliers(None)
+    assert m == {"k_mult": 1.0, "bb_mult": 1.0, "er_mult": 1.0, "hr_mult": 1.0}
+    print("✓ rest_adjustment_multipliers correctly treats unknown rest as normal, never assuming the worse case")
+
+
+def test_rest_adjustment_multipliers_very_short_rest_same_as_boundary():
+    # A pitcher on 2 days' rest (extremely unusual, essentially never happens in practice) still
+    # gets the SAME flat short-rest multiplier as one on 4 days, not a scaling penalty -- this
+    # platform doesn't have real data to support a graduated "the shorter, the worse" curve, so
+    # it stays honest about only asserting the one threshold get_starter_rest_info itself defines.
+    assert P.rest_adjustment_multipliers(2) == P.rest_adjustment_multipliers(4)
+    print("✓ rest_adjustment_multipliers applies a flat penalty across the whole short-rest range, not a fabricated graduated curve")
+
+
 def test_pitcher_allowed_rates_guards():
     assert P.pitcher_allowed_rates(None) is None
     assert P.pitcher_allowed_rates(dict(battersFaced=10)) is None  # too thin
+
+
+def test_pitcher_allowed_rates_short_rest_applies_correct_direction():
+    stat = dict(battersFaced=400, homeRuns=15, strikeOuts=95, baseOnBalls=42, hits=105)
+    normal = P.pitcher_allowed_rates(stat)
+    short = P.pitcher_allowed_rates(stat, days_rest=4)
+    # Hand-verified exact ratios, not just directional checks
+    assert abs(short["k"] / normal["k"] - P.REST_K_MULT) < 1e-9
+    assert abs(short["bb"] / normal["bb"] - P.REST_BB_MULT) < 1e-9
+    assert abs(short["hr"] / normal["hr"] - P.REST_HR_MULT) < 1e-9
+    print("✓ pitcher_allowed_rates applies the exact, hand-verified short-rest multiplier to k/bb/hr")
+
+
+def test_pitcher_allowed_rates_short_rest_leaves_nonhr_hit_untouched():
+    # Deliberate: DIPS theory already established elsewhere in this module treats hits-allowed
+    # as mostly luck/defense, not pitcher skill -- a rest effect shouldn't suddenly appear here.
+    stat = dict(battersFaced=400, homeRuns=15, strikeOuts=95, baseOnBalls=42, hits=105)
+    normal = P.pitcher_allowed_rates(stat)
+    short = P.pitcher_allowed_rates(stat, days_rest=4)
+    assert short["nonhr_hit"] == normal["nonhr_hit"]
+    print("✓ pitcher_allowed_rates correctly leaves nonhr_hit untouched by the rest adjustment")
+
+
+def test_pitcher_allowed_rates_normal_rest_unaffected():
+    stat = dict(battersFaced=400, homeRuns=15, strikeOuts=95, baseOnBalls=42, hits=105)
+    no_arg = P.pitcher_allowed_rates(stat)
+    explicit_normal = P.pitcher_allowed_rates(stat, days_rest=5)
+    assert no_arg == explicit_normal
+    print("✓ pitcher_allowed_rates produces identical output whether days_rest is omitted or explicitly normal")
 
 
 def test_handedness_split_applies():
@@ -504,9 +582,9 @@ def test_add_starter_exposure_context_shares_projection_across_same_opponent():
     calls = {"n": 0}
     real_project_pitcher = P.project_pitcher
 
-    def counting_project_pitcher(stat, opp_lineup=None):
+    def counting_project_pitcher(stat, opp_lineup=None, days_rest=None):
         calls["n"] += 1
-        return real_project_pitcher(stat, opp_lineup)
+        return real_project_pitcher(stat, opp_lineup, days_rest)
 
     orig = P.project_pitcher
     P.project_pitcher = counting_project_pitcher
@@ -1104,6 +1182,56 @@ def test_project_pitcher_opener_reduces_hitter_exposure_via_exp_bf():
     proj = P.project_pitcher(opener)
     assert proj["exp_bf"] < old_style_exp_bf
     print(f"✓ project_pitcher's fix reduces exp_bf from what the old floor would have produced ({old_style_exp_bf:.1f}) to a real, honest value ({proj['exp_bf']:.1f})")
+
+
+# ----------------------------------------------------------------- project_pitcher: days_rest
+def test_project_pitcher_short_rest_applies_correct_direction_and_magnitude():
+    stat = dict(battersFaced=720, inningsPitched="180.0", gamesStarted=29,
+               strikeOuts=235, baseOnBalls=42, earnedRuns=65, hits=170)
+    normal = P.project_pitcher(stat)
+    short = P.project_pitcher(stat, days_rest=4)
+    # Hand-verified exact ratios, not just directional checks
+    assert abs(short["exp_k"] / normal["exp_k"] - P.REST_K_MULT) < 1e-9
+    assert abs(short["exp_bb"] / normal["exp_bb"] - P.REST_BB_MULT) < 1e-9
+    assert abs(short["exp_er"] / normal["exp_er"] - P.REST_ER_MULT) < 1e-9
+    print("✓ project_pitcher applies the exact, hand-verified short-rest multiplier to exp_k/exp_bb/exp_er")
+
+
+def test_project_pitcher_short_rest_leaves_hits_allowed_and_innings_untouched():
+    stat = dict(battersFaced=720, inningsPitched="180.0", gamesStarted=29,
+               strikeOuts=235, baseOnBalls=42, earnedRuns=65, hits=170)
+    normal = P.project_pitcher(stat)
+    short = P.project_pitcher(stat, days_rest=4)
+    assert short["exp_hits_allowed"] == normal["exp_hits_allowed"]   # DIPS-theory posture
+    assert short["exp_ip"] == normal["exp_ip"]     # rest doesn't change HOW LONG he's expected
+                                                   # to pitch, a separate decision driven by his
+                                                   # own usage pattern, not tonight's rest status
+    print("✓ project_pitcher correctly leaves exp_hits_allowed and exp_ip unaffected by the rest adjustment")
+
+
+def test_project_pitcher_short_rest_still_applies_with_opponent_matchup():
+    # Confirms the rest penalty survives the odds-ratio opponent-matchup step, not just the
+    # unadjusted case -- a short-rest ace facing a weak lineup should still project worse than
+    # his own full-rest numbers against that same lineup would.
+    stat = dict(battersFaced=720, inningsPitched="180.0", gamesStarted=29,
+               strikeOuts=235, baseOnBalls=42, earnedRuns=65, hits=170)
+    weak_lineup = {"k": 0.28, "bb": 0.06}   # a real, whiff-prone opposing lineup
+    normal = P.project_pitcher(stat, opp_lineup=weak_lineup)
+    short = P.project_pitcher(stat, opp_lineup=weak_lineup, days_rest=4)
+    assert short["exp_k"] < normal["exp_k"]
+    assert short["exp_bb"] > normal["exp_bb"]
+    print("✓ project_pitcher's rest penalty survives the opponent-matchup step, not just the unadjusted case")
+
+
+def test_project_pitcher_extra_and_unknown_rest_no_adjustment():
+    stat = dict(battersFaced=720, inningsPitched="180.0", gamesStarted=29,
+               strikeOuts=235, baseOnBalls=42, earnedRuns=65, hits=170)
+    baseline = P.project_pitcher(stat)
+    extra_rest = P.project_pitcher(stat, days_rest=7)
+    unknown_rest = P.project_pitcher(stat, days_rest=None)
+    assert extra_rest == baseline
+    assert unknown_rest == baseline
+    print("✓ project_pitcher correctly applies no adjustment for extra rest or unknown rest, matching the baseline exactly")
 
 
 

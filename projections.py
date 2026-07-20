@@ -178,10 +178,61 @@ def odds_ratio(p_bat: float, p_pit: float, p_lg: float) -> float:
     return o / (1 + o)
  
  
+# ---- starter rest adjustment ------------------------------------------------
+SHORT_REST_DAYS_MAX = 4   # matches mlb_engine.get_starter_rest_info's own stated threshold
+                         # (<=4 days = short rest) exactly, so this platform has ONE definition
+                         # of "short rest," not two that could quietly drift apart.
+
+REST_K_MULT = 0.95    # real, stated, conservative estimates -- NOT empirically fit against this
+REST_BB_MULT = 1.08   # platform's own outcomes (no settled history exists yet to fit against).
+REST_ER_MULT = 1.10   # Short rest (<=4 days) is a well-established effectiveness concern in
+REST_HR_MULT = 1.10   # real baseball research, but the exact magnitude varies across studies,
+                     # so these are deliberately modest, conservative shifts -- real enough to
+                     # matter, not so large they'd swamp the rest of the model on a single,
+                     # debated factor. K down (reduced dominance), BB up (control suffers first
+                     # under fatigue), ER and HR-allowed up (the direct, holistic effect of
+                     # diminished stuff/command). Deliberately does NOT touch hits-allowed
+                     # (nonhr_hit) -- this platform already treats that as mostly luck/defense,
+                     # not pitcher skill (DIPS theory, see project_pitcher's own comment on hits
+                     # allowed), so it would be inconsistent to suddenly attribute a rest effect
+                     # to a stat this platform has already decided isn't mostly about the
+                     # pitcher himself.
+                     #
+                     # Extra rest (5+ days, including the "standard" 5-day rotation) gets NO
+                     # adjustment at all -- mlb_engine.get_starter_rest_info's own docstring is
+                     # explicit that extra rest has "more mixed evidence," not a clean positive
+                     # the way short rest is a clean negative, so this platform doesn't assert
+                     # an effect the research itself doesn't clearly support.
+
+
+def rest_adjustment_multipliers(days_rest: Optional[int]) -> Dict[str, float]:
+    """Given a starter's real days of rest before tonight's start, return the real multipliers
+    to apply to his own K/BB/ER/HR-allowed rates -- {"k_mult", "bb_mult", "er_mult", "hr_mult"},
+    all 1.0 (no adjustment at all) unless days_rest is a real, known short-rest case
+    (<= SHORT_REST_DAYS_MAX). None (unknown rest, e.g. an MLB debut or a fetch failure) is
+    treated the SAME as normal rest -- 1.0, never assumed to be short rest just because it's
+    unknown. See the constants above for the full, honest reasoning behind each multiplier and
+    why hits-allowed is deliberately left untouched."""
+    if days_rest is None or days_rest > SHORT_REST_DAYS_MAX:
+        return {"k_mult": 1.0, "bb_mult": 1.0, "er_mult": 1.0, "hr_mult": 1.0}
+    return {"k_mult": REST_K_MULT, "bb_mult": REST_BB_MULT, "er_mult": REST_ER_MULT,
+           "hr_mult": REST_HR_MULT}
+
+
 # ---- batter model ----------------------------------------------------------
-def pitcher_allowed_rates(stat: Optional[Dict]) -> Optional[Dict]:
+def pitcher_allowed_rates(stat: Optional[Dict], days_rest: Optional[int] = None) -> Optional[Dict]:
     """Shrunk per-batter rates of what a pitcher ALLOWS, for the matchup math.
-    Returns None for missing/thin pitchers so the batter falls back to neutral."""
+    Returns None for missing/thin pitchers so the batter falls back to neutral.
+
+    days_rest: this pitcher's own real days of rest before tonight's start (from mlb_engine.
+    get_starter_rest_info), added directly on request. Applies rest_adjustment_multipliers' real,
+    stated short-rest penalty: this pitcher's own strikeout rate (k) goes DOWN (reduced dominance
+    under fatigue means fewer of his own Ks, so opposing hitters' odds-ratio K probability drops
+    too), while walks (bb) and home runs allowed (hr) go UP (worse command). Deliberately does
+    NOT adjust nonhr_hit, same DIPS-theory reasoning already established elsewhere in this
+    module: hits on balls in play are mostly luck/defense, not pitcher skill, so a rest effect
+    shouldn't suddenly appear there. None (the default) applies no adjustment at all -- unknown
+    or normal rest are treated the same, never assumed to be the worse case."""
     if not stat:
         return None
     bf = _f(stat, "battersFaced")
@@ -190,10 +241,20 @@ def pitcher_allowed_rates(stat: Optional[Dict]) -> Optional[Dict]:
     hr = _f(stat, "homeRuns"); so = _f(stat, "strikeOuts"); bb = _f(stat, "baseOnBalls")
     hits = _f(stat, "hits")
     nonhr_hit = max(hits - hr, 0.0)
+    mult = rest_adjustment_multipliers(days_rest)
     return {
-        "hr": _shrink(hr, bf, LG_RATE["hr"], 220),
-        "k": _shrink(so, bf, LG_RATE["k"], 150),
-        "bb": _shrink(bb, bf, LG_RATE["bb"], 350),
+        "hr": _shrink(hr, bf, LG_RATE["hr"], 220) * mult["hr_mult"],
+        "k": _shrink(so, bf, LG_RATE["k"], 150) * mult["k_mult"],   # this IS the pitcher's own
+                                                                    # strikeout rate (same
+                                                                    # quantity as project_
+                                                                    # pitcher's own k_rate), used
+                                                                    # via odds_ratio to compute
+                                                                    # the opposing batter's K
+                                                                    # probability -- reduced
+                                                                    # dominance under short rest
+                                                                    # means this goes DOWN, same
+                                                                    # direction as k_mult itself.
+        "bb": _shrink(bb, bf, LG_RATE["bb"], 350) * mult["bb_mult"],
         "nonhr_hit": _shrink(nonhr_hit, bf, LG_NONHR_HIT, 180),
     }
  
@@ -321,7 +382,8 @@ def build_lineup_rate_map(rows: list) -> Dict:
     return {k: lineup_k_bb_rates(v) for k, v in groups.items()}
  
  
-def project_pitcher(stat: Dict, opp_lineup: Optional[Dict] = None) -> Optional[Dict]:
+def project_pitcher(stat: Dict, opp_lineup: Optional[Dict] = None,
+                    days_rest: Optional[int] = None) -> Optional[Dict]:
     """Project a STARTER's K / outs / walks / earned runs / hits allowed. Returns None for
     non-starters or thin samples.
 
@@ -329,6 +391,12 @@ def project_pitcher(stat: Dict, opp_lineup: Optional[Dict] = None) -> Optional[D
       1. Starter gate: needs real starts, else it's a bullpen game/opener -> skip.
       2. Shrinkage: K and BB rates regress toward league average by batters faced.
       3. Clamps: expected counts capped at realistic ceilings as a backstop.
+
+    days_rest: this pitcher's own real days of rest before tonight's start (from mlb_engine.
+    get_starter_rest_info), added directly on request. Applies rest_adjustment_multipliers' real,
+    stated short-rest penalty to k_rate/bb_rate/er_rate -- see that function's own docstring for
+    the full reasoning. Deliberately does NOT touch h_rate (hits allowed), same DIPS-theory
+    posture already stated below for that stat. None (the default) applies no adjustment.
 
     When opp_lineup (the opposing lineup's K/BB rates) is supplied, K and BB are made
     matchup-aware via the odds-ratio method: a strikeout pitcher facing a whiff-prone
@@ -392,6 +460,16 @@ def project_pitcher(stat: Dict, opp_lineup: Optional[Dict] = None) -> Optional[D
     bb_rate = _shrink(bb, bf, *LG_PITCHER["bb"])
     er_rate = _shrink(er, ip, LG_ER_PER_IP, ER_PRIOR_IP)   # earned runs per INNING, not per BF
     h_rate = _shrink(h_allowed, bf, *LG_PITCHER["hits_allowed"])   # per BATTER FACED, like K/BB
+
+    # 2a. Rest: apply the real, stated short-rest penalty (see rest_adjustment_multipliers' own
+    # docstring for the full reasoning) BEFORE the opponent-matchup step below, so the final,
+    # matchup-adjusted rate also reflects it -- a short-rest ace facing a weak lineup should
+    # still project worse than his own full-rest numbers against that same lineup would. h_rate
+    # deliberately untouched, same DIPS-theory reasoning as pitcher_allowed_rates.
+    rest_mult = rest_adjustment_multipliers(days_rest)
+    k_rate *= rest_mult["k_mult"]
+    bb_rate *= rest_mult["bb_mult"]
+    er_rate *= rest_mult["er_mult"]
 
     # 2b. Matchup: combine with the opposing lineup's rates via odds-ratio.
     if opp_lineup:
@@ -606,7 +684,9 @@ def build_projection_index(rows: List[Dict], meta: List[Dict],
         if not stat:
             continue
         park = PARK_FACTORS.get(r.get("_venue_id"), NEUTRAL_PARK)
-        opp_allowed = pitcher_allowed_rates(r.get("_opp_stat"))
+        # Same _opp_days_rest per-row convention as enrich_hitter_rows -- see that function's
+        # own comment for the full reasoning.
+        opp_allowed = pitcher_allowed_rates(r.get("_opp_stat"), r.get("_opp_days_rest"))
         xhr = xhr_from_statcast(r.get("_pid"), statcast, statcast_k)
         probs = batter_pa_probs(stat, park, opp_allowed, r.get("_split_stat"), xhr, r.get("_weather_hr", 1.0))
         if probs is None:
@@ -761,7 +841,12 @@ def enrich_hitter_rows(rows: List[Dict], sims: int = DEFAULT_SIMS, seed: Optiona
         if not stat:
             continue
         park = PARK_FACTORS.get(r.get("_venue_id"), NEUTRAL_PARK)
-        opp_allowed = pitcher_allowed_rates(r.get("_opp_stat"))
+        # _opp_days_rest: the OPPOSING starter's own real days of rest, added directly on
+        # request -- same established per-row metadata convention as _opp_stat/_venue_id/
+        # _weather_hr (attached upstream by best_bets_data.py, sourced from mlb_engine.
+        # get_starter_rest_info). A short-rest opposing starter allows real hitters more --
+        # see pitcher_allowed_rates' own docstring for the full reasoning and exact direction.
+        opp_allowed = pitcher_allowed_rates(r.get("_opp_stat"), r.get("_opp_days_rest"))
         xhr = xhr_from_statcast(r.get("_pid"), statcast, statcast_k)
         probs = batter_pa_probs(stat, park, opp_allowed, r.get("_split_stat"), xhr, r.get("_weather_hr", 1.0))
         if probs is None:
@@ -975,16 +1060,21 @@ def add_starter_exposure_context(rows: List[Dict]) -> List[Dict]:
     Rows missing usable data (no _opp_stat, or project_pitcher can't project a real starter from
     it — a thin sample or genuine reliever) are left without vs SP/vs Pen fields, not given a
     fabricated split."""
-    proj_cache: Dict[int, Optional[Dict]] = {}
+    proj_cache: Dict[tuple, Optional[Dict]] = {}
     for r in rows:
         opp_stat = r.get("_opp_stat")
         exp_pa = r.get("_exp_pa")
         lineup_idx = r.get("_lineup_idx")
         if not opp_stat or exp_pa is None or lineup_idx is None:
             continue
-        cache_key = id(opp_stat)
+        # _opp_days_rest: same per-row convention as _opp_stat -- included in the cache key
+        # (not just opp_stat's own identity) since, in principle, two rows could share the same
+        # opp_stat object but a different rest reading; in practice every hitter facing the same
+        # starter shares both, but keying on both stays correct rather than relying on that.
+        opp_days_rest = r.get("_opp_days_rest")
+        cache_key = (id(opp_stat), opp_days_rest)
         if cache_key not in proj_cache:
-            proj_cache[cache_key] = project_pitcher(opp_stat)
+            proj_cache[cache_key] = project_pitcher(opp_stat, days_rest=opp_days_rest)
         starter_proj = proj_cache[cache_key]
         if not starter_proj:
             continue
@@ -1037,7 +1127,14 @@ def blend_hitter_probs_with_bullpen(row: Dict, bullpen_stat: Dict, sims: int = D
     exp_pa = row.get("_exp_pa")
     if not stat or lineup_idx is None or exp_pa is None:
         return None
-    starter_proj = project_pitcher(row.get("_opp_stat"))
+    # _opp_days_rest: same per-row convention as _opp_stat (see enrich_hitter_rows' own
+    # comment) -- passed to BOTH starter-side calls below, since project_pitcher's own exp_bf
+    # (which hitter_starter_exposures reads to split vs-starter/vs-bullpen PA) and this
+    # starter's own allowed-rates should both reflect his real rest status. Deliberately NOT
+    # passed to the bullpen-side pitcher_allowed_rates call further down -- rest is specifically
+    # a starting-pitcher concept, not something that applies to a bullpen as a whole.
+    opp_days_rest = row.get("_opp_days_rest")
+    starter_proj = project_pitcher(row.get("_opp_stat"), days_rest=opp_days_rest)
     if not starter_proj:
         return None
     exposures = hitter_starter_exposures(lineup_idx, starter_proj["exp_bf"], exp_pa)
@@ -1050,7 +1147,7 @@ def blend_hitter_probs_with_bullpen(row: Dict, bullpen_stat: Dict, sims: int = D
     weather_hr = row.get("_weather_hr", 1.0)
     split_stat = row.get("_split_stat")
 
-    opp_sp_rates = pitcher_allowed_rates(row.get("_opp_stat"))
+    opp_sp_rates = pitcher_allowed_rates(row.get("_opp_stat"), opp_days_rest)
     opp_pen_rates = pitcher_allowed_rates(bullpen_stat)
     if opp_sp_rates is None or opp_pen_rates is None:
         # batter_pa_probs itself accepts opp_allowed=None gracefully (a silent, neutral,
@@ -1091,12 +1188,17 @@ def build_pitcher_projection_rows(rows: List[Dict], meta: List[Dict],
     lineup_map = build_lineup_rate_map(rows)
     out: List[Dict] = []
     for m in meta:
-        for pm, team, opp, team_id in ((m["home_pm"], m["home_name"], m["away_name"], m.get("home_id")),
-                                       (m["away_pm"], m["away_name"], m["home_name"], m.get("away_id"))):
+        # home_days_rest/away_days_rest: this STARTER's own real days of rest, added directly
+        # on request -- attached to meta upstream by best_bets_data.py, sourced from mlb_engine.
+        # get_starter_rest_info. Paired with each pitcher tuple below the same way team/opp/
+        # team_id already are, so it flows through to project_pitcher naturally.
+        for pm, team, opp, team_id, days_rest in (
+                (m["home_pm"], m["home_name"], m["away_name"], m.get("home_id"), m.get("home_days_rest")),
+                (m["away_pm"], m["away_name"], m["home_name"], m.get("away_id"), m.get("away_days_rest"))):
             if pm.id is None or not pm.stat:
                 continue
             opp_rates = lineup_map.get((m["label"], opp))
-            proj = project_pitcher(pm.stat, opp_rates)
+            proj = project_pitcher(pm.stat, opp_rates, days_rest)
             if not proj:
                 continue
             sim = simulate_pitcher(proj, sims, rng)
@@ -1123,7 +1225,7 @@ def build_pitcher_projection_rows(rows: List[Dict], meta: List[Dict],
                 "Hits Allowed fair": prob_to_american(ha_over),
                 "_opp_k": (opp_rates or {}).get("k"), "_opp_bb": (opp_rates or {}).get("bb"),
                 "_game": m["label"], "_pid": pm.id, "_game_date": m.get("game_date"),
-                "_team_id": team_id,
+                "_team_id": team_id, "_days_rest": days_rest,
             })
     out.sort(key=lambda r: r["Proj K"], reverse=True)
     return out

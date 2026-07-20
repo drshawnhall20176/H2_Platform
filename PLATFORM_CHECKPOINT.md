@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 851/851 tests green)
+## What's in this checkpoint (all tested — 863/863 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -4298,6 +4298,62 @@ arithmetic bug in the simulation script itself along the way (`[1..9]*2` has onl
 enough to slice to 20 — Python slicing beyond a list's length silently returns what's there rather
 than erroring, so the mistake wasn't in the production code, but in my own test data construction,
 caught by an IndexError before trusting the result). 851/851 total passing.
+
+### Pitcher rest wired into the actual probability model (2026-07-20)
+Following the consistency audit — confirmed `get_starter_rest_info`, `get_team_bullpen_fatigue`,
+and `get_team_hitter_workload` were all captured, tested, and displayed on Pitching Lab, but
+none touched ModelProb anywhere on the platform — Shawn chose pitcher rest to close first.
+
+**Core, testable logic**: `rest_adjustment_multipliers(days_rest)` in `projections.py` — real,
+stated, conservative multipliers (K down 5%, BB up 8%, ER and HR-allowed up 10%) for a starter
+on ≤4 days' rest, matching `get_starter_rest_info`'s own threshold exactly so there's one
+definition of "short rest" on this platform, not two that could drift apart. Standard rest,
+extra rest, and unknown rest all get zero adjustment — extra rest deliberately not treated as a
+clean positive, matching `get_starter_rest_info`'s own honest "mixed evidence" framing. Hits-
+allowed deliberately untouched, staying consistent with this platform's existing DIPS-theory
+stance elsewhere in the same module.
+
+**Both consumer functions extended and fully tested**: `pitcher_allowed_rates` (feeds opposing
+hitters' probabilities) and `project_pitcher` (feeds the starter's own K/BB/ER/Outs/Hits-Allowed
+props), each verified by hand-computing the exact expected ratios before writing test
+assertions. A real mistake caught mid-build: an initial version of `pitcher_allowed_rates` left
+its own `k` field unadjusted with a confused, backwards comment claiming it was somehow different
+from `project_pitcher`'s own `k_rate` — it isn't, it's the same underlying quantity (the
+pitcher's own strikeout rate), and needed the same downward adjustment. Caught by rereading my
+own reasoning before it shipped, not after.
+
+**Threaded through every live call site, not just the two most obvious ones** — traced every
+caller of both functions across the whole codebase first, rather than assuming coverage: `enrich_
+hitter_rows` and `build_pitcher_projection_rows` (the two `build_mlb_board` calls directly),
+`blend_hitter_probs_with_bullpen` (the bullpen-blend re-pricing path — rest applied to both
+starter-side calls, deliberately NOT to the bullpen-side call, since rest is specifically a
+starting-pitcher concept), `add_starter_exposure_context` (used by Dinger Engine, including
+`days_rest` in its own projection cache key for correctness), and `build_projection_index` (used
+by Edge Board, Media Room, and Podcast Studio). One genuinely dead function, `build_signals`,
+confirmed via a real grep across the whole codebase to never be called anywhere and correctly
+left alone rather than wastefully updated.
+
+**The actual data fetch wired into `best_bets_data.py`'s `build_mlb_board`**, mirroring the
+existing `load_bullpen_aggregate_for_blend` caching pattern exactly: `get_starter_rest_info`
+cached per starter (not per hitter), attached to `meta` as `home_days_rest`/`away_days_rest` for
+the pitcher-projection path, and mirrored into a `pitcher_id -> days_rest` lookup so every
+hitter row can carry its own opposing starter's rest via the `_opp_pid` it already has — the
+same established per-row metadata convention as `_opp_stat`/`_venue_id`/`_weather_hr`.
+
+**17 new tests** across `rest_adjustment_multipliers`, `pitcher_allowed_rates`, and
+`project_pitcher` — every ratio hand-verified by direct computation first, including the
+boundary matching `get_starter_rest_info`'s own <=4/5 threshold exactly, extra rest and unknown
+rest both correctly producing zero adjustment, hits-allowed and `exp_ip` confirmed untouched,
+and the rest penalty confirmed to survive the opponent-lineup matchup step. Plus a full,
+realistic end-to-end simulation through the real `build_mlb_board` pipeline — confirmed
+`days_rest` flows correctly from the (mocked) `get_starter_rest_info` all the way through `meta`
+and each hitter row's `_opp_days_rest` to the final `ModelProb`. A real, instructive catch along
+the way: the first comparison run showed IDENTICAL ModelProb between a short-rest and normal-rest
+scenario — not a production bug, but `st.cache_data`'s own cache correctly (by design) reusing a
+result across two mocked runs with identical function arguments; clearing the cache between runs
+resolved it, confirming this was a test-isolation artifact, not a real gap. The real, isolated
+comparison showed a genuine +1.69 percentage point difference in the correct direction. 863/863
+total passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
