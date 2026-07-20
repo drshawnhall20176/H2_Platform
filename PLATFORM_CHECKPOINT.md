@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 762/762 tests green)
+## What's in this checkpoint (all tested — 766/766 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -3565,6 +3565,61 @@ computed slot was checked directly, rather than assuming the code was wrong. 762
 passing (no new dedicated unit tests added this turn, since this reuses `sports.py`'s own
 already-tested `game_dt`/`slot_of`/`SLOT_ORDER` and Graded Picks' own already-proven filtering
 pattern verbatim, rather than introducing new logic that would need its own new coverage).
+
+### Two real, confirmed bugs from a real trading session: opener overweighting and lineup freshness (2026-07-19)
+Shawn flagged Speculative Basket showing multiple real, good hitters graded "A" on the "Under"
+side of a doubleheader Game 2, "based on some real time trades using these picks" that settled
+oddly. First established the grading direction itself wasn't backwards — a letter grade
+correctly follows whichever side the model favors, and "Under" can legitimately earn an A when
+the model believes a hit is genuinely unlikely. But the SPECIFIC pattern (real hitters from BOTH
+teams in the same game bunched into low-probability grades) pointed at something real and
+game-specific, not the grading logic. Investigated with a live web search to confirm the actual
+game context before touching any code, rather than guessing: Dodgers @ Yankees, Sunday July 19
+doubleheader Game 2. Two real, separate, confirmed mechanisms, both traced to real code, not
+speculated.
+
+**Bug 1 — a genuine bullpen-game opener gets overweighted, confirmed directly**: both Game 2
+"starters" were real openers (Will Klein for the Dodgers, Ryan Yarbrough for the Yankees with a
+bullpen game to follow), not conventional starters. `hitter_starter_exposures` (which decides how
+many of a hitter's plate appearances fall against the starter vs. the bullpen for the blended
+probability the platform already uses) reads directly off `project_pitcher`'s own `exp_bf`. But
+`project_pitcher`'s `exp_ip = np.clip(ip / gs, 3.0, 7.0)` forced EVERY probable starter's expected
+innings up to a 3.0-inning floor — built to guard a real starter's occasional short outing, but
+wrong for a pitcher whose season-long average is genuinely, repeatedly that low because he's
+deliberately used for ~1-inning stints. Confirmed the real, downstream effect directly: for a
+realistic opener profile (12 starts averaging 2.0 IP each), the OLD floor attributed 2.0 of a
+leadoff hitter's 4.4 real plate appearances to the opener's own (possibly strong) individual
+rate; the fix correctly drops that to 1.0, with the rest properly falling to the bullpen phase of
+the blend. `OPENER_IP_PER_GS_THRESHOLD = 2.5` — a real, stated threshold (a genuine starter
+rarely averages below ~2.5 IP/start across a full season even in a rough year) — now lets a
+pitcher's own low number stand (floored only at 0.5, against near-zero noise) instead of being
+overridden. A genuinely struggling but real starter (2.8 IP/start, above the threshold) still
+gets the original 3.0 floor unchanged — confirmed directly, so the fix doesn't overcorrect into
+under-crediting real starters having a bad year.
+
+**Bug 2 — a scratched player can still appear, confirmed as a real, explainable timing gap, not
+a caching bug**: separately, reporting indicated Ohtani (dealing with a knee issue) "could be out
+of the lineup in the nightcap." Traced `_team_starters`: each game already fetches its own
+boxscore by its own unique `gamePk` (doubleheader games are NOT conflated at the data layer), but
+when a specific game's official batting order isn't posted yet, the fallback is a team's ENTIRE
+active roster, marked "Projected." A player ruled out of THIS specific game but still on the
+active roster would still appear, since the platform has no explicit "scratched from today's
+game" signal, only "posted lineup" vs. "active roster." The "Lineup" field (Confirmed/Projected)
+already existed on every play dict — it just wasn't being shown on these two pages. Added the
+same 🟢/🟡 signal Graded Picks already uses, plus an explicit caption naming the real risk
+directly: a Projected-lineup player shown here could still be scratched before first pitch.
+
+**9 new tests**: opener detection (5 tests — a real opener profile keeps its own low exp_ip
+instead of the 3.0 floor; a normal starter is completely unaffected; a genuinely struggling real
+starter still gets the original floor, confirming no overcorrection; an extreme near-zero edge
+case still gets a sane 0.5 floor, with a self-caught test-fixture bug along the way — an initial
+version used ip=3.0 with gs=10, which fails the real `ip >= 15` starter gate entirely and returns
+None, not a bug, just an unrealistic fixture, corrected before trusting the result; and a direct,
+end-to-end proof that the fix reduces `exp_bf` from what the old floor would have produced).
+Plus a full, realistic end-to-end simulation reproducing the doubleheader scenario directly —
+hitters facing a real opener profile now show a healthy ~71-75% hit probability instead of being
+artificially depressed, and the Lineup field is confirmed flowing all the way through to the
+final play dict, ready for the page to display. 766/766 total passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

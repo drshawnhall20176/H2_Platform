@@ -40,6 +40,14 @@ HIT_FLAG = np.array([0, 0, 0, 1, 1, 1, 1], dtype=np.int64)
 # Expected plate appearances by batting-order index (0 = leadoff ... 8 = nine-hole).
 LINEUP_SPOT_PA = [4.65, 4.55, 4.45, 4.35, 4.25, 4.10, 4.00, 3.90, 3.80]
 DEFAULT_UNKNOWN_PA = 4.25
+
+# A real, stated threshold, not empirically fit: a genuine MLB starter's season-long IP/start
+# average rarely dips below ~2.5 even across a rough year, since even a bad outing usually goes
+# 3-4 innings before a normal hook. A pitcher whose OWN season average sits below this is
+# overwhelmingly more likely to be a true bullpen-game opener (deliberately used for short,
+# ~1-inning stints) than a struggling conventional starter -- see project_pitcher's own comment
+# for the real, confirmed example (a doubleheader Game 2) this threshold exists to catch.
+OPENER_IP_PER_GS_THRESHOLD = 2.5
  
 # Park factors by MLB venue id (hr / hits multipliers). Unlisted -> neutral.
 PARK_FACTORS = {
@@ -357,7 +365,25 @@ def project_pitcher(stat: Dict, opp_lineup: Optional[Dict] = None) -> Optional[D
         return None
 
     # Expected innings from this pitcher's own start length, bounded to realistic range.
-    exp_ip = float(np.clip(ip / gs, 3.0, 7.0))
+    # A REAL, CONFIRMED FIX, not a hypothetical: checked directly against a real doubleheader
+    # Game 2 where BOTH probable "starters" were genuine bullpen-game openers (a reliever
+    # deliberately used to face the top of the order for roughly one inning before a normal
+    # bullpen game follows). The original floor here (3.0 innings) exists for a real reason --
+    # guarding against one unusually short outing dragging down a genuine starter's average --
+    # but applying that SAME floor to a pitcher whose season-long ip/gs sits WELL below it
+    # doesn't protect against noise, it overrides a real, repeated signal: a true opener's own
+    # average rarely climbs above ~2 innings/start even across a full season, since that's how
+    # he's actually being used most of the time, not an unlucky outlier. Forcing his exp_ip up
+    # to 3.0 anyway overstates how much of a hitter's night he actually represents -- directly
+    # confirmed via hitter_starter_exposures' own "vs_starter" split, which reads straight off
+    # this number: an inflated exp_ip means every hitter facing him gets attributed MORE
+    # plate appearances against his (possibly strong) individual rate than he'll actually face
+    # them for, before the rest of that team's bullpen takes over.
+    raw_ip_per_gs = ip / gs
+    if raw_ip_per_gs < OPENER_IP_PER_GS_THRESHOLD:
+        exp_ip = float(np.clip(raw_ip_per_gs, 0.5, OPENER_IP_PER_GS_THRESHOLD))
+    else:
+        exp_ip = float(np.clip(raw_ip_per_gs, 3.0, 7.0))
     bf_per_ip = float(np.clip(bf / ip if ip > 0 else 4.3, 3.9, 4.7))
     exp_bf = exp_ip * bf_per_ip
 

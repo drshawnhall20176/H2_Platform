@@ -1051,8 +1051,62 @@ def test_enrich_hitter_rows_hrr_higher_than_hit_pct_alone():
     print("✓ enrich_hitter_rows' HRR% is a genuinely distinct probability from Hit% alone, confirming Runs/RBI are real contributors")
 
 
-# ----------------------------------------------------------------- project_pitcher: exp_er
-def test_project_pitcher_exp_er_present_and_sane():
+# ----------------------------------------------------------------- project_pitcher: opener detection
+def test_project_pitcher_opener_uses_own_low_ip_not_forced_to_floor():
+    # THE real, confirmed fix: a genuine opener profile (12 starts averaging 2.0 IP each) must
+    # keep his own real, low exp_ip -- NOT get force-floored up to 3.0 the way a normal
+    # starter's occasional short outing correctly would be.
+    opener = dict(battersFaced=100, inningsPitched="24.0", gamesStarted=12,
+                 strikeOuts=28, baseOnBalls=8, earnedRuns=6, hits=18)
+    proj = P.project_pitcher(opener)
+    assert proj["exp_ip"] == pytest.approx(2.0, abs=1e-9)
+    print("✓ project_pitcher correctly keeps a genuine opener's own low exp_ip instead of forcing it to the normal-starter floor")
+
+
+def test_project_pitcher_normal_starter_unaffected_by_opener_logic():
+    normal = dict(battersFaced=720, inningsPitched="180.0", gamesStarted=29,
+                 strikeOuts=235, baseOnBalls=42, earnedRuns=65, hits=170)
+    proj = P.project_pitcher(normal)
+    assert proj["exp_ip"] == pytest.approx(180 / 29, abs=0.01)
+    print("✓ project_pitcher's opener detection correctly leaves a real, normal starter's exp_ip unaffected")
+
+
+def test_project_pitcher_struggling_starter_still_gets_normal_floor():
+    # A real, deliberate distinction: a CONVENTIONAL starter having a bad year (short outings,
+    # but still genuinely a starter, not an opener) should still get the ORIGINAL 3.0 floor --
+    # confirms the fix doesn't overcorrect and start under-crediting real, if struggling,
+    # starters. ip/gs here is 2.8, above the 2.5 opener threshold.
+    struggling = dict(battersFaced=350, inningsPitched="84.0", gamesStarted=30,
+                      strikeOuts=70, baseOnBalls=40, earnedRuns=55, hits=100)
+    proj = P.project_pitcher(struggling)
+    assert proj["exp_ip"] == pytest.approx(3.0, abs=1e-9)
+    print("✓ project_pitcher still applies the normal 3.0-inning floor to a genuinely struggling (but real) starter, not just any short-outing pitcher")
+
+
+def test_project_pitcher_opener_floor_guards_against_near_zero_noise():
+    # An extreme, near-zero-IP-per-start edge case should still be floored at a small, sane
+    # minimum (0.5), not left at an unrealistic near-zero value. ip=16, gs=40 keeps this fixture
+    # within the real starter gate (ip >= 15) while still exercising the extreme low end.
+    extreme = dict(battersFaced=100, inningsPitched="16.0", gamesStarted=40,
+                  strikeOuts=15, baseOnBalls=10, earnedRuns=8, hits=14)
+    proj = P.project_pitcher(extreme)
+    assert proj["exp_ip"] == pytest.approx(0.5, abs=1e-9)
+    print("✓ project_pitcher's opener floor correctly guards against an unrealistic near-zero exp_ip")
+
+
+def test_project_pitcher_opener_reduces_hitter_exposure_via_exp_bf():
+    # A real, end-to-end proof that the fix actually changes the downstream number that matters
+    # -- exp_bf, which hitter_starter_exposures directly reads to decide how many of a hitter's
+    # PA fall against this specific pitcher vs. the bullpen.
+    opener = dict(battersFaced=100, inningsPitched="24.0", gamesStarted=12,
+                 strikeOuts=28, baseOnBalls=8, earnedRuns=6, hits=18)
+    old_style_exp_bf = 3.0 * (100 / 24.0)   # what the OLD, un-fixed floor would have produced
+    proj = P.project_pitcher(opener)
+    assert proj["exp_bf"] < old_style_exp_bf
+    print(f"✓ project_pitcher's fix reduces exp_bf from what the old floor would have produced ({old_style_exp_bf:.1f}) to a real, honest value ({proj['exp_bf']:.1f})")
+
+
+
     ace = dict(battersFaced=720, inningsPitched="180.0", gamesStarted=29,
               strikeOuts=235, baseOnBalls=42, earnedRuns=65)   # a real ~3.25 ERA season
     proj = P.project_pitcher(ace)
