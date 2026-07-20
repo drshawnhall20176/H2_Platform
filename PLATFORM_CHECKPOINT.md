@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 771/771 tests green)
+## What's in this checkpoint (all tested — 776/776 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -3675,6 +3675,54 @@ market with a ceiling below HR's, everywhere this platform shows a grade (Graded
 Suggested Parlays, Retrospective's grade-accuracy tracking, and every sport, not just MLB). This
 fix corrects all of them at once, from the single, shared function every one of those pages
 already calls through.
+
+### A deeper follow-up to the ceiling fix: amplification cap for near-50%-reference markets (2026-07-19)
+Shawn reported the same underlying pattern was still happening after the anchor fix — a new
+screenshot showed a full page of "Batter Hits+Runs+RBIs Under 1.5" plays, all graded A, all
+around -115 fair odds, spanning many different, unrelated games. Confirmed directly this was a
+real, different, and deeper issue than the one just fixed — the anchor fix itself was working
+exactly as designed, which turned out to be the actual problem.
+
+**Root cause, confirmed by hand before touching any code**: -115 implies a ModelProb of ~53.5%,
+giving a raw conviction of 1.408x against H-R-R's real Under-side ceiling (~2.63, since its 0.62
+reference sits far closer to a coin flip than HR's 0.11 does). Checked what fraction of the way
+to each market's own ceiling this represented: 1.408x on H-R-R's ceiling sits at 24.98% of the
+way there; reaching "A" on HR itself requires 24.72% of the way to ITS ceiling. Nearly identical
+— the anchor formula was being completely mathematically consistent. But "same proportional
+distance" isn't the same as "equally rare" or "equally deserving of an A": HR's wide ceiling
+means real players spread out across a broad range, so 3.0x really is exceptional; H-R-R's
+compressed ceiling means real players cluster tightly in a narrow band (confirmed empirically
+last turn: 0.57-0.64), so even a genuinely modest, unremarkable edge (a real ~15-percentage-point
+edge, nowhere close to exceptional) automatically lands a large fraction of the way to that
+market's own small ceiling — not because the play is rare, but because the market itself has
+less room to begin with.
+
+**The fix**: `AMPLIFICATION_CAP = 2.5` bounds how much any single market's low ceiling can
+amplify the edge portion above 1.0, regardless of how compressed that market's ceiling actually
+is. Verified against multiple candidate cap values (2.0/2.5/3.0) before choosing 2.5, checking
+each against the real reported case, the original trivial-edge case, and — critically — the
+motivating case for ceiling normalization in the first place: a genuinely exceptional edge on a
+near-50%-reference market (a real 90% ModelProb, the kind of play WNBA/NBA/NFL markets needed
+this whole feature to be able to recognize as A-worthy) must still reach A under the cap, while a
+merely modest one (60% ModelProb) stays well below it. 2.5 satisfied every case cleanly. HR's own
+grades stay byte-identical (its own amplification ratio is already 1.0, well under the cap), and
+the earlier Stolen Bases compression fix is unaffected (its own ratio was already below 2.5).
+
+**5 new tests**: the exact reported case (1.408x raw conviction, H-R-R's real ceiling) confirmed
+to now land at B, not A; the genuinely-exceptional near-50%-reference case confirmed to still
+reach A under the cap; a merely modest near-50%-reference edge confirmed to stay well below A;
+HR's own grades confirmed byte-identical; the original trivial-edge bug case reconfirmed still
+excluded under the new cap. Plus a full, realistic end-to-end simulation with a fresh set of
+hitter profiles landing right around the reference threshold — confirmed none reach A anymore,
+consistent with the isolated, hand-verified case. 776/776 total passing.
+
+**A real, honest note on process**: this is now the third grading-related fix in a short span
+(ceiling normalization, the anchor fix, and now the amplification cap), each one surfaced by an
+actual real-money trading session rather than caught in advance. Worth watching for whether this
+pattern shows up again on a genuinely different market or reference shape — the same diagnostic
+approach (does it span one game or many unrelated ones, and what's the actual raw conviction and
+ceiling behind the number) is what found all three, in order, and is the fastest path to the
+next one if it exists.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

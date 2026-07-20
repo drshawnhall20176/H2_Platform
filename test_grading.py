@@ -155,6 +155,57 @@ def test_conviction_to_grade_anchor_fix_sb_compression_still_holds():
     print("✓ conviction_to_grade's anchor fix preserves the earlier Stolen Bases compression fix")
 
 
+# ----------------------------------------------------------------- conviction_to_grade: AMPLIFICATION_CAP fix
+def test_conviction_to_grade_modest_edge_on_compressed_ceiling_market_no_longer_reaches_a():
+    # THE exact real, second reported case: a real but genuinely modest edge (-115 American odds
+    # implies ModelProb ~53.5%, raw conviction 1.408x against H-R-R's real Under-side ceiling of
+    # ~2.63) was STILL reaching "A" even after the anchor fix, because the anchor fix alone was
+    # mathematically consistent but didn't account for how compressed a near-50%-reference
+    # market's ceiling naturally is. Confirmed this exact real case now lands at a "B", not "A".
+    grade = grading.conviction_to_grade(1.408, ceiling=2.6316)
+    assert grade is not None
+    assert grade["letter"] == "B"
+    print("✓ conviction_to_grade's amplification cap correctly downgrades a modest edge on a compressed-ceiling market from A to B")
+
+
+def test_conviction_to_grade_amplification_cap_still_lets_exceptional_near_50_edge_reach_a():
+    # Confirms the cap doesn't overcorrect -- a GENUINELY exceptional edge on a near-50%-
+    # reference market (90% ModelProb, raw conviction 1.8x against a ceiling of 2.0, e.g. a
+    # real WNBA/NBA/NFL-style market) must still be able to reach A.
+    grade = grading.conviction_to_grade(1.8, ceiling=2.0)
+    assert grade is not None
+    assert grade["letter"] == "A"
+    print("✓ conviction_to_grade's amplification cap still lets a genuinely exceptional near-50%-reference edge reach A")
+
+
+def test_conviction_to_grade_amplification_cap_keeps_modest_near_50_edge_well_below_a():
+    # A merely modest edge (60% ModelProb, raw conviction 1.2x) on the same kind of market
+    # should stay well below A -- confirms the cap produces a real, meaningful spread between
+    # "exceptional" and "modest" for markets whose ceiling is naturally compressed.
+    grade = grading.conviction_to_grade(1.2, ceiling=2.0)
+    assert grade is None or grade["letter"] in ("C", "D")
+    print("✓ conviction_to_grade's amplification cap keeps a merely modest near-50%-reference edge well below A")
+
+
+def test_conviction_to_grade_amplification_cap_hr_still_byte_identical():
+    # HR's own ceiling equals REFERENCE_CEILING, so the amplification ratio is exactly 1.0 --
+    # well below the cap -- meaning this fix must leave HR's own grades completely untouched.
+    hr_ceiling = 1.0 / 0.11
+    for conviction in (3.5, 2.2, 1.6, 1.25, 1.0):
+        with_ceiling = grading.conviction_to_grade(conviction, hr_ceiling)
+        without_ceiling = grading.conviction_to_grade(conviction)
+        assert with_ceiling == without_ceiling
+    print("✓ conviction_to_grade's amplification cap leaves HR's own grades exactly byte-identical")
+
+
+def test_conviction_to_grade_amplification_cap_trivial_edge_still_excluded():
+    # Regression guard: the original anchor-fix bug case (a trivial, near-1.0 raw conviction on
+    # H-R-R's Under side) must still fall below the D floor under the cap too.
+    grade = grading.conviction_to_grade(1.03, ceiling=2.6316)
+    assert grade is None
+    print("✓ conviction_to_grade's amplification cap still correctly excludes the original trivial-edge bug case")
+
+
 # ----------------------------------------------------------------- organize_graded_picks
 def _pick(player, team, game, conviction, market="Batter HR"):
     return {"Player": player, "Team": team, "Game": game, "Market": market, "Side": "Over",

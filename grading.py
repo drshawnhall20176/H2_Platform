@@ -58,6 +58,20 @@ REFERENCE_CEILING = 1.0 / 0.11   # ~9.09 -- MLB Batter HR's own theoretical ceil
                                  # if unintentionally, calibrated around, not a new arbitrary
                                  # number invented for this fix.
 
+AMPLIFICATION_CAP = 2.5   # a real, stated bound (not empirically fit) on how much any single
+                         # market's low ceiling can amplify the edge portion above 1.0 -- found
+                         # necessary via a real, reported case: H-R-R's Under side (ceiling
+                         # ~2.63, since its 0.62 reference sits far closer to a coin flip than
+                         # HR's 0.11 does) would otherwise amplify by ~4.96x, letting a real but
+                         # genuinely modest edge (1.408x raw -- a real ~15-percentage-point edge,
+                         # nowhere close to exceptional) reach "A" purely because that market's
+                         # own ceiling is structurally compressed, not because the play itself
+                         # was rare or outstanding. Verified by hand against the motivating case
+                         # for ceiling normalization in the first place (a genuinely exceptional
+                         # near-50%-reference play, e.g. a 90% ModelProb on a ref=0.5 market)
+                         # still reaches A at this cap, while a merely modest edge on the same
+                         # kind of market (a 60% ModelProb) stays well below it.
+
 
 def conviction_to_grade(conviction: Optional[float], ceiling: Optional[float] = None) -> Optional[Dict[str, Any]]:
     """Map a play's Conviction number to a letter grade + tier label for quick visual scanning --
@@ -78,14 +92,15 @@ def conviction_to_grade(conviction: Optional[float], ceiling: Optional[float] = 
 
     ceiling: this SPECIFIC play's own theoretical maximum possible conviction (1/RefProb for
     whichever side is favored) -- when supplied, conviction is normalized against it (scaled by
-    REFERENCE_CEILING / ceiling) BEFORE comparing to GRADE_THRESHOLDS, so a market with a
-    genuinely lower ceiling than HR's isn't structurally locked out of ever reaching a high
-    grade, and a market with a HIGHER ceiling than HR's (Stolen Bases, whose rarity gives it even
-    more headroom than HR) gets appropriately compressed rather than dominating every ranking for
-    reasons that have nothing to do with how good the actual play is. When ceiling is None (a
-    play with no such info, or an older caller not yet passing it), falls back to comparing the
-    RAW conviction directly -- stays backward compatible rather than silently reinterpreting a
-    caller's numbers it wasn't given enough context to normalize correctly.
+    a capped REFERENCE_CEILING / ceiling ratio, see AMPLIFICATION_CAP below) BEFORE comparing to
+    GRADE_THRESHOLDS, so a market with a genuinely lower ceiling than HR's isn't structurally
+    locked out of ever reaching a high grade, and a market with a HIGHER ceiling than HR's
+    (Stolen Bases, whose rarity gives it even more headroom than HR) gets appropriately
+    compressed rather than dominating every ranking for reasons that have nothing to do with how
+    good the actual play is. When ceiling is None (a play with no such info, or an older caller
+    not yet passing it), falls back to comparing the RAW conviction directly -- stays backward
+    compatible rather than silently reinterpreting a caller's numbers it wasn't given enough
+    context to normalize correctly.
 
     SPORT-AGNOSTIC BY DESIGN: takes a plain Conviction number (and optional ceiling), not a
     sport-specific row shape -- works identically whether the play came from MLB, WNBA, NBA, NFL,
@@ -111,7 +126,21 @@ def conviction_to_grade(conviction: Optional[float], ceiling: Optional[float] = 
         # leaving HR's own grades byte-identical (ceiling == REFERENCE_CEILING makes this
         # formula reduce to graded_value == conviction exactly) and still letting a genuinely
         # good low-ceiling play (a real, large edge above 1.0, not a token one) reach A.
-        graded_value = 1.0 + (conviction - 1.0) * (REFERENCE_CEILING - 1.0) / (ceiling - 1.0)
+        #
+        # A SECOND, REAL FIX ON TOP OF THAT ONE -- confirmed via a real, reported follow-up:
+        # even with the anchor above, a market whose reference probability sits close to 0.5
+        # (H-R-R at 0.62, far closer to a coin flip than HR's 0.11) has a structurally
+        # COMPRESSED ceiling (2.63, vs HR's 9.09) -- meaning real players cluster tightly in a
+        # narrow raw-conviction band near that low ceiling, so even a MODEST, unremarkable edge
+        # (a real 15-percentage-point edge, 1.408x raw, nowhere close to exceptional) sits a
+        # LARGE fraction of the way to that market's own small ceiling, and the anchor formula
+        # above -- while mathematically consistent -- amplifies that fraction the same as it
+        # would for a genuinely rare, exceptional edge on HR. AMPLIFICATION_CAP bounds how much
+        # any single market's low ceiling can amplify the edge portion, so a proportionally
+        # "far along" but absolutely modest edge doesn't get treated as equivalent to a truly
+        # rare one just because its own market happens to have less room to begin with.
+        amplification = min((REFERENCE_CEILING - 1.0) / (ceiling - 1.0), AMPLIFICATION_CAP)
+        graded_value = 1.0 + (conviction - 1.0) * amplification
     for threshold, letter, tier in GRADE_THRESHOLDS:
         if graded_value >= threshold:
             return {"letter": letter, "tier": tier, "conviction": conviction}
