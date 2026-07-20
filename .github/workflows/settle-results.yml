@@ -1,0 +1,70 @@
+# Auto-settle bet RESULTS for your open bets — the automation behind an always-current Track
+# Record, the same way capture-closing-lines.yml automates CLV.
+#
+# WHAT IT DOES:
+#   Runs settle_results.py on a timer, later in the evening and into the next morning (games
+#   have to actually FINISH before a result exists, unlike a closing line which is captured
+#   BEFORE first pitch). Each run finds open bets, fetches that sport's real, final player
+#   results for each bet's own slate date, and settles "win"/"loss" using retro.py's existing,
+#   already-tested grade_play — the same function Retrospective already grades the model's own
+#   picks with. This is what keeps Bet Log/Track Record current without manual entry.
+#
+# REQUIRES player_id on a bet to auto-settle it — name-only matching is genuinely fragile, and a
+#   WRONG automated settlement would silently corrupt a real trade record, worse than no
+#   automation at all. quick_log.py already populates player_id on every bet it logs, so this
+#   closes on its own for new bets; older or manually-logged bets without it are left for manual
+#   settlement in Bet Log itself, never guessed at by name.
+#
+# IMPORTANT — this writes to your DATABASE, not to a file (so there is NO git commit step). It
+#   needs DATABASE_URL set (Settings -> Secrets and variables -> Actions):
+#     DATABASE_URL   — your Supabase/Postgres URL, so results land where the app reads them
+#   Without DATABASE_URL the runner writes to an ephemeral SQLite file that vanishes — it will
+#   refuse to run and tell you so. No odds API key needed — this reads real, final results, not
+#   live prices.
+#
+# SCHEDULE: MLB games mostly finish 8pm-1am ET, some later on the West Coast or in extra innings;
+#   WNBA similarly runs into the evening. The overnight block covers that. A morning catch-up
+#   block re-checks anything a late/extra-innings game, or a boxscore that took longer to
+#   finalize, might have missed overnight — settlement isn't time-sensitive the way a closing
+#   line is (a missed closing-line window is gone forever; a missed settlement just gets caught
+#   on the next run, since the real result doesn't change), so this schedule is deliberately
+#   simpler than capture-closing-lines.yml's, not chasing a hard pre-game deadline.
+#
+#   In UTC: 00:00-08:59 (~7pm-3:59am ET) overnight block, every 30 min, covering when games
+#   actually finish; 11:00-14:59 (~6-9:59am ET) morning catch-up block, every 30 min. Adjust if
+#   a sport's slate runs later than this covers.
+
+name: settle-results
+
+on:
+  schedule:
+    - cron: "*/30 0-8 * * *"     # 00:00-08:59 UTC (~7pm-3:59am ET) — overnight, when games finish
+    - cron: "*/30 11-14 * * *"   # 11:00-14:59 UTC (~6-9:59am ET) — morning catch-up
+  workflow_dispatch: {}          # manual "Run workflow" button (handy for testing)
+
+permissions:
+  contents: read                 # no commit needed — results are written to the database
+
+jobs:
+  settle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        # Install the app's full pinned deps so every module the runner imports (retro, betlog,
+        # sports and their transitive imports, including each sport's own engine module) is
+        # guaranteed present. Listing a subset risked a crash-on-import when a transitive
+        # package was missing — same reasoning as capture-closing-lines.yml's own install step.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Settle results for open bets
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python settle_results.py
