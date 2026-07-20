@@ -134,12 +134,50 @@ if not selected_markets:
     st.stop()
 plays = [pl for pl in plays if pl.get("Market") in selected_markets]
 
-parlays = grading.build_suggested_parlays(plays)
+# --- parlay mode: Suggested tiers vs Game Coverage parlay ---------------------------------
+# Added directly on request, after the same real gap Speculative Basket's own Game Coverage
+# mode was built to answer: even Suggested Parlays' own "safety"-objective tiers (Safer/Steady)
+# still require clearing conviction_to_grade's real edge floor, and a real, reported strategy
+# (one safe pick per game) mostly doesn't clear it -- Total Hits' own reference (0.65) is already
+# high, so a real, good 65-77% pick barely beats "typical." Chained here (unlike Speculative
+# Basket's independent positions) since this page's whole point is a single, combined, all-must-
+# hit ticket -- and it's SAFE to chain this way: build_game_coverage_picks already guarantees at
+# most one leg per game, so every leg comes from a genuinely different game, the same level of
+# independence every other tier on this page already accepts.
+mode = st.radio("Parlay mode", ["Suggested tiers (5 objectives)", "Game Coverage parlay (one safest pick per game)"],
+                horizontal=True,
+                help="Suggested tiers: the original 5-tier behavior (Safer/Steady/Balanced/Bold/"
+                    "Longshot), each with its own objective, among plays that already clear a "
+                    "real edge floor. Game Coverage parlay: one safest pick per game, chained "
+                    "into a single ticket -- no edge floor, since the point is covering every "
+                    "game, not finding the biggest edge.")
 
-if not parlays:
-    st.info("Not enough diverse graded plays match the selected markets to safely build a "
-            "parlay — try including more markets, or check back closer to first pitch.")
-    st.stop()
+if mode == "Game Coverage parlay (one safest pick per game)":
+    c_mkt, c_side = st.columns(2)
+    sorted_markets = sorted(selected_markets)
+    default_idx = sorted_markets.index("Batter Total Hits") if "Batter Total Hits" in sorted_markets else 0
+    with c_mkt:
+        coverage_market = st.selectbox("Market", options=sorted_markets, index=default_idx)
+    with c_side:
+        coverage_side = st.selectbox("Side", options=["Over", "Under"])
+    parlays = [grading.build_game_coverage_parlay(plays, market=coverage_market, side=coverage_side)]
+    if not parlays[0]["legs"]:
+        st.info(f"No {coverage_market} {coverage_side} play found for any game in the current "
+                f"filter — try a different market/side, or check back closer to first pitch.")
+        st.stop()
+    st.caption(f"One pick per game, chained into a single parlay — the highest-probability "
+              f"{coverage_market} {coverage_side} play in each game currently in view. No edge "
+              f"floor: some legs may show \"No edge floor\" instead of a letter grade, which is "
+              f"expected — it means that specific leg doesn't carry validated edge over what's "
+              f"typical for this market, even though it's still the safest real option in that "
+              f"game.")
+else:
+    parlays = grading.build_suggested_parlays(plays)
+
+    if not parlays:
+        st.info("Not enough diverse graded plays match the selected markets to safely build a "
+                "parlay — try including more markets, or check back closer to first pitch.")
+        st.stop()
 
 st.info(
     "⚠️ **Parlays are high-variance, even when every leg looks good.** A 60% chance on each of "
@@ -155,10 +193,17 @@ st.info(
 )
 
 GRADE_COLOR = {"A": "#16783c", "B": "#2e7d32", "C": "#b8860b", "D": "#6b7280"}
-TIER_ICON = {"Safer": "🟢", "Steady": "🔵", "Balanced": "🟡", "Bold": "🟠", "Longshot": "🔴"}
+TIER_ICON = {"Safer": "🟢", "Steady": "🔵", "Balanced": "🟡", "Bold": "🟠", "Longshot": "🔴",
+            "Game Coverage": "🗺️"}
 
 
-def _grade_badge(grade: dict) -> str:
+def _grade_badge(grade) -> str:
+    # Handles None honestly, not by hiding it -- a Game Coverage pick with no real edge over
+    # typical still gets shown (it's still the safest option in that game), just labeled as
+    # such rather than crashing. Same fix already applied to Speculative Basket.
+    if grade is None:
+        return ("<span style='background:#374151;color:#d1d5db;padding:1px 8px;border-radius:6px;"
+               "font-weight:700;font-size:0.85em;'>No edge floor</span>")
     color = GRADE_COLOR.get(grade["letter"], "#6b7280")
     return (f"<span style='background:{color};color:white;padding:1px 8px;border-radius:6px;"
            f"font-weight:700;font-size:0.85em;'>{grade['letter']}</span>")
