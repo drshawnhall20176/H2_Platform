@@ -20,6 +20,7 @@ sport-agnostic, the same as the rest of grading.py.
 import streamlit as st
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
 from datetime import datetime
+from typing import Optional
 import pytz
 
 import sports
@@ -120,28 +121,67 @@ if not selected_markets:
     st.stop()
 plays = [pl for pl in plays if pl.get("Market") in selected_markets]
 
-# --- basket size + risk floor ------------------------------------------------
-c_size, c_grade = st.columns(2)
-with c_size:
-    basket_size = st.number_input("Number of positions", min_value=2, max_value=15, value=8, step=1)
-with c_grade:
-    grade_choice = st.selectbox(
-        "Minimum grade", options=["C (recommended)", "B (tighter)", "A (strictest)", "No extra floor"],
-        help="A real, reported issue on Suggested Parlays: without a real quality floor, "
-            "chasing the longest odds alone can pick the WORST, barely-qualifying plays purely "
-            "because they have long odds, not because they have any real edge. This floor "
-            "requires real, validated picks before a position is even eligible.",
-    )
-    min_grade_letter = {"C (recommended)": "C", "B (tighter)": "B", "A (strictest)": "A",
-                        "No extra floor": None}[grade_choice]
+# --- basket mode: Speculative (chase payout) vs Game Coverage (safest pick per game) ---------
+# Added directly on request, after a real, reported gap: a real strategy (one safe hit pick per
+# game, confirmed against actual placed bets) mostly didn't clear the edge floor the Speculative
+# mode below requires -- Total Hits' own reference (0.65) is already high, so a real, good 65-77%
+# pick barely beats "typical," even though it's a perfectly sound pick for a DIFFERENT question:
+# not "what has the best edge," but "given I'm making one pick per game regardless, who's the
+# safest option." Game Coverage answers that question directly, with no edge floor at all.
+mode = st.radio("Basket mode", ["Speculative (chase payout)", "Game Coverage (one safest pick per game)"],
+                horizontal=True,
+                help="Speculative: the original mode, chases the biggest payout among plays that "
+                    "already clear a real edge floor. Game Coverage: for each game in your "
+                    "current filter, shows the single highest-probability pick for a chosen "
+                    "market/side -- no edge floor, since the point is coverage across every "
+                    "game, not finding the biggest edge.")
 
-basket = grading.build_speculative_basket(plays, size=int(basket_size), min_grade_letter=min_grade_letter)
+if mode == "Game Coverage (one safest pick per game)":
+    c_mkt, c_side = st.columns(2)
+    sorted_markets = sorted(markets_present)
+    default_idx = sorted_markets.index("Batter Total Hits") if "Batter Total Hits" in sorted_markets else 0
+    with c_mkt:
+        coverage_market = st.selectbox("Market", options=sorted_markets, index=default_idx)
+    with c_side:
+        coverage_side = st.selectbox("Side", options=["Over", "Under"])
+    coverage_picks = grading.build_game_coverage_picks(plays, market=coverage_market, side=coverage_side)
+    basket = {
+        "legs": coverage_picks,
+        "prob_at_least_one_wins": grading.basket_prob_at_least_one_wins(coverage_picks),
+        "expected_winners": round(sum(leg.get("ModelProb", 0.0) for leg in coverage_picks), 2),
+    }
+    if not basket["legs"]:
+        st.info(f"No {coverage_market} {coverage_side} play found for any game in the current "
+                f"filter — try a different market/side, or check back closer to first pitch.")
+        st.stop()
+    st.caption(f"One pick per game — the single highest-probability {coverage_market} {coverage_side} "
+              f"play in each game currently in view. No edge floor: some of these may show no "
+              f"letter grade at all, which is expected and not an error — it means this specific "
+              f"pick doesn't carry validated edge over what's typical for this market, even "
+              f"though it's still the safest real option available in that game.")
+else:
+    # --- basket size + risk floor ------------------------------------------------
+    c_size, c_grade = st.columns(2)
+    with c_size:
+        basket_size = st.number_input("Number of positions", min_value=2, max_value=15, value=8, step=1)
+    with c_grade:
+        grade_choice = st.selectbox(
+            "Minimum grade", options=["C (recommended)", "B (tighter)", "A (strictest)", "No extra floor"],
+            help="A real, reported issue on Suggested Parlays: without a real quality floor, "
+                "chasing the longest odds alone can pick the WORST, barely-qualifying plays purely "
+                "because they have long odds, not because they have any real edge. This floor "
+                "requires real, validated picks before a position is even eligible.",
+        )
+        min_grade_letter = {"C (recommended)": "C", "B (tighter)": "B", "A (strictest)": "A",
+                            "No extra floor": None}[grade_choice]
 
-if not basket["legs"]:
-    st.info("Not enough real, graded plays match the selected markets and minimum grade to "
-            "build a basket — try including more markets, loosening the grade floor, or check "
-            "back closer to first pitch.")
-    st.stop()
+    basket = grading.build_speculative_basket(plays, size=int(basket_size), min_grade_letter=min_grade_letter)
+
+    if not basket["legs"]:
+        st.info("Not enough real, graded plays match the selected markets and minimum grade to "
+                "build a basket — try including more markets, loosening the grade floor, or check "
+                "back closer to first pitch.")
+        st.stop()
 
 st.info(
     "💼 **This is a basket of INDEPENDENT positions, not a parlay.** Each play below is its "
@@ -170,7 +210,13 @@ st.caption("\"P(at least one wins)\" and \"Expected winners\" assume independenc
 GRADE_COLOR = {"A": "#16783c", "B": "#2e7d32", "C": "#b8860b", "D": "#6b7280"}
 
 
-def _grade_badge(grade: dict) -> str:
+def _grade_badge(grade: Optional[dict]) -> str:
+    # Handles None honestly, not by hiding it -- a Game Coverage pick with no real edge over
+    # typical still gets shown (it's still the safest option in that game), just labeled as
+    # such rather than crashing or silently pretending it has a grade it doesn't.
+    if grade is None:
+        return ("<span style='background:#374151;color:#d1d5db;padding:1px 8px;border-radius:6px;"
+               "font-weight:700;font-size:0.85em;'>No edge floor</span>")
     color = GRADE_COLOR.get(grade["letter"], "#6b7280")
     return (f"<span style='background:{color};color:white;padding:1px 8px;border-radius:6px;"
            f"font-weight:700;font-size:0.85em;'>{grade['letter']}</span>")
