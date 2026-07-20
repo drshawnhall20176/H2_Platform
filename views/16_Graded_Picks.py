@@ -21,6 +21,7 @@ import pytz
 import sports
 import best_bets_data as BBD
 import grading
+import quick_log
 
 _active = sports.active()
 E, P = _active.engine, _active.projections
@@ -202,3 +203,11 @@ for game in organized:
                 elif lineup == "Confirmed":
                     st.caption("🟢 Confirmed lineup.")
             st.markdown("")
+
+        # Quick-log widget, added directly on request: during a real, narrow pick-making
+        # window, having to separately re-enter a pick into Bet Log is real friction that gets
+        # skipped in favor of just making the pick. Per-game (this page's own natural unit),
+        # owner-only (quick_log itself enforces this).
+        game_plays = [play for player_entry in game["players"] for play in player_entry["plays"]]
+        quick_log.render_quick_log(game_plays, date_str, _active.key,
+                                   key_prefix=f"graded_{game['game']}")

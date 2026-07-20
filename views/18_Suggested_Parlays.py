@@ -32,6 +32,7 @@ import pytz
 import sports
 import best_bets_data as BBD
 import grading
+import quick_log
 
 game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER   # shared with
                                                                                    # Graded Picks
@@ -212,3 +213,10 @@ for parlay in parlays:
                 # the active roster even though he may not have been in that game's own lineup.
                 st.caption("🟡 Lineup not yet confirmed for this game — a player shown here "
                           "could still be scratched before first pitch.")
+
+        # Quick-log widget, added directly on request: during a real, narrow pick-making
+        # window, having to separately re-enter a pick into Bet Log is real friction that gets
+        # skipped in favor of just making the pick. Owner-only (quick_log itself enforces this),
+        # keyed per tier so each tier's own multiselect/button don't collide with another tier's.
+        quick_log.render_quick_log(parlay["legs"], date_str, _active.key,
+                                   key_prefix=f"parlays_{parlay['tier']}")

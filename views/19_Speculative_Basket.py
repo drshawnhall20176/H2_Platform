@@ -25,6 +25,7 @@ import pytz
 import sports
 import best_bets_data as BBD
 import grading
+import quick_log
 
 game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER   # shared with
                                                                                    # Graded Picks
@@ -208,3 +209,8 @@ with st.container(border=True):
             st.caption("🟡 Lineup not yet confirmed for this game — a player shown here could "
                       "still be scratched before first pitch.")
         st.markdown("")
+
+# Quick-log widget, added directly on request: during a real, narrow pick-making window, having
+# to separately re-enter a pick into Bet Log is real friction that gets skipped in favor of just
+# making the pick. Owner-only (quick_log itself enforces this).
+quick_log.render_quick_log(basket["legs"], date_str, _active.key, key_prefix="basket")

@@ -10,6 +10,7 @@ import pytz
 
 import sports
 import best_bets_data as BBD
+import quick_log
 
 _active = sports.active()
 E, P = _active.engine, _active.projections
@@ -79,18 +80,33 @@ with f3: min_conv = st.slider("Min conviction", 1.0, 3.0, 1.2, 0.1)
 view = [p for p in plays
         if (slot_pick == "All slate" or p["Slot"] == slot_pick)
         and p["Market"] in mkt_pick and p["Conviction"] >= min_conv]
+# A REAL, CONFIRMED FIX, not the original design -- re-sorted here by ModelProb (real
+# probability of hitting), not left in the plays list's own Conviction-descending order. Same
+# real reasoning as the fix already made to Command Center's "Tonight's top leans": Conviction
+# measures edge relative to a market-typical reference rate, not absolute likelihood, and a real
+# betting decision should lead with "how likely is this," not "how much better than typical is
+# this market's own reference rate." min_conv above still requires real, validated edge before a
+# play is even eligible -- this reorders WITHIN that already-graded set, it doesn't remove the
+# floor.
+view.sort(key=lambda p: p["ModelProb"], reverse=True)
 
 # --- the board -------------------------------------------------------------
 for p in view:
     if p.get("_bullpen_blended"):
         p["Player"] = f"🔄 {p['Player']}"   # compact, visible marker — no new column needed
-df = pd.DataFrame(view)[["Conviction", "Time", "Slot", "Player", "Team", "Market", "Side",
-                         "Line", "ModelProb", "Fair", "Game", "Why"]]
+df = pd.DataFrame(view)[["ModelProb", "Conviction", "Time", "Slot", "Player", "Team", "Market", "Side",
+                         "Line", "Fair", "Game", "Why"]]
 df = df.rename(columns={"ModelProb": "Model %", "Why": "Why the model likes it"})
 st.dataframe(df.style.format({"Model %": "{:.0%}", "Line": "{:g}", "Conviction": "{:.2f}×", "Fair": "{:+d}"},
                              na_rep="—")
-             .theme_gradient(cmap="Greens", subset=["Conviction"]),
+             .theme_gradient(cmap="Greens", subset=["Model %"]),
              use_container_width=True, hide_index=True, height=400)
+
+# Quick-log widget, added directly on request: during a real, narrow pick-making window, having
+# to separately re-enter a pick into Bet Log is real friction that gets skipped in favor of just
+# making the pick. Owner-only (quick_log itself enforces this).
+quick_log.render_quick_log(view, date_str, _active.key, key_prefix="best_bets")
+
 if any(p.get("_bullpen_blended") for p in view):
     st.caption("🔄 = re-priced using this hitter's own real vs-starter/vs-bullpen exposure split, "
               "not just the starter's rate applied to all of his projected plate appearances — a "
@@ -109,11 +125,11 @@ if not view:
     st.stop()
 
 # Searchable picker: the box is type-to-search, so just start typing a player's name to jump to
-# them — no scrolling. Plays are already ordered by conviction, so the strongest leans are on top.
+# them — no scrolling. Plays are already ordered by ModelProb, so the most likely leans are on top.
 selected_idx = st.selectbox(
     "Select a play to inspect for model hallucinations (type a name to search)",
     options=range(len(view)),
-    format_func=lambda i: (f"{view[i]['Conviction']:.2f}×  ·  {view[i]['Player']}  ·  "
+    format_func=lambda i: (f"{view[i]['ModelProb']:.0%}  ·  {view[i]['Player']}  ·  "
                            f"{view[i]['Market']} {view[i]['Side']} {view[i]['Line']:g}"))
 
 p = view[selected_idx]

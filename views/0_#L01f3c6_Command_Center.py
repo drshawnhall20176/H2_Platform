@@ -20,6 +20,7 @@ import betlog as B
 import sports
 import best_bets_data as BBD
 import grading
+import quick_log
  
 _active = sports.active()
  
@@ -163,48 +164,57 @@ with left:
         # conviction_to_grade already exposes for exactly this reason, means "Tonight's top
         # leans" now agrees with what Graded Picks itself would show for the same slate --
         # intra-page consistency, not a second, silently different ranking of "the same" model.
-        graded_plays = []
-        for p in plays:
-            g = grading.conviction_to_grade(p.get("Conviction"), p.get("_ceiling"))
-            if g:
-                graded_plays.append({**p, "_grade": g})
-        graded_plays.sort(key=lambda p: p["_grade"]["rank_value"], reverse=True)
-
+        # A REAL, CONFIRMED FIX, not the original design -- Top Leans used to sort by rank_value
+        # (the ceiling-normalized Conviction metric), which is the wrong number for what a "top
+        # lean" actually means to a real person. Confirmed directly with a real, reported
+        # example: a genuine longshot Triples play (11% real chance of happening, an 89% chance
+        # it doesn't) can carry a raw Conviction of 4.44x purely because Triples' reference rate
+        # is so low (~2.5%) that even a modest real probability looks huge relative to it --
+        # rank_value would still rate this a real, valid grade, but "leans" colloquially means
+        # "I lean toward this happening," which is a probability question, not an edge-relative-
+        # to-typical one. This is the SAME real distinction already built into Suggested Parlays'
+        # Safer/Steady tiers -- Top Leans just never got the same treatment. Graded Picks itself
+        # stays rank_value-sorted on purpose (its entire identity IS the letter-grade system),
+        # but this widget's own name and purpose are different. See grading.build_top_leans' own
+        # docstring for the full reasoning -- pulled out of this view for the same reason every
+        # other piece of real logic on this platform lives in grading.py, not trusted by eye in
+        # the browser.
         _TOP_TABS = [("All", None)] + [(f"{_MARKET_ICONS.get(m, '🔹')} {m}", m)
                                        for m in _active.market_map.keys()]
         _ttabs = st.tabs([t[0] for t in _TOP_TABS])
         for _tb, (_lab, _mkt) in zip(_ttabs, _TOP_TABS):
             with _tb:
                 if _mkt is None:
-                    # "All" = a cross-market summary, NOT a raw rank_value sort. Since the rarest
-                    # event in any market family tends to win conviction (and, before this fix,
-                    # could still dominate even after normalization), sorting everything by
-                    # rank_value alone just reproduces whichever single market has the most
-                    # headroom. Instead show the best 2 leans from each market.
-                    picks, seen = [], {}
-                    for p in graded_plays:                # already rank_value-sorted
-                        m = p["Market"]
-                        if seen.get(m, 0) < 2:
-                            picks.append(p)
-                            seen[m] = seen.get(m, 0) + 1
-                    subset = sorted(picks, key=lambda p: -p["_grade"]["rank_value"])
+                    subset = grading.build_top_leans(plays, per_market=2)
                     st.caption("Best two leans from each market — so this isn't just one market's tab again.")
                 else:
-                    subset = [p for p in graded_plays if p["Market"] == _mkt][:8]
+                    subset = [p for p in grading.build_top_leans(plays, per_market=8)
+                             if p["Market"] == _mkt][:8]
                 if subset:
                     for p in subset:
                         p["Grade"] = p["_grade"]["letter"]
-                    tdf = pd.DataFrame(subset)[["Grade", "Conviction", "Player", "Market", "Side",
-                                                "Line", "ModelProb", "Why"]]
+                    tdf = pd.DataFrame(subset)[["Grade", "ModelProb", "Player", "Market", "Side",
+                                                "Line", "Conviction", "Why"]]
                     st.dataframe(
                         tdf.rename(columns={"ModelProb": "Model %", "Why": "Reasoning"})
                         .style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×", "Line": "{:g}"})
-                        .theme_gradient(cmap="Greens", subset=["Conviction"]),
+                        .theme_gradient(cmap="Greens", subset=["Model %"]),
                         hide_index=True, use_container_width=True, height=330)
                 else:
                     st.caption("No leans in this market on tonight's board.")
-        st.caption("Grade and rank reflect the same ceiling-normalized methodology as Graded Picks — "
-                  "not guaranteed value, priced against the live market on the Edge Board.")
+        st.caption("Ranked by real probability of hitting (Model %), among plays that already "
+                  "clear a real grade — not by Conviction alone, which measures edge relative to "
+                  "a market-typical rate and can run high on a genuine longshot in a rare-event "
+                  "market. Grade still reflects the same methodology as Graded Picks.")
+        # Quick-log widget, added directly on request: during a real, narrow pick-making window,
+        # having to separately re-enter a pick into Bet Log is real friction that gets skipped in
+        # favor of just making the pick. Uses the same curated "best 2 per market" set shown in
+        # the All tab -- the most representative summary of tonight's top leans, not a separate
+        # widget per market tab (which would mean 15+ redundant copies). Owner-only (quick_log
+        # itself enforces this, so this stays hidden for a public/Discord audience even though
+        # Command Center itself is a public page).
+        quick_log.render_quick_log(grading.build_top_leans(plays, per_market=2), today,
+                                   _active.key, key_prefix="top_leans")
     else:
         st.info("No games on the board right now. Top leans appear here on an active slate.")
  
