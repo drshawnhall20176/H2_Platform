@@ -177,7 +177,8 @@ def build_pitcher_arsenal(pitches: pd.DataFrame) -> pd.DataFrame:
 # --------------------------------------------------------------------- hitter splits
 def build_hitter_splits(pitches: pd.DataFrame) -> pd.DataFrame:
     """One row per (batter, family): whiff%, contact%, SLG-against, xwOBA-against, exit velo
-    (the HITTER'S OWN average exit velocity when he puts this family in play), count.
+    (the HITTER'S OWN average exit velocity when he puts this family in play), zone% (this
+    hitter's own), count.
 
     Aggregated by pitch family (Fastball/Breaking/Offspeed) for a stable per-hitter sample.
 
@@ -189,8 +190,17 @@ def build_hitter_splits(pitches: pd.DataFrame) -> pd.DataFrame:
     on the arsenal table (this is what happens when THIS hitter specifically connects, not the
     pitcher's own season-long average against everyone). NaN (not a fabricated 0.0) when this
     hitter has no real batted-ball sample against this family -- an honest "not enough data"
-    state, not a fabricated "zero exit velocity.\""""
-    cols = ["batter", "family", "pitches", "whiff", "contact", "slg", "xwoba", "exit_velo"]
+    state, not a fabricated "zero exit velocity."
+
+    zone_pct added directly on request, after an initial (too hasty) call to leave it off the
+    hitter side entirely -- reconsidered: this is NOT a circular restatement of the pitcher's
+    own zone%. The pitcher's arsenal zone% is his OVERALL rate across every hitter he's faced;
+    this is the fraction of THIS family, SPECIFICALLY when thrown to THIS hitter, that landed in
+    the zone -- a real, different signal (do pitchers change their approach against this
+    specific hitter, e.g. nibbling more against a disciplined one, or challenging a hitter who
+    doesn't punish contact in the zone)."""
+    cols = ["batter", "family", "pitches", "whiff", "contact", "slg", "xwoba", "exit_velo",
+           "zone_pct"]
     if pitches is None or len(pitches) == 0:
         return pd.DataFrame(columns=cols)
     df = pitches.copy()
@@ -207,6 +217,8 @@ def build_hitter_splits(pitches: pd.DataFrame) -> pd.DataFrame:
     df["_ab"] = events.isin(_AB_EVENTS).values
     df["_xwoba"] = pd.to_numeric(_col(df, "estimated_woba_using_speedangle"), errors="coerce")
     df["_exit_velo"] = pd.to_numeric(_col(df, "launch_speed"), errors="coerce")
+    zone_code = pd.to_numeric(_col(df, "zone"), errors="coerce")
+    df["_in_zone"] = zone_code.between(1, 9)   # Statcast's own 9 in-zone region codes
 
     rows = []
     for (bid, fam), g in df.groupby(["_bid", "_family"]):
@@ -222,6 +234,7 @@ def build_hitter_splits(pitches: pd.DataFrame) -> pd.DataFrame:
             "batter": int(bid),
             "family": fam,
             "pitches": n,
+            "zone_pct": float(g["_in_zone"].sum()) / n,
             "whiff": (whiffs / swings) if swings else 0.0,
             "contact": (1.0 - whiffs / swings) if swings else 0.0,
             "slg": (tb / abs_) if abs_ else 0.0,                   # SLG against this family
@@ -234,14 +247,14 @@ def build_hitter_splits(pitches: pd.DataFrame) -> pd.DataFrame:
 # --------------------------------------------------------------------- hitter splits by pitch type
 def build_hitter_pitch_type_splits(pitches: pd.DataFrame) -> pd.DataFrame:
     """One row per (batter, SPECIFIC pitch_type): whiff%, contact%, SLG-against, xwOBA-against,
-    exit velo (this hitter's own), count.
+    exit velo (this hitter's own), zone% (this hitter's own), count.
 
     Same math as build_hitter_splits (see its own docstring for the real reasoning behind
-    contact_pct/exit_velo) but by individual pitch (4-Seam, Slider, Curveball ...) rather than
-    family — more granular, but noisier per hitter, so it uses a higher pitch floor
+    contact_pct/exit_velo/zone_pct) but by individual pitch (4-Seam, Slider, Curveball ...)
+    rather than family — more granular, but noisier per hitter, so it uses a higher pitch floor
     (MIN_PITCHES_TYPE) and always carries the pitch count so a thin sample is visible, not hidden."""
     cols = ["batter", "pitch_type", "pitch_name", "family", "pitches", "whiff", "contact",
-           "slg", "xwoba", "exit_velo"]
+           "slg", "xwoba", "exit_velo", "zone_pct"]
     if pitches is None or len(pitches) == 0:
         return pd.DataFrame(columns=cols)
     df = pitches.copy()
@@ -257,6 +270,8 @@ def build_hitter_pitch_type_splits(pitches: pd.DataFrame) -> pd.DataFrame:
     df["_ab"] = events.isin(_AB_EVENTS).values
     df["_xwoba"] = pd.to_numeric(_col(df, "estimated_woba_using_speedangle"), errors="coerce")
     df["_exit_velo"] = pd.to_numeric(_col(df, "launch_speed"), errors="coerce")
+    zone_code = pd.to_numeric(_col(df, "zone"), errors="coerce")
+    df["_in_zone"] = zone_code.between(1, 9)
 
     rows = []
     for (bid, ptype), g in df.groupby(["_bid", "_ptype"]):
@@ -279,6 +294,7 @@ def build_hitter_pitch_type_splits(pitches: pd.DataFrame) -> pd.DataFrame:
             "slg": (tb / abs_) if abs_ else 0.0,
             "xwoba": float(np.nanmean(g["_xwoba"])) if g["_xwoba"].notna().any() else 0.0,
             "exit_velo": float(np.nanmean(ev_series)) if ev_series.notna().any() else float("nan"),
+            "zone_pct": float(g["_in_zone"].sum()) / n,
         })
     out = pd.DataFrame(rows, columns=cols)
     if len(out):
@@ -317,6 +333,7 @@ def build_matchup(pitcher_id: int, hitter_id: int,
         h_slg = hs["slg"] if hs else None
         h_contact = hs.get("contact") if hs else None
         h_exit_velo = hs.get("exit_velo") if hs else None
+        h_zone_pct = hs.get("zone_pct") if hs else None
         rows.append({
             "pitch_name": pitch.get("pitch_name", pitch.get("pitch_type")),
             "pitch_type": pitch.get("pitch_type"),
@@ -338,6 +355,7 @@ def build_matchup(pitcher_id: int, hitter_id: int,
             "h_xwoba": hs["xwoba"] if hs else None,
             "h_contact": h_contact,
             "h_exit_velo": h_exit_velo,
+            "h_zone_pct": h_zone_pct,
             "score": (matchup_score(pitch.get("whiff", 0.0), h_whiff, h_slg)
                       if hs else None),
         })
@@ -414,6 +432,7 @@ def load(arsenal_path: str = ARSENAL_PATH, hitter_path: str = HITTER_PATH
                     "xwoba": float(d.get("xwoba", 0) or 0), "pitches": int(d.get("pitches", 0) or 0),
                     "contact": _none_safe_float(d.get("contact")),
                     "exit_velo": _none_safe_float(d.get("exit_velo")),
+                    "zone_pct": _none_safe_float(d.get("zone_pct")),
                 }
         except Exception:
             pass
@@ -424,7 +443,7 @@ def load(arsenal_path: str = ARSENAL_PATH, hitter_path: str = HITTER_PATH
 def load_hitter_types(path: str = HITTER_TYPE_PATH) -> Dict[int, List[Dict]]:
     """Read the by-specific-pitch hitter table into a fast lookup:
         hitter_types[batter_id] -> [ {pitch_type, pitch_name, family, pitches, whiff, contact,
-                                     slg, xwoba, exit_velo}, ... ]
+                                     slg, xwoba, exit_velo, zone_pct}, ... ]
     Sorted most-seen pitch first. Returns {} if the file is missing (page treats it as optional)."""
     out: Dict[int, List[Dict]] = {}
     if not os.path.exists(path):
@@ -440,6 +459,7 @@ def load_hitter_types(path: str = HITTER_TYPE_PATH) -> Dict[int, List[Dict]]:
                 "xwoba": float(d.get("xwoba", 0) or 0),
                 "contact": _none_safe_float(d.get("contact")),
                 "exit_velo": _none_safe_float(d.get("exit_velo")),
+                "zone_pct": _none_safe_float(d.get("zone_pct")),
             })
     except Exception:
         pass

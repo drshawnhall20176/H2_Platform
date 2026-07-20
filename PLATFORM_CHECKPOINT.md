@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 846/846 tests green)
+## What's in this checkpoint (all tested — 851/851 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -4261,6 +4261,43 @@ end-to-end simulation — raw Statcast-shaped pitches through a REAL CSV write/r
 resulting numbers told a genuinely coherent scouting story on their own (58.3% whiff and weak
 85.0 mph contact against Breaking, 77.3% contact and hard 104.0 mph contact against Fastball) —
 not just mechanically correct math. 846/846 total passing.
+
+### Hitter-side zone%: reconsidering an earlier, too-hasty call (2026-07-20)
+Shawn asked two real questions: whether there's a hitter-side zone%, and whether the pitcher-
+side zone% should have color coding. Both deserved actually checking, not just restating the
+earlier reasoning.
+
+**Zone% coloring on the pitcher side: reasoning re-verified with a concrete counterexample, held
+up.** A fastball at 65% zone rate is generally good (fastballs are meant to work ahead in
+counts); a breaking ball at 65% zone rate is often bad (a hanging slider that gets crushed). Same
+number, opposite meaning, depending on pitch type and what the pitcher's actually doing with it —
+unlike Whiff%/Contact%/Exit Velo, where the direction never flips. Kept uncolored, now with the
+concrete reasoning stated directly rather than just asserted.
+
+**Hitter-side zone%: the earlier decision to leave it off was too hasty, and wrong.** Reconsidered
+directly: it's NOT circular with the pitcher's own arsenal zone% (his overall rate across every
+hitter he's faced) — it's specifically how often pitchers challenge THIS hitter in the zone with
+a given family/pitch, a real, different signal (do they nibble more against a disciplined hitter,
+or challenge one who doesn't punish contact in the zone). Built it.
+
+**Extended `build_hitter_splits`/`build_hitter_pitch_type_splits`** with `zone_pct`, reusing the
+exact same Statcast zone-code logic (1-9 = in-zone) already built for the pitcher-side arsenal.
+`load()`/`load_hitter_types()` extended to read it through using the same shared `_none_safe_float`
+helper (honest `None`, never a fabricated `0.0`, when genuinely absent). `build_matchup()` passes
+`h_zone_pct` through the join. Both hitter tables on Matchup Lab display it, left uncolored for
+the same, now-concrete reasoning as the pitcher side — restated specifically for the hitter
+context in the view's own caption, not just copy-pasted.
+
+**6 new tests**, the core number hand-verified first (27 in-zone / 18 out-of-zone pitches → zone%
+= 0.6, confirmed by direct execution before any assertion was written) — covering both aggregation
+functions, drift-safety when the underlying `zone` column is entirely absent, and `build_matchup`'s
+pass-through including the missing-hitter case. Plus a full, realistic end-to-end simulation
+through a real CSV round-trip (40% hitter-specific zone rate against Breaking, confirmed
+end-to-end from raw pitches to the final `build_matchup` output) — caught and fixed a real
+arithmetic bug in the simulation script itself along the way (`[1..9]*2` has only 18 elements, not
+enough to slice to 20 — Python slicing beyond a list's length silently returns what's there rather
+than erroring, so the mistake wasn't in the production code, but in my own test data construction,
+caught by an IndexError before trusting the result). 851/851 total passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

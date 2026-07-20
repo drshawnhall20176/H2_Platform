@@ -170,6 +170,45 @@ def test_hitter_pitch_type_splits_contact_pct_and_exit_velo():
     print("✓ hitter pitch-type splits: contact%/exit velo hand-verified, same math as the family-level split")
 
 
+def _mock_pitches_hitter_zone():
+    """45 pitches for batter 300 vs Fastball (clears MIN_PITCHES_FAMILY=40): 27 in-zone
+    (Statcast zone codes 1-9), 18 out-of-zone (codes 11-14) -> zone% = 27/45 = 0.6."""
+    zones = ([1, 2, 3, 4, 5, 6, 7, 8, 9] * 3)[:27] + ([11, 12, 13, 14] * 5)[:18]
+    rows = [{"batter": 300, "pitcher": 100, "pitch_type": "FF", "zone": zones[i],
+            "description": "ball", "launch_speed": None, "events": "",
+            "estimated_woba_using_speedangle": None} for i in range(45)]
+    return pd.DataFrame(rows)
+
+
+def test_hitter_splits_zone_pct():
+    # Added after reconsidering an earlier decision to leave zone% off the hitter side entirely
+    # -- this is NOT circular with the pitcher's own arsenal zone%: that's his overall rate
+    # across every hitter he's faced; this is specifically how often pitchers challenge THIS
+    # hitter in the zone with this family, a real, different signal.
+    hs = M.build_hitter_splits(_mock_pitches_hitter_zone())
+    row = hs.iloc[0]
+    assert abs(row["zone_pct"] - 0.6) < 1e-9
+    print("✓ hitter splits (by family): hitter-specific zone% hand-verified")
+
+
+def test_hitter_pitch_type_splits_zone_pct():
+    df = _mock_pitches_hitter_zone()
+    hts = M.build_hitter_pitch_type_splits(df)
+    row = hts.iloc[0]
+    assert abs(row["zone_pct"] - 0.6) < 1e-9
+    print("✓ hitter pitch-type splits: hitter-specific zone% hand-verified")
+
+
+def test_hitter_splits_zone_pct_drift_safe_when_column_missing():
+    # Same drift-safe posture as the pitcher side: raw Statcast missing the zone column entirely
+    # must not crash, correctly computing 0 in-zone pitches rather than erroring.
+    hs = M.build_hitter_splits(_mock_pitches())   # the original fixture, predates zone entirely
+    assert "zone_pct" in hs.columns
+    fb = hs[(hs["batter"] == 200) & (hs["family"] == "Fastball")].iloc[0]
+    assert fb["zone_pct"] == 0.0
+    print("✓ hitter splits: zone% stays drift-safe when the underlying zone column is entirely absent")
+
+
 def test_matchup_score_direction():
     # A pitch the pitcher misses bats with (high p_whiff) vs a hitter who whiffs a lot and does
     # little damage should score HIGHER than the same pitch vs a hitter who crushes that family.
@@ -260,6 +299,30 @@ def test_build_matchup_hitter_contact_and_exit_velo_none_when_hitter_missing():
     assert rows[0]["h_contact"] is None
     assert rows[0]["h_exit_velo"] is None
     print("✓ build_matchup correctly leaves h_contact/h_exit_velo as None when the hitter has no cached data, not a crash")
+
+
+def test_build_matchup_passes_through_hitter_zone_pct():
+    arsenals = {100: [
+        {"pitch_type": "SL", "pitch_name": "Slider", "family": "Breaking", "usage": 0.4,
+         "whiff": 0.60, "putaway": 0.5, "velo": 86.0},
+    ]}
+    hitter_splits = {200: {
+        "Breaking": {"whiff": 0.45, "slg": 0.230, "xwoba": 0.250, "pitches": 120,
+                    "contact": 0.55, "exit_velo": 89.3, "zone_pct": 0.38},
+    }}
+    rows = M.build_matchup(100, 200, arsenals, hitter_splits)
+    assert rows[0]["h_zone_pct"] == 0.38
+    print("✓ build_matchup correctly passes through the hitter's own zone% for the matched family")
+
+
+def test_build_matchup_hitter_zone_pct_none_when_hitter_missing():
+    arsenals = {100: [
+        {"pitch_type": "SL", "pitch_name": "Slider", "family": "Breaking", "usage": 0.4,
+         "whiff": 0.60, "putaway": 0.5, "velo": 86.0},
+    ]}
+    rows = M.build_matchup(100, 999, arsenals, {})
+    assert rows[0]["h_zone_pct"] is None
+    print("✓ build_matchup correctly leaves h_zone_pct as None when the hitter has no cached data")
 
 
 def test_empty_inputs_dont_crash():
