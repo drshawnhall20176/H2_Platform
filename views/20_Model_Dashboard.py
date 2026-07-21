@@ -91,13 +91,10 @@ else:
 
 # =========================================================================== element 2: the tool's own picks
 st.divider()
-st.subheader("🎯 The tool's own picks — how last night's slate graded out")
-st.caption("Last night's board, rebuilt and graded against real results, filtered to C-or-better "
-          "graded plays only — the same floor Suggested Parlays and Graded Picks already use to "
-          "mean 'a real recommendation,' not every candidate the model ever considered.")
-
-target = st.date_input("Slate to review", datetime.now() - timedelta(days=1), key="dash_slate_date")
-date_str = target.strftime("%Y-%m-%d")
+st.subheader("🎯 The tool's own picks — how the tool's recommendations graded out")
+st.caption("Rebuilt and graded against real results, filtered to C-or-better graded plays only "
+          "— the same floor Suggested Parlays and Graded Picks already use to mean 'a real "
+          "recommendation,' not every candidate the model ever considered.")
 
 if _active.key == "MLB":
     fip_constant = st.number_input("FIP constant", value=E.FIP_CONSTANT_DEFAULT, step=0.01,
@@ -110,8 +107,8 @@ if _active.key == "MLB":
         graded, _ = R.grade_slate(plays, results)
         return graded
 
-    with st.spinner("Rebuilding last night's board..."):
-        graded = _load_graded_mlb(date_str, fip_constant)
+    def _load_graded_for(date_str_inner: str):
+        return _load_graded_mlb(date_str_inner, fip_constant)
 else:
     @st.cache_data(ttl=600, show_spinner=False)
     def _load_graded_generic(sport_key: str, date_str_inner: str):
@@ -122,30 +119,54 @@ else:
         graded, _ = R.grade_slate(plays, results)
         return graded
 
-    with st.spinner("Rebuilding last night's board..."):
-        graded = _load_graded_generic(_active.key, date_str)
+    def _load_graded_for(date_str_inner: str):
+        return _load_graded_generic(_active.key, date_str_inner)
+
+view_mode = st.radio("View", ["Single slate", "Trend (multiple nights)"], horizontal=True,
+                     key="dash_view_mode")
+
+if view_mode == "Single slate":
+    target = st.date_input("Slate to review", datetime.now() - timedelta(days=1), key="dash_slate_date")
+    date_str = target.strftime("%Y-%m-%d")
+    with st.spinner("Rebuilding that night's board..."):
+        graded = _load_graded_for(date_str)
+else:
+    n_days = st.number_input("Nights back", min_value=1, max_value=30, value=7, step=1,
+                             key="dash_trend_days")
+    dates = R.trading_dates_ending_yesterday(int(n_days))
+    graded = []
+    progress = st.progress(0.0, text=f"Rebuilding {len(dates)} nights...")
+    for i, d in enumerate(dates):
+        graded.extend(_load_graded_for(d))
+        progress.progress((i + 1) / len(dates), text=f"Rebuilt {d} ({i + 1}/{len(dates)})")
+    progress.empty()
+    st.caption(f"Pooled across {dates[0]} through {dates[-1]} ({len(dates)} nights).")
 
 st.warning("**Approximate, for exploration.** Rebuilding a past slate uses *current*-season "
           "rates, not the exact point-in-time numbers from that specific night — fine for "
-          "checking last night, not a substitute for the Bet Log's own real, point-in-time "
+          "checking recent results, not a substitute for the Bet Log's own real, point-in-time "
           "record above.", icon="⚠️")
 
 by_market = G.hit_miss_by_market(graded, min_grade_letter="C")
 if by_market:
-    _pie_grid(by_market, "hits", "misses", "market")
+    _pie_grid(by_market, "hits", "misses", "label")
 
-    st.markdown("**Hit rate by letter grade, within each market** — does an A actually hit more "
-               "than a C in *this specific market*? The pie chart above pools every C-or-better "
-               "grade into one hit/miss split, which can hide a real problem: a market where A's "
-               "are near-perfect and C's are closer to a coin flip looks identical in aggregate "
-               "to one where every grade performs about the same. This breaks it apart. Includes "
-               "D-grade and ungraded plays too, so the full A→D ordering is visible, not just the "
-               "C-or-better subset the pie chart above is scoped to.")
+    st.markdown("**Hit rate by letter grade, within each market/side** — does an A actually hit "
+               "more than a C in *this specific market and side*? The pie chart above pools "
+               "every C-or-better grade into one hit/miss split, which can hide a real problem: "
+               "a bucket where A's are near-perfect and C's are closer to a coin flip looks "
+               "identical in aggregate to one where every grade performs about the same. This "
+               "breaks it apart. Split by side too (not just market) — Over and Under for the "
+               "same market carry different reference rates, so a shared letter grade means "
+               "different real confidence on each side; pooling them would muddy this exact "
+               "table. Includes D-grade and ungraded plays too, so the full A→D ordering is "
+               "visible, not just the C-or-better subset the pie chart above is scoped to.")
     for m in by_market:
-        market_plays = [g for g in graded if g.get("Market") == m["market"]]
-        breakdown = G.grade_accuracy_by_letter(market_plays)
+        bucket_plays = [g for g in graded
+                        if g.get("Market") == m["market"] and g.get("Side") == m["side"]]
+        breakdown = G.grade_accuracy_by_letter(bucket_plays)
         if breakdown:
-            with st.expander(f"{m['market']} — by letter grade"):
+            with st.expander(f"{m['label']} — by letter grade"):
                 st.dataframe(pd.DataFrame(breakdown).rename(
                     columns={"letter": "Grade", "tier": "Label", "n": "Plays", "hit_rate": "Hit rate"})
                     .style.format({"Hit rate": "{:.0%}"}), hide_index=True, use_container_width=True)
