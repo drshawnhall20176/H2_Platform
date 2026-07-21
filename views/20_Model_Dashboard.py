@@ -21,6 +21,7 @@ point-in-time record.
 """
 
 import streamlit as st
+import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
@@ -132,6 +133,22 @@ st.warning("**Approximate, for exploration.** Rebuilding a past slate uses *curr
 by_market = G.hit_miss_by_market(graded, min_grade_letter="C")
 if by_market:
     _pie_grid(by_market, "hits", "misses", "market")
+
+    st.markdown("**Hit rate by letter grade, within each market** — does an A actually hit more "
+               "than a C in *this specific market*? The pie chart above pools every C-or-better "
+               "grade into one hit/miss split, which can hide a real problem: a market where A's "
+               "are near-perfect and C's are closer to a coin flip looks identical in aggregate "
+               "to one where every grade performs about the same. This breaks it apart. Includes "
+               "D-grade and ungraded plays too, so the full A→D ordering is visible, not just the "
+               "C-or-better subset the pie chart above is scoped to.")
+    for m in by_market:
+        market_plays = [g for g in graded if g.get("Market") == m["market"]]
+        breakdown = G.grade_accuracy_by_letter(market_plays)
+        if breakdown:
+            with st.expander(f"{m['market']} — by letter grade"):
+                st.dataframe(pd.DataFrame(breakdown).rename(
+                    columns={"letter": "Grade", "tier": "Label", "n": "Plays", "hit_rate": "Hit rate"})
+                    .style.format({"Hit rate": "{:.0%}"}), hide_index=True, use_container_width=True)
 else:
     st.caption("No C-or-better graded picks settled for this slate yet — try an earlier date, "
               "or results may not be posted for this slate yet.")
