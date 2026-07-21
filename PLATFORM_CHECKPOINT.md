@@ -4593,6 +4593,46 @@ message, not a crash). Element 2's exact output shape confirmed to match what th
 `_pie_grid` helper expects, using a realistic simulated `grade_slate`-shaped input, since live
 network access to actually rebuild a real slate isn't available from this sandbox.
 
+### Per-market letter-grade breakdown added to Model Dashboard (2026-07-21)
+Following a real, live run of the new dashboard: Batter HR came back at 22.7% (22 hit, 75 miss)
+against every other market clustering 53-67%, and Shawn asked directly whether that's a real
+problem.
+
+**Root cause investigated and confirmed, not guessed**: checked `projections.BEST_BET_REF` and
+found HR's own reference rate (0.11) is dramatically lower than every other market shown, and
+crucially, `grading.REFERENCE_CEILING` is LITERALLY DEFINED as HR's own ceiling (`1.0 / 0.11`) —
+confirmed by reading the constant's own definition, not inferred. That means no ceiling-
+normalization amplification distorts HR's own grades the way it does for compressed-ceiling
+markets like Total Hits, so the calculated absolute-probability floors per letter grade for HR
+(C >= 16.5%, B >= 22.0%, A >= 33.0%) are exact, not approximate. The real, observed 22.7% lands
+almost exactly on the B-grade floor -- consistent with a realistic, mostly-C-grade sample, not
+obviously a miscalibration. The honest limitation stated directly: this doesn't PROVE the model
+is fine without knowing the real grade mix inside that 97-play sample -- it explains most of why
+HR looks structurally different from every other market on the page.
+
+**Checked before building anything**: `grade_accuracy_by_letter` already exists and is already
+wired into Retrospective (confirmed via grep, not assumed), but only as a pooled, all-markets-
+combined breakdown -- exactly the gap that made the aggregate 22.7% ambiguous in the first place.
+
+**Added a genuinely new, per-market view, not a duplicate of the existing one**: for each market
+already shown in the pie-chart grid, an expander now shows hit rate broken out by A/B/C/D letter
+grade specifically within that market -- reusing the existing, already-tested `grade_accuracy_
+by_letter` directly (just filtered to one market's plays first), not new grading logic. Uses the
+FULL graded list per market (including D-grade and ungraded plays), not just the C-or-better
+subset the pie chart itself is scoped to, so the complete A->D ordering is visible for
+confirming the grading system is well-ordered, not only the "real recommendation" slice.
+
+**Verified with a realistic simulation before considering it done**: built a mock 97-pick HR
+sample with a realistic 70/22/8 C/B/A grade mix, with outcomes drawn at each play's own stated
+probability (not hand-picked to prove a point) -- came back with a pooled hit rate (25.8%) close
+to the real, observed 22.7%, and the breakdown itself showed a clean, monotonic A (45.5%) > B
+(38.1%) > C (18.5%) ordering, exactly what well-calibrated grading should produce. Gives Shawn a
+concrete, correct picture of what the real breakdown should look like if the model's grading is
+actually working, to compare the live page against. 903/903 tests passing (no new pure-function
+logic was added -- this composes two already-tested functions -- so no new unit tests were
+needed beyond the existing coverage for hit_miss_by_market and grade_accuracy_by_letter
+individually).
+
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
   framing/item 5 writeup above for why: no confirmed way to find every game a specific umpire
