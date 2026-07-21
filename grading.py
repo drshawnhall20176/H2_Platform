@@ -348,9 +348,20 @@ def grade_accuracy_by_letter(graded_plays: List[Dict]) -> List[Dict]:
 
 def hit_miss_by_market(graded_plays: List[Dict], min_grade_letter: str = "C") -> List[Dict]:
     """Takes ALREADY-GRADED plays (retro.grade_slate's own output -- each carrying "Hit":
-    True/False/None, "Market", "Conviction", and "_ceiling") and buckets settled, real-graded
-    plays into per-market hit/miss counts -- added directly on request for a dashboard showing
-    "how did the tool's actual recommendations do last night, broken down by market."
+    True/False/None, "Market", "Side", "Conviction", and "_ceiling") and buckets settled,
+    real-graded plays into per-(market, side) hit/miss counts -- added directly on request for
+    a dashboard showing "how did the tool's actual recommendations do last night, broken down
+    by market."
+
+    Groups by (market, side) TOGETHER, not market alone -- a REAL, CONFIRMED FIX, not a
+    preemptive one: grouping by market alone was found to pool Over and Under picks for the
+    same market into one bucket, even though they have genuinely different reference rates
+    (e.g. Batter Total Hits Over is ~65% typical, Under is ~35%) and therefore different
+    grading ceilings. A "C" grade means a different real confidence level on each side, so
+    pooling them muddies the letter-grade signal -- confirmed directly against a real slate
+    where Batter Total Hits' C and D grades converged to nearly identical hit rates (58% vs
+    58%), which is exactly the symptom two differently-calibrated populations averaged together
+    would produce, not a sign the grading itself was wrong.
 
     min_grade_letter: the SAME letter-grade floor Suggested Parlays/Graded Picks already use
     to mean "a real recommendation" (default "C", matching Suggested Parlays' own default) --
@@ -363,9 +374,12 @@ def hit_miss_by_market(graded_plays: List[Dict], min_grade_letter: str = "C") ->
     Only SETTLED plays (Hit is not None) count toward hits/misses -- an unsettled or ungradeable
     play is silently excluded, never counted as a miss.
 
-    Returns one entry per market that has at least one real, settled, C-or-better play:
-    [{"market", "hits", "misses"}, ...], sorted by total plays descending (busiest markets
-    first). A market with zero qualifying plays is simply absent -- never a fabricated 0-0."""
+    Returns one entry per (market, side) that has at least one real, settled, C-or-better play:
+    [{"market", "side", "label", "hits", "misses"}, ...], sorted by total plays descending
+    (busiest first). "side" is None (and "label" is just the market name) for plays that never
+    carried a Side field at all -- graceful, not an error, since not every market necessarily
+    has a distinct Over/Under framing. A (market, side) pair with zero qualifying plays is
+    simply absent -- never a fabricated 0-0."""
     letters_in_order = [letter for _, letter, _ in GRADE_THRESHOLDS]
     if min_grade_letter not in letters_in_order:
         min_grade_letter = "C"
@@ -373,7 +387,7 @@ def hit_miss_by_market(graded_plays: List[Dict], min_grade_letter: str = "C") ->
     allowed_letters = set(letters_in_order[:cutoff_idx + 1])
 
     settled = [g for g in graded_plays if g.get("Hit") is not None]
-    by_market: Dict[str, Dict] = {}
+    by_bucket: Dict[tuple, Dict] = {}
     for g in settled:
         grade = conviction_to_grade(g.get("Conviction"), g.get("_ceiling"))
         if not grade or grade["letter"] not in allowed_letters:
@@ -381,12 +395,16 @@ def hit_miss_by_market(graded_plays: List[Dict], min_grade_letter: str = "C") ->
         mkt = g.get("Market")
         if mkt is None:
             continue
-        rec = by_market.setdefault(mkt, {"market": mkt, "hits": 0, "misses": 0})
+        side = g.get("Side")
+        key = (mkt, side)
+        label = f"{mkt} — {side}" if side else mkt
+        rec = by_bucket.setdefault(key, {"market": mkt, "side": side, "label": label,
+                                        "hits": 0, "misses": 0})
         if g["Hit"]:
             rec["hits"] += 1
         else:
             rec["misses"] += 1
-    return sorted(by_market.values(), key=lambda r: -(r["hits"] + r["misses"]))
+    return sorted(by_bucket.values(), key=lambda r: -(r["hits"] + r["misses"]))
 
 
 

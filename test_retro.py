@@ -139,3 +139,35 @@ if __name__ == "__main__":
         except Exception as e:  # noqa: BLE001
             print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
     print(f"\n{passed}/{len(tests)} tests passed")
+
+
+# ----------------------------------------------------------------- trading_dates_ending_yesterday
+def test_trading_dates_ending_yesterday_hand_verified():
+    result = R.trading_dates_ending_yesterday(3, as_of="2026-07-21")
+    assert result == ["2026-07-18", "2026-07-19", "2026-07-20"]
+    print("✓ trading_dates_ending_yesterday returns the correct, hand-verified dates in chronological order")
+
+
+def test_trading_dates_ending_yesterday_single_day():
+    assert R.trading_dates_ending_yesterday(1, as_of="2026-07-21") == ["2026-07-20"]
+    print("✓ trading_dates_ending_yesterday correctly handles n_days=1")
+
+
+def test_trading_dates_ending_yesterday_zero_is_empty_not_an_error():
+    assert R.trading_dates_ending_yesterday(0, as_of="2026-07-21") == []
+    assert R.trading_dates_ending_yesterday(-3, as_of="2026-07-21") == []
+    print("✓ trading_dates_ending_yesterday returns an honest empty list for n_days<=0, not a crash")
+
+
+def test_trading_dates_ending_yesterday_crosses_month_boundary():
+    result = R.trading_dates_ending_yesterday(7, as_of="2026-08-01")
+    assert result == ["2026-07-25", "2026-07-26", "2026-07-27", "2026-07-28",
+                      "2026-07-29", "2026-07-30", "2026-07-31"]
+    print("✓ trading_dates_ending_yesterday correctly crosses a real month boundary")
+
+
+def test_trading_dates_ending_yesterday_never_includes_today():
+    result = R.trading_dates_ending_yesterday(5, as_of="2026-07-21")
+    assert "2026-07-21" not in result   # today's slate isn't settled yet, must never be included
+    assert result[-1] == "2026-07-20"   # most recent entry is yesterday
+    print("✓ trading_dates_ending_yesterday never includes today's date, only fully-settled prior nights")

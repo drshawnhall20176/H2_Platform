@@ -540,8 +540,8 @@ def test_hit_miss_by_market_hand_verified():
     ]
     result = grading.hit_miss_by_market(plays)
     by_mkt = {r["market"]: r for r in result}
-    assert by_mkt["Batter HR"] == {"market": "Batter HR", "hits": 1, "misses": 1}
-    assert by_mkt["Batter Total Hits"] == {"market": "Batter Total Hits", "hits": 1, "misses": 1}
+    assert by_mkt["Batter HR"]["hits"] == 1 and by_mkt["Batter HR"]["misses"] == 1
+    assert by_mkt["Batter Total Hits"]["hits"] == 1 and by_mkt["Batter Total Hits"]["misses"] == 1
     print("✓ hit_miss_by_market correctly buckets hand-verified plays by market")
 
 
@@ -552,7 +552,7 @@ def test_hit_miss_by_market_excludes_below_floor():
     ]
     result = grading.hit_miss_by_market(plays)
     mkt = next(r for r in result if r["market"] == "Batter HR")
-    assert mkt == {"market": "Batter HR", "hits": 1, "misses": 0}
+    assert mkt["hits"] == 1 and mkt["misses"] == 0
     print("✓ hit_miss_by_market correctly excludes sub-floor (ungraded) plays entirely")
 
 
@@ -571,7 +571,8 @@ def test_hit_miss_by_market_default_excludes_d_grade():
 def test_hit_miss_by_market_min_grade_letter_can_be_loosened():
     plays = [_graded_play(1.25, True)]   # D grade
     result = grading.hit_miss_by_market(plays, min_grade_letter="D")
-    assert result == [{"market": "Batter HR", "hits": 1, "misses": 0}]
+    assert len(result) == 1
+    assert result[0]["hits"] == 1 and result[0]["misses"] == 0
     print("✓ hit_miss_by_market's min_grade_letter parameter correctly widens the floor when loosened to D")
 
 
@@ -598,6 +599,41 @@ def test_hit_miss_by_market_sorted_by_volume_descending():
     assert result[0]["market"] == "Batter Total Hits"   # busiest market first
     assert result[1]["market"] == "Batter HR"
     print("✓ hit_miss_by_market sorts busiest markets first")
+
+
+def test_hit_miss_by_market_separates_over_and_under():
+    # A REAL, CONFIRMED FIX, not a hypothetical: grouping by market alone was found (via a real
+    # dashboard run) to pool Over and Under picks for the same market together, even though they
+    # carry very different reference rates and therefore mean different things at the same
+    # letter grade. Confirms the two sides now land in genuinely separate buckets.
+    plays = [
+        {"Conviction": 1.6, "Hit": True, "Market": "Batter Total Hits", "Side": "Over"},
+        {"Conviction": 1.6, "Hit": False, "Market": "Batter Total Hits", "Side": "Over"},
+        {"Conviction": 1.6, "Hit": True, "Market": "Batter Total Hits", "Side": "Under"},
+    ]
+    result = grading.hit_miss_by_market(plays)
+    assert len(result) == 2   # Over and Under are now two separate entries, not pooled into one
+    by_side = {r["side"]: r for r in result}
+    assert by_side["Over"]["hits"] == 1 and by_side["Over"]["misses"] == 1
+    assert by_side["Under"]["hits"] == 1 and by_side["Under"]["misses"] == 0
+    print("✓ hit_miss_by_market correctly keeps Over and Under as separate buckets for the same market")
+
+
+def test_hit_miss_by_market_label_combines_market_and_side():
+    plays = [{"Conviction": 1.6, "Hit": True, "Market": "Batter Total Hits", "Side": "Under"}]
+    result = grading.hit_miss_by_market(plays)
+    assert result[0]["label"] == "Batter Total Hits — Under"
+    print("✓ hit_miss_by_market's label field correctly combines market and side for direct display use")
+
+
+def test_hit_miss_by_market_missing_side_stays_graceful():
+    # Not every market necessarily carries a Side field -- must not crash, and the label should
+    # fall back to just the market name rather than showing a literal "None" in the display text.
+    plays = [_graded_play(2.0, True)]   # the shared helper doesn't set Side at all
+    result = grading.hit_miss_by_market(plays)
+    assert result[0]["side"] is None
+    assert result[0]["label"] == "Batter HR"
+    print("✓ hit_miss_by_market gracefully falls back to just the market name when Side is genuinely absent")
 
 
 # ----------------------------------------------------------------- build_parlay_leg_pool

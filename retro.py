@@ -16,6 +16,27 @@ model's probability at bet time) is the source of truth. This page is for explor
 from __future__ import annotations
  
 from typing import Dict, List, Optional, Tuple
+from datetime import datetime, timedelta
+
+
+def trading_dates_ending_yesterday(n_days: int, as_of: Optional[str] = None) -> List[str]:
+    """The last n_days real calendar dates, as "YYYY-MM-DD" strings, ending at YESTERDAY
+    relative to as_of (defaults to today) -- added directly on request, for a "trend across
+    recent nights" dashboard view.
+
+    Ends at yesterday, not today, on purpose: today's slate is still in progress or hasn't been
+    played yet at any point someone would realistically be checking this, so including it would
+    mean rebuilding a night with an incomplete or entirely absent real result to grade against.
+
+    Returns OLDEST FIRST (chronological order), matching how a trend is naturally read left to
+    right. n_days <= 0 returns an empty list, not an error -- a real, honest "nothing to show"
+    rather than a crash on a stray zero from a UI number input."""
+    if n_days <= 0:
+        return []
+    anchor = datetime.strptime(as_of, "%Y-%m-%d") if as_of else datetime.now()
+    yesterday = anchor - timedelta(days=1)
+    return [(yesterday - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(n_days - 1, -1, -1)]
+
  
 MARKET_STAT = {
     "Batter HR": "hr", "Batter Total Bases": "tb", "Batter Total Hits": "hits",

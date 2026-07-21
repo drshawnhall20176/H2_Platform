@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 903/903 tests green)
+## What's in this checkpoint (all tested — 911/911 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -4632,6 +4632,84 @@ actually working, to compare the live page against. 903/903 tests passing (no ne
 logic was added -- this composes two already-tested functions -- so no new unit tests were
 needed beyond the existing coverage for hit_miss_by_market and grade_accuracy_by_letter
 individually).
+
+### Real Over/Under pooling bug fixed, found via live dashboard data (2026-07-21)
+Following a real, live run of Model Dashboard: Batter Total Hits' C and D letter grades came
+back at nearly identical hit rates (58% vs 58%, on samples of 36 and 117 -- large enough that
+this wasn't primarily small-sample noise), while every other market showed real separation.
+Investigated directly rather than guessed at an explanation: confirmed `REFERENCE_CEILING` is
+literally defined as Batter HR's own ceiling (`1.0 / 0.11`), and that Total Hits' Over (65%
+typical) and Under (35% typical) sides have genuinely different reference rates and grading
+ceilings — yet `hit_miss_by_market` and the per-market letter-grade breakdown both grouped by
+Market alone, silently pooling both sides together. A "C" grade means a materially different
+real confidence level on Over versus Under for the same market, so averaging them together was
+exactly the kind of thing that would produce two grade tiers converging to a similar hit rate
+without either grade actually being wrong.
+
+**Fixed `grading.hit_miss_by_market`** to group by (Market, Side) instead of Market alone.
+Output now carries `market`, `side`, and a combined `label` (e.g. "Batter Total Hits — Under")
+for direct display use, falling back gracefully to just the market name when a play never
+carried a Side field at all (not every market necessarily has a distinct Over/Under framing).
+
+**3 existing tests updated** to match the corrected output shape, **3 new tests added**
+specifically confirming the actual fix — Over and Under land in genuinely separate buckets, the
+label combines correctly, and a missing Side degrades gracefully rather than showing a literal
+"None" in the display text. 906/906 total passing.
+
+**Model Dashboard updated to match**: pie chart titles now use the combined market+side label,
+and the per-market letter-grade expander now filters by both Market and Side (matching the
+fixed function), not just Market.
+
+**A related, NOT-yet-fixed finding flagged directly, not silently expanded into**:
+`betlog.py`'s `market_breakdown` — which feeds Element 1 (real bets) on this same dashboard, and
+is also used by Track Record's existing CLV bar chart and per-market table — has the identical
+Market-only grouping issue. Deliberately left untouched this round: it's a more invasive change
+than the Retrospective-side fix, since it's an existing, already-deployed function multiple
+other parts of the platform already depend on, not scoped to what was explicitly confirmed this
+turn. Flagged to Shawn directly for a decision rather than assumed in scope.
+
+### Trending across multiple nights added to Model Dashboard (2026-07-21)
+Following the HR parlay discussion (letter grades separated correctly on one night, but one
+night alone can't confirm the ordering holds up), Shawn wanted to check whether A > B > C
+persists across multiple nights rather than trust a single 15-leg sample. Presented two real
+options first — rebuild on demand each time (no new storage, slower per-check) versus persist
+graded results once computed (faster over time, real new infrastructure) — recommended the
+on-demand approach first as the lower-risk way to find out whether trending is actually useful
+before investing in persistence.
+
+**Core, testable logic**: `retro.trading_dates_ending_yesterday(n_days, as_of=None)` — a small,
+pure date-range helper. Deliberately ends at yesterday, never today: today's slate is still in
+progress or unplayed at any point someone would realistically check this, so including it would
+mean rebuilding a night with an incomplete or absent real result to grade against. Returns
+oldest-first (chronological), matching how a trend reads left to right. n_days<=0 returns an
+honest empty list, not a crash, guarding against a stray zero from a UI number input. 5 new
+tests, including a real month-boundary case (not just a same-month range) and a direct
+confirmation that today's own date is never included.
+
+**Model Dashboard's Element 2 restructured** with a Single slate / Trend (multiple nights) mode
+toggle. Both modes reuse the exact same per-date cached loader functions (`_load_graded_mlb`/
+`_load_graded_generic`, unchanged) — trend mode just calls the loader in a loop across the
+computed date range and pools every night's graded plays into one combined list via `.extend()`,
+with a progress bar so a multi-night rebuild (each night involves real fetches: pitcher/hitter
+stats, weather, Statcast) doesn't look hung. Everything downstream — `hit_miss_by_market`, the
+pie-chart grid, the per-market-side letter-grade breakdown — is completely unchanged, since it
+already operates generically on whatever `graded` list it's handed; pooling multiple nights
+required zero changes to any of that rendering or aggregation logic.
+
+**A real, useful side effect of reusing the existing per-date cache**: if a date was already
+rebuilt once (e.g. checked in Single slate mode), switching to Trend mode that includes it reuses
+the cached result rather than re-fetching — the caching was already per-date, so this falls out
+for free rather than needing new cache-key design.
+
+**Verified end-to-end with a full simulation**: 3 nights of realistic mock graded HR plays,
+pooled through the exact same code path the dashboard uses, confirmed the pooled hit/miss counts
+and letter-grade breakdown come out correct against hand-computed expectations. 911/911 tests
+passing.
+
+**Explicitly NOT built this round, and deliberately so**: persistent storage for graded results
+(Option B from the original framing). The plan discussed with Shawn: run on-demand trending for a
+while, and if checking it often enough that rebuild time becomes the real friction, that's the
+actual signal to invest in persistence — not something to guess at up front.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
