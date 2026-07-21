@@ -275,6 +275,41 @@ def bullpen_fatigue_multipliers(fatigued_fraction: Optional[float]) -> Dict[str,
            "hr_mult": REST_HR_MULT}
 
 
+# ---- hitter rest/workload adjustment -----------------------------------------
+HITTER_FATIGUE_GAMES_MAX = 8   # matches mlb_engine.get_team_hitter_workload's own 🔴 threshold
+                              # exactly (8+ consecutive games started, no rest day) -- ONE
+                              # definition of "hitter fatigue" on this platform, not two. The
+                              # 🟡 tier (5-7 straight games) is deliberately NOT treated as a
+                              # real adjustment trigger here, same "only the clearest, most
+                              # confident signal gets a real adjustment" posture as short rest
+                              # (<=4 days, not 5+) and bullpen fatigue (>=1/3 of the pen, not any
+                              # single tired arm) -- a "watch" signal isn't the same as a
+                              # confirmed one.
+
+HITTER_FATIGUE_HR_MULT = 0.92    # real, stated, conservative estimates -- NOT empirically fit.
+HITTER_FATIGUE_HIT_MULT = 0.95   # A hitter on an extended run without a day off is a real,
+HITTER_FATIGUE_K_MULT = 1.08     # well-covered concern in real baseball reporting (beat writers,
+                                 # team statements), generally described as reduced bat speed and
+                                 # power (fewer HR, softer/less frequent contact overall) and a
+                                 # real uptick in strikeouts. Deliberately does NOT touch walk
+                                 # rate -- plate discipline is a far less physically demanding
+                                 # skill than bat speed/power generation, so there's no honest
+                                 # basis to assert fatigue erodes it the same way.
+
+
+def hitter_fatigue_multipliers(consecutive_games_started: Optional[int]) -> Dict[str, float]:
+    """Given a hitter's real, current consecutive-games-started streak (from mlb_engine.
+    get_team_hitter_workload), the real multipliers to apply to his own HR/hit(contact)/K rates
+    -- {"hr_mult", "hit_mult", "k_mult"}, all 1.0 (no adjustment) unless the streak is a real,
+    confirmed no-rest-day case (>= HITTER_FATIGUE_GAMES_MAX). None (unknown workload, e.g. a
+    rookie's MLB debut or a fetch failure) is treated the SAME as a well-rested hitter -- 1.0,
+    never assumed to be the worse case just because it's unknown."""
+    if consecutive_games_started is None or consecutive_games_started < HITTER_FATIGUE_GAMES_MAX:
+        return {"hr_mult": 1.0, "hit_mult": 1.0, "k_mult": 1.0}
+    return {"hr_mult": HITTER_FATIGUE_HR_MULT, "hit_mult": HITTER_FATIGUE_HIT_MULT,
+           "k_mult": HITTER_FATIGUE_K_MULT}
+
+
 # ---- batter model ----------------------------------------------------------
 def pitcher_allowed_rates(stat: Optional[Dict], days_rest: Optional[int] = None,
                           bullpen_fatigue: Optional[float] = None) -> Optional[Dict]:
@@ -366,16 +401,29 @@ def batter_base_rates(season_stat: Dict, split_stat: Optional[Dict] = None,
  
 def batter_pa_probs(season_stat: Dict, park: Dict, opp_allowed: Optional[Dict] = None,
                     split_stat: Optional[Dict] = None, xhr_pa: Optional[float] = None,
-                    weather_hr: float = 1.0) -> Optional[np.ndarray]:
+                    weather_hr: float = 1.0,
+                    consecutive_games_started: Optional[int] = None) -> Optional[np.ndarray]:
     """Per-PA outcome distribution: matchup-, platoon-, Statcast-, and weather-aware.
- 
-    Order: stabilized base rates (handedness + barrel-implied HR) -> odds-ratio vs the
-    pitcher -> park -> weather (temperature + wind on HR)."""
+
+    Order: stabilized base rates (handedness + barrel-implied HR) -> hitter's OWN fatigue ->
+    odds-ratio vs the pitcher -> park -> weather (temperature + wind on HR).
+
+    consecutive_games_started: this hitter's own real current no-rest-day streak (from
+    mlb_engine.get_team_hitter_workload), added directly on request. Applies hitter_fatigue_
+    multipliers' real, stated penalty to HIS OWN rates -- power (hr) and contact quality
+    (1b/2b/3b together) go DOWN, strikeouts go UP, walk rate deliberately untouched (see that
+    function's own docstring for the full reasoning). Applied BEFORE the opponent-matchup step
+    so a fatigued hitter still projects worse than his own well-rested numbers would against
+    that same pitcher."""
     base = batter_base_rates(season_stat, split_stat, xhr_pa)
     if base is None:
         return None
+    fatigue_mult = hitter_fatigue_multipliers(consecutive_games_started)
     p_hr, p_3b, p_2b, p_1b = base["hr"], base["3b"], base["2b"], base["1b"]
     p_bb, p_k = base["bb"], base["k"]
+    p_hr *= fatigue_mult["hr_mult"]
+    p_3b *= fatigue_mult["hit_mult"]; p_2b *= fatigue_mult["hit_mult"]; p_1b *= fatigue_mult["hit_mult"]
+    p_k *= fatigue_mult["k_mult"]
  
     # Matchup: combine batter rate with the pitcher's allowed rate via odds-ratio.
     if opp_allowed:
@@ -757,7 +805,10 @@ def build_projection_index(rows: List[Dict], meta: List[Dict],
         # own comment for the full reasoning.
         opp_allowed = pitcher_allowed_rates(r.get("_opp_stat"), r.get("_opp_days_rest"))
         xhr = xhr_from_statcast(r.get("_pid"), statcast, statcast_k)
-        probs = batter_pa_probs(stat, park, opp_allowed, r.get("_split_stat"), xhr, r.get("_weather_hr", 1.0))
+        # Same _consecutive_games_started per-row convention as enrich_hitter_rows -- see that
+        # function's own comment for the full reasoning.
+        probs = batter_pa_probs(stat, park, opp_allowed, r.get("_split_stat"), xhr,
+                                r.get("_weather_hr", 1.0), r.get("_consecutive_games_started"))
         if probs is None:
             continue
         sim = simulate_batter(probs, r.get("_exp_pa", DEFAULT_UNKNOWN_PA), sims, rng)
@@ -917,7 +968,12 @@ def enrich_hitter_rows(rows: List[Dict], sims: int = DEFAULT_SIMS, seed: Optiona
         # see pitcher_allowed_rates' own docstring for the full reasoning and exact direction.
         opp_allowed = pitcher_allowed_rates(r.get("_opp_stat"), r.get("_opp_days_rest"))
         xhr = xhr_from_statcast(r.get("_pid"), statcast, statcast_k)
-        probs = batter_pa_probs(stat, park, opp_allowed, r.get("_split_stat"), xhr, r.get("_weather_hr", 1.0))
+        # _consecutive_games_started: this HITTER's own real current no-rest-day streak, added
+        # directly on request -- same established per-row metadata convention as _opp_stat/
+        # _opp_days_rest (attached upstream by best_bets_data.py, sourced from mlb_engine.
+        # get_team_hitter_workload). See batter_pa_probs' own docstring for the full reasoning.
+        probs = batter_pa_probs(stat, park, opp_allowed, r.get("_split_stat"), xhr,
+                                r.get("_weather_hr", 1.0), r.get("_consecutive_games_started"))
         if probs is None:
             continue
         sim = simulate_batter(probs, r.get("_exp_pa", DEFAULT_UNKNOWN_PA), sims, rng)
@@ -1233,8 +1289,10 @@ def blend_hitter_probs_with_bullpen(row: Dict, bullpen_stat: Dict, sims: int = D
         # for a function whose whole purpose is providing a real bullpen-aware read — an explicit
         # check here, not a downstream one, is what actually prevents a silently-neutral "blend."
         return None
-    probs_sp = batter_pa_probs(stat, park, opp_sp_rates, split_stat, xhr, weather_hr)
-    probs_pen = batter_pa_probs(stat, park, opp_pen_rates, split_stat, xhr, weather_hr)
+    probs_sp = batter_pa_probs(stat, park, opp_sp_rates, split_stat, xhr, weather_hr,
+                               row.get("_consecutive_games_started"))
+    probs_pen = batter_pa_probs(stat, park, opp_pen_rates, split_stat, xhr, weather_hr,
+                                row.get("_consecutive_games_started"))
     if probs_sp is None or probs_pen is None:
         return None
 

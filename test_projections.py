@@ -25,6 +25,61 @@ def test_low_sample_returns_none():
     assert P.batter_pa_probs(dict(plateAppearances=10), P.NEUTRAL_PARK) is None
 
 
+# ----------------------------------------------------------------- batter_pa_probs: hitter fatigue
+def test_batter_pa_probs_fatigue_applies_correct_direction_and_magnitude():
+    stat = dict(plateAppearances=600, atBats=540, hits=170, doubles=36, triples=2,
+               homeRuns=25, baseOnBalls=55, strikeOuts=125)
+    normal = P.batter_pa_probs(stat, P.NEUTRAL_PARK)
+    fatigued = P.batter_pa_probs(stat, P.NEUTRAL_PARK, consecutive_games_started=8)
+    # Hand-verified exact ratios
+    assert abs(fatigued[P.HR] / normal[P.HR] - P.HITTER_FATIGUE_HR_MULT) < 1e-9
+    assert abs(fatigued[P.K] / normal[P.K] - P.HITTER_FATIGUE_K_MULT) < 1e-9
+    assert abs(fatigued[P.SINGLE] / normal[P.SINGLE] - P.HITTER_FATIGUE_HIT_MULT) < 1e-9
+    assert abs(fatigued[P.DOUBLE] / normal[P.DOUBLE] - P.HITTER_FATIGUE_HIT_MULT) < 1e-9
+    print("✓ batter_pa_probs applies the exact, hand-verified fatigue penalty to HR/hit/K")
+
+
+def test_batter_pa_probs_fatigue_leaves_walk_rate_untouched():
+    stat = dict(plateAppearances=600, atBats=540, hits=170, doubles=36, triples=2,
+               homeRuns=25, baseOnBalls=55, strikeOuts=125)
+    normal = P.batter_pa_probs(stat, P.NEUTRAL_PARK)
+    fatigued = P.batter_pa_probs(stat, P.NEUTRAL_PARK, consecutive_games_started=8)
+    assert fatigued[P.BB] == normal[P.BB]
+    print("✓ batter_pa_probs correctly leaves walk rate untouched by the fatigue adjustment")
+
+
+def test_batter_pa_probs_fatigue_below_threshold_unaffected():
+    stat = dict(plateAppearances=600, atBats=540, hits=170, doubles=36, triples=2,
+               homeRuns=25, baseOnBalls=55, strikeOuts=125)
+    normal = P.batter_pa_probs(stat, P.NEUTRAL_PARK)
+    watch_tier = P.batter_pa_probs(stat, P.NEUTRAL_PARK, consecutive_games_started=6)
+    assert (normal == watch_tier).all()
+    print("✓ batter_pa_probs applies no adjustment for the 🟡 watch tier (below the real 8-game threshold)")
+
+
+def test_batter_pa_probs_fatigue_survives_opponent_matchup():
+    # Confirms the fatigue penalty survives the odds-ratio opponent-matchup step, not just the
+    # unadjusted case.
+    stat = dict(plateAppearances=600, atBats=540, hits=170, doubles=36, triples=2,
+               homeRuns=25, baseOnBalls=55, strikeOuts=125)
+    opp_allowed = dict(hr=0.03, k=0.22, bb=0.08, nonhr_hit=0.20)
+    normal = P.batter_pa_probs(stat, P.NEUTRAL_PARK, opp_allowed=opp_allowed)
+    fatigued = P.batter_pa_probs(stat, P.NEUTRAL_PARK, opp_allowed=opp_allowed,
+                                 consecutive_games_started=8)
+    assert fatigued[P.HR] < normal[P.HR]
+    assert fatigued[P.K] > normal[P.K]
+    print("✓ batter_pa_probs' fatigue penalty survives the opponent-matchup step, not just the unadjusted case")
+
+
+def test_batter_pa_probs_fatigue_none_unaffected():
+    stat = dict(plateAppearances=600, atBats=540, hits=170, doubles=36, triples=2,
+               homeRuns=25, baseOnBalls=55, strikeOuts=125)
+    no_arg = P.batter_pa_probs(stat, P.NEUTRAL_PARK)
+    explicit_none = P.batter_pa_probs(stat, P.NEUTRAL_PARK, consecutive_games_started=None)
+    assert (no_arg == explicit_none).all()
+    print("✓ batter_pa_probs produces identical output whether consecutive_games_started is omitted or explicitly None")
+
+
 def test_park_boosts_hr_rate():
     neutral = P.batter_pa_probs(_slugger(), P.NEUTRAL_PARK)[P.HR]
     coors = P.batter_pa_probs(_slugger(), P.PARK_FACTORS[7])[P.HR]
@@ -308,6 +363,57 @@ def test_bullpen_fatigue_multipliers_none_treated_as_fresh():
     m = P.bullpen_fatigue_multipliers(None)
     assert m == {"k_mult": 1.0, "bb_mult": 1.0, "er_mult": 1.0, "hr_mult": 1.0}
     print("✓ bullpen_fatigue_multipliers correctly treats unknown fatigue as fresh, never assuming the worse case")
+
+
+# ----------------------------------------------------------------- hitter_fatigue_multipliers
+def test_hitter_fatigue_multipliers_at_threshold():
+    m = P.hitter_fatigue_multipliers(8)
+    assert m["hr_mult"] == P.HITTER_FATIGUE_HR_MULT
+    assert m["hit_mult"] == P.HITTER_FATIGUE_HIT_MULT
+    assert m["k_mult"] == P.HITTER_FATIGUE_K_MULT
+    assert m["hr_mult"] < 1.0    # reduced power
+    assert m["hit_mult"] < 1.0   # reduced contact quality
+    assert m["k_mult"] > 1.0     # more strikeouts
+    print("✓ hitter_fatigue_multipliers applies the real, stated fatigue penalty in the correct direction on every rate")
+
+
+def test_hitter_fatigue_multipliers_no_bb_field_at_all():
+    # Deliberate: plate discipline (walk rate) is not adjusted at all -- there's no honest basis
+    # to assert fatigue erodes a far less physically demanding skill the same way it erodes bat
+    # speed/power, so this function doesn't even return a bb_mult key.
+    m = P.hitter_fatigue_multipliers(8)
+    assert "bb_mult" not in m
+    print("✓ hitter_fatigue_multipliers deliberately has no walk-rate adjustment at all")
+
+
+def test_hitter_fatigue_multipliers_boundary_at_7_and_8():
+    # THE exact boundary get_team_hitter_workload's own 🔴 tag uses.
+    below = P.hitter_fatigue_multipliers(7)
+    at = P.hitter_fatigue_multipliers(8)
+    assert below == {"hr_mult": 1.0, "hit_mult": 1.0, "k_mult": 1.0}
+    assert at["hr_mult"] != 1.0
+    print("✓ hitter_fatigue_multipliers' boundary exactly matches get_team_hitter_workload's own 8-game threshold")
+
+
+def test_hitter_fatigue_multipliers_watch_tier_not_adjusted():
+    # A real, deliberate choice: the 5-7 game "🟡 extended run" tier does NOT trigger a real
+    # adjustment, same "watch signal isn't a confirmed one" posture as extra pitcher rest.
+    m = P.hitter_fatigue_multipliers(6)
+    assert m == {"hr_mult": 1.0, "hit_mult": 1.0, "k_mult": 1.0}
+    print("✓ hitter_fatigue_multipliers correctly applies no adjustment for the 🟡 watch tier, only the confirmed 🔴 one")
+
+
+def test_hitter_fatigue_multipliers_none_treated_as_rested():
+    m = P.hitter_fatigue_multipliers(None)
+    assert m == {"hr_mult": 1.0, "hit_mult": 1.0, "k_mult": 1.0}
+    print("✓ hitter_fatigue_multipliers correctly treats unknown workload as rested, never assuming the worse case")
+
+
+def test_hitter_fatigue_multipliers_longer_streak_same_flat_penalty():
+    # No graduated curve -- 12 straight games gets the SAME flat penalty as exactly 8, matching
+    # the same "no real data to support a graduated curve" posture as the pitcher-side functions.
+    assert P.hitter_fatigue_multipliers(12) == P.hitter_fatigue_multipliers(8)
+    print("✓ hitter_fatigue_multipliers applies a flat penalty across the whole fatigued range, not a fabricated graduated curve")
 
 
 def test_pitcher_allowed_rates_guards():

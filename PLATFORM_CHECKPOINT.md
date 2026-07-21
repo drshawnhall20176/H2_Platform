@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 879/879 tests green)
+## What's in this checkpoint (all tested — 890/890 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -4403,6 +4403,57 @@ isolated comparison showed a genuine +0.26 percentage point difference in the co
 — smaller than pitcher rest's +1.69pp for a real, honest reason (fatigue only affects the
 vs-bullpen phase of the blend, naturally a smaller share of a hitter's total exposure than the
 vs-starter phase), not a sign of anything wrong. 879/879 total passing.
+
+### Batter rest/workload wired into the actual probability model (2026-07-20)
+Closing the third gap from the consistency audit, completing both halves of Shawn's original
+"pitcher fatigue, batter rest" ask. Confirmed `get_team_hitter_workload` was captured, tested,
+and displayed on Pitching Lab, but never touched a single ModelProb anywhere on the platform.
+
+**A genuinely different shape than the two pitcher-side fixes, correctly recognized as such**:
+this affects the HITTER's own performance directly, not an opponent adjustment, so the
+integration point is `batter_pa_probs` itself (the hitter's own per-PA outcome distribution),
+not `pitcher_allowed_rates`/`project_pitcher`.
+
+**Core, testable logic**: `hitter_fatigue_multipliers` — real, stated, conservative multipliers
+(HR down 8%, contact quality down 5%, K up 8%) for a hitter on a real, confirmed 8+ consecutive-
+games-started streak with no rest day, matching `get_team_hitter_workload`'s own 🔴 threshold
+exactly. The 🟡 "extended run" tier (5-7 games) deliberately does NOT trigger an adjustment,
+same "only the clearest, most confident signal gets a real adjustment" posture as short rest and
+bullpen fatigue. Walk rate deliberately untouched — plate discipline is a far less physically
+demanding skill than bat speed/power generation, so there's no honest basis to assert fatigue
+erodes it the same way; the function doesn't even return a bb_mult key, making the omission
+structural rather than just a 1.0 default that could look accidental.
+
+**`batter_pa_probs` extended** with `consecutive_games_started`, applied right after base rates
+are computed and before the opponent-matchup step, so a fatigued hitter still projects worse
+than his own well-rested numbers would against that same pitcher — confirmed directly that the
+penalty survives the odds-ratio matchup step, not just the unadjusted case. Threaded through
+every live caller: `enrich_hitter_rows` and `build_projection_index` (the latter used by Edge
+Board, Media Room, and Podcast Studio), plus both phases (`probs_sp`/`probs_pen`) of
+`blend_hitter_probs_with_bullpen`, so a fatigued hitter's own real workload is reflected whether
+or not the bullpen-blend re-pricing engages for him. `build_signals` confirmed dead code again
+and correctly left alone.
+
+**The actual data fetch wired into `best_bets_data.py`**, fetched once per DISTINCT team (not
+per hitter row, since every hitter on the same team shares one fetch) via a new `load_team_
+hitter_workload` cache mirroring the established pattern, then looked up per hitter by their own
+`_pid` — the same established per-row metadata convention as `_opp_stat`/`_opp_days_rest`.
+
+**16 new tests** across `hitter_fatigue_multipliers` and `batter_pa_probs` — every ratio hand-
+verified by direct computation first, including confirming `bb_mult` isn't even a key in the
+returned dict (not just checking it equals 1.0), the exact 7/8-game boundary matching `get_team_
+hitter_workload`'s own threshold, the 🟡 watch tier correctly producing no adjustment, and the
+penalty surviving the opponent-matchup step. Plus a full, realistic end-to-end simulation
+through the real `build_mlb_board` pipeline, with the same `st.cache_data.clear()` isolation
+discipline carried forward from both prior fixes — confirmed a genuine -1.34 percentage point
+difference in HR probability between a hitter on 2 straight games versus 9 straight games with
+no rest day, correct direction (more fatigue, less power). 890/890 total passing.
+
+**Three gaps closed from the original five-item audit** (pitcher rest, bullpen fatigue, batter
+rest). Injuries remains the one item left — captured, tested, displayed on Pitching Lab, still
+disconnected from every probability on Suggested Parlays, Speculative Basket, Command Center,
+and Best Bets, and genuinely different in shape from the other three (closer to a filter/gating
+decision than a rate multiplier).
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
