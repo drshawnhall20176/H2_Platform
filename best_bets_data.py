@@ -88,6 +88,13 @@ def build_mlb_board(date_str: str, fip_constant: float):
             return None
         return E.get_starter_rest_info(pitcher_id, team_id, date_str_inner).get("days_rest")
 
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def load_bullpen_fatigue_for_blend(team_id, exclude_pid, date_str_inner):
+        if not team_id:
+            return None
+        fatigue_rows = E.get_team_bullpen_fatigue(team_id, date_str_inner)
+        return P.bullpen_fatigued_fraction(fatigue_rows, exclude_pid=exclude_pid)
+
     rows, meta = E.build_slate(date_str, fip_constant)
     sc, k = load_statcast()
     wx = load_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
@@ -126,6 +133,7 @@ def build_mlb_board(date_str: str, fip_constant: float):
     P.apply_bullpen_blend_to_top_plays(
         plays, rows_by_pid,
         get_bullpen_stat_fn=lambda tid, ex: load_bullpen_aggregate_for_blend(tid, ex, fip_constant),
+        get_bullpen_fatigue_fn=lambda tid, ex: load_bullpen_fatigue_for_blend(tid, ex, date_str),
         statcast=sc, statcast_k=k, seed=7, top_n=30)
 
     return rows, meta, plays

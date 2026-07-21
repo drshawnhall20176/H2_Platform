@@ -219,8 +219,65 @@ def rest_adjustment_multipliers(days_rest: Optional[int]) -> Dict[str, float]:
            "hr_mult": REST_HR_MULT}
 
 
+# ---- bullpen fatigue adjustment ---------------------------------------------
+BULLPEN_FATIGUE_THRESHOLD = 0.34   # a real, stated threshold (roughly 1/3), not empirically fit
+                                   # -- a single tired reliever among several fresh ones still
+                                   # leaves a manager real options, so no team-wide adjustment is
+                                   # warranted until a meaningful SHARE of the bullpen is showing
+                                   # fatigue signs at once.
+
+
+def bullpen_fatigued_fraction(fatigue_rows: List[Dict],
+                              exclude_pid: Optional[int] = None) -> Optional[float]:
+    """Given mlb_engine.get_team_bullpen_fatigue's own raw output (one row per pitcher who
+    actually appeared in the recent window), the real fraction of that group currently showing
+    fatigue signs -- matching get_team_bullpen_fatigue's own tag thresholds exactly (3+
+    consecutive days, OR pitched within the last day), not a new, separate definition of
+    "fatigued."
+
+    exclude_pid: tonight's own probable starter, if he happens to appear in the window (e.g. a
+    recent spot start or a piggyback outing) -- the same exclude_pid pattern get_bullpen_
+    aggregate_stat itself already uses, so "the bullpen" means the same real group of pitchers
+    in both places.
+
+    Returns None (not a fabricated 0.0) when there's no real data to compute from at all -- an
+    empty window (e.g. an off day before this one, or a fetch failure upstream) -- distinct from
+    a genuinely computed 0.0 (a real bullpen with real recent appearances, none of them
+    fatigued)."""
+    relevant = [r for r in fatigue_rows if r.get("player_id") != exclude_pid]
+    if not relevant:
+        return None
+    fatigued = sum(1 for r in relevant
+                   if r.get("consecutive_days", 0) >= 3 or r.get("days_since_last_appearance", 99) <= 1)
+    return fatigued / len(relevant)
+
+
+def bullpen_fatigue_multipliers(fatigued_fraction: Optional[float]) -> Dict[str, float]:
+    """Given the real fraction of a team's bullpen currently showing fatigue signs (from
+    bullpen_fatigued_fraction), the real multipliers to apply to that bullpen's own K/BB/ER/HR-
+    allowed rates -- {"k_mult", "bb_mult", "er_mult", "hr_mult"}.
+
+    DELIBERATELY REUSES rest_adjustment_multipliers' own REST_K_MULT/REST_BB_MULT/REST_ER_MULT/
+    REST_HR_MULT constants, not a new, separately-invented set of numbers: both represent the
+    same underlying real concept (a pitching arm under real, recent workload strain) at a
+    similarly modest, conservative magnitude, and this platform doesn't have separate research
+    to justify a genuinely different number for "a fatigued bullpen" versus "a short-rest
+    starter" -- reusing the same, already-stated numbers is the more honest choice over
+    inventing a second arbitrary one just to have a different-looking constant.
+
+    Applies only when fatigued_fraction >= BULLPEN_FATIGUE_THRESHOLD -- a real, stated floor, so
+    one tired reliever among many fresh arms doesn't trigger a team-wide adjustment. None
+    (unknown -- e.g. a fetch failure, or no recent-appearance data at all) is treated the SAME
+    as a genuinely fresh bullpen -- no adjustment, never assumed to be the worse case."""
+    if fatigued_fraction is None or fatigued_fraction < BULLPEN_FATIGUE_THRESHOLD:
+        return {"k_mult": 1.0, "bb_mult": 1.0, "er_mult": 1.0, "hr_mult": 1.0}
+    return {"k_mult": REST_K_MULT, "bb_mult": REST_BB_MULT, "er_mult": REST_ER_MULT,
+           "hr_mult": REST_HR_MULT}
+
+
 # ---- batter model ----------------------------------------------------------
-def pitcher_allowed_rates(stat: Optional[Dict], days_rest: Optional[int] = None) -> Optional[Dict]:
+def pitcher_allowed_rates(stat: Optional[Dict], days_rest: Optional[int] = None,
+                          bullpen_fatigue: Optional[float] = None) -> Optional[Dict]:
     """Shrunk per-batter rates of what a pitcher ALLOWS, for the matchup math.
     Returns None for missing/thin pitchers so the batter falls back to neutral.
 
@@ -232,7 +289,15 @@ def pitcher_allowed_rates(stat: Optional[Dict], days_rest: Optional[int] = None)
     NOT adjust nonhr_hit, same DIPS-theory reasoning already established elsewhere in this
     module: hits on balls in play are mostly luck/defense, not pitcher skill, so a rest effect
     shouldn't suddenly appear there. None (the default) applies no adjustment at all -- unknown
-    or normal rest are treated the same, never assumed to be the worse case."""
+    or normal rest are treated the same, never assumed to be the worse case.
+
+    bullpen_fatigue: the real fraction of a team's bullpen currently showing fatigue signs (from
+    bullpen_fatigued_fraction), added directly on request -- the SAME real degradation as
+    days_rest, applied when `stat` is a combined bullpen aggregate (get_bullpen_aggregate_stat)
+    rather than a single starter's own line. In practice only one of days_rest/bullpen_fatigue
+    is ever meaningfully non-None for a given call (a real starter's own line has days_rest, a
+    bullpen aggregate has bullpen_fatigue) -- but both multiplier sets are applied together if
+    somehow both were provided, rather than one silently overriding the other."""
     if not stat:
         return None
     bf = _f(stat, "battersFaced")
@@ -241,20 +306,24 @@ def pitcher_allowed_rates(stat: Optional[Dict], days_rest: Optional[int] = None)
     hr = _f(stat, "homeRuns"); so = _f(stat, "strikeOuts"); bb = _f(stat, "baseOnBalls")
     hits = _f(stat, "hits")
     nonhr_hit = max(hits - hr, 0.0)
-    mult = rest_adjustment_multipliers(days_rest)
+    rest_mult = rest_adjustment_multipliers(days_rest)
+    fatigue_mult = bullpen_fatigue_multipliers(bullpen_fatigue)
+    hr_mult = rest_mult["hr_mult"] * fatigue_mult["hr_mult"]
+    k_mult = rest_mult["k_mult"] * fatigue_mult["k_mult"]
+    bb_mult = rest_mult["bb_mult"] * fatigue_mult["bb_mult"]
     return {
-        "hr": _shrink(hr, bf, LG_RATE["hr"], 220) * mult["hr_mult"],
-        "k": _shrink(so, bf, LG_RATE["k"], 150) * mult["k_mult"],   # this IS the pitcher's own
-                                                                    # strikeout rate (same
-                                                                    # quantity as project_
-                                                                    # pitcher's own k_rate), used
-                                                                    # via odds_ratio to compute
-                                                                    # the opposing batter's K
-                                                                    # probability -- reduced
-                                                                    # dominance under short rest
-                                                                    # means this goes DOWN, same
-                                                                    # direction as k_mult itself.
-        "bb": _shrink(bb, bf, LG_RATE["bb"], 350) * mult["bb_mult"],
+        "hr": _shrink(hr, bf, LG_RATE["hr"], 220) * hr_mult,
+        "k": _shrink(so, bf, LG_RATE["k"], 150) * k_mult,   # this IS the pitcher's own
+                                                            # strikeout rate (same
+                                                            # quantity as project_
+                                                            # pitcher's own k_rate), used
+                                                            # via odds_ratio to compute
+                                                            # the opposing batter's K
+                                                            # probability -- reduced
+                                                            # dominance under short rest
+                                                            # means this goes DOWN, same
+                                                            # direction as k_mult itself.
+        "bb": _shrink(bb, bf, LG_RATE["bb"], 350) * bb_mult,
         "nonhr_hit": _shrink(nonhr_hit, bf, LG_NONHR_HIT, 180),
     }
  
@@ -1086,7 +1155,8 @@ def add_starter_exposure_context(rows: List[Dict]) -> List[Dict]:
  
 def blend_hitter_probs_with_bullpen(row: Dict, bullpen_stat: Dict, sims: int = DEFAULT_SIMS,
                                     seed: Optional[int] = None, statcast: Optional[Dict] = None,
-                                    statcast_k: Optional[float] = None) -> Optional[Dict]:
+                                    statcast_k: Optional[float] = None,
+                                    bullpen_fatigue: Optional[float] = None) -> Optional[Dict]:
     """Recompute a hitter's HR%/Hit%/TB1.5%/SO Prob as a BLEND of two real phases of his night —
     his own actual vs-starter and vs-bullpen plate-appearance exposure (hitter_starter_exposures),
     each simulated against its OWN real opposing pitching quality (the starter's own stat line
@@ -1111,6 +1181,12 @@ def blend_hitter_probs_with_bullpen(row: Dict, bullpen_stat: Dict, sims: int = D
     would be a real approximation error for a ">=1 occurrence" outcome like HR% (the math isn't
     linear: P(at least one HR across two phases) != a weighted average of each phase's own P(>=1
     HR)).
+
+    bullpen_fatigue: the real fraction of THIS team's bullpen currently showing fatigue signs
+    (from bullpen_fatigued_fraction), added directly on request -- applied to the vs-Pen phase's
+    own opp_pen_rates via pitcher_allowed_rates' own bullpen_fatigue parameter, so a genuinely
+    taxed bullpen projects real hitters a real, modest degree worse than that same bullpen's
+    season-long aggregate line alone would suggest.
 
     Returns None (not a fabricated blend) if: the row can't be projected at all (missing _stat/
     _venue_id/_opp_stat/etc — same gate enrich_hitter_rows itself uses), the starter can't be
@@ -1148,7 +1224,7 @@ def blend_hitter_probs_with_bullpen(row: Dict, bullpen_stat: Dict, sims: int = D
     split_stat = row.get("_split_stat")
 
     opp_sp_rates = pitcher_allowed_rates(row.get("_opp_stat"), opp_days_rest)
-    opp_pen_rates = pitcher_allowed_rates(bullpen_stat)
+    opp_pen_rates = pitcher_allowed_rates(bullpen_stat, bullpen_fatigue=bullpen_fatigue)
     if opp_sp_rates is None or opp_pen_rates is None:
         # batter_pa_probs itself accepts opp_allowed=None gracefully (a silent, neutral,
         # unadjusted fallback) — checking ITS output for None would never actually catch a
@@ -1479,7 +1555,7 @@ BULLPEN_BLEND_MARKET_COLS = {
 def apply_bullpen_blend_to_top_plays(plays: List[Dict], rows_by_pid: Dict[Any, Dict],
                                      get_bullpen_stat_fn, statcast: Optional[Dict] = None,
                                      statcast_k: Optional[float] = None, seed: Optional[int] = None,
-                                     top_n: int = 30) -> List[Dict]:
+                                     top_n: int = 30, get_bullpen_fatigue_fn=None) -> List[Dict]:
     """Re-price the top N hitter-market plays using their real vs-starter/vs-bullpen exposure,
     instead of leaving Best Bets' whole board priced off the starter's rate for every projected
     PA — the fix for a real, confirmed issue: a starter-only read on a real slate showed 47% for
@@ -1512,6 +1588,14 @@ def apply_bullpen_blend_to_top_plays(plays: List[Dict], rows_by_pid: Dict[Any, D
     mlb_engine.get_bullpen_aggregate_stat, so repeated calls for the same opponent across
     multiple candidate hitters are free, not refetched per hitter.
 
+    get_bullpen_fatigue_fn(team_id, exclude_pid) -> Optional[float], added directly on request,
+    same dependency-injected shape as get_bullpen_stat_fn, same exclude_pid meaning. Optional
+    (None by default) so existing callers that haven't wired it up yet keep working exactly as
+    before — a real, deliberate backward-compatible rollout, not a breaking signature change.
+    When supplied, its return value (the real fraction of that bullpen currently showing fatigue
+    signs) is passed straight through to blend_hitter_probs_with_bullpen's own bullpen_fatigue
+    parameter.
+
     Plays that can't be blended (no matching row, no opponent id, bullpen data unavailable, or
     blend_hitter_probs_with_bullpen's own None cases — including "no real bullpen exposure to
     blend," the common, expected case for most plays) are left exactly as build_best_bets
@@ -1537,8 +1621,11 @@ def apply_bullpen_blend_to_top_plays(plays: List[Dict], rows_by_pid: Dict[Any, D
         bullpen_stat = get_bullpen_stat_fn(opp_id, row.get("_opp_pid"))
         if not bullpen_stat:
             continue
+        bullpen_fatigue = (get_bullpen_fatigue_fn(opp_id, row.get("_opp_pid"))
+                          if get_bullpen_fatigue_fn else None)
         blended = blend_hitter_probs_with_bullpen(row, bullpen_stat, seed=seed,
-                                                   statcast=statcast, statcast_k=statcast_k)
+                                                   statcast=statcast, statcast_k=statcast_k,
+                                                   bullpen_fatigue=bullpen_fatigue)
         if not blended:
             continue
 

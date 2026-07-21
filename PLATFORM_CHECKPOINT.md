@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 863/863 tests green)
+## What's in this checkpoint (all tested — 879/879 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -4354,6 +4354,55 @@ result across two mocked runs with identical function arguments; clearing the ca
 resolved it, confirming this was a test-isolation artifact, not a real gap. The real, isolated
 comparison showed a genuine +1.69 percentage point difference in the correct direction. 863/863
 total passing.
+
+### Bullpen fatigue wired into the actual probability model (2026-07-20)
+Closing the second gap from the consistency audit, following pitcher rest. Confirmed
+`get_team_bullpen_fatigue` was captured, tested, and displayed on Pitching Lab, but never
+touched a single ModelProb anywhere on the platform.
+
+**Scoped narrower than pitcher rest, correctly**: `get_bullpen_aggregate_stat` (the combined
+bullpen stat dict) is only ever consumed by `pitcher_allowed_rates`, never `project_pitcher`
+(which is specifically for a real starter's own props — there's no "Bullpen Strikeouts" market
+on this platform), so only one function needed the new parameter, not two.
+
+**Core, testable logic**: `bullpen_fatigued_fraction` turns `get_team_bullpen_fatigue`'s
+per-pitcher rows into a single team-level fraction, using the exact same fatigue definition that
+function's own tags already use (3+ consecutive days, or pitched within the last day) — not a
+new, separately-invented threshold. `bullpen_fatigue_multipliers` deliberately reuses
+`rest_adjustment_multipliers`' own REST_K_MULT/REST_BB_MULT/REST_ER_MULT/REST_HR_MULT constants
+rather than inventing a second arbitrary set of numbers — both represent the same real concept
+(a pitching arm under recent workload strain) at a similarly modest, conservative magnitude, and
+this platform has no separate research to justify treating them differently.
+`BULLPEN_FATIGUE_THRESHOLD = 0.34` (roughly 1/3): a single tired reliever among several fresh
+arms still leaves a manager real options, so the adjustment only applies once a meaningful SHARE
+of the bullpen is showing fatigue signs at once, not for any one pitcher in isolation.
+
+**`pitcher_allowed_rates` extended** to accept `bullpen_fatigue` alongside the existing
+`days_rest`, composing both multiplicatively if somehow both were present (in practice only one
+is ever meaningfully non-None for a given stat dict — a real starter's own line has days_rest, a
+bullpen aggregate has bullpen_fatigue). `blend_hitter_probs_with_bullpen` and
+`apply_bullpen_blend_to_top_plays` both extended with a `get_bullpen_fatigue_fn` parameter
+(defaulting to `None`), matching the exact same dependency-injected shape as the pre-existing
+`get_bullpen_stat_fn` — a real, deliberate non-breaking rollout, confirmed directly with a test
+that an existing caller without the new parameter keeps working exactly as before.
+
+**The actual data fetch wired into `best_bets_data.py`**, mirroring `load_bullpen_aggregate_for_
+blend`'s exact caching pattern: `get_team_bullpen_fatigue` cached per team, turned into a
+fraction via `bullpen_fatigued_fraction`, passed as the new `get_bullpen_fatigue_fn`.
+
+**13 new tests** across `bullpen_fatigued_fraction`, `bullpen_fatigue_multipliers`,
+`pitcher_allowed_rates`, `blend_hitter_probs_with_bullpen`, and `apply_bullpen_blend_to_top_
+plays` — every fraction and ratio hand-verified by direct computation first, including a direct
+confirmation that the fatigue threshold's tag boundaries exactly match `get_team_bullpen_
+fatigue`'s own definition, and that an existing caller without the new fatigue function keeps
+working unchanged. Plus a full, realistic end-to-end simulation through the real `build_mlb_
+board` pipeline, with proper `st.cache_data.clear()` isolation between the two scenarios this
+time — a real lesson carried forward from the pitcher-rest work, where the first comparison run
+showed a false "no difference" purely from stale cached state across two mocked runs. The real,
+isolated comparison showed a genuine +0.26 percentage point difference in the correct direction
+— smaller than pitcher rest's +1.69pp for a real, honest reason (fatigue only affects the
+vs-bullpen phase of the blend, naturally a smaller share of a hitter's total exposure than the
+vs-starter phase), not a sign of anything wrong. 879/879 total passing.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

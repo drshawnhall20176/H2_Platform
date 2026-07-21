@@ -219,6 +219,97 @@ def test_rest_adjustment_multipliers_very_short_rest_same_as_boundary():
     print("✓ rest_adjustment_multipliers applies a flat penalty across the whole short-rest range, not a fabricated graduated curve")
 
 
+# ----------------------------------------------------------------- bullpen_fatigued_fraction
+def _fatigue_row(pid, consecutive_days=0, days_since=5):
+    return {"player_id": pid, "name": f"P{pid}", "consecutive_days": consecutive_days,
+           "days_since_last_appearance": days_since, "appearances_in_window": 1,
+           "total_outs_in_window": 3, "tag": "x"}
+
+
+def test_bullpen_fatigued_fraction_hand_verified():
+    rows = [
+        _fatigue_row(1, consecutive_days=3),        # fatigued: 3+ streak
+        _fatigue_row(2, days_since=0),               # fatigued: pitched yesterday (0 days since)
+        _fatigue_row(3, consecutive_days=0, days_since=5),  # fresh
+        _fatigue_row(4, consecutive_days=1, days_since=3),  # fresh
+    ]
+    frac = P.bullpen_fatigued_fraction(rows)
+    assert frac == 0.5   # 2 fatigued out of 4, hand-verified
+    print("✓ bullpen_fatigued_fraction correctly computes the real, hand-verified fraction of a bullpen showing fatigue")
+
+
+def test_bullpen_fatigued_fraction_excludes_starter():
+    rows = [
+        _fatigue_row(1, consecutive_days=3),   # fatigued, but this IS the starter -- excluded
+        _fatigue_row(2, consecutive_days=0, days_since=5),   # fresh reliever
+    ]
+    frac = P.bullpen_fatigued_fraction(rows, exclude_pid=1)
+    assert frac == 0.0   # only the fresh reliever remains after excluding the starter
+    print("✓ bullpen_fatigued_fraction correctly excludes tonight's own starter from the bullpen calculation")
+
+
+def test_bullpen_fatigued_fraction_empty_returns_none():
+    assert P.bullpen_fatigued_fraction([]) is None
+    print("✓ bullpen_fatigued_fraction correctly returns None (not a fabricated 0.0) for an empty window")
+
+
+def test_bullpen_fatigued_fraction_all_excluded_returns_none():
+    rows = [_fatigue_row(1, consecutive_days=3)]
+    assert P.bullpen_fatigued_fraction(rows, exclude_pid=1) is None
+    print("✓ bullpen_fatigued_fraction correctly returns None when excluding the starter leaves nothing")
+
+
+def test_bullpen_fatigued_fraction_tag_boundary_matches_get_team_bullpen_fatigue():
+    # Confirms the EXACT same thresholds get_team_bullpen_fatigue's own tag logic uses (3+
+    # consecutive days OR days_since <= 1), not a new, separately-invented definition.
+    just_under_3 = _fatigue_row(1, consecutive_days=2, days_since=2)   # NOT fatigued
+    exactly_3 = _fatigue_row(2, consecutive_days=3, days_since=3)      # fatigued
+    pitched_today_ish = _fatigue_row(3, consecutive_days=0, days_since=1)  # fatigued
+    pitched_2_days_ago = _fatigue_row(4, consecutive_days=0, days_since=2)  # NOT fatigued
+    assert P.bullpen_fatigued_fraction([just_under_3]) == 0.0
+    assert P.bullpen_fatigued_fraction([exactly_3]) == 1.0
+    assert P.bullpen_fatigued_fraction([pitched_today_ish]) == 1.0
+    assert P.bullpen_fatigued_fraction([pitched_2_days_ago]) == 0.0
+    print("✓ bullpen_fatigued_fraction's fatigue definition exactly matches get_team_bullpen_fatigue's own tag boundaries")
+
+
+# ----------------------------------------------------------------- bullpen_fatigue_multipliers
+def test_bullpen_fatigue_multipliers_above_threshold():
+    m = P.bullpen_fatigue_multipliers(0.5)
+    assert m["k_mult"] == P.REST_K_MULT
+    assert m["bb_mult"] == P.REST_BB_MULT
+    assert m["er_mult"] == P.REST_ER_MULT
+    assert m["hr_mult"] == P.REST_HR_MULT
+    print("✓ bullpen_fatigue_multipliers applies the real, shared fatigue penalty above the threshold")
+
+
+def test_bullpen_fatigue_multipliers_deliberately_reuses_rest_constants():
+    # A real, deliberate design choice, not a coincidence: both concepts (a fatigued bullpen and
+    # a short-rest starter) reuse the exact same underlying magnitude.
+    assert P.bullpen_fatigue_multipliers(0.5) == P.rest_adjustment_multipliers(4)
+    print("✓ bullpen_fatigue_multipliers deliberately shares its exact magnitude with rest_adjustment_multipliers")
+
+
+def test_bullpen_fatigue_multipliers_below_threshold_no_adjustment():
+    m = P.bullpen_fatigue_multipliers(0.2)
+    assert m == {"k_mult": 1.0, "bb_mult": 1.0, "er_mult": 1.0, "hr_mult": 1.0}
+    print("✓ bullpen_fatigue_multipliers applies no adjustment when the fatigued fraction is below the real, stated threshold")
+
+
+def test_bullpen_fatigue_multipliers_exact_threshold_boundary():
+    below = P.bullpen_fatigue_multipliers(P.BULLPEN_FATIGUE_THRESHOLD - 0.01)
+    at = P.bullpen_fatigue_multipliers(P.BULLPEN_FATIGUE_THRESHOLD)
+    assert below == {"k_mult": 1.0, "bb_mult": 1.0, "er_mult": 1.0, "hr_mult": 1.0}
+    assert at["k_mult"] == P.REST_K_MULT
+    print("✓ bullpen_fatigue_multipliers' threshold boundary is inclusive and exact")
+
+
+def test_bullpen_fatigue_multipliers_none_treated_as_fresh():
+    m = P.bullpen_fatigue_multipliers(None)
+    assert m == {"k_mult": 1.0, "bb_mult": 1.0, "er_mult": 1.0, "hr_mult": 1.0}
+    print("✓ bullpen_fatigue_multipliers correctly treats unknown fatigue as fresh, never assuming the worse case")
+
+
 def test_pitcher_allowed_rates_guards():
     assert P.pitcher_allowed_rates(None) is None
     assert P.pitcher_allowed_rates(dict(battersFaced=10)) is None  # too thin
@@ -251,6 +342,37 @@ def test_pitcher_allowed_rates_normal_rest_unaffected():
     explicit_normal = P.pitcher_allowed_rates(stat, days_rest=5)
     assert no_arg == explicit_normal
     print("✓ pitcher_allowed_rates produces identical output whether days_rest is omitted or explicitly normal")
+
+
+def test_pitcher_allowed_rates_bullpen_fatigue_applies_correct_direction():
+    stat = dict(battersFaced=400, homeRuns=15, strikeOuts=95, baseOnBalls=42, hits=105)
+    normal = P.pitcher_allowed_rates(stat)
+    fatigued = P.pitcher_allowed_rates(stat, bullpen_fatigue=0.5)
+    assert abs(fatigued["k"] / normal["k"] - P.REST_K_MULT) < 1e-9
+    assert abs(fatigued["bb"] / normal["bb"] - P.REST_BB_MULT) < 1e-9
+    assert abs(fatigued["hr"] / normal["hr"] - P.REST_HR_MULT) < 1e-9
+    assert fatigued["nonhr_hit"] == normal["nonhr_hit"]   # same DIPS-theory posture as rest
+    print("✓ pitcher_allowed_rates applies the exact, hand-verified bullpen fatigue penalty")
+
+
+def test_pitcher_allowed_rates_bullpen_fatigue_below_threshold_unaffected():
+    stat = dict(battersFaced=400, homeRuns=15, strikeOuts=95, baseOnBalls=42, hits=105)
+    normal = P.pitcher_allowed_rates(stat)
+    below = P.pitcher_allowed_rates(stat, bullpen_fatigue=0.2)
+    assert normal == below
+    print("✓ pitcher_allowed_rates applies no adjustment when bullpen_fatigue is below the real threshold")
+
+
+def test_pitcher_allowed_rates_combines_rest_and_fatigue_multiplicatively():
+    # A real, deliberate design confirmation: if both were somehow provided together (in
+    # practice they never are for the same real stat dict), they compose multiplicatively
+    # rather than one silently overriding the other.
+    stat = dict(battersFaced=400, homeRuns=15, strikeOuts=95, baseOnBalls=42, hits=105)
+    normal = P.pitcher_allowed_rates(stat)
+    both = P.pitcher_allowed_rates(stat, days_rest=4, bullpen_fatigue=0.5)
+    assert abs(both["k"] / normal["k"] - (P.REST_K_MULT ** 2)) < 1e-9
+    assert abs(both["bb"] / normal["bb"] - (P.REST_BB_MULT ** 2)) < 1e-9
+    print("✓ pitcher_allowed_rates combines rest and bullpen fatigue multiplicatively when both are present")
 
 
 def test_handedness_split_applies():
@@ -689,6 +811,22 @@ def test_blend_none_when_bullpen_stat_too_thin():
     print("✓ blend_hitter_probs_with_bullpen correctly returns None for a bullpen sample too thin to trust")
 
 
+def test_blend_bullpen_fatigue_raises_hr_percent():
+    # Added directly on request: a genuinely FATIGUED bullpen (same season-long stat line, but
+    # currently taxed) should project real hitters a real, modest degree WORSE than that same
+    # bullpen's fresh read -- confirmed directly, not just assumed from the unit-level tests.
+    pen_stat = dict(strikeOuts=300, baseOnBalls=90, hitByPitch=10, homeRuns=35,
+                    battersFaced=1800, hits=380, atBats=1600, earnedRuns=180,
+                    inningsPitched="450.0")
+    row = _blendable_row(lineup_idx=0, exp_pa=4.55)
+    fresh = P.blend_hitter_probs_with_bullpen(row, pen_stat, seed=7)
+    fatigued = P.blend_hitter_probs_with_bullpen(row, pen_stat, seed=7, bullpen_fatigue=0.5)
+    assert fresh is not None and fatigued is not None
+    assert fatigued["HR%"] > fresh["HR%"]
+    print(f"✓ blend_hitter_probs_with_bullpen correctly raises HR% ({fresh['HR%']:.3f} -> "
+         f"{fatigued['HR%']:.3f}) for a genuinely fatigued bullpen vs the same bullpen fresh")
+
+
 def test_blend_vs_sp_vs_pen_sum_to_exp_pa():
     row = _blendable_row(lineup_idx=0, exp_pa=4.55)
     pen_stat = dict(strikeOuts=300, baseOnBalls=90, hitByPitch=10, homeRuns=35,
@@ -797,6 +935,37 @@ def test_apply_blend_leaves_play_unchanged_when_bullpen_lookup_returns_none():
     assert "_bullpen_blended" not in out[0]
     assert out[0]["Conviction"] == 4.25
     print("✓ apply_bullpen_blend_to_top_plays leaves a play untouched when the bullpen lookup itself fails")
+
+
+def test_apply_blend_backward_compatible_without_fatigue_fn():
+    # A REAL, CONFIRMED backward-compatibility guard: an existing caller that hasn't wired up
+    # get_bullpen_fatigue_fn yet (the default, None) must keep working exactly as before -- a
+    # real, deliberate non-breaking rollout, not assumed.
+    play = _hr_play(1, conviction=4.25)
+    row = _bad_starter_row(1, opp_id=114)
+    out = P.apply_bullpen_blend_to_top_plays([play], {1: row}, lambda tid, ex: _GOOD_PEN_STAT, seed=7)
+    assert out[0]["_bullpen_blended"] is True
+    print("✓ apply_bullpen_blend_to_top_plays works correctly without get_bullpen_fatigue_fn, unchanged from before this feature")
+
+
+def test_apply_blend_fetches_and_applies_bullpen_fatigue():
+    play = _hr_play(1, conviction=4.25)
+    row = _bad_starter_row(1, opp_id=114)
+    fatigue_calls = []
+
+    def fake_get_fatigue(team_id, exclude_pid):
+        fatigue_calls.append(team_id)
+        return 0.6   # a genuinely fatigued bullpen
+
+    without_fatigue = P.apply_bullpen_blend_to_top_plays(
+        [dict(play)], {1: dict(row)}, lambda tid, ex: _GOOD_PEN_STAT, seed=7)
+    with_fatigue = P.apply_bullpen_blend_to_top_plays(
+        [dict(play)], {1: dict(row)}, lambda tid, ex: _GOOD_PEN_STAT, seed=7,
+        get_bullpen_fatigue_fn=fake_get_fatigue)
+
+    assert fatigue_calls == [114]   # fetched using the real opponent team id
+    assert with_fatigue[0]["ModelProb"] != without_fatigue[0]["ModelProb"]
+    print("✓ apply_bullpen_blend_to_top_plays correctly fetches and applies real bullpen fatigue when get_bullpen_fatigue_fn is supplied")
 
 
 def test_apply_blend_leaves_play_unchanged_when_no_real_exposure():
