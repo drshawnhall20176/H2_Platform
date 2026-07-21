@@ -530,6 +530,76 @@ def test_grade_accuracy_works_for_non_mlb_shaped_plays():
     print("✓ grade_accuracy_by_letter correctly handles WNBA-shaped graded plays")
 
 
+# ----------------------------------------------------------------- hit_miss_by_market
+def test_hit_miss_by_market_hand_verified():
+    plays = [
+        {"Conviction": 1.6, "Hit": True, "Market": "Batter HR"},    # C, hit
+        {"Conviction": 1.55, "Hit": False, "Market": "Batter HR"},  # C, miss
+        {"Conviction": 3.2, "Hit": True, "Market": "Batter Total Hits"},   # A, hit
+        {"Conviction": 2.1, "Hit": False, "Market": "Batter Total Hits"},  # B, miss
+    ]
+    result = grading.hit_miss_by_market(plays)
+    by_mkt = {r["market"]: r for r in result}
+    assert by_mkt["Batter HR"] == {"market": "Batter HR", "hits": 1, "misses": 1}
+    assert by_mkt["Batter Total Hits"] == {"market": "Batter Total Hits", "hits": 1, "misses": 1}
+    print("✓ hit_miss_by_market correctly buckets hand-verified plays by market")
+
+
+def test_hit_miss_by_market_excludes_below_floor():
+    plays = [
+        _graded_play(1.6, True),          # C, counts
+        _graded_play(1.05, False),        # below the D floor entirely, must NOT count
+    ]
+    result = grading.hit_miss_by_market(plays)
+    mkt = next(r for r in result if r["market"] == "Batter HR")
+    assert mkt == {"market": "Batter HR", "hits": 1, "misses": 0}
+    print("✓ hit_miss_by_market correctly excludes sub-floor (ungraded) plays entirely")
+
+
+def test_hit_miss_by_market_default_excludes_d_grade():
+    # A REAL, DELIBERATE design choice confirmed directly: the default min_grade_letter="C"
+    # must exclude D-grade plays specifically, not just sub-floor ones -- a D IS a real grade
+    # (conviction_to_grade returns a letter), but still shouldn't count toward "the tool's real
+    # recommendations" the same way Suggested Parlays' own default floor already treats it.
+    plays = [_graded_play(1.25, True)]   # a genuine D grade (>=1.2, <1.5), no ceiling amplification
+    assert grading.conviction_to_grade(1.25, None)["letter"] == "D"   # confirm the premise first
+    result = grading.hit_miss_by_market(plays)
+    assert result == []   # D excluded by the default C-or-better floor
+    print("✓ hit_miss_by_market's default floor correctly excludes D-grade plays, not just sub-floor ones")
+
+
+def test_hit_miss_by_market_min_grade_letter_can_be_loosened():
+    plays = [_graded_play(1.25, True)]   # D grade
+    result = grading.hit_miss_by_market(plays, min_grade_letter="D")
+    assert result == [{"market": "Batter HR", "hits": 1, "misses": 0}]
+    print("✓ hit_miss_by_market's min_grade_letter parameter correctly widens the floor when loosened to D")
+
+
+def test_hit_miss_by_market_excludes_unsettled_plays():
+    plays = [_graded_play(2.0, True), _graded_play(2.0, None)]   # one still pending
+    result = grading.hit_miss_by_market(plays)
+    mkt = result[0]
+    assert mkt["hits"] == 1 and mkt["misses"] == 0   # the unsettled play doesn't count as a miss
+    print("✓ hit_miss_by_market excludes unsettled (Hit=None) plays, never counting them as a miss")
+
+
+def test_hit_miss_by_market_absent_market_not_fabricated():
+    plays = [_graded_play(2.0, True)]   # only Batter HR present in this window
+    result = grading.hit_miss_by_market(plays)
+    markets = {r["market"] for r in result}
+    assert markets == {"Batter HR"}   # no other market shown as a fabricated 0-0
+    print("✓ hit_miss_by_market omits markets with zero qualifying plays rather than faking an empty entry")
+
+
+def test_hit_miss_by_market_sorted_by_volume_descending():
+    plays = ([_graded_play(2.0, True)] * 2   # Batter HR: 2 plays
+            + [{"Conviction": 2.0, "Hit": True, "Market": "Batter Total Hits"}] * 5)  # 5 plays
+    result = grading.hit_miss_by_market(plays)
+    assert result[0]["market"] == "Batter Total Hits"   # busiest market first
+    assert result[1]["market"] == "Batter HR"
+    print("✓ hit_miss_by_market sorts busiest markets first")
+
+
 # ----------------------------------------------------------------- build_parlay_leg_pool
 def _leg(player, team, game, conviction, market="Batter HR", model_prob=0.3):
     return {"Player": player, "Team": team, "Game": game, "Market": market, "Side": "Over",

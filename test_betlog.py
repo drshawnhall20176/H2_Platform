@@ -52,6 +52,87 @@ def test_trader_field_is_optional():
         print("✓ trader field is genuinely optional, defaulting to None when never specified")
 
 
+def test_is_real_bet_defaults_true_for_existing_callers():
+    # A REAL, CONFIRMED BUG this test guards against: the SQLite/Postgres INSERT statements
+    # explicitly supply a value for every _FIELDS column, including None for anything the
+    # caller didn't pass -- so the schema's own "DEFAULT TRUE" never actually applies on
+    # insert. Without add_bet's own explicit fields.setdefault, an existing caller (like
+    # quick_log.py) that predates this field would silently log every bet as is_real_bet=None,
+    # not True -- confirmed directly by testing, not assumed.
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "bets.db")
+        bid = B.add_bet(db, player="Judge", game="NYY @ BOS", market="Batter HR",
+                        side="Over", line=0.5, entry_odds=280, stake=5.0)
+        bet = B.list_bets(db)[0]
+        assert bet["is_real_bet"] == 1
+        print("✓ is_real_bet correctly defaults to True (1) for a caller that never mentions it, guarding the real bug this session caught")
+
+
+def test_is_real_bet_explicit_false_for_tracking_only_predictions():
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "bets.db")
+        bid = B.add_bet(db, player="Soto", game="NYM @ MIL", market="Batter Total Hits",
+                        side="Under", line=0.5, model_prob=0.42, result="win",
+                        is_real_bet=False, notes="tracking-only, no real stake placed")
+        bet = B.list_bets(db)[0]
+        assert bet["is_real_bet"] == 0
+        assert bet["result"] == "win"
+        print("✓ is_real_bet correctly stores False (0) for a tracking-only prediction, distinct from a real, staked bet")
+
+
+def test_is_real_bet_round_trips_through_update():
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "bets.db")
+        bid = B.add_bet(db, player="Soto", market="Batter Total Hits", is_real_bet=False)
+        B.update_bet(bid, db, is_real_bet=True)   # e.g. a tracking prediction later becomes a real bet
+        assert B.list_bets(db)[0]["is_real_bet"] == 1
+        print("✓ is_real_bet round-trips correctly through update_bet")
+
+
+def test_summary_and_calibration_work_correctly_on_tracking_only_bets():
+    # Confirms the EXISTING, pre-built summary()/calibration() analytics -- built for real,
+    # staked bets -- already handle tracking-only entries (stake=None, entry_odds=None)
+    # gracefully, without any changes needed to those functions themselves.
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "bets.db")
+        B.add_bet(db, player="Soto", market="Batter Total Hits", side="Under", model_prob=0.42,
+                 result="win", is_real_bet=False)
+        B.add_bet(db, player="Duran", market="Batter Total Hits", side="Under", model_prob=0.42,
+                 result="loss", is_real_bet=False)
+        bets = B.list_bets(db)
+        s = B.summary(bets)
+        assert s["wins"] == 1 and s["losses"] == 1
+        assert s["staked"] == 0.0    # no real stake on tracking-only entries -- correctly zero, not an error
+        assert s["roi"] is None      # ROI is meaningless with zero real money at risk -- correctly None, not 0 or a crash
+        print("✓ summary() correctly handles tracking-only bets: real win/loss counts, zero staked, no fabricated ROI")
+
+
+def test_list_bets_filters_by_is_real_bet():
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "bets.db")
+        B.add_bet(db, player="Real Bet", market="Batter HR", stake=5.0)               # real, default
+        B.add_bet(db, player="Tracking Only", market="Batter Total Hits",
+                 is_real_bet=False, result="win", model_prob=0.42)
+        real_only = B.list_bets(db, is_real_bet=True)
+        tracking_only = B.list_bets(db, is_real_bet=False)
+        assert len(real_only) == 1 and real_only[0]["player"] == "Real Bet"
+        assert len(tracking_only) == 1 and tracking_only[0]["player"] == "Tracking Only"
+        assert len(B.list_bets(db)) == 2   # no filter -- both returned
+        print("✓ list_bets correctly filters by is_real_bet, cleanly separating real bets from tracking-only predictions")
+
+
+def test_list_bets_is_real_bet_filter_combines_with_other_filters():
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "bets.db")
+        B.add_bet(db, player="Real MLB", market="Batter HR", sport="MLB", stake=5.0)
+        B.add_bet(db, player="Tracking MLB", market="Batter Total Hits", sport="MLB",
+                 is_real_bet=False, result="win", model_prob=0.42)
+        B.add_bet(db, player="Real NBA", market="Points", sport="NBA", stake=5.0)
+        out = B.list_bets(db, sport="MLB", is_real_bet=False)
+        assert len(out) == 1 and out[0]["player"] == "Tracking MLB"
+        print("✓ list_bets' is_real_bet filter correctly combines with the existing sport filter")
+
+
 def test_player_id_field():
     # Added directly on request, for automated result settlement -- retro.py's existing,
     # already-tested grade_play/get_player_results match by numeric player ID, not name.

@@ -47,9 +47,19 @@ CREATE TABLE IF NOT EXISTS bets (
     notes      TEXT,
     ticket     TEXT,
     sport      TEXT,
-    trader     TEXT
+    trader     TEXT,
+    is_real_bet INTEGER DEFAULT 1
 );
 """
+# is_real_bet: added directly on request, to distinguish real, placed wagers from tracking-only
+# predictions logged purely to validate the model's own stated probabilities (e.g. "the model
+# said this basket had a 42% average hit rate -- did it?"). Defaults to 1 (real bet) so every
+# row logged before this column existed -- all of them genuinely were real, placed bets through
+# Quick Log -- stays correctly categorized without a manual backfill. Tracking-only entries set
+# this explicitly to 0. summary()/bet_pnl() already treat stake=0/None gracefully (0 profit, ROI
+# None), so a tracking-only row with no real stake was already safe to log before this column
+# existed -- this just makes the DISTINCTION explicit and queryable, rather than relying on
+# "stake happens to be empty" as an implicit, easy-to-misread signal.
 # player_id: added directly on request, for automated result settlement -- retro.py's existing,
 # already-tested grade_play/get_player_results (the same machinery Retrospective/Media Room/
 # Podcast Studio already use to grade the model's own picks against real results) matches by
@@ -71,7 +81,7 @@ CREATE TABLE IF NOT EXISTS bets (
 
 _FIELDS = ["ts_placed", "slate_date", "game", "player", "player_id", "market", "side", "line",
            "entry_odds", "model_prob", "stake", "book", "close_odds", "result", "notes",
-           "ticket", "sport", "trader"]
+           "ticket", "sport", "trader", "is_real_bet"]
  
  
 # ===========================================================================
@@ -118,6 +128,8 @@ def _sqlite_conn(db_path: str = DB_PATH):
             con.execute("ALTER TABLE bets ADD COLUMN trader TEXT")
         if "player_id" not in cols:         # migrate DBs that predate automated result settlement
             con.execute("ALTER TABLE bets ADD COLUMN player_id INTEGER")
+        if "is_real_bet" not in cols:       # migrate DBs that predate tracking-only predictions
+            con.execute("ALTER TABLE bets ADD COLUMN is_real_bet INTEGER DEFAULT 1")
         yield con
         con.commit()
     finally:
@@ -157,11 +169,13 @@ CREATE TABLE IF NOT EXISTS bets (
     ts_placed  TEXT NOT NULL,
     slate_date TEXT, game TEXT, player TEXT, player_id INTEGER, market TEXT, side TEXT,
     line REAL, entry_odds INTEGER, model_prob REAL, stake REAL, book TEXT,
-    close_odds INTEGER, result TEXT, notes TEXT, ticket TEXT, sport TEXT, trader TEXT
+    close_odds INTEGER, result TEXT, notes TEXT, ticket TEXT, sport TEXT, trader TEXT,
+    is_real_bet BOOLEAN DEFAULT TRUE
 );
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS sport TEXT;
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS trader TEXT;
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS player_id INTEGER;
+ALTER TABLE bets ADD COLUMN IF NOT EXISTS is_real_bet BOOLEAN DEFAULT TRUE;
 """
  
  
@@ -211,11 +225,19 @@ def _pg_delete(bet_id) -> None:
 # ---- public API — identical signatures, dispatches to the active backend ---
 def add_bet(db_path: str = DB_PATH, **fields) -> int:
     fields.setdefault("ts_placed", datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    # A REAL, CONFIRMED BUG caught by directly testing, not assumed: the INSERT statement below
+    # (both backends) explicitly supplies a value for every column in _FIELDS, including None
+    # for anything the caller didn't pass -- so the schema's own "DEFAULT TRUE" on is_real_bet
+    # NEVER actually applies on insert; a caller (like the existing, unmodified quick_log.py)
+    # that doesn't know about this new field would silently log every bet as is_real_bet=None,
+    # not True. Defaulting it explicitly here, the same way ts_placed already is, protects every
+    # caller -- present and future -- not just the ones updated to know about this field.
+    fields.setdefault("is_real_bet", True)
     return _pg_add_bet(fields) if USING_POSTGRES else _sqlite_add_bet(db_path, fields)
  
  
 def list_bets(db_path: str = DB_PATH, settled: Optional[bool] = None,
-              sport: Optional[str] = None) -> List[Dict]:
+              sport: Optional[str] = None, is_real_bet: Optional[bool] = None) -> List[Dict]:
     rows = _pg_list() if USING_POSTGRES else _sqlite_list(db_path)
     if sport is not None:
         # Match the sport; treat legacy rows with no sport recorded as MLB (the original sport).
@@ -224,6 +246,13 @@ def list_bets(db_path: str = DB_PATH, settled: Optional[bool] = None,
         rows = [b for b in rows if b.get("result")]
     elif settled is False:
         rows = [b for b in rows if not b.get("result")]
+    if is_real_bet is not None:
+        # Handles SQLite's integer (1/0) and Postgres's native boolean representations alike,
+        # and treats a genuinely missing value (a row that somehow predates even the migration's
+        # own backfill) as a real bet -- the same "every bet logged before this feature existed
+        # genuinely was real" reasoning the migration's own DEFAULT already applies.
+        rows = [b for b in rows
+               if bool(b.get("is_real_bet") if b.get("is_real_bet") is not None else True) == is_real_bet]
     return rows
  
  

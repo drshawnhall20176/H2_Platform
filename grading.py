@@ -346,6 +346,50 @@ def grade_accuracy_by_letter(graded_plays: List[Dict]) -> List[Dict]:
     return out
 
 
+def hit_miss_by_market(graded_plays: List[Dict], min_grade_letter: str = "C") -> List[Dict]:
+    """Takes ALREADY-GRADED plays (retro.grade_slate's own output -- each carrying "Hit":
+    True/False/None, "Market", "Conviction", and "_ceiling") and buckets settled, real-graded
+    plays into per-market hit/miss counts -- added directly on request for a dashboard showing
+    "how did the tool's actual recommendations do last night, broken down by market."
+
+    min_grade_letter: the SAME letter-grade floor Suggested Parlays/Graded Picks already use
+    to mean "a real recommendation" (default "C", matching Suggested Parlays' own default) --
+    "C or better" here means A, B, or C, using GRADE_THRESHOLDS' own ordering, not a separately
+    invented cutoff. This is a deliberate choice, not an oversight: without it, a market's pie
+    chart would be diluted by every candidate play the model ever considered, most of which were
+    never real picks anyone would have acted on -- undersells what the model's actual
+    recommendations did. D-grade and ungraded (None) plays are excluded entirely.
+
+    Only SETTLED plays (Hit is not None) count toward hits/misses -- an unsettled or ungradeable
+    play is silently excluded, never counted as a miss.
+
+    Returns one entry per market that has at least one real, settled, C-or-better play:
+    [{"market", "hits", "misses"}, ...], sorted by total plays descending (busiest markets
+    first). A market with zero qualifying plays is simply absent -- never a fabricated 0-0."""
+    letters_in_order = [letter for _, letter, _ in GRADE_THRESHOLDS]
+    if min_grade_letter not in letters_in_order:
+        min_grade_letter = "C"
+    cutoff_idx = letters_in_order.index(min_grade_letter)
+    allowed_letters = set(letters_in_order[:cutoff_idx + 1])
+
+    settled = [g for g in graded_plays if g.get("Hit") is not None]
+    by_market: Dict[str, Dict] = {}
+    for g in settled:
+        grade = conviction_to_grade(g.get("Conviction"), g.get("_ceiling"))
+        if not grade or grade["letter"] not in allowed_letters:
+            continue
+        mkt = g.get("Market")
+        if mkt is None:
+            continue
+        rec = by_market.setdefault(mkt, {"market": mkt, "hits": 0, "misses": 0})
+        if g["Hit"]:
+            rec["hits"] += 1
+        else:
+            rec["misses"] += 1
+    return sorted(by_market.values(), key=lambda r: -(r["hits"] + r["misses"]))
+
+
+
 # ===========================================================================
 # SUGGESTED PARLAYS -- for a Discord/public audience that doesn't want to comb through the
 # graded board themselves. A REAL, DELIBERATE CORRELATION SAFEGUARD IS THE CORE OF THIS DESIGN,

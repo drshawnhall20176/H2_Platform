@@ -4,7 +4,7 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 890/890 tests green)
+## What's in this checkpoint (all tested — 903/903 tests green)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -4454,6 +4454,144 @@ rest). Injuries remains the one item left — captured, tested, displayed on Pit
 disconnected from every probability on Suggested Parlays, Speculative Basket, Command Center,
 and Best Bets, and genuinely different in shape from the other three (closer to a filter/gating
 decision than a rate multiplier).
+
+### Tracking-only prediction logging, real bug caught before shipping (2026-07-21)
+Following the July 20 results discussion (manual 8-pick winner, 25-for-25 Over-side Game
+Coverage picks, 2-for-8 Under-side Speculative Basket check that turned out to be prediction-
+only, no real stake), Shawn asked to start persistently tracking predicted-vs-actual across
+sessions, plus a hit/miss pie chart.
+
+**Reused the existing Bet Log/settlement infrastructure rather than building a parallel system**
+— its own docstring already states the goal directly ("here's documented evidence it beats the
+market"), and `add_bet`/`list_bets`/`summary`/`calibration` already operate generically on
+`model_prob`/`result` with no changes needed. Added one new column, `is_real_bet` (SQLite
+INTEGER, Postgres native BOOLEAN, both defaulting to TRUE), to distinguish real, staked wagers
+from predictions logged purely to check the model's own stated probabilities against what
+happened.
+
+**A real, confirmed bug caught by directly testing before it shipped**: assumed the schema-level
+`DEFAULT TRUE` would apply when a caller didn't mention the field. It doesn't — both backends'
+INSERT statements explicitly supply a value (including `None`) for every column in `_FIELDS`, so
+the column default only ever applies to schema migration of pre-existing rows (confirmed
+separately, that part was fine), never to new inserts. Without a fix, every future call from the
+existing, unmodified `quick_log.py` — which doesn't know this field exists — would have silently
+logged real bets as `is_real_bet=None`. Fixed with an explicit `fields.setdefault("is_real_bet",
+True)` in `add_bet`, the same pattern `ts_placed` already uses, confirmed correct by testing both
+the omitted and explicit-False cases directly rather than trusting the fix by inspection alone.
+
+**`list_bets` extended** with an `is_real_bet` filter, handling SQLite's integer and Postgres's
+boolean representations alike, and treating a genuinely missing value as real (consistent with
+the migration's own default and the fact that every bet logged before this feature existed
+genuinely was a real, placed wager).
+
+**9 new tests**, including one specifically guarding the caught bug (confirms `is_real_bet`
+defaults to `1` for a caller that mentions nothing about it) and one confirming the pre-existing
+`summary()`/`calibration()` functions already handle tracking-only entries gracefully (zero
+staked, `None` ROI, real win/loss counts) with no changes needed to those functions themselves.
+896/896 total passing.
+
+**All 41 real picks from the July 20 conversation logged**, all as `is_real_bet=False` since none
+were explicitly confirmed as real, placed wagers even where the framing suggested it (flagged
+directly to Shawn for correction, not silently assumed): 8 manual Dinger Engine/Matchup Lab picks
+(8-for-8, no model_prob available since these didn't come from the platform's own algorithm), 10
+Best Bets Over-side picks (10-for-10), a 15-leg Suggested Parlays Game Coverage parlay (15-for-15,
+model_prob derived from each leg's shown fair odds), and 8 Speculative Basket Under-side coverage
+picks (2-for-8, matching the platform's own "Expected winners: 3.4" prediction within normal
+variance).
+
+**A hit/miss pie chart built and shown** (35 hit / 6 miss, 85% overall) — deliberately paired
+with a by-strategy breakdown (33/33 high-confidence Over picks vs. 2/8 near-coin-flip Under
+coverage picks) rather than shown as a single number alone, since lumping both together would
+overstate what "the model" actually produced — the Over-side result and the Under-side result
+are genuinely different kinds of evidence, and collapsing them into one hit rate would be
+misleading regardless of how favorable the combined number looks.
+
+**Not yet built**: a real, persistent page in the app itself for this (the chart above was a
+one-off Visualizer render for this conversation, not wired into any view file) — worth deciding
+deliberately with Shawn rather than assumed, given it's a separate, real scope decision.
+
+### Hit/miss tracking made persistent — wired into the real Track Record page (2026-07-21)
+Following the one-off Visualizer pie chart from last turn, Shawn asked to continue toward a
+real, persistent page. Checked first rather than building a new page from scratch: `views/9_
+Track_Record.py` already exists specifically for this ("the proof page... all numbers come
+straight from the logged bet database"), already reads from `betlog.py`, and already has a
+calibration scatter plot, per-market CLV breakdown, and a receipts table. The actual gap was
+narrower than a new build — making this existing page `is_real_bet`-aware, and adding the
+specific hit/miss pie chart Shawn asked for.
+
+**`_load_bets` now explicitly filters to `is_real_bet=True`** for every section that talks about
+real money (CLV, P&L, the "Record" metric) — not relying on tracking-only entries' missing
+entry/close odds as an implicit safety net, but filtering explicitly so the page's own "every bet
+we log, graded against the closing line" promise stays honest by construction.
+
+**A real structural bug caught and fixed before it shipped**: the page's existing guard
+(`if not bets: ... st.stop()`) would have halted the ENTIRE page today, since real bets = 0 right
+now and tracking-only predictions = 41. Restructured to check a new `all_tracked` loader (real +
+tracking-only combined) for the stop condition instead, confirmed directly against the actual
+current data (0 real, 41 tracked, page correctly does NOT stop) rather than assumed. Reconsidered
+wrapping the rest of the page in a conditional, then verified `summary()`/`market_breakdown()`/
+`calibration()`/`clv_series()` all already handle empty lists gracefully — so the fix stayed
+minimal (one changed stop condition) instead of a large, risky restructure of a 200-line file.
+
+**The new hit/miss section is explicitly, visibly scoped as broader than the real-money
+sections above it** — labeled directly on the page: includes both real, placed bets and
+tracking-only logged predictions, with the count of each shown so a viewer isn't left assuming
+an inflated number represents real wagers. Placed directly after the existing calibration
+scatter plot, since both answer the same "is the model honest" question at different levels of
+detail — the scatter shows calibration by probability bucket, the pie shows the simple,
+overall split.
+
+**Verified against the real, currently-logged data directly**, not just by inspection: confirmed
+`n_real=0`, `n_tracking=41`, wins/losses `35/6` — the exact numbers the real database holds after
+last turn's logging. 896/896 tests passing (view files aren't unit-tested directly, but every
+underlying `betlog.py` function they depend on is, and this page's own new logic was verified by
+direct execution against the real data before considering it done).
+
+**Deliberately left untouched**: the page's existing owner-only gating. Its own docstring already
+reasons through when to revisit that (once there's enough REAL, graded bet history — tracking-
+only predictions don't count toward that bar), and changing gating is a real product decision, not
+something to change unilaterally as a side effect of a data-tracking feature.
+
+### Model Dashboard — new combined page, real bets + the tool's own picks (2026-07-21)
+Following the "what's doable" discussion, Shawn confirmed: Element 2's pie charts count only
+C-or-better graded picks (matching Suggested Parlays/Graded Picks' own existing floor for "a real
+recommendation," not every candidate the model considered), and both elements combine into one
+new dashboard page rather than being spread across Track Record and Retrospective.
+
+**Core, testable logic**: `grading.hit_miss_by_market(graded_plays, min_grade_letter="C")` —
+takes retro.grade_slate's own output (already carrying Hit/Market/Conviction/_ceiling on every
+play) and buckets settled, C-or-better plays into per-market hit/miss counts. A real, deliberate
+design choice stated directly in its own docstring: without the grade floor, a market's pie
+chart would be diluted by every low-conviction candidate the model ever considered, most of
+which were never real picks anyone would have acted on.
+
+**A genuine test-data mistake caught and corrected before trusting the function**: an early hand-
+verification used an arbitrary `_ceiling=5.0` for a play intended to grade D, but the platform's
+real `REFERENCE_CEILING` (~9.09) meant the ceiling-normalization amplification built earlier this
+session legitimately promoted that play to a C — confirmed directly by checking `conviction_to_
+grade` in isolation before concluding either the function or the test was wrong. Redid the
+verification with a conviction value (1.05) confirmed to grade as None regardless of ceiling,
+which is what actually exposed whether the exclusion logic worked.
+
+**7 new tests**, including a genuinely useful one that checks the D-grade exclusion specifically
+(not just the sub-floor/None case) — a D is a real, valid grade from `conviction_to_grade`, and
+confirming it's excluded by the default floor is a different, necessary check from confirming an
+ungraded play is excluded. 903/903 total passing.
+
+**New page**: `views/20_Model_Dashboard.py` — Element 1 (real bets, `is_real_bet=True` only, via
+the existing `market_breakdown`) and Element 2 (last night's board rebuilt and graded, same
+machinery Retrospective already uses, filtered through the new `hit_miss_by_market`), each
+rendered as one pie chart per market via a single shared `_pie_grid` helper so both sections
+look and behave identically rather than two subtly different implementations. Gated with the
+same `require_trading_access` Track Record uses, since it shows real bet data too. Carries the
+same honest "approximate, current-season rates, not point-in-time" caveat Retrospective's own
+page already states, since Element 2 is built on the same rebuild-and-grade approach.
+
+**Verified end-to-end against real and realistic data**: Element 1 confirmed directly against
+the actual, currently-logged database (0 real bets → correctly falls into the sparse-data
+message, not a crash). Element 2's exact output shape confirmed to match what the shared
+`_pie_grid` helper expects, using a realistic simulated `grade_slate`-shaped input, since live
+network access to actually rebuild a real slate isn't available from this sandbox.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
