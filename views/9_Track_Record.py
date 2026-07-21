@@ -31,6 +31,26 @@ PALETTE = {"pos": "#16a34a", "neg": "#dc2626", "model": "#2563eb", "muted": "#94
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _load_bets(sport_key: str):
+    # Real, placed wagers ONLY -- this feeds every section on this page that talks about real
+    # money (CLV, P&L, "Record"). A tracking-only logged prediction (is_real_bet=False, added
+    # directly on request for validating the model's own stated probabilities without real
+    # stake) has no real entry/close odds anyway, so it was already inert here -- but filtering
+    # explicitly, not relying on that as an implicit safety net, keeps this page's own "every
+    # bet we log, graded against the closing line" promise honest by construction, not by luck.
+    try:
+        return B.list_bets(sport=sport_key, is_real_bet=True)
+    except Exception:
+        return []
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_all_tracked(sport_key: str):
+    # BOTH real bets AND tracking-only predictions -- used ONLY by the hit/miss section below.
+    # The calibration question ("the model said X%, did it happen?") is equally real evidence
+    # whether real money was on it or not; a real $50 win and a $0 logged-only win are both
+    # genuine confirmations of the model's own stated probability. Kept as a clearly separate
+    # loader (not folded into _load_bets above) so it can never accidentally leak into the
+    # real-money sections this page's own header promises are about real, placed wagers.
     try:
         return B.list_bets(sport=sport_key)
     except Exception:
@@ -50,7 +70,8 @@ if not sports.require_trading_access("Track Record"):
 
 
 bets = _load_bets(_active.key)
-if not bets:
+all_tracked = _load_all_tracked(_active.key)
+if not all_tracked:
     st.info(f"📈 We're building our {_active.label} track record. Once bets are logged and settled, "
             "the proof shows up here — CLV, per-market performance, and calibration. Switch sports "
             "in the sidebar to see another league's record.")
@@ -168,6 +189,32 @@ if cal and sum(c["n"] for c in cal) >= 8:
                "mean much — it sharpens as the sample grows.")
 else:
     st.caption("The calibration chart appears once enough settled bets accumulate to bucket them.")
+
+# ------------------------------------------------------------------ hit/miss (all tracked predictions)
+st.divider()
+st.subheader("🥧 Hit rate — every prediction we've tracked")
+n_real = sum(1 for b in all_tracked if bool(b.get("is_real_bet") if b.get("is_real_bet") is not None else True))
+n_tracking = len(all_tracked) - n_real
+tracked_summary = B.summary(all_tracked)
+tracked_settled = tracked_summary["wins"] + tracked_summary["losses"]
+if n_tracking > 0:
+    st.caption(f"Includes both real, placed bets ({n_real}) and predictions we logged just to check "
+              f"the model's own stated probability against what happened, with no real money on "
+              f"them ({n_tracking}) — a wider, honest read of whether the model's calls hold up, not "
+              f"just the ones we backed with a stake. The sections above (CLV, P&L) are real-money "
+              f"only; this one is broader on purpose.")
+if tracked_settled >= 4:
+    figh = go.Figure(go.Pie(
+        labels=["Hit", "Miss"], values=[tracked_summary["wins"], tracked_summary["losses"]],
+        marker=dict(colors=[PALETTE["pos"], PALETTE["neg"]]), hole=0.45,
+        textinfo="label+percent", sort=False))
+    figh.update_layout(template="plotly_white", height=320, margin=dict(l=10, r=10, t=10, b=10),
+                       showlegend=False)
+    st.plotly_chart(figh, use_container_width=True)
+    st.caption(f"{tracked_summary['wins']}–{tracked_summary['losses']} across {tracked_settled} settled, "
+              f"tracked predictions.")
+else:
+    st.caption("The hit/miss chart appears once a handful of tracked predictions have settled.")
 
 # ------------------------------------------------------------------ receipts (historical, safe to show)
 st.divider()
