@@ -1256,6 +1256,65 @@ def test_basket_prob_at_least_one_wins_increases_with_more_legs():
     print("✓ basket_prob_at_least_one_wins correctly increases as more independent positions are added to the basket")
 
 
+# ----------------------------------------------------------------- basket_win_count_distribution
+def test_basket_win_count_distribution_hand_verified_two_legs():
+    # Hand-verified over 2 independent legs (p=0.3, p=0.5):
+    # P(0) = 0.7*0.5 = 0.35, P(1) = 0.3*0.5 + 0.7*0.5 = 0.50, P(2) = 0.3*0.5 = 0.15
+    legs = [_leg("A", "T1", "G1", conviction=2.0, model_prob=0.3),
+           _leg("B", "T2", "G2", conviction=2.0, model_prob=0.5)]
+    dist = grading.basket_win_count_distribution(legs)
+    assert dist == pytest.approx([0.35, 0.50, 0.15], abs=1e-9)
+    print("✓ basket_win_count_distribution matches a hand-verified exact 2-leg distribution")
+
+
+def test_basket_win_count_distribution_sums_to_one():
+    legs = [_leg(f"P{i}", f"T{i}", f"G{i}", conviction=2.0, model_prob=0.2 + 0.1 * i) for i in range(6)]
+    dist = grading.basket_win_count_distribution(legs)
+    assert len(dist) == 7   # 0..6 wins for 6 legs
+    assert sum(dist) == pytest.approx(1.0, abs=1e-9)
+    print("✓ basket_win_count_distribution sums to 1.0 across all possible win counts")
+
+
+def test_basket_win_count_distribution_empty_legs():
+    assert grading.basket_win_count_distribution([]) == [1.0]   # P(0 wins) = 1, trivially
+
+
+def test_basket_win_count_distribution_single_leg_matches_bernoulli():
+    legs = [_leg("A", "T1", "G1", conviction=2.0, model_prob=0.42)]
+    dist = grading.basket_win_count_distribution(legs)
+    assert dist == pytest.approx([0.58, 0.42], abs=1e-9)
+
+
+def test_basket_win_count_distribution_agrees_with_at_least_one_and_expected_winners():
+    # The two existing basket numbers are both summaries of this same distribution -- this test
+    # is the real, load-bearing check that all three stay mutually consistent, not just that each
+    # is independently correct in isolation.
+    legs = [_leg(f"P{i}", f"T{i}", f"G{i}", conviction=2.0, model_prob=p)
+           for i, p in enumerate([0.34, 0.365, 0.37, 0.376, 0.391, 0.398])]
+    dist = grading.basket_win_count_distribution(legs)
+
+    at_least_one_from_dist = 1.0 - dist[0]
+    assert at_least_one_from_dist == pytest.approx(grading.basket_prob_at_least_one_wins(legs), abs=1e-9)
+
+    expected_from_dist = sum(k * p for k, p in enumerate(dist))
+    expected_from_sum = sum(leg.get("ModelProb", 0.0) for leg in legs)
+    assert expected_from_dist == pytest.approx(expected_from_sum, abs=1e-9)
+    print("✓ basket_win_count_distribution's own P(0) and mean exactly agree with the existing "
+         "prob_at_least_one_wins and expected_winners numbers computed independently")
+
+
+def test_basket_win_count_distribution_all_zero_probs_is_certain_zero_wins():
+    legs = [_leg(f"P{i}", f"T{i}", f"G{i}", conviction=2.0, model_prob=0.0) for i in range(3)]
+    dist = grading.basket_win_count_distribution(legs)
+    assert dist == pytest.approx([1.0, 0.0, 0.0, 0.0], abs=1e-9)
+
+
+def test_basket_win_count_distribution_all_certain_probs_is_certain_max_wins():
+    legs = [_leg(f"P{i}", f"T{i}", f"G{i}", conviction=2.0, model_prob=1.0) for i in range(3)]
+    dist = grading.basket_win_count_distribution(legs)
+    assert dist == pytest.approx([0.0, 0.0, 0.0, 1.0], abs=1e-9)
+
+
 # ----------------------------------------------------------------- build_speculative_basket
 def test_speculative_basket_reuses_payout_objective():
     # Same real proof pattern used for Bold/Longshot's own payout objective: a lower-Conviction,
