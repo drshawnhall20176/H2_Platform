@@ -157,6 +157,34 @@ def conviction_to_grade(conviction: Optional[float], ceiling: Optional[float] = 
     return None
 
 
+def filter_min_probability(plays: List[Dict], min_prob: float) -> List[Dict]:
+    """Keep only plays whose own real ModelProb clears min_prob (0.0-1.0) -- a raw, absolute
+    probability floor, added directly on request after a real, reported gap: a real, sharp
+    trader's own manual process wanted "show me only plays at least 70% likely to hit," and
+    the platform's existing floors (grade letters like C/B/A, or Best Bets' own Conviction
+    slider) don't answer that directly -- both are RELATIVE to a market's own typical reference
+    rate, not an absolute probability cutoff. Two plays can carry the same letter grade, or the
+    same Conviction ratio, at very different raw ModelProb levels (a market with a low reference
+    rate needs less raw probability to clear the same relative bar than one with a high
+    reference rate) -- this filters on the one number that means the same thing regardless of
+    which market a play is in.
+
+    Shared, sport-agnostic, and deliberately simple: every play on this platform already carries
+    a real "ModelProb" field (attached at the exact same place Conviction and Fair are, in every
+    sport's own build_best_bets), so this is one small, testable filter reused across Best Bets,
+    Graded Picks, Suggested Parlays, and Speculative Basket rather than four near-duplicate
+    inline filters drifting apart over time.
+
+    min_prob <= 0 returns every play completely unfiltered (the default, "no floor" state) --
+    deliberately not even touching plays with a missing/None ModelProb in that case, so a caller
+    that never sets a floor sees byte-identical behavior to before this function existed. Once a
+    real floor is set (min_prob > 0), a play with no ModelProb at all is excluded, not treated as
+    passing an unknown threshold."""
+    if min_prob <= 0:
+        return list(plays)
+    return [p for p in plays if p.get("ModelProb") is not None and p["ModelProb"] >= min_prob]
+
+
 def rank_flat_plays(plays: List[Dict], key: str = "rank_value") -> List[Dict]:
     """Attach an explicit, 1-indexed "_rank" to a flat list of plays, sorted by the given key --
     shared, testable logic behind the ranking shown on Graded Picks (once a specific game is
@@ -625,6 +653,38 @@ def basket_prob_at_least_one_wins(legs: List[Dict]) -> float:
     for leg in legs:
         prob_none_hit *= (1.0 - leg.get("ModelProb", 0.0))
     return 1.0 - prob_none_hit
+
+
+def basket_win_count_distribution(legs: List[Dict]) -> List[float]:
+    """Full probability distribution over how many legs in this basket win -- exact Poisson-
+    binomial, not just the mean. "Expected winners" is this distribution's own mean (sum(k *
+    P(k))) with the per-leg detail already thrown away; "P(at least one wins)" is just 1 - P(0).
+    Both existing basket numbers are summaries of this richer thing, not independent facts --
+    this is the actual object those two numbers are computed FROM, exposed directly so a caller
+    can show the real shape (e.g. "2 or 3 winners together" can be a much more informative,
+    honest answer than a single expected-value point estimate).
+
+    Same independence assumption as every other basket/parlay probability function in this
+    module -- see basket_prob_at_least_one_wins's own docstring for the honest caveat that
+    still applies here.
+
+    DP recursion: dp[k] after processing i legs = P(exactly k of the first i legs won). Starts
+    at dp = [1.0] (0 legs processed, exactly 0 wins with certainty) and grows by one slot per
+    leg -- each leg either misses (k stays put, weight 1-p) or hits (k moves up one, weight p).
+    O(n^2), fine at real basket sizes (a handful up to ~15 legs); not built for anything larger.
+
+    Returns a list of length len(legs)+1 where index k = P(exactly k legs win), summing to 1.0
+    up to floating-point error. Empty legs returns [1.0] (P(0 wins) = 1, trivially true of an
+    empty basket)."""
+    dp = [1.0]
+    for leg in legs:
+        p = leg.get("ModelProb", 0.0)
+        new_dp = [0.0] * (len(dp) + 1)
+        for k, mass in enumerate(dp):
+            new_dp[k] += mass * (1.0 - p)
+            new_dp[k + 1] += mass * p
+        dp = new_dp
+    return dp
 
 
 def build_game_coverage_picks(plays: List[Dict], market: str = "Batter Total Hits",

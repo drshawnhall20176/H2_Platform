@@ -230,6 +230,47 @@ def test_conviction_to_grade_rank_value_equals_conviction_without_ceiling():
     assert grade["rank_value"] == grade["conviction"] == 2.4
 
 
+# ----------------------------------------------------------------- filter_min_probability
+def test_filter_min_probability_keeps_only_plays_at_or_above_floor():
+    plays = [
+        {"Player": "Low", "ModelProb": 0.55},
+        {"Player": "Right At Floor", "ModelProb": 0.70},
+        {"Player": "High", "ModelProb": 0.85},
+    ]
+    kept = grading.filter_min_probability(plays, 0.70)
+    assert [p["Player"] for p in kept] == ["Right At Floor", "High"]   # >= is inclusive, not strictly >
+    print("✓ filter_min_probability keeps plays at or above the floor, drops everything below it")
+
+
+def test_filter_min_probability_zero_or_negative_returns_everything_unfiltered():
+    plays = [{"Player": "A", "ModelProb": 0.10}, {"Player": "B"}]   # B has no ModelProb at all
+    assert grading.filter_min_probability(plays, 0.0) == plays
+    assert grading.filter_min_probability(plays, -1.0) == plays
+    print("✓ filter_min_probability with no real floor set (<=0) returns every play untouched, "
+         "including one with no ModelProb at all -- byte-identical to not filtering")
+
+
+def test_filter_min_probability_excludes_missing_model_prob_once_a_real_floor_is_set():
+    plays = [{"Player": "NoProb"}, {"Player": "HasProb", "ModelProb": 0.9}]
+    kept = grading.filter_min_probability(plays, 0.5)
+    assert [p["Player"] for p in kept] == ["HasProb"]   # NoProb never silently "passes" a real floor
+    print("✓ filter_min_probability excludes a play with no ModelProb once a real floor is active, "
+         "rather than treating an unknown probability as passing")
+
+
+def test_filter_min_probability_does_not_mutate_input_list():
+    plays = [{"Player": "A", "ModelProb": 0.9}, {"Player": "B", "ModelProb": 0.1}]
+    grading.filter_min_probability(plays, 0.5)
+    assert len(plays) == 2   # caller's own list untouched, only a new filtered list returned
+    print("✓ filter_min_probability returns a new list without mutating the caller's own list")
+
+
+def test_filter_min_probability_100_percent_only_keeps_certain_plays():
+    plays = [{"Player": "Certain", "ModelProb": 1.0}, {"Player": "AlmostCertain", "ModelProb": 0.99}]
+    kept = grading.filter_min_probability(plays, 1.0)
+    assert [p["Player"] for p in kept] == ["Certain"]
+
+
 # ----------------------------------------------------------------- rank_flat_plays
 def test_rank_flat_plays_by_rank_value_resolves_cross_market_inversion():
     plays = [
@@ -1254,6 +1295,65 @@ def test_basket_prob_at_least_one_wins_increases_with_more_legs():
     probs = [grading.basket_prob_at_least_one_wins(legs[:n]) for n in range(1, 7)]
     assert probs == sorted(probs)   # strictly non-decreasing as more legs are added
     print("✓ basket_prob_at_least_one_wins correctly increases as more independent positions are added to the basket")
+
+
+# ----------------------------------------------------------------- basket_win_count_distribution
+def test_basket_win_count_distribution_hand_verified_two_legs():
+    # Hand-verified over 2 independent legs (p=0.3, p=0.5):
+    # P(0) = 0.7*0.5 = 0.35, P(1) = 0.3*0.5 + 0.7*0.5 = 0.50, P(2) = 0.3*0.5 = 0.15
+    legs = [_leg("A", "T1", "G1", conviction=2.0, model_prob=0.3),
+           _leg("B", "T2", "G2", conviction=2.0, model_prob=0.5)]
+    dist = grading.basket_win_count_distribution(legs)
+    assert dist == pytest.approx([0.35, 0.50, 0.15], abs=1e-9)
+    print("✓ basket_win_count_distribution matches a hand-verified exact 2-leg distribution")
+
+
+def test_basket_win_count_distribution_sums_to_one():
+    legs = [_leg(f"P{i}", f"T{i}", f"G{i}", conviction=2.0, model_prob=0.2 + 0.1 * i) for i in range(6)]
+    dist = grading.basket_win_count_distribution(legs)
+    assert len(dist) == 7   # 0..6 wins for 6 legs
+    assert sum(dist) == pytest.approx(1.0, abs=1e-9)
+    print("✓ basket_win_count_distribution sums to 1.0 across all possible win counts")
+
+
+def test_basket_win_count_distribution_empty_legs():
+    assert grading.basket_win_count_distribution([]) == [1.0]   # P(0 wins) = 1, trivially
+
+
+def test_basket_win_count_distribution_single_leg_matches_bernoulli():
+    legs = [_leg("A", "T1", "G1", conviction=2.0, model_prob=0.42)]
+    dist = grading.basket_win_count_distribution(legs)
+    assert dist == pytest.approx([0.58, 0.42], abs=1e-9)
+
+
+def test_basket_win_count_distribution_agrees_with_at_least_one_and_expected_winners():
+    # The two existing basket numbers are both summaries of this same distribution -- this test
+    # is the real, load-bearing check that all three stay mutually consistent, not just that each
+    # is independently correct in isolation.
+    legs = [_leg(f"P{i}", f"T{i}", f"G{i}", conviction=2.0, model_prob=p)
+           for i, p in enumerate([0.34, 0.365, 0.37, 0.376, 0.391, 0.398])]
+    dist = grading.basket_win_count_distribution(legs)
+
+    at_least_one_from_dist = 1.0 - dist[0]
+    assert at_least_one_from_dist == pytest.approx(grading.basket_prob_at_least_one_wins(legs), abs=1e-9)
+
+    expected_from_dist = sum(k * p for k, p in enumerate(dist))
+    expected_from_sum = sum(leg.get("ModelProb", 0.0) for leg in legs)
+    assert expected_from_dist == pytest.approx(expected_from_sum, abs=1e-9)
+    print("✓ basket_win_count_distribution's own P(0) and mean exactly agree with the existing "
+         "prob_at_least_one_wins and expected_winners numbers computed independently")
+
+
+def test_basket_win_count_distribution_all_zero_probs_is_certain_zero_wins():
+    legs = [_leg(f"P{i}", f"T{i}", f"G{i}", conviction=2.0, model_prob=0.0) for i in range(3)]
+    dist = grading.basket_win_count_distribution(legs)
+    assert dist == pytest.approx([1.0, 0.0, 0.0, 0.0], abs=1e-9)
+
+
+def test_basket_win_count_distribution_all_certain_probs_is_certain_max_wins():
+    legs = [_leg(f"P{i}", f"T{i}", f"G{i}", conviction=2.0, model_prob=1.0) for i in range(3)]
+    dist = grading.basket_win_count_distribution(legs)
+    assert dist == pytest.approx([0.0, 0.0, 0.0, 1.0], abs=1e-9)
 
 
 # ----------------------------------------------------------------- build_speculative_basket

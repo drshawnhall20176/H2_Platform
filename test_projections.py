@@ -328,6 +328,49 @@ def test_bullpen_fatigued_fraction_tag_boundary_matches_get_team_bullpen_fatigue
     print("✓ bullpen_fatigued_fraction's fatigue definition exactly matches get_team_bullpen_fatigue's own tag boundaries")
 
 
+# ----------------------------------------------------------------- bullpen_freshness_tag
+def test_bullpen_freshness_tag_unknown_for_none():
+    assert P.bullpen_freshness_tag(None) == "unknown"
+    print("✓ bullpen_freshness_tag reports \"unknown\" for missing data, never guessing fresh or taxed")
+
+
+def test_bullpen_freshness_tag_matches_threshold_exactly():
+    assert P.bullpen_freshness_tag(P.BULLPEN_FATIGUE_THRESHOLD - 0.01) == "fresh"
+    assert P.bullpen_freshness_tag(P.BULLPEN_FATIGUE_THRESHOLD) == "taxed"
+    assert P.bullpen_freshness_tag(1.0) == "taxed"
+    assert P.bullpen_freshness_tag(0.0) == "fresh"
+    print("✓ bullpen_freshness_tag uses the exact same inclusive threshold boundary as bullpen_fatigue_multipliers")
+
+
+# ----------------------------------------------------------------- bullpen_freshness_edge
+def test_bullpen_freshness_edge_away_fresher():
+    # Away team fresh (0.1), home team taxed (0.6) -> away has the edge.
+    assert P.bullpen_freshness_edge(0.1, 0.6) == "away"
+    print("✓ bullpen_freshness_edge correctly picks the fresher away bullpen")
+
+
+def test_bullpen_freshness_edge_home_fresher():
+    assert P.bullpen_freshness_edge(0.6, 0.1) == "home"
+    print("✓ bullpen_freshness_edge correctly picks the fresher home bullpen")
+
+
+def test_bullpen_freshness_edge_both_fresh_is_even():
+    assert P.bullpen_freshness_edge(0.1, 0.15) == "even"
+
+
+def test_bullpen_freshness_edge_both_taxed_is_even():
+    assert P.bullpen_freshness_edge(0.6, 0.7) == "even"
+    print("✓ bullpen_freshness_edge calls it \"even\" when both sides are fresh, or both are taxed, "
+         "not just when the fractions are numerically identical")
+
+
+def test_bullpen_freshness_edge_none_when_either_side_unknown():
+    assert P.bullpen_freshness_edge(None, 0.6) is None
+    assert P.bullpen_freshness_edge(0.1, None) is None
+    assert P.bullpen_freshness_edge(None, None) is None
+    print("✓ bullpen_freshness_edge never resolves a missing read on either side into a false \"even\"")
+
+
 # ----------------------------------------------------------------- bullpen_fatigue_multipliers
 def test_bullpen_fatigue_multipliers_above_threshold():
     m = P.bullpen_fatigue_multipliers(0.5)

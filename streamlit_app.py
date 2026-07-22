@@ -63,6 +63,11 @@ def run():
     # "engine not wired yet" gracefully inside the page itself.
     sport_only_leads = {
         "1": ("MLB",), "2": ("MLB",), "10": ("MLB",),   # Pitching Lab, Dinger Engine, Matchup Lab (MLB)
+        "21": ("MLB",),                                 # Bullpen Watch -- built directly on
+                                                          # mlb_engine's own bullpen-fatigue
+                                                          # functions, no WNBA/NFL equivalent
+                                                          # exists yet, same posture as Pitching
+                                                          # Lab/Dinger Engine above
         "11": ("WNBA", "NBA", "NCAAMB"),                # Hot Hand Engine (opponent-adjusted leaderboard)
         "12": ("WNBA", "NBA", "NCAAMB"),                # Matchup Lab (WNBA/NBA/NCAAMB) — same slot as page 10, different sport
         "13": ("NFL",),                                 # Matchup Lab (NFL) — own page, not the shared basketball one (see its own module docstring for why)
@@ -102,6 +107,8 @@ def run():
         "17": ("Data Health",   "🩺", "data_health"),
         "18": ("Suggested Parlays", "🎫", "suggested_parlays"),
         "19": ("Speculative Basket", "🧺", "speculative_basket"),
+        "20": ("Model Dashboard", "🏆", "model_dashboard"),
+        "21": ("Bullpen Watch", "🛡️", "bullpen_watch"),
     }
 
     def lead(name: str) -> str:
