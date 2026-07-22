@@ -171,6 +171,46 @@ def test_build_pitching_slate_threads_team_ids_through(monkeypatch):
     print("✓ build_pitching_slate correctly threads each side's own team_id and their opponent's through")
 
 
+# ----------------------------------------------------------------- pair_pitching_slate_by_game
+def _pitching_row(team, opp, game_label, game_date=None):
+    return {"Pitcher": f"{team} SP", "Team": team, "Opponent": opp, "Game": game_label,
+           "_game_date": game_date}
+
+
+def test_pair_pitching_slate_by_game_pairs_home_and_away():
+    rows = [_pitching_row("Yankees", "Red Sox", "Red Sox @ Yankees"),
+           _pitching_row("Red Sox", "Yankees", "Red Sox @ Yankees")]
+    games = E.pair_pitching_slate_by_game(rows)
+    assert len(games) == 1
+    assert games[0]["home"]["Team"] == "Yankees" and games[0]["away"]["Team"] == "Red Sox"
+    print("✓ pair_pitching_slate_by_game correctly sorts each side into home/away using the label's own away-part match")
+
+
+def test_pair_pitching_slate_by_game_drops_unpaired_rows():
+    # A row whose partner never came back (e.g. a data gap) should be dropped entirely, not
+    # shown as a half-built game with one side missing.
+    rows = [_pitching_row("Yankees", "Red Sox", "Red Sox @ Yankees")]   # away side missing
+    assert E.pair_pitching_slate_by_game(rows) == []
+    print("✓ pair_pitching_slate_by_game drops a game where only one side's row is present")
+
+
+def test_pair_pitching_slate_by_game_multiple_games():
+    rows = [
+        _pitching_row("Yankees", "Red Sox", "Red Sox @ Yankees"),
+        _pitching_row("Red Sox", "Yankees", "Red Sox @ Yankees"),
+        _pitching_row("Dodgers", "Giants", "Giants @ Dodgers"),
+        _pitching_row("Giants", "Dodgers", "Giants @ Dodgers"),
+    ]
+    games = E.pair_pitching_slate_by_game(rows)
+    assert len(games) == 2
+    labels = {g["label"] for g in games}
+    assert labels == {"Red Sox @ Yankees", "Giants @ Dodgers"}
+
+
+def test_pair_pitching_slate_by_game_empty_input():
+    assert E.pair_pitching_slate_by_game([]) == []
+
+
 # ----------------------------------------------------------------- get_team_injuries
 def test_get_team_injuries_filters_to_non_active_status(monkeypatch):
     # Documented roster response shape (MLB Stats API's own roster endpoint structure), not a

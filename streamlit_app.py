@@ -68,6 +68,9 @@ def run():
                                                           # functions, no WNBA/NFL equivalent
                                                           # exists yet, same posture as Pitching
                                                           # Lab/Dinger Engine above
+        "22": ("MLB",),                                 # Game Watch -- same MLB-only posture,
+                                                          # built on the same bullpen functions
+                                                          # plus build_pitching_slate's FIP
         "11": ("WNBA", "NBA", "NCAAMB"),                # Hot Hand Engine (opponent-adjusted leaderboard)
         "12": ("WNBA", "NBA", "NCAAMB"),                # Matchup Lab (WNBA/NBA/NCAAMB) — same slot as page 10, different sport
         "13": ("NFL",),                                 # Matchup Lab (NFL) — own page, not the shared basketball one (see its own module docstring for why)
@@ -109,6 +112,7 @@ def run():
         "19": ("Speculative Basket", "🧺", "speculative_basket"),
         "20": ("Model Dashboard", "🏆", "model_dashboard"),
         "21": ("Bullpen Watch", "🛡️", "bullpen_watch"),
+        "22": ("Game Watch", "📡", "game_watch"),
     }
 
     def lead(name: str) -> str:

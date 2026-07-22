@@ -288,6 +288,65 @@ def bullpen_freshness_edge(away_fraction: Optional[float], home_fraction: Option
     return "even"
 
 
+def lower_is_better_edge(away_value: Optional[float], home_value: Optional[float],
+                         epsilon: float = 0.0) -> Optional[str]:
+    """Generic "which side has the better (LOWER) number" comparison -- for ERA/FIP-style metrics
+    where lower is better. Deliberately generic and metric-agnostic (not "starter FIP edge" or
+    "bullpen ERA edge" specifically) so ONE tested function backs every lower-is-better comparison
+    Game Watch makes, rather than several near-identical copies drifting apart over time.
+
+    Returns "away" (away side's number is the better/lower one), "home" (home side's is), "even"
+    (a real, close comparison -- see epsilon), or None when EITHER side's value is missing. A
+    missing value is never resolved into a guessed "even" or a guessed direction.
+
+    epsilon: how close two values must be before calling it "even" rather than a real edge --
+    0.0 (the default) means only an EXACT tie counts as even. Real, single-season pitching
+    metrics (ERA, FIP) are noisy enough that a razor-thin numeric difference isn't a real edge;
+    callers comparing those should pass a real, stated epsilon rather than relying on the
+    exact-tie default -- kept as an explicit caller decision (visible and documented where it's
+    applied) rather than a hidden default baked into this function, the same way
+    BULLPEN_FATIGUE_THRESHOLD is a named, visible constant rather than a buried magic number."""
+    if away_value is None or home_value is None:
+        return None
+    if abs(away_value - home_value) <= epsilon:
+        return "even"
+    return "away" if away_value < home_value else "home"
+
+
+def matchup_signal_tally(edges: List[Optional[str]]) -> Dict[str, Any]:
+    """Given a list of directional edges (each "home"/"away"/"even"/None, e.g. from
+    lower_is_better_edge or bullpen_freshness_edge), tallies how many real signals favor each
+    side into an honest, deliberately un-overclaiming verdict -- NOT a probability, NOT a
+    betting recommendation, just a transparent count of how many independently-computed factors
+    happen to point the same way. This is Game Watch's entire "combining logic" -- no weights,
+    no fabricated score, because there's no real backtested validation yet that would justify
+    weighting one signal over another; an honest count is the most this data can currently
+    support.
+
+    Returns {"home": count, "away": count, "even": count, "unavailable": count, "available":
+    count, "verdict": str}. verdict is "home"/"away" only when that side has STRICTLY more
+    signals than the other (a tie is never silently broken toward either side); "even" when tied
+    with at least one real signal available; "insufficient_data" when nothing was available at
+    all (every edge was None) -- an honest state distinct from "even," since "even" is a real,
+    positive finding (the sides genuinely compared as similar) and "insufficient_data" is the
+    absence of a finding."""
+    home = sum(1 for e in edges if e == "home")
+    away = sum(1 for e in edges if e == "away")
+    even = sum(1 for e in edges if e == "even")
+    unavailable = sum(1 for e in edges if e is None)
+    available = home + away + even
+    if available == 0:
+        verdict = "insufficient_data"
+    elif home > away:
+        verdict = "home"
+    elif away > home:
+        verdict = "away"
+    else:
+        verdict = "even"
+    return {"home": home, "away": away, "even": even, "unavailable": unavailable,
+           "available": available, "verdict": verdict}
+
+
 def bullpen_fatigue_multipliers(fatigued_fraction: Optional[float]) -> Dict[str, float]:
     """Given the real fraction of a team's bullpen currently showing fatigue signs (from
     bullpen_fatigued_fraction), the real multipliers to apply to that bullpen's own K/BB/ER/HR-

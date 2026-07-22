@@ -145,8 +145,8 @@ def test_require_sport_accepts_a_list_of_keys():
 
 
 def test_sport_only_page_visibility_matches_expected_config():
-    # Regression guard: Pitching Lab/Dinger Engine/Matchup Lab(MLB)/Bullpen Watch must stay
-    # MLB-only, Hot Hand Engine/Matchup Lab(WNBA/NBA/NCAAMB) must stay basketball-only, and
+    # Regression guard: Pitching Lab/Dinger Engine/Matchup Lab(MLB)/Bullpen Watch/Game Watch must
+    # stay MLB-only, Hot Hand Engine/Matchup Lab(WNBA/NBA/NCAAMB) must stay basketball-only, and
     # Matchup Lab(NFL)/Anytime TD Engine must stay NFL-only. A future page renumbering could
     # silently break this if nothing locks in which lead numbers map to which sport(s).
     src = (_HERE / "streamlit_app.py").read_text()
@@ -155,12 +155,12 @@ def test_sport_only_page_visibility_matches_expected_config():
     pairs = {}
     for key, vals in re.findall(r'"(\d+)":\s*\(([^)]*)\)', m.group(1)):
         pairs[key] = tuple(re.findall(r'"(\w+)"', vals))
-    assert pairs == {"1": ("MLB",), "2": ("MLB",), "10": ("MLB",), "21": ("MLB",),
+    assert pairs == {"1": ("MLB",), "2": ("MLB",), "10": ("MLB",), "21": ("MLB",), "22": ("MLB",),
                      "11": ("WNBA", "NBA", "NCAAMB"), "12": ("WNBA", "NBA", "NCAAMB"),
                      "13": ("NFL",), "14": ("NFL",), "15": ("NFL",)}, pairs
     print("✓ sport_only_leads matches expected config (Pitching Lab/Dinger Engine/Matchup Lab(MLB)/"
-          "Bullpen Watch -> MLB, Hot Hand Engine/Matchup Lab(WNBA/NBA/NCAAMB) -> WNBA+NBA+NCAAMB, "
-          "Matchup Lab(NFL)/Anytime TD Engine/QB Lab -> NFL)")
+          "Bullpen Watch/Game Watch -> MLB, Hot Hand Engine/Matchup Lab(WNBA/NBA/NCAAMB) -> "
+          "WNBA+NBA+NCAAMB, Matchup Lab(NFL)/Anytime TD Engine/QB Lab -> NFL)")
 
 
 def test_hot_hand_and_matchup_lab_loaders_key_their_cache_by_sport():

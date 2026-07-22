@@ -371,7 +371,69 @@ def test_bullpen_freshness_edge_none_when_either_side_unknown():
     print("✓ bullpen_freshness_edge never resolves a missing read on either side into a false \"even\"")
 
 
-# ----------------------------------------------------------------- bullpen_fatigue_multipliers
+# ----------------------------------------------------------------- lower_is_better_edge
+def test_lower_is_better_edge_picks_the_lower_value():
+    assert P.lower_is_better_edge(3.20, 4.10) == "away"   # away's lower FIP wins
+    assert P.lower_is_better_edge(4.10, 3.20) == "home"
+    print("✓ lower_is_better_edge correctly picks whichever side has the lower (better) number")
+
+
+def test_lower_is_better_edge_exact_tie_is_even_by_default():
+    assert P.lower_is_better_edge(3.50, 3.50) == "even"
+
+
+def test_lower_is_better_edge_respects_epsilon():
+    # A real but tiny 0.05 gap: "even" once a real epsilon is applied, a real edge with none.
+    assert P.lower_is_better_edge(3.50, 3.55) == "away"          # epsilon=0.0 default -> real edge
+    assert P.lower_is_better_edge(3.50, 3.55, epsilon=0.20) == "even"   # explicit epsilon absorbs it
+    assert P.lower_is_better_edge(3.00, 4.00, epsilon=0.20) == "away"  # a real gap still wins even with epsilon
+    print("✓ lower_is_better_edge treats a gap smaller than a caller-supplied epsilon as \"even\", "
+         "not a fabricated edge from noise")
+
+
+def test_lower_is_better_edge_none_when_either_side_missing():
+    assert P.lower_is_better_edge(None, 4.10) is None
+    assert P.lower_is_better_edge(3.20, None) is None
+    assert P.lower_is_better_edge(None, None) is None
+
+
+# ----------------------------------------------------------------- matchup_signal_tally
+def test_matchup_signal_tally_hand_verified_majority():
+    tally = P.matchup_signal_tally(["home", "home", "away"])
+    assert tally == {"home": 2, "away": 1, "even": 0, "unavailable": 0, "available": 3, "verdict": "home"}
+    print("✓ matchup_signal_tally correctly tallies a 2-1 majority into a \"home\" verdict")
+
+
+def test_matchup_signal_tally_tie_is_even_not_silently_broken():
+    tally = P.matchup_signal_tally(["home", "away"])
+    assert tally["verdict"] == "even"
+    tally2 = P.matchup_signal_tally(["home", "away", "even"])
+    assert tally2["verdict"] == "even"   # 1-1 with one genuine "even" signal is still an even verdict
+    print("✓ matchup_signal_tally never silently breaks a tie toward either side")
+
+
+def test_matchup_signal_tally_all_unavailable_is_insufficient_data_not_even():
+    tally = P.matchup_signal_tally([None, None, None])
+    assert tally["verdict"] == "insufficient_data"
+    assert tally == {"home": 0, "away": 0, "even": 0, "unavailable": 3, "available": 0,
+                     "verdict": "insufficient_data"}
+    print("✓ matchup_signal_tally distinguishes \"insufficient_data\" (nothing available) from "
+         "\"even\" (signals available and genuinely balanced) -- not the same honest state")
+
+
+def test_matchup_signal_tally_mixed_availability():
+    # A real, partial read: only 2 of 3 signals came back, and they split -- still \"even\", not
+    # treated as 1 missing signal defaulting to either side.
+    tally = P.matchup_signal_tally(["home", "away", None])
+    assert tally["available"] == 2 and tally["unavailable"] == 1
+    assert tally["verdict"] == "even"
+
+
+def test_matchup_signal_tally_empty_list_is_insufficient_data():
+    assert P.matchup_signal_tally([])["verdict"] == "insufficient_data"
+
+
+
 def test_bullpen_fatigue_multipliers_above_threshold():
     m = P.bullpen_fatigue_multipliers(0.5)
     assert m["k_mult"] == P.REST_K_MULT
