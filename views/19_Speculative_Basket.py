@@ -18,6 +18,7 @@ sport-agnostic, the same as the rest of grading.py.
 """
 
 import streamlit as st
+import pandas as pd
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
 from datetime import datetime
 from typing import Optional
@@ -194,18 +195,69 @@ st.info(
     "it to what your book actually offers to see if there's real value."
 )
 
+# Rank once here (not down in the display loop) so the trim control below and the metrics/
+# distribution above the leg list all operate on the same real ModelProb ranking.
+grading.rank_flat_plays(basket["legs"], key="ModelProb")
+all_legs = basket["legs"]
+n_positions = len(all_legs)
+
+if n_positions > 1:
+    trim_to = st.slider(
+        "Trim to top N positions (ranked by real ModelProb)", min_value=1, max_value=n_positions,
+        value=n_positions,
+        help="Positions are already ranked strongest-to-weakest by their own real ModelProb "
+            "above. Trimming here keeps the top N and drops the rest, live-updating every "
+            "number below — including the full win-count distribution, not just the mean. "
+            "Because this trims by strength, it can only ever keep the highest-probability "
+            "legs: it structurally can't isolate one specific weaker pick while dropping a "
+            "stronger one ranked above it.",
+    )
+else:
+    trim_to = n_positions
+trimmed_legs = all_legs[:trim_to]
+
+trimmed_at_least_one = grading.basket_prob_at_least_one_wins(trimmed_legs)
+trimmed_expected = sum(leg.get("ModelProb", 0.0) for leg in trimmed_legs)
+distribution = grading.basket_win_count_distribution(trimmed_legs)
+
 c1, c2, c3 = st.columns(3)
 with c1:
-    st.metric("Positions in basket", len(basket["legs"]))
+    st.metric("Positions in basket", len(trimmed_legs))
 with c2:
-    st.metric("P(at least one wins)", f"{basket['prob_at_least_one_wins']:.1%}")
+    st.metric("P(at least one wins)", f"{trimmed_at_least_one:.1%}")
 with c3:
-    st.metric("Expected winners", f"{basket['expected_winners']:.1f}")
+    st.metric("Expected winners", f"{trimmed_expected:.1f}")
 st.caption("\"P(at least one wins)\" and \"Expected winners\" assume independence across positions "
           "— the same-player exclusion below removes the single biggest way that assumption "
           "breaks, but positions sharing a game can still carry some real, smaller correlation "
           "this doesn't fully capture. Neither number is a baseball statistic — both describe "
           "how many of these BETS are expected to settle correctly, not actual hits/runs/RBIs.")
+
+# Full win-count distribution -- "Expected winners" is just this distribution's own mean, with
+# the per-outcome detail already thrown away. Showing the whole shape gives the real band to
+# expect (e.g. "2 or 3 winners together" is a materially richer, more honest answer than a
+# single "expect about 2.2" point estimate) instead of just one summary number.
+with st.expander(f"📊 Full win-count distribution ({len(trimmed_legs)} positions)", expanded=True):
+    dist_df = pd.DataFrame({"Probability": distribution},
+                           index=[f"{k} win{'s' if k != 1 else ''}" for k in range(len(distribution))])
+    st.bar_chart(dist_df, y="Probability")
+
+    mode_k = max(range(len(distribution)), key=lambda k: distribution[k])
+    # The real "band to expect" -- the mode plus whichever neighbor carries more mass, not a
+    # fixed +/-1 window, since the distribution isn't always symmetric around the mode.
+    left_mass = distribution[mode_k - 1] if mode_k > 0 else -1.0
+    right_mass = distribution[mode_k + 1] if mode_k + 1 < len(distribution) else -1.0
+    if right_mass >= left_mass and right_mass >= 0:
+        band_k, band_mass = (mode_k, mode_k + 1), distribution[mode_k] + right_mass
+    elif left_mass >= 0:
+        band_k, band_mass = (mode_k - 1, mode_k), distribution[mode_k] + left_mass
+    else:
+        band_k, band_mass = (mode_k,), distribution[mode_k]
+    band_label = " or ".join(str(k) for k in band_k)
+    st.caption(f"Most likely single outcome: **{mode_k} winner{'s' if mode_k != 1 else ''}** "
+              f"({distribution[mode_k]:.1%}). **{band_label} winner{'s' if band_k[-1] != 1 else ''} "
+              f"together** covers {band_mass:.1%} of all outcomes — the real range to expect, not "
+              f"just the single expected-value point above.")
 
 GRADE_COLOR = {"A": "#16783c", "B": "#2e7d32", "C": "#b8860b", "D": "#6b7280"}
 
@@ -223,13 +275,12 @@ def _grade_badge(grade: Optional[dict]) -> str:
 
 
 with st.container(border=True):
-    # Ranking, added directly on request: multiple positions can share the same letter grade
-    # while still having meaningfully different real probabilities behind them. Ranked by
-    # ModelProb (real probability of hitting), same reasoning as Suggested Parlays -- this page
-    # is explicitly framed around "which of these is more likely to actually hit."
-    grading.rank_flat_plays(basket["legs"], key="ModelProb")
-
-    for leg in basket["legs"]:
+    # Ranking already happened once, above the trim slider (multiple positions can share the
+    # same letter grade while still having meaningfully different real probabilities behind
+    # them -- this page is explicitly framed around "which of these is more likely to actually
+    # hit," same reasoning as Suggested Parlays). Lists the TRIMMED set so this list, the metrics
+    # above, and the distribution chart above all stay in sync with the slider.
+    for leg in trimmed_legs:
         grade_html = _grade_badge(leg["_grade"])
         leg_fair = leg.get("Fair")
         leg_fair_str = f"{leg_fair:+d}" if leg_fair is not None else "—"
@@ -258,5 +309,6 @@ with st.container(border=True):
 
 # Quick-log widget, added directly on request: during a real, narrow pick-making window, having
 # to separately re-enter a pick into Bet Log is real friction that gets skipped in favor of just
-# making the pick. Owner-only (quick_log itself enforces this).
-quick_log.render_quick_log(basket["legs"], date_str, _active.key, key_prefix="basket")
+# making the pick. Owner-only (quick_log itself enforces this). Logs the TRIMMED set -- whatever
+# the slider above currently shows is what actually gets offered for logging.
+quick_log.render_quick_log(trimmed_legs, date_str, _active.key, key_prefix="basket")
