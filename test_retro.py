@@ -9,10 +9,12 @@ import retro as R
 
 
 def test_grade_play():
-    a = {"hr": 1, "tb": 5, "hits": 2, "so": 1}
+    a = {"hr": 1, "tb": 5, "hits": 2, "so": 1, "hrr": 4}
     assert R.grade_play("Batter HR", "Over", 0.5, a) is True
     assert R.grade_play("Batter Total Bases", "Over", 1.5, a) is True
     assert R.grade_play("Batter Total Hits", "Under", 0.5, a) is False    # had 2 hits
+    assert R.grade_play("Batter Hits+Runs+RBIs", "Over", 1.5, a) is True   # 4 > 1.5
+    assert R.grade_play("Batter Hits+Runs+RBIs", "Under", 1.5, a) is False
     p = {"p_k": 4, "p_outs": 18, "p_bb": 2}
     assert R.grade_play("Pitcher Strikeouts", "Over", 5.5, p) is False     # only 4 K
     assert R.grade_play("Pitcher Strikeouts", "Under", 5.5, p) is True
@@ -53,13 +55,48 @@ def test_homer_report_catches_and_misses():
 def test_boxscore_parsing():
     box = {"teams": {"home": {"players": {
         "ID1": {"person": {"id": 1, "fullName": "Slugger"},
-                "stats": {"batting": {"hits": 2, "doubles": 1, "triples": 0, "homeRuns": 1, "strikeOuts": 1}}}}},
+                "stats": {"batting": {"hits": 2, "doubles": 1, "triples": 0, "homeRuns": 1,
+                                      "strikeOuts": 1, "runs": 2, "rbi": 3}}}}},
         "away": {"players": {
             "ID2": {"person": {"id": 2, "fullName": "Ace"},
                     "stats": {"pitching": {"strikeOuts": 8, "baseOnBalls": 2, "inningsPitched": "6.2"}}}}}}}
     res = E._parse_boxscore_results(box)
     assert res[1]["hr"] == 1 and res[1]["tb"] == 6      # double(2)+HR(4)=6
+    assert res[1]["hrr"] == 7                            # 2 hits + 2 runs + 3 rbi = 7
     assert res[2]["p_k"] == 8 and res[2]["p_outs"] == 20  # 6.2 IP -> 20 outs
+
+
+def test_boxscore_parsing_hrr_missing_runs_rbi_defaults_to_zero():
+    # A boxscore entry with a batting line but no runs/rbi keys at all (rare, but real API
+    # responses aren't guaranteed to include every field) should default those two components
+    # to 0 rather than crashing or leaving "hrr" unset entirely.
+    box = {"teams": {"home": {"players": {
+        "ID1": {"person": {"id": 1, "fullName": "Bench Bat"},
+                "stats": {"batting": {"hits": 1, "doubles": 0, "triples": 0, "homeRuns": 0}}}}},
+        "away": {"players": {}}}}
+    res = E._parse_boxscore_results(box)
+    assert res[1]["hrr"] == 1   # 1 hit + 0 runs + 0 rbi
+
+
+def test_market_report_works_for_hits_runs_rbis():
+    # Regression guard, same shape as the NFL Pass Yards test above: Batter Hits+Runs+RBIs plays
+    # were being built and shown on the board (projections.build_best_bets) but had no MARKET_STAT
+    # entry, so grade_play always returned None for them -- they silently never settled anywhere
+    # results get graded (Retrospective, Model Dashboard's "tool's own picks" section), the exact
+    # same silent-zero-graded-plays failure mode the NFL fix above already guards against.
+    plays = [
+        dict(Player="Big Night", PlayerId=1, Market="Batter Hits+Runs+RBIs", Side="Over", Line=1.5,
+            ModelProb=0.4, Conviction=1.3),
+        dict(Player="Quiet Night", PlayerId=2, Market="Batter Hits+Runs+RBIs", Side="Over", Line=1.5,
+            ModelProb=0.35, Conviction=1.1),
+    ]
+    results = {1: {"hrr": 4}, 2: {"hrr": 1}, 55: {"hrr": 5}}
+    rep = R.market_report(plays, results, "Batter Hits+Runs+RBIs", top_n=5, default_line=1.5)
+    caught_names = [c["Player"] for c in rep["caught"]]
+    assert "Big Night" in caught_names          # 4 > 1.5, cleared
+    assert "Quiet Night" not in caught_names    # 1 < 1.5, didn't clear its own line
+    assert rep["unprojected"] == 1              # player 55 (5 > 1.5) but wasn't projected
+    print("✓ market_report (and grade_play/MARKET_STAT underneath it) works for Batter Hits+Runs+RBIs")
 
 
 def test_market_report_matches_homer_report_for_mlb():

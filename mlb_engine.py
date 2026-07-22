@@ -500,7 +500,8 @@ def _ip_to_outs(ip) -> int:
 def _parse_boxscore_results(box: Dict) -> Dict[int, Dict]:
     """Per-player actuals from one boxscore, keyed by player id.
  
-    Batting: hr, hits, tb, so. Pitching: p_k, p_outs, p_bb. (A player may have both.)"""
+    Batting: hr, hits, tb, so, hrr (Hits+Runs+RBIs combined). Pitching: p_k, p_outs, p_bb.
+    (A player may have both.)"""
     out: Dict[int, Dict] = {}
     for side in ("home", "away"):
         players = (((box.get("teams", {}) or {}).get(side, {}) or {}).get("players", {}) or {})
@@ -518,9 +519,18 @@ def _parse_boxscore_results(box: Dict) -> Dict[int, Dict]:
                 d = int(bat.get("doubles", 0) or 0)
                 t = int(bat.get("triples", 0) or 0)
                 hr = int(bat.get("homeRuns", 0) or 0)
+                # runs/rbi -- same real MLB Stats API field names build_batting_order_projections
+                # already reads from this exact boxscore shape (bat.get("runs")/bat.get("rbi")),
+                # not a new/guessed field.
+                runs = int(bat.get("runs", 0) or 0)
+                rbi = int(bat.get("rbi", 0) or 0)
                 singles = max(h - d - t - hr, 0)
                 rec.update(hr=hr, hits=h, tb=singles + 2 * d + 3 * t + 4 * hr,
-                           so=int(bat.get("strikeOuts", 0) or 0))
+                           so=int(bat.get("strikeOuts", 0) or 0),
+                           # hrr: the actual combined Hits+Runs+RBIs total for the night -- the
+                           # real stat "Batter Hits+Runs+RBIs" plays (graded against the 1.5
+                           # DEFAULT_LINES threshold via MARKET_STAT below) settle against.
+                           hrr=h + runs + rbi)
  
             pit = stats.get("pitching", {}) or {}
             if pit:
