@@ -199,6 +199,40 @@ if game_options:
             st.caption(rest["rest_tag"] if rest["last_start_date"] is None else
                       f"{rest['rest_tag']} · last started {rest['last_start_date']}")
 
+    # === Starter check: did the probable starter actually take the mound? ---------------------
+    # Added directly on request, after a real, reported pattern: a probable starter posted
+    # earlier in the day doesn't always match who actually starts (a late scratch, or a bullpen
+    # game with no true starter at all) -- noticed mid-game, not before, since nothing in MLB's
+    # own schedule data marks a probable pitcher "confirmed" the way a posted batting order marks
+    # a lineup confirmed. HONEST SCOPE: this can only catch a mismatch ONCE the game has actually
+    # started and posted real pitching stats -- it cannot warn before first pitch, unlike the
+    # lineup Projected/Confirmed badge elsewhere on this platform. On-demand (one live boxscore
+    # fetch per side), not automatic -- most useful once a game is actually underway.
+    st.markdown("**🔁 Starter check**")
+    st.caption("Confirms whether the probable starter shown above is the same real person who "
+              "actually has the ball — only meaningful once the game has started; before that, "
+              "this correctly reports \"not started yet,\" not a guess either way.")
+    if picked.get("gamePk"):
+        sc1, sc2 = st.columns(2)
+        for col, label, sp, side in ((sc1, picked["home_name"], picked["home_pm"], "home"),
+                                     (sc2, picked["away_name"], picked["away_pm"], "away")):
+            with col:
+                st.markdown(f"**{label}** — probable: {sp.name}")
+                if st.button("Check actual starter", key=f"starter_check_{side}_{picked['gamePk']}"):
+                    with st.spinner("Checking tonight's live boxscore..."):
+                        actual = E.get_actual_starter(picked["gamePk"], side)
+                    mismatch = E.starter_mismatch(sp.id, actual)
+                    if mismatch is None:
+                        st.caption("⏳ Not started yet (or no pitching stats posted) — nothing "
+                                  "to confirm against yet.")
+                    elif mismatch:
+                        st.error(f"⚠️ Mismatch — **{actual['name']}** actually has the ball, not "
+                                "the probable starter shown above.")
+                    else:
+                        st.success(f"✅ Confirmed — {actual['name']} matches the probable starter.")
+    else:
+        st.caption("No game id available for this matchup — starter check isn't available here.")
+
     # === Mid-season catcher change: does this starter's own BB/K rate actually shift? ---------
     st.markdown("**🧤 Catcher change check**")
     st.caption("A pitcher's season-long BB/K rates already happened WITH his real catcher(s) "
