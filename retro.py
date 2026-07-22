@@ -15,7 +15,7 @@ model's probability at bet time) is the source of truth. This page is for explor
  
 from __future__ import annotations
  
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 
 
@@ -42,6 +42,10 @@ MARKET_STAT = {
     "Batter HR": "hr", "Batter Total Bases": "tb", "Batter Total Hits": "hits",
     "Batter Strikeouts": "so", "Pitcher Strikeouts": "p_k", "Pitcher Outs": "p_outs",
     "Pitcher Walks": "p_bb",
+    # Hits+Runs+RBIs (H-R-R) -- combined-stat market, graded against mlb_engine.
+    # get_player_results()'s own "hrr" field (real hits+runs+rbi from that night's boxscore),
+    # the same 1.5-line Over/Under every other market here grades against via grade_play.
+    "Batter Hits+Runs+RBIs": "hrr",
     # WNBA/NBA/NCAAMB — all three basketball sports share the same display market names (the
     # Core-4 convention), so one entry per name covers all of them; no separate NBA/NCAAMB rows
     # needed. Keys match wnba_engine.get_player_results()'s (and NBA's/NCAAMB's) result dict exactly.
@@ -109,6 +113,63 @@ def grade_slate(plays: List[Dict], results: Dict[int, Dict]) -> Tuple[List[Dict]
         "calibration": _calibration(matched),
     }
     return graded, summary
+ 
+ 
+def player_calibration(graded_plays: List[Dict], min_plays: int = 8) -> List[Dict]:
+    """Groups ALREADY-GRADED, settled plays (grade_slate's own output -- each carrying "Hit",
+    "ModelProb", "Player", "PlayerId") by PLAYER, and compares each player's own average
+    ModelProb against their real, actual hit rate over the same window -- a systematic,
+    data-driven answer to a real, recurring pattern: traders keeping an informal "ban list" of
+    specific players who seem to keep missing on plays the model favored (Curtis Mead, Vlad Jr.,
+    Mookie Betts, and similar real, repeated examples), almost always based on a handful of
+    memorable misses, not a real sample. This either confirms a real, systematic gap for a
+    specific player, or shows the "ban list" instinct doesn't hold up once more games are
+    counted -- useful either way, and a genuine improvement over gut-feel alone.
+
+    POOLED ACROSS EVERY MARKET AND SIDE FOR A GIVEN PLAYER, deliberately, not split out
+    per-market -- matching how the "ban list" pattern itself actually works (a person doesn't
+    separately track "Curtis Mead misses Hits props" vs "Curtis Mead misses Total Bases props,"
+    they just stop trusting Curtis Mead). This is the same pooling _calibration itself already
+    does across markets by ModelProb bin, not a new methodology invented for this function --
+    each individual play's own (ModelProb - actual outcome) is already a comparable, market-
+    agnostic 0-1 scale quantity (a calibration error), so averaging it across a player's mixed
+    markets is sound, not apples-to-oranges, the same way _calibration's own cross-market
+    pooling already is.
+
+    min_plays: the real, stated floor against exactly the small-sample problem the "ban list"
+    pattern itself is prone to -- a player with only 2-3 settled plays in the window is EXCLUDED
+    entirely, not shown with a misleadingly precise hit rate from too small a sample to mean
+    anything. Defaults to 8, not empirically fit -- enough real plays that one bad night doesn't
+    single-handedly define the number, still low enough to surface a real signal without
+    requiring a huge pooled window.
+
+    Returns a list of {"player", "player_id", "n", "avg_model_prob", "actual_hit_rate", "gap"},
+    one entry per player with at least min_plays real settled plays, sorted by "gap" DESCENDING
+    (most model-OVERRATED player first). gap = avg_model_prob - actual_hit_rate: positive means
+    the model expected more than actually happened (the real "ban list" direction -- a player
+    who keeps missing plays the model favored); negative means the opposite (a player quietly
+    outperforming what the model expected of them, the mirror-image, equally real finding)."""
+    settled = [g for g in graded_plays if g.get("Hit") is not None and g.get("PlayerId") is not None]
+    by_player: Dict[Any, Dict] = {}
+    for g in settled:
+        pid = g["PlayerId"]
+        rec = by_player.setdefault(pid, {"player": g.get("Player"), "player_id": pid,
+                                         "n": 0, "_sum_model_prob": 0.0, "_hits": 0})
+        rec["n"] += 1
+        rec["_sum_model_prob"] += g.get("ModelProb", 0.0)
+        if g["Hit"]:
+            rec["_hits"] += 1
+
+    out = []
+    for rec in by_player.values():
+        if rec["n"] < min_plays:
+            continue
+        avg_prob = rec["_sum_model_prob"] / rec["n"]
+        hit_rate = rec["_hits"] / rec["n"]
+        out.append({"player": rec["player"], "player_id": rec["player_id"], "n": rec["n"],
+                    "avg_model_prob": round(avg_prob, 3), "actual_hit_rate": round(hit_rate, 3),
+                    "gap": round(avg_prob - hit_rate, 3)})
+    return sorted(out, key=lambda r: -r["gap"])
  
  
 def market_report(plays: List[Dict], results: Dict[int, Dict], market: str, top_n: int = 15,
