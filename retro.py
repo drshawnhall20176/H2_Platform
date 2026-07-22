@@ -42,10 +42,6 @@ MARKET_STAT = {
     "Batter HR": "hr", "Batter Total Bases": "tb", "Batter Total Hits": "hits",
     "Batter Strikeouts": "so", "Pitcher Strikeouts": "p_k", "Pitcher Outs": "p_outs",
     "Pitcher Walks": "p_bb",
-    # Hits+Runs+RBIs (H-R-R) -- combined-stat market, graded against mlb_engine.
-    # get_player_results()'s own "hrr" field (real hits+runs+rbi from that night's boxscore),
-    # the same 1.5-line Over/Under every other market here grades against via grade_play.
-    "Batter Hits+Runs+RBIs": "hrr",
     # WNBA/NBA/NCAAMB — all three basketball sports share the same display market names (the
     # Core-4 convention), so one entry per name covers all of them; no separate NBA/NCAAMB rows
     # needed. Keys match wnba_engine.get_player_results()'s (and NBA's/NCAAMB's) result dict exactly.
