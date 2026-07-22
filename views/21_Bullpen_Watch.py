@@ -57,17 +57,10 @@ if not pitching_rows:
     st.info("No probable starters found for this date yet — check back closer to first pitch.")
     st.stop()
 
-# Reconstruct one entry per GAME from build_pitching_slate's own one-row-per-starter shape,
-# matching that function's own label convention exactly ("{away} @ {home}", no game-number
-# suffix, confirmed directly against its own f-string) rather than guessing at a new format.
-games_map = {}
-for r in pitching_rows:
-    label = r["Game"]
-    away_part, _, home_part = label.partition(" @ ")
-    slot = "away" if r["Team"] == away_part else "home"
-    games_map.setdefault(label, {"label": label, "_game_date": r.get("_game_date")})[slot] = r
-
-games = [g for g in games_map.values() if "home" in g and "away" in g]
+# Reconstruct one entry per GAME from build_pitching_slate's own one-row-per-starter shape --
+# shared, tested logic (mlb_engine.pair_pitching_slate_by_game), also reused by Game Watch,
+# rather than each page keeping its own inline copy.
+games = E.pair_pitching_slate_by_game(pitching_rows)
 games.sort(key=lambda g: (SLOT_ORDER.get(slot_of(game_dt(g["_game_date"])), 9), g["label"]))
 
 if not games:
