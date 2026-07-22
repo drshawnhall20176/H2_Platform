@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
  
 import requests
+import pytz
  
 BASE = "https://statsapi.mlb.com/api/v1"
 TIMEOUT = 10
@@ -819,7 +820,24 @@ def get_team_bullpen_fatigue(team_id: int, before_date: str, days_back: int = 5)
     return out
 
 
-def get_team_recent_form(team_id: int, before_date: str, games_back: int = 15) -> Optional[Dict[str, Any]]:
+def _eastern_hour(iso_utc: Optional[str]) -> Optional[int]:
+    """The Eastern-local hour (0-23) of a UTC game_date string, or None for missing/malformed
+    input -- a small, self-contained helper (rather than importing sports.py's own game_dt just
+    for this) so mlb_engine.py doesn't take on a new cross-module dependency for one field.
+    Same US/Eastern conversion sports.game_dt already uses, via the same pytz library already a
+    project dependency."""
+    if not iso_utc:
+        return None
+    try:
+        dt = datetime.strptime(iso_utc, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.utc)
+        return dt.astimezone(pytz.timezone("US/Eastern")).hour
+    except (ValueError, TypeError):
+        return None
+
+
+def get_team_recent_form(team_id: int, before_date: str, games_back: int = 15,
+                         venue: Optional[str] = None,
+                         time_of_day: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """A team's own real record and run differential over its last `games_back` ACTUAL GAMES
     (not calendar days -- a team's own most recent games, the same "count games, not calendar
     days" convention get_team_bullpen_fatigue/get_team_hitter_workload already use) strictly
@@ -829,34 +847,68 @@ def get_team_recent_form(team_id: int, before_date: str, games_back: int = 15) -
     number chosen independently).
 
     METHOD: one get_team_schedule_range call over a generous calendar window (games_back * 2
-    calendar days, since off days mean calendar days != games played -- a 30-day window
-    reliably contains 15+ real games during the regular season), filtered to Final games, then
-    the most recent `games_back` of those. Uses the schedule response's OWN per-team "score"
-    field (see _normalize_schedule_json's own note) rather than a second boxscore fetch per game
-    -- one schedule request per team covers the whole window, the same real-cost shape
-    get_team_bullpen_fatigue already uses for its own schedule call, cheaper than that function's
-    overall cost since no per-game boxscore fetch is needed here at all.
+    calendar days with no filter, wider when venue/time_of_day narrows the pool -- see below),
+    filtered to Final games, optionally filtered further by venue/time_of_day, then the most
+    recent `games_back` of those. Uses the schedule response's OWN per-team "score" field (see
+    _normalize_schedule_json's own note) rather than a second boxscore fetch per game -- one
+    schedule request per team covers the whole window regardless of how wide it is (a real,
+    documented single-request capability of this endpoint, not compounding fetch cost), cheaper
+    than get_team_bullpen_fatigue's overall cost since no per-game boxscore fetch is needed here
+    at all.
 
-    HONEST LIMITATION, same posture as get_team_bullpen_fatigue: NOT verified against a live
-    response — same statsapi.mlb.com network restriction from this sandbox applies here too.
+    venue: None (default, every game), "home" (only this team's home games), or "away" (only
+    this team's road games) -- filtering happens BEFORE taking the most recent games_back, so
+    "last 15 home games" means the 15 most recent home games specifically, which can span a much
+    wider calendar window than "last 15 games overall" (roughly half of any team's games are
+    home games, so a home/away filter alone widens the needed calendar buffer roughly 2x; the
+    buffer below accounts for this).
 
-    Returns None if the team has no Final games with usable scores in the window (a real, honest
-    "no data" state, not a fabricated 0-0 record). Otherwise: {"games": int, "wins": int,
-    "losses": int, "win_pct": float, "run_diff": int, "avg_run_diff": float}. run_diff is this
-    team's OWN total (runs scored minus runs allowed) summed across the window; avg_run_diff is
-    that total divided by games played — the number actually comparable between two teams that
-    didn't play the exact same number of games in their own windows."""
+    time_of_day: None (default), "day" (games starting before 5pm ET), or "night" (5pm ET or
+    later) -- the SAME hour boundary sports.slot_of already uses for its own Afternoon/Evening
+    split, not a new, separately-invented cutoff. Day games are a real minority of any team's
+    schedule (getaway days, Sunday afternoons), so this filter widens the calendar buffer more
+    aggressively than venue does. HONEST IMPRECISION, same posture as get_team_bullpen_fatigue's
+    own calendar-day bucketing: MLB start times are scheduled in the home team's own local zone,
+    so converting to Eastern for this cutoff can misclassify a game close to the boundary for
+    West Coast teams specifically -- not worth a timezone-conversion dependency for what's a
+    rare, boundary-only misread, the same tradeoff already accepted elsewhere in this file.
+
+    Returns None if the team has no Final games with usable scores matching every filter in the
+    window (a real, honest "no data" state, not a fabricated 0-0 record). Otherwise: {"games":
+    int, "wins": int, "losses": int, "win_pct": float, "run_diff": int, "avg_run_diff": float}.
+    run_diff is this team's OWN total (runs scored minus runs allowed) summed across the window;
+    avg_run_diff is that total divided by games played — the number actually comparable between
+    two teams that didn't play the exact same number of games in their own windows."""
     try:
         before_dt = datetime.strptime(before_date, "%Y-%m-%d")
     except ValueError:
         return None
-    start = (before_dt - timedelta(days=games_back * 2)).strftime("%Y-%m-%d")
+    # Widen the calendar buffer when a filter narrows the real pool of qualifying games -- see
+    # the venue/time_of_day docstring notes above for why each needs a different multiplier.
+    buffer_mult = 2
+    if venue:
+        buffer_mult = max(buffer_mult, 4)
+    if time_of_day:
+        buffer_mult = max(buffer_mult, 8)
+    start = (before_dt - timedelta(days=games_back * buffer_mult)).strftime("%Y-%m-%d")
     end = (before_dt - timedelta(days=1)).strftime("%Y-%m-%d")
     if end < start:
         return None
 
     games = get_team_schedule_range(team_id, start, end)
     games = [g for g in games if "final" in (g.get("status", "") or "").lower()]
+
+    if venue == "home":
+        games = [g for g in games if g.get("home_id") == team_id]
+    elif venue == "away":
+        games = [g for g in games if g.get("home_id") != team_id]
+
+    if time_of_day in ("day", "night"):
+        def _is_day(g):
+            hour = _eastern_hour(g.get("game_date"))
+            return hour is not None and hour < 17
+        games = [g for g in games if _is_day(g) == (time_of_day == "day")]
+
     games = games[-games_back:]   # most recent games_back only, chronological order preserved
 
     valid = []

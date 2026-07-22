@@ -489,6 +489,58 @@ def test_get_team_recent_form_none_on_bad_date():
     assert E.get_team_recent_form(117, "not-a-date") is None
 
 
+def test_get_team_recent_form_venue_home_only(monkeypatch):
+    games = [
+        _fake_form_game(1, "2026-07-10T23:10:00Z", 117, 5, 2),          # home win
+        {"gamePk": 2, "game_date": "2026-07-12T23:10:00Z", "status": "Final",
+         "home_id": 200, "away_id": 117, "home_score": 9, "away_score": 1},   # away loss
+        _fake_form_game(3, "2026-07-14T23:10:00Z", 117, 3, 6),          # home loss
+    ]
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    form = E.get_team_recent_form(117, "2026-07-18", games_back=15, venue="home")
+    assert form["games"] == 2   # only the 2 home games counted, away game excluded
+    assert form["wins"] == 1 and form["losses"] == 1
+    print("✓ get_team_recent_form(venue='home') correctly excludes this team's away games")
+
+
+def test_get_team_recent_form_venue_away_only(monkeypatch):
+    games = [
+        _fake_form_game(1, "2026-07-10T23:10:00Z", 117, 5, 2),          # home win (excluded)
+        {"gamePk": 2, "game_date": "2026-07-12T23:10:00Z", "status": "Final",
+         "home_id": 200, "away_id": 117, "home_score": 9, "away_score": 1},   # away loss (counted)
+    ]
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    form = E.get_team_recent_form(117, "2026-07-18", games_back=15, venue="away")
+    assert form["games"] == 1 and form["losses"] == 1
+    print("✓ get_team_recent_form(venue='away') correctly excludes this team's home games")
+
+
+def test_get_team_recent_form_time_of_day_night_only(monkeypatch):
+    games = [
+        _fake_form_game(1, "2026-07-10T18:10:00Z", 117, 5, 2),   # 18:10 UTC = 14:10 ET -> day
+        _fake_form_game(2, "2026-07-12T23:10:00Z", 117, 4, 1),   # 23:10 UTC = 19:10 ET -> night
+    ]
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    night_form = E.get_team_recent_form(117, "2026-07-18", games_back=15, time_of_day="night")
+    day_form = E.get_team_recent_form(117, "2026-07-18", games_back=15, time_of_day="day")
+    assert night_form["games"] == 1 and day_form["games"] == 1
+    print("✓ get_team_recent_form correctly splits games into day vs night using the same "
+         "Eastern-hour boundary sports.slot_of already uses")
+
+
+def test_get_team_recent_form_venue_and_time_of_day_combine(monkeypatch):
+    games = [
+        _fake_form_game(1, "2026-07-10T18:10:00Z", 117, 5, 2),   # home, day
+        {"gamePk": 2, "game_date": "2026-07-11T23:10:00Z", "status": "Final",   # away, night
+         "home_id": 200, "away_id": 117, "home_score": 1, "away_score": 4},
+        _fake_form_game(3, "2026-07-12T23:10:00Z", 117, 3, 1),   # home, night
+    ]
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    form = E.get_team_recent_form(117, "2026-07-18", games_back=15, venue="home", time_of_day="night")
+    assert form["games"] == 1   # only game 3 is both home AND night
+    print("✓ get_team_recent_form applies venue and time_of_day together (AND), not one overriding the other")
+
+
 # ----------------------------------------------------------------- get_team_pitching_staff
 def test_get_team_pitching_staff_filters_to_pitchers_and_excludes_given_id(monkeypatch):
     fake_roster = {"roster": [
