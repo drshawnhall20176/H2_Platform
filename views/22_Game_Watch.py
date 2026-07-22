@@ -1,14 +1,18 @@
 """
-Game Watch — tonight's whole slate, four real signals per game, honestly combined.
+Game Watch — tonight's whole slate, six real signals per game plus injury context, honestly
+combined.
 
 WHAT THIS IS, PRECISELY: for each game, compares starter quality (FIP), bullpen freshness,
-bullpen quality (aggregate ERA), and team form (last-15-games record and run differential) side
-by side, then reports how many of those signals favor each team. That's it. NOT a win
-probability. NOT a betting recommendation. NOT a prediction of the final score. A transparent
-count of how many independently-computed factors happen to point the same way -- see
-projections.matchup_signal_tally's own docstring for why a count, not a fabricated weighted
-score: there's no real backtested validation yet that would justify weighting one signal over
-another, so an honest count is the most this data can currently support.
+bullpen quality (aggregate ERA), overall team form (last-15-games record and run differential),
+each team's form specifically in tonight's role (home vs road), and each team's form specifically
+in tonight's day/night slot -- then reports how many of those signals favor each team. Also shows
+each team's real injury/roster-restriction report as CONTEXT, deliberately not tallied (see the
+per-game injury section's own note for why). That's it. NOT a win probability. NOT a betting
+recommendation. NOT a prediction of the final score. A transparent count of how many
+independently-computed factors happen to point the same way -- see projections.matchup_signal_
+tally's own docstring for why a count, not a fabricated weighted score: there's no real
+backtested validation yet that would justify weighting one signal over another, so an honest
+count is the most this data can currently support.
 
 WHY THIS EXISTS: a real, repeated pattern from trader discussion -- moneyline decisions were
 being made by manually comparing starter quality, bullpen state, and recent team form every
@@ -19,16 +23,20 @@ separate, independent days, not a one-off comment). This is a first step at that
 scoped to signals that were already built or nearly free to add, not a full game-simulation
 model -- that's a genuinely bigger, different undertaking, worth its own separate build if this
 proves useful. Bullpen Watch already covers freshness alone, cheaply, for anyone who just wants
-that quick read; this page is the fuller (and more expensive) picture for anyone who wants all
-four.
+that quick read; this page is the fuller (and more expensive) picture for anyone who wants more.
+
+NOT EVERYTHING FROM THAT SAME REAL PROCESS IS HERE YET -- see the disclaimer at the bottom of
+the page for the three pieces deliberately left out (pitcher-side xERA, team-level platoon
+performance, head-to-head starter history) and why each is a real, separate undertaking rather
+than a quick addition, not an oversight.
 
 REAL COST, OPT-IN BY DESIGN: the starter-FIP comparison is FREE (already inside the same
-build_pitching_slate fetch Bullpen Watch also uses). Bullpen freshness costs what Bullpen Watch
-already costs. Bullpen quality and team form are each a genuinely NEW real cost on top (bullpen
-quality: a full roster + per-pitcher-metrics fetch per team; team form: one schedule-range fetch
-per team, cheaper than bullpen quality since no per-game boxscore fetch is needed) -- so, like
-Bullpen Watch, nothing beyond the lightweight starter list loads until you press the button
-below.
+build_pitching_slate fetch Bullpen Watch also uses). Every other signal is a genuinely NEW real
+fetch per team on top -- bullpen freshness and quality each cost what they already cost
+elsewhere on this platform; each team-form variant (overall, road/home, day/night) is its own
+schedule-range fetch; the injury report is one more roster fetch per team. Nothing beyond the
+lightweight starter list loads until you press the button below -- a real, larger number of API
+calls than earlier versions of this page, worth being upfront about.
 """
 
 import streamlit as st
@@ -56,9 +64,10 @@ GAMES_BACK = 15   # matches the real number from trader discussion directly ("la
                   # not a round number picked independently
 
 st.title("📡 Game Watch")
-st.caption("Four real signals per game — starter quality, bullpen freshness, bullpen quality, "
-          "team form — combined into an honest count, not a predicted winner. See the "
-          "disclaimer at the bottom before reading too much into any single game.")
+st.caption("Six real signals per game, plus injury context — starter quality, bullpen freshness, "
+          "bullpen quality, overall team form, tonight's-role form, tonight's-slot form — "
+          "combined into an honest count, not a predicted winner. See the disclaimer at the "
+          "bottom before reading too much into any single game.")
 lc1, lc2 = st.columns(2)
 with lc1:
     st.page_link("views/1_#L01f3af_Pitching_Lab.py",
@@ -135,9 +144,11 @@ if not games:
 st.caption(f"{len(games)} game(s) shown for {date_str}.")
 
 if not st.button(f"🔄 Load matchup signals for {len(games)} game(s)",
-                 help="Real cost: bullpen freshness, bullpen quality, AND team form each "
-                     "require their own real fetch per team, for both teams in every game below "
-                     "(starter FIP is free, already loaded above). Cached for 10 minutes."):
+                 help="Real cost, bigger than earlier versions of this page: bullpen freshness, "
+                     "bullpen quality, three separate team-form variants (overall, road/home, "
+                     "day/night), and an injury report each require their own real fetch per "
+                     "team, for both teams in every game below (starter FIP is free, already "
+                     "loaded above). Cached for 10-15 minutes."):
     st.info("Press the button above to load tonight's matchup signals. Nothing beyond the "
            "starter list above is fetched until you do.")
     st.stop()
@@ -166,7 +177,27 @@ def load_team_form(team_id, date_str_inner):
     return E.get_team_recent_form(team_id, date_str_inner, games_back=GAMES_BACK)
 
 
-progress = st.progress(0.0, text="Checking starter quality, bullpen freshness, bullpen quality, and team form...")
+@st.cache_data(ttl=900, show_spinner=False)
+def load_team_form_filtered(team_id, date_str_inner, venue=None, time_of_day=None):
+    if not team_id:
+        return None
+    return E.get_team_recent_form(team_id, date_str_inner, games_back=GAMES_BACK,
+                                  venue=venue, time_of_day=time_of_day)
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def load_injuries(team_id):
+    if not team_id:
+        return []
+    return E.get_team_injuries(team_id)
+
+
+def _diff(edge_val):
+    """None-safe extraction of avg_run_diff from a get_team_recent_form result (or None)."""
+    return edge_val["avg_run_diff"] if edge_val else None
+
+
+progress = st.progress(0.0, text="Checking starter quality, bullpen state, team form, and injuries...")
 for i, g in enumerate(games):
     away_row, home_row = g["away"], g["home"]
     away_fresh = load_bullpen_freshness(away_row["_team_id"], away_row["_pid"], date_str)
@@ -176,20 +207,51 @@ for i, g in enumerate(games):
     away_form = load_team_form(away_row["_team_id"], date_str)
     home_form = load_team_form(home_row["_team_id"], date_str)
 
+    # Home/road form: each team's own form in the ROLE it's actually playing tonight -- the away
+    # team's road record, the home team's home record. More targeted than the generic L15 form
+    # above, and a genuinely different (complementary, not redundant) real signal.
+    away_road_form = load_team_form_filtered(away_row["_team_id"], date_str, venue="away")
+    home_home_form = load_team_form_filtered(home_row["_team_id"], date_str, venue="home")
+
+    # Day/night form: both teams' form specifically in TONIGHT's own time-of-day bucket. Only
+    # computed when tonight's own start time is actually known -- an unknown start time means
+    # there's no real "tonight's bucket" to compare either team against, an honest None rather
+    # than guessing.
+    tonight_hour_dt = game_dt(g["_game_date"])
+    tonight_tod = None
+    if tonight_hour_dt is not None:
+        tonight_tod = "day" if tonight_hour_dt.hour < 17 else "night"
+    away_tod_form = (load_team_form_filtered(away_row["_team_id"], date_str, time_of_day=tonight_tod)
+                     if tonight_tod else None)
+    home_tod_form = (load_team_form_filtered(home_row["_team_id"], date_str, time_of_day=tonight_tod)
+                     if tonight_tod else None)
+
+    away_injuries = load_injuries(away_row["_team_id"])
+    home_injuries = load_injuries(home_row["_team_id"])
+
     starter_edge = P.lower_is_better_edge(away_row.get("FIP"), home_row.get("FIP"), epsilon=FIP_EPSILON)
     freshness_edge = P.bullpen_freshness_edge(away_fresh, home_fresh)
     quality_edge = P.lower_is_better_edge(away_bp_era, home_bp_era, epsilon=BULLPEN_ERA_EPSILON)
-    form_edge = P.higher_is_better_edge(away_form["avg_run_diff"] if away_form else None,
-                                        home_form["avg_run_diff"] if home_form else None,
-                                        epsilon=RUN_DIFF_EPSILON)
+    form_edge = P.higher_is_better_edge(_diff(away_form), _diff(home_form), epsilon=RUN_DIFF_EPSILON)
+    home_road_edge = P.higher_is_better_edge(_diff(away_road_form), _diff(home_home_form),
+                                             epsilon=RUN_DIFF_EPSILON)
+    tod_edge = P.higher_is_better_edge(_diff(away_tod_form), _diff(home_tod_form),
+                                       epsilon=RUN_DIFF_EPSILON)
 
-    g["_tally"] = P.matchup_signal_tally([starter_edge, freshness_edge, quality_edge, form_edge])
+    g["_tally"] = P.matchup_signal_tally([starter_edge, freshness_edge, quality_edge, form_edge,
+                                          home_road_edge, tod_edge])
     g["_signals"] = {
         "Starter FIP": (away_row.get("FIP"), home_row.get("FIP"), starter_edge),
         "Bullpen freshness": (away_fresh, home_fresh, freshness_edge),
         "Bullpen ERA": (away_bp_era, home_bp_era, quality_edge),
         "Team form (L15)": (away_form, home_form, form_edge),
+        "Form in tonight's role (road/home)": (away_road_form, home_home_form, home_road_edge),
+        "Form in tonight's day/night slot": (away_tod_form, home_tod_form, tod_edge),
     }
+    g["_tonight_tod"] = tonight_tod   # kept separately for display context, not baked into the
+                                      # signal's own key name (a per-game-varying dict key would
+                                      # break the fixed _SIGNAL_KIND formatting lookup below)
+    g["_injuries"] = {"away": away_injuries, "home": home_injuries}
     progress.progress((i + 1) / len(games), text=f"Checked {g['label']} ({i + 1}/{len(games)})")
 progress.empty()
 
@@ -209,7 +271,8 @@ VERDICT_TEXT = {
     "even": "Signals split or too close to call — no real edge either way.",
 }
 
-_SIGNAL_KIND = {"Bullpen freshness": "pct", "Team form (L15)": "form"}
+_SIGNAL_KIND = {"Bullpen freshness": "pct", "Team form (L15)": "form",
+                "Form in tonight's role (road/home)": "form", "Form in tonight's day/night slot": "form"}
 
 for g in games:
     dt = game_dt(g["_game_date"])
@@ -218,6 +281,12 @@ for g in games:
     tally = g["_tally"]
     with st.container(border=True):
         st.markdown(f"### {g['label']} — {time_str}")
+        if g["_tonight_tod"] is None:
+            st.caption("Tonight's own start time is unknown, so the day/night form signal above "
+                      "has no real bucket to compare — shown as \"no data,\" not guessed.")
+        else:
+            st.caption(f"Tonight is a {g['_tonight_tod']} game — the day/night form row above "
+                      f"compares both teams' own {g['_tonight_tod']}-game form specifically.")
 
         rows = []
         for signal_name, (away_val, home_val, edge) in g["_signals"].items():
@@ -245,15 +314,46 @@ for g in games:
             st.markdown(f"**{tally[tally['verdict']]} of {tally['available']} available signals "
                        f"favor {winner}.**")
 
+        # Injury report — CONTEXT, deliberately NOT one of the tallied signals above. A raw
+        # injured-player COUNT would be a fabricated precision this page has avoided everywhere
+        # else: a team with 5 injured bench players and one with 1 injured star aren't
+        # comparable by count alone, and turning "who's hurt" into a fake number would be
+        # exactly the kind of overclaiming this page's own disclaimer argues against. Shown as a
+        # real, raw list for your own judgment instead.
+        inj = g["_injuries"]
+        if inj["away"] or inj["home"]:
+            with st.expander("🩺 Injury/roster-restriction report (context, not a tallied signal)"):
+                ic1, ic2 = st.columns(2)
+                for col, team_name, players in ((ic1, away_row["Team"], inj["away"]),
+                                                (ic2, home_row["Team"], inj["home"])):
+                    with col:
+                        st.markdown(f"**{team_name}**")
+                        if not players:
+                            st.caption("No reported restrictions.")
+                        for p in players:
+                            st.caption(f"{p['player']} ({p['position']}) — {p['status']}")
+
 st.divider()
-st.caption("⚠️ **Read this before reading too much into any game above.** This is four "
+st.caption("⚠️ **Read this before reading too much into any game above.** This is six "
           "individually honest comparisons counted up, not a probability and not a validated "
-          "model — there's no historical backtest yet showing these four signals actually "
-          "predict outcomes, or how much weight each deserves relative to the others. A 3-of-4 "
-          "read is a starting point for your own judgment, not a call to act on by itself. "
-          "\"Even\" and \"not enough data\" are both real, honest outcomes — most games likely "
-          "won't show a clean sweep, and that itself is useful information, not a failure of "
-          "the page. Uses the same \"real gap\" thresholds stated at the top of this page "
-          f"(±{FIP_EPSILON:.2f} FIP, ±{BULLPEN_ERA_EPSILON:.2f} bullpen ERA, "
-          f"±{RUN_DIFF_EPSILON:.2f} avg run diff) so a razor-thin numeric difference isn't "
-          "shown as a real edge.")
+          "model — there's no historical backtest yet showing these six signals actually "
+          "predict outcomes, or how much weight each deserves relative to the others. A read "
+          "like 4-of-6 is a starting point for your own judgment, not a call to act on by "
+          "itself. \"Even\" and \"not enough data\" are both real, honest outcomes — most games "
+          "likely won't show a clean sweep, and that itself is useful information, not a "
+          "failure of the page. Uses the same \"real gap\" thresholds stated at the top of this "
+          f"page (±{FIP_EPSILON:.2f} FIP, ±{BULLPEN_ERA_EPSILON:.2f} bullpen ERA, "
+          f"±{RUN_DIFF_EPSILON:.2f} avg run diff — applied to every run-differential-based "
+          "signal: overall form, road/home form, and day/night form alike) so a razor-thin "
+          "numeric difference isn't shown as a real edge. The injury report is context only, "
+          "never tallied — see its own note above for why.\n\n"
+          "**Not covered here, and each a real, separate undertaking rather than a quick "
+          "addition:** pitcher-side expected ERA (xERA) — this platform has expected-stats data "
+          "for BATTERS (xwOBA) but nothing equivalent for pitchers yet, which would need a new "
+          "external data source, not just a new aggregation of what's already here. Team-level "
+          "platoon performance (vs LHP/RHP) — individual hitter splits already exist and feed "
+          "the player-prop models, but a fair TEAM-level rollup needs real playing-time "
+          "weighting decisions, not a naive average. Head-to-head starter-vs-opponent history — "
+          "deliberately left out of the tally: most specific pitcher/team pairs have only a "
+          "handful of career meetings, and turning that into a directional signal would be "
+          "exactly the small-sample overclaiming this page exists to avoid.")
