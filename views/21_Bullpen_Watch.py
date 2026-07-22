@@ -61,15 +61,57 @@ if not pitching_rows:
 # shared, tested logic (mlb_engine.pair_pitching_slate_by_game), also reused by Game Watch,
 # rather than each page keeping its own inline copy.
 games = E.pair_pitching_slate_by_game(pitching_rows)
-games.sort(key=lambda g: (SLOT_ORDER.get(slot_of(game_dt(g["_game_date"])), 9), g["label"]))
+# Strictly chronological by actual start time -- game_dt returns a TZ-AWARE (Eastern) datetime
+# or None, so the sort key separates "has a real date" from "doesn't" as its own leading tuple
+# element rather than falling back to a naive datetime.max, which would crash comparing against
+# a tz-aware one. Python's tuple comparison short-circuits on the first differing element, so a
+# missing-date game's dummy datetime.min entry is never actually compared against a real one.
+games.sort(key=lambda g: (game_dt(g["_game_date"]) is None, game_dt(g["_game_date"]) or datetime.min,
+                          g["label"]))
 
 if not games:
     st.info("Couldn't pair up both sides for any game on this date — try a different date.")
     st.stop()
 
-st.caption(f"{len(games)} game(s) on the board for {date_str}.")
+# Time slot + Game filters — the same shared helpers (game_dt/slot_of/SLOT_ORDER) Matchup Lab,
+# Best Bets, and Graded Picks already use, narrowing a busy night's full slate down to one part
+# of it. "Game" defaults to "All games in this slot" (nothing hidden unless actively narrowed).
+for g in games:
+    g["_slot"] = slot_of(game_dt(g["_game_date"]))
+slots_present = sorted({g["_slot"] for g in games}, key=lambda s: SLOT_ORDER.get(s, 9))
 
-if not st.button(f"🔄 Load bullpen freshness for all {len(games)} game(s)",
+c_slot, c_game = st.columns(2)
+with c_slot:
+    slot_pick = st.selectbox("Time slot", ["All slate"] + slots_present)
+slot_games = games if slot_pick == "All slate" else [g for g in games if g["_slot"] == slot_pick]
+
+if not slot_games:
+    st.info(f"No games in the {slot_pick} slot — try a different time slot or \"All slate\".")
+    st.stop()
+
+game_date_by_label = {g["label"]: g["_game_date"] for g in slot_games}
+games_present = sorted(game_date_by_label, key=lambda lbl: game_date_by_label[lbl] or "~")
+
+
+def _game_label_fmt(lbl: str) -> str:
+    dt = game_dt(game_date_by_label.get(lbl))   # already Eastern-localized by game_dt itself
+    return lbl if dt is None else f"{dt.strftime('%-I:%M %p ET')} — {lbl}"
+
+
+with c_game:
+    game_pick = st.selectbox("Game", ["All games in this slot"] + games_present,
+                             format_func=lambda lbl: _game_label_fmt(lbl)
+                             if lbl != "All games in this slot" else lbl)
+games = (slot_games if game_pick == "All games in this slot"
+        else [g for g in slot_games if g["label"] == game_pick])
+
+if not games:
+    st.info("No games match the current filters — try a different time slot or game.")
+    st.stop()
+
+st.caption(f"{len(games)} game(s) shown for {date_str}.")
+
+if not st.button(f"🔄 Load bullpen freshness for {len(games)} game(s)",
                  help="Real cost: a schedule window plus one boxscore per team's recent game, "
                      "for both teams in every game below. Cached for 10 minutes once loaded."):
     st.info("Press the button above to load tonight's bullpen reads. Nothing is fetched until "
