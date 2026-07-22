@@ -230,3 +230,67 @@ else:
               "watching, not automatically acting on — even a real, systematic-looking gap over "
               "a modest sample can still be variance. This is a data point for the same "
               "judgment call a \"ban list\" already makes informally, not a replacement for it.")
+
+# =========================================================================== element 4: slate-wide chalk test
+if _active.key == "MLB":
+    st.divider()
+    st.subheader("📅🎯 Slate-wide chalk test")
+    st.caption("Tests one specific, real, ONE-TIME claim from trader discussion, not a proven "
+              "pattern: \"a slate with a lot of higher-tier starters tends to run chalky.\" "
+              "Operationalized here as: does a day's average probable-starter FIP correlate "
+              "with that same day's overall settled prop hit rate? If the hypothesis holds, "
+              "expect a NEGATIVE correlation — better (lower) FIP pitching across the slate "
+              "paired with a higher, \"chalkier\" hit rate. Real cost per day tested (a full "
+              "board rebuild + grading, same as Trend mode above, plus one lightweight starter "
+              "fetch) — nothing runs until you press the button below.")
+
+    chalk_days = st.number_input("Days to test", min_value=10, max_value=30, value=14, step=1,
+                                 key="chalk_n_days",
+                                 help="Capped at 30 for the same real-cost reasons as Trend mode "
+                                     "above; floored at 10 since a correlation from fewer days "
+                                     "isn't reported as a real number (see below).")
+
+    if st.button(f"🔄 Run the {int(chalk_days)}-day chalk test"):
+        chalk_dates = R.trading_dates_ending_yesterday(int(chalk_days))
+        daily_points = []
+        progress = st.progress(0.0, text=f"Testing {len(chalk_dates)} night(s)...")
+        for i, d in enumerate(chalk_dates):
+            pitching_rows = E.build_pitching_slate(d)
+            fips = [r["FIP"] for r in pitching_rows if r.get("FIP")]
+            graded_day = _load_graded_for(d)
+            settled_day = [g for g in graded_day if g.get("Hit") is not None]
+            if fips and settled_day:
+                daily_points.append({
+                    "date": d,
+                    "avg_starter_fip": sum(fips) / len(fips),
+                    "hit_rate": sum(1 for g in settled_day if g["Hit"]) / len(settled_day),
+                })
+            progress.progress((i + 1) / len(chalk_dates), text=f"Tested {d} ({i + 1}/{len(chalk_dates)})")
+        progress.empty()
+
+        result = R.slate_chalk_correlation(daily_points, min_days=10)
+        if result["correlation"] is None:
+            st.info(result["note"] or "Not enough usable data to compute a real correlation.")
+        else:
+            r = result["correlation"]
+            rc1, rc2 = st.columns(2)
+            rc1.metric("Correlation (r)", f"{r:+.3f}")
+            rc2.metric("Nights tested", result["n_days"])
+            if r < -0.3:
+                st.markdown("A real negative relationship — **consistent with** the hypothesis "
+                           "(tougher slate-wide pitching paired with a chalkier day). "
+                           "Consistent with, not proof of.")
+            elif r > 0.3:
+                st.markdown("A real positive relationship — this **contradicts** the hypothesis "
+                           "as originally stated.")
+            else:
+                st.markdown("Close to zero — **no clear linear relationship** either way in "
+                           "this window.")
+            chart_df = (pd.DataFrame(daily_points)[["avg_starter_fip", "hit_rate"]]
+                       .rename(columns={"avg_starter_fip": "Avg starter FIP",
+                                        "hit_rate": "Day's hit rate"}))
+            st.scatter_chart(chart_df, x="Avg starter FIP", y="Day's hit rate")
+        st.caption("⚠️ Correlation, not causation, from a modest number of days on a genuinely "
+                  "noisy real-world process — read this as suggestive at best, never proof, "
+                  "regardless of which way it comes out. Same current-season-rates caveat as "
+                  "Trend mode above.")
