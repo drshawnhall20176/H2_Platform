@@ -101,6 +101,92 @@ def test_player_calibration_empty_input_returns_empty_list():
     assert R.player_calibration([]) == []
 
 
+# ----------------------------------------------------------------- _pearson_r
+def test_pearson_r_perfect_positive_correlation():
+    xs = [1, 2, 3, 4, 5]
+    ys = [2, 4, 6, 8, 10]   # exactly ys = 2*xs
+    assert abs(R._pearson_r(xs, ys) - 1.0) < 1e-9
+    print("✓ _pearson_r correctly finds r=1.0 for a perfectly linear positive relationship")
+
+
+def test_pearson_r_perfect_negative_correlation():
+    xs = [1, 2, 3, 4, 5]
+    ys = [10, 8, 6, 4, 2]   # exactly ys = 12 - 2*xs
+    assert abs(R._pearson_r(xs, ys) - (-1.0)) < 1e-9
+    print("✓ _pearson_r correctly finds r=-1.0 for a perfectly linear negative relationship")
+
+
+def test_pearson_r_no_correlation():
+    xs = [1, 2, 3, 4]
+    ys = [5, 5, 5, 5]   # ys is constant -> undefined, not 0.0
+    assert R._pearson_r(xs, ys) is None
+    print("✓ _pearson_r reports undefined (None), not a fabricated 0.0, when one series has zero variance")
+
+
+def test_pearson_r_hand_verified_partial_correlation():
+    # Hand-verified: mean_x=3, mean_y=3.6, cov=sum((x-3)(y-3.6))=7.0, var_x=10, var_y=5.2,
+    # r = 7.0 / sqrt(10*5.2) = 7.0/sqrt(52) = 0.97072...
+    xs = [1, 2, 3, 4, 5]
+    ys = [2, 3, 4, 4, 5]
+    r = R._pearson_r(xs, ys)
+    assert abs(r - 0.9707) < 0.001
+
+
+def test_pearson_r_too_few_points():
+    assert R._pearson_r([1], [1]) is None
+    assert R._pearson_r([], []) is None
+
+
+# ----------------------------------------------------------------- slate_chalk_correlation
+def _chalk_point(date, fip, hit_rate):
+    return {"date": date, "avg_starter_fip": fip, "hit_rate": hit_rate}
+
+
+def test_slate_chalk_correlation_below_min_days_returns_no_number():
+    points = [_chalk_point(f"2026-07-{d:02d}", 3.5, 0.5) for d in range(1, 5)]   # only 4 days
+    result = R.slate_chalk_correlation(points, min_days=10)
+    assert result["correlation"] is None
+    assert result["n_days"] == 4
+    assert "at least 10" in result["note"]
+    print("✓ slate_chalk_correlation refuses to report a precise-looking r from too few days")
+
+
+def test_slate_chalk_correlation_hand_verified_negative_relationship():
+    # Lower avg_starter_fip (tougher pitching) paired with HIGHER hit_rate at every point --
+    # exactly the direction the real hypothesis predicts, and real enough to detect.
+    points = [
+        _chalk_point("2026-07-01", 3.00, 0.68),
+        _chalk_point("2026-07-02", 3.20, 0.64),
+        _chalk_point("2026-07-03", 3.40, 0.60),
+        _chalk_point("2026-07-04", 3.60, 0.58),
+        _chalk_point("2026-07-05", 3.80, 0.55),
+        _chalk_point("2026-07-06", 4.00, 0.52),
+        _chalk_point("2026-07-07", 4.20, 0.50),
+        _chalk_point("2026-07-08", 4.40, 0.47),
+        _chalk_point("2026-07-09", 4.60, 0.44),
+        _chalk_point("2026-07-10", 4.80, 0.40),
+    ]
+    result = R.slate_chalk_correlation(points, min_days=10)
+    assert result["n_days"] == 10
+    assert result["correlation"] < -0.9   # a strong, real negative relationship
+    print("✓ slate_chalk_correlation correctly detects a strong negative relationship when the underlying data has one")
+
+
+def test_slate_chalk_correlation_no_real_relationship():
+    # hit_rate constant regardless of avg_starter_fip -> no real relationship, honestly None.
+    points = [_chalk_point(f"2026-07-{d:02d}", 3.0 + d * 0.1, 0.55) for d in range(1, 11)]
+    result = R.slate_chalk_correlation(points, min_days=10)
+    assert result["correlation"] is None
+    assert "undefined" in result["note"]
+
+
+def test_slate_chalk_correlation_exactly_at_min_days_boundary():
+    points = [_chalk_point(f"2026-07-{d:02d}", 3.0 + d * 0.05, 0.60 - d * 0.01) for d in range(1, 11)]
+    result = R.slate_chalk_correlation(points, min_days=10)
+    assert result["n_days"] == 10 and result["correlation"] is not None
+    print("✓ slate_chalk_correlation reports a real number once min_days is exactly met, not just strictly exceeded")
+
+
 def test_homer_report_catches_and_misses():
     plays = [
         dict(Player="Top", PlayerId=1, Market="Batter HR", Side="Over", Line=0.5, ModelProb=0.25, Conviction=2.3),

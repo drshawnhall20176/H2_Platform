@@ -170,8 +170,68 @@ def player_calibration(graded_plays: List[Dict], min_plays: int = 8) -> List[Dic
                     "avg_model_prob": round(avg_prob, 3), "actual_hit_rate": round(hit_rate, 3),
                     "gap": round(avg_prob - hit_rate, 3)})
     return sorted(out, key=lambda r: -r["gap"])
- 
- 
+
+
+def _pearson_r(xs: List[float], ys: List[float]) -> Optional[float]:
+    """Standard, textbook Pearson correlation coefficient -- hand-rolled rather than pulling in
+    scipy/numpy for one formula. Returns None when either variable has zero variance (a constant
+    series -- correlation is mathematically undefined, not 0.0) or fewer than 2 points are given."""
+    n = len(xs)
+    if n < 2:
+        return None
+    mean_x, mean_y = sum(xs) / n, sum(ys) / n
+    cov = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+    var_x = sum((x - mean_x) ** 2 for x in xs)
+    var_y = sum((y - mean_y) ** 2 for y in ys)
+    if var_x == 0 or var_y == 0:
+        return None
+    return cov / ((var_x ** 0.5) * (var_y ** 0.5))
+
+
+def slate_chalk_correlation(daily_points: List[Dict], min_days: int = 10) -> Dict:
+    """Tests one specific, testable version of a real, one-time anecdotal claim from trader
+    discussion: "a slate with a lot of higher-tier starters tends to run chalky" (favorites/
+    high-probability plays hitting more as expected). Operationalized here as: does a day's
+    AVERAGE probable-starter FIP (lower FIP = tougher, higher-tier pitching across the slate)
+    correlate with that SAME day's overall observed prop hit rate (grade_slate's own summary
+    ["hit_rate"] -- the most direct, already-computed proxy for "how chalky that day ran")?
+
+    Takes daily_points: one entry per historical date -- {"date", "avg_starter_fip", "hit_rate"}
+    -- and computes the real Pearson correlation between avg_starter_fip and hit_rate. Building
+    that list itself requires real historical data (build_pitching_slate + a rebuilt, graded
+    board, for each date) -- deliberately NOT this function's job. This function only does the
+    correlation math on an already-assembled list, kept pure and testable, matching this
+    codebase's established split between tested logic and network-dependent orchestration
+    everywhere else (see player_calibration's own docstring for the same reasoning applied to a
+    different hypothesis).
+
+    THE EXPECTED SIGN IF THE HYPOTHESIS HOLDS IS NEGATIVE: lower avg_starter_fip (better, higher-
+    tier pitching) should correlate with a HIGHER hit rate (a "chalkier" day) -- so a real
+    negative r is CONSISTENT WITH (not proof of) the hypothesis, a positive r contradicts it, and
+    an r near zero means no real linear relationship either way. This function reports the
+    number; it does not interpret it as confirming or denying anything -- correlation from a
+    modest number of days, on a real-world process this noisy, is suggestive at best, never
+    proof, regardless of which way it comes out.
+
+    min_days: a real, stated floor against reading anything into a correlation computed from too
+    few days -- correlation coefficients from small samples are notoriously unstable, and this
+    was flagged from the very start as "one hunch from one person, one time," exactly the kind
+    of claim a tiny sample could spuriously "confirm." Below min_days, returns {"n_days": ...,
+    "correlation": None, "note": "..."} rather than a precise-looking r from too few points.
+
+    Returns {"n_days": int, "correlation": float or None, "note": str or None}."""
+    n = len(daily_points)
+    if n < min_days:
+        return {"n_days": n, "correlation": None,
+               "note": f"Only {n} day(s) of data — need at least {min_days} before a "
+                      "correlation here means anything."}
+    xs = [d["avg_starter_fip"] for d in daily_points]
+    ys = [d["hit_rate"] for d in daily_points]
+    r = _pearson_r(xs, ys)
+    note = None if r is not None else "No real variation in one of the two series — correlation is undefined, not zero."
+    return {"n_days": n, "correlation": round(r, 3) if r is not None else None, "note": note}
+
+
 def market_report(plays: List[Dict], results: Dict[int, Dict], market: str, top_n: int = 15,
                   default_line: Optional[float] = None) -> Dict:
     """Of players whose actual result CLEARED the model's line for `market`, where did the model
