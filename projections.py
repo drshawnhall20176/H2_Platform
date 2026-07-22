@@ -252,6 +252,42 @@ def bullpen_fatigued_fraction(fatigue_rows: List[Dict],
     return fatigued / len(relevant)
 
 
+def bullpen_freshness_tag(fraction: Optional[float]) -> str:
+    """Classify a single team's own bullpen_fatigued_fraction into "fresh", "taxed", or
+    "unknown" -- the SAME BULLPEN_FATIGUE_THRESHOLD bullpen_fatigue_multipliers already uses to
+    decide whether a fatigued bullpen's own K/BB/ER/HR rates get adjusted, not a second,
+    separately-invented cutoff for display purposes. Pulled out as its own small, testable
+    function (rather than an inline comparison in Bullpen Watch's own view code) so the actual
+    fresh-vs-taxed classification is unit tested, not just trusted by eye in the browser -- the
+    same posture every other piece of real logic on this platform already takes.
+
+    "unknown" (not silently treated as either "fresh" or "taxed") when fraction is None -- no
+    real recent-appearance data to classify, honestly reported as such."""
+    if fraction is None:
+        return "unknown"
+    return "taxed" if fraction >= BULLPEN_FATIGUE_THRESHOLD else "fresh"
+
+
+def bullpen_freshness_edge(away_fraction: Optional[float], home_fraction: Optional[float]) -> Optional[str]:
+    """Which side (if either) has the clearer bullpen-freshness edge, comparing both teams' own
+    bullpen_fatigued_fraction via bullpen_freshness_tag's own classification -- the real decision
+    logic behind Bullpen Watch's per-game "who's fresher tonight" line.
+
+    Returns "away" (away team's bullpen fresher), "home" (home team's bullpen fresher), "even"
+    (both fresh, both taxed, or genuinely tied), or None when EITHER side's data is unknown --
+    a missing read on one side is never resolved into a false "even," since "even" is a real,
+    positive claim (both sides genuinely compared the same) that missing data can't support."""
+    away_tag = bullpen_freshness_tag(away_fraction)
+    home_tag = bullpen_freshness_tag(home_fraction)
+    if away_tag == "unknown" or home_tag == "unknown":
+        return None
+    if away_tag == "taxed" and home_tag == "fresh":
+        return "home"
+    if home_tag == "taxed" and away_tag == "fresh":
+        return "away"
+    return "even"
+
+
 def bullpen_fatigue_multipliers(fatigued_fraction: Optional[float]) -> Dict[str, float]:
     """Given the real fraction of a team's bullpen currently showing fatigue signs (from
     bullpen_fatigued_fraction), the real multipliers to apply to that bullpen's own K/BB/ER/HR-

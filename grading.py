@@ -157,6 +157,34 @@ def conviction_to_grade(conviction: Optional[float], ceiling: Optional[float] = 
     return None
 
 
+def filter_min_probability(plays: List[Dict], min_prob: float) -> List[Dict]:
+    """Keep only plays whose own real ModelProb clears min_prob (0.0-1.0) -- a raw, absolute
+    probability floor, added directly on request after a real, reported gap: a real, sharp
+    trader's own manual process wanted "show me only plays at least 70% likely to hit," and
+    the platform's existing floors (grade letters like C/B/A, or Best Bets' own Conviction
+    slider) don't answer that directly -- both are RELATIVE to a market's own typical reference
+    rate, not an absolute probability cutoff. Two plays can carry the same letter grade, or the
+    same Conviction ratio, at very different raw ModelProb levels (a market with a low reference
+    rate needs less raw probability to clear the same relative bar than one with a high
+    reference rate) -- this filters on the one number that means the same thing regardless of
+    which market a play is in.
+
+    Shared, sport-agnostic, and deliberately simple: every play on this platform already carries
+    a real "ModelProb" field (attached at the exact same place Conviction and Fair are, in every
+    sport's own build_best_bets), so this is one small, testable filter reused across Best Bets,
+    Graded Picks, Suggested Parlays, and Speculative Basket rather than four near-duplicate
+    inline filters drifting apart over time.
+
+    min_prob <= 0 returns every play completely unfiltered (the default, "no floor" state) --
+    deliberately not even touching plays with a missing/None ModelProb in that case, so a caller
+    that never sets a floor sees byte-identical behavior to before this function existed. Once a
+    real floor is set (min_prob > 0), a play with no ModelProb at all is excluded, not treated as
+    passing an unknown threshold."""
+    if min_prob <= 0:
+        return list(plays)
+    return [p for p in plays if p.get("ModelProb") is not None and p["ModelProb"] >= min_prob]
+
+
 def rank_flat_plays(plays: List[Dict], key: str = "rank_value") -> List[Dict]:
     """Attach an explicit, 1-indexed "_rank" to a flat list of plays, sorted by the given key --
     shared, testable logic behind the ranking shown on Graded Picks (once a specific game is
