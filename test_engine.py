@@ -666,6 +666,77 @@ def test_get_pitcher_starts_empty_on_fetch_failure(monkeypatch):
     assert E.get_pitcher_starts_this_season(111, 2026) == []
 
 
+# ----------------------------------------------------------------- get_actual_starter
+def _fake_live_boxscore(home_players=None, away_players=None):
+    """home_players/away_players: {pid: (name, gamesStarted)}. Builds a minimal real-shaped
+    live boxscore -- distinct from _fake_boxscore above, which only models innings pitched
+    (get_team_bullpen_fatigue's own concern), not gamesStarted (this function's own concern)."""
+    def _side(players):
+        out = {}
+        for pid, (name, gs) in (players or {}).items():
+            out[f"ID{pid}"] = {"person": {"id": pid, "fullName": name},
+                               "stats": {"pitching": {"gamesStarted": gs}}}
+        return {"players": out}
+    return {"teams": {"home": _side(home_players), "away": _side(away_players)}}
+
+
+def test_get_actual_starter_finds_the_real_starter(monkeypatch):
+    box = _fake_live_boxscore(home_players={555: ("Real Starter", 1), 556: ("Reliever", 0)})
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+    starter = E.get_actual_starter(12345, "home")
+    assert starter == {"player_id": 555, "name": "Real Starter"}
+    print("✓ get_actual_starter correctly identifies the pitcher with gamesStarted >= 1, not a reliever with 0")
+
+
+def test_get_actual_starter_none_on_empty_boxscore(monkeypatch):
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: {})
+    assert E.get_actual_starter(12345, "home") is None
+    print("✓ get_actual_starter returns None (not a crash or a guess) when the boxscore has no pitching data yet -- "
+         "the same honest state as a game that hasn't started")
+
+
+def test_get_actual_starter_none_on_fetch_failure(monkeypatch):
+    def _boom(url, params=None, retries=2):
+        raise Exception("network down")
+    monkeypatch.setattr(E, "fetch_json", _boom)
+    assert E.get_actual_starter(12345, "home") is None
+
+
+def test_get_actual_starter_does_not_guess_from_outs_alone(monkeypatch):
+    # A pitcher with real innings but gamesStarted explicitly 0/absent must NOT be picked --
+    # the deliberate difference from get_pitcher_starts_this_season's own season-level fallback.
+    box = _fake_live_boxscore(home_players={555: ("Long Reliever", 0)})
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+    assert E.get_actual_starter(12345, "home") is None
+    print("✓ get_actual_starter never falls back to an outs-based guess for one partial, in-progress game")
+
+
+def test_get_actual_starter_reads_the_correct_side(monkeypatch):
+    box = _fake_live_boxscore(home_players={555: ("Home SP", 1)}, away_players={556: ("Away SP", 1)})
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+    assert E.get_actual_starter(12345, "home")["player_id"] == 555
+    assert E.get_actual_starter(12345, "away")["player_id"] == 556
+    print("✓ get_actual_starter reads the requested side only, never mixing up home and away")
+
+
+# ----------------------------------------------------------------- starter_mismatch
+def test_starter_mismatch_true_when_different_people():
+    assert E.starter_mismatch(111, {"player_id": 222, "name": "Someone Else"}) is True
+
+
+def test_starter_mismatch_false_when_same_person():
+    assert E.starter_mismatch(111, {"player_id": 111, "name": "As Expected"}) is False
+
+
+def test_starter_mismatch_none_when_no_probable_id():
+    assert E.starter_mismatch(None, {"player_id": 222, "name": "X"}) is None
+
+
+def test_starter_mismatch_none_when_actual_starter_unknown():
+    assert E.starter_mismatch(111, None) is None
+    print("✓ starter_mismatch reports None (not a false True/False) whenever either side is unknown")
+
+
 # ----------------------------------------------------------------- get_pitcher_batting_order_splits
 def _fake_bo_box(pitcher_id, pitcher_side, opp_batters):
     """opp_batters: list of (pid, name, battingOrder_code, batting_stat_dict)."""

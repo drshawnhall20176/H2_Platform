@@ -310,8 +310,70 @@ def _team_starters(game: Dict, team_key: str, box: Dict) -> Tuple[List[int], boo
     pids = [r["person"]["id"] for r in roster
             if r.get("position", {}).get("abbreviation") != "P" and r.get("person", {}).get("id")]
     return pids, True
- 
- 
+
+
+def get_actual_starter(game_pk: int, side: str) -> Optional[Dict[str, Any]]:
+    """Fetches this ONE game's own live boxscore and finds which pitcher's own stat line shows
+    he ACTUALLY started -- gamesStarted >= 1, the SAME real, precedented signal get_pitcher_
+    starts_this_season already uses to detect a start from a per-game stat line (there, from a
+    season gameLog; here, from tonight's own live boxscore.pitching stats instead) -- not a new,
+    separately-invented detection method.
+
+    Added directly on request, after a real, reported pattern: a probable starter posted earlier
+    in the day doesn't always match who actually takes the mound (a late scratch, or a bullpen
+    game with no true starter at all) -- traders noticed mid-game, not before, which is the
+    honest scope of what this can catch. See starter_mismatch below for the actual comparison.
+
+    Returns {"player_id", "name"} for whoever's boxscore entry shows gamesStarted >= 1 on `side`
+    ("home"/"away"), or None -- most commonly because the game hasn't started yet (no pitching
+    stats posted at all), occasionally because the boxscore genuinely doesn't carry a
+    gamesStarted field for anyone yet even once it has. An honest None either way, not a guess.
+
+    DELIBERATELY DOES NOT FALL BACK to an outs-based guess the way get_pitcher_starts_this_
+    season's own SEASON-level list does (>=9 outs as a proxy is reasonable averaged over a whole
+    season of starts; applied to ONE partial, in-progress game it would misfire on a starter
+    already pulled early, or a bullpen game's own opener) -- an honest None here is more useful
+    than a wrong guess, especially since a wrong guess is exactly the kind of thing this check
+    exists to catch in the first place.
+
+    HONEST LIMITATION, same posture as this file's other boxscore-dependent functions: the
+    gamesStarted field's presence/behavior on an IN-PROGRESS (not yet final) boxscore specifically
+    is not verified against a live response from this sandbox (statsapi.mlb.com unreachable here)
+    -- lower risk than a novel assumption, since gamesStarted itself is already relied on
+    elsewhere in this file for completed games, but the in-progress case specifically is newer
+    ground worth a real, early check once redeployed."""
+    try:
+        box = fetch_json(f"{BASE}/game/{game_pk}/boxscore")
+    except Exception:
+        return None
+    players = (((box.get("teams", {}) or {}).get(side, {}) or {}).get("players", {}) or {})
+    for pdata in players.values():
+        pit = (pdata.get("stats", {}) or {}).get("pitching", {}) or {}
+        if not pit:
+            continue
+        gs = pit.get("gamesStarted")
+        if gs and int(gs) >= 1:
+            person = pdata.get("person", {}) or {}
+            return {"player_id": person.get("id"), "name": person.get("fullName")}
+    return None
+
+
+def starter_mismatch(probable_pitcher_id: Optional[int],
+                     actual_starter: Optional[Dict[str, Any]]) -> Optional[bool]:
+    """Compares a probable starter's own id against get_actual_starter's own result -- pulled out
+    as its own small, pure, testable function (rather than an inline comparison wherever this
+    gets displayed) so the actual match/mismatch logic is unit tested, not just trusted by eye in
+    the browser, the same posture every other piece of real logic on this platform already takes.
+
+    Returns True (a real mismatch -- the pitcher who actually started is a different real person
+    than who was probable), False (they match), or None when there isn't enough information to
+    say either way (no real probable id, or get_actual_starter itself returned None -- most
+    likely the game hasn't started yet). None is never resolved into a false True or False."""
+    if probable_pitcher_id is None or actual_starter is None or actual_starter.get("player_id") is None:
+        return None
+    return actual_starter["player_id"] != probable_pitcher_id
+
+
 # --------------------------------------------------------------------- orchestration
 def build_slate(date_str: str, fip_constant: float = FIP_CONSTANT_DEFAULT,
                 max_workers: int = 8) -> Tuple[List[Dict], List[Dict]]:
@@ -372,6 +434,11 @@ def build_slate(date_str: str, fip_constant: float = FIP_CONSTANT_DEFAULT,
             "away_id": s["game"].get("away_id"),
             "home_pm": s["home_pm"],
             "away_pm": s["away_pm"],
+            # Additive, backward compatible -- added directly on request for Pitching Lab's own
+            # "starter check" section, which needs to re-fetch ONE specific game's own live
+            # boxscore on demand (get_actual_starter below). Every existing caller already reads
+            # meta via .get()/[key] on the fields it actually uses, so a new key here is safe.
+            "gamePk": s["game"].get("gamePk"),
         })
         for side in s["sides"]:
             opp = side["opp_pm"]
@@ -500,7 +567,8 @@ def _ip_to_outs(ip) -> int:
 def _parse_boxscore_results(box: Dict) -> Dict[int, Dict]:
     """Per-player actuals from one boxscore, keyed by player id.
  
-    Batting: hr, hits, tb, so. Pitching: p_k, p_outs, p_bb. (A player may have both.)"""
+    Batting: hr, hits, tb, so, hrr (Hits+Runs+RBIs combined). Pitching: p_k, p_outs, p_bb.
+    (A player may have both.)"""
     out: Dict[int, Dict] = {}
     for side in ("home", "away"):
         players = (((box.get("teams", {}) or {}).get(side, {}) or {}).get("players", {}) or {})
@@ -518,9 +586,18 @@ def _parse_boxscore_results(box: Dict) -> Dict[int, Dict]:
                 d = int(bat.get("doubles", 0) or 0)
                 t = int(bat.get("triples", 0) or 0)
                 hr = int(bat.get("homeRuns", 0) or 0)
+                # runs/rbi -- same real MLB Stats API field names build_batting_order_projections
+                # already reads from this exact boxscore shape (bat.get("runs")/bat.get("rbi")),
+                # not a new/guessed field.
+                runs = int(bat.get("runs", 0) or 0)
+                rbi = int(bat.get("rbi", 0) or 0)
                 singles = max(h - d - t - hr, 0)
                 rec.update(hr=hr, hits=h, tb=singles + 2 * d + 3 * t + 4 * hr,
-                           so=int(bat.get("strikeOuts", 0) or 0))
+                           so=int(bat.get("strikeOuts", 0) or 0),
+                           # hrr: the actual combined Hits+Runs+RBIs total for the night -- the
+                           # real stat "Batter Hits+Runs+RBIs" plays (graded against the 1.5
+                           # DEFAULT_LINES threshold via MARKET_STAT below) settle against.
+                           hrr=h + runs + rbi)
  
             pit = stats.get("pitching", {}) or {}
             if pit:
