@@ -173,3 +173,60 @@ if by_market:
 else:
     st.caption("No C-or-better graded picks settled for this slate yet — try an earlier date, "
               "or results may not be posted for this slate yet.")
+
+# =========================================================================== element 3: player calibration
+st.divider()
+st.subheader("🧑‍⚖️ Player calibration — model vs. reality, by player")
+st.caption("A real, recurring pattern worth checking with data instead of gut feel: traders "
+          "keeping an informal \"ban list\" of specific players who seem to keep missing on "
+          "plays the model favored. This groups every SETTLED play in the window above by "
+          "player (pooled across every market, the same way a real \"ban list\" itself pools "
+          "across markets) and compares the model's own average probability against what "
+          "actually happened. Uses the SAME graded plays already loaded above — Trend mode's "
+          "wider, multi-night window will surface far more players than Single slate, where "
+          "most players will have too few plays to clear the floor below.")
+
+min_plays = st.number_input("Minimum settled plays to include a player", min_value=2, max_value=50,
+                            value=8, step=1,
+                            help="A real, stated floor against the exact small-sample problem "
+                                "the \"ban list\" pattern itself is prone to — a player with "
+                                "only 2-3 memorable misses isn't a real signal yet.")
+calibration = R.player_calibration(graded, min_plays=int(min_plays))
+
+if not calibration:
+    st.info(f"No player has {int(min_plays)}+ settled plays in this window yet — try Trend mode "
+           f"with more nights, or lower the minimum above.")
+else:
+    def _cal_df(rows):
+        return (pd.DataFrame(rows)[["player", "n", "avg_model_prob", "actual_hit_rate", "gap"]]
+                .rename(columns={"player": "Player", "n": "Plays", "avg_model_prob": "Model avg",
+                                 "actual_hit_rate": "Actual hit rate", "gap": "Gap"}))
+
+    cal_tab1, cal_tab2 = st.tabs(["📉 Most overrated by the model", "📈 Most underrated by the model"])
+    with cal_tab1:
+        st.caption("Positive gap = the model expected more than actually happened — the real "
+                  "\"ban list\" direction.")
+        overrated = [r for r in calibration if r["gap"] > 0][:15]
+        if overrated:
+            st.dataframe(_cal_df(overrated).style.format(
+                {"Model avg": "{:.0%}", "Actual hit rate": "{:.0%}", "Gap": "{:+.0%}"}),
+                hide_index=True, use_container_width=True)
+        else:
+            st.caption("No player in this window is running hot on the model's expectations — "
+                      "nobody has a positive gap yet.")
+    with cal_tab2:
+        st.caption("Negative gap = the player quietly outperformed what the model expected of "
+                  "them — the mirror image, an equally real finding.")
+        underrated = [r for r in calibration if r["gap"] < 0][::-1][:15]
+        if underrated:
+            st.dataframe(_cal_df(underrated).style.format(
+                {"Model avg": "{:.0%}", "Actual hit rate": "{:.0%}", "Gap": "{:+.0%}"}),
+                hide_index=True, use_container_width=True)
+        else:
+            st.caption("No player in this window is outperforming the model's expectations yet "
+                      "— nobody has a negative gap.")
+    st.caption("⚠️ Same honest caveat as the rest of this page: Trend mode rebuilds past slates "
+              "with CURRENT-season rates, not point-in-time ones. A real gap here is worth "
+              "watching, not automatically acting on — even a real, systematic-looking gap over "
+              "a modest sample can still be variance. This is a data point for the same "
+              "judgment call a \"ban list\" already makes informally, not a replacement for it.")
