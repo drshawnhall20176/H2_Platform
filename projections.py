@@ -313,6 +313,18 @@ def lower_is_better_edge(away_value: Optional[float], home_value: Optional[float
     return "away" if away_value < home_value else "home"
 
 
+def higher_is_better_edge(away_value: Optional[float], home_value: Optional[float],
+                          epsilon: float = 0.0) -> Optional[str]:
+    """Mirror of lower_is_better_edge for metrics where HIGHER is better (run differential,
+    batting average, win percentage) rather than lower (ERA, FIP). Implemented as a direct call
+    into lower_is_better_edge with both values negated -- "higher is better for X" is exactly
+    equivalent to "lower is better for -X" -- so this reuses the exact same tested comparison and
+    epsilon logic rather than a second, separately-maintained copy that could drift out of sync.
+    None stays None either way (negating None isn't attempted)."""
+    return lower_is_better_edge(-away_value if away_value is not None else None,
+                                -home_value if home_value is not None else None, epsilon=epsilon)
+
+
 def matchup_signal_tally(edges: List[Optional[str]]) -> Dict[str, Any]:
     """Given a list of directional edges (each "home"/"away"/"even"/None, e.g. from
     lower_is_better_edge or bullpen_freshness_edge), tallies how many real signals favor each

@@ -268,6 +268,15 @@ def _normalize_schedule_json(sched: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "away_id": away.get("team", {}).get("id"),
                 "home_pitcher_id": (home.get("probablePitcher") or {}).get("id"),
                 "away_pitcher_id": (away.get("probablePitcher") or {}).get("id"),
+                # Additive, backward compatible -- added directly on request for get_team_
+                # recent_form below, which needs each side's actual final score. MLB Stats API's
+                # schedule response carries "score" directly on each side's own team sub-object
+                # for any game that has started or finished, no separate boxscore fetch needed --
+                # a well-documented, standard field on this endpoint, not a novel assumption, but
+                # (like every other schedule/boxscore-shape assumption in this file) not verified
+                # against a live response from this sandbox. None for a game that hasn't started.
+                "home_score": home.get("score"),
+                "away_score": away.get("score"),
             })
     return games
 
@@ -808,6 +817,64 @@ def get_team_bullpen_fatigue(team_id: int, before_date: str, days_back: int = 5)
         })
     out.sort(key=lambda x: (-x["consecutive_days"], x["days_since_last_appearance"]))
     return out
+
+
+def get_team_recent_form(team_id: int, before_date: str, games_back: int = 15) -> Optional[Dict[str, Any]]:
+    """A team's own real record and run differential over its last `games_back` ACTUAL GAMES
+    (not calendar days -- a team's own most recent games, the same "count games, not calendar
+    days" convention get_team_bullpen_fatigue/get_team_hitter_workload already use) strictly
+    before before_date -- the two things a real, repeated trader pattern checks by hand alongside
+    starter quality and bullpen freshness: "winning the last 15 games and the run differential is
+    big" (games_back defaults to 15 to match that real, stated number directly, not a round
+    number chosen independently).
+
+    METHOD: one get_team_schedule_range call over a generous calendar window (games_back * 2
+    calendar days, since off days mean calendar days != games played -- a 30-day window
+    reliably contains 15+ real games during the regular season), filtered to Final games, then
+    the most recent `games_back` of those. Uses the schedule response's OWN per-team "score"
+    field (see _normalize_schedule_json's own note) rather than a second boxscore fetch per game
+    -- one schedule request per team covers the whole window, the same real-cost shape
+    get_team_bullpen_fatigue already uses for its own schedule call, cheaper than that function's
+    overall cost since no per-game boxscore fetch is needed here at all.
+
+    HONEST LIMITATION, same posture as get_team_bullpen_fatigue: NOT verified against a live
+    response — same statsapi.mlb.com network restriction from this sandbox applies here too.
+
+    Returns None if the team has no Final games with usable scores in the window (a real, honest
+    "no data" state, not a fabricated 0-0 record). Otherwise: {"games": int, "wins": int,
+    "losses": int, "win_pct": float, "run_diff": int, "avg_run_diff": float}. run_diff is this
+    team's OWN total (runs scored minus runs allowed) summed across the window; avg_run_diff is
+    that total divided by games played — the number actually comparable between two teams that
+    didn't play the exact same number of games in their own windows."""
+    try:
+        before_dt = datetime.strptime(before_date, "%Y-%m-%d")
+    except ValueError:
+        return None
+    start = (before_dt - timedelta(days=games_back * 2)).strftime("%Y-%m-%d")
+    end = (before_dt - timedelta(days=1)).strftime("%Y-%m-%d")
+    if end < start:
+        return None
+
+    games = get_team_schedule_range(team_id, start, end)
+    games = [g for g in games if "final" in (g.get("status", "") or "").lower()]
+    games = games[-games_back:]   # most recent games_back only, chronological order preserved
+
+    valid = []
+    for g in games:
+        is_home = g.get("home_id") == team_id
+        own_score = g["home_score"] if is_home else g["away_score"]
+        opp_score = g["away_score"] if is_home else g["home_score"]
+        if own_score is None or opp_score is None:
+            continue
+        valid.append((own_score, opp_score))
+    if not valid:
+        return None
+
+    wins = sum(1 for own, opp in valid if own > opp)
+    run_diff_total = sum(own - opp for own, opp in valid)
+    n = len(valid)
+    return {"games": n, "wins": wins, "losses": n - wins, "win_pct": round(wins / n, 3),
+           "run_diff": run_diff_total, "avg_run_diff": round(run_diff_total / n, 2)}
 
 
 def get_team_pitching_staff(team_id: int, exclude_pid: Optional[int] = None) -> List[Dict[str, Any]]:

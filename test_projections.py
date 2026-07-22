@@ -397,6 +397,42 @@ def test_lower_is_better_edge_none_when_either_side_missing():
     assert P.lower_is_better_edge(None, None) is None
 
 
+# ----------------------------------------------------------------- higher_is_better_edge
+def test_higher_is_better_edge_picks_the_higher_value():
+    assert P.higher_is_better_edge(5.5, 2.1) == "away"   # away's higher run diff wins
+    assert P.higher_is_better_edge(2.1, 5.5) == "home"
+    print("✓ higher_is_better_edge correctly picks whichever side has the higher (better) number")
+
+
+def test_higher_is_better_edge_exact_tie_is_even_by_default():
+    assert P.higher_is_better_edge(1.5, 1.5) == "even"
+
+
+def test_higher_is_better_edge_respects_epsilon():
+    assert P.higher_is_better_edge(1.50, 1.55) == "home"          # epsilon=0.0 default -> real edge
+    assert P.higher_is_better_edge(1.50, 1.55, epsilon=0.20) == "even"
+    print("✓ higher_is_better_edge treats a gap smaller than a caller-supplied epsilon as \"even\"")
+
+
+def test_higher_is_better_edge_none_when_either_side_missing():
+    assert P.higher_is_better_edge(None, 2.0) is None
+    assert P.higher_is_better_edge(2.0, None) is None
+    assert P.higher_is_better_edge(None, None) is None
+
+
+def test_higher_is_better_edge_is_the_true_mirror_of_lower_is_better_edge():
+    # For the same pair of values, the two functions should always disagree (never both "home",
+    # never both "away") -- confirms this isn't a second, independently-drifted implementation.
+    for away, home in [(3.0, 4.0), (4.0, 3.0), (2.5, 2.5), (None, 3.0)]:
+        lo = P.lower_is_better_edge(away, home)
+        hi = P.higher_is_better_edge(away, home)
+        if lo in ("home", "away"):
+            assert hi == ("away" if lo == "home" else "home")
+        else:
+            assert hi == lo   # "even" and None both agree between the two
+    print("✓ higher_is_better_edge is confirmed to be the true mirror of lower_is_better_edge for every real case")
+
+
 # ----------------------------------------------------------------- matchup_signal_tally
 def test_matchup_signal_tally_hand_verified_majority():
     tally = P.matchup_signal_tally(["home", "home", "away"])

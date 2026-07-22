@@ -428,6 +428,67 @@ def test_bullpen_fatigue_sorted_most_fatigued_first(monkeypatch):
     print("✓ get_team_bullpen_fatigue sorts the longest current streak first")
 
 
+# ----------------------------------------------------------------- get_team_recent_form
+def _fake_form_game(gamePk, game_date, home_id, home_score, away_score, status="Final"):
+    return {"gamePk": gamePk, "game_date": game_date, "status": status, "home_id": home_id,
+           "away_id": 999, "home_score": home_score, "away_score": away_score}
+
+
+def test_get_team_recent_form_hand_verified_record_and_run_diff(monkeypatch):
+    # Team 117 as home in every game here for simplicity: won 2, lost 1.
+    # Game 1: 5-2 (own +3), Game 2: 1-4 (own -3), Game 3: 6-1 (own +5) -> run_diff = +5, 2-1 record
+    games = [
+        _fake_form_game(1, "2026-07-10T23:10:00Z", 117, 5, 2),
+        _fake_form_game(2, "2026-07-12T23:10:00Z", 117, 1, 4),
+        _fake_form_game(3, "2026-07-14T23:10:00Z", 117, 6, 1),
+    ]
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    form = E.get_team_recent_form(117, "2026-07-18", games_back=15)
+    assert form == {"games": 3, "wins": 2, "losses": 1, "win_pct": 0.667,
+                    "run_diff": 5, "avg_run_diff": 1.67}
+    print("✓ get_team_recent_form hand-verifies the exact record and run differential from 3 games")
+
+
+def test_get_team_recent_form_away_side_uses_away_score(monkeypatch):
+    # Team 117 as AWAY this time: home_score=2, away_score=7 -> team 117 (away) won by +5.
+    games = [{"gamePk": 1, "game_date": "2026-07-15T23:10:00Z", "status": "Final",
+             "home_id": 200, "away_id": 117, "home_score": 2, "away_score": 7}]
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    form = E.get_team_recent_form(117, "2026-07-18", games_back=15)
+    assert form["wins"] == 1 and form["run_diff"] == 5
+    print("✓ get_team_recent_form correctly reads the away side's own score when the team is away")
+
+
+def test_get_team_recent_form_skips_non_final_games(monkeypatch):
+    games = [
+        _fake_form_game(1, "2026-07-14T23:10:00Z", 117, 5, 2),
+        _fake_form_game(2, "2026-07-16T23:10:00Z", 117, 3, 1, status="Postponed"),
+    ]
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    form = E.get_team_recent_form(117, "2026-07-18", games_back=15)
+    assert form["games"] == 1
+    print("✓ get_team_recent_form excludes a non-Final (postponed) game from the record")
+
+
+def test_get_team_recent_form_only_counts_most_recent_games_back(monkeypatch):
+    games = [_fake_form_game(i, f"2026-07-{i:02d}T23:10:00Z", 117, 10, 0) for i in range(1, 11)]
+    # 10 blowout wins available, but only ask for the last 3.
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    form = E.get_team_recent_form(117, "2026-07-18", games_back=3)
+    assert form["games"] == 3
+    print("✓ get_team_recent_form only counts the most recent games_back games, not every Final game found")
+
+
+def test_get_team_recent_form_none_when_no_final_games(monkeypatch):
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: [])
+    assert E.get_team_recent_form(117, "2026-07-18") is None
+    print("✓ get_team_recent_form returns None (not a fabricated 0-0) when there's no real data")
+
+
+def test_get_team_recent_form_none_on_bad_date():
+    assert E.get_team_recent_form(117, "not-a-date") is None
+
+
 # ----------------------------------------------------------------- get_team_pitching_staff
 def test_get_team_pitching_staff_filters_to_pitchers_and_excludes_given_id(monkeypatch):
     fake_roster = {"roster": [
