@@ -35,7 +35,12 @@ def load_best_bets_mlb(date_str: str, fip_constant: float):
         dt, _ = slot_by_game.get(pl["Game"], (None, None))
         pl["Slot"] = slot_of(dt)
         pl["Time"] = dt.strftime("%I:%M %p").lstrip("0") + " ET" if dt else "TBD"
-    return plays, len(meta)
+    # Returns the full meta list now (not just its count) -- needed for the Game filter below,
+    # which reuses each game's own real game_date for chronological ordering and the "7:05 PM
+    # ET — Team @ Team" dropdown label, the same pattern Graded Picks/Bullpen Watch/Game Watch
+    # already use. n_games (the old return value) was dead code -- never actually read anywhere
+    # in this file, confirmed directly before making this change.
+    return plays, meta
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -48,7 +53,7 @@ def load_best_bets_generic(sport_key: str, date_str: str):
         dt = slot_by_game.get(pl["Game"])
         pl["Slot"] = slot_of(dt)
         pl["Time"] = dt.strftime("%I:%M %p").lstrip("0") + " ET" if dt else "TBD"
-    return plays, len(meta)
+    return plays, meta
 
 
 # --- controls ---------------------------------------------------------------
@@ -58,12 +63,12 @@ if _active.key == "MLB":
     with c2: fip_constant = st.number_input("FIP constant", value=E.FIP_CONSTANT_DEFAULT, step=0.01)
     date_str = target.strftime("%Y-%m-%d")
     with st.spinner("Scanning the slate..."):
-        plays, n_games = load_best_bets_mlb(date_str, fip_constant)
+        plays, meta = load_best_bets_mlb(date_str, fip_constant)
 else:
     target = st.date_input("Slate date", datetime.now(eastern))
     date_str = target.strftime("%Y-%m-%d")
     with st.spinner("Scanning the slate..."):
-        plays, n_games = load_best_bets_generic(_active.key, date_str)
+        plays, meta = load_best_bets_generic(_active.key, date_str)
 
 if not plays:
     st.info("No plays for this date.")
@@ -71,13 +76,40 @@ if not plays:
 
 # --- filters ---------------------------------------------------------------
 slots_present = sorted({p["Slot"] for p in plays}, key=lambda s: SLOT_ORDER.get(s, 9))
-f1, f2, f3, f4 = st.columns([1, 2, 1, 1])
-with f1: slot_pick = st.selectbox("Time slot", ["All slate"] + slots_present)
+f1, f2 = st.columns(2)
+with f1:
+    slot_pick = st.selectbox("Time slot", ["All slate"] + slots_present)
+slot_plays = plays if slot_pick == "All slate" else [p for p in plays if p["Slot"] == slot_pick]
+
+# Game filter, added directly on request — the same shared pattern Graded Picks/Bullpen Watch/
+# Game Watch already use: chronological by each game's own real start time, "Game" defaulting to
+# "All games in this slot" so nothing is hidden unless actively narrowed. Built from meta (now
+# returned in full by both loaders above) rather than re-deriving game times from the plays
+# list's own already-formatted "Time" strings, which aren't safe to sort chronologically as
+# plain text (e.g. "10:15 AM ET" would incorrectly string-sort before "3:07 PM ET").
+game_date_by_label = {m["label"]: m.get("game_date") for m in meta}
+games_in_slot = sorted({p["Game"] for p in slot_plays},
+                       key=lambda g: game_date_by_label.get(g) or "~")
+
+
+def _game_label_fmt(g: str) -> str:
+    dt = game_dt(game_date_by_label.get(g))   # already Eastern-localized by game_dt itself
+    return g if dt is None else f"{dt.strftime('%-I:%M %p ET')} — {g}"
+
+
 with f2:
+    game_pick = st.selectbox("Game", ["All games in this slot"] + games_in_slot,
+                             format_func=lambda g: _game_label_fmt(g)
+                             if g != "All games in this slot" else g)
+slot_plays = (slot_plays if game_pick == "All games in this slot"
+             else [p for p in slot_plays if p["Game"] == game_pick])
+
+f3, f4, f5 = st.columns(3)
+with f3:
     markets = sorted({p["Market"] for p in plays})
     mkt_pick = st.multiselect("Markets", markets, default=markets)
-with f3: min_conv = st.slider("Min conviction", 1.0, 3.0, 1.2, 0.1)
-with f4:
+with f4: min_conv = st.slider("Min conviction", 1.0, 3.0, 1.2, 0.1)
+with f5:
     # A separate, ABSOLUTE floor from Min conviction above -- Conviction is relative to each
     # market's own typical reference rate, so the same Conviction value means different real
     # probability depending on the market. Added directly on request: a real, sharp trader's
@@ -90,9 +122,7 @@ with f4:
                                  "different raw probabilities, since Conviction is relative to "
                                  "each market's own typical reference rate.")
 
-view = [p for p in plays
-        if (slot_pick == "All slate" or p["Slot"] == slot_pick)
-        and p["Market"] in mkt_pick and p["Conviction"] >= min_conv]
+view = [p for p in slot_plays if p["Market"] in mkt_pick and p["Conviction"] >= min_conv]
 view = grading.filter_min_probability(view, min_prob_pct / 100.0)
 # A REAL, CONFIRMED FIX, not the original design -- re-sorted here by ModelProb (real
 # probability of hitting), not left in the plays list's own Conviction-descending order. Same
@@ -135,8 +165,8 @@ st.markdown("---")
 st.subheader("🔍 Inspect Bet Diagnostics")
 
 if not view:
-    st.info("No plays match the current filters — adjust the time slot, markets, min conviction, "
-           "or min probability.")
+    st.info("No plays match the current filters — adjust the time slot, game, markets, min "
+           "conviction, or min probability.")
     st.stop()
 
 # Searchable picker: the box is type-to-search, so just start typing a player's name to jump to
