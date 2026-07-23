@@ -37,6 +37,16 @@ elsewhere on this platform; each team-form variant (overall, road/home, day/nigh
 schedule-range fetch; the injury report is one more roster fetch per team. Nothing beyond the
 lightweight starter list loads until you press the button below -- a real, larger number of API
 calls than earlier versions of this page, worth being upfront about.
+
+EXPERIMENTAL WIN-PROBABILITY ESTIMATE, PER GAME, COLLAPSED BY DEFAULT: a real Pythagorean/Log5
+estimate (Phase 1 of the bigger, separately-scoped "real win-probability model" project) sits in
+its own collapsed expander under each game, deliberately kept visually and conceptually separate
+from the six honest-count signals above it. Those six output a COUNT specifically because
+nothing here is backtested; this outputs an actual PROBABILITY NUMBER, a different and higher-
+stakes kind of claim. Costs zero additional fetches -- reuses the same runs_scored/FIP/bullpen-
+ERA data already loaded for the six signals. See projections.py's own module-level comment above
+game_win_probability for the full honesty note, and the expander's own warning text before
+trusting any number in it.
 """
 
 import streamlit as st
@@ -238,6 +248,17 @@ for i, g in enumerate(games):
     tod_edge = P.higher_is_better_edge(_diff(away_tod_form), _diff(home_tod_form),
                                        epsilon=RUN_DIFF_EPSILON)
 
+    # EXPERIMENTAL, UNBACKTESTED -- see projections.py's own module-level comment above
+    # game_win_probability for the full honesty note. Zero new fetches: reuses the exact same
+    # runs_scored (from away_form/home_form), starter FIP, and bullpen ERA already loaded above
+    # for the six honest-count signals -- this is a different LENS on the same real data, not a
+    # new data source.
+    g["_win_prob"] = P.game_win_probability(
+        away_runs_scored=away_form["runs_scored"] if away_form else None,
+        away_starter_fip=away_row.get("FIP"), away_bullpen_era=away_bp_era,
+        home_runs_scored=home_form["runs_scored"] if home_form else None,
+        home_starter_fip=home_row.get("FIP"), home_bullpen_era=home_bp_era)
+
     g["_tally"] = P.matchup_signal_tally([starter_edge, freshness_edge, quality_edge, form_edge,
                                           home_road_edge, tod_edge])
     g["_signals"] = {
@@ -332,6 +353,32 @@ for g in games:
                             st.caption("No reported restrictions.")
                         for p in players:
                             st.caption(f"{p['player']} ({p['position']}) — {p['status']}")
+
+        # EXPERIMENTAL win-probability estimate -- collapsed by default and visually separated
+        # from the six honest-count signals above on purpose. Those six are an honest COUNT;
+        # this is an actual PROBABILITY NUMBER, a fundamentally different and higher-stakes kind
+        # of claim (a number like "62%" reads as validated even when labeled otherwise) -- see
+        # projections.py's own module-level comment above game_win_probability for the full
+        # honesty note. NOT a game simulation, NOT backtested against real results yet.
+        wp = g["_win_prob"]
+        with st.expander("🧪 EXPERIMENTAL — Pythagorean/Log5 win probability (read the warning before trusting this)"):
+            if wp is None:
+                st.caption("Not enough data to compute an estimate for this game.")
+            else:
+                wc1, wc2 = st.columns(2)
+                wc1.metric(f"{away_row['Team']} (away)", f"{wp['away_win_prob']:.0%}")
+                wc2.metric(f"{home_row['Team']} (home)", f"{wp['home_win_prob']:.0%}")
+            st.caption("⚠️ **This is not backtested.** Real, decades-old formulas (Bill James' "
+                      "Pythagorean expectation + Log5), not invented for this platform — but "
+                      "applied here with zero historical validation that they're calibrated "
+                      "for what this platform feeds them. Not a game simulation: no inning-by-"
+                      "inning modeling, no park/weather adjustment, no bullpen hand-off logic. "
+                      "Each team's own runs-allowed side comes from TONIGHT's specific starter "
+                      "FIP + bullpen ERA blended (5.5/9 starter, 3.5/9 bullpen — a real, stated, "
+                      "unvalidated assumption); each team's own runs-scored side comes from "
+                      "recent form, since there's no opponent-adjusted offense model here yet. "
+                      "Treat this as a hypothesis to check once real results are available, not "
+                      "a number to act on.")
 
 st.divider()
 st.caption("⚠️ **Read this before reading too much into any game above.** This is six "
