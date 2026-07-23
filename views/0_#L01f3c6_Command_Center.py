@@ -113,7 +113,7 @@ if st.secrets.get("AUDIENCE", "owner") == "owner":
     _dh_results = DF.check_all_sources()
     _dh_overall = DF.overall_status(_dh_results)
     _DH_ICON = {"green": "🟢", "yellow": "🟡", "red": "🔴"}
-    st.page_link("views/17_Data_Health.py",
+    st.page_link("views/20_Data_Health.py",
                 label=f"{_DH_ICON[_dh_overall]} Data health — see what's behind these numbers →",
                 icon="🩺")
  
@@ -151,7 +151,7 @@ with left:
     # split hardens), so this stays hidden for a public/Discord audience rather than linking to
     # a page they can't open, the same pattern already used just below for Data Health.
     if st.secrets.get("AUDIENCE", "owner") == "owner":
-        st.page_link("views/16_Graded_Picks.py", label="See the full slate, graded game by game →",
+        st.page_link("views/2_Graded_Picks.py", label="See the full slate, graded game by game →",
                     icon="🏅")
     if plays:
         # A REAL, CONFIRMED FIX, not the original design -- this used to sort by raw Conviction

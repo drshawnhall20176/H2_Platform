@@ -1,0 +1,547 @@
+"""
+Matchup Lab — pitch-level arsenal vs. hitter vulnerability.
+
+Season rate stats say whether a hitter is good; this says *how to get him out*. Pick a probable
+starter and an opposing hitter, and the Lab pairs the pitcher's arsenal (what he throws, how much
+he misses bats with each pitch) against the hitter's performance by pitch family — then flags the
+specific pitches to attack with.
+
+Reads the nightly-cached tables from matchup_data (data/pitcher_arsenals.csv,
+data/hitter_pitch_splits.csv). It never pulls pitch-level Statcast live — that job belongs to
+refresh_matchups.py / the nightly Action.
+"""
+
+import pandas as pd
+import streamlit as st
+import styling  # installs theme-proof .theme_gradient (readable in light + dark)
+import plotly.graph_objects as go
+
+import sports
+import mlb_engine as E
+import matchup_data as MD
+import statcast_data as SC
+from datetime import datetime
+
+game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER   # shared with Best Bets
+
+st.title("🔬 Matchup Lab")
+st.caption("Pitch-level arsenal vs. hitter vulnerability — the specific pitches to attack with. "
+           "Season stats tell you *if* a hitter is good; this tells you *how* to get him out.")
+
+
+@st.cache_data(ttl=6 * 3600, show_spinner=False)
+def load_matchup_cache():
+    return MD.load()
+
+
+@st.cache_data(ttl=300, show_spinner="Loading probable starters…")
+def load_pitchers(date_str: str):
+    return E.build_pitching_slate(date_str)
+
+
+@st.cache_data(ttl=300, show_spinner="Loading hitters…")
+def load_hitters(date_str: str):
+    rows, _meta = E.build_slate(date_str)
+    return rows
+
+
+arsenals, hitter_splits = load_matchup_cache()
+
+
+@st.cache_data(ttl=6 * 3600, show_spinner=False)
+def load_hitter_type_cache():
+    return MD.load_hitter_types()
+
+# --- empty-state: cache not built yet -------------------------------------------------------
+if not arsenals or not hitter_splits:
+    st.info("**Pitch-level data isn't cached yet.** The Matchup Lab reads two tables built by a "
+            "nightly job. Run `python refresh_matchups.py` (or wait for the scheduled Action) to "
+            "pull the season's pitch-level Statcast and populate:\n\n"
+            "- `data/pitcher_arsenals.csv`\n- `data/hitter_pitch_splits.csv`\n\n"
+            "This page will light up once those exist.")
+    st.stop()
+
+c1, c2 = st.columns([3, 1])
+with c1:
+    date_str = st.date_input("Slate date", datetime.now()).strftime("%Y-%m-%d")
+with c2:
+    if st.button("🔄 Refresh"):
+        st.cache_data.clear()
+        st.rerun()
+
+pitchers = load_pitchers(date_str)
+if not pitchers:
+    st.warning("No probable starters found for this date yet — check back closer to game time.")
+    st.stop()
+
+# Time slot + Game filters — same shared helpers Best Bets and the WNBA/NBA/NCAAMB/NFL Matchup
+# Lab pages already use, narrowing a busy night's pitcher list before picking one. Two pitchers
+# share a game (home/away starter), so filtering is by the shared "Game" label, not per-pitcher.
+for r in pitchers:
+    r["_slot"] = slot_of(game_dt(r.get("_game_date")))
+slots_present = sorted({r["_slot"] for r in pitchers}, key=lambda s: SLOT_ORDER.get(s, 9))
+
+c_slot, c_game = st.columns(2)
+with c_slot:
+    slot_pick = st.selectbox("Time slot", ["All slate"] + slots_present)
+slot_pitchers = pitchers if slot_pick == "All slate" else [r for r in pitchers if r["_slot"] == slot_pick]
+
+if not slot_pitchers:
+    st.info(f"No probable starters in the {slot_pick} slot — try a different time slot or \"All slate\".")
+    st.stop()
+
+game_date_by_label: dict = {}
+for r in slot_pitchers:
+    game_date_by_label.setdefault(r["Game"], r.get("_game_date"))
+games_present = sorted(game_date_by_label, key=lambda g: game_date_by_label[g] or "~")
+
+
+def _game_label_fmt(g: str) -> str:
+    dt = game_dt(game_date_by_label.get(g))   # already Eastern-localized by game_dt itself
+    if dt is None:
+        return g
+    return f"{dt.strftime('%-I:%M %p ET')} — {g}"
+
+
+with c_game:
+    game_pick = st.selectbox("Game", ["All games in this slot"] + games_present,
+                             format_func=lambda g: _game_label_fmt(g) if g != "All games in this slot" else g)
+final_pitchers = (slot_pitchers if game_pick == "All games in this slot"
+                 else [r for r in slot_pitchers if r["Game"] == game_pick])
+
+if not final_pitchers:
+    st.info("No probable starters match the current filters — try a different time slot or game.")
+    st.stop()
+
+# Pitcher picker (only those we have arsenal data for are useful, but show all with a flag).
+p_by_label = {}
+for r in final_pitchers:
+    pid = r.get("_pid")
+    has = pid in arsenals
+    label = f"{r['Pitcher']} ({r['Team']}){'' if has else '  — no pitch data'}"
+    p_by_label[label] = r
+p_label = st.selectbox("Pitcher (type to search)", sorted(p_by_label.keys()))
+pitcher = p_by_label[p_label]
+pitcher_pid = pitcher.get("_pid")
+
+# --- Bullpen instead of the starter -----------------------------------------
+# The whole point: a lineup can struggle against a real ace and still erupt once his team's
+# bullpen takes over — a genuinely different matchup once the starter leaves. The underlying
+# arsenal/hitter-vulnerability data already covers every pitcher who threw a pitch that season,
+# not just probable starters (confirmed during scoping — matchup_data.py's refresh pulls Savant's
+# whole-league pitch log), so this needed a picker extension, not new modeling.
+st.caption("💡 A lineup that struggles against tonight's starter can look very different once "
+          "his bullpen takes over — check a specific reliever below instead.")
+use_bullpen = st.checkbox(f"🔄 Look at {pitcher['Team']}'s bullpen instead of {pitcher['Pitcher']}")
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def load_pitching_staff(team_id, exclude_pid):
+    if not team_id:
+        return []
+    return E.get_team_pitching_staff(team_id, exclude_pid=exclude_pid)
+
+
+if use_bullpen:
+    staff = load_pitching_staff(pitcher.get("_team_id"), pitcher_pid)
+    if not staff:
+        st.warning(f"No active pitching staff found for {pitcher['Team']} — showing "
+                  f"{pitcher['Pitcher']} instead.")
+    else:
+        staff_by_label = {}
+        for s in staff:
+            has = s["id"] in arsenals
+            staff_by_label[f"{s['name']}{'' if has else '  — no pitch data'}"] = s
+        reliever_label = st.selectbox("Reliever (type to search)", sorted(staff_by_label.keys()))
+        reliever = staff_by_label[reliever_label]
+        with st.spinner(f"Loading {reliever['name']}'s season stats..."):
+            rm = E.get_pitcher_metrics(reliever["id"], E.FIP_CONSTANT_DEFAULT)
+        # Same field shape build_pitching_slate's rows use, so every downstream reference below
+        # (pitcher["Pitcher"]/["Team"]/.get("_team_id") etc.) works unchanged for a reliever too —
+        # this is a swap of WHICH pitcher feeds the rest of the page, not a second code path.
+        pitcher = {
+            "Pitcher": rm.name, "_pid": rm.id, "Team": pitcher["Team"],
+            "Opponent": pitcher["Opponent"], "Game": pitcher["Game"], "Hand": rm.hand,
+            "_game_date": pitcher.get("_game_date"), "_team_id": pitcher.get("_team_id"),
+            "_opp_id": pitcher.get("_opp_id"),
+            "ERA": round(rm.era, 2), "FIP": rm.fip, "Delta": round(rm.era - rm.fip, 2),
+            "K/9": round(rm.k9, 1), "WHIP": round(rm.whip, 2), "HR/9": round(rm.hr9, 2), "OBA": rm.oba,
+        }
+        pitcher_pid = pitcher["_pid"]
+        if not rm.has_stats:
+            st.caption(f"⚪ No season pitching line found for {rm.name} yet — arsenal data below "
+                      "may still be useful, but ERA/FIP won't be.")
+
+# Hitters: default to the pitcher's opponent, fall back to the whole slate.
+hitters = load_hitters(date_str)
+opp = pitcher.get("Opponent")
+opp_hitters = [h for h in hitters if h.get("Team") == opp] or hitters
+h_by_label = {}
+for h in opp_hitters:
+    hid = h.get("_pid")
+    has = hid in hitter_splits
+    label = f"{h.get('Hitter', '?')} ({h.get('Team', '')}){'' if has else '  — no pitch data'}"
+    h_by_label[label] = h
+h_label = st.selectbox(f"Hitter (opposing {opp or 'lineup'} — type to search)",
+                       sorted(h_by_label.keys()))
+hitter = h_by_label[h_label]
+hitter_hid = hitter.get("_pid")
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def load_injuries(team_id):
+    if not team_id:
+        return []
+    return E.get_team_injuries(team_id)
+
+
+team_injuries = load_injuries(pitcher.get("_team_id"))
+opp_injuries = load_injuries(pitcher.get("_opp_id"))
+if team_injuries or opp_injuries:
+    with st.expander("🏥 Injury report — both teams"):
+        for label, injuries in ((pitcher["Team"], team_injuries), (opp or "Opponent", opp_injuries)):
+            if not injuries:
+                continue
+            st.markdown(f"**{label}**")
+            idf = pd.DataFrame(injuries)[["player", "position", "status", "return_date", "comment"]]
+            idf = idf.rename(columns={"player": "Player", "position": "Pos", "status": "Status",
+                                      "return_date": "Est. Return", "comment": "Comment"})
+            st.dataframe(idf, hide_index=True, use_container_width=True)
+        st.caption("Sourced from MLB Stats API's own roster status field — any player not on "
+                  "Active status (10/15/60-day IL, restricted, bereavement, paternity, etc.), "
+                  "using MLB's own description for that status. \"Est. Return\" and \"Comment\" "
+                  "are always blank — the roster endpoint reports a status, not a detailed "
+                  "injury description (body part, expected return), so this stays honestly "
+                  "empty rather than guessed. Informational only, not folded into any signal "
+                  "on this page.")
+
+st.divider()
+
+# --- Batting order splits: how this pitcher performs against each lineup slot -----------------
+# A real GM/rotation-planning question: does this arm get hit hard by the middle of the order
+# specifically, or is he equally tough top to bottom? Also directly useful scouting a pitcher
+# being considered in a trade against real lineup construction, not just his aggregate line.
+# Behind an expander with an explicit button, not auto-computed: scanning a season's worth of a
+# pitcher's own starts (bounded to his real starts via his own game log, not his whole team's
+# season) still means one boxscore fetch per start — a real cost worth gating behind a person
+# actually asking to see it, not fired automatically every time this page loads.
+with st.expander(f"📋 {pitcher['Pitcher']} vs. the batting order (season)"):
+    st.caption("Cumulative stats this pitcher has allowed this season, broken down by the "
+              "OPPOSING hitter's own lineup spot — computed from his real starts this season, "
+              "not a live query. Small samples are the norm here, not the exception: a single "
+              "season of starts often means each slot only has 15-25 AB against him total. A "
+              "real signal worth a look, not one worth trusting blindly.")
+    if st.button("Load batting order splits", key="load_bo_splits"):
+        with st.spinner(f"Scanning {pitcher['Pitcher']}'s starts this season..."):
+            season = int(date_str[:4])
+            bo_splits = E.get_pitcher_batting_order_splits(pitcher_pid, season, before_date=date_str)
+        if not bo_splits:
+            st.info("No batting-order data available yet — either no starts found this season, "
+                    "or the data couldn't be aggregated.")
+        else:
+            # Cross-reference TODAY's actual (or projected) lineup for the opposing team, so the
+            # historical per-slot performance above can be read against who's actually standing
+            # in each slot tonight, not just an abstract "Slot 2" — this is what the person
+            # actually asked for: not who's historically hit in a slot, but who's in it TODAY.
+            # Reuses hitters/opp already loaded earlier on this page — zero extra fetch.
+            opp_hitters = [h for h in hitters if h.get("Team") == opp and h.get("_lineup_idx") is not None]
+            today_lineup = {h["_lineup_idx"] + 1: h for h in opp_hitters}   # 0-indexed -> 1-indexed slot
+            lineup_is_projected = any(h.get("Lineup") == "Projected" for h in opp_hitters)
+
+            bo_rows = [{"Slot": slot, **stats} for slot, stats in sorted(bo_splits.items())]
+            for row in bo_rows:
+                today_hitter = today_lineup.get(row["Slot"])
+                row["Today"] = today_hitter["Hitter"] if today_hitter else "—"
+            bo_df = pd.DataFrame(bo_rows).rename(columns={
+                "ab": "AB", "r": "R", "h": "H", "2b": "2B", "3b": "3B", "hr": "HR", "rbi": "RBI",
+                "bb": "BB", "hbp": "HBP", "so": "SO", "avg": "AVG", "obp": "OBP", "slg": "SLG", "ops": "OPS"})
+            bo_df = bo_df[["Slot", "Today", "AB", "R", "H", "2B", "3B", "HR", "RBI", "BB", "HBP",
+                          "SO", "AVG", "OBP", "SLG", "OPS"]]
+            int_cols = ["AB", "R", "H", "2B", "3B", "HR", "RBI", "BB", "HBP", "SO"]
+            st.dataframe(
+                bo_df.style.format({**{c: "{:.0f}" for c in int_cols},
+                                   "AVG": "{:.3f}", "OBP": "{:.3f}", "SLG": "{:.3f}", "OPS": "{:.3f}"})
+                .theme_gradient(cmap="RdYlGn", subset=["OPS"]),
+                hide_index=True, use_container_width=True)
+            if not today_lineup:
+                st.caption("⚪ No lineup data found for this game yet — the \"Today\" column will "
+                          "fill in once one's available.")
+            elif lineup_is_projected:
+                st.caption("🟡 Lineup not officially posted yet — \"Today\" shows a projected "
+                          "batting order, not a confirmed one.")
+            else:
+                st.caption("🟢 Confirmed batting order for this game.")
+            with st.expander("Why these numbers might not match ESPN or other sites exactly"):
+                st.markdown(
+                    "**These are computed here, not pulled from a pre-built \"batting order "
+                    "split.\"** MLB Stats API doesn't expose one directly (confirmed during "
+                    "scoping — no such endpoint was found). Instead, this platform finds this "
+                    "pitcher's own real starts this season, pulls each start's boxscore, reads "
+                    "every opposing hitter's own lineup-slot field, and sums by slot itself. "
+                    "ESPN, Baseball-Reference, and similar sites build the same kind of split "
+                    "from their own pipelines — usually landing very close, but a small gap is "
+                    "normal, not a sign either side is wrong.\n\n"
+                    "**Regular season only, by design.** Only games with `gameType = \"R\"` are "
+                    "included — spring training and any other non-regular-season starts are "
+                    "excluded on purpose, matching what a standard stat page like ESPN's shows. "
+                    "(This was a real, fixed bug: an earlier version of this page didn't pin "
+                    "that filter down, and picked up a few extra non-regular-season starts, "
+                    "producing a consistent overcount across every slot — caught by comparing "
+                    "this page's own output against ESPN's for a real pitcher.)\n\n"
+                    "**\"As of\" timing can differ.** This reads as of the slate date selected "
+                    "above; a third-party site's own page may have been generated at a slightly "
+                    "different moment (their last refresh vs. this page's). A start or two of "
+                    "difference near the edges of a comparison is expected, not a red flag.\n\n"
+                    "**OBP is a stated approximation** (H + BB + HBP over AB + BB + HBP) — "
+                    "sacrifice flies aren't tracked at this level of aggregation, so it'll read "
+                    "very close to, but not always bit-for-bit identical to, official OBP.\n\n"
+                    "**Small samples are the norm, not the exception**, on top of all of the "
+                    "above — a single season's worth of starts often means 15-25 AB per slot. "
+                    "Worth checking against a second source before leaning on any one slot's "
+                    "number too heavily, the same way any small-sample stat deserves."
+                )
+
+# --- Catcher framing: does this pitcher's own team's catching help or hurt his real numbers? --
+# Real, well-known effect independent of stuff: a catcher who steals extra strikes makes his own
+# pitcher's real results look better than his "true" performance would suggest on pure stuff
+# alone. Team-level, not tied to a specific start or specific catcher — see team_catcher_framing's
+# own docstring for why that's a real, deliberate scoping choice, not a shortcut.
+with st.expander(f"🧤 {pitcher['Team']}'s catcher framing"):
+    cf_lookup = SC.load_catcher_framing()
+    if not cf_lookup:
+        st.info("No catcher framing data cached yet — run `python refresh_statcast.py` to "
+                "populate it. Refreshed alongside the hitter Statcast data Dinger Engine uses.")
+    else:
+        team_cf = SC.team_catcher_framing(cf_lookup, pitcher.get("_team_id"))
+        if not team_cf:
+            queried_id = pitcher.get("_team_id")
+            resolved_ids = sorted({c.get("team_id") for c in cf_lookup.values() if c.get("team_id")})
+            st.caption(f"No qualified catcher framing data found for {pitcher['Team']} yet. "
+                      f"(Queried team_id={queried_id!r} against {len(cf_lookup)} cached catchers, "
+                      f"{len(resolved_ids)} distinct resolved team ids on file"
+                      f"{': ' + str(resolved_ids[:10]) if resolved_ids else ''}.)")
+        else:
+            st.markdown(f"**{pitcher['Team']}'s catching corps** (weighted by each catcher's "
+                       f"own called-pitch volume): **{team_cf['strike_rate']:.1%}** shadow-zone "
+                       f"strike rate, **{team_cf['framing_runs']:+.1f}** combined framing runs.")
+            cf_rows = [{"Catcher": c["name"], "Called Pitches": int(c["called_pitches"]),
+                       "Strike Rate": c["strike_rate"], "Framing Runs": c["framing_runs"]}
+                      for c in team_cf["catchers"]]
+            st.dataframe(
+                pd.DataFrame(cf_rows).style.format({"Strike Rate": "{:.1%}", "Framing Runs": "{:+.1f}"})
+                .theme_gradient(cmap="RdYlGn", subset=["Framing Runs"]),
+                hide_index=True, use_container_width=True)
+            st.caption("A team-level read, not tied to this specific start or one specific "
+                      "catcher — Savant's own framing data is a SEASON-LONG aggregate per "
+                      "catcher, not a per-game split, and catchers rotate the same way relievers "
+                      "do. Positive framing runs = this catching corps steals extra strikes "
+                      "(helps the pitcher's real results look better than pure stuff alone would "
+                      "suggest); negative = the opposite. Qualified at Baseball Savant's own "
+                      "default (~6 called pitches in the shadow zone per team game).")
+
+
+rows = MD.build_matchup(pitcher_pid, hitter_hid, arsenals, hitter_splits)
+if not rows:
+    st.warning(f"No cached pitch data for **{pitcher['Pitcher']}** — pick another starter, or the "
+               "nightly refresh hasn't captured enough of his pitches yet.")
+    st.stop()
+
+have_hitter = any(r["score"] is not None for r in rows)
+
+# Headline insight — the single takeaway.
+if have_hitter:
+    best = rows[0]
+    st.markdown(f"### 🎯 Attack **{hitter['Hitter']}** with the **{best['pitch_name']}**")
+    st.caption(f"{pitcher['Pitcher']} throws it {best['usage']*100:.0f}% of the time and misses "
+               f"bats {best['p_whiff']*100:.0f}% per swing. {hitter['Hitter']} whiffs "
+               f"{(best['h_whiff'] or 0)*100:.0f}% vs {best['family'].lower()} and slugs "
+               f"{best['h_slg'] or 0:.2f} against it. Matchup score is a scouting sort, not a "
+               "probability.")
+else:
+    st.info(f"We have {pitcher['Pitcher']}'s arsenal, but no cached pitch-family data for "
+            f"{hitter['Hitter']} yet — showing the arsenal alone.")
+
+# --- table 1: the matchup grid (the money view) ---------------------------------------------
+st.subheader("Matchup grid — arsenal × this hitter")
+grid = pd.DataFrame([{
+    "Pitch": r["pitch_name"],
+    "Usage": r["usage"],
+    "Velo": r["velo"],
+    "Zone%": r.get("zone_pct"),
+    "Contact%": r.get("contact_pct"),
+    "Exit Velo": r.get("exit_velo"),
+    "P Whiff%": r["p_whiff"],
+    "P PutAway%": r["p_putaway"],
+    "H Whiff% (fam)": r["h_whiff"],
+    "H SLG (fam)": r["h_slg"],
+    "H xwOBA (fam)": r["h_xwoba"],
+    "Score": r["score"],
+} for r in rows])
+
+# Coerce numeric (None-safe) so the gradient never chokes — the lesson from the Dinger fix.
+for c in ["Usage", "Velo", "Zone%", "Contact%", "Exit Velo", "P Whiff%", "P PutAway%",
+          "H Whiff% (fam)", "H SLG (fam)", "H xwOBA (fam)", "Score"]:
+    grid[c] = pd.to_numeric(grid[c], errors="coerce")
+
+styler = (grid.style
+          .format({"Usage": "{:.0%}", "Velo": "{:.2f}", "Zone%": "{:.0%}", "Contact%": "{:.0%}",
+                   "Exit Velo": "{:.1f}", "P Whiff%": "{:.0%}", "P PutAway%": "{:.0%}",
+                   "H Whiff% (fam)": "{:.0%}", "H SLG (fam)": "{:.2f}", "H xwOBA (fam)": "{:.2f}",
+                   "Score": "{:.2f}"}, na_rep="—")
+          # Green = high value on that stat, everywhere on the platform (same convention as the
+          # Dinger Engine). P Whiff%/P PutAway%/Score stay pitcher-framed (green = good for the
+          # pitcher); SLG/xwOBA are a hitter-quality stat, so they share Dinger's direction too.
+          # Contact%/Exit Velo use the REVERSED colormap (same convention already established
+          # for ERA/FIP/WHIP on Pitching Lab) — LOWER is good for the pitcher on both: less
+          # contact allowed, softer contact when it happens. Zone% deliberately left uncolored:
+          # unlike whiff/contact, it isn't a directional good/bad metric on its own — a low-zone
+          # breaking ball that lives off the plate can be a great weapon, not a weak one, so
+          # coloring it would imply a direction the number doesn't actually support.
+          .theme_gradient(cmap="RdYlGn", subset=["P Whiff%", "P PutAway%", "H Whiff% (fam)", "Score"])
+          .theme_gradient(cmap="RdYlGn", subset=["H SLG (fam)", "H xwOBA (fam)"])
+          .theme_gradient(cmap="RdYlGn_r", subset=["Contact%", "Exit Velo"]))
+st.dataframe(styler, use_container_width=True, hide_index=True)
+st.caption("Green favors the pitcher on Whiff%/PutAway%/Score, and (reversed) on Contact%/Exit "
+          "Velo — lower is good for the pitcher on both, same convention as ERA/FIP on Pitching "
+          "Lab. SLG/xwOBA color the same direction as every other page on the platform (high = "
+          "green), so a hitter's power reads the same here as on the Dinger Engine. Zone% is "
+          "left uncolored — it describes where a pitch lives, not whether that's good or bad on "
+          "its own. Hitter columns are by pitch **family** (Fastball / Breaking / Offspeed) for "
+          "a stable sample; the pitch is mapped to its family.")
+
+# --- pitch mix, visualized -------------------------------------------------------------------
+# NOT a WNBA/NBA-style trend chart on purpose: that chart works because there's a real per-game
+# time axis (10 dated recent games) to plot against. This data has no equivalent — arsenals/
+# hitter_splits are season-aggregate snapshots PER PITCH, not a dated sequence, so there's no
+# "recent form over time" to trend. What genuinely maps here is the same instinct (see it, don't
+# just read a table) applied to what this data actually is: a COMPOSITION (pitch mix) and a
+# MATCHUP (whiff rates compared), so a bar chart, not a line chart.
+st.markdown("**Pitch mix, colored by matchup score**")
+mix_rows = sorted(rows, key=lambda r: r["usage"] or 0, reverse=True)
+mix_fig = go.Figure(go.Bar(
+    x=[r["usage"] or 0 for r in mix_rows], y=[r["pitch_name"] for r in mix_rows],
+    orientation="h",
+    marker=dict(color=[r["score"] if r["score"] is not None else 0 for r in mix_rows],
+               colorscale=[[0, "#c84242"], [0.5, "#f0d660"], [1, "#2e964e"]],
+               cmin=0, cmax=1, showscale=have_hitter,
+               colorbar=dict(title="Score", thickness=12) if have_hitter else None),
+    text=[f"{(r['usage'] or 0)*100:.0f}%" for r in mix_rows], textposition="outside",
+    hovertext=[f"{r['pitch_name']}: {(r['usage'] or 0)*100:.0f}% usage"
+              + (f", score {r['score']:.2f}" if r["score"] is not None else "") for r in mix_rows],
+    hoverinfo="text",
+))
+mix_fig.update_layout(template="plotly_white", height=max(220, 60 * len(mix_rows)),
+                      margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Usage%",
+                      xaxis_tickformat=".0%", yaxis=dict(autorange="reversed"), showlegend=False)
+st.plotly_chart(mix_fig, use_container_width=True)
+
+if have_hitter:
+    st.markdown("**Whiff rate: this pitch (pitcher) vs this family (hitter)**")
+    wf_rows = sorted(rows, key=lambda r: (r["score"] if r["score"] is not None else -1), reverse=True)
+    wf_fig = go.Figure()
+    wf_fig.add_trace(go.Bar(x=[r["p_whiff"] or 0 for r in wf_rows], y=[r["pitch_name"] for r in wf_rows],
+                            orientation="h", name=f"{pitcher['Pitcher']} whiff% (this pitch)",
+                            marker=dict(color="#2563eb")))
+    wf_fig.add_trace(go.Bar(x=[r["h_whiff"] or 0 for r in wf_rows], y=[r["pitch_name"] for r in wf_rows],
+                            orientation="h", name=f"{hitter['Hitter']} whiff% (this family)",
+                            marker=dict(color="#f97316")))
+    wf_fig.update_layout(template="plotly_white", height=max(220, 60 * len(wf_rows)),
+                         margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Whiff%",
+                         xaxis_tickformat=".0%", yaxis=dict(autorange="reversed"),
+                         barmode="group", legend=dict(orientation="h", y=-0.15))
+    st.plotly_chart(wf_fig, use_container_width=True)
+    st.caption("Both bars long = the strongest case to attack with that pitch (misses bats for "
+               "the pitcher AND against this hitter). Blue long / orange short = a pitch that "
+               "misses bats generally but not particularly against this hitter — usage and "
+               "Score above already account for this, this just makes it visible at a glance.")
+else:
+    st.caption("Blue bars only — no cached hitter-side whiff data to pair against yet, showing "
+               "arsenal mix alone.")
+
+# --- table 2 + 3 side by side: raw arsenal and raw hitter splits -----------------------------
+c1, c2 = st.columns(2)
+with c1:
+    st.subheader(f"{pitcher['Pitcher']} — full arsenal")
+    ars = pd.DataFrame([{
+        "Pitch": p["pitch_name"], "Family": p["family"], "Usage": p["usage"],
+        "Velo": p["velo"], "Zone%": p.get("zone_pct"), "Contact%": p.get("contact_pct"),
+        "Exit Velo": p.get("exit_velo"), "Whiff%": p["whiff"], "PutAway%": p["putaway"],
+    } for p in arsenals.get(pitcher_pid, [])])
+    if len(ars):
+        for c in ["Usage", "Velo", "Zone%", "Contact%", "Exit Velo", "Whiff%", "PutAway%"]:
+            ars[c] = pd.to_numeric(ars[c], errors="coerce")
+        st.dataframe(ars.style.format({"Usage": "{:.0%}", "Velo": "{:.2f}", "Zone%": "{:.0%}",
+                                       "Contact%": "{:.0%}", "Exit Velo": "{:.1f}",
+                                       "Whiff%": "{:.0%}", "PutAway%": "{:.0%}"}, na_rep="—")
+                     .theme_gradient(cmap="RdYlGn", subset=["Whiff%", "PutAway%"])
+                     .theme_gradient(cmap="RdYlGn_r", subset=["Contact%", "Exit Velo"]),
+                     use_container_width=True, hide_index=True)
+
+with c2:
+    st.subheader(f"{hitter['Hitter']} — by pitch family")
+    hs = hitter_splits.get(hitter_hid, {})
+    if hs:
+        hrows = pd.DataFrame([{
+            "Family": fam, "Pitches": v["pitches"], "Zone%": v.get("zone_pct"),
+            "Whiff%": v["whiff"], "Contact%": v.get("contact"), "Exit Velo": v.get("exit_velo"),
+            "SLG": v["slg"], "xwOBA": v["xwoba"],
+        } for fam, v in hs.items()])
+        for c in ["Zone%", "Whiff%", "Contact%", "Exit Velo", "SLG", "xwOBA"]:
+            hrows[c] = pd.to_numeric(hrows[c], errors="coerce")
+        st.dataframe(hrows.style.format({"Zone%": "{:.0%}", "Whiff%": "{:.0%}", "Contact%": "{:.0%}",
+                                         "Exit Velo": "{:.1f}", "SLG": "{:.2f}", "xwOBA": "{:.2f}"},
+                                        na_rep="—")
+                     .theme_gradient(cmap="RdYlGn", subset=["SLG", "xwOBA"])
+                     .theme_gradient(cmap="RdYlGn", subset=["Whiff%"])
+                     # Reversed on purpose, same real logic as the main grid: this whole page
+                     # scouts the PITCHER's attack plan, so Whiff% is already colored "high =
+                     # pitcher-favorable" (a real hitter weakness). Contact%/Exit Velo are the
+                     # hitter's own quality-of-contact complement -- low is the same
+                     # pitcher-favorable direction (weak or no contact), so these reverse. Zone%
+                     # left uncolored, same reasoning as the pitcher's own arsenal zone%: a high
+                     # zone rate against this hitter can mean pitchers are confident challenging
+                     # him (fine, if he doesn't punish it) or that they've been careless (bad, if
+                     # he does) -- the direction depends on what SLG/xwOBA/Contact% on this same
+                     # row already show, not something zone% communicates on its own.
+                     .theme_gradient(cmap="RdYlGn_r", subset=["Contact%", "Exit Velo"]),
+                     use_container_width=True, hide_index=True)
+    else:
+        st.caption("No cached pitch-family splits for this hitter yet.")
+
+# --- hitter by SPECIFIC pitch type (full arsenal view) --------------------------------------
+st.subheader(f"{hitter['Hitter']} — by pitch type (full arsenal)")
+st.caption("Granular view: performance against each individual pitch, not just the family. More "
+           "detailed but noisier — the **Pitches** column shows the sample, and pitches with too "
+           "few seen are hidden. Read a small sample with caution.")
+hitter_types = load_hitter_type_cache()
+ht = hitter_types.get(hitter_hid, [])
+if ht:
+    htype = pd.DataFrame([{
+        "Pitch": r["pitch_name"], "Family": r["family"], "Pitches": r["pitches"],
+        "Zone%": r.get("zone_pct"), "Whiff%": r["whiff"], "Contact%": r.get("contact"),
+        "Exit Velo": r.get("exit_velo"), "SLG": r["slg"], "xwOBA": r["xwoba"],
+    } for r in ht])
+    for c in ["Zone%", "Whiff%", "Contact%", "Exit Velo", "SLG", "xwOBA"]:
+        htype[c] = pd.to_numeric(htype[c], errors="coerce")
+    st.dataframe(htype.style.format({"Zone%": "{:.0%}", "Whiff%": "{:.0%}", "Contact%": "{:.0%}",
+                                     "Exit Velo": "{:.1f}", "SLG": "{:.2f}", "xwOBA": "{:.2f}"},
+                                    na_rep="—")
+                 .theme_gradient(cmap="RdYlGn", subset=["Whiff%"])
+                 .theme_gradient(cmap="RdYlGn", subset=["SLG", "xwOBA"])
+                 .theme_gradient(cmap="RdYlGn_r", subset=["Contact%", "Exit Velo"]),
+                 use_container_width=True, hide_index=True)
+    st.caption("Green = the hitter whiffs on it, or makes weak/no contact (good for the pitcher) "
+              "— Contact%/Exit Velo are reversed from Whiff% since low is the same "
+              "pitcher-favorable direction. Zone% is left uncolored — a high rate against this "
+              "hitter can mean pitchers are confidently challenging him (fine, if he doesn't "
+              "punish it) or being careless (bad, if he does), a direction Contact%/SLG/xwOBA on "
+              "this same row already show. Red = damage the hitter does (SLG / xwOBA against). "
+              "Sorted by pitches seen.")
+else:
+    st.caption("No by-pitch-type data cached for this hitter yet — the nightly refresh needs enough "
+              "of each pitch to clear the sample floor. The family view above is the stable read.")
+
+st.divider()
+st.caption("⚖️ A scouting tool, not a projection. Pitch-level rates are descriptive of the past and "
+           "come from Statcast; small samples (especially per hitter) move around. The matchup score "
+           "is a transparent sort to surface pitches worth attacking — not a probability or a bet signal.")
