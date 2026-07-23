@@ -44,6 +44,22 @@ def main():
     lookup, k = SC.load(path)
     print(f"Cached {len(lookup)} batters. Calibration k = {round(k, 3) if k else 'n/a'}.")
 
+    print(f"\nPulling Statcast pitcher expected-stats (xERA) for {year} from Baseball Savant...")
+    try:
+        p_path = SC.refresh_pitchers(year)
+        p_lookup = SC.load_pitchers(p_path)
+        print(f"Cached {len(p_lookup)} pitchers.")
+    except Exception as e:  # noqa: BLE001
+        # Same non-fatal posture as catcher framing below: a pitcher-xERA failure shouldn't block
+        # the batter cache (Dinger Engine's own core dependency) from refreshing successfully.
+        # Game Watch's own xERA signal just shows "no data" until this succeeds, same "optional,
+        # fails soft" contract the batter data itself already has.
+        tb = traceback.format_exc()
+        first_line = str(e).replace("\n", " ")[:200]
+        print(f"::warning::Pitcher xERA refresh failed (non-fatal, batter cache unaffected): {first_line}")
+        print("Full traceback:")
+        print(tb)
+
     print(f"\nPulling catcher framing data for {year} from Baseball Savant...")
     try:
         cf_path = SC.refresh_catcher_framing(year)

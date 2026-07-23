@@ -28,12 +28,20 @@ def test_catcher_framing_failure_emits_visible_warning_annotation():
     def fake_load(path=SC.DEFAULT_PATH):
         return {1: {}}, 0.05
 
+    def fake_refresh_pitchers(year, out_path=SC.DEFAULT_PITCHER_PATH):
+        return out_path
+
+    def fake_load_pitchers(path=SC.DEFAULT_PITCHER_PATH):
+        return {1: {}}
+
     def fake_refresh_catcher_framing(year, out_path=SC.CATCHER_FRAMING_PATH):
         raise ValueError("simulated Savant column drift")
 
     buf = io.StringIO()
     with patch.object(SC, "refresh", fake_refresh), \
         patch.object(SC, "load", fake_load), \
+        patch.object(SC, "refresh_pitchers", fake_refresh_pitchers), \
+        patch.object(SC, "load_pitchers", fake_load_pitchers), \
         patch.object(SC, "refresh_catcher_framing", fake_refresh_catcher_framing), \
         patch.object(sys, "argv", ["refresh_statcast.py", "2026"]), \
         redirect_stdout(buf):
@@ -55,6 +63,12 @@ def test_catcher_framing_success_no_warning():
     def fake_load(path=SC.DEFAULT_PATH):
         return {1: {}}, 0.05
 
+    def fake_refresh_pitchers(year, out_path=SC.DEFAULT_PITCHER_PATH):
+        return out_path
+
+    def fake_load_pitchers(path=SC.DEFAULT_PITCHER_PATH):
+        return {1: {}, 2: {}}
+
     def fake_refresh_catcher_framing(year, out_path=SC.CATCHER_FRAMING_PATH):
         return out_path
 
@@ -64,6 +78,8 @@ def test_catcher_framing_success_no_warning():
     buf = io.StringIO()
     with patch.object(SC, "refresh", fake_refresh), \
         patch.object(SC, "load", fake_load), \
+        patch.object(SC, "refresh_pitchers", fake_refresh_pitchers), \
+        patch.object(SC, "load_pitchers", fake_load_pitchers), \
         patch.object(SC, "refresh_catcher_framing", fake_refresh_catcher_framing), \
         patch.object(SC, "load_catcher_framing", fake_load_catcher_framing), \
         patch.object(sys, "argv", ["refresh_statcast.py", "2026"]), \
@@ -73,7 +89,46 @@ def test_catcher_framing_success_no_warning():
     output = buf.getvalue()
     assert rc == 0
     assert "::warning::" not in output
+    assert "Cached 2 pitchers." in output
     assert "Cached 2 catchers." in output
+
+
+def test_pitcher_xera_failure_emits_visible_warning_annotation_and_does_not_block_the_rest():
+    # Same real diagnosis-gap posture as catcher framing's own regression guard above, applied
+    # to the pitcher xERA step specifically -- a pitcher-xERA failure must be loud (a real
+    # ::warning:: annotation, not a silently swallowed exception) AND non-fatal (the batter cache
+    # and catcher framing must still refresh and commit normally).
+    def fake_refresh(year, out_path=SC.DEFAULT_PATH):
+        return out_path
+
+    def fake_load(path=SC.DEFAULT_PATH):
+        return {1: {}}, 0.05
+
+    def fake_refresh_pitchers(year, out_path=SC.DEFAULT_PITCHER_PATH):
+        raise ValueError("simulated pybaseball column drift")
+
+    def fake_refresh_catcher_framing(year, out_path=SC.CATCHER_FRAMING_PATH):
+        return out_path
+
+    def fake_load_catcher_framing(path=SC.CATCHER_FRAMING_PATH):
+        return {1: {}, 2: {}}
+
+    buf = io.StringIO()
+    with patch.object(SC, "refresh", fake_refresh), \
+        patch.object(SC, "load", fake_load), \
+        patch.object(SC, "refresh_pitchers", fake_refresh_pitchers), \
+        patch.object(SC, "refresh_catcher_framing", fake_refresh_catcher_framing), \
+        patch.object(SC, "load_catcher_framing", fake_load_catcher_framing), \
+        patch.object(sys, "argv", ["refresh_statcast.py", "2026"]), \
+        redirect_stdout(buf):
+        rc = RS.main()
+
+    output = buf.getvalue()
+    assert rc == 0   # pitcher xERA failure must NOT fail the whole script
+    assert "::warning::" in output
+    assert "simulated pybaseball column drift" in output
+    assert "Cached 2 catchers." in output   # the rest of the run still completed normally
+    print("✓ a pitcher xERA failure emits a visible ::warning:: annotation and does not block the batter/catcher-framing steps")
 
 
 def test_team_enrichment_respects_called_pitches_floor_and_writes_team_names(tmp_path):
@@ -82,6 +137,12 @@ def test_team_enrichment_respects_called_pitches_floor_and_writes_team_names(tmp
 
     def fake_load(path=SC.DEFAULT_PATH):
         return {1: {}}, 0.05
+
+    def fake_refresh_pitchers(year, out_path=SC.DEFAULT_PITCHER_PATH):
+        return out_path
+
+    def fake_load_pitchers(path=SC.DEFAULT_PITCHER_PATH):
+        return {1: {}}
 
     cf_path = str(tmp_path / "catcher_framing.csv")
 
@@ -103,6 +164,8 @@ def test_team_enrichment_respects_called_pitches_floor_and_writes_team_names(tmp
     buf = io.StringIO()
     with patch.object(SC, "refresh", fake_refresh), \
         patch.object(SC, "load", fake_load), \
+        patch.object(SC, "refresh_pitchers", fake_refresh_pitchers), \
+        patch.object(SC, "load_pitchers", fake_load_pitchers), \
         patch.object(SC, "refresh_catcher_framing", fake_refresh_catcher_framing), \
         patch.object(SC, "load_catcher_framing", fake_load_catcher_framing), \
         patch.object(RS.E, "get_player_current_team", fake_get_team), \

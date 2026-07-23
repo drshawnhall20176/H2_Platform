@@ -359,6 +359,26 @@ def matchup_signal_tally(edges: List[Optional[str]]) -> Dict[str, Any]:
            "available": available, "verdict": verdict}
 
 
+def team_platoon_advantage_fraction(lineup_rows: List[Dict]) -> Optional[float]:
+    """Given a real lineup (mlb_engine.build_game_lineups' own row shape -- each already carrying
+    an "Advantage" field from mlb_engine.platoon_advantage, computed against THAT row's own
+    opposing starter's hand), the real fraction of this lineup holding the platoon edge against
+    tonight's specific opposing starter. Reuses the exact same per-batter Advantage field Dinger
+    Engine's own "Platoon map" section already computes and displays -- not a new calculation,
+    a new AGGREGATION of one that already exists.
+
+    Only "Advantage" and "Disadvantage" count as real, known reads -- "Unknown" (missing hand
+    data for that specific batter) is excluded from both the numerator and denominator, the same
+    "don't let a missing read silently count against either side" posture used throughout this
+    module. Returns None if the lineup is empty or every batter came back "Unknown" -- an honest
+    "no read" state, not a fabricated 0.0."""
+    known = [r for r in lineup_rows if r.get("Advantage") in ("Advantage", "Disadvantage")]
+    if not known:
+        return None
+    adv_count = sum(1 for r in known if r["Advantage"] == "Advantage")
+    return adv_count / len(known)
+
+
 # =============================================================================================
 # EXPERIMENTAL — Option A, Phase 1: a real Pythagorean/Log5 win-probability estimator.
 #
@@ -571,7 +591,11 @@ def simulate_one_game(away_probs_vs_starter: List[np.ndarray], away_probs_vs_bul
                       home_starter_exp_outs: float,
                       home_probs_vs_starter: List[np.ndarray], home_probs_vs_bullpen: List[np.ndarray],
                       away_starter_exp_outs: float,
-                      rng, max_innings: int = 9) -> Tuple[int, int]:
+                      rng, max_innings: int = 9,
+                      early_pull_runs: Optional[int] = None,
+                      away_probs_vs_closer: Optional[List[np.ndarray]] = None,
+                      home_probs_vs_closer: Optional[List[np.ndarray]] = None,
+                      closer_innings: int = 1) -> Tuple[int, int]:
     """One simulated trial of a full game, inning by inning, using real base-out state via
     advance_runners above.
 
@@ -582,6 +606,39 @@ def simulate_one_game(away_probs_vs_starter: List[np.ndarray], away_probs_vs_bul
     HOME's pitching staff has recorded this many outs against the away lineup, the away lineup
     switches from vs_starter to vs_bullpen probabilities for the rest of the game. home_probs_*/
     away_starter_exp_outs are the exact mirror image for the home lineup against away's pitching.
+
+    ADAPTIVE PULL, OPT-IN: early_pull_runs (default None, the original fixed-outs-only behavior,
+    unchanged for any existing caller) -- when set to a real integer, EACH starter can also be
+    pulled early, before his own exp_outs, if he's personally allowed at least this many runs in
+    THIS SPECIFIC TRIAL. A real, stated "quick hook" rule, not a claim to model actual in-game
+    manager decision-making precisely -- there's no single, universally agreed formula for real
+    pull decisions (checked directly: even people who track bullpen usage full-time describe it
+    as genuinely hard to project), so this is one honest, defensible threshold, not a discovered
+    one. Tracks each starter's OWN runs-allowed total separately from the team's own overall
+    pitching-outs counter, and stops counting against him the moment he's pulled (by either
+    condition) -- runs allowed after a pull belong to the bullpen, not the starter who's already
+    out of the game. The pull check happens BEFORE each plate appearance, so a start that reaches
+    the threshold ON a given PA is pulled starting the NEXT PA, not retroactively.
+
+    THIRD PHASE, OPT-IN: away_probs_vs_closer/home_probs_vs_closer (default None, the original
+    two-phase starter/bullpen behavior, unchanged for any existing caller) -- EXACT same naming
+    convention as away_probs_vs_bullpen/home_probs_vs_bullpen above: away_probs_vs_closer is the
+    AWAY lineup's own probabilities when facing the HOME team's closer (mirrors away_probs_vs_
+    bullpen being the away lineup facing home's broader bullpen), and home_probs_vs_closer is the
+    home lineup's own probabilities facing the AWAY team's closer. Once a side's starter is out
+    (see ADAPTIVE PULL above), that side's OWN closer (see this section's own module comment for
+    how "the closer" gets identified -- by real, available saves data, not guessed) takes over
+    for the FINAL closer_innings innings specifically (default 1, just the 9th) using his own
+    individual rates, instead of the blended "rest of bullpen" aggregate -- but ONLY once the
+    starter is already out; the closer phase can't cut a good start short.
+
+    REAL, STATED SIMPLIFICATION: this closer phase triggers by INNING NUMBER alone, not by real
+    save-situation logic. A real closer typically doesn't appear in a lopsided blowout -- this
+    simulation has no concept of "the game is already decided" and will still use the closer's
+    own rates in the 9th inning of a 10-0 game. Chosen deliberately over trying to model real
+    managerial save-situation judgment, which is exactly the kind of thing this whole section's
+    own module comment already flags as genuinely hard to project even for people who track it
+    full-time -- an honest, simple rule here beats a falsely precise one.
 
     Does NOT stop a half-inning early on a would-be walk-off (see module comment) -- harmless for
     a win/loss tally specifically, since the final score comparison after max_innings is still
@@ -605,19 +662,36 @@ def simulate_one_game(away_probs_vs_starter: List[np.ndarray], away_probs_vs_bul
     away_score = home_score = 0
     away_idx = home_idx = 0
     home_pitching_outs = away_pitching_outs = 0
+    # Runs allowed by EACH starter specifically, tracked separately from the team-wide pitching-
+    # outs counters above -- only used/updated when early_pull_runs is actually set.
+    home_starter_runs = away_starter_runs = 0
+    home_starter_active = away_starter_active = True
 
-    for _ in range(max_innings):
+    for inning_num in range(1, max_innings + 1):
+        is_closer_window = inning_num > (max_innings - closer_innings)
+
         # Top half: away bats against home's pitching.
         bases, outs = (False, False, False), 0
         pa_count = 0
         while outs < 3 and pa_count < MAX_PA_PER_HALF_INNING:
-            probs = (away_probs_vs_bullpen[away_idx] if home_pitching_outs >= home_starter_exp_outs
-                    else away_probs_vs_starter[away_idx])
+            if home_starter_active and (
+                home_pitching_outs >= home_starter_exp_outs
+                or (early_pull_runs is not None and home_starter_runs >= early_pull_runs)
+            ):
+                home_starter_active = False
+            if home_starter_active:
+                probs = away_probs_vs_starter[away_idx]
+            elif away_probs_vs_closer is not None and is_closer_window:
+                probs = away_probs_vs_closer[away_idx]
+            else:
+                probs = away_probs_vs_bullpen[away_idx]
             outcome = rng.choice(7, p=probs)
             bases, outs_this_pa, runs = advance_runners(bases, outcome)
             outs += outs_this_pa
             home_pitching_outs += outs_this_pa
             away_score += runs
+            if home_starter_active:
+                home_starter_runs += runs
             away_idx = (away_idx + 1) % 9
             pa_count += 1
 
@@ -625,13 +699,24 @@ def simulate_one_game(away_probs_vs_starter: List[np.ndarray], away_probs_vs_bul
         bases, outs = (False, False, False), 0
         pa_count = 0
         while outs < 3 and pa_count < MAX_PA_PER_HALF_INNING:
-            probs = (home_probs_vs_bullpen[home_idx] if away_pitching_outs >= away_starter_exp_outs
-                    else home_probs_vs_starter[home_idx])
+            if away_starter_active and (
+                away_pitching_outs >= away_starter_exp_outs
+                or (early_pull_runs is not None and away_starter_runs >= early_pull_runs)
+            ):
+                away_starter_active = False
+            if away_starter_active:
+                probs = home_probs_vs_starter[home_idx]
+            elif home_probs_vs_closer is not None and is_closer_window:
+                probs = home_probs_vs_closer[home_idx]
+            else:
+                probs = home_probs_vs_bullpen[home_idx]
             outcome = rng.choice(7, p=probs)
             bases, outs_this_pa, runs = advance_runners(bases, outcome)
             outs += outs_this_pa
             away_pitching_outs += outs_this_pa
             home_score += runs
+            if away_starter_active:
+                away_starter_runs += runs
             home_idx = (home_idx + 1) % 9
             pa_count += 1
 
@@ -643,7 +728,11 @@ def simulate_game_win_probability(away_probs_vs_starter: List[np.ndarray], away_
                                   home_probs_vs_starter: List[np.ndarray], home_probs_vs_bullpen: List[np.ndarray],
                                   away_starter_exp_outs: float,
                                   n_trials: int = 1000, seed: Optional[int] = None,
-                                  max_innings: int = 9) -> Dict[str, Any]:
+                                  max_innings: int = 9,
+                                  early_pull_runs: Optional[int] = None,
+                                  away_probs_vs_closer: Optional[List[np.ndarray]] = None,
+                                  home_probs_vs_closer: Optional[List[np.ndarray]] = None,
+                                  closer_innings: int = 1) -> Dict[str, Any]:
     """Runs simulate_one_game n_trials independent times and tallies the real fraction won by
     each side -- the actual Monte Carlo estimate.
 
@@ -653,6 +742,11 @@ def simulate_game_win_probability(away_probs_vs_starter: List[np.ndarray], away_
     a real, stated simplification; a vectorized version would run far more trials in the same
     time, a genuine future optimization not implemented here). Higher n_trials narrows the
     estimate at the cost of runtime -- exposed as a real, adjustable parameter, not hidden.
+
+    early_pull_runs, away_probs_vs_closer, home_probs_vs_closer, closer_innings: all passed
+    straight through to simulate_one_game's own adaptive-pull and third-phase-closer logic --
+    see its own docstring for the full reasoning on each. All default to None/1, preserving the
+    original two-phase, fixed-outs-only behavior exactly for any existing caller.
 
     Returns {"away_win_prob", "home_win_prob", "tie_prob", "n_trials", "avg_away_runs",
     "avg_home_runs"}. tie_prob is the real fraction tied after max_innings (extra innings not
@@ -666,7 +760,9 @@ def simulate_game_win_probability(away_probs_vs_starter: List[np.ndarray], away_
         away_runs, home_runs = simulate_one_game(
             away_probs_vs_starter, away_probs_vs_bullpen, home_starter_exp_outs,
             home_probs_vs_starter, home_probs_vs_bullpen, away_starter_exp_outs,
-            rng, max_innings=max_innings)
+            rng, max_innings=max_innings, early_pull_runs=early_pull_runs,
+            away_probs_vs_closer=away_probs_vs_closer, home_probs_vs_closer=home_probs_vs_closer,
+            closer_innings=closer_innings)
         away_runs_total += away_runs
         home_runs_total += home_runs
         if away_runs > home_runs:

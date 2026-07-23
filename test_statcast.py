@@ -395,6 +395,65 @@ def test_refresh_catcher_framing_warns_on_column_mismatch_data_loss(monkeypatch,
     print("✓ refresh_catcher_framing warns on silent column-mismatch data loss, surfacing the real raw column names")
 
 
+def test_build_pitcher_statcast_frame_basic():
+    xs = pd.DataFrame([
+        dict(player_id=501, name="Ace, Real", pa=650, era=2.80, xera=3.10, woba=0.280, xwoba=0.295),
+        dict(player_id=502, name="Lucky, Guy", pa=600, era=3.20, xera=4.40, woba=0.300, xwoba=0.360),
+    ])
+    out = SC._build_pitcher_statcast_frame(xs)
+    assert len(out) == 2
+    row = out[out["player_id"] == 501].iloc[0]
+    assert row["name"] == "Real Ace"   # "Last, First" flipped, same _build_name convention as batters
+    assert abs(row["era"] - 2.80) < 1e-9 and abs(row["xera"] - 3.10) < 1e-9
+    print("✓ _build_pitcher_statcast_frame parses a real-shaped expected-stats leaderboard correctly")
+
+
+def test_build_pitcher_statcast_frame_missing_id_column_raises():
+    xs = pd.DataFrame([dict(name="No Id Guy", era=3.00, xera=3.20)])
+    try:
+        SC._build_pitcher_statcast_frame(xs)
+        assert False, "should have raised KeyError for a missing player-id column"
+    except KeyError as e:
+        assert "player-id column not found" in str(e)
+    print("✓ _build_pitcher_statcast_frame raises a real, informative error on a missing id column rather than silently returning empty")
+
+
+def test_build_pitcher_statcast_frame_empty_raises():
+    xs = pd.DataFrame([dict(player_id=None, name="Bad Row", era=3.00, xera=3.20)])
+    try:
+        SC._build_pitcher_statcast_frame(xs)
+        assert False, "should have raised ValueError for zero valid rows"
+    except ValueError as e:
+        assert "no valid player_id rows" in str(e)
+
+
+def test_load_pitchers_missing_file_is_graceful():
+    assert SC.load_pitchers("/no/such/pitcher/file.csv") == {}
+    print("✓ load_pitchers returns {} (not a crash) when the cache file doesn't exist yet")
+
+
+def test_load_pitchers_round_trip():
+    with tempfile.TemporaryDirectory() as tmp:
+        df = pd.DataFrame([
+            dict(player_id=501, name="Real Ace", pa=650, era=2.80, xera=3.10, woba=0.280, xwoba=0.295),
+        ])
+        path = os.path.join(tmp, "statcast_pitchers.csv")
+        df.to_csv(path, index=False)
+        lookup = SC.load_pitchers(path)
+        assert len(lookup) == 1
+        assert lookup[501]["name"] == "Real Ace"
+        assert abs(lookup[501]["era"] - 2.80) < 1e-9
+        assert abs(lookup[501]["xera"] - 3.10) < 1e-9
+    print("✓ load_pitchers round-trips a real cached CSV correctly")
+
+
+def test_load_pitchers_empty_file_is_graceful():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "empty.csv")
+        pd.DataFrame([]).to_csv(path, index=False)
+        assert SC.load_pitchers(path) == {}
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

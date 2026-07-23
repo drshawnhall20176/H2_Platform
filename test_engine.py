@@ -171,6 +171,28 @@ def test_build_pitching_slate_threads_team_ids_through(monkeypatch):
     print("✓ build_pitching_slate correctly threads each side's own team_id and their opponent's through")
 
 
+def test_build_pitching_slate_threads_gamepk_and_venue_id_through(monkeypatch):
+    # Needed for Game Watch's own team-platoon signal — mlb_engine.build_game_lineups needs a
+    # real gamePk and venue_id to fetch tonight's actual lineups for one specific game.
+    fake_games = [{
+        "gamePk": 999888, "game_date": "2026-06-28T17:10:00Z", "venue_id": 3313,
+        "home_name": "Yankees", "away_name": "Red Sox", "home_id": 147, "away_id": 111,
+        "home_pitcher_id": 111, "away_pitcher_id": 222,
+    }]
+
+    def fake_get_pitcher_metrics(pid, fip_constant):
+        return E.PitcherMetrics(id=pid, name=f"Pitcher {pid}", era=3.50, fip=3.20, k9=9.0,
+                                whip=1.10, hr9=1.0, oba=0.240)
+
+    monkeypatch.setattr(E, "get_schedule", lambda date_str: fake_games)
+    monkeypatch.setattr(E, "get_pitcher_metrics", fake_get_pitcher_metrics)
+
+    rows = E.build_pitching_slate("2026-06-28")
+    assert all(r["_gamePk"] == 999888 for r in rows)
+    assert all(r["_venue_id"] == 3313 for r in rows)
+    print("✓ build_pitching_slate correctly threads gamePk and venue_id through to both sides")
+
+
 # ----------------------------------------------------------------- pair_pitching_slate_by_game
 def _pitching_row(team, opp, game_label, game_date=None):
     return {"Pitcher": f"{team} SP", "Team": team, "Opponent": opp, "Game": game_label,
@@ -636,6 +658,60 @@ def test_get_team_pitching_staff_no_exclude(monkeypatch):
 def test_get_team_pitching_staff_empty_on_fetch_failure(monkeypatch):
     monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: {})
     assert E.get_team_pitching_staff(117) == []
+
+
+# ----------------------------------------------------------------- get_bullpen_closer
+def test_get_bullpen_closer_picks_the_pitcher_with_most_saves(monkeypatch):
+    fake_staff = [{"id": 201, "name": "Middle Reliever"}, {"id": 202, "name": "Setup Man"},
+                 {"id": 203, "name": "Closer Guy"}]
+
+    def fake_get_pitcher_metrics(pid, fip_constant=E.FIP_CONSTANT_DEFAULT):
+        saves = {201: 0, 202: 3, 203: 22}[pid]
+        return E.PitcherMetrics(id=pid, name=f"P{pid}", stat={"saves": saves})
+
+    monkeypatch.setattr(E, "get_team_pitching_staff", lambda team_id, exclude_pid=None: fake_staff)
+    monkeypatch.setattr(E, "get_pitcher_metrics", fake_get_pitcher_metrics)
+
+    closer = E.get_bullpen_closer(117)
+    assert closer.id == 203   # the real 22-save arm, not the 3-save setup man or the 0-save reliever
+    print("✓ get_bullpen_closer correctly identifies the pitcher with the most real saves")
+
+
+def test_get_bullpen_closer_none_when_no_one_has_a_save(monkeypatch):
+    fake_staff = [{"id": 201, "name": "Reliever A"}, {"id": 202, "name": "Reliever B"}]
+
+    def fake_get_pitcher_metrics(pid, fip_constant=E.FIP_CONSTANT_DEFAULT):
+        return E.PitcherMetrics(id=pid, name=f"P{pid}", stat={"saves": 0})
+
+    monkeypatch.setattr(E, "get_team_pitching_staff", lambda team_id, exclude_pid=None: fake_staff)
+    monkeypatch.setattr(E, "get_pitcher_metrics", fake_get_pitcher_metrics)
+
+    assert E.get_bullpen_closer(117) is None
+    print("✓ get_bullpen_closer returns None (not a fabricated pick) when every pitcher has zero real saves")
+
+
+def test_get_bullpen_closer_none_when_staff_empty(monkeypatch):
+    monkeypatch.setattr(E, "get_team_pitching_staff", lambda team_id, exclude_pid=None: [])
+    assert E.get_bullpen_closer(117) is None
+
+
+def test_get_bullpen_closer_excludes_pitcher_with_missing_id(monkeypatch):
+    # A get_pitcher_metrics call that comes back with no real id (a genuinely failed individual
+    # fetch) must not crash the whole search or accidentally win by having a None saves value
+    # compare oddly -- confirmed it's cleanly excluded instead.
+    fake_staff = [{"id": 201, "name": "Real Reliever"}, {"id": 202, "name": "Failed Fetch"}]
+
+    def fake_get_pitcher_metrics(pid, fip_constant=E.FIP_CONSTANT_DEFAULT):
+        if pid == 202:
+            return E.PitcherMetrics(id=None, name="Unknown", stat={})
+        return E.PitcherMetrics(id=pid, name=f"P{pid}", stat={"saves": 5})
+
+    monkeypatch.setattr(E, "get_team_pitching_staff", lambda team_id, exclude_pid=None: fake_staff)
+    monkeypatch.setattr(E, "get_pitcher_metrics", fake_get_pitcher_metrics)
+
+    closer = E.get_bullpen_closer(117)
+    assert closer.id == 201
+    print("✓ get_bullpen_closer excludes a pitcher whose own metrics fetch failed (no real id) rather than crashing")
 
 
 # ----------------------------------------------------------------- get_bullpen_aggregate_stat

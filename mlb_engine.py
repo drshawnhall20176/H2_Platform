@@ -470,30 +470,36 @@ def build_pitching_slate(date_str: str, fip_constant: float = FIP_CONSTANT_DEFAU
     Returns one row per probable starter, including Delta = ERA - FIP (positive =
     underlying performance better than results = positive-regression candidate)."""
     games = [g for g in get_schedule(date_str) if g.get("gamePk")]
-    tasks = []  # (pitcher_id, team_name, opponent, game_label, game_date, team_id, opp_id)
+    tasks = []  # (pitcher_id, team_name, opponent, game_label, game_date, team_id, opp_id, gamePk, venue_id)
     for g in games:
         label = f"{g['away_name']} @ {g['home_name']}"
         gd = g.get("game_date")
         tasks.append((g["home_pitcher_id"], g["home_name"], g["away_name"], label, gd,
-                     g.get("home_id"), g.get("away_id")))
+                     g.get("home_id"), g.get("away_id"), g.get("gamePk"), g.get("venue_id")))
         tasks.append((g["away_pitcher_id"], g["away_name"], g["home_name"], label, gd,
-                     g.get("away_id"), g.get("home_id")))
+                     g.get("away_id"), g.get("home_id"), g.get("gamePk"), g.get("venue_id")))
  
     def fetch(t):
-        pid, team, opp, label, gd, team_id, opp_id = t
+        pid, team, opp, label, gd, team_id, opp_id, game_pk, venue_id = t
         pm = get_pitcher_metrics(pid, fip_constant)
-        return pm, team, opp, label, gd, team_id, opp_id
+        return pm, team, opp, label, gd, team_id, opp_id, game_pk, venue_id
  
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         results = list(ex.map(fetch, tasks))
  
     rows = []
-    for pm, team, opp, label, gd, team_id, opp_id in results:
+    for pm, team, opp, label, gd, team_id, opp_id, game_pk, venue_id in results:
         if pm.id is None or pm.era == 0:
             continue
         rows.append({
             "Pitcher": pm.name, "_pid": pm.id, "Team": team, "Opponent": opp, "Game": label,
             "Hand": pm.hand, "_game_date": gd, "_team_id": team_id, "_opp_id": opp_id,
+            # Additive, backward compatible -- added directly on request for Game Watch's own
+            # team-platoon signal, which needs to fetch tonight's ACTUAL 18-real-batter lineups
+            # (mlb_engine.build_game_lineups) for one specific game, not the whole slate. Every
+            # existing caller already reads rows via .get()/[key] on the fields it actually uses,
+            # so two new keys here are safe.
+            "_gamePk": game_pk, "_venue_id": venue_id,
             "ERA": round(pm.era, 2), "FIP": pm.fip, "Delta": round(pm.era - pm.fip, 2),
             "K/9": round(pm.k9, 1), "WHIP": round(pm.whip, 2), "HR/9": round(pm.hr9, 2), "OBA": pm.oba,
         })
@@ -1029,6 +1035,54 @@ def get_team_pitching_staff(team_id: int, exclude_pid: Optional[int] = None) -> 
             continue
         out.append({"id": pid, "name": person.get("fullName")})
     return sorted(out, key=lambda p: p["name"] or "")
+
+
+def get_bullpen_closer(team_id: int, exclude_pid: Optional[int] = None,
+                       fip_constant: float = FIP_CONSTANT_DEFAULT,
+                       max_workers: int = 8) -> Optional["PitcherMetrics"]:
+    """Identifies a team's own likely CLOSER from its real active pitching staff, using real,
+    available saves data -- the most defensible proxy available without a dedicated bullpen-role
+    data source. Checked directly via research before building this, not assumed: even people
+    who track bullpen roles full-time (fantasy baseball analysts, whose whole job is exactly
+    this) describe closer/setup assignments as genuinely hard to project -- MLB Stats API itself
+    has no dedicated "role" field. Saves are a real, standard stat this same season-stat fetch
+    (get_pitcher_metrics) already carries for every pitcher, not a new data source.
+
+    METHOD: fetches the team's whole active pitching staff (get_team_pitching_staff), then each
+    pitcher's own real season metrics concurrently (get_pitcher_metrics, the SAME function
+    already used for every starter on this platform), and returns whoever has the most real
+    saves this season.
+
+    REAL, STATED LIMITATION: a team using a genuine closer-committee (several relievers splitting
+    save opportunities roughly evenly) still returns SOMEONE -- whoever happens to have the most
+    saves, even if the gap over the next-highest arm is small -- rather than correctly reporting
+    "no clear closer, this bullpen is a committee." A real simplification, not a claim to detect
+    committees specifically.
+
+    REAL COST: one roster fetch plus one get_pitcher_metrics call PER pitcher on the active
+    staff (typically 12-14 pitchers) -- a real, additional cost on top of get_bullpen_
+    aggregate_stat's own cost, run concurrently the same way build_slate's own per-hitter
+    fetches already are.
+
+    Returns None if the team has no active pitching staff, or if EVERY pitcher on it has zero
+    real saves this season (early season, or a genuinely closer-less bullpen so far) -- an
+    honest "no real closer identified" state, not a fabricated pick from a tie at zero."""
+    staff = get_team_pitching_staff(team_id, exclude_pid=exclude_pid)
+    if not staff:
+        return None
+
+    def fetch(p):
+        return get_pitcher_metrics(p["id"], fip_constant)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        metrics = list(ex.map(fetch, staff))
+
+    candidates = [(safe_float((pm.stat or {}).get("saves")), pm) for pm in metrics if pm.id is not None]
+    candidates = [(saves, pm) for saves, pm in candidates if saves > 0]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda t: -t[0])
+    return candidates[0][1]
 
 
 def get_bullpen_aggregate_stat(team_id: int, exclude_pid: Optional[int] = None,

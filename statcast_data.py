@@ -133,8 +133,106 @@ def refresh(year: int, out_path: str = DEFAULT_PATH) -> str:
     out.to_csv(out_path, index=False)
     print(f"Wrote {len(out)} batters to {out_path}")
     return out_path
- 
- 
+
+
+# --------------------------------------------------------------------- pitcher xERA
+# Added directly on request: this platform had expected-stats data for BATTERS (above) but
+# nothing equivalent for PITCHERS. Mirrors the exact same architecture as the batter side --
+# same pybaseball library (already a proven dependency here, not a new one), same pure/testable
+# frame-builder pattern, same "Statcast is always optional, never required" load contract.
+#
+# ONE leaderboard here, not two merged: xERA doesn't need a separate exit-velo/barrels pull the
+# way batter-side xHR-rate calibration does (see expected_hr_rate's own barrel-rate-to-HR-rate
+# calibration, a batter-specific need pitchers don't have here) -- pybaseball's own
+# statcast_pitcher_expected_stats() already returns actual ERA alongside xERA in one leaderboard,
+# the same "actual + expected together" shape the batter-side expected-stats leaderboard already
+# has (confirmed for batters during that feature's own scoping; assumed to hold for the pitcher
+# sibling function by the same vendor, not independently re-confirmed).
+DEFAULT_PITCHER_PATH = os.path.join(DATA_DIR, "statcast_pitchers.csv")
+
+
+def _build_pitcher_statcast_frame(xs: pd.DataFrame) -> pd.DataFrame:
+    """Pure, Savant-free, unit-tested -- mirrors _build_statcast_frame's own pattern exactly for
+    the pitcher side. xs = pybaseball's own statcast_pitcher_expected_stats() leaderboard.
+
+    Raises the same KeyError/ValueError shape _build_statcast_frame does on a missing id column
+    or an empty result, for the same reason: a silent empty frame here would make xERA look like
+    "no data for anyone" rather than surfacing the real column-name mismatch that caused it."""
+    xs = xs.copy()
+    xs_id = _pick(xs, "player_id", "playerid", "mlbam", "key_mlbam", "pitcher")
+    if xs_id is None:
+        raise KeyError(
+            "player-id column not found in Savant pitcher expected-stats data (pybaseball may "
+            f"have renamed it). columns: {list(xs.columns)[:10]}")
+    xs["_pid"] = pd.to_numeric(xs_id, errors="coerce")
+    xs = xs.dropna(subset=["_pid"])
+    if xs.empty:
+        raise ValueError("no valid player_id rows in pitcher expected-stats data")
+
+    return pd.DataFrame({
+        "player_id": xs["_pid"].astype(int),
+        "name": _build_name(xs),
+        "pa": _series(xs, "pa", fill=0),
+        "era": _series(xs, "era", fill=0.0),
+        "xera": _series(xs, "xera", "est_era", "x_era", fill=0.0),
+        "woba": _series(xs, "woba", fill=0.0),
+        "xwoba": _series(xs, "est_woba", "xwoba", fill=0.0),
+    })
+
+
+def refresh_pitchers(year: int, out_path: str = DEFAULT_PITCHER_PATH) -> str:
+    """Pull Savant's pitcher expected-stats leaderboard via pybaseball, mirroring refresh()'s own
+    pattern for the pitcher side. Run nightly, same as refresh() (a real, separate cron/manual
+    step -- this does NOT run automatically inside refresh() itself, since a failure on one side
+    shouldn't silently block the other).
+
+    HONEST LIMITATION, same posture as every other Savant-shape assumption on this platform: the
+    exact column names statcast_pitcher_expected_stats() returns are NOT verified against a live
+    response from this sandbox (no network path to pybaseball/Savant here). _build_pitcher_
+    statcast_frame's own multi-candidate _series()/_pick() lookups are the same real defense
+    refresh()'s own batter-side pull already relies on for this exact risk (pybaseball's column
+    names have drifted between versions before) -- but worth a real, early check of the printed
+    row count the first time this actually runs somewhere with live access."""
+    from pybaseball import statcast_pitcher_expected_stats
+
+    xs = _norm_cols(statcast_pitcher_expected_stats(year))
+    out = _build_pitcher_statcast_frame(xs)
+
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    out.to_csv(out_path, index=False)
+    print(f"Wrote {len(out)} pitchers to {out_path}")
+    return out_path
+
+
+def load_pitchers(path: str = DEFAULT_PITCHER_PATH) -> Dict[int, Dict]:
+    """Read the cached pitcher-xERA CSV. Returns {player_id: {...}}, or {} if the file is
+    missing -- mirrors load()'s own "Statcast is always optional, never required" contract
+    exactly. No calibration_k here (unlike load()'s own return) -- xERA is already on the real
+    ERA scale directly, it doesn't need the barrel-rate-to-HR-rate calibration constant the
+    batter side computes for a completely different purpose."""
+    if not os.path.exists(path):
+        return {}
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return {}
+    if df.empty or "player_id" not in df.columns:
+        return {}
+
+    lookup: Dict[int, Dict] = {}
+    for r in df.itertuples(index=False):
+        d = r._asdict()
+        lookup[int(d["player_id"])] = {
+            "name": d.get("name"),
+            "pa": float(d.get("pa", 0) or 0),
+            "era": float(d.get("era", 0) or 0),
+            "xera": float(d.get("xera", 0) or 0),
+            "woba": float(d.get("woba", 0) or 0),
+            "xwoba": float(d.get("xwoba", 0) or 0),
+        }
+    return lookup
+
+
 # ---------------------------------------------------------------------- load
 def load(path: str = DEFAULT_PATH) -> Tuple[Dict[int, Dict], Optional[float]]:
     """Read the cached CSV. Returns (lookup_by_player_id, calibration_k).

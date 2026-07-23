@@ -469,6 +469,37 @@ def test_matchup_signal_tally_empty_list_is_insufficient_data():
     assert P.matchup_signal_tally([])["verdict"] == "insufficient_data"
 
 
+# ----------------------------------------------------------------- team_platoon_advantage_fraction
+def test_team_platoon_advantage_fraction_hand_verified():
+    lineup = [{"Advantage": "Advantage"}, {"Advantage": "Advantage"}, {"Advantage": "Advantage"},
+             {"Advantage": "Disadvantage"}, {"Advantage": "Disadvantage"}]
+    frac = P.team_platoon_advantage_fraction(lineup)
+    assert abs(frac - 0.6) < 1e-9   # 3 of 5
+    print("✓ team_platoon_advantage_fraction hand-verifies the exact fraction of a lineup holding the platoon edge")
+
+
+def test_team_platoon_advantage_fraction_excludes_unknown():
+    lineup = [{"Advantage": "Advantage"}, {"Advantage": "Unknown"}, {"Advantage": "Disadvantage"}]
+    frac = P.team_platoon_advantage_fraction(lineup)
+    assert abs(frac - 0.5) < 1e-9   # 1 of 2 KNOWN reads, "Unknown" row excluded entirely
+    print("✓ team_platoon_advantage_fraction excludes Unknown reads from both numerator and denominator")
+
+
+def test_team_platoon_advantage_fraction_none_when_empty():
+    assert P.team_platoon_advantage_fraction([]) is None
+
+
+def test_team_platoon_advantage_fraction_none_when_all_unknown():
+    lineup = [{"Advantage": "Unknown"}, {"Advantage": "Unknown"}]
+    assert P.team_platoon_advantage_fraction(lineup) is None
+    print("✓ team_platoon_advantage_fraction returns None (not a fabricated 0.0) when every batter's hand data is unknown")
+
+
+def test_team_platoon_advantage_fraction_all_advantage():
+    lineup = [{"Advantage": "Advantage"}] * 4
+    assert P.team_platoon_advantage_fraction(lineup) == 1.0
+
+
 # ----------------------------------------------------------------- blended_pitching_run_rate
 def test_blended_pitching_run_rate_hand_verified():
     # 5.5/9 * 3.60 + 3.5/9 * 4.20 = 3.833333...
@@ -719,6 +750,172 @@ def test_simulate_one_game_starter_to_bullpen_handoff_affects_scoring():
         n_trials=400, seed=5)
     assert early_pull["avg_away_runs"] > late_pull["avg_away_runs"]
     print("✓ simulate_one_game: pulling a tough starter earlier for a weaker bullpen measurably raises the opposing offense's expected runs")
+
+
+# ----------------------------------------------------------------- simulate_one_game: adaptive pull (early_pull_runs)
+def test_simulate_one_game_early_pull_hand_verified_exact_score():
+    # A degenerate but fully deterministic case, computed directly (not estimated by hand) then
+    # locked in here as a regression value: home's starter never reaches his exp_outs (99, an
+    # all-HR lineup never records an out against him), but early_pull_runs=2 should pull him
+    # after exactly 2 solo homers -- the away lineup then faces the (all-out) bullpen for the
+    # rest of the game, so the final score is exactly 2-0, not the safety-cap-driven blowout an
+    # un-pulled starter would allow.
+    hr_probs = [_certain_probs(P.HR)] * 9
+    out_probs = [_certain_probs(P.OUT_PLAY)] * 9
+    rng = np.random.default_rng(1)
+    away_runs, home_runs = P.simulate_one_game(
+        hr_probs, out_probs, 99, out_probs, out_probs, 99, rng, early_pull_runs=2)
+    assert (away_runs, home_runs) == (2, 0)
+    print("✓ simulate_one_game with early_pull_runs=2 hand-verifies the exact 2-0 score once the starter is pulled after his 2nd allowed run")
+
+
+def test_simulate_one_game_early_pull_none_preserves_original_behavior():
+    # Same exact setup, but early_pull_runs=None (the default) -- the starter never gets pulled
+    # via runs allowed, so the safety cap alone determines the final score (see the dedicated
+    # safety-cap test above for the exact same 40-PA-per-inning derivation).
+    hr_probs = [_certain_probs(P.HR)] * 9
+    out_probs = [_certain_probs(P.OUT_PLAY)] * 9
+    rng = np.random.default_rng(1)
+    away_runs, home_runs = P.simulate_one_game(
+        hr_probs, out_probs, 99, out_probs, out_probs, 99, rng, early_pull_runs=None)
+    assert away_runs == P.MAX_PA_PER_HALF_INNING * 9   # same derivation as the safety-cap test
+    assert home_runs == 0
+    print("✓ simulate_one_game with early_pull_runs=None (default) is unaffected by runs allowed, matching the original fixed-outs-only behavior exactly")
+
+
+def test_simulate_one_game_early_pull_check_is_not_retroactive():
+    # The pull check happens BEFORE each PA, not after -- a starter who allows exactly the
+    # threshold on some PA is still active FOR that PA (the run that crossed the threshold still
+    # happened while he was in), and is only pulled starting the NEXT one. Traced by hand and
+    # confirmed by the exact 2-0 test above: the 2nd homer (which brings his runs allowed to
+    # exactly 2, the threshold) still counts as allowed by the starter, not retroactively
+    # reassigned to the bullpen -- if the check WERE retroactive/pre-emptive on the qualifying
+    # PA itself, the 2nd batter would have faced the bullpen (all outs) instead of the starter
+    # (all HR), and the final score would be 1-0, not 2-0.
+    hr_probs = [_certain_probs(P.HR)] * 9
+    out_probs = [_certain_probs(P.OUT_PLAY)] * 9
+    rng = np.random.default_rng(1)
+    away_runs, _ = P.simulate_one_game(hr_probs, out_probs, 99, out_probs, out_probs, 99,
+                                       rng, early_pull_runs=2)
+    assert away_runs == 2   # not 1 -- confirms the pull isn't applied retroactively to the qualifying PA
+    print("✓ simulate_one_game's early-pull check applies going forward from the NEXT plate appearance, never retroactively")
+
+
+def test_simulate_one_game_early_pull_affects_only_the_pulled_side():
+    # early_pull_runs is a single shared parameter, but each side's own starter is tracked and
+    # pulled INDEPENDENTLY -- pulling the home starter early must not affect whether/when the
+    # away starter gets pulled.
+    hr_probs = [_certain_probs(P.HR)] * 9
+    out_probs = [_certain_probs(P.OUT_PLAY)] * 9
+    rng = np.random.default_rng(1)
+    # Home's starter (facing an all-HR away lineup) should get pulled after 2 runs; away's
+    # starter (facing an all-out home lineup) should never allow a run and never get pulled.
+    away_runs, home_runs = P.simulate_one_game(
+        hr_probs, out_probs, home_starter_exp_outs=99,
+        home_probs_vs_starter=out_probs, home_probs_vs_bullpen=out_probs, away_starter_exp_outs=99,
+        rng=rng, early_pull_runs=2)
+    assert away_runs == 2 and home_runs == 0
+    print("✓ simulate_one_game tracks and pulls each side's own starter independently under early_pull_runs")
+
+
+def test_simulate_game_win_probability_passes_early_pull_runs_through():
+    # Regression guard: simulate_game_win_probability must actually forward early_pull_runs to
+    # simulate_one_game, not silently drop it -- confirmed by the same dramatic score difference
+    # the pure simulate_one_game tests above already established, now checked through the
+    # trials-averaging wrapper specifically.
+    hr_probs = [_certain_probs(P.HR)] * 9
+    out_probs = [_certain_probs(P.OUT_PLAY)] * 9
+    with_pull = P.simulate_game_win_probability(hr_probs, out_probs, 99, out_probs, out_probs, 99,
+                                                n_trials=20, seed=3, early_pull_runs=2)
+    without_pull = P.simulate_game_win_probability(hr_probs, out_probs, 99, out_probs, out_probs, 99,
+                                                    n_trials=20, seed=3, early_pull_runs=None)
+    assert with_pull["avg_away_runs"] < without_pull["avg_away_runs"]
+    assert with_pull["avg_away_runs"] == 2.0   # every trial is identically deterministic here
+    print("✓ simulate_game_win_probability correctly forwards early_pull_runs down to simulate_one_game")
+
+
+# ----------------------------------------------------------------- simulate_one_game: third-phase closer
+def test_simulate_one_game_closer_takes_over_the_final_inning_hand_verified():
+    # Computed directly (not estimated by hand), then locked in as a regression value: home's
+    # starter is pulled immediately (exp_outs=0), and the "rest of bullpen" (home_probs_vs_
+    # bullpen) always allows a HR -- but home's own closer is lights-out. With closer_innings=1,
+    # innings 1-8 hit the safety cap (40 runs each, HR never makes an out) = 320, and inning 9
+    # is shut down by the closer (0 runs) -> exactly 320 total, not 360 (the no-closer case).
+    hr_probs = [_certain_probs(P.HR)] * 9
+    out_probs = [_certain_probs(P.OUT_PLAY)] * 9
+    rng = np.random.default_rng(2)
+    away_runs, home_runs = P.simulate_one_game(
+        hr_probs, hr_probs, 0, out_probs, out_probs, 99,
+        rng, away_probs_vs_closer=out_probs, closer_innings=1)
+    assert (away_runs, home_runs) == (320, 0)
+    print("✓ simulate_one_game's closer phase hand-verifies the exact 320-0 score across the full 9 innings")
+
+
+def test_simulate_one_game_no_closer_given_preserves_original_two_phase_behavior():
+    # Same exact setup, but away_probs_vs_closer=None (the default) -- every inning after the
+    # immediate pull uses the HR-certain "rest of bullpen" array, hitting the safety cap in
+    # all 9 innings (9 * 40 = 360), same derivation as the safety-cap test.
+    hr_probs = [_certain_probs(P.HR)] * 9
+    out_probs = [_certain_probs(P.OUT_PLAY)] * 9
+    rng = np.random.default_rng(2)
+    away_runs, home_runs = P.simulate_one_game(
+        hr_probs, hr_probs, 0, out_probs, out_probs, 99,
+        rng, away_probs_vs_closer=None)
+    assert away_runs == P.MAX_PA_PER_HALF_INNING * 9
+    assert home_runs == 0
+    print("✓ simulate_one_game with no closer array given (default None) is unaffected, matching the original two-phase behavior exactly")
+
+
+def test_simulate_one_game_closer_never_overrides_an_active_starter():
+    # A starter who's still active going into (and through) the closer's own inning window must
+    # keep pitching -- the closer phase can only take over once the starter is actually out,
+    # never cut a still-cruising start short just because it's the 9th inning.
+    out_probs = [_certain_probs(P.OUT_PLAY)] * 9
+    hr_probs = [_certain_probs(P.HR)] * 9
+    rng = np.random.default_rng(4)
+    away_runs, home_runs = P.simulate_one_game(
+        out_probs, hr_probs, 99,   # home starter never reaches 99 outs across 9 innings -> never pulled
+        out_probs, out_probs, 99,
+        rng, away_probs_vs_closer=hr_probs, closer_innings=1)
+    assert (away_runs, home_runs) == (0, 0)
+    print("✓ simulate_one_game's closer phase never overrides a starter who's still active, even in the closer's own inning window")
+
+
+def test_simulate_one_game_closer_array_is_not_swapped_between_sides():
+    # Regression guard for a REAL bug caught and fixed while building this (not a hypothetical):
+    # away_probs_vs_closer must be the AWAY lineup's own read facing the HOME closer (mirroring
+    # away_probs_vs_bullpen's own convention exactly), not accidentally cross-wired to the other
+    # side. Give AWAY's closer array a distinctly different read (certain HR) than HOME's
+    # (certain out) and confirm each side's own runs reflect its OWN opposing closer, not the
+    # other side's.
+    out_probs = [_certain_probs(P.OUT_PLAY)] * 9
+    hr_probs = [_certain_probs(P.HR)] * 9
+    rng = np.random.default_rng(9)
+    away_runs, home_runs = P.simulate_one_game(
+        out_probs, out_probs, 0,    # home starter pulled immediately; away batters face home's closer
+        out_probs, out_probs, 0,    # away starter pulled immediately; home batters face away's closer
+        rng, away_probs_vs_closer=out_probs,   # away batters vs HOME's closer: shut down
+        home_probs_vs_closer=hr_probs,          # home batters vs AWAY's closer: gives up HRs
+        closer_innings=9)   # the whole game is "closer window" for a clean, simple check
+    assert away_runs == 0    # away batters faced home's OWN (shutdown) closer, not away's own
+    assert home_runs == P.MAX_PA_PER_HALF_INNING * 9   # home batters faced away's OWN (HR) closer
+    print("✓ simulate_one_game's away_probs_vs_closer/home_probs_vs_closer are never cross-wired between sides")
+
+
+def test_simulate_game_win_probability_passes_closer_params_through():
+    # Regression guard: simulate_game_win_probability must actually forward the closer
+    # parameters to simulate_one_game, not silently drop them.
+    hr_probs = [_certain_probs(P.HR)] * 9
+    out_probs = [_certain_probs(P.OUT_PLAY)] * 9
+    with_closer = P.simulate_game_win_probability(
+        hr_probs, hr_probs, 0, out_probs, out_probs, 99,
+        n_trials=10, seed=2, away_probs_vs_closer=out_probs, closer_innings=1)
+    without_closer = P.simulate_game_win_probability(
+        hr_probs, hr_probs, 0, out_probs, out_probs, 99,
+        n_trials=10, seed=2)
+    assert with_closer["avg_away_runs"] < without_closer["avg_away_runs"]
+    assert with_closer["avg_away_runs"] == 320.0   # every trial is identically deterministic here
+    print("✓ simulate_game_win_probability correctly forwards the closer parameters down to simulate_one_game")
 
 
 def test_simulate_game_win_probability_lopsided_matchup_favors_the_better_side():
