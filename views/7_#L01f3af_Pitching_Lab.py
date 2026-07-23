@@ -15,6 +15,7 @@ import pytz
 import mlb_engine as E
 import projections as P
 import statcast_data as SC
+import weather as WX
 
 st.title("🎯 Pitching Lab")
 st.caption("ERA vs FIP regression and matchup-aware strikeout/innings projections")
@@ -38,16 +39,19 @@ def load_statcast():
     return SC.load()  # (lookup_by_player_id, calibration_k); ({}, None) if no cache file
 
 
-def _build_lineup_probs(rows, opp_starter_stat, opp_bullpen_stat, park, statcast_lookup, statcast_k):
+def _build_lineup_probs(rows, opp_starter_stat, opp_bullpen_stat, park, statcast_lookup, statcast_k,
+                        weather_hr=1.0):
     """For a real 9-batter lineup (build_game_lineups' own row shape), build the two per-batter
     probability-array lists the game simulation needs -- one for facing the OPPOSING starter,
     one for facing the OPPOSING bullpen -- reusing batter_pa_probs/pitcher_allowed_rates exactly
     as they're already used elsewhere on this platform for individual player props, not a new
     parallel calculation.
 
-    NO LIVE WEATHER ADJUSTMENT (weather_hr fixed at 1.0, neutral) -- a real, stated
-    simplification for this v1 wiring, not an oversight; batter_pa_probs itself supports a real
-    weather multiplier, it's just not fetched and threaded through here yet.
+    weather_hr: a real HR-rate multiplier from weather.get_game_weather (the SAME function
+    Dinger Engine's own game-by-game weather read already uses), added directly on request after
+    this was shipped as a stated v1 simplification (fixed at 1.0, neutral). Defaults to 1.0 for
+    any caller that doesn't have a real weather read yet -- an indoor/dome game or a missing
+    weather fetch is honestly neutral, not guessed in either direction.
 
     Returns (probs_vs_starter_list, probs_vs_bullpen_list), each exactly 9 arrays in the same
     batting-order order as `rows`, or None if either the starter's or bullpen's own rates can't
@@ -60,13 +64,32 @@ def _build_lineup_probs(rows, opp_starter_stat, opp_bullpen_stat, park, statcast
     vs_starter, vs_bullpen = [], []
     for row in rows:
         xhr = P.xhr_from_statcast(row["_pid"], statcast_lookup, statcast_k)
-        probs_sp = P.batter_pa_probs(row["_stat"], park, opp_sp_rates, row["_split_stat"], xhr, weather_hr=1.0)
-        probs_pen = P.batter_pa_probs(row["_stat"], park, opp_pen_rates, row["_split_stat"], xhr, weather_hr=1.0)
+        probs_sp = P.batter_pa_probs(row["_stat"], park, opp_sp_rates, row["_split_stat"], xhr, weather_hr=weather_hr)
+        probs_pen = P.batter_pa_probs(row["_stat"], park, opp_pen_rates, row["_split_stat"], xhr, weather_hr=weather_hr)
         if probs_sp is None or probs_pen is None:
             return None
         vs_starter.append(probs_sp)
         vs_bullpen.append(probs_pen)
     return vs_starter, vs_bullpen
+
+
+def _build_lineup_probs_vs_one_pitcher(rows, opp_stat, park, statcast_lookup, statcast_k, weather_hr=1.0):
+    """Same real logic as _build_lineup_probs above, but for ONE specific opposing pitcher
+    (the closer) rather than a starter+bullpen pair -- avoids the wasted double computation
+    _build_lineup_probs would do if called with the same stat dict twice for both its starter
+    and bullpen arguments. Returns a list of 9 probability arrays, or None if the pitcher's own
+    rates or any single batter's own projection can't be computed."""
+    opp_rates = P.pitcher_allowed_rates(opp_stat)
+    if opp_rates is None:
+        return None
+    out = []
+    for row in rows:
+        xhr = P.xhr_from_statcast(row["_pid"], statcast_lookup, statcast_k)
+        probs = P.batter_pa_probs(row["_stat"], park, opp_rates, row["_split_stat"], xhr, weather_hr=weather_hr)
+        if probs is None:
+            return None
+        out.append(probs)
+    return out
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -279,16 +302,17 @@ if game_options:
     # bigger, more complex model with more places a real calibration error could hide, and
     # there's been zero opportunity to check it against actual outcomes from this sandbox.
     #
-    # REAL, STATED SIMPLIFICATIONS IN THE WIRING ITSELF (on top of the engine's own, see
-    # projections.py's module comment above simulate_one_game): no live weather adjustment
-    # (weather_hr fixed at 1.0 neutral -- batter_pa_probs supports a real weather multiplier,
-    # just not wired in here yet); a starter's own rest/matchup-lineup adjustments used
-    # elsewhere on this platform (rest_adjustment_multipliers, opponent-lineup K/BB odds-ratio)
-    # are NOT applied here -- each starter/bullpen is projected from his own season rates alone.
+    # REAL, STATED SIMPLIFICATIONS STILL IN THE WIRING (on top of the engine's own, see
+    # projections.py's module comment above simulate_one_game): a starter's own rest/matchup-
+    # lineup adjustments used elsewhere on this platform (rest_adjustment_multipliers, opponent-
+    # lineup K/BB odds-ratio) are NOT applied here -- each starter/bullpen is projected from his
+    # own season rates alone. Real weather (via weather.get_game_weather, same function Dinger
+    # Engine's own game-by-game read uses) IS applied now -- added directly on request, no
+    # longer a stated gap.
     #
     # REAL COST, substantial: up to 18 hitter fetches, 2 starter fetches, 1 boxscore fetch, 2
-    # bullpen-aggregate fetches, PLUS the simulation itself (n_trials full 9-inning games) --
-    # the most expensive single feature on this platform. On-demand only.
+    # bullpen-aggregate fetches, 1 weather fetch, PLUS the simulation itself (n_trials full
+    # 9-inning games) -- the most expensive single feature on this platform. On-demand only.
     st.markdown("**🎲 EXPERIMENTAL — full Monte Carlo game simulation**")
     st.caption("Simulates the actual game, inning by inning, using both teams' real lineups — "
               "the full version of a win-probability model, not the lighter Pythagorean/Log5 "
@@ -299,6 +323,31 @@ if game_options:
                          help="More trials narrow the estimate but take longer to run in this "
                              "plain-Python (not vectorized) engine — see projections.py's own "
                              "docstring for the exact tradeoff.")
+    apc1, apc2 = st.columns([1, 2])
+    with apc1:
+        adaptive_pull = st.checkbox("Adaptive starter pull", value=True,
+                                    help="Pull a starter early in a given trial if he's allowed "
+                                        "too many runs, instead of always pitching his full "
+                                        "expected outs regardless of how the trial is going.")
+    with apc2:
+        early_pull_runs = st.number_input(
+            "Pull after this many runs allowed", min_value=1, max_value=10, value=5, step=1,
+            disabled=not adaptive_pull,
+            help="A real, stated 'quick hook' rule, not a claim to model actual manager "
+                "decisions precisely — there's no single agreed formula for real in-game pull "
+                "decisions (checked directly: genuinely hard to project even for people who "
+                "track bullpen usage full-time). See projections.simulate_one_game's own "
+                "docstring for the full reasoning.")
+    multi_reliever = st.checkbox(
+        "Multi-reliever bullpen sequencing (identify each team's own closer by real saves data)",
+        value=True,
+        help="Instead of one blended bullpen rate for every relief inning, identifies each "
+            "team's own likely closer (most real saves on the active staff) and uses his own "
+            "individual rates for the 9th inning specifically, once the starter is out — the "
+            "rest of the bullpen still uses the blended aggregate for any earlier relief "
+            "innings. A real, stated proxy (saves), not a guaranteed-correct role read — a "
+            "genuine closer-committee team will still return whoever has the most saves. Real "
+            "additional cost: one full staff of pitcher fetches per team.")
     if st.button("🎲 Run full game simulation", key=f"sim_run_{picked.get('gamePk')}"):
         with st.spinner("Fetching both real lineups..."):
             lineups = E.build_game_lineups(
@@ -313,10 +362,32 @@ if game_options:
                 park = P.PARK_FACTORS.get(picked.get("venue_id"), P.NEUTRAL_PARK)
                 home_pm, away_pm = lineups["home_pm"], lineups["away_pm"]
 
+                # Real weather -- the SAME get_game_weather Dinger Engine's own game-by-game
+                # weather read already uses, added directly on request after this was shipped as
+                # a stated v1 simplification (weather_hr fixed at 1.0). An indoor/dome game or a
+                # failed fetch falls back to weather_hr=1.0 (neutral) -- honest, not guessed.
+                weather_hr = 1.0
+                try:
+                    wx = WX.get_game_weather(picked.get("venue_id"), picked.get("game_date"), picked.get("venue"))
+                    if wx and not wx.get("dome"):
+                        weather_hr = wx.get("hr_factor", 1.0)
+                except Exception:
+                    pass   # weather_hr stays neutral -- an honest fallback, not a blocked simulation
+
                 away_bullpen_stat = E.get_bullpen_aggregate_stat(picked["away_id"], exclude_pid=away_pm.id)
                 home_bullpen_stat = E.get_bullpen_aggregate_stat(picked["home_id"], exclude_pid=home_pm.id)
                 away_starter_proj = P.project_pitcher(away_pm.stat)
                 home_starter_proj = P.project_pitcher(home_pm.stat)
+
+                # Multi-reliever sequencing: each side's own closer, identified by real saves
+                # data (mlb_engine.get_bullpen_closer's own docstring has the full reasoning and
+                # stated limitations). None when the toggle is off, or when no clear closer is
+                # found (get_bullpen_closer's own honest "no fabricated pick" contract) -- either
+                # way, simulate_game_win_probability's own closer params default to None-safe.
+                away_closer = home_closer = None
+                if multi_reliever:
+                    away_closer = E.get_bullpen_closer(picked["away_id"], exclude_pid=away_pm.id)
+                    home_closer = E.get_bullpen_closer(picked["home_id"], exclude_pid=home_pm.id)
 
                 sim_result = None
                 if not (away_bullpen_stat and home_bullpen_stat and away_starter_proj and home_starter_proj):
@@ -325,18 +396,35 @@ if game_options:
                               "opener) — the simulation needs a real projection for both sides.")
                 else:
                     home_probs = _build_lineup_probs(lineups["home_rows"], away_pm.stat, away_bullpen_stat,
-                                                     park, statcast_lookup, statcast_k)
+                                                     park, statcast_lookup, statcast_k, weather_hr=weather_hr)
                     away_probs = _build_lineup_probs(lineups["away_rows"], home_pm.stat, home_bullpen_stat,
-                                                     park, statcast_lookup, statcast_k)
+                                                     park, statcast_lookup, statcast_k, weather_hr=weather_hr)
                     if home_probs is None or away_probs is None:
                         st.warning("Couldn't build real matchup probabilities for every batter in "
                                   "one or both lineups (thin individual sample) — the simulation "
                                   "needs a real projection for all 18 real batters.")
                     else:
+                        # away_probs_vs_closer = AWAY lineup's own read facing HOME's closer
+                        # (mirrors away_probs the same way away_probs itself mirrors "away
+                        # lineup facing home's starter/bullpen" -- see simulate_one_game's own
+                        # docstring for why this exact naming convention matters).
+                        away_probs_vs_closer = (
+                            _build_lineup_probs_vs_one_pitcher(lineups["away_rows"], home_closer.stat,
+                                                               park, statcast_lookup, statcast_k,
+                                                               weather_hr=weather_hr)
+                            if home_closer else None)
+                        home_probs_vs_closer = (
+                            _build_lineup_probs_vs_one_pitcher(lineups["home_rows"], away_closer.stat,
+                                                               park, statcast_lookup, statcast_k,
+                                                               weather_hr=weather_hr)
+                            if away_closer else None)
                         sim_result = P.simulate_game_win_probability(
                             away_probs[0], away_probs[1], home_starter_proj["exp_outs"],
                             home_probs[0], home_probs[1], away_starter_proj["exp_outs"],
-                            n_trials=n_trials)
+                            n_trials=n_trials,
+                            early_pull_runs=int(early_pull_runs) if adaptive_pull else None,
+                            away_probs_vs_closer=away_probs_vs_closer,
+                            home_probs_vs_closer=home_probs_vs_closer)
 
             if sim_result:
                 mc1, mc2, mc3 = st.columns(3)
@@ -346,6 +434,13 @@ if game_options:
                 st.caption(f"Average simulated score: {picked['away_name']} "
                           f"{sim_result['avg_away_runs']:.1f} — {picked['home_name']} "
                           f"{sim_result['avg_home_runs']:.1f}, across {sim_result['n_trials']} trials.")
+                if multi_reliever:
+                    away_closer_name = away_closer.name if away_closer else "no clear closer identified"
+                    home_closer_name = home_closer.name if home_closer else "no clear closer identified"
+                    st.caption(f"🔒 Closers used for the 9th inning: {picked['away_name']} — "
+                              f"{away_closer_name}; {picked['home_name']} — {home_closer_name}. "
+                              "Identified by real saves data — see the checkbox's own help text "
+                              "for the stated limitation on closer-committee bullpens.")
                 st.caption("⚠️ **Not backtested.** A real inning-by-inning simulation using real "
                           "lineups, but deterministic base-running (see projections.py's own "
                           "module comment for the exact list of simplifications) tends to "

@@ -1,11 +1,13 @@
 """
-Game Watch — tonight's whole slate, six real signals per game plus injury context, honestly
+Game Watch — tonight's whole slate, eight real signals per game plus injury context, honestly
 combined.
 
-WHAT THIS IS, PRECISELY: for each game, compares starter quality (FIP), bullpen freshness,
-bullpen quality (aggregate ERA), overall team form (last-15-games record and run differential),
-each team's form specifically in tonight's role (home vs road), and each team's form specifically
-in tonight's day/night slot -- then reports how many of those signals favor each team. Also shows
+WHAT THIS IS, PRECISELY: for each game, compares starter quality (FIP), starter quality by
+contact-quality (xERA -- a separate, deliberately non-redundant read, see below), bullpen
+freshness, bullpen quality (aggregate ERA), overall team form (last-15-games record and run
+differential), each team's form specifically in tonight's role (home vs road), each team's form
+specifically in tonight's day/night slot, and each team's own real platoon edge against tonight's
+specific opposing starter -- then reports how many of those signals favor each team. Also shows
 each team's real injury/roster-restriction report as CONTEXT, deliberately not tallied (see the
 per-game injury section's own note for why). That's it. NOT a win probability. NOT a betting
 recommendation. NOT a prediction of the final score. A transparent count of how many
@@ -25,28 +27,42 @@ model -- that's a genuinely bigger, different undertaking, worth its own separat
 proves useful. Bullpen Watch already covers freshness alone, cheaply, for anyone who just wants
 that quick read; this page is the fuller (and more expensive) picture for anyone who wants more.
 
-NOT EVERYTHING FROM THAT SAME REAL PROCESS IS HERE YET -- see the disclaimer at the bottom of
-the page for the three pieces deliberately left out (pitcher-side xERA, team-level platoon
-performance, head-to-head starter history) and why each is a real, separate undertaking rather
-than a quick addition, not an oversight.
+STARTER FIP AND STARTER xERA ARE DELIBERATELY BOTH KEPT, NOT MERGED: real research (checked
+directly, not assumed) found xERA has SIMILAR predictive power to FIP for future ERA, not
+clearly better -- MLB's own glossary states xERA "is not necessarily predictive" on its own. So
+this isn't "xERA replaces FIP because it's a better metric." FIP and xERA measure a pitcher
+through genuinely different mechanisms (FIP only counts strikeouts/walks/homers; xERA reads
+contact quality on everything in play), so when they agree, that's a real, independently-
+corroborated read; when they disagree on a specific pitcher, THAT disagreement is itself real
+information this page didn't have access to before -- which is why they're shown and tallied as
+two separate signals, not silently averaged into one.
 
-REAL COST, OPT-IN BY DESIGN: the starter-FIP comparison is FREE (already inside the same
-build_pitching_slate fetch Bullpen Watch also uses). Every other signal is a genuinely NEW real
+NOT EVERYTHING FROM THAT SAME REAL PROCESS IS HERE -- head-to-head starter-vs-opponent history is
+deliberately still left out, not an oversight: most specific pitcher/team pairs have only a
+handful of career meetings, and turning that into a directional signal would be exactly the
+small-sample overclaiming this page exists to avoid.
+
+REAL COST, OPT-IN BY DESIGN: the starter-FIP comparison and starter xERA are both FREE (FIP is
+already inside the same build_pitching_slate fetch Bullpen Watch also uses; xERA is a single
+cached local file read, not a live fetch at all). Every other signal is a genuinely NEW real
 fetch per team on top -- bullpen freshness and quality each cost what they already cost
 elsewhere on this platform; each team-form variant (overall, road/home, day/night) is its own
-schedule-range fetch; the injury report is one more roster fetch per team. Nothing beyond the
-lightweight starter list loads until you press the button below -- a real, larger number of API
-calls than earlier versions of this page, worth being upfront about.
+schedule-range fetch; the injury report is one more roster fetch per team; the team-platoon
+signal is the biggest addition -- a full 18-real-batter lineup fetch per game (the same
+mlb_engine.build_game_lineups the Monte Carlo simulation on Pitching Lab already uses). Nothing
+beyond the lightweight starter list and the one-time xERA cache read loads until you press the
+button below.
 
 EXPERIMENTAL WIN-PROBABILITY ESTIMATE, PER GAME, COLLAPSED BY DEFAULT: a real Pythagorean/Log5
 estimate (Phase 1 of the bigger, separately-scoped "real win-probability model" project) sits in
 its own collapsed expander under each game, deliberately kept visually and conceptually separate
-from the six honest-count signals above it. Those six output a COUNT specifically because
+from the eight honest-count signals above it. Those eight output a COUNT specifically because
 nothing here is backtested; this outputs an actual PROBABILITY NUMBER, a different and higher-
 stakes kind of claim. Costs zero additional fetches -- reuses the same runs_scored/FIP/bullpen-
-ERA data already loaded for the six signals. See projections.py's own module-level comment above
-game_win_probability for the full honesty note, and the expander's own warning text before
-trusting any number in it.
+ERA data already loaded for the tallied signals (deliberately does NOT yet incorporate xERA or
+the platoon signal -- see projections.game_win_probability's own docstring, unchanged since
+Phase 1). See projections.py's own module-level comment above game_win_probability for the full
+honesty note, and the expander's own warning text before trusting any number in it.
 """
 
 import streamlit as st
@@ -54,6 +70,7 @@ from datetime import datetime
 
 import mlb_engine as E
 import projections as P
+import statcast_data as SC
 import sports
 
 game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER
@@ -65,19 +82,24 @@ game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER
 # different quality across a whole season, genuinely noisier than one starter's own FIP).
 FIP_EPSILON = 0.20
 BULLPEN_ERA_EPSILON = 0.30
+XERA_EPSILON = 0.20   # same scale/reasoning as FIP_EPSILON -- xERA is on the real ERA scale too
 # Run differential is a per-game AVERAGE (not a total), so this needs to be a small number --
 # roughly "three quarters of a run per game, sustained over the last 15 games" as the real,
 # stated floor for "this is a meaningfully hotter/colder team," not noise from a couple of
 # lopsided games inside an otherwise ordinary stretch.
 RUN_DIFF_EPSILON = 0.75
+PLATOON_EPSILON = 0.15   # a real, stated floor for "this lineup genuinely holds the platoon
+                        # edge more," not noise from one or two extra favorable bats in a
+                        # 9-man lineup (1 batter out of 9 alone is an ~11-point swing)
 GAMES_BACK = 15   # matches the real number from trader discussion directly ("last 15 games"),
                   # not a round number picked independently
 
 st.title("📡 Game Watch")
-st.caption("Six real signals per game, plus injury context — starter quality, bullpen freshness, "
-          "bullpen quality, overall team form, tonight's-role form, tonight's-slot form — "
-          "combined into an honest count, not a predicted winner. See the disclaimer at the "
-          "bottom before reading too much into any single game.")
+st.caption("Eight real signals per game, plus injury context — starter quality (FIP and xERA), "
+          "bullpen freshness, bullpen quality, overall team form, tonight's-role form, "
+          "tonight's-slot form, and team platoon edge — combined into an honest count, not a "
+          "predicted winner. See the disclaimer at the bottom before reading too much into any "
+          "single game.")
 lc1, lc2 = st.columns(2)
 with lc1:
     st.page_link("views/7_#L01f3af_Pitching_Lab.py",
@@ -101,6 +123,21 @@ with st.spinner("Loading tonight's probable starters..."):
 if not pitching_rows:
     st.info("No probable starters found for this date yet — check back closer to first pitch.")
     st.stop()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_statcast_pitchers():
+    # ONE load for the whole page, not per-game -- same convention Dinger Engine/Pitching Lab
+    # already use for their own statcast loaders. Cache miss (file doesn't exist yet, or the
+    # nightly refresh hasn't run) returns {} gracefully -- see statcast_data.load_pitchers' own
+    # "Statcast is always optional, never required" contract.
+    return SC.load_pitchers()
+
+
+# Called immediately, NOT gated behind the button below -- this is a single local CSV read (the
+# nightly-refreshed cache file), not a live network fetch, so it doesn't carry the real per-game
+# API cost the button below exists to gate.
+statcast_pitchers = load_statcast_pitchers()
 
 games = E.pair_pitching_slate_by_game(pitching_rows)
 # Strictly chronological by actual start time -- game_dt returns a TZ-AWARE (Eastern) datetime
@@ -156,9 +193,10 @@ st.caption(f"{len(games)} game(s) shown for {date_str}.")
 if not st.button(f"🔄 Load matchup signals for {len(games)} game(s)",
                  help="Real cost, bigger than earlier versions of this page: bullpen freshness, "
                      "bullpen quality, three separate team-form variants (overall, road/home, "
-                     "day/night), and an injury report each require their own real fetch per "
-                     "team, for both teams in every game below (starter FIP is free, already "
-                     "loaded above). Cached for 10-15 minutes."):
+                     "day/night), an injury report, AND (new) a full 18-real-batter lineup fetch "
+                     "per game for the team-platoon signal each require their own real fetch, "
+                     "for both teams in every game below (starter FIP and xERA are free, already "
+                     "loaded above/cached once for the page). Cached for 10-15 minutes."):
     st.info("Press the button above to load tonight's matchup signals. Nothing beyond the "
            "starter list above is fetched until you do.")
     st.stop()
@@ -202,6 +240,17 @@ def load_injuries(team_id):
     return E.get_team_injuries(team_id)
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def load_lineups(game_pk, home_id, away_id, home_pitcher_id, away_pitcher_id, venue_id):
+    # The genuinely NEW, larger real cost this page now carries -- up to 18 real hitter fetches
+    # per game (build_game_lineups' own cost, same function the Monte Carlo simulation on
+    # Pitching Lab already uses). Needed for the team-platoon signal specifically; every other
+    # signal on this page still costs what it always did.
+    if not game_pk:
+        return None
+    return E.build_game_lineups(game_pk, home_id, away_id, home_pitcher_id, away_pitcher_id, venue_id)
+
+
 def _diff(edge_val):
     """None-safe extraction of avg_run_diff from a get_team_recent_form result (or None)."""
     return edge_val["avg_run_diff"] if edge_val else None
@@ -239,6 +288,22 @@ for i, g in enumerate(games):
     away_injuries = load_injuries(away_row["_team_id"])
     home_injuries = load_injuries(home_row["_team_id"])
 
+    # Pitcher xERA -- FREE, reuses the one-time statcast_pitchers lookup already loaded above
+    # (no per-game fetch at all, just a dict lookup by each starter's own _pid).
+    away_xera_row = statcast_pitchers.get(away_row["_pid"])
+    home_xera_row = statcast_pitchers.get(home_row["_pid"])
+    away_xera = away_xera_row["xera"] if away_xera_row and away_xera_row.get("xera") else None
+    home_xera = home_xera_row["xera"] if home_xera_row and home_xera_row.get("xera") else None
+
+    # Team platoon -- the genuinely NEW real cost (see load_lineups' own comment): a full 18-real-
+    # batter fetch for this one game. away_platoon reads the AWAY lineup's own Advantage against
+    # tonight's HOME starter (build_game_lineups' own "away_rows" convention -- away batters face
+    # home's pitching); home_platoon is the mirror image.
+    lineups = load_lineups(away_row.get("_gamePk"), home_row["_team_id"], away_row["_team_id"],
+                           home_row["_pid"], away_row["_pid"], away_row.get("_venue_id"))
+    away_platoon = P.team_platoon_advantage_fraction(lineups["away_rows"]) if lineups else None
+    home_platoon = P.team_platoon_advantage_fraction(lineups["home_rows"]) if lineups else None
+
     starter_edge = P.lower_is_better_edge(away_row.get("FIP"), home_row.get("FIP"), epsilon=FIP_EPSILON)
     freshness_edge = P.bullpen_freshness_edge(away_fresh, home_fresh)
     quality_edge = P.lower_is_better_edge(away_bp_era, home_bp_era, epsilon=BULLPEN_ERA_EPSILON)
@@ -247,6 +312,8 @@ for i, g in enumerate(games):
                                              epsilon=RUN_DIFF_EPSILON)
     tod_edge = P.higher_is_better_edge(_diff(away_tod_form), _diff(home_tod_form),
                                        epsilon=RUN_DIFF_EPSILON)
+    xera_edge = P.lower_is_better_edge(away_xera, home_xera, epsilon=XERA_EPSILON)
+    platoon_edge = P.higher_is_better_edge(away_platoon, home_platoon, epsilon=PLATOON_EPSILON)
 
     # EXPERIMENTAL, UNBACKTESTED -- see projections.py's own module-level comment above
     # game_win_probability for the full honesty note. Zero new fetches: reuses the exact same
@@ -260,14 +327,16 @@ for i, g in enumerate(games):
         home_starter_fip=home_row.get("FIP"), home_bullpen_era=home_bp_era)
 
     g["_tally"] = P.matchup_signal_tally([starter_edge, freshness_edge, quality_edge, form_edge,
-                                          home_road_edge, tod_edge])
+                                          home_road_edge, tod_edge, xera_edge, platoon_edge])
     g["_signals"] = {
         "Starter FIP": (away_row.get("FIP"), home_row.get("FIP"), starter_edge),
+        "Starter xERA": (away_xera, home_xera, xera_edge),
         "Bullpen freshness": (away_fresh, home_fresh, freshness_edge),
         "Bullpen ERA": (away_bp_era, home_bp_era, quality_edge),
         "Team form (L15)": (away_form, home_form, form_edge),
         "Form in tonight's role (road/home)": (away_road_form, home_home_form, home_road_edge),
         "Form in tonight's day/night slot": (away_tod_form, home_tod_form, tod_edge),
+        "Team platoon edge": (away_platoon, home_platoon, platoon_edge),
     }
     g["_tonight_tod"] = tonight_tod   # kept separately for display context, not baked into the
                                       # signal's own key name (a per-game-varying dict key would
@@ -293,7 +362,8 @@ VERDICT_TEXT = {
 }
 
 _SIGNAL_KIND = {"Bullpen freshness": "pct", "Team form (L15)": "form",
-                "Form in tonight's role (road/home)": "form", "Form in tonight's day/night slot": "form"}
+                "Form in tonight's role (road/home)": "form", "Form in tonight's day/night slot": "form",
+                "Team platoon edge": "pct"}
 
 for g in games:
     dt = game_dt(g["_game_date"])
@@ -381,26 +451,23 @@ for g in games:
                       "a number to act on.")
 
 st.divider()
-st.caption("⚠️ **Read this before reading too much into any game above.** This is six "
+st.caption("⚠️ **Read this before reading too much into any game above.** This is eight "
           "individually honest comparisons counted up, not a probability and not a validated "
-          "model — there's no historical backtest yet showing these six signals actually "
+          "model — there's no historical backtest yet showing these eight signals actually "
           "predict outcomes, or how much weight each deserves relative to the others. A read "
-          "like 4-of-6 is a starting point for your own judgment, not a call to act on by "
+          "like 5-of-8 is a starting point for your own judgment, not a call to act on by "
           "itself. \"Even\" and \"not enough data\" are both real, honest outcomes — most games "
           "likely won't show a clean sweep, and that itself is useful information, not a "
           "failure of the page. Uses the same \"real gap\" thresholds stated at the top of this "
-          f"page (±{FIP_EPSILON:.2f} FIP, ±{BULLPEN_ERA_EPSILON:.2f} bullpen ERA, "
-          f"±{RUN_DIFF_EPSILON:.2f} avg run diff — applied to every run-differential-based "
-          "signal: overall form, road/home form, and day/night form alike) so a razor-thin "
-          "numeric difference isn't shown as a real edge. The injury report is context only, "
-          "never tallied — see its own note above for why.\n\n"
-          "**Not covered here, and each a real, separate undertaking rather than a quick "
-          "addition:** pitcher-side expected ERA (xERA) — this platform has expected-stats data "
-          "for BATTERS (xwOBA) but nothing equivalent for pitchers yet, which would need a new "
-          "external data source, not just a new aggregation of what's already here. Team-level "
-          "platoon performance (vs LHP/RHP) — individual hitter splits already exist and feed "
-          "the player-prop models, but a fair TEAM-level rollup needs real playing-time "
-          "weighting decisions, not a naive average. Head-to-head starter-vs-opponent history — "
-          "deliberately left out of the tally: most specific pitcher/team pairs have only a "
-          "handful of career meetings, and turning that into a directional signal would be "
-          "exactly the small-sample overclaiming this page exists to avoid.")
+          f"page (±{FIP_EPSILON:.2f} FIP, ±{XERA_EPSILON:.2f} xERA, ±{BULLPEN_ERA_EPSILON:.2f} "
+          f"bullpen ERA, ±{RUN_DIFF_EPSILON:.2f} avg run diff — applied to every run-differential-"
+          f"based signal: overall form, road/home form, and day/night form alike, "
+          f"±{PLATOON_EPSILON:.2f} platoon-advantage share) so a razor-thin numeric difference "
+          "isn't shown as a real edge. The injury report is context only, never tallied — see "
+          "its own note above for why. Starter FIP and starter xERA are two DELIBERATELY "
+          "separate signals, not one merged into the other — see the top of this page for why "
+          "that's intentional, not double-counting.\n\n"
+          "**Not covered here, and a deliberate exclusion, not an oversight:** head-to-head "
+          "starter-vs-opponent history — most specific pitcher/team pairs have only a handful "
+          "of career meetings, and turning that into a directional signal would be exactly the "
+          "small-sample overclaiming this page exists to avoid.")
