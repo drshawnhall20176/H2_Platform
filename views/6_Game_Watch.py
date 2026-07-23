@@ -71,6 +71,7 @@ from datetime import datetime
 import mlb_engine as E
 import projections as P
 import statcast_data as SC
+import quick_log
 import sports
 
 game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER
@@ -438,6 +439,28 @@ for g in games:
                 wc1, wc2 = st.columns(2)
                 wc1.metric(f"{away_row['Team']} (away)", f"{wp['away_win_prob']:.0%}")
                 wc2.metric(f"{home_row['Team']} (home)", f"{wp['home_win_prob']:.0%}")
+
+                # Moneyline logging -- added directly on request. Reuses the SAME shared quick_
+                # log widget every other page already uses, by building a team-level "play" dict
+                # (Player=None, Market="Moneyline") rather than a whole separate logging system.
+                # Fair moneyline odds come from THIS SAME experimental win-probability estimate,
+                # via projections.prob_to_american -- the exact function already used to compute
+                # every other "Fair" price shown elsewhere on this platform, not a new one. Since
+                # the estimate itself is unbacktested (see the warning below), so is this fair
+                # price -- render_quick_log's own caption already says "the model's own fair
+                # price, not a live book price," which is exactly true here too.
+                away_fair = P.prob_to_american(wp["away_win_prob"])
+                home_fair = P.prob_to_american(wp["home_win_prob"])
+                ml_plays = [
+                    {"Player": None, "PlayerId": None, "Game": g["label"], "Market": "Moneyline",
+                     "Side": away_row["Team"], "Line": None, "Fair": away_fair,
+                     "ModelProb": wp["away_win_prob"]},
+                    {"Player": None, "PlayerId": None, "Game": g["label"], "Market": "Moneyline",
+                     "Side": home_row["Team"], "Line": None, "Fair": home_fair,
+                     "ModelProb": wp["home_win_prob"]},
+                ]
+                quick_log.render_quick_log(ml_plays, date_str, "MLB", key_prefix=f"gw_ml_{g['label']}")
+
             st.caption("⚠️ **This is not backtested.** Real, decades-old formulas (Bill James' "
                       "Pythagorean expectation + Log5), not invented for this platform — but "
                       "applied here with zero historical validation that they're calibrated "
