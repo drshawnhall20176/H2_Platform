@@ -18,6 +18,21 @@ APPROXIMATE ON PURPOSE, SAME HONEST CAVEAT AS RETROSPECTIVE: rebuilding a past s
 CURRENT-season rates, not the exact point-in-time numbers from that specific night. Fine for
 "last night" specifically (little time has passed), not a substitute for the Bet Log's own
 point-in-time record.
+
+GATING, FIXED DIRECTLY ON REQUEST AFTER A PLATFORM AUDIT: this page used to require the same
+strict trading-access password as Bet Log/Track Record for the WHOLE page, even though only
+element 1 (Real bets) actually touches real financial data -- elements 2-4 (tool's own picks,
+player calibration, chalk test) are all rebuilt-board analysis, the same sensitivity level as
+Retrospective, which is NOT behind that stricter gate. That meant this page's own stated
+"marketing-facing proof page" identity was contradicted by its own gating: it was fully hidden
+behind a private password most visitors would never have, AND (a real, separate bug) it was
+NOT in owner_only_titles, so it still APPEARED in navigation for a public/Discord audience,
+who could click it and hit a password wall for content most of which was never actually
+sensitive -- the only page on this platform with that specific "visible then blocked" dead end,
+unlike Bet Log/Track Record, which simply don't appear in navigation at all for that audience.
+Fixed by gating the PAGE at the same level as Retrospective (require_live_engine, matching its
+own real sensitivity), and moving the stricter trading-access password check down to guard
+ONLY element 1, inline, right where the real financial data actually renders.
 """
 
 import streamlit as st
@@ -37,7 +52,7 @@ E, P = _active.engine, _active.projections
 st.title("🏆 Model Dashboard")
 st.caption(f"Real bets and the tool's own picks, by market — {_active.icon} {_active.label}")
 
-if not sports.require_trading_access("Model Dashboard"):
+if not sports.require_live_engine("Model Dashboard"):
     st.stop()
 
 PALETTE = {"pos": "#16a34a", "neg": "#dc2626"}   # matches Track Record's own hit/miss colors
@@ -69,25 +84,28 @@ st.subheader("💵 Real bets — hit rate by market")
 st.caption("Every real, placed bet we've logged, broken down by market. Real money, real "
           "results — nothing rebuilt or approximated here.")
 
+# The stricter, separate trading-access password -- same gate Bet Log/Track Record use for the
+# same real financial data -- checked HERE specifically, not for the whole page (see this file's
+# own module docstring for why). Elements 2-4 below render normally either way.
+if sports.require_trading_access("This section"):
 
-@st.cache_data(ttl=300, show_spinner=False)
-def _load_real_bets(sport_key: str):
-    try:
-        return B.list_bets(sport=sport_key, is_real_bet=True)
-    except Exception:
-        return []
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _load_real_bets(sport_key: str):
+        try:
+            return B.list_bets(sport=sport_key, is_real_bet=True)
+        except Exception:
+            return []
 
-
-real_bets = _load_real_bets(_active.key)
-if real_bets:
-    mkt = [m for m in B.market_breakdown(real_bets) if m["wins"] + m["losses"] > 0]
-    if mkt:
-        _pie_grid(mkt, "wins", "losses", "market")
+    real_bets = _load_real_bets(_active.key)
+    if real_bets:
+        mkt = [m for m in B.market_breakdown(real_bets) if m["wins"] + m["losses"] > 0]
+        if mkt:
+            _pie_grid(mkt, "wins", "losses", "market")
+        else:
+            st.caption("No settled real bets yet for this sport — pies appear once results come in.")
     else:
-        st.caption("No settled real bets yet for this sport — pies appear once results come in.")
-else:
-    st.info("No real bets logged yet for this sport. Once real, placed bets are logged and "
-           "settled, this section fills in automatically.")
+        st.info("No real bets logged yet for this sport. Once real, placed bets are logged and "
+               "settled, this section fills in automatically.")
 
 # =========================================================================== element 2: the tool's own picks
 st.divider()

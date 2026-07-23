@@ -67,6 +67,15 @@ def load_bullpen_handedness(team_id, exclude_pid):
     return E.get_bullpen_handedness_mix(team_id, exclude_pid=exclude_pid)
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def load_hitter_workload(team_id, date_str_inner):
+    # Moved here from Pitching Lab -- see the Hitter Workload section's own comment below for
+    # the full reasoning. Same 900s ttl Pitching Lab's own version already used.
+    if not team_id:
+        return []
+    return E.get_team_hitter_workload(team_id, date_str_inner)
+
+
 eastern = pytz.timezone("US/Eastern")
 default_date = datetime.now(eastern)
  
@@ -318,6 +327,43 @@ for m in meta_sorted:
                         st.caption(f"🎯 If it gets to the pen: {opp_name}'s bullpen is "
                                   f"{mix['pct_R']:.0%} RHP / {mix['pct_L']:.0%} LHP "
                                   f"({mix['R']}R / {mix['L']}L, {mix['total']} active arms)")
+
+        # --- Hitter workload -------------------------------------------------
+        # Moved here from Pitching Lab directly on request -- a fatigue/rest concern about the
+        # HITTERS in this game, the same real thing pitcher rest and bullpen fatigue already
+        # cover for pitchers, just landed on the pitcher-focused page originally because it
+        # followed that page's own per-game pattern, not because it's conceptually a pitching
+        # topic. This is the actual hitter-focused home on this platform.
+        #
+        # Real cost per team (same as it always was) -- an opt-in checkbox here, matching this
+        # page's OWN existing convention for the "🔄 Bullpen" toggles above, rather than a
+        # separate single-game picker the way Pitching Lab used to gate it. Every game's own
+        # expander already runs for every game on the slate regardless of whether it's visually
+        # collapsed (Streamlit doesn't defer content inside a closed expander), so this MUST stay
+        # opt-in per game -- an unconditional fetch here would silently fetch workload data for
+        # every game on the slate on every page load, the exact cost regression this checkbox
+        # exists to prevent.
+        show_workload = st.checkbox("🏃 Show hitter workload (who's played every game, no rest)",
+                                    key=f"workload_{m['label']}")
+        if show_workload:
+            home_workload = load_hitter_workload(m.get("home_id"), date_str)
+            away_workload = load_hitter_workload(m.get("away_id"), date_str)
+            wlc1, wlc2 = st.columns(2)
+            for col, label, workload in ((wlc1, m["away_name"], away_workload),
+                                         (wlc2, m["home_name"], home_workload)):
+                with col:
+                    st.markdown(f"**{label}**")
+                    flagged = [w for w in workload if w["consecutive_games_started"] >= 5]
+                    if not flagged:
+                        st.caption("No hitters with 5+ straight games started in this window.")
+                    else:
+                        st.dataframe(
+                            pd.DataFrame(flagged)[["name", "consecutive_games_started", "tag"]]
+                            .rename(columns={"name": "Hitter", "consecutive_games_started": "Streak", "tag": "Tag"}),
+                            hide_index=True, use_container_width=True)
+            st.caption("Counts backward through each TEAM's own most recent games, not "
+                      "consecutive calendar days — a team's own off-day is real rest regardless "
+                      "of how many calendar days it spans.")
 
         t_away, t_home = st.tabs([f"✈️ {m['away_name']} bats", f"🏠 {m['home_name']} bats"])
 
