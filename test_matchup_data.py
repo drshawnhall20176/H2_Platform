@@ -411,6 +411,70 @@ def test_load_exit_velo_none_when_csv_has_real_nan():
     print("✓ load() correctly surfaces a real, current-schema NaN exit_velo as None too")
 
 
+# ----------------------------------------------------------------- build_lineup_vs_pitch_leaderboard
+def test_build_lineup_vs_pitch_leaderboard_ranks_by_exit_velo():
+    hitter_types = {
+        201: [{"pitch_type": "SI", "pitch_name": "Sinker", "pitches": 40, "exit_velo": 88.5,
+              "slg": 0.410, "xwoba": 0.320, "whiff": 0.15}],
+        202: [{"pitch_type": "SI", "pitch_name": "Sinker", "pitches": 35, "exit_velo": 95.2,
+              "slg": 0.610, "xwoba": 0.400, "whiff": 0.10}],
+        203: [{"pitch_type": "SI", "pitch_name": "Sinker", "pitches": 50, "exit_velo": 91.0,
+              "slg": 0.480, "xwoba": 0.350, "whiff": 0.20}],
+    }
+    rows = M.build_lineup_vs_pitch_leaderboard([201, 202, 203], "SI", hitter_types)
+    assert [r["batter_id"] for r in rows] == [202, 203, 201]   # highest exit velo first
+    print("✓ build_lineup_vs_pitch_leaderboard correctly ranks a real lineup by exit velo, highest first")
+
+
+def test_build_lineup_vs_pitch_leaderboard_omits_batters_without_this_specific_pitch():
+    hitter_types = {
+        201: [{"pitch_type": "SI", "pitch_name": "Sinker", "pitches": 40, "exit_velo": 88.5,
+              "slg": 0.410, "xwoba": 0.320, "whiff": 0.15}],
+        202: [{"pitch_type": "SL", "pitch_name": "Slider", "pitches": 60, "exit_velo": 90.0,
+              "slg": 0.500, "xwoba": 0.360, "whiff": 0.25}],   # never faced a Sinker
+    }
+    rows = M.build_lineup_vs_pitch_leaderboard([201, 202], "SI", hitter_types)
+    assert len(rows) == 1 and rows[0]["batter_id"] == 201
+    print("✓ build_lineup_vs_pitch_leaderboard omits a batter with no real sample against this specific pitch type")
+
+
+def test_build_lineup_vs_pitch_leaderboard_omits_thin_samples():
+    # The exact real caution from the conversation this feature came from: a batter "looking
+    # good down there but... limited on PAs" must be omitted, not shown with a misleading number.
+    hitter_types = {
+        201: [{"pitch_type": "SI", "pitch_name": "Sinker", "pitches": 5, "exit_velo": 99.9,
+              "slg": 1.000, "xwoba": 0.600, "whiff": 0.0}],   # huge number, tiny sample
+    }
+    rows = M.build_lineup_vs_pitch_leaderboard([201], "SI", hitter_types, min_pitches=25)
+    assert rows == []
+    print("✓ build_lineup_vs_pitch_leaderboard omits a thin-sample batter rather than showing a misleadingly big number")
+
+
+def test_build_lineup_vs_pitch_leaderboard_missing_exit_velo_sorts_last():
+    hitter_types = {
+        201: [{"pitch_type": "SI", "pitch_name": "Sinker", "pitches": 40, "exit_velo": None,
+              "slg": 0.300, "xwoba": 0.280, "whiff": 0.30}],   # real sample, no batted ball yet
+        202: [{"pitch_type": "SI", "pitch_name": "Sinker", "pitches": 35, "exit_velo": 90.0,
+              "slg": 0.500, "xwoba": 0.360, "whiff": 0.10}],
+    }
+    rows = M.build_lineup_vs_pitch_leaderboard([201, 202], "SI", hitter_types)
+    assert [r["batter_id"] for r in rows] == [202, 201]   # real number before a missing one
+    assert rows[1]["exit_velo"] is None   # never fabricated as 0.0
+    print("✓ build_lineup_vs_pitch_leaderboard sorts a missing exit_velo last, never fabricates a 0.0")
+
+
+def test_build_lineup_vs_pitch_leaderboard_empty_lineup():
+    assert M.build_lineup_vs_pitch_leaderboard([], "SI", {}) == []
+
+
+def test_build_lineup_vs_pitch_leaderboard_batter_entirely_missing_from_cache():
+    # A batter with NO cached pitch-type data at all (not even an empty list) must be skipped
+    # cleanly, not crash on a missing dict key.
+    rows = M.build_lineup_vs_pitch_leaderboard([999], "SI", {201: []})
+    assert rows == []
+    print("✓ build_lineup_vs_pitch_leaderboard handles a batter entirely absent from the cache without crashing")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

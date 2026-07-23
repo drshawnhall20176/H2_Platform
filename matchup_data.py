@@ -363,6 +363,48 @@ def build_matchup(pitcher_id: int, hitter_id: int,
     return rows
 
 
+def build_lineup_vs_pitch_leaderboard(lineup_batter_ids: List[int], pitch_type: str,
+                                      hitter_types: Dict[int, List[Dict]],
+                                      min_pitches: int = MIN_PITCHES_TYPE) -> List[Dict]:
+    """Given a real opposing lineup (a list of batter ids) and ONE specific pitch type (e.g. the
+    starter's own most-used pitch), ranks the whole lineup by real performance against that ONE
+    pitch specifically -- the actual question a real trader conversation was answering manually,
+    one screenshot at a time: "who on this team matches up best against this pitcher's most-used
+    pitch?" ("Can you do the one filtered by most used pitch? And tell me who has the highest EV").
+
+    Reuses load_hitter_types' own already-cached per-(batter, specific-pitch-type) data directly
+    -- no new aggregation, no new Statcast pull, just a new RANKING across a real lineup instead
+    of Matchup Lab's existing one-hitter-at-a-time lookup.
+
+    A batter with too few pitches against this exact pitch type is OMITTED entirely, not shown
+    with a misleadingly precise number from a handful of pitches -- the exact "[a batter's]
+    looking good down there too but I'm guessing that's a small sample... he's limited on PAs"
+    caution from the real conversation this feature came from. min_pitches defaults to the SAME
+    MIN_PITCHES_TYPE floor load_hitter_types' own cached data was already built with, so this
+    doesn't apply a second, different threshold on top of the first.
+
+    Sorted by exit_velo descending (highest first, the real, stated ask) -- a missing exit_velo
+    (a real batted-ball sample can still be thin enough that no ball was ever put in play) sorts
+    last, never fabricated as a 0.0 that would misleadingly look like weak contact.
+
+    Each row: {"batter_id", "pitch_type", "pitch_name", "pitches", "exit_velo", "slg", "xwoba",
+    "whiff"}."""
+    out = []
+    for bid in lineup_batter_ids:
+        rows_for_batter = hitter_types.get(int(bid), [])
+        match = next((r for r in rows_for_batter if r.get("pitch_type") == pitch_type), None)
+        if match is None or match.get("pitches", 0) < min_pitches:
+            continue
+        out.append({
+            "batter_id": int(bid), "pitch_type": pitch_type,
+            "pitch_name": match.get("pitch_name", pitch_type),
+            "pitches": match["pitches"], "exit_velo": match.get("exit_velo"),
+            "slg": match.get("slg"), "xwoba": match.get("xwoba"), "whiff": match.get("whiff"),
+        })
+    out.sort(key=lambda r: (r["exit_velo"] is not None, r["exit_velo"] or 0), reverse=True)
+    return out
+
+
 # --------------------------------------------------------------------- refresh (network)
 def refresh(year: int, arsenal_path: str = ARSENAL_PATH, hitter_path: str = HITTER_PATH,
             hitter_type_path: str = HITTER_TYPE_PATH) -> Tuple[str, str, str]:
