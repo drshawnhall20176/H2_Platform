@@ -571,6 +571,186 @@ def test_game_win_probability_own_pitching_affects_own_runs_allowed_not_opponent
     print("✓ game_win_probability correctly attributes each team's own pitching to its own runs allowed, not swapped")
 
 
+# ----------------------------------------------------------------- advance_runners
+def test_advance_runners_out_and_strikeout_no_advance():
+    for outcome in (P.OUT_PLAY, P.K):
+        bases, outs, runs = P.advance_runners((True, True, True), outcome)
+        assert bases == (True, True, True) and outs == 1 and runs == 0
+    print("✓ advance_runners: outs and strikeouts record 1 out, no runner movement, no runs")
+
+
+def test_advance_runners_walk_all_eight_base_states_hand_verified():
+    # Every real base-out combination for a walk, hand-derived from the standard MLB force rule.
+    cases = [
+        ((False, False, False), (True, False, False), 0),
+        ((True, False, False), (True, True, False), 0),
+        ((False, True, False), (True, True, False), 0),
+        ((False, False, True), (True, False, True), 0),
+        ((True, True, False), (True, True, True), 0),
+        ((True, False, True), (True, True, True), 0),
+        ((False, True, True), (True, True, True), 0),
+        ((True, True, True), (True, True, True), 1),   # bases loaded -> forced run
+    ]
+    for before, expected_bases, expected_runs in cases:
+        bases, outs, runs = P.advance_runners(before, P.BB)
+        assert bases == expected_bases and outs == 0 and runs == expected_runs, \
+            f"walk from {before}: got {bases}/{runs}, expected {expected_bases}/{expected_runs}"
+    print("✓ advance_runners: all 8 real base-state force-advance cases for a walk hand-verified exactly")
+
+
+def test_advance_runners_single():
+    # Runner on 2nd and 3rd score, runner on 1st advances to 2nd only, batter to 1st.
+    bases, outs, runs = P.advance_runners((True, True, True), P.SINGLE)
+    assert bases == (True, True, False) and outs == 0 and runs == 2
+    bases, outs, runs = P.advance_runners((False, False, False), P.SINGLE)
+    assert bases == (True, False, False) and runs == 0
+
+
+def test_advance_runners_double():
+    bases, outs, runs = P.advance_runners((True, True, True), P.DOUBLE)
+    assert bases == (False, True, True) and runs == 2   # 1st->3rd, 2nd+3rd score
+
+
+def test_advance_runners_triple():
+    bases, outs, runs = P.advance_runners((True, True, True), P.TRIPLE)
+    assert bases == (False, False, True) and runs == 3   # everyone scores, batter on 3rd
+
+
+def test_advance_runners_home_run():
+    bases, outs, runs = P.advance_runners((True, True, True), P.HR)
+    assert bases == (False, False, False) and runs == 4   # grand slam
+    bases, outs, runs = P.advance_runners((False, False, False), P.HR)
+    assert bases == (False, False, False) and runs == 1   # solo shot
+    print("✓ advance_runners: single/double/triple/HR all hand-verified, including a grand slam")
+
+
+# ----------------------------------------------------------------- simulate_one_game / simulate_game_win_probability
+def _certain_probs(outcome_idx):
+    """A degenerate PA-outcome distribution that ALWAYS produces the same outcome -- lets a test
+    fully determine a simulated game's exact result rather than depending on randomness. ONLY
+    safe to use for OUT_PLAY/K (which always end the PA with an out) or mixed into a lineup
+    alongside other batters who DO make outs -- using this alone for HR/BB/hit outcomes across
+    an ENTIRE lineup would mean no out could ever occur, relying entirely on simulate_one_game's
+    own MAX_PA_PER_HALF_INNING safety cap rather than a real 3-out termination."""
+    probs = np.zeros(7)
+    probs[outcome_idx] = 1.0
+    return probs
+
+
+def _realistic_probs(out=0.68, k=0.08, bb=0.08, single=0.10, double=0.03, triple=0.005, hr=0.035):
+    """A real, non-degenerate PA-outcome distribution (order matches P.OUTCOMES exactly) --
+    always has a genuine chance of an out, so a half-inning built from these terminates normally
+    via 3 real outs rather than relying on the safety cap. Defaults are roughly realistic MLB
+    rates; callers skew individual arguments to build a "hot" or "cold" lineup for a directional
+    comparison test."""
+    probs = np.array([out, k, bb, single, double, triple, hr])
+    return probs / probs.sum()   # normalize in case a caller's custom values don't sum to 1.0 exactly
+
+
+def test_simulate_one_game_all_strikeouts_is_scoreless():
+    k_probs = [_certain_probs(P.K)] * 9
+    rng = np.random.default_rng(42)
+    away_runs, home_runs = P.simulate_one_game(k_probs, k_probs, 15, k_probs, k_probs, 15, rng)
+    assert away_runs == 0 and home_runs == 0
+    print("✓ simulate_one_game: an all-strikeout lineup on both sides produces a real 0-0 game")
+
+
+def test_simulate_one_game_three_up_three_down_every_inning():
+    # A lineup that always makes an out: exactly 3 PAs per half-inning, 9 innings -> 27 PAs each
+    # side, 0-0 final. A clean, fully deterministic end-to-end check of the half-inning/inning
+    # bookkeeping itself (not just advance_runners in isolation).
+    out_probs = [_certain_probs(P.OUT_PLAY)] * 9
+    rng = np.random.default_rng(1)
+    away_runs, home_runs = P.simulate_one_game(out_probs, out_probs, 15, out_probs, out_probs, 15, rng)
+    assert (away_runs, home_runs) == (0, 0)
+    print("✓ simulate_one_game: an always-out lineup correctly plays 9 full three-up-three-down innings, 0-0")
+
+
+def test_simulate_one_game_leadoff_homer_every_inning():
+    # Batter 1 always homers, everyone else always makes an out. NOT simply "1 run per inning" --
+    # the leadoff spot does NOT recur exactly once every 3 outs, because the very first
+    # half-inning uses 4 PAs (HR, out, out, out -- the HR doesn't consume an out), which shifts
+    # which lineup slot leads off every inning after. Computed directly and hand-traced
+    # inning-by-inning to confirm (both come to the same real answer): innings 1/3/6/9 each
+    # produce exactly 1 run (the HR slot happens to bat in each), the rest produce 0 -> 4 runs
+    # total, not 9. A genuine example of why "obvious" baseball arithmetic is worth checking
+    # directly rather than assuming.
+    probs = [_certain_probs(P.HR)] + [_certain_probs(P.OUT_PLAY)] * 8
+    rng = np.random.default_rng(7)
+    away_runs, home_runs = P.simulate_one_game(probs, probs, 15, probs, probs, 15, rng)
+    assert away_runs == 4 and home_runs == 4
+    print("✓ simulate_one_game: a deterministic leadoff-homer lineup produces the correctly hand-traced 4-4 score, not the naive 9-9 guess")
+
+
+def test_simulate_one_game_safety_cap_terminates_a_never_out_lineup():
+    # Regression test for a REAL bug caught while writing this test suite, not a hypothetical:
+    # an all-home-run lineup can never record an out, so without MAX_PA_PER_HALF_INNING this
+    # call would hang indefinitely (confirmed directly -- it did, before the cap was added).
+    # With the cap, every half-inning is force-ended at exactly MAX_PA_PER_HALF_INNING PAs, each
+    # one a solo HR (bases always reset to empty after a HR) -> an exact, hand-predictable score.
+    hr_probs = [_certain_probs(P.HR)] * 9
+    always_out = [_certain_probs(P.OUT_PLAY)] * 9
+    rng = np.random.default_rng(11)
+    away_runs, home_runs = P.simulate_one_game(hr_probs, hr_probs, 99, always_out, always_out, 99,
+                                               rng, max_innings=9)
+    assert away_runs == P.MAX_PA_PER_HALF_INNING * 9   # capped PAs per inning, 1 run each, 9 innings
+    assert home_runs == 0
+    print(f"✓ simulate_one_game's MAX_PA_PER_HALF_INNING safety cap correctly terminates a lineup "
+         f"that can never make an out, instead of hanging forever (the real bug this guards against)")
+
+
+def test_simulate_one_game_starter_to_bullpen_handoff_affects_scoring():
+    # A believable, non-degenerate matchup: the away lineup hits a tough starter poorly but a
+    # weak bullpen well. Pulling the home starter EARLIER (fewer expected outs) lets the away
+    # lineup reach the weaker bullpen sooner in the game -- a real, directional check of the
+    # starter/bullpen switch logic (not an exact hand-predicted score, which isn't meaningful
+    # once outcomes are genuinely probabilistic rather than certain).
+    tough_starter = [_realistic_probs(out=0.75, k=0.18, bb=0.04, single=0.02, double=0.005, hr=0.005)] * 9
+    weak_bullpen = [_realistic_probs(out=0.55, k=0.08, bb=0.07, single=0.15, double=0.06, hr=0.09)] * 9
+    always_out = [_certain_probs(P.OUT_PLAY)] * 9
+
+    early_pull = P.simulate_game_win_probability(
+        tough_starter, weak_bullpen, home_starter_exp_outs=3,   # pulled after 1 inning
+        home_probs_vs_starter=always_out, home_probs_vs_bullpen=always_out, away_starter_exp_outs=99,
+        n_trials=400, seed=5)
+    late_pull = P.simulate_game_win_probability(
+        tough_starter, weak_bullpen, home_starter_exp_outs=24,   # effectively never pulled in 9 innings
+        home_probs_vs_starter=always_out, home_probs_vs_bullpen=always_out, away_starter_exp_outs=99,
+        n_trials=400, seed=5)
+    assert early_pull["avg_away_runs"] > late_pull["avg_away_runs"]
+    print("✓ simulate_one_game: pulling a tough starter earlier for a weaker bullpen measurably raises the opposing offense's expected runs")
+
+
+def test_simulate_game_win_probability_lopsided_matchup_favors_the_better_side():
+    # Away lineup crushes; home lineup is helpless -- not literally certain (real, non-degenerate
+    # probabilities), but should win the overwhelming majority of trials.
+    strong_hitting = [_realistic_probs(out=0.45, k=0.05, bb=0.10, single=0.15, double=0.10, hr=0.14)] * 9
+    weak_hitting = [_realistic_probs(out=0.85, k=0.10, bb=0.03, single=0.015, double=0.003, hr=0.001)] * 9
+    result = P.simulate_game_win_probability(strong_hitting, strong_hitting, 99, weak_hitting, weak_hitting, 99,
+                                             n_trials=300, seed=42)
+    assert result["away_win_prob"] > 0.9
+    assert result["n_trials"] == 300
+    print("✓ simulate_game_win_probability gives a heavily lopsided matchup an overwhelmingly one-sided win rate")
+
+
+def test_simulate_game_win_probability_probs_sum_to_one():
+    k_probs = [_certain_probs(P.K)] * 9
+    result = P.simulate_game_win_probability(k_probs, k_probs, 15, k_probs, k_probs, 15, n_trials=50, seed=1)
+    total = result["away_win_prob"] + result["home_win_prob"] + result["tie_prob"]
+    assert abs(total - 1.0) < 1e-9
+    assert result["tie_prob"] == 1.0   # an always-scoreless game is always a tie
+    print("✓ simulate_game_win_probability's away/home/tie probabilities always sum to exactly 1.0")
+
+
+def test_simulate_game_win_probability_reproducible_with_seed():
+    hot = [_realistic_probs(out=0.50, k=0.08, bb=0.08, single=0.14, double=0.08, hr=0.10)] * 9
+    cold = [_realistic_probs(out=0.80, k=0.12, bb=0.04, single=0.03, double=0.005, hr=0.005)] * 9
+    r1 = P.simulate_game_win_probability(hot, cold, 15, hot, cold, 15, n_trials=100, seed=99)
+    r2 = P.simulate_game_win_probability(hot, cold, 15, hot, cold, 15, n_trials=100, seed=99)
+    assert r1 == r2
+    print("✓ simulate_game_win_probability gives identical results for the same seed, real reproducibility")
+
+
 def test_bullpen_fatigue_multipliers_above_threshold():
     m = P.bullpen_fatigue_multipliers(0.5)
     assert m["k_mult"] == P.REST_K_MULT

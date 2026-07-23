@@ -25,7 +25,7 @@ from __future__ import annotations
 import math
 import re
 import unicodedata
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
  
 import numpy as np
 
@@ -479,6 +479,206 @@ def game_win_probability(away_runs_scored: Optional[float], away_starter_fip: Op
         return None
     return {"away_pyth": round(away_pyth, 3), "home_pyth": round(home_pyth, 3),
            "away_win_prob": round(away_win_prob, 3), "home_win_prob": round(1 - away_win_prob, 3)}
+
+
+# =============================================================================================
+# EXPERIMENTAL — Option A, Phase 2: a real inning-by-inning Monte Carlo game simulation.
+#
+# THE "REAL" VERSION of a win-probability model, in the strictest sense -- Method 1 from Option
+# A's own scoping conversation, not the Pythagorean/Log5 shortcut above it. Simulates real
+# baserunners, real half-innings, a real starter-to-bullpen handoff, using the SAME per-PA
+# outcome distributions (batter_pa_probs) and starter-innings model (project_pitcher) already
+# built and tested for individual player props -- this reuses that real, proven infrastructure
+# rather than inventing a parallel one.
+#
+# STILL NOT BACKTESTED. Everything in the Phase 1 module comment above applies here too, doubled:
+# this is a bigger, more complex model with more places a real calibration error could hide, and
+# there has been zero opportunity to check it against actual outcomes from this sandbox.
+#
+# REAL, STATED SIMPLIFICATIONS (an honest list, not an exhaustive one):
+#   - Base-running is fully DETERMINISTIC, not probabilistic: a single always scores a runner
+#     from 2nd (real MLB: roughly 55-65% of the time depending on speed/situation) and always
+#     advances a runner from 1st to 2nd only (never 3rd); a double always scores runners from 2nd
+#     and 3rd and advances a 1st-base runner to 3rd only (never home). No sacrifice flies, no
+#     stolen bases, no wild pitches/passed balls, no double plays. Net effect on total scoring is
+#     genuinely uncertain -- some of these overstate advancement, some understate it.
+#   - The starter is pulled at a FIXED out count (project_pitcher's own exp_outs), not reactively
+#     based on how he's actually pitching in a given simulated trial -- a starter who's allowed 6
+#     runs in 2 innings in one trial still "pitches" his full expected outs in that trial.
+#   - The bullpen is treated as ONE blended pitcher for the rest of the game (get_bullpen_
+#     aggregate_stat's own aggregate rates), not a real sequence of distinct relievers with their
+#     own individual matchups, handedness, or leverage-based usage (closer only in save
+#     situations, etc.).
+#   - Extra innings are NOT simulated. A game tied after regulation is reported as a tie, not
+#     extended -- MLB's own extra-inning rules (including the runner-on-2nd-to-start-the-inning
+#     rule used in some recent seasons) aren't modeled. A meaningfully high tie rate in the
+#     output is itself an honest signal the game projects as a real coin-flip, not a bug.
+#   - No park/weather adjustment beyond what's already baked into each batter's own supplied
+#     probability array (batter_pa_probs already applies both when the caller passes park/
+#     weather_hr into it -- this engine doesn't re-apply or double-count them).
+# =============================================================================================
+
+
+MAX_PA_PER_HALF_INNING = 40   # a defensive cap, not a normal code path -- see simulate_one_game's
+                              # own docstring for why this exists (guards against a degenerate
+                              # probability array that could otherwise make a half-inning, and
+                              # this whole function, run forever). Far above the actual MLB
+                              # record for one half-inning (12 runs) -- never fires on real data.
+
+
+def advance_runners(bases: Tuple[bool, bool, bool], outcome_idx: int) -> Tuple[Tuple[bool, bool, bool], int, int]:
+    """One plate appearance's effect on the real base-out state -- pure, deterministic baseball
+    rules given an outcome (see this section's own module comment for the real, stated
+    simplifications behind the hit-advancement rules specifically; walk force-advances below are
+    the real, standard MLB force-play rule, not a simplification).
+
+    bases: (on_1st, on_2nd, on_3rd) BEFORE this plate appearance. outcome_idx: one of this
+    module's own OUT_PLAY/K/BB/SINGLE/DOUBLE/TRIPLE/HR constants (the same 7-outcome vocabulary
+    batter_pa_probs/simulate_batter already use elsewhere in this file).
+
+    Returns (new_bases, outs_recorded_this_pa, runs_scored_this_pa). outs_recorded_this_pa is
+    always 0 or 1 in this model (no double plays modeled -- a real, stated simplification, see
+    module comment)."""
+    on1, on2, on3 = bases
+    if outcome_idx in (OUT_PLAY, K):
+        return bases, 1, 0
+    if outcome_idx == BB:
+        # Real, standard force-advance rule: a runner only advances if the chain of occupied
+        # bases starting from 1st reaches him. Hand-verified against all 8 real base-state
+        # cases in this function's own test suite.
+        if not on1:
+            return (True, on2, on3), 0, 0
+        if not on2:
+            return (True, True, on3), 0, 0
+        if not on3:
+            return (True, True, True), 0, 0
+        return (True, True, True), 0, 1   # bases loaded -> runner on 3rd forced home
+    if outcome_idx == SINGLE:
+        runs = (1 if on3 else 0) + (1 if on2 else 0)
+        return (True, on1, False), 0, runs
+    if outcome_idx == DOUBLE:
+        runs = (1 if on3 else 0) + (1 if on2 else 0)
+        return (False, True, on1), 0, runs
+    if outcome_idx == TRIPLE:
+        runs = (1 if on1 else 0) + (1 if on2 else 0) + (1 if on3 else 0)
+        return (False, False, True), 0, runs
+    # HR
+    runs = 1 + (1 if on1 else 0) + (1 if on2 else 0) + (1 if on3 else 0)
+    return (False, False, False), 0, runs
+
+
+def simulate_one_game(away_probs_vs_starter: List[np.ndarray], away_probs_vs_bullpen: List[np.ndarray],
+                      home_starter_exp_outs: float,
+                      home_probs_vs_starter: List[np.ndarray], home_probs_vs_bullpen: List[np.ndarray],
+                      away_starter_exp_outs: float,
+                      rng, max_innings: int = 9) -> Tuple[int, int]:
+    """One simulated trial of a full game, inning by inning, using real base-out state via
+    advance_runners above.
+
+    away_probs_vs_starter/vs_bullpen: 9 per-PA outcome probability arrays (batter_pa_probs'
+    own output shape), one per AWAY lineup slot, in batting order -- vs_starter computed against
+    the HOME starter's own opp_allowed rates, vs_bullpen against the HOME bullpen's. home_
+    starter_exp_outs: the HOME starter's own expected outs (project_pitcher's exp_ip*3) -- once
+    HOME's pitching staff has recorded this many outs against the away lineup, the away lineup
+    switches from vs_starter to vs_bullpen probabilities for the rest of the game. home_probs_*/
+    away_starter_exp_outs are the exact mirror image for the home lineup against away's pitching.
+
+    Does NOT stop a half-inning early on a would-be walk-off (see module comment) -- harmless for
+    a win/loss tally specifically, since the final score comparison after max_innings is still
+    correct even if a few "meaningless" trailing runs get simulated in a game that would have
+    actually ended sooner.
+
+    SAFETY CAP: a half-inning is force-ended after MAX_PA_PER_HALF_INNING plate appearances even
+    without 3 real outs recorded -- a real, defensive guard, not a normal code path. batter_pa_
+    probs can (rarely, at the extreme) produce a probability array where OUT_PLAY rounds to
+    ~0 if the other categories already summed close to 1.0; without this cap, a batter who can
+    essentially never make an out would keep a half-inning (and this whole function) running
+    forever. MAX_PA_PER_HALF_INNING is set far above anything a real MLB half-inning has ever
+    seen (the actual MLB record is 12 runs in one half-inning, nowhere near this cap) specifically
+    so it never fires on realistic data -- it exists purely as a guarantee against a genuine,
+    if rare, degenerate input, confirmed directly: an earlier version of this function's own test
+    suite hung indefinitely before this cap was added, using an all-home-run probability array
+    with no real chance of ever recording an out.
+
+    Returns (away_runs, home_runs) for this ONE trial. Call this many times (or use
+    simulate_game_win_probability below) and tally outcomes for a real win-probability read."""
+    away_score = home_score = 0
+    away_idx = home_idx = 0
+    home_pitching_outs = away_pitching_outs = 0
+
+    for _ in range(max_innings):
+        # Top half: away bats against home's pitching.
+        bases, outs = (False, False, False), 0
+        pa_count = 0
+        while outs < 3 and pa_count < MAX_PA_PER_HALF_INNING:
+            probs = (away_probs_vs_bullpen[away_idx] if home_pitching_outs >= home_starter_exp_outs
+                    else away_probs_vs_starter[away_idx])
+            outcome = rng.choice(7, p=probs)
+            bases, outs_this_pa, runs = advance_runners(bases, outcome)
+            outs += outs_this_pa
+            home_pitching_outs += outs_this_pa
+            away_score += runs
+            away_idx = (away_idx + 1) % 9
+            pa_count += 1
+
+        # Bottom half: home bats against away's pitching.
+        bases, outs = (False, False, False), 0
+        pa_count = 0
+        while outs < 3 and pa_count < MAX_PA_PER_HALF_INNING:
+            probs = (home_probs_vs_bullpen[home_idx] if away_pitching_outs >= away_starter_exp_outs
+                    else home_probs_vs_starter[home_idx])
+            outcome = rng.choice(7, p=probs)
+            bases, outs_this_pa, runs = advance_runners(bases, outcome)
+            outs += outs_this_pa
+            away_pitching_outs += outs_this_pa
+            home_score += runs
+            home_idx = (home_idx + 1) % 9
+            pa_count += 1
+
+    return away_score, home_score
+
+
+def simulate_game_win_probability(away_probs_vs_starter: List[np.ndarray], away_probs_vs_bullpen: List[np.ndarray],
+                                  home_starter_exp_outs: float,
+                                  home_probs_vs_starter: List[np.ndarray], home_probs_vs_bullpen: List[np.ndarray],
+                                  away_starter_exp_outs: float,
+                                  n_trials: int = 1000, seed: Optional[int] = None,
+                                  max_innings: int = 9) -> Dict[str, Any]:
+    """Runs simulate_one_game n_trials independent times and tallies the real fraction won by
+    each side -- the actual Monte Carlo estimate.
+
+    n_trials defaults to 1000, a real, stated tradeoff: standard error on a win-rate proportion
+    near 50% at n=1000 is roughly +/-1.6 percentage points (1 SE) -- tight enough to be useful,
+    loose enough to run in reasonable time in a plain Python loop (not vectorized across trials --
+    a real, stated simplification; a vectorized version would run far more trials in the same
+    time, a genuine future optimization not implemented here). Higher n_trials narrows the
+    estimate at the cost of runtime -- exposed as a real, adjustable parameter, not hidden.
+
+    Returns {"away_win_prob", "home_win_prob", "tie_prob", "n_trials", "avg_away_runs",
+    "avg_home_runs"}. tie_prob is the real fraction tied after max_innings (extra innings not
+    simulated -- see this section's own module comment); away_win_prob + home_win_prob +
+    tie_prob always sums to 1.0. A meaningfully high tie_prob is an honest signal the game
+    projects as a real coin-flip, not a modeling failure."""
+    rng = np.random.default_rng(seed)
+    away_wins = home_wins = ties = 0
+    away_runs_total = home_runs_total = 0
+    for _ in range(n_trials):
+        away_runs, home_runs = simulate_one_game(
+            away_probs_vs_starter, away_probs_vs_bullpen, home_starter_exp_outs,
+            home_probs_vs_starter, home_probs_vs_bullpen, away_starter_exp_outs,
+            rng, max_innings=max_innings)
+        away_runs_total += away_runs
+        home_runs_total += home_runs
+        if away_runs > home_runs:
+            away_wins += 1
+        elif home_runs > away_runs:
+            home_wins += 1
+        else:
+            ties += 1
+    return {"away_win_prob": round(away_wins / n_trials, 3), "home_win_prob": round(home_wins / n_trials, 3),
+           "tie_prob": round(ties / n_trials, 3), "n_trials": n_trials,
+           "avg_away_runs": round(away_runs_total / n_trials, 2),
+           "avg_home_runs": round(home_runs_total / n_trials, 2)}
 
 
 def bullpen_fatigue_multipliers(fatigued_fraction: Optional[float]) -> Dict[str, float]:
