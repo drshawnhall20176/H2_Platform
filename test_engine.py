@@ -211,6 +211,72 @@ def test_pair_pitching_slate_by_game_empty_input():
     assert E.pair_pitching_slate_by_game([]) == []
 
 
+# ----------------------------------------------------------------- build_game_lineups
+def _fake_lineup_box(home_pids, away_pids):
+    return {"teams": {"home": {"battingOrder": home_pids}, "away": {"battingOrder": away_pids}}}
+
+
+def _fake_hitter(pid):
+    return {"id": pid, "name": f"Batter {pid}", "bat_hand": "R",
+           "stat": {"plateAppearances": 500, "avg": 0.260, "slg": 0.420, "obp": 0.330, "ops": 0.750,
+                    "homeRuns": 15, "hits": 130, "totalBases": 210, "strikeOuts": 100},
+           "vs_l": None, "vs_r": None}
+
+
+def test_build_game_lineups_full_nine_batter_lineups(monkeypatch):
+    home_pids = list(range(101, 110))   # 9 real pids
+    away_pids = list(range(201, 210))
+    box = _fake_lineup_box(home_pids, away_pids)
+
+    monkeypatch.setattr(E, "get_pitcher_metrics",
+                        lambda pid, fip_constant=E.FIP_CONSTANT_DEFAULT: E.PitcherMetrics(id=pid, name=f"SP{pid}"))
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+    monkeypatch.setattr(E, "get_hitter_raw", _fake_hitter)
+
+    result = E.build_game_lineups(game_pk=999, home_id=10, away_id=20,
+                                  home_pitcher_id=1, away_pitcher_id=2, venue_id=5)
+    assert result is not None
+    assert len(result["home_rows"]) == 9 and len(result["away_rows"]) == 9
+    print("✓ build_game_lineups assembles a full real 9-batter lineup for both sides")
+
+
+def test_build_game_lineups_home_batters_face_away_starter(monkeypatch):
+    home_pids = list(range(101, 110))
+    away_pids = list(range(201, 210))
+    box = _fake_lineup_box(home_pids, away_pids)
+
+    monkeypatch.setattr(E, "get_pitcher_metrics",
+                        lambda pid, fip_constant=E.FIP_CONSTANT_DEFAULT: E.PitcherMetrics(id=pid, name=f"SP{pid}"))
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+    monkeypatch.setattr(E, "get_hitter_raw", _fake_hitter)
+
+    result = E.build_game_lineups(game_pk=999, home_id=10, away_id=20,
+                                  home_pitcher_id=1, away_pitcher_id=2, venue_id=5)
+    # Home batters' own "_opp_pid" must reflect the AWAY starter (id=2), not home's own.
+    assert all(r["_opp_pid"] == 2 for r in result["home_rows"])
+    assert all(r["_opp_pid"] == 1 for r in result["away_rows"])
+    # Bullpen-lookup team id: home batters' own _opp_id is the AWAY team (bullpen they'd face).
+    assert all(r["_opp_id"] == 20 for r in result["home_rows"])
+    assert all(r["_opp_id"] == 10 for r in result["away_rows"])
+    print("✓ build_game_lineups correctly assigns each side's own OPPONENT starter/team, never swapped")
+
+
+def test_build_game_lineups_none_when_lineup_incomplete(monkeypatch):
+    home_pids = list(range(101, 106))   # only 5 -- an incomplete lineup
+    away_pids = list(range(201, 210))
+    box = _fake_lineup_box(home_pids, away_pids)
+
+    monkeypatch.setattr(E, "get_pitcher_metrics",
+                        lambda pid, fip_constant=E.FIP_CONSTANT_DEFAULT: E.PitcherMetrics(id=pid, name=f"SP{pid}"))
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+    monkeypatch.setattr(E, "get_hitter_raw", _fake_hitter)
+
+    result = E.build_game_lineups(game_pk=999, home_id=10, away_id=20,
+                                  home_pitcher_id=1, away_pitcher_id=2, venue_id=5)
+    assert result is None
+    print("✓ build_game_lineups returns None (not a partial/guessed lineup) when a full 9 real batters can't be assembled")
+
+
 # ----------------------------------------------------------------- get_team_injuries
 def test_get_team_injuries_filters_to_non_active_status(monkeypatch):
     # Documented roster response shape (MLB Stats API's own roster endpoint structure), not a

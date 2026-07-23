@@ -531,6 +531,57 @@ def pair_pitching_slate_by_game(pitching_rows: List[Dict]) -> List[Dict]:
     return [g for g in games_map.values() if "home" in g and "away" in g]
 
 
+def build_game_lineups(game_pk: int, home_id: int, away_id: int,
+                       home_pitcher_id: Optional[int], away_pitcher_id: Optional[int],
+                       venue_id: Optional[int], fip_constant: float = FIP_CONSTANT_DEFAULT,
+                       max_workers: int = 8) -> Optional[Dict[str, Any]]:
+    """Fetch ONE specific game's own two real lineups (9 batters each), with every field
+    batter_pa_probs/project_pitcher/hitter_starter_exposures already need -- the SAME per-batter
+    enrichment build_slate's own _hitter_row already does, scoped to just these two teams
+    instead of the whole day's slate. Added directly for the game-simulation engine (projections.
+    simulate_game_win_probability), which needs real matchup-aware probability arrays for 18 real
+    batters, not the whole day's worth build_slate would otherwise fetch.
+
+    REAL COST: 2 starter fetches (get_pitcher_metrics), 1 boxscore fetch (lineup confirmation via
+    _team_starters), up to 18 hitter fetches (get_hitter_raw, 9 per team, deduplicated and
+    concurrent) -- comparable to what build_slate spends on ONE game, just not multiplied across
+    an entire day's slate.
+
+    Returns {"home_pm", "away_pm", "home_rows", "away_rows"} -- home_pm/away_pm are each side's
+    own starter (PitcherMetrics); home_rows/away_rows are each exactly 9 _hitter_row-shaped
+    dicts (home_rows already carries AWAY's PitcherMetrics as each home batter's own opponent,
+    and vice versa -- the same "away hitters face the HOME pitcher" convention build_slate
+    itself already uses). Returns None if either side's real lineup can't be assembled to a full
+    9 batters (a partial lineup isn't a real simulation input -- an honest None, not a guess at
+    who's missing)."""
+    home_pm = get_pitcher_metrics(home_pitcher_id, fip_constant)
+    away_pm = get_pitcher_metrics(away_pitcher_id, fip_constant)
+    try:
+        box = fetch_json(f"{BASE}/game/{game_pk}/boxscore")
+    except Exception:
+        box = {}
+
+    game_stub = {"home_id": home_id, "away_id": away_id}
+    home_pids, home_projected = _team_starters(game_stub, "home", box)
+    away_pids, away_projected = _team_starters(game_stub, "away", box)
+
+    unique_pids = set(home_pids) | set(away_pids)
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        raws = list(ex.map(get_hitter_raw, unique_pids))
+    raw_by_id = {r["id"]: r for r in raws if r}
+
+    # Home batters face AWAY's pitching (opp=away_pm, opp_team_id=away_id, for a later bullpen-
+    # aggregate lookup on AWAY's own bullpen) -- and the exact mirror for away batters.
+    home_rows = [_hitter_row(raw_by_id[pid], away_pm, "home", "", home_projected, idx, venue_id, away_id)
+                for idx, pid in enumerate(home_pids) if pid in raw_by_id]
+    away_rows = [_hitter_row(raw_by_id[pid], home_pm, "away", "", away_projected, idx, venue_id, home_id)
+                for idx, pid in enumerate(away_pids) if pid in raw_by_id]
+
+    if len(home_rows) < 9 or len(away_rows) < 9:
+        return None
+    return {"home_pm": home_pm, "away_pm": away_pm, "home_rows": home_rows[:9], "away_rows": away_rows[:9]}
+
+
 def _hitter_row(raw: Dict, opp: PitcherMetrics, team_name: str,
                 game_label: str, projected: bool, lineup_idx: int = 0,
                 venue_id: int = None, opp_team_id: int = None) -> Dict:
