@@ -62,20 +62,20 @@ def run():
     # Track Record, Media Room, Podcast, Retrospective) stay visible for every sport and handle
     # "engine not wired yet" gracefully inside the page itself.
     sport_only_leads = {
-        "1": ("MLB",), "2": ("MLB",), "10": ("MLB",),   # Pitching Lab, Dinger Engine, Matchup Lab (MLB)
-        "21": ("MLB",),                                 # Bullpen Watch -- built directly on
+        "5": ("MLB",),                                   # Bullpen Watch -- built directly on
                                                           # mlb_engine's own bullpen-fatigue
                                                           # functions, no WNBA/NFL equivalent
                                                           # exists yet, same posture as Pitching
-                                                          # Lab/Dinger Engine above
-        "22": ("MLB",),                                 # Game Watch -- same MLB-only posture,
+                                                          # Lab/Dinger Engine below
+        "6": ("MLB",),                                   # Game Watch -- same MLB-only posture,
                                                           # built on the same bullpen functions
                                                           # plus build_pitching_slate's FIP
-        "11": ("WNBA", "NBA", "NCAAMB"),                # Hot Hand Engine (opponent-adjusted leaderboard)
-        "12": ("WNBA", "NBA", "NCAAMB"),                # Matchup Lab (WNBA/NBA/NCAAMB) — same slot as page 10, different sport
-        "13": ("NFL",),                                 # Matchup Lab (NFL) — own page, not the shared basketball one (see its own module docstring for why)
-        "14": ("NFL",),                                 # Anytime TD Engine — NFL's Dinger Engine analog
-        "15": ("NFL",),                                 # QB Lab — NFL's Pitching Lab analog
+        "7": ("MLB",), "8": ("MLB",), "9": ("MLB",),      # Pitching Lab, Dinger Engine, Matchup Lab (MLB)
+        "10": ("WNBA", "NBA", "NCAAMB"),                 # Hot Hand Engine (opponent-adjusted leaderboard)
+        "11": ("WNBA", "NBA", "NCAAMB"),                 # Matchup Lab (WNBA/NBA/NCAAMB) — same slot as page 9, different sport
+        "12": ("NFL",),                                  # Matchup Lab (NFL) — own page, not the shared basketball one (see its own module docstring for why)
+        "13": ("NFL",),                                  # Anytime TD Engine — NFL's Dinger Engine analog
+        "14": ("NFL",),                                  # QB Lab — NFL's Pitching Lab analog
     }
 
     # Internal/paid tools kept off the Discord/public build — matched by TITLE (not page number)
@@ -89,30 +89,37 @@ def run():
     # leading page-number -> (title, icon, stable url slug). The url_path is the key fix: it pins
     # each page to a predictable URL so reruns keep you on the same page instead of defaulting to
     # Home.
+    #
+    # NUMBERING, RE-GROUPED DIRECTLY ON REQUEST AFTER A PLATFORM AUDIT (previously reflected build
+    # order, not a designed sidebar journey -- recommendation pages and self-grading pages were
+    # each scattered across the full 0-22 range with unrelated pages between them): 1-4
+    # recommendations (shared board, different lenses), 5-6 moneyline signals, 7-14 deep research,
+    # 15 trading desk, 16-19 self-grading/proof (now cross-linked to each other, see each page's
+    # own docstring), 20-22 ops/content. Command Center stays 0, the landing page throughout.
     meta = {
         "0": ("Command Center", "🏆", "command_center"),
-        "1": ("Pitching Lab",   "🎯", "pitching_lab"),
-        "2": ("Dinger Engine",  "💣", "dinger_engine"),
-        "3": ("Edge Board",     "📈", "edge_board"),
-        "4": ("Bet Log",        "📒", "bet_log"),
-        "5": ("Best Bets",      "⭐", "best_bets"),
-        "6": ("Retrospective",  "🔍", "retrospective"),
-        "7": ("Media Room",     "📣", "media_room"),
-        "8": ("Podcast Studio", "🎙️", "podcast_studio"),
-        "9": ("Track Record",   "📊", "track_record"),
-        "10": ("Matchup Lab",   "🔬", "matchup_lab"),
-        "11": ("Hot Hand Engine", "🔥", "hot_hand_engine"),
-        "12": ("Matchup Lab",   "🔬", "matchup_lab"),   # WNBA version — same slot as page 10
-        "13": ("Matchup Lab",   "🔬", "nfl_matchup_lab"),   # NFL version — same title, distinct url_path
-        "14": ("Anytime TD Engine", "🎯", "anytime_td_engine"),
-        "15": ("QB Lab",        "🏈", "qb_lab"),
-        "16": ("Graded Picks",  "🏅", "graded_picks"),
-        "17": ("Data Health",   "🩺", "data_health"),
-        "18": ("Suggested Parlays", "🎫", "suggested_parlays"),
-        "19": ("Speculative Basket", "🧺", "speculative_basket"),
-        "20": ("Model Dashboard", "🏆", "model_dashboard"),
-        "21": ("Bullpen Watch", "🛡️", "bullpen_watch"),
-        "22": ("Game Watch", "📡", "game_watch"),
+        "1": ("Best Bets",      "⭐", "best_bets"),
+        "2": ("Graded Picks",   "🏅", "graded_picks"),
+        "3": ("Suggested Parlays", "🎫", "suggested_parlays"),
+        "4": ("Speculative Basket", "🧺", "speculative_basket"),
+        "5": ("Bullpen Watch",  "🛡️", "bullpen_watch"),
+        "6": ("Game Watch",     "📡", "game_watch"),
+        "7": ("Pitching Lab",   "🎯", "pitching_lab"),
+        "8": ("Dinger Engine",  "💣", "dinger_engine"),
+        "9": ("Matchup Lab",    "🔬", "matchup_lab"),
+        "10": ("Hot Hand Engine", "🔥", "hot_hand_engine"),
+        "11": ("Matchup Lab",   "🔬", "matchup_lab"),   # WNBA version — same slot as page 9
+        "12": ("Matchup Lab",   "🔬", "nfl_matchup_lab"),   # NFL version — same title, distinct url_path
+        "13": ("Anytime TD Engine", "🎯", "anytime_td_engine"),
+        "14": ("QB Lab",        "🏈", "qb_lab"),
+        "15": ("Edge Board",    "📈", "edge_board"),
+        "16": ("Retrospective", "🔍", "retrospective"),
+        "17": ("Model Dashboard", "🏆", "model_dashboard"),
+        "18": ("Bet Log",       "📒", "bet_log"),
+        "19": ("Track Record",  "📊", "track_record"),
+        "20": ("Data Health",   "🩺", "data_health"),
+        "21": ("Media Room",    "📣", "media_room"),
+        "22": ("Podcast Studio", "🎙️", "podcast_studio"),
     }
 
     def lead(name: str) -> str:

@@ -149,17 +149,22 @@ def test_sport_only_page_visibility_matches_expected_config():
     # stay MLB-only, Hot Hand Engine/Matchup Lab(WNBA/NBA/NCAAMB) must stay basketball-only, and
     # Matchup Lab(NFL)/Anytime TD Engine must stay NFL-only. A future page renumbering could
     # silently break this if nothing locks in which lead numbers map to which sport(s).
+    #
+    # Numbers updated for the platform-audit re-grouping (recommendations 1-4, moneyline signals
+    # 5-6, deep research 7-14, trading desk 15, self-grading/proof 16-19, ops/content 20-22) --
+    # this test's own real job (catching a silent renumbering mismatch) is exactly why it needed
+    # updating here rather than being left to fail confusingly against the old numbers.
     src = (_HERE / "streamlit_app.py").read_text()
     m = re.search(r"sport_only_leads = \{([^}]*)\}", src, re.DOTALL)
     assert m, "streamlit_app.py must define sport_only_leads"
     pairs = {}
     for key, vals in re.findall(r'"(\d+)":\s*\(([^)]*)\)', m.group(1)):
         pairs[key] = tuple(re.findall(r'"(\w+)"', vals))
-    assert pairs == {"1": ("MLB",), "2": ("MLB",), "10": ("MLB",), "21": ("MLB",), "22": ("MLB",),
-                     "11": ("WNBA", "NBA", "NCAAMB"), "12": ("WNBA", "NBA", "NCAAMB"),
-                     "13": ("NFL",), "14": ("NFL",), "15": ("NFL",)}, pairs
-    print("✓ sport_only_leads matches expected config (Pitching Lab/Dinger Engine/Matchup Lab(MLB)/"
-          "Bullpen Watch/Game Watch -> MLB, Hot Hand Engine/Matchup Lab(WNBA/NBA/NCAAMB) -> "
+    assert pairs == {"5": ("MLB",), "6": ("MLB",), "7": ("MLB",), "8": ("MLB",), "9": ("MLB",),
+                     "10": ("WNBA", "NBA", "NCAAMB"), "11": ("WNBA", "NBA", "NCAAMB"),
+                     "12": ("NFL",), "13": ("NFL",), "14": ("NFL",)}, pairs
+    print("✓ sport_only_leads matches expected config (Bullpen Watch/Game Watch/Pitching Lab/"
+          "Dinger Engine/Matchup Lab(MLB) -> MLB, Hot Hand Engine/Matchup Lab(WNBA/NBA/NCAAMB) -> "
           "WNBA+NBA+NCAAMB, Matchup Lab(NFL)/Anytime TD Engine/QB Lab -> NFL)")
 
 
@@ -173,8 +178,8 @@ def test_hot_hand_and_matchup_lab_loaders_key_their_cache_by_sport():
     # already follows the sport_key-as-first-arg convention; this locks in that Hot Hand Engine
     # and Matchup Lab do too, so a future edit can't silently drop the parameter again.
     for path, loaders in (
-        ("views/11_Hot_Hand_Engine.py", ["load_board", "load_injuries"]),
-        ("views/12_Matchup_Lab.py", ["load_slate", "load_injuries", "load_matchup"]),
+        ("views/10_Hot_Hand_Engine.py", ["load_board", "load_injuries"]),
+        ("views/11_Matchup_Lab.py", ["load_slate", "load_injuries", "load_matchup"]),
     ):
         src = (_HERE / path).read_text()
         for fn in loaders:
@@ -224,7 +229,7 @@ def test_best_bets_and_matchup_lab_use_the_shared_time_slot_helpers():
     # the identical logic — extracted into sports.py specifically so a second/third copy never
     # has to exist (and never quietly drifts from the original). This checks the source actually
     # imports from sports rather than redefining its own copy.
-    for path in ("views/5_#U2b50_Best_Bets.py", "views/12_Matchup_Lab.py"):
+    for path in ("views/1_#U2b50_Best_Bets.py", "views/11_Matchup_Lab.py"):
         src = (_HERE / path).read_text()
         assert "sports.game_dt" in src or "S.game_dt" in src, f"{path} should use the shared game_dt"
         assert re.search(r"^def game_dt", src, re.MULTILINE) is None, (
@@ -290,8 +295,8 @@ def test_bet_log_and_track_record_call_the_trading_gate():
     # exists and works in isolation -- a real risk otherwise: sports.require_trading_access
     # could be perfectly correct and simply never called from either page, leaving Bet Log/
     # Track Record just as open as before with no error anywhere to reveal it.
-    bet_log_src = (_HERE / "views" / "4_#L01f4d2_Bet_Log.py").read_text()
-    track_record_src = (_HERE / "views" / "9_Track_Record.py").read_text()
+    bet_log_src = (_HERE / "views" / "18_#L01f4d2_Bet_Log.py").read_text()
+    track_record_src = (_HERE / "views" / "19_Track_Record.py").read_text()
     assert "sports.require_trading_access(" in bet_log_src
     assert "sports.require_trading_access(" in track_record_src
     print("\u2713 both Bet Log and Track Record actually call sports.require_trading_access, confirmed by reading the real source, not assumed")

@@ -4,7 +4,8 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 911/911 tests green)
+## What's in this checkpoint (all tested — 1015/1015 tests green as of 2026-07-23; see the
+## "Platform audit" entry near the end for what's changed since the 911-test mark below)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -4710,6 +4711,78 @@ passing.
 (Option B from the original framing). The plan discussed with Shawn: run on-demand trending for a
 while, and if checking it often enough that rebuild time becomes the real friction, that's the
 actual signal to invest in persistence — not something to guess at up front.
+
+### Platform audit — page placement, self-grading overlap, and a full renumbering (2026-07-23)
+Shawn asked for an in-depth, top-to-bottom audit ahead of eventual release: content placement,
+redundancy, and whether the recommendation pages (Top Leans/Best Bets/Graded Picks/Suggested
+Parlays/Speculative Basket) and the self-grading pages actually cohere. Read every one of the 22
+view pages in full rather than just titles/captions before concluding anything.
+
+**Findings, in order of what got fixed:**
+1. **Hitter Workload was living in Pitching Lab** — a pitcher-only page by its own docstring; the
+  section's own caption already called it "the hitter-side sibling" of pitcher rest/bullpen
+  fatigue, i.e. self-aware it didn't really belong there. Moved to Dinger Engine (the platform's
+  actual hitter-focused home), into its existing per-game "Game-by-game" expander loop next to
+  the platoon map. Had to adapt the gating pattern, not copy Pitching Lab's verbatim: Pitching Lab
+  gated it behind picking ONE game from a dropdown; Dinger Engine loops through every game in a
+  collapsed expander instead, and Streamlit doesn't defer code inside a closed expander — copying
+  the old pattern would have silently fetched workload data for every game on the slate on every
+  load. Used Dinger Engine's own existing convention instead (an opt-in checkbox, same as its
+  "🔄 Bullpen" toggles).
+2. **Model Dashboard's gating was inconsistent** — not in `owner_only_titles`, so it appeared in
+  navigation for a public/Discord audience, but internally called `require_trading_access` (the
+  strict Bet Log/Track Record password) for the WHOLE page even though only element 1 (Real bets)
+  actually touches real financial data. The only page on the platform with a "visible in nav, then
+  hard-gated on click" dead end. Fixed: page-level gate downgraded to `require_live_engine`
+  (matching Retrospective, its real sibling in sensitivity); the strict password check moved
+  inline to guard only element 1, right where the real-money data renders. Elements 2-4 (tool's
+  own picks, player calibration, chalk test) now render for anyone who can already see the page.
+3. **Real overlap confirmed (not assumed) between Retrospective and Model Dashboard.** Checked
+  directly: Model Dashboard's "hit rate by letter grade, within each market/side" section
+  deliberately does NOT re-filter to C-or-better the way its neighboring pie chart does — it
+  includes D-grade plays too, the exact same A-through-D range Retrospective's own (pooled,
+  slate-wide) letter-grade table showed, just broken out more granularly per market/side. A
+  confirmed strict superset, not a different cut of the data — removed from Retrospective, left a
+  page_link pointer in its place. Retrospective's OTHER content (conviction-tier hit rate,
+  calibration scatter plot, "could we have caught it" ranking) has no equivalent anywhere else and
+  was left untouched. Added reciprocal `page_link`s between the two.
+4. **Bet Log and Track Record both present CLV/calibration from the same logged-bet data**, with
+  no signposting anywhere explaining why both exist. Real, legitimate distinction (Bet Log = the
+  full working ledger; Track Record = the polished, narrative presentation for an eventual public
+  audience) — but currently pointless in practice since BOTH are owner-only today, so there's no
+  actual audience difference yet to justify it. Added an honest note to both docstrings saying so
+  directly, plus reciprocal `page_link`s, rather than pretending the distinction is doing more work
+  right now than it is.
+5. **Sidebar order read as a build log, not a designed journey** — the four recommendation pages
+  and four self-grading pages were each scattered across the full 0-22 range with unrelated pages
+  between them (Data Health sat at #17, wedged inside that scatter). Confirmed with Shawn, then
+  executed a full renumbering: 0 Command Center (unchanged) · 1-4 recommendations (Best Bets,
+  Graded Picks, Suggested Parlays, Speculative Basket — same shared board, different lenses) · 5-6
+  moneyline signals (Bullpen Watch, Game Watch) · 7-14 deep research (Pitching Lab, Dinger Engine,
+  the three Matchup Lab variants, Hot Hand Engine, Anytime TD Engine, QB Lab) · 15 Edge Board
+  (trading desk) · 16-19 self-grading/proof, now cross-linked per the finding above (Retrospective,
+  Model Dashboard, Bet Log, Track Record) · 20-22 ops/content (Data Health, Media Room, Podcast
+  Studio).
+
+**Mechanically**: all 22 `views/*.py` files renamed via a two-phase temp-name swap (avoids any
+collision risk from a direct old-name-to-new-name move sequence colliding mid-rename).
+`streamlit_app.py`'s `sport_only_leads` and `meta` dicts rewritten for the new numbers —
+`owner_only_titles` did NOT need to change, since it already matched by page TITLE specifically so
+a future renumbering couldn't silently un-gate anything by accident (confirmed that design intent
+paid off directly here). All 13 hardcoded `st.page_link("views/OLD_NAME.py", ...)` cross-references
+across 11 files updated and re-verified their targets actually resolve. `test_sports.py`'s own
+regression guard (which locks in the exact `sport_only_leads` mapping so a silent renumbering
+mismatch gets caught) updated to the new expected numbers — plus three more tests in the same file
+that had hardcoded old filenames directly, caught by actually running the suite rather than
+assuming the regex-guard fix was the only one needed. Full-codebase grep confirmed zero remaining
+references to any old filename anywhere in `.py` files. 1015/1015 tests passing throughout.
+
+**Note on this checkpoint file itself**: this entry documents the audit/cleanup specifically: it
+does not retroactively backfill everything built between the last entry above (2026-07-21,
+911 tests) and now (1015 tests) — the min-probability filter, Bullpen Watch, Game Watch, player
+calibration, the chalk-index correlation tool, team-form signals, and the Pythagorean/Log5 and
+Monte Carlo win-probability work all happened in that gap and aren't individually logged here.
+Worth a dedicated catch-up pass if that history is wanted, separate from this audit.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
