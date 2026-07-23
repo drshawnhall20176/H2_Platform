@@ -1351,7 +1351,80 @@ def test_build_pitcher_projection_rows_includes_tto_and_team_id():
     print("✓ build_pitcher_projection_rows includes Proj TTO (matching Proj BF / 9) and each pitcher's own _team_id")
 
 
-# ----------------------------------------------------------------- hitter_starter_exposures
+# ----------------------------------------------------------------- pitcher_consistency_index
+def _start(hits=5, k=6, er=3, ip="6.0"):
+    return {"gamePk": 1, "game_date": "2026-06-01", "stat": {
+        "hits": hits, "strikeOuts": k, "earnedRuns": er, "inningsPitched": ip}}
+
+
+def test_pitcher_consistency_index_hand_verified_mean_stdev_cv():
+    # 5 real starts, hits/IP computed directly (not by hand) then locked in as a regression
+    # value: (5,6.0), (3,6.0), (8,5.0), (4,7.0), (6,6.0) -> per-9 rates 7.5, 4.5, 14.4,
+    # 5.142857, 9.0 -> mean 8.1086, sample stdev 3.9549, cv 0.4877.
+    starts = [_start(hits=5, ip="6.0"), _start(hits=3, ip="6.0"), _start(hits=8, ip="5.0"),
+             _start(hits=4, ip="7.0"), _start(hits=6, ip="6.0")]
+    result = P.pitcher_consistency_index(starts, stat_keys=("hits",), min_starts=5)
+    assert result is not None
+    assert result["n_starts"] == 5
+    hits_result = result["hits"]
+    assert abs(hits_result["mean"] - 8.11) < 0.01
+    assert abs(hits_result["stdev"] - 3.95) < 0.01
+    assert abs(hits_result["cv"] - 0.488) < 0.001
+    assert hits_result["per_start"] == [7.5, 4.5, 14.4, 5.14, 9.0]
+    print("✓ pitcher_consistency_index hand-verifies exactly against directly-computed mean/stdev/cv")
+
+
+def test_pitcher_consistency_index_none_below_min_starts():
+    starts = [_start(), _start(), _start()]   # only 3, default min_starts=5
+    assert P.pitcher_consistency_index(starts) is None
+    print("✓ pitcher_consistency_index returns None (not a noisy read) below the min_starts floor")
+
+
+def test_pitcher_consistency_index_skips_zero_ip_starts():
+    # A start with 0 IP (a real, rare MLB Stats API edge case) must not count toward min_starts
+    # or contribute a fabricated 0.0 rate.
+    starts = [_start(ip="0.0")] + [_start()] * 5
+    result = P.pitcher_consistency_index(starts, stat_keys=("hits",), min_starts=5)
+    assert result is not None
+    assert result["n_starts"] == 5   # the 0-IP start excluded, not counted as a 6th
+    print("✓ pitcher_consistency_index correctly excludes zero-IP starts rather than fabricating a rate for them")
+
+
+def test_pitcher_consistency_index_cv_none_when_mean_is_zero():
+    # A pitcher who's allowed 0 earned runs in every one of his last several starts -- CV is
+    # mathematically undefined (division by a zero mean), must be honest None, not a fabricated
+    # 0.0 or an error.
+    starts = [_start(er=0)] * 6
+    result = P.pitcher_consistency_index(starts, stat_keys=("earnedRuns",), min_starts=5)
+    assert result["earnedRuns"]["mean"] == 0.0
+    assert result["earnedRuns"]["cv"] is None
+    print("✓ pitcher_consistency_index returns cv=None (not a fabricated value) when the mean rate is exactly zero")
+
+
+def test_pitcher_consistency_index_multiple_stats_independently():
+    starts = [_start(hits=5, k=8, er=2, ip="6.0"), _start(hits=6, k=7, er=3, ip="6.0"),
+             _start(hits=4, k=9, er=1, ip="6.0"), _start(hits=5, k=8, er=2, ip="6.0"),
+             _start(hits=5, k=8, er=2, ip="6.0")]
+    result = P.pitcher_consistency_index(starts, stat_keys=("hits", "strikeOuts", "earnedRuns"))
+    assert set(result.keys()) == {"n_starts", "hits", "strikeOuts", "earnedRuns"}
+    # Strikeouts are nearly identical every start (8,7,9,8,8) -- should show LOWER relative
+    # variability (cv) than earned runs (2,3,1,2,2), a real, directionally-correct comparison.
+    assert result["strikeOuts"]["cv"] < result["earnedRuns"]["cv"]
+    print("✓ pitcher_consistency_index computes each requested stat independently and comparably via CV")
+
+
+def test_pitcher_consistency_index_consistent_pitcher_has_low_cv():
+    # A genuinely steady pitcher (nearly the same hits allowed every start) should show a real,
+    # low CV -- a direct, meaningful check that the metric actually measures what it claims to.
+    steady = [_start(hits=5, ip="6.0")] * 4 + [_start(hits=6, ip="6.0")]
+    streaky = [_start(hits=1, ip="6.0"), _start(hits=10, ip="6.0"), _start(hits=2, ip="6.0"),
+              _start(hits=9, ip="6.0"), _start(hits=1, ip="6.0")]
+    steady_result = P.pitcher_consistency_index(steady, stat_keys=("hits",))
+    streaky_result = P.pitcher_consistency_index(streaky, stat_keys=("hits",))
+    assert steady_result["hits"]["cv"] < streaky_result["hits"]["cv"]
+    print("✓ pitcher_consistency_index correctly gives a genuinely steady pitcher a lower CV than a genuinely streaky one")
+
+
 def test_hitter_starter_exposures_leadoff_sees_starter_multiple_times():
     # Leadoff (idx=0) comes up as batter #1, #10, #19, #28... A starter projecting 27 BF means
     # the leadoff hitter faces him 3 full times (batters 1, 10, 19 all <= 27).

@@ -1153,6 +1153,84 @@ def times_through_order(exp_bf: float, lineup_size: int = 9) -> float:
     return exp_bf / lineup_size
 
 
+# Real, stated stats measured for consistency, and their real display labels -- deliberately a
+# small, fixed set rather than "any stat key," since a per-9 rate is only a meaningful, familiar
+# number for stats people already think about on a per-9-innings basis.
+CONSISTENCY_STAT_LABELS = {"hits": "Hits/9", "strikeOuts": "K/9", "earnedRuns": "ERA (that start)"}
+
+
+def pitcher_consistency_index(starts: List[Dict[str, Any]],
+                              stat_keys: Tuple[str, ...] = ("hits", "strikeOuts", "earnedRuns"),
+                              min_starts: int = 5) -> Optional[Dict[str, Any]]:
+    """Given a pitcher's own real starts this season (mlb_engine.get_pitcher_starts_this_season's
+    own output shape -- each {"gamePk", "game_date", "stat"}), measures how CONSISTENT vs
+    STREAKY he's been, per real stat, using each start's own rate PER 9 INNINGS rather than raw
+    counts, so a 5-inning start and a 7-inning start are directly comparable.
+
+    WHY THIS EXISTS: a real, recurring pattern from trader discussion -- "[a pitcher] is hard to
+    gauge cos he can either go out there giving it up or go out there and have a shit outta
+    game," followed by someone manually eyeballing a screenshot of his last several starts
+    looking for a pattern, and a real, sharp pushback on doing that from someone else in the same
+    conversation: "next team he faces still has to meet the criteria... probably a random
+    occurrence [not a real pattern in the pitcher himself]." This gives a real number for "how
+    much does this guy swing start to start" instead of eyeballing a screenshot for a pattern
+    that might just be opponent noise.
+
+    HONEST SCOPE, NOT YET OPPONENT-ADJUSTED -- READ THIS BEFORE TRUSTING IT: this measures RAW
+    start-to-start variance only. It does NOT separate "this pitcher is genuinely streaky" from
+    "he faced a much tougher lineup in his bad starts and a weak one in his good starts," which
+    is EXACTLY the sharp distinction raised in the same real conversation that prompted this
+    feature. A true opponent-adjusted version would need each start's own opponent identified (a
+    real boxscore fetch per start, not included here) and a real opponent-quality metric to
+    residualize against -- a genuinely bigger build, not a quick follow-on to this. This is the
+    honest first half: real variance, not yet real variance minus explainable variance.
+
+    METHOD: for each stat_key, computes each start's own per-9 rate ((stat_value / IP) * 9), then
+    the COEFFICIENT OF VARIATION (stdev / mean) across his last min_starts-or-more real starts.
+    CV rather than raw stdev specifically because it's scale-free: a stat with a naturally higher
+    mean (strikeouts) would show a naturally higher raw stdev than a lower-mean stat (earned
+    runs) even at the SAME real relative consistency, and CV corrects for that, making the three
+    stats' own consistency scores genuinely comparable to each other, not just internally.
+
+    Starts with zero innings pitched (a real, if rare, MLB Stats API edge case -- e.g. a start
+    that ended before recording an out) are skipped for that computation, not treated as a 0.0
+    rate, which would be a fabricated data point, not a real one.
+
+    Returns None if fewer than min_starts real starts with usable innings are available -- an
+    honest "not enough of a sample yet" rather than a noisy read from 2-3 starts. Otherwise:
+    {"n_starts": int, stat_key: {"mean": float, "stdev": float, "cv": float, "per_start": [float,
+    ...]}, ...} for each stat_key that had usable data across enough starts -- a stat_key
+    missing from the result (rather than present with a fabricated value) means IT specifically
+    didn't have enough usable data, even if the others did."""
+    usable = [s for s in starts if _parse_ip(s.get("stat", {}).get("inningsPitched")) > 0]
+    if len(usable) < min_starts:
+        return None
+
+    result: Dict[str, Any] = {"n_starts": len(usable)}
+    for key in stat_keys:
+        rates = []
+        for s in usable:
+            stat = s.get("stat", {})
+            ip = _parse_ip(stat.get("inningsPitched"))
+            rates.append((_f(stat, key) / ip) * 9.0)
+        if len(rates) < min_starts:
+            continue   # shouldn't happen given the usable filter above, but never fabricate a
+                      # per-stat result from fewer real data points than min_starts requires
+        mean = float(np.mean(rates))
+        stdev = float(np.std(rates, ddof=1))   # sample stdev (ddof=1), not population -- these
+                                                # starts are a SAMPLE of this pitcher's true
+                                                # talent/tendency, not his entire universe of
+                                                # possible starts
+        cv = (stdev / mean) if mean > 0 else None   # undefined (not a fabricated 0.0 or inf)
+                                                     # when the mean itself is 0 -- e.g. a
+                                                     # pitcher who's allowed 0 earned runs in
+                                                     # every one of his last N starts
+        result[key] = {"mean": round(mean, 2), "stdev": round(stdev, 2),
+                       "cv": round(cv, 3) if cv is not None else None,
+                       "per_start": [round(r, 2) for r in rates]}
+    return result
+
+
 def hitter_starter_exposures(lineup_idx: int, starter_proj_bf: float, exp_pa: float,
                              lineup_size: int = 9) -> Dict[str, float]:
     """How many of THIS hitter's own expected plate appearances (exp_pa) fall against the
