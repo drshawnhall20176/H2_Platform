@@ -22,6 +22,12 @@ st.caption("ERA vs FIP regression and matchup-aware strikeout/innings projection
 
 eastern = pytz.timezone("US/Eastern")
 
+CONSISTENCY_LOOKBACK_STARTS = 8   # a real, stated judgment call for the Pitcher Consistency
+                                 # section below -- roughly a starter's last ~6 weeks of starts
+                                 # (5-day rotation), long enough to be a real sample, short
+                                 # enough to still reflect his current form. Not empirically
+                                 # tuned against this platform's own data.
+
 
 def game_time_et(iso_utc):
     """ISO-UTC start -> '7:10 PM ET', or 'TBD' if missing."""
@@ -493,6 +499,63 @@ if game_options:
                     st.caption("Real, summed outcomes across each block of starts, not a "
                               "projected adjustment. A small sample on either side — read with "
                               "the same caution any small-sample split deserves.")
+
+    # === Pitcher consistency: is this guy steady or streaky start to start? -------------------
+    # Added directly on request, after a real, specific conversation: someone manually eyeballing
+    # a screenshot of a starter's last several games looking for a pattern ("he can either go out
+    # there giving it up or go out there and have a shit outta game"), and a real, sharp pushback
+    # from someone else in the same conversation: "next team he faces still has to meet the
+    # criteria... probably a random occurrence [not a real pattern]." This gives a real number
+    # for that question instead of eyeballing a screenshot.
+    st.markdown("**📈 Pitcher consistency (steady vs. streaky, start to start)**")
+    st.caption("How much does this starter's own performance actually swing game to game, using "
+              "his real last "
+              f"{CONSISTENCY_LOOKBACK_STARTS} starts? Coefficient of variation (CV) per stat — "
+              "lower means steadier, higher means more boom-or-bust.\n\n"
+              "⚠️ **NOT opponent-adjusted, read this before trusting it.** This measures raw "
+              "swings only — it does NOT separate genuine streakiness from just having faced a "
+              "tough lineup in a bad start and a weak one in a good start, which is exactly the "
+              "real distinction that prompted building this. A true opponent-adjusted version "
+              "would need a real boxscore fetch per start plus a real opponent-quality metric to "
+              "compare against — a genuinely bigger build, not included here. Costs a real "
+              "fetch per start scanned, so it's on-demand, not automatic.")
+    pc1, pc2 = st.columns(2)
+    for col, label, sp in ((pc1, picked["home_name"], picked["home_pm"]),
+                           (pc2, picked["away_name"], picked["away_pm"])):
+        with col:
+            st.markdown(f"**{label}** — {sp.name}")
+            if st.button("Check consistency", key=f"consistency_{sp.id}"):
+                with st.spinner(f"Pulling {sp.name}'s real starts this season..."):
+                    season = int(date_str[:4])
+                    starts = E.get_pitcher_starts_this_season(sp.id, season, before_date=date_str)
+                    starts_sorted = sorted(starts, key=lambda s: s.get("game_date") or "")
+                    recent = starts_sorted[-CONSISTENCY_LOOKBACK_STARTS:]
+                    result = P.pitcher_consistency_index(recent, min_starts=5)
+                if not result:
+                    st.caption(f"Not enough real starts yet this season (fewer than 5 with "
+                              "usable innings) for a real consistency read.")
+                else:
+                    for key, tab_label in (("hits", "Hits/9"), ("strikeOuts", "K/9"),
+                                          ("earnedRuns", "ERA, that start")):
+                        stat_result = result.get(key)
+                        if not stat_result:
+                            continue
+                        cv = stat_result["cv"]
+                        tag = ("—" if cv is None else
+                              "🟢 Consistent" if cv < 0.30 else
+                              "🟡 Moderate" if cv < 0.60 else
+                              "🔴 Streaky")
+                        sc1, sc2, sc3 = st.columns(3)
+                        sc1.metric(f"{tab_label} avg", f"{stat_result['mean']:.2f}")
+                        sc2.metric("CV", f"{cv:.2f}" if cv is not None else "—")
+                        sc3.markdown(f"**{tag}**")
+                        with st.expander(f"{tab_label} — last {result['n_starts']} starts"):
+                            st.line_chart(stat_result["per_start"])
+                    st.caption(f"Based on his real last {result['n_starts']} starts with usable "
+                              "innings — a real, stated judgment call on window size (last "
+                              f"{CONSISTENCY_LOOKBACK_STARTS}), not empirically tuned. 🟢/🟡/🔴 "
+                              "thresholds (CV < 0.30 / 0.30–0.60 / ≥ 0.60) are also a real, "
+                              "stated judgment call, not derived from this platform's own data.")
 else:
     st.caption("No games with both team ids available for this date.")
 
