@@ -176,6 +176,59 @@ if use_bullpen:
 hitters = load_hitters(date_str)
 opp = pitcher.get("Opponent")
 opp_hitters = [h for h in hitters if h.get("Team") == opp] or hitters
+
+# === Lineup leaderboard vs. this pitcher's arsenal =========================================
+# Added directly on request, after a real conversation doing this exact thing manually,
+# screenshot by screenshot: "Is this by pitch mix batted ball events? Filtered by all pitches or
+# most used pitches?... Can you do the one filtered by most used pitch? And tell me who has the
+# highest EV." Matchup Lab already had every real number this needs (pitcher arsenal usage order,
+# each hitter's own per-specific-pitch-type splits) -- it just only offered a one-hitter-at-a-time
+# lookup, never a ranked view across the whole real opposing lineup. This is that ranking, not a
+# new calculation.
+st.subheader("🏆 Lineup leaderboard vs. this pitcher's arsenal")
+pitcher_arsenal = arsenals.get(pitcher_pid, [])   # already usage-sorted (build_pitcher_arsenal's
+                                                  # own real sort), so index 0 is his most-used
+                                                  # pitch with zero extra computation
+if not pitcher_arsenal:
+    st.caption(f"No cached arsenal for {pitcher['Pitcher']} yet — the leaderboard needs at "
+              "least one of his real pitch types on file.")
+else:
+    pitch_by_label = {f"{p['pitch_name']} ({p['usage']:.0%} usage)": p["pitch_type"] for p in pitcher_arsenal}
+    pitch_label = st.selectbox("Filter by this pitch specifically", list(pitch_by_label.keys()),
+                               index=0,   # defaults to his real most-used pitch
+                               help="Defaults to the pitcher's own most-used pitch (the real, "
+                                   "stated ask: 'filtered by most used pitch'). Pick any other "
+                                   "pitch in his real arsenal to check the lineup against that "
+                                   "one specifically instead.")
+    selected_pitch_type = pitch_by_label[pitch_label]
+
+    hitter_types_for_board = load_hitter_type_cache()
+    board = MD.build_lineup_vs_pitch_leaderboard(
+        [h.get("_pid") for h in opp_hitters if h.get("_pid")], selected_pitch_type, hitter_types_for_board)
+    if not board:
+        st.caption(f"No real batter in {opp or 'this lineup'} has enough of a sample against "
+                  f"{pitch_label.split(' (')[0]} specifically yet — try a different pitch, or "
+                  "check back once more of the season is in.")
+    else:
+        name_by_bid = {h.get("_pid"): h.get("Hitter", "?") for h in opp_hitters}
+        board_df = pd.DataFrame([{
+            "Hitter": name_by_bid.get(r["batter_id"], "?"), "Pitches seen": r["pitches"],
+            "Exit Velo": r["exit_velo"], "SLG": r["slg"], "xwOBA": r["xwoba"], "Whiff%": r["whiff"],
+        } for r in board])
+        st.dataframe(board_df.style.format({"Exit Velo": "{:.1f}", "SLG": "{:.2f}", "xwOBA": "{:.2f}",
+                                            "Whiff%": "{:.0%}"}, na_rep="—")
+                     .theme_gradient(cmap="RdYlGn", subset=["Exit Velo", "SLG", "xwOBA"])
+                     .theme_gradient(cmap="RdYlGn_r", subset=["Whiff%"]),
+                     use_container_width=True, hide_index=True)
+        st.caption(f"Ranked by real exit velocity against {pitch_label.split(' (')[0]} "
+                  "specifically, highest first — a real, direct answer to 'who on this lineup "
+                  "matches up best against this exact pitch.' Batters without enough of a real "
+                  "sample against this specific pitch are left off entirely, not shown with a "
+                  "misleadingly precise number from a handful of pitches. A scouting read, not "
+                  "a probability or a bet signal — same posture as every other number on this "
+                  "page.")
+st.divider()
+
 h_by_label = {}
 for h in opp_hitters:
     hid = h.get("_pid")
