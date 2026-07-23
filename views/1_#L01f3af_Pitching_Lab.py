@@ -14,6 +14,7 @@ import pytz
 
 import mlb_engine as E
 import projections as P
+import statcast_data as SC
 
 st.title("🎯 Pitching Lab")
 st.caption("ERA vs FIP regression and matchup-aware strikeout/innings projections")
@@ -30,6 +31,42 @@ def game_time_et(iso_utc):
         return dt.strftime("%I:%M %p").lstrip("0") + " ET"
     except (ValueError, TypeError):
         return "TBD"
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_statcast():
+    return SC.load()  # (lookup_by_player_id, calibration_k); ({}, None) if no cache file
+
+
+def _build_lineup_probs(rows, opp_starter_stat, opp_bullpen_stat, park, statcast_lookup, statcast_k):
+    """For a real 9-batter lineup (build_game_lineups' own row shape), build the two per-batter
+    probability-array lists the game simulation needs -- one for facing the OPPOSING starter,
+    one for facing the OPPOSING bullpen -- reusing batter_pa_probs/pitcher_allowed_rates exactly
+    as they're already used elsewhere on this platform for individual player props, not a new
+    parallel calculation.
+
+    NO LIVE WEATHER ADJUSTMENT (weather_hr fixed at 1.0, neutral) -- a real, stated
+    simplification for this v1 wiring, not an oversight; batter_pa_probs itself supports a real
+    weather multiplier, it's just not fetched and threaded through here yet.
+
+    Returns (probs_vs_starter_list, probs_vs_bullpen_list), each exactly 9 arrays in the same
+    batting-order order as `rows`, or None if either the starter's or bullpen's own rates can't
+    be computed, or if ANY single batter in the lineup can't be projected -- a simulation missing
+    even one real batter isn't a real 9-man lineup."""
+    opp_sp_rates = P.pitcher_allowed_rates(opp_starter_stat)
+    opp_pen_rates = P.pitcher_allowed_rates(opp_bullpen_stat)
+    if opp_sp_rates is None or opp_pen_rates is None:
+        return None
+    vs_starter, vs_bullpen = [], []
+    for row in rows:
+        xhr = P.xhr_from_statcast(row["_pid"], statcast_lookup, statcast_k)
+        probs_sp = P.batter_pa_probs(row["_stat"], park, opp_sp_rates, row["_split_stat"], xhr, weather_hr=1.0)
+        probs_pen = P.batter_pa_probs(row["_stat"], park, opp_pen_rates, row["_split_stat"], xhr, weather_hr=1.0)
+        if probs_sp is None or probs_pen is None:
+            return None
+        vs_starter.append(probs_sp)
+        vs_bullpen.append(probs_pen)
+    return vs_starter, vs_bullpen
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -232,6 +269,89 @@ if game_options:
                         st.success(f"✅ Confirmed — {actual['name']} matches the probable starter.")
     else:
         st.caption("No game id available for this matchup — starter check isn't available here.")
+
+    # === EXPERIMENTAL: full Monte Carlo game simulation (Option A, Method 1) -------------------
+    # Added directly on request, after building and testing the underlying simulation engine
+    # (projections.simulate_game_win_probability) separately with synthetic data. This is the
+    # REAL DATA WIRING step: fetches both teams' actual 9-man lineups (mlb_engine.
+    # build_game_lineups) and runs them through that engine. UNBACKTESTED -- same honest
+    # limitation as the lighter Pythagorean/Log5 estimate on Game Watch, doubled: this is a
+    # bigger, more complex model with more places a real calibration error could hide, and
+    # there's been zero opportunity to check it against actual outcomes from this sandbox.
+    #
+    # REAL, STATED SIMPLIFICATIONS IN THE WIRING ITSELF (on top of the engine's own, see
+    # projections.py's module comment above simulate_one_game): no live weather adjustment
+    # (weather_hr fixed at 1.0 neutral -- batter_pa_probs supports a real weather multiplier,
+    # just not wired in here yet); a starter's own rest/matchup-lineup adjustments used
+    # elsewhere on this platform (rest_adjustment_multipliers, opponent-lineup K/BB odds-ratio)
+    # are NOT applied here -- each starter/bullpen is projected from his own season rates alone.
+    #
+    # REAL COST, substantial: up to 18 hitter fetches, 2 starter fetches, 1 boxscore fetch, 2
+    # bullpen-aggregate fetches, PLUS the simulation itself (n_trials full 9-inning games) --
+    # the most expensive single feature on this platform. On-demand only.
+    st.markdown("**🎲 EXPERIMENTAL — full Monte Carlo game simulation**")
+    st.caption("Simulates the actual game, inning by inning, using both teams' real lineups — "
+              "the full version of a win-probability model, not the lighter Pythagorean/Log5 "
+              "shortcut on Game Watch. Real, substantial cost (roughly 20+ fetches plus the "
+              "simulation itself) — nothing runs until you press the button below.")
+    n_trials = st.slider("Number of simulated games", min_value=200, max_value=3000, value=800,
+                         step=200,
+                         help="More trials narrow the estimate but take longer to run in this "
+                             "plain-Python (not vectorized) engine — see projections.py's own "
+                             "docstring for the exact tradeoff.")
+    if st.button("🎲 Run full game simulation", key=f"sim_run_{picked.get('gamePk')}"):
+        with st.spinner("Fetching both real lineups..."):
+            lineups = E.build_game_lineups(
+                picked["gamePk"], picked["home_id"], picked["away_id"],
+                picked["home_pm"].id, picked["away_pm"].id, picked.get("venue_id"), fip_constant)
+        if lineups is None:
+            st.warning("Couldn't assemble a full real 9-batter lineup for one or both teams "
+                      "(lineup not posted yet, or thin data) — try again closer to first pitch.")
+        else:
+            with st.spinner(f"Building matchup-aware probabilities and running {n_trials} simulated games..."):
+                statcast_lookup, statcast_k = load_statcast()
+                park = P.PARK_FACTORS.get(picked.get("venue_id"), P.NEUTRAL_PARK)
+                home_pm, away_pm = lineups["home_pm"], lineups["away_pm"]
+
+                away_bullpen_stat = E.get_bullpen_aggregate_stat(picked["away_id"], exclude_pid=away_pm.id)
+                home_bullpen_stat = E.get_bullpen_aggregate_stat(picked["home_id"], exclude_pid=home_pm.id)
+                away_starter_proj = P.project_pitcher(away_pm.stat)
+                home_starter_proj = P.project_pitcher(home_pm.stat)
+
+                sim_result = None
+                if not (away_bullpen_stat and home_bullpen_stat and away_starter_proj and home_starter_proj):
+                    st.warning("One or both starters/bullpens don't have enough real season data "
+                              "to project (a very early-season sample, or a true bullpen-game "
+                              "opener) — the simulation needs a real projection for both sides.")
+                else:
+                    home_probs = _build_lineup_probs(lineups["home_rows"], away_pm.stat, away_bullpen_stat,
+                                                     park, statcast_lookup, statcast_k)
+                    away_probs = _build_lineup_probs(lineups["away_rows"], home_pm.stat, home_bullpen_stat,
+                                                     park, statcast_lookup, statcast_k)
+                    if home_probs is None or away_probs is None:
+                        st.warning("Couldn't build real matchup probabilities for every batter in "
+                                  "one or both lineups (thin individual sample) — the simulation "
+                                  "needs a real projection for all 18 real batters.")
+                    else:
+                        sim_result = P.simulate_game_win_probability(
+                            away_probs[0], away_probs[1], home_starter_proj["exp_outs"],
+                            home_probs[0], home_probs[1], away_starter_proj["exp_outs"],
+                            n_trials=n_trials)
+
+            if sim_result:
+                mc1, mc2, mc3 = st.columns(3)
+                mc1.metric(f"{picked['away_name']} (away)", f"{sim_result['away_win_prob']:.0%}")
+                mc2.metric(f"{picked['home_name']} (home)", f"{sim_result['home_win_prob']:.0%}")
+                mc3.metric("Tied after 9 (extras not simulated)", f"{sim_result['tie_prob']:.0%}")
+                st.caption(f"Average simulated score: {picked['away_name']} "
+                          f"{sim_result['avg_away_runs']:.1f} — {picked['home_name']} "
+                          f"{sim_result['avg_home_runs']:.1f}, across {sim_result['n_trials']} trials.")
+                st.caption("⚠️ **Not backtested.** A real inning-by-inning simulation using real "
+                          "lineups, but deterministic base-running (see projections.py's own "
+                          "module comment for the exact list of simplifications) tends to "
+                          "inflate scoring somewhat above real MLB rates — trust the direction "
+                          "of this result more than its exact number until it's been checked "
+                          "against real outcomes.")
 
     # === Mid-season catcher change: does this starter's own BB/K rate actually shift? ---------
     st.markdown("**🧤 Catcher change check**")
