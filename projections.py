@@ -359,6 +359,128 @@ def matchup_signal_tally(edges: List[Optional[str]]) -> Dict[str, Any]:
            "available": available, "verdict": verdict}
 
 
+# =============================================================================================
+# EXPERIMENTAL — Option A, Phase 1: a real Pythagorean/Log5 win-probability estimator.
+#
+# GENUINELY DIFFERENT IN KIND from every function above this line. matchup_signal_tally and its
+# neighbors deliberately output an honest COUNT ("3 of 6 signals agree"), specifically because
+# nothing on this platform has been backtested against real outcomes. The functions below output
+# an actual PROBABILITY NUMBER -- a fundamentally different, higher-stakes kind of claim, because
+# a number like "62% to win" reads as validated even when explicitly labeled otherwise. Both this
+# module-level comment and every caller of these functions should say so prominently.
+#
+# NOT A GAME SIMULATION. This is the lighter of the two paths a real win-probability model could
+# take: two real, decades-old sabermetric formulas (Bill James' Pythagorean expectation and Log5),
+# not a pitch-by-pitch or inning-by-inning simulation. A true simulation -- team-level run-scoring
+# distributions, a starter modeled over his actual expected innings, bullpen hand-off logic,
+# park/weather adjustments -- is a genuinely bigger, separate undertaking, not implemented here.
+#
+# NOT YET BACKTESTED. Same honest limitation as everywhere else on this platform born from this
+# sandbox's own network restriction: there's no way to validate this against real historical
+# outcomes from here. Every constant below (the Pythagorean exponent, the starter/bullpen innings
+# split) is a real, well-documented value from outside this platform, not derived from this
+# platform's own data -- named and visible, the same way BULLPEN_FATIGUE_THRESHOLD and every
+# other judgment-call constant in this module already is, not buried. Treat any output as a
+# hypothesis to check once real results are available, not a number to trust yet.
+# =============================================================================================
+
+PYTHAGOREAN_EXPONENT = 1.83   # the classic, fixed MLB exponent (Bill James' original estimate,
+                             # still the most commonly cited fixed value) -- NOT "Pythagenpat,"
+                             # a real, documented refinement that computes a dynamic exponent
+                             # per run environment instead of using one fixed number. A stated
+                             # v1 simplification, not an oversight.
+STARTER_INNINGS_SHARE = 5.5 / 9   # a real, commonly-used rough assumption for an average MLB
+                                 # starter's own outing length -- not derived from this
+                                 # platform's own data, and not adjusted per-pitcher (a starter
+                                 # who reliably goes deeper or shorter than average isn't
+                                 # reflected here; a real, stated gap, not an oversight)
+BULLPEN_INNINGS_SHARE = 1.0 - STARTER_INNINGS_SHARE
+
+
+def blended_pitching_run_rate(starter_fip: Optional[float], bullpen_era: Optional[float],
+                              starter_share: float = STARTER_INNINGS_SHARE,
+                              bullpen_share: float = BULLPEN_INNINGS_SHARE) -> Optional[float]:
+    """Blends a starter's own FIP with his team's bullpen's own aggregate ERA into a single
+    "expected runs allowed per 9 innings tonight" number for that team's pitching as a whole,
+    weighted by each side's assumed share of the game (see this section's own module-level
+    comment for the real, stated assumptions behind both the weights and treating FIP/ERA as a
+    rough stand-in for expected total runs allowed -- FIP technically estimates EARNED runs on a
+    defense-independent basis, not literally every run; close enough for a v1 approximation,
+    stated explicitly rather than glossed over).
+
+    Returns None if either input is missing -- an incomplete blend is never reported as if it
+    were complete."""
+    if starter_fip is None or bullpen_era is None:
+        return None
+    return starter_share * starter_fip + bullpen_share * bullpen_era
+
+
+def pythagorean_win_pct(runs_scored: Optional[float], runs_allowed: Optional[float],
+                        exponent: float = PYTHAGOREAN_EXPONENT) -> Optional[float]:
+    """Bill James' real Pythagorean win-expectation formula: win% = RS^k / (RS^k + RA^k) -- a
+    real, decades-old sabermetric method, not invented for this platform. exponent defaults to
+    PYTHAGOREAN_EXPONENT (see its own module-level note for why a fixed 1.83 rather than a
+    dynamically-computed one).
+
+    Returns None (never a guessed 0.500) when either input is missing, or when either is
+    non-positive -- the formula is only meaningful for positive runs values, and there's no real
+    sense in which a team has zero or negative expected runs."""
+    if runs_scored is None or runs_allowed is None or runs_scored <= 0 or runs_allowed <= 0:
+        return None
+    rs_k = runs_scored ** exponent
+    ra_k = runs_allowed ** exponent
+    return rs_k / (rs_k + ra_k)
+
+
+def log5_win_probability(pct_a: Optional[float], pct_b: Optional[float]) -> Optional[float]:
+    """Bill James' real Log5 formula for head-to-head win probability from two teams' own
+    independent win percentages -- itself decades-old, not invented here: P(A beats B) =
+    (pA - pA*pB) / (pA + pB - 2*pA*pB).
+
+    Returns None when either input is missing, or when the formula's own denominator is exactly
+    zero (only possible at degenerate extremes -- e.g. both inputs exactly 0 or both exactly 1 --
+    not a real MLB scenario, but guarded honestly here rather than raising a division error)."""
+    if pct_a is None or pct_b is None:
+        return None
+    denom = pct_a + pct_b - 2 * pct_a * pct_b
+    if denom == 0:
+        return None
+    return (pct_a - pct_a * pct_b) / denom
+
+
+def game_win_probability(away_runs_scored: Optional[float], away_starter_fip: Optional[float],
+                         away_bullpen_era: Optional[float], home_runs_scored: Optional[float],
+                         home_starter_fip: Optional[float], home_bullpen_era: Optional[float],
+                         exponent: float = PYTHAGOREAN_EXPONENT) -> Optional[Dict[str, float]]:
+    """Ties blended_pitching_run_rate + pythagorean_win_pct + log5_win_probability together into
+    tonight's own away/home win probability -- the actual Phase 1 estimator, given already-
+    computed real inputs.
+
+    DELIBERATELY ASYMMETRIC INPUT TREATMENT, a real modeling choice, not an inconsistency: each
+    team's own RUNS SCORED (offense) uses their RECENT FORM (the best offense proxy actually
+    available -- there's no per-opponent offense adjustment on this platform yet), while each
+    team's own RUNS ALLOWED (pitching) uses TONIGHT'S SPECIFIC starter+bullpen blend, since that
+    real, known information is more relevant to tonight than a recent average across whichever
+    pitchers actually took the mound over the last 15 games. A team's runs-allowed input is
+    always built from ITS OWN pitching (blended_pitching_run_rate of away_starter_fip/away_
+    bullpen_era for the away team, home_starter_fip/home_bullpen_era for home) -- a team's own
+    good pitching should lower ITS OWN runs allowed, not its opponent's.
+
+    Returns None if any required input is missing anywhere in the chain -- an incomplete
+    estimate is never partially filled in with a guess. Otherwise: {"away_pyth", "home_pyth",
+    "away_win_prob", "home_win_prob"} -- the two Pythagorean win%s and the two Log5 head-to-head
+    probabilities (which sum to 1.0 by construction)."""
+    away_ra = blended_pitching_run_rate(away_starter_fip, away_bullpen_era)
+    home_ra = blended_pitching_run_rate(home_starter_fip, home_bullpen_era)
+    away_pyth = pythagorean_win_pct(away_runs_scored, away_ra, exponent=exponent)
+    home_pyth = pythagorean_win_pct(home_runs_scored, home_ra, exponent=exponent)
+    away_win_prob = log5_win_probability(away_pyth, home_pyth)
+    if away_win_prob is None:
+        return None
+    return {"away_pyth": round(away_pyth, 3), "home_pyth": round(home_pyth, 3),
+           "away_win_prob": round(away_win_prob, 3), "home_win_prob": round(1 - away_win_prob, 3)}
+
+
 def bullpen_fatigue_multipliers(fatigued_fraction: Optional[float]) -> Dict[str, float]:
     """Given the real fraction of a team's bullpen currently showing fatigue signs (from
     bullpen_fatigued_fraction), the real multipliers to apply to that bullpen's own K/BB/ER/HR-

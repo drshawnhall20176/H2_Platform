@@ -875,10 +875,13 @@ def get_team_recent_form(team_id: int, before_date: str, games_back: int = 15,
 
     Returns None if the team has no Final games with usable scores matching every filter in the
     window (a real, honest "no data" state, not a fabricated 0-0 record). Otherwise: {"games":
-    int, "wins": int, "losses": int, "win_pct": float, "run_diff": int, "avg_run_diff": float}.
-    run_diff is this team's OWN total (runs scored minus runs allowed) summed across the window;
-    avg_run_diff is that total divided by games played — the number actually comparable between
-    two teams that didn't play the exact same number of games in their own windows."""
+    int, "wins": int, "losses": int, "win_pct": float, "run_diff": int, "avg_run_diff": float,
+    "runs_scored": float, "runs_allowed": float}. run_diff is this team's OWN total (runs scored
+    minus runs allowed) summed across the window; avg_run_diff is that total divided by games
+    played — the number actually comparable between two teams that didn't play the exact same
+    number of games in their own windows. runs_scored/runs_allowed are the same per-game
+    averages, kept separately (not just their difference) since a Pythagorean win-expectation
+    estimate needs both independently."""
     try:
         before_dt = datetime.strptime(before_date, "%Y-%m-%d")
     except ValueError:
@@ -924,9 +927,16 @@ def get_team_recent_form(team_id: int, before_date: str, games_back: int = 15,
 
     wins = sum(1 for own, opp in valid if own > opp)
     run_diff_total = sum(own - opp for own, opp in valid)
+    runs_scored_total = sum(own for own, opp in valid)
+    runs_allowed_total = sum(opp for own, opp in valid)
     n = len(valid)
     return {"games": n, "wins": wins, "losses": n - wins, "win_pct": round(wins / n, 3),
-           "run_diff": run_diff_total, "avg_run_diff": round(run_diff_total / n, 2)}
+           "run_diff": run_diff_total, "avg_run_diff": round(run_diff_total / n, 2),
+           # Additive: separate runs-scored/allowed averages, not just their differential --
+           # needed for a Pythagorean-expectation estimate (see projections.pythagorean_win_pct),
+           # which needs RS and RA independently, not just RS-minus-RA.
+           "runs_scored": round(runs_scored_total / n, 2),
+           "runs_allowed": round(runs_allowed_total / n, 2)}
 
 
 def get_team_pitching_staff(team_id: int, exclude_pid: Optional[int] = None) -> List[Dict[str, Any]]:

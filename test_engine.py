@@ -445,7 +445,8 @@ def test_get_team_recent_form_hand_verified_record_and_run_diff(monkeypatch):
     monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
     form = E.get_team_recent_form(117, "2026-07-18", games_back=15)
     assert form == {"games": 3, "wins": 2, "losses": 1, "win_pct": 0.667,
-                    "run_diff": 5, "avg_run_diff": 1.67}
+                    "run_diff": 5, "avg_run_diff": 1.67,
+                    "runs_scored": 4.0, "runs_allowed": 2.33}   # 12/3, 7/3 rounded
     print("✓ get_team_recent_form hand-verifies the exact record and run differential from 3 games")
 
 

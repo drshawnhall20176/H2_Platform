@@ -469,6 +469,107 @@ def test_matchup_signal_tally_empty_list_is_insufficient_data():
     assert P.matchup_signal_tally([])["verdict"] == "insufficient_data"
 
 
+# ----------------------------------------------------------------- blended_pitching_run_rate
+def test_blended_pitching_run_rate_hand_verified():
+    # 5.5/9 * 3.60 + 3.5/9 * 4.20 = 3.833333...
+    rate = P.blended_pitching_run_rate(3.60, 4.20)
+    assert abs(rate - 3.8333) < 0.001
+    print("✓ blended_pitching_run_rate hand-verifies against the stated 5.5/9-starter, 3.5/9-bullpen weighting")
+
+
+def test_blended_pitching_run_rate_none_when_either_missing():
+    assert P.blended_pitching_run_rate(None, 4.20) is None
+    assert P.blended_pitching_run_rate(3.60, None) is None
+
+
+def test_blended_pitching_run_rate_custom_shares():
+    # An explicit 50/50 split should just be the plain average.
+    rate = P.blended_pitching_run_rate(3.00, 5.00, starter_share=0.5, bullpen_share=0.5)
+    assert rate == 4.0
+
+
+# ----------------------------------------------------------------- pythagorean_win_pct
+def test_pythagorean_win_pct_hand_verified_clean_exponent():
+    # RS=5, RA=4, k=2 -> 25/(25+16) = 25/41
+    pct = P.pythagorean_win_pct(5, 4, exponent=2)
+    assert abs(pct - 25 / 41) < 1e-9
+    print("✓ pythagorean_win_pct hand-verifies exactly against a clean k=2 case (25/41)")
+
+
+def test_pythagorean_win_pct_hand_verified_default_exponent():
+    # RS=5, RA=4, default k=1.83 -> 0.6006928... (computed directly, not estimated by hand)
+    pct = P.pythagorean_win_pct(5, 4)
+    assert abs(pct - 0.6006928) < 0.0001
+
+
+def test_pythagorean_win_pct_equal_teams_is_half():
+    assert abs(P.pythagorean_win_pct(4.5, 4.5) - 0.5) < 1e-9
+
+
+def test_pythagorean_win_pct_none_on_missing_or_nonpositive():
+    assert P.pythagorean_win_pct(None, 4.0) is None
+    assert P.pythagorean_win_pct(4.0, None) is None
+    assert P.pythagorean_win_pct(0, 4.0) is None
+    assert P.pythagorean_win_pct(4.0, -1) is None
+    print("✓ pythagorean_win_pct returns None (never a guessed 0.500) for missing or non-positive inputs")
+
+
+# ----------------------------------------------------------------- log5_win_probability
+def test_log5_win_probability_hand_verified():
+    # pA=0.6, pB=0.4 -> (0.6-0.24)/(1.0-0.48) = 0.36/0.52 = 0.69230769...
+    p = P.log5_win_probability(0.6, 0.4)
+    assert abs(p - 0.6923077) < 0.0001
+    print("✓ log5_win_probability hand-verifies exactly against Bill James' own published formula")
+
+
+def test_log5_win_probability_equal_teams_is_half():
+    assert abs(P.log5_win_probability(0.55, 0.55) - 0.5) < 1e-9
+
+
+def test_log5_win_probability_none_when_either_missing():
+    assert P.log5_win_probability(None, 0.5) is None
+    assert P.log5_win_probability(0.5, None) is None
+
+
+# ----------------------------------------------------------------- game_win_probability
+def test_game_win_probability_hand_verified_full_chain():
+    # Computed directly (not estimated by hand) end-to-end from real inputs, then re-asserted
+    # here as the locked-in regression value -- away team: better offense AND better pitching.
+    result = P.game_win_probability(
+        away_runs_scored=4.5, away_starter_fip=3.20, away_bullpen_era=3.80,
+        home_runs_scored=4.0, home_starter_fip=4.00, home_bullpen_era=4.50)
+    assert abs(result["away_pyth"] - 0.621) < 0.001
+    assert abs(result["home_pyth"] - 0.478) < 0.001
+    assert abs(result["away_win_prob"] - 0.642) < 0.001
+    assert abs(result["home_win_prob"] - 0.358) < 0.001
+    print("✓ game_win_probability's full Pythagorean+Log5 chain hand-verifies end to end")
+
+
+def test_game_win_probability_probabilities_sum_to_one():
+    result = P.game_win_probability(4.5, 3.20, 3.80, 4.0, 4.00, 4.50)
+    assert abs(result["away_win_prob"] + result["home_win_prob"] - 1.0) < 1e-9
+    print("✓ game_win_probability's away/home win probabilities always sum to exactly 1.0 by construction")
+
+
+def test_game_win_probability_none_when_any_input_missing():
+    assert P.game_win_probability(None, 3.20, 3.80, 4.0, 4.00, 4.50) is None
+    assert P.game_win_probability(4.5, None, 3.80, 4.0, 4.00, 4.50) is None
+    assert P.game_win_probability(4.5, 3.20, None, 4.0, 4.00, 4.50) is None
+    assert P.game_win_probability(4.5, 3.20, 3.80, None, 4.00, 4.50) is None
+    assert P.game_win_probability(4.5, 3.20, 3.80, 4.0, None, 4.50) is None
+    assert P.game_win_probability(4.5, 3.20, 3.80, 4.0, 4.00, None) is None
+    print("✓ game_win_probability returns None (never a partial guess) if ANY of the six required inputs is missing")
+
+
+def test_game_win_probability_own_pitching_affects_own_runs_allowed_not_opponents():
+    # Regression guard for the exact bug this design is prone to: a team's runs-ALLOWED input
+    # must come from ITS OWN starter/bullpen, never accidentally swapped with the opponent's.
+    # Improving ONLY the home team's own pitching should raise the home win prob, not lower it.
+    worse_home_pitching = P.game_win_probability(4.5, 3.50, 4.00, 4.5, 3.50, 4.00)
+    better_home_pitching = P.game_win_probability(4.5, 3.50, 4.00, 4.5, 2.50, 3.00)
+    assert better_home_pitching["home_win_prob"] > worse_home_pitching["home_win_prob"]
+    print("✓ game_win_probability correctly attributes each team's own pitching to its own runs allowed, not swapped")
+
 
 def test_bullpen_fatigue_multipliers_above_threshold():
     m = P.bullpen_fatigue_multipliers(0.5)
