@@ -116,6 +116,24 @@ def test_bet_log_fields_from_play_only_real_betlog_fields():
     print("✓ bet_log_fields_from_play returns only real, valid betlog.py field names")
 
 
+def test_bet_log_fields_from_play_handles_moneyline_shape_end_to_end():
+    # A team-level moneyline play (Player=None, no PlayerId, no real Line) -- added directly on
+    # request for Game Watch's own moneyline logging. Confirms the full mapping (not just the
+    # label) handles this shape cleanly: player/player_id come through as None (already-nullable
+    # columns), line falls back to the same "missing -> 0.0" behavior every other play already
+    # gets, not a crash or a special case.
+    ml_play = {"Player": None, "PlayerId": None, "Team": None, "Game": "Red Sox @ Yankees",
+              "Market": "Moneyline", "Side": "New York Yankees", "Line": None, "Fair": -145,
+              "ModelProb": 0.59, "Why": "x"}
+    fields = Q.bet_log_fields_from_play(ml_play, "2026-07-23", "MLB", stake=10.0)
+    assert fields["player"] is None and fields["player_id"] is None
+    assert fields["market"] == "Moneyline" and fields["side"] == "New York Yankees"
+    assert fields["line"] == 0.0   # same honest "missing -> 0.0" fallback every other play gets
+    assert fields["entry_odds"] == -145
+    assert abs(fields["model_prob"] - 0.59) < 1e-9
+    print("✓ bet_log_fields_from_play correctly handles a full moneyline-shaped play end to end")
+
+
 # ----------------------------------------------------------------- bet_log_signature
 def test_bet_log_signature_distinguishes_different_plays():
     sig_a = Q.bet_log_signature(_play(player="Ohtani"), "2026-07-20")
@@ -144,6 +162,39 @@ def test_bet_log_signature_different_side_differs():
     sig_under = Q.bet_log_signature(_play(side="Under"), "2026-07-20")
     assert sig_over != sig_under
     print("✓ bet_log_signature correctly distinguishes Over vs Under on the same market/line")
+
+
+# ----------------------------------------------------------------- format_play_label
+def test_format_play_label_normal_player_prop():
+    label = Q.format_play_label(_play(player="Aaron Judge", market="Batter HR", side="Over",
+                                      line=0.5, fair=+250))
+    assert label == "Aaron Judge · Batter HR Over 0.5 @ +250"
+    print("✓ format_play_label correctly formats a normal player-prop play")
+
+
+def test_format_play_label_missing_fair_shows_dash():
+    label = Q.format_play_label(_play(player="Aaron Judge", fair=None))
+    assert "—" in label
+    print("✓ format_play_label shows a dash (not a crash or 'None') when Fair is missing")
+
+
+def test_format_play_label_team_level_play_has_no_player_or_line():
+    # A moneyline play (Player=None) -- added directly on request for Game Watch's own
+    # moneyline logging. Must skip the player/line pieces entirely, not show a confusing
+    # "? · ... —" placeholder for a play that was never meant to have either.
+    ml_play = {"Player": None, "Market": "Moneyline", "Side": "New York Yankees",
+              "Line": None, "Fair": -145, "ModelProb": 0.59, "Game": "Red Sox @ Yankees"}
+    label = Q.format_play_label(ml_play)
+    assert label == "Moneyline New York Yankees @ -145"
+    assert "?" not in label
+    assert "None" not in label
+    print("✓ format_play_label correctly formats a team-level moneyline play with no player/line, no '?' placeholder")
+
+
+def test_format_play_label_team_level_play_missing_fair():
+    ml_play = {"Player": None, "Market": "Moneyline", "Side": "Boston Red Sox", "Fair": None}
+    label = Q.format_play_label(ml_play)
+    assert label == "Moneyline Boston Red Sox @ —"
 
 
 if __name__ == "__main__":

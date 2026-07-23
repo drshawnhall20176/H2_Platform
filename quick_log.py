@@ -81,6 +81,26 @@ def bet_log_signature(play: Dict, date_str: str) -> tuple:
            float(play.get("Line") or 0.0), play.get("Fair"))
 
 
+def format_play_label(play: Dict) -> str:
+    """Pure, testable label for one play/leg in the quick-log picker -- pulled out of render_
+    quick_log's own body specifically so this formatting logic is unit tested, not just trusted
+    by eye in the browser (the same reasoning every other piece of real logic in this file
+    already gets).
+
+    A missing Player (None, not just absent) means a TEAM-LEVEL play -- a moneyline, added
+    directly on request for Game Watch's own moneyline logging -- which has no player and no
+    real "Line" either. Skips both pieces entirely rather than showing a confusing "? · ... —"
+    placeholder for a play that was never meant to have a player in the first place."""
+    fair = play.get("Fair")
+    fair_str = f"{fair:+d}" if fair is not None else "—"
+    player = play.get("Player")
+    if player is None:
+        return f"{play.get('Market', '?')} {play.get('Side', '')} @ {fair_str}"
+    line = play.get("Line")
+    line_str = f"{line:g}" if line is not None else "—"
+    return f"{player} · {play.get('Market', '?')} {play.get('Side', '')} {line_str} @ {fair_str}"
+
+
 def render_quick_log(plays: List[Dict], date_str: str, sport_key: str, key_prefix: str,
                      expanded: bool = False) -> None:
     """Render a compact "log this pick" widget for a flat list of play/leg dicts -- the actual
@@ -108,13 +128,7 @@ def render_quick_log(plays: List[Dict], date_str: str, sport_key: str, key_prefi
                   "you know your real fill.")
 
         def _label(i: int) -> str:
-            p = plays[i]
-            fair = p.get("Fair")
-            fair_str = f"{fair:+d}" if fair is not None else "—"
-            line = p.get("Line")
-            line_str = f"{line:g}" if line is not None else "—"
-            return (f"{p.get('Player', '?')} · {p.get('Market', '?')} {p.get('Side', '')} "
-                   f"{line_str} @ {fair_str}")
+            return format_play_label(plays[i])
 
         picks = st.multiselect("Select the picks you're taking", list(range(len(plays))),
                                format_func=_label, key=f"{key_prefix}_ql_picks")
