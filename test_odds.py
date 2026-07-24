@@ -122,6 +122,69 @@ def test_market_lines_for_player_absent_when_no_match():
     print("✓ market_lines_for_player returns {} (not a guess) when nothing matches")
 
 
+# ----------------------------------------------------------------- market_lines_for_slate
+def test_market_lines_for_slate_builds_lookup_for_every_player_in_one_pass():
+    offers = [
+        {"market": "pitcher_strikeouts", "player": "Tomoyuki Sugano", "point": 3.5,
+         "over": {"fd": -120}, "under": {"fd": 100}},
+        {"market": "batter_hits", "player": "Jose Ramirez", "point": 1.5,
+         "over": {"fd": -150}, "under": {"fd": 120}},
+    ]
+    lines = O.market_lines_for_slate(offers)
+    assert lines[(P.normalize_name("Tomoyuki Sugano"), "pitcher_strikeouts")] == 3.5
+    assert lines[(P.normalize_name("Jose Ramirez"), "batter_hits")] == 1.5
+    print("✓ market_lines_for_slate correctly builds a real per-player, per-market line lookup for the whole slate in one pass")
+
+
+def test_market_lines_for_slate_matches_the_exact_real_reported_case():
+    # The real, specific discrepancy this whole feature was built from: DraftKings' real line on
+    # Sugano's strikeouts was 3.5, while the platform's own hardcoded default was 5.5.
+    offers = [{"market": "pitcher_strikeouts", "player": "Tomoyuki Sugano", "point": 3.5,
+              "over": {"draftkings": -115}, "under": {"draftkings": -105}}]
+    lines = O.market_lines_for_slate(offers)
+    assert lines[(P.normalize_name("Tomoyuki Sugano"), "pitcher_strikeouts")] == 3.5
+    assert lines[(P.normalize_name("Tomoyuki Sugano"), "pitcher_strikeouts")] != 5.5
+    print("✓ market_lines_for_slate correctly resolves the exact real Sugano case that surfaced this whole gap")
+
+
+def test_market_lines_for_slate_picks_most_booked_point_per_player_independently():
+    offers = [
+        {"market": "batter_hits", "player": "Player A", "point": 1.5,
+         "over": {"fd": -150, "dk": -140}, "under": {"fd": 120}},   # 3 total quotes
+        {"market": "batter_hits", "player": "Player A", "point": 2.5,
+         "over": {"mgm": 250}, "under": {}},                        # 1 total quote
+        {"market": "batter_hits", "player": "Player B", "point": 0.5,
+         "over": {"fd": -200}, "under": {"fd": 150}},
+    ]
+    lines = O.market_lines_for_slate(offers)
+    assert lines[(P.normalize_name("Player A"), "batter_hits")] == 1.5   # consensus for A
+    assert lines[(P.normalize_name("Player B"), "batter_hits")] == 0.5   # B unaffected by A's own tie-break
+    print("✓ market_lines_for_slate resolves each player's own consensus line independently, not cross-contaminated between players")
+
+
+def test_market_lines_for_slate_different_players_same_market_dont_collide():
+    offers = [
+        {"market": "pitcher_strikeouts", "player": "Pitcher One", "point": 8.5,
+         "over": {"fd": -110}, "under": {"fd": -110}},
+        {"market": "pitcher_strikeouts", "player": "Pitcher Two", "point": 4.5,
+         "over": {"fd": -110}, "under": {"fd": -110}},
+    ]
+    lines = O.market_lines_for_slate(offers)
+    assert lines[(P.normalize_name("Pitcher One"), "pitcher_strikeouts")] == 8.5
+    assert lines[(P.normalize_name("Pitcher Two"), "pitcher_strikeouts")] == 4.5
+    print("✓ market_lines_for_slate correctly keys by (player, market) together, so two real pitchers' own very different real strikeout lines don't collide")
+
+
+def test_market_lines_for_slate_empty_offers():
+    assert O.market_lines_for_slate([]) == {}
+
+
+def test_market_lines_for_slate_skips_offers_with_no_real_book_quotes():
+    offers = [{"market": "batter_hits", "player": "Ghost Offer", "point": 1.5, "over": {}, "under": {}}]
+    assert O.market_lines_for_slate(offers) == {}
+    print("✓ market_lines_for_slate skips an offer with zero real book quotes rather than treating it as real coverage")
+
+
 def test_kelly_fraction():
     # p=0.60 at even money (+100): f* = (0.6*2 - 1)/(2-1) = 0.20
     assert abs(O.kelly_fraction(0.60, 100) - 0.20) < 1e-9

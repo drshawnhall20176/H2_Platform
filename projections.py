@@ -1511,7 +1511,8 @@ def xhr_from_statcast(pid, statcast: Optional[Dict], k: Optional[float]) -> Opti
 def build_bullpen_matchup_rows(rows: List[Dict], opp_team_name: str, bullpen_stat: Dict,
                                sims: int = DEFAULT_SIMS, seed: Optional[int] = None,
                                statcast: Optional[Dict] = None,
-                               statcast_k: Optional[float] = None) -> List[Dict]:
+                               statcast_k: Optional[float] = None,
+                               real_lines: Optional[Dict[Tuple[str, str], float]] = None) -> List[Dict]:
     """Recompute HR%/Hit%/TB1.5%/SO Prob for the hitters on opp_team_name — the team that WOULD
     face this bullpen — using bullpen_stat (an aggregate bullpen stat dict from mlb_engine.
     get_bullpen_aggregate_stat) as the opposing-pitcher input, instead of each hitter's own
@@ -1521,7 +1522,10 @@ def build_bullpen_matchup_rows(rows: List[Dict], opp_team_name: str, bullpen_sta
     NOT NEW MODELING — a thin wrapper around enrich_hitter_rows, the exact same function that
     already computes the "vs starter" read. The only change is which opposing-pitcher stat dict
     feeds pitcher_allowed_rates() inside it; every other input (park, platoon split, Statcast,
-    weather, expected PA) stays identical to the hitter's own already-loaded row.
+    weather, expected PA) stays identical to the hitter's own already-loaded row. real_lines
+    passed straight through, added directly on request alongside enrich_hitter_rows' own real-
+    line wiring, so this bullpen-read toggle uses the same real sportsbook lines when available,
+    not a silently different (always-default) read from the vs-starter table right next to it.
 
     WORKS ON COPIES, NEVER MUTATES THE ORIGINAL SLATE ROWS: those still need to reflect the
     vs-starter read for the rest of the page (leaderboards, season-long context, other games'
@@ -1531,38 +1535,121 @@ def build_bullpen_matchup_rows(rows: List[Dict], opp_team_name: str, bullpen_sta
     target_rows = [dict(r) for r in rows if r.get("Team") == opp_team_name]
     for r in target_rows:
         r["_opp_stat"] = bullpen_stat
-    return enrich_hitter_rows(target_rows, sims=sims, seed=seed, statcast=statcast, statcast_k=statcast_k)
+    return enrich_hitter_rows(target_rows, sims=sims, seed=seed, statcast=statcast,
+                              statcast_k=statcast_k, real_lines=real_lines)
+
+
+# =============================================================================================
+# REAL SPORTSBOOK LINES, WIRED INTO THE CORE PROJECTION PIPELINE ITSELF -- ADDED DIRECTLY ON
+# REQUEST, AFTER A REAL, REPORTED DISCREPANCY: a Graded Picks play showed "Pitcher Strikeouts
+# Under 5.5" for a real start (Tomoyuki Sugano) whose actual DraftKings line was 3.5. Traced to
+# the root: this platform's ENTIRE prop-generation pipeline -- Best Bets, Graded Picks, Suggested
+# Parlays, Speculative Basket, Command Center's Top Leans, all of it -- had never been wired to
+# real odds at all, for ANY market. It always used a fixed per-market placeholder (DEFAULT_LINES),
+# which config.py's own top-of-file comment already flagged as known, unfinished work. Only Edge
+# Board used real odds, and only for its own separate EV display, never feeding back into the
+# actual picks/grades everyone else on the platform sees.
+#
+# THE STAKES ARE REAL, NOT HYPOTHETICAL: a play graded against the wrong line isn't just
+# imprecise, it's answering a different question than the one actually on the board -- "Under
+# 5.5" and "Under 3.5" are genuinely different propositions with different real hit rates, not a
+# rounding difference.
+# =============================================================================================
+
+MLB_MARKET_TO_ODDS_KEY = {
+    "Batter HR": "batter_home_runs", "Batter Total Bases": "batter_total_bases",
+    "Batter Total Hits": "batter_hits", "Batter Strikeouts": "batter_strikeouts",
+    "Batter Runs": "batter_runs_scored", "Batter RBIs": "batter_rbis",
+    "Batter Stolen Bases": "batter_stolen_bases", "Batter Singles": "batter_singles",
+    "Batter Doubles": "batter_doubles", "Batter Triples": "batter_triples",
+    "Batter Walks": "batter_walks", "Batter Hits+Runs+RBIs": "batter_hits_runs_rbis",
+    "Pitcher Strikeouts": "pitcher_strikeouts", "Pitcher Outs": "pitcher_outs",
+    "Pitcher Walks": "pitcher_walks", "Pitcher Earned Runs": "pitcher_earned_runs",
+    "Pitcher Hits Allowed": "pitcher_hits_allowed",
+}
+# MUST STAY IN SYNC WITH sports.py's OWN _MLB_MARKET_MAP -- kept as its own explicit constant
+# here (not imported from that module's private attribute) so this file's own real-line lookup,
+# now something real people's real decisions depend on, doesn't reach into another module's
+# private state for it. A dedicated test (test_projections.py::
+# test_mlb_market_to_odds_key_matches_sports_market_map) checks the two are IDENTICAL, a real,
+# automated guard against the two drifting apart, not just a comment asking nicely.
+
+
+def real_line_or_default(market: str, player_name: str,
+                         real_lines: Optional[Dict[Tuple[str, str], float]],
+                         default: float) -> Tuple[float, str]:
+    """The one real, shared decision point EVERY market's own probability computation now routes
+    through: use the real, live sportsbook line when one's available, this platform's own
+    DEFAULT_LINES placeholder when it isn't. Decided in exactly one place, not reimplemented per
+    market -- if this logic is ever wrong, there's exactly one function to fix, not a dozen.
+
+    real_lines: {(normalized_player_name, odds_api_market_key): point}, market_lines_for_slate's
+    own return shape -- None (not just an empty dict) means "no real-odds fetch was attempted at
+    all this run" (a missing API key, or the fetch failed), as distinct from "a real fetch
+    happened but found no coverage for this specific player" (an empty dict, or simply no entry
+    for this key) -- both real, honest states, but worth keeping distinguishable upstream even
+    though this function treats them the same way (fall back to the placeholder either way).
+
+    Returns (line, source) -- source is "book" when a real line was used, "default" when it fell
+    back to the placeholder. This SOURCE is attached to every generated play downstream (see
+    build_best_bets/build_pitcher_projection_rows), so a person can always see which of their
+    picks are graded against a real, live number and which are still using this platform's own
+    generic placeholder -- never silently blended as if they carried the same real confidence."""
+    if real_lines is not None:
+        odds_key = MLB_MARKET_TO_ODDS_KEY.get(market)
+        if odds_key is not None:
+            real = real_lines.get((normalize_name(player_name), odds_key))
+            if real is not None:
+                return float(real), "book"
+    return default, "default"
 
 
 def enrich_hitter_rows(rows: List[Dict], sims: int = DEFAULT_SIMS, seed: Optional[int] = None,
-                       statcast: Optional[Dict] = None, statcast_k: Optional[float] = None) -> List[Dict]:
+                       statcast: Optional[Dict] = None, statcast_k: Optional[float] = None,
+                       real_lines: Optional[Dict[Tuple[str, str], float]] = None) -> List[Dict]:
     """Attach matchup-aware model probabilities to each hitter row in place:
-    HR%, Hit% (>=1), TB1.5% (>1.5 total bases), SO Prob (>=1 strikeout).
- 
+    HR%, Hit%, TB1.5%, SO Prob, Single%/Double%/Triple%/Walk%, Runs%/RBI%/SB%, HRR%.
+
+    REAL LINES, WIRED IN DIRECTLY ON REQUEST -- see this section's own module-level comment
+    above for the full reasoning. Every one of these markets now computes its own probability
+    against the REAL sportsbook line when `real_lines` supplies one for that specific player
+    (via real_line_or_default), falling back to this platform's own DEFAULT_LINES placeholder
+    otherwise -- real_lines=None (the default) preserves the exact original behavior for any
+    existing caller, always using the placeholder, same as before this change.
+
+    EVERY EXISTING COLUMN NAME IS UNCHANGED ("TB1.5%" still means "the total-bases-over
+    probability," even though the line it's computed against may not literally be 1.5 anymore
+    when a real book line is available) -- a deliberate choice, not an oversight, given how many
+    other places on this platform already reference these exact names. What's NEW is a real,
+    honest companion field per market: r["<Market> Line"] (the ACTUAL line the probability was
+    computed against) and r["<Market> LineSource"] ("book" or "default"), so the real line is
+    never hidden behind a column name that no longer matches it. build_best_bets reads these
+    companion fields directly rather than a hardcoded literal, so the "Line" shown on every
+    generated play is always the real one actually used, not a stale assumption.
+
     When a Statcast lookup is supplied, HR regresses toward the barrel-implied rate and
     extra columns are added: Barrel%, xHR/PA, and Due (xHR minus actual HR rate = positive-
     regression dinger signal).
 
-    Also attaches Runs%, RBI%, SB% (all "at least one tonight," matching the Over 0.5 line these
-    markets are actually quoted at) -- via batter_counting_rate/poisson_over_half_prob, a
-    genuinely different methodology than HR/Hits/TB above (see that section's own module-level
-    comment for the full reasoning on why). Runs/RBI use the opposing starter's ERA when his own
-    stat line has one; SB deliberately doesn't get an opponent adjustment at all -- stolen-base
-    success depends much more on the CATCHER's arm/pop time than the pitcher's own run
-    prevention, and that signal isn't modeled on this platform yet, so SB stays an honest,
-    simpler read of the batter's own rate rather than pretending an opponent adjustment it
-    doesn't actually have.
+    Also attaches Runs%, RBI%, SB% via batter_counting_rate/poisson_over_prob, a genuinely
+    different methodology than HR/Hits/TB above (see that section's own module-level comment for
+    the full reasoning on why). Runs/RBI use the opposing starter's ERA when his own stat line
+    has one; SB deliberately doesn't get an opponent adjustment at all -- stolen-base success
+    depends much more on the CATCHER's arm/pop time than the pitcher's own run prevention, and
+    that signal isn't modeled on this platform yet, so SB stays an honest, simpler read of the
+    batter's own rate rather than pretending an opponent adjustment it doesn't actually have.
 
-    Also attaches HRR% (Hits+Runs+RBIs clearing the real 1.5 default line) via simulate_hits_
-    runs_rbi -- the one market here needing a full per-trial simulated distribution rather than
-    a closed-form probability, and the one deliberately built to be CORRELATION-AWARE (a hot
-    game trial for Hits also boosts that same trial's Runs/RBI), not three independently-drawn
-    components -- see that function's own docstring for the full reasoning."""
+    Also attaches HRR% (Hits+Runs+RBIs) via simulate_hits_runs_rbi -- the one market here needing
+    a full per-trial simulated distribution rather than a closed-form probability, and the one
+    deliberately built to be CORRELATION-AWARE (a hot game trial for Hits also boosts that same
+    trial's Runs/RBI), not three independently-drawn components -- see that function's own
+    docstring for the full reasoning."""
     rng = np.random.default_rng(seed)
     for r in rows:
         stat = r.get("_stat")
         if not stat:
             continue
+        player_name = r.get("Hitter", "")
         park = PARK_FACTORS.get(r.get("_venue_id"), NEUTRAL_PARK)
         # _opp_days_rest: the OPPOSING starter's own real days of rest, added directly on
         # request -- same established per-row metadata convention as _opp_stat/_venue_id/
@@ -1580,17 +1667,35 @@ def enrich_hitter_rows(rows: List[Dict], sims: int = DEFAULT_SIMS, seed: Optiona
         if probs is None:
             continue
         sim = simulate_batter(probs, r.get("_exp_pa", DEFAULT_UNKNOWN_PA), sims, rng)
-        r["HR%"] = float(np.mean(sim["hr"] >= 1))
-        r["Hit%"] = float(np.mean(sim["hits"] >= 1))
-        r["TB1.5%"] = float(np.mean(sim["tb"] > 1.5))
-        r["SO Prob"] = float(np.mean(sim["k"] >= 1))
+
+        hr_line, hr_src = real_line_or_default("Batter HR", player_name, real_lines, 0.5)
+        r["HR%"] = float(np.mean(sim["hr"] > hr_line))
+        r["HR Line"], r["HR LineSource"] = hr_line, hr_src
+
+        hit_line, hit_src = real_line_or_default("Batter Total Hits", player_name, real_lines, 0.5)
+        r["Hit%"] = float(np.mean(sim["hits"] > hit_line))
+        r["Hit Line"], r["Hit LineSource"] = hit_line, hit_src
+
+        tb_line, tb_src = real_line_or_default("Batter Total Bases", player_name, real_lines,
+                                               DEFAULT_LINES["Batter Total Bases"])
+        r["TB1.5%"] = float(np.mean(sim["tb"] > tb_line))
+        r["TB Line"], r["TB LineSource"] = tb_line, tb_src
+
+        so_line, so_src = real_line_or_default("Batter Strikeouts", player_name, real_lines, 0.5)
+        r["SO Prob"] = float(np.mean(sim["k"] > so_line))
+        r["SO Line"], r["SO LineSource"] = so_line, so_src
+
         # Single%/Double%/Triple%/Walk%: the SAME PA-outcome simulation already used for HR/Hits/
         # TB/K, not a new methodology -- these were already being drawn, simulate_batter just
         # didn't surface them as their own counts before this.
-        r["Single%"] = float(np.mean(sim["single"] >= 1))
-        r["Double%"] = float(np.mean(sim["double"] >= 1))
-        r["Triple%"] = float(np.mean(sim["triple"] >= 1))
-        r["Walk%"] = float(np.mean(sim["bb"] >= 1))
+        for market, sim_key, col in (("Batter Singles", "single", "Single%"),
+                                     ("Batter Doubles", "double", "Double%"),
+                                     ("Batter Triples", "triple", "Triple%"),
+                                     ("Batter Walks", "bb", "Walk%")):
+            line, src = real_line_or_default(market, player_name, real_lines, 0.5)
+            r[col] = float(np.mean(sim[sim_key] > line))
+            r[f"{col[:-1]} Line"], r[f"{col[:-1]} LineSource"] = line, src
+
         if xhr is not None:
             sc = statcast.get(r.get("_pid")) or {}
             actual_hr_pa = _f(stat, "homeRuns") / max(_f(stat, "plateAppearances"), 1)
@@ -1605,19 +1710,29 @@ def enrich_hitter_rows(rows: List[Dict], sims: int = DEFAULT_SIMS, seed: Optiona
         exp_rbi = batter_counting_rate(stat, exp_pa, "rbi", LG_RBI_PER_PA, RUNS_RBI_PRIOR_PA, opp_era)
         exp_sb = batter_counting_rate(stat, exp_pa, "stolenBases", LG_SB_PER_PA, SB_PRIOR_PA)
         if exp_runs is not None:
-            r["Runs%"] = poisson_over_half_prob(exp_runs)
+            runs_line, runs_src = real_line_or_default("Batter Runs", player_name, real_lines, 0.5)
+            r["Runs%"] = poisson_over_prob(exp_runs, runs_line)
+            r["Runs Line"], r["Runs LineSource"] = runs_line, runs_src
         if exp_rbi is not None:
-            r["RBI%"] = poisson_over_half_prob(exp_rbi)
+            rbi_line, rbi_src = real_line_or_default("Batter RBIs", player_name, real_lines, 0.5)
+            r["RBI%"] = poisson_over_prob(exp_rbi, rbi_line)
+            r["RBI Line"], r["RBI LineSource"] = rbi_line, rbi_src
         if exp_sb is not None:
-            r["SB%"] = poisson_over_half_prob(exp_sb)
+            sb_line, sb_src = real_line_or_default("Batter Stolen Bases", player_name, real_lines, 0.5)
+            r["SB%"] = poisson_over_prob(exp_sb, sb_line)
+            r["SB Line"], r["SB LineSource"] = sb_line, sb_src
         # Hits+Runs+RBIs (H-R-R): the ONE market on this platform needing a per-trial simulated
-        # distribution rather than a closed-form probability, since its line (1.5, not 0.5) isn't
-        # a simple "at least one" question -- see simulate_hits_runs_rbi's own docstring for the
-        # full correlation-aware methodology this specifically exists to support.
+        # distribution rather than a closed-form probability, since its default line (1.5, not
+        # 0.5) isn't a simple "at least one" question -- see simulate_hits_runs_rbi's own
+        # docstring for the full correlation-aware methodology this specifically exists to
+        # support.
         if exp_runs is not None and exp_rbi is not None:
+            hrr_line, hrr_src = real_line_or_default("Batter Hits+Runs+RBIs", player_name, real_lines,
+                                                      DEFAULT_LINES["Batter Hits+Runs+RBIs"])
             exp_hits = float(np.mean(sim["hits"]))
             hrr_sim = simulate_hits_runs_rbi(sim["hits"], exp_hits, exp_runs, exp_rbi, rng)
-            r["HRR%"] = float(np.mean(hrr_sim["hrr"] > DEFAULT_LINES["Batter Hits+Runs+RBIs"]))
+            r["HRR%"] = float(np.mean(hrr_sim["hrr"] > hrr_line))
+            r["HRR Line"], r["HRR LineSource"] = hrr_line, hrr_src
     return rows
 
 
@@ -1694,6 +1809,37 @@ def batter_counting_rate(season_stat: Dict, exp_pa: float, stat_key: str, lg_rat
     return max(rate * exp_pa, 0.0)
 
 
+def poisson_over_prob(exp_count: float, line: float) -> float:
+    """P(count > line) for a Poisson(exp_count) distribution -- the real, general closed form
+    this whole platform's Runs/RBI/Stolen-Base markets now route through, generalizing
+    poisson_over_half_prob below to ANY real line, not just the fixed 0.5 these markets used to
+    always assume. Added directly on request, after a real, reported discrepancy traced back to
+    this platform's markets never having been wired to real sportsbook lines at all -- most of
+    these specific markets are typically still quoted at 0.5 in practice, but the fix has to be
+    real and general, not "0.5, except sometimes."
+
+    P(X > line) = 1 - P(X <= floor(line)), via the closed-form Poisson CDF (a direct, hand-rolled
+    cumulative sum, not scipy -- exact and cheap for the small counts these real lines ever
+    involve). A non-integer line (0.5, 1.5, ...) is the real, standard sportsbook convention
+    specifically to avoid a push -- floor(line) reduces to the correct integer threshold either
+    way (floor(0.5)=0, floor(1.5)=1).
+
+    Reduces EXACTLY to poisson_over_half_prob's own formula at line=0.5 (floor(0.5)=0, so this
+    is 1 - P(X=0) = 1 - e^(-lambda), byte-identical) -- confirmed directly with a test, not just
+    asserted, since that function's own real callers must see no behavior change at the default
+    line."""
+    lam = max(exp_count, 0.0)
+    k = int(np.floor(line))
+    if k < 0:
+        return 1.0   # a negative line means literally any real non-negative count clears it
+    cdf = np.exp(-lam)   # P(X=0)
+    term = cdf
+    for i in range(1, k + 1):
+        term *= lam / i   # P(X=i) = P(X=i-1) * lambda / i, the standard Poisson recurrence
+        cdf += term
+    return float(1.0 - cdf)
+
+
 def poisson_over_half_prob(exp_count: float) -> float:
     """P(count >= 1) for a Poisson(exp_count) distribution, the exact closed form for the
     standard "Over 0.5" line these markets are quoted at -- P(X>=1) = 1 - P(X=0) = 1 - e^(-lambda).
@@ -1701,8 +1847,12 @@ def poisson_over_half_prob(exp_count: float) -> float:
     distribution to compare against multiple different lines/derived stats at once, while this
     only ever needs one specific probability, and the closed form is both more precise (no
     simulation noise) and cheaper (no random sampling at all) for that single, well-defined
-    question."""
-    return float(1.0 - np.exp(-max(exp_count, 0.0)))
+    question.
+
+    A thin wrapper over poisson_over_prob(exp_count, 0.5) now -- kept as its own named function
+    since "over half" (the standard, still-most-common real line for these markets) is a real,
+    frequently-reached-for shorthand worth keeping, not because the math is actually different."""
+    return poisson_over_prob(exp_count, 0.5)
 
 
 # ---- Hits + Runs + RBIs (H-R-R) -- a real, deliberate correlation-aware approach --------------
@@ -1815,7 +1965,8 @@ def add_starter_exposure_context(rows: List[Dict]) -> List[Dict]:
 def blend_hitter_probs_with_bullpen(row: Dict, bullpen_stat: Dict, sims: int = DEFAULT_SIMS,
                                     seed: Optional[int] = None, statcast: Optional[Dict] = None,
                                     statcast_k: Optional[float] = None,
-                                    bullpen_fatigue: Optional[float] = None) -> Optional[Dict]:
+                                    bullpen_fatigue: Optional[float] = None,
+                                    real_lines: Optional[Dict[Tuple[str, str], float]] = None) -> Optional[Dict]:
     """Recompute a hitter's HR%/Hit%/TB1.5%/SO Prob as a BLEND of two real phases of his night —
     his own actual vs-starter and vs-bullpen plate-appearance exposure (hitter_starter_exposures),
     each simulated against its OWN real opposing pitching quality (the starter's own stat line
@@ -1831,6 +1982,15 @@ def blend_hitter_probs_with_bullpen(row: Dict, bullpen_stat: Dict, sims: int = D
     materially better bullpen was accounted for — a 6-point, ~15% relative overstatement on what
     was the single highest-conviction play on the whole slate that night. This function is that
     exact correction, generalized.
+
+    REAL LINES, WIRED IN DIRECTLY ON REQUEST -- IMPORTANT GIVEN WHAT THIS FUNCTION SPECIFICALLY
+    RE-PRICES: this recomputes probabilities for the TOP-CONVICTION candidates on the whole board
+    (see apply_bullpen_blend_to_top_plays' own docstring) -- exactly the plays where grading
+    against a stale placeholder line instead of the real one actually used elsewhere would matter
+    most. real_lines is passed straight through to real_line_or_default for each of the 4
+    markets, so a re-priced probability stays consistent with whatever real (or default) line
+    enrich_hitter_rows originally used for this same row/market -- real_lines=None preserves the
+    exact original always-default behavior for any existing caller.
 
     METHOD: runs simulate_batter TWICE with the SAME rng — once for his vs-starter PA using the
     starter's own opp_allowed rates, once for his vs-bullpen PA using bullpen_stat's rates — then
@@ -1862,6 +2022,7 @@ def blend_hitter_probs_with_bullpen(row: Dict, bullpen_stat: Dict, sims: int = D
     exp_pa = row.get("_exp_pa")
     if not stat or lineup_idx is None or exp_pa is None:
         return None
+    player_name = row.get("Hitter", "")
     # _opp_days_rest: same per-row convention as _opp_stat (see enrich_hitter_rows' own
     # comment) -- passed to BOTH starter-side calls below, since project_pitcher's own exp_bf
     # (which hitter_starter_exposures reads to split vs-starter/vs-bullpen PA) and this
@@ -1907,20 +2068,44 @@ def blend_hitter_probs_with_bullpen(row: Dict, bullpen_stat: Dict, sims: int = D
     combined_tb = sim_sp["tb"] + sim_pen["tb"]
     combined_k = sim_sp["k"] + sim_pen["k"]
 
+    hr_line, _ = real_line_or_default("Batter HR", player_name, real_lines, 0.5)
+    hit_line, _ = real_line_or_default("Batter Total Hits", player_name, real_lines, 0.5)
+    tb_line, _ = real_line_or_default("Batter Total Bases", player_name, real_lines,
+                                      DEFAULT_LINES["Batter Total Bases"])
+    so_line, _ = real_line_or_default("Batter Strikeouts", player_name, real_lines, 0.5)
+
     return {
-        "HR%": float(np.mean(combined_hr >= 1)),
-        "Hit%": float(np.mean(combined_hits >= 1)),
-        "TB1.5%": float(np.mean(combined_tb > 1.5)),
-        "SO Prob": float(np.mean(combined_k >= 1)),
+        "HR%": float(np.mean(combined_hr > hr_line)),
+        "Hit%": float(np.mean(combined_hits > hit_line)),
+        "TB1.5%": float(np.mean(combined_tb > tb_line)),
+        "SO Prob": float(np.mean(combined_k > so_line)),
         "vs SP": round(vs_sp_pa, 2), "vs Pen": round(vs_pen_pa, 2),
     }
 
 
 def build_pitcher_projection_rows(rows: List[Dict], meta: List[Dict],
-                                  sims: int = DEFAULT_SIMS, seed: Optional[int] = None) -> List[Dict]:
+                                  sims: int = DEFAULT_SIMS, seed: Optional[int] = None,
+                                  real_lines: Optional[Dict[Tuple[str, str], float]] = None) -> List[Dict]:
     """Matchup-aware starter projections for the Pitching Lab: expected IP/K/BB/outs/earned runs/
-    hits allowed, plus the strikeout-over (and, now, earned-runs-over and hits-allowed-over)
-    probability and fair odds at the default line."""
+    hits allowed, plus the over-probability and fair odds for each of the 5 real pitcher markets
+    (Strikeouts, Outs, Walks, Earned Runs, Hits Allowed).
+
+    REAL LINES, WIRED IN DIRECTLY ON REQUEST -- THIS IS THE ACTUAL FUNCTION BEHIND THE REAL,
+    REPORTED CASE THAT STARTED THIS: a Graded Picks play showed "Pitcher Strikeouts Under 5.5"
+    for a real start (Tomoyuki Sugano) whose actual DraftKings line was 3.5 -- this function is
+    where that 5.5 came from, unconditionally, for every pitcher on every slate, regardless of
+    who they actually are. See projections.py's own module-level comment above real_line_or_
+    default for the full reasoning.
+
+    Each of the 5 markets now computes its own probability against the REAL sportsbook line when
+    `real_lines` supplies one for this specific pitcher (via real_line_or_default), falling back
+    to this platform's own DEFAULT_LINES placeholder otherwise -- real_lines=None (the default)
+    preserves the exact original behavior for any existing caller. Every "<X> line" field this
+    function already exposed is now the REAL line actually used (not always the placeholder),
+    with a new companion "<X> LineSource" ("book"/"default") so it's never ambiguous which is
+    which. "Outs line"/"BB line" are new -- those two markets didn't expose their own line field
+    at all before this, even though Pitcher Outs and Pitcher Walks are real, gradeable markets
+    just like the other three."""
     rng = np.random.default_rng(seed)
     lineup_map = build_lineup_rate_map(rows)
     out: List[Dict] = []
@@ -1939,13 +2124,21 @@ def build_pitcher_projection_rows(rows: List[Dict], meta: List[Dict],
             if not proj:
                 continue
             sim = simulate_pitcher(proj, sims, rng)
-            k_line = DEFAULT_LINES["Pitcher Strikeouts"]
+
+            k_line, k_src = real_line_or_default("Pitcher Strikeouts", pm.name, real_lines,
+                                                 DEFAULT_LINES["Pitcher Strikeouts"])
             k_over = float(np.mean(sim["k"] > k_line))
-            outs_over = float(np.mean(sim["outs"] > DEFAULT_LINES["Pitcher Outs"]))
-            bb_over = float(np.mean(sim["bb"] > DEFAULT_LINES["Pitcher Walks"]))
-            er_line = DEFAULT_LINES["Pitcher Earned Runs"]
+            outs_line, outs_src = real_line_or_default("Pitcher Outs", pm.name, real_lines,
+                                                        DEFAULT_LINES["Pitcher Outs"])
+            outs_over = float(np.mean(sim["outs"] > outs_line))
+            bb_line, bb_src = real_line_or_default("Pitcher Walks", pm.name, real_lines,
+                                                    DEFAULT_LINES["Pitcher Walks"])
+            bb_over = float(np.mean(sim["bb"] > bb_line))
+            er_line, er_src = real_line_or_default("Pitcher Earned Runs", pm.name, real_lines,
+                                                    DEFAULT_LINES["Pitcher Earned Runs"])
             er_over = float(np.mean(sim["er"] > er_line))
-            ha_line = DEFAULT_LINES["Pitcher Hits Allowed"]
+            ha_line, ha_src = real_line_or_default("Pitcher Hits Allowed", pm.name, real_lines,
+                                                    DEFAULT_LINES["Pitcher Hits Allowed"])
             ha_over = float(np.mean(sim["hits_allowed"] > ha_line))
             out.append({
                 "Pitcher": pm.name, "Team": team, "Opp": opp, "Hand": pm.hand,
@@ -1955,10 +2148,16 @@ def build_pitcher_projection_rows(rows: List[Dict], meta: List[Dict],
                 "Proj ER": round(proj["exp_er"], 2),
                 "Proj Hits Allowed": round(proj["exp_hits_allowed"], 1),
                 "Proj BF": round(proj["exp_bf"], 1), "Proj TTO": round(times_through_order(proj["exp_bf"]), 2),
-                "K line": k_line, "K over%": round(k_over, 4), "K fair": prob_to_american(k_over),
-                "Outs over%": round(outs_over, 4), "BB over%": round(bb_over, 4),
-                "ER line": er_line, "ER over%": round(er_over, 4), "ER fair": prob_to_american(er_over),
-                "Hits Allowed line": ha_line, "Hits Allowed over%": round(ha_over, 4),
+                "K line": k_line, "K LineSource": k_src,
+                "K over%": round(k_over, 4), "K fair": prob_to_american(k_over),
+                "Outs line": outs_line, "Outs LineSource": outs_src,
+                "Outs over%": round(outs_over, 4),
+                "BB line": bb_line, "BB LineSource": bb_src,
+                "BB over%": round(bb_over, 4),
+                "ER line": er_line, "ER LineSource": er_src,
+                "ER over%": round(er_over, 4), "ER fair": prob_to_american(er_over),
+                "Hits Allowed line": ha_line, "Hits Allowed LineSource": ha_src,
+                "Hits Allowed over%": round(ha_over, 4),
                 "Hits Allowed fair": prob_to_american(ha_over),
                 "_opp_k": (opp_rates or {}).get("k"), "_opp_bb": (opp_rates or {}).get("bb"),
                 "_game": m["label"], "_pid": pm.id, "_game_date": m.get("game_date"),
@@ -2132,25 +2331,51 @@ def _pitcher_diag(r: Dict) -> Dict:
 def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict]) -> List[Dict]:
     """Rank model candidate plays across all markets by conviction (model prob vs the
     market-typical prob for that prop), each with transparent reasoning. No odds required.
- 
+
+    THE LINE ON EVERY PLAY IS NOW THE REAL ONE ACTUALLY USED, NOT A HARDCODED LITERAL -- added
+    directly on request, after a real, reported discrepancy (a Graded Picks play showing
+    "Pitcher Strikeouts Under 5.5" for a pitcher whose real DraftKings line was 3.5). This
+    function used to pair each market with a fixed literal line regardless of what enrich_
+    hitter_rows/build_pitcher_projection_rows actually computed the probability against -- now
+    it reads each row's own real "<Market> Line"/"<Market> LineSource" companion fields (attached
+    by those two functions, see their own docstrings), so the "Line" shown here always matches
+    the real line the ModelProb was actually computed against. Every generated play now also
+    carries a real "LineSource" field ("book"/"default"), so a person can always see which of
+    their picks are graded against a real, live sportsbook number and which are still using this
+    platform's own generic placeholder -- never silently blended as if they carried the same real
+    confidence.
+
     These are the model's strongest LEANS, not guaranteed value — check the live price on
     the Edge Board and let the proof layer (CLV/calibration) be the judge."""
     plays: List[Dict] = []
- 
-    batter_specs = [("Batter HR", "HR%", 0.5), ("Batter Total Bases", "TB1.5%", 1.5),
-                    ("Batter Total Hits", "Hit%", 0.5), ("Batter Strikeouts", "SO Prob", 0.5),
-                    ("Batter Runs", "Runs%", 0.5), ("Batter RBIs", "RBI%", 0.5),
-                    ("Batter Stolen Bases", "SB%", 0.5),
-                    ("Batter Singles", "Single%", 0.5), ("Batter Doubles", "Double%", 0.5),
-                    ("Batter Triples", "Triple%", 0.5), ("Batter Walks", "Walk%", 0.5),
-                    ("Batter Hits+Runs+RBIs", "HRR%", DEFAULT_LINES["Batter Hits+Runs+RBIs"])]
+
+    # (market, probability column, line field, line-source field) -- line/source now read PER
+    # ROW (each hitter's own real line, not one fixed literal for every hitter in this market).
+    batter_specs = [
+        ("Batter HR", "HR%", "HR Line", "HR LineSource"),
+        ("Batter Total Bases", "TB1.5%", "TB Line", "TB LineSource"),
+        ("Batter Total Hits", "Hit%", "Hit Line", "Hit LineSource"),
+        ("Batter Strikeouts", "SO Prob", "SO Line", "SO LineSource"),
+        ("Batter Runs", "Runs%", "Runs Line", "Runs LineSource"),
+        ("Batter RBIs", "RBI%", "RBI Line", "RBI LineSource"),
+        ("Batter Stolen Bases", "SB%", "SB Line", "SB LineSource"),
+        ("Batter Singles", "Single%", "Single Line", "Single LineSource"),
+        ("Batter Doubles", "Double%", "Double Line", "Double LineSource"),
+        ("Batter Triples", "Triple%", "Triple Line", "Triple LineSource"),
+        ("Batter Walks", "Walk%", "Walk Line", "Walk LineSource"),
+        ("Batter Hits+Runs+RBIs", "HRR%", "HRR Line", "HRR LineSource"),
+    ]
     for r in hitter_rows:
         opp_era_raw = (r.get("_opp_stat") or {}).get("era")
         opp_era_display = round(float(opp_era_raw), 2) if opp_era_raw not in (None, "") else None
-        for market, col, line in batter_specs:
+        for market, col, line_field, source_field in batter_specs:
             p = r.get(col)
             if p is None:
                 continue
+            # Fallback line for the rare case a row has the probability but (for some reason)
+            # not its own companion line field -- honest ("default"), never a crash.
+            line = r.get(line_field, DEFAULT_LINES.get(market, 0.5))
+            line_source = r.get(source_field, "default")
             side, sp, ref_s = _favored_side(p, BEST_BET_REF[market])
             if market == "Batter HR" and side == "Under":
                 continue  # "won't homer" isn't a real play
@@ -2164,7 +2389,7 @@ def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict]) -> List[D
                 # against and how good/bad that pitcher really is. None (not 0.0) when unknown,
                 # so an absent ERA is never mistaken for a genuinely great one.
                 "OppERA": opp_era_display,
-                "Market": market, "Side": side, "Line": line,
+                "Market": market, "Side": side, "Line": line, "LineSource": line_source,
                 "ModelProb": round(sp, 4), "Fair": prob_to_american(sp),
                 "Conviction": round(sp / ref_s, 2) if ref_s > 0 else 0.0,
                 # this play's own theoretical max conviction (1/RefProb) -- lets
@@ -2176,23 +2401,27 @@ def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict]) -> List[D
                                              # status, not previously exposed on a play
                 **_hitter_diag(r),
             })
- 
-    pitcher_specs = [("Pitcher Strikeouts", "K over%", DEFAULT_LINES["Pitcher Strikeouts"]),
-                     ("Pitcher Outs", "Outs over%", DEFAULT_LINES["Pitcher Outs"]),
-                     ("Pitcher Walks", "BB over%", DEFAULT_LINES["Pitcher Walks"]),
-                     ("Pitcher Earned Runs", "ER over%", DEFAULT_LINES["Pitcher Earned Runs"]),
-                     ("Pitcher Hits Allowed", "Hits Allowed over%", DEFAULT_LINES["Pitcher Hits Allowed"])]
+
+    pitcher_specs = [
+        ("Pitcher Strikeouts", "K over%", "K line", "K LineSource"),
+        ("Pitcher Outs", "Outs over%", "Outs line", "Outs LineSource"),
+        ("Pitcher Walks", "BB over%", "BB line", "BB LineSource"),
+        ("Pitcher Earned Runs", "ER over%", "ER line", "ER LineSource"),
+        ("Pitcher Hits Allowed", "Hits Allowed over%", "Hits Allowed line", "Hits Allowed LineSource"),
+    ]
     for r in pitcher_rows:
-        for market, col, line in pitcher_specs:
+        for market, col, line_field, source_field in pitcher_specs:
             p = r.get(col)
             if p is None:
                 continue
+            line = r.get(line_field, DEFAULT_LINES.get(market, 0.5))
+            line_source = r.get(source_field, "default")
             side, sp, ref_s = _favored_side(p, BEST_BET_REF[market])
             plays.append({
                 "Player": r["Pitcher"], "PlayerId": r.get("_pid"), "Team": r["Team"], "Game": r.get("_game", ""),
                 "Opp": r.get("Opp"),
                 "Versus": r.get("Opp"),
-                "Market": market, "Side": side, "Line": line,
+                "Market": market, "Side": side, "Line": line, "LineSource": line_source,
                 "ModelProb": round(sp, 4), "Fair": prob_to_american(sp),
                 "Conviction": round(sp / ref_s, 2) if ref_s > 0 else 0.0,
                 # this play's own theoretical max conviction (1/RefProb) -- lets
@@ -2202,7 +2431,7 @@ def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict]) -> List[D
                 "Why": "; ".join(_pitcher_reasons(r, market, side)),
                 **_pitcher_diag(r),
             })
- 
+
     plays.sort(key=lambda x: x["Conviction"], reverse=True)
     return plays
  
@@ -2216,7 +2445,8 @@ BULLPEN_BLEND_MARKET_COLS = {
 def apply_bullpen_blend_to_top_plays(plays: List[Dict], rows_by_pid: Dict[Any, Dict],
                                      get_bullpen_stat_fn, statcast: Optional[Dict] = None,
                                      statcast_k: Optional[float] = None, seed: Optional[int] = None,
-                                     top_n: int = 30, get_bullpen_fatigue_fn=None) -> List[Dict]:
+                                     top_n: int = 30, get_bullpen_fatigue_fn=None,
+                                     real_lines: Optional[Dict[Tuple[str, str], float]] = None) -> List[Dict]:
     """Re-price the top N hitter-market plays using their real vs-starter/vs-bullpen exposure,
     instead of leaving Best Bets' whole board priced off the starter's rate for every projected
     PA — the fix for a real, confirmed issue: a starter-only read on a real slate showed 47% for
@@ -2257,6 +2487,12 @@ def apply_bullpen_blend_to_top_plays(plays: List[Dict], rows_by_pid: Dict[Any, D
     signs) is passed straight through to blend_hitter_probs_with_bullpen's own bullpen_fatigue
     parameter.
 
+    real_lines: passed straight through to blend_hitter_probs_with_bullpen's own real_lines
+    parameter -- added directly on request so the top-conviction re-pricing pass stays
+    consistent with whatever real (or default) line each play was ORIGINALLY shown against, not
+    silently reverting to the placeholder default during the blend step. None (the default)
+    preserves the exact original always-default behavior for any existing caller.
+
     Plays that can't be blended (no matching row, no opponent id, bullpen data unavailable, or
     blend_hitter_probs_with_bullpen's own None cases — including "no real bullpen exposure to
     blend," the common, expected case for most plays) are left exactly as build_best_bets
@@ -2286,7 +2522,8 @@ def apply_bullpen_blend_to_top_plays(plays: List[Dict], rows_by_pid: Dict[Any, D
                           if get_bullpen_fatigue_fn else None)
         blended = blend_hitter_probs_with_bullpen(row, bullpen_stat, seed=seed,
                                                    statcast=statcast, statcast_k=statcast_k,
-                                                   bullpen_fatigue=bullpen_fatigue)
+                                                   bullpen_fatigue=bullpen_fatigue,
+                                                   real_lines=real_lines)
         if not blended:
             continue
 

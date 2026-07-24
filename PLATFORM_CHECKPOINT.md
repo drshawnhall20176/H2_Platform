@@ -4,10 +4,10 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 1098/1098 tests green as of 2026-07-24; the
+## What's in this checkpoint (all tested — 1122/1122 tests green as of 2026-07-24; the
 ## 2026-07-21-through-2026-07-24 entries near the end, from "Discord community analysis"
-## through the Graded Picks slate summary, are now fully logged in their real chronological
-## order — no gap remains between the 911-test mark below and the current count)
+## through real sportsbook lines wired into the core pipeline, are now fully logged in their
+## real chronological order — no gap remains between the 911-test mark below and the current count)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -5218,6 +5218,86 @@ one. Ran one more offline sanity check with a realistic 6-play mixed-grade board
 this done — the A bucket correctly re-ordered by ModelProb rather than Conviction, and the
 highest-ModelProb play on the entire board (a D at 95%) was correctly the one NOT shown. 1098
 tests passing after this entry.
+
+### Real sportsbook lines wired into the core projection pipeline (2026-07-24)
+The largest single change this platform has seen — and the most consequential for people making
+real decisions from it. A real, specific discrepancy surfaced by a user: Graded Picks showed
+"Pitcher Strikeouts Under 5.5" for Tomoyuki Sugano, whose real DraftKings line was 3.5. Traced
+to the root: the ENTIRE prop-generation pipeline — Best Bets, Graded Picks, Suggested Parlays,
+Speculative Basket, Command Center, all of it — had never been wired to real odds at all, for
+ANY market. `config.py`'s own top-of-file comment already flagged this as known, unfinished work.
+Only Edge Board used real odds, and only for its own EV display, never feeding the actual picks
+everyone sees. A play graded against the wrong line isn't just imprecise; it's answering a
+different question than the one actually on the book. Real people, real decisions — full fix.
+
+**The full chain, rebuilt from the bottom up:**
+
+`odds_api.SUPPORTED_MARKETS` expanded from 7 to all 17 real markets this platform generates
+picks for, matching `sports._MLB_MARKET_MAP` exactly (also confirming Edge Board was only pricing
+7 of 17 markets against real odds — this fixes that too).
+
+`odds_api.market_lines_for_slate` — new single-pass batch function: {(normalized_player_name,
+odds_api_market_key): real_line} for every player across the whole slate, in one scan. Same
+tie-break logic as market_lines_for_player (most-booked point wins consensus) but O(slate) not
+O(slate × players). 6 tests including the exact Sugano case reproduced directly.
+
+`projections.poisson_over_prob(exp_count, line)` — generalizes the Runs/RBI/Stolen-Base
+probability math to ANY real line (not just 0.5 structurally baked into the old function's name).
+Confirmed byte-identical to `poisson_over_half_prob` at line=0.5 across six different rates. 5 new
+tests; all 4 existing tests for the old function still pass unmodified.
+
+`projections.MLB_MARKET_TO_ODDS_KEY` + `projections.real_line_or_default` — ONE shared decision
+point every market routes through: real line if available, honest placeholder if not, with
+source ("book"/"default") always recorded. A drift-guard test confirms this map is identical to
+`sports._MLB_MARKET_MAP` and will fail loudly if the two ever diverge. 4 tests.
+
+`projections.enrich_hitter_rows` — all 12 batter markets now compute their probability against
+the real book line for that specific player, falling back to DEFAULT_LINES if none exists.
+Existing column names kept (avoiding 20 cross-file rename risks) but each row now also carries
+a "<Market> Line" / "<Market> LineSource" companion field so the real line is never hidden. All
+8 existing tests pass unmodified.
+
+`projections.build_pitcher_projection_rows` — all 5 pitcher markets, including the actual Sugano
+one. At line 3.5 (real), Sugano's K over% is 53.6%. At line 5.5 (old placeholder), it was 19.9%
+— a completely different proposition. 4 new tests including a full end-to-end Sugano
+reproduction; all 3 existing tests pass unmodified.
+
+`projections.blend_hitter_probs_with_bullpen` + `apply_bullpen_blend_to_top_plays` — the
+re-pricing pass for the TOP-CONVICTION candidates specifically, where a stale placeholder line
+would matter most. `real_lines` threaded through both so a re-priced probability stays consistent
+with whatever real line the play was ORIGINALLY shown against. 1 new test; all 24 existing blend
+tests pass unmodified.
+
+`projections.build_best_bets` — reads each row's own companion "Line"/"LineSource" fields instead
+of a hardcoded literal. Every generated play now carries "LineSource" so it's always visible which
+plays are graded against a real, live number. 3 new tests: backward-compat for old-shape rows,
+reads real line correctly, and the complete full-pipeline Sugano end-to-end. All 7 existing
+`build_best_bets` tests pass unmodified.
+
+`best_bets_data.build_mlb_board` — the one shared loader all 7 pages share. One batch real-odds
+fetch per session, before the projection pipeline runs. Failure-safe: network error, quota
+exceeded, missing key, or a non-dict response (the fetch_json body-validation fix from earlier
+today applies here too) all fall back cleanly to DEFAULT_LINES, never blocking the page. The
+API key flows in as a parameter (Streamlit's own cache-key convention requires it), read from
+`st.secrets["ODDS_API_KEY"]` via a new shared `get_odds_api_key()` helper — same key Edge Board
+already requires, no new infrastructure needed for a deploy that already has Edge Board working.
+
+**UI visibility:** Best Bets and Graded Picks both now show `📊 3.5` for a real book line and a
+plain `3.5` for a placeholder, matching the `🔄` convention already established for bullpen-
+blended plays. A caption explaining the `📊` marker appears whenever at least one real book line
+exists on the current filtered board.
+
+**Real cost, stated directly:** 17 markets × number-of-games quota units per
+`build_mlb_board` call. Cached at the same 5-minute TTL as the rest of the pipeline — shared
+across all 7 pages that call the shared loader, so one real fetch serves all of them, not one
+per page navigation. Worth confirming the quota implications with the actual plan tier before
+the first live deployment, since a full slate is 15 games × 17 markets = 255 units per refresh.
+
+**What's not yet done:** grading outcomes in Retrospective still uses DEFAULT_LINES for post-game
+settlement (a separate code path). Pitching Lab's own standalone pitching table still shows its
+own "K line" column, now correctly populated from the real line when available, but the label
+still says "K line" not "📊 K line" — a minor cosmetic gap, not a data accuracy one. 1122 tests
+passing after this entry.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

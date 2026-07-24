@@ -25,9 +25,30 @@ BASE = "https://api.the-odds-api.com/v4"
 SPORT = "baseball_mlb"
 
 # The model's markets, expressed as Odds API market keys.
+# EXPANDED from the original 7 to the full 16, matching sports.py's own _MLB_MARKET_MAP exactly
+# -- confirmed directly on request, after a real, reported discrepancy (a Graded Picks play
+# showing "Pitcher Strikeouts Under 5.5" for a pitcher whose real DraftKings line was 3.5) traced
+# back to this platform's core prop-generation pipeline never having been wired to real odds at
+# all, for ANY market -- it always used a fixed per-market placeholder (see config.py's own
+# DEFAULT_LINES, which documented this as known, unfinished work). sports.py's own market_map
+# already had real Odds API key mappings for all 16, "confirmed directly against the-odds-
+# api.com's own live 'Betting Markets' documentation" per its own comment -- this file's own
+# SUPPORTED_MARKETS had simply never been expanded to match, so Edge Board itself was also only
+# ever pricing 7 of the 16 real markets this platform actually generates picks for.
+#
+# REAL, HONEST LIMITATION: the 9 markets added here beyond the original 7 (batter_runs_scored,
+# batter_rbis, batter_stolen_bases, batter_singles, batter_doubles, batter_triples, batter_walks,
+# pitcher_earned_runs, pitcher_hits_allowed) are NOT verified against a live Odds API response
+# from this sandbox (no network path to api.the-odds-api.com here) -- confirmed via the
+# provider's own documentation, same honest posture as every other externally-documented-but-
+# not-live-tested assumption on this platform, but worth a real, deliberate first check once this
+# runs somewhere with live access, given the real stakes riding on it.
 SUPPORTED_MARKETS = [
     "batter_home_runs", "batter_total_bases", "batter_hits", "batter_strikeouts",
-    "pitcher_strikeouts", "pitcher_outs", "pitcher_walks",
+    "batter_runs_scored", "batter_rbis", "batter_stolen_bases", "batter_singles",
+    "batter_doubles", "batter_triples", "batter_walks",
+    "pitcher_strikeouts", "pitcher_outs", "pitcher_walks", "pitcher_earned_runs",
+    "pitcher_hits_allowed",
 ]
 
 
@@ -213,6 +234,49 @@ def market_lines_for_player(offers: List[Dict], player_name: str, projections_mo
         if cur is None or book_count > cur[1]:
             best[mkey] = (point, book_count)
     return {mkey: point for mkey, (point, _cnt) in best.items()}
+
+
+def market_lines_for_slate(offers: List[Dict], projections_module=None) -> Dict[Tuple[str, str], float]:
+    """{(normalized_player_name, market_key): point} for EVERY player in one pass over `offers`
+    -- the real, efficient building block behind wiring live sportsbook lines into this
+    platform's own CORE prop-generation pipeline (enrich_hitter_rows/build_pitcher_projection_
+    rows), not just Edge Board's own display lookup.
+
+    A GENUINELY SEPARATE FUNCTION FROM market_lines_for_player, not a trivial wrapper around
+    calling it once per player: that function does a full scan of `offers` PER CALL, which is
+    fine for Matchup Lab's own "one player's own line" lookup, but would mean re-scanning the
+    same, possibly large, whole-slate offers list once per player (potentially 200+ times for a
+    full slate) if used to build a lookup for every player at once. This does the identical real
+    tie-break logic (the point backed by the MOST total book quotes wins) in a single pass
+    instead.
+
+    Same real matching convention as market_lines_for_player and compute_edges: keyed by
+    normalize_name (sport-specific, handles accents/spelling so a book's own name formatting
+    doesn't cause a miss), not the raw book-supplied name string.
+
+    A player/market combo with no real book offer at all is simply absent from the returned
+    dict -- the caller's own responsibility to fall back to this platform's own DEFAULT_LINES
+    placeholder when a real line isn't available, an honest gap rather than a guess."""
+    if projections_module is None:
+        import projections as projections_module
+    P = projections_module
+
+    best: Dict[Tuple[str, str], Tuple[float, int]] = {}
+    for off in offers:
+        name = P.normalize_name(off.get("player", ""))
+        mkey = off.get("market")
+        point = off.get("point")
+        if not name or mkey is None or point is None:
+            continue
+        book_count = len(off.get("over") or {}) + len(off.get("under") or {})
+        if book_count == 0:
+            continue
+        key = (name, mkey)
+        cur = best.get(key)
+        if cur is None or book_count > cur[1]:
+            best[key] = (point, book_count)
+
+    return {key: point for key, (point, _cnt) in best.items()}
 
 
 def compute_edges(index: Dict, offers: List[Dict],

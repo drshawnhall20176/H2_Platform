@@ -27,18 +27,51 @@ consolidating into a shared module would have quietly introduced it if not for t
 
 from __future__ import annotations
 
+from typing import Any, Dict, Optional
+
 import streamlit as st
 
 import mlb_engine as E
 import projections as P
+import odds_api as O
 import sports
 
 
+def get_odds_api_key() -> Optional[str]:
+    """Read the Odds API key from st.secrets or the environment -- the SAME pattern Edge Board
+    already uses, centralized here so every page that shares build_mlb_board doesn't each
+    duplicate the key-lookup logic. Returns None when not configured (graceful fallback to
+    DEFAULT_LINES, not a page crash -- the intent is that a deploy without an API key still
+    works correctly, just without real lines)."""
+    import os
+    try:
+        return st.secrets["ODDS_API_KEY"]
+    except Exception:
+        return os.environ.get("ODDS_API_KEY")
+
+
 @st.cache_data(ttl=300, show_spinner=False)
-def build_mlb_board(date_str: str, fip_constant: float):
-    """The ONE shared MLB board-building pipeline — slate -> statcast/weather enrichment ->
-    hitter/pitcher projections -> ranked plays -> bullpen-blend re-pricing. Returns
-    (rows, meta, plays).
+def build_mlb_board(date_str: str, fip_constant: float, odds_api_key: Optional[str] = None):
+    """The ONE shared MLB board-building pipeline — slate -> real sportsbook lines -> statcast/
+    weather enrichment -> hitter/pitcher projections -> ranked plays -> bullpen-blend re-pricing.
+    Returns (rows, meta, plays).
+
+    odds_api_key: the real The Odds API key (from st.secrets/env, same as Edge Board already
+    uses). When None (not configured), every market falls back to this platform's own
+    DEFAULT_LINES placeholder -- the exact original behavior -- so a deploy without an API key
+    still works correctly, just without real lines. When supplied, a single real batch fetch
+    pulls real sportsbook lines for all 17 real MLB markets at once, and every probability
+    computed by enrich_hitter_rows/build_pitcher_projection_rows is computed against the real
+    line for that specific player, not a one-size-fits-all placeholder.
+
+    REAL COST, STATED DIRECTLY: player props cost 1 quota unit per market per event. This fetch
+    requests all 17 real markets for every game on the slate -- a full 15-game slate is 15 × 17
+    = 255 quota units per build_mlb_board call. Cached at the same 5-minute ttl as the rest of
+    this pipeline (so a full slate refresh costs 255 quota, not 255 per page navigation within
+    that window), and fetched once here for every page that shares this pipeline (Best Bets,
+    Graded Picks, Suggested Parlays, Speculative Basket, Command Center) rather than once per
+    page -- confirmed that this consolidation is what best_bets_data.py was built for in the
+    first place.
 
     PUBLIC, NOT INTERNAL — a real, deliberate widening of scope, not the original design:
     Retrospective had its own separate, third copy of this exact pipeline (load_retro_mlb),
@@ -105,6 +138,23 @@ def build_mlb_board(date_str: str, fip_constant: float):
     rows, meta = E.build_slate(date_str, fip_constant)
     sc, k = load_statcast()
     wx = load_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
+
+    # Real sportsbook lines -- one batch fetch for all 17 real markets across every game on the
+    # slate, feeding every probability the pipeline computes downstream. None (and a silent
+    # graceful fallback to DEFAULT_LINES) if: no API key configured, the fetch fails for any
+    # reason (network, quota exceeded, etc), or the response body is non-dict (the same real
+    # failure mode that tripped the live pitch-count feature -- fetch_json's own None-body guard
+    # handles this already, but a belt-and-suspenders try/except here means a real, unexpected
+    # odds-fetch failure can never block the rest of the pipeline from running).
+    real_lines = None
+    if odds_api_key:
+        try:
+            offers, _info = O.fetch_slate_props(date_str, odds_api_key,
+                                                list(O.SUPPORTED_MARKETS), sport=O.SPORT)
+            real_lines = O.market_lines_for_slate(offers)
+        except Exception:
+            real_lines = None   # fall back to DEFAULT_LINES, not a page crash
+
     # Starter rest, added directly on request -- one cached fetch per real starter (home/away
     # per game), not per hitter row. Attached to meta (home_days_rest/away_days_rest) for
     # build_pitcher_projection_rows' own use, and mirrored into a pitcher_id -> days_rest lookup
@@ -137,8 +187,8 @@ def build_mlb_board(date_str: str, fip_constant: float):
         if team_id not in workload_by_team:
             workload_by_team[team_id] = load_team_hitter_workload(team_id, date_str)
         r["_consecutive_games_started"] = workload_by_team[team_id].get(r.get("_pid"))
-    P.enrich_hitter_rows(rows, seed=7, statcast=sc, statcast_k=k)
-    pitcher_rows = P.build_pitcher_projection_rows(rows, meta, seed=11)
+    P.enrich_hitter_rows(rows, seed=7, statcast=sc, statcast_k=k, real_lines=real_lines)
+    pitcher_rows = P.build_pitcher_projection_rows(rows, meta, seed=11, real_lines=real_lines)
     plays = P.build_best_bets(rows, pitcher_rows)
 
     # Re-price the top hitter-market plays using their real vs-starter/vs-bullpen exposure — see
@@ -149,19 +199,19 @@ def build_mlb_board(date_str: str, fip_constant: float):
         plays, rows_by_pid,
         get_bullpen_stat_fn=lambda tid, ex: load_bullpen_aggregate_for_blend(tid, ex, fip_constant),
         get_bullpen_fatigue_fn=lambda tid, ex: load_bullpen_fatigue_for_blend(tid, ex, date_str),
-        statcast=sc, statcast_k=k, seed=7, top_n=30)
+        statcast=sc, statcast_k=k, seed=7, top_n=30, real_lines=real_lines)
 
     return rows, meta, plays
 
 
 def load_mlb_best_bets_board(date_str: str, fip_constant: float):
-    """Build the full MLB best-bets board: slate -> statcast/weather enrichment -> hitter/pitcher
-    projections -> ranked plays -> bullpen-blend re-pricing of the top hitter-market candidates.
+    """Build the full MLB best-bets board: slate -> real sportsbook lines -> statcast/weather
+    enrichment -> hitter/pitcher projections -> ranked plays -> bullpen-blend re-pricing.
 
     Returns (plays, meta) — the RAW ranked plays (no Slot/Time enrichment; Best Bets adds that
     itself for its own table, Command Center doesn't need it at all) and the full per-game
     metadata list, matching what both callers' own pre-existing interfaces already expected."""
-    _, meta, plays = build_mlb_board(date_str, fip_constant)
+    _, meta, plays = build_mlb_board(date_str, fip_constant, get_odds_api_key())
     return plays, meta
 
 
@@ -173,7 +223,7 @@ def load_mlb_graded_picks_board(date_str: str, fip_constant: float):
     into the flattened plays list.
 
     Returns (plays, meta, rows)."""
-    rows, meta, plays = build_mlb_board(date_str, fip_constant)
+    rows, meta, plays = build_mlb_board(date_str, fip_constant, get_odds_api_key())
     return plays, meta, rows
 
 

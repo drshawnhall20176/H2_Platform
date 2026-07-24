@@ -1267,6 +1267,109 @@ def test_build_best_bets_includes_hrr():
     print("\u2713 build_best_bets correctly produces a real Batter Hits+Runs+RBIs play with honest, correlation-aware reasoning")
 
 
+# ----------------------------------------------------------------- build_best_bets: real lines end to end
+def test_build_best_bets_falls_back_to_default_line_source_when_row_lacks_companion_fields():
+    # A row shaped the OLD way (no "<Market> Line"/"LineSource" companion fields at all, as
+    # every fixture above this point in the file already is) must still work exactly as before —
+    # falling back to DEFAULT_LINES and reporting an honest "default" source, never a crash or a
+    # fabricated "book" claim for a line that was never actually real.
+    hitters = [dict(Hitter="Old Style Row", Team="A", GameLabel="A @ B", Hand="L",
+                    **{"Opp Hand": "R", "Opp Pitcher": "Ace"}, Advantage="Advantage",
+                    _weather_hr=1.0, Due=0.0, **{"HR%": 0.15, "TB1.5%": 0.40})]
+    plays = P.build_best_bets(hitters, [])
+    tb_play = next(p for p in plays if p["Market"] == "Batter Total Bases")
+    assert tb_play["Line"] == 1.5 and tb_play["LineSource"] == "default"
+    print("✓ build_best_bets falls back to the honest DEFAULT_LINES/'default' source for a row lacking the new companion fields, exactly as before this feature")
+
+
+def test_build_best_bets_reads_real_line_and_source_from_the_row():
+    hitters = [dict(Hitter="Real Line Guy", Team="A", GameLabel="A @ B", Hand="L",
+                    **{"Opp Hand": "R", "Opp Pitcher": "Ace"}, Advantage="Advantage",
+                    _weather_hr=1.0, Due=0.0,
+                    **{"TB1.5%": 0.35, "TB Line": 2.5, "TB LineSource": "book"})]
+    plays = P.build_best_bets(hitters, [])
+    tb_play = next(p for p in plays if p["Market"] == "Batter Total Bases")
+    assert tb_play["Line"] == 2.5 and tb_play["LineSource"] == "book"
+    print("✓ build_best_bets correctly reads the real line and 'book' source from the row's own companion fields, not a hardcoded literal")
+
+
+def test_build_best_bets_full_pipeline_reproduces_the_real_sugano_case():
+    # THE full, real, end-to-end reproduction: real odds -> build_pitcher_projection_rows ->
+    # build_best_bets -> the actual play a person would see on Best Bets/Graded Picks. This is
+    # the complete chain the real, reported discrepancy traveled through.
+    stat = dict(battersFaced=650, inningsPitched="165.0", gamesStarted=27,
+               strikeOuts=95, baseOnBalls=35, earnedRuns=60, hits=160)
+    sugano = _fake_pm(700, "Tomoyuki Sugano", "R", 3.80, 4.10, stat)
+    opp = _fake_pm(701, "Opposing Pitcher", "L", 4.00, 4.00, stat)
+    meta = [{"label": "Opponent @ Padres", "home_id": 135, "away_id": 999,
+            "home_name": "San Diego Padres", "away_name": "Opponent",
+            "game_date": "2026-07-24", "home_pm": sugano, "away_pm": opp}]
+    real_lines = {(P.normalize_name("Tomoyuki Sugano"), "pitcher_strikeouts"): 3.5}
+
+    pitcher_rows_real = P.build_pitcher_projection_rows([], meta, seed=1, real_lines=real_lines)
+    pitcher_rows_default = P.build_pitcher_projection_rows([], meta, seed=1, real_lines=None)
+
+    plays_real = P.build_best_bets([], pitcher_rows_real)
+    plays_default = P.build_best_bets([], pitcher_rows_default)
+
+    sugano_play_real = next(p for p in plays_real
+                            if p["Player"] == "Tomoyuki Sugano" and p["Market"] == "Pitcher Strikeouts")
+    sugano_play_default = next(p for p in plays_default
+                               if p["Player"] == "Tomoyuki Sugano" and p["Market"] == "Pitcher Strikeouts")
+
+    assert sugano_play_real["Line"] == 3.5 and sugano_play_real["LineSource"] == "book"
+    assert sugano_play_default["Line"] == 5.5 and sugano_play_default["LineSource"] == "default"
+    assert sugano_play_real["ModelProb"] != sugano_play_default["ModelProb"]
+    print(f"✓ FULL PIPELINE, end to end: real odds -> build_pitcher_projection_rows -> "
+         f"build_best_bets correctly produces 'Pitcher Strikeouts {sugano_play_real['Side']} "
+         f"{sugano_play_real['Line']:g}' (the real DraftKings line) instead of the old hardcoded "
+         f"'{sugano_play_default['Side']} {sugano_play_default['Line']:g}' — the exact real, "
+         f"reported case, resolved completely from the real-odds lookup through to the final play")
+
+
+# ----------------------------------------------------------------- MLB_MARKET_TO_ODDS_KEY and real_line_or_default
+def test_mlb_market_to_odds_key_matches_sports_market_map():
+    """Drift guard: MLB_MARKET_TO_ODDS_KEY in projections.py and _MLB_MARKET_MAP in sports.py
+    must always be identical -- projections.py's own comment says exactly this, and this test
+    is the automated enforcement. Fails loudly if one gets updated without the other."""
+    import sports
+    assert P.MLB_MARKET_TO_ODDS_KEY == sports._MLB_MARKET_MAP, (
+        "projections.MLB_MARKET_TO_ODDS_KEY and sports._MLB_MARKET_MAP have drifted apart -- "
+        "update both together. Differences: "
+        f"{set(P.MLB_MARKET_TO_ODDS_KEY.items()) ^ set(sports._MLB_MARKET_MAP.items())}")
+    print(f"✓ MLB_MARKET_TO_ODDS_KEY matches sports._MLB_MARKET_MAP exactly across all "
+         f"{len(P.MLB_MARKET_TO_ODDS_KEY)} real markets — no drift")
+
+
+def test_real_line_or_default_returns_real_line_when_available():
+    import projections as P
+    normalized = P.normalize_name("Tomoyuki Sugano")
+    real_lines = {(normalized, "pitcher_strikeouts"): 3.5}
+    line, src = P.real_line_or_default("Pitcher Strikeouts", "Tomoyuki Sugano", real_lines, 5.5)
+    assert line == 3.5 and src == "book"
+    print("✓ real_line_or_default returns the real book line and 'book' source when available")
+
+
+def test_real_line_or_default_falls_back_to_placeholder_when_player_absent():
+    real_lines = {(P.normalize_name("Someone Else"), "pitcher_strikeouts"): 3.5}
+    line, src = P.real_line_or_default("Pitcher Strikeouts", "Tomoyuki Sugano", real_lines, 5.5)
+    assert line == 5.5 and src == "default"
+    print("✓ real_line_or_default falls back to the placeholder when no real line exists for this specific player")
+
+
+def test_real_line_or_default_falls_back_when_real_lines_is_none():
+    line, src = P.real_line_or_default("Pitcher Strikeouts", "Anyone", None, 5.5)
+    assert line == 5.5 and src == "default"
+    print("✓ real_line_or_default falls back cleanly when real_lines=None (no odds fetch attempted this run)")
+
+
+def test_real_line_or_default_none_for_unrecognized_market():
+    real_lines = {}
+    line, src = P.real_line_or_default("Some Unknown Market", "Tomoyuki Sugano", real_lines, 5.5)
+    assert line == 5.5 and src == "default"
+    print("✓ real_line_or_default falls back for an unrecognized market key rather than crashing")
+
+
 
 # ----------------------------------------------------------------- build_bullpen_matchup_rows
 def _hitter_row_for_bullpen_test(team, opp_stat):
@@ -1565,6 +1668,28 @@ def test_blend_reproduces_real_slate_direction_ace_starter_weak_pen():
     print(f"✓ blend_hitter_probs_with_bullpen correctly lowers HR% ({starter_only['HR%']:.3f} -> "
          f"{blended['HR%']:.3f}) when the real bullpen is meaningfully better than a bad starter, "
          f"matching the direction of the real reported case")
+
+
+def test_blend_uses_real_line_when_available():
+    # THE real, important guarantee this section exists for: the re-pricing pass must stay
+    # consistent with whatever real line the play was ORIGINALLY shown against, not silently
+    # revert to the placeholder default during the blend step.
+    good_pen_stat = dict(strikeOuts=300, baseOnBalls=90, hitByPitch=10, homeRuns=35,
+                         battersFaced=1800, hits=380, atBats=1600, earnedRuns=180,
+                         inningsPitched="450.0")
+    row = _blendable_row(lineup_idx=0, exp_pa=4.55)
+    real_lines = {(P.normalize_name("Test Slugger"), "batter_total_bases"): 2.5}
+
+    blended_default = P.blend_hitter_probs_with_bullpen(row, good_pen_stat, seed=7)
+    blended_real = P.blend_hitter_probs_with_bullpen(row, good_pen_stat, seed=7, real_lines=real_lines)
+
+    assert blended_default is not None and blended_real is not None
+    # A materially higher real line (2.5 vs the 1.5 default) must produce a LOWER TB1.5% —
+    # genuinely harder to clear a higher bar, not just a differently-labeled identical number.
+    assert blended_real["TB1.5%"] < blended_default["TB1.5%"]
+    print(f"✓ blend_hitter_probs_with_bullpen correctly uses the real line (TB1.5% drops from "
+         f"{blended_default['TB1.5%']:.3f} at the default 1.5 to {blended_real['TB1.5%']:.3f} "
+         f"at the real 2.5) rather than silently reverting to the placeholder during re-pricing")
 
 
 def test_blend_returns_none_when_no_bullpen_exposure():
@@ -1903,6 +2028,42 @@ def test_poisson_over_half_prob_bounded_below_one():
     # just outside any value this function will ever realistically see. Checked at a real,
     # plausible-if-extreme value instead, where the bound is meaningfully checkable.
     assert P.poisson_over_half_prob(5.0) < 1.0
+
+
+# ----------------------------------------------------------------- poisson_over_prob
+def test_poisson_over_prob_matches_poisson_over_half_prob_at_line_half():
+    # THE real, required guarantee: every existing caller of poisson_over_half_prob must see
+    # zero behavior change now that it's a thin wrapper over this general function.
+    for lam in (0.1, 0.3, 0.42, 1.0, 2.5, 5.0):
+        assert abs(P.poisson_over_prob(lam, 0.5) - P.poisson_over_half_prob(lam)) < 1e-12
+    print("✓ poisson_over_prob(lam, 0.5) is byte-identical to poisson_over_half_prob(lam) for every real lambda checked")
+
+
+def test_poisson_over_prob_hand_verified_non_half_lines():
+    # Computed directly (not estimated by hand), then locked in as regression values.
+    assert abs(P.poisson_over_prob(1.0, 1.5) - 0.26424111765711533) < 1e-9
+    assert abs(P.poisson_over_prob(2.5, 2.5) - 0.4561868841166705) < 1e-9
+    print("✓ poisson_over_prob hand-verifies exactly for real, non-0.5 lines (1.5, 2.5) — the actual generalization this function exists for")
+
+
+def test_poisson_over_prob_monotonic_in_line():
+    # A higher real line should always be harder to clear, for the same expected count.
+    lam = 1.2
+    p_low = P.poisson_over_prob(lam, 0.5)
+    p_mid = P.poisson_over_prob(lam, 1.5)
+    p_high = P.poisson_over_prob(lam, 2.5)
+    assert p_low > p_mid > p_high
+    print("✓ poisson_over_prob is correctly monotonically decreasing as the real line increases")
+
+
+def test_poisson_over_prob_negative_line_is_certain():
+    assert P.poisson_over_prob(0.3, -0.5) == 1.0
+    print("✓ poisson_over_prob correctly returns 1.0 for a line below zero (any real non-negative count clears it)")
+
+
+def test_poisson_over_prob_zero_rate_never_clears_a_real_line():
+    assert P.poisson_over_prob(0.0, 0.5) == 0.0
+    assert P.poisson_over_prob(0.0, 1.5) == 0.0
 
 
 # ----------------------------------------------------------------- simulate_hits_runs_rbi
@@ -2352,6 +2513,95 @@ def test_build_pitcher_projection_rows_includes_hits_allowed_fields():
         assert r["Hits Allowed line"] == 5.5
         assert 0.0 <= r["Hits Allowed over%"] <= 1.0
     print("✓ build_pitcher_projection_rows correctly includes all four Hits Allowed fields for every starter")
+
+
+# ----------------------------------------------------------------- build_pitcher_projection_rows: real lines
+def test_build_pitcher_projection_rows_default_line_when_no_real_lines_given():
+    stat = dict(battersFaced=720, inningsPitched="180.0", gamesStarted=29,
+               strikeOuts=235, baseOnBalls=42, earnedRuns=65, hits=170)
+    hp = _fake_pm(601, "Home Ace", "R", 3.25, 3.20, stat)
+    ap = _fake_pm(602, "Away Ace", "L", 3.60, 3.55, stat)
+    meta = [{"label": "NYY @ BOS", "home_id": 1, "away_id": 2,
+            "home_name": "Boston Red Sox", "away_name": "New York Yankees",
+            "game_date": "2026-07-18", "home_pm": hp, "away_pm": ap}]
+    out = P.build_pitcher_projection_rows([], meta, seed=1)   # real_lines not passed at all
+    for r in out:
+        assert r["K line"] == 5.5 and r["K LineSource"] == "default"
+        assert r["Outs line"] == 17.5 and r["Outs LineSource"] == "default"
+        assert r["BB line"] == 1.5 and r["BB LineSource"] == "default"
+    print("✓ build_pitcher_projection_rows falls back to the exact original default-line behavior when real_lines isn't passed at all, unchanged from before this feature")
+
+
+def test_build_pitcher_projection_rows_uses_real_line_when_available():
+    stat = dict(battersFaced=720, inningsPitched="180.0", gamesStarted=29,
+               strikeOuts=235, baseOnBalls=42, earnedRuns=65, hits=170)
+    hp = _fake_pm(601, "Home Ace", "R", 3.25, 3.20, stat)
+    ap = _fake_pm(602, "Away Ace", "L", 3.60, 3.55, stat)
+    meta = [{"label": "NYY @ BOS", "home_id": 1, "away_id": 2,
+            "home_name": "Boston Red Sox", "away_name": "New York Yankees",
+            "game_date": "2026-07-18", "home_pm": hp, "away_pm": ap}]
+    real_lines = {(P.normalize_name("Home Ace"), "pitcher_strikeouts"): 7.5}
+    out = P.build_pitcher_projection_rows([], meta, seed=1, real_lines=real_lines)
+    home_row = next(r for r in out if r["Pitcher"] == "Home Ace")
+    away_row = next(r for r in out if r["Pitcher"] == "Away Ace")
+    assert home_row["K line"] == 7.5 and home_row["K LineSource"] == "book"
+    assert away_row["K line"] == 5.5 and away_row["K LineSource"] == "default"   # no real line for Away Ace
+    print("✓ build_pitcher_projection_rows uses the real line for the pitcher who has one, and the honest default for the one who doesn't — independently, not all-or-nothing")
+
+
+def test_build_pitcher_projection_rows_reproduces_the_real_sugano_case():
+    # THE exact real, reported case this entire feature was built from: Graded Picks showed
+    # "Pitcher Strikeouts Under 5.5" for Tomoyuki Sugano, whose real DraftKings line was 3.5.
+    # Confirms directly that the real line, once available, is what the probability is actually
+    # computed against -- not just displayed differently while the math stays on the old default.
+    stat = dict(battersFaced=650, inningsPitched="165.0", gamesStarted=27,
+               strikeOuts=95, baseOnBalls=35, earnedRuns=60, hits=160)   # a real, modest-K profile
+    sugano = _fake_pm(700, "Tomoyuki Sugano", "R", 3.80, 4.10, stat)
+    opp = _fake_pm(701, "Opposing Pitcher", "L", 4.00, 4.00, stat)
+    meta = [{"label": "Opponent @ Padres", "home_id": 135, "away_id": 999,
+            "home_name": "San Diego Padres", "away_name": "Opponent",
+            "game_date": "2026-07-24", "home_pm": sugano, "away_pm": opp}]
+    real_lines = {(P.normalize_name("Tomoyuki Sugano"), "pitcher_strikeouts"): 3.5}
+
+    with_real_line = P.build_pitcher_projection_rows([], meta, seed=1, real_lines=real_lines)
+    without_real_line = P.build_pitcher_projection_rows([], meta, seed=1, real_lines=None)
+
+    sugano_real = next(r for r in with_real_line if r["Pitcher"] == "Tomoyuki Sugano")
+    sugano_default = next(r for r in without_real_line if r["Pitcher"] == "Tomoyuki Sugano")
+
+    assert sugano_real["K line"] == 3.5 and sugano_real["K LineSource"] == "book"
+    assert sugano_default["K line"] == 5.5 and sugano_default["K LineSource"] == "default"
+    # The probability itself must genuinely differ between the two -- confirming the real line
+    # actually drove a different computation, not just a different label on the same number.
+    assert sugano_real["K over%"] != sugano_default["K over%"]
+    print(f"✓ build_pitcher_projection_rows resolves the exact real Sugano case: real line 3.5 "
+         f"(K over% = {sugano_real['K over%']}) vs. the old hardcoded 5.5 "
+         f"(K over% = {sugano_default['K over%']}) — genuinely different numbers, not just a relabel")
+
+
+def test_build_pitcher_projection_rows_real_lines_for_all_five_markets():
+    stat = dict(battersFaced=720, inningsPitched="180.0", gamesStarted=29,
+               strikeOuts=235, baseOnBalls=42, earnedRuns=65, hits=170)
+    pm = _fake_pm(601, "Five Market Guy", "R", 3.25, 3.20, stat)
+    other = _fake_pm(602, "Other Guy", "L", 3.60, 3.55, stat)
+    meta = [{"label": "AWY @ HOM", "home_id": 1, "away_id": 2,
+            "home_name": "HOM", "away_name": "AWY",
+            "game_date": "2026-07-18", "home_pm": pm, "away_pm": other}]
+    real_lines = {
+        (P.normalize_name("Five Market Guy"), "pitcher_strikeouts"): 6.5,
+        (P.normalize_name("Five Market Guy"), "pitcher_outs"): 18.5,
+        (P.normalize_name("Five Market Guy"), "pitcher_walks"): 2.5,
+        (P.normalize_name("Five Market Guy"), "pitcher_earned_runs"): 1.5,
+        (P.normalize_name("Five Market Guy"), "pitcher_hits_allowed"): 4.5,
+    }
+    out = P.build_pitcher_projection_rows([], meta, seed=1, real_lines=real_lines)
+    r = next(row for row in out if row["Pitcher"] == "Five Market Guy")
+    assert r["K line"] == 6.5 and r["K LineSource"] == "book"
+    assert r["Outs line"] == 18.5 and r["Outs LineSource"] == "book"
+    assert r["BB line"] == 2.5 and r["BB LineSource"] == "book"
+    assert r["ER line"] == 1.5 and r["ER LineSource"] == "book"
+    assert r["Hits Allowed line"] == 4.5 and r["Hits Allowed LineSource"] == "book"
+    print("✓ build_pitcher_projection_rows correctly wires real lines independently into all five real pitcher markets, not just strikeouts")
 
 
 # ----------------------------------------------------------------- _hitter_reasons: new markets
