@@ -7,6 +7,14 @@ anyone specifically interested in a different game. Games are shown here in full
 most interesting first (by each game's own best play), so the whole slate stays visible — nothing
 silently dropped, just organized by what's actually worth a look first.
 
+SLATE SUMMARY, ADDED DIRECTLY ON REQUEST -- NOT A CONTRADICTION OF THE ABOVE: a curated "top
+picks by grade" section now sits ABOVE the full game-by-game board, specifically so someone
+doesn't have to scroll every game to find the strongest picks. The reasoning above for why this
+page isn't JUST a flat top-N still holds completely -- the summary is additive, not a
+replacement; the full board underneath is complete and totally unaffected by the summary's own
+grade-floor/Top N controls. Excludes D by default (a real, visible, adjustable floor, not
+hardcoded) -- see grading.top_picks_by_grade's own docstring for the full reasoning on why.
+
 Letter grades and tier labels here are THIS PLATFORM'S OWN wording and thresholds, grounded in
 its own already-established Conviction scale — not reverse-engineered from, or copied from, any
 other product's scoring or badge text. See projections.conviction_to_grade's own docstring for
@@ -178,6 +186,62 @@ def _grade_badge(grade: dict) -> str:
            f"<span style='color:{color};font-weight:600;'>{grade['tier']}</span> "
            f"<span style='opacity:0.7;'>({grade['conviction']:.2f}×)</span>")
 
+
+# --- Slate summary ------------------------------------------------------------
+# Added directly on request: a curated "look here first" view sitting ABOVE the full game-by-game
+# board below, not instead of it -- the board underneath is completely unchanged, every game and
+# every grade still fully visible exactly as it always has been. This section exists specifically
+# so someone doesn't have to scroll through every game to find the strongest picks, without
+# undoing the whole reason this page is organized game-by-game in the first place (see the module
+# docstring at the top of this file).
+st.subheader("⭐ Slate summary — top picks by grade")
+
+GRADE_FLOOR_OPTIONS = {
+    "A only": ("A",),
+    "B or better": ("A", "B"),
+    "C or better": ("A", "B", "C"),
+    "D or better (all grades)": ("A", "B", "C", "D"),
+}
+sc1, sc2 = st.columns([2, 1])
+with sc1:
+    # Defaults to "C or better" -- a real, visible, adjustable control, not a hardcoded rule. D
+    # is this platform's own explicit "still worth a look, proceed with real caution" floor, the
+    # lowest grade that clears any real threshold at all -- a curated summary featuring D picks
+    # with the same visual weight as A's and B's would undercut the entire reason the letter
+    # grade exists. Change this if you specifically want to check whether tonight's D's are
+    # running hot.
+    grade_floor_pick = st.selectbox("Grade floor for this summary", list(GRADE_FLOOR_OPTIONS.keys()),
+                                    index=2)
+with sc2:
+    top_n = st.number_input("Top N per grade", min_value=1, max_value=20, value=5, step=1)
+
+summary = grading.top_picks_by_grade(organized, letters=GRADE_FLOOR_OPTIONS[grade_floor_pick],
+                                     top_n=int(top_n))
+if not summary:
+    st.caption(f"Nothing clears {grade_floor_pick.lower()} on the current filters — try a "
+              "lower grade floor, or loosen the filters above.")
+else:
+    for entry in summary:
+        color = GRADE_COLOR.get(entry["letter"], "#6b7280")
+        st.markdown(f"<span style='color:{color};font-weight:700;'>{entry['letter']} grade</span>",
+                   unsafe_allow_html=True)
+        for pl in entry["picks"]:
+            fair = pl.get("Fair")
+            fair_str = f"{fair:+d}" if fair is not None else "—"
+            st.markdown(
+                f"{pl['ModelProb']:.0%} · {_grade_badge(pl['_grade'])} — **{pl['Player']}** "
+                f"{pl['Market']} {pl['Side']} {pl['Line']:g} · Fair {fair_str} · {pl['Game']}",
+                unsafe_allow_html=True,
+            )
+    summary_plays = [pl for entry in summary for pl in entry["picks"]]
+    quick_log.render_quick_log(summary_plays, date_str, _active.key, key_prefix="graded_summary")
+    st.caption("Sorted by real ModelProb within each grade — probability of actually hitting, "
+              "not raw Conviction (which is relative to each market's own typical reference "
+              "rate, not an absolute likelihood). The full game-by-game board below is complete "
+              "and unaffected by the grade floor/Top N controls above — nothing there is hidden "
+              "or filtered by this summary.")
+
+st.divider()
 
 if show_ranking:
     st.caption("🔢 Ranked #1 (strongest) to weakest within this game, by the same real grading "
