@@ -46,7 +46,7 @@ SPORT = "baseball_mlb"
 SUPPORTED_MARKETS = [
     "batter_home_runs", "batter_total_bases", "batter_hits", "batter_strikeouts",
     "batter_runs_scored", "batter_rbis", "batter_stolen_bases", "batter_singles",
-    "batter_doubles", "batter_triples", "batter_walks",
+    "batter_doubles", "batter_triples", "batter_walks", "batter_hits_runs_rbis",
     "pitcher_strikeouts", "pitcher_outs", "pitcher_walks", "pitcher_earned_runs",
     "pitcher_hits_allowed",
 ]

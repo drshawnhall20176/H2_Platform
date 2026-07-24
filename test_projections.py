@@ -1341,6 +1341,24 @@ def test_mlb_market_to_odds_key_matches_sports_market_map():
          f"{len(P.MLB_MARKET_TO_ODDS_KEY)} real markets — no drift")
 
 
+def test_supported_markets_covers_every_projected_market():
+    """Drift guard for a real, specific production bug: batter_hits_runs_rbis was in
+    MLB_MARKET_TO_ODDS_KEY (so the platform generated HRR plays) but NOT in SUPPORTED_MARKETS
+    (so it was never requested from the odds API). Result: HRR plays were always computed against
+    the DEFAULT_LINES placeholder even when the API key was configured, because the real lines
+    were simply never fetched. Fails loudly if any projected market gets added to the map without
+    also being added to the API request list."""
+    import odds_api as O
+    projected = set(P.MLB_MARKET_TO_ODDS_KEY.values())
+    requested = set(O.SUPPORTED_MARKETS)
+    missing = projected - requested
+    assert not missing, (
+        f"These markets are in MLB_MARKET_TO_ODDS_KEY but NOT in odds_api.SUPPORTED_MARKETS -- "
+        f"real lines will never be fetched for them even when an API key is configured: {missing}")
+    print(f"✓ Every projected market ({len(projected)}) is also in SUPPORTED_MARKETS — "
+         f"no market will silently fall back to the placeholder due to a missing API request")
+
+
 def test_real_line_or_default_returns_real_line_when_available():
     import projections as P
     normalized = P.normalize_name("Tomoyuki Sugano")
