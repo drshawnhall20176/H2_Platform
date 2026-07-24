@@ -9,6 +9,77 @@ No network required. Run either way:
 import mlb_engine as E
 
 
+# ----------------------------------------------------------------- fetch_json
+# A REAL bug caught in production, not a hypothetical: this function had zero direct test
+# coverage before now (every caller gets tested by monkeypatching fetch_json itself, bypassing
+# the real HTTP layer entirely) -- meaning this exact class of bug (a technically-successful
+# response with a non-dict body silently breaking every one of fetch_json's 21 callers, which
+# all assume a real dict) had no test surface to catch it before it reached production.
+
+class _FakeResponse:
+    def __init__(self, status_code=200, body=None):
+        self.status_code = status_code
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
+def test_fetch_json_normal_success_returns_the_real_dict(monkeypatch):
+    monkeypatch.setattr(E._SESSION, "get", lambda *a, **k: _FakeResponse(200, {"hello": "world"}))
+    assert E.fetch_json("https://example.com") == {"hello": "world"}
+
+
+def test_fetch_json_non_200_status_returns_empty_dict(monkeypatch):
+    monkeypatch.setattr(E._SESSION, "get", lambda *a, **k: _FakeResponse(404, {"error": "not found"}))
+    assert E.fetch_json("https://example.com", retries=0) == {}
+
+
+def test_fetch_json_network_exception_returns_empty_dict(monkeypatch):
+    def _boom(*a, **k):
+        raise E.requests.RequestException("network down")
+    monkeypatch.setattr(E._SESSION, "get", _boom)
+    assert E.fetch_json("https://example.com", retries=0) == {}
+
+
+def test_fetch_json_null_body_returns_empty_dict_not_none(monkeypatch):
+    # THE REAL PRODUCTION BUG, exactly as it happened: a 200-status response whose body is
+    # literal JSON null (a plausible real shape for a postponed/suspended game's own boxscore
+    # endpoint) used to pass straight through as None, then crash every caller's own .get(...)
+    # call downstream with an AttributeError. Locked in here so this exact class of bug can't
+    # silently reappear.
+    monkeypatch.setattr(E._SESSION, "get", lambda *a, **k: _FakeResponse(200, None))
+    result = E.fetch_json("https://example.com", retries=0)
+    assert result == {}
+    assert result is not None
+    assert isinstance(result, dict)
+    print("✓ fetch_json returns a real {} (not None) for a technically-successful response with a JSON null body — the exact real production bug")
+
+
+def test_fetch_json_non_dict_list_body_returns_empty_dict(monkeypatch):
+    # A JSON array body (another real, plausible non-dict shape) must be treated the same honest
+    # way as null -- every real caller in this codebase expects a dict and calls .get() on it.
+    monkeypatch.setattr(E._SESSION, "get", lambda *a, **k: _FakeResponse(200, [1, 2, 3]))
+    result = E.fetch_json("https://example.com", retries=0)
+    assert result == {} and isinstance(result, dict)
+    print("✓ fetch_json returns a real {} (not a bare list) for a technically-successful response with a non-dict JSON body")
+
+
+def test_fetch_json_retries_before_giving_up(monkeypatch):
+    calls = []
+
+    def _flaky(*a, **k):
+        calls.append(1)
+        if len(calls) < 3:
+            raise E.requests.RequestException("timeout")
+        return _FakeResponse(200, {"finally": "worked"})
+
+    monkeypatch.setattr(E._SESSION, "get", _flaky)
+    assert E.fetch_json("https://example.com", retries=2) == {"finally": "worked"}
+    assert len(calls) == 3
+    print("✓ fetch_json actually retries the stated number of times before succeeding or giving up")
+
+
 # ----------------------------------------------------------------- FIP
 def test_fip_known_value():
     # 13*8 + 3*(10+2) - 2*38 = 64; 64/42 = 1.5238; +3.17 = 4.69
@@ -1013,6 +1084,76 @@ def test_get_actual_starter_reads_the_correct_side(monkeypatch):
     assert E.get_actual_starter(12345, "home")["player_id"] == 555
     assert E.get_actual_starter(12345, "away")["player_id"] == 556
     print("✓ get_actual_starter reads the requested side only, never mixing up home and away")
+
+
+# ----------------------------------------------------------------- get_live_pitching_line
+def _fake_live_boxscore_with_stats(home_players=None, away_players=None):
+    """home_players/away_players: {pid: (name, gamesStarted, pitches, hits, earned_runs,
+    strikeouts, walks, innings_pitched)}. A separate, purpose-built fake from _fake_live_boxscore
+    above (which only models gamesStarted for the simpler starter-confirmation tests) -- this one
+    carries the real, full pitching-stat fields get_live_pitching_line actually reads."""
+    def _side(players):
+        out = {}
+        for pid, (name, gs, pitches, hits, er, k, bb, ip) in (players or {}).items():
+            out[f"ID{pid}"] = {"person": {"id": pid, "fullName": name}, "stats": {"pitching": {
+                "gamesStarted": gs, "numberOfPitches": pitches, "hits": hits, "earnedRuns": er,
+                "strikeOuts": k, "baseOnBalls": bb, "inningsPitched": ip}}}
+        return {"players": out}
+    return {"teams": {"home": _side(home_players), "away": _side(away_players)}}
+
+
+def test_get_live_pitching_line_finds_the_real_starter_with_full_line(monkeypatch):
+    box = _fake_live_boxscore_with_stats(
+        home_players={555: ("Real Starter", 1, 68, 3, 1, 6, 2, "5.2")})
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+    line = E.get_live_pitching_line(12345, "home")
+    assert line == {"player_id": 555, "name": "Real Starter", "pitches": 68,
+                    "innings_pitched": "5.2", "hits": 3, "earned_runs": 1,
+                    "strikeouts": 6, "walks": 2}
+    print("✓ get_live_pitching_line correctly reads the real starter's full live line from the boxscore")
+
+
+def test_get_live_pitching_line_ignores_a_reliever_with_zero_games_started(monkeypatch):
+    box = _fake_live_boxscore_with_stats(
+        home_players={555: ("Long Reliever", 0, 30, 2, 0, 3, 1, "2.0")})
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+    assert E.get_live_pitching_line(12345, "home") is None
+    print("✓ get_live_pitching_line never picks a reliever (gamesStarted=0) over the real starter")
+
+
+def test_get_live_pitching_line_none_on_empty_boxscore(monkeypatch):
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: {})
+    assert E.get_live_pitching_line(12345, "home") is None
+    print("✓ get_live_pitching_line returns None (not a fabricated zero line) when the game hasn't started yet")
+
+
+def test_get_live_pitching_line_none_on_fetch_failure(monkeypatch):
+    def _boom(url, params=None, retries=2):
+        raise Exception("network down")
+    monkeypatch.setattr(E, "fetch_json", _boom)
+    assert E.get_live_pitching_line(12345, "home") is None
+
+
+def test_get_live_pitching_line_reads_the_correct_side(monkeypatch):
+    box = _fake_live_boxscore_with_stats(
+        home_players={555: ("Home SP", 1, 50, 2, 1, 4, 1, "4.0")},
+        away_players={556: ("Away SP", 1, 80, 5, 3, 5, 3, "6.0")})
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+    assert E.get_live_pitching_line(12345, "home")["pitches"] == 50
+    assert E.get_live_pitching_line(12345, "away")["pitches"] == 80
+    print("✓ get_live_pitching_line reads the requested side only, never mixing up home and away")
+
+
+def test_get_live_pitching_line_missing_fields_default_honestly(monkeypatch):
+    # A real, if rare, boxscore edge case: gamesStarted present but some other field genuinely
+    # absent from this specific in-progress response. Must default to 0, not crash.
+    box = {"teams": {"home": {"players": {"ID555": {
+        "person": {"id": 555, "fullName": "Sparse Data SP"},
+        "stats": {"pitching": {"gamesStarted": 1}}}}}}}
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+    line = E.get_live_pitching_line(12345, "home")
+    assert line["pitches"] == 0 and line["hits"] == 0 and line["strikeouts"] == 0
+    print("✓ get_live_pitching_line defaults missing individual stat fields to 0 rather than crashing")
 
 
 # ----------------------------------------------------------------- starter_mismatch

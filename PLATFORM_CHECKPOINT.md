@@ -4,8 +4,10 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 1015/1015 tests green as of 2026-07-23; see the
-## "Platform audit" entry near the end for what's changed since the 911-test mark below)
+## What's in this checkpoint (all tested — 1071/1071 tests green as of 2026-07-23; the
+## 2026-07-21-through-2026-07-23 entries near the end, from "Discord community analysis"
+## through the fetch_json production-crash fix, are now fully logged in their real chronological
+## order — no gap remains between the 911-test mark below and the current count)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -4712,6 +4714,161 @@ passing.
 while, and if checking it often enough that rebuild time becomes the real friction, that's the
 actual signal to invest in persistence — not something to guess at up front.
 
+### Discord community analysis + Tier 1: min-probability filter and Bullpen Watch (2026-07-21/22)
+A long, dedicated analysis pass through several days of real H2Sports Discord conversation
+(Zvuo, H2Deezy, Zee, Black_Hammer19XX, Onebaddad619, Ojay, and others — real users, actively
+trading), looking specifically for data-answerable patterns in how the community was actually
+using (and working around) the platform, not speculation. Found several real, repeated pain
+points and prioritized them into a Tier 1/2/3 roadmap with Shawn before building anything.
+
+**Min probability % filter (Tier 1, cheapest, most directly requested)**: Zvuo's own real
+workflow was routing the tool's own picks through a third-party AI just to strip anything under
+70% — every play already carries a real ModelProb, so this needed a slider, not new modeling.
+`grading.filter_min_probability(plays, min_prob)` — a shared, pure helper, defaults to a no-op —
+wired into Best Bets, Graded Picks, Suggested Parlays, and Speculative Basket identically. 5 new
+tests.
+
+**Bullpen Watch (Tier 1, new page)**: the single most-repeated real complaint across multiple
+independent days: "our research only holds up for 6 innings" — bullpen freshness checked
+manually, every night, outside the tool. Slate-wide 🟢/🔴 freshness per game, MLB-only, opt-in
+(a real per-team fetch, not free), built on the SAME `get_team_bullpen_fatigue` already used
+elsewhere — `projections.bullpen_freshness_tag`/`bullpen_freshness_edge` added on top. 7 new
+tests.
+
+### Tier 2: starter confirmation and per-player calibration tracker (2026-07-22)
+**Starter confirmation / live mismatch check**: a real, repeated pain point — "who are these
+pitchers, messed up my research" once an unannounced starter swap happens mid-slate.
+`mlb_engine.get_actual_starter`/`starter_mismatch` — checks the live boxscore against the
+probable-starter list, wired into Pitching Lab as a per-side, post-game-start button. Honest
+scope stated directly: this catches a mismatch once the game has started, it cannot warn
+pre-game — no data source exists that would make a real pre-game guarantee possible. 9 new
+tests.
+
+**Per-player calibration tracker**: both Deezy and Zee independently keep informal "ban lists"
+(Curtis Mead, Vlad Jr., Juan Soto, Mookie, and others) for players the model seems to persistently
+overrate. `retro.player_calibration(graded_plays, min_plays)` answers this with real settled-play
+data instead of vibes — pools across every market per player (matching how a real ban list
+actually thinks about a player, not market-by-market), sorted most-overrated first. Shipped with
+`min_plays` defaulting to 8, a stated judgment call (Shawn's own original suggestion was 20+),
+adjustable live in the UI. Added to Model Dashboard. 6 new tests.
+
+### Tier 3: Game Watch v1 — a real moneyline/matchup signal (2026-07-22)
+The biggest true gap from the same Discord analysis: Zvuo's whole manual pre-moneyline-bet
+process (starter ERA, recent team form, bullpen freshness, and more) happened entirely outside
+the platform. Scoped deliberately as a phased build, NOT a full win-probability model outright —
+that's a genuinely different problem (team-level simulation vs. this platform's whole existing
+player-prop architecture), worth its own separate, later conversation.
+
+**New page: Game Watch.** For each game on the slate: starter FIP, bullpen freshness, bullpen
+quality (aggregate ERA), and team form (last-15-games record + run differential) — reports how
+many of those signals favor each team as an honest COUNT ("3 of 4"), deliberately not a
+fabricated weighted probability, since nothing here was backtested yet.
+`mlb_engine.pair_pitching_slate_by_game` (shared, tested game-pairing logic, also reused by
+Bullpen Watch), `projections.lower_is_better_edge`/`higher_is_better_edge`/
+`matchup_signal_tally` (real, transparent comparison primitives with a stated epsilon per
+signal, not exact-tie-only). 18+ new tests across the new comparison functions and the pairing
+logic.
+
+**Team recent form**: `mlb_engine.get_team_recent_form(team_id, before_date, games_back=15)` —
+a real "last 15 games" record/run-differential read, matching Zvuo's own stated number directly
+("winning the last 15 games and the run differential is big"), using the schedule response's own
+per-team score field rather than a second boxscore fetch per game. 6 new tests.
+
+**HRR market fix (Batter Hits+Runs+RBIs)**: `mlb_engine._parse_boxscore_results` extended to
+extract `runs`/`rbi` so `hrr = h + runs + rbi` can actually be graded — this market existed on
+the board already but had no way to settle against a real result. 3 new tests.
+
+**Speculative Basket trim tool**: `grading.basket_win_count_distribution(legs)` — an exact
+Poisson-binomial win-count distribution via dynamic programming, not a Monte Carlo approximation.
+Wired into Speculative Basket as a live trim slider with a full win-count bar chart. 7 new tests.
+
+### Slate-wide chalk index — does the model's own board actually predict the night? (2026-07-22)
+A genuinely different kind of check from everything else on the platform: not "did this one pick
+hit," but "across many nights, does the SLATE-WIDE average starter quality actually correlate
+with that night's overall hit rate" — a real, if coarse, test of whether the model's own read on
+"tonight is chalky" tracks reality. `retro._pearson_r` (hand-rolled, no scipy dependency, returns
+None rather than a fabricated correlation for a constant series) and
+`retro.slate_chalk_correlation(daily_points, min_days=10)`. Added to Model Dashboard, MLB-only,
+behind an explicit "run the N-day test" button (a real cost — one full slate rebuild per day
+checked). 9 new tests including hand-verified r=1.0/r=-1.0/r=0.9707 cases. Cannot be run for real
+from this sandbox (no live MLB API access) — shipped as a tested, ready tool, not a completed
+validation.
+
+### Filtering and chronological sorting added across the new summary views (2026-07-22)
+Bullpen Watch and Game Watch (and later Best Bets) got the same Time slot + Game filter pattern
+already established on Matchup Lab/Graded Picks — narrows a busy night's slate without hiding
+anything by default. While adding this, caught and fixed a real, if subtle, sort-order issue:
+the existing "sort by slot, then alphabetically within slot" convention wasn't strictly
+chronological (a slot groups a coarse time range; two games in the same slot could still render
+out of true start-time order). Fixed by sorting on `game_dt` directly, then discovered a second
+real bug while doing so: the first fix used `datetime.max` as a fallback for games with an
+unknown start time, which crashes when compared against `game_dt`'s own timezone-AWARE
+datetimes (a naive-vs-aware comparison, a real Python footgun) — fixed by restructuring the sort
+key so a missing-date game's dummy value is never actually compared against a real one, verified
+against synthetic mixed dated/undated games before shipping.
+
+
+### Game Watch expanded to 6 signals: home/road and day/night form (2026-07-23)
+Following up on Zvuo's own real process ("winning the last 15 games... they have a less taxed
+bullpen also"), `get_team_recent_form` extended with real `venue` ("home"/"away") and
+`time_of_day` ("day"/"night") filters — each team's form specifically in the ROLE it's playing
+tonight (a road team's own road record, not its overall record), and specifically in tonight's
+own time-of-day slot. Same "count real games, not calendar days" convention as the original
+function, with the calendar-day search window widened proportionally for filtered queries (a
+home/away split alone roughly halves the real pool of qualifying games; a day/night split cuts
+it further, since day games are a real minority of any team's schedule). 10 new tests.
+
+### Option A, Phase 1 — a real Pythagorean/Log5 win-probability estimator (2026-07-23)
+The bigger, harder question Shawn kept returning to: a real win-PROBABILITY model, not just an
+honest signal count. Scoped as two real methods with very different cost: a full inning-by-inning
+simulation (Method 1, the "true" version), or Bill James' own real, decades-old Pythagorean
+expectation + Log5 formulas layered on data Game Watch already computes (Method 2, far cheaper).
+Built Method 2 first, explicitly labeled EXPERIMENTAL and visually separated from the honest-
+count signals — a probability number reads as validated even when explicitly labeled otherwise,
+so the UI treats it as a fundamentally different, higher-stakes kind of claim, not just another
+row in the same table.
+
+`projections.pythagorean_win_pct`, `log5_win_probability`, `blended_pitching_run_rate`,
+`game_win_probability` — every constant (the 1.83 Pythagorean exponent, the 5.5/9 starter-innings
+share) is a real, visible, named module constant, not buried, and explicitly flagged as an
+UNVALIDATED borrowed value, not derived from this platform's own data. 14 new tests, hand-
+verified against directly-computed reference values — including a regression guard for the exact
+class of bug this design is prone to (a team's own pitching quality must affect its OWN runs
+allowed, never accidentally swapped with the opponent's).
+
+### Option A, Phase 2 (Method 1) — a real Monte Carlo game simulation (2026-07-23)
+The full, harder version: real innings, real baserunners, a real starter-to-bullpen handoff,
+reusing the platform's existing per-PA outcome machinery (`batter_pa_probs`,
+`project_pitcher`) rather than inventing parallel infrastructure.
+
+`projections.advance_runners` — pure, deterministic base-out state transitions, every one of the
+8 real base-state cases for a walk hand-verified against the actual MLB force-advance rule.
+`simulate_one_game` / `simulate_game_win_probability` — a full 9-inning trial (or many, tallied),
+a starter pulled at his own `project_pitcher`-derived expected outs, extra innings NOT simulated
+(reported as a real tie rate, not guessed at).
+
+**A real bug caught and fixed while building this, not a hypothetical one**: an all-home-run
+probability array can never record an out, so a naive version of the half-inning loop hangs
+forever — confirmed directly, it did hang before a `MAX_PA_PER_HALF_INNING` safety cap was added.
+A dedicated regression test proves the cap actually engages. Also caught: an early hand-derived
+"9-9" expected score for a deterministic test case was simply wrong (the leadoff batting spot
+doesn't recur exactly once per inning, since the very first half-inning uses 4 PAs, not 3,
+shifting the alignment for every inning after) — computed directly instead of trusting the hand
+derivation, locked in the correct 4-4 value.
+
+**Real data wiring**: `mlb_engine.build_game_lineups` — fetches one specific game's own two real
+9-batter lineups (reusing `build_slate`'s own per-batter enrichment, scoped to two teams instead
+of the whole day's slate), wired into Pitching Lab as a new, clearly-costed EXPERIMENTAL section
+separate from the honest-count signals on Game Watch. Real cost, stated directly in the UI: up to
+18 hitter fetches, 2 starter fetches, 1 boxscore fetch, 2 bullpen-aggregate fetches, plus the
+simulation itself — the most expensive single feature on the platform, on-demand only. Ran the
+full pipeline against realistic synthetic data before calling it done; the two methods
+(Pythagorean vs. Monte Carlo) genuinely disagreed on the same illustrative matchup (64% vs. 54%),
+and the simulation's own average runs ran a bit high versus real MLB scoring — an honest signal
+that the deterministic base-running simplification (no probabilistic runner advancement) inflates
+scoring somewhat, exactly as its own stated limitation predicted, not a surprise.
+
+
 ### Platform audit — page placement, self-grading overlap, and a full renumbering (2026-07-23)
 Shawn asked for an in-depth, top-to-bottom audit ahead of eventual release: content placement,
 redundancy, and whether the recommendation pages (Top Leans/Best Bets/Graded Picks/Suggested
@@ -4777,12 +4934,181 @@ that had hardcoded old filenames directly, caught by actually running the suite 
 assuming the regex-guard fix was the only one needed. Full-codebase grep confirmed zero remaining
 references to any old filename anywhere in `.py` files. 1015/1015 tests passing throughout.
 
-**Note on this checkpoint file itself**: this entry documents the audit/cleanup specifically: it
-does not retroactively backfill everything built between the last entry above (2026-07-21,
-911 tests) and now (1015 tests) — the min-probability filter, Bullpen Watch, Game Watch, player
-calibration, the chalk-index correlation tool, team-form signals, and the Pythagorean/Log5 and
-Monte Carlo win-probability work all happened in that gap and aren't individually logged here.
-Worth a dedicated catch-up pass if that history is wanted, separate from this audit.
+**Note on this checkpoint file itself**: this entry originally noted the pre-audit gap (min-
+probability filter through the Monte Carlo simulation) as not yet backfilled. That gap has since
+been filled in as its own dedicated pass — see the entries directly above this one, all dated
+2026-07-21 through 2026-07-23, inserted in their real chronological order rather than appended
+out of sequence.
+
+### Game Watch expanded to 8 signals: pitcher xERA and team-level platoon (2026-07-23)
+Two more real, specific items from Zvuo's original manual process, explicitly scoped as
+conditional on Shawn's own ask: build only "if it's going to improve predictability."
+
+**Pitcher xERA — researched before building, not assumed.** MLB's own glossary states xERA "is
+not necessarily predictive" on its own, and independent research found it has similar predictive
+power to FIP, not clearly better. Built anyway, but as a genuinely separate signal from FIP, not
+a replacement or a blend — FIP and xERA measure a pitcher through different mechanisms (three
+true outcomes vs. real contact quality), so when they disagree on a specific pitcher, that
+disagreement is itself real information the platform didn't have before.
+`statcast_data.refresh_pitchers`/`load_pitchers` mirror the batter-side pipeline's exact
+architecture (same `pybaseball` dependency, already proven, not a new one) — wired into
+`refresh_statcast.py` and its GitHub Action non-fatally, same posture as catcher framing. 6 new
+tests, plus a real regression caught and fixed: the new pitcher-xERA step broke an existing "a
+clean run has no warnings" test in `refresh_statcast`'s own suite; fixed properly with a
+dedicated failure-path test for the new step, not just patched around.
+
+**Team-level platoon**: `projections.team_platoon_advantage_fraction` — reuses the exact
+`Advantage` field Dinger Engine's own platoon map already computes per batter (not a new
+calculation, a new AGGREGATION of one that already existed), comparing what fraction of each real
+lineup holds the platoon edge against tonight's specific opposing starter. Requires Game Watch to
+now also fetch a full real lineup per game (`build_game_lineups`, the same function the
+simulation uses) — a genuinely new, larger real cost for this signal specifically, stated
+directly in the page's own cost warning. 5 new tests. 1028 tests passing after this entry.
+
+### Monte Carlo simulation enhancements: weather, adaptive pull, multi-reliever bullpen (2026-07-23)
+Three real enhancements to the existing simulation engine, each kept fully backward compatible
+(new parameters default to the original behavior for any existing caller).
+
+**Real weather**: wired `weather.get_game_weather` (the same function Dinger Engine's own
+game-by-game read already uses) into the simulation's per-batter probability builder, replacing
+the stated `weather_hr=1.0` placeholder from the original build.
+
+**Adaptive starter pull**: `early_pull_runs`, an optional parameter — each starter now tracks his
+own runs-allowed independently and can be pulled before his expected outs if he crosses a real,
+stated threshold in that specific trial. A real "quick hook" rule, explicitly not a claim to
+model actual manager decision-making — there's no single agreed formula for that, confirmed via
+research that even people who track bullpen usage full-time describe it as genuinely hard to
+project.
+
+**Multi-reliever bullpen (closer identification)**: researched before building — real bullpen
+roles (closer vs. setup) are fluid and not reliably derivable from season stats alone, but real
+saves totals ARE a standard, already-fetched stat. `mlb_engine.get_bullpen_closer` identifies a
+team's likely closer by real saves (most saves on the active staff, honestly returning None if
+no one has any), who then takes over the final `closer_innings` specifically once the starter is
+out. **A real bug caught and fixed while building this**: the away/home closer probability arrays
+were initially cross-wired between sides — caught by re-deriving the naming convention against
+the already-correct bullpen logic before running anything, fixed, then a dedicated regression
+test written specifically to guard against that exact mistake recurring. 14 new tests across the
+adaptive-pull and closer-phase logic. 1042 tests passing after this entry.
+
+### Best Bets: Game filter added alongside Time slot (2026-07-23)
+The same Time slot + Game filter pattern already on Graded Picks/Bullpen Watch/Game Watch, added
+to Best Bets on direct request. Required changing `load_mlb_best_bets_board`/
+`load_best_bets_generic` to return the full `meta` list instead of just its count — confirmed
+`n_games` (the old return value) was genuinely dead code, never read anywhere in the file, before
+making the change. No new tests needed (pure UI wiring reusing already-tested filter logic); full
+suite re-verified unchanged at 1042.
+
+### Pitcher Consistency Index — steady vs. streaky, start to start (2026-07-23)
+From a real, specific Discord exchange: someone manually eyeballing a screenshot of a starter's
+last several games looking for a pattern ("he can either go out there giving it up or go out
+there and have a shit outta game"), and a real, sharp pushback from someone else in the same
+conversation: "next team he faces still has to meet the criteria... probably a random occurrence
+[not a real pattern]." Built to give a real number for that question instead of a screenshot.
+
+`projections.pitcher_consistency_index` — for a pitcher's real last N starts
+(`mlb_engine.get_pitcher_starts_this_season`, already existed, reused directly), computes each
+start's own per-9 rate for Hits/K/ER, then the coefficient of variation across starts (CV rather
+than raw stdev specifically because it's scale-free across stats with different natural means).
+Explicitly, directly NOT opponent-adjusted — states its own real limitation prominently: it
+cannot separate genuine streakiness from just having faced a tough lineup in a bad start and a
+weak one in a good start, which is exactly the distinction the original conversation raised. Added
+to Pitching Lab. 6 new tests, plus a real validation: ran it against a synthetic streaky pitcher
+before shipping, and it came back exactly matching the real trader's own intuition — strikeouts
+"Consistent," hits and ERA "Streaky" for the same pitcher, the same pattern that led someone to
+say "might just take his strikeouts instead." 1048 tests passing after this entry.
+
+### Moneyline bet logging on Game Watch (2026-07-23)
+Reuses the existing shared `quick_log` widget rather than building a parallel logging system —
+a moneyline play is built as a team-level "play" dict (`Player=None`, `Market="Moneyline"`) using
+`projections.prob_to_american` (the same function that already computes every other "Fair" price
+shown elsewhere) to convert the experimental win-probability estimate into fair odds. Required
+one real fix to the shared widget: its label formatting assumed every play had a player, so
+`quick_log.format_play_label` was pulled out to a module-level, testable function and taught to
+handle a missing player cleanly, which benefits any future team-level bet type, not just
+moneylines. 8 new tests (4 for the label fix, 1 end-to-end mapping test, plus confirming
+`bet_log_fields_from_play` handles the full moneyline shape correctly). Confirmed Bet Log's own
+display doesn't choke on a blank player field before calling this done. 1053 tests passing after
+this entry.
+
+### Matchup Lab: lineup leaderboard vs. a pitcher's arsenal (2026-07-23)
+From a second, detailed Discord exchange doing exactly this manually, screenshot by screenshot:
+"Can you do the one filtered by most used pitch? And tell me who has the highest EV." Matchup Lab
+already had every real number this needed (`build_pitcher_arsenal`'s own usage-sorted rows,
+`load_hitter_types`' per-batter per-specific-pitch data) — it just only ever offered a
+one-hitter-at-a-time lookup, never a ranked view across a real lineup.
+
+`matchup_data.build_lineup_vs_pitch_leaderboard` — ranks a real opposing lineup by exit velocity
+against one specific pitch type (defaulting to the pitcher's own most-used, selectable to any
+other pitch in his real arsenal), omitting any batter without a real sample against that exact
+pitch rather than showing a misleadingly precise number from a handful of pitches — the same
+"limited on PAs" caution from the real conversation this came from. 6 new tests.
+
+**A real, second bug caught here, more serious than the first**: while adding these tests, an
+edit accidentally deleted the `if __name__ == "__main__":` line from `test_matchup_data.py`
+itself, which silently made the file's own bottom test-runner loop part of the LAST test
+function's body — every time that one test ran, it re-ran the entire 33-test suite again,
+including itself, infinite recursion. Didn't crash outright; manifested as the suite quietly
+taking over four minutes instead of one second, which is what actually surfaced it. Traced
+methodically rather than guessed at: isolated the one hanging test, reproduced the exact same
+call directly in plain Python outside pytest to rule out the real function first, then found the
+missing line by direct inspection once the function itself was cleared. Fixed, reverified with a
+hard timeout. 1059 tests passing after this entry — the count as of this checkpoint update.
+
+### Live pitch count on Pitching Lab, with real opt-in auto-refresh (2026-07-23)
+The last item from the "anything remaining" review: a real, repeated pattern (Ojay and Deezy
+manually tracking a starter's live pitch count mid-game to gauge whether he's cruising or getting
+hit hard), previously deferred as needing its own scoping conversation. Turned out more tractable
+than first implied — `get_actual_starter` (built for starter confirmation) already fetches a
+live, in-progress boxscore and reads a real-time pitching stat dict; `numberOfPitches`, `hits`,
+`earnedRuns` were just unread fields on a call the platform already makes.
+
+`mlb_engine.get_live_pitching_line` — one live boxscore fetch, returns the confirmed actual
+starter's pitch count, IP, and today's H/ER/K/BB, all from the same real dict shape
+`_parse_boxscore_results` already trusts for completed-game grading. Deliberately RAW NUMBERS
+ONLY — no attempt to predict "innings left" or "pull probability," which would be a claim about
+a live, in-progress managerial decision, harder to validate than anything else already
+experimental on this platform. 6 new tests.
+
+Added to Pitching Lab as a new "📟 Live pitch count" section right after Starter Check, with a
+manual refresh button as the baseline (works with zero new dependencies) and a real opt-in
+auto-refresh checkbox using `streamlit-autorefresh` (confirmed real and installs cleanly before
+pinning — a small, single-purpose frontend-timer component, not a blocking loop). Imported
+defensively (try/except ImportError) so a deploy missing the package still gets manual refresh,
+just not the checkbox. Real, stated cost directly in the UI: auto-refresh means a fresh live
+fetch for both teams roughly every 10 seconds while enabled, not free, and the interval itself is
+a rough estimate per the component's own documented caveat, not an exact timer. 1065 tests
+passing after this entry.
+
+### Production crash fixed: fetch_json's own contract wasn't actually being honored (2026-07-23)
+The first real bug this platform hit in actual production, not caught in this sandbox first.
+Shawn hit an `AttributeError` on Pitching Lab's new Live pitch count section, checking the
+Washington Nationals — the traceback pointed straight at `get_live_pitching_line`.
+
+Root cause, traced to the actual source rather than patched where it surfaced:
+`fetch_json`'s own docstring already promised "{} on failure, never raises" — but that promise
+only covered NETWORK failures (a timeout, a non-200 status). A technically-successful response
+(status 200) whose BODY happened to be non-dict JSON — a literal `null`, plausible for a
+postponed/suspended game's own live boxscore endpoint with no data prepared yet — passed straight
+through as `r.json()`'s own raw value. Every one of `fetch_json`'s 21 call sites across this file
+calls `.get(...)` on the result assuming a real dict; a single non-dict response anywhere would
+crash exactly this way.
+
+Fixed at the root, not just in the one caller that happened to surface it first: `fetch_json` now
+validates the parsed body is actually a dict before returning it, falling back to the same honest
+`{}` every other real failure mode already returns. Confirmed all 21 existing call sites already
+assumed dict semantics before making the change, so nothing else could have depended on the old,
+broken behavior. This also silently fixes the identical latent risk in `get_actual_starter` (the
+starter-confirmation feature), which shared the exact same vulnerable pattern and simply hadn't
+been exercised by this specific failure mode yet.
+
+`fetch_json` had ZERO direct unit tests before this — every caller was tested by monkeypatching
+`fetch_json` itself, bypassing the real HTTP layer entirely, which is exactly why this class of
+bug had no test surface to catch it. 6 new tests added for `fetch_json` directly, including one
+that reproduces the exact real bug (a 200-status response with a JSON `null` body) and a
+retry-count test. Reproduced the original crash scenario one more time end-to-end after the fix,
+confirming both `get_live_pitching_line` and `get_actual_starter` now return a clean `None`
+instead of crashing. 1071 tests passing after this entry.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher

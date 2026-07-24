@@ -52,12 +52,32 @@ def strip_accents(text: str) -> str:
  
  
 def fetch_json(url: str, params: Optional[Dict] = None, retries: int = 2) -> Dict[str, Any]:
-    """GET JSON with a couple of retries. Returns {} on failure (never raises)."""
+    """GET JSON with a couple of retries. Returns {} on failure -- never raises, AND never
+    returns anything but a real dict, even on a technical "success."
+
+    A REAL BUG CAUGHT IN PRODUCTION, FIXED HERE AT THE ROOT: a 200-status response whose BODY
+    happens to be non-dict JSON (a literal `null`, an empty list, a bare number) used to pass
+    straight through as `r.json()`'s own raw return value -- this function's own docstring
+    already promised "{} on failure," but that promise only covered NETWORK failures (a timeout,
+    a non-200 status), not a technically-successful response with a genuinely unexpected body
+    shape. Every one of this function's dozens of callers across this codebase calls `.get(...)`
+    on the result assuming it's always a real dict -- a single non-dict response anywhere would
+    crash with an AttributeError ('NoneType' object has no attribute 'get'), exactly what
+    happened: Pitching Lab's live pitch-count check hit a real game (a postponed/suspended one,
+    a plausible real cause) where the live boxscore endpoint's own body was JSON null instead of
+    an empty structure. Fixed at the source, not just in the one caller that happened to surface
+    it first -- every other function relying on this file's own "never raises, always a dict"
+    contract is protected by the same fix, not just the new one."""
     for attempt in range(retries + 1):
         try:
             r = _SESSION.get(url, params=params or {}, timeout=TIMEOUT)
             if r.status_code == 200:
-                return r.json()
+                body = r.json()
+                if isinstance(body, dict):
+                    return body
+                return {}   # a technically-successful response with a non-dict body is still
+                           # treated as "no usable data," the same honest {} every other real
+                           # failure mode in this function already returns
         except requests.RequestException:
             pass
     return {}
@@ -365,6 +385,62 @@ def get_actual_starter(game_pk: int, side: str) -> Optional[Dict[str, Any]]:
         if gs and int(gs) >= 1:
             person = pdata.get("person", {}) or {}
             return {"player_id": person.get("id"), "name": person.get("fullName")}
+    return None
+
+
+def get_live_pitching_line(game_pk: int, side: str) -> Optional[Dict[str, Any]]:
+    """One live boxscore fetch, returns the ACTUAL current starter's own real-time line: pitch
+    count, innings pitched so far, and today's actual hits/earned runs/strikeouts/walks allowed
+    IN THIS START specifically. Added directly on request, after a real, repeated pattern: real
+    traders manually tracking a starter's live pitch count mid-game to gauge how much longer
+    he'll last and whether he's cruising or getting hit hard ("He's at 68 pitches but best part
+    he has just 1 hit no runs... he can def get 6").
+
+    Combines what get_actual_starter above already does (confirm WHO's pitching, via the exact
+    same real gamesStarted>=1 signal) with reading the REST of that same already-open pitching
+    stat dict, rather than a second separate boxscore fetch for what's fundamentally one real
+    question asked together: "who's pitching, and how's it going." Every field read here
+    (numberOfPitches, hits, earnedRuns, strikeOuts, baseOnBalls, inningsPitched) is a real,
+    standard MLB Stats API pitching-stat field; strikeOuts/baseOnBalls/inningsPitched are already
+    relied on elsewhere in this file for completed-game grading (_parse_boxscore_results) —
+    numberOfPitches/hits/earnedRuns are new reads from this same dict, not a new endpoint or a
+    new assumption about its shape.
+
+    RAW NUMBERS ONLY, DELIBERATELY NOT A PREDICTION: this does not estimate "innings left" or
+    "pull probability" — that would be a claim about a live, in-progress managerial decision,
+    genuinely harder to validate than anything else already flagged as experimental on this
+    platform. Shows the same real facts a trader would read by eye, nothing inferred on top.
+
+    HONEST LIMITATION, same posture as get_actual_starter above: numberOfPitches specifically on
+    an IN-PROGRESS boxscore is not verified against a live response from this sandbox (statsapi.
+    mlb.com unreachable here) — a real, standard, well-documented field, but worth a real, early
+    check once redeployed, same as every other boxscore-shape assumption in this file.
+
+    Returns {"player_id", "name", "pitches", "innings_pitched", "hits", "earned_runs",
+    "strikeouts", "walks"} for whoever's boxscore entry shows gamesStarted >= 1 on `side`
+    ("home"/"away"), or None — most commonly because the game hasn't started yet. An honest None,
+    not a fabricated zero line."""
+    try:
+        box = fetch_json(f"{BASE}/game/{game_pk}/boxscore")
+    except Exception:
+        return None
+    players = (((box.get("teams", {}) or {}).get(side, {}) or {}).get("players", {}) or {})
+    for pdata in players.values():
+        pit = (pdata.get("stats", {}) or {}).get("pitching", {}) or {}
+        if not pit:
+            continue
+        gs = pit.get("gamesStarted")
+        if gs and int(gs) >= 1:
+            person = pdata.get("person", {}) or {}
+            return {
+                "player_id": person.get("id"), "name": person.get("fullName"),
+                "pitches": int(pit.get("numberOfPitches", 0) or 0),
+                "innings_pitched": pit.get("inningsPitched", "0.0"),
+                "hits": int(pit.get("hits", 0) or 0),
+                "earned_runs": int(pit.get("earnedRuns", 0) or 0),
+                "strikeouts": int(pit.get("strikeOuts", 0) or 0),
+                "walks": int(pit.get("baseOnBalls", 0) or 0),
+            }
     return None
 
 
