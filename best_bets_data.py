@@ -53,10 +53,9 @@ def get_odds_api_key() -> Optional[str]:
 def render_book_selector(key_prefix: str = "book",
                          available_books: Optional[List[str]] = None,
                          date_str: Optional[str] = None) -> str:
-    """Render the shared sportsbook selector. Returns the selected Odds API book key.
-
-    Placed at the TOP of sidebar content so the dropdown opens downward with room to show
-    all options without being clipped by the viewport bottom edge."""
+    """Render the sportsbook selector inline on the main page (not the sidebar).
+    Sidebar placement caused the dropdown to be clipped by the viewport bottom edge.
+    Returns the selected Odds API book key."""
     if not get_odds_api_key():
         return O.DEFAULT_BOOK
 
@@ -70,21 +69,16 @@ def render_book_selector(key_prefix: str = "book",
     book_labels = [O.US_BOOKS.get(k, k) for k in books_to_show]
     default_idx = books_to_show.index(O.DEFAULT_BOOK) if O.DEFAULT_BOOK in books_to_show else 0
 
-    # Inject at the very top of the sidebar using a container so it appears above
-    # the navigation items and doesn't get pushed to the bottom where the dropdown
-    # flyout is clipped by the viewport edge.
-    sidebar_top = st.sidebar.container()
-    with sidebar_top:
-        selected_label = st.selectbox(
-            "📖 Sportsbook",
-            book_labels,
-            index=default_idx,
-            key=f"{key_prefix}_book_selector",
-            help=f"Lines and odds will use this book's specific line where it has coverage. "
-                f"{len(books_to_show)} book(s) available for tonight's slate. "
-                "Falls back to the lowest available line across all books when your selected "
-                "book doesn't have a line for a specific player."
-        )
+    selected_label = st.selectbox(
+        "📖 Sportsbook",
+        book_labels,
+        index=default_idx,
+        key=f"{key_prefix}_book_selector",
+        help=f"Lines and model probabilities will use this book's specific line where available. "
+            f"{len(books_to_show)} book(s) active on tonight's slate. "
+            "Falls back to the lowest available line across all books when your selected "
+            "book doesn't have coverage for a specific player."
+    )
     return books_to_show[book_labels.index(selected_label)]
 
 
