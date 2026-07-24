@@ -33,7 +33,7 @@ def test_module_imports_mlb_modules_directly_not_via_sport_dispatch():
 
 def test_load_mlb_best_bets_board_signature():
     sig = inspect.signature(BBD.load_mlb_best_bets_board)
-    assert list(sig.parameters.keys()) == ["date_str", "fip_constant"]
+    assert list(sig.parameters.keys()) == ["date_str", "fip_constant", "preferred_book"]
 
 
 def _fake_row_and_meta():

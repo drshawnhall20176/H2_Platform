@@ -147,19 +147,62 @@ def test_market_lines_for_slate_matches_the_exact_real_reported_case():
     print("✓ market_lines_for_slate correctly resolves the exact real Sugano case that surfaced this whole gap")
 
 
-def test_market_lines_for_slate_picks_most_booked_point_per_player_independently():
+def test_market_lines_for_slate_uses_minimum_line_when_books_disagree():
+    # THE REAL PRODUCTION BUG THIS FIX EXISTS FOR: DraftKings posted 0.5 for Ezequiel Tovar's
+    # H+R+RBI while other books posted 1.5. The old "most-booked wins" logic picked 1.5 --
+    # the model then computed "Over 1.5" probability for a bet that was actually available at
+    # "Over 0.5" on DraftKings. A bettor CAN get 0.5; that's the real line that matters.
+    offers = [
+        {"market": "batter_hits_runs_rbis", "player": "Ezequiel Tovar", "point": 1.5,
+         "over": {"fanduel": -130, "betmgm": -140}, "under": {"fanduel": 110, "betmgm": 118}},
+        {"market": "batter_hits_runs_rbis", "player": "Ezequiel Tovar", "point": 0.5,
+         "over": {"draftkings": -115}, "under": {"draftkings": -115}},
+    ]
+    lines = O.market_lines_for_slate(offers)
+    assert lines[(P.normalize_name("Ezequiel Tovar"), "batter_hits_runs_rbis")] == 0.5
+    print("✓ market_lines_for_slate correctly resolves the exact real Tovar case: DK's 0.5 wins over other books' 1.5 because the minimum is the real available bet")
+
+
+def test_market_lines_for_slate_minimum_line_independent_per_player():
+    # Two players in the same market with different line situations -- each player's own
+    # minimum is resolved independently, not cross-contaminated between players.
     offers = [
         {"market": "batter_hits", "player": "Player A", "point": 1.5,
-         "over": {"fd": -150, "dk": -140}, "under": {"fd": 120}},   # 3 total quotes
+         "over": {"fd": -150, "dk": -140}, "under": {"fd": 120}},
         {"market": "batter_hits", "player": "Player A", "point": 2.5,
-         "over": {"mgm": 250}, "under": {}},                        # 1 total quote
+         "over": {"mgm": 250}, "under": {}},
         {"market": "batter_hits", "player": "Player B", "point": 0.5,
          "over": {"fd": -200}, "under": {"fd": 150}},
     ]
     lines = O.market_lines_for_slate(offers)
-    assert lines[(P.normalize_name("Player A"), "batter_hits")] == 1.5   # consensus for A
-    assert lines[(P.normalize_name("Player B"), "batter_hits")] == 0.5   # B unaffected by A's own tie-break
-    print("✓ market_lines_for_slate resolves each player's own consensus line independently, not cross-contaminated between players")
+    assert lines[(P.normalize_name("Player A"), "batter_hits")] == 1.5   # min of 1.5 and 2.5
+    assert lines[(P.normalize_name("Player B"), "batter_hits")] == 0.5   # B unaffected
+    print("✓ market_lines_for_slate resolves each player's own minimum line independently")
+
+
+def test_market_lines_for_slate_preferred_book_overrides_minimum():
+    # A user who selects FanDuel as their book should get FanDuel's line (1.5), not DK's
+    # lower line (0.5) -- they're not betting at DraftKings.
+    offers = [
+        {"market": "batter_hits_runs_rbis", "player": "Ezequiel Tovar", "point": 1.5,
+         "over": {"fanduel": -130}, "under": {"fanduel": 110}},
+        {"market": "batter_hits_runs_rbis", "player": "Ezequiel Tovar", "point": 0.5,
+         "over": {"draftkings": -115}, "under": {"draftkings": -115}},
+    ]
+    key = (P.normalize_name("Ezequiel Tovar"), "batter_hits_runs_rbis")
+    assert O.market_lines_for_slate(offers, preferred_book="fanduel")[key] == 1.5
+    assert O.market_lines_for_slate(offers, preferred_book="draftkings")[key] == 0.5
+    print("✓ market_lines_for_slate uses the preferred book's specific line — a FanDuel user gets 1.5, a DK user gets 0.5, for the same player")
+
+
+def test_market_lines_for_slate_falls_back_to_minimum_when_preferred_book_has_no_coverage():
+    offers = [
+        {"market": "batter_hits_runs_rbis", "player": "Rare Player", "point": 1.5,
+         "over": {"fanduel": -130}, "under": {"fanduel": 110}},
+    ]
+    lines = O.market_lines_for_slate(offers, preferred_book="draftkings")
+    assert lines[(P.normalize_name("Rare Player"), "batter_hits_runs_rbis")] == 1.5
+    print("✓ market_lines_for_slate falls back to minimum-across-all-books when the preferred book has no coverage for a specific player")
 
 
 def test_market_lines_for_slate_different_players_same_market_dont_collide():

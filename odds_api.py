@@ -236,32 +236,53 @@ def market_lines_for_player(offers: List[Dict], player_name: str, projections_mo
     return {mkey: point for mkey, (point, _cnt) in best.items()}
 
 
-def market_lines_for_slate(offers: List[Dict], projections_module=None) -> Dict[Tuple[str, str], float]:
+# Real US sportsbook keys as returned by The Odds API (Pro tier), with their display names.
+# Confirmed directly against the-odds-api.com's own Bookmaker APIs documentation.
+# DraftKings is default because that's the primary book for this platform's own users.
+US_BOOKS: Dict[str, str] = {
+    "draftkings": "DraftKings",
+    "fanduel": "FanDuel",
+    "betmgm": "BetMGM",
+    "caesars": "Caesars",
+    "betrivers": "BetRivers",
+    "fanatics": "Fanatics",
+    "bovada": "Bovada",
+}
+DEFAULT_BOOK = "draftkings"
+
+
+def market_lines_for_slate(offers: List[Dict], projections_module=None,
+                           preferred_book: Optional[str] = None) -> Dict[Tuple[str, str], float]:
     """{(normalized_player_name, market_key): point} for EVERY player in one pass over `offers`
     -- the real, efficient building block behind wiring live sportsbook lines into this
     platform's own CORE prop-generation pipeline (enrich_hitter_rows/build_pitcher_projection_
     rows), not just Edge Board's own display lookup.
 
-    A GENUINELY SEPARATE FUNCTION FROM market_lines_for_player, not a trivial wrapper around
-    calling it once per player: that function does a full scan of `offers` PER CALL, which is
-    fine for Matchup Lab's own "one player's own line" lookup, but would mean re-scanning the
-    same, possibly large, whole-slate offers list once per player (potentially 200+ times for a
-    full slate) if used to build a lookup for every player at once. This does the identical real
-    tie-break logic (the point backed by the MOST total book quotes wins) in a single pass
-    instead.
+    RESOLUTION STRATEGY: prefers the specific book in `preferred_book` (e.g. "draftkings") when
+    that book has a line for a given player/market. Falls back to the MINIMUM real line across
+    all books when the preferred book doesn't have coverage. This is the right design for a
+    per-user sportsbook selector: a user who selects DraftKings gets DK's exact line everywhere
+    DK has coverage, and minimum-across-all-books (the most favorable available line) where DK
+    doesn't -- never a silent miss that leaves a player on the wrong line.
+
+    WHY MINIMUM AS FALLBACK (not consensus): a real, specific production bug confirmed this.
+    The original "most-booked point wins" logic picked 1.5 for Ezequiel Tovar's H+R+RBI when
+    DraftKings had him at 0.5 and other books had him at 1.5. A bettor CAN actually bet the 0.5
+    line at DraftKings -- the minimum is always the most favorable available line, and therefore
+    the one the platform should compute against when no preferred book is set.
+
+    preferred_book: an Odds API book key (e.g. "draftkings", "fanduel") -- see US_BOOKS for the
+    full real list. None means minimum-across-all-books for every player/market.
 
     Same real matching convention as market_lines_for_player and compute_edges: keyed by
-    normalize_name (sport-specific, handles accents/spelling so a book's own name formatting
-    doesn't cause a miss), not the raw book-supplied name string.
-
-    A player/market combo with no real book offer at all is simply absent from the returned
-    dict -- the caller's own responsibility to fall back to this platform's own DEFAULT_LINES
-    placeholder when a real line isn't available, an honest gap rather than a guess."""
+    normalize_name. A player/market combo with no real book offer is absent from the result."""
     if projections_module is None:
         import projections as projections_module
     P = projections_module
 
-    best: Dict[Tuple[str, str], Tuple[float, int]] = {}
+    preferred: Dict[Tuple[str, str], float] = {}   # entries where preferred_book has coverage
+    fallback: Dict[Tuple[str, str], float] = {}    # minimum across all books (fallback)
+
     for off in offers:
         name = P.normalize_name(off.get("player", ""))
         mkey = off.get("market")
@@ -272,11 +293,26 @@ def market_lines_for_slate(offers: List[Dict], projections_module=None) -> Dict[
         if book_count == 0:
             continue
         key = (name, mkey)
-        cur = best.get(key)
-        if cur is None or book_count > cur[1]:
-            best[key] = (point, book_count)
+        point = float(point)
 
-    return {key: point for key, (point, _cnt) in best.items()}
+        # Preferred book: use this exact line if the preferred book posted it
+        if preferred_book:
+            over_books = off.get("over") or {}
+            under_books = off.get("under") or {}
+            if preferred_book in over_books or preferred_book in under_books:
+                cur = preferred.get(key)
+                if cur is None or point < cur:   # still take the minimum if same book posts multiple
+                    preferred[key] = point
+
+        # Minimum fallback: always track the lowest real line across all books
+        cur = fallback.get(key)
+        if cur is None or point < cur:
+            fallback[key] = point
+
+    # Merge: preferred book's line where available, minimum everywhere else
+    result = dict(fallback)
+    result.update(preferred)
+    return result
 
 
 def compute_edges(index: Dict, offers: List[Dict],
