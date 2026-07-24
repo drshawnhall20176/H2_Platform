@@ -122,6 +122,20 @@ with f5:
                                  "different raw probabilities, since Conviction is relative to "
                                  "each market's own typical reference rate.")
 
+# A REAL BUG FIX, caught directly in production: clearing the Markets multiselect down to zero
+# selections used to raise a raw KeyError, not a friendly message. Root cause: pd.DataFrame([])
+# on an empty `view` produces a DataFrame with ZERO COLUMNS (nothing to infer them from), and the
+# very next line selects specific columns out of it -- a KeyError, since none of those columns
+# exist on a columnless frame. A "no plays match" info message already existed further down the
+# page, but only right before the Diagnostic Inspector section, well AFTER the crash-prone
+# DataFrame code -- it could never actually be reached in this exact scenario. Fixed by checking
+# BEFORE building the board, with a specific, more directly actionable message for the single
+# most common real cause (zero markets selected) separate from the general "adjust your filters"
+# case.
+if not mkt_pick:
+    st.info("Select at least one market above to see plays.")
+    st.stop()
+
 view = [p for p in slot_plays if p["Market"] in mkt_pick and p["Conviction"] >= min_conv]
 view = grading.filter_min_probability(view, min_prob_pct / 100.0)
 # A REAL, CONFIRMED FIX, not the original design -- re-sorted here by ModelProb (real
@@ -133,6 +147,11 @@ view = grading.filter_min_probability(view, min_prob_pct / 100.0)
 # play is even eligible -- this reorders WITHIN that already-graded set, it doesn't remove the
 # floor.
 view.sort(key=lambda p: p["ModelProb"], reverse=True)
+
+if not view:
+    st.info("No plays match the current filters — adjust the time slot, game, markets, min "
+           "conviction, or min probability.")
+    st.stop()
 
 # --- the board -------------------------------------------------------------
 for p in view:
@@ -164,10 +183,9 @@ if any(p.get("_bullpen_blended") for p in view):
 st.markdown("---")
 st.subheader("🔍 Inspect Bet Diagnostics")
 
-if not view:
-    st.info("No plays match the current filters — adjust the time slot, game, markets, min "
-           "conviction, or min probability.")
-    st.stop()
+# No "if not view" check needed here -- the earlier checks (zero markets selected, or zero plays
+# matching the rest of the filters) already st.stop() the whole page before this point, so `view`
+# is guaranteed non-empty by the time execution reaches here.
 
 # Searchable picker: the box is type-to-search, so just start typing a player's name to jump to
 # them — no scrolling. Plays are already ordered by ModelProb, so the most likely leans are on top.
