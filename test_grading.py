@@ -478,6 +478,70 @@ def test_organize_graded_picks_game_order_uses_rank_value():
     print("✓ organize_graded_picks correctly orders GAMES by rank_value too, not just plays within one player")
 
 
+# ----------------------------------------------------------------- top_picks_by_grade
+def _pick_prob(player, game, conviction, model_prob, market="Batter HR"):
+    p = _pick(player, "T1", game, conviction, market=market)
+    p["ModelProb"] = model_prob
+    return p
+
+
+def test_top_picks_by_grade_excludes_d_by_default():
+    plays = [
+        _pick_prob("A Grade Player", "G1", 3.5, 0.40),   # A
+        _pick_prob("D Grade Player", "G1", 1.3, 0.90),   # D -- high ModelProb, but still D
+    ]
+    organized = grading.organize_graded_picks(plays)
+    summary = grading.top_picks_by_grade(organized)
+    letters = {entry["letter"] for entry in summary}
+    assert letters == {"A"}   # D excluded by the real, stated default, even with a high ModelProb
+    print("✓ top_picks_by_grade excludes D by default, even when a D pick has a higher raw ModelProb than the A picks shown")
+
+
+def test_top_picks_by_grade_includes_d_when_explicitly_requested():
+    plays = [_pick_prob("D Grade Player", "G1", 1.3, 0.60)]
+    organized = grading.organize_graded_picks(plays)
+    summary = grading.top_picks_by_grade(organized, letters=("A", "B", "C", "D"))
+    assert {entry["letter"] for entry in summary} == {"D"}
+    print("✓ top_picks_by_grade includes D when the caller explicitly passes it in letters — a real, visible opt-in, not a hidden rule")
+
+
+def test_top_picks_by_grade_sorted_by_model_prob_not_conviction():
+    # Two real A-grade plays -- the one with the LOWER conviction but HIGHER ModelProb must sort
+    # first within its own grade bucket, the same real fix already made to Best Bets/Top Leans.
+    plays = [
+        _pick_prob("Higher Conviction", "G1", 5.0, 0.30),
+        _pick_prob("Higher Prob", "G1", 3.1, 0.55),
+    ]
+    organized = grading.organize_graded_picks(plays)
+    summary = grading.top_picks_by_grade(organized)
+    a_bucket = next(e for e in summary if e["letter"] == "A")
+    assert a_bucket["picks"][0]["Player"] == "Higher Prob"
+    assert a_bucket["picks"][1]["Player"] == "Higher Conviction"
+    print("✓ top_picks_by_grade sorts within each grade by real ModelProb, not Conviction")
+
+
+def test_top_picks_by_grade_respects_top_n():
+    plays = [_pick_prob(f"Player {i}", "G1", 3.5, 0.5 - i * 0.01) for i in range(8)]
+    organized = grading.organize_graded_picks(plays)
+    summary = grading.top_picks_by_grade(organized, top_n=3)
+    a_bucket = next(e for e in summary if e["letter"] == "A")
+    assert len(a_bucket["picks"]) == 3
+    assert a_bucket["picks"][0]["Player"] == "Player 0"   # highest ModelProb (0.50) kept
+    print("✓ top_picks_by_grade correctly caps each grade bucket at top_n, keeping the highest-ModelProb picks")
+
+
+def test_top_picks_by_grade_omits_letters_with_no_real_plays():
+    plays = [_pick_prob("Only A Player", "G1", 3.5, 0.40)]   # only an A play exists
+    organized = grading.organize_graded_picks(plays)
+    summary = grading.top_picks_by_grade(organized, letters=("A", "B", "C"))
+    assert len(summary) == 1 and summary[0]["letter"] == "A"
+    print("✓ top_picks_by_grade omits a letter entirely when no real play earned that grade, rather than an empty section")
+
+
+def test_top_picks_by_grade_empty_organized_input():
+    assert grading.top_picks_by_grade([]) == []
+
+
 def test_organize_graded_picks_works_for_non_mlb_shaped_plays():
     # Regression guard for the REAL confirmed bug this module was created to fix: Graded Picks
     # used to call P.organize_graded_picks(plays) where P is whichever sport's own projections

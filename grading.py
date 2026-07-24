@@ -334,6 +334,53 @@ def organize_graded_picks(plays: List[Dict]) -> List[Dict[str, Any]]:
     return out
 
 
+def top_picks_by_grade(organized: List[Dict[str, Any]], letters=("A", "B", "C"),
+                       top_n: int = 5) -> List[Dict[str, Any]]:
+    """A curated "look here first" summary, added directly on request for Graded Picks --
+    flattens organize_graded_picks' own nested game/player/plays output back into a single list
+    (every play there already carries its own real "_grade" from that same function, no
+    re-grading here), then returns the top `top_n` per letter grade, sorted by real ModelProb --
+    probability of actually hitting, not raw Conviction or rank_value. Same real fix already
+    made to Best Bets and Command Center's own Top Leans: Conviction is relative to a market's
+    own typical reference rate, not an absolute likelihood, and "what's actually worth a look"
+    should lead with "how likely is this," not "how much better than typical is this market's
+    own reference rate."
+
+    NOT a replacement for the game-by-game board this same function's caller already builds --
+    this is a curated SUMMARY sitting above it, not instead of it; the full board underneath
+    still shows every game and every grade exactly as it always has. See organize_graded_picks'
+    own docstring for why a flat ranked list was deliberately avoided as the page's ONLY view in
+    the first place -- that reasoning doesn't disappear just because a summary now also exists.
+
+    letters: which grades to include, and in what order -- defaults to A/B/C, deliberately
+    excluding D. D is this platform's own explicit "still worth a look, proceed with real
+    caution" floor (the lowest grade conviction_to_grade's own threshold allows at all) -- a
+    curated "look here first" summary featuring D picks with the same visual weight as A's and
+    B's would undercut the entire reason the letter grade exists. A REAL, VISIBLE, ADJUSTABLE
+    floor, not a hardcoded rule baked into this function -- a caller can pass letters=("A", "B",
+    "C", "D") to include D too, exposed as a real, visible UI control, not a silent default a
+    person can't see or change.
+
+    Returns a list of {"letter": str, "picks": [play, ...]}, one entry per letter in `letters`
+    that has at least one real graded play -- a letter with zero plays right now is simply
+    absent from the output, not included as a misleading empty section."""
+    flat: List[Dict[str, Any]] = [pl for entry in organized for player_entry in entry["players"]
+                                  for pl in player_entry["plays"]]
+
+    by_letter: Dict[str, List[Dict[str, Any]]] = {}
+    for pl in flat:
+        by_letter.setdefault(pl["_grade"]["letter"], []).append(pl)
+
+    out = []
+    for letter in letters:
+        picks = by_letter.get(letter, [])
+        if not picks:
+            continue
+        picks_sorted = sorted(picks, key=lambda p: p.get("ModelProb", 0.0), reverse=True)
+        out.append({"letter": letter, "picks": picks_sorted[:top_n]})
+    return out
+
+
 def grade_accuracy_by_letter(graded_plays: List[Dict]) -> List[Dict]:
     """Takes ALREADY-GRADED plays (each carrying "Hit": True/False/None and "Conviction" -- e.g.
     retro.grade_slate's own output) and breaks down REAL hit rate by letter grade

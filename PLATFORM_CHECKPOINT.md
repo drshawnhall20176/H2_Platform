@@ -4,9 +4,9 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 1092/1092 tests green as of 2026-07-24; the
+## What's in this checkpoint (all tested — 1098/1098 tests green as of 2026-07-24; the
 ## 2026-07-21-through-2026-07-24 entries near the end, from "Discord community analysis"
-## through automated Bet Log settlement, are now fully logged in their real chronological
+## through the Graded Picks slate summary, are now fully logged in their real chronological
 ## order — no gap remains between the 911-test mark below and the current count)
 
 ### Stage 1 — the sport-selector foundation
@@ -5179,6 +5179,44 @@ cost-guard tests — boxscore fetched once per game not per bet, schedule fetche
 per bet — and the DNP-void case, the trickiest correctness concern). Ran one more integrated,
 realistic mixed-batch check by hand before calling this done: a real HR prop, a real moneyline,
 and a still-in-progress game in the same batch, all three resolved exactly as expected. 1092
+tests passing after this entry.
+
+### Graded Picks: a curated slate summary, sitting above the full board, not replacing it (2026-07-24)
+A real feature request with a real tension worth naming before building anything: Graded Picks'
+own tagline is "not a flat top-10 that hides the rest of the board" — that was a deliberate
+design choice (see organize_graded_picks' own docstring), so a literal top-N replacement would
+have quietly undone the reason this page exists as a separate thing from Best Bets. Resolved by
+addition, not replacement: a new "Slate summary" section renders ABOVE the existing game-by-game
+board, which is completely unchanged underneath — every game, every grade, still fully visible.
+
+`grading.top_picks_by_grade(organized, letters, top_n)` — flattens organize_graded_picks' own
+nested output back into one list (no re-grading, reuses what's already computed) and returns the
+top N per letter grade, sorted by real ModelProb, not Conviction or rank_value — probability of
+actually hitting, the same real fix already made to Best Bets and Command Center's own Top Leans.
+
+**D excluded by default, discussed and agreed on before building, not assumed:** D is this
+platform's own explicit "still worth a look, proceed with real caution" floor — a curated "look
+here first" summary giving D picks the same visual weight as A's and B's would undercut the
+entire reason the letter grade exists. Confirmed directly by checking `grade_accuracy_by_letter`'s
+own real precedent: Suggested Parlays and Model Dashboard's pie chart already use a C-or-better
+floor to mean "a real recommendation" as opposed to every candidate the model considered — this
+applies that same already-established line to a new spot, not a new, arbitrary rule. Built as a
+REAL, VISIBLE, ADJUSTABLE control on the page itself (a "Grade floor" selectbox defaulting to "C
+or better," a "Top N per grade" number input defaulting to 5) rather than a hardcoded rule buried
+in code — someone who specifically wants to check whether tonight's D's are running hot can
+loosen it themselves.
+
+Own quick-log widget for the summary's own flattened picks, separate from the per-game ones
+already on the board below — safe by construction, since quick_log's own dedup signature already
+prevents the same real bet from being logged twice even if it's selectable from both places.
+
+6 new tests, including a direct check that a D pick with a 95% ModelProb still gets excluded by
+the default floor (confirming the exclusion is a real, deliberate rule, not just "D's happen to
+have low ModelProb usually") and a cross-market-inversion-style check that within a grade, a
+lower-Conviction/higher-ModelProb play correctly sorts ABOVE a higher-Conviction/lower-ModelProb
+one. Ran one more offline sanity check with a realistic 6-play mixed-grade board before calling
+this done — the A bucket correctly re-ordered by ModelProb rather than Conviction, and the
+highest-ModelProb play on the entire board (a D at 95%) was correctly the one NOT shown. 1098
 tests passing after this entry.
 
 ## NOT YET DONE (next stages)
