@@ -55,15 +55,14 @@ def render_book_selector(key_prefix: str = "book",
                          date_str: Optional[str] = None) -> str:
     """Render the shared sportsbook selector. Returns the selected Odds API book key.
 
-    available_books: if supplied directly (e.g. from a prior load), use it. Otherwise,
-    if date_str is supplied, fetches tonight's real book coverage via fetch_available_books
-    (a separate, lightweight cached function independent of the heavy pipeline cache).
-    Falls back to the full US_BOOKS list if neither is available."""
+    Reads tonight's available books from session state (stored there as a side effect of the
+    main pipeline's already-paid-for fetch) -- no second API call, no extra quota cost.
+    Falls back to the full US_BOOKS list on first load before the pipeline has run."""
     if not get_odds_api_key():
         return O.DEFAULT_BOOK
 
     if available_books is None and date_str:
-        available_books = fetch_available_books(date_str, get_odds_api_key())
+        available_books = get_available_books_for_date(date_str)
 
     books_to_show = available_books if available_books else list(O.US_BOOKS.keys())
     if O.DEFAULT_BOOK not in books_to_show:
@@ -87,23 +86,23 @@ def render_book_selector(key_prefix: str = "book",
     return books_to_show[book_labels.index(selected_label)]
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def fetch_available_books(date_str: str, odds_api_key: Optional[str]) -> List[str]:
-    """Fetch the list of books that actually have coverage tonight -- kept SEPARATE from
-    build_mlb_board intentionally. available_books is UI state for the book selector; baking
-    it into build_mlb_board's own cached result means the selector sees a stale list whenever
-    the heavy pipeline cache is hit, even after the API response changes. A separate, lightweight
-    cache means the selector always reflects tonight's real book coverage independently of
-    whether the full pipeline result is stale. Same TTL as build_mlb_board."""
-    if not odds_api_key:
-        return list(O.US_BOOKS.keys())
-    try:
-        offers, _ = O.fetch_slate_props(date_str, odds_api_key,
-                                        list(O.SUPPORTED_MARKETS), sport=O.SPORT)
-        live = O.books_in_offers(offers)
-        return live if live else list(O.US_BOOKS.keys())
-    except Exception:
-        return list(O.US_BOOKS.keys())
+def get_available_books_for_date(date_str: str) -> List[str]:
+    """Returns the list of books that have coverage for date_str, using whatever the main
+    pipeline already fetched and cached. If the pipeline hasn't run yet for this date, returns
+    the full US_BOOKS list as a safe fallback -- the selector will show all books, which is
+    correct behavior when we don't yet know which ones are available tonight.
+
+    Deliberately NOT a separate API fetch -- that would cost quota for every page load just to
+    populate a dropdown. Instead reads from Streamlit session state, where the main pipeline
+    stores the real book list as a side effect of its own already-paid-for fetch."""
+    key = f"_available_books_{date_str}"
+    return st.session_state.get(key, list(O.US_BOOKS.keys()))
+
+
+def store_available_books_for_date(date_str: str, books: List[str]) -> None:
+    """Store the available books for a date into session state, called by the main pipeline
+    after its fetch so that get_available_books_for_date can read it on the same page load."""
+    st.session_state[f"_available_books_{date_str}"] = books
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -211,8 +210,9 @@ def build_mlb_board(date_str: str, fip_constant: float, odds_api_key: Optional[s
                                                 list(O.SUPPORTED_MARKETS), sport=O.SPORT)
             real_lines = O.market_lines_for_slate(offers, preferred_book=preferred_book)
             live_books = O.books_in_offers(offers)
-            if live_books:   # only narrow the list when we actually got real data back
+            if live_books:
                 available_books = live_books
+                store_available_books_for_date(date_str, live_books)
         except Exception:
             real_lines = None   # fall back to DEFAULT_LINES, not a page crash
 
