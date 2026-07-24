@@ -51,21 +51,21 @@ def get_odds_api_key() -> Optional[str]:
 
 
 def render_book_selector(key_prefix: str = "book",
-                         available_books: Optional[List[str]] = None) -> str:
-    """Render the shared sportsbook selector used by Best Bets, Graded Picks, Suggested Parlays,
-    and Speculative Basket. Returns the selected Odds API book key (e.g. "draftkings").
+                         available_books: Optional[List[str]] = None,
+                         date_str: Optional[str] = None) -> str:
+    """Render the shared sportsbook selector. Returns the selected Odds API book key.
 
-    available_books: the real list of book keys that had coverage in tonight's odds data
-    (from build_mlb_board's own books_in_offers pass). When supplied, only shows books that
-    actually posted lines tonight -- not the full hardcoded list. When None or empty (no API key,
-    or fetch failed), falls back to the full US_BOOKS list so the selector still renders.
-
-    Placed in the sidebar, defaults to DraftKings, only shows when an API key is configured."""
+    available_books: if supplied directly (e.g. from a prior load), use it. Otherwise,
+    if date_str is supplied, fetches tonight's real book coverage via fetch_available_books
+    (a separate, lightweight cached function independent of the heavy pipeline cache).
+    Falls back to the full US_BOOKS list if neither is available."""
     if not get_odds_api_key():
         return O.DEFAULT_BOOK
 
+    if available_books is None and date_str:
+        available_books = fetch_available_books(date_str, get_odds_api_key())
+
     books_to_show = available_books if available_books else list(O.US_BOOKS.keys())
-    # Ensure DEFAULT_BOOK is always in the list even if not returned by the API
     if O.DEFAULT_BOOK not in books_to_show:
         books_to_show = [O.DEFAULT_BOOK] + books_to_show
 
@@ -85,6 +85,25 @@ def render_book_selector(key_prefix: str = "book",
                 "book doesn't have a line for a specific player."
         )
     return books_to_show[book_labels.index(selected_label)]
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_available_books(date_str: str, odds_api_key: Optional[str]) -> List[str]:
+    """Fetch the list of books that actually have coverage tonight -- kept SEPARATE from
+    build_mlb_board intentionally. available_books is UI state for the book selector; baking
+    it into build_mlb_board's own cached result means the selector sees a stale list whenever
+    the heavy pipeline cache is hit, even after the API response changes. A separate, lightweight
+    cache means the selector always reflects tonight's real book coverage independently of
+    whether the full pipeline result is stale. Same TTL as build_mlb_board."""
+    if not odds_api_key:
+        return list(O.US_BOOKS.keys())
+    try:
+        offers, _ = O.fetch_slate_props(date_str, odds_api_key,
+                                        list(O.SUPPORTED_MARKETS), sport=O.SPORT)
+        live = O.books_in_offers(offers)
+        return live if live else list(O.US_BOOKS.keys())
+    except Exception:
+        return list(O.US_BOOKS.keys())
 
 
 @st.cache_data(ttl=300, show_spinner=False)
