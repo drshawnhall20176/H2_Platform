@@ -251,6 +251,20 @@ US_BOOKS: Dict[str, str] = {
 DEFAULT_BOOK = "draftkings"
 
 
+def books_in_offers(offers: List[Dict]) -> List[str]:
+    """Returns a sorted list of Odds API book keys that actually appear in this slate's offers,
+    filtered to the ones in US_BOOKS. Used to show only books with real coverage in tonight's
+    data rather than the full hardcoded list -- a user can only meaningfully select a book that
+    actually posted lines for this slate."""
+    seen = set()
+    for off in offers:
+        for book in list((off.get("over") or {}).keys()) + list((off.get("under") or {}).keys()):
+            if book in US_BOOKS:
+                seen.add(book)
+    # Return in US_BOOKS display order so DraftKings is always first
+    return [k for k in US_BOOKS if k in seen]
+
+
 def market_lines_for_slate(offers: List[Dict], projections_module=None,
                            preferred_book: Optional[str] = None) -> Dict[Tuple[str, str], float]:
     """{(normalized_player_name, market_key): point} for EVERY player in one pass over `offers`

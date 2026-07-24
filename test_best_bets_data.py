@@ -69,7 +69,7 @@ def test_load_mlb_best_bets_board_full_pipeline_runs_and_blends():
                     lambda tid, exclude_pid=None, fip_constant=3.10: good_pen_stat), \
         patch("statcast_data.load", lambda: ({}, None)), \
         patch("weather.get_game_weather", lambda *a, **k: None):
-        plays, meta = BBD.load_mlb_best_bets_board("2026-07-18", BBD.E.FIP_CONSTANT_DEFAULT)
+        plays, meta, available_books = BBD.load_mlb_best_bets_board("2026-07-18", BBD.E.FIP_CONSTANT_DEFAULT)
 
     assert len(meta) == 1
     assert len(plays) > 0
@@ -89,7 +89,7 @@ def test_load_mlb_best_bets_board_returns_meta_not_just_count():
         patch.object(BBD.E, "get_bullpen_aggregate_stat", lambda *a, **k: None), \
         patch("statcast_data.load", lambda: ({}, None)), \
         patch("weather.get_game_weather", lambda *a, **k: None):
-        plays, meta = BBD.load_mlb_best_bets_board("2026-07-18", BBD.E.FIP_CONSTANT_DEFAULT)
+        plays, meta, available_books = BBD.load_mlb_best_bets_board("2026-07-18", BBD.E.FIP_CONSTANT_DEFAULT)
 
     assert isinstance(meta, list)
     assert meta[0]["label"] == "Away @ Home (Game 1)"
@@ -104,7 +104,7 @@ def test_load_mlb_graded_picks_board_returns_rows_too():
         patch.object(BBD.E, "get_bullpen_aggregate_stat", lambda *a, **k: None), \
         patch("statcast_data.load", lambda: ({}, None)), \
         patch("weather.get_game_weather", lambda *a, **k: None):
-        plays, meta, rows = BBD.load_mlb_graded_picks_board("2026-07-18", BBD.E.FIP_CONSTANT_DEFAULT)
+        plays, meta, rows, available_books = BBD.load_mlb_graded_picks_board("2026-07-18", BBD.E.FIP_CONSTANT_DEFAULT)
 
     assert len(plays) > 0
     assert len(meta) == 1

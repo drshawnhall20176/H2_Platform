@@ -50,23 +50,27 @@ def get_odds_api_key() -> Optional[str]:
         return os.environ.get("ODDS_API_KEY")
 
 
-def render_book_selector(key_prefix: str = "book") -> str:
+def render_book_selector(key_prefix: str = "book",
+                         available_books: Optional[List[str]] = None) -> str:
     """Render the shared sportsbook selector used by Best Bets, Graded Picks, Suggested Parlays,
     and Speculative Basket. Returns the selected Odds API book key (e.g. "draftkings").
 
-    Placed in the sidebar so it's always visible without taking up main-page real estate,
-    defaults to DraftKings (the primary book for this platform's own users), and only shows
-    when an API key is configured -- if the key isn't set, there are no real lines to select
-    a book for, so showing the selector would be misleading.
+    available_books: the real list of book keys that had coverage in tonight's odds data
+    (from build_mlb_board's own books_in_offers pass). When supplied, only shows books that
+    actually posted lines tonight -- not the full hardcoded list. When None or empty (no API key,
+    or fetch failed), falls back to the full US_BOOKS list so the selector still renders.
 
-    key_prefix: unique Streamlit widget key prefix per page, avoids key collisions across the
-    four pages that all render this same selector in the same session."""
+    Placed in the sidebar, defaults to DraftKings, only shows when an API key is configured."""
     if not get_odds_api_key():
-        return O.DEFAULT_BOOK   # no key -> selector doesn't appear, default key returned silently
+        return O.DEFAULT_BOOK
 
-    book_options = list(O.US_BOOKS.keys())
-    book_labels = list(O.US_BOOKS.values())
-    default_idx = book_options.index(O.DEFAULT_BOOK) if O.DEFAULT_BOOK in book_options else 0
+    books_to_show = available_books if available_books else list(O.US_BOOKS.keys())
+    # Ensure DEFAULT_BOOK is always in the list even if not returned by the API
+    if O.DEFAULT_BOOK not in books_to_show:
+        books_to_show = [O.DEFAULT_BOOK] + books_to_show
+
+    book_labels = [O.US_BOOKS.get(k, k) for k in books_to_show]
+    default_idx = books_to_show.index(O.DEFAULT_BOOK) if O.DEFAULT_BOOK in books_to_show else 0
 
     with st.sidebar:
         st.markdown("---")
@@ -75,13 +79,12 @@ def render_book_selector(key_prefix: str = "book") -> str:
             book_labels,
             index=default_idx,
             key=f"{key_prefix}_book_selector",
-            help="Lines and odds shown across Best Bets, Graded Picks, Suggested Parlays, and "
-                "Speculative Basket will use this book's specific line where it has coverage. "
+            help="Lines and odds will use this book's specific line where it has coverage. "
+                "Only books that posted lines on tonight's slate are shown. "
                 "Falls back to the lowest available line across all books when your selected "
                 "book doesn't have a line for a specific player."
         )
-    # Reverse lookup: label -> key
-    return book_options[book_labels.index(selected_label)]
+    return books_to_show[book_labels.index(selected_label)]
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -182,11 +185,15 @@ def build_mlb_board(date_str: str, fip_constant: float, odds_api_key: Optional[s
     # handles this already, but a belt-and-suspenders try/except here means a real, unexpected
     # odds-fetch failure can never block the rest of the pipeline from running).
     real_lines = None
+    available_books: List[str] = list(O.US_BOOKS.keys())   # full list as default
     if odds_api_key:
         try:
             offers, _info = O.fetch_slate_props(date_str, odds_api_key,
                                                 list(O.SUPPORTED_MARKETS), sport=O.SPORT)
             real_lines = O.market_lines_for_slate(offers, preferred_book=preferred_book)
+            live_books = O.books_in_offers(offers)
+            if live_books:   # only narrow the list when we actually got real data back
+                available_books = live_books
         except Exception:
             real_lines = None   # fall back to DEFAULT_LINES, not a page crash
 
@@ -236,7 +243,7 @@ def build_mlb_board(date_str: str, fip_constant: float, odds_api_key: Optional[s
         get_bullpen_fatigue_fn=lambda tid, ex: load_bullpen_fatigue_for_blend(tid, ex, date_str),
         statcast=sc, statcast_k=k, seed=7, top_n=30, real_lines=real_lines)
 
-    return rows, meta, plays
+    return rows, meta, plays, available_books
 
 
 def load_mlb_best_bets_board(date_str: str, fip_constant: float,
@@ -244,24 +251,22 @@ def load_mlb_best_bets_board(date_str: str, fip_constant: float,
     """Build the full MLB best-bets board: slate -> real sportsbook lines -> statcast/weather
     enrichment -> hitter/pitcher projections -> ranked plays -> bullpen-blend re-pricing.
 
-    Returns (plays, meta) — the RAW ranked plays (no Slot/Time enrichment; Best Bets adds that
-    itself for its own table, Command Center doesn't need it at all) and the full per-game
-    metadata list, matching what both callers' own pre-existing interfaces already expected."""
-    _, meta, plays = build_mlb_board(date_str, fip_constant, get_odds_api_key(), preferred_book)
-    return plays, meta
+    Returns (plays, meta, available_books) — available_books is the list of book keys that
+    actually had coverage in tonight's odds data, used to populate the sportsbook selector."""
+    _, meta, plays, available_books = build_mlb_board(date_str, fip_constant,
+                                                      get_odds_api_key(), preferred_book)
+    return plays, meta, available_books
 
 
 def load_mlb_graded_picks_board(date_str: str, fip_constant: float,
                                 preferred_book: str = O.DEFAULT_BOOK):
-    """Same underlying board as load_mlb_best_bets_board (shares its cached result when called
-    with the same arguments in the same session — no duplicate slate fetch), but ALSO returns the
-    raw hitter rows, needed for the Graded Picks page's own per-game "one-sided" banner
-    (mlb_engine.compute_one_sided_banner), which reads real per-hitter fields that don't survive
-    into the flattened plays list.
+    """Same underlying board as load_mlb_best_bets_board, but also returns raw hitter rows
+    for Graded Picks' one-sided banner.
 
-    Returns (plays, meta, rows)."""
-    rows, meta, plays = build_mlb_board(date_str, fip_constant, get_odds_api_key(), preferred_book)
-    return plays, meta, rows
+    Returns (plays, meta, rows, available_books)."""
+    rows, meta, plays, available_books = build_mlb_board(date_str, fip_constant,
+                                                         get_odds_api_key(), preferred_book)
+    return plays, meta, rows, available_books
 
 
 def load_generic_best_bets_board(sport_key: str, date_str: str):
