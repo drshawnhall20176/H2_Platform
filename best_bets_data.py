@@ -55,9 +55,8 @@ def render_book_selector(key_prefix: str = "book",
                          date_str: Optional[str] = None) -> str:
     """Render the shared sportsbook selector. Returns the selected Odds API book key.
 
-    Reads tonight's available books from session state (stored there as a side effect of the
-    main pipeline's already-paid-for fetch) -- no second API call, no extra quota cost.
-    Falls back to the full US_BOOKS list on first load before the pipeline has run."""
+    Placed at the TOP of sidebar content so the dropdown opens downward with room to show
+    all options without being clipped by the viewport bottom edge."""
     if not get_odds_api_key():
         return O.DEFAULT_BOOK
 
@@ -71,15 +70,18 @@ def render_book_selector(key_prefix: str = "book",
     book_labels = [O.US_BOOKS.get(k, k) for k in books_to_show]
     default_idx = books_to_show.index(O.DEFAULT_BOOK) if O.DEFAULT_BOOK in books_to_show else 0
 
-    with st.sidebar:
-        st.markdown("---")
+    # Inject at the very top of the sidebar using a container so it appears above
+    # the navigation items and doesn't get pushed to the bottom where the dropdown
+    # flyout is clipped by the viewport edge.
+    sidebar_top = st.sidebar.container()
+    with sidebar_top:
         selected_label = st.selectbox(
             "📖 Sportsbook",
             book_labels,
             index=default_idx,
             key=f"{key_prefix}_book_selector",
-            help="Lines and odds will use this book's specific line where it has coverage. "
-                "Only books that posted lines on tonight's slate are shown. "
+            help=f"Lines and odds will use this book's specific line where it has coverage. "
+                f"{len(books_to_show)} book(s) available for tonight's slate. "
                 "Falls back to the lowest available line across all books when your selected "
                 "book doesn't have a line for a specific player."
         )
@@ -87,22 +89,9 @@ def render_book_selector(key_prefix: str = "book",
 
 
 def get_available_books_for_date(date_str: str) -> List[str]:
-    """Returns the list of books that have coverage for date_str, using whatever the main
-    pipeline already fetched and cached. If the pipeline hasn't run yet for this date, returns
-    the full US_BOOKS list as a safe fallback -- the selector will show all books, which is
-    correct behavior when we don't yet know which ones are available tonight.
-
-    Deliberately NOT a separate API fetch -- that would cost quota for every page load just to
-    populate a dropdown. Instead reads from Streamlit session state, where the main pipeline
-    stores the real book list as a side effect of its own already-paid-for fetch."""
-    key = f"_available_books_{date_str}"
-    return st.session_state.get(key, list(O.US_BOOKS.keys()))
-
-
-def store_available_books_for_date(date_str: str, books: List[str]) -> None:
-    """Store the available books for a date into session state, called by the main pipeline
-    after its fetch so that get_available_books_for_date can read it on the same page load."""
-    st.session_state[f"_available_books_{date_str}"] = books
+    """Returns the list of books stored in session state for tonight, or the full US_BOOKS
+    list as a safe fallback when nothing has been stored yet."""
+    return st.session_state.get(f"_available_books_{date_str}", list(O.US_BOOKS.keys()))
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -212,7 +201,6 @@ def build_mlb_board(date_str: str, fip_constant: float, odds_api_key: Optional[s
             live_books = O.books_in_offers(offers)
             if live_books:
                 available_books = live_books
-                store_available_books_for_date(date_str, live_books)
         except Exception:
             real_lines = None   # fall back to DEFAULT_LINES, not a page crash
 
