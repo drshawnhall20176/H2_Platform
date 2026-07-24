@@ -17,6 +17,17 @@ import projections as P
 import statcast_data as SC
 import weather as WX
 
+try:
+    from streamlit_autorefresh import st_autorefresh
+    _HAS_AUTOREFRESH = True
+except ImportError:
+    # Real, stated graceful degradation, same posture as Statcast being optional elsewhere on
+    # this platform: the manual "refresh" button for live pitch count must keep working even if
+    # this small, real third-party component (github.com/kmcgrady/streamlit-autorefresh) isn't
+    # installed in a given deploy -- only the auto-refresh checkbox itself is hidden, not the
+    # whole feature.
+    _HAS_AUTOREFRESH = False
+
 st.title("🎯 Pitching Lab")
 st.caption("ERA vs FIP regression and matchup-aware strikeout/innings projections")
 
@@ -298,6 +309,64 @@ if game_options:
                         st.success(f"✅ Confirmed — {actual['name']} matches the probable starter.")
     else:
         st.caption("No game id available for this matchup — starter check isn't available here.")
+
+    # === Live pitch count ======================================================================
+    # Added directly on request, after a real, repeated pattern: real traders manually tracking a
+    # starter's live pitch count mid-game to gauge how much longer he'll last and whether he's
+    # cruising or getting hit hard ("He's at 68 pitches but best part he has just 1 hit no runs").
+    # RAW NUMBERS ONLY, deliberately not a prediction -- see mlb_engine.get_live_pitching_line's
+    # own docstring for why "innings left" or "pull probability" isn't attempted here; that's a
+    # claim about a live, in-progress managerial decision, a different and harder thing than
+    # showing the same real facts a trader would already read by eye.
+    st.markdown("**📟 Live pitch count**")
+    st.caption("Pitch count and today's real line for whoever's actually pitching right now — "
+              "only meaningful once the game has started. Manual refresh always works; "
+              "auto-refresh below is a real, ongoing cost while enabled (a fresh live fetch "
+              "every ~10 seconds for both sides), so it's opt-in, not the default.")
+    if picked.get("gamePk"):
+        live_auto = False
+        if _HAS_AUTOREFRESH:
+            live_auto = st.checkbox(
+                "🔴 Auto-refresh every ~10s while this game is live", value=False,
+                key=f"live_auto_{picked['gamePk']}",
+                help="Turn this off (or navigate away) once you're done watching this specific "
+                    "game — it keeps re-fetching both teams' live boxscore in the background "
+                    "the whole time it's checked. The refresh interval is a rough estimate, not "
+                    "an exact timer (a real, stated limitation of the underlying component).")
+            if live_auto:
+                st_autorefresh(interval=10_000, key=f"live_autorefresh_{picked['gamePk']}")
+        else:
+            st.caption("⚪ Auto-refresh isn't available in this deploy (the optional "
+                      "`streamlit-autorefresh` package isn't installed) — manual refresh below "
+                      "still works normally.")
+
+        lc1, lc2 = st.columns(2)
+        for col, label, side in ((lc1, picked["home_name"], "home"),
+                                 (lc2, picked["away_name"], "away")):
+            with col:
+                st.markdown(f"**{label}**")
+                state_key = f"live_line_{side}_{picked['gamePk']}"
+                manual_clicked = st.button("🔄 Refresh live line",
+                                           key=f"live_refresh_{side}_{picked['gamePk']}")
+                if manual_clicked:
+                    with st.spinner("Checking live boxscore..."):
+                        st.session_state[state_key] = E.get_live_pitching_line(picked["gamePk"], side)
+                elif live_auto:
+                    st.session_state[state_key] = E.get_live_pitching_line(picked["gamePk"], side)
+
+                line = st.session_state.get(state_key)
+                if line is None:
+                    st.caption("⏳ Not started yet, or hasn't been checked — press refresh, or "
+                              "enable auto-refresh above.")
+                else:
+                    lm1, lm2, lm3 = st.columns(3)
+                    lm1.metric("Pitches", line["pitches"])
+                    lm2.metric("IP", line["innings_pitched"])
+                    lm3.metric("H / ER", f"{line['hits']} / {line['earned_runs']}")
+                    st.caption(f"{line['name']} — {line['strikeouts']} K, {line['walks']} BB "
+                              "today. Raw numbers only — no pull prediction.")
+    else:
+        st.caption("No game id available for this matchup — live pitch count isn't available here.")
 
     # === EXPERIMENTAL: full Monte Carlo game simulation (Option A, Method 1) -------------------
     # Added directly on request, after building and testing the underlying simulation engine
