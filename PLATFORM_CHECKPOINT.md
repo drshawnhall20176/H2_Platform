@@ -5110,6 +5110,28 @@ retry-count test. Reproduced the original crash scenario one more time end-to-en
 confirming both `get_live_pitching_line` and `get_actual_starter` now return a clean `None`
 instead of crashing. 1071 tests passing after this entry.
 
+### Production crash fixed: Best Bets raised a raw KeyError with zero markets selected (2026-07-24)
+The second real production bug this platform hit, reported with a screenshot showing the
+friendlier empty-state message an equivalent situation on Speculative Basket already handles
+gracefully. Root cause, confirmed by direct reproduction before fixing anything: clearing the
+Markets multiselect down to zero selections makes `view` an empty list; `pd.DataFrame([])`
+produces a DataFrame with ZERO COLUMNS (nothing to infer them from), and the very next line
+selects specific named columns out of it — a real `KeyError`, not a hypothetical one, reproduced
+directly and confirmed to match the reported error exactly before writing the fix.
+
+A "no plays match the current filters" info message already existed on the page — but only right
+before the Diagnostic Inspector section, well AFTER the crash-prone DataFrame-building code, so
+it could never actually be reached in this specific scenario; the crash always happened first.
+Fixed by adding two checks BEFORE the board is built: an early, specific check for zero markets
+selected (a more directly actionable message than the generic one, since it's the single most
+common real cause), and the general "no plays match" check moved up to guard the DataFrame
+construction itself rather than a page section further down. The original, now-unreachable check
+before the Diagnostic Inspector was removed rather than left as dead code. No new unit tests
+needed (pure view-layer control flow, no new testable logic) — verified instead by directly
+reproducing the exact original `KeyError` in a standalone script, confirming the diagnosis, then
+confirming the two new checks both sit before the crash point in the actual file. Full suite
+re-verified unaffected at 1071.
+
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
   framing/item 5 writeup above for why: no confirmed way to find every game a specific umpire
