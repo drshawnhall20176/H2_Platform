@@ -58,9 +58,12 @@ if _active.key == "MLB":
     target = st.date_input("Slate date", datetime.now())
     date_str = target.strftime("%Y-%m-%d")
     preferred_book = BBD.render_book_selector(key_prefix="graded_picks", date_str=date_str)
+    prev_books = BBD.get_available_books_for_date(date_str)
     with st.spinner("Grading the slate..."):
         plays, meta, rows, available_books = BBD.load_mlb_graded_picks_board(
             date_str, E.FIP_CONSTANT_DEFAULT, preferred_book)
+    if BBD.get_available_books_for_date(date_str) != prev_books:
+        st.rerun()
 else:
     target = st.date_input("Slate date", datetime.now(eastern))
     date_str = target.strftime("%Y-%m-%d")
