@@ -25,6 +25,7 @@ from datetime import datetime
 
 import sports
 import betlog as B
+import bet_settlement
 
 _active = sports.active()
 st.title(f"📒 Bet Log — proof layer  ·  {_active.icon} {_active.label}")
@@ -113,6 +114,60 @@ if s["clv_n"] == 0:
 open_bets = [b for b in bets if not b.get("result")]
 if open_bets:
     st.subheader(f"Open bets ({len(open_bets)}) — enter closing odds & result, then save")
+
+    # Auto-settle, added directly on request: betlog.py's own player_id column was added
+    # specifically "for automated result settlement" (see its own schema comment) referencing
+    # retro.py's existing grading machinery -- this is what actually uses it, wired to real,
+    # already-tested logic (bet_settlement.py) rather than left as unused schema groundwork.
+    # MLB ONLY FOR NOW, same honest scope as several other features on this platform.
+    if _active.key == "MLB":
+        st.markdown("**🔄 Auto-settle open bets**")
+        st.caption("Checks each open bet's real game against the real MLB schedule and, only "
+                  "for a game already confirmed Final, fills in the real result — win, loss, "
+                  "push, or void (a real scratch/DNP settles as void, not a loss). Never "
+                  "touches a bet whose game is still in progress. Shows a real preview below "
+                  "before anything is saved — nothing changes in the Bet Log until you "
+                  "explicitly confirm. Doesn't touch closing odds — enter those in the table "
+                  "below same as always, auto-settle only fills in the real result.")
+        if st.button("🔍 Check for settleable bets"):
+            with st.spinner("Checking real schedules and box scores..."):
+                st.session_state["settlement_plan"] = bet_settlement.build_settlement_plan(open_bets)
+
+        plan = st.session_state.get("settlement_plan")
+        if plan:
+            proposed = plan["proposed"]
+            still_pending = plan["still_pending"]
+            unresolved = plan["unresolved"]
+
+            if proposed:
+                st.markdown(f"**{len(proposed)} bet(s) ready to settle:**")
+                preview_df = pd.DataFrame(proposed)[["description", "old_result", "new_result"]]
+                preview_df.columns = ["Bet", "Current", "New result"]
+                st.dataframe(preview_df, hide_index=True, use_container_width=True)
+                if st.button(f"✅ Confirm and apply {len(proposed)} settlement(s)", type="primary"):
+                    n = bet_settlement.apply_settlement_plan(proposed)
+                    st.session_state.pop("settlement_plan", None)
+                    st.success(f"Settled {n} bet(s). Enter closing odds below if you have them, "
+                              "then save.")
+                    st.rerun()
+            else:
+                st.caption("Nothing is settleable right now — check the sections below for why.")
+
+            if still_pending:
+                with st.expander(f"⏳ {len(still_pending)} still pending — game not Final yet"):
+                    st.dataframe(pd.DataFrame(still_pending)[["description", "game", "status"]]
+                                .rename(columns={"description": "Bet", "game": "Game", "status": "Status"}),
+                                hide_index=True, use_container_width=True)
+            if unresolved:
+                with st.expander(f"❓ {len(unresolved)} couldn't be auto-settled — needs manual entry"):
+                    st.dataframe(pd.DataFrame(unresolved)[["description", "reason"]]
+                                .rename(columns={"description": "Bet", "reason": "Why"}),
+                                hide_index=True, use_container_width=True)
+        st.divider()
+    else:
+        st.caption(f"Auto-settle isn't available for {_active.label} yet — MLB only for now. "
+                  "Enter results manually in the table below.")
+
     odf = pd.DataFrame(open_bets)[["id", "player", "market", "side", "line", "entry_odds",
                                    "model_prob", "stake", "close_odds", "result"]]
     edited = st.data_editor(
