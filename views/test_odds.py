@@ -1,0 +1,396 @@
+"""
+test_odds.py — offline tests for odds math + edge join (no network).
+
+    python test_odds.py     # or: pytest test_odds.py
+"""
+
+import projections as P
+import odds_api as O
+
+
+def test_implied_prob():
+    assert round(O.implied_prob(-110), 4) == 0.5238
+    assert round(O.implied_prob(100), 4) == 0.5
+    assert round(O.implied_prob(120), 4) == 0.4545
+
+
+def test_decimal():
+    assert O.american_to_decimal(100) == 2.0
+    assert O.american_to_decimal(-200) == 1.5
+    assert O.american_to_decimal(150) == 2.5
+
+
+def test_ev_percent():
+    assert round(O.ev_percent(0.60, 120), 1) == 32.0
+    assert round(O.ev_percent(0.50, -110), 2) == -4.55
+    # break-even: fair price for 50% is +100 -> EV 0
+    assert round(O.ev_percent(0.50, 100), 6) == 0.0
+
+
+def test_devig():
+    assert O.devig_two_way(-110, -110) == 0.5
+    # favorite over: over -200 / under +160 -> fair over > 0.5
+    fair = O.devig_two_way(-200, 160)
+    assert 0.6 < fair < 0.72
+
+
+def test_best_price_picks_highest_payout():
+    # +120 pays more than -105; +120 should win
+    book, price = O._best_price({"a": -105, "b": 120})
+    assert price == 120
+
+
+def test_parse_event_offers():
+    event = {
+        "bookmakers": [{
+            "key": "fanduel",
+            "markets": [{
+                "key": "batter_hits",
+                "outcomes": [
+                    {"name": "Over", "description": "Aaron Judge", "point": 0.5, "price": -200},
+                    {"name": "Under", "description": "Aaron Judge", "point": 0.5, "price": 160},
+                ],
+            }],
+        }]
+    }
+    offers = O.parse_event_offers(event)
+    assert len(offers) == 1
+    o = offers[0]
+    assert o["market"] == "batter_hits" and o["point"] == 0.5
+    assert o["over"]["fanduel"] == -200 and o["under"]["fanduel"] == 160
+
+
+def test_compute_edges_matches_and_ranks():
+    slug = dict(plateAppearances=600, atBats=540, hits=165, doubles=34, triples=2,
+                homeRuns=38, baseOnBalls=55, strikeOuts=140)
+    row = {"Hitter": "José Ramírez", "Team": "CLE", "GameLabel": "CLE @ DET",
+           "Opp Pitcher": "P", "Lineup": "Confirmed", "_stat": slug, "_exp_pa": 4.5, "_venue_id": None}
+    meta = []
+    index = P.build_projection_index([row], meta, sims=15000, seed=3)
+
+    offers = [
+        # book sends de-accented name; should still match
+        {"market": "batter_hits", "player": "Jose Ramirez", "point": 0.5,
+         "over": {"fd": -200}, "under": {"fd": 160}},
+        # unmatched player
+        {"market": "batter_hits", "player": "Nobody Here", "point": 0.5,
+         "over": {"fd": -150}, "under": {"fd": 120}},
+    ]
+    edges, stats = O.compute_edges(index, offers)
+    assert stats["matched"] == 1 and stats["unmatched"] == 1
+    assert all("EV%" in e for e in edges)
+    # sorted by EV% descending
+    evs = [e["EV%"] for e in edges]
+    assert evs == sorted(evs, reverse=True)
+    # model name (with accent) is preserved in output
+    assert edges[0]["Player"] == "José Ramírez"
+
+
+# ----------------------------------------------------------------- market_lines_for_player
+def test_market_lines_for_player_matches_by_normalized_name():
+    offers = [
+        # book sends de-accented name; should still match, same as compute_edges
+        {"market": "batter_hits", "player": "Jose Ramirez", "point": 1.5,
+         "over": {"fd": -150}, "under": {"fd": 120}},
+        {"market": "batter_home_runs", "player": "Someone Else", "point": 0.5,
+         "over": {"fd": -110}, "under": {"fd": -110}},
+    ]
+    lines = O.market_lines_for_player(offers, "José Ramírez")
+    assert lines == {"batter_hits": 1.5}
+    print("✓ market_lines_for_player matches names the same accent/spelling-insensitive way compute_edges does")
+
+
+def test_market_lines_for_player_picks_the_most_booked_point():
+    # Two books disagree on the point (1.5 vs 2.5) for the same market/player. The one backed by
+    # MORE total book quotes should win -> 1.5 has 2 books total (1 over + 1 under from "fd" plus
+    # 1 more from "dk" on the over side = 3), 2.5 only has 1.
+    offers = [
+        {"market": "batter_hits", "player": "Jose Ramirez", "point": 1.5,
+         "over": {"fd": -150, "dk": -140}, "under": {"fd": 120}},
+        {"market": "batter_hits", "player": "Jose Ramirez", "point": 2.5,
+         "over": {"mgm": 250}, "under": {}},
+    ]
+    lines = O.market_lines_for_player(offers, "Jose Ramirez")
+    assert lines == {"batter_hits": 1.5}
+    print("✓ market_lines_for_player picks the point with the most total book quotes as consensus")
+
+
+def test_market_lines_for_player_absent_when_no_match():
+    offers = [{"market": "batter_hits", "player": "Nobody Here", "point": 1.5,
+              "over": {"fd": -150}, "under": {"fd": 120}}]
+    assert O.market_lines_for_player(offers, "Jose Ramirez") == {}
+    print("✓ market_lines_for_player returns {} (not a guess) when nothing matches")
+
+
+# ----------------------------------------------------------------- market_lines_for_slate
+def test_market_lines_for_slate_builds_lookup_for_every_player_in_one_pass():
+    offers = [
+        {"market": "pitcher_strikeouts", "player": "Tomoyuki Sugano", "point": 3.5,
+         "over": {"fd": -120}, "under": {"fd": 100}},
+        {"market": "batter_hits", "player": "Jose Ramirez", "point": 1.5,
+         "over": {"fd": -150}, "under": {"fd": 120}},
+    ]
+    lines = O.market_lines_for_slate(offers)
+    assert lines[(P.normalize_name("Tomoyuki Sugano"), "pitcher_strikeouts")] == 3.5
+    assert lines[(P.normalize_name("Jose Ramirez"), "batter_hits")] == 1.5
+    print("✓ market_lines_for_slate correctly builds a real per-player, per-market line lookup for the whole slate in one pass")
+
+
+def test_market_lines_for_slate_matches_the_exact_real_reported_case():
+    # The real, specific discrepancy this whole feature was built from: DraftKings' real line on
+    # Sugano's strikeouts was 3.5, while the platform's own hardcoded default was 5.5.
+    offers = [{"market": "pitcher_strikeouts", "player": "Tomoyuki Sugano", "point": 3.5,
+              "over": {"draftkings": -115}, "under": {"draftkings": -105}}]
+    lines = O.market_lines_for_slate(offers)
+    assert lines[(P.normalize_name("Tomoyuki Sugano"), "pitcher_strikeouts")] == 3.5
+    assert lines[(P.normalize_name("Tomoyuki Sugano"), "pitcher_strikeouts")] != 5.5
+    print("✓ market_lines_for_slate correctly resolves the exact real Sugano case that surfaced this whole gap")
+
+
+def test_market_lines_for_slate_uses_minimum_line_when_books_disagree():
+    # THE REAL PRODUCTION BUG THIS FIX EXISTS FOR: DraftKings posted 0.5 for Ezequiel Tovar's
+    # H+R+RBI while other books posted 1.5. The old "most-booked wins" logic picked 1.5 --
+    # the model then computed "Over 1.5" probability for a bet that was actually available at
+    # "Over 0.5" on DraftKings. A bettor CAN get 0.5; that's the real line that matters.
+    offers = [
+        {"market": "batter_hits_runs_rbis", "player": "Ezequiel Tovar", "point": 1.5,
+         "over": {"fanduel": -130, "betmgm": -140}, "under": {"fanduel": 110, "betmgm": 118}},
+        {"market": "batter_hits_runs_rbis", "player": "Ezequiel Tovar", "point": 0.5,
+         "over": {"draftkings": -115}, "under": {"draftkings": -115}},
+    ]
+    lines = O.market_lines_for_slate(offers)
+    assert lines[(P.normalize_name("Ezequiel Tovar"), "batter_hits_runs_rbis")] == 0.5
+    print("✓ market_lines_for_slate correctly resolves the exact real Tovar case: DK's 0.5 wins over other books' 1.5 because the minimum is the real available bet")
+
+
+def test_market_lines_for_slate_minimum_line_independent_per_player():
+    # Two players in the same market with different line situations -- each player's own
+    # minimum is resolved independently, not cross-contaminated between players.
+    offers = [
+        {"market": "batter_hits", "player": "Player A", "point": 1.5,
+         "over": {"fd": -150, "dk": -140}, "under": {"fd": 120}},
+        {"market": "batter_hits", "player": "Player A", "point": 2.5,
+         "over": {"mgm": 250}, "under": {}},
+        {"market": "batter_hits", "player": "Player B", "point": 0.5,
+         "over": {"fd": -200}, "under": {"fd": 150}},
+    ]
+    lines = O.market_lines_for_slate(offers)
+    assert lines[(P.normalize_name("Player A"), "batter_hits")] == 1.5   # min of 1.5 and 2.5
+    assert lines[(P.normalize_name("Player B"), "batter_hits")] == 0.5   # B unaffected
+    print("✓ market_lines_for_slate resolves each player's own minimum line independently")
+
+
+def test_market_lines_for_slate_preferred_book_overrides_minimum():
+    # A user who selects FanDuel as their book should get FanDuel's line (1.5), not DK's
+    # lower line (0.5) -- they're not betting at DraftKings.
+    offers = [
+        {"market": "batter_hits_runs_rbis", "player": "Ezequiel Tovar", "point": 1.5,
+         "over": {"fanduel": -130}, "under": {"fanduel": 110}},
+        {"market": "batter_hits_runs_rbis", "player": "Ezequiel Tovar", "point": 0.5,
+         "over": {"draftkings": -115}, "under": {"draftkings": -115}},
+    ]
+    key = (P.normalize_name("Ezequiel Tovar"), "batter_hits_runs_rbis")
+    assert O.market_lines_for_slate(offers, preferred_book="fanduel")[key] == 1.5
+    assert O.market_lines_for_slate(offers, preferred_book="draftkings")[key] == 0.5
+    print("✓ market_lines_for_slate uses the preferred book's specific line — a FanDuel user gets 1.5, a DK user gets 0.5, for the same player")
+
+
+def test_market_lines_for_slate_falls_back_to_minimum_when_preferred_book_has_no_coverage():
+    offers = [
+        {"market": "batter_hits_runs_rbis", "player": "Rare Player", "point": 1.5,
+         "over": {"fanduel": -130}, "under": {"fanduel": 110}},
+    ]
+    lines = O.market_lines_for_slate(offers, preferred_book="draftkings")
+    assert lines[(P.normalize_name("Rare Player"), "batter_hits_runs_rbis")] == 1.5
+    print("✓ market_lines_for_slate falls back to minimum-across-all-books when the preferred book has no coverage for a specific player")
+
+
+def test_market_lines_for_slate_different_players_same_market_dont_collide():
+    offers = [
+        {"market": "pitcher_strikeouts", "player": "Pitcher One", "point": 8.5,
+         "over": {"fd": -110}, "under": {"fd": -110}},
+        {"market": "pitcher_strikeouts", "player": "Pitcher Two", "point": 4.5,
+         "over": {"fd": -110}, "under": {"fd": -110}},
+    ]
+    lines = O.market_lines_for_slate(offers)
+    assert lines[(P.normalize_name("Pitcher One"), "pitcher_strikeouts")] == 8.5
+    assert lines[(P.normalize_name("Pitcher Two"), "pitcher_strikeouts")] == 4.5
+    print("✓ market_lines_for_slate correctly keys by (player, market) together, so two real pitchers' own very different real strikeout lines don't collide")
+
+
+def test_market_lines_for_slate_empty_offers():
+    assert O.market_lines_for_slate([]) == {}
+
+
+def test_market_lines_for_slate_skips_offers_with_no_real_book_quotes():
+    offers = [{"market": "batter_hits", "player": "Ghost Offer", "point": 1.5, "over": {}, "under": {}}]
+    assert O.market_lines_for_slate(offers) == {}
+    print("✓ market_lines_for_slate skips an offer with zero real book quotes rather than treating it as real coverage")
+
+
+def test_kelly_fraction():
+    # p=0.60 at even money (+100): f* = (0.6*2 - 1)/(2-1) = 0.20
+    assert abs(O.kelly_fraction(0.60, 100) - 0.20) < 1e-9
+    assert O.kelly_fraction(0.50, 100) == 0.0      # fair odds -> no edge
+    assert O.kelly_fraction(0.40, 100) == 0.0      # -EV -> clamped to 0
+
+
+def test_kelly_stake_caps_and_fractions():
+    # full f=0.20, quarter -> 0.05; 5% cap is not binding -> 0.05 * 1000 = 50
+    assert O.kelly_stake(0.60, 100, 1000, fraction=0.25, cap_pct=0.05) == 50.0
+    # tighter 2% cap binds -> 20
+    assert O.kelly_stake(0.60, 100, 1000, fraction=0.25, cap_pct=0.02) == 20.0
+    # -EV bet -> no stake
+    assert O.kelly_stake(0.45, 100, 1000) == 0.0
+    # small bankroll, half-Kelly -> small bet
+    assert O.kelly_stake(0.58, 120, 50, fraction=0.5, cap_pct=0.05) > 0
+
+
+def test_fetch_slate_props_threads_sport_through():
+    # Regression test: fetch_slate_props used to call fetch_events()/fetch_event_props() with no
+    # sport arg, silently defaulting to MLB no matter what the caller asked for. Monkeypatch both
+    # to record what sport they actually received.
+    calls = {"events_sport": None, "props_sport": None}
+
+    def fake_fetch_events(api_key, sport=O.SPORT):
+        calls["events_sport"] = sport
+        return [{"id": "evt1", "commence_time": "2026-07-13T23:00:00Z"}]
+
+    def fake_fetch_event_props(event_id, api_key, markets, regions="us", sport=O.SPORT):
+        calls["props_sport"] = sport
+        return {"bookmakers": []}, {"remaining": "42"}
+
+    orig_events, orig_props = O.fetch_events, O.fetch_event_props
+    O.fetch_events, O.fetch_event_props = fake_fetch_events, fake_fetch_event_props
+    try:
+        offers, info = O.fetch_slate_props("2026-07-13", "fake_key", ["player_points"],
+                                           sport="basketball_wnba")
+    finally:
+        O.fetch_events, O.fetch_event_props = orig_events, orig_props
+
+    assert calls["events_sport"] == "basketball_wnba"
+    assert calls["props_sport"] == "basketball_wnba"
+    assert info["events_fetched"] == 1
+    print("✓ fetch_slate_props actually forwards sport to both fetch_events and fetch_event_props")
+
+
+def test_fetch_slate_props_defaults_to_mlb_for_backward_compat():
+    # Existing MLB call sites that don't pass sport= must keep working unchanged.
+    import inspect
+    sig = inspect.signature(O.fetch_slate_props)
+    assert sig.parameters["sport"].default == "baseball_mlb"
+    print("✓ fetch_slate_props still defaults to MLB when sport isn't specified")
+
+
+def test_fetch_slate_props_threads_markets_into_parsing():
+    # Regression test for a real bug found in a live WNBA test: fetch_slate_props correctly
+    # passed `markets` into fetch_event_props (the actual API call), but never passed it into
+    # parse_event_offers (the parsing step) — which has its OWN independent default of MLB's
+    # SUPPORTED_MARKETS. Result: every real WNBA offer the API returned got silently filtered out
+    # during parsing, because none of player_points/player_rebounds/etc. are in MLB's list.
+    # compute_edges then saw an empty offers list -> matched=0 AND unmatched=0, indistinguishable
+    # from "no props posted yet" without reading the source.
+    wnba_event_json = {
+        "bookmakers": [{
+            "key": "fanduel",
+            "markets": [{
+                "key": "player_points",
+                "outcomes": [
+                    {"description": "A. Player", "name": "Over", "point": 15.5, "price": -110},
+                    {"description": "A. Player", "name": "Under", "point": 15.5, "price": -110},
+                ],
+            }],
+        }],
+    }
+
+    def fake_fetch_events(api_key, sport=O.SPORT):
+        return [{"id": "evt1", "commence_time": "2026-07-14T23:00:00Z"}]
+
+    def fake_fetch_event_props(event_id, api_key, markets, regions="us", sport=O.SPORT):
+        return wnba_event_json, {"remaining": "100"}
+
+    orig_events, orig_props = O.fetch_events, O.fetch_event_props
+    O.fetch_events, O.fetch_event_props = fake_fetch_events, fake_fetch_event_props
+    try:
+        offers, info = O.fetch_slate_props("2026-07-14", "fake_key", ["player_points"],
+                                           sport="basketball_wnba")
+    finally:
+        O.fetch_events, O.fetch_event_props = orig_events, orig_props
+
+    assert len(offers) == 1, "the WNBA player_points offer must survive parsing, not be silently dropped"
+    assert offers[0]["market"] == "player_points"
+    assert offers[0]["player"] == "A. Player"
+    print("✓ fetch_slate_props threads the caller's markets list into parse_event_offers too, "
+          "not just fetch_event_props")
+
+
+# ----------------------------------------------------------------- parse_game_spread
+def test_parse_game_spread_averages_across_books():
+    event = {
+        "bookmakers": [
+            {"key": "fanduel", "markets": [{"key": "spreads", "outcomes": [
+                {"name": "Atlanta Dream", "point": -8.5, "price": -110},
+                {"name": "Chicago Sky", "point": 8.5, "price": -110},
+            ]}]},
+            {"key": "draftkings", "markets": [{"key": "spreads", "outcomes": [
+                {"name": "Atlanta Dream", "point": -9.5, "price": -105},
+                {"name": "Chicago Sky", "point": 9.5, "price": -115},
+            ]}]},
+        ]
+    }
+    spreads = O.parse_game_spread(event)
+    assert spreads["Atlanta Dream"] == -9.0    # avg(-8.5, -9.5)
+    assert spreads["Chicago Sky"] == 9.0       # avg(8.5, 9.5)
+    print("✓ parse_game_spread averages the point across every book that posted a spreads market")
+
+
+def test_parse_game_spread_ignores_non_spread_markets():
+    event = {"bookmakers": [{"key": "fanduel", "markets": [
+        {"key": "h2h", "outcomes": [{"name": "Atlanta Dream", "price": -400}]},
+        {"key": "totals", "outcomes": [{"name": "Over", "point": 165.5, "price": -110}]},
+    ]}]}
+    assert O.parse_game_spread(event) == {}
+    print("✓ parse_game_spread ignores h2h/totals markets, only reads 'spreads'")
+
+
+def test_parse_game_spread_empty_when_no_bookmakers():
+    assert O.parse_game_spread({"bookmakers": []}) == {}
+
+
+# ----------------------------------------------------------------- fetch_slate_spreads
+def test_fetch_slate_spreads_only_requests_the_spreads_market():
+    calls = {"markets_requested": None}
+
+    def fake_fetch_events(api_key, sport=O.SPORT):
+        return [{"id": "evt1", "commence_time": "2026-07-14T23:00:00Z"}]
+
+    def fake_fetch_event_props(event_id, api_key, markets, regions="us", sport=O.SPORT):
+        calls["markets_requested"] = markets
+        return {"bookmakers": [{"key": "fd", "markets": [{"key": "spreads", "outcomes": [
+            {"name": "Atlanta Dream", "point": -6.5}, {"name": "Chicago Sky", "point": 6.5},
+        ]}]}]}, {"remaining": "500"}
+
+    orig_events, orig_props = O.fetch_events, O.fetch_event_props
+    O.fetch_events, O.fetch_event_props = fake_fetch_events, fake_fetch_event_props
+    try:
+        spreads, info = O.fetch_slate_spreads("2026-07-14", "fake_key", sport="basketball_wnba")
+    finally:
+        O.fetch_events, O.fetch_event_props = orig_events, orig_props
+
+    assert calls["markets_requested"] == ["spreads"]   # not the 4-market player-prop list — cheap fetch
+    assert spreads == {"Atlanta Dream": -6.5, "Chicago Sky": 6.5}
+    assert info["events_fetched"] == 1 and info["remaining"] == "500"
+    print("✓ fetch_slate_spreads requests only the 'spreads' market (cheap) and returns {team: spread}")
+
+
+if __name__ == "__main__":
+    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
+    passed = 0
+    for t in tests:
+        try:
+            t(); print(f"PASS  {t.__name__}"); passed += 1
+        except AssertionError as e:
+            print(f"FAIL  {t.__name__}: {e}")
+        except Exception as e:  # noqa: BLE001
+            print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
+    print(f"\n{passed}/{len(tests)} tests passed")
