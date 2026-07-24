@@ -157,10 +157,20 @@ if not view:
 for p in view:
     if p.get("_bullpen_blended"):
         p["Player"] = f"🔄 {p['Player']}"   # compact, visible marker — no new column needed
+    # Mark each play's line source directly in the Line column display so nobody is ever
+    # looking at a line without knowing whether it's a real, live number or a generic
+    # placeholder -- "📊 3.5" for a real book line, plain "3.5" for the default. Added directly
+    # on request after a real, reported discrepancy (a play showing "Under 5.5" for a pitcher
+    # whose real DraftKings line was 3.5). The 📊 marker is the same posture as 🔄 above --
+    # visible in the existing Line column, no extra column needed.
+    if p.get("LineSource") == "book":
+        p["_display_line"] = f"📊 {p['Line']:g}"
+    else:
+        p["_display_line"] = f"{p['Line']:g}" if p.get("Line") is not None else "—"
 df = pd.DataFrame(view)[["ModelProb", "Conviction", "Time", "Slot", "Player", "Team", "Market", "Side",
-                         "Line", "Fair", "Game", "Why"]]
-df = df.rename(columns={"ModelProb": "Model %", "Why": "Why the model likes it"})
-st.dataframe(df.style.format({"Model %": "{:.0%}", "Line": "{:g}", "Conviction": "{:.2f}×", "Fair": "{:+d}"},
+                         "_display_line", "Fair", "Game", "Why"]]
+df = df.rename(columns={"ModelProb": "Model %", "_display_line": "Line", "Why": "Why the model likes it"})
+st.dataframe(df.style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×", "Fair": "{:+d}"},
                              na_rep="—")
              .theme_gradient(cmap="Greens", subset=["Model %"]),
              use_container_width=True, hide_index=True, height=400)
@@ -178,6 +188,14 @@ if any(p.get("_bullpen_blended") for p in view):
               "whole slate, for real cost reasons — a play outside that scope still uses the "
               "starter-only read, which is usually the same number anyway when a hitter has "
               "little or no real bullpen exposure to begin with.")
+if any(p.get("LineSource") == "book" for p in view):
+    st.caption("📊 = this play's line is a real, live sportsbook number (from The Odds API, "
+              "the same source Edge Board already uses) — the probability and grade are computed "
+              "against this real line, not a generic placeholder. A plain number with no 📊 "
+              "means the API key isn't configured, or this specific player/market had no coverage "
+              "in the real book data, so the platform's own DEFAULT_LINES placeholder was used "
+              "instead. To enable real lines everywhere, add ODDS_API_KEY to your Streamlit "
+              "secrets — same key Edge Board already requires.")
 
 # --- DIAGNOSTIC INSPECTOR --------------------------------------------------
 st.markdown("---")

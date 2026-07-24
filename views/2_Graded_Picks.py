@@ -271,8 +271,12 @@ for game in organized:
                 fair = pl.get("Fair")
                 fair_str = f"{fair:+d}" if fair is not None else "—"
                 rank_prefix = f"**#{pl['_rank']}** · " if show_ranking and pl.get("_rank") else ""
+                line_val = pl.get("Line")
+                line_src = pl.get("LineSource", "default")
+                line_str = (f"📊 {line_val:g}" if line_src == "book" and line_val is not None
+                           else f"{line_val:g}" if line_val is not None else "—")
                 st.markdown(
-                    f"{rank_prefix}{grade_html} — {pl['Market']} {pl['Side']} {pl['Line']:g} · Fair {fair_str}",
+                    f"{rank_prefix}{grade_html} — {pl['Market']} {pl['Side']} {line_str} · Fair {fair_str}",
                     unsafe_allow_html=True,
                 )
                 st.caption(pl.get("Why", ""))
