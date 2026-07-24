@@ -57,15 +57,13 @@ def load_best_bets_generic(sport_key: str, date_str: str):
 # state is empty so the selector shows all books as a fallback; after the load
 # completes and stores the real list, a rerun updates the selector automatically.
 if _active.key == "MLB":
-    c1, c2 = st.columns([2, 1])
+    c1, c2, c3 = st.columns([3, 1, 2])
     with c1: target = st.date_input("Slate date", datetime.now())
     with c2: fip_constant = st.number_input("FIP constant", value=E.FIP_CONSTANT_DEFAULT, step=0.01)
     date_str = target.strftime("%Y-%m-%d")
-    preferred_book = BBD.render_book_selector(key_prefix="best_bets", date_str=date_str)
+    with c3: preferred_book = BBD.render_book_selector(key_prefix="best_bets", date_str=date_str)
     with st.spinner("Scanning the slate..."):
         plays, meta, available_books = load_best_bets_mlb(date_str, fip_constant, preferred_book)
-    # Store real book list in session state from the view layer (not inside the cached function,
-    # where st.session_state writes are silently dropped by Streamlit's cache execution context).
     ss_key = f"_available_books_{date_str}"
     if st.session_state.get(ss_key) != available_books:
         st.session_state[ss_key] = available_books

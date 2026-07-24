@@ -52,9 +52,10 @@ eastern = pytz.timezone("US/Eastern")
 
 # --- controls ---------------------------------------------------------------
 if _active.key == "MLB":
-    target = st.date_input("Slate date", datetime.now())
+    c1, c2 = st.columns([2, 1])
+    with c1: target = st.date_input("Slate date", datetime.now())
     date_str = target.strftime("%Y-%m-%d")
-    preferred_book = BBD.render_book_selector(key_prefix="speculative_basket", date_str=date_str)
+    with c2: preferred_book = BBD.render_book_selector(key_prefix="speculative_basket", date_str=date_str)
     with st.spinner("Building the basket..."):
         plays, meta, rows, available_books = BBD.load_mlb_graded_picks_board(
             date_str, E.FIP_CONSTANT_DEFAULT, preferred_book)
