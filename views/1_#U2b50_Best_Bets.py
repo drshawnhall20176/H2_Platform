@@ -35,12 +35,11 @@ def load_best_bets_mlb(date_str: str, fip_constant: float, preferred_book: str):
         dt, _ = slot_by_game.get(pl["Game"], (None, None))
         pl["Slot"] = slot_of(dt)
         pl["Time"] = dt.strftime("%I:%M %p").lstrip("0") + " ET" if dt else "TBD"
-    # Returns the full meta list now (not just its count) -- needed for the Game filter below,
-    # which reuses each game's own real game_date for chronological ordering and the "7:05 PM
-    # ET — Team @ Team" dropdown label, the same pattern Graded Picks/Bullpen Watch/Game Watch
-    # already use. n_games (the old return value) was dead code -- never actually read anywhere
-    # in this file, confirmed directly before making this change.
     return plays, meta, available_books
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_best_bets_generic(sport_key: str, date_str: str):
     """Any sport whose engine/projections don't need MLB's statcast/weather enrichment path —
     currently WNBA, and any future sport built the same way."""
     plays, meta = BBD.load_generic_best_bets_board(sport_key, date_str)
@@ -53,17 +52,27 @@ def load_best_bets_mlb(date_str: str, fip_constant: float, preferred_book: str):
 
 
 # --- controls ---------------------------------------------------------------
-preferred_book = BBD.render_book_selector(
-    key_prefix="best_bets",
-    available_books=st.session_state.get("best_bets_available_books"))
+# Load first (to get the real available_books from tonight's API response),
+# then render the selector with the real list. On the very first load, session
+# state is empty so the selector shows all books as a fallback; after the load
+# completes and stores the real list, a rerun updates the selector automatically.
 if _active.key == "MLB":
     c1, c2 = st.columns([2, 1])
     with c1: target = st.date_input("Slate date", datetime.now())
     with c2: fip_constant = st.number_input("FIP constant", value=E.FIP_CONSTANT_DEFAULT, step=0.01)
     date_str = target.strftime("%Y-%m-%d")
+    # Render selector with whatever books we already know about (may be empty on first load)
+    preferred_book = BBD.render_book_selector(
+        key_prefix="best_bets",
+        available_books=st.session_state.get("best_bets_available_books"))
     with st.spinner("Scanning the slate..."):
         plays, meta, available_books = load_best_bets_mlb(date_str, fip_constant, preferred_book)
+    # Store the real book list; if it changed from what was in session state, trigger a rerun
+    # so the selector immediately reflects the correct options from tonight's API response.
+    prev_books = st.session_state.get("best_bets_available_books")
     st.session_state["best_bets_available_books"] = available_books
+    if prev_books != available_books:
+        st.rerun()
 else:
     target = st.date_input("Slate date", datetime.now(eastern))
     date_str = target.strftime("%Y-%m-%d")
