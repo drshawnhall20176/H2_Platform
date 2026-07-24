@@ -61,18 +61,9 @@ if _active.key == "MLB":
     with c1: target = st.date_input("Slate date", datetime.now())
     with c2: fip_constant = st.number_input("FIP constant", value=E.FIP_CONSTANT_DEFAULT, step=0.01)
     date_str = target.strftime("%Y-%m-%d")
-    # Render selector with whatever books we already know about (may be empty on first load)
-    preferred_book = BBD.render_book_selector(
-        key_prefix="best_bets",
-        available_books=st.session_state.get("best_bets_available_books"))
+    preferred_book = BBD.render_book_selector(key_prefix="best_bets", date_str=date_str)
     with st.spinner("Scanning the slate..."):
         plays, meta, available_books = load_best_bets_mlb(date_str, fip_constant, preferred_book)
-    # Store the real book list; if it changed from what was in session state, trigger a rerun
-    # so the selector immediately reflects the correct options from tonight's API response.
-    prev_books = st.session_state.get("best_bets_available_books")
-    st.session_state["best_bets_available_books"] = available_books
-    if prev_books != available_books:
-        st.rerun()
 else:
     target = st.date_input("Slate date", datetime.now(eastern))
     date_str = target.strftime("%Y-%m-%d")
