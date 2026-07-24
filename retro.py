@@ -67,6 +67,62 @@ def grade_play(market: str, side: str, line: float, actuals: Optional[Dict]) -> 
     val = actuals[key]
     over_hit = val > line
     return over_hit if side == "Over" else (val < line)   # .5 lines -> no push
+
+
+def settle_bet_result(market: str, side: str, line, actuals):
+    """Real-world settlement status for ONE logged Bet Log entry -- "win"/"loss"/"push"/"void",
+    a richer real vocabulary than grade_play's own True/False/None above.
+
+    NOT a replacement for grade_play -- that function is scoped to the model's OWN generated
+    board specifically (always real .5 lines, so an exact-tie push is structurally impossible
+    there, and its own None just means "leave this out of the aggregate hit-rate," not a real
+    settlement status). A Bet Log entry can carry ANY real line a person actually got from a
+    sportsbook, including a genuine whole-number line where an exact tie is a real, if
+    comparatively rare, push -- and "the player recorded nothing at all for this stat category
+    despite the game being confirmed Final" is a real, distinct VOID case (the standard real
+    sportsbook treatment for a late scratch or a DNP prop), not silently the same "insufficient
+    data" grade_play's own None already represents for a different purpose.
+
+    CALLER'S OWN RESPONSIBILITY, not this function's: confirming the game is actually Final
+    before calling this at all. This function has no game-status awareness by design (same as
+    grade_play) -- calling it against a game that's still in progress would read a not-yet-
+    accumulated stat as a genuine miss or a scratch, which is simply wrong, not just premature.
+
+    Returns None only when `market` isn't a real market this platform knows how to grade at all,
+    or `line` itself is missing -- an honest "can't determine," never a guess."""
+    key = MARKET_STAT.get(market)
+    if key is None or line is None:
+        return None
+    if not actuals or key not in actuals:
+        return "void"
+    val = actuals[key]
+    if val == line:
+        return "push"
+    over_hit = val > line
+    hit = over_hit if side == "Over" else (val < line)
+    return "win" if hit else "loss"
+
+
+def settle_moneyline_result(side_team, home_team, away_team, home_score, away_score):
+    """Real-world settlement for ONE logged MONEYLINE bet -- compares the bet's own logged team
+    name against the real final score. A genuinely separate comparison from settle_bet_result
+    above: a moneyline bet has no player and no line at all, just "did this team win," so there's
+    no MARKET_STAT lookup or actuals dict involved here, just the schedule's own real score.
+
+    CALLER'S OWN RESPONSIBILITY, same posture as settle_bet_result: confirming the game is
+    actually Final before calling this.
+
+    Returns "win"/"loss", or None (an honest "can't determine," never a guess) when: the scores
+    themselves aren't real/usable (missing, or a genuine tie -- structurally rare for a completed
+    MLB game, which resolves ties via extra innings, but not worth guessing at if it's ever seen
+    in real data), or side_team doesn't match EITHER real team name at all (a real data mismatch,
+    not something to silently resolve either way)."""
+    if home_score is None or away_score is None or home_score == away_score:
+        return None
+    if side_team not in (home_team, away_team):
+        return None
+    winner = home_team if home_score > away_score else away_team
+    return "win" if side_team == winner else "loss"
  
  
 def _calibration(graded: List[Dict], n_bins: int = 5) -> List[Dict]:

@@ -23,6 +23,68 @@ def test_grade_play():
     assert R.grade_play("Batter HR", "Over", 0.5, None) is None
 
 
+# ----------------------------------------------------------------- settle_bet_result
+def test_settle_bet_result_win_and_loss():
+    a = {"hr": 1, "tb": 5, "hits": 2, "so": 1, "hrr": 4}
+    assert R.settle_bet_result("Batter HR", "Over", 0.5, a) == "win"
+    assert R.settle_bet_result("Batter Total Hits", "Under", 0.5, a) == "loss"   # had 2 hits
+    print("✓ settle_bet_result correctly returns real 'win'/'loss' strings for a normal, non-tied result")
+
+
+def test_settle_bet_result_push_on_a_real_whole_number_line():
+    # The real, important difference from grade_play: a genuine sportsbook line can be a whole
+    # number (not this platform's own always-.5 lines), and an exact tie is a real push, not a
+    # loss for either side.
+    a = {"tb": 1}
+    assert R.settle_bet_result("Batter Total Bases", "Over", 1, a) == "push"
+    assert R.settle_bet_result("Batter Total Bases", "Under", 1, a) == "push"
+    print("✓ settle_bet_result correctly identifies a real push on a whole-number line, for either side")
+
+
+def test_settle_bet_result_void_when_player_has_no_stat_at_all():
+    # The game is (by the caller's own responsibility) confirmed Final, but this player recorded
+    # nothing for this stat category at all -- a real scratch/DNP, the standard real sportsbook
+    # treatment is VOID, not a loss.
+    assert R.settle_bet_result("Batter HR", "Over", 0.5, {"p_k": 6}) == "void"
+    assert R.settle_bet_result("Batter HR", "Over", 0.5, None) == "void"
+    assert R.settle_bet_result("Batter HR", "Over", 0.5, {}) == "void"
+    print("✓ settle_bet_result returns 'void' (not silently a loss) when the player recorded nothing for this stat category")
+
+
+def test_settle_bet_result_none_for_unknown_market_or_missing_line():
+    assert R.settle_bet_result("Some Made Up Market", "Over", 0.5, {"hr": 1}) is None
+    assert R.settle_bet_result("Batter HR", "Over", None, {"hr": 1}) is None
+    print("✓ settle_bet_result returns None (an honest 'can't determine') for an unrecognized market or a missing line")
+
+
+def test_settle_bet_result_hand_verified_full_vocabulary():
+    # All four real result values, one hand-verified case each, in a single test for a clean
+    # read of the full real vocabulary this function actually produces.
+    assert R.settle_bet_result("Pitcher Strikeouts", "Over", 5.5, {"p_k": 8}) == "win"
+    assert R.settle_bet_result("Pitcher Strikeouts", "Over", 5.5, {"p_k": 3}) == "loss"
+    assert R.settle_bet_result("Pitcher Strikeouts", "Over", 6, {"p_k": 6}) == "push"
+    assert R.settle_bet_result("Pitcher Strikeouts", "Over", 5.5, {"hr": 1}) == "void"
+    print("✓ settle_bet_result's full real vocabulary (win/loss/push/void) hand-verified in one pass")
+
+
+# ----------------------------------------------------------------- settle_moneyline_result
+def test_settle_moneyline_result_win_and_loss():
+    assert R.settle_moneyline_result("New York Yankees", "New York Yankees", "Boston Red Sox", 5, 3) == "win"
+    assert R.settle_moneyline_result("Boston Red Sox", "New York Yankees", "Boston Red Sox", 5, 3) == "loss"
+    print("✓ settle_moneyline_result correctly compares the logged team against the real final score")
+
+
+def test_settle_moneyline_result_none_on_missing_or_tied_scores():
+    assert R.settle_moneyline_result("New York Yankees", "New York Yankees", "Boston Red Sox", None, 3) is None
+    assert R.settle_moneyline_result("New York Yankees", "New York Yankees", "Boston Red Sox", 4, 4) is None
+    print("✓ settle_moneyline_result returns None (never a guess) for missing or genuinely tied scores")
+
+
+def test_settle_moneyline_result_none_when_side_matches_neither_real_team():
+    assert R.settle_moneyline_result("Chicago Cubs", "New York Yankees", "Boston Red Sox", 5, 3) is None
+    print("✓ settle_moneyline_result returns None when the logged side doesn't match either real team — a genuine data mismatch, not resolved either way")
+
+
 def test_grade_slate_summary():
     plays = [
         dict(Player="A", PlayerId=1, Market="Batter HR", Side="Over", Line=0.5, ModelProb=0.24, Conviction=2.2),
@@ -210,7 +272,7 @@ def test_boxscore_parsing():
         "away": {"players": {
             "ID2": {"person": {"id": 2, "fullName": "Ace"},
                     "stats": {"pitching": {"strikeOuts": 8, "baseOnBalls": 2, "inningsPitched": "6.2"}}}}}}}
-    res = E._parse_boxscore_results(box)
+    res = E.parse_boxscore_results(box)
     assert res[1]["hr"] == 1 and res[1]["tb"] == 6      # double(2)+HR(4)=6
     assert res[1]["hrr"] == 7                            # 2 hits + 2 runs + 3 rbi = 7
     assert res[2]["p_k"] == 8 and res[2]["p_outs"] == 20  # 6.2 IP -> 20 outs
@@ -224,7 +286,7 @@ def test_boxscore_parsing_hrr_missing_runs_rbi_defaults_to_zero():
         "ID1": {"person": {"id": 1, "fullName": "Bench Bat"},
                 "stats": {"batting": {"hits": 1, "doubles": 0, "triples": 0, "homeRuns": 0}}}}},
         "away": {"players": {}}}}
-    res = E._parse_boxscore_results(box)
+    res = E.parse_boxscore_results(box)
     assert res[1]["hrr"] == 1   # 1 hit + 0 runs + 0 rbi
 
 

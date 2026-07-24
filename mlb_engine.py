@@ -402,7 +402,7 @@ def get_live_pitching_line(game_pk: int, side: str) -> Optional[Dict[str, Any]]:
     question asked together: "who's pitching, and how's it going." Every field read here
     (numberOfPitches, hits, earnedRuns, strikeOuts, baseOnBalls, inningsPitched) is a real,
     standard MLB Stats API pitching-stat field; strikeOuts/baseOnBalls/inningsPitched are already
-    relied on elsewhere in this file for completed-game grading (_parse_boxscore_results) —
+    relied on elsewhere in this file for completed-game grading (parse_boxscore_results) —
     numberOfPitches/hits/earnedRuns are new reads from this same dict, not a new endpoint or a
     new assumption about its shape.
 
@@ -730,11 +730,16 @@ def _ip_to_outs(ip) -> int:
         return 0
  
  
-def _parse_boxscore_results(box: Dict) -> Dict[int, Dict]:
+def parse_boxscore_results(box: Dict) -> Dict[int, Dict]:
     """Per-player actuals from one boxscore, keyed by player id.
- 
+
     Batting: hr, hits, tb, so, hrr (Hits+Runs+RBIs combined). Pitching: p_k, p_outs, p_bb.
-    (A player may have both.)"""
+    (A player may have both.)
+
+    Promoted from a module-private helper (_parse_boxscore_results) to this real, public name
+    directly on request, when bet_settlement.py needed to reuse this exact same parsing for a
+    genuinely separate purpose (real Bet Log settlement, not just this file's own completed-game
+    grading) -- a real, intentional API surface change, not just a rename for its own sake."""
     out: Dict[int, Dict] = {}
     for side in ("home", "away"):
         players = (((box.get("teams", {}) or {}).get(side, {}) or {}).get("players", {}) or {})
@@ -784,7 +789,7 @@ def get_player_results(date_str: str) -> Dict[int, Dict]:
             box = fetch_json(f"{BASE}/game/{g['gamePk']}/boxscore")
         except Exception:
             continue
-        for pid, rec in _parse_boxscore_results(box).items():
+        for pid, rec in parse_boxscore_results(box).items():
             results.setdefault(pid, {}).update(rec)
     return results
 
@@ -857,7 +862,7 @@ def get_team_bullpen_fatigue(team_id: int, before_date: str, days_back: int = 5)
     METHOD: fetches the team's real games in the window via get_team_schedule_range (one request
     covering the whole window, not days_back separate get_schedule() calls), then for each FINAL
     game in it fetches that game's boxscore and scans every player with a non-empty
-    stats.pitching entry — reusing the EXACT SAME parsing shape _parse_boxscore_results already
+    stats.pitching entry — reusing the EXACT SAME parsing shape parse_boxscore_results already
     has proven in production for grading (get_player_results), not new, unverified parsing logic.
 
     DELIBERATELY DOES NOT TRY TO DISTINGUISH "STARTER" FROM "RELIEVER" WITHIN A SINGLE BOXSCORE —

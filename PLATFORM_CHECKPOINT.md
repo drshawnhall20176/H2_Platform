@@ -4,9 +4,9 @@
 NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
 originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
 
-## What's in this checkpoint (all tested — 1071/1071 tests green as of 2026-07-23; the
-## 2026-07-21-through-2026-07-23 entries near the end, from "Discord community analysis"
-## through the fetch_json production-crash fix, are now fully logged in their real chronological
+## What's in this checkpoint (all tested — 1092/1092 tests green as of 2026-07-24; the
+## 2026-07-21-through-2026-07-24 entries near the end, from "Discord community analysis"
+## through automated Bet Log settlement, are now fully logged in their real chronological
 ## order — no gap remains between the 911-test mark below and the current count)
 
 ### Stage 1 — the sport-selector foundation
@@ -5131,6 +5131,55 @@ needed (pure view-layer control flow, no new testable logic) — verified instea
 reproducing the exact original `KeyError` in a standalone script, confirming the diagnosis, then
 confirming the two new checks both sit before the crash point in the actual file. Full suite
 re-verified unaffected at 1071.
+
+### Automated Bet Log settlement, for player props and moneylines (2026-07-24)
+A sharp question, not just a feature request: since Retrospective already captures real
+hits/misses, why is Bet Log's own `result` field still filled in by hand? Turned out the
+groundwork was already half-built — `betlog.py`'s own schema comment on its `player_id` column
+already said it was "added directly on request, for automated result settlement," referencing
+`retro.py`'s existing grading machinery. What had never been built was the function that actually
+used it.
+
+**Two genuinely separate settlement paths, not one:**
+`retro.settle_bet_result(market, side, line, actuals)` — for player props, reuses `MARKET_STAT`
+and the same real per-player boxscore data `mlb_engine.parse_boxscore_results` already builds
+(promoted from a module-private helper to a real public one specifically for this reuse). A
+richer real vocabulary than the existing `grade_play`'s own True/False/None: "win"/"loss"/
+"push"/"void". Deliberately NOT a change to `grade_play` itself, which stays scoped to the
+model's own always-.5-line board. The two new, real cases that came directly from the user's own
+reminder that result tracking has more than win/loss: an exact-tie on a genuine whole-number
+sportsbook line is a real PUSH (impossible on this platform's own .5 lines, but a bet logged by
+hand can carry any real line); a player with zero recorded stats at all despite the game being
+confirmed Final is a real VOID (the standard sportsbook treatment for a scratch/DNP), not
+silently a loss.
+
+`retro.settle_moneyline_result(side_team, home_team, away_team, home_score, away_score)` — a
+genuinely different comparison for moneylines specifically (no player, no line, just "did this
+team win"), settled directly off the schedule's own real score with zero boxscore fetch needed.
+
+**`bet_settlement.py`, new module** — the real orchestration: groups open bets by date (one
+schedule fetch per date, not per bet), caches each game's boxscore (one fetch per game, not per
+bet sharing it — confirmed directly with a call-counting test), and NEVER settles a bet whose
+game isn't confirmed Final via the same real status check already used in five other places in
+this codebase. Returns three honest, separately-labeled buckets — proposed, still_pending,
+unresolved — never silently merged or dropped. `build_settlement_plan` only ever proposes changes;
+`apply_settlement_plan` is the one function that actually writes, and it's the caller's own
+responsibility to have shown a real preview and gotten explicit confirmation first.
+
+**Safety-first UI on Bet Log**: a "Check for settleable bets" button builds the plan; the proposed
+changes render as a real table (bet, current status, new result) BEFORE anything is written;
+"Confirm and apply" is a separate, explicit step. Still-pending and unresolved bets get their own
+expanders explaining why, not silently left unexplained. MLB only for now, same honest scope as
+several other features on this platform — non-MLB sports show a clear "not available yet" message
+rather than silently doing nothing.
+
+21 new tests: 8 for the two new `retro.py` settlement functions (including a hand-verified full
+win/loss/push/void pass), 13 for `bet_settlement.py`'s own orchestration (including the two real
+cost-guard tests — boxscore fetched once per game not per bet, schedule fetched once per date not
+per bet — and the DNP-void case, the trickiest correctness concern). Ran one more integrated,
+realistic mixed-batch check by hand before calling this done: a real HR prop, a real moneyline,
+and a still-in-progress game in the same batch, all three resolved exactly as expected. 1092
+tests passing after this entry.
 
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
