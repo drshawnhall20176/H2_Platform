@@ -29,7 +29,7 @@ game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER
 
 @st.cache_data(ttl=300, show_spinner=False)
 def load_best_bets_mlb(date_str: str, fip_constant: float, preferred_book: str):
-    plays, meta = BBD.load_mlb_best_bets_board(date_str, fip_constant, preferred_book)
+    plays, meta, available_books = BBD.load_mlb_best_bets_board(date_str, fip_constant, preferred_book)
     slot_by_game = {m["label"]: (game_dt(m.get("game_date")), m.get("venue")) for m in meta}
     for pl in plays:
         dt, _ = slot_by_game.get(pl["Game"], (None, None))
@@ -40,11 +40,7 @@ def load_best_bets_mlb(date_str: str, fip_constant: float, preferred_book: str):
     # ET — Team @ Team" dropdown label, the same pattern Graded Picks/Bullpen Watch/Game Watch
     # already use. n_games (the old return value) was dead code -- never actually read anywhere
     # in this file, confirmed directly before making this change.
-    return plays, meta
-
-
-@st.cache_data(ttl=300, show_spinner=False)
-def load_best_bets_generic(sport_key: str, date_str: str):
+    return plays, meta, available_books
     """Any sport whose engine/projections don't need MLB's statcast/weather enrichment path —
     currently WNBA, and any future sport built the same way."""
     plays, meta = BBD.load_generic_best_bets_board(sport_key, date_str)
@@ -57,14 +53,17 @@ def load_best_bets_generic(sport_key: str, date_str: str):
 
 
 # --- controls ---------------------------------------------------------------
-preferred_book = BBD.render_book_selector(key_prefix="best_bets")
+preferred_book = BBD.render_book_selector(
+    key_prefix="best_bets",
+    available_books=st.session_state.get("best_bets_available_books"))
 if _active.key == "MLB":
     c1, c2 = st.columns([2, 1])
     with c1: target = st.date_input("Slate date", datetime.now())
     with c2: fip_constant = st.number_input("FIP constant", value=E.FIP_CONSTANT_DEFAULT, step=0.01)
     date_str = target.strftime("%Y-%m-%d")
     with st.spinner("Scanning the slate..."):
-        plays, meta = load_best_bets_mlb(date_str, fip_constant, preferred_book)
+        plays, meta, available_books = load_best_bets_mlb(date_str, fip_constant, preferred_book)
+    st.session_state["best_bets_available_books"] = available_books
 else:
     target = st.date_input("Slate date", datetime.now(eastern))
     date_str = target.strftime("%Y-%m-%d")
