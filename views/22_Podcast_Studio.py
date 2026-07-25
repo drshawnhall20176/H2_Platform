@@ -18,6 +18,14 @@ import podcast as PC
 import selections as SEL
 
 _active = sports.active()
+
+# UFC is outcome-based -- Podcast Studio's script generation is built on
+# player stat projections that don't exist for UFC.
+if _active.key == "UFC":
+    st.title("🎙️ H2 Podcast Studio")
+    st.info("🥊 Podcast Studio doesn't apply to UFC — the episode scripts are built on "
+            "player stat projections. Head to **UFC Fight Card** for tonight's bouts.")
+    st.stop()
 E, P = _active.engine, _active.projections
 
 if not sports.require_live_engine("Podcast Studio"):

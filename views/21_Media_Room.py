@@ -20,6 +20,15 @@ import selections as SEL
 import retro as R
 
 _active = sports.active()
+
+# UFC is outcome-based -- Media Room's discussion hooks and content generation
+# are built on counting-stat projections that don't exist for UFC.
+if _active.key == "UFC":
+    st.title("📣 H2 Sports Media")
+    st.info("🥊 Media Room content generation doesn't apply to UFC — the discussion hooks "
+            "and analysis are built on player stat projections. Head to **UFC Fight Card** "
+            "for tonight's bouts and odds.")
+    st.stop()
 E, P = _active.engine, _active.projections
 
 if not sports.require_live_engine("Media Room"):
