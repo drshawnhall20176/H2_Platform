@@ -69,6 +69,14 @@ if _active.key == "MLB":
         st.session_state[ss_key] = available_books
         st.rerun()
 else:
+    # UFC and other outcome-based sports have no projections pipeline -- redirect immediately
+    # before any loader is called, to avoid AttributeError on sport.projections.
+    if _active.key == "UFC":
+        st.info("🥊 This page doesn't apply to UFC — fights are outcome-based, not "
+                "counting-stat-based. Head to **UFC Fight Card** in the sidebar for "
+                "tonight's bouts, moneyline odds, method of victory lines, and fight "
+                "duration props.")
+        st.stop()
     target = st.date_input("Slate date", datetime.now(eastern))
     date_str = target.strftime("%Y-%m-%d")
     with st.spinner("Grading the slate..."):
