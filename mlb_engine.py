@@ -528,13 +528,27 @@ def build_slate(date_str: str, fip_constant: float = FIP_CONSTANT_DEFAULT,
         })
         for side in s["sides"]:
             opp = side["opp_pm"]
+            is_home = (side["team_key"] == "home")
+            game_hour = _eastern_hour(s["game"].get("game_date"))
+            is_day_game = (game_hour is not None and game_hour < 17)
             for idx, pid in enumerate(side["pids"]):
                 raw = raw_by_id.get(pid)
                 if not raw:
                     continue
-                rows.append(_hitter_row(raw, opp, side["team_name"], s["label"],
-                                        side["projected"], idx, s["game"].get("venue_id"),
-                                        side.get("opp_team_id")))
+                row = _hitter_row(raw, opp, side["team_name"], s["label"],
+                                  side["projected"], idx, s["game"].get("venue_id"),
+                                  side.get("opp_team_id"))
+                # Home/away and day/night context -- added directly on request so the "Why"
+                # column and pitcher diagnostics can surface the same splits Deezy was doing
+                # manually in Discord (e.g. "Shane Drohan doesn't do as well in home day games")
+                # rather than leaving community members to research this externally. Attached
+                # here (in build_slate) so every downstream consumer -- Best Bets, Graded Picks,
+                # Dinger Engine, Matchup Lab -- gets the same signal without each page re-deriving
+                # it from the game label string.
+                row["_is_home"] = is_home
+                row["_is_day_game"] = is_day_game
+                row["_game_date"] = s["game"].get("game_date")
+                rows.append(row)
     return rows, meta
  
  

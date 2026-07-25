@@ -2750,7 +2750,107 @@ def test_build_best_bets_opp_era_none_when_unavailable():
     print("✓ build_best_bets correctly leaves OppERA as None (not a fabricated 0.0) when the real ERA isn't available")
 
 
+# ----------------------------------------------------------------- _is_day_game_from_iso
+def test_is_day_game_from_iso_day_game():
+    # 4:10 PM ET = 20:10 UTC during EDT (UTC-4)
+    assert P._is_day_game_from_iso("2026-07-24T20:10:00Z") is True
+    print("✓ _is_day_game_from_iso correctly identifies a 4:10 PM ET game as a day game")
+
+
+def test_is_day_game_from_iso_night_game():
+    # 7:05 PM ET = 23:05 UTC
+    assert P._is_day_game_from_iso("2026-07-24T23:05:00Z") is False
+    # 8:10 PM ET = 00:10 UTC next day
+    assert P._is_day_game_from_iso("2026-07-25T00:10:00Z") is False
+    print("✓ _is_day_game_from_iso correctly identifies evening games as night games")
+
+
+def test_is_day_game_from_iso_none_when_missing():
+    assert P._is_day_game_from_iso(None) is None
+    assert P._is_day_game_from_iso("not-a-date") is None
+    print("✓ _is_day_game_from_iso returns None for missing/malformed input")
+
+
+# ----------------------------------------------------------------- _hitter_reasons: day/night and disadvantage
+def test_hitter_reasons_surfaces_disadvantage_explicitly():
+    # The Discord question: "should I skip players that say Disadvantage?"
+    # Answer surfaced now directly in the Why column instead of requiring external knowledge.
+    row = dict(Hand="R", **{"Opp Hand": "R"}, Advantage="Disadvantage",
+               _weather_hr=1.0, Due=0.0, _is_home=True, _is_day_game=False)
+    why = P._hitter_reasons(row, "Batter HR", "Over")
+    assert any("disadvantage" in w.lower() for w in why)
+    assert any("still leans" in w.lower() or "model still" in w.lower() for w in why)
+    print("✓ _hitter_reasons now explicitly surfaces platoon disadvantage in the Why column, "
+         "with the clarification that it's context not a veto")
+
+
+def test_hitter_reasons_day_game_context_for_hr_market():
+    row = dict(Hand="R", **{"Opp Hand": "L"}, Advantage="Advantage",
+               _weather_hr=1.0, Due=0.0, _is_home=True, _is_day_game=True)
+    why = P._hitter_reasons(row, "Batter HR", "Over")
+    assert any("home" in w and "day" in w for w in why)
+    print("✓ _hitter_reasons includes home/day context for HR market")
+
+
+def test_hitter_reasons_night_away_context():
+    row = dict(Hand="L", **{"Opp Hand": "R"}, Advantage="Advantage",
+               _weather_hr=1.0, Due=0.0, _is_home=False, _is_day_game=False)
+    why = P._hitter_reasons(row, "Batter Total Hits", "Over")
+    assert any("away" in w and "night" in w for w in why)
+    print("✓ _hitter_reasons includes away/night context for Total Hits market")
+
+
+def test_hitter_reasons_no_context_when_unknown():
+    # When _is_home and _is_day_game are not set, no location/time claim should appear
+    row = dict(Hand="R", **{"Opp Hand": "L"}, Advantage="Advantage",
+               _weather_hr=1.0, Due=0.0)
+    why = P._hitter_reasons(row, "Batter HR", "Over")
+    assert not any("home" in w or "away" in w or "day" in w or "night" in w for w in why)
+    print("✓ _hitter_reasons makes no location/time claim when _is_home/_is_day_game are absent")
+
+
+# ----------------------------------------------------------------- _pitcher_reasons: day/night/home
+def test_pitcher_reasons_surfaces_home_day_context_for_strikeouts():
+    # The Drohan case: "check splits" for a home day game pitcher — the exact insight
+    # Deezy was doing manually in Discord that the platform should surface automatically.
+    r = {"Opp": "Rockies", "_opp_k": 0.20, "_opp_bb": 0.08,
+         "Proj K": 5.2, "Proj BB": 2.1, "Proj IP": 6.0, "Proj Outs": 18.0,
+         "_is_home": True, "_is_day_game": True}
+    why = P._pitcher_reasons(r, "Pitcher Strikeouts", "Under")
+    assert any("home" in w and "day" in w for w in why)
+    print("✓ _pitcher_reasons surfaces 'home day game — check splits' for Pitcher Strikeouts, "
+         "matching the Drohan insight from Discord")
+
+
+def test_pitcher_reasons_no_context_when_unknown():
+    r = {"Opp": "Rockies", "_opp_k": 0.20, "_opp_bb": 0.08,
+         "Proj K": 5.2, "Proj BB": 2.1, "Proj IP": 6.0, "Proj Outs": 18.0}
+    why = P._pitcher_reasons(r, "Pitcher Strikeouts", "Over")
+    assert not any("home" in w or "away" in w for w in why)
+    print("✓ _pitcher_reasons makes no location claim when _is_home is absent")
+
+
+def test_pitcher_reasons_away_night_context_for_earned_runs():
+    r = {"Opp": "Brewers", "_opp_k": 0.22, "_opp_bb": 0.08,
+         "Proj K": 6.0, "Proj IP": 6.5, "Proj Outs": 19.5, "ERA": 3.25,
+         "_is_home": False, "_is_day_game": False}
+    why = P._pitcher_reasons(r, "Pitcher Earned Runs", "Under")
+    assert any("away" in w and "night" in w for w in why)
+    print("✓ _pitcher_reasons surfaces away/night context for Pitcher Earned Runs market")
+
+
 if __name__ == "__main__":
+    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
+    passed = 0
+    for t in tests:
+        try:
+            t(); print(f"PASS  {t.__name__}"); passed += 1
+        except AssertionError as e:
+            print(f"FAIL  {t.__name__}: {e}")
+        except Exception as e:  # noqa: BLE001
+            print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
+    print(f"\n{passed}/{len(tests)} tests passed")
+
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
     for t in tests:

@@ -25,6 +25,7 @@ from __future__ import annotations
 import math
 import re
 import unicodedata
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
  
 import numpy as np
@@ -124,6 +125,19 @@ def prob_to_american(p: float) -> Optional[int]:
     if p <= 0 or p >= 1:
         return None
     return int(round(-100 * p / (1 - p))) if p >= 0.5 else int(round(100 * (1 - p) / p))
+
+
+def _is_day_game_from_iso(iso_utc):
+    """True if the game starts before 5pm ET, False for night, None if unknown.
+    US Eastern = UTC-4 during MLB season (April-October, EDT)."""
+    if not iso_utc:
+        return None
+    try:
+        dt = datetime.strptime(str(iso_utc)[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+        et_hour = (dt - timedelta(hours=4)).hour
+        return et_hour < 17
+    except (ValueError, TypeError):
+        return None
  
  
 # ---- regression to the mean (shrinkage) ------------------------------------
@@ -2162,6 +2176,11 @@ def build_pitcher_projection_rows(rows: List[Dict], meta: List[Dict],
                 "_opp_k": (opp_rates or {}).get("k"), "_opp_bb": (opp_rates or {}).get("bb"),
                 "_game": m["label"], "_pid": pm.id, "_game_date": m.get("game_date"),
                 "_team_id": team_id, "_days_rest": days_rest,
+                # Home/away and day/night context -- same signals added to hitter rows in
+                # mlb_engine.build_slate, now also on pitcher rows so _pitcher_reasons can
+                # surface split-context in the "Why" column (e.g. Drohan's day-game home splits).
+                "_is_home": (team == m.get("home_name")),
+                "_is_day_game": _is_day_game_from_iso(m.get("game_date")),
             })
     out.sort(key=lambda r: r["Proj K"], reverse=True)
     return out
@@ -2212,8 +2231,20 @@ def _hitter_reasons(r: Dict, market: str, side: str) -> List[str]:
     why = []
     offense = market in ("Batter HR", "Batter Total Bases", "Batter Total Hits",
                          "Batter Singles", "Batter Doubles", "Batter Triples")
+    is_home = r.get("_is_home")
+    is_day = r.get("_is_day_game")
+    location = ("home" if is_home else "away") if is_home is not None else None
+    time_slot = ("day" if is_day else "night") if is_day is not None else None
+
     if side == "Over" and offense and r.get("Advantage") == "Advantage":
         why.append(f"platoon edge ({r.get('Hand')} bat vs {r.get('Opp Hand')}HP)")
+    elif side == "Over" and offense and r.get("Advantage") == "Disadvantage":
+        # Surface the platoon disadvantage so users know the model still leans Over
+        # despite the handedness mismatch -- the same thing users were asking about in Discord.
+        why.append(f"platoon disadvantage ({r.get('Hand')} bat vs {r.get('Opp Hand')}HP) — "
+                  "model still leans Over based on other factors")
+    if location and time_slot and market in ("Batter HR", "Batter Total Bases", "Batter Total Hits"):
+        why.append(f"{location} {time_slot} game")
     if market in ("Batter HR", "Batter Total Bases") and (r.get("_weather_hr") or 1.0) >= 1.05:
         why.append(f"weather aiding power (+{(r['_weather_hr'] - 1) * 100:.0f}%)")
     if market == "Batter HR" and (r.get("Due") or 0) > 0.01:
@@ -2222,16 +2253,9 @@ def _hitter_reasons(r: Dict, market: str, side: str) -> List[str]:
         why.append("elevated whiff risk in this matchup" if side == "Over"
                    else "strong contact profile (rarely strikes out)")
     if market == "Batter Walks":
-        # Honest to what the model actually does: walks come from the SAME PA-outcome
-        # distribution as HR/Hits, but driven by plate discipline (his own walk rate,
-        # matchup-adjusted against the pitcher's own control), not power or platoon the way
-        # HR/TB are -- a genuinely different real driver, not the same reasoning relabeled.
         why.append("real plate discipline in this matchup" if side == "Over"
                    else "aggressive approach, rarely walks")
     if market in ("Batter Runs", "Batter RBIs"):
-        # Honest to what the model actually does for these two markets specifically (see
-        # batter_counting_rate's own docstring): the opposing starter's ERA is the one real
-        # opponent-quality signal factored in here, not platoon or weather the way HR/Hits are.
         opp_era = (r.get("_opp_stat") or {}).get("era")
         if opp_era:
             if side == "Over" and opp_era >= 4.5:
@@ -2239,14 +2263,8 @@ def _hitter_reasons(r: Dict, market: str, side: str) -> List[str]:
             elif side == "Under" and opp_era <= 3.3:
                 why.append(f"facing a strong starter ({opp_era:.2f} ERA)")
     if market == "Batter Stolen Bases":
-        # Deliberately no opponent read here -- SB doesn't get one in the model at all (catcher
-        # arm/pop time isn't captured on this platform yet), so the honest reason is just his
-        # own real season rate driving this, not a fabricated matchup factor.
         why.append("based on his own season stolen-base rate")
     if market == "Batter Hits+Runs+RBIs":
-        # Honest about what's actually different here: this is the one market combining three
-        # correlated stats (a hot game tends to boost all three together, not independently),
-        # not a fabricated claim of precision the underlying model doesn't have.
         why.append("combined hits/runs/RBI projection (correlation-aware, not treated as three independent stats)")
     if not why:
         why.append(f"model leans {side} of a typical line here")
@@ -2255,7 +2273,25 @@ def _hitter_reasons(r: Dict, market: str, side: str) -> List[str]:
  
 def _pitcher_reasons(r: Dict, market: str, side: str) -> List[str]:
     why, opp_k, opp_bb = [], r.get("_opp_k"), r.get("_opp_bb")
+    is_home = r.get("_is_home")
+    is_day = r.get("_is_day_game")
+
+    # Home/day context -- added directly on request after community members (Deezy in Discord)
+    # were doing this research manually for every game. A pitcher whose top-line ERA looks
+    # strong but who underperforms specifically at home in day games is a real, meaningful
+    # signal the platform should surface in the "Why" column, not leave for users to find on
+    # their own externally. Home/away and day/night splits are the #1 thing Deezy cited when
+    # overriding what looked like strong model conviction on a pitcher.
+    location = None
+    if is_home is not None:
+        location = "home" if is_home else "away"
+    time_slot = None
+    if is_day is not None:
+        time_slot = "day" if is_day else "night"
+
     if market == "Pitcher Strikeouts":
+        if location and time_slot:
+            why.append(f"{location} {time_slot} game — check splits")
         if side == "Over":
             if opp_k and opp_k > 0.23:
                 why.append(f"{r['Opp']} whiff-prone ({opp_k * 100:.0f}% K rate)")
@@ -2269,17 +2305,14 @@ def _pitcher_reasons(r: Dict, market: str, side: str) -> List[str]:
             why.append(f"{r['Opp']} patient lineup ({opp_bb * 100:.0f}% walk rate)")
         why.append(f"projects {r.get('Proj BB')} BB")
     elif market == "Pitcher Outs":
+        if location and time_slot:
+            why.append(f"{location} {time_slot} game — check IP/Outs splits")
         why.append(f"projects {r.get('Proj IP')} IP ({r.get('Proj Outs')} outs)")
     elif market == "Pitcher Earned Runs":
-        # Honest to the model here too: no opposing-lineup adjustment for ER (see
-        # project_pitcher's own docstring for why), so the real driver is this pitcher's own
-        # ERA and projected innings, not a matchup factor the model doesn't actually apply.
+        if location and time_slot:
+            why.append(f"{location} {time_slot} game — check ERA splits")
         why.append(f"{r.get('ERA')} ERA over a projected {r.get('Proj IP')} IP")
     elif market == "Pitcher Hits Allowed":
-        # Honest about a real, established limitation: hits allowed is heavily shrunk toward
-        # league average (DIPS theory -- largely out of a pitcher's own control), so this is a
-        # real but genuinely softer signal than K/BB, and the reason says so rather than
-        # overstating it as a strong individual read.
         why.append(f"projects {r.get('Proj Hits Allowed')} hits allowed (regressed toward "
                   f"league average — largely defense/luck-driven, not just this pitcher)")
     if not why:
