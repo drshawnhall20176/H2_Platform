@@ -1387,6 +1387,12 @@ def get_pitcher_starts_this_season(pitcher_id: int, season: int,
         return []
 
     out: List[Dict[str, Any]] = []
+    # Build a gamePk -> home_team_id lookup from the splits themselves.
+    # The split's team object is the pitcher's own team; the game object has the gamePk.
+    # We determine home/away by checking if sp.get("isHome") is present (hitting gameLog
+    # includes it; pitching gameLog may not). When isHome is None, fall back to checking
+    # if the pitcher's team ID matches the home team ID from the schedule game object.
+    # The game object in pitching gameLog sometimes includes "teams" with home/away info.
     for sp in splits:
         game = sp.get("game") or {}
         game_pk = game.get("gamePk")
@@ -1394,20 +1400,35 @@ def get_pitcher_starts_this_season(pitcher_id: int, season: int,
         if game_pk is None:
             continue
         if before_date and game_date and game_date >= before_date:
-            continue   # no lookahead — never include a game on/after the date being analyzed
+            continue
         stat = sp.get("stat") or {}
         gs = safe_float(stat.get("gamesStarted"))
         outs = _ip_to_outs(stat.get("inningsPitched", "0.0"))
         if gs >= 1 or outs >= 9:
-            game_time = (game.get("gameDate") or sp.get("date") or "")
+            # _game_time: prefer the ISO UTC timestamp (includes time for day/night filtering)
+            # over a date-only string. gameDate in the game object is typically ISO UTC.
+            game_time = (game.get("gameDate")   # "2026-07-25T17:10:00Z" -- preferred
+                         or stat.get("startTime") or stat.get("gameStartTime")
+                         or sp.get("date") or "")   # fallback: date-only, no time component
+
+            # Determine isHome using multiple fallbacks:
+            # 1. sp.get("isHome") -- present in some gameLog formats
+            # 2. game["teams"]["home"]["team"]["id"] vs pitcher's team -- when game has teams obj
+            # 3. None (unknown) -- venue filter will skip this start conservatively
+            is_home = sp.get("isHome")
+            if is_home is None:
+                pitcher_team_id = (sp.get("team") or {}).get("id")
+                game_teams = game.get("teams") or {}
+                home_team_id = ((game_teams.get("home") or {}).get("team") or {}).get("id")
+                if pitcher_team_id and home_team_id:
+                    is_home = (pitcher_team_id == home_team_id)
+
             out.append({
                 "gamePk": game_pk,
                 "game_date": game_date,
                 "stat": stat,
-                # isHome is a split-level field on sp -- store it here so get_pitcher_split_stat
-                # can filter by venue without needing a separate schedule lookup.
-                "isHome": sp.get("isHome"),
-                "_game_time": game_time,   # ISO UTC timestamp for day/night filtering
+                "isHome": is_home,
+                "_game_time": game_time,
             })
     return out
 
@@ -1501,9 +1522,17 @@ def get_hitter_split_stat(player_id: int, season: int, date_str: str,
         if safe_float(stat.get("plateAppearances")) < 1:
             continue
 
-        # isHome is a split-level field on sp, not inside the stat dict.
-        # stat.get("homeAway") is always None -- the correct path is sp.get("isHome").
-        is_home = sp.get("isHome")   # True/False/None
+        # isHome is a split-level field -- also try game["teams"]["home"]["team"]["id"]
+        # vs pitcher's team ID as a fallback when isHome isn't populated.
+        is_home = sp.get("isHome")
+        if is_home is None:
+            hitter_team_id = (sp.get("team") or {}).get("id")
+            game_obj = sp.get("game") or {}
+            game_teams = game_obj.get("teams") or {}
+            home_team_id = ((game_teams.get("home") or {}).get("team") or {}).get("id")
+            if hitter_team_id and home_team_id:
+                is_home = (hitter_team_id == home_team_id)
+
         if venue is not None and is_home is not None:
             if venue == "home" and not is_home:
                 continue
