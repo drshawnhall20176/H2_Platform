@@ -137,15 +137,20 @@ def load(date_str: str, fip_constant: float, venue_split=None, time_split=None):
     projections = P.build_pitcher_projection_rows(rows, meta, seed=11)
     fip_rows = []
     for m in meta:
-        for pm, team, opp, team_id in ((m["home_pm"], m["home_name"], m["away_name"], m.get("home_id")),
-                                       (m["away_pm"], m["away_name"], m["home_name"], m.get("away_id"))):
+        gd = m.get("game_date")
+        import projections as _P
+        is_day = _P._is_day_game_from_iso(gd)
+        for pm, team, opp, team_id, is_home in (
+                (m["home_pm"], m["home_name"], m["away_name"], m.get("home_id"), True),
+                (m["away_pm"], m["away_name"], m["home_name"], m.get("away_id"), False)):
             if pm.id is None or pm.era == 0:
                 continue
             fip_rows.append({
                 "Pitcher": pm.name, "Team": team, "Opponent": opp, "Hand": pm.hand,
                 "ERA": round(pm.era, 2), "FIP": pm.fip, "Delta": round(pm.era - pm.fip, 2),
                 "K/9": round(pm.k9, 1), "WHIP": round(pm.whip, 2), "HR/9": round(pm.hr9, 2), "OBA": pm.oba,
-                "_game_date": m.get("game_date"), "_team_id": team_id,
+                "_game_date": gd, "_team_id": team_id,
+                "_is_home": is_home, "_is_day_game": is_day,
             })
     return fip_rows, projections, meta
 
@@ -163,6 +168,26 @@ venue_split, time_split = BBD.render_split_selector(key_prefix="pitching_lab")
 
 with st.spinner("Loading starters and opposing lineups..."):
     fip_rows, proj_rows, meta = load(date_str, fip_constant, venue_split, time_split)
+
+# Situational display filter: when a split is active, only show pitchers who are actually
+# in that situation tonight (home starters in home games, etc.)
+if venue_split or time_split:
+    def _matches(r):
+        is_home = r.get("_is_home")
+        is_day = r.get("_is_day_game")
+        if venue_split == "home" and is_home is False:
+            return False
+        if venue_split == "away" and is_home is True:
+            return False
+        if time_split == "day" and is_day is False:
+            return False
+        if time_split == "night" and is_day is True:
+            return False
+        return True
+
+    matching = {r["Pitcher"] for r in fip_rows if _matches(r)}
+    fip_rows = [r for r in fip_rows if r["Pitcher"] in matching]
+    proj_rows = [r for r in proj_rows if r["Pitcher"] in matching]
 
 if not fip_rows:
     st.info("No probable starters found for this date. Pick a date with scheduled games.")

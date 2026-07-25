@@ -77,6 +77,30 @@ if not pitchers:
     st.warning("No probable starters found for this date yet — check back closer to game time.")
     st.stop()
 
+# Situational filter: when a split is active, narrow the pitcher picker to only pitchers
+# actually in that situation tonight -- the split stats computed during matchup analysis
+# reflect what they do in this specific context.
+if venue_split or time_split:
+    import projections as _P
+    filtered_pitchers = []
+    for r in pitchers:
+        is_home = r.get("_is_home")
+        is_day = r.get("_is_day_game")
+        if venue_split == "home" and is_home is False:
+            continue
+        if venue_split == "away" and is_home is True:
+            continue
+        if time_split == "day" and is_day is False:
+            continue
+        if time_split == "night" and is_day is True:
+            continue
+        filtered_pitchers.append(r)
+    if filtered_pitchers:
+        pitchers = filtered_pitchers
+    else:
+        st.info("No pitchers match the current split filters for tonight's slate.")
+        st.stop()
+
 # Time slot + Game filters — same shared helpers Best Bets and the WNBA/NBA/NCAAMB/NFL Matchup
 # Lab pages already use, narrowing a busy night's pitcher list before picking one. Two pitchers
 # share a game (home/away starter), so filtering is by the shared "Game" label, not per-pitcher.

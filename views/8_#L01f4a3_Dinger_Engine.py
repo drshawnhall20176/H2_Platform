@@ -111,6 +111,24 @@ venue_split, time_split = BBD.render_split_selector(key_prefix="dinger_engine")
 
 with st.spinner("Compiling telemetry..."):
     rows, meta, n_statcast, wx_by_venue = load_slate(date_str, fip_constant, venue_split, time_split)
+
+# Situational display filter: when a split is active, only show hitters actually in
+# that situation tonight (away-team hitters in night games, etc.)
+if venue_split or time_split:
+    filtered_rows = []
+    for r in rows:
+        is_home = r.get("_is_home")
+        is_day = r.get("_is_day_game")
+        if venue_split == "home" and is_home is False:
+            continue
+        if venue_split == "away" and is_home is True:
+            continue
+        if time_split == "day" and is_day is False:
+            continue
+        if time_split == "night" and is_day is True:
+            continue
+        filtered_rows.append(r)
+    rows = filtered_rows
  
 if not rows:
     st.info("No hitters compiled for this date. Pick a date with scheduled MLB games.")
