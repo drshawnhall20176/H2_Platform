@@ -1389,13 +1389,8 @@ def get_pitcher_starts_this_season(pitcher_id: int, season: int,
 
     out: List[Dict[str, Any]] = []
 
-    # Build a gamePk→is_home lookup from the team schedule when team_id is provided.
-    # This is the reliable source: get_team_schedule_range returns home_id for every game,
-    # letting us determine home/away definitively. The pitching gameLog API response does
-    # NOT reliably include isHome at the split level (confirmed by live testing -- Foster
-    # Griffin's 10 day starts showed n=0 because isHome was None for every start). Without
-    # this lookup, venue filtering silently does nothing.
-    pk_is_home: Dict[int, bool] = {}
+    # Build gamePk → {is_home, game_date} from team schedule -- the reliable source.
+    pk_info: Dict[int, Dict] = {}
     if team_id:
         start_of_season = f"{season}-03-01"
         end_date = before_date or f"{season}-12-31"
@@ -1404,9 +1399,12 @@ def get_pitcher_starts_this_season(pitcher_id: int, season: int,
             for g in schedule_games:
                 pk = g.get("gamePk")
                 if pk is not None:
-                    pk_is_home[int(pk)] = (g.get("home_id") == team_id)
+                    pk_info[int(pk)] = {
+                        "is_home": (g.get("home_id") == team_id),
+                        "game_date": g.get("game_date"),  # ISO UTC with time component
+                    }
         except Exception:
-            pass  # fall back to sp.get("isHome") / game teams object
+            pass
 
     for sp in splits:
         game = sp.get("game") or {}
@@ -1424,9 +1422,12 @@ def get_pitcher_starts_this_season(pitcher_id: int, season: int,
                          or stat.get("startTime") or stat.get("gameStartTime")
                          or sp.get("date") or "")
 
-            # isHome priority: schedule lookup > sp.get("isHome") > game teams object > None
+            # isHome + game_date priority: schedule lookup (reliable) > gameLog fields
             gp_int = int(game_pk) if game_pk else None
-            is_home = pk_is_home.get(gp_int) if gp_int in pk_is_home else None
+            sched = pk_info.get(gp_int) if gp_int else None
+            is_home = sched["is_home"] if sched else None
+            sched_game_date = sched["game_date"] if sched else None
+
             if is_home is None:
                 is_home = sp.get("isHome")
             if is_home is None:
@@ -1436,6 +1437,10 @@ def get_pitcher_starts_this_season(pitcher_id: int, season: int,
                 if pitcher_team_id and home_team_id:
                     is_home = (pitcher_team_id == home_team_id)
 
+            # Use schedule's ISO timestamp for day/night (reliable) vs gameLog's gameDate (may be date-only)
+            game_time = (sched_game_date or game.get("gameDate")
+                         or stat.get("startTime") or stat.get("gameStartTime")
+                         or sp.get("date") or "")
             out.append({
                 "gamePk": game_pk,
                 "game_date": game_date,
@@ -1485,11 +1490,14 @@ def get_pitcher_split_stat(pitcher_id: int, season: int, date_str: str,
             if game_time:
                 try:
                     hour = _eastern_hour(game_time)
-                    is_day = hour is not None and hour < 17
-                    if time_of_day == "day" and not is_day:
-                        continue
-                    if time_of_day == "night" and is_day:
-                        continue
+                    if hour is not None:  # only filter when we actually know the time
+                        is_day = hour < 17
+                        if time_of_day == "day" and not is_day:
+                            continue
+                        if time_of_day == "night" and is_day:
+                            continue
+                    # If hour is None (date-only string, no time component), include
+                    # the game conservatively -- never drop a start we can't classify
                 except Exception:
                     pass
 
@@ -1548,19 +1556,19 @@ def get_hitter_split_stat(player_id: int, season: int, date_str: str,
                 continue
 
         if time_of_day is not None:
-            # game_date at the split level is "YYYY-MM-DD" only (no time component).
-            # The game object may have a more precise timestamp.
             game_obj = sp.get("game") or {}
             game_time = (game_obj.get("gameDate") or game_obj.get("officialDate")
                          or stat.get("startTime") or stat.get("gameStartTime"))
             if game_time:
                 try:
                     hour = _eastern_hour(game_time)
-                    is_day = hour is not None and hour < 17
-                    if time_of_day == "day" and not is_day:
-                        continue
-                    if time_of_day == "night" and is_day:
-                        continue
+                    if hour is not None:  # only filter when we actually know the time
+                        is_day = hour < 17
+                        if time_of_day == "day" and not is_day:
+                            continue
+                        if time_of_day == "night" and is_day:
+                            continue
+                    # If hour is None, include conservatively
                 except Exception:
                     pass
 
