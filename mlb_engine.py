@@ -1406,6 +1406,136 @@ def get_pitcher_starts_this_season(pitcher_id: int, season: int,
     return out
 
 
+MIN_SPLIT_STARTS = 5   # minimum starts/games before we use a split over the full-season line
+
+
+def get_pitcher_split_stat(pitcher_id: int, season: int, date_str: str,
+                           venue: Optional[str] = None,
+                           time_of_day: Optional[str] = None) -> tuple:
+    """Aggregate pitching stat dict for only the starts matching venue/time_of_day, plus the
+    start count. Returns (stat_dict, n_starts) where stat_dict matches PitcherMetrics.stat,
+    or (None, n_starts) when the filtered sample has fewer than MIN_SPLIT_STARTS starts.
+
+    None is the explicit signal to fall back to the full-season stat -- never silently use a
+    3-start split as if it were stable. venue: 'home'/'away'/None. time_of_day: 'day'/'night'/None.
+
+    HONEST LIMITATION on time_of_day: MLB's gameLog stat splits don't always include a start
+    time field. When unavailable, time_of_day filtering can't be applied to that game and it
+    is included conservatively (same posture as get_team_recent_form's own day/night caveat)."""
+    starts = get_pitcher_starts_this_season(pitcher_id, season, before_date=date_str)
+    if not starts:
+        return None, 0
+
+    filtered = []
+    for s in starts:
+        stat = s.get("stat") or {}
+        home_away = stat.get("homeAway")   # "H" or "A" when gameLog includes it
+
+        if venue is not None and home_away is not None:
+            if venue == "home" and home_away != "H":
+                continue
+            if venue == "away" and home_away != "A":
+                continue
+
+        if time_of_day is not None:
+            game_time = stat.get("startTime") or stat.get("gameStartTime")
+            if game_time:
+                try:
+                    hour = _eastern_hour(game_time)
+                    is_day = hour is not None and hour < 17
+                    if time_of_day == "day" and not is_day:
+                        continue
+                    if time_of_day == "night" and is_day:
+                        continue
+                except Exception:
+                    pass
+
+        filtered.append(s)
+
+    if len(filtered) < MIN_SPLIT_STARTS:
+        return None, len(filtered)
+
+    aggregated = _aggregate_pitching_splits([{"stat": s["stat"]} for s in filtered])
+    return aggregated, len(filtered)
+
+
+def get_hitter_split_stat(player_id: int, season: int, date_str: str,
+                          venue: Optional[str] = None,
+                          time_of_day: Optional[str] = None) -> tuple:
+    """Aggregate hitting stat dict for only the games matching venue/time_of_day, plus the
+    game count. Returns (stat_dict, n_games) matching get_hitter_raw's season stat shape,
+    or (None, n_games) when the sample is below MIN_SPLIT_STARTS games.
+
+    Same honest constraint as get_pitcher_split_stat: None signals fall back to full-season."""
+    try:
+        data = fetch_json(f"{BASE}/people/{player_id}/stats",
+                          {"stats": "gameLog", "group": "hitting",
+                           "season": season, "gameType": "R"})
+    except Exception:
+        return None, 0
+    try:
+        splits = (data.get("stats") or [{}])[0].get("splits", [])
+    except (IndexError, AttributeError):
+        return None, 0
+
+    filtered = []
+    for sp in splits:
+        game_date = sp.get("date", "")
+        if date_str and game_date >= date_str:
+            continue
+        stat = sp.get("stat") or {}
+        if safe_float(stat.get("plateAppearances")) < 1:
+            continue
+
+        home_away = stat.get("homeAway")
+        if venue is not None and home_away is not None:
+            if venue == "home" and home_away != "H":
+                continue
+            if venue == "away" and home_away != "A":
+                continue
+
+        if time_of_day is not None:
+            game_time = stat.get("startTime") or stat.get("gameStartTime")
+            if game_time:
+                try:
+                    hour = _eastern_hour(game_time)
+                    is_day = hour is not None and hour < 17
+                    if time_of_day == "day" and not is_day:
+                        continue
+                    if time_of_day == "night" and is_day:
+                        continue
+                except Exception:
+                    pass
+
+        filtered.append(stat)
+
+    if len(filtered) < MIN_SPLIT_STARTS:
+        return None, len(filtered)
+
+    totals: Dict[str, float] = {}
+    counting = ("plateAppearances", "atBats", "hits", "homeRuns", "doubles", "triples",
+                "baseOnBalls", "strikeOuts", "totalBases", "rbi", "runs", "stolenBases",
+                "hitByPitch", "sacFlies")
+    for stat in filtered:
+        for k in counting:
+            totals[k] = totals.get(k, 0.0) + safe_float(stat.get(k))
+
+    ab = totals.get("atBats", 0)
+    h = totals.get("hits", 0)
+    bb = totals.get("baseOnBalls", 0)
+    sf = totals.get("sacFlies", 0)
+    hbp = totals.get("hitByPitch", 0)
+    tb = totals.get("totalBases", 0)
+    if ab > 0:
+        totals["avg"] = round(h / ab, 3)
+        totals["slg"] = round(tb / ab, 3)
+    obp_d = ab + bb + hbp + sf
+    if obp_d > 0:
+        totals["obp"] = round((h + bb + hbp) / obp_d, 3)
+    totals["ops"] = round(totals.get("slg", 0.0) + totals.get("obp", 0.0), 3)
+    return totals, len(filtered)
+
+
 def get_pitcher_batting_order_splits(pitcher_id: int, season: int,
                                      before_date: Optional[str] = None) -> Dict[int, Dict[str, Any]]:
     """Cumulative hitting stats THIS PITCHER has allowed this season, broken down by the

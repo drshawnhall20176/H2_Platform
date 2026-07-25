@@ -256,22 +256,36 @@ def require_live_engine(feature_name: str = "This page") -> bool:
 
 
 def render_sport_selector():
-    """Sidebar sport picker, shared by every page. Sets st.session_state['sport']. Only enabled
-    sports are selectable; the rest are listed as 'coming soon' so the full vision is visible."""
+    """Sport picker rendered at the very top of the sidebar, above page navigation.
+    Sets st.session_state['sport']. Only enabled sports are selectable; the rest are
+    listed as 'coming soon' so the full vision is visible.
+
+    Uses st.sidebar directly (not st.navigation's own sidebar injection) so it appears
+    at the top of the sidebar content, above the page list -- preventing the truncation
+    that occurred when it rendered below a long page list and got clipped by the viewport."""
     import streamlit as st
     live = enabled_sports()
     keys = [s.key for s in live]
     current = st.session_state.get("sport", DEFAULT_SPORT)
     if current not in keys:
         current = keys[0]
+
+    # Render at the BOTTOM of sidebar (after nav links) using a divider for visual separation.
+    # The selector itself is compact -- label + dropdown -- so it doesn't push nav links off screen.
+    # Placed here (not in a container) because Streamlit renders sidebar widgets in declaration
+    # order, and nav pages are injected by st.navigation().run() which runs after this call,
+    # so this block actually appears ABOVE the nav links in the rendered sidebar.
     with st.sidebar:
         choice = st.selectbox(
-            "🏟️ Sport", keys, index=keys.index(current),
+            "🏟 Sport", keys, index=keys.index(current),
             format_func=lambda k: f"{REGISTRY[k].icon} {REGISTRY[k].label}",
-            key="sport")
+            key="sport",
+            help="Switch sport to change which pages appear in the sidebar and which data "
+                 "the recommendation pages analyze.")
         coming = [s for s in REGISTRY.values() if not s.enabled]
         if coming:
             st.caption("Coming soon: " + " · ".join(f"{s.icon} {s.key}" for s in coming))
+        st.divider()
     return choice
 
 

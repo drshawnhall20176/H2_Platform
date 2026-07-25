@@ -82,6 +82,52 @@ def render_book_selector(key_prefix: str = "book",
     return books_to_show[book_labels.index(selected_label)]
 
 
+def render_split_selector(key_prefix: str = "split") -> tuple:
+    """Render the venue (Home/Away/All) and time-of-day (Day/Night/All) split selectors
+    inline on the main page. Returns (venue_split, time_split) as Odds-API-style strings:
+    venue_split: 'home', 'away', or None (All). time_split: 'day', 'night', or None (All).
+
+    Placed inline (not sidebar) so users clearly understand the split toggles affect the
+    CURRENT PAGE's conviction scores, grades, and rankings -- not a global preference.
+    Default is All/All (full-season, existing behavior), so the page works identically for
+    users who never touch the toggles.
+
+    IMPORTANT -- these drive a real recomputation of every probability on the board when
+    set. A clear per-play indicator (via _split_label in the Why column) ensures no one
+    looks at a changed conviction score without knowing the split drove it."""
+    vc1, vc2 = st.columns(2)
+    with vc1:
+        venue_opt = st.radio(
+            "🏟️ Venue split",
+            ["All", "Home", "Away"],
+            horizontal=True,
+            key=f"{key_prefix}_venue",
+            help="Recomputes model probabilities using only each pitcher's and hitter's "
+                 "home (or away) game log. Falls back to full-season when fewer than 5 "
+                 "qualifying starts/games exist — shown in 'Why the model likes it'.")
+    with vc2:
+        time_opt = st.radio(
+            "🕐 Time split",
+            ["All", "Day", "Night"],
+            horizontal=True,
+            key=f"{key_prefix}_time",
+            help="Recomputes using only day games (before 5pm ET) or night games. "
+                 "Day games are a minority of the schedule so samples are often thin — "
+                 "the model will show 'full-season used (thin split)' when fewer than 5 "
+                 "qualifying games exist.")
+    venue_split = None if venue_opt == "All" else venue_opt.lower()
+    time_split = None if time_opt == "All" else time_opt.lower()
+
+    if venue_split or time_split:
+        parts = [p for p in [venue_opt if venue_split else None,
+                              time_opt if time_split else None] if p]
+        st.caption(f"⚠️ **Split mode active: {' + '.join(parts)} games only.** "
+                  "Conviction scores and grades reflect this split, not the full-season "
+                  "baseline. Plays showing 'full-season used' in the Why column had fewer "
+                  "than 5 qualifying games in this split — those numbers are unchanged.")
+    return venue_split, time_split
+
+
 def get_available_books_for_date(date_str: str) -> List[str]:
     """Returns the list of books stored in session state for tonight, or the full US_BOOKS
     list as a safe fallback when nothing has been stored yet."""
@@ -90,7 +136,9 @@ def get_available_books_for_date(date_str: str) -> List[str]:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def build_mlb_board(date_str: str, fip_constant: float, odds_api_key: Optional[str] = None,
-                    preferred_book: str = O.DEFAULT_BOOK):
+                    preferred_book: str = O.DEFAULT_BOOK,
+                    venue_split: Optional[str] = None,
+                    time_split: Optional[str] = None):
     """The ONE shared MLB board-building pipeline — slate -> real sportsbook lines -> statcast/
     weather enrichment -> hitter/pitcher projections -> ranked plays -> bullpen-blend re-pricing.
     Returns (rows, meta, plays).
@@ -178,6 +226,65 @@ def build_mlb_board(date_str: str, fip_constant: float, odds_api_key: Optional[s
     sc, k = load_statcast()
     wx = load_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
 
+    # Split stat overrides -- when venue_split or time_split is set, replace each pitcher's
+    # full-season stat (and each hitter's _stat) with their filtered game log, so the model
+    # computes probabilities against what this player actually does in THIS type of game.
+    # Falls back to full-season silently when the split sample is below MIN_SPLIT_STARTS (5).
+    # The _split_label attached here flows through to the Why column so every play shows
+    # which data source was used -- never a silent substitution.
+    season = int(date_str[:4])
+    if venue_split or time_split:
+        # Pitcher splits: replace pm.stat in meta for each starter
+        for m in meta:
+            for pm_attr in ("home_pm", "away_pm"):
+                pm = m.get(pm_attr)
+                if pm is None or pm.id is None or not pm.stat:
+                    continue
+                split_stat, n = E.get_pitcher_split_stat(
+                    pm.id, season, date_str,
+                    venue=venue_split, time_of_day=time_split)
+                if split_stat is not None:
+                    import dataclasses
+                    m[pm_attr] = dataclasses.replace(pm, stat=split_stat)
+                    m[f"_{pm_attr}_split_n"] = n
+                    m[f"_{pm_attr}_split_label"] = f"{split_label_base} split ({n} starts)" if split_label_base else None
+                else:
+                    m[f"_{pm_attr}_split_label"] = None
+
+        # Hitter splits: replace _stat on each row
+        for r in rows:
+            pid = r.get("_pid")
+            if not pid:
+                continue
+            split_stat, n = E.get_hitter_split_stat(
+                pid, season, date_str,
+                venue=venue_split, time_of_day=time_split)
+            if split_stat is not None:
+                r["_stat"] = split_stat
+                r["_split_n"] = n
+                # Build a readable label for the Why column
+                parts = []
+                if venue_split:
+                    parts.append(venue_split)
+                if time_split:
+                    parts.append(time_split)
+                r["_split_label"] = f"{'/'.join(parts)} split ({n} games)"
+            else:
+                r["_split_label"] = None   # full-season used, no label needed
+
+        # Pitcher split label: also attach to pitcher rows (done in build_pitcher_projection_rows
+        # via meta, which now carries the overridden pm.stat)
+        split_parts = []
+        if venue_split:
+            split_parts.append(venue_split)
+        if time_split:
+            split_parts.append(time_split)
+        split_label_base = "/".join(split_parts) if split_parts else None
+    else:
+        split_label_base = None
+        for r in rows:
+            r["_split_label"] = None
+
     # Real sportsbook lines -- one batch fetch for all 17 real markets across every game on the
     # slate, feeding every probability the pipeline computes downstream. None (and a silent
     # graceful fallback to DEFAULT_LINES) if: no API key configured, the fetch fails for any
@@ -248,25 +355,26 @@ def build_mlb_board(date_str: str, fip_constant: float, odds_api_key: Optional[s
 
 
 def load_mlb_best_bets_board(date_str: str, fip_constant: float,
-                             preferred_book: str = O.DEFAULT_BOOK):
-    """Build the full MLB best-bets board: slate -> real sportsbook lines -> statcast/weather
-    enrichment -> hitter/pitcher projections -> ranked plays -> bullpen-blend re-pricing.
-
-    Returns (plays, meta, available_books) — available_books is the list of book keys that
-    actually had coverage in tonight's odds data, used to populate the sportsbook selector."""
-    _, meta, plays, available_books = build_mlb_board(date_str, fip_constant,
-                                                      get_odds_api_key(), preferred_book)
+                             preferred_book: str = O.DEFAULT_BOOK,
+                             venue_split: Optional[str] = None,
+                             time_split: Optional[str] = None):
+    """Build the full MLB best-bets board with optional split filtering.
+    Returns (plays, meta, available_books)."""
+    _, meta, plays, available_books = build_mlb_board(
+        date_str, fip_constant, get_odds_api_key(), preferred_book,
+        venue_split, time_split)
     return plays, meta, available_books
 
 
 def load_mlb_graded_picks_board(date_str: str, fip_constant: float,
-                                preferred_book: str = O.DEFAULT_BOOK):
-    """Same underlying board as load_mlb_best_bets_board, but also returns raw hitter rows
-    for Graded Picks' one-sided banner.
-
+                                preferred_book: str = O.DEFAULT_BOOK,
+                                venue_split: Optional[str] = None,
+                                time_split: Optional[str] = None):
+    """Same as load_mlb_best_bets_board but also returns raw hitter rows.
     Returns (plays, meta, rows, available_books)."""
-    rows, meta, plays, available_books = build_mlb_board(date_str, fip_constant,
-                                                         get_odds_api_key(), preferred_book)
+    rows, meta, plays, available_books = build_mlb_board(
+        date_str, fip_constant, get_odds_api_key(), preferred_book,
+        venue_split, time_split)
     return plays, meta, rows, available_books
 
 

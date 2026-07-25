@@ -1703,3 +1703,126 @@ if __name__ == "__main__":
         except Exception as e:  # noqa: BLE001
             print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
     print(f"\n{passed}/{len(tests)} tests passed")
+
+
+# ----------------------------------------------------------------- split stat functions
+def test_get_pitcher_split_stat_returns_none_below_min_sample(monkeypatch):
+    """Below MIN_SPLIT_STARTS (5), must return (None, n) -- never use a thin split."""
+    import mlb_engine as E
+
+    # 3 starts, all home -- below the 5-start minimum
+    starts = [
+        {"gamePk": 1, "game_date": "2026-07-01",
+         "stat": {"homeAway": "H", "strikeOuts": 8, "baseOnBalls": 2,
+                  "inningsPitched": "6.0", "gamesStarted": 1, "battersFaced": 22,
+                  "earnedRuns": 2, "hits": 5, "homeRuns": 0, "atBats": 20}},
+        {"gamePk": 2, "game_date": "2026-07-08",
+         "stat": {"homeAway": "H", "strikeOuts": 6, "baseOnBalls": 3,
+                  "inningsPitched": "5.1", "gamesStarted": 1, "battersFaced": 23,
+                  "earnedRuns": 3, "hits": 7, "homeRuns": 1, "atBats": 20}},
+        {"gamePk": 3, "game_date": "2026-07-15",
+         "stat": {"homeAway": "H", "strikeOuts": 7, "baseOnBalls": 2,
+                  "inningsPitched": "7.0", "gamesStarted": 1, "battersFaced": 24,
+                  "earnedRuns": 1, "hits": 4, "homeRuns": 0, "atBats": 21}},
+    ]
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda pid, season, before_date: starts)
+
+    stat, n = E.get_pitcher_split_stat(1, 2026, "2026-07-24", venue="home")
+    assert stat is None
+    assert n == 3   # returns the real count so callers can show "only 3 home starts"
+    print("✓ get_pitcher_split_stat returns (None, n) when sample is below MIN_SPLIT_STARTS -- "
+         "never silently uses a thin split")
+
+
+def test_get_pitcher_split_stat_aggregates_above_min_sample(monkeypatch):
+    """5+ starts should aggregate and return a real stat dict."""
+    import mlb_engine as E
+
+    starts = []
+    for i in range(6):
+        starts.append({
+            "gamePk": 100 + i, "game_date": f"2026-0{i+1}-10",
+            "stat": {"homeAway": "H", "strikeOuts": 8, "baseOnBalls": 2,
+                     "inningsPitched": "6.0", "gamesStarted": 1, "battersFaced": 22,
+                     "earnedRuns": 2, "hits": 5, "homeRuns": 0, "atBats": 20}
+        })
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda pid, season, before_date: starts)
+
+    stat, n = E.get_pitcher_split_stat(1, 2026, "2026-07-24", venue="home")
+    assert stat is not None
+    assert n == 6
+    assert stat["strikeOuts"] == 48   # 8 * 6
+    assert stat["baseOnBalls"] == 12   # 2 * 6
+    print("✓ get_pitcher_split_stat correctly aggregates 6 home starts into a usable stat dict")
+
+
+def test_get_pitcher_split_stat_filters_to_venue(monkeypatch):
+    """Away games must be excluded when venue='home'."""
+    import mlb_engine as E
+
+    starts = [
+        {"gamePk": i, "game_date": f"2026-0{i}-10",
+         "stat": {"homeAway": "H" if i <= 3 else "A", "strikeOuts": 8,
+                  "baseOnBalls": 2, "inningsPitched": "6.0", "gamesStarted": 1,
+                  "battersFaced": 22, "earnedRuns": 2, "hits": 5, "homeRuns": 0, "atBats": 20}}
+        for i in range(1, 8)
+    ]
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda pid, season, before_date: starts)
+
+    stat_home, n_home = E.get_pitcher_split_stat(1, 2026, "2026-07-24", venue="home")
+    stat_away, n_away = E.get_pitcher_split_stat(1, 2026, "2026-07-24", venue="away")
+
+    # 3 home starts -> below minimum, 4 away starts -> below minimum (both need 5)
+    assert stat_home is None and n_home == 3
+    assert stat_away is None and n_away == 4
+    print("✓ get_pitcher_split_stat correctly separates home and away games when homeAway field is present")
+
+
+def test_get_hitter_split_stat_returns_none_below_min_sample(monkeypatch):
+    """Hitter split also enforces the 5-game minimum."""
+    import mlb_engine as E
+
+    def fake_fetch(url, params=None, retries=2):
+        return {"stats": [{"splits": [
+            {"date": f"2026-0{i}-10",
+             "stat": {"homeAway": "H", "plateAppearances": 4, "atBats": 3,
+                      "hits": 1, "homeRuns": 0, "doubles": 0, "triples": 0,
+                      "baseOnBalls": 1, "strikeOuts": 1, "totalBases": 1,
+                      "rbi": 0, "runs": 0, "stolenBases": 0, "hitByPitch": 0,
+                      "sacFlies": 0}}
+            for i in range(1, 4)  # only 3 games
+        ]}]}
+
+    monkeypatch.setattr(E, "fetch_json", fake_fetch)
+    stat, n = E.get_hitter_split_stat(999, 2026, "2026-07-24", venue="home")
+    assert stat is None
+    assert n == 3
+    print("✓ get_hitter_split_stat also returns (None, n) below the 5-game minimum")
+
+
+def test_get_hitter_split_stat_aggregates_counting_stats(monkeypatch):
+    """5+ games should aggregate hits, HR, etc. and recompute rates."""
+    import mlb_engine as E
+
+    def fake_fetch(url, params=None, retries=2):
+        return {"stats": [{"splits": [
+            {"date": f"2026-0{i}-10",
+             "stat": {"homeAway": "H", "plateAppearances": 4, "atBats": 4,
+                      "hits": 2, "homeRuns": 1, "doubles": 0, "triples": 0,
+                      "baseOnBalls": 0, "strikeOuts": 1, "totalBases": 5,
+                      "rbi": 1, "runs": 1, "stolenBases": 0, "hitByPitch": 0,
+                      "sacFlies": 0}}
+            for i in range(1, 7)  # 6 games, all home
+        ]}]}
+
+    monkeypatch.setattr(E, "fetch_json", fake_fetch)
+    stat, n = E.get_hitter_split_stat(999, 2026, "2026-07-24", venue="home")
+    assert stat is not None
+    assert n == 6
+    assert stat["hits"] == 12        # 2 * 6
+    assert stat["homeRuns"] == 6     # 1 * 6
+    assert abs(stat["avg"] - 0.500) < 0.001   # 12/24
+    print("✓ get_hitter_split_stat correctly aggregates 6 home games and recomputes AVG/OBP/SLG")
+
+
+

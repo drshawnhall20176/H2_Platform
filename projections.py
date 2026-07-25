@@ -2176,11 +2176,10 @@ def build_pitcher_projection_rows(rows: List[Dict], meta: List[Dict],
                 "_opp_k": (opp_rates or {}).get("k"), "_opp_bb": (opp_rates or {}).get("bb"),
                 "_game": m["label"], "_pid": pm.id, "_game_date": m.get("game_date"),
                 "_team_id": team_id, "_days_rest": days_rest,
-                # Home/away and day/night context -- same signals added to hitter rows in
-                # mlb_engine.build_slate, now also on pitcher rows so _pitcher_reasons can
-                # surface split-context in the "Why" column (e.g. Drohan's day-game home splits).
                 "_is_home": (team == m.get("home_name")),
                 "_is_day_game": _is_day_game_from_iso(m.get("game_date")),
+                "_split_label": (m.get("_home_pm_split_label") if team == m.get("home_name")
+                                 else m.get("_away_pm_split_label")),
             })
     out.sort(key=lambda r: r["Proj K"], reverse=True)
     return out
@@ -2236,6 +2235,14 @@ def _hitter_reasons(r: Dict, market: str, side: str) -> List[str]:
     location = ("home" if is_home else "away") if is_home is not None else None
     time_slot = ("day" if is_day else "night") if is_day is not None else None
 
+    # Split mode label -- when a split stat was used instead of full-season, surface it first
+    # so the user always knows what data drove the conviction score.
+    split_label = r.get("_split_label")
+    if split_label:
+        why.append(f"📊 using {split_label}")
+    elif (r.get("_split_n") is not None and r.get("_split_n", 99) < 5):
+        why.append("full-season used (split too thin)")
+
     if side == "Over" and offense and r.get("Advantage") == "Advantage":
         why.append(f"platoon edge ({r.get('Hand')} bat vs {r.get('Opp Hand')}HP)")
     elif side == "Over" and offense and r.get("Advantage") == "Disadvantage":
@@ -2275,6 +2282,11 @@ def _pitcher_reasons(r: Dict, market: str, side: str) -> List[str]:
     why, opp_k, opp_bb = [], r.get("_opp_k"), r.get("_opp_bb")
     is_home = r.get("_is_home")
     is_day = r.get("_is_day_game")
+
+    # Split mode label
+    split_label = r.get("_split_label")
+    if split_label:
+        why.append(f"📊 using {split_label}")
 
     # Home/day context -- added directly on request after community members (Deezy in Discord)
     # were doing this research manually for every game. A pitcher whose top-line ERA looks
