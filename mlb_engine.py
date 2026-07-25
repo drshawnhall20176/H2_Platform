@@ -1399,7 +1399,16 @@ def get_pitcher_starts_this_season(pitcher_id: int, season: int,
         gs = safe_float(stat.get("gamesStarted"))
         outs = _ip_to_outs(stat.get("inningsPitched", "0.0"))
         if gs >= 1 or outs >= 9:
-            out.append({"gamePk": game_pk, "game_date": game_date, "stat": stat})
+            game_time = (game.get("gameDate") or sp.get("date") or "")
+            out.append({
+                "gamePk": game_pk,
+                "game_date": game_date,
+                "stat": stat,
+                # isHome is a split-level field on sp -- store it here so get_pitcher_split_stat
+                # can filter by venue without needing a separate schedule lookup.
+                "isHome": sp.get("isHome"),
+                "_game_time": game_time,   # ISO UTC timestamp for day/night filtering
+            })
     return out
 
 
@@ -1426,16 +1435,24 @@ def get_pitcher_split_stat(pitcher_id: int, season: int, date_str: str,
     filtered = []
     for s in starts:
         stat = s.get("stat") or {}
-        home_away = stat.get("homeAway")   # "H" or "A" when gameLog includes it
 
-        if venue is not None and home_away is not None:
-            if venue == "home" and home_away != "H":
+        # get_pitcher_starts_this_season stores the raw split entry as 'stat' but the
+        # isHome field is on the parent split, not inside stat{}. We need to store it
+        # separately. For now, derive home/away from the game's home_id vs the pitcher's
+        # team_id using the gamePk -- but we don't have team_id here. As a pragmatic fix:
+        # the gameLog split for pitchers includes 'isHome' at the split level too. However
+        # get_pitcher_starts_this_season only stores stat, not the full split. We add isHome
+        # to the stored dict so it's available here.
+        is_home = s.get("isHome")   # None if get_pitcher_starts_this_season didn't store it yet
+
+        if venue is not None and is_home is not None:
+            if venue == "home" and not is_home:
                 continue
-            if venue == "away" and home_away != "A":
+            if venue == "away" and is_home:
                 continue
 
         if time_of_day is not None:
-            game_time = stat.get("startTime") or stat.get("gameStartTime")
+            game_time = s.get("_game_time") or stat.get("startTime") or stat.get("gameStartTime")
             if game_time:
                 try:
                     hour = _eastern_hour(game_time)
@@ -1484,15 +1501,21 @@ def get_hitter_split_stat(player_id: int, season: int, date_str: str,
         if safe_float(stat.get("plateAppearances")) < 1:
             continue
 
-        home_away = stat.get("homeAway")
-        if venue is not None and home_away is not None:
-            if venue == "home" and home_away != "H":
+        # isHome is a split-level field on sp, not inside the stat dict.
+        # stat.get("homeAway") is always None -- the correct path is sp.get("isHome").
+        is_home = sp.get("isHome")   # True/False/None
+        if venue is not None and is_home is not None:
+            if venue == "home" and not is_home:
                 continue
-            if venue == "away" and home_away != "A":
+            if venue == "away" and is_home:
                 continue
 
         if time_of_day is not None:
-            game_time = stat.get("startTime") or stat.get("gameStartTime")
+            # game_date at the split level is "YYYY-MM-DD" only (no time component).
+            # The game object may have a more precise timestamp.
+            game_obj = sp.get("game") or {}
+            game_time = (game_obj.get("gameDate") or game_obj.get("officialDate")
+                         or stat.get("startTime") or stat.get("gameStartTime"))
             if game_time:
                 try:
                     hour = _eastern_hour(game_time)

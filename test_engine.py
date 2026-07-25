@@ -1713,15 +1713,15 @@ def test_get_pitcher_split_stat_returns_none_below_min_sample(monkeypatch):
     # 3 starts, all home -- below the 5-start minimum
     starts = [
         {"gamePk": 1, "game_date": "2026-07-01",
-         "stat": {"homeAway": "H", "strikeOuts": 8, "baseOnBalls": 2,
+         "stat": {"strikeOuts": 8, "baseOnBalls": 2,
                   "inningsPitched": "6.0", "gamesStarted": 1, "battersFaced": 22,
                   "earnedRuns": 2, "hits": 5, "homeRuns": 0, "atBats": 20}},
         {"gamePk": 2, "game_date": "2026-07-08",
-         "stat": {"homeAway": "H", "strikeOuts": 6, "baseOnBalls": 3,
+         "stat": {"strikeOuts": 6, "baseOnBalls": 3,
                   "inningsPitched": "5.1", "gamesStarted": 1, "battersFaced": 23,
                   "earnedRuns": 3, "hits": 7, "homeRuns": 1, "atBats": 20}},
         {"gamePk": 3, "game_date": "2026-07-15",
-         "stat": {"homeAway": "H", "strikeOuts": 7, "baseOnBalls": 2,
+         "stat": {"strikeOuts": 7, "baseOnBalls": 2,
                   "inningsPitched": "7.0", "gamesStarted": 1, "battersFaced": 24,
                   "earnedRuns": 1, "hits": 4, "homeRuns": 0, "atBats": 21}},
     ]
@@ -1742,7 +1742,7 @@ def test_get_pitcher_split_stat_aggregates_above_min_sample(monkeypatch):
     for i in range(6):
         starts.append({
             "gamePk": 100 + i, "game_date": f"2026-0{i+1}-10",
-            "stat": {"homeAway": "H", "strikeOuts": 8, "baseOnBalls": 2,
+            "stat": {"strikeOuts": 8, "baseOnBalls": 2,
                      "inningsPitched": "6.0", "gamesStarted": 1, "battersFaced": 22,
                      "earnedRuns": 2, "hits": 5, "homeRuns": 0, "atBats": 20}
         })
@@ -1757,14 +1757,17 @@ def test_get_pitcher_split_stat_aggregates_above_min_sample(monkeypatch):
 
 
 def test_get_pitcher_split_stat_filters_to_venue(monkeypatch):
-    """Away games must be excluded when venue='home'."""
+    """Away games must be excluded when venue='home'. Uses isHome field at the start entry
+    level (not stat.homeAway which was the wrong location -- the real fix for the bug where
+    venue filtering silently did nothing)."""
     import mlb_engine as E
 
     starts = [
         {"gamePk": i, "game_date": f"2026-0{i}-10",
-         "stat": {"homeAway": "H" if i <= 3 else "A", "strikeOuts": 8,
-                  "baseOnBalls": 2, "inningsPitched": "6.0", "gamesStarted": 1,
-                  "battersFaced": 22, "earnedRuns": 2, "hits": 5, "homeRuns": 0, "atBats": 20}}
+         "isHome": (i <= 3),   # first 3 are home starts, last 4 are away
+         "stat": {"strikeOuts": 8, "baseOnBalls": 2, "inningsPitched": "6.0",
+                  "gamesStarted": 1, "battersFaced": 22, "earnedRuns": 2,
+                  "hits": 5, "homeRuns": 0, "atBats": 20}}
         for i in range(1, 8)
     ]
     monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda pid, season, before_date: starts)
@@ -1772,10 +1775,10 @@ def test_get_pitcher_split_stat_filters_to_venue(monkeypatch):
     stat_home, n_home = E.get_pitcher_split_stat(1, 2026, "2026-07-24", venue="home")
     stat_away, n_away = E.get_pitcher_split_stat(1, 2026, "2026-07-24", venue="away")
 
-    # 3 home starts -> below minimum, 4 away starts -> below minimum (both need 5)
-    assert stat_home is None and n_home == 3
-    assert stat_away is None and n_away == 4
-    print("✓ get_pitcher_split_stat correctly separates home and away games when homeAway field is present")
+    # 3 home starts -> below minimum (5), 4 away starts -> below minimum
+    assert stat_home is None and n_home == 3, f"expected (None, 3) got ({stat_home}, {n_home})"
+    assert stat_away is None and n_away == 4, f"expected (None, 4) got ({stat_away}, {n_away})"
+    print("✓ get_pitcher_split_stat correctly filters by isHome field (not the old stat.homeAway)")
 
 
 def test_get_hitter_split_stat_returns_none_below_min_sample(monkeypatch):
@@ -1785,7 +1788,7 @@ def test_get_hitter_split_stat_returns_none_below_min_sample(monkeypatch):
     def fake_fetch(url, params=None, retries=2):
         return {"stats": [{"splits": [
             {"date": f"2026-0{i}-10",
-             "stat": {"homeAway": "H", "plateAppearances": 4, "atBats": 3,
+             "stat": {"plateAppearances": 4, "atBats": 3,
                       "hits": 1, "homeRuns": 0, "doubles": 0, "triples": 0,
                       "baseOnBalls": 1, "strikeOuts": 1, "totalBases": 1,
                       "rbi": 0, "runs": 0, "stolenBases": 0, "hitByPitch": 0,
@@ -1807,7 +1810,7 @@ def test_get_hitter_split_stat_aggregates_counting_stats(monkeypatch):
     def fake_fetch(url, params=None, retries=2):
         return {"stats": [{"splits": [
             {"date": f"2026-0{i}-10",
-             "stat": {"homeAway": "H", "plateAppearances": 4, "atBats": 4,
+             "stat": {"plateAppearances": 4, "atBats": 4,
                       "hits": 2, "homeRuns": 1, "doubles": 0, "triples": 0,
                       "baseOnBalls": 0, "strikeOuts": 1, "totalBases": 5,
                       "rbi": 1, "runs": 1, "stolenBases": 0, "hitByPitch": 0,
