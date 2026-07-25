@@ -27,7 +27,7 @@ consolidating into a shared module would have quietly introduced it if not for t
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import streamlit as st
 
@@ -272,7 +272,7 @@ def load_mlb_graded_picks_board(date_str: str, fip_constant: float,
 
 def load_generic_best_bets_board(sport_key: str, date_str: str):
     """Any sport whose engine/projections don't need MLB's statcast/weather/bullpen-blend
-    enrichment path — currently WNBA, and any future sport built the same way.
+    enrichment path — currently NFL, WNBA, and any future sport built the same way.
 
     A REAL, DELIBERATE CONSOLIDATION, not new scope creep: before this existed, Best Bets and
     Command Center each had their OWN separate copy of this exact two-line pattern
@@ -282,13 +282,31 @@ def load_generic_best_bets_board(sport_key: str, date_str: str):
     third page (Graded Picks) needed its own copy too, rather than after a real bug forces it —
     unlike the MLB fix, which came after a real, reported production issue.
 
-    Takes sport_key as an explicit argument and calls sports.get(sport_key) fresh on each call —
-    deliberately NOT resolved via sports.active() at import time, same reasoning as this file's
-    own MLB functions: a module-level resolution would freeze to whichever sport was active on
-    this module's first import, silently wrong for every later call to a different sport.
+    Real sportsbook lines added for NFL, matching the MLB pipeline's own real-lines wiring:
+    one batch fetch of the sport's supported markets, real_lines passed to build_best_bets.
+    WNBA and other non-NFL sports still use the placeholder default (no odds fetch) until their
+    own market keys are confirmed and tested the same way.
 
     Returns (plays, meta)."""
     sport = sports.get(sport_key)
     rows, meta = sport.engine.build_slate(date_str)
-    plays = sport.projections.build_best_bets(rows)
-    return plays, meta
+
+    real_lines = None
+    available_books: List[str] = list(O.US_BOOKS.keys())
+    api_key = get_odds_api_key()
+    if api_key and sport_key == "NFL":
+        try:
+            preferred_book = st.session_state.get(
+                f"_preferred_book_nfl", O.DEFAULT_BOOK)
+            offers, _ = O.fetch_slate_props(
+                date_str, api_key, list(O.NFL_SUPPORTED_MARKETS),
+                sport=O.NFL_SPORT)
+            real_lines = O.market_lines_for_slate(offers, preferred_book=preferred_book)
+            live = O.books_in_offers(offers)
+            if live:
+                available_books = live
+        except Exception:
+            real_lines = None
+
+    plays = sport.projections.build_best_bets(rows, real_lines=real_lines)
+    return plays, meta, available_books

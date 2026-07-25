@@ -109,6 +109,123 @@ def test_build_best_bets_only_produces_plays_for_a_rows_own_markets():
     print("✓ build_best_bets only produces plays for a row's own gated markets, no phantom markets")
 
 
+# ----------------------------------------------------------------- real lines: NFL_MARKET_TO_ODDS_KEY drift guard
+def test_nfl_market_to_odds_key_matches_sports_market_map():
+    """Drift guard: NFL_MARKET_TO_ODDS_KEY, sports.REGISTRY NFL market_map, and
+    odds_api.NFL_SUPPORTED_MARKETS must all agree. Fails loudly if any gets updated without
+    the others -- same class of silent gap that caused the MLB HRR bug."""
+    import sports, odds_api as O
+    nfl_sport = sports.REGISTRY.get("NFL")
+    assert nfl_sport is not None
+    assert NP.NFL_MARKET_TO_ODDS_KEY == nfl_sport.market_map, (
+        f"nfl_projections.NFL_MARKET_TO_ODDS_KEY and sports NFL market_map have drifted: "
+        f"{set(NP.NFL_MARKET_TO_ODDS_KEY.items()) ^ set(nfl_sport.market_map.items())}")
+    projected = set(NP.NFL_MARKET_TO_ODDS_KEY.values())
+    requested = set(O.NFL_SUPPORTED_MARKETS)
+    missing = projected - requested
+    assert not missing, (
+        f"These NFL markets are projected but NOT in NFL_SUPPORTED_MARKETS: {missing}")
+    print(f"✓ NFL_MARKET_TO_ODDS_KEY, sports market_map, and NFL_SUPPORTED_MARKETS all agree "
+         f"across all {len(projected)} real NFL markets")
+
+
+# ----------------------------------------------------------------- real_line_or_default_nfl
+def test_real_line_or_default_nfl_returns_real_line_when_available():
+    from projections import normalize_name
+    real_lines = {(normalize_name("Patrick Mahomes"), "player_pass_yds"): 267.5}
+    line, src = NP.real_line_or_default_nfl("Pass Yards", "Patrick Mahomes", real_lines, 224.5)
+    assert line == 267.5 and src == "book"
+    print("✓ real_line_or_default_nfl returns the real book line and 'book' source when available")
+
+
+def test_real_line_or_default_nfl_falls_back_when_player_absent():
+    real_lines = {(NP.normalize_name("Someone Else"), "player_pass_yds"): 267.5}
+    line, src = NP.real_line_or_default_nfl("Pass Yards", "Patrick Mahomes", real_lines, 224.5)
+    assert line == 224.5 and src == "default"
+    print("✓ real_line_or_default_nfl falls back to the placeholder when player has no real line")
+
+
+def test_real_line_or_default_nfl_falls_back_when_real_lines_is_none():
+    line, src = NP.real_line_or_default_nfl("Pass Yards", "Anyone", None, 224.5)
+    assert line == 224.5 and src == "default"
+    print("✓ real_line_or_default_nfl falls back cleanly when real_lines=None")
+
+
+# ----------------------------------------------------------------- build_best_bets: real lines
+def test_build_best_bets_uses_real_line_when_available():
+    from projections import normalize_name
+    # A realistic, variable log: some games above 224.5 (default), some below 267.5 (real line)
+    # so the two lines produce meaningfully different probabilities.
+    log = [{"passing_yards": v} for v in [310, 190, 275, 245, 220]]
+    row = {"Player": "Patrick Mahomes", "Team": "KC", "Opp": "LAC", "GameLabel": "KC @ LAC",
+           "_pid": "p1", "_markets": ["player_pass_yds"], "_recent_games": log}
+    real_lines = {(normalize_name("Patrick Mahomes"), "player_pass_yds"): 267.5}
+
+    plays_real = NP.build_best_bets([row], sims=4000, seed=1, real_lines=real_lines)
+    plays_default = NP.build_best_bets([row], sims=4000, seed=1, real_lines=None)
+
+    assert plays_real[0]["Line"] == 267.5 and plays_real[0]["LineSource"] == "book"
+    assert plays_default[0]["Line"] == 224.5 and plays_default[0]["LineSource"] == "default"
+    # The probabilities must differ -- the real line (267.5) and default (224.5) are meaningfully
+    # different thresholds against the same game log, so the model answers a different question.
+    assert plays_real[0]["ModelProb"] != plays_default[0]["ModelProb"]
+    print(f"✓ build_best_bets uses real line (267.5, prob={plays_real[0]['ModelProb']}) "
+         f"vs default (224.5, prob={plays_default[0]['ModelProb']}) — genuinely different numbers")
+
+
+def test_build_best_bets_line_source_default_when_no_real_lines():
+    row = {"Player": "Some RB", "Team": "KC", "Opp": "LAC", "GameLabel": "KC @ LAC",
+           "_pid": "p1", "_markets": ["player_rush_yds"],
+           "_recent_games": [{"rushing_yards": 65}] * 4}
+    plays = NP.build_best_bets([row], sims=2000, seed=1)
+    assert plays[0]["LineSource"] == "default"
+    assert plays[0]["Line"] == 44.5   # _MARKET_SPEC default for rush yards
+    print("✓ build_best_bets correctly reports 'default' LineSource when no real_lines provided")
+
+
+def test_build_best_bets_position_aware_real_lines_independent():
+    # Two players, different positions, different real lines -- each gets their own book line
+    # independently, not cross-contaminated.
+    from projections import normalize_name
+    qb_row = {"Player": "QB One", "Team": "KC", "Opp": "LAC", "GameLabel": "KC @ LAC",
+              "_pid": "qb1", "_markets": ["player_pass_yds"],
+              "_recent_games": [{"passing_yards": 290}] * 5}
+    wr_row = {"Player": "WR One", "Team": "KC", "Opp": "LAC", "GameLabel": "KC @ LAC",
+              "_pid": "wr1", "_markets": ["player_reception_yds"],
+              "_recent_games": [{"receiving_yards": 75}] * 5}
+    real_lines = {
+        (normalize_name("QB One"), "player_pass_yds"): 272.5,
+        (normalize_name("WR One"), "player_reception_yds"): 54.5,
+    }
+    plays = NP.build_best_bets([qb_row, wr_row], sims=2000, seed=1, real_lines=real_lines)
+    qb_play = next(p for p in plays if p["Player"] == "QB One")
+    wr_play = next(p for p in plays if p["Player"] == "WR One")
+    assert qb_play["Line"] == 272.5 and qb_play["LineSource"] == "book"
+    assert wr_play["Line"] == 54.5 and wr_play["LineSource"] == "book"
+    print("✓ build_best_bets correctly assigns real lines independently per player and per market")
+
+
+# ----------------------------------------------------------------- default_board_from_index: real lines
+def test_default_board_from_index_uses_real_lines():
+    from projections import normalize_name
+    # Variable log so 267.5 and 224.5 produce different probabilities
+    def _qb_log_varied(yds): return {"passing_yards": yds, "attempts": 35}
+    rows = [{"Player": "Patrick Mahomes", "Team": "KC", "Opp": "LAC", "GameLabel": "KC @ LAC",
+             "_game_date": "2026-09-10",
+             "_recent_games": [_qb_log_varied(v) for v in [310, 190, 275, 245, 220]],
+             "_markets": ["player_pass_yds"]}]
+    index = NP.build_projection_index(rows, meta=[], sims=4000, seed=7)
+    real_lines = {(normalize_name("Patrick Mahomes"), "player_pass_yds"): 267.5}
+
+    board_real = NP.default_board_from_index(index, real_lines=real_lines)
+    board_default = NP.default_board_from_index(index, real_lines=None)
+
+    assert board_real[0]["Line"] == 267.5 and board_real[0]["LineSource"] == "book"
+    assert board_default[0]["Line"] == 224.5 and board_default[0]["LineSource"] == "default"
+    assert board_real[0]["ModelProb"] != board_default[0]["ModelProb"]
+    print("✓ default_board_from_index correctly uses real lines for Edge Board's display")
+
+
 # ----------------------------------------------------------------- explain_miss
 def test_explain_miss_none_row_explains_not_on_slate():
     msg = NP.explain_miss(None, "Pass Yards")

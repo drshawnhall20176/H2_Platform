@@ -140,21 +140,26 @@ def build_projection_index(rows: List[Dict], meta: List[Dict],
     return index
 
 
-def default_board_from_index(index: Dict) -> List[Dict]:
-    """Model-only board (favored side at default lines) from the index — every NFL market in
-    _MARKET_SPEC is a plain Over/Under, no special-case needed. Probabilities are shrunk toward a
-    neutral baseline by sample size before being clipped, same fix every other sport carries."""
+def default_board_from_index(index: Dict,
+                             real_lines: Optional[Dict] = None) -> List[Dict]:
+    """Model-only board (favored side at real or default lines) from the index — every NFL market
+    in _MARKET_SPEC is a plain Over/Under, no special-case needed. Probabilities are shrunk toward
+    a neutral baseline by sample size before being clipped, same fix every other sport carries.
+
+    real_lines: same shape as build_best_bets -- when supplied, uses the real book line for each
+    player/market where available, falling back to _MARKET_SPEC defaults otherwise."""
     out: List[Dict] = []
     for (nm, mkey), entry in index.items():
-        _col, disp, line = _MARKET_SPEC.get(mkey, (mkey, mkey, 0.5))
+        _col, disp, default_ln = _MARKET_SPEC.get(mkey, (mkey, mkey, 0.5))
         dist, ctx = entry["dist"], entry["ctx"]
+        line, line_src = real_line_or_default_nfl(disp, ctx["player"], real_lines, default_ln)
         raw = prob_over(dist, line)
         shrunk = BB_P.shrink_prob(raw, entry.get("n_games", 0))
         over = _clip_prob(shrunk)
         side, prob = ("Over", over) if over >= 0.5 else ("Under", 1 - over)
         out.append(_signal(ctx["player"], ctx["team"], ctx["game"], disp, side, line, prob,
                            entry["mean"], Opp=ctx.get("opp"), Lineup=ctx.get("lineup"),
-                           GameTime=ctx.get("game_date")))
+                           GameTime=ctx.get("game_date"), LineSource=line_src))
     return out
 
 
@@ -162,6 +167,43 @@ def default_board_from_index(index: Dict) -> List[Dict]:
 # Reference (typical/coin-flip) hit-rate per market — 0.5 for all four, honest given the default
 # lines above are round-number estimates, not book-calibrated (same reasoning every sport uses).
 BEST_BET_REF = {"Pass Yards": 0.5, "Rush Yards": 0.5, "Receptions": 0.5, "Receiving Yards": 0.5}
+
+# =============================================================================================
+# REAL SPORTSBOOK LINES -- ported directly from the MLB pipeline (see projections.py's own
+# module-level comment on this for full reasoning). Same design: one shared mapping, one shared
+# decision function, real line when available, honest DEFAULT_LINES placeholder when not.
+# =============================================================================================
+
+# NFL display market name -> Odds API market key. MUST STAY IN SYNC with sports.py's own
+# NFL market_map AND odds_api.NFL_SUPPORTED_MARKETS -- a drift-guard test enforces this.
+NFL_MARKET_TO_ODDS_KEY: Dict[str, str] = {
+    "Pass Yards":      "player_pass_yds",
+    "Rush Yards":      "player_rush_yds",
+    "Receptions":      "player_receptions",
+    "Receiving Yards": "player_reception_yds",
+}
+
+
+def real_line_or_default_nfl(
+        market_display: str,
+        player_name: str,
+        real_lines: Optional[Dict],
+        default: float) -> Tuple[float, str]:
+    """The one shared decision point for every NFL market's line -- use the real, live
+    sportsbook line when available (preferred book exact line, or minimum across all books
+    as fallback), otherwise this platform's own _MARKET_SPEC placeholder.
+
+    Mirrors projections.real_line_or_default exactly -- same design, separate function so
+    nfl_projections.py stays self-contained without importing projections.py's internals.
+
+    Returns (line, source) -- source is 'book' or 'default', same convention as MLB."""
+    if real_lines is not None:
+        odds_key = NFL_MARKET_TO_ODDS_KEY.get(market_display)
+        if odds_key is not None:
+            real = real_lines.get((normalize_name(player_name), odds_key))
+            if real is not None:
+                return float(real), "book"
+    return default, "default"
 
 
 def _favored_side(prob_over: float, ref: float):
@@ -217,11 +259,17 @@ def explain_miss(row: Optional[Dict], market: str = "Pass Yards") -> str:
 
 
 def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
-                    seed: Optional[int] = None) -> List[Dict]:
+                    seed: Optional[int] = None,
+                    real_lines: Optional[Dict] = None) -> List[Dict]:
     """Rank candidate plays across every position-relevant market by conviction (model prob vs
     the reference prob for that market), each with recent-form reasoning. No odds required — same
     output schema every sport's build_best_bets uses. Probabilities are shrunk toward a neutral
-    baseline by sample size before being clipped, same fix every other sport carries."""
+    baseline by sample size before being clipped, same fix every other sport carries.
+
+    real_lines: {(normalized_player_name, odds_api_market_key): point} from
+    odds_api.market_lines_for_slate -- when supplied, each play's Line is the real book line
+    for that specific player (via real_line_or_default_nfl), not the _MARKET_SPEC placeholder.
+    None (the default) preserves the exact original always-placeholder behavior."""
     rng = np.random.default_rng(seed)
     plays: List[Dict] = []
 
@@ -231,7 +279,8 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
         if not log or not markets:
             continue
         for mkey in markets:
-            col, disp, line = _MARKET_SPEC[mkey]
+            col, disp, default_ln = _MARKET_SPEC[mkey]
+            line, line_src = real_line_or_default_nfl(disp, r["Player"], real_lines, default_ln)
             values = [g.get(col) or 0 for g in log]
             sim = simulate_player_stat(values, sims, rng)
             if sim.size == 0:
@@ -243,7 +292,7 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
             plays.append({
                 "Player": r["Player"], "PlayerId": r.get("_pid"), "Team": r["Team"],
                 "Game": r["GameLabel"], "Opp": r.get("Opp"), "Versus": r.get("Opp"),
-                "Market": disp, "Side": side, "Line": line,
+                "Market": disp, "Side": side, "Line": line, "LineSource": line_src,
                 "ModelProb": round(sp, 4), "Fair": prob_to_american(sp),
                 "Conviction": round(sp / ref_s, 2) if ref_s > 0 else 0.0,
                 # this play's own theoretical max conviction (1/RefProb) -- lets

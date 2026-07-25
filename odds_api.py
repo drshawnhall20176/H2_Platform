@@ -23,6 +23,15 @@ import requests
 
 BASE = "https://api.the-odds-api.com/v4"
 SPORT = "baseball_mlb"
+NFL_SPORT = "americanfootball_nfl"
+
+# NFL market keys confirmed against The Odds API's own market taxonomy -- same source as the
+# MLB keys above. Only the 4 real prop markets the NFL engine currently projects for:
+# pass yards, rush yards, receptions, receiving yards. Anytime TD has its own separate key
+# (player_anytime_td) but uses a binary market structure (not Over/Under), not wired yet.
+NFL_SUPPORTED_MARKETS = [
+    "player_pass_yds", "player_rush_yds", "player_receptions", "player_reception_yds",
+]
 
 # The model's markets, expressed as Odds API market keys.
 # EXPANDED from the original 7 to the full 16, matching sports.py's own _MLB_MARKET_MAP exactly
