@@ -122,9 +122,12 @@ def render_split_selector(key_prefix: str = "split") -> tuple:
         parts = [p for p in [venue_opt if venue_split else None,
                               time_opt if time_split else None] if p]
         st.caption(f"⚠️ **Split mode active: {' + '.join(parts)} games only.** "
-                  "Conviction scores and grades reflect this split, not the full-season "
-                  "baseline. Plays showing 'full-season used' in the Why column had fewer "
-                  "than 5 qualifying games in this split — those numbers are unchanged.")
+                  "The board shows only players who are actually in this situation tonight "
+                  f"(e.g. Away = only away teams; Night = only night games). "
+                  "Conviction scores reflect each player's own historical performance in "
+                  "this split, not their full-season baseline. "
+                  "Plays showing 'full-season used' in the Why column had fewer than 5 "
+                  "qualifying games in this split.")
     return venue_split, time_split
 
 
@@ -367,7 +370,49 @@ def load_mlb_graded_picks_board(date_str: str, fip_constant: float,
     return plays, meta, rows, available_books
 
 
-def load_generic_best_bets_board(sport_key: str, date_str: str):
+def filter_by_split_situation(plays: List[Dict],
+                               venue_split: Optional[str],
+                               time_split: Optional[str]) -> List[Dict]:
+    """When a venue or time split is active, filter plays to only those where the player
+    is actually in that situation TONIGHT -- not just where their historical split stats
+    were used. A player whose away/night stats were used to compute the probability should
+    only appear on the board when they're actually the away team in a night game tonight.
+
+    This is the display filter that complements the model-side split stat substitution:
+    - Model side: recomputes probabilities using filtered game logs (already done)
+    - Display side: shows only plays where the player is in that situation tonight (this)
+
+    Without this, 'Away + Night' shows home-team players whose away/night historical stats
+    happened to be strong -- but they're not actually in that situation tonight.
+
+    venue_split: 'home', 'away', or None. time_split: 'day', 'night', or None.
+    When both None, returns plays unchanged."""
+    if not venue_split and not time_split:
+        return plays
+
+    filtered = []
+    for p in plays:
+        is_home = p.get("_is_home")
+        is_day = p.get("_is_day_game")
+
+        # Venue filter: skip if we know the player's situation and it doesn't match
+        if venue_split == "home" and is_home is False:
+            continue
+        if venue_split == "away" and is_home is True:
+            continue
+        # If _is_home is None (unknown), include the play -- never silently drop unknowns
+
+        # Time filter: skip if we know and it doesn't match
+        if time_split == "day" and is_day is False:
+            continue
+        if time_split == "night" and is_day is True:
+            continue
+
+        filtered.append(p)
+    return filtered
+
+
+
     """Any sport whose engine/projections don't need MLB's statcast/weather/bullpen-blend
     enrichment path — currently NFL, WNBA, and any future sport built the same way.
 
