@@ -204,6 +204,111 @@ hitters = load_hitters(date_str)
 opp = pitcher.get("Opponent")
 opp_hitters = [h for h in hitters if h.get("Team") == opp] or hitters
 
+# === Split stat comparison panel ============================================================
+# This is Deezy's real question: "does this pitcher's split profile give me a reason to
+# fade or follow the model?" -- a direct comparison of full-season vs. the selected split
+# so the user can see the delta without leaving the page. Only shown when a split is active.
+if venue_split or time_split:
+    split_parts = [p for p in [venue_split, time_split] if p]
+    split_label = " + ".join(p.title() for p in split_parts)
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def load_pitcher_split(pid, season, date, venue, time_of_day):
+        return E.get_pitcher_split_stat(pid, season, date, venue=venue, time_of_day=time_of_day)
+
+    season = int(date_str[:4])
+    split_stat, n_split = load_pitcher_split(
+        pitcher_pid, season, date_str, venue_split, time_split)
+
+    st.subheader(f"📊 Split profile: {pitcher['Pitcher']} — {split_label}")
+
+    full = pitcher   # full-season stats already on the pitcher row
+
+    def _rate(stat_dict, key, denominator_key=None, per=9.0):
+        """Compute a per-9 rate from counting stat / IP, or return the raw value."""
+        if stat_dict is None:
+            return None
+        val = stat_dict.get(key)
+        if val is None:
+            return None
+        if denominator_key:
+            ip_str = stat_dict.get("inningsPitched", "0.0")
+            try:
+                parts = str(ip_str).split(".")
+                ip = int(parts[0]) + (int(parts[1]) / 3 if len(parts) > 1 else 0)
+            except (ValueError, IndexError):
+                ip = 0.0
+            return round(float(val) / ip * per, 2) if ip > 0 else None
+        return round(float(val), 2) if val is not None else None
+
+    if split_stat is None:
+        st.caption(f"⚪ Fewer than {E.MIN_SPLIT_STARTS} {split_label} starts found (n={n_split}) "
+                  "— split sample too thin to compare reliably. Full-season line is shown above.")
+    else:
+        # Build comparison table
+        def _delta_str(full_val, split_val, lower_is_better=False):
+            if full_val is None or split_val is None:
+                return "—"
+            diff = split_val - full_val
+            if abs(diff) < 0.01:
+                return "≈ same"
+            direction = "↑" if diff > 0 else "↓"
+            worse = (diff > 0) == lower_is_better
+            color = "🔴" if worse else "🟢"
+            return f"{color} {direction}{abs(diff):.2f}"
+
+        era_full = full.get("ERA")
+        era_split = _rate(split_stat, "earnedRuns", "inningsPitched")
+        k9_full = full.get("K/9")
+        k9_split = _rate(split_stat, "strikeOuts", "inningsPitched")
+        bb9_split = _rate(split_stat, "baseOnBalls", "inningsPitched")
+        # BB/9 from full season -- derive from WHIP and K/9 if not directly stored
+        # (pitcher row doesn't carry BB/9 directly; compute from stat if we can)
+        whip_full = full.get("WHIP")
+        whip_split = None
+        if split_stat.get("baseOnBalls") is not None and split_stat.get("hits") is not None:
+            ip_str = split_stat.get("inningsPitched", "0.0")
+            try:
+                parts = str(ip_str).split(".")
+                ip = int(parts[0]) + (int(parts[1]) / 3 if len(parts) > 1 else 0)
+                if ip > 0:
+                    whip_split = round((float(split_stat["baseOnBalls"]) + float(split_stat["hits"])) / ip, 2)
+            except Exception:
+                pass
+
+        # IP per start
+        ip_split = None
+        gs_split = split_stat.get("gamesStarted", n_split) or n_split
+        if gs_split > 0:
+            ip_str = split_stat.get("inningsPitched", "0.0")
+            try:
+                parts = str(ip_str).split(".")
+                ip_total = int(parts[0]) + (int(parts[1]) / 3 if len(parts) > 1 else 0)
+                ip_split = round(ip_total / gs_split, 1)
+            except Exception:
+                pass
+
+        rows_cmp = [
+            ("ERA", era_full, era_split,
+             _delta_str(era_full, era_split, lower_is_better=True)),
+            ("K/9", k9_full, k9_split,
+             _delta_str(k9_full, k9_split, lower_is_better=False)),
+            ("WHIP", whip_full, whip_split,
+             _delta_str(whip_full, whip_split, lower_is_better=True)),
+            ("IP/GS", None, ip_split, "—"),
+        ]
+
+        cdf = pd.DataFrame(rows_cmp, columns=["Stat", "Full season", f"{split_label} ({n_split} starts)", "Δ"])
+        cdf = cdf.fillna("—")
+        st.dataframe(cdf, hide_index=True, use_container_width=True)
+        st.caption(
+            f"**How to read this:** Δ 🟢 = the split is BETTER for this pitcher than his full-season line "
+            f"(follow the model's conviction); 🔴 = WORSE than his season line (reason to fade). "
+            f"ERA and WHIP: lower is better. K/9: higher is better. "
+            f"A large 🔴 ERA delta means this pitcher underperforms in {split_label} games specifically — "
+            f"the model's conviction scores for his Ks/Outs/ER props above already reflect this split, "
+            f"but the table tells you HOW much worse.")
+
 # === Lineup leaderboard vs. this pitcher's arsenal =========================================
 # Added directly on request, after a real conversation doing this exact thing manually,
 # screenshot by screenshot: "Is this by pitch mix batted ball events? Filtered by all pitches or
