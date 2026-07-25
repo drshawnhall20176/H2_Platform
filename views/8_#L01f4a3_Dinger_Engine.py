@@ -336,6 +336,37 @@ for m in meta_sorted:
                                           help=f"Show {m['away_name']} hitters vs {m['home_name']}'s "
                                               "bullpen instead of the confirmed starter.")
 
+        # --- Per-game inline split toggle ------------------------------------
+        # Lets the user compare full-season vs. split within THIS expander without scrolling
+        # back up. The global toggle sets the default; each game can be independently overridden.
+        # Stats reflect the split computed at load time -- this is a display-layer filter.
+        import projections as _Pmod
+        game_date_iso = m.get("game_date", "")
+        game_is_day = _Pmod._is_day_game_from_iso(game_date_iso)
+
+        gsvc1, gsvc2 = st.columns(2)
+        with gsvc1:
+            game_venue_opt = st.radio(
+                "🏟️ Venue", ["All", "Home", "Away"],
+                index=({"home": 2, "away": 1}.get(venue_split, 0) if venue_split else 0),
+                horizontal=True, key=f"venue_split_{m['label']}",
+                help="Show only the home or away team's hitters in this game.")
+        with gsvc2:
+            game_time_opt = st.radio(
+                "🕐 Time", ["All", "Day", "Night"],
+                index=({"day": 1, "night": 2}.get(time_split, 0) if time_split else 0),
+                horizontal=True, key=f"time_split_{m['label']}",
+                help="Day/Night filter for this game. Stats already reflect the split set above.")
+
+        game_venue_split = None if game_venue_opt == "All" else game_venue_opt.lower()
+        game_time_split = None if game_time_opt == "All" else game_time_opt.lower()
+
+        if game_time_split == "day" and game_is_day is False:
+            st.caption(f"ℹ️ This is a **night game** ({game_time_et(game_date_iso)}) — "
+                      "Day filter has no matching hitters for this game.")
+        elif game_time_split == "night" and game_is_day is True:
+            st.caption(f"ℹ️ This is a **day game** ({game_time_et(game_date_iso)}) — "
+                      "Night filter has no matching hitters for this game.")
         game_df = all_df[all_df["GameLabel"] == m["label"]]
         sort_col = "HR%" if "HR%" in game_df.columns else "PowerIndex"
 
@@ -435,6 +466,31 @@ for m in meta_sorted:
                 bp_df["Opp HR/9"] = agg.get("homeRunsPer9", 0.0)
             return bp_df.sort_values(sort_col, ascending=False) if sort_col in bp_df.columns else bp_df
 
+        def _apply_game_split(sub_df):
+            """Apply the per-game venue/time split filter to a hitter sub-table.
+            game_venue_split: 'home', 'away', or None.
+            game_time_split: 'day', 'night', or None (None = show all).
+            Time filter on a specific game is all-or-nothing -- if this game IS a day game
+            and Night is selected, nothing matches; a note above already surfaced this."""
+            if not game_venue_split and not game_time_split:
+                return sub_df
+            mask = pd.Series([True] * len(sub_df), index=sub_df.index)
+            if game_venue_split == "home":
+                mask &= sub_df.get("_is_home", pd.Series([None]*len(sub_df), index=sub_df.index)).eq(True)
+            elif game_venue_split == "away":
+                mask &= sub_df.get("_is_home", pd.Series([None]*len(sub_df), index=sub_df.index)).eq(False)
+            if game_time_split == "day" and game_is_day is False:
+                return sub_df.iloc[0:0]   # no rows -- night game, Day selected
+            if game_time_split == "night" and game_is_day is True:
+                return sub_df.iloc[0:0]   # no rows -- day game, Night selected
+            return sub_df[mask]
+
+        _col_cfg = {"Advantage": st.column_config.TextColumn(
+            "Platoon", help="Advantage = opposite hands (platoon edge). "
+            "Disadvantage = same hands — NOT a skip signal. Great hitters "
+            "produce regardless. The model already factors this in via "
+            "vs_L/vs_R splits.")}
+
         with t_away:
             if home_bullpen_on:
                 sub = _bullpen_sub(game_df, m["away_name"], m.get("home_id"), hp.id)
@@ -442,12 +498,12 @@ for m in meta_sorted:
                           "bullpen, not the confirmed starter.")
             else:
                 sub = game_df[game_df["Team"] == m["away_name"]].sort_values(sort_col, ascending=False)
-            st.dataframe(style_hitters(sub), use_container_width=True, hide_index=True,
-                        column_config={"Advantage": st.column_config.TextColumn(
-                            "Platoon", help="Advantage = opposite hands (platoon edge). "
-                            "Disadvantage = same hands — NOT a skip signal. Great hitters "
-                            "produce regardless. The model already factors this in via "
-                            "vs_L/vs_R splits.")})
+            sub = _apply_game_split(sub)
+            if sub.empty and (game_venue_split or game_time_split):
+                st.caption("No hitters match the current per-game split filter.")
+            else:
+                st.dataframe(style_hitters(sub), use_container_width=True, hide_index=True,
+                            column_config=_col_cfg)
         with t_home:
             if away_bullpen_on:
                 sub = _bullpen_sub(game_df, m["home_name"], m.get("away_id"), ap.id)
@@ -455,12 +511,12 @@ for m in meta_sorted:
                           "bullpen, not the confirmed starter.")
             else:
                 sub = game_df[game_df["Team"] == m["home_name"]].sort_values(sort_col, ascending=False)
-            st.dataframe(style_hitters(sub), use_container_width=True, hide_index=True,
-                        column_config={"Advantage": st.column_config.TextColumn(
-                            "Platoon", help="Advantage = opposite hands (platoon edge). "
-                            "Disadvantage = same hands — NOT a skip signal. Great hitters "
-                            "produce regardless. The model already factors this in via "
-                            "vs_L/vs_R splits.")})
+            sub = _apply_game_split(sub)
+            if sub.empty and (game_venue_split or game_time_split):
+                st.caption("No hitters match the current per-game split filter.")
+            else:
+                st.dataframe(style_hitters(sub), use_container_width=True, hide_index=True,
+                            column_config=_col_cfg)
  
 st.caption("HR% / Hit% / TB1.5% / SO Prob are matchup-aware model probabilities for TODAY's game: "
            "each hitter's stabilized rates are combined with the opposing pitcher's allowed rates "
