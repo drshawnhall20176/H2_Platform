@@ -10,7 +10,27 @@ import sports as S
 _HERE = Path(__file__).parent
 
 
+def test_has_projections_correctly_classifies_all_sports():
+    """has_projections is the gating flag for whether a sport runs through the shared
+    Best Bets / Edge Board / Model Dashboard pipeline. Outcome-based sports (UFC)
+    return False and get redirect messages; stat-based sports return True and get
+    the full pipeline. Derived from projections_module so adding a new outcome-based
+    sport with projections_module='' automatically gets has_projections=False."""
+    assert S.REGISTRY["MLB"].has_projections is True
+    assert S.REGISTRY["NFL"].has_projections is True
+    assert S.REGISTRY["WNBA"].has_projections is True
+    assert S.REGISTRY["NBA"].has_projections is True
+    assert S.REGISTRY["NCAAMB"].has_projections is True
+    assert S.REGISTRY["UFC"].has_projections is False
+    print("✓ has_projections correctly True for all stat-based sports, False for outcome-based (UFC)")
+
+
 def test_registry_has_all_eight_leagues():
+    assert set(S.REGISTRY.keys()) == {"MLB", "NFL", "WNBA", "NBA", "NHL", "NCAAF", "NCAAMB", "UFC"}
+    print("✓ all 8 leagues registered")
+
+
+
     assert set(S.REGISTRY.keys()) == {"MLB", "NFL", "WNBA", "NBA", "NHL", "NCAAF", "NCAAMB", "UFC"}
     print("✓ all 8 leagues registered")
 
@@ -258,18 +278,16 @@ def test_every_live_sport_implements_the_full_shared_page_contract():
                        # the generic contract these functions belong to — a different, deliberate
                        # design, not a gap (see e.g. views/6_..._Retrospective.py's load_retro_mlb
                        # vs load_retro_generic split).
-        if sport.key == "UFC":
-            continue   # UFC is outcome-based (fight results), not player-stat-based. It has no
-                       # projections module and no get_player_results/explain_miss (those functions
-                       # apply to counting-stat sports like WNBA/NFL). UFC's dedicated Fight Card
-                       # page handles everything -- it never goes through the shared generic pages
-                       # that require this contract (Retrospective, Podcast Studio, etc.).
+        if not sport.has_projections:
+            continue   # Outcome-based sports (UFC, and any future boxing/golf additions) have no
+                       # projections pipeline -- they use dedicated pages and never go through the
+                       # shared generic pages that require this contract.
         engine, proj = sport.engine, sport.projections
         missing_engine = [fn for fn in _ENGINE_CONTRACT if not callable(getattr(engine, fn, None))]
         missing_proj = [fn for fn in _PROJECTIONS_CONTRACT if not callable(getattr(proj, fn, None))]
         assert not missing_engine, f"{sport.key}'s engine is missing: {missing_engine}"
         assert not missing_proj, f"{sport.key}'s projections module is missing: {missing_proj}"
-    print("✓ every live non-MLB non-UFC sport implements the full engine/projections contract every shared page needs")
+    print("✓ every live stat-based sport (has_projections=True) implements the full engine/projections contract")
 
 
 # ----------------------------------------------------------------- _check_trading_password

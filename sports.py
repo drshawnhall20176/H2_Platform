@@ -40,6 +40,18 @@ class Sport:
     _projections: object = None
 
     @property
+    def has_projections(self) -> bool:
+        """True for counting-stat sports (MLB, NFL, WNBA, NBA, etc.) that have a full
+        projections pipeline (build_best_bets, build_projection_index, etc.).
+        False for outcome-based sports (UFC, boxing, golf) that use dedicated pages
+        instead of the generic Best Bets / Edge Board / Model Dashboard pipeline.
+
+        Derived from projections_module so it never needs to be set manually --
+        adding a new outcome-based sport with projections_module="" automatically
+        gets has_projections=False with no other changes needed."""
+        return bool(self.projections_module)
+
+    @property
     def engine(self):
         if self._engine is None and self.engine_module:
             self._engine = __import__(self.engine_module)

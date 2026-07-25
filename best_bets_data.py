@@ -436,7 +436,7 @@ def filter_by_split_situation(plays: List[Dict],
 
     # Sports like UFC are outcome-based and have no projections module -- they use
     # dedicated pages instead of the generic Best Bets pipeline. Return empty gracefully.
-    if not sport.projections:
+    if not sport.has_projections:
         return [], [], list(O.US_BOOKS.keys())
 
     rows, meta = sport.engine.build_slate(date_str)
