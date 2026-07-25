@@ -77,7 +77,10 @@ else:
                  # available for other sports, and deliberately not faked for them
 
 if not plays:
-    st.info("No games on the board right now. Graded picks appear here on an active slate.")
+    if _active.key == "UFC":
+        st.info("🥊 This page doesn't apply to UFC — head to **UFC Fight Card** in the sidebar.")
+    else:
+        st.info("No games on the board right now. Graded picks appear here on an active slate.")
     st.stop()
 
 # Time slot + Game filters — the same shared helpers (game_dt/slot_of/SLOT_ORDER) Best Bets and

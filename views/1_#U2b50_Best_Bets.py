@@ -89,7 +89,12 @@ else:
         st.rerun()
 
 if not plays:
-    st.info("No plays for this date.")
+    if _active.key == "UFC":
+        st.info("🥊 Best Bets doesn't apply to UFC — fights are outcome-based, not counting-stat-based. "
+               "Head to **UFC Fight Card** in the sidebar for tonight's bouts, moneyline odds, "
+               "method of victory lines, and fight duration props.")
+    else:
+        st.info("No plays for this date.")
     st.stop()
 
 # --- filters ---------------------------------------------------------------

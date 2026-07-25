@@ -72,7 +72,10 @@ else:
         plays, meta, _books = BBD.load_generic_best_bets_board(_active.key, date_str)
 
 if not plays:
-    st.info("No games on the board right now. Basket positions appear here on an active slate.")
+    if _active.key == "UFC":
+        st.info("🥊 This page doesn't apply to UFC — head to **UFC Fight Card** in the sidebar.")
+    else:
+        st.info("No games on the board right now. Basket positions appear here on an active slate.")
     st.stop()
 
 # --- time slot + game filter --------------------------------------------------
