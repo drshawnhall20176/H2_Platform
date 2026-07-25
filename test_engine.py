@@ -1725,7 +1725,7 @@ def test_get_pitcher_split_stat_returns_none_below_min_sample(monkeypatch):
                   "inningsPitched": "7.0", "gamesStarted": 1, "battersFaced": 24,
                   "earnedRuns": 1, "hits": 4, "homeRuns": 0, "atBats": 21}},
     ]
-    monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda pid, season, before_date: starts)
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda pid, season, before_date, team_id=None: starts)
 
     stat, n = E.get_pitcher_split_stat(1, 2026, "2026-07-24", venue="home")
     assert stat is None
@@ -1746,7 +1746,7 @@ def test_get_pitcher_split_stat_aggregates_above_min_sample(monkeypatch):
                      "inningsPitched": "6.0", "gamesStarted": 1, "battersFaced": 22,
                      "earnedRuns": 2, "hits": 5, "homeRuns": 0, "atBats": 20}
         })
-    monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda pid, season, before_date: starts)
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda pid, season, before_date, team_id=None: starts)
 
     stat, n = E.get_pitcher_split_stat(1, 2026, "2026-07-24", venue="home")
     assert stat is not None
@@ -1770,7 +1770,7 @@ def test_get_pitcher_split_stat_filters_to_venue(monkeypatch):
                   "hits": 5, "homeRuns": 0, "atBats": 20}}
         for i in range(1, 8)
     ]
-    monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda pid, season, before_date: starts)
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda pid, season, before_date, team_id=None: starts)
 
     stat_home, n_home = E.get_pitcher_split_stat(1, 2026, "2026-07-24", venue="home")
     stat_away, n_away = E.get_pitcher_split_stat(1, 2026, "2026-07-24", venue="away")

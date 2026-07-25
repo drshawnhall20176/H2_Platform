@@ -1345,7 +1345,8 @@ def get_starter_rest_info(pitcher_id: int, team_id: int, before_date: str,
 
 
 def get_pitcher_starts_this_season(pitcher_id: int, season: int,
-                                   before_date: Optional[str] = None) -> List[Dict[str, Any]]:
+                                   before_date: Optional[str] = None,
+                                   team_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """This pitcher's own STARTS this season: [{"gamePk", "game_date", "stat"}, ...] — the
     bounded set of
     games get_pitcher_batting_order_splits below actually needs to fetch boxscores for.
@@ -1387,12 +1388,26 @@ def get_pitcher_starts_this_season(pitcher_id: int, season: int,
         return []
 
     out: List[Dict[str, Any]] = []
-    # Build a gamePk -> home_team_id lookup from the splits themselves.
-    # The split's team object is the pitcher's own team; the game object has the gamePk.
-    # We determine home/away by checking if sp.get("isHome") is present (hitting gameLog
-    # includes it; pitching gameLog may not). When isHome is None, fall back to checking
-    # if the pitcher's team ID matches the home team ID from the schedule game object.
-    # The game object in pitching gameLog sometimes includes "teams" with home/away info.
+
+    # Build a gamePk→is_home lookup from the team schedule when team_id is provided.
+    # This is the reliable source: get_team_schedule_range returns home_id for every game,
+    # letting us determine home/away definitively. The pitching gameLog API response does
+    # NOT reliably include isHome at the split level (confirmed by live testing -- Foster
+    # Griffin's 10 day starts showed n=0 because isHome was None for every start). Without
+    # this lookup, venue filtering silently does nothing.
+    pk_is_home: Dict[int, bool] = {}
+    if team_id:
+        start_of_season = f"{season}-03-01"
+        end_date = before_date or f"{season}-12-31"
+        try:
+            schedule_games = get_team_schedule_range(team_id, start_of_season, end_date)
+            for g in schedule_games:
+                pk = g.get("gamePk")
+                if pk is not None:
+                    pk_is_home[int(pk)] = (g.get("home_id") == team_id)
+        except Exception:
+            pass  # fall back to sp.get("isHome") / game teams object
+
     for sp in splits:
         game = sp.get("game") or {}
         game_pk = game.get("gamePk")
@@ -1405,17 +1420,15 @@ def get_pitcher_starts_this_season(pitcher_id: int, season: int,
         gs = safe_float(stat.get("gamesStarted"))
         outs = _ip_to_outs(stat.get("inningsPitched", "0.0"))
         if gs >= 1 or outs >= 9:
-            # _game_time: prefer the ISO UTC timestamp (includes time for day/night filtering)
-            # over a date-only string. gameDate in the game object is typically ISO UTC.
-            game_time = (game.get("gameDate")   # "2026-07-25T17:10:00Z" -- preferred
+            game_time = (game.get("gameDate")
                          or stat.get("startTime") or stat.get("gameStartTime")
-                         or sp.get("date") or "")   # fallback: date-only, no time component
+                         or sp.get("date") or "")
 
-            # Determine isHome using multiple fallbacks:
-            # 1. sp.get("isHome") -- present in some gameLog formats
-            # 2. game["teams"]["home"]["team"]["id"] vs pitcher's team -- when game has teams obj
-            # 3. None (unknown) -- venue filter will skip this start conservatively
-            is_home = sp.get("isHome")
+            # isHome priority: schedule lookup > sp.get("isHome") > game teams object > None
+            gp_int = int(game_pk) if game_pk else None
+            is_home = pk_is_home.get(gp_int) if gp_int in pk_is_home else None
+            if is_home is None:
+                is_home = sp.get("isHome")
             if is_home is None:
                 pitcher_team_id = (sp.get("team") or {}).get("id")
                 game_teams = game.get("teams") or {}
@@ -1438,18 +1451,13 @@ MIN_SPLIT_STARTS = 5   # minimum starts/games before we use a split over the ful
 
 def get_pitcher_split_stat(pitcher_id: int, season: int, date_str: str,
                            venue: Optional[str] = None,
-                           time_of_day: Optional[str] = None) -> tuple:
-    """Aggregate pitching stat dict for only the starts matching venue/time_of_day, plus the
-    start count. Returns (stat_dict, n_starts) where stat_dict matches PitcherMetrics.stat,
-    or (None, n_starts) when the filtered sample has fewer than MIN_SPLIT_STARTS starts.
-
-    None is the explicit signal to fall back to the full-season stat -- never silently use a
-    3-start split as if it were stable. venue: 'home'/'away'/None. time_of_day: 'day'/'night'/None.
-
-    HONEST LIMITATION on time_of_day: MLB's gameLog stat splits don't always include a start
-    time field. When unavailable, time_of_day filtering can't be applied to that game and it
-    is included conservatively (same posture as get_team_recent_form's own day/night caveat)."""
-    starts = get_pitcher_starts_this_season(pitcher_id, season, before_date=date_str)
+                           time_of_day: Optional[str] = None,
+                           team_id: Optional[int] = None) -> tuple:
+    """Aggregate pitching stat dict for only the starts matching venue/time_of_day.
+    team_id: when provided, uses the team schedule to reliably determine home/away for each
+    start -- the pitching gameLog API does not include isHome reliably."""
+    starts = get_pitcher_starts_this_season(
+        pitcher_id, season, before_date=date_str, team_id=team_id)
     if not starts:
         return None, 0
 
