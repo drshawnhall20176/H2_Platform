@@ -60,7 +60,10 @@ def load_retro_mlb(date_str: str, fip_constant: float):
 @st.cache_data(ttl=600, show_spinner=False)
 def load_retro_generic(sport_key: str, date_str: str):
     sport = sports.get(sport_key)
-    rows, meta = sport.engine.build_slate(date_str)
+    if sport.key == "UFC":
+        st.info("🥊 Retrospective doesn't apply to UFC — head to **UFC Fight Card**.")
+        st.stop()
+        rows, meta = sport.engine.build_slate(date_str)
     plays = sport.projections.build_best_bets(rows)
     results = sport.engine.get_player_results(date_str)
     graded, summary = R.grade_slate(plays, results)

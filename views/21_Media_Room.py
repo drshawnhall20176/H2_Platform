@@ -139,7 +139,10 @@ def load_selections_mlb(date_str, n, cap, ev_mode):
 def load_selections_generic(sport_key, date_str, n, cap, ev_mode):
     sport = sports.get(sport_key)
     engine, proj = sport.engine, sport.projections
-    rows, meta = engine.build_slate(date_str)
+    if sport.key == "UFC":
+        rows, meta = [], []
+    else:
+        rows, meta = engine.build_slate(date_str)
     plays = SEL.filter_known_pitcher(proj.build_best_bets(rows))
 
     ev_used = False

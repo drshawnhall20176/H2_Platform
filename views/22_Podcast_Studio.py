@@ -78,7 +78,10 @@ def _board_mlb(date_str):
 
 def _board_generic(sport_key, date_str):
     sport = sports.get(sport_key)
-    rows, meta = sport.engine.build_slate(date_str)
+    if sport.key == "UFC":
+        rows, meta = [], []
+    else:
+        rows, meta = sport.engine.build_slate(date_str)
     return sport.projections.build_best_bets(rows), len(meta), rows, meta, None, None
 
 

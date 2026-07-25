@@ -134,6 +134,8 @@ else:
     @st.cache_data(ttl=600, show_spinner=False)
     def _load_graded_generic(sport_key: str, date_str_inner: str):
         sport = sports.get(sport_key)
+        if sport.key == "UFC":
+            return []   # UFC is outcome-based -- no graded plays pipeline
         rows, meta = sport.engine.build_slate(date_str_inner)
         plays = sport.projections.build_best_bets(rows)
         results = sport.engine.get_player_results(date_str_inner)
