@@ -45,6 +45,14 @@ def load_hitters(date_str: str):
     return rows
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def load_pitcher_split(pid, season, date, venue, time_of_day):
+    """Split stat comparison for the selected pitcher -- module-level so the cache is
+    stable across reruns. Defining inside an if-block caused the cache to reset every
+    time the split toggle changed, making the comparison table disappear."""
+    return E.get_pitcher_split_stat(pid, season, date, venue=venue, time_of_day=time_of_day)
+
+
 arsenals, hitter_splits = load_matchup_cache()
 
 
@@ -69,37 +77,10 @@ with c2:
         st.cache_data.clear()
         st.rerun()
 
-import best_bets_data as BBD
-venue_split, time_split = BBD.render_split_selector(key_prefix="matchup_lab")
-
 pitchers = load_pitchers(date_str)
 if not pitchers:
     st.warning("No probable starters found for this date yet — check back closer to game time.")
     st.stop()
-
-# Situational filter: when a split is active, narrow the pitcher picker to only pitchers
-# actually in that situation tonight -- the split stats computed during matchup analysis
-# reflect what they do in this specific context.
-if venue_split or time_split:
-    import projections as _P
-    filtered_pitchers = []
-    for r in pitchers:
-        is_home = r.get("_is_home")
-        is_day = r.get("_is_day_game")
-        if venue_split == "home" and is_home is False:
-            continue
-        if venue_split == "away" and is_home is True:
-            continue
-        if time_split == "day" and is_day is False:
-            continue
-        if time_split == "night" and is_day is True:
-            continue
-        filtered_pitchers.append(r)
-    if filtered_pitchers:
-        pitchers = filtered_pitchers
-    else:
-        st.info("No pitchers match the current split filters for tonight's slate.")
-        st.stop()
 
 # Time slot + Game filters — same shared helpers Best Bets and the WNBA/NBA/NCAAMB/NFL Matchup
 # Lab pages already use, narrowing a busy night's pitcher list before picking one. Two pitchers
@@ -150,6 +131,16 @@ for r in final_pitchers:
 p_label = st.selectbox("Pitcher (type to search)", sorted(p_by_label.keys()))
 pitcher = p_by_label[p_label]
 pitcher_pid = pitcher.get("_pid")
+
+# --- Split selector -- placed AFTER game/pitcher selection so switching Home/Away
+# doesn't reset the game picker. The user picks their game and pitcher first, then
+# applies the split lens to see that specific pitcher's context-specific profile.
+import best_bets_data as BBD
+venue_split, time_split = BBD.render_split_selector(key_prefix="matchup_lab")
+
+# Apply split filter to pitcher list for the split profile section -- but DON'T
+# re-filter the picker (the user already selected their pitcher above). The split
+# just affects the split comparison panel below.
 
 # --- Bullpen instead of the starter -----------------------------------------
 # The whole point: a lineup can struggle against a real ace and still erupt once his team's
@@ -211,10 +202,6 @@ opp_hitters = [h for h in hitters if h.get("Team") == opp] or hitters
 if venue_split or time_split:
     split_parts = [p for p in [venue_split, time_split] if p]
     split_label = " + ".join(p.title() for p in split_parts)
-
-    @st.cache_data(ttl=300, show_spinner=False)
-    def load_pitcher_split(pid, season, date, venue, time_of_day):
-        return E.get_pitcher_split_stat(pid, season, date, venue=venue, time_of_day=time_of_day)
 
     season = int(date_str[:4])
     split_stat, n_split = load_pitcher_split(
