@@ -22,3 +22,11 @@ nflreadpy==0.1.5         # NFL data (nflverse's actively-maintained successor to
                         # nfl_engine.py converts to pandas immediately (.to_pandas()) to stay
                         # consistent with every other sport's engine, so nothing else in the app
                         # needs to know Polars exists.
+streamlit-autorefresh==1.0.1   # Pitching Lab's live pitch-count auto-refresh — confirmed real
+                        # and installs cleanly before pinning (github.com/kmcgrady/streamlit-
+                        # autorefresh). Flagged by Snyk as an inactive project (last release
+                        # 2023) — a real, if minor, risk for a future Streamlit major version,
+                        # but it's a small, single-purpose frontend timer, not something that
+                        # needs active maintenance to keep working. Imported defensively
+                        # (try/except ImportError) in Pitching Lab, so a deploy missing this
+                        # package still gets manual refresh, just not the auto-refresh checkbox.

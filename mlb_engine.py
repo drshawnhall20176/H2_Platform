@@ -565,30 +565,27 @@ def build_pitching_slate(date_str: str, fip_constant: float = FIP_CONSTANT_DEFAU
         label = f"{g['away_name']} @ {g['home_name']}"
         gd = g.get("game_date")
         tasks.append((g["home_pitcher_id"], g["home_name"], g["away_name"], label, gd,
-                     g.get("home_id"), g.get("away_id"), g.get("gamePk"), g.get("venue_id")))
+                     g.get("home_id"), g.get("away_id"), g.get("gamePk"), g.get("venue_id"), True))
         tasks.append((g["away_pitcher_id"], g["away_name"], g["home_name"], label, gd,
-                     g.get("away_id"), g.get("home_id"), g.get("gamePk"), g.get("venue_id")))
+                     g.get("away_id"), g.get("home_id"), g.get("gamePk"), g.get("venue_id"), False))
  
     def fetch(t):
-        pid, team, opp, label, gd, team_id, opp_id, game_pk, venue_id = t
+        pid, team, opp, label, gd, team_id, opp_id, game_pk, venue_id, is_home = t
         pm = get_pitcher_metrics(pid, fip_constant)
-        return pm, team, opp, label, gd, team_id, opp_id, game_pk, venue_id
- 
+        return pm, team, opp, label, gd, team_id, opp_id, game_pk, venue_id, is_home
+
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         results = list(ex.map(fetch, tasks))
- 
+
     rows = []
-    for pm, team, opp, label, gd, team_id, opp_id, game_pk, venue_id in results:
+    for pm, team, opp, label, gd, team_id, opp_id, game_pk, venue_id, is_home in results:
         if pm.id is None or pm.era == 0:
             continue
         rows.append({
             "Pitcher": pm.name, "_pid": pm.id, "Team": team, "Opponent": opp, "Game": label,
             "Hand": pm.hand, "_game_date": gd, "_team_id": team_id, "_opp_id": opp_id,
-            # Additive, backward compatible -- added directly on request for Game Watch's own
-            # team-platoon signal, which needs to fetch tonight's ACTUAL 18-real-batter lineups
-            # (mlb_engine.build_game_lineups) for one specific game, not the whole slate. Every
-            # existing caller already reads rows via .get()/[key] on the fields it actually uses,
-            # so two new keys here are safe.
+            "_is_home": is_home,
+            "_is_day_game": ((_eastern_hour(gd) or 24) < 17) if gd else None,
             "_gamePk": game_pk, "_venue_id": venue_id,
             "ERA": round(pm.era, 2), "FIP": pm.fip, "Delta": round(pm.era - pm.fip, 2),
             "K/9": round(pm.k9, 1), "WHIP": round(pm.whip, 2), "HR/9": round(pm.hr9, 2), "OBA": pm.oba,
