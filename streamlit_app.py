@@ -23,9 +23,23 @@ import sports
 def run():
     st.set_page_config(page_title="H2 Sports MLB Dashboard", page_icon="⚾", layout="wide")
 
-    # Sidebar sport picker — sets st.session_state["sport"], read by every shared page below.
+    # Sport selector state must be set BEFORE building navigation (it drives which pages show).
+    # We read/set session state directly here rather than rendering UI, so the sidebar widget
+    # rendered below can pick up the correct current value without a double-render issue.
+    import sports as _sports
+    live = _sports.enabled_sports()
+    keys = [s.key for s in live]
+    if st.session_state.get("sport") not in keys:
+        st.session_state["sport"] = _sports.DEFAULT_SPORT
+    active_sport = st.session_state["sport"]
+
+    # Sidebar sport picker -- called here so it renders in the sidebar. Streamlit places
+    # st.navigation() page links at the top of the sidebar regardless of call order, so the
+    # selector ends up below the nav list. This is a known Streamlit constraint with no clean
+    # workaround -- the selector is still functional, just positioned at the bottom of the nav
+    # links rather than above them. The dropdown itself opens upward when near the bottom of
+    # the viewport, which avoids the truncation issue seen when it was buried below "View less".
     sports.render_sport_selector()
-    active_sport = sports.active_key()
 
     # Audience gate: same codebase, deployed twice on Streamlit Cloud, differing only in one
     # secret. The owner deployment's secrets.toml has no AUDIENCE (or AUDIENCE = "owner") -> sees
