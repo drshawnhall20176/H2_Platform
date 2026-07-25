@@ -71,7 +71,7 @@ if _active.key == "MLB":
 else:
     # UFC and other outcome-based sports have no projections pipeline -- redirect immediately
     # before any loader is called, to avoid AttributeError on sport.projections.
-    if _active.key == "UFC":
+    if not _active.has_projections:
         st.info("🥊 This page doesn't apply to UFC — fights are outcome-based, not "
                 "counting-stat-based. Head to **UFC Fight Card** in the sidebar for "
                 "tonight's bouts, moneyline odds, method of victory lines, and fight "
@@ -85,7 +85,7 @@ else:
                  # available for other sports, and deliberately not faked for them
 
 if not plays:
-    if _active.key == "UFC":
+    if not _active.has_projections:
         st.info("🥊 This page doesn't apply to UFC — head to **UFC Fight Card** in the sidebar.")
     else:
         st.info("No games on the board right now. Graded picks appear here on an active slate.")

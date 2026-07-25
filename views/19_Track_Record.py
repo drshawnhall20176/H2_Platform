@@ -64,6 +64,10 @@ def _load_all_tracked(sport_key: str):
 
 
 _active = sports.active()
+
+if not _active.has_projections:
+    st.info("🥊 This page doesn't apply to UFC — head to **UFC Fight Card** in the sidebar.")
+    st.stop()
 st.title(f"📊 Track Record  ·  {_active.icon} {_active.label}")
 st.markdown("**Every bet we log, graded against the closing line — no cherry-picking, no deleting "
             "the losers.** This is our forward-tested record, updated as results come in. "

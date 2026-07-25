@@ -21,7 +21,7 @@ _active = sports.active()
 
 # UFC is outcome-based -- Podcast Studio's script generation is built on
 # player stat projections that don't exist for UFC.
-if _active.key == "UFC":
+if not _active.has_projections:
     st.title("🎙️ H2 Podcast Studio")
     st.info("🥊 Podcast Studio doesn't apply to UFC — the episode scripts are built on "
             "player stat projections. Head to **UFC Fight Card** for tonight's bouts.")
@@ -86,7 +86,7 @@ def _board_mlb(date_str):
 
 def _board_generic(sport_key, date_str):
     sport = sports.get(sport_key)
-    if sport.key == "UFC":
+    if not sport.has_projections:
         rows, meta = [], []
     else:
         rows, meta = sport.engine.build_slate(date_str)

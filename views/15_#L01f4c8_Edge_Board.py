@@ -24,6 +24,12 @@ import betlog as B
 import bet_sizing as BS
 
 _active = sports.active()
+
+if not _active.has_projections:
+    st.title("📈 Edge Board")
+    st.info("🥊 Edge Board doesn't apply to UFC — it's built on player stat projections. "
+            "Head to **UFC Fight Card** in the sidebar for tonight's bouts and odds.")
+    st.stop()
 E, P = _active.engine, _active.projections   # sport-routed: MLB -> mlb_engine/projections,
                                               # WNBA -> wnba_engine/wnba_projections, etc.
 st.title("📈 Edge Board")

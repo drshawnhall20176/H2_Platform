@@ -23,7 +23,7 @@ _active = sports.active()
 
 # UFC is outcome-based -- Media Room's discussion hooks and content generation
 # are built on counting-stat projections that don't exist for UFC.
-if _active.key == "UFC":
+if not _active.has_projections:
     st.title("📣 H2 Sports Media")
     st.info("🥊 Media Room content generation doesn't apply to UFC — the discussion hooks "
             "and analysis are built on player stat projections. Head to **UFC Fight Card** "
@@ -148,7 +148,7 @@ def load_selections_mlb(date_str, n, cap, ev_mode):
 def load_selections_generic(sport_key, date_str, n, cap, ev_mode):
     sport = sports.get(sport_key)
     engine, proj = sport.engine, sport.projections
-    if sport.key == "UFC":
+    if not sport.has_projections:
         rows, meta = [], []
     else:
         rows, meta = engine.build_slate(date_str)

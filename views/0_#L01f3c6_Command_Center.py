@@ -64,7 +64,7 @@ def _board_mlb(date_str):
 
 
 def _board_generic(sport_key, date_str):
-    if sport_key == "UFC":
+    if not sports.get(sport_key).has_projections:
         return [], []   # UFC is outcome-based -- no generic plays pipeline
     plays, meta, _books = BBD.load_generic_best_bets_board(sport_key, date_str)
     return plays, meta

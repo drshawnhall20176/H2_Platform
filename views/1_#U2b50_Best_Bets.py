@@ -74,7 +74,7 @@ if _active.key == "MLB":
         st.session_state[ss_key] = available_books
         st.rerun()
 else:
-    if _active.key == "UFC":
+    if not _active.has_projections:
         st.info("🥊 This page doesn't apply to UFC — fights are outcome-based, not "
                 "counting-stat-based. Head to **UFC Fight Card** in the sidebar.")
         st.stop()
@@ -93,7 +93,7 @@ else:
         st.rerun()
 
 if not plays:
-    if _active.key == "UFC":
+    if not _active.has_projections:
         st.info("🥊 Best Bets doesn't apply to UFC — fights are outcome-based, not counting-stat-based. "
                "Head to **UFC Fight Card** in the sidebar for tonight's bouts, moneyline odds, "
                "method of victory lines, and fight duration props.")
