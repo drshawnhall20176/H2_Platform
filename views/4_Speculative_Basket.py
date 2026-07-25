@@ -60,6 +60,7 @@ if _active.key == "MLB":
     with st.spinner("Building the basket..."):
         plays, meta, rows, available_books = BBD.load_mlb_graded_picks_board(
             date_str, E.FIP_CONSTANT_DEFAULT, preferred_book, venue_split, time_split)
+    plays = BBD.filter_by_split_situation(plays, venue_split, time_split)
     ss_key = f"_available_books_{date_str}"
     if st.session_state.get(ss_key) != available_books:
         st.session_state[ss_key] = available_books

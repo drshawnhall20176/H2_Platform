@@ -68,6 +68,7 @@ if _active.key == "MLB":
     with st.spinner("Scanning the slate..."):
         plays, meta, available_books = load_best_bets_mlb(
             date_str, fip_constant, preferred_book, venue_split, time_split)
+    plays = BBD.filter_by_split_situation(plays, venue_split, time_split)
     ss_key = f"_available_books_{date_str}"
     if st.session_state.get(ss_key) != available_books:
         st.session_state[ss_key] = available_books
