@@ -163,7 +163,7 @@ def test_sport_only_page_visibility_matches_expected_config():
     assert pairs == {"5": ("MLB",), "6": ("MLB",), "7": ("MLB",), "8": ("MLB",), "9": ("MLB",),
                      "10": ("WNBA", "NBA", "NCAAMB"), "11": ("WNBA", "NBA", "NCAAMB"),
                      "12": ("NFL",), "13": ("NFL",), "14": ("NFL",),
-                     "21": ("UFC",)}, pairs
+                     "23": ("UFC",)}, pairs
     print("✓ sport_only_leads matches expected config (Bullpen Watch/Game Watch/Pitching Lab/"
           "Dinger Engine/Matchup Lab(MLB) -> MLB, Hot Hand Engine/Matchup Lab(WNBA/NBA/NCAAMB) -> "
           "WNBA+NBA+NCAAMB, Matchup Lab(NFL)/Anytime TD Engine/QB Lab -> NFL, "

@@ -90,7 +90,7 @@ def run():
         "12": ("NFL",),                                  # Matchup Lab (NFL) — own page, not the shared basketball one (see its own module docstring for why)
         "13": ("NFL",),                                  # Anytime TD Engine — NFL's Dinger Engine analog
         "14": ("NFL",),                                  # QB Lab — NFL's Pitching Lab analog
-        "21": ("UFC",),                                  # UFC Fight Card -- MMA-only, no MLB/NFL equivalent
+        "23": ("UFC",),                                  # UFC Fight Card -- MMA-only, no MLB/NFL equivalent
     }
 
     # Internal/paid tools kept off the Discord/public build — matched by TITLE (not page number)
@@ -135,6 +135,7 @@ def run():
         "20": ("Data Health",   "🩺", "data_health"),
         "21": ("Media Room",    "📣", "media_room"),
         "22": ("Podcast Studio", "🎙️", "podcast_studio"),
+        "23": ("UFC Fight Card", "🥊", "ufc_fight_card"),
     }
 
     def lead(name: str) -> str:
