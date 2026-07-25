@@ -234,6 +234,10 @@ def build_mlb_board(date_str: str, fip_constant: float, odds_api_key: Optional[s
     # which data source was used -- never a silent substitution.
     season = int(date_str[:4])
     if venue_split or time_split:
+        # Compute label base first so it's available in the loops below
+        split_parts = [p for p in [venue_split, time_split] if p]
+        split_label_base = "/".join(split_parts) if split_parts else None
+
         # Pitcher splits: replace pm.stat in meta for each starter
         for m in meta:
             for pm_attr in ("home_pm", "away_pm"):
@@ -247,7 +251,7 @@ def build_mlb_board(date_str: str, fip_constant: float, odds_api_key: Optional[s
                     import dataclasses
                     m[pm_attr] = dataclasses.replace(pm, stat=split_stat)
                     m[f"_{pm_attr}_split_n"] = n
-                    m[f"_{pm_attr}_split_label"] = f"{split_label_base} split ({n} starts)" if split_label_base else None
+                    m[f"_{pm_attr}_split_label"] = f"{split_label_base} split ({n} starts)"
                 else:
                     m[f"_{pm_attr}_split_label"] = None
 
@@ -262,24 +266,9 @@ def build_mlb_board(date_str: str, fip_constant: float, odds_api_key: Optional[s
             if split_stat is not None:
                 r["_stat"] = split_stat
                 r["_split_n"] = n
-                # Build a readable label for the Why column
-                parts = []
-                if venue_split:
-                    parts.append(venue_split)
-                if time_split:
-                    parts.append(time_split)
-                r["_split_label"] = f"{'/'.join(parts)} split ({n} games)"
+                r["_split_label"] = f"{split_label_base} split ({n} games)"
             else:
-                r["_split_label"] = None   # full-season used, no label needed
-
-        # Pitcher split label: also attach to pitcher rows (done in build_pitcher_projection_rows
-        # via meta, which now carries the overridden pm.stat)
-        split_parts = []
-        if venue_split:
-            split_parts.append(venue_split)
-        if time_split:
-            split_parts.append(time_split)
-        split_label_base = "/".join(split_parts) if split_parts else None
+                r["_split_label"] = None
     else:
         split_label_base = None
         for r in rows:
