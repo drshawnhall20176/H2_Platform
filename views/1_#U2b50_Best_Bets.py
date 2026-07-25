@@ -41,14 +41,14 @@ def load_best_bets_mlb(date_str: str, fip_constant: float, preferred_book: str):
 @st.cache_data(ttl=300, show_spinner=False)
 def load_best_bets_generic(sport_key: str, date_str: str):
     """Any sport whose engine/projections don't need MLB's statcast/weather enrichment path —
-    currently WNBA, and any future sport built the same way."""
-    plays, meta = BBD.load_generic_best_bets_board(sport_key, date_str)
+    currently NFL, WNBA, and any future sport built the same way."""
+    plays, meta, available_books = BBD.load_generic_best_bets_board(sport_key, date_str)
     slot_by_game = {m["label"]: game_dt(m.get("game_date")) for m in meta}
     for pl in plays:
         dt = slot_by_game.get(pl["Game"])
         pl["Slot"] = slot_of(dt)
         pl["Time"] = dt.strftime("%I:%M %p").lstrip("0") + " ET" if dt else "TBD"
-    return plays, meta
+    return plays, meta, available_books
 
 
 # --- controls ---------------------------------------------------------------
@@ -69,10 +69,19 @@ if _active.key == "MLB":
         st.session_state[ss_key] = available_books
         st.rerun()
 else:
-    target = st.date_input("Slate date", datetime.now(eastern))
+    c1, c2 = st.columns([2, 1])
+    with c1: target = st.date_input("Slate date", datetime.now(eastern))
     date_str = target.strftime("%Y-%m-%d")
+    with c2: preferred_book = BBD.render_book_selector(
+        key_prefix=f"{_active.key.lower()}_best_bets", date_str=date_str)
+    # Store preferred book for load_generic_best_bets_board to read
+    st.session_state[f"_preferred_book_{_active.key.lower()}"] = preferred_book
     with st.spinner("Scanning the slate..."):
-        plays, meta = load_best_bets_generic(_active.key, date_str)
+        plays, meta, available_books = load_best_bets_generic(_active.key, date_str)
+    ss_key = f"_available_books_{_active.key}_{date_str}"
+    if st.session_state.get(ss_key) != available_books:
+        st.session_state[ss_key] = available_books
+        st.rerun()
 
 if not plays:
     st.info("No plays for this date.")
