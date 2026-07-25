@@ -46,11 +46,11 @@ def load_hitters(date_str: str):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_pitcher_split(pid, season, date, venue, time_of_day):
+def load_pitcher_split(pid, season, date, venue, time_of_day, team_id=None):
     """Split stat comparison for the selected pitcher -- module-level so the cache is
-    stable across reruns. Defining inside an if-block caused the cache to reset every
-    time the split toggle changed, making the comparison table disappear."""
-    return E.get_pitcher_split_stat(pid, season, date, venue=venue, time_of_day=time_of_day)
+    stable across reruns. team_id enables reliable home/away via schedule lookup."""
+    return E.get_pitcher_split_stat(pid, season, date, venue=venue,
+                                    time_of_day=time_of_day, team_id=team_id)
 
 
 arsenals, hitter_splits = load_matchup_cache()
@@ -205,7 +205,8 @@ if venue_split or time_split:
 
     season = int(date_str[:4])
     split_stat, n_split = load_pitcher_split(
-        pitcher_pid, season, date_str, venue_split, time_split)
+        pitcher_pid, season, date_str, venue_split, time_split,
+        team_id=pitcher.get("_team_id"))
 
     st.subheader(f"📊 Split profile: {pitcher['Pitcher']} — {split_label}")
 

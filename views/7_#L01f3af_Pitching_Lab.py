@@ -125,9 +125,11 @@ def load(date_str: str, fip_constant: float, venue_split=None, time_split=None):
                 pm = m.get(pm_attr)
                 if pm is None or pm.id is None or not pm.stat:
                     continue
+                pitcher_team_id = m.get("home_id") if pm_attr == "home_pm" else m.get("away_id")
                 split_stat, n = E.get_pitcher_split_stat(
                     pm.id, season, date_str,
-                    venue=venue_split, time_of_day=time_split)
+                    venue=venue_split, time_of_day=time_split,
+                    team_id=pitcher_team_id)
                 if split_stat is not None:
                     import dataclasses
                     m[pm_attr] = dataclasses.replace(pm, stat=split_stat)
