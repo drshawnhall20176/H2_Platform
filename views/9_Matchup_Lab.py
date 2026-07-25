@@ -69,6 +69,9 @@ with c2:
         st.cache_data.clear()
         st.rerun()
 
+import best_bets_data as BBD
+venue_split, time_split = BBD.render_split_selector(key_prefix="matchup_lab")
+
 pitchers = load_pitchers(date_str)
 if not pitchers:
     st.warning("No probable starters found for this date yet — check back closer to game time.")

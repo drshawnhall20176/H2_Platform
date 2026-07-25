@@ -110,10 +110,31 @@ def _build_lineup_probs_vs_one_pitcher(rows, opp_stat, park, statcast_lookup, st
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def load(date_str: str, fip_constant: float):
+def load(date_str: str, fip_constant: float, venue_split=None, time_split=None):
+    import best_bets_data as BBD
     rows, meta = E.build_slate(date_str, fip_constant)
+    # Apply pitcher split stats when a split is selected -- same minimum-sample gate (5 starts)
+    # as Best Bets. Lets Deezy's "check Drohan's home day splits" workflow happen directly here.
+    season = int(date_str[:4])
+    split_label_base = None
+    if venue_split or time_split:
+        parts = [p for p in [venue_split, time_split] if p]
+        split_label_base = "/".join(parts)
+        for m in meta:
+            for pm_attr in ("home_pm", "away_pm"):
+                pm = m.get(pm_attr)
+                if pm is None or pm.id is None or not pm.stat:
+                    continue
+                split_stat, n = E.get_pitcher_split_stat(
+                    pm.id, season, date_str,
+                    venue=venue_split, time_of_day=time_split)
+                if split_stat is not None:
+                    import dataclasses
+                    m[pm_attr] = dataclasses.replace(pm, stat=split_stat)
+                    m[f"_{pm_attr}_split_label"] = f"{split_label_base} split ({n} starts)"
+                else:
+                    m[f"_{pm_attr}_split_label"] = f"full-season (only {n} {split_label_base} starts)"
     projections = P.build_pitcher_projection_rows(rows, meta, seed=11)
-    # FIP regression table, rebuilt from the probable starters in meta.
     fip_rows = []
     for m in meta:
         for pm, team, opp, team_id in ((m["home_pm"], m["home_name"], m["away_name"], m.get("home_id")),
@@ -129,6 +150,7 @@ def load(date_str: str, fip_constant: float):
     return fip_rows, projections, meta
 
 
+import best_bets_data as BBD
 col_a, col_b = st.columns([2, 1])
 with col_a:
     target_date = st.date_input("Analysis Date", datetime.now())
@@ -137,9 +159,10 @@ with col_b:
                                    step=0.01, help="Season-specific; ~3.1-3.2.")
 
 date_str = target_date.strftime("%Y-%m-%d")
+venue_split, time_split = BBD.render_split_selector(key_prefix="pitching_lab")
 
 with st.spinner("Loading starters and opposing lineups..."):
-    fip_rows, proj_rows, meta = load(date_str, fip_constant)
+    fip_rows, proj_rows, meta = load(date_str, fip_constant, venue_split, time_split)
 
 if not fip_rows:
     st.info("No probable starters found for this date. Pick a date with scheduled games.")

@@ -61,9 +61,10 @@ if _active.key == "MLB":
     with c1: target = st.date_input("Slate date", datetime.now())
     date_str = target.strftime("%Y-%m-%d")
     with c2: preferred_book = BBD.render_book_selector(key_prefix="suggested_parlays", date_str=date_str)
+    venue_split, time_split = BBD.render_split_selector(key_prefix="suggested_parlays")
     with st.spinner("Building parlay options..."):
         plays, meta, rows, available_books = BBD.load_mlb_graded_picks_board(
-            date_str, E.FIP_CONSTANT_DEFAULT, preferred_book)
+            date_str, E.FIP_CONSTANT_DEFAULT, preferred_book, venue_split, time_split)
     ss_key = f"_available_books_{date_str}"
     if st.session_state.get(ss_key) != available_books:
         st.session_state[ss_key] = available_books

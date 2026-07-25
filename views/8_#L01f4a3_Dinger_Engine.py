@@ -40,16 +40,30 @@ def load_weather(meta_keys: tuple):
  
  
 @st.cache_data(ttl=300, show_spinner=False)
-def load_slate(date_str: str, fip_constant: float):
+def load_slate(date_str: str, fip_constant: float, venue_split=None, time_split=None):
     rows, meta = E.build_slate(date_str, fip_constant)
     sc, k = load_statcast()
     wx_by_venue = load_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
     for r in rows:
         wx = wx_by_venue.get(r.get("_venue_id"))
         r["_weather_hr"] = wx["hr_factor"] if wx else 1.0
-    P.enrich_hitter_rows(rows, seed=7, statcast=sc, statcast_k=k)  # matchup/platoon/Statcast/weather
-    P.add_starter_exposure_context(rows)  # vs SP / vs Pen PA split — ties times-through-the-order
-                                          # to specific hitters and to the bullpen-matchup toggle
+    if venue_split or time_split:
+        season = int(date_str[:4])
+        parts = [p for p in [venue_split, time_split] if p]
+        label_base = "/".join(parts)
+        for r in rows:
+            pid = r.get("_pid")
+            if not pid:
+                continue
+            split_stat, n = E.get_hitter_split_stat(pid, season, date_str,
+                                                     venue=venue_split, time_of_day=time_split)
+            if split_stat is not None:
+                r["_stat"] = split_stat
+                r["_split_label"] = f"{label_base} split ({n} games)"
+            else:
+                r["_split_label"] = f"full-season ({n} {label_base} games only)"
+    P.enrich_hitter_rows(rows, seed=7, statcast=sc, statcast_k=k)
+    P.add_starter_exposure_context(rows)
     return rows, meta, (len(sc) if sc else 0), wx_by_venue
  
  
@@ -76,9 +90,11 @@ def load_hitter_workload(team_id, date_str_inner):
     return E.get_team_hitter_workload(team_id, date_str_inner)
 
 
+import best_bets_data as BBD
+
 eastern = pytz.timezone("US/Eastern")
 default_date = datetime.now(eastern)
- 
+
 c1, c2, c3 = st.columns([2, 1, 1])
 with c1:
     target_date = st.date_input("Slate date", default_date)
@@ -89,11 +105,12 @@ with c3:
     if st.button("🔄 Refresh"):
         st.cache_data.clear()
         st.rerun()
- 
+
 date_str = target_date.strftime("%Y-%m-%d")
- 
+venue_split, time_split = BBD.render_split_selector(key_prefix="dinger_engine")
+
 with st.spinner("Compiling telemetry..."):
-    rows, meta, n_statcast, wx_by_venue = load_slate(date_str, fip_constant)
+    rows, meta, n_statcast, wx_by_venue = load_slate(date_str, fip_constant, venue_split, time_split)
  
 if not rows:
     st.info("No hitters compiled for this date. Pick a date with scheduled MLB games.")
