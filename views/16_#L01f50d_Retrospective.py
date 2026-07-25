@@ -42,7 +42,7 @@ def load_retro_mlb(date_str: str, fip_constant: float):
     # UNBLENDED probabilities while the actual board shown to a person used the bullpen-blended
     # ones. That's a real accuracy gap now closed, not just fewer lines of code — this now grades
     # the SAME numbers a person actually sees.
-    rows, meta, plays = BBD.build_mlb_board(date_str, fip_constant)
+    rows, meta, plays, _books = BBD.build_mlb_board(date_str, fip_constant)
     results = E.get_player_results(date_str)
     graded, summary = R.grade_slate(plays, results)
     reports = {m: R.market_report(plays, results, m) for m in _active_markets}

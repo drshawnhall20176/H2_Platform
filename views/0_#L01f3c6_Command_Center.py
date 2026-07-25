@@ -59,11 +59,13 @@ _MARKET_ICONS = {
 
 # ---------- loaders ----------
 def _board_mlb(date_str):
-    return BBD.load_mlb_best_bets_board(date_str, BBD.E.FIP_CONSTANT_DEFAULT)
+    plays, meta, _books = BBD.load_mlb_best_bets_board(date_str, BBD.E.FIP_CONSTANT_DEFAULT)
+    return plays, meta
 
 
 def _board_generic(sport_key, date_str):
-    return BBD.load_generic_best_bets_board(sport_key, date_str)
+    plays, meta, _books = BBD.load_generic_best_bets_board(sport_key, date_str)
+    return plays, meta
 
 
 def _board(sport_key, date_str):

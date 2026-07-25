@@ -71,7 +71,7 @@ else:
     target = st.date_input("Slate date", datetime.now(eastern))
     date_str = target.strftime("%Y-%m-%d")
     with st.spinner("Grading the slate..."):
-        plays, meta = BBD.load_generic_best_bets_board(_active.key, date_str)
+        plays, meta, _books = BBD.load_generic_best_bets_board(_active.key, date_str)
     rows = None   # the one-sided banner is MLB-specific (compares starting pitchers) — not
                  # available for other sports, and deliberately not faked for them
 

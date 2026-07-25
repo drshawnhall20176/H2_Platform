@@ -123,7 +123,7 @@ if _active.key == "MLB":
 
     @st.cache_data(ttl=600, show_spinner=False)
     def _load_graded_mlb(date_str_inner: str, fip_constant_inner: float):
-        _, _, plays = BBD.build_mlb_board(date_str_inner, fip_constant_inner)
+        _, _, plays, _ = BBD.build_mlb_board(date_str_inner, fip_constant_inner)
         results = E.get_player_results(date_str_inner)
         graded, _ = R.grade_slate(plays, results)
         return graded
