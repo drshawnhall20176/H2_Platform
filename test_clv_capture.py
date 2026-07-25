@@ -71,7 +71,54 @@ def test_runner_not_started_filter():
     print("✓ runner keeps only not-yet-started games (pre-game prices)")
 
 
-if __name__ == "__main__":
+def test_market_to_odds_key_covers_all_mlb_markets():
+    """Drift guard: clv_capture.MARKET_TO_ODDS_KEY must cover every market this platform
+    generates picks for -- the same set as projections.MLB_MARKET_TO_ODDS_KEY. A market missing
+    here means bets on that market silently land in 'no_match' on every capture run, with no
+    error and no closing line, ever. The original 7-market list caused exactly this for Batter
+    Walks, HRR, RBIs, Runs, Singles, Doubles, Triples, Pitcher Earned Runs, Pitcher Hits Allowed."""
+    import projections as P
+    proj_keys = set(P.MLB_MARKET_TO_ODDS_KEY.keys())
+    capture_keys = set(C.MARKET_TO_ODDS_KEY.keys())
+    missing = proj_keys - capture_keys
+    assert not missing, (
+        f"These markets generate picks but have no CLV capture mapping -- "
+        f"bets on them will NEVER get a closing line: {missing}")
+    print(f"✓ clv_capture.MARKET_TO_ODDS_KEY covers all {len(proj_keys)} real MLB markets")
+
+
+def test_hrr_bets_can_be_matched_for_closing_line():
+    """Specific regression for the Ezequiel Tovar / Batter Hits+Runs+RBIs case from the
+    live bet log -- HRR bets were silently never getting a closing line because the market
+    key was missing from MARKET_TO_ODDS_KEY."""
+    offer = {"market": "batter_hits_runs_rbis", "player": "Ezequiel Tovar", "point": 0.5,
+             "over": {}, "under": {"draftkings": -115}}
+    bet = {"id": 1, "market": "Batter Hits+Runs+RBIs", "player": "Ezequiel Tovar",
+           "side": "Under", "line": 0.5, "book": "draftkings"}
+    price = C.bet_close_price(bet, [offer])
+    assert price == -115
+    print("✓ Batter Hits+Runs+RBIs bets can now be matched for closing line capture")
+
+
+def test_batter_walks_bets_can_be_matched():
+    offer = {"market": "batter_walks", "player": "Tyler Freeman", "point": 0.5,
+             "over": {}, "under": {"fanduel": -120}}
+    bet = {"id": 2, "market": "Batter Walks", "player": "Tyler Freeman",
+           "side": "Under", "line": 0.5, "book": "fanduel"}
+    assert C.bet_close_price(bet, [offer]) == -120
+    print("✓ Batter Walks bets can now be matched for closing line capture")
+
+
+def test_pitcher_earned_runs_bets_can_be_matched():
+    offer = {"market": "pitcher_earned_runs", "player": "Shane Drohan", "point": 1.5,
+             "over": {"draftkings": 110}, "under": {}}
+    bet = {"id": 3, "market": "Pitcher Earned Runs", "player": "Shane Drohan",
+           "side": "Over", "line": 1.5, "book": "draftkings"}
+    assert C.bet_close_price(bet, [offer]) == 110
+    print("✓ Pitcher Earned Runs bets can now be matched for closing line capture")
+
+
+
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
     for t in tests:

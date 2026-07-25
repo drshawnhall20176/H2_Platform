@@ -15,14 +15,28 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 # Bet Log display market -> Odds API market key.
+# EXPANDED to all 17 real MLB markets, matching projections.MLB_MARKET_TO_ODDS_KEY exactly.
+# The original 7 meant that bets on HRR, Walks, RBIs, Runs, Singles, Doubles, Triples, Walks,
+# Pitcher Earned Runs, and Pitcher Hits Allowed NEVER got a closing line captured -- they'd
+# silently land in capture_updates' no_match list on every run, with no error, no explanation.
 MARKET_TO_ODDS_KEY = {
-    "Batter HR": "batter_home_runs",
-    "Batter Total Bases": "batter_total_bases",
-    "Batter Total Hits": "batter_hits",
-    "Batter Strikeouts": "batter_strikeouts",
-    "Pitcher Strikeouts": "pitcher_strikeouts",
-    "Pitcher Outs": "pitcher_outs",
-    "Pitcher Walks": "pitcher_walks",
+    "Batter HR":              "batter_home_runs",
+    "Batter Total Bases":     "batter_total_bases",
+    "Batter Total Hits":      "batter_hits",
+    "Batter Strikeouts":      "batter_strikeouts",
+    "Batter Runs":            "batter_runs_scored",
+    "Batter RBIs":            "batter_rbis",
+    "Batter Stolen Bases":    "batter_stolen_bases",
+    "Batter Singles":         "batter_singles",
+    "Batter Doubles":         "batter_doubles",
+    "Batter Triples":         "batter_triples",
+    "Batter Walks":           "batter_walks",
+    "Batter Hits+Runs+RBIs":  "batter_hits_runs_rbis",
+    "Pitcher Strikeouts":     "pitcher_strikeouts",
+    "Pitcher Outs":           "pitcher_outs",
+    "Pitcher Walks":          "pitcher_walks",
+    "Pitcher Earned Runs":    "pitcher_earned_runs",
+    "Pitcher Hits Allowed":   "pitcher_hits_allowed",
 }
 
 
