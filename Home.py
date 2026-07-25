@@ -1,8 +1,51 @@
 import streamlit as st
-
+import sports
 
 st.title("⚾ H2 Sports — MLB Model Dashboard")
 st.caption("Live matchup analytics powered by the public MLB Stats API")
+
+# Sport selector -- primary location is here in the main content area, not the sidebar.
+# Streamlit's st.navigation always injects page links at the top of the sidebar regardless
+# of call order, pushing any sidebar widget below the full page list. Rendering it here
+# ensures it's always visible and unobstructed, at the top of the main content on the
+# landing page every user sees first.
+st.divider()
+live = sports.enabled_sports()
+keys = [s.key for s in live]
+current = st.session_state.get("sport", sports.DEFAULT_SPORT)
+if current not in keys:
+    current = keys[0]
+
+st.markdown("### 🏟 Select Sport")
+cols = st.columns(len(keys) + len([s for s in sports.REGISTRY.values() if not s.enabled]))
+
+for i, s in enumerate(live):
+    with cols[i]:
+        selected = (current == s.key)
+        if st.button(
+            f"{s.icon} {s.label}",
+            key=f"sport_btn_{s.key}",
+            type="primary" if selected else "secondary",
+            use_container_width=True
+        ):
+            st.session_state["sport"] = s.key
+            st.rerun()
+
+coming = [s for s in sports.REGISTRY.values() if not s.enabled]
+for i, s in enumerate(coming):
+    with cols[len(live) + i]:
+        st.button(
+            f"{s.icon} {s.label}\n*(coming soon)*",
+            key=f"sport_btn_coming_{s.key}",
+            disabled=True,
+            use_container_width=True
+        )
+
+active = sports.REGISTRY.get(current)
+if active:
+    st.caption(f"Currently viewing: **{active.icon} {active.label}** — select a page from the sidebar to begin.")
+
+st.divider()
 
 st.markdown(
     """
@@ -15,8 +58,8 @@ pulls the same live data and stays consistent.
 - **💣 Dinger Engine** — every projected hitter on the slate with platoon edges, ISO/OPS,
   and matchup leaderboards. Uses posted lineups when available, active rosters otherwise.
 
-Select a page from the sidebar to begin. Pick a date, and the engine fetches the slate
-concurrently — a full day usually loads in a few seconds.
+Pick a date on any page, and the engine fetches the slate concurrently — a full day
+usually loads in a few seconds.
 """
 )
 

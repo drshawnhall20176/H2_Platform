@@ -256,24 +256,25 @@ def require_live_engine(feature_name: str = "This page") -> bool:
 
 
 def render_sport_selector():
-    """Sport picker. Sets st.session_state['sport']. Only enabled sports are selectable."""
+    """Sidebar sport indicator -- shows the active sport as a compact read-only label.
+    The real interactive selector lives on the Home page where it's always visible and
+    unobstructed. This label keeps sidebar users oriented without taking up space or
+    getting buried below a long page list."""
     import streamlit as st
     live = enabled_sports()
     keys = [s.key for s in live]
     current = st.session_state.get("sport", DEFAULT_SPORT)
     if current not in keys:
         current = keys[0]
+        st.session_state["sport"] = current
+
+    active = REGISTRY.get(current)
     with st.sidebar:
-        st.markdown("**🏟 Sport**")
-        choice = st.selectbox(
-            "Sport", keys, index=keys.index(current),
-            format_func=lambda k: f"{REGISTRY[k].icon} {REGISTRY[k].label}",
-            key="sport",
-            label_visibility="collapsed")
+        st.markdown(f"**Sport:** {active.icon} {active.label}" if active else "**Sport:** MLB")
         coming = [s for s in REGISTRY.values() if not s.enabled]
         if coming:
             st.caption("Coming soon: " + " · ".join(f"{s.icon} {s.key}" for s in coming))
-    return choice
+    return current
 
 
 # ================================================================================================
