@@ -399,7 +399,12 @@ for m in meta_sorted:
                           "bullpen, not the confirmed starter.")
             else:
                 sub = game_df[game_df["Team"] == m["away_name"]].sort_values(sort_col, ascending=False)
-            st.dataframe(style_hitters(sub), use_container_width=True, hide_index=True)
+            st.dataframe(style_hitters(sub), use_container_width=True, hide_index=True,
+                        column_config={"Advantage": st.column_config.TextColumn(
+                            "Platoon", help="Advantage = opposite hands (platoon edge). "
+                            "Disadvantage = same hands — NOT a skip signal. Great hitters "
+                            "produce regardless. The model already factors this in via "
+                            "vs_L/vs_R splits.")})
         with t_home:
             if away_bullpen_on:
                 sub = _bullpen_sub(game_df, m["home_name"], m.get("away_id"), ap.id)
@@ -407,12 +412,23 @@ for m in meta_sorted:
                           "bullpen, not the confirmed starter.")
             else:
                 sub = game_df[game_df["Team"] == m["home_name"]].sort_values(sort_col, ascending=False)
-            st.dataframe(style_hitters(sub), use_container_width=True, hide_index=True)
+            st.dataframe(style_hitters(sub), use_container_width=True, hide_index=True,
+                        column_config={"Advantage": st.column_config.TextColumn(
+                            "Platoon", help="Advantage = opposite hands (platoon edge). "
+                            "Disadvantage = same hands — NOT a skip signal. Great hitters "
+                            "produce regardless. The model already factors this in via "
+                            "vs_L/vs_R splits.")})
  
 st.caption("HR% / Hit% / TB1.5% / SO Prob are matchup-aware model probabilities for TODAY's game: "
            "each hitter's stabilized rates are combined with the opposing pitcher's allowed rates "
            "(odds-ratio method) and his platoon split, then park-adjusted. K% is the hitter's SEASON "
            "strikeout rate (a skill stat) for reference. PowerIndex is the legacy heuristic.")
+st.caption("**Advantage / Disadvantage** = the handedness matchup between the batter and the opposing "
+           "starter. Advantage = opposite hands (e.g. RHB vs LHP) — the standard platoon edge. "
+           "Disadvantage = same hands (e.g. RHB vs RHP). **Disadvantage does NOT mean skip this player.** "
+           "It means one favorable factor isn't present tonight. Great hitters produce regardless — "
+           "check their season numbers vs. same-hand pitching specifically (the model already factors "
+           "this in via the vs_L/vs_R platoon split). Think of it as context, not a veto.")
 st.caption("Opp HR/9 = the opposing starter's home runs allowed per 9 innings, colored on fixed bands "
            "(not slate-relative): 🟢 under 0.80 excellent · 🟩 0.80–1.10 solid · 🟡 1.10–1.30 average · "
            "🟠 1.30–1.50 below average · 🔴 over 1.50 homer-prone. A redder arm is a better power spot "
