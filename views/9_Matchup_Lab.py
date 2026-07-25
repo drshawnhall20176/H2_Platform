@@ -229,8 +229,15 @@ if venue_split or time_split:
         return round(float(val), 2) if val is not None else None
 
     if split_stat is None:
-        st.caption(f"⚪ Fewer than {E.MIN_SPLIT_STARTS} {split_label} starts found (n={n_split}) "
-                  "— split sample too thin to compare reliably. Full-season line is shown above.")
+        if n_split == 0:
+            st.caption(f"⚪ No {split_label} starts found for {pitcher['Pitcher']} this season "
+                      f"— this pitcher may not have started in {split_label} games yet, or "
+                      f"the split data isn't available from the API for this pitcher. "
+                      f"Full-season line applies.")
+        else:
+            st.caption(f"⚪ Only {n_split} {split_label} start{'s' if n_split != 1 else ''} found "
+                      f"(minimum is {E.MIN_SPLIT_STARTS}) — split sample too thin to compare "
+                      f"reliably. Full-season line is shown above.")
     else:
         # Build comparison table
         def _delta_str(full_val, split_val, lower_is_better=False):
