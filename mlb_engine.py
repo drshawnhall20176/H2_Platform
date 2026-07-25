@@ -1470,14 +1470,9 @@ def get_pitcher_split_stat(pitcher_id: int, season: int, date_str: str,
     for s in starts:
         stat = s.get("stat") or {}
 
-        # get_pitcher_starts_this_season stores the raw split entry as 'stat' but the
-        # isHome field is on the parent split, not inside stat{}. We need to store it
-        # separately. For now, derive home/away from the game's home_id vs the pitcher's
-        # team_id using the gamePk -- but we don't have team_id here. As a pragmatic fix:
-        # the gameLog split for pitchers includes 'isHome' at the split level too. However
-        # get_pitcher_starts_this_season only stores stat, not the full split. We add isHome
-        # to the stored dict so it's available here.
-        is_home = s.get("isHome")   # None if get_pitcher_starts_this_season didn't store it yet
+        # is_home and _game_time were set by get_pitcher_starts_this_season using the
+        # schedule lookup (pk_info) when team_id was provided -- use them directly here.
+        is_home = s.get("isHome")
 
         if venue is not None and is_home is not None:
             if venue == "home" and not is_home:
@@ -1486,18 +1481,17 @@ def get_pitcher_split_stat(pitcher_id: int, season: int, date_str: str,
                 continue
 
         if time_of_day is not None:
-            game_time = s.get("_game_time") or stat.get("startTime") or stat.get("gameStartTime")
+            game_time = s.get("_game_time")
             if game_time:
                 try:
                     hour = _eastern_hour(game_time)
-                    if hour is not None:  # only filter when we actually know the time
+                    if hour is not None:
                         is_day = hour < 17
                         if time_of_day == "day" and not is_day:
                             continue
                         if time_of_day == "night" and is_day:
                             continue
-                    # If hour is None (date-only string, no time component), include
-                    # the game conservatively -- never drop a start we can't classify
+                    # hour is None = date-only string, include conservatively
                 except Exception:
                     pass
 
