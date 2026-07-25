@@ -112,8 +112,10 @@ venue_split, time_split = BBD.render_split_selector(key_prefix="dinger_engine")
 with st.spinner("Compiling telemetry..."):
     rows, meta, n_statcast, wx_by_venue = load_slate(date_str, fip_constant, venue_split, time_split)
 
-# Situational display filter: when a split is active, only show hitters actually in
-# that situation tonight (away-team hitters in night games, etc.)
+# Keep all_rows intact for the game-by-game section -- it needs both sides of every game.
+# The split filter applies to leaderboards and summary stats only.
+all_rows = rows
+
 if venue_split or time_split:
     filtered_rows = []
     for r in rows:
@@ -129,16 +131,18 @@ if venue_split or time_split:
             continue
         filtered_rows.append(r)
     rows = filtered_rows
- 
-if not rows:
+
+if not all_rows:
     st.info("No hitters compiled for this date. Pick a date with scheduled MLB games.")
     st.stop()
- 
-df = pd.DataFrame(rows)
- 
-confirmed = (df["Lineup"] == "Confirmed").sum()
-st.caption(f"{len(meta)} games · {len(df)} hitters · "
-           f"{confirmed} from confirmed lineups, {len(df) - confirmed} projected from active rosters")
+
+df = pd.DataFrame(rows) if rows else pd.DataFrame()
+all_df = pd.DataFrame(all_rows)
+
+confirmed = (all_df["Lineup"] == "Confirmed").sum()
+split_note = f" · showing {len(rows)} matching {' + '.join(p for p in [venue_split, time_split] if p)}" if (venue_split or time_split) else ""
+st.caption(f"{len(meta)} games · {len(all_df)} hitters · "
+           f"{confirmed} from confirmed lineups, {len(all_df) - confirmed} projected from active rosters{split_note}")
 if n_statcast:
     st.caption(f"🟢 Statcast power model active ({n_statcast} batters) — HR regresses toward "
                f"barrel-implied expected rate.")
@@ -212,30 +216,34 @@ def style_hitters(data: pd.DataFrame):
  
 # --- Leaderboards -----------------------------------------------------------
 st.subheader("Slate leaderboards")
-lc1, lc2, lc3 = st.columns(3)
-with lc1:
-    st.markdown("**🎯 Top HR probability** (matchup-aware)")
-    if "HR%" in df.columns:
-        top_hr = df.nlargest(8, "HR%")[["Hitter", "Team", "Opp Pitcher", "HR%"]]
-        st.dataframe(top_hr.style.format({"HR%": "{:.1%}"}), hide_index=True, use_container_width=True)
-    else:
-        st.dataframe(df.nlargest(8, "PowerIndex")[["Hitter", "Team", "Opp Pitcher", "PowerIndex"]],
+if df.empty:
+    st.caption(f"No hitters match the current split filter — leaderboards require at least one "
+              f"matching player. The game-by-game section below still shows all hitters.")
+else:
+    lc1, lc2, lc3 = st.columns(3)
+    with lc1:
+        st.markdown("**🎯 Top HR probability** (matchup-aware)")
+        if "HR%" in df.columns:
+            top_hr = df.nlargest(8, "HR%")[["Hitter", "Team", "Opp Pitcher", "HR%"]]
+            st.dataframe(top_hr.style.format({"HR%": "{:.1%}"}), hide_index=True, use_container_width=True)
+        else:
+            st.dataframe(df.nlargest(8, "PowerIndex")[["Hitter", "Team", "Opp Pitcher", "PowerIndex"]],
+                         hide_index=True, use_container_width=True)
+    with lc2:
+        st.markdown("**Best total-bases plays**")
+        if "TB1.5%" in df.columns:
+            top_tb = df.nlargest(8, "TB1.5%")[["Hitter", "Team", "Opp Pitcher", "TB1.5%"]]
+            st.dataframe(top_tb.style.format({"TB1.5%": "{:.1%}"}), hide_index=True, use_container_width=True)
+    with lc3:
+        st.markdown("**Platoon-advantage bats**")
+        sort_key = "HR%" if "HR%" in df.columns else "PowerIndex"
+        adv = df[df["Advantage"] == "Advantage"].nlargest(8, sort_key)
+        fmtcol = {sort_key: "{:.1%}"} if sort_key == "HR%" else {}
+        st.dataframe(adv[["Hitter", "Team", "Hand", "Opp Hand", sort_key]].style.format(fmtcol),
                      hide_index=True, use_container_width=True)
-with lc2:
-    st.markdown("**Best total-bases plays**")
-    if "TB1.5%" in df.columns:
-        top_tb = df.nlargest(8, "TB1.5%")[["Hitter", "Team", "Opp Pitcher", "TB1.5%"]]
-        st.dataframe(top_tb.style.format({"TB1.5%": "{:.1%}"}), hide_index=True, use_container_width=True)
-with lc3:
-    st.markdown("**Platoon-advantage bats**")
-    sort_key = "HR%" if "HR%" in df.columns else "PowerIndex"
-    adv = df[df["Advantage"] == "Advantage"].nlargest(8, sort_key)
-    fmtcol = {sort_key: "{:.1%}"} if sort_key == "HR%" else {}
-    st.dataframe(adv[["Hitter", "Team", "Hand", "Opp Hand", sort_key]].style.format(fmtcol),
-                 hide_index=True, use_container_width=True)
- 
+
 # --- Statcast: due-to-homer regression candidates --------------------------
-if "Due" in df.columns:
+if not df.empty and "Due" in df.columns:
     st.markdown("**🔥 Due to homer** — biggest gap between barrel-implied power and actual HR results "
                 "(positive = hitting the ball harder than the HR count shows)")
     due = df[df["Due"] > 0].nlargest(10, "Due")[
@@ -252,7 +260,7 @@ if "Due" in df.columns:
 # Reuses the SAME statcast lookup Dinger Engine already loaded for this pageview — zero extra fetch.
 sc, _k = load_statcast()
 if sc:
-    reg_table = SC.build_hitter_regression_table(rows, sc)
+    reg_table = SC.build_hitter_regression_table(all_rows, sc)
     if reg_table:
         st.markdown("**📊 Results vs. contact quality** — actual wOBA against expected wOBA "
                     "(quality-of-contact-implied). 🟢 Green = underperforming his contact quality, "
@@ -289,7 +297,7 @@ meta_sorted = sorted(meta, key=lambda m: m.get("game_date") or "9999")
 for m in meta_sorted:
     hp, ap = m["home_pm"], m["away_pm"]
     when = game_time_et(m.get("game_date"))
-    badge = "" if (df[df["GameLabel"].str.startswith(m["label"].split(" (Game")[0])]["Lineup"] == "Confirmed").any() else " · projected lineups"
+    badge = "" if (all_df[all_df["GameLabel"].str.startswith(m["label"].split(" (Game")[0])]["Lineup"] == "Confirmed").any() else " · projected lineups"
     with st.expander(f"🕒 {when}  ·  {m['label']}  —  {m['venue']}  ({m['status']}){badge}"):
         wx = wx_by_venue.get(m.get("venue_id"))
         if wx:
@@ -328,7 +336,7 @@ for m in meta_sorted:
                                           help=f"Show {m['away_name']} hitters vs {m['home_name']}'s "
                                               "bullpen instead of the confirmed starter.")
 
-        game_df = df[df["GameLabel"] == m["label"]]
+        game_df = all_df[all_df["GameLabel"] == m["label"]]
         sort_col = "HR%" if "HR%" in game_df.columns else "PowerIndex"
 
         # --- Lineup platoon map ---------------------------------------------
