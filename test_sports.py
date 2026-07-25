@@ -10,15 +10,15 @@ import sports as S
 _HERE = Path(__file__).parent
 
 
-def test_registry_has_all_seven_leagues():
-    assert set(S.REGISTRY.keys()) == {"MLB", "NFL", "WNBA", "NBA", "NHL", "NCAAF", "NCAAMB"}
-    print("✓ all 7 leagues registered")
+def test_registry_has_all_eight_leagues():
+    assert set(S.REGISTRY.keys()) == {"MLB", "NFL", "WNBA", "NBA", "NHL", "NCAAF", "NCAAMB", "UFC"}
+    print("✓ all 8 leagues registered")
 
 
 def test_mlb_wnba_nba_ncaamb_nfl_enabled_today():
     live = {s.key for s in S.enabled_sports()}
-    assert live == {"MLB", "WNBA", "NBA", "NCAAMB", "NFL"}, f"expected MLB+WNBA+NBA+NCAAMB+NFL live, got {live}"
-    print("✓ MLB, WNBA, NBA, NCAAMB, and NFL are the enabled/live sports (NFL confirmed live 2026-07-17)")
+    assert live == {"MLB", "WNBA", "NBA", "NCAAMB", "NFL", "UFC"}, f"expected MLB+WNBA+NBA+NCAAMB+NFL+UFC live, got {live}"
+    print("✓ MLB, WNBA, NBA, NCAAMB, NFL, and UFC are the enabled/live sports")
 
 
 def test_get_falls_back_to_default_for_unknown_key():
@@ -162,10 +162,12 @@ def test_sport_only_page_visibility_matches_expected_config():
         pairs[key] = tuple(re.findall(r'"(\w+)"', vals))
     assert pairs == {"5": ("MLB",), "6": ("MLB",), "7": ("MLB",), "8": ("MLB",), "9": ("MLB",),
                      "10": ("WNBA", "NBA", "NCAAMB"), "11": ("WNBA", "NBA", "NCAAMB"),
-                     "12": ("NFL",), "13": ("NFL",), "14": ("NFL",)}, pairs
+                     "12": ("NFL",), "13": ("NFL",), "14": ("NFL",),
+                     "21": ("UFC",)}, pairs
     print("✓ sport_only_leads matches expected config (Bullpen Watch/Game Watch/Pitching Lab/"
           "Dinger Engine/Matchup Lab(MLB) -> MLB, Hot Hand Engine/Matchup Lab(WNBA/NBA/NCAAMB) -> "
-          "WNBA+NBA+NCAAMB, Matchup Lab(NFL)/Anytime TD Engine/QB Lab -> NFL)")
+          "WNBA+NBA+NCAAMB, Matchup Lab(NFL)/Anytime TD Engine/QB Lab -> NFL, "
+          "UFC Fight Card -> UFC)")
 
 
 def test_hot_hand_and_matchup_lab_loaders_key_their_cache_by_sport():
@@ -256,12 +258,18 @@ def test_every_live_sport_implements_the_full_shared_page_contract():
                        # the generic contract these functions belong to — a different, deliberate
                        # design, not a gap (see e.g. views/6_..._Retrospective.py's load_retro_mlb
                        # vs load_retro_generic split).
+        if sport.key == "UFC":
+            continue   # UFC is outcome-based (fight results), not player-stat-based. It has no
+                       # projections module and no get_player_results/explain_miss (those functions
+                       # apply to counting-stat sports like WNBA/NFL). UFC's dedicated Fight Card
+                       # page handles everything -- it never goes through the shared generic pages
+                       # that require this contract (Retrospective, Podcast Studio, etc.).
         engine, proj = sport.engine, sport.projections
         missing_engine = [fn for fn in _ENGINE_CONTRACT if not callable(getattr(engine, fn, None))]
         missing_proj = [fn for fn in _PROJECTIONS_CONTRACT if not callable(getattr(proj, fn, None))]
         assert not missing_engine, f"{sport.key}'s engine is missing: {missing_engine}"
         assert not missing_proj, f"{sport.key}'s projections module is missing: {missing_proj}"
-    print("✓ every live non-MLB sport implements the full engine/projections contract every shared page needs")
+    print("✓ every live non-MLB non-UFC sport implements the full engine/projections contract every shared page needs")
 
 
 # ----------------------------------------------------------------- _check_trading_password

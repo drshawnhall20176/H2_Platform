@@ -44,6 +44,10 @@ for i, s in enumerate(coming):
 active = sports.REGISTRY.get(current)
 if active:
     st.caption(f"Currently viewing: **{active.icon} {active.label}** — select a page from the sidebar to begin.")
+    if current == "UFC":
+        st.info("🥊 UFC Fight Card is live — tonight's bouts with moneyline odds, "
+               "method of victory lines, and fight duration props. "
+               "Phase 2 will add finishing rate history and conviction scoring.")
 
 st.divider()
 

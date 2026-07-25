@@ -151,6 +151,24 @@ REGISTRY: Dict[str, Sport] = {
     ),
     "NHL":    Sport("NHL",   "NHL — Hockey",            "🏒", "icehockey_nhl",        [], {}, enabled=False),
     "NCAAF":  Sport("NCAAF", "NCAA Football",           "🏈", "americanfootball_ncaaf", [], {}, enabled=False),
+    "UFC":    Sport(
+        key="UFC", label="UFC — MMA", icon="🥊", odds_sport_key="mma_mixed_martial_arts",
+        markets=["h2h", "totals", "fighter_wins_by_ko_tko",
+                 "fighter_wins_by_submission", "fighter_wins_by_decision"],
+        market_map={
+            "Moneyline":       "h2h",
+            "Fight Duration":  "totals",
+            "Win by KO/TKO":   "fighter_wins_by_ko_tko",
+            "Win by Sub":      "fighter_wins_by_submission",
+            "Win by Decision": "fighter_wins_by_decision",
+        },
+        engine_module="ufc_engine", projections_module="",
+        config_module="",
+        enabled=True,   # Phase 1: odds display + fight card. No model yet -- UFC markets are
+                        # fight-outcome focused, not counting-stat based, so the projection
+                        # pipeline doesn't apply. Conviction scores derived from implied prob
+                        # vs community consensus will come in Phase 2.
+    ),
     "NCAAMB": Sport(
         key="NCAAMB", label="NCAA Men's Basketball", icon="🏀", odds_sport_key="basketball_ncaab",
         markets=["player_points", "player_rebounds", "player_assists", "player_threes"],

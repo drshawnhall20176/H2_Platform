@@ -90,6 +90,7 @@ def run():
         "12": ("NFL",),                                  # Matchup Lab (NFL) — own page, not the shared basketball one (see its own module docstring for why)
         "13": ("NFL",),                                  # Anytime TD Engine — NFL's Dinger Engine analog
         "14": ("NFL",),                                  # QB Lab — NFL's Pitching Lab analog
+        "21": ("UFC",),                                  # UFC Fight Card -- MMA-only, no MLB/NFL equivalent
     }
 
     # Internal/paid tools kept off the Discord/public build — matched by TITLE (not page number)
