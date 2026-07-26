@@ -494,11 +494,14 @@ def hit_miss_by_market(graded_plays: List[Dict], min_grade_letter: str = "C") ->
 # not less, on a page built specifically for people who explicitly don't want to dig into why a
 # number is what it is -- they're trusting it at face value.
 PARLAY_TIER_SIZES = [
-    (2, "Safer", "safety", None),
-    (3, "Steady", "safety", None),
-    (4, "Balanced", "conviction", None),
-    (5, "Bold", "payout", "C"),
-    (6, "Longshot", "payout", "C"),
+    (2, "Safer",      "safety",     None),
+    (3, "Steady",     "safety",     None),
+    (4, "Balanced",   "conviction", None),
+    (5, "Bold",       "payout",     "C"),
+    (6, "Longshot",   "payout",     "C"),
+    (7, "Aggressive", "payout",     "C"),   # Added: community regularly builds 6-8 mans;
+    (8, "Max",        "payout",     "C"),   # capped at C-grade floor same as Bold/Longshot so
+                                            # legs are still real recommendations, not padding.
 ]   # A REAL, SECOND REDESIGN, not the original approach: the first version (non-overlapping
    # slices of ONE ranked-by-conviction list) fixed leg reuse, but every tier was still
    # optimizing for the exact same thing -- just handing out consecutive chunks of the same

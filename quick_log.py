@@ -102,20 +102,12 @@ def format_play_label(play: Dict) -> str:
 
 
 def render_quick_log(plays: List[Dict], date_str: str, sport_key: str, key_prefix: str,
-                     expanded: bool = False) -> None:
-    """Render a compact "log this pick" widget for a flat list of play/leg dicts -- the actual
-    UI wired into Top Leans, Best Bets, Graded Picks, Suggested Parlays, and Speculative Basket.
-
-    OWNER-ONLY: renders nothing at all for a non-owner session, regardless of whether the
-    calling page itself is public -- see this module's own docstring for the full reasoning.
-
-    key_prefix must be unique per call site (e.g. the page name, or page name + game/tier label)
-    so Streamlit's own widget-key requirements don't collide when this is rendered more than
-    once on the same page (e.g. once per game on Graded Picks, once per tier on Suggested
-    Parlays)."""
-    import streamlit as st   # lazy import -- this module's pure functions above are meant to be
-                            # importable and testable without a Streamlit runtime; only this one
-                            # rendering function actually needs it
+                     expanded: bool = False, is_parlay: bool = False,
+                     parlay_tier: Optional[str] = None) -> None:
+    """Render a compact log-this-pick widget. is_parlay adds ticket name linking + pre-selects
+    all legs. book is auto-read from session state (whichever book was selected on Best Bets).
+    OWNER-ONLY: renders nothing for non-owner sessions."""
+    import streamlit as st
 
     if st.secrets.get("AUDIENCE", "owner") != "owner":
         return
@@ -123,35 +115,61 @@ def render_quick_log(plays: List[Dict], date_str: str, sport_key: str, key_prefi
         return
 
     with st.expander("📒 Log a pick to the Bet Log", expanded=expanded):
-        st.caption("Logs the model's own fair price as entry odds — this page has no live "
-                  "sportsbook integration. Edit the odds/stake in Bet Log after logging once "
-                  "you know your real fill.")
+        st.caption("Logs the model's own fair price as entry odds — edit odds/stake in "
+                  "Bet Log after logging once you know your real fill.")
+
+        # Book selector -- reads session state so it matches the board they were viewing
+        try:
+            from odds_api import US_BOOKS, DEFAULT_BOOK
+            _ss_book = (st.session_state.get("best_bets_book_selector")
+                        or st.session_state.get("graded_picks_book_selector")
+                        or st.session_state.get("speculative_basket_book_selector")
+                        or st.session_state.get("suggested_parlays_book_selector"))
+            _book_keys = list(US_BOOKS.keys())
+            _book_labels = [US_BOOKS[k] for k in _book_keys]
+            _default_label = _ss_book if _ss_book in _book_labels else US_BOOKS.get(DEFAULT_BOOK, "DraftKings")
+            _default_idx = _book_labels.index(_default_label) if _default_label in _book_labels else 0
+            book_label = st.selectbox("Book", _book_labels, index=_default_idx,
+                                      key=f"{key_prefix}_ql_book")
+            book = _book_keys[_book_labels.index(book_label)]
+        except Exception:
+            book = ""
+
+        # Ticket name -- links all legs under one ticket ID in the Bet Log (parlay mode)
+        ticket = ""
+        if is_parlay:
+            default_ticket = f'{parlay_tier or "Parlay"} {date_str}'
+            ticket = st.text_input("Ticket name (links all legs in Bet Log)",
+                                   value=default_ticket,
+                                   key=f"{key_prefix}_ql_ticket",
+                                   help="All legs logged under this name — matches how a "
+                                        "parlay slip appears in your sportsbook.")
 
         def _label(i: int) -> str:
             return format_play_label(plays[i])
 
+        # Parlay mode pre-selects all legs; singles mode starts empty
         picks = st.multiselect("Select the picks you're taking", list(range(len(plays))),
-                               format_func=_label, key=f"{key_prefix}_ql_picks")
-        # A real, deliberate two-widget design, not a single control: a dropdown quick-picks a
-        # common unit size (0.5 increments, $0-$500, covering typical unit sizes across a real
-        # range of bankroll sizes as it grows), while a SEPARATE number_input stays freely
-        # editable for an exact, arbitrary amount (e.g. $37.23) the dropdown's fixed grid can't
-        # represent. Re-keying the number_input on the dropdown's own current value is a real,
-        # deliberate Streamlit pattern -- selecting a new quick-pick gives the number_input a
-        # fresh key, so it re-initializes to that value, while still allowing free typing right
-        # after, rather than the two controls fighting over which one "owns" the value.
+                               format_func=_label, key=f"{key_prefix}_ql_picks",
+                               default=list(range(len(plays))) if is_parlay else [])
+
         c_pick, c_stake = st.columns(2)
         with c_pick:
             quick_pick = st.selectbox("Quick-pick stake ($)", options=STAKE_QUICK_PICKS,
                                       index=0, format_func=lambda v: f"${v:,.2f}",
                                       key=f"{key_prefix}_ql_stake_pick")
         with c_stake:
-            stake = st.number_input("Stake per pick ($) — or type an exact amount",
-                                    min_value=0.0, value=quick_pick, step=0.5,
+            stake_label = "Total parlay stake ($)" if is_parlay else "Stake per pick ($)"
+            stake = st.number_input(stake_label, min_value=0.0, value=quick_pick, step=0.5,
                                     key=f"{key_prefix}_ql_stake_{quick_pick}")
+
+        if is_parlay and picks:
+            st.caption(f"Logging as a **{len(picks)}-leg parlay** under ticket \'{ticket}\'. "
+                      "Edit actual fill odds in Bet Log after submitting.")
+
         if st.button("Log selected picks", type="primary", disabled=not picks,
                      key=f"{key_prefix}_ql_btn"):
-            import betlog as B   # lazy for the same testability reason as the streamlit import
+            import betlog as B
             logged_sigs = st.session_state.setdefault("logged_sigs", set())
             n = skipped = 0
             for i in picks:
@@ -160,7 +178,11 @@ def render_quick_log(plays: List[Dict], date_str: str, sport_key: str, key_prefi
                 if sig in logged_sigs:
                     skipped += 1
                     continue
-                B.add_bet(**bet_log_fields_from_play(play, date_str, sport_key, stake=stake))
+                fields = bet_log_fields_from_play(play, date_str, sport_key, stake=stake)
+                fields["book"] = book
+                if ticket:
+                    fields["ticket"] = ticket
+                B.add_bet(**fields)
                 logged_sigs.add(sig)
                 n += 1
             msg = f"Logged {n} pick(s) to the Bet Log — settle them there after the games."
