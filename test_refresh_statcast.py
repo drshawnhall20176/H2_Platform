@@ -168,7 +168,7 @@ def test_team_enrichment_respects_called_pitches_floor_and_writes_team_names(tmp
         patch.object(SC, "load_pitchers", fake_load_pitchers), \
         patch.object(SC, "refresh_catcher_framing", fake_refresh_catcher_framing), \
         patch.object(SC, "load_catcher_framing", fake_load_catcher_framing), \
-        patch.object(RS.E, "get_player_current_team", fake_get_team), \
+        patch("mlb_engine.get_player_current_team", fake_get_team), \
         patch.object(sys, "argv", ["refresh_statcast.py", "2026"]), \
         redirect_stdout(buf):
         rc = RS.main()

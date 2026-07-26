@@ -17,7 +17,6 @@ from datetime import date
 
 import pandas as pd
 
-import mlb_engine as E
 import statcast_data as SC
 
 # Catchers below this called-pitch floor get dropped during team enrichment, not just left with
@@ -93,6 +92,8 @@ def main():
         cf_lookup = {}
 
     if cf_lookup:
+        import mlb_engine as E   # lazy import -- only needed here, not at module load time
+                                  # so the workflow can run with just pybaseball+pandas installed
         print(f"\nLooking up each qualified catcher's current team (>= "
              f"{MIN_CALLED_PITCHES_FOR_TEAM_LOOKUP} called pitches)...")
         # Savant's catcher-framing leaderboard has NO team column at all — confirmed directly
