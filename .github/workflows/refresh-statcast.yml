@@ -49,7 +49,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install --no-cache-dir --upgrade pybaseball pandas
+        run: pip install --no-cache-dir --upgrade pybaseball pandas requests pytz
 
       - name: Pull Statcast batter + pitcher xERA + catcher-framing data and write the caches
         run: python refresh_statcast.py     # defaults to the current season; pulls all three,
