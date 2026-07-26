@@ -183,8 +183,24 @@ ALTER TABLE bets ADD COLUMN IF NOT EXISTS is_real_bet BOOLEAN DEFAULT TRUE;
 def _pg_conn():
     import psycopg2                          # imported lazily so offline paths never need it
     dsn = _DATABASE_URL or ""
-    kwargs = {} if "sslmode" in dsn else {"sslmode": "require"}   # Supabase requires SSL
-    con = psycopg2.connect(dsn, **kwargs)
+    try:
+        # Try connecting with the full DSN first (works for most URL formats)
+        kwargs = {} if "sslmode" in dsn else {"sslmode": "require"}
+        con = psycopg2.connect(dsn, **kwargs)
+    except psycopg2.ProgrammingError:
+        # psycopg2's DSN parser rejects special characters (!, @, etc.) in passwords
+        # when passed as a URL string. Fall back to parsing the URL manually and
+        # passing individual keyword arguments which don't go through the DSN parser.
+        from urllib.parse import urlparse, unquote
+        p = urlparse(dsn)
+        con = psycopg2.connect(
+            host=p.hostname,
+            port=p.port or 5432,
+            dbname=(p.path or "/postgres").lstrip("/"),
+            user=unquote(p.username or ""),
+            password=unquote(p.password or ""),
+            sslmode="require",
+        )
     try:
         with con.cursor() as cur:
             cur.execute(_PG_SCHEMA)
