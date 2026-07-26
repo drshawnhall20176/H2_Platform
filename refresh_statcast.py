@@ -37,8 +37,14 @@ def main():
         print("pybaseball is not installed. Run:  pip install pybaseball")
         return 1
     except Exception as e:  # noqa: BLE001
-        print(f"Refresh failed: {e}")
-        print("If column names changed in your pybaseball version, tell Claude and we'll adjust.")
+        tb = traceback.format_exc()
+        first_line = str(e).replace("\n", " ")[:300]
+        # Surface as a GitHub Actions error annotation so it appears on the summary page,
+        # not just buried in the step log that has to be opened and scrolled through.
+        print(f"::error::Statcast batter refresh failed: {first_line}")
+        print("Full traceback:")
+        print(tb)
+        print("If this is a pybaseball column drift, pin the version in the workflow and tell Claude.")
         return 1
     # quick sanity read-back
     lookup, k = SC.load(path)
