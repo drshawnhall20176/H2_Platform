@@ -130,56 +130,48 @@ if not plays:
     st.info("No graded plays match the current time slot/game filter — try a different selection.")
     st.stop()
 
-# --- market selection --------------------------------------------------------
-# Same real, deliberate reasoning as Suggested Parlays' own market filter -- letting a person
-# choose what they want exposure to, rather than Claude re-tuning reference probabilities to
-# force a "balanced-looking" default across markets that genuinely differ in real skew.
-markets_present = sorted({pl.get("Market") for pl in plays if pl.get("Market")})
-selected_markets = st.multiselect("Markets to include", options=markets_present,
-                                  default=markets_present)
-if not selected_markets:
-    st.info("Select at least one market above to see basket positions.")
-    st.stop()
-plays = [pl for pl in plays if pl.get("Market") in selected_markets]
-
-# --- min probability floor ----------------------------------------------------
-# A separate, ABSOLUTE floor from either mode's own grading below -- added directly on request,
-# same shared helper Best Bets/Graded Picks/Suggested Parlays all use. Applies to the eligible
-# pool before EITHER mode builds from it. Worth noting for Speculative mode specifically: that
-# mode's whole point is chasing the longest real odds (lowest ModelProb) among plays that still
-# clear a real grade floor, so setting a high probability floor here works directly against it
-# -- an honest tension, not a bug, and the same kind of floor/objective interaction that mode's
-# own "Minimum grade" control already has. Defaults to 0 (no floor) so nobody's existing basket
-# changes unless they actively set one.
-min_prob_pct = st.slider("Min probability %", 0, 100, 0, 5,
-                         help="Raw ModelProb floor on which legs are even eligible for the "
-                             "basket -- 0 means no floor. In Speculative mode specifically, a "
-                             "high floor here works against that mode's own payout-chasing "
-                             "objective -- set it deliberately, not as a default habit.")
-plays = grading.filter_min_probability(plays, min_prob_pct / 100.0)
-
-if not plays:
-    st.info("No plays clear the current min probability floor — try lowering it.")
-    st.stop()
-
-# --- basket mode: Speculative (chase payout) vs Game Coverage (safest pick per game) ---------
-# Added directly on request, after a real, reported gap: a real strategy (one safe hit pick per
-# game, confirmed against actual placed bets) mostly didn't clear the edge floor the Speculative
-# mode below requires -- Total Hits' own reference (0.65) is already high, so a real, good 65-77%
-# pick barely beats "typical," even though it's a perfectly sound pick for a DIFFERENT question:
-# not "what has the best edge," but "given I'm making one pick per game regardless, who's the
-# safest option." Game Coverage answers that question directly, with no edge floor at all.
+# --- basket mode: Speculative vs Game Coverage --------------------------------
+# Selected FIRST so the market controls shown below are mode-appropriate.
+# Game Coverage has its own Market/Side dropdowns -- showing "Markets to include"
+# in that mode created a confusing disconnect (multiselect said Pitcher Strikeouts,
+# dropdown defaulted to Batter Total Hits -- two controls that don't talk to each other).
 mode = st.radio("Basket mode", ["Speculative (chase payout)", "Game Coverage (one safest pick per game)"],
                 horizontal=True,
-                help="Speculative: the original mode, chases the biggest payout among plays that "
-                    "already clear a real edge floor. Game Coverage: for each game in your "
-                    "current filter, shows the single highest-probability pick for a chosen "
-                    "market/side -- no edge floor, since the point is coverage across every "
-                    "game, not finding the biggest edge.")
+                help="Speculative: chases the biggest payout among plays that clear a real edge "
+                    "floor. Game Coverage: for each game in your filter, shows the single "
+                    "highest-probability pick for a chosen market/side — no edge floor, since "
+                    "the point is coverage across every game, not finding the biggest edge.")
+
+# --- market selection (Speculative mode only) ---------------------------------
+# Hidden in Game Coverage mode -- that mode uses its own Market/Side dropdowns below
+# and doesn't use this filter at all.
+markets_present = sorted({pl.get("Market") for pl in plays if pl.get("Market")})
+if mode == "Speculative (chase payout)":
+    selected_markets = st.multiselect("Markets to include", options=markets_present,
+                                      default=markets_present)
+    if not selected_markets:
+        st.info("Select at least one market above to see basket positions.")
+        st.stop()
+    plays = [pl for pl in plays if pl.get("Market") in selected_markets]
+else:
+    selected_markets = markets_present  # Game Coverage filters by its own Market dropdown
+
+# --- min probability floor (Speculative mode only) ----------------------------
+if mode == "Speculative (chase payout)":
+    min_prob_pct = st.slider("Min probability %", 0, 100, 0, 5,
+                             help="Raw ModelProb floor on which plays are eligible for the "
+                                 "basket -- 0 means no floor. A high floor works against "
+                                 "Speculative mode's payout-chasing objective -- set deliberately.")
+    plays = grading.filter_min_probability(plays, min_prob_pct / 100.0)
+    if not plays:
+        st.info("No plays clear the current min probability floor — try lowering it.")
+        st.stop()
 
 if mode == "Game Coverage (one safest pick per game)":
     c_mkt, c_side = st.columns(2)
     sorted_markets = sorted(markets_present)
+    # Default to Batter Total Hits for Game Coverage (the proven winning coverage market)
+    # but fall back to the first available market if it's not present
     default_idx = sorted_markets.index("Batter Total Hits") if "Batter Total Hits" in sorted_markets else 0
     with c_mkt:
         coverage_market = st.selectbox("Market", options=sorted_markets, index=default_idx)
