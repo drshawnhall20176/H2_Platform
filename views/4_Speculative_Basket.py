@@ -315,6 +315,17 @@ def _grade_badge(grade: Optional[dict]) -> str:
 
 
 with st.container(border=True):
+    # Basket-level void risk -- shown once at the top, not buried in per-position captions.
+    n_proj = sum(1 for leg in trimmed_legs if leg.get("Lineup") == "Projected")
+    if n_proj > 0:
+        total = len(trimmed_legs)
+        st.warning(
+            f"⚠️ **Void risk:** {n_proj} of {total} position{'s' if total != 1 else ''} "
+            f"{'is' if n_proj == 1 else 'are'} on unconfirmed lineups (🟡). "
+            f"These are independent positions — a void here reduces your position count, "
+            f"not your payout math the way a parlay void does. Still worth confirming "
+            f"before committing to size."
+        )
     # Ranking already happened once, above the trim slider (multiple positions can share the
     # same letter grade while still having meaningfully different real probabilities behind
     # them -- this page is explicitly framed around "which of these is more likely to actually

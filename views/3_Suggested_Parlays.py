@@ -230,7 +230,7 @@ st.info(
 
 GRADE_COLOR = {"A": "#16783c", "B": "#2e7d32", "C": "#b8860b", "D": "#6b7280"}
 TIER_ICON = {"Safer": "🟢", "Steady": "🔵", "Balanced": "🟡", "Bold": "🟠", "Longshot": "🔴",
-            "Game Coverage": "🗺️"}
+            "Aggressive": "🔥", "Max": "💥", "Game Coverage": "🗺️"}
 
 
 def _grade_badge(grade) -> str:
@@ -247,6 +247,15 @@ def _grade_badge(grade) -> str:
 
 for parlay in parlays:
     icon = TIER_ICON.get(parlay["tier"], "🎫")
+    legs = parlay["legs"]
+
+    # Count projected (unconfirmed) legs -- the void risk number shown at the parlay level.
+    # Black_Hammer had 2 of 8 legs voided yesterday, cutting a large payout to $10. A single
+    # parlay-level warning is far more visible than per-leg captions that are easy to scroll past.
+    n_projected = sum(1 for leg in legs if leg.get("Lineup") == "Projected")
+    n_confirmed = sum(1 for leg in legs if leg.get("Lineup") == "Confirmed")
+    n_unknown = len(legs) - n_projected - n_confirmed
+
     with st.container(border=True):
         c1, c2 = st.columns([3, 1])
         with c1:
@@ -257,6 +266,25 @@ for parlay in parlays:
             st.metric("Combined Fair Odds", fair_str)
         st.caption(f"Model's combined win probability: {parlay['combined_prob']:.1%} "
                   f"(assuming independent legs — see the note above)")
+
+        # Void risk banner -- shown prominently ABOVE the legs list so it's impossible to miss.
+        # A projected leg isn't a bad pick -- it just means the lineup hasn't posted yet and
+        # the player could be scratched, turning a potential 8x win into a reduced payout.
+        if n_projected > 0:
+            void_pct = n_projected / len(legs)
+            if void_pct >= 0.5:
+                risk_level = "🔴 HIGH"
+            elif void_pct >= 0.25:
+                risk_level = "🟡 MODERATE"
+            else:
+                risk_level = "⚪ LOW"
+            st.warning(
+                f"**Void risk {risk_level}** — {n_projected} of {len(legs)} legs "
+                f"{'is' if n_projected == 1 else 'are'} on unconfirmed lineups (🟡). "
+                f"If scratched before first pitch, those legs void and your payout recalculates "
+                f"on the remaining {len(legs) - n_projected} legs. "
+                f"{'Check lineups closer to first pitch before locking this in.' if n_projected >= 2 else 'Confirm before locking in.'}"
+            )
 
         # Ranking, added directly on request: multiple legs can share the same letter grade
         # while still having meaningfully different real probabilities behind them. Ranked by
@@ -300,4 +328,6 @@ for parlay in parlays:
         # skipped in favor of just making the pick. Owner-only (quick_log itself enforces this),
         # keyed per tier so each tier's own multiselect/button don't collide with another tier's.
         quick_log.render_quick_log(parlay["legs"], date_str, _active.key,
-                                   key_prefix=f"parlays_{parlay['tier']}")
+                                   key_prefix=f"parlays_{parlay['tier']}",
+                                   is_parlay=True,
+                                   parlay_tier=parlay["tier"])
