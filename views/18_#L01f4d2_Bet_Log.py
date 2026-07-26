@@ -71,7 +71,22 @@ with st.expander("➕ Log a bet", expanded=False):
             stake = st.number_input("Stake ($)", min_value=0.0, value=2.50, step=0.5)
         col_b, col_t = st.columns(2)
         with col_b:
-            book = st.text_input("Book", placeholder="fanduel")
+            # Default to whichever book was last selected on Best Bets / Graded Picks.
+            # Session state keys follow the pattern set by render_book_selector:
+            # "best_bets_book_selector", "graded_picks_book_selector", etc.
+            _ss_book = (st.session_state.get("best_bets_book_selector")
+                        or st.session_state.get("graded_picks_book_selector")
+                        or st.session_state.get("speculative_basket_book_selector")
+                        or st.session_state.get("suggested_parlays_book_selector"))
+            from odds_api import US_BOOKS, DEFAULT_BOOK
+            _book_keys = list(US_BOOKS.keys())
+            _book_labels = [US_BOOKS[k] for k in _book_keys]
+            # _ss_book is already the display label from the selectbox widget
+            _default_label = _ss_book if _ss_book in _book_labels else US_BOOKS.get(DEFAULT_BOOK, "DraftKings")
+            _default_idx = _book_labels.index(_default_label) if _default_label in _book_labels else 0
+            book_label = st.selectbox("Book", _book_labels, index=_default_idx,
+                                      help="Defaults to whichever book you selected on Best Bets / Graded Picks.")
+            book = _book_keys[_book_labels.index(book_label)]
         with col_t:
             ticket = st.text_input("Parlay ticket (optional)", placeholder="e.g. Parlay 6/28 #1",
                                    help="Give every leg of the same parlay the SAME tag to group them. "
