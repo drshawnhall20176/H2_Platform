@@ -104,8 +104,13 @@ def format_play_label(play: Dict) -> str:
 def render_quick_log(plays: List[Dict], date_str: str, sport_key: str, key_prefix: str,
                      expanded: bool = False, is_parlay: bool = False,
                      parlay_tier: Optional[str] = None) -> None:
-    """Render a compact log-this-pick widget. is_parlay adds ticket name linking + pre-selects
-    all legs. book is auto-read from session state (whichever book was selected on Best Bets).
+    """Quick-log widget supporting three independent logging modes in one action:
+    - Log as parlay: all selected picks under one ticket name (linked in Bet Log)
+    - Log as singles: each selected pick as its own independent bet entry
+    - Both simultaneously: the real workflow -- one ticket + N straight bets at once
+
+    is_parlay: when True, pre-selects all plays and defaults Log as parlay to ON.
+    parlay_tier: used in the default ticket name (e.g. 'Game Coverage', 'Safer').
     OWNER-ONLY: renders nothing for non-owner sessions."""
     import streamlit as st
 
@@ -114,11 +119,11 @@ def render_quick_log(plays: List[Dict], date_str: str, sport_key: str, key_prefi
     if not plays:
         return
 
-    with st.expander("📒 Log a pick to the Bet Log", expanded=expanded):
-        st.caption("Logs the model's own fair price as entry odds — edit odds/stake in "
-                  "Bet Log after logging once you know your real fill.")
+    with st.expander("📒 Log picks to the Bet Log", expanded=expanded):
+        st.caption("Logs the model's own fair price as entry odds — edit actual fill "
+                  "odds/stakes in Bet Log after logging.")
 
-        # Book selector -- reads session state so it matches the board they were viewing
+        # ── Book selector ─────────────────────────────────────────────────────
         try:
             from odds_api import US_BOOKS, DEFAULT_BOOK
             _ss_book = (st.session_state.get("best_bets_book_selector")
@@ -127,65 +132,160 @@ def render_quick_log(plays: List[Dict], date_str: str, sport_key: str, key_prefi
                         or st.session_state.get("suggested_parlays_book_selector"))
             _book_keys = list(US_BOOKS.keys())
             _book_labels = [US_BOOKS[k] for k in _book_keys]
-            _default_label = _ss_book if _ss_book in _book_labels else US_BOOKS.get(DEFAULT_BOOK, "DraftKings")
-            _default_idx = _book_labels.index(_default_label) if _default_label in _book_labels else 0
+            _default_label = (_ss_book if _ss_book in _book_labels
+                              else US_BOOKS.get(DEFAULT_BOOK, "DraftKings"))
+            _default_idx = (_book_labels.index(_default_label)
+                            if _default_label in _book_labels else 0)
             book_label = st.selectbox("Book", _book_labels, index=_default_idx,
                                       key=f"{key_prefix}_ql_book")
             book = _book_keys[_book_labels.index(book_label)]
         except Exception:
             book = ""
 
-        # Ticket name -- links all legs under one ticket ID in the Bet Log (parlay mode)
-        ticket = ""
-        if is_parlay:
-            default_ticket = f'{parlay_tier or "Parlay"} {date_str}'
-            ticket = st.text_input("Ticket name (links all legs in Bet Log)",
-                                   value=default_ticket,
-                                   key=f"{key_prefix}_ql_ticket",
-                                   help="All legs logged under this name — matches how a "
-                                        "parlay slip appears in your sportsbook.")
-
+        # ── Play selector ─────────────────────────────────────────────────────
         def _label(i: int) -> str:
             return format_play_label(plays[i])
 
-        # Parlay mode pre-selects all legs; singles mode starts empty
-        picks = st.multiselect("Select the picks you're taking", list(range(len(plays))),
-                               format_func=_label, key=f"{key_prefix}_ql_picks",
-                               default=list(range(len(plays))) if is_parlay else [])
+        picks = st.multiselect(
+            "Which plays are you taking?",
+            list(range(len(plays))),
+            format_func=_label,
+            key=f"{key_prefix}_ql_picks",
+            default=list(range(len(plays))) if is_parlay else [],
+            help="Select the plays you want to log. Then choose below whether to log "
+                 "them as a parlay, as individual straight bets, or both at once."
+        )
 
-        c_pick, c_stake = st.columns(2)
-        with c_pick:
-            quick_pick = st.selectbox("Quick-pick stake ($)", options=STAKE_QUICK_PICKS,
-                                      index=0, format_func=lambda v: f"${v:,.2f}",
-                                      key=f"{key_prefix}_ql_stake_pick")
-        with c_stake:
-            stake_label = "Total parlay stake ($)" if is_parlay else "Stake per pick ($)"
-            stake = st.number_input(stake_label, min_value=0.0, value=quick_pick, step=0.5,
-                                    key=f"{key_prefix}_ql_stake_{quick_pick}")
+        if not picks:
+            st.caption("Select at least one play above, then choose how to log it.")
+            return
 
-        if is_parlay and picks:
-            st.caption(f"Logging as a **{len(picks)}-leg parlay** under ticket \'{ticket}\'. "
-                      "Edit actual fill odds in Bet Log after submitting.")
+        st.markdown(f"**{len(picks)} play{'s' if len(picks) != 1 else ''} selected** "
+                   f"— choose how to log them:")
 
-        if st.button("Log selected picks", type="primary", disabled=not picks,
+        # ── Mode toggles ──────────────────────────────────────────────────────
+        # Independent checkboxes so the user can mix and match freely.
+        # The typical workflow: both ON simultaneously → one parlay ticket +
+        # N straight bets logged in one click, matching how most of the community trades.
+        mc1, mc2 = st.columns(2)
+        with mc1:
+            log_parlay = st.checkbox(
+                "🎫 Log as parlay",
+                value=is_parlay,
+                key=f"{key_prefix}_ql_mode_parlay",
+                help="Logs all selected plays as one chained ticket in the Bet Log "
+                     "(same ticket name links them). Use for the combined DraftKings slip."
+            )
+        with mc2:
+            log_singles = st.checkbox(
+                "1️⃣ Log as singles",
+                value=True,
+                key=f"{key_prefix}_ql_mode_singles",
+                help="Logs each selected play as its own independent straight bet. "
+                     "Tracks each leg individually for CLV and hit-rate purposes."
+            )
+
+        if not log_parlay and not log_singles:
+            st.caption("Enable at least one logging mode above.")
+            return
+
+        # ── Parlay config (shown when parlay mode is ON) ──────────────────────
+        ticket = ""
+        parlay_stake = 0.0
+        if log_parlay:
+            st.markdown("**Parlay settings**")
+            default_ticket = f'{parlay_tier or "Parlay"} {date_str}'
+            ticket = st.text_input(
+                "Ticket name",
+                value=default_ticket,
+                key=f"{key_prefix}_ql_ticket",
+                help="All parlay legs logged under this name — find them grouped in "
+                     "Bet Log under the ticket column."
+            )
+            pc1, pc2 = st.columns(2)
+            with pc1:
+                parlay_qp = st.selectbox(
+                    "Parlay stake (quick-pick)",
+                    options=STAKE_QUICK_PICKS, index=0,
+                    format_func=lambda v: f"${v:,.2f}",
+                    key=f"{key_prefix}_ql_p_stake_pick"
+                )
+            with pc2:
+                parlay_stake = st.number_input(
+                    "Parlay stake ($)",
+                    min_value=0.0, value=parlay_qp, step=0.5,
+                    key=f"{key_prefix}_ql_p_stake_{parlay_qp}"
+                )
+
+        # ── Singles config (shown when singles mode is ON) ───────────────────
+        singles_stake = 0.0
+        if log_singles:
+            st.markdown("**Singles settings**")
+            sc1, sc2 = st.columns(2)
+            with sc1:
+                singles_qp = st.selectbox(
+                    "Per-pick stake (quick-pick)",
+                    options=STAKE_QUICK_PICKS, index=0,
+                    format_func=lambda v: f"${v:,.2f}",
+                    key=f"{key_prefix}_ql_s_stake_pick"
+                )
+            with sc2:
+                singles_stake = st.number_input(
+                    "Stake per pick ($)",
+                    min_value=0.0, value=singles_qp, step=0.5,
+                    key=f"{key_prefix}_ql_s_stake_{singles_qp}"
+                )
+
+        # ── Summary before logging ────────────────────────────────────────────
+        summary_parts = []
+        if log_parlay:
+            summary_parts.append(f"1 parlay ticket (${parlay_stake:.2f})")
+        if log_singles:
+            summary_parts.append(f"{len(picks)} straight bet{'s' if len(picks) != 1 else ''} "
+                                 f"(${singles_stake:.2f} each)")
+        if summary_parts:
+            total = ((parlay_stake if log_parlay else 0)
+                     + (singles_stake * len(picks) if log_singles else 0))
+            st.info(f"Will log: {' + '.join(summary_parts)} = **${total:.2f} total risk**")
+
+        # ── Log button ────────────────────────────────────────────────────────
+        if st.button("Log to Bet Log", type="primary",
                      key=f"{key_prefix}_ql_btn"):
             import betlog as B
             logged_sigs = st.session_state.setdefault("logged_sigs", set())
-            n = skipped = 0
-            for i in picks:
-                play = plays[i]
-                sig = bet_log_signature(play, date_str)
-                if sig in logged_sigs:
-                    skipped += 1
-                    continue
-                fields = bet_log_fields_from_play(play, date_str, sport_key, stake=stake)
-                fields["book"] = book
-                if ticket:
+            n_parlay = n_singles = n_skipped = 0
+
+            if log_parlay and ticket:
+                for i in picks:
+                    play = plays[i]
+                    fields = bet_log_fields_from_play(play, date_str, sport_key,
+                                                      stake=parlay_stake)
+                    fields["book"] = book
                     fields["ticket"] = ticket
-                B.add_bet(**fields)
-                logged_sigs.add(sig)
-                n += 1
-            msg = f"Logged {n} pick(s) to the Bet Log — settle them there after the games."
-            if skipped:
-                msg += f" Skipped {skipped} already logged this session."
-            st.success(msg)
+                    B.add_bet(**fields)
+                    n_parlay += 1
+
+            if log_singles:
+                for i in picks:
+                    play = plays[i]
+                    sig = bet_log_signature(play, date_str)
+                    if sig in logged_sigs:
+                        n_skipped += 1
+                        continue
+                    fields = bet_log_fields_from_play(play, date_str, sport_key,
+                                                      stake=singles_stake)
+                    fields["book"] = book
+                    B.add_bet(**fields)
+                    logged_sigs.add(sig)
+                    n_singles += 1
+
+            parts = []
+            if n_parlay:
+                parts.append(f"{n_parlay} parlay leg{'s' if n_parlay != 1 else ''} "
+                             f"under '{ticket}'")
+            if n_singles:
+                parts.append(f"{n_singles} straight bet{'s' if n_singles != 1 else ''}")
+            if n_skipped:
+                parts.append(f"{n_skipped} already logged (skipped)")
+            st.success("✅ Logged: " + " + ".join(parts) + " → Bet Log")
+
