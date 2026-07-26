@@ -68,7 +68,7 @@ if _active.key == "MLB":
 else:
     # UFC and other outcome-based sports have no projections pipeline -- redirect immediately
     # before any loader is called, to avoid AttributeError on sport.projections.
-    if _active.key == "UFC":
+    if not _active.has_projections:
         st.info("🥊 This page doesn't apply to UFC — fights are outcome-based, not "
                 "counting-stat-based. Head to **UFC Fight Card** in the sidebar for "
                 "tonight's bouts, moneyline odds, method of victory lines, and fight "
@@ -80,7 +80,7 @@ else:
         plays, meta, _books = BBD.load_generic_best_bets_board(_active.key, date_str)
 
 if not plays:
-    if _active.key == "UFC":
+    if not _active.has_projections:
         st.info("🥊 This page doesn't apply to UFC — head to **UFC Fight Card** in the sidebar.")
     else:
         st.info("No games on the board right now. Basket positions appear here on an active slate.")
@@ -315,6 +315,17 @@ def _grade_badge(grade: Optional[dict]) -> str:
 
 
 with st.container(border=True):
+    # Basket-level void risk -- shown once at the top, not buried in per-position captions.
+    n_proj = sum(1 for leg in trimmed_legs if leg.get("Lineup") == "Projected")
+    if n_proj > 0:
+        total = len(trimmed_legs)
+        st.warning(
+            f"⚠️ **Void risk:** {n_proj} of {total} position{'s' if total != 1 else ''} "
+            f"{'is' if n_proj == 1 else 'are'} on unconfirmed lineups (🟡). "
+            f"These are independent positions — a void here reduces your position count, "
+            f"not your payout math the way a parlay void does. Still worth confirming "
+            f"before committing to size."
+        )
     # Ranking already happened once, above the trim slider (multiple positions can share the
     # same letter grade while still having meaningfully different real probabilities behind
     # them -- this page is explicitly framed around "which of these is more likely to actually
