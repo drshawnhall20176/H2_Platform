@@ -2545,7 +2545,7 @@ def test_build_pitcher_projection_rows_default_line_when_no_real_lines_given():
     out = P.build_pitcher_projection_rows([], meta, seed=1)   # real_lines not passed at all
     for r in out:
         assert r["K line"] == 5.5 and r["K LineSource"] == "default"
-        assert r["Outs line"] == 17.5 and r["Outs LineSource"] == "default"
+        assert r["Outs line"] == 15.5 and r["Outs LineSource"] == "default"
         assert r["BB line"] == 1.5 and r["BB LineSource"] == "default"
     print("✓ build_pitcher_projection_rows falls back to the exact original default-line behavior when real_lines isn't passed at all, unchanged from before this feature")
 

@@ -74,7 +74,7 @@ DEFAULT_LINES = {
     "Batter Walks": 0.5,
     "Batter Hits+Runs+RBIs": 1.5,
     "Pitcher Strikeouts": 5.5,
-    "Pitcher Outs": 17.5,
+    "Pitcher Outs": 15.5,
     "Pitcher Walks": 1.5,
     "Pitcher Earned Runs": 2.5,
     "Pitcher Hits Allowed": 5.5,
@@ -1464,7 +1464,7 @@ _MARKET_DISPLAY = {
     "batter_hits": ("Batter Total Hits", 0.5),
     "batter_strikeouts": ("Batter Strikeouts", 0.5),
     "pitcher_strikeouts": ("Pitcher Strikeouts", 5.5),
-    "pitcher_outs": ("Pitcher Outs", 17.5),
+    "pitcher_outs": ("Pitcher Outs", 15.5),
     "pitcher_walks": ("Pitcher Walks", 1.5),
 }
  
