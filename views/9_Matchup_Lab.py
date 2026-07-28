@@ -41,8 +41,9 @@ def load_pitchers(date_str: str):
 
 @st.cache_data(ttl=300, show_spinner="Loading hitters…")
 def load_hitters(date_str: str):
-    rows, _meta = E.build_slate(date_str)
-    return rows
+    return E.build_slate(date_str)   # (rows, meta) -- meta carries each game's real gamePk,
+                                      # needed to tell doubleheader Game 1 from Game 2 (see the
+                                      # opp_hitters fix below; Team name alone collides on a DH day)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -181,7 +182,7 @@ if use_bullpen:
             "Pitcher": rm.name, "_pid": rm.id, "Team": pitcher["Team"],
             "Opponent": pitcher["Opponent"], "Game": pitcher["Game"], "Hand": rm.hand,
             "_game_date": pitcher.get("_game_date"), "_team_id": pitcher.get("_team_id"),
-            "_opp_id": pitcher.get("_opp_id"),
+            "_opp_id": pitcher.get("_opp_id"), "_gamePk": pitcher.get("_gamePk"),
             "ERA": round(rm.era, 2), "FIP": rm.fip, "Delta": round(rm.era - rm.fip, 2),
             "K/9": round(rm.k9, 1), "WHIP": round(rm.whip, 2), "HR/9": round(rm.hr9, 2), "OBA": rm.oba,
         }
@@ -191,9 +192,26 @@ if use_bullpen:
                       "may still be useful, but ERA/FIP won't be.")
 
 # Hitters: default to the pitcher's opponent, fall back to the whole slate.
-hitters = load_hitters(date_str)
+hitters, hitters_meta = load_hitters(date_str)
 opp = pitcher.get("Opponent")
-opp_hitters = [h for h in hitters if h.get("Team") == opp] or hitters
+
+# On a doubleheader day, Team name alone isn't enough -- both legs share the same two teams, so
+# hitters from BOTH games end up in `hitters` under the identical Team name. This is exactly what
+# produced duplicate leaderboard rows (the same hitter listed twice with identical stats) once a
+# DH was on the slate: filtering by Team alone can't tell Game 1's lineup from Game 2's. Resolve
+# the pitcher's own real gamePk to the SPECIFIC game's label (build_slate's GameLabel already
+# carries the "(Game N)" suffix -- see mlb_engine.py's build_slate/_hitter_row), and filter by
+# that too. Falls back to the old team-only match if a gamePk can't be resolved (e.g. a
+# bullpen-swapped reliever row below doesn't carry one) -- never stricter than before, just more
+# precise when a real gamePk is available.
+gamepk_to_label = {m.get("gamePk"): m.get("label") for m in hitters_meta if m.get("gamePk")}
+pitcher_game_label = gamepk_to_label.get(pitcher.get("_gamePk"))
+
+if pitcher_game_label:
+    opp_hitters = [h for h in hitters if h.get("Team") == opp and h.get("GameLabel") == pitcher_game_label]
+else:
+    opp_hitters = [h for h in hitters if h.get("Team") == opp]
+opp_hitters = opp_hitters or hitters
 
 # === Split stat comparison panel ============================================================
 # This is Deezy's real question: "does this pitcher's split profile give me a reason to
@@ -423,10 +441,12 @@ with st.expander(f"📋 {pitcher['Pitcher']} vs. the batting order (season)"):
             # historical per-slot performance above can be read against who's actually standing
             # in each slot tonight, not just an abstract "Slot 2" — this is what the person
             # actually asked for: not who's historically hit in a slot, but who's in it TODAY.
-            # Reuses hitters/opp already loaded earlier on this page — zero extra fetch.
-            opp_hitters = [h for h in hitters if h.get("Team") == opp and h.get("_lineup_idx") is not None]
-            today_lineup = {h["_lineup_idx"] + 1: h for h in opp_hitters}   # 0-indexed -> 1-indexed slot
-            lineup_is_projected = any(h.get("Lineup") == "Projected" for h in opp_hitters)
+            # Reuses the SAME opp_hitters already resolved earlier on this page (gamePk-scoped,
+            # not just Team-name-scoped -- re-deriving it here with a fresh Team-only filter had
+            # silently reintroduced the doubleheader duplicate-lineup bug fixed above).
+            lineup_hitters = [h for h in opp_hitters if h.get("_lineup_idx") is not None]
+            today_lineup = {h["_lineup_idx"] + 1: h for h in lineup_hitters}   # 0-indexed -> 1-indexed slot
+            lineup_is_projected = any(h.get("Lineup") == "Projected" for h in lineup_hitters)
 
             bo_rows = [{"Slot": slot, **stats} for slot, stats in sorted(bo_splits.items())]
             for row in bo_rows:
