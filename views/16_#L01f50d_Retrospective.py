@@ -63,7 +63,7 @@ def load_retro_generic(sport_key: str, date_str: str):
     if not sport.has_projections:
         st.info("🥊 Retrospective doesn't apply to UFC — head to **UFC Fight Card**.")
         st.stop()
-        rows, meta = sport.engine.build_slate(date_str)
+    rows, meta = sport.engine.build_slate(date_str)
     plays = sport.projections.build_best_bets(rows)
     results = sport.engine.get_player_results(date_str)
     graded, summary = R.grade_slate(plays, results)
