@@ -115,6 +115,72 @@ def test_load_mlb_graded_picks_board_returns_rows_too():
     print("✓ load_mlb_graded_picks_board returns the raw hitter rows, needed for the one-sided banner")
 
 
+def test_load_generic_best_bets_board_exists_on_module():
+    # Regression guard for a real production bug: this function's own `def` line was silently
+    # dropped during an edit, leaving its full body (docstring, build_slate call, everything)
+    # as unreachable dead code trailing inside filter_by_split_situation, after its return
+    # statement. The module still imported cleanly -- no syntax error -- so this shipped
+    # undetected. Every call site (Best Bets, Graded Picks, Suggested Parlays, Speculative
+    # Basket, Command Center) got an AttributeError at runtime for every non-MLB sport. On the
+    # four pages wrapped in try/except, that AttributeError was silently swallowed and shown to
+    # users as "No slate data available ... try a date when games are scheduled" -- a data
+    # problem that never existed. Command Center had no try/except at all and just crashed.
+    # This assertion alone would have caught it: an AttributeError, not a passing import.
+    assert hasattr(BBD, "load_generic_best_bets_board"), (
+        "load_generic_best_bets_board is missing from best_bets_data -- every non-MLB sport's "
+        "Best Bets/Graded Picks/Suggested Parlays/Speculative Basket/Command Center page will "
+        "silently show 'No slate data available' (or crash on Command Center) instead of plays."
+    )
+    sig = inspect.signature(BBD.load_generic_best_bets_board)
+    assert list(sig.parameters.keys()) == ["sport_key", "date_str"]
+    print("✓ load_generic_best_bets_board exists on best_bets_data with the expected signature")
+
+
+def test_load_generic_best_bets_board_full_pipeline_runs():
+    # Full pipeline test mirroring the MLB one above, for a generic (non-MLB) sport -- catches
+    # the same class of drift even if the function existed but its body were broken.
+    class _FakeEngine:
+        @staticmethod
+        def build_slate(date_str):
+            return (["fake_row"], [{"label": "Away @ Home", "game_date": "2026-07-28"}])
+
+    class _FakeProjections:
+        @staticmethod
+        def build_best_bets(rows, real_lines=None):
+            assert rows == ["fake_row"]
+            return [{"Player": "Test Player", "Market": "Points", "Game": "Away @ Home"}]
+
+    class _FakeSport:
+        has_projections = True
+        engine = _FakeEngine()
+        projections = _FakeProjections()
+
+    with patch.object(BBD.sports, "get", lambda sport_key: _FakeSport()), \
+        patch.object(BBD, "get_odds_api_key", lambda: None):
+        plays, meta, available_books = BBD.load_generic_best_bets_board("WNBA", "2026-07-28")
+
+    assert len(plays) == 1
+    assert plays[0]["Player"] == "Test Player"
+    assert len(meta) == 1
+    assert meta[0]["label"] == "Away @ Home"
+    assert isinstance(available_books, list) and len(available_books) > 0
+    print("✓ load_generic_best_bets_board runs build_slate -> build_best_bets end to end for a generic sport")
+
+
+def test_load_generic_best_bets_board_returns_empty_for_outcome_based_sports():
+    # UFC-style sports (has_projections=False) should return empty gracefully, not error --
+    # this is the path that lets the calling pages show their own dedicated messaging instead.
+    class _FakeOutcomeSport:
+        has_projections = False
+
+    with patch.object(BBD.sports, "get", lambda sport_key: _FakeOutcomeSport()):
+        plays, meta, available_books = BBD.load_generic_best_bets_board("UFC", "2026-07-28")
+
+    assert plays == []
+    assert meta == []
+    print("✓ load_generic_best_bets_board returns empty gracefully for outcome-based sports")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

@@ -414,7 +414,7 @@ def filter_by_split_situation(plays: List[Dict],
     return filtered
 
 
-
+def load_generic_best_bets_board(sport_key: str, date_str: str) -> tuple:
     """Any sport whose engine/projections don't need MLB's statcast/weather/bullpen-blend
     enrichment path — currently NFL, WNBA, and any future sport built the same way.
 
