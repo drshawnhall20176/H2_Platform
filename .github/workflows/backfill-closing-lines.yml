@@ -1,0 +1,87 @@
+# Manual, one-time/occasional catch-up for MLB bets that never got a closing line captured live —
+# runs backfill_closing_lines.py using The Odds API's HISTORICAL odds product.
+#
+# NOT scheduled on purpose. Unlike capture-closing-lines.yml (which runs constantly and costs
+# very little per call), historical odds costs 10 credits x markets x regions PER EVENT, per
+# snapshot — real money-equivalent quota, not something to burn automatically on a timer. This
+# workflow only ever runs when YOU click "Run workflow" and type "yes" to confirm.
+#
+# HOW TO RUN:
+#   1) Commit this file (and backfill_closing_lines.py, and the odds_api.py historical functions
+#      it depends on) to the repo.
+#   2) GitHub -> your repo -> Actions tab -> "backfill-closing-lines" in the left sidebar ->
+#      "Run workflow" button (top right of the runs list).
+#   3) Fill in the form:
+#        confirm — type exactly "yes". Anything else stops the run before any API calls are made
+#                  (this is the cost-confirmation gate; the script's own interactive [y/N] prompt
+#                  can't work in a non-interactive Actions run, so it's moved here instead).
+#        limit   — optional. Leave blank to backfill everything currently missing a close.
+#                  Set a small number (e.g. 3) for a first test run, to see real cost/behavior
+#                  before committing to the full backfill.
+#        dates   — optional, comma-separated slate_dates (e.g. 2026-07-22,2026-07-23) to restrict
+#                  to specific days. Leave blank for all dates with a missing close.
+#   4) Click "Run workflow", then click into the run to watch the log — it prints the cost
+#      estimate, the events being queried, and a running quota (used/remaining) after each one.
+#
+# REQUIRES the same two secrets capture-closing-lines.yml already uses (Settings -> Secrets and
+# variables -> Actions): ODDS_API_KEY (must be on a plan with historical access — a free-tier or
+# historical-less key gets 401/403 on the very first call) and DATABASE_URL.
+
+name: backfill-closing-lines
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "yes" to actually spend API credits. Anything else stops before any calls.'
+        required: true
+        default: "no"
+      limit:
+        description: "Optional: only backfill the first N events (good for a small first test run)"
+        required: false
+        default: ""
+      dates:
+        description: "Optional: comma-separated slate_dates, e.g. 2026-07-22,2026-07-23"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Confirm before spending anything
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "yes" ]; then
+            echo "confirm was not exactly 'yes' — stopping before any API calls are made."
+            echo "Re-run and type 'yes' in the confirm field to actually backfill."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Backfill closing lines
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          ARGS="--yes"
+          if [ -n "${{ github.event.inputs.limit }}" ]; then
+            ARGS="$ARGS --limit ${{ github.event.inputs.limit }}"
+          fi
+          if [ -n "${{ github.event.inputs.dates }}" ]; then
+            ARGS="$ARGS --dates ${{ github.event.inputs.dates }}"
+          fi
+          echo "Running: python backfill_closing_lines.py $ARGS"
+          python backfill_closing_lines.py $ARGS
