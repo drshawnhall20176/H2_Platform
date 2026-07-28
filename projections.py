@@ -2246,10 +2246,21 @@ def _hitter_reasons(r: Dict, market: str, side: str) -> List[str]:
     if side == "Over" and offense and r.get("Advantage") == "Advantage":
         why.append(f"platoon edge ({r.get('Hand')} bat vs {r.get('Opp Hand')}HP)")
     elif side == "Over" and offense and r.get("Advantage") == "Disadvantage":
-        # Surface the platoon disadvantage so users know the model still leans Over
-        # despite the handedness mismatch -- the same thing users were asking about in Discord.
         why.append(f"platoon disadvantage ({r.get('Hand')} bat vs {r.get('Opp Hand')}HP) — "
                   "model still leans Over based on other factors")
+
+    # Walk risk -- surface when the opposing pitcher has a high BB/9.
+    # This is the Raley situation (July 27): walked twice, kills HRR/Hits/Runs slips.
+    # Threshold ≥3.5 BB/9 is approximately the 85th percentile -- genuinely wild, not just
+    # slightly above average. Applied to all hit/run/RBI markets where a walk replaces a
+    # real at-bat and can prevent a counted hit or strand a runner.
+    opp_bb9 = r.get("_opp_bb9") or 0.0
+    if (opp_bb9 >= 3.5 and side == "Over"
+            and market in ("Batter Total Hits", "Batter Hits+Runs+RBIs",
+                          "Batter Runs", "Batter RBIs", "Batter HR",
+                          "Batter Total Bases", "Batter Singles")):
+        why.append(f"🚶 walk risk — opp pitcher {opp_bb9:.1f} BB/9 (high); "
+                  f"walks reduce real at-bats and can strand runners")
     if location and time_slot and market in ("Batter HR", "Batter Total Bases", "Batter Total Hits"):
         why.append(f"{location} {time_slot} game")
     if market in ("Batter HR", "Batter Total Bases") and (r.get("_weather_hr") or 1.0) >= 1.05:

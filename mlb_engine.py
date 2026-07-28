@@ -132,6 +132,7 @@ class PitcherMetrics:
     name: str = "TBD"
     hand: str = "R"
     k9: float = 0.0
+    bb9: float = 0.0    # walks per 9 innings -- high (≥3.5) flags walk risk for hitter props
     hr9: float = 0.0
     era: float = 0.0
     whip: float = 0.0
@@ -209,6 +210,7 @@ def get_pitcher_metrics(pitcher_id: Optional[int],
         name=person.get("fullName", "TBD"),
         hand=person.get("pitchHand", {}).get("code", "R"),
         k9=(so / ip * 9) if ip > 0 else 0.0,
+        bb9=(safe_float(stat.get("baseOnBalls")) / ip * 9) if ip > 0 else 0.0,
         hr9=safe_float(stat.get("homeRunsPer9")),
         era=safe_float(stat.get("era")),
         whip=safe_float(stat.get("whip")),
@@ -714,6 +716,10 @@ def _hitter_row(raw: Dict, opp: PitcherMetrics, team_name: str,
         "_exp_pa": exp_pa,
         "_venue_id": venue_id,
         "_opp_stat": opp.stat,                       # opposing pitcher's season line (matchup)
+        "_opp_bb9": opp.bb9,                          # opposing pitcher's BB/9 -- high (≥3.5)
+                                                       # means elevated walk risk for hitter props:
+                                                       # Raley getting walked twice (July 27) is the
+                                                       # real community example that drove this field.
         "_opp_pid": opp.id,                           # opposing STARTER's own player id — lets
                                                        # a bullpen-aggregate lookup exclude him,
                                                        # avoiding double-counting his own stats in
