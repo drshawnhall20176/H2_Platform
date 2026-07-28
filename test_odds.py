@@ -473,6 +473,33 @@ def test_fetch_slate_props_flags_events_with_no_returned_offers():
     print("✓ fetch_slate_props flags exactly the queried-but-empty event, distinguishing it from "
          "one that genuinely has live offers, even though both count toward events_fetched")
 
+
+def test_fetch_slate_props_exposes_raw_todays_events():
+    # The direct, verifiable answer to "why isn't game X showing up at all" -- a real list of
+    # exactly which events the provider's own feed returned for today, viewable in the UI
+    # instead of inferred from downstream symptoms (a doubleheader leg the provider's own event
+    # feed never listed looks identical, from every other diagnostic, to one that was queried and
+    # came back empty -- this is the one place that actually tells them apart).
+    def fake_fetch_events(api_key, sport=O.SPORT):
+        return [{"id": "evt_1", "commence_time": "2026-07-28T21:10:00Z",
+                 "away_team": "Cleveland Guardians", "home_team": "Cincinnati Reds"}]
+
+    def fake_fetch_event_props(event_id, api_key, markets, regions="us", sport=O.SPORT):
+        return {"bookmakers": []}, {"remaining": "999"}
+
+    orig_events, orig_props = O.fetch_events, O.fetch_event_props
+    O.fetch_events, O.fetch_event_props = fake_fetch_events, fake_fetch_event_props
+    try:
+        offers, info = O.fetch_slate_props("2026-07-28", "fake_key", ["batter_hits"])
+    finally:
+        O.fetch_events, O.fetch_event_props = orig_events, orig_props
+
+    assert info["todays_events"] == [{"id": "evt_1", "away": "Cleveland Guardians",
+                                      "home": "Cincinnati Reds", "commence_time": "2026-07-28T21:10:00Z"}]
+    print("✓ fetch_slate_props exposes the raw list of events the provider actually returned for "
+         "today, viewable directly instead of inferred")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

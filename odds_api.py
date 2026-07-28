@@ -480,6 +480,12 @@ def fetch_slate_props(date_str: str, api_key: str, markets: List[str], sport: st
     info includes remaining quota and event counts so the UI can show cost."""
     events = fetch_events(api_key, sport=sport)
     todays = [e for e in events if _eastern_date_str(e.get("commence_time")) == date_str]
+    # Raw, unfiltered summary of exactly what the provider's own /events listing returned for
+    # today -- the fastest way to confirm or rule out a real external-data limitation (e.g. a
+    # same-day doubleheader only getting ONE event entry from the provider for both legs)
+    # instead of guessing from downstream symptoms.
+    todays_summary = [{"id": e.get("id"), "away": e.get("away_team"), "home": e.get("home_team"),
+                       "commence_time": e.get("commence_time")} for e in todays]
     offers: List[Dict] = []
     remaining = None
     fetched = 0
@@ -504,7 +510,8 @@ def fetch_slate_props(date_str: str, api_key: str, markets: List[str], sport: st
         offers.extend(event_offers)
         fetched += 1
     return offers, {"events_total": len(todays), "events_fetched": fetched,
-                    "remaining": remaining, "no_offer_events": no_offer_events}
+                    "remaining": remaining, "no_offer_events": no_offer_events,
+                    "todays_events": todays_summary}
 
 
 # ---- Kelly stake sizing ----------------------------------------------------
