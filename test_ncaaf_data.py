@@ -156,6 +156,108 @@ def test_get_raises_cfbd_error_on_401():
          "own error-handling convention")
 
 
+def test_load_rosters_handles_a_genuinely_empty_api_response_without_crashing():
+    # Regression guard for a real, live-confirmed crash: a GitHub Actions run against the real
+    # CFBD API returned 0 roster rows for 2026 (a month before the season -- rosters likely
+    # aren't posted yet, see refresh_ncaaf.py's own diagnostic for that). pd.DataFrame([]) (zero
+    # rows) has NO COLUMNS at all, not just zero rows, so it writes an essentially blank CSV --
+    # and pd.read_csv on that raised pandas.errors.EmptyDataError: "No columns to parse from
+    # file", crashing the whole refresh job instead of just reporting 0 players cached.
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "roster.csv")
+        with patch.object(ND, "_get", return_value=[]):
+            ND.refresh_rosters(2026, "FAKE_KEY", out_path=out)
+        result = ND.load_rosters(out)   # must not raise
+    assert result == []
+    print("✓ load_rosters returns [] instead of crashing on a genuinely empty API response, "
+         "reproducing the exact real failure from a live workflow run")
+
+
+def test_load_player_stats_and_load_schedule_also_handle_empty_responses():
+    with tempfile.TemporaryDirectory() as tmp:
+        stats_out = os.path.join(tmp, "stats.csv")
+        sched_out = os.path.join(tmp, "sched.csv")
+        with patch.object(ND, "_get", return_value=[]):
+            ND.refresh_player_season_stats(2026, "FAKE_KEY", out_path=stats_out)
+            ND.refresh_schedule(2026, "FAKE_KEY", out_path=sched_out)
+        assert ND.load_player_stats(stats_out) == []
+        assert ND.load_schedule(sched_out) == []
+    print("✓ load_player_stats and load_schedule are equally robust to an empty API response")
+
+
+def test_refresh_rosters_falls_back_to_prior_year_when_current_year_is_empty():
+    # Regression guard for a real production bug: GET /roster?year=2026 returned 0 players on a
+    # live run (confirmed via a real GitHub Actions log, not theoretical) -- weeks before the
+    # 2026 season's own Week 0 kickoff. The endpoint call itself succeeded (no 401/429), it's
+    # just that a not-yet-started season's roster genuinely isn't populated yet. Falls back to
+    # year-1 and clearly logs it as a fallback, rather than caching nothing (which crashed
+    # load_rosters downstream with EmptyDataError before this fix existed at all).
+    fake_2025 = [{"id": "r1", "first_name": "Jane", "last_name": "Doe", "team": "Ohio State",
+                 "position": "QB", "year": 3, "jersey": 7, "height": 74.0, "weight": 215}]
+    calls = []
+
+    def fake_get(path, params, api_key):
+        calls.append(params["year"])
+        return [] if params["year"] == 2026 else fake_2025
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "roster.csv")
+        with patch.object(ND, "_get", side_effect=fake_get):
+            ND.refresh_rosters(2026, "FAKE_KEY", out_path=out)
+        rows = ND.load_rosters(out)
+
+    assert calls == [2026, 2025]   # tried the requested year first, THEN fell back
+    assert len(rows) == 1 and rows[0]["name"] == "Jane Doe"
+    print("✓ refresh_rosters falls back to year-1 when the requested year's roster is empty, "
+         "exactly reproducing and fixing the real GET /roster?year=2026 -> 0 players failure")
+
+
+def test_refresh_rosters_stays_on_requested_year_when_it_has_real_data():
+    # The fallback must not trigger when the requested year DOES have data -- a real, non-empty
+    # roster should never be silently swapped for last year's.
+    fake_2026 = [{"id": "r2", "first_name": "New", "last_name": "Guy", "team": "Georgia",
+                 "position": "RB", "year": 1, "jersey": 1, "height": 70.0, "weight": 190}]
+    calls = []
+
+    def fake_get(path, params, api_key):
+        calls.append(params["year"])
+        return fake_2026
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "roster.csv")
+        with patch.object(ND, "_get", side_effect=fake_get):
+            ND.refresh_rosters(2026, "FAKE_KEY", out_path=out)
+        rows = ND.load_rosters(out)
+
+    assert calls == [2026]   # only ONE call -- no unnecessary fallback attempt
+    assert rows[0]["name"] == "New Guy"
+    print("✓ refresh_rosters does not fall back when the requested year already has real data")
+
+
+def test_refresh_player_season_stats_falls_back_to_prior_year_when_current_year_is_empty():
+    # Same real-world cause as the roster fallback above, applied to season stats: a
+    # not-yet-started season has zero games played, so /stats/player/season for the current
+    # year is empty by definition until the season is underway.
+    fake_2025 = [{"season": 2025, "player_id": "1", "player": "X", "position": "QB", "team": "T",
+                 "conference": "C", "category": "passing", "stat_type": "YDS", "stat": "3000"}]
+    calls = []
+
+    def fake_get(path, params, api_key):
+        calls.append(params["year"])
+        return [] if params["year"] == 2026 else fake_2025
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "stats.csv")
+        with patch.object(ND, "_get", side_effect=fake_get):
+            ND.refresh_player_season_stats(2026, "FAKE_KEY", out_path=out)
+        rows = ND.load_player_stats(out)
+
+    assert calls == [2026, 2025]
+    assert len(rows) == 1 and rows[0]["passing_YDS"] == 3000
+    print("✓ refresh_player_season_stats falls back to year-1 when the current season has no "
+         "games played yet")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

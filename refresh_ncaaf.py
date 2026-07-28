@@ -44,6 +44,24 @@ def main() -> int:
         path = ND.refresh_rosters(year, api_key)
         rosters = ND.load_rosters(path)
         print(f"Cached {len(rosters)} roster players.")
+        if not rosters:
+            # Distinguish "this season's data isn't posted to CFBD yet" (a real, mundane
+            # possibility a month before kickoff -- rosters often aren't finalized in their
+            # system until fall camp) from "something is structurally wrong with the request"
+            # (bad param, endpoint issue, etc.) -- one extra cheap probe call, only spent when
+            # the primary pull actually came back empty, not on every run.
+            try:
+                prior = ND._get("/roster", {"year": year - 1}, api_key)
+                print(f"::warning::0 roster rows for {year}. Probed {year - 1} for comparison: "
+                     f"{len(prior)} rows. "
+                     + (f"{year - 1} has real data -- {year}'s roster likely just isn't posted "
+                        f"to CFBD yet (common a month before the season starts)."
+                        if prior else
+                        f"{year - 1} is ALSO empty -- this points to something structural "
+                        f"(request params, account access), not a 'too early in the season' gap."))
+            except Exception as probe_e:  # noqa: BLE001
+                print(f"::warning::0 roster rows for {year}, and the {year - 1} comparison "
+                     f"probe itself failed: {probe_e}")
     except Exception as e:  # noqa: BLE001
         tb = traceback.format_exc()
         first_line = str(e).replace("\n", " ")[:300]

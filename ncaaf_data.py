@@ -104,22 +104,47 @@ def _get(path: str, params: Dict, api_key: str) -> list:
     return r.json()
 
 
+_ROSTER_COLUMNS = ["id", "first_name", "last_name", "name", "team", "position",
+                  "year", "jersey", "height", "weight"]
+
+
 def refresh_rosters(year: int, api_key: str, out_path: str = ROSTER_PATH) -> str:
     """Every FBS/FCS team's full roster for `year`, ONE call (team= left unset deliberately --
-    see this module's own docstring for the confirmed-optional param)."""
+    see this module's own docstring for the confirmed-optional param).
+
+    Falls back to `year - 1` if the requested year comes back empty, clearly logged as a
+    fallback. Confirmed via a real run, not theoretical: GET /roster?year=2026 returned 0
+    players on July 28, 2026 -- weeks before the 2026 season's own Week 0 (Aug 27). CFBD's own
+    client docs default this same param to 2025, a real hint that a not-yet-started season's
+    roster genuinely isn't populated yet, not that the request itself is malformed (no auth/rate
+    error came back, just a valid empty list). A season roster is far more stable year over year
+    than in-season stats are, so last year's roster is a reasonable placeholder until the current
+    year's actually populates -- much better than caching nothing."""
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    players = _get("/roster", {"year": year}, api_key)
-    rows = [{
-        "id": p.get("id"), "first_name": p.get("first_name") or p.get("firstName"),
-        "last_name": p.get("last_name") or p.get("lastName"),
-        "name": f"{(p.get('first_name') or p.get('firstName') or '')} "
-               f"{(p.get('last_name') or p.get('lastName') or '')}".strip(),
-        "team": p.get("team"), "position": p.get("position"), "year": p.get("year"),
-        "jersey": p.get("jersey"), "height": p.get("height"), "weight": p.get("weight"),
-    } for p in players]
-    df = pd.DataFrame(rows)
+
+    def _fetch(y):
+        players = _get("/roster", {"year": y}, api_key)
+        return [{
+            "id": p.get("id"), "first_name": p.get("first_name") or p.get("firstName"),
+            "last_name": p.get("last_name") or p.get("lastName"),
+            "name": f"{(p.get('first_name') or p.get('firstName') or '')} "
+                   f"{(p.get('last_name') or p.get('lastName') or '')}".strip(),
+            "team": p.get("team"), "position": p.get("position"), "year": p.get("year"),
+            "jersey": p.get("jersey"), "height": p.get("height"), "weight": p.get("weight"),
+        } for p in players]
+
+    rows = _fetch(year)
+    used_year = year
+    if not rows:
+        print(f"[NCAAF] GET /roster?year={year} returned 0 players -- likely too early in the "
+             f"season for this year's roster to be posted yet. Falling back to year={year - 1}.")
+        rows = _fetch(year - 1)
+        used_year = year - 1
+
+    df = pd.DataFrame(rows, columns=_ROSTER_COLUMNS) if rows else pd.DataFrame(columns=_ROSTER_COLUMNS)
     df.to_csv(out_path, index=False)
-    print(f"[NCAAF] GET /roster?year={year}: {len(df)} players cached.")
+    print(f"[NCAAF] GET /roster?year={used_year}: {len(df)} players cached"
+         f"{' (fallback year)' if used_year != year else ''}.")
     return out_path
 
 
@@ -129,9 +154,24 @@ def refresh_player_season_stats(year: int, api_key: str, out_path: str = PLAYER_
     per (category, stat_type) pair, so the cached CSV is directly usable the way every other
     sport's cached/season-stat table already is, without a future reader needing to know CFBD's
     own wire format. Prints the real resulting column names so the exact stat_type strings CFBD
-    actually used are visible in the refresh log, not just assumed."""
+    actually used are visible in the refresh log, not just assumed.
+
+    Same year-fallback as refresh_rosters, for the same confirmed-real reason: season stats for
+    a not-yet-started season are empty by definition (no games played yet to generate stats
+    from) -- last year's full-season stats are a far more useful starting projection basis than
+    an empty cache until the current season's own games start accumulating real stats."""
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    stats = _get("/stats/player/season", {"year": year}, api_key)
+
+    def _fetch(y):
+        return _get("/stats/player/season", {"year": y}, api_key)
+
+    stats = _fetch(year)
+    used_year = year
+    if not stats:
+        print(f"[NCAAF] GET /stats/player/season?year={year} returned 0 rows -- likely no games "
+             f"played yet this season. Falling back to year={year - 1}.")
+        stats = _fetch(year - 1)
+        used_year = year - 1
 
     long_rows = [{
         "player_id": s.get("playerId") or s.get("player_id"),
@@ -143,7 +183,7 @@ def refresh_player_season_stats(year: int, api_key: str, out_path: str = PLAYER_
     if not long_rows:
         df = pd.DataFrame(columns=["player_id", "player", "position", "team", "conference"])
         df.to_csv(out_path, index=False)
-        print(f"[NCAAF] GET /stats/player/season?year={year} returned 0 rows -- wrote an empty cache.")
+        print(f"[NCAAF] GET /stats/player/season?year={used_year} also returned 0 rows -- wrote an empty cache.")
         return out_path
 
     long_df = pd.DataFrame(long_rows)
@@ -157,15 +197,27 @@ def refresh_player_season_stats(year: int, api_key: str, out_path: str = PLAYER_
                                aggfunc="first")
     out = identity.join(wide, how="left").reset_index()
     out.to_csv(out_path, index=False)
-    print(f"[NCAAF] GET /stats/player/season?year={year}: {len(out)} players, "
+    print(f"[NCAAF] GET /stats/player/season?year={used_year}: {len(out)} players, "
          f"{len(wide.columns)} stat columns: {sorted(wide.columns)[:20]}"
-         f"{' ...' if len(wide.columns) > 20 else ''}")
+         f"{' ...' if len(wide.columns) > 20 else ''}"
+         f"{' (fallback year)' if used_year != year else ''}")
     return out_path
+
+
+_SCHEDULE_COLUMNS = ["id", "season", "week", "start_date", "start_time_tbd", "completed",
+                    "neutral_site", "venue", "home_id", "home_team", "home_conference",
+                    "home_points", "away_id", "away_team", "away_conference", "away_points"]
 
 
 def refresh_schedule(year: int, api_key: str, out_path: str = SCHEDULE_PATH) -> str:
     """Full season schedule, ONE call (all weeks; the week= param is left unset on purpose --
-    narrowing per-week would mean one call per week instead of one call total)."""
+    narrowing per-week would mean one call per week instead of one call total).
+
+    No year-fallback here, unlike refresh_rosters/refresh_player_season_stats -- future
+    schedules are published well in advance (unlike rosters, which depend on players actually
+    being enrolled, or stats, which depend on games having been played), so an empty response
+    for the current year is a genuine anomaly worth seeing as zero games, not silently masked by
+    substituting last year's schedule."""
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     games = _get("/games", {"year": year}, api_key)
     rows = [{
@@ -182,7 +234,7 @@ def refresh_schedule(year: int, api_key: str, out_path: str = SCHEDULE_PATH) -> 
         "away_conference": g.get("awayConference") or g.get("away_conference"),
         "away_points": g.get("awayPoints") if "awayPoints" in g else g.get("away_points"),
     } for g in games]
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(rows, columns=_SCHEDULE_COLUMNS) if rows else pd.DataFrame(columns=_SCHEDULE_COLUMNS)
     df.to_csv(out_path, index=False)
     print(f"[NCAAF] GET /games?year={year}: {len(df)} games across "
          f"{df['week'].nunique() if not df.empty else 0} weeks.")
@@ -192,19 +244,31 @@ def refresh_schedule(year: int, api_key: str, out_path: str = SCHEDULE_PATH) -> 
 def load_rosters(path: str = ROSTER_PATH) -> List[Dict]:
     if not os.path.exists(path):
         return []
-    return pd.read_csv(path).to_dict("records")
+    try:
+        return pd.read_csv(path).to_dict("records")
+    except pd.errors.EmptyDataError:
+        # A zero-row API response writes a columnless CSV (pd.DataFrame([]) has no columns at
+        # all, not just no rows) -- read_csv on that raises rather than returning an empty
+        # frame. A genuinely empty cache should load as [], not crash the caller.
+        return []
 
 
 def load_player_stats(path: str = PLAYER_STATS_PATH) -> List[Dict]:
     if not os.path.exists(path):
         return []
-    return pd.read_csv(path).to_dict("records")
+    try:
+        return pd.read_csv(path).to_dict("records")
+    except pd.errors.EmptyDataError:
+        return []
 
 
 def load_schedule(path: str = SCHEDULE_PATH) -> List[Dict]:
     if not os.path.exists(path):
         return []
-    return pd.read_csv(path).to_dict("records")
+    try:
+        return pd.read_csv(path).to_dict("records")
+    except pd.errors.EmptyDataError:
+        return []
 
 
 def resolve_week(target_date: str, schedule: Optional[List[Dict]] = None,
