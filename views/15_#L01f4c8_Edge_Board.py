@@ -228,6 +228,14 @@ else:
             q2.metric("Games priced", info.get("events_fetched", "—"))
             q3.metric("Props matched", info.get("matched", "—"))
             q4.metric("Unmatched (name/line)", info.get("unmatched", "—"))
+
+            no_offer = info.get("no_offer_events") or []
+            if no_offer:
+                st.caption(f"⚪ {len(no_offer)} of {info.get('events_fetched', '—')} priced game(s) "
+                          f"returned no live props for the selected markets — most likely already "
+                          f"underway (books pull pre-game props once a game starts), so there's no "
+                          f"live pre-game edge left to compute. These won't appear in \"Filter by "
+                          f"game\" below even though they were queried: {', '.join(no_offer)}")
  
         if edges:
             edf = pd.DataFrame(edges)
