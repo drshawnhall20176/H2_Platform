@@ -121,6 +121,62 @@ def fetch_event_props(event_id: str, api_key: str, markets: List[str],
     )
 
 
+# ---- historical (backfill for already-completed games) ---------------------
+# A SEPARATE, more expensive product from everything above -- confirmed against the provider's
+# own docs (the-odds-api.com/historical-odds-data/ and .../liveapi/guides/v4/), not assumed:
+#   - Requires a paid usage plan. A free-tier key gets 401/403 on any /v4/historical/* path even
+#     though the exact same key works fine against /v4/sports/... above.
+#   - historical event-odds costs 10 credits x [markets requested] x [regions requested], PER
+#     EVENT, per snapshot -- ten times this module's own documented live per-event rate ("1 unit
+#     per market per event", see this file's own module docstring). Seventeen MLB markets in one
+#     call is 170 credits for that one event/snapshot, not 17 -- request only the markets a given
+#     event's missing bets actually need, not the sport's full market list.
+#   - The historical events-list call's exact cost isn't stated at that same 10x rate in the docs
+#     (events endpoints generally are described as cheap/infrequent), but isn't confirmed flat-1
+#     either -- backfill_closing_lines.py prints the real x-requests-used header this module's
+#     _get() already surfaces after every call, rather than assuming a number here.
+#
+# Neither function below has been exercised against a live key from this sandbox -- its network
+# is allowlisted to a fixed domain set that doesn't include the-odds-api.com, so these follow the
+# provider's documented request/response shape exactly but that response shape is, honestly,
+# unverified here. backfill_closing_lines.py prints the raw wrapper on the very first call if the
+# expected "data" key isn't where it's expected, so a shape surprise is loud and diagnosable
+# instead of silently returning zero matches with no explanation.
+def fetch_historical_events(api_key: str, date_iso: str, sport: str = SPORT) -> Tuple[List[Dict], Dict]:
+    """Events as they existed at `date_iso` (ISO8601 UTC) -- resolves this provider's own event
+    id for a game that's already been played (the live fetch_events above only returns
+    upcoming/in-progress events, never completed ones, so it can't be reused for backfill).
+
+    Pass a date_iso at or after that day's LAST commence_time so every game from that date is
+    guaranteed to have already been posted when this snapshot was taken."""
+    data, headers = _get(f"historical/sports/{sport}/events",
+                         {"apiKey": api_key, "date": date_iso, "dateFormat": "iso"})
+    events = data.get("data") if isinstance(data, dict) else data
+    return (events if isinstance(events, list) else []), headers
+
+
+def fetch_historical_event_props(event_id: str, api_key: str, markets: List[str], date_iso: str,
+                                 regions: str = "us", sport: str = SPORT) -> Tuple[Dict, Dict]:
+    """Odds for one event as they stood at `date_iso` -- the historical counterpart to
+    fetch_event_props above. Pass the game's REAL commence_time (e.g. from mlb_engine.
+    get_schedule's game_date, not a guess) as date_iso: the historical API returns the closest
+    snapshot AT OR BEFORE the timestamp given, which by definition is the last pre-game price --
+    the same "last update before a game starts becomes that game's closing line" definition
+    capture_closing_lines.py already uses for the live capture path, just applied to a moment in
+    the past instead of live.
+
+    Returns the RAW response dict (unlike fetch_event_props, which the docs describe as unwrapped)
+    -- the historical endpoint wraps the same event-odds shape inside a "data" key alongside
+    "timestamp"/"previous_timestamp"/"next_timestamp" snapshot metadata. Callers need
+    js.get("data") before handing it to parse_event_offers, and can read js.get("timestamp") to
+    confirm how close the returned snapshot actually landed to the requested date_iso."""
+    return _get(
+        f"historical/sports/{sport}/events/{event_id}/odds",
+        {"apiKey": api_key, "regions": regions, "markets": ",".join(markets),
+         "oddsFormat": "american", "dateFormat": "iso", "date": date_iso},
+    )
+
+
 # ---- parsing ---------------------------------------------------------------
 def parse_event_offers(event_json: Dict, supported_markets: Optional[List[str]] = None) -> List[Dict]:
     """Collapse all bookmakers into per-(market, player, line) offers with both sides.
