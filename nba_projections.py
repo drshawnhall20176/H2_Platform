@@ -229,7 +229,8 @@ def explain_miss(row: Optional[Dict], market: str = "Points") -> str:
 
 
 def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
-                    seed: Optional[int] = None) -> List[Dict]:
+                    seed: Optional[int] = None,
+                    real_lines: Optional[Dict] = None) -> List[Dict]:
     """Rank candidate plays across all four markets by conviction (model prob vs the reference
     prob for that market), each with recent-form reasoning. No odds required — output schema
     (Player/PlayerId/Team/Game/Opp/Versus/Market/Side/Line/ModelProb/Fair/Conviction/Why) matches
@@ -238,7 +239,13 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
     baseline by sample size (see basketball_projections.shrink_prob) before being clipped —
     without this, a run of players who all cleared their line in every recent game (common early
     season with short logs) all land on the exact same clipped 98%/Conviction, collapsing the
-    ranking among them into an arbitrary tie instead of a real ordering."""
+    ranking among them into an arbitrary tie instead of a real ordering.
+
+    real_lines: accepted for signature parity with nfl_projections.build_best_bets, since
+    best_bets_data.load_generic_best_bets_board calls every sport's build_best_bets the same
+    way and always passes this keyword. Currently unused and always None in practice -- NBA's
+    own market keys for real sportsbook lines aren't confirmed/tested yet, so this sport still
+    always prices off the _MARKET_SPEC placeholder line, same as before this parameter existed."""
     rng = np.random.default_rng(seed)
     plays: List[Dict] = []
 

@@ -181,6 +181,39 @@ def test_load_generic_best_bets_board_returns_empty_for_outcome_based_sports():
     print("✓ load_generic_best_bets_board returns empty gracefully for outcome-based sports")
 
 
+def test_load_generic_best_bets_board_real_modules_every_registered_sport():
+    # Regression guard for a real production bug: load_generic_best_bets_board calls
+    # sport.projections.build_best_bets(rows, real_lines=real_lines) the SAME way for every
+    # sport routed through this pipeline, but WNBA's, NBA's, and NCAAMB's build_best_bets were
+    # never updated to accept a real_lines keyword (only NFL's was, when real-lines support was
+    # added for NFL). Every call for those three sports threw TypeError: build_best_bets() got
+    # an unexpected keyword argument 'real_lines' -- masked by the caller's try/except into a
+    # false "No slate data available" warning on Best Bets/Graded Picks/Suggested Parlays/
+    # Speculative Basket, and an outright crash on Command Center (no try/except there).
+    #
+    # The earlier test above (test_load_generic_best_bets_board_full_pipeline_runs) uses a FAKE
+    # projections object and would NOT have caught this -- a fake's build_best_bets accepts
+    # whatever signature you give it. This test calls the REAL sports.REGISTRY and the REAL
+    # projections module for every enabled, stat-based sport, with only build_slate patched out
+    # (network calls), so a real signature mismatch fails loudly here instead of shipping.
+    import sports
+
+    for sport_key, sport in sports.REGISTRY.items():
+        if not sport.enabled or not sport.has_projections or sport_key == "MLB":
+            continue  # MLB routes through load_mlb_best_bets_board, a different function/signature
+        with patch.object(sport.engine, "build_slate", lambda date_str: ([], [])):
+            try:
+                plays, meta, available_books = BBD.load_generic_best_bets_board(sport_key, "2026-07-28")
+            except TypeError as e:
+                raise AssertionError(
+                    f"{sport_key}'s build_best_bets raised a TypeError -- its signature doesn't "
+                    f"match what load_generic_best_bets_board calls it with: {e}"
+                )
+        assert plays == [] and meta == []
+    print("✓ every enabled, stat-based sport's real build_best_bets accepts the real_lines keyword "
+         "load_generic_best_bets_board always passes")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
