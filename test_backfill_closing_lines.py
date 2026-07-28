@@ -14,6 +14,18 @@ import backfill_closing_lines as BF
 import odds_api as O
 
 
+def test_snapshot_query_time_subtracts_the_buffer_not_commence_time_itself():
+    # Regression guard for the real finding from a live run: querying the exact commence_time
+    # landed inside a pre-game prop-suspension window and came back with ZERO bookmakers for ANY
+    # book on 4 of 5 events. This is the fix -- query commence_time MINUS a buffer, never the
+    # instant itself.
+    assert BF.snapshot_query_time("2026-07-28T01:40:00Z", 10) == "2026-07-28T01:30:00Z"
+    assert BF.snapshot_query_time("2026-07-28T00:05:00Z", 10) == "2026-07-27T23:55:00Z"   # crosses a day boundary
+    assert BF.snapshot_query_time("2026-07-28T01:40:00Z", 0) == "2026-07-28T01:40:00Z"    # 0-buffer = exact commence
+    print("✓ snapshot_query_time subtracts the buffer from commence_time, including across a "
+         "UTC day boundary")
+
+
 def test_game_label_matches_real_logged_format():
     # Regression guard: a real user's exported bet log showed every single `game` field with
     # a " (Game N)" suffix -- even gameNumber=1, non-doubleheader games -- matching
@@ -210,6 +222,7 @@ def test_backfill_event_handles_unexpected_response_shape_without_crashing():
 
 
 if __name__ == "__main__":
+    test_snapshot_query_time_subtracts_the_buffer_not_commence_time_itself()
     test_game_label_matches_real_logged_format()
     test_unwrap_events_response_handles_both_documented_shapes()
     test_resolve_events_for_date_warns_when_schedule_has_games_but_events_come_back_empty()

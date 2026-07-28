@@ -36,6 +36,7 @@ Requires the same two things capture_closing_lines.py does:
 
 import argparse
 import os
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Set, Tuple
 
 import odds_api as O
@@ -45,6 +46,26 @@ import mlb_engine as E
 
 SPORT_KEY = "MLB"
 ODDS_SPORT = "baseball_mlb"
+
+
+def snapshot_query_time(commence_iso: str, minutes_before: int) -> str:
+    """The timestamp to actually query for a 'closing' snapshot -- commence_time MINUS a buffer,
+    not commence_time itself.
+
+    Confirmed against a real run, not theoretical: querying at the exact commence_time got back
+    a raw response with ZERO bookmakers for ANY book on 4 of 5 events (not just missing
+    draftkings -- an empty bookmakers list entirely). The likely reason: sportsbooks commonly
+    suspend player-prop markets in the last few minutes before first pitch while lineups get
+    finalized, so a snapshot at t=0 can land right inside that suspended window.
+
+    This also matches how the LIVE capture path already behaves in practice, not just in theory:
+    capture_closing_lines.py's actual 'closing' price for any bet is whatever its last
+    successful run captured before the game started -- and given that workflow's own 15-30
+    minute cadence, that's usually several minutes before literal first pitch already, never
+    exactly at it. Querying history at the exact instant of commence_time was the mismatch, not
+    the historical product itself."""
+    dt = datetime.fromisoformat(commence_iso.replace("Z", "+00:00"))
+    return (dt - timedelta(minutes=minutes_before)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def game_label(g: Dict) -> str:
@@ -162,15 +183,18 @@ def estimate_cost(groups: Dict[str, Dict], regions: str) -> int:
     return sum(10 * len(g["markets"]) * n_regions for g in groups.values())
 
 
-def backfill_event(event_key: str, group: Dict, api_key: str, regions: str) -> Dict:
-    """The one expensive call per event: fetch that event's historical odds at its own real
-    commence time, then match each of this event's missing bets against the returned offers
-    using the EXACT SAME pure matcher (clv_capture.bet_close_price) the live capture path uses --
-    no separate matching logic to keep in sync."""
+def backfill_event(event_key: str, group: Dict, api_key: str, regions: str,
+                   minutes_before: int = 10) -> Dict:
+    """The one expensive call per event: fetch that event's historical odds at a snapshot
+    shortly BEFORE its real commence time (see snapshot_query_time's docstring for why exact
+    commence_time is the wrong moment to query), then match each of this event's missing bets
+    against the returned offers using the EXACT SAME pure matcher (clv_capture.bet_close_price)
+    the live capture path uses -- no separate matching logic to keep in sync."""
     info = group["event"]
     markets = sorted(group["markets"])
+    query_iso = snapshot_query_time(info["commence_iso"], minutes_before)
     js, headers = O.fetch_historical_event_props(
-        info["event_id"], api_key, markets, info["commence_iso"], regions=regions, sport=ODDS_SPORT)
+        info["event_id"], api_key, markets, query_iso, regions=regions, sport=ODDS_SPORT)
 
     event_json = js.get("data")
     if event_json is None:
@@ -186,7 +210,8 @@ def backfill_event(event_key: str, group: Dict, api_key: str, regions: str) -> D
     report = C.capture_updates(group["bets"], offers, market_map=C.MARKET_TO_ODDS_KEY)
     report["headers"] = headers
     report["snapshot_ts"] = snapshot_ts
-    report["requested_date"] = info["commence_iso"]
+    report["requested_date"] = query_iso
+    report["commence_iso"] = info["commence_iso"]
 
     if report["no_match"]:
         # The previous run's log couldn't distinguish "the book genuinely has no historical data
@@ -210,6 +235,12 @@ def main() -> int:
     ap.add_argument("--dates", type=str, default=None,
                     help="comma-separated slate_dates to restrict to, e.g. 2026-07-22,2026-07-23")
     ap.add_argument("--regions", type=str, default="us")
+    ap.add_argument("--minutes-before", type=int, default=10,
+                    help="query this many minutes before each game's real commence time, not "
+                         "commence_time itself -- default 10, based on a real run where querying "
+                         "exact commence_time returned zero bookmakers on most events (props "
+                         "commonly get suspended in the last few minutes before first pitch). "
+                         "Try a larger value (e.g. 20 or 30) if this still comes back empty.")
     args = ap.parse_args()
 
     api_key = os.environ.get("ODDS_API_KEY")
@@ -285,9 +316,10 @@ def main() -> int:
     for event_key, g in groups.items():
         info = g["event"]
         print(f"\n[{info['away_name']} @ {info['home_name']}] requesting {sorted(g['markets'])} "
-             f"at {info['commence_iso']}...")
+             f"at {snapshot_query_time(info['commence_iso'], args.minutes_before)} "
+             f"(commence {info['commence_iso']}, {args.minutes_before} min buffer)...")
         try:
-            report = backfill_event(event_key, g, api_key, args.regions)
+            report = backfill_event(event_key, g, api_key, args.regions, args.minutes_before)
         except O.OddsAPIError as ex:
             print(f"  ✗ {ex}")
             if "401" in str(ex) or "403" in str(ex):
