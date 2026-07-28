@@ -57,6 +57,21 @@ def game_label(g: Dict) -> str:
     return f"{g['away_name']} @ {g['home_name']} (Game {g['gameNumber']})"
 
 
+def _unwrap_events_response(raw: object) -> List[Dict]:
+    """Pull the event list out of fetch_historical_events' raw response, whatever shape it turns
+    out to be -- wrapped ({"data": [...]}, matching the historical event-ODDS wrapper) or bare
+    (a plain list, matching how the LIVE /events endpoint already behaves in this same module).
+    Returns [] for anything else, rather than raising, so a genuine shape surprise shows up as
+    an empty, diagnosable result instead of a crashed run."""
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, dict):
+        inner = raw.get("data")
+        if isinstance(inner, list):
+            return inner
+    return []
+
+
 def resolve_events_for_date(slate_date: str, api_key: str) -> Tuple[Dict[str, Dict], List[str], Dict]:
     """For one slate_date: the real MLB schedule (free, authoritative commence times) joined to
     this provider's OWN event ids for that date (needed only because the historical event-odds
@@ -76,7 +91,19 @@ def resolve_events_for_date(slate_date: str, api_key: str) -> Tuple[Dict[str, Di
     # already posted when this historical snapshot was taken.
     last_start = max((g["game_date"] for g in schedule if g.get("game_date")), default=None)
     events_at = last_start or f"{slate_date}T23:59:00Z"
-    events, headers = O.fetch_historical_events(api_key, events_at, sport=ODDS_SPORT)
+    raw, headers = O.fetch_historical_events(api_key, events_at, sport=ODDS_SPORT)
+    events = _unwrap_events_response(raw)
+
+    if not events:
+        # The real MLB schedule (a separate, already-proven-working data source) says games
+        # existed this date -- an empty events list here means either the shape assumption in
+        # _unwrap_events_response is wrong, or the account/key genuinely has no historical
+        # coverage for this date/sport. Print the raw shape so this is diagnosable from a run's
+        # log instead of silently producing "0 game(s) resolved" with no further clue.
+        preview = (f"keys={list(raw.keys())}" if isinstance(raw, dict)
+                  else f"type={type(raw).__name__}, value={str(raw)[:200]!r}")
+        print(f"    ⚠ 0 events returned for {slate_date} (MLB schedule shows {len(schedule)} "
+             f"real game(s) that day) -- raw response {preview}")
 
     # Team-name match: exact first, then case/whitespace-normalized fallback. Odds API and MLB
     # Stats API both use full official team names for MLB in practice, so exact match should be
@@ -217,7 +244,9 @@ def main() -> int:
         if unresolved_bets:
             print(f"({len(unresolved_bets)} bet(s) had no matching event; their 'game' field may "
                   "not match the schedule's team names exactly.)")
-        return 0
+        print("\nExiting non-zero on purpose: a run that changes nothing shouldn't show green. "
+             "Check the '⚠ 0 events returned' lines above (if any) for the actual cause.")
+        return 2
 
     est = estimate_cost(groups, args.regions)
     n_bets_covered = sum(len(g["bets"]) for g in groups.values())
@@ -270,6 +299,10 @@ def main() -> int:
 
     print(f"\nBackfilled {total_updates} closing line(s). {total_no_match} bet(s) had no offer at close. "
          f"{len(unresolved_bets)} bet(s) had no matching event.")
+    if total_updates == 0:
+        print("Exiting non-zero on purpose: this run tried to backfill real bets but wrote zero "
+             "rows. Check the ✗ error lines above (if any) for the actual cause.")
+        return 2
     return 0
 
 

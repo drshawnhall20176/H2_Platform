@@ -109,6 +109,49 @@ def test_backfill_event_matches_real_offers_to_bets():
          "different-book bet unmatched (apples-to-apples, same rule as the live capture path)")
 
 
+def test_unwrap_events_response_handles_both_documented_shapes():
+    # Regression guard for the actual bug this session hit: a live run showed "Success" in
+    # GitHub Actions but changed zero rows. The most likely cause traced back to this exact
+    # unwrap step -- fetch_historical_events' wrapper shape was the least-verified assumption in
+    # the whole module (flagged as such in its own docstring), and if the real response turned
+    # out to be a bare list (like the LIVE /events endpoint already is, see fetch_events above)
+    # rather than {"data": [...]}, the old code's `data.get("data") if isinstance(data, dict)
+    # else data` would have handled a bare list fine -- but ANY other shape silently became [],
+    # with no way to tell why from a run's log. This is now a pure, independently testable
+    # function instead of dead-ended inline logic, specifically so both shapes (and the failure
+    # case) are locked in by a test, not just re-assumed correct next time this is touched.
+    assert BF._unwrap_events_response([{"id": "evt_1"}]) == [{"id": "evt_1"}]                # bare list
+    assert BF._unwrap_events_response({"data": [{"id": "evt_1"}]}) == [{"id": "evt_1"}]      # wrapped
+    assert BF._unwrap_events_response({"data": "not a list"}) == []          # malformed wrapper
+    assert BF._unwrap_events_response({"no_data_key": []}) == []             # different key name
+    assert BF._unwrap_events_response(None) == []
+    assert BF._unwrap_events_response("unexpected string") == []
+    print("✓ _unwrap_events_response handles both documented response shapes and fails soft "
+         "(empty list, not a crash) on anything else")
+
+
+def test_resolve_events_for_date_warns_when_schedule_has_games_but_events_come_back_empty():
+    # The exact failure signature from this session's real run: MLB's own schedule (a separate,
+    # already-proven data source) says games existed, but the historical events call came back
+    # empty -- this MUST print a diagnostic with the raw response shape, not just silently
+    # report "0 game(s) resolved" with no further clue in the log.
+    fake_schedule = [
+        {"away_name": "Baltimore Orioles", "home_name": "Detroit Tigers", "gameNumber": 1,
+         "game_date": "2026-07-27T23:05:00Z"},
+    ]
+    with patch.object(BF.E, "get_schedule", return_value=fake_schedule), \
+        patch.object(O, "fetch_historical_events", return_value=({"unexpected_key": []}, {})), \
+        patch("builtins.print") as mock_print:
+        matched, unmatched, headers = BF.resolve_events_for_date("2026-07-27", "FAKE_KEY")
+
+    assert matched == {}
+    assert "Baltimore Orioles @ Detroit Tigers (Game 1)" in unmatched
+    printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list if c.args)
+    assert "0 events returned" in printed and "1 real game" in printed
+    print("✓ resolve_events_for_date prints a real diagnostic (not a silent empty result) when "
+         "the schedule proves games existed but the historical events call returned none")
+
+
 def test_backfill_event_handles_unexpected_response_shape_without_crashing():
     # Regression guard: this module's own docstring is explicit that the historical response
     # shape is UNVERIFIED against a live call from this sandbox. If the real API's wrapper key
@@ -132,6 +175,8 @@ def test_backfill_event_handles_unexpected_response_shape_without_crashing():
 
 if __name__ == "__main__":
     test_game_label_matches_real_logged_format()
+    test_unwrap_events_response_handles_both_documented_shapes()
+    test_resolve_events_for_date_warns_when_schedule_has_games_but_events_come_back_empty()
     test_group_missing_bets_by_event_minimizes_markets_per_event()
     test_estimate_cost_matches_documented_formula()
     test_backfill_event_matches_real_offers_to_bets()

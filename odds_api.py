@@ -142,17 +142,21 @@ def fetch_event_props(event_id: str, api_key: str, markets: List[str],
 # unverified here. backfill_closing_lines.py prints the raw wrapper on the very first call if the
 # expected "data" key isn't where it's expected, so a shape surprise is loud and diagnosable
 # instead of silently returning zero matches with no explanation.
-def fetch_historical_events(api_key: str, date_iso: str, sport: str = SPORT) -> Tuple[List[Dict], Dict]:
+def fetch_historical_events(api_key: str, date_iso: str, sport: str = SPORT) -> Tuple[object, Dict]:
     """Events as they existed at `date_iso` (ISO8601 UTC) -- resolves this provider's own event
     id for a game that's already been played (the live fetch_events above only returns
     upcoming/in-progress events, never completed ones, so it can't be reused for backfill).
 
     Pass a date_iso at or after that day's LAST commence_time so every game from that date is
-    guaranteed to have already been posted when this snapshot was taken."""
-    data, headers = _get(f"historical/sports/{sport}/events",
-                         {"apiKey": api_key, "date": date_iso, "dateFormat": "iso"})
-    events = data.get("data") if isinstance(data, dict) else data
-    return (events if isinstance(events, list) else []), headers
+    guaranteed to have already been posted when this snapshot was taken.
+
+    Returns the RAW response (unlike fetch_events, which unwraps to a bare list) -- this
+    endpoint's exact wrapper shape is the least-verified assumption in this module (see this
+    file's own module-level comment), so the unwrapping and the diagnostic for when it doesn't
+    match live here on purpose, in backfill_closing_lines.resolve_events_for_date, the same
+    "don't hide an unverified shape assumption inside the client" choice already made for
+    fetch_historical_event_props below."""
+    return _get(f"historical/sports/{sport}/events", {"apiKey": api_key, "date": date_iso, "dateFormat": "iso"})
 
 
 def fetch_historical_event_props(event_id: str, api_key: str, markets: List[str], date_iso: str,
