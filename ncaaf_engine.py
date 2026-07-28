@@ -173,8 +173,20 @@ def get_player_results(date_str: str) -> Dict[str, Dict[str, float]]:
 
 
 # --------------------------------------------------------------------------- roster / stats join
-def _normalize_name(name: str) -> str:
-    return " ".join((name or "").lower().replace(".", "").replace("-", " ").split())
+def _missing(v) -> bool:
+    """True for None or NaN. Real production bug this guards against: pandas' CSV round-trip
+    (ncaaf_data.load_rosters/load_player_stats) turns a genuinely missing cell into NaN, not
+    None -- and NaN is TRUTHY in Python (`bool(float('nan'))` is True), so the common `(x or
+    default)` idiom silently lets it through unchanged. Confirmed live: a roster row with no
+    position value produced `(nan or "").upper()`, which is `nan.upper()` -- AttributeError,
+    not a graceful "no position known" skip."""
+    return v is None or (isinstance(v, float) and v != v)
+
+
+def _normalize_name(name) -> str:
+    if _missing(name):
+        return ""
+    return " ".join(str(name).lower().replace(".", "").replace("-", " ").split())
 
 
 def _stats_by_id_and_name(season: int) -> Tuple[Dict[str, Dict], Dict[Tuple[str, str], Dict]]:
@@ -185,10 +197,10 @@ def _stats_by_id_and_name(season: int) -> Tuple[Dict[str, Dict], Dict[Tuple[str,
     by_name_team: Dict[Tuple[str, str], Dict] = {}
     for r in ND.load_player_stats():
         pid = r.get("player_id")
-        if pid is not None:
+        if not _missing(pid):
             by_id[str(pid)] = r
         name, team = r.get("player"), r.get("team")
-        if name and team:
+        if not _missing(name) and not _missing(team):
             by_name_team[(_normalize_name(name), team)] = r
     return by_id, by_name_team
 
@@ -200,14 +212,15 @@ def player_row(player: Dict, team: str, opp: str, game_label: str, game_date: Op
     relevant rotation floor, or has no season-stat row to project from at all -- same "filter
     no-real-role noise off the slate" purpose every other sport's engine has, see config_ncaaf.py
     for the specific thresholds."""
-    position = (player.get("position") or "").upper()
+    raw_position = player.get("position")
+    position = "" if _missing(raw_position) else str(raw_position).upper()
     markets = _MARKETS_FOR_POSITION.get(position)
     if not markets or not stats_row or team_games_played <= 0:
         return None
 
     def per_game(col: str) -> float:
         val = stats_row.get(col)
-        if val is None or (isinstance(val, float) and val != val):   # None or NaN
+        if _missing(val):
             return 0.0
         return float(val) / team_games_played
 

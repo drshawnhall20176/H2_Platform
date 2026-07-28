@@ -94,6 +94,46 @@ def test_player_row_returns_none_with_no_stats_row_or_zero_games():
          "division-by-zero style silent wrong rate)")
 
 
+def test_player_row_handles_nan_position_without_crashing():
+    # Regression guard for a real, live production crash: a roster row read back through
+    # pandas' CSV round-trip (ncaaf_data.load_rosters) represents a missing "position" cell as
+    # NaN (a float), not None or "". NaN is TRUTHY in Python, so the old `(player.get("position")
+    # or "").upper()` idiom didn't catch it -- crashed with AttributeError calling .upper() on a
+    # float. Confirmed via the real traceback: ncaaf_engine.py line 203, in player_row.
+    player = {"id": "p1", "name": "Mystery Player", "team": "Ohio State", "position": float("nan")}
+    row = E.player_row(player, "Ohio State", "Texas", "Texas @ Ohio State", "2026-08-29",
+                       {"passing_YDS": 1000, "passing_ATT": 100}, team_games_played=5)
+    assert row is None   # unknown position -> no known markets -> cleanly skipped, not a crash
+    print("✓ player_row handles a NaN position value (pandas CSV round-trip) by cleanly "
+         "skipping the player, not crashing with AttributeError")
+
+
+def test_normalize_name_handles_nan_without_crashing():
+    # Same NaN-truthiness vulnerability, same fix, applied to the name-join fallback path.
+    assert E._normalize_name(float("nan")) == ""
+    assert E._normalize_name(None) == ""
+    assert E._normalize_name("Star QB") == "star qb"
+    print("✓ _normalize_name handles NaN and None without crashing, alongside real names")
+
+
+def test_stats_by_id_and_name_skips_rows_with_nan_identity_fields():
+    import ncaaf_data as ND
+    from unittest.mock import patch
+    fake_stats = [
+        {"season": 2025, "player_id": "p1", "player": "Real Player", "team": "Ohio State",
+         "passing_YDS": 1000},
+        {"season": 2025, "player_id": float("nan"), "player": float("nan"), "team": "Ohio State",
+         "passing_YDS": 500},
+    ]
+    with patch.object(ND, "load_player_stats", return_value=fake_stats):
+        by_id, by_name_team = E._stats_by_id_and_name(2025)
+    assert "p1" in by_id
+    assert len(by_id) == 1   # the NaN player_id row correctly excluded, not stored under "nan"
+    assert (E._normalize_name("Real Player"), "Ohio State") in by_name_team
+    print("✓ _stats_by_id_and_name excludes rows with NaN identity fields instead of indexing "
+         "them under a bogus 'nan' key")
+
+
 def test_build_slate_end_to_end_with_season_fallback_stats():
     # The full integration test reproducing the exact real scenario: week 1 of a new season,
     # where the season stats cache is actually last year's completed totals.
