@@ -544,9 +544,13 @@ if _active.key == "NFL":
         scoring = st.radio("Scoring format", ["PPR", "Half PPR", "Standard"],
                           key="ff_scoring")
     with sf2:
-        pos_filter = st.multiselect("Positions", ["QB", "RB", "WR", "TE"],
-                                   default=["QB", "RB", "WR", "TE"],
-                                   key="ff_positions")
+        pos_filter = st.multiselect(
+            "Positions",
+            ["QB", "RB", "WR", "TE", "K", "DEF", "DB", "LB", "DL", "DE", "CB", "S"],
+            default=["QB", "RB", "WR", "TE"],
+            key="ff_positions",
+            help="Standard fantasy: QB/RB/WR/TE. IDP leagues: add DB/LB/DL/DE/CB/S. DEF = team defense."
+        )
     with sf3:
         top_n_ff = st.number_input("Top N per position", min_value=5,
                                    max_value=30, value=10, key="ff_top_n")
@@ -560,7 +564,8 @@ if _active.key == "NFL":
         player = ctx["player"]
         mean = entry["mean"]
         if player not in player_proj:
-            pos = next((r.get("Position", "") for r in rows if r.get("Player") == player), "")
+            # Position is now stored in ctx directly -- no need to scan rows
+            pos = ctx.get("position", "")
             player_proj[player] = {
                 "Player": player, "Team": ctx["team"], "Game": ctx["game"],
                 "Opp": ctx.get("opp", ""), "Position": pos,
@@ -601,7 +606,7 @@ if _active.key == "NFL":
         st.info("No fantasy projections for this slate — try a date with scheduled NFL games.")
     else:
         ff_df = pd.DataFrame(ff_rows).sort_values("Proj Pts", ascending=False)
-        for pos in [p for p in ["QB", "RB", "WR", "TE"] if p in pos_filter]:
+        for pos in [p for p in ["QB", "RB", "WR", "TE", "K", "DEF", "DB", "LB", "DL", "DE", "CB", "S"] if p in pos_filter]:
             pos_df = ff_df[ff_df["Pos"] == pos].head(top_n_ff).reset_index(drop=True)
             if pos_df.empty:
                 continue
