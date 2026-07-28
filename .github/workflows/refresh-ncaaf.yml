@@ -1,0 +1,119 @@
+# Auto-refresh the NCAAF roster + player season stats + schedule caches — entirely in the
+# cloud, no local step. Same pattern as refresh-statcast.yml.
+#
+# WHAT IT DOES:
+#   Once a day this pulls the season's roster, player season stats, and schedule from
+#   CollegeFootballData.com (CFBD), writes data/ncaaf_rosters.csv, data/ncaaf_player_stats.csv,
+#   and data/ncaaf_schedule.csv, and commits them back to the repo. That commit triggers a
+#   Streamlit Cloud redeploy, so the deployed app picks up the fresh files with zero manual work.
+#
+# WHY DAILY, NOT MORE OFTEN — A REAL BUDGET CONSTRAINT, NOT JUST "stable data, no rush":
+#   CollegeFootballData's free tier is metered at roughly 1,000 API calls/month (confirmed
+#   against CFBD's own published blog post at time of scoping). This workflow makes exactly 3
+#   calls per run (see ncaaf_data.py's own docstring for the full accounting) — daily for an
+#   entire ~15-week season costs roughly 3 x 7 x 15 = 315 calls, comfortably inside budget with
+#   real room to spare. Rosters and season stats also genuinely don't change meaningfully more
+#   than once a day, so there's no upside to a tighter cadence here the way there is for
+#   closing-line capture.
+#
+# ONE-TIME SETUP (do this before the first run):
+#   1) Add the CFBD_API_KEY secret (Settings -> Secrets and variables -> Actions) — get a free
+#      key at collegefootballdata.com/key.
+#   2) Commit this workflow file at .github/workflows/refresh-ncaaf.yml, and ncaaf_data.py /
+#      refresh_ncaaf.py. (No .gitignore change needed — checked directly: this repo has no
+#      .gitignore restricting data/, the same way data/statcast_batters.csv etc. are already
+#      tracked plainly.)
+#   3) Go to the repo's Actions tab -> "refresh-ncaaf" -> "Run workflow" to populate all three
+#      files immediately (otherwise they first populate at the scheduled time below).
+#
+# NOTES:
+#   - No app dependency added: requests + pandas are already in requirements.txt. The official
+#     `cfbd` client package is deliberately NOT used and NOT installed here — it hard-pins
+#     pydantic<2, which conflicts with nfl_engine.py's own nflreadpy dependency (pydantic>=2.0).
+#     This was tested directly during scoping, not assumed: installing cfbd alongside nflreadpy
+#     breaks `import nflreadpy` outright. See ncaaf_data.py's own docstring for the full story.
+#   - Player season stats refresh failing is non-fatal to the whole job, same posture
+#     refresh_statcast.py already has for its own secondary pulls — the roster cache still
+#     commits even if season stats didn't produce a file this run.
+
+name: refresh-ncaaf
+
+on:
+  schedule:
+    - cron: "0 11 * * *"     # 11:00 UTC daily (~6-7am ET)
+  workflow_dispatch: {}       # manual "Run workflow" button in the Actions tab
+
+permissions:
+  contents: write             # allow the job to commit the refreshed CSVs back to the repo
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install --no-cache-dir --upgrade pandas requests
+
+      - name: Pull NCAAF roster + player season stats + schedule and write the caches
+        env:
+          CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
+        run: python refresh_ncaaf.py     # defaults to the current season; schedule pull is
+                                         # non-fatal (see main()'s own try/except) so this step
+                                         # still succeeds even if only roster+stats land
+
+      - name: Validate the roster + player stats caches with the app's own loader
+        # Same "use the real loader, refuse to commit an empty/broken pull" posture the Statcast
+        # workflow's own batter-cache validation has. Both are core dependencies for a future
+        # ncaaf_engine.py, worth blocking the commit over if either looks wrong.
+        run: |
+          python - <<'PY'
+          import sys
+          import ncaaf_data as ND
+          rosters = ND.load_rosters()
+          stats = ND.load_player_stats()
+          print(f"Loaded {len(rosters)} roster players, {len(stats)} players with season stats.")
+          if len(rosters) < 100:
+              print("Roster cache looks empty or too small (expected 1,000+ FBS/FCS players) — refusing to commit.")
+              sys.exit(1)
+          if len(stats) < 100:
+              print("Player season stats cache looks empty or too small — refusing to commit.")
+              sys.exit(1)
+          PY
+
+      - name: Validate the schedule cache (non-fatal — logs only, never blocks the commit)
+        run: |
+          python - <<'PY'
+          import ncaaf_data as ND
+          games = ND.load_schedule()
+          print(f"Loaded {len(games)} scheduled games.")
+          if len(games) < 50:
+              print("::warning::Schedule cache looks thin or missing after this run — see the earlier pull step's own log for the actual error. Committing roster/stats caches anyway (non-fatal).")
+          PY
+        continue-on-error: true
+
+      - name: Commit the refreshed caches (only if something changed)
+        # Same atomic-git-add lesson refresh-statcast.yml's own comment records: `git add` with
+        # multiple pathspecs fails ATOMICALLY if any one doesn't match a file on disk, silently
+        # blocking the commit of files that DID succeed. Stage the two core files
+        # unconditionally first, then only add the schedule file if it actually exists.
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/ncaaf_rosters.csv
+          git add data/ncaaf_player_stats.csv
+          if [ -f data/ncaaf_schedule.csv ]; then
+            git add data/ncaaf_schedule.csv
+          else
+            echo "::warning::data/ncaaf_schedule.csv was not produced this run (see the pull step's own log for why) — committing roster/stats caches only."
+          fi
+          if git diff --staged --quiet; then
+            echo "No change in NCAAF caches — nothing to commit."
+          else
+            git commit -m "Auto-refresh NCAAF roster/player-stats/schedule caches ($(date -u +%Y-%m-%d))"
+            git push
+          fi
