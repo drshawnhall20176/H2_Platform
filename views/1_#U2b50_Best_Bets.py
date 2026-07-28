@@ -89,9 +89,15 @@ else:
         try:
             plays, meta, available_books = load_best_bets_generic(_active.key, date_str)
         except Exception:
-            st.warning(f"No slate data available for {_active.label} on {date_str}. "
-                      "This is normal during the off-season or before week 1 stats are published. "
-                      "Try a date when games are scheduled.")
+            if _active.key == "NFL":
+                st.warning(f"No NFL slate data available for {date_str}. "
+                          "**Preseason games (August) aren't supported** — the projection model "
+                          "requires recent game logs that don't exist yet for 2026. "
+                          "NFL Best Bets will be live when the regular season starts "
+                          "(Week 1 begins September 4, 2026).")
+            else:
+                st.warning(f"No slate data available for {_active.label} on {date_str}. "
+                          "Try a date when games are scheduled.")
             st.stop()
     ss_key = f"_available_books_{_active.key}_{date_str}"
     if st.session_state.get(ss_key) != available_books:
