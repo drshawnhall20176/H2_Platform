@@ -236,6 +236,17 @@ else:
                           f"underway (books pull pre-game props once a game starts), so there's no "
                           f"live pre-game edge left to compute. These won't appear in \"Filter by "
                           f"game\" below even though they were queried: {', '.join(no_offer)}")
+
+            todays_events = info.get("todays_events") or []
+            with st.expander(f"🔍 Raw events returned by the odds provider today ({len(todays_events)})"):
+                if todays_events:
+                    st.dataframe(pd.DataFrame(todays_events), hide_index=True, use_container_width=True)
+                else:
+                    st.caption("No events at all came back for today's date.")
+                st.caption("If a game you expect isn't in this list, it's not a matching or "
+                          "parsing issue on our side — the provider's own event feed didn't "
+                          "include it. Doubleheaders are the most likely case: some providers "
+                          "only expose one event per team pairing per day, not one per leg.")
  
         if edges:
             edf = pd.DataFrame(edges)
