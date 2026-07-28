@@ -195,6 +195,43 @@ def test_clv_pct():
     assert B.clv_pct(-150, -150) == 0.0      # flat
     assert B.clv_pct(-110, -120) > 0         # took -110, closed -120 -> beat close
     assert B.clv_pct(100, None) is None      # no closing line
+    assert B.clv_pct(100, float("nan")) is None   # NaN treated the same as None
+
+
+def test_clv_pct_through_a_real_dataframe_not_just_direct_calls():
+    # Regression guard for a real production bug: Bet Log's Ledger table and CSV export both do
+    # `df = pd.DataFrame(bets)` before calling clv_pct row by row via df.apply(...). Once a bet
+    # dict's close_odds=None sits in the same numeric column as OTHER bets' real close_odds
+    # values, pandas silently upcasts the whole column to float64 and turns that None into NaN --
+    # confirmed here, not assumed. `clv_pct(x, None) is None` (the test above) passed even before
+    # the fix; it never exercised this NaN path, which is exactly how a real bug shipped past
+    # test coverage that only ever called clv_pct directly with a literal None.
+    #
+    # Caught via a real user's CSV export: 34% of bets with no captured close showed a
+    # fabricated, always-positive CLV% (a +252 entry with no close showed "CLV% = 252.00")
+    # instead of a blank cell -- exactly (american_to_decimal(entry_odds) - 1) * 100, i.e.
+    # american_to_decimal's own "invalid odds" fallback (decimal 1.0) silently standing in for
+    # the missing close.
+    import pandas as pd
+
+    bets = [
+        {"entry_odds": -110, "close_odds": -120},   # has a real close
+        {"entry_odds": 252, "close_odds": None},    # no close captured yet
+    ]
+    df = pd.DataFrame(bets)
+    assert df["close_odds"].dtype == float, (
+        "test setup check: this only reproduces the bug if pandas actually upcast the missing "
+        "value to a float column (NaN), matching the real Ledger/export code path"
+    )
+    df["CLV%"] = df.apply(lambda r: B.clv_pct(r.get("entry_odds"), r.get("close_odds")), axis=1)
+
+    assert df.loc[0, "CLV%"] == 4.13    # real close: normal CLV math, unaffected
+    assert pd.isna(df.loc[1, "CLV%"]), (
+        f"bet with no captured close_odds should show a blank/missing CLV%, not a fabricated "
+        f"number -- got {df.loc[1, 'CLV%']!r}"
+    )
+    print("✓ clv_pct correctly returns missing (not a fabricated number) for a NaN close_odds "
+         "arriving via a real pandas DataFrame, matching Bet Log's actual Ledger/export code path")
 
 
 def test_bet_pnl():

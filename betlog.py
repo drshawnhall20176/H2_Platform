@@ -292,14 +292,38 @@ def delete_bet(bet_id: int, db_path: str = DB_PATH) -> None:
 # ===========================================================================
 # ANALYTICS (pure functions over lists of bet dicts — fully testable offline)
 # ===========================================================================
+def _missing(v) -> bool:
+    """True for None or NaN (pandas silently turns None into NaN once it shares a numeric
+    DataFrame column with real values -- see Bet Log's `pd.DataFrame(bets)` ledger/export path).
+    NaN != NaN is a real, deliberate float property (not a typo) -- the standard NaN-detection
+    idiom that doesn't require importing math/numpy just for this one check. Same pattern already
+    used by _result() above for the same underlying reason (a DataFrame-passed row's missing
+    cells arrive as NaN, not None)."""
+    return v is None or (isinstance(v, float) and v != v)
+
+
 def clv_pct(entry_odds, close_odds) -> Optional[float]:
     """Closing Line Value as a percent: how much better your price was than the close.
- 
-    (decimal_entry / decimal_close − 1) × 100. Positive = you beat the close."""
-    if entry_odds is None or close_odds is None:
+
+    (decimal_entry / decimal_close − 1) × 100. Positive = you beat the close.
+
+    Returns None (not a fabricated number) when either odds value is missing. This used to check
+    only `is None`, which a real production bug exposed: when a bet's close_odds hadn't been
+    captured yet, the Bet Log Ledger table and CSV export (both of which build `pd.DataFrame
+    (bets)` first) got the missing value back as NaN, not None -- `NaN is None` is False, so the
+    old guard silently let it through into american_to_decimal(NaN), which hit ITS OWN 'invalid
+    odds' safety fallback (decimal 1.0) and produced a wildly wrong, always-positive CLV% (e.g. a
+    +252 entry price with no close showed a fabricated \"CLV% = 252.00\" instead of a blank cell)
+    for every single bet still waiting on a closing line. Confirmed against a real CSV export
+    where every affected row's bogus CLV% exactly equaled (american_to_decimal(entry_odds)-1)*100
+    -- i.e. exactly what you get from dividing by the 1.0 sentinel. summary()/clv_series()/
+    market_breakdown() were NOT affected -- they're called on the raw dict list from list_bets(),
+    where SQL NULL comes back as real Python None (sqlite3 and psycopg2 both do this natively),
+    so this specific leak only ever happened on the DataFrame-based Ledger/export path."""
+    if _missing(entry_odds) or _missing(close_odds):
         return None
     return round((american_to_decimal(entry_odds) / american_to_decimal(close_odds) - 1) * 100, 2)
- 
+
  
 def _result(bet) -> str:
     """Normalized result string, robust to None, NaN (which pandas produces for empty cells
