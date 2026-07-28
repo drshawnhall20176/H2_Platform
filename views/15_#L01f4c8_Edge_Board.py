@@ -526,3 +526,103 @@ fast with the number. And remember: from a small bankroll, correct sizing means 
 bets and slow, bumpy growth — that's the math, not a flaw.
 """
     )
+
+
+# ============================================================================
+# FANTASY FOOTBALL RANKINGS  (NFL only)
+# ============================================================================
+if _active.key == "NFL":
+    st.divider()
+    st.subheader("🏈 Fantasy Football Rankings")
+    st.caption("Projected fantasy points from the same model driving the Edge Board — "
+               "ranked by position for start/sit decisions. "
+               "**No TD projections** (too sparse/random) and **no injury monitoring**. "
+               "Use as a projection baseline alongside your own TD/injury reads.")
+
+    sf1, sf2, sf3 = st.columns(3)
+    with sf1:
+        scoring = st.radio("Scoring format", ["PPR", "Half PPR", "Standard"],
+                          key="ff_scoring")
+    with sf2:
+        pos_filter = st.multiselect("Positions", ["QB", "RB", "WR", "TE"],
+                                   default=["QB", "RB", "WR", "TE"],
+                                   key="ff_positions")
+    with sf3:
+        top_n_ff = st.number_input("Top N per position", min_value=5,
+                                   max_value=30, value=10, key="ff_top_n")
+
+    rec_bonus = {"PPR": 1.0, "Half PPR": 0.5, "Standard": 0.0}[scoring]
+
+    # Aggregate market projections per player into fantasy points
+    player_proj = {}
+    for (nm, mkey), entry in index.items():
+        ctx = entry["ctx"]
+        player = ctx["player"]
+        mean = entry["mean"]
+        if player not in player_proj:
+            pos = next((r.get("Position", "") for r in rows if r.get("Player") == player), "")
+            player_proj[player] = {
+                "Player": player, "Team": ctx["team"], "Game": ctx["game"],
+                "Opp": ctx.get("opp", ""), "Position": pos,
+                "pass_yds": 0.0, "rush_yds": 0.0, "rec": 0.0, "rec_yds": 0.0,
+            }
+        if mkey == "player_pass_yds":
+            player_proj[player]["pass_yds"] = mean
+        elif mkey == "player_rush_yds":
+            player_proj[player]["rush_yds"] = mean
+        elif mkey == "player_receptions":
+            player_proj[player]["rec"] = mean
+        elif mkey == "player_reception_yds":
+            player_proj[player]["rec_yds"] = mean
+
+    ff_rows = []
+    for p, d in player_proj.items():
+        pos = d["Position"]
+        if pos not in pos_filter:
+            continue
+        fpts = (d["pass_yds"] * 0.04 + d["rush_yds"] * 0.1
+                + d["rec"] * rec_bonus + d["rec_yds"] * 0.1)
+        if pos == "QB":
+            proj_str = f"{d['pass_yds']:.0f} pass yds"
+            if d["rush_yds"] > 5:
+                proj_str += f" + {d['rush_yds']:.0f} rush"
+        elif pos == "RB":
+            proj_str = f"{d['rush_yds']:.0f} rush yds"
+            if d["rec"] > 0.5:
+                proj_str += f" + {d['rec']:.1f} rec / {d['rec_yds']:.0f} rec yds"
+        else:
+            proj_str = f"{d['rec']:.1f} rec / {d['rec_yds']:.0f} yds"
+        ff_rows.append({
+            "Player": p, "Pos": pos, "Team": d["Team"], "Opp": d["Opp"],
+            "Proj Pts": round(fpts, 1), "Projected stat": proj_str, "Game": d["Game"],
+        })
+
+    if not ff_rows:
+        st.info("No fantasy projections for this slate — try a date with scheduled NFL games.")
+    else:
+        ff_df = pd.DataFrame(ff_rows).sort_values("Proj Pts", ascending=False)
+        for pos in [p for p in ["QB", "RB", "WR", "TE"] if p in pos_filter]:
+            pos_df = ff_df[ff_df["Pos"] == pos].head(top_n_ff).reset_index(drop=True)
+            if pos_df.empty:
+                continue
+            pos_df.index += 1
+            st.markdown(f"**{pos}**")
+            st.dataframe(
+                pos_df[["Player", "Team", "Opp", "Proj Pts", "Projected stat", "Game"]],
+                use_container_width=True,
+                column_config={
+                    "Proj Pts": st.column_config.NumberColumn(
+                        "Proj Pts", format="%.1f",
+                        help=f"Projected {scoring} fantasy points. No TDs included — "
+                             "add manually (QB ~1.5, RB ~0.5, WR/TE ~0.3 per game)."),
+                    "Projected stat": st.column_config.TextColumn("Projected stat line"),
+                }
+            )
+        rec_note = ("+1.0/rec" if scoring == "PPR"
+                    else "+0.5/rec" if scoring == "Half PPR" else "no rec bonus")
+        st.caption(
+            f"**{scoring}** — Pass yds×0.04, Rush/Rec yds×0.1, {rec_note}. "
+            "No TD projections (too rare per game to model reliably). "
+            "Rule of thumb to add: QB +1.5 TD pts, RB1 +0.5, WR1/TE1 +0.3. "
+            "Always check the official injury report before locking lineups."
+        )
