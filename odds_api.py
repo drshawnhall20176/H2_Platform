@@ -19,11 +19,28 @@ import math
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
+import pytz
 import requests
 
 BASE = "https://api.the-odds-api.com/v4"
 SPORT = "baseball_mlb"
 NFL_SPORT = "americanfootball_nfl"
+_EASTERN = pytz.timezone("US/Eastern")
+
+
+def _eastern_date_str(iso_utc: Optional[str]) -> Optional[str]:
+    """A game's real US/Eastern calendar date (YYYY-MM-DD), not the UTC date its commence_time
+    happens to be stamped in. Same conversion sports.game_dt already does elsewhere in this
+    codebase (UTC ISO -> US/Eastern) -- reimplemented locally here rather than importing sports
+    into this lower-level API-client module, to avoid a new cross-layer dependency for one date
+    string. Returns None for missing/malformed input, same fail-soft contract as sports.game_dt."""
+    if not iso_utc:
+        return None
+    try:
+        return datetime.fromisoformat(str(iso_utc).replace("Z", "+00:00")).astimezone(_EASTERN).strftime("%Y-%m-%d")
+    except (ValueError, TypeError):
+        return None
+
 
 # NFL market keys confirmed against The Odds API's own market taxonomy -- same source as the
 # MLB keys above. Only the 4 real prop markets the NFL engine currently projects for:
@@ -255,7 +272,7 @@ def fetch_slate_spreads(date_str: str, api_key: str, sport: str = SPORT) -> Tupl
     that need both call this separately from fetch_slate_props rather than this function trying
     to do double duty."""
     events = fetch_events(api_key, sport=sport)
-    todays = [e for e in events if str(e.get("commence_time", ""))[:10] == date_str]
+    todays = [e for e in events if _eastern_date_str(e.get("commence_time")) == date_str]
     spreads: Dict[str, float] = {}
     remaining = None
     fetched = 0
@@ -439,6 +456,7 @@ def compute_edges(index: Dict, offers: List[Dict],
                 "Player": entry["ctx"]["player"],
                 "Team": entry["ctx"]["team"],
                 "Game": entry["ctx"]["game"],
+                "GameTime": entry["ctx"].get("game_date"),
                 "Market": mkey,
                 "Side": side,
                 "Line": point,
@@ -461,7 +479,7 @@ def fetch_slate_props(date_str: str, api_key: str, markets: List[str], sport: st
 
     info includes remaining quota and event counts so the UI can show cost."""
     events = fetch_events(api_key, sport=sport)
-    todays = [e for e in events if str(e.get("commence_time", ""))[:10] == date_str]
+    todays = [e for e in events if _eastern_date_str(e.get("commence_time")) == date_str]
     offers: List[Dict] = []
     remaining = None
     fetched = 0

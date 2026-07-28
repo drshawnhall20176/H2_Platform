@@ -6,6 +6,7 @@ test_odds.py — offline tests for odds math + edge join (no network).
 
 import projections as P
 import odds_api as O
+import mlb_engine as E
 
 
 def test_implied_prob():
@@ -65,7 +66,9 @@ def test_compute_edges_matches_and_ranks():
                 homeRuns=38, baseOnBalls=55, strikeOuts=140)
     row = {"Hitter": "José Ramírez", "Team": "CLE", "GameLabel": "CLE @ DET",
            "Opp Pitcher": "P", "Lineup": "Confirmed", "_stat": slug, "_exp_pa": 4.5, "_venue_id": None}
-    meta = []
+    meta = [{"label": "CLE @ DET", "game_date": "2026-07-28T23:10:00Z",
+            "home_pm": E.PitcherMetrics(id=None), "home_name": "DET",
+            "away_pm": E.PitcherMetrics(id=None), "away_name": "CLE"}]
     index = P.build_projection_index([row], meta, sims=15000, seed=3)
 
     offers = [
@@ -84,6 +87,14 @@ def test_compute_edges_matches_and_ranks():
     assert evs == sorted(evs, reverse=True)
     # model name (with accent) is preserved in output
     assert edges[0]["Player"] == "José Ramírez"
+    # Regression guard: GameTime used to be silently dropped between build_projection_index's ctx
+    # (which already carried it as "game_date") and compute_edges' own output row -- meaning
+    # Edge Board's game-filter dropdown, which explicitly checks `if "GameTime" in edf.columns`,
+    # could never take its already-written chronological-sort branch and always fell back to
+    # alphabetical, regardless of how many games were on the slate.
+    assert edges[0]["GameTime"] == "2026-07-28T23:10:00Z"
+    print("✓ compute_edges carries GameTime through from the projection index, so Edge Board's "
+         "existing chronological-sort branch actually has data to use")
 
 
 # ----------------------------------------------------------------- market_lines_for_player
@@ -381,6 +392,49 @@ def test_fetch_slate_spreads_only_requests_the_spreads_market():
     assert spreads == {"Atlanta Dream": -6.5, "Chicago Sky": 6.5}
     assert info["events_fetched"] == 1 and info["remaining"] == "500"
     print("✓ fetch_slate_spreads requests only the 'spreads' market (cheap) and returns {team: spread}")
+
+
+# ----------------------------------------------------------------- _eastern_date_str
+def test_eastern_date_str_uses_real_us_eastern_calendar_date():
+    # Regression guard for a real bug: fetch_slate_props/fetch_slate_spreads used to compare a
+    # game's raw UTC commence_time date-prefix directly against the Eastern-context slate date
+    # (from st.date_input) as plain strings. Any game starting from ~8pm ET onward rolls to the
+    # NEXT calendar day in UTC, so that string comparison silently excluded it from "today's"
+    # slate entirely -- reported live as "Edge Board does not contain all games" (missing night
+    # games, especially West Coast).
+    assert O._eastern_date_str("2026-07-29T01:40:00Z") == "2026-07-28"   # 9:40 PM ET on the 28th
+    assert O._eastern_date_str("2026-07-28T17:40:00Z") == "2026-07-28"   # 1:40 PM ET -- same day either way
+    assert O._eastern_date_str(None) is None
+    assert O._eastern_date_str("not a real timestamp") is None
+    print("✓ _eastern_date_str resolves a game's real US/Eastern calendar date, not the UTC "
+         "date its commence_time happens to be stamped in")
+
+
+def test_fetch_slate_props_includes_late_night_games_that_roll_to_next_utc_day():
+    # The exact live scenario this bug caused: a 9:40 PM ET game (common for West Coast teams)
+    # has a UTC commence_time on the FOLLOWING calendar date. The old raw-string comparison
+    # dropped it from "today"; the fix correctly keeps it.
+    def fake_fetch_events(api_key, sport=O.SPORT):
+        return [
+            {"id": "evt_early", "commence_time": "2026-07-28T17:40:00Z"},   # 1:40 PM ET same day
+            {"id": "evt_late", "commence_time": "2026-07-29T01:40:00Z"},    # 9:40 PM ET same Eastern day
+            {"id": "evt_other_day", "commence_time": "2026-07-29T17:40:00Z"},  # genuinely the next day
+        ]
+
+    def fake_fetch_event_props(event_id, api_key, markets, regions="us", sport=O.SPORT):
+        return {"bookmakers": []}, {"remaining": "999"}
+
+    orig_events, orig_props = O.fetch_events, O.fetch_event_props
+    O.fetch_events, O.fetch_event_props = fake_fetch_events, fake_fetch_event_props
+    try:
+        offers, info = O.fetch_slate_props("2026-07-28", "fake_key", ["batter_hits"])
+    finally:
+        O.fetch_events, O.fetch_event_props = orig_events, orig_props
+
+    assert info["events_total"] == 2   # early + late, NOT evt_other_day
+    assert info["events_fetched"] == 2
+    print("✓ fetch_slate_props includes a 9:40 PM ET game (next-day in UTC) in the correct "
+         "Eastern slate date, and still correctly excludes a genuinely different day's game")
 
 
 if __name__ == "__main__":

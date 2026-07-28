@@ -33,9 +33,27 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+import pytz
 import requests
 
 UFC_SPORT = "mma_mixed_martial_arts"
+_EASTERN = pytz.timezone("US/Eastern")
+
+
+def _eastern_date_str(iso_utc: Optional[str]) -> Optional[str]:
+    """A fight card's real US/Eastern calendar date (YYYY-MM-DD), not the UTC date its
+    commence_time happens to be stamped in. UFC main cards commonly run 10pm ET or later --
+    exactly the window where a raw UTC-date-prefix comparison against an Eastern-context
+    date_str silently excludes the event entirely (its commence_time rolls to the next UTC
+    calendar day). Same fix/reasoning as odds_api.py's own _eastern_date_str, reimplemented
+    locally here rather than importing across modules for one date string."""
+    if not iso_utc:
+        return None
+    try:
+        return datetime.fromisoformat(str(iso_utc).replace("Z", "+00:00")).astimezone(_EASTERN).strftime("%Y-%m-%d")
+    except (ValueError, TypeError):
+        return None
+
 
 # Markets the Odds API supports for UFC.
 # h2h is always available; method markets depend on subscription tier.
@@ -75,7 +93,7 @@ def get_ufc_events(api_key: str, date_str: Optional[str] = None) -> List[Dict]:
         return []
     if not date_str:
         return data or []
-    return [e for e in (data or []) if str(e.get("commence_time", ""))[:10] == date_str]
+    return [e for e in (data or []) if _eastern_date_str(e.get("commence_time")) == date_str]
 
 
 def get_event_odds(event_id: str, api_key: str,
