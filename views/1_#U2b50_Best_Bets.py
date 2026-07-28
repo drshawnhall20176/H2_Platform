@@ -86,7 +86,13 @@ else:
     # Store preferred book for load_generic_best_bets_board to read
     st.session_state[f"_preferred_book_{_active.key.lower()}"] = preferred_book
     with st.spinner("Scanning the slate..."):
-        plays, meta, available_books = load_best_bets_generic(_active.key, date_str)
+        try:
+            plays, meta, available_books = load_best_bets_generic(_active.key, date_str)
+        except Exception:
+            st.warning(f"No slate data available for {_active.label} on {date_str}. "
+                      "This is normal during the off-season or before week 1 stats are published. "
+                      "Try a date when games are scheduled.")
+            st.stop()
     ss_key = f"_available_books_{_active.key}_{date_str}"
     if st.session_state.get(ss_key) != available_books:
         st.session_state[ss_key] = available_books

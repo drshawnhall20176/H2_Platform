@@ -80,7 +80,12 @@ else:
     target = st.date_input("Slate date", datetime.now(eastern))
     date_str = target.strftime("%Y-%m-%d")
     with st.spinner("Grading the slate..."):
-        plays, meta, _books = BBD.load_generic_best_bets_board(_active.key, date_str)
+        try:
+            plays, meta, _books = BBD.load_generic_best_bets_board(_active.key, date_str)
+        except Exception:
+            st.warning(f"No slate data available for {_active.label} on {date_str}. "
+                      "Normal during off-season. Try a date when games are scheduled.")
+            st.stop()
     rows = None   # the one-sided banner is MLB-specific (compares starting pitchers) — not
                  # available for other sports, and deliberately not faked for them
 
