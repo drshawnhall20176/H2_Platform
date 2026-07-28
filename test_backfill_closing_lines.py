@@ -200,6 +200,45 @@ def test_backfill_event_prints_raw_bookmakers_when_nothing_matches():
          "needed, so a genuine book-coverage gap is distinguishable from a parsing bug")
 
 
+def test_backfill_event_shows_exact_outcomes_when_book_present_but_still_unmatched():
+    # Regression guard for the real, live-confirmed situation this session hit: a raw response
+    # can contain the bet's own book (draftkings had real batter_hits data in a live run) and
+    # STILL end up in no_match -- meaning the mismatch is in the specific player/point/side, not
+    # book coverage. The book-coverage-only diagnostic (tested above) can't tell these apart; this
+    # one prints the exact outcomes so a name/point/side mismatch is visible directly.
+    fake_response = {
+        "timestamp": "2026-07-23T21:00:37Z",
+        "data": {
+            "id": "evt_stl",
+            "bookmakers": [{"key": "draftkings", "markets": [
+                {"key": "batter_hits", "outcomes": [
+                    # Note the trailing suffix -- a real name mismatch, not a missing price.
+                    {"description": "Nolan Gorman Jr.", "point": 0.5, "name": "Over", "price": -180},
+                    {"description": "Nolan Gorman Jr.", "point": 0.5, "name": "Under", "price": 150},
+                ]},
+            ]}],
+        },
+    }
+    group = {
+        "event": {"event_id": "evt_stl", "commence_iso": "2026-07-23T21:15:00Z",
+                  "away_name": "Arizona Diamondbacks", "home_name": "St. Louis Cardinals"},
+        "bets": [{"id": 5, "game": "Arizona Diamondbacks @ St. Louis Cardinals (Game 1)",
+                 "market": "Batter Total Hits", "book": "draftkings", "side": "Over",
+                 "line": 0.5, "player": "Nolan Gorman"}],   # bet log's name, no suffix
+        "markets": {"batter_hits"},
+    }
+    with patch.object(O, "fetch_historical_event_props", return_value=(fake_response, {})), \
+        patch("builtins.print") as mock_print:
+        report = BF.backfill_event("evt_stl", group, "FAKE_KEY", "us")
+
+    assert report["no_match"] == [5]
+    printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list if c.args)
+    assert "book WAS in the response" in printed
+    assert "Nolan Gorman" in printed and "Nolan Gorman Jr." in printed   # both names visible to compare
+    print("✓ when a bet's own book IS present but still unmatched, the exact outcomes print so a "
+         "name/point/side mismatch is visible instead of an identical-looking no_match line")
+
+
 def test_backfill_event_handles_unexpected_response_shape_without_crashing():
     # Regression guard: this module's own docstring is explicit that the historical response
     # shape is UNVERIFIED against a live call from this sandbox. If the real API's wrapper key
@@ -230,5 +269,6 @@ if __name__ == "__main__":
     test_estimate_cost_matches_documented_formula()
     test_backfill_event_matches_real_offers_to_bets()
     test_backfill_event_prints_raw_bookmakers_when_nothing_matches()
+    test_backfill_event_shows_exact_outcomes_when_book_present_but_still_unmatched()
     test_backfill_event_handles_unexpected_response_shape_without_crashing()
     print("\nAll backfill_closing_lines tests passed.")

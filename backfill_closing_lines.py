@@ -225,6 +225,31 @@ def backfill_event(event_key: str, group: Dict, api_key: str, regions: str,
         print(f"    raw response had {len(raw_books)} bookmaker(s): {raw_books}")
         print(f"    bet(s) needed book(s): {sorted(wanted_books)}")
 
+        # The book coverage question alone (above) can't distinguish "this book has no data
+        # here" from "this book HAS data, but something about player-name/point/side matching
+        # is silently missing it" -- both show up as an identical no_match line. If a bet's own
+        # book DID appear in the raw response, print that book's exact outcomes (player
+        # description, point, side, price) right next to what the bet itself needs, so a real
+        # mismatch (name spelling, point formatting, side wording) is visible directly instead
+        # of guessed at.
+        no_match_ids = set(report["no_match"])
+        for b in group["bets"]:
+            if b.get("id") not in no_match_ids:
+                continue
+            bk = (b.get("book") or "").strip().lower()
+            if bk not in raw_books:
+                continue   # genuinely absent -- the book-coverage line above already covers this
+            print(f"    bet #{b.get('id')} needed: player={b.get('player')!r} "
+                 f"market={b.get('market')!r} side={b.get('side')!r} line={b.get('line')!r} "
+                 f"book={bk!r} -- book WAS in the response, so comparing exact outcomes:")
+            for bm in (event_json.get("bookmakers") or []):
+                if (bm.get("key") or "").strip().lower() != bk:
+                    continue
+                for mk in bm.get("markets", []):
+                    outcomes = [(oc.get("description"), oc.get("point"), oc.get("name"), oc.get("price"))
+                               for oc in mk.get("outcomes", [])]
+                    print(f"      {bk}/{mk.get('key')} outcomes (player, point, side, price): {outcomes}")
+
     return report
 
 
