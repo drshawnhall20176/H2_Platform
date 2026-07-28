@@ -139,6 +139,15 @@ if not all_rows:
 df = pd.DataFrame(rows) if rows else pd.DataFrame()
 all_df = pd.DataFrame(all_rows)
 
+# Walk Risk column -- 🚶 when the opposing pitcher has ≥3.5 BB/9, blank otherwise.
+# Scannable at a glance across the whole lineup: if you see 🚶 on your pick,
+# the pitcher is wild enough to walk your player instead of giving them a real AB.
+for _frame in [df, all_df]:
+    if "_opp_bb9" in _frame.columns:
+        _frame["Walk Risk"] = _frame["_opp_bb9"].apply(
+            lambda v: f"🚶 {v:.1f}" if (v or 0) >= WALK_RISK_THRESHOLD else ""
+        )
+
 confirmed = (all_df["Lineup"] == "Confirmed").sum()
 split_note = f" · showing {len(rows)} matching {' + '.join(p for p in [venue_split, time_split] if p)}" if (venue_split or time_split) else ""
 st.caption(f"{len(meta)} games · {len(all_df)} hitters · "
@@ -153,7 +162,9 @@ else:
  
 # --- Styling ----------------------------------------------------------------
 DISPLAY_COLS = ["Hitter", "Team", "Hand", "Opp Pitcher", "Opp Hand", "Advantage", "Lineup",
-                "Opp HR/9", "vs SP", "vs Pen", "HR%", "Hit%", "TB1.5%", "SO Prob", "Barrel%", "xHR/PA", "K%", "HR", "TB", "SLG", "OPS", "ISO", "PowerIndex"]
+                "Opp HR/9", "Walk Risk", "vs SP", "vs Pen", "HR%", "Hit%", "TB1.5%", "SO Prob", "Barrel%", "xHR/PA", "K%", "HR", "TB", "SLG", "OPS", "ISO", "PowerIndex"]
+
+WALK_RISK_THRESHOLD = 3.5  # BB/9 -- approximately 85th percentile, genuinely wild control
  
  
 def hr9_band(v):
@@ -532,6 +543,11 @@ st.caption("**Advantage / Disadvantage** = the handedness matchup between the ba
            "It means one favorable factor isn't present tonight. Great hitters produce regardless — "
            "check their season numbers vs. same-hand pitching specifically (the model already factors "
            "this in via the vs_L/vs_R platoon split). Think of it as context, not a veto.")
+st.caption("**Walk Risk 🚶** = opposing pitcher's BB/9 is ≥3.5 — approximately the 85th percentile, "
+           "genuinely wild control. When this shows on your pick, the pitcher may walk your player "
+           "instead of giving them a real at-bat, killing HRR, Hits, and Runs props specifically. "
+           "The Raley situation (July 27 — walked twice, multiple slips dead) is the real example. "
+           "Not a reason to skip, but a reason to size down or hedge.")
 st.caption("Opp HR/9 = the opposing starter's home runs allowed per 9 innings, colored on fixed bands "
            "(not slate-relative): 🟢 under 0.80 excellent · 🟩 0.80–1.10 solid · 🟡 1.10–1.30 average · "
            "🟠 1.30–1.50 below average · 🔴 over 1.50 homer-prone. A redder arm is a better power spot "
