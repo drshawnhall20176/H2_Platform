@@ -417,7 +417,7 @@ st.caption("Model probabilities and fair prices at default lines — your pre-od
 view = board[board["ModelProb"] >= min_prob].sort_values("ModelProb", ascending=False).copy()
  
 # Game-time filter: turn each game's ISO start into an ET clock string, and let the user
-# narrow the scouting view to specific games (sorted by first pitch) — handy on a spread-out
+# narrow the scouting view to specific games (sorted by game time) — handy on a spread-out
 # slate where you want just the next game up.
 if "GameTime" in view.columns:
     view["Time (ET)"] = view["GameTime"].map(P.format_et)
@@ -429,7 +429,7 @@ if "GameTime" in view.columns:
     label_for = {g: (f"{P.format_et(t)} — {g}" if P.format_et(t) else g)
                  for g, t in zip(game_order["Game"], game_order["GameTime"])}
     picked = st.multiselect(
-        "Filter by game (first pitch ET) — leave empty for all", options=game_opts,
+        "Filter by game — leave empty for all", options=game_opts,
         format_func=lambda g: label_for.get(g, g), default=[],
         help="Pick one or more games to focus the board. Options are ordered by start time, so the "
              "earliest games are at the top. Empty = show every game.")
