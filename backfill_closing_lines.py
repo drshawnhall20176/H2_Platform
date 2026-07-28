@@ -187,6 +187,19 @@ def backfill_event(event_key: str, group: Dict, api_key: str, regions: str) -> D
     report["headers"] = headers
     report["snapshot_ts"] = snapshot_ts
     report["requested_date"] = info["commence_iso"]
+
+    if report["no_match"]:
+        # The previous run's log couldn't distinguish "the book genuinely has no historical data
+        # for this market/snapshot" from "a parsing bug on our side is silently dropping real
+        # data that WAS returned" -- both looked identical (a no_match line, quota barely moved).
+        # This is the raw, PRE-FILTER view: every bookmaker key and market key the response
+        # actually contained, before parse_event_offers' supported_markets filter drops anything.
+        raw_books = {bm.get("key"): sorted({m.get("key") for m in bm.get("markets", [])})
+                    for bm in (event_json.get("bookmakers") or [])}
+        wanted_books = {(b.get("book") or "").strip().lower() for b in group["bets"]}
+        print(f"    raw response had {len(raw_books)} bookmaker(s): {raw_books}")
+        print(f"    bet(s) needed book(s): {sorted(wanted_books)}")
+
     return report
 
 

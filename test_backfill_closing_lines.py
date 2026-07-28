@@ -152,6 +152,42 @@ def test_resolve_events_for_date_warns_when_schedule_has_games_but_events_come_b
          "the schedule proves games existed but the historical events call returned none")
 
 
+def test_backfill_event_prints_raw_bookmakers_when_nothing_matches():
+    # Regression guard for the real, live-confirmed situation this session hit: a historical
+    # call can succeed (real snapshot timestamp, quota barely moving) and STILL match zero
+    # bets -- and a plain "no matching offer" line can't distinguish "this book genuinely has no
+    # historical data here" from "a parsing bug is silently dropping data that WAS returned".
+    # This diagnostic exists specifically to tell those two apart from the next run's log.
+    fake_response = {
+        "timestamp": "2026-07-28T01:35:00Z",
+        "data": {
+            "id": "evt_abc",
+            "bookmakers": [
+                {"key": "fanduel", "markets": [{"key": "batter_hits", "outcomes": [
+                    {"description": "Ozzie Albies", "point": 0.5, "name": "Over", "price": -180}]}]},
+                # draftkings is absent entirely -- the real-world case this is built to catch
+            ],
+        },
+    }
+    group = {
+        "event": {"event_id": "evt_abc", "commence_iso": "2026-07-28T01:40:00Z",
+                  "away_name": "Boston Red Sox", "home_name": "Athletics"},
+        "bets": [{"id": 1, "game": "Boston Red Sox @ Athletics (Game 1)", "market": "Batter Total Hits",
+                 "book": "draftkings", "side": "Over", "line": 0.5, "player": "Ozzie Albies"}],
+        "markets": {"batter_hits"},
+    }
+    with patch.object(O, "fetch_historical_event_props", return_value=(fake_response, {})), \
+        patch("builtins.print") as mock_print:
+        report = BF.backfill_event("evt_abc", group, "FAKE_KEY", "us")
+
+    assert report["no_match"] == [1]
+    printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list if c.args)
+    assert "raw response had" in printed and "fanduel" in printed
+    assert "needed book(s)" in printed and "draftkings" in printed
+    print("✓ a real no_match prints exactly what the raw response contained vs what the bets "
+         "needed, so a genuine book-coverage gap is distinguishable from a parsing bug")
+
+
 def test_backfill_event_handles_unexpected_response_shape_without_crashing():
     # Regression guard: this module's own docstring is explicit that the historical response
     # shape is UNVERIFIED against a live call from this sandbox. If the real API's wrapper key
@@ -180,5 +216,6 @@ if __name__ == "__main__":
     test_group_missing_bets_by_event_minimizes_markets_per_event()
     test_estimate_cost_matches_documented_formula()
     test_backfill_event_matches_real_offers_to_bets()
+    test_backfill_event_prints_raw_bookmakers_when_nothing_matches()
     test_backfill_event_handles_unexpected_response_shape_without_crashing()
     print("\nAll backfill_closing_lines tests passed.")
