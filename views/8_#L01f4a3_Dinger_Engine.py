@@ -142,6 +142,7 @@ all_df = pd.DataFrame(all_rows)
 # Walk Risk column -- 🚶 when the opposing pitcher has ≥3.5 BB/9, blank otherwise.
 # Scannable at a glance across the whole lineup: if you see 🚶 on your pick,
 # the pitcher is wild enough to walk your player instead of giving them a real AB.
+WALK_RISK_THRESHOLD = 3.5  # BB/9 -- approximately 85th percentile, genuinely wild control
 for _frame in [df, all_df]:
     if "_opp_bb9" in _frame.columns:
         _frame["Walk Risk"] = _frame["_opp_bb9"].apply(
@@ -164,9 +165,6 @@ else:
 DISPLAY_COLS = ["Hitter", "Team", "Hand", "Opp Pitcher", "Opp Hand", "Advantage", "Lineup",
                 "Opp HR/9", "Walk Risk", "vs SP", "vs Pen", "HR%", "Hit%", "TB1.5%", "SO Prob", "Barrel%", "xHR/PA", "K%", "HR", "TB", "SLG", "OPS", "ISO", "PowerIndex"]
 
-WALK_RISK_THRESHOLD = 3.5  # BB/9 -- approximately 85th percentile, genuinely wild control
- 
- 
 def hr9_band(v):
     """Fixed-threshold coloring for pitcher HR/9 (absolute, not slate-relative).
     <0.8 excellent · 0.8-1.1 solid · 1.1-1.3 average · 1.3-1.5 below avg · >1.5 homer-prone.
