@@ -35,10 +35,12 @@ def test_registry_has_all_eight_leagues():
     print("✓ all 8 leagues registered")
 
 
-def test_mlb_wnba_nba_ncaamb_nfl_enabled_today():
+def test_mlb_wnba_nba_ncaamb_nfl_ncaaf_enabled_today():
     live = {s.key for s in S.enabled_sports()}
-    assert live == {"MLB", "WNBA", "NBA", "NCAAMB", "NFL", "UFC"}, f"expected MLB+WNBA+NBA+NCAAMB+NFL+UFC live, got {live}"
-    print("✓ MLB, WNBA, NBA, NCAAMB, NFL, and UFC are the enabled/live sports")
+    assert live == {"MLB", "WNBA", "NBA", "NCAAMB", "NFL", "NCAAF", "UFC"}, (
+        f"expected MLB+WNBA+NBA+NCAAMB+NFL+NCAAF+UFC live, got {live}"
+    )
+    print("✓ MLB, WNBA, NBA, NCAAMB, NFL, NCAAF, and UFC are the enabled/live sports")
 
 
 def test_get_falls_back_to_default_for_unknown_key():
@@ -79,11 +81,11 @@ def test_require_live_engine_false_for_unwired_sport(monkeypatch):
 
 
 def test_market_map_present_for_live_sports_only():
-    for key in ("MLB", "WNBA", "NBA", "NCAAMB", "NFL"):
+    for key in ("MLB", "WNBA", "NBA", "NCAAMB", "NFL", "NCAAF"):
         assert S.REGISTRY[key].market_map, f"{key} must have a market_map (CLV capture depends on it)"
-    for key in ("NHL", "NCAAF"):
+    for key in ("NHL",):
         assert S.REGISTRY[key].market_map == {}, f"{key} should still be a placeholder"
-    print("✓ MLB, WNBA, NBA, NCAAMB, and NFL have filled market_maps; the rest are honest placeholders")
+    print("✓ MLB, WNBA, NBA, NCAAMB, NFL, and NCAAF have filled market_maps; the rest are honest placeholders")
 
 
 def test_owner_only_pages_match_expected_titles():

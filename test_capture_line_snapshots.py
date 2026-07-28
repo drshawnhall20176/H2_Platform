@@ -54,7 +54,7 @@ def test_capture_for_sport_uses_that_sports_own_odds_key_and_markets(monkeypatch
 def test_capture_for_sport_no_markets_skips_fetch(monkeypatch):
     called = {"fetch": False}
     monkeypatch.setattr(O, "fetch_events", lambda api_key, sport=O.SPORT: called.__setitem__("fetch", True) or [])
-    report = CLS.capture_for_sport("NCAAF", "fake_key")   # placeholder sport, empty markets
+    report = CLS.capture_for_sport("NHL", "fake_key")   # placeholder sport, empty markets
     assert called["fetch"] is False
     assert report == {"events_checked": 0, "live_events": 0, "offers_seen": 0, "snapshots_recorded": 0}
     print("✓ capture_for_sport skips the fetch entirely for a sport with no markets configured yet")

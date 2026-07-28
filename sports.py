@@ -162,7 +162,34 @@ REGISTRY: Dict[str, Sport] = {
                         # schedule announcement — re-check both once real slate data is flowing.
     ),
     "NHL":    Sport("NHL",   "NHL — Hockey",            "🏒", "icehockey_nhl",        [], {}, enabled=False),
-    "NCAAF":  Sport("NCAAF", "NCAA Football",           "🏈", "americanfootball_ncaaf", [], {}, enabled=False),
+    "NCAAF":  Sport(
+        key="NCAAF", label="NCAA Football", icon="🏈", odds_sport_key="americanfootball_ncaaf",
+        markets=["player_pass_yds", "player_rush_yds", "player_receptions", "player_reception_yds"],
+        market_map={"Pass Yards": "player_pass_yds", "Rush Yards": "player_rush_yds",
+                    "Receptions": "player_receptions", "Receiving Yards": "player_reception_yds"},
+        engine_module="ncaaf_engine", projections_module="ncaaf_projections",
+        config_module="config_ncaaf",
+        enabled=True,    # LIVE — but with a real verification gap worth knowing about, unlike
+                        # NFL's own launch: NFL was tested end to end against REAL, LIVE data
+                        # inside this sandbox before being flipped on (nflreadpy's network is
+                        # reachable here). CFBD's API is NOT reachable from this sandbox at all
+                        # -- every column name and the whole build_slate/build_projection_index/
+                        # build_best_bets pipeline was verified against realistic data
+                        # constructed to match the CONFIRMED real schema from a real user-run
+                        # refresh-ncaaf.yml log (real column names, real player/game counts),
+                        # not against an actual live Streamlit render of these pages. Flipped on
+                        # anyway to unblock real end-to-end feedback the same way several other
+                        # pieces this session shipped ("the first real run is the actual
+                        # verification step") -- the first real page load is what closes this
+                        # gap, not a claim that it's already closed.
+                        # SCOPE, same staged-build honesty nfl_projections.py's own docstring
+                        # carries: no Hot Hand Engine/Matchup Lab-equivalent yet, and the
+                        # projection MODEL ITSELF is parametric (season-average rate + an
+                        # unvalidated assumed spread), not a bootstrap from real per-game logs
+                        # the way every other sport here works -- see ncaaf_projections.py's own
+                        # docstring for why (CFBD's season-stats cache has no per-game
+                        # breakdown) and the upgrade path once per-game logs are added.
+    ),
     "UFC":    Sport(
         key="UFC", label="UFC — MMA", icon="🥊", odds_sport_key="mma_mixed_martial_arts",
         markets=["h2h", "totals", "fighter_wins_by_ko_tko",

@@ -184,6 +184,7 @@ def refresh_player_season_stats(year: int, api_key: str, out_path: str = PLAYER_
         used_year = year - 1
 
     long_rows = [{
+        "season": s.get("season"),
         "player_id": s.get("playerId") or s.get("player_id"),
         "player": s.get("player"), "position": s.get("position"),
         "team": s.get("team"), "conference": s.get("conference"),
@@ -191,7 +192,7 @@ def refresh_player_season_stats(year: int, api_key: str, out_path: str = PLAYER_
         "value": s.get("stat"),
     } for s in stats]
     if not long_rows:
-        df = pd.DataFrame(columns=["player_id", "player", "position", "team", "conference"])
+        df = pd.DataFrame(columns=["season", "player_id", "player", "position", "team", "conference"])
         df.to_csv(out_path, index=False)
         print(f"[NCAAF] GET /stats/player/season?year={used_year} also returned 0 rows -- wrote an empty cache.")
         return out_path
@@ -201,7 +202,7 @@ def refresh_player_season_stats(year: int, api_key: str, out_path: str = PLAYER_
     # this module's docstring), so this cast is required, not defensive-for-no-reason.
     long_df["value"] = pd.to_numeric(long_df["value"], errors="coerce")
 
-    identity = (long_df[["player_id", "player", "position", "team", "conference"]]
+    identity = (long_df[["season", "player_id", "player", "position", "team", "conference"]]
                .drop_duplicates("player_id").set_index("player_id"))
     wide = long_df.pivot_table(index="player_id", columns="stat_col", values="value",
                                aggfunc="first")
