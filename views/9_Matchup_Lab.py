@@ -99,24 +99,44 @@ if not slot_pitchers:
     st.info(f"No probable starters in the {slot_pick} slot — try a different time slot or \"All slate\".")
     st.stop()
 
-game_date_by_label: dict = {}
+# Real per-game index keyed by _gamePk, NOT the team-name-only "Game" string. Both legs of a
+# doubleheader share the identical "Away @ Home" string, so the previous game_date_by_label dict
+# (keyed by that string, via setdefault) silently collapsed two real games into one dropdown
+# entry -- Game 2's info was discarded the moment Game 1's same-named entry existed. That's what
+# let a 7:10 PM starter (Gavin Williams) show up in the Pitcher list while "1:40 PM" was selected
+# above it: "Game" filtering was matching BOTH games' rows, not just the picked one. gamePk is
+# the real, always-unique key MLB's own schedule provides -- already on every pitcher row.
+pk_date: dict = {}
+label_pks: dict = {}
 for r in slot_pitchers:
-    game_date_by_label.setdefault(r["Game"], r.get("_game_date"))
-games_present = sorted(game_date_by_label, key=lambda g: game_date_by_label[g] or "~")
+    pk = r.get("_gamePk")
+    if pk is None:
+        continue
+    pk_date.setdefault(pk, r.get("_game_date"))
+    label_pks.setdefault(r["Game"], set()).add(pk)
+for label in label_pks:
+    label_pks[label] = sorted(label_pks[label], key=lambda p: pk_date.get(p) or "")
+
+game_number_by_pk = {pk: i for pks in label_pks.values() for i, pk in enumerate(pks, 1)}
+games_present = sorted(pk_date, key=lambda p: pk_date[p] or "~")
 
 
-def _game_label_fmt(g: str) -> str:
-    dt = game_dt(game_date_by_label.get(g))   # already Eastern-localized by game_dt itself
-    if dt is None:
-        return g
-    return f"{dt.strftime('%-I:%M %p ET')} — {g}"
+def _game_label_fmt(pk) -> str:
+    # Real explicit "(Game N)" suffix -- only when this team pairing actually has more than one
+    # game today -- matching the Dinger Engine's own game-by-game labeling convention exactly,
+    # rather than relying on the time prefix alone to imply a doubleheader is happening.
+    base = next((r["Game"] for r in slot_pitchers if r.get("_gamePk") == pk), str(pk))
+    if len(label_pks.get(base, [])) > 1:
+        base = f"{base} (Game {game_number_by_pk.get(pk, 1)})"
+    dt = game_dt(pk_date.get(pk))   # already Eastern-localized by game_dt itself
+    return f"{dt.strftime('%-I:%M %p ET')} — {base}" if dt is not None else base
 
 
 with c_game:
     game_pick = st.selectbox("Game", ["All games in this slot"] + games_present,
                              format_func=lambda g: _game_label_fmt(g) if g != "All games in this slot" else g)
 final_pitchers = (slot_pitchers if game_pick == "All games in this slot"
-                 else [r for r in slot_pitchers if r["Game"] == game_pick])
+                 else [r for r in slot_pitchers if r.get("_gamePk") == game_pick])
 
 if not final_pitchers:
     st.info("No probable starters match the current filters — try a different time slot or game.")
