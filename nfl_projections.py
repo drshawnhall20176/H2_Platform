@@ -128,7 +128,9 @@ def build_projection_index(rows: List[Dict], meta: List[Dict],
             continue
         nm = normalize_name(r["Player"])
         ctx = {"player": r["Player"], "team": r["Team"], "game": r["GameLabel"],
-              "opp": r.get("Opp"), "lineup": "Active", "game_date": r.get("_game_date")}
+              "opp": r.get("Opp"), "lineup": "Active", "game_date": r.get("_game_date"),
+              "position": r.get("Position", ""),   # needed for fantasy rankings on Edge Board
+              }
         for mkey in markets:
             col, _disp, _line = _MARKET_SPEC[mkey]
             values = [g.get(col) or 0 for g in log]
