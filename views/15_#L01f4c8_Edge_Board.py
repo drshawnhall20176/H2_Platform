@@ -557,6 +557,17 @@ if _active.key == "NFL":
 
     rec_bonus = {"PPR": 1.0, "Half PPR": 0.5, "Standard": 0.0}[scoring]
 
+    # Load defensive ranks for all teams -- one pass over the weekly stats table,
+    # fast because load_season_weekly_stats is already cached from the Edge Board load above.
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def load_def_ranks(date_str_inner: str) -> dict:
+        try:
+            return E.get_defense_ranks(date_str_inner)
+        except Exception:
+            return {}
+
+    def_ranks = load_def_ranks(date_str) if _active.key == "NFL" else {}
+
     # Aggregate market projections per player into fantasy points
     player_proj = {}
     for (nm, mkey), entry in index.items():
@@ -597,9 +608,27 @@ if _active.key == "NFL":
                 proj_str += f" + {d['rec']:.1f} rec / {d['rec_yds']:.0f} rec yds"
         else:
             proj_str = f"{d['rec']:.1f} rec / {d['rec_yds']:.0f} yds"
+        opp = d["Opp"]
+        opp_ranks = def_ranks.get(opp, {})
+        # Pick the rank most relevant to this position
+        if pos == "QB":
+            def_rank = opp_ranks.get("pass_yds")
+        elif pos in ("RB",):
+            def_rank = opp_ranks.get("rush_yds")
+        else:
+            def_rank = opp_ranks.get("rec_yds")
+
+        def_rank_str = (f"#{def_rank}" if def_rank else "—")
+        # Color-code: rank 1-10 = easy (green), 11-22 = mid, 23-32 = tough (red)
+        if def_rank and def_rank <= 10:
+            def_rank_str = f"🟢 #{def_rank}"
+        elif def_rank and def_rank >= 23:
+            def_rank_str = f"🔴 #{def_rank}"
+
         ff_rows.append({
             "Player": p, "Pos": pos, "Team": d["Team"], "Opp": d["Opp"],
-            "Proj Pts": round(fpts, 1), "Projected stat": proj_str, "Game": d["Game"],
+            "Proj Pts": round(fpts, 1), "Projected stat": proj_str,
+            "Opp DEF": def_rank_str, "Game": d["Game"],
         })
 
     if not ff_rows:
@@ -613,7 +642,7 @@ if _active.key == "NFL":
             pos_df.index += 1
             st.markdown(f"**{pos}**")
             st.dataframe(
-                pos_df[["Player", "Team", "Opp", "Proj Pts", "Projected stat", "Game"]],
+                pos_df[["Player", "Team", "Opp", "Proj Pts", "Projected stat", "Opp DEF", "Game"]],
                 use_container_width=True,
                 column_config={
                     "Proj Pts": st.column_config.NumberColumn(
@@ -621,6 +650,12 @@ if _active.key == "NFL":
                         help=f"Projected {scoring} fantasy points. No TDs included — "
                              "add manually (QB ~1.5, RB ~0.5, WR/TE ~0.3 per game)."),
                     "Projected stat": st.column_config.TextColumn("Projected stat line"),
+                    "Opp DEF": st.column_config.TextColumn(
+                        "Opp DEF rank",
+                        help="Opposing defense ranked 1-32 by yards allowed at this position. "
+                             "🟢 #1-10 = permissive (easy matchup), "
+                             "🔴 #23-32 = stingy (tough matchup). "
+                             "QB uses pass yds allowed, RB uses rush yds, WR/TE uses rec yds."),
                 }
             )
         rec_note = ("+1.0/rec" if scoring == "PPR"
