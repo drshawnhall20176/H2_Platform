@@ -7,6 +7,7 @@ test_projections.py — offline tests for the projection engine (seeded, determi
 import numpy as np
 import pytest
 import projections as P
+import mlb_engine as E
 
 
 def _slugger():
@@ -2837,6 +2838,54 @@ def test_pitcher_reasons_away_night_context_for_earned_runs():
     why = P._pitcher_reasons(r, "Pitcher Earned Runs", "Under")
     assert any("away" in w and "night" in w for w in why)
     print("✓ _pitcher_reasons surfaces away/night context for Pitcher Earned Runs market")
+
+
+# ----------------------------------------------------------------- build_projection_index (doubleheader)
+def test_build_projection_index_prefers_confirmed_lineup_on_doubleheader_collision():
+    # Regression guard for a real, live-confirmed bug: on a doubleheader day, a later game's
+    # lineup is often still unposted, so build_slate falls back to the full active roster for
+    # that game -- which almost always includes every player who's actually confirmed-starting
+    # the EARLIER game. Since rows iterate games in order (Game 1 before Game 2) and the index
+    # used to do an unconditional index[(nm, key)] = ... overwrite, Game 2's speculative
+    # roster-fallback row silently clobbered Game 1's real, Confirmed-lineup entry for every
+    # shared player. The live odds still matched something (a real index entry existed) -- the
+    # matched edge just came back mislabeled under Game 2's context, making Game 1 vanish from
+    # anything grouped/filtered by game (e.g. Edge Board's "Filter by game") even though its
+    # edges were computed correctly and were sitting right there under the wrong label.
+    stat = _slugger()
+    game1_row = {"Hitter": "Jose Ramirez", "Team": "CLE", "GameLabel": "CLE @ CIN (Game 1)",
+                "Opp Pitcher": "P1", "Lineup": "Confirmed", "_stat": stat, "_exp_pa": 4.5,
+                "_venue_id": None}
+    # Same player, same team -- Game 2's lineup isn't posted yet, so this row exists purely
+    # because he's on the active roster, not because he's actually starting Game 2.
+    game2_row = {"Hitter": "Jose Ramirez", "Team": "CLE", "GameLabel": "CLE @ CIN (Game 2)",
+                "Opp Pitcher": "P2", "Lineup": "Projected", "_stat": stat, "_exp_pa": 4.5,
+                "_venue_id": None}
+    meta = [{"label": "CLE @ CIN (Game 1)", "game_date": "2026-07-28T17:40:00Z",
+            "home_pm": E.PitcherMetrics(id=None), "home_name": "CIN",
+            "away_pm": E.PitcherMetrics(id=None), "away_name": "CLE"},
+           {"label": "CLE @ CIN (Game 2)", "game_date": "2026-07-28T23:10:00Z",
+            "home_pm": E.PitcherMetrics(id=None), "home_name": "CIN",
+            "away_pm": E.PitcherMetrics(id=None), "away_name": "CLE"}]
+
+    # Order matters -- this reproduces build_slate's own real iteration order (Game 1 before
+    # Game 2, confirmed via get_schedule's own sort key).
+    index = P.build_projection_index([game1_row, game2_row], meta, sims=5000, seed=11)
+    nm = P.normalize_name("Jose Ramirez")
+    entry = index[(nm, "batter_hits")]
+    assert entry["ctx"]["game"] == "CLE @ CIN (Game 1)", (
+        f"expected the Confirmed Game 1 entry to win the collision, got {entry['ctx']['game']!r}"
+    )
+    assert entry["ctx"]["lineup"] == "Confirmed"
+
+    # Reversed input order (Projected processed first, Confirmed second) must land on the same
+    # correct answer -- Confirmed should win regardless of which one happens to iterate last,
+    # not just because it happens to overwrite second.
+    index_rev = P.build_projection_index([game2_row, game1_row], meta, sims=5000, seed=11)
+    entry_rev = index_rev[(nm, "batter_hits")]
+    assert entry_rev["ctx"]["game"] == "CLE @ CIN (Game 1)"
+    print("✓ build_projection_index prefers a Confirmed-lineup row over a Projected one on a "
+         "doubleheader name collision, regardless of iteration order")
 
 
 if __name__ == "__main__":

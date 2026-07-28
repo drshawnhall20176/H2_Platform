@@ -1435,7 +1435,20 @@ def build_projection_index(rows: List[Dict], meta: List[Dict],
                "game_date": label_to_time.get(r["GameLabel"])}
         for key, arr in (("batter_home_runs", sim["hr"]), ("batter_total_bases", sim["tb"]),
                          ("batter_hits", sim["hits"]), ("batter_strikeouts", sim["k"])):
-            index[(nm, key)] = {"dist": _dist(arr), "mean": float(arr.mean()), "ctx": ctx}
+            idx_key = (nm, key)
+            existing = index.get(idx_key)
+            # Doubleheader collision guard: the SAME player can land in this loop twice in one
+            # day (once per leg) when a later game's lineup isn't posted yet and build_slate
+            # falls back to the full active roster -- which almost always includes every player
+            # who's actually confirmed-starting the earlier game. Without this check, whichever
+            # game happens to iterate second always wins, silently -- a Confirmed real starter's
+            # entry could get overwritten by the OTHER game's speculative roster guess. Prefer
+            # Confirmed over Projected on a collision; a confirmed lineup is ground truth for
+            # which game this player is actually in right now, a projected/roster-fallback
+            # listing for a different game is not.
+            if existing is not None and existing["ctx"].get("lineup") == "Confirmed" and ctx["lineup"] != "Confirmed":
+                continue
+            index[idx_key] = {"dist": _dist(arr), "mean": float(arr.mean()), "ctx": ctx}
  
     lineup_map = build_lineup_rate_map(rows)
     for m in meta:
