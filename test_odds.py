@@ -437,6 +437,42 @@ def test_fetch_slate_props_includes_late_night_games_that_roll_to_next_utc_day()
          "Eastern slate date, and still correctly excludes a genuinely different day's game")
 
 
+def test_fetch_slate_props_flags_events_with_no_returned_offers():
+    # The real, live-reported gap this closes: "Games priced: N" counts every event
+    # successfully QUERIED, regardless of whether it returned any usable data -- so a game that
+    # already started (books pulled pre-game props) still counts toward N, but produces zero
+    # edge rows and silently disappears from the "Filter by game" list built from those rows.
+    # That looked like a missing-game bug from the UI alone. no_offer_events makes the
+    # already-queried-but-empty case directly visible instead of a guess.
+    def fake_fetch_events(api_key, sport=O.SPORT):
+        return [
+            {"id": "evt_has_odds", "commence_time": "2026-07-28T22:40:00Z",
+             "away_team": "Boston Red Sox", "home_team": "New York Yankees"},
+            {"id": "evt_already_started", "commence_time": "2026-07-28T17:40:00Z",
+             "away_team": "Cleveland Guardians", "home_team": "Cincinnati Reds"},
+        ]
+
+    def fake_fetch_event_props(event_id, api_key, markets, regions="us", sport=O.SPORT):
+        if event_id == "evt_has_odds":
+            return {"bookmakers": [{"key": "draftkings", "markets": [{"key": "batter_hits", "outcomes": [
+                {"description": "Aaron Judge", "point": 0.5, "name": "Over", "price": -300},
+                {"description": "Aaron Judge", "point": 0.5, "name": "Under", "price": 220},
+            ]}]}]}, {"remaining": "999"}
+        return {"bookmakers": []}, {"remaining": "999"}   # already started -- props pulled
+
+    orig_events, orig_props = O.fetch_events, O.fetch_event_props
+    O.fetch_events, O.fetch_event_props = fake_fetch_events, fake_fetch_event_props
+    try:
+        offers, info = O.fetch_slate_props("2026-07-28", "fake_key", ["batter_hits"])
+    finally:
+        O.fetch_events, O.fetch_event_props = orig_events, orig_props
+
+    assert info["events_fetched"] == 2   # both were successfully queried
+    assert len(offers) == 1              # but only one actually has usable offers
+    assert info["no_offer_events"] == ["Cleveland Guardians @ Cincinnati Reds"]
+    print("✓ fetch_slate_props flags exactly the queried-but-empty event, distinguishing it from "
+         "one that genuinely has live offers, even though both count toward events_fetched")
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

@@ -483,16 +483,28 @@ def fetch_slate_props(date_str: str, api_key: str, markets: List[str], sport: st
     offers: List[Dict] = []
     remaining = None
     fetched = 0
+    no_offer_events: List[str] = []
     for e in todays:
         try:
             ej, hdr = fetch_event_props(e["id"], api_key, markets, sport=sport)
         except OddsAPIError:
             continue
         remaining = hdr.get("remaining") or remaining
-        offers.extend(parse_event_offers(ej, supported_markets=markets))
+        event_offers = parse_event_offers(ej, supported_markets=markets)
+        if not event_offers:
+            # Queried successfully, but nothing came back for the markets asked -- the most
+            # common real reason is the game has already started and books pulled pre-game
+            # player props (a live pre-game edge no longer exists to compute). This event still
+            # counts toward events_fetched below, which is exactly why "Games priced: N" alone
+            # can look inconsistent with a game missing from the "Filter by game" list (built
+            # from the resulting edge rows, not from this query count) -- surfacing which
+            # specific events landed here makes that directly diagnosable instead of a guess.
+            label = f"{e.get('away_team', '?')} @ {e.get('home_team', '?')}"
+            no_offer_events.append(label)
+        offers.extend(event_offers)
         fetched += 1
     return offers, {"events_total": len(todays), "events_fetched": fetched,
-                    "remaining": remaining}
+                    "remaining": remaining, "no_offer_events": no_offer_events}
 
 
 # ---- Kelly stake sizing ----------------------------------------------------
