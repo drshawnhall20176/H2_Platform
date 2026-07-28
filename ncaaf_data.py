@@ -119,11 +119,21 @@ def refresh_rosters(year: int, api_key: str, out_path: str = ROSTER_PATH) -> str
     roster genuinely isn't populated yet, not that the request itself is malformed (no auth/rate
     error came back, just a valid empty list). A season roster is far more stable year over year
     than in-season stats are, so last year's roster is a reasonable placeholder until the current
-    year's actually populates -- much better than caching nothing."""
+    year's actually populates -- much better than caching nothing.
+
+    Restricted to classification="fbs" -- confirmed via a real run that the unfiltered pull
+    returns EVERY division (FBS/FCS/D2/D3 combined: 30,072 players for one recent season), far
+    more than the FBS-only slate this platform's audience and the odds market itself actually
+    cover (sportsbooks don't offer player props on FCS/D2/D3 games). The exact string value
+    CFBD's raw API expects for this filter ("fbs" lowercase, matching the prose in its own docs
+    -- "Optional filter to only include players from FBS or FCS teams") is inferred from
+    convention, not confirmed against a live response the way the rest of this module's
+    unverified items are -- if this run's printed player count doesn't drop meaningfully from
+    30,072, the filter value needs adjusting, and that'll be visible directly in the log."""
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
     def _fetch(y):
-        players = _get("/roster", {"year": y}, api_key)
+        players = _get("/roster", {"year": y, "classification": "fbs"}, api_key)
         return [{
             "id": p.get("id"), "first_name": p.get("first_name") or p.get("firstName"),
             "last_name": p.get("last_name") or p.get("lastName"),
@@ -198,9 +208,8 @@ def refresh_player_season_stats(year: int, api_key: str, out_path: str = PLAYER_
     out = identity.join(wide, how="left").reset_index()
     out.to_csv(out_path, index=False)
     print(f"[NCAAF] GET /stats/player/season?year={used_year}: {len(out)} players, "
-         f"{len(wide.columns)} stat columns: {sorted(wide.columns)[:20]}"
-         f"{' ...' if len(wide.columns) > 20 else ''}"
-         f"{' (fallback year)' if used_year != year else ''}")
+         f"{len(wide.columns)} stat columns.{' (fallback year)' if used_year != year else ''}")
+    print(f"[NCAAF] ALL stat columns: {sorted(wide.columns)}")
     return out_path
 
 
@@ -217,9 +226,14 @@ def refresh_schedule(year: int, api_key: str, out_path: str = SCHEDULE_PATH) -> 
     schedules are published well in advance (unlike rosters, which depend on players actually
     being enrolled, or stats, which depend on games having been played), so an empty response
     for the current year is a genuine anomaly worth seeing as zero games, not silently masked by
-    substituting last year's schedule."""
+    substituting last year's schedule.
+
+    Restricted to classification="fbs" -- same reason and same unverified-string-value caveat
+    as refresh_rosters' own docstring; confirmed via a real run that the unfiltered pull returns
+    every division (1,638 games across 14 weeks for one recent season -- far more than a
+    ~130-team FBS-only slate would produce)."""
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    games = _get("/games", {"year": year}, api_key)
+    games = _get("/games", {"year": year, "classification": "fbs"}, api_key)
     rows = [{
         "id": g.get("id"), "season": g.get("season"), "week": g.get("week"),
         "start_date": g.get("startDate") or g.get("start_date"),
