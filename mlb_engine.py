@@ -25,6 +25,25 @@ import pytz
  
 BASE = "https://statsapi.mlb.com/api/v1"
 TIMEOUT = 10
+
+# Full team name (as returned by MLB Stats API's own team.name field, e.g. get_schedule's
+# home_name/away_name) -> common 2-3 letter abbreviation. A real, standard, stable 30-team
+# reference table -- used by bet_settlement.py to make its game-label matching tolerant of
+# abbreviated input ("HOU @ DET"), not just the exact full-name form ("Houston Astros @ Detroit
+# Tigers") the schedule itself returns. "Athletics" (not "Oakland Athletics") matches the club's
+# own current official name.
+MLB_TEAM_ABBR = {
+    "Arizona Diamondbacks": "ARI", "Atlanta Braves": "ATL", "Baltimore Orioles": "BAL",
+    "Boston Red Sox": "BOS", "Chicago Cubs": "CHC", "Chicago White Sox": "CWS",
+    "Cincinnati Reds": "CIN", "Cleveland Guardians": "CLE", "Colorado Rockies": "COL",
+    "Detroit Tigers": "DET", "Houston Astros": "HOU", "Kansas City Royals": "KC",
+    "Los Angeles Angels": "LAA", "Los Angeles Dodgers": "LAD", "Miami Marlins": "MIA",
+    "Milwaukee Brewers": "MIL", "Minnesota Twins": "MIN", "New York Mets": "NYM",
+    "New York Yankees": "NYY", "Athletics": "ATH", "Philadelphia Phillies": "PHI",
+    "Pittsburgh Pirates": "PIT", "San Diego Padres": "SD", "San Francisco Giants": "SF",
+    "Seattle Mariners": "SEA", "St. Louis Cardinals": "STL", "Tampa Bay Rays": "TB",
+    "Texas Rangers": "TEX", "Toronto Blue Jays": "TOR", "Washington Nationals": "WSH",
+}
  
 # League FIP constant. It is season-specific (lgERA minus the FIP numerator over lgIP),
 # historically ~3.1-3.2. Override per season if you want exactness; see derive_fip_constant.

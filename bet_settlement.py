@@ -31,6 +31,38 @@ import mlb_engine as E
 import retro as R
 import betlog as B
 
+_ABBR_TO_FULL = {v: k for k, v in E.MLB_TEAM_ABBR.items()}
+
+
+def _normalize_team(token: str) -> str:
+    """A team token (full name OR common abbreviation, any case/whitespace) -> the CANONICAL
+    full name MLB Stats API's own schedule returns. Unrecognized input passes through unchanged
+    (an honest non-match rather than a guess) -- this only widens what already matches, never
+    invents a match that wouldn't otherwise be correct."""
+    t = (token or "").strip()
+    upper = t.upper()
+    if upper in _ABBR_TO_FULL:
+        return _ABBR_TO_FULL[upper]
+    for full_name in E.MLB_TEAM_ABBR:
+        if full_name.lower() == t.lower():
+            return full_name
+    return t
+
+
+def _normalize_game_label(label: str) -> str:
+    """"HOU @ DET", "houston astros @ detroit tigers", and "Houston Astros @ Detroit Tigers" all
+    normalize to the same canonical string, so by_label's lookup works regardless of which form
+    a bet's game field was typed in -- a real, confirmed bug this fixes: the Log a bet form's own
+    placeholder text ("HOU @ DET") taught a format the schedule matcher, before this fix, could
+    never actually match (full names only, exact case), silently routing every manually-typed
+    prop bet to "unresolved" -- not because of a missing player_id, but because the game itself
+    was never found at all."""
+    parts = (label or "").split(" @ ")
+    if len(parts) != 2:
+        return label or ""
+    away, home = parts
+    return f"{_normalize_team(away)} @ {_normalize_team(home)}"
+
 
 def _describe(bet: Dict[str, Any]) -> str:
     """A short, real, human-readable label for one bet, used in the settlement preview — reuses
@@ -75,12 +107,13 @@ def build_settlement_plan(bets: List[Dict[str, Any]]) -> Dict[str, List[Dict[str
             continue
 
         schedule = E.get_schedule(slate_date)
-        by_label = {f"{g.get('away_name')} @ {g.get('home_name')}": g for g in schedule}
+        by_label = {_normalize_game_label(f"{g.get('away_name')} @ {g.get('home_name')}"): g
+                   for g in schedule}
         boxscore_cache: Dict[Any, Dict[int, Dict]] = {}
 
         for b in date_bets:
             game_label = b.get("game")
-            g = by_label.get(game_label)
+            g = by_label.get(_normalize_game_label(game_label))
             if g is None:
                 unresolved.append({"bet_id": b.get("id"), "description": _describe(b),
                                    "reason": f"couldn't match '{game_label}' to a real game on {slate_date}"})

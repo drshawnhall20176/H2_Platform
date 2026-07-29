@@ -196,6 +196,54 @@ def test_apply_settlement_plan_empty_list_does_nothing(monkeypatch):
     assert calls == []
 
 
+# ----------------------------------------------------------------- game-label normalization
+def test_normalize_game_label_matches_abbreviation_to_full_name():
+    # Regression guard for a real, confirmed bug: the Log a bet form's own placeholder text
+    # ("HOU @ DET") teaches a format the schedule matcher, before this fix, could never actually
+    # match (full names only, exact case) -- silently routing every manually-typed prop bet to
+    # "unresolved" with a confusing "no player_id" reason that had nothing to do with the real
+    # cause (the game itself was never found).
+    assert S._normalize_game_label("HOU @ DET") == S._normalize_game_label("Houston Astros @ Detroit Tigers")
+    assert S._normalize_game_label("hou @ det") == S._normalize_game_label("Houston Astros @ Detroit Tigers")
+    assert S._normalize_game_label("houston astros @ detroit tigers") == "Houston Astros @ Detroit Tigers"
+    print("✓ _normalize_game_label treats abbreviated, full-name, and mixed-case forms as identical")
+
+
+def test_normalize_game_label_unrecognized_team_passes_through_honestly():
+    # An unrecognized token should NOT silently match something wrong -- it passes through
+    # unchanged, so a genuinely bad game label still correctly lands in "unresolved" rather than
+    # being incorrectly matched to some other game.
+    assert S._normalize_game_label("XYZ @ DET") == "XYZ @ Detroit Tigers"
+    print("✓ an unrecognized team token passes through unchanged rather than guessing a match")
+
+
+def test_build_settlement_plan_settles_a_bet_logged_with_abbreviated_team_names(monkeypatch):
+    # End-to-end: a bet logged exactly the way the Log a bet form's own placeholder taught
+    # ("HOU @ DET") now correctly matches and settles, instead of landing in unresolved.
+    bet = _bet(player=None, player_id=None, market="Moneyline", side="Detroit Tigers", line=None,
+              game="HOU @ DET")
+    monkeypatch.setattr(E, "get_schedule",
+                        lambda d: [_schedule_game(home="Detroit Tigers", away="Houston Astros",
+                                                  home_score=5, away_score=2)])
+    plan = S.build_settlement_plan([bet])
+    assert len(plan["proposed"]) == 1
+    assert plan["unresolved"] == []
+    assert plan["proposed"][0]["new_result"] == "win"
+    print("✓ build_settlement_plan correctly settles a bet logged with abbreviated team names, "
+         "reproducing and confirming the fix for a real reported issue")
+
+
+def test_build_settlement_plan_case_insensitive_game_label_also_matches(monkeypatch):
+    bet = _bet(player=None, player_id=None, market="Moneyline", side="Detroit Tigers", line=None,
+              game="houston astros @ detroit tigers")
+    monkeypatch.setattr(E, "get_schedule",
+                        lambda d: [_schedule_game(home="Detroit Tigers", away="Houston Astros",
+                                                  home_score=5, away_score=2)])
+    plan = S.build_settlement_plan([bet])
+    assert len(plan["proposed"]) == 1
+    print("✓ build_settlement_plan matches a lowercase-typed game label too")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
