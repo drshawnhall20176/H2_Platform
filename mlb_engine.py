@@ -939,17 +939,27 @@ def get_team_injuries(team_id: int) -> List[Dict[str, Any]]:
     API (statsapi.mlb.com) isn't reachable from this sandbox's network allowlist (confirmed
     directly: a live request from this environment returned 403). Built from MLB Stats API's
     documented structure instead (the roster endpoint's own status.code/status.description
-    fields), not a live-verified response. Worth an early, deliberate manual check once actually
-    deployed — pull up one real team's roster and compare — before trusting this the way every
-    other sport's injury data on this platform has already been trusted.
+    fields), not a live-verified response.
 
-    Fetches rosterType=fullRoster specifically, not the default "active" roster: the active
-    roster by definition EXCLUDES injured players, so a plain roster call would return nothing
-    useful here. fullRoster was the most defensible documented choice for "the broadest set of
-    players, including every IL variant" — but whether it genuinely includes 60-day IL players
-    specifically (who by rule fall OFF the 40-man roster, a materially narrower option this
-    deliberately avoids using) is the one specific detail that stayed unconfirmed during
-    research and is exactly the kind of thing worth checking against a real response early.
+    Fetches rosterType=40Man specifically -- NOT fullRoster, a real, confirmed bug this fixes: a
+    real deployed report showed 130+ entries per team including statuses like "Development
+    List," "Reassigned to Minors," "Not Yet Reported," and "Reserve List (Minors)" -- fullRoster
+    pulls the ENTIRE organization across every affiliated minor-league level, not just the actual
+    40-man roster. 40Man is confirmed as its own distinct, documented MLB Stats API rosterType
+    value (github.com/BillPetti/baseballr's own mlb_rosters reference lists the full valid set:
+    '40Man', 'fullSeason', 'fullRoster', 'nonRosterInvitees', 'active', 'allTime', 'depthChart',
+    'gameday', 'coach') -- exactly the "materially narrower option" this function's own docstring
+    originally flagged as unconfirmed before switching to it. The active roster alone (rosterType
+    =active) by definition EXCLUDES injured players, so that option was never usable here; 40Man
+    is the right middle ground: active roster + real IL variants + players optioned but still
+    protected on the 40-man, without pulling in the rest of the farm system's own separate
+    transaction statuses.
+
+    STILL UNCONFIRMED, worth an early real check regardless of this fix: whether 40Man genuinely
+    includes 60-day IL players specifically (who by rule fall OFF the 40-man roster during that
+    assignment) -- a real, single detail that could mean a 60-day IL player is quietly absent
+    from this report even after this fix. Worth spot-checking a team with a known 60-day IL
+    player once redeployed.
 
     Filters to any roster entry whose status code isn't "A" (Active) — every other status
     (10/15/60-day IL, restricted, bereavement, paternity, etc.) surfaces here using the roster's
@@ -958,7 +968,7 @@ def get_team_injuries(team_id: int) -> List[Dict[str, Any]]:
     a STATUS, not the detailed injury description (body part, expected return) a dedicated
     injury-report source might have; reported honestly empty rather than guessed."""
     try:
-        data = fetch_json(f"{BASE}/teams/{team_id}/roster/fullRoster")
+        data = fetch_json(f"{BASE}/teams/{team_id}/roster/40Man")
     except Exception:
         return []
     if not data or not data.get("roster"):

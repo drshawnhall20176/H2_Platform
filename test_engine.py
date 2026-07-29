@@ -397,6 +397,25 @@ def test_get_team_injuries_empty_on_fetch_failure(monkeypatch):
     assert E.get_team_injuries(147) == []
 
 
+def test_get_team_injuries_requests_40man_not_full_roster(monkeypatch):
+    # Regression guard for a real, confirmed production bug: fullRoster pulls the ENTIRE
+    # organization across every affiliated minor-league level, not just the actual 40-man roster
+    # -- a real deployed report showed 130+ entries per team with statuses like "Development
+    # List," "Reassigned to Minors," and "Not Yet Reported," none of which are real MLB injuries.
+    # 40Man is confirmed as its own distinct, documented MLB Stats API rosterType.
+    captured_urls = []
+    def fake_fetch(url, params=None, retries=2):
+        captured_urls.append(url)
+        return {"roster": []}
+    monkeypatch.setattr(E, "fetch_json", fake_fetch)
+    E.get_team_injuries(147)
+    assert len(captured_urls) == 1
+    assert "40Man" in captured_urls[0]
+    assert "fullRoster" not in captured_urls[0]
+    print("✓ get_team_injuries requests the 40Man roster, not fullRoster, fixing the real "
+         "reported entire-organization bug")
+
+
 def test_get_team_injuries_falls_back_to_code_when_no_description(monkeypatch):
     fake_roster = {"roster": [
         {"person": {"fullName": "Hurt Player"}, "position": {"abbreviation": "OF"},
