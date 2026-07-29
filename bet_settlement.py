@@ -25,7 +25,8 @@ analysis):
     only function in this file that actually calls betlog.update_bet.
 """
 
-from typing import Any, Dict, List, Optional
+import re
+from typing import Any, Dict, List, Optional, Tuple
 
 import mlb_engine as E
 import retro as R
@@ -62,6 +63,33 @@ def _normalize_game_label(label: str) -> str:
         return label or ""
     away, home = parts
     return f"{_normalize_team(away)} @ {_normalize_team(home)}"
+
+
+_GAME_NUMBER_RE = re.compile(r"^(.*?)\s*\(Game (\d+)\)\s*$")
+
+
+def _split_game_number(label: str) -> Tuple[str, Optional[int]]:
+    """Splits a game label into (base_label, game_number) -- game_number is None if no
+    "(Game N)" suffix is present at all, or the real integer N when it is.
+
+    Real, confirmed root cause this exists to fix: mlb_engine.py's own build_pitching_slate
+    labels EVERY game with this suffix UNCONDITIONALLY (f"... (Game {game['gameNumber']})"),
+    and gameNumber defaults to 1 for every MLB Stats API schedule entry, doubleheader or not --
+    so a bet logged from ANY model play (via quick_log) carries "(Game 1)" even when there's no
+    second game that day at all. The old by_label construction here never had that suffix on its
+    own keys, so literally every quick-logged MLB bet failed to auto-match on this alone --
+    confirmed directly from a real settlement log: 6/6 unresolved bets, all with the exact same
+    "couldn't match '... (Game 1)' to a real game" reason, none of them genuine doubleheaders.
+
+    Split FIRST, then normalize team names on the clean base (not the other way around) -- doing
+    it in the other order would leave the suffix stuck onto the home-team token
+    ("Los Angeles Angels (Game 1)"), which would never match a real team name and silently fall
+    through _normalize_team's own unrecognized-token passthrough instead of being handled."""
+    label = label or ""
+    m = _GAME_NUMBER_RE.match(label)
+    if m:
+        return m.group(1).strip(), int(m.group(2))
+    return label.strip(), None
 
 
 def _describe(bet: Dict[str, Any]) -> str:
@@ -107,13 +135,30 @@ def build_settlement_plan(bets: List[Dict[str, Any]]) -> Dict[str, List[Dict[str
             continue
 
         schedule = E.get_schedule(slate_date)
-        by_label = {_normalize_game_label(f"{g.get('away_name')} @ {g.get('home_name')}"): g
-                   for g in schedule}
+        pairing_counts: Dict[str, int] = {}
+        for g in schedule:
+            pairing = _normalize_game_label(f"{g.get('away_name')} @ {g.get('home_name')}")
+            pairing_counts[pairing] = pairing_counts.get(pairing, 0) + 1
+
+        by_label: Dict[str, Dict] = {}
+        for g in schedule:
+            pairing = _normalize_game_label(f"{g.get('away_name')} @ {g.get('home_name')}")
+            game_num = g.get("gameNumber", 1)
+            by_label[f"{pairing} (Game {game_num})"] = g
+            # Unsuffixed key too, but ONLY when this pairing is unambiguous (exactly one game
+            # today) -- so a bet logged without any "(Game N)" suffix still matches the common
+            # case (a normal single game), without silently picking one leg of a real
+            # doubleheader over the other when a bet's label doesn't say which.
+            if pairing_counts[pairing] == 1:
+                by_label[pairing] = g
         boxscore_cache: Dict[Any, Dict[int, Dict]] = {}
 
         for b in date_bets:
             game_label = b.get("game")
-            g = by_label.get(_normalize_game_label(game_label))
+            base, game_num = _split_game_number(game_label or "")
+            normalized_base = _normalize_game_label(base)
+            lookup_key = f"{normalized_base} (Game {game_num})" if game_num is not None else normalized_base
+            g = by_label.get(lookup_key)
             if g is None:
                 unresolved.append({"bet_id": b.get("id"), "description": _describe(b),
                                    "reason": f"couldn't match '{game_label}' to a real game on {slate_date}"})

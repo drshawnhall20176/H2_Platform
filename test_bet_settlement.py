@@ -12,9 +12,10 @@ import bet_settlement as S
 
 
 def _schedule_game(gamePk=999, home="New York Yankees", away="Boston Red Sox",
-                   status="Final", home_score=5, away_score=3):
+                   status="Final", home_score=5, away_score=3, game_number=1):
     return {"gamePk": gamePk, "status": status, "home_name": home, "away_name": away,
-           "home_score": home_score, "away_score": away_score, "home_id": 147, "away_id": 111}
+           "home_score": home_score, "away_score": away_score, "home_id": 147, "away_id": 111,
+           "gameNumber": game_number}
 
 
 def _boxscore(home_players=None, away_players=None):
@@ -242,6 +243,78 @@ def test_build_settlement_plan_case_insensitive_game_label_also_matches(monkeypa
     plan = S.build_settlement_plan([bet])
     assert len(plan["proposed"]) == 1
     print("✓ build_settlement_plan matches a lowercase-typed game label too")
+
+
+# --------------------------------------------------------- (Game N) suffix (the real root cause)
+def test_split_game_number_extracts_the_suffix():
+    assert S._split_game_number("Houston Astros @ Detroit Tigers (Game 1)") == \
+          ("Houston Astros @ Detroit Tigers", 1)
+    assert S._split_game_number("Atlanta Braves @ New York Mets (Game 2)") == \
+          ("Atlanta Braves @ New York Mets", 2)
+    assert S._split_game_number("Houston Astros @ Detroit Tigers") == \
+          ("Houston Astros @ Detroit Tigers", None)
+    print("✓ _split_game_number correctly extracts a real suffix and returns None when there isn't one")
+
+
+def test_build_settlement_plan_resolves_a_normal_game_despite_the_unconditional_game_1_suffix(monkeypatch):
+    # Regression guard for a real, confirmed production bug, reproduced from an actual settlement
+    # log: mlb_engine.py's own build_pitching_slate labels EVERY game "(Game 1)" unconditionally
+    # (gameNumber defaults to 1 for every schedule entry, doubleheader or not), so a bet logged
+    # from any model play carries that suffix even for a completely normal single game. Before
+    # this fix, by_label's own keys never had the suffix, so this failed 6/6 times in the real
+    # log this test reproduces -- not an edge case, the common case for every quick-logged bet.
+    bet = _bet(player=None, player_id=None, market="Moneyline", side="Houston Astros", line=None,
+              game="Houston Astros @ Los Angeles Angels (Game 1)")
+    monkeypatch.setattr(E, "get_schedule",
+                        lambda d: [_schedule_game(home="Los Angeles Angels", away="Houston Astros",
+                                                  home_score=4, away_score=6, game_number=1)])
+    plan = S.build_settlement_plan([bet])
+    assert len(plan["proposed"]) == 1 and plan["unresolved"] == []
+    assert plan["proposed"][0]["new_result"] == "win"
+    print("✓ build_settlement_plan resolves a normal single game despite its bet's unconditional "
+         "'(Game 1)' suffix, reproducing and confirming the fix for the real reported bug")
+
+
+def test_build_settlement_plan_real_doubleheader_legs_settle_to_their_own_distinct_results(monkeypatch):
+    # The case the fix must NOT break: a genuine doubleheader, where the two legs have real,
+    # DIFFERENT results. Silently stripping the suffix and matching by team pairing alone (a
+    # simpler but wrong fix) would risk grading both legs against the same one game.
+    schedule = [
+        _schedule_game(gamePk=1001, home="New York Mets", away="Atlanta Braves",
+                       home_score=2, away_score=5, game_number=1),   # Braves win game 1
+        _schedule_game(gamePk=1002, home="New York Mets", away="Atlanta Braves",
+                       home_score=7, away_score=1, game_number=2),   # Braves lose game 2
+    ]
+    bet_g1 = _bet(id=1, player=None, player_id=None, market="Moneyline", side="Atlanta Braves",
+                 line=None, game="Atlanta Braves @ New York Mets (Game 1)")
+    bet_g2 = _bet(id=2, player=None, player_id=None, market="Moneyline", side="Atlanta Braves",
+                 line=None, game="Atlanta Braves @ New York Mets (Game 2)")
+    monkeypatch.setattr(E, "get_schedule", lambda d: schedule)
+    plan = S.build_settlement_plan([bet_g1, bet_g2])
+    g1 = next(p for p in plan["proposed"] if p["bet_id"] == 1)
+    g2 = next(p for p in plan["proposed"] if p["bet_id"] == 2)
+    assert g1["new_result"] == "win" and g2["new_result"] == "loss"
+    print("✓ real doubleheader legs each settle to their own correct, distinct result")
+
+
+def test_build_settlement_plan_ambiguous_suffixless_bet_on_a_real_doubleheader_stays_unresolved(monkeypatch):
+    # A bet logged WITHOUT a "(Game N)" suffix, for a team pairing that genuinely has two games
+    # that day, is truly ambiguous -- must stay unresolved for manual entry, never silently
+    # guess which leg (and therefore which real result) the person meant.
+    schedule = [
+        _schedule_game(gamePk=1001, home="New York Mets", away="Atlanta Braves",
+                       home_score=2, away_score=5, game_number=1),
+        _schedule_game(gamePk=1002, home="New York Mets", away="Atlanta Braves",
+                       home_score=7, away_score=1, game_number=2),
+    ]
+    bet = _bet(player=None, player_id=None, market="Moneyline", side="Atlanta Braves",
+              line=None, game="Atlanta Braves @ New York Mets")
+    monkeypatch.setattr(E, "get_schedule", lambda d: schedule)
+    plan = S.build_settlement_plan([bet])
+    assert plan["proposed"] == []
+    assert len(plan["unresolved"]) == 1
+    print("✓ a suffix-less bet for a genuine doubleheader correctly stays unresolved rather than "
+         "guessing between two different real games")
 
 
 if __name__ == "__main__":
