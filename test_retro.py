@@ -80,6 +80,18 @@ def test_settle_bet_result_pitcher_hits_allowed():
          "the real reported Cal Quantrill bet")
 
 
+def test_settle_bet_result_pitcher_earned_runs():
+    # Regression guard for the SECOND real instance of this exact bug class: 4 real "Pitcher
+    # Earned Runs" bets stuck as "game is Final but couldn't determine a real result," for the
+    # identical reason -- no MARKET_STAT entry, AND p_er wasn't computed by parse_boxscore_
+    # results at all, same as p_h before it.
+    assert R.settle_bet_result("Pitcher Earned Runs", "Over", 2.5, {"p_er": 4}) == "win"
+    assert R.settle_bet_result("Pitcher Earned Runs", "Over", 1.5, {"p_er": 1}) == "loss"
+    assert R.settle_bet_result("Pitcher Earned Runs", "Under", 1.5, {"p_er": 1}) == "win"
+    print("✓ Pitcher Earned Runs now grades correctly, reproducing and confirming the fix for "
+         "the real reported Littell/Jones/Gusto bets")
+
+
 # ----------------------------------------------------------------- settle_moneyline_result
 def test_settle_moneyline_result_win_and_loss():
     assert R.settle_moneyline_result("New York Yankees", "New York Yankees", "Boston Red Sox", 5, 3) == "win"

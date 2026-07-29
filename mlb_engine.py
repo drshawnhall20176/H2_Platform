@@ -788,7 +788,7 @@ def _ip_to_outs(ip) -> int:
 def parse_boxscore_results(box: Dict) -> Dict[int, Dict]:
     """Per-player actuals from one boxscore, keyed by player id.
 
-    Batting: hr, hits, tb, so, hrr (Hits+Runs+RBIs combined). Pitching: p_k, p_outs, p_bb, p_h.
+    Batting: hr, hits, tb, so, hrr (Hits+Runs+RBIs combined). Pitching: p_k, p_outs, p_bb, p_h, p_er.
     (A player may have both.)
 
     Promoted from a module-private helper (_parse_boxscore_results) to this real, public name
@@ -835,7 +835,14 @@ def parse_boxscore_results(box: Dict) -> Dict[int, Dict]:
                            # field already confirmed working on this exact pitching-stat object
                            # in get_live_pitching_line's own live read, just applied here to a
                            # completed/Final boxscore instead of an in-progress one.
-                           p_h=int(pit.get("hits", 0) or 0))
+                           p_h=int(pit.get("hits", 0) or 0),
+                           # p_er: pitcher earned runs -- the same real, missing piece, confirmed
+                           # directly from a live settlement log: 4 real "Pitcher Earned Runs"
+                           # bets stuck as "game is Final but couldn't determine a real result,"
+                           # for the identical reason p_h was missing before it. Same standard
+                           # "earnedRuns" field already confirmed working in get_live_pitching_
+                           # line's own live read, just applied here to a completed boxscore.
+                           p_er=int(pit.get("earnedRuns", 0) or 0))
     return out
  
  

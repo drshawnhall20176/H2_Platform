@@ -1806,13 +1806,29 @@ def test_parse_boxscore_results_computes_pitching_and_batting_stats_including_p_
         "stats": {"batting": {"hits": 2, "doubles": 1, "triples": 0, "homeRuns": 1,
                               "runs": 2, "rbi": 3, "strikeOuts": 1}}}}}}}
     results = E.parse_boxscore_results(box)
-    assert results[222] == {"name": "Cal Quantrill", "p_k": 3, "p_bb": 1, "p_outs": 17, "p_h": 6}
+    assert results[222] == {"name": "Cal Quantrill", "p_k": 3, "p_bb": 1, "p_outs": 17,
+                            "p_h": 6, "p_er": 0}
     slugger = results[333]
     assert slugger["hr"] == 1 and slugger["hits"] == 2 and slugger["so"] == 1
     assert slugger["tb"] == 2 * 1 + 4 * 1   # 0 singles (2 hits = 1 double + 1 HR) + double(x2) + HR(x4) = 6
     assert slugger["hrr"] == 2 + 2 + 3          # hits + runs + rbi
     print("✓ parse_boxscore_results correctly computes both pitching (incl. p_h) and batting "
          "stats from a real boxscore shape")
+
+
+def test_parse_boxscore_results_computes_p_er_pitcher_earned_runs():
+    # Regression guard for the SECOND real reported instance of this exact bug class: "Pitcher
+    # Earned Runs" bets stuck unresolved for a completed game because p_er, like p_h before it,
+    # simply wasn't being computed here at all. Uses Zack Littell's own real line from the
+    # settlement log this was reported from.
+    box = {"teams": {"away": {"players": {"ID444": {
+        "person": {"id": 444, "fullName": "Zack Littell"},
+        "stats": {"pitching": {"strikeOuts": 5, "baseOnBalls": 2, "inningsPitched": "5.0",
+                               "hits": 6, "earnedRuns": 4}}}}}}}
+    results = E.parse_boxscore_results(box)
+    assert results[444]["p_er"] == 4
+    print("✓ parse_boxscore_results correctly computes p_er (pitcher earned runs), reproducing "
+         "and confirming the fix for the real reported Littell/Jones/Gusto bets")
 
 
 def test_parse_boxscore_results_player_with_no_stats_excluded_from_pitching_and_batting():
