@@ -167,6 +167,61 @@ def test_load_generic_best_bets_board_full_pipeline_runs():
     print("✓ load_generic_best_bets_board runs build_slate -> build_best_bets end to end for a generic sport")
 
 
+def test_load_generic_best_bets_board_fetches_real_lines_for_non_nfl_sports_too():
+    # Regression guard for a real, live-reported bug: a real NCAAF Best Bets board showed every
+    # single play using the exact hardcoded placeholder line (219.5/49.5/54.5/4.5, matching
+    # ncaaf_projections._MARKET_SPEC's own defaults exactly) -- because the real-lines fetch was
+    # gated to `sport_key == "NFL"` specifically, so it was never even ATTEMPTED for anything
+    # else. Not a fetch failure; a fetch that never ran. This confirms the fix: the fetch now
+    # runs for a non-NFL sport too, using that sport's OWN markets/odds_sport_key/preferred-book
+    # session-state key, not NFL's.
+    import odds_api as O
+
+    class _FakeEngine:
+        @staticmethod
+        def build_slate(date_str):
+            return (["fake_row"], [{"label": "Away @ Home"}])
+
+    class _FakeProjections:
+        @staticmethod
+        def build_best_bets(rows, real_lines=None):
+            # The actual proof: real_lines must be the object our mocked fetch produced, not
+            # None (the old, NFL-only-gated behavior for every other sport).
+            assert real_lines == {"sentinel": "real-line-was-passed-through"}
+            return []
+
+    class _FakeSport:
+        has_projections = True
+        markets = ["player_points"]
+        odds_sport_key = "basketball_wnba"
+        engine = _FakeEngine()
+        projections = _FakeProjections()
+
+    calls = {}
+
+    def fake_fetch_slate_props(date_str, api_key, markets, sport):
+        calls["fetch_slate_props"] = (date_str, api_key, markets, sport)
+        return (["fake_offer"], {})
+
+    def fake_market_lines_for_slate(offers, preferred_book):
+        calls["market_lines_for_slate"] = (offers, preferred_book)
+        return {"sentinel": "real-line-was-passed-through"}
+
+    with patch.object(BBD.sports, "get", lambda sport_key: _FakeSport()), \
+        patch.object(BBD, "get_odds_api_key", lambda: "FAKE_KEY"), \
+        patch.object(O, "fetch_slate_props", side_effect=fake_fetch_slate_props), \
+        patch.object(O, "market_lines_for_slate", side_effect=fake_market_lines_for_slate), \
+        patch.object(O, "books_in_offers", return_value=[]):
+        BBD.load_generic_best_bets_board("WNBA", "2026-07-28")
+
+    assert "fetch_slate_props" in calls, (
+        "fetch_slate_props was never called for a non-NFL sport -- the NFL-only gate is still there"
+    )
+    assert calls["fetch_slate_props"] == ("2026-07-28", "FAKE_KEY", ["player_points"], "basketball_wnba")
+    print("✓ load_generic_best_bets_board now fetches real sportsbook lines for a non-NFL sport, "
+         "using that sport's own markets/odds_sport_key -- the exact fix for a real reported bug")
+
+
 def test_load_generic_best_bets_board_returns_empty_for_outcome_based_sports():
     # UFC-style sports (has_projections=False) should return empty gracefully, not error --
     # this is the path that lets the calling pages show their own dedicated messaging instead.

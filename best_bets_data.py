@@ -426,10 +426,17 @@ def load_generic_best_bets_board(sport_key: str, date_str: str) -> tuple:
     third page (Graded Picks) needed its own copy too, rather than after a real bug forces it —
     unlike the MLB fix, which came after a real, reported production issue.
 
-    Real sportsbook lines added for NFL, matching the MLB pipeline's own real-lines wiring:
-    one batch fetch of the sport's supported markets, real_lines passed to build_best_bets.
-    WNBA and other non-NFL sports still use the placeholder default (no odds fetch) until their
-    own market keys are confirmed and tested the same way.
+    Real sportsbook lines fetched generically for every sport with a projections module, not
+    just NFL -- this used to be NFL-only ("WNBA and other non-NFL sports still use the
+    placeholder default... until their own market keys are confirmed and tested the same way"),
+    a deliberate deferral at the time. That confirmation has since happened: sport.markets and
+    sport.odds_sport_key are correctly populated for every live sport (WNBA/NBA/NCAAMB/NFL/
+    NCAAF), so the fetch is generic now -- same one batch call per sport, real_lines passed to
+    build_best_bets, no per-sport special-casing needed. A real user report is what surfaced the
+    gap directly: NCAAF's Best Bets board showed every single play using the exact same
+    hardcoded placeholder line (219.5/49.5/54.5/4.5, matching _MARKET_SPEC's own defaults
+    exactly), because the fetch was never even attempted for anything but NFL -- not a fetch
+    failure, a fetch that never ran.
 
     Returns (plays, meta)."""
     sport = sports.get(sport_key)
@@ -444,13 +451,16 @@ def load_generic_best_bets_board(sport_key: str, date_str: str) -> tuple:
     real_lines = None
     available_books: List[str] = list(O.US_BOOKS.keys())
     api_key = get_odds_api_key()
-    if api_key and sport_key == "NFL":
+    if api_key and sport.markets:
         try:
+            # Per-sport key, not a hardcoded "_preferred_book_nfl" -- that string was a real,
+            # latent bug of its own: harmless only because this whole block used to be gated to
+            # NFL alone, so nothing else ever reached it to expose the mismatch.
             preferred_book = st.session_state.get(
-                f"_preferred_book_nfl", O.DEFAULT_BOOK)
+                f"_preferred_book_{sport_key.lower()}", O.DEFAULT_BOOK)
             offers, _ = O.fetch_slate_props(
-                date_str, api_key, list(O.NFL_SUPPORTED_MARKETS),
-                sport=O.NFL_SPORT)
+                date_str, api_key, list(sport.markets),
+                sport=sport.odds_sport_key)
             real_lines = O.market_lines_for_slate(offers, preferred_book=preferred_book)
             live = O.books_in_offers(offers)
             if live:
