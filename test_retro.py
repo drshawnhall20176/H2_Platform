@@ -67,6 +67,19 @@ def test_settle_bet_result_hand_verified_full_vocabulary():
     print("✓ settle_bet_result's full real vocabulary (win/loss/push/void) hand-verified in one pass")
 
 
+def test_settle_bet_result_pitcher_hits_allowed():
+    # Regression guard for a real reported bug: "Pitcher Hits Allowed" bets were stuck showing
+    # "game is Final but couldn't determine a real result" even for a genuinely completed game --
+    # MARKET_STAT had no entry for this market AND the underlying p_h stat wasn't even being
+    # computed by parse_boxscore_results at all. Both pieces needed fixing together; this
+    # confirms the mapping side now resolves correctly in both directions.
+    assert R.settle_bet_result("Pitcher Hits Allowed", "Over", 4.5, {"p_h": 6}) == "win"
+    assert R.settle_bet_result("Pitcher Hits Allowed", "Over", 4.5, {"p_h": 3}) == "loss"
+    assert R.settle_bet_result("Pitcher Hits Allowed", "Under", 4.5, {"p_h": 3}) == "win"
+    print("✓ Pitcher Hits Allowed now grades correctly, reproducing and confirming the fix for "
+         "the real reported Cal Quantrill bet")
+
+
 # ----------------------------------------------------------------- settle_moneyline_result
 def test_settle_moneyline_result_win_and_loss():
     assert R.settle_moneyline_result("New York Yankees", "New York Yankees", "Boston Red Sox", 5, 3) == "win"

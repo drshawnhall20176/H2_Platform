@@ -1792,6 +1792,38 @@ def test_hook_risk_flag_no_read_with_too_few_starts():
          "season data or missing pitch-count fields")
 
 
+def test_parse_boxscore_results_computes_pitching_and_batting_stats_including_p_h():
+    # No test coverage existed for this function at all before now. p_h (pitcher hits allowed)
+    # is the real fix for a reported bug: "Pitcher Hits Allowed" bets stayed stuck as
+    # unresolved even for a completed game, because this stat simply wasn't being computed here
+    # at all -- MARKET_STAT having an entry for it wouldn't have been enough on its own.
+    box = {"teams": {"away": {"players": {"ID222": {
+        "person": {"id": 222, "fullName": "Cal Quantrill"},
+        "stats": {"pitching": {"strikeOuts": 3, "baseOnBalls": 1, "inningsPitched": "5.2",
+                               "hits": 6}}}}},
+          "home": {"players": {"ID333": {
+        "person": {"id": 333, "fullName": "Slugger"},
+        "stats": {"batting": {"hits": 2, "doubles": 1, "triples": 0, "homeRuns": 1,
+                              "runs": 2, "rbi": 3, "strikeOuts": 1}}}}}}}
+    results = E.parse_boxscore_results(box)
+    assert results[222] == {"name": "Cal Quantrill", "p_k": 3, "p_bb": 1, "p_outs": 17, "p_h": 6}
+    slugger = results[333]
+    assert slugger["hr"] == 1 and slugger["hits"] == 2 and slugger["so"] == 1
+    assert slugger["tb"] == 2 * 1 + 4 * 1   # 0 singles (2 hits = 1 double + 1 HR) + double(x2) + HR(x4) = 6
+    assert slugger["hrr"] == 2 + 2 + 3          # hits + runs + rbi
+    print("✓ parse_boxscore_results correctly computes both pitching (incl. p_h) and batting "
+         "stats from a real boxscore shape")
+
+
+def test_parse_boxscore_results_player_with_no_stats_excluded_from_pitching_and_batting():
+    box = {"teams": {"away": {"players": {"ID1": {
+        "person": {"id": 1, "fullName": "Bench Player"}, "stats": {}}}}, "home": {"players": {}}}}
+    results = E.parse_boxscore_results(box)
+    assert results[1] == {"name": "Bench Player"}   # present, but no batting/pitching keys at all
+    print("✓ a player with no batting or pitching stats gets an entry with just their name, "
+         "not fabricated zero stats")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

@@ -41,7 +41,7 @@ def trading_dates_ending_yesterday(n_days: int, as_of: Optional[str] = None) -> 
 MARKET_STAT = {
     "Batter HR": "hr", "Batter Total Bases": "tb", "Batter Total Hits": "hits",
     "Batter Strikeouts": "so", "Pitcher Strikeouts": "p_k", "Pitcher Outs": "p_outs",
-    "Pitcher Walks": "p_bb",
+    "Pitcher Walks": "p_bb", "Pitcher Hits Allowed": "p_h",
     # Hits+Runs+RBIs (H-R-R) -- combined-stat market, graded against mlb_engine.
     # get_player_results()'s own "hrr" field (real hits+runs+rbi from that night's boxscore),
     # the same 1.5-line Over/Under every other market here grades against via grade_play.

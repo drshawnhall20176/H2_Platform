@@ -788,7 +788,7 @@ def _ip_to_outs(ip) -> int:
 def parse_boxscore_results(box: Dict) -> Dict[int, Dict]:
     """Per-player actuals from one boxscore, keyed by player id.
 
-    Batting: hr, hits, tb, so, hrr (Hits+Runs+RBIs combined). Pitching: p_k, p_outs, p_bb.
+    Batting: hr, hits, tb, so, hrr (Hits+Runs+RBIs combined). Pitching: p_k, p_outs, p_bb, p_h.
     (A player may have both.)
 
     Promoted from a module-private helper (_parse_boxscore_results) to this real, public name
@@ -829,7 +829,13 @@ def parse_boxscore_results(box: Dict) -> Dict[int, Dict]:
             if pit:
                 rec.update(p_k=int(pit.get("strikeOuts", 0) or 0),
                            p_bb=int(pit.get("baseOnBalls", 0) or 0),
-                           p_outs=_ip_to_outs(pit.get("inningsPitched", "0.0")))
+                           p_outs=_ip_to_outs(pit.get("inningsPitched", "0.0")),
+                           # p_h: pitcher hits allowed -- the real, missing piece behind
+                           # "Pitcher Hits Allowed" bets never resolving. Same standard "hits"
+                           # field already confirmed working on this exact pitching-stat object
+                           # in get_live_pitching_line's own live read, just applied here to a
+                           # completed/Final boxscore instead of an in-progress one.
+                           p_h=int(pit.get("hits", 0) or 0))
     return out
  
  
