@@ -26,6 +26,7 @@ from datetime import datetime
 import sports
 import betlog as B
 import bet_settlement
+import mlb_engine as E
 
 _active = sports.active()
 st.title(f"📒 Bet Log — proof layer  ·  {_active.icon} {_active.label}")
@@ -54,12 +55,56 @@ MARKETS = list(_active.market_map.keys()) + ["Other"] if _active.market_map else
  
 # --- Log a bet --------------------------------------------------------------
 with st.expander("➕ Log a bet", expanded=False):
+    # Player search — deliberately OUTSIDE the form below: st.form doesn't rerun reactively per
+    # keystroke or on a search button press until the whole form submits, so a live search can't
+    # live inside one. Added directly to fix a real, confirmed root cause: bets logged without a
+    # real player_id could never be auto-settled (bet_settlement.py has no way to find them in a
+    # boxscore) -- 5 real player-prop bets stuck exactly this way in a live settlement log.
+    if _active.key == "MLB":
+        st.caption("🔍 **Find the player first** (MLB only, for now) — this attaches a real "
+                  "player ID so the bet can auto-settle later. Skip it and type the name "
+                  "manually below if you prefer; auto-settle just won't be able to find that "
+                  "bet without a real ID.")
+        sc1, sc2 = st.columns([3, 1])
+        with sc1:
+            player_query = st.text_input("Search for a player", placeholder="e.g. Wade Meckler",
+                                         key="player_search_query", label_visibility="collapsed")
+        with sc2:
+            search_clicked = st.button("🔍 Search", use_container_width=True)
+        if search_clicked and player_query.strip():
+            st.session_state["player_search_results"] = E.search_players(player_query)
+        results = st.session_state.get("player_search_results") or []
+        if search_clicked and not results:
+            st.caption("No real matches found — you can still type the name manually below "
+                      "(auto-settle won't be able to find it later without a real ID, though).")
+        if results:
+            options = ["— none selected, I'll type the name manually —"] + [
+                f"{r['name']} — {r['team'] or 'no current team'} ({r['position'] or '?'})"
+                f"{'' if r['active'] else '  [inactive]'}"
+                for r in results
+            ]
+            picked_idx = st.selectbox("Real matches — pick one to attach a real player ID",
+                                      range(len(options)), format_func=lambda i: options[i])
+            if picked_idx > 0:
+                chosen = results[picked_idx - 1]
+                st.session_state["selected_player_id"] = chosen["id"]
+                st.session_state["selected_player_name"] = chosen["name"]
+                st.success(f"✅ Attached: {chosen['name']} (ID {chosen['id']}) — this bet will "
+                          f"be auto-settleable once the game is Final.")
+            else:
+                st.session_state["selected_player_id"] = None
+
     with st.form("log_bet", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
         with c1:
             d = st.date_input("Slate date", datetime.now())
             game = st.text_input("Game", placeholder="HOU @ DET")
-            player = st.text_input("Player", placeholder="Jose Altuve")
+            _prefill_name = st.session_state.get("selected_player_name", "")
+            player = st.text_input("Player", value=_prefill_name, placeholder="Jose Altuve",
+                                   help="Pre-filled from the search above, if you used it. You "
+                                        "can still edit this — just know editing it away from "
+                                        "the searched name won't change which player_id gets "
+                                        "attached below.")
         with c2:
             market = st.selectbox("Market", MARKETS)
             side = st.selectbox("Side", ["Over", "Under", "Yes"])
@@ -94,12 +139,24 @@ with st.expander("➕ Log a bet", expanded=False):
         notes = st.text_input("Notes", placeholder="optional")
         if st.form_submit_button("Log bet", type="primary"):
             if player and game:
-                B.add_bet(slate_date=d.isoformat(), game=game, player=player, market=market,
-                          side=side, line=line, entry_odds=int(entry_odds), model_prob=model_prob,
-                          stake=stake, book=book, notes=notes, ticket=ticket.strip(),
-                          sport=_active.key)
-                st.success(f"Logged: {player} {market} {side} {line}"
+                _pid = st.session_state.get("selected_player_id")
+                # Only trust the attached player_id if the typed name still matches what was
+                # searched -- if someone selected a player then edited the name field afterward,
+                # attaching the OLD id to a DIFFERENT typed name would be a real, silent
+                # correctness bug (settling the wrong player's bet), worse than no id at all.
+                if _pid is not None and player.strip() != st.session_state.get("selected_player_name", "").strip():
+                    _pid = None
+                B.add_bet(slate_date=d.isoformat(), game=game, player=player, player_id=_pid,
+                          market=market, side=side, line=line, entry_odds=int(entry_odds),
+                          model_prob=model_prob, stake=stake, book=book, notes=notes,
+                          ticket=ticket.strip(), sport=_active.key)
+                id_note = f" (player ID {_pid} attached — will auto-settle)" if _pid else \
+                          " (no player ID attached — will need manual settlement)"
+                st.success(f"Logged: {player} {market} {side} {line}{id_note}"
                            + (f"  ·  ticket “{ticket.strip()}”" if ticket.strip() else ""))
+                st.session_state["selected_player_id"] = None
+                st.session_state["selected_player_name"] = ""
+                st.session_state["player_search_results"] = []
             else:
                 st.warning("Player and game are required.")
  
@@ -178,6 +235,52 @@ if open_bets:
                     st.dataframe(pd.DataFrame(unresolved)[["description", "reason"]]
                                 .rename(columns={"description": "Bet", "reason": "Why"}),
                                 hide_index=True, use_container_width=True)
+
+                    # Retroactive player-ID backfill — the other half of the same real gap the
+                    # Log a bet form's own player search already fixes going forward. Only
+                    # offered for bets whose reason is specifically the missing-player_id one:
+                    # attaching a player_id wouldn't fix a different problem (a game that
+                    # couldn't be matched at all, say), so those aren't listed here.
+                    fixable = [u for u in unresolved if "no player_id" in u.get("reason", "")]
+                    if fixable:
+                        st.markdown("**🔗 Attach a real player ID to one of these**")
+                        fix_options = {f"{u['description']} (bet #{u['bet_id']})": u for u in fixable}
+                        fix_choice = st.selectbox("Which bet?", list(fix_options.keys()),
+                                                  key="backfill_bet_choice")
+                        target = fix_options[fix_choice]
+
+                        bc1, bc2 = st.columns([3, 1])
+                        with bc1:
+                            backfill_query = st.text_input(
+                                "Search for the real player", placeholder="e.g. Wade Meckler",
+                                key="backfill_search_query", label_visibility="collapsed")
+                        with bc2:
+                            backfill_clicked = st.button("🔍 Search", key="backfill_search_button",
+                                                         use_container_width=True)
+                        if backfill_clicked and backfill_query.strip():
+                            st.session_state["backfill_search_results"] = E.search_players(backfill_query)
+                        backfill_results = st.session_state.get("backfill_search_results") or []
+                        if backfill_clicked and not backfill_results:
+                            st.caption("No real matches found — try a different spelling.")
+                        if backfill_results:
+                            backfill_labels = [
+                                f"{r['name']} — {r['team'] or 'no current team'} ({r['position'] or '?'})"
+                                f"{'' if r['active'] else '  [inactive]'}"
+                                for r in backfill_results
+                            ]
+                            backfill_idx = st.selectbox(
+                                "Real matches — pick the right one", range(len(backfill_results)),
+                                format_func=lambda i: backfill_labels[i], key="backfill_pick")
+                            if st.button("✅ Attach this player ID", key="backfill_attach_button",
+                                        type="primary"):
+                                chosen = backfill_results[backfill_idx]
+                                B.update_bet(target["bet_id"], player_id=chosen["id"])
+                                st.session_state.pop("settlement_plan", None)
+                                st.session_state.pop("backfill_search_results", None)
+                                st.success(f"Attached {chosen['name']} (ID {chosen['id']}) to "
+                                          f"bet #{target['bet_id']}. Click 'Check for settleable "
+                                          f"bets' again to see if it now settles.")
+                                st.rerun()
         st.divider()
     else:
         st.caption(f"Auto-settle isn't available for {_active.label} yet — MLB only for now. "
