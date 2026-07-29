@@ -282,11 +282,21 @@ def parse_event_moneyline(event_json: Dict) -> Dict[str, Dict[str, float]]:
             if mk.get("key") != "h2h":
                 continue
             for oc in mk.get("outcomes", []):
-                team = oc.get("name")
-                price = oc.get("price")
-                if team is None or price is None:
+                try:
+                    team = oc.get("name")
+                    price = oc.get("price")
+                    if team is None or price is None:
+                        continue
+                    by_team.setdefault(team, {})[book] = float(price)
+                except Exception as e:  # noqa: BLE001
+                    # A shape surprise on ONE outcome must never take down the whole parse --
+                    # print the real raw entry so the actual live shape is visible in the next
+                    # log, and keep going rather than losing every other real price over one bad
+                    # record. Same posture search_players' own hardening already established
+                    # for exactly this kind of unverified-live-response risk.
+                    print(f"[parse_event_moneyline] skipped one malformed outcome: "
+                         f"{type(e).__name__}: {e} -- raw entry: {oc!r}")
                     continue
-                by_team.setdefault(team, {})[book] = price
     return by_team
 
 
@@ -338,23 +348,37 @@ def real_moneyline_price(moneylines: Dict[str, Dict[str, float]], team_name: str
     right level of tolerance, not a full abbreviation table repeated per sport.
 
     Returns (price, book), or None if this team has no real moneyline offer at all right now."""
-    target = (team_name or "").strip().lower()
-    if not target:
+    try:
+        target = (team_name or "").strip().lower()
+        if not target:
+            return None
+        book_prices = None
+        for team, prices in (moneylines or {}).items():
+            if not isinstance(prices, dict):
+                print(f"[real_moneyline_price] skipped a non-dict price entry for team "
+                     f"{team!r}: {type(prices)} -- {prices!r}")
+                continue
+            if (team or "").strip().lower() == target:
+                book_prices = prices
+                break
+        if not book_prices:
+            return None
+        if preferred_book and preferred_book in book_prices:
+            return float(book_prices[preferred_book]), preferred_book
+        picked = _best_price(book_prices)
+        if picked is None:
+            return None
+        book, price = picked
+        return float(price), book
+    except Exception as e:  # noqa: BLE001
+        # Same posture as search_players' own hardening: a live data-shape surprise here must
+        # degrade to "no real price found" (the same honest fallback this function already has
+        # for a genuine no-match), never crash the page a bet is being logged from. Confirmed
+        # as a real, not hypothetical, risk: a live deploy hit a TypeError inside this exact
+        # code path, past where the original (unguarded) version had no protection at all.
+        print(f"[real_moneyline_price] unexpected error for team={team_name!r}: "
+             f"{type(e).__name__}: {e}")
         return None
-    book_prices = None
-    for team, prices in moneylines.items():
-        if (team or "").strip().lower() == target:
-            book_prices = prices
-            break
-    if not book_prices:
-        return None
-    if preferred_book and preferred_book in book_prices:
-        return float(book_prices[preferred_book]), preferred_book
-    picked = _best_price(book_prices)
-    if picked is None:
-        return None
-    book, price = picked
-    return float(price), book
 
 
 def fetch_slate_spreads(date_str: str, api_key: str, sport: str = SPORT) -> Tuple[Dict[str, float], Dict]:

@@ -112,8 +112,18 @@ def bet_log_fields_from_play(play: Dict, date_str: str, sport_key: str,
             import odds_api as odds_api_module
         team = play.get("Side")
         if team:
-            real_ml = odds_api_module.real_moneyline_price(
-                moneylines, team, preferred_book=preferred_book)
+            try:
+                real_ml = odds_api_module.real_moneyline_price(
+                    moneylines, team, preferred_book=preferred_book)
+            except Exception as e:  # noqa: BLE001
+                # Belt-and-suspenders on top of real_moneyline_price's own internal hardening --
+                # this exact call crashed the whole Game Watch page once in production (a
+                # TypeError past where the original, unguarded version had no protection at
+                # all). A real-price lookup failing must never take down the page a pick is
+                # being logged from; degrade to the Fair-odds fallback instead.
+                print(f"[bet_log_fields_from_play] moneyline lookup failed for team={team!r}: "
+                     f"{type(e).__name__}: {e}")
+                real_ml = None
             if real_ml is not None:
                 real_price, _book = real_ml
                 entry_odds = real_price

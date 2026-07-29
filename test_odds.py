@@ -607,6 +607,42 @@ def test_real_moneyline_price_none_when_team_not_found():
     print("✓ real_moneyline_price returns None (never a guess) when the team has no real offer")
 
 
+def test_real_moneyline_price_survives_malformed_price_values():
+    # Regression guard for a real, confirmed production crash: a live Game Watch deploy hit a
+    # TypeError inside this exact code path, past where the original, unguarded version had no
+    # protection at all. A malformed price value (a non-numeric string, a None that slipped
+    # through, a nested structure instead of a plain number) must degrade to None, never crash
+    # the page a pick is being logged from.
+    moneylines = {"New York Yankees": {"draftkings": "not-a-real-price"}}
+    assert O.real_moneyline_price(moneylines, "New York Yankees") is None
+    print("✓ real_moneyline_price survives a malformed (non-numeric) price value instead of "
+         "raising a TypeError")
+
+
+def test_real_moneyline_price_survives_non_dict_price_entry():
+    # A shape surprise one level up: the per-team value isn't even a dict of book->price at all.
+    moneylines = {"New York Yankees": "not-a-dict-at-all", "Boston Red Sox": {"draftkings": 130}}
+    # The malformed Yankees entry is skipped; the still-valid Red Sox entry keeps working.
+    assert O.real_moneyline_price(moneylines, "New York Yankees") is None
+    assert O.real_moneyline_price(moneylines, "Boston Red Sox") == (130.0, "draftkings")
+    print("✓ real_moneyline_price skips a non-dict per-team entry instead of crashing, and "
+         "still correctly serves every other real entry in the same dict")
+
+
+def test_parse_event_moneyline_skips_a_malformed_outcome():
+    # Same real production risk, one layer earlier: a malformed individual outcome in a live
+    # response must be skipped (with the real raw entry logged for diagnosis), not crash the
+    # whole parse and lose every other real price in the same event.
+    event = {"bookmakers": [{"key": "draftkings", "markets": [{"key": "h2h", "outcomes": [
+        {"name": "New York Yankees", "price": -150},
+        {"name": "Boston Red Sox", "price": "garbage-value"},   # can't convert to float
+    ]}]}]}
+    parsed = O.parse_event_moneyline(event)
+    assert parsed == {"New York Yankees": {"draftkings": -150.0}}   # bad entry skipped, good one kept
+    print("✓ parse_event_moneyline skips a malformed individual outcome, keeping every other "
+         "real price from the same event")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
