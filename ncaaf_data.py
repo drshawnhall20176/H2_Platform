@@ -220,40 +220,51 @@ _SCHEDULE_COLUMNS = ["id", "season", "week", "start_date", "start_time_tbd", "co
                     "home_points", "away_id", "away_team", "away_conference", "away_points"]
 
 
-def refresh_schedule(year: int, api_key: str, out_path: str = SCHEDULE_PATH) -> str:
-    """Full season schedule, ONE call (all weeks; the week= param is left unset on purpose --
-    narrowing per-week would mean one call per week instead of one call total).
+def refresh_schedule(years: List[int], api_key: str, out_path: str = SCHEDULE_PATH) -> str:
+    """Full schedule for every season in `years`, ONE call per year (all weeks; the week= param
+    is left unset on purpose -- narrowing per-week would mean one call per week instead of one
+    call per season).
 
-    No year-fallback here, unlike refresh_rosters/refresh_player_season_stats -- future
-    schedules are published well in advance (unlike rosters, which depend on players actually
-    being enrolled, or stats, which depend on games having been played), so an empty response
-    for the current year is a genuine anomaly worth seeing as zero games, not silently masked by
-    substituting last year's schedule.
+    ACCEPTS MULTIPLE YEARS -- a real, live-confirmed bug, not a hypothetical: refresh_rosters and
+    refresh_player_season_stats both fall back to year-1 when the current season is empty (see
+    their own docstrings), but this function used to pull ONLY the target year's schedule. When a
+    fallback happened, ncaaf_engine._team_games_played_for_stats_season needed the FALLBACK
+    year's own schedule (to count that season's real completed games as the rate denominator),
+    and it simply didn't exist in the cache -- get_schedule(fallback_year) came back empty,
+    every team's games-played resolved to 0, and player_row's own zero-games guard silently
+    dropped every single player from the slate. Confirmed directly: a real refresh_ncaaf.py run
+    showed a real 2026 schedule (99 games that "night") alongside real 2025-fallback stats, and
+    Best Bets showed zero plays for every date tried. The caller (refresh_ncaaf.py) is
+    responsible for figuring out which years are actually needed (the target year, plus
+    whichever year roster/stats actually landed on) and passing all of them here.
 
-    Restricted to classification="fbs" -- same reason and same unverified-string-value caveat
-    as refresh_rosters' own docstring; confirmed via a real run that the unfiltered pull returns
-    every division (1,638 games across 14 weeks for one recent season -- far more than a
-    ~130-team FBS-only slate would produce)."""
+    No year-fallback INSIDE this function, still -- unlike roster/stats, an empty response for a
+    year that was explicitly asked for is a genuine anomaly worth seeing as zero games for that
+    year, not silently substituting a different one; the caller decides which years to ask for,
+    this function just fetches exactly those, faithfully."""
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    games = _get("/games", {"year": year, "classification": "fbs"}, api_key)
-    rows = [{
-        "id": g.get("id"), "season": g.get("season"), "week": g.get("week"),
-        "start_date": g.get("startDate") or g.get("start_date"),
-        "start_time_tbd": g.get("startTimeTBD") if "startTimeTBD" in g else g.get("start_time_tbd"),
-        "completed": g.get("completed"),
-        "neutral_site": g.get("neutralSite") if "neutralSite" in g else g.get("neutral_site"),
-        "venue": g.get("venue"),
-        "home_id": g.get("homeId") or g.get("home_id"), "home_team": g.get("homeTeam") or g.get("home_team"),
-        "home_conference": g.get("homeConference") or g.get("home_conference"),
-        "home_points": g.get("homePoints") if "homePoints" in g else g.get("home_points"),
-        "away_id": g.get("awayId") or g.get("away_id"), "away_team": g.get("awayTeam") or g.get("away_team"),
-        "away_conference": g.get("awayConference") or g.get("away_conference"),
-        "away_points": g.get("awayPoints") if "awayPoints" in g else g.get("away_points"),
-    } for g in games]
-    df = pd.DataFrame(rows, columns=_SCHEDULE_COLUMNS) if rows else pd.DataFrame(columns=_SCHEDULE_COLUMNS)
+    all_rows: List[Dict] = []
+    for year in years:
+        games = _get("/games", {"year": year, "classification": "fbs"}, api_key)
+        all_rows.extend([{
+            "id": g.get("id"), "season": g.get("season"), "week": g.get("week"),
+            "start_date": g.get("startDate") or g.get("start_date"),
+            "start_time_tbd": g.get("startTimeTBD") if "startTimeTBD" in g else g.get("start_time_tbd"),
+            "completed": g.get("completed"),
+            "neutral_site": g.get("neutralSite") if "neutralSite" in g else g.get("neutral_site"),
+            "venue": g.get("venue"),
+            "home_id": g.get("homeId") or g.get("home_id"), "home_team": g.get("homeTeam") or g.get("home_team"),
+            "home_conference": g.get("homeConference") or g.get("home_conference"),
+            "home_points": g.get("homePoints") if "homePoints" in g else g.get("home_points"),
+            "away_id": g.get("awayId") or g.get("away_id"), "away_team": g.get("awayTeam") or g.get("away_team"),
+            "away_conference": g.get("awayConference") or g.get("away_conference"),
+            "away_points": g.get("awayPoints") if "awayPoints" in g else g.get("away_points"),
+        } for g in games])
+        print(f"[NCAAF] GET /games?year={year}: {len(games)} games.")
+    df = pd.DataFrame(all_rows, columns=_SCHEDULE_COLUMNS) if all_rows else pd.DataFrame(columns=_SCHEDULE_COLUMNS)
     df.to_csv(out_path, index=False)
-    print(f"[NCAAF] GET /games?year={year}: {len(df)} games across "
-         f"{df['week'].nunique() if not df.empty else 0} weeks.")
+    print(f"[NCAAF] Schedule cache: {len(df)} games total across {sorted(set(years))} -- "
+         f"{df['week'].nunique() if not df.empty else 0} distinct week numbers.")
     return out_path
 
 

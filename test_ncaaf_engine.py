@@ -193,6 +193,35 @@ def test_build_slate_falls_back_to_name_team_join_when_id_does_not_match():
          "doesn't match")
 
 
+def test_build_slate_produces_real_rows_when_schedule_spans_both_target_and_fallback_years():
+    # End-to-end regression guard for the real bug a live user report surfaced: Best Bets showed
+    # "No plays for this date" and Command Center showed real games but zero model plays. Root
+    # cause: refresh_schedule used to pull only the target year, but stats had fallen back to a
+    # prior year -- _team_games_played_for_stats_season needed that prior year's own schedule to
+    # count its real completed games, and it simply wasn't cached. Reproduces the exact live
+    # state (schedule cache spans BOTH years, matching the fixed refresh_schedule's own new
+    # multi-year behavior) and confirms real rows now come out the other end.
+    schedule_2026 = [{"id": 1, "season": 2026, "week": 1, "start_date": "2026-08-29T19:30:00Z",
+                      "completed": False, "home_team": "Ohio State", "away_team": "Texas",
+                      "home_id": 1, "away_id": 2}]
+    schedule_2025 = _season_schedule(2025, "Ohio State", "Foe", 12, completed=True)
+    roster = [{"id": "p1", "name": "Star QB", "team": "Ohio State", "position": "QB"}]
+    stats = [{"season": 2025, "player_id": "p1", "player": "Star QB", "team": "Ohio State",
+             "passing_YDS": 3600, "passing_ATT": 360}]
+
+    with patch.object(ND, "load_schedule", return_value=schedule_2026 + schedule_2025), \
+        patch.object(ND, "load_rosters", return_value=roster), \
+        patch.object(ND, "load_player_stats", return_value=stats):
+        rows, meta = E.build_slate("2026-08-29")
+
+    assert len(meta) == 1   # the real 2026 game
+    assert len(rows) == 1   # NOT zero -- this is the exact bug being guarded against
+    assert rows[0]["PassYds"] == 300.0
+    assert rows[0]["_team_games_played"] == 12
+    print("✓ build_slate produces real rows when the schedule cache spans both the target and "
+         "fallback years, reproducing and confirming the fix for a real reported bug")
+
+
 def test_player_recent_games_respects_strictly_before_and_n():
     fake_game_rows = [
         {"player_id": "p1", "week": 1, "passing_YDS": 200},

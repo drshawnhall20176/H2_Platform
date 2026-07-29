@@ -108,13 +108,43 @@ def test_refresh_schedule_camel_case():
     with tempfile.TemporaryDirectory() as tmp:
         out = os.path.join(tmp, "sched.csv")
         with patch.object(ND, "_get", return_value=fake):
-            ND.refresh_schedule(2026, "FAKE_KEY", out_path=out)
+            ND.refresh_schedule([2026], "FAKE_KEY", out_path=out)
         rows = ND.load_schedule(out)
     assert len(rows) == 1
     assert rows[0]["home_team"] == "North Carolina" and rows[0]["away_team"] == "TCU"
     assert rows[0]["neutral_site"] is True
     assert rows[0]["week"] == 1
     print("✓ refresh_schedule parses camelCase game fields correctly")
+
+
+def test_refresh_schedule_merges_multiple_years_into_one_cache():
+    # Regression guard for a real, live-confirmed bug: refresh_schedule used to accept only a
+    # single year, but roster/player-stats can fall back to year-1 while the schedule stays on
+    # the target year -- ncaaf_engine._team_games_played_for_stats_season then needs the
+    # FALLBACK year's own schedule too (to count its real completed games), and it simply didn't
+    # exist. Confirmed live: a real refresh_ncaaf.py run showed a real 2026 schedule alongside
+    # 2025-fallback stats, and Best Bets showed zero plays for every date tried. This is the fix:
+    # one call per requested year, merged into a single cache get_schedule(season) can filter.
+    fake_2026 = [{"id": 1, "season": 2026, "week": 1, "home_team": "A", "away_team": "B"}]
+    fake_2025 = [{"id": 2, "season": 2025, "week": 6, "home_team": "C", "away_team": "D"}]
+    calls = []
+
+    def fake_get(path, params, api_key):
+        calls.append(params["year"])
+        return fake_2026 if params["year"] == 2026 else fake_2025
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "sched.csv")
+        with patch.object(ND, "_get", side_effect=fake_get):
+            ND.refresh_schedule([2026, 2025], "FAKE_KEY", out_path=out)
+        rows = ND.load_schedule(out)
+
+    assert calls == [2026, 2025]   # one call per requested year
+    assert len(rows) == 2
+    seasons = {r["season"] for r in rows}
+    assert seasons == {2026, 2025}   # both years present in the merged cache, not just one
+    print("✓ refresh_schedule pulls and merges multiple years into one cache, so "
+         "get_schedule(fallback_year) can find real games instead of coming back empty")
 
 
 def test_resolve_week_finds_upcoming_and_falls_back_to_last_week():
@@ -179,7 +209,7 @@ def test_load_player_stats_and_load_schedule_also_handle_empty_responses():
         sched_out = os.path.join(tmp, "sched.csv")
         with patch.object(ND, "_get", return_value=[]):
             ND.refresh_player_season_stats(2026, "FAKE_KEY", out_path=stats_out)
-            ND.refresh_schedule(2026, "FAKE_KEY", out_path=sched_out)
+            ND.refresh_schedule([2026], "FAKE_KEY", out_path=sched_out)
         assert ND.load_player_stats(stats_out) == []
         assert ND.load_schedule(sched_out) == []
     print("✓ load_player_stats and load_schedule are equally robust to an empty API response")

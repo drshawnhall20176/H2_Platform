@@ -74,10 +74,13 @@ def main() -> int:
         return 1
 
     print(f"\nPulling NCAAF player season stats for {year}...")
+    stats_year = year
     try:
         path = ND.refresh_player_season_stats(year, api_key)
         stats = ND.load_player_stats(path)
         print(f"Cached {len(stats)} players' season stat lines.")
+        if stats and stats[0].get("season") is not None:
+            stats_year = int(stats[0]["season"])
     except Exception as e:  # noqa: BLE001
         tb = traceback.format_exc()
         first_line = str(e).replace("\n", " ")[:300]
@@ -86,14 +89,29 @@ def main() -> int:
         print(tb)
         return 1
 
-    print(f"\nPulling NCAAF schedule for {year}...")
+    # Real bug this fixes, confirmed via a live run: refresh_schedule used to pull only `year`.
+    # When player season stats fall back to year-1 (the block above), ncaaf_engine.
+    # _team_games_played_for_stats_season needs THAT year's own schedule too, to count its real
+    # completed games as the rate denominator -- without it, every team's games-played resolves
+    # to 0 and player_row's own zero-games guard silently drops every player from the slate. See
+    # ncaaf_data.refresh_schedule's own docstring for the full story.
+    needed_years = sorted({year, stats_year})
+    print(f"\nPulling NCAAF schedule for {needed_years}...")
     completed_weeks: list = []
     try:
-        path = ND.refresh_schedule(year, api_key)
+        path = ND.refresh_schedule(needed_years, api_key)
         games = ND.load_schedule(path)
-        print(f"Cached {len(games)} games.")
+        print(f"Cached {len(games)} games total.")
+        # Per-game stats below stay scoped to the TARGET year's own completed weeks only, not
+        # stats_year's -- week numbers collide across seasons (both have a "week 6"), and the
+        # per-game cache doesn't carry a season column yet, so mixing years in there would let
+        # player_recent_games silently blend two different seasons' games together. A real,
+        # separate concern from this fix, not solved here -- the bootstrap upgrade stays on its
+        # honest parametric fallback until the TARGET season has its own completed weeks, even
+        # though season-average projections now work correctly via the fix above.
         completed_weeks = sorted({g["week"] for g in games
-                                  if g.get("completed") and g.get("week") is not None})
+                                  if g.get("season") == year and g.get("completed")
+                                  and g.get("week") is not None})
     except Exception as e:  # noqa: BLE001
         # Non-fatal, same posture refresh_statcast.py already has for its own secondary pulls:
         # roster + player stats are the core dependency for a projections engine; the schedule
