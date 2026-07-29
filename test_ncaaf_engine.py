@@ -193,6 +193,57 @@ def test_build_slate_falls_back_to_name_team_join_when_id_does_not_match():
          "doesn't match")
 
 
+def test_player_recent_games_respects_strictly_before_and_n():
+    fake_game_rows = [
+        {"player_id": "p1", "week": 1, "passing_YDS": 200},
+        {"player_id": "p1", "week": 2, "passing_YDS": 250},
+        {"player_id": "p1", "week": 3, "passing_YDS": 300},
+        {"player_id": "p1", "week": 5, "passing_YDS": 999},   # a future week -- must be excluded
+        {"player_id": "p2", "week": 2, "passing_YDS": 111},   # a different player -- must be excluded
+    ]
+    with patch.object(ND, "load_player_game_stats", return_value=fake_game_rows):
+        recent = E.player_recent_games("p1", before_week=4, n=2)
+    assert len(recent) == 2
+    assert [r["week"] for r in recent] == [3, 2]   # most recent first, only 2 (n=2), week 5 excluded
+    print("✓ player_recent_games returns only this player's games strictly before the given "
+         "week, most recent first, capped at n")
+
+
+def test_player_recent_games_empty_when_no_cache():
+    with patch.object(ND, "load_player_game_stats", return_value=[]):
+        assert E.player_recent_games("p1", before_week=5) == []
+    print("✓ player_recent_games returns [] gracefully when there's no per-game cache yet")
+
+
+def test_get_player_results_translates_cfbd_columns_to_shared_market_stat_keys():
+    # Regression guard for a real bug caught before it shipped: retro.py's shared MARKET_STAT
+    # dict expects "passing_yards"/"rushing_yards"/"receptions"/"receiving_yards" for these exact
+    # display market names (NFL's own key convention, reused since NCAAF shares NFL's display
+    # names) -- NOT CFBD's raw "passing_YDS" etc. Returning results under the raw CFBD keys would
+    # have made every single NCAAF play silently fail to grade even with real data present.
+    schedule = [{"id": 1, "season": 2025, "week": 6, "start_date": "2025-10-11T19:30:00Z",
+                "completed": True, "home_team": "Ohio State", "away_team": "Texas",
+                "home_id": 1, "away_id": 2, "venue": "X", "neutral_site": False}]
+    game_rows = [{"player_id": "p1", "week": 6, "passing_YDS": 312, "receiving_REC": None}]
+
+    with patch.object(ND, "load_schedule", return_value=schedule), \
+        patch.object(ND, "load_player_game_stats", return_value=game_rows):
+        results = E.get_player_results("2025-10-11")
+
+    assert "p1" in results
+    assert results["p1"]["passing_yards"] == 312.0     # translated key, matching retro.MARKET_STAT
+    assert "passing_YDS" not in results["p1"]            # the raw CFBD key must NOT leak through
+    assert "receptions" not in results["p1"]              # None value correctly excluded, not 0.0
+    print("✓ get_player_results translates CFBD's real column names into the shared MARKET_STAT "
+         "vocabulary retro.py's grading actually looks up")
+
+
+def test_get_player_results_empty_for_unresolvable_date():
+    with patch.object(ND, "load_schedule", return_value=[]):
+        assert E.get_player_results("2025-10-11") == {}
+    print("✓ get_player_results returns {} gracefully when no schedule/week can be resolved")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

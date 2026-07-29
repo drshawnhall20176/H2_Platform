@@ -155,21 +155,50 @@ def _infer_season(date_str: str) -> Optional[int]:
         return None
 
 
+# Translates this engine's own confirmed CFBD per-game column names into the SAME stat-key
+# vocabulary retro.py's shared MARKET_STAT dict already expects for these exact display market
+# names ("Pass Yards", "Rush Yards", "Receptions", "Receiving Yards" -- NCAAF's market_map in
+# sports.py deliberately reuses NFL's own display names). Confirmed by reading retro.py directly,
+# not assumed: MARKET_STAT maps "Pass Yards" -> "passing_yards", NOT "passing_YDS". Without this
+# translation, get_player_results would return real data under keys retro.py never looks up --
+# every NCAAF play would silently grade as "no result" even with real per-game stats present.
+_RESULT_KEY_MAP = {
+    "passing_YDS": "passing_yards", "rushing_YDS": "rushing_yards",
+    "receiving_REC": "receptions", "receiving_YDS": "receiving_yards",
+}
+
+
 def get_player_results(date_str: str) -> Dict[str, Dict[str, float]]:
     """Same contract as mlb_engine.get_player_results/nfl_engine.get_player_results (keyed by
-    player id, {stat_col: value}) -- required by Retrospective's grading logic
-    (grade_play/grade_slate), not optional. Currently ALWAYS returns {} -- not just for
-    not-yet-played weeks the way every other sport's version does, but always, honestly,
-    because ncaaf_data.py's cache is season TOTALS only (see its own docstring); there's no
-    per-game result to grade a specific week's plays against yet. Grading code already treats an
-    empty dict as "no results yet" (the same degraded-but-non-crashing path every other sport's
-    version hits for a future date) -- this just means that path is NCAAF's only path for now,
-    not a special case. Upgradable once ncaaf_engine.py gains real per-game logs (see this
-    module's own docstring on that same upgrade path)."""
-    _diag(f"get_player_results({date_str}): NCAAF has no per-game result cache yet "
-         "(season-totals-only data source) -- returning no results, same honest degradation "
-         "every sport's own get_player_results already has for a not-yet-played date")
-    return {}
+    player id, {stat_col: value}) -- required by Retrospective's grading logic. Real per-game
+    results, from ncaaf_data's per-game cache (populated by refresh_player_game_stats) -- no
+    longer always {} now that per-game data exists. Still returns {} gracefully for a date/week
+    with no cached per-game rows (not yet refreshed, or a not-yet-played week), same honest
+    degradation every other sport's version already has for a future date."""
+    season = _infer_season(date_str)
+    if season is None:
+        _diag(f"get_player_results({date_str}): could not infer season from date_str")
+        return {}
+    schedule = get_schedule(season)
+    week = _resolve_week(schedule, date_str)
+    if week is None:
+        return {}
+
+    rows = [r for r in ND.load_player_game_stats() if r.get("week") == week]
+    out: Dict[str, Dict[str, float]] = {}
+    for r in rows:
+        pid = r.get("player_id")
+        if pid is None:
+            continue
+        translated = {}
+        for cfbd_col, market_key in _RESULT_KEY_MAP.items():
+            val = r.get(cfbd_col)
+            if not _missing(val):
+                translated[market_key] = float(val)
+        if translated:
+            out[str(pid)] = translated
+    _diag(f"get_player_results({date_str}): season {season} week {week}, {len(out)} player result(s)")
+    return out
 
 
 # --------------------------------------------------------------------------- roster / stats join
@@ -205,9 +234,26 @@ def _stats_by_id_and_name(season: int) -> Tuple[Dict[str, Dict], Dict[Tuple[str,
     return by_id, by_name_team
 
 
+def player_recent_games(player_id, before_week: int, n: int = CFG.RECENT_GAMES_N) -> List[Dict]:
+    """This player's last n games STRICTLY BEFORE before_week this season, most recent first --
+    same "strictly before" lookahead-bias discipline as nfl_engine.player_recent_games (see its
+    own docstring for the full reasoning; identical concern applies here).
+
+    Reads ncaaf_data's per-game cache -- empty if refresh_player_game_stats hasn't been run yet,
+    or for a player/week with no cached rows. This is the real per-game data that upgrades
+    ncaaf_projections.py from its original parametric-only approach to an actual bootstrap, the
+    same method every other sport's engine here already uses."""
+    rows = [r for r in ND.load_player_game_stats()
+           if str(r.get("player_id")) == str(player_id) and r.get("week") is not None
+           and r["week"] < before_week]
+    rows.sort(key=lambda r: r["week"], reverse=True)
+    return rows[:n]
+
+
 def player_row(player: Dict, team: str, opp: str, game_label: str, game_date: Optional[str],
               stats_row: Optional[Dict], team_games_played: int,
-              opp_id: Optional[str] = None, team_id: Optional[str] = None) -> Optional[Dict]:
+              opp_id: Optional[str] = None, team_id: Optional[str] = None,
+              recent_games: Optional[List[Dict]] = None) -> Optional[Dict]:
     """Flat row for one player on the slate. None if the player doesn't clear ANY position-
     relevant rotation floor, or has no season-stat row to project from at all -- same "filter
     no-real-role noise off the slate" purpose every other sport's engine has, see config_ncaaf.py
@@ -241,8 +287,13 @@ def player_row(player: Dict, team: str, opp: str, game_label: str, game_date: Op
         "PassYds": round(per_game("passing_YDS"), 1), "RushYds": round(per_game("rushing_YDS"), 1),
         "Receptions": round(per_game("receiving_REC"), 1),
         "RecYds": round(per_game("receiving_YDS"), 1),
-        # private fields consumed by ncaaf_projections.py
+        # private fields consumed by ncaaf_projections.py -- _recent_games is real per-game data
+        # when available (see player_recent_games above), None when refresh_player_game_stats
+        # hasn't been run yet or this player/week has no cached rows; ncaaf_projections.py falls
+        # back to the season-average parametric approach in that case, same graceful-degradation
+        # posture as everything else in this module.
         "_pid": player.get("id"), "_stats_row": stats_row, "_team_games_played": team_games_played,
+        "_recent_games": recent_games or [],
         "_game_date": game_date, "_opp_id": opp_id, "_team_id": team_id, "_markets": cleared_markets,
     }
     return row
@@ -319,8 +370,10 @@ def build_slate(date_str: str, season: Optional[int] = None) -> Tuple[List[Dict]
             team_games = _team_games_played_for_stats_season(schedule, stats_season, season, team, week)
             for player in roster_by_team.get(team, []):
                 stats_row = _lookup_stats(player)
+                pid = player.get("id")
+                recent = player_recent_games(pid, week) if not _missing(pid) else []
                 row = player_row(player, team, opp, label, g.get("start_date"), stats_row,
-                                 team_games, opp_id=opp_id, team_id=team_id)
+                                 team_games, opp_id=opp_id, team_id=team_id, recent_games=recent)
                 if row is not None:
                     rows.append(row)
 

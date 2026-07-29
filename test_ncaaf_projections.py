@@ -7,22 +7,83 @@ import numpy as np
 import ncaaf_projections as P
 
 
-def test_simulate_player_stat_centers_on_the_given_rate():
+def test_simulate_player_stat_parametric_centers_on_the_given_rate():
     rng = np.random.default_rng(7)
-    sim = P.simulate_player_stat(rate=300.0, sims=50000, rng=rng)
+    sim = P.simulate_player_stat_parametric(rate=300.0, sims=50000, rng=rng)
     assert sim.size == 50000
     assert abs(sim.mean() - 300.0) < 5.0   # a parametric draw should land close to its own mean
     assert sim.min() >= 0                  # clipped non-negative
-    print("✓ simulate_player_stat's samples center on the given rate and never go negative")
+    print("✓ simulate_player_stat_parametric's samples center on the given rate and never go negative")
 
 
-def test_simulate_player_stat_empty_for_non_positive_rate():
+def test_simulate_player_stat_parametric_empty_for_non_positive_rate():
     rng = np.random.default_rng(1)
-    assert P.simulate_player_stat(0, 1000, rng).size == 0
-    assert P.simulate_player_stat(None, 1000, rng).size == 0
-    assert P.simulate_player_stat(-5, 1000, rng).size == 0
-    print("✓ simulate_player_stat returns empty for a non-positive or missing rate, not a "
-         "nonsensical distribution around zero")
+    assert P.simulate_player_stat_parametric(0, 1000, rng).size == 0
+    assert P.simulate_player_stat_parametric(None, 1000, rng).size == 0
+    assert P.simulate_player_stat_parametric(-5, 1000, rng).size == 0
+    print("✓ simulate_player_stat_parametric returns empty for a non-positive or missing rate, "
+         "not a nonsensical distribution around zero")
+
+
+def test_simulate_player_stat_bootstrap_resamples_real_values():
+    rng = np.random.default_rng(11)
+    sim = P.simulate_player_stat_bootstrap([200, 250, 300, 280], sims=20000, rng=rng)
+    assert sim.size == 20000
+    # a bootstrap resample can only ever produce values from the original set (rounded)
+    assert set(sim.tolist()) <= {200, 250, 300, 280}
+    assert abs(sim.mean() - 257.5) < 10.0   # close to the true mean of [200,250,300,280]
+    print("✓ simulate_player_stat_bootstrap resamples only from the real provided values")
+
+
+def test_simulate_player_stat_bootstrap_empty_for_no_values():
+    rng = np.random.default_rng(2)
+    assert P.simulate_player_stat_bootstrap([], 1000, rng).size == 0
+    print("✓ simulate_player_stat_bootstrap returns empty with no recent values to sample from")
+
+
+def test_simulate_for_row_prefers_bootstrap_when_recent_games_exist():
+    rng = np.random.default_rng(4)
+    row_with_recent = {"PassYds": 300.0, "_recent_games": [
+        {"passing_YDS": 250}, {"passing_YDS": 275}, {"passing_YDS": 260}]}
+    sim = P._simulate_for_row(row_with_recent, "PassYds", 20000, rng)
+    # bootstrap only ever produces the real observed values, never something wildly outside them
+    assert set(sim.tolist()) <= {250, 275, 260}
+
+    row_without_recent = {"PassYds": 300.0, "_recent_games": []}
+    rng2 = np.random.default_rng(4)
+    sim2 = P._simulate_for_row(row_without_recent, "PassYds", 20000, rng2)
+    # parametric draws spread well beyond the tight bootstrap set above
+    assert sim2.max() > 275 or sim2.min() < 250
+    print("✓ _simulate_for_row uses the real bootstrap when recent games exist, and only falls "
+         "back to the parametric model when they don't")
+
+
+def test_build_best_bets_uses_bootstrap_with_correct_column_names_end_to_end():
+    # Regression guard for the real bug caught while building this: _simulate_for_row and the
+    # Why-text builder were both reading _recent_games entries using the ROW-level field name
+    # ("PassYds") instead of the raw CFBD per-game column name ("passing_YDS") those entries
+    # actually use -- every real game would silently read as 0, bootstrapping from a set of
+    # zeros instead of the player's actual real values. This exercises the full production path
+    # (build_best_bets itself, not just the isolated helper) with realistic per-game rows.
+    rows = [{
+        "Player": "Star QB", "Team": "Ohio State", "GameLabel": "Texas @ Ohio State",
+        "Opp": "Texas", "Position": "QB", "PassYds": 300.0, "RushYds": 0.0,
+        "Receptions": 0.0, "RecYds": 0.0, "_pid": "p1", "_game_date": None,
+        "_team_games_played": 12, "_markets": ["player_pass_yds"],
+        "_recent_games": [
+            {"passing_YDS": 320}, {"passing_YDS": 280}, {"passing_YDS": 310}, {"passing_YDS": 290},
+        ],
+    }]
+    plays = P.build_best_bets(rows, sims=20000, seed=13)
+    assert len(plays) == 1
+    play = plays[0]
+    # If the column-name bug were present, ModelProb would reflect bootstrapping from zeros
+    # (an extremely low probability of clearing any real line) instead of these real ~300-yard
+    # games -- the Why text is the most direct, human-readable proof it used the real values.
+    assert "cleared" in play["Why"] and "last 4 games" in play["Why"]
+    assert "avg 300" in play["Why"] or "avg 30" in play["Why"]   # ~(320+280+310+290)/4 = 300.0
+    print("✓ build_best_bets' full production path correctly bootstraps from real per-game "
+         "values using the right column names, not a silent zero-filled fallback")
 
 
 def test_build_projection_index_uses_team_games_played_as_sample_size():

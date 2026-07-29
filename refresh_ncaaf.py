@@ -12,10 +12,13 @@ a dependency) -- see ncaaf_data.py's own docstring for why this deliberately doe
 official `cfbd` client package (a real, tested pydantic-version conflict with nflreadpy, not a
 style preference).
 
-COST NOTE: this makes 3 CFBD API calls per run (roster, player season stats, schedule) --
-comfortably inside the provider's ~1,000-calls/month free-tier budget even run daily through a
-full season. See ncaaf_data.py's own docstring for the full accounting. Not something to run on
-a tight loop regardless -- daily/weekly is the intended cadence, not per-page-load.
+COST NOTE: this makes 3 CFBD API calls per run for roster/season-stats/schedule, PLUS one
+additional call per completed week for per-game player stats (typically 0-15 depending on how
+far into the season it is) -- see ncaaf_data.refresh_player_game_stats's own docstring for the
+full accounting. A full season pulled once totals roughly 3 + 15 = 18 calls; even run daily
+through an entire season that's comfortably inside the provider's ~1,000-calls/month free-tier
+budget. Not something to run on a tight loop regardless -- daily/weekly is the intended cadence,
+not per-page-load.
 """
 
 import os
@@ -84,10 +87,13 @@ def main() -> int:
         return 1
 
     print(f"\nPulling NCAAF schedule for {year}...")
+    completed_weeks: list = []
     try:
         path = ND.refresh_schedule(year, api_key)
         games = ND.load_schedule(path)
         print(f"Cached {len(games)} games.")
+        completed_weeks = sorted({g["week"] for g in games
+                                  if g.get("completed") and g.get("week") is not None})
     except Exception as e:  # noqa: BLE001
         # Non-fatal, same posture refresh_statcast.py already has for its own secondary pulls:
         # roster + player stats are the core dependency for a projections engine; the schedule
@@ -98,6 +104,28 @@ def main() -> int:
         print(f"::warning::NCAAF schedule refresh failed (roster/stats still cached): {first_line}")
         print("Full traceback:")
         print(tb)
+
+    print(f"\nPulling NCAAF per-game player stats for {len(completed_weeks)} completed week(s)...")
+    if not completed_weeks:
+        print("No completed weeks yet this season (schedule failed above, or the season hasn't "
+             "started) -- skipping. Real bootstrap projections and Retrospective grading fall "
+             "back to their honest degraded paths until this has real data (see ncaaf_engine.py "
+             "and ncaaf_projections.py's own docstrings for what those fallbacks are).")
+    else:
+        try:
+            path = ND.refresh_player_game_stats(year, api_key, completed_weeks)
+            game_stats = ND.load_player_game_stats(path)
+            print(f"Cached {len(game_stats)} player-game row(s).")
+        except Exception as e:  # noqa: BLE001
+            # Non-fatal, same posture as the schedule pull above: this is what upgrades the
+            # projections from parametric to bootstrap and enables real Retrospective grading,
+            # but the platform still functions on the season-average fallback without it.
+            tb = traceback.format_exc()
+            first_line = str(e).replace("\n", " ")[:300]
+            print(f"::warning::NCAAF per-game stats refresh failed (roster/season-stats/schedule "
+                 f"still cached): {first_line}")
+            print("Full traceback:")
+            print(tb)
 
     print("\nDone.")
     return 0

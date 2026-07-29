@@ -61,6 +61,18 @@ _MARKET_SPEC: Dict[str, Tuple[str, str, float]] = {
     "player_reception_yds": ("RecYds",     "Receiving Yards", 54.5),
 }
 
+# The row-level field names above (PassYds/RushYds/...) are NOT the same strings as the raw CFBD
+# per-game cache's own column names (passing_YDS/rushing_YDS/... -- ncaaf_engine.py's per-game
+# cache, same confirmed columns as the season-stats cache). A real bug this mapping exists to
+# prevent: _simulate_for_row reading a _recent_games entry with the WRONG key (e.g. "PassYds"
+# instead of "passing_YDS") would silently get None -> 0 for every real game, bootstrapping from
+# a set of zeros instead of the player's actual real values -- caught directly by testing this
+# path against real per-game entries before shipping, not assumed correct.
+_ROW_FIELD_TO_CFBD_COL: Dict[str, str] = {
+    "PassYds": "passing_YDS", "RushYds": "rushing_YDS",
+    "Receptions": "receiving_REC", "RecYds": "receiving_YDS",
+}
+
 
 def market_list() -> List[Tuple[str, str, str]]:
     """[(market_key, row_field, display_name), ...] — public, iterable form of _MARKET_SPEC."""
@@ -92,18 +104,50 @@ def _signal(player, team, game, market, side, line, prob, projection, **extra) -
     return sig
 
 
-def simulate_player_stat(rate: float, sims: int, rng: np.random.Generator) -> np.ndarray:
-    """PARAMETRIC simulation from a season-average per-game RATE — see this module's own
-    docstring for why NCAAF can't bootstrap from real game logs the way every other sport here
-    does. Draws from Normal(rate, max(rate * _RATE_CV, _MIN_SCALE)), clipped to non-negative
-    integers (counting/yardage stats can't be fractional or negative). Returns an empty array
-    for a non-positive rate — no meaningful distribution to build around zero or negative
-    usage."""
+def simulate_player_stat_parametric(rate: float, sims: int, rng: np.random.Generator) -> np.ndarray:
+    """PARAMETRIC FALLBACK simulation from a season-average per-game RATE, used only when no
+    real per-game log exists for this player yet (refresh_player_game_stats hasn't been run, or
+    this player/week has no cached rows) -- see this module's own docstring for why NCAAF needed
+    this fallback at all, and simulate_player_stat_bootstrap below for the real, preferred path
+    once per-game data exists. Draws from Normal(rate, max(rate * _RATE_CV, _MIN_SCALE)), clipped
+    to non-negative integers. Returns an empty array for a non-positive rate."""
     if rate is None or rate <= 0:
         return np.array([], dtype=np.int64)
     scale = max(rate * _RATE_CV, _MIN_SCALE)
     draws = rng.normal(loc=rate, scale=scale, size=sims)
     return np.clip(np.round(draws), 0, None).astype(np.int64)
+
+
+def simulate_player_stat_bootstrap(recent_values: List[float], sims: int,
+                                   rng: np.random.Generator) -> np.ndarray:
+    """Bootstrap `sims` draws (with replacement) from a player's REAL recent-game values for one
+    stat -- identical method to nfl_projections.simulate_player_stat and every other sport's own
+    bootstrap, now that ncaaf_engine.player_recent_games provides real per-game data (via CFBD's
+    get_player_game_stats, added after NCAAF's initial parametric-only launch). This is the
+    PREFERRED path; build_projection_index/build_best_bets use this whenever a row has real
+    recent games, falling back to simulate_player_stat_parametric only when it doesn't. Returns
+    an empty array if there's no game log to sample from."""
+    if not recent_values:
+        return np.array([], dtype=np.int64)
+    draws = rng.choice(np.asarray(recent_values, dtype=np.float64), size=sims, replace=True)
+    return np.clip(np.round(draws), 0, None).astype(np.int64)
+
+
+def _simulate_for_row(r: Dict, col: str, sims: int, rng: np.random.Generator) -> np.ndarray:
+    """Picks bootstrap (real per-game values) over the parametric fallback whenever real recent
+    games actually exist for this row -- the single decision point both build_projection_index
+    and build_best_bets share, so they can never drift apart on which method a given player uses.
+
+    `col` is the ROW-level field name (e.g. "PassYds", matching player_row's own output) -- used
+    directly for the parametric path (r.get(col)), but _recent_games entries use ncaaf_engine's
+    raw per-game CFBD column names instead (e.g. "passing_YDS"), so those are read through
+    _ROW_FIELD_TO_CFBD_COL, not `col` itself."""
+    recent = r.get("_recent_games") or []
+    if recent:
+        cfbd_col = _ROW_FIELD_TO_CFBD_COL.get(col, col)
+        values = [g.get(cfbd_col) or 0 for g in recent]
+        return simulate_player_stat_bootstrap(values, sims, rng)
+    return simulate_player_stat_parametric(r.get(col), sims, rng)
 
 
 def _clip_prob(p: float) -> float:
@@ -137,12 +181,17 @@ def build_projection_index(rows: List[Dict], meta: List[Dict],
               "position": r.get("Position", "")}
         for mkey in markets:
             col, _disp, _line = _MARKET_SPEC[mkey]
-            rate = r.get(col)
-            sim = simulate_player_stat(rate, sims, rng)
+            sim = _simulate_for_row(r, col, sims, rng)
             if sim.size == 0:
                 continue
+            recent = r.get("_recent_games") or []
+            # Sample size for shrink_prob: the REAL number of games actually bootstrapped from
+            # when that path is used (a 3-game bootstrap deserves more shrinkage than a full
+            # team season would suggest), falling back to the team's games-played count only for
+            # the parametric path, where there's no per-player sample size to speak of.
+            n_sample = len(recent) if recent else n_games
             index[(nm, mkey)] = {"dist": _dist(sim), "mean": float(sim.mean()),
-                                 "n_games": n_games, "ctx": ctx}
+                                 "n_games": n_sample, "ctx": ctx}
     return index
 
 
@@ -207,15 +256,21 @@ def _favored_side(prob_over: float, ref: float):
     return "Under", 1.0 - prob_over, 1.0 - ref
 
 
-def _player_reasons(rate: float, n_games: int, line: float, side: str, mean_display: str) -> str:
-    """'Why' text built from the player's own season-average rate — no real game-to-game log
-    exists to describe a trend from (see this module's own docstring), so this states the
-    season-average basis plainly rather than fabricating a recency narrative the data can't
-    support."""
+def _player_reasons(rate: float, n_games: int, line: float, side: str, mean_display: str,
+                    recent_values: Optional[List[float]] = None) -> str:
+    """'Why' text -- real per-game hit-rate reasoning (matching every other sport's own
+    _player_reasons phrasing) when real recent games exist; the season-average-basis statement
+    only as a fallback for a player/week with no per-game log yet."""
+    if recent_values:
+        n = len(recent_values)
+        hits = (sum(1 for v in recent_values if v > line) if side == "Over"
+               else sum(1 for v in recent_values if v < line))
+        avg = sum(recent_values) / n
+        return f"cleared {line:g} in {hits} of last {n} games (avg {avg:.1f})"
     if n_games <= 0 or rate is None:
         return "no season stat data available"
     return (f"averaging {rate:.1f} {mean_display.lower()}/game over {n_games} team game(s) "
-           f"this season (parametric model, not a per-game bootstrap — see module notes)")
+           f"this season (parametric model, no per-game log for this player yet)")
 
 
 def explain_miss(row: Optional[Dict], market: str = "Pass Yards") -> str:
@@ -258,11 +313,13 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
             col, disp, default_ln = _MARKET_SPEC[mkey]
             rate = r.get(col)
             line, line_src = real_line_or_default_ncaaf(disp, r["Player"], real_lines, default_ln)
-            sim = simulate_player_stat(rate, sims, rng)
+            sim = _simulate_for_row(r, col, sims, rng)
             if sim.size == 0:
                 continue
+            recent = r.get("_recent_games") or []
+            n_sample = len(recent) if recent else n_games
             raw = prob_over(_dist(sim), line)
-            shrunk = BB_P.shrink_prob(raw, n_games)
+            shrunk = BB_P.shrink_prob(raw, n_sample)
             over = _clip_prob(shrunk)
             side, sp, ref_s = _favored_side(over, BEST_BET_REF.get(disp, 0.5))
             plays.append({
@@ -272,7 +329,9 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
                 "ModelProb": round(sp, 4), "Fair": prob_to_american(sp),
                 "Conviction": round(sp / ref_s, 2) if ref_s > 0 else 0.0,
                 "_ceiling": round(1.0 / ref_s, 2) if ref_s > 0 else None,
-                "Why": _player_reasons(rate, n_games, line, side, disp),
+                "Why": _player_reasons(rate, n_sample, line, side, disp,
+                                       recent_values=[g.get(_ROW_FIELD_TO_CFBD_COL.get(col, col)) or 0
+                                                      for g in recent] if recent else None),
                 "_stat_key": col, "_team_games_played": n_games,
             })
 

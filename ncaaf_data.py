@@ -79,6 +79,7 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 ROSTER_PATH = os.path.join(DATA_DIR, "ncaaf_rosters.csv")
 PLAYER_STATS_PATH = os.path.join(DATA_DIR, "ncaaf_player_stats.csv")
 SCHEDULE_PATH = os.path.join(DATA_DIR, "ncaaf_schedule.csv")
+PLAYER_GAME_STATS_PATH = os.path.join(DATA_DIR, "ncaaf_player_game_stats.csv")
 
 
 class CFBDError(Exception):
@@ -256,6 +257,89 @@ def refresh_schedule(year: int, api_key: str, out_path: str = SCHEDULE_PATH) -> 
     return out_path
 
 
+def refresh_player_game_stats(year: int, api_key: str, completed_weeks: List[int],
+                              out_path: str = PLAYER_GAME_STATS_PATH) -> str:
+    """Per-game player stat logs -- ONE call per completed week (see this module's own docstring
+    for the call-budget accounting: ~14 calls for a full season pulled once, comfortably inside
+    the ~1,000/month budget). This is what unlocks two things every other sport's engine already
+    has and NCAAF's Phase 2 build explicitly deferred: a real recency-window bootstrap
+    (ncaaf_projections.simulate_player_stat can resample real game-to-game values instead of
+    assuming an unvalidated spread) and real Retrospective grading
+    (ncaaf_engine.get_player_results can finally return real per-game results instead of always
+    {}).
+
+    completed_weeks: which weeks to actually pull -- pass only weeks the cached schedule marks
+    completed=True (see refresh_ncaaf.py), not every week 1-15 blindly; querying a week with no
+    games played yet just burns a call for an empty result.
+
+    RESPONSE SHAPE, the least-confirmed piece of this whole integration -- flagged directly, not
+    glossed over: GET /games/players returns a deeply nested structure, confirmed down to
+    {id, teams: [{school, conference, home_away, points, categories: [{name, types: [{...,
+    athletes: [{...}]}]}]}]} against CFBD's own published model docs (PlayerGame -> 
+    PlayerGameTeams -> PlayerGameCategories -> PlayerGameTypes -> PlayerGameAthletes). The two
+    deepest models' exact field names (does a "type" entry key its name as "name" or "type"? does
+    an athlete entry use "id"/"name"/"stat" like PlayerStat, or different keys?) resisted full
+    documentation confirmation despite real effort during this build. Every field access below
+    tries multiple plausible key names for exactly that reason (same defensive posture already
+    used for the camelCase/snake_case uncertainty elsewhere in this module) -- and this function
+    prints the FULL raw nested structure of the first athlete entry it finds, unconditionally, on
+    every run, so the real shape is visible in the very first refresh log rather than inferred."""
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    long_rows: List[Dict] = []
+    printed_sample = False
+
+    for week in completed_weeks:
+        try:
+            games = _get("/games/players", {"year": year, "week": week}, api_key)
+        except CFBDError as e:
+            print(f"[NCAAF] GET /games/players?year={year}&week={week} failed: {e}")
+            continue
+        for game in games:
+            game_id = game.get("id")
+            for team in (game.get("teams") or []):
+                school = team.get("school")
+                for category in (team.get("categories") or []):
+                    cat_name = category.get("name")
+                    for type_ in (category.get("types") or []):
+                        type_name = type_.get("name") or type_.get("type") or type_.get("statType")
+                        for athlete in (type_.get("athletes") or []):
+                            if not printed_sample:
+                                print(f"[NCAAF] raw /games/players athlete sample (week {week}): "
+                                     f"category={cat_name!r} type={type_name!r} athlete={athlete!r}")
+                                printed_sample = True
+                            athlete_id = (athlete.get("id") or athlete.get("athleteId")
+                                         or athlete.get("playerId") or athlete.get("player_id"))
+                            athlete_name = athlete.get("name") or athlete.get("player")
+                            stat_val = athlete.get("stat") or athlete.get("value")
+                            if athlete_id is None or not cat_name or not type_name:
+                                continue
+                            long_rows.append({
+                                "game_id": game_id, "week": week, "team": school,
+                                "player_id": athlete_id, "player": athlete_name,
+                                "stat_col": f"{cat_name}_{type_name}".strip("_"),
+                                "value": stat_val,
+                            })
+
+    if not long_rows:
+        cols = ["game_id", "week", "team", "player_id", "player"]
+        pd.DataFrame(columns=cols).to_csv(out_path, index=False)
+        print(f"[NCAAF] GET /games/players: 0 rows across {len(completed_weeks)} week(s) -- "
+             "wrote an empty cache.")
+        return out_path
+
+    long_df = pd.DataFrame(long_rows)
+    long_df["value"] = pd.to_numeric(long_df["value"], errors="coerce")
+    identity = (long_df[["game_id", "week", "team", "player_id", "player"]]
+               .drop_duplicates(["game_id", "player_id"]).set_index(["game_id", "player_id"]))
+    wide = long_df.pivot_table(index=["game_id", "player_id"], columns="stat_col",
+                               values="value", aggfunc="first")
+    out = identity.join(wide, how="left").reset_index()
+    out.to_csv(out_path, index=False)
+    print(f"[NCAAF] GET /games/players: {len(out)} player-game row(s) across "
+         f"{len(completed_weeks)} week(s), {len(wide.columns)} stat columns: {sorted(wide.columns)}")
+    return out_path
+
+
 def load_rosters(path: str = ROSTER_PATH) -> List[Dict]:
     if not os.path.exists(path):
         return []
@@ -265,6 +349,15 @@ def load_rosters(path: str = ROSTER_PATH) -> List[Dict]:
         # A zero-row API response writes a columnless CSV (pd.DataFrame([]) has no columns at
         # all, not just no rows) -- read_csv on that raises rather than returning an empty
         # frame. A genuinely empty cache should load as [], not crash the caller.
+        return []
+
+
+def load_player_game_stats(path: str = PLAYER_GAME_STATS_PATH) -> List[Dict]:
+    if not os.path.exists(path):
+        return []
+    try:
+        return pd.read_csv(path).to_dict("records")
+    except pd.errors.EmptyDataError:
         return []
 
 
