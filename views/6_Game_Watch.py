@@ -73,6 +73,8 @@ import projections as P
 import statcast_data as SC
 import quick_log
 import sports
+import odds_api as O
+import best_bets_data as BBD
 
 game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER
 
@@ -111,6 +113,27 @@ with lc2:
 
 target = st.date_input("Slate date", datetime.now())
 date_str = target.strftime("%Y-%m-%d")
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_real_moneylines(date_str_inner: str):
+    """Real, captured moneyline prices for every team playing on date_str_inner -- fetched ONCE
+    per date (cached, same 600s ttl as this page's other loaders) and reused across every game's
+    own quick_log widget below, instead of a redundant fetch per game. None (not {}) when no API
+    key is configured, so the calling code can tell "never attempted" from "attempted, found
+    nothing" the same way best_bets_data.py's own real-lines diagnostic already distinguishes
+    those two states elsewhere on this platform."""
+    api_key = BBD.get_odds_api_key()
+    if not api_key:
+        return None
+    try:
+        moneylines, _info = O.fetch_slate_moneylines(date_str_inner, api_key, sport=O.SPORT)
+        return moneylines
+    except Exception:
+        return None
+
+
+_real_moneylines = load_real_moneylines(date_str) or {}
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -459,7 +482,8 @@ for g in games:
                      "Side": home_row["Team"], "Line": None, "Fair": home_fair,
                      "ModelProb": wp["home_win_prob"]},
                 ]
-                quick_log.render_quick_log(ml_plays, date_str, "MLB", key_prefix=f"gw_ml_{g['label']}")
+                quick_log.render_quick_log(ml_plays, date_str, "MLB", key_prefix=f"gw_ml_{g['label']}",
+                                           moneylines=_real_moneylines)
 
             st.caption("⚠️ **This is not backtested.** Real, decades-old formulas (Bill James' "
                       "Pythagorean expectation + Log5), not invented for this platform — but "
