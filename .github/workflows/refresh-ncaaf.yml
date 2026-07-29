@@ -104,11 +104,18 @@ jobs:
           print(f"Loaded {len(games)} scheduled games.")
           if len(games) < 50:
               print("::warning::Schedule cache looks thin or missing after this run — see the earlier pull step's own log for the actual error. Committing roster/stats caches anyway (non-fatal).")
+          seasons_present = sorted({g.get("season") for g in games if g.get("season") is not None})
+          stats = ND.load_player_stats()
+          stats_season = stats[0].get("season") if stats else None
+          # Regression check for the real bug this workflow's own history recorded: the schedule
+          # cache must include whichever season player stats actually landed on (target or
+          # fallback), or ncaaf_engine's games-played denominator silently resolves to 0 for
+          # every team and the whole slate goes empty downstream.
+          if stats_season is not None and stats_season not in seasons_present:
+              print(f"::warning::Player stats are for season {stats_season}, but the schedule cache only has {seasons_present} — this WILL produce zero plays downstream (games-played resolves to 0 for every team). See refresh_ncaaf.py's own needed_years logic.")
           game_stats = ND.load_player_game_stats()
           completed = sorted({g["week"] for g in games if g.get("completed") and g.get("week") is not None})
-          print(f"Loaded {len(game_stats)} player-game row(s) across {len(completed)} completed week(s).")
-          if completed and not game_stats:
-              print("::warning::There are completed weeks this season but the per-game stats cache is empty — see the earlier pull step's own log for why. Real bootstrap projections and Retrospective grading will stay on their season-average fallback until this is populated.")
+          print(f"Loaded {len(game_stats)} player-game row(s) across {len(completed)} completed week(s) (any season).")
           PY
         continue-on-error: true
 
