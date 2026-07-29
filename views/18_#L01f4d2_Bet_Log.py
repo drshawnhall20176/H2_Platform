@@ -184,7 +184,7 @@ if open_bets:
                   "Enter results manually in the table below.")
 
     odf = pd.DataFrame(open_bets)[["id", "player", "market", "side", "line", "entry_odds",
-                                   "model_prob", "stake", "close_odds", "result"]]
+                                   "model_prob", "stake", "close_odds", "result", "cashed_out_amount"]]
     edited = st.data_editor(
         odf, hide_index=True, use_container_width=True, key="settle_editor",
         disabled=["id", "player", "market", "side", "line", "entry_odds", "model_prob", "stake"],
@@ -192,6 +192,12 @@ if open_bets:
             "close_odds": st.column_config.NumberColumn("Closing odds", help="The price at game time / close."),
             "result": st.column_config.SelectboxColumn("Result", options=["", "win", "loss", "push", "void"]),
             "model_prob": st.column_config.NumberColumn("Model %", format="%.2f"),
+            "cashed_out_amount": st.column_config.NumberColumn(
+                "Cashed out ($)", help="If you cashed this bet out early, enter what you actually "
+                "received here. Leave blank if you held it — a blank is not the same as a $0 "
+                "cash-out. You can enter this before the bet is graded; once the real result comes "
+                "in (auto-settle or manual), the Cash-out vs. held report below can compare what "
+                "you actually took against what holding would have paid."),
         },
     )
     if st.button("💾 Save settlements", type="primary"):
@@ -199,7 +205,8 @@ if open_bets:
         for _, r in edited.iterrows():
             co = None if pd.isna(r["close_odds"]) else int(r["close_odds"])
             res = r["result"] or None
-            B.update_bet(int(r["id"]), close_odds=co, result=res)
+            cashed_out = None if pd.isna(r["cashed_out_amount"]) else float(r["cashed_out_amount"])
+            B.update_bet(int(r["id"]), close_odds=co, result=res, cashed_out_amount=cashed_out)
             n += 1
         st.success(f"Saved {n} bet(s).")
         st.rerun()
@@ -281,6 +288,47 @@ else:
             legdf[["player", "market", "side", "line", "entry_odds", "result", "as single"]]
             .style.format({"line": "{:.1f}", "entry_odds": "{:.0f}"}, na_rep="—"),
             hide_index=True, use_container_width=True)
+
+# --- Cash-out vs. held --------------------------------------------------------
+st.divider()
+st.subheader("💵 Cash-out vs. held")
+st.caption("An honest measure of something this community jokes about a lot — is cashing out "
+          "early actually costing money, or actually saving it? For every bet with a cash-out "
+          "amount logged (in the settle table above) whose real result has since come in, this "
+          "compares what you actually walked away with against what holding to the end would "
+          "have paid. Log the cash-out amount while the bet is still open — once it's graded and "
+          "drops out of the settle table above, there's currently no way to add one retroactively.")
+co_report = B.cash_out_vs_held(bets)
+if co_report["n"] == 0:
+    st.caption("No graded cash-outs yet. Enter a cash-out amount on an open bet above, then once "
+              "its real result is in (auto-settle or manual), it shows up here.")
+else:
+    a, b = st.columns(2)
+    a.metric("Actually realized (cash-outs)", f"${co_report['total_actual_pnl']:+.2f}",
+             help=f"Across {co_report['n']} graded cash-out(s) — what was actually taken.")
+    b.metric("Would've realized (held to the end)", f"${co_report['total_held_pnl']:+.2f}",
+             delta=f"{-co_report['net_value_of_cashing_out']:+.2f} vs actual",
+             help="What the same bets would have paid had every one been held to its real result.")
+    net = co_report["net_value_of_cashing_out"]
+    if net < 0:
+        st.success(f"Cashing out has net **saved ${-net:.2f}** across these bets compared to "
+                   f"holding every one to the end.")
+    elif net > 0:
+        st.info(f"Holding to the end would have net **paid ${net:.2f} more** across these bets — "
+                f"the real cost of the cash-out habit, in dollars, not a feeling.")
+    else:
+        st.caption("A wash so far — cashing out and holding have netted the same across these bets.")
+    codf = pd.DataFrame(co_report["rows"])
+    st.dataframe(
+        codf[["game", "player", "market", "stake", "cashed_out_amount", "actual_pnl",
+             "held_pnl", "difference", "final_result"]]
+        .rename(columns={"cashed_out_amount": "Cashed out ($)", "actual_pnl": "Actual P&L",
+                         "held_pnl": "P&L if held", "difference": "Held − actual",
+                         "final_result": "Real result"})
+        .style.format({"stake": "${:.2f}", "Cashed out ($)": "${:.2f}", "Actual P&L": "${:+.2f}",
+                       "P&L if held": "${:+.2f}", "Held − actual": "${:+.2f}"}),
+        hide_index=True, use_container_width=True)
+
  
 # --- Full ledger ------------------------------------------------------------
 st.divider()
