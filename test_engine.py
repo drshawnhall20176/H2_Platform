@@ -1824,6 +1824,42 @@ def test_parse_boxscore_results_player_with_no_stats_excluded_from_pitching_and_
          "not fabricated zero stats")
 
 
+def test_search_players_returns_real_matches_active_first(monkeypatch):
+    # Regression guard for a real, confirmed root cause: bets logged through "Log a bet" had no
+    # way to attach a real player_id, so bet_settlement.py could never auto-match them -- 5 real
+    # bets stuck exactly this way in a live settlement log. This is the fix's foundation.
+    fake_response = {"people": [
+        {"id": 12345, "fullName": "Wade Meckler", "currentTeam": {"name": "San Francisco Giants"},
+         "primaryPosition": {"abbreviation": "OF"}, "active": True},
+        {"id": 99999, "fullName": "Wade Meckler Sr.", "currentTeam": None,
+         "primaryPosition": {"abbreviation": "1B"}, "active": False},
+    ]}
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake_response)
+    results = E.search_players("Wade Meckler")
+    assert len(results) == 2
+    assert results[0]["id"] == 12345 and results[0]["active"] is True   # active player ranked first
+    assert results[0]["team"] == "San Francisco Giants" and results[0]["position"] == "OF"
+    assert results[1]["active"] is False
+    print("✓ search_players returns real matches with active players ranked first")
+
+
+def test_search_players_empty_query_and_no_matches(monkeypatch):
+    assert E.search_players("") == []
+    assert E.search_players("   ") == []
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: {})
+    assert E.search_players("Totally Nonexistent Player") == []
+    print("✓ search_players returns an honest empty list for a blank query or no real matches, "
+         "never a fabricated result")
+
+
+def test_search_players_network_failure_returns_empty_not_a_crash(monkeypatch):
+    def _raise(*a, **k):
+        raise Exception("network error")
+    monkeypatch.setattr(E, "fetch_json", _raise)
+    assert E.search_players("Ohtani") == []
+    print("✓ search_players degrades to an empty list on a network failure, never crashes the form")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

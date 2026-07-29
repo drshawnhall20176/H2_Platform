@@ -855,6 +855,46 @@ def get_player_results(date_str: str) -> Dict[int, Dict]:
     return results
 
 
+def search_players(query: str) -> List[Dict[str, Any]]:
+    """Real MLB player search -- GET /people/search?names={query}, confirmed against MLB Stats
+    API's own published documentation (not guessed): returns {"people": [{id, fullName,
+    currentTeam, primaryPosition, active, ...}]}. Added directly to fix a real, confirmed root
+    cause: bets logged through the "Log a bet" form had no way to attach a real player_id at
+    all, so bet_settlement.py's own auto-match logic could never find them in a boxscore no
+    matter how correctly everything else about the bet was entered -- 5 real bets stuck exactly
+    this way in a live settlement log before this existed.
+
+    Returns [{"id", "name", "team", "position", "active"}, ...] sorted with ACTIVE players
+    first (a name search for a common surname can return long-retired players alongside current
+    ones; the overwhelming majority of real use here is "who's playing today," so surfacing
+    active players first is a real, deliberate ranking choice, not just alphabetical order) --
+    an empty list for no query, no matches, or a network failure, never a fabricated result.
+
+    HONEST LIMITATION, same posture as every other MLB Stats API function in this file: not
+    verified against a live response from this sandbox (statsapi.mlb.com unreachable here) --
+    the endpoint, its `names` parameter, and every field read below are confirmed against MLB's
+    own published API documentation, not exercised against a real request. Worth an early,
+    deliberate check once deployed -- search a well-known name and confirm the results look
+    right -- before trusting this the way every sandbox-unverifiable function on this platform
+    already carries that same caveat."""
+    query = (query or "").strip()
+    if not query:
+        return []
+    try:
+        data = fetch_json(f"{BASE}/people/search", params={"names": query})
+    except Exception:
+        return []
+    people = data.get("people") or []
+    out = []
+    for p in people:
+        team = (p.get("currentTeam") or {}).get("name")
+        position = (p.get("primaryPosition") or {}).get("abbreviation")
+        out.append({"id": p.get("id"), "name": p.get("fullName"), "team": team,
+                   "position": position, "active": bool(p.get("active"))})
+    out.sort(key=lambda p: not p["active"])   # active players first, stable order otherwise
+    return out
+
+
 def get_team_injuries(team_id: int) -> List[Dict[str, Any]]:
     """Team injury/roster-restriction report: [{"player", "status", "position", "return_date",
     "comment"}, ...] — same shape basketball_engine.get_team_injuries and nfl_engine.

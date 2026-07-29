@@ -317,6 +317,51 @@ def test_build_settlement_plan_ambiguous_suffixless_bet_on_a_real_doubleheader_s
          "guessing between two different real games")
 
 
+# ----------------------------------------------------------------- retroactive player_id backfill
+def test_backfill_player_id_via_update_bet_resolves_a_previously_stuck_bet(monkeypatch):
+    # End-to-end regression guard for the new backfill tool's own workflow: a real bet, logged
+    # with no player_id (exactly the state 5 real bets were found stuck in), first confirmed
+    # unresolved with the specific "no player_id" reason, then backfilled through betlog.
+    # update_bet -- the exact call the new Bet Log UI tool makes -- and re-checked to confirm it
+    # NOW resolves via build_settlement_plan, using a real SQLite database round trip throughout.
+    import tempfile
+    import os
+    import betlog as B
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "bets.db")
+        B.add_bet(db, slate_date="2026-07-28", game="Houston Astros @ Los Angeles Angels (Game 1)",
+                 player="Wade Meckler", player_id=None, market="Batter Total Hits", side="Over",
+                 line=0.5)
+        bets = B.list_bets(db)
+        assert len(bets) == 1 and bets[0].get("player_id") is None
+
+        schedule = [_schedule_game(home="Los Angeles Angels", away="Houston Astros",
+                                   home_score=4, away_score=6, game_number=1)]
+        monkeypatch.setattr(E, "get_schedule", lambda d: schedule)
+
+        # Step 1: confirm it's genuinely stuck on the missing-player_id reason before any fix.
+        plan_before = S.build_settlement_plan(bets)
+        assert plan_before["proposed"] == []
+        assert len(plan_before["unresolved"]) == 1
+        assert "no player_id" in plan_before["unresolved"][0]["reason"]
+
+        # Step 2: the backfill tool's own action -- attach a real player_id via update_bet.
+        bet_id = bets[0]["id"]
+        B.update_bet(bet_id, db_path=db, player_id=663728)
+
+        # Step 3: re-check settlement with the now-updated bet -- must resolve this time.
+        updated_bets = B.list_bets(db)
+        box = _boxscore(away_players={663728: ("Wade Meckler", 2, 0, 2, 0, 1, 1)})   # 2 hits -> win
+        monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+        plan_after = S.build_settlement_plan(updated_bets)
+        assert len(plan_after["proposed"]) == 1
+        assert plan_after["proposed"][0]["new_result"] == "win"
+        assert plan_after["unresolved"] == []
+    print("✓ backfilling a player_id via update_bet (the new Bet Log tool's own action) correctly "
+         "unblocks a previously-stuck bet through the real settlement pipeline")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
