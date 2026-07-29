@@ -264,6 +264,99 @@ def parse_game_spread(event_json: Dict) -> Dict[str, float]:
     return {team: sum(pts) / len(pts) for team, pts in samples.items()}
 
 
+def parse_event_moneyline(event_json: Dict) -> Dict[str, Dict[str, float]]:
+    """{team_name: {book: price}} for one event's "h2h" (moneyline) market -- keeping EVERY
+    book's own price, a genuinely different parser from parse_game_spread just above (which
+    averages across books into a single display number). A real price LOOKUP needs the specific
+    preferred-book price or the best available across books, not an average nobody can actually
+    bet at.
+
+    h2h outcomes have NO `point` at all (moneyline isn't a line-based market the way spreads/
+    totals are) -- oc.get("name") IS the team name itself, unlike a player-prop outcome where
+    `name` is Over/Under and `description` carries the player. Forcing h2h through
+    parse_event_offers (which requires a non-None point) would silently drop every outcome."""
+    by_team: Dict[str, Dict[str, float]] = {}
+    for bm in event_json.get("bookmakers", []):
+        book = bm.get("key", "?")
+        for mk in bm.get("markets", []):
+            if mk.get("key") != "h2h":
+                continue
+            for oc in mk.get("outcomes", []):
+                team = oc.get("name")
+                price = oc.get("price")
+                if team is None or price is None:
+                    continue
+                by_team.setdefault(team, {})[book] = price
+    return by_team
+
+
+def fetch_slate_moneylines(date_str: str, api_key: str,
+                           sport: str = SPORT) -> Tuple[Dict[str, Dict[str, float]], Dict]:
+    """{team_name: {book: price}} for every team playing on date_str, plus (info) with remaining
+    quota -- same (result, info) contract as fetch_slate_spreads, just keeping per-book
+    granularity instead of an averaged display number, since a real price lookup needs a
+    specific, actually-bettable price.
+
+    sport: any Odds API sport key -- deliberately sport-agnostic, not MLB-specific. Moneylines
+    exist the same way (an "h2h" market) across every sport this platform covers, so this one
+    function serves all of them, not a copy per sport."""
+    events = fetch_events(api_key, sport=sport)
+    todays = [e for e in events if _eastern_date_str(e.get("commence_time")) == date_str]
+    moneylines: Dict[str, Dict[str, float]] = {}
+    remaining = None
+    fetched = 0
+    for e in todays:
+        try:
+            ej, hdr = fetch_event_props(e["id"], api_key, ["h2h"], sport=sport)
+        except OddsAPIError:
+            continue
+        remaining = hdr.get("remaining") or remaining
+        for team, book_prices in parse_event_moneyline(ej).items():
+            moneylines.setdefault(team, {}).update(book_prices)
+        fetched += 1
+    return moneylines, {"events_total": len(todays), "events_fetched": fetched, "remaining": remaining}
+
+
+def real_moneyline_price(moneylines: Dict[str, Dict[str, float]], team_name: str,
+                         preferred_book: Optional[str] = None) -> Optional[Tuple[float, str]]:
+    """The REAL moneyline price (American odds) for one team, picked from `moneylines` (already
+    fetched via fetch_slate_moneylines) -- the team-level counterpart to real_entry_price's own
+    player-prop lookup, added for the same real reason: quick_log.py's Fair-odds fallback meant
+    a moneyline pick's entry_odds was always the model's own theoretical price, never a real
+    captured one, the same measurement gap real_entry_price closed for player props.
+
+    Same preferred_book resolution as real_entry_price: the exact price at preferred_book when
+    that book posted this team's moneyline, otherwise the single BEST (highest-payout) price
+    across every book that did.
+
+    TEAM NAME MATCHING is a simple, lightly-normalized exact match (lowercased, whitespace-
+    stripped) -- deliberately NOT the same abbreviation-tolerant matching bet_settlement.py's own
+    game-label fix needed. That fix existed because a PERSON free-typed a game label into a form
+    (with a placeholder that taught abbreviations). Here, neither side of the comparison is
+    user-typed: both the play's own team name (from the sport's own schedule data) and the Odds
+    API's own event data are already real, canonical team names -- an exact-ish match is the
+    right level of tolerance, not a full abbreviation table repeated per sport.
+
+    Returns (price, book), or None if this team has no real moneyline offer at all right now."""
+    target = (team_name or "").strip().lower()
+    if not target:
+        return None
+    book_prices = None
+    for team, prices in moneylines.items():
+        if (team or "").strip().lower() == target:
+            book_prices = prices
+            break
+    if not book_prices:
+        return None
+    if preferred_book and preferred_book in book_prices:
+        return float(book_prices[preferred_book]), preferred_book
+    picked = _best_price(book_prices)
+    if picked is None:
+        return None
+    book, price = picked
+    return float(price), book
+
+
 def fetch_slate_spreads(date_str: str, api_key: str, sport: str = SPORT) -> Tuple[Dict[str, float], Dict]:
     """{team_name: spread} for every team playing on date_str, plus (info) with remaining quota —
     same (result, info) contract as fetch_slate_props so pages can show cost the same way. Only
@@ -285,6 +378,7 @@ def fetch_slate_spreads(date_str: str, api_key: str, sport: str = SPORT) -> Tupl
         spreads.update(parse_game_spread(ej))
         fetched += 1
     return spreads, {"events_total": len(todays), "events_fetched": fetched, "remaining": remaining}
+
 
 
 def market_lines_for_player(offers: List[Dict], player_name: str, projections_module=None) -> Dict[str, float]:

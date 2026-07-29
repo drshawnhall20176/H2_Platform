@@ -151,6 +151,52 @@ def test_bet_log_fields_from_play_offers_provided_but_market_not_in_sports_map()
          "this sport's own market_map, rather than crashing")
 
 
+def _ml_play(side="New York Yankees", fair=-145, game="Red Sox @ Yankees", model_prob=0.59):
+    return {"Player": None, "PlayerId": None, "Team": None, "Game": game, "Market": "Moneyline",
+           "Side": side, "Line": None, "Fair": fair, "ModelProb": model_prob, "Why": "x"}
+
+
+def test_bet_log_fields_from_play_uses_real_moneyline_price_when_matched():
+    # Regression guard for the actual fix: a real captured moneyline price now replaces the
+    # model's own Fair-derived price for team-level picks, same as the player-prop path already
+    # does -- moneylines are a genuinely different data shape (team + price, no market_key/line/
+    # over-under split), so this exercises the SEPARATE moneyline lookup path specifically.
+    moneylines = {"New York Yankees": {"draftkings": -150, "fanduel": -145}}
+    fields = Q.bet_log_fields_from_play(_ml_play(), "2026-07-29", "MLB", moneylines=moneylines,
+                                        preferred_book="draftkings")
+    assert fields["entry_odds"] == -150.0
+    assert fields["entry_odds_source"] == "book"
+    print("✓ bet_log_fields_from_play uses a real captured moneyline price when the team matches")
+
+
+def test_bet_log_fields_from_play_falls_back_to_fair_when_moneylines_have_no_match():
+    moneylines = {"Boston Red Sox": {"draftkings": 130}}   # the OTHER team, not the one we bet
+    fields = Q.bet_log_fields_from_play(_ml_play(side="New York Yankees"), "2026-07-29", "MLB",
+                                        moneylines=moneylines)
+    assert fields["entry_odds"] == -145 and fields["entry_odds_source"] == "model_fair"
+    print("✓ bet_log_fields_from_play falls back to Fair odds when moneylines don't contain a "
+         "real match for this specific team")
+
+
+def test_bet_log_fields_from_play_moneyline_path_ignored_for_player_props():
+    # The two real-price paths must never cross-contaminate: a player-prop play should never
+    # accidentally use the moneyline lookup, and vice versa (covered by the mirror test below).
+    moneylines = {"New York Yankees": {"draftkings": -150}}
+    player_play = _play(player="Ohtani", market="Batter HR", side="Over", fair=-150)
+    fields = Q.bet_log_fields_from_play(player_play, "2026-07-20", "MLB", moneylines=moneylines)
+    assert fields["entry_odds"] == -150 and fields["entry_odds_source"] == "model_fair"
+    print("✓ a player-prop play is never affected by a moneylines dict being passed in")
+
+
+def test_bet_log_fields_from_play_offers_path_ignored_for_moneyline_plays():
+    offers = [{"player": "Someone", "market": "batter_hits", "point": 0.5,
+              "over": {"draftkings": -200}, "under": {"draftkings": 165}}]
+    fields = Q.bet_log_fields_from_play(_ml_play(), "2026-07-29", "MLB", offers=offers)
+    assert fields["entry_odds"] == -145 and fields["entry_odds_source"] == "model_fair"
+    print("✓ a moneyline play (no Player) is never affected by an offers list being passed in "
+         "without a matching moneylines dict")
+
+
 def test_bet_log_fields_from_play_maps_player_id():
     # Added directly on request, for automated result settlement -- confirms the play's own
     # PlayerId (set on every play by build_best_bets) flows through correctly.

@@ -550,6 +550,63 @@ def test_real_entry_price_none_when_no_real_offer_exists():
     print("✓ real_entry_price returns None (never a guess) when no real offer matches at all")
 
 
+# ----------------------------------------------------------------- moneyline (team-level) price capture
+def test_parse_event_moneyline_keeps_per_book_prices():
+    # A real, deliberate difference from parse_game_spread just above it: that one AVERAGES
+    # across books into a single display number; a real price lookup needs each book's own
+    # actual price, not an average nobody can bet at.
+    event = {"bookmakers": [
+        {"key": "draftkings", "markets": [{"key": "h2h", "outcomes": [
+            {"name": "New York Yankees", "price": -150}, {"name": "Boston Red Sox", "price": 130}]}]},
+        {"key": "fanduel", "markets": [{"key": "h2h", "outcomes": [
+            {"name": "New York Yankees", "price": -145}, {"name": "Boston Red Sox", "price": 125}]}]},
+    ]}
+    parsed = O.parse_event_moneyline(event)
+    assert parsed == {"New York Yankees": {"draftkings": -150, "fanduel": -145},
+                      "Boston Red Sox": {"draftkings": 130, "fanduel": 125}}
+    print("✓ parse_event_moneyline keeps each book's own real price, not an averaged number")
+
+
+def test_parse_event_moneyline_ignores_non_h2h_markets():
+    event = {"bookmakers": [{"key": "draftkings", "markets": [
+        {"key": "spreads", "outcomes": [{"name": "New York Yankees", "point": -1.5, "price": -110}]},
+        {"key": "h2h", "outcomes": [{"name": "New York Yankees", "price": -150}]},
+    ]}]}
+    parsed = O.parse_event_moneyline(event)
+    assert parsed == {"New York Yankees": {"draftkings": -150}}   # only the h2h outcome counted
+    print("✓ parse_event_moneyline only reads the h2h market, ignoring spreads/other markets "
+         "in the same response")
+
+
+def test_real_moneyline_price_uses_preferred_book_when_available():
+    moneylines = {"New York Yankees": {"draftkings": -150, "fanduel": -145}}
+    result = O.real_moneyline_price(moneylines, "New York Yankees", preferred_book="draftkings")
+    assert result == (-150.0, "draftkings")
+    print("✓ real_moneyline_price uses the exact preferred book's price when available")
+
+
+def test_real_moneyline_price_falls_back_to_best_price():
+    moneylines = {"New York Yankees": {"draftkings": -150, "fanduel": -145}}
+    result = O.real_moneyline_price(moneylines, "New York Yankees", preferred_book="betmgm")
+    assert result == (-145.0, "fanduel")   # -145 pays more than -150 -- the real best price
+    print("✓ real_moneyline_price falls back to the best available price across books")
+
+
+def test_real_moneyline_price_case_and_whitespace_insensitive_team_match():
+    moneylines = {"New York Yankees": {"draftkings": -150}}
+    assert O.real_moneyline_price(moneylines, "new york yankees") == (-150.0, "draftkings")
+    assert O.real_moneyline_price(moneylines, "  New York Yankees  ") == (-150.0, "draftkings")
+    print("✓ real_moneyline_price matches team names regardless of case or surrounding whitespace")
+
+
+def test_real_moneyline_price_none_when_team_not_found():
+    moneylines = {"New York Yankees": {"draftkings": -150}}
+    assert O.real_moneyline_price(moneylines, "Boston Red Sox") is None
+    assert O.real_moneyline_price({}, "New York Yankees") is None
+    assert O.real_moneyline_price(moneylines, "") is None
+    print("✓ real_moneyline_price returns None (never a guess) when the team has no real offer")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
