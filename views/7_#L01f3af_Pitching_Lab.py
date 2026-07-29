@@ -415,6 +415,32 @@ if game_options:
                     lm3.metric("H / ER", f"{line['hits']} / {line['earned_runs']}")
                     st.caption(f"{line['name']} — {line['strikeouts']} K, {line['walks']} BB "
                               "today. Raw numbers only — no pull prediction.")
+
+                    # Unearned-run flag — added directly on request, after a real, live piece of
+                    # community confusion (checked against the actual chat log): a fielding error
+                    # meant runs that clearly scored didn't count as earned, and it took several
+                    # messages of manual ESPN cross-checking before anyone understood why. runs
+                    # and earned_runs are both already in `line` above — this is the same data,
+                    # just surfaced directly instead of requiring a person to notice the mismatch.
+                    if line["unearned_runs"] > 0:
+                        st.warning(f"⚠️ {line['unearned_runs']} of {line['name']}'s {line['runs']} "
+                                  f"run(s) today are **unearned** (a fielding error factored in) — "
+                                  f"his earned-run total ({line['earned_runs']}) won't match the "
+                                  f"raw runs you're watching score. This is why an earned-run prop "
+                                  f"can stay Under even after a run visibly crosses the plate.")
+
+                    # Hook-risk flag — same real scenario this platform's own community hit: a
+                    # strikeout prop riding on "one more" late, with no visibility into whether
+                    # this pitcher's own season workload pattern makes that likely. Compares
+                    # against HIS OWN real season average/max, not a league-wide number.
+                    if line.get("player_id"):
+                        team_id_for_side = picked["home_id"] if side == "home" else picked["away_id"]
+                        season_pitch_stats = E.pitcher_season_pitch_stats(
+                            line["player_id"], int(date_str[:4]), before_date=date_str,
+                            team_id=team_id_for_side)
+                        risk = E.hook_risk_flag(line["pitches"], season_pitch_stats)
+                        if risk:
+                            st.caption(risk)
     else:
         st.caption("No game id available for this matchup — live pitch count isn't available here.")
 
