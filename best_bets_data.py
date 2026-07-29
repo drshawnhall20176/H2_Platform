@@ -440,6 +440,7 @@ def load_generic_best_bets_board(sport_key: str, date_str: str) -> tuple:
 
     Returns (plays, meta)."""
     sport = sports.get(sport_key)
+    diag_key = f"_real_lines_diag_{sport_key}_{date_str}"
 
     # Sports like UFC are outcome-based and have no projections module -- they use
     # dedicated pages instead of the generic Best Bets pipeline. Return empty gracefully.
@@ -451,6 +452,8 @@ def load_generic_best_bets_board(sport_key: str, date_str: str) -> tuple:
     real_lines = None
     available_books: List[str] = list(O.US_BOOKS.keys())
     api_key = get_odds_api_key()
+    diag = {"attempted": bool(api_key and sport.markets), "api_key_present": bool(api_key),
+           "offers": 0, "matched_lines": 0, "error": None}
     if api_key and sport.markets:
         try:
             # Per-sport key, not a hardcoded "_preferred_book_nfl" -- that string was a real,
@@ -462,11 +465,18 @@ def load_generic_best_bets_board(sport_key: str, date_str: str) -> tuple:
                 date_str, api_key, list(sport.markets),
                 sport=sport.odds_sport_key)
             real_lines = O.market_lines_for_slate(offers, preferred_book=preferred_book)
+            diag["offers"] = len(offers)
+            diag["matched_lines"] = len(real_lines)
             live = O.books_in_offers(offers)
             if live:
                 available_books = live
-        except Exception:
+        except Exception as e:  # noqa: BLE001
             real_lines = None
+            diag["error"] = str(e)[:200]
+    try:
+        st.session_state[diag_key] = diag
+    except Exception:
+        pass   # no Streamlit runtime (e.g. a test or script context) -- diagnostic is optional
 
     plays = sport.projections.build_best_bets(rows, real_lines=real_lines)
     return plays, meta, available_books

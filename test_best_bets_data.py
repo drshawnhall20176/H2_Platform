@@ -222,6 +222,80 @@ def test_load_generic_best_bets_board_fetches_real_lines_for_non_nfl_sports_too(
          "using that sport's own markets/odds_sport_key -- the exact fix for a real reported bug")
 
 
+def test_load_generic_best_bets_board_diagnostic_reports_zero_offers():
+    # The exact scenario a real user hit and couldn't tell apart from a broken fetch: the
+    # real-lines fetch runs successfully (no exception, real API key) but the book/Odds API has
+    # zero props posted for this sport/date yet -- common well before a season starts. The
+    # diagnostic must say so explicitly (offers=0), not look identical to "fetch never ran".
+    import odds_api as O
+
+    class _FakeEngine:
+        @staticmethod
+        def build_slate(date_str):
+            return ([], [])
+
+    class _FakeProjections:
+        @staticmethod
+        def build_best_bets(rows, real_lines=None):
+            return []
+
+    class _FakeSport:
+        has_projections = True
+        markets = ["player_pass_yds"]
+        odds_sport_key = "americanfootball_ncaaf"
+        engine = _FakeEngine()
+        projections = _FakeProjections()
+
+    fake_session_state = {}
+    with patch.object(BBD.sports, "get", lambda sport_key: _FakeSport()), \
+        patch.object(BBD, "get_odds_api_key", lambda: "FAKE_KEY"), \
+        patch.object(BBD.st, "session_state", fake_session_state), \
+        patch.object(O, "fetch_slate_props", return_value=([], {})), \
+        patch.object(O, "market_lines_for_slate", return_value={}), \
+        patch.object(O, "books_in_offers", return_value=[]):
+        BBD.load_generic_best_bets_board("NCAAF", "2026-07-28")
+
+    diag = fake_session_state.get("_real_lines_diag_NCAAF_2026-07-28")
+    assert diag is not None
+    assert diag["attempted"] is True
+    assert diag["api_key_present"] is True
+    assert diag["offers"] == 0
+    assert diag["matched_lines"] == 0
+    assert diag["error"] is None
+    print("✓ the real-lines diagnostic correctly distinguishes 'fetch ran, found 0 real offers' "
+         "from 'fetch never ran', which used to look identical from the outside")
+
+
+def test_load_generic_best_bets_board_diagnostic_reports_not_attempted_without_api_key():
+    class _FakeEngine:
+        @staticmethod
+        def build_slate(date_str):
+            return ([], [])
+
+    class _FakeProjections:
+        @staticmethod
+        def build_best_bets(rows, real_lines=None):
+            return []
+
+    class _FakeSport:
+        has_projections = True
+        markets = ["player_pass_yds"]
+        odds_sport_key = "americanfootball_ncaaf"
+        engine = _FakeEngine()
+        projections = _FakeProjections()
+
+    fake_session_state = {}
+    with patch.object(BBD.sports, "get", lambda sport_key: _FakeSport()), \
+        patch.object(BBD, "get_odds_api_key", lambda: None), \
+        patch.object(BBD.st, "session_state", fake_session_state):
+        BBD.load_generic_best_bets_board("NCAAF", "2026-07-28")
+
+    diag = fake_session_state.get("_real_lines_diag_NCAAF_2026-07-28")
+    assert diag["attempted"] is False
+    assert diag["api_key_present"] is False
+    print("✓ the real-lines diagnostic correctly reports 'not attempted' when no API key is configured")
+
+
 def test_load_generic_best_bets_board_returns_empty_for_outcome_based_sports():
     # UFC-style sports (has_projections=False) should return empty gracefully, not error --
     # this is the path that lets the calling pages show their own dedicated messaging instead.
