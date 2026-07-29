@@ -359,4 +359,6 @@ with st.container(border=True):
 # to separately re-enter a pick into Bet Log is real friction that gets skipped in favor of just
 # making the pick. Owner-only (quick_log itself enforces this). Logs the TRIMMED set -- whatever
 # the slider above currently shows is what actually gets offered for logging.
-quick_log.render_quick_log(trimmed_legs, date_str, _active.key, key_prefix="basket")
+_real_offers = st.session_state.get(f"_real_offers_{_active.key}_{date_str}") or []
+quick_log.render_quick_log(trimmed_legs, date_str, _active.key, key_prefix="basket",
+                           offers=_real_offers)

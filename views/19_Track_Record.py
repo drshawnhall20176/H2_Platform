@@ -118,6 +118,38 @@ elif clv_n < 100:
     st.caption(f"Sample: {clv_n} bets with closing lines — enough to see the trend, still growing "
                "toward a fully settled read.")
 
+# ------------------------------------------------------------------ real-price CLV (the trustworthy number)
+st.divider()
+rp = B.real_price_clv_summary(bets)
+st.subheader("💵 CLV on real captured prices")
+st.caption("The metric above compares entry_odds against the closing line — but until recently, "
+          "every logged pick's entry_odds was the model's own **Fair price**, re-derived "
+          "straight from its own probability, not an actual price we got. That's not really "
+          "measuring \"did we get a good price\" — it's measuring \"did the model's own belief "
+          "end up on the right side of where the market closed,\" which is a different, less "
+          "direct signal. Picks logged from a page with live sportsbook odds now capture a "
+          "**real** price instead when one's available. This section is CLV computed on ONLY "
+          "those genuinely real-priced picks — the actual, trustworthy answer, even though the "
+          "sample is small for now.")
+if rp["n_real_price"] == 0:
+    st.caption("No picks with a real captured price yet — this fills in as new picks get logged "
+              "from a page with live odds. The metric above still reflects the model's own "
+              "fair-price signal in the meantime, not nothing.")
+else:
+    r1, r2, r3 = st.columns(3)
+    r1.metric("Real-price CLV", f"{rp['avg_clv']:+.2f}%" if rp["avg_clv"] is not None else "—",
+             help="Average CLV, computed only on picks whose entry_odds is a real captured "
+                  "sportsbook price — not the model's own Fair price.")
+    r2.metric("Real-priced picks", f"{rp['n_real_price']} / {rp['n_total']}",
+             help="How many tracked picks have a genuinely real captured price versus the "
+                  "model's own Fair-price fallback. This grows over time, it can't be "
+                  "backfilled for picks already logged.")
+    r3.metric("Beat-close rate (real prices)",
+             f"{rp['beat_close_rate']:.0f}%" if rp["beat_close_rate"] is not None else "—")
+    if rp["n_real_price"] < 20:
+        st.caption(f"Only {rp['n_real_price']} real-priced picks so far — direction only, not a "
+                  "verdict yet. This is the number worth watching grow.")
+
 # ------------------------------------------------------------------ CLV curve
 st.divider()
 st.subheader("📈 Closing-line value over time")

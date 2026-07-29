@@ -217,8 +217,12 @@ with left:
         # widget per market tab (which would mean 15+ redundant copies). Owner-only (quick_log
         # itself enforces this, so this stays hidden for a public/Discord audience even though
         # Command Center itself is a public page).
+        # _real_offers: the SAME real sportsbook offers already fetched to price this board (see
+        # best_bets_data.py's own offers side-channel) -- reused so a logged pick gets a real
+        # captured price when one exists, instead of quick_log always falling back to Fair odds.
+        _real_offers = st.session_state.get(f"_real_offers_{_active.key}_{today}") or []
         quick_log.render_quick_log(grading.build_top_leans(plays, per_market=2), today,
-                                   _active.key, key_prefix="top_leans")
+                                   _active.key, key_prefix="top_leans", offers=_real_offers)
     else:
         st.info("No games on the board right now. Top leans appear here on an active slate.")
  

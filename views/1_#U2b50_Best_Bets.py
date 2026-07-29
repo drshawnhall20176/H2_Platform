@@ -241,7 +241,12 @@ st.dataframe(df.style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×", "Fa
 # Quick-log widget, added directly on request: during a real, narrow pick-making window, having
 # to separately re-enter a pick into Bet Log is real friction that gets skipped in favor of just
 # making the pick. Owner-only (quick_log itself enforces this).
-quick_log.render_quick_log(view, date_str, _active.key, key_prefix="best_bets")
+# _real_offers side-channel: the SAME real sportsbook offers this page already fetched to price
+# its own board (see best_bets_data.load_generic_best_bets_board) -- reused here so a logged
+# pick gets a real captured price when one exists, instead of quick_log always falling back to
+# the model's own Fair odds.
+_real_offers = st.session_state.get(f"_real_offers_{_active.key}_{date_str}") or []
+quick_log.render_quick_log(view, date_str, _active.key, key_prefix="best_bets", offers=_real_offers)
 
 if any(p.get("_bullpen_blended") for p in view):
     st.caption("🔄 = re-priced using this hitter's own real vs-starter/vs-bullpen exposure split, "

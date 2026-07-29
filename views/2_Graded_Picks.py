@@ -259,7 +259,9 @@ else:
                 unsafe_allow_html=True,
             )
     summary_plays = [pl for entry in summary for pl in entry["picks"]]
-    quick_log.render_quick_log(summary_plays, date_str, _active.key, key_prefix="graded_summary")
+    _real_offers = st.session_state.get(f"_real_offers_{_active.key}_{date_str}") or []
+    quick_log.render_quick_log(summary_plays, date_str, _active.key, key_prefix="graded_summary",
+                               offers=_real_offers)
     st.caption("Sorted by real ModelProb within each grade — probability of actually hitting, "
               "not raw Conviction (which is relative to each market's own typical reference "
               "rate, not an absolute likelihood). The full game-by-game board below is complete "
@@ -318,5 +320,6 @@ for game in organized:
         # skipped in favor of just making the pick. Per-game (this page's own natural unit),
         # owner-only (quick_log itself enforces this).
         game_plays = [play for player_entry in game["players"] for play in player_entry["plays"]]
+        _real_offers = st.session_state.get(f"_real_offers_{_active.key}_{date_str}") or []
         quick_log.render_quick_log(game_plays, date_str, _active.key,
-                                   key_prefix=f"graded_{game['game']}")
+                                   key_prefix=f"graded_{game['game']}", offers=_real_offers)

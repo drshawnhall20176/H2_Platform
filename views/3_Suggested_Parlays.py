@@ -332,7 +332,9 @@ for parlay in parlays:
         # window, having to separately re-enter a pick into Bet Log is real friction that gets
         # skipped in favor of just making the pick. Owner-only (quick_log itself enforces this),
         # keyed per tier so each tier's own multiselect/button don't collide with another tier's.
+        _real_offers = st.session_state.get(f"_real_offers_{_active.key}_{date_str}") or []
         quick_log.render_quick_log(parlay["legs"], date_str, _active.key,
                                    key_prefix=f"parlays_{parlay['tier']}",
                                    is_parlay=True,
-                                   parlay_tier=parlay["tier"])
+                                   parlay_tier=parlay["tier"],
+                                   offers=_real_offers)
