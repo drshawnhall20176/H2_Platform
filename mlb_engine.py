@@ -408,6 +408,19 @@ def get_live_pitching_line(game_pk: int, side: str) -> Optional[Dict[str, Any]]:
     numberOfPitches/hits/earnedRuns are new reads from this same dict, not a new endpoint or a
     new assumption about its shape.
 
+    ALSO READS `runs` (total runs allowed, earned + unearned) alongside `earnedRuns` — added
+    directly to answer a real, live piece of confusion this platform's own community hit
+    (checked against the real chat log): a Rocchio fielding error meant a walk and a Kyle
+    Manzardo home run afterward didn't count as earned, and it took several messages of manual
+    cross-checking against ESPN before anyone realized why the earned-run number wasn't moving
+    the way the raw run total was. `runs` and `earnedRuns` are both standard, separately-tracked
+    fields on the same MLB Stats API pitching-stat object (the ERA-vs-RA distinction is
+    fundamental to how baseball itself tracks pitching) — reading one more field off data this
+    function already fetches, not a new endpoint or a new call. `unearned_runs = runs -
+    earned_runs`; unearned_runs > 0 is the direct, immediate answer to "wait, why isn't the
+    earned-run number matching the runs I'm watching score" the moment it happens, instead of a
+    person needing to notice the mismatch and cross-check a second source mid-game.
+
     RAW NUMBERS ONLY, DELIBERATELY NOT A PREDICTION: this does not estimate "innings left" or
     "pull probability" — that would be a claim about a live, in-progress managerial decision,
     genuinely harder to validate than anything else already flagged as experimental on this
@@ -416,12 +429,15 @@ def get_live_pitching_line(game_pk: int, side: str) -> Optional[Dict[str, Any]]:
     HONEST LIMITATION, same posture as get_actual_starter above: numberOfPitches specifically on
     an IN-PROGRESS boxscore is not verified against a live response from this sandbox (statsapi.
     mlb.com unreachable here) — a real, standard, well-documented field, but worth a real, early
-    check once redeployed, same as every other boxscore-shape assumption in this file.
+    check once redeployed, same as every other boxscore-shape assumption in this file. `runs`
+    alongside `earnedRuns` on the SAME object carries the identical unverified-shape caveat —
+    inferred from the fact that earnedRuns already reads correctly in production and ERA-vs-RA is
+    about as standard a stat pairing as exists in baseball, not confirmed against a live response.
 
-    Returns {"player_id", "name", "pitches", "innings_pitched", "hits", "earned_runs",
-    "strikeouts", "walks"} for whoever's boxscore entry shows gamesStarted >= 1 on `side`
-    ("home"/"away"), or None — most commonly because the game hasn't started yet. An honest None,
-    not a fabricated zero line."""
+    Returns {"player_id", "name", "pitches", "innings_pitched", "hits", "runs", "earned_runs",
+    "unearned_runs", "strikeouts", "walks"} for whoever's boxscore entry shows gamesStarted >= 1
+    on `side` ("home"/"away"), or None — most commonly because the game hasn't started yet. An
+    honest None, not a fabricated zero line."""
     try:
         box = fetch_json(f"{BASE}/game/{game_pk}/boxscore")
     except Exception:
@@ -434,12 +450,15 @@ def get_live_pitching_line(game_pk: int, side: str) -> Optional[Dict[str, Any]]:
         gs = pit.get("gamesStarted")
         if gs and int(gs) >= 1:
             person = pdata.get("person", {}) or {}
+            runs = int(pit.get("runs", 0) or 0)
+            earned_runs = int(pit.get("earnedRuns", 0) or 0)
             return {
                 "player_id": person.get("id"), "name": person.get("fullName"),
                 "pitches": int(pit.get("numberOfPitches", 0) or 0),
                 "innings_pitched": pit.get("inningsPitched", "0.0"),
                 "hits": int(pit.get("hits", 0) or 0),
-                "earned_runs": int(pit.get("earnedRuns", 0) or 0),
+                "runs": runs, "earned_runs": earned_runs,
+                "unearned_runs": max(0, runs - earned_runs),
                 "strikeouts": int(pit.get("strikeOuts", 0) or 0),
                 "walks": int(pit.get("baseOnBalls", 0) or 0),
             }
@@ -1458,6 +1477,54 @@ def get_pitcher_starts_this_season(pitcher_id: int, season: int,
 
 
 MIN_SPLIT_STARTS = 5   # minimum starts/games before we use a split over the full-season line
+
+
+def pitcher_season_pitch_stats(pitcher_id: int, season: int, before_date: Optional[str] = None,
+                               team_id: Optional[int] = None) -> Dict[str, Any]:
+    """This pitcher's own average and max pitch count across REAL starts this season, from the
+    exact same gameLog data get_pitcher_starts_this_season already fetches (one call, already
+    paid for by that function whenever it's used first — no new endpoint). `stat.numberOfPitches`
+    is read from each start's own gameLog entry, same field name already confirmed working on
+    the live boxscore in get_live_pitching_line (gameLog entries share the same underlying
+    pitching-stat schema, per get_pitcher_starts_this_season's own docstring).
+
+    Returns {"n_starts", "avg_pitches", "max_pitches"} — all None/0 if there's no real start
+    data yet (early season, or a pitcher with too few starts to mean anything)."""
+    starts = get_pitcher_starts_this_season(pitcher_id, season, before_date=before_date, team_id=team_id)
+    counts = [int(s["stat"].get("numberOfPitches", 0) or 0) for s in starts
+             if s.get("stat", {}).get("numberOfPitches")]
+    if not counts:
+        return {"n_starts": len(starts), "avg_pitches": None, "max_pitches": None}
+    return {"n_starts": len(starts), "avg_pitches": round(sum(counts) / len(counts), 1),
+           "max_pitches": max(counts)}
+
+
+def hook_risk_flag(current_pitches: int, season_stats: Dict[str, Any]) -> Optional[str]:
+    """A direct answer to a real scenario from this platform's own community: a strikeout prop
+    riding on a pitcher who needs "one more" late, with no visibility into whether his own season
+    workload pattern makes that likely. Compares CURRENT live pitch count against this specific
+    pitcher's own real season average/max (not a league-wide number) — the same "his own season
+    norm, not a generic threshold" discipline nfl_projections' TD:INT regression already follows.
+
+    Returns a short flag string, or None if there isn't enough season data yet
+    (season_stats["n_starts"] < MIN_SPLIT_STARTS) to say anything meaningful — an honest
+    "no read" rather than a guess dressed up as a signal.
+
+    NOT a prediction of exactly when a manager will pull this specific pitcher today (a live,
+    in-progress decision — same "raw numbers, not a prediction" posture get_live_pitching_line's
+    own docstring holds to) — a workload-context flag, not a pull-probability estimate."""
+    n = season_stats.get("n_starts") or 0
+    avg = season_stats.get("avg_pitches")
+    mx = season_stats.get("max_pitches")
+    if n < MIN_SPLIT_STARTS or avg is None or mx is None:
+        return None
+    if current_pitches >= mx:
+        return f"🔴 Already at his season-high pitch count ({mx}) — deep past his own norm today"
+    if current_pitches >= avg + 10:
+        return f"🟠 {current_pitches} pitches vs. his own {avg:.0f} average this season — hook risk elevated"
+    if current_pitches >= avg:
+        return f"🟡 At his own season-average pitch count ({avg:.0f}) — normal range to be pulled soon"
+    return None
 
 
 def get_pitcher_split_stat(pitcher_id: int, season: int, date_str: str,

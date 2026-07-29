@@ -1089,15 +1089,20 @@ def test_get_actual_starter_reads_the_correct_side(monkeypatch):
 # ----------------------------------------------------------------- get_live_pitching_line
 def _fake_live_boxscore_with_stats(home_players=None, away_players=None):
     """home_players/away_players: {pid: (name, gamesStarted, pitches, hits, earned_runs,
-    strikeouts, walks, innings_pitched)}. A separate, purpose-built fake from _fake_live_boxscore
-    above (which only models gamesStarted for the simpler starter-confirmation tests) -- this one
-    carries the real, full pitching-stat fields get_live_pitching_line actually reads."""
+    strikeouts, walks, innings_pitched, [runs])}. A separate, purpose-built fake from
+    _fake_live_boxscore above (which only models gamesStarted for the simpler starter-
+    confirmation tests) -- this one carries the real, full pitching-stat fields
+    get_live_pitching_line actually reads. `runs` is OPTIONAL (9th tuple element) -- defaults to
+    equal earned_runs (i.e. zero unearned runs) so every existing 8-tuple call site keeps working
+    unchanged; pass a 9th value explicitly to model a game with a real unearned run."""
     def _side(players):
         out = {}
-        for pid, (name, gs, pitches, hits, er, k, bb, ip) in (players or {}).items():
+        for pid, vals in (players or {}).items():
+            name, gs, pitches, hits, er, k, bb, ip = vals[:8]
+            runs = vals[8] if len(vals) > 8 else er
             out[f"ID{pid}"] = {"person": {"id": pid, "fullName": name}, "stats": {"pitching": {
                 "gamesStarted": gs, "numberOfPitches": pitches, "hits": hits, "earnedRuns": er,
-                "strikeOuts": k, "baseOnBalls": bb, "inningsPitched": ip}}}
+                "runs": runs, "strikeOuts": k, "baseOnBalls": bb, "inningsPitched": ip}}}
         return {"players": out}
     return {"teams": {"home": _side(home_players), "away": _side(away_players)}}
 
@@ -1108,8 +1113,8 @@ def test_get_live_pitching_line_finds_the_real_starter_with_full_line(monkeypatc
     monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
     line = E.get_live_pitching_line(12345, "home")
     assert line == {"player_id": 555, "name": "Real Starter", "pitches": 68,
-                    "innings_pitched": "5.2", "hits": 3, "earned_runs": 1,
-                    "strikeouts": 6, "walks": 2}
+                    "innings_pitched": "5.2", "hits": 3, "runs": 1, "earned_runs": 1,
+                    "unearned_runs": 0, "strikeouts": 6, "walks": 2}
     print("✓ get_live_pitching_line correctly reads the real starter's full live line from the boxscore")
 
 
@@ -1153,7 +1158,21 @@ def test_get_live_pitching_line_missing_fields_default_honestly(monkeypatch):
     monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
     line = E.get_live_pitching_line(12345, "home")
     assert line["pitches"] == 0 and line["hits"] == 0 and line["strikeouts"] == 0
+    assert line["runs"] == 0 and line["earned_runs"] == 0 and line["unearned_runs"] == 0
     print("✓ get_live_pitching_line defaults missing individual stat fields to 0 rather than crashing")
+
+
+def test_fake_boxscore_helper_optional_runs_tuple_element_models_unearned_runs(monkeypatch):
+    # Exercises the helper's own 9th-tuple-element extension directly, not just the hand-built
+    # dict version used elsewhere -- confirms the shared test fixture itself stays correct, not
+    # just the function it fakes.
+    box = _fake_live_boxscore_with_stats(
+        home_players={555: ("Real Starter", 1, 88, 6, 2, 5, 3, "5.1", 4)})   # er=2, runs=4
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+    line = E.get_live_pitching_line(12345, "home")
+    assert line["runs"] == 4 and line["earned_runs"] == 2 and line["unearned_runs"] == 2
+    print("✓ _fake_live_boxscore_with_stats' optional 9th tuple element correctly models a game "
+         "with a real unearned run")
 
 
 # ----------------------------------------------------------------- starter_mismatch
@@ -1688,6 +1707,89 @@ def test_hitter_workload_sorted_by_streak_descending(monkeypatch):
     assert workload[0]["name"] == "High Streak"   # 3-game streak (never missed) ranked first
     assert workload[1]["name"] == "Low Streak"    # 1-game streak (missed game 2) ranked second
     print("✓ get_team_hitter_workload correctly sorts the least-rested hitters first")
+
+
+def test_get_live_pitching_line_computes_unearned_runs():
+    # Regression guard for a real community pain point (checked against the actual chat log): a
+    # fielding error meant a walk and a home run afterward didn't count as earned, and it took
+    # several messages of manual ESPN cross-checking before anyone understood why. runs and
+    # earnedRuns are both standard fields on the same pitching-stat object this function already
+    # fetches -- unearned_runs = runs - earned_runs answers that confusion directly.
+    def fake_fetch_json(url, params=None, retries=2):
+        return {"teams": {"away": {"players": {"ID123": {
+            "person": {"id": 123, "fullName": "Chase Burns"},
+            "stats": {"pitching": {
+                "gamesStarted": 1, "numberOfPitches": 88, "inningsPitched": "5.1",
+                "hits": 6, "runs": 4, "earnedRuns": 2, "strikeOuts": 5, "baseOnBalls": 3,
+            }},
+        }}}}}
+    import unittest.mock as mock
+    with mock.patch.object(E, "fetch_json", side_effect=fake_fetch_json):
+        line = E.get_live_pitching_line(12345, "away")
+    assert line["runs"] == 4 and line["earned_runs"] == 2
+    assert line["unearned_runs"] == 2   # the direct answer: 2 of his 4 runs are NOT earned
+    print("✓ get_live_pitching_line correctly computes unearned_runs from the same boxscore data "
+         "it already fetches, reproducing the exact real Chase Burns confusion from the Discord log")
+
+
+def test_get_live_pitching_line_zero_unearned_when_all_earned():
+    def fake_fetch_json(url, params=None, retries=2):
+        return {"teams": {"home": {"players": {"ID9": {
+            "person": {"id": 9, "fullName": "Clean Outing"},
+            "stats": {"pitching": {
+                "gamesStarted": 1, "numberOfPitches": 70, "inningsPitched": "6.0",
+                "hits": 3, "runs": 1, "earnedRuns": 1, "strikeOuts": 7, "baseOnBalls": 1,
+            }},
+        }}}}}
+    import unittest.mock as mock
+    with mock.patch.object(E, "fetch_json", side_effect=fake_fetch_json):
+        line = E.get_live_pitching_line(999, "home")
+    assert line["unearned_runs"] == 0
+    print("✓ get_live_pitching_line reports 0 unearned runs when runs and earned_runs match")
+
+
+def test_pitcher_season_pitch_stats_averages_real_starts(monkeypatch):
+    fake_starts = [
+        {"gamePk": 1, "game_date": "2026-06-01", "stat": {"numberOfPitches": 95}},
+        {"gamePk": 2, "game_date": "2026-06-08", "stat": {"numberOfPitches": 88}},
+        {"gamePk": 3, "game_date": "2026-06-15", "stat": {"numberOfPitches": 102}},
+    ]
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda *a, **k: fake_starts)
+    stats = E.pitcher_season_pitch_stats(12345, 2026, before_date="2026-07-29")
+    assert stats["n_starts"] == 3
+    assert stats["avg_pitches"] == round((95 + 88 + 102) / 3, 1)
+    assert stats["max_pitches"] == 102
+    print("✓ pitcher_season_pitch_stats correctly averages and finds the max from real starts")
+
+
+def test_pitcher_season_pitch_stats_empty_with_no_starts(monkeypatch):
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season", lambda *a, **k: [])
+    stats = E.pitcher_season_pitch_stats(12345, 2026)
+    assert stats["n_starts"] == 0 and stats["avg_pitches"] is None and stats["max_pitches"] is None
+    print("✓ pitcher_season_pitch_stats returns an honest empty result with no real starts yet")
+
+
+def test_hook_risk_flag_reproduces_the_real_melton_scenario():
+    # The actual scenario from the Discord log: needing one more K at 92+ pitches, on a pitcher
+    # whose own season-high was around 102 -- a real, elevated-risk situation the flag should
+    # surface, not a guess about whether he specifically gets pulled.
+    season_stats = {"n_starts": 15, "avg_pitches": 85.0, "max_pitches": 102}
+    flag_92 = E.hook_risk_flag(92, season_stats)
+    assert flag_92 is not None and "🟡" in flag_92
+    flag_past_max = E.hook_risk_flag(103, season_stats)
+    assert flag_past_max is not None and "🔴" in flag_past_max
+    flag_low = E.hook_risk_flag(70, season_stats)
+    assert flag_low is None   # well below his own norm -- no flag, not a false alarm
+    print("✓ hook_risk_flag correctly flags elevated and season-high pitch counts, reproducing "
+         "the real Melton scenario from the Discord log")
+
+
+def test_hook_risk_flag_no_read_with_too_few_starts():
+    thin_sample = {"n_starts": 2, "avg_pitches": 85.0, "max_pitches": 102}
+    assert E.hook_risk_flag(92, thin_sample) is None
+    assert E.hook_risk_flag(92, {"n_starts": 10, "avg_pitches": None, "max_pitches": None}) is None
+    print("✓ hook_risk_flag returns an honest 'no read' rather than a guess with too little "
+         "season data or missing pitch-count fields")
 
 
 if __name__ == "__main__":
