@@ -222,7 +222,76 @@ def test_load_generic_best_bets_board_fetches_real_lines_for_non_nfl_sports_too(
          "using that sport's own markets/odds_sport_key -- the exact fix for a real reported bug")
 
 
-def test_load_generic_best_bets_board_diagnostic_reports_zero_offers():
+def test_load_generic_best_bets_board_stores_real_offers_for_quick_log_reuse():
+    # Regression guard for the actual fix: Best Bets already fetches real offers internally for
+    # its own board display -- this confirms those SAME offers get stored in a session-state
+    # side-channel so quick_log's own real-price lookup can reuse them for free, with zero extra
+    # Odds API calls, instead of always falling back to the model's own Fair odds.
+    import odds_api as O
+
+    class _FakeEngine:
+        @staticmethod
+        def build_slate(date_str):
+            return ([], [])
+
+    class _FakeProjections:
+        @staticmethod
+        def build_best_bets(rows, real_lines=None):
+            return []
+
+    class _FakeSport:
+        has_projections = True
+        markets = ["batter_hits"]
+        odds_sport_key = "baseball_mlb"
+        engine = _FakeEngine()
+        projections = _FakeProjections()
+
+    fake_offers = [{"player": "Wade Meckler", "market": "batter_hits", "point": 0.5,
+                    "over": {"draftkings": -260}, "under": {"draftkings": 210}}]
+    fake_session_state = {}
+    with patch.object(BBD.sports, "get", lambda sport_key: _FakeSport()), \
+        patch.object(BBD, "get_odds_api_key", lambda: "FAKE_KEY"), \
+        patch.object(BBD.st, "session_state", fake_session_state), \
+        patch.object(O, "fetch_slate_props", return_value=(fake_offers, {})), \
+        patch.object(O, "market_lines_for_slate", return_value={}), \
+        patch.object(O, "books_in_offers", return_value=["draftkings"]):
+        BBD.load_generic_best_bets_board("MLB", "2026-07-28")
+
+    stored_offers = fake_session_state.get("_real_offers_MLB_2026-07-28")
+    assert stored_offers == fake_offers
+    print("✓ load_generic_best_bets_board stores the real fetched offers in a session-state "
+         "side-channel for quick_log to reuse")
+
+
+def test_load_generic_best_bets_board_offers_sidechannel_empty_when_fetch_not_attempted():
+    class _FakeEngine:
+        @staticmethod
+        def build_slate(date_str):
+            return ([], [])
+
+    class _FakeProjections:
+        @staticmethod
+        def build_best_bets(rows, real_lines=None):
+            return []
+
+    class _FakeSport:
+        has_projections = True
+        markets = ["batter_hits"]
+        odds_sport_key = "baseball_mlb"
+        engine = _FakeEngine()
+        projections = _FakeProjections()
+
+    fake_session_state = {}
+    with patch.object(BBD.sports, "get", lambda sport_key: _FakeSport()), \
+        patch.object(BBD, "get_odds_api_key", lambda: None), \
+        patch.object(BBD.st, "session_state", fake_session_state):
+        BBD.load_generic_best_bets_board("MLB", "2026-07-28")
+
+    assert fake_session_state.get("_real_offers_MLB_2026-07-28") == []
+    print("✓ the offers side-channel is an honest empty list, not missing, when no fetch was attempted")
+
+
+
     # The exact scenario a real user hit and couldn't tell apart from a broken fetch: the
     # real-lines fetch runs successfully (no exception, real API key) but the book/Odds API has
     # zero props posted for this sport/date yet -- common well before a season starts. The

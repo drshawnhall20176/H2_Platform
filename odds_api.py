@@ -322,6 +322,78 @@ def market_lines_for_player(offers: List[Dict], player_name: str, projections_mo
     return {mkey: point for mkey, (point, _cnt) in best.items()}
 
 
+def real_entry_price(offers: List[Dict], player_name: str, market_key: str, side: str,
+                     preferred_book: Optional[str] = None,
+                     projections_module=None) -> Optional[Tuple[float, float, str]]:
+    """The REAL sportsbook price (American odds) for one player's specific market/side, picked
+    from `offers` (already fetched via fetch_slate_props) -- what a bet's entry_odds SHOULD be
+    when a real book price is available, instead of falling back to the model's own theoretical
+    Fair odds. Added directly to close a real, confirmed gap: quick_log.py's own Fair-odds
+    fallback meant entry_odds was always mathematically derived from the SAME probability CLV
+    was supposed to be checking against a real captured price -- comparing model_prob's own
+    price against the closing line isn't really measuring "did we get a good price," it's
+    measuring "did the model's own belief end up on the right side of where the market closed."
+    Confirmed directly against a real bet log export: every single tracked bet showed a priced
+    edge of well under 0.1 percentage points versus its own stated model_prob -- not a small real
+    edge, a tautology.
+
+    Returns (price, point, book) -- the real price, the real point/line that price was posted at
+    (which may differ slightly from the bet's own logged line if the book's number has since
+    moved), and which book it came from -- or None if this player/market/side has no real book
+    offer right now at all. Common well before a slate posts real props, or for a lower-profile
+    game/player a book hasn't priced yet -- the honest degradation quick_log.py falls back to
+    Fair odds for, same as always, just now the LAST resort instead of the ONLY option.
+
+    MATCHING: same normalize_name convention as market_lines_for_player/compute_edges, and the
+    same book-count tie-break as market_lines_for_player when more than one point is posted for
+    this player/market (prefer the point backed by the most total book quotes).
+
+    preferred_book RESOLUTION: same strategy as market_lines_for_slate -- the exact price at
+    preferred_book if that book posted this specific market, otherwise the single BEST (highest-
+    payout) price across every book that did. Never averages or silently picks an arbitrary book."""
+    if projections_module is None:
+        import projections as projections_module
+    P = projections_module
+    target_name = P.normalize_name(player_name)
+    side_lower = (side or "").lower()
+    if side_lower.startswith("over") or side_lower == "yes":
+        side_key = "over"
+    elif side_lower.startswith("under"):
+        side_key = "under"
+    else:
+        return None   # a side this function doesn't know how to price (e.g. a future new type)
+
+    best_offer = None
+    best_count = -1
+    for off in offers:
+        if P.normalize_name(off.get("player", "")) != target_name:
+            continue
+        if off.get("market") != market_key:
+            continue
+        count = len(off.get("over") or {}) + len(off.get("under") or {})
+        if count > best_count:
+            best_count = count
+            best_offer = off
+
+    if best_offer is None:
+        return None
+    book_prices = best_offer.get(side_key) or {}
+    if not book_prices:
+        return None
+    point = best_offer.get("point")
+    if point is None:
+        return None
+
+    if preferred_book and preferred_book in book_prices:
+        return float(book_prices[preferred_book]), float(point), preferred_book
+
+    picked = _best_price(book_prices)
+    if picked is None:
+        return None
+    book, price = picked
+    return float(price), float(point), book
+
+
 # Real US sportsbook keys as returned by The Odds API (Pro tier), with their display names.
 # Confirmed directly against the-odds-api.com's own Bookmaker APIs documentation.
 # DraftKings is default because that's the primary book for this platform's own users.

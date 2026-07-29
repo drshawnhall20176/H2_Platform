@@ -86,7 +86,69 @@ def test_bet_log_fields_from_play_entry_odds_is_the_model_fair_price():
     play = _play(fair=+340)
     fields = Q.bet_log_fields_from_play(play, "2026-07-20", "MLB")
     assert fields["entry_odds"] == 340
-    print("✓ bet_log_fields_from_play correctly uses the model's own Fair price as entry_odds")
+    assert fields["entry_odds_source"] == "model_fair"
+    print("✓ bet_log_fields_from_play correctly uses the model's own Fair price as entry_odds "
+         "when no real offers are provided, and labels it as such")
+
+
+def test_bet_log_fields_from_play_uses_real_book_price_when_offers_match():
+    # Regression guard for the actual fix: a real captured book price now replaces the model's
+    # own Fair-derived price when a genuine match exists in already-fetched offers. Confirmed
+    # against a real production finding: every previously-logged bet showed a "priced edge" of
+    # well under 0.1 percentage points versus its own model_prob -- a tautology, not a real edge,
+    # because entry_odds and model_prob were never independent numbers before this fix.
+    import unittest.mock as mock
+    play = _play(player="Wade Meckler", market="Batter Total Hits", side="Over", fair=-282)
+    offers = [{"player": "Wade Meckler", "market": "batter_hits", "point": 0.5,
+              "over": {"draftkings": -260}, "under": {"draftkings": 210}}]
+
+    class _FakeSport:
+        market_map = {"Batter Total Hits": "batter_hits"}
+
+    with mock.patch("sports.get", return_value=_FakeSport()):
+        fields = Q.bet_log_fields_from_play(play, "2026-07-20", "MLB", offers=offers,
+                                            preferred_book="draftkings")
+    assert fields["entry_odds"] == -260.0
+    assert fields["entry_odds_source"] == "book"
+    assert fields["line"] == 0.5   # the real posted point, from the real offer
+    print("✓ bet_log_fields_from_play uses a real captured book price (and its real point) "
+         "when offers are provided and a genuine match exists")
+
+
+def test_bet_log_fields_from_play_falls_back_to_fair_when_offers_have_no_match():
+    import unittest.mock as mock
+    play = _play(player="Wade Meckler", market="Batter Total Hits", side="Over", fair=-282)
+    offers = [{"player": "A Totally Different Player", "market": "batter_hits", "point": 1.5,
+              "over": {"draftkings": -150}, "under": {"draftkings": 130}}]
+
+    class _FakeSport:
+        market_map = {"Batter Total Hits": "batter_hits"}
+
+    with mock.patch("sports.get", return_value=_FakeSport()):
+        fields = Q.bet_log_fields_from_play(play, "2026-07-20", "MLB", offers=offers)
+    assert fields["entry_odds"] == -282   # the Fair fallback, untouched
+    assert fields["entry_odds_source"] == "model_fair"
+    assert fields["line"] == 0.5   # the play's own original line, not the unrelated offer's point
+    print("✓ bet_log_fields_from_play falls back to Fair odds when offers don't contain a real "
+         "match for this specific player/market")
+
+
+def test_bet_log_fields_from_play_offers_provided_but_market_not_in_sports_map():
+    # A real, honest edge case: offers exist, but this sport's own market_map doesn't have an
+    # entry for this specific display market name -- must degrade to the Fair fallback, not crash.
+    import unittest.mock as mock
+    play = _play(market="Some Unmapped Market")
+    offers = [{"player": "Ohtani", "market": "whatever", "point": 0.5,
+              "over": {"draftkings": -150}, "under": {"draftkings": 130}}]
+
+    class _FakeSport:
+        market_map = {}   # this market genuinely isn't mapped
+
+    with mock.patch("sports.get", return_value=_FakeSport()):
+        fields = Q.bet_log_fields_from_play(play, "2026-07-20", "MLB", offers=offers)
+    assert fields["entry_odds_source"] == "model_fair"
+    print("✓ bet_log_fields_from_play degrades honestly to Fair odds when the market isn't in "
+         "this sport's own market_map, rather than crashing")
 
 
 def test_bet_log_fields_from_play_maps_player_id():
@@ -109,8 +171,9 @@ def test_bet_log_fields_from_play_only_real_betlog_fields():
     # Confirms every key returned is a real, valid betlog.py field, not a typo or extra key that
     # would silently be dropped (or worse, rejected) by add_bet.
     real_betlog_fields = {"ts_placed", "slate_date", "game", "player", "player_id", "market",
-                          "side", "line", "entry_odds", "model_prob", "stake", "book",
-                          "close_odds", "result", "notes", "ticket", "sport", "trader"}
+                          "side", "line", "entry_odds", "entry_odds_source", "model_prob",
+                          "stake", "book", "close_odds", "result", "notes", "ticket", "sport",
+                          "trader"}
     fields = Q.bet_log_fields_from_play(_play(), "2026-07-20", "MLB")
     assert set(fields.keys()) <= real_betlog_fields
     print("✓ bet_log_fields_from_play returns only real, valid betlog.py field names")

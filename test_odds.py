@@ -500,6 +500,56 @@ def test_fetch_slate_props_exposes_raw_todays_events():
          "today, viewable directly instead of inferred")
 
 
+# ----------------------------------------------------------------- real_entry_price
+def test_real_entry_price_uses_preferred_book_when_available():
+    import projections as P
+    offers = [
+        {"player": "Wade Meckler", "market": "batter_hits", "point": 0.5,
+         "over": {"draftkings": -280, "fanduel": -260}, "under": {"draftkings": 220, "fanduel": 210}},
+    ]
+    result = O.real_entry_price(offers, "Wade Meckler", "batter_hits", "Over",
+                                preferred_book="draftkings", projections_module=P)
+    assert result == (-280.0, 0.5, "draftkings")
+    print("✓ real_entry_price uses the exact preferred book's price when that book posted the market")
+
+
+def test_real_entry_price_falls_back_to_best_price_when_preferred_book_missing():
+    import projections as P
+    offers = [
+        {"player": "Wade Meckler", "market": "batter_hits", "point": 0.5,
+         "over": {"draftkings": -280, "fanduel": -260}, "under": {"draftkings": 220, "fanduel": 210}},
+    ]
+    result = O.real_entry_price(offers, "Wade Meckler", "batter_hits", "Over",
+                                preferred_book="betmgm", projections_module=P)
+    assert result == (-260.0, 0.5, "fanduel")   # -260 pays more than -280 -- the real best price
+    print("✓ real_entry_price falls back to the single best (highest-payout) price across books "
+         "when the preferred book didn't post this market")
+
+
+def test_real_entry_price_handles_under_and_yes_sides():
+    import projections as P
+    offers = [{"player": "X", "market": "batter_hits", "point": 0.5,
+              "over": {"draftkings": -280}, "under": {"draftkings": 220}}]
+    under = O.real_entry_price(offers, "X", "batter_hits", "Under", projections_module=P)
+    assert under == (220.0, 0.5, "draftkings")
+    yes = O.real_entry_price(offers, "X", "batter_hits", "Yes", projections_module=P)
+    assert yes == (-280.0, 0.5, "draftkings")   # "Yes" treated as the Over side
+    print("✓ real_entry_price correctly handles Under and treats Yes as the Over side")
+
+
+def test_real_entry_price_none_when_no_real_offer_exists():
+    import projections as P
+    offers = [{"player": "Someone Else", "market": "batter_hits", "point": 0.5,
+              "over": {"draftkings": -200}, "under": {"draftkings": 165}}]
+    # Wrong player
+    assert O.real_entry_price(offers, "Wade Meckler", "batter_hits", "Over", projections_module=P) is None
+    # Wrong market
+    assert O.real_entry_price(offers, "Someone Else", "batter_hr", "Over", projections_module=P) is None
+    # Empty offers entirely
+    assert O.real_entry_price([], "Someone Else", "batter_hits", "Over", projections_module=P) is None
+    print("✓ real_entry_price returns None (never a guess) when no real offer matches at all")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

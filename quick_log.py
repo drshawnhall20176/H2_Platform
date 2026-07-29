@@ -37,7 +37,9 @@ STAKE_QUICK_PICKS: List[float] = [round(i * 0.5, 1) for i in range(1001)]   # 0.
 
 
 def bet_log_fields_from_play(play: Dict, date_str: str, sport_key: str,
-                             stake: float = 0.0) -> Dict:
+                             stake: float = 0.0, offers: Optional[List[Dict]] = None,
+                             preferred_book: Optional[str] = None,
+                             odds_api_module=None, projections_module=None) -> Dict:
     """Pure, testable mapping from a play/leg dict (the same shape produced by build_best_bets,
     organize_graded_picks, build_suggested_parlays, and build_speculative_basket across every
     sport) to the exact kwargs betlog.add_bet needs. Separated from the Streamlit UI specifically
@@ -45,17 +47,60 @@ def bet_log_fields_from_play(play: Dict, date_str: str, sport_key: str,
     mapping here would silently corrupt real trade-log data, which is the one thing on this whole
     platform that must never be wrong.
 
-    entry_odds is the play's own "Fair" field -- the MODEL's fair price, not a real book price
-    (see this module's own docstring for why that distinction matters). model_prob and line
-    default to 0.0 rather than raising if genuinely absent, since a play missing one of these
-    fields should still be loggable (a person can fill in the gap in Bet Log itself) rather than
-    crash the whole logging flow over one incomplete field.
+    entry_odds: a REAL captured sportsbook price when `offers` is provided and has a real match
+    for this player/market/side (via odds_api.real_entry_price) -- otherwise, the play's own
+    "Fair" field (the MODEL's fair price), same fallback this module always had. Added directly
+    to close a real, confirmed gap: the old Fair-only behavior meant entry_odds was always
+    mathematically derived from model_prob, so CLV (which compares entry_odds against the real
+    closing line) was never actually measuring "did we get a good price" -- it was comparing the
+    model's own belief against where the market closed. Confirmed directly against a real bet
+    log export: every tracked bet showed a "priced edge" under 0.1 percentage points versus its
+    own model_prob -- not a small real edge, a tautology, because entry_odds and model_prob were
+    never independent numbers to begin with.
+
+    entry_odds_source records WHICH path produced entry_odds ("book" for a real captured price,
+    "model_fair" for the Fair-odds fallback) -- this is what lets CLV reporting show a genuinely
+    trustworthy number going forward instead of silently mixing the two kinds together the way
+    every bet before this fix necessarily did.
+
+    offers/preferred_book: pass the SAME already-fetched offers a calling page used to price its
+    own board (Best Bets, Edge Board, etc.) -- reuses that data for free, no extra Odds API call
+    just to log a pick. None (the default) skips the real-price lookup entirely and goes straight
+    to the Fair-odds fallback, same as this function's original behavior.
+
+    model_prob and line default to 0.0 rather than raising if genuinely absent, since a play
+    missing one of these fields should still be loggable (a person can fill in the gap in Bet Log
+    itself) rather than crash the whole logging flow over one incomplete field.
 
     player_id comes straight from the play's own "PlayerId" (set on every play by build_best_
     bets, present all the way through every downstream function in grading.py) -- this is what
     lets a logged bet be automatically settled later: retro.py's existing, already-tested grade_
     play/get_player_results match by numeric player ID, not by name, since name matching alone
     is genuinely fragile."""
+    entry_odds = play.get("Fair")
+    entry_odds_source = "model_fair"
+    line = float(play.get("Line") or 0.0)
+
+    if offers:
+        if odds_api_module is None:
+            import odds_api as odds_api_module
+        if projections_module is None:
+            import projections as projections_module
+        import sports
+        player = play.get("Player")
+        market_map = (sports.get(sport_key).market_map or {}) if sport_key else {}
+        market_key = market_map.get(play.get("Market"))
+        side = play.get("Side")
+        if player and market_key and side:
+            real = odds_api_module.real_entry_price(
+                offers, player, market_key, side, preferred_book=preferred_book,
+                projections_module=projections_module)
+            if real is not None:
+                real_price, real_point, _book = real
+                entry_odds = real_price
+                entry_odds_source = "book"
+                line = real_point   # the real posted line, which may have moved since the model's own default
+
     return {
         "slate_date": date_str,
         "game": play.get("Game"),
@@ -63,8 +108,9 @@ def bet_log_fields_from_play(play: Dict, date_str: str, sport_key: str,
         "player_id": play.get("PlayerId"),
         "market": play.get("Market"),
         "side": play.get("Side"),
-        "line": float(play.get("Line") or 0.0),
-        "entry_odds": play.get("Fair"),
+        "line": line,
+        "entry_odds": entry_odds,
+        "entry_odds_source": entry_odds_source,
         "model_prob": float(play.get("ModelProb") or 0.0),
         "stake": float(stake or 0.0),
         "sport": sport_key,
@@ -103,7 +149,8 @@ def format_play_label(play: Dict) -> str:
 
 def render_quick_log(plays: List[Dict], date_str: str, sport_key: str, key_prefix: str,
                      expanded: bool = False, is_parlay: bool = False,
-                     parlay_tier: Optional[str] = None) -> None:
+                     parlay_tier: Optional[str] = None,
+                     offers: Optional[List[Dict]] = None) -> None:
     """Quick-log widget supporting three independent logging modes in one action:
     - Log as parlay: all selected picks under one ticket name (linked in Bet Log)
     - Log as singles: each selected pick as its own independent bet entry
@@ -111,6 +158,15 @@ def render_quick_log(plays: List[Dict], date_str: str, sport_key: str, key_prefi
 
     is_parlay: when True, pre-selects all plays and defaults Log as parlay to ON.
     parlay_tier: used in the default ticket name (e.g. 'Game Coverage', 'Safer').
+
+    offers: the SAME already-fetched real sportsbook offers a calling page used to price its own
+    board (Best Bets, Edge Board, etc.), if it has them -- passed straight through to
+    bet_log_fields_from_play so a logged pick gets a REAL captured price when one exists, instead
+    of always falling back to the model's own Fair odds (see quick_log_fields_from_play's own
+    docstring for why that fallback alone made CLV tracking not actually measure what it claimed
+    to). None (the default) preserves the original Fair-odds-only behavior for any caller that
+    doesn't have real offers on hand.
+
     OWNER-ONLY: renders nothing for non-owner sessions."""
     import streamlit as st
 
@@ -120,8 +176,14 @@ def render_quick_log(plays: List[Dict], date_str: str, sport_key: str, key_prefi
         return
 
     with st.expander("📒 Log picks to the Bet Log", expanded=expanded):
-        st.caption("Logs the model's own fair price as entry odds — edit actual fill "
-                  "odds/stakes in Bet Log after logging.")
+        if offers:
+            st.caption("Uses a real, live sportsbook price when one's available for the "
+                      "selected book — falls back to the model's own fair price only when "
+                      "no real offer exists yet. Edit actual fill odds/stakes in Bet Log "
+                      "after logging if needed.")
+        else:
+            st.caption("Logs the model's own fair price as entry odds — edit actual fill "
+                      "odds/stakes in Bet Log after logging.")
 
         # ── Book selector ─────────────────────────────────────────────────────
         try:
@@ -259,7 +321,8 @@ def render_quick_log(plays: List[Dict], date_str: str, sport_key: str, key_prefi
                 for i in picks:
                     play = plays[i]
                     fields = bet_log_fields_from_play(play, date_str, sport_key,
-                                                      stake=parlay_stake)
+                                                      stake=parlay_stake, offers=offers,
+                                                      preferred_book=book)
                     fields["book"] = book
                     fields["ticket"] = ticket
                     B.add_bet(**fields)
@@ -273,7 +336,8 @@ def render_quick_log(plays: List[Dict], date_str: str, sport_key: str, key_prefi
                         n_skipped += 1
                         continue
                     fields = bet_log_fields_from_play(play, date_str, sport_key,
-                                                      stake=singles_stake)
+                                                      stake=singles_stake, offers=offers,
+                                                      preferred_book=book)
                     fields["book"] = book
                     B.add_bet(**fields)
                     logged_sigs.add(sig)

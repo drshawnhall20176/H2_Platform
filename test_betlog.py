@@ -370,6 +370,48 @@ def test_cashed_out_amount_persists_through_a_real_sqlite_round_trip():
     print("✓ cashed_out_amount persists correctly through a real SQLite add_bet/list_bets round trip")
 
 
+def test_real_price_clv_summary_excludes_model_fair_bets():
+    # Regression guard for the actual fix: a bet whose entry_odds is really just the model's own
+    # Fair price re-derived from model_prob must never count toward this specific metric, even
+    # if it happens to have a close_odds recorded -- only entry_odds_source == "book" counts.
+    bets = [
+        {"entry_odds": -150, "close_odds": -170, "entry_odds_source": "book"},
+        {"entry_odds": -110, "close_odds": -105, "entry_odds_source": "book"},
+        {"entry_odds": -282, "close_odds": -260, "entry_odds_source": "model_fair"},
+        {"entry_odds": +120, "close_odds": None, "entry_odds_source": "book"},
+    ]
+    result = B.real_price_clv_summary(bets)
+    assert result["n_real_price"] == 3
+    assert result["n_total"] == 4
+    assert result["clv_n"] == 2   # only the 2 real-price bets that also have a close_odds
+    print("✓ real_price_clv_summary correctly excludes model_fair-sourced bets from the CLV math")
+
+
+def test_real_price_clv_summary_empty_when_no_real_price_bets_exist():
+    # The expected state for almost every bet logged before this fix shipped.
+    bets = [
+        {"entry_odds": -150, "close_odds": -170, "entry_odds_source": "model_fair"},
+        {"entry_odds": -110, "close_odds": -105, "entry_odds_source": None},   # legacy, pre-fix row
+    ]
+    result = B.real_price_clv_summary(bets)
+    assert result["n_real_price"] == 0
+    assert result["avg_clv"] is None
+    assert result["beat_close_rate"] is None
+    print("✓ real_price_clv_summary returns an honest empty result, not zero or a crash, when no "
+         "bet has a real captured price yet")
+
+
+def test_real_price_clv_summary_missing_entry_odds_source_treated_as_not_real():
+    # A pre-existing row from before this column existed has no entry_odds_source at all
+    # (None) -- must NOT be silently counted as a real price just because it's not explicitly
+    # tagged "model_fair".
+    bets = [{"entry_odds": -150, "close_odds": -170}]   # no entry_odds_source key at all
+    result = B.real_price_clv_summary(bets)
+    assert result["n_real_price"] == 0
+    print("✓ a bet with no entry_odds_source at all is correctly treated as not a real price, "
+         "not silently included")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS bets (
     sport      TEXT,
     trader     TEXT,
     is_real_bet INTEGER DEFAULT 1,
-    cashed_out_amount REAL
+    cashed_out_amount REAL,
+    entry_odds_source TEXT
 );
 """
 # is_real_bet: added directly on request, to distinguish real, placed wagers from tracking-only
@@ -82,7 +83,7 @@ CREATE TABLE IF NOT EXISTS bets (
 
 _FIELDS = ["ts_placed", "slate_date", "game", "player", "player_id", "market", "side", "line",
            "entry_odds", "model_prob", "stake", "book", "close_odds", "result", "notes",
-           "ticket", "sport", "trader", "is_real_bet", "cashed_out_amount"]
+           "ticket", "sport", "trader", "is_real_bet", "cashed_out_amount", "entry_odds_source"]
  
  
 # ===========================================================================
@@ -133,6 +134,8 @@ def _sqlite_conn(db_path: str = DB_PATH):
             con.execute("ALTER TABLE bets ADD COLUMN is_real_bet INTEGER DEFAULT 1")
         if "cashed_out_amount" not in cols:  # migrate DBs that predate cash-out-vs-held tracking
             con.execute("ALTER TABLE bets ADD COLUMN cashed_out_amount REAL")
+        if "entry_odds_source" not in cols:  # migrate DBs that predate real-price-vs-Fair-odds tracking
+            con.execute("ALTER TABLE bets ADD COLUMN entry_odds_source TEXT")
         yield con
         con.commit()
     finally:
@@ -173,13 +176,14 @@ CREATE TABLE IF NOT EXISTS bets (
     slate_date TEXT, game TEXT, player TEXT, player_id INTEGER, market TEXT, side TEXT,
     line REAL, entry_odds INTEGER, model_prob REAL, stake REAL, book TEXT,
     close_odds INTEGER, result TEXT, notes TEXT, ticket TEXT, sport TEXT, trader TEXT,
-    is_real_bet BOOLEAN DEFAULT TRUE, cashed_out_amount REAL
+    is_real_bet BOOLEAN DEFAULT TRUE, cashed_out_amount REAL, entry_odds_source TEXT
 );
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS sport TEXT;
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS trader TEXT;
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS player_id INTEGER;
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS is_real_bet BOOLEAN DEFAULT TRUE;
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS cashed_out_amount REAL;
+ALTER TABLE bets ADD COLUMN IF NOT EXISTS entry_odds_source TEXT;
 """
  
  
@@ -450,8 +454,40 @@ def summary(bets: List[Dict]) -> Dict:
         "avg_clv": round(avg_clv, 2) if avg_clv is not None else None,
         "beat_close_rate": round(beat, 1) if beat is not None else None,
     }
- 
- 
+
+
+def real_price_clv_summary(bets: List[Dict]) -> Dict:
+    """CLV computed ONLY on bets with a genuinely captured real book price (entry_odds_source ==
+    "book") -- the actual, trustworthy answer to "are we beating the closing line," as opposed
+    to summary()'s own all-inclusive avg_clv, which (before entry_odds_source existed) could
+    include bets whose entry_odds was really just the model's own Fair price re-derived from
+    model_prob -- comparing a bet's own stated belief against where the market closed, not "did
+    we get a good price." Confirmed as a real, non-hypothetical gap: a live bet log export
+    showed every single tracked bet's "priced edge" under 0.1 percentage points versus its own
+    model_prob, a tautology rather than a real edge, because entry_odds and model_prob were
+    never independent numbers for any bet logged before this fix.
+
+    Kept as its OWN function rather than a filter flag on summary() specifically because record/
+    profit/ROI don't need this same restriction (a real $ result is a real $ result regardless of
+    how entry_odds was sourced) -- only CLV does, since CLV's whole meaning depends on entry_odds
+    being a real, independently-captured price.
+
+    Returns {"n_real_price", "n_total", "avg_clv", "beat_close_rate"} -- n_real_price will be a
+    small fraction of n_total for a while after this fix ships, growing over time as more bets
+    get logged with real captured prices going forward. That's expected, not a bug: pre-existing
+    bets never had a real price to begin with, and there's no way to retroactively invent one."""
+    real_price_bets = [b for b in bets if b.get("entry_odds_source") == "book"]
+    clvs = [clv_pct(b.get("entry_odds"), b.get("close_odds")) for b in real_price_bets]
+    clvs = [c for c in clvs if c is not None]
+    avg_clv = (sum(clvs) / len(clvs)) if clvs else None
+    beat = (sum(1 for c in clvs if c > 0) / len(clvs) * 100) if clvs else None
+    return {
+        "n_real_price": len(real_price_bets), "n_total": len(bets), "clv_n": len(clvs),
+        "avg_clv": round(avg_clv, 2) if avg_clv is not None else None,
+        "beat_close_rate": round(beat, 1) if beat is not None else None,
+    }
+
+
 def calibration(bets: List[Dict], n_bins: int = 5) -> List[Dict]:
     """Bucket settled bets by model probability and compare predicted vs actual hit rate.
  

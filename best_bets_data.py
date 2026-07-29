@@ -287,17 +287,28 @@ def build_mlb_board(date_str: str, fip_constant: float, odds_api_key: Optional[s
     # handles this already, but a belt-and-suspenders try/except here means a real, unexpected
     # odds-fetch failure can never block the rest of the pipeline from running).
     real_lines = None
+    real_offers: List[Dict] = []
     available_books: List[str] = list(O.US_BOOKS.keys())   # full list as default
     if odds_api_key:
         try:
             offers, _info = O.fetch_slate_props(date_str, odds_api_key,
                                                 list(O.SUPPORTED_MARKETS), sport=O.SPORT)
             real_lines = O.market_lines_for_slate(offers, preferred_book=preferred_book)
+            real_offers = offers
             live_books = O.books_in_offers(offers)
             if live_books:
                 available_books = live_books
         except Exception:
             real_lines = None   # fall back to DEFAULT_LINES, not a page crash
+    try:
+        # Same session-state side-channel as load_generic_best_bets_board's own offers cache --
+        # every MLB page that routes through this shared function (Command Center, Graded
+        # Picks, Suggested Parlays, Speculative Basket) picks this up automatically, so a
+        # logged pick from any of them can get a real captured price instead of always falling
+        # back to the model's own Fair odds.
+        st.session_state[f"_real_offers_MLB_{date_str}"] = real_offers
+    except Exception:
+        pass   # no Streamlit runtime (e.g. a test or script context)
 
     # Starter rest, added directly on request -- one cached fetch per real starter (home/away
     # per game), not per hitter row. Attached to meta (home_days_rest/away_days_rest) for
@@ -450,6 +461,7 @@ def load_generic_best_bets_board(sport_key: str, date_str: str) -> tuple:
     rows, meta = sport.engine.build_slate(date_str)
 
     real_lines = None
+    real_offers: List[Dict] = []
     available_books: List[str] = list(O.US_BOOKS.keys())
     api_key = get_odds_api_key()
     diag = {"attempted": bool(api_key and sport.markets), "api_key_present": bool(api_key),
@@ -465,6 +477,7 @@ def load_generic_best_bets_board(sport_key: str, date_str: str) -> tuple:
                 date_str, api_key, list(sport.markets),
                 sport=sport.odds_sport_key)
             real_lines = O.market_lines_for_slate(offers, preferred_book=preferred_book)
+            real_offers = offers
             diag["offers"] = len(offers)
             diag["matched_lines"] = len(real_lines)
             live = O.books_in_offers(offers)
@@ -475,8 +488,13 @@ def load_generic_best_bets_board(sport_key: str, date_str: str) -> tuple:
             diag["error"] = str(e)[:200]
     try:
         st.session_state[diag_key] = diag
+        # Same side-channel pattern as the diagnostic above -- lets a calling page's own
+        # quick_log widget reuse these SAME already-fetched offers for real-price bet logging
+        # (odds_api.real_entry_price), instead of quick_log needing its own separate fetch (or,
+        # before this existed, always falling back to the model's own Fair odds).
+        st.session_state[f"_real_offers_{sport_key}_{date_str}"] = real_offers
     except Exception:
-        pass   # no Streamlit runtime (e.g. a test or script context) -- diagnostic is optional
+        pass   # no Streamlit runtime (e.g. a test or script context) -- both are optional
 
     plays = sport.projections.build_best_bets(rows, real_lines=real_lines)
     return plays, meta, available_books
