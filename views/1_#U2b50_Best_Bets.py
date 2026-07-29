@@ -104,6 +104,30 @@ else:
         st.session_state[ss_key] = available_books
         st.rerun()
 
+    diag = st.session_state.get(f"_real_lines_diag_{_active.key}_{date_str}")
+    if diag:
+        if diag["error"]:
+            st.caption(f"⚪ Live line fetch failed ({diag['error']}) — showing the model's own "
+                      f"default lines instead of real {preferred_book} numbers.")
+        elif not diag["attempted"]:
+            reason = "no Odds API key configured" if not diag["api_key_present"] else \
+                     f"{_active.label} has no markets configured yet"
+            st.caption(f"⚪ Live line fetch not attempted ({reason}) — showing the model's own "
+                      f"default lines.")
+        elif diag["offers"] == 0:
+            st.caption(f"⚪ The live fetch ran, but {preferred_book} (or the Odds API) has 0 "
+                      f"props posted for {_active.label} on this date yet — showing the model's "
+                      f"own default lines, not real book numbers. Common well before a season "
+                      f"starts or for lower-profile games.")
+        elif diag["matched_lines"] == 0:
+            st.caption(f"⚪ The live fetch found {diag['offers']} real offer(s), but none matched "
+                      f"a player/market on this slate by name — showing the model's own default "
+                      f"lines. Worth a closer look if this persists once real games are close.")
+        else:
+            st.caption(f"🟢 Using real {preferred_book} lines where available "
+                      f"({diag['matched_lines']} player/market line(s) matched from "
+                      f"{diag['offers']} live offer(s)) — the model's own defaults fill in the rest.")
+
 if not plays:
     if not _active.has_projections:
         st.info("🥊 Best Bets doesn't apply to UFC — fights are outcome-based, not counting-stat-based. "
