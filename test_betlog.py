@@ -309,6 +309,67 @@ def test_group_tickets_and_migration():
         assert any(b.get("ticket") == "P1" for b in bets)               # ticket column persisted
 
 
+def test_bet_pnl_uses_cashout_amount_when_present_regardless_of_final_result():
+    # The core behavior: cashing out locks in a real dollar amount, independent of what the
+    # bet's legs go on to do. Same cashed_out_amount, opposite eventual results, identical
+    # actual P&L -- because what was actually realized was the cash-out, not the result.
+    won_after_cashout = {"stake": 25.0, "entry_odds": 350, "result": "win", "cashed_out_amount": 14.0}
+    lost_after_cashout = {"stake": 25.0, "entry_odds": 350, "result": "loss", "cashed_out_amount": 14.0}
+    assert B.bet_pnl(won_after_cashout) == -11.0
+    assert B.bet_pnl(lost_after_cashout) == -11.0
+    print("✓ bet_pnl uses the cash-out amount as the real P&L regardless of the eventual result")
+
+
+def test_bet_pnl_falls_back_to_normal_result_math_without_a_cashout():
+    won = {"stake": 25.0, "entry_odds": 350, "result": "win"}
+    assert B.bet_pnl(won) == 87.5   # normal win math, unaffected by the new cash-out path
+    print("✓ bet_pnl behaves exactly as before for a bet that was never cashed out")
+
+
+def test_pnl_if_held_ignores_cashout_and_shows_the_real_counterfactual():
+    bet = {"stake": 25.0, "entry_odds": 350, "result": "win", "cashed_out_amount": 14.0}
+    assert B._pnl_if_held(bet) == 87.5   # what it WOULD have paid, ignoring the cash-out
+    assert B.bet_pnl(bet) == -11.0        # what was ACTUALLY realized
+    print("✓ _pnl_if_held shows the real counterfactual, independent of bet_pnl's actual number")
+
+
+def test_cash_out_vs_held_aggregates_correctly_and_excludes_ungraded_bets():
+    left_money_on_table = {"stake": 25.0, "entry_odds": 350, "result": "win", "cashed_out_amount": 14.0}
+    cashout_saved_a_loss = {"stake": 25.0, "entry_odds": 350, "result": "loss", "cashed_out_amount": 14.0}
+    still_pending = {"stake": 10.0, "entry_odds": 200, "result": None, "cashed_out_amount": 8.0}
+    never_cashed_out = {"stake": 10.0, "entry_odds": 200, "result": "win"}   # excluded entirely
+
+    report = B.cash_out_vs_held(
+        [left_money_on_table, cashout_saved_a_loss, still_pending, never_cashed_out])
+
+    assert report["n"] == 2   # only the two GRADED cash-outs count; pending and non-cashed excluded
+    assert report["total_actual_pnl"] == -22.0    # -11 + -11
+    assert report["total_held_pnl"] == 62.5       # 87.5 + -25.0
+    assert report["net_value_of_cashing_out"] == -84.5
+    print("✓ cash_out_vs_held aggregates correctly and excludes still-pending or never-cashed-out bets")
+
+
+def test_cashed_out_amount_persists_through_a_real_sqlite_round_trip():
+    # Same "confirm against a real database round-trip" discipline this file already holds to
+    # for the ticket column above -- the new column must actually survive add_bet -> list_bets,
+    # not just work in isolated dict-based unit tests.
+    import tempfile
+    import os
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "bets.db")
+        B.add_bet(db, player="Rocchio", entry_odds=350, stake=25.0, result="win",
+                 cashed_out_amount=14.0)
+        B.add_bet(db, player="Never Cashed", entry_odds=200, stake=10.0, result="win")
+        bets = B.list_bets(db)
+        rocchio = next(b for b in bets if b["player"] == "Rocchio")
+        never = next(b for b in bets if b["player"] == "Never Cashed")
+        assert float(rocchio["cashed_out_amount"]) == 14.0
+        assert B.bet_pnl(rocchio) == -11.0
+        assert never.get("cashed_out_amount") is None
+        assert B.bet_pnl(never) == 20.0   # normal win math for the never-cashed-out bet (+200 on $10)
+    print("✓ cashed_out_amount persists correctly through a real SQLite add_bet/list_bets round trip")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

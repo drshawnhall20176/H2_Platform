@@ -337,3 +337,128 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
 
     plays.sort(key=lambda x: x["Conviction"], reverse=True)
     return plays
+
+
+# --------------------------------------------------------------------------- QB Lab
+def build_qb_matchup_projections(rows: List[Dict], opp_pass_yards_allowed: Dict[str, float],
+                                 league_avg_pass_yards_allowed: float,
+                                 opp_rush_yards_allowed: Optional[Dict[str, float]] = None,
+                                 league_avg_rush_yards_allowed: float = 0.0) -> List[Dict]:
+    """QB matchup-aware Pass Yards AND Rush Yards projections: each QB's own recent-form average
+    for both stats, each scaled by how much this week's opponent allows relative to the league
+    average for that stat -- direct port of nfl_projections.build_qb_matchup_projections' own
+    odds-ratio-style matchup adjustment, adapted to NCAAF's confirmed per-game column names
+    (passing_YDS/rushing_YDS, not NFL's passing_yards/rushing_yards).
+
+    RUSH YARDS INCLUDED HERE DELIBERATELY, same reasoning as NFL's own version: a QB's own
+    rushing-yards projection isn't shared with anyone else's betting line (unlike the shared
+    player_rush_yds market, which deliberately excludes QBs to avoid mixing a scrambling QB's
+    occasional carries with a workhorse RB's volume) -- no such conflict showing it here.
+
+    opp_pass_yards_allowed / opp_rush_yards_allowed: {opp_team: season stat allowed}, the
+    CALLER's job to build -- one ncaaf_engine.get_team_allowed_stats(opp, date, n=None) call per
+    unique opponent covers BOTH stats at once. league_avg_*_allowed come from ncaaf_engine.
+    get_league_average_pass_yards_allowed / get_league_average_rush_yards_allowed, also the
+    caller's job (one call each covers the whole slate)."""
+    opp_rush_yards_allowed = opp_rush_yards_allowed or {}
+    out: List[Dict] = []
+    for r in rows:
+        if r.get("Position") != "QB" or "player_pass_yds" not in (r.get("_markets") or []):
+            continue
+        log = r.get("_recent_games") or []
+        if not log:
+            continue
+        recent_pass_avg = sum(g.get("passing_YDS") or 0 for g in log) / len(log)
+        opp_pass_allowed = opp_pass_yards_allowed.get(r.get("Opp"), 0.0)
+        if league_avg_pass_yards_allowed > 0 and opp_pass_allowed > 0:
+            pass_factor = opp_pass_allowed / league_avg_pass_yards_allowed
+        else:
+            pass_factor = 1.0   # no opponent/league data yet -> neutral, never a fabricated boost/penalty
+
+        recent_rush_avg = sum(g.get("rushing_YDS") or 0 for g in log) / len(log)
+        opp_rush_allowed = opp_rush_yards_allowed.get(r.get("Opp"), 0.0)
+        if league_avg_rush_yards_allowed > 0 and opp_rush_allowed > 0:
+            rush_factor = opp_rush_allowed / league_avg_rush_yards_allowed
+        else:
+            rush_factor = 1.0
+
+        out.append({
+            "Player": r["Player"], "Team": r["Team"], "Opp": r.get("Opp"), "Game": r["GameLabel"],
+            "Recent Avg": round(recent_pass_avg, 1),
+            "Opp Pass Yds Allowed (season)": round(opp_pass_allowed, 1) if opp_pass_allowed else None,
+            "Matchup Factor": round(pass_factor, 2),
+            "Proj Pass Yds": round(recent_pass_avg * pass_factor, 1),
+            "Recent Rush Yds": round(recent_rush_avg, 1),
+            "Opp Rush Yds Allowed (season)": round(opp_rush_allowed, 1) if opp_rush_allowed else None,
+            "Rush Matchup Factor": round(rush_factor, 2),
+            "Proj Rush Yds": round(recent_rush_avg * rush_factor, 1),
+        })
+    out.sort(key=lambda x: x["Proj Pass Yds"], reverse=True)
+    return out
+
+
+def build_qb_efficiency_table(rows: List[Dict], season_logs_by_pid: Dict[str, List[Dict]]) -> List[Dict]:
+    """TD:INT regression signal: each QB's recent PASSING TD/INT rates against their own season-
+    long rates, flagging a meaningful divergence -- direct port of nfl_projections.
+    build_qb_efficiency_table, adapted to NCAAF's confirmed columns (passing_TD/passing_INT/
+    rushing_TD -- NOT the separate "interceptions_*" category, which CFBD tracks from the
+    DEFENDER's side of the play, not the passer's; passing_INT is the QB's own interceptions
+    thrown, confirmed present in the real column list from a live refresh run).
+
+    Built entirely from real confirmed data (TD/INT counts), not a fabricated "college football
+    FIP" -- same honesty NFL's own version holds to. A DIFFERENT axis of regression than MLB's
+    ERA-vs-FIP: that compares a luck-affected RESULTS metric against a more-predictive
+    PERIPHERALS metric over the SAME window; this compares a small, noisy RECENT window against
+    a larger, steadier SEASON window -- a recency-vs-stability axis, not a luck-vs-skill one.
+
+    TAG DIRECTION stated plainly: a QB trending well ABOVE their season TD:INT rate is flagged as
+    possibly NOT sustainable (their season rate is the larger, steadier sample) -- deliberately
+    NOT a buy/fade recommendation, just a description of which number is the more reliable
+    baseline. Rushing TD Rate shown alongside as its own raw signal, not blended into the
+    passing-specific delta -- there's no rushing equivalent of an interception to regress it
+    against the same way."""
+    out: List[Dict] = []
+    for r in rows:
+        if r.get("Position") != "QB":
+            continue
+        log = r.get("_recent_games") or []
+        if not log:
+            continue
+        pid = r.get("_pid")
+        season_log = season_logs_by_pid.get(pid) or []
+        recent_td = sum(g.get("passing_TD") or 0 for g in log) / len(log)
+        recent_int = sum(g.get("passing_INT") or 0 for g in log) / len(log)
+        season_td = (sum(g.get("passing_TD") or 0 for g in season_log) / len(season_log)
+                    if season_log else None)
+        season_int = (sum(g.get("passing_INT") or 0 for g in season_log) / len(season_log)
+                     if season_log else None)
+        recent_diff = recent_td - recent_int
+        season_diff = (season_td - season_int) if season_td is not None and season_int is not None else None
+        delta = (recent_diff - season_diff) if season_diff is not None else None
+
+        recent_rush_td = sum(g.get("rushing_TD") or 0 for g in log) / len(log)
+        season_rush_td = (sum(g.get("rushing_TD") or 0 for g in season_log) / len(season_log)
+                          if season_log else None)
+
+        tag = "—"
+        if delta is not None:
+            if delta >= 0.5:
+                tag = "📈 Trending above season norm — may not be sustainable"
+            elif delta <= -0.5:
+                tag = "📉 Trending below season norm — may not be sustainable"
+            else:
+                tag = "➡️ In line with season norm"
+
+        out.append({
+            "Player": r["Player"], "Team": r["Team"], "Opp": r.get("Opp"),
+            "Recent Passing TD Rate": round(recent_td, 2), "Recent INT Rate": round(recent_int, 2),
+            "Season Passing TD Rate": round(season_td, 2) if season_td is not None else None,
+            "Season INT Rate": round(season_int, 2) if season_int is not None else None,
+            "TD-INT Delta (recent vs season)": round(delta, 2) if delta is not None else None,
+            "Recent Rushing TD Rate": round(recent_rush_td, 2),
+            "Season Rushing TD Rate": round(season_rush_td, 2) if season_rush_td is not None else None,
+            "Tag": tag,
+        })
+    out.sort(key=lambda x: (x["TD-INT Delta (recent vs season)"]
+                            if x["TD-INT Delta (recent vs season)"] is not None else 0), reverse=True)
+    return out

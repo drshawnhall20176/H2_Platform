@@ -177,6 +177,86 @@ def test_explain_miss_handles_missing_row_and_missing_stat():
          "fabricating a per-game trend narrative")
 
 
+def test_build_qb_matchup_projections_scales_by_opponent_relative_to_league_average():
+    rows = [{
+        "Player": "Star QB", "Team": "Ohio State", "Opp": "Michigan",
+        "GameLabel": "Michigan @ Ohio State", "Position": "QB", "_pid": "p1",
+        "_markets": ["player_pass_yds", "player_rush_yds"],
+        "_recent_games": [
+            {"passing_YDS": 300, "rushing_YDS": 20}, {"passing_YDS": 280, "rushing_YDS": 15},
+        ],
+    }]
+    out = P.build_qb_matchup_projections(
+        rows, opp_pass_yards_allowed={"Michigan": 320.0}, league_avg_pass_yards_allowed=250.0,
+        opp_rush_yards_allowed={"Michigan": 90.0}, league_avg_rush_yards_allowed=100.0)
+    assert len(out) == 1
+    row = out[0]
+    assert row["Recent Avg"] == 290.0
+    assert row["Matchup Factor"] == 1.28   # 320/250, a softer-than-average pass defense
+    assert row["Proj Pass Yds"] == 371.2   # 290 * 1.28
+    assert row["Rush Matchup Factor"] == 0.9   # 90/100, a tougher-than-average rush defense
+    print("✓ build_qb_matchup_projections scales a QB's real recent average by real "
+         "opponent-vs-league-average allowed rates for both pass and rush yards")
+
+
+def test_build_qb_matchup_projections_neutral_factor_without_opponent_data():
+    rows = [{
+        "Player": "X", "Team": "T", "Opp": "NoDataTeam", "GameLabel": "G", "Position": "QB",
+        "_pid": "p1", "_markets": ["player_pass_yds"],
+        "_recent_games": [{"passing_YDS": 250, "rushing_YDS": 10}],
+    }]
+    out = P.build_qb_matchup_projections(rows, opp_pass_yards_allowed={}, league_avg_pass_yards_allowed=0.0)
+    assert out[0]["Matchup Factor"] == 1.0   # no fabricated boost/penalty with no real data
+    assert out[0]["Opp Pass Yds Allowed (season)"] is None
+    print("✓ build_qb_matchup_projections uses a neutral 1.0x factor, not a fabricated "
+         "adjustment, when there's no real opponent/league data yet")
+
+
+def test_build_qb_matchup_projections_skips_non_qb_and_no_recent_games():
+    rb_row = {"Player": "RB", "Position": "RB", "_markets": ["player_rush_yds"], "_recent_games": [{}]}
+    qb_no_log = {"Player": "QB2", "Position": "QB", "_markets": ["player_pass_yds"], "_recent_games": []}
+    out = P.build_qb_matchup_projections([rb_row, qb_no_log], {}, 0.0)
+    assert out == []
+    print("✓ build_qb_matchup_projections skips non-QB rows and QBs with no recent-game data")
+
+
+def test_build_qb_efficiency_table_flags_trending_above_season_norm():
+    rows = [{
+        "Player": "Star QB", "Team": "Ohio State", "Opp": "Michigan", "Position": "QB", "_pid": "p1",
+        "_recent_games": [
+            {"passing_TD": 3, "passing_INT": 1, "rushing_TD": 1},
+            {"passing_TD": 2, "passing_INT": 0, "rushing_TD": 0},
+        ],
+    }]
+    season_logs = {"p1": [
+        {"passing_TD": 2, "passing_INT": 1, "rushing_TD": 0},
+        {"passing_TD": 1, "passing_INT": 1, "rushing_TD": 0},
+        {"passing_TD": 3, "passing_INT": 0, "rushing_TD": 1},
+    ]}
+    out = P.build_qb_efficiency_table(rows, season_logs)
+    assert len(out) == 1
+    row = out[0]
+    assert row["Recent Passing TD Rate"] == 2.5 and row["Recent INT Rate"] == 0.5
+    assert row["Season Passing TD Rate"] == 2.0
+    assert row["TD-INT Delta (recent vs season)"] == 0.67
+    assert "Trending above season norm" in row["Tag"]
+    print("✓ build_qb_efficiency_table correctly computes recent-vs-season TD:INT rates and "
+         "flags a real, meaningful divergence")
+
+
+def test_build_qb_efficiency_table_no_season_log_yet():
+    rows = [{
+        "Player": "New QB", "Team": "T", "Opp": "O", "Position": "QB", "_pid": "p2",
+        "_recent_games": [{"passing_TD": 1, "passing_INT": 0, "rushing_TD": 0}],
+    }]
+    out = P.build_qb_efficiency_table(rows, season_logs_by_pid={})
+    assert out[0]["Season Passing TD Rate"] is None
+    assert out[0]["TD-INT Delta (recent vs season)"] is None
+    assert out[0]["Tag"] == "—"
+    print("✓ build_qb_efficiency_table handles a QB with no season log yet without crashing, "
+         "no fabricated delta or tag")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

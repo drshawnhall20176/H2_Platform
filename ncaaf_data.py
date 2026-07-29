@@ -307,8 +307,13 @@ def refresh_player_game_stats(year: int, api_key: str, completed_weeks: List[int
             continue
         for game in games:
             game_id = game.get("id")
-            for team in (game.get("teams") or []):
+            teams_in_game = game.get("teams") or []
+            schools_in_game = [t.get("school") for t in teams_in_game]
+            for team in teams_in_game:
                 school = team.get("school")
+                # The opponent is simply the OTHER school in this same game's teams list --
+                # already present in the raw response, no extra call or schedule join needed.
+                opponent = next((s for s in schools_in_game if s and s != school), None)
                 for category in (team.get("categories") or []):
                     cat_name = category.get("name")
                     for type_ in (category.get("types") or []):
@@ -326,13 +331,14 @@ def refresh_player_game_stats(year: int, api_key: str, completed_weeks: List[int
                                 continue
                             long_rows.append({
                                 "game_id": game_id, "week": week, "team": school,
+                                "opponent_team": opponent,
                                 "player_id": athlete_id, "player": athlete_name,
                                 "stat_col": f"{cat_name}_{type_name}".strip("_"),
                                 "value": stat_val,
                             })
 
     if not long_rows:
-        cols = ["game_id", "week", "team", "player_id", "player"]
+        cols = ["game_id", "week", "team", "opponent_team", "player_id", "player"]
         pd.DataFrame(columns=cols).to_csv(out_path, index=False)
         print(f"[NCAAF] GET /games/players: 0 rows across {len(completed_weeks)} week(s) -- "
              "wrote an empty cache.")
@@ -340,7 +346,7 @@ def refresh_player_game_stats(year: int, api_key: str, completed_weeks: List[int
 
     long_df = pd.DataFrame(long_rows)
     long_df["value"] = pd.to_numeric(long_df["value"], errors="coerce")
-    identity = (long_df[["game_id", "week", "team", "player_id", "player"]]
+    identity = (long_df[["game_id", "week", "team", "opponent_team", "player_id", "player"]]
                .drop_duplicates(["game_id", "player_id"]).set_index(["game_id", "player_id"]))
     wide = long_df.pivot_table(index=["game_id", "player_id"], columns="stat_col",
                                values="value", aggfunc="first")

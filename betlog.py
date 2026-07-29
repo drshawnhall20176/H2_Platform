@@ -48,7 +48,8 @@ CREATE TABLE IF NOT EXISTS bets (
     ticket     TEXT,
     sport      TEXT,
     trader     TEXT,
-    is_real_bet INTEGER DEFAULT 1
+    is_real_bet INTEGER DEFAULT 1,
+    cashed_out_amount REAL
 );
 """
 # is_real_bet: added directly on request, to distinguish real, placed wagers from tracking-only
@@ -81,7 +82,7 @@ CREATE TABLE IF NOT EXISTS bets (
 
 _FIELDS = ["ts_placed", "slate_date", "game", "player", "player_id", "market", "side", "line",
            "entry_odds", "model_prob", "stake", "book", "close_odds", "result", "notes",
-           "ticket", "sport", "trader", "is_real_bet"]
+           "ticket", "sport", "trader", "is_real_bet", "cashed_out_amount"]
  
  
 # ===========================================================================
@@ -130,6 +131,8 @@ def _sqlite_conn(db_path: str = DB_PATH):
             con.execute("ALTER TABLE bets ADD COLUMN player_id INTEGER")
         if "is_real_bet" not in cols:       # migrate DBs that predate tracking-only predictions
             con.execute("ALTER TABLE bets ADD COLUMN is_real_bet INTEGER DEFAULT 1")
+        if "cashed_out_amount" not in cols:  # migrate DBs that predate cash-out-vs-held tracking
+            con.execute("ALTER TABLE bets ADD COLUMN cashed_out_amount REAL")
         yield con
         con.commit()
     finally:
@@ -170,12 +173,13 @@ CREATE TABLE IF NOT EXISTS bets (
     slate_date TEXT, game TEXT, player TEXT, player_id INTEGER, market TEXT, side TEXT,
     line REAL, entry_odds INTEGER, model_prob REAL, stake REAL, book TEXT,
     close_odds INTEGER, result TEXT, notes TEXT, ticket TEXT, sport TEXT, trader TEXT,
-    is_real_bet BOOLEAN DEFAULT TRUE
+    is_real_bet BOOLEAN DEFAULT TRUE, cashed_out_amount REAL
 );
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS sport TEXT;
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS trader TEXT;
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS player_id INTEGER;
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS is_real_bet BOOLEAN DEFAULT TRUE;
+ALTER TABLE bets ADD COLUMN IF NOT EXISTS cashed_out_amount REAL;
 """
  
  
@@ -340,10 +344,23 @@ def _ticket(bet) -> str:
     if t is None or (isinstance(t, float) and t != t):
         return ""
     return str(t).strip()
- 
- 
-def bet_pnl(bet: Dict) -> Optional[float]:
-    """Profit for a settled bet. Win pays net odds × stake; loss = −stake; push/void = 0."""
+
+
+def _cashed_out_amount(bet):
+    """Normalized cash-out amount, NaN/None-safe (same pattern as _result/_ticket) -- None means
+    this bet was never cashed out (held to its natural result), not that the amount was zero."""
+    v = bet.get("cashed_out_amount")
+    if v is None or (isinstance(v, float) and v != v):       # None or NaN
+        return None
+    return float(v)
+
+
+def _pnl_if_held(bet: Dict):
+    """P&L this bet WOULD have realized had it been held to its real, graded result, ignoring
+    any cash-out -- the counterfactual side of cash_out_vs_held's own comparison. Identical
+    win/loss/push math to bet_pnl's own non-cash-out branch, just never short-circuited by a
+    cash-out amount, so a cashed-out bet's own real eventual result can still be compared
+    against what was actually taken."""
     result = _result(bet)
     stake = bet.get("stake") or 0.0
     odds = bet.get("entry_odds")
@@ -353,7 +370,62 @@ def bet_pnl(bet: Dict) -> Optional[float]:
         return round(-stake, 2)
     if result in ("push", "void"):
         return 0.0
-    return None  # unsettled
+    return None  # not yet graded
+
+
+def bet_pnl(bet: Dict) -> Optional[float]:
+    """Realized P&L for this bet. If it was cashed out early, that locked-in amount IS the real
+    P&L (cashed_out_amount − stake) -- regardless of how the bet's legs eventually resolve,
+    cashing out locks that number in. Otherwise, the normal win/loss/push math."""
+    stake = bet.get("stake") or 0.0
+    cashed_out = _cashed_out_amount(bet)
+    if cashed_out is not None:
+        return round(cashed_out - stake, 2)
+    return _pnl_if_held(bet)
+
+
+def cash_out_vs_held(bets):
+    """For every bet with a real cash-out logged, compares the ACTUAL realized P&L (the
+    cash-out amount) against what P&L WOULD have been had it been held to its real, graded
+    result -- an honest, measured answer to something this platform's own community treats as
+    a running item of debate ("cash outs are a win too, with some profit" -- is that actually
+    true across many bets, or just true often enough to feel that way?), rather than leaving it
+    as an unmeasured feeling.
+
+    Only includes cashed-out bets whose underlying legs have SINCE been graded to a real
+    win/loss/push (_pnl_if_held returns non-None) -- comparing against a still-pending
+    counterfactual isn't a real comparison yet, same "don't compare against ungraded results"
+    discipline bet_pnl's own unsettled-bet return already follows.
+
+    Returns {"rows": [...], "n", "total_actual_pnl", "total_held_pnl",
+    "net_value_of_cashing_out"} -- the last one POSITIVE means cashing out has net cost money
+    versus holding across these bets; NEGATIVE means cashing out has net saved money. Framed
+    this way (not "which strategy wins") because the honest answer is almost certainly "it
+    depends per bet" -- this gives the real aggregate, not a verdict."""
+    rows = []
+    for b in bets:
+        cashed_out = _cashed_out_amount(b)
+        stake = b.get("stake") or 0.0
+        if cashed_out is None:
+            continue
+        held_pnl = _pnl_if_held(b)
+        if held_pnl is None:
+            continue   # legs not graded yet -- no real comparison possible
+        actual_pnl = round(cashed_out - stake, 2)
+        rows.append({
+            "ts_placed": b.get("ts_placed"), "game": b.get("game"), "player": b.get("player"),
+            "market": b.get("market"), "stake": stake, "cashed_out_amount": cashed_out,
+            "actual_pnl": actual_pnl, "held_pnl": held_pnl,
+            "difference": round(held_pnl - actual_pnl, 2),
+            "final_result": _result(b),
+        })
+    total_actual = round(sum(r["actual_pnl"] for r in rows), 2)
+    total_held = round(sum(r["held_pnl"] for r in rows), 2)
+    return {
+        "rows": rows, "n": len(rows),
+        "total_actual_pnl": total_actual, "total_held_pnl": total_held,
+        "net_value_of_cashing_out": round(total_actual - total_held, 2),
+    }
  
  
 def summary(bets: List[Dict]) -> Dict:

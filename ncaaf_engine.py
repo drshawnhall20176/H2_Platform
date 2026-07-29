@@ -250,6 +250,114 @@ def player_recent_games(player_id, before_week: int, n: int = CFG.RECENT_GAMES_N
     return rows[:n]
 
 
+def get_player_season_games(player_id, before_date: str, max_games: int = 20) -> List[Dict]:
+    """This player's full game log for the season so far (any opponent), most recent first --
+    the baseline QB Lab's TD:INT efficiency table and Matchup Lab compare a recent/head-to-head
+    sample against. Same role as nfl_engine.get_player_season_games; max_games=20 comfortably
+    covers a full ~14-game FBS regular season plus a conference championship, without needing
+    NFL's 25 (a shorter season overall)."""
+    season = _infer_season(before_date)
+    if season is None:
+        return []
+    schedule = get_schedule(season)
+    week = _resolve_week(schedule, before_date)
+    if week is None:
+        return []
+    return player_recent_games(player_id, before_week=week, n=max_games)
+
+
+_ALLOWED_STAT_COLS = ["passing_YDS", "rushing_YDS", "receiving_REC", "receiving_YDS"]
+
+
+def get_team_allowed_stats(team: str, before_date: str, n: Optional[int] = None) -> Dict[str, float]:
+    """Average PassYds/RushYds/Receptions/RecYds ALLOWED by this team's defense -- n=None for the
+    whole season so far, n=int for just their last n games. Same construction as
+    nfl_engine.get_team_allowed_stats: group the per-game cache by game (every OPPOSING player's
+    stat line against this team, summed per game = that game's real team total against them),
+    then average across games. Depends on the per-game cache's opponent_team field (added
+    specifically to support this function -- see ncaaf_data.refresh_player_game_stats's own
+    docstring)."""
+    season = _infer_season(before_date)
+    if season is None:
+        return {}
+    schedule = get_schedule(season)
+    week = _resolve_week(schedule, before_date)
+    if week is None:
+        return {}
+    rows = [r for r in ND.load_player_game_stats()
+           if r.get("opponent_team") == team and r.get("week") is not None and r["week"] < week]
+    if not rows:
+        return {}
+    by_game: Dict[object, Dict[str, float]] = {}
+    for r in rows:
+        gid = r.get("game_id")
+        acc = by_game.setdefault(gid, {c: 0.0 for c in _ALLOWED_STAT_COLS})
+        for col in _ALLOWED_STAT_COLS:
+            val = r.get(col)
+            if not _missing(val):
+                acc[col] += float(val)
+    games = list(by_game.values())
+    if n is not None:
+        # Most-recent-n by week -- re-derive game order from the rows rather than assuming
+        # by_game's dict insertion order is chronological.
+        game_weeks = {r["game_id"]: r["week"] for r in rows if r.get("game_id") is not None}
+        ordered_ids = sorted(game_weeks, key=lambda gid: game_weeks[gid], reverse=True)[:n]
+        games = [by_game[gid] for gid in ordered_ids if gid in by_game]
+    if not games:
+        return {}
+    return {col: sum(g[col] for g in games) / len(games) for col in _ALLOWED_STAT_COLS}
+
+
+def _get_league_average_allowed(before_date: str, stat_col: str) -> float:
+    """League-wide average of `stat_col` allowed per team-game, up through (not including) the
+    week before_date resolves to -- the neutral baseline get_team_allowed_stats' own per-opponent
+    number gets compared against for a matchup factor. Same "group by (opponent_team, game),
+    average across games" construction as get_team_allowed_stats, just not restricted to one
+    team first. Deliberately season-wide only, not a recent-N-games version: a league-wide
+    "recent" baseline is genuinely ambiguous (recent for WHICH teams' games?) in a way a single
+    team's own recent-N-games isn't -- same reasoning nfl_engine's own version documents."""
+    season = _infer_season(before_date)
+    if season is None:
+        return 0.0
+    schedule = get_schedule(season)
+    week = _resolve_week(schedule, before_date)
+    if week is None:
+        return 0.0
+    rows = [r for r in ND.load_player_game_stats()
+           if r.get("week") is not None and r["week"] < week]
+    if not rows:
+        return 0.0
+    # Group by (opponent_team, game_id), NOT game_id alone -- a real bug caught by testing
+    # against realistic two-sided data: grouping by game_id alone sums BOTH teams' offensive
+    # output for that game into one number, double-counting rather than isolating each defense's
+    # own allowed total. This matches nfl_engine's own (opponent_team, week) grouping semantic,
+    # just keyed by game_id instead of week (more robust here -- see get_team_allowed_stats'
+    # own reasoning for using game_id, not week, as the per-game key).
+    by_defense_game: Dict[tuple, float] = {}
+    for r in rows:
+        val = r.get(stat_col)
+        if _missing(val):
+            continue
+        key = (r.get("opponent_team"), r.get("game_id"))
+        by_defense_game[key] = by_defense_game.get(key, 0.0) + float(val)
+    if not by_defense_game:
+        return 0.0
+    return sum(by_defense_game.values()) / len(by_defense_game)
+
+
+def get_league_average_pass_yards_allowed(before_date: str) -> float:
+    """League-wide average pass yards allowed per team-game -- see _get_league_average_allowed's
+    own docstring for the full reasoning (season-wide only, not a recent-N-games version)."""
+    return _get_league_average_allowed(before_date, "passing_YDS")
+
+
+def get_league_average_rush_yards_allowed(before_date: str) -> float:
+    """League-wide average rush yards allowed per team-game -- the baseline QB Lab's matchup-
+    adjusted Rush Yards projection compares one opponent's own allowed rate against, same role
+    get_league_average_pass_yards_allowed plays for the Pass Yards projection."""
+    return _get_league_average_allowed(before_date, "rushing_YDS")
+
+
 def player_row(player: Dict, team: str, opp: str, game_label: str, game_date: Optional[str],
               stats_row: Optional[Dict], team_games_played: int,
               opp_id: Optional[str] = None, team_id: Optional[str] = None,

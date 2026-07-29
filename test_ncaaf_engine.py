@@ -273,6 +273,81 @@ def test_get_player_results_empty_for_unresolvable_date():
     print("✓ get_player_results returns {} gracefully when no schedule/week can be resolved")
 
 
+def _dh_schedule(n_weeks=3):
+    return [{"id": 1000 + i, "season": 2025, "week": i, "start_date": f"2025-09-{i:02d}T19:30:00Z",
+            "completed": True, "home_team": "Ohio State", "away_team": "Foe", "home_id": 1, "away_id": 9}
+           for i in range(1, n_weeks + 1)]
+
+
+def test_get_team_allowed_stats_averages_correctly_across_games():
+    game_rows = [
+        {"game_id": 1, "week": 1, "team": "Team A", "opponent_team": "Weak Defense",
+         "passing_YDS": 300, "rushing_YDS": 100},
+        {"game_id": 2, "week": 2, "team": "Team B", "opponent_team": "Weak Defense",
+         "passing_YDS": 350, "rushing_YDS": 120},
+    ]
+    with patch.object(ND, "load_schedule", return_value=_dh_schedule()), \
+        patch.object(ND, "load_player_game_stats", return_value=game_rows):
+        allowed = E.get_team_allowed_stats("Weak Defense", "2025-09-20")
+    assert allowed["passing_YDS"] == 325.0    # (300+350)/2
+    assert allowed["rushing_YDS"] == 110.0    # (100+120)/2
+    print("✓ get_team_allowed_stats correctly averages what a defense allowed across real games")
+
+
+def test_get_team_allowed_stats_empty_for_no_games():
+    with patch.object(ND, "load_schedule", return_value=_dh_schedule()), \
+        patch.object(ND, "load_player_game_stats", return_value=[]):
+        assert E.get_team_allowed_stats("Nobody", "2025-09-20") == {}
+    print("✓ get_team_allowed_stats returns {} gracefully with no per-game data yet")
+
+
+def test_league_average_allowed_isolates_each_defense_not_both_sides_of_a_game():
+    # Regression guard for a real bug caught by testing, not assumed correct: grouping by
+    # game_id ALONE sums BOTH teams' offensive output in a game into one number -- double-
+    # counting a game as if it were a single "defense allowed" data point, when it's actually
+    # TWO (one per team's defense that day). Must group by (opponent_team, game_id).
+    game_rows = [
+        {"game_id": 1, "week": 1, "team": "Team A", "opponent_team": "Weak Defense", "passing_YDS": 300},
+        {"game_id": 1, "week": 1, "team": "Weak Defense", "opponent_team": "Team A", "passing_YDS": 50},
+        {"game_id": 2, "week": 2, "team": "Team B", "opponent_team": "Weak Defense", "passing_YDS": 350},
+        {"game_id": 3, "week": 2, "team": "Team C", "opponent_team": "Strong Defense", "passing_YDS": 150},
+    ]
+    with patch.object(ND, "load_schedule", return_value=_dh_schedule()), \
+        patch.object(ND, "load_player_game_stats", return_value=game_rows):
+        avg = E.get_league_average_pass_yards_allowed("2025-09-20")
+    # 4 real (defense, game) data points: 300, 50, 350, 150 -> mean 212.5, NOT (350+350+150)/3
+    assert avg == 212.5, f"expected 212.5 (correct per-defense isolation), got {avg}"
+    print("✓ league-average-allowed isolates each defense's own performance per game, not both "
+         "teams' combined offensive output")
+
+
+def test_league_average_rush_yards_allowed_uses_rushing_column():
+    game_rows = [
+        {"game_id": 1, "week": 1, "team": "Team A", "opponent_team": "D1", "rushing_YDS": 100},
+        {"game_id": 2, "week": 2, "team": "Team B", "opponent_team": "D2", "rushing_YDS": 200},
+    ]
+    with patch.object(ND, "load_schedule", return_value=_dh_schedule()), \
+        patch.object(ND, "load_player_game_stats", return_value=game_rows):
+        avg = E.get_league_average_rush_yards_allowed("2025-09-20")
+    assert avg == 150.0
+    print("✓ get_league_average_rush_yards_allowed reads the rushing column, not passing")
+
+
+def test_get_player_season_games_uses_player_recent_games_with_resolved_week():
+    schedule = _dh_schedule(n_weeks=5)
+    game_rows = [
+        {"player_id": "p1", "week": 1, "passing_YDS": 200},
+        {"player_id": "p1", "week": 3, "passing_YDS": 300},
+        {"player_id": "p1", "week": 5, "passing_YDS": 999},   # resolves as "current" week -- excluded
+    ]
+    with patch.object(ND, "load_schedule", return_value=schedule), \
+        patch.object(ND, "load_player_game_stats", return_value=game_rows):
+        games = E.get_player_season_games("p1", "2025-09-30")   # resolves to the last week (5) via fallback
+    weeks = sorted(g["week"] for g in games)
+    assert weeks == [1, 3]   # strictly before week 5, most-recent-first internally
+    print("✓ get_player_season_games resolves the right week and excludes that week's own game")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

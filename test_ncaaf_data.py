@@ -147,6 +147,74 @@ def test_refresh_schedule_merges_multiple_years_into_one_cache():
          "get_schedule(fallback_year) can find real games instead of coming back empty")
 
 
+def test_refresh_player_game_stats_parses_nested_structure_and_tracks_opponent():
+    # This function existed with only manual bash verification, never real pytest coverage --
+    # closing that gap now, including the opponent_team field (derived from the OTHER team
+    # already present in the same game's raw teams list, no extra call needed).
+    fake_response = [{
+        "id": 12345,
+        "teams": [
+            {"school": "Ohio State", "categories": [{"name": "passing", "types": [
+                {"name": "YDS", "athletes": [{"id": "p1", "name": "Star QB", "stat": "312"}]},
+                {"name": "TD", "athletes": [{"id": "p1", "name": "Star QB", "stat": "3"}]},
+            ]}]},
+            {"school": "Texas", "categories": [{"name": "passing", "types": [
+                {"name": "YDS", "athletes": [{"id": "p2", "name": "Other QB", "stat": "250"}]},
+            ]}]},
+        ],
+    }]
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "games.csv")
+        with patch.object(ND, "_get", return_value=fake_response):
+            ND.refresh_player_game_stats(2025, "FAKE_KEY", completed_weeks=[6], out_path=out)
+        rows = ND.load_player_game_stats(out)
+
+    assert len(rows) == 2
+    osu = next(r for r in rows if r["player"] == "Star QB")
+    tex = next(r for r in rows if r["player"] == "Other QB")
+    assert osu["team"] == "Ohio State" and osu["opponent_team"] == "Texas"
+    assert osu["passing_YDS"] == 312 and osu["passing_TD"] == 3
+    assert tex["team"] == "Texas" and tex["opponent_team"] == "Ohio State"
+    assert osu["week"] == 6 and osu["game_id"] == 12345
+    print("✓ refresh_player_game_stats parses the nested structure correctly and tracks each "
+         "player's real opponent for that game")
+
+
+def test_refresh_player_game_stats_uses_multiple_key_name_fallbacks():
+    # The two deepest models (PlayerGameTypes, PlayerGameAthletes) resisted full documentation
+    # confirmation -- this locks in that the defensive multi-key-name lookups actually work,
+    # not just that the happy path does.
+    fake_response = [{
+        "id": 1,
+        "teams": [
+            {"school": "A", "categories": [{"name": "rushing", "types": [
+                {"type": "YDS", "athletes": [{"athleteId": "p9", "player": "Alt Keys", "value": "88"}]},
+            ]}]},
+            {"school": "B", "categories": []},
+        ],
+    }]
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "games.csv")
+        with patch.object(ND, "_get", return_value=fake_response):
+            ND.refresh_player_game_stats(2025, "FAKE_KEY", completed_weeks=[1], out_path=out)
+        rows = ND.load_player_game_stats(out)
+    assert len(rows) == 1
+    assert rows[0]["player_id"] == "p9" and rows[0]["player"] == "Alt Keys"
+    assert rows[0]["rushing_YDS"] == 88
+    print("✓ refresh_player_game_stats' defensive key-name fallbacks (type/athleteId/value) work, "
+         "not just the primary name/id/stat keys")
+
+
+def test_refresh_player_game_stats_empty_completed_weeks_writes_empty_cache():
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "games.csv")
+        ND.refresh_player_game_stats(2025, "FAKE_KEY", completed_weeks=[], out_path=out)
+        rows = ND.load_player_game_stats(out)
+    assert rows == []
+    print("✓ refresh_player_game_stats writes a loadable empty cache when there are no "
+         "completed weeks to pull (no API calls made, no crash)")
+
+
 def test_resolve_week_finds_upcoming_and_falls_back_to_last_week():
     schedule = [
         {"week": 1, "start_date": "2026-08-29T19:30:00Z"},
