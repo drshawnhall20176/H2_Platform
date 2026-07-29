@@ -873,10 +873,16 @@ def search_players(query: str) -> List[Dict[str, Any]]:
     HONEST LIMITATION, same posture as every other MLB Stats API function in this file: not
     verified against a live response from this sandbox (statsapi.mlb.com unreachable here) --
     the endpoint, its `names` parameter, and every field read below are confirmed against MLB's
-    own published API documentation, not exercised against a real request. Worth an early,
-    deliberate check once deployed -- search a well-known name and confirm the results look
-    right -- before trusting this the way every sandbox-unverifiable function on this platform
-    already carries that same caveat."""
+    own published API documentation, not exercised against a real request. THIS ALREADY BIT ONCE
+    IN PRODUCTION: a real deployed search crashed the whole Bet Log page with an AttributeError
+    past where the original try/except covered (it only wrapped the fetch_json call itself, not
+    the parsing loop after it) -- confirming the live response's real shape differs from what
+    the documentation alone implied somewhere in that loop. Hardened directly as a result: every
+    per-entry read is now wrapped so one malformed record gets skipped (with the real raw entry
+    printed for diagnosis) instead of crashing the whole search, and a completely unexpected
+    top-level shape degrades to an honest [] the same way. The exact field-level mismatch that
+    caused the original crash is still unconfirmed -- the next real search's own log output is
+    what will show it precisely, not a guess."""
     query = (query or "").strip()
     if not query:
         return []
@@ -884,13 +890,32 @@ def search_players(query: str) -> List[Dict[str, Any]]:
         data = fetch_json(f"{BASE}/people/search", params={"names": query})
     except Exception:
         return []
-    people = data.get("people") or []
+    if not isinstance(data, dict):
+        print(f"[search_players] unexpected non-dict response for query={query!r}: {type(data)}")
+        return []
+    people = data.get("people")
+    if not isinstance(people, list):
+        print(f"[search_players] 'people' key missing or not a list for query={query!r}: "
+             f"{list(data.keys())}")
+        return []
     out = []
     for p in people:
-        team = (p.get("currentTeam") or {}).get("name")
-        position = (p.get("primaryPosition") or {}).get("abbreviation")
-        out.append({"id": p.get("id"), "name": p.get("fullName"), "team": team,
-                   "position": position, "active": bool(p.get("active"))})
+        try:
+            if not isinstance(p, dict):
+                print(f"[search_players] skipped a non-dict entry in 'people' for query={query!r}: "
+                     f"{type(p)} -- {p!r}")
+                continue
+            team = (p.get("currentTeam") or {}).get("name")
+            position = (p.get("primaryPosition") or {}).get("abbreviation")
+            out.append({"id": p.get("id"), "name": p.get("fullName"), "team": team,
+                       "position": position, "active": bool(p.get("active"))})
+        except Exception as e:  # noqa: BLE001
+            # A shape surprise on ONE entry must never take down the whole search -- print the
+            # real raw entry so the actual live shape is visible in the next log, and keep going
+            # rather than losing every other real match over one bad record.
+            print(f"[search_players] skipped one malformed entry for query={query!r}: "
+                 f"{type(e).__name__}: {e} -- raw entry: {p!r}")
+            continue
     out.sort(key=lambda p: not p["active"])   # active players first, stable order otherwise
     return out
 

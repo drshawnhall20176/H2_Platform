@@ -1860,6 +1860,37 @@ def test_search_players_network_failure_returns_empty_not_a_crash(monkeypatch):
     print("✓ search_players degrades to an empty list on a network failure, never crashes the form")
 
 
+def test_search_players_skips_a_malformed_entry_instead_of_crashing(monkeypatch):
+    # Regression guard for a real, confirmed production crash: a live deployed search hit an
+    # AttributeError inside this function's own parsing loop, past where the original try/except
+    # covered (it only wrapped the fetch_json call itself). One bad entry in a real response must
+    # never take down every other real match, or the whole Bet Log page with it.
+    fake_response = {"people": [
+        {"id": 1, "fullName": "Good Entry", "active": True,
+         "currentTeam": {"name": "Boston Red Sox"}, "primaryPosition": {"abbreviation": "OF"}},
+        "not a dict at all",              # a genuinely malformed entry
+        {"id": 2, "fullName": "Also Good", "active": True,
+         "currentTeam": {"name": "New York Yankees"}, "primaryPosition": {"abbreviation": "SS"}},
+    ]}
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake_response)
+    results = E.search_players("test")
+    names = {r["name"] for r in results}
+    assert names == {"Good Entry", "Also Good"}   # both real entries survive; the bad one is skipped
+    print("✓ search_players skips a malformed entry instead of crashing, keeping every other real match")
+
+
+def test_search_players_unexpected_top_level_shape_returns_empty():
+    import unittest.mock as mock
+    with mock.patch.object(E, "fetch_json", return_value={"totally": "unexpected"}):
+        assert E.search_players("test") == []
+    with mock.patch.object(E, "fetch_json", return_value={"people": "not a list"}):
+        assert E.search_players("test") == []
+    with mock.patch.object(E, "fetch_json", return_value="not even a dict"):
+        assert E.search_players("test") == []
+    print("✓ search_players degrades to an honest empty list for any unexpected top-level "
+         "response shape, never a crash")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
