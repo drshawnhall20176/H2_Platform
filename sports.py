@@ -384,6 +384,32 @@ def game_dt(iso_utc: Optional[str]):
         return None
 
 
+def has_started(iso_utc: Optional[str], now=None) -> Optional[bool]:
+    """Whether a game with this real, scheduled start time has already begun (or is scheduled to
+    have) -- True/False when the time is known and parseable, None when it isn't (an honest "we
+    don't know" state, same convention game_dt itself already uses -- a caller should treat None
+    as "can't tell, don't filter this out," not silently coerce it to True or False).
+
+    Added directly on request: without this, a page suggesting parlays or basket positions has
+    no way to tell a game that hasn't started yet from one that started or finished hours ago,
+    and could suggest a play on a game a person can no longer actually place a new pre-game bet
+    on. A REAL, STATED LIMITATION, not silently glossed over: this compares the game's own
+    SCHEDULED start time to now, not live in-game status -- a delayed game that hasn't actually
+    thrown a first pitch yet would still show True here. Genuine live-status tracking (polling
+    real scores/game state) is separate, larger scope; this is the same honest, immediately
+    actionable proxy most betting platforms use for "is this still open for a new pre-game
+    position," not a claim about live game state.
+
+    now: optional fixed "current time" for deterministic testing, same as_of convention already
+    used elsewhere in this codebase (e.g. retro.trading_dates_ending_yesterday) -- defaults to
+    the real current Eastern time when not supplied."""
+    dt = game_dt(iso_utc)
+    if dt is None:
+        return None
+    now = now or _datetime.now(_EASTERN)
+    return now >= dt
+
+
 def slot_of(dt) -> str:
     """Bucket a US/Eastern game datetime into a coarse time-slot label: Afternoon (<5pm ET),
     Evening (5-8pm ET), Late (8pm ET+), or TBD (no known time). Fixed hour boundaries, not

@@ -3204,6 +3204,26 @@ def test_build_best_bets_hitter_row_carries_real_price_when_offers_match():
          "offers are provided and match, while Fair keeps its own unchanged meaning")
 
 
+def test_build_best_bets_hitter_and_pitcher_plays_carry_real_game_date():
+    # Regression guard for a real, reported need: without a real game start time on each play,
+    # a page like Suggested Parlays or Speculative Basket has no way to tell "hasn't started
+    # yet" from "started or finished hours ago." _game_date was already attached to every row
+    # by build_slate -- this confirms it's now surfaced on the final play, not just sitting
+    # unused on the row.
+    hitters = [dict(Hitter="Wade Meckler", _pid=1, Team="SF", GameLabel="SF @ LAD",
+                    **{"Opp Pitcher": "Tyler Glasnow"}, _game_date="2026-07-30T19:10:00Z",
+                    **{"TB1.5%": 0.42, "TB Line": 1.5, "TB LineSource": "book"})]
+    pitchers = [dict(Pitcher="Zack Littell", _pid=2, Team="TB", _game="TEX @ TB",
+                     **{"Opp": "TEX"}, _game_date="2026-07-30T23:05:00Z",
+                     **{"K over%": 0.58, "K line": 5.5, "K LineSource": "book"})]
+    plays = P.build_best_bets(hitters, pitchers)
+    hitter_play = next(p for p in plays if p["Player"] == "Wade Meckler")
+    pitcher_play = next(p for p in plays if p["Player"] == "Zack Littell")
+    assert hitter_play["GameDate"] == "2026-07-30T19:10:00Z"
+    assert pitcher_play["GameDate"] == "2026-07-30T23:05:00Z"
+    print("✓ build_best_bets attaches the real game start time to both hitter and pitcher plays")
+
+
 def test_build_best_bets_pitcher_row_carries_real_price_when_offers_match():
     pitchers = [dict(Pitcher="Zack Littell", _pid=444, Team="TB", _game="TEX @ TB",
                      **{"Opp": "TEX"},

@@ -2646,6 +2646,13 @@ def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict],
                 "Player": r["Hitter"], "PlayerId": r.get("_pid"), "Team": r["Team"], "Game": r["GameLabel"],
                 "Opp": r.get("Opp Pitcher"),
                 "Versus": r.get("Opp Pitcher"),
+                # GameDate: this game's real, scheduled UTC start time -- already attached to
+                # every row by build_slate, just never surfaced on the final play before. Added
+                # directly on request: without this, a page like Suggested Parlays or
+                # Speculative Basket has no way to tell "this game hasn't started yet" from
+                # "this game started or finished hours ago," and could suggest a play from a
+                # game a person can no longer actually place a pre-game bet on.
+                "GameDate": r.get("_game_date"),
                 # The opposing starter's real ERA, straight from the same _opp_stat this whole
                 # matchup is already built from -- added directly on request, so a person doesn't
                 # have to separately cross-reference Pitching Lab to see who they're actually up
@@ -2702,6 +2709,7 @@ def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict],
                 "Player": r["Pitcher"], "PlayerId": r.get("_pid"), "Team": r["Team"], "Game": r.get("_game", ""),
                 "Opp": r.get("Opp"),
                 "Versus": r.get("Opp"),
+                "GameDate": r.get("_game_date"),
                 "Market": market, "Side": side, "Line": line, "LineSource": line_source,
                 "ModelProb": round(sp, 4), "Fair": prob_to_american(sp),
                 "RealPrice": _price if _price_source == "book" else None,

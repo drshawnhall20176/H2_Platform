@@ -230,6 +230,45 @@ def test_game_dt_none_for_missing_or_malformed():
     assert S.game_dt("not-a-date") is None
 
 
+def test_has_started_true_for_a_game_already_underway():
+    # The exact real-world scenario this was built for: prepping for a 1:40pm game while an
+    # earlier 12:10pm game is already in progress.
+    from datetime import datetime
+    import pytz
+    eastern = pytz.timezone("US/Eastern")
+    fixed_now = eastern.localize(datetime(2026, 7, 30, 13, 30))   # 1:30pm ET
+    assert S.has_started("2026-07-30T16:10:00Z", now=fixed_now) is True   # 12:10pm ET game
+    print("✓ has_started correctly reports True for a game whose scheduled start has passed")
+
+
+def test_has_started_false_for_a_game_not_yet_started():
+    from datetime import datetime
+    import pytz
+    eastern = pytz.timezone("US/Eastern")
+    fixed_now = eastern.localize(datetime(2026, 7, 30, 13, 30))   # 1:30pm ET
+    assert S.has_started("2026-07-30T17:40:00Z", now=fixed_now) is False   # 1:40pm ET game
+    print("✓ has_started correctly reports False for a game that hasn't started yet")
+
+
+def test_has_started_none_for_unknown_or_malformed():
+    # An honest "can't tell" state, same convention as game_dt itself -- callers must treat
+    # this as "don't filter it out," not silently coerce to True or False.
+    assert S.has_started(None) is None
+    assert S.has_started("") is None
+    assert S.has_started("not-a-date") is None
+    print("✓ has_started returns an honest None for unknown/malformed game dates, never a "
+         "guessed True or False")
+
+
+def test_has_started_boundary_at_exact_start_time():
+    from datetime import datetime
+    import pytz
+    eastern = pytz.timezone("US/Eastern")
+    exact_start = eastern.localize(datetime(2026, 7, 30, 12, 10))
+    assert S.has_started("2026-07-30T16:10:00Z", now=exact_start) is True
+    print("✓ has_started treats the exact scheduled start moment as already started")
+
+
 def test_slot_of_buckets_correctly():
     afternoon = S.game_dt("2026-07-16T19:00:00Z")   # 3pm ET (summer/EDT)
     evening = S.game_dt("2026-07-16T23:00:00Z")      # 7pm ET
