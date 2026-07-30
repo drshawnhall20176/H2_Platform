@@ -233,7 +233,9 @@ def explain_miss(row: Optional[Dict], market: str = "Points") -> str:
 
 def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
                     seed: Optional[int] = None,
-                    real_lines: Optional[Dict] = None) -> List[Dict]:
+                    real_lines: Optional[Dict] = None,
+                    offers: Optional[List[Dict]] = None,
+                    preferred_book: Optional[str] = None) -> List[Dict]:
     """Rank candidate plays across all four markets by conviction (model prob vs the reference
     prob for that market), each with recent-form reasoning. No odds required — output schema
     (Player/PlayerId/Team/Game/Opp/Versus/Market/Side/Line/ModelProb/Fair/Conviction/Why) matches

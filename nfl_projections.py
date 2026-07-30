@@ -262,7 +262,9 @@ def explain_miss(row: Optional[Dict], market: str = "Pass Yards") -> str:
 
 def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
                     seed: Optional[int] = None,
-                    real_lines: Optional[Dict] = None) -> List[Dict]:
+                    real_lines: Optional[Dict] = None,
+                    offers: Optional[List[Dict]] = None,
+                    preferred_book: Optional[str] = None) -> List[Dict]:
     """Rank candidate plays across every position-relevant market by conviction (model prob vs
     the reference prob for that market), each with recent-form reasoning. No odds required — same
     output schema every sport's build_best_bets uses. Probabilities are shrunk toward a neutral
@@ -271,7 +273,14 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
     real_lines: {(normalized_player_name, odds_api_market_key): point} from
     odds_api.market_lines_for_slate -- when supplied, each play's Line is the real book line
     for that specific player (via real_line_or_default_nfl), not the _MARKET_SPEC placeholder.
-    None (the default) preserves the exact original always-placeholder behavior."""
+    None (the default) preserves the exact original always-placeholder behavior.
+
+    offers, preferred_book: accepted for signature parity with wnba_projections.build_best_bets
+    -- best_bets_data.load_generic_best_bets_board now always passes both keywords to every
+    sport it calls, the same way it already always passed real_lines. Currently unused here --
+    NFL's own real-PRICE wiring (RealPrice/PriceSource/ConvictionSource, matching MLB and now
+    WNBA) is real, scoped, future work, not done in this pass. real_lines above already gives
+    NFL real LINES; this is specifically about real PRICES, a separate, later step."""
     rng = np.random.default_rng(seed)
     plays: List[Dict] = []
 

@@ -562,5 +562,6 @@ def load_generic_best_bets_board(sport_key: str, date_str: str) -> tuple:
     except Exception:
         pass   # no Streamlit runtime (e.g. a test or script context) -- both are optional
 
-    plays = sport.projections.build_best_bets(rows, real_lines=real_lines)
+    plays = sport.projections.build_best_bets(rows, real_lines=real_lines, offers=real_offers,
+                                              preferred_book=preferred_book if api_key and sport.markets else O.DEFAULT_BOOK)
     return plays, meta, available_books

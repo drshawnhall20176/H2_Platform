@@ -266,6 +266,77 @@ def test_build_best_bets_never_produces_a_none_fair_price():
     print("✓ build_best_bets never produces a None Fair price, even for a maximally consistent player")
 
 
+def test_build_best_bets_real_data_absent_matches_exact_original_behavior():
+    # The critical backward-compatibility guarantee: no real_lines, no offers -- every existing
+    # caller must see the exact original always-placeholder, always-theoretical behavior.
+    log = [_log(22, 4, 6, 3), _log(18, 5, 5, 2), _log(25, 3, 7, 4)]
+    rows = [_row("Sabrina Ionescu", "New York Liberty", "Las Vegas Aces",
+                "New York Liberty @ Las Vegas Aces", log)]
+    plays = WP.build_best_bets(rows, sims=8000, seed=5)
+    pts = next(p for p in plays if p["Market"] == "Points")
+    assert pts["Line"] == 12.5   # the original _MARKET_SPEC placeholder, unchanged
+    assert pts["LineSource"] == "default"
+    assert pts["RealPrice"] is None
+    assert pts["PriceSource"] == "model_fair"
+    assert pts["ConvictionSource"] == "model_typical"
+    print("✓ build_best_bets matches the exact original behavior when no real data is supplied")
+
+
+def test_build_best_bets_real_line_used_when_available():
+    # Regression guard for the actual, reported bug: real_lines used to be accepted but never
+    # read anywhere in this function's body -- every play always priced off the placeholder
+    # regardless of what load_generic_best_bets_board had already fetched.
+    log = [_log(22, 4, 6, 3), _log(18, 5, 5, 2), _log(25, 3, 7, 4)]
+    rows = [_row("Sabrina Ionescu", "New York Liberty", "Las Vegas Aces",
+                "New York Liberty @ Las Vegas Aces", log)]
+    real_lines = {("sabrina ionescu", "player_points"): 21.5}
+    plays = WP.build_best_bets(rows, sims=8000, seed=5, real_lines=real_lines)
+    pts = next(p for p in plays if p["Market"] == "Points")
+    assert pts["Line"] == 21.5
+    assert pts["LineSource"] == "book"
+    print("✓ build_best_bets now genuinely uses a real line when real_lines supplies one")
+
+
+def test_build_best_bets_real_price_and_reference_used_when_offers_available():
+    # Confirms the full real-price wiring: a real captured price (RealPrice/PriceSource) and a
+    # real no-vig market reference (ConvictionSource) both get used when offers cover this
+    # player/market, mirroring MLB's own RealPrice/ConvictionSource fields exactly.
+    log = [_log(22, 4, 6, 3), _log(18, 5, 5, 2), _log(25, 3, 7, 4), _log(20, 4, 6, 3), _log(24, 5, 8, 3)]
+    rows = [_row("Sabrina Ionescu", "New York Liberty", "Las Vegas Aces",
+                "New York Liberty @ Las Vegas Aces", log)]
+    real_lines = {("sabrina ionescu", "player_points"): 21.5}
+    offers = [{"player": "Sabrina Ionescu", "market": "player_points", "point": 21.5,
+              "over": {"draftkings": -115}, "under": {"draftkings": -105}}]
+    plays = WP.build_best_bets(rows, sims=8000, seed=5, real_lines=real_lines,
+                               offers=offers, preferred_book="draftkings")
+    pts = next(p for p in plays if p["Market"] == "Points")
+    assert pts["RealPrice"] == -115.0
+    assert pts["RealPriceBook"] == "draftkings"
+    assert pts["PriceSource"] == "book"
+    assert pts["ConvictionSource"] == "book"
+    # Fair (the theoretical price) must remain untouched -- RealPrice is additive, never a
+    # silent replacement of what Fair itself means.
+    assert pts["Fair"] != pts["RealPrice"]
+    print("✓ build_best_bets attaches a real captured price and a real market reference when "
+         "offers cover this player, without altering what Fair itself means")
+
+
+def test_build_best_bets_falls_back_honestly_when_offers_dont_cover_this_player():
+    # A player with real_lines/offers supplied for the SLATE, but no actual offer for THIS
+    # specific player, must fall back honestly -- not crash, not fabricate a match.
+    log = [_log(22, 4, 6, 3), _log(18, 5, 5, 2), _log(25, 3, 7, 4)]
+    rows = [_row("Some Bench Player", "New York Liberty", "Las Vegas Aces",
+                "New York Liberty @ Las Vegas Aces", log)]
+    offers = [{"player": "A Totally Different Player", "market": "player_points", "point": 10.5,
+              "over": {"draftkings": -110}, "under": {"draftkings": -110}}]
+    plays = WP.build_best_bets(rows, sims=8000, seed=5, offers=offers, preferred_book="draftkings")
+    pts = next(p for p in plays if p["Market"] == "Points")
+    assert pts["RealPrice"] is None
+    assert pts["PriceSource"] == "model_fair"
+    assert pts["ConvictionSource"] == "model_typical"
+    print("✓ build_best_bets falls back honestly when offers exist but don't cover this specific player")
+
+
 def test_default_board_from_index_never_produces_prob_at_the_boundary():
     log = [_log(30, 3, 2, 4)] * 10
     rows = [_row("Perfectly Consistent", "Las Vegas Aces", "Seattle Storm",

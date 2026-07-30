@@ -146,7 +146,7 @@ def test_load_generic_best_bets_board_full_pipeline_runs():
 
     class _FakeProjections:
         @staticmethod
-        def build_best_bets(rows, real_lines=None):
+        def build_best_bets(rows, real_lines=None, offers=None, preferred_book=None):
             assert rows == ["fake_row"]
             return [{"Player": "Test Player", "Market": "Points", "Game": "Away @ Home"}]
 
@@ -184,7 +184,7 @@ def test_load_generic_best_bets_board_fetches_real_lines_for_non_nfl_sports_too(
 
     class _FakeProjections:
         @staticmethod
-        def build_best_bets(rows, real_lines=None):
+        def build_best_bets(rows, real_lines=None, offers=None, preferred_book=None):
             # The actual proof: real_lines must be the object our mocked fetch produced, not
             # None (the old, NFL-only-gated behavior for every other sport).
             assert real_lines == {"sentinel": "real-line-was-passed-through"}
@@ -236,7 +236,7 @@ def test_load_generic_best_bets_board_stores_real_offers_for_quick_log_reuse():
 
     class _FakeProjections:
         @staticmethod
-        def build_best_bets(rows, real_lines=None):
+        def build_best_bets(rows, real_lines=None, offers=None, preferred_book=None):
             return []
 
     class _FakeSport:
@@ -271,7 +271,7 @@ def test_load_generic_best_bets_board_offers_sidechannel_empty_when_fetch_not_at
 
     class _FakeProjections:
         @staticmethod
-        def build_best_bets(rows, real_lines=None):
+        def build_best_bets(rows, real_lines=None, offers=None, preferred_book=None):
             return []
 
     class _FakeSport:
@@ -305,7 +305,7 @@ def test_load_generic_best_bets_board_offers_sidechannel_empty_when_fetch_not_at
 
     class _FakeProjections:
         @staticmethod
-        def build_best_bets(rows, real_lines=None):
+        def build_best_bets(rows, real_lines=None, offers=None, preferred_book=None):
             return []
 
     class _FakeSport:
@@ -343,7 +343,7 @@ def test_load_generic_best_bets_board_diagnostic_reports_not_attempted_without_a
 
     class _FakeProjections:
         @staticmethod
-        def build_best_bets(rows, real_lines=None):
+        def build_best_bets(rows, real_lines=None, offers=None, preferred_book=None):
             return []
 
     class _FakeSport:

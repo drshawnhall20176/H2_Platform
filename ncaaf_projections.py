@@ -291,7 +291,9 @@ def explain_miss(row: Optional[Dict], market: str = "Pass Yards") -> str:
 
 def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
                     seed: Optional[int] = None,
-                    real_lines: Optional[Dict] = None) -> List[Dict]:
+                    real_lines: Optional[Dict] = None,
+                    offers: Optional[List[Dict]] = None,
+                    preferred_book: Optional[str] = None) -> List[Dict]:
     """Rank candidate plays across every position-relevant market by conviction (model prob vs
     the reference prob for that market) — same output schema every sport's build_best_bets uses.
     Probabilities are shrunk toward a neutral baseline by (team) sample size before being

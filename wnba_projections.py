@@ -34,6 +34,8 @@ from projections import (  # genuinely sport-agnostic — reused, not duplicated
     prob_to_decimal, prob_to_american, curate_selections,
 )
 import basketball_projections as BB_P  # league-agnostic basketball logic, shared with a future NBA build
+import odds_api as O   # for real_entry_price/real_market_prob -- real price/reference wiring,
+                       # same functions MLB's own build_best_bets already uses
 
 DEFAULT_SIMS = 10000
 
@@ -232,7 +234,9 @@ def explain_miss(row: Optional[Dict], market: str = "Points") -> str:
 
 def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
                     seed: Optional[int] = None,
-                    real_lines: Optional[Dict] = None) -> List[Dict]:
+                    real_lines: Optional[Dict] = None,
+                    offers: Optional[List[Dict]] = None,
+                    preferred_book: Optional[str] = None) -> List[Dict]:
     """Rank candidate plays across all four markets by conviction (model prob vs the reference
     prob for that market), each with recent-form reasoning. No odds required — mirrors
     projections.build_best_bets's role and output schema (Player/PlayerId/Team/Game/Opp/Versus/
@@ -243,12 +247,26 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
     (common early season with short logs) all land on the exact same clipped 98%/Conviction,
     collapsing the ranking among them into an arbitrary tie instead of a real ordering.
 
-    real_lines: accepted for signature parity with nfl_projections.build_best_bets, since
-    best_bets_data.load_generic_best_bets_board calls every sport's build_best_bets the same
-    way and always passes this keyword. Currently unused and always None in practice -- WNBA's
-    own market keys for real sportsbook lines aren't confirmed/tested yet (see
-    load_generic_best_bets_board's docstring), so this sport still always prices off the
-    _MARKET_SPEC placeholder line, same as before this parameter existed."""
+    REAL DATA, WIRED IN DIRECTLY, MATCHING MLB'S OWN PATTERN -- a real, reported gap: this
+    function used to accept real_lines "for signature parity" and never actually use it,
+    meaning every WNBA play always priced off the _MARKET_SPEC placeholder regardless of what
+    load_generic_best_bets_board had already fetched. Same root gap, one level deeper, for
+    offers/preferred_book -- both were already being fetched generically and stashed in a
+    session-state side-channel for quick_log's later use, but never given to THIS function,
+    so no WNBA play could ever carry a real captured price or be graded against a real market
+    reference instead of BEST_BET_REF's own hand-typed guess. All three now wired in:
+      - Line: the real book line when real_lines supplies one for this player/market, the
+        _MARKET_SPEC placeholder otherwise (LineSource records which).
+      - Conviction's reference: the real, live no-vig market probability (odds_api.
+        real_market_prob) when offers cover this player/market/side, BEST_BET_REF otherwise
+        (ConvictionSource records which) -- the same real gap odds_api.real_market_prob's own
+        docstring documents for MLB, closed here too.
+      - Fair/RealPrice: a real captured sportsbook price (odds_api.real_entry_price) when
+        available, the model's own theoretical Fair price otherwise (PriceSource records
+        which) -- Fair itself is unchanged (always the theoretical number); RealPrice is new,
+        additive, never silently replacing it.
+    None for real_lines/offers (the default) preserves the exact original always-placeholder,
+    always-theoretical behavior for any existing caller."""
     rng = np.random.default_rng(seed)
     plays: List[Dict] = []
 
@@ -256,21 +274,51 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
         log = r.get("_game_log") or []
         if not log:
             continue
-        for mkey, (col, disp, line) in _MARKET_SPEC.items():
+        for mkey, (col, disp, default_line) in _MARKET_SPEC.items():
             values = [g[_STAT_KEY[col]] for g in log]
+            norm_name = normalize_name(r["Player"])
+            line, line_src = default_line, "default"
+            if real_lines is not None:
+                real = real_lines.get((norm_name, mkey))
+                if real is not None:
+                    line, line_src = float(real), "book"
             sim = simulate_player_stat(values, sims, rng)
             if sim.size == 0:
                 continue
             raw = prob_over(_dist(sim), line)
             shrunk = BB_P.shrink_prob(raw, len(values))
             over = _clip_prob(shrunk)
-            side, sp, ref_s = _favored_side(over, BEST_BET_REF.get(disp, 0.5))
+
+            # Real market reference when available, BEST_BET_REF's own hand-typed guess
+            # otherwise -- same real distinction MLB's Conviction fix already established.
+            typical_ref = BEST_BET_REF.get(disp, 0.5)
+            ref, ref_src = typical_ref, "model_typical"
+            if offers:
+                real_over_prob = O.real_market_prob(offers, r["Player"], mkey, "over",
+                                                    preferred_book=preferred_book)
+                if real_over_prob is not None:
+                    ref, ref_src = real_over_prob, "book"
+            side, sp, ref_s = _favored_side(over, ref)
+
+            # Real captured price when available, the model's own theoretical Fair price
+            # otherwise -- Fair itself never changes meaning, RealPrice is purely additive.
+            fair = prob_to_american(sp)
+            real_price, real_price_book, price_src = None, None, "model_fair"
+            if offers:
+                real = O.real_entry_price(offers, r["Player"], mkey, side,
+                                          preferred_book=preferred_book)
+                if real is not None:
+                    real_price, _real_point, real_price_book = real
+                    price_src = "book"
+
             plays.append({
                 "Player": r["Player"], "PlayerId": r.get("_pid"), "Team": r["Team"],
                 "Game": r["GameLabel"], "Opp": r.get("Opp"), "Versus": r.get("Opp"),
-                "Market": disp, "Side": side, "Line": line,
-                "ModelProb": round(sp, 4), "Fair": prob_to_american(sp),
+                "Market": disp, "Side": side, "Line": line, "LineSource": line_src,
+                "ModelProb": round(sp, 4), "Fair": fair,
+                "RealPrice": real_price, "RealPriceBook": real_price_book, "PriceSource": price_src,
                 "Conviction": round(sp / ref_s, 2) if ref_s > 0 else 0.0,
+                "ConvictionSource": ref_src,
                 # this play's own theoretical max conviction (1/RefProb) -- lets
                 # grading.conviction_to_grade normalize fairly across markets with very
                 # different reference rates, see that function's own docstring
