@@ -2492,6 +2492,15 @@ def _hitter_diag(r: Dict) -> Dict:
         "Barrel%": r.get("Barrel%"),      # from Statcast enrichment (None if Statcast off)
         "xHR/PA": r.get("xHR/PA"),
         "OppHR9": r.get("Opp HR/9"),      # opposing starter's HR/9 allowed
+        # Due, AVG, SLG: already computed elsewhere (Due drives the HR "Why" reasoning; AVG/SLG
+        # come straight from mlb_engine's own row build), just never surfaced on the play object
+        # itself before. Added directly on request, specifically so a Highlight Profile can
+        # reference these real, meaningful signals (e.g. "Due >= 0.02" for a genuine barrels-
+        # ahead-of-results HR radar) without needing a new computation or a fragile parse of the
+        # "Why" text.
+        "Due": r.get("Due"),
+        "AVG": r.get("AVG"),
+        "SLG": r.get("SLG"),
     }
     # Weather decomposition — split the HR factor into temperature vs wind so the inspector can
     # say "the +8% is heat, not the crosswind." Present only when the page stored the breakdown
