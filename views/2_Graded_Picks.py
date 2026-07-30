@@ -262,9 +262,20 @@ else:
             fair_str = (f"📊 {pl['RealPrice']:+d}" if pl.get("PriceSource") == "book"
                                                        and pl.get("RealPrice") is not None
                        else f"{pl['Fair']:+d}" if pl.get("Fair") is not None else "—")
+            # Baseline: the real reference rate this pick's Conviction (and therefore its grade)
+            # is actually measured against -- derived directly from ModelProb/Conviction, already
+            # on the play. Added directly on request: Model % and Grade sit right next to each
+            # other here, and without this, a later-listed A-grade pick showing a LOWER Model %
+            # than an earlier C-grade pick from a different market/line looks like a bug even
+            # when it's correct math -- the baseline makes the actual comparison verifiable.
+            conv, mp = pl.get("Conviction"), pl.get("ModelProb")
+            baseline_str = ""
+            if conv and mp is not None and conv > 0:
+                marker = "📊" if pl.get("ConvictionSource") == "book" else ""
+                baseline_str = f" (vs {marker}{mp / conv:.0%} typical)"
             st.markdown(
-                f"{pl['ModelProb']:.0%} · {_grade_badge(pl['_grade'])} — **{pl['Player']}** "
-                f"{pl['Market']} {pl['Side']} {pl['Line']:g} · Fair {fair_str} · {pl['Game']}",
+                f"{pl['ModelProb']:.0%} · {_grade_badge(pl['_grade'])}{baseline_str} — "
+                f"**{pl['Player']}** {pl['Market']} {pl['Side']} {pl['Line']:g} · Fair {fair_str} · {pl['Game']}",
                 unsafe_allow_html=True,
             )
     summary_plays = [pl for entry in summary for pl in entry["picks"]]

@@ -222,14 +222,39 @@ with left:
                         p["_display_line"] = (f"📊 {p['Line']:g}" if p.get("LineSource") == "book"
                                               and p.get("Line") is not None
                                               else f"{p['Line']:g}" if p.get("Line") is not None else "—")
+                        # The actual fix for a real, reported optics problem: Grade and Model %
+                        # look like they should move together (higher probability -> better
+                        # grade), but they're deliberately different axes -- Grade/Conviction
+                        # measure edge relative to what's TYPICAL for that specific line, not raw
+                        # likelihood. Without seeing that baseline, a C at 80% sitting above an A
+                        # at 79% looks like a bug even though it's correct math. The baseline is
+                        # derived directly from data already on the play (ModelProb/Conviction),
+                        # not a new computation -- the same number the grade was already using,
+                        # just no longer hidden behind a caption someone has to trust.
+                        conv = p.get("Conviction")
+                        mp = p.get("ModelProb")
+                        if conv and mp is not None and conv > 0:
+                            baseline = mp / conv
+                            marker = "📊 " if p.get("ConvictionSource") == "book" else ""
+                            p["_baseline"] = f"{marker}{baseline:.0%}"
+                        else:
+                            p["_baseline"] = "—"
                     tdf = pd.DataFrame(subset)[["Grade", "ModelProb", "Player", "Market", "Side",
-                                                "_display_line", "Conviction", "Why"]]
+                                                "_display_line", "Conviction", "_baseline", "Why"]]
                     st.dataframe(
                         tdf.rename(columns={"ModelProb": "Model %", "Why": "Reasoning",
-                                            "_display_line": "Line"})
+                                            "_display_line": "Line", "_baseline": "Baseline"})
                         .style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×"})
                         .theme_gradient(cmap="Greens", subset=["Model %"]),
                         hide_index=True, use_container_width=True, height=330)
+                    st.caption("**Baseline** is the real reference rate Conviction (and therefore "
+                              "Grade) is actually measured against for that exact line — "
+                              "Model % ÷ Conviction. It's why Grade and Model % don't move "
+                              "together: an 80% Model % against an 80%+ baseline is barely any "
+                              "edge at all (a real, correctly low grade), while a 65% Model % "
+                              "against a 20% baseline is a massive one. 📊 means the baseline "
+                              "itself is a real, live no-vig market rate, not this platform's own "
+                              "typical-rate estimate for the market.")
                 else:
                     st.caption("No leans in this market on tonight's board.")
         st.caption("Ranked by real probability of hitting (Model %), among plays that clear at "
