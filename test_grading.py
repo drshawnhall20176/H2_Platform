@@ -1266,6 +1266,37 @@ def test_suggested_parlays_builds_all_five_tiers_with_enough_legs():
     print("✓ build_suggested_parlays correctly builds all five tiers when the pool is large enough")
 
 
+def test_suggested_parlays_safer_excludes_d_grade_near_certainties():
+    # Regression guard for a real, live, directly reported bug: Safer/Steady originally had no
+    # grade floor at all, and a near-100%-for-almost-every-player market (Stolen Bases Under,
+    # Doubles Under) produces D-grade picks with astronomical real ModelProb every single night,
+    # regardless of any real signal for that specific player. Confirmed directly against a real
+    # screenshot: both legs of a live Safer tier and all three legs of a live Steady tier were
+    # exactly this -- D-grade Stolen-Base/Doubles unders, Fair odds from -920 to -5000, gutting
+    # the whole page's usefulness. This reproduces that shape directly: five D-grade
+    # near-certainties (conviction 1.25, no ceiling -- grades D under conviction_to_grade's own
+    # un-normalized floor) mixed with three real, validated B-grade picks.
+    junk = [_leg(f"Scrub{i}", f"T{i}", f"G{i}", 1.25, market="Batter Stolen Bases", model_prob=0.97)
+           for i in range(5)]
+    real = [
+        _leg("Javier Assad", "CHC", "CHC@STL", 2.5, market="Pitcher Outs", model_prob=0.92),
+        _leg("Spencer Jones", "NYY", "NYY@CWS", 2.3, market="Batter Strikeouts", model_prob=0.88),
+        _leg("Salvador Perez", "KC", "KC@MIN", 2.1, market="Batter Walks", model_prob=0.87),
+    ]
+    parlays = grading.build_suggested_parlays(junk + real)
+    tiers = {p["tier"]: p for p in parlays}
+    assert "Safer" in tiers
+    safer_players = [leg["Player"] for leg in tiers["Safer"]["legs"]]
+    assert "Javier Assad" in safer_players and "Spencer Jones" in safer_players
+    for scrub in [f"Scrub{i}" for i in range(5)]:
+        assert scrub not in safer_players
+    # Only 3 real candidates exist total, and Safer already used 2 of them -- Steady (needs 3)
+    # honestly can't be filled and must NOT appear, rather than getting padded with D-grade junk.
+    assert "Steady" not in tiers
+    print("✓ Safer excludes D-grade near-certainties entirely, picking real validated legs "
+         "instead, and Steady honestly disappears rather than being padded with junk")
+
+
 def test_suggested_parlays_tiers_are_non_overlapping():
     # THE real, requested fix: no leg (and therefore no player) should ever appear in more than
     # one tier -- each tier is a genuinely distinct combination, not the same core picks reused

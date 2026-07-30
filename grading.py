@@ -510,8 +510,8 @@ def hit_miss_by_market(graded_plays: List[Dict], min_grade_letter: str = "C") ->
 # not less, on a page built specifically for people who explicitly don't want to dig into why a
 # number is what it is -- they're trusting it at face value.
 PARLAY_TIER_SIZES = [
-    (2, "Safer",      "safety",     None),
-    (3, "Steady",     "safety",     None),
+    (2, "Safer",      "safety",     "C"),
+    (3, "Steady",     "safety",     "C"),
     (4, "Balanced",   "conviction", None),
     (5, "Bold",       "payout",     "C"),
     (6, "Longshot",   "payout",     "C"),
@@ -541,6 +541,23 @@ PARLAY_TIER_SIZES = [
    # Longshot now require at least a real "C" grade before a play is even eligible for the
    # payout ranking, so the biggest-payout search happens within a pool of genuinely
    # well-graded plays, not the bottom of the barrel.
+   #
+   # THE THIRD FIX, found via a real, live, reported screenshot: Safer/Steady originally had NO
+   # grade floor at all (min_grade=None), and this is the EXACT SAME underlying problem the
+   # payout tiers already got fixed for, just hitting from the opposite direction. "Safety" sorts
+   # by raw ModelProb, and a near-100%-for-almost-every-player market (Stolen Bases Under 0.5,
+   # Doubles Under 0.5 -- most hitters rarely do either) produces D-grade picks with 95%+ real
+   # ModelProb, EVERY night, for players who have nothing to do with tonight's actual matchup.
+   # Nothing stopped these from flooding the top of a ModelProb-sorted ranking and crowding out
+   # every real, validated pick -- confirmed directly against a live deploy where BOTH legs of
+   # Safer and all THREE legs of Steady were exactly this: Bo Bichette/Tyrone Taylor/Paul
+   # Goldschmidt/Jorge Polanco/Nasim Nunez, all D-grade Stolen-Base or Doubles unders, Fair odds
+   # in the -920 to -5000 range, on top of it ALSO showing every single leg on an unconfirmed
+   # lineup -- a parlay page that was, in the reporting person's own direct words, unusable. Same
+   # fix as the payout tiers: require at least a real "C" grade before a play is eligible for the
+   # safety ranking at all, so "most likely to hit" only ever searches within plays that already
+   # have real, validated edge -- never the trivial, structurally-near-certain background noise
+   # every single slate has regardless of any real signal.
 GRADE_RANK = {letter: len(GRADE_THRESHOLDS) - i for i, (_, letter, _) in enumerate(GRADE_THRESHOLDS)}
 # {"A": 4, "B": 3, "C": 2, "D": 1} -- higher is better, derived directly from GRADE_THRESHOLDS'
 # own real order rather than a second, separately-maintained ranking that could drift out of sync.
