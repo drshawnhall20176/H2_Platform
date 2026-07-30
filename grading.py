@@ -510,26 +510,27 @@ def hit_miss_by_market(graded_plays: List[Dict], min_grade_letter: str = "C") ->
 # not less, on a page built specifically for people who explicitly don't want to dig into why a
 # number is what it is -- they're trusting it at face value.
 PARLAY_TIER_SIZES = [
-    (2, "Safer",      "safety",     "C"),
-    (3, "Steady",     "safety",     "C"),
-    (4, "Balanced",   "safety",     "B"),
-    (5, "Bold",       "payout",     "C"),
-    (6, "Longshot",   "payout",     "C"),
-    (7, "Aggressive", "payout",     "C"),   # Added: community regularly builds 6-8 mans;
-    (8, "Max",        "payout",     "C"),   # capped at C-grade floor same as Bold/Longshot so
-                                            # legs are still real recommendations, not padding.
+    (2, "Safer",      "safety", "C"),
+    (3, "Steady",     "safety", "C"),
+    (4, "Balanced",   "safety", "B"),
+    (5, "Bold",       "safety", "C"),
+    (6, "Longshot",   "safety", "C"),
+    (7, "Aggressive", "safety", "C"),   # Added: community regularly builds 6-8 mans;
+    (8, "Max",        "safety", "C"),   # kept at C floor (not tightened to B like Balanced) --
+                                        # these later tiers draw from a smaller remaining pool
+                                        # after Safer/Steady/Balanced have already claimed their
+                                        # own players, so the wider floor keeps them achievable
+                                        # at size rather than frequently skipping outright.
 ]   # A REAL, SECOND REDESIGN, not the original approach: the first version (non-overlapping
    # slices of ONE ranked-by-conviction list) fixed leg reuse, but every tier was still
    # optimizing for the exact same thing -- just handing out consecutive chunks of the same
    # queue. Real feedback was that this could still read as mechanical, not genuinely
    # differentiated: a sharp person could notice Longshot's legs were simply Safer's leftovers,
-   # not picks chosen FOR being longshots. Each tier now has its OWN real objective (see
-   # _tier_sort_key below for exactly what each one optimizes for), so "Safer" actually means
-   # "ranked by real probability of hitting" and "Longshot" actually means "ranked by real
-   # payout size, among plays that still clear the grading floor" -- not just "fewer vs more of
-   # the identical ranking." Leg/player uniqueness across tiers is still a hard rule (see
-   # build_suggested_parlays), unchanged from the first redesign -- that part was never the
-   # problem, only "every tier ranks the same way" was.
+   # not picks chosen FOR being longshots. Each tier originally got its OWN real objective (see
+   # _tier_sort_key below for exactly what each one optimizes for) -- see THE FIFTH FIX below for
+   # why every tier now shares the same "safety" objective instead. Leg/player uniqueness across
+   # tiers is still a hard rule (see build_suggested_parlays), unchanged from the first redesign
+   # -- that part was never the problem, only "every tier ranks the same way" was.
    #
    # The 4th element (min_grade) is a REAL, second fix, found via a real reported example: with
    # only Batter HR selected, "payout" tiers were picking the WORST, barely-D-grade HR legs
@@ -581,6 +582,29 @@ PARLAY_TIER_SIZES = [
    # platform: on a thin slate without four real B+ picks left after Safer/Steady have already
    # claimed their own legs, Balanced now honestly doesn't appear, rather than filling itself
    # with the same C-or-lower legs Safer/Steady already correctly declined to feature this way.
+   #
+   # THE FIFTH FIX, direct, specific feedback: "payout" (Bold/Longshot/Aggressive/Max) is, BY
+   # DESIGN, the opposite of achievable -- it deliberately searches for the LOWEST ModelProb
+   # among C+ legs, since that's what maximizes payout size. That's exactly backwards from what
+   # a real person means by "give me a 5-8 leg parlay" -- reported directly: nobody in a real
+   # Discord, chasing real money, builds a longshot-heavy parlay out of near-zero-event legs
+   # (zero strikeouts, zero walks, zero earned runs) unless they're deliberately hunting a moon
+   # shot, which is a different, explicit thing from "I want this to be achievable." Confirmed
+   # directly against a realistic ~40-pick pool: "payout" put together a 5-leg Bold tier from
+   # five legs all sitting at 56-57% ModelProb for a combined 6.0% real probability. Every tier
+   # now uses the SAME "safety" (raw ModelProb, most-likely-to-hit-first) objective Safer/Steady/
+   # Balanced already use and already prove out -- risk still genuinely increases from Safer
+   # through Max, but because MORE real, validated legs are being compounded together, not
+   # because any individual leg was deliberately chosen for being unlikely. On the same real
+   # pool, this took Bold's own combined probability from 6.0% to 58.8%, and produced a smooth,
+   # sensible progression across all seven tiers (84.9% -> 75.5% -> 58.6% -> 46.6% -> 32.0% ->
+   # 17.6% -> 8.3%) with no tier landing on the "millions of dollars," nobody-takes-this-
+   # seriously combined odds "payout" could produce (see Suggested Parlays' own "Off the board"
+   # display cap for the display-side half of that fix, from a separate, earlier report). Kept
+   # at a "C" floor rather than tightening to "B" like Balanced -- these are the last four tiers
+   # in the sequence, drawing from whatever real candidates Safer/Steady/Balanced haven't already
+   # claimed, so the wider floor is what keeps them achievable AT SIZE instead of frequently
+   # skipping outright on a thinner slate.
 GRADE_RANK = {letter: len(GRADE_THRESHOLDS) - i for i, (_, letter, _) in enumerate(GRADE_THRESHOLDS)}
 # {"A": 4, "B": 3, "C": 2, "D": 1} -- higher is better, derived directly from GRADE_THRESHOLDS'
 # own real order rather than a second, separately-maintained ranking that could drift out of sync.

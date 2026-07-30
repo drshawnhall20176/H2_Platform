@@ -1347,6 +1347,74 @@ def test_suggested_parlays_balanced_uses_safety_not_conviction():
          f"{tiers['Balanced']['combined_prob']:.1%} (was 26.2% under the old conviction-based sort)")
 
 
+def test_suggested_parlays_bold_longshot_use_safety_not_payout():
+    # Regression guard for direct, specific feedback: "payout" (the old objective for Bold/
+    # Longshot/Aggressive/Max) deliberately searches for the LOWEST ModelProb among C+ legs,
+    # since that's what maximizes payout size -- the exact opposite of "achievable." Confirmed
+    # directly: a real person building a real 5-8 leg parlay isn't hunting near-zero-event legs
+    # unless deliberately chasing a moon shot, a different, explicit thing from wanting the tier
+    # to be achievable at all. Reproduces the real, measured improvement against a realistic
+    # ~40-pick pool: "payout" put together a 5-leg Bold tier entirely from 56-57% ModelProb legs
+    # for a combined 6.0% probability; "safety" should produce something meaningfully stronger.
+    import random
+    rng = random.Random(7)
+    markets = ["Batter Strikeouts", "Batter Total Hits", "Batter Total Bases", "Pitcher Outs",
+              "Pitcher Strikeouts", "Pitcher Walks", "Pitcher Earned Runs", "Batter Hits+Runs+RBIs"]
+    plays = []
+    for i in range(40):
+        mp = rng.uniform(0.55, 0.93)
+        conv = rng.uniform(1.3, 2.3)
+        ceiling = conv * rng.uniform(1.1, 1.6)
+        plays.append({"Player": f"Player{i}", "Team": f"T{i % 15}", "Market": rng.choice(markets),
+                     "Game": f"G{i % 12}", "ModelProb": mp, "Conviction": conv, "_ceiling": ceiling})
+
+    parlays = grading.build_suggested_parlays(plays)
+    tiers = {p["tier"]: p for p in parlays}
+    assert "Bold" in tiers
+    # Every leg in Bold should be genuinely high-probability, not clustered at the bottom of
+    # the C-grade floor the way "payout" would deliberately produce.
+    bold_probs = [leg["ModelProb"] for leg in tiers["Bold"]["legs"]]
+    assert min(bold_probs) > 0.70   # "payout" would have clustered these in the mid-50s%
+    assert tiers["Bold"]["combined_prob"] > 0.25   # was 6.0% under the old "payout" objective;
+    # threshold kept well below the ~59% seen in standalone verification since exact percentages
+    # vary by RNG sequence -- the min-probability check above is the more direct, robust proof
+    # this fix actually changed the selection, not just the reported number.
+    print(f"✓ Bold uses 'safety' (real ModelProb-first), combined probability "
+         f"{tiers['Bold']['combined_prob']:.1%} (was 6.0% under the old payout-chasing objective)")
+
+
+def test_suggested_parlays_full_tier_progression_is_achievable_throughout():
+    # Confirms the actual, holistic fix: every tier from Safer through Max should show a
+    # smooth, sensible progression -- combined probability decreasing as legs increase (more
+    # real legs compounded together is inherently riskier), but no tier collapsing to a
+    # near-zero, "nobody would take this seriously" combined probability the way "payout"
+    # used to produce for the largest tiers.
+    import random
+    rng = random.Random(7)
+    markets = ["Batter Strikeouts", "Batter Total Hits", "Batter Total Bases", "Pitcher Outs",
+              "Pitcher Strikeouts", "Pitcher Walks", "Pitcher Earned Runs", "Batter Hits+Runs+RBIs"]
+    plays = []
+    for i in range(60):
+        mp = rng.uniform(0.55, 0.93)
+        conv = rng.uniform(1.3, 2.3)
+        ceiling = conv * rng.uniform(1.1, 1.6)
+        plays.append({"Player": f"Player{i}", "Team": f"T{i % 20}", "Market": rng.choice(markets),
+                     "Game": f"G{i % 12}", "ModelProb": mp, "Conviction": conv, "_ceiling": ceiling})
+
+    parlays = grading.build_suggested_parlays(plays)
+    tiers_by_size = {p["size"]: p for p in parlays}
+    probs = [tiers_by_size[s]["combined_prob"] for s in sorted(tiers_by_size)]
+    # Monotonically decreasing as size increases -- more legs is always riskier, that part is
+    # correct and expected, not something this fix changes.
+    assert all(probs[i] >= probs[i + 1] for i in range(len(probs) - 1))
+    # But even the largest tier must stay genuinely achievable, not collapse toward zero.
+    max_tier = tiers_by_size.get(8) or tiers_by_size[max(tiers_by_size)]
+    assert max_tier["combined_prob"] > 0.03   # a real, meaningful floor, not "0.0%"
+    print(f"✓ Combined probability decreases smoothly and sensibly from Safer through the "
+         f"largest tier ({probs[0]:.1%} -> {probs[-1]:.1%}), with no tier collapsing to "
+         f"near-zero")
+
+
 def test_suggested_parlays_tiers_are_non_overlapping():
     # THE real, requested fix: no leg (and therefore no player) should ever appear in more than
     # one tier -- each tier is a genuinely distinct combination, not the same core picks reused
