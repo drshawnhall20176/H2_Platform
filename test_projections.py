@@ -2757,6 +2757,46 @@ def test_hitter_reasons_hr_due_shows_the_real_percentage_point_magnitude():
          "reference to a number it doesn't display")
 
 
+def test_hitter_reasons_total_hits_shows_real_avg_and_expected_pa():
+    # Regression guard for a real, reported gap: the platoon-edge and walk-risk checks above
+    # only fire for the Over side, so an Under pick on a genuinely good hitter (the reported
+    # example: Nico Hoerner, Under 1.5) had NOTHING player-specific in its own reasoning at all
+    # -- just generic home/away/day/night context, with no way to judge whether the pick was
+    # actually well-founded. Confirms the real season AVG and tonight's real expected PA count
+    # (both already computed elsewhere, just never shown here) now appear, for BOTH sides --
+    # the number is what explains the pick, not text that argues a direction.
+    row = {"AVG": 0.271, "_exp_pa": 3.9, "Hand": "R", "Opp Hand": "R", "Advantage": "Neutral"}
+    why_under = P._hitter_reasons(row, "Batter Total Hits", "Under")
+    assert "hitting 0.271 this season, projected for 3.9 PA tonight" in why_under
+
+    row2 = {"AVG": 0.312, "_exp_pa": 4.6, "Hand": "L", "Opp Hand": "R", "Advantage": "Neutral"}
+    why_over = P._hitter_reasons(row2, "Batter Total Hits", "Over")
+    assert "hitting 0.312 this season, projected for 4.6 PA tonight" in why_over
+    print("✓ _hitter_reasons shows the real season AVG and expected PA for Total Hits, on both "
+         "the Over and Under side")
+
+
+def test_hitter_reasons_total_hits_never_shows_opponent_hits_allowed():
+    # A real, deliberate omission, not an oversight: this platform's own methodology (see
+    # REST_HR_MULT's own comment in projections.py) already treats a pitcher's hits-allowed rate
+    # as mostly luck/defense (DIPS theory), not real, predictive pitcher skill. Showing it here
+    # as if it were a strong factor -- the way opponent K/BB rates correctly ARE shown -- would
+    # misrepresent what the model itself actually believes about that stat's reliability.
+    row = {"AVG": 0.271, "_exp_pa": 3.9, "_opp_hr9": 0.5}
+    why = P._hitter_reasons(row, "Batter Total Hits", "Under")
+    joined = " ".join(why).lower()
+    assert "allow" not in joined and "opp pitcher" not in joined
+    print("✓ _hitter_reasons never presents an opponent hits-allowed signal for Total Hits, "
+         "consistent with this platform's own DIPS-theory reasoning about that stat")
+
+
+def test_hitter_reasons_total_hits_falls_back_honestly_without_avg():
+    row = {"_is_home": True, "_is_day_game": True}
+    why = P._hitter_reasons(row, "Batter Total Hits", "Under")
+    assert not any("hitting" in w for w in why)
+    print("✓ _hitter_reasons doesn't fabricate an AVG-based reason when AVG genuinely isn't available")
+
+
 
     # When only the batter's own rate is available (no real opponent data), still show that
     # real number rather than dropping straight to the fully generic fallback.

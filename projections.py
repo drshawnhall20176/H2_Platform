@@ -2302,6 +2302,20 @@ def _hitter_reasons(r: Dict, market: str, side: str) -> List[str]:
     if market == "Batter HR" and (r.get("Due") or 0) > 0.01:
         why.append(f"barrels imply his real HR/PA rate should run {r['Due'] * 100:.1f} "
                   f"percentage points higher than his actual HR count shows")
+    if market == "Batter Total Hits":
+        avg = r.get("AVG")
+        exp_pa = r.get("_exp_pa")
+        # Deliberately the SAME text regardless of Over/Under -- a real .xxx average and a real
+        # expected PA count are useful information either way; the direction of the pick is for
+        # the number to explain, not something this text needs to argue for. NOT showing an
+        # opposing-pitcher hits-allowed signal here on purpose -- this platform's own REST_HR_
+        # MULT comment already documents treating that stat as mostly luck/defense (DIPS
+        # theory), not real, predictive pitcher skill, so presenting it as a strong factor here
+        # would misrepresent what the model itself actually believes about it.
+        if avg is not None and exp_pa is not None:
+            why.append(f"hitting {avg:.3f} this season, projected for {exp_pa:.1f} PA tonight")
+        elif avg is not None:
+            why.append(f"hitting {avg:.3f} this season")
     if market == "Batter Strikeouts":
         season_k = r.get("_season_k_rate")
         opp_k = r.get("_opp_k_allowed")
