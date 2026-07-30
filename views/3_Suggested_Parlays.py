@@ -101,6 +101,27 @@ if not plays:
         st.info("No games on the board right now. Parlay suggestions appear here on an active slate.")
     st.stop()
 
+# Exclude plays from a game that's already started or finished -- added directly on request
+# (prepping for a 1:40 game while an earlier game was already underway). A suggested parlay leg
+# on a game already in progress isn't a real, actionable suggestion; the book itself has usually
+# already pulled that game's pre-game props by first pitch/kickoff. Deliberately sport-agnostic
+# and placed here, after both the MLB and generic loading paths above, so it applies uniformly
+# and starts working automatically for any other sport the moment GameDate is wired into its own
+# build_best_bets too -- currently MLB only, a real, honest limitation, not silently pretended
+# otherwise. has_started's own None case (an unknown/malformed game date) is deliberately NEVER
+# filtered out here -- "can't tell" isn't the same as "already started," and dropping a real,
+# valid play over a missing timestamp would be its own new bug.
+_n_before_start_filter = len(plays)
+plays = [pl for pl in plays if sports.has_started(pl.get("GameDate")) is not True]
+_n_started_removed = _n_before_start_filter - len(plays)
+if _n_started_removed > 0:
+    st.caption(f"⏱️ {_n_started_removed} play(s) removed — their game has already started or "
+              "finished.")
+if not plays:
+    st.info("Every play on tonight's board is from a game that's already started or finished. "
+           "Check back once new games are on the board.")
+    st.stop()
+
 # --- time slot + game filter --------------------------------------------------
 # The same shared helpers (game_dt/slot_of/SLOT_ORDER) Best Bets, every Matchup Lab variant, and
 # Graded Picks already use -- added directly on request, to match Matchup Lab's own filtering

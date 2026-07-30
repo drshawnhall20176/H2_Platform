@@ -92,6 +92,22 @@ if not plays:
         st.info("No games on the board right now. Basket positions appear here on an active slate.")
     st.stop()
 
+# Exclude plays from a game that's already started or finished -- same real fix as Suggested
+# Parlays, added directly on request (prepping for a 1:40 game while an earlier game was already
+# underway). See that page's own comment for the full reasoning -- sport-agnostic placement,
+# MLB-only real data for now (GameDate isn't wired into other sports' build_best_bets yet), and
+# has_started's own None case is deliberately never filtered out.
+_n_before_start_filter = len(plays)
+plays = [pl for pl in plays if sports.has_started(pl.get("GameDate")) is not True]
+_n_started_removed = _n_before_start_filter - len(plays)
+if _n_started_removed > 0:
+    st.caption(f"⏱️ {_n_started_removed} play(s) removed — their game has already started or "
+              "finished.")
+if not plays:
+    st.info("Every play on tonight's board is from a game that's already started or finished. "
+           "Check back once new games are on the board.")
+    st.stop()
+
 # --- time slot + game filter --------------------------------------------------
 # The same shared helpers (game_dt/slot_of/SLOT_ORDER) Best Bets, every Matchup Lab variant, and
 # Graded Picks already use -- added directly on request, to match Matchup Lab's own filtering
