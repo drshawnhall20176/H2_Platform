@@ -153,8 +153,13 @@ mode = st.radio("Basket mode", ["Speculative (chase payout)", "Game Coverage (on
 # and doesn't use this filter at all.
 markets_present = sorted({pl.get("Market") for pl in plays if pl.get("Market")})
 if mode == "Speculative (chase payout)":
+    # Same real, deliberate curation as Suggested Parlays/Graded Picks -- see sports.py's own
+    # comment for the full reasoning. Especially relevant here: this mode explicitly chases
+    # payout, so it's the most exposed to the same rare-event-market problem.
+    _default_markets = (_active.default_markets or markets_present)
+    _default_selected = [m for m in _default_markets if m in markets_present] or markets_present
     selected_markets = st.multiselect("Markets to include", options=markets_present,
-                                      default=markets_present)
+                                      default=_default_selected)
     if not selected_markets:
         st.info("Select at least one market above to see basket positions.")
         st.stop()
