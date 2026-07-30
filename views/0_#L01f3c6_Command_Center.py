@@ -84,7 +84,10 @@ def today_board(sport_key, date_str):
 def yesterday_catches(sport_key, date_str, markets):
     plays, _ = _board(sport_key, date_str)
     results = sports.get(sport_key).engine.get_player_results(date_str)
-    return {m: R.market_report(plays, results, m)["caught"] for m in markets}, len(results)
+    reports = {m: R.market_report(plays, results, m) for m in markets}
+    return ({m: r["caught"] for m, r in reports.items()},
+            {m: r["missed"] for m, r in reports.items()},
+            len(results))
 
 
 today = datetime.now().strftime("%Y-%m-%d")
@@ -218,10 +221,16 @@ with left:
                         hide_index=True, use_container_width=True, height=330)
                 else:
                     st.caption("No leans in this market on tonight's board.")
-        st.caption("Ranked by real probability of hitting (Model %), among plays that already "
-                  "clear a real grade — not by Conviction alone, which measures edge relative to "
-                  "a market-typical rate and can run high on a genuine longshot in a rare-event "
-                  "market. Grade still reflects the same methodology as Graded Picks.")
+        st.caption("Ranked by real probability of hitting (Model %), among plays that clear at "
+                  "least a C grade — not by Conviction alone, which measures edge relative to a "
+                  "market-typical rate and can run high on a genuine longshot in a rare-event "
+                  "market. D-grade picks are excluded here on purpose (same as Graded Picks' own "
+                  "summary): a near-certain \"Under\" on a rare-event market like Stolen Bases or "
+                  "Triples can show a 95%+ Model % while still earning the platform's own lowest "
+                  "grade, because that market's own typical rate is already close to 100% — a "
+                  "high Model % there isn't a real edge, just a market where almost nothing "
+                  "happens for almost everyone. A grade shown here (C or better) means real, "
+                  "validated edge, not just a high raw probability.")
         # Quick-log widget, added directly on request: during a real, narrow pick-making window,
         # having to separately re-enter a pick into Bet Log is real friction that gets skipped in
         # favor of just making the pick. Uses the same curated "best 2 per market" set shown in
@@ -273,17 +282,23 @@ with right:
  
 # ---------- model-caught highlight (yesterday) ----------
 st.divider()
-st.subheader("🎯 The model caught these — last night's non-obvious plays")
+st.subheader("🎯 The model's own top picks — confirmed")
 if _active.key == "MLB":
-    st.caption("Players whose result cleared the line AND sat in the model's top plays before the game. "
-               "Surfaced by matchup, platoon, Statcast, and weather — not name value. (Exploratory; see Retrospective.)")
+    st.caption("Players whose result cleared the line AND sat in the model's top plays before "
+               "the game — real, direct proof the model's own pre-game confidence lined up "
+               "with what actually happened, not a claim these were surprising or hard to spot. "
+               "Surfaced by matchup, platoon, Statcast, and weather, not name recognition — a "
+               "correct #1-ranked pick counts the same here whether it's a household name or "
+               "not. (Exploratory; see Retrospective.)")
 else:
-    st.caption("Players whose result cleared the line AND sat in the model's top plays before the game. "
-               "Surfaced by recent form, not name value. (Exploratory; see Retrospective.)")
+    st.caption("Players whose result cleared the line AND sat in the model's top plays before "
+               "the game — real, direct proof the model's own pre-game confidence lined up "
+               "with what actually happened. Surfaced by recent form, not name recognition. "
+               "(Exploratory; see Retrospective.)")
 try:
-    catches, _ = yesterday_catches(_active.key, yest, tuple(_active.market_map.keys()))
+    catches, misses, _ = yesterday_catches(_active.key, yest, tuple(_active.market_map.keys()))
 except Exception:
-    catches = {}
+    catches, misses = {}, {}
 
 _caught_markets = list(_active.market_map.keys())
 _ctabs = st.tabs([f"{_MARKET_ICONS.get(m, '🔹')} {m}" for m in _caught_markets])
@@ -301,6 +316,38 @@ for _tb, _mkt in zip(_ctabs, _caught_markets):
         else:
             st.caption("Nothing cleared the line in the model's top plays for this market last night, "
                        "or results aren't final yet.")
+
+# ---------- genuinely surprising hits (the actual "opposite side," requested previously) ----------
+# market_report already computes this exact bucket (players whose result cleared the line but
+# whose PRE-GAME rank sat OUTSIDE the model's own top tier) -- it was just being discarded. This
+# is the honest complement to "top picks confirmed" above: that section shows the model's own
+# high-confidence calls landing (expected, if the model is well-calibrated); this one shows
+# outcomes the model DIDN'T have strong pre-game confidence in, that happened anyway. Neither
+# section claims the other's data -- "top picks confirmed" no longer says "non-obvious," and this
+# section is the one actually built to carry that meaning.
+st.divider()
+st.subheader("🔦 Surprising hits — the model didn't see these coming")
+st.caption("Players whose result ALSO cleared the line last night, but who sat OUTSIDE the "
+          "model's own top-ranked plays pre-game — genuinely low pre-game confidence, not a "
+          "confirmed top pick. A real, honest signal worth a second look either way: either the "
+          "model is missing something about this player/matchup worth investigating (see "
+          "Retrospective), or it's a genuinely unpredictable event landing as variance does. "
+          "Sorted worst-ranked (most surprising) first. (Exploratory.)")
+_stabs = st.tabs([f"{_MARKET_ICONS.get(m, '🔹')} {m}" for m in _caught_markets])
+for _tb, _mkt in zip(_stabs, _caught_markets):
+    with _tb:
+        surprises = sorted(misses.get(_mkt, []), key=lambda x: -x["Rank"])
+        if surprises:
+            sdf = pd.DataFrame(surprises[:6])
+            sdf["Pre-game rank"] = sdf.apply(lambda r: f"#{r['Rank']} of {r['OfTotal']}", axis=1)
+            cols = [c for c in ["Player", "Value", "Line", "ModelProb", "Pre-game rank"] if c in sdf.columns]
+            sdf = sdf[cols].rename(columns={"ModelProb": "Model %", "Value": _mkt})
+            fmt = {"Model %": "{:.0%}", "Line": "{:g}", _mkt: "{:.1f}"}
+            st.dataframe(sdf.style.format({k: v for k, v in fmt.items() if k in sdf.columns}, na_rep="—"),
+                        hide_index=True, use_container_width=True)
+        else:
+            st.caption("No real surprises for this market last night — every real hit sat in the "
+                      "model's own top-ranked plays, or results aren't final yet.")
 
 st.divider()
 st.caption("⚖️ For analysis and entertainment. Not financial advice and not a guarantee — outcomes "

@@ -298,6 +298,23 @@ with st.expander(f"📊 Full win-count distribution ({len(trimmed_legs)} positio
               f"together** covers {band_mass:.1%} of all outcomes — the real range to expect, not "
               f"just the single expected-value point above.")
 
+# "Most likely winners" -- added directly on request: "Expected winners" is a real, useful
+# number, but on its own it doesn't say WHICH legs are actually driving it. The answer already
+# exists -- trimmed_legs is ranked by real ModelProb below (see the comment above that ranking
+# call) -- this just makes the connection explicit instead of leaving a person to infer it from
+# the numbering scheme alone.
+top_n = max(1, round(trimmed_expected))
+top_legs = trimmed_legs[:top_n]
+with st.container(border=True):
+    st.markdown(f"#### 🎯 Most likely winners — top {top_n} (matching Expected winners ≈ {trimmed_expected:.1f})")
+    st.caption("These are literally the top-ranked positions in the list below by real ModelProb "
+              "— not a separate calculation, just called out directly here since a rounded "
+              "aggregate number doesn't by itself tell you which specific legs it's counting.")
+    for i, leg in enumerate(top_legs, 1):
+        opp = f" vs {leg['Opp']}" if leg.get("Opp") else ""
+        st.markdown(f"**#{i}** {leg['Player']} ({leg['Team']}) — {leg['Market']} {leg['Side']} "
+                   f"{leg['Line']:g}{opp} · **{leg['ModelProb']:.0%}** to hit")
+
 GRADE_COLOR = {"A": "#16783c", "B": "#2e7d32", "C": "#b8860b", "D": "#6b7280"}
 
 
@@ -330,6 +347,8 @@ with st.container(border=True):
     # them -- this page is explicitly framed around "which of these is more likely to actually
     # hit," same reasoning as Suggested Parlays). Lists the TRIMMED set so this list, the metrics
     # above, and the distribution chart above all stay in sync with the slider.
+    st.caption("🔢 Numbered by real probability of hitting (highest first) — #1 is the single "
+              "most likely position in this basket, not an arbitrary sequence.")
     for leg in trimmed_legs:
         grade_html = _grade_badge(leg["_grade"])
         leg_fair_str = (f"📊 {leg['RealPrice']:+d}" if leg.get("PriceSource") == "book"
