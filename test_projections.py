@@ -2646,11 +2646,50 @@ def test_hitter_reasons_runs_rbi_no_era_falls_back_to_generic():
     print("✓ _hitter_reasons falls back to the honest generic reason when no opponent ERA is available")
 
 
-def test_hitter_reasons_stolen_bases_references_own_rate_not_a_fabricated_matchup():
+def test_hitter_reasons_stolen_bases_falls_back_honestly_without_real_numbers():
     row = {}
     why = P._hitter_reasons(row, "Batter Stolen Bases", "Over")
     assert why == ["based on his own season stolen-base rate"]
-    print("✓ _hitter_reasons is honest that SB has no real opponent matchup factor in the model")
+    print("✓ _hitter_reasons falls back to the honest generic reason when the real season "
+         "SB/PA numbers aren't available on the row")
+
+
+def test_hitter_reasons_stolen_bases_shows_real_season_numbers_when_available():
+    # Regression guard for a real, reported gap: "based on his own season stolen-base rate"
+    # told a person nothing about whether an active basestealer or a rare, opportunistic one was
+    # behind a pick -- exactly the context needed to judge a risky leg like this one. Confirms
+    # the real underlying numbers (season SB, season PA, tonight's expected value) are surfaced
+    # directly, not just referenced vaguely.
+    active_basestealer = {"_season_sb": 12, "_season_pa_for_sb": 340, "_exp_sb_tonight": 0.15}
+    why = P._hitter_reasons(active_basestealer, "Batter Stolen Bases", "Over")
+    assert why == ["12 SB in 340 PA this season (3.5 per 100 PA), ~0.15 expected tonight"]
+
+    rare_basestealer = {"_season_sb": 2, "_season_pa_for_sb": 310, "_exp_sb_tonight": 0.03}
+    why2 = P._hitter_reasons(rare_basestealer, "Batter Stolen Bases", "Over")
+    assert "2 SB in 310 PA" in why2[0] and "0.6 per 100 PA" in why2[0]
+    # The two cases must be visibly, numerically distinguishable -- an active basestealer and a
+    # rare one clearing the same probability threshold should not read identically.
+    assert why != why2
+    print("✓ _hitter_reasons shows the real season SB/PA numbers and tonight's expected value, "
+         "genuinely distinguishing an active basestealer from a rare, opportunistic one")
+
+
+def test_enrich_hitter_rows_stores_real_stolen_base_numbers_on_the_row():
+    # Confirms the actual data-layer fix: enrich_hitter_rows now stores the real season SB
+    # count, season PA, and tonight's expected SB value directly on the row, which is what
+    # _hitter_reasons above reads to build the richer explanation.
+    rows = [dict(Hitter="Ke'Bryan Hayes", Team="PIT", GameLabel="PIT @ CIN", Hand="R",
+                **{"Opp Hand": "R", "Opp Pitcher": "Rhett Lowder"}, Advantage="",
+                _weather_hr=1.0, Due=0.0, _pid=1,
+                _stat={"plateAppearances": 340, "atBats": 300, "hits": 80, "doubles": 15,
+                      "triples": 2, "homeRuns": 5, "baseOnBalls": 30, "strikeOuts": 60,
+                      "stolenBases": 12, "runs": 40, "rbi": 35})]
+    P.enrich_hitter_rows(rows, seed=7)
+    row = rows[0]
+    assert row.get("_season_sb") == 12.0
+    assert row.get("_season_pa_for_sb") == 340.0
+    assert row.get("_exp_sb_tonight") is not None
+    print("✓ enrich_hitter_rows stores the real season SB/PA numbers directly on the row")
 
 
 # ----------------------------------------------------------------- _pitcher_reasons: earned runs
@@ -2671,12 +2710,86 @@ def test_pitcher_reasons_hits_allowed_references_dips_caveat():
 
 
 def test_hitter_reasons_walks_gets_own_distinct_reasoning():
+    # Empty row -- honest fallback when the real season/opponent rates aren't available.
     why_over = P._hitter_reasons({}, "Batter Walks", "Over")
     why_under = P._hitter_reasons({}, "Batter Walks", "Under")
     assert why_over == ["real plate discipline in this matchup"]
     assert why_under == ["aggressive approach, rarely walks"]
     assert why_over != why_under
     print("✓ _hitter_reasons gives Batter Walks its own distinct reasoning, not reused power/platoon language")
+
+
+def test_hitter_reasons_strikeouts_shows_real_matchup_numbers_when_available():
+    # Regression guard for the same real, reported gap found for Stolen Bases: "elevated whiff
+    # risk in this matchup" was the ENTIRE explanation for every single strikeout pick,
+    # regardless of the actual numbers behind it. Confirms the real season K rate and the real
+    # opposing pitcher's allowed K rate (the same numbers that actually drove the probability,
+    # not a separately-computed pair) are surfaced directly.
+    high_k_hitter = {"_season_k_rate": 0.28, "_opp_k_allowed": 0.24}
+    why = P._hitter_reasons(high_k_hitter, "Batter Strikeouts", "Over")
+    assert why == ["his own 28% K rate this season vs a pitcher who allows strikeouts at a 24% rate"]
+
+    low_k_hitter = {"_season_k_rate": 0.12, "_opp_k_allowed": 0.24}
+    why2 = P._hitter_reasons(low_k_hitter, "Batter Strikeouts", "Under")
+    assert "12%" in why2[0] and "24%" in why2[0]
+    assert why != why2   # genuinely distinguishable, not interchangeable boilerplate
+    print("✓ _hitter_reasons shows the real season K rate and opposing pitcher's real allowed "
+         "K rate for Strikeouts, genuinely distinguishing different matchups")
+
+
+def test_hitter_reasons_walks_shows_real_matchup_numbers_when_available():
+    high_bb_hitter = {"_season_bb_rate": 0.14, "_opp_bb_allowed": 0.11}
+    why = P._hitter_reasons(high_bb_hitter, "Batter Walks", "Over")
+    assert why == ["his own 14% walk rate this season vs a pitcher who allows walks at a 11% rate"]
+    print("✓ _hitter_reasons shows the real season walk rate and opposing pitcher's real "
+         "allowed walk rate for Walks")
+
+
+def test_hitter_reasons_hr_due_shows_the_real_percentage_point_magnitude():
+    # Same category of fix as Strikeouts/Walks/Stolen Bases: this used to say "barrels imply
+    # more power than the HR count shows" with no real number at all, even though a real Due
+    # value was already being checked to decide whether to show the line in the first place.
+    row = {"Due": 0.025}
+    why = P._hitter_reasons(row, "Batter HR", "Over")
+    assert why == ["barrels imply his real HR/PA rate should run 2.5 percentage points higher "
+                   "than his actual HR count shows"]
+    print("✓ _hitter_reasons shows the real Due magnitude in percentage points, not a vague "
+         "reference to a number it doesn't display")
+
+
+
+    # When only the batter's own rate is available (no real opponent data), still show that
+    # real number rather than dropping straight to the fully generic fallback.
+    row = {"_season_k_rate": 0.30}
+    why = P._hitter_reasons(row, "Batter Strikeouts", "Over")
+    assert why == ["his own 30% K rate this season"]
+    print("✓ _hitter_reasons shows the real season K rate alone when opponent data isn't "
+         "available, rather than the fully generic fallback")
+
+
+def test_enrich_hitter_rows_stores_real_k_bb_matchup_numbers_on_the_row():
+    # Confirms the actual data-layer fix: enrich_hitter_rows now stores the batter's own real
+    # season K/BB rates and the opposing pitcher's own real allowed K/BB rates directly on the
+    # row -- the same numbers _hitter_reasons above reads, and the same ones actually used in
+    # batter_pa_probs' own odds-ratio matchup math (not a second, separately-computed pair).
+    rows = [dict(Hitter="Test Hitter", Team="PIT", GameLabel="PIT @ CIN", Hand="R",
+                **{"Opp Hand": "R", "Opp Pitcher": "Test Pitcher"}, Advantage="",
+                _weather_hr=1.0, Due=0.0, _pid=1,
+                _opp_stat={"battersFaced": 300, "strikeOuts": 90, "baseOnBalls": 30,
+                          "homeRuns": 10, "hits": 70},
+                _stat={"plateAppearances": 340, "atBats": 300, "hits": 80, "doubles": 15,
+                      "triples": 2, "homeRuns": 5, "baseOnBalls": 40, "strikeOuts": 85,
+                      "stolenBases": 3})]
+    P.enrich_hitter_rows(rows, seed=7)
+    row = rows[0]
+    assert row.get("_season_k_rate") is not None
+    assert abs(row["_season_k_rate"] - (85 / 340)) < 1e-9
+    assert row.get("_season_bb_rate") is not None
+    assert abs(row["_season_bb_rate"] - (40 / 340)) < 1e-9
+    assert row.get("_opp_k_allowed") is not None
+    assert row.get("_opp_bb_allowed") is not None
+    print("✓ enrich_hitter_rows stores the real season K/BB rates and the real opponent-allowed "
+         "K/BB rates directly on the row")
 
 
 def test_hitter_reasons_singles_doubles_triples_get_platoon_reasoning():

@@ -216,7 +216,7 @@ def rank_flat_plays(plays: List[Dict], key: str = "rank_value") -> List[Dict]:
     return ranked
 
 
-def build_top_leans(plays: List[Dict], per_market: int = 2) -> List[Dict]:
+def build_top_leans(plays: List[Dict], per_market: int = 2, letters=("A", "B", "C")) -> List[Dict]:
     """Grade every play, then pick the best `per_market` from EACH market, all sorted by real
     probability of hitting (ModelProb) -- the actual, testable logic behind Command Center's
     "Tonight's top leans" widget, pulled out of the view layer for the same reason every other
@@ -241,10 +241,26 @@ def build_top_leans(plays: List[Dict], per_market: int = 2) -> List[Dict]:
     own name and purpose are different: someone glancing at "Tonight's top leans" is asking
     "what's likely to hit," not "what has the biggest edge relative to a market-typical rate."
 
+    letters: defaults to A/B/C, deliberately excluding D -- a SECOND real, confirmed gap this
+    fixes, found directly from a real report: sorting purely by ModelProb with no grade floor at
+    all meant a whole page of D-grade picks with zero A's could show up in a widget literally
+    named "Top Leans," with no visible explanation for why a 98% probability pick carried the
+    platform's own lowest grade. The real cause: for a rare-event market's OWN Under side
+    (Stolen Bases, Triples), near-100% ModelProb is the NORM for nearly every player, not a
+    signal of a good pick -- the market's own typical/reference rate is already close to 100%,
+    so even a genuinely elevated real probability barely edges past what's typical, earning a
+    real, correctly-computed low grade. Sorting by ModelProb alone let these structurally-near-
+    certain, low-grade "safe unders" systematically crowd out the per-market slots, silently
+    outranking genuinely interesting picks in the same market. top_picks_by_grade (Graded
+    Picks' own curated summary) already excludes D for exactly this reason -- this widget does
+    the same conceptual job and simply never got the same treatment. Same real, visible,
+    adjustable floor as that function -- a caller can pass letters=("A","B","C","D") to include D
+    too, exposed as a real UI control, not a silent default nobody can see or change.
+
     Still only draws from plays that clear conviction_to_grade's own real floor (a play must
     already have SOME real, validated edge to be graded at all) -- this isn't "any probability,
     no matter how thin the edge," it's "the most likely to hit, among plays that already have
-    real edge behind them."
+    real edge behind them, at a grade actually worth featuring here."
 
     per_market caps how many of the SAME market can appear, so one especially safe-looking
     market (e.g. a high-probability, low-edge one) can't fill the entire list by itself -- the
@@ -256,7 +272,7 @@ def build_top_leans(plays: List[Dict], per_market: int = 2) -> List[Dict]:
     graded = []
     for p in plays:
         g = conviction_to_grade(p.get("Conviction"), p.get("_ceiling"))
-        if g:
+        if g and g.get("letter") in letters:
             graded.append({**p, "_grade": g})
     graded.sort(key=lambda p: p.get("ModelProb", 0.0), reverse=True)
 

@@ -371,6 +371,41 @@ def test_build_top_leans_each_play_carries_grade():
     print("✓ build_top_leans attaches _grade to every returned play")
 
 
+def test_build_top_leans_excludes_d_grade_by_default():
+    # Regression guard for a real, reported gap: sorting purely by ModelProb with no grade floor
+    # meant a whole "Top Leans" widget could show D-grade-only picks with zero A/B/C, no visible
+    # explanation for why a 98% probability pick carried the platform's own lowest grade. The
+    # real cause confirmed directly: a near-certain "Under" on a rare-event market (Stolen Bases,
+    # Triples) has near-100% ModelProb for almost every player -- not a signal of a good pick,
+    # just a market whose typical rate is already close to 100%. Sorting by ModelProb alone let
+    # this structurally-near-certain, low-grade play crowd out a genuinely better one in the
+    # exact same market. top_picks_by_grade (Graded Picks' own curated summary) already excludes
+    # D for this identical reason; build_top_leans now matches it.
+    near_certain_d_grade_under = {"Player": "Safe Guy", "Market": "Batter Stolen Bases",
+                                  "ModelProb": 0.98, "Conviction": 1.09, "_ceiling": 1.05}
+    genuinely_good_c_grade_over = {"Player": "Real Pick", "Market": "Batter Stolen Bases",
+                                   "ModelProb": 0.35, "Conviction": 1.3, "_ceiling": 2.0}
+    leans = grading.build_top_leans([near_certain_d_grade_under, genuinely_good_c_grade_over])
+    players = [p["Player"] for p in leans]
+    assert "Safe Guy" not in players   # the D-grade near-certainty is excluded, even at 98% ModelProb
+    assert "Real Pick" in players      # the genuinely better C-grade pick survives instead
+    print("✓ build_top_leans excludes a D-grade play even at 98% ModelProb, letting a genuinely "
+         "better C-or-higher pick in the same market surface instead")
+
+
+def test_build_top_leans_letters_param_can_reinclude_d():
+    # Same real, visible, adjustable floor as top_picks_by_grade -- a caller can explicitly ask
+    # for D too, exposed as a real control, not silently unavailable.
+    d_only = {"Player": "Safe Guy", "Market": "Batter Stolen Bases",
+             "ModelProb": 0.98, "Conviction": 1.09, "_ceiling": 1.05}
+    leans_default = grading.build_top_leans([d_only])
+    leans_with_d = grading.build_top_leans([d_only], letters=("A", "B", "C", "D"))
+    assert leans_default == []
+    assert len(leans_with_d) == 1 and leans_with_d[0]["Player"] == "Safe Guy"
+    print("✓ build_top_leans' D-exclusion is a real, adjustable floor via the letters param, "
+         "not a hardcoded rule")
+
+
 # ----------------------------------------------------------------- organize_graded_picks
 def _pick(player, team, game, conviction, market="Batter HR", ceiling=None):
     return {"Player": player, "Team": team, "Game": game, "Market": market, "Side": "Over",

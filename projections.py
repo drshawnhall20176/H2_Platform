@@ -1684,6 +1684,20 @@ def enrich_hitter_rows(rows: List[Dict], sims: int = DEFAULT_SIMS, seed: Optiona
         # get_starter_rest_info). A short-rest opposing starter allows real hitters more --
         # see pitcher_allowed_rates' own docstring for the full reasoning and exact direction.
         opp_allowed = pitcher_allowed_rates(r.get("_opp_stat"), r.get("_opp_days_rest"))
+        # Real underlying K/BB matchup numbers, stored directly on the row -- added on request,
+        # after finding the same "generic boilerplate instead of real reasoning" gap Stolen
+        # Bases had. Both sides are real: the batter's own season rate (his own plate
+        # appearances/strikeouts/walks, not a model-only figure) and the opposing pitcher's own
+        # real, shrunk allowed rate (the same "k"/"bb" values actually used below in
+        # batter_pa_probs' own odds-ratio matchup math -- not a second, separately-computed
+        # number that could quietly disagree with what actually drove the probability).
+        season_pa_for_kbb = _f(stat, "plateAppearances")
+        if season_pa_for_kbb > 0:
+            r["_season_k_rate"] = _f(stat, "strikeOuts") / season_pa_for_kbb
+            r["_season_bb_rate"] = _f(stat, "baseOnBalls") / season_pa_for_kbb
+        if opp_allowed:
+            r["_opp_k_allowed"] = opp_allowed.get("k")
+            r["_opp_bb_allowed"] = opp_allowed.get("bb")
         xhr = xhr_from_statcast(r.get("_pid"), statcast, statcast_k)
         # _consecutive_games_started: this HITTER's own real current no-rest-day streak, added
         # directly on request -- same established per-row metadata convention as _opp_stat/
@@ -1736,6 +1750,13 @@ def enrich_hitter_rows(rows: List[Dict], sims: int = DEFAULT_SIMS, seed: Optiona
         exp_runs = batter_counting_rate(stat, exp_pa, "runs", LG_RUNS_PER_PA, RUNS_RBI_PRIOR_PA, opp_era)
         exp_rbi = batter_counting_rate(stat, exp_pa, "rbi", LG_RBI_PER_PA, RUNS_RBI_PRIOR_PA, opp_era)
         exp_sb = batter_counting_rate(stat, exp_pa, "stolenBases", LG_SB_PER_PA, SB_PRIOR_PA)
+        # Real underlying numbers stored directly on the row -- added on request, specifically so
+        # _hitter_reasons can show the ACTUAL season count/rate behind a stolen-base pick instead
+        # of a generic "based on his own season stolen-base rate" sentence that doesn't help
+        # anyone judge whether a real basestealer or a rare, opportunistic one is behind the number.
+        r["_season_sb"] = _f(stat, "stolenBases")
+        r["_season_pa_for_sb"] = _f(stat, "plateAppearances")
+        r["_exp_sb_tonight"] = exp_sb
         if exp_runs is not None:
             runs_line, runs_src = real_line_or_default("Batter Runs", player_name, real_lines, 0.5)
             r["Runs%"] = poisson_over_prob(exp_runs, runs_line)
@@ -2279,13 +2300,30 @@ def _hitter_reasons(r: Dict, market: str, side: str) -> List[str]:
     if market in ("Batter HR", "Batter Total Bases") and (r.get("_weather_hr") or 1.0) >= 1.05:
         why.append(f"weather aiding power (+{(r['_weather_hr'] - 1) * 100:.0f}%)")
     if market == "Batter HR" and (r.get("Due") or 0) > 0.01:
-        why.append("barrels imply more power than the HR count shows")
+        why.append(f"barrels imply his real HR/PA rate should run {r['Due'] * 100:.1f} "
+                  f"percentage points higher than his actual HR count shows")
     if market == "Batter Strikeouts":
-        why.append("elevated whiff risk in this matchup" if side == "Over"
-                   else "strong contact profile (rarely strikes out)")
+        season_k = r.get("_season_k_rate")
+        opp_k = r.get("_opp_k_allowed")
+        if season_k is not None and opp_k is not None:
+            why.append(f"his own {season_k:.0%} K rate this season vs a pitcher who allows "
+                      f"strikeouts at a {opp_k:.0%} rate")
+        elif season_k is not None:
+            why.append(f"his own {season_k:.0%} K rate this season")
+        else:
+            why.append("elevated whiff risk in this matchup" if side == "Over"
+                       else "strong contact profile (rarely strikes out)")
     if market == "Batter Walks":
-        why.append("real plate discipline in this matchup" if side == "Over"
-                   else "aggressive approach, rarely walks")
+        season_bb = r.get("_season_bb_rate")
+        opp_bb = r.get("_opp_bb_allowed")
+        if season_bb is not None and opp_bb is not None:
+            why.append(f"his own {season_bb:.0%} walk rate this season vs a pitcher who allows "
+                      f"walks at a {opp_bb:.0%} rate")
+        elif season_bb is not None:
+            why.append(f"his own {season_bb:.0%} walk rate this season")
+        else:
+            why.append("real plate discipline in this matchup" if side == "Over"
+                       else "aggressive approach, rarely walks")
     if market in ("Batter Runs", "Batter RBIs"):
         opp_era = (r.get("_opp_stat") or {}).get("era")
         if opp_era:
@@ -2294,7 +2332,16 @@ def _hitter_reasons(r: Dict, market: str, side: str) -> List[str]:
             elif side == "Under" and opp_era <= 3.3:
                 why.append(f"facing a strong starter ({opp_era:.2f} ERA)")
     if market == "Batter Stolen Bases":
-        why.append("based on his own season stolen-base rate")
+        season_sb = r.get("_season_sb")
+        season_pa = r.get("_season_pa_for_sb")
+        exp_sb_tonight = r.get("_exp_sb_tonight")
+        if season_sb is not None and season_pa:
+            rate_per_100_pa = (season_sb / season_pa) * 100 if season_pa > 0 else 0.0
+            exp_str = f", ~{exp_sb_tonight:.2f} expected tonight" if exp_sb_tonight is not None else ""
+            why.append(f"{season_sb:.0f} SB in {season_pa:.0f} PA this season "
+                      f"({rate_per_100_pa:.1f} per 100 PA){exp_str}")
+        else:
+            why.append("based on his own season stolen-base rate")   # honest fallback if the real numbers aren't available
     if market == "Batter Hits+Runs+RBIs":
         why.append("combined hits/runs/RBI projection (correlation-aware, not treated as three independent stats)")
     if not why:
