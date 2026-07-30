@@ -1757,6 +1757,21 @@ def enrich_hitter_rows(rows: List[Dict], sims: int = DEFAULT_SIMS, seed: Optiona
         r["_season_sb"] = _f(stat, "stolenBases")
         r["_season_pa_for_sb"] = _f(stat, "plateAppearances")
         r["_exp_sb_tonight"] = exp_sb
+        # Same real-number pattern extended to Runs, RBIs, and the specific hit-type markets
+        # (Doubles, Triples, Singles) -- added directly on request, systematically covering
+        # every remaining market that only had generic context reasoning, not real numbers.
+        # singles derived the same way _rates_from_stat already does elsewhere in this module
+        # (hits minus doubles/triples/HR), not a second, separately-invented definition.
+        season_pa = _f(stat, "plateAppearances")
+        r["_season_pa"] = season_pa
+        r["_season_runs"] = _f(stat, "runs")
+        r["_season_rbi"] = _f(stat, "rbi")
+        r["_exp_runs_tonight"] = exp_runs
+        r["_exp_rbi_tonight"] = exp_rbi
+        r["_season_doubles"] = _f(stat, "doubles")
+        r["_season_triples"] = _f(stat, "triples")
+        r["_season_singles"] = max(_f(stat, "hits") - _f(stat, "doubles") - _f(stat, "triples")
+                                   - _f(stat, "homeRuns"), 0.0)
         if exp_runs is not None:
             runs_line, runs_src = real_line_or_default("Batter Runs", player_name, real_lines, 0.5)
             r["Runs%"] = poisson_over_prob(exp_runs, runs_line)
@@ -2302,6 +2317,16 @@ def _hitter_reasons(r: Dict, market: str, side: str) -> List[str]:
     if market == "Batter HR" and (r.get("Due") or 0) > 0.01:
         why.append(f"barrels imply his real HR/PA rate should run {r['Due'] * 100:.1f} "
                   f"percentage points higher than his actual HR count shows")
+    if market == "Batter Total Bases":
+        slg = r.get("SLG")
+        exp_pa = r.get("_exp_pa")
+        # Same real-number pattern as Total Hits -- SLG is the real, season-long signal for
+        # extra-base power (a single counts 1 total base, a double 2, a triple 3, a HR 4), the
+        # direct real number behind a Total Bases line the way AVG is for Total Hits.
+        if slg is not None and exp_pa is not None:
+            why.append(f"slugging {slg:.3f} this season, projected for {exp_pa:.1f} PA tonight")
+        elif slg is not None:
+            why.append(f"slugging {slg:.3f} this season")
     if market == "Batter Total Hits":
         avg = r.get("AVG")
         exp_pa = r.get("_exp_pa")
@@ -2345,6 +2370,22 @@ def _hitter_reasons(r: Dict, market: str, side: str) -> List[str]:
                 why.append(f"facing a struggling starter ({opp_era:.2f} ERA)")
             elif side == "Under" and opp_era <= 3.3:
                 why.append(f"facing a strong starter ({opp_era:.2f} ERA)")
+        # A real, deliberate addition: the opp-ERA check above only fires past a threshold, so a
+        # moderate-ERA matchup previously left this market with NOTHING player-specific at all.
+        # The batter's own real season rate (runs or RBIs per PA, expressed per 100 PA for a
+        # readable number) is useful either way, same reasoning as every other market fixed
+        # this pass -- shown alongside the ERA context when both are present, not instead of it.
+        season_pa = r.get("_season_pa")
+        stat_key, exp_key, label = (
+            ("_season_runs", "_exp_runs_tonight", "runs") if market == "Batter Runs"
+            else ("_season_rbi", "_exp_rbi_tonight", "RBIs"))
+        season_count = r.get(stat_key)
+        exp_tonight = r.get(exp_key)
+        if season_count is not None and season_pa:
+            rate_per_100 = (season_count / season_pa) * 100 if season_pa > 0 else 0.0
+            exp_str = f", ~{exp_tonight:.2f} expected tonight" if exp_tonight is not None else ""
+            why.append(f"{season_count:.0f} {label} in {season_pa:.0f} PA this season "
+                      f"({rate_per_100:.1f} per 100 PA){exp_str}")
     if market == "Batter Stolen Bases":
         season_sb = r.get("_season_sb")
         season_pa = r.get("_season_pa_for_sb")
@@ -2356,8 +2397,27 @@ def _hitter_reasons(r: Dict, market: str, side: str) -> List[str]:
                       f"({rate_per_100_pa:.1f} per 100 PA){exp_str}")
         else:
             why.append("based on his own season stolen-base rate")   # honest fallback if the real numbers aren't available
+    if market in ("Batter Singles", "Batter Doubles", "Batter Triples"):
+        # Same real season-count/rate pattern as Stolen Bases, applied to the specific hit type
+        # this market actually asks about -- added directly on request, systematically covering
+        # every remaining market that only had generic platoon/walk-risk context (Over-only, so
+        # an Under pick on any of these previously had nothing player-specific at all).
+        stat_key, label = {
+            "Batter Singles": ("_season_singles", "1B"),
+            "Batter Doubles": ("_season_doubles", "2B"),
+            "Batter Triples": ("_season_triples", "3B"),
+        }[market]
+        season_count = r.get(stat_key)
+        season_pa = r.get("_season_pa")
+        if season_count is not None and season_pa:
+            rate_per_100 = (season_count / season_pa) * 100 if season_pa > 0 else 0.0
+            why.append(f"{season_count:.0f} {label} in {season_pa:.0f} PA this season "
+                      f"({rate_per_100:.1f} per 100 PA)")
     if market == "Batter Hits+Runs+RBIs":
-        why.append("combined hits/runs/RBI projection (correlation-aware, not treated as three independent stats)")
+        avg = r.get("AVG")
+        avg_str = f" — hitting {avg:.3f} this season" if avg is not None else ""
+        why.append(f"combined hits/runs/RBI projection (correlation-aware, not treated as three "
+                  f"independent stats){avg_str}")
     if not why:
         why.append(f"model leans {side} of a typical line here")
     return why

@@ -2797,6 +2797,102 @@ def test_hitter_reasons_total_hits_falls_back_honestly_without_avg():
     print("✓ _hitter_reasons doesn't fabricate an AVG-based reason when AVG genuinely isn't available")
 
 
+def test_hitter_reasons_total_bases_shows_real_slg_and_expected_pa():
+    # Same real-number fix as Total Hits, applied to Total Bases: SLG is the direct real signal
+    # for extra-base power, the actual thing this market asks about.
+    row = {"SLG": 0.478, "_exp_pa": 4.2}
+    why = P._hitter_reasons(row, "Batter Total Bases", "Over")
+    assert "slugging 0.478 this season, projected for 4.2 PA tonight" in why
+    print("✓ _hitter_reasons shows real SLG and expected PA for Total Bases")
+
+
+def test_hitter_reasons_runs_shows_real_season_rate_even_below_era_threshold():
+    # Regression guard for a real gap: the opp-ERA check only fires past a threshold (>=4.5 for
+    # Over, <=3.3 for Under), so a moderate-ERA matchup previously left this market with NOTHING
+    # player-specific at all. Confirms the batter's own real season runs rate now always shows
+    # when available, independent of whether the ERA threshold was cleared.
+    row = {"_opp_stat": {"era": 3.9}, "_season_runs": 62, "_season_pa": 410,
+          "_exp_runs_tonight": 0.52}
+    why = P._hitter_reasons(row, "Batter Runs", "Over")
+    assert not any("struggling starter" in w or "strong starter" in w for w in why)
+    assert "62 runs in 410 PA this season (15.1 per 100 PA), ~0.52 expected tonight" in why
+    print("✓ _hitter_reasons shows the real season runs rate for Batter Runs even when the ERA "
+         "threshold isn't cleared")
+
+
+def test_hitter_reasons_runs_shows_both_era_and_season_rate_when_both_apply():
+    row = {"_opp_stat": {"era": 5.1}, "_season_runs": 62, "_season_pa": 410,
+          "_exp_runs_tonight": 0.52}
+    why = P._hitter_reasons(row, "Batter Runs", "Over")
+    assert any("struggling starter" in w for w in why)
+    assert any("62 runs in 410 PA" in w for w in why)
+    print("✓ _hitter_reasons shows both the real ERA context and the real season rate together "
+         "when both genuinely apply")
+
+
+def test_hitter_reasons_rbis_shows_real_season_rate():
+    row = {"_season_rbi": 55, "_season_pa": 410, "_exp_rbi_tonight": 0.48}
+    why = P._hitter_reasons(row, "Batter RBIs", "Under")
+    assert "55 RBIs in 410 PA this season (13.4 per 100 PA), ~0.48 expected tonight" in why
+    print("✓ _hitter_reasons shows the real season RBI rate for Batter RBIs")
+
+
+def test_hitter_reasons_singles_doubles_triples_show_real_season_rates():
+    # Regression guard for a real, reported gap: these three markets previously had NO dedicated
+    # reasoning at all -- only the Over-only platoon/walk-risk checks (meaning an Under pick had
+    # nothing player-specific whatsoever, the same class of gap Total Hits had for Nico Hoerner).
+    singles_why = P._hitter_reasons({"_season_singles": 88, "_season_pa": 410}, "Batter Singles", "Over")
+    assert "88 1B in 410 PA this season (21.5 per 100 PA)" in singles_why
+
+    doubles_why = P._hitter_reasons({"_season_doubles": 24, "_season_pa": 410}, "Batter Doubles", "Under")
+    assert "24 2B in 410 PA this season (5.9 per 100 PA)" in doubles_why
+
+    triples_why = P._hitter_reasons({"_season_triples": 2, "_season_pa": 410}, "Batter Triples", "Under")
+    assert "2 3B in 410 PA this season (0.5 per 100 PA)" in triples_why
+
+    # Genuinely distinguishable, not interchangeable boilerplate across the three markets.
+    assert singles_why != doubles_why != triples_why
+    print("✓ _hitter_reasons shows real season count/rate for Singles, Doubles, and Triples, "
+         "each genuinely distinct")
+
+
+def test_hitter_reasons_hrr_shows_real_avg_alongside_methodology_note():
+    # The methodology note (correlation-aware combined projection) is itself real and honest,
+    # not something to remove -- this adds a real number alongside it, doesn't replace it.
+    why = P._hitter_reasons({"AVG": 0.284}, "Batter Hits+Runs+RBIs", "Over")
+    assert len(why) == 1
+    assert "correlation-aware" in why[0] and "0.284" in why[0]
+    # Honest fallback when AVG genuinely isn't available -- the methodology note alone, no
+    # fabricated number.
+    why_no_avg = P._hitter_reasons({}, "Batter Hits+Runs+RBIs", "Over")
+    assert "correlation-aware" in why_no_avg[0] and "hitting" not in why_no_avg[0]
+    print("✓ _hitter_reasons shows real AVG alongside the honest HRR methodology note, with a "
+         "clean fallback when AVG isn't available")
+
+
+def test_enrich_hitter_rows_stores_every_new_real_number():
+    # Confirms the actual data-layer fix underneath all the reasoning-layer tests above: every
+    # new field is genuinely computed and stored on the row, not just assumed to exist.
+    rows = [dict(Hitter="Test Hitter", Team="PIT", GameLabel="PIT @ CIN", Hand="R",
+                **{"Opp Hand": "R", "Opp Pitcher": "Test Pitcher"}, Advantage="",
+                _weather_hr=1.0, Due=0.0, _pid=1,
+                _opp_stat={"era": 4.0, "battersFaced": 300, "strikeOuts": 90, "baseOnBalls": 30,
+                          "homeRuns": 10, "hits": 70},
+                _stat={"plateAppearances": 410, "atBats": 370, "hits": 114, "doubles": 24,
+                      "triples": 2, "homeRuns": 20, "baseOnBalls": 40, "strikeOuts": 85,
+                      "stolenBases": 3, "runs": 62, "rbi": 55})]
+    P.enrich_hitter_rows(rows, seed=7)
+    row = rows[0]
+    assert row.get("_season_pa") == 410.0
+    assert row.get("_season_runs") == 62.0
+    assert row.get("_season_rbi") == 55.0
+    assert row.get("_season_doubles") == 24.0
+    assert row.get("_season_triples") == 2.0
+    assert row.get("_season_singles") == 114.0 - 24.0 - 2.0 - 20.0   # hits - 2B - 3B - HR
+    assert row.get("_exp_runs_tonight") is not None
+    assert row.get("_exp_rbi_tonight") is not None
+    print("✓ enrich_hitter_rows stores every new real season number correctly")
+
 
     # When only the batter's own rate is available (no real opponent data), still show that
     # real number rather than dropping straight to the fully generic fallback.
