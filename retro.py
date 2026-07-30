@@ -407,6 +407,64 @@ def explain_miss(row: Optional[Dict], market: str = "Batter HR") -> str:
         return (f"Genuine over — projected only {pk:.1f} K against a contact lineup; the strikeouts "
                 "landed above a low expectation. Not a systematic miss.")
  
+    # ---- Batter Strikeouts: the batter's own real K rate vs the opposing pitcher's real allowed rate
+    if market == "Batter Strikeouts":
+        signals = []
+        season_k = row.get("_season_k_rate")
+        opp_k_allowed = row.get("_opp_k_allowed")
+        if isinstance(season_k, (int, float)) and season_k >= 0.24:
+            signals.append(f"his own real {season_k:.0%} K rate this season")
+        if isinstance(opp_k_allowed, (int, float)) and opp_k_allowed >= 0.23:
+            signals.append(f"faced a pitcher who allows Ks at a real {opp_k_allowed:.0%} rate")
+        if signals:
+            return "Catchable — model had signal it under-weighted: " + "; ".join(signals) + "."
+        if isinstance(season_k, (int, float)) and season_k < 0.16:
+            return (f"Genuine variance — his own real K rate this season is only {season_k:.0%}, "
+                   "a real contact bat having an off night, not a signal the model missed.")
+        return "Landed just outside the top tier — no specific signal the model missed; normal strikeout variance."
+
+    # ---- Batter Walks: the batter's own real BB rate vs the opposing pitcher's real allowed rate
+    if market == "Batter Walks":
+        signals = []
+        season_bb = row.get("_season_bb_rate")
+        opp_bb_allowed = row.get("_opp_bb_allowed")
+        if isinstance(season_bb, (int, float)) and season_bb >= 0.11:
+            signals.append(f"his own real {season_bb:.0%} walk rate this season")
+        if isinstance(opp_bb_allowed, (int, float)) and opp_bb_allowed >= 0.09:
+            signals.append(f"faced a pitcher who allows walks at a real {opp_bb_allowed:.0%} rate")
+        if signals:
+            return "Catchable — model had signal it under-weighted: " + "; ".join(signals) + "."
+        if isinstance(season_bb, (int, float)) and season_bb < 0.06:
+            return (f"Genuine variance — his own real walk rate this season is only {season_bb:.0%}, "
+                   "a genuinely free-swinging bat drawing one anyway, not a signal the model missed.")
+        return "Landed just outside the top tier — no specific signal the model missed; normal walk variance."
+
+    # ---- Batter Stolen Bases: the batter's own real season SB rate, the one real signal that
+    # actually matters here (no real opposing-catcher-arm/pitcher-hold data available yet)
+    if market == "Batter Stolen Bases":
+        season_sb = row.get("_season_sb")
+        season_pa = row.get("_season_pa_for_sb")
+        if isinstance(season_sb, (int, float)) and isinstance(season_pa, (int, float)) and season_pa > 0:
+            rate_per_100 = (season_sb / season_pa) * 100
+            if rate_per_100 >= 2.0:
+                return (f"Catchable — model had signal it under-weighted: {season_sb:.0f} SB in "
+                       f"{season_pa:.0f} PA this season ({rate_per_100:.1f} per 100 PA) is a real, "
+                       "active basestealer, not a rare event for this specific player.")
+            return (f"Genuine variance — only {season_sb:.0f} SB in {season_pa:.0f} PA this season "
+                   f"({rate_per_100:.1f} per 100 PA); a real, rare opportunistic steal, not a signal "
+                   "the model missed.")
+        return "Landed just outside the top tier — no specific signal the model missed; stolen bases are inherently rare."
+
+    # ---- Every other market: an honest "not built yet" message, never a silently wrong one.
+    # A real, pre-existing safety fix, found while extending this function: the old unconditional
+    # fallback below applied HR-specific reasoning (ISO, home run count) to ANY unmatched market
+    # -- nonsensical for, say, a Runs/RBI/Doubles miss. Better to say "not built yet" honestly
+    # than show a number that has nothing to do with the actual market.
+    if market not in ("Batter Total Bases", "Batter Total Hits", "Batter HR"):
+        return ("No specific miss explanation built for this market yet — the real season/matchup "
+                "numbers behind it aren't wired into this function. Not a claim about whether the "
+                "model was right or wrong, just an honest gap in this specific explanation.")
+
     # ---- Offensive markets: shared skeleton, market-specific signal + power floor -----------
     signals = []
     wx = row.get("_weather_hr") or 1.0

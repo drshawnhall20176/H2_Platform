@@ -445,3 +445,86 @@ def test_trading_dates_ending_yesterday_never_includes_today():
     assert "2026-07-21" not in result   # today's slate isn't settled yet, must never be included
     assert result[-1] == "2026-07-20"   # most recent entry is yesterday
     print("✓ trading_dates_ending_yesterday never includes today's date, only fully-settled prior nights")
+
+
+# ----------------------------------------------------------------- explain_miss
+def test_explain_miss_none_row_means_not_projected():
+    assert R.explain_miss(None, "Batter HR") == (
+        "Not in a projected lineup (late change, call-up, or pinch-hit) — the model "
+        "never saw this player.")
+    print("✓ explain_miss handles a player the model never projected at all")
+
+
+def test_explain_miss_pitcher_strikeouts_catchable_vs_variance():
+    catchable = R.explain_miss({"_opp_k": 0.25, "Proj K": 6.0}, "Pitcher Strikeouts")
+    assert catchable.startswith("Catchable")
+    assert "25%" in catchable and "6.0" in catchable
+    variance = R.explain_miss({"_opp_k": 0.18, "Proj K": 3.5}, "Pitcher Strikeouts")
+    assert variance.startswith("Genuine over")
+    assert catchable != variance
+    print("✓ explain_miss correctly distinguishes catchable vs genuine-variance for Pitcher Strikeouts")
+
+
+def test_explain_miss_batter_hr_unchanged_behavior():
+    # Protects the pre-existing HR branch against regression from extending this function.
+    catchable = R.explain_miss({"Due": 0.03, "Barrel%": 0.12, "ISO": 0.220, "HR": 15}, "Batter HR")
+    assert catchable.startswith("Catchable") and "barrel" in catchable.lower()
+    variance = R.explain_miss({"Due": 0.0, "ISO": 0.100, "HR": 3}, "Batter HR")
+    assert variance.startswith("Genuine long shot")
+    print("✓ explain_miss's original Batter HR behavior is unchanged")
+
+
+def test_explain_miss_strikeouts_catchable_vs_variance():
+    # Regression guard for the actual fix requested: real, distinguishing reasoning for a
+    # Batter Strikeouts miss, using the batter's own real season K rate and the opposing
+    # pitcher's own real allowed K rate -- the same numbers already surfacing in "Why" text.
+    catchable = R.explain_miss({"_season_k_rate": 0.28, "_opp_k_allowed": 0.25}, "Batter Strikeouts")
+    assert catchable.startswith("Catchable")
+    assert "28%" in catchable and "25%" in catchable
+    variance = R.explain_miss({"_season_k_rate": 0.10, "_opp_k_allowed": 0.15}, "Batter Strikeouts")
+    assert variance.startswith("Genuine variance")
+    assert "10%" in variance
+    assert catchable != variance
+    print("✓ explain_miss gives real, distinguishing reasoning for Batter Strikeouts misses")
+
+
+def test_explain_miss_walks_catchable_vs_variance():
+    catchable = R.explain_miss({"_season_bb_rate": 0.14, "_opp_bb_allowed": 0.10}, "Batter Walks")
+    assert catchable.startswith("Catchable")
+    assert "14%" in catchable
+    variance = R.explain_miss({"_season_bb_rate": 0.04, "_opp_bb_allowed": 0.07}, "Batter Walks")
+    assert variance.startswith("Genuine variance")
+    assert catchable != variance
+    print("✓ explain_miss gives real, distinguishing reasoning for Batter Walks misses")
+
+
+def test_explain_miss_stolen_bases_catchable_vs_variance():
+    catchable = R.explain_miss({"_season_sb": 15, "_season_pa_for_sb": 350}, "Batter Stolen Bases")
+    assert catchable.startswith("Catchable")
+    assert "15 SB" in catchable and "350 PA" in catchable
+    variance = R.explain_miss({"_season_sb": 1, "_season_pa_for_sb": 300}, "Batter Stolen Bases")
+    assert variance.startswith("Genuine variance")
+    assert "1 SB" in variance
+    assert catchable != variance
+    print("✓ explain_miss gives real, distinguishing reasoning for Batter Stolen Bases misses")
+
+
+def test_explain_miss_unhandled_market_is_honest_not_silently_wrong():
+    # The actual safety fix found while extending this function: the old unconditional fallback
+    # would have silently applied HR-specific reasoning (ISO, home run count) to ANY unmatched
+    # market -- nonsensical for something like Batter RBIs. Confirms the real fix: an honest
+    # "not built yet" message instead, and confirms it does NOT leak ISO/HR-style text.
+    result = R.explain_miss({"ISO": 0.089, "HR": 2}, "Batter RBIs")
+    assert "not built" in result.lower() or "not wired" in result.lower() or "market yet" in result.lower()
+    assert "ISO" not in result and "HR" not in result and "power" not in result.lower()
+    print("✓ explain_miss gives an honest 'not built yet' message for an unhandled market, "
+         "never silently wrong HR-style reasoning")
+
+
+def test_explain_miss_every_market_stat_key_covers_returns_something_honest():
+    # Broader sweep: every market retro.py actually grades should get either a real, specific
+    # explanation or the honest fallback -- never an exception, never silently wrong text.
+    for market in R.MARKET_STAT:
+        result = R.explain_miss({}, market)
+        assert isinstance(result, str) and len(result) > 0
+    print("✓ explain_miss returns a real string for every market MARKET_STAT covers, no exceptions")
