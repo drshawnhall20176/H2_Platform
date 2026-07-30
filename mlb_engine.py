@@ -955,11 +955,19 @@ def get_team_injuries(team_id: int) -> List[Dict[str, Any]]:
     protected on the 40-man, without pulling in the rest of the farm system's own separate
     transaction statuses.
 
-    STILL UNCONFIRMED, worth an early real check regardless of this fix: whether 40Man genuinely
-    includes 60-day IL players specifically (who by rule fall OFF the 40-man roster during that
-    assignment) -- a real, single detail that could mean a 60-day IL player is quietly absent
-    from this report even after this fix. Worth spot-checking a team with a known 60-day IL
-    player once redeployed.
+    CONFIRMED via a real deployed check, not just documentation: 40Man correctly includes 60-day
+    IL players (Rangers: Carter Baumler, Cody Bradford, Jordan Montgomery, Michael Helman, Robert
+    Garcia; Rays: Edwin Uceta, Gavin Lux, Jonathan Heasley, Manuel Rodríguez, Ryan Pepiot, Steven
+    Wilson all showed up correctly as "Injured 60-Day" on a real run) -- the one specific detail
+    flagged as unconfirmed when this fix first shipped. Real counts dropped from 130+ entries per
+    team (fullRoster, the whole organization) to ~18-20 (40Man, the real roster), matching the
+    expected shape.
+
+    "Reassigned to Minors" entries are EXPECTED here, not a sign this is still too broad: a
+    player can be optioned to AAA/AA while still protected on the 40-man roster (exactly why
+    teams keep prospects "on the 40-man" during option years, per MLB's own roster rules) -- a
+    real roster restriction (they can't play for the MLB team tonight) even though it isn't an
+    injury, which is why this report is titled "roster-restriction," not "injury," report.
 
     Filters to any roster entry whose status code isn't "A" (Active) — every other status
     (10/15/60-day IL, restricted, bereavement, paternity, etc.) surfaces here using the roster's

@@ -89,7 +89,25 @@ def bet_log_fields_from_play(play: Dict, date_str: str, sport_key: str,
     line = float(play.get("Line") or 0.0)
     player = play.get("Player")
 
-    if offers and player:
+    # PREFER the play's own already-computed RealPrice/PriceSource, set once, correctly, by
+    # build_best_bets at board-build time -- a real, confirmed architectural fix, not a style
+    # preference. The offers-based lookup below used to be the ONLY path, meaning quick_log did
+    # a completely separate, redundant real-price lookup from scratch every time a pick got
+    # logged, even though the play object already had this exact answer sitting on it. Two real
+    # problems with that: (1) it required threading `offers` through an entire session-state
+    # side-channel just to make this data reachable at logging time, with all the cross-session
+    # caching fragility that side-channel turned out to have; (2) if the market moved between
+    # when the board was built and when the pick was actually logged, the independent lookup
+    # could silently return a DIFFERENT real price than the one a person was looking at on
+    # screen when they decided to log it -- a real consistency risk, not just an efficiency one.
+    # Reading the play's own field guarantees "what you saw" and "what got logged" are the exact
+    # same number, always. `play.get("Line")` is already the real line when LineSource == "book"
+    # (set independently by real_line_or_default), so no separate "real line" field is needed
+    # here -- it's already correct.
+    if play.get("PriceSource") == "book" and play.get("RealPrice") is not None:
+        entry_odds = play["RealPrice"]
+        entry_odds_source = "book"
+    elif offers and player:
         if odds_api_module is None:
             import odds_api as odds_api_module
         if projections_module is None:

@@ -643,6 +643,99 @@ def test_parse_event_moneyline_skips_a_malformed_outcome():
          "real price from the same event")
 
 
+def test_compute_edges_tracks_real_unmatched_names_not_just_a_count():
+    # Regression guard for the actual fix behind a long-open item ("player name mismatches"): a
+    # bare unmatched COUNT gives no way to know which real player/market failed to match, so a
+    # genuine book-vs-model spelling mismatch stayed invisible and unfixable. This confirms the
+    # real name (not a placeholder) is recorded for each unmatched offer.
+    import projections as P
+    index = {}   # empty -- every offer below will fail to match, by construction
+    offers = [
+        {"player": "José Ramírez", "market": "batter_home_runs", "point": 0.5,
+        "over": {"draftkings": 350}, "under": {"draftkings": -450}},
+        {"player": "Some Totally Different Guy", "market": "batter_hits", "point": 1.5,
+        "over": {"draftkings": 200}, "under": {"draftkings": -250}},
+    ]
+    rows, stats = O.compute_edges(index, offers, projections_module=P)
+    assert rows == []
+    assert stats["unmatched"] == 2
+    assert stats["unmatched_names"] == [
+        {"player": "José Ramírez", "market": "batter_home_runs"},
+        {"player": "Some Totally Different Guy", "market": "batter_hits"},
+    ]
+    print("✓ compute_edges tracks the real unmatched player names and markets, not just a count")
+
+
+def test_compute_edges_dedupes_unmatched_names_across_alternate_lines():
+    # The same player/market can appear multiple times in offers when a book posts alternate
+    # lines -- the diagnostic list should show each real mismatch once, not once per line.
+    import projections as P
+    index = {}
+    offers = [
+        {"player": "José Ramírez", "market": "batter_home_runs", "point": 0.5,
+        "over": {"draftkings": 350}, "under": {"draftkings": -450}},
+        {"player": "José Ramírez", "market": "batter_home_runs", "point": 1.5,   # same player/market, alt line
+        "over": {"draftkings": 800}, "under": {"draftkings": -1200}},
+    ]
+    rows, stats = O.compute_edges(index, offers, projections_module=P)
+    assert stats["unmatched"] == 2   # the real count still reflects both offers
+    assert stats["unmatched_names"] == [{"player": "José Ramírez", "market": "batter_home_runs"}]
+    print("✓ compute_edges dedupes the unmatched-names diagnostic list by (player, market), "
+         "even though the raw unmatched count still reflects every offer")
+
+
+# ----------------------------------------------------------------- real_market_prob
+def test_real_market_prob_over_and_under_sum_to_one():
+    import projections as P
+    offers = [{"player": "Wade Meckler", "market": "batter_total_bases", "point": 1.5,
+              "over": {"draftkings": -140, "fanduel": -135},
+              "under": {"draftkings": 115, "fanduel": 110}}]
+    over_p = O.real_market_prob(offers, "Wade Meckler", "batter_total_bases", "Over",
+                                preferred_book="draftkings", projections_module=P)
+    under_p = O.real_market_prob(offers, "Wade Meckler", "batter_total_bases", "Under",
+                                 preferred_book="draftkings", projections_module=P)
+    assert abs(over_p + under_p - 1.0) < 1e-9
+    assert 0.5 < over_p < 0.6   # a real, sanity-checkable range for -140/+115
+    print("✓ real_market_prob's Over and Under probabilities sum to exactly 1.0, a proper devig "
+         "of the same book's own two-sided prices")
+
+
+def test_real_market_prob_uses_one_books_own_both_sides_not_mixed_books():
+    # Regression guard for a real, deliberate design choice: mixing one book's Over price with
+    # a DIFFERENT book's Under price would blend two independent vig structures into a number
+    # that isn't really either book's true market view. Must return None, never guess.
+    import projections as P
+    offers = [{"player": "X", "market": "batter_total_bases", "point": 1.5,
+              "over": {"draftkings": -140}, "under": {"fanduel": 110}}]
+    result = O.real_market_prob(offers, "X", "batter_total_bases", "Over", projections_module=P)
+    assert result is None
+    print("✓ real_market_prob returns None rather than devigging across two different books' "
+         "own independent prices")
+
+
+def test_real_market_prob_prefers_preferred_book_when_it_has_both_sides():
+    import projections as P
+    offers = [{"player": "X", "market": "batter_total_bases", "point": 1.5,
+              "over": {"draftkings": -140, "fanduel": -200},
+              "under": {"draftkings": 115, "fanduel": 165}}]
+    dk_prob = O.real_market_prob(offers, "X", "batter_total_bases", "Over",
+                                 preferred_book="draftkings", projections_module=P)
+    fd_prob = O.real_market_prob(offers, "X", "batter_total_bases", "Over",
+                                 preferred_book="fanduel", projections_module=P)
+    assert dk_prob != fd_prob   # genuinely different books' own vig -- confirms the right one was used
+    print("✓ real_market_prob uses the preferred book's own two-sided prices specifically, not "
+         "an arbitrary book, when the preferred book posted both sides")
+
+
+def test_real_market_prob_none_when_no_real_match_at_all():
+    import projections as P
+    assert O.real_market_prob([], "X", "batter_total_bases", "Over", projections_module=P) is None
+    offers = [{"player": "Someone Else", "market": "batter_total_bases", "point": 1.5,
+              "over": {"draftkings": -140}, "under": {"draftkings": 115}}]
+    assert O.real_market_prob(offers, "X", "batter_total_bases", "Over", projections_module=P) is None
+    print("✓ real_market_prob returns None (never a guess) with no real match at all")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

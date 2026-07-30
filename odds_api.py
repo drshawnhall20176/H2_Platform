@@ -512,6 +512,75 @@ def real_entry_price(offers: List[Dict], player_name: str, market_key: str, side
     return float(price), float(point), book
 
 
+def real_market_prob(offers: List[Dict], player_name: str, market_key: str, side: str,
+                     preferred_book: Optional[str] = None,
+                     projections_module=None) -> Optional[float]:
+    """The REAL, no-vig market probability of one specific side, for one specific player/market —
+    what a play's Conviction/grade SHOULD be measured against when real two-sided book prices
+    exist, instead of a hand-typed guess at what's "typical" for the whole market category.
+
+    Added directly to close a real, confirmed gap: BEST_BET_REF (projections.py) is a hardcoded
+    dict of reasoned-but-unvalidated estimates ("Batter Total Bases": 0.42, etc.) -- several
+    entries are explicitly documented as "reasoned, stated estimates... not empirically fit
+    against this platform's own graded history yet." Conviction (model_prob / BEST_BET_REF
+    [market]) is described everywhere in this codebase as "this play's real probability is 3.2x
+    the MARKET-TYPICAL rate for this prop" -- but the denominator was never actually the real
+    market's own rate, it was one person's best guess at it. The exact same class of gap
+    real_entry_price closed for entry_odds, one level deeper: now it's the REFERENCE a play gets
+    graded against, not just the price shown next to it.
+
+    MATCHING: identical to real_entry_price's own player/market matching (same normalize_name
+    convention, same book-count tie-break for the point).
+
+    TWO-SIDED RESOLUTION: uses ONE book's own real prices on BOTH sides (Over AND Under) for a
+    genuinely consistent devig — mixing one book's Over price with a DIFFERENT book's Under price
+    would blend two different books' own independent vig structures into a number that isn't
+    really either book's true market view. Prefers preferred_book when it posted both sides;
+    otherwise the first book (by iteration order) that posted both sides. Returns None if no
+    single book posted both sides — a one-sided-only offer can't be devigged at all, and this
+    function never guesses at what the missing side "probably" costs.
+
+    Returns the no-vig probability of the SPECIFIC side requested (Over probability directly,
+    1 - Over probability for Under), or None if there's no real two-sided match at all."""
+    if projections_module is None:
+        import projections as projections_module
+    P = projections_module
+    target_name = P.normalize_name(player_name)
+    side_lower = (side or "").lower()
+    if side_lower.startswith("over") or side_lower == "yes":
+        want_over = True
+    elif side_lower.startswith("under"):
+        want_over = False
+    else:
+        return None
+
+    best_offer = None
+    best_count = -1
+    for off in offers:
+        if P.normalize_name(off.get("player", "")) != target_name:
+            continue
+        if off.get("market") != market_key:
+            continue
+        count = len(off.get("over") or {}) + len(off.get("under") or {})
+        if count > best_count:
+            best_count = count
+            best_offer = off
+    if best_offer is None:
+        return None
+
+    over_books = best_offer.get("over") or {}
+    under_books = best_offer.get("under") or {}
+    two_sided_books = set(over_books) & set(under_books)
+    if not two_sided_books:
+        return None   # no single book posted both sides -- can't devig, never guess
+
+    book = preferred_book if preferred_book in two_sided_books else sorted(two_sided_books)[0]
+    over_prob = devig_two_way(over_books[book], under_books[book])
+    if over_prob is None:
+        return None
+    return over_prob if want_over else (1.0 - over_prob)
+
+
 # Real US sportsbook keys as returned by The Odds API (Pro tier), with their display names.
 # Confirmed directly against the-odds-api.com's own Bookmaker APIs documentation.
 # DraftKings is default because that's the primary book for this platform's own users.
@@ -616,6 +685,7 @@ def compute_edges(index: Dict, offers: List[Dict],
     P = projections_module
     rows: List[Dict] = []
     matched = unmatched = 0
+    unmatched_names: List[Dict[str, str]] = []
 
     for off in offers:
         mkey, point = off["market"], off["point"]
@@ -623,6 +693,13 @@ def compute_edges(index: Dict, offers: List[Dict],
         entry = index.get((nm, mkey))
         if entry is None:
             unmatched += 1
+            # The real, actionable fix for a long-open item ("player name mismatches"): a bare
+            # count gives no way to know WHICH player/market actually failed to match, so a real
+            # mismatch (a book's own spelling differing from the model's roster data) stays
+            # invisible and unfixable. Recording the real book-side name here is what lets a
+            # person actually add the right alias/fix once a genuine mismatch shows up in a live
+            # run, instead of guessing at names that might not even be the ones causing trouble.
+            unmatched_names.append({"player": off["player"], "market": mkey})
             continue
         matched += 1
         dist = entry["dist"]
@@ -661,7 +738,14 @@ def compute_edges(index: Dict, offers: List[Dict],
             })
 
     rows.sort(key=lambda r: r["EV%"], reverse=True)
-    return rows, {"matched": matched, "unmatched": unmatched}
+    seen = set()
+    deduped_unmatched: List[Dict[str, str]] = []
+    for u in unmatched_names:
+        key = (u["player"], u["market"])
+        if key not in seen:
+            seen.add(key)
+            deduped_unmatched.append(u)
+    return rows, {"matched": matched, "unmatched": unmatched, "unmatched_names": deduped_unmatched}
 
 
 def fetch_slate_props(date_str: str, api_key: str, markets: List[str], sport: str = SPORT) -> Tuple[List[Dict], Dict]:

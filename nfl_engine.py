@@ -105,7 +105,18 @@ def get_schedule(season: int) -> List[Dict[str, Any]]:
     """Full-season schedule: [{game_id, week, game_date, home_team, away_team, home_score,
     away_score, home_rest, away_rest}, ...]. away_rest/home_rest come DIRECTLY from nflreadpy's
     schedule data — confirmed live — so unlike every basketball engine in this platform, NFL
-    doesn't need to compute rest days itself by scanning recent games; the schedule already has it."""
+    doesn't need to compute rest days itself by scanning recent games; the schedule already has it.
+
+    PRESEASON, RESOLVED AS A REAL DATA-SOURCE LIMITATION, NOT A FIXABLE BUG: confirmed directly
+    against a real, live nflreadpy pull (a real 2025 season schedule) that load_schedules()
+    returns ONLY regular-season and playoff games (game_type in {REG, WC, DIV, CON, SB}) -- zero
+    preseason rows, for a season that's fully complete and therefore has no missing-data excuse.
+    nflreadpy's own load_schedules() signature has no season_type/game_type parameter to request
+    preseason specifically either (confirmed via its own docstring) -- this isn't this platform
+    choosing to exclude preseason, the underlying data source doesn't carry it at all through this
+    function. Supporting NFL preseason for real would need an entirely different data source, not
+    a code fix here -- a genuinely separate, much larger project, not something this function's
+    own logic could be changed to unlock."""
     try:
         df = nfl.load_schedules([season]).to_pandas()
     except Exception:
@@ -192,6 +203,13 @@ def get_team_roster(team_abbr: str, season: int) -> List[Dict[str, Any]]:
 
 
 # --------------------------------------------------------------------------- weekly stats
+# Confirmed directly against a real, live nflreadpy pull (not guessed) -- a real 2025-season
+# query showed these columns exist and carry genuine non-zero values for real defensive players.
+_IDP_STAT_COLS = ["def_tackles_solo", "def_tackles_with_assist", "def_tackles_for_loss",
+                 "def_sacks", "def_qb_hits", "def_interceptions", "def_pass_defended",
+                 "def_fumbles_forced", "def_tds", "def_safeties"]
+
+
 def load_season_weekly_stats(season: int) -> pd.DataFrame:
     """The season's full weekly player-stats table, loaded ONCE — see module docstring for why
     this matters (the performance bug this replaces). Callers (build_slate) load this a single
@@ -212,6 +230,9 @@ def load_season_weekly_stats(season: int) -> pd.DataFrame:
         if col not in df.columns:
             df[col] = 0
     df["_touches"] = df["carries"].fillna(0) + df["targets"].fillna(0)
+    for col in _IDP_STAT_COLS:
+        if col not in df.columns:
+            df[col] = 0
     return df
 
 
@@ -235,6 +256,102 @@ def player_recent_games(weekly: pd.DataFrame, player_id: str, before_week: int,
     rows = weekly[(weekly["player_id"] == player_id) & (weekly["week"] < before_week)]
     rows = rows.sort_values("week", ascending=False).head(n)
     return rows.to_dict("records")
+
+
+# --------------------------------------------------------------------------- IDP (defensive fantasy)
+# Raw nflreadpy position codes -> the platform's own existing IDP filter categories (DB/LB/DL/
+# DE/CB/S) -- confirmed against a real live pull of players with genuine defensive stat lines,
+# not guessed. LB sub-positions (MLB/ILB/OLB) collapse to "LB"; DL sub-positions (DT/NT) collapse
+# to "DL"; safety variants (FS/SAF) collapse to "S". CB/DB/DE/S already match the dropdown's own
+# category names directly and pass through unchanged.
+IDP_POSITION_MAP: Dict[str, str] = {
+    "CB": "CB", "DB": "DB", "DE": "DE", "S": "S", "FS": "S", "SAF": "S",
+    "LB": "LB", "MLB": "LB", "ILB": "LB", "OLB": "LB",
+    "DL": "DL", "DT": "DL", "NT": "DL",
+}
+
+
+def get_idp_candidates(weekly: pd.DataFrame, before_date: str, season: int) -> List[Dict[str, Any]]:
+    """Real defensive players with a genuine recent IDP snap footprint, each with their own
+    season-to-date recent-game AVERAGE for every real defensive stat column nflreadpy provides
+    (def_tackles_solo, def_sacks, def_interceptions, def_pass_defended, etc.) -- the actual
+    missing piece behind a long-open item: the fantasy position filter already offered DB/LB/DL/
+    DE/CB/S as real options, but nothing in this engine ever computed a real defensive stat for
+    any of them, so selecting one silently produced an empty list, not wrong data — there was no
+    path from those positions to any real number at all, not a bug in an existing computation.
+
+    POSITION NORMALIZATION, a second real, confirmed gap this closes: nflreadpy's own position
+    codes are far more granular than the platform's existing dropdown (MLB/ILB/OLB for
+    linebackers, DT/NT for defensive tackles, FS/SAF for safeties) -- IDP_POSITION_MAP collapses
+    these to the dropdown's own existing categories, confirmed against a real position-value
+    query on real defensive stat rows, not assumed.
+
+    Reuses player_recent_games (already generic over every column in `weekly`, including these
+    defensive ones) for the actual per-player averaging — no new fetch, no new caching, the exact
+    same mechanism offensive stats already use here, just pointed at different columns.
+
+    Candidate selection: the most recent completed week's own rows, filtered to a raw position
+    this module maps to a real IDP category, with at least one genuine defensive stat recorded
+    that week — excludes the occasional stray def_fumbles credit an offensive player picks up
+    recovering their own fumble (a real player, just not a real IDP-relevant one).
+
+    Returns [{"player", "player_id", "team", "position" (normalized), plus each raw def_* column
+    as a PER-GAME AVERAGE, not a total}, ...] for players with at least one real recent game."""
+    if weekly.empty:
+        return []
+    schedule = get_schedule(season)
+    week = _resolve_week(schedule, before_date)
+    if week is None:
+        return []
+
+    recent_weeks = weekly[weekly["week"] < week]
+    if recent_weeks.empty:
+        return []
+    latest_week = int(recent_weeks["week"].max())
+    latest_rows = recent_weeks[recent_weeks["week"] == latest_week]
+    candidates = latest_rows[
+        latest_rows["position"].isin(IDP_POSITION_MAP)
+        & (latest_rows[_IDP_STAT_COLS].fillna(0).sum(axis=1) > 0)
+    ]
+
+    out: List[Dict[str, Any]] = []
+    seen_pids = set()
+    for _, r in candidates.iterrows():
+        pid = r.get("player_id")
+        if pid is None or pid in seen_pids:
+            continue
+        seen_pids.add(pid)
+        recent = player_recent_games(weekly, pid, before_week=week)
+        if not recent:
+            continue
+        n = len(recent)
+        row = {"player": r.get("player_display_name"), "player_id": pid,
+              "team": r.get("team"), "position": IDP_POSITION_MAP[r["position"]]}
+        for col in _IDP_STAT_COLS:
+            total = sum(float(g.get(col) or 0) for g in recent)
+            row[col] = total / n
+        out.append(row)
+    return out
+
+
+# Real, standard IDP fantasy scoring — ONE common, clearly-labeled convention (close to
+# Sleeper's/ESPN's own defaults: solo tackle 1pt, assist 0.5pt, sack 2pt, INT 3pt, forced fumble
+# 2pt, pass defended 1pt, defensive TD 6pt, safety 2pt), NOT asserted as a universal standard —
+# IDP scoring varies meaningfully by league (some score assists at a full point, some score INTs
+# higher, some don't score pass-defended at all). Shown plainly in the UI as one convention, same
+# honesty already established for the PPR/Half PPR/Standard receiving toggle right next to it.
+IDP_SCORING: Dict[str, float] = {
+    "def_tackles_solo": 1.0, "def_tackles_with_assist": 0.5, "def_sacks": 2.0,
+    "def_interceptions": 3.0, "def_pass_defended": 1.0, "def_fumbles_forced": 2.0,
+    "def_tds": 6.0, "def_safeties": 2.0,
+}
+
+
+def idp_fantasy_points(row: Dict[str, Any]) -> float:
+    """Fantasy points for one IDP candidate row (from get_idp_candidates), using IDP_SCORING's
+    own documented, single-convention weights. A missing stat column contributes 0, not a crash
+    — a defender genuinely averaging 0 sacks recently is real information, not missing data."""
+    return sum(IDP_SCORING[col] * float(row.get(col) or 0) for col in IDP_SCORING)
 
 
 # --------------------------------------------------------------------------- injuries

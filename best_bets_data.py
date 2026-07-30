@@ -138,6 +138,96 @@ def get_available_books_for_date(date_str: str) -> List[str]:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+def fetch_mlb_real_lines(date_str: str, odds_api_key: Optional[str],
+                         preferred_book: str = O.DEFAULT_BOOK):
+    """The ONE real-lines fetch for MLB — extracted directly out of build_mlb_board so every
+    page that needs real sportsbook lines calls this SAME function, instead of each
+    independently reimplementing (or, as found during a real audit, silently omitting) the
+    fetch. This is the actual fix for a real, confirmed structural risk: Dinger Engine, Pitching
+    Lab, Media Room, and Podcast Studio were each found to have their OWN separate copy of the
+    slate-building pipeline that never fetched real lines at all, even though build_mlb_board
+    (used by Best Bets, Graded Picks, Command Center, Suggested Parlays, Speculative Basket,
+    Retrospective, and Model Dashboard) had already been fixed. Extracting the fetch itself into
+    one shared function, rather than just patching each duplicate independently, is what
+    actually closes the "modules functioning independently instead of plugged into the same
+    live stream" gap, not just its most recently-discovered symptom.
+
+    Returns (real_lines, real_offers, available_books) — real_lines is the {(player, market):
+    point} dict real_line_or_default needs, real_offers is the raw per-book data real_entry_
+    price/real_market_prob need, available_books is the real list of books that actually posted
+    something today (falls back to the full known book list when nothing live is available).
+    real_lines is None (not {}) when no fetch was attempted or it failed — the same "no real
+    data, not empty real data" distinction build_mlb_board's own code already made, preserved
+    here rather than flattened into something ambiguous.
+
+    CACHED HERE DIRECTLY (300s, matching build_mlb_board's own ttl) -- necessary once this
+    function had more than one real caller: without its own cache, build_mlb_board's internal
+    call and a separate caller (Pitching Lab, Dinger Engine, Retrospective) requesting the same
+    (date_str, odds_api_key, preferred_book) within the same page load would each trigger a
+    genuinely separate real Odds API fetch for identical data -- real, wasted quota cost, not
+    just a style concern.
+
+    DOES NOT WRITE session_state ITSELF -- a real, confirmed bug this function used to have,
+    caught during a final pre-deploy review, not found earlier: st.cache_data caches GLOBALLY
+    across ALL users/sessions by default (Streamlit's own docs confirm this directly). A cache
+    HIT skips re-executing the function body entirely, so a session-state write placed inside a
+    cached function only reliably fires for whichever session happened to trigger the actual
+    fetch -- every OTHER session hitting the same cache within the same window would get the
+    correct real_offers RETURNED (return values are always correctly delivered regardless of
+    cache status) but would never see quick_log's own real-price side-channel populated for
+    THEIR session, silently falling back to model-generated pricing despite real data existing
+    and being available. Every caller of this function MUST write
+    st.session_state[f"_real_offers_MLB_{{date_str}}"] = real_offers THEMSELVES, in their own
+    UNCACHED page-level code (never inside another @st.cache_data-wrapped function, which would
+    reintroduce the identical bug one layer removed) -- see any of this function's real callers
+    (Best Bets, Pitching Lab, Dinger Engine) for the correct pattern."""
+    real_lines = None
+    real_offers: List[Dict] = []
+    available_books: List[str] = list(O.US_BOOKS.keys())
+    if odds_api_key:
+        try:
+            offers, _info = O.fetch_slate_props(date_str, odds_api_key,
+                                                list(O.SUPPORTED_MARKETS), sport=O.SPORT)
+            real_lines = O.market_lines_for_slate(offers, preferred_book=preferred_book)
+            real_offers = offers
+            live_books = O.books_in_offers(offers)
+            if live_books:
+                available_books = live_books
+        except Exception:
+            real_lines = None   # fall back to DEFAULT_LINES, not a page crash
+    return real_lines, real_offers, available_books
+
+
+def ensure_mlb_offers_session_state(date_str: str, odds_api_key: Optional[str],
+                                    preferred_book: str = O.DEFAULT_BOOK) -> None:
+    """Guarantees THIS user's own session has the real-price side-channel populated, regardless
+    of how many layers of @st.cache_data sit between this call and the real Odds API fetch.
+
+    DELIBERATELY NEVER DECORATED WITH @st.cache_data -- that is the entire point of this
+    function existing. A real, confirmed bug, caught during a final pre-deploy review: writing
+    st.session_state INSIDE a cached function (fetch_mlb_real_lines used to do this directly)
+    only reliably fires for whichever session happened to trigger the actual fetch — Streamlit's
+    own docs confirm st.cache_data caches GLOBALLY across every user/session by default, and a
+    cache HIT skips re-executing the function body (and therefore any side effect inside it)
+    entirely. A second person, or the same person on a fresh session, hitting a warm cache would
+    get the correct real_offers back as a RETURN VALUE (that part always works) but would never
+    see their OWN session's quick_log side-channel populated — silently falling back to model-
+    generated Fair pricing on their own logged bet, despite real market data existing and having
+    already been fetched by someone else moments earlier.
+
+    Call this from a page's own TOP-LEVEL script code (never from inside another @st.cache_data-
+    wrapped loader) every time that page needs quick_log's real-price lookup to work. Internally
+    calls the cached fetch_mlb_real_lines (a cache hit if this date/key/book combination was
+    already fetched this window — cheap, not a second real API cost), then writes session_state
+    directly in this function's own always-executed body."""
+    _real_lines, real_offers, _books = fetch_mlb_real_lines(date_str, odds_api_key, preferred_book)
+    try:
+        st.session_state[f"_real_offers_MLB_{date_str}"] = real_offers
+    except Exception:
+        pass   # no Streamlit runtime (e.g. a test or script context)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
 def build_mlb_board(date_str: str, fip_constant: float, odds_api_key: Optional[str] = None,
                     preferred_book: str = O.DEFAULT_BOOK,
                     venue_split: Optional[str] = None,
@@ -280,35 +370,11 @@ def build_mlb_board(date_str: str, fip_constant: float, odds_api_key: Optional[s
             r["_split_label"] = None
 
     # Real sportsbook lines -- one batch fetch for all 17 real markets across every game on the
-    # slate, feeding every probability the pipeline computes downstream. None (and a silent
-    # graceful fallback to DEFAULT_LINES) if: no API key configured, the fetch fails for any
-    # reason (network, quota exceeded, etc), or the response body is non-dict (the same real
-    # failure mode that tripped the live pitch-count feature -- fetch_json's own None-body guard
-    # handles this already, but a belt-and-suspenders try/except here means a real, unexpected
-    # odds-fetch failure can never block the rest of the pipeline from running).
-    real_lines = None
-    real_offers: List[Dict] = []
-    available_books: List[str] = list(O.US_BOOKS.keys())   # full list as default
-    if odds_api_key:
-        try:
-            offers, _info = O.fetch_slate_props(date_str, odds_api_key,
-                                                list(O.SUPPORTED_MARKETS), sport=O.SPORT)
-            real_lines = O.market_lines_for_slate(offers, preferred_book=preferred_book)
-            real_offers = offers
-            live_books = O.books_in_offers(offers)
-            if live_books:
-                available_books = live_books
-        except Exception:
-            real_lines = None   # fall back to DEFAULT_LINES, not a page crash
-    try:
-        # Same session-state side-channel as load_generic_best_bets_board's own offers cache --
-        # every MLB page that routes through this shared function (Command Center, Graded
-        # Picks, Suggested Parlays, Speculative Basket) picks this up automatically, so a
-        # logged pick from any of them can get a real captured price instead of always falling
-        # back to the model's own Fair odds.
-        st.session_state[f"_real_offers_MLB_{date_str}"] = real_offers
-    except Exception:
-        pass   # no Streamlit runtime (e.g. a test or script context)
+    # slate, feeding every probability the pipeline computes downstream. Extracted into
+    # fetch_mlb_real_lines (see its own docstring) so this exact fetch is a single, shared
+    # function every MLB page can call, not logic that lives only inside this one function.
+    real_lines, real_offers, available_books = fetch_mlb_real_lines(
+        date_str, odds_api_key, preferred_book)
 
     # Starter rest, added directly on request -- one cached fetch per real starter (home/away
     # per game), not per hitter row. Attached to meta (home_days_rest/away_days_rest) for
@@ -344,7 +410,7 @@ def build_mlb_board(date_str: str, fip_constant: float, odds_api_key: Optional[s
         r["_consecutive_games_started"] = workload_by_team[team_id].get(r.get("_pid"))
     P.enrich_hitter_rows(rows, seed=7, statcast=sc, statcast_k=k, real_lines=real_lines)
     pitcher_rows = P.build_pitcher_projection_rows(rows, meta, seed=11, real_lines=real_lines)
-    plays = P.build_best_bets(rows, pitcher_rows)
+    plays = P.build_best_bets(rows, pitcher_rows, offers=real_offers, preferred_book=preferred_book)
 
     # Re-price the top hitter-market plays using their real vs-starter/vs-bullpen exposure — see
     # apply_bullpen_blend_to_top_plays' own docstring for the full reasoning and the real,

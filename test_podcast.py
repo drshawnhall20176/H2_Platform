@@ -72,6 +72,28 @@ def test_assemble_script_handles_no_retro_gracefully():
     assert "results not pulled yet" in text
 
 
+def test_selection_beats_uses_real_price_when_available():
+    # A real captured price (RealPrice/PriceSource="book") should be spoken directly, not
+    # buried behind the old "prices not checked"-style model-only framing.
+    play_with_real_price = {"Player": "Wade Meckler", "Team": "SF", "Market": "Batter Total Bases",
+                            "Side": "Over", "Line": 1.5, "ModelProb": 0.55, "Fair": 138,
+                            "RealPrice": -140, "RealPriceBook": "draftkings", "PriceSource": "book",
+                            "Conviction": 1.2, "Why": "test"}
+    beats = PC.selection_beats(play_with_real_price)
+    joined = " ".join(b["text"] for b in beats if b.get("text"))
+    assert "-140" in joined and "Real price" in joined
+
+
+def test_selection_beats_falls_back_to_fair_price_without_real_price():
+    play_model_only = {"Player": "Someone", "Team": "SF", "Market": "Batter Total Bases",
+                       "Side": "Over", "Line": 1.5, "ModelProb": 0.55, "Fair": 138,
+                       "PriceSource": "model_fair", "Conviction": 1.2, "Why": "test"}
+    beats = PC.selection_beats(play_model_only)
+    joined = str(beats)
+    assert "Fair price is around +138" in joined
+    assert "Real price" not in joined
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

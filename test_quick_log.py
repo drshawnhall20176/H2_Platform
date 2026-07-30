@@ -91,7 +91,60 @@ def test_bet_log_fields_from_play_entry_odds_is_the_model_fair_price():
          "when no real offers are provided, and labels it as such")
 
 
-def test_bet_log_fields_from_play_uses_real_book_price_when_offers_match():
+def test_bet_log_fields_from_play_prefers_the_plays_own_real_price_over_a_fresh_offers_lookup():
+    # The actual architectural fix: when a play already carries RealPrice/PriceSource (set once,
+    # correctly, by build_best_bets at board-build time), quick_log must use THAT value directly
+    # rather than doing its own separate, redundant lookup via offers -- even when offers is ALSO
+    # provided and would produce a genuinely different answer. This guarantees "what a person saw
+    # on screen" and "what got logged" are always the exact same number, never two independently
+    # computed prices that could disagree if the market moved between board-build and log time.
+    play = dict(_play(player="Wade Meckler", market="Batter Total Hits", side="Over", fair=-282),
+               RealPrice=-260, PriceSource="book", RealPriceBook="draftkings")
+    # A DIFFERENT offers snapshot, deliberately, simulating the market having moved since the
+    # play was built -- if quick_log did its own independent lookup, it would find THIS number
+    # instead, which must NOT happen.
+    stale_offers = [{"player": "Wade Meckler", "market": "batter_hits", "point": 0.5,
+                     "over": {"draftkings": -305}, "under": {"draftkings": 250}}]
+    fields = Q.bet_log_fields_from_play(play, "2026-07-20", "MLB", offers=stale_offers,
+                                        preferred_book="draftkings")
+    assert fields["entry_odds"] == -260   # the play's OWN real price, not the stale offers lookup
+    assert fields["entry_odds_source"] == "book"
+    print("✓ bet_log_fields_from_play prefers the play's own already-computed RealPrice over a "
+         "fresh (and potentially inconsistent) offers-based lookup")
+
+
+def test_bet_log_fields_from_play_falls_back_to_offers_lookup_when_play_has_no_real_price_yet():
+    # Plays without RealPrice/PriceSource set (an older cached play, a sport that doesn't
+    # populate these fields yet) must still correctly fall back to the offers-based lookup --
+    # this is a genuine fallback, not a replacement of the existing mechanism.
+    play = _play(player="Wade Meckler", market="Batter Total Hits", side="Over", fair=-282)
+    assert "RealPrice" not in play   # confirms this play genuinely has no pre-computed real price
+    offers = [{"player": "Wade Meckler", "market": "batter_hits", "point": 0.5,
+              "over": {"draftkings": -260}, "under": {"draftkings": 210}}]
+
+    class _FakeSport:
+        market_map = {"Batter Total Hits": "batter_hits"}
+
+    import unittest.mock as mock
+    with mock.patch("sports.get", return_value=_FakeSport()):
+        fields = Q.bet_log_fields_from_play(play, "2026-07-20", "MLB", offers=offers,
+                                            preferred_book="draftkings")
+    assert fields["entry_odds"] == -260.0 and fields["entry_odds_source"] == "book"
+    print("✓ bet_log_fields_from_play correctly falls back to the offers-based lookup when the "
+         "play itself has no pre-computed RealPrice")
+
+
+def test_bet_log_fields_from_play_ignores_play_price_source_when_not_book():
+    # A play with PriceSource="model_fair" (the normal, honest default when no real price exists
+    # at all) must not be misread as having a real price -- only PriceSource == "book" counts.
+    play = dict(_play(player="Wade Meckler", fair=-282), RealPrice=None, PriceSource="model_fair")
+    fields = Q.bet_log_fields_from_play(play, "2026-07-20", "MLB")
+    assert fields["entry_odds"] == -282 and fields["entry_odds_source"] == "model_fair"
+    print("✓ bet_log_fields_from_play correctly ignores a play's PriceSource when it isn't "
+         "\"book\", falling through to the normal Fair-odds behavior")
+
+
+
     # Regression guard for the actual fix: a real captured book price now replaces the model's
     # own Fair-derived price when a genuine match exists in already-fetched offers. Confirmed
     # against a real production finding: every previously-logged bet showed a "priced edge" of

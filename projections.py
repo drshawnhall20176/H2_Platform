@@ -2395,9 +2395,78 @@ def _pitcher_diag(r: Dict) -> Dict:
         "ProjIP": r.get("Proj IP"), "ProjOuts": r.get("Proj Outs"),
         "OppK": r.get("_opp_k"), "OppBB": r.get("_opp_bb"),   # opposing lineup K/BB rates
     }
- 
- 
-def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict]) -> List[Dict]:
+
+
+def _real_price_or_fair(offers, player: str, market: str, side: str, model_prob: float,
+                        preferred_book=None):
+    """The actual missing piece in the real-lines fix: the LINE has been real since the July 24
+    wiring (real_line_or_default), but the PRICE shown alongside it (the "Fair" column every
+    play carries) has ALWAYS been prob_to_american(model_prob) -- the model's own theoretical
+    price, with zero attempt to check whether a real captured price exists at that SAME real
+    line. A person reading "Over 4.5, -150" had no way to know whether -150 was a real
+    DraftKings price or the model's own independent belief -- the two numbers look identical.
+
+    Confirmed as a real, systemic gap, not a hypothetical one: market_lines_for_slate (which
+    feeds real_line_or_default) only ever returns {(player, market): point} -- the point alone,
+    never a price. odds_api.real_entry_price (built for the CLV/bet-logging fix) already does
+    the real per-book price lookup this needs; it just was never called during pick GENERATION,
+    only at logging time, well after a person had already read the model-only "Fair" price and
+    decided what to do with it.
+
+    Returns (price, source, book) -- source is "book" when a real captured price was used,
+    "model_fair" when it fell back to the model's own theoretical price (offers not provided, no
+    real match for this player/market/side, or MLB_MARKET_TO_ODDS_KEY has no entry for this
+    market). book is the real sportsbook the price came from, or None when source is
+    "model_fair". Mirrors real_line_or_default's own resolution pattern exactly -- real first,
+    model-generated fallback, source always tagged, never silently blended as if both carried
+    the same real confidence.
+
+    Local odds_api import (not module-level) deliberately, same reason odds_api.real_entry_
+    price's own default projections_module import is local too: odds_api.py imports THIS module
+    for normalize_name, so a module-level import here in the other direction would be circular."""
+    if offers:
+        odds_key = MLB_MARKET_TO_ODDS_KEY.get(market)
+        if odds_key:
+            import odds_api as O
+            real = O.real_entry_price(offers, player, odds_key, side, preferred_book=preferred_book)
+            if real is not None:
+                real_price, _real_point, book = real
+                return int(round(real_price)), "book", book
+    return prob_to_american(model_prob), "model_fair", None
+
+
+def _real_reference_or_typical(offers: Optional[List[Dict]], player: str, market: str, side: str,
+                               typical_ref: float,
+                               preferred_book: Optional[str] = None) -> Tuple[float, str]:
+    """The actual fix for a real, confirmed gap in how plays get GRADED and RANKED, not just
+    priced: Conviction (model_prob / reference) is described throughout this codebase as "this
+    play's real probability relative to the MARKET-TYPICAL rate for this prop" -- but the
+    reference used, BEST_BET_REF, is a hardcoded dict of one person's reasoned-but-unvalidated
+    estimates, several explicitly documented as "not empirically fit against this platform's own
+    graded history yet." A play's grade and rank were being decided against a GUESS at what's
+    typical, not the REAL market's own view of THIS SPECIFIC bet.
+
+    Uses odds_api.real_market_prob (a proper two-sided devig of one book's own real Over/Under
+    prices) as the reference when a genuine real match exists, falling back to typical_ref
+    (BEST_BET_REF's own value for this market) otherwise -- identical resolution posture to
+    _real_price_or_fair and real_line_or_default before it: real first, model-generated
+    fallback, source always tagged, never silently blended as if both carried the same real
+    confidence.
+
+    Returns (reference, source) -- source is "book" when a real no-vig market probability was
+    used, "model_typical" when it fell back to BEST_BET_REF's own hand-set value."""
+    if offers:
+        odds_key = MLB_MARKET_TO_ODDS_KEY.get(market)
+        if odds_key:
+            import odds_api as O
+            real_ref = O.real_market_prob(offers, player, odds_key, side, preferred_book=preferred_book)
+            if real_ref is not None and real_ref > 0:
+                return real_ref, "book"
+    return typical_ref, "model_typical"
+
+
+def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict],
+                    offers=None, preferred_book=None) -> List[Dict]:
     """Rank model candidate plays across all markets by conviction (model prob vs the
     market-typical prob for that prop), each with transparent reasoning. No odds required.
 
@@ -2448,6 +2517,10 @@ def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict]) -> List[D
             side, sp, ref_s = _favored_side(p, BEST_BET_REF[market])
             if market == "Batter HR" and side == "Under":
                 continue  # "won't homer" isn't a real play
+            _price, _price_source, _price_book = _real_price_or_fair(
+                offers, r["Hitter"], market, side, sp, preferred_book)
+            _ref, _ref_source = _real_reference_or_typical(
+                offers, r["Hitter"], market, side, ref_s, preferred_book)
             plays.append({
                 "Player": r["Hitter"], "PlayerId": r.get("_pid"), "Team": r["Team"], "Game": r["GameLabel"],
                 "Opp": r.get("Opp Pitcher"),
@@ -2460,11 +2533,23 @@ def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict]) -> List[D
                 "OppERA": opp_era_display,
                 "Market": market, "Side": side, "Line": line, "LineSource": line_source,
                 "ModelProb": round(sp, 4), "Fair": prob_to_american(sp),
-                "Conviction": round(sp / ref_s, 2) if ref_s > 0 else 0.0,
+                # RealPrice: the actual captured sportsbook price at this same real line, when
+                # one exists -- None when it doesn't, never silently backfilled with Fair's own
+                # value, so "a real price exists" and "no real price, here's our own estimate"
+                # stay genuinely distinguishable downstream. See _real_price_or_fair's own
+                # docstring for the full reasoning.
+                "RealPrice": _price if _price_source == "book" else None,
+                "RealPriceBook": _price_book, "PriceSource": _price_source,
+                # Conviction now measured against the REAL no-vig market probability for this
+                # specific play when one exists, not always BEST_BET_REF's own hand-typed guess
+                # at what's "typical" for this whole market -- see _real_reference_or_typical's
+                # own docstring for the full reasoning. ConvictionSource tells you which was used.
+                "Conviction": round(sp / _ref, 2) if _ref > 0 else 0.0,
+                "ConvictionSource": _ref_source,
                 # this play's own theoretical max conviction (1/RefProb) -- lets
                 # grading.conviction_to_grade normalize fairly across markets with very
                 # different reference rates, see that function's own docstring
-                "_ceiling": round(1.0 / ref_s, 2) if ref_s > 0 else None,
+                "_ceiling": round(1.0 / _ref, 2) if _ref > 0 else None,
                 "Why": "; ".join(_hitter_reasons(r, market, side)),
                 "Lineup": r.get("Lineup"),   # "Confirmed" / "Projected" -- real lineup-confidence
                                              # status, not previously exposed on a play
@@ -2488,14 +2573,21 @@ def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict]) -> List[D
             line = r.get(line_field, DEFAULT_LINES.get(market, 0.5))
             line_source = r.get(source_field, "default")
             side, sp, ref_s = _favored_side(p, BEST_BET_REF[market])
+            _price, _price_source, _price_book = _real_price_or_fair(
+                offers, r["Pitcher"], market, side, sp, preferred_book)
+            _ref, _ref_source = _real_reference_or_typical(
+                offers, r["Pitcher"], market, side, ref_s, preferred_book)
             plays.append({
                 "Player": r["Pitcher"], "PlayerId": r.get("_pid"), "Team": r["Team"], "Game": r.get("_game", ""),
                 "Opp": r.get("Opp"),
                 "Versus": r.get("Opp"),
                 "Market": market, "Side": side, "Line": line, "LineSource": line_source,
                 "ModelProb": round(sp, 4), "Fair": prob_to_american(sp),
-                "Conviction": round(sp / ref_s, 2) if ref_s > 0 else 0.0,
-                "_ceiling": round(1.0 / ref_s, 2) if ref_s > 0 else None,
+                "RealPrice": _price if _price_source == "book" else None,
+                "RealPriceBook": _price_book, "PriceSource": _price_source,
+                "Conviction": round(sp / _ref, 2) if _ref > 0 else 0.0,
+                "ConvictionSource": _ref_source,
+                "_ceiling": round(1.0 / _ref, 2) if _ref > 0 else None,
                 "Why": "; ".join(_pitcher_reasons(r, market, side)),
                 "_is_home": r.get("_is_home"),
                 "_is_day_game": r.get("_is_day_game"),

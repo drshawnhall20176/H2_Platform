@@ -412,6 +412,118 @@ def test_load_generic_best_bets_board_real_modules_every_registered_sport():
          "load_generic_best_bets_board always passes")
 
 
+# ----------------------------------------------------------------- fetch_mlb_real_lines
+def test_fetch_mlb_real_lines_returns_real_lines_offers_and_books():
+    # fetch_mlb_real_lines itself must NEVER touch session_state -- a real, confirmed bug fix:
+    # it used to write session_state directly, but being @st.cache_data-wrapped means that write
+    # only reliably fires for whichever session triggered the real fetch. See
+    # ensure_mlb_offers_session_state for the actual, session-safe fix.
+    fake_offers = [{"player": "Wade Meckler", "market": "batter_total_bases", "point": 1.5,
+                    "over": {"draftkings": -140}, "under": {"draftkings": 115}}]
+    with patch.object(BBD.O, "fetch_slate_props", return_value=(fake_offers, {})), \
+        patch.object(BBD.O, "market_lines_for_slate", return_value={("wade meckler", "batter_total_bases"): 1.5}), \
+        patch.object(BBD.O, "books_in_offers", return_value=["draftkings"]):
+        real_lines, real_offers, available_books = BBD.fetch_mlb_real_lines(
+            "2026-07-28", "FAKE_KEY", preferred_book="draftkings")
+    assert real_lines == {("wade meckler", "batter_total_bases"): 1.5}
+    assert real_offers == fake_offers
+    assert available_books == ["draftkings"]
+    print("✓ fetch_mlb_real_lines returns real lines/offers/books, and touches no session_state "
+         "of its own")
+
+
+def test_fetch_mlb_real_lines_no_api_key_returns_honest_empty_state():
+    real_lines, real_offers, available_books = BBD.fetch_mlb_real_lines("2026-07-28", None)
+    assert real_lines is None   # never attempted, not an empty-but-real {}
+    assert real_offers == []
+    assert available_books == list(BBD.O.US_BOOKS.keys())
+    print("✓ fetch_mlb_real_lines returns an honest None (not attempted) with no API key, not "
+         "a fabricated empty result")
+
+
+def test_fetch_mlb_real_lines_fetch_failure_degrades_gracefully():
+    with patch.object(BBD.O, "fetch_slate_props", side_effect=Exception("network error")):
+        real_lines, real_offers, available_books = BBD.fetch_mlb_real_lines("2026-07-28", "FAKE_KEY")
+    assert real_lines is None
+    assert real_offers == []
+    print("✓ fetch_mlb_real_lines degrades to an honest None on a real fetch failure, never "
+         "crashing the page")
+
+
+# ----------------------------------------------------------------- ensure_mlb_offers_session_state
+def test_ensure_mlb_offers_session_state_writes_the_real_side_channel():
+    fake_offers = [{"player": "X", "market": "batter_total_bases", "point": 1.5,
+                    "over": {"draftkings": -140}, "under": {"draftkings": 115}}]
+    fake_session_state = {}
+    with patch.object(BBD, "fetch_mlb_real_lines", return_value=(None, fake_offers, [])), \
+        patch.object(BBD.st, "session_state", fake_session_state):
+        BBD.ensure_mlb_offers_session_state("2026-07-28", "FAKE_KEY")
+    assert fake_session_state.get("_real_offers_MLB_2026-07-28") == fake_offers
+    print("✓ ensure_mlb_offers_session_state correctly writes the real-offers side-channel")
+
+
+def test_ensure_mlb_offers_session_state_is_never_cache_decorated():
+    # The actual regression guard for the real, confirmed cross-session bug: this function must
+    # NEVER be wrapped in @st.cache_data, or its whole reason for existing (guaranteeing the
+    # write fires for THIS session, every time, regardless of whether the underlying fetch was a
+    # cache hit) breaks the exact same way fetch_mlb_real_lines' own internal write used to.
+    import inspect
+    # A cache-wrapped function's __wrapped__/cache-related attributes give this away; a plain
+    # function does not carry Streamlit's cache-decorator markers.
+    assert not hasattr(BBD.ensure_mlb_offers_session_state, "clear"), (
+        "ensure_mlb_offers_session_state appears to be @st.cache_data-wrapped (has a .clear() "
+        "cache-management method) -- this would silently reintroduce the exact cross-session "
+        "bug this function exists to fix. It must remain a plain, uncached function."
+    )
+    print("✓ ensure_mlb_offers_session_state is confirmed NOT cache-decorated, preserving the "
+         "guarantee that its session_state write fires for every real caller")
+
+
+def test_ensure_mlb_offers_session_state_fixes_the_real_cross_session_bug():
+    # Direct proof the actual bug is fixed: simulate TWO separate user sessions both calling
+    # ensure_mlb_offers_session_state for the same date -- a real second/third caller hitting a
+    # warm fetch_mlb_real_lines cache must STILL get their own session_state populated, not just
+    # whichever session happened to trigger the real fetch first.
+    fake_offers = [{"player": "X", "market": "batter_total_bases", "point": 1.5,
+                    "over": {"draftkings": -140}, "under": {"draftkings": 115}}]
+
+    session_a = {}
+    session_b = {}
+    # fetch_mlb_real_lines mocked to always return the "already cached" result (as it would for
+    # a real cache hit) -- confirming ensure_mlb_offers_session_state's own write still fires
+    # every time regardless, since it is never itself cached.
+    with patch.object(BBD, "fetch_mlb_real_lines", return_value=(None, fake_offers, [])):
+        with patch.object(BBD.st, "session_state", session_a):
+            BBD.ensure_mlb_offers_session_state("2026-07-28", "FAKE_KEY")
+        with patch.object(BBD.st, "session_state", session_b):
+            BBD.ensure_mlb_offers_session_state("2026-07-28", "FAKE_KEY")
+    assert session_a.get("_real_offers_MLB_2026-07-28") == fake_offers
+    assert session_b.get("_real_offers_MLB_2026-07-28") == fake_offers
+    print("✓ ensure_mlb_offers_session_state correctly populates a SECOND session's own "
+         "session_state even when the underlying fetch was already cached from a first session "
+         "-- the actual, direct fix for the real cross-session bug")
+
+
+def test_build_mlb_board_uses_the_shared_fetch_mlb_real_lines_not_a_duplicate():
+    # Regression guard for the actual structural fix: build_mlb_board itself now calls the
+    # shared fetch_mlb_real_lines function rather than maintaining its own separate inline copy
+    # of the same fetch logic -- confirms there's genuinely one source of truth, not two.
+    called_with = {}
+    def fake_fetch(date_str, odds_api_key, preferred_book=BBD.O.DEFAULT_BOOK):
+        called_with["date_str"] = date_str
+        called_with["odds_api_key"] = odds_api_key
+        return None, [], list(BBD.O.US_BOOKS.keys())
+    with patch.object(BBD, "fetch_mlb_real_lines", side_effect=fake_fetch):
+        try:
+            BBD.build_mlb_board("2026-07-28", 3.15, odds_api_key="FAKE_KEY")
+        except Exception:
+            pass   # this test only cares whether fetch_mlb_real_lines got called, not the full pipeline
+    assert called_with.get("date_str") == "2026-07-28"
+    assert called_with.get("odds_api_key") == "FAKE_KEY"
+    print("✓ build_mlb_board calls the shared fetch_mlb_real_lines function, confirming it's no "
+         "longer maintaining its own separate, potentially-drifting copy of the fetch logic")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

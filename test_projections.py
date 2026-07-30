@@ -2888,6 +2888,154 @@ def test_build_projection_index_prefers_confirmed_lineup_on_doubleheader_collisi
          "doubleheader name collision, regardless of iteration order")
 
 
+# ----------------------------------------------------------------- real price (not just real line)
+def test_real_price_or_fair_uses_real_captured_price_when_offers_match():
+    # Regression guard for a real, confirmed systemic gap: the LINE has been real since the July
+    # 24 wiring, but the PRICE shown alongside it (the "Fair" field every play carries) was
+    # ALWAYS the model's own theoretical price, with zero attempt to check for a real captured
+    # price at that same real line. A person reading "Over 4.5, -150" had no way to know whether
+    # -150 was real or just the model's own belief -- the two numbers looked identical.
+    offers = [{"player": "Wade Meckler", "market": "batter_total_bases", "point": 1.5,
+              "over": {"draftkings": -140}, "under": {"draftkings": 115}}]
+    price, source, book = P._real_price_or_fair(
+        offers, "Wade Meckler", "Batter Total Bases", "Over", 0.55, preferred_book="draftkings")
+    assert price == -140 and source == "book" and book == "draftkings"
+    print("✓ _real_price_or_fair uses the real captured DraftKings price when a genuine match exists")
+
+
+def test_real_price_or_fair_falls_back_to_model_when_no_offers():
+    price, source, book = P._real_price_or_fair(None, "Wade Meckler", "Batter Total Bases", "Over", 0.55)
+    assert source == "model_fair" and book is None
+    assert price == P.prob_to_american(0.55)
+    print("✓ _real_price_or_fair falls back to the model's own theoretical price when no offers "
+         "are provided, tagged honestly as model_fair")
+
+
+def test_real_price_or_fair_falls_back_when_offers_have_no_real_match():
+    offers = [{"player": "A Totally Different Player", "market": "batter_total_bases", "point": 1.5,
+              "over": {"draftkings": -140}, "under": {"draftkings": 115}}]
+    price, source, book = P._real_price_or_fair(offers, "Wade Meckler", "Batter Total Bases", "Over", 0.55)
+    assert source == "model_fair" and book is None
+    print("✓ _real_price_or_fair falls back to model_fair when offers exist but don't match this "
+         "specific player/market/side")
+
+
+def test_real_price_or_fair_falls_back_for_a_market_with_no_odds_key_mapping():
+    offers = [{"player": "Wade Meckler", "market": "some_unmapped_market", "point": 1.5,
+              "over": {"draftkings": -140}, "under": {"draftkings": 115}}]
+    price, source, book = P._real_price_or_fair(offers, "Wade Meckler", "Not A Real Market", "Over", 0.55)
+    assert source == "model_fair"
+    print("✓ _real_price_or_fair degrades honestly to model_fair for a market with no "
+         "MLB_MARKET_TO_ODDS_KEY entry, rather than crashing")
+
+
+def test_build_best_bets_hitter_row_carries_real_price_when_offers_match():
+    hitters = [dict(Hitter="Wade Meckler", _pid=663728, Team="SF", GameLabel="SF @ LAD",
+                    **{"Opp Pitcher": "Tyler Glasnow"},
+                    **{"TB1.5%": 0.42, "TB Line": 1.5, "TB LineSource": "book"})]
+    offers = [{"player": "Wade Meckler", "market": "batter_total_bases", "point": 1.5,
+              "over": {"draftkings": -140}, "under": {"draftkings": 115}}]
+
+    # Without offers: RealPrice is None, PriceSource is model_fair -- backward compatible with
+    # every existing caller that doesn't pass offers at all.
+    plays_no_offers = P.build_best_bets(hitters, [])
+    tb_play = next(p for p in plays_no_offers if p["Market"] == "Batter Total Bases")
+    assert tb_play["RealPrice"] is None and tb_play["PriceSource"] == "model_fair"
+    assert tb_play["Fair"] == P.prob_to_american(tb_play["ModelProb"])   # Fair's own meaning unchanged
+
+    # With real offers: RealPrice is populated, Fair STILL shows the model's own independent
+    # estimate (unchanged) -- both numbers available, never silently conflated.
+    plays_with_offers = P.build_best_bets(hitters, [], offers=offers, preferred_book="draftkings")
+    tb_play2 = next(p for p in plays_with_offers if p["Market"] == "Batter Total Bases")
+    assert tb_play2["RealPrice"] == -140
+    assert tb_play2["RealPriceBook"] == "draftkings"
+    assert tb_play2["PriceSource"] == "book"
+    assert tb_play2["Fair"] == tb_play["Fair"]   # Fair's own value is identical either way
+    print("✓ build_best_bets correctly attaches a real captured price to a hitter play when "
+         "offers are provided and match, while Fair keeps its own unchanged meaning")
+
+
+def test_build_best_bets_pitcher_row_carries_real_price_when_offers_match():
+    pitchers = [dict(Pitcher="Zack Littell", _pid=444, Team="TB", _game="TEX @ TB",
+                     **{"Opp": "TEX"},
+                     **{"K over%": 0.58, "K line": 5.5, "K LineSource": "book"})]
+    offers = [{"player": "Zack Littell", "market": "pitcher_strikeouts", "point": 5.5,
+              "over": {"fanduel": -125}, "under": {"fanduel": -105}}]
+    plays = P.build_best_bets([], pitchers, offers=offers, preferred_book="fanduel")
+    k_play = next(p for p in plays if p["Market"] == "Pitcher Strikeouts")
+    assert k_play["RealPrice"] == -125 and k_play["RealPriceBook"] == "fanduel"
+    assert k_play["PriceSource"] == "book"
+    print("✓ build_best_bets correctly attaches a real captured price to a pitcher play too, "
+         "same mechanism as the hitter side")
+
+
+# ----------------------------------------------------------------- real reference (Conviction/grading)
+def test_real_reference_or_typical_uses_real_devigged_market_prob():
+    offers = [{"player": "Wade Meckler", "market": "batter_total_bases", "point": 1.5,
+              "over": {"draftkings": -140}, "under": {"draftkings": 115}}]
+    ref, source = P._real_reference_or_typical(
+        offers, "Wade Meckler", "Batter Total Bases", "Over", 0.42, preferred_book="draftkings")
+    assert source == "book"
+    assert abs(ref - 0.5563770794824399) < 1e-9   # the real no-vig Over probability at -140/+115
+    print("✓ _real_reference_or_typical uses the real, devigged market probability when a "
+         "genuine two-sided match exists")
+
+
+def test_real_reference_or_typical_falls_back_to_best_bet_ref_without_real_data():
+    ref, source = P._real_reference_or_typical(
+        None, "Wade Meckler", "Batter Total Bases", "Over", 0.42)
+    assert source == "model_typical" and ref == 0.42
+    print("✓ _real_reference_or_typical falls back to BEST_BET_REF's own hand-typed value when "
+         "no real offers are provided")
+
+
+def test_build_best_bets_conviction_uses_real_market_reference_not_hardcoded_guess():
+    # Regression guard for a real, confirmed gap directly analogous to the Fair-price fix: the
+    # reference every Conviction/grade is measured against was ALWAYS BEST_BET_REF's own
+    # hand-typed guess, described everywhere as "market-typical" but never actually the real
+    # market's own view. Confirmed this produces a MEANINGFULLY different, more honest number:
+    # a play showing 1.43x "conviction" against the hand-typed 0.42 guess drops to 1.08x once
+    # measured against the real market's own 0.556 no-vig probability -- exactly the gap that
+    # could separate a false "A grade" from an honest marginal read.
+    hitters = [dict(Hitter="Wade Meckler", _pid=663728, Team="SF", GameLabel="SF @ LAD",
+                    **{"Opp Pitcher": "Tyler Glasnow"},
+                    **{"TB1.5%": 0.60, "TB Line": 1.5, "TB LineSource": "book"})]
+
+    plays_no_offers = P.build_best_bets(hitters, [])
+    tb_play = next(p for p in plays_no_offers if p["Market"] == "Batter Total Bases")
+    assert tb_play["ConvictionSource"] == "model_typical"
+    assert tb_play["Conviction"] == round(0.60 / P.BEST_BET_REF["Batter Total Bases"], 2)
+
+    offers = [{"player": "Wade Meckler", "market": "batter_total_bases", "point": 1.5,
+              "over": {"draftkings": -140}, "under": {"draftkings": 115}}]
+    plays_with_offers = P.build_best_bets(hitters, [], offers=offers, preferred_book="draftkings")
+    tb_play2 = next(p for p in plays_with_offers if p["Market"] == "Batter Total Bases")
+    assert tb_play2["ConvictionSource"] == "book"
+    real_ref = 0.5563770794824399
+    assert tb_play2["Conviction"] == round(0.60 / real_ref, 2)
+    assert tb_play2["Conviction"] < tb_play["Conviction"]   # the real reference is meaningfully higher here
+    # _ceiling must be computed consistently with whichever reference Conviction itself used --
+    # otherwise conviction_to_grade's own normalization math would silently mix two different bases.
+    assert tb_play2["_ceiling"] == round(1.0 / real_ref, 2)
+    print("✓ build_best_bets' Conviction and _ceiling both use the real market reference when "
+         "available, producing a meaningfully different (and more honest) number than the "
+         "hand-typed BEST_BET_REF guess, with _ceiling kept consistent with whichever basis "
+         "Conviction itself used")
+
+
+def test_build_best_bets_conviction_source_backward_compatible_without_offers():
+    # Every existing caller that doesn't pass offers at all (Retrospective, Model Dashboard,
+    # Media Room, Podcast Studio, every existing test) must get IDENTICAL Conviction/_ceiling
+    # values to before this fix -- ConvictionSource is simply always "model_typical" for them.
+    hitters = [dict(Hitter="X", _pid=1, Team="A", GameLabel="A @ B",
+                    **{"Opp Pitcher": "Y"}, **{"TB1.5%": 0.5, "TB Line": 1.5, "TB LineSource": "default"})]
+    plays = P.build_best_bets(hitters, [])
+    tb_play = next(p for p in plays if p["Market"] == "Batter Total Bases")
+    assert tb_play["ConvictionSource"] == "model_typical"
+    assert tb_play["Conviction"] == round(0.5 / P.BEST_BET_REF["Batter Total Bases"], 2)
+    print("✓ build_best_bets stays fully backward compatible for callers that don't pass offers")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

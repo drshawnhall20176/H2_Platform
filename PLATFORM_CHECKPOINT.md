@@ -1,13 +1,13 @@
 # H2 Sports Platform — Build Checkpoint
 
 **This is the multi-sport platform build.** It is the live source of truth (MLB + WNBA + NBA +
-NCAAMB + NFL, all live on one sport-selector foundation). MLB runs exactly as the standalone did
-originally; WNBA, NBA, NCAAMB, and NFL are all real, priced sports now — not placeholders.
+NCAAMB + NFL + NCAAF, all live on one sport-selector foundation). MLB runs exactly as the
+standalone did originally; WNBA, NBA, NCAAMB, NFL, and NCAAF are all real, priced sports now —
+not placeholders.
 
-## What's in this checkpoint (all tested — 1122/1122 tests green as of 2026-07-24; the
-## 2026-07-21-through-2026-07-24 entries near the end, from "Discord community analysis"
-## through real sportsbook lines wired into the core pipeline, are now fully logged in their
-## real chronological order — no gap remains between the 911-test mark below and the current count)
+## What's in this checkpoint (all tested — 1302/1302 tests green as of 2026-07-29; everything
+## from "NCAAF — the sixth live sport" onward is new since the 1122-test / 2026-07-24 mark
+## above. See those two new sections for the full real-bug-driven build log.)
 
 ### Stage 1 — the sport-selector foundation
 - **`sports.py`** — the sport registry, the heart of the platform. `Sport.engine` / `.projections`
@@ -5299,6 +5299,163 @@ own "K line" column, now correctly populated from the real line when available, 
 still says "K line" not "📊 K line" — a minor cosmetic gap, not a data accuracy one. 1122 tests
 passing after this entry.
 
+## NCAAF — the sixth live sport
+
+Built from scratch on a genuinely different data source than every other sport here: CollegeFootballData.com (CFBD), not MLB Stats API/ESPN/nflreadpy. That difference drove almost every real design decision below.
+
+**Why cached, not live-per-page-load like every other sport:** CFBD's free tier is metered at
+roughly 1,000 API calls/month — confirmed against CFBD's own published blog post, not assumed.
+Every other sport's engine here fetches live on every page load because its own data source is
+effectively unlimited. That pattern would exhaust CFBD's budget in days. NCAAF instead follows
+the SAME nightly-batch-cache pattern `statcast_data.py`/`refresh_matchups.py` already established
+for pitch-level Statcast data: a scheduled GitHub Action (`refresh_ncaaf.py`) pulls once, writes
+to `data/ncaaf_*.csv`, and `ncaaf_engine.py` only ever reads those cached files.
+
+**Real research before any code, not guessed schemas:** every CFBD field name used
+(`passing_YDS`, `rushing_CAR`, `receiving_REC`, etc.) was confirmed against CFBD's own published
+OpenAPI documentation before writing the parser — this sandbox cannot reach
+`api.collegefootballdata.com` at all (confirmed directly, same as MLB Stats API), so nothing
+could be live-verified the way NFL's own nflreadpy build was. Every genuinely unverified
+assumption was flagged directly in code comments rather than silently presented as confirmed —
+and the real user's own first live refresh run then confirmed or corrected each one in turn (see
+the real bug list below).
+
+**The official `cfbd` Python client was tried and rejected for a real, tested reason, not a style
+preference:** it hard-pins `pydantic<2`. This platform's own `nfl_engine.py` already depends on
+`nflreadpy`, which requires `pydantic>=2.0`. Installing both in the same environment was tested
+directly, not assumed — `import nflreadpy` throws `ModuleNotFoundError` immediately once `cfbd`
+downgrades pydantic underneath it. Since this is one Streamlit app where a person can navigate
+from an NFL page to an NCAAF page in the same running process, both packages need to import
+successfully in the SAME environment — there's no "isolate the GitHub Action's own requirements"
+escape hatch. `ncaaf_data.py` uses raw `requests` calls against the same REST API instead, costing
+zero new dependencies and matching how every other integration on this platform already works
+(`odds_api.py`, `mlb_engine.py`, `ufc_engine.py` — none of them use a generated client library
+either).
+
+**Real bugs found via actual live refresh runs, not caught in advance:**
+- **Year-fallback needed for roster/stats, but NOT the schedule at first** — `GET /roster?year=2026` returned 0 players on a live run weeks before the 2026 season's own Week 0 kickoff. Fixed by falling back to `year-1` for roster and season-stats specifically (a season's roster/stats genuinely don't exist yet before it starts). Schedule deliberately did NOT get this same fallback at first (future schedules are published well in advance, so an empty response there is a real anomaly worth surfacing, not masking) — which directly caused the next bug.
+- **The "0 plays" bug** — once roster/stats correctly fell back to 2025, `_team_games_played_for_stats_season`'s own fallback branch needed 2025's SCHEDULE too (to count that season's real completed games as the rate denominator), and it simply didn't exist in the cache (only the current year's schedule was ever fetched). Every team's games-played resolved to 0, and `player_row`'s own zero-games guard silently dropped every single player. `refresh_schedule` now accepts a list of years and merges them, so `get_schedule(fallback_year)` can find real games instead of coming back empty.
+- **The "(Game N)" suffix bug — the actual root cause behind a SEPARATE "0 plays" recurrence.** `mlb_engine.py`'s own slate-label construction (reused pattern) labels every game "(Game N)" UNCONDITIONALLY, even a completely normal single game (gameNumber defaults to 1 for every schedule entry, doubleheader or not). The schedule-matching `by_label` dict never had that suffix on its own keys, so EVERY bet logged from a model play failed to auto-match — not an edge case, the common case. Fixed by building suffix-aware keys, PLUS an unsuffixed fallback key only when a team pairing genuinely has just one game that day — verified directly that a real doubleheader's two legs still settle to their own distinct real results, and that a suffix-less bet against a genuine doubleheader correctly stays unresolved rather than guessing.
+- **NaN-position crash** — a roster row's missing "position" cell round-trips through pandas as `NaN` (a float), not `None`. `NaN` is truthy in Python, so the existing `(x or default)` idiom didn't catch it — `nan.upper()` crashed live in production. Same root cause found and fixed in THREE places at once (`player_row`, `_normalize_name`, `_stats_by_id_and_name`) rather than just the one that happened to crash first.
+- **Doubleheader-collision fix ported from MLB's own Matchup Lab fix earlier in this same file** — confirmed the exact same class of bug (opponent hitters/games colliding across DH legs) needed its own NCAAF-specific guard in `build_slate`'s opponent lookup, not assumed safe just because MLB's version was already fixed.
+
+**Deliberately staged: parametric model first, then a real bootstrap upgrade.** CFBD's cached
+season stats are SEASON TOTALS, not per-game logs — there was nothing to bootstrap real
+game-to-game variance from at first. `ncaaf_projections.py` shipped with a parametric (Normal
+distribution) simulation, explicit about the mean being real (CFBD-sourced) and the spread being
+an unvalidated assumption. Once `refresh_player_game_stats` (CFBD's `/games/players` endpoint,
+one call per completed week) added real per-game logs, `ncaaf_projections.py` was upgraded to
+prefer a real bootstrap (same method every other sport here uses) whenever real recent games
+exist, falling back to the parametric model only when they don't — verified both paths never
+cross-contaminate with dedicated tests. A real column-name bug was caught here too: the bootstrap
+path was reading `_recent_games` entries with the wrong key (the row-level display field instead
+of the raw CFBD per-game column), which would have silently bootstrapped from a set of zeros —
+caught by a test written specifically to verify the bootstrap path, not assumed correct.
+
+**Real-lines fetching generalized to every sport, not just NCAAF's own gap.** Wiring NCAAF into
+`load_generic_best_bets_board` surfaced that the function's real-odds fetch was hardcoded to
+`sport_key == "NFL"` — every other sport (including WNBA/NBA/NCAAMB, already live) had been
+silently using placeholder default lines this whole time, never attempting a real fetch at all.
+Generalized the fetch to any sport with a projections module, which fixed the same long-standing
+gap for WNBA/NBA/NCAAMB as a direct side effect of fixing it for NCAAF.
+
+**Honest current status:** live, real-priced (once DraftKings actually posts NCAAF props — off-
+season right now, confirmed via a real diagnostic caption on Best Bets rather than left as a
+silent guess), with a real bootstrap model that activates automatically once the season's own
+per-game data exists. QB Lab and Matchup Lab equivalents (`get_team_allowed_stats`,
+`build_qb_matchup_projections`, `build_qb_efficiency_table` — all built and tested, mirroring
+NFL's own QB Lab exactly) exist in `ncaaf_engine.py`/`ncaaf_projections.py` but the two view PAGES
+themselves were never built — a genuine, real remaining gap, not silently finished.
+
+
+## Post-NCAAF: real-price measurement fix, Bet Log features, and a 6-item bug-fix sweep
+
+### The CLV measurement gap — the platform's own tracked numbers weren't measuring what they claimed to
+A direct user question ("Avg CLV is declining but calibration doesn't look dreadful") led to
+pulling a real bet log export and computing each bet's own priced edge (model_prob vs. the
+market-implied probability from its own entry_odds). Every single tracked bet showed under 0.1
+percentage points of "edge" — not a small real edge, a tautology. Traced to the root:
+`quick_log.py`'s own documented behavior stored the play's own "Fair" field (the model's own
+probability, re-derived into odds) as `entry_odds` whenever a pick got logged from a model play —
+meaning CLV was comparing the model's own belief against where the market closed, not "did we
+get a real price," for every quick-logged bet on the platform.
+
+**The real fix, not a workaround:** `odds_api.real_entry_price` (player props) and
+`odds_api.real_moneyline_price` (team-level moneylines — a genuinely different data shape, no
+`point`/line at all, just a team and a price) look up an ACTUAL captured sportsbook price from
+already-fetched offers, preferring the selected book and falling back to the best available price
+across books. `betlog.py` gained a new `entry_odds_source` column ("book" vs "model_fair") so the
+two kinds of entry price can never be silently mixed again. `quick_log.bet_log_fields_from_play`
+now tries a real-price lookup first and only falls back to Fair odds when no real match exists —
+wired into all five model-play pages (Best Bets, Command Center, Graded Picks, Suggested Parlays,
+Speculative Basket) via one shared session-state side-channel (the SAME already-fetched offers
+each page uses to price its own board, reused for free — no extra Odds API call just to log a
+pick) plus Game Watch's own moneyline logging. Track Record now shows a separate, clearly-labeled
+"CLV on real captured prices" section alongside the original all-inclusive metric — deliberately
+NOT silently redefining a number with real history behind it; the new number will be a small
+sample for a while, by design, since old bets never had a real price to begin with.
+
+**A real production crash found DURING this build, twice, both hardened the same way:**
+`search_players` (a new MLB Stats API player-search feature, for attaching a real `player_id` to
+a bet at logging time) and the new `real_moneyline_price` both crashed in live production with
+errors Streamlit's own redaction hid the exact cause of. Both hardened with the same posture:
+wrap the whole parsing pass, skip a malformed individual entry with a diagnostic print instead of
+crashing the whole function, and degrade to an honest empty/None result for any unexpected shape.
+
+### Bet Log features added directly on request
+- **Cash-out vs. held tracking** — a real `cashed_out_amount` column; `bet_pnl` uses it as the
+  bet's true realized P&L regardless of how the legs eventually resolve. A new report compares
+  actual cash-out dollars against what holding to the end would have paid, aggregated honestly
+  (not framed as "which strategy wins," since the real answer is almost certainly "it depends").
+- **Player search + retroactive backfill** — search MLB's real player database and attach a real
+  `player_id` at logging time (fixing player-prop bets that could never auto-settle without one),
+  plus a separate tool for backfilling `player_id` onto bets already stuck in that exact state.
+- **`bet_settlement.py` bug chain, found via real stuck-bet screenshots, not hypothesized:** game
+  labels typed with abbreviations ("HOU @ DET") couldn't match the schedule's own full-name
+  labels — fixed with a real 30-team abbreviation table. Two markets ("Pitcher Hits Allowed",
+  "Pitcher Earned Runs") had never had their underlying stat computed by `parse_boxscore_results`
+  at all, only shown live-in-progress — both fixed the same way once found.
+- **`get_team_injuries` was pulling the entire organization, not just the 40-man roster** — a
+  real user screenshot showed farm-system transaction statuses ("Development List," "Reassigned
+  to Minors," "Not Yet Reported") mixed in with real injuries, ~130 entries per team. Traced to
+  `rosterType=fullRoster` (the whole organization across every minor-league level) instead of the
+  documented, distinct `rosterType=40Man`. Confirmed via a real follow-up run: counts dropped to
+  ~18-20 per team, and 60-day IL players (a real detail that couldn't be confirmed from
+  documentation alone) do correctly appear.
+
+### The 6-item open-items sweep (this entry)
+Working down the original handoff's own "pending" list in one pass:
+1. **Player name mismatches** — `compute_edges` used to track only an unmatched COUNT, giving no
+   way to know which real player/market actually failed to match. Now records and surfaces the
+   real names on Edge Board (deduped by player+market), so a genuine mismatch is finally fixable
+   instead of invisible.
+2. **Retrospective grading used DEFAULT_LINES** — confirmed MLB's own path (`load_retro_mlb`) was
+   already fixed via `build_mlb_board`'s real-lines fetch; the generic path (every OTHER sport)
+   was still calling `build_best_bets` with no `real_lines` at all. Now fetches real lines the
+   same way Best Bets does.
+3. **`PLATFORM_CHECKPOINT.md` stale** — this entry.
+4. **Pitching Lab's "K line" hardcoded label** — the displayed header said "SO o5.5" unconditionally, even though the actual threshold (`k_line`) is computed PER PITCHER (a real book line when available) and was being silently dropped from the display entirely. Now shows the real per-pitcher line as its own visible column.
+5. **NFL preseason** — resolved as a genuine data-source limitation, not a fixable bug. Confirmed
+   directly against a real, live nflreadpy pull (a complete, past 2025 season) that
+   `load_schedules()` returns zero preseason rows — only `REG`/`WC`/`DIV`/`CON`/`SB` — and its own
+   documented signature has no parameter to request preseason specifically. Supporting it for real
+   would need an entirely different data source, not a code change here.
+6. **IDP defensive stats** — confirmed the "framework" was actually just one dropdown option
+   (DB/LB/DL/DE/CB/S) with zero real computation behind it; selecting one silently produced
+   nothing. Built for real: `nfl_engine.get_idp_candidates` (confirmed live that nflreadpy's own
+   `load_player_stats` already carries real defensive columns — `def_tackles_solo`, `def_sacks`,
+   `def_interceptions`, `def_pass_defended`, etc. — reusing the exact same `player_recent_games`
+   averaging mechanism offense already uses), a real position-code normalization map (nflreadpy's
+   own codes are far more granular than the dropdown's categories — MLB/ILB/OLB all collapse to
+   "LB", DT/NT collapse to "DL", FS/SAF collapse to "S", confirmed against real position values on
+   real defensive stat rows), and one clearly-labeled standard IDP scoring convention (not
+   asserted as universal — IDP scoring varies meaningfully by league). Verified end to end against
+   real live data: 411 real defensive players correctly matched to real games in a real week, with
+   recognizable NFL names and plausible stat lines.
+
+1302 tests passing after this entry.
+
+
 ## NOT YET DONE (next stages)
 - **Umpire tendencies** — genuinely deferred, not built as a weaker version. See the catcher
   framing/item 5 writeup above for why: no confirmed way to find every game a specific umpire
@@ -5337,9 +5494,30 @@ passing after this entry.
 - **MLB pitcher rest days / injury report in Matchup Lab** — see above. Both would need genuinely
   new data plumbing (a pitcher game-log fetch for the former, an injury-status fetch for the
   latter) this platform doesn't have for MLB yet, not a quick follow-on to the filter addition.
-- **NHL, NCAAF** — no engines built yet. (NCAAWB considered and deliberately deferred — Odds API
-  doesn't currently offer player props for WNCAAB, so there's no live market for Edge Board to
-  price against yet; worth revisiting if that coverage gap closes.)
+- **NHL** — no engine built yet. (NCAAF is now live — see the new section above. NCAAWB
+  considered and deliberately deferred — Odds API doesn't currently offer player props for
+  WNCAAB, so there's no live market for Edge Board to price against yet; worth revisiting if
+  that coverage gap closes.)
+- **NCAAF's own QB Lab / Matchup Lab pages** — the real backend exists and is tested
+  (`get_team_allowed_stats`, `build_qb_matchup_projections`, `build_qb_efficiency_table`,
+  mirroring NFL's own QB Lab exactly), but the two actual view PAGES were never built. A genuine,
+  scoped, real remaining gap — not started, not silently finished.
+- **The real-price CLV fix's own remaining honest gap** — Game Watch's moneyline logging and all
+  five model-play pages are wired to attempt a real captured price; nothing currently checks
+  whether OTHER markets beyond the ones already confirmed (Pitcher Hits Allowed, Pitcher Earned
+  Runs) have the same "stat computed live but never for a completed-game grade" gap
+  `parse_boxscore_results` had. Worth a deliberate audit across every MARKET_STAT entry rather
+  than waiting for the next one to surface as a real stuck-bet screenshot.
+- **`load_retro_generic`'s real-lines fix is code-verified, not live-verified** — same posture as
+  every other MLB-Stats-API/Odds-API function in this file: this sandbox cannot reach either
+  provider, so the fix (confirmed correct by tracing the exact same pattern already proven live
+  on Best Bets) hasn't been checked against an actual live WNBA/NBA/NCAAMB/NFL/NCAAF Retrospective
+  page. Worth a first real look next time any of those pages get checked live for something else.
+- **IDP fantasy scoring is one convention, not configurable** — `IDP_SCORING`'s weights are a
+  real, common baseline (close to Sleeper's/ESPN's own defaults), clearly captioned as such in
+  the UI, but there's no way for a person to plug in their own league's exact scoring yet. The
+  underlying per-game stat averages (the more portable real number) are already there if this
+  becomes worth doing for real.
 
 ## Deploy notes
 - Main file path = `streamlit_app.py` for the owner app, `streamlit_app_discord.py` for the

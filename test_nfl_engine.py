@@ -516,6 +516,73 @@ def test_league_average_rush_yards_allowed_averages_across_all_games(monkeypatch
     print("✓ get_league_average_rush_yards_allowed correctly averages across every team's games league-wide")
 
 
+# ----------------------------------------------------------------- IDP (defensive fantasy)
+def test_idp_position_map_covers_the_real_confirmed_position_codes():
+    # Confirmed directly against a real, live nflreadpy pull -- every one of these raw position
+    # codes showed up on real players with genuine non-zero defensive stat lines.
+    for raw in ["CB", "DB", "DE", "S", "FS", "SAF", "LB", "MLB", "ILB", "OLB", "DL", "DT", "NT"]:
+        assert raw in E.IDP_POSITION_MAP
+    assert E.IDP_POSITION_MAP["MLB"] == "LB" and E.IDP_POSITION_MAP["ILB"] == "LB"
+    assert E.IDP_POSITION_MAP["DT"] == "DL" and E.IDP_POSITION_MAP["NT"] == "DL"
+    assert E.IDP_POSITION_MAP["FS"] == "S" and E.IDP_POSITION_MAP["SAF"] == "S"
+    assert E.IDP_POSITION_MAP["CB"] == "CB"   # already matches the dropdown directly
+    print("✓ IDP_POSITION_MAP correctly collapses every real confirmed raw position code to the "
+         "platform's own existing IDP filter categories")
+
+
+def test_idp_fantasy_points_uses_the_documented_scoring_weights():
+    row = {"def_tackles_solo": 5, "def_tackles_with_assist": 2, "def_sacks": 1,
+          "def_interceptions": 1, "def_pass_defended": 2, "def_fumbles_forced": 0,
+          "def_tds": 0, "def_safeties": 0}
+    pts = E.idp_fantasy_points(row)
+    expected = 5 * 1.0 + 2 * 0.5 + 1 * 2.0 + 1 * 3.0 + 2 * 1.0
+    assert pts == expected
+    print("✓ idp_fantasy_points correctly applies the documented single-convention scoring weights")
+
+
+def test_idp_fantasy_points_missing_columns_contribute_zero():
+    assert E.idp_fantasy_points({}) == 0.0
+    print("✓ idp_fantasy_points handles a row with no stat columns at all, contributing 0 "
+         "rather than crashing")
+
+
+def test_get_idp_candidates_computes_real_per_game_averages(monkeypatch):
+    fake_weekly = pd.DataFrame([
+        {"player_id": "def1", "player_display_name": "Real Backer", "position": "MLB",
+        "team": "KC", "week": 5, "def_tackles_solo": 6, "def_tackles_with_assist": 1,
+        "def_tackles_for_loss": 0, "def_sacks": 0.5, "def_qb_hits": 1, "def_interceptions": 0,
+        "def_pass_defended": 0, "def_fumbles_forced": 0, "def_tds": 0, "def_safeties": 0},
+        {"player_id": "def1", "player_display_name": "Real Backer", "position": "MLB",
+        "team": "KC", "week": 4, "def_tackles_solo": 4, "def_tackles_with_assist": 3,
+        "def_tackles_for_loss": 1, "def_sacks": 0, "def_qb_hits": 0, "def_interceptions": 1,
+        "def_pass_defended": 1, "def_fumbles_forced": 0, "def_tds": 0, "def_safeties": 0},
+        # An offensive player with a stray fumble-recovery credit -- position not in
+        # IDP_POSITION_MAP, must be excluded entirely.
+        {"player_id": "qb1", "player_display_name": "Some QB", "position": "QB",
+        "team": "KC", "week": 5, "def_tackles_solo": 0, "def_tackles_with_assist": 0,
+        "def_tackles_for_loss": 0, "def_sacks": 0, "def_qb_hits": 0, "def_interceptions": 0,
+        "def_pass_defended": 0, "def_fumbles_forced": 1, "def_tds": 0, "def_safeties": 0},
+    ])
+    fake_schedule = [{"game_id": f"g{i}", "week": i, "game_date": f"2025-10-{i:02d}",
+                     "home_team": "KC", "away_team": "LV", "home_score": 20, "away_score": 17,
+                     "home_rest": 7, "away_rest": 7} for i in range(1, 7)]
+    monkeypatch.setattr(E, "get_schedule", lambda season: fake_schedule)
+    candidates = E.get_idp_candidates(fake_weekly, "2025-10-13", 2025)   # resolves to week 6
+    assert len(candidates) == 1   # the QB's stray fumble credit correctly excluded
+    row = candidates[0]
+    assert row["player"] == "Real Backer" and row["position"] == "LB"   # MLB normalized to LB
+    assert row["def_tackles_solo"] == 5.0    # avg(6, 4)
+    assert row["def_sacks"] == 0.25          # avg(0.5, 0)
+    assert row["def_interceptions"] == 0.5   # avg(0, 1)
+    print("✓ get_idp_candidates computes real per-game averages, normalizes the position, and "
+         "excludes a non-defensive player's stray defensive-stat credit")
+
+
+def test_get_idp_candidates_empty_weekly_returns_empty():
+    assert E.get_idp_candidates(pd.DataFrame(), "2025-10-13", 2025) == []
+    print("✓ get_idp_candidates returns an honest empty list for an empty weekly table")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
