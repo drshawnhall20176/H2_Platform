@@ -275,10 +275,48 @@ for parlay in parlays:
             st.markdown(f"### {icon} {parlay['tier']} — {parlay['size']}-leg parlay")
         with c2:
             fair = parlay["combined_fair_american"]
-            fair_str = f"{fair:+d}" if fair is not None else "—"
-            st.metric("Combined Fair Odds", fair_str)
-        st.caption(f"Model's combined win probability: {parlay['combined_prob']:.1%} "
+            # A real, reported problem, not a cosmetic one: chaining several already-longshot
+            # legs (each individually a real, validated pick -- that part isn't the issue) can
+            # compound into combined odds in the MILLIONS, a number no real sportsbook has ever
+            # posted for a parlay and never will -- books cap maximum payouts well below where
+            # this math runs unchecked. Showing that raw number as "Combined Fair Odds" doesn't
+            # read as an honest theoretical calculation, it reads as the tool being broken --
+            # and on a page whose whole premise is producing real, usable numbers for real
+            # money, that's a genuine credibility problem, not just an eyesore.
+            MAX_DISPLAYABLE_FAIR_ODDS = 50_000   # real sportsbooks generally don't post parlay
+            # prices anywhere near this size either -- this is already a generous ceiling, not a
+            # narrow one. Past it, the honest thing to show isn't a bigger number, it's that no
+            # real market equivalent exists.
+            if fair is None:
+                st.metric("Combined Fair Odds", "—")
+            elif abs(fair) > MAX_DISPLAYABLE_FAIR_ODDS:
+                st.metric("Combined Fair Odds", "Off the board")
+            else:
+                st.metric("Combined Fair Odds", f"{fair:+,d}")
+        prob = parlay["combined_prob"]
+        # Same real problem, one level down: "0.0%" for a genuinely tiny-but-real probability
+        # reads as "impossible," a different and false claim from "technically possible, but
+        # vanishingly unlikely." Enough precision to show what's actually true, without turning
+        # into an unreadable string of decimal places for the common (non-tiny) case.
+        if prob is None:
+            prob_str = "—"
+        elif prob >= 0.001:
+            prob_str = f"{prob:.1%}"
+        elif prob > 0:
+            prob_str = f"{prob:.4%}"
+        else:
+            prob_str = "0%"
+        st.caption(f"Model's combined win probability: {prob_str} "
                   f"(assuming independent legs — see the note above)")
+        if fair is not None and abs(fair) > MAX_DISPLAYABLE_FAIR_ODDS:
+            st.caption(f"⚠️ **\"Off the board\"** means the real math (every leg's own probability "
+                      f"multiplied together) produces combined odds beyond {MAX_DISPLAYABLE_FAIR_ODDS:+,d} "
+                      f"— no real sportsbook prices a parlay anywhere near that size, they cap "
+                      f"maximum payouts well before this point. Every individual leg above is "
+                      f"still a real, validated pick; chaining this many longshot-leaning legs "
+                      f"together is just genuinely, mathematically close to impossible as a "
+                      f"single combined bet — {prob_str} is the honest real number to weigh, not "
+                      f"a price to compare against a book.")
 
         # Void risk banner -- shown prominently ABOVE the legs list so it's impossible to miss.
         # A projected leg isn't a bad pick -- it just means the lineup hasn't posted yet and
