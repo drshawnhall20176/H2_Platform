@@ -3,11 +3,12 @@ Suggested Parlays — ready-made parlay options for people who don't want to com
 graded board themselves, built directly from the model's own top graded plays.
 
 Five tiers by risk (Safer/Steady/Balanced/Bold/Longshot, 2 through 6 legs), each with its OWN
-real objective, not just a different slice of the same ranking — Safer/Steady rank by real
-probability of hitting, Balanced uses the original Conviction metric, and Bold/Longshot rank by
-real payout size among plays that still cleared the actual grading floor. No leg, and no player,
-ever appears in more than one tier. Two earlier versions of this feature (cumulative tiers, then
-non-overlapping slices of one ranking) both got real feedback that led here — see
+real objective, not just a different slice of the same ranking — Safer/Steady/Balanced all rank
+by real probability of hitting (Balanced requires a stricter "B" grade floor, since a 4-leg tier
+compounds more real risk than a 2 or 3-leg one), and Bold/Longshot rank by real payout size among
+plays that still cleared the actual grading floor. No leg, and no player, ever appears in more
+than one tier. Two earlier versions of this feature (cumulative tiers, then non-overlapping
+slices of one ranking) both got real feedback that led here — see
 grading.build_suggested_parlays' own docstring for the full history and reasoning.
 
 THE CORE SAFEGUARD, NOT AN AFTERTHOUGHT: a parlay's combined probability is only honestly the
