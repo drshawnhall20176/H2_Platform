@@ -1297,6 +1297,56 @@ def test_suggested_parlays_safer_excludes_d_grade_near_certainties():
          "instead, and Steady honestly disappears rather than being padded with junk")
 
 
+def test_suggested_parlays_balanced_uses_safety_not_conviction():
+    # Regression guard for the actual fix, real money on the line: Balanced (4-leg) used to sort
+    # by raw Conviction, which favors legs with the biggest edge relative to a market's own
+    # typical rate -- a real, validated signal, but NOT what determines whether a PARLAY
+    # actually hits, since what compounds across legs is raw probability, not relative edge.
+    # Reproduces the exact real 15-pick pool this was found and measured against: pure
+    # "conviction" selected four real A-grade legs at 63-79% Model % for a combined real
+    # probability of just 26.2% -- worse than what Safer already achieves in half the legs.
+    # Confirms Balanced now uses the same "safety" (raw ModelProb) objective as Safer/Steady,
+    # with a stricter "B" floor appropriate for a 4-leg tier's own larger compounded risk.
+    def _leg_c(player, team, game, conviction, ceiling, market, model_prob):
+        leg = _leg(player, team, game, conviction, market=market, model_prob=model_prob)
+        leg["_ceiling"] = ceiling
+        return leg
+
+    picks = [
+        _leg_c("Royce Lewis", "KC", "KC@MIN", 2.26, 2.86, "Batter Total Hits", 0.79),
+        _leg_c("Nico Hoerner", "CHC", "CHC@STL", 1.92, 2.63, "Batter Strikeouts", 0.73),
+        _leg_c("Luis Arraez", "SF", "SF@SD", 1.90, 2.63, "Batter Strikeouts", 0.72),
+        _leg_c("TJ Friedl", "CIN", "PIT@CIN", 1.81, 2.63, "Batter HRR", 0.69),
+        _leg_c("Victor Mesa Jr.", "TEX", "TEX@TB", 1.82, 2.86, "Batter Total Bases", 0.63),
+        _leg_c("Javier Assad", "CHC", "CHC@STL", 1.62, 1.75, "Pitcher Outs", 0.92),
+        _leg_c("Spencer Jones", "NYY", "NYY@CWS", 1.42, 1.61, "Batter Strikeouts", 0.88),
+        _leg_c("Tyler Tolbert", "KC", "KC@MIN", 1.41, 1.67, "Batter HRR", 0.85),
+        _leg_c("Javier Assad", "CHC", "CHC@STL", 1.48, 1.82, "Pitcher Strikeouts", 0.82),
+        _leg_c("Luke Raley", "SEA", "SEA@LAD", 1.42, 1.75, "Batter HRR", 0.81),
+        _leg_c("Salvador Perez", "KC", "KC@MIN", 1.40, 1.61, "Batter Walks", 0.87),
+        _leg_c("Kyle Stowers", "MIA", "MIA@NYM", 1.38, 1.61, "Batter Strikeouts", 0.86),
+        _leg_c("Munetaka Murakami", "NYY", "NYY@CWS", 1.38, 1.61, "Batter Strikeouts", 0.85),
+        _leg_c("Luisangel Acuna", "NYY", "NYY@CWS", 1.37, 1.61, "Batter Walks", 0.85),
+        _leg_c("Eugenio Suarez", "PIT", "PIT@CIN", 1.36, 1.61, "Batter Strikeouts", 0.84),
+    ]
+    parlays = grading.build_suggested_parlays(picks)
+    tiers = {p["tier"]: p for p in parlays}
+    assert "Balanced" in tiers
+    balanced_players = {leg["Player"] for leg in tiers["Balanced"]["legs"]}
+    # The old conviction-based Balanced picked exactly these four -- confirms it's NOT this set anymore.
+    old_conviction_picks = {"Royce Lewis", "Nico Hoerner", "Luis Arraez", "Victor Mesa Jr."}
+    assert balanced_players != old_conviction_picks
+    # Every leg must clear the new "B" floor.
+    for leg in tiers["Balanced"]["legs"]:
+        grade = grading.conviction_to_grade(leg["Conviction"], leg.get("_ceiling"))
+        assert grading.GRADE_RANK[grade["letter"]] >= grading.GRADE_RANK["B"]
+    # The real, measured improvement: combined probability rises meaningfully once ModelProb,
+    # not raw Conviction, drives the selection.
+    assert tiers["Balanced"]["combined_prob"] > 0.30   # was 0.262 under the old "conviction" objective
+    print(f"✓ Balanced now uses 'safety' with a B floor, combined probability "
+         f"{tiers['Balanced']['combined_prob']:.1%} (was 26.2% under the old conviction-based sort)")
+
+
 def test_suggested_parlays_tiers_are_non_overlapping():
     # THE real, requested fix: no leg (and therefore no player) should ever appear in more than
     # one tier -- each tier is a genuinely distinct combination, not the same core picks reused
