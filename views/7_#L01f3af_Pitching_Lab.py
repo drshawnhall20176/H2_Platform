@@ -13,6 +13,7 @@ from datetime import datetime
 import pytz
 
 import mlb_engine as E
+import odds_api as O
 import projections as P
 import statcast_data as SC
 import weather as WX
@@ -113,6 +114,17 @@ def _build_lineup_probs_vs_one_pitcher(rows, opp_stat, park, statcast_lookup, st
 def load(date_str: str, fip_constant: float, venue_split=None, time_split=None):
     import best_bets_data as BBD
     rows, meta = E.build_slate(date_str, fip_constant)
+    # Real, confirmed fix for a structural gap: this page never fetched real sportsbook lines at
+    # all, even after Best Bets/Graded Picks/Command Center/Model Dashboard/Retrospective were
+    # already fixed to use them. Every "K line"/"Proj K"/"K Over%" shown on this page was ALWAYS
+    # measured against this platform's own DEFAULT_LINES/BEST_BET_REF placeholders -- including
+    # after the K-line column was made visible earlier this session, which exposed whatever
+    # value was there without verifying that value was ever real on THIS specific page. Calls
+    # the SAME shared fetch_mlb_real_lines function build_mlb_board itself uses (see that
+    # function's own docstring) rather than reimplementing the fetch a second time.
+    api_key = BBD.get_odds_api_key()
+    preferred_book = st.session_state.get("_preferred_book_mlb", O.DEFAULT_BOOK)
+    real_lines, real_offers, _books = BBD.fetch_mlb_real_lines(date_str, api_key, preferred_book)
     # Apply pitcher split stats when a split is selected -- same minimum-sample gate (5 starts)
     # as Best Bets. Lets Deezy's "check Drohan's home day splits" workflow happen directly here.
     season = int(date_str[:4])
@@ -136,7 +148,7 @@ def load(date_str: str, fip_constant: float, venue_split=None, time_split=None):
                     m[f"_{pm_attr}_split_label"] = f"{split_label_base} split ({n} starts)"
                 else:
                     m[f"_{pm_attr}_split_label"] = f"full-season (only {n} {split_label_base} starts)"
-    projections = P.build_pitcher_projection_rows(rows, meta, seed=11)
+    projections = P.build_pitcher_projection_rows(rows, meta, seed=11, real_lines=real_lines)
     fip_rows = []
     for m in meta:
         gd = m.get("game_date")
@@ -170,6 +182,14 @@ venue_split, time_split = BBD.render_split_selector(key_prefix="pitching_lab")
 
 with st.spinner("Loading starters and opposing lineups..."):
     fip_rows, proj_rows, meta = load(date_str, fip_constant, venue_split, time_split)
+
+# Guarantees THIS session's own quick_log real-price side-channel is populated, regardless of
+# whether load() above was a cache hit for this session specifically -- see best_bets_data.
+# ensure_mlb_offers_session_state's own docstring for the real, confirmed cross-session bug this
+# fixes. Called here, in genuinely uncached top-level page code, not inside load() itself (which
+# is @st.cache_data-wrapped and would silently reintroduce the identical bug).
+BBD.ensure_mlb_offers_session_state(
+    date_str, BBD.get_odds_api_key(), st.session_state.get("_preferred_book_mlb", O.DEFAULT_BOOK))
 
 # Situational display filter: when a split is active, only show pitchers who are actually
 # in that situation tonight (home starters in home games, etc.)
@@ -210,16 +230,28 @@ if proj_rows:
         pdf = pdf.sort_values("_game_date", kind="stable", na_position="last")
     else:
         pdf = pdf.sort_values("Proj K", ascending=False, kind="stable")
-    show = pdf.rename(columns={"K over%": "SO o5.5", "K fair": "SO fair"})
-    cols = ["Time", "Pitcher", "Team", "Opp", "Hand", "Proj IP", "Proj K", "SO o5.5", "SO fair",
-            "Proj BB", "Proj Outs", "Proj TTO", "ERA", "FIP"]
+    # "SO o5.5" used to be a hardcoded, fixed-number column header -- a real, confirmed bug, not
+    # just a cosmetic quirk: K line is actually computed PER PITCHER (a real book line via
+    # real_line_or_default when available, this platform's own default otherwise -- see K
+    # LineSource just below), and was silently dropped from the display entirely. A person
+    # reading "SO o5.5" had no way to know the real probability shown might be evaluated against
+    # a genuinely different threshold for that specific pitcher. Now shows the real K line as its
+    # own column, and uses generic headers (no baked-in number) for the probability/fair columns.
+    show = pdf.rename(columns={"K over%": "K Over%", "K fair": "K Fair"})
+    cols = ["Time", "Pitcher", "Team", "Opp", "Hand", "Proj IP", "Proj K", "K line", "K Over%",
+            "K Fair", "Proj BB", "Proj Outs", "Proj TTO", "ERA", "FIP"]
     show = show[[c for c in cols if c in show.columns]]
     st.dataframe(
-        show.style.format({"SO o5.5": "{:.1%}", "Proj IP": "{:.1f}", "Proj K": "{:.1f}",
-                           "Proj BB": "{:.1f}", "Proj Outs": "{:.1f}", "Proj TTO": "{:.2f}",
-                           "ERA": "{:.2f}", "FIP": "{:.2f}"})
-        .theme_gradient(cmap="RdYlGn", subset=["Proj K", "SO o5.5"]),
+        show.style.format({"K Over%": "{:.1%}", "K line": "{:.1f}", "Proj IP": "{:.1f}",
+                           "Proj K": "{:.1f}", "Proj BB": "{:.1f}", "Proj Outs": "{:.1f}",
+                           "Proj TTO": "{:.2f}", "ERA": "{:.2f}", "FIP": "{:.2f}"})
+        .theme_gradient(cmap="RdYlGn", subset=["Proj K", "K Over%"]),
         use_container_width=True, hide_index=True, height=420)
+    st.caption("**K line** is the real threshold each pitcher's own K Over% is actually evaluated "
+              "against — a real sportsbook line when one's available, this platform's own "
+              "default otherwise (see the Edge Board / Best Bets tables for a per-pitcher "
+              "book-vs-default breakdown). It varies by pitcher — reading K Over% without it "
+              "would leave the real number this table is answering invisible.")
     st.caption("**Proj TTO** = expected times through the order (Proj BF ÷ 9). Well-documented "
               "industry research (Baseball Prospectus, SABR) shows pitcher performance meaningfully "
               "degrades each additional trip through the same lineup within a game — roughly an "

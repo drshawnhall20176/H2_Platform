@@ -96,6 +96,14 @@ with st.spinner("Loading tonight's board..."):
     except Exception:
         plays, n_games = [], 0
 
+if _active.key == "MLB":
+    # Guarantees THIS session's own quick_log real-price side-channel is populated, regardless
+    # of whether today_board above was a cache hit for this session specifically -- see
+    # ensure_mlb_offers_session_state's own docstring for the real, confirmed cross-session bug
+    # this fixes. Called here, in genuinely uncached top-level page code.
+    BBD.ensure_mlb_offers_session_state(
+        today, BBD.get_odds_api_key(), st.session_state.get("_preferred_book_mlb", BBD.O.DEFAULT_BOOK))
+
 bets = B.list_bets(sport=_active.key)
 s = B.summary(bets)
  
@@ -197,11 +205,15 @@ with left:
                 if subset:
                     for p in subset:
                         p["Grade"] = p["_grade"]["letter"]
+                        p["_display_line"] = (f"📊 {p['Line']:g}" if p.get("LineSource") == "book"
+                                              and p.get("Line") is not None
+                                              else f"{p['Line']:g}" if p.get("Line") is not None else "—")
                     tdf = pd.DataFrame(subset)[["Grade", "ModelProb", "Player", "Market", "Side",
-                                                "Line", "Conviction", "Why"]]
+                                                "_display_line", "Conviction", "Why"]]
                     st.dataframe(
-                        tdf.rename(columns={"ModelProb": "Model %", "Why": "Reasoning"})
-                        .style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×", "Line": "{:g}"})
+                        tdf.rename(columns={"ModelProb": "Model %", "Why": "Reasoning",
+                                            "_display_line": "Line"})
+                        .style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×"})
                         .theme_gradient(cmap="Greens", subset=["Model %"]),
                         hide_index=True, use_container_width=True, height=330)
                 else:

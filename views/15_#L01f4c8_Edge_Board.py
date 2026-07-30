@@ -247,6 +247,20 @@ else:
                           "parsing issue on our side — the provider's own event feed didn't "
                           "include it. Doubleheaders are the most likely case: some providers "
                           "only expose one event per team pairing per day, not one per leg.")
+
+            unmatched_names = info.get("unmatched_names") or []
+            if unmatched_names:
+                with st.expander(f"❓ {len(unmatched_names)} real player(s)/market(s) the book "
+                                 f"posted but we couldn't match to our own slate"):
+                    st.dataframe(pd.DataFrame(unmatched_names).rename(
+                        columns={"player": "Player (as the book spelled it)", "market": "Market"}),
+                        hide_index=True, use_container_width=True)
+                    st.caption("A real mismatch usually means the book's own spelling of this "
+                              "name differs from what our roster data has (an accent, a suffix, "
+                              "a nickname) — normalize_name already strips accents/punctuation/Jr."
+                              "-Sr.-II-III, so a name still showing up here needs its own real "
+                              "fix, not a guess. Could also mean this player genuinely isn't on "
+                              "tonight's projected slate at all (not a name problem).")
  
         if edges:
             edf = pd.DataFrame(edges)
@@ -649,6 +663,45 @@ if _active.key == "NFL":
             "Proj Pts": round(fpts, 1), "Projected stat": proj_str,
             "Opp DEF": def_rank_str, "Game": d["Game"],
         })
+
+    # Real IDP rows — the actual missing piece behind a long-open item: this dropdown already
+    # offered DB/LB/DL/DE/CB/S, but nothing here ever computed a real number for any of them.
+    # Only fetched when an IDP position is actually selected, so the common QB/RB/WR/TE case
+    # doesn't pay for a fetch/computation it doesn't need.
+    idp_positions_selected = [p for p in pos_filter if p in E.IDP_POSITION_MAP.values()]
+    if _active.key == "NFL" and idp_positions_selected:
+        season = E._infer_season(date_str)
+        weekly = E.load_season_weekly_stats(season) if season is not None else None
+        idp_candidates = (E.get_idp_candidates(weekly, date_str, season)
+                          if weekly is not None and not weekly.empty else [])
+        # Real game/opponent context for each IDP candidate's own team, from the same meta
+        # the rest of this page already built for the offensive side.
+        game_by_team = {}
+        for m in meta:
+            game_by_team[m.get("home_name")] = (m.get("label"), m.get("away_name"))
+            game_by_team[m.get("away_name")] = (m.get("label"), m.get("home_name"))
+        for c in idp_candidates:
+            if c["position"] not in idp_positions_selected:
+                continue
+            game_label, opp = game_by_team.get(c["team"], (None, None))
+            if game_label is None:
+                continue   # this player's team isn't on tonight's slate at all
+            pts = E.idp_fantasy_points(c)
+            proj_str = (f"{c['def_tackles_solo']:.1f} solo tkl"
+                       + (f" + {c['def_sacks']:.2f} sk" if c["def_sacks"] >= 0.1 else "")
+                       + (f" + {c['def_interceptions']:.2f} int" if c["def_interceptions"] >= 0.1 else ""))
+            ff_rows.append({
+                "Player": c["player"], "Pos": c["position"], "Team": c["team"], "Opp": opp,
+                "Proj Pts": round(pts, 1), "Projected stat": proj_str,
+                "Opp DEF": "—", "Game": game_label,
+            })
+        if idp_positions_selected:
+            st.caption("**IDP scoring** (DB/LB/DL/DE/CB/S): solo tackle 1pt, assist 0.5pt, "
+                      "sack 2pt, INT 3pt, forced fumble 2pt, pass defended 1pt, defensive TD "
+                      "6pt, safety 2pt — one common scoring convention, not a universal "
+                      "standard. Check your own league's exact settings before trusting these "
+                      "points directly; the underlying per-game stat averages are the more "
+                      "portable real number regardless of scoring format.")
 
     if not ff_rows:
         st.info("No fantasy projections for this slate — try a date with scheduled NFL games.")

@@ -63,6 +63,7 @@ if _active.key == "MLB":
     with st.spinner("Grading the slate..."):
         plays, meta, rows, available_books = BBD.load_mlb_graded_picks_board(
             date_str, E.FIP_CONSTANT_DEFAULT, preferred_book, venue_split, time_split)
+    BBD.ensure_mlb_offers_session_state(date_str, BBD.get_odds_api_key(), preferred_book)
     plays = BBD.filter_by_split_situation(plays, venue_split, time_split)
     ss_key = f"_available_books_{date_str}"
     if st.session_state.get(ss_key) != available_books:
@@ -236,7 +237,14 @@ with sc1:
     # grade exists. Change this if you specifically want to check whether tonight's D's are
     # running hot.
     grade_floor_pick = st.selectbox("Grade floor for this summary", list(GRADE_FLOOR_OPTIONS.keys()),
-                                    index=2)
+                                    index=2,
+                                    help="Grades are now measured against the real, live no-vig "
+                                        "market probability for a play whenever one exists (📊 "
+                                        "on the grade badge below), not always this platform's "
+                                        "own hand-typed guess at what's typical for the market. "
+                                        "A genuinely harder bar to clear — fewer A's/B's than "
+                                        "you might remember isn't a bug, it's real market data "
+                                        "replacing a guess.")
 with sc2:
     top_n = st.number_input("Top N per grade", min_value=1, max_value=20, value=5, step=1)
 
@@ -251,8 +259,9 @@ else:
         st.markdown(f"<span style='color:{color};font-weight:700;'>{entry['letter']} grade</span>",
                    unsafe_allow_html=True)
         for pl in entry["picks"]:
-            fair = pl.get("Fair")
-            fair_str = f"{fair:+d}" if fair is not None else "—"
+            fair_str = (f"📊 {pl['RealPrice']:+d}" if pl.get("PriceSource") == "book"
+                                                       and pl.get("RealPrice") is not None
+                       else f"{pl['Fair']:+d}" if pl.get("Fair") is not None else "—")
             st.markdown(
                 f"{pl['ModelProb']:.0%} · {_grade_badge(pl['_grade'])} — **{pl['Player']}** "
                 f"{pl['Market']} {pl['Side']} {pl['Line']:g} · Fair {fair_str} · {pl['Game']}",
@@ -274,6 +283,17 @@ if show_ranking:
     st.caption("🔢 Ranked #1 (strongest) to weakest within this game, by the same real grading "
               "this page already uses — not raw Conviction, so the ranking always agrees with "
               "the letter grades shown.")
+if any(pl.get("ConvictionSource") == "book" or pl.get("PriceSource") == "book"
+      or pl.get("LineSource") == "book"
+      for game in organized for pe in game["players"] for pl in pe["plays"]):
+    st.caption("📊 appears in up to three places per play, each independently: on the **grade**, "
+              "when that play's Conviction (and therefore its grade and rank) is measured "
+              "against the real, live no-vig market probability instead of this platform's own "
+              "hand-typed guess at what's typical for the market — the more rigorous "
+              "comparison. On the **line**, when it's a real sportsbook number. On **Fair**, "
+              "when it's a real captured price. A grade with no 📊 isn't wrong, just measured "
+              "against this platform's own reasoned-but-unvalidated estimate rather than a live "
+              "market.")
 
 for game in organized:
     game_label = game["game"]
@@ -295,8 +315,17 @@ for game in organized:
             st.markdown(f"**{player_entry['player']}** ({player_entry['team']})")
             for pl in player_entry["plays"]:
                 grade_html = _grade_badge(pl["_grade"])
-                fair = pl.get("Fair")
-                fair_str = f"{fair:+d}" if fair is not None else "—"
+                # A real, confirmed distinction worth marking right next to the grade itself:
+                # whether THIS grade was measured against the real market's own no-vig
+                # probability, or this platform's own hand-typed guess at what's typical for the
+                # market. Same 📊 convention as the Line/Fair markers, placed on the grade badge
+                # specifically since Conviction (what the grade is actually derived from) is a
+                # raw number upstream, not a text field that could carry the marker itself.
+                if pl.get("ConvictionSource") == "book":
+                    grade_html += " 📊"
+                fair_str = (f"📊 {pl['RealPrice']:+d}" if pl.get("PriceSource") == "book"
+                                                           and pl.get("RealPrice") is not None
+                           else f"{pl['Fair']:+d}" if pl.get("Fair") is not None else "—")
                 rank_prefix = f"**#{pl['_rank']}** · " if show_ranking and pl.get("_rank") else ""
                 line_val = pl.get("Line")
                 line_src = pl.get("LineSource", "default")

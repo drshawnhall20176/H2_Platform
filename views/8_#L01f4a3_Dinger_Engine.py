@@ -11,6 +11,7 @@ import styling  # installs theme-proof .theme_gradient (readable in light + dark
 import pandas as pd
  
 import mlb_engine as E
+import odds_api as O
 import projections as P
 import statcast_data as SC
 import weather as WX
@@ -41,7 +42,18 @@ def load_weather(meta_keys: tuple):
  
 @st.cache_data(ttl=300, show_spinner=False)
 def load_slate(date_str: str, fip_constant: float, venue_split=None, time_split=None):
+    import best_bets_data as BBD
     rows, meta = E.build_slate(date_str, fip_constant)
+    # Real, confirmed fix for a structural gap: this page built its own slate independently and
+    # never fetched real sportsbook lines at all, even after Best Bets/Graded Picks/Command
+    # Center/Model Dashboard/Retrospective were already fixed to use them. Every HR%/hit
+    # probability shown here was ALWAYS measured against this platform's own DEFAULT_LINES/
+    # BEST_BET_REF placeholders -- the same player's HR pick could show a genuinely different
+    # (and wrong) number here than on Best Bets, for the exact same game, the same night. Calls
+    # the SAME shared fetch_mlb_real_lines function build_mlb_board and Pitching Lab already use.
+    api_key = BBD.get_odds_api_key()
+    preferred_book = st.session_state.get("_preferred_book_mlb", O.DEFAULT_BOOK)
+    real_lines, _offers, _books = BBD.fetch_mlb_real_lines(date_str, api_key, preferred_book)
     sc, k = load_statcast()
     wx_by_venue = load_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
     for r in rows:
@@ -62,9 +74,9 @@ def load_slate(date_str: str, fip_constant: float, venue_split=None, time_split=
                 r["_split_label"] = f"{label_base} split ({n} games)"
             else:
                 r["_split_label"] = f"full-season ({n} {label_base} games only)"
-    P.enrich_hitter_rows(rows, seed=7, statcast=sc, statcast_k=k)
+    P.enrich_hitter_rows(rows, seed=7, statcast=sc, statcast_k=k, real_lines=real_lines)
     P.add_starter_exposure_context(rows)
-    return rows, meta, (len(sc) if sc else 0), wx_by_venue
+    return rows, meta, (len(sc) if sc else 0), wx_by_venue, real_lines
  
  
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -110,7 +122,14 @@ date_str = target_date.strftime("%Y-%m-%d")
 venue_split, time_split = BBD.render_split_selector(key_prefix="dinger_engine")
 
 with st.spinner("Compiling telemetry..."):
-    rows, meta, n_statcast, wx_by_venue = load_slate(date_str, fip_constant, venue_split, time_split)
+    rows, meta, n_statcast, wx_by_venue, real_lines = load_slate(date_str, fip_constant, venue_split, time_split)
+
+# Guarantees THIS session's own quick_log real-price side-channel is populated, regardless of
+# whether load_slate() above was a cache hit for this session specifically -- see best_bets_data.
+# ensure_mlb_offers_session_state's own docstring for the real, confirmed cross-session bug this
+# fixes. Called here, in genuinely uncached top-level page code, not inside load_slate() itself.
+BBD.ensure_mlb_offers_session_state(
+    date_str, BBD.get_odds_api_key(), st.session_state.get("_preferred_book_mlb", O.DEFAULT_BOOK))
 
 # Keep all_rows intact for the game-by-game section -- it needs both sides of every game.
 # The split filter applies to leaderboards and summary stats only.
@@ -394,7 +413,12 @@ for m in meta_sorted:
                     return r
                 with ThreadPoolExecutor(max_workers=8) as ex:
                     enriched = list(ex.map(_apply, base))
-                P.enrich_hitter_rows(enriched, seed=7, statcast=sc, statcast_k=_k)
+                # real_lines threaded in via closure (same pattern sc/_k already use here) -- a
+                # real, confirmed second instance of the same disconnected-pipeline gap: this
+                # per-game split override path calls enrich_hitter_rows independently of the
+                # main load_slate() above, and was found to ALSO be missing real_lines even
+                # after that first call site was fixed.
+                P.enrich_hitter_rows(enriched, seed=7, statcast=sc, statcast_k=_k, real_lines=real_lines)
                 return enriched
 
             with st.spinner("Loading split stats for this game..."):
@@ -491,7 +515,8 @@ for m in meta_sorted:
                           f"vs-starter read for {opp_team} instead.")
                 return rows_source[rows_source["Team"] == opp_team].sort_values(sort_col, ascending=False)
             bp_rows = P.build_bullpen_matchup_rows(base_rows, opp_team, agg, seed=7,
-                                                    statcast=sc, statcast_k=_k)
+                                                    statcast=sc, statcast_k=_k,
+                                                    real_lines=real_lines)
             bp_df = pd.DataFrame(bp_rows)
             # "Opp Pitcher"/"Opp Hand"/"Advantage" describe the SINGLE starter — showing them
             # unchanged next to a bullpen-wide read would misleadingly imply one specific

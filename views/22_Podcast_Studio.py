@@ -55,33 +55,32 @@ st.caption("A full ~hour show rundown for Dr. Hall & Deezy — rebuilt every day
 
 
 def _board_mlb(date_str):
+    # Real, confirmed fix for a structural gap: this used to be its own separate, duplicate
+    # reimplementation of build_mlb_board's own logic (statcast/weather/hitter-pitcher
+    # enrichment/best_bets) -- but WITHOUT ever fetching real sportsbook lines or prices. Every
+    # play shown here was always measured against this platform's own DEFAULT_LINES/BEST_BET_REF
+    # placeholders, even after Best Bets/Graded Picks/Command Center/Model Dashboard/Retrospective
+    # were all already fixed to use real data. build_mlb_board's own docstring explicitly
+    # documents this exact class of bug already causing one real, confirmed production issue
+    # (a Command Center/Best Bets conviction mismatch) BEFORE it was made "PUBLIC, NOT INTERNAL"
+    # specifically so every page could share it -- this page just never actually did.
+    import best_bets_data as BBD
     import statcast_data as SC
-    import weather as WX
 
     @st.cache_data(ttl=3600, show_spinner=False)
     def load_statcast():
         return SC.load()
 
-    @st.cache_data(ttl=1800, show_spinner=False)
-    def load_weather(keys):
-        out = {}
-        for vid, gdate, vname in keys:
-            if vid is not None and vid not in out:
-                try:
-                    out[vid] = WX.get_game_weather(vid, gdate, vname)
-                except Exception:
-                    out[vid] = None
-        return out
-
-    rows, meta = E.build_slate(date_str)
+    fip_constant = E.FIP_CONSTANT_DEFAULT
+    api_key = get_key()
+    rows, meta, plays, _books = BBD.build_mlb_board(date_str, fip_constant, odds_api_key=api_key)
+    # Statcast loaded separately here (its own cached call, same ttl as build_mlb_board's own
+    # internal copy) specifically for the "ev_mode" feature's own build_projection_index call
+    # below, which build_mlb_board doesn't expose internally. Not a new parallel pipeline --
+    # rows/meta/plays all still come from the one real, shared source; this is the one piece
+    # build_mlb_board's own return doesn't carry.
     sc, k = load_statcast()
-    wx = load_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
-    for r in rows:
-        w = wx.get(r.get("_venue_id"))
-        r["_weather_hr"] = w["hr_factor"] if w else 1.0
-    P.enrich_hitter_rows(rows, seed=7, statcast=sc, statcast_k=k)
-    pr = P.build_pitcher_projection_rows(rows, meta, seed=11)
-    return P.build_best_bets(rows, pr), len(meta), rows, meta, sc, k
+    return plays, len(meta), rows, meta, sc, k
 
 
 def _board_generic(sport_key, date_str):

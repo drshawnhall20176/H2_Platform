@@ -65,6 +65,7 @@ if _active.key == "MLB":
     with st.spinner("Building parlay options..."):
         plays, meta, rows, available_books = BBD.load_mlb_graded_picks_board(
             date_str, E.FIP_CONSTANT_DEFAULT, preferred_book, venue_split, time_split)
+    BBD.ensure_mlb_offers_session_state(date_str, BBD.get_odds_api_key(), preferred_book)
     plays = BBD.filter_by_split_situation(plays, venue_split, time_split)
     ss_key = f"_available_books_{date_str}"
     if st.session_state.get(ss_key) != available_books:
@@ -226,11 +227,17 @@ st.info(
     "real math, not a guarantee. Combined odds assume each leg is independent; legs here never "
     "share a player (the single biggest way that assumption breaks), but two legs from the same "
     "game can still carry some real, smaller correlation the math below doesn't fully capture.\n\n"
-    "📊 **What \"Fair\" means**: Fair odds are what a bet would need to pay to be break-even, "
-    "given the model's own probability — not what a sportsbook is actually offering. A big "
-    "negative number (like -480) means the model thinks this is VERY likely to happen, which is "
-    "exactly why it can still earn a high grade — it's not a bad price, it's the model saying "
-    "it's confident. Compare it to what your book actually offers to see if there's real value."
+    "📊 **What \"Fair\" means, per leg**: when marked 📊, it's a real captured sportsbook price "
+    "for that specific leg — the number a book is actually offering right now. Without the "
+    "marker, it's the model's own break-even estimate, not a real price. A big negative number "
+    "(like -480) means the model thinks this is VERY likely to happen, which is exactly why it "
+    "can still earn a high grade — it's not a bad price, it's the model saying it's confident.\n\n"
+    "**Combined Fair Odds** (the parlay-level number) is ALWAYS the model's own theoretical "
+    "figure, even when every individual leg has a real price — a real sportsbook's own parlay "
+    "price isn't just those real prices multiplied together (books apply their own correlation "
+    "and parlay-specific vig on top), so there's no honest way to call a combined number "
+    "\"real.\" Compare it to what your actual book quotes for the same combination to see if "
+    "there's real value."
 )
 
 GRADE_COLOR = {"A": "#16783c", "B": "#2e7d32", "C": "#b8860b", "D": "#6b7280"}
@@ -301,8 +308,9 @@ for parlay in parlays:
 
         for leg in parlay["legs"]:
             grade_html = _grade_badge(leg["_grade"])
-            leg_fair = leg.get("Fair")
-            leg_fair_str = f"{leg_fair:+d}" if leg_fair is not None else "—"
+            leg_fair_str = (f"📊 {leg['RealPrice']:+d}" if leg.get("PriceSource") == "book"
+                                                            and leg.get("RealPrice") is not None
+                           else f"{leg['Fair']:+d}" if leg.get("Fair") is not None else "—")
             lineup = leg.get("Lineup")
             lineup_icon = "🟡 " if lineup == "Projected" else ("🟢 " if lineup == "Confirmed" else "")
             rank_prefix = f"**#{leg['_rank']}** · " if leg.get("_rank") else ""

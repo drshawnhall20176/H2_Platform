@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 import retro as R
 import sports
 import best_bets_data as BBD
+import odds_api as O
 
 _active = sports.active()
 E, P = _active.engine, _active.projections
@@ -51,7 +52,16 @@ def load_retro_mlb(date_str: str, fip_constant: float):
     # plays) — rebuilding them here is cheap, pure computation (no network calls; every pitcher's
     # own stats are already sitting in rows' own "_opp_stat" fields), not a real duplication of
     # the expensive part of the pipeline (build_slate, statcast, weather, the bullpen blend).
-    pitcher_rows = P.build_pitcher_projection_rows(rows, meta, seed=11)
+    # real_lines IS fetched again here -- a real, confirmed second instance of the same
+    # disconnected-pipeline gap, found during a later audit: this call was missing real_lines
+    # even though the main `plays` above already correctly used them, meaning the "why did this
+    # K prediction miss" explanation built from pitcher_rows could reference a genuinely
+    # different (wrong) line than what was actually graded. Calls the SAME cached
+    # fetch_mlb_real_lines function build_mlb_board's own internal call already used -- cached at
+    # the same 300s window, so this is a real cache hit, not a second real API cost.
+    api_key = BBD.get_odds_api_key()
+    real_lines, _offers, _books2 = BBD.fetch_mlb_real_lines(date_str, api_key)
+    pitcher_rows = P.build_pitcher_projection_rows(rows, meta, seed=11, real_lines=real_lines)
     for pr in pitcher_rows:                     # so pitcher-K misses can be explained too
         rows_by_pid.setdefault(pr.get("_pid"), pr)
     return graded, summary, reports, rows_by_pid, len(meta), len(results)
@@ -64,7 +74,27 @@ def load_retro_generic(sport_key: str, date_str: str):
         st.info("🥊 Retrospective doesn't apply to UFC — head to **UFC Fight Card**.")
         st.stop()
     rows, meta = sport.engine.build_slate(date_str)
-    plays = sport.projections.build_best_bets(rows)
+
+    # Real sportsbook lines, same fetch best_bets_data.load_generic_best_bets_board already does
+    # for Best Bets/Command Center/etc. -- a real, confirmed gap this closes: MLB's own
+    # load_retro_mlb (just above) already grades against real lines via build_mlb_board, but this
+    # generic path (every other sport) was calling build_best_bets with no real_lines at all,
+    # always falling back to this platform's own placeholder DEFAULT_LINES regardless of whether
+    # a real book price existed. Retrospective's whole purpose is judging the model's own board
+    # honestly -- grading it against a line nobody could actually get undermines that.
+    real_lines = None
+    api_key = BBD.get_odds_api_key()
+    if api_key and sport.markets:
+        try:
+            preferred_book = st.session_state.get(
+                f"_preferred_book_{sport_key.lower()}", O.DEFAULT_BOOK)
+            offers, _ = O.fetch_slate_props(date_str, api_key, list(sport.markets),
+                                            sport=sport.odds_sport_key)
+            real_lines = O.market_lines_for_slate(offers, preferred_book=preferred_book)
+        except Exception:
+            real_lines = None   # fall back to DEFAULT_LINES, not a page crash
+
+    plays = sport.projections.build_best_bets(rows, real_lines=real_lines)
     results = sport.engine.get_player_results(date_str)
     graded, summary = R.grade_slate(plays, results)
     reports = {m: R.market_report(plays, results, m) for m in _active_markets}

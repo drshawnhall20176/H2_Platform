@@ -466,12 +466,13 @@ for g in games:
                 # Moneyline logging -- added directly on request. Reuses the SAME shared quick_
                 # log widget every other page already uses, by building a team-level "play" dict
                 # (Player=None, Market="Moneyline") rather than a whole separate logging system.
-                # Fair moneyline odds come from THIS SAME experimental win-probability estimate,
-                # via projections.prob_to_american -- the exact function already used to compute
-                # every other "Fair" price shown elsewhere on this platform, not a new one. Since
-                # the estimate itself is unbacktested (see the warning below), so is this fair
-                # price -- render_quick_log's own caption already says "the model's own fair
-                # price, not a live book price," which is exactly true here too.
+                # away_fair/home_fair are always THIS experimental win-probability estimate's own
+                # theoretical price (via projections.prob_to_american) -- the play's own "Fair"
+                # field never changes meaning. But the ACTUAL price a logged bet gets is NOT
+                # always this: moneylines=_real_moneylines is passed below, and quick_log's own
+                # real_moneyline_price lookup will use a genuine captured price instead whenever
+                # one exists for this team, exactly like every other market on this platform.
+                # Only falls back to this Fair estimate when no real moneyline match exists.
                 away_fair = P.prob_to_american(wp["away_win_prob"])
                 home_fair = P.prob_to_american(wp["home_win_prob"])
                 ml_plays = [

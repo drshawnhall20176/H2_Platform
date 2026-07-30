@@ -81,8 +81,16 @@ def value_text(p):
         live = f"{p['LivePrice']:+d}" if p.get("LivePrice") is not None else "—"
         return f"Live value: {p['EV']:+.1f}% at {live} ({p['Book']})." if p.get("Book") else \
                f"Live value: {p['EV']:+.1f}% at {live}."
+    # A real captured price may already be sitting on this play (RealPrice, from the same
+    # already-fetched board data build_mlb_board uses -- no extra Odds API cost, unlike the
+    # dedicated "Live value" EV fetch above) even in this free/Conviction mode. Show it directly
+    # instead of the old blanket "prices not checked" disclaimer, which was true before RealPrice
+    # existed but isn't always true anymore.
+    if p.get("PriceSource") == "book" and p.get("RealPrice") is not None:
+        book_str = f" ({p['RealPriceBook']})" if p.get("RealPriceBook") else ""
+        return f"Real price: {p['RealPrice']:+d}{book_str}."
     fair = f"{p['Fair']:+d}" if p.get("Fair") is not None else "—"
-    return f"Fair price ~{fair} (prices not checked — flip on Live value to verify)."
+    return f"Fair price ~{fair} (model estimate — flip on Live value for a live EV% read)."
  
  
 def reality_check(p):
@@ -100,33 +108,31 @@ def get_key():
  
 @st.cache_data(ttl=300, show_spinner=False)
 def load_selections_mlb(date_str, n, cap, ev_mode):
+    # Real, confirmed fix for a structural gap -- same class of bug build_mlb_board's own
+    # docstring documents already causing one real, confirmed production issue (a Command
+    # Center/Best Bets conviction mismatch) before it was made "PUBLIC, NOT INTERNAL" so every
+    # page could share it. This page never actually did: it used to rebuild the slate and every
+    # hitter/pitcher projection independently, WITHOUT ever fetching real sportsbook lines or
+    # prices, even after every other page sharing this pipeline was already fixed. Every play
+    # shown here (including the "Fair price ~X" text in value_text, which now sometimes shows a
+    # REAL price instead) was silently always measured against this platform's own DEFAULT_LINES
+    # /BEST_BET_REF placeholders regardless of what real_lines had already fixed elsewhere.
+    import best_bets_data as BBD
     import statcast_data as SC
-    import weather as WX
 
     @st.cache_data(ttl=3600, show_spinner=False)
     def load_statcast():
         return SC.load()
 
-    @st.cache_data(ttl=1800, show_spinner=False)
-    def load_weather(keys):
-        out = {}
-        for vid, gdate, vname in keys:
-            if vid is not None and vid not in out:
-                try:
-                    out[vid] = WX.get_game_weather(vid, gdate, vname)
-                except Exception:
-                    out[vid] = None
-        return out
+    fip_constant = E.FIP_CONSTANT_DEFAULT
+    api_key = get_key()
+    rows, meta, plays, _books = BBD.build_mlb_board(date_str, fip_constant, odds_api_key=api_key)
+    plays = SEL.filter_known_pitcher(plays)   # drop TBD-pitcher plays
 
-    rows, meta = E.build_slate(date_str)
+    # Statcast loaded separately here (its own cached call) specifically for ev_mode's own
+    # build_projection_index call below, which build_mlb_board doesn't expose internally -- not
+    # a new parallel pipeline, rows/meta/plays above all still come from the one real source.
     sc, k = load_statcast()
-    wx = load_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
-    for r in rows:
-        w = wx.get(r.get("_venue_id"))
-        r["_weather_hr"] = w["hr_factor"] if w else 1.0
-    P.enrich_hitter_rows(rows, seed=7, statcast=sc, statcast_k=k)
-    pr = P.build_pitcher_projection_rows(rows, meta, seed=11)
-    plays = SEL.filter_known_pitcher(P.build_best_bets(rows, pr))   # drop TBD-pitcher plays
 
     ev_used = False
     if ev_mode:

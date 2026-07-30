@@ -68,6 +68,12 @@ if _active.key == "MLB":
     with st.spinner("Scanning the slate..."):
         plays, meta, available_books = load_best_bets_mlb(
             date_str, fip_constant, preferred_book, venue_split, time_split)
+    # Guarantees THIS session's own quick_log real-price side-channel is populated, regardless
+    # of whether load_best_bets_mlb above was a cache hit for this session specifically -- see
+    # ensure_mlb_offers_session_state's own docstring for the real, confirmed cross-session bug
+    # this fixes. Called here, in genuinely uncached top-level page code, not inside any
+    # @st.cache_data-wrapped function (which would silently reintroduce the identical bug).
+    BBD.ensure_mlb_offers_session_state(date_str, BBD.get_odds_api_key(), preferred_book)
     plays = BBD.filter_by_split_situation(plays, venue_split, time_split)
     ss_key = f"_available_books_{date_str}"
     if st.session_state.get(ss_key) != available_books:
@@ -171,7 +177,15 @@ f3, f4, f5 = st.columns(3)
 with f3:
     markets = sorted({p["Market"] for p in plays})
     mkt_pick = st.multiselect("Markets", markets, default=markets)
-with f4: min_conv = st.slider("Min conviction", 1.0, 3.0, 1.2, 0.1)
+with f4: min_conv = st.slider("Min conviction", 1.0, 3.0, 1.2, 0.1,
+                              help="Conviction is now measured against the real, live no-vig "
+                                   "market probability for a play whenever one exists (📊 on "
+                                   "the grade badge elsewhere on this platform), not always this "
+                                   "platform's own hand-typed guess at what's typical for the "
+                                   "market. That's a genuinely harder, more honest bar to clear "
+                                   "— seeing fewer plays pass the same threshold than you might "
+                                   "remember isn't a bug, it's real market data replacing a "
+                                   "guess.")
 with f5:
     # A separate, ABSOLUTE floor from Min conviction above -- Conviction is relative to each
     # market's own typical reference rate, so the same Conviction value means different real
@@ -230,11 +244,20 @@ for p in view:
         p["_display_line"] = f"📊 {p['Line']:g}"
     else:
         p["_display_line"] = f"{p['Line']:g}" if p.get("Line") is not None else "—"
+    # Same real-vs-placeholder marker applied to the PRICE, not just the line -- a real, confirmed
+    # systemic gap this closes: the line has been real since the July 24 wiring, but the price
+    # shown alongside it was ALWAYS the model's own theoretical number (Fair), with zero attempt
+    # to check for a real captured price at that same real line. "📊 -140" is a real DraftKings
+    # price; a plain "+138" with no marker is still the model's own independent estimate.
+    if p.get("PriceSource") == "book" and p.get("RealPrice") is not None:
+        p["_display_price"] = f"📊 {p['RealPrice']:+d}"
+    else:
+        p["_display_price"] = f"{p['Fair']:+d}" if p.get("Fair") is not None else "—"
 df = pd.DataFrame(view)[["ModelProb", "Conviction", "Time", "Slot", "Player", "Team", "Market", "Side",
-                         "_display_line", "Fair", "Game", "Why"]]
-df = df.rename(columns={"ModelProb": "Model %", "_display_line": "Line", "Why": "Why the model likes it"})
-st.dataframe(df.style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×", "Fair": "{:+d}"},
-                             na_rep="—")
+                         "_display_line", "_display_price", "Game", "Why"]]
+df = df.rename(columns={"ModelProb": "Model %", "_display_line": "Line",
+                        "_display_price": "Fair", "Why": "Why the model likes it"})
+st.dataframe(df.style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×"}, na_rep="—")
              .theme_gradient(cmap="Greens", subset=["Model %"]),
              use_container_width=True, hide_index=True, height=400)
 
@@ -257,13 +280,17 @@ if any(p.get("_bullpen_blended") for p in view):
               "starter-only read, which is usually the same number anyway when a hitter has "
               "little or no real bullpen exposure to begin with.")
 if any(p.get("LineSource") == "book" for p in view):
-    st.caption("📊 = this play's line is a real, live sportsbook number (from The Odds API, "
-              "the same source Edge Board already uses) — the probability and grade are computed "
-              "against this real line, not a generic placeholder. A plain number with no 📊 "
-              "means the API key isn't configured, or this specific player/market had no coverage "
-              "in the real book data, so the platform's own DEFAULT_LINES placeholder was used "
-              "instead. To enable real lines everywhere, add ODDS_API_KEY to your Streamlit "
-              "secrets — same key Edge Board already requires.")
+    st.caption("📊 = a real, live sportsbook number (from The Odds API, the same source Edge "
+              "Board already uses), shown in BOTH the Line and Fair columns independently — a "
+              "real line doesn't guarantee a real price, and vice versa, so each is marked on "
+              "its own. **Line:** the probability and grade are computed against this real "
+              "number, not a generic placeholder. **Fair:** this is the real captured price a "
+              "book is actually offering right now, not the model's own theoretical estimate. "
+              "A plain number with no 📊 in either column means the API key isn't configured, "
+              "or this specific player/market/side had no real coverage, so the platform's own "
+              "placeholder (for Line) or the model's own independent estimate (for Fair) was "
+              "used instead. To enable real lines and prices everywhere, add ODDS_API_KEY to "
+              "your Streamlit secrets — same key Edge Board already requires.")
 
 # --- DIAGNOSTIC INSPECTOR --------------------------------------------------
 st.markdown("---")
@@ -283,6 +310,30 @@ selected_idx = st.selectbox(
 
 p = view[selected_idx]
 with st.expander("Diagnostic Inspector", expanded=True):
+    # What's real vs. model-generated for THIS specific play, all in one place -- Conviction is
+    # a raw numeric column in the main table above (can't carry an inline 📊 marker the way the
+    # Line/Fair text columns can), so this is the actual place to see it clearly per play.
+    rc1, rc2, rc3 = st.columns(3)
+    conv_src = p.get("ConvictionSource", "model_typical")
+    rc1.metric("Conviction basis",
+              "📊 Real market" if conv_src == "book" else "Model-typical guess",
+              help="Whether this play's Conviction (and therefore its grade and rank) is "
+                   "measured against the real, live no-vig market probability for this exact "
+                   "bet, or this platform's own hand-set estimate of what's typical for this "
+                   "market category. Real market data is the more rigorous, more honest "
+                   "comparison — it reflects what's actually being offered right now, not a "
+                   "guess.")
+    price_src = p.get("PriceSource", "model_fair")
+    rc2.metric("Price basis", "📊 Real book price" if price_src == "book" else "Model estimate")
+    line_src = p.get("LineSource", "default")
+    rc3.metric("Line basis", "📊 Real book line" if line_src == "book" else "Platform default")
+    if conv_src != "book":
+        st.caption("No real two-sided book price was available for this specific play, so its "
+                  "Conviction/grade fell back to this platform's own reasoned-but-unvalidated "
+                  "estimate of a typical rate for this market. Not wrong, just less rigorous "
+                  "than a real market comparison — worth knowing before trusting the grade at "
+                  "face value.")
+
     if _active.key == "MLB":
         pa = p.get("PA")
         phr = p.get("ParkHR", 1.0)

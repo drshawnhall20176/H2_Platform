@@ -60,6 +60,7 @@ if _active.key == "MLB":
     with st.spinner("Building the basket..."):
         plays, meta, rows, available_books = BBD.load_mlb_graded_picks_board(
             date_str, E.FIP_CONSTANT_DEFAULT, preferred_book, venue_split, time_split)
+    BBD.ensure_mlb_offers_session_state(date_str, BBD.get_odds_api_key(), preferred_book)
     plays = BBD.filter_by_split_situation(plays, venue_split, time_split)
     ss_key = f"_available_books_{date_str}"
     if st.session_state.get(ss_key) != available_books:
@@ -227,9 +228,10 @@ st.info(
     "Hitting even one is a genuine win, unlike a parlay where every single leg has to hit "
     "together. The math below reflects that: \"at least one hits\" instead of \"everything "
     "hits.\"\n\n"
-    "📊 **What \"Fair\" means**: Fair odds are what a bet would need to pay to be break-even, "
-    "given the model's own probability — not what a sportsbook is actually offering. Compare "
-    "it to what your book actually offers to see if there's real value."
+    "📊 **What \"Fair\" means**: when marked 📊, it's a real captured sportsbook price for that "
+    "specific play — the number a book is actually offering right now. Without the marker, "
+    "it's the model's own break-even estimate, not a real price. Compare it to what your book "
+    "actually offers to see if there's real value."
 )
 
 # Rank once here (not down in the display loop) so the trim control below and the metrics/
@@ -330,8 +332,9 @@ with st.container(border=True):
     # above, and the distribution chart above all stay in sync with the slider.
     for leg in trimmed_legs:
         grade_html = _grade_badge(leg["_grade"])
-        leg_fair = leg.get("Fair")
-        leg_fair_str = f"{leg_fair:+d}" if leg_fair is not None else "—"
+        leg_fair_str = (f"📊 {leg['RealPrice']:+d}" if leg.get("PriceSource") == "book"
+                                                        and leg.get("RealPrice") is not None
+                       else f"{leg['Fair']:+d}" if leg.get("Fair") is not None else "—")
         lineup = leg.get("Lineup")
         lineup_icon = "🟡 " if lineup == "Projected" else ("🟢 " if lineup == "Confirmed" else "")
         rank_prefix = f"**#{leg['_rank']}** · " if leg.get("_rank") else ""
