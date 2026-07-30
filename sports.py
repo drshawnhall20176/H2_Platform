@@ -29,6 +29,20 @@ class Sport:
     odds_sport_key: str            # The Odds API sport key, e.g. "baseball_mlb"
     markets: List[str]             # Odds API market keys this sport prices
     market_map: Dict[str, str]     # Bet Log display market -> Odds API key (for CLV capture)
+    default_markets: Optional[List[str]] = None   # curated default for "Markets to include"
+    # filters (Suggested Parlays, Graded Picks, Speculative Basket) -- None means "every market
+    # this sport has," the original behavior. A real, deliberate curation for MLB specifically:
+    # leaving rare-event markets (Stolen Bases, HR, Doubles, Triples, Singles) selected by
+    # default let the "payout"-chasing parlay tiers compound several already-longshot legs
+    # together into combined odds in the MILLIONS -- mathematically real, but numbers no actual
+    # sportsbook has ever offered, already addressed on the display side (see Suggested
+    # Parlays' own "Off the board" cap). This is the same real fix one level upstream: a
+    # smaller, more STABLE default market set (the batter markets with genuinely moderate,
+    # well-anchored typical rates, plus every pitcher market, whose probabilities are anchored
+    # to a known starter's own role/innings rather than a single hitter's binary swing outcome)
+    # means the astronomical case is rarer to begin with, not just capped after the fact.
+    # Nothing is removed -- every market remains one click away in the same multiselect, this
+    # only changes what's pre-selected before a person touches anything.
     single_line_markets: set = field(default_factory=set)  # markets matched w/o a point (e.g. HR)
     engine_module: str = ""        # import path of the sport's data engine
     projections_module: str = ""   # import path of the sport's projections
@@ -95,6 +109,9 @@ REGISTRY: Dict[str, Sport] = {
     "MLB": Sport(
         key="MLB", label="MLB — Baseball", icon="⚾", odds_sport_key="baseball_mlb",
         markets=_MLB_MARKETS, market_map=_MLB_MARKET_MAP,
+        default_markets=["Batter Hits+Runs+RBIs", "Batter Strikeouts", "Batter Total Bases",
+                         "Batter Total Hits", "Pitcher Earned Runs", "Pitcher Hits Allowed",
+                         "Pitcher Outs", "Pitcher Strikeouts", "Pitcher Walks"],
         single_line_markets={"batter_home_runs"},
         engine_module="mlb_engine", projections_module="projections", config_module="config",
         enabled=True,

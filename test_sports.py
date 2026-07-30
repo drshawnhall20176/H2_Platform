@@ -376,6 +376,57 @@ def test_mlb_hrr_market_present():
     print("\u2713 Batter Hits+Runs+RBIs is correctly registered with its real, confirmed Odds API key")
 
 
+def test_mlb_default_markets_is_the_real_curated_list():
+    # Regression guard for the actual fix: leaving every market selected by default (including
+    # rare-event ones like Stolen Bases, HR, Doubles, Triples) let the "payout"-chasing parlay
+    # tiers compound several already-longshot legs into combined odds in the millions -- real
+    # math, but numbers no actual sportsbook has ever offered. Confirms the exact curated
+    # default matches what was actually specified, not an approximation.
+    mlb = S.get("MLB")
+    assert mlb.default_markets == [
+        "Batter Hits+Runs+RBIs", "Batter Strikeouts", "Batter Total Bases", "Batter Total Hits",
+        "Pitcher Earned Runs", "Pitcher Hits Allowed", "Pitcher Outs", "Pitcher Strikeouts",
+        "Pitcher Walks",
+    ]
+    print("\u2713 MLB's default_markets is the exact real curated list")
+
+
+def test_mlb_default_markets_every_entry_is_a_real_valid_market():
+    # Every curated default must actually exist in market_map -- a typo here would silently
+    # produce an empty pre-selection (the intersection-with-markets_present logic in the view
+    # files would just drop it), not an error, so this needs direct verification.
+    mlb = S.get("MLB")
+    for market in mlb.default_markets:
+        assert market in mlb.market_map, f"{market!r} is not a real MLB market key"
+    print("\u2713 Every market in MLB's default_markets is a real, valid market_map key")
+
+
+def test_mlb_default_markets_excludes_the_rare_event_markets():
+    # The actual point of the curation: the markets most prone to producing astronomical
+    # combined parlay odds (rare, longshot-leaning events for most players) must be excluded
+    # from the default, even though they remain fully selectable -- nothing is removed, only
+    # what's pre-selected changes.
+    mlb = S.get("MLB")
+    excluded = {"Batter HR", "Batter Runs", "Batter RBIs", "Batter Stolen Bases", "Batter Walks",
+               "Batter Singles", "Batter Doubles", "Batter Triples"}
+    assert excluded.isdisjoint(set(mlb.default_markets))
+    # But every one of them must still be a real, selectable market -- curation, not removal.
+    for market in excluded:
+        assert market in mlb.market_map
+    print("\u2713 MLB's default_markets excludes the rare-event markets while keeping them fully "
+         "selectable, not removed from the platform")
+
+
+def test_other_sports_default_markets_unchanged():
+    # Sports without an explicit curation must keep the original "every market" behavior --
+    # this was a deliberate MLB-specific fix, not a platform-wide behavior change.
+    for key in ["WNBA", "NBA", "NCAAMB", "NFL"]:
+        sport = S.get(key)
+        if sport is not None:
+            assert sport.default_markets is None
+    print("\u2713 Sports without an explicit curation keep default_markets=None, unchanged behavior")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
