@@ -85,9 +85,20 @@ def yesterday_catches(sport_key, date_str, markets):
     plays, _ = _board(sport_key, date_str)
     results = sports.get(sport_key).engine.get_player_results(date_str)
     reports = {m: R.market_report(plays, results, m) for m in markets}
+    rows_by_pid = {}
+    if sport_key == "MLB":
+        # explain_miss needs the enriched board row itself (season K/BB/SB rates, opposing
+        # allowed rates, Statcast barrels, etc.), not just the play -- same real data already
+        # powering the "Why" column elsewhere, reused here rather than recomputed. Mirrors
+        # Retrospective's own established rows_by_pid pattern exactly (load_retro_mlb).
+        try:
+            rows, _meta, _plays, _books = BBD.build_mlb_board(date_str, BBD.E.FIP_CONSTANT_DEFAULT)
+            rows_by_pid = {r.get("_pid"): r for r in rows}
+        except Exception:
+            rows_by_pid = {}
     return ({m: r["caught"] for m, r in reports.items()},
             {m: r["missed"] for m, r in reports.items()},
-            len(results))
+            rows_by_pid, len(results))
 
 
 today = datetime.now().strftime("%Y-%m-%d")
@@ -296,9 +307,9 @@ else:
                "with what actually happened. Surfaced by recent form, not name recognition. "
                "(Exploratory; see Retrospective.)")
 try:
-    catches, misses, _ = yesterday_catches(_active.key, yest, tuple(_active.market_map.keys()))
+    catches, misses, rows_by_pid, _ = yesterday_catches(_active.key, yest, tuple(_active.market_map.keys()))
 except Exception:
-    catches, misses = {}, {}
+    catches, misses, rows_by_pid = {}, {}, {}
 
 _caught_markets = list(_active.market_map.keys())
 _ctabs = st.tabs([f"{_MARKET_ICONS.get(m, '🔹')} {m}" for m in _caught_markets])
@@ -330,9 +341,13 @@ st.subheader("🔦 Surprising hits — the model didn't see these coming")
 st.caption("Players whose result ALSO cleared the line last night, but who sat OUTSIDE the "
           "model's own top-ranked plays pre-game — genuinely low pre-game confidence, not a "
           "confirmed top pick. A real, honest signal worth a second look either way: either the "
-          "model is missing something about this player/matchup worth investigating (see "
-          "Retrospective), or it's a genuinely unpredictable event landing as variance does. "
-          "Sorted worst-ranked (most surprising) first. (Exploratory.)")
+          "model is missing something about this player/matchup worth investigating, or it's a "
+          "genuinely unpredictable event landing as variance does. The Reason column (MLB only "
+          "for now) tells you which: \"Catchable\" means a real signal existed and the model "
+          "under-weighted it — worth investigating. \"Genuine variance\" means the model was "
+          "right to rank it low; this is randomness, not a modeling gap — chasing these is "
+          "exactly the overfitting this platform avoids. Sorted worst-ranked (most surprising) "
+          "first. (Exploratory.)")
 _stabs = st.tabs([f"{_MARKET_ICONS.get(m, '🔹')} {m}" for m in _caught_markets])
 for _tb, _mkt in zip(_stabs, _caught_markets):
     with _tb:
@@ -340,7 +355,11 @@ for _tb, _mkt in zip(_stabs, _caught_markets):
         if surprises:
             sdf = pd.DataFrame(surprises[:6])
             sdf["Pre-game rank"] = sdf.apply(lambda r: f"#{r['Rank']} of {r['OfTotal']}", axis=1)
-            cols = [c for c in ["Player", "Value", "Line", "ModelProb", "Pre-game rank"] if c in sdf.columns]
+            if _active.key == "MLB":
+                sdf["Reason"] = sdf["PlayerId"].apply(
+                    lambda pid: R.explain_miss(rows_by_pid.get(pid), _mkt))
+            cols = [c for c in ["Player", "Value", "Line", "ModelProb", "Pre-game rank", "Reason"]
+                   if c in sdf.columns]
             sdf = sdf[cols].rename(columns={"ModelProb": "Model %", "Value": _mkt})
             fmt = {"Model %": "{:.0%}", "Line": "{:g}", _mkt: "{:.1f}"}
             st.dataframe(sdf.style.format({k: v for k, v in fmt.items() if k in sdf.columns}, na_rep="—"),
