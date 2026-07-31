@@ -25,6 +25,19 @@ game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER
 # on the platform.
 GRADE_COLOR = {"A": "#16783c", "B": "#2e7d32", "C": "#b8860b", "D": "#6b7280"}
 
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_highlights_board(date_str, fip_constant, preferred_book, venue_split, time_split):
+    """Same real fix for a real, reported problem: this page used to call
+    load_mlb_best_bets_board directly, uncached, in top-level page code -- meaning the entire
+    expensive board build (odds fetch, Statcast merge, enrichment) re-ran on EVERY widget
+    interaction, including ones with nothing to do with the board itself (picking a player from
+    a dropdown, clicking a market radio, expanding "show all matches"). Every other
+    recommendation page on this platform (Best Bets, Graded Picks, Suggested Parlays) already
+    wraps this exact call in its own @st.cache_data loader for this exact reason -- this page
+    just never got the same treatment."""
+    return BBD.load_mlb_best_bets_board(date_str, fip_constant, preferred_book, venue_split, time_split)
+
 st.title("✨ Highlights")
 st.caption("Save a named filter once, see who matches it every day — the same workflow as a "
           "PropFinder Highlight Profile, built on this platform's own real fields.")
@@ -65,7 +78,7 @@ venue_split, time_split = BBD.render_split_selector(key_prefix="highlights")
 
 with st.spinner("Loading tonight's board..."):
     try:
-        plays, meta, _books = BBD.load_mlb_best_bets_board(
+        plays, meta, _books = _load_highlights_board(
             date_str, BBD.E.FIP_CONSTANT_DEFAULT, preferred_book, venue_split, time_split)
     except Exception:
         plays, meta = [], []
@@ -196,20 +209,6 @@ st.subheader("Today's Highlights")
 
 MAX_ROWS_SHOWN = 15
 
-# Real diagnostic fields already sitting on every play -- _hitter_diag/_pitcher_diag in
-# projections.py already spread these onto every hitter/pitcher play at build_best_bets time,
-# purely for the existing Bet Diagnostics inspector. Reused here directly, not refetched or
-# invented -- the "look up a player" stat panel below is just surfacing data that's already
-# there, same as everything else fixed this session.
-HITTER_STAT_FIELDS = [("PA", "Exp. PA tonight"), ("AVG", "Season AVG"), ("SLG", "Season SLG"),
-                      ("Due", "Barrels-ahead-of-HR (Due)"), ("Barrel%", "Barrel %"),
-                      ("xHR/PA", "Expected HR/PA"), ("ParkHR", "Park HR factor"),
-                      ("WxHR", "Weather HR factor"), ("Platoon", "Platoon split"),
-                      ("OppHR9", "Opp. starter HR/9")]
-PITCHER_STAT_FIELDS = [("PA", "Proj. batters faced"), ("ProjK", "Proj. K"), ("ProjBB", "Proj. BB"),
-                       ("ProjIP", "Proj. IP"), ("ProjOuts", "Proj. outs"),
-                       ("OppK", "Opp. lineup K rate"), ("OppBB", "Opp. lineup BB rate")]
-
 
 def _matches_dataframe(matches: list) -> pd.DataFrame:
     """Real, sortable table -- same theme_gradient/colored-grade pattern already established on
@@ -235,27 +234,74 @@ def _matches_dataframe(matches: list) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("Model %", ascending=False, kind="stable")
 
 
-def _render_player_stats(play: dict) -> None:
-    """The actual fix requested: a real, per-player stat view a person can pull up right from a
-    matched highlight, instead of having to separately cross-reference Matchup Lab or Pitching
-    Lab by hand. Pitcher markets carry ProjK/ProjOuts-style fields, hitter markets carry AVG/
-    SLG/Due/Barrel%-style fields -- picks whichever set is actually present on this specific
-    play rather than guessing from the market name, so it stays correct if new markets are
-    added later."""
-    fields = PITCHER_STAT_FIELDS if play.get("ProjK") is not None else HITTER_STAT_FIELDS
-    stat_rows = []
-    for key, label in fields:
-        val = play.get(key)
-        if val is None:
-            continue
-        if isinstance(val, float):
-            val = f"{val:.3f}" if key in ("AVG", "SLG", "xHR/PA", "Due") else f"{val:.2f}"
-        stat_rows.append({"Stat": label, "Value": val})
-    if not stat_rows:
-        st.caption("No additional real stats available for this player/market.")
-        return
-    st.dataframe(pd.DataFrame(stat_rows), hide_index=True, use_container_width=True,
-                height=min(38 * (len(stat_rows) + 1) + 3, 320))
+# The one real, market-specific number that actually drove each market's probability --
+# mirrors the same per-market signal already used in _hitter_reasons' own "Why" text this
+# session, just picked out individually here instead of joined into a sentence. Directly fixes
+# the real reported bug: showing generic player/game-level context (AVG, ParkHR, Platoon) for
+# EVERY market made every row look identical, since none of those fields are market-specific.
+def _market_stat(play: dict) -> str:
+    market = play.get("Market", "")
+    if market == "Batter HR":
+        due = play.get("Due")
+        return f"Due +{due * 100:.1f}pp" if due is not None else "—"
+    if market == "Batter Total Bases":
+        slg = play.get("SLG")
+        return f"SLG {slg:.3f}" if slg is not None else "—"
+    if market in ("Batter Total Hits", "Batter Hits+Runs+RBIs"):
+        avg = play.get("AVG")
+        return f"AVG {avg:.3f}" if avg is not None else "—"
+    if market == "Batter Strikeouts":
+        k = play.get("_season_k_rate")
+        return f"{k:.0%} K rate" if k is not None else "—"
+    if market == "Batter Walks":
+        bb = play.get("_season_bb_rate")
+        return f"{bb:.0%} BB rate" if bb is not None else "—"
+    if market == "Batter Stolen Bases":
+        sb, pa = play.get("_season_sb"), play.get("_season_pa_for_sb")
+        return f"{sb:.0f} SB/{pa:.0f} PA" if sb is not None and pa else "—"
+    if market == "Batter Runs":
+        runs, pa = play.get("_season_runs"), play.get("_season_pa")
+        return f"{runs:.0f} R/{pa:.0f} PA" if runs is not None and pa else "—"
+    if market == "Batter RBIs":
+        rbi, pa = play.get("_season_rbi"), play.get("_season_pa")
+        return f"{rbi:.0f} RBI/{pa:.0f} PA" if rbi is not None and pa else "—"
+    if market == "Batter Doubles":
+        d, pa = play.get("_season_doubles"), play.get("_season_pa")
+        return f"{d:.0f} 2B/{pa:.0f} PA" if d is not None and pa else "—"
+    if market == "Batter Triples":
+        t, pa = play.get("_season_triples"), play.get("_season_pa")
+        return f"{t:.0f} 3B/{pa:.0f} PA" if t is not None and pa else "—"
+    if market == "Batter Singles":
+        s, pa = play.get("_season_singles"), play.get("_season_pa")
+        return f"{s:.0f} 1B/{pa:.0f} PA" if s is not None and pa else "—"
+    if market == "Pitcher Strikeouts":
+        pk = play.get("ProjK")
+        return f"Proj. {pk:.1f} K" if pk is not None else "—"
+    if market == "Pitcher Walks":
+        pbb = play.get("ProjBB")
+        return f"Proj. {pbb:.1f} BB" if pbb is not None else "—"
+    if market == "Pitcher Outs":
+        po = play.get("ProjOuts")
+        return f"Proj. {po:.1f} outs" if po is not None else "—"
+    return "—"
+
+
+def _player_markets_dataframe(matches: list) -> pd.DataFrame:
+    """One row per market this player matched on, each with its own real, market-specific
+    driving stat -- built to gradient-color like Dinger Engine's own tables (many rows, real
+    column-wise comparison), not a single stacked list where a color gradient would be
+    meaningless (comparing an AVG against a PA on the same color scale means nothing)."""
+    rows = []
+    for m in matches:
+        grade = H._play_value(m, "Grade") or "—"
+        line_val = m.get("Line")
+        line_str = f"{line_val:g}" if isinstance(line_val, (int, float)) else "—"
+        rows.append({
+            "Market": m.get("Market", ""), "Side": m.get("Side", ""), "Line": line_str,
+            "Model %": m.get("ModelProb", 0.0), "Grade": grade,
+            "Real driving stat": _market_stat(m),
+        })
+    return pd.DataFrame(rows).sort_values("Model %", ascending=False, kind="stable")
 
 
 if not plays:
@@ -293,7 +339,7 @@ else:
                         .format({"Model %": "{:.0%}"})
                         .map(lambda g: f"color:{GRADE_COLOR.get(g, '#6b7280')};font-weight:700;",
                              subset=["Grade"])
-                        .theme_gradient(cmap="Greens", subset=["Model %"]),
+                        .theme_gradient(cmap="RdYlGn", subset=["Model %"]),
                     hide_index=True, use_container_width=True,
                     height=min(38 * (len(shown) + 1) + 3, 460))
                 if n > MAX_ROWS_SHOWN:
@@ -303,32 +349,36 @@ else:
                                 .format({"Model %": "{:.0%}"})
                                 .map(lambda g: f"color:{GRADE_COLOR.get(g, '#6b7280')};font-weight:700;",
                                      subset=["Grade"])
-                                .theme_gradient(cmap="Greens", subset=["Model %"]),
+                                .theme_gradient(cmap="RdYlGn", subset=["Model %"]),
                             hide_index=True, use_container_width=True, height=460)
 
-                # Per-player stat drill-down, added directly on request -- same "type to search"
+                # Per-player drill-down, added directly on request -- same "type to search"
                 # pattern Matchup Lab already uses for its own hitter/pitcher lookups, applied
                 # here to whichever players actually matched THIS profile (deduped, since the
-                # same player can match on more than one market within a profile).
+                # same player can match on more than one market within a profile). Shows every
+                # matched market as its own gradient-colored row with its own real, market-
+                # specific driving stat -- the actual fix for a real reported bug: showing one
+                # generic player-level stat panel per player made every market look identical,
+                # since AVG/ParkHR/Platoon don't vary by market for the same player/game.
                 by_player = {}
                 for m in r["matches"]:
                     by_player.setdefault(m["Player"], []).append(m)
                 player_pick = st.selectbox(
                     "🔍 Look up a player from these matches", [""] + sorted(by_player.keys()),
                     key=f"lookup_{r['id']}",
-                    help="Pulls the real, already-computed stats behind this player's own "
-                        "matched play(s) -- season rate, matchup factors, projections.")
+                    help="Every market this player matched on, each with its own real, "
+                        "market-specific driving stat -- not the same generic context repeated "
+                        "for every row.")
                 if player_pick:
-                    player_matches = by_player[player_pick]
-                    if len(player_matches) > 1:
-                        market_pick = st.radio(
-                            f"{player_pick} matched on {len(player_matches)} markets — which one?",
-                            [m["Market"] for m in player_matches], horizontal=True,
-                            key=f"market_pick_{r['id']}_{player_pick}")
-                        chosen = next(m for m in player_matches if m["Market"] == market_pick)
-                    else:
-                        chosen = player_matches[0]
-                    _render_player_stats(chosen)
+                    pdf = _player_markets_dataframe(by_player[player_pick])
+                    st.dataframe(
+                        pdf.style
+                            .format({"Model %": "{:.0%}"})
+                            .map(lambda g: f"color:{GRADE_COLOR.get(g, '#6b7280')};font-weight:700;",
+                                 subset=["Grade"])
+                            .theme_gradient(cmap="RdYlGn", subset=["Model %"]),
+                        hide_index=True, use_container_width=True,
+                        height=min(38 * (len(pdf) + 1) + 3, 320))
 
             if st.button("🗑️ Delete profile", key=f"del_{r['id']}"):
                 H.delete_profile(r["id"])
