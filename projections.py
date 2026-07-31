@@ -2501,6 +2501,22 @@ def _hitter_diag(r: Dict) -> Dict:
         "Due": r.get("Due"),
         "AVG": r.get("AVG"),
         "SLG": r.get("SLG"),
+        # The remaining market-specific real fields, added directly on request: without these,
+        # every market for the same player showed the SAME generic player/game-level context
+        # (AVG, SLG, ParkHR, etc.), since those were the only fields ever surfaced here -- even
+        # though the real, market-specific numbers (K rate, BB rate, SB rate, Runs/RBI rate,
+        # hit-type rates) were already being computed by enrich_hitter_rows this whole session,
+        # just never spread onto the play object itself. Same "real data existed, just wasn't
+        # surfaced" pattern as everything else fixed this session, one more layer out.
+        "_season_k_rate": r.get("_season_k_rate"), "_opp_k_allowed": r.get("_opp_k_allowed"),
+        "_season_bb_rate": r.get("_season_bb_rate"), "_opp_bb_allowed": r.get("_opp_bb_allowed"),
+        "_season_sb": r.get("_season_sb"), "_season_pa_for_sb": r.get("_season_pa_for_sb"),
+        "_exp_sb_tonight": r.get("_exp_sb_tonight"),
+        "_season_pa": r.get("_season_pa"),
+        "_season_runs": r.get("_season_runs"), "_exp_runs_tonight": r.get("_exp_runs_tonight"),
+        "_season_rbi": r.get("_season_rbi"), "_exp_rbi_tonight": r.get("_exp_rbi_tonight"),
+        "_season_doubles": r.get("_season_doubles"), "_season_triples": r.get("_season_triples"),
+        "_season_singles": r.get("_season_singles"),
     }
     # Weather decomposition — split the HR factor into temperature vs wind so the inspector can
     # say "the +8% is heat, not the crosswind." Present only when the page stored the breakdown
