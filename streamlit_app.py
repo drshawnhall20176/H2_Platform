@@ -136,6 +136,7 @@ def run():
         "21": ("Media Room",    "📣", "media_room"),
         "22": ("Podcast Studio", "🎙️", "podcast_studio"),
         "23": ("UFC Fight Card", "🥊", "ufc_fight_card"),
+        "24": ("Highlights",    "✨", "highlights"),
     }
 
     def lead(name: str) -> str:

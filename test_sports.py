@@ -109,6 +109,30 @@ def test_owner_only_pages_match_expected_titles():
           "Graded Picks, by real title")
 
 
+def test_every_view_file_has_a_matching_meta_entry():
+    # Regression guard for a real, reported bug: a new page (24_Highlights.py) was added to
+    # views/ without a matching entry in streamlit_app.py's meta dict, so it silently fell back
+    # to the raw, unformatted filename ("24_Highlights") in the sidebar instead of a real title
+    # and icon -- no error, no crash, just a wrong-looking sidebar entry that's easy to miss
+    # until someone actually looks at it. Confirms every view file's leading number is a real
+    # key in meta, so this can't happen silently again for the next new page.
+    views_dir = _HERE / "views"
+    src = (_HERE / "streamlit_app.py").read_text()
+    m = re.search(r"meta = \{(.*?)\n    \}", src, re.DOTALL)
+    assert m, "streamlit_app.py must define meta"
+    known_keys = set(re.findall(r'"(\d+)":\s*\(', m.group(1)))
+    missing = []
+    for f in views_dir.glob("*.py"):
+        lead_match = re.match(r"(\d+)", f.name)
+        if not lead_match:
+            continue   # a view file with no leading number isn't part of this numbering scheme
+        if lead_match.group(1) not in known_keys:
+            missing.append(f.name)
+    assert not missing, f"these view files have no matching meta entry: {missing}"
+    print(f"✓ every numbered view file has a matching streamlit_app.py meta entry "
+         f"({len(known_keys)} registered)")
+
+
 def test_public_audience_defaults_safe():
     # Missing/unset AUDIENCE secret must default to "owner" (fail toward showing the owner
     # everything on unconfigured/local runs), never silently default to "public".

@@ -619,7 +619,20 @@ def build_pitching_slate(date_str: str, fip_constant: float = FIP_CONSTANT_DEFAU
 
     rows = []
     for pm, team, opp, label, gd, team_id, opp_id, game_pk, venue_id, is_home in results:
-        if pm.id is None or pm.era == 0:
+        if pm.id is None or not pm.has_stats:
+            # A REAL, CONFIRMED FIX, not a style change: this used to check pm.era == 0, using a
+            # zero ERA as a proxy for "no real data found." But a real pitcher with a genuinely
+            # real, legitimate 0.00 ERA -- a rookie or recent call-up who's thrown a handful of
+            # scoreless innings, a real and not-even-rare situation -- has has_stats=True and a
+            # real stat line, yet was being silently treated the same as a pitcher with NO data
+            # at all. The visible effect: that pitcher's row vanished, and since Game Watch pairs
+            # home/away pitchers into one game, losing either side's row took the ENTIRE game off
+            # the board -- not a cosmetic gap, a real game a person could no longer see or bet on
+            # simply going missing. get_pitcher_metrics already computes has_stats specifically
+            # to make this distinction (see its own docstring/comment: "flag it so the UI shows
+            # 'no data', not a fake-elite 0.00") -- this now actually uses that real signal
+            # instead of the fragile era==0 proxy that quietly broke the exact case it was
+            # trying to protect against.
             continue
         rows.append({
             "Pitcher": pm.name, "_pid": pm.id, "Team": team, "Opponent": opp, "Game": label,

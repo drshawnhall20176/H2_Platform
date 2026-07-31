@@ -242,6 +242,67 @@ def test_build_pitching_slate_threads_team_ids_through(monkeypatch):
     print("✓ build_pitching_slate correctly threads each side's own team_id and their opponent's through")
 
 
+def test_build_pitching_slate_includes_a_genuine_zero_era_pitcher(monkeypatch):
+    # Regression guard for a real, reported bug: a real, live game (Padres) went missing from
+    # Game Watch entirely. Traced to build_pitching_slate using `pm.era == 0` as a proxy for
+    # "no real data found" -- but a real pitcher with a genuinely real 0.00 ERA (a rookie or
+    # recent call-up who's thrown a handful of scoreless innings, not a rare situation at all
+    # near a trade deadline when teams are actively calling players up) has has_stats=True and a
+    # real stat line, yet was being silently excluded the same as a pitcher with NO data
+    # whatsoever. Since this function pairs home/away pitchers into one game downstream, losing
+    # either side's row took the entire game off the board, not just that one pitcher's row.
+    fake_games = [{
+        "gamePk": 99999, "game_date": "2026-07-31T04:45:00Z",
+        "home_name": "Padres", "away_name": "Giants",
+        "home_pitcher_id": 501, "away_pitcher_id": 502,
+    }]
+
+    def fake_get_pitcher_metrics(pid, fip_constant):
+        if pid == 501:
+            # A real rookie call-up: genuinely real data (has_stats=True), genuinely 0.00 ERA
+            # after a small real scoreless sample -- NOT the same as "no data found."
+            return E.PitcherMetrics(id=pid, name="Rookie Call-Up", era=0.0, fip=1.85, k9=11.0,
+                                    whip=0.80, hr9=0.0, oba=0.150, has_stats=True)
+        return E.PitcherMetrics(id=pid, name=f"Pitcher {pid}", era=3.50, fip=3.20, k9=9.0,
+                                whip=1.10, hr9=1.0, oba=0.240, has_stats=True)
+
+    monkeypatch.setattr(E, "get_schedule", lambda date_str: fake_games)
+    monkeypatch.setattr(E, "get_pitcher_metrics", fake_get_pitcher_metrics)
+
+    rows = E.build_pitching_slate("2026-07-31")
+    assert len(rows) == 2, "both pitchers (including the real 0.00 ERA one) must be included"
+    rookie_row = next((r for r in rows if r["_pid"] == 501), None)
+    assert rookie_row is not None, "a pitcher with a genuine 0.00 ERA must not be silently dropped"
+    assert rookie_row["ERA"] == 0.0
+    print("✓ build_pitching_slate correctly includes a pitcher with a genuine 0.00 ERA and real "
+         "data, no longer confusing it with 'no data found'")
+
+
+def test_build_pitching_slate_still_excludes_genuinely_no_data_pitchers(monkeypatch):
+    # Confirms the fix didn't lose the original, real protection -- a pitcher with genuinely NO
+    # stats anywhere (has_stats=False) must still be excluded, same as before.
+    fake_games = [{
+        "gamePk": 88888, "game_date": "2026-07-31T04:45:00Z",
+        "home_name": "Padres", "away_name": "Giants",
+        "home_pitcher_id": 601, "away_pitcher_id": 602,
+    }]
+
+    def fake_get_pitcher_metrics(pid, fip_constant):
+        if pid == 601:
+            return E.PitcherMetrics(id=pid, name="No Data Guy", has_stats=False)
+        return E.PitcherMetrics(id=pid, name=f"Pitcher {pid}", era=3.50, fip=3.20, k9=9.0,
+                                whip=1.10, hr9=1.0, oba=0.240, has_stats=True)
+
+    monkeypatch.setattr(E, "get_schedule", lambda date_str: fake_games)
+    monkeypatch.setattr(E, "get_pitcher_metrics", fake_get_pitcher_metrics)
+
+    rows = E.build_pitching_slate("2026-07-31")
+    assert len(rows) == 1   # only the pitcher WITH real data
+    assert rows[0]["_pid"] == 602
+    print("✓ build_pitching_slate still correctly excludes a pitcher with genuinely no data "
+         "anywhere, unchanged from before this fix")
+
+
 def test_build_pitching_slate_threads_gamepk_and_venue_id_through(monkeypatch):
     # Needed for Game Watch's own team-platoon signal — mlb_engine.build_game_lineups needs a
     # real gamePk and venue_id to fetch tonight's actual lineups for one specific game.
