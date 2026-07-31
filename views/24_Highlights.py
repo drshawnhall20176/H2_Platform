@@ -15,7 +15,7 @@ import highlights as H
 
 _active = sports.active()
 
-st.title("⭐ Highlights")
+st.title("✨ Highlights")
 st.caption("Save a named filter once, see who matches it every day — the same workflow as a "
           "PropFinder Highlight Profile, built on this platform's own real fields.")
 
