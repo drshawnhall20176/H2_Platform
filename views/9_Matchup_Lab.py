@@ -377,13 +377,19 @@ else:
     else:
         name_by_bid = {h.get("_pid"): h.get("Hitter", "?") for h in opp_hitters}
         board_df = pd.DataFrame([{
-            "Hitter": name_by_bid.get(r["batter_id"], "?"), "Pitches seen": r["pitches"],
-            "Exit Velo": r["exit_velo"], "SLG": r["slg"], "xwOBA": r["xwoba"], "Whiff%": r["whiff"],
+            "Hitter": name_by_bid.get(r["batter_id"], "?"), "PA": r.get("pa"),
+            "Pitches seen": r["pitches"], "HR": r.get("hr"),
+            "BA": r.get("ba"), "OBP": r.get("obp"), "SLG": r["slg"], "ISO": r.get("iso"),
+            "xwOBA": r["xwoba"], "BB%": r.get("bb_pct"), "K%": r.get("k_pct"),
+            "Whiff%": r["whiff"], "SwStr%": r.get("swstr_pct"), "Exit Velo": r["exit_velo"],
         } for r in board])
-        st.dataframe(board_df.style.format({"Exit Velo": "{:.1f}", "SLG": "{:.2f}", "xwOBA": "{:.2f}",
-                                            "Whiff%": "{:.0%}"}, na_rep="—")
-                     .theme_gradient(cmap="RdYlGn", subset=["Exit Velo", "SLG", "xwOBA"])
-                     .theme_gradient(cmap="RdYlGn_r", subset=["Whiff%"]),
+        st.dataframe(board_df.style.format({
+            "BA": "{:.3f}", "OBP": "{:.3f}", "SLG": "{:.2f}", "ISO": "{:.3f}", "xwOBA": "{:.2f}",
+            "BB%": "{:.0%}", "K%": "{:.0%}", "Whiff%": "{:.0%}", "SwStr%": "{:.0%}",
+            "Exit Velo": "{:.1f}",
+        }, na_rep="—")
+                     .theme_gradient(cmap="RdYlGn", subset=["Exit Velo", "BA", "OBP", "SLG", "ISO", "xwOBA", "BB%"])
+                     .theme_gradient(cmap="RdYlGn_r", subset=["Whiff%", "K%", "SwStr%"]),
                      width="stretch", hide_index=True)
         st.caption(f"Ranked by real exit velocity against {pitch_label.split(' (')[0]} "
                   "specifically, highest first — a real, direct answer to 'who on this lineup "

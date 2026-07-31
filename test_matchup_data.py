@@ -350,6 +350,119 @@ def test_hitter_pitch_type_splits():
     print("✓ hitter pitch-type splits: per-pitch whiff/SLG, sample floor, names")
 
 
+def test_hitter_pitch_type_splits_outcome_stats_ff():
+    # Regression guard for the actual fix requested: real PA/BA/OBP/ISO/BB%/K%/SwStr%/HR, closing
+    # a real, reported gap against a third-party tool this community was returning to for these
+    # exact columns. Hand-verified against the SAME real, already-established _mock_pitches
+    # fixture other tests already use, not a new invented dataset.
+    #
+    # FF group (40 pitches): 1 home_run event (i==0), 5 field_out events (i=1..5), 34 empty
+    # (no PA-ending event). AB = 1 HR + 5 field_out = 6. Hits = 1 (the HR). No walks/HBP/sac.
+    ht = M.build_hitter_pitch_type_splits(_mock_pitches())
+    ff = ht[(ht["batter"] == 200) & (ht["pitch_type"] == "FF")].iloc[0]
+    assert ff["pa"] == 6
+    assert abs(ff["ba"] - (1 / 6)) < 1e-6
+    assert abs(ff["obp"] - (1 / 6)) < 1e-6   # no walks/HBP here, so OBP == BA
+    assert abs(ff["iso"] - 0.5) < 1e-6       # SLG (4/6) - BA (1/6) = 0.5
+    assert ff["bb_pct"] == 0.0
+    assert ff["k_pct"] == 0.0                # no strikeout events in the FF group
+    assert abs(ff["swstr_pct"] - (5 / 40)) < 1e-6   # 5 whiffs / 40 TOTAL pitches, not swings
+    assert ff["hr"] == 1
+    print("✓ FF outcome stats (PA/BA/OBP/ISO/BB%/K%/SwStr%/HR) match hand-verified expected values")
+
+
+def test_hitter_pitch_type_splits_outcome_stats_sl():
+    # SL group (40 pitches): 18 strikeout events, 6 single events, 16 empty. AB = 18+6 = 24.
+    # Hits = 6 (the singles). PA = 24. No walks/HBP/sac.
+    ht = M.build_hitter_pitch_type_splits(_mock_pitches())
+    sl = ht[(ht["batter"] == 200) & (ht["pitch_type"] == "SL")].iloc[0]
+    assert sl["pa"] == 24
+    assert abs(sl["ba"] - 0.25) < 1e-6
+    assert abs(sl["obp"] - 0.25) < 1e-6
+    assert abs(sl["iso"] - 0.0) < 1e-6       # SLG (0.25) == BA (0.25) for all-singles contact
+    assert sl["bb_pct"] == 0.0
+    assert abs(sl["k_pct"] - 0.75) < 1e-6    # 18 strikeouts / 24 PA
+    assert abs(sl["swstr_pct"] - 0.45) < 1e-6   # 18 whiffs / 40 total pitches (genuinely
+    # different from the existing "whiff" field's 18/30-swings = 0.60 -- confirms SwStr% uses
+    # the real, correct denominator (all pitches), not a duplicate of the swing-based whiff rate.
+    assert sl["hr"] == 0
+    print("✓ SL outcome stats match hand-verified expected values, and SwStr% is genuinely "
+         "distinct from the existing swing-based whiff% (different real denominator)")
+
+
+def test_hitter_pitch_type_splits_ba_none_when_no_at_bats():
+    # A (batter, pitch) group with real pitches but zero real at-bats (every PA ended in a walk,
+    # say) must show ba/obp/iso as honest None, never a fabricated 0.0 that would misleadingly
+    # look like real, checked contact data.
+    rows = [{"batter": 300, "pitcher": 100, "pitch_type": "CU", "release_speed": 78,
+            "strikes": 0, "description": "ball", "events": "walk" if i % 4 == 3 else "",
+            "estimated_woba_using_speedangle": None} for i in range(30)]
+    ht = M.build_hitter_pitch_type_splits(pd.DataFrame(rows))
+    cu = ht[(ht["batter"] == 300) & (ht["pitch_type"] == "CU")].iloc[0]
+    assert cu["ba"] is None
+    assert cu["iso"] is None
+    print("✓ BA/ISO are honest None (not a fabricated 0.0) when there are real pitches but zero at-bats")
+
+
+# ----------------------------------------------------------------- load_hitter_types: new fields
+def test_load_hitter_types_reads_new_outcome_stats_from_a_real_csv():
+    import tempfile
+    import os
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "hitter_types.csv")
+        pd.DataFrame([{"batter": 700, "pitch_type": "FF", "pitch_name": "4-Seam FB",
+                      "family": "Fastball", "pitches": 40, "whiff": 0.25, "contact": 0.75,
+                      "slg": 0.667, "xwoba": 0.400, "exit_velo": 95.0, "zone_pct": 0.5,
+                      "pa": 6, "ba": 0.167, "obp": 0.167, "iso": 0.5, "bb_pct": 0.0,
+                      "k_pct": 0.0, "swstr_pct": 0.125, "hr": 1}]).to_csv(path, index=False)
+        loaded = M.load_hitter_types(path)
+        row = loaded[700][0]
+        assert row["pa"] == 6
+        assert abs(row["ba"] - 0.167) < 1e-6
+        assert abs(row["obp"] - 0.167) < 1e-6
+        assert abs(row["iso"] - 0.5) < 1e-6
+        assert row["bb_pct"] == 0.0
+        assert row["k_pct"] == 0.0
+        assert abs(row["swstr_pct"] - 0.125) < 1e-6
+        assert row["hr"] == 1
+    print("✓ load_hitter_types correctly reads every new outcome-level field from a real CSV")
+
+
+def test_load_hitter_types_older_csv_without_new_fields_gives_honest_none():
+    # A CSV written BEFORE this fix existed won't have the new columns at all -- must give an
+    # honest None/0, never crash, same graceful-migration posture every other field here has.
+    import tempfile
+    import os
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "old_hitter_types.csv")
+        pd.DataFrame([{"batter": 800, "pitch_type": "SL", "pitch_name": "Slider",
+                      "family": "Breaking", "pitches": 40, "whiff": 0.5, "contact": 0.5,
+                      "slg": 0.3, "xwoba": 0.3, "exit_velo": 90.0, "zone_pct": 0.4}]
+                    ).to_csv(path, index=False)
+        loaded = M.load_hitter_types(path)
+        row = loaded[800][0]
+        assert row["ba"] is None and row["obp"] is None and row["iso"] is None
+        assert row["bb_pct"] is None and row["k_pct"] is None
+        assert row["pa"] == 0 and row["hr"] == 0 and row["swstr_pct"] == 0.0
+    print("✓ load_hitter_types gracefully handles an older CSV predating the new fields, no crash")
+
+
+# ----------------------------------------------------------------- leaderboard: new fields thread through
+def test_build_lineup_vs_pitch_leaderboard_carries_new_stats_through():
+    hitter_types = {900: [{"pitch_type": "FF", "pitch_name": "4-Seam FB", "pitches": 40,
+                          "exit_velo": 95.0, "slg": 0.667, "xwoba": 0.4, "whiff": 0.25,
+                          "pa": 6, "ba": 0.167, "obp": 0.167, "iso": 0.5, "bb_pct": 0.0,
+                          "k_pct": 0.0, "swstr_pct": 0.125, "hr": 1}]}
+    board = M.build_lineup_vs_pitch_leaderboard([900], "FF", hitter_types)
+    assert len(board) == 1
+    row = board[0]
+    assert row["pa"] == 6 and row["hr"] == 1
+    assert abs(row["ba"] - 0.167) < 1e-6
+    assert abs(row["swstr_pct"] - 0.125) < 1e-6
+    print("✓ build_lineup_vs_pitch_leaderboard correctly carries every new outcome stat through "
+         "to its own output, not just the aggregation layer")
+
+
 # ----------------------------------------------------------------- load() -- no prior direct coverage
 def test_load_reads_zone_contact_exit_velo_from_a_real_csv():
     import tempfile
