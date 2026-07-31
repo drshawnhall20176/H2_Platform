@@ -139,6 +139,34 @@ def run():
         "24": ("Highlights",    "✨", "highlights"),
     }
 
+    # SIDEBAR SECTIONS, added directly on request: st.navigation natively supports a
+    # dict-of-lists (each key becomes a real, collapsible section header in the sidebar) instead
+    # of one flat list -- confirmed directly against Streamlit's own docs before using it, not
+    # assumed. Boundaries here are NOT a new reorganization -- they're the exact same grouping
+    # already described in the numbering comment above from a real, past platform audit; that
+    # decision existed in a code comment but was never actually visible in the sidebar itself.
+    # This makes it visible, nothing more. "0" (Command Center) and Home (added separately,
+    # below) share the landing section on purpose -- both are genuine front doors, not a
+    # recommendation or a research tool. 23/24 (UFC Fight Card, Highlights) postdate the
+    # original audit's 0-22 range; both are fundamentally "what should I bet on today" tools,
+    # the same real question Best Bets/Graded Picks/Suggested Parlays already answer, so they
+    # join Recommendations rather than inventing a new section for two pages.
+    SECTION_OF = {}
+    for k in ("0",):
+        SECTION_OF[k] = "🏠 Home"
+    for k in ("1", "2", "3", "4", "23", "24"):
+        SECTION_OF[k] = "🎯 Recommendations"
+    for k in ("5", "6"):
+        SECTION_OF[k] = "📡 Live Signals"
+    for k in ("7", "8", "9", "10", "11", "12", "13", "14"):
+        SECTION_OF[k] = "🔬 Deep Research"
+    for k in ("15",):
+        SECTION_OF[k] = "📈 Trading Desk"
+    for k in ("16", "17", "18", "19"):
+        SECTION_OF[k] = "🔍 Self-Grading & Proof"
+    for k in ("20", "21", "22"):
+        SECTION_OF[k] = "📣 Ops & Content"
+
     def lead(name: str) -> str:
         """Leading page number as a string ('10_Matchup_Lab.py' -> '10'), else the stem."""
         m = re.match(r"(\d+)", name)
@@ -149,8 +177,11 @@ def run():
                         key=lambda p: (int(lead(p.name)) if lead(p.name).isdigit() else 999, p.name))
 
     # Home is the landing page but NOT a forced default fallback (default= is intentionally
-    # omitted, so a rerun on any other page stays on that page).
-    pages = [st.Page(str(here / "Home.py"), title="Home", icon="⚾", url_path="home")]
+    # omitted, so a rerun on any other page stays on that page). Placed in its own section
+    # alongside Command Center (see SECTION_OF above) rather than left unsectioned -- st.
+    # navigation's dict mode sections everything or nothing, there's no supported way to mix a
+    # loose top-level page with sectioned ones (confirmed directly against Streamlit's own docs).
+    sections: dict = {"🏠 Home": [st.Page(str(here / "Home.py"), title="Home", icon="⚾", url_path="home")]}
     for f in view_files:
         key = lead(f.name)
         required_sports = sport_only_leads.get(key)
@@ -159,9 +190,12 @@ def run():
         title, icon, slug = meta.get(key, (f.stem, "📄", f"page_{key}"))
         if title in owner_only_titles and audience != "owner":
             continue  # Bet Log / Media Room / Podcast Studio / Edge Board / Matchup Lab / Track Record: owner deployment only
-        pages.append(st.Page(str(f), title=title, icon=icon, url_path=slug))
+        section = SECTION_OF.get(key, "🔬 Deep Research")   # a real, sensible default for any
+        # future page whose number isn't added to SECTION_OF yet -- never silently disappears,
+        # never crashes, just lands somewhere reasonable until explicitly categorized.
+        sections.setdefault(section, []).append(st.Page(str(f), title=title, icon=icon, url_path=slug))
 
-    st.navigation(pages).run()
+    st.navigation(sections).run()
 
 
 if __name__ == "__main__":

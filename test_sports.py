@@ -133,6 +133,64 @@ def test_every_view_file_has_a_matching_meta_entry():
          f"({len(known_keys)} registered)")
 
 
+def test_every_meta_entry_has_a_real_sidebar_section():
+    # Regression guard for the new sidebar sectioning: every page number registered in meta
+    # must land in a real SECTION_OF entry (or the "Deep Research" catch-all), so a future page
+    # never silently vanishes from the sidebar or lands somewhere confusing without anyone
+    # noticing. Confirms the mapping is complete, not just present.
+    src = (_HERE / "streamlit_app.py").read_text()
+    meta_match = re.search(r"meta = \{(.*?)\n    \}", src, re.DOTALL)
+    assert meta_match, "streamlit_app.py must define meta"
+    meta_keys = set(re.findall(r'"(\d+)":\s*\(', meta_match.group(1)))
+
+    section_match = re.search(r"SECTION_OF = \{\}(.*?)\n\n    def lead", src, re.DOTALL)
+    assert section_match, "streamlit_app.py must define SECTION_OF"
+    section_src = section_match.group(1)
+    covered = set()
+    for keys_str in re.findall(r'for k in \(([^)]*)\):', section_src):
+        covered.update(k.strip().strip('"') for k in keys_str.split(","))
+    # "0" is handled separately (Home's own section) -- every OTHER meta key must be covered,
+    # since the code's own fallback (SECTION_OF.get(key, "🔬 Deep Research")) means an omission
+    # wouldn't crash, just land silently in a section that might not be the intended one.
+    uncovered = meta_keys - covered
+    assert not uncovered, f"these page numbers have no explicit sidebar section: {uncovered}"
+    print(f"✓ every meta-registered page number has an explicit sidebar section "
+         f"({len(covered)} covered)")
+
+
+def test_sidebar_sections_match_the_documented_grouping():
+    # Confirms the actual grouping matches what's documented -- the exact same boundaries
+    # already described in the numbering comment from the original platform audit, now made
+    # visible in the sidebar rather than just living in a comment.
+    src = (_HERE / "streamlit_app.py").read_text()
+    section_match = re.search(r"SECTION_OF = \{\}(.*?)\n\n    def lead", src, re.DOTALL)
+    assert section_match, "streamlit_app.py must define SECTION_OF"
+    section_src = section_match.group(1)
+    pairs = re.findall(r'for k in \(([^)]*)\):\s*\n\s*SECTION_OF\[k\] = "([^"]*)"', section_src)
+    actual = {}
+    for keys_str, section in pairs:
+        for k in keys_str.split(","):
+            k = k.strip().strip('"')
+            if k:   # trailing commas in single-element tuples like ("15",) produce an empty
+                    # split segment -- not a real key, just filter it out
+                actual[k] = section
+    expected = {
+        "0": "🏠 Home",
+        "1": "🎯 Recommendations", "2": "🎯 Recommendations", "3": "🎯 Recommendations",
+        "4": "🎯 Recommendations", "23": "🎯 Recommendations", "24": "🎯 Recommendations",
+        "5": "📡 Live Signals", "6": "📡 Live Signals",
+        "7": "🔬 Deep Research", "8": "🔬 Deep Research", "9": "🔬 Deep Research",
+        "10": "🔬 Deep Research", "11": "🔬 Deep Research", "12": "🔬 Deep Research",
+        "13": "🔬 Deep Research", "14": "🔬 Deep Research",
+        "15": "📈 Trading Desk",
+        "16": "🔍 Self-Grading & Proof", "17": "🔍 Self-Grading & Proof",
+        "18": "🔍 Self-Grading & Proof", "19": "🔍 Self-Grading & Proof",
+        "20": "📣 Ops & Content", "21": "📣 Ops & Content", "22": "📣 Ops & Content",
+    }
+    assert actual == expected, f"section grouping drifted from expected: {actual}"
+    print("✓ sidebar sections match the documented grouping from the original platform audit")
+
+
 def test_public_audience_defaults_safe():
     # Missing/unset AUDIENCE secret must default to "owner" (fail toward showing the owner
     # everything on unconfigured/local runs), never silently default to "public".
