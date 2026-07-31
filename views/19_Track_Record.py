@@ -171,7 +171,7 @@ if len(series) >= 2:
     fig.update_layout(template="plotly_white", height=360, margin=dict(l=10, r=10, t=10, b=10),
                       xaxis_title="Bets tracked", yaxis_title="Avg CLV (%)",
                       legend=dict(orientation="h", yanchor="bottom", y=1.0, x=0))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 else:
     st.caption("The CLV curve appears once a few bets with closing lines are in.")
 
@@ -193,7 +193,7 @@ if priced:
     figm.add_vline(x=0, line=dict(color=PALETTE["muted"], width=1))
     figm.update_layout(template="plotly_white", height=max(280, 46 * len(labels)),
                        margin=dict(l=10, r=60, t=10, b=10), xaxis_title="Avg CLV (%)")
-    st.plotly_chart(figm, use_container_width=True)
+    st.plotly_chart(figm, width="stretch")
 
     small = [m for m in priced_sorted if m["clv_n"] < 5]
     if small:
@@ -207,7 +207,7 @@ with st.expander("Full per-market breakdown"):
              "Hit rate": (f"{m['hit_rate']*100:.0f}%" if m["hit_rate"] is not None else "—"),
              "Avg CLV": (f"{m['avg_clv']:+.1f}%" if m["avg_clv"] is not None else "—"),
              "CLV sample": m["clv_n"]} for m in mkt]
-    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
 # ------------------------------------------------------------------ calibration
 st.divider()
@@ -228,7 +228,7 @@ if cal and sum(c["n"] for c in cal) >= 8:
                        xaxis=dict(title="We predicted", range=[0, 1], tickformat=".0%"),
                        yaxis=dict(title="It actually happened", range=[0, 1], tickformat=".0%"),
                        showlegend=False)
-    st.plotly_chart(figc, use_container_width=True)
+    st.plotly_chart(figc, width="stretch")
     st.caption("Bubble size = number of bets in that probability range. This chart needs volume to "
                "mean much — it sharpens as the sample grows.")
 else:
@@ -254,7 +254,7 @@ if tracked_settled >= 4:
         textinfo="label+percent", sort=False))
     figh.update_layout(template="plotly_white", height=320, margin=dict(l=10, r=10, t=10, b=10),
                        showlegend=False)
-    st.plotly_chart(figh, use_container_width=True)
+    st.plotly_chart(figh, width="stretch")
     st.caption(f"{tracked_summary['wins']}–{tracked_summary['losses']} across {tracked_settled} settled, "
               f"tracked predictions.")
 else:
@@ -281,7 +281,7 @@ if settled:
             "Model %": (f"{b['model_prob']*100:.0f}%" if b.get("model_prob") is not None else "—"),
             "CLV": (f"{clv:+.1f}%" if clv is not None else "—"),
         })
-    st.dataframe(pd.DataFrame(rec), hide_index=True, use_container_width=True)
+    st.dataframe(pd.DataFrame(rec), hide_index=True, width="stretch")
 else:
     st.caption("Settled selections show up here as results come in.")
 

@@ -253,22 +253,22 @@ else:
         st.markdown("**🎯 Top HR probability** (matchup-aware)")
         if "HR%" in df.columns:
             top_hr = df.nlargest(8, "HR%")[["Hitter", "Team", "Opp Pitcher", "HR%"]]
-            st.dataframe(top_hr.style.format({"HR%": "{:.1%}"}), hide_index=True, use_container_width=True)
+            st.dataframe(top_hr.style.format({"HR%": "{:.1%}"}), hide_index=True, width="stretch")
         else:
             st.dataframe(df.nlargest(8, "PowerIndex")[["Hitter", "Team", "Opp Pitcher", "PowerIndex"]],
-                         hide_index=True, use_container_width=True)
+                         hide_index=True, width="stretch")
     with lc2:
         st.markdown("**Best total-bases plays**")
         if "TB1.5%" in df.columns:
             top_tb = df.nlargest(8, "TB1.5%")[["Hitter", "Team", "Opp Pitcher", "TB1.5%"]]
-            st.dataframe(top_tb.style.format({"TB1.5%": "{:.1%}"}), hide_index=True, use_container_width=True)
+            st.dataframe(top_tb.style.format({"TB1.5%": "{:.1%}"}), hide_index=True, width="stretch")
     with lc3:
         st.markdown("**Platoon-advantage bats**")
         sort_key = "HR%" if "HR%" in df.columns else "PowerIndex"
         adv = df[df["Advantage"] == "Advantage"].nlargest(8, sort_key)
         fmtcol = {sort_key: "{:.1%}"} if sort_key == "HR%" else {}
         st.dataframe(adv[["Hitter", "Team", "Hand", "Opp Hand", sort_key]].style.format(fmtcol),
-                     hide_index=True, use_container_width=True)
+                     hide_index=True, width="stretch")
 
 # --- Statcast: due-to-homer regression candidates --------------------------
 if not df.empty and "Due" in df.columns:
@@ -279,7 +279,7 @@ if not df.empty and "Due" in df.columns:
     st.dataframe(
         due.style.format({"Barrel%": "{:.1%}", "xHR/PA": "{:.1%}", "HR%": "{:.1%}", "Due": "{:+.1%}"})
         .theme_gradient(cmap="RdYlGn", subset=["Due"]),
-        hide_index=True, use_container_width=True)
+        hide_index=True, width="stretch")
  
 # --- Statcast: overall hitter regression (wOBA vs xwOBA) --------------------
 # The honest hitter counterpart to Pitching Lab's ERA-vs-FIP table — same underlying idea (a
@@ -299,7 +299,7 @@ if sc:
         st.dataframe(
             rdf.style.format({"wOBA": "{:.3f}", "xwOBA": "{:.3f}", "Delta": "{:+.3f}"})
             .theme_gradient(cmap="RdYlGn_r", subset=["Delta"]),   # reversed: negative delta = green (good)
-            hide_index=True, use_container_width=True)
+            hide_index=True, width="stretch")
         st.caption(f"Qualified hitters only (≥{SC.MIN_PA_QUALIFIED} PA) — small samples produce "
                   "noisy wOBA/xwOBA on both sides, not a real signal worth surfacing.")
 
@@ -498,7 +498,7 @@ for m in meta_sorted:
                         st.dataframe(
                             pd.DataFrame(flagged)[["name", "consecutive_games_started", "tag"]]
                             .rename(columns={"name": "Hitter", "consecutive_games_started": "Streak", "tag": "Tag"}),
-                            hide_index=True, use_container_width=True)
+                            hide_index=True, width="stretch")
             st.caption("Counts backward through each TEAM's own most recent games, not "
                       "consecutive calendar days — a team's own off-day is real rest regardless "
                       "of how many calendar days it spans.")
@@ -544,7 +544,7 @@ for m in meta_sorted:
                           "bullpen, not the confirmed starter.")
             else:
                 sub = game_df[game_df["Team"] == m["away_name"]].sort_values(sort_col, ascending=False)
-            st.dataframe(style_hitters(sub), use_container_width=True, hide_index=True,
+            st.dataframe(style_hitters(sub), width="stretch", hide_index=True,
                         column_config=_col_cfg)
         with t_home:
             if away_bullpen_on:
@@ -553,7 +553,7 @@ for m in meta_sorted:
                           "bullpen, not the confirmed starter.")
             else:
                 sub = game_df[game_df["Team"] == m["home_name"]].sort_values(sort_col, ascending=False)
-            st.dataframe(style_hitters(sub), use_container_width=True, hide_index=True,
+            st.dataframe(style_hitters(sub), width="stretch", hide_index=True,
                         column_config=_col_cfg)
  
 st.caption("HR% / Hit% / TB1.5% / SO Prob are matchup-aware model probabilities for TODAY's game: "

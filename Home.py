@@ -26,7 +26,7 @@ for i, s in enumerate(live):
             f"{s.icon} {s.label}",
             key=f"sport_btn_{s.key}",
             type="primary" if selected else "secondary",
-            use_container_width=True
+            width="stretch"
         ):
             st.session_state["sport"] = s.key
             st.rerun()
@@ -38,7 +38,7 @@ for i, s in enumerate(coming):
             f"{s.icon} {s.label}\n*(coming soon)*",
             key=f"sport_btn_coming_{s.key}",
             disabled=True,
-            use_container_width=True
+            width="stretch"
         )
 
 active = sports.REGISTRY.get(current)

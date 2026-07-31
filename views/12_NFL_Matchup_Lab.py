@@ -197,7 +197,7 @@ if team_injuries or opp_injuries:
             idf = pd.DataFrame(injuries)[["player", "position", "status", "return_date", "comment"]]
             idf = idf.rename(columns={"player": "Player", "position": "Pos", "status": "Status",
                                       "return_date": "Est. Return", "comment": "Comment"})
-            st.dataframe(idf, hide_index=True, use_container_width=True)
+            st.dataframe(idf, hide_index=True, width="stretch")
         st.caption("Sourced from nflverse's real weekly injury reports — informational only, not "
                   "folded into any signal on this page. \"Questionable\" isn't a hard out; "
                   "\"Est. Return\" is always blank — NFL's real injury data doesn't include an "
@@ -281,7 +281,7 @@ def _render_bar_chart(title: str, stat_fn, slot) -> None:
             fig.update_yaxes(dtick=1)   # TD counts are integers — don't let Plotly show 0.5 ticks
         fig.update_layout(template="plotly_white", height=220,
                           margin=dict(l=10, r=10, t=30, b=10), title=title, showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
 
 for (mkey, col, disp), slot in zip(active_markets, col_iter):
@@ -311,7 +311,7 @@ for (mkey, col, disp), slot in zip(active_markets, col_iter):
         fig.update_layout(template="plotly_white", height=220,
                           margin=dict(l=10, r=10, t=30, b=10), title=disp,
                           showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
 for (title, stat_fn), slot in zip(extra_bar_charts, col_iter):
     _render_bar_chart(title, stat_fn, slot)
@@ -339,7 +339,7 @@ if profile:
     st.markdown(f"**{row['Player']} — recent form, season form, and this matchup**")
     st.dataframe(
         pdf.style.format({"Recent Avg": "{:.1f}", "Season Avg": "{:.1f}", "H2H Avg": "{:.1f}"}, na_rep="—"),
-        hide_index=True, use_container_width=True,
+        hide_index=True, width="stretch",
     )
 
 if not h2h_log:
@@ -361,7 +361,7 @@ if profile:
         odf.style.format({"Opp Team Total (recent)": "{:.1f}", "Opp Team Total (season)": "{:.1f}",
                           "Defense Trend": "{:.2f}×"}, na_rep="—")
         .theme_gradient(cmap="RdYlGn", subset=["Defense Trend"]),
-        hide_index=True, use_container_width=True,
+        hide_index=True, width="stretch",
     )
     st.caption(
         f"\"Opp Team Total\" = {row['Opp']}'s **entire team combined**, not a per-player or "
@@ -403,7 +403,7 @@ with gc1:
                                 "Pass Yds": g.get("passing_yards", 0), "Rush Yds": g.get("rushing_yards", 0),
                                 "Rec": g.get("receptions", 0), "Rec Yds": g.get("receiving_yards", 0)}
                                for g in log])
-        st.dataframe(rec_df, hide_index=True, use_container_width=True, height=250)
+        st.dataframe(rec_df, hide_index=True, width="stretch", height=250)
     else:
         st.caption("No recent games on file.")
 
@@ -414,7 +414,7 @@ with gc2:
                                 "Pass Yds": g.get("passing_yards", 0), "Rush Yds": g.get("rushing_yards", 0),
                                 "Rec": g.get("receptions", 0), "Rec Yds": g.get("receiving_yards", 0)}
                                for g in h2h_log])
-        st.dataframe(h2h_df, hide_index=True, use_container_width=True, height=250)
+        st.dataframe(h2h_df, hide_index=True, width="stretch", height=250)
     else:
         st.caption("No meetings yet this season.")
 

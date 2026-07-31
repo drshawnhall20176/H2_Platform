@@ -65,7 +65,7 @@ def _pie(hits: int, misses: int, title: str):
         textinfo="label+percent", sort=False))
     fig.update_layout(template="plotly_white", title=dict(text=title, font=dict(size=14)),
                       height=260, margin=dict(l=10, r=10, t=40, b=10), showlegend=False)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def _pie_grid(entries, hit_key: str, miss_key: str, title_key: str):
@@ -192,7 +192,7 @@ if by_market:
             with st.expander(f"{m['label']} — by letter grade"):
                 st.dataframe(pd.DataFrame(breakdown).rename(
                     columns={"letter": "Grade", "tier": "Label", "n": "Plays", "hit_rate": "Hit rate"})
-                    .style.format({"Hit rate": "{:.0%}"}), hide_index=True, use_container_width=True)
+                    .style.format({"Hit rate": "{:.0%}"}), hide_index=True, width="stretch")
 else:
     st.caption("No C-or-better graded picks settled for this slate yet — try an earlier date, "
               "or results may not be posted for this slate yet.")
@@ -233,7 +233,7 @@ else:
         if overrated:
             st.dataframe(_cal_df(overrated).style.format(
                 {"Model avg": "{:.0%}", "Actual hit rate": "{:.0%}", "Gap": "{:+.0%}"}),
-                hide_index=True, use_container_width=True)
+                hide_index=True, width="stretch")
         else:
             st.caption("No player in this window is running hot on the model's expectations — "
                       "nobody has a positive gap yet.")
@@ -244,7 +244,7 @@ else:
         if underrated:
             st.dataframe(_cal_df(underrated).style.format(
                 {"Model avg": "{:.0%}", "Actual hit rate": "{:.0%}", "Gap": "{:+.0%}"}),
-                hide_index=True, use_container_width=True)
+                hide_index=True, width="stretch")
         else:
             st.caption("No player in this window is outperforming the model's expectations yet "
                       "— nobody has a negative gap.")

@@ -246,7 +246,7 @@ with left:
                                             "_display_line": "Line", "_baseline": "Baseline"})
                         .style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×"})
                         .theme_gradient(cmap="Greens", subset=["Model %"]),
-                        hide_index=True, use_container_width=True, height=330)
+                        hide_index=True, width="stretch", height=330)
                     st.caption("**Baseline** is the real reference rate Conviction (and therefore "
                               "Grade) is actually measured against for that exact line — "
                               "Model % ÷ Conviction. It's why Grade and Model % don't move "
@@ -297,7 +297,7 @@ with right:
         fig.add_hline(y=0, line_dash="dash", line_color="#64748b")
         fig.update_layout(height=240, margin=dict(l=10, r=10, t=24, b=10),
                           title="Average CLV over time (%)", template="plotly_white")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
         st.caption(f"Positive and climbing = beating the market. {len(clv_bets)} bets with closing lines.")
     else:
         st.info("**Tracking since inception.** CLV and calibration populate here as bets are logged "
@@ -314,7 +314,7 @@ with right:
         fig2.update_layout(height=240, margin=dict(l=10, r=10, t=24, b=10),
                            title="Calibration: predicted vs actual", template="plotly_white",
                            xaxis_range=[0, 1], yaxis_range=[0, 1])
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig2, width="stretch")
  
 # ---------- model-caught highlight (yesterday) ----------
 st.divider()
@@ -348,7 +348,7 @@ for _tb, _mkt in zip(_ctabs, _caught_markets):
             cdf = cdf[cols].rename(columns={"ModelProb": "Model %", "Value": _mkt})
             fmt = {"Model %": "{:.0%}", "Line": "{:g}", _mkt: "{:.1f}"}
             st.dataframe(cdf.style.format({k: v for k, v in fmt.items() if k in cdf.columns}, na_rep="—"),
-                        hide_index=True, use_container_width=True)
+                        hide_index=True, width="stretch")
         else:
             st.caption("Nothing cleared the line in the model's top plays for this market last night, "
                        "or results aren't final yet.")
@@ -388,7 +388,7 @@ for _tb, _mkt in zip(_stabs, _caught_markets):
             sdf = sdf[cols].rename(columns={"ModelProb": "Model %", "Value": _mkt})
             fmt = {"Model %": "{:.0%}", "Line": "{:g}", _mkt: "{:.1f}"}
             st.dataframe(sdf.style.format({k: v for k, v in fmt.items() if k in sdf.columns}, na_rep="—"),
-                        hide_index=True, use_container_width=True)
+                        hide_index=True, width="stretch")
         else:
             st.caption("No real surprises for this market last night — every real hit sat in the "
                       "model's own top-ranked plays, or results aren't final yet.")

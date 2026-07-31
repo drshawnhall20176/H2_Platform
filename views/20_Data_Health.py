@@ -103,7 +103,7 @@ else:
                         count = markets_seen.get(mk, 0)
                         status = "✅" if count > 0 else "❌ MISSING"
                         market_rows.append({"Market key": mk, "Offers": count, "Status": status})
-                    st.dataframe(pd.DataFrame(market_rows), hide_index=True, use_container_width=True)
+                    st.dataframe(pd.DataFrame(market_rows), hide_index=True, width="stretch")
 
                 with col2:
                     st.markdown("**US sportsbooks in the response:**")

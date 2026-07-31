@@ -240,7 +240,7 @@ else:
             todays_events = info.get("todays_events") or []
             with st.expander(f"🔍 Raw events returned by the odds provider today ({len(todays_events)})"):
                 if todays_events:
-                    st.dataframe(pd.DataFrame(todays_events), hide_index=True, use_container_width=True)
+                    st.dataframe(pd.DataFrame(todays_events), hide_index=True, width="stretch")
                 else:
                     st.caption("No events at all came back for today's date.")
                 st.caption("If a game you expect isn't in this list, it's not a matching or "
@@ -254,7 +254,7 @@ else:
                                  f"posted but we couldn't match to our own slate"):
                     st.dataframe(pd.DataFrame(unmatched_names).rename(
                         columns={"player": "Player (as the book spelled it)", "market": "Market"}),
-                        hide_index=True, use_container_width=True)
+                        hide_index=True, width="stretch")
                     st.caption("A real mismatch usually means the book's own spelling of this "
                               "name differs from what our roster data has (an accent, a suffix, "
                               "a nickname) — normalize_name already strips accents/punctuation/Jr."
@@ -368,7 +368,7 @@ else:
                     .theme_gradient(cmap="Blues", subset=["Stake $"])
                     .apply(_tier_style, subset=["Tier"])
                 )
-                st.dataframe(styler, use_container_width=True, hide_index=True, height=520)
+                st.dataframe(styler, width="stretch", hide_index=True, height=520)
                 st.caption("Ranked by EV% at the best price. **Shaded %** is the model prob after your "
                            "haircut; **Stake $** is fractional-Kelly on that shaded prob, capped per bet "
                            "AND per game. **Tier** reads the stake for you: **No bet** = edge shaded out to "
@@ -529,7 +529,7 @@ styler2 = (
              "Line": "{:.1f}", "Fair (dec)": "{:.2f}"})
     .apply(_zone_style, subset=["Room"])
 )
-st.dataframe(styler2, use_container_width=True, hide_index=True, height=420)
+st.dataframe(styler2, width="stretch", hide_index=True, height=420)
 st.caption("**Room** redirects the eye from raw certainty to actual opportunity: the darkest-probability "
            "rows are usually near-locks (no room), so the green here marks the **value zone** instead — "
            "where a model edge can exist *and* be bet. **Shaded %** previews a 5-point haircut. This is "
@@ -715,7 +715,7 @@ if _active.key == "NFL":
             st.markdown(f"**{pos}**")
             st.dataframe(
                 pos_df[["Player", "Team", "Opp", "Proj Pts", "Projected stat", "Opp DEF", "Game"]],
-                use_container_width=True,
+                width="stretch",
                 column_config={
                     "Proj Pts": st.column_config.NumberColumn(
                         "Proj Pts", format="%.1f",

@@ -70,7 +70,7 @@ with st.expander("➕ Log a bet", expanded=False):
             player_query = st.text_input("Search for a player", placeholder="e.g. Wade Meckler",
                                          key="player_search_query", label_visibility="collapsed")
         with sc2:
-            search_clicked = st.button("🔍 Search", use_container_width=True)
+            search_clicked = st.button("🔍 Search", width="stretch")
         if search_clicked and player_query.strip():
             st.session_state["player_search_results"] = E.search_players(player_query)
         results = st.session_state.get("player_search_results") or []
@@ -215,7 +215,7 @@ if open_bets:
                 st.markdown(f"**{len(proposed)} bet(s) ready to settle:**")
                 preview_df = pd.DataFrame(proposed)[["description", "old_result", "new_result"]]
                 preview_df.columns = ["Bet", "Current", "New result"]
-                st.dataframe(preview_df, hide_index=True, use_container_width=True)
+                st.dataframe(preview_df, hide_index=True, width="stretch")
                 if st.button(f"✅ Confirm and apply {len(proposed)} settlement(s)", type="primary"):
                     n = bet_settlement.apply_settlement_plan(proposed)
                     st.session_state.pop("settlement_plan", None)
@@ -229,12 +229,12 @@ if open_bets:
                 with st.expander(f"⏳ {len(still_pending)} still pending — game not Final yet"):
                     st.dataframe(pd.DataFrame(still_pending)[["description", "game", "status"]]
                                 .rename(columns={"description": "Bet", "game": "Game", "status": "Status"}),
-                                hide_index=True, use_container_width=True)
+                                hide_index=True, width="stretch")
             if unresolved:
                 with st.expander(f"❓ {len(unresolved)} couldn't be auto-settled — needs manual entry"):
                     st.dataframe(pd.DataFrame(unresolved)[["description", "reason"]]
                                 .rename(columns={"description": "Bet", "reason": "Why"}),
-                                hide_index=True, use_container_width=True)
+                                hide_index=True, width="stretch")
 
                     # Retroactive player-ID backfill — the other half of the same real gap the
                     # Log a bet form's own player search already fixes going forward. Only
@@ -256,7 +256,7 @@ if open_bets:
                                 key="backfill_search_query", label_visibility="collapsed")
                         with bc2:
                             backfill_clicked = st.button("🔍 Search", key="backfill_search_button",
-                                                         use_container_width=True)
+                                                         width="stretch")
                         if backfill_clicked and backfill_query.strip():
                             st.session_state["backfill_search_results"] = E.search_players(backfill_query)
                         backfill_results = st.session_state.get("backfill_search_results") or []
@@ -289,7 +289,7 @@ if open_bets:
     odf = pd.DataFrame(open_bets)[["id", "player", "market", "side", "line", "entry_odds",
                                    "model_prob", "stake", "close_odds", "result", "cashed_out_amount"]]
     edited = st.data_editor(
-        odf, hide_index=True, use_container_width=True, key="settle_editor",
+        odf, hide_index=True, width="stretch", key="settle_editor",
         disabled=["id", "player", "market", "side", "line", "entry_odds", "model_prob", "stake"],
         column_config={
             "close_odds": st.column_config.NumberColumn("Closing odds", help="The price at game time / close."),
@@ -342,7 +342,7 @@ if cal:
     _cc, _ = st.columns([2, 3])          # cap width to ~40% of the page
     with _cc:
         try:
-            st.pyplot(fig, use_container_width=False)
+            st.pyplot(fig, width="content")
         except TypeError:
             st.pyplot(fig)
     plt.close(fig)
@@ -390,7 +390,7 @@ else:
         st.dataframe(
             legdf[["player", "market", "side", "line", "entry_odds", "result", "as single"]]
             .style.format({"line": "{:.1f}", "entry_odds": "{:.0f}"}, na_rep="—"),
-            hide_index=True, use_container_width=True)
+            hide_index=True, width="stretch")
 
 # --- Cash-out vs. held --------------------------------------------------------
 st.divider()
@@ -430,7 +430,7 @@ else:
                          "final_result": "Real result"})
         .style.format({"stake": "${:.2f}", "Cashed out ($)": "${:.2f}", "Actual P&L": "${:+.2f}",
                        "P&L if held": "${:+.2f}", "Held − actual": "${:+.2f}"}),
-        hide_index=True, use_container_width=True)
+        hide_index=True, width="stretch")
 
  
 # --- Full ledger ------------------------------------------------------------
@@ -447,7 +447,7 @@ st.dataframe(
                        "line": "{:.1f}", "stake": "${:.2f}", "entry_odds": "{:.0f}",
                        "close_odds": "{:.0f}"}, na_rep="—")
     .theme_gradient(cmap="RdYlGn", subset=["CLV%"]),
-    use_container_width=True, hide_index=True)
+    width="stretch", hide_index=True)
  
 with st.expander("Why CLV is the metric that matters"):
     st.markdown(

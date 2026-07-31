@@ -193,7 +193,7 @@ if team_injuries or opp_injuries:
             idf = pd.DataFrame(injuries)[["player", "position", "status", "return_date", "comment"]]
             idf = idf.rename(columns={"player": "Player", "position": "Pos", "status": "Status",
                                       "return_date": "Est. Return", "comment": "Comment"})
-            st.dataframe(idf, hide_index=True, use_container_width=True)
+            st.dataframe(idf, hide_index=True, width="stretch")
         st.caption("Sourced from ESPN/Rotowire — informational only, not folded into any signal "
                    "on this page. \"Day-To-Day\"/\"Questionable\" isn't a hard out.")
 
@@ -266,7 +266,7 @@ for (mkey, col, disp), slot in zip(P.market_list(), (tc1, tc2, tc3, tc4)):
         fig.update_layout(template="plotly_white", height=220,
                           margin=dict(l=10, r=10, t=30, b=10), title=disp,
                           showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 st.caption("Dashed line is tonight's actual sportsbook number once fetched above; otherwise it's "
            "the model's own default line, clearly labeled as such, never presented as a live "
            "quote it isn't.")
@@ -290,7 +290,7 @@ pdf = pdf[["Market", "Recent Avg", "Season Avg", "H2H Avg", "H2H Games", "Notes"
 st.markdown(f"**{row['Player']} — recent form, season form, and this matchup**")
 st.dataframe(
     pdf.style.format({"Recent Avg": "{:.1f}", "Season Avg": "{:.1f}", "H2H Avg": "{:.1f}"}, na_rep="—"),
-    hide_index=True, use_container_width=True,
+    hide_index=True, width="stretch",
 )
 
 if not h2h_log:
@@ -311,7 +311,7 @@ st.dataframe(
     odf.style.format({"Opp Team Total (recent)": "{:.1f}", "Opp Team Total (season)": "{:.1f}",
                       "Defense Trend": "{:.2f}×"}, na_rep="—")
     .theme_gradient(cmap="RdYlGn", subset=["Defense Trend"]),
-    hide_index=True, use_container_width=True,
+    hide_index=True, width="stretch",
 )
 st.caption(
     f"\"Opp Team Total\" = {row['Opp']}'s **entire team combined**, not a per-player or "
@@ -354,7 +354,7 @@ with gc1:
                                 "PTS": g.get("pts", 0), "REB": g.get("reb", 0),
                                 "AST": g.get("ast", 0), "3PM": g.get("fg3m", 0),
                                 "MIN": g.get("min", 0)} for g in log])
-        st.dataframe(rec_df, hide_index=True, use_container_width=True, height=250)
+        st.dataframe(rec_df, hide_index=True, width="stretch", height=250)
     else:
         st.caption("No recent games on file.")
 
@@ -364,7 +364,7 @@ with gc2:
         h2h_df = pd.DataFrame([{"Date": g.get("date", "—")[:10], "PTS": g.get("pts", 0),
                                 "REB": g.get("reb", 0), "AST": g.get("ast", 0),
                                 "3PM": g.get("fg3m", 0), "MIN": g.get("min", 0)} for g in h2h_log])
-        st.dataframe(h2h_df, hide_index=True, use_container_width=True, height=250)
+        st.dataframe(h2h_df, hide_index=True, width="stretch", height=250)
     else:
         st.caption("No meetings yet this season.")
 

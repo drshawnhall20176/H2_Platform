@@ -133,6 +133,26 @@ def test_every_view_file_has_a_matching_meta_entry():
          f"({len(known_keys)} registered)")
 
 
+def test_no_deprecated_use_container_width_anywhere():
+    # Regression guard for a real fix: use_container_width was deprecated by Streamlit (removal
+    # already past its own stated date as of this platform's current date) and has been fully
+    # replaced everywhere it appeared -- 89 occurrences across 20 files, all mapped to the real
+    # migration (use_container_width=True -> width="stretch", use_container_width=False ->
+    # width="content"), verified directly against Streamlit's own source and release notes
+    # before making the change, not guessed at. This confirms it can't silently creep back in
+    # during future work -- a new page added later, or code pasted from an old example, could
+    # easily reintroduce the deprecated parameter without anyone noticing until it breaks.
+    py_files = [f for f in _HERE.glob("*.py") if not f.name.startswith("test_")]
+    py_files += list((_HERE / "views").glob("*.py"))
+    offenders = []
+    for f in py_files:
+        if "use_container_width" in f.read_text(encoding="utf-8"):
+            offenders.append(f.name)
+    assert not offenders, f"deprecated use_container_width found in: {offenders}"
+    print(f"✓ use_container_width is fully migrated to width=\"stretch\"/\"content\" everywhere "
+         f"({len(py_files)} files checked)")
+
+
 def test_every_meta_entry_has_a_real_sidebar_section():
     # Regression guard for the new sidebar sectioning: every page number registered in meta
     # must land in a real SECTION_OF entry (or the "Deep Research" catch-all), so a future page

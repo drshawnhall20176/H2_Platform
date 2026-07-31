@@ -246,7 +246,7 @@ if proj_rows:
                            "Proj K": "{:.1f}", "Proj BB": "{:.1f}", "Proj Outs": "{:.1f}",
                            "Proj TTO": "{:.2f}", "ERA": "{:.2f}", "FIP": "{:.2f}"})
         .theme_gradient(cmap="RdYlGn", subset=["Proj K", "K Over%"]),
-        use_container_width=True, hide_index=True, height=420)
+        width="stretch", hide_index=True, height=420)
     st.caption("**K line** is the real threshold each pitcher's own K Over% is actually evaluated "
               "against — a real sportsbook line when one's available, this platform's own "
               "default otherwise (see the Edge Board / Best Bets tables for a per-pitcher "
@@ -283,7 +283,7 @@ styled = (
     .theme_gradient(cmap="RdYlGn", subset=["Delta", "K/9"])
     .theme_gradient(cmap="RdYlGn_r", subset=["ERA", "FIP", "WHIP", "HR/9"])
 )
-st.dataframe(styled, use_container_width=True, hide_index=True)
+st.dataframe(styled, width="stretch", hide_index=True)
 
 # === Bullpen fatigue =========================================================
 st.divider()
@@ -329,7 +329,7 @@ if game_options:
                 bdf.style.format({"ERA": "{:.2f}", "FIP": "{:.2f}", "K/9": "{:.1f}"}, na_rep="—")
                 .theme_gradient(cmap="RdYlGn", subset=["K/9"])
                 .theme_gradient(cmap="RdYlGn_r", subset=["ERA", "FIP"]),
-                hide_index=True, use_container_width=True)
+                hide_index=True, width="stretch")
     st.caption("Every pitcher who recorded an out in either team's last 5 games, not just "
               "confirmed relievers — cross-reference against the probable starter above to "
               "read the rest as bullpen arms. \"Outs (window)\" is total workload across the "

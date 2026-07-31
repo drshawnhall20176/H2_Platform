@@ -116,7 +116,7 @@ with st.expander("🏥 Team injury report (tonight's slate)"):
         idf = pd.DataFrame(team_injuries)[["player", "position", "status", "return_date", "comment"]]
         idf = idf.rename(columns={"player": "Player", "position": "Pos", "status": "Status",
                                   "return_date": "Est. Return", "comment": "Comment"})
-        st.dataframe(idf, hide_index=True, use_container_width=True)
+        st.dataframe(idf, hide_index=True, width="stretch")
     if not any_reported:
         st.caption("No injuries currently reported for any team on tonight's slate.")
     st.caption("Sourced from ESPN/Rotowire — informational only, not folded into any score on "
@@ -216,7 +216,7 @@ st.dataframe(
                      "Opp Allows /100 Poss": "{:.1f}", "Slate Avg /100 Poss": "{:.1f}",
                      "Matchup Factor": "{:.2f}×", "Matchup Score": "{:.1f}"}, na_rep="—")
     .theme_gradient(cmap="RdYlGn", subset=["Matchup Factor"]),
-    hide_index=True, use_container_width=True, height=520,
+    hide_index=True, width="stretch", height=520,
 )
 st.caption("\"Opp Team Total\" = that opponent's entire team combined for that stat, raw per-game "
            "(not a per-player or per-position figure). \"Opp Pace\" = their estimated possessions "

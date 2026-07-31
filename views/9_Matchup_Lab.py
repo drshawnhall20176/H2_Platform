@@ -333,7 +333,7 @@ if venue_split or time_split:
 
         cdf = pd.DataFrame(rows_cmp, columns=["Stat", "Full season", f"{split_label} ({n_split} starts)", "Δ"])
         cdf = cdf.fillna("—")
-        st.dataframe(cdf, hide_index=True, use_container_width=True)
+        st.dataframe(cdf, hide_index=True, width="stretch")
         st.caption(
             f"**How to read this:** Δ 🟢 = the split is BETTER for this pitcher than his full-season line "
             f"(follow the model's conviction); 🔴 = WORSE than his season line (reason to fade). "
@@ -384,7 +384,7 @@ else:
                                             "Whiff%": "{:.0%}"}, na_rep="—")
                      .theme_gradient(cmap="RdYlGn", subset=["Exit Velo", "SLG", "xwOBA"])
                      .theme_gradient(cmap="RdYlGn_r", subset=["Whiff%"]),
-                     use_container_width=True, hide_index=True)
+                     width="stretch", hide_index=True)
         st.caption(f"Ranked by real exit velocity against {pitch_label.split(' (')[0]} "
                   "specifically, highest first — a real, direct answer to 'who on this lineup "
                   "matches up best against this exact pitch.' Batters without enough of a real "
@@ -424,7 +424,7 @@ if team_injuries or opp_injuries:
             idf = pd.DataFrame(injuries)[["player", "position", "status", "return_date", "comment"]]
             idf = idf.rename(columns={"player": "Player", "position": "Pos", "status": "Status",
                                       "return_date": "Est. Return", "comment": "Comment"})
-            st.dataframe(idf, hide_index=True, use_container_width=True)
+            st.dataframe(idf, hide_index=True, width="stretch")
         st.caption("Sourced from MLB Stats API's own roster status field — any player not on "
                   "Active status (10/15/60-day IL, restricted, bereavement, paternity, etc.), "
                   "using MLB's own description for that status. \"Est. Return\" and \"Comment\" "
@@ -482,7 +482,7 @@ with st.expander(f"📋 {pitcher['Pitcher']} vs. the batting order (season)"):
                 bo_df.style.format({**{c: "{:.0f}" for c in int_cols},
                                    "AVG": "{:.3f}", "OBP": "{:.3f}", "SLG": "{:.3f}", "OPS": "{:.3f}"})
                 .theme_gradient(cmap="RdYlGn", subset=["OPS"]),
-                hide_index=True, use_container_width=True)
+                hide_index=True, width="stretch")
             if not today_lineup:
                 st.caption("⚪ No lineup data found for this game yet — the \"Today\" column will "
                           "fill in once one's available.")
@@ -550,7 +550,7 @@ with st.expander(f"🧤 {pitcher['Team']}'s catcher framing"):
             st.dataframe(
                 pd.DataFrame(cf_rows).style.format({"Strike Rate": "{:.1%}", "Framing Runs": "{:+.1f}"})
                 .theme_gradient(cmap="RdYlGn", subset=["Framing Runs"]),
-                hide_index=True, use_container_width=True)
+                hide_index=True, width="stretch")
             st.caption("A team-level read, not tied to this specific start or one specific "
                       "catcher — Savant's own framing data is a SEASON-LONG aggregate per "
                       "catcher, not a per-game split, and catchers rotate the same way relievers "
@@ -620,7 +620,7 @@ styler = (grid.style
           .theme_gradient(cmap="RdYlGn", subset=["P Whiff%", "P PutAway%", "H Whiff% (fam)", "Score"])
           .theme_gradient(cmap="RdYlGn", subset=["H SLG (fam)", "H xwOBA (fam)"])
           .theme_gradient(cmap="RdYlGn_r", subset=["Contact%", "Exit Velo"]))
-st.dataframe(styler, use_container_width=True, hide_index=True)
+st.dataframe(styler, width="stretch", hide_index=True)
 st.caption("Green favors the pitcher on Whiff%/PutAway%/Score, and (reversed) on Contact%/Exit "
           "Velo — lower is good for the pitcher on both, same convention as ERA/FIP on Pitching "
           "Lab. SLG/xwOBA color the same direction as every other page on the platform (high = "
@@ -653,7 +653,7 @@ mix_fig = go.Figure(go.Bar(
 mix_fig.update_layout(template="plotly_white", height=max(220, 60 * len(mix_rows)),
                       margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Usage%",
                       xaxis_tickformat=".0%", yaxis=dict(autorange="reversed"), showlegend=False)
-st.plotly_chart(mix_fig, use_container_width=True)
+st.plotly_chart(mix_fig, width="stretch")
 
 if have_hitter:
     st.markdown("**Whiff rate: this pitch (pitcher) vs this family (hitter)**")
@@ -669,7 +669,7 @@ if have_hitter:
                          margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Whiff%",
                          xaxis_tickformat=".0%", yaxis=dict(autorange="reversed"),
                          barmode="group", legend=dict(orientation="h", y=-0.15))
-    st.plotly_chart(wf_fig, use_container_width=True)
+    st.plotly_chart(wf_fig, width="stretch")
     st.caption("Both bars long = the strongest case to attack with that pitch (misses bats for "
                "the pitcher AND against this hitter). Blue long / orange short = a pitch that "
                "misses bats generally but not particularly against this hitter — usage and "
@@ -695,7 +695,7 @@ with c1:
                                        "Whiff%": "{:.0%}", "PutAway%": "{:.0%}"}, na_rep="—")
                      .theme_gradient(cmap="RdYlGn", subset=["Whiff%", "PutAway%"])
                      .theme_gradient(cmap="RdYlGn_r", subset=["Contact%", "Exit Velo"]),
-                     use_container_width=True, hide_index=True)
+                     width="stretch", hide_index=True)
 
 with c2:
     st.subheader(f"{hitter['Hitter']} — by pitch family")
@@ -724,7 +724,7 @@ with c2:
                      # he does) -- the direction depends on what SLG/xwOBA/Contact% on this same
                      # row already show, not something zone% communicates on its own.
                      .theme_gradient(cmap="RdYlGn_r", subset=["Contact%", "Exit Velo"]),
-                     use_container_width=True, hide_index=True)
+                     width="stretch", hide_index=True)
     else:
         st.caption("No cached pitch-family splits for this hitter yet.")
 
@@ -749,7 +749,7 @@ if ht:
                  .theme_gradient(cmap="RdYlGn", subset=["Whiff%"])
                  .theme_gradient(cmap="RdYlGn", subset=["SLG", "xwOBA"])
                  .theme_gradient(cmap="RdYlGn_r", subset=["Contact%", "Exit Velo"]),
-                 use_container_width=True, hide_index=True)
+                 width="stretch", hide_index=True)
     st.caption("Green = the hitter whiffs on it, or makes weak/no contact (good for the pitcher) "
               "— Contact%/Exit Velo are reversed from Whiff% since low is the same "
               "pitcher-favorable direction. Zone% is left uncolored — a high rate against this "

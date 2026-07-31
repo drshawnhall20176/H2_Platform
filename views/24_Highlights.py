@@ -188,7 +188,7 @@ with st.container(border=True):
         if preview_parts:
             st.caption("Will match plays where " + " AND ".join(preview_parts) + ".")
 
-        submitted = st.form_submit_button("Save profile", use_container_width=True)
+        submitted = st.form_submit_button("Save profile", width="stretch")
         if submitted:
             if not name:
                 st.error("Give the profile a name first.")
@@ -340,7 +340,7 @@ else:
                         .map(lambda g: f"color:{GRADE_COLOR.get(g, '#6b7280')};font-weight:700;",
                              subset=["Grade"])
                         .theme_gradient(cmap="RdYlGn", subset=["Model %"]),
-                    hide_index=True, use_container_width=True,
+                    hide_index=True, width="stretch",
                     height=min(38 * (len(shown) + 1) + 3, 460))
                 if n > MAX_ROWS_SHOWN:
                     with st.expander(f"Show all {n} matches"):
@@ -350,7 +350,7 @@ else:
                                 .map(lambda g: f"color:{GRADE_COLOR.get(g, '#6b7280')};font-weight:700;",
                                      subset=["Grade"])
                                 .theme_gradient(cmap="RdYlGn", subset=["Model %"]),
-                            hide_index=True, use_container_width=True, height=460)
+                            hide_index=True, width="stretch", height=460)
 
                 # Per-player drill-down, added directly on request -- same "type to search"
                 # pattern Matchup Lab already uses for its own hitter/pitcher lookups, applied
@@ -377,7 +377,7 @@ else:
                             .map(lambda g: f"color:{GRADE_COLOR.get(g, '#6b7280')};font-weight:700;",
                                  subset=["Grade"])
                             .theme_gradient(cmap="RdYlGn", subset=["Model %"]),
-                        hide_index=True, use_container_width=True,
+                        hide_index=True, width="stretch",
                         height=min(38 * (len(pdf) + 1) + 3, 320))
 
             if st.button("🗑️ Delete profile", key=f"del_{r['id']}"):

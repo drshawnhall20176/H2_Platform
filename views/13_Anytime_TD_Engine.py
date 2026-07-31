@@ -91,7 +91,7 @@ ldf = ldf.rename(columns={"ModelProb": "Model %", "Fair": "Fair Odds", "TDGames"
 st.dataframe(
     ldf.style.format({"Model %": "{:.0%}"}, na_rep="—")
     .theme_gradient(cmap="RdYlGn", subset=["Model %"]),
-    hide_index=True, use_container_width=True,
+    hide_index=True, width="stretch",
 )
 st.caption("**Model %** is an empirical-Bayes-shrunk rate (each player's own recent TD-scored-or-"
           "not rate, pulled toward a neutral baseline by how many real games back it — a 2-game "
@@ -114,7 +114,7 @@ for tab, pos in zip(tabs, positions_present):
         st.dataframe(
             pdf.style.format({"Model %": "{:.0%}"}, na_rep="—")
             .theme_gradient(cmap="RdYlGn", subset=["Model %"]),
-            hide_index=True, use_container_width=True,
+            hide_index=True, width="stretch",
         )
 
 st.caption("v1 signal — no opponent adjustment (a defense that's allowed more TDs lately isn't "

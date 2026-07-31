@@ -162,7 +162,7 @@ def _render_market_review(rep, market, rows_by_pid):
         st.dataframe(
             cdf[cols].rename(columns={"ModelProb": "Model %", "Value": market}).style.format(
                 {"Model %": "{:.0%}", "Conviction": "{:.2f}×", "Line": "{:g}", market: "{:.1f}"}, na_rep="—"),
-            hide_index=True, use_container_width=True)
+            hide_index=True, width="stretch")
  
     if rep["missed"]:
         st.markdown("**Ranked low — could we have caught it?**")
@@ -178,7 +178,7 @@ def _render_market_review(rep, market, rows_by_pid):
         mdf = pd.DataFrame(mrows)
         st.dataframe(
             mdf.style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×", market: "{:.1f}"}, na_rep="—"),
-            hide_index=True, use_container_width=True)
+            hide_index=True, width="stretch")
  
     if rep["unprojected"]:
         st.caption(f"➕ {rep['unprojected']} more from players not in a projected lineup "
@@ -222,7 +222,7 @@ if summary["tiers"]:
     st.markdown("**Hit rate by conviction tier** — if the model ranks well, stronger leans hit more often")
     st.dataframe(pd.DataFrame(summary["tiers"]).rename(
         columns={"tier": "Conviction", "n": "Plays", "hit_rate": "Hit rate"})
-        .style.format({"Hit rate": "{:.0%}"}), hide_index=True, use_container_width=True)
+        .style.format({"Hit rate": "{:.0%}"}), hide_index=True, width="stretch")
     st.caption("No equivalent of this specific conviction-tier breakdown exists anywhere else on "
               "this platform — Model Dashboard's own letter-grade tables are organized by grade "
               "and market instead, not conviction tier.")
@@ -254,7 +254,7 @@ if cal:
     chart_col, _ = st.columns([2, 3])          # cap width to ~40% of the page
     with chart_col:
         try:
-            st.pyplot(fig, use_container_width=False)   # fixed small size, don't stretch
+            st.pyplot(fig, width="content")   # fixed small size, don't stretch
         except TypeError:
             st.pyplot(fig)                              # older Streamlit: column still caps it
     plt.close(fig)
@@ -292,14 +292,14 @@ def _render_graded(subset):
     # Natural width + wide text columns -> horizontal scroll for the two long reason columns.
     try:
         st.dataframe(
-            styler, use_container_width=False, hide_index=True, height=480,
+            styler, width="content", hide_index=True, height=480,
             column_config={
                 "Why it missed": st.column_config.TextColumn("Why it missed", width="large"),
                 "Why the model liked it": st.column_config.TextColumn("Why the model liked it", width="large"),
                 "Player": st.column_config.TextColumn("Player", width="medium"),
             })
     except (TypeError, AttributeError):
-        st.dataframe(styler, use_container_width=False, hide_index=True, height=480)
+        st.dataframe(styler, width="content", hide_index=True, height=480)
  
  
 _GRADED_TABS = [("All markets", None)] + [(f"{_MARKET_ICONS.get(m, '🔹')} {m}", m) for m in _active_markets]

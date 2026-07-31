@@ -230,7 +230,7 @@ for i, event in enumerate(events):
                         })
             if method_rows:
                 mdf = pd.DataFrame(method_rows)
-                st.dataframe(mdf, hide_index=True, use_container_width=True)
+                st.dataframe(mdf, hide_index=True, width="stretch")
 
         # ── Community Pick Helper ──────────────────────────────────────────
         # Phase 1: show what the odds say, let community add conviction

@@ -265,7 +265,7 @@ df = df.rename(columns={"ModelProb": "Model %", "_display_line": "Line",
                         "_display_price": "Fair", "Why": "Why the model likes it"})
 st.dataframe(df.style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×"}, na_rep="—")
              .theme_gradient(cmap="Greens", subset=["Model %"]),
-             use_container_width=True, hide_index=True, height=400)
+             width="stretch", hide_index=True, height=400)
 
 # Quick-log widget, added directly on request: during a real, narrow pick-making window, having
 # to separately re-enter a pick into Bet Log is real friction that gets skipped in favor of just
@@ -420,7 +420,7 @@ with st.expander("Diagnostic Inspector", expanded=True):
             log_df = pd.DataFrame([{"Date": _fmt_date(g.get("date")), "Opponent": g.get("opp") or "—",
                                     stat_key.upper(): g.get(stat_key, 0), "Minutes": g.get("min", 0)}
                                    for g in log])
-            st.dataframe(log_df, hide_index=True, use_container_width=True)
+            st.dataframe(log_df, hide_index=True, width="stretch")
             st.caption("Most recent game first. This is the exact data the bootstrap resampled from — "
                        "no park factor, weather, or opponent-strength adjustment yet (v1 model).")
 

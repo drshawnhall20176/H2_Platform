@@ -17,7 +17,7 @@ USE (drop-in replacement for `.background_gradient(cmap=..., subset=...)`):
     styler = df.style.format({...}, na_rep="—")
     styler = gradient(styler, "Greens", ["Whiff%", "Score"])   # good = green
     styler = gradient(styler, "Reds",   ["SLG", "xwOBA"])      # damage = red
-    st.dataframe(styler, use_container_width=True, hide_index=True)
+    st.dataframe(styler, width="stretch", hide_index=True)
 
 `gradient()` returns the styler so calls chain. It never raises on empty frames or all-NaN
 columns; it simply leaves those cells with readable neutral text.

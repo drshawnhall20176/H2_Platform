@@ -95,7 +95,7 @@ if matchup_proj:
                        "Rush Matchup Factor": "{:.2f}×", "Proj Rush Yds": "{:.1f}"}, na_rep="—")
         .theme_gradient(cmap="RdYlGn", subset=["Matchup Factor", "Proj Pass Yds",
                                                "Rush Matchup Factor", "Proj Rush Yds"]),
-        use_container_width=True, hide_index=True, height=420)
+        width="stretch", hide_index=True, height=420)
     st.caption("**Matchup Factor** / **Rush Matchup Factor** > 1.0× means this opponent has "
               "allowed MORE of that stat than league average this season (a softer defense, "
               "good for the QB); < 1.0× means tougher than average. 1.00× (neutral) shows when "
@@ -133,7 +133,7 @@ if efficiency:
                        "Recent Rushing TD Rate": "{:.2f}", "Season Rushing TD Rate": "{:.2f}"}, na_rep="—")
         .theme_gradient(cmap="RdYlGn", subset=["TD-INT Delta (recent vs season)"])
     )
-    st.dataframe(styled, use_container_width=True, hide_index=True, height=420)
+    st.dataframe(styled, width="stretch", hide_index=True, height=420)
 else:
     st.write("No QBs with enough data for a regression comparison yet.")
 
