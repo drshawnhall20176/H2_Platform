@@ -265,18 +265,21 @@ def test_team_logo_html_empty_for_no_url():
     print("✓ _team_logo_html renders nothing at all when no URL is known, not a placeholder")
 
 
-def test_schedule_game_row_pulls_content_left_not_space_between():
+def test_schedule_game_row_uses_grid_alignment_not_space_between():
     # Regression guard for the real, reported feedback this replaced: the original layout used
-    # justify-content:space-between, stretching team names and time/venue across the full row
-    # width. Confirms that's actually gone, not just the intent stated in a comment.
+    # justify-content:space-between (flex), stretching team names and time/venue across the full
+    # row width. Then upgraded again to a real CSS Grid so columns actually align down the page
+    # -- confirms both: no leftover flex space-between, and the row genuinely uses the shared
+    # grid column template, not just "some gap."
     import components as C
     g = {"home": "New York Yankees", "away": "Boston Red Sox", "dt": None, "time_known": False,
         "venue": "Yankee Stadium", "home_logo": None, "away_logo": None}
-    html = C._schedule_game_row(g, "#3b82f6")
+    html = C._schedule_game_row(g, "#3b82f6", C._GRID_COLS_WITH_ROSTER, True)
     assert "justify-content:space-between" not in html
-    assert "gap:12px" in html
-    print("✓ schedule game row content is pulled together with a defined gap, not spread "
-         "across the full row width")
+    assert "display:grid" in html
+    assert C._GRID_COLS_WITH_ROSTER in html
+    print("✓ schedule game row uses real CSS Grid with the shared column template, not "
+         "flex space-between")
 
 
 def test_schedule_game_row_includes_logos_when_present():
@@ -284,7 +287,7 @@ def test_schedule_game_row_includes_logos_when_present():
     g = {"home": "New York Yankees", "away": "Boston Red Sox", "dt": None, "time_known": False,
         "venue": None, "home_logo": "https://www.mlbstatic.com/team-logos/147.svg",
         "away_logo": "https://www.mlbstatic.com/team-logos/111.svg"}
-    html = C._schedule_game_row(g, "#3b82f6")
+    html = C._schedule_game_row(g, "#3b82f6", C._GRID_COLS_WITH_ROSTER, True)
     assert html.count("<img") == 2
     assert "147.svg" in html and "111.svg" in html
     print("✓ schedule game row includes both team logos when both URLs are known")
@@ -294,7 +297,7 @@ def test_schedule_game_row_omits_logos_when_absent():
     import components as C
     g = {"home": "Some Team", "away": "Other Team", "dt": None, "time_known": False,
         "venue": None, "home_logo": None, "away_logo": None}
-    html = C._schedule_game_row(g, "#3b82f6")
+    html = C._schedule_game_row(g, "#3b82f6", C._GRID_COLS_WITH_ROSTER, True)
     assert "<img" not in html
     print("✓ schedule game row has zero <img> tags when no logos are available, not broken ones")
 
@@ -368,7 +371,7 @@ def test_schedule_game_row_includes_status_and_lineup_bubbles():
     g = {"home": "New York Yankees", "away": "Boston Red Sox", "dt": None, "time_known": False,
         "venue": None, "home_logo": None, "away_logo": None, "status": "delayed",
         "home_lineup_confirmed": True, "away_lineup_confirmed": True}
-    html = C._schedule_game_row(g, "#3b82f6")
+    html = C._schedule_game_row(g, "#3b82f6", C._GRID_COLS_WITH_ROSTER, True)
     assert "Delayed" in html
     assert html.count("border-radius:50%") == 2
     print("✓ schedule game row includes both the status badge and lineup bubbles when present")
@@ -390,7 +393,7 @@ def test_schedule_game_row_has_no_embedded_newlines():
         "dt": None, "time_known": False, "venue": "Yankee Stadium",
         "home_logo": "https://example.com/a.png", "away_logo": "https://example.com/b.png",
         "status": "in-progress", "home_lineup_confirmed": True, "away_lineup_confirmed": False}
-    html = C._schedule_game_row(g, "#3b82f6")
+    html = C._schedule_game_row(g, "#3b82f6", C._GRID_COLS_WITH_ROSTER, True)
     assert "\n" not in html, (
         "schedule game row HTML contains an embedded newline -- this is exactly the shape of "
         "bug that made real content (time/venue) render as literal escaped text once multiple "
@@ -402,3 +405,67 @@ def test_schedule_game_row_has_no_embedded_newlines():
     assert "&lt;span" not in joined and "<span" in joined   # real HTML, not escaped-as-text
     print("✓ schedule game row (alone and joined with others) contains zero embedded newlines -- "
          "the exact condition that caused real content to render as literal text")
+
+
+# ----------------------------------------------------------------- header row + legend
+def test_schedule_header_includes_roster_column_when_requested():
+    import components as C
+    html = C._schedule_header_html(C._GRID_COLS_WITH_ROSTER, show_roster=True)
+    assert "Teams" in html and "Time" in html and "Roster Status" in html and "Location" in html
+    print("✓ header row includes the Roster Status column when show_roster is True")
+
+
+def test_schedule_header_omits_roster_column_when_not_applicable():
+    import components as C
+    html = C._schedule_header_html(C._GRID_COLS_NO_ROSTER, show_roster=False)
+    assert "Teams" in html and "Time" in html and "Location" in html
+    assert "Roster Status" not in html
+    print("✓ header row omits the Roster Status column entirely when the sport has no lineup data")
+
+
+def test_lineup_legend_explains_both_colors():
+    import components as C
+    html = C._lineup_legend_html()
+    assert "posted" in html.lower()
+    assert "not yet confirmed" in html.lower() or "projected" in html.lower()
+    assert C._TREND_COLOR["good"] in html and C._TREND_COLOR["bad"] in html
+    assert "\n" not in html
+    print("✓ lineup legend explains both the green (posted) and red (not confirmed) states")
+
+
+def test_todays_schedule_board_shows_legend_when_roster_data_present(monkeypatch, captured):
+    import components as C
+    import schedule_board as SB
+    from datetime import datetime
+    import pytz
+    ET = pytz.timezone("US/Eastern")
+    games = [{"home": "New York Yankees", "away": "Boston Red Sox",
+             "dt": ET.localize(datetime(2026, 8, 1, 19)), "time_known": True, "venue": None,
+             "home_logo": None, "away_logo": None, "status": "scheduled",
+             "home_lineup_confirmed": False, "away_lineup_confirmed": True}]
+    result = SB.group_games("MLB", games)
+    monkeypatch.setattr(C.st, "columns", lambda n: [MagicMock() for _ in range(n)])
+    monkeypatch.setattr(C.st, "container", lambda **kw: MagicMock())
+    C.todays_schedule_board(result, "⚾", "MLB")
+    assert any("Lineup officially posted" in call for call in captured)
+    print("✓ todays_schedule_board shows the legend when at least one game has real lineup data")
+
+
+def test_todays_schedule_board_omits_legend_when_no_roster_data(monkeypatch, captured):
+    import components as C
+    import schedule_board as SB
+    from datetime import datetime
+    import pytz
+    ET = pytz.timezone("US/Eastern")
+    games = [{"home": "Boston Celtics", "away": "Miami Heat",
+             "dt": ET.localize(datetime(2026, 8, 1, 19)), "time_known": True, "venue": None,
+             "home_logo": None, "away_logo": None, "status": "scheduled",
+             "home_lineup_confirmed": None, "away_lineup_confirmed": None}]
+    result = SB.group_games("NBA", games)
+    monkeypatch.setattr(C.st, "columns", lambda n: [MagicMock() for _ in range(n)])
+    monkeypatch.setattr(C.st, "container", lambda **kw: MagicMock())
+    C.todays_schedule_board(result, "🏀", "NBA")
+    assert not any("Lineup officially posted" in call for call in captured)
+    assert not any("Roster Status" in call for call in captured)
+    print("✓ todays_schedule_board omits the legend AND the Roster Status column entirely for "
+         "a sport with no lineup data (NBA)")

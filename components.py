@@ -262,7 +262,16 @@ def _status_badge_html(status: Optional[str]) -> str:
     color, label = style
     return (f'<span style="font-size:11px;font-weight:700;white-space:nowrap;'
            f'background:{color}22;color:{color};padding:3px 8px;border-radius:6px;'
-           f'border:1px solid {color}55;">{label}</span>')
+           f'border:1px solid {color}55;margin-left:6px;">{label}</span>')
+
+
+def _lineup_dot_html(confirmed: Optional[bool]) -> str:
+    """One red-or-green dot -- green when confirmed, red otherwise. Split out from
+    _lineup_bubble_html below so the legend (see _lineup_legend_html) can reuse the EXACT same
+    dot styling instead of a second, potentially-drifting copy."""
+    color = _TREND_COLOR["good"] if confirmed else _TREND_COLOR["bad"]
+    return (f'<span style="width:8px;height:8px;border-radius:50%;background:{color};'
+           f'display:inline-block;"></span>')
 
 
 def _lineup_bubble_html(g: dict) -> str:
@@ -274,71 +283,101 @@ def _lineup_bubble_html(g: dict) -> str:
     home_c, away_c = g.get("home_lineup_confirmed"), g.get("away_lineup_confirmed")
     if home_c is None and away_c is None:
         return ""
-    green, red = _TREND_COLOR["good"], _TREND_COLOR["bad"]
-
-    def _dot(confirmed: Optional[bool]) -> str:
-        color = green if confirmed else red
-        return (f'<span style="width:8px;height:8px;border-radius:50%;background:{color};'
-               f'display:inline-block;margin-left:3px;"></span>')
-
-    return (f'<span style="display:inline-flex;align-items:center;gap:2px;font-size:10.5px;'
-           f'color:#9aa4b2;font-weight:600;">H:{_dot(home_c)}'
-           f'<span style="margin-left:6px;">A:</span>{_dot(away_c)}</span>')
+    return (f'<span style="display:inline-flex;align-items:center;gap:4px;font-size:10.5px;'
+           f'color:#9aa4b2;font-weight:600;white-space:nowrap;">H: {_lineup_dot_html(home_c)}'
+           f'<span style="margin-left:8px;">A:</span> {_lineup_dot_html(away_c)}</span>')
 
 
-def _schedule_game_row(g: dict, color: str) -> str:
-    """One game's self-contained HTML row -- team logo + away @ home pulled together on the
-    left, a small colored time chip and venue immediately after (not stretched to the far edge
-    of the row) so the row's real content stays compact instead of wasting horizontal space --
-    directly reported feedback: the original space-between layout spread team names and time/
-    venue across the FULL container width, which read as wasted real estate especially once
-    conference boxes went side by side (see todays_schedule_board below) and got narrower. color
-    is the SAME accent color assigned to this game's conference (see todays_schedule_board) --
-    carries the conference's own color through to the row level via the same alpha-blended-
+def _lineup_legend_html() -> str:
+    """One-line legend explaining the H:/A: bubbles -- added directly on request, shown once per
+    Today's Schedule section (see todays_schedule_board), not per conference box, and only when
+    at least one game in the result actually carries real lineup data (no point explaining a
+    bubble that isn't on screen for this sport)."""
+    return (f'<div style="font-size:11.5px;color:#9aa4b2;margin:2px 0 10px 2px;">'
+           f'{_lineup_dot_html(True)}&nbsp;Lineup officially posted&nbsp;&nbsp;&nbsp;'
+           f'{_lineup_dot_html(False)}&nbsp;Not yet confirmed (showing projected roster)</div>')
+
+
+# Grid column widths shared by the header row, every division-label row, and every game row in a
+# conference box, so Teams/Time/Roster Status/Location genuinely align down the page instead of
+# each row sizing itself independently -- directly reported feedback that the previous flex-based
+# layout looked "ragged" once team-name lengths varied row to row. Roster Status is its own
+# narrower column ONLY for sports that actually have lineup data (see show_roster below) -- no
+# empty column for sports that never populate it.
+_GRID_COLS_WITH_ROSTER = "minmax(150px,1.7fr) 82px 96px minmax(90px,1fr)"
+_GRID_COLS_NO_ROSTER = "minmax(150px,1.7fr) 82px minmax(90px,1fr)"
+
+
+def _grid_row(columns: str, cells: List[str], extra_style: str = "") -> str:
+    """One grid row (header, division label, or game) using the SAME grid-template-columns as
+    every other row in this conference box -- each row is its own small grid container, but
+    because they all share an identical column template, the column boundaries line up visually
+    down the page without needing one unified mega-grid across division boundaries. Single-line,
+    deliberately -- see _schedule_game_row's own docstring for the real, confirmed reason
+    (multiple rows get joined together into one st.markdown() call; embedded newlines in that
+    joined string get misread by the markdown renderer as an indented code block)."""
+    cells_html = "".join(cells)
+    return (f'<div style="display:grid;grid-template-columns:{columns};align-items:center;'
+           f'gap:10px;{extra_style}">{cells_html}</div>')
+
+
+def _schedule_header_html(columns: str, show_roster: bool) -> str:
+    """Column header row (Teams / Time / [Roster Status] / Location) -- added directly on
+    request so the schedule genuinely reads as an aligned table, not just a list that happens to
+    have consistent-ish spacing."""
+    label_style = ('font-size:10.5px;font-weight:700;color:#6b7280;text-transform:uppercase;'
+                  'letter-spacing:0.5px;')
+    cells = [f'<span style="{label_style}">Teams</span>', f'<span style="{label_style}">Time</span>']
+    if show_roster:
+        cells.append(f'<span style="{label_style}">Roster Status</span>')
+    cells.append(f'<span style="{label_style}">Location</span>')
+    return _grid_row(columns, cells, extra_style="padding:0 10px 6px;border-bottom:1px solid #262b33;margin-bottom:4px;")
+
+
+def _schedule_game_row(g: dict, color: str, columns: str, show_roster: bool) -> str:
+    """One game's self-contained HTML row, laid out as grid cells matching the shared column
+    template (see _GRID_COLS_WITH_ROSTER/_GRID_COLS_NO_ROSTER and _schedule_header_html) so it
+    genuinely aligns under the header instead of each row sizing its own content independently.
+    color is the SAME accent color assigned to this game's conference (see todays_schedule_board)
+    -- carries the conference's own color through to the row level via the same alpha-blended-
     background technique kpi_row already uses, rather than introduce an unrelated new color
-    scheme.
-
-    Also carries a real game-status badge (Live/Delayed/Canceled/Final -- see _STATUS_STYLE) and,
-    for MLB specifically, H:/A: lineup-confirmation bubbles -- both added directly on request.
+    scheme. Also carries a real game-status badge (Live/Delayed/Canceled/Final -- see
+    _STATUS_STYLE), inline next to the time.
 
     BUILT AS A SINGLE-LINE STRING, DELIBERATELY -- a real, confirmed rendering bug, not a style
     choice: many of these rows get joined together (see todays_schedule_board's own rows =
     "".join(...)) into ONE st.markdown() call. A pretty-printed, multi-line/indented f-string
-    (this function's own original version) gets misread by the markdown renderer once several
-    are concatenated -- deeply-indented inner lines (the time chip and venue, in the confirmed
-    live report) get treated as an indented Markdown code block and leak as literal escaped text
-    instead of rendering as HTML, while shallow single-line content (team names) renders fine.
-    Every other HTML-building helper in this module that gets joined this way (_team_logo_html,
-    _status_badge_html, _lineup_bubble_html) was already single-line and unaffected -- this
-    function was the one real gap."""
+    gets misread by the markdown renderer once several are concatenated -- deeply-indented inner
+    lines get treated as an indented Markdown code block and leak as literal escaped text instead
+    of rendering as HTML."""
     if g.get("time_known") and g.get("dt") is not None:
         time_str = g["dt"].strftime("%-I:%M %p ET")
     else:
         time_str = "Time TBD"
-    venue_html = (f'<span style="font-size:11.5px;color:#9aa4b2;">{g["venue"]}</span>'
-                 if g.get("venue") else "")
-    status_html = _status_badge_html(g.get("status"))
-    lineup_html = _lineup_bubble_html(g)
     away_logo = _team_logo_html(g.get('away_logo'))
     home_logo = _team_logo_html(g.get('home_logo'))
     away_name = g.get('away', '?')
     home_name = g.get('home', '?')
-    return (
-        '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;'
-        'padding:8px 10px;border-radius:8px;margin-bottom:3px;background:rgba(255,255,255,0.025);">'
-        '<div style="font-size:14px;white-space:nowrap;">'
+    teams_cell = (
+        f'<div style="font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'
         f'{away_logo}<span style="font-weight:600;">{away_name}</span>'
         '<span style="color:#6b7280;margin:0 5px;">@</span>'
-        f'{home_logo}<span style="font-weight:600;">{home_name}</span>'
-        '</div>'
-        '<div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">'
-        f'{lineup_html}{status_html}'
-        f'<span style="font-size:11.5px;font-weight:700;white-space:nowrap;background:{color}1e;'
-        f'color:{color};padding:3px 9px;border-radius:6px;">{time_str}</span>'
-        f'{venue_html}'
-        '</div>'
-        '</div>'
+        f'{home_logo}<span style="font-weight:600;">{home_name}</span></div>'
     )
+    time_cell = (
+        f'<div><span style="font-size:11.5px;font-weight:700;white-space:nowrap;background:{color}1e;'
+        f'color:{color};padding:3px 9px;border-radius:6px;">{time_str}</span>'
+        f'{_status_badge_html(g.get("status"))}</div>'
+    )
+    cells = [teams_cell, time_cell]
+    if show_roster:
+        cells.append(f'<div>{_lineup_bubble_html(g)}</div>')
+    venue_cell = (f'<div style="font-size:11.5px;color:#9aa4b2;overflow:hidden;'
+                 f'text-overflow:ellipsis;white-space:nowrap;">{g.get("venue") or ""}</div>')
+    cells.append(venue_cell)
+    return _grid_row(columns, cells,
+                     extra_style="padding:8px 10px;border-radius:8px;margin-bottom:3px;"
+                                "background:rgba(255,255,255,0.025);")
 
 
 def todays_schedule_board(result: Optional[dict], icon: str, label: str) -> None:
@@ -356,6 +395,13 @@ def todays_schedule_board(result: Optional[dict], icon: str, label: str) -> None
     just to see today's whole slate). Up to 3 conferences per row -- exactly fills one row for
     every 2-conference sport here (MLB/NBA/NFL/WNBA), and wraps into multiple rows for NCAAF
     without going so narrow that a game row's team names + time chip stop fitting comfortably.
+
+    EVERY ROW (header, division label, game) IN A CONFERENCE BOX SHARES THE SAME GRID COLUMN
+    TEMPLATE -- added directly on request, so Teams/Time/Roster Status/Location genuinely align
+    down the page instead of each row sizing its own content independently (the previous flex-
+    based layout looked "ragged" once team-name lengths varied row to row). Roster Status is its
+    own column ONLY when at least one game in the whole result actually carries lineup data
+    (checked once, up front) -- no empty column for a sport that never populates it.
 
     Each conference gets one color, cycled from _KPI_PALETTE -- the SAME palette kpi_row already
     uses for decorative-but-distinguishing variety (not the red/green/yellow reserved platform-
@@ -375,26 +421,43 @@ def todays_schedule_board(result: Optional[dict], icon: str, label: str) -> None
         st.caption("No games scheduled today.")
         return
 
+    # Checked ONCE across the whole result, not per conference/game -- a sport either has real
+    # lineup data or it doesn't, so the Roster Status column (and its legend) should be all-or-
+    # nothing for this render, not flicker in and out box to box.
+    all_games = [g for divs in grouped.values() for gs in divs.values() for g in gs] + other
+    show_roster = any(g.get("home_lineup_confirmed") is not None
+                      or g.get("away_lineup_confirmed") is not None for g in all_games)
+    columns = _GRID_COLS_WITH_ROSTER if show_roster else _GRID_COLS_NO_ROSTER
+
+    if show_roster:
+        st.markdown(_lineup_legend_html(), unsafe_allow_html=True)
+
     def _render_conference(conf: str, color: str) -> None:
         with st.container(border=True):
             st.markdown(
                 f'<div style="display:inline-block;background:{color}22;border:1px solid '
                 f'{color}55;color:{color};padding:4px 12px;border-radius:8px;font-weight:700;'
-                f'font-size:13px;letter-spacing:0.3px;margin-bottom:8px;">{conf}</div>',
+                f'font-size:13px;letter-spacing:0.3px;margin-bottom:10px;">{conf}</div>',
                 unsafe_allow_html=True)
+            st.markdown(_schedule_header_html(columns, show_roster), unsafe_allow_html=True)
             divisions = grouped[conf]
             if has_divisions:
                 for div in sorted(k for k in divisions.keys() if k is not None):
                     st.markdown(
-                        f'<div style="font-size:11px;color:{color};opacity:0.9;font-weight:700;'
-                        f'text-transform:uppercase;letter-spacing:0.6px;margin:10px 0 4px;">'
-                        f'{div}</div>', unsafe_allow_html=True)
-                    rows = "".join(_schedule_game_row(g, color) for g in divisions[div])
+                        _grid_row(columns,
+                                 [f'<span style="grid-column:1/-1;font-size:11px;color:{color};'
+                                  f'opacity:0.9;font-weight:700;text-transform:uppercase;'
+                                  f'letter-spacing:0.6px;">{div}</span>'],
+                                 extra_style="margin:8px 0 4px;"),
+                        unsafe_allow_html=True)
+                    rows = "".join(_schedule_game_row(g, color, columns, show_roster)
+                                   for g in divisions[div])
                     st.markdown(rows, unsafe_allow_html=True)
             else:
                 # No division level for this sport (WNBA/NCAAF) -- every game for this
                 # conference lives under the single None key group_games always uses.
-                rows = "".join(_schedule_game_row(g, color) for g in divisions.get(None, []))
+                rows = "".join(_schedule_game_row(g, color, columns, show_roster)
+                               for g in divisions.get(None, []))
                 st.markdown(rows, unsafe_allow_html=True)
 
     confs = sorted(grouped.keys())
@@ -416,9 +479,10 @@ def todays_schedule_board(result: Optional[dict], icon: str, label: str) -> None
             st.markdown(
                 f'<div style="display:inline-block;background:{gray}22;border:1px solid '
                 f'{gray}55;color:{gray};padding:4px 12px;border-radius:8px;font-weight:700;'
-                f'font-size:13px;letter-spacing:0.3px;margin-bottom:6px;">Other</div>',
+                f'font-size:13px;letter-spacing:0.3px;margin-bottom:10px;">Other</div>',
                 unsafe_allow_html=True)
             st.caption("Home team not in this platform's own conference/division reference "
                       "table yet (a real gap, not a hidden game) -- still shown below.")
-            rows = "".join(_schedule_game_row(g, gray) for g in other)
+            st.markdown(_schedule_header_html(columns, show_roster), unsafe_allow_html=True)
+            rows = "".join(_schedule_game_row(g, gray, columns, show_roster) for g in other)
             st.markdown(rows, unsafe_allow_html=True)
