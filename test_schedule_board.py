@@ -120,6 +120,18 @@ def test_ncaaf_game_with_no_conference_on_row_falls_into_other():
     print("✓ An NCAAF game with no conference on its own row falls into 'other', not dropped")
 
 
+def test_espn_cdn_logo_builds_expected_url():
+    assert SB._espn_cdn_logo("nfl", "KC") == "https://a.espncdn.com/i/teamlogos/nfl/500/kc.png"
+    assert SB._espn_cdn_logo("nba", "BOS") == "https://a.espncdn.com/i/teamlogos/nba/500/bos.png"
+    print("✓ _espn_cdn_logo builds the confirmed ESPN CDN URL pattern, lowercased")
+
+
+def test_espn_cdn_logo_none_safe():
+    assert SB._espn_cdn_logo("nfl", None) is None
+    assert SB._espn_cdn_logo("nfl", "") is None
+    print("✓ _espn_cdn_logo returns None for a missing abbreviation, never crashes or guesses")
+
+
 def test_todays_schedule_returns_none_for_unsupported_sport():
     assert SB.todays_schedule("NCAAMB", "2026-08-01") is None
     assert SB.todays_schedule("UFC", "2026-08-01") is None

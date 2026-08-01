@@ -93,8 +93,8 @@ def _get_json_cached(url: str, params: Optional[Dict] = None) -> Optional[Dict]:
 # --------------------------------------------------------------------------- schedule
 def get_schedule(date_str: str) -> List[Dict[str, Any]]:
     """Games scheduled for date_str (YYYY-MM-DD). One dict per game with both team ids/names/
-    abbreviations — all pulled directly from the scoreboard response, no separate team lookup
-    needed."""
+    abbreviations/logos — all pulled directly from the scoreboard response, no separate team
+    lookup needed."""
     espn_date = date_str.replace("-", "")   # ESPN wants YYYYMMDD; we use YYYY-MM-DD everywhere else
     data = _get_json(f"{SITE_API}/scoreboard", params={"dates": espn_date})
     if not data:
@@ -120,9 +120,15 @@ def get_schedule(date_str: str) -> List[Dict[str, Any]]:
                 "home_id": int(home["team"]["id"]),
                 "home_name": home["team"].get("displayName", "Unknown"),
                 "home_abbr": home["team"].get("abbreviation"),
+                # ESPN's own scoreboard response already carries a real logo URL directly on
+                # each team object -- captured here rather than constructed from a guessed CDN
+                # path pattern, so a wrong guess can never happen. None (not a broken-link
+                # guess) when ESPN's response doesn't have one for some reason.
+                "home_logo": home["team"].get("logo"),
                 "away_id": int(away["team"]["id"]),
                 "away_name": away["team"].get("displayName", "Unknown"),
                 "away_abbr": away["team"].get("abbreviation"),
+                "away_logo": away["team"].get("logo"),
             })
         except (KeyError, TypeError, ValueError):
             logger.exception("NBA scoreboard event had an unexpected shape: %s", event.get("id"))

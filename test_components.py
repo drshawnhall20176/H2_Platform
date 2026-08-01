@@ -222,3 +222,80 @@ def test_page_header_is_lighter_weight_than_hero_banner(captured):
     assert "h2-hero" not in captured[0]
     print("✓ page_header does not carry hero_banner's gradient background -- confirmed "
          "genuinely lighter-weight, not a duplicate")
+
+
+# ----------------------------------------------------------------- Today's Schedule (logos + row layout)
+def test_team_logo_html_includes_onerror_fallback():
+    import components as C
+    html = C._team_logo_html("https://www.mlbstatic.com/team-logos/147.svg")
+    assert "<img" in html
+    assert "onerror" in html and "display" in html
+    print("✓ _team_logo_html includes an onerror fallback that hides a broken/wrong image, "
+         "never shows a broken-image icon")
+
+
+def test_team_logo_html_empty_for_no_url():
+    import components as C
+    assert C._team_logo_html(None) == ""
+    assert C._team_logo_html("") == ""
+    print("✓ _team_logo_html renders nothing at all when no URL is known, not a placeholder")
+
+
+def test_schedule_game_row_pulls_content_left_not_space_between():
+    # Regression guard for the real, reported feedback this replaced: the original layout used
+    # justify-content:space-between, stretching team names and time/venue across the full row
+    # width. Confirms that's actually gone, not just the intent stated in a comment.
+    import components as C
+    g = {"home": "New York Yankees", "away": "Boston Red Sox", "dt": None, "time_known": False,
+        "venue": "Yankee Stadium", "home_logo": None, "away_logo": None}
+    html = C._schedule_game_row(g, "#3b82f6")
+    assert "justify-content:space-between" not in html
+    assert "gap:12px" in html
+    print("✓ schedule game row content is pulled together with a defined gap, not spread "
+         "across the full row width")
+
+
+def test_schedule_game_row_includes_logos_when_present():
+    import components as C
+    g = {"home": "New York Yankees", "away": "Boston Red Sox", "dt": None, "time_known": False,
+        "venue": None, "home_logo": "https://www.mlbstatic.com/team-logos/147.svg",
+        "away_logo": "https://www.mlbstatic.com/team-logos/111.svg"}
+    html = C._schedule_game_row(g, "#3b82f6")
+    assert html.count("<img") == 2
+    assert "147.svg" in html and "111.svg" in html
+    print("✓ schedule game row includes both team logos when both URLs are known")
+
+
+def test_schedule_game_row_omits_logos_when_absent():
+    import components as C
+    g = {"home": "Some Team", "away": "Other Team", "dt": None, "time_known": False,
+        "venue": None, "home_logo": None, "away_logo": None}
+    html = C._schedule_game_row(g, "#3b82f6")
+    assert "<img" not in html
+    print("✓ schedule game row has zero <img> tags when no logos are available, not broken ones")
+
+
+def test_todays_schedule_board_lays_out_conferences_in_columns(monkeypatch, captured):
+    # Regression guard for the real, reported feedback: conference boxes must render side by
+    # side (st.columns), not stacked full-width containers.
+    import components as C
+    import schedule_board as SB
+    from datetime import datetime
+    import pytz
+    ET = pytz.timezone("US/Eastern")
+    games = [
+        {"home": "New York Yankees", "away": "Boston Red Sox",
+         "dt": ET.localize(datetime(2026, 8, 1, 19)), "time_known": True, "venue": None,
+         "home_logo": None, "away_logo": None},
+        {"home": "Los Angeles Dodgers", "away": "San Diego Padres",
+         "dt": ET.localize(datetime(2026, 8, 1, 22)), "time_known": True, "venue": None,
+         "home_logo": None, "away_logo": None},
+    ]
+    result = SB.group_games("MLB", games)
+    columns_calls = []
+    monkeypatch.setattr(C.st, "columns", lambda n: columns_calls.append(n) or
+                        [MagicMock() for _ in range(n)])
+    monkeypatch.setattr(C.st, "container", lambda **kw: MagicMock())
+    C.todays_schedule_board(result, "⚾", "MLB")
+    assert columns_calls, "todays_schedule_board must call st.columns to lay out conferences side by side"
+    print(f"✓ todays_schedule_board lays out conferences using st.columns (called with n={columns_calls})")

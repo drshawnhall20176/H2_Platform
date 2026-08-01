@@ -52,8 +52,17 @@ def _mlb_games(date_str: str) -> List[Dict[str, Any]]:
         dt = sports.game_dt(g.get("game_date"))
         if dt is None or dt.strftime("%Y-%m-%d") != date_str:
             continue
-        out.append({"home": g.get("home_name"), "away": g.get("away_name"),
-                    "dt": dt, "time_known": True, "venue": g.get("venue_name")})
+        # MLB's own official static logo CDN, keyed by the real numeric team ID the Stats API
+        # already returns on every schedule row (home_id/away_id) -- a real, confirmed, widely-
+        # used pattern (mlbstatic.com/team-logos/{id}.svg), not a guessed URL. None-safe: a
+        # missing id just means no logo, never a crash.
+        home_id, away_id = g.get("home_id"), g.get("away_id")
+        out.append({
+            "home": g.get("home_name"), "away": g.get("away_name"),
+            "home_logo": f"https://www.mlbstatic.com/team-logos/{home_id}.svg" if home_id else None,
+            "away_logo": f"https://www.mlbstatic.com/team-logos/{away_id}.svg" if away_id else None,
+            "dt": dt, "time_known": True, "venue": g.get("venue_name"),
+        })
     return out
 
 
@@ -66,9 +75,27 @@ def _basketball_games(date_str: str, engine_module: str) -> List[Dict[str, Any]]
         dt = sports.game_dt(g.get("game_date"))
         if dt is None or dt.strftime("%Y-%m-%d") != date_str:
             continue
+        # Real logo URL ESPN's own scoreboard response already carries -- see nba_engine.py/
+        # wnba_engine.py's own get_schedule for where this is captured. Never a guess.
         out.append({"home": g.get("home_name"), "away": g.get("away_name"),
+                    "home_logo": g.get("home_logo"), "away_logo": g.get("away_logo"),
                     "dt": dt, "time_known": True, "venue": None})
     return out
+
+
+def _espn_cdn_logo(sport_slug: str, abbr: Optional[str]) -> Optional[str]:
+    """ESPN's own well-known team-logo CDN pattern (confirmed: a real logo URL of exactly this
+    shape appears directly inside ESPN's own API responses for other sports, e.g.
+    "https://a.espncdn.com/i/teamlogos/nba/500/cle.png") -- used here for NFL specifically only
+    because nfl_engine.get_schedule has no logo field of its own to capture (nflreadpy's schedule
+    data doesn't carry one), unlike NBA/WNBA above where the real URL is captured directly.
+    REAL, STATED RISK: a small number of abbreviations could differ from ESPN's own file-naming
+    convention (not verified live from this sandbox, no network path to espncdn.com here) -- see
+    components.py's own onerror handling on the <img> tag, which hides a wrong guess cleanly
+    instead of showing a broken-image icon."""
+    if not abbr:
+        return None
+    return f"https://a.espncdn.com/i/teamlogos/{sport_slug}/500/{abbr.lower()}.png"
 
 
 def _nfl_games(date_str: str) -> List[Dict[str, Any]]:
@@ -87,6 +114,8 @@ def _nfl_games(date_str: str) -> List[Dict[str, Any]]:
         if g.get("game_date") != date_str:
             continue
         out.append({"home": g.get("home_team"), "away": g.get("away_team"),
+                    "home_logo": _espn_cdn_logo("nfl", g.get("home_team")),
+                    "away_logo": _espn_cdn_logo("nfl", g.get("away_team")),
                     "dt": None, "time_known": False, "venue": None})
     return out
 
@@ -185,5 +214,12 @@ def _ncaaf_games_with_conference(date_str: str) -> List[Dict[str, Any]]:
             continue
         out.append({"home": g.get("home_team"), "away": g.get("away_team"), "dt": dt,
                     "time_known": not bool(g.get("start_time_tbd")), "venue": g.get("venue"),
+                    # No logo source for NCAAF yet -- CFBD's schedule cache doesn't carry one,
+                    # and (unlike NFL) there's no safe abbreviation to build an ESPN CDN guess
+                    # from -- CFBD team names ("Georgia") don't reliably map to ESPN's own file
+                    # slugs for 130+ FBS teams the way a small, well-known 32-team league does.
+                    # Real, stated gap: would need its own CFBD teams-endpoint fetch+cache,
+                    # same pattern the schedule itself already uses, not a guess.
+                    "home_logo": None, "away_logo": None,
                     "_home_conference": g.get("home_conference")})
     return out

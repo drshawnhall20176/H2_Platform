@@ -197,16 +197,29 @@ def section_header(icon: str, title: str, subtitle: Optional[str] = None,
     """, unsafe_allow_html=True)
 
 
+def _team_logo_html(url: Optional[str]) -> str:
+    """Small inline team logo, or nothing at all when no URL is available/known -- never a
+    broken-image icon. onerror hides the element itself on a 404/bad URL, a completely standard,
+    stable HTML behavior (not a fragile internal hook, see this module's own CSS-risk section) --
+    the one real, honest safety net for NFL's constructed-guess logo URLs and any other source
+    that might not resolve."""
+    if not url:
+        return ""
+    return (f'<img src="{url}" style="width:20px;height:20px;object-fit:contain;'
+           f'vertical-align:middle;margin-right:5px;" onerror="this.style.display=\'none\'">')
+
+
 def _schedule_game_row(g: dict, color: str) -> str:
-    """One game's self-contained HTML row -- away @ home, a small colored time chip (or an
-    honest 'Time TBD' when schedule_board.py couldn't determine one, e.g. NFL's date-only source
-    data), venue in muted text. color is the SAME accent color assigned to this game's conference
-    (see todays_schedule_board below) -- carries the conference's own color through to the row
-    level via the same alpha-blended-background technique kpi_row already uses, rather than
-    introduce an unrelated new color scheme. Bolded team names for real typographic hierarchy --
-    the plain-text default this replaced (see this platform's own "internal tool, not a product"
-    problem statement at the top of this module) read as flat/undifferentiated next to every
-    other component here."""
+    """One game's self-contained HTML row -- team logo + away @ home pulled together on the
+    left, a small colored time chip and venue immediately after (not stretched to the far edge
+    of the row) so the row's real content stays compact instead of wasting horizontal space --
+    directly reported feedback: the original space-between layout spread team names and time/
+    venue across the FULL container width, which read as wasted real estate especially once
+    conference boxes went side by side (see todays_schedule_board below) and got narrower. color
+    is the SAME accent color assigned to this game's conference (see todays_schedule_board) --
+    carries the conference's own color through to the row level via the same alpha-blended-
+    background technique kpi_row already uses, rather than introduce an unrelated new color
+    scheme."""
     if g.get("time_known") and g.get("dt") is not None:
         time_str = g["dt"].strftime("%-I:%M %p ET")
     else:
@@ -214,18 +227,18 @@ def _schedule_game_row(g: dict, color: str) -> str:
     venue_html = (f'<span style="font-size:11.5px;color:#9aa4b2;">{g["venue"]}</span>'
                  if g.get("venue") else "")
     return f"""
-    <div style="display:flex;justify-content:space-between;align-items:center;
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;
                 padding:8px 10px;border-radius:8px;margin-bottom:3px;
                 background:rgba(255,255,255,0.025);">
-      <div style="font-size:14px;">
-        <span style="font-weight:600;">{g.get('away', '?')}</span>
+      <div style="font-size:14px;white-space:nowrap;">
+        {_team_logo_html(g.get('away_logo'))}<span style="font-weight:600;">{g.get('away', '?')}</span>
         <span style="color:#6b7280;margin:0 5px;">@</span>
-        <span style="font-weight:600;">{g.get('home', '?')}</span>
+        {_team_logo_html(g.get('home_logo'))}<span style="font-weight:600;">{g.get('home', '?')}</span>
       </div>
-      <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;margin-left:10px;">
-        {venue_html}
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
         <span style="font-size:11.5px;font-weight:700;white-space:nowrap;background:{color}1e;
                     color:{color};padding:3px 9px;border-radius:6px;">{time_str}</span>
+        {venue_html}
       </div>
     </div>"""
 
@@ -238,6 +251,13 @@ def todays_schedule_board(result: Optional[dict], icon: str, label: str) -> None
     at all rather than render an empty section, same "hidden, not shown broken" posture used
     elsewhere on this platform. Renders a plain, honest "no games today" message for a real empty
     schedule (a legitimate off-day), which IS worth showing, unlike a None result.
+
+    CONFERENCE BOXES LAID OUT SIDE BY SIDE, not stacked full-width -- directly reported feedback:
+    stacking wasted real estate on a wide screen, and would get genuinely painful for a many-
+    conference sport (NCAAF: up to ~10 conferences full-width would mean 10 screens of scrolling
+    just to see today's whole slate). Up to 3 conferences per row -- exactly fills one row for
+    every 2-conference sport here (MLB/NBA/NFL/WNBA), and wraps into multiple rows for NCAAF
+    without going so narrow that a game row's team names + time chip stop fitting comfortably.
 
     Each conference gets one color, cycled from _KPI_PALETTE -- the SAME palette kpi_row already
     uses for decorative-but-distinguishing variety (not the red/green/yellow reserved platform-
@@ -257,8 +277,7 @@ def todays_schedule_board(result: Optional[dict], icon: str, label: str) -> None
         st.caption("No games scheduled today.")
         return
 
-    for i, conf in enumerate(sorted(grouped.keys())):
-        color = _KPI_PALETTE[i % len(_KPI_PALETTE)]
+    def _render_conference(conf: str, color: str) -> None:
         with st.container(border=True):
             st.markdown(
                 f'<div style="display:inline-block;background:{color}22;border:1px solid '
@@ -279,6 +298,16 @@ def todays_schedule_board(result: Optional[dict], icon: str, label: str) -> None
                 # conference lives under the single None key group_games always uses.
                 rows = "".join(_schedule_game_row(g, color) for g in divisions.get(None, []))
                 st.markdown(rows, unsafe_allow_html=True)
+
+    confs = sorted(grouped.keys())
+    per_row = 3
+    for row_start in range(0, len(confs), per_row):
+        row_confs = confs[row_start:row_start + per_row]
+        cols = st.columns(len(row_confs))
+        for col, conf in zip(cols, row_confs):
+            i = confs.index(conf)
+            with col:
+                _render_conference(conf, _KPI_PALETTE[i % len(_KPI_PALETTE)])
 
     if other:
         # Deliberately the neutral trend gray, not another palette color -- "Other" is a real

@@ -93,11 +93,11 @@ def _get_json_cached(url: str, params: Optional[Dict] = None) -> Optional[Dict]:
 # --------------------------------------------------------------------------- schedule
 def get_schedule(date_str: str) -> List[Dict[str, Any]]:
     """Games scheduled for date_str (YYYY-MM-DD). One dict per game with both team ids/names/
-    abbreviations — all pulled directly from the scoreboard response, no separate team lookup
-    needed. Abbreviations (e.g. "ATL") exist alongside id/displayName in the same competitor
-    "team" object ESPN already returns here — captured because get_team_injuries needs one (the
-    injuries endpoint keys by abbreviation, not ESPN's numeric team id), not because anything
-    else in this module needs it yet."""
+    abbreviations/logos — all pulled directly from the scoreboard response, no separate team
+    lookup needed. Abbreviations (e.g. "ATL") exist alongside id/displayName in the same
+    competitor "team" object ESPN already returns here — captured because get_team_injuries
+    needs one (the injuries endpoint keys by abbreviation, not ESPN's numeric team id), not
+    because anything else in this module needs it yet."""
     espn_date = date_str.replace("-", "")   # ESPN wants YYYYMMDD; we use YYYY-MM-DD everywhere else
     data = _get_json(f"{SITE_API}/scoreboard", params={"dates": espn_date})
     if not data:
@@ -123,9 +123,13 @@ def get_schedule(date_str: str) -> List[Dict[str, Any]]:
                 "home_id": int(home["team"]["id"]),
                 "home_name": home["team"].get("displayName", "Unknown"),
                 "home_abbr": home["team"].get("abbreviation"),
+                # Real ESPN-returned logo URL, not a constructed guess -- see nba_engine.py's
+                # own identical comment for the full reasoning.
+                "home_logo": home["team"].get("logo"),
                 "away_id": int(away["team"]["id"]),
                 "away_name": away["team"].get("displayName", "Unknown"),
                 "away_abbr": away["team"].get("abbreviation"),
+                "away_logo": away["team"].get("logo"),
             })
         except (KeyError, TypeError, ValueError):
             logger.exception("WNBA scoreboard event had an unexpected shape: %s", event.get("id"))
