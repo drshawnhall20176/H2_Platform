@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 import streamlit as st
+import components as C
 
 import sports
 from sports import require_sport
@@ -33,9 +34,10 @@ require_sport("UFC")
 import ufc_engine as E
 from odds_api import american_to_decimal, US_BOOKS
 
-st.title("🥊 UFC Fight Card")
-st.caption("Tonight's bouts — odds, implied probabilities, and method of victory lines. "
-           "Phase 1: data surface. Model conviction scores coming in Phase 2.")
+C.base_css()
+C.page_header("🥊", "UFC Fight Card",
+             "Tonight's bouts — odds, implied probabilities, and method of victory lines. "
+             "Phase 1: data surface. Model conviction scores coming in Phase 2.")
 
 # ── API key check ──────────────────────────────────────────────────────────
 try:
@@ -89,7 +91,7 @@ if not events:
     # Demo mode: show today's actual card from the API with results so you can
     # see what the fight card page looks like with real data.
     st.divider()
-    st.subheader("📋 Today's completed card — UFC Fight Night: Ankalaev vs. Guskov")
+    C.section_header("📋", "Today's completed card — UFC Fight Night: Ankalaev vs. Guskov")
     st.caption("Abu Dhabi · Etihad Arena · July 25, 2026 — odds have closed, results shown for reference")
 
     completed_bouts = [
@@ -153,7 +155,7 @@ def _prob_bar(prob: float, label: str, color: str):
 
 # Main card first (API returns main event first)
 st.divider()
-st.subheader("🎯 Fight Card")
+C.section_header("🎯", "Fight Card")
 
 for i, event in enumerate(events):
     fighter_a = event.get("home_team", "Fighter A")

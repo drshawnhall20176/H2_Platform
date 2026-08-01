@@ -66,6 +66,7 @@ honesty note, and the expander's own warning text before trusting any number in 
 """
 
 import streamlit as st
+import components as C
 from datetime import datetime
 
 import mlb_engine as E
@@ -97,12 +98,13 @@ PLATOON_EPSILON = 0.15   # a real, stated floor for "this lineup genuinely holds
 GAMES_BACK = 15   # matches the real number from trader discussion directly ("last 15 games"),
                   # not a round number picked independently
 
-st.title("📡 Game Watch")
-st.caption("Eight real signals per game, plus injury context — starter quality (FIP and xERA), "
-          "bullpen freshness, bullpen quality, overall team form, tonight's-role form, "
-          "tonight's-slot form, and team platoon edge — combined into an honest count, not a "
-          "predicted winner. See the disclaimer at the bottom before reading too much into any "
-          "single game.")
+C.base_css()
+C.page_header("📡", "Game Watch",
+             "Eight real signals per game, plus injury context — starter quality (FIP and xERA), "
+             "bullpen freshness, bullpen quality, overall team form, tonight's-role form, "
+             "tonight's-slot form, and team platoon edge — combined into an honest count, not a "
+             "predicted winner. See the disclaimer at the bottom before reading too much into any "
+             "single game.")
 lc1, lc2 = st.columns(2)
 with lc1:
     st.page_link("views/7_#L01f3af_Pitching_Lab.py",

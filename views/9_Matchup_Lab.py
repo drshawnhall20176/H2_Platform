@@ -13,6 +13,7 @@ refresh_matchups.py / the nightly Action.
 
 import pandas as pd
 import streamlit as st
+import components as C
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
 import plotly.graph_objects as go
 
@@ -24,9 +25,10 @@ from datetime import datetime
 
 game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER   # shared with Best Bets
 
-st.title("🔬 Matchup Lab")
-st.caption("Pitch-level arsenal vs. hitter vulnerability — the specific pitches to attack with. "
-           "Season stats tell you *if* a hitter is good; this tells you *how* to get him out.")
+C.base_css()
+C.page_header("🔬", "Matchup Lab",
+             "Pitch-level arsenal vs. hitter vulnerability — the specific pitches to attack with. "
+             "Season stats tell you *if* a hitter is good; this tells you *how* to get him out.")
 
 
 @st.cache_data(ttl=6 * 3600, show_spinner=False)
@@ -246,7 +248,7 @@ if venue_split or time_split:
         pitcher_pid, season, date_str, venue_split, time_split,
         team_id=pitcher.get("_team_id"))
 
-    st.subheader(f"📊 Split profile: {pitcher['Pitcher']} — {split_label}")
+    C.section_header("📊", f"Split profile: {pitcher['Pitcher']} — {split_label}")
 
     full = pitcher   # full-season stats already on the pitcher row
 
@@ -350,7 +352,7 @@ if venue_split or time_split:
 # each hitter's own per-specific-pitch-type splits) -- it just only offered a one-hitter-at-a-time
 # lookup, never a ranked view across the whole real opposing lineup. This is that ranking, not a
 # new calculation.
-st.subheader("🏆 Lineup leaderboard vs. this pitcher's arsenal")
+C.section_header("🏆", "Lineup leaderboard vs. this pitcher's arsenal")
 pitcher_arsenal = arsenals.get(pitcher_pid, [])   # already usage-sorted (build_pitcher_arsenal's
                                                   # own real sort), so index 0 is his most-used
                                                   # pitch with zero extra computation
@@ -588,7 +590,7 @@ else:
             f"{hitter['Hitter']} yet — showing the arsenal alone.")
 
 # --- table 1: the matchup grid (the money view) ---------------------------------------------
-st.subheader("Matchup grid — arsenal × this hitter")
+C.section_header("🔥", "Matchup grid — arsenal × this hitter")
 grid = pd.DataFrame([{
     "Pitch": r["pitch_name"],
     "Usage": r["usage"],
@@ -687,7 +689,7 @@ else:
 # --- table 2 + 3 side by side: raw arsenal and raw hitter splits -----------------------------
 c1, c2 = st.columns(2)
 with c1:
-    st.subheader(f"{pitcher['Pitcher']} — full arsenal")
+    C.section_header("🎯", f"{pitcher['Pitcher']} — full arsenal")
     ars = pd.DataFrame([{
         "Pitch": p["pitch_name"], "Family": p["family"], "Usage": p["usage"],
         "Velo": p["velo"], "Zone%": p.get("zone_pct"), "Contact%": p.get("contact_pct"),
@@ -704,7 +706,7 @@ with c1:
                      width="stretch", hide_index=True)
 
 with c2:
-    st.subheader(f"{hitter['Hitter']} — by pitch family")
+    C.section_header("📈", f"{hitter['Hitter']} — by pitch family")
     hs = hitter_splits.get(hitter_hid, {})
     if hs:
         hrows = pd.DataFrame([{
@@ -735,7 +737,7 @@ with c2:
         st.caption("No cached pitch-family splits for this hitter yet.")
 
 # --- hitter by SPECIFIC pitch type (full arsenal view) --------------------------------------
-st.subheader(f"{hitter['Hitter']} — by pitch type (full arsenal)")
+C.section_header("🎯", f"{hitter['Hitter']} — by pitch type (full arsenal)")
 st.caption("Granular view: performance against each individual pitch, not just the family. More "
            "detailed but noisier — the **Pitches** column shows the sample, and pitches with too "
            "few seen are hidden. Read a small sample with caution.")

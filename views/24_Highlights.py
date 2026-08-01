@@ -13,6 +13,7 @@ import pandas as pd
 import streamlit as st
 
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
+import components as C
 import sports
 import best_bets_data as BBD
 import highlights as H
@@ -38,9 +39,10 @@ def _load_highlights_board(date_str, fip_constant, preferred_book, venue_split, 
     just never got the same treatment."""
     return BBD.load_mlb_best_bets_board(date_str, fip_constant, preferred_book, venue_split, time_split)
 
-st.title("✨ Highlights")
-st.caption("Save a named filter once, see who matches it every day — the same workflow as a "
-          "PropFinder Highlight Profile, built on this platform's own real fields.")
+C.base_css()
+C.page_header("✨", "Highlights",
+             "Save a named filter once, see who matches it every day — the same workflow as a "
+             "PropFinder Highlight Profile, built on this platform's own real fields.")
 
 if _active.key != "MLB":
     st.info("Highlights is MLB-only for now — the real fields these profiles filter on "
@@ -128,7 +130,7 @@ with s4:
 # --- build a new profile (moved to the top on request -- this is the thing a person actually
 # comes here to DO; the results below are what they came back to CHECK) ---------------------
 st.divider()
-st.subheader("Build a new profile")
+C.section_header("🛠️", "Build a new profile")
 
 with st.container(border=True):
     st.caption("Every condition below runs against real fields already on tonight's board — "
@@ -205,7 +207,7 @@ with st.container(border=True):
 
 # --- today's highlights --------------------------------------------------------
 st.divider()
-st.subheader("Today's Highlights")
+C.section_header("📋", "Today's Highlights")
 
 MAX_ROWS_SHOWN = 15
 

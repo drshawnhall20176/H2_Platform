@@ -17,6 +17,7 @@ table) — adapted, not reinvented, for what NFL's real data actually looks like
 import os
 
 import streamlit as st
+import components as C
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
 import pandas as pd
 import plotly.graph_objects as go
@@ -31,12 +32,13 @@ import nfl_projections as P
 _active = sports.active()
 game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER   # shared with Best Bets
 
-st.title("🔬 Matchup Lab")
-st.caption("One player, one opponent, three real signals: recent form, head-to-head history this "
-          "season, and whether the opponent's defense has been trending looser or tighter "
-          "lately — the honest NFL counterpart to WNBA/NBA/NCAAMB's own Matchup Lab, built on "
-          "NFL's real data shape (weekly slates, week-specific injury reports) rather than a "
-          "forced port of the basketball version.")
+C.base_css()
+C.page_header("🔬", "Matchup Lab",
+             "One player, one opponent, three real signals: recent form, head-to-head history this "
+             "season, and whether the opponent's defense has been trending looser or tighter "
+             "lately — the honest NFL counterpart to WNBA/NBA/NCAAMB's own Matchup Lab, built on "
+             "NFL's real data shape (weekly slates, week-specific injury reports) rather than a "
+             "forced port of the basketball version.")
 
 if not sports.require_sport(["NFL"], "Matchup Lab"):
     st.stop()

@@ -7,6 +7,7 @@ matchup), so a strikeout arm vs a whiff-prone lineup projects higher than vs a c
 """
 
 import streamlit as st
+import components as C
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
 import pandas as pd
 from datetime import datetime
@@ -29,8 +30,9 @@ except ImportError:
     # whole feature.
     _HAS_AUTOREFRESH = False
 
-st.title("🎯 Pitching Lab")
-st.caption("ERA vs FIP regression and matchup-aware strikeout/innings projections")
+C.base_css()
+C.page_header("🎯", "Pitching Lab",
+             "ERA vs FIP regression and matchup-aware strikeout/innings projections")
 
 eastern = pytz.timezone("US/Eastern")
 
@@ -219,7 +221,7 @@ df = pd.DataFrame(fip_rows)
 df["Time"] = df["_game_date"].apply(game_time_et)
 
 # === Matchup-aware projections =============================================
-st.subheader("⚡ Matchup-aware starter projections")
+C.section_header("⚡", "Matchup-aware starter projections")
 st.caption("Expected line vs the opposing lineup. Proj K already accounts for how much that "
            "specific lineup strikes out — the same odds-ratio matchup used on the hitter side.")
 if proj_rows:
@@ -266,7 +268,7 @@ else:
 
 # === FIP regression ========================================================
 st.divider()
-st.subheader("📉 ERA vs FIP regression")
+C.section_header("📉", "ERA vs FIP regression")
 buys = df[df["Delta"] >= 0.50].sort_values("Delta", ascending=False)
 fades = df[df["Delta"] <= -0.50].sort_values("Delta")
 m1, m2, m3 = st.columns(3)
@@ -287,7 +289,7 @@ st.dataframe(styled, width="stretch", hide_index=True)
 
 # === Bullpen fatigue =========================================================
 st.divider()
-st.subheader("💪 Bullpen fatigue")
+C.section_header("💪", "Bullpen fatigue")
 st.caption("Which relievers on each side have real recent workload — pitched on 3+ straight "
           "days is the clearest \"likely unavailable tonight\" signal. Scoped to one game at a "
           "time, not the whole slate — each team's read costs several real API calls (a "
@@ -748,7 +750,7 @@ st.page_link("views/8_#L01f4a3_Dinger_Engine.py",
 
 # === Discussion hooks ======================================================
 st.divider()
-st.subheader("🤳 Discussion hooks (auto-generated)")
+C.section_header("🤳", "Discussion hooks (auto-generated)")
 st.caption("Talking points where the underlying metrics diverge from the surface results.")
 if buys.empty:
     st.write("No strong positive-regression candidates on this slate.")

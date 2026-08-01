@@ -12,6 +12,7 @@ scan for the head-to-head piece).
 import os
 
 import streamlit as st
+import components as C
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
 import pandas as pd
 import plotly.graph_objects as go
@@ -24,12 +25,13 @@ import odds_api as O
 _active = sports.active()
 game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER   # shared with Best Bets
 
-st.title("🔬 Matchup Lab")
-st.caption(f"One player, one opponent, three real signals: recent form, head-to-head history "
-           f"this season, and whether the opponent's defense has been trending looser or "
-           f"tighter lately — the honest {_active.key} counterpart to Dinger Engine's pitch-type "
-           f"Matchup Lab (no free {_active.key} equivalent to Statcast exists, so this leans on "
-           f"box-score signals instead, the same foundation Hot Hand Engine is built on).")
+C.base_css()
+C.page_header("🔬", "Matchup Lab",
+             f"One player, one opponent, three real signals: recent form, head-to-head history "
+             f"this season, and whether the opponent's defense has been trending looser or "
+             f"tighter lately — the honest {_active.key} counterpart to Dinger Engine's pitch-type "
+             f"Matchup Lab (no free {_active.key} equivalent to Statcast exists, so this leans on "
+             f"box-score signals instead, the same foundation Hot Hand Engine is built on).")
 
 if not sports.require_sport(["WNBA", "NBA", "NCAAMB"], "Matchup Lab"):
     st.stop()

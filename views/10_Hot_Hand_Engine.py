@@ -17,6 +17,7 @@ labeled signal is the more conservative, honest choice for a live betting board.
 import os
 
 import streamlit as st
+import components as C
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
 import pandas as pd
 from datetime import datetime
@@ -27,11 +28,12 @@ import odds_api as O
 
 _active = sports.active()
 
-st.title("🔥 Hot Hand Engine")
-st.caption(f"Recent-form leaders, adjusted for how generous tonight's opponent has actually "
-           f"been — the honest {_active.key} counterpart to Dinger Engine (no Statcast-"
-           f"equivalent data exists for basketball, so this leans on a real signal that does: "
-           f"opponent defense from box scores already being pulled for every slate).")
+C.base_css()
+C.page_header("🔥", "Hot Hand Engine",
+             f"Recent-form leaders, adjusted for how generous tonight's opponent has actually "
+             f"been — the honest {_active.key} counterpart to Dinger Engine (no Statcast-"
+             f"equivalent data exists for basketball, so this leans on a real signal that does: "
+             f"opponent defense from box scores already being pulled for every slate).")
 
 if not sports.require_sport(["WNBA", "NBA", "NCAAMB"], "Hot Hand Engine"):
     st.stop()

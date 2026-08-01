@@ -7,6 +7,7 @@ lineup detection, and a real Confirmed/Projected badge. Loads a full slate in se
 """
  
 import streamlit as st
+import components as C
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
 import pandas as pd
  
@@ -18,8 +19,9 @@ import weather as WX
 from datetime import datetime
 import pytz
  
-st.title("💣 H2 Sports — Dinger Engine")
-st.caption("Live hitter matchups, platoon edges, and power leaderboards")
+C.base_css()
+C.page_header("💣", "H2 Sports — Dinger Engine",
+             "Live hitter matchups, platoon edges, and power leaderboards")
  
  
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -243,7 +245,7 @@ def style_hitters(data: pd.DataFrame):
  
  
 # --- Leaderboards -----------------------------------------------------------
-st.subheader("Slate leaderboards")
+C.section_header("🏆", "Slate leaderboards")
 if df.empty:
     st.caption(f"No hitters match the current split filter — leaderboards require at least one "
               f"matching player. The game-by-game section below still shows all hitters.")
@@ -305,7 +307,7 @@ if sc:
 
 # --- Per-game detail --------------------------------------------------------
 st.divider()
-st.subheader("Game-by-game")
+C.section_header("⚾", "Game-by-game")
  
  
 def game_time_et(iso_utc):

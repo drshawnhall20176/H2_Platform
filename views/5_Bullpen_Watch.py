@@ -25,6 +25,7 @@ when you press the button below, not automatically on page load.
 """
 
 import streamlit as st
+import components as C
 from datetime import datetime
 
 import mlb_engine as E
@@ -35,8 +36,9 @@ game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER
                                                                                    # every other
                                                                                    # slate-wide page
 
-st.title("🛡️ Bullpen Watch")
-st.caption("Tonight's whole slate, one question per game: which side has the fresher bullpen?")
+C.base_css()
+C.page_header("🛡️", "Bullpen Watch",
+             "Tonight's whole slate, one question per game: which side has the fresher bullpen?")
 st.page_link("views/7_#L01f3af_Pitching_Lab.py",
              label="Want per-pitcher detail and quality (ERA/FIP) too? See Pitching Lab →",
              icon="🎯")
