@@ -106,6 +106,24 @@ def test_get_event_odds_raises_a_real_error_on_api_failure():
          "no longer silently returning {}")
 
 
+def test_ufc_markets_excludes_confirmed_unsupported_method_of_victory():
+    # Regression guard for a real, confirmed fix: fighter_wins_by_ko_tko/submission/decision
+    # were confirmed LIVE to be rejected by The Odds API for MMA with a real INVALID_MARKET
+    # error -- not a guess, not one event's quirk. Requesting them alongside h2h/totals took
+    # the WHOLE request down together, even though h2h/totals themselves are valid and posted.
+    # This locks in the fix so the excluded markets can't quietly get re-added later without a
+    # deliberate decision (e.g. once The Odds API actually adds MMA method-of-victory support).
+    assert "h2h" in U.UFC_MARKETS
+    assert "totals" in U.UFC_MARKETS
+    for excluded in ("fighter_wins_by_ko_tko", "fighter_wins_by_submission",
+                    "fighter_wins_by_decision"):
+        assert excluded not in U.UFC_MARKETS, (
+            f"{excluded} was confirmed unsupported by The Odds API for MMA -- re-adding it "
+            "will break h2h/totals too unless The Odds API has confirmed added support")
+    print("✓ UFC_MARKETS excludes the confirmed-unsupported method-of-victory markets, keeping "
+         "the confirmed-valid h2h/totals in the actual request")
+
+
 def test_underlying_get_raises_descriptive_errors_for_real_status_codes():
     import requests
 

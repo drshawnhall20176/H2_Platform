@@ -11,9 +11,17 @@ DATA SOURCE: The Odds API (same key as MLB/NFL). Sport key: mma_mixed_martial_ar
 Markets:
   h2h                     = Moneyline (fighter wins the fight)
   totals                  = Fight goes over/under N.5 rounds
-  fighter_wins_by_ko_tko  = Fighter wins specifically by KO/TKO
-  fighter_wins_by_submission = Fighter wins by submission
-  fighter_wins_by_decision   = Fighter wins by decision (any type)
+
+Method-of-victory markets (fighter_wins_by_ko_tko/submission/decision) are DELIBERATELY NOT
+requested -- confirmed live, not assumed, that The Odds API currently rejects all three with a
+real INVALID_MARKET error for MMA. Its own docs state MMA coverage is "fight winner odds, with
+more markets on the way," meaning this isn't specific to one event or book; it's the API's
+current MMA coverage. Requesting them alongside h2h/totals took the WHOLE request down together
+(a real, confirmed bug this fixes) even though h2h/totals themselves are valid and DraftKings
+does have them posted. MARKET_LABELS below is kept as-is for when the API adds support -- the
+view's own display code already handles a market being absent gracefully (shows "not yet
+available" rather than breaking), so re-adding these later is a one-line change back to
+UFC_MARKETS, not a rebuild.
 
 build_slate() returns (bouts, meta) matching the platform's cross-sport engine contract,
 but bouts have a different shape from player-stat rows:
@@ -62,9 +70,9 @@ def _eastern_date_str(iso_utc: Optional[str]) -> Optional[str]:
 UFC_MARKETS = [
     "h2h",
     "totals",
-    "fighter_wins_by_ko_tko",
-    "fighter_wins_by_submission",
-    "fighter_wins_by_decision",
+    # fighter_wins_by_ko_tko / fighter_wins_by_submission / fighter_wins_by_decision
+    # DELIBERATELY excluded -- see this module's own docstring for the confirmed reasoning
+    # (real INVALID_MARKET error, not an assumption).
 ]
 
 # Human-readable display names for each market
