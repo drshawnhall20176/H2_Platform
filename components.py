@@ -324,9 +324,12 @@ def _grid_row(columns: str, cells: List[str], extra_style: str = "") -> str:
 def _schedule_header_html(columns: str, show_roster: bool) -> str:
     """Column header row (Teams / Time / [Roster Status] / Location) -- added directly on
     request so the schedule genuinely reads as an aligned table, not just a list that happens to
-    have consistent-ish spacing."""
-    label_style = ('font-size:10.5px;font-weight:700;color:#6b7280;text-transform:uppercase;'
-                  'letter-spacing:0.5px;')
+    have consistent-ish spacing. Labels centered within their own column, also on request --
+    each header <span> becomes a grid item (stretches to fill its column width the same as any
+    other grid item), so text-align:center centers the label text within that full column, not
+    just within the label's own short text width."""
+    label_style = ('display:block;text-align:center;font-size:10.5px;font-weight:700;'
+                  'color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;')
     cells = [f'<span style="{label_style}">Teams</span>', f'<span style="{label_style}">Time</span>']
     if show_roster:
         cells.append(f'<span style="{label_style}">Roster Status</span>')

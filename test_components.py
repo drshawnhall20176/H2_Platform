@@ -408,6 +408,13 @@ def test_schedule_game_row_has_no_embedded_newlines():
 
 
 # ----------------------------------------------------------------- header row + legend
+def test_schedule_header_labels_are_centered():
+    import components as C
+    html = C._schedule_header_html(C._GRID_COLS_WITH_ROSTER, show_roster=True)
+    assert html.count("text-align:center") == 4   # Teams, Time, Roster Status, Location
+    print("✓ every header label is centered within its own column")
+
+
 def test_schedule_header_includes_roster_column_when_requested():
     import components as C
     html = C._schedule_header_html(C._GRID_COLS_WITH_ROSTER, show_roster=True)
