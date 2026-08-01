@@ -1,7 +1,31 @@
+# H2 Sports theme — single, forced dark theme.
+#
+# Started as a switchable light+dark pair via [theme.light]/[theme.dark] sub-tables, which is
+# the officially documented mechanism -- but it did not resolve correctly on this deployment
+# (Streamlit 1.59.1, Streamlit Cloud), confirmed directly: config was being read correctly
+# (primaryColor rendered correctly throughout), but the base light/dark resolution did not
+# consistently honor base="dark" as the true first-load default, even in a private/incognito
+# window with zero stored preference. Consistent with a known, Streamlit-team-confirmed bug
+# where theme selection doesn't behave the way `base` implies (see streamlit/streamlit#13280).
+# Simplifying to a single flat [theme] table (no separate light/dark tables) fixed it cleanly,
+# confirmed live in a private window. Real, lower-risk trade-off worth knowing: this app no
+# longer has a distinct, custom-styled light mode -- if a user manually selects "Light" in the
+# Settings menu, they'll see Streamlit's own stock light colors, not a matching custom light
+# theme. Given this platform's real, heavy late-night usage pattern (see prior version of this
+# file for the full reasoning), dark-only is an acceptable trade for something that actually
+# renders correctly over something more ambitious that silently doesn't.
+#
+# base = "dark": the default and effectively the only real theme now.
+# primaryColor: #1f6feb, the same blue already used for the "shared" profile badge on
+# Highlights -- kept deliberately distinct from this platform's own real red-yellow-green data
+# language (grades, RdYlGn gradient tables, Due/edge coloring), so a blue button is never
+# confused with what red/green/yellow already mean on the data itself.
 [theme]
 base = "dark"
 primaryColor = "#1f6feb"
 backgroundColor = "#0e1117"
 secondaryBackgroundColor = "#1a1f2b"
 textColor = "#e6e6e6"
+borderColor = "#2d3344"
+baseRadius = "medium"
 font = "sans serif"
