@@ -23,6 +23,7 @@ the full reasoning.
 
 import streamlit as st
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
+import components as C
 from datetime import datetime
 import pytz
 
@@ -38,9 +39,10 @@ game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER
                                                                                    # every Matchup
                                                                                    # Lab variant
 
-st.title("🏅 Graded Picks")
-st.caption(f"Every game on the slate, graded — sorted with the most interesting first, not a "
-          f"flat top-10 that hides the rest of the board — {_active.icon} {_active.label}")
+C.base_css()
+C.page_header("🏅", "Graded Picks",
+             f"Every game on the slate, graded — sorted with the most interesting first, not a "
+             f"flat top-10 that hides the rest of the board — {_active.icon} {_active.label}")
 # Restored after Graded Picks itself moved to owner-only -- both this page and Suggested Parlays
 # now share the same owner-only audience, so this pointer no longer risks a broken public link
 # the way it did when Graded Picks was still public and Suggested Parlays was already gated.
@@ -226,7 +228,7 @@ def _grade_badge(grade: dict) -> str:
 # so someone doesn't have to scroll through every game to find the strongest picks, without
 # undoing the whole reason this page is organized game-by-game in the first place (see the module
 # docstring at the top of this file).
-st.subheader("⭐ Slate summary — top picks by grade")
+C.section_header("⭐", "Slate summary — top picks by grade")
 
 GRADE_FLOOR_OPTIONS = {
     "A only": ("A",),

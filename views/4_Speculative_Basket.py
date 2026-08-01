@@ -18,6 +18,7 @@ sport-agnostic, the same as the rest of grading.py.
 """
 
 import streamlit as st
+import components as C
 import pandas as pd
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
 from datetime import datetime
@@ -38,9 +39,10 @@ game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER
 _active = sports.active()
 E, P = _active.engine, _active.projections
 
-st.title("🧺 Speculative Basket")
-st.caption(f"Several small, independent high-upside positions — not a parlay, no \"all must "
-          f"hit\" combination — {_active.icon} {_active.label}")
+C.base_css()
+C.page_header("🧺", "Speculative Basket",
+             f"Several small, independent high-upside positions — not a parlay, no \"all must "
+             f"hit\" combination — {_active.icon} {_active.label}")
 st.page_link("views/3_Suggested_Parlays.py", label="Looking for a chained, all-must-hit parlay instead? See Suggested Parlays →",
             icon="🎫")
 

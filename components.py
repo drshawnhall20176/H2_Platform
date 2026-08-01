@@ -92,6 +92,24 @@ def wrapped_tab_picker(items: List[tuple], key: str, default_index: int = 0):
     return values[selected_label]
 
 
+def page_header(icon: str, title: str, subtitle: str) -> None:
+    """Lighter-weight page header for ordinary sub-pages -- replaces a plain st.title()+
+    st.caption() pair with a consistent icon-badge treatment. Deliberately NOT the full
+    gradient hero_banner() above -- that stays reserved for the two genuine "front door" pages
+    (Home, Command Center) on purpose. A big gradient banner identically repeated at the top of
+    20+ sub-pages would read as visual fatigue, not polish; this is the lighter, consistent
+    alternative for everywhere else."""
+    st.markdown(f"""
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:2px;">
+      <div style="font-size:32px;line-height:1;">{icon}</div>
+      <div>
+        <div style="font-size:27px;font-weight:800;letter-spacing:-0.5px;line-height:1.15;">{title}</div>
+        <div style="font-size:14px;color:#9aa4b2;margin-top:2px;">{subtitle}</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
 def base_css() -> None:
     """One-time, page-level CSS polish. Call once near the top of a page, after st.title/caption.
     Safe, self-contained rules only -- see this module's own docstring for the honest risk

@@ -201,3 +201,24 @@ def test_wrapped_tab_picker_respects_default_index(monkeypatch):
     _, _, kw = calls[0]
     assert kw["default"] == "Batter HR"
     print("✓ wrapped_tab_picker passes the correct label as default when default_index is given")
+
+
+def test_page_header_renders_balanced_html_with_icon_title_subtitle(captured):
+    import components as C
+    C.page_header("⭐", "Best Bets", "The strongest leans across the slate")
+    assert _balanced_divs(captured[0])
+    assert "Best Bets" in captured[0]
+    assert "The strongest leans across the slate" in captured[0]
+    print("✓ page_header renders balanced HTML with icon, title, and subtitle all present")
+
+
+def test_page_header_is_lighter_weight_than_hero_banner(captured):
+    # Real, deliberate distinction: page_header must NOT carry hero_banner's gradient
+    # background -- it's meant to be the lighter alternative for ordinary sub-pages, not a
+    # second copy of the front-door treatment.
+    import components as C
+    C.page_header("🏅", "Graded Picks", "Every game on the slate, graded")
+    assert "linear-gradient" not in captured[0]
+    assert "h2-hero" not in captured[0]
+    print("✓ page_header does not carry hero_banner's gradient background -- confirmed "
+         "genuinely lighter-weight, not a duplicate")

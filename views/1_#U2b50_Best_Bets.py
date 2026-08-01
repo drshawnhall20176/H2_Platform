@@ -4,6 +4,7 @@ Best Bets — the model's strongest leans across the whole slate, with reasoning
 
 import streamlit as st
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
+import components as C
 import pandas as pd
 from datetime import datetime
 import pytz
@@ -16,9 +17,10 @@ import quick_log
 _active = sports.active()
 E, P = _active.engine, _active.projections
 
-st.title("⭐ Best Bets")
-st.caption(f"The model's strongest leans across the slate — ranked, reasoned, and by time slot "
-           f"— {_active.icon} {_active.label}")
+C.base_css()
+C.page_header("⭐", "Best Bets",
+             f"The model's strongest leans across the slate — ranked, reasoned, and by time slot "
+             f"— {_active.icon} {_active.label}")
 
 if not sports.require_live_engine("Best Bets"):
     st.stop()
@@ -299,8 +301,8 @@ if any(p.get("LineSource") == "book" for p in view):
               "your Streamlit secrets — same key Edge Board already requires.")
 
 # --- DIAGNOSTIC INSPECTOR --------------------------------------------------
-st.markdown("---")
-st.subheader("🔍 Inspect Bet Diagnostics")
+st.divider()
+C.section_header("🔍", "Inspect Bet Diagnostics")
 
 # No "if not view" check needed here -- the earlier checks (zero markets selected, or zero plays
 # matching the rest of the filters) already st.stop() the whole page before this point, so `view`
