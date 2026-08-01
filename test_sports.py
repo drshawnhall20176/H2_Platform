@@ -196,19 +196,43 @@ def test_sidebar_sections_match_the_documented_grouping():
                     # split segment -- not a real key, just filter it out
                 actual[k] = section
     expected = {
-        "0": "🏠 Start Here",
-        "1": "🎯 Recommendations", "2": "🎯 Recommendations", "3": "🎯 Recommendations",
-        "4": "🎯 Recommendations", "23": "🎯 Recommendations", "24": "🎯 Recommendations",
-        "5": "🔬 Research & Signals", "6": "🔬 Research & Signals", "7": "🔬 Research & Signals",
-        "8": "🔬 Research & Signals", "9": "🔬 Research & Signals", "10": "🔬 Research & Signals",
-        "11": "🔬 Research & Signals", "12": "🔬 Research & Signals", "13": "🔬 Research & Signals",
-        "14": "🔬 Research & Signals", "15": "🔬 Research & Signals",
-        "16": "🔍 Self-Grading & Proof", "17": "🔍 Self-Grading & Proof",
-        "18": "🔍 Self-Grading & Proof", "19": "🔍 Self-Grading & Proof",
-        "20": "📣 Ops & Content", "21": "📣 Ops & Content", "22": "📣 Ops & Content",
+        "0": "🏠 START HERE",
+        "1": "🎯 RECOMMENDATIONS", "2": "🎯 RECOMMENDATIONS", "3": "🎯 RECOMMENDATIONS",
+        "4": "🎯 RECOMMENDATIONS", "23": "🎯 RECOMMENDATIONS", "24": "🎯 RECOMMENDATIONS",
+        "5": "🔬 RESEARCH & SIGNALS", "6": "🔬 RESEARCH & SIGNALS", "7": "🔬 RESEARCH & SIGNALS",
+        "8": "🔬 RESEARCH & SIGNALS", "9": "🔬 RESEARCH & SIGNALS", "10": "🔬 RESEARCH & SIGNALS",
+        "11": "🔬 RESEARCH & SIGNALS", "12": "🔬 RESEARCH & SIGNALS", "13": "🔬 RESEARCH & SIGNALS",
+        "14": "🔬 RESEARCH & SIGNALS", "15": "🔬 RESEARCH & SIGNALS",
+        "16": "🔍 SELF-GRADING & PROOF", "17": "🔍 SELF-GRADING & PROOF",
+        "18": "🔍 SELF-GRADING & PROOF", "19": "🔍 SELF-GRADING & PROOF",
+        "20": "📣 OPS & CONTENT", "21": "📣 OPS & CONTENT", "22": "📣 OPS & CONTENT",
     }
     assert actual == expected, f"section grouping drifted from expected: {actual}"
-    print("✓ sidebar sections match the documented, consolidated 5-section grouping")
+    print("✓ sidebar sections match the documented, consolidated 5-section grouping (uppercase "
+         "for visual prominence)")
+
+
+def test_home_page_shares_command_centers_section():
+    # Regression guard for a real, found bug: Home.py is added to the sidebar separately from
+    # the meta-driven loop (it isn't a numbered view file), with its own hardcoded section name
+    # -- when Command Center's section was renamed, this hardcoded string was missed, silently
+    # producing two separate single-item "home" sections instead of one shared one. Confirms
+    # both stay in sync going forward.
+    src = (_HERE / "streamlit_app.py").read_text()
+    home_match = re.search(r'sections: dict = \{"([^"]*)":', src)
+    assert home_match, "streamlit_app.py must define the Home.py section inline"
+    home_section = home_match.group(1)
+
+    section_match = re.search(r"SECTION_OF = \{\}(.*?)\n\n    def lead", src, re.DOTALL)
+    assert section_match, "streamlit_app.py must define SECTION_OF"
+    zero_match = re.search(r'for k in \("0",\):\s*\n\s*SECTION_OF\[k\] = "([^"]*)"', section_match.group(1))
+    assert zero_match, "streamlit_app.py must assign a section for page \"0\" (Command Center)"
+    command_center_section = zero_match.group(1)
+
+    assert home_section == command_center_section, (
+        f"Home.py's section ({home_section!r}) doesn't match Command Center's ({command_center_section!r}) "
+        f"-- they're meant to share one front-door section, not two separate ones")
+    print(f"✓ Home.py and Command Center share the same sidebar section ({home_section!r})")
 
 
 def test_public_audience_defaults_safe():

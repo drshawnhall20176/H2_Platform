@@ -154,25 +154,25 @@ def run():
     # original name read as confusingly redundant with the "Home" *page* link directly beneath
     # it, two different things sharing one word right next to each other.
     #
-    # A REAL, DELIBERATE LIMIT WORTH STATING PLAINLY: this consolidation is a genuine structural
-    # fix in Python, not CSS -- deliberately NOT attempting to visually differentiate section
-    # headers from page links via custom CSS targeting Streamlit's own internal sidebar DOM.
-    # Checked directly first: those internal hooks (stSidebarNav, stSidebarNavItems) have
-    # changed name across real Streamlit releases, and even experienced users report the current
-    # ones simply not working. Building a fix on a foundation that's confirmed unreliable would
-    # be worse than not fixing it -- reducing the actual number of lines is the reliable lever
-    # available here, not restyling text that's still there either way.
+    # SECTION NAMES ARE UPPERCASE, added directly on request for more visual prominence against
+    # the page links beneath them -- a genuinely safe way to do this, not the risky one. Checked
+    # first: CSS targeting Streamlit's own internal sidebar DOM (stSidebarNav, stSidebarNavItems)
+    # is confirmed unreliable -- those hooks have changed name across real Streamlit releases,
+    # and even experienced users report the current ones simply not working. Uppercase text
+    # carries its own visual weight regardless of font size or color, and it's just a Python
+    # string -- no dependency on internals that could silently stop working on a future
+    # Streamlit update.
     SECTION_OF = {}
     for k in ("0",):
-        SECTION_OF[k] = "🏠 Start Here"
+        SECTION_OF[k] = "🏠 START HERE"
     for k in ("1", "2", "3", "4", "23", "24"):
-        SECTION_OF[k] = "🎯 Recommendations"
+        SECTION_OF[k] = "🎯 RECOMMENDATIONS"
     for k in ("5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"):
-        SECTION_OF[k] = "🔬 Research & Signals"
+        SECTION_OF[k] = "🔬 RESEARCH & SIGNALS"
     for k in ("16", "17", "18", "19"):
-        SECTION_OF[k] = "🔍 Self-Grading & Proof"
+        SECTION_OF[k] = "🔍 SELF-GRADING & PROOF"
     for k in ("20", "21", "22"):
-        SECTION_OF[k] = "📣 Ops & Content"
+        SECTION_OF[k] = "📣 OPS & CONTENT"
 
     def lead(name: str) -> str:
         """Leading page number as a string ('10_Matchup_Lab.py' -> '10'), else the stem."""
@@ -188,7 +188,7 @@ def run():
     # alongside Command Center (see SECTION_OF above) rather than left unsectioned -- st.
     # navigation's dict mode sections everything or nothing, there's no supported way to mix a
     # loose top-level page with sectioned ones (confirmed directly against Streamlit's own docs).
-    sections: dict = {"🏠 Home": [st.Page(str(here / "Home.py"), title="Home", icon="⚾", url_path="home")]}
+    sections: dict = {"🏠 START HERE": [st.Page(str(here / "Home.py"), title="Home", icon="⚾", url_path="home")]}
     for f in view_files:
         key = lead(f.name)
         required_sports = sport_only_leads.get(key)
