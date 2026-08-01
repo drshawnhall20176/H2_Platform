@@ -623,6 +623,73 @@ def test_other_sports_default_markets_unchanged():
     print("\u2713 Sports without an explicit curation keep default_markets=None, unchanged behavior")
 
 
+def test_bet_log_track_record_link_gated_on_has_projections():
+    # Regression guard for a real, reported crash: Bet Log's page_link to Track Record was
+    # unconditional, but Track Record hides itself from the sidebar entirely for any sport with
+    # has_projections=False (UFC) -- st.page_link to a page outside the CURRENT navigation set
+    # raises StreamlitPageNotFoundError, not a graceful message. Confirmed live via a real
+    # traceback (Bet Log crashing outright while viewing UFC). The link and its target must never
+    # be able to drift out of sync on this condition again.
+    src = (_HERE / "views" / "18_#L01f4d2_Bet_Log.py").read_text()
+    m = re.search(r'if\s+_active\.has_projections\s*:\s*\n\s*st\.page_link\(\s*"views/19_Track_Record\.py"',
+                 src)
+    assert m, ("Bet Log's page_link to Track Record must be guarded by "
+              "`if _active.has_projections:` -- otherwise this crashes for any sport without a "
+              "projections model (UFC)")
+    print("✓ Bet Log's Track Record link is gated on has_projections, matching its target's own gate")
+
+
+def test_command_center_graded_picks_link_gated_on_has_projections():
+    # Same real bug class, caught in the same audit before it was independently reported: this
+    # link was only gated on audience (owner-only), but Graded Picks ALSO hides itself for any
+    # sport without a projections model -- same StreamlitPageNotFoundError risk as Bet Log's own
+    # Track Record link above, just not yet hit by a real user.
+    src = (_HERE / "views" / "0_#L01f3c6_Command_Center.py").read_text()
+    m = re.search(
+        r'if\s+st\.secrets\.get\("AUDIENCE",\s*"owner"\)\s*==\s*"owner"\s+and\s+_active\.has_projections\s*:'
+        r'\s*\n\s*st\.page_link\(\s*"views/2_Graded_Picks\.py"', src)
+    assert m, ("Command Center's page_link to Graded Picks must be guarded by BOTH the audience "
+              "check AND has_projections -- otherwise this crashes for an owner-audience viewer "
+              "on any sport without a projections model (UFC)")
+    print("✓ Command Center's Graded Picks link is gated on both audience and has_projections")
+
+
+def test_every_cross_page_link_targets_a_page_visible_under_the_same_conditions():
+    # A general, systematic guard against this whole bug CLASS recurring on some future page --
+    # not just the two specific instances above. For every st.page_link in views/, if the TARGET
+    # page requires has_projections (per streamlit_app.py's own projections_only_titles) but the
+    # SOURCE page doesn't, the source file's text must contain "has_projections" somewhere (a
+    # loose but real check that the source at least references the condition its own link
+    # depends on, not proof of correct placement -- the two explicit tests above cover placement
+    # for the known real cases).
+    src = (_HERE / "streamlit_app.py").read_text()
+    meta_block = re.search(r"meta = \{(.*?)\n    \}", src, re.DOTALL).group(1)
+    key_title = dict(re.findall(r'"(\d+)":\s*\("([^"]+)"', meta_block))
+    proj_only = {t.strip().strip('"') for t in
+                re.search(r"projections_only_titles = \{([^}]*)\}", src, re.DOTALL)
+                .group(1).split(",") if t.strip()}
+
+    def lead(name):
+        lm = re.match(r"(\d+)", name)
+        return lm.group(1) if lm else None
+
+    violations = []
+    for f in (_HERE / "views").glob("*.py"):
+        text = f.read_text()
+        src_title = key_title.get(lead(f.name), "?")
+        if src_title in proj_only:
+            continue   # source itself is hidden under the same condition -- never reachable
+        for tm in re.finditer(r'st\.page_link\(\s*"views/([^"]+)"', text):
+            target_title = key_title.get(lead(tm.group(1)), "?")
+            if target_title in proj_only and "has_projections" not in text:
+                violations.append(f"{f.name} -> {tm.group(1)}")
+    assert not violations, (
+        f"these page_link calls target a has_projections-only page from a source that never "
+        f"mentions has_projections at all: {violations}")
+    print("✓ every page_link targeting a has_projections-gated page has some has_projections "
+         "reference in its own source file")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
