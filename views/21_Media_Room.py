@@ -81,7 +81,7 @@ def headline(p):
  
 def value_text(p):
     if p.get("EV") is not None:
-        live = f"{p['LivePrice']:+d}" if p.get("LivePrice") is not None else "—"
+        live = f"{p['LivePrice']:+.0f}" if p.get("LivePrice") is not None else "—"
         return f"Live value: {p['EV']:+.1f}% at {live} ({p['Book']})." if p.get("Book") else \
                f"Live value: {p['EV']:+.1f}% at {live}."
     # A real captured price may already be sitting on this play (RealPrice, from the same
@@ -91,8 +91,8 @@ def value_text(p):
     # existed but isn't always true anymore.
     if p.get("PriceSource") == "book" and p.get("RealPrice") is not None:
         book_str = f" ({p['RealPriceBook']})" if p.get("RealPriceBook") else ""
-        return f"Real price: {p['RealPrice']:+d}{book_str}."
-    fair = f"{p['Fair']:+d}" if p.get("Fair") is not None else "—"
+        return f"Real price: {p['RealPrice']:+.0f}{book_str}."
+    fair = f"{p['Fair']:+.0f}" if p.get("Fair") is not None else "—"
     return f"Fair price ~{fair} (model estimate — flip on Live value for a live EV% read)."
  
  

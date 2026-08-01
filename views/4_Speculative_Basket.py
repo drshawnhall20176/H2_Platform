@@ -374,9 +374,9 @@ with st.container(border=True):
               "most likely position in this basket, not an arbitrary sequence.")
     for leg in trimmed_legs:
         grade_html = _grade_badge(leg["_grade"])
-        leg_fair_str = (f"📊 {leg['RealPrice']:+d}" if leg.get("PriceSource") == "book"
+        leg_fair_str = (f"📊 {leg['RealPrice']:+.0f}" if leg.get("PriceSource") == "book"
                                                         and leg.get("RealPrice") is not None
-                       else f"{leg['Fair']:+d}" if leg.get("Fair") is not None else "—")
+                       else f"{leg['Fair']:+.0f}" if leg.get("Fair") is not None else "—")
         lineup = leg.get("Lineup")
         lineup_icon = "🟡 " if lineup == "Projected" else ("🟢 " if lineup == "Confirmed" else "")
         rank_prefix = f"**#{leg['_rank']}** · " if leg.get("_rank") else ""

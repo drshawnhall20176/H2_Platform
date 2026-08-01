@@ -335,6 +335,20 @@ if caught:
     fmt = {"Model %": "{:.0%}", "Line": "{:g}", _mkt: "{:.1f}"}
     st.dataframe(cdf.style.format({k: v for k, v in fmt.items() if k in cdf.columns}, na_rep="—"),
                 hide_index=True, width="stretch")
+    # REAL, CONFIRMED EXPLANATION for something a user flagged as looking "off" -- every player
+    # in this table showing the identical Line value (the sport's own _MARKET_SPEC default, e.g.
+    # WNBA Points = 12.5) is expected here, not a wiring bug. odds_api.fetch_slate_props pulls
+    # its event list from the Odds API's own /events endpoint, which only lists current/upcoming
+    # games (see that function's own docstring: "the game has already started and books pulled
+    # pre-game player props"). By the time this table looks back at YESTERDAY's already-finished
+    # games, there's no live event left to fetch a real captured line from -- every play falls
+    # back to the model's own placeholder line honestly, the same fallback used any time a real
+    # line genuinely isn't available. Real historical lines were never actually gone (Bet Log's
+    # own closing-line capture stores them for anything logged), just not wired into THIS
+    # specific backward-looking table.
+    st.caption("Line reflects the model's own evaluation threshold. Real captured book lines "
+              "aren't fetchable for games that already finished by the time this table looks "
+              "back at them — the live odds feed only covers current/upcoming games.")
 else:
     st.caption("Nothing cleared the line in the model's top plays for this market last night, "
                "or results aren't final yet.")

@@ -267,9 +267,9 @@ else:
         st.markdown(f"<span style='color:{color};font-weight:700;'>{entry['letter']} grade</span>",
                    unsafe_allow_html=True)
         for pl in entry["picks"]:
-            fair_str = (f"📊 {pl['RealPrice']:+d}" if pl.get("PriceSource") == "book"
+            fair_str = (f"📊 {pl['RealPrice']:+.0f}" if pl.get("PriceSource") == "book"
                                                        and pl.get("RealPrice") is not None
-                       else f"{pl['Fair']:+d}" if pl.get("Fair") is not None else "—")
+                       else f"{pl['Fair']:+.0f}" if pl.get("Fair") is not None else "—")
             # Baseline: the real reference rate this pick's Conviction (and therefore its grade)
             # is actually measured against -- derived directly from ModelProb/Conviction, already
             # on the play. Added directly on request: Model % and Grade sit right next to each
@@ -342,9 +342,9 @@ for game in organized:
                 # raw number upstream, not a text field that could carry the marker itself.
                 if pl.get("ConvictionSource") == "book":
                     grade_html += " 📊"
-                fair_str = (f"📊 {pl['RealPrice']:+d}" if pl.get("PriceSource") == "book"
+                fair_str = (f"📊 {pl['RealPrice']:+.0f}" if pl.get("PriceSource") == "book"
                                                            and pl.get("RealPrice") is not None
-                           else f"{pl['Fair']:+d}" if pl.get("Fair") is not None else "—")
+                           else f"{pl['Fair']:+.0f}" if pl.get("Fair") is not None else "—")
                 rank_prefix = f"**#{pl['_rank']}** · " if show_ranking and pl.get("_rank") else ""
                 line_val = pl.get("Line")
                 line_src = pl.get("LineSource", "default")

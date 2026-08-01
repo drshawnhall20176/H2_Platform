@@ -180,9 +180,9 @@ def selection_beats(p: Dict) -> List[Dict]:
     inv = 100 - prob
     push = _DEEZY_PUSH.get(p.get("Market"), "Break this one down for me, Doc.").format(prob=prob, inv=inv)
     opp = f" vs {p['Opp']}" if p.get("Opp") else ""
-    fair = f"{p['Fair']:+d}" if p.get("Fair") is not None else "—"
+    fair = f"{p['Fair']:+.0f}" if p.get("Fair") is not None else "—"
     if p.get("EV") is not None:
-        live = f"{p['LivePrice']:+d}" if p.get("LivePrice") is not None else "—"
+        live = f"{p['LivePrice']:+.0f}" if p.get("LivePrice") is not None else "—"
         price_beat = (f"Live price is {live} — that's about {p['EV']:+.1f}% value by our math. "
                       f"Model has it ~{prob}%. That's a real edge at this number, not just a lean.")
     elif p.get("PriceSource") == "book" and p.get("RealPrice") is not None:
@@ -190,7 +190,7 @@ def selection_beats(p: Dict) -> List[Dict]:
         # already-fetched board data, zero extra Odds API cost) even without the dedicated
         # "Live value" EV fetch above -- show it directly instead of always defaulting to the
         # model-only fair-price framing below.
-        price_beat = (f"Real price right now is {p['RealPrice']:+d}. Model has it ~{prob}% — "
+        price_beat = (f"Real price right now is {p['RealPrice']:+.0f}. Model has it ~{prob}% — "
                       f"a lean we like, not a lock.")
     else:
         price_beat = (f"Fair price is around {fair}. Model has it ~{prob}% — a lean we like, not a "

@@ -94,6 +94,23 @@ def test_selection_beats_falls_back_to_fair_price_without_real_price():
     assert "Real price" not in joined
 
 
+def test_selection_beats_does_not_crash_on_float_real_price():
+    # REAL, CONFIRMED REGRESSION GUARD -- a live crash was reported elsewhere in this codebase
+    # from exactly this shape of bug: odds_api.real_entry_price is explicitly typed to return a
+    # float price (raw pass-through from the live odds API), and a strict {:+d} format code
+    # raises ValueError on any float input. Fixed here and in every other place this same
+    # pattern appeared (8 files, RealPrice/LivePrice).
+    play = {"Player": "Wade Meckler", "Team": "SF", "Market": "Batter Total Bases",
+           "Side": "Over", "Line": 1.5, "ModelProb": 0.55, "Fair": 138,
+           "RealPrice": -140.0, "RealPriceBook": "draftkings", "PriceSource": "book",
+           "Conviction": 1.2, "Why": "test"}
+    beats = PC.selection_beats(play)
+    joined = " ".join(b["text"] for b in beats if b.get("text"))
+    assert "-140" in joined
+    print("✓ selection_beats does not crash on a float RealPrice (the same bug class that "
+         "crashed Best Bets live)")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

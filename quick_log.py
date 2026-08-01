@@ -184,7 +184,7 @@ def format_play_label(play: Dict) -> str:
     real "Line" either. Skips both pieces entirely rather than showing a confusing "? · ... —"
     placeholder for a play that was never meant to have a player in the first place."""
     fair = play.get("Fair")
-    fair_str = f"{fair:+d}" if fair is not None else "—"
+    fair_str = f"{fair:+.0f}" if fair is not None else "—"
     player = play.get("Player")
     if player is None:
         return f"{play.get('Market', '?')} {play.get('Side', '')} @ {fair_str}"

@@ -340,6 +340,20 @@ def test_format_play_label_missing_fair_shows_dash():
     print("✓ format_play_label shows a dash (not a crash or 'None') when Fair is missing")
 
 
+def test_format_play_label_float_fair_does_not_crash():
+    # REAL, CONFIRMED REGRESSION GUARD -- a live crash was reported: odds_api.real_entry_price
+    # is explicitly typed to return a float price (raw pass-through from the live odds API,
+    # which doesn't always serialize whole-number American odds as JSON ints), and the OLD
+    # strict {:+d} format code raises ValueError on any float input. Fair itself is always a
+    # real int today (prob_to_american's own return type), but this guards the same format
+    # string against ever being fed a float again, matching the same fix applied everywhere
+    # else this exact pattern showed up (RealPrice/LivePrice across 8 files).
+    label = Q.format_play_label(_play(player="Aaron Judge", fair=-115.0))
+    assert "-115" in label
+    print("✓ format_play_label does not crash on a float Fair value (the same bug class that "
+         "crashed Best Bets live)")
+
+
 def test_format_play_label_team_level_play_has_no_player_or_line():
     # A moneyline play (Player=None) -- added directly on request for Game Watch's own
     # moneyline logging. Must skip the player/line pieces entirely, not show a confusing

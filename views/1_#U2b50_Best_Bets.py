@@ -258,9 +258,9 @@ for p in view:
     # to check for a real captured price at that same real line. "📊 -140" is a real DraftKings
     # price; a plain "+138" with no marker is still the model's own independent estimate.
     if p.get("PriceSource") == "book" and p.get("RealPrice") is not None:
-        p["_display_price"] = f"📊 {p['RealPrice']:+d}"
+        p["_display_price"] = f"📊 {p['RealPrice']:+.0f}"
     else:
-        p["_display_price"] = f"{p['Fair']:+d}" if p.get("Fair") is not None else "—"
+        p["_display_price"] = f"{p['Fair']:+.0f}" if p.get("Fair") is not None else "—"
 df = pd.DataFrame(view)[["ModelProb", "Conviction", "Time", "Slot", "Player", "Team", "Market", "Side",
                          "_display_line", "_display_price", "Game", "Why"]]
 df = df.rename(columns={"ModelProb": "Model %", "_display_line": "Line",

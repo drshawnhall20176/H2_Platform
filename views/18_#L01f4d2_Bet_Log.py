@@ -380,7 +380,7 @@ else:
     cmp = B.compare_parlay_vs_singles(legs, pstake)
     if cmp:
         a, b = st.columns(2)
-        a.metric(f"Parlay ({cmp['parlay_american']:+d})" if cmp["parlay_american"] else "Parlay",
+        a.metric(f"Parlay ({cmp['parlay_american']:+.0f})" if cmp["parlay_american"] else "Parlay",
                  f"${cmp['parlay_pnl']:+.2f}" if cmp["parlay_pnl"] is not None else "pending",
                  help=f"All {cmp['n']} legs must hit. Status: {cmp['status']}")
         b.metric(f"Same ${cmp['parlay_stake']:.0f} as singles",
