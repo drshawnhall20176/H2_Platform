@@ -18,6 +18,7 @@ shape is confirmed the same rigorous way the Core markets' was.
 """
 
 import streamlit as st
+import components as C
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
 import pandas as pd
 from datetime import datetime
@@ -30,10 +31,11 @@ import nfl_projections as P
 _active = sports.active()
 eastern = pytz.timezone("US/Eastern")
 
-st.title("🎯 Anytime TD Engine")
-st.caption("Who's most likely to score — a ranked probability board for a single binary outcome, "
-          "the honest NFL counterpart to Dinger Engine's home-run board. Model-only for now — "
-          "see the note below for why live odds aren't wired in yet.")
+C.base_css()
+C.page_header("🎯", "Anytime TD Engine",
+             "Who's most likely to score — a ranked probability board for a single binary outcome, "
+             "the honest NFL counterpart to Dinger Engine's home-run board. Model-only for now — "
+             "see the note below for why live odds aren't wired in yet.")
 
 if not sports.require_sport(["NFL"], "Anytime TD Engine"):
     st.stop()
@@ -81,7 +83,7 @@ if not filtered:
     st.stop()
 
 # --- leaderboard ---------------------------------------------------------
-st.subheader("🏆 Leaderboard")
+C.section_header("🏆", "Leaderboard")
 top_n = st.slider("Show top N", 5, min(50, len(filtered)), min(25, len(filtered)))
 top = filtered[:top_n]
 
@@ -101,7 +103,7 @@ st.caption("**Model %** is an empirical-Bayes-shrunk rate (each player's own rec
           "not a recommendation to bet at it.")
 
 # --- by position breakdown ---------------------------------------------------
-st.subheader("By position")
+C.section_header("📋", "By position")
 tabs = st.tabs([f"{p}" for p in positions_present])
 for tab, pos in zip(tabs, positions_present):
     with tab:

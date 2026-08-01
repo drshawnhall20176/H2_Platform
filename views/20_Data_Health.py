@@ -7,14 +7,16 @@ page exists so that noticing happens here, in one place, at a glance — not dow
 """
 
 import streamlit as st
+import components as C
 import pandas as pd
 
 import data_freshness as DF
 
-st.title("🩺 Data Health")
-st.caption("A single, honest answer to \"is the data behind this platform actually current, or "
-          "silently stale?\" — checked directly against each file's own real state, not a "
-          "workflow's own claimed success.")
+C.base_css()
+C.page_header("🩺", "Data Health",
+             "A single, honest answer to \"is the data behind this platform actually current, or "
+             "silently stale?\" — checked directly against each file's own real state, not a "
+             "workflow's own claimed success.")
 
 results = DF.check_all_sources()
 overall = DF.overall_status(results)
@@ -52,7 +54,7 @@ st.caption("Tracks the file-based sources refreshed by refresh-statcast.yml and 
           "of a committed file, a genuinely different mechanism, and isn't tracked here yet.")
 
 st.divider()
-st.subheader("🔌 Live Odds API diagnostic")
+C.section_header("🔌", "Live Odds API diagnostic")
 st.caption("Checks what market keys and books the Odds API is actually returning for tonight's "
           "slate — the direct answer to 'is my API key configured, and does it have coverage "
           "for the markets this platform uses?'")

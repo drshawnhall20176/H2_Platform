@@ -23,6 +23,7 @@ the record. See Bet Log's own docstring for the same note from its side.
 """
 
 import streamlit as st
+import components as C
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -68,7 +69,9 @@ _active = sports.active()
 if not _active.has_projections:
     st.info("🥊 This page doesn't apply to UFC — head to **UFC Fight Card** in the sidebar.")
     st.stop()
-st.title(f"📊 Track Record  ·  {_active.icon} {_active.label}")
+C.base_css()
+C.page_header("📊", f"Track Record  ·  {_active.icon} {_active.label}",
+             "Our forward-tested record, updated as results come in — no cherry-picking, no deleting the losers.")
 st.markdown("**Every bet we log, graded against the closing line — no cherry-picking, no deleting "
             "the losers.** This is our forward-tested record, updated as results come in. "
             "The single number we care about most is **CLV** (closing-line value): whether we "
@@ -121,7 +124,7 @@ elif clv_n < 100:
 # ------------------------------------------------------------------ real-price CLV (the trustworthy number)
 st.divider()
 rp = B.real_price_clv_summary(bets)
-st.subheader("💵 CLV on real captured prices")
+C.section_header("💵", "CLV on real captured prices")
 st.caption("The metric above compares entry_odds against the closing line — but until recently, "
           "every logged pick's entry_odds was the model's own **Fair price**, re-derived "
           "straight from its own probability, not an actual price we got. That's not really "
@@ -152,7 +155,7 @@ else:
 
 # ------------------------------------------------------------------ CLV curve
 st.divider()
-st.subheader("📈 Closing-line value over time")
+C.section_header("📈", "Closing-line value over time")
 st.caption("Our cumulative average CLV as bets accumulate. Positive and stable = a real, "
            "repeatable edge — this is the closest thing we have to an equity curve.")
 if len(series) >= 2:
@@ -177,7 +180,7 @@ else:
 
 # ------------------------------------------------------------------ per-market strength
 st.divider()
-st.subheader("🎯 Where our edge lives — by market")
+C.section_header("🎯", "Where our edge lives — by market")
 st.caption("Average CLV for each prop type. This is the honest map of our strengths and "
            "weaknesses: the markets where we consistently beat the close are where we're sharpest. "
            "We show it because knowing our own edges is the mark of a real model, not a tout.")
@@ -211,7 +214,7 @@ with st.expander("Full per-market breakdown"):
 
 # ------------------------------------------------------------------ calibration
 st.divider()
-st.subheader("🎚️ Are our probabilities honest?")
+C.section_header("🎚️", "Are our probabilities honest?")
 st.caption("When we say a play is 60%, does it hit ~60% of the time? Points on the dashed line = "
            "well-calibrated. We show the warts too: if our longshots run hot, you'll see it here.")
 if cal and sum(c["n"] for c in cal) >= 8:
@@ -236,7 +239,7 @@ else:
 
 # ------------------------------------------------------------------ hit/miss (all tracked predictions)
 st.divider()
-st.subheader("🥧 Hit rate — every prediction we've tracked")
+C.section_header("🥧", "Hit rate — every prediction we've tracked")
 n_real = sum(1 for b in all_tracked if bool(b.get("is_real_bet") if b.get("is_real_bet") is not None else True))
 n_tracking = len(all_tracked) - n_real
 tracked_summary = B.summary(all_tracked)
@@ -262,7 +265,7 @@ else:
 
 # ------------------------------------------------------------------ receipts (historical, safe to show)
 st.divider()
-st.subheader("🧾 Recent results — the receipts")
+C.section_header("🧾", "Recent results — the receipts")
 st.caption("A rolling window of settled selections with how they graded. These are *past* calls "
            "(the games are over), shown for transparency. 🟢 hit · 🔴 miss.")
 settled = [b for b in bets if B._result(b) in ("win", "loss")]

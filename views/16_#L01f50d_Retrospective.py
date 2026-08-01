@@ -7,6 +7,7 @@ for new variables to explain a specific surprise after the fact.
 """
  
 import streamlit as st
+import components as C
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
@@ -19,9 +20,10 @@ import odds_api as O
 _active = sports.active()
 E, P = _active.engine, _active.projections
 
-st.title("🔍 Retrospective")
-st.caption(f"How the model's pre-game board lined up with what actually happened — "
-           f"{_active.icon} {_active.label}")
+C.base_css()
+C.page_header("🔍", "Retrospective",
+             f"How the model's pre-game board lined up with what actually happened — "
+             f"{_active.icon} {_active.label}")
 
 if not sports.require_live_engine("Retrospective"):
     st.stop()
@@ -135,7 +137,7 @@ if not summary["graded"]:
 st.caption(f"{n_games} games · {summary['graded']} plays graded · {n_results} players with results")
  
 # --- headline: could we have caught it? (all cast markets) -----------------
-st.subheader("🎯 Could we have caught it?")
+C.section_header("🎯", "Could we have caught it?")
 st.caption("For each market we cast, of the players whose result *cleared the line*, where did "
            "the model rank them **before** the game — and for the ones it ranked low, an honest "
            "reason. High rank = the model surfaced it; deep in the list = the data says it was "
@@ -187,14 +189,13 @@ def _render_market_review(rep, market, rows_by_pid):
         st.caption("Nothing cleared the line to review for this market on this date.")
  
  
-tabs = st.tabs([f"{_MARKET_ICONS.get(m, '🔹')} {m}" for m in _active_markets])
-for tab, market in zip(tabs, _active_markets):
-    with tab:
-        _render_market_review(reports[market], market, rows_by_pid)
-        if market == "Batter Total Hits":
-            st.caption("⚠️ Reminder: 1+ hits lands well over half the time, so a 'miss' here is closer "
-                       "to a coin flip than a called shot — most are simply variance, not something the "
-                       "model should have caught.")
+_RETRO_ITEMS = [(f"{_MARKET_ICONS.get(m, '🔹')} {m}", m) for m in _active_markets]
+market = C.wrapped_tab_picker(_RETRO_ITEMS, key="retro_market")
+_render_market_review(reports[market], market, rows_by_pid)
+if market == "Batter Total Hits":
+    st.caption("⚠️ Reminder: 1+ hits lands well over half the time, so a 'miss' here is closer "
+               "to a coin flip than a called shot — most are simply variance, not something the "
+               "model should have caught.")
 
 if _active.key == "MLB":
     st.caption("**\"Catchable\" does not mean the model was wrong** — it means a real, market-specific "
@@ -212,7 +213,7 @@ else:
  
 # --- model accuracy --------------------------------------------------------
 st.divider()
-st.subheader("📊 How the model's leans did")
+C.section_header("📊", "How the model's leans did")
 m1, m2, m3 = st.columns(3)
 m1.metric("Plays graded", summary["graded"])
 m2.metric("Hit rate", f"{summary['hit_rate']:.0%}" if summary["hit_rate"] is not None else "—")
@@ -263,7 +264,7 @@ if cal:
  
 # --- full graded board -----------------------------------------------------
 st.divider()
-st.subheader("Full graded board")
+C.section_header("📋", "Full graded board")
 only = st.radio("Show", ["All graded", "Hits only", "Misses only"], horizontal=True)
  
 _graded_all = [g for g in graded if g["Hit"] is not None]
@@ -303,11 +304,9 @@ def _render_graded(subset):
  
  
 _GRADED_TABS = [("All markets", None)] + [(f"{_MARKET_ICONS.get(m, '🔹')} {m}", m) for m in _active_markets]
-gtabs = st.tabs([t[0] for t in _GRADED_TABS])
-for tab, (_label, mkt) in zip(gtabs, _GRADED_TABS):
-    with tab:
-        subset = _graded_all if mkt is None else [g for g in _graded_all if g["Market"] == mkt]
-        _render_graded(subset)
+mkt = C.wrapped_tab_picker(_GRADED_TABS, key="retro_graded_market")
+subset = _graded_all if mkt is None else [g for g in _graded_all if g["Market"] == mkt]
+_render_graded(subset)
  
 if only == "Misses only":
     st.caption("**Why so many high-conviction plays 'missed':** conviction is a *ratio* (model prob ÷ "

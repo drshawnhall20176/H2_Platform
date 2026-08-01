@@ -18,6 +18,7 @@ Track Record goes public and the two pages actually serve two different audience
 """
 
 import streamlit as st
+import components as C
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -29,10 +30,11 @@ import bet_settlement
 import mlb_engine as E
 
 _active = sports.active()
-st.title(f"📒 Bet Log — proof layer  ·  {_active.icon} {_active.label}")
-st.caption("Track CLV, ROI, and calibration. The record that proves the model works. "
-           "Switch sports in the sidebar to see that sport's bets — every bet is logged with "
-           "the sport it was placed under.")
+C.base_css()
+C.page_header("📒", f"Bet Log — proof layer  ·  {_active.icon} {_active.label}",
+             "Track CLV, ROI, and calibration. The record that proves the model works. "
+             "Switch sports in the sidebar to see that sport's bets — every bet is logged with "
+             "the sport it was placed under.")
 st.page_link("views/19_Track_Record.py",
              label="📊 Want the polished, narrative version of this same evidence? See Track Record →",
              icon="📊")
@@ -168,7 +170,7 @@ if not bets:
 s = B.summary(bets)
  
 # --- Summary ----------------------------------------------------------------
-st.subheader("Performance")
+C.section_header("📈", "Performance")
 m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("Record", f"{s['wins']}-{s['losses']}", help=f"{s['open']} open, {s['settled']} settled")
 m2.metric("Profit", f"${s['profit']:,.2f}")
@@ -185,7 +187,7 @@ if s["clv_n"] == 0:
 # --- Open bets: settle ------------------------------------------------------
 open_bets = [b for b in bets if not b.get("result")]
 if open_bets:
-    st.subheader(f"Open bets ({len(open_bets)}) — enter closing odds & result, then save")
+    C.section_header("📝", f"Open bets ({len(open_bets)}) — enter closing odds & result, then save")
 
     # Auto-settle, added directly on request: betlog.py's own player_id column was added
     # specifically "for automated result settlement" (see its own schema comment) referencing
@@ -315,7 +317,7 @@ if open_bets:
         st.rerun()
  
 # --- Calibration ------------------------------------------------------------
-st.subheader("Calibration — do your probabilities tell the truth?")
+C.section_header("📐", "Calibration — do your probabilities tell the truth?")
 cal = B.calibration(bets, n_bins=5)
 settled_n = s["settled"]
 if settled_n < 20:
@@ -354,7 +356,7 @@ else:
  
 # --- Parlay vs straight bets -----------------------------------------------
 st.divider()
-st.subheader("🎫 Parlay vs straight bets")
+C.section_header("🎫", "Parlay vs straight bets")
 tickets = B.group_tickets(bets)
 multi = {t: legs for t, legs in tickets.items() if len(legs) > 1}
 if not multi:
@@ -394,7 +396,7 @@ else:
 
 # --- Cash-out vs. held --------------------------------------------------------
 st.divider()
-st.subheader("💵 Cash-out vs. held")
+C.section_header("💵", "Cash-out vs. held")
 st.caption("An honest measure of something this community jokes about a lot — is cashing out "
           "early actually costing money, or actually saving it? For every bet with a cash-out "
           "amount logged (in the settle table above) whose real result has since come in, this "
@@ -435,7 +437,7 @@ else:
  
 # --- Full ledger ------------------------------------------------------------
 st.divider()
-st.subheader("Ledger")
+C.section_header("📖", "Ledger")
 df = pd.DataFrame(bets)
 df["CLV%"] = df.apply(lambda r: B.clv_pct(r.get("entry_odds"), r.get("close_odds")), axis=1)
 df["P&L"] = df.apply(lambda r: B.bet_pnl(r), axis=1)

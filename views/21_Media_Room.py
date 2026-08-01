@@ -12,6 +12,7 @@ Plays whose opposing starter is undetermined (TBD) are excluded — the matchup 
 import os
  
 import streamlit as st
+import components as C
 from datetime import datetime
  
 import sports
@@ -24,7 +25,8 @@ _active = sports.active()
 # UFC is outcome-based -- Media Room's discussion hooks and content generation
 # are built on counting-stat projections that don't exist for UFC.
 if not _active.has_projections:
-    st.title("📣 H2 Sports Media")
+    C.base_css()
+    C.page_header("📣", "H2 Sports Media", "Curated plays with the reasoning, ready for the show")
     st.info("🥊 Media Room content generation doesn't apply to UFC — the discussion hooks "
             "and analysis are built on player stat projections. Head to **UFC Fight Card** "
             "for tonight's bouts and odds.")
@@ -34,22 +36,23 @@ E, P = _active.engine, _active.projections
 if not sports.require_live_engine("Media Room"):
     st.stop()
 
+C.base_css()
 st.markdown("""
 <style>
-.sel-card {background:#f8fafc;border:1px solid #e2e8f0;border-left:5px solid #7c3aed;
+.sel-card {background:#1a1f2b;border:1px solid #2d3344;border-left:5px solid #7c3aed;
            border-radius:10px;padding:14px 18px;margin-bottom:12px;}
-.sel-card h4 {margin:0 0 6px;font-size:17px;color:#0f172a;}
-.sel-card .case {color:#334155;font-size:14px;margin:2px 0;}
-.sel-card .rc {color:#64748b;font-size:13px;font-style:italic;margin-top:6px;}
+.sel-card h4 {margin:0 0 6px;font-size:17px;color:#f8fafc;}
+.sel-card .case {color:#c7ccd6;font-size:14px;margin:2px 0;}
+.sel-card .rc {color:#9aa4b2;font-size:13px;font-style:italic;margin-top:6px;}
 .sel-badge {display:inline-block;background:#7c3aed;color:#fff;font-size:12px;
             padding:2px 9px;border-radius:999px;margin-left:6px;vertical-align:middle;}
-.sel-val {display:inline-block;background:#dcfce7;color:#166534;font-size:12px;
+.sel-val {display:inline-block;background:#16783c;color:#f8fafc;font-size:12px;
           padding:2px 9px;border-radius:999px;margin-left:6px;vertical-align:middle;}
 </style>
 """, unsafe_allow_html=True)
  
-st.title(f"📣 H2 Sports Media — Selections  ·  {_active.icon} {_active.label}")
-st.caption("Curated plays we found interesting, with the reasoning — ready for the show and the Discord")
+C.page_header("📣", f"H2 Sports Media — Selections  ·  {_active.icon} {_active.label}",
+             "Curated plays we found interesting, with the reasoning — ready for the show and the Discord")
  
 SIDE_PHRASE = {
     ("Batter HR", "Over"): "to homer", ("Batter Total Bases", "Over"): "Over 1.5 total bases",
@@ -251,7 +254,7 @@ for i, p in enumerate(sel, 1):
         </div>""", unsafe_allow_html=True)
  
 # --- copy-all block --------------------------------------------------------
-st.subheader("📋 Copy for the show / Discord")
+C.section_header("📋", "Copy for the show / Discord")
 st.caption("One click the copy icon (top-right of the block) to grab the whole segment.")
 lines = [f"🎙️ H2 Sports Media — Selections we found interesting · {date_str}",
          f"({'live value' if ev_used else 'model conviction — prices not checked'})", ""]

@@ -13,6 +13,7 @@ behind each.
 """
 
 import streamlit as st
+import components as C
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
 import pandas as pd
 from datetime import datetime
@@ -25,10 +26,11 @@ import nfl_projections as P
 _active = sports.active()
 eastern = pytz.timezone("US/Eastern")
 
-st.title("🏈 QB Lab")
-st.caption("Matchup-aware Pass Yards projections and a TD:INT regression table — the honest NFL "
-          "counterpart to Pitching Lab's ERA-vs-FIP framing and matchup-adjusted K projections, "
-          "built on real confirmed play data rather than a forced port of baseball's formulas.")
+C.base_css()
+C.page_header("🏈", "QB Lab",
+             "Matchup-aware Pass Yards projections and a TD:INT regression table — the honest NFL "
+             "counterpart to Pitching Lab's ERA-vs-FIP framing and matchup-adjusted K projections, "
+             "built on real confirmed play data rather than a forced port of baseball's formulas.")
 
 if not sports.require_sport(["NFL"], "QB Lab"):
     st.stop()
@@ -69,7 +71,7 @@ if not matchup_proj and not efficiency:
 st.caption(f"{n_games} game(s) · {n_qbs} QB(s) on the slate")
 
 # === Matchup-aware projections =============================================
-st.subheader("⚡ Matchup-aware Pass Yards + Rush Yards projections")
+C.section_header("⚡", "Matchup-aware Pass Yards + Rush Yards projections")
 st.caption("Both Proj columns already account for how much yardage that specific opponent's "
           "defense has allowed this season relative to league average — the same odds-ratio "
           "matchup adjustment Pitching Lab's own Proj K uses, applied here to two yardage stats. "
@@ -106,7 +108,7 @@ else:
 
 # === TD:INT regression + rushing TDs ========================================
 st.divider()
-st.subheader("📉 Touchdowns: passing vs. rushing, and TD:INT regression")
+C.section_header("📉", "Touchdowns: passing vs. rushing, and TD:INT regression")
 st.caption("Passing TD:INT regression compares each QB's recent differential against their OWN "
           "season-long rate, not league average — a QB trending well above or below their own "
           "established norm is flagged, since the season sample is the more reliable baseline to "
@@ -139,7 +141,7 @@ else:
 
 # === Discussion hooks ========================================================
 st.divider()
-st.subheader("🤳 Discussion hooks (auto-generated)")
+C.section_header("🤳", "Discussion hooks (auto-generated)")
 st.caption("Talking points where recent form has meaningfully diverged from a QB's own season norm.")
 if efficiency:
     edf_sorted = pd.DataFrame(efficiency)

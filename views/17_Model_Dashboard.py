@@ -36,6 +36,7 @@ ONLY element 1, inline, right where the real financial data actually renders.
 """
 
 import streamlit as st
+import components as C
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
@@ -49,8 +50,9 @@ import grading as G
 _active = sports.active()
 E, P = _active.engine, _active.projections
 
-st.title("🏆 Model Dashboard")
-st.caption(f"Real bets and the tool's own picks, by market — {_active.icon} {_active.label}")
+C.base_css()
+C.page_header("🏆", "Model Dashboard",
+             f"Real bets and the tool's own picks, by market — {_active.icon} {_active.label}")
 
 if not sports.require_live_engine("Model Dashboard"):
     st.stop()
@@ -80,7 +82,7 @@ def _pie_grid(entries, hit_key: str, miss_key: str, title_key: str):
 
 # =========================================================================== element 1: real bets
 st.divider()
-st.subheader("💵 Real bets — hit rate by market")
+C.section_header("💵", "Real bets — hit rate by market")
 st.caption("Every real, placed bet we've logged, broken down by market. Real money, real "
           "results — nothing rebuilt or approximated here.")
 
@@ -109,7 +111,7 @@ if sports.require_trading_access("This section"):
 
 # =========================================================================== element 2: the tool's own picks
 st.divider()
-st.subheader("🎯 The tool's own picks — how the tool's recommendations graded out")
+C.section_header("🎯", "The tool's own picks — how the tool's recommendations graded out")
 st.caption("Rebuilt and graded against real results, filtered to C-or-better graded plays only "
           "— the same floor Suggested Parlays and Graded Picks already use to mean 'a real "
           "recommendation,' not every candidate the model ever considered.")
@@ -199,7 +201,7 @@ else:
 
 # =========================================================================== element 3: player calibration
 st.divider()
-st.subheader("🧑‍⚖️ Player calibration — model vs. reality, by player")
+C.section_header("🧑‍⚖️", "Player calibration — model vs. reality, by player")
 st.caption("A real, recurring pattern worth checking with data instead of gut feel: traders "
           "keeping an informal \"ban list\" of specific players who seem to keep missing on "
           "plays the model favored. This groups every SETTLED play in the window above by "
@@ -257,7 +259,7 @@ else:
 # =========================================================================== element 4: slate-wide chalk test
 if _active.key == "MLB":
     st.divider()
-    st.subheader("📅🎯 Slate-wide chalk test")
+    C.section_header("📅🎯", "Slate-wide chalk test")
     st.caption("Tests one specific, real, ONE-TIME claim from trader discussion, not a proven "
               "pattern: \"a slate with a lot of higher-tier starters tends to run chalky.\" "
               "Operationalized here as: does a day's average probable-starter FIP correlate "

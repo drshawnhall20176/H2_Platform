@@ -16,6 +16,7 @@ from datetime import datetime
 import pandas as pd
 import pytz
 import streamlit as st
+import components as C
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
  
 import sports
@@ -26,15 +27,17 @@ import bet_sizing as BS
 _active = sports.active()
 
 if not _active.has_projections:
-    st.title("📈 Edge Board")
+    C.base_css()
+    C.page_header("📈", "Edge Board", "Model probabilities, fair prices, and live edges")
     st.info("🥊 Edge Board doesn't apply to UFC — it's built on player stat projections. "
             "Head to **UFC Fight Card** in the sidebar for tonight's bouts and odds.")
     st.stop()
 E, P = _active.engine, _active.projections   # sport-routed: MLB -> mlb_engine/projections,
                                               # WNBA -> wnba_engine/wnba_projections, etc.
-st.title("📈 Edge Board")
-st.caption(f"Model probabilities, fair prices, and live edges for every prop on the slate "
-           f"— {_active.icon} {_active.label}")
+C.base_css()
+C.page_header("📈", "Edge Board",
+             f"Model probabilities, fair prices, and live edges for every prop on the slate "
+             f"— {_active.icon} {_active.label}")
 
 if not sports.require_live_engine("Edge Board"):
     st.stop()
@@ -128,7 +131,7 @@ board = pd.DataFrame(P.default_board_from_index(index))
 # ============================================================================
 # LIVE EDGES
 # ============================================================================
-st.subheader("💵 Live edges")
+C.section_header("💵", "Live edges")
 api_key = get_api_key()
  
 if not api_key:
@@ -442,7 +445,7 @@ else:
 # MODEL BOARD (no odds needed)
 # ============================================================================
 st.divider()
-st.subheader("🧮 Model board (no odds)")
+C.section_header("🧮", "Model board (no odds)")
 st.caption("Model probabilities and fair prices at default lines — your pre-odds scouting view. "
            "Without a market this can't compute edge, but it can flag where an edge could realistically "
            "be *found and bet* once you fetch odds.")
@@ -566,7 +569,7 @@ bets and slow, bumpy growth — that's the math, not a flaw.
 # ============================================================================
 if _active.key == "NFL":
     st.divider()
-    st.subheader("🏈 Fantasy Football Rankings")
+    C.section_header("🏈", "Fantasy Football Rankings")
     st.caption("Projected fantasy points from the same model driving the Edge Board — "
                "ranked by position for start/sit decisions. "
                "**No TD projections** (too sparse/random) and **no injury monitoring**. "

@@ -9,6 +9,7 @@ plan, and a sign-off. Copy-pasteable as a complete show doc.
 import os
 
 import streamlit as st
+import components as C
 from datetime import datetime, timedelta
 
 import sports
@@ -22,7 +23,8 @@ _active = sports.active()
 # UFC is outcome-based -- Podcast Studio's script generation is built on
 # player stat projections that don't exist for UFC.
 if not _active.has_projections:
-    st.title("🎙️ H2 Podcast Studio")
+    C.base_css()
+    C.page_header("🎙️", "H2 Podcast Studio", "Episode scripts, rebuilt every day from the slate")
     st.info("🥊 Podcast Studio doesn't apply to UFC — the episode scripts are built on "
             "player stat projections. Head to **UFC Fight Card** for tonight's bouts.")
     st.stop()
@@ -39,19 +41,20 @@ def get_key():
         return os.environ.get("ODDS_API_KEY")
 
 
+C.base_css()
 st.markdown("""
 <style>
-.beat-line {margin:3px 0;font-size:14px;color:#0f172a;}
-.beat-line b {color:#7c3aed;}
-.beat-note {margin:3px 0;font-size:13px;color:#64748b;font-style:italic;}
-.beat-fill {margin:4px 0;font-size:14px;background:#fef9c3;border-left:3px solid #eab308;
-            padding:4px 10px;border-radius:5px;color:#713f12;}
-.sec-time {color:#94a3b8;font-size:13px;font-weight:normal;}
+.beat-line {margin:3px 0;font-size:14px;color:#e6e6e6;}
+.beat-line b {color:#a78bfa;}
+.beat-note {margin:3px 0;font-size:13px;color:#9aa4b2;font-style:italic;}
+.beat-fill {margin:4px 0;font-size:14px;background:#3a3410;border-left:3px solid #eab308;
+            padding:4px 10px;border-radius:5px;color:#fde68a;}
+.sec-time {color:#9aa4b2;font-size:13px;font-weight:normal;}
 </style>
 """, unsafe_allow_html=True)
 
-st.title(f"🎙️ H2 Podcast Studio  ·  {_active.icon} {_active.label}")
-st.caption("A full ~hour show rundown for Dr. Hall & Deezy — rebuilt every day from the slate")
+C.page_header("🎙️", f"H2 Podcast Studio  ·  {_active.icon} {_active.label}",
+             "A full ~hour show rundown for Dr. Hall & Deezy — rebuilt every day from the slate")
 
 
 def _board_mlb(date_str):
@@ -180,6 +183,6 @@ for sec in sections:
 
 # --- full copy-paste show doc ----------------------------------------------
 st.divider()
-st.subheader("📋 Full show doc — copy for the studio")
+C.section_header("📋", "Full show doc — copy for the studio")
 st.caption("One click the copy icon to grab the entire rundown for your notes or teleprompter.")
 st.code(PC.script_to_text(date_str, sections), language=None)
