@@ -431,6 +431,55 @@ def test_build_game_lineups_none_when_lineup_incomplete(monkeypatch):
     print("✓ build_game_lineups returns None (not a partial/guessed lineup) when a full 9 real batters can't be assembled")
 
 
+# ----------------------------------------------------------------- get_lineup_status
+def test_get_lineup_status_both_confirmed_when_batting_order_posted(monkeypatch):
+    home_pids = list(range(101, 110))
+    away_pids = list(range(201, 210))
+    box = _fake_lineup_box(home_pids, away_pids)
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: box)
+
+    home_confirmed, away_confirmed = E.get_lineup_status(game_pk=999, home_id=10, away_id=20)
+    assert home_confirmed is True and away_confirmed is True
+    print("✓ get_lineup_status reports both sides confirmed when a real battingOrder is posted "
+         "for both")
+
+
+def test_get_lineup_status_not_confirmed_when_batting_order_empty(monkeypatch):
+    # Empty battingOrder -- _team_starters falls back to the active roster, exactly the
+    # "not officially posted yet" case the red bubble is supposed to represent.
+    box = {"teams": {"home": {"battingOrder": []}, "away": {"battingOrder": []}}}
+    monkeypatch.setattr(E, "fetch_json",
+                        lambda url, params=None, retries=2: (
+                            {"roster": [{"person": {"id": 1}, "position": {"abbreviation": "1B"}}]}
+                            if "roster" in url else box))
+    home_confirmed, away_confirmed = E.get_lineup_status(game_pk=999, home_id=10, away_id=20)
+    assert home_confirmed is False and away_confirmed is False
+    print("✓ get_lineup_status reports NOT confirmed for a side with no real battingOrder posted yet")
+
+
+def test_get_lineup_status_one_side_confirmed_one_not(monkeypatch):
+    # Real, reported bug class this mirrors: home/away must be decided INDEPENDENTLY, not both
+    # flipped together by one side's own status.
+    box = {"teams": {"home": {"battingOrder": list(range(101, 110))}, "away": {"battingOrder": []}}}
+    monkeypatch.setattr(E, "fetch_json",
+                        lambda url, params=None, retries=2: (
+                            {"roster": [{"person": {"id": 1}, "position": {"abbreviation": "1B"}}]}
+                            if "roster" in url else box))
+    home_confirmed, away_confirmed = E.get_lineup_status(game_pk=999, home_id=10, away_id=20)
+    assert home_confirmed is True and away_confirmed is False
+    print("✓ get_lineup_status decides home/away lineup confirmation independently, not coupled")
+
+
+def test_get_lineup_status_returns_not_confirmed_on_fetch_failure(monkeypatch):
+    def _boom(url, params=None, retries=2):
+        raise ConnectionError("simulated network failure")
+    monkeypatch.setattr(E, "fetch_json", _boom)
+    home_confirmed, away_confirmed = E.get_lineup_status(game_pk=999, home_id=10, away_id=20)
+    assert home_confirmed is False and away_confirmed is False
+    print("✓ get_lineup_status fails honest (not confirmed) rather than crashing or guessing "
+         "confirmed on a real fetch failure")
+
+
 # ----------------------------------------------------------------- get_team_injuries
 def test_get_team_injuries_filters_to_non_active_status(monkeypatch):
     # Documented roster response shape (MLB Stats API's own roster endpoint structure), not a

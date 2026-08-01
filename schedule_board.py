@@ -38,11 +38,48 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+import streamlit as st
+
 import league_structure as LS
 import sports
 
 # Sports this section covers -- see module docstring for why NCAAMB/UFC are excluded.
 SUPPORTED_SPORTS = {"MLB", "NBA", "WNBA", "NFL", "NCAAF"}
+
+
+def _categorize_status(raw_text: Optional[str], espn_state: Optional[str] = None) -> str:
+    """Maps a sport's own raw status text (MLB's detailedState: "Scheduled", "In Progress",
+    "Final", "Postponed", "Delayed Start", "Suspended", "Cancelled", etc.) and/or ESPN's coarse
+    state (pre/in/post, for NBA/WNBA) into ONE of this platform's own 5 categories: scheduled,
+    delayed, canceled, in-progress, finished.
+
+    TEXT CHECKED FIRST, REGARDLESS OF STATE -- a real, deliberate ordering: ESPN can report
+    state="in" for a game that's actually paused for a rain delay (the clock stops, state doesn't
+    change), and MLB's own "Suspended"/"Postponed" don't map cleanly onto pre/in/post at all.
+    Keyword-matching the human-readable text first catches these real cases regardless of which
+    coarse bucket the source system itself puts them in; the state fallback below only fires when
+    the text itself doesn't say anything more specific (or is missing entirely, e.g. NFL/NCAAF's
+    derived-only status -- see their own callers for why those two sports only ever produce
+    "scheduled" or "finished").
+
+    Never returns anything outside the 5 real categories, and always returns SOMETHING -- an
+    unrecognized/missing status honestly defaults to "scheduled" (a real game the platform simply
+    doesn't have detail on yet is closer to "hasn't started" than any of the other 4 for display
+    purposes), never a blank or a crash."""
+    s = (raw_text or "").lower()
+    if "cancel" in s:
+        return "canceled"
+    if "postpon" in s or "delay" in s or "suspend" in s:
+        return "delayed"
+    if "final" in s or "game over" in s or ("complet" in s and "incomplet" not in s):
+        return "finished"
+    if "progress" in s:
+        return "in-progress"
+    if espn_state == "post":
+        return "finished"
+    if espn_state == "in":
+        return "in-progress"
+    return "scheduled"
 
 
 def _mlb_games(date_str: str) -> List[Dict[str, Any]]:
@@ -57,11 +94,20 @@ def _mlb_games(date_str: str) -> List[Dict[str, Any]]:
         # used pattern (mlbstatic.com/team-logos/{id}.svg), not a guessed URL. None-safe: a
         # missing id just means no logo, never a crash.
         home_id, away_id = g.get("home_id"), g.get("away_id")
+        # Real lineup-confirmation status per side -- see mlb_engine.get_lineup_status's own
+        # docstring. One extra live fetch per game; safe here specifically because the whole
+        # todays_schedule() result is cached below (see that function's own comment).
+        game_pk = g.get("gamePk")
+        home_confirmed = away_confirmed = None
+        if game_pk and home_id and away_id:
+            home_confirmed, away_confirmed = E.get_lineup_status(game_pk, home_id, away_id)
         out.append({
             "home": g.get("home_name"), "away": g.get("away_name"),
             "home_logo": f"https://www.mlbstatic.com/team-logos/{home_id}.svg" if home_id else None,
             "away_logo": f"https://www.mlbstatic.com/team-logos/{away_id}.svg" if away_id else None,
             "dt": dt, "time_known": True, "venue": g.get("venue_name"),
+            "status": _categorize_status(g.get("status")),
+            "home_lineup_confirmed": home_confirmed, "away_lineup_confirmed": away_confirmed,
         })
     return out
 
@@ -79,7 +125,13 @@ def _basketball_games(date_str: str, engine_module: str) -> List[Dict[str, Any]]
         # wnba_engine.py's own get_schedule for where this is captured. Never a guess.
         out.append({"home": g.get("home_name"), "away": g.get("away_name"),
                     "home_logo": g.get("home_logo"), "away_logo": g.get("away_logo"),
-                    "dt": dt, "time_known": True, "venue": None})
+                    "dt": dt, "time_known": True, "venue": None,
+                    "status": _categorize_status(g.get("status_detail"), g.get("status_state")),
+                    # No confirmed lineup-status signal for these two sports yet -- see
+                    # schedule_board.py's own module-level notes on scope. None (not False),
+                    # so the renderer knows to skip the bubble entirely rather than show a
+                    # red "not confirmed" that isn't a real, checked answer.
+                    "home_lineup_confirmed": None, "away_lineup_confirmed": None})
     return out
 
 
@@ -116,7 +168,16 @@ def _nfl_games(date_str: str) -> List[Dict[str, Any]]:
         out.append({"home": g.get("home_team"), "away": g.get("away_team"),
                     "home_logo": _espn_cdn_logo("nfl", g.get("home_team")),
                     "away_logo": _espn_cdn_logo("nfl", g.get("away_team")),
-                    "dt": None, "time_known": False, "venue": None})
+                    "dt": None, "time_known": False, "venue": None,
+                    # HONEST LIMITATION, not a gap in this function's own logic: nflreadpy's
+                    # schedule data isn't a live feed, so "delayed"/"in-progress"/"canceled"
+                    # genuinely can't be told apart here -- only whether a real final score has
+                    # posted yet. Real score presence (not just "did the scheduled time pass")
+                    # is the honest signal, since a postponed/delayed game's own start time
+                    # already came and went without becoming Finished.
+                    "status": ("finished" if g.get("home_score") is not None
+                              and g.get("away_score") is not None else "scheduled"),
+                    "home_lineup_confirmed": None, "away_lineup_confirmed": None})
     return out
 
 
@@ -168,10 +229,17 @@ def group_games(sport_key: str, games: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"grouped": grouped, "other": other, "has_divisions": has_divisions}
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def todays_schedule(sport_key: str, date_str: str) -> Optional[Dict[str, Any]]:
     """Public entry point. Returns None for a sport outside SUPPORTED_SPORTS (the caller should
     simply not render the section, not show an empty/broken one) -- otherwise a dict from
-    group_games above, always a real (possibly empty) result, never a crash on a bad fetch."""
+    group_games above, always a real (possibly empty) result, never a crash on a bad fetch.
+
+    CACHED, 5-minute TTL -- MLB's own per-game lineup-status check (get_lineup_status) adds one
+    real boxscore fetch PER GAME shown, on top of the base schedule fetch; without caching, every
+    Streamlit rerun on Home.py (which happens on any widget interaction anywhere on the page, not
+    just a real refresh) would re-run the whole slate's worth of live fetches. Same TTL convention
+    best_bets_data.py's own today_board already uses for live-ish data."""
     if sport_key not in SUPPORTED_SPORTS:
         return None
     try:
@@ -221,5 +289,10 @@ def _ncaaf_games_with_conference(date_str: str) -> List[Dict[str, Any]]:
                     # Real, stated gap: would need its own CFBD teams-endpoint fetch+cache,
                     # same pattern the schedule itself already uses, not a guess.
                     "home_logo": None, "away_logo": None,
+                    # HONEST LIMITATION, same as NFL's own: CFBD's schedule cache is refreshed
+                    # periodically, not a live feed, so only Scheduled/Finished are real signals
+                    # here -- "completed" is CFBD's own real field, already on this row.
+                    "status": "finished" if g.get("completed") else "scheduled",
+                    "home_lineup_confirmed": None, "away_lineup_confirmed": None,
                     "_home_conference": g.get("home_conference")})
     return out

@@ -728,6 +728,31 @@ def build_game_lineups(game_pk: int, home_id: int, away_id: int,
     return {"home_pm": home_pm, "away_pm": away_pm, "home_rows": home_rows[:9], "away_rows": away_rows[:9]}
 
 
+def get_lineup_status(game_pk: int, home_id: int, away_id: int) -> Tuple[bool, bool]:
+    """Whether each side's REAL starting lineup has been officially posted yet (a real
+    battingOrder present on the live boxscore) vs still just this platform's own active-roster
+    projection -- the exact same detection _team_starters/build_game_lineups already use for
+    real simulation input, reused here for a much cheaper caller that only wants the yes/no
+    status, not the full 9-batter lineup itself. Returns (home_confirmed, away_confirmed).
+
+    REAL COST: exactly one boxscore fetch, not the 18 additional hitter fetches build_game_
+    lineups needs on top of it -- safe to call once per game on a schedule board showing an
+    entire day's slate, where build_game_lineups' own real cost would multiply badly.
+
+    Fails honest, not silent: any fetch problem returns (False, False) -- "not confirmed yet" is
+    the correct, safe default when the real answer can't be determined (a genuinely unconfirmed
+    lineup and an unknown one look identical to a caller that just wants a yes/no, and defaulting
+    to "confirmed" on a fetch error would be the wrong direction to be wrong in)."""
+    try:
+        box = fetch_json(f"{BASE}/game/{game_pk}/boxscore")
+    except Exception:
+        return False, False
+    game_stub = {"home_id": home_id, "away_id": away_id}
+    _home_pids, home_projected = _team_starters(game_stub, "home", box)
+    _away_pids, away_projected = _team_starters(game_stub, "away", box)
+    return (not home_projected), (not away_projected)
+
+
 def _hitter_row(raw: Dict, opp: PitcherMetrics, team_name: str,
                 game_label: str, projected: bool, lineup_idx: int = 0,
                 venue_id: int = None, opp_team_id: int = None) -> Dict:

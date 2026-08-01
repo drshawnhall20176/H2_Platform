@@ -323,3 +323,52 @@ def test_todays_schedule_board_lays_out_conferences_in_columns(monkeypatch, capt
     C.todays_schedule_board(result, "⚾", "MLB")
     assert columns_calls, "todays_schedule_board must call st.columns to lay out conferences side by side"
     print(f"✓ todays_schedule_board lays out conferences using st.columns (called with n={columns_calls})")
+
+
+# ----------------------------------------------------------------- status badge + lineup bubbles
+def test_status_badge_shown_for_non_scheduled_states():
+    import components as C
+    assert "Live" in C._status_badge_html("in-progress")
+    assert "Delayed" in C._status_badge_html("delayed")
+    assert "Canceled" in C._status_badge_html("canceled")
+    assert "Final" in C._status_badge_html("finished")
+    print("✓ _status_badge_html shows the right label for every non-scheduled state")
+
+
+def test_status_badge_empty_for_scheduled_or_unknown():
+    # Deliberate: the time chip already says "upcoming" -- a same-meaning badge is redundant.
+    import components as C
+    assert C._status_badge_html("scheduled") == ""
+    assert C._status_badge_html(None) == ""
+    assert C._status_badge_html("") == ""
+    print("✓ _status_badge_html renders nothing for scheduled/unknown status, no redundant badge")
+
+
+def test_lineup_bubble_shows_green_for_confirmed_red_for_not():
+    import components as C
+    html = C._lineup_bubble_html({"home_lineup_confirmed": True, "away_lineup_confirmed": False})
+    assert html.count("border-radius:50%") == 2   # two dots
+    assert C._TREND_COLOR["good"] in html   # home: green
+    assert C._TREND_COLOR["bad"] in html    # away: red
+    assert "H:" in html and "A:" in html
+    print("✓ lineup bubbles show green for a confirmed lineup and red for one that isn't, "
+         "independently per side")
+
+
+def test_lineup_bubble_empty_when_not_applicable():
+    # Sports without a confirmed lineup-status signal (NBA/WNBA/NFL/NCAAF right now) pass both
+    # as None -- must render nothing at all, not a pair of misleading red dots.
+    import components as C
+    assert C._lineup_bubble_html({"home_lineup_confirmed": None, "away_lineup_confirmed": None}) == ""
+    print("✓ lineup bubbles render nothing when the sport has no confirmed signal, not a false red")
+
+
+def test_schedule_game_row_includes_status_and_lineup_bubbles():
+    import components as C
+    g = {"home": "New York Yankees", "away": "Boston Red Sox", "dt": None, "time_known": False,
+        "venue": None, "home_logo": None, "away_logo": None, "status": "delayed",
+        "home_lineup_confirmed": True, "away_lineup_confirmed": True}
+    html = C._schedule_game_row(g, "#3b82f6")
+    assert "Delayed" in html
+    assert html.count("border-radius:50%") == 2
+    print("✓ schedule game row includes both the status badge and lineup bubbles when present")

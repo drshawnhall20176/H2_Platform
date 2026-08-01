@@ -239,6 +239,53 @@ def _team_logo_html(url: Optional[str]) -> str:
            f'vertical-align:middle;margin-right:5px;" onerror="this.style.display=\'none\'">')
 
 
+# Game-status badge colors -- a genuinely separate semantic dimension from the conference accent
+# color or _TREND_COLOR's own good/bad/neutral judgment (a live game isn't "good", a final score
+# isn't "bad") -- its own small, fixed map so it never accidentally collides with either.
+_STATUS_STYLE = {
+    "delayed": ("#f59e0b", "Delayed"),
+    "canceled": ("#dc2626", "Canceled"),
+    "in-progress": ("#16a34a", "Live"),
+    "finished": ("#8b93a1", "Final"),
+    # "scheduled" deliberately has no entry -- the time chip already communicates "upcoming",
+    # a same-meaning "Scheduled" badge next to it would be pure redundancy, not new information.
+}
+
+
+def _status_badge_html(status: Optional[str]) -> str:
+    """A small colored status badge for anything OTHER than 'scheduled' (see _STATUS_STYLE's own
+    comment on why) -- empty string for scheduled/unknown, never a placeholder badge for the
+    common case."""
+    style = _STATUS_STYLE.get(status or "")
+    if not style:
+        return ""
+    color, label = style
+    return (f'<span style="font-size:11px;font-weight:700;white-space:nowrap;'
+           f'background:{color}22;color:{color};padding:3px 8px;border-radius:6px;'
+           f'border:1px solid {color}55;">{label}</span>')
+
+
+def _lineup_bubble_html(g: dict) -> str:
+    """H:/A: red-or-green dots showing whether each side's REAL starting lineup is officially
+    posted yet (green) or still just this platform's own projection (red) -- MLB only right now,
+    see schedule_board.py's own module notes on why other sports don't have a confirmed signal
+    for this yet. Empty string entirely when both sides are None (not applicable for this sport),
+    so nothing renders instead of a pair of misleading always-red dots."""
+    home_c, away_c = g.get("home_lineup_confirmed"), g.get("away_lineup_confirmed")
+    if home_c is None and away_c is None:
+        return ""
+    green, red = _TREND_COLOR["good"], _TREND_COLOR["bad"]
+
+    def _dot(confirmed: Optional[bool]) -> str:
+        color = green if confirmed else red
+        return (f'<span style="width:8px;height:8px;border-radius:50%;background:{color};'
+               f'display:inline-block;margin-left:3px;"></span>')
+
+    return (f'<span style="display:inline-flex;align-items:center;gap:2px;font-size:10.5px;'
+           f'color:#9aa4b2;font-weight:600;">H:{_dot(home_c)}'
+           f'<span style="margin-left:6px;">A:</span>{_dot(away_c)}</span>')
+
+
 def _schedule_game_row(g: dict, color: str) -> str:
     """One game's self-contained HTML row -- team logo + away @ home pulled together on the
     left, a small colored time chip and venue immediately after (not stretched to the far edge
@@ -249,13 +296,18 @@ def _schedule_game_row(g: dict, color: str) -> str:
     is the SAME accent color assigned to this game's conference (see todays_schedule_board) --
     carries the conference's own color through to the row level via the same alpha-blended-
     background technique kpi_row already uses, rather than introduce an unrelated new color
-    scheme."""
+    scheme.
+
+    Also carries a real game-status badge (Live/Delayed/Canceled/Final -- see _STATUS_STYLE) and,
+    for MLB specifically, H:/A: lineup-confirmation bubbles -- both added directly on request."""
     if g.get("time_known") and g.get("dt") is not None:
         time_str = g["dt"].strftime("%-I:%M %p ET")
     else:
         time_str = "Time TBD"
     venue_html = (f'<span style="font-size:11.5px;color:#9aa4b2;">{g["venue"]}</span>'
                  if g.get("venue") else "")
+    status_html = _status_badge_html(g.get("status"))
+    lineup_html = _lineup_bubble_html(g)
     return f"""
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;
                 padding:8px 10px;border-radius:8px;margin-bottom:3px;
@@ -266,6 +318,8 @@ def _schedule_game_row(g: dict, color: str) -> str:
         {_team_logo_html(g.get('home_logo'))}<span style="font-weight:600;">{g.get('home', '?')}</span>
       </div>
       <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+        {lineup_html}
+        {status_html}
         <span style="font-size:11.5px;font-weight:700;white-space:nowrap;background:{color}1e;
                     color:{color};padding:3px 9px;border-radius:6px;">{time_str}</span>
         {venue_html}

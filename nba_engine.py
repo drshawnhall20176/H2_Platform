@@ -113,10 +113,17 @@ def get_schedule(date_str: str) -> List[Dict[str, Any]]:
         away = next((c for c in competitors if c.get("homeAway") == "away"), None)
         if not home or not away:
             continue
+        # Real live status ESPN's own scoreboard already carries per competition -- state is the
+        # coarse pre/in/post bucket, description is the human-readable text ("Scheduled", "Final",
+        # "Delayed", "Postponed", etc.). Captured raw here; schedule_board.py owns mapping this
+        # into the platform's own 5-category status.
+        status_obj = ((comps[0].get("status") or {}).get("type") or {})
         try:
             games.append({
                 "gameId": event.get("id"),
                 "game_date": event.get("date"),
+                "status_state": status_obj.get("state"),
+                "status_detail": status_obj.get("description"),
                 "home_id": int(home["team"]["id"]),
                 "home_name": home["team"].get("displayName", "Unknown"),
                 "home_abbr": home["team"].get("abbreviation"),

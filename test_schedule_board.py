@@ -132,11 +132,116 @@ def test_espn_cdn_logo_none_safe():
     print("✓ _espn_cdn_logo returns None for a missing abbreviation, never crashes or guesses")
 
 
+# ----------------------------------------------------------------- _categorize_status
+def test_categorize_status_mlb_detailed_states():
+    assert SB._categorize_status("Scheduled") == "scheduled"
+    assert SB._categorize_status("Pre-Game") == "scheduled"
+    assert SB._categorize_status("Warmup") == "scheduled"
+    assert SB._categorize_status("In Progress") == "in-progress"
+    assert SB._categorize_status("Final") == "finished"
+    assert SB._categorize_status("Game Over") == "finished"
+    assert SB._categorize_status("Postponed") == "delayed"
+    assert SB._categorize_status("Delayed Start") == "delayed"
+    assert SB._categorize_status("Delayed: Rain") == "delayed"
+    assert SB._categorize_status("Suspended") == "delayed"
+    assert SB._categorize_status("Cancelled") == "canceled"
+    print("✓ _categorize_status correctly maps every real MLB detailedState value seen in this "
+         "codebase to one of the 5 categories")
+
+
+def test_categorize_status_espn_state_fallback():
+    # No specific text, only ESPN's coarse pre/in/post state -- the fallback path.
+    assert SB._categorize_status(None, "pre") == "scheduled"
+    assert SB._categorize_status(None, "in") == "in-progress"
+    assert SB._categorize_status(None, "post") == "finished"
+    print("✓ _categorize_status falls back to ESPN's coarse state when there's no more specific text")
+
+
+def test_categorize_status_text_overrides_state():
+    # Regression guard for the real, stated reason text is checked FIRST: a rain delay mid-game
+    # can leave ESPN's own state at "in" while the description says "Delayed".
+    assert SB._categorize_status("Delayed", "in") == "delayed"
+    assert SB._categorize_status("Postponed", "pre") == "delayed"
+    print("✓ specific status text overrides the coarse pre/in/post state when they disagree")
+
+
+def test_categorize_status_unknown_defaults_to_scheduled_not_crash():
+    assert SB._categorize_status(None, None) == "scheduled"
+    assert SB._categorize_status("", "") == "scheduled"
+    assert SB._categorize_status("Some Unrecognized Future Status") == "scheduled"
+    print("✓ _categorize_status never crashes on missing/unrecognized input, defaults honestly "
+         "to scheduled")
+
+
 def test_todays_schedule_returns_none_for_unsupported_sport():
     assert SB.todays_schedule("NCAAMB", "2026-08-01") is None
     assert SB.todays_schedule("UFC", "2026-08-01") is None
     print("✓ todays_schedule returns None for sports outside SUPPORTED_SPORTS (NCAAMB, UFC) -- "
          "the caller's signal to simply not render the section")
+
+
+# ----------------------------------------------------------------- per-sport status/lineup wiring
+def test_mlb_games_wires_real_status_and_lineup_confirmation(monkeypatch):
+    import mlb_engine as E
+    fake_schedule = [{
+        "gamePk": 12345, "gameNumber": 1, "game_date": "2026-08-01T23:10:00Z",
+        "status": "In Progress", "venue_name": "Yankee Stadium", "venue_id": 1,
+        "home_name": "New York Yankees", "away_name": "Boston Red Sox",
+        "home_id": 147, "away_id": 111, "home_pitcher_id": None, "away_pitcher_id": None,
+        "home_score": None, "away_score": None,
+    }]
+    monkeypatch.setattr(E, "get_schedule", lambda date_str: fake_schedule)
+    monkeypatch.setattr(E, "get_lineup_status", lambda game_pk, home_id, away_id: (True, False))
+
+    games = SB._mlb_games("2026-08-01")
+    assert len(games) == 1
+    g = games[0]
+    assert g["status"] == "in-progress"
+    assert g["home_lineup_confirmed"] is True
+    assert g["away_lineup_confirmed"] is False
+    print("✓ _mlb_games wires real status and independently-decided lineup confirmation per side")
+
+
+def test_nfl_games_status_finished_only_when_both_scores_present(monkeypatch):
+    import nfl_engine as E
+    fake_schedule = [
+        {"game_id": "g1", "week": 1, "game_date": "2026-09-08", "home_team": "KC", "away_team": "BUF",
+         "home_score": 24, "away_score": 20, "home_rest": 7, "away_rest": 7},
+        {"game_id": "g2", "week": 1, "game_date": "2026-09-08", "home_team": "SF", "away_team": "SEA",
+         "home_score": None, "away_score": None, "home_rest": 7, "away_rest": 7},
+    ]
+    monkeypatch.setattr(E, "get_schedule", lambda season: fake_schedule)
+    monkeypatch.setattr(E, "_infer_season", lambda date_str: 2026)
+    monkeypatch.setattr(E, "_resolve_week", lambda schedule, date_str: 1)
+
+    games = SB._nfl_games("2026-09-08")
+    by_home = {g["home"]: g for g in games}
+    assert by_home["KC"]["status"] == "finished"
+    assert by_home["SF"]["status"] == "scheduled"
+    print("✓ NFL games only report 'finished' when a real final score is present, 'scheduled' "
+         "otherwise -- never a fabricated in-progress/delayed")
+
+
+def test_ncaaf_games_status_uses_real_completed_field(monkeypatch):
+    import ncaaf_engine as E
+    fake_schedule = [
+        {"id": 1, "week": 1, "start_date": "2026-08-30T19:00:00Z", "start_time_tbd": False,
+         "completed": True, "venue": "Sanford Stadium", "home_team": "Georgia",
+         "home_conference": "SEC", "away_team": "Alabama", "away_conference": "SEC"},
+        {"id": 2, "week": 1, "start_date": "2026-08-30T23:00:00Z", "start_time_tbd": False,
+         "completed": False, "venue": None, "home_team": "Ohio State",
+         "home_conference": "Big Ten", "away_team": "Michigan", "away_conference": "Big Ten"},
+    ]
+    monkeypatch.setattr(E, "get_schedule", lambda season: fake_schedule)
+    monkeypatch.setattr(E, "_infer_season", lambda date_str: 2026)
+    monkeypatch.setattr(E, "_resolve_week", lambda schedule, date_str: 1)
+    monkeypatch.setattr(E, "games_for_week", lambda schedule, week: schedule)
+
+    games = SB._ncaaf_games_with_conference("2026-08-30")
+    by_home = {g["home"]: g for g in games}
+    assert by_home["Georgia"]["status"] == "finished"
+    assert by_home["Ohio State"]["status"] == "scheduled"
+    print("✓ NCAAF games use CFBD's own real 'completed' field for status, not a guess")
 
 
 if __name__ == "__main__":
