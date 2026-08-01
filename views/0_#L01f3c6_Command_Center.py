@@ -11,6 +11,7 @@ claim, it reads "tracking since inception" until the Bet Log fills it in for rea
  
 import streamlit as st
 import styling  # installs theme-proof .theme_gradient (readable in light + dark)
+import components as C  # shared KPI tiles / section headers -- see that module's own docstring
 import pandas as pd
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
@@ -24,28 +25,15 @@ import quick_log
  
 _active = sports.active()
  
-st.markdown("""
-<style>
-.h2-hero {background:linear-gradient(110deg,#0f172a,#1e293b);padding:22px 26px;border-radius:14px;
-          color:#f8fafc;margin-bottom:6px;}
-.h2-hero h1 {margin:0;font-size:30px;letter-spacing:-0.5px;}
-.h2-hero p {margin:4px 0 0;color:#94a3b8;font-size:15px;}
-.pipe {display:inline-block;background:#1e293b;color:#e2e8f0;border:1px solid #334155;
-       padding:6px 12px;border-radius:999px;margin:3px 4px;font-size:13px;}
-.pipe-arrow {color:#64748b;margin:0 2px;}
-</style>
-""", unsafe_allow_html=True)
- 
-st.markdown(f"""
-<div class="h2-hero">
-  <h1>🏆 H2 Sports — Command Center</h1>
-  <p>Trade sports, don't bet sports. A layered model that prices every prop, sizes with
-     discipline, and proves itself with closing-line value and calibration. — {_active.icon} {_active.label}</p>
-</div>
-""", unsafe_allow_html=True)
+C.hero_banner("🏆", "H2 Sports — Command Center",
+             f"Trade sports, don't bet sports. A layered model that prices every prop, sizes with "
+             f"discipline, and proves itself with closing-line value and calibration. — "
+             f"{_active.icon} {_active.label}")
 
 if not sports.require_live_engine("Command Center"):
     st.stop()
+
+C.base_css()
 
 # Icon per market, for the tab strips below — falls back to a generic icon for anything not
 # listed (future sports don't need an entry here to render correctly, just less decoratively).
@@ -123,14 +111,21 @@ s = B.summary(bets)
  
 # ---------- KPI row ----------
 top = plays[0] if plays else None
-k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("Tonight's games", n_games)
-k2.metric("Model plays", len(plays))
-k3.metric("Top lean", f"{top['Conviction']:.1f}×" if top else "—",
-          help=f"{top['Player']} {top['Market']} {top['Side']}" if top else None)
-k4.metric("Beat-close rate", f"{s['beat_close_rate']:.0f}%" if s["beat_close_rate"] is not None else "—",
-          help="Share of bets that beat the closing line. The core proof metric.")
-k5.metric("Avg CLV", f"{s['avg_clv']:+.2f}%" if s["avg_clv"] is not None else "—")
+_beat_close = s["beat_close_rate"]
+_avg_clv = s["avg_clv"]
+C.kpi_row([
+    {"icon": "⚾", "value": str(n_games), "label": "Tonight's games"},
+    {"icon": "🎲", "value": str(len(plays)), "label": "Model plays"},
+    {"icon": "⭐", "value": f"{top['Conviction']:.1f}×" if top else "—", "label": "Top lean",
+     "help": f"{top['Player']} {top['Market']} {top['Side']}" if top else None},
+    {"icon": "📈", "value": f"{_beat_close:.0f}%" if _beat_close is not None else "—",
+     "label": "Beat-close rate", "help": "Share of bets that beat the closing line. The core proof metric.",
+     "trend": ("good" if _beat_close is not None and _beat_close >= 50
+               else "bad" if _beat_close is not None else None)},
+    {"icon": "💰", "value": f"{_avg_clv:+.2f}%" if _avg_clv is not None else "—", "label": "Avg CLV",
+     "trend": ("good" if _avg_clv is not None and _avg_clv >= 0
+               else "bad" if _avg_clv is not None else None)},
+])
 
 # Owner-only data-health pointer — the Data Health page itself is gated the same way, so this
 # stays hidden for a public/Discord audience rather than linking to a page they can't open.
@@ -146,24 +141,12 @@ if st.secrets.get("AUDIENCE", "owner") == "owner":
 # ---------- the model pipeline (the pitch) ----------
 st.markdown("##### How every play is built")
 if _active.key == "MLB":
-    st.markdown(
-        '<span class="pipe">Matchup (odds-ratio)</span><span class="pipe-arrow">→</span>'
-        '<span class="pipe">Handedness splits</span><span class="pipe-arrow">→</span>'
-        '<span class="pipe">Statcast expected power</span><span class="pipe-arrow">→</span>'
-        '<span class="pipe">Weather & wind</span><span class="pipe-arrow">→</span>'
-        '<span class="pipe">Live EV vs market</span><span class="pipe-arrow">→</span>'
-        '<span class="pipe">Kelly sizing</span><span class="pipe-arrow">→</span>'
-        '<span class="pipe">Logged · CLV · calibration</span>',
-        unsafe_allow_html=True)
+    C.pipeline_chips(["Matchup (odds-ratio)", "Handedness splits", "Statcast expected power",
+                     "Weather & wind", "Live EV vs market", "Kelly sizing",
+                     "Logged · CLV · calibration"])
 else:
-    st.markdown(
-        '<span class="pipe">Last 10 games</span><span class="pipe-arrow">→</span>'
-        '<span class="pipe">Bootstrap resample</span><span class="pipe-arrow">→</span>'
-        '<span class="pipe">Rotation-minutes filter</span><span class="pipe-arrow">→</span>'
-        '<span class="pipe">Live EV vs market</span><span class="pipe-arrow">→</span>'
-        '<span class="pipe">Kelly sizing</span><span class="pipe-arrow">→</span>'
-        '<span class="pipe">Logged · CLV · calibration</span>',
-        unsafe_allow_html=True)
+    C.pipeline_chips(["Last 10 games", "Bootstrap resample", "Rotation-minutes filter",
+                     "Live EV vs market", "Kelly sizing", "Logged · CLV · calibration"])
     st.caption("v1 model — opponent defense and pace aren't incorporated yet.")
  
 st.divider()
@@ -171,7 +154,7 @@ left, right = st.columns([3, 2])
  
 # ---------- tonight's top plays ----------
 with left:
-    st.subheader("⭐ Tonight's top leans")
+    C.section_header("⭐", "Tonight's top leans")
     # Owner-only Graded Picks pointer — Graded Picks itself is gated the same way (moved to
     # owner-only directly on request, to guarantee no broken public links as the subscriber
     # split hardens), so this stays hidden for a public/Discord audience rather than linking to
@@ -285,40 +268,41 @@ with left:
  
 # ---------- proof panel (the hero) ----------
 with right:
-    st.subheader("🧾 The proof")
-    clv_bets = [b for b in bets if b.get("close_odds") is not None and b.get("entry_odds") is not None]
-    if clv_bets:
-        clv_bets = sorted(clv_bets, key=lambda b: b.get("ts_placed", ""))
-        running, tot = [], 0.0
-        for i, b in enumerate(clv_bets, 1):
-            tot += B.clv_pct(b["entry_odds"], b["close_odds"]) or 0
-            running.append(tot / i)
-        fig = go.Figure(go.Scatter(y=running, mode="lines+markers", line=dict(color="#22c55e")))
-        fig.add_hline(y=0, line_dash="dash", line_color="#64748b")
-        fig.update_layout(height=240, margin=dict(l=10, r=10, t=24, b=10),
-                          title="Average CLV over time (%)", template="plotly_white")
-        st.plotly_chart(fig, width="stretch")
-        st.caption(f"Positive and climbing = beating the market. {len(clv_bets)} bets with closing lines.")
-    else:
-        st.info("**Tracking since inception.** CLV and calibration populate here as bets are logged "
-                "and settled — this is the honest, forward-tested track record, not a backtest. "
-                "Log plays from the Edge Board to begin.", icon="🧭")
+    with st.container(border=True):
+        C.section_header("🧾", "The proof")
+        clv_bets = [b for b in bets if b.get("close_odds") is not None and b.get("entry_odds") is not None]
+        if clv_bets:
+            clv_bets = sorted(clv_bets, key=lambda b: b.get("ts_placed", ""))
+            running, tot = [], 0.0
+            for i, b in enumerate(clv_bets, 1):
+                tot += B.clv_pct(b["entry_odds"], b["close_odds"]) or 0
+                running.append(tot / i)
+            fig = go.Figure(go.Scatter(y=running, mode="lines+markers", line=dict(color="#22c55e")))
+            fig.add_hline(y=0, line_dash="dash", line_color="#64748b")
+            fig.update_layout(height=240, margin=dict(l=10, r=10, t=24, b=10),
+                              title="Average CLV over time (%)", template="plotly_white")
+            st.plotly_chart(fig, width="stretch")
+            st.caption(f"Positive and climbing = beating the market. {len(clv_bets)} bets with closing lines.")
+        else:
+            st.info("**Tracking since inception.** CLV and calibration populate here as bets are logged "
+                    "and settled — this is the honest, forward-tested track record, not a backtest. "
+                    "Log plays from the Edge Board to begin.", icon="🧭")
  
-    cal = B.calibration(bets, n_bins=5) if bets else []
-    if cal:
-        fig2 = go.Figure()
-        fig2.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode="lines",
-                                  line=dict(dash="dash", color="#94a3b8"), showlegend=False))
-        fig2.add_trace(go.Scatter(x=[c["predicted"] for c in cal], y=[c["actual"] for c in cal],
-                                  mode="markers", marker=dict(size=12, color="#7c3aed"), showlegend=False))
-        fig2.update_layout(height=240, margin=dict(l=10, r=10, t=24, b=10),
-                           title="Calibration: predicted vs actual", template="plotly_white",
-                           xaxis_range=[0, 1], yaxis_range=[0, 1])
-        st.plotly_chart(fig2, width="stretch")
+        cal = B.calibration(bets, n_bins=5) if bets else []
+        if cal:
+            fig2 = go.Figure()
+            fig2.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode="lines",
+                                      line=dict(dash="dash", color="#94a3b8"), showlegend=False))
+            fig2.add_trace(go.Scatter(x=[c["predicted"] for c in cal], y=[c["actual"] for c in cal],
+                                      mode="markers", marker=dict(size=12, color="#7c3aed"), showlegend=False))
+            fig2.update_layout(height=240, margin=dict(l=10, r=10, t=24, b=10),
+                               title="Calibration: predicted vs actual", template="plotly_white",
+                               xaxis_range=[0, 1], yaxis_range=[0, 1])
+            st.plotly_chart(fig2, width="stretch")
  
 # ---------- model-caught highlight (yesterday) ----------
 st.divider()
-st.subheader("🎯 The model's own top picks — confirmed")
+C.section_header("🎯", "The model's own top picks — confirmed")
 if _active.key == "MLB":
     st.caption("Players whose result cleared the line AND sat in the model's top plays before "
                "the game — real, direct proof the model's own pre-game confidence lined up "
@@ -362,7 +346,7 @@ for _tb, _mkt in zip(_ctabs, _caught_markets):
 # section claims the other's data -- "top picks confirmed" no longer says "non-obvious," and this
 # section is the one actually built to carry that meaning.
 st.divider()
-st.subheader("🔦 Surprising hits — the model didn't see these coming")
+C.section_header("🔦", "Surprising hits — the model didn't see these coming")
 st.caption("Players whose result ALSO cleared the line last night, but who sat OUTSIDE the "
           "model's own top-ranked plays pre-game — genuinely low pre-game confidence, not a "
           "confirmed top pick. A real, honest signal worth a second look either way: either the "
