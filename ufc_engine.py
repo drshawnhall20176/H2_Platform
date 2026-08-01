@@ -36,6 +36,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import pytz
 import requests
 
+from odds_api import OddsAPIError
+
 UFC_SPORT = "mma_mixed_martial_arts"
 _EASTERN = pytz.timezone("US/Eastern")
 
@@ -79,18 +81,29 @@ _TIMEOUT = 20
 
 
 def _get(path: str, params: Dict) -> Tuple[Any, Dict]:
-    """Raw GET against The Odds API. Returns (json_body, headers)."""
-    r = requests.get(f"{_BASE}/{path}", params=params, timeout=_TIMEOUT)
-    r.raise_for_status()
+    """Raw GET against The Odds API. Returns (json_body, headers). Raises OddsAPIError with a
+    real, descriptive message on failure -- callers must not swallow this silently; a genuine
+    API error (invalid market, rate limit, auth) needs to be visibly different from "no odds
+    posted yet for this event," which look identical from the UI otherwise."""
+    try:
+        r = requests.get(f"{_BASE}/{path}", params=params, timeout=_TIMEOUT)
+    except requests.RequestException as e:
+        raise OddsAPIError(f"network error: {e}") from e
+    if r.status_code == 401:
+        raise OddsAPIError("401 Unauthorized — check your API key.")
+    if r.status_code == 429:
+        raise OddsAPIError("429 — out of quota for this period.")
+    if r.status_code != 200:
+        raise OddsAPIError(f"HTTP {r.status_code}: {r.text[:300]}")
     return r.json(), dict(r.headers)
 
 
 def get_ufc_events(api_key: str, date_str: Optional[str] = None) -> List[Dict]:
-    """All upcoming UFC events, optionally filtered to a specific date."""
-    try:
-        data, _ = _get(f"sports/{UFC_SPORT}/events", {"apiKey": api_key})
-    except Exception:
-        return []
+    """All upcoming UFC events, optionally filtered to a specific date. Raises OddsAPIError on a
+    real API failure -- the caller (the view) is responsible for catching this and showing it,
+    rather than this function silently returning [] and making a real error indistinguishable
+    from "no events scheduled."""
+    data, _ = _get(f"sports/{UFC_SPORT}/events", {"apiKey": api_key})
     if not date_str:
         return data or []
     return [e for e in (data or []) if _eastern_date_str(e.get("commence_time")) == date_str]
@@ -99,16 +112,16 @@ def get_ufc_events(api_key: str, date_str: Optional[str] = None) -> List[Dict]:
 def get_event_odds(event_id: str, api_key: str,
                    markets: Optional[List[str]] = None,
                    book: str = "draftkings") -> Dict:
-    """Fetch odds for a specific UFC event. Returns raw Odds API event object."""
+    """Fetch odds for a specific UFC event. Returns raw Odds API event object. Raises
+    OddsAPIError on a real API failure -- same reasoning as get_ufc_events above; a real,
+    fixable error (e.g. one of UFC_MARKETS not yet supported for this event) must be visible,
+    not silently identical to "no odds posted yet.\""""
     markets = markets or UFC_MARKETS
-    try:
-        data, _ = _get(
-            f"sports/{UFC_SPORT}/events/{event_id}/odds",
-            {"apiKey": api_key, "regions": "us",
-             "markets": ",".join(markets), "oddsFormat": "american"})
-        return data or {}
-    except Exception:
-        return {}
+    data, _ = _get(
+        f"sports/{UFC_SPORT}/events/{event_id}/odds",
+        {"apiKey": api_key, "regions": "us",
+         "markets": ",".join(markets), "oddsFormat": "american"})
+    return data or {}
 
 
 def parse_bout_odds(event_data: Dict, preferred_book: str = "draftkings") -> Dict[str, Any]:

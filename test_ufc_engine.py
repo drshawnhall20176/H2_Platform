@@ -64,19 +64,68 @@ def test_get_ufc_events_returns_everything_when_no_date_filter():
     print("✓ get_ufc_events returns everything, unfiltered, when no date_str is given")
 
 
-def test_get_ufc_events_fails_soft_on_network_error():
+def test_get_ufc_events_raises_a_real_error_on_api_failure():
+    # Regression guard for the actual fix requested: this used to fail soft (return []),
+    # which was the real obstacle to diagnosing a genuine reported bug -- "odds not pulling in"
+    # looked identical whether the cause was truly no odds posted yet, or a real, fixable API
+    # error (rate limit, invalid market, bad key). Now raises a real OddsAPIError with a
+    # descriptive message instead, matching odds_api.py's own established pattern for MLB/NFL,
+    # so the view can show it and a real cause is actually diagnosable.
     def fake_get(path, params):
-        raise RuntimeError("network is down")
+        raise U.OddsAPIError("HTTP 422: invalid market")
 
     orig_get = U._get
     U._get = fake_get
     try:
-        events = U.get_ufc_events("fake_key", date_str="2026-07-28")
+        try:
+            U.get_ufc_events("fake_key", date_str="2026-07-28")
+            assert False, "should have raised OddsAPIError"
+        except U.OddsAPIError as e:
+            assert "invalid market" in str(e)
     finally:
         U._get = orig_get
+    print("✓ get_ufc_events raises a real, descriptive OddsAPIError on a real API failure, "
+         "no longer silently returning an empty list")
 
-    assert events == []
-    print("✓ get_ufc_events fails soft (empty list) on a network error, not a crash")
+
+def test_get_event_odds_raises_a_real_error_on_api_failure():
+    def fake_get(path, params):
+        raise U.OddsAPIError("429 — out of quota for this period.")
+
+    orig_get = U._get
+    U._get = fake_get
+    try:
+        try:
+            U.get_event_odds("evt_1", "fake_key")
+            assert False, "should have raised OddsAPIError"
+        except U.OddsAPIError as e:
+            assert "out of quota" in str(e)
+    finally:
+        U._get = orig_get
+    print("✓ get_event_odds raises a real, descriptive OddsAPIError on a real API failure, "
+         "no longer silently returning {}")
+
+
+def test_underlying_get_raises_descriptive_errors_for_real_status_codes():
+    import requests
+
+    class _FakeResponse:
+        def __init__(self, status_code, text=""):
+            self.status_code = status_code
+            self.text = text
+
+    orig_requests_get = U.requests.get
+    for status, expect_substr in [(401, "Unauthorized"), (429, "quota"), (422, "HTTP 422")]:
+        U.requests.get = lambda *a, status=status, **kw: _FakeResponse(status, "invalid market")
+        try:
+            try:
+                U._get("sports/mma_mixed_martial_arts/events", {"apiKey": "x"})
+                assert False, f"should have raised for status {status}"
+            except U.OddsAPIError as e:
+                assert expect_substr in str(e)
+        finally:
+            U.requests.get = orig_requests_get
+    print("✓ _get raises a real, descriptive OddsAPIError for 401/429/other real HTTP failures")
 
 
 if __name__ == "__main__":
