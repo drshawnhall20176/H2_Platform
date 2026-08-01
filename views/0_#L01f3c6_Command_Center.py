@@ -160,7 +160,10 @@ with left:
         # owner-only directly on request, to guarantee no broken public links as the subscriber
         # split hardens), so this stays hidden for a public/Discord audience rather than linking to
         # a page they can't open, the same pattern already used just below for Data Health.
-        if st.secrets.get("AUDIENCE", "owner") == "owner":
+        # ALSO now gated on has_projections -- Graded Picks hides itself entirely for any sport
+        # without a projections model (UFC), same real StreamlitPageNotFoundError risk just
+        # confirmed and fixed on Bet Log's own link to Track Record (see that page's own comment).
+        if st.secrets.get("AUDIENCE", "owner") == "owner" and _active.has_projections:
             st.page_link("views/2_Graded_Picks.py", label="See the full slate, graded game by game →",
                         icon="🏅")
         if plays:

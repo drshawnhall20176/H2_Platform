@@ -35,9 +35,16 @@ C.page_header("📒", f"Bet Log — proof layer  ·  {_active.icon} {_active.lab
              "Track CLV, ROI, and calibration. The record that proves the model works. "
              "Switch sports in the sidebar to see that sport's bets — every bet is logged with "
              "the sport it was placed under.")
-st.page_link("views/19_Track_Record.py",
-             label="📊 Want the polished, narrative version of this same evidence? See Track Record →",
-             icon="📊")
+# REAL, CONFIRMED FIX -- this link used to be unconditional, but Track Record hides itself
+# entirely from the sidebar for any sport with has_projections=False (UFC today). st.page_link
+# to a page that isn't part of the CURRENT navigation set raises StreamlitPageNotFoundError, not
+# a graceful "page doesn't exist" -- this crashed Bet Log outright for a UFC/owner viewer. Same
+# has_projections condition Track Record itself gates on, so the link and its target can never
+# drift out of sync again.
+if _active.has_projections:
+    st.page_link("views/19_Track_Record.py",
+                 label="📊 Want the polished, narrative version of this same evidence? See Track Record →",
+                 icon="📊")
 
 if not sports.require_trading_access("Bet Log"):
     st.stop()
