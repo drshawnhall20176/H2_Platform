@@ -302,6 +302,11 @@ def test_sport_only_page_visibility_matches_expected_config():
     # 5-6, deep research 7-14, trading desk 15, self-grading/proof 16-19, ops/content 20-22) --
     # this test's own real job (catching a silent renumbering mismatch) is exactly why it needed
     # updating here rather than being left to fail confusingly against the old numbers.
+    #
+    # Highlights (24) added directly on request, closing a real, reported gap: Highlights was
+    # already gated MLB-only at the page level (its own real fields aren't wired into other
+    # sports yet), but had no matching sidebar-level gate, so it stayed visible as a dead link
+    # for every non-MLB sport.
     src = (_HERE / "streamlit_app.py").read_text()
     m = re.search(r"sport_only_leads = \{([^}]*)\}", src, re.DOTALL)
     assert m, "streamlit_app.py must define sport_only_leads"
@@ -311,11 +316,37 @@ def test_sport_only_page_visibility_matches_expected_config():
     assert pairs == {"5": ("MLB",), "6": ("MLB",), "7": ("MLB",), "8": ("MLB",), "9": ("MLB",),
                      "10": ("WNBA", "NBA", "NCAAMB"), "11": ("WNBA", "NBA", "NCAAMB"),
                      "12": ("NFL",), "13": ("NFL",), "14": ("NFL",),
-                     "23": ("UFC",)}, pairs
+                     "23": ("UFC",), "24": ("MLB",)}, pairs
     print("✓ sport_only_leads matches expected config (Bullpen Watch/Game Watch/Pitching Lab/"
           "Dinger Engine/Matchup Lab(MLB) -> MLB, Hot Hand Engine/Matchup Lab(WNBA/NBA/NCAAMB) -> "
           "WNBA+NBA+NCAAMB, Matchup Lab(NFL)/Anytime TD Engine/QB Lab -> NFL, "
-          "UFC Fight Card -> UFC)")
+          "UFC Fight Card -> UFC, Highlights -> MLB)")
+
+
+def test_projections_only_pages_hidden_for_sports_without_projections():
+    # Regression guard for a real, reported gap: for UFC (has_projections=False), Best Bets,
+    # Graded Picks, Suggested Parlays, Speculative Basket, Edge Board, Retrospective, Model
+    # Dashboard, Track Record, Media Room, and Podcast Studio each carry their own has_projections
+    # gate that immediately shows "doesn't apply, head to UFC Fight Card" and stops -- every one
+    # a guaranteed dead end, not graceful degradation, when reached from the sidebar. Bet Log and
+    # Data Health must stay OUT of this set -- Bet Log is a real, functional log for any sport
+    # with a market_map (UFC has one), and Data Health is sport-agnostic.
+    src = (_HERE / "streamlit_app.py").read_text()
+    m = re.search(r"projections_only_titles = \{([^}]*)\}", src, re.DOTALL)
+    assert m, "streamlit_app.py must define projections_only_titles"
+    gated = {t.strip().strip('"') for t in m.group(1).split(",") if t.strip()}
+    assert gated == {"Best Bets", "Graded Picks", "Suggested Parlays", "Speculative Basket",
+                     "Edge Board", "Retrospective", "Model Dashboard", "Track Record",
+                     "Media Room", "Podcast Studio"}, gated
+    assert "Bet Log" not in gated and "Data Health" not in gated
+    all_titles = set(re.findall(r'\("([^"]+)",\s*"[^"]*",\s*"[^"]*"\)', src))
+    assert gated <= all_titles, f"gated titles not found in meta: {gated - all_titles}"
+    # And confirm the loop actually reads this set against has_projections, not just defines it
+    # unused -- a real, reported class of bug elsewhere in this project (a check defined but
+    # never wired into the actual code path).
+    assert "not sports.get(active_sport).has_projections" in src
+    print("✓ projections_only_titles targets exactly the 10 pages that are guaranteed dead ends "
+         "for an outcome-based sport, and is actually wired into the sidebar-building loop")
 
 
 def test_hot_hand_and_matchup_lab_loaders_key_their_cache_by_sport():

@@ -72,9 +72,7 @@ def run():
     views_dir = here / "views"
 
     # Pages that only make sense for a SPECIFIC SET of sports are hidden entirely — not shown
-    # greyed out — when a different sport is active. Shared proof pages (Edge Board, Bet Log,
-    # Track Record, Media Room, Podcast, Retrospective) stay visible for every sport and handle
-    # "engine not wired yet" gracefully inside the page itself.
+    # greyed out — when a different sport is active.
     sport_only_leads = {
         "5": ("MLB",),                                   # Bullpen Watch -- built directly on
                                                           # mlb_engine's own bullpen-fatigue
@@ -91,7 +89,26 @@ def run():
         "13": ("NFL",),                                  # Anytime TD Engine — NFL's Dinger Engine analog
         "14": ("NFL",),                                  # QB Lab — NFL's Pitching Lab analog
         "23": ("UFC",),                                  # UFC Fight Card -- MMA-only, no MLB/NFL equivalent
+        "24": ("MLB",),                                  # Highlights -- already gated MLB-only at the
+                                                          # page level (its own real fields aren't wired
+                                                          # into other sports yet), just never had the
+                                                          # matching sidebar-level gate until now.
     }
+
+    # REAL, REPORTED GAP CLOSED HERE: these titles all carry a has_projections check that shows
+    # "doesn't apply to UFC, head to UFC Fight Card" and st.stop()s immediately for any sport with
+    # no projections pipeline (has_projections=False -- currently just UFC) -- confirmed by
+    # reading each page's own gate, not assumed. Model Dashboard doesn't literally st.stop(), but
+    # every section on it is driven entirely by graded plays that are always [] for such a sport,
+    # so it silently renders an all-empty page instead. None of these were graceful degradation in
+    # practice — every one was a guaranteed dead end reachable from the sidebar, real clutter for
+    # exactly the reason a person reported: a UFC user sees 10 live-looking links that all lead to
+    # the same "this isn't for you" message. Matched by TITLE (not page number), same reasoning as
+    # owner_only_titles below. Bet Log stays visible on purpose -- it's a real, functional log for
+    # any sport with a market_map (UFC has one), not projections-dependent at all.
+    projections_only_titles = {"Best Bets", "Graded Picks", "Suggested Parlays", "Speculative Basket",
+                               "Edge Board", "Retrospective", "Model Dashboard", "Track Record",
+                               "Media Room", "Podcast Studio"}
 
     # Internal/paid tools kept off the Discord/public build — matched by TITLE (not page number)
     # so a future re-numbering of the views/ files can't silently un-gate one of these by
@@ -194,6 +211,10 @@ def run():
         if required_sports and active_sport not in required_sports:
             continue  # e.g. Dinger Engine makes no sense once WNBA/NBA is selected, and vice versa
         title, icon, slug = meta.get(key, (f.stem, "📄", f"page_{key}"))
+        if title in projections_only_titles and not sports.get(active_sport).has_projections:
+            continue  # Best Bets / Graded Picks / Edge Board / Retrospective / etc: every one of
+                      # these is a guaranteed dead end for an outcome-based sport like UFC -- see
+                      # projections_only_titles' own comment above for the real, reported gap this closes
         if title in owner_only_titles and audience != "owner":
             continue  # Bet Log / Media Room / Podcast Studio / Edge Board / Matchup Lab / Track Record: owner deployment only
         section = SECTION_OF.get(key, "🔬 DEEP RESEARCH")   # a real, sensible default for any
