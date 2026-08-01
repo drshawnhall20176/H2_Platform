@@ -19,9 +19,15 @@ from pathlib import Path
 
 import sports
 
+_H2_MARK = Path(__file__).parent / "assets" / "h2_mark.png"
+
 
 def run():
-    st.set_page_config(page_title="H2 Sports MLB Dashboard", page_icon="⚾", layout="wide")
+    # Real H2 Sports mark as the browser tab icon when the asset is present, the original
+    # emoji as an honest fallback otherwise (a stripped-down deploy missing assets/ should never
+    # crash page config) -- same fail-soft posture components.hero_banner's own logo uses.
+    page_icon = str(_H2_MARK) if _H2_MARK.exists() else "⚾"
+    st.set_page_config(page_title="H2 Sports MLB Dashboard", page_icon=page_icon, layout="wide")
 
     # Sport selector state must be set BEFORE building navigation (it drives which pages show).
     # We read/set session state directly here rather than rendering UI, so the sidebar widget

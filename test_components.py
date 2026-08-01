@@ -121,6 +121,30 @@ def test_hero_banner_renders_balanced_html_with_icon_title_subtitle(captured):
     print("✓ hero_banner renders balanced HTML with icon, title, and subtitle all present")
 
 
+def test_hero_banner_embeds_the_real_logo_asset(captured):
+    # Confirms the actual assets/h2_logo.png file is found and embedded, not just that the
+    # code path exists -- this only passes if the real asset is present and readable.
+    import components as C
+    C._b64_asset.clear()   # don't let another test's cache hit hide a real regression here
+    C.hero_banner("⚾", "H2 Sports — MLB Model Dashboard", "Live matchup analytics")
+    assert "data:image/png;base64," in captured[0]
+    assert "<img" in captured[0]
+    print("✓ hero_banner embeds the real logo asset as a base64 data URI")
+
+
+def test_hero_banner_degrades_gracefully_when_asset_missing(captured, monkeypatch):
+    # FAILS SAFE: a missing/stripped asset must never crash hero_banner or leave a broken-image
+    # tag -- just the original icon+title+subtitle layout with no logo slot.
+    import components as C
+    monkeypatch.setattr(C, "_b64_asset", lambda name: None)
+    C.hero_banner("🏆", "H2 Sports — Command Center", "Trade sports, not bet sports.")
+    assert "<img" not in captured[0]
+    assert "H2 Sports — Command Center" in captured[0]
+    assert captured[0].count("<div") == captured[0].count("</div>")
+    print("✓ hero_banner degrades to icon+title+subtitle only, no broken image, when the "
+         "logo asset is missing")
+
+
 def test_pipeline_chips_correct_arrow_count_between_steps(captured):
     import components as C
     C.pipeline_chips(["Step A", "Step B", "Step C", "Step D"])

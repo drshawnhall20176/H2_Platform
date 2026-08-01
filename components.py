@@ -27,26 +27,56 @@ Nothing here targets fragile internals like the sidebar nav DOM.
 
 from __future__ import annotations
 
+import base64
+from pathlib import Path
 from typing import List, Optional, Sequence
 
 import streamlit as st
+
+_ASSETS_DIR = Path(__file__).parent / "assets"
+
+
+@st.cache_resource(show_spinner=False)
+def _b64_asset(filename: str) -> Optional[str]:
+    """Base64-encoded bytes of a static file under assets/, cached for the life of the process
+    (a real logo file never changes mid-session, so re-reading/re-encoding it on every hero_
+    banner call across every rerun would be pure waste). Returns None if the file isn't there --
+    hero_banner below must degrade to its original icon+title+subtitle look, not crash, if an
+    asset is ever missing (e.g. a stripped-down deploy, or the file simply not committed)."""
+    path = _ASSETS_DIR / filename
+    if not path.exists():
+        return None
+    return base64.b64encode(path.read_bytes()).decode("ascii")
 
 
 def hero_banner(icon: str, title: str, subtitle: str) -> None:
     """Dark gradient hero banner -- extracted from Command Center's own original inline CSS
     (already proven working there) into this shared module, so every page that wants this same
     "front door" treatment reuses the exact same visual language instead of each page
-    duplicating and potentially drifting from its own copy of the CSS."""
+    duplicating and potentially drifting from its own copy of the CSS.
+
+    Real H2 Sports logo (assets/h2_logo.png) rendered to the left of the title/subtitle stack --
+    added directly on request. FAILS SAFE: if the asset is ever missing, this silently falls back
+    to the original icon+title+subtitle layout with no logo slot at all, never a broken-image
+    icon or a crash -- same fail-soft posture this module already uses everywhere else (base_css's
+    own CSS-hook risk, the sidebar CSS removed after it was confirmed inert, etc.)."""
+    logo_b64 = _b64_asset("h2_logo.png")
+    logo_html = (f'<img src="data:image/png;base64,{logo_b64}" '
+                f'style="height:56px;width:auto;flex-shrink:0;">' if logo_b64 else "")
     st.markdown(f"""
     <style>
     .h2-hero {{background:linear-gradient(110deg,#0f172a,#1e293b);padding:22px 26px;
-              border-radius:14px;color:#f8fafc;margin-bottom:6px;}}
+              border-radius:14px;color:#f8fafc;margin-bottom:6px;display:flex;
+              align-items:center;gap:18px;}}
     .h2-hero h1 {{margin:0;font-size:30px;letter-spacing:-0.5px;}}
     .h2-hero p {{margin:4px 0 0;color:#94a3b8;font-size:15px;}}
     </style>
     <div class="h2-hero">
-      <h1>{icon} {title}</h1>
-      <p>{subtitle}</p>
+      {logo_html}
+      <div>
+        <h1>{icon} {title}</h1>
+        <p>{subtitle}</p>
+      </div>
     </div>
     """, unsafe_allow_html=True)
 
