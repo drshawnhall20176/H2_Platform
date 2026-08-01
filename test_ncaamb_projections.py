@@ -209,6 +209,71 @@ def test_build_best_bets_falls_back_honestly_when_offers_dont_cover_this_player(
     print("✓ NCAAMB build_best_bets falls back honestly when offers exist but don't cover this specific player")
 
 
+
+# ----------------------------------------------------------------- build_minutes_row
+def test_build_minutes_row_uses_avg_min_from_row():
+    row = {"AvgMin": 28.4}
+    result = NP.build_minutes_row(row, h2h_log=[])
+    assert result["Market"] == "Minutes"
+    assert result["Recent Avg"] == 28.4
+    print("✓ build_minutes_row reports Recent Avg straight from row['AvgMin'], no recomputation")
+
+
+def test_build_minutes_row_computes_season_and_h2h_averages():
+    row = {"AvgMin": 30.0}
+    season_log = [{"min": m} for m in (26, 28, 30, 32, 34)]   # season avg 30
+    h2h = [{"min": 25}, {"min": 35}]
+    result = NP.build_minutes_row(row, h2h_log=h2h, season_log=season_log)
+    assert result["Season Avg"] == 30.0
+    assert result["H2H Avg"] == 30.0
+    assert result["H2H Games"] == 2
+    print("✓ build_minutes_row computes Season Avg and H2H Avg correctly from real game logs")
+
+
+def test_build_minutes_row_honest_empty_h2h():
+    row = {"AvgMin": 28.0}
+    result = NP.build_minutes_row(row, h2h_log=[])
+    assert result["H2H Games"] == 0
+    assert result["H2H Avg"] is None
+    assert result["H2H Spread"] is None
+    print("✓ build_minutes_row honestly reports zero H2H games rather than guessing")
+
+
+def test_build_minutes_row_flags_high_variance():
+    row = {"AvgMin": 28.0}
+    season_log = [{"min": 28}] * 10   # season avg 28
+    # wide swing: 10 and 38 minutes across 2 meetings -- spread of 28, more than 75% of season avg (21)
+    h2h = [{"min": 38}, {"min": 10}]
+    result = NP.build_minutes_row(row, h2h_log=h2h, season_log=season_log)
+    assert result["High Variance"] is True
+    assert result["H2H Spread"] == "10\u201338"
+    print("✓ build_minutes_row flags a wide H2H minutes swing as high variance, with the real spread shown")
+
+
+def test_build_minutes_row_has_no_suppressed_or_defense_trend_fields():
+    # Real, deliberate design: Minutes has no "how does this opponent defend it" concept, so
+    # these must be explicitly absent/None, never silently computed as if they meant something.
+    row = {"AvgMin": 28.0}
+    result = NP.build_minutes_row(row, h2h_log=[])
+    assert result["Suppressed"] is False
+    assert result["Opp Recent Allowed"] is None
+    assert result["Opp Season Allowed"] is None
+    assert result["Defense Trend"] is None
+    print("✓ build_minutes_row correctly omits Suppressed/Defense Trend -- no honest signal exists for those")
+
+
+def test_build_minutes_row_compatible_with_profile_table_columns():
+    # Regression guard: the view file appends this row directly onto build_matchup_profile's own
+    # output and selects a fixed column set from the combined list -- every one of those columns
+    # must exist on this row's dict too, or the real Streamlit page would crash on a KeyError.
+    row = {"AvgMin": 28.0}
+    result = NP.build_minutes_row(row, h2h_log=[])
+    required = ["Market", "Recent Avg", "Season Avg", "H2H Avg", "H2H Games",
+               "H2H Spread", "High Variance", "Suppressed"]
+    assert all(k in result for k in required)
+    print("✓ build_minutes_row's output has every column the recent-form table actually selects")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

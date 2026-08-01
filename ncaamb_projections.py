@@ -423,6 +423,49 @@ def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[int, Dict[str, floa
 
 
 # --------------------------------------------------------------------------- Matchup Lab
+def build_minutes_row(row: Dict, h2h_log: List[Dict],
+                      season_log: Optional[List[Dict]] = None) -> Dict:
+    """One extra profile row for Minutes Played, alongside build_matchup_profile's own four real
+    markets -- added directly on request as playing-time CONTEXT, not a fifth market: this
+    platform doesn't trade minutes played, so there's no Line, no Conviction, and (unlike the
+    four real markets) no Suppressed/Defense Trend fields either -- there's no honest "how does
+    this opponent defend minutes played" signal the way there is for a real counting stat, so
+    those are left out entirely rather than computed and shown as if they meant something.
+
+    Real motivation: a minutes swing is often the actual REASON a counting stat swings with it
+    (foul trouble, blowout garbage time, a shortened rotation) -- this data was already being
+    captured (row["AvgMin"], every game log's own "min" key) and already shown in the raw
+    recent-games/H2H-games tables at the bottom of the page, just never summarized here
+    alongside the other four signals the way Points/Rebounds/Assists/Threes Made are.
+
+    Same H2H Spread / High Variance math as build_matchup_profile's own per-market loop, kept
+    consistent rather than reinvented for this one extra row."""
+    recent_avg = row.get("AvgMin")
+    season_vals = [g.get("min", 0.0) for g in (season_log or [])]
+    season_avg = (sum(season_vals) / len(season_vals)) if season_vals else None
+    hvals = [g.get("min", 0.0) for g in h2h_log]
+    h2h_avg = (sum(hvals) / len(hvals)) if hvals else None
+    h2h_spread = f"{min(hvals):.0f}\u2013{max(hvals):.0f}" if len(hvals) >= 2 else None
+    high_variance = False
+    if len(hvals) >= 2 and season_avg and season_avg > 0:
+        spread = max(hvals) - min(hvals)
+        high_variance = spread > season_avg * 0.75   # same threshold as the four real markets
+    return {
+        "Market": "Minutes",
+        "Recent Avg": recent_avg,
+        "Season Avg": round(season_avg, 1) if season_avg is not None else None,
+        "H2H Games": len(hvals),
+        "H2H Avg": round(h2h_avg, 1) if h2h_avg is not None else None,
+        "H2H Spread": h2h_spread,
+        "High Variance": high_variance,
+        "Suppressed": False,   # never computed for Minutes -- see docstring
+        "Opp Recent Allowed": None,
+        "Opp Season Allowed": None,
+        "Defense Trend": None,
+        "Trend Tag": None,
+    }
+
+
 def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_recent_allowed: Dict[str, float],
                           opp_season_allowed: Dict[str, float],
                           season_log: Optional[List[Dict]] = None) -> List[Dict]:

@@ -163,6 +163,11 @@ with st.spinner(f"Pulling {row['Opp']}'s matchup history and defensive trend..."
         _active.key, date_str, pid, team_id, opp_id)
 
 profile = P.build_matchup_profile(row, h2h_log, opp_recent, opp_season, season_log=season_log)
+# Minutes Played -- playing-time context alongside the four real markets, added directly on
+# request. Appended here (not folded into build_matchup_profile itself) since it isn't one of
+# the four real markets that function's own suppression/defense-trend logic is built around --
+# see build_minutes_row's own docstring for why those fields don't apply to it.
+profile.append(P.build_minutes_row(row, h2h_log, season_log=season_log))
 
 st.markdown(f"### {row['Player']} vs {row['Opp']}")
 st.caption(f"{row['GameLabel']}  ·  averaging {row['AvgMin']:.0f} min/game over their last "
@@ -272,6 +277,35 @@ for (mkey, col, disp), slot in zip(P.market_list(), (tc1, tc2, tc3, tc4)):
 st.caption("Dashed line is tonight's actual sportsbook number once fetched above; otherwise it's "
            "the model's own default line, clearly labeled as such, never presented as a live "
            "quote it isn't.")
+
+# --- Minutes Played -- playing-time context, NOT a market this platform trades -----------------
+# Full-width and visually separate from the 2x2 grid above on purpose -- reinforces that this
+# is a different KIND of signal (no Line, no book price, nothing to bet on) rather than a fifth
+# market blended in among the four real ones. A minutes swing is often the actual reason a real
+# counting stat swung with it (foul trouble, blowout garbage time, a shortened rotation).
+if trend_log:
+    min_xs = [g.get("date", "—")[5:10] for g in trend_log]
+    min_ys = [g.get("min", 0.0) for g in trend_log]
+    min_hover = [f"Minutes: {y:g}<br>vs {g.get('opp', '—')}" for y, g in zip(min_ys, trend_log)]
+    fig_min = go.Figure()
+    fig_min.add_trace(go.Scatter(x=min_xs, y=min_ys, mode="lines+markers", name="Minutes",
+                                 line=dict(color="#3b82f6"), marker=dict(size=8),
+                                 text=min_hover, hoverinfo="text"))
+    season_min_vals = [g.get("min", 0.0) for g in (season_log or [])]
+    if season_min_vals:
+        season_avg_min = sum(season_min_vals) / len(season_min_vals)
+        # "Season avg" here on purpose, not "Line"/"Model default" -- there is no betting line
+        # for minutes played, and reusing that language would misleadingly imply there is one.
+        fig_min.add_hline(y=season_avg_min, line_dash="dash", line_color="#f97316",
+                          annotation_text=f"Season avg: {season_avg_min:.1f}",
+                          annotation_position="top left")
+    fig_min.update_xaxes(type="category")
+    fig_min.update_layout(template="plotly_white", height=220,
+                          margin=dict(l=10, r=10, t=30, b=10), title="Minutes",
+                          showlegend=False)
+    st.plotly_chart(fig_min, width="stretch")
+    st.caption("No betting line for minutes played -- dashed line (when shown) is her own season "
+              "average, for scale, not a sportsbook number.")
 
 # --- table 1: player signals (recent form / season form / this matchup) -----
 pdf = pd.DataFrame(profile)[["Market", "Recent Avg", "Season Avg", "H2H Avg", "H2H Games",
