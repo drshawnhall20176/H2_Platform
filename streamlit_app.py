@@ -142,26 +142,33 @@ def run():
     # SIDEBAR SECTIONS, added directly on request: st.navigation natively supports a
     # dict-of-lists (each key becomes a real, collapsible section header in the sidebar) instead
     # of one flat list -- confirmed directly against Streamlit's own docs before using it, not
-    # assumed. Boundaries here are NOT a new reorganization -- they're the exact same grouping
-    # already described in the numbering comment above from a real, past platform audit; that
-    # decision existed in a code comment but was never actually visible in the sidebar itself.
-    # This makes it visible, nothing more. "0" (Command Center) and Home (added separately,
-    # below) share the landing section on purpose -- both are genuine front doors, not a
-    # recommendation or a research tool. 23/24 (UFC Fight Card, Highlights) postdate the
-    # original audit's 0-22 range; both are fundamentally "what should I bet on today" tools,
-    # the same real question Best Bets/Graded Picks/Suggested Parlays already answer, so they
-    # join Recommendations rather than inventing a new section for two pages.
+    # assumed. Boundaries here started as the exact grouping from a real, past platform audit
+    # (previously 7 sections), then CONSOLIDATED to 5 directly on request after real, reported
+    # feedback that the sidebar had become cluttered and hard to navigate -- each section header
+    # is itself a full line of text in a narrow sidebar, so 7 section headers plus 22 page links
+    # (29 lines total) reads as noise, not structure. Live Signals (2 items) and Trading Desk (1
+    # item) were the two smallest sections, adding the least real organizational value per line
+    # of header text -- merged into Research & Signals rather than kept as their own headers.
+    # Recommendations/Self-Grading & Proof/Ops & Content stayed separate since each holds enough
+    # real items to justify its own header. "Home" section renamed to "Start Here" -- the
+    # original name read as confusingly redundant with the "Home" *page* link directly beneath
+    # it, two different things sharing one word right next to each other.
+    #
+    # A REAL, DELIBERATE LIMIT WORTH STATING PLAINLY: this consolidation is a genuine structural
+    # fix in Python, not CSS -- deliberately NOT attempting to visually differentiate section
+    # headers from page links via custom CSS targeting Streamlit's own internal sidebar DOM.
+    # Checked directly first: those internal hooks (stSidebarNav, stSidebarNavItems) have
+    # changed name across real Streamlit releases, and even experienced users report the current
+    # ones simply not working. Building a fix on a foundation that's confirmed unreliable would
+    # be worse than not fixing it -- reducing the actual number of lines is the reliable lever
+    # available here, not restyling text that's still there either way.
     SECTION_OF = {}
     for k in ("0",):
-        SECTION_OF[k] = "🏠 Home"
+        SECTION_OF[k] = "🏠 Start Here"
     for k in ("1", "2", "3", "4", "23", "24"):
         SECTION_OF[k] = "🎯 Recommendations"
-    for k in ("5", "6"):
-        SECTION_OF[k] = "📡 Live Signals"
-    for k in ("7", "8", "9", "10", "11", "12", "13", "14"):
-        SECTION_OF[k] = "🔬 Deep Research"
-    for k in ("15",):
-        SECTION_OF[k] = "📈 Trading Desk"
+    for k in ("5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"):
+        SECTION_OF[k] = "🔬 Research & Signals"
     for k in ("16", "17", "18", "19"):
         SECTION_OF[k] = "🔍 Self-Grading & Proof"
     for k in ("20", "21", "22"):

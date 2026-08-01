@@ -179,9 +179,10 @@ def test_every_meta_entry_has_a_real_sidebar_section():
 
 
 def test_sidebar_sections_match_the_documented_grouping():
-    # Confirms the actual grouping matches what's documented -- the exact same boundaries
-    # already described in the numbering comment from the original platform audit, now made
-    # visible in the sidebar rather than just living in a comment.
+    # Confirms the actual grouping matches what's documented -- 5 sections, consolidated down
+    # from an original 7 directly on request after real, reported sidebar clutter (each section
+    # header is itself a full line of text; Live Signals and Trading Desk were the two smallest
+    # sections, merged into Research & Signals rather than kept as their own single-line headers).
     src = (_HERE / "streamlit_app.py").read_text()
     section_match = re.search(r"SECTION_OF = \{\}(.*?)\n\n    def lead", src, re.DOTALL)
     assert section_match, "streamlit_app.py must define SECTION_OF"
@@ -195,20 +196,19 @@ def test_sidebar_sections_match_the_documented_grouping():
                     # split segment -- not a real key, just filter it out
                 actual[k] = section
     expected = {
-        "0": "🏠 Home",
+        "0": "🏠 Start Here",
         "1": "🎯 Recommendations", "2": "🎯 Recommendations", "3": "🎯 Recommendations",
         "4": "🎯 Recommendations", "23": "🎯 Recommendations", "24": "🎯 Recommendations",
-        "5": "📡 Live Signals", "6": "📡 Live Signals",
-        "7": "🔬 Deep Research", "8": "🔬 Deep Research", "9": "🔬 Deep Research",
-        "10": "🔬 Deep Research", "11": "🔬 Deep Research", "12": "🔬 Deep Research",
-        "13": "🔬 Deep Research", "14": "🔬 Deep Research",
-        "15": "📈 Trading Desk",
+        "5": "🔬 Research & Signals", "6": "🔬 Research & Signals", "7": "🔬 Research & Signals",
+        "8": "🔬 Research & Signals", "9": "🔬 Research & Signals", "10": "🔬 Research & Signals",
+        "11": "🔬 Research & Signals", "12": "🔬 Research & Signals", "13": "🔬 Research & Signals",
+        "14": "🔬 Research & Signals", "15": "🔬 Research & Signals",
         "16": "🔍 Self-Grading & Proof", "17": "🔍 Self-Grading & Proof",
         "18": "🔍 Self-Grading & Proof", "19": "🔍 Self-Grading & Proof",
         "20": "📣 Ops & Content", "21": "📣 Ops & Content", "22": "📣 Ops & Content",
     }
     assert actual == expected, f"section grouping drifted from expected: {actual}"
-    print("✓ sidebar sections match the documented grouping from the original platform audit")
+    print("✓ sidebar sections match the documented, consolidated 5-section grouping")
 
 
 def test_public_audience_defaults_safe():
