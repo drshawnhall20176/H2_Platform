@@ -196,10 +196,34 @@ def run():
         title, icon, slug = meta.get(key, (f.stem, "📄", f"page_{key}"))
         if title in owner_only_titles and audience != "owner":
             continue  # Bet Log / Media Room / Podcast Studio / Edge Board / Matchup Lab / Track Record: owner deployment only
-        section = SECTION_OF.get(key, "🔬 Deep Research")   # a real, sensible default for any
+        section = SECTION_OF.get(key, "🔬 DEEP RESEARCH")   # a real, sensible default for any
         # future page whose number isn't added to SECTION_OF yet -- never silently disappears,
         # never crashes, just lands somewhere reasonable until explicitly categorized.
         sections.setdefault(section, []).append(st.Page(str(f), title=title, icon=icon, url_path=slug))
+
+    # EXPERIMENTAL sidebar section-header styling, added directly on request (bold + distinct
+    # color for section headers vs. page links). A REAL, STATED LIMIT: there is no confirmed,
+    # documented CSS hook for this specific element -- checked directly first, and found no
+    # reliable current selector, only inconsistent reports across Streamlit versions/forum posts.
+    # This is a best-effort, multi-fallback attempt, not a verified fix -- built to be safe even
+    # if it does nothing: every rule below is scoped to try to hit ONLY non-link items (section
+    # headers, which aren't clickable) using :not(:has(a)), specifically to avoid the failure
+    # mode of accidentally bolding/recoloring the actual page links too. If none of these
+    # selectors match this Streamlit version's real DOM, the rules are simply inert -- nothing
+    # breaks, the sidebar just looks exactly as it did before this block existed. Needs visual
+    # confirmation in the actual deployed app; this cannot be verified from here.
+    st.markdown("""
+    <style>
+    [data-testid="stSidebarNavItems"] li:not(:has(a)) p,
+    [data-testid="stSidebarNavItems"] li:not(:has(a)) span,
+    [data-testid="stSidebarNav"] li:not(:has(a)) p,
+    [data-testid="stSidebarNav"] li:not(:has(a)) span {
+        font-weight: 700 !important;
+        color: #7aa2f7 !important;
+        letter-spacing: 0.3px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
     st.navigation(sections).run()
 
