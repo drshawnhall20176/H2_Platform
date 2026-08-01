@@ -46,6 +46,8 @@ from projections import (  # genuinely sport-agnostic — reused, not duplicated
 import basketball_projections as BB_P   # shrink_prob only — see module docstring for why this
                                         # cross-domain-sounding import is the right call, not a mistake
 import config_nfl as CFG
+import odds_api as O   # for real_entry_price/real_market_prob -- real price/reference wiring,
+                       # same functions MLB/WNBA/NBA/NCAAMB's own build_best_bets already use
 
 DEFAULT_SIMS = CFG.DEFAULT_SIMS
 
@@ -275,12 +277,18 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
     for that specific player (via real_line_or_default_nfl), not the _MARKET_SPEC placeholder.
     None (the default) preserves the exact original always-placeholder behavior.
 
-    offers, preferred_book: accepted for signature parity with wnba_projections.build_best_bets
-    -- best_bets_data.load_generic_best_bets_board now always passes both keywords to every
-    sport it calls, the same way it already always passed real_lines. Currently unused here --
-    NFL's own real-PRICE wiring (RealPrice/PriceSource/ConvictionSource, matching MLB and now
-    WNBA) is real, scoped, future work, not done in this pass. real_lines above already gives
-    NFL real LINES; this is specifically about real PRICES, a separate, later step."""
+    offers, preferred_book: NOW WIRED IN, matching MLB/WNBA/NBA/NCAAMB -- previously accepted
+    for signature parity only. Reuses NFL_MARKET_TO_ODDS_KEY (already built for real_line_or_
+    default_nfl above) to look up real captured prices/references:
+      - Conviction's reference: the real, live no-vig market probability (odds_api.
+        real_market_prob) when offers cover this player/market, BEST_BET_REF otherwise
+        (ConvictionSource records which).
+      - Fair/RealPrice: a real captured sportsbook price (odds_api.real_entry_price) when
+        available, the model's own theoretical Fair price otherwise (PriceSource records
+        which) -- Fair itself is unchanged; RealPrice is new, additive.
+    real_lines above already gave NFL real LINES; this closes the separate real-PRICE gap this
+    docstring used to flag as future work. None/empty offers (the default) preserves the exact
+    original always-theoretical behavior for any existing caller."""
     rng = np.random.default_rng(seed)
     plays: List[Dict] = []
 
@@ -299,13 +307,39 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
             raw = prob_over(_dist(sim), line)
             shrunk = BB_P.shrink_prob(raw, len(values))
             over = _clip_prob(shrunk)
-            side, sp, ref_s = _favored_side(over, BEST_BET_REF.get(disp, 0.5))
+
+            # Real market reference when available, BEST_BET_REF's own hand-typed guess
+            # otherwise -- odds_key comes from the same NFL_MARKET_TO_ODDS_KEY map already
+            # backing real_line_or_default_nfl above.
+            odds_key = NFL_MARKET_TO_ODDS_KEY.get(disp)
+            typical_ref = BEST_BET_REF.get(disp, 0.5)
+            ref, ref_src = typical_ref, "model_typical"
+            if offers and odds_key:
+                real_over_prob = O.real_market_prob(offers, r["Player"], odds_key, "over",
+                                                    preferred_book=preferred_book)
+                if real_over_prob is not None:
+                    ref, ref_src = real_over_prob, "book"
+            side, sp, ref_s = _favored_side(over, ref)
+
+            # Real captured price when available, the model's own theoretical Fair price
+            # otherwise -- Fair itself never changes meaning, RealPrice is purely additive.
+            fair = prob_to_american(sp)
+            real_price, real_price_book, price_src = None, None, "model_fair"
+            if offers and odds_key:
+                real = O.real_entry_price(offers, r["Player"], odds_key, side,
+                                          preferred_book=preferred_book)
+                if real is not None:
+                    real_price, _real_point, real_price_book = real
+                    price_src = "book"
+
             plays.append({
                 "Player": r["Player"], "PlayerId": r.get("_pid"), "Team": r["Team"],
                 "Game": r["GameLabel"], "Opp": r.get("Opp"), "Versus": r.get("Opp"),
                 "Market": disp, "Side": side, "Line": line, "LineSource": line_src,
-                "ModelProb": round(sp, 4), "Fair": prob_to_american(sp),
+                "ModelProb": round(sp, 4), "Fair": fair,
+                "RealPrice": real_price, "RealPriceBook": real_price_book, "PriceSource": price_src,
                 "Conviction": round(sp / ref_s, 2) if ref_s > 0 else 0.0,
+                "ConvictionSource": ref_src,
                 # this play's own theoretical max conviction (1/RefProb) -- lets
                 # grading.conviction_to_grade normalize fairly across markets with very
                 # different reference rates, see that function's own docstring

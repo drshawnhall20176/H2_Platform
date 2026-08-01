@@ -201,30 +201,10 @@ def run():
         # never crashes, just lands somewhere reasonable until explicitly categorized.
         sections.setdefault(section, []).append(st.Page(str(f), title=title, icon=icon, url_path=slug))
 
-    # EXPERIMENTAL sidebar section-header styling, added directly on request (bold + distinct
-    # color for section headers vs. page links). A REAL, STATED LIMIT: there is no confirmed,
-    # documented CSS hook for this specific element -- checked directly first, and found no
-    # reliable current selector, only inconsistent reports across Streamlit versions/forum posts.
-    # This is a best-effort, multi-fallback attempt, not a verified fix -- built to be safe even
-    # if it does nothing: every rule below is scoped to try to hit ONLY non-link items (section
-    # headers, which aren't clickable) using :not(:has(a)), specifically to avoid the failure
-    # mode of accidentally bolding/recoloring the actual page links too. If none of these
-    # selectors match this Streamlit version's real DOM, the rules are simply inert -- nothing
-    # breaks, the sidebar just looks exactly as it did before this block existed. Needs visual
-    # confirmation in the actual deployed app; this cannot be verified from here.
-    st.markdown("""
-    <style>
-    [data-testid="stSidebarNavItems"] li:not(:has(a)) p,
-    [data-testid="stSidebarNavItems"] li:not(:has(a)) span,
-    [data-testid="stSidebarNav"] li:not(:has(a)) p,
-    [data-testid="stSidebarNav"] li:not(:has(a)) span {
-        font-weight: 700 !important;
-        color: #7aa2f7 !important;
-        letter-spacing: 0.3px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
+    # Bold/colored sidebar section-header styling was attempted here and confirmed (via a real
+    # screenshot, pixel-sampled) to be inert against this Streamlit version's actual DOM -- see
+    # the "CSS risk" section of the project handoff. Removed rather than left as dead code.
+    # UPPERCASE section names remain the confirmed, real, working lever for visual separation.
     st.navigation(sections).run()
 
 

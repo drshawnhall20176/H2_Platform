@@ -145,6 +145,70 @@ def test_build_best_bets_no_longer_clusters_different_streak_lengths_identically
     print("✓ NCAAMB's build_best_bets Conviction ranking also no longer ties streak lengths together")
 
 
+# ----------------------------------------------------------------- real price/reference wiring
+def test_build_best_bets_matches_original_behavior_with_no_real_data():
+    log = [_log(14, 6, 3, 2), _log(11, 5, 4, 1), _log(16, 7, 2, 2)]
+    rows = [{"Player": "Cooper Flagg", "Team": "Duke", "Opp": "UNC",
+            "GameLabel": "UNC @ Duke", "_pid": 1, "_game_log": log}]
+    plays = NP.build_best_bets(rows, sims=8000, seed=5)
+    pts = next(p for p in plays if p["Market"] == "Points")
+    assert pts["Line"] == 12.5   # the original _MARKET_SPEC placeholder, unchanged
+    assert pts["LineSource"] == "default"
+    assert pts["RealPrice"] is None
+    assert pts["PriceSource"] == "model_fair"
+    assert pts["ConvictionSource"] == "model_typical"
+    print("✓ NCAAMB build_best_bets matches the exact original behavior when no real data is supplied")
+
+
+def test_build_best_bets_real_line_used_when_available():
+    log = [_log(14, 6, 3, 2), _log(11, 5, 4, 1), _log(16, 7, 2, 2)]
+    rows = [{"Player": "Cooper Flagg", "Team": "Duke", "Opp": "UNC",
+            "GameLabel": "UNC @ Duke", "_pid": 1, "_game_log": log}]
+    real_lines = {("cooper flagg", "player_points"): 15.5}
+    plays = NP.build_best_bets(rows, sims=8000, seed=5, real_lines=real_lines)
+    pts = next(p for p in plays if p["Market"] == "Points")
+    assert pts["Line"] == 15.5
+    assert pts["LineSource"] == "book"
+    print("✓ NCAAMB build_best_bets now genuinely uses a real line when real_lines supplies one")
+
+
+def test_build_best_bets_real_price_and_reference_used_when_offers_available():
+    log = [_log(14, 6, 3, 2), _log(11, 5, 4, 1), _log(16, 7, 2, 2), _log(13, 6, 3, 1), _log(15, 5, 4, 2)]
+    rows = [{"Player": "Cooper Flagg", "Team": "Duke", "Opp": "UNC",
+            "GameLabel": "UNC @ Duke", "_pid": 1, "_game_log": log}]
+    # 12.5 sits below this log's own ~13.8 average, so Over is the deterministically favored
+    # side -- the real book price picked up must match whichever side the model actually
+    # favors, not an assumed one.
+    real_lines = {("cooper flagg", "player_points"): 12.5}
+    offers = [{"player": "Cooper Flagg", "market": "player_points", "point": 12.5,
+              "over": {"draftkings": -115}, "under": {"draftkings": -105}}]
+    plays = NP.build_best_bets(rows, sims=8000, seed=5, real_lines=real_lines,
+                               offers=offers, preferred_book="draftkings")
+    pts = next(p for p in plays if p["Market"] == "Points")
+    assert pts["Side"] == "Over"
+    assert pts["RealPrice"] == -115.0
+    assert pts["RealPriceBook"] == "draftkings"
+    assert pts["PriceSource"] == "book"
+    assert pts["ConvictionSource"] == "book"
+    assert pts["Fair"] != pts["RealPrice"]
+    print("✓ NCAAMB build_best_bets attaches a real captured price and a real market reference when "
+         "offers cover this player, without altering what Fair itself means")
+
+
+def test_build_best_bets_falls_back_honestly_when_offers_dont_cover_this_player():
+    log = [_log(14, 6, 3, 2), _log(11, 5, 4, 1), _log(16, 7, 2, 2)]
+    rows = [{"Player": "Some Bench Player", "Team": "Duke", "Opp": "UNC",
+            "GameLabel": "UNC @ Duke", "_pid": 1, "_game_log": log}]
+    offers = [{"player": "A Totally Different Player", "market": "player_points", "point": 10.5,
+              "over": {"draftkings": -110}, "under": {"draftkings": -110}}]
+    plays = NP.build_best_bets(rows, sims=8000, seed=5, offers=offers, preferred_book="draftkings")
+    pts = next(p for p in plays if p["Market"] == "Points")
+    assert pts["RealPrice"] is None
+    assert pts["PriceSource"] == "model_fair"
+    assert pts["ConvictionSource"] == "model_typical"
+    print("✓ NCAAMB build_best_bets falls back honestly when offers exist but don't cover this specific player")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

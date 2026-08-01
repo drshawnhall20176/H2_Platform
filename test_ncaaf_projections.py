@@ -257,6 +257,53 @@ def test_build_qb_efficiency_table_no_season_log_yet():
          "no fabricated delta or tag")
 
 
+# ----------------------------------------------------------------- real price/reference wiring
+def _ncaaf_row(player="Star QB", pid="p1"):
+    return {
+        "Player": player, "Team": "Ohio State", "GameLabel": "Texas @ Ohio State",
+        "Opp": "Texas", "Position": "QB", "PassYds": 300.0, "RushYds": 0.0,
+        "Receptions": 0.0, "RecYds": 0.0, "_pid": pid, "_game_date": None,
+        "_team_games_played": 12, "_markets": ["player_pass_yds"],
+        "_recent_games": [
+            {"passing_YDS": 320}, {"passing_YDS": 280}, {"passing_YDS": 310}, {"passing_YDS": 290},
+        ],
+    }
+
+
+def test_build_best_bets_matches_original_behavior_with_no_offers():
+    plays = P.build_best_bets([_ncaaf_row()], sims=8000, seed=13)
+    assert plays[0]["RealPrice"] is None
+    assert plays[0]["PriceSource"] == "model_fair"
+    assert plays[0]["ConvictionSource"] == "model_typical"
+    print("✓ NCAAF build_best_bets matches the exact original behavior when no offers are supplied")
+
+
+def test_build_best_bets_real_price_and_reference_used_when_offers_available():
+    real_lines = {(P.normalize_name("Star QB"), "player_pass_yds"): 275.5}
+    offers = [{"player": "Star QB", "market": "player_pass_yds", "point": 275.5,
+              "over": {"draftkings": -115}, "under": {"draftkings": -105}}]
+    plays = P.build_best_bets([_ncaaf_row()], sims=8000, seed=13, real_lines=real_lines,
+                             offers=offers, preferred_book="draftkings")
+    assert plays[0]["RealPrice"] == -115.0
+    assert plays[0]["RealPriceBook"] == "draftkings"
+    assert plays[0]["PriceSource"] == "book"
+    assert plays[0]["ConvictionSource"] == "book"
+    assert plays[0]["Fair"] != plays[0]["RealPrice"]
+    print("✓ NCAAF build_best_bets attaches a real captured price and a real market reference when "
+         "offers cover this player, without altering what Fair itself means")
+
+
+def test_build_best_bets_falls_back_honestly_when_offers_dont_cover_this_player():
+    offers = [{"player": "A Totally Different Player", "market": "player_pass_yds",
+              "point": 200.5, "over": {"draftkings": -110}, "under": {"draftkings": -110}}]
+    plays = P.build_best_bets([_ncaaf_row(player="Some Bench QB", pid="p2")], sims=8000, seed=13,
+                             offers=offers, preferred_book="draftkings")
+    assert plays[0]["RealPrice"] is None
+    assert plays[0]["PriceSource"] == "model_fair"
+    assert plays[0]["ConvictionSource"] == "model_typical"
+    print("✓ NCAAF build_best_bets falls back honestly when offers exist but don't cover this specific player")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

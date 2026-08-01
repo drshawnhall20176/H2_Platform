@@ -142,6 +142,68 @@ def test_build_best_bets_no_longer_clusters_different_streak_lengths_identically
     print("✓ NBA's build_best_bets Conviction ranking also no longer ties streak lengths together")
 
 
+# ----------------------------------------------------------------- real price/reference wiring
+def test_build_best_bets_matches_original_behavior_with_no_real_data():
+    # The critical backward-compatibility guarantee: no real_lines, no offers -- every existing
+    # caller must see the exact original always-placeholder, always-theoretical behavior.
+    log = [_log(28, 7, 5, 2), _log(24, 8, 6, 3), _log(30, 6, 4, 2)]
+    rows = [{"Player": "LeBron James", "Team": "Lakers", "Opp": "Celtics",
+            "GameLabel": "Celtics @ Lakers", "_pid": 1, "_game_log": log}]
+    plays = NP.build_best_bets(rows, sims=8000, seed=5)
+    pts = next(p for p in plays if p["Market"] == "Points")
+    assert pts["Line"] == 22.5   # the original _MARKET_SPEC placeholder, unchanged
+    assert pts["LineSource"] == "default"
+    assert pts["RealPrice"] is None
+    assert pts["PriceSource"] == "model_fair"
+    assert pts["ConvictionSource"] == "model_typical"
+    print("✓ NBA build_best_bets matches the exact original behavior when no real data is supplied")
+
+
+def test_build_best_bets_real_line_used_when_available():
+    log = [_log(28, 7, 5, 2), _log(24, 8, 6, 3), _log(30, 6, 4, 2)]
+    rows = [{"Player": "LeBron James", "Team": "Lakers", "Opp": "Celtics",
+            "GameLabel": "Celtics @ Lakers", "_pid": 1, "_game_log": log}]
+    real_lines = {("lebron james", "player_points"): 25.5}
+    plays = NP.build_best_bets(rows, sims=8000, seed=5, real_lines=real_lines)
+    pts = next(p for p in plays if p["Market"] == "Points")
+    assert pts["Line"] == 25.5
+    assert pts["LineSource"] == "book"
+    print("✓ NBA build_best_bets now genuinely uses a real line when real_lines supplies one")
+
+
+def test_build_best_bets_real_price_and_reference_used_when_offers_available():
+    log = [_log(28, 7, 5, 2), _log(24, 8, 6, 3), _log(30, 6, 4, 2), _log(26, 7, 5, 3), _log(29, 8, 6, 2)]
+    rows = [{"Player": "LeBron James", "Team": "Lakers", "Opp": "Celtics",
+            "GameLabel": "Celtics @ Lakers", "_pid": 1, "_game_log": log}]
+    real_lines = {("lebron james", "player_points"): 25.5}
+    offers = [{"player": "LeBron James", "market": "player_points", "point": 25.5,
+              "over": {"draftkings": -115}, "under": {"draftkings": -105}}]
+    plays = NP.build_best_bets(rows, sims=8000, seed=5, real_lines=real_lines,
+                               offers=offers, preferred_book="draftkings")
+    pts = next(p for p in plays if p["Market"] == "Points")
+    assert pts["RealPrice"] == -115.0
+    assert pts["RealPriceBook"] == "draftkings"
+    assert pts["PriceSource"] == "book"
+    assert pts["ConvictionSource"] == "book"
+    assert pts["Fair"] != pts["RealPrice"]
+    print("✓ NBA build_best_bets attaches a real captured price and a real market reference when "
+         "offers cover this player, without altering what Fair itself means")
+
+
+def test_build_best_bets_falls_back_honestly_when_offers_dont_cover_this_player():
+    log = [_log(28, 7, 5, 2), _log(24, 8, 6, 3), _log(30, 6, 4, 2)]
+    rows = [{"Player": "Some Bench Player", "Team": "Lakers", "Opp": "Celtics",
+            "GameLabel": "Celtics @ Lakers", "_pid": 1, "_game_log": log}]
+    offers = [{"player": "A Totally Different Player", "market": "player_points", "point": 10.5,
+              "over": {"draftkings": -110}, "under": {"draftkings": -110}}]
+    plays = NP.build_best_bets(rows, sims=8000, seed=5, offers=offers, preferred_book="draftkings")
+    pts = next(p for p in plays if p["Market"] == "Points")
+    assert pts["RealPrice"] is None
+    assert pts["PriceSource"] == "model_fair"
+    assert pts["ConvictionSource"] == "model_typical"
+    print("✓ NBA build_best_bets falls back honestly when offers exist but don't cover this specific player")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

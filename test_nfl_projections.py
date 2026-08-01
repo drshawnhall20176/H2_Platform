@@ -109,6 +109,55 @@ def test_build_best_bets_only_produces_plays_for_a_rows_own_markets():
     print("✓ build_best_bets only produces plays for a row's own gated markets, no phantom markets")
 
 
+def test_build_best_bets_matches_original_behavior_with_no_offers():
+    # Backward-compatibility guarantee: no offers supplied -- every existing caller must see
+    # the exact original always-theoretical PriceSource/ConvictionSource behavior.
+    row = {"Player": "Patrick Mahomes", "Team": "KC", "Opp": "LAC", "GameLabel": "KC @ LAC",
+           "_pid": "p1", "_markets": ["player_pass_yds"],
+           "_recent_games": [{"passing_yards": v} for v in [310, 190, 275, 245, 220]]}
+    plays = NP.build_best_bets([row], sims=4000, seed=1)
+    assert plays[0]["RealPrice"] is None
+    assert plays[0]["PriceSource"] == "model_fair"
+    assert plays[0]["ConvictionSource"] == "model_typical"
+    print("✓ NFL build_best_bets matches the exact original behavior when no offers are supplied")
+
+
+def test_build_best_bets_real_price_and_reference_used_when_offers_available():
+    from projections import normalize_name
+    log = [{"passing_yards": v} for v in [310, 190, 275, 245, 220]]
+    row = {"Player": "Patrick Mahomes", "Team": "KC", "Opp": "LAC", "GameLabel": "KC @ LAC",
+           "_pid": "p1", "_markets": ["player_pass_yds"], "_recent_games": log}
+    # 230.5 sits below this log's own ~248 average, so Over is the deterministically favored
+    # side (unlike 267.5, which sits above it and favors Under) -- the real book price picked
+    # up must match whichever side the model actually favors, not an assumed one.
+    real_lines = {(normalize_name("Patrick Mahomes"), "player_pass_yds"): 230.5}
+    offers = [{"player": "Patrick Mahomes", "market": "player_pass_yds", "point": 230.5,
+              "over": {"draftkings": -115}, "under": {"draftkings": -105}}]
+    plays = NP.build_best_bets([row], sims=4000, seed=1, real_lines=real_lines,
+                              offers=offers, preferred_book="draftkings")
+    assert plays[0]["Side"] == "Over"
+    assert plays[0]["RealPrice"] == -115.0
+    assert plays[0]["RealPriceBook"] == "draftkings"
+    assert plays[0]["PriceSource"] == "book"
+    assert plays[0]["ConvictionSource"] == "book"
+    assert plays[0]["Fair"] != plays[0]["RealPrice"]
+    print("✓ NFL build_best_bets attaches a real captured price and a real market reference when "
+         "offers cover this player, without altering what Fair itself means")
+
+
+def test_build_best_bets_falls_back_honestly_when_offers_dont_cover_this_player():
+    row = {"Player": "Some Bench WR", "Team": "KC", "Opp": "LAC", "GameLabel": "KC @ LAC",
+           "_pid": "p2", "_markets": ["player_reception_yds"],
+           "_recent_games": [{"receiving_yards": 65}] * 4}
+    offers = [{"player": "A Totally Different Player", "market": "player_reception_yds",
+              "point": 40.5, "over": {"draftkings": -110}, "under": {"draftkings": -110}}]
+    plays = NP.build_best_bets([row], sims=2000, seed=1, offers=offers, preferred_book="draftkings")
+    assert plays[0]["RealPrice"] is None
+    assert plays[0]["PriceSource"] == "model_fair"
+    assert plays[0]["ConvictionSource"] == "model_typical"
+    print("✓ NFL build_best_bets falls back honestly when offers exist but don't cover this specific player")
+
+
 # ----------------------------------------------------------------- real lines: NFL_MARKET_TO_ODDS_KEY drift guard
 def test_nfl_market_to_odds_key_matches_sports_market_map():
     """Drift guard: NFL_MARKET_TO_ODDS_KEY, sports.REGISTRY NFL market_map, and

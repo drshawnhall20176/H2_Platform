@@ -37,6 +37,8 @@ import basketball_projections as BB_P   # shrink_prob only — pure probability 
                                         # basketball-specific assumptions, same reuse nfl_
                                         # projections.py's own docstring already justifies
 import config_ncaaf as CFG
+import odds_api as O   # for real_entry_price/real_market_prob -- real price/reference wiring,
+                       # same functions MLB/WNBA/NBA/NCAAMB/NFL's own build_best_bets already use
 
 DEFAULT_SIMS = CFG.DEFAULT_SIMS
 
@@ -302,7 +304,17 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
     real_lines: {(normalized_player_name, odds_api_market_key): point} from
     odds_api.market_lines_for_slate -- when supplied, each play's Line is the real book line for
     that specific player, not the _MARKET_SPEC placeholder. None (the default) preserves the
-    always-placeholder behavior."""
+    always-placeholder behavior.
+
+    offers, preferred_book: NOW WIRED IN, matching MLB/WNBA/NBA/NCAAMB/NFL -- previously accepted
+    for signature parity only. Reuses NCAAF_MARKET_TO_ODDS_KEY (already built for real_line_or_
+    default_ncaaf above) to look up real captured prices/references, same fix as NFL's own:
+      - Conviction's reference: the real, live no-vig market probability (odds_api.
+        real_market_prob) when offers cover this player/market, BEST_BET_REF otherwise
+        (ConvictionSource records which).
+      - Fair/RealPrice: a real captured sportsbook price (odds_api.real_entry_price) when
+        available, the model's own theoretical Fair price otherwise (PriceSource records
+        which) -- Fair itself is unchanged; RealPrice is new, additive."""
     rng = np.random.default_rng(seed)
     plays: List[Dict] = []
 
@@ -323,13 +335,39 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
             raw = prob_over(_dist(sim), line)
             shrunk = BB_P.shrink_prob(raw, n_sample)
             over = _clip_prob(shrunk)
-            side, sp, ref_s = _favored_side(over, BEST_BET_REF.get(disp, 0.5))
+
+            # Real market reference when available, BEST_BET_REF's own hand-typed guess
+            # otherwise -- odds_key comes from the same NCAAF_MARKET_TO_ODDS_KEY map already
+            # backing real_line_or_default_ncaaf above.
+            odds_key = NCAAF_MARKET_TO_ODDS_KEY.get(disp)
+            typical_ref = BEST_BET_REF.get(disp, 0.5)
+            ref, ref_src = typical_ref, "model_typical"
+            if offers and odds_key:
+                real_over_prob = O.real_market_prob(offers, r["Player"], odds_key, "over",
+                                                    preferred_book=preferred_book)
+                if real_over_prob is not None:
+                    ref, ref_src = real_over_prob, "book"
+            side, sp, ref_s = _favored_side(over, ref)
+
+            # Real captured price when available, the model's own theoretical Fair price
+            # otherwise -- Fair itself never changes meaning, RealPrice is purely additive.
+            fair = prob_to_american(sp)
+            real_price, real_price_book, price_src = None, None, "model_fair"
+            if offers and odds_key:
+                real = O.real_entry_price(offers, r["Player"], odds_key, side,
+                                          preferred_book=preferred_book)
+                if real is not None:
+                    real_price, _real_point, real_price_book = real
+                    price_src = "book"
+
             plays.append({
                 "Player": r["Player"], "PlayerId": r.get("_pid"), "Team": r["Team"],
                 "Game": r["GameLabel"], "Opp": r.get("Opp"), "Versus": r.get("Opp"),
                 "Market": disp, "Side": side, "Line": line, "LineSource": line_src,
-                "ModelProb": round(sp, 4), "Fair": prob_to_american(sp),
+                "ModelProb": round(sp, 4), "Fair": fair,
+                "RealPrice": real_price, "RealPriceBook": real_price_book, "PriceSource": price_src,
                 "Conviction": round(sp / ref_s, 2) if ref_s > 0 else 0.0,
+                "ConvictionSource": ref_src,
                 "_ceiling": round(1.0 / ref_s, 2) if ref_s > 0 else None,
                 "Why": _player_reasons(rate, n_sample, line, side, disp,
                                        recent_values=[g.get(_ROW_FIELD_TO_CFBD_COL.get(col, col)) or 0
