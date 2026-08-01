@@ -195,3 +195,71 @@ def section_header(icon: str, title: str, subtitle: Optional[str] = None,
       </div>
     </div>
     """, unsafe_allow_html=True)
+
+
+def _schedule_game_row(g: dict) -> str:
+    """One game's self-contained HTML row -- away @ home, real local time (or an honest
+    'Time TBD' when schedule_board.py couldn't determine one, e.g. NFL's date-only source data),
+    venue when known. Shared by every conference/division block below."""
+    if g.get("time_known") and g.get("dt") is not None:
+        time_str = g["dt"].strftime("%-I:%M %p ET")
+    else:
+        time_str = "Time TBD"
+    venue_html = (f'<span style="color:#6b7280;"> · {g["venue"]}</span>' if g.get("venue") else "")
+    return f"""
+    <div style="display:flex;justify-content:space-between;align-items:center;
+                padding:7px 0;border-bottom:1px solid #262b33;">
+      <div style="font-size:14px;">{g.get('away', '?')} <span style="color:#6b7280;">@</span>
+        {g.get('home', '?')}</div>
+      <div style="font-size:12.5px;color:#9aa4b2;flex-shrink:0;margin-left:10px;">
+        {time_str}{venue_html}
+      </div>
+    </div>"""
+
+
+def todays_schedule_board(result: Optional[dict], icon: str, label: str) -> None:
+    """Renders schedule_board.todays_schedule()'s own return shape -- conference (and division,
+    where that data exists) sections, each game sorted chronologically within its group. result
+    is None for a sport schedule_board.py doesn't cover (NCAAMB, UFC) or that had a live fetch
+    error already absorbed upstream -- the caller should check for None and simply not call this
+    at all rather than render an empty section, same "hidden, not shown broken" posture used
+    elsewhere on this platform. Renders a plain, honest "no games today" message for a real empty
+    schedule (a legitimate off-day), which IS worth showing, unlike a None result."""
+    if result is None:
+        return
+    section_header(icon, f"Today's {label} Schedule")
+
+    grouped = result["grouped"]
+    other = result["other"]
+    has_divisions = result["has_divisions"]
+
+    if not grouped and not other:
+        st.caption("No games scheduled today.")
+        return
+
+    for conf in sorted(grouped.keys()):
+        with st.container(border=True):
+            st.markdown(f'<div style="font-weight:700;font-size:15px;margin-bottom:4px;">'
+                       f'{conf}</div>', unsafe_allow_html=True)
+            divisions = grouped[conf]
+            if has_divisions:
+                for div in sorted(k for k in divisions.keys() if k is not None):
+                    st.markdown(f'<div style="font-size:12px;color:#9aa4b2;font-weight:600;'
+                               f'text-transform:uppercase;letter-spacing:0.4px;margin:8px 0 2px;">'
+                               f'{div}</div>', unsafe_allow_html=True)
+                    rows = "".join(_schedule_game_row(g) for g in divisions[div])
+                    st.markdown(rows, unsafe_allow_html=True)
+            else:
+                # No division level for this sport (WNBA/NCAAF) -- every game for this
+                # conference lives under the single None key group_games always uses.
+                rows = "".join(_schedule_game_row(g) for g in divisions.get(None, []))
+                st.markdown(rows, unsafe_allow_html=True)
+
+    if other:
+        with st.container(border=True):
+            st.markdown('<div style="font-weight:700;font-size:15px;margin-bottom:4px;">'
+                       'Other</div>', unsafe_allow_html=True)
+            st.caption("Home team not in this platform's own conference/division reference "
+                      "table yet (a real gap, not a hidden game) -- still shown below.")
+            rows = "".join(_schedule_game_row(g) for g in other)
+            st.markdown(rows, unsafe_allow_html=True)

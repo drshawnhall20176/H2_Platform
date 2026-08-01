@@ -1,6 +1,11 @@
 import streamlit as st
 import sports
 import components as C
+import schedule_board as SB
+from datetime import datetime as _dt
+import pytz as _pytz
+
+_ET = _pytz.timezone("US/Eastern")
 
 C.base_css()
 C.hero_banner("⚾", "H2 Sports — MLB Model Dashboard",
@@ -53,22 +58,31 @@ if active:
 
 st.divider()
 
-with st.container(border=True):
-    st.markdown(
-        """
-This dashboard is built on a single shared backend (`mlb_engine.py`) so every page
+# ---------- Today's Schedule ----------
+# Sport-aware, and only rendered for the sports schedule_board.py actually covers (MLB, NBA,
+# WNBA, NFL, NCAAF) -- NCAAMB (350+ Division I teams across dozens of conferences, no reference
+# data sourced yet) and UFC (individual bouts, not team matchups -- UFC Fight Card already IS its
+# own schedule) are deliberately hidden here rather than shown broken/empty, same "hidden, not
+# shown broken" posture the sidebar itself already uses for sport-gated pages.
+if active and current in SB.SUPPORTED_SPORTS:
+    today_str = _dt.now(_ET).strftime("%Y-%m-%d")
+    with st.spinner("Loading today's schedule..."):
+        schedule_result = SB.todays_schedule(current, today_str)
+    C.todays_schedule_board(schedule_result, active.icon, active.label)
+    st.divider()
+
+if active:
+    with st.container(border=True):
+        st.markdown(
+            f"""
+This dashboard is built on a single shared backend (`{active.engine_module}.py`) so every page
 pulls the same live data and stays consistent.
 
-**Pages**
-- **🎯 Pitching Lab** — probable starters across today's slate, ERA vs FIP regression,
-  and auto-generated discussion hooks.
-- **💣 Dinger Engine** — every projected hitter on the slate with platoon edges, ISO/OPS,
-  and matchup leaderboards. Uses posted lineups when available, active rosters otherwise.
-
 Pick a date on any page, and the engine fetches the slate concurrently — a full day
-usually loads in a few seconds.
+usually loads in a few seconds. See the sidebar for every page available for
+**{active.icon} {active.label}**.
 """
-    )
+        )
 
 st.info(
     "Analytics here describe likelihoods and trends, not certainties. If you publish picks "

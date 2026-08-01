@@ -1,0 +1,189 @@
+"""
+schedule_board.py — "Today's Schedule" data layer for Home.py: today's games for the active
+sport, grouped by conference (and division where that data exists), sorted chronologically by
+real start time.
+
+DELIBERATELY BUILT ON EACH ENGINE'S OWN get_schedule(), NOT build_slate() -- get_schedule is the
+lightweight, games-only fetch every engine already has (team names, start time, venue), completely
+separate from the heavy per-player projection pipeline build_slate runs. A schedule display has no
+reason to wait on player-level data it isn't showing.
+
+SCOPE: MLB, NBA, WNBA, NFL, NCAAF only, matching league_structure.py's own reference tables.
+NCAAMB (350+ Division I teams across dozens of conferences, no mapping sourced yet) and UFC
+(individual bouts, not team matchups -- UFC Fight Card already IS its own schedule) are
+deliberately not covered here -- see league_structure.py's own docstring. Home.py's own caller is
+responsible for simply not rendering this section for those two sports, the same "hidden
+entirely, not shown broken" posture the rest of this platform already uses for sport-gated content.
+
+DATE HANDLING, PER SPORT -- real, confirmed differences, not a uniform assumption:
+  - MLB / NBA / WNBA: game_date is a full ISO-UTC timestamp -- run through sports.game_dt (the
+    platform's own shared UTC->US/Eastern conversion) for both the date filter and the
+    chronological sort, same real fix odds_api.py/ufc_engine.py's own _eastern_date_str already
+    established (a late-night ET game can roll to the next UTC calendar day; a raw string-prefix
+    comparison would silently drop it from "today").
+  - NCAAF: start_date is also a full ISO-UTC timestamp (confirmed against ncaaf_data.py's own
+    _SCHEDULE_COLUMNS, which carries a separate start_time_tbd flag alongside it -- that flag only
+    makes sense if start_date normally carries a real time). Same game_dt handling as above.
+  - NFL: nflreadpy's own "gameday" field (this engine's game_date) is DATE ONLY, no time-of-day --
+    confirmed by what nfl_engine.get_schedule actually extracts today. Running a bare date string
+    through game_dt would silently do the wrong thing (Python's fromisoformat treats a date-only
+    string as a NAIVE local midnight, then .astimezone() offsets it by the SERVER's own timezone,
+    not a real Eastern conversion) -- compared directly as a date string instead, no conversion.
+    Real consequence, stated honestly: NFL games on the same date can't be chronologically sorted
+    by real kickoff time with what this engine currently captures -- they fall back to a stable
+    alphabetical-by-away-team order and display as "Time TBD" rather than fabricate a kickoff.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
+import league_structure as LS
+import sports
+
+# Sports this section covers -- see module docstring for why NCAAMB/UFC are excluded.
+SUPPORTED_SPORTS = {"MLB", "NBA", "WNBA", "NFL", "NCAAF"}
+
+
+def _mlb_games(date_str: str) -> List[Dict[str, Any]]:
+    import mlb_engine as E
+    out = []
+    for g in E.get_schedule(date_str):
+        dt = sports.game_dt(g.get("game_date"))
+        if dt is None or dt.strftime("%Y-%m-%d") != date_str:
+            continue
+        out.append({"home": g.get("home_name"), "away": g.get("away_name"),
+                    "dt": dt, "time_known": True, "venue": g.get("venue_name")})
+    return out
+
+
+def _basketball_games(date_str: str, engine_module: str) -> List[Dict[str, Any]]:
+    """Shared by NBA and WNBA -- identical ESPN scoreboard shape, see league_structure.py's own
+    note on why these are keyed by full display name rather than a guessed abbreviation."""
+    E = __import__(engine_module)
+    out = []
+    for g in E.get_schedule(date_str):
+        dt = sports.game_dt(g.get("game_date"))
+        if dt is None or dt.strftime("%Y-%m-%d") != date_str:
+            continue
+        out.append({"home": g.get("home_name"), "away": g.get("away_name"),
+                    "dt": dt, "time_known": True, "venue": None})
+    return out
+
+
+def _nfl_games(date_str: str) -> List[Dict[str, Any]]:
+    import nfl_engine as E
+    season = E._infer_season(date_str)
+    if season is None:
+        return []
+    schedule = E.get_schedule(season)
+    week = E._resolve_week(schedule, date_str)
+    if week is None:
+        return []
+    out = []
+    for g in E.games_for_week(schedule, week):
+        # Direct string comparison, deliberately -- see module docstring on why NFL's date-only
+        # game_date can't safely go through game_dt the way the timestamp-based sports do.
+        if g.get("game_date") != date_str:
+            continue
+        out.append({"home": g.get("home_team"), "away": g.get("away_team"),
+                    "dt": None, "time_known": False, "venue": None})
+    return out
+
+
+def _conference_lookup(sport_key: str):
+    """(lookup_dict, has_divisions) for sport_key -- has_divisions is False for sports whose real
+    structure has no division level (WNBA: East/West only; NCAAF: most real conferences dropped
+    divisions in the 2024+ realignment, never modeled here as a result), so the caller knows not
+    to render an empty division sub-header for those."""
+    if sport_key == "MLB":
+        return LS.MLB_TEAM_LEAGUE, True
+    if sport_key == "NBA":
+        return LS.NBA_TEAM_CONFERENCE, True
+    if sport_key == "NFL":
+        return LS.NFL_TEAM_CONFERENCE, True
+    if sport_key == "WNBA":
+        return {name: (conf, None) for name, conf in LS.wnba_team_conference().items()}, False
+    if sport_key == "NCAAF":
+        return {}, False   # NCAAF groups by conference directly from the game row -- see below
+    return {}, False
+
+
+def group_games(sport_key: str, games: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Groups already-fetched games by (conference[, division]), sorted chronologically within
+    each group. Games whose home team isn't found in the reference table land in "Other" --
+    FAILS SAFE, never dropped and never a crash (see league_structure.py's own docstring).
+
+    Returns {"grouped": {conference: {division_or_None: [games...]}}, "other": [games...],
+    "has_divisions": bool} -- has_divisions tells the renderer whether to show a division
+    sub-header at all (WNBA/NCAAF never have one, see _conference_lookup)."""
+    lookup, has_divisions = _conference_lookup(sport_key)
+    grouped: Dict[str, Dict[Optional[str], List[Dict]]] = {}
+    other: List[Dict[str, Any]] = []
+
+    for g in sorted(games, key=lambda x: (x["dt"] is None, x["dt"], x.get("away") or "")):
+        conf = div = None
+        if sport_key == "NCAAF":
+            # NCAAF's own schedule rows already carry conference directly -- no lookup table
+            # needed at all, the one sport where this data was already there for free.
+            conf = g.pop("_home_conference", None)
+        else:
+            entry = lookup.get(g["home"])
+            if entry:
+                conf, div = entry
+        if not conf:
+            other.append(g)
+            continue
+        grouped.setdefault(conf, {}).setdefault(div, []).append(g)
+
+    return {"grouped": grouped, "other": other, "has_divisions": has_divisions}
+
+
+def todays_schedule(sport_key: str, date_str: str) -> Optional[Dict[str, Any]]:
+    """Public entry point. Returns None for a sport outside SUPPORTED_SPORTS (the caller should
+    simply not render the section, not show an empty/broken one) -- otherwise a dict from
+    group_games above, always a real (possibly empty) result, never a crash on a bad fetch."""
+    if sport_key not in SUPPORTED_SPORTS:
+        return None
+    try:
+        if sport_key == "MLB":
+            games = _mlb_games(date_str)
+        elif sport_key == "NBA":
+            games = _basketball_games(date_str, "nba_engine")
+        elif sport_key == "WNBA":
+            games = _basketball_games(date_str, "wnba_engine")
+        elif sport_key == "NFL":
+            games = _nfl_games(date_str)
+        elif sport_key == "NCAAF":
+            games = _ncaaf_games_with_conference(date_str)
+        else:
+            games = []
+    except Exception:
+        # A live fetch failure here must never take down Home.py itself -- an empty schedule
+        # section (or the caller choosing not to render it) is the honest degradation, matching
+        # every other engine's own fail-soft posture elsewhere in this platform.
+        games = []
+    return group_games(sport_key, games)
+
+
+def _ncaaf_games_with_conference(date_str: str) -> List[Dict[str, Any]]:
+    """Same as _ncaaf_games, but stashes the home team's real conference (already on the raw
+    schedule row -- see module docstring) onto each game so group_games can read it back off
+    without a second lookup table NCAAF doesn't need."""
+    import ncaaf_engine as E
+    season = E._infer_season(date_str)
+    if season is None:
+        return []
+    schedule = E.get_schedule(season)
+    week = E._resolve_week(schedule, date_str)
+    if week is None:
+        return []
+    out = []
+    for g in E.games_for_week(schedule, week):
+        dt = sports.game_dt(g.get("start_date"))
+        if dt is None or dt.strftime("%Y-%m-%d") != date_str:
+            continue
+        out.append({"home": g.get("home_team"), "away": g.get("away_team"), "dt": dt,
+                    "time_known": not bool(g.get("start_time_tbd")), "venue": g.get("venue"),
+                    "_home_conference": g.get("home_conference")})
+    return out
