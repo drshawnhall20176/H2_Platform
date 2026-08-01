@@ -299,7 +299,18 @@ def _schedule_game_row(g: dict, color: str) -> str:
     scheme.
 
     Also carries a real game-status badge (Live/Delayed/Canceled/Final -- see _STATUS_STYLE) and,
-    for MLB specifically, H:/A: lineup-confirmation bubbles -- both added directly on request."""
+    for MLB specifically, H:/A: lineup-confirmation bubbles -- both added directly on request.
+
+    BUILT AS A SINGLE-LINE STRING, DELIBERATELY -- a real, confirmed rendering bug, not a style
+    choice: many of these rows get joined together (see todays_schedule_board's own rows =
+    "".join(...)) into ONE st.markdown() call. A pretty-printed, multi-line/indented f-string
+    (this function's own original version) gets misread by the markdown renderer once several
+    are concatenated -- deeply-indented inner lines (the time chip and venue, in the confirmed
+    live report) get treated as an indented Markdown code block and leak as literal escaped text
+    instead of rendering as HTML, while shallow single-line content (team names) renders fine.
+    Every other HTML-building helper in this module that gets joined this way (_team_logo_html,
+    _status_badge_html, _lineup_bubble_html) was already single-line and unaffected -- this
+    function was the one real gap."""
     if g.get("time_known") and g.get("dt") is not None:
         time_str = g["dt"].strftime("%-I:%M %p ET")
     else:
@@ -308,23 +319,26 @@ def _schedule_game_row(g: dict, color: str) -> str:
                  if g.get("venue") else "")
     status_html = _status_badge_html(g.get("status"))
     lineup_html = _lineup_bubble_html(g)
-    return f"""
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;
-                padding:8px 10px;border-radius:8px;margin-bottom:3px;
-                background:rgba(255,255,255,0.025);">
-      <div style="font-size:14px;white-space:nowrap;">
-        {_team_logo_html(g.get('away_logo'))}<span style="font-weight:600;">{g.get('away', '?')}</span>
-        <span style="color:#6b7280;margin:0 5px;">@</span>
-        {_team_logo_html(g.get('home_logo'))}<span style="font-weight:600;">{g.get('home', '?')}</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
-        {lineup_html}
-        {status_html}
-        <span style="font-size:11.5px;font-weight:700;white-space:nowrap;background:{color}1e;
-                    color:{color};padding:3px 9px;border-radius:6px;">{time_str}</span>
-        {venue_html}
-      </div>
-    </div>"""
+    away_logo = _team_logo_html(g.get('away_logo'))
+    home_logo = _team_logo_html(g.get('home_logo'))
+    away_name = g.get('away', '?')
+    home_name = g.get('home', '?')
+    return (
+        '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;'
+        'padding:8px 10px;border-radius:8px;margin-bottom:3px;background:rgba(255,255,255,0.025);">'
+        '<div style="font-size:14px;white-space:nowrap;">'
+        f'{away_logo}<span style="font-weight:600;">{away_name}</span>'
+        '<span style="color:#6b7280;margin:0 5px;">@</span>'
+        f'{home_logo}<span style="font-weight:600;">{home_name}</span>'
+        '</div>'
+        '<div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">'
+        f'{lineup_html}{status_html}'
+        f'<span style="font-size:11.5px;font-weight:700;white-space:nowrap;background:{color}1e;'
+        f'color:{color};padding:3px 9px;border-radius:6px;">{time_str}</span>'
+        f'{venue_html}'
+        '</div>'
+        '</div>'
+    )
 
 
 def todays_schedule_board(result: Optional[dict], icon: str, label: str) -> None:

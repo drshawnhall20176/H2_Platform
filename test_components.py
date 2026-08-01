@@ -372,3 +372,33 @@ def test_schedule_game_row_includes_status_and_lineup_bubbles():
     assert "Delayed" in html
     assert html.count("border-radius:50%") == 2
     print("✓ schedule game row includes both the status badge and lineup bubbles when present")
+
+
+def test_schedule_game_row_has_no_embedded_newlines():
+    # REAL, CONFIRMED REGRESSION GUARD, not a style preference: a real bug shipped and was
+    # reported live -- multiple game rows get joined together with "".join() into ONE
+    # st.markdown() call (see todays_schedule_board's own rows = "".join(...)). A pretty-printed,
+    # indented multi-line f-string renders fine in isolation but gets misread by the markdown
+    # renderer once several are concatenated -- deeply-indented inner lines (the time chip and
+    # venue, in the live report) get treated as an indented Markdown code block and leak as
+    # literal escaped text instead of rendering as HTML. Team names (shallow, single-line)
+    # rendered fine, which is exactly what made the bug confusing to spot from the screenshot
+    # alone. This test fails loudly if a future edit reintroduces a multi-line/indented f-string
+    # here, before it ever reaches a real deploy.
+    import components as C
+    g = {"home": "New York Yankees", "away": "Boston Red Sox",
+        "dt": None, "time_known": False, "venue": "Yankee Stadium",
+        "home_logo": "https://example.com/a.png", "away_logo": "https://example.com/b.png",
+        "status": "in-progress", "home_lineup_confirmed": True, "away_lineup_confirmed": False}
+    html = C._schedule_game_row(g, "#3b82f6")
+    assert "\n" not in html, (
+        "schedule game row HTML contains an embedded newline -- this is exactly the shape of "
+        "bug that made real content (time/venue) render as literal escaped text once multiple "
+        "rows were joined together for one st.markdown() call")
+    # Also confirm the fix holds up under the ACTUAL join() multiple rows go through together --
+    # not just one row in isolation.
+    joined = html + html + html
+    assert "\n" not in joined
+    assert "&lt;span" not in joined and "<span" in joined   # real HTML, not escaped-as-text
+    print("✓ schedule game row (alone and joined with others) contains zero embedded newlines -- "
+         "the exact condition that caused real content to render as literal text")
