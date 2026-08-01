@@ -154,116 +154,117 @@ left, right = st.columns([3, 2])
  
 # ---------- tonight's top plays ----------
 with left:
-    C.section_header("⭐", "Tonight's top leans")
-    # Owner-only Graded Picks pointer — Graded Picks itself is gated the same way (moved to
-    # owner-only directly on request, to guarantee no broken public links as the subscriber
-    # split hardens), so this stays hidden for a public/Discord audience rather than linking to
-    # a page they can't open, the same pattern already used just below for Data Health.
-    if st.secrets.get("AUDIENCE", "owner") == "owner":
-        st.page_link("views/2_Graded_Picks.py", label="See the full slate, graded game by game →",
-                    icon="🏅")
-    if plays:
-        # A REAL, CONFIRMED FIX, not the original design -- this used to sort by raw Conviction
-        # directly, which can genuinely INVERT against the letter-grade system every other page
-        # (Graded Picks, Suggested Parlays, Speculative Basket) already uses: a raw 2.5x on HR
-        # (ceiling ~9.09, a "B") can outrank a raw 1.8x on a near-50%-reference market (ceiling
-        # ~2.0, a genuine "A") purely because HR's own raw numbers run bigger, even though the
-        # SECOND play is the stronger one by every other page's own grading logic. Grading every
-        # play here too, and sorting/filtering by the SAME ceiling-normalized rank_value grading.
-        # conviction_to_grade already exposes for exactly this reason, means "Tonight's top
-        # leans" now agrees with what Graded Picks itself would show for the same slate --
-        # intra-page consistency, not a second, silently different ranking of "the same" model.
-        # A REAL, CONFIRMED FIX, not the original design -- Top Leans used to sort by rank_value
-        # (the ceiling-normalized Conviction metric), which is the wrong number for what a "top
-        # lean" actually means to a real person. Confirmed directly with a real, reported
-        # example: a genuine longshot Triples play (11% real chance of happening, an 89% chance
-        # it doesn't) can carry a raw Conviction of 4.44x purely because Triples' reference rate
-        # is so low (~2.5%) that even a modest real probability looks huge relative to it --
-        # rank_value would still rate this a real, valid grade, but "leans" colloquially means
-        # "I lean toward this happening," which is a probability question, not an edge-relative-
-        # to-typical one. This is the SAME real distinction already built into Suggested Parlays'
-        # Safer/Steady tiers -- Top Leans just never got the same treatment. Graded Picks itself
-        # stays rank_value-sorted on purpose (its entire identity IS the letter-grade system),
-        # but this widget's own name and purpose are different. See grading.build_top_leans' own
-        # docstring for the full reasoning -- pulled out of this view for the same reason every
-        # other piece of real logic on this platform lives in grading.py, not trusted by eye in
-        # the browser.
-        _TOP_TABS = [("All", None)] + [(f"{_MARKET_ICONS.get(m, '🔹')} {m}", m)
-                                       for m in _active.market_map.keys()]
-        _mkt = C.wrapped_tab_picker(_TOP_TABS, key="top_leans_market")
-        if _mkt is None:
-            subset = grading.build_top_leans(plays, per_market=2)
-            st.caption("Best two leans from each market — so this isn't just one market's tab again.")
+    with st.container(border=True):
+        C.section_header("⭐", "Tonight's top leans")
+        # Owner-only Graded Picks pointer — Graded Picks itself is gated the same way (moved to
+        # owner-only directly on request, to guarantee no broken public links as the subscriber
+        # split hardens), so this stays hidden for a public/Discord audience rather than linking to
+        # a page they can't open, the same pattern already used just below for Data Health.
+        if st.secrets.get("AUDIENCE", "owner") == "owner":
+            st.page_link("views/2_Graded_Picks.py", label="See the full slate, graded game by game →",
+                        icon="🏅")
+        if plays:
+            # A REAL, CONFIRMED FIX, not the original design -- this used to sort by raw Conviction
+            # directly, which can genuinely INVERT against the letter-grade system every other page
+            # (Graded Picks, Suggested Parlays, Speculative Basket) already uses: a raw 2.5x on HR
+            # (ceiling ~9.09, a "B") can outrank a raw 1.8x on a near-50%-reference market (ceiling
+            # ~2.0, a genuine "A") purely because HR's own raw numbers run bigger, even though the
+            # SECOND play is the stronger one by every other page's own grading logic. Grading every
+            # play here too, and sorting/filtering by the SAME ceiling-normalized rank_value grading.
+            # conviction_to_grade already exposes for exactly this reason, means "Tonight's top
+            # leans" now agrees with what Graded Picks itself would show for the same slate --
+            # intra-page consistency, not a second, silently different ranking of "the same" model.
+            # A REAL, CONFIRMED FIX, not the original design -- Top Leans used to sort by rank_value
+            # (the ceiling-normalized Conviction metric), which is the wrong number for what a "top
+            # lean" actually means to a real person. Confirmed directly with a real, reported
+            # example: a genuine longshot Triples play (11% real chance of happening, an 89% chance
+            # it doesn't) can carry a raw Conviction of 4.44x purely because Triples' reference rate
+            # is so low (~2.5%) that even a modest real probability looks huge relative to it --
+            # rank_value would still rate this a real, valid grade, but "leans" colloquially means
+            # "I lean toward this happening," which is a probability question, not an edge-relative-
+            # to-typical one. This is the SAME real distinction already built into Suggested Parlays'
+            # Safer/Steady tiers -- Top Leans just never got the same treatment. Graded Picks itself
+            # stays rank_value-sorted on purpose (its entire identity IS the letter-grade system),
+            # but this widget's own name and purpose are different. See grading.build_top_leans' own
+            # docstring for the full reasoning -- pulled out of this view for the same reason every
+            # other piece of real logic on this platform lives in grading.py, not trusted by eye in
+            # the browser.
+            _TOP_TABS = [("All", None)] + [(f"{_MARKET_ICONS.get(m, '🔹')} {m}", m)
+                                           for m in _active.market_map.keys()]
+            _mkt = C.wrapped_tab_picker(_TOP_TABS, key="top_leans_market")
+            if _mkt is None:
+                subset = grading.build_top_leans(plays, per_market=2)
+                st.caption("Best two leans from each market — so this isn't just one market's tab again.")
+            else:
+                subset = [p for p in grading.build_top_leans(plays, per_market=8)
+                         if p["Market"] == _mkt][:8]
+            if subset:
+                for p in subset:
+                    p["Grade"] = p["_grade"]["letter"]
+                    p["_display_line"] = (f"📊 {p['Line']:g}" if p.get("LineSource") == "book"
+                                          and p.get("Line") is not None
+                                          else f"{p['Line']:g}" if p.get("Line") is not None else "—")
+                    # The actual fix for a real, reported optics problem: Grade and Model %
+                    # look like they should move together (higher probability -> better
+                    # grade), but they're deliberately different axes -- Grade/Conviction
+                    # measure edge relative to what's TYPICAL for that specific line, not raw
+                    # likelihood. Without seeing that baseline, a C at 80% sitting above an A
+                    # at 79% looks like a bug even though it's correct math. The baseline is
+                    # derived directly from data already on the play (ModelProb/Conviction),
+                    # not a new computation -- the same number the grade was already using,
+                    # just no longer hidden behind a caption someone has to trust.
+                    conv = p.get("Conviction")
+                    mp = p.get("ModelProb")
+                    if conv and mp is not None and conv > 0:
+                        baseline = mp / conv
+                        marker = "📊 " if p.get("ConvictionSource") == "book" else ""
+                        p["_baseline"] = f"{marker}{baseline:.0%}"
+                    else:
+                        p["_baseline"] = "—"
+                tdf = pd.DataFrame(subset)[["Grade", "ModelProb", "Player", "Market", "Side",
+                                            "_display_line", "Conviction", "_baseline", "Why"]]
+                st.dataframe(
+                    tdf.rename(columns={"ModelProb": "Model %", "Why": "Reasoning",
+                                        "_display_line": "Line", "_baseline": "Baseline"})
+                    .style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×"})
+                    .theme_gradient(cmap="Greens", subset=["Model %"]),
+                    column_config={"Reasoning": st.column_config.TextColumn(width="large")},
+                    hide_index=True, width="stretch", height=330)
+                st.caption("**Baseline** is the real reference rate Conviction (and therefore "
+                          "Grade) is actually measured against for that exact line — "
+                          "Model % ÷ Conviction. It's why Grade and Model % don't move "
+                          "together: an 80% Model % against an 80%+ baseline is barely any "
+                          "edge at all (a real, correctly low grade), while a 65% Model % "
+                          "against a 20% baseline is a massive one. 📊 means the baseline "
+                          "itself is a real, live no-vig market rate, not this platform's own "
+                          "typical-rate estimate for the market.")
+            else:
+                st.caption("No leans in this market on tonight's board.")
+            st.caption("Ranked by real probability of hitting (Model %), among plays that clear at "
+                      "least a C grade — not by Conviction alone, which measures edge relative to a "
+                      "market-typical rate and can run high on a genuine longshot in a rare-event "
+                      "market. D-grade picks are excluded here on purpose (same as Graded Picks' own "
+                      "summary): a near-certain \"Under\" on a rare-event market like Stolen Bases or "
+                      "Triples can show a 95%+ Model % while still earning the platform's own lowest "
+                      "grade, because that market's own typical rate is already close to 100% — a "
+                      "high Model % there isn't a real edge, just a market where almost nothing "
+                      "happens for almost everyone. A grade shown here (C or better) means real, "
+                      "validated edge, not just a high raw probability.")
+            # Quick-log widget, added directly on request: during a real, narrow pick-making window,
+            # having to separately re-enter a pick into Bet Log is real friction that gets skipped in
+            # favor of just making the pick. Uses the same curated "best 2 per market" set shown in
+            # the All tab -- the most representative summary of tonight's top leans, not a separate
+            # widget per market tab (which would mean 15+ redundant copies). Owner-only (quick_log
+            # itself enforces this, so this stays hidden for a public/Discord audience even though
+            # Command Center itself is a public page).
+            # _real_offers: the SAME real sportsbook offers already fetched to price this board (see
+            # best_bets_data.py's own offers side-channel) -- reused so a logged pick gets a real
+            # captured price when one exists, instead of quick_log always falling back to Fair odds.
+            _real_offers = st.session_state.get(f"_real_offers_{_active.key}_{today}") or []
+            quick_log.render_quick_log(grading.build_top_leans(plays, per_market=2), today,
+                                       _active.key, key_prefix="top_leans", offers=_real_offers)
         else:
-            subset = [p for p in grading.build_top_leans(plays, per_market=8)
-                     if p["Market"] == _mkt][:8]
-        if subset:
-            for p in subset:
-                p["Grade"] = p["_grade"]["letter"]
-                p["_display_line"] = (f"📊 {p['Line']:g}" if p.get("LineSource") == "book"
-                                      and p.get("Line") is not None
-                                      else f"{p['Line']:g}" if p.get("Line") is not None else "—")
-                # The actual fix for a real, reported optics problem: Grade and Model %
-                # look like they should move together (higher probability -> better
-                # grade), but they're deliberately different axes -- Grade/Conviction
-                # measure edge relative to what's TYPICAL for that specific line, not raw
-                # likelihood. Without seeing that baseline, a C at 80% sitting above an A
-                # at 79% looks like a bug even though it's correct math. The baseline is
-                # derived directly from data already on the play (ModelProb/Conviction),
-                # not a new computation -- the same number the grade was already using,
-                # just no longer hidden behind a caption someone has to trust.
-                conv = p.get("Conviction")
-                mp = p.get("ModelProb")
-                if conv and mp is not None and conv > 0:
-                    baseline = mp / conv
-                    marker = "📊 " if p.get("ConvictionSource") == "book" else ""
-                    p["_baseline"] = f"{marker}{baseline:.0%}"
-                else:
-                    p["_baseline"] = "—"
-            tdf = pd.DataFrame(subset)[["Grade", "ModelProb", "Player", "Market", "Side",
-                                        "_display_line", "Conviction", "_baseline", "Why"]]
-            st.dataframe(
-                tdf.rename(columns={"ModelProb": "Model %", "Why": "Reasoning",
-                                    "_display_line": "Line", "_baseline": "Baseline"})
-                .style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×"})
-                .theme_gradient(cmap="Greens", subset=["Model %"]),
-                column_config={"Reasoning": st.column_config.TextColumn(width="large")},
-                hide_index=True, width="stretch", height=330)
-            st.caption("**Baseline** is the real reference rate Conviction (and therefore "
-                      "Grade) is actually measured against for that exact line — "
-                      "Model % ÷ Conviction. It's why Grade and Model % don't move "
-                      "together: an 80% Model % against an 80%+ baseline is barely any "
-                      "edge at all (a real, correctly low grade), while a 65% Model % "
-                      "against a 20% baseline is a massive one. 📊 means the baseline "
-                      "itself is a real, live no-vig market rate, not this platform's own "
-                      "typical-rate estimate for the market.")
-        else:
-            st.caption("No leans in this market on tonight's board.")
-        st.caption("Ranked by real probability of hitting (Model %), among plays that clear at "
-                  "least a C grade — not by Conviction alone, which measures edge relative to a "
-                  "market-typical rate and can run high on a genuine longshot in a rare-event "
-                  "market. D-grade picks are excluded here on purpose (same as Graded Picks' own "
-                  "summary): a near-certain \"Under\" on a rare-event market like Stolen Bases or "
-                  "Triples can show a 95%+ Model % while still earning the platform's own lowest "
-                  "grade, because that market's own typical rate is already close to 100% — a "
-                  "high Model % there isn't a real edge, just a market where almost nothing "
-                  "happens for almost everyone. A grade shown here (C or better) means real, "
-                  "validated edge, not just a high raw probability.")
-        # Quick-log widget, added directly on request: during a real, narrow pick-making window,
-        # having to separately re-enter a pick into Bet Log is real friction that gets skipped in
-        # favor of just making the pick. Uses the same curated "best 2 per market" set shown in
-        # the All tab -- the most representative summary of tonight's top leans, not a separate
-        # widget per market tab (which would mean 15+ redundant copies). Owner-only (quick_log
-        # itself enforces this, so this stays hidden for a public/Discord audience even though
-        # Command Center itself is a public page).
-        # _real_offers: the SAME real sportsbook offers already fetched to price this board (see
-        # best_bets_data.py's own offers side-channel) -- reused so a logged pick gets a real
-        # captured price when one exists, instead of quick_log always falling back to Fair odds.
-        _real_offers = st.session_state.get(f"_real_offers_{_active.key}_{today}") or []
-        quick_log.render_quick_log(grading.build_top_leans(plays, per_market=2), today,
-                                   _active.key, key_prefix="top_leans", offers=_real_offers)
-    else:
-        st.info("No games on the board right now. Top leans appear here on an active slate.")
+            st.info("No games on the board right now. Top leans appear here on an active slate.")
  
 # ---------- proof panel (the hero) ----------
 with right:
