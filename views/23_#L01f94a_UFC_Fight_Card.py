@@ -15,7 +15,7 @@ Phase 2: conviction scoring from community pick aggregation + historical
 fighter finishing rate will follow once the data layer is proven live.
 """
 import os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 import pandas as pd
 import streamlit as st
@@ -44,7 +44,7 @@ if not api_key:
     st.stop()
 
 # ── Date picker ───────────────────────────────────────────────────────────
-eastern = datetime.now(timezone(timedelta(hours=-4)))
+eastern = datetime.now(E._EASTERN)
 target = st.date_input("Event date", eastern)
 date_str = target.strftime("%Y-%m-%d")
 
@@ -60,8 +60,15 @@ preferred_book = book_keys[book_labels.index(preferred_label)]
 def load_card(date_str: str, api_key: str):
     return E.get_ufc_events(api_key, date_str)
 
-with st.spinner("Loading fight card..."):
-    events = load_card(date_str, api_key)
+try:
+    with st.spinner("Loading fight card..."):
+        events = load_card(date_str, api_key)
+except E.OddsAPIError as e:
+    st.error(f"⚠️ Odds API error while loading the fight card: {e}")
+    st.caption("This is a real API failure (bad key, rate limit, or an unsupported market for "
+              "this event/date) — not \"no events scheduled.\" If this persists, check the "
+              "message above against The Odds API's own error code reference.")
+    st.stop()
 
 if not events:
     # Events disappear from the API feed once completed -- an Abu Dhabi card
@@ -152,7 +159,7 @@ for i, event in enumerate(events):
     # Parse ET time
     try:
         dt = datetime.strptime(commence[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
-        et = dt - timedelta(hours=4)
+        et = dt.astimezone(E._EASTERN)
         time_str = et.strftime("%-I:%M %p ET")
     except Exception:
         time_str = "TBD"
@@ -162,8 +169,17 @@ for i, event in enumerate(events):
 
     with st.expander(f"{card_label} · {fighter_a} vs. {fighter_b} · {time_str}", expanded=(i < 3)):
 
-        with st.spinner("Loading odds..."):
-            odds = load_bout_odds(event_id, api_key, preferred_book)
+        try:
+            with st.spinner("Loading odds..."):
+                odds = load_bout_odds(event_id, api_key, preferred_book)
+        except E.OddsAPIError as e:
+            st.warning(f"⚠️ Odds API error for this bout: {e}")
+            st.caption("A real API failure, not \"no odds posted yet\" — if this is an "
+                      "INVALID_MARKET error, one of this platform's requested markets "
+                      "(h2h/totals/method-of-victory) isn't yet supported for this specific "
+                      "event; tell Claude the exact message above so the request can be "
+                      "narrowed to what's actually available.")
+            continue
 
         if not odds:
             st.caption("No odds available yet for this bout.")
