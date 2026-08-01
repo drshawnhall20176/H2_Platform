@@ -242,9 +242,9 @@ def _team_logo_html(url: Optional[str]) -> str:
     if not url:
         return ""
     return (f'<span style="display:inline-flex;align-items:center;justify-content:center;'
-           f'width:20px;height:20px;border-radius:5px;background:#eef0f3;flex-shrink:0;'
-           f'margin-right:5px;vertical-align:middle;">'
-           f'<img src="{url}" style="width:15px;height:15px;object-fit:contain;" '
+           f'width:18px;height:18px;border-radius:5px;background:#eef0f3;flex-shrink:0;'
+           f'margin-right:4px;vertical-align:middle;">'
+           f'<img src="{url}" style="width:13px;height:13px;object-fit:contain;" '
            f'onerror="this.parentElement.style.display=\'none\'"></span>')
 
 
@@ -377,9 +377,9 @@ def _schedule_game_row(g: dict, color: str, columns: str, show_roster: bool) -> 
     away_name = g.get('away', '?')
     home_name = g.get('home', '?')
     teams_cell = (
-        f'<div style="font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'
+        f'<div style="font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'
         f'{away_logo}<span style="font-weight:600;">{away_name}</span>'
-        '<span style="color:#6b7280;margin:0 5px;">@</span>'
+        '<span style="color:#6b7280;margin:0 4px;">@</span>'
         f'{home_logo}<span style="font-weight:600;">{home_name}</span></div>'
     )
     time_cell = (
