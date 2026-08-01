@@ -197,22 +197,35 @@ def section_header(icon: str, title: str, subtitle: Optional[str] = None,
     """, unsafe_allow_html=True)
 
 
-def _schedule_game_row(g: dict) -> str:
-    """One game's self-contained HTML row -- away @ home, real local time (or an honest
-    'Time TBD' when schedule_board.py couldn't determine one, e.g. NFL's date-only source data),
-    venue when known. Shared by every conference/division block below."""
+def _schedule_game_row(g: dict, color: str) -> str:
+    """One game's self-contained HTML row -- away @ home, a small colored time chip (or an
+    honest 'Time TBD' when schedule_board.py couldn't determine one, e.g. NFL's date-only source
+    data), venue in muted text. color is the SAME accent color assigned to this game's conference
+    (see todays_schedule_board below) -- carries the conference's own color through to the row
+    level via the same alpha-blended-background technique kpi_row already uses, rather than
+    introduce an unrelated new color scheme. Bolded team names for real typographic hierarchy --
+    the plain-text default this replaced (see this platform's own "internal tool, not a product"
+    problem statement at the top of this module) read as flat/undifferentiated next to every
+    other component here."""
     if g.get("time_known") and g.get("dt") is not None:
         time_str = g["dt"].strftime("%-I:%M %p ET")
     else:
         time_str = "Time TBD"
-    venue_html = (f'<span style="color:#6b7280;"> · {g["venue"]}</span>' if g.get("venue") else "")
+    venue_html = (f'<span style="font-size:11.5px;color:#9aa4b2;">{g["venue"]}</span>'
+                 if g.get("venue") else "")
     return f"""
     <div style="display:flex;justify-content:space-between;align-items:center;
-                padding:7px 0;border-bottom:1px solid #262b33;">
-      <div style="font-size:14px;">{g.get('away', '?')} <span style="color:#6b7280;">@</span>
-        {g.get('home', '?')}</div>
-      <div style="font-size:12.5px;color:#9aa4b2;flex-shrink:0;margin-left:10px;">
-        {time_str}{venue_html}
+                padding:8px 10px;border-radius:8px;margin-bottom:3px;
+                background:rgba(255,255,255,0.025);">
+      <div style="font-size:14px;">
+        <span style="font-weight:600;">{g.get('away', '?')}</span>
+        <span style="color:#6b7280;margin:0 5px;">@</span>
+        <span style="font-weight:600;">{g.get('home', '?')}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;margin-left:10px;">
+        {venue_html}
+        <span style="font-size:11.5px;font-weight:700;white-space:nowrap;background:{color}1e;
+                    color:{color};padding:3px 9px;border-radius:6px;">{time_str}</span>
       </div>
     </div>"""
 
@@ -224,7 +237,14 @@ def todays_schedule_board(result: Optional[dict], icon: str, label: str) -> None
     error already absorbed upstream -- the caller should check for None and simply not call this
     at all rather than render an empty section, same "hidden, not shown broken" posture used
     elsewhere on this platform. Renders a plain, honest "no games today" message for a real empty
-    schedule (a legitimate off-day), which IS worth showing, unlike a None result."""
+    schedule (a legitimate off-day), which IS worth showing, unlike a None result.
+
+    Each conference gets one color, cycled from _KPI_PALETTE -- the SAME palette kpi_row already
+    uses for decorative-but-distinguishing variety (not the red/green/yellow reserved platform-
+    wide for real win/loss data meaning). That color carries through to the division label and
+    every game's time chip underneath it, so the section reads as one coherent design instead of
+    plain, uncolored text rows -- matching the "commercial feel" component language established
+    everywhere else on this platform, not a separately-styled, flatter-looking bolt-on."""
     if result is None:
         return
     section_header(icon, f"Today's {label} Schedule")
@@ -237,29 +257,41 @@ def todays_schedule_board(result: Optional[dict], icon: str, label: str) -> None
         st.caption("No games scheduled today.")
         return
 
-    for conf in sorted(grouped.keys()):
+    for i, conf in enumerate(sorted(grouped.keys())):
+        color = _KPI_PALETTE[i % len(_KPI_PALETTE)]
         with st.container(border=True):
-            st.markdown(f'<div style="font-weight:700;font-size:15px;margin-bottom:4px;">'
-                       f'{conf}</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div style="display:inline-block;background:{color}22;border:1px solid '
+                f'{color}55;color:{color};padding:4px 12px;border-radius:8px;font-weight:700;'
+                f'font-size:13px;letter-spacing:0.3px;margin-bottom:8px;">{conf}</div>',
+                unsafe_allow_html=True)
             divisions = grouped[conf]
             if has_divisions:
                 for div in sorted(k for k in divisions.keys() if k is not None):
-                    st.markdown(f'<div style="font-size:12px;color:#9aa4b2;font-weight:600;'
-                               f'text-transform:uppercase;letter-spacing:0.4px;margin:8px 0 2px;">'
-                               f'{div}</div>', unsafe_allow_html=True)
-                    rows = "".join(_schedule_game_row(g) for g in divisions[div])
+                    st.markdown(
+                        f'<div style="font-size:11px;color:{color};opacity:0.9;font-weight:700;'
+                        f'text-transform:uppercase;letter-spacing:0.6px;margin:10px 0 4px;">'
+                        f'{div}</div>', unsafe_allow_html=True)
+                    rows = "".join(_schedule_game_row(g, color) for g in divisions[div])
                     st.markdown(rows, unsafe_allow_html=True)
             else:
                 # No division level for this sport (WNBA/NCAAF) -- every game for this
                 # conference lives under the single None key group_games always uses.
-                rows = "".join(_schedule_game_row(g) for g in divisions.get(None, []))
+                rows = "".join(_schedule_game_row(g, color) for g in divisions.get(None, []))
                 st.markdown(rows, unsafe_allow_html=True)
 
     if other:
+        # Deliberately the neutral trend gray, not another palette color -- "Other" is a real
+        # gap being surfaced honestly (see schedule_board.py), not a real grouped category that
+        # deserves equal visual billing with AL/NL, Eastern/Western, etc.
+        gray = _TREND_COLOR["neutral"]
         with st.container(border=True):
-            st.markdown('<div style="font-weight:700;font-size:15px;margin-bottom:4px;">'
-                       'Other</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div style="display:inline-block;background:{gray}22;border:1px solid '
+                f'{gray}55;color:{gray};padding:4px 12px;border-radius:8px;font-weight:700;'
+                f'font-size:13px;letter-spacing:0.3px;margin-bottom:6px;">Other</div>',
+                unsafe_allow_html=True)
             st.caption("Home team not in this platform's own conference/division reference "
                       "table yet (a real gap, not a hidden game) -- still shown below.")
-            rows = "".join(_schedule_game_row(g) for g in other)
+            rows = "".join(_schedule_game_row(g, gray) for g in other)
             st.markdown(rows, unsafe_allow_html=True)
