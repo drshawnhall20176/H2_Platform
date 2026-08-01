@@ -386,6 +386,7 @@ else:
             "Whiff%": r["whiff"], "SwStr%": r.get("swstr_pct"), "Exit Velo": r["exit_velo"],
         } for r in board])
         st.dataframe(board_df.style.format({
+            "PA": "{:.0f}", "HR": "{:.0f}",
             "BA": "{:.3f}", "OBP": "{:.3f}", "SLG": "{:.2f}", "ISO": "{:.3f}", "xwOBA": "{:.2f}",
             "BB%": "{:.0%}", "K%": "{:.0%}", "Whiff%": "{:.0%}", "SwStr%": "{:.0%}",
             "Exit Velo": "{:.1f}",

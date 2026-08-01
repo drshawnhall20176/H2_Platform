@@ -102,6 +102,21 @@ def _none_safe_float(raw) -> Optional[float]:
     return None if raw is None or pd.isna(raw) else float(raw)
 
 
+def _none_safe_int(raw) -> Optional[int]:
+    """Same honest contract as _none_safe_float, for integer counting fields (pa, hr) --
+    REAL, CONFIRMED FIX for the same bug class _none_safe_float already exists to prevent, just
+    caught in a different pair of fields: load_hitter_types used to read these two specifically
+    with d.get("pa", 0)/d.get("hr", 0), which silently returns 0 (not None) whenever the "pa"/
+    "hr" column is missing from an older cached CSV entirely -- a real, reported live bug (a
+    pitch-type leaderboard showing PA=0/HR=0 for every single batter, including ones with
+    hundreds of real pitches on file, because the cache predated these two fields specifically
+    while the OTHER new fields on the same row -- ba/obp/iso/bb_pct/k_pct -- already used the
+    honest d.get(key) pattern and correctly showed as missing instead of a fabricated count).
+    None means "not known" (stale cache, or genuinely never computed); a real 0 means "computed,
+    and the honest answer is zero" -- these are different facts and must not collapse into one."""
+    return None if raw is None or pd.isna(raw) else int(raw)
+
+
 # --------------------------------------------------------------------- pitcher arsenal
 def build_pitcher_arsenal(pitches: pd.DataFrame) -> pd.DataFrame:
     """One row per (pitcher, pitch_type): usage%, whiff%, put-away%, avg velo, zone%, contact%,
@@ -547,11 +562,16 @@ def load_hitter_types(path: str = HITTER_TYPE_PATH) -> Dict[int, List[Dict]]:
                                      k_pct, swstr_pct, hr}, ... ]
     Sorted most-seen pitch first. Returns {} if the file is missing (page treats it as optional).
 
-    pa/hr always real counts (like pitches already is, never None) since they're always
-    computable once a row exists at all. ba/obp/iso/bb_pct/k_pct can be genuinely None on an
-    older cached CSV written before this field existed, or when the real denominator (AB/PA)
-    was zero for this specific (batter, pitch) combination -- same honest None-not-fabricated-
-    zero convention every other optional field here already uses."""
+    pa/hr/ba/obp/iso/bb_pct/k_pct can ALL be genuinely None on an older cached CSV written
+    before these fields existed -- REAL, CONFIRMED FIX: pa/hr used to be read with
+    d.get("pa", 0)/d.get("hr", 0), which silently fabricated a 0 (not None) whenever the column
+    was simply missing from the row entirely, while the other five fields on this same row
+    already used the honest d.get(key)-with-no-default pattern. A stale cache predating these
+    fields showed PA=0/HR=0 for every real batter -- indistinguishable from "we checked and it's
+    genuinely zero" -- while the SAME stale-cache condition correctly showed ba/obp/etc as
+    missing. Now consistent: every one of these seven fields uses _none_safe_int/_none_safe_float,
+    same honest-None-not-fabricated-zero convention every other optional field here already
+    uses."""
     out: Dict[int, List[Dict]] = {}
     if not os.path.exists(path):
         return out
@@ -567,14 +587,14 @@ def load_hitter_types(path: str = HITTER_TYPE_PATH) -> Dict[int, List[Dict]]:
                 "contact": _none_safe_float(d.get("contact")),
                 "exit_velo": _none_safe_float(d.get("exit_velo")),
                 "zone_pct": _none_safe_float(d.get("zone_pct")),
-                "pa": int(d.get("pa", 0) or 0),
+                "pa": _none_safe_int(d.get("pa")),
                 "ba": _none_safe_float(d.get("ba")),
                 "obp": _none_safe_float(d.get("obp")),
                 "iso": _none_safe_float(d.get("iso")),
                 "bb_pct": _none_safe_float(d.get("bb_pct")),
                 "k_pct": _none_safe_float(d.get("k_pct")),
                 "swstr_pct": float(d.get("swstr_pct", 0) or 0),
-                "hr": int(d.get("hr", 0) or 0),
+                "hr": _none_safe_int(d.get("hr")),
             })
     except Exception:
         pass

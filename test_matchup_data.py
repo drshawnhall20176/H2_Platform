@@ -430,7 +430,17 @@ def test_load_hitter_types_reads_new_outcome_stats_from_a_real_csv():
 
 def test_load_hitter_types_older_csv_without_new_fields_gives_honest_none():
     # A CSV written BEFORE this fix existed won't have the new columns at all -- must give an
-    # honest None/0, never crash, same graceful-migration posture every other field here has.
+    # honest None, never crash, same graceful-migration posture every other field here has.
+    #
+    # REAL, CONFIRMED FIX to this test itself, not just the implementation: this test used to
+    # assert row["pa"] == 0 and row["hr"] == 0 as the EXPECTED, correct behavior -- it was
+    # written alongside the same bug it should have caught. A real, reported live bug (a
+    # pitch-type leaderboard showing PA=0/HR=0 for every batter on a stale cache, including ones
+    # with hundreds of real pitches on file) traced directly back to this exact code path:
+    # load_hitter_types used to read pa/hr with d.get("pa", 0)/d.get("hr", 0), silently
+    # fabricating a 0 whenever the column was missing entirely, while the other five new fields
+    # on the same row already used the honest d.get(key)-with-no-default pattern this test
+    # already asserted for ba/obp/iso/bb_pct/k_pct. Now consistent across all seven.
     import tempfile
     import os
     with tempfile.TemporaryDirectory() as tmp:
@@ -443,8 +453,21 @@ def test_load_hitter_types_older_csv_without_new_fields_gives_honest_none():
         row = loaded[800][0]
         assert row["ba"] is None and row["obp"] is None and row["iso"] is None
         assert row["bb_pct"] is None and row["k_pct"] is None
-        assert row["pa"] == 0 and row["hr"] == 0 and row["swstr_pct"] == 0.0
-    print("✓ load_hitter_types gracefully handles an older CSV predating the new fields, no crash")
+        assert row["pa"] is None, (
+            "pa must be honestly None on a stale CSV missing this column, not a fabricated 0 -- "
+            "this is the exact real bug that was reported live and traced to this code path")
+        assert row["hr"] is None, "hr must be honestly None on a stale CSV, same reasoning as pa"
+        assert row["swstr_pct"] == 0.0   # unaffected -- always uses a real 0 default, not optional
+    print("✓ load_hitter_types gracefully handles an older CSV predating the new fields, no crash, "
+         "and pa/hr are now honestly None instead of a fabricated 0")
+
+
+def test_none_safe_int_distinguishes_missing_from_a_real_zero():
+    assert M._none_safe_int(None) is None
+    assert M._none_safe_int(float("nan")) is None
+    assert M._none_safe_int(0) == 0          # a REAL computed zero must survive, not collapse to None
+    assert M._none_safe_int(6) == 6
+    print("✓ _none_safe_int distinguishes 'missing' (None) from a real, computed zero, both ways")
 
 
 # ----------------------------------------------------------------- leaderboard: new fields thread through
