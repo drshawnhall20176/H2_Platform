@@ -112,6 +112,40 @@ def test_base_css_renders_style_block(captured):
     print("✓ base_css renders a real <style> block")
 
 
+def test_hero_banner_renders_balanced_html_with_icon_title_subtitle(captured):
+    import components as C
+    C.hero_banner("🏆", "H2 Sports — Command Center", "Trade sports, not bet sports.")
+    assert captured[0].count("<div") == captured[0].count("</div>")
+    assert "H2 Sports — Command Center" in captured[0]
+    assert "Trade sports, not bet sports." in captured[0]
+    print("✓ hero_banner renders balanced HTML with icon, title, and subtitle all present")
+
+
+def test_pipeline_chips_correct_arrow_count_between_steps(captured):
+    import components as C
+    C.pipeline_chips(["Step A", "Step B", "Step C", "Step D"])
+    # 2 markdown calls: the style block, then the chips themselves
+    assert len(captured) == 2
+    assert captured[1].count("pipe-arrow") == 3   # N steps -> N-1 arrows, not N or N+1
+    for step in ["Step A", "Step B", "Step C", "Step D"]:
+        assert step in captured[1]
+    print("✓ pipeline_chips renders exactly N-1 arrows for N steps, all steps present")
+
+
+def test_pipeline_chips_single_step_has_no_dangling_arrow(captured):
+    import components as C
+    C.pipeline_chips(["Only One Step"])
+    assert "pipe-arrow" not in captured[1]
+    print("✓ pipeline_chips with a single step has no dangling trailing arrow")
+
+
+def test_pipeline_chips_empty_list_does_not_crash(captured):
+    import components as C
+    C.pipeline_chips([])
+    assert captured[1] == ""
+    print("✓ pipeline_chips with an empty list renders nothing for the chips, no crash")
+
+
 def test_kpi_palette_has_no_red_or_green_for_neutral_tiles():
     # Real, deliberate design constraint: the decorative palette must never overlap with this
     # platform's own red/green data-meaning language (grades, RdYlGn gradients) -- confirms this

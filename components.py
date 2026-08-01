@@ -32,6 +32,40 @@ from typing import List, Optional, Sequence
 import streamlit as st
 
 
+def hero_banner(icon: str, title: str, subtitle: str) -> None:
+    """Dark gradient hero banner -- extracted from Command Center's own original inline CSS
+    (already proven working there) into this shared module, so every page that wants this same
+    "front door" treatment reuses the exact same visual language instead of each page
+    duplicating and potentially drifting from its own copy of the CSS."""
+    st.markdown(f"""
+    <style>
+    .h2-hero {{background:linear-gradient(110deg,#0f172a,#1e293b);padding:22px 26px;
+              border-radius:14px;color:#f8fafc;margin-bottom:6px;}}
+    .h2-hero h1 {{margin:0;font-size:30px;letter-spacing:-0.5px;}}
+    .h2-hero p {{margin:4px 0 0;color:#94a3b8;font-size:15px;}}
+    </style>
+    <div class="h2-hero">
+      <h1>{icon} {title}</h1>
+      <p>{subtitle}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def pipeline_chips(steps: List[str]) -> None:
+    """Horizontal chain of pill-shaped step chips connected by arrows -- extracted from Command
+    Center's own original "How every play is built" pipeline visualization into this shared
+    module, same reasoning as hero_banner above. steps is rendered in order, left to right."""
+    st.markdown("""
+    <style>
+    .pipe {display:inline-block;background:#1e293b;color:#e2e8f0;border:1px solid #334155;
+           padding:6px 12px;border-radius:999px;margin:3px 4px;font-size:13px;}
+    .pipe-arrow {color:#64748b;margin:0 2px;}
+    </style>
+    """, unsafe_allow_html=True)
+    chips = f'<span class="pipe-arrow">→</span>'.join(f'<span class="pipe">{s}</span>' for s in steps)
+    st.markdown(chips, unsafe_allow_html=True)
+
+
 def base_css() -> None:
     """One-time, page-level CSS polish. Call once near the top of a page, after st.title/caption.
     Safe, self-contained rules only -- see this module's own docstring for the honest risk

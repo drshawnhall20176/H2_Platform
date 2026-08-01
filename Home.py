@@ -1,8 +1,10 @@
 import streamlit as st
 import sports
+import components as C
 
-st.title("⚾ H2 Sports — MLB Model Dashboard")
-st.caption("Live matchup analytics powered by the public MLB Stats API")
+C.base_css()
+C.hero_banner("⚾", "H2 Sports — MLB Model Dashboard",
+             "Live matchup analytics powered by the public MLB Stats API")
 
 # Sport selector -- primary location is here in the main content area, not the sidebar.
 # Streamlit's st.navigation always injects page links at the top of the sidebar regardless
@@ -16,7 +18,7 @@ current = st.session_state.get("sport", sports.DEFAULT_SPORT)
 if current not in keys:
     current = keys[0]
 
-st.markdown("### 🏟 Select Sport")
+C.section_header("🏟", "Select Sport")
 cols = st.columns(len(keys) + len([s for s in sports.REGISTRY.values() if not s.enabled]))
 
 for i, s in enumerate(live):
@@ -51,8 +53,9 @@ if active:
 
 st.divider()
 
-st.markdown(
-    """
+with st.container(border=True):
+    st.markdown(
+        """
 This dashboard is built on a single shared backend (`mlb_engine.py`) so every page
 pulls the same live data and stays consistent.
 
@@ -65,7 +68,7 @@ pulls the same live data and stays consistent.
 Pick a date on any page, and the engine fetches the slate concurrently — a full day
 usually loads in a few seconds.
 """
-)
+    )
 
 st.info(
     "Analytics here describe likelihoods and trends, not certainties. If you publish picks "
