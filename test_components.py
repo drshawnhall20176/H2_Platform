@@ -156,3 +156,48 @@ def test_kpi_palette_has_no_red_or_green_for_neutral_tiles():
         assert color not in reds_greens, f"{color} looks like a red/green data-meaning color"
     print("✓ the decorative KPI palette contains no colors that could be confused with this "
          "platform's own red/green data-meaning language")
+
+
+def test_wrapped_tab_picker_returns_value_not_label(monkeypatch):
+    # Regression guard for the actual fix requested: replaces native st.tabs (which overflows
+    # off-screen with a truncating ">" arrow once there are too many markets) with st.pills,
+    # confirmed directly against Streamlit's own docs to wrap naturally to multiple rows.
+    import components as C
+    calls = []
+
+    def fake_pills(label, options, **kw):
+        calls.append((label, options, kw))
+        return "Batter HR"   # simulate the user having selected this pill
+
+    monkeypatch.setattr(C.st, "pills", fake_pills)
+    items = [("All", None), ("Batter HR", "Batter HR"), ("Batter Total Bases", "Batter Total Bases")]
+    result = C.wrapped_tab_picker(items, key="top_leans_market")
+    assert result == "Batter HR"
+    print("✓ wrapped_tab_picker returns the underlying VALUE for the selected label, not the label itself")
+
+
+def test_wrapped_tab_picker_calls_pills_with_correct_parameters(monkeypatch):
+    import components as C
+    calls = []
+    monkeypatch.setattr(C.st, "pills", lambda label, options, **kw: calls.append((label, options, kw)) or options[0])
+    items = [("All", None), ("Batter HR", "Batter HR")]
+    C.wrapped_tab_picker(items, key="my_key")
+    _, options, kw = calls[0]
+    assert options == ["All", "Batter HR"]
+    assert kw["default"] == "All"
+    assert kw["required"] is True   # matches real st.tabs() behavior: always exactly one selection
+    assert kw["key"] == "my_key"
+    assert kw["label_visibility"] == "collapsed"
+    print("✓ wrapped_tab_picker calls st.pills with correct options, default, required=True, "
+         "and a collapsed label")
+
+
+def test_wrapped_tab_picker_respects_default_index(monkeypatch):
+    import components as C
+    calls = []
+    monkeypatch.setattr(C.st, "pills", lambda label, options, **kw: calls.append((label, options, kw)) or options[0])
+    items = [("All", None), ("Batter HR", "Batter HR"), ("Batter Total Bases", "Batter Total Bases")]
+    C.wrapped_tab_picker(items, key="k", default_index=1)
+    _, _, kw = calls[0]
+    assert kw["default"] == "Batter HR"
+    print("✓ wrapped_tab_picker passes the correct label as default when default_index is given")

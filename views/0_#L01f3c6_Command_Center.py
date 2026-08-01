@@ -190,56 +190,55 @@ with left:
         # the browser.
         _TOP_TABS = [("All", None)] + [(f"{_MARKET_ICONS.get(m, '🔹')} {m}", m)
                                        for m in _active.market_map.keys()]
-        _ttabs = st.tabs([t[0] for t in _TOP_TABS])
-        for _tb, (_lab, _mkt) in zip(_ttabs, _TOP_TABS):
-            with _tb:
-                if _mkt is None:
-                    subset = grading.build_top_leans(plays, per_market=2)
-                    st.caption("Best two leans from each market — so this isn't just one market's tab again.")
+        _mkt = C.wrapped_tab_picker(_TOP_TABS, key="top_leans_market")
+        if _mkt is None:
+            subset = grading.build_top_leans(plays, per_market=2)
+            st.caption("Best two leans from each market — so this isn't just one market's tab again.")
+        else:
+            subset = [p for p in grading.build_top_leans(plays, per_market=8)
+                     if p["Market"] == _mkt][:8]
+        if subset:
+            for p in subset:
+                p["Grade"] = p["_grade"]["letter"]
+                p["_display_line"] = (f"📊 {p['Line']:g}" if p.get("LineSource") == "book"
+                                      and p.get("Line") is not None
+                                      else f"{p['Line']:g}" if p.get("Line") is not None else "—")
+                # The actual fix for a real, reported optics problem: Grade and Model %
+                # look like they should move together (higher probability -> better
+                # grade), but they're deliberately different axes -- Grade/Conviction
+                # measure edge relative to what's TYPICAL for that specific line, not raw
+                # likelihood. Without seeing that baseline, a C at 80% sitting above an A
+                # at 79% looks like a bug even though it's correct math. The baseline is
+                # derived directly from data already on the play (ModelProb/Conviction),
+                # not a new computation -- the same number the grade was already using,
+                # just no longer hidden behind a caption someone has to trust.
+                conv = p.get("Conviction")
+                mp = p.get("ModelProb")
+                if conv and mp is not None and conv > 0:
+                    baseline = mp / conv
+                    marker = "📊 " if p.get("ConvictionSource") == "book" else ""
+                    p["_baseline"] = f"{marker}{baseline:.0%}"
                 else:
-                    subset = [p for p in grading.build_top_leans(plays, per_market=8)
-                             if p["Market"] == _mkt][:8]
-                if subset:
-                    for p in subset:
-                        p["Grade"] = p["_grade"]["letter"]
-                        p["_display_line"] = (f"📊 {p['Line']:g}" if p.get("LineSource") == "book"
-                                              and p.get("Line") is not None
-                                              else f"{p['Line']:g}" if p.get("Line") is not None else "—")
-                        # The actual fix for a real, reported optics problem: Grade and Model %
-                        # look like they should move together (higher probability -> better
-                        # grade), but they're deliberately different axes -- Grade/Conviction
-                        # measure edge relative to what's TYPICAL for that specific line, not raw
-                        # likelihood. Without seeing that baseline, a C at 80% sitting above an A
-                        # at 79% looks like a bug even though it's correct math. The baseline is
-                        # derived directly from data already on the play (ModelProb/Conviction),
-                        # not a new computation -- the same number the grade was already using,
-                        # just no longer hidden behind a caption someone has to trust.
-                        conv = p.get("Conviction")
-                        mp = p.get("ModelProb")
-                        if conv and mp is not None and conv > 0:
-                            baseline = mp / conv
-                            marker = "📊 " if p.get("ConvictionSource") == "book" else ""
-                            p["_baseline"] = f"{marker}{baseline:.0%}"
-                        else:
-                            p["_baseline"] = "—"
-                    tdf = pd.DataFrame(subset)[["Grade", "ModelProb", "Player", "Market", "Side",
-                                                "_display_line", "Conviction", "_baseline", "Why"]]
-                    st.dataframe(
-                        tdf.rename(columns={"ModelProb": "Model %", "Why": "Reasoning",
-                                            "_display_line": "Line", "_baseline": "Baseline"})
-                        .style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×"})
-                        .theme_gradient(cmap="Greens", subset=["Model %"]),
-                        hide_index=True, width="stretch", height=330)
-                    st.caption("**Baseline** is the real reference rate Conviction (and therefore "
-                              "Grade) is actually measured against for that exact line — "
-                              "Model % ÷ Conviction. It's why Grade and Model % don't move "
-                              "together: an 80% Model % against an 80%+ baseline is barely any "
-                              "edge at all (a real, correctly low grade), while a 65% Model % "
-                              "against a 20% baseline is a massive one. 📊 means the baseline "
-                              "itself is a real, live no-vig market rate, not this platform's own "
-                              "typical-rate estimate for the market.")
-                else:
-                    st.caption("No leans in this market on tonight's board.")
+                    p["_baseline"] = "—"
+            tdf = pd.DataFrame(subset)[["Grade", "ModelProb", "Player", "Market", "Side",
+                                        "_display_line", "Conviction", "_baseline", "Why"]]
+            st.dataframe(
+                tdf.rename(columns={"ModelProb": "Model %", "Why": "Reasoning",
+                                    "_display_line": "Line", "_baseline": "Baseline"})
+                .style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×"})
+                .theme_gradient(cmap="Greens", subset=["Model %"]),
+                column_config={"Reasoning": st.column_config.TextColumn(width="large")},
+                hide_index=True, width="stretch", height=330)
+            st.caption("**Baseline** is the real reference rate Conviction (and therefore "
+                      "Grade) is actually measured against for that exact line — "
+                      "Model % ÷ Conviction. It's why Grade and Model % don't move "
+                      "together: an 80% Model % against an 80%+ baseline is barely any "
+                      "edge at all (a real, correctly low grade), while a 65% Model % "
+                      "against a 20% baseline is a massive one. 📊 means the baseline "
+                      "itself is a real, live no-vig market rate, not this platform's own "
+                      "typical-rate estimate for the market.")
+        else:
+            st.caption("No leans in this market on tonight's board.")
         st.caption("Ranked by real probability of hitting (Model %), among plays that clear at "
                   "least a C grade — not by Conviction alone, which measures edge relative to a "
                   "market-typical rate and can run high on a genuine longshot in a rare-event "
@@ -321,21 +320,20 @@ except Exception:
     catches, misses, rows_by_pid = {}, {}, {}
 
 _caught_markets = list(_active.market_map.keys())
-_ctabs = st.tabs([f"{_MARKET_ICONS.get(m, '🔹')} {m}" for m in _caught_markets])
-for _tb, _mkt in zip(_ctabs, _caught_markets):
-    with _tb:
-        caught = catches.get(_mkt, [])
-        if caught:
-            cdf = pd.DataFrame(caught[:6])
-            cdf["Pre-game rank"] = cdf.apply(lambda r: f"#{r['Rank']} of {r['OfTotal']}", axis=1)
-            cols = [c for c in ["Player", "Value", "Line", "ModelProb", "Pre-game rank"] if c in cdf.columns]
-            cdf = cdf[cols].rename(columns={"ModelProb": "Model %", "Value": _mkt})
-            fmt = {"Model %": "{:.0%}", "Line": "{:g}", _mkt: "{:.1f}"}
-            st.dataframe(cdf.style.format({k: v for k, v in fmt.items() if k in cdf.columns}, na_rep="—"),
-                        hide_index=True, width="stretch")
-        else:
-            st.caption("Nothing cleared the line in the model's top plays for this market last night, "
-                       "or results aren't final yet.")
+_TOP_PICKS_ITEMS = [(f"{_MARKET_ICONS.get(m, '🔹')} {m}", m) for m in _caught_markets]
+_mkt = C.wrapped_tab_picker(_TOP_PICKS_ITEMS, key="top_picks_market")
+caught = catches.get(_mkt, [])
+if caught:
+    cdf = pd.DataFrame(caught[:6])
+    cdf["Pre-game rank"] = cdf.apply(lambda r: f"#{r['Rank']} of {r['OfTotal']}", axis=1)
+    cols = [c for c in ["Player", "Value", "Line", "ModelProb", "Pre-game rank"] if c in cdf.columns]
+    cdf = cdf[cols].rename(columns={"ModelProb": "Model %", "Value": _mkt})
+    fmt = {"Model %": "{:.0%}", "Line": "{:g}", _mkt: "{:.1f}"}
+    st.dataframe(cdf.style.format({k: v for k, v in fmt.items() if k in cdf.columns}, na_rep="—"),
+                hide_index=True, width="stretch")
+else:
+    st.caption("Nothing cleared the line in the model's top plays for this market last night, "
+               "or results aren't final yet.")
 
 # ---------- genuinely surprising hits (the actual "opposite side," requested previously) ----------
 # market_report already computes this exact bucket (players whose result cleared the line but
@@ -357,25 +355,25 @@ st.caption("Players whose result ALSO cleared the line last night, but who sat O
           "right to rank it low; this is randomness, not a modeling gap — chasing these is "
           "exactly the overfitting this platform avoids. Sorted worst-ranked (most surprising) "
           "first. (Exploratory.)")
-_stabs = st.tabs([f"{_MARKET_ICONS.get(m, '🔹')} {m}" for m in _caught_markets])
-for _tb, _mkt in zip(_stabs, _caught_markets):
-    with _tb:
-        surprises = sorted(misses.get(_mkt, []), key=lambda x: -x["Rank"])
-        if surprises:
-            sdf = pd.DataFrame(surprises[:6])
-            sdf["Pre-game rank"] = sdf.apply(lambda r: f"#{r['Rank']} of {r['OfTotal']}", axis=1)
-            if _active.key == "MLB":
-                sdf["Reason"] = sdf["PlayerId"].apply(
-                    lambda pid: R.explain_miss(rows_by_pid.get(pid), _mkt))
-            cols = [c for c in ["Player", "Value", "Line", "ModelProb", "Pre-game rank", "Reason"]
-                   if c in sdf.columns]
-            sdf = sdf[cols].rename(columns={"ModelProb": "Model %", "Value": _mkt})
-            fmt = {"Model %": "{:.0%}", "Line": "{:g}", _mkt: "{:.1f}"}
-            st.dataframe(sdf.style.format({k: v for k, v in fmt.items() if k in sdf.columns}, na_rep="—"),
-                        hide_index=True, width="stretch")
-        else:
-            st.caption("No real surprises for this market last night — every real hit sat in the "
-                      "model's own top-ranked plays, or results aren't final yet.")
+_SURPRISE_ITEMS = [(f"{_MARKET_ICONS.get(m, '🔹')} {m}", m) for m in _caught_markets]
+_mkt = C.wrapped_tab_picker(_SURPRISE_ITEMS, key="surprising_hits_market")
+surprises = sorted(misses.get(_mkt, []), key=lambda x: -x["Rank"])
+if surprises:
+    sdf = pd.DataFrame(surprises[:6])
+    sdf["Pre-game rank"] = sdf.apply(lambda r: f"#{r['Rank']} of {r['OfTotal']}", axis=1)
+    if _active.key == "MLB":
+        sdf["Reason"] = sdf["PlayerId"].apply(
+            lambda pid: R.explain_miss(rows_by_pid.get(pid), _mkt))
+    cols = [c for c in ["Player", "Value", "Line", "ModelProb", "Pre-game rank", "Reason"]
+           if c in sdf.columns]
+    sdf = sdf[cols].rename(columns={"ModelProb": "Model %", "Value": _mkt})
+    fmt = {"Model %": "{:.0%}", "Line": "{:g}", _mkt: "{:.1f}"}
+    st.dataframe(sdf.style.format({k: v for k, v in fmt.items() if k in sdf.columns}, na_rep="—"),
+                column_config={"Reason": st.column_config.TextColumn(width="large")},
+                hide_index=True, width="stretch")
+else:
+    st.caption("No real surprises for this market last night — every real hit sat in the "
+              "model's own top-ranked plays, or results aren't final yet.")
 
 st.divider()
 st.caption("⚖️ For analysis and entertainment. Not financial advice and not a guarantee — outcomes "

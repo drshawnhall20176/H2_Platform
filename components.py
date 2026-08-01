@@ -66,6 +66,32 @@ def pipeline_chips(steps: List[str]) -> None:
     st.markdown(chips, unsafe_allow_html=True)
 
 
+def wrapped_tab_picker(items: List[tuple], key: str, default_index: int = 0):
+    """A tab-like selector that WRAPS to multiple rows instead of overflowing off-screen with a
+    truncating ">" arrow, the way native st.tabs() does with many options. Built on st.pills
+    (confirmed directly against Streamlit's own docs before using it: pills wrap to the next
+    line by default when they overflow, the same real behavior st.container(horizontal=True)
+    has, unlike st.tabs or st.columns which don't wrap at all).
+
+    items: [(display_label, value), ...] -- same shape as the existing _TOP_TABS-style pattern
+    already used for market tabs, so converting a call site is a straightforward swap, not a
+    rewrite of the surrounding logic.
+
+    required=True (fixed, not exposed as a parameter) matches real st.tabs() behavior: there's
+    always exactly one selection, never a "nothing selected" state a caller would have to
+    handle as a special case.
+
+    Returns the VALUE (not the label) of the selected item -- caller checks this directly and
+    renders only that one branch's content (see this function's own module docstring on why
+    that's also more efficient than st.tabs, which computes every tab's content on every rerun
+    whether it's visible or not)."""
+    labels = [i[0] for i in items]
+    values = {i[0]: i[1] for i in items}
+    selected_label = st.pills(f"tab_picker_{key}", labels, default=labels[default_index],
+                              required=True, key=key, label_visibility="collapsed")
+    return values[selected_label]
+
+
 def base_css() -> None:
     """One-time, page-level CSS polish. Call once near the top of a page, after st.title/caption.
     Safe, self-contained rules only -- see this module's own docstring for the honest risk
