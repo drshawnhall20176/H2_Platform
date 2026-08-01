@@ -142,33 +142,32 @@ def run():
     # SIDEBAR SECTIONS, added directly on request: st.navigation natively supports a
     # dict-of-lists (each key becomes a real, collapsible section header in the sidebar) instead
     # of one flat list -- confirmed directly against Streamlit's own docs before using it, not
-    # assumed. Boundaries here started as the exact grouping from a real, past platform audit
-    # (previously 7 sections), then CONSOLIDATED to 5 directly on request after real, reported
-    # feedback that the sidebar had become cluttered and hard to navigate -- each section header
-    # is itself a full line of text in a narrow sidebar, so 7 section headers plus 22 page links
-    # (29 lines total) reads as noise, not structure. Live Signals (2 items) and Trading Desk (1
-    # item) were the two smallest sections, adding the least real organizational value per line
-    # of header text -- merged into Research & Signals rather than kept as their own headers.
-    # Recommendations/Self-Grading & Proof/Ops & Content stayed separate since each holds enough
-    # real items to justify its own header. "Home" section renamed to "Start Here" -- the
-    # original name read as confusingly redundant with the "Home" *page* link directly beneath
-    # it, two different things sharing one word right next to each other.
+    # assumed. 6 sections. Started at 7 (the original platform-audit grouping), consolidated to
+    # 5 after real, reported sidebar clutter, then split back to 6 directly on request once
+    # "Research & Signals" (merged from the old Live Signals + Deep Research + Trading Desk) grew
+    # to the sidebar's single largest section. This split back out along the SAME real line the
+    # original 7-section grouping already used -- Live Signals is specifically tonight's-game
+    # tools (bullpen freshness, game-day signals), Deep Research is projection/analysis tools
+    # (pitch-level and matchup-level modeling) -- not an arbitrary 50/50 cut. Edge Board (still
+    # only 1 item on its own) stayed folded into Deep Research rather than getting its own
+    # section, since a true 1-item section was the original problem this whole restructuring
+    # started from.
     #
-    # SECTION NAMES ARE UPPERCASE, added directly on request for more visual prominence against
-    # the page links beneath them -- a genuinely safe way to do this, not the risky one. Checked
-    # first: CSS targeting Streamlit's own internal sidebar DOM (stSidebarNav, stSidebarNavItems)
-    # is confirmed unreliable -- those hooks have changed name across real Streamlit releases,
-    # and even experienced users report the current ones simply not working. Uppercase text
-    # carries its own visual weight regardless of font size or color, and it's just a Python
-    # string -- no dependency on internals that could silently stop working on a future
-    # Streamlit update.
+    # SECTION NAMES ARE UPPERCASE for visual prominence against the page links beneath them --
+    # a genuinely safe way to do this (see this comment's own earlier reasoning, preserved
+    # below): CSS targeting Streamlit's own internal sidebar DOM (stSidebarNav,
+    # stSidebarNavItems) is confirmed unreliable across releases, so uppercase text -- a plain
+    # Python string, no dependency on internals that could silently stop working -- is the lever
+    # used here instead.
     SECTION_OF = {}
     for k in ("0",):
         SECTION_OF[k] = "🏠 START HERE"
     for k in ("1", "2", "3", "4", "23", "24"):
         SECTION_OF[k] = "🎯 RECOMMENDATIONS"
-    for k in ("5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"):
-        SECTION_OF[k] = "🔬 RESEARCH & SIGNALS"
+    for k in ("5", "6"):
+        SECTION_OF[k] = "🛰️ LIVE SIGNALS"
+    for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15"):
+        SECTION_OF[k] = "🔬 DEEP RESEARCH"
     for k in ("16", "17", "18", "19"):
         SECTION_OF[k] = "🔍 SELF-GRADING & PROOF"
     for k in ("20", "21", "22"):

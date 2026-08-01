@@ -199,17 +199,17 @@ def test_sidebar_sections_match_the_documented_grouping():
         "0": "🏠 START HERE",
         "1": "🎯 RECOMMENDATIONS", "2": "🎯 RECOMMENDATIONS", "3": "🎯 RECOMMENDATIONS",
         "4": "🎯 RECOMMENDATIONS", "23": "🎯 RECOMMENDATIONS", "24": "🎯 RECOMMENDATIONS",
-        "5": "🔬 RESEARCH & SIGNALS", "6": "🔬 RESEARCH & SIGNALS", "7": "🔬 RESEARCH & SIGNALS",
-        "8": "🔬 RESEARCH & SIGNALS", "9": "🔬 RESEARCH & SIGNALS", "10": "🔬 RESEARCH & SIGNALS",
-        "11": "🔬 RESEARCH & SIGNALS", "12": "🔬 RESEARCH & SIGNALS", "13": "🔬 RESEARCH & SIGNALS",
-        "14": "🔬 RESEARCH & SIGNALS", "15": "🔬 RESEARCH & SIGNALS",
+        "5": "🛰️ LIVE SIGNALS", "6": "🛰️ LIVE SIGNALS",
+        "7": "🔬 DEEP RESEARCH", "8": "🔬 DEEP RESEARCH", "9": "🔬 DEEP RESEARCH",
+        "10": "🔬 DEEP RESEARCH", "11": "🔬 DEEP RESEARCH", "12": "🔬 DEEP RESEARCH",
+        "13": "🔬 DEEP RESEARCH", "14": "🔬 DEEP RESEARCH", "15": "🔬 DEEP RESEARCH",
         "16": "🔍 SELF-GRADING & PROOF", "17": "🔍 SELF-GRADING & PROOF",
         "18": "🔍 SELF-GRADING & PROOF", "19": "🔍 SELF-GRADING & PROOF",
         "20": "📣 OPS & CONTENT", "21": "📣 OPS & CONTENT", "22": "📣 OPS & CONTENT",
     }
     assert actual == expected, f"section grouping drifted from expected: {actual}"
-    print("✓ sidebar sections match the documented, consolidated 5-section grouping (uppercase "
-         "for visual prominence)")
+    print("✓ sidebar sections match the documented, 6-section grouping (uppercase for "
+         "visual prominence, Live Signals/Deep Research split along a real conceptual line)")
 
 
 def test_home_page_shares_command_centers_section():
