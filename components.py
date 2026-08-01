@@ -228,15 +228,24 @@ def section_header(icon: str, title: str, subtitle: Optional[str] = None,
 
 
 def _team_logo_html(url: Optional[str]) -> str:
-    """Small inline team logo, or nothing at all when no URL is available/known -- never a
-    broken-image icon. onerror hides the element itself on a 404/bad URL, a completely standard,
-    stable HTML behavior (not a fragile internal hook, see this module's own CSS-risk section) --
-    the one real, honest safety net for NFL's constructed-guess logo URLs and any other source
-    that might not resolve."""
+    """Small inline team logo on a light backdrop chip, or nothing at all when no URL is
+    available/known -- never a broken-image icon. onerror hides the OUTER chip entirely on a
+    404/bad URL (not just the image), so a failed logo never leaves an empty light square behind
+    -- still a completely standard, stable HTML behavior, not a fragile internal hook.
+
+    LIGHT BACKDROP ADDED DIRECTLY ON REQUEST, a real confirmed problem, not a style preference:
+    several real team logos (Yankees, Tigers, other navy/black-primary marks) are predominantly
+    dark-colored artwork with a transparent background -- dropped directly onto this platform's
+    own dark row background, they were genuinely losing most of their contrast/visibility. A
+    small light-gray rounded chip behind every logo guarantees contrast regardless of that
+    specific team's own color palette, the same fix real sports apps use for exactly this reason."""
     if not url:
         return ""
-    return (f'<img src="{url}" style="width:20px;height:20px;object-fit:contain;'
-           f'vertical-align:middle;margin-right:5px;" onerror="this.style.display=\'none\'">')
+    return (f'<span style="display:inline-flex;align-items:center;justify-content:center;'
+           f'width:20px;height:20px;border-radius:5px;background:#eef0f3;flex-shrink:0;'
+           f'margin-right:5px;vertical-align:middle;">'
+           f'<img src="{url}" style="width:15px;height:15px;object-fit:contain;" '
+           f'onerror="this.parentElement.style.display=\'none\'"></span>')
 
 
 # Game-status badge colors -- a genuinely separate semantic dimension from the conference accent
@@ -304,8 +313,14 @@ def _lineup_legend_html() -> str:
 # layout looked "ragged" once team-name lengths varied row to row. Roster Status is its own
 # narrower column ONLY for sports that actually have lineup data (see show_roster below) -- no
 # empty column for sports that never populate it.
-_GRID_COLS_WITH_ROSTER = "minmax(150px,1.7fr) 82px 96px minmax(90px,1fr)"
-_GRID_COLS_NO_ROSTER = "minmax(150px,1.7fr) 82px minmax(90px,1fr)"
+#
+# TEAMS GIVEN MUCH MORE OF THE FLEXIBLE WIDTH (3.2fr vs Location's 1fr) -- real, confirmed
+# problem, not a style choice: full team names on both sides plus two logos were getting cut off
+# with an ellipsis at the old, closer-to-even ratio. Location loses relative width in the trade,
+# but venue names were already truncating at the old width too, so it's a real net improvement
+# for the column that actually needs the room.
+_GRID_COLS_WITH_ROSTER = "minmax(170px,3.2fr) 78px 92px minmax(70px,1fr)"
+_GRID_COLS_NO_ROSTER = "minmax(170px,3.2fr) 78px minmax(70px,1fr)"
 
 
 def _grid_row(columns: str, cells: List[str], extra_style: str = "") -> str:
