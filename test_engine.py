@@ -1177,6 +1177,88 @@ def test_get_pitcher_starts_empty_on_fetch_failure(monkeypatch):
     assert E.get_pitcher_starts_this_season(111, 2026) == []
 
 
+# ----------------------------------------------------------------- last_start_regression_signal
+def _fake_starts(entries):
+    """entries: list of (game_date, innings_pitched_str, earned_runs)."""
+    return [{"gamePk": i, "game_date": d, "stat": {"inningsPitched": ip, "earnedRuns": er}}
+           for i, (d, ip, er) in enumerate(entries)]
+
+
+def test_last_start_regression_signal_flags_a_rough_outing_as_trending_worse(monkeypatch):
+    # Real, evidenced pattern this closes: a rough last start (well above his own season ERA)
+    # is a real bounce-back-forward candidate for the next one.
+    starts = _fake_starts([
+        ("2026-07-10", "6.0", 1), ("2026-07-16", "7.0", 2), ("2026-07-22", "5.0", 5),
+    ])
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season",
+                        lambda pid, season, before_date=None: starts)
+    sig = E.last_start_regression_signal(123, 2026, "2026-07-28")
+    assert sig["last_era"] == 9.0    # 5 ER / 5 IP * 9
+    assert sig["season_era"] == 4.0  # (1+2+5) ER / (6+7+5) IP * 9
+    assert sig["delta"] == 5.0
+    assert sig["tag"] == "🥶 Trending worse"
+    print("✓ last_start_regression_signal correctly flags a rough last outing as a real "
+         "bounce-back-forward candidate")
+
+
+def test_last_start_regression_signal_flags_a_great_outing_as_trending_better(monkeypatch):
+    starts = _fake_starts([
+        ("2026-07-10", "5.0", 4), ("2026-07-16", "6.0", 3), ("2026-07-22", "7.0", 0),
+    ])
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season",
+                        lambda pid, season, before_date=None: starts)
+    sig = E.last_start_regression_signal(123, 2026, "2026-07-28")
+    assert sig["last_era"] == 0.0
+    assert sig["tag"] == "🔥 Trending better"
+    print("✓ last_start_regression_signal correctly flags a great last outing as a real "
+         "regression-back-toward-normal candidate")
+
+
+def test_last_start_regression_signal_steady_when_no_meaningful_gap(monkeypatch):
+    starts = _fake_starts([
+        ("2026-07-10", "6.0", 3), ("2026-07-16", "6.0", 2), ("2026-07-22", "6.0", 3),
+    ])
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season",
+                        lambda pid, season, before_date=None: starts)
+    sig = E.last_start_regression_signal(123, 2026, "2026-07-28")
+    assert sig["tag"] == "➡️ In line with season"
+    print("✓ last_start_regression_signal reports 'in line' when the last start isn't a "
+         "meaningful outlier vs season, not a fabricated trend from noise")
+
+
+def test_last_start_regression_signal_none_for_too_short_a_last_outing(monkeypatch):
+    # HONEST NOISE GUARD: a 2 IP relief-length outing is too short a sample to say anything
+    # real about -- must return None, not a wildly noisy ERA number dressed up as a signal.
+    starts = _fake_starts([("2026-07-10", "6.0", 2), ("2026-07-22", "2.0", 3)])
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season",
+                        lambda pid, season, before_date=None: starts)
+    sig = E.last_start_regression_signal(123, 2026, "2026-07-28")
+    assert sig is None
+    print("✓ last_start_regression_signal returns honest None for a last start under 3 IP, "
+         "doesn't manufacture a signal from too small a sample")
+
+
+def test_last_start_regression_signal_none_when_no_starts_at_all(monkeypatch):
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season",
+                        lambda pid, season, before_date=None: [])
+    assert E.last_start_regression_signal(123, 2026, "2026-07-28") is None
+    print("✓ last_start_regression_signal returns honest None when this pitcher has no real "
+         "starts on file yet")
+
+
+def test_last_start_regression_signal_reuses_supplied_season_era(monkeypatch):
+    # When the caller already has a real season ERA (build_pitching_slate's own ERA/FIP work),
+    # it must be reused, not recomputed from a second, potentially-drifting aggregation.
+    starts = _fake_starts([("2026-07-22", "6.0", 3)])   # 4.50 if computed fresh
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season",
+                        lambda pid, season, before_date=None: starts)
+    sig = E.last_start_regression_signal(123, 2026, "2026-07-28", season_era=3.00)
+    assert sig["season_era"] == 3.00   # the SUPPLIED value, not a freshly-computed 4.50
+    assert sig["delta"] == 1.50        # 4.50 last_era - 3.00 supplied season_era
+    print("✓ last_start_regression_signal reuses a supplied season_era instead of recomputing "
+         "its own, avoiding two potentially-drifting copies of the same real number")
+
+
 # ----------------------------------------------------------------- get_actual_starter
 def _fake_live_boxscore(home_players=None, away_players=None):
     """home_players/away_players: {pid: (name, gamesStarted)}. Builds a minimal real-shaped

@@ -1636,6 +1636,78 @@ def get_pitcher_starts_this_season(pitcher_id: int, season: int,
 MIN_SPLIT_STARTS = 5   # minimum starts/games before we use a split over the full-season line
 
 
+def last_start_regression_signal(pitcher_id: int, season: int, before_date: str,
+                                 season_era: Optional[float] = None) -> Optional[Dict[str, Any]]:
+    """Compares a starter's MOST RECENT real start to their own season ERA -- ADDED DIRECTLY ON
+    REQUEST, closing a real, evidenced gap: a real trader in this project's own community was
+    manually tracking exactly this pattern by hand, with screenshots, across multiple real
+    pitchers ("guys who had a great start tend to follow it with a rough one, and vice versa").
+    Built entirely from get_pitcher_starts_this_season's own already-fetched gameLog data --
+    zero new network calls beyond what that function already makes.
+
+    A GENUINELY DIFFERENT, SHORTER-HORIZON SIGNAL than build_pitching_slate's own ERA-vs-FIP
+    Delta column -- that one compares a pitcher's WHOLE-SEASON results to their whole-season
+    peripherals (a season-long luck-vs-skill read). This compares ONE start to that SAME
+    pitcher's own season rate -- "was his last outing unusually good or bad relative to his own
+    real season, and might the next one regress back toward his real level" -- a different
+    question with a different, shorter answer window, not a duplicate of the existing signal.
+
+    HONEST NOISE CAVEAT, stated plainly rather than hidden behind a clean-looking number: ERA
+    from a SINGLE start is a tiny sample, and can swing wildly on a handful of runs allowed in
+    relief innings or an early exit. Returns None (not a manufactured signal) for a last start
+    under 3 IP -- too short a look to say anything real about it, the same "honest absence over
+    a fabricated number" posture every other optional field in this file already uses.
+
+    season_era: pass this in when the caller already has it (build_pitching_slate's own
+    ERA/FIP work computes a real season ERA already) to avoid a second, redundant aggregation of
+    the same real number -- computed fresh from this pitcher's own real starts only when not
+    supplied.
+
+    Returns None if this pitcher has no real starts on file before before_date, or his season ERA
+    can't be computed at all (no real innings logged yet). Otherwise {"last_start_date",
+    "last_ip", "last_er", "last_era", "season_era", "delta", "tag"} -- delta = last_era minus
+    season_era (positive = his last start's earned-run rate was WORSE than his own season norm,
+    a real bounce-back-forward candidate; negative = his last start was BETTER than his own
+    season norm, a real regression-back-toward-normal candidate). tag is one of "🔥 Trending
+    better" (meaningfully below his season ERA last time out), "🥶 Trending worse" (meaningfully
+    above it), or "➡️ In line with season" (no meaningful gap) -- the ±2.00 ERA threshold is a
+    real, stated, round-number choice (a two-run-per-nine swing on a single start), not
+    empirically fit; worth recalibrating against real results once enough of these have been
+    tracked through to a next start in Track Record."""
+    starts = get_pitcher_starts_this_season(pitcher_id, season, before_date=before_date)
+    if not starts:
+        return None
+    starts = sorted(starts, key=lambda s: s.get("game_date") or "")
+    last = starts[-1]
+    last_stat = last.get("stat") or {}
+    last_outs = _ip_to_outs(last_stat.get("inningsPitched", "0.0"))
+    if last_outs < 9:   # under 3 IP -- too short a look to say anything real, see docstring
+        return None
+    last_ip = last_outs / 3.0
+    last_er = safe_float(last_stat.get("earnedRuns"))
+    last_era = (last_er / last_ip) * 9
+
+    if season_era is None:
+        total_outs = sum(_ip_to_outs((s.get("stat") or {}).get("inningsPitched", "0.0")) for s in starts)
+        total_er = sum(safe_float((s.get("stat") or {}).get("earnedRuns")) for s in starts)
+        season_era = (total_er / (total_outs / 3.0)) * 9 if total_outs > 0 else None
+    if season_era is None:
+        return None
+
+    delta = round(last_era - season_era, 2)
+    if delta <= -2.0:
+        tag = "🔥 Trending better"
+    elif delta >= 2.0:
+        tag = "🥶 Trending worse"
+    else:
+        tag = "➡️ In line with season"
+    return {
+        "last_start_date": last.get("game_date"), "last_ip": round(last_ip, 1),
+        "last_er": int(last_er), "last_era": round(last_era, 2),
+        "season_era": round(season_era, 2), "delta": delta, "tag": tag,
+    }
+
+
 def pitcher_season_pitch_stats(pitcher_id: int, season: int, before_date: Optional[str] = None,
                                team_id: Optional[int] = None) -> Dict[str, Any]:
     """This pitcher's own average and max pitch count across REAL starts this season, from the
