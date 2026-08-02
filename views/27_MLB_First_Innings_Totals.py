@@ -1,12 +1,15 @@
 """
-First Innings Totals — on-demand "Team Total Runs - First N Innings" projection, one game and
-one batting side at a time.
+First Innings Totals — on-demand "Team Total Runs, First N Innings" projection, one game and one
+batting side at a time. Real, tradeable DraftKings markets, both offered side by side: "Team
+Total Runs - 1st 3 Innings" and "Team Total Runs - 1st 5 Innings" (confirmed directly from a real
+DK bet slip, not a secondary betting-guide source -- an earlier draft of this page dropped First
+3 Innings entirely on the mistaken belief it wasn't real; it is, and this page offers both again).
 
 WHAT THIS PROJECTS: mlb_engine/projections already had the real inputs and model for this market
 built (get_team_recent_first_innings_runs, get_pitcher_recent_first_innings_allowed,
 project_team_first_innings_total, prob_over_first_innings_line) — this page is the missing UI on
 top of them. Every number shown comes from those tested functions; this file only picks a game/
-side, calls them, and renders the result.
+side/window, calls them, and renders the result.
 
 METHOD, STATED PLAINLY (see project_team_first_innings_total's own docstring for the full real
 reasoning): the projected rate is a simple average of the BATTING TEAM's own recent scoring rate
@@ -17,11 +20,25 @@ starter has pitched early. Runs are then simulated via a Poisson draw at that bl
 REAL COST, OPT-IN BY DESIGN, same posture as Bullpen Watch: a full read costs a team-schedule
 window plus one linescore fetch per recent game for the batting team, plus one linescore fetch
 per recent start for the opposing starter — genuinely more than a free page load, so nothing
-past picking the game/side runs until the button below is pressed.
+past picking the game/side/window runs until the button below is pressed.
 
-NO LIVE ODDS FEED for this market yet (no odds_api mapping exists for first-innings team totals
-on this platform) — the line you check probability against is entered by hand, always labeled as
-a model read, never presented as a live sportsbook quote.
+NO LIVE ODDS FEED for this market, on either window, and this is a real, confirmed gap in this
+platform's specific data source, not a claim that the market itself isn't real (it plainly is,
+per the DK slip above): The Odds API's own published period-markets coverage (v1) is first-5-
+innings ONLY (h2h_1st_5_innings, spreads_1st_5_innings, totals_1st_5_innings), with no first-3-
+innings key at all -- and even its 5-innings totals key is a combined GAME total (both teams'
+runs together), not a TEAM-specific total for either window, at any plan tier. So a real price
+genuinely can't be pulled for this exact market on this platform right now, for 3 or 5 innings,
+even though real books plainly offer it. The line you check probability against is entered by
+hand, always labeled as a model read, never presented as a live sportsbook quote -- and CLV
+against a real captured price can't be tracked here until/unless a different data source covers it.
+
+BET LOG: logging is wired in (same shared quick_log widget every other actionable page already
+uses), and a logged pick here DOES auto-grade for BOTH windows -- bet_settlement.py's own
+TEAM_TOTAL_MARKETS entries for "First 3 Innings Total"/"First 5 Innings Total" settle it against
+the real linescore for that window once the game goes Final, the same automated pipeline
+Moneyline picks already get. Auto-grading doesn't need a live price at all (it only needs the
+real final result), so it's real value here even though CLV tracking isn't possible yet.
 """
 
 import streamlit as st
@@ -32,16 +49,22 @@ import pytz
 import sports
 import mlb_engine as E
 import projections as P
+import quick_log
 
 eastern = pytz.timezone("US/Eastern")
 game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER   # shared with
                                                                                    # every other
                                                                                    # slate-wide page
 
+# Real DK market names for each window, used verbatim as this page's own Market values -- must
+# match bet_settlement.TEAM_TOTAL_MARKETS' own keys exactly, or a logged pick here silently can't
+# auto-grade. Keyed by n_innings so the picker below and the settlement lookup share one source.
+MARKET_BY_N = {3: "First 3 Innings Total", 5: "First 5 Innings Total"}
+
 C.base_css()
 C.page_header("1️⃣", "First Innings Totals",
-             "Team Total Runs - First N Innings — pick a game, pick a side, see the real "
-             "blended projection.")
+             "Team Total Runs, First 3 or First 5 Innings — pick a game, pick a side, see the "
+             "real blended projection.")
 
 if not sports.require_sport(["MLB"], "First Innings Totals"):
     st.stop()
@@ -111,8 +134,10 @@ side_pick = st.radio("Which side's runs?", list(side_labels.keys()), horizontal=
 batting_row = away_row if side_labels[side_pick] == "away" else home_row
 opposing_row = home_row if side_labels[side_pick] == "away" else away_row
 
-n_innings_label = st.radio("Market", ["First 3 Innings", "First 5 Innings"], horizontal=True)
-n_innings = 3 if n_innings_label == "First 3 Innings" else 5
+market_pick = st.radio("Market", ["Team Total Runs - 1st 3 Innings", "Team Total Runs - 1st 5 Innings"],
+                       horizontal=True)
+n_innings = 3 if market_pick.endswith("3 Innings") else 5
+market_name = MARKET_BY_N[n_innings]
 
 st.caption(f"Projecting **{batting_row['Team']}** runs scored in the first {n_innings} innings, "
           f"facing **{opposing_row['Pitcher']}** ({opposing_row['Team']}).")
@@ -179,7 +204,24 @@ p1, p2 = st.columns(2)
 p1.metric(f"P(Over {line:g})", f"{probs['prob_over']:.0%}")
 p2.metric(f"P(Under {line:g})", f"{probs['prob_under']:.0%}")
 
-st.caption("Model-only line — no live sportsbook feed exists yet for this market on this "
-          "platform, so check this against whatever number your book is actually posting before "
-          f"betting it. Simulated via a Poisson draw at the blended rate above, "
-          f"{P.DEFAULT_SIMS:,} trials, reproducible with the same inputs.")
+st.caption("Model-only line — this platform's own odds provider has no live price for this exact "
+          "market on either window (see this page's own module docstring for the specifics), so "
+          "check this against whatever number your book is actually posting before betting it. "
+          f"Simulated via a Poisson draw at the blended rate above, {P.DEFAULT_SIMS:,} trials, "
+          "reproducible with the same inputs.")
+
+# Bet Log logging -- same shared quick_log widget Game Watch/Pitching Lab/Dinger Engine already
+# use. "Player" carries the TEAM name here (reused field, no dedicated team column in betlog's
+# own schema -- see bet_settlement.TEAM_TOTAL_MARKETS' own comment), not a literal player. No
+# offers/moneylines passed through (none exist for this market, see module docstring), so every
+# logged pick here honestly falls back to the model's own Fair price -- entry_odds_source will
+# always read "model_fair", never "book", until/unless a real data source covers this market.
+fit_plays = [
+    {"Player": batting_row["Team"], "PlayerId": None, "Game": selected_game["label"],
+     "Market": market_name, "Side": "Over", "Line": line,
+     "Fair": P.prob_to_american(probs["prob_over"]), "ModelProb": probs["prob_over"]},
+    {"Player": batting_row["Team"], "PlayerId": None, "Game": selected_game["label"],
+     "Market": market_name, "Side": "Under", "Line": line,
+     "Fair": P.prob_to_american(probs["prob_under"]), "ModelProb": probs["prob_under"]},
+]
+quick_log.render_quick_log(fit_plays, date_str, "MLB", key_prefix=f"fit_{selected_game['label']}_{n_innings}")
