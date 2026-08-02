@@ -29,6 +29,7 @@ import odds_api as O
 import best_bets_data as BBD
 
 eastern = pytz.timezone("US/Eastern")
+game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER   # shared with Matchup Lab
 
 C.base_css()
 C.page_header("📉", "Player Lines",
@@ -46,8 +47,63 @@ def load_pitchers(date_str: str):
 
 @st.cache_data(ttl=300, show_spinner="Loading hitters…")
 def load_hitters(date_str: str):
-    rows, _meta = E.build_slate(date_str)
-    return rows
+    return E.build_slate(date_str)   # (rows, meta) -- meta carries each game's real gamePk,
+                                     # needed for the same doubleheader-safe Game filter Matchup
+                                     # Lab already uses (hitter rows themselves have GameLabel
+                                     # but no gamePk/game_date of their own -- see the join below)
+
+
+def apply_slot_and_game_filters(rows: list, label_key: str, key_prefix: str) -> list:
+    """Time slot + Game filters — THE SAME shared pattern Best Bets and every Matchup Lab page
+    already use, narrowing a busy night's player list before picking one. ADDED DIRECTLY ON
+    REQUEST, closing a real, reported gap: the first version of this page only carried over
+    Venue/Time SPLIT (which reshapes the DATA for an already-picked player) and missed these two
+    (which narrow the SEARCH LIST itself) entirely.
+
+    Real, doubleheader-safe Game disambiguation, not a simplified reimplementation -- reuses the
+    same _gamePk-keyed logic Matchup Lab's own page already established after a real, confirmed
+    bug (two legs of a doubleheader sharing the identical "Away @ Home" label used to collapse
+    into one dropdown entry, silently discarding Game 2's own real info). Every row passed in
+    MUST already carry _game_date and _gamePk -- pitcher rows have these natively; hitter rows
+    need them joined on first, since build_slate's own hitter rows don't carry either (see the
+    join in this page's own hitter-loading code below)."""
+    for r in rows:
+        r["_slot"] = slot_of(game_dt(r.get("_game_date")))
+    slots_present = sorted({r["_slot"] for r in rows}, key=lambda s: SLOT_ORDER.get(s, 9))
+
+    c_slot, c_game = st.columns(2)
+    with c_slot:
+        slot_pick = st.selectbox("Time slot", ["All slate"] + slots_present, key=f"{key_prefix}_slot")
+    slot_rows = rows if slot_pick == "All slate" else [r for r in rows if r["_slot"] == slot_pick]
+    if not slot_rows:
+        return []
+
+    pk_date: dict = {}
+    label_pks: dict = {}
+    for r in slot_rows:
+        pk = r.get("_gamePk")
+        if pk is None:
+            continue
+        pk_date.setdefault(pk, r.get("_game_date"))
+        label_pks.setdefault(r[label_key], set()).add(pk)
+    for lbl in label_pks:
+        label_pks[lbl] = sorted(label_pks[lbl], key=lambda p: pk_date.get(p) or "")
+    game_number_by_pk = {pk: i for pks in label_pks.values() for i, pk in enumerate(pks, 1)}
+    games_present = sorted(pk_date, key=lambda p: pk_date[p] or "~")
+
+    def _game_label_fmt(pk) -> str:
+        base = next((r[label_key] for r in slot_rows if r.get("_gamePk") == pk), str(pk))
+        if len(label_pks.get(base, [])) > 1:
+            base = f"{base} (Game {game_number_by_pk.get(pk, 1)})"
+        dt = game_dt(pk_date.get(pk))
+        return f"{dt.strftime('%-I:%M %p ET')} — {base}" if dt is not None else base
+
+    with c_game:
+        game_pick = st.selectbox("Game", ["All games in this slot"] + games_present,
+                                 format_func=lambda g: _game_label_fmt(g) if g != "All games in this slot" else g,
+                                 key=f"{key_prefix}_game")
+    return (slot_rows if game_pick == "All games in this slot"
+           else [r for r in slot_rows if r.get("_gamePk") == game_pick])
 
 
 # Pitcher chart spec: (stat_key on get_pitcher_recent_games's own row, display market name,
@@ -85,19 +141,35 @@ if player_type == "Pitcher":
     if not pitchers:
         st.info("No probable starters found for this date. Pick a date with scheduled games.")
         st.stop()
-    p_by_label = {f"{r['Pitcher']} ({r['Team']})": r for r in pitchers}
+    final_pitchers = apply_slot_and_game_filters(pitchers, "Game", "player_lines_p")
+    if not final_pitchers:
+        st.info("No probable starters match the current filters — try a different time slot or game.")
+        st.stop()
+    p_by_label = {f"{r['Pitcher']} ({r['Team']})": r for r in final_pitchers}
     label = st.selectbox("Pitcher (type to search)", sorted(p_by_label.keys()))
     selected = p_by_label[label]
     player_name, player_id = selected["Pitcher"], selected.get("_pid")
 else:
-    hitters = load_hitters(date_str)
+    hitters, hitter_meta = load_hitters(date_str)
     if not hitters:
         st.info("No hitters found for this date. Pick a date with scheduled games.")
         st.stop()
-    h_by_label = {f"{r['Player']} ({r['Team']})": r for r in hitters}
+    # Real join: build_slate's own hitter rows carry GameLabel but no _game_date/_gamePk of
+    # their own (confirmed directly against _hitter_row's real return dict) -- meta has both,
+    # keyed by the same label string, so it's joined on here rather than assumed present.
+    meta_by_label = {m["label"]: m for m in hitter_meta}
+    for r in hitters:
+        m = meta_by_label.get(r.get("GameLabel"), {})
+        r["_game_date"] = m.get("game_date")
+        r["_gamePk"] = m.get("gamePk")
+    final_hitters = apply_slot_and_game_filters(hitters, "GameLabel", "player_lines_h")
+    if not final_hitters:
+        st.info("No hitters match the current filters — try a different time slot or game.")
+        st.stop()
+    h_by_label = {f"{r['Hitter']} ({r['Team']})": r for r in final_hitters}
     label = st.selectbox("Batter (type to search)", sorted(h_by_label.keys()))
     selected = h_by_label[label]
-    player_name, player_id = selected["Player"], selected.get("_pid")
+    player_name, player_id = selected["Hitter"], selected.get("_pid")
 
 if not player_id:
     st.warning("No player ID on file for this selection — can't load a real game log.")
