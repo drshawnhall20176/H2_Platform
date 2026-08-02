@@ -203,7 +203,7 @@ def test_sidebar_sections_match_the_documented_grouping():
         "7": "🔬 DEEP RESEARCH", "8": "🔬 DEEP RESEARCH", "9": "🔬 DEEP RESEARCH",
         "10": "🔬 DEEP RESEARCH", "11": "🔬 DEEP RESEARCH", "12": "🔬 DEEP RESEARCH",
         "13": "🔬 DEEP RESEARCH", "14": "🔬 DEEP RESEARCH", "15": "🔬 DEEP RESEARCH",
-        "25": "🔬 DEEP RESEARCH",
+        "25": "🔬 DEEP RESEARCH", "26": "🔬 DEEP RESEARCH",
         "16": "🔍 SELF-GRADING & PROOF", "17": "🔍 SELF-GRADING & PROOF",
         "18": "🔍 SELF-GRADING & PROOF", "19": "🔍 SELF-GRADING & PROOF",
         "20": "📣 OPS & CONTENT", "21": "📣 OPS & CONTENT", "22": "📣 OPS & CONTENT",
@@ -313,6 +313,9 @@ def test_sport_only_page_visibility_matches_expected_config():
     # after NFL's own Matchup Lab/Anytime TD Engine/QB Lab were already built -- found live,
     # after an earlier claim NFL had neither Hot Hand Engine nor Matchup Lab turned out wrong
     # for Matchup Lab specifically.
+    #
+    # Player Lines (MLB, 26) added directly on request -- recent-form trend charts, pitcher or
+    # batter, the MLB counterpart to WNBA/NBA/NCAAMB's own Matchup Lab trend charts.
     src = (_HERE / "streamlit_app.py").read_text()
     m = re.search(r"sport_only_leads = \{([^}]*)\}", src, re.DOTALL)
     assert m, "streamlit_app.py must define sport_only_leads"
@@ -322,11 +325,11 @@ def test_sport_only_page_visibility_matches_expected_config():
     assert pairs == {"5": ("MLB",), "6": ("MLB",), "7": ("MLB",), "8": ("MLB",), "9": ("MLB",),
                      "10": ("WNBA", "NBA", "NCAAMB"), "11": ("WNBA", "NBA", "NCAAMB"),
                      "12": ("NFL",), "13": ("NFL",), "14": ("NFL",),
-                     "23": ("UFC",), "24": ("MLB",), "25": ("NFL",)}, pairs
+                     "23": ("UFC",), "24": ("MLB",), "25": ("NFL",), "26": ("MLB",)}, pairs
     print("✓ sport_only_leads matches expected config (Bullpen Watch/Game Watch/Pitching Lab/"
-          "Dinger Engine/Matchup Lab(MLB) -> MLB, Hot Hand Engine/Matchup Lab(WNBA/NBA/NCAAMB) -> "
-          "WNBA+NBA+NCAAMB, Matchup Lab(NFL)/Anytime TD Engine/QB Lab/Hot Hand Engine(NFL) -> NFL, "
-          "UFC Fight Card -> UFC, Highlights -> MLB)")
+          "Dinger Engine/Matchup Lab(MLB)/Player Lines -> MLB, Hot Hand Engine/Matchup "
+          "Lab(WNBA/NBA/NCAAMB) -> WNBA+NBA+NCAAMB, Matchup Lab(NFL)/Anytime TD Engine/QB Lab/"
+          "Hot Hand Engine(NFL) -> NFL, UFC Fight Card -> UFC, Highlights -> MLB)")
 
 
 def test_projections_only_pages_hidden_for_sports_without_projections():

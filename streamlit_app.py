@@ -102,6 +102,8 @@ def run():
         "25": ("NFL",),                                  # Hot Hand Engine (NFL) -- own page, not the
                                                           # shared basketball one, same real reasoning
                                                           # as Matchup Lab (NFL)'s own page 12.
+        "26": ("MLB",),                                  # Player Lines -- recent-form trend charts,
+                                                          # pitcher or batter, MLB's own real markets.
     }
 
     # REAL, REPORTED GAP CLOSED HERE: these titles all carry a has_projections check that shows
@@ -165,6 +167,7 @@ def run():
         "24": ("Highlights",    "✨", "highlights"),
         "25": ("Hot Hand Engine", "🔥", "nfl_hot_hand_engine"),   # NFL version — same title as
                                                                   # page 10, distinct url_path
+        "26": ("Player Lines",   "📉", "mlb_player_lines"),
     }
 
     # SIDEBAR SECTIONS, added directly on request: st.navigation natively supports a
@@ -194,7 +197,7 @@ def run():
         SECTION_OF[k] = "🎯 RECOMMENDATIONS"
     for k in ("5", "6"):
         SECTION_OF[k] = "🛰️ LIVE SIGNALS"
-    for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25"):
+    for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26"):
         SECTION_OF[k] = "🔬 DEEP RESEARCH"
     for k in ("16", "17", "18", "19"):
         SECTION_OF[k] = "🔍 SELF-GRADING & PROOF"

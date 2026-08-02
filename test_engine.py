@@ -1259,6 +1259,119 @@ def test_last_start_regression_signal_reuses_supplied_season_era(monkeypatch):
          "its own, avoiding two potentially-drifting copies of the same real number")
 
 
+# ----------------------------------------------------------------- get_pitcher_recent_games
+def _fake_start_rich(game_date, ip, er, hits, k, is_home, game_time):
+    return {"gamePk": 1, "game_date": game_date, "isHome": is_home, "_game_time": game_time,
+           "stat": {"inningsPitched": ip, "earnedRuns": er, "hits": hits, "strikeOuts": k}}
+
+
+def test_get_pitcher_recent_games_returns_chart_ready_fields(monkeypatch):
+    starts = [_fake_start_rich("2026-07-10", "6.0", 1, 4, 8, True, "2026-07-10T18:10:00Z")]
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season",
+                        lambda pid, season, before_date=None: starts)
+    games = E.get_pitcher_recent_games(123, 2026, "2026-07-20")
+    assert games == [{"game_date": "2026-07-10", "outs": 18, "hits_allowed": 4.0,
+                      "earned_runs": 1.0, "strikeouts": 8.0}]
+    print("✓ get_pitcher_recent_games returns the exact chart-ready fields (outs, hits_allowed, "
+         "earned_runs, strikeouts) per start")
+
+
+def test_get_pitcher_recent_games_venue_filter(monkeypatch):
+    starts = [
+        _fake_start_rich("2026-07-10", "6.0", 1, 4, 8, True, "2026-07-10T18:10:00Z"),
+        _fake_start_rich("2026-07-16", "5.0", 3, 6, 5, False, "2026-07-16T23:10:00Z"),
+    ]
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season",
+                        lambda pid, season, before_date=None: starts)
+    home_games = E.get_pitcher_recent_games(123, 2026, "2026-07-20", venue="home")
+    assert len(home_games) == 1 and home_games[0]["game_date"] == "2026-07-10"
+    print("✓ get_pitcher_recent_games correctly filters to home starts only")
+
+
+def test_get_pitcher_recent_games_sorted_oldest_to_newest(monkeypatch):
+    starts = [
+        _fake_start_rich("2026-07-16", "5.0", 3, 6, 5, True, "2026-07-16T18:10:00Z"),
+        _fake_start_rich("2026-07-10", "6.0", 1, 4, 8, True, "2026-07-10T18:10:00Z"),
+    ]
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season",
+                        lambda pid, season, before_date=None: starts)
+    games = E.get_pitcher_recent_games(123, 2026, "2026-07-20")
+    assert [g["game_date"] for g in games] == ["2026-07-10", "2026-07-16"]
+    print("✓ get_pitcher_recent_games returns games oldest-to-newest, chart-ready order")
+
+
+def test_get_pitcher_recent_games_respects_n_limit(monkeypatch):
+    starts = [_fake_start_rich(f"2026-07-{d:02d}", "6.0", 1, 4, 8, True, f"2026-07-{d:02d}T18:10:00Z")
+             for d in range(1, 16)]   # 15 starts
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season",
+                        lambda pid, season, before_date=None: starts)
+    games = E.get_pitcher_recent_games(123, 2026, "2026-07-20", n=10)
+    assert len(games) == 10
+    assert games[-1]["game_date"] == "2026-07-15"   # the most recent 10, last one is the newest
+    print("✓ get_pitcher_recent_games respects the n limit, keeping the MOST RECENT n starts")
+
+
+def test_get_pitcher_recent_games_empty_when_no_starts(monkeypatch):
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season",
+                        lambda pid, season, before_date=None: [])
+    assert E.get_pitcher_recent_games(123, 2026, "2026-07-20") == []
+    print("✓ get_pitcher_recent_games returns an honest empty list, not a crash or fabricated data")
+
+
+# ----------------------------------------------------------------- get_hitter_recent_games
+def _fake_hitter_gamelog(entries):
+    """entries: list of (date, isHome, atBats, hits, totalBases, runs, rbi, homeRuns, strikeOuts)."""
+    return {"stats": [{"splits": [
+        {"date": d, "isHome": ih,
+        "stat": {"plateAppearances": ab, "atBats": ab, "hits": h, "totalBases": tb,
+                "runs": r, "rbi": rbi, "homeRuns": hr, "strikeOuts": so}}
+        for d, ih, ab, h, tb, r, rbi, hr, so in entries
+    ]}]}
+
+
+def test_get_hitter_recent_games_computes_real_hrr(monkeypatch):
+    fake = _fake_hitter_gamelog([("2026-07-10", True, 4, 2, 3, 1, 2, 0, 1)])
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake)
+    games = E.get_hitter_recent_games(456, 2026)
+    assert len(games) == 1
+    g = games[0]
+    assert g["hits"] == 2.0 and g["total_bases"] == 3.0
+    assert g["hrr"] == 5.0   # 2 hits + 1 run + 2 rbi -- the REAL recorded sum, not a simulation
+    assert g["hr"] == 0.0 and g["strikeouts"] == 1.0
+    # REAL, CONFIRMED FIX: "outs" was added here mistakenly (not a real market this platform or
+    # any sportsbook trades for batters) and removed directly on request -- this guards against
+    # it being silently reintroduced.
+    assert "outs" not in g
+    print("✓ get_hitter_recent_games computes real per-game HRR (hits+runs+rbi actually "
+         "recorded), not simulated market values, and no longer includes the mistaken Outs field")
+
+
+def test_get_hitter_recent_games_venue_filter(monkeypatch):
+    fake = _fake_hitter_gamelog([
+        ("2026-07-10", True, 4, 2, 3, 1, 2, 0, 1),
+        ("2026-07-11", False, 4, 0, 0, 0, 0, 0, 3),
+    ])
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake)
+    home_games = E.get_hitter_recent_games(456, 2026, venue="home")
+    assert len(home_games) == 1 and home_games[0]["game_date"] == "2026-07-10"
+    print("✓ get_hitter_recent_games correctly filters to home games only")
+
+
+def test_get_hitter_recent_games_excludes_games_without_a_real_plate_appearance(monkeypatch):
+    fake = _fake_hitter_gamelog([("2026-07-10", True, 0, 0, 0, 0, 0, 0, 0)])
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake)
+    games = E.get_hitter_recent_games(456, 2026)
+    assert games == []
+    print("✓ get_hitter_recent_games excludes a game with no real plate appearance (didn't "
+         "actually play), not a fabricated 0-for-0 row")
+
+
+def test_get_hitter_recent_games_empty_on_fetch_failure(monkeypatch):
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: (_ for _ in ()).throw(ConnectionError()))
+    assert E.get_hitter_recent_games(456, 2026) == []
+    print("✓ get_hitter_recent_games fails honest (empty list) on a real fetch error, never crashes")
+
+
 # ----------------------------------------------------------------- get_actual_starter
 def _fake_live_boxscore(home_players=None, away_players=None):
     """home_players/away_players: {pid: (name, gamesStarted)}. Builds a minimal real-shaped

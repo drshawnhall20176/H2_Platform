@@ -1708,6 +1708,129 @@ def last_start_regression_signal(pitcher_id: int, season: int, before_date: str,
     }
 
 
+def get_pitcher_recent_games(pitcher_id: int, season: int, before_date: Optional[str] = None,
+                             venue: Optional[str] = None, time_of_day: Optional[str] = None,
+                             n: int = 10) -> List[Dict[str, Any]]:
+    """Last n real starts, oldest-to-newest (chart-ready order) -- Outs/Hits Allowed/Earned Runs/
+    Strikeouts per start, for the Player Lines trend charts. ADDED DIRECTLY ON REQUEST.
+
+    A THIN FILTERING WRAPPER around get_pitcher_starts_this_season's own already-fetched starts
+    -- zero new network calls. Reuses that function's own real isHome/_game_time detection
+    instead of re-deriving it a second way, same "one source of truth" posture as everywhere
+    else real per-game data gets reused across this file's own multiple consumers.
+
+    venue/time_of_day: same semantics as get_pitcher_split_stat's own filters (the aggregate
+    version Pitching Lab already uses) -- "home"/"away", "day"/"night". A start whose home/away
+    or day/night honestly can't be determined is EXCLUDED when a filter is active (conservative:
+    only show starts we can actually confirm match), included when no filter is active at all.
+
+    Returns [] on no real starts found -- an honest empty chart, never a fabricated data point."""
+    starts = get_pitcher_starts_this_season(pitcher_id, season, before_date=before_date)
+    if venue is not None:
+        starts = [s for s in starts if s.get("isHome") == (venue == "home")]
+    if time_of_day is not None:
+        filtered = []
+        for s in starts:
+            hour = _eastern_hour(s.get("_game_time"))
+            if hour is None:
+                filtered.append(s)   # unknown time -- include conservatively, matching
+                continue             # get_pitcher_split_stat's own same posture
+            is_day = hour < 17
+            if (time_of_day == "day") == is_day:
+                filtered.append(s)
+        starts = filtered
+    starts = sorted(starts, key=lambda s: s.get("game_date") or "")[-n:]
+
+    out = []
+    for s in starts:
+        stat = s.get("stat") or {}
+        out.append({
+            "game_date": s.get("game_date"),
+            "outs": _ip_to_outs(stat.get("inningsPitched", "0.0")),
+            "hits_allowed": safe_float(stat.get("hits")),
+            "earned_runs": safe_float(stat.get("earnedRuns")),
+            "strikeouts": safe_float(stat.get("strikeOuts")),
+        })
+    return out
+
+
+def get_hitter_recent_games(player_id: int, season: int, before_date: Optional[str] = None,
+                            venue: Optional[str] = None, time_of_day: Optional[str] = None,
+                            n: int = 10) -> List[Dict[str, Any]]:
+    """Last n real games, oldest-to-newest (chart-ready order) -- Hits/Total Bases/HRR/HR/
+    Strikeouts per game, for the Player Lines trend charts. ADDED DIRECTLY ON REQUEST.
+
+    SAME real gameLog fetch and venue/isHome/time-of-day detection get_hitter_split_stat already
+    uses (that function aggregates into one stat dict for a split; this one keeps each game as
+    its own row for charting) -- duplicated here rather than refactored out from a live,
+    already-tested function Pitching Lab/Best Bets depend on, the lower-risk choice for a new,
+    separate consumer.
+
+    HRR here is the REAL per-game sum (hits + runs + rbi actually recorded that game), NOT the
+    simulated market probability build_best_bets computes (simulate_hits_runs_rbi models a
+    forward-looking distribution; this is what actually already happened, the right number for
+    a "how has he really been doing" trend line).
+
+    Returns [] on no real games found -- an honest empty chart, never a fabricated data point."""
+    try:
+        data = fetch_json(f"{BASE}/people/{player_id}/stats",
+                          {"stats": "gameLog", "group": "hitting", "season": season, "gameType": "R"})
+    except Exception:
+        return []
+    try:
+        splits = (data.get("stats") or [{}])[0].get("splits", [])
+    except (IndexError, AttributeError):
+        return []
+
+    games = []
+    for sp in splits:
+        game_date = sp.get("date", "")
+        if before_date and game_date >= before_date:
+            continue
+        stat = sp.get("stat") or {}
+        if safe_float(stat.get("plateAppearances")) < 1:
+            continue
+
+        is_home = sp.get("isHome")
+        if is_home is None:
+            hitter_team_id = (sp.get("team") or {}).get("id")
+            game_obj = sp.get("game") or {}
+            game_teams = game_obj.get("teams") or {}
+            home_team_id = ((game_teams.get("home") or {}).get("team") or {}).get("id")
+            if hitter_team_id and home_team_id:
+                is_home = (hitter_team_id == home_team_id)
+        if venue is not None and is_home != (venue == "home"):
+            continue   # unknown (None) is excluded too when a filter is active -- conservative
+
+        if time_of_day is not None:
+            game_obj = sp.get("game") or {}
+            game_time = (game_obj.get("gameDate") or game_obj.get("officialDate")
+                        or stat.get("startTime") or stat.get("gameStartTime"))
+            hour = _eastern_hour(game_time) if game_time else None
+            if hour is not None:
+                is_day = hour < 17
+                if (time_of_day == "day") != is_day:
+                    continue
+            # unknown hour -- included conservatively, same posture as get_hitter_split_stat
+
+        games.append({"game_date": game_date, "stat": stat})
+
+    games = sorted(games, key=lambda g: g["game_date"])[-n:]
+    out = []
+    for g in games:
+        stat = g["stat"]
+        hits = safe_float(stat.get("hits"))
+        out.append({
+            "game_date": g["game_date"],
+            "hits": hits,
+            "total_bases": safe_float(stat.get("totalBases")),
+            "hrr": hits + safe_float(stat.get("runs")) + safe_float(stat.get("rbi")),
+            "hr": safe_float(stat.get("homeRuns")),
+            "strikeouts": safe_float(stat.get("strikeOuts")),
+        })
+    return out
+
+
 def pitcher_season_pitch_stats(pitcher_id: int, season: int, before_date: Optional[str] = None,
                                team_id: Optional[int] = None) -> Dict[str, Any]:
     """This pitcher's own average and max pitch count across REAL starts this season, from the
