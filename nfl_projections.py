@@ -755,3 +755,82 @@ def build_qb_efficiency_table(rows: List[Dict], season_logs_by_pid: Dict[str, Li
     out.sort(key=lambda x: (x["TD-INT Delta (recent vs season)"]
                             if x["TD-INT Delta (recent vs season)"] is not None else 0), reverse=True)
     return out
+
+
+# Row field (nfl_engine.player_row's own naming) -> nfl_engine.get_team_allowed_stats' own key
+# for that same real stat. Two genuinely different naming conventions meeting at one join point,
+# not duplicated data -- _MARKET_SPEC's own "col" values already match get_team_allowed_stats'
+# keys exactly (both "passing_yards" etc.), this bridges ONLY the row's own different naming.
+_ALLOWED_KEY_TO_ROW_FIELD = {"passing_yards": "PassYds", "rushing_yards": "RushYds",
+                             "receptions": "Receptions", "receiving_yards": "RecYds"}
+
+
+def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[str, Dict[str, float]]) -> List[Dict]:
+    """NFL's own matchup-adjusted leaderboard -- ADDED DIRECTLY ON REQUEST, closing the one real
+    remaining gap after NFL's own Matchup Lab, Anytime TD Engine, and QB Lab were already built:
+    those are one-player-at-a-time tools; this is the slate-WIDE ranked view WNBA/NBA/NCAAMB's
+    own Hot Hand Engine already has. Same real signal, same honest framing: each rotation
+    player's own recent-form average, scaled by how generous or stingy THIS WEEK's specific
+    opponent has been recently, relative to the average allowed rate across every opponent
+    actually on this week's slate (not a full-league scan) -- "is this a good matchup relative
+    to this week's other games," not a claim calibrated against the full season.
+
+    NO PACE ADJUSTMENT -- a real, deliberate difference from the basketball version, not an
+    oversight: nfl_engine.get_team_allowed_stats' own docstring already states the same real
+    reasoning (NFL has no equivalent "possessions" concept the way basketball's per-100
+    normalization needs). Raw per-game allowed rates are used directly, honestly, not force-fit
+    into a basketball-shaped adjustment that wouldn't mean the same thing here.
+
+    opp_allowed: {team_abbr: {"passing_yards", "rushing_yards", "receptions", "receiving_yards"}}
+    from nfl_engine.get_team_allowed_stats, one call per unique opponent on this week's real
+    slate -- the CALLER's job to fetch, not this function's, matching every other sport's own
+    hot-hand board (keeps this module free of its own network fetching).
+
+    ONLY the market(s) actually relevant to each player's own real recent role (row["_markets"],
+    already computed by nfl_engine.player_row from his real position) are scored -- never shows
+    a QB's Rush Yards matchup factor as if it were his specialty, or a WR's Pass Yards. A player
+    active in more than one real market (a real dual-threat usage profile) gets one row PER
+    market, not force-blended into a single score -- the same "don't blend genuinely different
+    signals into one number" posture Conviction/_favored_side already hold to elsewhere.
+
+    Returns one dict per (player, market): {"Player", "Team", "Opp", "Position", "Market",
+    "Recent Avg", "Opp Allows", "Slate Avg", "Matchup Factor", "Hot Hand Score"}, sorted by Hot
+    Hand Score descending. Matchup Factor defaults to a neutral 1.00 (not a fabricated edge) when
+    this specific opponent's own allowed data isn't available yet."""
+    baseline_samples: Dict[str, List[float]] = {k: [] for k in _ALLOWED_KEY_TO_ROW_FIELD}
+    for stats in opp_allowed.values():
+        for k in baseline_samples:
+            v = stats.get(k)
+            if v:
+                baseline_samples[k].append(v)
+    baseline = {k: (sum(v) / len(v) if v else 0.0) for k, v in baseline_samples.items()}
+
+    out: List[Dict] = []
+    for r in rows:
+        opp = r.get("Opp")
+        opp_stats = opp_allowed.get(opp) if opp else None
+        for mkey in (r.get("_markets") or []):
+            spec = _MARKET_SPEC.get(mkey)
+            if not spec:
+                continue
+            stat_col, disp, _default_ln = spec
+            row_field = _ALLOWED_KEY_TO_ROW_FIELD.get(stat_col)
+            if not row_field:
+                continue
+            recent_avg = r.get(row_field)
+            if not recent_avg:
+                continue
+            opp_rate = (opp_stats or {}).get(stat_col)
+            slate_avg = baseline.get(stat_col, 0.0)
+            matchup_factor = (opp_rate / slate_avg) if (opp_rate and slate_avg > 0) else 1.0
+            out.append({
+                "Player": r["Player"], "Team": r["Team"], "Opp": opp,
+                "Position": r.get("Position", ""), "Market": disp,
+                "Recent Avg": recent_avg,
+                "Opp Allows": round(opp_rate, 1) if opp_rate else None,
+                "Slate Avg": round(slate_avg, 1) if slate_avg else None,
+                "Matchup Factor": round(matchup_factor, 2),
+                "Hot Hand Score": round(recent_avg * matchup_factor, 1),
+            })
+    out.sort(key=lambda x: x["Hot Hand Score"], reverse=True)
+    return out

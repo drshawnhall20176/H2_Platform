@@ -577,6 +577,79 @@ def test_qb_efficiency_table_includes_rushing_td_rate_alongside_passing():
     print("✓ build_qb_efficiency_table includes Rushing TD Rate alongside the renamed Passing TD Rate")
 
 
+# ----------------------------------------------------------------- build_hot_hand_board
+def test_build_hot_hand_board_scores_favorable_matchup_higher():
+    rows = [{"Player": "Josh Allen", "Team": "BUF", "Opp": "NYJ", "Position": "QB",
+            "PassYds": 265.0, "RushYds": 0.0, "Receptions": 0.0, "RecYds": 0.0,
+            "_markets": ["player_pass_yds"]}]
+    # NYJ allows well above the slate average -- a real favorable matchup
+    opp_allowed = {"NYJ": {"passing_yards": 300.0, "rushing_yards": 90.0,
+                          "receptions": 20.0, "receiving_yards": 260.0},
+                  "KC": {"passing_yards": 200.0, "rushing_yards": 95.0,
+                        "receptions": 18.0, "receiving_yards": 190.0}}
+    board = NP.build_hot_hand_board(rows, opp_allowed)
+    assert len(board) == 1
+    row = board[0]
+    assert row["Market"] == "Pass Yards"
+    assert row["Matchup Factor"] > 1.0   # NYJ allows more than the slate average -> favorable
+    assert row["Hot Hand Score"] > row["Recent Avg"]
+    print("✓ build_hot_hand_board scores a favorable matchup (opponent allows more than the "
+         "slate average) above the player's own raw recent average")
+
+
+def test_build_hot_hand_board_only_scores_markets_relevant_to_position():
+    # A QB's row must never get a Rush Yards or Receptions row just because those markets exist
+    # in general -- only the markets actually in his own row["_markets"].
+    rows = [{"Player": "Josh Allen", "Team": "BUF", "Opp": "NYJ", "Position": "QB",
+            "PassYds": 265.0, "RushYds": 35.0, "Receptions": 0.0, "RecYds": 0.0,
+            "_markets": ["player_pass_yds", "player_rush_yds"]}]
+    opp_allowed = {"NYJ": {"passing_yards": 280.0, "rushing_yards": 90.0,
+                          "receptions": 20.0, "receiving_yards": 260.0}}
+    board = NP.build_hot_hand_board(rows, opp_allowed)
+    markets = {r["Market"] for r in board}
+    assert markets == {"Pass Yards", "Rush Yards"}   # NOT Receptions/Receiving Yards
+    print("✓ build_hot_hand_board only scores markets actually in the player's own _markets, "
+         "never a market outside his real recent role")
+
+
+def test_build_hot_hand_board_one_row_per_market_for_dual_threat_player():
+    rows = [{"Player": "Deebo Samuel", "Team": "SF", "Opp": "SEA", "Position": "WR",
+            "PassYds": 0.0, "RushYds": 25.0, "Receptions": 5.0, "RecYds": 60.0,
+            "_markets": ["player_rush_yds", "player_receptions", "player_reception_yds"]}]
+    opp_allowed = {"SEA": {"passing_yards": 220.0, "rushing_yards": 100.0,
+                          "receptions": 20.0, "receiving_yards": 210.0}}
+    board = NP.build_hot_hand_board(rows, opp_allowed)
+    assert len(board) == 3   # NOT force-blended into one row
+    print("✓ build_hot_hand_board gives a dual-threat player one row per real market, not one "
+         "blended score")
+
+
+def test_build_hot_hand_board_neutral_factor_when_opponent_data_missing():
+    rows = [{"Player": "Josh Allen", "Team": "BUF", "Opp": "NYJ", "Position": "QB",
+            "PassYds": 265.0, "RushYds": 0.0, "Receptions": 0.0, "RecYds": 0.0,
+            "_markets": ["player_pass_yds"]}]
+    board = NP.build_hot_hand_board(rows, opp_allowed={})   # no data for NYJ at all
+    assert board[0]["Matchup Factor"] == 1.0   # honest neutral, not a fabricated edge
+    assert board[0]["Opp Allows"] is None
+    print("✓ build_hot_hand_board defaults to a neutral 1.00 factor (not a fabricated edge) "
+         "when this opponent's allowed data isn't available yet")
+
+
+def test_build_hot_hand_board_sorted_by_score_descending():
+    rows = [
+        {"Player": "Cold Matchup", "Team": "A", "Opp": "X", "Position": "QB",
+         "PassYds": 200.0, "RushYds": 0.0, "Receptions": 0.0, "RecYds": 0.0,
+         "_markets": ["player_pass_yds"]},
+        {"Player": "Hot Matchup", "Team": "B", "Opp": "Y", "Position": "QB",
+         "PassYds": 200.0, "RushYds": 0.0, "Receptions": 0.0, "RecYds": 0.0,
+         "_markets": ["player_pass_yds"]},
+    ]
+    opp_allowed = {"X": {"passing_yards": 150.0}, "Y": {"passing_yards": 350.0}}
+    board = NP.build_hot_hand_board(rows, opp_allowed)
+    assert board[0]["Player"] == "Hot Matchup"
+    print("✓ build_hot_hand_board sorts by Hot Hand Score descending, best matchup first")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
