@@ -292,6 +292,73 @@ def test_first_innings_totals_view_file_uses_platform_conventions():
          "the real (not reimplemented) engine/projections functions it's built on")
 
 
+def test_first_innings_totals_market_names_match_settlement_registry():
+    # Regression guard for a real, silent-corruption-class risk: the view file logs picks under
+    # whichever market name MARKET_BY_N maps a given n_innings to (quick_log's own play-dict
+    # shape), and bet_settlement.py's TEAM_TOTAL_MARKETS dict must use the EXACT same strings as
+    # its own keys, or a logged pick would silently never auto-grade -- landing in "unresolved"
+    # forever with no error, no crash, just quietly never settling. A wrong field mapping here is
+    # exactly the class of bug quick_log.py's own bet_log_fields_from_play docstring already
+    # warns about for a different field. Checked in BOTH directions: every market the view can
+    # log must be settleable, and (just as important) the two files must agree on which
+    # n_innings each market name actually means -- a name matching but pointed at the wrong
+    # window would settle a real bet against the wrong linescore, silently.
+    view_src = (_HERE / "views" / "27_MLB_First_Innings_Totals.py").read_text()
+    settlement_src = (_HERE / "bet_settlement.py").read_text()
+
+    view_match = re.search(r"MARKET_BY_N = \{([^}]*)\}", view_src)
+    assert view_match, "views/27_MLB_First_Innings_Totals.py must define MARKET_BY_N"
+    view_pairs = dict(re.findall(r'(\d+):\s*"([^"]+)"', view_match.group(1)))
+    view_market_to_n = {name: int(n) for n, name in view_pairs.items()}
+    assert view_market_to_n, "MARKET_BY_N must have at least one real entry"
+
+    settlement_match = re.search(r"TEAM_TOTAL_MARKETS = \{([^}]*)\}", settlement_src)
+    assert settlement_match, "bet_settlement.py must define TEAM_TOTAL_MARKETS"
+    settlement_market_to_n = dict(re.findall(r'"([^"]+)":\s*(\d+)', settlement_match.group(1)))
+    settlement_market_to_n = {name: int(n) for name, n in settlement_market_to_n.items()}
+    assert settlement_market_to_n, "TEAM_TOTAL_MARKETS must have at least one real entry"
+
+    assert view_market_to_n == settlement_market_to_n, (
+        f"market registry drift between the view and bet_settlement: view has "
+        f"{view_market_to_n!r}, settlement has {settlement_market_to_n!r} — a logged pick would "
+        f"either silently never settle, or settle against the wrong innings window")
+    print(f"✓ First Innings Totals' logged market names ({sorted(view_market_to_n)}) match "
+         "bet_settlement's own TEAM_TOTAL_MARKETS exactly, including which n_innings each one "
+         "means, so logged picks actually auto-grade against the right window")
+
+
+def test_first_innings_totals_offers_both_real_dk_windows():
+    # Regression guard specifically for a real, confirmed mistake: an earlier draft of this page
+    # dropped "First 3 Innings" entirely on the belief it wasn't a real market -- it is, verified
+    # directly against a real DraftKings bet slip showing "Team Total Runs - 1st 3 Innings" and
+    # "Team Total Runs - 1st 5 Innings" offered side by side. Confirms both real windows stay
+    # present going forward, not just that whatever's there is internally consistent (the
+    # previous test alone wouldn't catch someone removing 3-innings support from both files
+    # together and staying "consistent" the whole time).
+    view_src = (_HERE / "views" / "27_MLB_First_Innings_Totals.py").read_text()
+    match = re.search(r"MARKET_BY_N = \{([^}]*)\}", view_src)
+    assert match, "views/27_MLB_First_Innings_Totals.py must define MARKET_BY_N"
+    ns_present = {int(n) for n in re.findall(r"(\d+):\s*\"", match.group(1))}
+    assert ns_present == {3, 5}, (
+        f"expected both real DK windows (3 and 5 innings), got {ns_present} — "
+        "First 3 Innings is a real, confirmed market, not a fabricated default")
+    print("✓ First Innings Totals offers both real DK windows (First 3 Innings and First 5 "
+         "Innings), matching a real confirmed DK bet slip")
+
+
+def test_first_innings_totals_view_wires_bet_log():
+    # Confirms the view file actually calls quick_log.render_quick_log (not just that the
+    # underlying settlement machinery exists) -- the two previous tests would both pass even if
+    # this page never called the widget at all, which would leave auto-grading real but
+    # unreachable from the page itself.
+    view_path = _HERE / "views" / "27_MLB_First_Innings_Totals.py"
+    src = view_path.read_text()
+    assert "import quick_log" in src
+    assert "quick_log.render_quick_log(" in src
+    print("✓ First Innings Totals view actually calls quick_log.render_quick_log, not just "
+         "leaving the settlement machinery unreachable")
+
+
 def test_public_audience_defaults_safe():
     # Missing/unset AUDIENCE secret must default to "owner" (fail toward showing the owner
     # everything on unconfigured/local runs), never silently default to "public".

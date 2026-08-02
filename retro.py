@@ -123,8 +123,35 @@ def settle_moneyline_result(side_team, home_team, away_team, home_score, away_sc
         return None
     winner = home_team if home_score > away_score else away_team
     return "win" if side_team == winner else "loss"
- 
- 
+
+
+def settle_team_total_result(side: str, line: Optional[float], team_runs: Optional[float]):
+    """Real-world settlement for ONE logged TEAM TOTAL bet (e.g. "First 5 Innings Total") --
+    compares the bet's own logged Over/Under side and line against the real runs that specific
+    team actually scored in the window this market covers. A third, genuinely separate
+    comparison alongside settle_bet_result (player-stat, MARKET_STAT-keyed) and settle_moneyline_
+    result (whole-game win/loss, no line at all) above: this one has a real line like a player
+    prop does, but no player and no MARKET_STAT/actuals dict involved -- just one real number
+    (team_runs) against the line, the same bare comparison every real sportsbook total settles on.
+
+    CALLER'S OWN RESPONSIBILITY, same posture as settle_bet_result/settle_moneyline_result:
+    confirming BOTH that the game is actually Final AND that team_runs reflects a fully completed
+    window for this specific market (e.g. all 5 real innings actually played, not a partial count
+    from a suspended/shortened game) before calling this -- this function has no game-status or
+    innings-completeness awareness by design, same as its two siblings above.
+
+    Returns "win"/"loss"/"push" (an exact-tie push is genuinely possible here, unlike moneyline,
+    since a real sportsbook total line can land on a whole number), or None (an honest "can't
+    determine," never a guess) when line or team_runs itself is missing."""
+    if line is None or team_runs is None:
+        return None
+    if team_runs == line:
+        return "push"
+    over_hit = team_runs > line
+    hit = over_hit if side == "Over" else (team_runs < line)
+    return "win" if hit else "loss"
+
+
 def _calibration(graded: List[Dict], n_bins: int = 5) -> List[Dict]:
     settled = [g for g in graded if g["Hit"] is not None]
     if not settled:

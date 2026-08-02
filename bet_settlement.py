@@ -34,6 +34,26 @@ import betlog as B
 
 _ABBR_TO_FULL = {v: k for k, v in E.MLB_TEAM_ABBR.items()}
 
+# Team-total markets this module knows how to auto-settle, mapped to their real n_innings window.
+# Both confirmed real, tradeable DraftKings markets (verbatim from a real DK bet slip: "Team
+# Total Runs - 1st 3 Innings" and "Team Total Runs - 1st 5 Innings", both offered side by side) --
+# an earlier internal assumption that only the 5-innings version was real, based on secondary
+# betting-guide sources rather than an actual sportsbook, turned out wrong; corrected here.
+#
+# ADDED DIRECTLY ON REQUEST, closing the exact gap test_build_settlement_plan_no_player_id_and_
+# not_moneyline_is_unresolved's own name describes: a bet with no player_id and market !=
+# "Moneyline" used to be unconditionally unresolved -- correct for an old manually-typed bet with
+# a genuinely missing player_id, but ALSO catching every team-total bet, which has no player_id
+# on purpose (it's not a player-prop bet at all, same as Moneyline).
+#
+# The bet's own "player" field carries the TEAM NAME for these, reused rather than a new schema
+# column -- there's no dedicated team column in betlog's schema (confirmed directly against its
+# own CREATE TABLE), and unlike Moneyline (which puts the team name in "side", since a moneyline
+# bet has no separate Over/Under axis at all), a total needs BOTH a team identity AND an Over/
+# Under side, so "player" is the least-bad reuse: same "who/what this bet is about" role quick_
+# log.py's own play-dict shape already gives that field, just not literally a person this time.
+TEAM_TOTAL_MARKETS = {"First 5 Innings Total": 5, "First 3 Innings Total": 3}
+
 
 def _normalize_team(token: str) -> str:
     """A team token (full name OR common abbreviation, any case/whitespace) -> the CANONICAL
@@ -152,6 +172,12 @@ def build_settlement_plan(bets: List[Dict[str, Any]]) -> Dict[str, List[Dict[str
             if pairing_counts[pairing] == 1:
                 by_label[pairing] = g
         boxscore_cache: Dict[Any, Dict[int, Dict]] = {}
+        linescore_cache: Dict[Tuple[Any, int], Optional[Dict]] = {}   # (gamePk, n_innings) -> get_
+                                                                       # game_first_n_innings_runs'
+                                                                       # own result, so two bets on
+                                                                       # the same game+window (e.g.
+                                                                       # Over AND Under both logged)
+                                                                       # share one real linescore fetch
 
         for b in date_bets:
             game_label = b.get("game")
@@ -170,10 +196,35 @@ def build_settlement_plan(bets: List[Dict[str, Any]]) -> Dict[str, List[Dict[str
                 continue
 
             is_moneyline = (b.get("market") == "Moneyline")
+            team_total_n = TEAM_TOTAL_MARKETS.get(b.get("market"))
             if is_moneyline:
                 new_result = R.settle_moneyline_result(
                     b.get("side"), g.get("home_name"), g.get("away_name"),
                     g.get("home_score"), g.get("away_score"))
+            elif team_total_n is not None:
+                team_norm = _normalize_team(b.get("player") or "")
+                home_norm, away_norm = _normalize_team(g.get("home_name")), _normalize_team(g.get("away_name"))
+                if team_norm not in (home_norm, away_norm):
+                    unresolved.append({"bet_id": b.get("id"), "description": _describe(b),
+                                       "reason": f"couldn't match team '{b.get('player')}' to "
+                                                 f"either side of {game_label}"})
+                    continue
+                gid = g.get("gamePk")
+                cache_key = (gid, team_total_n)
+                if cache_key not in linescore_cache:
+                    linescore_cache[cache_key] = E.get_game_first_n_innings_runs(gid, team_total_n)
+                innings = linescore_cache[cache_key]
+                # Only settle off a FULLY completed window (all team_total_n innings really
+                # played) -- get_game_first_n_innings_runs' own "innings_counted" honestly
+                # reflects a suspended/shortened game's real partial count rather than padding it,
+                # and settling a First 5 Innings Total against only 4 real completed innings would
+                # be a wrong result, not just an early one. A short count here becomes new_result
+                # = None below, same honest "can't determine yet" every other unsettleable case
+                # already gets, not a special early-return.
+                new_result = (R.settle_team_total_result(b.get("side"), b.get("line"),
+                                                         innings["home" if team_norm == home_norm
+                                                                 else "away"])
+                             if innings and innings.get("innings_counted") == team_total_n else None)
             elif b.get("player_id"):
                 gid = g.get("gamePk")
                 if gid not in boxscore_cache:

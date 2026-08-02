@@ -138,6 +138,163 @@ def test_build_settlement_plan_moneyline_loss(monkeypatch):
     assert plan["proposed"][0]["new_result"] == "loss"
 
 
+# ----------------------------------------------------------------- build_settlement_plan: team totals
+def _linescore(innings_data):
+    """innings_data: [(num, home_runs, away_runs), ...] -- real MLB Stats API /linescore shape,
+    same field path (innings[].num, .home.runs, .away.runs) get_game_first_n_innings_runs's own
+    docstring confirms against the official MLB-StatsAPI wrapper."""
+    return {"innings": [{"num": n, "home": {"runs": hr}, "away": {"runs": ar}}
+                        for n, hr, ar in innings_data]}
+
+
+def test_build_settlement_plan_team_total_home_side_win(monkeypatch):
+    # Yankees (home) is the TEAM being bet -- "player" carries the team name, same reused-field
+    # convention TEAM_TOTAL_MARKETS' own comment documents. 3 real runs over 5 real innings vs a
+    # 1.5 line -> Over wins.
+    bet = _bet(player="New York Yankees", player_id=None, market="First 5 Innings Total",
+              side="Over", line=1.5)
+    ls = _linescore([(1, 1, 0), (2, 0, 0), (3, 1, 1), (4, 0, 0), (5, 1, 0)])   # home: 3, away: 1
+    monkeypatch.setattr(E, "get_schedule", lambda d: [_schedule_game()])
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: ls)
+
+    plan = S.build_settlement_plan([bet])
+    assert plan["still_pending"] == [] and plan["unresolved"] == []
+    assert len(plan["proposed"]) == 1
+    assert plan["proposed"][0]["new_result"] == "win"
+    print("✓ build_settlement_plan settles a First 5 Innings Total bet on the HOME team correctly")
+
+
+def test_build_settlement_plan_team_total_away_side_loss(monkeypatch):
+    # Same real game/linescore as above, but the AWAY team's own total (Red Sox: 1 run) against
+    # the same 1.5 line -> Over loses.
+    bet = _bet(player="Boston Red Sox", player_id=None, market="First 5 Innings Total",
+              side="Over", line=1.5)
+    ls = _linescore([(1, 1, 0), (2, 0, 0), (3, 1, 1), (4, 0, 0), (5, 1, 0)])   # home: 3, away: 1
+    monkeypatch.setattr(E, "get_schedule", lambda d: [_schedule_game()])
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: ls)
+
+    plan = S.build_settlement_plan([bet])
+    assert len(plan["proposed"]) == 1
+    assert plan["proposed"][0]["new_result"] == "loss"
+    print("✓ build_settlement_plan settles a First 5 Innings Total bet on the AWAY team correctly, "
+         "using that team's own real runs, not the home side's")
+
+
+def test_build_settlement_plan_team_total_push(monkeypatch):
+    # A real whole-number line landing on an exact tie -- end to end through build_settlement_
+    # plan itself, not just settle_team_total_result in isolation (test_retro.py already covers
+    # that function's own push logic directly; this confirms the real runs actually reach it).
+    bet = _bet(player="New York Yankees", player_id=None, market="First 5 Innings Total",
+              side="Over", line=3)
+    ls = _linescore([(1, 1, 0), (2, 0, 0), (3, 1, 1), (4, 0, 0), (5, 1, 0)])   # home: 3, exact tie
+    monkeypatch.setattr(E, "get_schedule", lambda d: [_schedule_game()])
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: ls)
+
+    plan = S.build_settlement_plan([bet])
+    assert len(plan["proposed"]) == 1
+    assert plan["proposed"][0]["new_result"] == "push"
+    print("✓ build_settlement_plan settles a First 5 Innings Total to a real 'push' end to end "
+         "when the real runs land exactly on a whole-number line")
+
+
+def test_build_settlement_plan_team_total_incomplete_window_is_unresolved(monkeypatch):
+    # Real, honest guard: only 4 of the first 5 innings actually happened (e.g. a suspended
+    # game) -- settling against a partial count would be a WRONG result, not just an early one,
+    # so this must land in unresolved, never a guessed win/loss.
+    bet = _bet(player="New York Yankees", player_id=None, market="First 5 Innings Total",
+              side="Over", line=1.5)
+    ls = _linescore([(1, 1, 0), (2, 0, 0), (3, 1, 1), (4, 0, 0)])   # only 4 innings on record
+    monkeypatch.setattr(E, "get_schedule", lambda d: [_schedule_game()])
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: ls)
+
+    plan = S.build_settlement_plan([bet])
+    assert plan["proposed"] == []
+    assert len(plan["unresolved"]) == 1
+    assert "couldn't determine" in plan["unresolved"][0]["reason"]
+    print("✓ build_settlement_plan refuses to settle a First 5 Innings Total against a partial, "
+         "less-than-5-inning linescore, even though the game itself is confirmed Final")
+
+
+def test_build_settlement_plan_team_total_unmatched_team_is_unresolved(monkeypatch):
+    bet = _bet(player="Chicago Cubs", player_id=None, market="First 5 Innings Total",
+              side="Over", line=1.5)
+    monkeypatch.setattr(E, "get_schedule", lambda d: [_schedule_game()])
+    fetch_calls = []
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fetch_calls.append(url) or {})
+
+    plan = S.build_settlement_plan([bet])
+    assert len(plan["unresolved"]) == 1
+    assert "couldn't match team" in plan["unresolved"][0]["reason"]
+    assert fetch_calls == []   # never even fetches the linescore for a team that isn't in this game
+    print("✓ build_settlement_plan flags a First 5 Innings Total bet whose team doesn't match "
+         "either real side of the game, without wasting a linescore fetch on it")
+
+
+def test_build_settlement_plan_team_total_linescore_fetched_once_for_both_sides(monkeypatch):
+    # Over AND Under on the SAME team+game (a real, common pattern -- hedging or a line move) --
+    # the linescore must be fetched exactly once, not twice, same real cost guarantee the
+    # existing boxscore-sharing test already establishes for player props.
+    bet_over = _bet(id=1, player="New York Yankees", player_id=None, market="First 5 Innings Total",
+                    side="Over", line=1.5)
+    bet_under = _bet(id=2, player="New York Yankees", player_id=None, market="First 5 Innings Total",
+                     side="Under", line=3.5)
+    ls = _linescore([(1, 1, 0), (2, 0, 0), (3, 1, 1), (4, 0, 0), (5, 1, 0)])   # home: 3
+    fetch_calls = []
+    monkeypatch.setattr(E, "get_schedule", lambda d: [_schedule_game()])
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fetch_calls.append(url) or ls)
+
+    plan = S.build_settlement_plan([bet_over, bet_under])
+    assert len(plan["proposed"]) == 2
+    assert len(fetch_calls) == 1
+    results = {p["bet_id"]: p["new_result"] for p in plan["proposed"]}
+    assert results == {1: "win", 2: "win"}   # 3 runs: Over 1.5 wins, Under 3.5 also wins
+    print("✓ build_settlement_plan fetches a game's own linescore exactly once even when "
+         "multiple team-total bets (e.g. both sides of a line) reference it")
+
+
+def test_build_settlement_plan_first_3_innings_total_settles_correctly(monkeypatch):
+    # Real, confirmed DK market (verbatim from a real bet slip: "Team Total Runs - 1st 3
+    # Innings") -- separate coverage from the First 5 Innings tests above, since an earlier
+    # draft of this platform mistakenly treated only the 5-innings window as real. Runs after
+    # inning 3 must be ignored: the away team scores 2 more in innings 4-5 here, which must NOT
+    # count toward a First 3 Innings settlement.
+    bet = _bet(player="Boston Red Sox", player_id=None, market="First 3 Innings Total",
+              side="Over", line=0.5)
+    ls = _linescore([(1, 0, 1), (2, 0, 0), (3, 0, 0), (4, 0, 1), (5, 0, 1)])   # away: 1 through
+                                                                               # inning 3, 3 total
+    monkeypatch.setattr(E, "get_schedule", lambda d: [_schedule_game()])
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: ls)
+
+    plan = S.build_settlement_plan([bet])
+    assert len(plan["proposed"]) == 1
+    assert plan["proposed"][0]["new_result"] == "win"   # 1 run through inning 3 > 0.5
+    print("✓ build_settlement_plan settles a real First 3 Innings Total bet correctly, using "
+         "only the first 3 innings' own runs, not the game's later innings")
+
+
+def test_build_settlement_plan_first_3_and_first_5_dont_share_a_linescore_cache_entry(monkeypatch):
+    # The SAME team+game, logged under BOTH windows (a real, plausible pattern -- someone bets
+    # both the 1st-3 and 1st-5 team total on the same game). Each window needs its OWN linescore
+    # read (a 3-inning count and a 5-inning count are genuinely different numbers), so this must
+    # be 2 real fetches, not 1 -- the cache key is (gamePk, n_innings), not gamePk alone.
+    bet_f3 = _bet(id=1, player="New York Yankees", player_id=None, market="First 3 Innings Total",
+                 side="Over", line=0.5)
+    bet_f5 = _bet(id=2, player="New York Yankees", player_id=None, market="First 5 Innings Total",
+                 side="Over", line=2.5)
+    ls = _linescore([(1, 1, 0), (2, 0, 0), (3, 0, 0), (4, 1, 0), (5, 1, 0)])   # home: 1 through
+                                                                               # inning 3, 3 total
+    fetch_calls = []
+    monkeypatch.setattr(E, "get_schedule", lambda d: [_schedule_game()])
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fetch_calls.append(url) or ls)
+
+    plan = S.build_settlement_plan([bet_f3, bet_f5])
+    assert len(fetch_calls) == 2   # NOT 1 -- (gamePk, 3) and (gamePk, 5) are genuinely different reads
+    results = {p["bet_id"]: p["new_result"] for p in plan["proposed"]}
+    assert results == {1: "win", 2: "win"}   # F3: 1 run > 0.5; F5: 3 runs > 2.5
+    print("✓ build_settlement_plan reads the linescore separately per (game, n_innings) pair, "
+         "so First 3 and First 5 Innings bets on the same game never share a stale cache entry")
+
+
 # ----------------------------------------------------------------- build_settlement_plan: grouping
 def test_build_settlement_plan_groups_by_date_fetches_schedule_once_per_date(monkeypatch):
     bet1 = _bet(id=1, slate_date="2026-07-24", player="A", player_id=555)

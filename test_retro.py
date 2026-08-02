@@ -110,6 +110,29 @@ def test_settle_moneyline_result_none_when_side_matches_neither_real_team():
     print("✓ settle_moneyline_result returns None when the logged side doesn't match either real team — a genuine data mismatch, not resolved either way")
 
 
+# ----------------------------------------------------------------- settle_team_total_result
+def test_settle_team_total_result_win_and_loss():
+    assert R.settle_team_total_result("Over", 1.5, 3.0) == "win"
+    assert R.settle_team_total_result("Over", 1.5, 1.0) == "loss"
+    assert R.settle_team_total_result("Under", 1.5, 1.0) == "win"
+    assert R.settle_team_total_result("Under", 1.5, 3.0) == "loss"
+    print("✓ settle_team_total_result correctly compares real team runs against the logged line, both sides")
+
+
+def test_settle_team_total_result_push_on_a_real_whole_number_line():
+    # Same real distinction settle_bet_result's own push test makes: a genuine sportsbook total
+    # line can be a whole number, and an exact tie is a real push, not a loss for either side.
+    assert R.settle_team_total_result("Over", 2, 2.0) == "push"
+    assert R.settle_team_total_result("Under", 2, 2.0) == "push"
+    print("✓ settle_team_total_result correctly identifies a real push on a whole-number line, for either side")
+
+
+def test_settle_team_total_result_none_for_missing_line_or_runs():
+    assert R.settle_team_total_result("Over", None, 3.0) is None
+    assert R.settle_team_total_result("Over", 1.5, None) is None
+    print("✓ settle_team_total_result returns None (an honest 'can't determine') for a missing line or missing real runs")
+
+
 def test_grade_slate_summary():
     plays = [
         dict(Player="A", PlayerId=1, Market="Batter HR", Side="Over", Line=0.5, ModelProb=0.24, Conviction=2.2),
