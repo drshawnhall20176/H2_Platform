@@ -331,7 +331,11 @@ for game in organized:
                 )
 
         for player_entry in game["players"]:
-            st.markdown(f"**{player_entry['player']}** ({player_entry['team']})")
+            _team_trend = None
+            if player_entry["plays"]:
+                _team_trend = player_entry["plays"][0].get("TeamTrend")
+            _trend_suffix = f"  ·  Team: {_team_trend}" if _team_trend and _team_trend != "➡️ Steady" else ""
+            st.markdown(f"**{player_entry['player']}** ({player_entry['team']}){_trend_suffix}")
             for pl in player_entry["plays"]:
                 grade_html = _grade_badge(pl["_grade"])
                 # A real, confirmed distinction worth marking right next to the grade itself:

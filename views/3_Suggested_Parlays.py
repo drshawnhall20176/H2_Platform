@@ -388,8 +388,10 @@ for parlay in parlays:
             lineup = leg.get("Lineup")
             lineup_icon = "🟡 " if lineup == "Projected" else ("🟢 " if lineup == "Confirmed" else "")
             rank_prefix = f"**#{leg['_rank']}** · " if leg.get("_rank") else ""
+            _team_trend = leg.get("TeamTrend")
+            _trend_str = f" {_team_trend}" if _team_trend and _team_trend != "➡️ Steady" else ""
             st.markdown(
-                f"{rank_prefix}{grade_html} {lineup_icon}**{leg['Player']}** ({leg['Team']}) — {leg['Market']} "
+                f"{rank_prefix}{grade_html} {lineup_icon}**{leg['Player']}** ({leg['Team']}{_trend_str}) — {leg['Market']} "
                 f"{leg['Side']} {leg['Line']:g} · Fair odds {leg_fair_str}",
                 unsafe_allow_html=True,
             )
