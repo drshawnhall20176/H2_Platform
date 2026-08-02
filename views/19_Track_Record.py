@@ -26,6 +26,7 @@ import streamlit as st
 import components as C
 import pandas as pd
 import plotly.graph_objects as go
+from datetime import datetime, timedelta
 
 import sports
 import betlog as B
@@ -83,13 +84,53 @@ st.page_link("views/18_#L01f4d2_Bet_Log.py",
 if not sports.require_trading_access("Track Record"):
     st.stop()
 
+# ------------------------------------------------------------------ since-date filter
+# ADDED DIRECTLY ON REQUEST, after a real, serious conversation about real money: without this,
+# there was NO way -- for Shawn or for any future analysis -- to check whether real logged
+# results actually looked different after a specific platform change shipped. Every claim about
+# an "improvement" was unverifiable against this page's own all-time-blended numbers. Off by
+# default (shows the full all-time record, unchanged from before this existed) -- turning it on
+# is an explicit choice to test a specific window, not a new default behavior forced on anyone.
+st.divider()
+dcol1, dcol2 = st.columns([1, 2])
+with dcol1:
+    use_since = st.checkbox("Test a specific window", value=False,
+                            help="Off by default — shows the full all-time record, same as "
+                                "always. Turn this on to check whether real results look "
+                                "different since a specific date (e.g. right after a change "
+                                "shipped) — the actual way to test whether an improvement moved "
+                                "the real numbers, not just whether it seemed like a good idea.")
+since_date = None
+with dcol2:
+    if use_since:
+        since_date = st.date_input("Only include bets placed on or after",
+                                   value=datetime.now() - timedelta(days=14),
+                                   key="track_record_since_date")
 
-bets = _load_bets(_active.key)
-all_tracked = _load_all_tracked(_active.key)
+all_bets_unfiltered = _load_bets(_active.key)
+all_tracked_unfiltered = _load_all_tracked(_active.key)
+
+if since_date:
+    since_str = since_date.strftime("%Y-%m-%d")
+    bets = B.filter_bets_since(all_bets_unfiltered, since_str)
+    all_tracked = B.filter_bets_since(all_tracked_unfiltered, since_str)
+    st.caption(f"📅 Showing **{len(bets)} of {len(all_bets_unfiltered)}** real bets placed on or "
+              f"after **{since_str}** — every metric below (CLV, hit rate, calibration, market "
+              f"breakdown) is recomputed fresh for ONLY this window, not blended with older "
+              f"history. Turn the filter off above to see the full all-time record again.")
+else:
+    bets = all_bets_unfiltered
+    all_tracked = all_tracked_unfiltered
+
 if not all_tracked:
-    st.info(f"📈 We're building our {_active.label} track record. Once bets are logged and settled, "
-            "the proof shows up here — CLV, per-market performance, and calibration. Switch sports "
-            "in the sidebar to see another league's record.")
+    if since_date:
+        st.info(f"📅 No real bets placed on or after **{since_date.strftime('%Y-%m-%d')}** yet — "
+               f"{len(all_bets_unfiltered)} exist all-time, just none in this specific window. "
+               f"Turn the filter off above to see the full record.")
+    else:
+        st.info(f"📈 We're building our {_active.label} track record. Once bets are logged and settled, "
+                "the proof shows up here — CLV, per-market performance, and calibration. Switch sports "
+                "in the sidebar to see another league's record.")
     st.stop()
 
 summ = B.summary(bets)
@@ -101,9 +142,21 @@ clv_n = summ.get("clv_n") or 0
 # ------------------------------------------------------------------ hero strip
 st.divider()
 h1, h2, h3, h4 = st.columns(4)
+# When a since-date filter is active, show this window's Avg CLV AGAINST the full all-time
+# number as a real delta -- the direct, at-a-glance answer to "did this look different after
+# the change," instead of making anyone flip the filter on and off and remember the old number.
+clv_delta = None
+if since_date:
+    alltime_summ = B.summary(all_bets_unfiltered)
+    if alltime_summ["avg_clv"] is not None and summ["avg_clv"] is not None:
+        clv_delta = f"{summ['avg_clv'] - alltime_summ['avg_clv']:+.2f}pp vs all-time"
 h1.metric("Avg CLV", f"{summ['avg_clv']:+.2f}%" if summ["avg_clv"] is not None else "—",
-          help="Average closing-line value across all tracked bets. Positive = we beat the "
-               "market's closing price on average. This is our headline signal.")
+          delta=clv_delta,
+          help="Average closing-line value across tracked bets in the window above (all-time by "
+               "default). Positive = we beat the market's closing price on average. This is our "
+               "headline signal. When a since-date filter is active, the delta shown is this "
+               "window's Avg CLV minus the full all-time Avg CLV — positive means this window is "
+               "outperforming the longer history, negative means it's underperforming it.")
 h2.metric("Bets tracked (with closing lines)", clv_n,
           help="How many bets have a recorded closing line — our real sample size. We show it "
                "openly; it tells you exactly how much to trust the numbers.")
