@@ -133,6 +133,53 @@ def test_list_bets_is_real_bet_filter_combines_with_other_filters():
         print("✓ list_bets' is_real_bet filter correctly combines with the existing sport filter")
 
 
+# ----------------------------------------------------------------- filter_bets_since
+def test_filter_bets_since_excludes_bets_before_the_date():
+    bets = [
+        {"player": "Before", "ts_placed": "2026-07-15T12:00:00"},
+        {"player": "On the day", "ts_placed": "2026-08-01T09:00:00"},
+        {"player": "After", "ts_placed": "2026-08-05T18:30:00"},
+    ]
+    out = B.filter_bets_since(bets, "2026-08-01")
+    names = {b["player"] for b in out}
+    assert names == {"On the day", "After"}
+    print("✓ filter_bets_since keeps bets placed ON the cutoff date and after, excludes earlier ones")
+
+
+def test_filter_bets_since_no_filter_returns_everything_unchanged():
+    bets = [{"player": "A", "ts_placed": "2026-07-15T12:00:00"},
+           {"player": "B", "ts_placed": "2026-08-05T18:30:00"}]
+    assert B.filter_bets_since(bets, None) == bets
+    assert B.filter_bets_since(bets, "") == bets
+    print("✓ filter_bets_since is a genuine no-op (not just 'returns everything' by coincidence) "
+         "when no since-date is given -- the explicit 'off' state")
+
+
+def test_filter_bets_since_excludes_bets_with_no_placed_date():
+    # A real edge case: a bet with no ts_placed at all can't honestly be said to be "on or
+    # after" any date -- must be excluded, not incorrectly included by treating missing as "0000".
+    bets = [{"player": "No date"}, {"player": "Has date", "ts_placed": "2026-08-05T00:00:00"}]
+    out = B.filter_bets_since(bets, "2026-08-01")
+    assert len(out) == 1 and out[0]["player"] == "Has date"
+    print("✓ filter_bets_since excludes a bet with no known placement date, doesn't guess it's in range")
+
+
+def test_filter_bets_since_real_regression_a_since_date_actually_narrows_the_real_window():
+    # Direct regression guard for the real, reported gap this closes: before this existed, there
+    # was no way to check whether real results looked different after a specific date. Confirms
+    # the narrowed set really IS smaller when there's real history before the cutoff.
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "bets.db")
+        B.add_bet(db, player="Old Pick", market="Batter HR", stake=5.0)
+        bets = B.list_bets(db)
+        bets[0]["ts_placed"] = "2026-01-01T00:00:00"   # simulate an old bet directly
+        recent = B.filter_bets_since(bets, "2026-08-01")
+        assert len(recent) == 0
+        assert len(B.filter_bets_since(bets, None)) == 1
+        print("✓ filter_bets_since genuinely narrows the real window -- the actual fix, not just "
+             "a function that exists but doesn't change anything")
+
+
 def test_player_id_field():
     # Added directly on request, for automated result settlement -- retro.py's existing,
     # already-tested grade_play/get_player_results match by numeric player ID, not name.

@@ -260,6 +260,29 @@ def add_bet(db_path: str = DB_PATH, **fields) -> int:
     return _pg_add_bet(fields) if USING_POSTGRES else _sqlite_add_bet(db_path, fields)
  
  
+def filter_bets_since(bets: List[Dict], since_date_str: Optional[str]) -> List[Dict]:
+    """Bets placed on or after since_date_str (a "YYYY-MM-DD" string), by ts_placed. None (or
+    falsy) since_date_str returns bets unchanged -- the explicit "no filter, show everything"
+    case, not a special case to handle separately.
+
+    ADDED DIRECTLY ON REQUEST, after a real, serious conversation about real money: without this,
+    there was no way to check whether real logged results actually looked different after a
+    specific platform change shipped -- every claim about an "improvement" was unverifiable
+    against Track Record's own all-time-blended numbers. Extracted as its own testable function
+    rather than left as inline view-script logic specifically so this can be covered by a real
+    regression test, not just eyeballed on a live page.
+
+    STRING COMPARISON, deliberately, not a datetime parse -- ts_placed is always written as a
+    real ISO-8601 string (see the "ts_placed" default above: datetime.now(timezone.utc).
+    isoformat()), and ISO-8601's own date-first ordering means simple string comparison sorts
+    correctly without needing to parse either side into a datetime object first. A bet with no
+    ts_placed at all (an edge case predating this field) is excluded, not incorrectly included --
+    "no known placement date" can't honestly be said to be "on or after" anything."""
+    if not since_date_str:
+        return bets
+    return [b for b in bets if (b.get("ts_placed") or "")[:10] >= since_date_str]
+
+
 def list_bets(db_path: str = DB_PATH, settled: Optional[bool] = None,
               sport: Optional[str] = None, is_real_bet: Optional[bool] = None) -> List[Dict]:
     rows = _pg_list() if USING_POSTGRES else _sqlite_list(db_path)
