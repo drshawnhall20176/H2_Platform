@@ -17,7 +17,7 @@ sport and politely no-op when a different sport is selected.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -465,11 +465,31 @@ def require_trading_access(page_name: str = "This page") -> bool:
         return True
     st.warning(f"🔒 {page_name} needs a separate password — this is real trading history, kept "
               f"apart from the rest of the owner build.")
-    entered = st.text_input("Password", type="password", key="trading_password_input")
-    if entered:
-        if _check_trading_password(entered, st.secrets.get("TRADING_PASSWORD")):
-            st.session_state["trading_unlocked"] = True
-            st.rerun()
-        else:
-            st.error("Incorrect password.")
-    return False
+
+def team_trend_tag(recent: Optional[float], season: Optional[float]) -> Tuple[str, Optional[float]]:
+    """Turns a team's own recent scoring output vs. their season norm into one of 3 tags -- the
+    SAME thresholds and label style wnba_projections/nba_projections/ncaamb_projections' own
+    per-market "Defense Trend" already uses (📈/📉/➡️, 1.08/0.92 cutoffs), reused here on
+    purpose rather than reinvented, so "trending" means the same thing everywhere on this
+    platform, not a subtly different bar depending which page you're looking at.
+
+    ADDED DIRECTLY ON REQUEST, closing a real, evidenced gap: multiple real traders in this
+    project's own community independently described watching an entire team's lineup produce
+    while their own specific pick didn't ("everybody around 'em in the lineup gets a homerun or
+    a hit"), and the underlying signal (a team's own recent-vs-season scoring rate) either
+    existed but never reached the actual pick page (MLB: get_team_recent_form was real, wired
+    only into Game Watch), or didn't exist at all yet (WNBA/NBA/NCAAMB had the OPPONENT's
+    defensive trend but nothing for the player's OWN team's offense; NFL/NCAAF had neither).
+    This is the shared, final step every sport's own team-trend function now feeds into.
+
+    Returns (tag, ratio). ratio is None (not a fabricated 1.0) when either input is missing or
+    season is zero/None -- ratio can't be computed, so the tag is honestly "➡️ Steady" (the
+    neutral default) rather than a computed-looking number with nothing real behind it."""
+    if recent is None or season is None or season <= 0:
+        return "➡️ Steady", None
+    ratio = recent / season
+    if ratio >= 1.08:
+        return "📈 Hot", round(ratio, 2)
+    if ratio <= 0.92:
+        return "📉 Cold", round(ratio, 2)
+    return "➡️ Steady", round(ratio, 2)

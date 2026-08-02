@@ -319,6 +319,26 @@ def get_team_recent_allowed_stats(team_id: int, before_date: str,
     return {k: (sum(v) / len(v) if v else 0.0) for k, v in totals.items()}
 
 
+def get_team_recent_scored_stats(team_id: int, before_date: str,
+                                 n: int = CFG.RECENT_GAMES_N, days_back: int = 45) -> Dict[str, float]:
+    """Average PTS/REB/AST/FG3M this team has ITSELF SCORED over their last n completed games --
+    the mirror image of get_team_recent_allowed_stats just above (that one reads the opponent's
+    side of each boxscore; this one reads this team's own side of the exact same already-fetched
+    games). Zero new network calls -- get_game_team_totals' own cache is shared.
+
+    ADDED DIRECTLY ON REQUEST, closing a real, evidenced gap -- see wnba_engine.py's own
+    identical function for the full reasoning. Same "poss" pace field, same reason."""
+    games = get_team_recent_game_ids(team_id, before_date, n, days_back=days_back)
+    totals = {"pts": [], "reb": [], "ast": [], "fg3m": [], "poss": []}
+    for g in games:
+        game_totals = get_game_team_totals(g["gameId"])
+        own_totals = game_totals.get(int(team_id))
+        if own_totals:
+            for k in totals:
+                totals[k].append(own_totals.get(k, 0.0))
+    return {k: (sum(v) / len(v) if v else 0.0) for k, v in totals.items()}
+
+
 def get_team_rest_info(team_id: int, before_date: str, days_back: int = 10) -> Dict[str, Any]:
     """Rest context for a team heading into `before_date`: days since their last completed game,
     and whether tonight is a back-to-back. Same small wrapper pattern as

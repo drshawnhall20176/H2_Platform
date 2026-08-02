@@ -690,6 +690,26 @@ def test_every_cross_page_link_targets_a_page_visible_under_the_same_conditions(
          "reference in its own source file")
 
 
+# ----------------------------------------------------------------- team_trend_tag
+def test_team_trend_tag_hot_cold_steady():
+    import sports as S
+    assert S.team_trend_tag(120, 100) == ("📈 Hot", 1.2)
+    assert S.team_trend_tag(80, 100) == ("📉 Cold", 0.8)
+    assert S.team_trend_tag(100, 100) == ("➡️ Steady", 1.0)
+    assert S.team_trend_tag(105, 100) == ("➡️ Steady", 1.05)   # inside the neutral band
+    print("✓ team_trend_tag correctly buckets hot/cold/steady using the same 1.08/0.92 "
+         "thresholds Defense Trend already established")
+
+
+def test_team_trend_tag_honest_when_uncomputable():
+    import sports as S
+    assert S.team_trend_tag(None, 100) == ("➡️ Steady", None)
+    assert S.team_trend_tag(100, None) == ("➡️ Steady", None)
+    assert S.team_trend_tag(100, 0) == ("➡️ Steady", None)
+    print("✓ team_trend_tag returns an honest None ratio (not a fabricated number) when either "
+         "input is missing or season is zero")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

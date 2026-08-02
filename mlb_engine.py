@@ -528,6 +528,7 @@ def build_slate(date_str: str, fip_constant: float = FIP_CONSTANT_DEFAULT,
             sides.append({
                 "team_key": team_key,
                 "team_name": game[f"{team_key}_name"],
+                "team_id": game.get(f"{team_key}_id"),
                 "opp_pm": opp_pm,
                 "opp_team_id": game.get(f"{opp_key}_id"),
                 "pids": pids,
@@ -577,7 +578,7 @@ def build_slate(date_str: str, fip_constant: float = FIP_CONSTANT_DEFAULT,
                     continue
                 row = _hitter_row(raw, opp, side["team_name"], s["label"],
                                   side["projected"], idx, s["game"].get("venue_id"),
-                                  side.get("opp_team_id"))
+                                  side.get("opp_team_id"), side.get("team_id"))
                 # Home/away and day/night context -- added directly on request so the "Why"
                 # column and pitcher diagnostics can surface the same splits Deezy was doing
                 # manually in Discord (e.g. "Shane Drohan doesn't do as well in home day games")
@@ -755,7 +756,7 @@ def get_lineup_status(game_pk: int, home_id: int, away_id: int) -> Tuple[bool, b
 
 def _hitter_row(raw: Dict, opp: PitcherMetrics, team_name: str,
                 game_label: str, projected: bool, lineup_idx: int = 0,
-                venue_id: int = None, opp_team_id: int = None) -> Dict:
+                venue_id: int = None, opp_team_id: int = None, team_id: int = None) -> Dict:
     stat = raw["stat"]
     avg = safe_float(stat.get("avg"))
     slg = safe_float(stat.get("slg"))
@@ -791,6 +792,9 @@ def _hitter_row(raw: Dict, opp: PitcherMetrics, team_name: str,
         "_stat": stat,
         "_exp_pa": exp_pa,
         "_venue_id": venue_id,
+        "_team_id": team_id,   # needed by best_bets_data.attach_team_trend -- real gap this row
+                               # never carried before (Team display name existed, no id to look
+                               # up a team's real recent-form data with).
         "_opp_stat": opp.stat,                       # opposing pitcher's season line (matchup)
         "_opp_bb9": opp.bb9,                          # opposing pitcher's BB/9 -- high (≥3.5)
                                                        # means elevated walk risk for hitter props:

@@ -524,6 +524,91 @@ def test_build_mlb_board_uses_the_shared_fetch_mlb_real_lines_not_a_duplicate():
          "longer maintaining its own separate, potentially-drifting copy of the fetch logic")
 
 
+# ----------------------------------------------------------------- attach_team_trend
+def test_attach_team_trend_mlb_computes_once_per_team_not_once_per_play():
+    calls = []
+
+    def fake_form(team_id, before_date, games_back=15, **kw):
+        calls.append((team_id, games_back))
+        if team_id == 147:
+            return {"runs_scored": 6.0 if games_back == 15 else 4.0}
+        return {"runs_scored": 3.0 if games_back == 15 else 5.0}
+
+    with patch.object(E, "get_team_recent_form", fake_form):
+        rows = [{"Team": "New York Yankees", "_team_id": 147},
+               {"Team": "New York Yankees", "_team_id": 147},
+               {"Team": "Boston Red Sox", "_team_id": 111}]
+        plays = [{"Team": "New York Yankees", "Player": "A"},
+                {"Team": "New York Yankees", "Player": "B"},
+                {"Team": "Boston Red Sox", "Player": "C"}]
+        BBD.attach_team_trend("MLB", plays, rows, "2026-08-02")
+
+    assert plays[0]["TeamTrend"] == "📈 Hot" and plays[1]["TeamTrend"] == "📈 Hot"
+    assert plays[2]["TeamTrend"] == "📉 Cold"
+    # 2 unique teams x 2 calls each (recent + season) = 4 -- NOT 3 plays x 2 = 6, confirming the
+    # per-team cache actually works, not just "happens to look right" for this small example.
+    assert len(calls) == 4, f"expected exactly 4 engine calls (cached per team), got {len(calls)}"
+    print("✓ attach_team_trend computes each team's trend exactly once, reused across every "
+         "play for that team, not refetched per play")
+
+
+def test_attach_team_trend_fails_soft_on_fetch_error():
+    def boom(team_id, before_date, games_back=15, **kw):
+        raise ConnectionError("simulated failure")
+
+    with patch.object(E, "get_team_recent_form", boom):
+        rows = [{"Team": "New York Yankees", "_team_id": 147}]
+        plays = [{"Team": "New York Yankees", "Player": "A"}]
+        BBD.attach_team_trend("MLB", plays, rows, "2026-08-02")   # must not raise
+
+    assert plays[0]["TeamTrend"] == "➡️ Steady"
+    assert plays[0]["TeamTrendRatio"] is None
+    print("✓ attach_team_trend fails soft (honest Steady/None) on a real fetch error, never "
+         "crashes the whole board over one team's bad fetch")
+
+
+def test_attach_team_trend_missing_team_id_falls_back_honest():
+    # A play whose Team has no matching _team_id anywhere in rows -- must not crash, must not
+    # fabricate a trend.
+    rows = [{"Team": "Some Other Team", "_team_id": 999}]
+    plays = [{"Team": "New York Yankees", "Player": "A"}]
+    BBD.attach_team_trend("MLB", plays, rows, "2026-08-02")
+    assert plays[0]["TeamTrend"] == "➡️ Steady"
+    assert plays[0]["TeamTrendRatio"] is None
+    print("✓ attach_team_trend handles a play with no matching team_id gracefully, no crash")
+
+
+def test_attach_team_trend_nfl_uses_schedule_not_team_id():
+    import nfl_engine as NE
+    fake_schedule = [
+        {"week": 1, "home_team": "KC", "away_team": "BUF", "home_score": 30, "away_score": 20},
+        {"week": 2, "home_team": "DEN", "away_team": "KC", "home_score": 10, "away_score": 17},
+    ]
+    with patch.object(NE, "_infer_season", lambda date_str: 2026), \
+         patch.object(NE, "get_schedule", lambda season: fake_schedule), \
+         patch.object(NE, "_resolve_week", lambda schedule, date_str: 3):
+        rows = [{"Team": "KC", "_team_id": "KC"}]
+        plays = [{"Team": "KC", "Player": "Mahomes"}]
+        BBD.attach_team_trend("NFL", plays, rows, "2026-09-22")
+    # KC scored 30 then 17 -- both games count as "recent" (n=4, only 2 games exist), so
+    # recent_avg == season_avg == 23.5 -> Steady, confirming the real NFL codepath actually ran
+    # (not silently skipped) rather than asserting a specific Hot/Cold outcome.
+    assert plays[0]["TeamTrend"] == "➡️ Steady"
+    assert plays[0]["TeamTrendRatio"] == 1.0
+    print("✓ attach_team_trend correctly dispatches to NFL's schedule-based calling convention "
+         "(not the team_id lookup the other sports use)")
+
+
+def test_attach_team_trend_unsupported_sport_leaves_honest_default():
+    rows = [{"Team": "Some Team", "_team_id": 1}]
+    plays = [{"Team": "Some Team", "Player": "A"}]
+    BBD.attach_team_trend("UFC", plays, rows, "2026-08-02")
+    assert plays[0]["TeamTrend"] == "➡️ Steady"
+    assert plays[0]["TeamTrendRatio"] is None
+    print("✓ attach_team_trend leaves the honest default for a sport with no team-trend source "
+         "(UFC), never crashes on an unrecognized sport_key")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

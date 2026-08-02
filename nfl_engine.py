@@ -178,6 +178,37 @@ def games_for_week(schedule: List[Dict], week: int) -> List[Dict]:
     return [g for g in schedule if g["week"] == week]
 
 
+def get_team_recent_scoring(team_abbr: str, schedule: List[Dict], before_week: int,
+                            n: int = 4) -> Optional[Dict[str, float]]:
+    """This team's own points scored, recent (last n completed games before before_week) vs.
+    season-to-date -- built entirely from the already-fetched full-season schedule (get_schedule),
+    zero new network calls. n=4 (roughly a quarter-season) is NFL's own natural "recent stretch"
+    unit for a 17-18 game season -- not the basketball/MLB "last 15 games" convention borrowed
+    wholesale from a sport with 10x as many games, which wouldn't mean the same thing here.
+
+    ADDED DIRECTLY ON REQUEST, closing a real, evidenced gap: NFL had no team-level scoring trend
+    signal of any kind before this -- see sports.team_trend_tag's own docstring for the full
+    reasoning behind this whole cross-sport effort, prioritized specifically because NFL's own
+    season is close.
+
+    Returns None if this team has no completed (real-score) games before before_week at all -- an
+    honest "no data yet" (start of season/first few weeks), not a fabricated average. Otherwise
+    {"recent_avg": float, "season_avg": float, "recent_games": int, "season_games": int}."""
+    played = [g for g in schedule if g["week"] < before_week
+             and (g.get("home_team") == team_abbr or g.get("away_team") == team_abbr)]
+    scored = []
+    for g in sorted(played, key=lambda g: g["week"]):
+        is_home = g.get("home_team") == team_abbr
+        pts = g.get("home_score") if is_home else g.get("away_score")
+        if pts is not None:
+            scored.append(float(pts))
+    if not scored:
+        return None
+    recent = scored[-n:]
+    return {"recent_avg": sum(recent) / len(recent), "season_avg": sum(scored) / len(scored),
+           "recent_games": len(recent), "season_games": len(scored)}
+
+
 # --------------------------------------------------------------------------- rosters
 def get_team_roster(team_abbr: str, season: int) -> List[Dict[str, Any]]:
     """A team's roster for a season: [{id, name, position}, ...]. id is the GSIS id (e.g.

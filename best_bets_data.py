@@ -27,7 +27,7 @@ consolidating into a shared module would have quietly introduced it if not for t
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import streamlit as st
 
@@ -35,6 +35,91 @@ import mlb_engine as E
 import projections as P
 import odds_api as O
 import sports
+
+
+def attach_team_trend(sport_key: str, plays: List[Dict], rows: List[Dict], date_str: str) -> None:
+    """Attaches "TeamTrend" (a tag: 📈 Hot / 📉 Cold / ➡️ Steady) and "TeamTrendRatio" (the real
+    number behind it, or None) to every play IN PLACE -- the core "reach" fix, added directly on
+    request after a real, evidenced gap: real traders in this project's own community
+    independently described watching an entire team's lineup produce while their own specific
+    pick didn't ("everybody around 'em in the lineup gets a homerun or a hit"), and the
+    underlying signal either existed but never reached the actual pick page (MLB's own
+    get_team_recent_form was real, wired only into Game Watch) or didn't exist anywhere yet
+    (WNBA/NBA/NCAAMB had the OPPONENT's defensive trend but nothing for the player's OWN team's
+    offense; NFL/NCAAF had neither). See sports.team_trend_tag's own docstring for the shared
+    tag/threshold logic every sport below feeds into -- same bar everywhere on this platform.
+
+    COMPUTED ONCE PER UNIQUE TEAM ON THE BOARD, not once per play -- a team with 8 hitters/
+    receivers on the slate only needs its own recent-form fetch once, reused for all 8 plays.
+    team_id (MLB/WNBA/NBA/NCAAMB) is read from `rows` (the pre-build_best_bets rows, which carry
+    "_team_id" -- plays themselves only carry the display "Team" name, not an id to look up with).
+
+    FAILS SOFT, ALWAYS: any fetch problem for a specific team leaves that team's plays at the
+    same honest "➡️ Steady"/None default team_trend_tag itself returns for missing data -- one
+    team's fetch failing (or a sport with no team_trend source at all) must never break the
+    board, and never fabricates a trend that isn't real."""
+    team_ids = {r["Team"]: r.get("_team_id") for r in rows
+               if isinstance(r, dict) and r.get("Team") and r.get("_team_id")}
+    cache: Dict[str, Tuple[str, Optional[float]]] = {}
+
+    # NFL/NCAAF need a resolved (schedule, week) pair, fetched once for the whole board (not
+    # once per team) -- both engines' own get_schedule already caches the full season, so this
+    # costs at most one call, reused by every team lookup below via the closures.
+    nfl_schedule = nfl_week = ncaaf_schedule = ncaaf_week = None
+    if sport_key == "NFL":
+        import nfl_engine as NE
+        season = NE._infer_season(date_str)
+        if season is not None:
+            nfl_schedule = NE.get_schedule(season)
+            nfl_week = NE._resolve_week(nfl_schedule, date_str)
+    elif sport_key == "NCAAF":
+        import ncaaf_engine as CE
+        season = CE._infer_season(date_str)
+        if season is not None:
+            ncaaf_schedule = CE.get_schedule(season)
+            ncaaf_week = CE._resolve_week(ncaaf_schedule, date_str)
+
+    def _trend_for(team_name: str) -> Tuple[str, Optional[float]]:
+        if team_name in cache:
+            return cache[team_name]
+        tag, ratio = "➡️ Steady", None
+        try:
+            if sport_key == "MLB":
+                team_id = team_ids.get(team_name)
+                if team_id:
+                    recent = E.get_team_recent_form(team_id, date_str, games_back=15)
+                    season_form = E.get_team_recent_form(team_id, date_str, games_back=100)
+                    if recent and season_form:
+                        tag, ratio = sports.team_trend_tag(recent.get("runs_scored"),
+                                                            season_form.get("runs_scored"))
+            elif sport_key in ("WNBA", "NBA", "NCAAMB"):
+                team_id = team_ids.get(team_name)
+                if team_id:
+                    eng = sports.get(sport_key).engine
+                    recent = eng.get_team_recent_scored_stats(team_id, date_str)
+                    season_stats = eng.get_team_recent_scored_stats(team_id, date_str,
+                                                                     n=40, days_back=200)
+                    if recent and season_stats:
+                        tag, ratio = sports.team_trend_tag(recent.get("pts"), season_stats.get("pts"))
+            elif sport_key == "NFL" and nfl_schedule and nfl_week is not None:
+                import nfl_engine as NE
+                form = NE.get_team_recent_scoring(team_name, nfl_schedule, nfl_week)
+                if form:
+                    tag, ratio = sports.team_trend_tag(form["recent_avg"], form["season_avg"])
+            elif sport_key == "NCAAF" and ncaaf_schedule and ncaaf_week is not None:
+                import ncaaf_engine as CE
+                form = CE.get_team_recent_scoring(team_name, ncaaf_schedule, ncaaf_week)
+                if form:
+                    tag, ratio = sports.team_trend_tag(form["recent_avg"], form["season_avg"])
+        except Exception:
+            pass   # one team's fetch failing must never break the whole board -- honest default stands
+        cache[team_name] = (tag, ratio)
+        return cache[team_name]
+
+    for p in plays:
+        tag, ratio = _trend_for(p.get("Team", ""))
+        p["TeamTrend"] = tag
+        p["TeamTrendRatio"] = ratio
 
 
 def get_odds_api_key() -> Optional[str]:
@@ -431,9 +516,10 @@ def load_mlb_best_bets_board(date_str: str, fip_constant: float,
                              time_split: Optional[str] = None):
     """Build the full MLB best-bets board with optional split filtering.
     Returns (plays, meta, available_books)."""
-    _, meta, plays, available_books = build_mlb_board(
+    rows, meta, plays, available_books = build_mlb_board(
         date_str, fip_constant, get_odds_api_key(), preferred_book,
         venue_split, time_split)
+    attach_team_trend("MLB", plays, rows, date_str)
     return plays, meta, available_books
 
 
@@ -446,6 +532,7 @@ def load_mlb_graded_picks_board(date_str: str, fip_constant: float,
     rows, meta, plays, available_books = build_mlb_board(
         date_str, fip_constant, get_odds_api_key(), preferred_book,
         venue_split, time_split)
+    attach_team_trend("MLB", plays, rows, date_str)
     return plays, meta, rows, available_books
 
 
@@ -564,4 +651,5 @@ def load_generic_best_bets_board(sport_key: str, date_str: str) -> tuple:
 
     plays = sport.projections.build_best_bets(rows, real_lines=real_lines, offers=real_offers,
                                               preferred_book=preferred_book if api_key and sport.markets else O.DEFAULT_BOOK)
+    attach_team_trend(sport_key, plays, rows, date_str)
     return plays, meta, available_books

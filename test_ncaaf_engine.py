@@ -348,6 +348,34 @@ def test_get_player_season_games_uses_player_recent_games_with_resolved_week():
     print("✓ get_player_season_games resolves the right week and excludes that week's own game")
 
 
+# ----------------------------------------------------------------- get_team_recent_scoring
+def test_get_team_recent_scoring_uses_ncaaf_own_field_names():
+    # REAL, CONFIRMED DISTINCTION from NFL's identical-looking function: NCAAF's cached schedule
+    # uses home_points/away_points and a real "completed" boolean -- NOT NFL's home_score/
+    # away_score. This test fails loudly if that distinction ever gets silently blurred.
+    schedule = [
+        {"week": 1, "home_team": "Georgia", "away_team": "Alabama",
+         "home_points": 27, "away_points": 24, "completed": True},
+        {"week": 2, "home_team": "Tennessee", "away_team": "Georgia",
+         "home_points": 10, "away_points": 31, "completed": True},
+        {"week": 3, "home_team": "Georgia", "away_team": "Auburn",
+         "home_points": None, "away_points": None, "completed": False},
+    ]
+    form = E.get_team_recent_scoring("Georgia", schedule, before_week=3)
+    assert form["season_games"] == 2   # week 3 not completed yet -- excluded
+    assert form["season_avg"] == 29.0   # (27 + 31) / 2
+    print("✓ get_team_recent_scoring reads NCAAF's own real field names, excludes incomplete games")
+
+
+def test_get_team_recent_scoring_none_when_no_games_played_yet():
+    schedule = [{"week": 3, "home_team": "Georgia", "away_team": "Alabama",
+                "home_points": 27, "away_points": 24, "completed": True}]
+    form = E.get_team_recent_scoring("Georgia", schedule, before_week=1)
+    assert form is None
+    print("✓ get_team_recent_scoring returns honest None when this team has no completed games "
+         "before the given week yet")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

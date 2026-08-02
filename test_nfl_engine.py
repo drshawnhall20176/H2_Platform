@@ -583,6 +583,54 @@ def test_get_idp_candidates_empty_weekly_returns_empty():
     print("✓ get_idp_candidates returns an honest empty list for an empty weekly table")
 
 
+# ----------------------------------------------------------------- get_team_recent_scoring
+def test_get_team_recent_scoring_recent_vs_season():
+    schedule = [
+        {"week": 1, "home_team": "KC", "away_team": "BUF", "home_score": 30, "away_score": 20},
+        {"week": 2, "home_team": "DEN", "away_team": "KC", "home_score": 10, "away_score": 17},
+        {"week": 3, "home_team": "KC", "away_team": "LV", "home_score": 24, "away_score": 21},
+        {"week": 4, "home_team": "KC", "away_team": "SEA", "home_score": 31, "away_score": 14},
+    ]
+    # before_week=5, n=2 -> recent = last 2 of [30, 17, 24, 31] = [24, 31] -> avg 27.5
+    # season = all 4 -> avg (30+17+24+31)/4 = 25.5
+    form = E.get_team_recent_scoring("KC", schedule, before_week=5, n=2)
+    assert form["recent_avg"] == 27.5
+    assert form["season_avg"] == 25.5
+    assert form["recent_games"] == 2
+    assert form["season_games"] == 4
+    print("✓ get_team_recent_scoring correctly separates recent (last n) from season-to-date average")
+
+
+def test_get_team_recent_scoring_only_counts_games_before_the_given_week():
+    schedule = [
+        {"week": 1, "home_team": "KC", "away_team": "BUF", "home_score": 30, "away_score": 20},
+        {"week": 2, "home_team": "KC", "away_team": "DEN", "home_score": 40, "away_score": 10},
+    ]
+    # before_week=2 -> only week 1 counts, week 2 hasn't happened "yet" from this vantage point
+    form = E.get_team_recent_scoring("KC", schedule, before_week=2)
+    assert form["season_games"] == 1
+    assert form["season_avg"] == 30.0
+    print("✓ get_team_recent_scoring only counts games strictly before before_week, not the whole season")
+
+
+def test_get_team_recent_scoring_none_when_no_games_played_yet():
+    schedule = [{"week": 3, "home_team": "KC", "away_team": "BUF", "home_score": 30, "away_score": 20}]
+    form = E.get_team_recent_scoring("KC", schedule, before_week=1)
+    assert form is None
+    print("✓ get_team_recent_scoring returns honest None (not a fabricated average) when this "
+         "team has no completed games before the given week yet")
+
+
+def test_get_team_recent_scoring_ignores_unplayed_games():
+    schedule = [
+        {"week": 1, "home_team": "KC", "away_team": "BUF", "home_score": 30, "away_score": 20},
+        {"week": 2, "home_team": "KC", "away_team": "DEN", "home_score": None, "away_score": None},
+    ]
+    form = E.get_team_recent_scoring("KC", schedule, before_week=3)
+    assert form["season_games"] == 1   # the None-score game (not yet played) is excluded
+    print("✓ get_team_recent_scoring excludes games with no real score yet, doesn't fabricate 0")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

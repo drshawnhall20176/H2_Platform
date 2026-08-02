@@ -95,6 +95,34 @@ def games_for_week(schedule: List[Dict], week: int) -> List[Dict]:
     return [g for g in schedule if g.get("week") == week]
 
 
+def get_team_recent_scoring(team_name: str, schedule: List[Dict], before_week: int,
+                            n: int = 4) -> Optional[Dict[str, float]]:
+    """This team's own points scored, recent (last n completed games before before_week) vs.
+    season-to-date -- built entirely from the already-fetched full-season schedule (get_schedule),
+    zero new network calls. Same reasoning as nfl_engine.py's own identical function -- see
+    sports.team_trend_tag's own docstring for the full cross-sport reasoning.
+
+    Uses NCAAF's own real field names (home_points/away_points, completed) -- NOT NFL's
+    (home_score/away_score) -- these are two genuinely different cached schedules, not a shared
+    schema, confirmed against ncaaf_data.py's own _SCHEDULE_COLUMNS.
+
+    Returns None if this team has no completed games before before_week at all -- an honest
+    "no data yet", not a fabricated average."""
+    played = [g for g in schedule if g.get("completed") and g.get("week", 999) < before_week
+             and (g.get("home_team") == team_name or g.get("away_team") == team_name)]
+    scored = []
+    for g in sorted(played, key=lambda g: g["week"]):
+        is_home = g.get("home_team") == team_name
+        pts = g.get("home_points") if is_home else g.get("away_points")
+        if pts is not None:
+            scored.append(float(pts))
+    if not scored:
+        return None
+    recent = scored[-n:]
+    return {"recent_avg": sum(recent) / len(recent), "season_avg": sum(scored) / len(scored),
+           "recent_games": len(recent), "season_games": len(scored)}
+
+
 def _team_games_played_before(schedule: List[Dict], team: str, week: int) -> int:
     """How many of `team`'s games have already been COMPLETED strictly before `week` this
     season -- the per-game-rate denominator this engine uses in place of a true individual

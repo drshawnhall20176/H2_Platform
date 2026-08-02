@@ -224,11 +224,13 @@ with left:
                         p["_baseline"] = f"{marker}{baseline:.0%}"
                     else:
                         p["_baseline"] = "—"
-                tdf = pd.DataFrame(subset)[["Grade", "ModelProb", "Player", "Market", "Side",
-                                            "_display_line", "Conviction", "_baseline", "Why"]]
+                tdf = pd.DataFrame(subset)[["Grade", "ModelProb", "Player", "Team", "TeamTrend",
+                                            "Market", "Side", "_display_line", "Conviction",
+                                            "_baseline", "Why"]]
                 st.dataframe(
                     tdf.rename(columns={"ModelProb": "Model %", "Why": "Reasoning",
-                                        "_display_line": "Line", "_baseline": "Baseline"})
+                                        "_display_line": "Line", "_baseline": "Baseline",
+                                        "TeamTrend": "Team Trend"})
                     .style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×"})
                     .theme_gradient(cmap="Greens", subset=["Model %"]),
                     column_config={"Reasoning": st.column_config.TextColumn(width="large")},

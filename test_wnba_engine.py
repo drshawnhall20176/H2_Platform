@@ -600,6 +600,40 @@ def test_get_team_recent_allowed_stats_empty_when_no_recent_games(monkeypatch):
     assert allowed == {"pts": 0.0, "reb": 0.0, "ast": 0.0, "fg3m": 0.0, "poss": 0.0}
 
 
+def test_get_team_recent_scored_stats_averages_own_totals(monkeypatch):
+    E._response_cache.clear()
+    monkeypatch.setattr(E, "get_team_recent_game_ids",
+                        lambda team_id, before_date, n=E.CFG.RECENT_GAMES_N, days_back=45: [
+                            {"gameId": "g1", "date": "2026-07-12T00:00Z", "opp_id": 19, "opp_name": "Chicago Sky"},
+                            {"gameId": "g2", "date": "2026-07-10T00:00Z", "opp_id": 16, "opp_name": "Washington Mystics"},
+                        ])
+    game_totals = {
+        "g1": {20: {"pts": 90.0, "reb": 35.0, "ast": 20.0, "fg3m": 8.0, "poss": 96.0},
+              19: {"pts": 78.0, "reb": 30.0, "ast": 16.0, "fg3m": 6.0, "poss": 94.0}},
+        "g2": {20: {"pts": 85.0, "reb": 33.0, "ast": 19.0, "fg3m": 9.0, "poss": 90.0},
+              16: {"pts": 82.0, "reb": 32.0, "ast": 18.0, "fg3m": 8.0, "poss": 92.0}},
+    }
+    monkeypatch.setattr(E, "get_game_team_totals", lambda gid: game_totals.get(gid, {}))
+
+    scored = E.get_team_recent_scored_stats(20, "2026-07-14", n=10)
+    # REAL, CONFIRMED FIX -- the mirror image of get_team_recent_allowed_stats just above: team
+    # 20's OWN points were 90 and 85 -> scored avg pts = 87.5, NOT the opponents' 78/82 that the
+    # allowed-stats test above correctly returns. This is the exact distinction the whole
+    # TeamTrend feature depends on -- confusing these two would silently invert every trend.
+    assert scored["pts"] == 87.5
+    assert scored["reb"] == 34.0
+    assert scored["poss"] == 93.0
+    print("✓ get_team_recent_scored_stats correctly averages THIS team's own totals, not the opponents'")
+
+
+def test_get_team_recent_scored_stats_empty_when_no_recent_games(monkeypatch):
+    E._response_cache.clear()
+    monkeypatch.setattr(E, "get_team_recent_game_ids",
+                        lambda team_id, before_date, n=10, days_back=45: [])
+    scored = E.get_team_recent_scored_stats(20, "2026-07-14")
+    assert scored == {"pts": 0.0, "reb": 0.0, "ast": 0.0, "fg3m": 0.0, "poss": 0.0}
+
+
 # ----------------------------------------------------------------- get_team_rest_info
 def test_get_team_rest_info_flags_back_to_back(monkeypatch):
     monkeypatch.setattr(E, "get_team_recent_game_ids",

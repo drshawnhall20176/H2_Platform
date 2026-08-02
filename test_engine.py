@@ -160,6 +160,21 @@ def test_hitter_row_assembly():
     assert row["_opp_id"] == 116               # the opposing TEAM's id, not the pitcher's own player id
 
 
+def test_hitter_row_carries_team_id():
+    # REAL, CONFIRMED FIX: hitter rows used to have "Team" (a display name) but no numeric
+    # team_id at all -- found while wiring best_bets_data.attach_team_trend, which needs a real
+    # id to call get_team_recent_form with. opp_team_id (the OPPONENT's id) already existed;
+    # this is the row's OWN team's id, a genuinely different, previously-missing field.
+    opp = E.PitcherMetrics(id=1, name="Ace", hand="R")
+    raw = {"id": 99, "name": "José Ramírez", "bat_hand": "S",
+          "stat": dict(homeRuns=30, hits=160, totalBases=300, avg="0.280", obp="0.360",
+                       slg="0.520", ops="0.880", strikeOuts=90, plateAppearances=650)}
+    row = E._hitter_row(raw, opp, "Guardians", "CLE @ DET (Game 1)", projected=False,
+                        opp_team_id=116, team_id=114)
+    assert row["_team_id"] == 114
+    print("✓ _hitter_row now carries this player's own team_id, not just the opponent's")
+
+
 def test_hitter_row_missing_pa_no_crash():
     # plateAppearances missing -> K% denominator guarded to 1, must not divide by zero
     opp = E.PitcherMetrics(id=1, name="Ace", hand="L")

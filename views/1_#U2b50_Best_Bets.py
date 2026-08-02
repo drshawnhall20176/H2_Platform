@@ -261,13 +261,20 @@ for p in view:
         p["_display_price"] = f"📊 {p['RealPrice']:+.0f}"
     else:
         p["_display_price"] = f"{p['Fair']:+.0f}" if p.get("Fair") is not None else "—"
-df = pd.DataFrame(view)[["ModelProb", "Conviction", "Time", "Slot", "Player", "Team", "Market", "Side",
-                         "_display_line", "_display_price", "Game", "Why"]]
+df = pd.DataFrame(view)[["ModelProb", "Conviction", "Time", "Slot", "Player", "Team", "TeamTrend",
+                         "Market", "Side", "_display_line", "_display_price", "Game", "Why"]]
 df = df.rename(columns={"ModelProb": "Model %", "_display_line": "Line",
-                        "_display_price": "Fair", "Why": "Why the model likes it"})
+                        "_display_price": "Fair", "Why": "Why the model likes it",
+                        "TeamTrend": "Team Trend"})
 st.dataframe(df.style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×"}, na_rep="—")
              .theme_gradient(cmap="Greens", subset=["Model %"]),
              width="stretch", hide_index=True, height=400)
+st.caption("Team Trend: this player's own team, scoring recently vs. their season norm -- 📈 Hot "
+          "means the whole offense has been running above its own baseline lately, 📉 Cold below "
+          "it, ➡️ Steady in between or not enough data yet. A real, separate signal from this "
+          "specific player's own conviction above -- worth weighing together, not a tiebreaker "
+          "rule (a hot team with a cold individual matchup is still a real, different situation "
+          "than a hot team with a hot individual one).")
 
 # Quick-log widget, added directly on request: during a real, narrow pick-making window, having
 # to separately re-enter a pick into Bet Log is real friction that gets skipped in favor of just
