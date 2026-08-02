@@ -161,10 +161,21 @@ def load(date_str: str, fip_constant: float, venue_split=None, time_split=None):
                 (m["away_pm"], m["away_name"], m["home_name"], m.get("away_id"), False)):
             if pm.id is None or pm.era == 0:
                 continue
+            # Last-start regression signal -- added directly on request, closing a real,
+            # evidenced gap: reuses pm.era (already computed for the FIP table right below) as
+            # season_era so this doesn't redundantly re-aggregate the same real number a second
+            # way. See mlb_engine.last_start_regression_signal's own docstring for the full
+            # reasoning -- None (not a fabricated trend) when his last start was too short a
+            # sample to read, or he has no real starts logged yet.
+            last_start = E.last_start_regression_signal(pm.id, int(date_str[:4]), date_str,
+                                                         season_era=pm.era)
             fip_rows.append({
                 "Pitcher": pm.name, "Team": team, "Opponent": opp, "Hand": pm.hand,
                 "ERA": round(pm.era, 2), "FIP": pm.fip, "Delta": round(pm.era - pm.fip, 2),
                 "K/9": round(pm.k9, 1), "WHIP": round(pm.whip, 2), "HR/9": round(pm.hr9, 2), "OBA": pm.oba,
+                "Last Start": last_start["tag"] if last_start else "— (no recent start on file)",
+                "Last ERA": last_start["last_era"] if last_start else None,
+                "Last IP": last_start["last_ip"] if last_start else None,
                 "_game_date": gd, "_team_id": team_id,
                 "_is_home": is_home, "_is_day_game": is_day,
             })
@@ -286,6 +297,24 @@ styled = (
     .theme_gradient(cmap="RdYlGn_r", subset=["ERA", "FIP", "WHIP", "HR/9"])
 )
 st.dataframe(styled, width="stretch", hide_index=True)
+
+# === Last-start regression signal ==========================================
+st.divider()
+C.section_header("🔁", "Last start trend")
+st.caption("A genuinely different, SHORTER-horizon read than the ERA vs FIP table above -- that "
+          "one compares a pitcher's whole SEASON to his own peripherals (a season-long luck-vs-"
+          "skill question). This compares his single MOST RECENT start to his own season ERA: "
+          "was his last outing unusually good or bad relative to his real level, and might the "
+          "next one regress back toward it. Closing a real, evidenced gap -- this exact pattern "
+          "was being tracked by hand, with screenshots, before this existed. ERA from one start "
+          "is a small sample on purpose treated as directional, not a probability -- a last "
+          "start under 3 IP is left off entirely rather than shown with a noisy, misleading "
+          "number (see the — rows below).")
+trend_cols = ["Time", "Pitcher", "Team", "Opponent", "Hand", "Last Start", "Last ERA", "Last IP", "ERA"]
+trend_df = df.sort_values("Delta", ascending=False)[[c for c in trend_cols if c in df.columns]]
+st.dataframe(
+    trend_df.style.format({"Last ERA": "{:.2f}", "Last IP": "{:.1f}", "ERA": "{:.2f}"}, na_rep="—"),
+    width="stretch", hide_index=True)
 
 # === Bullpen fatigue =========================================================
 st.divider()
