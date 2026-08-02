@@ -1978,6 +1978,69 @@ def simulate_hits_runs_rbi(sim_hits: np.ndarray, exp_hits: float, exp_runs: floa
     return {"hits": sim_hits, "runs": runs, "rbi": rbi, "hrr": hrr}
 
 
+def project_team_first_innings_total(team_recent: Optional[Dict], pitcher_allowed: Optional[Dict],
+                                     sims: int = DEFAULT_SIMS,
+                                     seed: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    """Projects a real probability distribution for "Team Total Runs - First N Innings" --
+    ADDED DIRECTLY ON REQUEST, closing a real, evidenced gap (a real cashed 5-leg parlay, every
+    leg this exact market, and confirmed real research that this market category is actively
+    traded across MLB/NBA/NFL alike, not a baseball-only niche). This platform's entire market
+    list was player props only before this -- the first team-level market built here.
+
+    COMBINES TWO REAL, DIFFERENT SIGNALS: the batting team's own recent runs-scored rate in
+    innings 1-N (mlb_engine.get_team_recent_first_innings_runs' own "runs_scored") and the
+    OPPOSING STARTER's own recent runs-allowed rate in innings 1-N (mlb_engine.get_pitcher_
+    recent_first_innings_allowed's own "runs_allowed") -- pitcher-specific, not a team-blended
+    average, since this market is fundamentally about how THIS starter has pitched early, not
+    his team's whole rotation.
+
+    METHOD, STATED PLAINLY: projected_runs is a SIMPLE AVERAGE of the two rates, not a log5/
+    multiplicative blend against a league baseline -- a real, deliberate choice. A multiplicative
+    combination needs a real, current league-average first-N-innings runs figure to normalize
+    against; this platform doesn't have a live, verified number for that yet (deriving one
+    accurately would mean aggregating recent form across all 30 teams, a real cost not yet
+    justified for a v1). A plain average of two already-real, already-fetched rates is simpler,
+    fully transparent, and avoids introducing a THIRD unverified number just to make the model
+    look more sophisticated than the data underneath it actually supports. Worth revisiting once
+    real graded results exist in Track Record to check whether this simple blend is actually
+    well-calibrated, or whether it needs the more complex version -- the same "state the real
+    assumption, check it against real results later" posture last_start_regression_signal's own
+    ±2.00 ERA threshold already takes.
+
+    Runs are simulated via a Poisson draw at projected_runs -- the SAME rng.poisson(...)
+    convention already used throughout this file for other count-based outcomes (see
+    simulate_hits_runs_rbi), not a new, separately-invented distribution.
+
+    Returns None if either input is missing or has no usable rate -- an honest "can't project
+    this game yet" (not enough real recent data for one side), never a fabricated probability.
+    Otherwise {"projected_runs": float, "team_rate": float, "pitcher_allowed_rate": float,
+    "sim": np.ndarray} -- sim is the raw per-trial array, so a caller can compute P(over/under)
+    for ANY line without re-simulating (see prob_over_first_innings_line below)."""
+    if not team_recent or not pitcher_allowed:
+        return None
+    team_rate = team_recent.get("runs_scored")
+    pitcher_rate = pitcher_allowed.get("runs_allowed")
+    if team_rate is None or pitcher_rate is None:
+        return None
+
+    projected = max((team_rate + pitcher_rate) / 2.0, 0.05)   # floor avoids a literal 0.0 mean,
+                                                               # which would make Poisson degenerate
+    rng = np.random.default_rng(seed)
+    sim = rng.poisson(projected, size=sims)
+    return {"projected_runs": round(projected, 2), "team_rate": round(team_rate, 2),
+           "pitcher_allowed_rate": round(pitcher_rate, 2), "sim": sim}
+
+
+def prob_over_first_innings_line(sim: np.ndarray, line: float) -> Dict[str, float]:
+    """P(over) and P(under) a given line, from project_team_first_innings_total's own per-trial
+    sim array -- kept as a separate, cheap function (not baked into the projection itself) so a
+    caller can check MULTIPLE real lines (e.g., the actual posted 1.5 vs. a what-if 2.5) against
+    the exact same simulation without re-running it, the same "simulate once, price many lines"
+    posture Best Bets' own pricing already uses elsewhere."""
+    over = float((sim > line).mean())
+    return {"prob_over": round(over, 4), "prob_under": round(1.0 - over, 4)}
+
+
 def add_starter_exposure_context(rows: List[Dict]) -> List[Dict]:
     """Attach "vs SP" / "vs Pen" plate-appearance breakdown to each hitter row in place — the
     connective tissue tying times_through_order (a starter-side number) to the hitter side, and

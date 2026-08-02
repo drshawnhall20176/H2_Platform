@@ -3305,6 +3305,58 @@ def test_build_best_bets_conviction_source_backward_compatible_without_offers():
     print("✓ build_best_bets stays fully backward compatible for callers that don't pass offers")
 
 
+# ----------------------------------------------------------------- project_team_first_innings_total
+def test_project_team_first_innings_total_averages_the_two_real_rates():
+    team_recent = {"games": 15, "runs_scored": 1.2}
+    pitcher_allowed = {"games": 8, "runs_allowed": 1.0}
+    result = P.project_team_first_innings_total(team_recent, pitcher_allowed, sims=5000, seed=1)
+    assert result["team_rate"] == 1.2
+    assert result["pitcher_allowed_rate"] == 1.0
+    assert result["projected_runs"] == 1.1   # (1.2 + 1.0) / 2 -- a plain average, stated as such
+    assert len(result["sim"]) == 5000
+    print("✓ project_team_first_innings_total averages the team's own rate and the opposing "
+         "starter's own rate -- a stated, transparent method, not a hidden multiplier")
+
+
+def test_project_team_first_innings_total_none_when_either_input_missing():
+    team_recent = {"games": 15, "runs_scored": 1.2}
+    assert P.project_team_first_innings_total(None, {"runs_allowed": 1.0}) is None
+    assert P.project_team_first_innings_total(team_recent, None) is None
+    assert P.project_team_first_innings_total({"games": 1}, {"games": 1}) is None   # no rate keys
+    print("✓ project_team_first_innings_total returns honest None when either real input is "
+         "missing, never fabricates a projection from half the data")
+
+
+def test_project_team_first_innings_total_reproducible_with_seed():
+    team_recent = {"runs_scored": 1.4}
+    pitcher_allowed = {"runs_allowed": 1.1}
+    r1 = P.project_team_first_innings_total(team_recent, pitcher_allowed, sims=2000, seed=7)
+    r2 = P.project_team_first_innings_total(team_recent, pitcher_allowed, sims=2000, seed=7)
+    assert (r1["sim"] == r2["sim"]).all()
+    print("✓ project_team_first_innings_total is exactly reproducible with the same seed")
+
+
+def test_prob_over_first_innings_line_matches_hand_count():
+    import numpy as np
+    sim = np.array([0, 1, 1, 2, 2, 2, 3])   # 7 trials: values 2,2,2,3 (four of them) are > 1.5
+    probs = P.prob_over_first_innings_line(sim, line=1.5)
+    assert probs["prob_over"] == round(4 / 7, 4)
+    assert probs["prob_under"] == round(3 / 7, 4)
+    print("✓ prob_over_first_innings_line matches a hand-verified count for a real line")
+
+
+def test_prob_over_first_innings_line_higher_projection_means_higher_prob_over():
+    # Real, monotonic sanity check: a stronger combined rate must produce a HIGHER P(over) for
+    # the same line, not an arbitrary/unstable number.
+    weak = P.project_team_first_innings_total({"runs_scored": 0.8}, {"runs_allowed": 0.7}, sims=8000, seed=3)
+    strong = P.project_team_first_innings_total({"runs_scored": 2.0}, {"runs_allowed": 1.8}, sims=8000, seed=3)
+    weak_probs = P.prob_over_first_innings_line(weak["sim"], line=1.5)
+    strong_probs = P.prob_over_first_innings_line(strong["sim"], line=1.5)
+    assert strong_probs["prob_over"] > weak_probs["prob_over"]
+    print("✓ a stronger combined offense/opposing-pitcher rate produces a real, higher P(over) "
+         "for the same line -- the model responds sensibly to its own real inputs")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

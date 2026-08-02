@@ -203,7 +203,7 @@ def test_sidebar_sections_match_the_documented_grouping():
         "7": "🔬 DEEP RESEARCH", "8": "🔬 DEEP RESEARCH", "9": "🔬 DEEP RESEARCH",
         "10": "🔬 DEEP RESEARCH", "11": "🔬 DEEP RESEARCH", "12": "🔬 DEEP RESEARCH",
         "13": "🔬 DEEP RESEARCH", "14": "🔬 DEEP RESEARCH", "15": "🔬 DEEP RESEARCH",
-        "25": "🔬 DEEP RESEARCH", "26": "🔬 DEEP RESEARCH",
+        "25": "🔬 DEEP RESEARCH", "26": "🔬 DEEP RESEARCH", "27": "🔬 DEEP RESEARCH",
         "16": "🔍 SELF-GRADING & PROOF", "17": "🔍 SELF-GRADING & PROOF",
         "18": "🔍 SELF-GRADING & PROOF", "19": "🔍 SELF-GRADING & PROOF",
         "20": "📣 OPS & CONTENT", "21": "📣 OPS & CONTENT", "22": "📣 OPS & CONTENT",
@@ -234,6 +234,62 @@ def test_home_page_shares_command_centers_section():
         f"Home.py's section ({home_section!r}) doesn't match Command Center's ({command_center_section!r}) "
         f"-- they're meant to share one front-door section, not two separate ones")
     print(f"✓ Home.py and Command Center share the same sidebar section ({home_section!r})")
+
+
+def test_first_innings_totals_registered_in_all_three_registries():
+    # Regression guard for page 27 (First Innings Totals) specifically -- a page can pass
+    # test_every_view_file_has_a_matching_meta_entry (meta only) while still being missing from
+    # sport_only_leads (would then show up for every sport, including ones with no first-innings
+    # engine support) or SECTION_OF (would silently fall into the "Deep Research" catch-all
+    # instead of the intended section). Confirms all three registries agree on key "27" at once,
+    # not just that each one individually has *some* "27" entry.
+    src = (_HERE / "streamlit_app.py").read_text()
+
+    lead_match = re.search(r'"27":\s*\("MLB",\)', src)
+    assert lead_match, "page 27 must be MLB-only in sport_only_leads"
+
+    meta_match = re.search(r'"27":\s*\("([^"]+)",\s*"([^"]+)",\s*"([^"]+)"\)', src)
+    assert meta_match, "page 27 must have a meta entry"
+    title, icon, slug = meta_match.groups()
+    assert title == "First Innings Totals"
+    assert slug == "mlb_first_innings_totals"
+    assert icon, "page 27 must have a real icon, not an empty string"
+
+    section_match = re.search(r"SECTION_OF = \{\}(.*?)\n\n    def lead", src, re.DOTALL)
+    assert section_match, "streamlit_app.py must define SECTION_OF"
+    covered = set()
+    for keys_str in re.findall(r'for k in \(([^)]*)\):', section_match.group(1)):
+        covered.update(k.strip().strip('"') for k in keys_str.split(","))
+    assert "27" in covered, "page 27 must land in a real sidebar section, not the catch-all"
+
+    print("✓ First Innings Totals (27) is registered consistently across sport_only_leads, "
+         "meta, and SECTION_OF")
+
+
+def test_first_innings_totals_view_file_uses_platform_conventions():
+    # Confirms the actual view file (not just streamlit_app.py's registries) exists and follows
+    # the same real conventions every other page here uses -- base_css/page_header for the shared
+    # look, require_sport as the MLB-only gate (matching sport_only_leads' own "27": ("MLB",)
+    # above, so the two can't silently drift apart), and calls into the real, tested engine/
+    # projections functions this page is built on rather than reimplementing the math inline.
+    view_path = _HERE / "views" / "27_MLB_First_Innings_Totals.py"
+    assert view_path.exists(), "views/27_MLB_First_Innings_Totals.py must exist"
+    src = view_path.read_text()
+
+    assert "C.base_css()" in src
+    assert 'C.page_header(' in src
+    assert 'sports.require_sport(["MLB"]' in src
+
+    for call in ("E.build_pitching_slate(", "E.pair_pitching_slate_by_game(",
+                "E.get_team_recent_first_innings_runs(",
+                "E.get_pitcher_recent_first_innings_allowed(",
+                "P.project_team_first_innings_total(", "P.prob_over_first_innings_line("):
+        assert call in src, f"expected a real call to {call} in the First Innings Totals view"
+
+    assert "use_container_width" not in src
+
+    print("✓ First Innings Totals view file exists, uses shared page conventions, and calls "
+         "the real (not reimplemented) engine/projections functions it's built on")
 
 
 def test_public_audience_defaults_safe():
@@ -316,6 +372,11 @@ def test_sport_only_page_visibility_matches_expected_config():
     #
     # Player Lines (MLB, 26) added directly on request -- recent-form trend charts, pitcher or
     # batter, the MLB counterpart to WNBA/NBA/NCAAMB's own Matchup Lab trend charts.
+    #
+    # First Innings Totals (MLB, 27) added directly on request -- built directly on mlb_engine's
+    # own get_team_recent_first_innings_runs/get_pitcher_recent_first_innings_allowed and
+    # projections' own project_team_first_innings_total/prob_over_first_innings_line, no WNBA/NFL
+    # equivalent exists yet, same MLB-only posture as Bullpen Watch/Game Watch/Highlights above.
     src = (_HERE / "streamlit_app.py").read_text()
     m = re.search(r"sport_only_leads = \{([^}]*)\}", src, re.DOTALL)
     assert m, "streamlit_app.py must define sport_only_leads"
@@ -325,11 +386,12 @@ def test_sport_only_page_visibility_matches_expected_config():
     assert pairs == {"5": ("MLB",), "6": ("MLB",), "7": ("MLB",), "8": ("MLB",), "9": ("MLB",),
                      "10": ("WNBA", "NBA", "NCAAMB"), "11": ("WNBA", "NBA", "NCAAMB"),
                      "12": ("NFL",), "13": ("NFL",), "14": ("NFL",),
-                     "23": ("UFC",), "24": ("MLB",), "25": ("NFL",), "26": ("MLB",)}, pairs
+                     "23": ("UFC",), "24": ("MLB",), "25": ("NFL",), "26": ("MLB",),
+                     "27": ("MLB",)}, pairs
     print("✓ sport_only_leads matches expected config (Bullpen Watch/Game Watch/Pitching Lab/"
-          "Dinger Engine/Matchup Lab(MLB)/Player Lines -> MLB, Hot Hand Engine/Matchup "
-          "Lab(WNBA/NBA/NCAAMB) -> WNBA+NBA+NCAAMB, Matchup Lab(NFL)/Anytime TD Engine/QB Lab/"
-          "Hot Hand Engine(NFL) -> NFL, UFC Fight Card -> UFC, Highlights -> MLB)")
+          "Dinger Engine/Matchup Lab(MLB)/Player Lines/First Innings Totals -> MLB, Hot Hand "
+          "Engine/Matchup Lab(WNBA/NBA/NCAAMB) -> WNBA+NBA+NCAAMB, Matchup Lab(NFL)/Anytime TD "
+          "Engine/QB Lab/Hot Hand Engine(NFL) -> NFL, UFC Fight Card -> UFC, Highlights -> MLB)")
 
 
 def test_projections_only_pages_hidden_for_sports_without_projections():

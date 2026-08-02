@@ -104,6 +104,9 @@ def run():
                                                           # as Matchup Lab (NFL)'s own page 12.
         "26": ("MLB",),                                  # Player Lines -- recent-form trend charts,
                                                           # pitcher or batter, MLB's own real markets.
+        "27": ("MLB",),                                  # First Innings Totals -- built directly on
+                                                          # mlb_engine's own first-N-innings functions,
+                                                          # no WNBA/NFL equivalent exists yet.
     }
 
     # REAL, REPORTED GAP CLOSED HERE: these titles all carry a has_projections check that shows
@@ -168,6 +171,7 @@ def run():
         "25": ("Hot Hand Engine", "🔥", "nfl_hot_hand_engine"),   # NFL version — same title as
                                                                   # page 10, distinct url_path
         "26": ("Player Lines",   "📉", "mlb_player_lines"),
+        "27": ("First Innings Totals", "1️⃣", "mlb_first_innings_totals"),
     }
 
     # SIDEBAR SECTIONS, added directly on request: st.navigation natively supports a
@@ -197,7 +201,7 @@ def run():
         SECTION_OF[k] = "🎯 RECOMMENDATIONS"
     for k in ("5", "6"):
         SECTION_OF[k] = "🛰️ LIVE SIGNALS"
-    for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26"):
+    for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26", "27"):
         SECTION_OF[k] = "🔬 DEEP RESEARCH"
     for k in ("16", "17", "18", "19"):
         SECTION_OF[k] = "🔍 SELF-GRADING & PROOF"

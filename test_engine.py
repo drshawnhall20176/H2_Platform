@@ -845,6 +845,90 @@ def test_get_team_recent_form_venue_and_time_of_day_combine(monkeypatch):
     print("✓ get_team_recent_form applies venue and time_of_day together (AND), not one overriding the other")
 
 
+# ----------------------------------------------------------------- get_game_first_n_innings_runs
+def test_get_game_first_n_innings_runs_sums_only_the_requested_innings(monkeypatch):
+    # Real field path (innings[].num, .home.runs, .away.runs) confirmed directly against the
+    # official MLB-StatsAPI wrapper's own source before writing the function -- this fixture
+    # matches that confirmed real shape, not a guess.
+    fake_linescore = {"innings": [
+        {"num": 1, "home": {"runs": 1}, "away": {"runs": 0}},
+        {"num": 2, "home": {"runs": 0}, "away": {"runs": 2}},
+        {"num": 3, "home": {"runs": 0}, "away": {"runs": 0}},
+        {"num": 4, "home": {"runs": 3}, "away": {"runs": 0}},   # must NOT count
+    ]}
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake_linescore)
+    result = E.get_game_first_n_innings_runs(777, n_innings=3)
+    assert result == {"home": 1.0, "away": 2.0, "innings_counted": 3}
+    print("✓ get_game_first_n_innings_runs sums only innings 1-3, correctly excludes inning 4")
+
+
+def test_get_game_first_n_innings_runs_honest_when_game_hasnt_reached_n_innings(monkeypatch):
+    # A game only 2 innings in (rain delay, etc.) -- must report innings_counted=2 honestly,
+    # never pad to look like a full 3 innings happened.
+    fake_linescore = {"innings": [
+        {"num": 1, "home": {"runs": 1}, "away": {"runs": 0}},
+        {"num": 2, "home": {"runs": 0}, "away": {"runs": 1}},
+    ]}
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake_linescore)
+    result = E.get_game_first_n_innings_runs(777, n_innings=3)
+    assert result == {"home": 1.0, "away": 1.0, "innings_counted": 2}
+    print("✓ get_game_first_n_innings_runs honestly reports fewer innings_counted when the game "
+         "hasn't reached n_innings yet, never fabricates the missing inning as scoreless")
+
+
+def test_get_game_first_n_innings_runs_none_on_fetch_failure(monkeypatch):
+    def _boom(url, params=None, retries=2):
+        raise ConnectionError("simulated failure")
+    monkeypatch.setattr(E, "fetch_json", _boom)
+    assert E.get_game_first_n_innings_runs(777) is None
+    print("✓ get_game_first_n_innings_runs fails honest (None) on a real fetch error, never crashes")
+
+
+def test_get_game_first_n_innings_runs_none_when_no_innings_data(monkeypatch):
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: {"innings": []})
+    assert E.get_game_first_n_innings_runs(777) is None
+    print("✓ get_game_first_n_innings_runs returns honest None for an empty linescore, not a fabricated 0-0")
+
+
+# ----------------------------------------------------------------- get_team_recent_first_innings_runs
+def test_get_team_recent_first_innings_runs_averages_across_games(monkeypatch):
+    games = [
+        {"gamePk": 1, "home_id": 147, "status": "Final", "game_date": "2026-07-28"},
+        {"gamePk": 2, "home_id": 111, "status": "Final", "game_date": "2026-07-29"},   # team 147 away
+    ]
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    innings_by_pk = {1: {"home": 1.0, "away": 2.0, "innings_counted": 3},
+                    2: {"home": 0.0, "away": 1.0, "innings_counted": 3}}
+    monkeypatch.setattr(E, "get_game_first_n_innings_runs",
+                        lambda pk, n=3: innings_by_pk.get(pk))
+    form = E.get_team_recent_first_innings_runs(147, "2026-08-01", n_innings=3)
+    # Game 1: team 147 home -> scored 1.0, allowed 2.0. Game 2: team 147 away -> scored 1.0, allowed 0.0.
+    assert form == {"games": 2, "runs_scored": 1.0, "runs_allowed": 1.0}
+    print("✓ get_team_recent_first_innings_runs correctly attributes scored/allowed by home/away "
+         "perspective per game, averaged across the real window")
+
+
+def test_get_team_recent_first_innings_runs_skips_games_with_no_linescore_data(monkeypatch):
+    games = [
+        {"gamePk": 1, "home_id": 147, "status": "Final", "game_date": "2026-07-28"},
+        {"gamePk": 2, "home_id": 147, "status": "Final", "game_date": "2026-07-29"},
+    ]
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: games)
+    # Game 2's linescore fetch failed (returns None) -- must not disqualify game 1's real data.
+    monkeypatch.setattr(E, "get_game_first_n_innings_runs",
+                        lambda pk, n=3: {"home": 1.0, "away": 0.0, "innings_counted": 3} if pk == 1 else None)
+    form = E.get_team_recent_first_innings_runs(147, "2026-08-01")
+    assert form["games"] == 1   # only the one game with real data counted, not disqualified entirely
+    print("✓ get_team_recent_first_innings_runs counts whichever games have real linescore data, "
+         "one bad fetch doesn't disqualify the whole result")
+
+
+def test_get_team_recent_first_innings_runs_none_when_no_games(monkeypatch):
+    monkeypatch.setattr(E, "get_team_schedule_range", lambda team_id, s, e: [])
+    assert E.get_team_recent_first_innings_runs(147, "2026-08-01") is None
+    print("✓ get_team_recent_first_innings_runs returns honest None when there's no real data at all")
+
+
 # ----------------------------------------------------------------- get_team_pitching_staff
 def test_get_team_pitching_staff_filters_to_pitchers_and_excludes_given_id(monkeypatch):
     fake_roster = {"roster": [
@@ -1257,6 +1341,56 @@ def test_last_start_regression_signal_reuses_supplied_season_era(monkeypatch):
     assert sig["delta"] == 1.50        # 4.50 last_era - 3.00 supplied season_era
     print("✓ last_start_regression_signal reuses a supplied season_era instead of recomputing "
          "its own, avoiding two potentially-drifting copies of the same real number")
+
+
+# ----------------------------------------------------------------- get_pitcher_recent_first_innings_allowed
+def test_get_pitcher_recent_first_innings_allowed_uses_opposing_teams_runs(monkeypatch):
+    starts = [
+        {"gamePk": 1, "game_date": "2026-07-10", "isHome": True, "stat": {}},
+        {"gamePk": 2, "game_date": "2026-07-16", "isHome": False, "stat": {}},
+    ]
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season",
+                        lambda pid, season, before_date=None: starts)
+    innings_by_pk = {1: {"home": 1.0, "away": 0.0, "innings_counted": 3},
+                    2: {"home": 2.0, "away": 1.0, "innings_counted": 3}}
+    monkeypatch.setattr(E, "get_game_first_n_innings_runs",
+                        lambda pk, n=3: innings_by_pk.get(pk))
+    result = E.get_pitcher_recent_first_innings_allowed(999, 2026, "2026-07-20")
+    # Start 1: pitcher's team home -> the AWAY team's runs (0.0) are what he allowed.
+    # Start 2: pitcher's team away -> the HOME team's runs (2.0) are what he allowed.
+    assert result == {"games": 2, "runs_allowed": 1.0}
+    print("✓ get_pitcher_recent_first_innings_allowed correctly uses the OPPOSING team's runs, "
+         "flipped correctly for home vs away starts")
+
+
+def test_get_pitcher_recent_first_innings_allowed_none_when_no_starts(monkeypatch):
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season",
+                        lambda pid, season, before_date=None: [])
+    assert E.get_pitcher_recent_first_innings_allowed(999, 2026, "2026-07-20") is None
+    print("✓ get_pitcher_recent_first_innings_allowed returns honest None with no real starts on file")
+
+
+def test_get_pitcher_recent_first_innings_allowed_skips_starts_missing_isHome(monkeypatch):
+    # A real edge case: isHome is None for a given start (couldn't be determined) -- must be
+    # excluded, not guessed, since guessing wrong would flip which side's runs count.
+    starts = [{"gamePk": 1, "game_date": "2026-07-10", "isHome": None, "stat": {}}]
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season",
+                        lambda pid, season, before_date=None: starts)
+    assert E.get_pitcher_recent_first_innings_allowed(999, 2026, "2026-07-20") is None
+    print("✓ get_pitcher_recent_first_innings_allowed excludes a start with unknown home/away "
+         "rather than guessing which side's runs he allowed")
+
+
+def test_get_pitcher_recent_first_innings_allowed_respects_games_back(monkeypatch):
+    starts = [{"gamePk": i, "game_date": f"2026-07-{i:02d}", "isHome": True, "stat": {}}
+             for i in range(1, 16)]   # 15 starts
+    monkeypatch.setattr(E, "get_pitcher_starts_this_season",
+                        lambda pid, season, before_date=None: starts)
+    monkeypatch.setattr(E, "get_game_first_n_innings_runs",
+                        lambda pk, n=3: {"home": 1.0, "away": 2.0, "innings_counted": 3})
+    result = E.get_pitcher_recent_first_innings_allowed(999, 2026, "2026-07-20", games_back=5)
+    assert result["games"] == 5
+    print("✓ get_pitcher_recent_first_innings_allowed respects games_back, doesn't use every start on file")
 
 
 # ----------------------------------------------------------------- get_pitcher_recent_games
