@@ -460,6 +460,31 @@ def test_league_schedules_team_and_score_lookup_covers_every_real_confirmed_fiel
          "across MLB, NFL, NCAAF, and WNBA -- including NCAAF's genuinely different field names")
 
 
+# ----------------------------------------------------------------- Matchup Lab: L5/L10 Avg
+def test_matchup_lab_l5_l10_wired_into_the_real_table():
+    # Regression guard confirming the gate is actually WIRED IN, matching the same class of
+    # check already done for every other feature added this session -- the real L5 Avg/L10 Avg
+    # computation could be perfectly correct in all three projections modules and simply never
+    # reach the actual displayed table.
+    src = (_HERE / "views" / "11_Matchup_Lab.py").read_text()
+    assert 'show_l5_l10 = st.checkbox(' in src, "the L5/L10 checkbox must actually exist"
+    assert '"L5 Avg", "L10 Avg"' in src, "the new columns must actually get added to the displayed table when toggled on"
+    print("\u2713 Matchup Lab's L5/L10 toggle is genuinely wired into the real displayed table, "
+         "not just computed and left unused")
+
+
+def test_matchup_lab_l5_l10_computed_identically_across_all_three_basketball_sports():
+    # Regression guard confirming the SAME real fix landed in all three projections modules
+    # (WNBA/NBA/NCAAMB), not just one -- Matchup Lab (page 11) serves all three from one shared
+    # page, so a gap in any single module would silently show L5/L10 for two sports and not the third.
+    for fname in ("wnba_projections.py", "nba_projections.py", "ncaamb_projections.py"):
+        src = (_HERE / fname).read_text()
+        assert '"L5 Avg"' in src and '"L10 Avg"' in src, f"{fname} is missing the L5/L10 computation"
+        assert "l5_avgs[stat_key]" in src and "l10_avgs[stat_key]" in src, (
+            f"{fname} must compute L5/L10 from season_log directly, not reuse another sport's values")
+    print("✓ L5 Avg/L10 Avg are computed identically across WNBA, NBA, and NCAAMB's own projections modules")
+
+
 # ----------------------------------------------------------------- Dinger Engine: L5 Hit Rate
 def test_dinger_engine_load_l5_hit_rate_computes_the_real_fraction():
     # THE actual real logic this feature adds, executed directly from the real file source (not

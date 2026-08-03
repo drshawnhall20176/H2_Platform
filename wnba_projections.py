@@ -528,6 +528,8 @@ def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_recent_allowed: Di
     season_avgs: Dict[str, Optional[float]] = {}
     h2h_avgs: Dict[str, Optional[float]] = {}
     ratios: Dict[str, float] = {}
+    l5_avgs: Dict[str, Optional[float]] = {}
+    l10_avgs: Dict[str, Optional[float]] = {}
     for _mkey, (col, _disp, _line) in _MARKET_SPEC.items():
         stat_key = _STAT_KEY[col]
         if season_log:
@@ -535,6 +537,18 @@ def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_recent_allowed: Di
             season_avgs[stat_key] = (sum(svals) / len(svals)) if svals else None
         else:
             season_avgs[stat_key] = None
+        # L5/L10, ADDED DIRECTLY ON REQUEST -- season_log is already "most recent first" (see
+        # this function's own docstring / get_player_season_games' own docstring), so [:5]/[:10]
+        # is a real, correct recent-games slice, not a new fetch or a new assumption. Genuinely
+        # separate from Recent Avg (row.get(col), the model's own 45-day-window recency signal
+        # this function never touches) -- this is a second, independent read at two DIFFERENT
+        # real windows, the same additive, non-model-touching pattern Dinger Engine's own L5 Hit
+        # Rate already established. None (not 0.0) when fewer than N real games exist in the
+        # window, an honest "not enough games yet," never padded with a guessed average.
+        l5 = season_log[:5] if season_log else []
+        l10 = season_log[:10] if season_log else []
+        l5_avgs[stat_key] = (sum(g.get(stat_key, 0.0) for g in l5) / len(l5)) if len(l5) == 5 else None
+        l10_avgs[stat_key] = (sum(g.get(stat_key, 0.0) for g in l10) / len(l10)) if len(l10) == 10 else None
         hvals = [g.get(stat_key, 0.0) for g in h2h_log]
         h2h_avgs[stat_key] = (sum(hvals) / len(hvals)) if hvals else None
         sa = season_avgs[stat_key]
@@ -580,6 +594,8 @@ def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_recent_allowed: Di
         out.append({
             "Market": disp,
             "Recent Avg": recent_avg,
+            "L5 Avg": round(l5_avgs[stat_key], 1) if l5_avgs.get(stat_key) is not None else None,
+            "L10 Avg": round(l10_avgs[stat_key], 1) if l10_avgs.get(stat_key) is not None else None,
             "Season Avg": round(season_avg, 1) if season_avg is not None else None,
             "H2H Games": len(hvals),
             "H2H Avg": round(h2h_avg, 1) if h2h_avg is not None else None,

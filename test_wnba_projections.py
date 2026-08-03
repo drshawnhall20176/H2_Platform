@@ -671,6 +671,50 @@ def test_build_matchup_profile_season_avg_none_without_season_log():
     assert pts["Season Avg"] is None
 
 
+# ----------------------------------------------------------------- L5 Avg / L10 Avg (added directly on request)
+def test_build_matchup_profile_l5_and_l10_are_real_separate_windows():
+    # Real, exact, hand-verifiable construction: season_log is "most recent first" (confirmed
+    # against get_player_season_games' own docstring) -- the first 5 entries are a genuine hot
+    # stretch (30 pts/g), the next 5 a cooler stretch (10 pts/g), so L5, L10, and Season Avg must
+    # all land at DIFFERENT, exactly-computable real numbers if the windowing is correct.
+    row = {"PTS": 24.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
+    hot = [{"pts": 30, "reb": 5, "ast": 3, "fg3m": 2} for _ in range(5)]
+    cool = [{"pts": 10, "reb": 5, "ast": 3, "fg3m": 2} for _ in range(5)]
+    season_log = hot + cool   # most recent first -- 5 hot games, then 5 cooler ones
+    profile = WP.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={},
+                                       season_log=season_log)
+    pts = next(p for p in profile if p["Market"] == "Points")
+    assert pts["L5 Avg"] == 30.0     # exactly the 5 real hot games
+    assert pts["L10 Avg"] == 20.0    # (30*5 + 10*5) / 10 = 20.0, all 10 real games
+    assert pts["Season Avg"] == 20.0 # same 10 games, same real number here, but computed independently
+    print("✓ L5 Avg and L10 Avg reflect their own real, distinct windows -- exact, hand-verified numbers")
+
+
+def test_build_matchup_profile_l5_none_with_fewer_than_5_real_games():
+    row = {"PTS": 24.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
+    season_log = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2} for _ in range(3)]   # only 3 real games this season
+    profile = WP.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={},
+                                       season_log=season_log)
+    pts = next(p for p in profile if p["Market"] == "Points")
+    assert pts["L5 Avg"] is None    # honest "not enough real games yet," never a padded average
+    assert pts["L10 Avg"] is None
+    assert pts["Season Avg"] == 20.0   # Season Avg is unaffected -- it never required a fixed count
+    print("✓ L5 Avg/L10 Avg are honestly None (not a padded/partial average) with fewer than 5/10 real games")
+
+
+def test_build_matchup_profile_l5_real_but_l10_none_with_seven_real_games():
+    # The real, in-between case: enough games for L5, not yet enough for L10 -- each window's
+    # own honesty is independent, not an all-or-nothing gate.
+    row = {"PTS": 24.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
+    season_log = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2} for _ in range(7)]
+    profile = WP.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={},
+                                       season_log=season_log)
+    pts = next(p for p in profile if p["Market"] == "Points")
+    assert pts["L5 Avg"] == 20.0
+    assert pts["L10 Avg"] is None
+    print("✓ L5 Avg computes correctly even when L10 honestly can't yet, with 7 real games (enough for one, not the other)")
+
+
 # ----------------------------------------------------------------- H2H spread / high variance
 def test_build_matchup_profile_flags_high_variance_h2h():
     row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
