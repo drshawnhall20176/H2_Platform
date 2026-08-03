@@ -24,9 +24,10 @@ C.page_header("💣", "H2 Sports — Dinger Engine",
              "Live hitter matchups, platoon edges, and power leaderboards")
  
  
-@st.cache_data(ttl=3600, show_spinner=False)
-def load_statcast():
-    return SC.load()  # (lookup_by_player_id, calibration_k); ({}, None) if no cache file
+# load_statcast (a local @st.cache_data wrapper around SC.load()) consolidated into
+# statcast_data.load_cached — this exact wrapper used to be independently redefined in 6 places
+# platform-wide, each its own separate, unshared cache entry despite doing identical real work.
+# See that function's own docstring for the full real, confirmed finding.
  
  
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -56,7 +57,7 @@ def load_slate(date_str: str, fip_constant: float, venue_split=None, time_split=
     api_key = BBD.get_odds_api_key()
     preferred_book = st.session_state.get("_preferred_book_mlb", O.DEFAULT_BOOK)
     real_lines, _offers, _books = BBD.fetch_mlb_real_lines(date_str, api_key, preferred_book)
-    sc, k = load_statcast()
+    sc, k = SC.load_cached()
     wx_by_venue = load_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
     for r in rows:
         wx = wx_by_venue.get(r.get("_venue_id"))
@@ -288,7 +289,7 @@ if not df.empty and "Due" in df.columns:
 # results metric can be noisy; a quality-of-contact-based expected metric is a steadier read on
 # true talent), but OVERALL offensive value, not just the HR-specific "Due to homer" board above.
 # Reuses the SAME statcast lookup Dinger Engine already loaded for this pageview — zero extra fetch.
-sc, _k = load_statcast()
+sc, _k = SC.load_cached()
 if sc:
     reg_table = SC.build_hitter_regression_table(all_rows, sc)
     if reg_table:

@@ -23,6 +23,7 @@ import sports
 import odds_api as O
 import betlog as B
 import bet_sizing as BS
+import statcast_data as SC
 
 _active = sports.active()
 
@@ -57,10 +58,10 @@ def get_api_key():
         return os.environ.get("ODDS_API_KEY")
  
  
-@st.cache_data(ttl=3600, show_spinner=False)
-def load_statcast():
-    import statcast_data as SC
-    return SC.load()  # (lookup, k); ({}, None) if no cache file
+# load_statcast (a local @st.cache_data wrapper around SC.load()) consolidated into
+# statcast_data.load_cached — this exact wrapper used to be independently redefined in 6 places
+# platform-wide, each its own separate, unshared cache entry despite doing identical real work.
+# See that function's own docstring for the full real, confirmed finding.
  
  
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -86,7 +87,7 @@ def load_index(sport_key: str, date_str: str, sims: int, seed: int):
     rows, meta = engine.build_slate(date_str)
     extra = {}
     if sport_key == "MLB":
-        sc, k = load_statcast()
+        sc, k = SC.load_cached()
         wx = load_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
         for r in rows:
             w = wx.get(r.get("_venue_id"))

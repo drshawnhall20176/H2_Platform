@@ -54,9 +54,10 @@ def game_time_et(iso_utc):
         return "TBD"
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def load_statcast():
-    return SC.load()  # (lookup_by_player_id, calibration_k); ({}, None) if no cache file
+# load_statcast (a local @st.cache_data wrapper around SC.load()) consolidated into
+# statcast_data.load_cached — this exact wrapper used to be independently redefined in 6 places
+# platform-wide, each its own separate, unshared cache entry despite doing identical real work.
+# See that function's own docstring for the full real, confirmed finding.
 
 
 def _build_lineup_probs(rows, opp_starter_stat, opp_bullpen_stat, park, statcast_lookup, statcast_k,
@@ -572,7 +573,7 @@ if game_options:
                       "(lineup not posted yet, or thin data) — try again closer to first pitch.")
         else:
             with st.spinner(f"Building matchup-aware probabilities and running {n_trials} simulated games..."):
-                statcast_lookup, statcast_k = load_statcast()
+                statcast_lookup, statcast_k = SC.load_cached()
                 park = P.PARK_FACTORS.get(picked.get("venue_id"), P.NEUTRAL_PARK)
                 home_pm, away_pm = lineups["home_pm"], lineups["away_pm"]
 

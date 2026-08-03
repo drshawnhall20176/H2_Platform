@@ -70,19 +70,18 @@ def _board_mlb(date_str):
     import best_bets_data as BBD
     import statcast_data as SC
 
-    @st.cache_data(ttl=3600, show_spinner=False)
-    def load_statcast():
-        return SC.load()
-
     fip_constant = E.FIP_CONSTANT_DEFAULT
     api_key = get_key()
     rows, meta, plays, _books = BBD.build_mlb_board(date_str, fip_constant, odds_api_key=api_key)
-    # Statcast loaded separately here (its own cached call, same ttl as build_mlb_board's own
-    # internal copy) specifically for the "ev_mode" feature's own build_projection_index call
-    # below, which build_mlb_board doesn't expose internally. Not a new parallel pipeline --
-    # rows/meta/plays all still come from the one real, shared source; this is the one piece
-    # build_mlb_board's own return doesn't carry.
-    sc, k = load_statcast()
+    # Statcast loaded separately here specifically for the "ev_mode" feature's own
+    # build_projection_index call below, which build_mlb_board doesn't expose internally. Not a
+    # new parallel pipeline -- rows/meta/plays all still come from the one real, shared source;
+    # this is the one piece build_mlb_board's own return doesn't carry. SC.load_cached() (not a
+    # local wrapper redefined here) so this shares ONE real cache entry platform-wide -- see that
+    # function's own docstring for the real, confirmed finding this fixes (this exact page was
+    # one of 6 places independently re-parsing the same file from disk, on its own separate hour-
+    # long clock).
+    sc, k = SC.load_cached()
     return plays, len(meta), rows, meta, sc, k
 
 
