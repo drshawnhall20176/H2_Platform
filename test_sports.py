@@ -197,7 +197,7 @@ def test_sidebar_sections_match_the_documented_grouping():
                     # split segment -- not a real key, just filter it out
                 actual[k] = section
     expected = {
-        "0": "🏠 START HERE",
+        "0": "🏠 START HERE", "28": "🏠 START HERE",
         "1": "🎯 RECOMMENDATIONS", "2": "🎯 RECOMMENDATIONS", "3": "🎯 RECOMMENDATIONS",
         "4": "🎯 RECOMMENDATIONS", "23": "🎯 RECOMMENDATIONS", "24": "🎯 RECOMMENDATIONS",
         "5": "🛰️ LIVE SIGNALS", "6": "🛰️ LIVE SIGNALS",
@@ -227,7 +227,7 @@ def test_home_page_shares_command_centers_section():
 
     section_match = re.search(r"SECTION_OF = \{\}(.*?)\n\n    def lead", src, re.DOTALL)
     assert section_match, "streamlit_app.py must define SECTION_OF"
-    zero_match = re.search(r'for k in \("0",\):\s*\n\s*SECTION_OF\[k\] = "([^"]*)"', section_match.group(1))
+    zero_match = re.search(r'for k in \([^)]*"0"[^)]*\):\s*\n\s*SECTION_OF\[k\] = "([^"]*)"', section_match.group(1))
     assert zero_match, "streamlit_app.py must assign a section for page \"0\" (Command Center)"
     command_center_section = zero_match.group(1)
 
@@ -291,6 +291,83 @@ def test_first_innings_totals_view_file_uses_platform_conventions():
 
     print("✓ First Innings Totals view file exists, uses shared page conventions, and calls "
          "the real (not reimplemented) engine/projections functions it's built on")
+
+
+def test_league_schedules_registered_and_universal():
+    # Regression guard for page 28 (League Schedules) specifically -- registered in meta and
+    # SECTION_OF (so it actually appears in the sidebar, in the START HERE section right
+    # alongside Command Center, per direct request), and DELIBERATELY ABSENT from sport_only_
+    # leads -- unlike First Innings Totals (MLB-only by design), this page must work for every
+    # sport, so it must never be gated to a subset the way sport_only_leads gates other pages.
+    src = (_HERE / "streamlit_app.py").read_text()
+
+    meta_match = re.search(r'"28":\s*\("([^"]+)",\s*"([^"]+)",\s*"([^"]+)"\)', src)
+    assert meta_match, "page 28 must have a meta entry"
+    title, icon, slug = meta_match.groups()
+    assert title == "League Schedules"
+    assert slug == "league_schedules"
+    assert icon
+
+    section_match = re.search(r"SECTION_OF = \{\}(.*?)\n\n    def lead", src, re.DOTALL)
+    assert section_match
+    covered = set()
+    for keys_str in re.findall(r'for k in \(([^)]*)\):', section_match.group(1)):
+        covered.update(k.strip().strip('"') for k in keys_str.split(","))
+    assert "28" in covered, "page 28 must land in a real sidebar section, not the catch-all"
+
+    lead_match = re.search(r'"28":\s*\(', src[:src.index("meta = {")])   # only search sport_only_leads' own block, before meta
+    assert lead_match is None, "page 28 (League Schedules) must NOT appear in sport_only_leads -- it has to work for every sport"
+    print("✓ League Schedules (28) is registered in meta/SECTION_OF and deliberately absent from sport_only_leads")
+
+
+def test_league_schedules_view_file_uses_platform_conventions_and_no_gate():
+    view_path = _HERE / "views" / "28_League_Schedules.py"
+    assert view_path.exists(), "views/28_League_Schedules.py must exist"
+    src = view_path.read_text()
+
+    assert "C.base_css()" in src
+    assert "C.page_header(" in src
+    assert "sports.active()" in src
+    # Deliberately NO require_sport/require_live_engine gate -- this page must work for every
+    # sport (gracefully degrading for one with no real get_schedule, e.g. UFC), never blocked at
+    # the door the way a sport-specific/projections-only page correctly is.
+    assert "sports.require_sport(" not in src
+    assert "sports.require_live_engine(" not in src
+    print("✓ League Schedules view file uses shared page conventions and is deliberately ungated by sport")
+
+
+def test_league_schedules_team_and_score_lookup_covers_every_real_confirmed_field_shape():
+    # THE real regression guard for the actual bug found and fixed while building this page:
+    # NCAAF's own real schedule rows use start_date/home_team/away_team/home_points/away_points,
+    # genuinely different field names than MLB's game_date/home_name/away_name/home_score/away_
+    # score -- confirmed directly by reading ncaaf_data.py's own schedule row construction, not
+    # guessed. Executes the view file's own _team/_score functions directly (not a duplicate
+    # reimplementation) against every real, confirmed shape this platform's own engines produce.
+    import ast
+    src = (_HERE / "views" / "28_League_Schedules.py").read_text()
+    tree = ast.parse(src)
+    funcs = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in ("_team", "_score")]
+    assert len(funcs) == 2, "expected both _team and _score helper functions to exist"
+    ns: dict = {}
+    exec(compile(ast.Module(body=funcs, type_ignores=[]), "<league_schedules_helpers>", "exec"), ns)
+    _team, _score = ns["_team"], ns["_score"]
+
+    mlb = {"home_name": "Yankees", "away_name": "Red Sox", "home_score": 5, "away_score": 3}
+    assert _team(mlb, "home") == "Yankees" and _score(mlb, "home") == 5
+
+    nfl = {"home_team": "KC", "away_team": "BUF", "home_score": 24, "away_score": 20}
+    assert _team(nfl, "home") == "KC" and _score(nfl, "home") == 24
+
+    ncaaf = {"home_team": "Georgia", "away_team": "Alabama", "home_points": 27, "away_points": 24}
+    assert _team(ncaaf, "home") == "Georgia" and _score(ncaaf, "home") == 27, (
+        "NCAAF uses home_team/home_points, not home_name/home_score -- a real, confirmed field-name gap")
+
+    wnba = {"home_name": "Aces", "away_name": "Storm"}   # no real score field on this sport's own get_schedule
+    assert _team(wnba, "home") == "Aces" and _score(wnba, "home") is None, (
+        "WNBA's own get_schedule carries no score field -- must be honest None, never a fabricated 0")
+
+    print("✓ League Schedules' team/score lookup correctly covers every real, confirmed field-name shape "
+         "across MLB, NFL, NCAAF, and WNBA -- including NCAAF's genuinely different field names")
 
 
 def test_first_innings_totals_market_names_match_settlement_registry():

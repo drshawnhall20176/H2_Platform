@@ -172,6 +172,7 @@ def run():
                                                                   # page 10, distinct url_path
         "26": ("Player Lines",   "📉", "mlb_player_lines"),
         "27": ("First Innings Totals", "1️⃣", "mlb_first_innings_totals"),
+        "28": ("League Schedules", "📅", "league_schedules"),
     }
 
     # SIDEBAR SECTIONS, added directly on request: st.navigation natively supports a
@@ -195,7 +196,7 @@ def run():
     # Python string, no dependency on internals that could silently stop working -- is the lever
     # used here instead.
     SECTION_OF = {}
-    for k in ("0",):
+    for k in ("0", "28"):
         SECTION_OF[k] = "🏠 START HERE"
     for k in ("1", "2", "3", "4", "23", "24"):
         SECTION_OF[k] = "🎯 RECOMMENDATIONS"

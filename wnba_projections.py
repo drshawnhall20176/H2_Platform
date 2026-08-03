@@ -29,6 +29,9 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+import retro as R
+import calibration_corrections as CC
+
 from projections import (  # genuinely sport-agnostic — reused, not duplicated
     prob_over, prob_for_side, normalize_name, format_et,
     prob_to_decimal, prob_to_american, curate_selections,
@@ -270,6 +273,16 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
     rng = np.random.default_rng(seed)
     plays: List[Dict] = []
 
+    # THE closed feedback loop, same mechanism as MLB's projections.build_best_bets (see that
+    # function's own comment for the full reasoning) -- real accumulated Retrospective grading
+    # for WNBA (persisted by grading_history.py) gets periodically turned into a real, shrunk
+    # correction per market (retro.fit_market_calibration, refresh_calibration.py, weekly) and
+    # applied here, the one shared source Top Leans/Command Center, Media Room, and Podcast
+    # Studio all already draw their WNBA plays from. A genuine no-op today (calibration_
+    # corrections.latest_fit returns None until real WNBA history clears retro.CALIBRATION_MIN_N
+    # for a given market) -- starts contributing on its own as real graded history accumulates.
+    _corrections = {m: CC.latest_fit("WNBA", m) for m in BEST_BET_REF}
+
     for r in rows:
         log = r.get("_game_log") or []
         if not log:
@@ -299,6 +312,7 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
                 if real_over_prob is not None:
                     ref, ref_src = real_over_prob, "book"
             side, sp, ref_s = _favored_side(over, ref)
+            sp = R.apply_calibration_correction(sp, _corrections.get(disp))
 
             # Real captured price when available, the model's own theoretical Fair price
             # otherwise -- Fair itself never changes meaning, RealPrice is purely additive.

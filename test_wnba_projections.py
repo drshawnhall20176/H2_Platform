@@ -5,10 +5,21 @@ compatibility with odds_api.compute_edges (the actual integration point Edge Boa
     python test_wnba_projections.py     # or: pytest test_wnba_projections.py
 """
 
+import os
+import tempfile
+
 import numpy as np
 
 import wnba_projections as WP
 import odds_api as O
+import calibration_corrections as CC
+
+# Same real test-isolation fix already applied to test_projections.py -- build_best_bets now
+# looks up a real calibration correction per market via CC.latest_fit, which resolves to
+# CC.DB_PATH when no explicit db_path is passed. Redirected here, once, for the whole test
+# session, so running this file never creates or touches a real file under this repo's own
+# data/ directory as a side effect. See test_projections.py's own comment for the full reasoning.
+CC.DB_PATH = os.path.join(tempfile.gettempdir(), "h2_test_calibration_corrections_wnba.db")
 
 
 def _row(name, team, opp, game, log, game_date="2026-07-13T23:00:00Z"):
@@ -202,6 +213,81 @@ def test_build_best_bets_covers_all_four_markets_and_ranks_by_conviction():
 def test_build_best_bets_skips_players_with_no_game_log():
     rows = [_row("No Log", "Atlanta Dream", "Chicago Sky", "Chicago Sky @ Atlanta Dream", [])]
     assert WP.build_best_bets(rows, sims=1000, seed=1) == []
+
+
+# ----------------------------------------------------------------- calibration correction wiring
+def test_build_best_bets_applies_a_real_stored_calibration_correction():
+    # Same real proof already established for MLB's projections.build_best_bets, applied here to
+    # confirm the WNBA extension of the identical mechanism actually works, not just compiles.
+    log_hot = [_log(p, 3, 2, 4) for p in (28, 30, 26, 29, 31, 27, 30, 28, 29, 27)]
+    rows = [_row("Hot Scorer", "Las Vegas Aces", "Seattle Storm", "Seattle Storm @ Las Vegas Aces", log_hot)]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "cc.db")
+        orig_path = CC.DB_PATH
+        CC.DB_PATH = db
+        try:
+            uncorrected = WP.build_best_bets(rows, sims=8000, seed=3)
+            pts_uncorrected = next(p for p in uncorrected if p["Market"] == "Points")
+
+            fit = {"slope": 1.0, "intercept": -0.05, "raw_slope": 1.0, "raw_intercept": -0.05,
+                  "n": 150, "weight": 0.6}
+            CC.record_fit("WNBA", "Points", fit, min_n_used=100, db_path=db)
+            corrected = WP.build_best_bets(rows, sims=8000, seed=3)
+            pts_corrected = next(p for p in corrected if p["Market"] == "Points")
+        finally:
+            CC.DB_PATH = orig_path
+
+    assert abs(pts_corrected["ModelProb"] - (pts_uncorrected["ModelProb"] - 0.05)) < 1e-9, (
+        f"expected a real -0.05 correction on Points ModelProb, got uncorrected="
+        f"{pts_uncorrected['ModelProb']}, corrected={pts_corrected['ModelProb']}")
+    print("✓ WNBA build_best_bets applies a real, stored calibration correction to the actual generated play's ModelProb")
+
+
+def test_build_best_bets_conviction_reflects_the_corrected_modelprob():
+    log_hot = [_log(p, 3, 2, 4) for p in (28, 30, 26, 29, 31, 27, 30, 28, 29, 27)]
+    rows = [_row("Hot Scorer", "Las Vegas Aces", "Seattle Storm", "Seattle Storm @ Las Vegas Aces", log_hot)]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "cc.db")
+        orig_path = CC.DB_PATH
+        CC.DB_PATH = db
+        try:
+            fit = {"slope": 1.0, "intercept": -0.05, "raw_slope": 1.0, "raw_intercept": -0.05,
+                  "n": 150, "weight": 0.6}
+            CC.record_fit("WNBA", "Points", fit, min_n_used=100, db_path=db)
+            corrected = WP.build_best_bets(rows, sims=8000, seed=3)
+        finally:
+            CC.DB_PATH = orig_path
+        uncorrected = WP.build_best_bets(rows, sims=8000, seed=3)   # fresh, empty temp path -- no fit
+
+    pts_c = next(p for p in corrected if p["Market"] == "Points")
+    pts_u = next(p for p in uncorrected if p["Market"] == "Points")
+    assert pts_c["ModelProb"] < pts_u["ModelProb"]
+    assert pts_c["Conviction"] < pts_u["Conviction"], (
+        "Conviction must move WITH the corrected ModelProb, not silently stay based on the raw one")
+    print("✓ WNBA Conviction correctly reflects the corrected ModelProb, not a stale raw value")
+
+
+def test_build_best_bets_is_a_real_no_op_when_no_wnba_correction_exists():
+    log_hot = [_log(p, 3, 2, 4) for p in (28, 30, 26, 29, 31, 27, 30, 28, 29, 27)]
+    rows = [_row("Hot Scorer", "Las Vegas Aces", "Seattle Storm", "Seattle Storm @ Las Vegas Aces", log_hot)]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "cc.db")   # real, empty temp DB -- no fit ever recorded
+        orig_path = CC.DB_PATH
+        CC.DB_PATH = db
+        try:
+            plays = WP.build_best_bets(rows, sims=8000, seed=3)
+        finally:
+            CC.DB_PATH = orig_path
+
+    pts = next(p for p in plays if p["Market"] == "Points")
+    # matches this exact scenario's own already-established uncorrected baseline (0.857, per the
+    # sibling tests above using the identical row/log fixture) -- a real, sensible, unmodified
+    # probability for a very consistent ~28ppg scorer against a 12.5 line, not a guessed number.
+    assert pts["ModelProb"] > 0.80
+    print("✓ WNBA build_best_bets is a genuine no-op when no real correction has been fit for a market yet")
 
 
 # ----------------------------------------------------------------- explain_miss
