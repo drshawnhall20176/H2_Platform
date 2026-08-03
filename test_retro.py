@@ -211,6 +211,103 @@ def test_player_calibration_empty_input_returns_empty_list():
     assert R.player_calibration([]) == []
 
 
+# ----------------------------------------------------------------- fit_market_calibration / apply_calibration_correction
+def test_fit_market_calibration_below_min_n_returns_none():
+    plays = [_graded(f"P{i}", i, 0.5, i % 2 == 0) for i in range(50)]   # 50 < CALIBRATION_MIN_N (100)
+    assert R.fit_market_calibration(plays) is None
+    print("✓ fit_market_calibration returns None (an honest 'not enough real evidence yet') below CALIBRATION_MIN_N")
+
+
+def _bucketed_calibration_plays(n_p_values=20, samples_per_p=10, bias=0.0, market="Batter HR"):
+    """Real, EXACT synthetic construction for calibration-fit tests -- no randomness, no modulo-
+    correlation artifacts. n_p_values distinct ModelProb values, evenly spaced 0.10-0.90; at each
+    one, exactly round(samples_per_p * true_rate) of the samples are real hits, where true_rate =
+    min(p + bias, 0.95). bias=0.0 means "already perfectly calibrated"; bias=0.10 means "the real
+    hit rate deliberately runs 10 points hotter than the model says" -- an exact, hand-verifiable
+    ground truth the fit's own recovered numbers can be checked against."""
+    plays = []
+    pid = 0
+    for j in range(n_p_values):
+        p = 0.10 + 0.8 * j / (n_p_values - 1)
+        true_rate = min(p + bias, 0.95)
+        n_hits = round(samples_per_p * true_rate)
+        for k in range(samples_per_p):
+            plays.append(_graded(f"P{pid}", pid, round(p, 4), k < n_hits, market=market))
+            pid += 1
+    return plays
+
+
+def test_fit_market_calibration_recovers_a_known_injected_real_bias():
+    # Real, exact construction (see _bucketed_calibration_plays' own docstring) so the recovered
+    # numbers are hand-verifiable: the real hit rate is DELIBERATELY p + 0.10 (clamped at 0.95)
+    # at every one of 20 distinct ModelProb values -- a genuine, systematic +10-point
+    # underconfidence. The fit must recover a real, positive intercept close to that real bias,
+    # not just run without crashing.
+    plays = _bucketed_calibration_plays(n_p_values=20, samples_per_p=10, bias=0.10)
+    fit = R.fit_market_calibration(plays)
+    assert fit is not None and fit["n"] == 200
+    assert 0.05 < fit["raw_intercept"] < 0.15, f"expected the raw fit to recover close to the real +0.10 bias, got {fit['raw_intercept']}"
+    assert 0.8 < fit["raw_slope"] < 1.3   # a real slope near 1 -- the bias here is a flat shift, not a scaling error
+    print(f"✓ fit_market_calibration recovers a real, deliberately injected +0.10 calibration bias (raw_intercept={fit['raw_intercept']})")
+
+
+def test_fit_market_calibration_shrinks_toward_identity_at_the_floor():
+    # At exactly CALIBRATION_MIN_N (100) real plays, the shrinkage weight must be 0.5 -- HALF the
+    # fitted correction's own strength, per this function's own documented n/(n+prior) formula
+    # with prior=100. Proven directly, not just asserted from the formula being present.
+    plays = _bucketed_calibration_plays(n_p_values=20, samples_per_p=5, bias=0.10)
+    fit = R.fit_market_calibration(plays)
+    assert fit is not None and fit["n"] == 100
+    assert abs(fit["weight"] - 0.5) < 0.001
+    # the REAL (shrunk) intercept should be exactly half the RAW (unshrunk) one at this exact n
+    assert abs(fit["intercept"] - fit["raw_intercept"] * 0.5) < 0.01
+    print(f"✓ at exactly CALIBRATION_MIN_N, the fitted correction is shrunk to half its own raw strength (weight={fit['weight']})")
+
+
+def test_fit_market_calibration_well_calibrated_data_yields_near_identity():
+    # When the model is ALREADY well-calibrated (real hit rate matches real ModelProb exactly, no
+    # systematic gap), the fit should recover something close to slope=1, intercept=0 -- i.e.
+    # correctly conclude "no real correction needed" rather than inventing one from noise.
+    plays = _bucketed_calibration_plays(n_p_values=20, samples_per_p=15, bias=0.0)
+    fit = R.fit_market_calibration(plays)
+    assert fit is not None
+    assert abs(fit["raw_intercept"]) < 0.05
+    assert abs(fit["raw_slope"] - 1.0) < 0.15
+    print(f"✓ fit_market_calibration correctly recovers a near-identity correction when the model is already well-calibrated (raw_intercept={fit['raw_intercept']})")
+
+
+def test_fit_market_calibration_excludes_unsettled_plays_from_n():
+    settled = _bucketed_calibration_plays(n_p_values=15, samples_per_p=10, bias=0.0)   # 150 real, spread across real ModelProb values
+    unsettled = [_graded(f"U{i}", 1000 + i, 0.5, None) for i in range(500)]            # Hit=None, plenty of them
+    fit = R.fit_market_calibration(settled + unsettled)
+    assert fit is not None and fit["n"] == 150   # only the real settled plays counted, not the 500 unsettled ones
+    print("✓ fit_market_calibration counts only real settled plays (Hit is not None) toward n, ignoring unsettled ones entirely")
+
+
+def test_apply_calibration_correction_passthrough_when_correction_is_none():
+    assert R.apply_calibration_correction(0.42, None) == 0.42
+    print("✓ apply_calibration_correction passes raw_prob straight through unchanged when no real correction exists yet")
+
+
+def test_apply_calibration_correction_passthrough_when_prob_is_none():
+    fit = {"slope": 1.2, "intercept": 0.1}
+    assert R.apply_calibration_correction(None, fit) is None
+    print("✓ apply_calibration_correction passes a missing raw_prob straight through as None, never fabricating a number")
+
+
+def test_apply_calibration_correction_applies_the_real_linear_transform():
+    fit = {"slope": 1.0, "intercept": 0.05}
+    assert abs(R.apply_calibration_correction(0.30, fit) - 0.35) < 1e-9
+    print("✓ apply_calibration_correction applies the exact stored slope/intercept transform")
+
+
+def test_apply_calibration_correction_clamps_to_the_real_valid_range():
+    extreme = {"slope": 3.0, "intercept": 0.5}   # a deliberately extreme, unrealistic correction
+    assert R.apply_calibration_correction(0.90, extreme) <= 0.99   # would otherwise exceed 1.0
+    assert R.apply_calibration_correction(0.01, {"slope": 1.0, "intercept": -0.5}) >= 0.01   # would otherwise go negative
+    print("✓ apply_calibration_correction clamps to [0.01, 0.99] — a correction can nudge a number, never claim false certainty")
+
+
 # ----------------------------------------------------------------- _pearson_r
 def test_pearson_r_perfect_positive_correlation():
     xs = [1, 2, 3, 4, 5]

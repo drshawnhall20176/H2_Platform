@@ -4,10 +4,24 @@ test_projections.py — offline tests for the projection engine (seeded, determi
     python test_projections.py     # or: pytest test_projections.py
 """
 
+import os
+import tempfile
+
 import numpy as np
 import pytest
 import projections as P
 import mlb_engine as E
+import calibration_corrections as CC
+
+# build_best_bets now looks up a real calibration correction per market (see projections.py's
+# own comment at its call site) via CC.latest_fit, which resolves to CC.DB_PATH when no explicit
+# db_path is passed -- exactly what every one of this file's existing tests does, since they
+# were written before this feature existed and have no reason to know about it. Redirected here,
+# ONCE, for the whole test session, to a real OS temp path -- matching this codebase's own
+# established convention (confirmed: no existing test anywhere touches betlog.py's real default
+# path either, always an explicit temp db_path) -- so running this test file never creates or
+# touches a real file under this repo's own data/ directory as a side effect.
+CC.DB_PATH = os.path.join(tempfile.gettempdir(), "h2_test_calibration_corrections.db")
 
 
 def _slugger():
@@ -1184,6 +1198,79 @@ def test_build_best_bets_ranks_and_reasons():
     assert "platoon" in top["Why"] and "weather" in top["Why"]
     # no "won't homer" plays
     assert not any(p["Market"] == "Batter HR" and p["Side"] == "Under" for p in plays)
+
+
+# ----------------------------------------------------------------- calibration correction wiring
+def _hitter_row_for_hr(hr_pct=0.30):
+    return dict(Hitter="Slugger", Team="A", GameLabel="A @ B", Hand="L",
+               **{"Opp Hand": "R", "Opp Pitcher": "Ace"}, Advantage="Advantage",
+               _weather_hr=1.0, Due=0.0, **{"HR%": hr_pct, "TB1.5%": 0.49, "Hit%": 0.70, "SO Prob": 0.55})
+
+
+def test_build_best_bets_applies_a_real_stored_calibration_correction():
+    # THE actual proof this closes the loop: a real, recorded correction for "Batter HR" must
+    # show up in the real ModelProb of a real generated play -- not just be stored somewhere
+    # unused. +0.05 flat nudge, matching this exact scenario already hand-verified manually
+    # before this test existed.
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "cc.db")
+        orig_path = CC.DB_PATH
+        CC.DB_PATH = db
+        try:
+            fit = {"slope": 1.0, "intercept": 0.05, "raw_slope": 1.0, "raw_intercept": 0.05,
+                  "n": 250, "weight": 0.71}
+            CC.record_fit("MLB", "Batter HR", fit, min_n_used=100, db_path=db)
+            plays = P.build_best_bets([_hitter_row_for_hr(hr_pct=0.30)], [])
+        finally:
+            CC.DB_PATH = orig_path
+
+    hr_play = next(p for p in plays if p["Market"] == "Batter HR")
+    assert abs(hr_play["ModelProb"] - 0.35) < 1e-9, (
+        f"raw HR% was 0.30, a real +0.05 correction is stored -- expected ModelProb 0.35, got {hr_play['ModelProb']}")
+    print("✓ build_best_bets applies a real, stored calibration correction to the actual generated play's ModelProb")
+
+
+def test_build_best_bets_conviction_reflects_the_corrected_modelprob_not_the_raw_one():
+    # Conviction = ModelProb / reference rate -- if the correction were applied to ModelProb but
+    # NOT flow through to Conviction (a real, plausible ordering bug -- e.g. computing Conviction
+    # from the pre-correction probability by accident), Grade/ranking downstream would silently
+    # disagree with the ModelProb shown right next to it on the same play.
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "cc.db")
+        orig_path = CC.DB_PATH
+        CC.DB_PATH = db
+        try:
+            fit = {"slope": 1.0, "intercept": 0.05, "raw_slope": 1.0, "raw_intercept": 0.05,
+                  "n": 250, "weight": 0.71}
+            CC.record_fit("MLB", "Batter HR", fit, min_n_used=100, db_path=db)
+            corrected_plays = P.build_best_bets([_hitter_row_for_hr(hr_pct=0.30)], [])
+        finally:
+            CC.DB_PATH = orig_path
+        uncorrected_plays = P.build_best_bets([_hitter_row_for_hr(hr_pct=0.30)], [])   # no CC row for this fresh temp path
+
+    corrected = next(p for p in corrected_plays if p["Market"] == "Batter HR")
+    uncorrected = next(p for p in uncorrected_plays if p["Market"] == "Batter HR")
+    assert corrected["ModelProb"] > uncorrected["ModelProb"]
+    assert corrected["Conviction"] > uncorrected["Conviction"], (
+        "Conviction must move WITH the corrected ModelProb, not silently stay based on the raw one")
+    print("✓ Conviction (and therefore Grade/ranking) correctly reflects the corrected ModelProb, not a stale raw value")
+
+
+def test_build_best_bets_is_a_real_no_op_when_no_correction_exists():
+    # The genuine, expected state right now for essentially every market -- confirmed directly,
+    # not just inferred from the other 285 tests in this file happening to still pass.
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "cc.db")   # a real, empty temp DB -- no fit ever recorded
+        orig_path = CC.DB_PATH
+        CC.DB_PATH = db
+        try:
+            plays = P.build_best_bets([_hitter_row_for_hr(hr_pct=0.30)], [])
+        finally:
+            CC.DB_PATH = orig_path
+
+    hr_play = next(p for p in plays if p["Market"] == "Batter HR")
+    assert hr_play["ModelProb"] == 0.30   # untouched -- exactly the raw HR%, no correction applied
+    print("✓ build_best_bets is a genuine no-op when no real correction has been fit for a market yet")
 
 
 def test_build_best_bets_includes_new_markets():

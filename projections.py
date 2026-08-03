@@ -31,6 +31,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from grading import GRADE_THRESHOLDS, conviction_to_grade, organize_graded_picks, grade_accuracy_by_letter  # noqa: F401
+import retro as R
+import calibration_corrections as CC
  
 # ---- per-PA outcome model --------------------------------------------------
 OUTCOMES = ["out_play", "k", "bb", "single", "double", "triple", "hr"]
@@ -2696,6 +2698,25 @@ def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict],
     the Edge Board and let the proof layer (CLV/calibration) be the judge."""
     plays: List[Dict] = []
 
+    # THE closed feedback loop, added directly on request: real accumulated Retrospective
+    # grading (persisted by grading_history.py) gets periodically turned into a real, shrunk
+    # correction per market (retro.fit_market_calibration, run by refresh_calibration.py on a
+    # weekly cadence) and stored (calibration_corrections.py). Looked up ONCE per market here,
+    # not once per play -- a full slate touches every market at most once per hitter/pitcher
+    # loop below, so pre-fetching avoids a real, repeated DB round-trip per player for no reason.
+    # THE ONE SHARED INSERTION POINT: this is the single place ModelProb gets finalized for
+    # every play this function produces, and every page on this platform (Top Leans, Graded
+    # Picks, Suggested Parlays, Speculative Basket) already draws its own plays from THIS
+    # function's output -- correcting it here, once, means every one of those pages inherits the
+    # correction automatically. No per-page wiring, by construction, not by coincidence.
+    #
+    # A GENUINE NO-OP TODAY, ON PURPOSE: with real accumulated history still thin, calibration_
+    # corrections.latest_fit returns None for essentially every market right now, and retro.
+    # apply_calibration_correction passes raw_prob straight through unchanged whenever correction
+    # is None -- see either function's own docstring. This starts contributing real value on its
+    # own as real graded history accumulates, with no further code change required here.
+    _corrections = {m: CC.latest_fit("MLB", m) for m in BEST_BET_REF}
+
     # (market, probability column, line field, line-source field) -- line/source now read PER
     # ROW (each hitter's own real line, not one fixed literal for every hitter in this market).
     batter_specs = [
@@ -2724,6 +2745,7 @@ def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict],
             line = r.get(line_field, DEFAULT_LINES.get(market, 0.5))
             line_source = r.get(source_field, "default")
             side, sp, ref_s = _favored_side(p, BEST_BET_REF[market])
+            sp = R.apply_calibration_correction(sp, _corrections.get(market))
             if market == "Batter HR" and side == "Under":
                 continue  # "won't homer" isn't a real play
             _price, _price_source, _price_book = _real_price_or_fair(
@@ -2789,6 +2811,7 @@ def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict],
             line = r.get(line_field, DEFAULT_LINES.get(market, 0.5))
             line_source = r.get(source_field, "default")
             side, sp, ref_s = _favored_side(p, BEST_BET_REF[market])
+            sp = R.apply_calibration_correction(sp, _corrections.get(market))
             _price, _price_source, _price_book = _real_price_or_fair(
                 offers, r["Pitcher"], market, side, sp, preferred_book)
             _ref, _ref_source = _real_reference_or_typical(

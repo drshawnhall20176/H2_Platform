@@ -18,6 +18,8 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 
+import numpy as np
+
 
 def trading_dates_ending_yesterday(n_days: int, as_of: Optional[str] = None) -> List[str]:
     """The last n_days real calendar dates, as "YYYY-MM-DD" strings, ending at YESTERDAY
@@ -167,6 +169,98 @@ def _calibration(graded: List[Dict], n_bins: int = 5) -> List[Dict]:
                     "actual": round(sum(1 for g in grp if g["Hit"]) / len(grp), 3),
                     "n": len(grp)})
     return out
+
+
+# ---- calibration-based recalibration (the closed feedback loop) ------------
+# Confirmed directly with the person building this platform: 100 real graded plays in a market
+# before ANY correction is even attempted -- below that, fit_market_calibration returns None and
+# apply_calibration_correction is a no-op (raw_prob passed straight through, unchanged).
+CALIBRATION_MIN_N = 100
+
+# Same shrinkage-to-prior STRUCTURE as projections._shrink (this module's own sibling concept,
+# not a new philosophy invented here) -- at exactly CALIBRATION_MIN_N real plays, the fitted
+# correction is applied at HALF its own fitted strength (n / (n + prior) = 100/200 = 0.5), climbing
+# toward full strength only as real n grows well past the floor (500 plays -> ~83%, 1000 -> ~91%).
+# A hard cliff at the floor (0% correction at 99 plays, 100% at 100) would treat 100 real plays as
+# meaningfully different from 99, which they aren't -- this ramps instead, the same real reasoning
+# _shrink's own comment gives for why sample-size-weighted blending beats a hard threshold.
+CALIBRATION_SHRINK_PRIOR = 100
+
+
+def fit_market_calibration(graded_plays: List[Dict], min_n: int = CALIBRATION_MIN_N,
+                           prior: float = CALIBRATION_SHRINK_PRIOR, n_bins: int = 10) -> Optional[Dict]:
+    """Fit a real, SHRUNK linear correction (actual ~ slope * predicted + intercept) from a real
+    pile of graded plays -- the actual mechanism behind the closed feedback loop: Retrospective's
+    own grading, persisted by grading_history.py, periodically turned into a correction applied
+    back onto tomorrow's own ModelProb via apply_calibration_correction below, at the ONE shared
+    point (projections.build_best_bets) every page (Top Leans, Graded Picks, Suggested Parlays,
+    Speculative Basket) already draws its plays from -- fix it once, here, and every one of those
+    inherits the fix automatically, with no separate per-page wiring.
+
+    DELIBERATELY A SIMPLE WEIGHTED LINEAR FIT ON _calibration'S OWN BUCKETS, not a logistic/Platt
+    fit -- this platform doesn't depend on scikit-learn (confirmed: it's not in requirements.txt,
+    despite appearing in a deploy log as someone else's transitive dependency), and a straight-
+    line correction on real bucketed predicted-vs-actual data is exactly as auditable as every
+    other piece of math on this platform already is: "our ~40% calls have actually been landing
+    around 47%, so nudge accordingly" is a sentence a subscriber can follow. A hidden 2-parameter
+    logistic fit would not meaningfully out-perform this at the sample sizes this floor is even
+    considering, and would cost real explainability for no real accuracy gain.
+
+    Returns None (an honest "not enough real evidence yet," never a guessed correction) when
+    fewer than min_n real settled plays exist, or when fewer than 2 real calibration buckets have
+    any data to fit a line through at all. Otherwise returns {"slope", "intercept" (the REAL,
+    shrinkage-weighted values to apply), "raw_slope", "raw_intercept" (the un-shrunk fit, kept for
+    audit/display so a person can see how much the shrinkage itself pulled the correction back),
+    "n" (real settled plays this was fit on), "weight" (the real shrinkage weight applied, 0-1)}."""
+    settled = [g for g in graded_plays if g.get("Hit") is not None]
+    n = len(settled)
+    if n < min_n:
+        return None
+
+    buckets = _calibration(settled, n_bins=n_bins)
+    if len(buckets) < 2:
+        return None   # can't fit a real line through fewer than 2 real points
+
+    xs = np.array([b["predicted"] for b in buckets], dtype=float)
+    ys = np.array([b["actual"] for b in buckets], dtype=float)
+    ws = np.array([b["n"] for b in buckets], dtype=float)
+
+    # Closed-form WEIGHTED simple linear regression (actual ~ slope*predicted + intercept),
+    # written out explicitly rather than via a general matrix solve -- 2 real unknowns, plain
+    # enough to read and verify by eye, matching every other formula on this platform.
+    sw, swx, swy = ws.sum(), (ws * xs).sum(), (ws * ys).sum()
+    swxx, swxy = (ws * xs * xs).sum(), (ws * xs * ys).sum()
+    denom = sw * swxx - swx * swx
+    if denom == 0:
+        return None   # every real bucket sits at the identical predicted value -- no real slope to fit
+    raw_slope = (sw * swxy - swx * swy) / denom
+    raw_intercept = (swy - raw_slope * swx) / sw
+
+    weight = n / (n + prior)
+    slope = 1.0 + weight * (raw_slope - 1.0)
+    intercept = 0.0 + weight * (raw_intercept - 0.0)
+
+    return {"slope": round(float(slope), 4), "intercept": round(float(intercept), 4), "n": n,
+           "raw_slope": round(float(raw_slope), 4), "raw_intercept": round(float(raw_intercept), 4),
+           "weight": round(float(weight), 3)}
+
+
+def apply_calibration_correction(raw_prob: Optional[float], correction: Optional[Dict]) -> Optional[float]:
+    """Apply a fitted correction (fit_market_calibration's own output) to ONE real ModelProb.
+    correction=None (no real fit exists yet for this market -- the common case until real volume
+    accumulates) is a genuine no-op: raw_prob passed straight through, unchanged, never a guessed
+    adjustment. raw_prob=None also passes through unchanged (nothing to correct).
+
+    Clamped to [0.01, 0.99] -- the SAME real floor/ceiling _shrink-derived probabilities are
+    already clamped to elsewhere on this platform (a probability of exactly 0 or 1 is never
+    honestly knowable), so a correction can nudge a number but can never produce a claimed
+    certainty the model itself never actually has."""
+    if correction is None or raw_prob is None:
+        return raw_prob
+    p = correction["slope"] * raw_prob + correction["intercept"]
+    return min(max(p, 0.01), 0.99)
+
+
  
  
 def grade_slate(plays: List[Dict], results: Dict[int, Dict]) -> Tuple[List[Dict], Dict]:
