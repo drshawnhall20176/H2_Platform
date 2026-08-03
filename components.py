@@ -398,7 +398,8 @@ def _schedule_game_row(g: dict, color: str, columns: str, show_roster: bool) -> 
                                 "background:rgba(255,255,255,0.025);")
 
 
-def todays_schedule_board(result: Optional[dict], icon: str, label: str) -> None:
+def todays_schedule_board(result: Optional[dict], icon: str, label: str,
+                          heading: Optional[str] = None) -> None:
     """Renders schedule_board.todays_schedule()'s own return shape -- conference (and division,
     where that data exists) sections, each game sorted chronologically within its group. result
     is None for a sport schedule_board.py doesn't cover (NCAAMB, UFC) or that had a live fetch
@@ -406,6 +407,12 @@ def todays_schedule_board(result: Optional[dict], icon: str, label: str) -> None
     at all rather than render an empty section, same "hidden, not shown broken" posture used
     elsewhere on this platform. Renders a plain, honest "no games today" message for a real empty
     schedule (a legitimate off-day), which IS worth showing, unlike a None result.
+
+    heading: None (the default) preserves the exact original "Today's {label} Schedule" text --
+    Home.py's own real usage always shows today, so that wording is still correct there. Added
+    directly on request for League Schedules, which lets a person browse ANY real date/week, not
+    just today -- passing an explicit heading (e.g. "Aug 12, 2026 — MLB Schedule") there avoids
+    the real, confusing "Today's Schedule" header sitting above a genuinely different date.
 
     CONFERENCE BOXES LAID OUT SIDE BY SIDE, not stacked full-width -- directly reported feedback:
     stacking wasted real estate on a wide screen, and would get genuinely painful for a many-
@@ -429,7 +436,7 @@ def todays_schedule_board(result: Optional[dict], icon: str, label: str) -> None
     everywhere else on this platform, not a separately-styled, flatter-looking bolt-on."""
     if result is None:
         return
-    section_header(icon, f"Today's {label} Schedule")
+    section_header(icon, heading if heading is not None else f"Today's {label} Schedule")
 
     grouped = result["grouped"]
     other = result["other"]

@@ -320,14 +320,43 @@ def test_league_schedules_registered_and_universal():
     print("✓ League Schedules (28) is registered in meta/SECTION_OF and deliberately absent from sport_only_leads")
 
 
+def test_league_schedules_merge_combines_multiple_dates_without_dropping_or_duplicating():
+    # THE real, new logic this rebuild added: an NFL/NCAAF week spans several real calendar
+    # dates, but schedule_board.todays_schedule() is scoped to ONE date -- _merge_schedule_
+    # results combines several of its real outputs into one. Executed directly from the real
+    # file source, not a duplicate reimplementation, so this actually tests the shipped function.
+    import ast
+    src = (_HERE / "views" / "28_League_Schedules.py").read_text()
+    tree = ast.parse(src)
+    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_merge_schedule_results")
+    ns: dict = {}
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), "<league_schedules_merge>", "exec"), ns)
+    merge = ns["_merge_schedule_results"]
+
+    thu = {"grouped": {"AFC": {"East": [{"home": "Buffalo Bills", "away": "Miami Dolphins"}]}},
+          "other": [], "has_divisions": True}
+    sun = {"grouped": {"AFC": {"East": [{"home": "NY Jets", "away": "New England Patriots"}]},
+                      "NFC": {"West": [{"home": "SF 49ers", "away": "Seattle Seahawks"}]}},
+          "other": [{"home": "Unmapped Team", "away": "Other Team"}], "has_divisions": True}
+    merged = merge([thu, sun, None])   # None (a real possible per-date result) must not crash the merge
+
+    assert len(merged["grouped"]["AFC"]["East"]) == 2   # both real Thursday AND Sunday AFC East games kept, not overwritten
+    assert len(merged["grouped"]["NFC"]["West"]) == 1
+    assert len(merged["other"]) == 1
+    assert merged["has_divisions"] is True
+    print("✓ _merge_schedule_results correctly combines multiple real per-date results across a week, dropping nothing, duplicating nothing")
+
+
+
 def test_league_schedules_view_file_uses_platform_conventions_and_no_gate():
     view_path = _HERE / "views" / "28_League_Schedules.py"
     assert view_path.exists(), "views/28_League_Schedules.py must exist"
     src = view_path.read_text()
 
     assert "C.base_css()" in src
-    assert "C.page_header(" in src
-    assert "sports.active()" in src
+    assert "C.hero_banner(" in src   # landing-page tier styling, matching Home.py/Command Center
+    assert "sports.enabled_sports()" in src   # Home.py's own real sport-tab pattern, reused not reinvented
+    assert "st.session_state[\"sport\"]" in src   # same session_state key Home.py's own tabs use -- one shared selector, not a page-local copy
     # Deliberately NO require_sport/require_live_engine gate -- this page must work for every
     # sport (gracefully degrading for one with no real get_schedule, e.g. UFC), never blocked at
     # the door the way a sport-specific/projections-only page correctly is.
@@ -422,6 +451,18 @@ def test_first_innings_totals_offers_both_real_dk_windows():
         "First 3 Innings is a real, confirmed market, not a fabricated default")
     print("✓ First Innings Totals offers both real DK windows (First 3 Innings and First 5 "
          "Innings), matching a real confirmed DK bet slip")
+
+
+def test_first_innings_totals_offers_all_games_option():
+    # Added directly on request: the Game dropdown must offer a real "All Games" choice (a
+    # full-slate overview table, both sides, every game in the current time-slot filter) as well
+    # as picking one specific game. Confirmed by source, not just that the string appears
+    # somewhere -- it must actually be the FIRST option in the selectbox's own choice list.
+    src = (_HERE / "views" / "27_MLB_First_Innings_Totals.py").read_text()
+    assert 'game_pick = st.selectbox("Game", ["All Games"] + games_present' in src, (
+        "the Game dropdown must offer \"All Games\" as its first real choice")
+    assert 'if game_pick == "All Games":' in src, "the page must actually branch on the All Games choice, not just list it"
+    print("\u2713 First Innings Totals offers a real \"All Games\" option in the Game dropdown, and branches on it")
 
 
 def test_first_innings_totals_view_wires_bet_log():
