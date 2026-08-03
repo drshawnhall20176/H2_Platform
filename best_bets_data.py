@@ -358,9 +358,15 @@ def build_mlb_board(date_str: str, fip_constant: float, odds_api_key: Optional[s
     import statcast_data as SC
     import weather as WX
 
-    @st.cache_data(ttl=3600, show_spinner=False)
-    def load_statcast():
-        return SC.load()
+    # load_statcast (a local @st.cache_data wrapper around SC.load()) consolidated into
+    # statcast_data.load_cached — this exact wrapper used to be independently redefined in 6
+    # places platform-wide (this one included), each its own separate, unshared cache entry
+    # despite doing identical real work. Highest-value of the 6: this IS the shared board-
+    # building pipeline every page (Best Bets, Graded Picks, Command Center, Suggested Parlays,
+    # Speculative Basket, Retrospective, Media Room, Podcast Studio) already funnels through, so
+    # this single fix is what actually makes the other 5 pages' own consolidation matter — before
+    # this, even build_mlb_board's OWN Statcast read was its own unshared cache. See that
+    # function's own docstring for the full real, confirmed finding.
 
     @st.cache_data(ttl=1800, show_spinner=False)
     def load_weather(meta_keys: tuple):
@@ -401,7 +407,7 @@ def build_mlb_board(date_str: str, fip_constant: float, odds_api_key: Optional[s
         return {r["player_id"]: r.get("consecutive_games_started") for r in workload_rows}
 
     rows, meta = E.build_slate(date_str, fip_constant)
-    sc, k = load_statcast()
+    sc, k = SC.load_cached()
     wx = load_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
 
     # Split stat overrides -- when venue_split or time_split is set, replace each pitcher's

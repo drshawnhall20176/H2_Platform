@@ -68,7 +68,7 @@ def test_load_mlb_best_bets_board_full_pipeline_runs_and_blends():
     with patch.object(BBD.E, "build_slate", lambda date_str, fip: ([fake_row], fake_meta)), \
         patch.object(BBD.E, "get_bullpen_aggregate_stat",
                     lambda tid, exclude_pid=None, fip_constant=3.10: good_pen_stat), \
-        patch("statcast_data.load", lambda: ({}, None)), \
+        patch("statcast_data.load", lambda *a, **k: ({}, None)), \
         patch("weather.get_game_weather", lambda *a, **k: None):
         plays, meta, available_books = BBD.load_mlb_best_bets_board("2026-07-18", BBD.E.FIP_CONSTANT_DEFAULT)
 
@@ -88,7 +88,7 @@ def test_load_mlb_best_bets_board_returns_meta_not_just_count():
 
     with patch.object(BBD.E, "build_slate", lambda date_str, fip: ([fake_row], fake_meta)), \
         patch.object(BBD.E, "get_bullpen_aggregate_stat", lambda *a, **k: None), \
-        patch("statcast_data.load", lambda: ({}, None)), \
+        patch("statcast_data.load", lambda *a, **k: ({}, None)), \
         patch("weather.get_game_weather", lambda *a, **k: None):
         plays, meta, available_books = BBD.load_mlb_best_bets_board("2026-07-18", BBD.E.FIP_CONSTANT_DEFAULT)
 
@@ -103,7 +103,7 @@ def test_load_mlb_graded_picks_board_returns_rows_too():
 
     with patch.object(BBD.E, "build_slate", lambda date_str, fip: ([fake_row], fake_meta)), \
         patch.object(BBD.E, "get_bullpen_aggregate_stat", lambda *a, **k: None), \
-        patch("statcast_data.load", lambda: ({}, None)), \
+        patch("statcast_data.load", lambda *a, **k: ({}, None)), \
         patch("weather.get_game_weather", lambda *a, **k: None):
         plays, meta, rows, available_books = BBD.load_mlb_graded_picks_board("2026-07-18", BBD.E.FIP_CONSTANT_DEFAULT)
 

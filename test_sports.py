@@ -2,6 +2,7 @@
 the require_live_engine guard that lets engine-backed pages degrade gracefully for sports that
 aren't wired end-to-end yet) — plus the owner/public audience gate in streamlit_app.py."""
 
+import inspect
 import re
 from pathlib import Path
 
@@ -662,6 +663,45 @@ def test_bet_log_and_track_record_call_the_trading_gate():
     assert "sports.require_trading_access(" in bet_log_src
     assert "sports.require_trading_access(" in track_record_src
     print("\u2713 both Bet Log and Track Record actually call sports.require_trading_access, confirmed by reading the real source, not assumed")
+
+
+# ----------------------------------------------------------------- require_trading_access
+def test_require_trading_access_true_when_already_unlocked():
+    import streamlit as st
+    st.session_state["trading_unlocked"] = True
+    assert S.require_trading_access("Bet Log") is True
+    st.session_state.pop("trading_unlocked", None)   # reset for other tests
+    print("✓ require_trading_access reuses session_state, so a correct password only needs to be entered once per session")
+
+
+def test_require_trading_access_false_before_anything_is_entered():
+    import streamlit as st
+    st.session_state.pop("trading_unlocked", None)
+    st.session_state.pop("trading_password_input", None)
+    assert S.require_trading_access("Bet Log") is False
+    assert not st.session_state.get("trading_unlocked")
+    print("✓ require_trading_access stays locked (no crash) before any password has been entered")
+
+
+def test_require_trading_access_actually_renders_and_checks_a_password_input():
+    # THE regression test for the real, confirmed bug this fixes, verified by reading the actual
+    # source rather than asserted from a return value -- and deliberately so: st.text_input can't
+    # be seeded through st.session_state outside a real `streamlit run` context (confirmed
+    # directly -- session state does not function for widget resolution in bare/pytest mode), so
+    # a call-and-check-the-return-value test could only ever prove the "not yet entered" and
+    # "already unlocked" branches, exactly the two branches that were NEVER broken. The actual
+    # bug was structural: require_trading_access rendered the st.warning explaining a password
+    # was needed, but never rendered the st.text_input to type one INTO, and never called this
+    # module's own _check_trading_password at all -- meaning trading_unlocked could never become
+    # True by any real path, for anyone, ever. Reading the real source is the only way to
+    # actually confirm all three pieces now exist together, not just that the function returns
+    # something plausible in a context where the interesting branch can't be exercised.
+    src = inspect.getsource(S.require_trading_access)
+    assert 'st.text_input(' in src, "require_trading_access must actually render a password entry box"
+    assert 'type="password"' in src, "the entry box must mask input, not show the password in plain text"
+    assert '_check_trading_password(' in src, "a typed entry must actually be checked against the real secret"
+    assert 'st.session_state["trading_unlocked"] = True' in src, "a correct entry must actually unlock the session"
+    print("✓ require_trading_access genuinely renders a password box, checks it, and unlocks on success — confirmed by reading its real source, the same way the original bug (a warning with no way to ever act on it) was found")
 
 
 def test_mlb_market_map_values_all_present_in_markets():

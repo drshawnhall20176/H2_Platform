@@ -459,12 +459,30 @@ def require_trading_access(page_name: str = "This page") -> bool:
     Reuses st.session_state so a correct password only needs to be entered once per browser
     session, not re-typed on every page navigation within it. Returns True once unlocked (caller
     proceeds normally); returns False and renders the password prompt itself (caller should
-    st.stop() right after, matching require_live_engine/require_sport's own return contract)."""
+    st.stop() right after, matching require_live_engine/require_sport's own return contract).
+
+    A REAL, CONFIRMED FIX, not the original design: this used to render only the warning text
+    above and never the actual text_input a person would type a password INTO -- meaning
+    trading_unlocked could never become True by any real path, and Bet Log/Track Record were
+    permanently inaccessible to everyone, forever, with no visible way to unlock them. Caught
+    directly from a real report ("Bet log and Track record do not have the entry box for the
+    password"). Now actually renders the input, checks it against the real secret via this
+    module's own _check_trading_password, and sets session_state on a correct entry -- in the
+    SAME script run the correct password is submitted, so the caller's own
+    `if not require_trading_access(...): st.stop()` pattern proceeds immediately with no extra
+    rerun/flicker, matching every other require_* gate's own return-True-this-run contract."""
     import streamlit as st
     if st.session_state.get("trading_unlocked"):
         return True
     st.warning(f"🔒 {page_name} needs a separate password — this is real trading history, kept "
               f"apart from the rest of the owner build.")
+    entered = st.text_input("Trading password", type="password", key="trading_password_input")
+    if entered:
+        if _check_trading_password(entered, st.secrets.get("TRADING_PASSWORD")):
+            st.session_state["trading_unlocked"] = True
+            return True
+        st.error("Incorrect password.")
+    return False
 
 def team_trend_tag(recent: Optional[float], season: Optional[float]) -> Tuple[str, Optional[float]]:
     """Turns a team's own recent scoring output vs. their season norm into one of 3 tags -- the

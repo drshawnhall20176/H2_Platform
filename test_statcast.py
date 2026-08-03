@@ -6,12 +6,15 @@ test_statcast.py — offline tests for the Statcast layer (no Savant, no pybaseb
 
 import os
 import tempfile
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 import projections as P
 import statcast_data as SC
+
+_HERE = Path(__file__).parent
 
 
 def _write_cache(tmp):
@@ -38,6 +41,76 @@ def test_load_and_calibration():
         assert k is not None and 0.4 < k < 0.8           # plausible barrel->HR factor
         # elite barrels map to a much higher expected HR rate than a slap hitter
         assert SC.expected_hr_rate(lookup[1]["brl_pa"], k) > SC.expected_hr_rate(lookup[3]["brl_pa"], k)
+
+
+# ----------------------------------------------------------------- load_cached
+def test_load_cached_returns_same_shape_as_load():
+    # load_cached is a thin @st.cache_data wrapper around load() -- confirms it actually
+    # delegates correctly, not just that it exists.
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _write_cache(tmp)
+        lookup, k = SC.load_cached(path)
+        assert len(lookup) == 4
+        assert k is not None and 0.4 < k < 0.8
+    print("✓ load_cached delegates to load() correctly, same real return shape")
+
+
+def test_load_cached_is_genuinely_cached():
+    # THE regression test for the real, confirmed finding this function exists to fix: this
+    # exact @st.cache_data(ttl=3600) wrapper around SC.load() used to be independently redefined
+    # as a local nested closure in 6 separate places platform-wide (best_bets_data.build_mlb_
+    # board, and the views for Pitching Lab, Media Room, Edge Board, Podcast Studio, Dinger
+    # Engine) -- Streamlit keys cache_data on a function's own identity, so those 6 identical-
+    # bodied wrappers were 6 UNSHARED cache entries, and a single real session visiting several
+    # of those pages in a row re-read and re-parsed the same statcast_batters.csv from disk up to
+    # 6 separate times. Proven here directly, not just asserted from the decorator being present:
+    # call once, then rewrite the SAME path with different content and call again with the
+    # IDENTICAL path arg -- a genuine cache hit must return the ORIGINAL (now stale) result.
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _write_cache(tmp)
+        first_lookup, first_k = SC.load_cached(path)
+        assert len(first_lookup) == 4
+
+        # Overwrite the same path with a genuinely different dataset (2 rows instead of 4, a
+        # different calibration k) -- same file path, so this is purely a caching question.
+        df = pd.DataFrame([
+            dict(player_id=9, name="New Guy", pa=600, brl_pa=0.100, brl_pct=0.20,
+                 hardhit=0.55, avg_ev=94.0, slg=0.500, xslg=0.510, xiso=0.220),
+        ])
+        df.to_csv(path, index=False)
+        second_lookup, second_k = SC.load_cached(path)
+
+    assert len(second_lookup) == 4          # still the FIRST call's 4 rows, not the new 1 row
+    assert 9 not in second_lookup           # the new player was never actually read
+    assert second_k == first_k              # same k as the first call, not recomputed
+    print("✓ load_cached is genuinely cached — a repeated call with the identical path doesn't "
+         "re-read the file from disk, confirmed by the file's real content changing underneath it")
+
+
+def test_every_former_duplicate_call_site_now_uses_load_cached():
+    # Regression guard for the consolidation itself, not just that load_cached works in
+    # isolation -- a real risk otherwise: load_cached could be perfectly correct and simply not
+    # actually adopted everywhere, leaving some pages still paying their own separate, unshared
+    # SC.load() cost exactly as before. Checks every one of the 6 real call sites this session
+    # confirmed were independently redefining the identical wrapper: best_bets_data.py (the
+    # shared board-building pipeline every other page funnels through) and the views for
+    # Pitching Lab, Media Room, Edge Board, Podcast Studio, and Dinger Engine. Game Watch's own
+    # load_statcast_pitchers is deliberately NOT checked here -- it wraps load_pitchers(), a
+    # real, different dataset, correctly left as its own separate cache.
+    call_sites = [
+        _HERE / "best_bets_data.py",
+        _HERE / "views" / "7_#L01f3af_Pitching_Lab.py",
+        _HERE / "views" / "21_Media_Room.py",
+        _HERE / "views" / "15_#L01f4c8_Edge_Board.py",
+        _HERE / "views" / "22_Podcast_Studio.py",
+        _HERE / "views" / "8_#L01f4a3_Dinger_Engine.py",
+    ]
+    for path in call_sites:
+        src = path.read_text()
+        assert "SC.load_cached(" in src, f"{path.name} must call the shared SC.load_cached(), not a local wrapper"
+        assert "def load_statcast():" not in src, f"{path.name} still defines its own local load_statcast wrapper"
+    print(f"✓ all {len(call_sites)} former duplicate call sites now use the one shared "
+         "statcast_data.load_cached(), none still define their own local wrapper")
 
 
 def test_low_pa_excluded_from_calibration():
