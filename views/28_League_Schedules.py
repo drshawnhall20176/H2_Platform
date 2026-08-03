@@ -18,10 +18,15 @@ CONFERENCE/DIVISION GROUPING, REUSING schedule_board.py + components.todays_sche
 added directly on request, NOT reimplemented here. Those two already do this correctly (real
 per-sport conference/division reference tables, real lineup-confirmation status for MLB, a real
 "Other" bucket for any team missing from the reference data rather than silently dropped) for
-MLB/NBA/WNBA/NFL/NCAAF (schedule_board.SUPPORTED_SPORTS) -- this page's own earlier, simpler
-flat-list rendering is kept ONLY as the honest fallback for a sport outside that scope (NCAAMB:
-350+ Division I teams, no reference table sourced yet; UFC: individual bouts, not team matchups,
-already served by its own UFC Fight Card page).
+MLB/NBA/WNBA/NFL/NCAAF/NCAAMB (schedule_board.SUPPORTED_SPORTS) -- NCAAMB added directly on
+request too, using that SAME "Other" bucket rather than a fabricated 350+-team conference table
+(see schedule_board.py's own module docstring for the full reasoning). This page's own earlier,
+simpler flat-list rendering below is now a purely DEFENSIVE fallback -- every sport in this
+platform's registry that has a real get_schedule is also in schedule_board.SUPPORTED_SPORTS as of
+this fix, so there's no currently-reachable case for it, but it's kept (rather than deleted) for
+a future sport that gains get_schedule before schedule_board.py is updated for it -- the same
+"never silently disappears, lands somewhere reasonable" posture streamlit_app.py's own SECTION_OF
+catch-all already uses elsewhere on this platform.
 
 TWO GENUINELY DIFFERENT REAL SHAPES, HANDLED EXPLICITLY, NOT PAPERED OVER: NFL/NCAAF's own
 get_schedule(season) returns a WHOLE SEASON at once (these sports play once a week, so "browse
@@ -83,7 +88,7 @@ if not hasattr(E, "get_schedule"):
 WEEKLY_SPORTS = {"NFL", "NCAAF"}   # see this file's own module docstring for the real reasoning
 
 
-# ----------------------------------------------------------------- fallback flat renderer (NCAAMB etc.)
+# ----------------------------------------------------------------- fallback flat renderer (defensive; no currently-reachable case, see module docstring)
 def _team(g: dict, side: str) -> str:
     return g.get(f"{side}_name") or g.get(f"{side}_team") or "?"
 
@@ -134,10 +139,19 @@ if current in WEEKLY_SPORTS:
     season = st.number_input("Season", min_value=2015, max_value=2100, value=datetime.now().year, step=1)
 
     @st.cache_data(ttl=3600, show_spinner="Loading season schedule...")
-    def load_schedule(season_inner: int):
-        return E.get_schedule(int(season_inner))
+    def load_schedule(sport_key_inner: str, season_inner: int):
+        # sport_key_inner is a REAL, CONFIRMED FIX, not the original design: this function used
+        # to close over the page-level E (this sport's engine module) without taking the sport
+        # itself as an argument -- Streamlit's cache_data keys purely on a function's own
+        # arguments, never on outer/closure variables, so NFL and NCAAF (both WEEKLY_SPORTS,
+        # both commonly the same real season number) silently collided in the cache: whichever
+        # was loaded first in a session got reused for the OTHER sport too, mislabeled, until the
+        # 3600s TTL expired. Confirmed directly from a real report: the NCAAF tab was showing
+        # NFL's own real schedule. Every relevant piece of state a cached function's result
+        # actually depends on must be a real argument to it -- E was never safe to close over here.
+        return sports.get(sport_key_inner).engine.get_schedule(int(season_inner))
 
-    schedule = load_schedule(season)
+    schedule = load_schedule(current, season)
     if not schedule:
         st.info(f"No real schedule data available for the {int(season)} {_active.label} season yet.")
         st.stop()
@@ -182,10 +196,12 @@ else:
                                 heading=f"{date_str} — {_active.label} Schedule")
     else:
         @st.cache_data(ttl=300, show_spinner="Loading schedule...")
-        def load_schedule_for_date(date_str_inner: str):
-            return E.get_schedule(date_str_inner)
+        def load_schedule_for_date(sport_key_inner: str, date_str_inner: str):
+            # sport_key_inner: same real, confirmed fix as load_schedule above -- never close
+            # over the page-level E across a sport switch inside a cached function.
+            return sports.get(sport_key_inner).engine.get_schedule(date_str_inner)
 
-        games = load_schedule_for_date(date_str)
+        games = load_schedule_for_date(current, date_str)
         if not games:
             st.info(f"No {_active.label} games scheduled for {date_str}.")
             st.stop()
