@@ -1,0 +1,60 @@
+# Weekly calibration refresh — the automation behind the closed feedback loop.
+#
+# WHAT IT DOES:
+#   Once a week, runs refresh_calibration.py, which pulls the full real accumulated grading
+#   history (grading_history.py — every play Retrospective has graded and persisted, for every
+#   market, whether anyone bet it or not) and, for any (sport, market) with at least
+#   retro.CALIBRATION_MIN_N (100) real settled plays, fits a real, shrunk correction and records
+#   it via calibration_corrections.py. projections.build_best_bets (the one shared source Top
+#   Leans, Graded Picks, Suggested Parlays, and Speculative Basket all already draw their plays
+#   from) looks up and applies the latest correction automatically — no per-page wiring, and no
+#   redeploy needed for a new correction to take effect, since it's read from the database live.
+#
+# WEEKLY, NOT NIGHTLY, ON PURPOSE: a single day's slate is nowhere near enough real evidence to
+#   responsibly move a live coefficient without just chasing noise. refresh_calibration.py's own
+#   docstring has the full real reasoning. Confirmed directly with the person building this
+#   platform: 100 real settled plays before any correction is even attempted, and even then,
+#   real accumulated Retrospective grading takes real time to reach that floor per market — this
+#   is expected to be a genuine no-op for most markets for a while, by design, not a bug.
+#
+# REQUIRES DATABASE_URL (Settings -> Secrets and variables -> Actions) — same secret settle-
+#   results.yml and capture-closing-lines.yml already use, so grading history and fitted
+#   corrections land in the SAME database the deployed app reads from and writes to. Without it,
+#   refresh_calibration.py refuses to run and tells you so — no silent no-op.
+#
+# SCHEDULE: once a week is plenty — real calibration evidence doesn't meaningfully shift within a
+#   single week. Sunday early morning UTC, after a full week of grading has had a chance to
+#   accumulate and well outside any live slate's own real-time traffic.
+
+name: refresh-calibration
+
+on:
+  schedule:
+    - cron: "0 9 * * 0"   # 09:00 UTC Sunday (~4-5am ET depending on DST) — once a week
+  workflow_dispatch: {}    # manual "Run workflow" button (handy for testing)
+
+permissions:
+  contents: read            # no commit needed — reads and writes to the database only
+
+jobs:
+  refresh-calibration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        # Install the app's full pinned deps so every module the runner imports (retro, sports,
+        # grading_history, calibration_corrections, projections, and each sport's own engine)
+        # is guaranteed present — same reasoning settle-results.yml's own install step gives.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Refresh calibration corrections from real accumulated grading history
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python refresh_calibration.py
