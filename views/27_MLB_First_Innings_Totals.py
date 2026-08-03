@@ -99,8 +99,10 @@ if not games:
     st.info("Couldn't pair up both sides for any game on this date — try a different date.")
     st.stop()
 
-# Time slot filter narrows a busy night before picking ONE specific game — this page projects a
-# single side of a single game, so (unlike Bullpen Watch) there's no "all games" option here.
+# Time slot filter narrows a busy night before picking a game (or all of them, see the "All
+# Games" option below) — unlike Bullpen Watch's own slate-wide view, this page still needs a
+# side/game context for its single-play flow, so the slot filter stays useful even with "All
+# Games" available.
 for g in games:
     g["_slot"] = slot_of(game_dt(g["_game_date"]))
 slots_present = sorted({g["_slot"] for g in games}, key=lambda s: SLOT_ORDER.get(s, 9))
@@ -119,35 +121,22 @@ games_present = sorted(game_date_by_label, key=lambda lbl: game_date_by_label[lb
 
 
 def _game_label_fmt(lbl: str) -> str:
+    if lbl == "All Games":
+        return "All Games"
     dt = game_dt(game_date_by_label.get(lbl))   # already Eastern-localized by game_dt itself
     return lbl if dt is None else f"{dt.strftime('%-I:%M %p ET')} — {lbl}"
 
 
 with c_game:
-    game_pick = st.selectbox("Game", games_present, format_func=_game_label_fmt)
-
-selected_game = next(g for g in slot_games if g["label"] == game_pick)
-away_row, home_row = selected_game["away"], selected_game["home"]
-
-side_labels = {f"{away_row['Team']} (away)": "away", f"{home_row['Team']} (home)": "home"}
-side_pick = st.radio("Which side's runs?", list(side_labels.keys()), horizontal=True)
-batting_row = away_row if side_labels[side_pick] == "away" else home_row
-opposing_row = home_row if side_labels[side_pick] == "away" else away_row
+    # "All Games" first, added directly on request -- a real, meaningfully bigger read (every
+    # game in the current time-slot filter, both sides each), not a free toggle, so it's opt-in
+    # the same way the single-game button below already is, not a default.
+    game_pick = st.selectbox("Game", ["All Games"] + games_present, format_func=_game_label_fmt)
 
 market_pick = st.radio("Market", ["Team Total Runs - 1st 3 Innings", "Team Total Runs - 1st 5 Innings"],
                        horizontal=True)
 n_innings = 3 if market_pick.endswith("3 Innings") else 5
 market_name = MARKET_BY_N[n_innings]
-
-st.caption(f"Projecting **{batting_row['Team']}** runs scored in the first {n_innings} innings, "
-          f"facing **{opposing_row['Pitcher']}** ({opposing_row['Team']}).")
-
-if not st.button(f"🔄 Load {batting_row['Team']} first-{n_innings}-innings projection",
-                 help="Real cost: a schedule window plus one linescore fetch per recent game for "
-                     f"{batting_row['Team']}, plus one linescore fetch per recent start for "
-                     f"{opposing_row['Pitcher']}. Cached for 10 minutes once loaded."):
-    st.info("Press the button above to run this projection. Nothing is fetched until you do.")
-    st.stop()
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -162,6 +151,91 @@ def load_pitcher_allowed(pitcher_id: int, season: int, before_date: str, n_innin
 
 
 season = int(date_str[:4])
+
+if game_pick == "All Games":
+    # A full-slate OVERVIEW table, not the same single-play flow -- deliberately no side picker
+    # (both sides shown for every game), no manual line entry (a single typed line can't mean the
+    # same thing across teams with very different real scoring rates, so a fixed, honest 1.5
+    # reference is used for every row -- the same default value the single-game view itself
+    # starts on), and no Bet Log logging here (quick_log logs ONE specific pick; pick a specific
+    # game/side below instead to log it). REAL COST, STATED PLAINLY: roughly 4 real fetches per
+    # game (both teams' own recent scoring + both opposing starters' own recent runs allowed),
+    # not 2 -- genuinely bigger than the single-game button below, so still gated behind its own
+    # explicit button, never run automatically just because "All Games" was picked from the list.
+    REFERENCE_LINE = 1.5
+    st.caption(f"Every game in the **{slot_pick}** slot, both sides, first {n_innings} innings — "
+              f"checked against a fixed {REFERENCE_LINE:g}-run reference line for every row "
+              "(a single typed line can't mean the same thing across teams with different real "
+              "scoring rates). Pick a specific game above to check a custom line or log a pick.")
+
+    if not st.button(f"🔄 Load All Games first-{n_innings}-innings projections "
+                     f"({len(slot_games)} game(s), both sides)",
+                     help=f"Real cost: roughly 4 real fetches per game — both teams' own recent "
+                         f"scoring plus both opposing starters' own recent runs allowed — "
+                         f"{len(slot_games)} game(s) means real cost scales with slate size. "
+                         "Each fetch is cached for 10 minutes once loaded, and any game already "
+                         "checked individually above is already a cache hit here."):
+        st.info("Press the button above to run this projection. Nothing is fetched until you do.")
+        st.stop()
+
+    rows = []
+    progress = st.progress(0.0, text="Loading...")
+    for i, g in enumerate(slot_games):
+        for side_key, batting_row, opposing_row in (("away", g["away"], g["home"]),
+                                                     ("home", g["home"], g["away"])):
+            progress.progress((i + (0.5 if side_key == "home" else 0.0)) / len(slot_games),
+                              text=f"Loading {batting_row['Team']}...")
+            team_recent = load_team_recent(batting_row["_team_id"], date_str, n_innings)
+            pitcher_allowed = load_pitcher_allowed(opposing_row["_pid"], season, date_str, n_innings)
+            if not team_recent or not pitcher_allowed:
+                continue   # honestly skipped, not padded with a guessed row -- same "not enough
+                          # real recent data yet" case the single-game view surfaces explicitly
+            proj = P.project_team_first_innings_total(team_recent, pitcher_allowed,
+                                                       sims=P.DEFAULT_SIMS, seed=7)
+            if not proj:
+                continue
+            probs = P.prob_over_first_innings_line(proj["sim"], REFERENCE_LINE)
+            rows.append({
+                "Game": g["label"], "Team": batting_row["Team"],
+                "Opp Pitcher": opposing_row["Pitcher"],
+                "Own Rate": round(proj["team_rate"], 2),
+                "Opp Allowed Rate": round(proj["pitcher_allowed_rate"], 2),
+                "Projected Runs": round(proj["projected_runs"], 2),
+                f"P(Over {REFERENCE_LINE:g})": f"{probs['prob_over']:.0%}",
+                f"P(Under {REFERENCE_LINE:g})": f"{probs['prob_under']:.0%}",
+            })
+    progress.empty()
+
+    if not rows:
+        st.warning("Not enough real recent data to project any game in this slot yet.")
+        st.stop()
+
+    st.dataframe(rows, hide_index=True, width="stretch")
+    st.caption("Model-only — same real gap as the single-game view: this platform's own odds "
+              f"provider has no live price for this market. Simulated via a Poisson draw at "
+              f"each row's own blended rate, {P.DEFAULT_SIMS:,} trials, reproducible with the "
+              "same inputs.")
+    st.stop()
+
+selected_game = next(g for g in slot_games if g["label"] == game_pick)
+away_row, home_row = selected_game["away"], selected_game["home"]
+
+side_labels = {f"{away_row['Team']} (away)": "away", f"{home_row['Team']} (home)": "home"}
+side_pick = st.radio("Which side's runs?", list(side_labels.keys()), horizontal=True)
+batting_row = away_row if side_labels[side_pick] == "away" else home_row
+opposing_row = home_row if side_labels[side_pick] == "away" else away_row
+
+st.caption(f"Projecting **{batting_row['Team']}** runs scored in the first {n_innings} innings, "
+          f"facing **{opposing_row['Pitcher']}** ({opposing_row['Team']}).")
+
+if not st.button(f"🔄 Load {batting_row['Team']} first-{n_innings}-innings projection",
+                 help="Real cost: a schedule window plus one linescore fetch per recent game for "
+                     f"{batting_row['Team']}, plus one linescore fetch per recent start for "
+                     f"{opposing_row['Pitcher']}. Cached for 10 minutes once loaded."):
+    st.info("Press the button above to run this projection. Nothing is fetched until you do.")
+    st.stop()
+
+
 with st.spinner(f"Pulling {batting_row['Team']}'s recent first-{n_innings}-innings scoring..."):
     team_recent = load_team_recent(batting_row["_team_id"], date_str, n_innings)
 with st.spinner(f"Pulling {opposing_row['Pitcher']}'s recent first-{n_innings}-innings runs "
