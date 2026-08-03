@@ -4,7 +4,12 @@ test_weather.py — offline tests for weather math and parsing (no network).
     python test_weather.py    # or: pytest test_weather.py
 """
 
+import time
+from pathlib import Path
+
 import weather as W
+
+_HERE = Path(__file__).parent
 
 
 def test_wind_out_component():
@@ -107,6 +112,135 @@ def test_override_merge_corrects_defaulted_bearing():
     merged = W._merge_overrides(W._STATIC_STADIUMS, overrides)
     assert merged[111]["cf_bearing"] == 25      # corrected from the defaulted 0
     assert merged[111]["lat"] == 34.07          # API coords retained
+
+
+# ----------------------------------------------------------------- load_slate_weather
+def test_load_slate_weather_dedupes_by_venue():
+    # A doubleheader shares one park -- two games, same venue_id, must be ONE real fetch.
+    calls = []
+
+    def fake_get_game_weather(vid, gdate, vname=None):
+        calls.append(vid)
+        return {"venue_id": vid, "temp_f": 75}
+
+    orig = W.get_game_weather
+    W.get_game_weather = fake_get_game_weather
+    try:
+        meta_keys = ((12, "2026-06-28", "Coors Field"), (12, "2026-06-28", "Coors Field"))
+        result = W.load_slate_weather(meta_keys)
+    finally:
+        W.get_game_weather = orig
+
+    assert calls == [12]                       # fetched ONCE, not twice
+    assert result[12]["temp_f"] == 75
+    print("\u2713 load_slate_weather fetches each unique venue only once, even if it appears twice in meta_keys")
+
+
+def test_load_slate_weather_skips_none_venue_id():
+    calls = []
+
+    def fake_get_game_weather(vid, gdate, vname=None):
+        calls.append(vid)
+        return {"venue_id": vid}
+
+    orig = W.get_game_weather
+    W.get_game_weather = fake_get_game_weather
+    try:
+        meta_keys = ((None, "2026-06-28", None), (12, "2026-06-28", "Coors Field"))
+        result = W.load_slate_weather(meta_keys)
+    finally:
+        W.get_game_weather = orig
+
+    assert calls == [12]            # None venue never fetched
+    assert None not in result       # and never added to the output dict either
+    assert 12 in result
+    print("\u2713 load_slate_weather skips a missing venue_id entirely, same as every former local wrapper")
+
+
+def test_load_slate_weather_one_game_failure_doesnt_break_the_slate():
+    def flaky_get_game_weather(vid, gdate, vname=None):
+        if vid == 13:
+            raise ValueError("simulated real fetch failure")
+        return {"venue_id": vid, "temp_f": 80}
+
+    orig = W.get_game_weather
+    W.get_game_weather = flaky_get_game_weather
+    try:
+        meta_keys = ((12, "2026-06-28", "Coors Field"), (13, "2026-06-28", "Some Park"))
+        result = W.load_slate_weather(meta_keys)
+    finally:
+        W.get_game_weather = orig
+
+    assert result[12]["temp_f"] == 80    # the good game is unaffected
+    assert result[13] is None            # the failing game degrades to None, not a crash
+    print("\u2713 load_slate_weather isolates one game's real fetch failure \u2014 the rest of the slate still loads")
+
+
+def test_load_slate_weather_is_genuinely_parallel():
+    # THE regression test for the real, confirmed performance finding this function exists to
+    # fix: the 3 former local wrappers fetched one game at a time, sequentially. Proven here
+    # directly with real wall-clock timing, not just asserted from ThreadPoolExecutor being
+    # present in the source -- a simulated per-call delay across several "games" must complete in
+    # roughly ONE delay's worth of time (fanned out concurrently), not N delays' worth (run one
+    # after another). 8 games, 100ms simulated delay each: sequential would be ~800ms; parallel
+    # (max_workers=8) should land close to 100ms, generously bounded at 400ms to stay reliable on
+    # a loaded CI box without weakening the real point being proven.
+    def slow_get_game_weather(vid, gdate, vname=None):
+        time.sleep(0.1)
+        return {"venue_id": vid}
+
+    orig = W.get_game_weather
+    W.get_game_weather = slow_get_game_weather
+    try:
+        meta_keys = tuple((vid, "2026-06-28", f"Park {vid}") for vid in range(1, 9))   # 8 unique venues
+        t0 = time.perf_counter()
+        result = W.load_slate_weather(meta_keys)
+        elapsed = time.perf_counter() - t0
+    finally:
+        W.get_game_weather = orig
+
+    assert len(result) == 8
+    assert elapsed < 0.4, (f"took {elapsed:.2f}s for 8 games at 0.1s each \u2014 should be ~0.1s "
+                           "fanned out concurrently, not ~0.8s run one at a time")
+    print(f"\u2713 load_slate_weather is genuinely parallel \u2014 8 simulated 0.1s fetches completed in "
+         f"{elapsed:.2f}s, not the ~0.8s a sequential loop (the exact bug this fixes) would take")
+
+
+def test_load_slate_weather_is_cached():
+    calls = []
+
+    def counting_get_game_weather(vid, gdate, vname=None):
+        calls.append(vid)
+        return {"venue_id": vid, "temp_f": 70}
+
+    orig = W.get_game_weather
+    W.get_game_weather = counting_get_game_weather
+    try:
+        meta_keys = ((21, "2026-06-28", "Park A"),)
+        W.load_slate_weather(meta_keys)
+        W.load_slate_weather(meta_keys)   # identical args -- should be a cache hit, no new call
+    finally:
+        W.get_game_weather = orig
+
+    assert calls == [21]   # only ONE real underlying fetch across both calls
+    print("\u2713 load_slate_weather is genuinely cached \u2014 a repeated call with identical meta_keys doesn't re-fetch")
+
+
+def test_every_former_weather_call_site_now_uses_load_slate_weather():
+    # Regression guard for the consolidation itself, matching the same class of check already
+    # done for statcast_data.load_cached \u2014 confirms load_slate_weather is actually ADOPTED
+    # everywhere it needs to be, not just that it works correctly in isolation.
+    call_sites = [
+        _HERE / "best_bets_data.py",
+        _HERE / "views" / "15_#L01f4c8_Edge_Board.py",
+        _HERE / "views" / "8_#L01f4a3_Dinger_Engine.py",
+    ]
+    for path in call_sites:
+        src = path.read_text()
+        assert "load_slate_weather(" in src, f"{path.name} must call the shared weather.load_slate_weather()"
+        assert "def load_weather(meta_keys" not in src, f"{path.name} still defines its own local sequential load_weather wrapper"
+    print(f"\u2713 all {len(call_sites)} former duplicate weather call sites now use the one shared, "
+         "parallelized weather.load_slate_weather(), none still define their own local sequential wrapper")
 
 
 if __name__ == "__main__":

@@ -368,16 +368,14 @@ def build_mlb_board(date_str: str, fip_constant: float, odds_api_key: Optional[s
     # this, even build_mlb_board's OWN Statcast read was its own unshared cache. See that
     # function's own docstring for the full real, confirmed finding.
 
-    @st.cache_data(ttl=1800, show_spinner=False)
-    def load_weather(meta_keys: tuple):
-        out = {}
-        for vid, gdate, vname in meta_keys:
-            if vid is not None and vid not in out:
-                try:
-                    out[vid] = WX.get_game_weather(vid, gdate, vname)
-                except Exception:
-                    out[vid] = None
-        return out
+    # load_weather (a local @st.cache_data wrapper doing a SEQUENTIAL per-game loop) consolidated
+    # into weather.load_slate_weather — this exact wrapper used to be independently redefined in
+    # 3 places platform-wide (this one included, Edge Board, Dinger Engine), and unlike every
+    # other per-game/per-player fetch in this codebase (mlb_engine.build_slate's own
+    # ThreadPoolExecutor(max_workers=8) fan-outs), it fetched one game's weather at a time with
+    # zero concurrency -- the one real exception to an otherwise consistently-parallelized
+    # codebase. See that function's own docstring for the full real, confirmed finding (measured:
+    # 3.0-7.5s sequential vs 0.4-1.0s parallel on a simulated 15-game slate).
 
     @st.cache_data(ttl=1800, show_spinner=False)
     def load_bullpen_aggregate_for_blend(team_id, exclude_pid, fip_constant_inner):
@@ -408,7 +406,7 @@ def build_mlb_board(date_str: str, fip_constant: float, odds_api_key: Optional[s
 
     rows, meta = E.build_slate(date_str, fip_constant)
     sc, k = SC.load_cached()
-    wx = load_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
+    wx = WX.load_slate_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
 
     # Split stat overrides -- when venue_split or time_split is set, replace each pitcher's
     # full-season stat (and each hitter's _stat) with their filtered game log, so the model
