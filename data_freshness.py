@@ -33,6 +33,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
+import streamlit as st
 
 import statcast_data as SC
 import matchup_data as MD
@@ -107,9 +108,26 @@ def check_source(name: str, path: str, expected_cadence_hours: float, min_rows: 
             "last_modified": last_modified, "age_hours": age_hours, "row_count": row_count}
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def check_all_sources(sources: Optional[List] = None, now: Optional[float] = None) -> List[Dict[str, Any]]:
     """Check every tracked source. sources defaults to TRACKED_SOURCES; overridable for testing
-    with a smaller/synthetic set. Returns one result dict per source, in the same order given."""
+    with a smaller/synthetic set. Returns one result dict per source, in the same order given.
+
+    CACHED, ADDED DIRECTLY ON REQUEST after a real, confirmed performance finding: this was
+    UNCACHED, and every call re-reads all 5 tracked CSVs from disk with pd.read_csv just to count
+    rows -- genuinely cheap once, but Streamlit reruns a page's entire script on EVERY widget
+    interaction, not just on page load. Command Center alone has three tab pickers; before this
+    fix, clicking between market tabs re-read every tracked file from disk each time, for no
+    reason (these files refresh once every 24h per TRACKED_SOURCES' own cadence, so anything
+    under that is functionally identical to a live read). 300s matches this platform's own
+    established convention for slate-level caching (best_bets_data.py's today_board/build_mlb_
+    board), not a new number invented for this fix specifically.
+
+    now defaults to None (falls through to real wall-clock time inside check_source) -- caching
+    this means "now" is effectively frozen at whatever it was on the last cache miss for up to
+    the TTL window, so a displayed age_hours can lag the true value by up to 300s. Immaterial
+    given these files change once a day: a report that's up to 5 minutes stale about data that's
+    already up to 24h old was never the precision this module was built to provide."""
     sources = TRACKED_SOURCES if sources is None else sources
     return [check_source(name, path, cadence, min_rows, now=now)
            for name, path, cadence, min_rows in sources]

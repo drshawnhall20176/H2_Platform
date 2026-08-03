@@ -125,6 +125,33 @@ def test_check_all_sources_preserves_order_and_checks_each():
     print("✓ check_all_sources correctly checks every source and preserves order")
 
 
+def test_check_all_sources_is_cached_across_repeated_calls():
+    # Real, confirmed performance fix: Command Center's own three tab pickers each trigger a
+    # full Streamlit script rerun, and check_all_sources used to re-read every tracked CSV from
+    # disk on each one. Proven here directly, not just asserted from the decorator being present:
+    # call once, then rewrite the SAME file with a different row count and call again with the
+    # IDENTICAL (sources, now) args -- a genuine cache hit must return the ORIGINAL (now stale)
+    # result rather than re-reading the file, since nothing about the call's own inputs changed.
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "a.csv")
+        _write_csv(path, n_rows=200)
+        now = time.time()
+        os.utime(path, (now, now))
+        sources = [("Source A", path, 24, 50)]
+
+        first = DF.check_all_sources(sources, now=now)
+        assert first[0]["row_count"] == 200
+
+        _write_csv(path, n_rows=5)   # now genuinely below min_rows=50 -- would read "red" if re-read
+        os.utime(path, (now, now))   # same mtime, so this isn't just a staleness difference either
+        second = DF.check_all_sources(sources, now=now)
+
+    assert second[0]["row_count"] == 200   # still the FIRST call's result -- proves the cache hit,
+    assert second[0]["status"] == "green"  # not a coincidence of the new file also passing
+    print("✓ check_all_sources is genuinely cached — a repeated call with identical args doesn't "
+         "re-read the file from disk, confirmed by the file's real content changing underneath it")
+
+
 def test_overall_status_red_if_any_red():
     results = [{"status": "green"}, {"status": "red"}, {"status": "yellow"}]
     assert DF.overall_status(results) == "red"
