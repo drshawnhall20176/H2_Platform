@@ -30,17 +30,11 @@ C.page_header("💣", "H2 Sports — Dinger Engine",
 # See that function's own docstring for the full real, confirmed finding.
  
  
-@st.cache_data(ttl=1800, show_spinner=False)
-def load_weather(meta_keys: tuple):
-    """meta_keys: tuple of (venue_id, game_date, venue_name). Returns {venue_id: weather|None}."""
-    out = {}
-    for vid, gdate, vname in meta_keys:
-        if vid is not None and vid not in out:
-            try:
-                out[vid] = WX.get_game_weather(vid, gdate, vname)
-            except Exception:
-                out[vid] = None
-    return out
+# load_weather (a local @st.cache_data wrapper doing a SEQUENTIAL per-game loop) consolidated
+# into weather.load_slate_weather — this exact wrapper used to be independently redefined in 3
+# places platform-wide, and unlike every other per-game/per-player fetch in this codebase, it
+# fetched one game's weather at a time with zero concurrency. See that function's own docstring
+# for the full real, confirmed finding.
  
  
 @st.cache_data(ttl=300, show_spinner=False)
@@ -58,7 +52,7 @@ def load_slate(date_str: str, fip_constant: float, venue_split=None, time_split=
     preferred_book = st.session_state.get("_preferred_book_mlb", O.DEFAULT_BOOK)
     real_lines, _offers, _books = BBD.fetch_mlb_real_lines(date_str, api_key, preferred_book)
     sc, k = SC.load_cached()
-    wx_by_venue = load_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
+    wx_by_venue = WX.load_slate_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
     for r in rows:
         wx = wx_by_venue.get(r.get("_venue_id"))
         r["_weather_hr"] = wx["hr_factor"] if wx else 1.0

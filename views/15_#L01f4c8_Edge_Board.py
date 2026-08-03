@@ -24,6 +24,7 @@ import odds_api as O
 import betlog as B
 import bet_sizing as BS
 import statcast_data as SC
+import weather as WX
 
 _active = sports.active()
 
@@ -64,17 +65,11 @@ def get_api_key():
 # See that function's own docstring for the full real, confirmed finding.
  
  
-@st.cache_data(ttl=1800, show_spinner=False)
-def load_weather(meta_keys: tuple):
-    import weather as WX
-    out = {}
-    for vid, gdate, vname in meta_keys:
-        if vid is not None and vid not in out:
-            try:
-                out[vid] = WX.get_game_weather(vid, gdate, vname)
-            except Exception:
-                out[vid] = None
-    return out
+# load_weather (a local @st.cache_data wrapper doing a SEQUENTIAL per-game loop) consolidated
+# into weather.load_slate_weather — this exact wrapper used to be independently redefined in 3
+# places platform-wide, and unlike every other per-game/per-player fetch in this codebase, it
+# fetched one game's weather at a time with zero concurrency. See that function's own docstring
+# for the full real, confirmed finding.
  
  
 @st.cache_data(ttl=300, show_spinner=False)
@@ -88,7 +83,7 @@ def load_index(sport_key: str, date_str: str, sims: int, seed: int):
     extra = {}
     if sport_key == "MLB":
         sc, k = SC.load_cached()
-        wx = load_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
+        wx = WX.load_slate_weather(tuple((m.get("venue_id"), m.get("game_date"), m.get("venue")) for m in meta))
         for r in rows:
             w = wx.get(r.get("_venue_id"))
             r["_weather_hr"] = w["hr_factor"] if w else 1.0   # temp + wind on HR, matches Dinger Engine
