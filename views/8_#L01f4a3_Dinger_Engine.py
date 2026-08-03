@@ -99,6 +99,29 @@ def load_hitter_workload(team_id, date_str_inner):
     return E.get_team_hitter_workload(team_id, date_str_inner)
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def load_l5_hit_rate(pid: int, season: int, date_str_inner: str):
+    """One hitter's own last 5 real games (get_hitter_recent_games, already tested and live on
+    Player Lines) -- (fraction of those games with >=1 real hit, real games found). ADDED
+    DIRECTLY ON REQUEST, closing a real, repeated point of confusion: Hit% above is the model's
+    own matchup-aware probability for TONIGHT (shrunk toward league average by real PA volume,
+    then blended against the opposing starter/platoon/park) -- it does NOT chase a short hot or
+    cold streak by design (see this page's own bottom caption), which reads as "wrong" next to a
+    sportsbook's own plain last-5-games number until both are shown side by side. This is that
+    other number, the same "LAST 5 AVG"-style read a real book shows, so the two can be compared
+    directly instead of one silently contradicting the other.
+
+    None (not 0.0) when no real games are found in the window -- an honest "no data," never a
+    fabricated 0%. Real cost: one call per hitter, same as this page's own Hitter Workload
+    section next to it -- see that checkbox's own comment for why this MUST stay opt-in
+    (checkbox-gated) rather than computed unconditionally for every hitter on the slate."""
+    games = E.get_hitter_recent_games(pid, season, before_date=date_str_inner, n=5)
+    if not games:
+        return None
+    hit_games = sum(1 for g in games if g["hits"] >= 1)
+    return {"l5_hit_rate": hit_games / len(games), "l5_games": len(games)}
+
+
 import best_bets_data as BBD
 
 eastern = pytz.timezone("US/Eastern")
@@ -179,7 +202,7 @@ else:
  
 # --- Styling ----------------------------------------------------------------
 DISPLAY_COLS = ["Hitter", "Team", "Hand", "Opp Pitcher", "Opp Hand", "Advantage", "Lineup",
-                "Opp HR/9", "Walk Risk", "vs SP", "vs Pen", "HR%", "Hit%", "TB1.5%", "SO Prob", "Barrel%", "xHR/PA", "K%", "HR", "TB", "SLG", "OPS", "ISO", "PowerIndex"]
+                "Opp HR/9", "Walk Risk", "vs SP", "vs Pen", "HR%", "Hit%", "L5 Hit%", "TB1.5%", "SO Prob", "Barrel%", "xHR/PA", "K%", "HR", "TB", "SLG", "OPS", "ISO", "PowerIndex"]
 
 def hr9_band(v):
     """Fixed-threshold coloring for pitcher HR/9 (absolute, not slate-relative).
@@ -215,17 +238,17 @@ def style_hitters(data: pd.DataFrame):
     # low sample). As a mixed object column that (a) breaks the color gradient for the whole column
     # and (b) renders "None" instead of "—". Coerce to numeric so None -> NaN: the gradient then
     # colors the real values and leaves the no-Statcast cells blank ("—"), instead of faking a number.
-    for c in ("Barrel%", "xHR/PA", "vs SP", "vs Pen"):
+    for c in ("Barrel%", "xHR/PA", "vs SP", "vs Pen", "L5 Hit%"):
         if c in view.columns:
             view[c] = pd.to_numeric(view[c], errors="coerce")
-    pct = [c for c in ("HR%", "Hit%", "TB1.5%", "SO Prob", "K%", "Barrel%", "xHR/PA") if c in view.columns]
+    pct = [c for c in ("HR%", "Hit%", "L5 Hit%", "TB1.5%", "SO Prob", "K%", "Barrel%", "xHR/PA") if c in view.columns]
     fmt = {"HR": "{:.0f}", "TB": "{:.0f}", "SLG": "{:.2f}", "OPS": "{:.2f}",
            "ISO": "{:.2f}", "PowerIndex": "{:.1f}", "Opp HR/9": "{:.2f}",
            "vs SP": "{:.2f}", "vs Pen": "{:.2f}"}
     fmt.update({c: "{:.1%}" for c in pct})
     styler = view.style.format(fmt, na_rep="—")
     # High is good for a hitter -> green. Barrel%/xHR/PA (more power) belong here too.
-    grad_up = [c for c in ("HR%", "Hit%", "TB1.5%", "Barrel%", "xHR/PA", "HR", "TB", "SLG",
+    grad_up = [c for c in ("HR%", "Hit%", "L5 Hit%", "TB1.5%", "Barrel%", "xHR/PA", "HR", "TB", "SLG",
                            "OPS", "ISO", "PowerIndex") if c in view.columns]
     if grad_up:
         styler = styler.theme_gradient(cmap="RdYlGn", subset=grad_up)
@@ -500,6 +523,34 @@ for m in meta_sorted:
                       "consecutive calendar days — a team's own off-day is real rest regardless "
                       "of how many calendar days it spans.")
 
+        # Same real-cost/opt-in reasoning as Hitter Workload right above -- one checkbox for the
+        # whole game (both tabs), not two, matching how the workload section already shows both
+        # teams together once toggled on. Added directly on request, closing a real, repeated
+        # point of confusion: this page's own Hit% is a matchup-aware model probability that
+        # deliberately doesn't chase a short streak (see the bottom-of-page caption on why), so
+        # it can genuinely disagree with what a sportsbook's own plain "last 5 games" read shows
+        # for the same player -- putting both numbers side by side makes that visible at a
+        # glance instead of needing to be re-explained each time it comes up.
+        show_l5 = st.checkbox("📅 Show Last 5 Games Hit Rate (same read your sportsbook shows)",
+                              key=f"l5_{m['label']}")
+
+        def _add_l5_column(df: pd.DataFrame) -> pd.DataFrame:
+            """Adds an "L5 Hit%" column (fraction of the last 5 real games with >=1 hit) right
+            next to Hit%, using this hitter's own real _pid -- one real fetch per hitter shown,
+            each independently cached at 900s, so re-toggling this on/off or re-rendering the
+            same game doesn't re-fetch a player already checked. NaN (renders as "—", never a
+            fabricated 0%) for a hitter with no real games found in the window."""
+            if df.empty or "_pid" not in df.columns:
+                return df
+            df = df.copy()
+            season = int(date_str[:4])
+            rates = {}
+            for pid in df["_pid"].dropna().unique():
+                r = load_l5_hit_rate(int(pid), season, date_str)
+                rates[pid] = r["l5_hit_rate"] if r else None
+            df["L5 Hit%"] = df["_pid"].map(rates)
+            return df
+
         t_away, t_home = st.tabs([f"✈️ {m['away_name']} bats", f"🏠 {m['home_name']} bats"])
 
         def _bullpen_sub(rows_source: pd.DataFrame, opp_team: str, opp_team_id, exclude_pid) -> pd.DataFrame:
@@ -541,6 +592,9 @@ for m in meta_sorted:
                           "bullpen, not the confirmed starter.")
             else:
                 sub = game_df[game_df["Team"] == m["away_name"]].sort_values(sort_col, ascending=False)
+            if show_l5:
+                with st.spinner(f"Loading {m['away_name']}'s last 5 games..."):
+                    sub = _add_l5_column(sub)
             st.dataframe(style_hitters(sub), width="stretch", hide_index=True,
                         column_config=_col_cfg)
         with t_home:
@@ -550,6 +604,9 @@ for m in meta_sorted:
                           "bullpen, not the confirmed starter.")
             else:
                 sub = game_df[game_df["Team"] == m["home_name"]].sort_values(sort_col, ascending=False)
+            if show_l5:
+                with st.spinner(f"Loading {m['home_name']}'s last 5 games..."):
+                    sub = _add_l5_column(sub)
             st.dataframe(style_hitters(sub), width="stretch", hide_index=True,
                         column_config=_col_cfg)
  
