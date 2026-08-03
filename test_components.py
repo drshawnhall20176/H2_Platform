@@ -476,3 +476,52 @@ def test_todays_schedule_board_omits_legend_when_no_roster_data(monkeypatch, cap
     assert not any("Roster Status" in call for call in captured)
     print("✓ todays_schedule_board omits the legend AND the Roster Status column entirely for "
          "a sport with no lineup data (NBA)")
+
+
+# ----------------------------------------------------------------- _schedule_game_row: real date fallback
+def test_schedule_game_row_shows_real_time_when_known():
+    import components as C
+    from datetime import datetime
+    import pytz
+    ET = pytz.timezone("US/Eastern")
+    g = {"home": "Yankees", "away": "Red Sox", "dt": ET.localize(datetime(2026, 8, 3, 19, 5)),
+        "time_known": True, "venue": "Yankee Stadium", "status": "scheduled"}
+    row = C._schedule_game_row(g, "#5865F2", C._GRID_COLS_NO_ROSTER, False)
+    assert "7:05 PM ET" in row
+    print("✓ _schedule_game_row shows the real time when time_known and dt are both present")
+
+
+def test_schedule_game_row_shows_real_date_when_time_unknown_but_dt_exists():
+    # THE real, confirmed fix for NCAAF's own start_time_tbd case: dt parses fine (the DATE is
+    # real and known) even when the specific kickoff time isn't confirmed -- this used to
+    # silently discard that real date and show a bare, uninformative "Time TBD" instead.
+    import components as C
+    from datetime import datetime
+    import pytz
+    ET = pytz.timezone("US/Eastern")
+    g = {"home": "Georgia", "away": "Alabama", "dt": ET.localize(datetime(2026, 9, 5, 0, 0)),
+        "time_known": False, "venue": None, "status": "scheduled"}
+    row = C._schedule_game_row(g, "#5865F2", C._GRID_COLS_NO_ROSTER, False)
+    assert "9/5" in row and "Time TBD" in row
+    print("✓ _schedule_game_row shows the real date (with an honest Time TBD) when dt exists but time_known is False")
+
+
+def test_schedule_game_row_shows_real_date_from_date_str_when_dt_is_none():
+    # THE real, confirmed fix for NFL's own real case: dt is ALWAYS None for this sport (a
+    # date-only field can't safely parse a time, see schedule_board._nfl_games' own comment),
+    # but the real YYYY-MM-DD string is now kept and used here instead of being discarded.
+    import components as C
+    g = {"home": "Chiefs", "away": "Bills", "dt": None, "time_known": False, "venue": None,
+        "status": "scheduled", "date_str": "2026-09-07"}
+    row = C._schedule_game_row(g, "#5865F2", C._GRID_COLS_NO_ROSTER, False)
+    assert "9/7" in row and "Time TBD" in row
+    print("✓ _schedule_game_row shows the real date from date_str (NFL's own real field) when dt itself is None")
+
+
+def test_schedule_game_row_bare_time_tbd_when_truly_nothing_known():
+    import components as C
+    g = {"home": "Team A", "away": "Team B", "dt": None, "time_known": False, "venue": None,
+        "status": "scheduled"}   # no date_str either -- a genuine "nothing known" floor case
+    row = C._schedule_game_row(g, "#5865F2", C._GRID_COLS_NO_ROSTER, False)
+    assert "Time TBD" in row
+    print("✓ _schedule_game_row falls back to a bare Time TBD only when truly no real date info exists at all")

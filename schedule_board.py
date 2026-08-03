@@ -8,12 +8,24 @@ lightweight, games-only fetch every engine already has (team names, start time, 
 separate from the heavy per-player projection pipeline build_slate runs. A schedule display has no
 reason to wait on player-level data it isn't showing.
 
-SCOPE: MLB, NBA, WNBA, NFL, NCAAF only, matching league_structure.py's own reference tables.
-NCAAMB (350+ Division I teams across dozens of conferences, no mapping sourced yet) and UFC
-(individual bouts, not team matchups -- UFC Fight Card already IS its own schedule) are
-deliberately not covered here -- see league_structure.py's own docstring. Home.py's own caller is
-responsible for simply not rendering this section for those two sports, the same "hidden
-entirely, not shown broken" posture the rest of this platform already uses for sport-gated content.
+SCOPE: MLB, NBA, WNBA, NFL, NCAAF, NCAAMB. UFC (individual bouts, not team matchups -- UFC Fight
+Card already IS its own schedule) is deliberately not covered here -- see league_structure.py's
+own docstring. Home.py's own caller is responsible for simply not rendering this section for that
+one sport, the same "hidden entirely, not shown broken" posture the rest of this platform already
+uses for sport-gated content.
+
+NCAAMB, ADDED DIRECTLY ON REQUEST, HONESTLY, NOT WITH A FABRICATED CONFERENCE TABLE: 350+
+Division I teams across dozens of conferences is real, substantial reference data this platform
+doesn't have sourced and verified -- typing one by hand here would risk silently mislabeling real
+teams, worse than not grouping them at all. _conference_lookup's own existing fallback (an empty
+lookup, has_divisions=False) already sends every NCAAMB game into group_games' own "Other" bucket
+-- which was ALREADY built, tested, and gets the exact same real visual treatment (colored box,
+grid-aligned rows, status badges) as a real conference section, just without a conference/division
+sub-grouping. So NCAAMB gets the SAME fancy rendering everything else does, honestly labeled as
+missing conference data (the "Other" bucket's own existing caption already says so), rather than
+either a fabricated/risky mapping or staying on a visually plainer fallback page. Uses the exact
+same ESPN scoreboard shape/fetch as NBA/WNBA (_basketball_games, confirmed field-for-field against
+ncaamb_engine.get_schedule's own real output) -- no new fetch logic needed for this sport at all.
 
 DATE HANDLING, PER SPORT -- real, confirmed differences, not a uniform assumption:
   - MLB / NBA / WNBA: game_date is a full ISO-UTC timestamp -- run through sports.game_dt (the
@@ -43,8 +55,8 @@ import streamlit as st
 import league_structure as LS
 import sports
 
-# Sports this section covers -- see module docstring for why NCAAMB/UFC are excluded.
-SUPPORTED_SPORTS = {"MLB", "NBA", "WNBA", "NFL", "NCAAF"}
+# Sports this section covers -- see module docstring for why UFC is excluded and NCAAMB isn't.
+SUPPORTED_SPORTS = {"MLB", "NBA", "WNBA", "NFL", "NCAAF", "NCAAMB"}
 
 
 def _categorize_status(raw_text: Optional[str], espn_state: Optional[str] = None) -> str:
@@ -169,6 +181,15 @@ def _nfl_games(date_str: str) -> List[Dict[str, Any]]:
                     "home_logo": _espn_cdn_logo("nfl", g.get("home_team")),
                     "away_logo": _espn_cdn_logo("nfl", g.get("away_team")),
                     "dt": None, "time_known": False, "venue": None,
+                    # date_str kept as the raw, real, already-filtered-on YYYY-MM-DD string --
+                    # A REAL, CONFIRMED FIX, not the original design: this used to be computed
+                    # (for the filter above) and then discarded, leaving the display layer with
+                    # NOTHING date-related to show for NFL (dt is always None here, by design,
+                    # since NFL's date-only field can't safely go through game_dt -- see module
+                    # docstring). _schedule_game_row falls back to this real date when dt itself
+                    # isn't available, rather than showing a bare, uninformative "Time TBD" for
+                    # every single NFL game regardless of which real day it's actually on.
+                    "date_str": g.get("game_date"),
                     # HONEST LIMITATION, not a gap in this function's own logic: nflreadpy's
                     # schedule data isn't a live feed, so "delayed"/"in-progress"/"canceled"
                     # genuinely can't be told apart here -- only whether a real final score has
@@ -185,7 +206,12 @@ def _conference_lookup(sport_key: str):
     """(lookup_dict, has_divisions) for sport_key -- has_divisions is False for sports whose real
     structure has no division level (WNBA: East/West only; NCAAF: most real conferences dropped
     divisions in the 2024+ realignment, never modeled here as a result), so the caller knows not
-    to render an empty division sub-header for those."""
+    to render an empty division sub-header for those.
+
+    NCAAMB falls through to the final, generic ({}, False) below -- a real, deliberate gap, not
+    an oversight: 350+ Division I teams across dozens of conferences is real reference data this
+    platform hasn't sourced and verified, so every NCAAMB game lands in group_games' own "Other"
+    bucket honestly, rather than risk a hand-typed mapping silently mislabeling a real team."""
     if sport_key == "MLB":
         return LS.MLB_TEAM_LEAGUE, True
     if sport_key == "NBA":
@@ -196,7 +222,7 @@ def _conference_lookup(sport_key: str):
         return {name: (conf, None) for name, conf in LS.wnba_team_conference().items()}, False
     if sport_key == "NCAAF":
         return {}, False   # NCAAF groups by conference directly from the game row -- see below
-    return {}, False
+    return {}, False   # NCAAMB (and any future sport) -- see this function's own docstring above
 
 
 def group_games(sport_key: str, games: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -253,6 +279,8 @@ def todays_schedule(sport_key: str, date_str: str) -> Optional[Dict[str, Any]]:
             games = _nfl_games(date_str)
         elif sport_key == "NCAAF":
             games = _ncaaf_games_with_conference(date_str)
+        elif sport_key == "NCAAMB":
+            games = _basketball_games(date_str, "ncaamb_engine")
         else:
             games = []
     except Exception:

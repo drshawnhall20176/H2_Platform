@@ -60,10 +60,13 @@ st.divider()
 
 # ---------- Today's Schedule ----------
 # Sport-aware, and only rendered for the sports schedule_board.py actually covers (MLB, NBA,
-# WNBA, NFL, NCAAF) -- NCAAMB (350+ Division I teams across dozens of conferences, no reference
-# data sourced yet) and UFC (individual bouts, not team matchups -- UFC Fight Card already IS its
-# own schedule) are deliberately hidden here rather than shown broken/empty, same "hidden, not
-# shown broken" posture the sidebar itself already uses for sport-gated pages.
+# WNBA, NFL, NCAAF, NCAAMB) -- UFC (individual bouts, not team matchups -- UFC Fight Card already
+# IS its own schedule) is deliberately hidden here rather than shown broken/empty, same "hidden,
+# not shown broken" posture the sidebar itself already uses for sport-gated pages. NCAAMB renders
+# through the SAME rich board as every other sport here now (added directly on request to League
+# Schedules, and this page gets it for free too, same shared schedule_board.py) -- honestly
+# grouped into an "Other" section rather than real conferences, since no verified 350+-team
+# conference table exists yet, see schedule_board.py's own module docstring for the full reasoning.
 if active and current in SB.SUPPORTED_SPORTS:
     today_str = _dt.now(_ET).strftime("%Y-%m-%d")
     with st.spinner("Loading today's schedule..."):

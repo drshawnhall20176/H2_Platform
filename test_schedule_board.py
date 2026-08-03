@@ -120,6 +120,43 @@ def test_ncaaf_game_with_no_conference_on_row_falls_into_other():
     print("✓ An NCAAF game with no conference on its own row falls into 'other', not dropped")
 
 
+# ----------------------------------------------------------------- NCAAMB (added directly on request)
+def test_ncaamb_is_in_supported_sports():
+    # Regression guard for the real, direct request this closes: NCAAMB used to be deliberately
+    # excluded (see this module's own docstring for the real "no verified conference table"
+    # reasoning) -- it's back in scope now, using the SAME honest "Other" bucket every sport
+    # already falls back to when a team isn't in a real reference table, not a fabricated mapping.
+    assert "NCAAMB" in SB.SUPPORTED_SPORTS
+    print("✓ NCAAMB is in SUPPORTED_SPORTS, added directly on request")
+
+
+def test_ncaamb_games_land_in_other_with_the_same_rich_rendering():
+    # THE real point of this addition: NCAAMB gets the exact same visual treatment (colored box,
+    # grid-aligned rows, status badges -- see components.todays_schedule_board) as every other
+    # sport, honestly grouped under "Other" rather than fabricated conferences, since no
+    # verified 350+-team Division I conference table exists on this platform yet.
+    games = [{"home": "Duke", "away": "North Carolina", "dt": _dt(19), "time_known": True,
+             "venue": None, "home_logo": None, "away_logo": None, "status": "scheduled",
+             "home_lineup_confirmed": None, "away_lineup_confirmed": None}]
+    result = SB.group_games("NCAAMB", games)
+    assert result["grouped"] == {}   # no real conference table -- nothing lands in a named group
+    assert len(result["other"]) == 1
+    assert result["other"][0]["home"] == "Duke"
+    assert result["has_divisions"] is False
+    print("✓ NCAAMB games land in the real 'Other' bucket (no fabricated conference table), "
+         "which already gets the exact same rich rendering as a real conference section")
+
+
+def test_ncaamb_dispatches_through_basketball_games():
+    # Confirms the real fetch dispatch actually reaches NCAAMB, not just that group_games alone
+    # can handle NCAAMB-shaped rows if handed some by hand.
+    from pathlib import Path
+    src = Path(__file__).parent.joinpath("schedule_board.py").read_text()
+    assert '_basketball_games(date_str, "ncaamb_engine")' in src, (
+        "todays_schedule must actually dispatch NCAAMB through _basketball_games, not just list it in SUPPORTED_SPORTS")
+    print("✓ todays_schedule genuinely dispatches NCAAMB through _basketball_games (same real fetch NBA/WNBA already use)")
+
+
 def test_espn_cdn_logo_builds_expected_url():
     assert SB._espn_cdn_logo("nfl", "KC") == "https://a.espncdn.com/i/teamlogos/nfl/500/kc.png"
     assert SB._espn_cdn_logo("nba", "BOS") == "https://a.espncdn.com/i/teamlogos/nba/500/bos.png"
@@ -174,10 +211,14 @@ def test_categorize_status_unknown_defaults_to_scheduled_not_crash():
 
 
 def test_todays_schedule_returns_none_for_unsupported_sport():
-    assert SB.todays_schedule("NCAAMB", "2026-08-01") is None
+    # UFC is the one remaining, deliberate exclusion -- individual bouts, not team matchups,
+    # already served by its own UFC Fight Card page. NCAAMB is NOT tested here anymore: it was
+    # excluded before, added directly on request (see this module's own docstring for the real
+    # reasoning), and now has its own dedicated tests below confirming it actually works.
     assert SB.todays_schedule("UFC", "2026-08-01") is None
-    print("✓ todays_schedule returns None for sports outside SUPPORTED_SPORTS (NCAAMB, UFC) -- "
-         "the caller's signal to simply not render the section")
+    print("✓ todays_schedule returns None for UFC (individual bouts, not team matchups -- "
+         "UFC Fight Card already IS its own schedule) -- the caller's signal to simply not "
+         "render the section")
 
 
 # ----------------------------------------------------------------- per-sport status/lineup wiring

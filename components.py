@@ -28,6 +28,7 @@ Nothing here targets fragile internals like the sidebar nav DOM.
 from __future__ import annotations
 
 import base64
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Sequence
 
@@ -370,6 +371,21 @@ def _schedule_game_row(g: dict, color: str, columns: str, show_roster: bool) -> 
     of rendering as HTML."""
     if g.get("time_known") and g.get("dt") is not None:
         time_str = g["dt"].strftime("%-I:%M %p ET")
+    elif g.get("dt") is not None:
+        # A REAL, CONFIRMED FIX, not the original design: NCAAF's own start_time_tbd case still
+        # carries a real, parsed dt (the DATE parses fine even when the specific kickoff time
+        # doesn't) -- this used to fall straight through to a bare "Time TBD" below, discarding
+        # a real date that was already sitting right there on the dict. Shows the real date,
+        # honestly labeled TBD for the time specifically, not the date too.
+        time_str = g["dt"].strftime("%a %-m/%-d") + " · Time TBD"
+    elif g.get("date_str"):
+        # NFL's own real case: dt is always None here (date-only field, can't safely parse a
+        # time -- see schedule_board._nfl_games' own comment), but a real YYYY-MM-DD string is
+        # still available and was being silently discarded before this fix.
+        try:
+            time_str = datetime.strptime(g["date_str"], "%Y-%m-%d").strftime("%a %-m/%-d") + " · Time TBD"
+        except (ValueError, TypeError):
+            time_str = "Time TBD"
     else:
         time_str = "Time TBD"
     away_logo = _team_logo_html(g.get('away_logo'))

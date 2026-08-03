@@ -320,6 +320,67 @@ def test_league_schedules_registered_and_universal():
     print("✓ League Schedules (28) is registered in meta/SECTION_OF and deliberately absent from sport_only_leads")
 
 
+def test_league_schedules_load_schedule_functions_take_sport_as_a_real_argument():
+    # Regression guard for a real, confirmed bug: both cached loaders used to close over the
+    # page-level E (this sport's engine module) without taking the sport itself as an argument --
+    # Streamlit's cache_data keys purely on a function's own arguments, never on outer/closure
+    # variables, so NFL and NCAAF (the same real season number, most of the time) silently
+    # collided: whichever was loaded first in a session got reused for the OTHER sport too,
+    # mislabeled, until the cache's own TTL expired. Confirmed directly from a real report: the
+    # NCAAF tab was showing NFL's own real schedule.
+    src = (_HERE / "views" / "28_League_Schedules.py").read_text()
+    assert "def load_schedule(sport_key_inner: str, season_inner: int):" in src, (
+        "load_schedule must take the sport as a real argument, not close over the page-level E")
+    assert "def load_schedule_for_date(sport_key_inner: str, date_str_inner: str):" in src, (
+        "load_schedule_for_date must take the sport as a real argument too -- same bug class")
+    assert "load_schedule(current, season)" in src
+    assert "load_schedule_for_date(current, date_str)" in src
+    print("✓ both League Schedules cache loaders take sport as a real, explicit argument")
+
+
+def test_league_schedules_load_schedule_doesnt_collide_across_sports():
+    # THE real proof, not just a source-text check: extracts the real load_schedule function
+    # from the actual file (walking the AST, since it's defined conditionally inside an `if`
+    # block, not at module top level) and calls it for two different sports with the IDENTICAL
+    # season number -- the exact real-world scenario that triggered the original bug. A genuine
+    # cache-key collision would return the SAME (wrong) result for the second call; the fix
+    # must return each sport's own, genuinely different result.
+    import ast
+    import sports as S
+    src = (_HERE / "views" / "28_League_Schedules.py").read_text()
+    tree = ast.parse(src)
+    fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "load_schedule")
+    ns = {"sports": S, "st": __import__("streamlit")}
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), "<load_schedule>", "exec"), ns)
+    load_schedule = ns["load_schedule"]
+
+    class _FakeEngine:
+        def __init__(self, tag):
+            self.tag = tag
+        def get_schedule(self, season):
+            return [{"week": 1, "tag": self.tag, "season": season}]
+
+    class _FakeSport:
+        def __init__(self, tag):
+            self.engine = _FakeEngine(tag)
+
+    orig_get = S.get
+    S.get = lambda key: _FakeSport(key)   # each sport's own engine returns ITS OWN tagged schedule
+    try:
+        nfl_result = load_schedule("NFL", 2026)
+        ncaaf_result = load_schedule("NCAAF", 2026)   # SAME season number -- the real collision scenario
+    finally:
+        S.get = orig_get
+
+    assert nfl_result[0]["tag"] == "NFL"
+    assert ncaaf_result[0]["tag"] == "NCAAF", (
+        f"expected NCAAF's own real schedule, got {ncaaf_result} -- a cache-key collision would "
+        "silently return NFL's own cached result here instead")
+    print("✓ load_schedule correctly returns each sport's own real schedule, even for the same "
+         "season number, with no cache-key collision between them")
+
+
+
 def test_league_schedules_merge_combines_multiple_dates_without_dropping_or_duplicating():
     # THE real, new logic this rebuild added: an NFL/NCAAF week spans several real calendar
     # dates, but schedule_board.todays_schedule() is scoped to ONE date -- _merge_schedule_
