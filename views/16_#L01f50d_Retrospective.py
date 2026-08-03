@@ -16,6 +16,7 @@ import retro as R
 import sports
 import best_bets_data as BBD
 import odds_api as O
+import grading_history as GH
 
 _active = sports.active()
 E, P = _active.engine, _active.projections
@@ -119,6 +120,24 @@ if _active.key == "MLB":
 
     with st.spinner("Rebuilding the board and pulling results..."):
         graded, summary, reports, rows_by_pid, n_games, n_results = load_retro_mlb(date_str, fip_constant)
+
+    # Persisted here, in genuinely uncached top-level page code — NEVER inside load_retro_mlb
+    # itself, which is @st.cache_data-wrapped. A write inside a cached function only fires on the
+    # actual cache MISS; a second visit (or a second person) within the 600s TTL would silently
+    # skip writing at all. Same real, confirmed reason best_bets_data.ensure_mlb_offers_session_
+    # state's own docstring already documents for the identical class of bug. record_graded_slate
+    # itself is idempotent per (slate_date, sport) — revisiting this same date repeatedly (which
+    # this page's own st.date_input makes easy) replaces, not multiplies, the stored rows.
+    #
+    # REAL CAVEAT, STATED PLAINLY, NOT SWEPT UNDER THE RUG: this page's own warning above already
+    # says it — rebuilding a past MLB slate uses CURRENT-season rates, not the rates that existed
+    # on that real date, so a row persisted here reflects "what today's model would say about that
+    # game," not a genuine point-in-time prediction. Real, useful signal for calibration on
+    # recently-played dates (little look-ahead yet); a real bias for old ones. Not filtered out
+    # here on purpose — this module's own docstring already puts the sample-size-and-soundness
+    # judgment call on every caller, not on the storage layer; a future retuning decision needs to
+    # weigh this the same way it weighs sample size, using since_date to prefer recent history.
+    GH.record_graded_slate(date_str, "MLB", graded)
 else:
     target = st.date_input("Slate to review", datetime.now() - timedelta(days=1))
     date_str = target.strftime("%Y-%m-%d")
@@ -129,6 +148,12 @@ else:
 
     with st.spinner("Rebuilding the board and pulling results..."):
         graded, summary, reports, rows_by_pid, n_games, n_results = load_retro_generic(_active.key, date_str)
+
+    # Persisted here, in genuinely uncached top-level page code -- same reasoning as the MLB
+    # branch above. WNBA's own recency-window model naturally avoids the look-ahead caveat MLB's
+    # version carries (this page's own info banner above already says so) -- so a row persisted
+    # here is a genuinely point-in-time prediction, the cleanest signal this module can store.
+    GH.record_graded_slate(date_str, _active.key, graded)
  
 if not summary["graded"]:
     st.info("No completed games with results for this date yet. Pick a date whose games are final.")
