@@ -308,8 +308,15 @@ if trend_log:
               "average, for scale, not a sportsbook number.")
 
 # --- table 1: player signals (recent form / season form / this matchup) -----
-pdf = pd.DataFrame(profile)[["Market", "Recent Avg", "Season Avg", "H2H Avg", "H2H Games",
-                             "H2H Spread", "High Variance", "Suppressed"]]
+# ADDED DIRECTLY ON REQUEST, same real pattern Dinger Engine's own L5 Hit Rate checkbox already
+# established -- L5 Avg/L10 Avg are computed from season_log (already fetched for Season Avg,
+# zero new cost) inside build_matchup_profile itself, genuinely separate from Recent Avg (the
+# model's own 45-day recency signal, untouched by this addition). Off by default to keep the
+# table's default width manageable -- this table already carries 6 real columns before Notes.
+show_l5_l10 = st.checkbox("📅 Show Last 5 / Last 10 game averages", key="matchup_lab_l5_l10")
+_window_cols = ["L5 Avg", "L10 Avg"] if show_l5_l10 else []
+pdf = pd.DataFrame(profile)[["Market", "Recent Avg"] + _window_cols +
+                            ["Season Avg", "H2H Avg", "H2H Games", "H2H Spread", "High Variance", "Suppressed"]]
 
 
 def _notes(r):
@@ -322,12 +329,20 @@ def _notes(r):
 
 
 pdf["Notes"] = pdf.apply(_notes, axis=1)
-pdf = pdf[["Market", "Recent Avg", "Season Avg", "H2H Avg", "H2H Games", "Notes"]]
+pdf = pdf[["Market", "Recent Avg"] + _window_cols + ["Season Avg", "H2H Avg", "H2H Games", "Notes"]]
 st.markdown(f"**{row['Player']} — recent form, season form, and this matchup**")
+_fmt = {"Recent Avg": "{:.1f}", "Season Avg": "{:.1f}", "H2H Avg": "{:.1f}"}
+_fmt.update({c: "{:.1f}" for c in _window_cols})
 st.dataframe(
-    pdf.style.format({"Recent Avg": "{:.1f}", "Season Avg": "{:.1f}", "H2H Avg": "{:.1f}"}, na_rep="—"),
+    pdf.style.format(_fmt, na_rep="—"),
     hide_index=True, width="stretch",
 )
+if show_l5_l10:
+    st.caption("L5/L10 Avg: this player's own real average over her literal last 5 or last 10 "
+              "games, any opponent — a plain, un-weighted read (the same shape a sportsbook's "
+              "own \"last 5\" column shows), genuinely different from Recent Avg above it (the "
+              "model's own recency signal, a 45-day rolling window). \"—\" means fewer than that "
+              "many real games exist yet this season, never a padded average.")
 
 if not h2h_log:
     st.caption(f"ℹ️ {row['Team']} and {row['Opp']} haven't played each other yet this season — "
