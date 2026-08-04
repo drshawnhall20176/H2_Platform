@@ -276,9 +276,16 @@ if summary["tiers"]:
 # broken out PER MARKET/SIDE rather than pooled across the whole slate the way this page's own
 # version used to be -- a strict superset of what this page showed, not a different cut of the
 # data. Removed here rather than kept as a second, coarser copy of the same real numbers.
-st.page_link("views/17_Model_Dashboard.py",
-             label="🎯 Want hit rate by letter grade? See Model Dashboard — broken out per market/side, "
-                  "not just pooled across the whole slate →", icon="🏆")
+#
+# A REAL, CONFIRMED FIX, not the original design: Model Dashboard moved to owner_only_titles
+# directly on request, but this link itself was never updated to match -- a real, live
+# StreamlitPageNotFoundError for anyone on the public build (Retrospective itself stayed public;
+# its own link target didn't). Gated here the same way Command Center already gates its own
+# owner-only links, not a new pattern invented for this one case.
+if st.secrets.get("AUDIENCE", "owner") == "owner":
+    st.page_link("views/17_Model_Dashboard.py",
+                 label="🎯 Want hit rate by letter grade? See Model Dashboard — broken out per market/side, "
+                      "not just pooled across the whole slate →", icon="🏆")
 
 cal = summary["calibration"]
 if cal:
