@@ -445,8 +445,19 @@ _rank_sport_key = st.selectbox("Sport", _rank_sport_keys,
 _rank_sport = sports.get(_rank_sport_key)
 _rank_market = st.selectbox("Market", ["All markets"] + list(_rank_sport.market_map.keys()),
                             key="retro_rank_market")
+# ADDED DIRECTLY ON REQUEST: a real recency scope, reusing fetch_graded_plays' own since_date
+# support that already existed (not new plumbing) -- "All time" pools every real date this
+# platform has ever graded and persisted; "Last 10 real days" narrows to a real, recent window,
+# the same kind of recency lens Dinger Engine/Matchup Lab/this page's own L5-L10 section already
+# use elsewhere. A genuinely different real question than "All time" -- has the model's own
+# rank-based reliability looked different lately, not just across its whole real history.
+_rank_scope = st.radio("Scope", ["All time", "Last 10 real days"], horizontal=True,
+                       key="retro_rank_scope")
+_rank_since = None
+if _rank_scope == "Last 10 real days":
+    _rank_since = (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d")
 
-_rank_history = GH.fetch_graded_plays(_rank_sport.key,
+_rank_history = GH.fetch_graded_plays(_rank_sport.key, since_date=_rank_since,
                                       market=None if _rank_market == "All markets" else _rank_market)
 _rank_result = R.catch_rate_by_rank(_rank_history,
                                     market=None if _rank_market == "All markets" else _rank_market)
