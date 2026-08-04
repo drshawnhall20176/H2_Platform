@@ -8,6 +8,8 @@ import os
 import tempfile
 from pathlib import Path
 
+import pytest
+
 import grading_history as GH
 import retro as R
 
@@ -275,6 +277,35 @@ def test_retrospective_shows_the_catch_rate_by_rank_chart():
     assert "go.Bar(" in src, "the chart must actually render as a real bar chart, not just compute the numbers"
     print("✓ Retrospective's own \"Model caught it by rank\" chart is genuinely wired to real "
          "accumulated grading_history data, not left uncomputed or undisplayed")
+
+
+def test_retrospective_rank_chart_selector_never_passes_raw_sport_objects():
+    # THE real, confirmed bug this fixes: a real production crash (TypeError: cannot pickle
+    # 'module' object) -- sports.Sport carries lazily-populated _engine/_projections fields
+    # that, once ANY page anywhere has touched .engine/.projections (true almost immediately in
+    # real use), hold a live module reference on the shared, global Sport singleton. Streamlit's
+    # own widget-state machinery deepcopies its options internally, and a raw module isn't
+    # deepcopy-able. Reproduced directly, not just asserted from source text, using the exact
+    # same real Sport objects the app itself uses.
+    import copy
+    import sports as S
+    s = S.get("MLB")
+    _ = s.engine          # trigger the lazy import, exactly what every real page load does
+    _ = s.projections
+    with pytest.raises(TypeError):
+        copy.deepcopy(s)   # confirms the real, underlying hazard still exists on Sport itself
+    copy.deepcopy(s.key)   # a plain string key never hits it -- the real, correct fix
+
+    src = (Path(__file__).parent / "views" / "16_#L01f50d_Retrospective.py").read_text()
+    assert 'st.selectbox("Sport", [s for s in sports.enabled_sports()' not in src, (
+        "must never pass raw Sport objects as selectbox options again -- see this test's own docstring")
+    assert "_rank_sport_keys = [s.key for s in sports.enabled_sports()" in src, (
+        "the rank chart's sport selector must operate on plain string keys, not Sport objects"
+    )
+    assert "_rank_sport = sports.get(_rank_sport_key)" in src, (
+        "the full Sport object must only be resolved AFTER the widget call, never handed to the widget itself")
+    print("✓ Retrospective's rank chart selector uses plain string keys, never raw Sport objects -- "
+         "the real production crash reproduced and confirmed fixed")
 
 
 def test_retrospective_l5_l10_wired_into_the_graded_board():
