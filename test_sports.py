@@ -516,81 +516,103 @@ def test_matchup_lab_window_redesign_landed_identically_across_all_three_basketb
 
 # ----------------------------------------------------------------- Dinger Engine: L5 Hit Rate
 # ----------------------------------------------------------------- Dinger Engine: L5 Hit Rate
-def test_dinger_engine_load_l5_hit_rate_computes_the_real_fraction():
+def test_dinger_engine_load_l5_context_computes_all_four_real_rates():
     # THE actual real logic this feature adds, executed directly from the real file source (not
     # a duplicate reimplementation) -- extracted via AST including its own @st.cache_data
-    # decorator, same pattern already used for statcast_data.load_cached/weather.load_slate_
-    # weather in this exact test file.
+    # decorator, same pattern already used elsewhere in this exact test file. Confirms all FOUR
+    # real rates (not just Hit%, the original single-column version) come from the SAME one real
+    # fetch, each using its own real model threshold, hand-verified exact numbers.
     import ast
     view_path = _HERE / "views" / "8_#L01f4a3_Dinger_Engine.py"
     src = view_path.read_text()
     tree = ast.parse(src)
-    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "load_l5_hit_rate")
+    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "load_l5_context")
 
     import mlb_engine as E
     import streamlit as st
     ns = {"E": E, "st": st}
-    exec(compile(ast.Module(body=[fn], type_ignores=[]), "<load_l5_hit_rate>", "exec"), ns)
-    load_l5_hit_rate = ns["load_l5_hit_rate"]
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), "<load_l5_context>", "exec"), ns)
+    load_l5_context = ns["load_l5_context"]
 
     def fake_recent_games(pid, season, before_date=None, n=5):
-        # 3 real hits out of 5 real games -- an exact, hand-verifiable ground truth.
-        return [{"hits": 1}, {"hits": 0}, {"hits": 2}, {"hits": 0}, {"hits": 1}]
+        # 5 real games, exact hand-verifiable ground truth for all four stats at once:
+        # hits:   [1, 0, 2, 0, 1] -> 3/5 games with >0.5 hits    = 0.6
+        # hr:     [1, 0, 0, 0, 1] -> 2/5 games with >0.5 HR      = 0.4
+        # tb:     [2, 0, 3, 0, 4] -> 3/5 games with >1.5 TB      = 0.6
+        # k:      [0, 1, 0, 2, 1] -> 3/5 games with >0.5 K       = 0.6
+        return [
+            {"hits": 1, "hr": 1, "total_bases": 2, "strikeouts": 0},
+            {"hits": 0, "hr": 0, "total_bases": 0, "strikeouts": 1},
+            {"hits": 2, "hr": 0, "total_bases": 3, "strikeouts": 0},
+            {"hits": 0, "hr": 0, "total_bases": 0, "strikeouts": 2},
+            {"hits": 1, "hr": 1, "total_bases": 4, "strikeouts": 1},
+        ]
 
     orig = E.get_hitter_recent_games
     E.get_hitter_recent_games = fake_recent_games
     try:
-        result = load_l5_hit_rate(12345, 2026, "2026-07-18")
+        result = load_l5_context(12345, 2026, "2026-07-18")
     finally:
         E.get_hitter_recent_games = orig
 
     assert result is not None
-    assert abs(result["l5_hit_rate"] - 0.6) < 1e-9   # 3 of 5 games had >=1 real hit
+    assert abs(result["l5_hit_rate"] - 0.6) < 1e-9
+    assert abs(result["l5_hr_rate"] - 0.4) < 1e-9
+    assert abs(result["l5_tb_rate"] - 0.6) < 1e-9
+    assert abs(result["l5_so_rate"] - 0.6) < 1e-9
     assert result["l5_games"] == 5
-    print("✓ load_l5_hit_rate correctly computes the real fraction of last-5 games with a hit")
+    print("✓ load_l5_context correctly computes all four real rates (HR%/Hit%/TB1.5%/SO%) from the one real fetch, hand-verified exact numbers")
 
 
-def test_dinger_engine_load_l5_hit_rate_none_for_no_real_games():
+def test_dinger_engine_load_l5_context_none_for_no_real_games():
     import ast
     view_path = _HERE / "views" / "8_#L01f4a3_Dinger_Engine.py"
     src = view_path.read_text()
     tree = ast.parse(src)
-    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "load_l5_hit_rate")
+    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "load_l5_context")
 
     import mlb_engine as E
     import streamlit as st
     ns = {"E": E, "st": st}
-    exec(compile(ast.Module(body=[fn], type_ignores=[]), "<load_l5_hit_rate_empty>", "exec"), ns)
-    load_l5_hit_rate = ns["load_l5_hit_rate"]
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), "<load_l5_context_empty>", "exec"), ns)
+    load_l5_context = ns["load_l5_context"]
 
     orig = E.get_hitter_recent_games
     E.get_hitter_recent_games = lambda pid, season, before_date=None, n=5: []
     try:
-        result = load_l5_hit_rate(99999, 2026, "2026-07-18")
+        result = load_l5_context(99999, 2026, "2026-07-18")
     finally:
         E.get_hitter_recent_games = orig
 
-    assert result is None   # an honest "no real data," never a fabricated 0.0
-    print("✓ load_l5_hit_rate returns None (not a fabricated 0%) when no real recent games are found")
+    assert result is None   # an honest "no real data," never a fabricated 0.0 on any of the four
+    print("✓ load_l5_context returns None (not fabricated 0%s) when no real recent games are found")
 
 
-def test_dinger_engine_l5_hit_rate_wired_into_the_real_table():
+def test_dinger_engine_l5_context_wired_into_the_real_table():
     # Regression guard confirming the gate is actually WIRED IN, matching the same class of
-    # check already done for every other feature added this session -- load_l5_hit_rate could be
-    # perfectly correct and simply never reach the actual displayed table.
+    # check already done for every other feature added this session -- load_l5_context could be
+    # perfectly correct and simply never reach the actual displayed table. Confirms all three NEW
+    # columns (L5 HR%/L5 TB1.5%/L5 SO%), not just the original L5 Hit%.
     src = (_HERE / "views" / "8_#L01f4a3_Dinger_Engine.py").read_text()
-    assert 'show_l5 = st.checkbox(' in src, "the L5 Hit Rate checkbox must actually exist"
-    assert "_add_l5_column(sub)" in src, "the L5 column must actually get merged into the displayed table"
-    assert '"L5 Hit%"' in src and "DISPLAY_COLS" in src
+    assert 'show_l5 = st.checkbox(' in src, "the L5 checkbox must actually exist"
+    assert "_add_l5_columns(sub)" in src, "the L5 columns must actually get merged into the displayed table"
     display_cols_match = re.search(r"DISPLAY_COLS = \[(.*?)\]", src, re.DOTALL)
-    assert display_cols_match and '"L5 Hit%"' in display_cols_match.group(1), (
-        "L5 Hit% must be in DISPLAY_COLS or style_hitters will silently never show it")
-    # "right next to Hit%" per the direct request -- confirmed by real position, not just presence
+    assert display_cols_match, "DISPLAY_COLS must exist"
     cols_text = display_cols_match.group(1)
+    for real_col in ('"L5 HR%"', '"L5 Hit%"', '"L5 TB1.5%"', '"L5 SO%"'):
+        assert real_col in cols_text, f"{real_col} must be in DISPLAY_COLS or style_hitters will silently never show it"
+    # "right next to" each real model column per the direct request -- confirmed by real position
+    assert cols_text.index('"HR%"') < cols_text.index('"L5 HR%"') < cols_text.index('"Hit%"'), (
+        "L5 HR% must sit immediately after HR%")
     assert cols_text.index('"Hit%"') < cols_text.index('"L5 Hit%"') < cols_text.index('"TB1.5%"'), (
-        "L5 Hit% must sit immediately after Hit% in the real column order")
-    print("✓ L5 Hit Rate is genuinely wired into the real table: checkbox exists, gets merged in, "
-         "and is positioned right next to Hit% in DISPLAY_COLS")
+        "L5 Hit% must sit immediately after Hit%")
+    assert cols_text.index('"TB1.5%"') < cols_text.index('"L5 TB1.5%"') < cols_text.index('"SO Prob"'), (
+        "L5 TB1.5% must sit immediately after TB1.5%")
+    assert cols_text.index('"SO Prob"') < cols_text.index('"L5 SO%"'), (
+        "L5 SO% must sit immediately after SO Prob")
+    print("✓ All four L5 columns are genuinely wired into the real table: checkbox exists, gets "
+         "merged in, and each sits right next to its own real model column in DISPLAY_COLS")
+
 
 
 def test_first_innings_totals_market_names_match_settlement_registry():
