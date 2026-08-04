@@ -1190,12 +1190,22 @@ def test_every_cross_page_link_targets_a_page_visible_under_the_same_conditions(
     # loose but real check that the source at least references the condition its own link
     # depends on, not proof of correct placement -- the two explicit tests above cover placement
     # for the known real cases).
+    #
+    # EXTENDED TO COVER owner_only_titles TOO, a real, confirmed gap that let a real bug through:
+    # Model Dashboard moved to owner_only_titles, but Retrospective's own link to it (Retrospective
+    # itself stayed public) was never updated -- a live StreamlitPageNotFoundError for anyone on
+    # the public build. This test's own docstring already claimed to guard "this whole bug CLASS,"
+    # but only ever checked the has_projections half of it -- fixed to actually be comprehensive,
+    # not just fixing the one reported instance and leaving the same gap open for the next one.
     src = (_HERE / "streamlit_app.py").read_text()
     meta_block = re.search(r"meta = \{(.*?)\n    \}", src, re.DOTALL).group(1)
     key_title = dict(re.findall(r'"(\d+)":\s*\("([^"]+)"', meta_block))
     proj_only = {t.strip().strip('"') for t in
                 re.search(r"projections_only_titles = \{([^}]*)\}", src, re.DOTALL)
                 .group(1).split(",") if t.strip()}
+    owner_only = {t.strip().strip('"') for t in
+                 re.search(r"owner_only_titles = \{([^}]*)\}", src, re.DOTALL)
+                 .group(1).split(",") if t.strip()}
 
     def lead(name):
         lm = re.match(r"(\d+)", name)
@@ -1205,17 +1215,28 @@ def test_every_cross_page_link_targets_a_page_visible_under_the_same_conditions(
     for f in (_HERE / "views").glob("*.py"):
         text = f.read_text()
         src_title = key_title.get(lead(f.name), "?")
-        if src_title in proj_only:
-            continue   # source itself is hidden under the same condition -- never reachable
         for tm in re.finditer(r'st\.page_link\(\s*"views/([^"]+)"', text):
             target_title = key_title.get(lead(tm.group(1)), "?")
-            if target_title in proj_only and "has_projections" not in text:
-                violations.append(f"{f.name} -> {tm.group(1)}")
+            # Two REAL, INDEPENDENT gating conditions -- confirmed directly from a real bug this
+            # exact conflation caused: an early "source already requires has_projections, skip
+            # this whole link" continue must NOT also skip the owner_only check below it, since a
+            # source can legitimately require has_projections while still being PUBLIC (most of
+            # projections_only_titles is public -- Best Bets, Retrospective, etc.), and a target
+            # can be owner_only regardless of its own has_projections status. The original version
+            # of this test used ONE blanket continue for both, which meant a source already in
+            # proj_only (Retrospective) never even reached the owner_only check for its own links
+            # -- confirmed directly: this is the exact real gap that let the Model Dashboard link
+            # bug ship without this test catching it, reproduced and fixed here, not assumed.
+            if not (src_title in proj_only) and target_title in proj_only and "has_projections" not in text:
+                violations.append(f"{f.name} -> {tm.group(1)} (has_projections)")
+            if target_title in owner_only and src_title not in owner_only and "AUDIENCE" not in text:
+                violations.append(f"{f.name} -> {tm.group(1)} (owner_only)")
     assert not violations, (
-        f"these page_link calls target a has_projections-only page from a source that never "
-        f"mentions has_projections at all: {violations}")
-    print("✓ every page_link targeting a has_projections-gated page has some has_projections "
-         "reference in its own source file")
+        f"these page_link calls target a gated page from a source that's visible under looser "
+        f"conditions than the target, with no real reference to the condition that gap depends "
+        f"on anywhere in the source: {violations}")
+    print("✓ every page_link targeting a has_projections- or owner_only-gated page has some "
+         "real reference to that same condition in its own source file")
 
 
 # ----------------------------------------------------------------- team_trend_tag
