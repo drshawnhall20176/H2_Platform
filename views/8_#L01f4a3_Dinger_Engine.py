@@ -100,26 +100,40 @@ def load_hitter_workload(team_id, date_str_inner):
 
 
 @st.cache_data(ttl=900, show_spinner=False)
-def load_l5_hit_rate(pid: int, season: int, date_str_inner: str):
+def load_l5_context(pid: int, season: int, date_str_inner: str):
     """One hitter's own last 5 real games (get_hitter_recent_games, already tested and live on
-    Player Lines) -- (fraction of those games with >=1 real hit, real games found). ADDED
-    DIRECTLY ON REQUEST, closing a real, repeated point of confusion: Hit% above is the model's
-    own matchup-aware probability for TONIGHT (shrunk toward league average by real PA volume,
-    then blended against the opposing starter/platoon/park) -- it does NOT chase a short hot or
-    cold streak by design (see this page's own bottom caption), which reads as "wrong" next to a
-    sportsbook's own plain last-5-games number until both are shown side by side. This is that
-    other number, the same "LAST 5 AVG"-style read a real book shows, so the two can be compared
-    directly instead of one silently contradicting the other.
+    Player Lines) -- real rates for HR%/Hit%/TB1.5%/SO Prob, ALL FOUR from this ONE already-
+    fetched game log, not four separate fetches. ADDED DIRECTLY ON REQUEST, extending the
+    original L5 Hit Rate feature to the platform's other real batter markets on this page, same
+    real reasoning: each of HR%/Hit%/TB1.5%/SO Prob above is the model's own matchup-aware
+    probability for TONIGHT (shrunk toward league average, blended against the opposing starter/
+    platoon/park) -- none of them chase a short hot or cold streak by design (see this page's own
+    bottom caption), which reads as "wrong" next to a sportsbook's own plain last-5-games number
+    until both are shown side by side.
 
-    None (not 0.0) when no real games are found in the window -- an honest "no data," never a
-    fabricated 0%. Real cost: one call per hitter, same as this page's own Hitter Workload
-    section next to it -- see that checkbox's own comment for why this MUST stay opt-in
-    (checkbox-gated) rather than computed unconditionally for every hitter on the slate."""
+    EACH REAL RATE USES THE SAME REAL THRESHOLD projections.py's own model column actually grades
+    against, confirmed directly, not assumed -- HR% and SO Prob are both "> 0.5" (at least 1 real
+    HR / strikeout), TB1.5% is "> 1.5" (at least 2 real total bases), Hit% is "> 0.5" (at least 1
+    real hit, this page's own original L5 Hit Rate check, unchanged). Using a different real bar
+    per stat here would silently make an L5 column and its own model column answer different
+    questions -- confirmed identical to real_line_or_default's own real fallback constants at
+    every one of this platform's own default-line call sites for these four markets.
+
+    None (not 0.0) for the whole dict when no real games are found in the window -- an honest "no
+    data," never a fabricated 0%. Real cost: still just ONE call per hitter (unchanged from the
+    original L5 Hit Rate) -- see this page's own Hitter Workload checkbox for why this stays
+    opt-in rather than computed unconditionally for every hitter on the slate."""
     games = E.get_hitter_recent_games(pid, season, before_date=date_str_inner, n=5)
     if not games:
         return None
-    hit_games = sum(1 for g in games if g["hits"] >= 1)
-    return {"l5_hit_rate": hit_games / len(games), "l5_games": len(games)}
+    n = len(games)
+    return {
+        "l5_games": n,
+        "l5_hit_rate": sum(1 for g in games if g["hits"] > 0.5) / n,
+        "l5_hr_rate": sum(1 for g in games if g["hr"] > 0.5) / n,
+        "l5_tb_rate": sum(1 for g in games if g["total_bases"] > 1.5) / n,
+        "l5_so_rate": sum(1 for g in games if g["strikeouts"] > 0.5) / n,
+    }
 
 
 import best_bets_data as BBD
@@ -202,7 +216,7 @@ else:
  
 # --- Styling ----------------------------------------------------------------
 DISPLAY_COLS = ["Hitter", "Team", "Hand", "Opp Pitcher", "Opp Hand", "Advantage", "Lineup",
-                "Opp HR/9", "Walk Risk", "vs SP", "vs Pen", "HR%", "Hit%", "L5 Hit%", "TB1.5%", "SO Prob", "Barrel%", "xHR/PA", "K%", "HR", "TB", "SLG", "OPS", "ISO", "PowerIndex"]
+                "Opp HR/9", "Walk Risk", "vs SP", "vs Pen", "HR%", "L5 HR%", "Hit%", "L5 Hit%", "TB1.5%", "L5 TB1.5%", "SO Prob", "L5 SO%", "Barrel%", "xHR/PA", "K%", "HR", "TB", "SLG", "OPS", "ISO", "PowerIndex"]
 
 def hr9_band(v):
     """Fixed-threshold coloring for pitcher HR/9 (absolute, not slate-relative).
@@ -238,22 +252,22 @@ def style_hitters(data: pd.DataFrame):
     # low sample). As a mixed object column that (a) breaks the color gradient for the whole column
     # and (b) renders "None" instead of "—". Coerce to numeric so None -> NaN: the gradient then
     # colors the real values and leaves the no-Statcast cells blank ("—"), instead of faking a number.
-    for c in ("Barrel%", "xHR/PA", "vs SP", "vs Pen", "L5 Hit%"):
+    for c in ("Barrel%", "xHR/PA", "vs SP", "vs Pen", "L5 Hit%", "L5 HR%", "L5 TB1.5%", "L5 SO%"):
         if c in view.columns:
             view[c] = pd.to_numeric(view[c], errors="coerce")
-    pct = [c for c in ("HR%", "Hit%", "L5 Hit%", "TB1.5%", "SO Prob", "K%", "Barrel%", "xHR/PA") if c in view.columns]
+    pct = [c for c in ("HR%", "L5 HR%", "Hit%", "L5 Hit%", "TB1.5%", "L5 TB1.5%", "SO Prob", "L5 SO%", "K%", "Barrel%", "xHR/PA") if c in view.columns]
     fmt = {"HR": "{:.0f}", "TB": "{:.0f}", "SLG": "{:.2f}", "OPS": "{:.2f}",
            "ISO": "{:.2f}", "PowerIndex": "{:.1f}", "Opp HR/9": "{:.2f}",
            "vs SP": "{:.2f}", "vs Pen": "{:.2f}"}
     fmt.update({c: "{:.1%}" for c in pct})
     styler = view.style.format(fmt, na_rep="—")
     # High is good for a hitter -> green. Barrel%/xHR/PA (more power) belong here too.
-    grad_up = [c for c in ("HR%", "Hit%", "L5 Hit%", "TB1.5%", "Barrel%", "xHR/PA", "HR", "TB", "SLG",
-                           "OPS", "ISO", "PowerIndex") if c in view.columns]
+    grad_up = [c for c in ("HR%", "L5 HR%", "Hit%", "L5 Hit%", "TB1.5%", "L5 TB1.5%", "Barrel%",
+                           "xHR/PA", "HR", "TB", "SLG", "OPS", "ISO", "PowerIndex") if c in view.columns]
     if grad_up:
         styler = styler.theme_gradient(cmap="RdYlGn", subset=grad_up)
     # Strikeouts hurt the hitter, so high = red on both the game prob and the season rate.
-    red_high = [c for c in ("SO Prob", "K%") if c in view.columns]
+    red_high = [c for c in ("SO Prob", "L5 SO%", "K%") if c in view.columns]
     if red_high:
         styler = styler.theme_gradient(cmap="RdYlGn_r", subset=red_high)
     # Opp HR/9 uses fixed bands (elite arm green -> homer-prone red), not a slate-relative gradient.
@@ -526,29 +540,39 @@ for m in meta_sorted:
         # Same real-cost/opt-in reasoning as Hitter Workload right above -- one checkbox for the
         # whole game (both tabs), not two, matching how the workload section already shows both
         # teams together once toggled on. Added directly on request, closing a real, repeated
-        # point of confusion: this page's own Hit% is a matchup-aware model probability that
-        # deliberately doesn't chase a short streak (see the bottom-of-page caption on why), so
-        # it can genuinely disagree with what a sportsbook's own plain "last 5 games" read shows
-        # for the same player -- putting both numbers side by side makes that visible at a
-        # glance instead of needing to be re-explained each time it comes up.
-        show_l5 = st.checkbox("📅 Show Last 5 Games Hit Rate (same read your sportsbook shows)",
+        # point of confusion: this page's own model columns are matchup-aware probabilities that
+        # deliberately don't chase a short streak (see the bottom-of-page caption on why), so
+        # they can genuinely disagree with what a sportsbook's own plain "last 5 games" read
+        # shows for the same player -- putting both numbers side by side makes that visible at a
+        # glance instead of needing to be re-explained each time it comes up. Expanded directly
+        # on request from Hit% alone to all four real batter markets this page grades (HR%/Hit%/
+        # TB1.5%/SO Prob) -- genuinely free, since load_l5_context already pulls everything
+        # needed for all four from the ONE real per-hitter fetch the original Hit%-only version
+        # already made; nothing new to fetch, just more of what's already in hand.
+        show_l5 = st.checkbox("📅 Show Last 5 Games rates (same read your sportsbook shows)",
                               key=f"l5_{m['label']}")
 
-        def _add_l5_column(df: pd.DataFrame) -> pd.DataFrame:
-            """Adds an "L5 Hit%" column (fraction of the last 5 real games with >=1 hit) right
-            next to Hit%, using this hitter's own real _pid -- one real fetch per hitter shown,
-            each independently cached at 900s, so re-toggling this on/off or re-rendering the
-            same game doesn't re-fetch a player already checked. NaN (renders as "—", never a
+        def _add_l5_columns(df: pd.DataFrame) -> pd.DataFrame:
+            """Adds L5 HR%/L5 Hit%/L5 TB1.5%/L5 SO% (each right next to its own model column),
+            using this hitter's own real _pid -- one real fetch per hitter shown, each
+            independently cached at 900s, so re-toggling this on/off or re-rendering the same
+            game doesn't re-fetch a player already checked. NaN (renders as "—", never a
             fabricated 0%) for a hitter with no real games found in the window."""
             if df.empty or "_pid" not in df.columns:
                 return df
             df = df.copy()
             season = int(date_str[:4])
-            rates = {}
+            hit_rates, hr_rates, tb_rates, so_rates = {}, {}, {}, {}
             for pid in df["_pid"].dropna().unique():
-                r = load_l5_hit_rate(int(pid), season, date_str)
-                rates[pid] = r["l5_hit_rate"] if r else None
-            df["L5 Hit%"] = df["_pid"].map(rates)
+                r = load_l5_context(int(pid), season, date_str)
+                hit_rates[pid] = r["l5_hit_rate"] if r else None
+                hr_rates[pid] = r["l5_hr_rate"] if r else None
+                tb_rates[pid] = r["l5_tb_rate"] if r else None
+                so_rates[pid] = r["l5_so_rate"] if r else None
+            df["L5 Hit%"] = df["_pid"].map(hit_rates)
+            df["L5 HR%"] = df["_pid"].map(hr_rates)
+            df["L5 TB1.5%"] = df["_pid"].map(tb_rates)
+            df["L5 SO%"] = df["_pid"].map(so_rates)
             return df
 
         t_away, t_home = st.tabs([f"✈️ {m['away_name']} bats", f"🏠 {m['home_name']} bats"])
@@ -594,7 +618,7 @@ for m in meta_sorted:
                 sub = game_df[game_df["Team"] == m["away_name"]].sort_values(sort_col, ascending=False)
             if show_l5:
                 with st.spinner(f"Loading {m['away_name']}'s last 5 games..."):
-                    sub = _add_l5_column(sub)
+                    sub = _add_l5_columns(sub)
             st.dataframe(style_hitters(sub), width="stretch", hide_index=True,
                         column_config=_col_cfg)
         with t_home:
@@ -606,7 +630,7 @@ for m in meta_sorted:
                 sub = game_df[game_df["Team"] == m["home_name"]].sort_values(sort_col, ascending=False)
             if show_l5:
                 with st.spinner(f"Loading {m['home_name']}'s last 5 games..."):
-                    sub = _add_l5_column(sub)
+                    sub = _add_l5_columns(sub)
             st.dataframe(style_hitters(sub), width="stretch", hide_index=True,
                         column_config=_col_cfg)
  
