@@ -279,6 +279,21 @@ def test_retrospective_shows_the_catch_rate_by_rank_chart():
          "accumulated grading_history data, not left uncomputed or undisplayed")
 
 
+def test_retrospective_rank_chart_has_a_real_recency_scope():
+    # Added directly on request: the rank chart's own "All time" default pooled essentially all
+    # real history since the loop started, which meant it stayed sparse for a while (see the
+    # backfill script this exact request also produced). A real "Last 10 real days" scope reuses
+    # fetch_graded_plays' own since_date support that already existed -- confirmed here that it's
+    # actually wired to that real parameter, not silently ignored.
+    src = (Path(__file__).parent / "views" / "16_#L01f50d_Retrospective.py").read_text()
+    assert '_rank_scope = st.radio("Scope", ["All time", "Last 10 real days"]' in src
+    assert "_rank_since = (datetime.now() - timedelta(days=10))" in src
+    assert "GH.fetch_graded_plays(_rank_sport.key, since_date=_rank_since" in src, (
+        "the scope selection must actually reach fetch_graded_plays' own since_date parameter")
+    print("✓ Retrospective's rank chart has a real, wired 'Last 10 real days' recency scope, "
+         "reusing fetch_graded_plays' own existing since_date support")
+
+
 def test_retrospective_rank_chart_selector_never_passes_raw_sport_objects():
     # THE real, confirmed bug this fixes: a real production crash (TypeError: cannot pickle
     # 'module' object) -- sports.Sport carries lazily-populated _engine/_projections fields
