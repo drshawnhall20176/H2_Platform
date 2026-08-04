@@ -1,0 +1,63 @@
+# One-off backfill — grades and persists the last N real past MLB slates in one run.
+#
+# WHAT IT DOES:
+#   Runs backfill_grading_history.py, which reuses Retrospective's own real grading pipeline
+#   (build the real historical board, grade it against real results, compute real rank, persist)
+#   for several real past dates in one pass -- the same real work a person visiting Retrospective
+#   for each of those dates would trigger, just automated. Added directly on request: the "Model
+#   caught it — by pre-game rank" chart on Retrospective only fills in as real dates get manually
+#   graded one at a time, which left it showing a single bucket for a while. This is the real,
+#   honest way to get more real volume showing sooner -- real games that already happened, not
+#   synthetic data.
+#
+# MANUAL TRIGGER ONLY, NO SCHEDULE, ON PURPOSE: unlike refresh-calibration.yml (a real, recurring
+#   weekly job), this is an occasional, on-demand tool -- run it once to backfill a real window,
+#   not automatically every week. Real cost is genuinely higher than a normal run too: each date
+#   is a full real board rebuild (schedule, live odds, Statcast, weather, bullpen blend), so 10
+#   real dates in one run is a meaningfully heavier job than anything scheduled in this repo.
+#
+# REQUIRES DATABASE_URL (Settings -> Secrets and variables -> Actions) — same secret every other
+#   real write job in this repo already uses, so backfilled rows land in the SAME database the
+#   deployed app reads from. Without it, the script refuses to run and says so -- no silent no-op.
+
+name: backfill-grading-history
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "How many real past days to backfill"
+        required: false
+        default: "10"
+      end:
+        description: "Real most-recent date to include, YYYY-MM-DD (blank = yesterday)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read            # no commit needed — reads and writes to the database only
+
+jobs:
+  backfill-grading-history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30      # a real, heavier run than refresh-calibration's own 15-minute budget
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Backfill real grading history
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          ARGS="--days ${{ inputs.days }}"
+          if [ -n "${{ inputs.end }}" ]; then
+            ARGS="$ARGS --end ${{ inputs.end }}"
+          fi
+          python backfill_grading_history.py $ARGS
