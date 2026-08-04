@@ -75,11 +75,18 @@ def load_matchup(sport_key: str, date_str: str, player_id: int, team_id: int, op
     # sport_key: same cache-differentiation reason as load_slate above.
     h2h_log = E.get_player_history_vs_opponent(player_id, team_id, opp_id, date_str)
     season_log = E.get_player_season_games(player_id, team_id, date_str)              # full season, any opponent
-    opp_recent = E.get_team_recent_allowed_stats(opp_id, date_str)                    # last 10
+    # THE real redesign, added directly on request: all three real windows fetched here, not
+    # just "recent" (n=10) -- get_team_recent_allowed_stats' own docstring confirms this is
+    # built entirely from box scores already fetched for build_slate, zero new network cost per
+    # window, so fetching all three up front (rather than gating behind a real-cost checkbox,
+    # the pattern Dinger Engine's own L5 Hit Rate needed for a genuinely NEW per-player fetch)
+    # lets a person freely switch between them with no real cost tradeoff to explain.
+    opp_l5 = E.get_team_recent_allowed_stats(opp_id, date_str, n=5)
+    opp_l10 = E.get_team_recent_allowed_stats(opp_id, date_str)                        # n=10, the real default
     opp_season = E.get_team_recent_allowed_stats(opp_id, date_str, n=82, days_back=200)  # season-wide
     team_rest = E.get_team_rest_info(team_id, date_str)
     opp_rest = E.get_team_rest_info(opp_id, date_str)
-    return h2h_log, season_log, opp_recent, opp_season, team_rest, opp_rest
+    return h2h_log, season_log, opp_l5, opp_l10, opp_season, team_rest, opp_rest
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -159,10 +166,21 @@ if team_id is None or opp_id is None:
     st.stop()
 
 with st.spinner(f"Pulling {row['Opp']}'s matchup history and defensive trend..."):
-    h2h_log, season_log, opp_recent, opp_season, team_rest, opp_rest = load_matchup(
+    h2h_log, season_log, opp_l5, opp_l10, opp_season, team_rest, opp_rest = load_matchup(
         _active.key, date_str, pid, team_id, opp_id)
 
-profile = P.build_matchup_profile(row, h2h_log, opp_recent, opp_season, season_log=season_log)
+# THE real redesign, added directly on request: ONE real window selector drives BOTH sides of
+# the matchup read together (the player's own rate AND the opponent's own allowed rate,
+# recomputed for the SAME window) -- not the earlier, less complete version, which only ever
+# added the player's own L5/L10 as extra columns next to a fixed "last 10" opponent number.
+# Default "Season" preserves the exact prior baseline behavior for anyone who never touches this.
+_WINDOW_OPTIONS = {"Season": (None, None), "Last 10 Games": (10, opp_l10), "Last 5 Games": (5, opp_l5)}
+window_label = st.radio("Window", list(_WINDOW_OPTIONS.keys()), horizontal=True,
+                        key="matchup_lab_window")
+window_n, opp_allowed_for_window = _WINDOW_OPTIONS[window_label]
+
+profile = P.build_matchup_profile(row, h2h_log, opp_allowed_for_window or {}, opp_season,
+                                  season_log=season_log, window_n=window_n)
 # Minutes Played -- playing-time context alongside the four real markets, added directly on
 # request. Appended here (not folded into build_matchup_profile itself) since it isn't one of
 # the four real markets that function's own suppression/defense-trend logic is built around --
@@ -308,15 +326,13 @@ if trend_log:
               "average, for scale, not a sportsbook number.")
 
 # --- table 1: player signals (recent form / season form / this matchup) -----
-# ADDED DIRECTLY ON REQUEST, same real pattern Dinger Engine's own L5 Hit Rate checkbox already
-# established -- L5 Avg/L10 Avg are computed from season_log (already fetched for Season Avg,
-# zero new cost) inside build_matchup_profile itself, genuinely separate from Recent Avg (the
-# model's own 45-day recency signal, untouched by this addition). Off by default to keep the
-# table's default width manageable -- this table already carries 6 real columns before Notes.
-show_l5_l10 = st.checkbox("📅 Show Last 5 / Last 10 game averages", key="matchup_lab_l5_l10")
-_window_cols = ["L5 Avg", "L10 Avg"] if show_l5_l10 else []
-pdf = pd.DataFrame(profile)[["Market", "Recent Avg"] + _window_cols +
-                            ["Season Avg", "H2H Avg", "H2H Games", "H2H Spread", "High Variance", "Suppressed"]]
+# THE real redesign, added directly on request: "Window Avg" is ALREADY the right number for
+# whichever window is selected above (build_matchup_profile did the real recomputation) -- this
+# table just needs to LABEL that column by the real selected window, not maintain three separate
+# fixed columns the way the earlier, less complete version did.
+_window_col_label = f"{window_label} Avg"
+pdf = pd.DataFrame(profile)[["Market", "Recent Avg", "Window Avg", "H2H Avg", "H2H Games",
+                             "H2H Spread", "High Variance", "Suppressed"]]
 
 
 def _notes(r):
@@ -329,57 +345,69 @@ def _notes(r):
 
 
 pdf["Notes"] = pdf.apply(_notes, axis=1)
-pdf = pdf[["Market", "Recent Avg"] + _window_cols + ["Season Avg", "H2H Avg", "H2H Games", "Notes"]]
-st.markdown(f"**{row['Player']} — recent form, season form, and this matchup**")
-_fmt = {"Recent Avg": "{:.1f}", "Season Avg": "{:.1f}", "H2H Avg": "{:.1f}"}
-_fmt.update({c: "{:.1f}" for c in _window_cols})
+pdf = pdf[["Market", "Recent Avg", "Window Avg", "H2H Avg", "H2H Games", "Notes"]]
+pdf = pdf.rename(columns={"Window Avg": _window_col_label})
+st.markdown(f"**{row['Player']} — recent form, {window_label.lower()}, and this matchup**")
 st.dataframe(
-    pdf.style.format(_fmt, na_rep="—"),
+    pdf.style.format({"Recent Avg": "{:.1f}", _window_col_label: "{:.1f}", "H2H Avg": "{:.1f}"}, na_rep="—"),
     hide_index=True, width="stretch",
 )
-if show_l5_l10:
-    st.caption("L5/L10 Avg: this player's own real average over her literal last 5 or last 10 "
-              "games, any opponent — a plain, un-weighted read (the same shape a sportsbook's "
-              "own \"last 5\" column shows), genuinely different from Recent Avg above it (the "
-              "model's own recency signal, a 45-day rolling window). \"—\" means fewer than that "
-              "many real games exist yet this season, never a padded average.")
+_window_phrase = {None: "her real full season", 10: "her literal last 10 games", 5: "her literal last 5 games"}[window_n]
+st.caption(f"**{_window_col_label}**: this player's own real average over {_window_phrase}, any "
+          "opponent — a plain, un-weighted read (the same shape a sportsbook's own \"last N\" "
+          "column shows), genuinely different from Recent Avg above it (the model's own recency "
+          "signal, a fixed 45-day rolling window that doesn't change with this selector). "
+          "\"—\" means fewer than that many real games exist yet this season, never a padded average.")
 
 if not h2h_log:
     st.caption(f"ℹ️ {row['Team']} and {row['Opp']} haven't played each other yet this season — "
                "H2H columns are honestly blank rather than a guess. Recent form and defense "
                "trend are still real signals on their own.")
 if not season_log:
-    st.caption("ℹ️ No season-long log available yet for Season Avg — early in the season this "
+    st.caption(f"ℹ️ No season-long log available yet — early in the season {_window_col_label} "
                "may just equal her recent form.")
 
 # --- table 2: opponent's whole-team defensive trend --------------------------
 st.markdown(f"**{row['Opp']} — whole-team defensive trend (not player- or position-specific)**")
-odf = pd.DataFrame(profile)[["Market", "Opp Recent Allowed", "Opp Season Allowed", "Defense Trend",
-                             "Trend Tag"]]
-odf = odf.rename(columns={"Opp Recent Allowed": "Opp Team Total (recent)",
-                          "Opp Season Allowed": "Opp Team Total (season)"})
-st.dataframe(
-    odf.style.format({"Opp Team Total (recent)": "{:.1f}", "Opp Team Total (season)": "{:.1f}",
-                      "Defense Trend": "{:.2f}×"}, na_rep="—")
-    .theme_gradient(cmap="RdYlGn", subset=["Defense Trend"]),
-    hide_index=True, width="stretch",
-)
-st.caption(
-    f"\"Opp Team Total\" = {row['Opp']}'s **entire team combined**, not a per-player or "
-    "per-position figure — there's no per-position or per-defender data here, just whether "
-    "this team's overall defense at each stat has been trending looser or tighter than their "
-    "own norm. 🟢 Green / looser lately = they've been allowing MORE than usual — good news for "
-    f"{row['Player']}'s counting stats. 🔴 Red / tighter lately = allowing less. Each market has "
-    "its own independent trend.")
+if window_n is None:
+    # Season-vs-itself is not a real trend reading (build_matchup_profile's own Defense Trend is
+    # honestly None here) -- shows the one real number that DOES exist on this window (their
+    # real season-long allowed total) without a fabricated comparison next to it.
+    odf = pd.DataFrame(profile)[["Market", "Opp Window Allowed"]]
+    odf = odf.rename(columns={"Opp Window Allowed": "Opp Team Total (season)"})
+    st.dataframe(odf.style.format({"Opp Team Total (season)": "{:.1f}"}, na_rep="—"),
+                hide_index=True, width="stretch")
+    st.caption(f"\"Opp Team Total\" = {row['Opp']}'s **entire team combined**, their real "
+              "full-season baseline. Pick Last 10 Games or Last 5 Games above to see whether "
+              "their defense has been trending looser or tighter than this real baseline.")
+else:
+    odf = pd.DataFrame(profile)[["Market", "Opp Window Allowed", "Defense Trend", "Trend Tag"]]
+    odf = odf.rename(columns={"Opp Window Allowed": f"Opp Team Total ({window_label.lower()})"})
+    st.dataframe(
+        odf.style.format({f"Opp Team Total ({window_label.lower()})": "{:.1f}",
+                          "Defense Trend": "{:.2f}×"}, na_rep="—")
+        .theme_gradient(cmap="RdYlGn", subset=["Defense Trend"]),
+        hide_index=True, width="stretch",
+    )
+    st.caption(
+        f"\"Opp Team Total\" = {row['Opp']}'s **entire team combined**, not a per-player or "
+        "per-position figure — there's no per-position or per-defender data here, just whether "
+        f"this team's overall defense at each stat has run looser or tighter over their real "
+        f"{window_label.lower()} than their own real season norm. 🟢 Green / looser = they've "
+        f"been allowing MORE than usual — good news for {row['Player']}'s counting stats. 🔴 Red "
+        "/ tighter = allowing less. Each market has its own independent trend.")
 
 with st.expander("Full column reference"):
-    st.markdown("""
+    st.markdown(f"""
 **Player signals**
-- **Recent Avg** — the player's own bootstrap-model average over her last 10 games, no opponent
-  adjustment (the same number Best Bets/Edge Board price off).
-- **Season Avg** — her full-season average (any opponent). H2H Avg is compared against THIS, not
-  Recent Avg — that separates "this team's specific effect on her" from "she's just been hot or
-  cold lately," which a 10-game recency window alone can't distinguish.
+- **Recent Avg** — the player's own bootstrap-model average over her last 10 games (a fixed
+  45-day recency window), no opponent adjustment (the same number Best Bets/Edge Board price
+  off). Doesn't change with the Window selector above — it's the model's own real signal, not a
+  comparison point.
+- **{_window_col_label}** — her own real average over {_window_phrase}, any opponent — recomputes
+  when you change the Window selector above. H2H Avg is compared against her real SEASON average
+  specifically (never this selector) — that separates "this team's specific effect on her" from
+  "she's just been hot or cold lately."
 - **H2H Avg / H2H Games** — her actual average in every game her team has played against this
   specific opponent *this season*. Teams typically meet 2-4 times a season, so a small sample
   here is expected, not a bug — read it as a data point, not a verdict.
@@ -389,10 +417,10 @@ with st.expander("Full column reference"):
   small sample.
 
 **Opponent signals**
-- **Opp Team Total (recent / season)** — tonight's opponent's WHOLE TEAM combined total at each
-  stat, over their last 10 games vs. their full season (same recent number Hot Hand Engine uses).
-- **Defense Trend** — Team Total (recent) ÷ Team Total (season). See the note above that table
-  for what the color and tags mean.
+- **Opp Team Total** — tonight's opponent's WHOLE TEAM combined total at each stat, recomputed
+  for the SAME Window selector above (their real last 10/last 5/season, not a fixed number).
+- **Defense Trend** — Opp Team Total (selected window) ÷ their own real season total. Only shown
+  on Last 10/Last 5 — season-vs-itself isn't a real trend, so it's honestly omitted on Season.
     """)
 
 # --- supporting detail: recent game log + H2H game log ----------------------

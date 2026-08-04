@@ -10,6 +10,7 @@ import streamlit as st
 import components as C
 import pandas as pd
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 from datetime import datetime, timedelta
  
 import retro as R
@@ -137,7 +138,17 @@ if _active.key == "MLB":
     # here on purpose — this module's own docstring already puts the sample-size-and-soundness
     # judgment call on every caller, not on the storage layer; a future retuning decision needs to
     # weigh this the same way it weighs sample size, using since_date to prefer recent history.
-    GH.record_graded_slate(date_str, "MLB", graded)
+    #
+    # Rank/OfTotal, ADDED DIRECTLY ON REQUEST for retro.catch_rate_by_rank -- computed from
+    # `graded` itself (grade_slate's own output already carries Market/ModelProb/PlayerId, no
+    # separate pre-graded plays list needed). NEW dicts built here, not a mutation of `graded` in
+    # place -- `graded` came back from an @st.cache_data-wrapped loader, and mutating a cached
+    # function's own returned objects is a real, avoidable footgun even if this Streamlit version
+    # happens to isolate cache reads safely; not worth relying on that.
+    _ranks = R.rank_within_market(graded)
+    graded_with_rank = [dict(p, Rank=_ranks[p["PlayerId"]][0], OfTotal=_ranks[p["PlayerId"]][1])
+                        if p.get("PlayerId") in _ranks else p for p in graded]
+    GH.record_graded_slate(date_str, "MLB", graded_with_rank)
 else:
     target = st.date_input("Slate to review", datetime.now() - timedelta(days=1))
     date_str = target.strftime("%Y-%m-%d")
@@ -153,7 +164,12 @@ else:
     # branch above. WNBA's own recency-window model naturally avoids the look-ahead caveat MLB's
     # version carries (this page's own info banner above already says so) -- so a row persisted
     # here is a genuinely point-in-time prediction, the cleanest signal this module can store.
-    GH.record_graded_slate(date_str, _active.key, graded)
+    #
+    # Rank/OfTotal, same real reasoning and same non-mutating construction as the MLB branch above.
+    _ranks = R.rank_within_market(graded)
+    graded_with_rank = [dict(p, Rank=_ranks[p["PlayerId"]][0], OfTotal=_ranks[p["PlayerId"]][1])
+                        if p.get("PlayerId") in _ranks else p for p in graded]
+    GH.record_graded_slate(date_str, _active.key, graded_with_rank)
  
 if not summary["graded"]:
     st.info("No completed games with results for this date yet. Pick a date whose games are final.")
@@ -291,10 +307,26 @@ if cal:
 st.divider()
 C.section_header("📋", "Full graded board")
 only = st.radio("Show", ["All graded", "Hits only", "Misses only"], horizontal=True)
- 
+
+# ADDED DIRECTLY ON REQUEST, same real opt-in-for-real-cost pattern Dinger Engine's own L5 Hit
+# Rate checkbox already established -- one real fetch per unique player shown, only when this is
+# actually turned on. MLB only: retro.l5_l10_hit_rate is built on mlb_engine.get_hitter_recent_
+# games, which has no real WNBA/NBA/NCAAMB equivalent on this platform yet -- an honest scope
+# limit, not hidden from a person on another sport (the checkbox itself just doesn't render there).
+_show_l5_l10 = False
+if _active.key == "MLB":
+    _show_l5_l10 = st.checkbox("📅 Show Last 5 / Last 10 hit-rate context (real per-player cost)",
+                               key="retro_l5_l10")
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _load_l5_l10_games(pid: int, season_inner: int, before_date: str):
+    return E.get_hitter_recent_games(pid, season_inner, before_date=before_date, n=10)
+
+
 _graded_all = [g for g in graded if g["Hit"] is not None]
- 
- 
+
+
 def _render_graded(subset):
     g = pd.DataFrame(subset)
     if not g.empty:
@@ -310,11 +342,35 @@ def _render_graded(subset):
     g["Why it missed"] = g.apply(
         lambda r: "" if r["Hit"] else R.explain_pick_miss(r["ModelProb"], r["Market"], r.get("Side", "")),
         axis=1)
-    show = g[["Conviction", "Player", "Market", "Side", "Line", "ModelProb", "Actual",
-              "Result", "Why it missed", "Why"]]
+
+    cols = ["Conviction", "Player", "Market", "Side", "Line", "ModelProb", "Actual",
+           "Result", "Why it missed", "Why"]
+    fmt = {"Model %": "{:.0%}", "Conviction": "{:.2f}×", "Line": "{:g}", "Actual": "{:.1f}"}
+
+    if _show_l5_l10:
+        # Real, market-and-line-aware L5/L10 -- see retro.l5_l10_hit_rate's own docstring for
+        # why this is NOT the same fixed ">=1 hit" shortcut Dinger Engine's own L5 column uses.
+        # before_date=date_str keeps this a genuine point-in-time read for whichever slate is
+        # being reviewed, never "as of today" for a historical date.
+        season = int(date_str[:4])
+        l5_vals, l10_vals = [], []
+        for _, r in g.iterrows():
+            pid = r.get("PlayerId")
+            if pid is None:
+                l5_vals.append(None); l10_vals.append(None)
+                continue
+            games = _load_l5_l10_games(int(pid), season, date_str)
+            l5, l10 = R.l5_l10_hit_rate(games or [], r["Market"], r.get("Line"))
+            l5_vals.append(l5); l10_vals.append(l10)
+        g["L5 Hit%"] = l5_vals
+        g["L10 Hit%"] = l10_vals
+        cols = cols[:6] + ["L5 Hit%", "L10 Hit%"] + cols[6:]
+        fmt["L5 Hit%"] = "{:.0%}"
+        fmt["L10 Hit%"] = "{:.0%}"
+
+    show = g[cols]
     styler = (show.rename(columns={"ModelProb": "Model %", "Why": "Why the model liked it"})
-              .style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×", "Line": "{:g}",
-                            "Actual": "{:.1f}"}, na_rep="—"))
+              .style.format(fmt, na_rep="—"))
     # Natural width + wide text columns -> horizontal scroll for the two long reason columns.
     try:
         st.dataframe(
@@ -326,6 +382,12 @@ def _render_graded(subset):
             })
     except (TypeError, AttributeError):
         st.dataframe(styler, width="content", hide_index=True, height=480)
+    if _show_l5_l10:
+        st.caption("L5/L10 Hit%: real hit rate over this player's own last 5/10 real games, "
+                  "checked against the SAME market and line this specific play was graded "
+                  "against — not a fixed \"got a hit\" shortcut. \"—\" means fewer than that "
+                  "many real games exist yet, or this market isn't a batter market this read "
+                  "covers (pitcher markets aren't included — no real trend source for those yet).")
  
  
 _GRADED_TABS = [("All markets", None)] + [(f"{_MARKET_ICONS.get(m, '🔹')} {m}", m) for m in _active_markets]
@@ -341,3 +403,51 @@ if only == "Misses only":
                "most do is normal variance for a high-variance market, not a broken model. The Bet Log's "
                "calibration over many slates — not one cold night — is the real test of whether the "
                "probabilities are honest.")
+
+
+# ------------------------------------------------------------------ "model caught it" by rank
+# ADDED DIRECTLY ON REQUEST: is there a real correlation between how confident the model's own
+# pre-game rank was in a market and whether it actually caught? Pulls from grading_history's own
+# REAL ACCUMULATED history (every date this page has ever graded and persisted, not just today's
+# slate) -- the exact reason rank got added to that module's own schema. Same PALETTE Track
+# Record's own calibration chart already uses, for visual consistency across the two pages that
+# both answer "is the model's own confidence actually meaningful."
+st.divider()
+C.section_header("🎯", "Model caught it — by pre-game rank")
+st.caption("Across every real graded play this platform has persisted (not just today's slate): "
+          "did the model's own #1 pick in a market actually hit more often than its #5? A real, "
+          "growing answer, not a guess — each bar needs its own real sample before it appears.")
+
+_PALETTE = {"pos": "#16a34a", "neg": "#dc2626", "model": "#2563eb", "muted": "#94a3b8",
+           "grid": "#e5e7eb"}
+
+_rank_sport = st.selectbox("Sport", [s for s in sports.enabled_sports() if s.has_projections],
+                           format_func=lambda s: f"{s.icon} {s.label}", key="retro_rank_sport")
+_rank_market = st.selectbox("Market", ["All markets"] + list(_rank_sport.market_map.keys()),
+                            key="retro_rank_market")
+
+_rank_history = GH.fetch_graded_plays(_rank_sport.key,
+                                      market=None if _rank_market == "All markets" else _rank_market)
+_rank_result = R.catch_rate_by_rank(_rank_history,
+                                    market=None if _rank_market == "All markets" else _rank_market)
+
+if _rank_result:
+    figr = go.Figure(go.Bar(
+        x=[b["bucket"] for b in _rank_result], y=[b["hit_rate"] for b in _rank_result],
+        marker_color=_PALETTE["model"],
+        text=[f"n={b['n']}" for b in _rank_result], textposition="outside",
+        hovertemplate="%{x}<br>hit rate %{y:.0%}<br>%{text}<extra></extra>",
+    ))
+    figr.update_layout(template="plotly_white", height=360, margin=dict(l=10, r=10, t=30, b=10),
+                       yaxis=dict(title="Real hit rate", range=[0, 1], tickformat=".0%"),
+                       xaxis=dict(title="Pre-game rank within its own market"))
+    st.plotly_chart(figr, width="stretch")
+    st.caption("A bar only appears once its own bucket clears 20 real graded plays — thinner "
+              "buckets are omitted, not shown on a handful of plays. This fills in on its own "
+              "as more real slates get graded here; it's not something to force by grading more "
+              "dates at once.")
+else:
+    st.info("Not enough real accumulated history yet for this sport/market to show a real "
+           "rank-vs-hit-rate read (each bucket needs 20+ real graded plays). Keep grading real "
+           "dates on this page — this fills in on its own, the same way Track Record's own "
+           "calibration chart does.")

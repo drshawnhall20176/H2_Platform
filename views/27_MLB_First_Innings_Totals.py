@@ -278,6 +278,61 @@ p1, p2 = st.columns(2)
 p1.metric(f"P(Over {line:g})", f"{probs['prob_over']:.0%}")
 p2.metric(f"P(Under {line:g})", f"{probs['prob_under']:.0%}")
 
+# ADDED DIRECTLY ON REQUEST -- a real, numbers-filled-in breakdown of why THIS market's own
+# percentages are what they are, not a generic restatement of the caption above it. Uses the
+# actual real inputs this specific projection was built from (team_recent/pitcher_allowed/proj),
+# not a re-derivation -- if the numbers shown here ever disagreed with the metrics above, that
+# would itself be a real bug, so this reads directly off the same values already computed.
+with st.expander(f"🔍 How this {n_innings}-inning projection was calculated"):
+    team_games = team_recent.get("games", 0)
+    pitcher_starts = pitcher_allowed.get("games", 0)
+    st.markdown(
+        f"**1. {batting_row['Team']}'s own real scoring rate** — "
+        f"{proj['team_rate']:.2f} runs/game in innings 1-{n_innings}, over its last "
+        f"{team_games} real game(s)."
+    )
+    if team_games < 8:
+        st.caption(f"⚠️ Only {team_games} real game(s) behind this side of the blend — thinner "
+                  "than the platform's own usual 15-game window (early season, a recent "
+                  "callup/trade, or a short recent stretch of clean linescore data). Real, not "
+                  "fabricated, but weight it accordingly.")
+
+    st.markdown(
+        f"**2. {opposing_row['Pitcher']}'s own real runs-allowed rate** — "
+        f"{proj['pitcher_allowed_rate']:.2f} runs/start allowed in innings 1-{n_innings}, over "
+        f"his last {pitcher_starts} real start(s)."
+    )
+    if pitcher_starts < 5:
+        st.caption(f"⚠️ Only {pitcher_starts} real start(s) behind this side of the blend — "
+                  "thinner than the platform's own usual 10-start window (early season, a "
+                  "recent callup, or an IL stint). Real, not fabricated, but weight it "
+                  "accordingly.")
+
+    st.markdown(
+        f"**3. The blend** — a plain average of the two, not a multiplicative/log5 combination: "
+        f"({proj['team_rate']:.2f} + {proj['pitcher_allowed_rate']:.2f}) / 2 = "
+        f"**{proj['projected_runs']:.2f} projected runs**. Deliberately simple: a real "
+        "multiplicative blend needs a real, current league-average first-N-innings runs figure "
+        "to normalize against, which this platform doesn't have verified yet — averaging two "
+        "already-real, already-fetched rates avoids inventing a third, unverified number just "
+        "to look more sophisticated than the data underneath actually supports."
+    )
+
+    st.markdown(
+        f"**4. Why {line:g} lands at {probs['prob_over']:.0%}/{probs['prob_under']:.0%}** — "
+        f"{proj['projected_runs']:.2f} is the MEAN of a simulated Poisson distribution "
+        f"({P.DEFAULT_SIMS:,} real trials, not a formula shortcut), the same real distribution "
+        "every count-based outcome on this platform is simulated from. The percentages are "
+        f"simply the real share of those {P.DEFAULT_SIMS:,} trials that landed above/below "
+        f"{line:g} — a Poisson distribution is naturally right-skewed at a mean this low, which "
+        "is exactly why the Under side usually reads meaningfully higher than the Over side at "
+        "a small mean like this, even before any matchup-specific edge is considered."
+    )
+    st.caption("First 3 vs First 5 use this exact same real method — only the two real inputs "
+              "(team's own rate, pitcher's own allowed rate) change, both recomputed for "
+              "whichever window is selected above, never scaled or estimated from the other "
+              "window's own numbers.")
+
 st.caption("Model-only line — this platform's own odds provider has no live price for this exact "
           "market on either window (see this page's own module docstring for the specifics), so "
           "check this against whatever number your book is actually posting before betting it. "
