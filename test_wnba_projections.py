@@ -598,14 +598,14 @@ def test_build_hot_hand_board_spread_unknown_when_team_spreads_omitted():
 # ----------------------------------------------------------------- build_matchup_profile
 def test_build_matchup_profile_covers_all_markets():
     row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
-    profile = WP.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={})
+    profile = WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={})
     assert {p["Market"] for p in profile} == {"Points", "Rebounds", "Assists", "Threes Made"}
     print("✓ build_matchup_profile covers all 4 markets")
 
 
 def test_build_matchup_profile_honest_empty_h2h():
     row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
-    profile = WP.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={})
+    profile = WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={})
     pts = next(p for p in profile if p["Market"] == "Points")
     assert pts["H2H Games"] == 0
     assert pts["H2H Avg"] is None   # never fabricated when teams haven't met
@@ -616,7 +616,7 @@ def test_build_matchup_profile_computes_h2h_average():
     row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
     h2h = [{"pts": 25.0, "reb": 4.0, "ast": 2.0, "fg3m": 3.0},
           {"pts": 19.0, "reb": 6.0, "ast": 4.0, "fg3m": 1.0}]
-    profile = WP.build_matchup_profile(row, h2h_log=h2h, opp_recent_allowed={}, opp_season_allowed={})
+    profile = WP.build_matchup_profile(row, h2h_log=h2h, opp_allowed={}, opp_season_allowed={})
     pts = next(p for p in profile if p["Market"] == "Points")
     assert pts["H2H Games"] == 2
     assert pts["H2H Avg"] == 22.0
@@ -624,95 +624,132 @@ def test_build_matchup_profile_computes_h2h_average():
 
 
 def test_build_matchup_profile_tags_defense_trend_correctly():
+    # window_n=10 (not the old fixed "always last 10") -- Defense Trend now compares WHICHEVER
+    # real window is selected against the opponent's own season allowed rate.
     row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
-    # opponent has been allowing MORE lately than their season norm -> looser defense
+    # opponent has been allowing MORE over this window than their season norm -> looser defense
     looser = WP.build_matchup_profile(row, h2h_log=[],
-                                      opp_recent_allowed={"pts": 90.0},
-                                      opp_season_allowed={"pts": 80.0})
+                                      opp_allowed={"pts": 90.0},
+                                      opp_season_allowed={"pts": 80.0}, window_n=10)
     pts = next(p for p in looser if p["Market"] == "Points")
     assert pts["Defense Trend"] > 1.08
     assert pts["Trend Tag"] == "📈 Looser lately"
 
-    # opponent has tightened up recently -> lower trend
+    # opponent has tightened up over this window -> lower trend
     tighter = WP.build_matchup_profile(row, h2h_log=[],
-                                       opp_recent_allowed={"pts": 70.0},
-                                       opp_season_allowed={"pts": 80.0})
+                                       opp_allowed={"pts": 70.0},
+                                       opp_season_allowed={"pts": 80.0}, window_n=10)
     pts2 = next(p for p in tighter if p["Market"] == "Points")
     assert pts2["Defense Trend"] < 0.92
     assert pts2["Trend Tag"] == "📉 Tighter lately"
-    print("✓ build_matchup_profile correctly tags looser/tighter defensive trends")
+    print("✓ build_matchup_profile correctly tags looser/tighter defensive trends for a real selected window")
+
+
+def test_build_matchup_profile_defense_trend_none_on_season_window():
+    # THE real, confirmed design point: season-vs-itself is not a real trend reading, so
+    # window_n=None (the real Season baseline) must not show a trivial/meaningless trend at all.
+    row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
+    profile = WP.build_matchup_profile(row, h2h_log=[], opp_allowed={"pts": 80.0},
+                                       opp_season_allowed={"pts": 80.0})   # window_n defaults to None
+    pts = next(p for p in profile if p["Market"] == "Points")
+    assert pts["Defense Trend"] is None
+    assert pts["Trend Tag"] is None
+    print("✓ build_matchup_profile honestly omits Defense Trend on the Season window, not a meaningless season-vs-itself comparison")
 
 
 def test_build_matchup_profile_neutral_when_no_season_allowed_data():
     row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
-    profile = WP.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={"pts": 90.0},
-                                       opp_season_allowed={})   # no season data -> can't compute a trend
+    profile = WP.build_matchup_profile(row, h2h_log=[], opp_allowed={"pts": 90.0},
+                                       opp_season_allowed={}, window_n=10)   # no season data -> can't compute a trend
     pts = next(p for p in profile if p["Market"] == "Points")
     assert pts["Defense Trend"] == 1.0
     assert pts["Trend Tag"] == "➡️ Steady"
 
 
-# ----------------------------------------------------------------- season baseline
-def test_build_matchup_profile_reports_season_avg_alongside_recent_and_h2h():
+# ----------------------------------------------------------------- Window Avg (real redesign, added directly on request)
+def test_build_matchup_profile_window_avg_defaults_to_season():
     row = {"PTS": 24.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}   # recent form running hot
     season_log = [{"pts": p, "reb": 5, "ast": 3, "fg3m": 2} for p in (18, 20, 19, 21, 20)]  # season norm ~19.6
-    profile = WP.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={},
-                                       season_log=season_log)
+    profile = WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
+                                       season_log=season_log)   # window_n not passed -> real Season default
     pts = next(p for p in profile if p["Market"] == "Points")
-    assert pts["Season Avg"] == 19.6
-    assert pts["Recent Avg"] == 24.0   # confirms Season Avg is a genuinely separate baseline
-    print("✓ build_matchup_profile reports Season Avg as a real, separate baseline from Recent Avg")
+    assert pts["Window Avg"] == 19.6
+    assert pts["Recent Avg"] == 24.0   # confirms Window Avg (season) is a genuinely separate baseline from the model's own Recent Avg
+    print("✓ build_matchup_profile's Window Avg defaults to the real Season baseline when window_n isn't given")
 
 
-def test_build_matchup_profile_season_avg_none_without_season_log():
+def test_build_matchup_profile_window_avg_none_without_season_log():
     row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
-    profile = WP.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={})
+    profile = WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={})
     pts = next(p for p in profile if p["Market"] == "Points")
-    assert pts["Season Avg"] is None
+    assert pts["Window Avg"] is None
 
 
-# ----------------------------------------------------------------- L5 Avg / L10 Avg (added directly on request)
-def test_build_matchup_profile_l5_and_l10_are_real_separate_windows():
-    # Real, exact, hand-verifiable construction: season_log is "most recent first" (confirmed
-    # against get_player_season_games' own docstring) -- the first 5 entries are a genuine hot
-    # stretch (30 pts/g), the next 5 a cooler stretch (10 pts/g), so L5, L10, and Season Avg must
-    # all land at DIFFERENT, exactly-computable real numbers if the windowing is correct.
+def test_build_matchup_profile_window_avg_recomputes_for_l5_and_l10_separately():
+    # THE real redesign this session's own request asked for, hand-verified: the SAME real
+    # season_log (5 hot games most recent, 5 cooler ones before that) must produce three
+    # DIFFERENT, exactly-computable Window Avg values depending on which real window_n is asked
+    # for -- not three columns shown at once (the earlier, less complete version), one real
+    # recomputed value per call, matching how a person would actually toggle between them.
     row = {"PTS": 24.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
     hot = [{"pts": 30, "reb": 5, "ast": 3, "fg3m": 2} for _ in range(5)]
     cool = [{"pts": 10, "reb": 5, "ast": 3, "fg3m": 2} for _ in range(5)]
     season_log = hot + cool   # most recent first -- 5 hot games, then 5 cooler ones
-    profile = WP.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={},
-                                       season_log=season_log)
-    pts = next(p for p in profile if p["Market"] == "Points")
-    assert pts["L5 Avg"] == 30.0     # exactly the 5 real hot games
-    assert pts["L10 Avg"] == 20.0    # (30*5 + 10*5) / 10 = 20.0, all 10 real games
-    assert pts["Season Avg"] == 20.0 # same 10 games, same real number here, but computed independently
-    print("✓ L5 Avg and L10 Avg reflect their own real, distinct windows -- exact, hand-verified numbers")
+
+    l5_profile = WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
+                                          season_log=season_log, window_n=5)
+    l10_profile = WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
+                                           season_log=season_log, window_n=10)
+    season_profile = WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
+                                              season_log=season_log)   # window_n=None
+
+    l5_pts = next(p for p in l5_profile if p["Market"] == "Points")
+    l10_pts = next(p for p in l10_profile if p["Market"] == "Points")
+    season_pts = next(p for p in season_profile if p["Market"] == "Points")
+    assert l5_pts["Window Avg"] == 30.0     # exactly the 5 real hot games
+    assert l10_pts["Window Avg"] == 20.0    # (30*5 + 10*5) / 10 = 20.0, all 10 real games
+    assert season_pts["Window Avg"] == 20.0 # same 10 games here too, but a genuinely separate real code path
+    print("✓ Window Avg correctly recomputes for L5, L10, and Season as three separate real calls, hand-verified numbers")
 
 
-def test_build_matchup_profile_l5_none_with_fewer_than_5_real_games():
+def test_build_matchup_profile_window_avg_none_with_fewer_than_5_real_games():
     row = {"PTS": 24.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
     season_log = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2} for _ in range(3)]   # only 3 real games this season
-    profile = WP.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={},
-                                       season_log=season_log)
-    pts = next(p for p in profile if p["Market"] == "Points")
-    assert pts["L5 Avg"] is None    # honest "not enough real games yet," never a padded average
-    assert pts["L10 Avg"] is None
-    assert pts["Season Avg"] == 20.0   # Season Avg is unaffected -- it never required a fixed count
-    print("✓ L5 Avg/L10 Avg are honestly None (not a padded/partial average) with fewer than 5/10 real games")
+    l5_profile = WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
+                                          season_log=season_log, window_n=5)
+    season_profile = WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
+                                              season_log=season_log)
+    l5_pts = next(p for p in l5_profile if p["Market"] == "Points")
+    season_pts = next(p for p in season_profile if p["Market"] == "Points")
+    assert l5_pts["Window Avg"] is None    # honest "not enough real games yet," never a padded average
+    assert season_pts["Window Avg"] == 20.0   # the real Season window is unaffected -- it never required a fixed count
+    print("✓ Window Avg is honestly None (not a padded/partial average) on L5 with fewer than 5 real games, unaffected on Season")
 
 
-def test_build_matchup_profile_l5_real_but_l10_none_with_seven_real_games():
-    # The real, in-between case: enough games for L5, not yet enough for L10 -- each window's
-    # own honesty is independent, not an all-or-nothing gate.
+def test_build_matchup_profile_window_avg_l5_real_but_l10_none_with_seven_real_games():
+    # The real, in-between case: enough real games for L5, not yet enough for L10 -- each
+    # window's own honesty is independent, not an all-or-nothing gate.
     row = {"PTS": 24.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
     season_log = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2} for _ in range(7)]
-    profile = WP.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={},
-                                       season_log=season_log)
+    l5_profile = WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
+                                          season_log=season_log, window_n=5)
+    l10_profile = WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
+                                           season_log=season_log, window_n=10)
+    l5_pts = next(p for p in l5_profile if p["Market"] == "Points")
+    l10_pts = next(p for p in l10_profile if p["Market"] == "Points")
+    assert l5_pts["Window Avg"] == 20.0
+    assert l10_pts["Window Avg"] is None
+    print("✓ Window Avg computes correctly on L5 even when L10 honestly can't yet, with 7 real games")
+
+
+def test_build_matchup_profile_window_avg_none_for_unsupported_window_n():
+    row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
+    season_log = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2} for _ in range(10)]
+    profile = WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
+                                       season_log=season_log, window_n=7)   # not a real supported window
     pts = next(p for p in profile if p["Market"] == "Points")
-    assert pts["L5 Avg"] == 20.0
-    assert pts["L10 Avg"] is None
-    print("✓ L5 Avg computes correctly even when L10 honestly can't yet, with 7 real games (enough for one, not the other)")
+    assert pts["Window Avg"] is None, "an unsupported window_n must be an honest None, never a silent fallback to some other window"
+    print("✓ Window Avg is honestly None for an unsupported window_n, never silently falls back to a different window")
 
 
 # ----------------------------------------------------------------- H2H spread / high variance
@@ -721,7 +758,7 @@ def test_build_matchup_profile_flags_high_variance_h2h():
     season_log = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2}] * 10   # season avg 20
     # wild H2H swing: 4 and 32 across 2 games — spread of 28, way more than 75% of season avg (15)
     h2h = [{"pts": 32, "reb": 5, "ast": 3, "fg3m": 2}, {"pts": 4, "reb": 5, "ast": 3, "fg3m": 2}]
-    profile = WP.build_matchup_profile(row, h2h_log=h2h, opp_recent_allowed={}, opp_season_allowed={},
+    profile = WP.build_matchup_profile(row, h2h_log=h2h, opp_allowed={}, opp_season_allowed={},
                                        season_log=season_log)
     pts = next(p for p in profile if p["Market"] == "Points")
     assert pts["High Variance"] is True
@@ -733,7 +770,7 @@ def test_build_matchup_profile_no_variance_flag_for_consistent_h2h():
     row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
     season_log = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2}] * 10
     h2h = [{"pts": 19, "reb": 5, "ast": 3, "fg3m": 2}, {"pts": 21, "reb": 5, "ast": 3, "fg3m": 2}]
-    profile = WP.build_matchup_profile(row, h2h_log=h2h, opp_recent_allowed={}, opp_season_allowed={},
+    profile = WP.build_matchup_profile(row, h2h_log=h2h, opp_allowed={}, opp_season_allowed={},
                                        season_log=season_log)
     pts = next(p for p in profile if p["Market"] == "Points")
     assert pts["High Variance"] is False
@@ -742,7 +779,7 @@ def test_build_matchup_profile_no_variance_flag_for_consistent_h2h():
 def test_build_matchup_profile_no_spread_with_fewer_than_two_h2h_games():
     row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
     h2h = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2}]   # only 1 meeting -> no spread to report
-    profile = WP.build_matchup_profile(row, h2h_log=h2h, opp_recent_allowed={}, opp_season_allowed={})
+    profile = WP.build_matchup_profile(row, h2h_log=h2h, opp_allowed={}, opp_season_allowed={})
     pts = next(p for p in profile if p["Market"] == "Points")
     assert pts["H2H Spread"] is None
     assert pts["High Variance"] is False
@@ -754,7 +791,7 @@ def test_build_matchup_profile_flags_the_one_suppressed_market():
     season_log = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2}] * 10
     # Threes specifically get shut down (0.5 vs season avg 2 -> ratio 0.25); everything else ~normal.
     h2h = [{"pts": 19, "reb": 5, "ast": 3, "fg3m": 0}, {"pts": 21, "reb": 5, "ast": 3, "fg3m": 1}]
-    profile = WP.build_matchup_profile(row, h2h_log=h2h, opp_recent_allowed={}, opp_season_allowed={},
+    profile = WP.build_matchup_profile(row, h2h_log=h2h, opp_allowed={}, opp_season_allowed={},
                                        season_log=season_log)
     threes = next(p for p in profile if p["Market"] == "Threes Made")
     others = [p for p in profile if p["Market"] != "Threes Made"]
@@ -769,7 +806,7 @@ def test_build_matchup_profile_no_suppression_flag_when_everything_dips_evenly()
     row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
     season_log = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2}] * 10
     h2h = [{"pts": 17, "reb": 4.3, "ast": 2.6, "fg3m": 1.7}]   # all ~85% of season norm, evenly
-    profile = WP.build_matchup_profile(row, h2h_log=h2h, opp_recent_allowed={}, opp_season_allowed={},
+    profile = WP.build_matchup_profile(row, h2h_log=h2h, opp_allowed={}, opp_season_allowed={},
                                        season_log=season_log)
     assert all(not p["Suppressed"] for p in profile)
     print("✓ build_matchup_profile does not flag suppression when every market dips evenly (not a targeted effect)")
@@ -782,7 +819,7 @@ def test_build_matchup_profile_no_suppression_when_all_low_but_not_distinctly_se
     row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
     season_log = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2}] * 10
     h2h = [{"pts": 13, "reb": 3.2, "ast": 1.9, "fg3m": 1.3}]   # all ~62-65% of season norm
-    profile = WP.build_matchup_profile(row, h2h_log=h2h, opp_recent_allowed={}, opp_season_allowed={},
+    profile = WP.build_matchup_profile(row, h2h_log=h2h, opp_allowed={}, opp_season_allowed={},
                                        season_log=season_log)
     assert all(not p["Suppressed"] for p in profile)
     print("✓ build_matchup_profile requires distinct separation, not just a low absolute ratio, to flag suppression")
@@ -790,7 +827,7 @@ def test_build_matchup_profile_no_suppression_when_all_low_but_not_distinctly_se
 
 def test_build_matchup_profile_no_suppression_flag_without_enough_data():
     row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
-    profile = WP.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={})
+    profile = WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={})
     assert all(not p["Suppressed"] for p in profile)   # no h2h/season data at all -> nothing to flag
 
 

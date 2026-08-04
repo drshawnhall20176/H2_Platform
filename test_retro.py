@@ -435,6 +435,131 @@ def test_boxscore_parsing_hrr_missing_runs_rbi_defaults_to_zero():
     assert res[1]["hrr"] == 1   # 1 hit + 0 runs + 0 rbi
 
 
+# ----------------------------------------------------------------- rank_within_market / catch_rate_by_rank
+def _play(player, pid, model_prob, market="Batter HR"):
+    return {"Player": player, "PlayerId": pid, "Market": market, "Side": "Over", "ModelProb": model_prob}
+
+
+# ----------------------------------------------------------------- l5_l10_hit_rate
+def _game(hr=0, total_bases=0, hits=0, strikeouts=0, hrr=None):
+    return {"hr": hr, "total_bases": total_bases, "hits": hits, "strikeouts": strikeouts,
+           "hrr": hrr if hrr is not None else hits}
+
+
+def test_l5_l10_hit_rate_uses_the_real_end_of_the_list_as_most_recent():
+    # get_hitter_recent_games' own real order is ASCENDING (oldest first) -- the most recent 5
+    # real games are the LAST 5 in the list, not the first 5. Exact, hand-verifiable construction:
+    # the first 5 games (oldest) never clear the HR line; the last 5 (most recent) always do.
+    games = [_game(hr=0) for _ in range(5)] + [_game(hr=1) for _ in range(5)]
+    l5, l10 = R.l5_l10_hit_rate(games, "Batter HR", 0.5)
+    assert l5 == 1.0    # the real most-recent 5 (all HR=1) clear a 0.5 line every time
+    assert l10 == 0.5   # all 10 real games: 5 clear, 5 don't
+    print("✓ l5_l10_hit_rate correctly reads the real most-recent games from the END of the ascending-order list")
+
+
+def test_l5_l10_hit_rate_is_market_and_line_aware_not_a_fixed_shortcut():
+    # THE real point of this function, not Dinger Engine's own fixed ">=1 hit" shortcut: the
+    # SAME 10 real games read completely differently depending on which market/line is actually
+    # being checked.
+    games = [_game(total_bases=1) for _ in range(5)] + [_game(total_bases=3) for _ in range(5)]
+    l5_tb15, _ = R.l5_l10_hit_rate(games, "Batter Total Bases", 1.5)   # needs >1.5 total bases
+    assert l5_tb15 == 1.0   # the real most-recent 5 games all had 3 total bases, clearing 1.5
+    l5_tb35, _ = R.l5_l10_hit_rate(games, "Batter Total Bases", 3.5)   # needs >3.5 -- none clear
+    assert l5_tb35 == 0.0
+    print("✓ l5_l10_hit_rate is genuinely market/line-aware — the same real games read differently at different lines")
+
+
+def test_l5_l10_hit_rate_none_with_fewer_than_5_real_games():
+    games = [_game(hr=1) for _ in range(3)]
+    l5, l10 = R.l5_l10_hit_rate(games, "Batter HR", 0.5)
+    assert l5 is None and l10 is None
+    print("✓ l5_l10_hit_rate is honestly None (not a padded average) with fewer than 5 real games")
+
+
+def test_l5_l10_hit_rate_l5_real_but_l10_none_with_seven_real_games():
+    games = [_game(hr=1) for _ in range(7)]
+    l5, l10 = R.l5_l10_hit_rate(games, "Batter HR", 0.5)
+    assert l5 == 1.0
+    assert l10 is None
+    print("✓ l5_l10_hit_rate computes L5 correctly even when L10 honestly can't yet, with 7 real games")
+
+
+def test_l5_l10_hit_rate_none_for_a_market_with_no_real_stat_key():
+    games = [_game(hr=1) for _ in range(10)]
+    l5, l10 = R.l5_l10_hit_rate(games, "Pitcher Strikeouts", 5.5)   # pitcher market -- no batter-side equivalent
+    assert l5 is None and l10 is None
+    print("✓ l5_l10_hit_rate returns honest None for a market it doesn't cover (pitcher markets), never guesses")
+
+
+def test_l5_l10_hit_rate_none_with_no_real_games_at_all():
+    l5, l10 = R.l5_l10_hit_rate([], "Batter HR", 0.5)
+    assert l5 is None and l10 is None
+    print("✓ l5_l10_hit_rate handles zero real games gracefully, no crash")
+
+
+def test_rank_within_market_ranks_by_modelprob_descending():
+    plays = [_play("A", 1, 0.30), _play("B", 2, 0.55), _play("C", 3, 0.42)]
+    ranks = R.rank_within_market(plays)
+    assert ranks[2] == (1, 3)   # highest ModelProb (0.55) -> real rank 1 of 3
+    assert ranks[3] == (2, 3)
+    assert ranks[1] == (3, 3)   # lowest ModelProb -> real rank 3 of 3
+    print("✓ rank_within_market ranks by ModelProb descending, same convention market_report already uses")
+
+
+def test_rank_within_market_ranks_each_market_independently():
+    plays = [_play("A", 1, 0.80, market="Batter HR"), _play("B", 2, 0.20, market="Batter HR"),
+            _play("C", 3, 0.10, market="Pitcher Strikeouts")]   # only real play in ITS OWN market
+    ranks = R.rank_within_market(plays)
+    assert ranks[3] == (1, 1)   # rank 1 of 1 within its own market, despite the lowest raw ModelProb overall
+    print("✓ rank_within_market ranks each real market separately, not pooled across markets")
+
+
+def test_catch_rate_by_rank_below_min_n_bucket_is_absent():
+    graded = [dict(_graded(f"P{i}", i, 0.5, i % 2 == 0), Rank=1) for i in range(5)]   # only 5, below min_n=20
+    result = R.catch_rate_by_rank(graded)
+    assert result == [], "a bucket with fewer than min_n real settled plays must not appear at all"
+    print("✓ catch_rate_by_rank omits a bucket entirely below its real min_n floor, rather than showing a thin number")
+
+
+def test_catch_rate_by_rank_computes_the_real_hit_rate_per_bucket():
+    # Real, exact, hand-verifiable construction: rank 1 plays hit 80% of the time (16/20), rank 2
+    # plays hit 40% of the time (8/20) -- two real, genuinely different buckets.
+    r1 = [dict(_graded(f"R1_{i}", i, 0.6, i < 16), Rank=1) for i in range(20)]
+    r2 = [dict(_graded(f"R2_{i}", 100 + i, 0.5, i < 8), Rank=2) for i in range(20)]
+    result = R.catch_rate_by_rank(r1 + r2, min_n=20)
+    by_bucket = {b["bucket"]: b for b in result}
+    assert by_bucket["Rank 1"]["n"] == 20 and by_bucket["Rank 1"]["hit_rate"] == 0.8
+    assert by_bucket["Rank 2"]["n"] == 20 and by_bucket["Rank 2"]["hit_rate"] == 0.4
+    print("✓ catch_rate_by_rank computes the exact real hit rate per rank bucket (Rank 1: 0.8, Rank 2: 0.4)")
+
+
+def test_catch_rate_by_rank_pools_the_real_tail_bands():
+    # Ranks 6-10 is a real, pooled band, not five separate individual-rank buckets.
+    plays = []
+    for rank in range(6, 11):
+        for i in range(4):   # 5 ranks * 4 = 20 total real plays in this one pooled band
+            plays.append(dict(_graded(f"R{rank}_{i}", rank * 10 + i, 0.4, i < 2), Rank=rank))
+    result = R.catch_rate_by_rank(plays, min_n=20)
+    assert len(result) == 1 and result[0]["bucket"] == "Ranks 6-10"
+    assert result[0]["n"] == 20 and result[0]["hit_rate"] == 0.5
+    print("✓ catch_rate_by_rank correctly pools the real tail bands (Ranks 6-10) into one bucket")
+
+
+def test_catch_rate_by_rank_excludes_plays_with_no_real_rank():
+    graded = [dict(_graded(f"P{i}", i, 0.5, True)) for i in range(30)]   # NO Rank key at all -- e.g. logged before this feature existed
+    result = R.catch_rate_by_rank(graded, min_n=20)
+    assert result == [], "plays with no real Rank must be silently excluded, never treated as rank-less zeros"
+    print("✓ catch_rate_by_rank excludes real plays with no rank data, rather than guessing")
+
+
+def test_catch_rate_by_rank_narrows_to_one_market_when_asked():
+    hr = [dict(_graded(f"HR{i}", i, 0.5, True, market="Batter HR"), Rank=1) for i in range(20)]
+    ks = [dict(_graded(f"K{i}", 100 + i, 0.5, False, market="Pitcher Strikeouts"), Rank=1) for i in range(20)]
+    result = R.catch_rate_by_rank(hr + ks, market="Batter HR", min_n=20)
+    assert len(result) == 1 and result[0]["hit_rate"] == 1.0   # only the real HR plays counted
+    print("✓ catch_rate_by_rank correctly narrows to one real market when asked")
+
+
 def test_market_report_works_for_hits_runs_rbis():
     # Regression guard, same shape as the NFL Pass Yards test above: Batter Hits+Runs+RBIs plays
     # were being built and shown on the board (projections.build_best_bets) but had no MARKET_STAT

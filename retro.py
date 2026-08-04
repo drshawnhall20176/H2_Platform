@@ -409,6 +409,121 @@ def slate_chalk_correlation(daily_points: List[Dict], min_days: int = 10) -> Dic
     return {"n_days": n, "correlation": round(r, 3) if r is not None else None, "note": note}
 
 
+# Deliberately a SEPARATE stat-key map from MARKET_STAT above, not a reuse of it -- confirmed by
+# reading mlb_engine.get_hitter_recent_games' own real per-game dict: it uses total_bases/
+# strikeouts, genuinely different real field names than the final-result grading path MARKET_
+# STAT was built for (tb/so). Pretending the two are interchangeable would be a real, silent
+# field-name bug (a KeyError-free .get() would just silently return 0 every time), not a
+# harmless shortcut. Batter markets only -- get_hitter_recent_games has no pitcher-side
+# equivalent on this platform yet, an honest scope limit, not an oversight.
+L5_L10_BATTER_STAT_KEY = {
+    "Batter HR": "hr", "Batter Total Bases": "total_bases", "Batter Total Hits": "hits",
+    "Batter Strikeouts": "strikeouts", "Batter Hits+Runs+RBIs": "hrr",
+}
+
+
+def l5_l10_hit_rate(games: List[Dict], market: str, line: Optional[float]) -> Tuple[Optional[float], Optional[float]]:
+    """Real hit rate over a player's own last 5/10 real games (mlb_engine.get_hitter_recent_
+    games' own output) for the SAME market/line a specific graded play was actually reviewed
+    against -- NOT a fixed ">=1 hit" shortcut (Dinger Engine's own L5 Hit Rate checkbox is
+    exactly that shortcut, correct for its own single "Hit%" column; this generalizes to every
+    real batter market Retrospective grades, where "clearing the line" means something different
+    for Batter HR than for Batter Total Bases). ADDED DIRECTLY ON REQUEST.
+
+    games is expected ASCENDING by date (mlb_engine.get_hitter_recent_games' own real order --
+    oldest first), so the most recent games sit at the END of the list -- games[-5:]/games[-10:]
+    here, deliberately not games[:5]/games[:10].
+
+    Returns (l5_rate, l10_rate) -- each an honest None (never a padded/guessed rate) when fewer
+    than that many real games exist yet, or when market/line isn't a real batter market this
+    function covers (see L5_L10_BATTER_STAT_KEY's own docstring above for that real scope limit)."""
+    stat_key = L5_L10_BATTER_STAT_KEY.get(market)
+    if stat_key is None or line is None or not games:
+        return None, None
+
+    def _rate(window: int) -> Optional[float]:
+        sub = games[-window:]
+        if len(sub) < window:
+            return None
+        hits = sum(1 for g in sub if g.get(stat_key, 0) > line)
+        return hits / window
+
+    return _rate(5), _rate(10)
+
+
+def rank_within_market(plays: List[Dict]) -> Dict[Any, Tuple[int, int]]:
+    """For every real play, its own real rank (1 = the model's own most confident pick) within
+    JUST its own market that day, and that market's own real total play count that day --
+    {PlayerId: (rank, of_total)}. Ranked by ModelProb descending, the SAME real ranking
+    convention market_report already uses below (not a second, separately-invented one) --
+    extracted here specifically so a caller can persist rank alongside a graded play (grading_
+    history.py's own real column) without needing market_report's own "did it clear the line"
+    framing, which intentionally only reports on players who actually hit, not every real play.
+
+    Computed from the PRE-grading plays list (ModelProb doesn't change through grading), so this
+    is meant to be called once, before grade_slate, with its result merged into each graded
+    play's own dict afterward -- see views/16_Retrospective.py's own real usage."""
+    result: Dict[Any, Tuple[int, int]] = {}
+    by_market: Dict[str, List[Dict]] = {}
+    for p in plays:
+        by_market.setdefault(p.get("Market"), []).append(p)
+    for _market, mkt_plays in by_market.items():
+        ranked = sorted(mkt_plays, key=lambda x: -(x.get("ModelProb") or 0))
+        total = len(ranked)
+        for i, p in enumerate(ranked):
+            pid = p.get("PlayerId")
+            if pid is not None:
+                result[pid] = (i + 1, total)
+    return result
+
+
+# Real, sensible rank buckets, not raw individual ranks past the top few -- ADDED DIRECTLY ON
+# REQUEST. The top 3 ranks each get their own real resolution (that's exactly where "does the
+# model's own #1 pick actually catch more often than its #5" is a real, answerable question);
+# past that, individual-rank buckets thin out fast on an ordinary slate (rarely more than one or
+# two real plays AT rank 11, say, per market per day), so the tail is pooled into two wider real
+# bands that can accumulate enough real volume to mean something.
+RANK_BUCKETS: List[Tuple[str, int, int]] = [
+    ("Rank 1", 1, 1), ("Rank 2", 2, 2), ("Rank 3", 3, 3),
+    ("Ranks 4-5", 4, 5), ("Ranks 6-10", 6, 10), ("Ranks 11+", 11, 10_000),
+]
+
+
+def catch_rate_by_rank(graded_plays: List[Dict], market: Optional[str] = None,
+                       min_n: int = 20) -> List[Dict]:
+    """Real hit rate per RANK_BUCKETS bucket, across real accumulated graded plays (meant to be
+    called on grading_history.fetch_graded_plays' own output, the same "real accumulated history,
+    zero new statistical logic" design retro.fit_market_calibration already established). ADDED
+    DIRECTLY ON REQUEST: is there a real correlation between how confident the model's own
+    pre-game rank was and whether it actually caught -- e.g. does the #1 pick in a market really
+    hit more often than the #5?
+
+    Requires plays to carry real Rank/OfTotal (added to grading_history's own schema for exactly
+    this) -- plays without it (logged before this feature existed, or from a source that never
+    computed rank) are silently excluded, not treated as rank-less zeros.
+
+    A bucket only appears in the real output once it clears min_n real settled plays -- the same
+    real sample-size discipline retro.player_calibration's own min_plays already enforces one
+    level up, not a new standard invented here. Returns [{"bucket", "n", "hit_rate"}, ...] in
+    RANK_BUCKETS' own order, thinnest-evidence buckets simply absent rather than shown on a
+    handful of real plays."""
+    if market is not None:
+        graded_plays = [p for p in graded_plays if p.get("Market") == market]
+
+    out = []
+    for label, lo, hi in RANK_BUCKETS:
+        bucket_plays = [p for p in graded_plays
+                        if p.get("Rank") is not None and p.get("Hit") is not None
+                        and lo <= p["Rank"] <= hi]
+        n = len(bucket_plays)
+        if n < min_n:
+            continue
+        hits = sum(1 for p in bucket_plays if p["Hit"])
+        out.append({"bucket": label, "n": n, "hit_rate": round(hits / n, 3)})
+    return out
+
+
+
 def market_report(plays: List[Dict], results: Dict[int, Dict], market: str, top_n: int = 15,
                   default_line: Optional[float] = None) -> Dict:
     """Of players whose actual result CLEARED the model's line for `market`, where did the model

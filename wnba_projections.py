@@ -496,33 +496,46 @@ def build_minutes_row(row: Dict, h2h_log: List[Dict],
     }
 
 
-def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_recent_allowed: Dict[str, float],
+def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_allowed: Dict[str, float],
                           opp_season_allowed: Dict[str, float],
-                          season_log: Optional[List[Dict]] = None) -> List[Dict]:
+                          season_log: Optional[List[Dict]] = None,
+                          window_n: Optional[int] = None) -> List[Dict]:
     """One row per market (Points/Rebounds/Assists/Threes Made) for Matchup Lab's deep-dive on a
     single player vs their tonight's opponent, combining real signals:
-      - Recent Avg: the player's own last-10-game average (the same number the model prices off).
-      - Season Avg: the player's full-season average (any opponent) — the baseline H2H Avg is
-        actually compared against, so a below-norm H2H reading reflects this SPECIFIC opponent's
-        effect on her, not just general hot/cold form drift (which Recent Avg alone can't
-        distinguish, since it's a moving 10-game window that could easily overlap with or exclude
-        the H2H games themselves).
+      - Recent Avg: the player's own last-10-game average (the SAME number the model prices off,
+        a 45-day recency window) -- always shown, untouched by window_n below, since it's the
+        real signal behind tonight's actual prediction, not just another comparison point.
+      - Window Avg / Opp Window Allowed: THE real redesign, added directly on request -- BOTH
+        the player's own rate AND the opponent's own allowed rate, recomputed for the SAME real
+        window (season/last 10/last 5), not just the player's side alone (that was this
+        function's own earlier, less complete version). window_n=None means season (the real
+        baseline); 10 or 5 means season_log[:10]/[:5] for the player's own side, and the CALLER
+        is expected to pass the matching real opp_allowed dict for that same window (wnba_
+        engine.get_team_recent_allowed_stats(opp_id, date_str, n=window_n) -- built entirely
+        from box scores already fetched for build_slate, zero new network cost per window, so
+        the caller can freely compute all three and let a person switch between them at will).
       - H2H Avg / Spread: how this exact player has done against THIS SPECIFIC opponent this
         season, if they've met (WNBA teams typically play each other 2-4 times a season — h2h_log
         can legitimately be empty, reported honestly, not padded with a guess). Spread is the
         min-max range across those meetings; High Variance flags when that range is wide relative
         to her season norm — a small H2H sample with wildly different games each time is a
-        different, less trustworthy signal than a small sample that's been consistent.
+        different, less trustworthy signal than a small sample that's been consistent. Always
+        compared against her real SEASON average specifically (never the selected window) -- H2H
+        is inherently a "vs this one opponent" read, not a recency-window one, so the baseline it
+        needs is the most stable real number available, not whichever window happens to be picked.
       - Suppressed: True for at most one market — the one where her H2H performance is
         distinctly LOWER (relative to her season norm) than her other markets are against this
         same opponent. This is the closest honest answer to "how does this team specifically
         defend her" that box-score data supports: not scheme detail, just which specific stat
-        category dips more than the others when she plays this team.
-      - Defense Trend: this opponent's recent (last 10) allowed rate vs. their own season-long
-        allowed rate — are they trending looser or tighter defensively lately, independent of how
-        they've done over the full season.
-    Pure synthesis, no network calls — the caller (the page) fetches h2h_log / opp_recent_allowed
-    / opp_season_allowed / season_log via wnba_engine and passes them in already-fetched."""
+        category dips more than the others when she plays this team. Also always season-based,
+        same real reason as H2H above.
+      - Defense Trend: the SELECTED window's opponent-allowed rate vs. their own real season-long
+        allowed rate -- are they trending looser or tighter over the window actually being looked
+        at, not always fixed at "last 10" regardless of what's selected. None (not a trivial
+        1.0/"Steady") when window_n is None -- season compared to itself is not a real trend
+        reading, so it's honestly omitted rather than shown as a meaningless comparison.
+    Pure synthesis, no network calls — the caller (the page) fetches h2h_log / opp_allowed /
+    opp_season_allowed / season_log via wnba_engine and passes them in already-fetched."""
     # First pass: season averages and H2H-vs-season ratios for every market, needed up front so
     # the "which market is disproportionately suppressed" comparison can see all four at once.
     season_avgs: Dict[str, Optional[float]] = {}
@@ -537,14 +550,10 @@ def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_recent_allowed: Di
             season_avgs[stat_key] = (sum(svals) / len(svals)) if svals else None
         else:
             season_avgs[stat_key] = None
-        # L5/L10, ADDED DIRECTLY ON REQUEST -- season_log is already "most recent first" (see
-        # this function's own docstring / get_player_season_games' own docstring), so [:5]/[:10]
-        # is a real, correct recent-games slice, not a new fetch or a new assumption. Genuinely
-        # separate from Recent Avg (row.get(col), the model's own 45-day-window recency signal
-        # this function never touches) -- this is a second, independent read at two DIFFERENT
-        # real windows, the same additive, non-model-touching pattern Dinger Engine's own L5 Hit
-        # Rate already established. None (not 0.0) when fewer than N real games exist in the
-        # window, an honest "not enough games yet," never padded with a guessed average.
+        # season_log is already "most recent first" (see get_player_season_games' own docstring),
+        # so [:5]/[:10] is a real, correct recent-games slice, not a new fetch or new assumption.
+        # None (not 0.0) when fewer than N real games exist in the window, an honest "not enough
+        # games yet," never padded with a guessed average.
         l5 = season_log[:5] if season_log else []
         l10 = season_log[:10] if season_log else []
         l5_avgs[stat_key] = (sum(g.get(stat_key, 0.0) for g in l5) / len(l5)) if len(l5) == 5 else None
@@ -574,6 +583,15 @@ def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_recent_allowed: Di
         season_avg = season_avgs.get(stat_key)
         h2h_avg = h2h_avgs.get(stat_key)
 
+        if window_n is None:
+            window_avg = season_avg
+        elif window_n == 5:
+            window_avg = l5_avgs.get(stat_key)
+        elif window_n == 10:
+            window_avg = l10_avgs.get(stat_key)
+        else:
+            window_avg = None   # an unsupported window is an honest None, never a silent fallback
+
         hvals = [g.get(stat_key, 0.0) for g in h2h_log]
         h2h_spread = f"{min(hvals):.0f}\u2013{max(hvals):.0f}" if len(hvals) >= 2 else None
         high_variance = False
@@ -581,30 +599,31 @@ def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_recent_allowed: Di
             spread = max(hvals) - min(hvals)
             high_variance = spread > season_avg * 0.75   # a wide swing relative to her own norm
 
-        recent_allowed = opp_recent_allowed.get(stat_key, 0.0)
+        window_allowed = opp_allowed.get(stat_key, 0.0)
         season_allowed = opp_season_allowed.get(stat_key, 0.0)
-        trend = (recent_allowed / season_allowed) if season_allowed > 0 else 1.0
-        if trend >= 1.08:
-            trend_tag = "📈 Looser lately"
-        elif trend <= 0.92:
-            trend_tag = "📉 Tighter lately"
-        else:
-            trend_tag = "➡️ Steady"
+        trend = None
+        trend_tag = None
+        if window_n is not None:   # season-vs-itself is not a real trend reading -- see docstring
+            trend = (window_allowed / season_allowed) if season_allowed > 0 else 1.0
+            if trend >= 1.08:
+                trend_tag = "📈 Looser lately"
+            elif trend <= 0.92:
+                trend_tag = "📉 Tighter lately"
+            else:
+                trend_tag = "➡️ Steady"
 
         out.append({
             "Market": disp,
             "Recent Avg": recent_avg,
-            "L5 Avg": round(l5_avgs[stat_key], 1) if l5_avgs.get(stat_key) is not None else None,
-            "L10 Avg": round(l10_avgs[stat_key], 1) if l10_avgs.get(stat_key) is not None else None,
-            "Season Avg": round(season_avg, 1) if season_avg is not None else None,
+            "Window Avg": round(window_avg, 1) if window_avg is not None else None,
+            "Opp Window Allowed": round(window_allowed, 1) if window_allowed else None,
             "H2H Games": len(hvals),
             "H2H Avg": round(h2h_avg, 1) if h2h_avg is not None else None,
             "H2H Spread": h2h_spread,
             "High Variance": high_variance,
             "Suppressed": stat_key == suppressed_key,
-            "Opp Recent Allowed": round(recent_allowed, 1) if recent_allowed else None,
-            "Opp Season Allowed": round(season_allowed, 1) if season_allowed else None,
-            "Defense Trend": round(trend, 2),
+            "Defense Trend": round(trend, 2) if trend is not None else None,
             "Trend Tag": trend_tag,
         })
     return out
+

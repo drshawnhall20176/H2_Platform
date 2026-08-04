@@ -461,30 +461,60 @@ def test_league_schedules_team_and_score_lookup_covers_every_real_confirmed_fiel
 
 
 # ----------------------------------------------------------------- Matchup Lab: L5/L10 Avg
-def test_matchup_lab_l5_l10_wired_into_the_real_table():
-    # Regression guard confirming the gate is actually WIRED IN, matching the same class of
-    # check already done for every other feature added this session -- the real L5 Avg/L10 Avg
-    # computation could be perfectly correct in all three projections modules and simply never
-    # reach the actual displayed table.
+def test_matchup_lab_window_selector_wired_into_both_tables():
+    # Regression guard confirming the real redesign (a window selector that recomputes BOTH the
+    # player's own rate and the opponent's own allowed rate for the same window, not just an
+    # extra column bolted onto the player's own side -- the earlier, less complete version) is
+    # actually wired into both displayed tables, not just computed and left unused.
     src = (_HERE / "views" / "11_Matchup_Lab.py").read_text()
-    assert 'show_l5_l10 = st.checkbox(' in src, "the L5/L10 checkbox must actually exist"
-    assert '"L5 Avg", "L10 Avg"' in src, "the new columns must actually get added to the displayed table when toggled on"
-    print("\u2713 Matchup Lab's L5/L10 toggle is genuinely wired into the real displayed table, "
-         "not just computed and left unused")
+    assert 'window_label = st.radio("Window",' in src, "the real Window selector must actually exist"
+    assert '"Season": (None, None), "Last 10 Games": (10, opp_l10), "Last 5 Games": (5, opp_l5)' in src, (
+        "the selector must drive both window_n AND the matching real opp_allowed dict together")
+    assert "P.build_matchup_profile(row, h2h_log, opp_allowed_for_window or {}, opp_season," in src
+    assert '"Market", "Recent Avg", "Window Avg"' in src, "table 1 must show the real recomputed Window Avg, not a fixed column set"
+    assert '"Opp Window Allowed"' in src, "table 2 must show the real recomputed opponent side too, not just the player's own"
+    print("✓ Matchup Lab's real Window selector is genuinely wired into both tables — player's "
+         "own rate AND opponent's own allowed rate both recompute for the same selected window")
 
 
-def test_matchup_lab_l5_l10_computed_identically_across_all_three_basketball_sports():
-    # Regression guard confirming the SAME real fix landed in all three projections modules
+def test_matchup_lab_defense_trend_honestly_omitted_on_season_window():
+    # Regression guard for the real, deliberate design point: season-vs-itself isn't a real
+    # trend, so the view must branch and NOT actually SELECT a Defense Trend column when Season
+    # is selected -- confirmed by real source structure, not just that the branch exists somewhere.
+    src = (_HERE / "views" / "11_Matchup_Lab.py").read_text()
+    assert 'odf = pd.DataFrame(profile)[["Market", "Opp Window Allowed"]]' in src, (
+        "the Season-window branch must select only the real numbers that actually exist on that window")
+    assert 'odf = pd.DataFrame(profile)[["Market", "Opp Window Allowed", "Defense Trend", "Trend Tag"]]' in src, (
+        "the Last 10/Last 5 branch must select the real trend comparison, since it's a genuine reading there")
+    print("✓ Matchup Lab honestly omits the Defense Trend column on the Season window, and includes "
+         "it on Last 10/Last 5 where it's a real reading")
+
+
+def test_matchup_lab_load_matchup_fetches_all_three_real_windows():
+    # Confirms all three real opponent-allowed windows are fetched up front (L5, L10, season) --
+    # get_team_recent_allowed_stats is genuinely free (built from box scores already cached for
+    # the slate), so this should NOT be gated behind a real-cost opt-in the way Dinger Engine's
+    # own L5 Hit Rate needed to be for a genuinely new per-player fetch.
+    src = (_HERE / "views" / "11_Matchup_Lab.py").read_text()
+    assert "opp_l5 = E.get_team_recent_allowed_stats(opp_id, date_str, n=5)" in src
+    assert "opp_l10 = E.get_team_recent_allowed_stats(opp_id, date_str)" in src
+    assert "opp_season = E.get_team_recent_allowed_stats(opp_id, date_str, n=82, days_back=200)" in src
+    print("✓ Matchup Lab fetches all three real windows (L5/L10/Season) up front, no opt-in gate needed for genuinely free data")
+
+
+def test_matchup_lab_window_redesign_landed_identically_across_all_three_basketball_sports():
+    # Regression guard confirming the SAME real redesign landed in all three projections modules
     # (WNBA/NBA/NCAAMB), not just one -- Matchup Lab (page 11) serves all three from one shared
-    # page, so a gap in any single module would silently show L5/L10 for two sports and not the third.
+    # page, so a gap in any single module would silently break the window selector for two sports.
     for fname in ("wnba_projections.py", "nba_projections.py", "ncaamb_projections.py"):
         src = (_HERE / fname).read_text()
-        assert '"L5 Avg"' in src and '"L10 Avg"' in src, f"{fname} is missing the L5/L10 computation"
-        assert "l5_avgs[stat_key]" in src and "l10_avgs[stat_key]" in src, (
-            f"{fname} must compute L5/L10 from season_log directly, not reuse another sport's values")
-    print("✓ L5 Avg/L10 Avg are computed identically across WNBA, NBA, and NCAAMB's own projections modules")
+        assert "window_n: Optional[int] = None" in src, f"{fname} is missing the real window_n parameter"
+        assert '"Window Avg"' in src and '"Opp Window Allowed"' in src, f"{fname} is missing the real recomputed output fields"
+        assert "if window_n is not None:" in src, f"{fname} must honestly omit Defense Trend on the Season window"
+    print("✓ The real window_n redesign is computed identically across WNBA, NBA, and NCAAMB's own projections modules")
 
 
+# ----------------------------------------------------------------- Dinger Engine: L5 Hit Rate
 # ----------------------------------------------------------------- Dinger Engine: L5 Hit Rate
 def test_dinger_engine_load_l5_hit_rate_computes_the_real_fraction():
     # THE actual real logic this feature adds, executed directly from the real file source (not
@@ -627,6 +657,19 @@ def test_first_innings_totals_offers_all_games_option():
         "the Game dropdown must offer \"All Games\" as its first real choice")
     assert 'if game_pick == "All Games":' in src, "the page must actually branch on the All Games choice, not just list it"
     print("\u2713 First Innings Totals offers a real \"All Games\" option in the Game dropdown, and branches on it")
+
+
+def test_first_innings_totals_explains_the_real_calculation():
+    # Added directly on request: a real "how this was calculated" breakdown, using the actual
+    # real numbers already computed (team_recent/pitcher_allowed/proj), not a generic restatement.
+    src = (_HERE / "views" / "27_MLB_First_Innings_Totals.py").read_text()
+    assert 'with st.expander(f"\U0001F50D How this {n_innings}-inning projection was calculated"):' in src, (
+        "the explanation must actually exist as a real expander, not just be planned")
+    assert "proj['team_rate']" in src and "proj['pitcher_allowed_rate']" in src and "proj['projected_runs']" in src
+    assert "team_games < 8" in src and "pitcher_starts < 5" in src, (
+        "must flag a real thinner-than-usual sample, same small-sample honesty used elsewhere on this platform")
+    print("\u2713 First Innings Totals explains the real calculation with the actual computed numbers, "
+         "including a real small-sample caution")
 
 
 def test_first_innings_totals_view_wires_bet_log():

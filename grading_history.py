@@ -73,12 +73,14 @@ CREATE TABLE IF NOT EXISTS graded_plays (
     model_prob   REAL,
     conviction   REAL,
     hit          INTEGER,
-    actual_value REAL
+    actual_value REAL,
+    rank         INTEGER,
+    of_total     INTEGER
 );
 """
 
 _FIELDS = ["graded_at", "slate_date", "sport", "market", "player", "player_id", "side", "line",
-           "model_prob", "conviction", "hit", "actual_value"]
+           "model_prob", "conviction", "hit", "actual_value", "rank", "of_total"]
 
 
 # ===========================================================================
@@ -113,6 +115,15 @@ def _sqlite_conn(db_path: str = DB_PATH):
     con.row_factory = sqlite3.Row
     try:
         con.executescript(_SCHEMA)
+        # Migration for a real DB created before rank/of_total existed (added directly on
+        # request, for retro.catch_rate_by_rank) -- same exact ALTER-TABLE-if-missing pattern
+        # betlog.py's own connection setup already uses for this identical class of schema
+        # growth, not a new approach invented here.
+        cols = [r[1] for r in con.execute("PRAGMA table_info(graded_plays)").fetchall()]
+        if "rank" not in cols:
+            con.execute("ALTER TABLE graded_plays ADD COLUMN rank INTEGER")
+        if "of_total" not in cols:
+            con.execute("ALTER TABLE graded_plays ADD COLUMN of_total INTEGER")
         yield con
         con.commit()
     finally:
@@ -157,6 +168,8 @@ CREATE TABLE IF NOT EXISTS graded_plays (
     player TEXT, player_id INTEGER, side TEXT, line REAL, model_prob REAL, conviction REAL,
     hit INTEGER, actual_value REAL
 );
+ALTER TABLE graded_plays ADD COLUMN IF NOT EXISTS rank INTEGER;
+ALTER TABLE graded_plays ADD COLUMN IF NOT EXISTS of_total INTEGER;
 """
 
 
@@ -214,6 +227,13 @@ def record_graded_slate(slate_date: str, sport: str, graded_plays: List[Dict],
     rather than raising, so this stays safe to call even for a sport/market combination whose
     plays don't carry every field.
 
+    Rank/OfTotal (ADDED DIRECTLY ON REQUEST, for retro.catch_rate_by_rank) are NOT part of grade_
+    slate's own real output -- grade_slate only ever sees one market's worth of already-graded
+    plays, and rank is inherently a cross-play, within-market comparison. The real caller is
+    expected to merge retro.rank_within_market(plays)'s own output into each graded play's dict
+    (as "Rank"/"OfTotal") BEFORE calling this -- see views/16_Retrospective.py's own real usage.
+    Missing here too is fine, stored as NULL, same as every other optional field.
+
     Replaces (not appends to) any existing rows for this exact (slate_date, sport) -- see this
     module's own docstring for why per-day replacement, not per-row upsert, is the real
     idempotency unit here. Returns the number of rows written.
@@ -235,6 +255,7 @@ def record_graded_slate(slate_date: str, sport: str, graded_plays: List[Dict],
             "conviction": p.get("Conviction"),
             "hit": (1 if hit is True else 0 if hit is False else None),
             "actual_value": p.get("Actual"),
+            "rank": p.get("Rank"), "of_total": p.get("OfTotal"),
         })
 
     if USING_POSTGRES:
@@ -254,7 +275,9 @@ def fetch_graded_plays(sport: str, market: Optional[str] = None, since_date: Opt
 
     hit comes back as True/False/None (not the stored 0/1/NULL) -- the same three-state contract
     grade_slate's own output already uses, so downstream code never has to know this passed
-    through storage at all.
+    through storage at all. Rank/OfTotal (ADDED DIRECTLY ON REQUEST, for retro.catch_rate_by_
+    rank) come back as stored -- real ints when record_graded_slate was given real rank data,
+    None otherwise (never guessed).
 
     Same dynamic db_path resolution as record_graded_slate, for the same reason."""
     db_path = db_path if db_path is not None else DB_PATH
@@ -270,6 +293,7 @@ def fetch_graded_plays(sport: str, market: Optional[str] = None, since_date: Opt
             "Player": r.get("player"), "PlayerId": r.get("player_id"),
             "Hit": (True if hit == 1 else False if hit == 0 else None),
             "Actual": r.get("actual_value"),
+            "Rank": r.get("rank"), "OfTotal": r.get("of_total"),
             "_slate_date": r.get("slate_date"), "_graded_at": r.get("graded_at"),
         })
     return out

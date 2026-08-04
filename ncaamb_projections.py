@@ -466,17 +466,19 @@ def build_minutes_row(row: Dict, h2h_log: List[Dict],
     }
 
 
-def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_recent_allowed: Dict[str, float],
+def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_allowed: Dict[str, float],
                           opp_season_allowed: Dict[str, float],
-                          season_log: Optional[List[Dict]] = None) -> List[Dict]:
+                          season_log: Optional[List[Dict]] = None,
+                          window_n: Optional[int] = None) -> List[Dict]:
     """One row per market (Points/Rebounds/Assists/Threes Made) for Matchup Lab's deep-dive on a
     single player vs their tonight's opponent — see wnba_projections.build_matchup_profile's
-    docstring for the full reasoning behind each signal (identical here; copy-adapt, not a
-    different design). One NCAAMB-specific note, more pronounced than NBA's own version of this
-    same caveat: h2h_log will legitimately be EMPTY far more often here than in the pros — most
-    Division I non-conference opponents play each other once a season if at all, unlike a pro
-    league's balanced round-robin schedule, so an empty head-to-head sample is the common case
-    for most matchups, not the exception. Reported honestly rather than padded with a guess."""
+    docstring for the full reasoning behind each signal, INCLUDING the real window_n redesign
+    (identical here; copy-adapt, not a different design). One NCAAMB-specific note, more
+    pronounced than NBA's own version of this same caveat: h2h_log will legitimately be EMPTY far
+    more often here than in the pros — most Division I non-conference opponents play each other
+    once a season if at all, unlike a pro league's balanced round-robin schedule, so an empty
+    head-to-head sample is the common case for most matchups, not the exception. Reported
+    honestly rather than padded with a guess."""
     season_avgs: Dict[str, Optional[float]] = {}
     h2h_avgs: Dict[str, Optional[float]] = {}
     ratios: Dict[str, float] = {}
@@ -489,11 +491,9 @@ def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_recent_allowed: Di
             season_avgs[stat_key] = (sum(svals) / len(svals)) if svals else None
         else:
             season_avgs[stat_key] = None
-        # L5/L10, ADDED DIRECTLY ON REQUEST -- same real reasoning as wnba_projections.build_
-        # matchup_profile's own comment: season_log is already "most recent first," so [:5]/[:10]
-        # is a real, correct slice, zero new fetches. Genuinely separate from Recent Avg (the
-        # model's own 45-day recency signal, untouched here) -- a second, independent read at two
-        # different real windows, same additive pattern Dinger Engine's own L5 Hit Rate uses.
+        # season_log is already "most recent first," so [:5]/[:10] is a real, correct slice, zero
+        # new fetches. None (not 0.0) when fewer than N real games exist, an honest "not enough
+        # games yet," never padded.
         l5 = season_log[:5] if season_log else []
         l10 = season_log[:10] if season_log else []
         l5_avgs[stat_key] = (sum(g.get(stat_key, 0.0) for g in l5) / len(l5)) if len(l5) == 5 else None
@@ -520,6 +520,15 @@ def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_recent_allowed: Di
         season_avg = season_avgs.get(stat_key)
         h2h_avg = h2h_avgs.get(stat_key)
 
+        if window_n is None:
+            window_avg = season_avg
+        elif window_n == 5:
+            window_avg = l5_avgs.get(stat_key)
+        elif window_n == 10:
+            window_avg = l10_avgs.get(stat_key)
+        else:
+            window_avg = None   # an unsupported window is an honest None, never a silent fallback
+
         hvals = [g.get(stat_key, 0.0) for g in h2h_log]
         h2h_spread = f"{min(hvals):.0f}\u2013{max(hvals):.0f}" if len(hvals) >= 2 else None
         high_variance = False
@@ -527,30 +536,30 @@ def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_recent_allowed: Di
             spread = max(hvals) - min(hvals)
             high_variance = spread > season_avg * 0.75
 
-        recent_allowed = opp_recent_allowed.get(stat_key, 0.0)
+        window_allowed = opp_allowed.get(stat_key, 0.0)
         season_allowed = opp_season_allowed.get(stat_key, 0.0)
-        trend = (recent_allowed / season_allowed) if season_allowed > 0 else 1.0
-        if trend >= 1.08:
-            trend_tag = "📈 Looser lately"
-        elif trend <= 0.92:
-            trend_tag = "📉 Tighter lately"
-        else:
-            trend_tag = "➡️ Steady"
+        trend = None
+        trend_tag = None
+        if window_n is not None:   # season-vs-itself is not a real trend reading
+            trend = (window_allowed / season_allowed) if season_allowed > 0 else 1.0
+            if trend >= 1.08:
+                trend_tag = "📈 Looser lately"
+            elif trend <= 0.92:
+                trend_tag = "📉 Tighter lately"
+            else:
+                trend_tag = "➡️ Steady"
 
         out.append({
             "Market": disp,
             "Recent Avg": recent_avg,
-            "L5 Avg": round(l5_avgs[stat_key], 1) if l5_avgs.get(stat_key) is not None else None,
-            "L10 Avg": round(l10_avgs[stat_key], 1) if l10_avgs.get(stat_key) is not None else None,
-            "Season Avg": round(season_avg, 1) if season_avg is not None else None,
+            "Window Avg": round(window_avg, 1) if window_avg is not None else None,
+            "Opp Window Allowed": round(window_allowed, 1) if window_allowed else None,
             "H2H Games": len(hvals),
             "H2H Avg": round(h2h_avg, 1) if h2h_avg is not None else None,
             "H2H Spread": h2h_spread,
             "High Variance": high_variance,
             "Suppressed": stat_key == suppressed_key,
-            "Opp Recent Allowed": round(recent_allowed, 1) if recent_allowed else None,
-            "Opp Season Allowed": round(season_allowed, 1) if season_allowed else None,
-            "Defense Trend": round(trend, 2),
+            "Defense Trend": round(trend, 2) if trend is not None else None,
             "Trend Tag": trend_tag,
         })
     return out
