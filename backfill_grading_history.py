@@ -10,28 +10,38 @@ that have already happened, just for several real dates in one pass instead of o
 time -- real volume, faster, not synthetic volume.
 
 Run it locally or as a one-off GitHub Action (manual "Run workflow", same as refresh-calibration):
-    python backfill_grading_history.py                  # last 10 real days ending yesterday
+    python backfill_grading_history.py                  # last 5 real days ending yesterday
     python backfill_grading_history.py --days 20         # a different real window
     python backfill_grading_history.py --end 2026-07-15  # a different real end date
+    python backfill_grading_history.py --force            # re-grade dates that already have real data too
 
-REAL COST, STATED PLAINLY: each real date is a FULL real board rebuild -- MLB schedule, live odds,
-Statcast, weather, the bullpen blend -- the exact same real cost a single real Retrospective visit
-already pays, just repeated N times in one run rather than spread across N separate page loads.
-Ten real dates is a genuinely heavier run than anything else in this codebase's own scheduled
-jobs; this is why it's its own standalone script (run on demand), not folded into the weekly
-refresh-calibration job or run automatically on a schedule.
+REAL COST, CONFIRMED DIRECTLY, NOT JUST ESTIMATED: a real run against 10 real dates genuinely ran
+past 30 real minutes on a GitHub Actions runner and got killed by the job timeout -- each real
+date is a FULL real board rebuild (schedule, live odds, Statcast, weather, the bullpen blend,
+PLUS build_slate's own real per-player fetch fan-out -- confirmed elsewhere in this codebase to
+mean roughly 250-300 individual real MLB Stats API calls for a full slate, already parallelized
+at max_workers=8, so ~30-35 real sequential waves EVEN with that concurrency). Ten of those back
+to back is a real, substantial amount of real network time, not a small job -- the default here
+is 5 real days for exactly this reason (a real, comfortable default that finishes reliably),
+with --days available for a longer real run for anyone willing to raise the workflow's own
+timeout to match.
+
+RESUME-AWARE, ADDED DIRECTLY AFTER A REAL TIMEOUT: if a run gets killed partway through (the
+exact real scenario that prompted this), grading_history.record_graded_slate's own real REPLACE-
+per-day semantics mean every date that DID finish before the cutoff is already safely persisted,
+not lost -- but re-running the same window from scratch used to redo that already-finished real
+work for no reason, real cost paid twice. Each date is now checked against what's already
+persisted before doing the real work again; a date with real data already stored is skipped by
+default (real, fast) unless --force is passed (e.g., because results were corrected since the
+first real grading).
 
 REAL CAVEAT, CARRIED OVER FROM RETROSPECTIVE'S OWN DOCUMENTED ONE, NOT A NEW GAP: rebuilding a
 past MLB slate uses CURRENT-season rates, not the rates that existed on that real date, so a row
 persisted here reflects "what today's model would say about that game," not a genuine point-in-
 time prediction -- real, useful signal for calibration on recently-played dates (little look-ahead
-yet, which is exactly what a real "last 10 days" backfill stays within), a real bias for much
-older ones. This is the same real reason this script defaults to a real, recent, bounded window
-(10 real days) rather than defaulting to "as far back as possible."
-
-Idempotent per (slate_date, sport) -- grading_history.record_graded_slate's own real REPLACE
-semantics mean re-running this backfill (to extend the window, or just to refresh) never creates
-duplicate rows for a date already graded here or from a real Retrospective visit.
+yet, which is exactly what a real recent-days backfill stays within), a real bias for much older
+ones. This is the same real reason this script defaults to a real, recent, bounded window rather
+than defaulting to "as far back as possible."
 
 Writes to the SAME database the app reads. REQUIRES DATABASE_URL for a real backfilled row to
 persist to where the deployed app actually looks for it -- without it, grading_history would
@@ -51,6 +61,15 @@ import mlb_engine as E
 import retro as R
 
 FIP_CONSTANT = E.FIP_CONSTANT_DEFAULT
+
+
+def date_already_backfilled(date_str: str, sport: str = "MLB") -> bool:
+    """True if real graded data already exists for this exact (date_str, sport) -- the real
+    resume check: fetch_graded_plays' own since_date is an inclusive LOWER bound (matches this
+    date and every later one too), so this filters the real result down to an exact match on
+    that one date's own real rows rather than a broader window."""
+    rows = GH.fetch_graded_plays(sport, since_date=date_str)
+    return any(r.get("_slate_date") == date_str for r in rows)
 
 
 def backfill_one_date(date_str: str) -> Optional[int]:
@@ -88,34 +107,44 @@ def real_recent_dates(days: int, end_date: Optional[str] = None) -> List[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--days", type=int, default=10,
-                        help="how many real past days to backfill (default: 10)")
+    parser.add_argument("--days", type=int, default=5,
+                        help="how many real past days to backfill (default: 5 -- see this "
+                            "script's own module docstring for why 10 genuinely timed out once)")
     parser.add_argument("--end", type=str, default=None,
                         help="the real most-recent date to include, YYYY-MM-DD (default: yesterday)")
+    parser.add_argument("--force", action="store_true",
+                        help="re-grade a date even if real data is already persisted for it "
+                            "(default: skip it, real and fast -- see this script's own "
+                            "RESUME-AWARE docstring section)")
     args = parser.parse_args()
 
     if not os.environ.get("DATABASE_URL") and not getattr(GH, "USING_POSTGRES", False):
         print("DATABASE_URL not set — real backfilled grading would be written to an ephemeral "
               "SQLite file and lost on the next deploy.\nSet the DATABASE_URL secret (your "
-              "Supabase URL) so this actually reads and writes where the deployed app looks.")
+              "Supabase URL) so this actually reads and writes where the deployed app looks.",
+              flush=True)
         return 1
 
     dates = real_recent_dates(args.days, args.end)
-    print(f"Backfilling {len(dates)} real date(s): {dates[-1]} through {dates[0]}\n")
+    print(f"Backfilling {len(dates)} real date(s): {dates[-1]} through {dates[0]}\n", flush=True)
 
-    total_plays, dates_graded, dates_skipped = 0, 0, 0
+    total_plays, dates_graded, dates_skipped, dates_already_done = 0, 0, 0, 0
     for date_str in dates:
+        if not args.force and date_already_backfilled(date_str):
+            print(f"{date_str}  already has real data -- skipping (use --force to re-grade)", flush=True)
+            dates_already_done += 1
+            continue
         n = backfill_one_date(date_str)
         if n is None:
-            print(f"{date_str}  skipped (no real games or no final results yet)")
+            print(f"{date_str}  skipped (no real games or no final results yet)", flush=True)
             dates_skipped += 1
         else:
-            print(f"{date_str}  {n} real play(s) graded and persisted")
+            print(f"{date_str}  {n} real play(s) graded and persisted", flush=True)
             total_plays += n
             dates_graded += 1
 
-    print(f"\n{dates_graded} real date(s) backfilled, {dates_skipped} skipped, "
-         f"{total_plays} total real play(s) persisted.")
+    print(f"\n{dates_graded} real date(s) backfilled, {dates_already_done} already done, "
+         f"{dates_skipped} skipped, {total_plays} total real play(s) persisted.", flush=True)
     return 0
 
 

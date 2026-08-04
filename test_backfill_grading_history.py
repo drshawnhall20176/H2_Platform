@@ -117,6 +117,73 @@ def test_backfill_workflow_yaml_is_valid_and_calls_the_real_script():
     print("✓ backfill-grading-history.yml is valid YAML, manual-trigger-only, and calls the real script")
 
 
+def test_date_already_backfilled_true_after_a_real_persist():
+    plays = [_play(player_id=1)]
+    results = {1: {"hr": 1}}
+    with tempfile.TemporaryDirectory() as tmp:
+        GH.DB_PATH = os.path.join(tmp, "gh.db")
+        with patch("best_bets_data.build_mlb_board", return_value=([], [{"label": "A @ B"}], plays, {})), \
+             patch("mlb_engine.get_player_results", return_value=results):
+            BG.backfill_one_date("2026-07-18")
+        assert BG.date_already_backfilled("2026-07-18") is True
+    print("\u2713 date_already_backfilled correctly reports True once a real date has been persisted")
+
+
+def test_date_already_backfilled_false_before_any_real_persist():
+    with tempfile.TemporaryDirectory() as tmp:
+        GH.DB_PATH = os.path.join(tmp, "gh.db")
+        assert BG.date_already_backfilled("2026-07-18") is False
+    print("\u2713 date_already_backfilled correctly reports False when no real data exists yet for that date")
+
+
+def test_date_already_backfilled_is_an_exact_date_match_not_a_since_date_range():
+    # THE real, confirmed correctness point: fetch_graded_plays' own since_date is an inclusive
+    # LOWER bound (matches this date AND every later one) -- a naive "if fetch_graded_plays(...)
+    # returns anything" check would incorrectly report an EARLIER date as "already backfilled"
+    # just because a LATER date has real data. Exact match required.
+    plays = [_play(player_id=1)]
+    results = {1: {"hr": 1}}
+    with tempfile.TemporaryDirectory() as tmp:
+        GH.DB_PATH = os.path.join(tmp, "gh.db")
+        with patch("best_bets_data.build_mlb_board", return_value=([], [{"label": "A @ B"}], plays, {})), \
+             patch("mlb_engine.get_player_results", return_value=results):
+            BG.backfill_one_date("2026-07-20")   # only the LATER date has real data
+        assert BG.date_already_backfilled("2026-07-18") is False   # the earlier date does NOT
+        assert BG.date_already_backfilled("2026-07-20") is True
+    print("\u2713 date_already_backfilled requires an exact real date match, not just any real data on/after that date")
+
+
+def test_main_skips_a_date_with_real_data_unless_forced():
+    # Real, end-to-end proof of the actual resume behavior main() provides: a date already
+    # persisted must not be re-processed (backfill_one_date never called for it) unless --force
+    # is passed.
+    import sys as _sys
+    plays = [_play(player_id=1)]
+    results = {1: {"hr": 1}}
+    with tempfile.TemporaryDirectory() as tmp:
+        GH.DB_PATH = os.path.join(tmp, "gh.db")
+        os.environ["DATABASE_URL"] = "dummy-to-pass-the-refuse-check"
+        orig_argv = _sys.argv
+        try:
+            with patch("best_bets_data.build_mlb_board", return_value=([], [{"label": "A @ B"}], plays, {})), \
+                 patch("mlb_engine.get_player_results", return_value=results):
+                _sys.argv = ["backfill_grading_history.py", "--days", "1", "--end", "2026-07-18"]
+                BG.main()   # first real run: genuinely persists
+
+                with patch("backfill_grading_history.backfill_one_date") as mock_backfill:
+                    BG.main()   # second run, same window, no --force: must skip
+                    mock_backfill.assert_not_called()
+
+                _sys.argv = ["backfill_grading_history.py", "--days", "1", "--end", "2026-07-18", "--force"]
+                with patch("backfill_grading_history.backfill_one_date", return_value=1) as mock_backfill:
+                    BG.main()   # third run, WITH --force: must genuinely re-process
+                    mock_backfill.assert_called_once_with("2026-07-18")
+        finally:
+            _sys.argv = orig_argv
+            del os.environ["DATABASE_URL"]
+    print("\u2713 main() correctly skips an already-backfilled real date by default, and genuinely re-processes it with --force")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
