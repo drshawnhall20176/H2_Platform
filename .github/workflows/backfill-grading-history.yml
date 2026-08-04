@@ -12,9 +12,20 @@
 #
 # MANUAL TRIGGER ONLY, NO SCHEDULE, ON PURPOSE: unlike refresh-calibration.yml (a real, recurring
 #   weekly job), this is an occasional, on-demand tool -- run it once to backfill a real window,
-#   not automatically every week. Real cost is genuinely higher than a normal run too: each date
-#   is a full real board rebuild (schedule, live odds, Statcast, weather, bullpen blend), so 10
-#   real dates in one run is a meaningfully heavier job than anything scheduled in this repo.
+#   not automatically every week.
+#
+# REAL COST, CONFIRMED DIRECTLY, NOT ESTIMATED: a real run against 10 real dates ran past 30 real
+#   minutes and got killed by an earlier, too-small timeout on this exact job -- each date is a
+#   full real board rebuild (schedule, live odds, Statcast, weather, bullpen blend, and build_
+#   slate's own real ~250-300 individual MLB Stats API calls for a full slate, already
+#   parallelized at max_workers=8). The script's own default dropped to 5 real days for this exact
+#   reason, and this job's own timeout is set generously above even a realistic worst case for
+#   that default -- raise --days here only alongside raising this timeout to match, not independently.
+#
+# RESUME-AWARE: if a run times out or gets cancelled partway through, every date that DID finish
+#   is already safely persisted (grading_history.record_graded_slate's own real REPLACE-per-day
+#   semantics) -- simply re-running this same workflow (same or larger --days) will skip every
+#   date already done and only do the real, remaining work, not start over from scratch.
 #
 # REQUIRES DATABASE_URL (Settings -> Secrets and variables -> Actions) — same secret every other
 #   real write job in this repo already uses, so backfilled rows land in the SAME database the
@@ -26,13 +37,18 @@ on:
   workflow_dispatch:
     inputs:
       days:
-        description: "How many real past days to backfill"
+        description: "How many real past days to backfill (default 5 -- see this file's own comment before raising it)"
         required: false
-        default: "10"
+        default: "5"
       end:
         description: "Real most-recent date to include, YYYY-MM-DD (blank = yesterday)"
         required: false
         default: ""
+      force:
+        description: "Re-grade dates that already have real data (default: skip them, real and fast)"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read            # no commit needed — reads and writes to the database only
@@ -40,7 +56,9 @@ permissions:
 jobs:
   backfill-grading-history:
     runs-on: ubuntu-latest
-    timeout-minutes: 30      # a real, heavier run than refresh-calibration's own 15-minute budget
+    timeout-minutes: 90      # confirmed real cost: 10 real dates already exceeded a 30-minute
+                              # budget once -- this default (5 days) should finish well inside
+                              # this, with real headroom for real API variance/slowness
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -59,5 +77,8 @@ jobs:
           ARGS="--days ${{ inputs.days }}"
           if [ -n "${{ inputs.end }}" ]; then
             ARGS="$ARGS --end ${{ inputs.end }}"
+          fi
+          if [ "${{ inputs.force }}" = "true" ]; then
+            ARGS="$ARGS --force"
           fi
           python backfill_grading_history.py $ARGS
