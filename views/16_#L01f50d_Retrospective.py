@@ -421,8 +421,21 @@ st.caption("Across every real graded play this platform has persisted (not just 
 _PALETTE = {"pos": "#16a34a", "neg": "#dc2626", "model": "#2563eb", "muted": "#94a3b8",
            "grid": "#e5e7eb"}
 
-_rank_sport = st.selectbox("Sport", [s for s in sports.enabled_sports() if s.has_projections],
-                           format_func=lambda s: f"{s.icon} {s.label}", key="retro_rank_sport")
+_rank_sport_keys = [s.key for s in sports.enabled_sports() if s.has_projections]
+# A REAL, CONFIRMED FIX, not the original design: st.selectbox's own OPTIONS must be safely
+# deepcopy-able -- Streamlit's own widget-state machinery deepcopies them internally. sports.
+# Sport objects carry lazily-populated _engine/_projections fields that, once any page anywhere
+# has touched .engine/.projections (which happens on essentially every page load), hold a LIVE
+# MODULE reference on the shared, global Sport singleton in sports.REGISTRY -- and a raw module
+# is not deepcopy-able, a real TypeError, confirmed directly from a real production traceback
+# (Retrospective crashing on load). Selecting on plain string keys here instead, exactly the
+# same real fix Home.py's own sport tabs already use (a plain st.session_state["sport"] string,
+# never the Sport object itself) -- the FULL Sport object is only ever resolved via sports.get(),
+# safely, after the widget call, never handed to a widget as its own options/value.
+_rank_sport_key = st.selectbox("Sport", _rank_sport_keys,
+                               format_func=lambda k: f"{sports.get(k).icon} {sports.get(k).label}",
+                               key="retro_rank_sport")
+_rank_sport = sports.get(_rank_sport_key)
 _rank_market = st.selectbox("Market", ["All markets"] + list(_rank_sport.market_map.keys()),
                             key="retro_rank_market")
 
