@@ -454,31 +454,53 @@ _rank_market = st.selectbox("Market", ["All markets"] + list(_rank_sport.market_
 _rank_scope = st.radio("Scope", ["All time", "Last 10 real days"], horizontal=True,
                        key="retro_rank_scope")
 _rank_since = None
+# A REAL, CONFIRMED FIX, not the original design: min_n=20 stayed fixed regardless of scope, but
+# Rank 1/2/3 are structurally a ONE-PER-DAY-PER-MARKET event -- a real 10-day window can NEVER
+# produce more than 10 real Rank-1 plays, permanently below 20 no matter how much real backfill
+# happens within that window. Confirmed directly from a real report: the scoped chart showed one
+# giant "Ranks 11+" bar (which naturally pools dozens of real plays per day) and nothing else. A
+# real, lower floor for the shorter window -- still a real sample-size discipline, just sized to
+# what 10 real days can actually produce, the same reasoning retro.player_calibration's own
+# smaller min_plays=8 default already uses one level up for a different real constraint.
+_rank_min_n = 20
 if _rank_scope == "Last 10 real days":
     _rank_since = (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d")
+    _rank_min_n = 5
 
 _rank_history = GH.fetch_graded_plays(_rank_sport.key, since_date=_rank_since,
                                       market=None if _rank_market == "All markets" else _rank_market)
-_rank_result = R.catch_rate_by_rank(_rank_history,
+_rank_result = R.catch_rate_by_rank(_rank_history, min_n=_rank_min_n,
                                     market=None if _rank_market == "All markets" else _rank_market)
 
-if _rank_result:
+if any(b["n"] > 0 for b in _rank_result):
+    # A REAL, CONFIRMED FIX, not the original design: catch_rate_by_rank now always returns all
+    # 6 real buckets (see its own docstring) -- every real category renders here always, not just
+    # whichever ones happen to clear the floor. Qualifying bars (hit_rate is a real number) get
+    # the platform's own real "model" blue; a bucket with real plays that hasn't cleared its own
+    # floor yet renders as a muted, honestly-labeled placeholder instead of vanishing entirely --
+    # the exact visual difference between "a real, trustworthy read" and "real data exists here,
+    # just not enough of it yet" that a silently-missing category couldn't show.
+    _bar_colors = [_PALETTE["model"] if b["hit_rate"] is not None else _PALETTE["muted"]
+                  for b in _rank_result]
+    _bar_heights = [b["hit_rate"] if b["hit_rate"] is not None else 0 for b in _rank_result]
+    _bar_text = [f"n={b['n']}" if b["hit_rate"] is not None else f"n={b['n']} (needs {_rank_min_n}+)"
+                for b in _rank_result]
     figr = go.Figure(go.Bar(
-        x=[b["bucket"] for b in _rank_result], y=[b["hit_rate"] for b in _rank_result],
-        marker_color=_PALETTE["model"],
-        text=[f"n={b['n']}" for b in _rank_result], textposition="outside",
+        x=[b["bucket"] for b in _rank_result], y=_bar_heights,
+        marker_color=_bar_colors,
+        text=_bar_text, textposition="outside",
         hovertemplate="%{x}<br>hit rate %{y:.0%}<br>%{text}<extra></extra>",
     ))
     figr.update_layout(template="plotly_white", height=360, margin=dict(l=10, r=10, t=30, b=10),
                        yaxis=dict(title="Real hit rate", range=[0, 1], tickformat=".0%"),
                        xaxis=dict(title="Pre-game rank within its own market"))
     st.plotly_chart(figr, width="stretch")
-    st.caption("A bar only appears once its own bucket clears 20 real graded plays — thinner "
-              "buckets are omitted, not shown on a handful of plays. This fills in on its own "
-              "as more real slates get graded here; it's not something to force by grading more "
-              "dates at once.")
+    st.caption(f"Blue bars clear their own real floor ({_rank_min_n}+ real graded plays for this "
+              f"scope) — a genuine, trustworthy read. Grey bars have real plays too, just not "
+              f"enough of them yet (shown at n={_rank_min_n}+ once they clear it, never before) — "
+              "this fills in on its own as more real slates get graded here; it's not something "
+              "to force by grading more dates at once.")
 else:
-    st.info("Not enough real accumulated history yet for this sport/market to show a real "
-           "rank-vs-hit-rate read (each bucket needs 20+ real graded plays). Keep grading real "
-           "dates on this page — this fills in on its own, the same way Track Record's own "
-           "calibration chart does.")
+    st.info("Not enough real accumulated history yet for this sport/market/scope to show a real "
+           "rank-vs-hit-rate read. Keep grading real dates on this page — this fills in on its "
+           "own, the same way Track Record's own calibration chart does.")
