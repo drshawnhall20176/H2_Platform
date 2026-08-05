@@ -36,33 +36,24 @@ DATE HANDLING, PER SPORT -- real, confirmed differences, not a uniform assumptio
   - NCAAF: start_date is also a full ISO-UTC timestamp (confirmed against ncaaf_data.py's own
     _SCHEDULE_COLUMNS, which carries a separate start_time_tbd flag alongside it -- that flag only
     makes sense if start_date normally carries a real time). Same game_dt handling as above.
-  - NFL: nflreadpy's own "gametime" field DOES carry a real kickoff time for modern seasons --
-    A REAL, CONFIRMED FIX, not the original design: this earlier version of this docstring
-    claimed NFL's schedule data was date-only with no real time-of-day available at all, which
-    was true of "gameday" ALONE but never checked whether a separate time column existed -- it
-    does (confirmed directly against nflreadr's own published data dictionary), and simply wasn't
-    being extracted (see nfl_engine.get_schedule's own docstring for the full confirmation).
-    Parsed directly into a real US/Eastern-localized datetime in _nfl_games below (nflreadpy's
-    own "gametime" is already Eastern Time, 24-hour HH:MM, matching NFL broadcast convention),
-    not routed through game_dt (which expects a real UTC input, not a bare local HH:MM). Genuinely
-    NA/missing for older/historical seasons in nflreadr's own real data -- a missing or
-    unparseable game_time still honestly falls back to date_str + "Time TBD", the same graceful
-    degradation this module already used before this fix, just no longer the default outcome for
-    a real, current game with a real, known kickoff time.
+  - NFL: nflreadpy's own "gameday" field (this engine's game_date) is DATE ONLY, no time-of-day --
+    confirmed by what nfl_engine.get_schedule actually extracts today. Running a bare date string
+    through game_dt would silently do the wrong thing (Python's fromisoformat treats a date-only
+    string as a NAIVE local midnight, then .astimezone() offsets it by the SERVER's own timezone,
+    not a real Eastern conversion) -- compared directly as a date string instead, no conversion.
+    Real consequence, stated honestly: NFL games on the same date can't be chronologically sorted
+    by real kickoff time with what this engine currently captures -- they fall back to a stable
+    alphabetical-by-away-team order and display as "Time TBD" rather than fabricate a kickoff.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-import pytz as _pytz
 import streamlit as st
 
 import league_structure as LS
 import sports
-
-_ET_TZ = _pytz.timezone("US/Eastern")
 
 # Sports this section covers -- see module docstring for why UFC is excluded and NCAAMB isn't.
 SUPPORTED_SPORTS = {"MLB", "NBA", "WNBA", "NFL", "NCAAF", "NCAAMB"}
@@ -182,39 +173,22 @@ def _nfl_games(date_str: str) -> List[Dict[str, Any]]:
         return []
     out = []
     for g in E.games_for_week(schedule, week):
-        # Direct string comparison, deliberately -- game_date itself is still a bare date (no
-        # time component), so filtering by it stays a plain string match regardless of whether
-        # game_time below parses successfully for this particular row.
+        # Direct string comparison, deliberately -- see module docstring on why NFL's date-only
+        # game_date can't safely go through game_dt the way the timestamp-based sports do.
         if g.get("game_date") != date_str:
             continue
-        # A REAL, CONFIRMED FIX, not the original design: nflreadpy's own real "gametime" column
-        # (get_schedule's own docstring has the full real confirmation) DOES carry a real kickoff
-        # time for modern seasons -- Eastern Time, 24-hour HH:MM, matching NFL's own broadcast
-        # convention exactly (nflreadpy's own "20:20" IS "8:20 PM ET", confirmed directly against
-        # nflreadr's own published data dictionary and sample data). Parsed into a real, US/
-        # Eastern-localized datetime here -- this earlier version's own docstring claimed this
-        # was a genuine data-source limitation ("NFL's date-only game_date can't safely go
-        # through game_dt"), which was true of game_date alone but never checked game_time,
-        # which was never being extracted at all until now (see get_schedule's own docstring).
-        dt, time_known = None, False
-        game_time = g.get("game_time")
-        if game_time and isinstance(game_time, str) and ":" in game_time:
-            try:
-                hour, minute = (int(x) for x in game_time.split(":")[:2])
-                naive = datetime.strptime(date_str, "%Y-%m-%d").replace(hour=hour, minute=minute)
-                dt = _ET_TZ.localize(naive)
-                time_known = True
-            except (ValueError, TypeError):
-                pass   # a real but unparseable game_time (or missing, per nflreadr's own real
-                       # "NA for older seasons" behavior) -- honestly falls through to date_str
-                       # below, same graceful degradation as before this fix, never a crash.
         out.append({"home": g.get("home_team"), "away": g.get("away_team"),
                     "home_logo": _espn_cdn_logo("nfl", g.get("home_team")),
                     "away_logo": _espn_cdn_logo("nfl", g.get("away_team")),
-                    "dt": dt, "time_known": time_known, "venue": None,
+                    "dt": None, "time_known": False, "venue": None,
                     # date_str kept as the raw, real, already-filtered-on YYYY-MM-DD string --
-                    # the real fallback _schedule_game_row uses when dt itself couldn't be built
-                    # (a genuinely missing/unparseable game_time, not the common case anymore).
+                    # A REAL, CONFIRMED FIX, not the original design: this used to be computed
+                    # (for the filter above) and then discarded, leaving the display layer with
+                    # NOTHING date-related to show for NFL (dt is always None here, by design,
+                    # since NFL's date-only field can't safely go through game_dt -- see module
+                    # docstring). _schedule_game_row falls back to this real date when dt itself
+                    # isn't available, rather than showing a bare, uninformative "Time TBD" for
+                    # every single NFL game regardless of which real day it's actually on.
                     "date_str": g.get("game_date"),
                     # HONEST LIMITATION, not a gap in this function's own logic: nflreadpy's
                     # schedule data isn't a live feed, so "delayed"/"in-progress"/"canceled"
@@ -315,65 +289,6 @@ def todays_schedule(sport_key: str, date_str: str) -> Optional[Dict[str, Any]]:
         # every other engine's own fail-soft posture elsewhere in this platform.
         games = []
     return group_games(sport_key, games)
-
-
-def next_scheduled_date(sport_key: str, date_str: str, max_days_ahead: int = 21) -> Optional[str]:
-    """ADDED DIRECTLY ON REQUEST: the next real date with at least one real scheduled game for
-    sport_key, searching forward from date_str -- meant to be called only AFTER todays_schedule
-    for that same date came back real but empty (a genuine off-day, not a fetch failure), so a
-    caller can show "no games today, but here's the next real slate" instead of a bare dead end.
-
-    TWO GENUINELY DIFFERENT REAL STRATEGIES, matching each sport's own real data shape, not one
-    uniform approach:
-      - NFL/NCAAF: get_schedule(season) already returns the WHOLE real season in one fetch (see
-        _nfl_games/_ncaaf_games_with_conference above, which already call it this way) -- scanned
-        in memory for the next real date, zero new fetches. Capped to the CURRENTLY LOADED
-        season's own real schedule -- this does not reach into a future season that hasn't
-        started yet (e.g. asking in the real off-season between one season ending and the next
-        one's own schedule being published), an honest boundary, not a gap.
-      - MLB/NBA/WNBA/NCAAMB: get_schedule(date_str) is scoped to ONE real date -- scanned day by
-        day, using each engine's own RAW get_schedule call directly (NOT _mlb_games/
-        _basketball_games, which each add real per-game enrichment -- lineup status, logos --
-        this only needs to know whether ANY real game exists that day, the cheapest possible real
-        check). Capped at max_days_ahead (default 21) real days forward -- a genuine, long
-        real off-season (WNBA/NBA between seasons) will exceed this and honestly return None
-        rather than hammering a real API once per day for months look‑ahead.
-
-    None if nothing real is found within the real search bounds above -- an honest "genuinely
-    can't tell you when, from what's loaded" rather than a guess."""
-    from datetime import datetime, timedelta
-    if sport_key not in SUPPORTED_SPORTS:
-        return None
-    try:
-        if sport_key in ("NFL", "NCAAF"):
-            import importlib
-            E = importlib.import_module("nfl_engine" if sport_key == "NFL" else "ncaaf_engine")
-            season = E._infer_season(date_str)
-            if season is None:
-                return None
-            schedule = E.get_schedule(season)
-            date_field = "game_date" if sport_key == "NFL" else "start_date"
-            future_dates = sorted({(g.get(date_field) or "")[:10] for g in schedule
-                                   if (g.get(date_field) or "")[:10] > date_str})
-            return future_dates[0] if future_dates else None
-
-        engine_name = {"MLB": "mlb_engine", "NBA": "nba_engine", "WNBA": "wnba_engine",
-                      "NCAAMB": "ncaamb_engine"}.get(sport_key)
-        if engine_name is None:
-            return None
-        import importlib
-        E = importlib.import_module(engine_name)
-        start = datetime.strptime(date_str, "%Y-%m-%d")
-        for i in range(1, max_days_ahead + 1):
-            candidate = (start + timedelta(days=i)).strftime("%Y-%m-%d")
-            if E.get_schedule(candidate):   # the raw, lightweight fetch -- no per-game enrichment
-                return candidate
-        return None
-    except Exception:
-        # Same fail-soft posture as todays_schedule itself -- a lookup failure here must never
-        # take down the page; an honest None (the caller's own "nothing found" path) is the
-        # correct degradation, not a crash.
-        return None
 
 
 def _ncaaf_games_with_conference(date_str: str) -> List[Dict[str, Any]]:
