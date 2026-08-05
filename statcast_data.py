@@ -21,7 +21,24 @@ import os
 from typing import Dict, Optional, Tuple
  
 import pandas as pd
-import streamlit as st
+try:
+    import streamlit as st
+except ImportError:
+    # A REAL, CONFIRMED FIX, not the original design: refresh_statcast.py's own real,
+    # deliberately minimal environment (pybaseball/pandas/requests/pytz only, by its own
+    # workflow's own real comment -- "in the runner, not in the app's requirements -- the
+    # app stays lightweight") never installs streamlit, and it never calls load_cached
+    # below (confirmed directly: refresh_statcast.py only ever calls the RAW load/refresh
+    # functions, never load_cached) -- but the earlier, unconditional `import streamlit as
+    # st` here still made this whole MODULE unimportable without streamlit installed,
+    # confirmed directly from a real production failure (refresh-statcast's own real cron
+    # run: ModuleNotFoundError: No module named 'streamlit', before a single line of this
+    # module's own real Statcast logic ever ran). Same real optional-import pattern already
+    # established elsewhere in this codebase (line_history.py/grading_history.py/
+    # calibration_corrections.py's own DATABASE_URL lookups) for this identical class of
+    # problem -- a module used by BOTH the live Streamlit app and a standalone script that
+    # must not require Streamlit at all.
+    st = None
  
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 DEFAULT_PATH = os.path.join(DATA_DIR, "statcast_batters.csv")
@@ -285,29 +302,35 @@ def load(path: str = DEFAULT_PATH) -> Tuple[Dict[int, Dict], Optional[float]]:
     return lookup, k
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def load_cached(path: str = DEFAULT_PATH) -> Tuple[Dict[int, Dict], Optional[float]]:
-    """Cached companion to load() above — same (lookup_by_player_id, calibration_k) return.
+if st is not None:
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def load_cached(path: str = DEFAULT_PATH) -> Tuple[Dict[int, Dict], Optional[float]]:
+        """Cached companion to load() above — same (lookup_by_player_id, calibration_k) return.
 
-    A REAL, CONFIRMED FIX, not the original design: this exact `@st.cache_data(ttl=3600) def
-    load_statcast(): return SC.load()` wrapper used to be independently redefined as a LOCAL
-    nested closure inside 6 separate call sites (best_bets_data.build_mlb_board, and the views
-    for Pitching Lab, Media Room, Edge Board, Podcast Studio, and Dinger Engine) -- confirmed
-    identical in every one, not 6 genuine variants. Streamlit's cache_data keys on a function's
-    own identity (module + qualname + source), so 6 separately-defined nested functions with
-    identical bodies are NOT the same cache entry to Streamlit, even though they do the exact
-    same real work on the exact same file. A single user's real session — Command Center (via
-    build_mlb_board), then Podcast Studio, then Media Room, then Edge Board — re-read and re-
-    parsed the same statcast_batters.csv from disk up to 4 separate times, each on its own
-    independent hour-long TTL, none of them aware the others existed. Confirmed as a real,
-    reported symptom: Command Center/Podcast Studio/Media Room all "took almost one minute."
+        A REAL, CONFIRMED FIX, not the original design: this exact `@st.cache_data(ttl=3600) def
+        load_statcast(): return SC.load()` wrapper used to be independently redefined as a LOCAL
+        nested closure inside 6 separate call sites (best_bets_data.build_mlb_board, and the views
+        for Pitching Lab, Media Room, Edge Board, Podcast Studio, and Dinger Engine) -- confirmed
+        identical in every one, not 6 genuine variants. Streamlit's cache_data keys on a function's
+        own identity (module + qualname + source), so 6 separately-defined nested functions with
+        identical bodies are NOT the same cache entry to Streamlit, even though they do the exact
+        same real work on the exact same file. A single user's real session — Command Center (via
+        build_mlb_board), then Podcast Studio, then Media Room, then Edge Board — re-read and re-
+        parsed the same statcast_batters.csv from disk up to 4 separate times, each on its own
+        independent hour-long TTL, none of them aware the others existed. Confirmed as a real,
+        reported symptom: Command Center/Podcast Studio/Media Room all "took almost one minute."
 
-    Genuinely one function now, in the one module that already owns load() itself -- every
-    former call site should call THIS instead of defining its own local wrapper. Game Watch's
-    own load_statcast_pitchers is NOT part of this consolidation -- it wraps load_pitchers()
-    (pitcher data), a real, different dataset from this one (batter data), correctly left as its
-    own separate cache."""
-    return load(path)
+        Genuinely one function now, in the one module that already owns load() itself -- every
+        former call site should call THIS instead of defining its own local wrapper. Game Watch's
+        own load_statcast_pitchers is NOT part of this consolidation -- it wraps load_pitchers()
+        (pitcher data), a real, different dataset from this one (batter data), correctly left as its
+        own separate cache.
+
+        DEFINED ONLY WHEN STREAMLIT IS ACTUALLY IMPORTABLE (see the module-level try/except
+        above) -- refresh_statcast.py's own real, deliberately minimal environment never installs
+        streamlit and never calls this function; every REAL caller of load_cached is a live
+        Streamlit page, which already requires streamlit to run at all."""
+        return load(path)
  
  
 def expected_hr_rate(brl_pa: float, k: Optional[float]) -> Optional[float]:

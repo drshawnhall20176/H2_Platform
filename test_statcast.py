@@ -527,6 +527,56 @@ def test_load_pitchers_empty_file_is_graceful():
         assert SC.load_pitchers(path) == {}
 
 
+def test_statcast_data_importable_without_streamlit():
+    # THE real, confirmed production incident this guards against directly: refresh_statcast.py
+    # (a standalone script, run by refresh-statcast.yml's own real, deliberately minimal
+    # environment -- pybaseball/pandas/requests/pytz only, "the app stays lightweight" per that
+    # workflow's own real comment) imports statcast_data, which used to unconditionally `import
+    # streamlit as st` at module level -- added later for load_cached's own real @st.cache_data
+    # decorator, but never made optional. Confirmed directly from a real cron failure:
+    # ModuleNotFoundError: No module named 'streamlit', before a single line of this module's
+    # own real Statcast logic ever ran.
+    #
+    # Reproduced directly here, not just asserted from source text -- genuinely blocks the real
+    # streamlit import (the same failure mode refresh-statcast's own minimal environment hits)
+    # and confirms the module still imports cleanly, with its real, actually-used functions
+    # (load/refresh, what refresh_statcast.py itself calls) still real and callable, and
+    # load_cached (streamlit-only, never called by refresh_statcast.py) correctly absent rather
+    # than crashing the whole module.
+    import builtins
+    import sys
+
+    real_import = builtins.__import__
+
+    def _blocked_import(name, *args, **kwargs):
+        if name == "streamlit" or name.startswith("streamlit."):
+            raise ImportError(f"No module named '{name}'")
+        return real_import(name, *args, **kwargs)
+
+    saved_modules = {m: sys.modules[m] for m in list(sys.modules)
+                     if "streamlit" in m or m == "statcast_data"}
+    for m in saved_modules:
+        del sys.modules[m]
+    builtins.__import__ = _blocked_import
+    try:
+        import statcast_data as SC_no_streamlit
+        assert SC_no_streamlit.st is None, "st must be honestly None when streamlit isn't installed, not crash the import"
+        assert not hasattr(SC_no_streamlit, "load_cached"), (
+            "load_cached must not be defined at all without streamlit -- it's never called by "
+            "refresh_statcast.py, and referencing st.cache_data without a real st would crash")
+        assert callable(SC_no_streamlit.load), "load() -- what refresh_statcast.py actually calls -- must still work"
+        assert callable(SC_no_streamlit.refresh), "refresh() -- what refresh_statcast.py actually calls -- must still work"
+    finally:
+        builtins.__import__ = real_import
+        for m in list(sys.modules):
+            if "streamlit" in m or m == "statcast_data":
+                del sys.modules[m]
+        sys.modules.update(saved_modules)
+        import statcast_data  # noqa: F401 -- restore the real, normal module for every test after this one
+    print("✓ statcast_data.py imports cleanly without streamlit installed, with its real, "
+         "actually-used functions intact — the exact real production failure this guards against")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
