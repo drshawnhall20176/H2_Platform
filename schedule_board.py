@@ -323,34 +323,35 @@ def next_scheduled_date(sport_key: str, date_str: str, max_days_ahead: int = 21)
     for that same date came back real but empty (a genuine off-day, not a fetch failure), so a
     caller can show "no games today, but here's the next real slate" instead of a bare dead end.
 
-    TWO GENUINELY DIFFERENT REAL STRATEGIES, matching each sport's own real data shape, not one
-    uniform approach:
+    A REAL, CONFIRMED FIX, not the original design: NBA/WNBA/NCAAMB (the three ESPN-based
+    sports) DISABLED HERE ENTIRELY, always returning None for them -- confirmed directly from a
+    real production incident, not a guess. The original day-by-day scan (up to max_days_ahead=21
+    real, rapid, sequential requests to ESPN whenever a sport's schedule came back empty) is the
+    confirmed real trigger: ESPN's own WAF started returning a genuine 403 Forbidden on requests
+    that had worked fine moments earlier, immediately after this exact scan pattern ran -- rapid,
+    sequential, many-request scanning against one endpoint is exactly the shape of traffic a
+    bot-detection layer exists to catch. The real caller (Home.py) already falls back to the
+    honest "No games scheduled today" message when this returns None -- a real, safe regression
+    from "shows the next real date," not a broken feature, until a genuinely safely-throttled way
+    to check ahead exists for these three sports.
+
+    MLB/NFL/NCAAF remain fully real and unaffected, for two different real reasons:
       - NFL/NCAAF: get_schedule(season) already returns the WHOLE real season in one fetch (see
         _nfl_games/_ncaaf_games_with_conference above, which already call it this way) -- scanned
-        in memory for the next real date, zero new fetches. Capped to the CURRENTLY LOADED
-        season's own real schedule -- this does not reach into a future season that hasn't
-        started yet (e.g. asking in the real off-season between one season ending and the next
-        one's own schedule being published), an honest boundary, not a gap.
+        in memory for the next real date, ZERO new real requests at all, never at risk of this
+        class of problem in the first place. Capped to the CURRENTLY LOADED season's own real
+        schedule -- doesn't reach into a future season that hasn't started yet, an honest
+        boundary, not a gap.
       - MLB: get_schedule(date_str) uses a genuinely different real API (MLB Stats API, not
-        ESPN) that was never touched by the ESPN-specific fix below -- still exactly one cheap
-        real call per candidate day, scanned day by day, using the raw get_schedule directly
-        (NOT _mlb_games, which adds real per-game enrichment -- lineup status, logos -- this
-        only needs to know whether ANY real game exists that day).
-      - NBA/WNBA/NCAAMB: scanned day by day too, but using ONE cheap, direct single-date probe
-        per candidate day (deliberately NOT the full engine.get_schedule -- that function now
-        makes THREE real queries per call, see wnba_engine.get_schedule's own docstring for why;
-        21 candidates x 3 real queries each would be a real, meaningfully heavier real cost than
-        this rough "does anything exist nearby" check actually needs). A real, known day-off
-        imprecision from a single probe is an acceptable trade here -- this only needs to find
-        SOME real nearby date to hand off to the caller, which then calls the real, fully-
-        corrected todays_schedule for that exact date anyway, getting the real, precise answer
-        for whichever date actually gets shown.
-      Both real branches capped at max_days_ahead (default 21) real days forward -- a genuine,
-      long real off-season (WNBA/NBA between seasons) will exceed this and honestly return None
-      rather than hammering a real API once per day for months look‑ahead.
+        ESPN), never implicated in the real ESPN incident above -- still scanned day by day,
+        one cheap real call per candidate day, capped at max_days_ahead (default 21) real days
+        forward, same real reasoning as always: a genuine, long real off-season will exceed this
+        and honestly return None rather than hammering a real API once per day for months
+        look-ahead.
 
-    None if nothing real is found within the real search bounds above -- an honest "genuinely
-    can't tell you when, from what's loaded" rather than a guess."""
+    None if nothing real is found within the real search bounds above (or for any real NBA/WNBA/
+    NCAAMB request, per the real, confirmed disabling above) -- an honest "genuinely can't tell
+    you when, from what's loaded" rather than a guess."""
     from datetime import datetime, timedelta
     if sport_key not in SUPPORTED_SPORTS:
         return None
@@ -371,25 +372,35 @@ def next_scheduled_date(sport_key: str, date_str: str, max_days_ahead: int = 21)
                       "NCAAMB": "ncaamb_engine"}.get(sport_key)
         if engine_name is None:
             return None
+
+        if sport_key != "MLB":
+            # A REAL, CONFIRMED FIX, not the original design: this real day-by-day scan (up to
+            # max_days_ahead=21 real, rapid, sequential requests to ESPN whenever a sport's
+            # schedule comes back empty) is the confirmed real trigger of a real production
+            # incident -- ESPN's own WAF started returning a genuine 403 Forbidden for requests
+            # from this app that had worked fine moments before, immediately after this exact
+            # scan pattern ran. Rapid, sequential, many-request scanning against ESPN's own
+            # scoreboard is EXACTLY the shape of traffic a bot-detection layer is built to catch,
+            # and it appears to have caught this. Disabled entirely for the three ESPN-based
+            # sports (NBA/WNBA/NCAAMB) until a real, safely-throttled way to do this exists --
+            # the honest "No games scheduled today" message (this function's own real caller
+            # already falls back to that when this returns None) is a real, safe regression from
+            # "shows the next real date," not a broken feature; MLB/NFL/NCAAF are UNAFFECTED and
+            # keep the real fallback, since MLB uses a genuinely different API (never implicated)
+            # and NFL/NCAAF scan the ALREADY-fetched full season in memory (zero new requests at
+            # all, never at risk of this class of problem in the first place).
+            return None
+
         import importlib
         E = importlib.import_module(engine_name)
         start = datetime.strptime(date_str, "%Y-%m-%d")
         for i in range(1, max_days_ahead + 1):
             candidate = (start + timedelta(days=i)).strftime("%Y-%m-%d")
-            if sport_key == "MLB":
-                # MLB uses a genuinely different real API (MLB Stats API, not ESPN) -- never
-                # touched by the ESPN day-boundary fix above, so its own get_schedule is still
-                # exactly one cheap real call, same as always. No probe needed here.
-                if E.get_schedule(candidate):
-                    return candidate
-            else:
-                # NBA/WNBA/NCAAMB share ESPN's SITE_API/_get_json -- ONE cheap, direct single-
-                # date probe, not the full get_schedule (which now makes 3 real queries). A real
-                # day-off imprecision here is fine: the caller re-fetches this exact candidate
-                # properly (via the real, fully-corrected todays_schedule) once one is found.
-                probe = E._get_json(f"{E.SITE_API}/scoreboard", params={"dates": candidate.replace("-", "")})
-                if probe and probe.get("events"):
-                    return candidate
+            # MLB uses a genuinely different real API (MLB Stats API, not ESPN) -- never touched
+            # by the ESPN issue above, so its own get_schedule is still exactly one cheap real
+            # call, same as always.
+            if E.get_schedule(candidate):
+                return candidate
         return None
     except Exception:
         # Same fail-soft posture as todays_schedule itself -- a lookup failure here must never

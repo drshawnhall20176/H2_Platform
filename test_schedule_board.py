@@ -325,29 +325,34 @@ def test_next_scheduled_date_mlb_scans_day_by_day_using_the_raw_lightweight_fetc
     print("✓ next_scheduled_date scans MLB day by day using the raw, lightweight get_schedule, stopping at the first real hit")
 
 
-def test_next_scheduled_date_wnba_uses_a_cheap_probe_not_the_full_three_call_get_schedule():
-    # A REAL, CONFIRMED FIX: get_schedule for the ESPN-based sports now makes THREE real queries
-    # per call (see wnba_engine.get_schedule's own docstring). Scanning up to 21 real candidate
-    # days using the FULL get_schedule would mean up to 63 real requests on every real page load
-    # when the season is genuinely active but the first check happens to fail. Confirms this
-    # scan uses ONE cheap, direct probe per candidate day instead -- E._get_json, never the
-    # full, three-call E.get_schedule.
-    calls = []
-
-    def fake_get_json(url, params=None):
-        calls.append(params["dates"])
-        real_event = {"id": "1"}
-        return {"events": [real_event]} if params["dates"] == "20260808" else {"events": []}
-
-    with patch.object(wnba_engine, "_get_json", side_effect=fake_get_json), \
-         patch.object(wnba_engine, "get_schedule") as mock_full_get_schedule:
+def test_next_scheduled_date_wnba_disabled_entirely_after_the_real_espn_incident():
+    # A REAL, CONFIRMED FIX: the original day-by-day scan for the ESPN-based sports (up to 21
+    # real, rapid, sequential requests) is the confirmed real trigger of a real production
+    # incident -- ESPN's own WAF started 403'ing requests that had worked fine moments earlier,
+    # immediately after this exact scan pattern ran. Confirms this is now genuinely disabled for
+    # WNBA (and NBA/NCAAMB, the same real ESPN-based sports), not just less aggressive -- ZERO
+    # real requests, an honest None every time, regardless of what a real fetch would return.
+    with patch.object(wnba_engine, "_get_json") as mock_get_json, \
+         patch.object(wnba_engine, "get_schedule") as mock_get_schedule:
         result = SB.next_scheduled_date("WNBA", "2026-08-05")
+    assert result is None
+    mock_get_json.assert_not_called()
+    mock_get_schedule.assert_not_called()
+    print("✓ next_scheduled_date is genuinely disabled for WNBA (zero real requests), the real fix for the real ESPN block incident")
 
-    assert result == "2026-08-08"
-    assert calls == ["20260806", "20260807", "20260808"], (
-        f"expected a real day-by-day scan using single-date probes, stopping at the first real hit, got {calls}")
-    mock_full_get_schedule.assert_not_called()
-    print("✓ next_scheduled_date uses a real, cheap single-date probe for WNBA, never the full three-call get_schedule")
+
+def test_next_scheduled_date_nba_and_ncaamb_also_disabled():
+    # Same real fix applies to NBA and NCAAMB -- all three share the identical real ESPN
+    # SITE_API/_get_json pattern that triggered the real incident.
+    import nba_engine
+    import ncaamb_engine
+    with patch.object(nba_engine, "_get_json") as mock_nba, \
+         patch.object(ncaamb_engine, "_get_json") as mock_ncaamb:
+        assert SB.next_scheduled_date("NBA", "2026-08-05") is None
+        assert SB.next_scheduled_date("NCAAMB", "2026-08-05") is None
+    mock_nba.assert_not_called()
+    mock_ncaamb.assert_not_called()
+    print("✓ next_scheduled_date is also genuinely disabled for NBA and NCAAMB, the same real ESPN-based sports")
 
 
 def test_next_scheduled_date_mlb_none_beyond_the_real_cap():
