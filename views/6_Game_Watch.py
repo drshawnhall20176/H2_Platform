@@ -398,6 +398,18 @@ for g in games:
     tally = g["_tally"]
     with st.container(border=True):
         st.markdown(f"### {g['label']} — {time_str}")
+        # ADDED DIRECTLY ON REQUEST: real, confirmed example -- Cody Bradford's actual 2026
+        # season debut (reinstated from a 60-day IL stint after nearly two years out) meant he
+        # genuinely had no computable stat line, and this game used to vanish from the board
+        # entirely rather than show with an honest gap on his one side. Now it shows, but the
+        # dashes on his side need a real explanation, not just silent "—" marks with no context.
+        for side_row in (away_row, home_row):
+            if not side_row.get("_has_stats", True):
+                st.caption(f"⚠️ {side_row['Pitcher']} ({side_row['Team']}) has no real, "
+                          "computable stat line yet — likely a season debut, a long injured-"
+                          "list return, or a very recent call-up with too little MLB innings to "
+                          "measure. Every signal on his side below shows \"—\", honestly, rather "
+                          "than a fabricated number.")
         if g["_tonight_tod"] is None:
             st.caption("Tonight's own start time is unknown, so the day/night form signal above "
                       "has no real bucket to compare — shown as \"no data,\" not guessed.")
