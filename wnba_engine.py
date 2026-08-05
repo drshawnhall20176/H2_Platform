@@ -174,7 +174,21 @@ def get_schedule(date_str: str) -> List[Dict[str, Any]]:
         except (KeyError, TypeError, ValueError):
             logger.exception("WNBA scoreboard event had an unexpected shape: %s", event.get("id"))
             continue
-    _diag(f"get_schedule({date_str}): {len(games)} game(s) found ({len(data.get('events', []))} raw events)")
+    _diag(f"get_schedule({date_str}): {len(games)} game(s) found ({len(all_events)} raw events across 3 real queries)")
+
+    if not games:
+        # A REAL, DELIBERATE FALLBACK, added directly on urgent request after ESPN's own real
+        # block took the whole real schedule fetch down -- tried ONLY when the ESPN-based fetch
+        # above genuinely found nothing, so if ESPN's own block has already cleared, this new,
+        # separately-risky source is never touched at all. See nba_stats_engine.py's own
+        # docstring for the full, honest reasoning on why this is a real fallback, not a
+        # replacement -- stats.nba.com carries its own real, separate risk of the same class of
+        # problem, not a safer alternative.
+        import nba_stats_engine as NS
+        games = NS.get_schedule(date_str, NS.LEAGUE_ID_WNBA)
+        if games:
+            _diag(f"get_schedule({date_str}): ESPN returned nothing; the stats.nba.com real "
+                 f"fallback found {len(games)} real game(s) instead")
     return games
 
 

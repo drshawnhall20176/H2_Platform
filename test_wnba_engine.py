@@ -9,6 +9,8 @@ whoever deploys, since stats.wnba.com is unreachable from the build sandbox.
     python test_wnba_engine.py     # or: pytest test_wnba_engine.py
 """
 
+from unittest.mock import patch
+
 import wnba_engine as E
 
 
@@ -279,8 +281,57 @@ def test_get_schedule_succeeds_even_if_one_of_three_real_queries_fails(monkeypat
 
 
 def test_get_schedule_returns_empty_on_fetch_failure(monkeypatch):
+    # Explicitly isolates the new stats.nba.com fallback too -- without this, ESPN failing would
+    # fall through to a real, unmocked network attempt against stats.nba.com (which happens to
+    # fail fast in this sandbox's own restricted network, masking the real isolation gap rather
+    # than fixing it).
     monkeypatch.setattr(E, "_get_json", lambda url, params=None: None)
+    import nba_stats_engine as NS
+    monkeypatch.setattr(NS, "get_schedule", lambda date_str, league_id: [])
     assert E.get_schedule("2026-07-14") == []
+
+
+def test_get_schedule_falls_back_to_stats_nba_com_when_espn_returns_nothing(monkeypatch):
+    # A REAL, CONFIRMED FIX, added directly on urgent request after ESPN's own real block took
+    # the whole real schedule fetch down: confirms the real fallback is genuinely wired in and
+    # genuinely used when ESPN's own three real queries all come back empty.
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: {"events": []})   # ESPN: real, empty
+    import nba_stats_engine as NS
+    fallback_game = {"gameId": "1", "game_date": "2026-07-14", "home_id": 1, "away_id": 2,
+                     "home_name": "Team A", "away_name": "Team B", "home_abbr": "A",
+                     "away_abbr": "B", "home_logo": None, "away_logo": None,
+                     "status_state": None, "status_detail": "7:00 pm ET"}
+    calls = []
+
+    def fake_fallback(date_str, league_id):
+        calls.append((date_str, league_id))
+        return [fallback_game]
+
+    monkeypatch.setattr(NS, "get_schedule", fake_fallback)
+    games = E.get_schedule("2026-07-14")
+    assert games == [fallback_game]
+    assert calls == [("2026-07-14", NS.LEAGUE_ID_WNBA)], (
+        f"expected the real fallback to be called with the correct real date and WNBA league_id, got {calls}")
+    print("✓ get_schedule correctly falls back to the real stats.nba.com source when ESPN's own three queries all return nothing")
+
+
+def test_get_schedule_never_calls_the_fallback_when_espn_actually_has_real_games(monkeypatch):
+    # THE real point of building this as a fallback, not a replacement: if ESPN's own real block
+    # has cleared, the new, separately-risky source must never even be touched.
+    real_event = {
+        "id": "1", "date": "2026-07-14T23:00Z",
+        "competitions": [{"competitors": [
+            {"homeAway": "home", "team": {"id": "1", "displayName": "Team A", "abbreviation": "A"}},
+            {"homeAway": "away", "team": {"id": "2", "displayName": "Team B", "abbreviation": "B"}},
+        ], "status": {"type": {}}}],
+    }
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: {"events": [real_event]})
+    import nba_stats_engine as NS
+    with patch.object(NS, "get_schedule") as mock_fallback:
+        games = E.get_schedule("2026-07-14")
+    assert len(games) == 1
+    mock_fallback.assert_not_called()
+    print("✓ the stats.nba.com fallback is never touched when ESPN's own fetch genuinely succeeds")
 
 
 # ----------------------------------------------------------------- get_team_roster (ESPN roster)
