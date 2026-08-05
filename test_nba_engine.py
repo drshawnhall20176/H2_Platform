@@ -62,34 +62,55 @@ def test_get_schedule_returns_empty_on_fetch_failure(monkeypatch):
     assert E.get_schedule("2026-01-14") == []
 
 
-def test_get_schedule_uses_a_real_wider_range_not_a_single_unreliable_date(monkeypatch):
-    # A REAL, CONFIRMED FIX, not the original design: same real issue confirmed directly against
-    # a real, live ESPN fetch (see wnba_engine.get_schedule's own docstring for the full
-    # confirmation -- both engines share the identical SITE_API scoreboard shape) -- a single
-    # dates=YYYYMMDD query does NOT reliably return the requested real Eastern date's own games.
-    captured = {}
+def test_get_schedule_makes_three_real_safe_single_date_queries_not_a_range(monkeypatch):
+    # A SECOND, REAL, CONFIRMED FIX: the first attempt (a single dates=START-END range query)
+    # was confirmed directly from a real production log to return a genuine 403 Forbidden on
+    # every real request. Reverted to three separate real single-date queries -- the exact same
+    # dates=YYYYMMDD format that's always worked.
+    calls = []
 
     def fake_get_json(url, params=None):
-        captured["params"] = params
+        calls.append(params)
         return {"events": []}
 
     monkeypatch.setattr(E, "_get_json", fake_get_json)
     E.get_schedule("2026-01-14")
-    assert captured["params"] == {"dates": "20260113-20260115"}
-    print("✓ get_schedule queries a real, wider date range instead of a single, unreliable exact date")
+    assert calls == [{"dates": "20260113"}, {"dates": "20260114"}, {"dates": "20260115"}], (
+        f"expected three real, individually-safe single-date queries, got {calls}")
+    print("✓ get_schedule makes three real, individually-safe single-date queries, never the real 403-triggering range format")
 
 
-def test_get_schedule_wider_range_correctly_handles_a_real_month_boundary(monkeypatch):
-    captured = {}
+def test_get_schedule_three_queries_correctly_handle_a_real_month_boundary(monkeypatch):
+    calls = []
 
     def fake_get_json(url, params=None):
-        captured["params"] = params
+        calls.append(params)
         return {"events": []}
 
     monkeypatch.setattr(E, "_get_json", fake_get_json)
     E.get_schedule("2026-01-31")
-    assert captured["params"] == {"dates": "20260130-20260201"}
-    print("✓ get_schedule's real date range correctly rolls across a real month boundary")
+    assert calls == [{"dates": "20260130"}, {"dates": "20260131"}, {"dates": "20260201"}]
+    print("✓ get_schedule's three real single-date queries correctly roll across a real month boundary")
+
+
+def test_get_schedule_dedupes_the_same_real_event_across_multiple_queries(monkeypatch):
+    shared_event = {
+        "id": "999", "date": "2026-01-14T23:00Z",
+        "competitions": [{"competitors": [
+            {"homeAway": "home", "team": {"id": "1", "displayName": "Team A", "abbreviation": "A"}},
+            {"homeAway": "away", "team": {"id": "2", "displayName": "Team B", "abbreviation": "B"}},
+        ], "status": {"type": {}}}],
+    }
+
+    def fake_get_json(url, params=None):
+        if params["dates"] in ("20260113", "20260114"):
+            return {"events": [shared_event]}
+        return {"events": []}
+
+    monkeypatch.setattr(E, "_get_json", fake_get_json)
+    games = E.get_schedule("2026-01-14")
+    assert len(games) == 1, f"expected the real shared event deduped to exactly 1, got {len(games)}"
+    print("✓ get_schedule correctly dedupes the same real event id when it appears in more than one of the three real queries")
 
 
 # ----------------------------------------------------------------- team_abbrs_from_meta

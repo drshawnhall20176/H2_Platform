@@ -331,13 +331,23 @@ def next_scheduled_date(sport_key: str, date_str: str, max_days_ahead: int = 21)
         season's own real schedule -- this does not reach into a future season that hasn't
         started yet (e.g. asking in the real off-season between one season ending and the next
         one's own schedule being published), an honest boundary, not a gap.
-      - MLB/NBA/WNBA/NCAAMB: get_schedule(date_str) is scoped to ONE real date -- scanned day by
-        day, using each engine's own RAW get_schedule call directly (NOT _mlb_games/
-        _basketball_games, which each add real per-game enrichment -- lineup status, logos --
-        this only needs to know whether ANY real game exists that day, the cheapest possible real
-        check). Capped at max_days_ahead (default 21) real days forward -- a genuine, long
-        real off-season (WNBA/NBA between seasons) will exceed this and honestly return None
-        rather than hammering a real API once per day for months look‑ahead.
+      - MLB: get_schedule(date_str) uses a genuinely different real API (MLB Stats API, not
+        ESPN) that was never touched by the ESPN-specific fix below -- still exactly one cheap
+        real call per candidate day, scanned day by day, using the raw get_schedule directly
+        (NOT _mlb_games, which adds real per-game enrichment -- lineup status, logos -- this
+        only needs to know whether ANY real game exists that day).
+      - NBA/WNBA/NCAAMB: scanned day by day too, but using ONE cheap, direct single-date probe
+        per candidate day (deliberately NOT the full engine.get_schedule -- that function now
+        makes THREE real queries per call, see wnba_engine.get_schedule's own docstring for why;
+        21 candidates x 3 real queries each would be a real, meaningfully heavier real cost than
+        this rough "does anything exist nearby" check actually needs). A real, known day-off
+        imprecision from a single probe is an acceptable trade here -- this only needs to find
+        SOME real nearby date to hand off to the caller, which then calls the real, fully-
+        corrected todays_schedule for that exact date anyway, getting the real, precise answer
+        for whichever date actually gets shown.
+      Both real branches capped at max_days_ahead (default 21) real days forward -- a genuine,
+      long real off-season (WNBA/NBA between seasons) will exceed this and honestly return None
+      rather than hammering a real API once per day for months look‑ahead.
 
     None if nothing real is found within the real search bounds above -- an honest "genuinely
     can't tell you when, from what's loaded" rather than a guess."""
@@ -366,8 +376,20 @@ def next_scheduled_date(sport_key: str, date_str: str, max_days_ahead: int = 21)
         start = datetime.strptime(date_str, "%Y-%m-%d")
         for i in range(1, max_days_ahead + 1):
             candidate = (start + timedelta(days=i)).strftime("%Y-%m-%d")
-            if E.get_schedule(candidate):   # the raw, lightweight fetch -- no per-game enrichment
-                return candidate
+            if sport_key == "MLB":
+                # MLB uses a genuinely different real API (MLB Stats API, not ESPN) -- never
+                # touched by the ESPN day-boundary fix above, so its own get_schedule is still
+                # exactly one cheap real call, same as always. No probe needed here.
+                if E.get_schedule(candidate):
+                    return candidate
+            else:
+                # NBA/WNBA/NCAAMB share ESPN's SITE_API/_get_json -- ONE cheap, direct single-
+                # date probe, not the full get_schedule (which now makes 3 real queries). A real
+                # day-off imprecision here is fine: the caller re-fetches this exact candidate
+                # properly (via the real, fully-corrected todays_schedule) once one is found.
+                probe = E._get_json(f"{E.SITE_API}/scoreboard", params={"dates": candidate.replace("-", "")})
+                if probe and probe.get("events"):
+                    return candidate
         return None
     except Exception:
         # Same fail-soft posture as todays_schedule itself -- a lookup failure here must never

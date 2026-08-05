@@ -104,29 +104,45 @@ def get_schedule(date_str: str) -> List[Dict[str, Any]]:
     return that real date's own games -- confirmed directly against a real, live fetch: querying
     dates=20260805 (a real date with four real, confirmed WNBA games that evening) came back with
     ESPN's own response labeling itself "day": "2026-08-04" and returning only the PRIOR night's
-    late game, none of the real games actually happening that Eastern evening. ESPN's own day
-    boundary for this parameter doesn't reliably align with a plain Eastern calendar date the way
-    the original single-date query assumed.
+    late game, none of the real games actually happening that Eastern evening.
 
-    Fixed by querying a real, WIDER window (date_str-1 through date_str+1, ESPN's own documented
-    dates=START-END range syntax) instead of a single exact date -- this can only ever return
-    MORE real games than a single-date query, never fewer, so it's a strictly safer real fetch,
-    not a riskier one. The existing client-side filter in schedule_board._basketball_games
-    already re-derives each game's own real Eastern date from its own real UTC timestamp and
-    narrows to exactly the requested date -- that logic was already correct; this fixes the
-    actual real gap, which was ESPN not returning the requested date's own games in the first
-    place, not a downstream filtering mistake."""
-    start = (datetime.strptime(date_str, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y%m%d")
-    end = (datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y%m%d")
-    data = _get_json(f"{SITE_API}/scoreboard", params={"dates": f"{start}-{end}"})
-    if not data:
-        _diag(f"get_schedule({date_str}): scoreboard fetch returned nothing (request failed)")
+    A SECOND, REAL, CONFIRMED FIX ON TOP OF THAT ONE: the first attempt at fixing this used ESPN's
+    own documented dates=START-END range syntax -- confirmed directly from a real production log
+    that ESPN returns a genuine 403 Forbidden for that exact range format from this app, on every
+    single real request, not an intermittent rate-limit. Reverted to what's actually confirmed
+    safe: THREE separate real single-date queries (date_str-1, date_str, date_str+1), each using
+    the exact same dates=YYYYMMDD format that's always worked, merged and deduped by event id
+    before parsing. Real cost: 3 real requests instead of 1, but each one is individually proven
+    not to 403 -- a real, working fix beats an elegant one that gets blocked. The existing client-
+    side filter in schedule_board._basketball_games already re-derives each game's own real
+    Eastern date from its own real UTC timestamp and narrows to exactly the requested date --
+    that logic was already correct and needed no changes for either fix."""
+    all_events: List[Dict[str, Any]] = []
+    seen_ids = set()
+    any_real_response = False
+    for offset in (-1, 0, 1):
+        d = (datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=offset)).strftime("%Y%m%d")
+        data = _get_json(f"{SITE_API}/scoreboard", params={"dates": d})
+        if not data:
+            continue
+        any_real_response = True
+        for event in data.get("events", []):
+            eid = event.get("id")
+            if eid is not None and eid in seen_ids:
+                continue   # the same real game can legitimately appear in more than one of the
+                          # three real queries above -- deduped here, not double-counted
+            if eid is not None:
+                seen_ids.add(eid)
+            all_events.append(event)
+
+    if not any_real_response:
+        _diag(f"get_schedule({date_str}): all three real scoreboard fetches failed (request failed)")
         return []
-    if "events" not in data:
-        _diag(f"get_schedule({date_str}): response had no 'events' key — keys were {list(data.keys())}")
+    if not all_events:
+        _diag(f"get_schedule({date_str}): real fetches succeeded but returned zero events across all three real dates queried")
 
     games = []
-    for event in data.get("events", []):
+    for event in all_events:
         comps = event.get("competitions") or []
         if not comps:
             continue
