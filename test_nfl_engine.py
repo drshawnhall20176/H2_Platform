@@ -86,6 +86,23 @@ def test_get_schedule_parses_real_confirmed_shape(monkeypatch):
     print("✓ get_schedule correctly parses the real, confirmed nflreadpy schedule shape")
 
 
+def test_get_schedule_extracts_the_real_gametime_column(monkeypatch):
+    # A REAL, CONFIRMED FIX: "gametime" is a real, live column on nflreadr's own actual schedule
+    # data (confirmed directly against nflreadr's own published data dictionary and sample data,
+    # e.g. a real Thursday-night game showing "20:20") -- this used to simply never be read at
+    # all, which is the real, confirmed root cause of a real reported bug (NFL.com showing a real
+    # kickoff time for a game this platform's own schedule displayed as "Time TBD").
+    fake_df = pd.DataFrame([
+        {"game_id": "2026_01_NE_SEA", "week": 1, "gameday": "2026-09-09", "gametime": "20:20",
+        "home_team": "SEA", "away_team": "NE", "home_score": None, "away_score": None,
+        "home_rest": 7, "away_rest": 7},
+    ])
+    monkeypatch.setattr(E.nfl, "load_schedules", lambda seasons: _FakePolarsDF(fake_df))
+    sched = E.get_schedule(2026)
+    assert sched[0]["game_time"] == "20:20"
+    print("✓ get_schedule now correctly extracts the real gametime column (e.g. 8:20 PM ET), not just the bare date")
+
+
 def test_get_schedule_empty_on_fetch_failure(monkeypatch):
     def raise_err(seasons):
         raise ConnectionError("simulated failure")

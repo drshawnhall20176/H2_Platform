@@ -102,10 +102,23 @@ _MARKET_SPEC: Dict[str, Tuple[str, str, str, float]] = {
 
 # --------------------------------------------------------------------------- schedule / weeks
 def get_schedule(season: int) -> List[Dict[str, Any]]:
-    """Full-season schedule: [{game_id, week, game_date, home_team, away_team, home_score,
-    away_score, home_rest, away_rest}, ...]. away_rest/home_rest come DIRECTLY from nflreadpy's
-    schedule data — confirmed live — so unlike every basketball engine in this platform, NFL
-    doesn't need to compute rest days itself by scanning recent games; the schedule already has it.
+    """Full-season schedule: [{game_id, week, game_date, game_time, home_team, away_team,
+    home_score, away_score, home_rest, away_rest}, ...]. away_rest/home_rest come DIRECTLY from
+    nflreadpy's schedule data — confirmed live — so unlike every basketball engine in this
+    platform, NFL doesn't need to compute rest days itself by scanning recent games; the schedule
+    already has it.
+
+    A REAL, CONFIRMED FIX, not the original design: game_time (nflreadpy's own real "gametime"
+    column, e.g. "20:20" for an 8:20 PM ET kickoff) used to simply never be extracted here at
+    all -- a real, reported gap (NFL.com showing a real kickoff time for a game this platform's
+    own schedule displayed as "Time TBD"), NOT a genuine limitation of the underlying data as an
+    earlier version of this docstring claimed. Confirmed directly against nflreadr's own real
+    published data dictionary and a real sample pull (nflreadr.nflverse.com/reference/load_
+    schedules.html): "gametime" is a real, live column on modern seasons, Eastern Time, 24-hour
+    HH:MM (matching NFL broadcast convention exactly -- the same "20:20" shown there IS "8:20 PM
+    ET"). Genuinely NA/missing for older/historical seasons in nflreadr's own real data (its own
+    published 1999 example shows NA) -- callers should still treat a missing/unparseable
+    game_time as an honest "don't know," not assume it's always populated.
 
     PRESEASON, RESOLVED AS A REAL DATA-SOURCE LIMITATION, NOT A FIXABLE BUG: confirmed directly
     against a real, live nflreadpy pull (a real 2025 season schedule) that load_schedules()
@@ -116,7 +129,8 @@ def get_schedule(season: int) -> List[Dict[str, Any]]:
     choosing to exclude preseason, the underlying data source doesn't carry it at all through this
     function. Supporting NFL preseason for real would need an entirely different data source, not
     a code fix here -- a genuinely separate, much larger project, not something this function's
-    own logic could be changed to unlock."""
+    own logic could be changed to unlock. (Unrelated to the game_time fix above -- this remains a
+    real, separate, still-open gap.)"""
     try:
         df = nfl.load_schedules([season]).to_pandas()
     except Exception:
@@ -131,6 +145,7 @@ def get_schedule(season: int) -> List[Dict[str, Any]]:
         try:
             out.append({
                 "game_id": r["game_id"], "week": int(r["week"]), "game_date": r.get("gameday"),
+                "game_time": r.get("gametime"),
                 "home_team": r["home_team"], "away_team": r["away_team"],
                 "home_score": r.get("home_score"), "away_score": r.get("away_score"),
                 "home_rest": r.get("home_rest"), "away_rest": r.get("away_rest"),

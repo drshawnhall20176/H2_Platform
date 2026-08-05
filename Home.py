@@ -71,7 +71,29 @@ if active and current in SB.SUPPORTED_SPORTS:
     today_str = _dt.now(_ET).strftime("%Y-%m-%d")
     with st.spinner("Loading today's schedule..."):
         schedule_result = SB.todays_schedule(current, today_str)
-    C.todays_schedule_board(schedule_result, active.icon, active.label)
+
+    # ADDED DIRECTLY ON REQUEST: a real, genuinely empty result for TODAY (confirmed by
+    # todays_schedule_board's own docstring: this is "a real empty schedule -- a legitimate
+    # off-day," not a fetch failure) used to just show a bare "No games scheduled today" and
+    # stop there -- for a sport whose season hasn't started yet (NFL/NCAAF preseason, an
+    # off-season gap), that's honest but not very useful on its own. Falls forward to the next
+    # REAL scheduled date instead, using the same real schedule data, clearly labeled as NOT
+    # today so it's never mistaken for it.
+    _today_empty = bool(schedule_result) and not schedule_result["grouped"] and not schedule_result["other"]
+    if _today_empty:
+        with st.spinner("Checking for upcoming games..."):
+            _next_date = SB.next_scheduled_date(current, today_str)
+        if _next_date:
+            with st.spinner("Loading the next scheduled slate..."):
+                schedule_result = SB.todays_schedule(current, _next_date)
+            st.caption(f"No {active.label} games scheduled today — showing the next real "
+                      f"scheduled date instead.")
+            C.todays_schedule_board(schedule_result, active.icon, active.label,
+                                    heading=f"Next {active.label} games — {_next_date}")
+        else:
+            C.todays_schedule_board(schedule_result, active.icon, active.label)
+    else:
+        C.todays_schedule_board(schedule_result, active.icon, active.label)
     st.divider()
 
 if active:

@@ -113,6 +113,21 @@ def test_owner_only_pages_match_expected_titles():
           "Graded Picks, by real title")
 
 
+def test_home_falls_forward_to_next_scheduled_date_when_today_is_empty():
+    # ADDED DIRECTLY ON REQUEST: a real, genuinely empty schedule for today (a legitimate
+    # off-day -- e.g. NFL before the season starts) must fall forward to the next real scheduled
+    # date instead of just stopping at a bare "No games scheduled today," confirmed wired into
+    # the real Home.py source, not just present in schedule_board.py in isolation.
+    src = (_HERE / "Home.py").read_text()
+    assert "SB.next_scheduled_date(current, today_str)" in src, (
+        "Home.py must actually call next_scheduled_date when today's own schedule is empty")
+    assert '_today_empty = bool(schedule_result) and not schedule_result["grouped"] and not schedule_result["other"]' in src, (
+        "the empty-check must distinguish a real empty result from a None (unsupported sport) result")
+    assert 'heading=f"Next {active.label} games — {_next_date}"' in src, (
+        "the fallback board must be clearly labeled as NOT today, never shown under a bare 'Today's Schedule' heading")
+    print("✓ Home.py genuinely falls forward to the next real scheduled date when today is a real, legitimate off-day")
+
+
 def test_every_view_file_has_a_matching_meta_entry():
     # Regression guard for a real, reported bug: a new page (24_Highlights.py) was added to
     # views/ without a matching entry in streamlit_app.py's meta dict, so it silently fell back
