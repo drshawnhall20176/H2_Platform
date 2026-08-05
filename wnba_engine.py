@@ -136,8 +136,20 @@ def get_schedule(date_str: str) -> List[Dict[str, Any]]:
             all_events.append(event)
 
     if not any_real_response:
+        # A REAL, CONFIRMED BUG FIX: this early return used to skip the stats.nba.com fallback
+        # below entirely -- confirmed directly from a real production log that ESPN's own three
+        # queries fail with a real HTTP 403 (a hard fetch failure, any_real_response staying
+        # False), not just a soft "succeeded but zero events" response the fallback below was
+        # only ever checked for. A hard failure needs the exact same real fallback a soft empty
+        # does -- there's no real reason to treat "ESPN refused the request" as less worth
+        # falling back from than "ESPN answered with nothing."
         _diag(f"get_schedule({date_str}): all three real scoreboard fetches failed (request failed)")
-        return []
+        import nba_stats_engine as NS
+        games = NS.get_schedule(date_str, NS.LEAGUE_ID_WNBA)
+        if games:
+            _diag(f"get_schedule({date_str}): ESPN's own fetch failed outright; the stats.nba.com "
+                 f"real fallback found {len(games)} real game(s) instead")
+        return games
     if not all_events:
         _diag(f"get_schedule({date_str}): real fetches succeeded but returned zero events across all three real dates queried")
 

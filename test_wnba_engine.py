@@ -315,6 +315,25 @@ def test_get_schedule_falls_back_to_stats_nba_com_when_espn_returns_nothing(monk
     print("✓ get_schedule correctly falls back to the real stats.nba.com source when ESPN's own three queries all return nothing")
 
 
+def test_get_schedule_falls_back_when_espn_fails_outright_not_just_when_empty(monkeypatch):
+    # THE exact real bug found in production, confirmed directly from a real log: ESPN returning
+    # a genuine HTTP failure (403 Forbidden) on all three real queries -- a HARD failure, where
+    # _get_json itself returns None -- used to hit an early `return []` that completely skipped
+    # the real fallback below it. That's a genuinely different real case from ESPN answering
+    # successfully with zero events, and it needs the exact same real fallback, not a bypass.
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: None)   # ESPN: real, hard failure (all three)
+    import nba_stats_engine as NS
+    fallback_game = {"gameId": "1", "game_date": "2026-07-14", "home_id": 1, "away_id": 2,
+                     "home_name": "Team A", "away_name": "Team B", "home_abbr": "A",
+                     "away_abbr": "B", "home_logo": None, "away_logo": None,
+                     "status_state": None, "status_detail": "7:00 pm ET"}
+    monkeypatch.setattr(NS, "get_schedule", lambda date_str, league_id: [fallback_game])
+    games = E.get_schedule("2026-07-14")
+    assert games == [fallback_game], (
+        "a hard ESPN fetch failure must reach the real fallback, not bypass it via an early return")
+    print("✓ get_schedule correctly reaches the real fallback on a hard ESPN fetch failure (403-style), not just a soft empty response")
+
+
 def test_get_schedule_never_calls_the_fallback_when_espn_actually_has_real_games(monkeypatch):
     # THE real point of building this as a fallback, not a replacement: if ESPN's own real block
     # has cleared, the new, separately-risky source must never even be touched.
