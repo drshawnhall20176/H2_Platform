@@ -502,11 +502,20 @@ def catch_rate_by_rank(graded_plays: List[Dict], market: Optional[str] = None,
     this) -- plays without it (logged before this feature existed, or from a source that never
     computed rank) are silently excluded, not treated as rank-less zeros.
 
-    A bucket only appears in the real output once it clears min_n real settled plays -- the same
-    real sample-size discipline retro.player_calibration's own min_plays already enforces one
-    level up, not a new standard invented here. Returns [{"bucket", "n", "hit_rate"}, ...] in
-    RANK_BUCKETS' own order, thinnest-evidence buckets simply absent rather than shown on a
-    handful of real plays."""
+    ALWAYS RETURNS ALL 6 REAL RANK_BUCKETS, EVERY CALL -- A REAL, CONFIRMED FIX, not the original
+    design: the original version silently DROPPED any bucket below min_n entirely, which meant a
+    caller had no way to tell "this bucket has zero real plays" apart from "this bucket has 8 real
+    plays, just not enough yet" -- both looked identical (absent). Confirmed directly from a real
+    report: Rank 1/2/3 are structurally a ONE-PER-DAY-PER-MARKET event (only ever one real #1 pick
+    in a market, per day) -- a real 10-day window can NEVER produce more than 10 real Rank-1
+    observations, permanently below a min_n=20 floor no matter how much real backfill happens
+    within that window, while "Ranks 11+" pools dozens of real plays per day and clears easily --
+    which meant a scoped chart showed one giant bar and nothing else, with no way to tell the
+    difference between "truly zero data" and "real data, just not enough of it yet." Every real
+    bucket now comes back with its own real n; hit_rate is None (not a fabricated number, and not
+    silent absence either) whenever n < min_n -- the caller (Retrospective's own chart) renders
+    every real category always, visually distinguishing "a real, trustworthy bar" from "real data
+    exists here, just not enough of it yet" rather than making an entire category vanish."""
     if market is not None:
         graded_plays = [p for p in graded_plays if p.get("Market") == market]
 
@@ -517,6 +526,7 @@ def catch_rate_by_rank(graded_plays: List[Dict], market: Optional[str] = None,
                         and lo <= p["Rank"] <= hi]
         n = len(bucket_plays)
         if n < min_n:
+            out.append({"bucket": label, "n": n, "hit_rate": None})
             continue
         hits = sum(1 for p in bucket_plays if p["Hit"])
         out.append({"bucket": label, "n": n, "hit_rate": round(hits / n, 3)})

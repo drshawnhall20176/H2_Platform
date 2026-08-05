@@ -514,11 +514,23 @@ def test_rank_within_market_ranks_each_market_independently():
     print("✓ rank_within_market ranks each real market separately, not pooled across markets")
 
 
-def test_catch_rate_by_rank_below_min_n_bucket_is_absent():
+def test_catch_rate_by_rank_below_min_n_bucket_has_honest_none_not_absence():
+    # A REAL, CONFIRMED FIX, not the original design: the original version silently DROPPED a
+    # thin bucket entirely, indistinguishable from a bucket with truly zero real plays. Confirmed
+    # directly from a real report: Rank 1/2/3 are structurally a ONE-PER-DAY-PER-MARKET event, so
+    # a real 10-day scoped window can never produce more than 10 real Rank-1 plays -- permanently
+    # below a min_n=20 floor no matter how much real backfill happens, which meant a scoped chart
+    # showed one giant bar and nothing else. Every real bucket now always appears, with its own
+    # real n; hit_rate is None (not a fabricated number) when n < min_n.
     graded = [dict(_graded(f"P{i}", i, 0.5, i % 2 == 0), Rank=1) for i in range(5)]   # only 5, below min_n=20
     result = R.catch_rate_by_rank(graded)
-    assert result == [], "a bucket with fewer than min_n real settled plays must not appear at all"
-    print("✓ catch_rate_by_rank omits a bucket entirely below its real min_n floor, rather than showing a thin number")
+    assert len(result) == 6, "all 6 real RANK_BUCKETS must always appear, not just the ones that clear the floor"
+    r1 = next(b for b in result if b["bucket"] == "Rank 1")
+    assert r1["n"] == 5 and r1["hit_rate"] is None, "a real, thin bucket reports its own real n, honestly None for hit_rate"
+    empty = next(b for b in result if b["bucket"] == "Rank 2")
+    assert empty["n"] == 0 and empty["hit_rate"] is None, "a bucket with truly zero real plays also reports honestly"
+    print("✓ catch_rate_by_rank always returns all 6 real buckets, with an honest None (not a fabricated number "
+         "or silent absence) for any bucket below its real min_n floor")
 
 
 def test_catch_rate_by_rank_computes_the_real_hit_rate_per_bucket():
@@ -540,23 +552,26 @@ def test_catch_rate_by_rank_pools_the_real_tail_bands():
         for i in range(4):   # 5 ranks * 4 = 20 total real plays in this one pooled band
             plays.append(dict(_graded(f"R{rank}_{i}", rank * 10 + i, 0.4, i < 2), Rank=rank))
     result = R.catch_rate_by_rank(plays, min_n=20)
-    assert len(result) == 1 and result[0]["bucket"] == "Ranks 6-10"
-    assert result[0]["n"] == 20 and result[0]["hit_rate"] == 0.5
+    by_bucket = {b["bucket"]: b for b in result}
+    assert by_bucket["Ranks 6-10"]["n"] == 20 and by_bucket["Ranks 6-10"]["hit_rate"] == 0.5
+    assert by_bucket["Rank 1"]["n"] == 0   # a real, honestly-empty bucket, still present in the output
     print("✓ catch_rate_by_rank correctly pools the real tail bands (Ranks 6-10) into one bucket")
 
 
 def test_catch_rate_by_rank_excludes_plays_with_no_real_rank():
     graded = [dict(_graded(f"P{i}", i, 0.5, True)) for i in range(30)]   # NO Rank key at all -- e.g. logged before this feature existed
     result = R.catch_rate_by_rank(graded, min_n=20)
-    assert result == [], "plays with no real Rank must be silently excluded, never treated as rank-less zeros"
-    print("✓ catch_rate_by_rank excludes real plays with no rank data, rather than guessing")
+    assert all(b["n"] == 0 and b["hit_rate"] is None for b in result), (
+        "plays with no real Rank must be excluded from every real bucket's own count, never treated as rank-less zeros")
+    print("✓ catch_rate_by_rank excludes real plays with no rank data from every bucket, rather than guessing")
 
 
 def test_catch_rate_by_rank_narrows_to_one_market_when_asked():
     hr = [dict(_graded(f"HR{i}", i, 0.5, True, market="Batter HR"), Rank=1) for i in range(20)]
     ks = [dict(_graded(f"K{i}", 100 + i, 0.5, False, market="Pitcher Strikeouts"), Rank=1) for i in range(20)]
     result = R.catch_rate_by_rank(hr + ks, market="Batter HR", min_n=20)
-    assert len(result) == 1 and result[0]["hit_rate"] == 1.0   # only the real HR plays counted
+    by_bucket = {b["bucket"]: b for b in result}
+    assert by_bucket["Rank 1"]["hit_rate"] == 1.0   # only the real HR plays counted
     print("✓ catch_rate_by_rank correctly narrows to one real market when asked")
 
 

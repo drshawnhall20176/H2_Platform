@@ -292,6 +292,28 @@ def test_retrospective_rank_chart_has_a_real_recency_scope():
         "the scope selection must actually reach fetch_graded_plays' own since_date parameter")
     print("✓ Retrospective's rank chart has a real, wired 'Last 10 real days' recency scope, "
          "reusing fetch_graded_plays' own existing since_date support")
+def test_retrospective_rank_chart_uses_a_scope_dependent_floor_and_shows_every_category():
+    # THE real, confirmed fix for a real report: a fixed min_n=20 regardless of scope meant a
+    # real 10-day window (where Rank 1/2/3 are structurally a one-per-day-per-market event, never
+    # more than 10 real observations no matter how much real backfill happens) could only ever
+    # show ONE giant bar ("Ranks 11+", which naturally pools dozens of real plays per day) and
+    # nothing else. Confirmed here: the scoped window uses a real, lower, achievable floor, and
+    # every real category renders always (never silently vanishes), with a genuinely distinct
+    # visual treatment for a bucket that has real data but hasn't cleared its own floor yet.
+    src = (Path(__file__).parent / "views" / "16_#L01f50d_Retrospective.py").read_text()
+    assert "_rank_min_n = 20" in src and "_rank_min_n = 5" in src, (
+        "the rank floor must genuinely differ by scope, not stay fixed at 20 regardless")
+    assert "R.catch_rate_by_rank(_rank_history, min_n=_rank_min_n" in src, (
+        "the scope-dependent floor must actually reach catch_rate_by_rank, not just be computed and unused")
+    assert 'if any(b["n"] > 0 for b in _rank_result):' in src, (
+        "must check for ANY real data existing, not truthiness of the old drop-thin-buckets contract"
+    )
+    assert "_PALETTE[\"model\"] if b[\"hit_rate\"] is not None else _PALETTE[\"muted\"]" in src, (
+        "a bucket below its own floor must render as a genuinely distinct color, not the same blue as a real bar")
+    print("✓ Retrospective's rank chart uses a real, scope-dependent floor and shows every real "
+         "category always, with a genuinely distinct look for thin-but-real buckets")
+
+
 
 
 def test_retrospective_rank_chart_selector_never_passes_raw_sport_objects():
