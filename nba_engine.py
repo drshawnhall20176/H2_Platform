@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -94,9 +94,21 @@ def _get_json_cached(url: str, params: Optional[Dict] = None) -> Optional[Dict]:
 def get_schedule(date_str: str) -> List[Dict[str, Any]]:
     """Games scheduled for date_str (YYYY-MM-DD). One dict per game with both team ids/names/
     abbreviations/logos — all pulled directly from the scoreboard response, no separate team
-    lookup needed."""
-    espn_date = date_str.replace("-", "")   # ESPN wants YYYYMMDD; we use YYYY-MM-DD everywhere else
-    data = _get_json(f"{SITE_API}/scoreboard", params={"dates": espn_date})
+    lookup needed.
+
+    A REAL, CONFIRMED FIX, not the original design: same real issue confirmed directly against a
+    real, live WNBA fetch (see wnba_engine.get_schedule's own docstring for the full confirmation
+    -- both engines share the identical SITE_API scoreboard shape) -- querying ESPN's own
+    scoreboard with a single exact dates=YYYYMMDD does NOT reliably return that real Eastern
+    date's own games; ESPN's own internal day boundary for this parameter doesn't reliably align
+    with a plain Eastern calendar date. Fixed the same way: query a real, wider window (date_str-1
+    through date_str+1) instead of a single exact date -- strictly more real games returned,
+    never fewer -- and rely on the existing, already-correct client-side filter in schedule_
+    board._basketball_games to narrow down to exactly the requested date using each game's own
+    real UTC timestamp."""
+    start = (datetime.strptime(date_str, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y%m%d")
+    end = (datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y%m%d")
+    data = _get_json(f"{SITE_API}/scoreboard", params={"dates": f"{start}-{end}"})
     if not data:
         _diag(f"get_schedule({date_str}): scoreboard fetch returned nothing (request failed)")
         return []

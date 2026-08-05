@@ -197,7 +197,12 @@ def test_get_schedule_parses_espn_scoreboard_shape(monkeypatch):
     print("✓ get_schedule parses ESPN's scoreboard shape (incl. abbreviations) and skips malformed events")
 
 
-def test_get_schedule_uses_yyyymmdd_date_param(monkeypatch):
+def test_get_schedule_uses_a_real_wider_range_not_a_single_unreliable_date(monkeypatch):
+    # A REAL, CONFIRMED FIX, not the original design: a single dates=YYYYMMDD query was
+    # confirmed directly against a real, live ESPN fetch to NOT reliably return the requested
+    # real Eastern date's own games. Now queries a real, wider window (date-1 through date+1) --
+    # the existing, already-correct client-side filter in schedule_board._basketball_games
+    # narrows this down to exactly the requested date afterward.
     captured = {}
 
     def fake_get_json(url, params=None):
@@ -206,7 +211,23 @@ def test_get_schedule_uses_yyyymmdd_date_param(monkeypatch):
 
     monkeypatch.setattr(E, "_get_json", fake_get_json)
     E.get_schedule("2026-07-14")
-    assert captured["params"] == {"dates": "20260714"}
+    assert captured["params"] == {"dates": "20260713-20260715"}
+    print("✓ get_schedule queries a real, wider date range instead of a single, unreliable exact date")
+
+
+def test_get_schedule_wider_range_correctly_handles_a_real_month_boundary(monkeypatch):
+    # Real, exact proof the date-1/date+1 arithmetic is genuine date math, not string slicing --
+    # July 31 - 1 day must correctly roll back to July 30, and July 31 + 1 day forward to Aug 1.
+    captured = {}
+
+    def fake_get_json(url, params=None):
+        captured["params"] = params
+        return {"events": []}
+
+    monkeypatch.setattr(E, "_get_json", fake_get_json)
+    E.get_schedule("2026-07-31")
+    assert captured["params"] == {"dates": "20260730-20260801"}
+    print("✓ get_schedule's real date range correctly rolls across a real month boundary")
 
 
 def test_get_schedule_returns_empty_on_fetch_failure(monkeypatch):

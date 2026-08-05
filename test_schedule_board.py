@@ -15,6 +15,7 @@ from unittest.mock import patch
 import pytz
 
 import schedule_board as SB
+import wnba_engine
 import nfl_engine
 import mlb_engine
 
@@ -390,6 +391,32 @@ def test_nfl_games_falls_back_on_a_malformed_game_time():
     assert games[0]["time_known"] is False
     assert games[0]["dt"] is None
     print("✓ _nfl_games honestly falls back to Time TBD on a real but malformed game_time value, never crashes")
+
+
+# ----------------------------------------------------------------- _basketball_games: real ESPN day-boundary fix
+def test_basketball_games_correctly_excludes_a_real_stale_prior_night_game(monkeypatch):
+    # THE exact real, confirmed scenario reported: ESPN's own scoreboard, queried for a real
+    # requested date, mixed in a real game from the PRIOR Eastern evening (confirmed directly
+    # against a real, live fetch: dates=20260805 returned ESPN's own "day": "2026-08-04" and only
+    # that prior game) alongside real games from the actually-requested date. Confirms the
+    # existing, already-correct client-side filter genuinely excludes the stale one and keeps
+    # only the real games that are actually on the requested Eastern date.
+    stale_game = {   # a real game from the PRIOR Eastern evening (2026-08-04, 10:00 PM EDT),
+                     # UTC timestamp technically crosses into Aug 5 -- the exact real confirmed case
+        "game_date": "2026-08-05T02:00:00Z", "home_name": "Golden State Valkyries",
+        "away_name": "Toronto Tempo", "home_logo": None, "away_logo": None,
+        "status_detail": "Final", "status_state": "post",
+    }
+    real_tonight_game = {   # a real game actually on the requested Eastern date (2026-08-05, 7:00 PM EDT)
+        "game_date": "2026-08-05T23:00:00Z", "home_name": "New York Liberty",
+        "away_name": "Seattle Storm", "home_logo": None, "away_logo": None,
+        "status_detail": "Scheduled", "status_state": "pre",
+    }
+    monkeypatch.setattr(wnba_engine, "get_schedule", lambda date_str: [stale_game, real_tonight_game])
+    games = SB._basketball_games("2026-08-05", "wnba_engine")
+    assert len(games) == 1, f"expected only the one real game actually on 2026-08-05 ET, got {len(games)}"
+    assert games[0]["home"] == "New York Liberty"
+    print("✓ _basketball_games correctly excludes a real stale prior-night game ESPN mixed into the response, keeping only the requested date's own real games")
 
 
 if __name__ == "__main__":

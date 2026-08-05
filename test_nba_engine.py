@@ -62,6 +62,36 @@ def test_get_schedule_returns_empty_on_fetch_failure(monkeypatch):
     assert E.get_schedule("2026-01-14") == []
 
 
+def test_get_schedule_uses_a_real_wider_range_not_a_single_unreliable_date(monkeypatch):
+    # A REAL, CONFIRMED FIX, not the original design: same real issue confirmed directly against
+    # a real, live ESPN fetch (see wnba_engine.get_schedule's own docstring for the full
+    # confirmation -- both engines share the identical SITE_API scoreboard shape) -- a single
+    # dates=YYYYMMDD query does NOT reliably return the requested real Eastern date's own games.
+    captured = {}
+
+    def fake_get_json(url, params=None):
+        captured["params"] = params
+        return {"events": []}
+
+    monkeypatch.setattr(E, "_get_json", fake_get_json)
+    E.get_schedule("2026-01-14")
+    assert captured["params"] == {"dates": "20260113-20260115"}
+    print("✓ get_schedule queries a real, wider date range instead of a single, unreliable exact date")
+
+
+def test_get_schedule_wider_range_correctly_handles_a_real_month_boundary(monkeypatch):
+    captured = {}
+
+    def fake_get_json(url, params=None):
+        captured["params"] = params
+        return {"events": []}
+
+    monkeypatch.setattr(E, "_get_json", fake_get_json)
+    E.get_schedule("2026-01-31")
+    assert captured["params"] == {"dates": "20260130-20260201"}
+    print("✓ get_schedule's real date range correctly rolls across a real month boundary")
+
+
 # ----------------------------------------------------------------- team_abbrs_from_meta
 def test_team_abbrs_from_meta_derives_from_build_slate_meta():
     meta = [{"label": "Bucks @ Celtics", "home_id": 2, "home_abbr": "BOS", "away_id": 17, "away_abbr": "MIL"}]

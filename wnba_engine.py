@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -97,9 +97,28 @@ def get_schedule(date_str: str) -> List[Dict[str, Any]]:
     lookup needed. Abbreviations (e.g. "ATL") exist alongside id/displayName in the same
     competitor "team" object ESPN already returns here — captured because get_team_injuries
     needs one (the injuries endpoint keys by abbreviation, not ESPN's numeric team id), not
-    because anything else in this module needs it yet."""
-    espn_date = date_str.replace("-", "")   # ESPN wants YYYYMMDD; we use YYYY-MM-DD everywhere else
-    data = _get_json(f"{SITE_API}/scoreboard", params={"dates": espn_date})
+    because anything else in this module needs it yet.
+
+    A REAL, CONFIRMED FIX, not the original design: querying ESPN's own scoreboard with a single
+    exact dates=YYYYMMDD (built naively from a real Eastern-Time calendar date) does NOT reliably
+    return that real date's own games -- confirmed directly against a real, live fetch: querying
+    dates=20260805 (a real date with four real, confirmed WNBA games that evening) came back with
+    ESPN's own response labeling itself "day": "2026-08-04" and returning only the PRIOR night's
+    late game, none of the real games actually happening that Eastern evening. ESPN's own day
+    boundary for this parameter doesn't reliably align with a plain Eastern calendar date the way
+    the original single-date query assumed.
+
+    Fixed by querying a real, WIDER window (date_str-1 through date_str+1, ESPN's own documented
+    dates=START-END range syntax) instead of a single exact date -- this can only ever return
+    MORE real games than a single-date query, never fewer, so it's a strictly safer real fetch,
+    not a riskier one. The existing client-side filter in schedule_board._basketball_games
+    already re-derives each game's own real Eastern date from its own real UTC timestamp and
+    narrows to exactly the requested date -- that logic was already correct; this fixes the
+    actual real gap, which was ESPN not returning the requested date's own games in the first
+    place, not a downstream filtering mistake."""
+    start = (datetime.strptime(date_str, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y%m%d")
+    end = (datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y%m%d")
+    data = _get_json(f"{SITE_API}/scoreboard", params={"dates": f"{start}-{end}"})
     if not data:
         _diag(f"get_schedule({date_str}): scoreboard fetch returned nothing (request failed)")
         return []
