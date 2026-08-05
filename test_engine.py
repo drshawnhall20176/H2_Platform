@@ -293,9 +293,13 @@ def test_build_pitching_slate_includes_a_genuine_zero_era_pitcher(monkeypatch):
          "data, no longer confusing it with 'no data found'")
 
 
-def test_build_pitching_slate_still_excludes_genuinely_no_data_pitchers(monkeypatch):
-    # Confirms the fix didn't lose the original, real protection -- a pitcher with genuinely NO
-    # stats anywhere (has_stats=False) must still be excluded, same as before.
+def test_build_pitching_slate_includes_a_real_honest_placeholder_for_no_data_pitchers(monkeypatch):
+    # A REAL, CONFIRMED FIX, not the original design: confirmed directly against a real, live
+    # case (Cody Bradford's actual 2026 season debut, reinstated from a 60-day IL stint after
+    # nearly two years out -- genuinely no real 2025 or 2026 stat line for get_pitcher_metrics to
+    # find). Excluding his row used to also drop the ENTIRE game, since Game Watch/Bullpen Watch
+    # pair home/away rows into one game -- now a real, honest placeholder row instead, so the
+    # real game still shows.
     fake_games = [{
         "gamePk": 88888, "game_date": "2026-07-31T04:45:00Z",
         "home_name": "Padres", "away_name": "Giants",
@@ -312,10 +316,70 @@ def test_build_pitching_slate_still_excludes_genuinely_no_data_pitchers(monkeypa
     monkeypatch.setattr(E, "get_pitcher_metrics", fake_get_pitcher_metrics)
 
     rows = E.build_pitching_slate("2026-07-31")
-    assert len(rows) == 1   # only the pitcher WITH real data
-    assert rows[0]["_pid"] == 602
-    print("✓ build_pitching_slate still correctly excludes a pitcher with genuinely no data "
-         "anywhere, unchanged from before this fix")
+    assert len(rows) == 2, "both real pitchers must get a real row now, not just the one with data"
+    no_data_row = next(r for r in rows if r["_pid"] == 601)
+    real_row = next(r for r in rows if r["_pid"] == 602)
+    assert no_data_row["Pitcher"] == "No Data Guy"   # the real fetched name, not a blank
+    assert no_data_row["_has_stats"] is False
+    assert no_data_row["ERA"] is None and no_data_row["FIP"] is None and no_data_row["Delta"] is None
+    assert real_row["_has_stats"] is True
+    assert real_row["ERA"] == 3.50   # the pitcher WITH real data is completely unaffected
+    print("✓ build_pitching_slate now includes a real, honest placeholder row (real name, "
+         "every stat honestly None) for a pitcher with no computable stats, instead of dropping him")
+
+
+def test_build_pitching_slate_no_data_pitcher_no_longer_drops_the_whole_game(monkeypatch):
+    # THE real, end-to-end proof this fix actually closes the loop: pair_pitching_slate_by_game
+    # (the SAME shared function Game Watch/Bullpen Watch both call) must now successfully pair
+    # this real game, not silently drop it because one side had no data.
+    fake_games = [{
+        "gamePk": 88888, "game_date": "2026-07-31T04:45:00Z",
+        "home_name": "Padres", "away_name": "Giants",
+        "home_pitcher_id": 601, "away_pitcher_id": 602,
+    }]
+
+    def fake_get_pitcher_metrics(pid, fip_constant):
+        if pid == 601:
+            return E.PitcherMetrics(id=pid, name="No Data Guy", has_stats=False)
+        return E.PitcherMetrics(id=pid, name=f"Pitcher {pid}", era=3.50, fip=3.20, k9=9.0,
+                                whip=1.10, hr9=1.0, oba=0.240, has_stats=True)
+
+    monkeypatch.setattr(E, "get_schedule", lambda date_str: fake_games)
+    monkeypatch.setattr(E, "get_pitcher_metrics", fake_get_pitcher_metrics)
+
+    rows = E.build_pitching_slate("2026-07-31")
+    games = E.pair_pitching_slate_by_game(rows)
+    assert len(games) == 1, "the real game must now pair and show, not vanish because one side had no data"
+    game = games[0]
+    assert game["home"]["_has_stats"] is False
+    assert game["away"]["_has_stats"] is True
+    print("✓ pair_pitching_slate_by_game now successfully pairs a real game even when one starter has no computable data")
+
+
+def test_build_pitching_slate_placeholder_uses_the_real_tbd_default_when_no_starter_announced(monkeypatch):
+    # The OTHER real gap this same fix covers: pm.id is None (no probable starter announced for
+    # this side at all yet) -- pm.name honestly defaults to "TBD" (PitcherMetrics' own real
+    # default), never a blank or a crash.
+    fake_games = [{
+        "gamePk": 88889, "game_date": "2026-07-31T04:45:00Z",
+        "home_name": "Padres", "away_name": "Giants",
+        "home_pitcher_id": None, "away_pitcher_id": 602,
+    }]
+
+    def fake_get_pitcher_metrics(pid, fip_constant):
+        if pid is None:
+            return E.PitcherMetrics(id=None)   # the real, honest "no probable starter yet" case
+        return E.PitcherMetrics(id=pid, name=f"Pitcher {pid}", era=3.50, fip=3.20, k9=9.0,
+                                whip=1.10, hr9=1.0, oba=0.240, has_stats=True)
+
+    monkeypatch.setattr(E, "get_schedule", lambda date_str: fake_games)
+    monkeypatch.setattr(E, "get_pitcher_metrics", fake_get_pitcher_metrics)
+
+    rows = E.build_pitching_slate("2026-07-31")
+    tbd_row = next(r for r in rows if r["_pid"] is None)
+    assert tbd_row["Pitcher"] == "TBD"
+    assert tbd_row["_has_stats"] is False
+    print("✓ build_pitching_slate honestly shows TBD (not a crash or blank) when no probable starter has been announced yet")
 
 
 def test_build_pitching_slate_threads_gamepk_and_venue_id_through(monkeypatch):

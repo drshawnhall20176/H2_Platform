@@ -621,19 +621,35 @@ def build_pitching_slate(date_str: str, fip_constant: float = FIP_CONSTANT_DEFAU
     rows = []
     for pm, team, opp, label, gd, team_id, opp_id, game_pk, venue_id, is_home in results:
         if pm.id is None or not pm.has_stats:
-            # A REAL, CONFIRMED FIX, not a style change: this used to check pm.era == 0, using a
-            # zero ERA as a proxy for "no real data found." But a real pitcher with a genuinely
-            # real, legitimate 0.00 ERA -- a rookie or recent call-up who's thrown a handful of
-            # scoreless innings, a real and not-even-rare situation -- has has_stats=True and a
-            # real stat line, yet was being silently treated the same as a pitcher with NO data
-            # at all. The visible effect: that pitcher's row vanished, and since Game Watch pairs
-            # home/away pitchers into one game, losing either side's row took the ENTIRE game off
-            # the board -- not a cosmetic gap, a real game a person could no longer see or bet on
-            # simply going missing. get_pitcher_metrics already computes has_stats specifically
-            # to make this distinction (see its own docstring/comment: "flag it so the UI shows
-            # 'no data', not a fake-elite 0.00") -- this now actually uses that real signal
-            # instead of the fragile era==0 proxy that quietly broke the exact case it was
-            # trying to protect against.
+            # A REAL, CONFIRMED FIX, not the original design: this used to `continue` (skip this
+            # row entirely) here, and since Game Watch/Bullpen Watch pair home/away pitchers into
+            # one game, losing either side's row took the ENTIRE game off the board -- confirmed
+            # directly against a real, live case: Cody Bradford's actual 2026 season debut
+            # (reinstated from a 60-day IL stint after nearly two years out, so genuinely had no
+            # real 2025 OR 2026 stat line for get_pitcher_metrics to find) correctly triggered
+            # has_stats=False, and the whole real Rangers @ Giants game vanished, even though the
+            # OPPOSING starter (Whisenhunt) had perfectly real, computable data the whole time.
+            #
+            # Now a REAL, HONEST PLACEHOLDER ROW instead: real Pitcher/Team/Opponent/Game context
+            # (pm.name is the real fetched name when the API found the person but no stat line --
+            # Bradford's own real case -- and the real "TBD" default only when no probable
+            # starter has been announced for this side at all), every real stat field honestly
+            # None rather than fabricated -- the SAME has_stats-aware None/NaN convention already
+            # established elsewhere in this file (see "Opp HR/9" below). pair_pitching_slate_by_
+            # game only ever pairs a game when BOTH sides have a real row -- previously a has_
+            # stats=False pitcher meant NO row at all for that side, so pairing silently failed;
+            # now both sides always get a real row, so the real game shows, with an honest gap on
+            # whichever one side genuinely has nothing to report, not the whole matchup vanishing.
+            rows.append({
+                "Pitcher": pm.name, "_pid": pm.id, "Team": team, "Opponent": opp, "Game": label,
+                "Hand": pm.hand, "_game_date": gd, "_team_id": team_id, "_opp_id": opp_id,
+                "_is_home": is_home,
+                "_is_day_game": ((_eastern_hour(gd) or 24) < 17) if gd else None,
+                "_gamePk": game_pk, "_venue_id": venue_id,
+                "ERA": None, "FIP": None, "Delta": None,
+                "K/9": None, "WHIP": None, "HR/9": None, "OBA": None,
+                "_has_stats": False,
+            })
             continue
         rows.append({
             "Pitcher": pm.name, "_pid": pm.id, "Team": team, "Opponent": opp, "Game": label,
@@ -643,6 +659,7 @@ def build_pitching_slate(date_str: str, fip_constant: float = FIP_CONSTANT_DEFAU
             "_gamePk": game_pk, "_venue_id": venue_id,
             "ERA": round(pm.era, 2), "FIP": pm.fip, "Delta": round(pm.era - pm.fip, 2),
             "K/9": round(pm.k9, 1), "WHIP": round(pm.whip, 2), "HR/9": round(pm.hr9, 2), "OBA": pm.oba,
+            "_has_stats": True,
         })
     if rows and not any(r["_game_date"] for r in rows):
         # Every row has real pitcher data (ERA/FIP etc. all populated, or they'd have been
@@ -667,8 +684,15 @@ def pair_pitching_slate_by_game(pitching_rows: List[Dict]) -> List[Dict]:
     format.
 
     Returns a list of {"label", "_game_date", "away": row, "home": row} -- ONLY for games where
-    BOTH sides paired successfully (a row with no matching partner, e.g. from a data gap, is
-    silently dropped rather than shown as a half-built game)."""
+    BOTH sides paired successfully. A REAL, CONFIRMED CHANGE in what that actually excludes now:
+    build_pitching_slate itself used to drop a pitcher's row entirely when he had no real
+    computable stats (has_stats=False), so a genuine data gap on either side meant the whole game
+    silently failed to pair here too. build_pitching_slate now returns a real, honest placeholder
+    row (has_stats=False, every stat field None) instead of dropping it -- so both sides almost
+    always have SOME real row now, and this function's own pairing succeeds for real games that
+    used to vanish here. The "no matching partner" case this function's own filter still guards
+    against is now a genuinely rarer, different one -- a row whose own Game label truly has no
+    counterpart at all (a real data-shape anomaly, not an ordinary has_stats gap)."""
     games_map: Dict[str, Dict] = {}
     for r in pitching_rows:
         label = r["Game"]

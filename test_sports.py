@@ -128,6 +128,21 @@ def test_home_falls_forward_to_next_scheduled_date_when_today_is_empty():
     print("✓ Home.py genuinely falls forward to the next real scheduled date when today is a real, legitimate off-day")
 
 
+def test_game_watch_explains_a_real_no_data_pitcher_instead_of_bare_dashes():
+    # ADDED DIRECTLY ON REQUEST: a real, confirmed case (Cody Bradford's actual 2026 season
+    # debut, reinstated from a 60-day IL stint after nearly two years out) used to make the
+    # whole real game vanish from Game Watch entirely. Fixed at the source (mlb_engine.
+    # build_pitching_slate now includes an honest placeholder row instead of dropping it) --
+    # this confirms Game Watch's own real caption explaining WHY a side shows dashes is
+    # actually wired in, not just the underlying data fix landing silently.
+    src = (_HERE / "views" / "6_Game_Watch.py").read_text()
+    assert 'if not side_row.get("_has_stats", True):' in src, (
+        "Game Watch must actually check the real _has_stats flag per side")
+    assert "computable stat line yet" in src, (
+        "a no-data pitcher must get a real, honest explanation, not just unexplained dashes")
+    print("✓ Game Watch explains a real no-data pitcher's side directly, rather than leaving bare unexplained dashes")
+
+
 def test_every_view_file_has_a_matching_meta_entry():
     # Regression guard for a real, reported bug: a new page (24_Highlights.py) was added to
     # views/ without a matching entry in streamlit_app.py's meta dict, so it silently fell back
