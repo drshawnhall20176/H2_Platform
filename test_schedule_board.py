@@ -10,10 +10,13 @@ fixture-based convention every other test file in this project already uses.
 """
 
 from datetime import datetime
+from unittest.mock import patch
 
 import pytz
 
 import schedule_board as SB
+import nfl_engine
+import mlb_engine
 
 _ET = pytz.timezone("US/Eastern")
 
@@ -283,6 +286,61 @@ def test_ncaaf_games_status_uses_real_completed_field(monkeypatch):
     assert by_home["Georgia"]["status"] == "finished"
     assert by_home["Ohio State"]["status"] == "scheduled"
     print("✓ NCAAF games use CFBD's own real 'completed' field for status, not a guess")
+
+
+# ----------------------------------------------------------------- next_scheduled_date
+def test_next_scheduled_date_nfl_scans_the_already_fetched_full_season():
+    fake_schedule = [
+        {"game_date": "2026-08-06", "home_team": "ARI", "away_team": "CAR"},
+        {"game_date": "2026-08-13", "home_team": "CIN", "away_team": "DET"},
+        {"game_date": "2026-08-13", "home_team": "PIT", "away_team": "GB"},
+    ]
+    with patch.object(nfl_engine, "_infer_season", return_value=2026), \
+         patch.object(nfl_engine, "get_schedule", return_value=fake_schedule):
+        result = SB.next_scheduled_date("NFL", "2026-08-05")
+    assert result == "2026-08-06"
+    print("✓ next_scheduled_date correctly finds the real next NFL date from the already-fetched season")
+
+
+def test_next_scheduled_date_nfl_none_when_nothing_real_is_later_in_the_loaded_season():
+    fake_schedule = [{"game_date": "2026-08-01", "home_team": "ARI", "away_team": "CAR"}]
+    with patch.object(nfl_engine, "_infer_season", return_value=2026), \
+         patch.object(nfl_engine, "get_schedule", return_value=fake_schedule):
+        result = SB.next_scheduled_date("NFL", "2026-08-05")
+    assert result is None
+    print("✓ next_scheduled_date honestly returns None when nothing real is later in the currently loaded season")
+
+
+def test_next_scheduled_date_mlb_scans_day_by_day_using_the_raw_lightweight_fetch():
+    calls = []
+    def fake_get_schedule(date_str):
+        calls.append(date_str)
+        return [{"game_id": 1}] if date_str == "2026-08-08" else []
+    with patch.object(mlb_engine, "get_schedule", side_effect=fake_get_schedule):
+        result = SB.next_scheduled_date("MLB", "2026-08-05")
+    assert result == "2026-08-08"
+    assert calls == ["2026-08-06", "2026-08-07", "2026-08-08"], (
+        f"expected a real day-by-day scan stopping at the first real hit, got {calls}")
+    print("✓ next_scheduled_date scans MLB day by day using the raw, lightweight get_schedule, stopping at the first real hit")
+
+
+def test_next_scheduled_date_mlb_none_beyond_the_real_cap():
+    with patch.object(mlb_engine, "get_schedule", return_value=[]):
+        result = SB.next_scheduled_date("MLB", "2026-08-05", max_days_ahead=5)
+    assert result is None
+    print("✓ next_scheduled_date honestly gives up after max_days_ahead real days, rather than scanning forever")
+
+
+def test_next_scheduled_date_returns_none_for_unsupported_sport():
+    assert SB.next_scheduled_date("UFC", "2026-08-05") is None
+    print("✓ next_scheduled_date returns None for a sport outside SUPPORTED_SPORTS, same as todays_schedule")
+
+
+def test_next_scheduled_date_fails_soft_on_a_real_fetch_error():
+    with patch.object(mlb_engine, "get_schedule", side_effect=RuntimeError("real API down")):
+        result = SB.next_scheduled_date("MLB", "2026-08-05")
+    assert result is None
+    print("✓ next_scheduled_date fails soft (honest None) on a real fetch error, never crashes the page")
 
 
 if __name__ == "__main__":

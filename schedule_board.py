@@ -291,6 +291,65 @@ def todays_schedule(sport_key: str, date_str: str) -> Optional[Dict[str, Any]]:
     return group_games(sport_key, games)
 
 
+def next_scheduled_date(sport_key: str, date_str: str, max_days_ahead: int = 21) -> Optional[str]:
+    """ADDED DIRECTLY ON REQUEST: the next real date with at least one real scheduled game for
+    sport_key, searching forward from date_str -- meant to be called only AFTER todays_schedule
+    for that same date came back real but empty (a genuine off-day, not a fetch failure), so a
+    caller can show "no games today, but here's the next real slate" instead of a bare dead end.
+
+    TWO GENUINELY DIFFERENT REAL STRATEGIES, matching each sport's own real data shape, not one
+    uniform approach:
+      - NFL/NCAAF: get_schedule(season) already returns the WHOLE real season in one fetch (see
+        _nfl_games/_ncaaf_games_with_conference above, which already call it this way) -- scanned
+        in memory for the next real date, zero new fetches. Capped to the CURRENTLY LOADED
+        season's own real schedule -- this does not reach into a future season that hasn't
+        started yet (e.g. asking in the real off-season between one season ending and the next
+        one's own schedule being published), an honest boundary, not a gap.
+      - MLB/NBA/WNBA/NCAAMB: get_schedule(date_str) is scoped to ONE real date -- scanned day by
+        day, using each engine's own RAW get_schedule call directly (NOT _mlb_games/
+        _basketball_games, which each add real per-game enrichment -- lineup status, logos --
+        this only needs to know whether ANY real game exists that day, the cheapest possible real
+        check). Capped at max_days_ahead (default 21) real days forward -- a genuine, long
+        real off-season (WNBA/NBA between seasons) will exceed this and honestly return None
+        rather than hammering a real API once per day for months look‑ahead.
+
+    None if nothing real is found within the real search bounds above -- an honest "genuinely
+    can't tell you when, from what's loaded" rather than a guess."""
+    from datetime import datetime, timedelta
+    if sport_key not in SUPPORTED_SPORTS:
+        return None
+    try:
+        if sport_key in ("NFL", "NCAAF"):
+            import importlib
+            E = importlib.import_module("nfl_engine" if sport_key == "NFL" else "ncaaf_engine")
+            season = E._infer_season(date_str)
+            if season is None:
+                return None
+            schedule = E.get_schedule(season)
+            date_field = "game_date" if sport_key == "NFL" else "start_date"
+            future_dates = sorted({(g.get(date_field) or "")[:10] for g in schedule
+                                   if (g.get(date_field) or "")[:10] > date_str})
+            return future_dates[0] if future_dates else None
+
+        engine_name = {"MLB": "mlb_engine", "NBA": "nba_engine", "WNBA": "wnba_engine",
+                      "NCAAMB": "ncaamb_engine"}.get(sport_key)
+        if engine_name is None:
+            return None
+        import importlib
+        E = importlib.import_module(engine_name)
+        start = datetime.strptime(date_str, "%Y-%m-%d")
+        for i in range(1, max_days_ahead + 1):
+            candidate = (start + timedelta(days=i)).strftime("%Y-%m-%d")
+            if E.get_schedule(candidate):   # the raw, lightweight fetch -- no per-game enrichment
+                return candidate
+        return None
+    except Exception:
+        # Same fail-soft posture as todays_schedule itself -- a lookup failure here must never
+        # take down the page; an honest None (the caller's own "nothing found" path) is the
+        # correct degradation, not a crash.
+        return None
+
+
 def _ncaaf_games_with_conference(date_str: str) -> List[Dict[str, Any]]:
     """Same as _ncaaf_games, but stashes the home team's real conference (already on the raw
     schedule row -- see module docstring) onto each game so group_games can read it back off
