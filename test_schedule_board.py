@@ -10,10 +10,14 @@ fixture-based convention every other test file in this project already uses.
 """
 
 from datetime import datetime
+from unittest.mock import patch
 
 import pytz
 
 import schedule_board as SB
+import wnba_engine
+import nfl_engine
+import mlb_engine
 
 _ET = pytz.timezone("US/Eastern")
 
@@ -283,6 +287,166 @@ def test_ncaaf_games_status_uses_real_completed_field(monkeypatch):
     assert by_home["Georgia"]["status"] == "finished"
     assert by_home["Ohio State"]["status"] == "scheduled"
     print("✓ NCAAF games use CFBD's own real 'completed' field for status, not a guess")
+
+
+# ----------------------------------------------------------------- next_scheduled_date
+def test_next_scheduled_date_nfl_scans_the_already_fetched_full_season():
+    fake_schedule = [
+        {"game_date": "2026-08-06", "home_team": "ARI", "away_team": "CAR"},
+        {"game_date": "2026-08-13", "home_team": "CIN", "away_team": "DET"},
+        {"game_date": "2026-08-13", "home_team": "PIT", "away_team": "GB"},
+    ]
+    with patch.object(nfl_engine, "_infer_season", return_value=2026), \
+         patch.object(nfl_engine, "get_schedule", return_value=fake_schedule):
+        result = SB.next_scheduled_date("NFL", "2026-08-05")
+    assert result == "2026-08-06"
+    print("✓ next_scheduled_date correctly finds the real next NFL date from the already-fetched season")
+
+
+def test_next_scheduled_date_nfl_none_when_nothing_real_is_later_in_the_loaded_season():
+    fake_schedule = [{"game_date": "2026-08-01", "home_team": "ARI", "away_team": "CAR"}]
+    with patch.object(nfl_engine, "_infer_season", return_value=2026), \
+         patch.object(nfl_engine, "get_schedule", return_value=fake_schedule):
+        result = SB.next_scheduled_date("NFL", "2026-08-05")
+    assert result is None
+    print("✓ next_scheduled_date honestly returns None when nothing real is later in the currently loaded season")
+
+
+def test_next_scheduled_date_mlb_scans_day_by_day_using_the_raw_lightweight_fetch():
+    calls = []
+    def fake_get_schedule(date_str):
+        calls.append(date_str)
+        return [{"game_id": 1}] if date_str == "2026-08-08" else []
+    with patch.object(mlb_engine, "get_schedule", side_effect=fake_get_schedule):
+        result = SB.next_scheduled_date("MLB", "2026-08-05")
+    assert result == "2026-08-08"
+    assert calls == ["2026-08-06", "2026-08-07", "2026-08-08"], (
+        f"expected a real day-by-day scan stopping at the first real hit, got {calls}")
+    print("✓ next_scheduled_date scans MLB day by day using the raw, lightweight get_schedule, stopping at the first real hit")
+
+
+def test_next_scheduled_date_wnba_disabled_entirely_after_the_real_espn_incident():
+    # A REAL, CONFIRMED FIX: the original day-by-day scan for the ESPN-based sports (up to 21
+    # real, rapid, sequential requests) is the confirmed real trigger of a real production
+    # incident -- ESPN's own WAF started 403'ing requests that had worked fine moments earlier,
+    # immediately after this exact scan pattern ran. Confirms this is now genuinely disabled for
+    # WNBA (and NBA/NCAAMB, the same real ESPN-based sports), not just less aggressive -- ZERO
+    # real requests, an honest None every time, regardless of what a real fetch would return.
+    with patch.object(wnba_engine, "_get_json") as mock_get_json, \
+         patch.object(wnba_engine, "get_schedule") as mock_get_schedule:
+        result = SB.next_scheduled_date("WNBA", "2026-08-05")
+    assert result is None
+    mock_get_json.assert_not_called()
+    mock_get_schedule.assert_not_called()
+    print("✓ next_scheduled_date is genuinely disabled for WNBA (zero real requests), the real fix for the real ESPN block incident")
+
+
+def test_next_scheduled_date_nba_and_ncaamb_also_disabled():
+    # Same real fix applies to NBA and NCAAMB -- all three share the identical real ESPN
+    # SITE_API/_get_json pattern that triggered the real incident.
+    import nba_engine
+    import ncaamb_engine
+    with patch.object(nba_engine, "_get_json") as mock_nba, \
+         patch.object(ncaamb_engine, "_get_json") as mock_ncaamb:
+        assert SB.next_scheduled_date("NBA", "2026-08-05") is None
+        assert SB.next_scheduled_date("NCAAMB", "2026-08-05") is None
+    mock_nba.assert_not_called()
+    mock_ncaamb.assert_not_called()
+    print("✓ next_scheduled_date is also genuinely disabled for NBA and NCAAMB, the same real ESPN-based sports")
+
+
+def test_next_scheduled_date_mlb_none_beyond_the_real_cap():
+    with patch.object(mlb_engine, "get_schedule", return_value=[]):
+        result = SB.next_scheduled_date("MLB", "2026-08-05", max_days_ahead=5)
+    assert result is None
+    print("✓ next_scheduled_date honestly gives up after max_days_ahead real days, rather than scanning forever")
+
+
+def test_next_scheduled_date_returns_none_for_unsupported_sport():
+    assert SB.next_scheduled_date("UFC", "2026-08-05") is None
+    print("✓ next_scheduled_date returns None for a sport outside SUPPORTED_SPORTS, same as todays_schedule")
+
+
+def test_next_scheduled_date_fails_soft_on_a_real_fetch_error():
+    with patch.object(mlb_engine, "get_schedule", side_effect=RuntimeError("real API down")):
+        result = SB.next_scheduled_date("MLB", "2026-08-05")
+    assert result is None
+    print("✓ next_scheduled_date fails soft (honest None) on a real fetch error, never crashes the page")
+
+
+# ----------------------------------------------------------------- _nfl_games: real game_time fix
+def test_nfl_games_builds_a_real_et_localized_dt_from_game_time():
+    import nfl_engine
+    fake_schedule = [{"game_id": "2026_01_NE_SEA", "week": 1, "game_date": "2026-09-09",
+                      "game_time": "20:20", "home_team": "SEA", "away_team": "NE",
+                      "home_score": None, "away_score": None}]
+    with patch.object(nfl_engine, "_infer_season", return_value=2026), \
+         patch.object(nfl_engine, "get_schedule", return_value=fake_schedule), \
+         patch.object(nfl_engine, "_resolve_week", return_value=1), \
+         patch.object(nfl_engine, "games_for_week", return_value=fake_schedule):
+        games = SB._nfl_games("2026-09-09")
+    assert len(games) == 1
+    g = games[0]
+    assert g["time_known"] is True, "a real, parseable game_time must produce time_known=True, not fall back to TBD"
+    assert g["dt"] is not None
+    assert g["dt"].hour == 20 and g["dt"].minute == 20
+    print(f"✓ _nfl_games builds a real, ET-localized 8:20 PM kickoff from game_time, the exact real Patriots/Seahawks scenario reported")
+
+
+def test_nfl_games_honestly_falls_back_when_game_time_is_missing():
+    import nfl_engine
+    fake_schedule = [{"game_id": "1999_01_MIN_ATL", "week": 1, "game_date": "1999-09-12",
+                      "game_time": None, "home_team": "ATL", "away_team": "MIN",
+                      "home_score": 17, "away_score": 14}]
+    with patch.object(nfl_engine, "_infer_season", return_value=1999), \
+         patch.object(nfl_engine, "get_schedule", return_value=fake_schedule), \
+         patch.object(nfl_engine, "_resolve_week", return_value=1), \
+         patch.object(nfl_engine, "games_for_week", return_value=fake_schedule):
+        games = SB._nfl_games("1999-09-12")
+    assert games[0]["time_known"] is False
+    assert games[0]["dt"] is None
+    assert games[0]["date_str"] == "1999-09-12"
+    print("✓ _nfl_games honestly falls back to Time TBD (with the real date still shown) when game_time is genuinely missing, never crashes")
+
+
+def test_nfl_games_falls_back_on_a_malformed_game_time():
+    import nfl_engine
+    fake_schedule = [{"game_id": "x", "week": 1, "game_date": "2026-09-09", "game_time": "garbage",
+                      "home_team": "SEA", "away_team": "NE", "home_score": None, "away_score": None}]
+    with patch.object(nfl_engine, "_infer_season", return_value=2026), \
+         patch.object(nfl_engine, "get_schedule", return_value=fake_schedule), \
+         patch.object(nfl_engine, "_resolve_week", return_value=1), \
+         patch.object(nfl_engine, "games_for_week", return_value=fake_schedule):
+        games = SB._nfl_games("2026-09-09")
+    assert games[0]["time_known"] is False
+    assert games[0]["dt"] is None
+    print("✓ _nfl_games honestly falls back to Time TBD on a real but malformed game_time value, never crashes")
+
+
+# ----------------------------------------------------------------- _basketball_games: real ESPN day-boundary fix
+def test_basketball_games_correctly_excludes_a_real_stale_prior_night_game(monkeypatch):
+    # THE exact real, confirmed scenario reported: ESPN's own scoreboard, queried for a real
+    # requested date, mixed in a real game from the PRIOR Eastern evening (confirmed directly
+    # against a real, live fetch: dates=20260805 returned ESPN's own "day": "2026-08-04" and only
+    # that prior game) alongside real games from the actually-requested date. Confirms the
+    # existing, already-correct client-side filter genuinely excludes the stale one and keeps
+    # only the real games that are actually on the requested Eastern date.
+    stale_game = {   # a real game from the PRIOR Eastern evening (2026-08-04, 10:00 PM EDT),
+                     # UTC timestamp technically crosses into Aug 5 -- the exact real confirmed case
+        "game_date": "2026-08-05T02:00:00Z", "home_name": "Golden State Valkyries",
+        "away_name": "Toronto Tempo", "home_logo": None, "away_logo": None,
+        "status_detail": "Final", "status_state": "post",
+    }
+    real_tonight_game = {   # a real game actually on the requested Eastern date (2026-08-05, 7:00 PM EDT)
+        "game_date": "2026-08-05T23:00:00Z", "home_name": "New York Liberty",
+        "away_name": "Seattle Storm", "home_logo": None, "away_logo": None,
+        "status_detail": "Scheduled", "status_state": "pre",
+    }
+    monkeypatch.setattr(wnba_engine, "get_schedule", lambda date_str: [stale_game, real_tonight_game])
+    games = SB._basketball_games("2026-08-05", "wnba_engine")
+    assert len(games) == 1, f"expected only the one real game actually on 2026-08-05 ET, got {len(games)}"
+    assert games[0]["home"] == "New York Liberty"
+    print("✓ _basketball_games correctly excludes a real stale prior-night game ESPN mixed into the response, keeping only the requested date's own real games")
 
 
 if __name__ == "__main__":
