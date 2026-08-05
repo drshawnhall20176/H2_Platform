@@ -312,6 +312,19 @@ def test_retrospective_rank_chart_uses_a_scope_dependent_floor_and_shows_every_c
         "a bucket below its own floor must render as a genuinely distinct color, not the same blue as a real bar")
     print("✓ Retrospective's rank chart uses a real, scope-dependent floor and shows every real "
          "category always, with a genuinely distinct look for thin-but-real buckets")
+def test_retrospective_rank_chart_shows_a_real_distinct_dates_diagnostic():
+    # Added directly on request: a direct, real answer to "is this bucket thin because history
+    # is genuinely still thin, or because something's broken" -- computed from _rank_history's
+    # own real _slate_date field (already fetched, zero new queries), not a guess or a separate
+    # database call.
+    src = (Path(__file__).parent / "views" / "16_#L01f50d_Retrospective.py").read_text()
+    assert '_rank_distinct_dates = len({r.get("_slate_date")' in src, (
+        "must compute the real distinct-date count from the already-fetched history, not a new query")
+    assert "distinct real date(s) persisted" in src, "the real count must actually be shown, not just computed"
+    print("✓ Retrospective's rank chart shows a real, direct distinct-dates diagnostic, computed "
+         "from data already fetched")
+
+
 
 
 

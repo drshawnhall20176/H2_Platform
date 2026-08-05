@@ -472,6 +472,18 @@ _rank_history = GH.fetch_graded_plays(_rank_sport.key, since_date=_rank_since,
 _rank_result = R.catch_rate_by_rank(_rank_history, min_n=_rank_min_n,
                                     market=None if _rank_market == "All markets" else _rank_market)
 
+# ADDED DIRECTLY ON REQUEST: a real, direct answer to "is this thin because real history is
+# genuinely still thin, or because something's actually broken" -- computed from _rank_history
+# itself (already fetched above, zero new queries), not a guess. Every graded_plays row already
+# carries its own real _slate_date (grading_history's own real field, confirmed), so this is
+# exact, not estimated.
+_rank_distinct_dates = len({r.get("_slate_date") for r in _rank_history if r.get("_slate_date")})
+st.caption(f"📅 {_rank_distinct_dates} distinct real date(s) persisted for this sport/market/scope "
+          f"— {len(_rank_history)} real graded play(s) total. If this number looks lower than "
+          "expected, that's the real, direct answer to why a bucket is still thin (Rank 1 needs "
+          "roughly one real date per real observation) — check Retrospective's own real grading "
+          "history or the backfill script's own log for how many real dates actually persisted.")
+
 if any(b["n"] > 0 for b in _rank_result):
     # A REAL, CONFIRMED FIX, not the original design: catch_rate_by_rank now always returns all
     # 6 real buckets (see its own docstring) -- every real category renders here always, not just
