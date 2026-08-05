@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -97,52 +97,17 @@ def get_schedule(date_str: str) -> List[Dict[str, Any]]:
     lookup needed. Abbreviations (e.g. "ATL") exist alongside id/displayName in the same
     competitor "team" object ESPN already returns here — captured because get_team_injuries
     needs one (the injuries endpoint keys by abbreviation, not ESPN's numeric team id), not
-    because anything else in this module needs it yet.
-
-    A REAL, CONFIRMED FIX, not the original design: querying ESPN's own scoreboard with a single
-    exact dates=YYYYMMDD (built naively from a real Eastern-Time calendar date) does NOT reliably
-    return that real date's own games -- confirmed directly against a real, live fetch: querying
-    dates=20260805 (a real date with four real, confirmed WNBA games that evening) came back with
-    ESPN's own response labeling itself "day": "2026-08-04" and returning only the PRIOR night's
-    late game, none of the real games actually happening that Eastern evening.
-
-    A SECOND, REAL, CONFIRMED FIX ON TOP OF THAT ONE: the first attempt at fixing this used ESPN's
-    own documented dates=START-END range syntax -- confirmed directly from a real production log
-    that ESPN returns a genuine 403 Forbidden for that exact range format from this app, on every
-    single real request, not an intermittent rate-limit. Reverted to what's actually confirmed
-    safe: THREE separate real single-date queries (date_str-1, date_str, date_str+1), each using
-    the exact same dates=YYYYMMDD format that's always worked, merged and deduped by event id
-    before parsing. Real cost: 3 real requests instead of 1, but each one is individually proven
-    not to 403 -- a real, working fix beats an elegant one that gets blocked. The existing client-
-    side filter in schedule_board._basketball_games already re-derives each game's own real
-    Eastern date from its own real UTC timestamp and narrows to exactly the requested date --
-    that logic was already correct and needed no changes for either fix."""
-    all_events: List[Dict[str, Any]] = []
-    seen_ids = set()
-    any_real_response = False
-    for offset in (-1, 0, 1):
-        d = (datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=offset)).strftime("%Y%m%d")
-        data = _get_json(f"{SITE_API}/scoreboard", params={"dates": d})
-        if not data:
-            continue
-        any_real_response = True
-        for event in data.get("events", []):
-            eid = event.get("id")
-            if eid is not None and eid in seen_ids:
-                continue   # the same real game can legitimately appear in more than one of the
-                          # three real queries above -- deduped here, not double-counted
-            if eid is not None:
-                seen_ids.add(eid)
-            all_events.append(event)
-
-    if not any_real_response:
-        _diag(f"get_schedule({date_str}): all three real scoreboard fetches failed (request failed)")
+    because anything else in this module needs it yet."""
+    espn_date = date_str.replace("-", "")   # ESPN wants YYYYMMDD; we use YYYY-MM-DD everywhere else
+    data = _get_json(f"{SITE_API}/scoreboard", params={"dates": espn_date})
+    if not data:
+        _diag(f"get_schedule({date_str}): scoreboard fetch returned nothing (request failed)")
         return []
-    if not all_events:
-        _diag(f"get_schedule({date_str}): real fetches succeeded but returned zero events across all three real dates queried")
+    if "events" not in data:
+        _diag(f"get_schedule({date_str}): response had no 'events' key — keys were {list(data.keys())}")
 
     games = []
-    for event in all_events:
+    for event in data.get("events", []):
         comps = event.get("competitions") or []
         if not comps:
             continue

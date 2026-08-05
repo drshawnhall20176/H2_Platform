@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -94,47 +94,17 @@ def _get_json_cached(url: str, params: Optional[Dict] = None) -> Optional[Dict]:
 def get_schedule(date_str: str) -> List[Dict[str, Any]]:
     """Games scheduled for date_str (YYYY-MM-DD). One dict per game with both team ids/names/
     abbreviations/logos — all pulled directly from the scoreboard response, no separate team
-    lookup needed.
-
-    A REAL, CONFIRMED FIX, not the original design: same real issue confirmed directly against a
-    real, live WNBA fetch (see wnba_engine.get_schedule's own docstring for the full confirmation
-    -- both engines share the identical SITE_API scoreboard shape) -- querying ESPN's own
-    scoreboard with a single exact dates=YYYYMMDD does NOT reliably return that real Eastern
-    date's own games; ESPN's own internal day boundary for this parameter doesn't reliably align
-    with a plain Eastern calendar date.
-
-    A SECOND, REAL, CONFIRMED FIX ON TOP OF THAT ONE, same as wnba_engine.get_schedule: the first
-    attempt used ESPN's own documented dates=START-END range syntax, confirmed directly from a
-    real production log to return a genuine 403 Forbidden on every real request, not an
-    intermittent rate-limit. Reverted to THREE separate real single-date queries (date_str-1,
-    date_str, date_str+1), each using the exact dates=YYYYMMDD format that's always worked,
-    merged and deduped by event id before parsing -- see wnba_engine.get_schedule's own docstring
-    for the full real reasoning, identical here."""
-    all_events: List[Dict[str, Any]] = []
-    seen_ids = set()
-    any_real_response = False
-    for offset in (-1, 0, 1):
-        d = (datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=offset)).strftime("%Y%m%d")
-        data = _get_json(f"{SITE_API}/scoreboard", params={"dates": d})
-        if not data:
-            continue
-        any_real_response = True
-        for event in data.get("events", []):
-            eid = event.get("id")
-            if eid is not None and eid in seen_ids:
-                continue
-            if eid is not None:
-                seen_ids.add(eid)
-            all_events.append(event)
-
-    if not any_real_response:
-        _diag(f"get_schedule({date_str}): all three real scoreboard fetches failed (request failed)")
+    lookup needed."""
+    espn_date = date_str.replace("-", "")   # ESPN wants YYYYMMDD; we use YYYY-MM-DD everywhere else
+    data = _get_json(f"{SITE_API}/scoreboard", params={"dates": espn_date})
+    if not data:
+        _diag(f"get_schedule({date_str}): scoreboard fetch returned nothing (request failed)")
         return []
-    if not all_events:
-        _diag(f"get_schedule({date_str}): real fetches succeeded but returned zero events across all three real dates queried")
+    if "events" not in data:
+        _diag(f"get_schedule({date_str}): response had no 'events' key — keys were {list(data.keys())}")
 
     games = []
-    for event in all_events:
+    for event in data.get("events", []):
         comps = event.get("competitions") or []
         if not comps:
             continue
@@ -170,7 +140,7 @@ def get_schedule(date_str: str) -> List[Dict[str, Any]]:
         except (KeyError, TypeError, ValueError):
             logger.exception("NBA scoreboard event had an unexpected shape: %s", event.get("id"))
             continue
-    _diag(f"get_schedule({date_str}): {len(games)} game(s) found ({len(all_events)} raw events across 3 real queries)")
+    _diag(f"get_schedule({date_str}): {len(games)} game(s) found ({len(data.get('events', []))} raw events)")
     return games
 
 
