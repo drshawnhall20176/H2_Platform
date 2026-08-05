@@ -343,6 +343,55 @@ def test_next_scheduled_date_fails_soft_on_a_real_fetch_error():
     print("✓ next_scheduled_date fails soft (honest None) on a real fetch error, never crashes the page")
 
 
+# ----------------------------------------------------------------- _nfl_games: real game_time fix
+def test_nfl_games_builds_a_real_et_localized_dt_from_game_time():
+    import nfl_engine
+    fake_schedule = [{"game_id": "2026_01_NE_SEA", "week": 1, "game_date": "2026-09-09",
+                      "game_time": "20:20", "home_team": "SEA", "away_team": "NE",
+                      "home_score": None, "away_score": None}]
+    with patch.object(nfl_engine, "_infer_season", return_value=2026), \
+         patch.object(nfl_engine, "get_schedule", return_value=fake_schedule), \
+         patch.object(nfl_engine, "_resolve_week", return_value=1), \
+         patch.object(nfl_engine, "games_for_week", return_value=fake_schedule):
+        games = SB._nfl_games("2026-09-09")
+    assert len(games) == 1
+    g = games[0]
+    assert g["time_known"] is True, "a real, parseable game_time must produce time_known=True, not fall back to TBD"
+    assert g["dt"] is not None
+    assert g["dt"].hour == 20 and g["dt"].minute == 20
+    print(f"✓ _nfl_games builds a real, ET-localized 8:20 PM kickoff from game_time, the exact real Patriots/Seahawks scenario reported")
+
+
+def test_nfl_games_honestly_falls_back_when_game_time_is_missing():
+    import nfl_engine
+    fake_schedule = [{"game_id": "1999_01_MIN_ATL", "week": 1, "game_date": "1999-09-12",
+                      "game_time": None, "home_team": "ATL", "away_team": "MIN",
+                      "home_score": 17, "away_score": 14}]
+    with patch.object(nfl_engine, "_infer_season", return_value=1999), \
+         patch.object(nfl_engine, "get_schedule", return_value=fake_schedule), \
+         patch.object(nfl_engine, "_resolve_week", return_value=1), \
+         patch.object(nfl_engine, "games_for_week", return_value=fake_schedule):
+        games = SB._nfl_games("1999-09-12")
+    assert games[0]["time_known"] is False
+    assert games[0]["dt"] is None
+    assert games[0]["date_str"] == "1999-09-12"
+    print("✓ _nfl_games honestly falls back to Time TBD (with the real date still shown) when game_time is genuinely missing, never crashes")
+
+
+def test_nfl_games_falls_back_on_a_malformed_game_time():
+    import nfl_engine
+    fake_schedule = [{"game_id": "x", "week": 1, "game_date": "2026-09-09", "game_time": "garbage",
+                      "home_team": "SEA", "away_team": "NE", "home_score": None, "away_score": None}]
+    with patch.object(nfl_engine, "_infer_season", return_value=2026), \
+         patch.object(nfl_engine, "get_schedule", return_value=fake_schedule), \
+         patch.object(nfl_engine, "_resolve_week", return_value=1), \
+         patch.object(nfl_engine, "games_for_week", return_value=fake_schedule):
+        games = SB._nfl_games("2026-09-09")
+    assert games[0]["time_known"] is False
+    assert games[0]["dt"] is None
+    print("✓ _nfl_games honestly falls back to Time TBD on a real but malformed game_time value, never crashes")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
