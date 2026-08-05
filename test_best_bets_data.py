@@ -13,11 +13,27 @@ No network required.
 """
 
 import inspect
+import os
+import tempfile
 from unittest.mock import patch
 
 import best_bets_data as BBD
 import mlb_engine as E
 import projections as P
+import calibration_corrections as CC
+import player_calibration_corrections as PCC
+
+# Same real test-isolation fix already applied to test_projections.py -- build_mlb_board calls
+# P.build_best_bets internally, which looks up real calibration corrections via CC.latest_fit /
+# PCC.latest_fits_for_sport, resolving to their own module-level DB_PATH when no explicit db_path
+# is passed. At least one test below calls the real, unmocked build_mlb_board (expecting it to
+# fail on a later, genuinely-unmocked network call) -- confirmed directly: it reaches far enough
+# into the real pipeline to create real stray files under this repo's own data/ directory before
+# failing. Redirected here, once, for the whole test session, so running this file never touches
+# a real file under data/ as a side effect. See test_projections.py's own comment for the full
+# reasoning.
+CC.DB_PATH = os.path.join(tempfile.gettempdir(), "h2_test_calibration_corrections_bbd.db")
+PCC.DB_PATH = os.path.join(tempfile.gettempdir(), "h2_test_player_calibration_corrections_bbd.db")
 
 
 def test_module_imports_mlb_modules_directly_not_via_sport_dispatch():

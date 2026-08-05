@@ -33,6 +33,7 @@ import numpy as np
 from grading import GRADE_THRESHOLDS, conviction_to_grade, organize_graded_picks, grade_accuracy_by_letter  # noqa: F401
 import retro as R
 import calibration_corrections as CC
+import player_calibration_corrections as PCC
  
 # ---- per-PA outcome model --------------------------------------------------
 OUTCOMES = ["out_play", "k", "bb", "single", "double", "triple", "hr"]
@@ -2717,6 +2718,19 @@ def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict],
     # own as real graded history accumulates, with no further code change required here.
     _corrections = {m: CC.latest_fit("MLB", m) for m in BEST_BET_REF}
 
+    # A REAL, SECOND, STACKED correction layer, added directly on request -- per PLAYER, not per
+    # market, reaching a real, specific pattern (a hitter who's genuinely been a real "HR or bust"
+    # read over their own last 20+ real settled plays, surfacing as a top play far more
+    # consistently than that real pattern justifies) the market-wide correction above can't
+    # reach, since it corrects every player in a market the same way. ONE real bulk query here
+    # (player_calibration_corrections.latest_fits_for_sport), not one query per player -- a full
+    # slate can carry hundreds of distinct real players, so this stays a single real DB round
+    # trip, not hundreds. Same genuine no-op today, on purpose, same real reason as above: with
+    # real accumulated history still thin, most players haven't cleared PLAYER_CALIBRATION_MIN_N
+    # (20) real settled plays yet, and apply_player_calibration_correction passes raw_prob
+    # straight through unchanged whenever no correction exists for that player.
+    _player_corrections = PCC.latest_fits_for_sport("MLB")
+
     # (market, probability column, line field, line-source field) -- line/source now read PER
     # ROW (each hitter's own real line, not one fixed literal for every hitter in this market).
     batter_specs = [
@@ -2746,6 +2760,7 @@ def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict],
             line_source = r.get(source_field, "default")
             side, sp, ref_s = _favored_side(p, BEST_BET_REF[market])
             sp = R.apply_calibration_correction(sp, _corrections.get(market))
+            sp = R.apply_player_calibration_correction(sp, _player_corrections.get(r.get("_pid")))
             if market == "Batter HR" and side == "Under":
                 continue  # "won't homer" isn't a real play
             _price, _price_source, _price_book = _real_price_or_fair(
@@ -2812,6 +2827,7 @@ def build_best_bets(hitter_rows: List[Dict], pitcher_rows: List[Dict],
             line_source = r.get(source_field, "default")
             side, sp, ref_s = _favored_side(p, BEST_BET_REF[market])
             sp = R.apply_calibration_correction(sp, _corrections.get(market))
+            sp = R.apply_player_calibration_correction(sp, _player_corrections.get(r.get("_pid")))
             _price, _price_source, _price_book = _real_price_or_fair(
                 offers, r["Pitcher"], market, side, sp, preferred_book)
             _ref, _ref_source = _real_reference_or_typical(

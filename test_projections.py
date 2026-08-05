@@ -12,6 +12,7 @@ import pytest
 import projections as P
 import mlb_engine as E
 import calibration_corrections as CC
+import player_calibration_corrections as PCC
 
 # build_best_bets now looks up a real calibration correction per market (see projections.py's
 # own comment at its call site) via CC.latest_fit, which resolves to CC.DB_PATH when no explicit
@@ -22,6 +23,9 @@ import calibration_corrections as CC
 # path either, always an explicit temp db_path) -- so running this test file never creates or
 # touches a real file under this repo's own data/ directory as a side effect.
 CC.DB_PATH = os.path.join(tempfile.gettempdir(), "h2_test_calibration_corrections.db")
+# Same real reason, same real isolation, for the player-level correction layer added alongside
+# it -- PCC.latest_fits_for_sport is now ALSO called unconditionally inside build_best_bets.
+PCC.DB_PATH = os.path.join(tempfile.gettempdir(), "h2_test_player_calibration_corrections.db")
 
 
 def _slugger():
@@ -1201,10 +1205,11 @@ def test_build_best_bets_ranks_and_reasons():
 
 
 # ----------------------------------------------------------------- calibration correction wiring
-def _hitter_row_for_hr(hr_pct=0.30):
+def _hitter_row_for_hr(hr_pct=0.30, pid=777):
     return dict(Hitter="Slugger", Team="A", GameLabel="A @ B", Hand="L",
                **{"Opp Hand": "R", "Opp Pitcher": "Ace"}, Advantage="Advantage",
-               _weather_hr=1.0, Due=0.0, **{"HR%": hr_pct, "TB1.5%": 0.49, "Hit%": 0.70, "SO Prob": 0.55})
+               _weather_hr=1.0, Due=0.0, _pid=pid,
+               **{"HR%": hr_pct, "TB1.5%": 0.49, "Hit%": 0.70, "SO Prob": 0.55})
 
 
 def test_build_best_bets_applies_a_real_stored_calibration_correction():
@@ -1271,6 +1276,89 @@ def test_build_best_bets_is_a_real_no_op_when_no_correction_exists():
     hr_play = next(p for p in plays if p["Market"] == "Batter HR")
     assert hr_play["ModelProb"] == 0.30   # untouched -- exactly the raw HR%, no correction applied
     print("✓ build_best_bets is a genuine no-op when no real correction has been fit for a market yet")
+
+
+def _player_fit(n=25, weight=0.556, raw_gap=0.10, shrunk_gap=0.056):
+    return {"player": "Slugger", "n": n, "weight": weight, "raw_gap": raw_gap, "shrunk_gap": shrunk_gap}
+
+
+def test_build_best_bets_applies_a_real_stored_player_level_correction():
+    # THE actual proof this second, stacked layer closes the loop too -- a real, recorded
+    # player-specific correction (keyed to _pid=777, matching _hitter_row_for_hr's own default)
+    # must show up in the real ModelProb of a real generated play for THAT SPECIFIC PLAYER.
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "pcc.db")
+        orig_path = PCC.DB_PATH
+        PCC.DB_PATH = db
+        try:
+            PCC.record_fit("MLB", 777, _player_fit(shrunk_gap=0.056), min_n_used=20, db_path=db)
+            plays = P.build_best_bets([_hitter_row_for_hr(hr_pct=0.30, pid=777)], [])
+        finally:
+            PCC.DB_PATH = orig_path
+
+    hr_play = next(p for p in plays if p["Market"] == "Batter HR")
+    assert abs(hr_play["ModelProb"] - (0.30 - 0.056)) < 1e-9, (
+        f"raw HR% was 0.30, a real -0.056 shrunk_gap correction is stored for this exact player -- "
+        f"expected ModelProb {0.30 - 0.056}, got {hr_play['ModelProb']}")
+    print("✓ build_best_bets applies a real, stored PLAYER-LEVEL calibration correction to that exact player's generated play")
+
+
+def test_build_best_bets_player_level_correction_only_affects_that_one_player():
+    # Real proof this is genuinely player-specific, not accidentally applied platform-wide --
+    # a DIFFERENT player (_pid=888) with no real correction on file must be completely untouched.
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "pcc.db")
+        orig_path = PCC.DB_PATH
+        PCC.DB_PATH = db
+        try:
+            PCC.record_fit("MLB", 777, _player_fit(shrunk_gap=0.056), min_n_used=20, db_path=db)
+            plays = P.build_best_bets([_hitter_row_for_hr(hr_pct=0.30, pid=888)], [])   # a DIFFERENT real player
+        finally:
+            PCC.DB_PATH = orig_path
+
+    hr_play = next(p for p in plays if p["Market"] == "Batter HR")
+    assert hr_play["ModelProb"] == 0.30, "a correction fit for a different real player must never leak onto this one"
+    print("✓ a player-level correction fit for one real player has zero effect on a different one")
+
+
+def test_build_best_bets_stacks_market_and_player_level_corrections_together():
+    # THE real point of a SECOND, STACKED layer: both real corrections must apply together, in
+    # order (market-level first, then player-level on top of the already-corrected number) --
+    # not one silently overriding or skipping the other.
+    with tempfile.TemporaryDirectory() as tmp:
+        cc_db = os.path.join(tmp, "cc.db")
+        pcc_db = os.path.join(tmp, "pcc.db")
+        orig_cc, orig_pcc = CC.DB_PATH, PCC.DB_PATH
+        CC.DB_PATH, PCC.DB_PATH = cc_db, pcc_db
+        try:
+            market_fit = {"slope": 1.0, "intercept": 0.05, "raw_slope": 1.0, "raw_intercept": 0.05,
+                         "n": 250, "weight": 0.71}
+            CC.record_fit("MLB", "Batter HR", market_fit, min_n_used=100, db_path=cc_db)
+            PCC.record_fit("MLB", 777, _player_fit(shrunk_gap=0.02), min_n_used=20, db_path=pcc_db)
+            plays = P.build_best_bets([_hitter_row_for_hr(hr_pct=0.30, pid=777)], [])
+        finally:
+            CC.DB_PATH, PCC.DB_PATH = orig_cc, orig_pcc
+
+    hr_play = next(p for p in plays if p["Market"] == "Batter HR")
+    # raw 0.30 -> market-level +0.05 (slope=1.0, intercept=0.05) -> 0.35 -> player-level -0.02 -> 0.33
+    assert abs(hr_play["ModelProb"] - 0.33) < 1e-9, (
+        f"expected both real corrections to stack (0.30 + 0.05 - 0.02 = 0.33), got {hr_play['ModelProb']}")
+    print(f"✓ market-level and player-level corrections genuinely stack together in order, not one overriding the other (final: {hr_play['ModelProb']})")
+
+
+def test_build_best_bets_player_level_is_a_real_no_op_when_no_correction_exists():
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "pcc.db")   # a real, empty temp DB -- no fit ever recorded
+        orig_path = PCC.DB_PATH
+        PCC.DB_PATH = db
+        try:
+            plays = P.build_best_bets([_hitter_row_for_hr(hr_pct=0.30, pid=777)], [])
+        finally:
+            PCC.DB_PATH = orig_path
+
+    hr_play = next(p for p in plays if p["Market"] == "Batter HR")
+    assert hr_play["ModelProb"] == 0.30
+    print("✓ build_best_bets is a genuine no-op for the player-level layer when no real correction has been fit yet")
 
 
 def test_build_best_bets_includes_new_markets():

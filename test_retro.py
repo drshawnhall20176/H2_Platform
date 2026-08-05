@@ -210,6 +210,86 @@ def test_player_calibration_excludes_plays_missing_player_id():
 def test_player_calibration_empty_input_returns_empty_list():
     assert R.player_calibration([]) == []
 
+# ----------------------------------------------------------------- fit_player_calibration / apply_player_calibration_correction
+def test_fit_player_calibration_below_min_n_excludes_the_player():
+    plays = [_graded("Thin Sample Guy", 1, 0.5, i % 2 == 0) for i in range(10)]   # 10 < PLAYER_CALIBRATION_MIN_N (20)
+    result = R.fit_player_calibration(plays)
+    assert 1 not in result
+    print("✓ fit_player_calibration excludes a player with fewer than 20 real settled plays entirely")
+
+
+def test_fit_player_calibration_recovers_a_known_injected_bias():
+    # Real, exact, hand-verifiable construction: a player the model rates at 0.55 average, but
+    # who has genuinely only hit 8 of 20 real times (0.40 actual) -- a real, deliberate +0.15 gap
+    # (the model has been overrating him), at exactly the real floor (n=20, weight=0.5).
+    plays = [_graded("Schwarber-like Guy", 99, 0.55, i < 8) for i in range(20)]
+    result = R.fit_player_calibration(plays)
+    rec = result[99]
+    assert rec["n"] == 20
+    assert abs(rec["raw_gap"] - 0.15) < 1e-9   # 0.55 - 0.40 = 0.15, exact
+    assert abs(rec["weight"] - 0.5) < 1e-9     # exactly at the floor -> half strength, same real structure as market-level
+    assert abs(rec["shrunk_gap"] - 0.075) < 1e-9   # 0.15 * 0.5
+    print(f"✓ fit_player_calibration recovers a real, exact +0.15 gap for an overrated player at exactly the floor (shrunk to {rec['shrunk_gap']})")
+
+
+def test_fit_player_calibration_negative_gap_for_an_underrated_player():
+    # The mirror image: a player the model rates at 0.30 average, who's actually hit 18 of 20
+    # real times (0.90 actual) -- a real, deliberate -0.60 gap (the model has been underrating him).
+    plays = [_graded("Underrated Guy", 42, 0.30, i < 18) for i in range(20)]
+    result = R.fit_player_calibration(plays)
+    rec = result[42]
+    assert abs(rec["raw_gap"] - (-0.60)) < 1e-9
+    assert rec["shrunk_gap"] < 0, "an underrated player must show a real negative shrunk_gap"
+    print("✓ fit_player_calibration correctly shows a real negative gap for a player the model has been underrating")
+
+
+def test_fit_player_calibration_shrinks_more_at_a_higher_real_n():
+    # Real, direct proof of the shrinkage structure itself: the SAME real +0.15 gap, but at a
+    # much larger real n, must apply at MORE of its own real strength, not the same 50% every time.
+    thin = [_graded("Same Player", 7, 0.55, i < 8) for i in range(20)]     # n=20 -> weight=0.5
+    thick = [_graded("Same Player", 7, 0.55, i < 40) for i in range(100)]  # n=100 -> weight=100/120=0.833
+    thin_rec = R.fit_player_calibration(thin)[7]
+    thick_rec = R.fit_player_calibration(thick)[7]
+    assert thick_rec["weight"] > thin_rec["weight"]
+    assert abs(thick_rec["weight"] - round(100 / 120, 3)) < 1e-9   # weight is rounded to 3 decimals by the function itself
+    print(f"✓ fit_player_calibration applies more of its own real strength as real n grows (n=20: {thin_rec['weight']}, n=100: {thick_rec['weight']})")
+
+
+def test_fit_player_calibration_pools_across_markets_for_one_player():
+    # Same real pooling player_calibration itself already does -- one player's own real gap
+    # spans every market they've been graded in, not computed separately per market.
+    plays = ([_graded("Multi-Market Guy", 5, 0.6, True, market="Batter HR") for _ in range(10)] +
+            [_graded("Multi-Market Guy", 5, 0.6, False, market="Batter Total Hits") for _ in range(10)])
+    result = R.fit_player_calibration(plays)
+    assert result[5]["n"] == 20   # both markets' real plays pooled into one real player-level count
+    print("✓ fit_player_calibration pools a player's real plays across every market, same as player_calibration itself")
+
+
+def test_apply_player_calibration_correction_passthrough_when_none():
+    assert R.apply_player_calibration_correction(0.45, None) == 0.45
+    print("✓ apply_player_calibration_correction passes raw_prob straight through when no real player-specific correction exists yet")
+
+
+def test_apply_player_calibration_correction_subtracts_a_positive_gap():
+    correction = {"player": "X", "n": 20, "weight": 0.5, "raw_gap": 0.15, "shrunk_gap": 0.075}
+    result = R.apply_player_calibration_correction(0.55, correction)
+    assert abs(result - 0.475) < 1e-9   # 0.55 - 0.075
+    print("✓ apply_player_calibration_correction correctly subtracts a real positive (overrated) gap, pulling the number down")
+
+
+def test_apply_player_calibration_correction_adds_a_negative_gap():
+    correction = {"player": "Y", "n": 20, "weight": 0.5, "raw_gap": -0.30, "shrunk_gap": -0.15}
+    result = R.apply_player_calibration_correction(0.30, correction)
+    assert abs(result - 0.45) < 1e-9   # 0.30 - (-0.15) = 0.45
+    print("✓ apply_player_calibration_correction correctly adds when the real gap is negative (underrated), pushing the number up")
+
+
+def test_apply_player_calibration_correction_clamps_to_the_real_valid_range():
+    extreme = {"player": "Z", "n": 20, "weight": 1.0, "raw_gap": 0.9, "shrunk_gap": 0.9}
+    assert R.apply_player_calibration_correction(0.10, extreme) >= 0.01   # would otherwise go negative
+    print("✓ apply_player_calibration_correction clamps to [0.01, 0.99], same real floor/ceiling as every other probability")
+
+
 
 # ----------------------------------------------------------------- fit_market_calibration / apply_calibration_correction
 def test_fit_market_calibration_below_min_n_returns_none():

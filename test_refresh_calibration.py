@@ -14,6 +14,7 @@ import tempfile
 
 import grading_history as GH
 import calibration_corrections as CC
+import player_calibration_corrections as PCC
 import refresh_calibration as RC
 
 
@@ -106,6 +107,86 @@ def test_refresh_market_different_markets_are_independent():
         finally:
             GH.DB_PATH, CC.DB_PATH = orig_gh, orig_cc
     print("✓ refresh_market evaluates each market independently — one clearing the floor doesn't affect another")
+
+
+def test_refresh_players_records_a_real_fit_when_enough_evidence_exists():
+    with tempfile.TemporaryDirectory() as tmp:
+        gh_db = os.path.join(tmp, "gh.db")
+        pcc_db = os.path.join(tmp, "pcc.db")
+        orig_gh, orig_pcc = GH.DB_PATH, PCC.DB_PATH
+        GH.DB_PATH, PCC.DB_PATH = gh_db, pcc_db
+        try:
+            # 25 real settled plays for one player (>= PLAYER_CALIBRATION_MIN_N=20) -- a real,
+            # deliberate gap: model avg 0.55, actual hit rate 8/25=0.32.
+            plays = [_play(player="Schwarber-like Guy", player_id=42, model_prob=0.55,
+                          hit=(i < 8)) for i in range(25)]
+            GH.record_graded_slate("2026-07-18", "MLB", plays, db_path=gh_db)
+
+            fits = RC.refresh_players("MLB")
+            assert 42 in fits
+            assert fits[42]["n"] == 25
+
+            recorded = PCC.latest_fit("MLB", 42, db_path=pcc_db)
+            assert recorded is not None
+            assert recorded["player"] == "Schwarber-like Guy"
+        finally:
+            GH.DB_PATH, PCC.DB_PATH = orig_gh, orig_pcc
+    print("✓ refresh_players fetches real accumulated history, fits a real player-level correction, and records it")
+
+
+def test_refresh_players_returns_empty_and_records_nothing_below_the_floor():
+    with tempfile.TemporaryDirectory() as tmp:
+        gh_db = os.path.join(tmp, "gh.db")
+        pcc_db = os.path.join(tmp, "pcc.db")
+        orig_gh, orig_pcc = GH.DB_PATH, PCC.DB_PATH
+        GH.DB_PATH, PCC.DB_PATH = gh_db, pcc_db
+        try:
+            plays = [_play(player_id=42, model_prob=0.5, hit=(i % 2 == 0)) for i in range(10)]   # < 20
+            GH.record_graded_slate("2026-07-18", "MLB", plays, db_path=gh_db)
+
+            fits = RC.refresh_players("MLB")
+            assert fits == {}
+            assert PCC.latest_fit("MLB", 42, db_path=pcc_db) is None
+        finally:
+            GH.DB_PATH, PCC.DB_PATH = orig_gh, orig_pcc
+    print("✓ refresh_players records nothing for a player below the real min-n floor")
+
+
+def test_refresh_players_pools_across_markets_in_one_real_fetch():
+    # Real proof this is genuinely ONE fetch across the whole sport, not one per market --
+    # a player's plays spread across two different markets must still combine into one real fit.
+    with tempfile.TemporaryDirectory() as tmp:
+        gh_db = os.path.join(tmp, "gh.db")
+        pcc_db = os.path.join(tmp, "pcc.db")
+        orig_gh, orig_pcc = GH.DB_PATH, PCC.DB_PATH
+        GH.DB_PATH, PCC.DB_PATH = gh_db, pcc_db
+        try:
+            plays = ([_play(player_id=42, market="Batter HR", model_prob=0.5, hit=True) for _ in range(12)] +
+                    [_play(player_id=42, market="Batter Total Hits", model_prob=0.5, hit=False) for _ in range(13)])
+            GH.record_graded_slate("2026-07-18", "MLB", plays, db_path=gh_db)
+
+            fits = RC.refresh_players("MLB")
+            assert fits[42]["n"] == 25   # both markets' real plays pooled into one real player-level fit
+        finally:
+            GH.DB_PATH, PCC.DB_PATH = orig_gh, orig_pcc
+    print("✓ refresh_players pools a player's real plays across every market in one real fetch, not per-market")
+
+
+def test_refresh_players_different_sports_are_independent():
+    with tempfile.TemporaryDirectory() as tmp:
+        gh_db = os.path.join(tmp, "gh.db")
+        pcc_db = os.path.join(tmp, "pcc.db")
+        orig_gh, orig_pcc = GH.DB_PATH, PCC.DB_PATH
+        GH.DB_PATH, PCC.DB_PATH = gh_db, pcc_db
+        try:
+            mlb_plays = [_play(player_id=42, model_prob=0.5, hit=(i < 8)) for i in range(25)]
+            GH.record_graded_slate("2026-07-18", "MLB", mlb_plays, db_path=gh_db)
+
+            assert RC.refresh_players("MLB") != {}    # enough real evidence
+            assert RC.refresh_players("WNBA") == {}   # no real history for WNBA at all
+        finally:
+            GH.DB_PATH, PCC.DB_PATH = orig_gh, orig_pcc
+    print("✓ refresh_players evaluates each sport independently — real MLB history doesn't leak into WNBA")
 
 
 if __name__ == "__main__":

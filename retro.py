@@ -349,6 +349,78 @@ def player_calibration(graded_plays: List[Dict], min_plays: int = 8) -> List[Dic
     return sorted(out, key=lambda r: -r["gap"])
 
 
+# Confirmed directly with the person building this platform: 20 real settled plays before ANY
+# player-specific correction is even attempted -- deliberately lower than CALIBRATION_MIN_N=100
+# above (market-level pools EVERY player together, so 100 real plays is realistic; one specific
+# player accumulating 100 real settled plays in a season would be rare), but meaningfully higher
+# than player_calibration's own display-only min_plays=8 default (or the as-low-as-2 that page's
+# own real UI allows) -- that page is a real, deliberate EXPLORATORY tool for human judgment (its
+# own on-page caption already says so: "worth watching, not automatically acting on"), and this
+# is the opposite: a real, automatic correction reaching live predictions, which needs real,
+# proven evidence behind it, not a hot week.
+PLAYER_CALIBRATION_MIN_N = 20
+PLAYER_CALIBRATION_SHRINK_PRIOR = 20   # same real structure as CALIBRATION_SHRINK_PRIOR above --
+                                       # at exactly the floor, a correction applies at half its
+                                       # own fitted strength, not full strength immediately
+
+
+def fit_player_calibration(graded_plays: List[Dict], min_plays: int = PLAYER_CALIBRATION_MIN_N,
+                           prior: float = PLAYER_CALIBRATION_SHRINK_PRIOR) -> Dict[Any, Dict]:
+    """A real, second, STACKED correction layer -- per PLAYER, not per market -- added directly
+    on request: a real, specific example (a hitter who's genuinely been a real "HR or bust" read
+    over their last 20 real settled plays, surfacing as a top play far more consistently than
+    that real pattern justifies) that the existing market-wide correction (fit_market_calibration
+    above) can't reach, since it corrects a whole market the same way for every player in it, not
+    one specific player's own real pattern within that market.
+
+    DELIBERATELY REUSES player_calibration's OWN ALREADY-TRUSTED gap computation directly, not a
+    new regression -- a player's own real settled-play count is far too thin (20-50, not the
+    100+ fit_market_calibration needs) to reliably fit a real bucketed slope/intercept curve the
+    way the market-level correction does; a single real, shrunk gap (avg_model_prob minus actual
+    hit_rate, exactly what player_calibration already computes and displays for human review) is
+    the honest, robust version of this at real player-level sample sizes, not a weaker
+    approximation of the market-level method.
+
+    Same real shrinkage STRUCTURE as fit_market_calibration (weight = n / (n + prior)) -- at
+    exactly min_plays, a player's own real gap is applied at half its own real strength, growing
+    toward full strength only as real n grows well past the floor, the same real reason a hard
+    on/off threshold isn't used here either.
+
+    Returns {player_id: {"player", "n", "weight", "raw_gap", "shrunk_gap"}} for every player with
+    at least min_plays real settled plays -- a real, empty dict for a sport/window with no player
+    clearing that floor yet, never a guessed correction. Pooled across every market for that
+    player (player_calibration's own real pooling choice, reused here for the same real reason:
+    a real "ban list" instinct doesn't split by market either)."""
+    raw = player_calibration(graded_plays, min_plays=min_plays)
+    out: Dict[Any, Dict] = {}
+    for rec in raw:
+        n = rec["n"]
+        weight = n / (n + prior)
+        raw_gap = rec["gap"]
+        out[rec["player_id"]] = {
+            "player": rec["player"], "n": n, "weight": round(weight, 3),
+            "raw_gap": raw_gap, "shrunk_gap": round(weight * raw_gap, 4),
+        }
+    return out
+
+
+def apply_player_calibration_correction(raw_prob: Optional[float],
+                                        correction: Optional[Dict]) -> Optional[float]:
+    """Apply a fitted player-level correction (fit_player_calibration's own output) to ONE real
+    ModelProb -- meant to be applied AFTER apply_calibration_correction (the market-level layer),
+    stacked, not instead of it. correction=None (no player-specific pattern proven yet -- the
+    common case for most players, by design) is a genuine no-op, same real contract as the
+    market-level version. gap = avg_model_prob - actual_hit_rate, so a POSITIVE gap means the
+    model has been overrating this player (subtracting it pulls the number down, toward what
+    actually happened); a negative gap means the opposite. Same real [0.01, 0.99] clamp as every
+    other probability on this platform -- a correction can nudge a number, never claim a false
+    certainty the model itself never actually has."""
+    if correction is None or raw_prob is None:
+        return raw_prob
+    p = raw_prob - correction["shrunk_gap"]
+    return min(max(p, 0.01), 0.99)
+
+
 def _pearson_r(xs: List[float], ys: List[float]) -> Optional[float]:
     """Standard, textbook Pearson correlation coefficient -- hand-rolled rather than pulling in
     scipy/numpy for one formula. Returns None when either variable has zero variance (a constant

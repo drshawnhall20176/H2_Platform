@@ -31,6 +31,7 @@ import numpy as np
 
 import retro as R
 import calibration_corrections as CC
+import player_calibration_corrections as PCC
 
 from projections import (  # genuinely sport-agnostic — reused, not duplicated
     prob_over, prob_for_side, normalize_name, format_et,
@@ -282,6 +283,9 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
     # corrections.latest_fit returns None until real WNBA history clears retro.CALIBRATION_MIN_N
     # for a given market) -- starts contributing on its own as real graded history accumulates.
     _corrections = {m: CC.latest_fit("WNBA", m) for m in BEST_BET_REF}
+    # Same real, second, STACKED player-level layer as MLB's own build_best_bets -- see that
+    # function's own comment for the full reasoning. One real bulk query here, not one per player.
+    _player_corrections = PCC.latest_fits_for_sport("WNBA")
 
     for r in rows:
         log = r.get("_game_log") or []
@@ -313,6 +317,7 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
                     ref, ref_src = real_over_prob, "book"
             side, sp, ref_s = _favored_side(over, ref)
             sp = R.apply_calibration_correction(sp, _corrections.get(disp))
+            sp = R.apply_player_calibration_correction(sp, _player_corrections.get(r.get("_pid")))
 
             # Real captured price when available, the model's own theoretical Fair price
             # otherwise -- Fair itself never changes meaning, RealPrice is purely additive.
