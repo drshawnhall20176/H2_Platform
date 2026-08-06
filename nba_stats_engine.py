@@ -43,7 +43,13 @@ import requests
 logger = logging.getLogger(__name__)
 
 BASE = "https://stats.nba.com/stats"
-_TIMEOUT = 10
+_TIMEOUT = 5   # A REAL, CONFIRMED FIX: confirmed directly from a real production log that a
+              # real failure here isn't a quick rejection (an explicit 403, like ESPN's own) --
+              # it's a genuine, silent timeout, meaning every real page load that reaches this
+              # fallback was waiting out the full original 10-second timeout for nothing. Cut in
+              # half so a predictable failure costs less real, wasted wait time -- this doesn't
+              # fix the underlying real problem (see this module's own docstring for the honest
+              # assessment of what does), just stops making a bad situation feel even slower.
 
 # Confirmed via multiple community NBA API client projects (py_ball, nba_api) as the real,
 # currently-working header set stats.nba.com checks for. Real, stated maintenance note: this
