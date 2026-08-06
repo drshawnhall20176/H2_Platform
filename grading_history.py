@@ -294,6 +294,13 @@ def fetch_graded_plays(sport: str, market: Optional[str] = None, since_date: Opt
             "Hit": (True if hit == 1 else False if hit == 0 else None),
             "Actual": r.get("actual_value"),
             "Rank": r.get("rank"), "OfTotal": r.get("of_total"),
+            # ADDED DIRECTLY ON REQUEST: needed to look up which specific real game a graded
+            # play belongs to (e.g. for retro.lineup_neighbor_analysis, which needs the real
+            # boxscore for that exact date to check batting-order neighbors) -- was already
+            # stored (slate_date, confirmed in this module's own schema) but never surfaced in
+            # this function's own output before now. Purely additive; every existing caller
+            # that doesn't look at this key is completely unaffected.
+            "SlateDate": r.get("slate_date"),
             "_slate_date": r.get("slate_date"), "_graded_at": r.get("graded_at"),
         })
     return out

@@ -138,6 +138,19 @@ def test_fetch_graded_plays_oldest_first():
         print("✓ fetch_graded_plays returns rows oldest slate first, regardless of write order")
 
 
+def test_fetch_graded_plays_surfaces_slate_date():
+    # ADDED DIRECTLY ON REQUEST: SlateDate was already stored but never surfaced in this
+    # function's own output -- needed to look up which specific real game a graded play
+    # belongs to (e.g. for a real lineup-neighbor analysis, which needs that exact date's own
+    # boxscore). Confirms the real, correct date comes back, not a guess or a blank.
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "grading_history.db")
+        GH.record_graded_slate("2026-07-18", "MLB", [_play(player="A", player_id=1)], db_path=db)
+        rows = GH.fetch_graded_plays("MLB", db_path=db)
+        assert rows[0]["SlateDate"] == "2026-07-18"
+        print("✓ fetch_graded_plays now correctly surfaces SlateDate, previously stored but never exposed")
+
+
 def test_fetch_graded_plays_feeds_retro_calibration_directly():
     # THE real design goal, proven end to end, not just asserted: this module does no statistical
     # work of its own -- real accumulated history has to be usable by retro._calibration with

@@ -1855,6 +1855,103 @@ def test_get_pitcher_starts_requests_regular_season_only(monkeypatch):
     print("✓ get_pitcher_starts_this_season explicitly requests regular-season-only games")
 
 
+# ----------------------------------------------------------------- find_hitter_game_pk / get_lineup_neighbor_result
+def test_find_hitter_game_pk_matches_the_exact_date(monkeypatch):
+    fake_gamelog = {"stats": [{"splits": [
+        {"date": "2026-07-14", "game": {"gamePk": 111}},
+        {"date": "2026-07-15", "game": {"gamePk": 222}},
+    ]}]}
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None: fake_gamelog)
+    assert E.find_hitter_game_pk(501, "2026-07-15") == 222
+    print("✓ find_hitter_game_pk correctly matches the exact real date, not just the first entry")
+
+
+def test_find_hitter_game_pk_returns_none_for_a_real_off_day():
+    with_no_match = {"stats": [{"splits": [{"date": "2026-07-14", "game": {"gamePk": 111}}]}]}
+    import unittest.mock as mock
+    with mock.patch.object(E, "fetch_json", return_value=with_no_match):
+        assert E.find_hitter_game_pk(501, "2026-07-16") is None
+    print("✓ find_hitter_game_pk correctly returns None for a real date with no matching game (an honest off day)")
+
+
+def test_find_hitter_game_pk_requests_regular_season_only(monkeypatch):
+    captured = {}
+
+    def fake_fetch(url, params=None):
+        captured["params"] = params
+        return {"stats": [{"splits": []}]}
+
+    monkeypatch.setattr(E, "fetch_json", fake_fetch)
+    E.find_hitter_game_pk(501, "2026-07-14")
+    assert captured["params"]["gameType"] == "R"
+    assert captured["params"]["group"] == "hitting"
+    print("✓ find_hitter_game_pk requests hitting gameLog, regular season only")
+
+
+def _fake_neighbor_box(player_side, slot_map):
+    """slot_map: {slot_int: (pid, ab, h, 2b, 3b, hr, bb, so)}."""
+    def _players(m):
+        return {f"ID{pid}": {"person": {"id": pid}, "battingOrder": f"{slot}00",
+                             "stats": {"batting": {"atBats": ab, "hits": h, "doubles": d2,
+                                                  "triples": d3, "homeRuns": hr,
+                                                  "baseOnBalls": bb, "strikeOuts": so}}}
+               for slot, (pid, ab, h, d2, d3, hr, bb, so) in m.items()}
+    opp_side = "away" if player_side == "home" else "home"
+    return {"teams": {player_side: {"players": _players(slot_map)}, opp_side: {"players": {}}}}
+
+
+def test_get_lineup_neighbor_result_finds_both_real_neighbors(monkeypatch):
+    box = _fake_neighbor_box("home", {
+        2: (601, 4, 1, 0, 0, 0, 0, 1),    # neighbor above
+        3: (501, 4, 2, 1, 0, 0, 0, 0),    # the player himself
+        4: (701, 4, 3, 0, 0, 2, 0, 0),    # neighbor below -- a real big game
+    })
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None: box)
+    result = E.get_lineup_neighbor_result(501, game_pk=999)
+    assert result["slot"] == 3
+    assert result["own_line"]["h"] == 2.0
+    assert result["neighbor_above"]["h"] == 1.0
+    assert result["neighbor_below"]["hr"] == 2.0
+    print("✓ get_lineup_neighbor_result correctly finds the player's own real slot and both real neighbors")
+
+
+def test_get_lineup_neighbor_result_leadoff_has_no_neighbor_above():
+    box = _fake_neighbor_box("home", {
+        1: (501, 5, 1, 0, 0, 0, 0, 1),
+        2: (601, 4, 0, 0, 0, 0, 0, 2),
+    })
+    import unittest.mock as mock
+    with mock.patch.object(E, "fetch_json", return_value=box):
+        result = E.get_lineup_neighbor_result(501, game_pk=999)
+    assert result["slot"] == 1
+    assert result["neighbor_above"] is None
+    assert result["neighbor_below"] is not None
+    print("✓ get_lineup_neighbor_result correctly reports no neighbor above the real leadoff spot")
+
+
+def test_get_lineup_neighbor_result_ninth_has_no_neighbor_below():
+    box = _fake_neighbor_box("away", {
+        8: (601, 4, 1, 0, 0, 0, 0, 1),
+        9: (501, 3, 0, 0, 0, 0, 0, 2),
+    })
+    import unittest.mock as mock
+    with mock.patch.object(E, "fetch_json", return_value=box):
+        result = E.get_lineup_neighbor_result(501, game_pk=999)
+    assert result["slot"] == 9
+    assert result["neighbor_below"] is None
+    assert result["neighbor_above"] is not None
+    print("✓ get_lineup_neighbor_result correctly reports no neighbor below the real 9th spot")
+
+
+def test_get_lineup_neighbor_result_none_when_player_not_in_this_box_score():
+    box = _fake_neighbor_box("home", {1: (601, 4, 1, 0, 0, 0, 0, 1)})
+    import unittest.mock as mock
+    with mock.patch.object(E, "fetch_json", return_value=box):
+        result = E.get_lineup_neighbor_result(999999, game_pk=999)
+    assert result is None
+    print("✓ get_lineup_neighbor_result honestly returns None when the player genuinely isn't in this real box score")
+
+
 # ----------------------------------------------------------------- get_player_current_team
 def test_get_player_current_team_real_shape(monkeypatch):
     fake_response = {"people": [{"id": 123, "fullName": "Test Catcher",

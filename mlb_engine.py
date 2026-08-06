@@ -2287,6 +2287,109 @@ def get_pitcher_batting_order_splits(pitcher_id: int, season: int,
     return out
 
 
+def find_hitter_game_pk(player_id: int, date_str: str) -> Optional[int]:
+    """This hitter's own real gamePk for date_str (YYYY-MM-DD), or None if he didn't appear that
+    day (off day, injury, DFA, etc.) or the real lookup itself fails.
+
+    ADDED DIRECTLY ON REQUEST, for a real lineup-neighbor analysis: grading_history now surfaces
+    SlateDate per graded play, but not which specific game that date maps to for a given player
+    -- this closes that gap. Same real, established method as get_pitcher_starts_this_season
+    above (one call to the player's own real season gameLog, which already carries each game's
+    own real gamePk and date attached per entry) -- group="hitting" instead of "pitching",
+    filtered to an EXACT date match rather than a season-long scan, since only one specific
+    game is ever needed here. gameType="R" pinned explicitly, same real reason as the pitcher
+    version: an unpinned season can include spring training under MLB Stats API's own real
+    conventions."""
+    season = int(date_str[:4])
+    try:
+        data = fetch_json(f"{BASE}/people/{player_id}/stats",
+                          {"stats": "gameLog", "group": "hitting", "season": season, "gameType": "R"})
+    except Exception:
+        return None
+    try:
+        splits = (data.get("stats") or [{}])[0].get("splits", [])
+    except (IndexError, AttributeError):
+        return None
+    for sp in splits:
+        if sp.get("date") == date_str:
+            gp = (sp.get("game") or {}).get("gamePk")
+            return int(gp) if gp is not None else None
+    return None
+
+
+def get_lineup_neighbor_result(player_id: int, game_pk: int) -> Optional[Dict[str, Any]]:
+    """This hitter's own real batting-order slot for one specific real game, plus the real,
+    same-game stat line for whoever batted immediately above and below him in that exact
+    lineup -- the real, concrete building block a lineup-neighbor analysis needs (does batting
+    near a hitter having a big game correlate with a better result for this player himself).
+
+    ADDED DIRECTLY ON REQUEST. Reuses the exact same real boxscore-parsing shape get_pitcher_
+    batting_order_splits above already established and depends on (teams.{side}.players,
+    battingOrder as a 3-digit code parsed via int(bo)//100) -- same honest, stated caveat
+    about that exact format not being live-verified from this sandbox (see that function's own
+    docstring for the full reasoning), not a new, separate risk.
+
+    Returns {"slot": int, "own_line": {...}, "neighbor_above": {...} or None (no one batted in
+    the slot right before him, e.g. he's the real leadoff hitter), "neighbor_below": {...} or
+    None} -- each line shaped {"ab", "h", "2b", "3b", "hr", "bb", "so"}. None (the whole real
+    result, not a guess) if the player genuinely isn't found in this game's own real boxscore at
+    all (DNP, or a real fetch failure)."""
+    try:
+        box = fetch_json(f"{BASE}/game/{game_pk}/boxscore")
+    except Exception:
+        return None
+    teams = box.get("teams", {}) or {}
+
+    def _line(pdata: Dict) -> Dict[str, float]:
+        bat = (pdata.get("stats", {}) or {}).get("batting", {}) or {}
+        return {"ab": safe_float(bat.get("atBats")), "h": safe_float(bat.get("hits")),
+               "2b": safe_float(bat.get("doubles")), "3b": safe_float(bat.get("triples")),
+               "hr": safe_float(bat.get("homeRuns")), "bb": safe_float(bat.get("baseOnBalls")),
+               "so": safe_float(bat.get("strikeOuts"))}
+
+    for side in ("home", "away"):
+        players = (teams.get(side, {}) or {}).get("players", {}) or {}
+        # Real slot -> real player-data map for this ONE team's own real lineup, built once per
+        # side so neighbor slots can be looked up directly, not re-scanned per player.
+        by_slot: Dict[int, Dict] = {}
+        own_pdata = None
+        for pdata in players.values():
+            if (pdata.get("person", {}) or {}).get("id") == player_id:
+                own_pdata = pdata
+            bo = pdata.get("battingOrder")
+            if not bo:
+                continue
+            try:
+                slot = int(bo) // 100
+            except (TypeError, ValueError):
+                continue
+            if 1 <= slot <= 9 and slot not in by_slot:
+                by_slot[slot] = pdata   # first entry per real slot -- the real starter, not a
+                                       # later substitution sharing the same base slot number
+
+        if own_pdata is None:
+            continue   # not on this side -- check the other real team
+        own_bo = own_pdata.get("battingOrder")
+        if not own_bo:
+            return None   # a real bench/bullpen entry with no real lineup slot at all
+        try:
+            own_slot = int(own_bo) // 100
+        except (TypeError, ValueError):
+            return None
+        if not (1 <= own_slot <= 9):
+            return None
+
+        above = by_slot.get(own_slot - 1) if own_slot > 1 else None
+        below = by_slot.get(own_slot + 1) if own_slot < 9 else None
+        return {
+            "slot": own_slot,
+            "own_line": _line(own_pdata),
+            "neighbor_above": _line(above) if above else None,
+            "neighbor_below": _line(below) if below else None,
+        }
+    return None
+
+
 def get_player_current_team(player_id: int) -> Optional[Dict[str, Any]]:
     """A general person -> current team lookup, returning BOTH the numeric id and the display
     name — {BASE}/people/{id} with hydrate=currentTeam explicitly requested.
