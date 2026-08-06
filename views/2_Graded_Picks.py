@@ -286,6 +286,19 @@ else:
                 f"**{pl['Player']}** {pl['Market']} {pl['Side']} {pl['Line']:g} · Fair {fair_str} · {pl['Game']}",
                 unsafe_allow_html=True,
             )
+            # ADDED DIRECTLY ON REQUEST: a real, confirmed example (Leody Taveras, 47% Under
+            # 0.5 Total Hits, his own real last game a real hit AND a real HR -- his best game
+            # of the whole 10-game window) showed this exact tension is completely invisible on
+            # the one page a pick actually gets decided on. This is a pure, additive flag --
+            # ModelProb, EdgePct, and the grade itself are all completely unchanged; this only
+            # surfaces a real, honest fact that was already true, just not shown here before.
+            if _active.key == "MLB" and pl.get("PlayerId"):
+                conflict = E.recent_game_conflicts_with_pick(
+                    pl["PlayerId"], int(date_str[:4]), date_str, pl["Market"], pl["Side"], pl["Line"])
+                if conflict:
+                    st.caption(f"⚠️ {pl['Player']}'s own last real game would have gone the "
+                              f"other way on this exact line — worth a second look before "
+                              f"trusting this one on recent form alone.")
     summary_plays = [pl for entry in summary for pl in entry["picks"]]
     _real_offers = st.session_state.get(f"_real_offers_{_active.key}_{date_str}") or []
     quick_log.render_quick_log(summary_plays, date_str, _active.key, key_prefix="graded_summary",
