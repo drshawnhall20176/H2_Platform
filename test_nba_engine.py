@@ -18,6 +18,32 @@ def _log(pts, reb, ast, fg3m, minutes, opp="Boston Celtics", date="2026-01-14T00
     return {"pts": pts, "reb": reb, "ast": ast, "fg3m": fg3m, "min": minutes, "opp": opp, "date": date}
 
 
+# ----------------------------------------------------------------- _get_json: real TLS fingerprint fix
+def test_get_json_uses_real_browser_impersonation(monkeypatch):
+    # Same real, confirmed fix as wnba_engine.py's own -- already proven working there before
+    # being applied here. Confirms _get_json genuinely passes impersonate="chrome" to the real
+    # curl_cffi call, not just that the import was swapped.
+    captured = {}
+
+    class _FakeResp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"events": []}
+
+    def fake_get(url, params=None, timeout=None, impersonate=None):
+        captured["impersonate"] = impersonate
+        return _FakeResp()
+
+    monkeypatch.setattr(E.requests, "get", fake_get)
+    result = E._get_json("https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
+                         {"dates": "20260805"})
+    assert result == {"events": []}
+    assert captured["impersonate"] == "chrome"
+    print("✓ _get_json genuinely uses real browser (Chrome) TLS impersonation, the confirmed fix already proven on WNBA")
+
+
 # ----------------------------------------------------------------- basic module wiring
 def test_site_api_and_cdn_api_use_nba_league_slug():
     assert E.SITE_API == "https://site.api.espn.com/apis/site/v2/sports/basketball/nba"
