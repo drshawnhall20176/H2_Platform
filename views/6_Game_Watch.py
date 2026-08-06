@@ -357,7 +357,20 @@ for i, g in enumerate(games):
     g["_signals"] = {
         "Starter FIP": (away_row.get("FIP"), home_row.get("FIP"), starter_edge),
         "Starter xERA": (away_xera, home_xera, xera_edge),
-        "Bullpen freshness": (away_fresh, home_fresh, freshness_edge),
+        # A REAL, CONFIRMED FIX, not the original design: away_fresh/home_fresh are actually
+        # bullpen_fatigued_fraction's own real output -- the FATIGUED fraction (0=nobody tired,
+        # 1=everybody tired), not a freshness percentage. freshness_edge itself was always
+        # correct (bullpen_freshness_edge correctly treats a LOWER fatigued fraction as the
+        # fresher bullpen) -- confirmed directly against a real, reported case: LAA showing
+        # "29%" and BAL showing "56%" under a "Bullpen freshness" header, with the edge
+        # correctly going to LAA, looked exactly backwards to a real reader, because the raw
+        # FATIGUE numbers were being shown as-is under a FRESHNESS label with no inversion.
+        # Inverted here (1 - fraction) so what's actually displayed is real freshness -- higher
+        # now genuinely means fresher, matching both the label and the edge it already agreed
+        # with the whole time.
+        "Bullpen freshness": (1 - away_fresh if away_fresh is not None else None,
+                              1 - home_fresh if home_fresh is not None else None,
+                              freshness_edge),
         "Bullpen ERA": (away_bp_era, home_bp_era, quality_edge),
         "Team form (L15)": (away_form, home_form, form_edge),
         "Form in tonight's role (road/home)": (away_road_form, home_home_form, home_road_edge),
