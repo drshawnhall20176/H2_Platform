@@ -160,6 +160,24 @@ def test_graded_picks_flags_a_real_recent_form_conflict():
     print("✓ Graded Picks genuinely surfaces a real recent-form conflict on the page a pick actually gets decided on")
 
 
+def test_game_watch_bullpen_freshness_display_is_genuinely_inverted_from_fatigue():
+    # A REAL, CONFIRMED FIX for a real, reported case: LAA showing "29%" and BAL "56%" under a
+    # "Bullpen freshness" header, with the edge correctly favoring LAA -- looked exactly
+    # backwards to a real reader, because the raw FATIGUE fraction (bullpen_fatigued_fraction's
+    # own real output) was being shown as-is under a FRESHNESS label. Confirms the real
+    # inversion (1 - fraction) is genuinely wired in, and that the edge computation itself
+    # (which was ALWAYS correct) is untouched -- this is a real display fix, not a logic change.
+    src = (_HERE / "views" / "6_Game_Watch.py").read_text()
+    assert "freshness_edge = P.bullpen_freshness_edge(away_fresh, home_fresh)" in src, (
+        "the real edge computation must still use the raw, unmodified fatigue fraction -- it "
+        "was already correct and must not be touched by this fix")
+    assert ('"Bullpen freshness": (1 - away_fresh if away_fresh is not None else None,'
+           in src), (
+        "the DISPLAYED value must be genuinely inverted (1 - fraction), so higher now means "
+        "fresher, matching both the label and the edge it already agreed with")
+    print("✓ Game Watch's Bullpen freshness display now genuinely shows freshness, not the raw fatigue fraction it used to show under that label")
+
+
 def test_every_view_file_has_a_matching_meta_entry():
     # Regression guard for a real, reported bug: a new page (24_Highlights.py) was added to
     # views/ without a matching entry in streamlit_app.py's meta dict, so it silently fell back
