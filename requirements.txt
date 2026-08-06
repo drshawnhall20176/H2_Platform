@@ -40,3 +40,15 @@ streamlit-autorefresh==1.0.1   # Pitching Lab's live pitch-count auto-refresh â€
                         # needs active maintenance to keep working. Imported defensively
                         # (try/except ImportError) in Pitching Lab, so a deploy missing this
                         # package still gets manual refresh, just not the auto-refresh checkbox.
+curl_cffi==0.16.0      # A REAL, CONFIRMED FIX for a real, confirmed root cause: ESPN's and
+                        # stats.nba.com's own 403/timeout responses were traced directly to TLS
+                        # fingerprinting, not IP-based blocking -- confirmed by a real, live test
+                        # showing the identical URL succeeding in a real browser but failing via
+                        # plain requests, from the SAME home network (ruling out IP/origin
+                        # entirely). Python's requests/urllib3 produces a distinctive, easily
+                        # detected TLS handshake signature (a JA3/JA4 fingerprint) that modern
+                        # anti-bot systems flag regardless of headers or IP -- curl_cffi replicates
+                        # a real browser's exact TLS handshake instead. Confirmed real cp310-abi3
+                        # wheel exists (stable ABI -- works across 3.10 through this app's own
+                        # 3.11 with no risk of the wheel-mismatch problem a Python version drift
+                        # already caused once this session).

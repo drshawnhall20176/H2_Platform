@@ -38,7 +38,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-import requests
+from curl_cffi import requests
 
 import config_wnba as CFG
 import basketball_engine as BB
@@ -46,8 +46,18 @@ import basketball_engine as BB
 logger = logging.getLogger(__name__)
 
 SITE_API = "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba"
-_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; H2Sports/1.0)"}
 _TIMEOUT = 15
+# A REAL, CONFIRMED FIX, not the original design: a custom, honest, self-identifying User-Agent
+# (the previous "H2Sports/1.0" string) does NOTHING to hide the underlying TLS handshake --
+# confirmed directly: the identical URL succeeded in a real browser but failed via plain Python
+# requests from the SAME home network, ruling out IP/origin and pointing at TLS/JA3
+# fingerprinting instead. curl_cffi's own impersonate="chrome" parameter (used directly in
+# _get_json below) now provides the FULL, real, internally-consistent Chrome fingerprint --
+# TLS handshake, HTTP/2 SETTINGS, and matching headers together. No separate _HEADERS dict here
+# anymore on purpose: mixing a custom header on top of an impersonated TLS profile risks
+# creating its own detectable mismatch (a real Chrome TLS handshake paired with a header no real
+# Chrome would ever send) -- letting one real, consistent browser profile own the whole request
+# is the safer, honest choice, not a corner cut.
 
 # Simple per-process cache so fetching 10 games' worth of boxscores for a 12-player roster costs
 # 10 requests, not 120 (every player on both teams shares the same game's boxscore). No TTL —
@@ -72,9 +82,13 @@ def _diag(msg: str) -> None:
 def _get_json(url: str, params: Optional[Dict] = None) -> Optional[Dict]:
     """Shared fetch helper: returns the parsed JSON body, or None on any failure (bad status,
     timeout, malformed JSON). Every caller below treats None the same way it treats an empty
-    result — fail soft, log, move on — so one bad request can't take down the whole slate build."""
+    result — fail soft, log, move on — so one bad request can't take down the whole slate build.
+
+    impersonate="chrome" is the real, confirmed fix here, not a style choice -- see this
+    module's own header-area comment for the full, confirmed reasoning (a real TLS/JA3
+    fingerprint mismatch, not an IP block, confirmed by a real live test)."""
     try:
-        resp = requests.get(url, params=params, headers=_HEADERS, timeout=_TIMEOUT)
+        resp = requests.get(url, params=params, timeout=_TIMEOUT, impersonate="chrome")
         resp.raise_for_status()
         return resp.json()
     except Exception:

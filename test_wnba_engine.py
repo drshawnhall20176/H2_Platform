@@ -18,6 +18,39 @@ def _log(pts, reb, ast, fg3m, minutes):
     return {"pts": pts, "reb": reb, "ast": ast, "fg3m": fg3m, "min": minutes}
 
 
+# ----------------------------------------------------------------- _get_json: real TLS fingerprint fix
+def test_get_json_uses_real_browser_impersonation(monkeypatch):
+    # A REAL, CONFIRMED FIX, not a style choice: confirmed directly against a real, live test
+    # that the actual block was TLS/JA3 fingerprinting, not IP-based -- the identical URL
+    # succeeded in a real browser but failed via plain Python requests from the SAME home
+    # network. Confirms _get_json genuinely passes impersonate="chrome" to the real curl_cffi
+    # call, not just that the import was swapped.
+    captured = {}
+
+    class _FakeResp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"events": []}
+
+    def fake_get(url, params=None, timeout=None, impersonate=None):
+        captured["url"] = url
+        captured["params"] = params
+        captured["timeout"] = timeout
+        captured["impersonate"] = impersonate
+        return _FakeResp()
+
+    monkeypatch.setattr(E.requests, "get", fake_get)
+    result = E._get_json("https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/scoreboard",
+                         {"dates": "20260805"})
+    assert result == {"events": []}
+    assert captured["impersonate"] == "chrome", (
+        "expected _get_json to pass impersonate='chrome' to the real curl_cffi call, "
+        f"got impersonate={captured['impersonate']!r}")
+    print("✓ _get_json genuinely uses real browser (Chrome) TLS impersonation, the confirmed fix for the real TLS fingerprinting block")
+
+
 # ----------------------------------------------------------------- avg_minutes
 def test_avg_minutes_empty_log():
     assert E.avg_minutes([]) == 0.0

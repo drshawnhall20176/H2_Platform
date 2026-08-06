@@ -30,6 +30,32 @@ def _real_shaped_response():
     }
 
 
+def test_get_json_uses_real_browser_impersonation(monkeypatch):
+    # Same real, confirmed fix as wnba_engine.py's own -- see that module's header-area comment
+    # for the full reasoning. Confirms _get_json genuinely passes impersonate="chrome" here too.
+    captured = {}
+
+    class _FakeResp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"resultSets": []}
+
+    def fake_get(url, params=None, headers=None, timeout=None, impersonate=None):
+        captured["impersonate"] = impersonate
+        captured["headers"] = headers
+        return _FakeResp()
+
+    monkeypatch.setattr(E.requests, "get", fake_get)
+    E._get_json(f"{E.BASE}/scoreboardv3", {"GameDate": "08/05/2026"})
+    assert captured["impersonate"] == "chrome"
+    # The application-specific headers (x-nba-stats-origin etc.) must still be sent -- these
+    # aren't things a generic Chrome impersonation would know to include on its own.
+    assert captured["headers"]["x-nba-stats-origin"] == "stats"
+    print("✓ nba_stats_engine._get_json genuinely uses real browser (Chrome) TLS impersonation, and still sends the real application-specific headers")
+
+
 def test_get_schedule_parses_the_documented_shape(monkeypatch):
     monkeypatch.setattr(E, "_get_json", lambda url, params: _real_shaped_response())
     games = E.get_schedule("2026-08-05", E.LEAGUE_ID_WNBA)
