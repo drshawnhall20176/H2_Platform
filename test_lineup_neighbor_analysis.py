@@ -42,8 +42,9 @@ def test_run_analysis_classifies_hot_and_cold_correctly():
                      {"slot": 3, "neighbor_above": {"h": 0, "hr": 0}, "neighbor_below": None}):
         result = L.run_analysis(markets=["Batter Total Hits"])
 
-    assert result["hot_neighbor"]["n"] == 1 and result["hot_neighbor"]["hit_rate"] == 1.0
-    assert result["cold_neighbor"]["n"] == 1 and result["cold_neighbor"]["hit_rate"] == 0.0
+    r = result["Batter Total Hits"]
+    assert r["hot_neighbor"]["n"] == 1 and r["hot_neighbor"]["hit_rate"] == 1.0
+    assert r["cold_neighbor"]["n"] == 1 and r["cold_neighbor"]["hit_rate"] == 0.0
     print("✓ run_analysis correctly classifies plays into hot/cold neighbor buckets and computes real hit rates")
 
 
@@ -99,8 +100,9 @@ def test_run_analysis_honestly_counts_plays_with_no_findable_game():
     with patch.object(L.GH, "fetch_graded_plays", return_value=plays), \
          patch.object(L.E, "find_hitter_game_pk", return_value=None):   # a real off day / DFA / fetch gap
         result = L.run_analysis(markets=["Batter Total Hits"])
-    assert result["skipped_no_game"] == 1
-    assert result["hot_neighbor"]["n"] == 0 and result["cold_neighbor"]["n"] == 0
+    r = result["Batter Total Hits"]
+    assert r["skipped_no_game"] == 1
+    assert r["hot_neighbor"]["n"] == 0 and r["cold_neighbor"]["n"] == 0
     print("✓ run_analysis honestly counts (not silently drops) plays where no real game could be found")
 
 
@@ -114,8 +116,9 @@ def test_run_analysis_honestly_counts_plays_with_no_real_neighbor_at_all():
          patch.object(L.E, "get_lineup_neighbor_result",
                       return_value={"slot": 1, "neighbor_above": None, "neighbor_below": None}):
         result = L.run_analysis(markets=["Batter Total Hits"])
-    assert result["no_neighbor_data"] == 1
-    assert result["hot_neighbor"]["n"] == 0 and result["cold_neighbor"]["n"] == 0
+    r = result["Batter Total Hits"]
+    assert r["no_neighbor_data"] == 1
+    assert r["hot_neighbor"]["n"] == 0 and r["cold_neighbor"]["n"] == 0
     print("✓ run_analysis honestly counts plays with genuinely no real neighbor data, never folding them into 'cold' by default")
 
 
@@ -129,8 +132,51 @@ def test_run_analysis_hot_wins_if_either_real_neighbor_is_hot():
                       return_value={"slot": 5, "neighbor_above": {"h": 0, "hr": 0},
                                    "neighbor_below": {"h": 0, "hr": 1}}):   # only the BELOW neighbor is hot
         result = L.run_analysis(markets=["Batter Total Hits"])
-    assert result["hot_neighbor"]["n"] == 1
+    assert result["Batter Total Hits"]["hot_neighbor"]["n"] == 1
     print("✓ run_analysis correctly classifies as hot when EITHER real adjacent neighbor had a big game")
+
+
+def test_run_analysis_max_plays_cap_keeps_the_most_recent_plays():
+    # fetch_graded_plays already returns oldest-first (confirmed in grading_history's own
+    # docstring) -- the real, most recent plays are the TAIL of that list, not the head.
+    plays = [_play(player_id=i, slate_date=f"2026-07-{i:02d}") for i in range(1, 11)]   # 10 real plays
+    seen_pids = []
+
+    def fake_find_game_pk(pid, date):
+        seen_pids.append(pid)
+        return 100
+
+    with patch.object(L.GH, "fetch_graded_plays", return_value=plays), \
+         patch.object(L.E, "find_hitter_game_pk", side_effect=fake_find_game_pk), \
+         patch.object(L.E, "get_lineup_neighbor_result",
+                      return_value={"slot": 3, "neighbor_above": {"h": 0, "hr": 0}, "neighbor_below": None}):
+        L.run_analysis(markets=["Batter Total Hits"], max_plays_per_market=3)
+
+    assert sorted(seen_pids) == [8, 9, 10], (
+        f"expected the real, most recent 3 plays (player_ids 8-10) to be kept, got {sorted(seen_pids)}")
+    print("✓ max_plays_per_market correctly keeps the real, most recent plays, not an arbitrary or random slice")
+
+
+def test_run_analysis_keeps_markets_genuinely_separate():
+    # THE real point of this fix: a real, confirmed production run pooled Strikeouts (a market
+    # with a genuinely different expected relationship to the hypothesis) together with the
+    # hitting markets into one muddled number. Confirms each market now gets its own real,
+    # separate result, not mixed together.
+    def fake_fetch(sport, market=None):
+        if market == "Batter Total Hits":
+            return [_play(player_id=1, hit=True, market=market)]
+        return [_play(player_id=2, hit=False, market=market)]
+
+    with patch.object(L.GH, "fetch_graded_plays", side_effect=fake_fetch), \
+         patch.object(L.E, "find_hitter_game_pk", return_value=100), \
+         patch.object(L.E, "get_lineup_neighbor_result",
+                      return_value={"slot": 3, "neighbor_above": {"h": 2, "hr": 0}, "neighbor_below": None}):
+        result = L.run_analysis(markets=["Batter Total Hits", "Batter Strikeouts"])
+
+    assert set(result.keys()) == {"Batter Total Hits", "Batter Strikeouts"}
+    assert result["Batter Total Hits"]["hot_neighbor"]["hit_rate"] == 1.0
+    assert result["Batter Strikeouts"]["hot_neighbor"]["hit_rate"] == 0.0
+    print("✓ run_analysis keeps each real market's own result genuinely separate, not pooled into one muddled number")
 
 
 if __name__ == "__main__":

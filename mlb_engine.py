@@ -1998,6 +1998,47 @@ def get_hitter_recent_games(player_id: int, season: int, before_date: Optional[s
     return out
 
 
+# Real market name -> the matching field get_hitter_recent_games already returns per game.
+# Confirmed against sports.py's own real, canonical market names -- NOT the market's own
+# display label guessed independently (a real, separate bug elsewhere in this codebase used
+# "H+R+RBI" instead of the real "Batter Hits+Runs+RBIs", silently matching nothing).
+_MARKET_TO_RECENT_GAME_FIELD = {
+    "Batter Total Hits": "hits", "Batter Total Bases": "total_bases",
+    "Batter Hits+Runs+RBIs": "hrr", "Batter HR": "hr", "Batter Strikeouts": "strikeouts",
+}
+
+
+def recent_game_conflicts_with_pick(player_id: int, season: int, before_date: str,
+                                    market: str, side: str, line: float) -> Optional[bool]:
+    """ADDED DIRECTLY ON REQUEST: a real, honest flag for a real, specific situation -- a pick's
+    own favored side disagreeing with what this exact player's OWN last real game would have
+    produced against this exact same line. The real, confirmed example this was built for:
+    Leody Taveras graded a 47%, C-grade Under 0.5 Total Hits, while his real last game (the one
+    right before this projected slate) was his best of the whole 10-game window -- a real hit
+    AND a real home run. That real tension is invisible on the page a pick actually gets decided
+    on; this makes it visible there directly, without changing ModelProb, EdgePct, or the grade
+    itself -- a pure, additive flag, not a different prediction.
+
+    Deliberately symmetric, not just checking Under picks: a real cold last game contradicting
+    an Over pick is the exact same kind of real tension, just facing the other direction.
+
+    Returns True (a real, confirmed conflict), False (last game was consistent with, or neutral
+    to, this side), or None (no real recent-game data available, or an unsupported market -- an
+    honest gap, never guessed as either direction)."""
+    field = _MARKET_TO_RECENT_GAME_FIELD.get(market)
+    if field is None or side not in ("Over", "Under"):
+        return None
+    games = get_hitter_recent_games(player_id, season, before_date=before_date, n=1)
+    if not games:
+        return None
+    last_value = games[-1].get(field)
+    if last_value is None:
+        return None
+    if side == "Under":
+        return last_value >= line   # a real last game that would itself have gone Over
+    return last_value < line   # side == "Over" -- a real last game that would itself have gone Under
+
+
 def pitcher_season_pitch_stats(pitcher_id: int, season: int, before_date: Optional[str] = None,
                                team_id: Optional[int] = None) -> Dict[str, Any]:
     """This pitcher's own average and max pitch count across REAL starts this season, from the

@@ -1855,7 +1855,61 @@ def test_get_pitcher_starts_requests_regular_season_only(monkeypatch):
     print("✓ get_pitcher_starts_this_season explicitly requests regular-season-only games")
 
 
-# ----------------------------------------------------------------- find_hitter_game_pk / get_lineup_neighbor_result
+# ----------------------------------------------------------------- recent_game_conflicts_with_pick
+def test_recent_game_conflicts_with_pick_the_real_confirmed_leody_case(monkeypatch):
+    # THE exact real, confirmed scenario this was built for: a real Under 0.5 Total Hits pick,
+    # with the player's own real last game showing 1 real hit -- a genuine conflict.
+    fake_games = [{"game_date": "2026-08-05", "hits": 1.0, "total_bases": 4.0, "hrr": 4.0,
+                  "hr": 1.0, "strikeouts": 0.0}]
+    monkeypatch.setattr(E, "get_hitter_recent_games", lambda *a, **k: fake_games)
+    result = E.recent_game_conflicts_with_pick(501, 2026, "2026-08-06", "Batter Total Hits", "Under", 0.5)
+    assert result is True
+    print("✓ recent_game_conflicts_with_pick correctly flags the real, confirmed Leody Taveras case (Under 0.5, but last game had a real hit)")
+
+
+def test_recent_game_conflicts_with_pick_no_conflict_when_consistent(monkeypatch):
+    fake_games = [{"game_date": "2026-08-05", "hits": 0.0, "total_bases": 0.0, "hrr": 0.0,
+                  "hr": 0.0, "strikeouts": 2.0}]
+    monkeypatch.setattr(E, "get_hitter_recent_games", lambda *a, **k: fake_games)
+    result = E.recent_game_conflicts_with_pick(501, 2026, "2026-08-06", "Batter Total Hits", "Under", 0.5)
+    assert result is False
+    print("✓ recent_game_conflicts_with_pick correctly reports no conflict when the real last game was consistent with the pick")
+
+
+def test_recent_game_conflicts_with_pick_symmetric_for_over_side(monkeypatch):
+    # A real cold last game contradicting an Over pick is the same real kind of tension, just
+    # facing the other direction -- confirms this isn't only checking Under picks.
+    fake_games = [{"game_date": "2026-08-05", "hits": 0.0, "total_bases": 0.0, "hrr": 0.0,
+                  "hr": 0.0, "strikeouts": 0.0}]
+    monkeypatch.setattr(E, "get_hitter_recent_games", lambda *a, **k: fake_games)
+    result = E.recent_game_conflicts_with_pick(501, 2026, "2026-08-06", "Batter Total Hits", "Over", 0.5)
+    assert result is True
+    print("✓ recent_game_conflicts_with_pick is genuinely symmetric -- a real cold last game flags an Over pick too")
+
+
+def test_recent_game_conflicts_with_pick_none_when_no_real_recent_game(monkeypatch):
+    monkeypatch.setattr(E, "get_hitter_recent_games", lambda *a, **k: [])
+    result = E.recent_game_conflicts_with_pick(501, 2026, "2026-08-06", "Batter Total Hits", "Under", 0.5)
+    assert result is None
+    print("✓ recent_game_conflicts_with_pick honestly returns None when there's no real recent game to check, never guesses")
+
+
+def test_recent_game_conflicts_with_pick_none_for_an_unsupported_market():
+    result = E.recent_game_conflicts_with_pick(501, 2026, "2026-08-06", "First Innings Total", "Under", 0.5)
+    assert result is None
+    print("✓ recent_game_conflicts_with_pick honestly returns None for a market with no real per-game field to check")
+
+
+def test_recent_game_conflicts_with_pick_uses_the_real_canonical_market_name():
+    # Confirms the real, canonical market name from sports.py itself ("Batter Hits+Runs+RBIs"),
+    # not a guessed/incorrect one -- a real, separate bug elsewhere in this codebase used
+    # "H+R+RBI" instead, which silently matched nothing.
+    assert "Batter Hits+Runs+RBIs" in E._MARKET_TO_RECENT_GAME_FIELD
+    assert "H+R+RBI" not in E._MARKET_TO_RECENT_GAME_FIELD
+    print("✓ recent_game_conflicts_with_pick uses the real, canonical market name, not a guessed one")
+
+
+
 def test_find_hitter_game_pk_matches_the_exact_date(monkeypatch):
     fake_gamelog = {"stats": [{"splits": [
         {"date": "2026-07-14", "game": {"gamePk": 111}},

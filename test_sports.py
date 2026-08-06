@@ -143,6 +143,23 @@ def test_game_watch_explains_a_real_no_data_pitcher_instead_of_bare_dashes():
     print("✓ Game Watch explains a real no-data pitcher's side directly, rather than leaving bare unexplained dashes")
 
 
+def test_graded_picks_flags_a_real_recent_form_conflict():
+    # ADDED DIRECTLY ON REQUEST: a real, confirmed example (Leody Taveras, 47% Under 0.5 Total
+    # Hits, his own real last game a real hit AND a real HR -- his best game of the whole 10-
+    # game window) showed this exact tension is completely invisible on the page a pick
+    # actually gets decided on. Confirms the real, honest flag is genuinely wired into the
+    # Slate Summary display, not just built as an unused engine function.
+    src = (_HERE / "views" / "2_Graded_Picks.py").read_text()
+    assert "E.recent_game_conflicts_with_pick(" in src, (
+        "Graded Picks must actually call the real conflict check, not just have it available")
+    assert 'if _active.key == "MLB" and pl.get("PlayerId"):' in src, (
+        "the real conflict check must be gated to MLB, the only sport this function supports"
+    )
+    assert "would have gone the" in src, (
+        "a real conflict must show a real, honest explanation, not a silent flag")
+    print("✓ Graded Picks genuinely surfaces a real recent-form conflict on the page a pick actually gets decided on")
+
+
 def test_every_view_file_has_a_matching_meta_entry():
     # Regression guard for a real, reported bug: a new page (24_Highlights.py) was added to
     # views/ without a matching entry in streamlit_app.py's meta dict, so it silently fell back
