@@ -26,6 +26,7 @@ import betlog as B
 import bet_sizing as BS
 import statcast_data as SC
 import weather as WX
+import mlb_shared_cache as MSC
 
 _active = sports.active()
 
@@ -79,12 +80,14 @@ def load_index(sport_key: str, date_str: str, sims: int, seed: int):
     layers in Statcast + weather enrichment (its own model inputs, unique to baseball); other
     sports don't have those and build their projection index straight from the engine's rows.
 
-    Returns (index, known_names) -- known_names ADDED DIRECTLY ON REQUEST, a real, confirmed
-    fix for a real, reported case (see projections.known_roster_names' own docstring for the
-    full reasoning). Uses hasattr, not a hard sport check: MLB has this real helper today,
-    other sports don't yet, and this must not break for any of them -- an empty set here is an
-    honest "no real distinction available yet" for a sport that hasn't wired this in, not a
-    crash or a silently wrong guess."""
+    Returns (index, known_names, all_active_names) -- known_names ADDED DIRECTLY ON REQUEST, a
+    real, confirmed fix for a real, reported case (see projections.known_roster_names' own
+    docstring for the full reasoning); all_active_names a SECOND real, confirmed fix layered on
+    the first (see mlb_engine.get_all_active_player_names' own docstring). Both use hasattr/a
+    real sport_key check, not a hard assumption: MLB has these real helpers today, other sports
+    don't yet, and this must not break for any of them -- an empty set here is an honest "no
+    real distinction available yet" for a sport that hasn't wired this in, not a crash or a
+    silently wrong guess."""
     sport = sports.get(sport_key)
     engine, proj = sport.engine, sport.projections
     rows, meta = engine.build_slate(date_str)
@@ -99,17 +102,19 @@ def load_index(sport_key: str, date_str: str, sims: int, seed: int):
     # Statcast + weather attached (MLB only) -> HR probabilities here are consistent with Dinger Engine.
     index = proj.build_projection_index(rows, meta, sims=sims, seed=seed, **extra)
     known_names = proj.known_roster_names(rows, meta) if hasattr(proj, "known_roster_names") else set()
-    return index, known_names
+    all_active_names = (MSC.get_all_active_player_names_cached(int(date_str[:4]))
+                        if sport_key == "MLB" else set())
+    return index, known_names, all_active_names
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def load_edges(sport_key: str, date_str: str, markets_tuple: tuple, _index: dict, _api_key: str,
-               _known_names: Optional[set] = None):
+               _known_names: Optional[set] = None, _all_active_names: Optional[set] = None):
     sport = sports.get(sport_key)
     offers, info = O.fetch_slate_props(date_str, _api_key, list(markets_tuple),
                                        sport=sport.odds_sport_key)
     edges, stats = O.compute_edges(_index, offers, projections_module=sport.projections,
-                                   known_names=_known_names)
+                                   known_names=_known_names, all_active_names=_all_active_names)
     return edges, {**info, **stats}
  
  
@@ -128,7 +133,7 @@ with c3:
 date_str = target_date.strftime("%Y-%m-%d")
 
 with st.spinner("Projecting the slate..."):
-    index, known_names = load_index(_active.key, date_str, P.DEFAULT_SIMS, seed=7)
+    index, known_names, all_active_names = load_index(_active.key, date_str, P.DEFAULT_SIMS, seed=7)
 
 if not index:
     st.info(f"No projectable props for this date. Pick a date with scheduled {_active.label} games.")
@@ -244,7 +249,7 @@ else:
         try:
             with st.spinner("Fetching odds and computing edges..."):
                 edges, info = load_edges(_active.key, date_str, tuple(sorted(chosen)), index, api_key,
-                                         known_names)
+                                         known_names, all_active_names)
         except O.OddsAPIError as e:
             st.error(f"Odds API error: {e}")
             edges, info = [], {}
@@ -287,14 +292,19 @@ else:
                 # little real data for the model to honestly price -- confirmed directly from a
                 # real, reported case where established veterans just off a long injury (Sean
                 # Murphy), just traded (Kevin Gausman), and real rookies (Abimelec Ortiz) all
-                # sat in the same bucket as a real name-normalization bug. Split here into two
-                # real, honest sections using the real "reason" tag compute_edges now attaches
-                # -- "unknown" (a sport without known_names wired in yet) is shown in the same
-                # single-list form as before, never silently dropped or miscategorized.
+                # sat in the same bucket as a real name-normalization bug. A SECOND real,
+                # confirmed follow-up found real, active, correctly-spelled players (Kevin
+                # Gausman again, Alí Sánchez, Edgar Quero, Zach Thornton) STILL sitting in the
+                # real mismatch bucket, simply because none of them was part of TONIGHT's
+                # specific slate -- a real, different reason than a spelling bug. Split here
+                # into three real, honest sections using the real "reason" tag compute_edges now
+                # attaches -- "unknown" (a sport without known_names wired in yet) is shown in
+                # the same single-list form as before, never silently dropped or miscategorized.
                 mismatches = [u for u in unmatched_names if u.get("reason") == "name_mismatch"]
                 no_data = [u for u in unmatched_names if u.get("reason") == "on_roster_no_data"]
+                not_tonight = [u for u in unmatched_names if u.get("reason") == "not_playing_tonight"]
                 unclassified = [u for u in unmatched_names if u.get("reason") not in
-                               ("name_mismatch", "on_roster_no_data")]
+                               ("name_mismatch", "on_roster_no_data", "not_playing_tonight")]
 
                 if mismatches:
                     with st.expander(f"❓ {len(mismatches)} real player(s)/market(s) the book "
@@ -308,7 +318,9 @@ else:
                                   "accents/punctuation/Jr.-Sr.-II-III-IV-V and a real trailing "
                                   "birth-year disambiguator, so a name still showing up here "
                                   "needs its own real fix, not a guess. This name genuinely "
-                                  "doesn't appear anywhere on tonight's real roster data at all.")
+                                  "doesn't appear anywhere on tonight's real roster data, and "
+                                  "isn't a real, currently active MLB player under any real "
+                                  "spelling either.")
 
                 if no_data:
                     with st.expander(f"⏳ {len(no_data)} real player(s)/market(s) on tonight's "
@@ -326,6 +338,19 @@ else:
                                   "first career start). This isn't a bug to fix; it's the model "
                                   "correctly refusing to guess.")
 
+                if not_tonight:
+                    with st.expander(f"🌙 {len(not_tonight)} real player(s)/market(s) the book "
+                                     f"posted for a player not part of tonight's specific slate"):
+                        st.dataframe(pd.DataFrame(not_tonight)[["player", "market"]].rename(
+                            columns={"player": "Player", "market": "Market"}),
+                            hide_index=True, width="stretch")
+                        st.caption("Not a name problem, and not a data problem either — each of "
+                                  "these is a real, currently active MLB player under this exact "
+                                  "spelling, confirmed against MLB's own full, real league-wide "
+                                  "roster. They're just not part of TONIGHT's specific games — a "
+                                  "different team's game, a bench day, or a real trade where the "
+                                  "new team hasn't played them yet. Nothing to fix here either.")
+
                 if unclassified:
                     with st.expander(f"❓ {len(unclassified)} real player(s)/market(s) the book "
                                      f"posted but we couldn't match to our own slate"):
@@ -339,8 +364,8 @@ else:
                                   "a name still showing up here needs its own real fix, not a guess. "
                                   "Could also mean this player genuinely isn't on tonight's projected "
                                   "slate at all, or has too little real data to price yet (not a "
-                                  "name problem) — this sport doesn't yet distinguish the two "
-                                  "reasons the way MLB does.")
+                                  "name problem) — this sport doesn't yet distinguish the reasons "
+                                  "the way MLB does.")
  
         if edges:
             edf = pd.DataFrame(edges)
