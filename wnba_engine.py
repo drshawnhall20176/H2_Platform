@@ -651,6 +651,18 @@ def build_slate(date_str: str, min_avg_minutes: float = CFG.MIN_AVG_MINUTES,
 
     meta: List[Dict] = []
     tasks: List[Tuple[Dict, str, str, str, Optional[str], int, int]] = []
+    # A REAL, CONFIRMED FIX, not the original design: get_team_roster used to be called
+    # sequentially, once per team, right here -- before the ThreadPoolExecutor block below even
+    # starts. A typical WNBA slate (5-6 games -> 10-12 team roster calls) meant 10-12 real,
+    # uncached, sequential network fetches every single time this function ran, before any of
+    # the already-parallelized per-player fetches even began. Collecting unique team IDs first
+    # and fetching every real roster concurrently fixes the real bottleneck directly; deduping
+    # by team_id also means a real doubleheader (the same team appearing in two of tonight's
+    # games) no longer triggers that team's own roster fetch twice.
+    team_ids = {tid for g in games for tid in (g["home_id"], g["away_id"])}
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        rosters = dict(zip(team_ids, ex.map(get_team_roster, team_ids)))
+
     for g in games:
         label = f"{g['away_name']} @ {g['home_name']}"
         meta.append({"label": label, "away_name": g["away_name"], "home_name": g["home_name"],
@@ -660,7 +672,7 @@ def build_slate(date_str: str, min_avg_minutes: float = CFG.MIN_AVG_MINUTES,
         for team_id, team_name, opp_name, opp_id in (
                 (g["home_id"], g["home_name"], g["away_name"], g["away_id"]),
                 (g["away_id"], g["away_name"], g["home_name"], g["home_id"])):
-            for player in get_team_roster(team_id):
+            for player in rosters[team_id]:
                 tasks.append((player, team_name, opp_name, label, g.get("game_date"), team_id, opp_id))
     _diag(f"build_slate({date_str}): {len(games)} game(s) -> {len(tasks)} roster slot(s) to project")
 

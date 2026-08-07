@@ -139,6 +139,62 @@ def test_build_slate_assembles_rows_from_mocked_fetches(monkeypatch):
     print("✓ build_slate wires schedule -> rosters -> game logs -> filtered rows correctly")
 
 
+def test_build_slate_fetches_each_teams_roster_only_once_even_with_a_real_doubleheader(monkeypatch):
+    # A REAL, CONFIRMED FIX, not the original design: get_team_roster used to be called
+    # sequentially inside the per-game loop, meaning a real doubleheader (the same team
+    # appearing in two of tonight's games) would trigger that team's own real roster fetch
+    # twice. Confirms the real fix: unique team IDs are collected first, so each team's roster
+    # is fetched exactly once, regardless of how many of tonight's games that team appears in.
+    game1 = {"gameId": "1", "game_date": "2026-07-13T18:00:00Z",
+            "home_id": 1611661330, "home_name": "Atlanta Dream",
+            "away_id": 1611661329, "away_name": "Chicago Sky"}
+    game2 = {"gameId": "2", "game_date": "2026-07-13T23:00:00Z",   # same two teams, second game
+            "home_id": 1611661330, "home_name": "Atlanta Dream",
+            "away_id": 1611661329, "away_name": "Chicago Sky"}
+    monkeypatch.setattr(E, "get_schedule", lambda date_str: [game1, game2])
+
+    call_count = {}
+    def fake_roster(team_id):
+        call_count[team_id] = call_count.get(team_id, 0) + 1
+        return []
+    monkeypatch.setattr(E, "get_team_roster", fake_roster)
+    monkeypatch.setattr(E, "get_player_recent_games", lambda *a, **k: [])
+
+    E.build_slate("2026-07-13")
+    assert call_count == {1611661330: 1, 1611661329: 1}, (
+        f"each real team's roster must be fetched exactly once, got {call_count}")
+    print("✓ build_slate fetches each unique team's roster exactly once, even across a real doubleheader")
+
+
+def test_build_slate_fetches_rosters_concurrently_not_sequentially(monkeypatch):
+    # A real, direct check that the fix actually parallelizes -- not just that get_team_roster
+    # is called correctly, but that it's genuinely invoked through ThreadPoolExecutor.map. A
+    # single "was the executor used at all" check wouldn't actually prove this: build_slate's
+    # own player-log fetch already used ThreadPoolExecutor before this fix, so that alone would
+    # pass even without the real change. Counts real executor entries instead -- two, one for
+    # rosters and one for player logs, confirms the roster fetch is now its own real concurrent
+    # step, not folded into or skipped before the pre-existing one.
+    game = {"gameId": "1", "game_date": "2026-07-13T23:00:00Z",
+           "home_id": 1611661330, "home_name": "Atlanta Dream",
+           "away_id": 1611661329, "away_name": "Chicago Sky"}
+    monkeypatch.setattr(E, "get_schedule", lambda date_str: [game])
+    monkeypatch.setattr(E, "get_team_roster", lambda team_id: [])
+    monkeypatch.setattr(E, "get_player_recent_games", lambda *a, **k: [])
+
+    real_executor = E.ThreadPoolExecutor
+    entry_count = {"n": 0}
+    class TrackingExecutor(real_executor):
+        def __enter__(self):
+            entry_count["n"] += 1
+            return super().__enter__()
+    monkeypatch.setattr(E, "ThreadPoolExecutor", TrackingExecutor)
+
+    E.build_slate("2026-07-13")
+    assert entry_count["n"] == 2, (
+        f"expected two separate real ThreadPoolExecutor uses (rosters, then player logs), got {entry_count['n']}")
+    print("✓ build_slate genuinely runs the roster fetch as its own concurrent step, not a sequential loop before the pre-existing player-log executor")
+
+
 # ----------------------------------------------------------------- ESPN fetch layer
 def test_get_json_returns_none_on_http_error(monkeypatch):
     class FakeResp:
