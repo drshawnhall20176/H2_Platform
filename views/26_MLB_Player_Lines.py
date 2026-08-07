@@ -24,6 +24,7 @@ import pytz
 
 import sports
 import mlb_engine as E
+import mlb_shared_cache as MSC
 import projections as P
 import odds_api as O
 import best_bets_data as BBD
@@ -38,19 +39,6 @@ C.page_header("📉", "Player Lines",
 
 if not sports.require_sport(["MLB"], "Player Lines"):
     st.stop()
-
-
-@st.cache_data(ttl=300, show_spinner="Loading probable starters…")
-def load_pitchers(date_str: str):
-    return E.build_pitching_slate(date_str)
-
-
-@st.cache_data(ttl=300, show_spinner="Loading hitters…")
-def load_hitters(date_str: str):
-    return E.build_slate(date_str)   # (rows, meta) -- meta carries each game's real gamePk,
-                                     # needed for the same doubleheader-safe Game filter Matchup
-                                     # Lab already uses (hitter rows themselves have GameLabel
-                                     # but no gamePk/game_date of their own -- see the join below)
 
 
 def apply_slot_and_game_filters(rows: list, label_key: str, key_prefix: str) -> list:
@@ -137,7 +125,11 @@ with c2:
 player_type = st.radio("Player type", ["Pitcher", "Batter"], horizontal=True)
 
 if player_type == "Pitcher":
-    pitchers = load_pitchers(date_str)
+    # A REAL, CONFIRMED FIX, not the original design: this used to be its own local
+    # @st.cache_data wrapper, byte-for-byte identical to MLB Matchup Lab's own (page 9) -- see
+    # mlb_shared_cache.py's own module docstring for the full, confirmed reasoning.
+    with st.spinner("Loading probable starters..."):
+        pitchers = MSC.load_pitching_slate_cached(date_str)
     if not pitchers:
         st.info("No probable starters found for this date. Pick a date with scheduled games.")
         st.stop()
@@ -150,7 +142,11 @@ if player_type == "Pitcher":
     selected = p_by_label[label]
     player_name, player_id = selected["Pitcher"], selected.get("_pid")
 else:
-    hitters, hitter_meta = load_hitters(date_str)
+    # A REAL, CONFIRMED FIX, not the original design: this used to be its own local
+    # @st.cache_data wrapper, byte-for-byte identical to MLB Matchup Lab's own (page 9) -- see
+    # mlb_shared_cache.py's own module docstring for the full, confirmed reasoning.
+    with st.spinner("Loading hitters..."):
+        hitters, hitter_meta = MSC.load_hitter_slate_cached(date_str)
     if not hitters:
         st.info("No hitters found for this date. Pick a date with scheduled games.")
         st.stop()

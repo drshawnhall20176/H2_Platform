@@ -29,6 +29,7 @@ import components as C
 from datetime import datetime
 
 import mlb_engine as E
+import mlb_shared_cache as MSC
 import projections as P
 import sports
 
@@ -46,14 +47,12 @@ st.page_link("views/7_#L01f3af_Pitching_Lab.py",
 target = st.date_input("Slate date", datetime.now())
 date_str = target.strftime("%Y-%m-%d")
 
-
-@st.cache_data(ttl=600, show_spinner=False)
-def load_pitching_slate(date_str_inner: str):
-    return E.build_pitching_slate(date_str_inner)
-
-
+# A REAL, CONFIRMED FIX, not the original design: this used to be its own local
+# @st.cache_data wrapper around E.build_pitching_slate, byte-for-byte identical to the ones
+# Game Watch and First Innings Totals each separately defined too -- see mlb_shared_cache.py's
+# own module docstring for the full, confirmed reasoning.
 with st.spinner("Loading tonight's probable starters..."):
-    pitching_rows = load_pitching_slate(date_str)
+    pitching_rows = MSC.load_pitching_slate_cached(date_str)
 
 if not pitching_rows:
     st.info("No probable starters found for this date yet — check back closer to first pitch.")
@@ -129,10 +128,17 @@ def load_team_freshness(team_id, exclude_pid, date_str_inner):
 
     Returns None only when team_id itself is missing (no real team to look up). A team WITH a
     real ID but no usable recent-appearance data still returns a dict, with "fraction": None --
-    an honest "we don't know," not silently treated as "fresh" or skipped from the page."""
+    an honest "we don't know," not silently treated as "fresh" or skipped from the page.
+
+    A REAL, CONFIRMED FIX, not the original design: the actual network fetch here (E.get_team_
+    bullpen_fatigue) used to be called directly, independently cached under THIS page's own
+    function identity -- Game Watch's own load_bullpen_freshness cached the exact same real
+    fetch separately too. See mlb_shared_cache.py's own module docstring for the full, confirmed
+    reasoning. Only the fetch is shared; this page's own real post-processing (the most-taxed
+    pitcher, the real pitcher count) stays exactly as it was."""
     if not team_id:
         return None
-    fatigue = E.get_team_bullpen_fatigue(team_id, date_str_inner)
+    fatigue = MSC.get_team_bullpen_fatigue_cached(team_id, date_str_inner)
     fraction = P.bullpen_fatigued_fraction(fatigue, exclude_pid=exclude_pid)
     # fatigue is already sorted most-fatigued-first (get_team_bullpen_fatigue's own contract) --
     # its own [0] is genuinely the single most-taxed arm, not an arbitrary pick.

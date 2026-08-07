@@ -19,6 +19,7 @@ import plotly.graph_objects as go
 
 import sports
 import mlb_engine as E
+import mlb_shared_cache as MSC
 import matchup_data as MD
 import statcast_data as SC
 from datetime import datetime
@@ -36,16 +37,10 @@ def load_matchup_cache():
     return MD.load()
 
 
-@st.cache_data(ttl=300, show_spinner="Loading probable starters…")
-def load_pitchers(date_str: str):
-    return E.build_pitching_slate(date_str)
-
-
-@st.cache_data(ttl=300, show_spinner="Loading hitters…")
-def load_hitters(date_str: str):
-    return E.build_slate(date_str)   # (rows, meta) -- meta carries each game's real gamePk,
-                                      # needed to tell doubleheader Game 1 from Game 2 (see the
-                                      # opp_hitters fix below; Team name alone collides on a DH day)
+# A REAL, CONFIRMED FIX, not the original design: load_pitchers/load_hitters used to be their
+# own local @st.cache_data wrappers here, byte-for-byte identical to MLB Player Lines' own --
+# see mlb_shared_cache.py's own module docstring for the full, confirmed reasoning. Both real
+# call sites below now call the shared cache directly.
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -80,7 +75,8 @@ with c2:
         st.cache_data.clear()
         st.rerun()
 
-pitchers = load_pitchers(date_str)
+with st.spinner("Loading probable starters..."):
+    pitchers = MSC.load_pitching_slate_cached(date_str)
 if not pitchers:
     st.warning("No probable starters found for this date yet — check back closer to game time.")
     st.stop()
@@ -214,7 +210,8 @@ if use_bullpen:
                       "may still be useful, but ERA/FIP won't be.")
 
 # Hitters: default to the pitcher's opponent, fall back to the whole slate.
-hitters, hitters_meta = load_hitters(date_str)
+with st.spinner("Loading hitters..."):
+    hitters, hitters_meta = MSC.load_hitter_slate_cached(date_str)
 opp = pitcher.get("Opponent")
 
 # On a doubleheader day, Team name alone isn't enough -- both legs share the same two teams, so

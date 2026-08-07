@@ -48,6 +48,7 @@ import pytz
 
 import sports
 import mlb_engine as E
+import mlb_shared_cache as MSC
 import projections as P
 import quick_log
 
@@ -70,11 +71,6 @@ if not sports.require_sport(["MLB"], "First Innings Totals"):
     st.stop()
 
 
-@st.cache_data(ttl=300, show_spinner="Loading probable starters…")
-def load_pitching_slate(date_str_inner: str):
-    return E.build_pitching_slate(date_str_inner)
-
-
 c_date, c_refresh = st.columns([2, 1])
 with c_date:
     date_str = st.date_input("Slate date", datetime.now(eastern)).strftime("%Y-%m-%d")
@@ -83,7 +79,14 @@ with c_refresh:
         st.cache_data.clear()
         st.rerun()
 
-pitching_rows = load_pitching_slate(date_str)
+# A REAL, CONFIRMED FIX, not the original design: this used to be its own local
+# @st.cache_data wrapper around E.build_pitching_slate, byte-for-byte identical to the ones
+# Bullpen Watch and Game Watch each separately defined too -- Streamlit's cache_data keys on a
+# function's own identity, so three separately-defined functions with identical bodies were
+# NOT the same cache entry, even doing the exact same real, expensive work on the exact same
+# date. See mlb_shared_cache.py's own module docstring for the full, confirmed reasoning.
+with st.spinner("Loading probable starters..."):
+    pitching_rows = MSC.load_pitching_slate_cached(date_str)
 if not pitching_rows:
     st.info("No probable starters found for this date yet — check back closer to first pitch.")
     st.stop()

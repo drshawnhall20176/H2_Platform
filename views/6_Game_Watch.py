@@ -70,6 +70,7 @@ import components as C
 from datetime import datetime
 
 import mlb_engine as E
+import mlb_shared_cache as MSC
 import projections as P
 import statcast_data as SC
 import quick_log
@@ -137,14 +138,12 @@ def load_real_moneylines(date_str_inner: str):
 
 _real_moneylines = load_real_moneylines(date_str) or {}
 
-
-@st.cache_data(ttl=600, show_spinner=False)
-def load_pitching_slate(date_str_inner: str):
-    return E.build_pitching_slate(date_str_inner)
-
-
+# A REAL, CONFIRMED FIX, not the original design: this used to be its own local
+# @st.cache_data wrapper around E.build_pitching_slate, byte-for-byte identical to the ones
+# Bullpen Watch and First Innings Totals each separately defined too -- see mlb_shared_cache.py's
+# own module docstring for the full, confirmed reasoning.
 with st.spinner("Loading tonight's probable starters..."):
-    pitching_rows = load_pitching_slate(date_str)
+    pitching_rows = MSC.load_pitching_slate_cached(date_str)
 
 if not pitching_rows:
     st.info("No probable starters found for this date yet — check back closer to first pitch.")
@@ -230,9 +229,15 @@ if not st.button(f"🔄 Load matchup signals for {len(games)} game(s)",
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_bullpen_freshness(team_id, exclude_pid, date_str_inner):
+    # A REAL, CONFIRMED FIX, not the original design: the actual network fetch here (E.get_
+    # team_bullpen_fatigue) used to be called directly, independently cached under THIS page's
+    # own function identity -- Bullpen Watch's own load_team_freshness cached the exact same
+    # real fetch separately too. See mlb_shared_cache.py's own module docstring for the full,
+    # confirmed reasoning. Only the fetch is shared; this page's own real post-processing
+    # (bullpen_fatigued_fraction) stays exactly as it was.
     if not team_id:
         return None
-    fatigue = E.get_team_bullpen_fatigue(team_id, date_str_inner)
+    fatigue = MSC.get_team_bullpen_fatigue_cached(team_id, date_str_inner)
     return P.bullpen_fatigued_fraction(fatigue, exclude_pid=exclude_pid)
 
 

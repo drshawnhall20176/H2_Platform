@@ -46,6 +46,7 @@ import betlog as B
 import retro as R
 import best_bets_data as BBD
 import grading as G
+import mlb_shared_cache as MSC
 
 _active = sports.active()
 E, P = _active.engine, _active.projections
@@ -280,7 +281,15 @@ if _active.key == "MLB":
         daily_points = []
         progress = st.progress(0.0, text=f"Testing {len(chalk_dates)} night(s)...")
         for i, d in enumerate(chalk_dates):
-            pitching_rows = E.build_pitching_slate(d)
+            # A REAL, CONFIRMED FIX, not the original design: this direct call used to hit E.
+            # build_pitching_slate uncached every real run of this backtest -- confirmed as a
+            # real, additional caller of the exact same function three OTHER pages already
+            # independently cached (see mlb_shared_cache.py's own module docstring). Genuinely
+            # safe to share even for these real historical dates: a past date's own real slate
+            # never changes, so a cache hit here is never stale, and re-running this same
+            # backtest (or another page checking the same real date) now reuses the real result
+            # instead of re-fetching it.
+            pitching_rows = MSC.load_pitching_slate_cached(d)
             fips = [r["FIP"] for r in pitching_rows if r.get("FIP")]
             graded_day = _load_graded_for(d)
             settled_day = [g for g in graded_day if g.get("Hit") is not None]

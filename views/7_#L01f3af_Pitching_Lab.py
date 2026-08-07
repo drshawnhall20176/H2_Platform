@@ -14,6 +14,7 @@ from datetime import datetime
 import pytz
 
 import mlb_engine as E
+import mlb_shared_cache as MSC
 import odds_api as O
 import projections as P
 import statcast_data as SC
@@ -329,9 +330,16 @@ st.caption("Which relievers on each side have real recent workload — pitched o
 
 @st.cache_data(ttl=900, show_spinner=False)
 def load_bullpen_fatigue(team_id, date_str_inner, fip_constant_inner):
+    # A REAL, CONFIRMED FIX, not the original design: the actual network fetch here (E.get_team_
+    # bullpen_fatigue) used to be called directly, independently cached under THIS page's own
+    # function identity -- Game Watch's and Bullpen Watch's own wrappers cached the exact same
+    # real fetch separately too, a real, confirmed third caller found in the same audit pass.
+    # See mlb_shared_cache.py's own module docstring for the full, confirmed reasoning. Only the
+    # fetch is shared; this page's own real post-processing (enriching with FIP metrics) stays
+    # exactly as it was.
     if not team_id:
         return []
-    fatigue = E.get_team_bullpen_fatigue(team_id, date_str_inner)
+    fatigue = MSC.get_team_bullpen_fatigue_cached(team_id, date_str_inner)
     return E.enrich_bullpen_fatigue_with_metrics(fatigue, fip_constant_inner)
 
 
