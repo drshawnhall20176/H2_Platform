@@ -27,6 +27,7 @@ import pytz
 import sports
 import odds_api as O
 import nfl_engine as E
+import nfl_shared_cache as NSC
 import nfl_projections as P
 
 _active = sports.active()
@@ -55,7 +56,13 @@ def get_api_key():
 
 @st.cache_data(ttl=300, show_spinner=False)
 def load_slate(date_str: str):
-    rows, meta = E.build_slate(date_str)
+    # A REAL, CONFIRMED FIX, not the original design: the actual network fetch here (E.build_
+    # slate) used to be called directly, independently cached under THIS page's own function
+    # identity -- Anytime TD Engine, QB Lab, and NFL Hot Hand Engine each cached the exact same
+    # real fetch separately too. See nfl_shared_cache.py's own module docstring for the full,
+    # confirmed reasoning. Only the fetch is shared; this page's own real post-processing
+    # (team_abbrs_from_meta) stays exactly as it was.
+    rows, meta = NSC.load_nfl_slate_cached(date_str)
     team_abbrs = E.team_abbrs_from_meta(meta)   # zero extra cost — meta already has this
     return rows, len(meta), team_abbrs
 

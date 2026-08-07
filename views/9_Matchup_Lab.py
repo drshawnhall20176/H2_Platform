@@ -28,7 +28,7 @@ game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER
 
 C.base_css()
 C.page_header("🔬", "Matchup Lab",
-             "Pitch-level arsenal vs. hitter vulnerability — the specific pitches to attack with. "
+             "The scouting report the book doesn't run. Pitch-level arsenal vs. hitter vulnerability — the specific pitches to attack with. "
              "Season stats tell you *if* a hitter is good; this tells you *how* to get him out.")
 
 
@@ -411,16 +411,11 @@ h_label = st.selectbox(f"Hitter (opposing {opp or 'lineup'} — type to search)"
 hitter = h_by_label[h_label]
 hitter_hid = hitter.get("_pid")
 
-
-@st.cache_data(ttl=1800, show_spinner=False)
-def load_injuries(team_id):
-    if not team_id:
-        return []
-    return E.get_team_injuries(team_id)
-
-
-team_injuries = load_injuries(pitcher.get("_team_id"))
-opp_injuries = load_injuries(pitcher.get("_opp_id"))
+# A REAL, CONFIRMED FIX, not the original design: this used to be its own local
+# @st.cache_data wrapper, byte-for-byte identical to Game Watch's own -- see mlb_shared_cache.py's
+# own module docstring for the full, confirmed reasoning.
+team_injuries = MSC.get_team_injuries_cached(pitcher.get("_team_id"))
+opp_injuries = MSC.get_team_injuries_cached(pitcher.get("_opp_id"))
 if team_injuries or opp_injuries:
     with st.expander("🏥 Injury report — both teams"):
         for label, injuries in ((pitcher["Team"], team_injuries), (opp or "Opponent", opp_injuries)):

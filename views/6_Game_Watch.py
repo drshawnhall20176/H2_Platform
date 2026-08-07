@@ -101,7 +101,7 @@ GAMES_BACK = 15   # matches the real number from trader discussion directly ("la
 
 C.base_css()
 C.page_header("📡", "Game Watch",
-             "Eight real signals per game, plus injury context — starter quality (FIP and xERA), "
+             "The pre-market scan, eight signals deep. Eight real signals per game, plus injury context — starter quality (FIP and xERA), "
              "bullpen freshness, bullpen quality, overall team form, tonight's-role form, "
              "tonight's-slot form, and team platoon edge — combined into an honest count, not a "
              "predicted winner. See the disclaimer at the bottom before reading too much into any "
@@ -264,11 +264,10 @@ def load_team_form_filtered(team_id, date_str_inner, venue=None, time_of_day=Non
                                   venue=venue, time_of_day=time_of_day)
 
 
-@st.cache_data(ttl=900, show_spinner=False)
-def load_injuries(team_id):
-    if not team_id:
-        return []
-    return E.get_team_injuries(team_id)
+# A REAL, CONFIRMED FIX, not the original design: this used to be its own local
+# @st.cache_data wrapper, byte-for-byte identical to MLB Matchup Lab's own (page 9) -- see
+# mlb_shared_cache.py's own module docstring for the full, confirmed reasoning. Both real call
+# sites below now call the shared cache directly.
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -316,8 +315,8 @@ for i, g in enumerate(games):
     home_tod_form = (load_team_form_filtered(home_row["_team_id"], date_str, time_of_day=tonight_tod)
                      if tonight_tod else None)
 
-    away_injuries = load_injuries(away_row["_team_id"])
-    home_injuries = load_injuries(home_row["_team_id"])
+    away_injuries = MSC.get_team_injuries_cached(away_row["_team_id"])
+    home_injuries = MSC.get_team_injuries_cached(home_row["_team_id"])
 
     # Pitcher xERA -- FREE, reuses the one-time statcast_pitchers lookup already loaded above
     # (no per-game fetch at all, just a dict lookup by each starter's own _pid).

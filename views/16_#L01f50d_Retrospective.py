@@ -24,7 +24,7 @@ E, P = _active.engine, _active.projections
 
 C.base_css()
 C.page_header("🔍", "Retrospective",
-             f"How the model's pre-game board lined up with what actually happened — "
+             f"The trade journal that doesn't lie. How the model's pre-game board lined up with what actually happened — "
              f"{_active.icon} {_active.label}")
 
 if not sports.require_live_engine("Retrospective"):

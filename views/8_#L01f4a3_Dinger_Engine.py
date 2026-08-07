@@ -21,7 +21,7 @@ import pytz
  
 C.base_css()
 C.page_header("💣", "H2 Sports — Dinger Engine",
-             "Live hitter matchups, platoon edges, and power leaderboards")
+             "Power hour, quantified. Live hitter matchups, platoon edges, and power leaderboards")
  
  
 # load_statcast (a local @st.cache_data wrapper around SC.load()) consolidated into

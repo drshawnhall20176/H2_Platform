@@ -38,7 +38,7 @@ E, P = _active.engine, _active.projections   # sport-routed: MLB -> mlb_engine/p
                                               # WNBA -> wnba_engine/wnba_projections, etc.
 C.base_css()
 C.page_header("📈", "Edge Board",
-             f"Model probabilities, fair prices, and live edges for every prop on the slate "
+             f"Where the edge shows its work. Model probabilities, fair prices, and live edges for every prop on the slate "
              f"— {_active.icon} {_active.label}")
 
 if not sports.require_live_engine("Edge Board"):

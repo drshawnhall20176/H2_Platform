@@ -19,7 +19,8 @@ E, P = _active.engine, _active.projections
 
 C.base_css()
 C.page_header("⭐", "Best Bets",
-             f"The model's strongest leans across the slate — ranked, reasoned, and by time slot "
+             f"Today's open positions, ranked by conviction. The model's strongest leans "
+             f"across the slate — ranked, reasoned, and by time slot "
              f"— {_active.icon} {_active.label}")
 
 if not sports.require_live_engine("Best Bets"):

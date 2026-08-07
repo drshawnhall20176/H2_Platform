@@ -33,7 +33,7 @@ except ImportError:
 
 C.base_css()
 C.page_header("🎯", "Pitching Lab",
-             "ERA vs FIP regression and matchup-aware strikeout/innings projections")
+             "Where the edge hides — regression, not vibes. ERA vs FIP regression and matchup-aware strikeout/innings projections")
 
 eastern = pytz.timezone("US/Eastern")
 

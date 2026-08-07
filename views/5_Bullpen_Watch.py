@@ -39,7 +39,8 @@ game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER
 
 C.base_css()
 C.page_header("🛡️", "Bullpen Watch",
-             "Tonight's whole slate, one question per game: which side has the fresher bullpen?")
+             "Know before it's 2 outs and it's too late. Tonight's whole slate, one question "
+             "per game: which side has the fresher bullpen?")
 st.page_link("views/7_#L01f3af_Pitching_Lab.py",
              label="Want per-pitcher detail and quality (ERA/FIP) too? See Pitching Lab →",
              icon="🎯")

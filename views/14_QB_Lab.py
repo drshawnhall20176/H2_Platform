@@ -21,6 +21,7 @@ import pytz
 
 import sports
 import nfl_engine as E
+import nfl_shared_cache as NSC
 import nfl_projections as P
 
 _active = sports.active()
@@ -38,7 +39,14 @@ if not sports.require_sport(["NFL"], "QB Lab"):
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load(date_str: str):
-    rows, meta = E.build_slate(date_str)
+    # A REAL, CONFIRMED FIX, not the original design: the actual network fetch here (E.build_
+    # slate) used to be called directly, independently cached under THIS page's own function
+    # identity -- NFL Matchup Lab, Anytime TD Engine, and NFL Hot Hand Engine each cached the
+    # exact same real fetch separately too. See nfl_shared_cache.py's own module docstring for
+    # the full, confirmed reasoning. Only the fetch is shared; this page's own real post-
+    # processing (QB filtering, the per-opponent allowed-stats fetches below) stays exactly as
+    # it was.
+    rows, meta = NSC.load_nfl_slate_cached(date_str)
     qb_rows = [r for r in rows if r["Position"] == "QB"]
 
     opps = sorted({r["Opp"] for r in qb_rows if r.get("Opp")})
