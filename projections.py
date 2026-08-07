@@ -1384,6 +1384,16 @@ def normalize_name(name: str) -> str:
     s = "".join(c for c in s if unicodedata.category(c) != "Mn").lower()
     s = re.sub(r"[^a-z0-9 ]", " ", s)
     s = re.sub(r"\b(jr|sr|ii|iii|iv|v)\b", " ", s)
+    # ADDED DIRECTLY ON REQUEST, a real, confirmed fix for a real, reported case: "Max Muncy
+    # (2002)" -- a real, known sportsbook convention for disambiguating two real MLB players
+    # who genuinely share the same name, by appending the younger one's own birth year.
+    # Confirmed directly: this used to normalize to "max muncy 2002", never matching the
+    # roster's own real "Max Muncy" -> "max muncy" -- the parentheses themselves were already
+    # stripped by the real regex above, but the bare digits inside them were not (they're valid
+    # a-z0-9 characters, so the general cleanup step above correctly left them alone). A 4-digit
+    # token from 1900-2099 is genuinely never part of a real player's own name, so stripping it
+    # here carries no real risk of stripping something meaningful.
+    s = re.sub(r"\b(19|20)\d{2}\b", " ", s)
     return re.sub(r"\s+", " ", s).strip()
  
  

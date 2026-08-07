@@ -14,6 +14,41 @@ import mlb_engine as E
 import calibration_corrections as CC
 import player_calibration_corrections as PCC
 
+
+# ----------------------------------------------------------------- normalize_name
+def test_normalize_name_strips_accents_and_punctuation():
+    assert P.normalize_name("José Ramírez") == "jose ramirez"
+    assert P.normalize_name("O'Neill") == "o neill"
+    print("✓ normalize_name strips real accents and punctuation")
+
+
+def test_normalize_name_strips_generational_suffixes():
+    assert P.normalize_name("George Lombard Jr.") == "george lombard"
+    assert P.normalize_name("Daniel Lynch IV") == "daniel lynch"
+    assert P.normalize_name("Robinson Cano Sr") == "robinson cano"
+    print("✓ normalize_name strips real generational suffixes (Jr/Sr/II/III/IV/V)")
+
+
+def test_normalize_name_strips_birth_year_disambiguator():
+    # ADDED DIRECTLY ON REQUEST, a real, confirmed fix for a real, reported case: "Max Muncy
+    # (2002)" -- a real, known sportsbook convention for disambiguating two real MLB players
+    # who genuinely share the same name, by appending the younger one's own birth year.
+    # Confirmed directly from a real, live Edge Board run showing this exact name failing to
+    # match the roster's own plain "Max Muncy" before this fix.
+    assert P.normalize_name("Max Muncy (2002)") == P.normalize_name("Max Muncy") == "max muncy"
+    print("✓ normalize_name strips a real birth-year disambiguator, matching the plain roster name")
+
+
+def test_normalize_name_does_not_strip_a_real_jersey_or_stat_number_mid_name():
+    # A real, deliberate boundary check for the new year-stripping regex above: it must only
+    # strip a real, standalone 4-digit token that looks like a year (1900-2099), not silently
+    # eat digits that happen to appear as their own separate word for an unrelated real reason.
+    # No real MLB player has a bare number as part of their own name, but this locks in the
+    # real regex's own actual scope rather than assuming it.
+    assert P.normalize_name("Player 23") == "player 23"   # not a 4-digit year -- left alone
+    print("✓ normalize_name's new year-stripping only matches a real 4-digit year token, not any bare number")
+
+
 # build_best_bets now looks up a real calibration correction per market (see projections.py's
 # own comment at its call site) via CC.latest_fit, which resolves to CC.DB_PATH when no explicit
 # db_path is passed -- exactly what every one of this file's existing tests does, since they
