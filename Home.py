@@ -8,8 +8,10 @@ import pytz as _pytz
 _ET = _pytz.timezone("US/Eastern")
 
 C.base_css()
-C.hero_banner("⚾", "H2 Sports — MLB Model Dashboard",
-             "Live matchup analytics powered by the public MLB Stats API")
+C.hero_banner("📈", "H2 Sports — The Sports Trading Desk",
+             "Trade sports, don't bet sports. Every prop priced, every position sized with "
+             "discipline, every result graded against the closing line. This is a day-trading "
+             "tool for real analysts — not a picks service, not a betting platform.")
 
 # Sport selector -- primary location is here in the main content area, not the sidebar.
 # Streamlit's st.navigation always injects page links at the top of the sidebar regardless

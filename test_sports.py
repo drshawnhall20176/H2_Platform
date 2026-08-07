@@ -178,6 +178,50 @@ def test_game_watch_bullpen_freshness_display_is_genuinely_inverted_from_fatigue
     print("✓ Game Watch's Bullpen freshness display now genuinely shows freshness, not the raw fatigue fraction it used to show under that label")
 
 
+def test_pitching_slate_consolidated_across_all_real_callers():
+    # A REAL, CONFIRMED FIX found in a real module-audit pass: SIX separate real call sites
+    # (not the three first found) independently called E.build_pitching_slate directly or
+    # through their own local, byte-for-byte-identical wrappers -- First Innings Totals,
+    # Bullpen Watch, and Game Watch (found first), plus Model Dashboard's own real backtest
+    # loop, MLB Player Lines, and MLB Matchup Lab page 9 (found in a second, broader sweep of
+    # the same underlying call, under different wrapper names like load_pitchers). Confirms all
+    # six now genuinely call the one, real, shared cache instead.
+    for filename in ("27_MLB_First_Innings_Totals.py", "5_Bullpen_Watch.py", "6_Game_Watch.py",
+                     "17_Model_Dashboard.py", "26_MLB_Player_Lines.py", "9_Matchup_Lab.py"):
+        src = (_HERE / "views" / filename).read_text()
+        assert "import mlb_shared_cache as MSC" in src, f"{filename} must import the shared cache module"
+        assert "MSC.load_pitching_slate_cached(" in src, f"{filename} must call the real, shared cached function"
+        assert "E.build_pitching_slate(" not in src, (
+            f"{filename} must not still call the real, unshared function directly")
+    print("✓ All six real callers now share one real cached call for build_pitching_slate, not six separate ones")
+
+
+def test_hitter_slate_consolidated_across_all_real_callers():
+    # A REAL, CONFIRMED FIX, the same real class of problem as the pitching-slate one: MLB
+    # Player Lines and MLB Matchup Lab (page 9) each independently defined a byte-for-byte-
+    # identical local wrapper around E.build_slate(date_str) too.
+    for filename in ("26_MLB_Player_Lines.py", "9_Matchup_Lab.py"):
+        src = (_HERE / "views" / filename).read_text()
+        assert "MSC.load_hitter_slate_cached(" in src, f"{filename} must call the real, shared cached function"
+        assert "def load_hitters(" not in src, f"{filename} must not still define its own local, now-redundant wrapper"
+    print("✓ Both real callers now share one real cached call for the hitter slate, not two separate ones")
+
+
+def test_bullpen_fatigue_fetch_consolidated_across_all_three_real_callers():
+    # A REAL, CONFIRMED FIX found in the same real module-audit pass: three separate view files
+    # each independently cached the exact same real, expensive fetch (E.get_team_bullpen_
+    # fatigue). Unlike the pitching-slate case, each page's own post-processing genuinely
+    # differs (Bullpen Watch also names the most-taxed pitcher, Pitching Lab enriches with FIP
+    # metrics) -- so only the fetch itself is shared, confirmed here, not a forced identical shape.
+    for filename in ("6_Game_Watch.py", "5_Bullpen_Watch.py", "7_#L01f3af_Pitching_Lab.py"):
+        src = (_HERE / "views" / filename).read_text()
+        assert "import mlb_shared_cache as MSC" in src, f"{filename} must import the shared cache module"
+        assert "MSC.get_team_bullpen_fatigue_cached(" in src, f"{filename} must call the real, shared cached fetch"
+        assert "E.get_team_bullpen_fatigue(" not in src, (
+            f"{filename} must not still call the real, unshared fetch directly")
+    print("✓ All three real callers (Game Watch, Bullpen Watch, Pitching Lab) now share one real cached fetch, each keeping its own real post-processing")
+
+
 def test_every_view_file_has_a_matching_meta_entry():
     # Regression guard for a real, reported bug: a new page (24_Highlights.py) was added to
     # views/ without a matching entry in streamlit_app.py's meta dict, so it silently fell back
@@ -349,7 +393,14 @@ def test_first_innings_totals_view_file_uses_platform_conventions():
     assert 'C.page_header(' in src
     assert 'sports.require_sport(["MLB"]' in src
 
-    for call in ("E.build_pitching_slate(", "E.pair_pitching_slate_by_game(",
+    # A REAL, CONFIRMED FIX to this test itself: E.build_pitching_slate is no longer called
+    # directly in this view -- it now goes through mlb_shared_cache.load_pitching_slate_cached,
+    # a real, deliberate consolidation (this exact call used to be duplicated as three separate,
+    # byte-for-byte-identical local @st.cache_data wrappers across this file, Bullpen Watch, and
+    # Game Watch; see mlb_shared_cache.py's own module docstring for the full reasoning). The
+    # real underlying work still happens in mlb_engine, just reached through the shared cache
+    # now, so this check follows that real call chain instead.
+    for call in ("MSC.load_pitching_slate_cached(", "E.pair_pitching_slate_by_game(",
                 "E.get_team_recent_first_innings_runs(",
                 "E.get_pitcher_recent_first_innings_allowed(",
                 "P.project_team_first_innings_total(", "P.prob_over_first_innings_line("):
