@@ -1458,20 +1458,21 @@ def test_get_pitcher_recent_first_innings_allowed_respects_games_back(monkeypatc
 
 
 # ----------------------------------------------------------------- get_pitcher_recent_games
-def _fake_start_rich(game_date, ip, er, hits, k, is_home, game_time):
+def _fake_start_rich(game_date, ip, er, hits, k, is_home, game_time, bb=0):
     return {"gamePk": 1, "game_date": game_date, "isHome": is_home, "_game_time": game_time,
-           "stat": {"inningsPitched": ip, "earnedRuns": er, "hits": hits, "strikeOuts": k}}
+           "stat": {"inningsPitched": ip, "earnedRuns": er, "hits": hits, "strikeOuts": k,
+                    "baseOnBalls": bb}}
 
 
 def test_get_pitcher_recent_games_returns_chart_ready_fields(monkeypatch):
-    starts = [_fake_start_rich("2026-07-10", "6.0", 1, 4, 8, True, "2026-07-10T18:10:00Z")]
+    starts = [_fake_start_rich("2026-07-10", "6.0", 1, 4, 8, True, "2026-07-10T18:10:00Z", bb=2)]
     monkeypatch.setattr(E, "get_pitcher_starts_this_season",
                         lambda pid, season, before_date=None: starts)
     games = E.get_pitcher_recent_games(123, 2026, "2026-07-20")
     assert games == [{"game_date": "2026-07-10", "outs": 18, "hits_allowed": 4.0,
-                      "earned_runs": 1.0, "strikeouts": 8.0}]
+                      "earned_runs": 1.0, "strikeouts": 8.0, "walks": 2.0}]
     print("✓ get_pitcher_recent_games returns the exact chart-ready fields (outs, hits_allowed, "
-         "earned_runs, strikeouts) per start")
+         "earned_runs, strikeouts, walks) per start")
 
 
 def test_get_pitcher_recent_games_venue_filter(monkeypatch):
@@ -1542,6 +1543,24 @@ def test_get_hitter_recent_games_computes_real_hrr(monkeypatch):
     assert "outs" not in g
     print("✓ get_hitter_recent_games computes real per-game HRR (hits+runs+rbi actually "
          "recorded), not simulated market values, and no longer includes the mistaken Outs field")
+
+
+def test_get_hitter_recent_games_includes_walks(monkeypatch):
+    # ADDED DIRECTLY ON REQUEST: "Batter Walks" is already a real, established, graded market
+    # elsewhere on this platform -- confirms the real baseOnBalls field is genuinely extracted
+    # here too, not just added to the pitcher side. A dedicated, standalone fake dict here
+    # rather than extending _fake_hitter_gamelog's own shared tuple shape, to avoid any real
+    # risk to the other real tests already built on that helper's own existing shape.
+    fake = {"stats": [{"splits": [
+        {"date": "2026-07-10", "isHome": True,
+         "stat": {"plateAppearances": 4, "atBats": 3, "hits": 1, "totalBases": 1,
+                  "runs": 1, "rbi": 0, "homeRuns": 0, "strikeOuts": 0, "baseOnBalls": 1}},
+    ]}]}
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake)
+    games = E.get_hitter_recent_games(456, 2026)
+    assert len(games) == 1
+    assert games[0]["walks"] == 1.0
+    print("✓ get_hitter_recent_games correctly extracts the real baseOnBalls field as walks")
 
 
 def test_get_hitter_recent_games_venue_filter(monkeypatch):

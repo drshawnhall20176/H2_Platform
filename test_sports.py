@@ -261,6 +261,19 @@ def test_nfl_week_resolution_consolidated_across_both_real_callers():
     print("✓ Both real NFL injury callers now share one real cached week resolution, each keeping its own final injury lookup")
 
 
+def test_player_lines_includes_pitcher_and_batter_walks():
+    # ADDED DIRECTLY ON REQUEST: "Pitcher Walks" and "Batter Walks" are already real,
+    # established, graded markets elsewhere on this platform -- confirms both are genuinely
+    # wired into Player Lines' own chart specs, using the same real DEFAULT_LINES source every
+    # other entry already uses, not new, invented default values.
+    src = (_HERE / "views" / "26_MLB_Player_Lines.py").read_text()
+    assert '("walks", "Pitcher Walks", P.DEFAULT_LINES["Pitcher Walks"])' in src, (
+        "Pitcher Walks must be added to PITCHER_CHARTS using the real, established default line")
+    assert '("walks", "Batter Walks", P.DEFAULT_LINES["Batter Walks"])' in src, (
+        "Batter Walks must be added to BATTER_CHARTS using the real, established default line")
+    print("✓ Player Lines genuinely includes both Pitcher Walks and Batter Walks, using the real, already-established default lines")
+
+
 def test_ncaaf_has_no_dedicated_pages_yet_matching_the_real_audit_finding():
     # A REAL, CONFIRMED FINDING from the same real module-audit pass that found NFL's own
     # redundancy: at the time ncaaf_shared_cache.py was built (proactively, before the problem

@@ -1917,6 +1917,14 @@ def get_pitcher_recent_games(pitcher_id: int, season: int, before_date: Optional
             "hits_allowed": safe_float(stat.get("hits")),
             "earned_runs": safe_float(stat.get("earnedRuns")),
             "strikeouts": safe_float(stat.get("strikeOuts")),
+            # ADDED DIRECTLY ON REQUEST: "Pitcher Walks" is already a real, established, graded
+            # market elsewhere on this platform (projections.DEFAULT_LINES["Pitcher Walks"]) --
+            # this just exposes the same real baseOnBalls field already present in the SAME
+            # stat dict every other field above already reads from, confirmed against the same
+            # real field name this file's own bb9/WHIP calculations already use. Zero new real
+            # network calls -- the fetch this function wraps (get_pitcher_starts_this_season)
+            # already pulled this data in, it just wasn't surfaced here before now.
+            "walks": safe_float(stat.get("baseOnBalls")),
         })
     return out
 
@@ -1994,6 +2002,13 @@ def get_hitter_recent_games(player_id: int, season: int, before_date: Optional[s
             "hrr": hits + safe_float(stat.get("runs")) + safe_float(stat.get("rbi")),
             "hr": safe_float(stat.get("homeRuns")),
             "strikeouts": safe_float(stat.get("strikeOuts")),
+            # ADDED DIRECTLY ON REQUEST: "Batter Walks" is already a real, established, graded
+            # market elsewhere on this platform (projections.DEFAULT_LINES["Batter Walks"]) --
+            # this just exposes the same real baseOnBalls field already present in the SAME
+            # stat dict every other field above already reads from. Zero new real network
+            # calls -- the fetch this function wraps already pulled this data in, it just
+            # wasn't surfaced here before now.
+            "walks": safe_float(stat.get("baseOnBalls")),
         })
     return out
 
