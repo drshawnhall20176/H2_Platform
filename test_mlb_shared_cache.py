@@ -94,6 +94,21 @@ def test_load_pitching_slate_cached_is_genuinely_cached():
     print("✓ load_pitching_slate_cached is genuinely decorated by st.cache_data, not accidentally uncached")
 
 
+def test_get_all_active_player_names_cached_wraps_the_real_engine_call():
+    fake_names = {"Kevin Gausman", "Alí Sánchez"}
+    with patch.object(MSC.E, "get_all_active_player_names", return_value=fake_names) as mock_fetch:
+        result = MSC.get_all_active_player_names_cached.__wrapped__(2026)
+    mock_fetch.assert_called_once_with(2026)
+    assert result == fake_names
+    print("✓ get_all_active_player_names_cached correctly wraps mlb_engine.get_all_active_player_names with the real season passed through")
+
+
+def test_get_all_active_player_names_cached_is_genuinely_cached():
+    assert hasattr(MSC.get_all_active_player_names_cached, "__wrapped__"), (
+        "get_all_active_player_names_cached must genuinely be decorated by st.cache_data, not a plain, uncached function")
+    print("✓ get_all_active_player_names_cached is genuinely decorated by st.cache_data, not accidentally uncached")
+
+
 def test_mlb_shared_cache_importable_without_streamlit():
     # THE real, confirmed production incident this class of fix guards against, reproduced
     # directly here, not just asserted from source text -- the exact same real pattern already
@@ -129,6 +144,8 @@ def test_mlb_shared_cache_importable_without_streamlit():
             "get_team_injuries_cached must not be defined at all without streamlit either")
         assert not hasattr(MSC_no_streamlit, "load_slate_with_fip_cached"), (
             "load_slate_with_fip_cached must not be defined at all without streamlit either")
+        assert not hasattr(MSC_no_streamlit, "get_all_active_player_names_cached"), (
+            "get_all_active_player_names_cached must not be defined at all without streamlit either")
         assert MSC_no_streamlit.E is not None, "mlb_engine itself must still import cleanly, unaffected by this module's own streamlit dependency"
     finally:
         builtins.__import__ = real_import

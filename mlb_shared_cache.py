@@ -50,6 +50,13 @@ A FIFTH CONSOLIDATION, load_slate_with_fip_cached, found in a THIRD, later audit
 Engine and Pitching Lab each independently called build_slate WITH an explicit fip_constant
 before diverging into genuinely different downstream work. The same real narrow-consolidation
 shape as get_team_bullpen_fatigue_cached above -- share only the identical, expensive fetch.
+
+A SIXTH ADDITION, get_all_active_player_names_cached: not a consolidation of an existing
+redundancy like the five above, but a NEW real capability, added directly on request, that lets
+Edge Board's own diagnostic panel tell a genuine, fixable name mismatch apart from a real,
+active player who simply isn't part of tonight's specific slate (see mlb_engine.
+get_all_active_player_names' own docstring for the full, confirmed reasoning). A real, notably
+longer TTL than every other entry here -- see that function's own docstring below for why.
 """
 
 from __future__ import annotations
@@ -146,3 +153,18 @@ if st is not None:
         call to best_bets_data.fetch_mlb_real_lines, which is ALREADY shared at its own source
         and needed no further consolidation) stays exactly as it was."""
         return E.build_slate(date_str, fip_constant)
+
+    @st.cache_data(ttl=21600, show_spinner=False)
+    def get_all_active_player_names_cached(season: int) -> set:
+        """Cached companion to mlb_engine.get_all_active_player_names -- the ONE real, shared
+        entry point for "every real player active in the majors this season" any page needing
+        it should call.
+
+        ADDED DIRECTLY ON REQUEST, a real, confirmed fix for a real, reported case (see that
+        function's own docstring for the full reasoning). TTL set to 21600s (6 hours), a real,
+        deliberate departure from every other TTL in this module -- every other real lookup here
+        (a slate, an injury report, a bullpen state) can genuinely change within minutes, but a
+        real trade or a real roster move is a genuinely rare, discrete event, not a continuous
+        one -- caching this for 6 hours means one real, shared league-wide fetch covers an
+        entire real trading session's worth of page loads, not one fetch per page per rerun."""
+        return E.get_all_active_player_names(season)

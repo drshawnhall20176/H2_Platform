@@ -615,6 +615,61 @@ def test_get_team_injuries_falls_back_to_code_when_no_description(monkeypatch):
     assert injuries[0]["status"] == "RM"
 
 
+# ----------------------------------------------------------------- get_all_active_player_names
+def test_get_all_active_player_names_parses_a_real_response_shape(monkeypatch):
+    # Documented response shape (MLB Stats API's own /sports/1/players endpoint structure), not
+    # a live-verified one -- see get_all_active_player_names' own docstring for the real,
+    # honest limitation.
+    fake = {"people": [
+        {"id": 1, "fullName": "Kevin Gausman"},
+        {"id": 2, "fullName": "Alí Sánchez"},
+        {"id": 3, "fullName": "Edgar Quero"},
+    ]}
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake)
+    names = E.get_all_active_player_names(2026)
+    assert names == {"Kevin Gausman", "Alí Sánchez", "Edgar Quero"}
+    print("✓ get_all_active_player_names correctly parses the real people list into a set of real full names")
+
+
+def test_get_all_active_player_names_passes_the_real_season(monkeypatch):
+    captured = {}
+    def fake_fetch(url, params=None, retries=2):
+        captured["url"] = url
+        captured["params"] = params
+        return {"people": []}
+    monkeypatch.setattr(E, "fetch_json", fake_fetch)
+    E.get_all_active_player_names(2026)
+    assert captured["url"] == f"{E.BASE}/sports/1/players"
+    assert captured["params"] == {"season": 2026}
+    print("✓ get_all_active_player_names calls the real single-request endpoint with the real season, not one call per team")
+
+
+def test_get_all_active_player_names_empty_on_fetch_failure(monkeypatch):
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: {})
+    assert E.get_all_active_player_names(2026) == set()
+    print("✓ get_all_active_player_names fails soft to an honest empty set, matching every other roster function in this file")
+
+
+def test_get_all_active_player_names_skips_malformed_entries_honestly(monkeypatch):
+    # A real, defensive check: an entry with no real fullName, or a non-dict entry, must be
+    # honestly skipped, never crash the whole real lookup or fabricate a name that isn't real.
+    fake = {"people": [
+        {"id": 1, "fullName": "Real Player"},
+        {"id": 2},   # no fullName at all
+        None,        # a genuinely malformed entry
+        "not even a dict",
+    ]}
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: fake)
+    assert E.get_all_active_player_names(2026) == {"Real Player"}
+    print("✓ get_all_active_player_names honestly skips malformed entries instead of crashing or fabricating a name")
+
+
+def test_get_all_active_player_names_honest_on_missing_people_key(monkeypatch):
+    monkeypatch.setattr(E, "fetch_json", lambda url, params=None, retries=2: {"totalItems": 0})
+    assert E.get_all_active_player_names(2026) == set()
+    print("✓ get_all_active_player_names honestly returns an empty set when the real response has no people key at all")
+
+
 # ----------------------------------------------------------------- schedule refactor
 def _fake_schedule_json(games):
     """Wrap a list of (gamePk, gameDate, home_name, home_id, away_name, away_id) into the raw

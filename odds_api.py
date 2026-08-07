@@ -675,7 +675,8 @@ def market_lines_for_slate(offers: List[Dict], projections_module=None,
 
 
 def compute_edges(index: Dict, offers: List[Dict],
-                  projections_module=None, known_names: Optional[set] = None) -> Tuple[List[Dict], Dict]:
+                  projections_module=None, known_names: Optional[set] = None,
+                  all_active_names: Optional[set] = None) -> Tuple[List[Dict], Dict]:
     """Join book offers to the model index and compute EV/edge per playable side.
 
     `projections_module` supplies normalize_name for the sport — defaults to MLB's projections;
@@ -688,19 +689,36 @@ def compute_edges(index: Dict, offers: List[Dict],
     (a real, fixable bug) or a real player who's genuinely on tonight's roster but has too
     little real, usable data to honestly price (a real, honest gap, not a bug -- a real trade,
     a real return from injury, a real rookie debut). With it, each unmatched entry is tagged
-    "reason": "on_roster_no_data" when the real, normalized name is in known_names, or
-    "reason": "name_mismatch" when it genuinely isn't found anywhere on the real roster at all
-    -- the second category is the one actually worth chasing down; the first isn't a bug to fix,
-    it's the model correctly declining to guess. Backward compatible: every existing real caller
-    that doesn't pass known_names gets every unmatched entry tagged "reason": "unknown" (the
-    exact same real, undifferentiated behavior as before this fix), not a crash or a changed
-    default judgment call."""
+    "reason": "on_roster_no_data" when the real, normalized name is in known_names.
+
+    all_active_names (optional, a set of real, normalized names of every player active in the
+    majors this season -- see mlb_engine.get_all_active_player_names' own docstring for the
+    full, confirmed reasoning): a SECOND real, confirmed fix, layered on the first after a real,
+    reported follow-up: real, established, active players (Kevin Gausman, Alí Sánchez, Edgar
+    Quero, Zach Thornton) were still landing in the SAME "genuinely doesn't appear anywhere"
+    bucket as a true spelling bug, even though none of them had a real name problem at all --
+    they simply weren't part of TONIGHT's specific slate (a real trade with no new-team debut
+    yet, a different team's game, a bench day). With this also passed, that real case is tagged
+    "reason": "not_playing_tonight" instead of "name_mismatch" -- leaving "name_mismatch" as the
+    one real category that's actually worth chasing down: a name that isn't found on tonight's
+    roster AND isn't a real, currently active MLB player at all under any real spelling.
+
+    Backward compatible at every layer: any real caller that skips known_names gets "unknown"
+    for every entry (the exact original, undifferentiated behavior); a caller that passes
+    known_names but not all_active_names still gets the real two-way split from the first fix,
+    with the new third category simply unavailable, not a crash or a silently wrong guess."""
     if projections_module is None:
         import projections as projections_module
     P = projections_module
     rows: List[Dict] = []
     matched = unmatched = 0
     unmatched_names: List[Dict[str, str]] = []
+    # Pre-normalized ONCE here, not re-normalized per unmatched offer inside the loop below --
+    # all_active_names can genuinely hold thousands of real league-wide names, and re-running
+    # normalize_name across all of them for every single unmatched offer would be a real,
+    # needless O(offers × names) cost instead of the honest O(offers + names) this achieves.
+    normalized_active_names = ({P.normalize_name(n) for n in all_active_names}
+                               if all_active_names is not None else None)
 
     for off in offers:
         mkey, point = off["market"], off["point"]
@@ -716,8 +734,12 @@ def compute_edges(index: Dict, offers: List[Dict],
             # run, instead of guessing at names that might not even be the ones causing trouble.
             if known_names is None:
                 reason = "unknown"
+            elif nm in known_names:
+                reason = "on_roster_no_data"
+            elif normalized_active_names is not None and nm in normalized_active_names:
+                reason = "not_playing_tonight"
             else:
-                reason = "on_roster_no_data" if nm in known_names else "name_mismatch"
+                reason = "name_mismatch"
             unmatched_names.append({"player": off["player"], "market": mkey, "reason": reason})
             continue
         matched += 1

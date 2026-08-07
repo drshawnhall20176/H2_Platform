@@ -754,6 +754,62 @@ def test_known_roster_names_and_compute_edges_work_together_end_to_end():
     print("✓ known_roster_names and compute_edges work together end to end, correctly separating a real on-roster player from a real genuine mismatch")
 
 
+def test_compute_edges_categorizes_a_real_active_player_not_playing_tonight():
+    # A REAL, CONFIRMED SECOND FIX, layered on the first: a live Edge Board run showed real,
+    # established, active players (Kevin Gausman -- just traded, no Cubs debut yet; Alí Sánchez
+    # -- active Yankees catcher; Edgar Quero -- active White Sox catcher with real 2026 stats;
+    # Zach Thornton -- active Mets rookie) STILL landing in the same "genuinely doesn't appear
+    # anywhere" bucket as a true spelling bug, even though none of them had a real name problem
+    # -- they simply weren't part of tonight's specific slate. Confirms compute_edges correctly
+    # tags this real case "not_playing_tonight" when all_active_names is passed, instead of the
+    # misleading "name_mismatch".
+    import projections as P
+    index = {}
+    known_names = set()   # empty -- none of these players is on TONIGHT's specific slate
+    all_active_names = {"Kevin Gausman", "Alí Sánchez", "Edgar Quero", "Zach Thornton"}
+    offers = [{"player": "Kevin Gausman", "market": "pitcher_outs", "point": 15.5,
+              "over": {"draftkings": -110}, "under": {"draftkings": -110}}]
+    rows, stats = O.compute_edges(index, offers, projections_module=P,
+                                  known_names=known_names, all_active_names=all_active_names)
+    assert stats["unmatched_names"] == [
+        {"player": "Kevin Gausman", "market": "pitcher_outs", "reason": "not_playing_tonight"}]
+    print("✓ compute_edges correctly tags a real, active player not on tonight's slate as 'not_playing_tonight', not a misleading name mismatch")
+
+
+def test_compute_edges_still_categorizes_a_real_genuine_mismatch_with_all_active_names_passed():
+    # The real, actually-worth-fixing category must still work correctly once a third real
+    # category exists -- a genuinely unknown name must not accidentally fall into
+    # "not_playing_tonight" just because all_active_names was passed.
+    import projections as P
+    index = {}
+    known_names = set()
+    all_active_names = {"Kevin Gausman"}   # a real, but genuinely different, active player
+    offers = [{"player": "Some Totally Different Guy", "market": "batter_hits", "point": 1.5,
+              "over": {"draftkings": 200}, "under": {"draftkings": -250}}]
+    rows, stats = O.compute_edges(index, offers, projections_module=P,
+                                  known_names=known_names, all_active_names=all_active_names)
+    assert stats["unmatched_names"] == [
+        {"player": "Some Totally Different Guy", "market": "batter_hits", "reason": "name_mismatch"}]
+    print("✓ compute_edges still correctly tags a real, genuine mismatch as 'name_mismatch' even when all_active_names is also passed")
+
+
+def test_compute_edges_normalizes_all_active_names_for_a_real_accented_match():
+    # A real, direct check that normalization is genuinely applied to all_active_names too, not
+    # just the book's own offer -- the real Alí Sánchez case depends on this: MLB's own API
+    # returns the real accented spelling, a book might post either spelling, and both must
+    # normalize to the same real string for this real match to work at all.
+    import projections as P
+    index = {}
+    known_names = set()
+    all_active_names = {"Alí Sánchez"}   # the real, accented spelling from MLB's own API
+    offers = [{"player": "Ali Sanchez", "market": "batter_hits", "point": 0.5,   # book's own unaccented spelling
+              "over": {"draftkings": -110}, "under": {"draftkings": -110}}]
+    rows, stats = O.compute_edges(index, offers, projections_module=P,
+                                  known_names=known_names, all_active_names=all_active_names)
+    assert stats["unmatched_names"][0]["reason"] == "not_playing_tonight"
+    print("✓ compute_edges correctly normalizes all_active_names too, so a real accent difference between the book and MLB's own API doesn't cause a false name_mismatch")
+
+
 # ----------------------------------------------------------------- real_market_prob
 def test_real_market_prob_over_and_under_sum_to_one():
     import projections as P

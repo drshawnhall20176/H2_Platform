@@ -1066,6 +1066,39 @@ def get_team_injuries(team_id: int) -> List[Dict[str, Any]]:
     return out
 
 
+def get_all_active_player_names(season: int) -> set:
+    """Every real player who's appeared in the majors this season (any team) -- returns raw,
+    unnormalized full names as MLB's own API spells them; the caller normalizes.
+
+    ADDED DIRECTLY ON REQUEST, a real, confirmed fix for a real, reported case: a live Edge
+    Board run showed real, established, active players (Kevin Gausman, Alí Sánchez, Edgar
+    Quero, Zach Thornton) all landing in the "genuinely doesn't appear anywhere on tonight's
+    roster" bucket, correctly, since none of them was a confirmed starter in tonight's specific
+    games -- but that label reads as a real spelling bug when the real, honest reason is
+    entirely different: the player just isn't part of TONIGHT's specific slate at all (a
+    different team's game, a bench day, a real trade with no new-team debut yet). This function
+    exists to let the caller tell that real, honest case apart from a genuine, fixable name
+    mismatch.
+
+    ONE real call, not thirty -- {BASE}/sports/1/players?season={season} returns every real
+    player across the whole league in a single request, a real, deliberate choice over the
+    obvious-but-expensive alternative of fetching each of the 30 real team rosters separately.
+
+    HONEST LIMITATION, same posture as this file's other roster functions: not verified against
+    a live response (statsapi.mlb.com unreachable from this sandbox) -- built defensively
+    (every field access uses .get(...), never assumes a key exists) so an unexpected real
+    response shape degrades to an honest empty set rather than a crash. Fails soft, always: any
+    fetch problem returns an honest empty set, the same real posture get_team_injuries and
+    every other roster function in this file already has -- a real fetch failure here must
+    never break the board, and must never fabricate a name that isn't real."""
+    try:
+        data = fetch_json(f"{BASE}/sports/1/players", params={"season": season})
+    except Exception:
+        return set()
+    people = data.get("people") or []
+    return {p.get("fullName") for p in people if isinstance(p, dict) and p.get("fullName")}
+
+
 def get_team_bullpen_fatigue(team_id: int, before_date: str, days_back: int = 5) -> List[Dict[str, Any]]:
     """Per-pitcher recent-appearance workload for this team, over the days_back calendar days
     STRICTLY BEFORE before_date (before_date itself, and anything on/after it, is never included
