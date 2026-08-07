@@ -237,6 +237,24 @@ def test_nfl_slate_consolidated_across_all_real_callers():
     print("✓ All four real NFL callers now share one real cached fetch, each keeping its own real post-processing, imports intact")
 
 
+def test_ncaaf_has_no_dedicated_pages_yet_matching_the_real_audit_finding():
+    # A REAL, CONFIRMED FINDING from the same real module-audit pass that found NFL's own
+    # redundancy: at the time ncaaf_shared_cache.py was built (proactively, before the problem
+    # exists), NCAAF had zero dedicated view files of its own -- confirmed directly, not
+    # assumed. This test exists to flag itself the moment that's no longer true: once a real
+    # NCAAF-dedicated page gets built, it should reach for ncaaf_shared_cache.load_ncaaf_slate_
+    # cached from its own first line, not define a new local wrapper -- the exact real mistake
+    # NFL's own four pages made independently before being found and fixed after the fact.
+    ncaaf_view_files = [f for f in (_HERE / "views").glob("*.py")
+                       if "import ncaaf_engine as E" in f.read_text()]
+    assert ncaaf_view_files == [], (
+        f"NCAAF now has its own dedicated view file(s): {[f.name for f in ncaaf_view_files]} -- "
+        f"time to apply the same real audit NFL already went through: read each one's own "
+        f"cached loaders, confirm which genuinely duplicate the same real fetch, and wire them "
+        f"into ncaaf_shared_cache.py the same way, BEFORE it ships, not after")
+    print("✓ Confirms NCAAF still has no dedicated pages of its own -- ncaaf_shared_cache.py is ready and waiting for when that changes")
+
+
 def test_bullpen_fatigue_fetch_consolidated_across_all_three_real_callers():
     # A REAL, CONFIRMED FIX found in the same real module-audit pass: three separate view files
     # each independently cached the exact same real, expensive fetch (E.get_team_bullpen_
