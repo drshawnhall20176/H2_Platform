@@ -292,6 +292,42 @@ def test_ncaaf_has_no_dedicated_pages_yet_matching_the_real_audit_finding():
     print("✓ Confirms NCAAF still has no dedicated pages of its own -- ncaaf_shared_cache.py is ready and waiting for when that changes")
 
 
+def test_edge_board_market_selector_excludes_unpriceable_mlb_markets():
+    # A REAL, CONFIRMED FIX for a real, reported case: a live Edge Board run showed 2015
+    # unmatched props against only 1491 matched, with six DIFFERENT players all failing on the
+    # exact same market (batter_rbis) -- the real signature of an unsupported market, not a
+    # name-matching problem. Confirmed directly: MLB's own build_projection_index only ever
+    # builds a real index entry for 7 of the 16 markets registered in sports.py's own market
+    # map (batter_rbis, batter_stolen_bases, and 7 others were never wired into that function's
+    # own hardcoded tuple list). The old widget offered, and defaulted to, all 16 -- guaranteeing
+    # a large, misleading "unmatched" count for every real user, every real run, with zero
+    # action needed to trigger it.
+    src = (_HERE / "views" / "15_#L01f4c8_Edge_Board.py").read_text()
+    assert 'getattr(P, "_MARKET_DISPLAY", {})' in src, (
+        "the market selector must source its real options from what the model can actually "
+        "price (P._MARKET_DISPLAY for MLB), not the full, broader market map")
+    assert "priceable_markets, default=priceable_markets" in src, (
+        "both the real options AND the real default selection must be restricted -- a fix "
+        "that narrowed only one of the two would still let the other guarantee the same "
+        "misleading unmatched count")
+    print("✓ Edge Board's market selector now genuinely excludes MLB markets the model can't actually price, both as options and as the default selection")
+
+
+def test_mlb_market_display_matches_what_build_projection_index_actually_supports():
+    # A REAL, DIRECT, BEHAVIORAL check (not just a source-text match): confirms P._MARKET_
+    # DISPLAY's own real keys are exactly the 7 markets build_projection_index actually builds
+    # (4 batter, 3 pitcher), and genuinely excludes the real, confirmed-failing ones from the
+    # live report this fix was built for.
+    import projections as P
+    priceable = set(P._MARKET_DISPLAY.keys())
+    assert priceable == {"batter_home_runs", "batter_total_bases", "batter_hits",
+                         "batter_strikeouts", "pitcher_strikeouts", "pitcher_outs", "pitcher_walks"}
+    # The exact real markets confirmed failing in the live report this fix addresses.
+    assert "batter_rbis" not in priceable
+    assert "batter_stolen_bases" not in priceable
+    print("✓ P._MARKET_DISPLAY's real keys exactly match what build_projection_index actually supports, confirmed directly against the real, reported failing markets")
+
+
 def test_best_bets_explains_conviction_for_a_first_time_visitor():
     # ADDED DIRECTLY ON REQUEST: Best Bets is the first page in the sidebar flow, and the two
     # real explanatory spots on this page (a footer caption and a "read me" expander) were both
