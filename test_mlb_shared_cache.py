@@ -68,6 +68,21 @@ def test_get_team_injuries_cached_is_genuinely_cached():
     print("✓ get_team_injuries_cached is genuinely decorated by st.cache_data, not accidentally uncached")
 
 
+def test_load_slate_with_fip_cached_wraps_build_slate_with_the_real_fip_constant():
+    fake_result = ([{"Hitter": "Test"}], [{"label": "Team A @ Team B"}])
+    with patch.object(MSC.E, "build_slate", return_value=fake_result) as mock_build:
+        result = MSC.load_slate_with_fip_cached.__wrapped__("2026-08-06", 3.10)
+    mock_build.assert_called_once_with("2026-08-06", 3.10)
+    assert result == fake_result
+    print("✓ load_slate_with_fip_cached correctly passes the real date and fip_constant through to build_slate")
+
+
+def test_load_slate_with_fip_cached_is_genuinely_cached():
+    assert hasattr(MSC.load_slate_with_fip_cached, "__wrapped__"), (
+        "load_slate_with_fip_cached must genuinely be decorated by st.cache_data, not a plain, uncached function")
+    print("✓ load_slate_with_fip_cached is genuinely decorated by st.cache_data, not accidentally uncached")
+
+
 def test_load_pitching_slate_cached_is_genuinely_cached():
     # __wrapped__ bypasses Streamlit's own cache for the unit test above (isolating the real
     # logic from Streamlit's runtime, which doesn't have a real session here) -- this confirms
@@ -112,6 +127,8 @@ def test_mlb_shared_cache_importable_without_streamlit():
             "load_hitter_slate_cached must not be defined at all without streamlit either")
         assert not hasattr(MSC_no_streamlit, "get_team_injuries_cached"), (
             "get_team_injuries_cached must not be defined at all without streamlit either")
+        assert not hasattr(MSC_no_streamlit, "load_slate_with_fip_cached"), (
+            "load_slate_with_fip_cached must not be defined at all without streamlit either")
         assert MSC_no_streamlit.E is not None, "mlb_engine itself must still import cleanly, unaffected by this module's own streamlit dependency"
     finally:
         builtins.__import__ = real_import

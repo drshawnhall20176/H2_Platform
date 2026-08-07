@@ -45,6 +45,11 @@ A THIRD CONSOLIDATION, load_hitter_slate_cached, and a FOURTH, get_team_injuries
 SAME real class of problem as load_pitching_slate_cached above -- genuinely byte-for-byte
 identical local wrappers, confirmed directly by reading each pair, differing only in their own
 chosen TTL. Shared here at the shorter (more conservative) of each pair's two original values.
+
+A FIFTH CONSOLIDATION, load_slate_with_fip_cached, found in a THIRD, later audit pass: MLB Dinger
+Engine and Pitching Lab each independently called build_slate WITH an explicit fip_constant
+before diverging into genuinely different downstream work. The same real narrow-consolidation
+shape as get_team_bullpen_fatigue_cached above -- share only the identical, expensive fetch.
 """
 
 from __future__ import annotations
@@ -125,3 +130,19 @@ if st is not None:
         if not team_id:
             return []
         return E.get_team_injuries(team_id)
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def load_slate_with_fip_cached(date_str: str, fip_constant: float):
+        """Cached companion to mlb_engine.build_slate WITH an explicit fip_constant -- a real,
+        genuinely different call (and cache key) from load_hitter_slate_cached above, which
+        calls build_slate with its own default fip_constant instead.
+
+        A REAL, CONFIRMED FIX found in a THIRD real audit pass: MLB Dinger Engine and Pitching
+        Lab each independently ran this exact same real fetch -- confirmed directly by reading
+        both -- before diverging into genuinely different downstream work (Dinger Engine builds
+        hitter-focused weather/split/power context; Pitching Lab builds pitcher-focused
+        projections and FIP regression). Only this shared, identical prefix is consolidated here
+        -- each page's own real, different post-processing (including each page's own separate
+        call to best_bets_data.fetch_mlb_real_lines, which is ALREADY shared at its own source
+        and needed no further consolidation) stays exactly as it was."""
+        return E.build_slate(date_str, fip_constant)

@@ -27,11 +27,17 @@ TTL set to 300s, matching three of the four original wrappers' own real choice (
 600s, the one outlier) -- the shorter, more conservative value, for the same real reason MLB's
 own consolidations picked the shorter of any differing pair: a real slate can change (a real
 inactive, a real lineup update), so fresher data is the safer real default.
+
+A SECOND CONSOLIDATION, resolve_nfl_week_cached, found in a later audit pass: NFL Matchup Lab and
+NFL Hot Hand Engine each independently ran the same real season/schedule/week resolution chain
+before diverging into their own different final injury shapes. Same real pattern as MLB's own
+bullpen-fatigue consolidation -- share only the expensive, identical part, keep each page's own
+different final call local.
 """
 
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 try:
     import streamlit as st
@@ -56,3 +62,26 @@ if st is not None:
         and never calls this function; every real caller of load_nfl_slate_cached is a live
         Streamlit page, which already requires Streamlit to run at all."""
         return E.build_slate(date_str)
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def resolve_nfl_week_cached(date_str: str) -> Tuple[Optional[int], Optional[int]]:
+        """Cached companion to the real season/schedule/week resolution chain (_infer_season ->
+        get_schedule -> _resolve_week) -- the ONE real, shared entry point any NFL page needing
+        to know "what season and week does this date fall in" should call.
+
+        A REAL, CONFIRMED FIX found in a SECOND real audit pass, after the first one (load_nfl_
+        slate_cached above) had already shipped: NFL Matchup Lab and NFL Hot Hand Engine each
+        independently ran this exact same real chain -- confirmed directly by reading both --
+        before diverging into their own different final shapes (Matchup Lab wants two specific
+        teams' injuries as a tuple; Hot Hand Engine wants a whole slate's worth as a dict). Only
+        the expensive, identical part -- season inference plus the real, full-season schedule
+        fetch plus week resolution -- is shared here; each page's own final get_team_injuries
+        call(s) stay local, since those are cheap, targeted, per-team calls that don't need
+        sharing the same way a full season schedule fetch does.
+
+        Returns (season, week) -- either may be None (an honest gap, e.g. a date outside any
+        real season), matching what both original callers already handled themselves."""
+        season = E._infer_season(date_str)
+        schedule = E.get_schedule(season) if season is not None else []
+        week = E._resolve_week(schedule, date_str) if schedule else None
+        return season, week

@@ -218,6 +218,19 @@ def test_injuries_consolidated_across_all_real_callers():
     print("✓ Both real callers now share one real cached call for team injuries, not two separate ones")
 
 
+def test_slate_with_fip_consolidated_across_both_real_callers():
+    # A REAL, CONFIRMED FIX found in a THIRD, later real audit pass: MLB Dinger Engine and
+    # Pitching Lab each independently called E.build_slate WITH an explicit fip_constant --
+    # confirmed directly by reading both -- before diverging into genuinely different real
+    # downstream work (hitter-focused weather/splits vs. pitcher-focused projections).
+    for filename in ("8_#L01f4a3_Dinger_Engine.py", "7_#L01f3af_Pitching_Lab.py"):
+        src = (_HERE / "views" / filename).read_text()
+        assert "MSC.load_slate_with_fip_cached(" in src, f"{filename} must call the real, shared cached function"
+        assert "E.build_slate(date_str, fip_constant)" not in src, (
+            f"{filename} must not still call the real, unshared fetch directly")
+    print("✓ Both real callers now share one real cached call for build_slate-with-fip_constant, not two separate ones")
+
+
 def test_nfl_slate_consolidated_across_all_real_callers():
     # A REAL, CONFIRMED FIX found in the same real module-audit pass, applied to NFL BEFORE it
     # goes live rather than after -- direct request: "this functionality and mindset is going
@@ -235,6 +248,17 @@ def test_nfl_slate_consolidated_across_all_real_callers():
             f"mistake during this exact consolidation once accidentally deleted this import "
             f"instead of adding alongside it, caught by this same real test suite before it shipped")
     print("✓ All four real NFL callers now share one real cached fetch, each keeping its own real post-processing, imports intact")
+
+
+def test_nfl_week_resolution_consolidated_across_both_real_callers():
+    # A REAL, CONFIRMED FIX found in a SECOND, later real audit pass: NFL Matchup Lab and NFL
+    # Hot Hand Engine each independently ran the same real season/schedule/week resolution chain
+    # before diverging into their own different final injury shapes.
+    for filename in ("12_NFL_Matchup_Lab.py", "25_NFL_Hot_Hand_Engine.py"):
+        src = (_HERE / "views" / filename).read_text()
+        assert "NSC.resolve_nfl_week_cached(" in src, f"{filename} must call the real, shared cached resolver"
+        assert "E._infer_season(date_str)" not in src, f"{filename} must not still run the real, unshared chain directly"
+    print("✓ Both real NFL injury callers now share one real cached week resolution, each keeping its own final injury lookup")
 
 
 def test_ncaaf_has_no_dedicated_pages_yet_matching_the_real_audit_finding():

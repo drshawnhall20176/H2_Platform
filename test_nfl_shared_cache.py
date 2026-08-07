@@ -24,6 +24,34 @@ def test_load_nfl_slate_cached_is_genuinely_cached():
     print("✓ load_nfl_slate_cached is genuinely decorated by st.cache_data, not accidentally uncached")
 
 
+def test_resolve_nfl_week_cached_wraps_the_real_chain():
+    fake_schedule = [{"game_id": "1"}]
+    with patch.object(NSC.E, "_infer_season", return_value=2026) as mock_infer, \
+         patch.object(NSC.E, "get_schedule", return_value=fake_schedule) as mock_sched, \
+         patch.object(NSC.E, "_resolve_week", return_value=5) as mock_week:
+        result = NSC.resolve_nfl_week_cached.__wrapped__("2026-10-05")
+    mock_infer.assert_called_once_with("2026-10-05")
+    mock_sched.assert_called_once_with(2026)
+    mock_week.assert_called_once_with(fake_schedule, "2026-10-05")
+    assert result == (2026, 5)
+    print("✓ resolve_nfl_week_cached correctly chains _infer_season -> get_schedule -> _resolve_week")
+
+
+def test_resolve_nfl_week_cached_honest_none_when_season_unresolvable():
+    with patch.object(NSC.E, "_infer_season", return_value=None), \
+         patch.object(NSC.E, "get_schedule") as mock_sched:
+        result = NSC.resolve_nfl_week_cached.__wrapped__("1999-01-01")
+    mock_sched.assert_not_called()
+    assert result == (None, None)
+    print("✓ resolve_nfl_week_cached honestly returns (None, None) for an unresolvable date, without a real, wasted schedule fetch")
+
+
+def test_resolve_nfl_week_cached_is_genuinely_cached():
+    assert hasattr(NSC.resolve_nfl_week_cached, "__wrapped__"), (
+        "resolve_nfl_week_cached must genuinely be decorated by st.cache_data, not a plain, uncached function")
+    print("✓ resolve_nfl_week_cached is genuinely decorated by st.cache_data, not accidentally uncached")
+
+
 def test_nfl_shared_cache_importable_without_streamlit():
     # Same real, confirmed pattern already proven for both statcast_data.py and
     # mlb_shared_cache.py -- applied here before NFL goes live, not after a real incident.
@@ -48,6 +76,8 @@ def test_nfl_shared_cache_importable_without_streamlit():
         assert not hasattr(NSC_no_streamlit, "load_nfl_slate_cached"), (
             "load_nfl_slate_cached must not be defined at all without streamlit -- "
             "referencing st.cache_data without a real st would crash")
+        assert not hasattr(NSC_no_streamlit, "resolve_nfl_week_cached"), (
+            "resolve_nfl_week_cached must not be defined at all without streamlit either")
         assert NSC_no_streamlit.E is not None, "nfl_engine itself must still import cleanly, unaffected by this module's own streamlit dependency"
     finally:
         builtins.__import__ = real_import
