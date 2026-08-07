@@ -8,10 +8,11 @@ render_split_selector), and the same real-line-vs-model-default honesty pattern 
 trend charts already established: a dashed reference line shows tonight's actual sportsbook
 number once fetched, the model's own default line otherwise, always clearly labeled as which.
 
-PITCHER: Outs, Hits Allowed, Earned Runs, Strikeouts -- built on mlb_engine.get_pitcher_recent_
-games (a thin wrapper around the same real starts data the pitcher regression tracker uses).
+PITCHER: Outs, Hits Allowed, Earned Runs, Strikeouts, Walks -- built on mlb_engine.get_pitcher_
+recent_games (a thin wrapper around the same real starts data the pitcher regression tracker
+uses).
 
-BATTER: Hits, Total Bases, Hits+Runs+RBIs, HR, and Strikeouts -- built on mlb_engine.
+BATTER: Hits, Total Bases, Hits+Runs+RBIs, HR, Strikeouts, and Walks -- built on mlb_engine.
 get_hitter_recent_games. HRR here is the REAL per-game sum (hits+runs+rbi actually recorded),
 not the simulated market probability build_best_bets computes elsewhere.
 """
@@ -101,6 +102,10 @@ PITCHER_CHARTS = [
     ("hits_allowed", "Pitcher Hits Allowed", P.DEFAULT_LINES["Pitcher Hits Allowed"]),
     ("earned_runs", "Pitcher Earned Runs", P.DEFAULT_LINES["Pitcher Earned Runs"]),
     ("strikeouts", "Pitcher Strikeouts", P.DEFAULT_LINES["Pitcher Strikeouts"]),
+    # ADDED DIRECTLY ON REQUEST: "Pitcher Walks" is already a real, established, graded market
+    # elsewhere on this platform -- same DEFAULT_LINES source every other entry above already
+    # uses, not a new, invented number.
+    ("walks", "Pitcher Walks", P.DEFAULT_LINES["Pitcher Walks"]),
 ]
 # Batter chart spec: same shape as PITCHER_CHARTS. "Batter HR"'s own 0.5 default lives here
 # directly rather than in DEFAULT_LINES, matching how every other Batter HR call site on this
@@ -112,6 +117,10 @@ BATTER_CHARTS = [
     ("hrr", "Batter Hits+Runs+RBIs", P.DEFAULT_LINES["Batter Hits+Runs+RBIs"]),
     ("hr", "Batter HR", 0.5),
     ("strikeouts", "Batter Strikeouts", P.DEFAULT_LINES["Batter Strikeouts"]),
+    # ADDED DIRECTLY ON REQUEST: "Batter Walks" is already a real, established, graded market
+    # elsewhere on this platform -- same DEFAULT_LINES source every other entry above already
+    # uses, not a new, invented number.
+    ("walks", "Batter Walks", P.DEFAULT_LINES["Batter Walks"]),
 ]
 
 c1, c2 = st.columns([2, 1])
