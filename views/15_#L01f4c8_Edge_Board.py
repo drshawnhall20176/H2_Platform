@@ -140,9 +140,24 @@ if not api_key:
 else:
     ec1, ec2 = st.columns([3, 1])
     with ec1:
+        # A REAL, CONFIRMED FIX, not the original design: _active.markets (every market
+        # registered in sports.py's own market map, for MLB 16 total) used to be both the real
+        # options list AND the real default selection here -- but MLB's own build_projection_
+        # index only ever builds a real index entry for 7 of those 16 (a hardcoded tuple list
+        # that was never kept in sync as new markets like Batter RBIs and Batter Stolen Bases
+        # got added to the market map over time). Any of the other 9 was GUARANTEED to show up
+        # as "unmatched" for every single player the book offered it for, regardless of name
+        # spelling -- confirmed directly from a real, reported Edge Board run showing six
+        # different players all failing on the exact same market (batter_rbis), the real
+        # signature of an unsupported market, not a name-matching problem. Reuses P._MARKET_
+        # DISPLAY (MLB's own real, already-accurate list of what it can price) as the source of
+        # truth when it exists; every other sport's own build_projection_index is already
+        # market-spec-driven (covers every registered market with no such gap), so this falls
+        # back to the original, still-correct _active.markets for them.
+        priceable_markets = list(getattr(P, "_MARKET_DISPLAY", {}).keys()) or _active.markets
         chosen = st.multiselect(
             "Markets to price (each market × each game = 1 quota unit)",
-            _active.markets, default=_active.markets,
+            priceable_markets, default=priceable_markets,
             format_func=lambda k: MARKET_LABEL.get(k, k),
         )
     with ec2:
