@@ -22,6 +22,10 @@ C.page_header("⭐", "Best Bets",
              f"Today's open positions, ranked by conviction. The model's strongest leans "
              f"across the slate — ranked, reasoned, and by time slot "
              f"— {_active.icon} {_active.label}")
+st.caption("💡 **Conviction**, in one line: how many times more likely this play is to hit than "
+          "a typical play in that same market — a 3.2× means this specific pick's real "
+          "probability is 3.2 times the usual rate for that stat, not a 0–100 score. Full "
+          "explanation in \"How 'best' is defined here\" at the bottom of this page.")
 
 if not sports.require_live_engine("Best Bets"):
     st.stop()
@@ -435,6 +439,26 @@ with st.expander("Diagnostic Inspector", expanded=True):
                        "no park factor, weather, or opponent-strength adjustment yet (v1 model).")
 
 # --- footer ----------------------------------------------------------------
-st.caption("Conviction shades darker for stronger leans. ...")
+st.caption("Conviction shades darker for stronger leans — the same real number driving the "
+          "grade badge and the ranking above, not a separate visual-only scale.")
 with st.expander("How 'best' is defined here (read me)"):
-    st.markdown("...")
+    st.markdown(
+        "**Conviction is relative, not absolute.** It's how many times more likely a play is "
+        "to hit than a *typical* play in that same market — a Conviction of 3.2× means this "
+        "specific pick's real probability is 3.2 times the usual hit rate for that stat, not a "
+        "0–100 score or a raw percentage. Two plays can carry the same Conviction number at "
+        "very different actual probabilities, since \"typical\" itself differs by market — a "
+        "25% chance in a market where 11% is normal (2.3×) reads very differently than a 60% "
+        "chance in a market where 55% is normal (1.1×), even though the second one is far more "
+        "likely to actually happen.\n\n"
+        "**That's why grade and probability are shown side by side, on purpose.** The letter "
+        "grade (Top Lean / Strong Lean / Lean / Watch) is Conviction translated into a quick "
+        "visual scan — it answers \"how much edge does this play have over what's typical here,\" "
+        "not \"how likely is this to hit.\" For that second question, look at Model % directly, "
+        "the play's own real, absolute probability. A rare-market prop can carry a strong grade "
+        "with real edge while still being a genuinely risky single leg on its own — that's not a "
+        "contradiction, it's exactly what \"edge relative to typical\" is supposed to capture.\n\n"
+        "**\"Best\" here means highest real Conviction that clears this platform's own grading "
+        "floor**, not highest raw probability and not lowest risk — a deliberate choice, since a "
+        "list sorted purely by probability would just surface the safest, most boring favorites "
+        "on the slate every night, not where the model actually sees the strongest mispricing.")
