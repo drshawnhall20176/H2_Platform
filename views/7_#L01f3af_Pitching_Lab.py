@@ -114,7 +114,13 @@ def _build_lineup_probs_vs_one_pitcher(rows, opp_stat, park, statcast_lookup, st
 @st.cache_data(ttl=600, show_spinner=False)
 def load(date_str: str, fip_constant: float, venue_split=None, time_split=None):
     import best_bets_data as BBD
-    rows, meta = E.build_slate(date_str, fip_constant)
+    # A REAL, CONFIRMED FIX, not the original design: the real E.build_slate(date_str, fip_
+    # constant) fetch here used to run independently, cached under THIS page's own function
+    # identity -- Dinger Engine cached the exact same real fetch separately too. See mlb_shared_
+    # cache.py's own module docstring for the full, confirmed reasoning. Only that shared fetch
+    # is consolidated; this page's own real, different post-processing (pitcher splits, pitcher
+    # projections, FIP regression) stays exactly as it was.
+    rows, meta = MSC.load_slate_with_fip_cached(date_str, fip_constant)
     # Real, confirmed fix for a structural gap: this page never fetched real sportsbook lines at
     # all, even after Best Bets/Graded Picks/Command Center/Model Dashboard/Retrospective were
     # already fixed to use them. Every "K line"/"Proj K"/"K Over%" shown on this page was ALWAYS

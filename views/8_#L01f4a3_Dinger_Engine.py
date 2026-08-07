@@ -12,6 +12,7 @@ import styling  # installs theme-proof .theme_gradient (readable in light + dark
 import pandas as pd
  
 import mlb_engine as E
+import mlb_shared_cache as MSC
 import odds_api as O
 import projections as P
 import statcast_data as SC
@@ -40,7 +41,13 @@ C.page_header("💣", "H2 Sports — Dinger Engine",
 @st.cache_data(ttl=300, show_spinner=False)
 def load_slate(date_str: str, fip_constant: float, venue_split=None, time_split=None):
     import best_bets_data as BBD
-    rows, meta = E.build_slate(date_str, fip_constant)
+    # A REAL, CONFIRMED FIX, not the original design: the real E.build_slate(date_str, fip_
+    # constant) fetch here used to run independently, cached under THIS page's own function
+    # identity -- Pitching Lab cached the exact same real fetch separately too. See mlb_shared_
+    # cache.py's own module docstring for the full, confirmed reasoning. Only that shared fetch
+    # is consolidated; this page's own real, different post-processing (weather, hitter splits,
+    # hitter enrichment) stays exactly as it was.
+    rows, meta = MSC.load_slate_with_fip_cached(date_str, fip_constant)
     # Real, confirmed fix for a structural gap: this page built its own slate independently and
     # never fetched real sportsbook lines at all, even after Best Bets/Graded Picks/Command
     # Center/Model Dashboard/Retrospective were already fixed to use them. Every HR%/hit

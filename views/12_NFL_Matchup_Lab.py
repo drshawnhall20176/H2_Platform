@@ -69,9 +69,12 @@ def load_slate(date_str: str):
 
 @st.cache_data(ttl=300, show_spinner=False)
 def load_injuries(date_str: str, team_abbr, opp_abbr):
-    season = E._infer_season(date_str)
-    schedule = E.get_schedule(season) if season is not None else []
-    week = E._resolve_week(schedule, date_str) if schedule else None
+    # A REAL, CONFIRMED FIX, not the original design: the real season/schedule/week resolution
+    # here used to run independently, cached under THIS page's own function identity -- NFL Hot
+    # Hand Engine cached the exact same real chain separately too. See nfl_shared_cache.py's own
+    # module docstring for the full, confirmed reasoning. Only that chain is shared; this page's
+    # own final, per-team injury lookups stay exactly as they were.
+    season, week = NSC.resolve_nfl_week_cached(date_str)
     if season is None or week is None:
         return [], []
     return E.get_team_injuries(team_abbr, season, week), E.get_team_injuries(opp_abbr, season, week)
