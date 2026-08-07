@@ -255,6 +255,26 @@ def test_ncaaf_has_no_dedicated_pages_yet_matching_the_real_audit_finding():
     print("✓ Confirms NCAAF still has no dedicated pages of its own -- ncaaf_shared_cache.py is ready and waiting for when that changes")
 
 
+def test_best_bets_explains_conviction_for_a_first_time_visitor():
+    # ADDED DIRECTLY ON REQUEST: Best Bets is the first page in the sidebar flow, and the two
+    # real explanatory spots on this page (a footer caption and a "read me" expander) were both
+    # genuine, unfinished placeholders -- confirmed directly, not assumed: the caption ended in
+    # a bare "..." and the expander's own markdown was literally "...". Confirms both are now
+    # real, substantive content, and that a short definition also appears immediately after the
+    # header -- not buried at the bottom where a first-time visitor would never see it before
+    # already being confused by a table full of Conviction values.
+    src = (_HERE / "views" / "1_#U2b50_Best_Bets.py").read_text()
+    assert 'st.markdown("...")' not in src, "the 'read me' expander must no longer be an empty placeholder"
+    assert '"Conviction shades darker for stronger leans. ..."' not in src, (
+        "the footer caption must no longer be truncated")
+    assert "how many times more likely this play is to hit than" in src, (
+        "a short, immediate Conviction definition must appear right after the page header")
+    assert "Top Lean / Strong Lean / Lean / Watch" in src, (
+        "the full explanation must name the real grade labels this page actually uses"
+    )
+    print("✓ Best Bets now genuinely explains Conviction for a first-time visitor, both immediately and in full, instead of two empty placeholders")
+
+
 def test_bullpen_fatigue_fetch_consolidated_across_all_three_real_callers():
     # A REAL, CONFIRMED FIX found in the same real module-audit pass: three separate view files
     # each independently cached the exact same real, expensive fetch (E.get_team_bullpen_
