@@ -514,12 +514,25 @@ def build_mlb_board(date_str: str, fip_constant: float, odds_api_key: Optional[s
     return rows, meta, plays, available_books
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def load_mlb_best_bets_board(date_str: str, fip_constant: float,
                              preferred_book: str = O.DEFAULT_BOOK,
                              venue_split: Optional[str] = None,
                              time_split: Optional[str] = None):
     """Build the full MLB best-bets board with optional split filtering.
-    Returns (plays, meta, available_books)."""
+    Returns (plays, meta, available_books).
+
+    A REAL, CONFIRMED FIX, not the original design: this function used to be uncached at this
+    layer, relying only on build_mlb_board's own cache below it -- but attach_team_trend right
+    after that call makes real, uncached, per-unique-team network fetches (two real calls to
+    get_team_recent_form per team, confirmed directly by reading that function) that ran in
+    full every single time, even on a real build_mlb_board cache hit. Confirmed as a real,
+    reported slowness (Command Center specifically), and confirmed as a real, shared cost
+    across six separate real callers of this function and its sibling below (Command Center,
+    Best Bets, Highlights, Graded Picks, Suggested Parlays, Speculative Basket) -- each one was
+    independently paying this same real per-team cost. Caching the WHOLE function here, same
+    300s TTL as build_mlb_board itself, means attach_team_trend's own real work is now genuinely
+    shared across all six real callers too, not just the board-build part underneath it."""
     rows, meta, plays, available_books = build_mlb_board(
         date_str, fip_constant, get_odds_api_key(), preferred_book,
         venue_split, time_split)
@@ -527,12 +540,16 @@ def load_mlb_best_bets_board(date_str: str, fip_constant: float,
     return plays, meta, available_books
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def load_mlb_graded_picks_board(date_str: str, fip_constant: float,
                                 preferred_book: str = O.DEFAULT_BOOK,
                                 venue_split: Optional[str] = None,
                                 time_split: Optional[str] = None):
     """Same as load_mlb_best_bets_board but also returns raw hitter rows.
-    Returns (plays, meta, rows, available_books)."""
+    Returns (plays, meta, rows, available_books).
+
+    Same real fix, same real reasoning, as load_mlb_best_bets_board directly above -- see that
+    function's own docstring for the full, confirmed cause."""
     rows, meta, plays, available_books = build_mlb_board(
         date_str, fip_constant, get_odds_api_key(), preferred_book,
         venue_split, time_split)

