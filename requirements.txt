@@ -32,14 +32,12 @@ nflreadpy==0.1.5         # NFL data (nflverse's actively-maintained successor to
                         # nfl_engine.py converts to pandas immediately (.to_pandas()) to stay
                         # consistent with every other sport's engine, so nothing else in the app
                         # needs to know Polars exists.
-streamlit-autorefresh==1.0.1   # Pitching Lab's live pitch-count auto-refresh — confirmed real
-                        # and installs cleanly before pinning (github.com/kmcgrady/streamlit-
-                        # autorefresh). Flagged by Snyk as an inactive project (last release
-                        # 2023) — a real, if minor, risk for a future Streamlit major version,
-                        # but it's a small, single-purpose frontend timer, not something that
-                        # needs active maintenance to keep working. Imported defensively
-                        # (try/except ImportError) in Pitching Lab, so a deploy missing this
-                        # package still gets manual refresh, just not the auto-refresh checkbox.
+# streamlit-autorefresh removed -- A REAL, CONFIRMED FIX: this package (the Snyk-flagged
+# inactive project noted here previously, last release 2023) is no longer needed at all.
+# Pitching Lab's own live pitch-count auto-refresh now uses st.fragment(run_every=...), a
+# native, currently-maintained Streamlit feature that does the exact same real job, confirmed
+# against Streamlit's own current docs -- removing a real, unmaintained dependency instead of
+# just working around it.
 curl_cffi==0.16.0      # A REAL, CONFIRMED FIX for a real, confirmed root cause: ESPN's and
                         # stats.nba.com's own 403/timeout responses were traced directly to TLS
                         # fingerprinting, not IP-based blocking -- confirmed by a real, live test

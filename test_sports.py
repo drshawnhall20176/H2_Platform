@@ -275,6 +275,58 @@ def test_best_bets_explains_conviction_for_a_first_time_visitor():
     print("✓ Best Bets now genuinely explains Conviction for a first-time visitor, both immediately and in full, instead of two empty placeholders")
 
 
+def test_model_dashboard_chalk_test_fragment_is_defined_and_actually_called():
+    # ADDED DIRECTLY ON REQUEST, part of a real performance pass: the slate-wide chalk test
+    # section was extracted into its own @st.fragment so pressing its button no longer reruns
+    # the rest of Model Dashboard above it. A single, non-looped fragment -- deliberately NOT
+    # applied to any per-item loop (e.g. one row per game/player), which has a real, documented
+    # Streamlit bug history around multiple instances of the same fragment function.
+    #
+    # This test exists because of a REAL, CONFIRMED MISTAKE caught during this exact change:
+    # the function was fully defined but never actually called, which would have silently
+    # removed the entire chalk-test feature from the page -- caught by directly checking the
+    # call exists, not just that the function definition compiles (compiling successfully says
+    # nothing about whether a defined function is ever invoked).
+    src = (_HERE / "views" / "17_Model_Dashboard.py").read_text()
+    assert "@st.fragment" in src, "the chalk test section must be wrapped in a real fragment"
+    assert "def _render_chalk_test():" in src, "the fragment function must be defined"
+    assert "\n    _render_chalk_test()" in src, (
+        "the fragment function must actually be called -- a defined-but-uncalled function "
+        "would silently remove this entire feature from the page, exactly the real mistake "
+        "this test was written to catch")
+    print("✓ Model Dashboard's chalk test is genuinely wrapped in a fragment AND actually called, not just defined")
+
+
+def test_pitching_lab_live_pitch_count_uses_a_real_fragment_not_a_full_page_autorefresh():
+    # ADDED DIRECTLY ON REQUEST, after a real performance audit: this used to call
+    # st_autorefresh directly in the main page body, which re-ran the ENTIRE Pitching Lab page
+    # every ~10 seconds while enabled -- starter selection, matchup tables, everything, not just
+    # the live pitch count. Confirms the real fix: st.fragment(run_every=...), a native
+    # Streamlit feature, now scopes the real 10-second timer to just this one section. Also
+    # confirms the now-unnecessary third-party streamlit-autorefresh dependency was genuinely
+    # removed, not just unused.
+    src = (_HERE / "views" / "7_#L01f3af_Pitching_Lab.py").read_text()
+    assert "@st.fragment(run_every=10 if live_auto else None)" in src, (
+        "the live pitch count must be wrapped in a real fragment, scoped to just this section")
+    assert "st_autorefresh(" not in src, "the old, full-page autorefresh call must be gone"
+    assert "from streamlit_autorefresh import" not in src, (
+        "the now-unnecessary third-party import must be removed entirely, not left dangling")
+    assert "_HAS_AUTOREFRESH" not in src, (
+        "the conditional-availability flag must be gone too -- auto-refresh is now always "
+        "available as a native Streamlit feature, not an optional third-party one")
+    print("✓ Pitching Lab's live pitch count genuinely uses a real, scoped st.fragment instead of a full-page autorefresh, and the now-unnecessary third-party dependency is gone")
+
+
+def test_streamlit_autorefresh_removed_from_requirements():
+    # Confirms the real cleanup went all the way through -- the dependency itself, not just its
+    # one real call site, since a real package still sitting in requirements.txt unused is its
+    # own kind of quiet redundancy.
+    src = (_HERE / "requirements.txt").read_text()
+    assert "streamlit-autorefresh==" not in src, (
+        "streamlit-autorefresh must be genuinely removed from requirements.txt, not just unused in code")
+    print("✓ streamlit-autorefresh is genuinely removed from requirements.txt, not just orphaned in code")
+
+
 def test_bullpen_fatigue_fetch_consolidated_across_all_three_real_callers():
     # A REAL, CONFIRMED FIX found in the same real module-audit pass: three separate view files
     # each independently cached the exact same real, expensive fetch (E.get_team_bullpen_
