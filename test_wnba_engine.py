@@ -266,7 +266,7 @@ def test_get_schedule_parses_espn_scoreboard_shape(monkeypatch):
         "events": [
             {
                 "id": "401810001",
-                "date": "2026-07-14T00:00Z",
+                "date": "2026-07-14T23:00Z",   # 7:00 PM Eastern (EDT, UTC-4) on the real requested date
                 "competitions": [{
                     "competitors": [
                         {"homeAway": "home", "team": {"id": "20", "displayName": "Atlanta Dream", "abbreviation": "ATL"}},
@@ -284,7 +284,7 @@ def test_get_schedule_parses_espn_scoreboard_shape(monkeypatch):
     g = games[0]
     assert g["home_id"] == 20 and g["home_name"] == "Atlanta Dream" and g["home_abbr"] == "ATL"
     assert g["away_id"] == 19 and g["away_name"] == "Chicago Sky" and g["away_abbr"] == "CHI"
-    assert g["game_date"] == "2026-07-14T00:00Z"
+    assert g["game_date"] == "2026-07-14T23:00Z"
     print("✓ get_schedule parses ESPN's scoreboard shape (incl. abbreviations) and skips malformed events")
 
 
@@ -440,6 +440,73 @@ def test_get_schedule_never_calls_the_fallback_when_espn_actually_has_real_games
     assert len(games) == 1
     mock_fallback.assert_not_called()
     print("✓ the stats.nba.com fallback is never touched when ESPN's own fetch genuinely succeeds")
+
+
+# ----------------------------------------------------------------- get_schedule date filtering
+def test_get_schedule_filters_out_a_real_game_from_an_adjacent_date(monkeypatch):
+    # A REAL, CONFIRMED FIX for a real, reported bug: get_schedule's own three-date merge
+    # (needed to dodge ESPN's own real 403 on a range query) used to return every event across
+    # all three real dates queried, completely unfiltered -- any real caller that didn't
+    # separately re-filter (build_slate did not) got games from the wrong real day mixed in.
+    # This event's own real date, 2026-07-13T23:00Z, is 7:00 PM Eastern on July 13 -- a real,
+    # different calendar day from the one actually requested.
+    wrong_day_event = {
+        "id": "1", "date": "2026-07-13T23:00Z",   # July 13, not the requested July 14
+        "competitions": [{"competitors": [
+            {"homeAway": "home", "team": {"id": "1", "displayName": "Team A", "abbreviation": "A"}},
+            {"homeAway": "away", "team": {"id": "2", "displayName": "Team B", "abbreviation": "B"}},
+        ]}],
+    }
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: {"events": [wrong_day_event]})
+    games = E.get_schedule("2026-07-14")
+    assert games == [], "a real game from an adjacent real calendar date must be filtered out, not included"
+    print("✓ get_schedule correctly filters out a real game whose own real Eastern date doesn't match the requested date")
+
+
+def test_get_schedule_keeps_a_real_game_that_crosses_midnight_utc_but_matches_eastern(monkeypatch):
+    # The real, deliberate opposite check: a game whose own raw UTC date string doesn't match
+    # date_str as a bare string, but whose real, converted Eastern date DOES match, must be kept
+    # -- this is exactly why Eastern conversion matters instead of a naive string comparison.
+    late_game = {
+        "id": "1", "date": "2026-07-15T02:00Z",   # 10:00 PM Eastern on July 14 (crosses midnight UTC)
+        "competitions": [{"competitors": [
+            {"homeAway": "home", "team": {"id": "1", "displayName": "Team A", "abbreviation": "A"}},
+            {"homeAway": "away", "team": {"id": "2", "displayName": "Team B", "abbreviation": "B"}},
+        ]}],
+    }
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: {"events": [late_game]})
+    games = E.get_schedule("2026-07-14")
+    assert len(games) == 1, "a real late-night game whose own real Eastern date matches must be kept, even though its raw UTC date string doesn't"
+    print("✓ get_schedule correctly keeps a real late-night game by its real Eastern date, not a naive UTC string comparison")
+
+
+def test_get_schedule_matches_the_real_reported_bug_a_team_in_two_games_same_apparent_slate(monkeypatch):
+    # A REAL, END-TO-END TEST reproducing the actual real, reported bug directly: a live
+    # Suggested Parlays run showed the same real team (Las Vegas Aces) appearing in two
+    # different games against two different opponents on what looked like the same real slate
+    # date -- the second game was real, just from an adjacent real date, unfiltered. Confirms
+    # the fix: only the game actually on the requested date survives.
+    real_game_today = {
+        "id": "1", "date": "2026-08-07T23:00Z",   # 7:00 PM Eastern, August 7 -- the real requested date
+        "competitions": [{"competitors": [
+            {"homeAway": "home", "team": {"id": "1", "displayName": "Indiana Fever", "abbreviation": "IND"}},
+            {"homeAway": "away", "team": {"id": "2", "displayName": "Las Vegas Aces", "abbreviation": "LVA"}},
+        ]}],
+    }
+    real_game_adjacent_day = {
+        "id": "2", "date": "2026-08-06T22:00Z",   # 6:00 PM Eastern, August 6 -- a real, different day
+        "competitions": [{"competitors": [
+            {"homeAway": "home", "team": {"id": "3", "displayName": "Minnesota Lynx", "abbreviation": "MIN"}},
+            {"homeAway": "away", "team": {"id": "2", "displayName": "Las Vegas Aces", "abbreviation": "LVA"}},
+        ]}],
+    }
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: {
+        "events": [real_game_today, real_game_adjacent_day]})
+    games = E.get_schedule("2026-08-07")
+    labels = {(g["home_name"], g["away_name"]) for g in games}
+    assert labels == {("Indiana Fever", "Las Vegas Aces")}, (
+        f"only the real game actually on August 7 should survive, got {labels}")
+    print("✓ get_schedule no longer reproduces the real, reported bug -- the same team no longer appears twice across two different real dates on one slate")
 
 
 # ----------------------------------------------------------------- get_team_roster (ESPN roster)

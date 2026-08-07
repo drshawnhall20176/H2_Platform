@@ -39,6 +39,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from curl_cffi import requests
+import pytz
 
 import config_wnba as CFG
 import basketball_engine as BB
@@ -200,6 +201,43 @@ def get_schedule(date_str: str) -> List[Dict[str, Any]]:
         except (KeyError, TypeError, ValueError):
             logger.exception("WNBA scoreboard event had an unexpected shape: %s", event.get("id"))
             continue
+
+    # A REAL, CONFIRMED FIX, not the original design: the three-date merge above (needed to
+    # dodge ESPN's own real 403 on a range query -- see this function's own docstring) means
+    # `games` at this point genuinely holds events from THREE separate real calendar dates
+    # (date_str-1, date_str, date_str+1), not just the one actually requested. This function
+    # used to return that raw, unfiltered mix directly, relying on schedule_board._basketball_
+    # games' own separate, external filter to narrow it back down -- but build_slate (and any
+    # other real caller that doesn't go through that one specific function) called get_schedule
+    # directly and got every game from all three dates with no filtering at all. Confirmed as a
+    # real, reported bug: a live Suggested Parlays run showed the same real team (Las Vegas
+    # Aces) appearing in two different games against two different opponents on what looked
+    # like the same real slate date -- the second game was a real game, just from an adjacent
+    # real date, not an error, but showing up unfiltered made it look like corrupted data.
+    # Filtered here, at the real source, so every real caller is protected automatically, not
+    # just the one that happened to remember to filter externally -- each game's own real UTC
+    # game_date is converted to real US/Eastern local time (the same real conversion every
+    # other sport's own schedule already uses for this) and narrowed to exactly date_str.
+    eastern = pytz.timezone("US/Eastern")
+    filtered = []
+    for g in games:
+        gd = g.get("game_date")
+        try:
+            # Same real, proven parsing sports.game_dt already uses -- deliberately NOT a rigid
+            # strptime format. Confirmed directly: other real events in this same ESPN response
+            # shape can come back as either "...T23:00:00Z" or "...T23:00Z" (no seconds), and a
+            # strptime format demanding seconds would silently, wrongly drop the second real
+            # shape as an unparseable date instead of correctly filtering it by day.
+            local_date = (datetime.fromisoformat(gd.replace("Z", "+00:00"))
+                         .astimezone(eastern).strftime("%Y-%m-%d"))
+        except (TypeError, ValueError, AttributeError):
+            continue   # an honest skip for a genuinely unparseable game_date, not a guess
+        if local_date == date_str:
+            filtered.append(g)
+    if len(filtered) != len(games):
+        _diag(f"get_schedule({date_str}): filtered {len(games)} raw game(s) across 3 real dates "
+             f"down to {len(filtered)} real game(s) actually on {date_str} (Eastern)")
+    games = filtered
     _diag(f"get_schedule({date_str}): {len(games)} game(s) found ({len(all_events)} raw events across 3 real queries)")
 
     if not games:
