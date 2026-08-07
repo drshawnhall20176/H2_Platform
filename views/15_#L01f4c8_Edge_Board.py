@@ -241,7 +241,11 @@ else:
             q1.metric("Quota remaining", info.get("remaining", "—"))
             q2.metric("Games priced", info.get("events_fetched", "—"))
             q3.metric("Props matched", info.get("matched", "—"))
-            q4.metric("Unmatched (name/line)", info.get("unmatched", "—"))
+            q4.metric("Unmatched (name/line)", info.get("unmatched", "—"),
+                     help="Counts every real failed offer, including when multiple books each "
+                         "post the same unmatched player/market -- so this can legitimately run "
+                         "higher than the player/market panel below, which shows each real "
+                         "unique mismatch once, not once per book.")
 
             no_offer = info.get("no_offer_events") or []
             if no_offer:
