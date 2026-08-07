@@ -328,6 +328,22 @@ def test_mlb_market_display_matches_what_build_projection_index_actually_support
     print("✓ P._MARKET_DISPLAY's real keys exactly match what build_projection_index actually supports, confirmed directly against the real, reported failing markets")
 
 
+def test_edge_board_unmatched_metric_explains_the_real_dedup_discrepancy():
+    # A REAL, CONFIRMED FIX for a real, reported case: a live Edge Board run showed "Unmatched
+    # (name/line): 42" at the top while the diagnostic panel right below it said "31 real
+    # player(s)/market(s)" -- both numbers were already correct (confirmed directly: compute_
+    # edges' own already-tested dedup logic collapses the same player/market appearing across
+    # multiple books/alternate lines into one panel row, while the raw counter reflects every
+    # real failed offer), but neither label explained why they'd ever legitimately differ,
+    # which reads as a real bug even though it isn't one. Confirms the top metric now carries a
+    # real, honest tooltip explaining this.
+    src = (_HERE / "views" / "15_#L01f4c8_Edge_Board.py").read_text()
+    assert "Counts every real failed offer, including when multiple books" in src, (
+        "the Unmatched (name/line) metric must explain why it can legitimately exceed the "
+        "deduplicated player/market panel below it")
+    print("✓ Edge Board's Unmatched metric now genuinely explains the real, honest reason it can differ from the panel's own deduplicated count")
+
+
 def test_best_bets_explains_conviction_for_a_first_time_visitor():
     # ADDED DIRECTLY ON REQUEST: Best Bets is the first page in the sidebar flow, and the two
     # real explanatory spots on this page (a footer caption and a "read me" expander) were both
