@@ -40,6 +40,11 @@ around it are NOT byte-for-byte identical the way the pitching-slate ones were (
 own version also names the single most-taxed pitcher). Rather than force a shared shape onto two
 genuinely different real outputs, only the expensive, identical part -- the raw fetch itself -- is
 shared here; each page's own different post-processing stays local, called on this shared result.
+
+A THIRD CONSOLIDATION, load_hitter_slate_cached, and a FOURTH, get_team_injuries_cached: both the
+SAME real class of problem as load_pitching_slate_cached above -- genuinely byte-for-byte
+identical local wrappers, confirmed directly by reading each pair, differing only in their own
+chosen TTL. Shared here at the shorter (more conservative) of each pair's two original values.
 """
 
 from __future__ import annotations
@@ -104,3 +109,19 @@ if st is not None:
         @st.cache_data wrapper around E.build_slate(date_str) -- confirmed directly by reading
         both. Same real 300s TTL both original wrappers already independently agreed on."""
         return E.build_slate(date_str)
+
+    @st.cache_data(ttl=900, show_spinner=False)
+    def get_team_injuries_cached(team_id: int) -> List[Dict]:
+        """Cached companion to mlb_engine.get_team_injuries -- the ONE real, shared entry point
+        for a team's own injury report every page needing it should call.
+
+        A REAL, CONFIRMED FIX, the SAME real class of problem as the other two consolidations
+        in this module: Game Watch and MLB Matchup Lab (page 9) each independently defined a
+        byte-for-byte-identical local wrapper -- confirmed directly by reading both, differing
+        only in their own real TTL (900s vs 1800s). Shared here at 900s, the SHORTER (more
+        conservative) of the two -- an injury report can genuinely change (a real activation or
+        a real new IL move), so fresher data is the safer real default, not an average of the
+        two original values."""
+        if not team_id:
+            return []
+        return E.get_team_injuries(team_id)

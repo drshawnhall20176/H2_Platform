@@ -47,6 +47,27 @@ def test_load_hitter_slate_cached_is_genuinely_cached():
     print("✓ load_hitter_slate_cached is genuinely decorated by st.cache_data, not accidentally uncached")
 
 
+def test_get_team_injuries_cached_wraps_the_real_engine_call():
+    fake_injuries = [{"player": "Test Player", "status": "10-Day IL"}]
+    with patch.object(MSC.E, "get_team_injuries", return_value=fake_injuries) as mock_fetch:
+        result = MSC.get_team_injuries_cached.__wrapped__(147)
+    mock_fetch.assert_called_once_with(147)
+    assert result == fake_injuries
+    print("✓ get_team_injuries_cached correctly wraps mlb_engine.get_team_injuries with the real team_id passed through")
+
+
+def test_get_team_injuries_cached_returns_empty_for_no_team_id():
+    result = MSC.get_team_injuries_cached.__wrapped__(None)
+    assert result == []
+    print("✓ get_team_injuries_cached correctly returns an honest empty list when no real team_id is given, without calling the real fetch")
+
+
+def test_get_team_injuries_cached_is_genuinely_cached():
+    assert hasattr(MSC.get_team_injuries_cached, "__wrapped__"), (
+        "get_team_injuries_cached must genuinely be decorated by st.cache_data, not a plain, uncached function")
+    print("✓ get_team_injuries_cached is genuinely decorated by st.cache_data, not accidentally uncached")
+
+
 def test_load_pitching_slate_cached_is_genuinely_cached():
     # __wrapped__ bypasses Streamlit's own cache for the unit test above (isolating the real
     # logic from Streamlit's runtime, which doesn't have a real session here) -- this confirms
@@ -89,6 +110,8 @@ def test_mlb_shared_cache_importable_without_streamlit():
             "get_team_bullpen_fatigue_cached must not be defined at all without streamlit either")
         assert not hasattr(MSC_no_streamlit, "load_hitter_slate_cached"), (
             "load_hitter_slate_cached must not be defined at all without streamlit either")
+        assert not hasattr(MSC_no_streamlit, "get_team_injuries_cached"), (
+            "get_team_injuries_cached must not be defined at all without streamlit either")
         assert MSC_no_streamlit.E is not None, "mlb_engine itself must still import cleanly, unaffected by this module's own streamlit dependency"
     finally:
         builtins.__import__ = real_import

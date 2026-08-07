@@ -207,6 +207,36 @@ def test_hitter_slate_consolidated_across_all_real_callers():
     print("✓ Both real callers now share one real cached call for the hitter slate, not two separate ones")
 
 
+def test_injuries_consolidated_across_all_real_callers():
+    # A REAL, CONFIRMED FIX, the same real class of problem as the other three consolidations
+    # in this module: Game Watch and MLB Matchup Lab (page 9) each independently defined a
+    # byte-for-byte-identical local wrapper around E.get_team_injuries(team_id) too.
+    for filename in ("6_Game_Watch.py", "9_Matchup_Lab.py"):
+        src = (_HERE / "views" / filename).read_text()
+        assert "MSC.get_team_injuries_cached(" in src, f"{filename} must call the real, shared cached function"
+        assert "def load_injuries(" not in src, f"{filename} must not still define its own local, now-redundant wrapper"
+    print("✓ Both real callers now share one real cached call for team injuries, not two separate ones")
+
+
+def test_nfl_slate_consolidated_across_all_real_callers():
+    # A REAL, CONFIRMED FIX found in the same real module-audit pass, applied to NFL BEFORE it
+    # goes live rather than after -- direct request: "this functionality and mindset is going
+    # to flow into the NFL and NCAAF models." Four separate NFL view files each called E.build_
+    # slate(date_str) as their own first step -- confirmed directly by reading all four -- even
+    # though each does genuinely different, substantial post-processing afterward.
+    for filename in ("12_NFL_Matchup_Lab.py", "13_Anytime_TD_Engine.py", "14_QB_Lab.py",
+                     "25_NFL_Hot_Hand_Engine.py"):
+        src = (_HERE / "views" / filename).read_text()
+        assert "import nfl_shared_cache as NSC" in src, f"{filename} must import the shared cache module"
+        assert "NSC.load_nfl_slate_cached(" in src, f"{filename} must call the real, shared cached fetch"
+        assert "E.build_slate(" not in src, f"{filename} must not still call the real, unshared fetch directly"
+        assert "import nfl_projections as P" in src, (
+            f"{filename} must still have its own real nfl_projections import intact -- a real "
+            f"mistake during this exact consolidation once accidentally deleted this import "
+            f"instead of adding alongside it, caught by this same real test suite before it shipped")
+    print("✓ All four real NFL callers now share one real cached fetch, each keeping its own real post-processing, imports intact")
+
+
 def test_bullpen_fatigue_fetch_consolidated_across_all_three_real_callers():
     # A REAL, CONFIRMED FIX found in the same real module-audit pass: three separate view files
     # each independently cached the exact same real, expensive fetch (E.get_team_bullpen_
