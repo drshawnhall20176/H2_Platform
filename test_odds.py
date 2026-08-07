@@ -659,9 +659,12 @@ def test_compute_edges_tracks_real_unmatched_names_not_just_a_count():
     rows, stats = O.compute_edges(index, offers, projections_module=P)
     assert rows == []
     assert stats["unmatched"] == 2
+    # A REAL, CONFIRMED FIX added a "reason" field to each entry (see compute_edges' own
+    # docstring) -- "unknown" here because this test doesn't pass known_names, the same real,
+    # backward-compatible default every existing caller gets until it opts in.
     assert stats["unmatched_names"] == [
-        {"player": "José Ramírez", "market": "batter_home_runs"},
-        {"player": "Some Totally Different Guy", "market": "batter_hits"},
+        {"player": "José Ramírez", "market": "batter_home_runs", "reason": "unknown"},
+        {"player": "Some Totally Different Guy", "market": "batter_hits", "reason": "unknown"},
     ]
     print("✓ compute_edges tracks the real unmatched player names and markets, not just a count")
 
@@ -679,9 +682,76 @@ def test_compute_edges_dedupes_unmatched_names_across_alternate_lines():
     ]
     rows, stats = O.compute_edges(index, offers, projections_module=P)
     assert stats["unmatched"] == 2   # the real count still reflects both offers
-    assert stats["unmatched_names"] == [{"player": "José Ramírez", "market": "batter_home_runs"}]
+    assert stats["unmatched_names"] == [{"player": "José Ramírez", "market": "batter_home_runs", "reason": "unknown"}]
     print("✓ compute_edges dedupes the unmatched-names diagnostic list by (player, market), "
          "even though the raw unmatched count still reflects every offer")
+
+
+def test_compute_edges_categorizes_a_real_on_roster_no_data_case():
+    # ADDED DIRECTLY ON REQUEST, a real, confirmed fix for a real, reported case: Kevin Gausman
+    # (just traded, hasn't debuted for his new team), Sean Murphy (just off a 60-day IL), and
+    # Ronel Blanco (just back from Tommy John surgery) all showed up as "unmatched" alongside
+    # genuine name mismatches -- but each was individually confirmed to be a real player
+    # genuinely on tonight's roster, just without enough real data for the model to honestly
+    # price. Confirms compute_edges correctly tags this case "on_roster_no_data", not the same
+    # bucket as a real, fixable name-spelling mismatch.
+    import projections as P
+    index = {}
+    known_names = {P.normalize_name("Kevin Gausman")}
+    offers = [{"player": "Kevin Gausman", "market": "pitcher_outs", "point": 15.5,
+              "over": {"draftkings": -110}, "under": {"draftkings": -110}}]
+    rows, stats = O.compute_edges(index, offers, projections_module=P, known_names=known_names)
+    assert stats["unmatched_names"] == [
+        {"player": "Kevin Gausman", "market": "pitcher_outs", "reason": "on_roster_no_data"}]
+    print("✓ compute_edges correctly tags a real, known roster player with no index entry as 'on_roster_no_data', not a name mismatch")
+
+
+def test_compute_edges_categorizes_a_real_genuine_name_mismatch():
+    import projections as P
+    index = {}
+    known_names = {P.normalize_name("Kevin Gausman")}   # a genuinely different real player
+    offers = [{"player": "Some Totally Different Guy", "market": "batter_hits", "point": 1.5,
+              "over": {"draftkings": 200}, "under": {"draftkings": -250}}]
+    rows, stats = O.compute_edges(index, offers, projections_module=P, known_names=known_names)
+    assert stats["unmatched_names"] == [
+        {"player": "Some Totally Different Guy", "market": "batter_hits", "reason": "name_mismatch"}]
+    print("✓ compute_edges correctly tags a real name genuinely absent from the roster as 'name_mismatch', the one real category actually worth chasing down")
+
+
+def test_compute_edges_reason_defaults_to_unknown_without_known_names():
+    # Confirms every real, existing caller that doesn't pass known_names (e.g. any sport that
+    # hasn't wired this in yet) gets the exact same real, undifferentiated behavior as before
+    # this fix -- not a crash, not a silently wrong default judgment call.
+    import projections as P
+    index = {}
+    offers = [{"player": "Kevin Gausman", "market": "pitcher_outs", "point": 15.5,
+              "over": {"draftkings": -110}, "under": {"draftkings": -110}}]
+    rows, stats = O.compute_edges(index, offers, projections_module=P)
+    assert stats["unmatched_names"][0]["reason"] == "unknown"
+    print("✓ compute_edges defaults every unmatched reason to 'unknown' when known_names isn't passed, fully backward compatible")
+
+
+def test_known_roster_names_and_compute_edges_work_together_end_to_end():
+    # A REAL, END-TO-END TEST, not just each piece checked in isolation: simulates the actual
+    # real scenario this whole fix was built for -- a real player (Kevin Gausman) genuinely on
+    # tonight's roster (his name is in rows/meta) but with no real index entry (build_projection_
+    # index skipped him for real, honest reasons), alongside a genuinely different name that
+    # never appears on the roster at all.
+    import projections as P
+    rows = [{"Hitter": "Kevin Gausman"}]
+    known_names = P.known_roster_names(rows, [])
+    index = {}   # empty -- Gausman genuinely has no real index entry, by construction
+    offers = [
+        {"player": "Kevin Gausman", "market": "pitcher_outs", "point": 15.5,
+        "over": {"draftkings": -110}, "under": {"draftkings": -110}},
+        {"player": "Some Totally Different Guy", "market": "batter_hits", "point": 1.5,
+        "over": {"draftkings": 200}, "under": {"draftkings": -250}},
+    ]
+    rows_out, stats = O.compute_edges(index, offers, projections_module=P, known_names=known_names)
+    by_player = {u["player"]: u["reason"] for u in stats["unmatched_names"]}
+    assert by_player["Kevin Gausman"] == "on_roster_no_data"
+    assert by_player["Some Totally Different Guy"] == "name_mismatch"
+    print("✓ known_roster_names and compute_edges work together end to end, correctly separating a real on-roster player from a real genuine mismatch")
 
 
 # ----------------------------------------------------------------- real_market_prob

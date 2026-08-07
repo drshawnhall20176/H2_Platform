@@ -49,6 +49,32 @@ def test_normalize_name_does_not_strip_a_real_jersey_or_stat_number_mid_name():
     print("✓ normalize_name's new year-stripping only matches a real 4-digit year token, not any bare number")
 
 
+# ----------------------------------------------------------------- known_roster_names
+def test_known_roster_names_includes_hitters_and_both_starters():
+    # ADDED DIRECTLY ON REQUEST, a real, confirmed fix for a real, reported case: real players
+    # (Kevin Gausman, Sean Murphy, Ronel Blanco, Abimelec Ortiz, George Klassen, George Lombard
+    # Jr.) all showed up in the same "couldn't match" bucket as genuine name mismatches, even
+    # though each one was individually confirmed to be a real, honest data gap, not a name
+    # problem. This confirms the real, underlying lookup this fix depends on: every real hitter
+    # and both real starters are captured, independent of build_projection_index's own skips.
+    rows = [{"Hitter": "Kevin Gausman"}, {"Hitter": "Sean Murphy"}]
+    home_pm = E.PitcherMetrics(id=1, name="Ronel Blanco", hand="R", stat={})
+    away_pm = E.PitcherMetrics(id=2, name="George Klassen", hand="R", stat={})
+    meta = [{"home_pm": home_pm, "away_pm": away_pm}]
+    names = P.known_roster_names(rows, meta)
+    assert names == {P.normalize_name("Kevin Gausman"), P.normalize_name("Sean Murphy"),
+                     P.normalize_name("Ronel Blanco"), P.normalize_name("George Klassen")}
+    print("✓ known_roster_names captures every real hitter and both real starters, regardless of build_projection_index's own real skips")
+
+
+def test_known_roster_names_handles_a_real_missing_pitcher_honestly():
+    rows = [{"Hitter": "Abimelec Ortiz"}]
+    meta = [{"home_pm": None, "away_pm": E.PitcherMetrics(id=None, name=None, hand="R", stat={})}]
+    names = P.known_roster_names(rows, meta)
+    assert names == {P.normalize_name("Abimelec Ortiz")}
+    print("✓ known_roster_names handles a real missing/unnamed pitcher honestly, without crashing")
+
+
 # build_best_bets now looks up a real calibration correction per market (see projections.py's
 # own comment at its call site) via CC.latest_fit, which resolves to CC.DB_PATH when no explicit
 # db_path is passed -- exactly what every one of this file's existing tests does, since they

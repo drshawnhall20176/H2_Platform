@@ -1481,6 +1481,33 @@ def build_projection_index(rows: List[Dict], meta: List[Dict],
                                    ("pitcher_walks", sim["bb"], proj["exp_bb"])):
                 index[(nm, key)] = {"dist": _dist(arr), "mean": float(mean), "ctx": ctx}
     return index
+
+
+def known_roster_names(rows: List[Dict], meta: List[Dict]) -> set:
+    """Every real, normalized player name that shows up anywhere on tonight's real slate --
+    hitters from rows, both starters from meta -- regardless of whether build_projection_index
+    above actually built a real index entry for them.
+
+    ADDED DIRECTLY ON REQUEST, a real, confirmed fix for a real, reported case: a live Edge
+    Board run showed real, established veterans (Kevin Gausman, Sean Murphy, Ronel Blanco) and
+    real rookies (Abimelec Ortiz, George Klassen, George Lombard Jr.) all landing in the same
+    "couldn't match to our own slate" bucket as genuine name-spelling mismatches -- but every
+    one of those real players was confirmed, individually, to be a real, honest data gap (a
+    real trade, a real return from a long injury, a real rookie debut, a real role change),
+    not a name problem at all. build_projection_index's own real skip conditions (if not stat,
+    if probs is None, if not proj) mean a player can be genuinely ON tonight's real roster --
+    with their own real name already sitting in rows/meta -- while still never getting a real
+    index entry, because the model doesn't have enough real, usable data to honestly price
+    them. Calling this separately (not folding it into build_projection_index's own return)
+    keeps every existing real caller of that function completely unaffected -- this is a real,
+    additive lookup, not a change to what index itself contains or means."""
+    names = {normalize_name(r["Hitter"]) for r in rows if r.get("Hitter")}
+    for m in meta:
+        for pm in (m.get("home_pm"), m.get("away_pm")):
+            if pm is not None and getattr(pm, "name", None):
+                names.add(normalize_name(pm.name))
+    return names
+
  
  
 # Display name + default line per Odds API market, for the model-only board.

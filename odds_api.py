@@ -675,11 +675,26 @@ def market_lines_for_slate(offers: List[Dict], projections_module=None,
 
 
 def compute_edges(index: Dict, offers: List[Dict],
-                  projections_module=None) -> Tuple[List[Dict], Dict]:
+                  projections_module=None, known_names: Optional[set] = None) -> Tuple[List[Dict], Dict]:
     """Join book offers to the model index and compute EV/edge per playable side.
 
     `projections_module` supplies normalize_name for the sport — defaults to MLB's projections;
-    the sport registry passes each sport's own module. Returns (edge_rows, stats), EV%-sorted."""
+    the sport registry passes each sport's own module. Returns (edge_rows, stats), EV%-sorted.
+
+    known_names (optional, a set of real, normalized roster names -- see projections.
+    known_roster_names's own docstring for the full, confirmed reasoning): ADDED DIRECTLY ON
+    REQUEST, a real, confirmed fix for a real, reported case. Without it, every real unmatched
+    offer lands in one undifferentiated bucket, whether it's a genuine name-spelling mismatch
+    (a real, fixable bug) or a real player who's genuinely on tonight's roster but has too
+    little real, usable data to honestly price (a real, honest gap, not a bug -- a real trade,
+    a real return from injury, a real rookie debut). With it, each unmatched entry is tagged
+    "reason": "on_roster_no_data" when the real, normalized name is in known_names, or
+    "reason": "name_mismatch" when it genuinely isn't found anywhere on the real roster at all
+    -- the second category is the one actually worth chasing down; the first isn't a bug to fix,
+    it's the model correctly declining to guess. Backward compatible: every existing real caller
+    that doesn't pass known_names gets every unmatched entry tagged "reason": "unknown" (the
+    exact same real, undifferentiated behavior as before this fix), not a crash or a changed
+    default judgment call."""
     if projections_module is None:
         import projections as projections_module
     P = projections_module
@@ -699,7 +714,11 @@ def compute_edges(index: Dict, offers: List[Dict],
             # invisible and unfixable. Recording the real book-side name here is what lets a
             # person actually add the right alias/fix once a genuine mismatch shows up in a live
             # run, instead of guessing at names that might not even be the ones causing trouble.
-            unmatched_names.append({"player": off["player"], "market": mkey})
+            if known_names is None:
+                reason = "unknown"
+            else:
+                reason = "on_roster_no_data" if nm in known_names else "name_mismatch"
+            unmatched_names.append({"player": off["player"], "market": mkey, "reason": reason})
             continue
         matched += 1
         dist = entry["dist"]

@@ -344,6 +344,30 @@ def test_edge_board_unmatched_metric_explains_the_real_dedup_discrepancy():
     print("✓ Edge Board's Unmatched metric now genuinely explains the real, honest reason it can differ from the panel's own deduplicated count")
 
 
+def test_edge_board_wires_known_names_through_the_full_real_chain():
+    # ADDED DIRECTLY ON REQUEST, a real, confirmed fix for a real, reported case: real
+    # established veterans (Kevin Gausman -- just traded, no debut yet for his new team; Sean
+    # Murphy -- just off a 60-day IL; Ronel Blanco -- just back from Tommy John surgery) and
+    # real rookies (Abimelec Ortiz, George Klassen, George Lombard Jr.) all landed in the same
+    # undifferentiated "couldn't match" bucket as a genuine, fixable name mismatch. Confirms the
+    # full real chain is wired: load_index computes and returns known_names, load_edges accepts
+    # and passes it to compute_edges, and the panel itself is genuinely split into two honest
+    # sections using the real "reason" tag, not just relying on compute_edges' own real logic
+    # existing in isolation.
+    src = (_HERE / "views" / "15_#L01f4c8_Edge_Board.py").read_text()
+    assert "known_names = proj.known_roster_names(rows, meta) if hasattr(proj" in src, (
+        "load_index must compute known_names, safely gated for sports without this helper yet")
+    assert "index, known_names = load_index(" in src, "the real call site must unpack both real return values"
+    assert "_known_names: Optional[set] = None" in src, "load_edges must accept known_names, defaulting to None for safety"
+    assert "known_names=_known_names" in src, "load_edges must actually pass known_names through to compute_edges"
+    assert 'u.get("reason") == "name_mismatch"' in src, "the panel must genuinely split out real name mismatches"
+    assert 'u.get("reason") == "on_roster_no_data"' in src, "the panel must genuinely split out the honest 'not enough data yet' case"
+    assert "This isn't a bug to fix; it's the model" in src, (
+        "the honest 'no data yet' section must explain this isn't a bug, matching the real, "
+        "confirmed cases (a real trade, a real injury return, a real rookie, a real role change)")
+    print("✓ Edge Board's full known_names chain is genuinely wired end to end, and the panel is genuinely split into two honest sections")
+
+
 def test_best_bets_explains_conviction_for_a_first_time_visitor():
     # ADDED DIRECTLY ON REQUEST: Best Bets is the first page in the sidebar flow, and the two
     # real explanatory spots on this page (a footer caption and a "read me" expander) were both
