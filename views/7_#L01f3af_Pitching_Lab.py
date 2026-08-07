@@ -20,16 +20,13 @@ import projections as P
 import statcast_data as SC
 import weather as WX
 
-try:
-    from streamlit_autorefresh import st_autorefresh
-    _HAS_AUTOREFRESH = True
-except ImportError:
-    # Real, stated graceful degradation, same posture as Statcast being optional elsewhere on
-    # this platform: the manual "refresh" button for live pitch count must keep working even if
-    # this small, real third-party component (github.com/kmcgrady/streamlit-autorefresh) isn't
-    # installed in a given deploy -- only the auto-refresh checkbox itself is hidden, not the
-    # whole feature.
-    _HAS_AUTOREFRESH = False
+# A REAL, CONFIRMED FIX, not the original design: the third-party streamlit-autorefresh package
+# (github.com/kmcgrady/streamlit-autorefresh, already flagged elsewhere in this codebase as an
+# inactive project -- last release 2023) used to be needed here for the live pitch-count auto-
+# refresh. It's genuinely no longer needed at all: st.fragment's own run_every parameter is a
+# native, currently-maintained Streamlit feature that does the exact same real job (confirmed
+# against Streamlit's own current docs), removing a real, unmaintained dependency instead of
+# just working around it. See the live pitch-count section below for the real fix itself.
 
 C.base_css()
 C.page_header("🎯", "Pitching Lab",
@@ -446,73 +443,84 @@ if game_options:
               "auto-refresh below is a real, ongoing cost while enabled (a fresh live fetch "
               "every ~10 seconds for both sides), so it's opt-in, not the default.")
     if picked.get("gamePk"):
-        live_auto = False
-        if _HAS_AUTOREFRESH:
-            live_auto = st.checkbox(
-                "🔴 Auto-refresh every ~10s while this game is live", value=False,
-                key=f"live_auto_{picked['gamePk']}",
-                help="Turn this off (or navigate away) once you're done watching this specific "
-                    "game — it keeps re-fetching both teams' live boxscore in the background "
-                    "the whole time it's checked. The refresh interval is a rough estimate, not "
-                    "an exact timer (a real, stated limitation of the underlying component).")
-            if live_auto:
-                st_autorefresh(interval=10_000, key=f"live_autorefresh_{picked['gamePk']}")
-        else:
-            st.caption("⚪ Auto-refresh isn't available in this deploy (the optional "
-                      "`streamlit-autorefresh` package isn't installed) — manual refresh below "
-                      "still works normally.")
+        # A REAL, CONFIRMED FIX: no longer conditional on an optional third-party package --
+        # st.fragment's own run_every is a native Streamlit feature, always available.
+        live_auto = st.checkbox(
+            "🔴 Auto-refresh every ~10s while this game is live", value=False,
+            key=f"live_auto_{picked['gamePk']}",
+            help="Turn this off (or navigate away) once you're done watching this specific "
+                "game — it keeps re-fetching both teams' live boxscore in the background "
+                "the whole time it's checked.")
 
-        lc1, lc2 = st.columns(2)
-        for col, label, side in ((lc1, picked["home_name"], "home"),
-                                 (lc2, picked["away_name"], "away")):
-            with col:
-                st.markdown(f"**{label}**")
-                state_key = f"live_line_{side}_{picked['gamePk']}"
-                manual_clicked = st.button("🔄 Refresh live line",
-                                           key=f"live_refresh_{side}_{picked['gamePk']}")
-                if manual_clicked:
-                    with st.spinner("Checking live boxscore..."):
+        # A REAL, CONFIRMED FIX, not the original design: this used to call st_autorefresh
+        # directly in the main page body, which re-ran the ENTIRE Pitching Lab page every ~10
+        # seconds while enabled -- starter selection, matchup tables, everything below, not just
+        # this live section. Confirmed against Streamlit's own real, current docs (v1.61.0):
+        # st.fragment's own run_every parameter does the exact same real job (an int here is
+        # seconds, matching the original 10_000ms/10s interval exactly), but reruns ONLY this
+        # function -- the rest of the page is completely untouched on each tick. live_auto
+        # itself stays OUTSIDE this fragment on purpose: run_every is fixed at the moment this
+        # function is defined below, which happens fresh on every real full-page rerun -- if the
+        # checkbox lived inside the fragment instead, toggling it would only rerun the fragment
+        # itself, and the timer wouldn't actually start or stop until something else triggered a
+        # real full rerun. A real, secondary benefit of this same fix: the "Refresh live line"
+        # buttons below are now inside the fragment too, so a manual click also only reruns this
+        # section, not the whole page.
+        @st.fragment(run_every=10 if live_auto else None)
+        def _render_live_pitch_lines():
+            lc1, lc2 = st.columns(2)
+            for col, label, side in ((lc1, picked["home_name"], "home"),
+                                     (lc2, picked["away_name"], "away")):
+                with col:
+                    st.markdown(f"**{label}**")
+                    state_key = f"live_line_{side}_{picked['gamePk']}"
+                    manual_clicked = st.button("🔄 Refresh live line",
+                                               key=f"live_refresh_{side}_{picked['gamePk']}")
+                    if manual_clicked:
+                        with st.spinner("Checking live boxscore..."):
+                            st.session_state[state_key] = E.get_live_pitching_line(picked["gamePk"], side)
+                    elif live_auto:
                         st.session_state[state_key] = E.get_live_pitching_line(picked["gamePk"], side)
-                elif live_auto:
-                    st.session_state[state_key] = E.get_live_pitching_line(picked["gamePk"], side)
 
-                line = st.session_state.get(state_key)
-                if line is None:
-                    st.caption("⏳ Not started yet, or hasn't been checked — press refresh, or "
-                              "enable auto-refresh above.")
-                else:
-                    lm1, lm2, lm3 = st.columns(3)
-                    lm1.metric("Pitches", line["pitches"])
-                    lm2.metric("IP", line["innings_pitched"])
-                    lm3.metric("H / ER", f"{line['hits']} / {line['earned_runs']}")
-                    st.caption(f"{line['name']} — {line['strikeouts']} K, {line['walks']} BB "
-                              "today. Raw numbers only — no pull prediction.")
+                    line = st.session_state.get(state_key)
+                    if line is None:
+                        st.caption("⏳ Not started yet, or hasn't been checked — press refresh, or "
+                                  "enable auto-refresh above.")
+                    else:
+                        lm1, lm2, lm3 = st.columns(3)
+                        lm1.metric("Pitches", line["pitches"])
+                        lm2.metric("IP", line["innings_pitched"])
+                        lm3.metric("H / ER", f"{line['hits']} / {line['earned_runs']}")
+                        st.caption(f"{line['name']} — {line['strikeouts']} K, {line['walks']} BB "
+                                  "today. Raw numbers only — no pull prediction.")
 
-                    # Unearned-run flag — added directly on request, after a real, live piece of
-                    # community confusion (checked against the actual chat log): a fielding error
-                    # meant runs that clearly scored didn't count as earned, and it took several
-                    # messages of manual ESPN cross-checking before anyone understood why. runs
-                    # and earned_runs are both already in `line` above — this is the same data,
-                    # just surfaced directly instead of requiring a person to notice the mismatch.
-                    if line["unearned_runs"] > 0:
-                        st.warning(f"⚠️ {line['unearned_runs']} of {line['name']}'s {line['runs']} "
-                                  f"run(s) today are **unearned** (a fielding error factored in) — "
-                                  f"his earned-run total ({line['earned_runs']}) won't match the "
-                                  f"raw runs you're watching score. This is why an earned-run prop "
-                                  f"can stay Under even after a run visibly crosses the plate.")
+                        # Unearned-run flag — added directly on request, after a real, live piece of
+                        # community confusion (checked against the actual chat log): a fielding error
+                        # meant runs that clearly scored didn't count as earned, and it took several
+                        # messages of manual ESPN cross-checking before anyone understood why. runs
+                        # and earned_runs are both already in `line` above — this is the same data,
+                        # just surfaced directly instead of requiring a person to notice the mismatch.
+                        if line["unearned_runs"] > 0:
+                            st.warning(f"⚠️ {line['unearned_runs']} of {line['name']}'s {line['runs']} "
+                                      f"run(s) today are **unearned** (a fielding error factored in) — "
+                                      f"his earned-run total ({line['earned_runs']}) won't match the "
+                                      f"raw runs you're watching score. This is why an earned-run prop "
+                                      f"can stay Under even after a run visibly crosses the plate.")
 
-                    # Hook-risk flag — same real scenario this platform's own community hit: a
-                    # strikeout prop riding on "one more" late, with no visibility into whether
-                    # this pitcher's own season workload pattern makes that likely. Compares
-                    # against HIS OWN real season average/max, not a league-wide number.
-                    if line.get("player_id"):
-                        team_id_for_side = picked["home_id"] if side == "home" else picked["away_id"]
-                        season_pitch_stats = E.pitcher_season_pitch_stats(
-                            line["player_id"], int(date_str[:4]), before_date=date_str,
-                            team_id=team_id_for_side)
-                        risk = E.hook_risk_flag(line["pitches"], season_pitch_stats)
-                        if risk:
-                            st.caption(risk)
+                        # Hook-risk flag — same real scenario this platform's own community hit: a
+                        # strikeout prop riding on "one more" late, with no visibility into whether
+                        # this pitcher's own season workload pattern makes that likely. Compares
+                        # against HIS OWN real season average/max, not a league-wide number.
+                        if line.get("player_id"):
+                            team_id_for_side = picked["home_id"] if side == "home" else picked["away_id"]
+                            season_pitch_stats = E.pitcher_season_pitch_stats(
+                                line["player_id"], int(date_str[:4]), before_date=date_str,
+                                team_id=team_id_for_side)
+                            risk = E.hook_risk_flag(line["pitches"], season_pitch_stats)
+                            if risk:
+                                st.caption(risk)
+
+        _render_live_pitch_lines()
     else:
         st.caption("No game id available for this matchup — live pitch count isn't available here.")
 
