@@ -32,6 +32,7 @@ from sports import require_sport
 require_sport("UFC")
 
 import ufc_engine as E
+import quick_log
 from odds_api import american_to_decimal, US_BOOKS
 
 C.base_css()
@@ -215,6 +216,33 @@ for i, event in enumerate(events):
                 st.metric(label=f"🔴 {underdog} (Underdog)",
                           value=_fmt_american(dog_odds),
                           delta=f"{dog_prob*100:.0f}% implied (no-vig)")
+
+            # Bet logging -- ADDED DIRECTLY ON REQUEST. Reuses the SAME shared quick_log widget
+            # every other page already uses (Best Bets, Graded Picks, Game Watch's own moneyline
+            # logging above), by building a team-level "play" dict (Player=None, Market=
+            # "Moneyline") rather than a whole separate logging system for UFC specifically.
+            #
+            # This page is explicitly "Phase 1: data surface only, no model" (see this file's
+            # own module docstring) -- there is no real model price to log as a fallback "Fair"
+            # the way Game Watch's own win-probability estimate provides. Using the real, live
+            # h2h odds already fetched for THIS SAME bout for both roles here is the honest
+            # choice, not a compromise: "Fair" is the real market price (there's no separate
+            # model number to prefer over it), and "ModelProb" is the real no-vig probability
+            # already computed above for the metrics themselves, not a fabricated prediction.
+            # bout_moneylines is built from this exact same real fetch, so quick_log's own real-
+            # price lookup will always find a genuine match here -- never the Fair fallback,
+            # since the "Fair" value already IS the real price in this specific case.
+            bout_moneylines = {fighter_a: {preferred_book: odds_a}, fighter_b: {preferred_book: odds_b}}
+            ml_plays = [
+                {"Player": None, "PlayerId": None, "Game": f"{fighter_a} vs. {fighter_b}",
+                 "Market": "Moneyline", "Side": fighter_a, "Line": None,
+                 "Fair": odds_a, "ModelProb": p_a},
+                {"Player": None, "PlayerId": None, "Game": f"{fighter_a} vs. {fighter_b}",
+                 "Market": "Moneyline", "Side": fighter_b, "Line": None,
+                 "Fair": odds_b, "ModelProb": p_b},
+            ]
+            quick_log.render_quick_log(ml_plays, date_str, "UFC", key_prefix=f"ufc_{event_id}",
+                                       moneylines=bout_moneylines)
 
         # ── Fight Duration ─────────────────────────────────────────────────
         totals = odds.get("totals") or {}

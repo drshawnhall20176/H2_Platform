@@ -1632,6 +1632,36 @@ def test_team_trend_tag_honest_when_uncomputable():
          "input is missing or season is zero")
 
 
+def test_ufc_fight_card_wires_bet_logging_through_the_shared_quick_log_widget():
+    # ADDED DIRECTLY ON REQUEST: UFC Fight Card previously had no bet-logging path at all.
+    # Reuses the SAME shared quick_log widget every other page already uses (Best Bets, Graded
+    # Picks, Game Watch's own moneyline logging), building a team-level "play" dict (Player=
+    # None, Market="Moneyline") rather than a new logging system -- the exact same shape
+    # test_quick_log.py's own test_bet_log_fields_from_play_handles_moneyline_shape_end_to_end
+    # already confirms works correctly, so this test only needs to confirm the real wiring on
+    # this page's own side, not re-prove the shared mapping itself.
+    #
+    # This page is explicitly "Phase 1: data surface only, no model" (its own module docstring)
+    # -- there's no separate model price to log as a Fair fallback the way Game Watch's own win-
+    # probability estimate provides, so this confirms the honest choice made instead: the real,
+    # live h2h odds already fetched for the SAME bout are used for both "Fair" and the real
+    # moneylines lookup, and the real no-vig probability already computed for the on-screen
+    # metrics is reused as "ModelProb", not a fabricated prediction.
+    src = (_HERE / "views" / "23_#L01f94a_UFC_Fight_Card.py").read_text()
+    assert "import quick_log" in src, "the page must import the shared quick_log module"
+    assert 'quick_log.render_quick_log(ml_plays, date_str, "UFC"' in src, (
+        "render_quick_log must be called with the real sport key 'UFC'")
+    assert '"Player": None, "PlayerId": None' in src, (
+        "the play dicts must use the established team-level moneyline shape (no Player), not a "
+        "player-prop shape UFC bouts don't actually have")
+    assert '"Market": "Moneyline"' in src, "the play dicts must use the real, already-registered Moneyline market name"
+    assert "moneylines=bout_moneylines" in src, (
+        "moneylines must be passed through so a real captured price is used, not just the Fair fallback")
+    assert 'bout_moneylines = {fighter_a: {preferred_book: odds_a}, fighter_b: {preferred_book: odds_b}}' in src, (
+        "bout_moneylines must be built from the exact same real, already-fetched odds shown on screen")
+    print("✓ UFC Fight Card genuinely wires bet logging through the shared quick_log widget, using real, already-fetched odds honestly")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

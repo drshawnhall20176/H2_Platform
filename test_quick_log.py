@@ -296,6 +296,28 @@ def test_bet_log_fields_from_play_handles_moneyline_shape_end_to_end():
     print("✓ bet_log_fields_from_play correctly handles a full moneyline-shaped play end to end")
 
 
+def test_bet_log_fields_from_play_handles_the_real_ufc_fight_card_shape_end_to_end():
+    # A REAL, END-TO-END TEST using the EXACT shape UFC Fight Card's own view file builds --
+    # ADDED DIRECTLY ON REQUEST to enable bet logging from that page. UFC has no model yet
+    # ("Phase 1: data surface only" per that page's own module docstring), so unlike Game
+    # Watch's moneyline logging (which has a real win-probability estimate to use as Fair), this
+    # page's own honest choice is to use the SAME real, live odds for both the Fair fallback and
+    # the real moneylines lookup -- confirms that choice produces a genuinely correct, non-
+    # fallback "book" price, not a silently wrong or double-counted number.
+    fighter_a, fighter_b = "Islam Makhachev", "Arman Tsarukyan"
+    odds_a, odds_b = -320, 260
+    bout_moneylines = {fighter_a: {"draftkings": odds_a}, fighter_b: {"draftkings": odds_b}}
+    play_a = {"Player": None, "PlayerId": None, "Game": f"{fighter_a} vs. {fighter_b}",
+             "Market": "Moneyline", "Side": fighter_a, "Line": None, "Fair": odds_a, "ModelProb": 0.76}
+    fields = Q.bet_log_fields_from_play(play_a, "2026-08-09", "UFC",
+                                        moneylines=bout_moneylines, preferred_book="draftkings")
+    assert fields["entry_odds"] == -320.0
+    assert fields["entry_odds_source"] == "book"   # a real captured price, not the Fair fallback
+    assert fields["market"] == "Moneyline" and fields["side"] == fighter_a
+    assert fields["sport"] == "UFC"
+    print("✓ bet_log_fields_from_play correctly handles the real UFC Fight Card moneyline shape end to end, using a genuine captured price")
+
+
 # ----------------------------------------------------------------- bet_log_signature
 def test_bet_log_signature_distinguishes_different_plays():
     sig_a = Q.bet_log_signature(_play(player="Ohtani"), "2026-07-20")
