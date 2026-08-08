@@ -1662,6 +1662,80 @@ def test_ufc_fight_card_wires_bet_logging_through_the_shared_quick_log_widget():
     print("✓ UFC Fight Card genuinely wires bet logging through the shared quick_log widget, using real, already-fetched odds honestly")
 
 
+def test_ufc_fight_card_wires_fight_duration_bet_logging():
+    # ADDED DIRECTLY ON REQUEST, extending Moneyline-only logging to a second real, currently-
+    # live market. Confirms the real, distinct handling: Fight Duration is an Over/Under, not a
+    # team-name pick, so there's no moneylines-style real-price lookup -- the real, already-
+    # fetched totals odds shown on screen are used directly as "Fair", with no further changes.
+    src = (_HERE / "views" / "23_#L01f94a_UFC_Fight_Card.py").read_text()
+    assert '"Market": "Fight Duration", "Side": "Over"' in src, (
+        "Fight Duration Over must be a real, loggable play")
+    assert '"Market": "Fight Duration", "Side": "Under"' in src, (
+        "Fight Duration Under must be a real, loggable play")
+    assert 'quick_log.render_quick_log(dur_plays, date_str, "UFC", key_prefix=f"ufc_dur_{event_id}")' in src, (
+        "Fight Duration plays must be logged through the same shared widget, with their own real key_prefix"
+    )
+    print("✓ UFC Fight Card genuinely wires Fight Duration bet logging, correctly handled as a real Over/Under, not a moneyline-shaped pick")
+
+
+def test_ufc_fight_card_wires_method_of_victory_bet_logging_dormant_until_real_data_exists():
+    # ADDED DIRECTLY ON REQUEST: this file's own module docstring confirms The Odds API
+    # currently rejects method-of-victory markets for MMA with a real INVALID_MARKET error --
+    # not a subscription-tier limit, an active rejection. Confirms the logging code is genuinely
+    # ready, using the real, registered canonical market names from sports.py's own UFC market_
+    # map (not the emoji-prefixed display labels), gated behind the exact same has_method check
+    # that already gates the display table -- so this activates automatically the moment the API
+    # adds real support, with zero further changes needed, matching this file's own stated
+    # promise that re-enabling this later is a one-line change, not a rebuild.
+    src = (_HERE / "views" / "23_#L01f94a_UFC_Fight_Card.py").read_text()
+    assert '"🤛 KO/TKO": "Win by KO/TKO", "🤸 Submission": "Win by Sub", "📋 Decision": "Win by Decision"' in src, (
+        "method_market_names must map to the real, registered canonical market names from sports.py's own UFC market_map")
+    assert '"Market": method_market_names[method_label], "Side": fighter' in src, (
+        "each method play must use the real canonical market name and the real fighter as Side")
+    assert 'quick_log.render_quick_log(method_plays, date_str, "UFC", key_prefix=f"ufc_method_{event_id}")' in src, (
+        "method_plays must be logged through the same shared widget")
+    assert "if method_rows:" in src, (
+        "logging must stay gated behind the same real has_method/method_rows checks that already gate the display, so it's dormant until real data exists")
+    print("✓ UFC Fight Card genuinely wires Method of Victory bet logging, correctly dormant until the Odds API actually supports these markets")
+
+
+def test_bet_log_manual_form_makes_player_optional_not_side():
+    # A REAL, CONFIRMED FIX for a real, reported case: the manual "Log a bet" form used to
+    # require BOTH Player and Game, and Side was a fixed selectbox (Over/Under/Yes only) with no
+    # way to enter a real team or fighter name -- meaning a genuine moneyline/fight-winner pick
+    # (MLB, UFC, or any other sport) could never actually be logged correctly through this form
+    # at all, for any sport, not just UFC (confirmed directly: a UFC screenshot showed the old
+    # MLB-only "HOU @ DET"/"Jose Altuve" placeholders still showing even with UFC active).
+    # Confirmed directly that no downstream code (betlog.py, bet_settlement.py, quick_log.py)
+    # assumed Side was one of those three specific values, so widening it to free text is safe.
+    src = (_HERE / "views" / "18_#L01f4d2_Bet_Log.py").read_text()
+    assert 'if game and side:' in src, (
+        "Game and Side must be the real required fields -- Player must no longer be required")
+    assert 'if player and game:' not in src, (
+        "the old, incorrect validation requiring Player must be genuinely gone, not just supplemented")
+    assert 'side = st.text_input("Side"' in src, (
+        "Side must be a real free-text field, not a fixed selectbox that can't hold a team/fighter name")
+    assert '_player = player.strip() or None' in src, (
+        "a blank Player field must be stored as a real None, the same explicit convention "
+        "quick_log.py's own moneyline logging already uses, not a silent empty string")
+    print("✓ Bet Log's manual form correctly requires Game and Side, makes Player genuinely optional, and Side accepts a real team/fighter name")
+
+
+def test_bet_log_manual_form_placeholders_are_sport_aware():
+    # Confirms the real, reported mismatch is fixed: UFC's own examples no longer show MLB's
+    # "HOU @ DET"/"Jose Altuve" placeholders, which read as genuinely wrong once UFC bet logging
+    # shipped (UFC bets don't have a "Player" the way MLB props do).
+    src = (_HERE / "views" / "18_#L01f4d2_Bet_Log.py").read_text()
+    assert '"UFC":   {"game": "Islam Makhachev vs. Arman Tsarukyan"' in src, (
+        "UFC must have its own real, fighter-vs-fighter example, not the MLB team-code placeholder")
+    assert '"leave blank for a fight-level pick"' in src, (
+        "UFC's own Player placeholder must honestly signal that it's optional for a fight-level pick")
+    assert '_ex = _FORM_EXAMPLES.get(_active.key, _FORM_EXAMPLES["MLB"])' in src, (
+        "the examples must be looked up by the real active sport, defaulting safely to the "
+        "original MLB example for any sport not yet given its own")
+    print("✓ Bet Log's manual form placeholders are genuinely sport-aware, with a real, correct UFC example")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

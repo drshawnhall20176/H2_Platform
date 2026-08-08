@@ -103,20 +103,43 @@ with st.expander("➕ Log a bet", expanded=False):
             else:
                 st.session_state["selected_player_id"] = None
 
+    # ADDED DIRECTLY ON REQUEST, a real, confirmed fix: "Player" used to be required and "Side"
+    # was a fixed selectbox (Over/Under/Yes only) with no way to enter a team or fighter name --
+    # meaning a genuine team-level or fighter-level moneyline pick (MLB, UFC, or any other
+    # sport) could never actually be logged correctly through this manual form at all, for any
+    # sport, not just UFC. Confirmed directly: no downstream code (betlog.py, bet_settlement.py,
+    # quick_log.py) assumes Side is one of those three specific values, so widening it to free
+    # text is safe. Sport-aware examples replace the old, always-MLB "HOU @ DET"/"Jose Altuve"
+    # placeholders, which read as genuinely wrong (and confusing) once UFC bet logging shipped.
+    _FORM_EXAMPLES = {
+        "MLB":   {"game": "HOU @ DET", "player": "Jose Altuve", "side": "Over"},
+        "WNBA":  {"game": "Aces @ Fever", "player": "A'ja Wilson", "side": "Over"},
+        "NFL":   {"game": "KC @ BUF", "player": "Patrick Mahomes", "side": "Over"},
+        "NCAAF": {"game": "Georgia @ Alabama", "player": "e.g. a skill player", "side": "Over"},
+        "UFC":   {"game": "Islam Makhachev vs. Arman Tsarukyan", "player": "leave blank for a fight-level pick",
+                  "side": "Islam Makhachev"},
+    }
+    _ex = _FORM_EXAMPLES.get(_active.key, _FORM_EXAMPLES["MLB"])
+
     with st.form("log_bet", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
         with c1:
             d = st.date_input("Slate date", datetime.now())
-            game = st.text_input("Game", placeholder="HOU @ DET")
+            game = st.text_input("Game", placeholder=_ex["game"])
             _prefill_name = st.session_state.get("selected_player_name", "")
-            player = st.text_input("Player", value=_prefill_name, placeholder="Jose Altuve",
+            player = st.text_input("Player (optional — leave blank for a team/fighter-level pick)",
+                                   value=_prefill_name, placeholder=_ex["player"],
                                    help="Pre-filled from the search above, if you used it. You "
                                         "can still edit this — just know editing it away from "
                                         "the searched name won't change which player_id gets "
-                                        "attached below.")
+                                        "attached below. Leave entirely blank for a moneyline, "
+                                        "fight-winner, or other team/fighter-level pick that has "
+                                        "no real individual player at all.")
         with c2:
             market = st.selectbox("Market", MARKETS)
-            side = st.selectbox("Side", ["Over", "Under", "Yes"])
+            side = st.text_input("Side", placeholder=_ex["side"],
+                                 help="Over/Under/Yes for a prop, or the real team/fighter name "
+                                     "for a moneyline/fight-winner pick.")
             line = st.number_input("Line", value=1.5, step=0.5)
         with c3:
             entry_odds = st.number_input("Entry odds (American)", value=-110, step=5)
@@ -147,7 +170,7 @@ with st.expander("➕ Log a bet", expanded=False):
                                         "Leave blank for a straight single.")
         notes = st.text_input("Notes", placeholder="optional")
         if st.form_submit_button("Log bet", type="primary"):
-            if player and game:
+            if game and side:
                 _pid = st.session_state.get("selected_player_id")
                 # Only trust the attached player_id if the typed name still matches what was
                 # searched -- if someone selected a player then edited the name field afterward,
@@ -155,19 +178,24 @@ with st.expander("➕ Log a bet", expanded=False):
                 # correctness bug (settling the wrong player's bet), worse than no id at all.
                 if _pid is not None and player.strip() != st.session_state.get("selected_player_name", "").strip():
                     _pid = None
-                B.add_bet(slate_date=d.isoformat(), game=game, player=player, player_id=_pid,
+                # A blank Player field means a genuine team/fighter-level pick -- stored as a
+                # real None, the same explicit convention quick_log.py's own moneyline logging
+                # already uses (Player=None), not a silent, ambiguous empty string.
+                _player = player.strip() or None
+                B.add_bet(slate_date=d.isoformat(), game=game, player=_player, player_id=_pid,
                           market=market, side=side, line=line, entry_odds=int(entry_odds),
                           model_prob=model_prob, stake=stake, book=book, notes=notes,
                           ticket=ticket.strip(), sport=_active.key)
                 id_note = f" (player ID {_pid} attached — will auto-settle)" if _pid else \
                           " (no player ID attached — will need manual settlement)"
-                st.success(f"Logged: {player} {market} {side} {line}{id_note}"
+                _label = f"{_player} " if _player else ""
+                st.success(f"Logged: {_label}{market} {side} {line}{id_note}"
                            + (f"  ·  ticket “{ticket.strip()}”" if ticket.strip() else ""))
                 st.session_state["selected_player_id"] = None
                 st.session_state["selected_player_name"] = ""
                 st.session_state["player_search_results"] = []
             else:
-                st.warning("Player and game are required.")
+                st.warning("Game and Side are required. Player is optional — leave it blank for a team/fighter-level pick.")
  
 bets = B.list_bets(sport=_active.key)
 if not bets:

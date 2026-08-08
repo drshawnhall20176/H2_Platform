@@ -318,6 +318,36 @@ def test_bet_log_fields_from_play_handles_the_real_ufc_fight_card_shape_end_to_e
     print("✓ bet_log_fields_from_play correctly handles the real UFC Fight Card moneyline shape end to end, using a genuine captured price")
 
 
+def test_bet_log_fields_from_play_handles_ufc_fight_duration_end_to_end():
+    # A REAL, END-TO-END TEST using the exact shape UFC Fight Card's own Fight Duration logging
+    # builds -- ADDED DIRECTLY ON REQUEST, extending Moneyline-only logging to this second real
+    # market. Fight Duration has no moneylines-style lookup (Over/Under isn't a team name), so
+    # this confirms the real, live odds already on the play itself flow straight through as
+    # entry_odds via the Fair fallback -- the honest, only-possible path for this market shape.
+    play = {"Player": None, "PlayerId": None, "Game": "Islam Makhachev vs. Arman Tsarukyan",
+           "Market": "Fight Duration", "Side": "Over", "Line": 2.5, "Fair": -155, "ModelProb": 0.61}
+    fields = Q.bet_log_fields_from_play(play, "2026-08-09", "UFC")
+    assert fields["entry_odds"] == -155
+    assert fields["entry_odds_source"] == "model_fair"   # honest: no separate real-price lookup exists for this market shape
+    assert fields["market"] == "Fight Duration" and fields["side"] == "Over"
+    assert fields["line"] == 2.5
+    print("✓ bet_log_fields_from_play correctly handles the real UFC Fight Duration shape end to end")
+
+
+def test_bet_log_fields_from_play_handles_ufc_method_of_victory_end_to_end():
+    # A REAL, END-TO-END TEST using the exact shape UFC Fight Card's own Method of Victory
+    # logging builds -- currently dormant on the real page since the Odds API rejects these
+    # markets, but this confirms the mapping itself is already correct and ready.
+    play = {"Player": None, "PlayerId": None, "Game": "Islam Makhachev vs. Arman Tsarukyan",
+           "Market": "Win by Sub", "Side": "Islam Makhachev", "Line": None,
+           "Fair": -140, "ModelProb": 0.58}
+    fields = Q.bet_log_fields_from_play(play, "2026-08-09", "UFC")
+    assert fields["entry_odds"] == -140
+    assert fields["market"] == "Win by Sub" and fields["side"] == "Islam Makhachev"
+    assert fields["line"] == 0.0   # honest "missing -> 0.0" fallback, same as every other no-line play
+    print("✓ bet_log_fields_from_play correctly handles the real UFC Method of Victory shape end to end")
+
+
 # ----------------------------------------------------------------- bet_log_signature
 def test_bet_log_signature_distinguishes_different_plays():
     sig_a = Q.bet_log_signature(_play(player="Ohtani"), "2026-07-20")

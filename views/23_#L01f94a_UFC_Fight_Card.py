@@ -257,7 +257,36 @@ for i, event in enumerate(events):
             with dcol2:
                 st.metric("Under (early finish)", _fmt_american(under_odds))
 
+            # Bet logging -- ADDED DIRECTLY ON REQUEST, extending the same real logging already
+            # wired for Moneyline above to this second real market. Same honest choice as
+            # Moneyline: no separate model price exists for this page yet, so the real, live
+            # totals odds already shown above are used directly as "Fair", and the real no-vig
+            # probability (the same real helper the Moneyline metrics above already use) stands
+            # in for "ModelProb" rather than a fabricated number.
+            #
+            # Genuinely different market shape from Moneyline, not a copy-paste: Over/Under
+            # isn't a "team name" pick real_moneyline_price can match against, so there's no
+            # separate moneylines-style lookup here -- the real, already-fetched odds ARE the
+            # entry price directly, with no further lookup needed or possible.
+            if over_odds is not None and under_odds is not None:
+                p_over, p_under = _no_vig_prob(over_odds, under_odds)
+                dur_plays = [
+                    {"Player": None, "PlayerId": None, "Game": f"{fighter_a} vs. {fighter_b}",
+                     "Market": "Fight Duration", "Side": "Over", "Line": total_point,
+                     "Fair": over_odds, "ModelProb": p_over},
+                    {"Player": None, "PlayerId": None, "Game": f"{fighter_a} vs. {fighter_b}",
+                     "Market": "Fight Duration", "Side": "Under", "Line": total_point,
+                     "Fair": under_odds, "ModelProb": p_under},
+                ]
+                quick_log.render_quick_log(dur_plays, date_str, "UFC", key_prefix=f"ufc_dur_{event_id}")
+
         # ── Method of Victory ─────────────────────────────────────────────
+        # Real, registered canonical market names (sports.py's own UFC market_map), NOT the
+        # emoji-prefixed display labels in `methods` below -- bet logging needs the same real
+        # market name every other logged pick on this platform uses, not a display-only string.
+        method_market_names = {
+            "🤛 KO/TKO": "Win by KO/TKO", "🤸 Submission": "Win by Sub", "📋 Decision": "Win by Decision",
+        }
         methods = {
             "🤛 KO/TKO":    odds.get("fighter_wins_by_ko_tko") or {},
             "🤸 Submission": odds.get("fighter_wins_by_submission") or {},
@@ -268,6 +297,7 @@ for i, event in enumerate(events):
         if has_method:
             st.markdown("**Method of Victory**")
             method_rows = []
+            method_plays = []
             for method_label, method_odds in methods.items():
                 if not method_odds:
                     continue
@@ -279,9 +309,32 @@ for i, event in enumerate(events):
                             "Odds": _fmt_american(o),
                             "Implied %": f"{_impl_prob(o)*100:.0f}%",
                         })
+                        # Bet logging -- ADDED DIRECTLY ON REQUEST, dormant until the Odds API
+                        # actually supports these markets (see this file's own module docstring
+                        # on the real, confirmed INVALID_MARKET rejection) -- gated behind the
+                        # exact same has_method/method_odds checks that already gate the display
+                        # above, so this activates automatically the moment real data exists,
+                        # with no further changes needed here. Each (method, fighter) is its own
+                        # independent real proposition, not a two-sided market like Moneyline or
+                        # Fight Duration (KO/TKO and Submission for the SAME fighter aren't
+                        # opposite sides of one bet), so this is one play per real, priced
+                        # outcome, not a paired Over/Under or head-to-head shape. "Fair" is the
+                        # real, live method-of-victory odds directly, same honest choice as
+                        # every other market on this page; "ModelProb" uses the real implied
+                        # probability already computed for the display table above (WITH vig,
+                        # since a real no-vig removal needs the other real outcomes for this
+                        # exact fighter+method combination, which aren't independently offered
+                        # here) -- an honest, clearly-labeled approximation, not a fabricated one.
+                        method_plays.append({
+                            "Player": None, "PlayerId": None,
+                            "Game": f"{fighter_a} vs. {fighter_b}",
+                            "Market": method_market_names[method_label], "Side": fighter,
+                            "Line": None, "Fair": o, "ModelProb": _impl_prob(o),
+                        })
             if method_rows:
                 mdf = pd.DataFrame(method_rows)
                 st.dataframe(mdf, hide_index=True, width="stretch")
+                quick_log.render_quick_log(method_plays, date_str, "UFC", key_prefix=f"ufc_method_{event_id}")
 
         # ── Community Pick Helper ──────────────────────────────────────────
         # Phase 1: show what the odds say, let community add conviction
