@@ -127,6 +127,30 @@ def load_retro_generic(sport_key: str, date_str: str):
             graded = [dict(p, GameMargin=_margin_by_label.get(p.get("Game")))
                      if p.get("Game") in _margin_by_label else p for p in graded]
 
+            # TeamMargin -- EXTENDED DIRECTLY ON REQUEST, splitting the real blowout-validation
+            # work by which side of a real blowout a player was actually on (a real, live
+            # example named directly: LV Aces 66 @ NY Liberty 99, with real, legitimate stars
+            # like Jewell Loyd and Breanna Stewart stuck under their own real lines). Reuses the
+            # SAME real, already-fetched _gids/_labels above -- zero new network calls, since
+            # get_team_margins shares the exact same real, cached boxscore fetch get_game_margin
+            # already triggered for the same game_id. Merged by the real player's own TEAM
+            # (not the game), since a game's two real teams get two different real signed values.
+            if hasattr(sport.engine, "get_team_margins"):
+                with ThreadPoolExecutor(max_workers=8) as ex:
+                    _team_margins_per_game = list(ex.map(sport.engine.get_team_margins, _gids))
+                _meta_by_label = {m["label"]: m for m in meta}
+                _team_margin_by_name = {}
+                for label, margins in zip(_labels, _team_margins_per_game):
+                    m = _meta_by_label.get(label)
+                    if not m or not margins:
+                        continue
+                    if m.get("home_id") in margins:
+                        _team_margin_by_name[m["home_name"]] = margins[m["home_id"]]
+                    if m.get("away_id") in margins:
+                        _team_margin_by_name[m["away_name"]] = margins[m["away_id"]]
+                graded = [dict(p, TeamMargin=_team_margin_by_name.get(p.get("Team")))
+                         if p.get("Team") in _team_margin_by_name else p for p in graded]
+
     reports = {m: R.market_report(plays, results, m) for m in _active_markets}
     rows_by_pid = {r.get("_pid"): r for r in rows}
     return graded, summary, reports, rows_by_pid, len(meta), len(results)
@@ -380,26 +404,31 @@ def _render_graded(subset):
            "Result", "Why it missed", "Why"]
     fmt = {"Model %": "{:.0%}", "Conviction": "{:.2f}×", "Line": "{:g}", "Actual": "{:.1f}"}
 
-    # Team environment -- ADDED DIRECTLY ON REQUEST, a real, distinct diagnostic from "Why it
-    # missed" above (that one's about probability/variance; this one's about whether the TEAM's
-    # own real collective output for this market still matched the model's real expectation,
-    # just landed on a different real hitter). MLB only: explain_team_environment lives in
-    # retro.py, the MLB-specific module, matching the same real _explain_miss routing this page
-    # already does a few lines up. Uses _graded_all (the full real slate), not subset -- a
+    # Team environment -- a real, distinct diagnostic from "Why it missed" above (that one's
+    # about probability/variance; this one's about whether the TEAM's own real collective output
+    # for this market still matched the model's real expectation, just landed on a different
+    # real player). EXTENDED DIRECTLY ON REQUEST beyond MLB-only: confirmed directly that
+    # explain_team_environment was already genuinely sport-agnostic under the hood -- it only
+    # ever needs Team/Game/Market/Line/Hit/Actual, fields every sport's own graded plays already
+    # carry, and retro.MARKET_STAT already has real entries for WNBA/NBA/NCAAMB's own Core-4
+    # markets (Points/Rebounds/Assists/Threes Made). The old MLB-only gate here was a real
+    # display decision made when this was first built, never a genuine limitation of the
+    # function itself -- unlike the L5/L10 checkbox below (which genuinely does depend on an
+    # MLB-only engine function) or the blowout-risk/GameMargin features (genuinely gated by real
+    # per-sport engine capability). Uses _graded_all (the full real slate), not subset -- a
     # missed player's own real teammates could be filtered out of subset entirely (e.g. "Misses
     # only"), which would silently starve this real comparison of the very plays it needs.
-    if _active.key == "MLB":
-        def _env_summary(r):
-            if r["Hit"]:
-                return ""
-            result = R.explain_team_environment(r.to_dict(), _graded_all)
-            if result is None:
-                return ""
-            verdict = "✅ matched" if result["environment_matched"] else "❌ also cold"
-            return (f"{verdict} — team {result['actual_team_total']:g} vs "
-                   f"{result['expected_team_total']:g} expected ({result['n_teammates']} hitters)")
-        g["Team environment"] = g.apply(_env_summary, axis=1)
-        cols.insert(cols.index("Why it missed") + 1, "Team environment")
+    def _env_summary(r):
+        if r["Hit"]:
+            return ""
+        result = R.explain_team_environment(r.to_dict(), _graded_all)
+        if result is None:
+            return ""
+        verdict = "✅ matched" if result["environment_matched"] else "❌ also cold"
+        return (f"{verdict} — team {result['actual_team_total']:g} vs "
+               f"{result['expected_team_total']:g} expected ({result['n_teammates']} real players)")
+    g["Team environment"] = g.apply(_env_summary, axis=1)
+    cols.insert(cols.index("Why it missed") + 1, "Team environment")
 
     if _show_l5_l10:
         # Real, market-and-line-aware L5/L10 -- see retro.l5_l10_hit_rate's own docstring for
@@ -683,3 +712,47 @@ if _show_validation_charts:
                    "real blowout-vs-hit-rate read. GameMargin only starts accumulating from real "
                    "slates graded through this page after this feature was added — keep grading "
                    "real dates here, and this fills in on its own.")
+
+        # EXTENDED DIRECTLY ON REQUEST, the real, deeper follow-up: splits the same real blowout
+        # question above by WHICH SIDE a player was actually on -- a real, live example named
+        # directly: LV Aces 66 @ NY Liberty 99, with real, legitimate stars stuck under their own
+        # real lines. Gated by its own real engine capability (get_team_margins), same real
+        # pattern as GameMargin's own gate. Reuses _margin_threshold (the same real slider right
+        # above) rather than a second, separate slider -- both real charts are answering
+        # variations on the same real question, at the same real cutoff, deliberately.
+        if hasattr(_rank_sport.engine, "get_team_margins"):
+            C.section_header("\u2696\ufe0f", "Does it matter which side of the blowout a player was on?")
+            st.caption("The chart above pools BOTH sides of a real blowout into one bucket -- but "
+                      "a losing team's own real stars fading (less real reason to keep pushing, "
+                      "down big) and a winning team's own real stars getting real, deliberate "
+                      "rest (an intentional coaching call, once the outcome is safe) are "
+                      "genuinely different real phenomena. This splits them, using the same real "
+                      "threshold above.")
+            _role_result = R.catch_rate_by_team_role_in_blowout(
+                _rank_history, threshold=_margin_threshold, min_n=20,
+                market=None if _rank_market == "All markets" else _rank_market)
+            if any(b["n"] > 0 for b in _role_result):
+                _role_colors = [_PALETTE["model"] if b["hit_rate"] is not None else _PALETTE["muted"]
+                                for b in _role_result]
+                _role_heights = [b["hit_rate"] if b["hit_rate"] is not None else 0 for b in _role_result]
+                _role_text = [f"n={b['n']}" if b["hit_rate"] is not None else f"n={b['n']} (needs 20+)"
+                             for b in _role_result]
+                figr2 = go.Figure(go.Bar(
+                    x=[b["bucket"] for b in _role_result], y=_role_heights,
+                    marker_color=_role_colors,
+                    text=_role_text, textposition="outside",
+                    hovertemplate="%{x}<br>hit rate %{y:.0%}<br>%{text}<extra></extra>",
+                ))
+                figr2.update_layout(template="plotly_white", height=360, margin=dict(l=10, r=10, t=30, b=10),
+                                    yaxis=dict(title="Real hit rate", range=[0, 1], tickformat=".0%"),
+                                    xaxis=dict(title="That player's own team's real result"))
+                st.plotly_chart(figr2, width="stretch")
+                st.caption("Blue bars clear their own real floor (20+ real graded plays for this "
+                          "scope). Grey bars have real plays too, just not enough of them yet \u2014 "
+                          "this fills in on its own as more real WNBA slates get graded here.")
+            else:
+                st.info("Not enough real accumulated history yet for this sport/market/scope to "
+                       "show a real winning-vs-losing-side read. TeamMargin only starts "
+                       "accumulating from real slates graded through this page after this "
+                       "feature was added \u2014 keep grading real dates here, and this fills in on "
+                       "its own.")

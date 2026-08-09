@@ -898,6 +898,35 @@ def test_get_game_margin_honest_none_on_fetch_failure(monkeypatch):
     print("✓ get_game_margin honestly returns None on a real fetch failure, never a fabricated margin")
 
 
+def test_get_team_margins_delegates_to_the_real_shared_computation(monkeypatch):
+    # EXTENDED DIRECTLY ON REQUEST, splitting the real blowout-validation work by which side of
+    # a real blowout a player was actually on -- a real, live example named directly: LV Aces 66
+    # @ NY Liberty 99. Thin wrapper -- confirms it genuinely delegates to get_game_team_totals
+    # (this module's own already-tested wrapper) + basketball_engine.team_margins_from_totals.
+    E._response_cache.clear()
+    fake_cdn = {
+        "gamepackageJSON": {
+            "boxscore": {
+                "teams": [
+                    {"team": {"id": "17"}, "statistics": [{"name": "points", "displayValue": "66"}]},
+                    {"team": {"id": "9"}, "statistics": [{"name": "points", "displayValue": "99"}]},
+                ]
+            }
+        }
+    }
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_cdn)
+    result = E.get_team_margins("g1")
+    assert result == {17: -33.0, 9: 33.0}
+    print("✓ get_team_margins correctly delegates to the real, shared computation, producing the real signed margins for both real teams")
+
+
+def test_get_team_margins_honest_empty_on_fetch_failure(monkeypatch):
+    E._response_cache.clear()
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: None)
+    assert E.get_team_margins("g1") == {}
+    print("✓ get_team_margins honestly returns an empty dict on a real fetch failure, never a fabricated margin")
+
+
 # ----------------------------------------------------------------- get_team_recent_allowed_stats
 def test_get_team_recent_allowed_stats_averages_opponent_totals(monkeypatch):
     E._response_cache.clear()

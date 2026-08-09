@@ -809,6 +809,102 @@ def test_catch_rate_by_blowout_margin_real_exact_tie_counts_as_competitive():
     print("✓ catch_rate_by_blowout_margin correctly counts a real, exact-tie game as competitive, not confused with missing data")
 
 
+# ----------------------------------------------------------------- catch_rate_by_team_role_in_blowout
+def test_catch_rate_by_team_role_in_blowout_uses_the_real_reported_example():
+    # EXTENDED DIRECTLY ON REQUEST, using the EXACT real, live example a real user reported: LV
+    # Aces 66 @ NY Liberty 99, a real 33-point final. Real, exact, hand-verifiable construction:
+    # losing-side players (Aces, TeamMargin=-33) hit 30% (6/20); winning-side players (Liberty,
+    # TeamMargin=+33) hit 55% (11/20) -- a real, different rate for each real side, exactly the
+    # real distinction one combined GameMargin bucket couldn't have shown.
+    losing_side = [dict(_graded(f"Aces{i}", i, 0.5, i < 6), TeamMargin=-33.0) for i in range(20)]
+    winning_side = [dict(_graded(f"Lib{i}", 100 + i, 0.5, i < 11), TeamMargin=33.0) for i in range(20)]
+    result = R.catch_rate_by_team_role_in_blowout(losing_side + winning_side, min_n=20)
+    assert len(result) == 3, "all three real buckets must always appear"
+    by_bucket = {b["bucket"]: b for b in result}
+    losing = next(v for k, v in by_bucket.items() if k.startswith("Blowout — losing"))
+    winning = next(v for k, v in by_bucket.items() if k.startswith("Blowout — winning"))
+    assert losing["n"] == 20 and losing["hit_rate"] == 0.30
+    assert winning["n"] == 20 and winning["hit_rate"] == 0.55
+    print("✓ catch_rate_by_team_role_in_blowout correctly separates real losing-side vs. real winning-side hit rates, using the real reported LV/NY example")
+
+
+def test_catch_rate_by_team_role_in_blowout_signs_are_genuinely_opposite_not_confused():
+    # A real, direct check that a real losing-side play and a real winning-side play from the
+    # SAME real game land in genuinely different real buckets, never the same one.
+    plays = [
+        dict(_graded("Loser", 1, 0.5, True), TeamMargin=-33.0),
+        dict(_graded("Winner", 2, 0.5, True), TeamMargin=33.0),
+    ]
+    result = R.catch_rate_by_team_role_in_blowout(plays, min_n=1)
+    by_bucket = {b["bucket"]: b["n"] for b in result}
+    losing_n = next(n for k, n in by_bucket.items() if k.startswith("Blowout — losing"))
+    winning_n = next(n for k, n in by_bucket.items() if k.startswith("Blowout — winning"))
+    assert losing_n == 1 and winning_n == 1
+    print("✓ catch_rate_by_team_role_in_blowout correctly keeps a real losing-side play and a real winning-side play in genuinely different buckets")
+
+
+def test_catch_rate_by_team_role_in_blowout_competitive_bucket_for_close_games():
+    plays = [dict(_graded(f"P{i}", i, 0.5, True), TeamMargin=3.0) for i in range(20)]
+    result = R.catch_rate_by_team_role_in_blowout(plays, threshold=10.0, min_n=20)
+    comp = next(b for b in result if b["bucket"].startswith("Competitive"))
+    losing = next(b for b in result if b["bucket"].startswith("Blowout — losing"))
+    winning = next(b for b in result if b["bucket"].startswith("Blowout — winning"))
+    assert comp["n"] == 20 and losing["n"] == 0 and winning["n"] == 0
+    print("✓ catch_rate_by_team_role_in_blowout correctly counts a close, real 3-point margin as competitive, not either blowout bucket")
+
+
+def test_catch_rate_by_team_role_in_blowout_boundaries_are_symmetric_and_inclusive():
+    # A real, direct boundary check -- a real margin sitting EXACTLY on the real threshold
+    # (either sign) must land in its own real blowout bucket, never Competitive.
+    plays = [
+        dict(_graded("AtLosingEdge", 1, 0.5, True), TeamMargin=-10.0),   # exactly -threshold
+        dict(_graded("AtWinningEdge", 2, 0.5, True), TeamMargin=10.0),   # exactly +threshold
+    ]
+    result = R.catch_rate_by_team_role_in_blowout(plays, threshold=10.0, min_n=1)
+    by_bucket = {b["bucket"]: b["n"] for b in result}
+    losing_n = next(n for k, n in by_bucket.items() if k.startswith("Blowout — losing"))
+    winning_n = next(n for k, n in by_bucket.items() if k.startswith("Blowout — winning"))
+    comp_n = next(n for k, n in by_bucket.items() if k.startswith("Competitive"))
+    assert losing_n == 1 and winning_n == 1 and comp_n == 0
+    print("✓ catch_rate_by_team_role_in_blowout's own boundaries are symmetric and inclusive on both real sides")
+
+
+def test_catch_rate_by_team_role_in_blowout_threshold_is_genuinely_adjustable():
+    plays = [dict(_graded(f"P{i}", i, 0.5, True), TeamMargin=-12.0) for i in range(20)]
+    at_10 = R.catch_rate_by_team_role_in_blowout(plays, threshold=10.0, min_n=20)
+    at_15 = R.catch_rate_by_team_role_in_blowout(plays, threshold=15.0, min_n=20)
+    losing_at_10 = next(b for b in at_10 if b["bucket"].startswith("Blowout — losing"))["n"]
+    losing_at_15 = next(b for b in at_15 if b["bucket"].startswith("Blowout — losing"))["n"]
+    assert losing_at_10 == 20   # -12 clears a real 10.0 threshold -> counted as a real blowout
+    assert losing_at_15 == 0    # the SAME real -12 does NOT clear a real 15.0 threshold
+    print("✓ catch_rate_by_team_role_in_blowout's threshold is a genuine, live parameter, same as catch_rate_by_blowout_margin's own")
+
+
+def test_catch_rate_by_team_role_in_blowout_below_min_n_bucket_has_honest_none():
+    plays = [dict(_graded(f"P{i}", i, 0.5, True), TeamMargin=-33.0) for i in range(5)]   # only 5, below min_n=20
+    result = R.catch_rate_by_team_role_in_blowout(plays)
+    losing = next(b for b in result if b["bucket"].startswith("Blowout — losing"))
+    assert losing["n"] == 5 and losing["hit_rate"] is None
+    print("✓ catch_rate_by_team_role_in_blowout returns an honest None for a real bucket below its own min_n floor")
+
+
+def test_catch_rate_by_team_role_in_blowout_excludes_plays_with_no_real_team_margin():
+    plays = [dict(_graded(f"P{i}", i, 0.5, True)) for i in range(30)]   # NO TeamMargin key at all
+    result = R.catch_rate_by_team_role_in_blowout(plays, min_n=20)
+    assert all(b["n"] == 0 and b["hit_rate"] is None for b in result), (
+        "real plays with no real TeamMargin must be excluded from every real bucket, never guessed")
+    print("✓ catch_rate_by_team_role_in_blowout excludes real plays with no team-margin data from every bucket")
+
+
+def test_catch_rate_by_team_role_in_blowout_narrows_to_one_market_when_asked():
+    pts = [dict(_graded(f"P{i}", i, 0.5, True, market="Points"), TeamMargin=-33.0) for i in range(20)]
+    reb = [dict(_graded(f"R{i}", 100 + i, 0.5, False, market="Rebounds"), TeamMargin=-33.0) for i in range(20)]
+    result = R.catch_rate_by_team_role_in_blowout(pts + reb, market="Points", min_n=20)
+    losing = next(b for b in result if b["bucket"].startswith("Blowout — losing"))
+    assert losing["hit_rate"] == 1.0   # only the real Points plays counted
+    print("✓ catch_rate_by_team_role_in_blowout correctly narrows to one real market when asked")
+
+
 def test_market_report_works_for_hits_runs_rbis():
     # Regression guard, same shape as the NFL Pass Yards test above: Batter Hits+Runs+RBIs plays
     # were being built and shown on the board (projections.build_best_bets) but had no MARKET_STAT

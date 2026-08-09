@@ -260,6 +260,50 @@ def test_game_margin_from_totals_honest_none_for_malformed_input():
     print("✓ game_margin_from_totals honestly returns None for malformed real input, never a fabricated margin")
 
 
+# ----------------------------------------------------------------- team_margins_from_totals
+def test_team_margins_from_totals_returns_signed_margins_for_both_real_teams():
+    # EXTENDED DIRECTLY ON REQUEST, splitting the real blowout-validation work by which side of
+    # a real blowout a player was actually on -- a real, live example named directly: a real,
+    # live 33-point WNBA blowout (LV Aces 66 @ NY Liberty 99). Real, exact, hand-verifiable:
+    # Liberty's own real signed margin is +33, Aces' own real signed margin is -33, from the SAME
+    # real fetch.
+    team_totals = {17: {"pts": 66.0}, 9: {"pts": 99.0}}   # 17 = Aces (lost), 9 = Liberty (won)
+    result = BB.team_margins_from_totals(team_totals)
+    assert result == {17: -33.0, 9: 33.0}
+    print("✓ team_margins_from_totals correctly returns the real, signed margin for both real teams from one real fetch")
+
+
+def test_team_margins_from_totals_signs_are_genuinely_opposite_not_both_positive():
+    # A real, direct check against the exact mistake a naive real implementation could make --
+    # both real teams' own signed margins must be exact opposites, never both positive/negative
+    # (which would silently discard the real winner/loser distinction this function exists for).
+    team_totals = {1: {"pts": 80.0}, 2: {"pts": 75.0}}
+    result = BB.team_margins_from_totals(team_totals)
+    assert result[1] == -result[2]
+    assert result[1] > 0 and result[2] < 0   # team 1 scored more -> team 1's own real margin is positive
+    print("✓ team_margins_from_totals' own two real signed margins are genuine, exact opposites")
+
+
+def test_team_margins_from_totals_real_exact_tie_returns_real_zeros_for_both():
+    # A real, exact tie (before overtime) -- both real teams' own signed margin must be a real
+    # 0.0, not a fabricated small nonzero value or an honest-but-wrong None.
+    team_totals = {1: {"pts": 85.0}, 2: {"pts": 85.0}}
+    result = BB.team_margins_from_totals(team_totals)
+    assert result == {1: 0.0, 2: 0.0}
+    print("✓ team_margins_from_totals correctly returns real 0.0 for both real teams on an exact tie")
+
+
+def test_team_margins_from_totals_honest_empty_dict_for_malformed_input():
+    # Same real "exactly two or nothing" discipline game_margin_from_totals already establishes
+    # -- genuinely malformed/partial real data must return an honest empty dict, never a partial
+    # or fabricated one.
+    assert BB.team_margins_from_totals({}) == {}
+    assert BB.team_margins_from_totals({5: {"pts": 92.0}}) == {}
+    assert BB.team_margins_from_totals({5: {"pts": 92.0}, 9: {"pts": 71.0}, 3: {"pts": 50.0}}) == {}
+    assert BB.team_margins_from_totals({5: {"reb": 40.0}, 9: {"pts": 71.0}}) == {}
+    print("✓ team_margins_from_totals honestly returns an empty dict for malformed real input, never a partial one")
+
+
 # ----------------------------------------------------------------- get_team_recent_allowed_stats
 def test_get_team_recent_allowed_stats_averages_opponent_totals():
     events = {"events": [

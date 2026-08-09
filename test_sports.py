@@ -1740,20 +1740,36 @@ def test_bet_log_manual_form_placeholders_are_sport_aware():
     print("✓ Bet Log's manual form placeholders are genuinely sport-aware, with a real, correct UFC example")
 
 
-def test_retrospective_wires_team_environment_diagnostic_using_full_slate():
-    # ADDED DIRECTLY ON REQUEST: a real, distinct diagnostic from "Why it missed" (probability-
-    # based) -- confirms Retrospective genuinely wires it in, gated to MLB (explain_team_
-    # environment lives in retro.py, the MLB-specific module), and critically uses _graded_all
-    # (the full real slate) rather than the possibly-filtered subset, since a missed player's
-    # own real teammates could otherwise be filtered out of view entirely (e.g. "Misses only"),
-    # silently starving the real comparison of the very plays it needs.
+def test_retrospective_wires_team_environment_diagnostic_for_every_sport():
+    # EXTENDED DIRECTLY ON REQUEST, a real, confirmed fix for a real, reported case: a real user
+    # showed a real, live 33-point WNBA blowout (LV Aces 66 @ NY Liberty 99) with real, legitimate
+    # stars (Jewell Loyd, Breanna Stewart) stuck well under their own real lines -- exactly the
+    # real garbage-time pattern this diagnostic exists to catch, but it was MLB-only until now.
+    # Confirmed directly (see retro.explain_team_environment's own real tests) that the function
+    # itself was already genuinely sport-agnostic -- it only ever needs Team/Game/Market/Line/
+    # Hit/Actual, fields every sport's own graded plays already carry, and MARKET_STAT already
+    # has real entries for WNBA/NBA/NCAAMB's own Core-4 markets. The old MLB-only gate here was a
+    # real display decision, never a genuine limitation of the function. Confirms the real fix:
+    # the diagnostic now runs unconditionally (not gated to MLB the way L5/L10 and the blowout-
+    # risk/GameMargin features genuinely still are, since THOSE really do depend on MLB-only or
+    # capability-specific engine functions), and critically uses _graded_all (the full real
+    # slate) rather than the possibly-filtered subset, since a missed player's own real teammates
+    # could otherwise be filtered out of view entirely (e.g. "Misses only"), silently starving
+    # the real comparison of the very plays it needs.
     src = (_HERE / "views" / "16_#L01f50d_Retrospective.py").read_text()
-    assert 'if _active.key == "MLB":' in src, "the diagnostic must be gated to MLB, matching explain_team_environment's own real home"
+    # A real, precise check that THIS section specifically is no longer MLB-gated -- not just a
+    # loose "the string exists somewhere in this file" check, which would pass regardless, since
+    # other, genuinely MLB-only sections (L5/L10, GameMargin) still correctly use that same gate.
+    assert 'def _env_summary(r):' in src
+    env_section_start = src.index("def _env_summary(r):")
+    env_section = src[max(0, env_section_start - 400):env_section_start]
+    assert 'if _active.key == "MLB":' not in env_section, (
+        "the team-environment diagnostic must no longer be gated to MLB -- it is genuinely sport-agnostic")
     assert "R.explain_team_environment(r.to_dict(), _graded_all)" in src, (
         "must call the real diagnostic with the full real slate (_graded_all), not the possibly-filtered subset")
     assert 'g["Team environment"] = g.apply(_env_summary, axis=1)' in src, (
         "the real column must actually be attached to the displayed table")
-    print("✓ Retrospective genuinely wires the team-environment diagnostic using the full real slate, gated correctly to MLB")
+    print("✓ Retrospective genuinely wires the team-environment diagnostic for every sport, using the full real slate")
 
 
 def test_retrospective_wires_conviction_tier_chart_reusing_already_fetched_history():
@@ -1795,6 +1811,44 @@ def test_retrospective_wires_game_margin_computation_gated_by_real_engine_capabi
     assert "graded = [dict(p, GameMargin=_margin_by_label.get(p.get(\"Game\")))" in src, (
         "must merge the real margin onto every real play sharing that same real game")
     print("✓ Retrospective genuinely wires GameMargin computation, gated by real engine capability, fetched CONCURRENTLY not sequentially")
+
+
+def test_retrospective_wires_team_margin_split_by_real_team_not_game():
+    # EXTENDED DIRECTLY ON REQUEST, splitting the real blowout-validation work by which side of
+    # a real blowout a player was actually on -- a real, live example named directly: LV Aces 66
+    # @ NY Liberty 99, with real, legitimate stars stuck under their own real lines. Confirms
+    # load_retro_generic genuinely computes and merges TeamMargin, gated by hasattr (same real
+    # pattern as GameMargin), reuses the SAME already-fetched _gids/_labels (zero new network
+    # calls), and critically merges by the real player's own TEAM field, not Game -- a game's
+    # two real teams must get two different real signed values, not the same one both sides.
+    src = (_HERE / "views" / "16_#L01f50d_Retrospective.py").read_text()
+    assert 'hasattr(sport.engine, "get_team_margins")' in src, (
+        "must gate by real engine capability, not assume every sport has this")
+    assert "_team_margins_per_game = list(ex.map(sport.engine.get_team_margins, _gids))" in src, (
+        "must reuse the same already-fetched real _gids, not a second, redundant real fetch")
+    assert '_team_margin_by_name[m["home_name"]] = margins[m["home_id"]]' in src, (
+        "must correctly map the real home team's own id to its own real signed margin")
+    assert '_team_margin_by_name[m["away_name"]] = margins[m["away_id"]]' in src, (
+        "must correctly map the real away team's own id to its own real signed margin")
+    assert 'graded = [dict(p, TeamMargin=_team_margin_by_name.get(p.get("Team")))' in src, (
+        "must merge the real signed margin onto each play by its own real TEAM, not Game -- "
+        "the two real teams in a blowout have two different real signed margins")
+    print("✓ Retrospective genuinely wires TeamMargin, correctly split by each real player's own team, reusing the already-fetched real game ids")
+
+
+def test_retrospective_wires_team_role_in_blowout_chart_reusing_the_same_real_threshold():
+    # EXTENDED DIRECTLY ON REQUEST, the display half of the real team-role-in-blowout validation
+    # work. Confirms the real chart is genuinely gated by real engine capability (only a sport
+    # with get_team_margins ever accumulates real TeamMargin data), and deliberately reuses
+    # _margin_threshold (the same real slider the blowout-margin chart right above it already
+    # has) rather than a second, separate slider -- both real charts answer variations on the
+    # same real question, at the same real cutoff.
+    src = (_HERE / "views" / "16_#L01f50d_Retrospective.py").read_text()
+    assert 'hasattr(_rank_sport.engine, "get_team_margins")' in src, (
+        "the real chart must be gated by real engine capability, not shown for every sport")
+    assert "R.catch_rate_by_team_role_in_blowout(\n                _rank_history, threshold=_margin_threshold" in src, (
+        "must reuse the already-fetched _rank_history and the same real slider value as the blowout-margin chart above it")
+    print("✓ Retrospective genuinely wires the team-role-in-blowout chart, gated correctly, reusing the same real threshold slider")
 
 
 def test_retrospective_wires_blowout_margin_chart_with_adjustable_threshold():

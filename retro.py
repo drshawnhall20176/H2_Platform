@@ -730,6 +730,76 @@ def catch_rate_by_blowout_margin(graded_plays: List[Dict], threshold: float = 10
     return out
 
 
+def catch_rate_by_team_role_in_blowout(graded_plays: List[Dict], threshold: float = 10.0,
+                                       market: Optional[str] = None, min_n: int = 20) -> List[Dict]:
+    """Real hit rate split by WHICH SIDE of a real blowout a player was actually on -- EXTENDED
+    DIRECTLY ON REQUEST, the real, deeper follow-up to catch_rate_by_blowout_margin (above). A
+    real, live example named directly: LV Aces 66 @ NY Liberty 99 (a real 33-point final), with
+    real, legitimate stars (Jewell Loyd, Breanna Stewart) stuck well under their own real lines
+    in real, live garbage time. catch_rate_by_blowout_margin already answers "was this game a
+    blowout" using the real, unsigned magnitude -- but that pools BOTH sides of a real blowout
+    into one bucket, blending two genuinely different real phenomena: a losing team's own real
+    stars fading (less real incentive to keep pushing, down big) versus a winning team's own
+    real stars getting real, deliberate rest once the outcome is safe (an intentional real
+    coaching decision, not fatigue). Those likely have different real magnitudes and different
+    real timing -- a winning team might pull its real stars earlier than a losing team's own
+    real stars naturally fade -- and one combined real bucket can't separate them.
+
+    USES THE REAL, SIGNED TeamMargin, NOT THE UNSIGNED GameMargin -- the real, necessary
+    distinction this function exists for. TeamMargin is specific to the player's OWN real team
+    (positive if their team won by that much, negative if they lost by that much), merged in by
+    views/16_Retrospective.py at grading time via basketball_engine.team_margins_from_totals /
+    wnba_engine.get_team_margins, the same real, retroactively-computable substitute for a
+    pre-game spread GameMargin's own docstring already establishes -- just split by real team
+    instead of pooled by real game.
+
+    threshold is a real, adjustable parameter, the same real design catch_rate_by_blowout_margin
+    already uses and for the same real reason -- lets a real caller test whether 10.0 real
+    points is the right real number to call either side of a blowout, not just accept it.
+
+    Real plays with no real TeamMargin (a sport whose own engine has no get_team_margins yet, a
+    game that hasn't been graded through the real Retrospective flow that computes it, or a play
+    whose own Team didn't match either real team in that real game) are honestly excluded from
+    all three real buckets, never guessed into one.
+
+    ALWAYS RETURNS ALL THREE REAL BUCKETS, EVERY CALL -- same real, deliberate honesty every
+    other catch_rate_by_* function above already establishes: hit_rate is None (not a fabricated
+    number) whenever a real bucket has fewer than min_n real settled plays."""
+    if market is not None:
+        graded_plays = [p for p in graded_plays if p.get("Market") == market]
+
+    def _bucket_for(margin: float) -> Optional[str]:
+        if margin <= -threshold:
+            return "losing"
+        if margin >= threshold:
+            return "winning"
+        return "competitive"
+
+    labels = {
+        "losing": f"Blowout \u2014 losing side (\u2264 -{threshold:g} pts)",
+        "competitive": f"Competitive (within {threshold:g} pts either way)",
+        "winning": f"Blowout \u2014 winning side (\u2265 {threshold:g} pts)",
+    }
+    grouped: Dict[str, List[Dict]] = {"losing": [], "competitive": [], "winning": []}
+    for p in graded_plays:
+        margin = p.get("TeamMargin")
+        if margin is None or p.get("Hit") is None:
+            continue
+        grouped[_bucket_for(margin)].append(p)
+
+    out = []
+    for key in ("losing", "competitive", "winning"):
+        bucket_plays = grouped[key]
+        n = len(bucket_plays)
+        if n < min_n:
+            out.append({"bucket": labels[key], "n": n, "hit_rate": None})
+            continue
+        hits = sum(1 for p in bucket_plays if p["Hit"])
+        out.append({"bucket": labels[key], "n": n, "hit_rate": round(hits / n, 3)})
+    return out
+
+
+
 
 def market_report(plays: List[Dict], results: Dict[int, Dict], market: str, top_n: int = 15,
                   default_line: Optional[float] = None) -> Dict:

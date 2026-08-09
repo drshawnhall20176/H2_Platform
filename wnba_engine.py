@@ -439,6 +439,12 @@ def get_game_margin(game_id: str) -> Optional[float]:
     return BB.game_margin_from_totals(get_game_team_totals(game_id))
 
 
+def get_team_margins(game_id: str) -> Dict[int, float]:
+    """Thin WNBA wrapper -- see basketball_engine.team_margins_from_totals' own docstring for
+    the full reasoning. Zero extra network cost, same real reason as get_game_margin above."""
+    return BB.team_margins_from_totals(get_game_team_totals(game_id))
+
+
 def get_team_recent_allowed_stats(team_id: int, before_date: str,
                                   n: int = CFG.RECENT_GAMES_N, days_back: int = 45) -> Dict[str, float]:
     """Average PTS/REB/AST/FG3M this team has ALLOWED over their last n completed games —

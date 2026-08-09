@@ -76,12 +76,14 @@ CREATE TABLE IF NOT EXISTS graded_plays (
     actual_value REAL,
     rank         INTEGER,
     of_total     INTEGER,
-    game_margin  REAL
+    game_margin  REAL,
+    team_margin  REAL
 );
 """
 
 _FIELDS = ["graded_at", "slate_date", "sport", "market", "player", "player_id", "side", "line",
-           "model_prob", "conviction", "hit", "actual_value", "rank", "of_total", "game_margin"]
+           "model_prob", "conviction", "hit", "actual_value", "rank", "of_total", "game_margin",
+           "team_margin"]
 
 
 # ===========================================================================
@@ -131,6 +133,14 @@ def _sqlite_conn(db_path: str = DB_PATH):
         # can never be recovered for an already-completed game).
         if "game_margin" not in cols:
             con.execute("ALTER TABLE graded_plays ADD COLUMN game_margin REAL")
+        # Same real migration pattern, for team_margin -- EXTENDED DIRECTLY ON REQUEST, splitting
+        # the real blowout-validation work by which side of a real blowout a player was actually
+        # on (see basketball_engine.team_margins_from_totals' own docstring for the full
+        # reasoning). game_margin (above) is the real, unsigned magnitude; team_margin is the
+        # real, SIGNED margin for the specific team that player was on, so a real query can
+        # separately ask "did the winning side rest its stars" vs "did the losing side fade."
+        if "team_margin" not in cols:
+            con.execute("ALTER TABLE graded_plays ADD COLUMN team_margin REAL")
         yield con
         con.commit()
     finally:
@@ -178,6 +188,7 @@ CREATE TABLE IF NOT EXISTS graded_plays (
 ALTER TABLE graded_plays ADD COLUMN IF NOT EXISTS rank INTEGER;
 ALTER TABLE graded_plays ADD COLUMN IF NOT EXISTS of_total INTEGER;
 ALTER TABLE graded_plays ADD COLUMN IF NOT EXISTS game_margin REAL;
+ALTER TABLE graded_plays ADD COLUMN IF NOT EXISTS team_margin REAL;
 """
 
 
@@ -251,6 +262,16 @@ def record_graded_slate(slate_date: str, sport: str, graded_plays: List[Dict],
     never be recovered once the game is over -- see game_margin_from_totals' own docstring for
     the full reasoning. Missing here too is fine, stored as NULL.
 
+    TeamMargin (EXTENDED DIRECTLY ON REQUEST, for retro.catch_rate_by_team_role_in_blowout) is
+    the SAME real, deliberate pattern once more, merged in via basketball_engine.team_margins_
+    from_totals / wnba_engine.get_team_margins, keyed by the SPECIFIC team a play's own Team
+    field refers to (not just the game). Unlike GameMargin's real, unsigned magnitude, this is
+    the real, SIGNED margin for that specific player's own team -- positive if their team won by
+    that much, negative if they lost by that much -- splitting a real blowout into two genuinely
+    different real phenomena (a losing team's own stars fading vs. a winning team's own stars
+    getting real, deliberate rest) that one combined, unsigned number can't tell apart. Missing
+    here too is fine, stored as NULL.
+
     Replaces (not appends to) any existing rows for this exact (slate_date, sport) -- see this
     module's own docstring for why per-day replacement, not per-row upsert, is the real
     idempotency unit here. Returns the number of rows written.
@@ -273,7 +294,7 @@ def record_graded_slate(slate_date: str, sport: str, graded_plays: List[Dict],
             "hit": (1 if hit is True else 0 if hit is False else None),
             "actual_value": p.get("Actual"),
             "rank": p.get("Rank"), "of_total": p.get("OfTotal"),
-            "game_margin": p.get("GameMargin"),
+            "game_margin": p.get("GameMargin"), "team_margin": p.get("TeamMargin"),
         })
 
     if USING_POSTGRES:
@@ -297,7 +318,10 @@ def fetch_graded_plays(sport: str, market: Optional[str] = None, since_date: Opt
     rank) come back as stored -- real ints when record_graded_slate was given real rank data,
     None otherwise (never guessed). GameMargin (ADDED DIRECTLY ON REQUEST, for retro.catch_
     rate_by_blowout_margin) comes back the same honest way -- a real float when record_graded_
-    slate was given one, None otherwise.
+    slate was given one, None otherwise. TeamMargin (EXTENDED DIRECTLY ON REQUEST, for retro.
+    catch_rate_by_team_role_in_blowout) comes back the same honest way too -- a real, signed
+    float for that specific play's own team when record_graded_slate was given one, None
+    otherwise.
 
     Same dynamic db_path resolution as record_graded_slate, for the same reason."""
     db_path = db_path if db_path is not None else DB_PATH
@@ -314,7 +338,7 @@ def fetch_graded_plays(sport: str, market: Optional[str] = None, since_date: Opt
             "Hit": (True if hit == 1 else False if hit == 0 else None),
             "Actual": r.get("actual_value"),
             "Rank": r.get("rank"), "OfTotal": r.get("of_total"),
-            "GameMargin": r.get("game_margin"),
+            "GameMargin": r.get("game_margin"), "TeamMargin": r.get("team_margin"),
             # ADDED DIRECTLY ON REQUEST: needed to look up which specific real game a graded
             # play belongs to (e.g. for retro.lineup_neighbor_analysis, which needs the real
             # boxscore for that exact date to check batting-order neighbors) -- was already

@@ -298,6 +298,33 @@ def game_margin_from_totals(team_totals: Dict[int, Dict[str, float]]) -> Optiona
     return abs(pts[0] - pts[1])
 
 
+def team_margins_from_totals(team_totals: Dict[int, Dict[str, float]]) -> Dict[int, float]:
+    """The real, SIGNED final margin for each real team in a game -- EXTENDED DIRECTLY ON
+    REQUEST, splitting the real blowout-validation work by which side of a real blowout a
+    player was actually on. game_margin_from_totals (above) only ever returns the real,
+    unsigned magnitude ("was this game a blowout"), deliberately losing which real team won or
+    lost -- correct for that real, narrower question, but not enough to separate two genuinely
+    different real phenomena a real, live example named directly: a losing team's own real
+    stars fading in real garbage time versus a winning team's own real stars getting real,
+    deliberate rest once the outcome is safe. Those are different real mechanisms with likely
+    different real timing, and one combined real bucket can't tell them apart.
+
+    Returns {team_id: signed_margin} for BOTH real teams from the SAME real fetch -- e.g. a real
+    99-66 final returns {winning_team_id: +33.0, losing_team_id: -33.0}. A real, honest empty
+    dict {} (never a partial or fabricated one) when team_totals doesn't have real data for
+    exactly two real teams -- the same real "exactly two or nothing" discipline game_margin_
+    from_totals already establishes, just returning both real signed values instead of one
+    real unsigned one."""
+    if len(team_totals) != 2:
+        return {}
+    items = list(team_totals.items())
+    (tid_a, stats_a), (tid_b, stats_b) = items
+    pts_a, pts_b = stats_a.get("pts"), stats_b.get("pts")
+    if pts_a is None or pts_b is None:
+        return {}
+    return {tid_a: pts_a - pts_b, tid_b: pts_b - pts_a}
+
+
 def get_team_recent_allowed_stats(team_id: int, before_date: str, site_api: str, cdn_api: str,
                                   fetch: FetchFn, diag: DiagFn = _noop_diag,
                                   n: int = 10, days_back: int = 45,

@@ -16,11 +16,11 @@ import retro as R
 
 def _play(market="Batter HR", side="Over", line=0.5, model_prob=0.35, conviction=1.9,
          player="Test Slugger", player_id=501, hit=True, actual=1, rank=None, of_total=None,
-         game_margin=None):
+         game_margin=None, team_margin=None):
     return {"Market": market, "Side": side, "Line": line, "ModelProb": model_prob,
            "Conviction": conviction, "Player": player, "PlayerId": player_id,
            "Hit": hit, "Actual": actual, "Rank": rank, "OfTotal": of_total,
-           "GameMargin": game_margin}
+           "GameMargin": game_margin, "TeamMargin": team_margin}
 
 
 def test_record_graded_slate_writes_rows():
@@ -254,6 +254,50 @@ def test_game_margin_round_trips_a_real_exact_tie_as_a_real_zero_not_none():
         row = GH.fetch_graded_plays("WNBA", db_path=db)[0]
         assert row["GameMargin"] == 0.0 and row["GameMargin"] is not None
         print("✓ GameMargin correctly round-trips a real, exact 0.0 tie, never confused with 'not provided'")
+
+
+def test_record_and_fetch_round_trips_team_margin():
+    # EXTENDED DIRECTLY ON REQUEST, splitting the real blowout-validation work by which side of
+    # a real blowout a player was actually on -- a real, live example named directly: LV Aces 66
+    # @ NY Liberty 99. Same real round-trip discipline as GameMargin above -- confirms the real,
+    # SIGNED column genuinely persists and comes back, not just that it exists in the schema.
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "grading_history.db")
+        GH.record_graded_slate("2026-08-09", "WNBA", [_play(team_margin=-33.0)], db_path=db)   # a real losing-side player
+        row = GH.fetch_graded_plays("WNBA", db_path=db)[0]
+        assert row["TeamMargin"] == -33.0
+        print("✓ record_graded_slate/fetch_graded_plays correctly round-trip real, signed TeamMargin data")
+
+
+def test_fetch_graded_plays_team_margin_is_none_when_never_provided():
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "grading_history.db")
+        GH.record_graded_slate("2026-08-09", "WNBA", [_play()], db_path=db)   # no team_margin passed
+        row = GH.fetch_graded_plays("WNBA", db_path=db)[0]
+        assert row["TeamMargin"] is None
+        print("✓ fetch_graded_plays returns TeamMargin as honest None when never provided, not a fabricated 0.0")
+
+
+def test_team_margin_round_trips_a_real_exact_tie_as_a_real_zero_not_none():
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "grading_history.db")
+        GH.record_graded_slate("2026-08-09", "WNBA", [_play(team_margin=0.0)], db_path=db)
+        row = GH.fetch_graded_plays("WNBA", db_path=db)[0]
+        assert row["TeamMargin"] == 0.0 and row["TeamMargin"] is not None
+        print("✓ TeamMargin correctly round-trips a real, exact 0.0 tie, never confused with 'not provided'")
+
+
+def test_team_margin_and_game_margin_round_trip_independently():
+    # A real, direct check that these two real, distinct columns don't silently collide or
+    # overwrite each other -- a real losing-side player has a real, negative TeamMargin (-33)
+    # alongside the SAME real, unsigned GameMargin (33) every player in that same real game shares.
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "grading_history.db")
+        GH.record_graded_slate("2026-08-09", "WNBA",
+                               [_play(game_margin=33.0, team_margin=-33.0)], db_path=db)
+        row = GH.fetch_graded_plays("WNBA", db_path=db)[0]
+        assert row["GameMargin"] == 33.0 and row["TeamMargin"] == -33.0
+        print("✓ GameMargin and TeamMargin round-trip independently, as two real, genuinely distinct columns")
 
 
 def test_fetch_graded_plays_feeds_catch_rate_by_rank_directly():
