@@ -25,7 +25,7 @@ columns; it simply leaves those cells with readable neutral text.
 
 from __future__ import annotations
 
-from typing import List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 
 import numpy as np
 import pandas as pd

@@ -357,8 +357,12 @@ def test_edge_board_wires_known_names_through_the_full_real_chain():
     src = (_HERE / "views" / "15_#L01f4c8_Edge_Board.py").read_text()
     assert "known_names = proj.known_roster_names(rows, meta) if hasattr(proj" in src, (
         "load_index must compute known_names, safely gated for sports without this helper yet")
-    assert "index, known_names, all_active_names = load_index(" in src, (
-        "the real call site must unpack all three real return values")
+    assert "index, meta, known_names, all_active_names = load_index(" in src, (
+        "the real call site must unpack all four real return values, including meta -- "
+        "REAL, CONFIRMED FIX for a real, pre-existing bug caught via a real pyflakes sweep: "
+        "meta was computed inside load_index but never returned, while this page's own IDP "
+        "section further down referenced a bare `meta` name undefined in its own scope -- a "
+        "genuine NameError waiting to fire for NFL + an IDP position filter together")
     assert "_known_names: Optional[set] = None" in src, "load_edges must accept known_names, defaulting to None for safety"
     assert "known_names=_known_names" in src, "load_edges must actually pass known_names through to compute_edges"
     assert 'u.get("reason") == "name_mismatch"' in src, "the panel must genuinely split out real name mismatches"
@@ -1928,6 +1932,72 @@ def test_matchup_lab_pitcher_comparison_table_avoids_the_real_arrow_serializatio
     assert 'cdf = cdf.fillna("—")' not in src, (
         "the real fillna call that only papered over the symptom (not the real dtype cause) must genuinely be gone")
     print("✓ Matchup Lab's pitcher comparison table genuinely fixes the real Arrow serialization bug at its real root cause, not just its symptom")
+
+
+def test_edge_board_idp_section_no_longer_references_an_undefined_meta():
+    # REAL, CONFIRMED FIX for a real, pre-existing bug -- caught directly via a real pyflakes
+    # sweep (not observed live): load_index already computed meta internally (from engine.
+    # build_slate) but never returned it, while this page's own real IDP section referenced a
+    # bare `meta` name that was never defined anywhere in ITS OWN scope. A genuine, real
+    # NameError waiting to fire the moment anyone selected NFL and a real IDP position filter
+    # (DB/LB/DL/DE/CB/S) together -- the exact same class of bug as the real, reported
+    # production NameError on Best Bets (bare `O` instead of `BBD.O`), just not yet triggered
+    # live because this specific real combination is a narrower real path than every page load.
+    src = (_HERE / "views" / "15_#L01f4c8_Edge_Board.py").read_text()
+    assert "return index, meta, known_names, all_active_names" in src, (
+        "load_index must genuinely return the real meta it already computes internally")
+    assert "index, meta, known_names, all_active_names = load_index(" in src, (
+        "the real call site must genuinely unpack meta, not silently discard it")
+    assert "for m in meta:" in src, (
+        "the real IDP section's own loop must still be present, now with a genuinely defined meta to iterate")
+    print("✓ Edge Board's IDP section no longer references an undefined meta -- the real NameError is genuinely fixed")
+
+
+def test_no_undefined_names_anywhere_in_the_real_project():
+    # ADDED DIRECTLY as a real, permanent safeguard, after TWO real, confirmed undefined-name
+    # bugs shipped in the same real session -- one a real, live production NameError (a bare `O`
+    # instead of `BBD.O` on Best Bets, crashing that page for every real user), the other a
+    # real, pre-existing bug this same real sweep caught before it was ever reported (a bare
+    # `meta` on Edge Board's own IDP section). py_compile alone -- this project's own real,
+    # existing syntax check -- never catches this real class of bug, since it only checks
+    # syntax, never whether a name actually resolves; a NameError on a default parameter value
+    # or a bare reference only ever fires at real import/execution time, which py_compile never
+    # performs. This is the real, permanent fix for that real gap: a genuine static-analysis
+    # sweep, via pyflakes' own real API, run automatically every time this real suite runs, not
+    # something that has to be remembered and run by hand.
+    #
+    # Deliberately filters to ONLY "undefined name" messages -- pyflakes' own other real
+    # categories (imported-but-unused, f-string missing a placeholder, local variable assigned
+    # but never used) are real, but genuinely benign style notes, not a real, live crash risk;
+    # failing this real test on those would create real noise that trains people to ignore real
+    # failures, the opposite of what a permanent safeguard should do.
+    import io
+    from pathlib import Path
+    from pyflakes.api import checkPath
+    from pyflakes.reporter import Reporter
+
+    project_root = _HERE
+    py_files = sorted(
+        p for p in project_root.glob("*.py")
+        if not p.name.startswith("test_")
+    ) + sorted(
+        p for p in (project_root / "views").glob("*.py")
+    )
+    assert len(py_files) > 50, "the real file sweep must genuinely cover this project's real size, not an empty or tiny glob"
+
+    undefined_name_issues = []
+    for path in py_files:
+        out, err = io.StringIO(), io.StringIO()
+        checkPath(str(path), Reporter(out, err))
+        for line in out.getvalue().splitlines():
+            if "undefined name" in line:
+                undefined_name_issues.append(line)
+
+    assert undefined_name_issues == [], (
+        "Real, live undefined-name bug(s) found -- each one is a genuine NameError waiting to "
+        "fire the moment its real code path executes:\n" + "\n".join(undefined_name_issues)
+    )
+    print(f"✓ No real undefined-name bugs anywhere across {len(py_files)} real project files")
 
 
 if __name__ == "__main__":

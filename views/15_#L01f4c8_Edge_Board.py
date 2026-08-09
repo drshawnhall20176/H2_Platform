@@ -80,10 +80,15 @@ def load_index(sport_key: str, date_str: str, sims: int, seed: int):
     layers in Statcast + weather enrichment (its own model inputs, unique to baseball); other
     sports don't have those and build their projection index straight from the engine's rows.
 
-    Returns (index, known_names, all_active_names) -- known_names ADDED DIRECTLY ON REQUEST, a
-    real, confirmed fix for a real, reported case (see projections.known_roster_names' own
-    docstring for the full reasoning); all_active_names a SECOND real, confirmed fix layered on
-    the first (see mlb_engine.get_all_active_player_names' own docstring). Both use hasattr/a
+    Returns (index, meta, known_names, all_active_names) -- meta ADDED DIRECTLY as part of a real,
+    confirmed fix: this function already computed meta internally (from engine.build_slate) but
+    never returned it, while this page's own real IDP section (further down) referenced a bare
+    `meta` name that was never defined anywhere in ITS OWN scope -- a genuine, real NameError
+    waiting to fire the moment anyone selected NFL and a real IDP position filter together,
+    caught directly via a real pyflakes sweep, not observed live. known_names ADDED DIRECTLY ON
+    REQUEST, a real, confirmed fix for a real, reported case (see projections.known_roster_names'
+    own docstring for the full reasoning); all_active_names a SECOND real, confirmed fix layered
+    on the first (see mlb_engine.get_all_active_player_names' own docstring). Both use hasattr/a
     real sport_key check, not a hard assumption: MLB has these real helpers today, other sports
     don't yet, and this must not break for any of them -- an empty set here is an honest "no
     real distinction available yet" for a sport that hasn't wired this in, not a crash or a
@@ -104,7 +109,7 @@ def load_index(sport_key: str, date_str: str, sims: int, seed: int):
     known_names = proj.known_roster_names(rows, meta) if hasattr(proj, "known_roster_names") else set()
     all_active_names = (MSC.get_all_active_player_names_cached(int(date_str[:4]))
                         if sport_key == "MLB" else set())
-    return index, known_names, all_active_names
+    return index, meta, known_names, all_active_names
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -133,7 +138,7 @@ with c3:
 date_str = target_date.strftime("%Y-%m-%d")
 
 with st.spinner("Projecting the slate..."):
-    index, known_names, all_active_names = load_index(_active.key, date_str, P.DEFAULT_SIMS, seed=7)
+    index, meta, known_names, all_active_names = load_index(_active.key, date_str, P.DEFAULT_SIMS, seed=7)
 
 if not index:
     st.info(f"No projectable props for this date. Pick a date with scheduled {_active.label} games.")

@@ -48,7 +48,7 @@ def load_best_bets_mlb(date_str: str, fip_constant: float, preferred_book: str,
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_best_bets_generic(sport_key: str, date_str: str, preferred_book: str = O.DEFAULT_BOOK):
+def load_best_bets_generic(sport_key: str, date_str: str, preferred_book: str = BBD.O.DEFAULT_BOOK):
     """Any sport whose engine/projections don't need MLB's statcast/weather enrichment path —
     currently NFL, WNBA, and any future sport built the same way."""
     plays, meta, available_books = BBD.load_generic_best_bets_board(sport_key, date_str, preferred_book)

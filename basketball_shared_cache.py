@@ -35,7 +35,7 @@ not free) -- the same real TTL Hot Hand Engine's own existing load_spreads alrea
 
 from __future__ import annotations
 
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
 try:
     import streamlit as st
