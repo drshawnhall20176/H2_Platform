@@ -48,10 +48,10 @@ def load_best_bets_mlb(date_str: str, fip_constant: float, preferred_book: str,
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_best_bets_generic(sport_key: str, date_str: str):
+def load_best_bets_generic(sport_key: str, date_str: str, preferred_book: str = O.DEFAULT_BOOK):
     """Any sport whose engine/projections don't need MLB's statcast/weather enrichment path —
     currently NFL, WNBA, and any future sport built the same way."""
-    plays, meta, available_books = BBD.load_generic_best_bets_board(sport_key, date_str)
+    plays, meta, available_books = BBD.load_generic_best_bets_board(sport_key, date_str, preferred_book)
     slot_by_game = {m["label"]: game_dt(m.get("game_date")) for m in meta}
     for pl in plays:
         dt = slot_by_game.get(pl["Game"])
@@ -96,11 +96,13 @@ else:
     date_str = target.strftime("%Y-%m-%d")
     with c2: preferred_book = BBD.render_book_selector(
         key_prefix=f"{_active.key.lower()}_best_bets", date_str=date_str)
-    # Store preferred book for load_generic_best_bets_board to read
+    # Retrospective's own load_retro_generic still reads this same session-state key
+    # independently (a real, separate real-lines fetch there) -- kept for that real cross-page
+    # dependency, even though load_best_bets_generic no longer needs it read back internally.
     st.session_state[f"_preferred_book_{_active.key.lower()}"] = preferred_book
     with st.spinner("Scanning the slate..."):
         try:
-            plays, meta, available_books = load_best_bets_generic(_active.key, date_str)
+            plays, meta, available_books = load_best_bets_generic(_active.key, date_str, preferred_book)
         except Exception:
             if _active.key == "NFL":
                 st.warning(f"No NFL slate data available for {date_str}. "

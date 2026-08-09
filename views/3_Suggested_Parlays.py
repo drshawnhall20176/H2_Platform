@@ -88,9 +88,13 @@ else:
         st.stop()
     target = st.date_input("Slate date", datetime.now(eastern))
     date_str = target.strftime("%Y-%m-%d")
+    # No book-selector widget of its own on this real branch -- reads whichever real book was
+    # last chosen on a page that does (Best Bets, etc.), same real pattern Command Center's own
+    # _board_generic already uses.
+    preferred_book = st.session_state.get(f"_preferred_book_{_active.key.lower()}", BBD.O.DEFAULT_BOOK)
     with st.spinner("Building parlay options..."):
         try:
-            plays, meta, _books = BBD.load_generic_best_bets_board(_active.key, date_str)
+            plays, meta, _books = BBD.load_generic_best_bets_board(_active.key, date_str, preferred_book)
         except Exception:
             st.warning(f"No slate data available for {_active.label} on {date_str}. "
                       "Normal during off-season. Try a date when games are scheduled.")

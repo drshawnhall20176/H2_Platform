@@ -289,6 +289,21 @@ if venue_split or time_split:
             color = "🔴" if worse else "🟢"
             return f"{color} {direction}{abs(diff):.2f}"
 
+        # REAL, CONFIRMED FIX for a real, reported bug, evidenced directly in a real server log:
+        # repeated "Could not convert '—' with type str: tried to convert to double" Arrow
+        # serialization failures on this exact table, every time a row had a real None value
+        # (e.g. no real full-season ERA, or too few real split starts for a real IP/GS read).
+        # The root cause was never the later cdf.fillna("—") call below -- fillna doesn't
+        # change a column's dtype back to something Arrow-compatible; by the time it ran, pandas
+        # had already inferred that column as "object" from the real mix of floats and None, and
+        # filling the None with a real string only made that same real column hold BOTH real
+        # floats and a real string, exactly the shape Arrow can't serialize. _delta_str (above)
+        # never had this real problem because it always returns a real string, never a raw
+        # number or None -- this formatter matches that same real, proven principle, applied to
+        # every real numeric value before it ever reaches the DataFrame, not patched after.
+        def _fmt_stat(val):
+            return "—" if val is None else f"{val:g}"
+
         era_full = full.get("ERA")
         era_split = _rate(split_stat, "earnedRuns", "inningsPitched")
         k9_full = full.get("K/9")
@@ -321,17 +336,16 @@ if venue_split or time_split:
                 pass
 
         rows_cmp = [
-            ("ERA", era_full, era_split,
+            ("ERA", _fmt_stat(era_full), _fmt_stat(era_split),
              _delta_str(era_full, era_split, lower_is_better=True)),
-            ("K/9", k9_full, k9_split,
+            ("K/9", _fmt_stat(k9_full), _fmt_stat(k9_split),
              _delta_str(k9_full, k9_split, lower_is_better=False)),
-            ("WHIP", whip_full, whip_split,
+            ("WHIP", _fmt_stat(whip_full), _fmt_stat(whip_split),
              _delta_str(whip_full, whip_split, lower_is_better=True)),
-            ("IP/GS", None, ip_split, "—"),
+            ("IP/GS", "—", _fmt_stat(ip_split), "—"),
         ]
 
         cdf = pd.DataFrame(rows_cmp, columns=["Stat", "Full season", f"{split_label} ({n_split} starts)", "Δ"])
-        cdf = cdf.fillna("—")
         st.dataframe(cdf, hide_index=True, width="stretch")
         st.caption(
             f"**How to read this:** Δ 🟢 = the split is BETTER for this pitcher than his full-season line "

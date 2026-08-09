@@ -1886,6 +1886,50 @@ def test_suggested_parlays_wires_blowout_risk_per_leg():
     print("✓ Suggested Parlays genuinely wires the real blowout-risk signal per leg")
 
 
+def test_all_five_real_callers_pass_preferred_book_to_load_generic_best_bets_board():
+    # REAL, CONFIRMED PERFORMANCE FIX, not the original design: load_generic_best_bets_board
+    # used to have no @st.cache_data at all, and every real caller called it with just
+    # (sport_key, date_str) -- a real, confirmed production regression, directly evidenced by a
+    # real server log showing build_slate's own full real fetch chain re-running from scratch on
+    # nearly every single real page interaction. Confirms every one of the five real callers now
+    # explicitly passes preferred_book through -- an internal st.session_state read inside a
+    # cached function would silently go stale the moment someone switched books, since
+    # Streamlit's own cache key only ever includes a function's real arguments.
+    callers = {
+        "views/0_#L01f3c6_Command_Center.py": 'BBD.load_generic_best_bets_board(sport_key, date_str, preferred_book)',
+        "views/1_#U2b50_Best_Bets.py": "BBD.load_generic_best_bets_board(sport_key, date_str, preferred_book)",
+        "views/2_Graded_Picks.py": 'BBD.load_generic_best_bets_board(_active.key, date_str, preferred_book)',
+        "views/3_Suggested_Parlays.py": 'BBD.load_generic_best_bets_board(_active.key, date_str, preferred_book)',
+        "views/4_Speculative_Basket.py": 'BBD.load_generic_best_bets_board(_active.key, date_str, preferred_book)',
+    }
+    for path, expected_call in callers.items():
+        src = (_HERE / path).read_text()
+        assert expected_call in src, f"{path} must genuinely pass preferred_book through, not call with just (sport_key, date_str)"
+    print("✓ All five real callers of load_generic_best_bets_board genuinely pass preferred_book through explicitly")
+
+
+def test_matchup_lab_pitcher_comparison_table_avoids_the_real_arrow_serialization_bug():
+    # REAL, CONFIRMED FIX for a real, reported bug, evidenced directly in a real server log:
+    # repeated "Could not convert '—' with type str: tried to convert to double" Arrow
+    # serialization failures on this exact table. The real root cause was never the old
+    # cdf.fillna("—") call -- fillna doesn't change a column's dtype back to something Arrow-
+    # compatible; by the time it ran, pandas had already inferred that column as "object" from a
+    # real mix of floats and None, and filling the None with a real string only made that same
+    # real column hold BOTH real floats and a real string, exactly what Arrow can't serialize.
+    # Confirms the real fix: every real numeric value is formatted to a real string via
+    # _fmt_stat BEFORE it ever reaches the DataFrame (the same real, already-proven principle
+    # _delta_str's own column already used successfully), and the real fillna call that was
+    # papering over the symptom, not the real cause, is genuinely gone.
+    src = (_HERE / "views" / "9_Matchup_Lab.py").read_text()
+    assert "def _fmt_stat(val):" in src, "the real formatter must exist"
+    assert 'return "—" if val is None else f"{val:g}"' in src, "the real formatter must always return a real string, matching _delta_str's own proven principle"
+    assert '("ERA", _fmt_stat(era_full), _fmt_stat(era_split),' in src, (
+        "every real numeric value in the row must be formatted to a real string before reaching the DataFrame")
+    assert 'cdf = cdf.fillna("—")' not in src, (
+        "the real fillna call that only papered over the symptom (not the real dtype cause) must genuinely be gone")
+    print("✓ Matchup Lab's pitcher comparison table genuinely fixes the real Arrow serialization bug at its real root cause, not just its symptom")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

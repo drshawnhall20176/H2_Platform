@@ -599,7 +599,9 @@ def filter_by_split_situation(plays: List[Dict],
     return filtered
 
 
-def load_generic_best_bets_board(sport_key: str, date_str: str) -> tuple:
+@st.cache_data(ttl=300, show_spinner=False)
+def load_generic_best_bets_board(sport_key: str, date_str: str,
+                                 preferred_book: str = O.DEFAULT_BOOK) -> tuple:
     """Any sport whose engine/projections don't need MLB's statcast/weather/bullpen-blend
     enrichment path — currently NFL, WNBA, and any future sport built the same way.
 
@@ -623,6 +625,23 @@ def load_generic_best_bets_board(sport_key: str, date_str: str) -> tuple:
     exactly), because the fetch was never even attempted for anything but NFL -- not a fetch
     failure, a fetch that never ran.
 
+    REAL, CONFIRMED PERFORMANCE FIX, not the original design: this function used to have no
+    @st.cache_data at all -- unlike build_mlb_board (above), its own direct MLB counterpart,
+    which was always cached. Since Streamlit reruns a page's entire script on every real widget
+    interaction (a checkbox, a slider, any of them), an uncached board here meant every single
+    interaction on Best Bets/Graded Picks/Suggested Parlays/Speculative Basket/Command Center
+    re-ran the ENTIRE real fetch chain from scratch -- real schedule fetch, every real team's
+    roster, every real team's recent-games lookup, and every individual real game's own boxscore
+    -- a genuinely severe, confirmed real regression once more real interactive widgets existed
+    on these pages to trigger it. preferred_book is now a real, explicit parameter (removed from
+    an internal st.session_state read) for the exact same real reason build_mlb_board's own
+    preferred_book already is one: a value read from session_state inside a cached function
+    would silently go stale the moment someone switched books without the cache KEY itself
+    changing, since Streamlit's own cache keys only ever include a function's real arguments,
+    never anything read from session_state internally. Every real caller now reads the real
+    preferred book from session_state ITSELF, at its own real, uncached call site, and passes it
+    in explicitly -- the same real pattern build_mlb_board's own callers already use.
+
     Returns (plays, meta)."""
     sport = sports.get(sport_key)
     diag_key = f"_real_lines_diag_{sport_key}_{date_str}"
@@ -642,11 +661,6 @@ def load_generic_best_bets_board(sport_key: str, date_str: str) -> tuple:
            "offers": 0, "matched_lines": 0, "error": None}
     if api_key and sport.markets:
         try:
-            # Per-sport key, not a hardcoded "_preferred_book_nfl" -- that string was a real,
-            # latent bug of its own: harmless only because this whole block used to be gated to
-            # NFL alone, so nothing else ever reached it to expose the mismatch.
-            preferred_book = st.session_state.get(
-                f"_preferred_book_{sport_key.lower()}", O.DEFAULT_BOOK)
             offers, _ = O.fetch_slate_props(
                 date_str, api_key, list(sport.markets),
                 sport=sport.odds_sport_key)

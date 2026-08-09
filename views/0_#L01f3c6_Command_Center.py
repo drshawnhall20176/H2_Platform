@@ -54,7 +54,11 @@ def _board_mlb(date_str):
 def _board_generic(sport_key, date_str):
     if not sports.get(sport_key).has_projections:
         return [], []   # UFC is outcome-based -- no generic plays pipeline
-    plays, meta, _books = BBD.load_generic_best_bets_board(sport_key, date_str)
+    # Same real session-state read _board_mlb's own preferred_book already uses (line above) --
+    # Command Center has no book-selector widget of its own; it reads whichever real book was
+    # last chosen on a page that does (Best Bets, Graded Picks, etc.).
+    preferred_book = st.session_state.get(f"_preferred_book_{sport_key.lower()}", BBD.O.DEFAULT_BOOK)
+    plays, meta, _books = BBD.load_generic_best_bets_board(sport_key, date_str, preferred_book)
     return plays, meta
 
 

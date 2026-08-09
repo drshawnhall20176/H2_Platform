@@ -190,7 +190,12 @@ def test_load_generic_best_bets_board_exists_on_module():
         "silently show 'No slate data available' (or crash on Command Center) instead of plays."
     )
     sig = inspect.signature(BBD.load_generic_best_bets_board)
-    assert list(sig.parameters.keys()) == ["sport_key", "date_str"]
+    # REAL, CONFIRMED PERFORMANCE FIX, not the original signature: preferred_book is now a real,
+    # explicit parameter (previously read from st.session_state internally), and the function is
+    # now genuinely @st.cache_data-decorated -- see that decorator's own real reasoning in the
+    # function's own docstring. A value read from session_state inside a cached function would
+    # silently go stale the moment someone switched books without the real cache KEY changing.
+    assert list(sig.parameters.keys()) == ["sport_key", "date_str", "preferred_book"]
     print("✓ load_generic_best_bets_board exists on best_bets_data with the expected signature")
 
 
@@ -223,6 +228,68 @@ def test_load_generic_best_bets_board_full_pipeline_runs():
     assert meta[0]["label"] == "Away @ Home"
     assert isinstance(available_books, list) and len(available_books) > 0
     print("✓ load_generic_best_bets_board runs build_slate -> build_best_bets end to end for a generic sport")
+
+
+def test_load_generic_best_bets_board_is_genuinely_cached():
+    # REAL, CONFIRMED PERFORMANCE FIX, not the original design: this function used to have no
+    # @st.cache_data at all, unlike build_mlb_board (its own direct MLB counterpart, always
+    # cached) -- confirmed directly from a real, reported production slowdown: a real server log
+    # showed build_slate's own full real fetch chain (schedule, every team's roster, every
+    # team's recent games, every individual game's own boxscore) re-running from scratch on
+    # nearly every single real page interaction, since Streamlit reruns a page's entire script
+    # on every real widget event and this function had nothing to short-circuit that.
+    assert hasattr(BBD.load_generic_best_bets_board, "__wrapped__"), (
+        "load_generic_best_bets_board must genuinely be decorated by st.cache_data, not a plain, uncached function")
+    print("✓ load_generic_best_bets_board is genuinely decorated by st.cache_data, not accidentally uncached")
+
+
+def test_load_generic_best_bets_board_preferred_book_is_genuinely_part_of_the_cache_key():
+    # A REAL, DIRECT CHECK of the real reason preferred_book became an explicit parameter (not
+    # left as an internal st.session_state read): Streamlit's own cache key is built ONLY from a
+    # function's real arguments, never anything read from session_state internally. If
+    # preferred_book had stayed an internal read, a real cache hit for the same (sport_key,
+    # date_str) would have silently kept serving lines from whichever book was preferred THE
+    # FIRST time that cache entry was built, even after a person switched books. Confirms the
+    # real fix directly: two different real preferred_book values must reach market_lines_for_
+    # slate as two different real values, not the same cached one.
+    import odds_api as O
+
+    class _FakeEngine:
+        @staticmethod
+        def build_slate(date_str):
+            return (["fake_row"], [{"label": "Away @ Home"}])
+
+    class _FakeProjections:
+        @staticmethod
+        def build_best_bets(rows, real_lines=None, offers=None, preferred_book=None):
+            return []
+
+    class _FakeSport:
+        has_projections = True
+        markets = ["player_points"]
+        odds_sport_key = "basketball_wnba"
+        engine = _FakeEngine()
+        projections = _FakeProjections()
+
+    seen_books = []
+
+    def fake_market_lines_for_slate(offers, preferred_book):
+        seen_books.append(preferred_book)
+        return {}
+
+    with patch.object(BBD.sports, "get", lambda sport_key: _FakeSport()), \
+        patch.object(BBD, "get_odds_api_key", lambda: "FAKE_KEY"), \
+        patch.object(O, "fetch_slate_props", return_value=(["fake_offer"], {})), \
+        patch.object(O, "market_lines_for_slate", side_effect=fake_market_lines_for_slate), \
+        patch.object(O, "books_in_offers", return_value=[]):
+        BBD.load_generic_best_bets_board.clear()   # a clean real cache for this real test
+        BBD.load_generic_best_bets_board("WNBA", "2026-07-28", preferred_book="DraftKings")
+        BBD.load_generic_best_bets_board("WNBA", "2026-07-28", preferred_book="FanDuel")
+
+    assert seen_books == ["DraftKings", "FanDuel"], (
+        "two different real preferred_book values must each reach market_lines_for_slate as "
+        "their own real value -- a shared/stale cache entry would show the same book twice")
+    print("✓ load_generic_best_bets_board's preferred_book is genuinely part of the real cache key, not silently stale on a book switch")
 
 
 def test_load_generic_best_bets_board_fetches_real_lines_for_non_nfl_sports_too():
