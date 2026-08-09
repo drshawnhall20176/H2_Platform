@@ -222,6 +222,44 @@ def test_get_game_team_totals_diagnostic_fires_on_partial_failure():
     print("✓ get_game_team_totals's diagnostic dump now fires on a partial (not just total) failure")
 
 
+# ----------------------------------------------------------------- game_margin_from_totals
+def test_game_margin_from_totals_computes_the_real_absolute_margin():
+    # ADDED DIRECTLY ON REQUEST, part of a real, two-part fix for a real, repeated community
+    # pain point: "blowouts causing failed parlays" / "players forget how to play after
+    # halftime." A real, hand-verifiable margin: 92 vs 71 -> 21.
+    team_totals = {5: {"pts": 92.0, "reb": 40.0}, 9: {"pts": 71.0, "reb": 35.0}}
+    assert BB.game_margin_from_totals(team_totals) == 21.0
+    print("✓ game_margin_from_totals computes the exact real absolute margin between two real teams' final scores")
+
+
+def test_game_margin_from_totals_order_independent():
+    # Margin is a real, symmetric quantity -- whichever team happens to come first in the real
+    # dict, the real margin must be identical.
+    a = {5: {"pts": 71.0}, 9: {"pts": 92.0}}
+    b = {9: {"pts": 92.0}, 5: {"pts": 71.0}}
+    assert BB.game_margin_from_totals(a) == BB.game_margin_from_totals(b) == 21.0
+    print("✓ game_margin_from_totals is genuinely order-independent, regardless of real dict key order")
+
+
+def test_game_margin_from_totals_real_tie_returns_a_real_zero_not_none():
+    # A real, exact tie at the buzzer (before overtime) is a real, valid 0.0 margin -- must be
+    # distinguished from "no real data," never silently conflated with it.
+    team_totals = {5: {"pts": 85.0}, 9: {"pts": 85.0}}
+    result = BB.game_margin_from_totals(team_totals)
+    assert result == 0.0 and result is not None
+    print("✓ game_margin_from_totals correctly returns a real 0.0 for an exact tie, not confused with 'no data'")
+
+
+def test_game_margin_from_totals_honest_none_for_malformed_input():
+    # Genuinely malformed/partial real data (not exactly two real teams, or a real team missing
+    # its own pts) must return an honest None, never a fabricated or partial margin.
+    assert BB.game_margin_from_totals({}) is None                                  # empty (a real fetch failure)
+    assert BB.game_margin_from_totals({5: {"pts": 92.0}}) is None                  # only one real team
+    assert BB.game_margin_from_totals({5: {"pts": 92.0}, 9: {"pts": 71.0}, 3: {"pts": 50.0}}) is None   # three -- genuinely malformed
+    assert BB.game_margin_from_totals({5: {"reb": 40.0}, 9: {"pts": 71.0}}) is None  # one real team missing its own pts
+    print("✓ game_margin_from_totals honestly returns None for malformed real input, never a fabricated margin")
+
+
 # ----------------------------------------------------------------- get_team_recent_allowed_stats
 def test_get_team_recent_allowed_stats_averages_opponent_totals():
     events = {"events": [

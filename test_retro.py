@@ -722,6 +722,93 @@ def test_catch_rate_by_conviction_tier_boundaries_are_lo_inclusive_hi_exclusive(
     print("✓ catch_rate_by_conviction_tier's own boundaries are correctly lo-inclusive/hi-exclusive, matching grade_slate's own real convention exactly")
 
 
+# ----------------------------------------------------------------- catch_rate_by_blowout_margin
+def test_catch_rate_by_blowout_margin_catches_the_real_reported_pattern():
+    # ADDED DIRECTLY ON REQUEST, the real validation half of a real, two-part fix for a real,
+    # repeated community pain point: "blowouts causing failed parlays" / "players forget how to
+    # play after halftime." Real, exact, hand-verifiable construction: competitive games (real
+    # margin < 10) hit 65% of the time (13/20), blowout games (real margin >= 10) hit only 35%
+    # of the time (7/20) -- exactly the real pattern this function exists to check for.
+    competitive = [dict(_graded(f"C{i}", i, 0.5, i < 13), GameMargin=6.0) for i in range(20)]
+    blowout = [dict(_graded(f"B{i}", 100 + i, 0.5, i < 7), GameMargin=18.0) for i in range(20)]
+    result = R.catch_rate_by_blowout_margin(competitive + blowout, min_n=20)
+    by_bucket = {b["bucket"]: b for b in result}
+    assert len(result) == 2
+    comp_bucket = next(v for k, v in by_bucket.items() if k.startswith("Competitive"))
+    blow_bucket = next(v for k, v in by_bucket.items() if k.startswith("Blowout"))
+    assert comp_bucket["n"] == 20 and comp_bucket["hit_rate"] == 0.65
+    assert blow_bucket["n"] == 20 and blow_bucket["hit_rate"] == 0.35
+    print("✓ catch_rate_by_blowout_margin correctly surfaces the real reported pattern -- lower real hit rate in real blowout games")
+
+
+def test_catch_rate_by_blowout_margin_threshold_is_genuinely_adjustable():
+    # A real, direct check that threshold is a genuine, live parameter, not a decorative one --
+    # the SAME real plays must land in different real buckets depending on the real threshold
+    # passed, proving a caller can actually test whether 10.0 is the right real number.
+    plays = [dict(_graded(f"P{i}", i, 0.5, True), GameMargin=12.0) for i in range(20)]
+    at_10 = R.catch_rate_by_blowout_margin(plays, threshold=10.0, min_n=20)
+    at_15 = R.catch_rate_by_blowout_margin(plays, threshold=15.0, min_n=20)
+    blow_at_10 = next(b for b in at_10 if b["bucket"].startswith("Blowout"))
+    blow_at_15 = next(b for b in at_15 if b["bucket"].startswith("Blowout"))
+    assert blow_at_10["n"] == 20   # margin 12 clears a 10.0 real threshold -> counted as blowout
+    assert blow_at_15["n"] == 0    # the SAME real margin 12 does NOT clear a 15.0 real threshold
+    print("✓ catch_rate_by_blowout_margin's threshold is a genuine, live parameter -- the same real plays land differently at different real thresholds")
+
+
+def test_catch_rate_by_blowout_margin_below_min_n_bucket_has_honest_none_not_absence():
+    # Same real, deliberate honesty catch_rate_by_rank/catch_rate_by_conviction_tier already
+    # establish -- a real, thin bucket must still appear, with its own real n, honestly None.
+    plays = [dict(_graded(f"P{i}", i, 0.5, True), GameMargin=15.0) for i in range(5)]   # only 5, below min_n=20
+    result = R.catch_rate_by_blowout_margin(plays)
+    assert len(result) == 2
+    blow_bucket = next(b for b in result if b["bucket"].startswith("Blowout"))
+    assert blow_bucket["n"] == 5 and blow_bucket["hit_rate"] is None
+    comp_bucket = next(b for b in result if b["bucket"].startswith("Competitive"))
+    assert comp_bucket["n"] == 0 and comp_bucket["hit_rate"] is None
+    print("✓ catch_rate_by_blowout_margin always returns both real buckets, with an honest None for any bucket below its real min_n floor")
+
+
+def test_catch_rate_by_blowout_margin_excludes_plays_with_no_real_game_margin():
+    # A real play from a sport with no get_game_margin capability yet, or a game not yet
+    # reviewed through Retrospective's own grading flow, must be excluded, never guessed into
+    # either real bucket.
+    plays = [dict(_graded(f"P{i}", i, 0.5, True)) for i in range(30)]   # NO GameMargin key at all
+    result = R.catch_rate_by_blowout_margin(plays, min_n=20)
+    assert all(b["n"] == 0 and b["hit_rate"] is None for b in result), (
+        "plays with no real GameMargin must be excluded from every real bucket's own count, never guessed")
+    print("✓ catch_rate_by_blowout_margin excludes real plays with no game-margin data from every bucket, rather than guessing")
+
+
+def test_catch_rate_by_blowout_margin_narrows_to_one_market_when_asked():
+    pts = [dict(_graded(f"P{i}", i, 0.5, True, market="Points"), GameMargin=18.0) for i in range(20)]
+    reb = [dict(_graded(f"R{i}", 100 + i, 0.5, False, market="Rebounds"), GameMargin=18.0) for i in range(20)]
+    result = R.catch_rate_by_blowout_margin(pts + reb, market="Points", min_n=20)
+    blow_bucket = next(b for b in result if b["bucket"].startswith("Blowout"))
+    assert blow_bucket["hit_rate"] == 1.0   # only the real Points plays counted
+    print("✓ catch_rate_by_blowout_margin correctly narrows to one real market when asked")
+
+
+def test_catch_rate_by_blowout_margin_boundary_is_lo_inclusive_hi_exclusive():
+    # A real, direct boundary check -- a game sitting EXACTLY on the real threshold must land in
+    # the Blowout bucket (which the threshold value STARTS), never Competitive.
+    plays = [dict(_graded(f"P{i}", i, 0.5, True), GameMargin=10.0) for i in range(20)]   # exactly on the default 10.0 threshold
+    result = R.catch_rate_by_blowout_margin(plays, threshold=10.0, min_n=20)
+    blow_bucket = next(b for b in result if b["bucket"].startswith("Blowout"))
+    comp_bucket = next(b for b in result if b["bucket"].startswith("Competitive"))
+    assert blow_bucket["n"] == 20 and comp_bucket["n"] == 0
+    print("✓ catch_rate_by_blowout_margin's own threshold boundary is correctly lo-inclusive for Blowout, matching every other bucketed function's convention")
+
+
+def test_catch_rate_by_blowout_margin_real_exact_tie_counts_as_competitive():
+    # A real, exact-tie game (margin 0.0, before overtime) must count as genuinely competitive,
+    # not be silently excluded the way "no real data" would be -- 0.0 is a real, valid margin.
+    plays = [dict(_graded(f"P{i}", i, 0.5, True), GameMargin=0.0) for i in range(20)]
+    result = R.catch_rate_by_blowout_margin(plays, min_n=20)
+    comp_bucket = next(b for b in result if b["bucket"].startswith("Competitive"))
+    assert comp_bucket["n"] == 20 and comp_bucket["hit_rate"] == 1.0
+    print("✓ catch_rate_by_blowout_margin correctly counts a real, exact-tie game as competitive, not confused with missing data")
+
+
 def test_market_report_works_for_hits_runs_rbis():
     # Regression guard, same shape as the NFL Pass Yards test above: Batter Hits+Runs+RBIs plays
     # were being built and shown on the board (projections.build_best_bets) but had no MARKET_STAT

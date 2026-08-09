@@ -127,6 +127,12 @@ def test_build_slate_assembles_rows_from_mocked_fetches(monkeypatch):
 
     assert len(meta) == 1
     assert meta[0]["label"] == "Chicago Sky @ Atlanta Dream"
+    # ADDED DIRECTLY ON REQUEST, part of a real, two-part fix for a real, repeated community
+    # pain point ("blowouts causing failed parlays" / "players forget how to play after
+    # halftime"): game_id now carries through to meta (it already existed in the real schedule
+    # data via "gameId", just was never copied over) -- needed to later look up this exact real
+    # game's own final margin via get_game_margin.
+    assert meta[0]["game_id"] == "1"
     names = {r["Player"] for r in rows}
     assert names == {"Home Starter", "Away Starter"}   # bench player filtered by minutes
     home_row = next(r for r in rows if r["Player"] == "Home Starter")
@@ -860,6 +866,36 @@ def test_get_game_team_totals_poss_zero_when_fields_unmatched(monkeypatch):
     totals = E.get_game_team_totals("g1")
     assert totals[20]["poss"] == 0.0
     print("✓ get_game_team_totals returns poss=0.0 (not negative) when possession inputs don't match")
+
+
+# ----------------------------------------------------------------- get_game_margin
+def test_get_game_margin_delegates_to_the_real_shared_computation(monkeypatch):
+    # ADDED DIRECTLY ON REQUEST, part of a real, two-part fix for a real, repeated community
+    # pain point: "blowouts causing failed parlays" / "players forget how to play after
+    # halftime." Thin wrapper -- confirms it genuinely delegates to get_game_team_totals (this
+    # module's own already-tested wrapper) + basketball_engine.game_margin_from_totals, rather
+    # than a separate, parallel implementation with its own chance to drift.
+    E._response_cache.clear()
+    fake_cdn = {
+        "gamepackageJSON": {
+            "boxscore": {
+                "teams": [
+                    {"team": {"id": "20"}, "statistics": [{"name": "points", "displayValue": "92"}]},
+                    {"team": {"id": "19"}, "statistics": [{"name": "points", "displayValue": "71"}]},
+                ]
+            }
+        }
+    }
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_cdn)
+    assert E.get_game_margin("g1") == 21.0
+    print("✓ get_game_margin correctly delegates to the real, shared computation, producing the real margin")
+
+
+def test_get_game_margin_honest_none_on_fetch_failure(monkeypatch):
+    E._response_cache.clear()
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: None)
+    assert E.get_game_margin("g1") is None
+    print("✓ get_game_margin honestly returns None on a real fetch failure, never a fabricated margin")
 
 
 # ----------------------------------------------------------------- get_team_recent_allowed_stats

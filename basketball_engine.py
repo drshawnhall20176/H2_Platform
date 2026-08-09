@@ -267,6 +267,37 @@ def get_game_team_totals(game_id: str, cdn_api: str, fetch: FetchFn,
     return out
 
 
+def game_margin_from_totals(team_totals: Dict[int, Dict[str, float]]) -> Optional[float]:
+    """The real, final point margin between two teams, from get_game_team_totals' own already-
+    fetched output -- ADDED DIRECTLY ON REQUEST, part of a real, two-part fix for a real,
+    repeated community pain point: "blowouts causing failed parlays" / "the fact that the
+    players seem to forget how to play after halftime," both real descriptions of garbage time
+    (once a game is decided, the favorite rests its stars, the underdog's bench gets extended
+    run). This is the real, retroactive half of that fix: The Odds API's own real spread data is
+    only ever available for a live/upcoming game, never a real, already-completed one -- there
+    is no way to backfill a real, historical pre-game spread for validation. A completed game's
+    own real, FINAL margin is the honest, retroactively-computable substitute: it answers a
+    genuinely related real question ("was this game actually lopsided") using data that already
+    exists for every real, past game, rather than a number that can never be recovered for one.
+
+    DELIBERATELY A PURE COMPUTATION on an already-fetched result, not a new fetch of its own --
+    get_game_team_totals already does the one real network call (or cache hit) this needs;
+    duplicating that here would be a real, needless second implementation of the same real
+    fetch/parse logic, with its own real chance to drift out of sync with the original.
+
+    Returns None (an honest "no real data," never a fabricated 0.0) when team_totals doesn't
+    have real data for exactly two real teams -- a genuinely malformed or partial fetch, not a
+    real game with a real, computable margin. A real 0.0 margin (an exact tie at the final buzzer,
+    which does happen before overtime) is returned as a real, valid 0.0, not silently confused
+    with "no data" -- the None/0.0 distinction is checked directly, not conflated."""
+    if len(team_totals) != 2:
+        return None
+    pts = [v.get("pts") for v in team_totals.values()]
+    if any(p is None for p in pts):
+        return None
+    return abs(pts[0] - pts[1])
+
+
 def get_team_recent_allowed_stats(team_id: int, before_date: str, site_api: str, cdn_api: str,
                                   fetch: FetchFn, diag: DiagFn = _noop_diag,
                                   n: int = 10, days_back: int = 45,

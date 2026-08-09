@@ -15,10 +15,12 @@ import retro as R
 
 
 def _play(market="Batter HR", side="Over", line=0.5, model_prob=0.35, conviction=1.9,
-         player="Test Slugger", player_id=501, hit=True, actual=1, rank=None, of_total=None):
+         player="Test Slugger", player_id=501, hit=True, actual=1, rank=None, of_total=None,
+         game_margin=None):
     return {"Market": market, "Side": side, "Line": line, "ModelProb": model_prob,
            "Conviction": conviction, "Player": player, "PlayerId": player_id,
-           "Hit": hit, "Actual": actual, "Rank": rank, "OfTotal": of_total}
+           "Hit": hit, "Actual": actual, "Rank": rank, "OfTotal": of_total,
+           "GameMargin": game_margin}
 
 
 def test_record_graded_slate_writes_rows():
@@ -215,6 +217,43 @@ def test_fetch_graded_plays_rank_is_none_when_never_provided():
         row = GH.fetch_graded_plays("MLB", db_path=db)[0]
         assert row["Rank"] is None and row["OfTotal"] is None
         print("✓ fetch_graded_plays returns Rank/OfTotal as honest None when never provided, not a fabricated rank")
+
+
+def test_record_and_fetch_round_trips_game_margin():
+    # ADDED DIRECTLY ON REQUEST, part of a real, two-part fix for a real, repeated community
+    # pain point: "blowouts causing failed parlays" / "players forget how to play after
+    # halftime." Same real round-trip discipline as Rank/OfTotal above -- confirms the real
+    # column genuinely persists and comes back, not just that it exists in the schema.
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "grading_history.db")
+        GH.record_graded_slate("2026-08-08", "WNBA", [_play(game_margin=24.0)], db_path=db)
+        row = GH.fetch_graded_plays("WNBA", db_path=db)[0]
+        assert row["GameMargin"] == 24.0
+        print("✓ record_graded_slate/fetch_graded_plays correctly round-trip real GameMargin data")
+
+
+def test_fetch_graded_plays_game_margin_is_none_when_never_provided():
+    # Real, honest default -- a play logged without a real game margin (a moneyline-only sport,
+    # or a genuinely incomplete real fetch) must come back None, never a fabricated 0.0 margin
+    # (which would be silently indistinguishable from a real, exact tie).
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "grading_history.db")
+        GH.record_graded_slate("2026-08-08", "WNBA", [_play()], db_path=db)   # no game_margin passed
+        row = GH.fetch_graded_plays("WNBA", db_path=db)[0]
+        assert row["GameMargin"] is None
+        print("✓ fetch_graded_plays returns GameMargin as honest None when never provided, not a fabricated 0.0")
+
+
+def test_game_margin_round_trips_a_real_exact_tie_as_a_real_zero_not_none():
+    # A real, direct check against the exact confusion the docstring warns about -- a real,
+    # exact-tie game (0.0 margin) must round-trip as a real 0.0, never silently collapsed into
+    # the same "never provided" None case.
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "grading_history.db")
+        GH.record_graded_slate("2026-08-08", "WNBA", [_play(game_margin=0.0)], db_path=db)
+        row = GH.fetch_graded_plays("WNBA", db_path=db)[0]
+        assert row["GameMargin"] == 0.0 and row["GameMargin"] is not None
+        print("✓ GameMargin correctly round-trips a real, exact 0.0 tie, never confused with 'not provided'")
 
 
 def test_fetch_graded_plays_feeds_catch_rate_by_rank_directly():

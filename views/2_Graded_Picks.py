@@ -186,6 +186,27 @@ if not plays:
 # real logic is actually unit tested, not just trusted by eye in the browser.
 organized = grading.organize_graded_picks(plays)
 
+# ADDED DIRECTLY ON REQUEST, the same real fix already wired into Best Bets -- see that page's
+# own comment for the full reasoning (a real, repeated community pain point: "blowouts causing
+# failed parlays" / "players forget how to play after halftime," both real descriptions of
+# garbage time). Same real design here: opt-in (a real, live spreads fetch costs real quota),
+# gated by hasattr (every current/future basketball sport has this real capability, MLB/NFL
+# genuinely don't), and shown as its own real, game-level banner -- the same real "separate
+# column, not folded into the score" pattern the existing 🔥 One-sided banner right below it
+# already established for MLB specifically.
+_show_blowout_risk = False
+_spreads: dict = {}
+if hasattr(P, "blowout_risk_tag"):
+    _show_blowout_risk = st.checkbox(
+        "⚠️ Show blowout risk (uses live odds API quota)", key=f"{_active.key.lower()}_gp_blowout",
+        help="Fetches tonight's real, live point spreads and flags a lopsided game right at the "
+            "top of its own real board -- the real, structural reason stars can see reduced "
+            "minutes and props can fail even on a genuinely good read. A real, separate signal, "
+            "never folded into any grade above.")
+    if _show_blowout_risk:
+        import basketball_shared_cache as BSC
+        _spreads, _spreads_info = BSC.load_team_spreads_cached(_active.key, date_str, BBD.get_odds_api_key())
+
 if not organized:
     st.info("Nothing on tonight's slate clears the grading floor yet — check back closer to "
             "first pitch as lineups and matchups firm up.")
@@ -342,6 +363,20 @@ for game in organized:
                     f"{banner['other_opp_hr9']:.2f} HR/9 allowed). Worth concentrating HR-market "
                     f"attention on that side specifically."
                 )
+
+        # Blowout-risk banner, real, game-level, checking both real teams in this game's own
+        # label -- shown once per game, not once per play/player, matching this game-level
+        # signal's own real, structural meaning (garbage time affects the whole game, not one
+        # specific pick).
+        if _show_blowout_risk:
+            for _team_part in game_label.split(" @ "):
+                _team_part = _team_part.strip()
+                _risk = BSC.blowout_risk_for_team(_team_part, _spreads, P) if _team_part else "—"
+                if _risk == "⚠️ Blowout risk":
+                    st.markdown(f"⚠️ **Blowout risk** — {_team_part}'s real, live spread suggests "
+                               "a lopsided game. Real garbage-time risk for both teams' stars in "
+                               "the second half.")
+                    break   # one real, game-level warning is enough -- both teams share the same real spread magnitude
 
         for player_entry in game["players"]:
             _team_trend = None

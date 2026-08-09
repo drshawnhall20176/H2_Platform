@@ -431,6 +431,14 @@ def get_game_team_totals(game_id: str) -> Dict[int, Dict[str, float]]:
     return BB.get_game_team_totals(game_id, CDN_API, _get_json_cached, _diag, diag_seen=_diag_seen)
 
 
+def get_game_margin(game_id: str) -> Optional[float]:
+    """Thin WNBA wrapper -- see basketball_engine.game_margin_from_totals' own docstring for the
+    full reasoning. Zero extra network cost: get_game_team_totals' own real fetch is already
+    shared/cached by get_game_boxscore for the same game_id, so this is a pure computation on an
+    already-fetched (or already-cached) real result, not a second real fetch."""
+    return BB.game_margin_from_totals(get_game_team_totals(game_id))
+
+
 def get_team_recent_allowed_stats(team_id: int, before_date: str,
                                   n: int = CFG.RECENT_GAMES_N, days_back: int = 45) -> Dict[str, float]:
     """Average PTS/REB/AST/FG3M this team has ALLOWED over their last n completed games —
@@ -704,7 +712,7 @@ def build_slate(date_str: str, min_avg_minutes: float = CFG.MIN_AVG_MINUTES,
     for g in games:
         label = f"{g['away_name']} @ {g['home_name']}"
         meta.append({"label": label, "away_name": g["away_name"], "home_name": g["home_name"],
-                     "game_date": g.get("game_date"),
+                     "game_date": g.get("game_date"), "game_id": g.get("gameId"),
                      "home_id": g["home_id"], "home_abbr": g.get("home_abbr"),
                      "away_id": g["away_id"], "away_abbr": g.get("away_abbr")})
         for team_id, team_name, opp_name, opp_id in (

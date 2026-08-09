@@ -1769,6 +1769,39 @@ def test_retrospective_wires_conviction_tier_chart_reusing_already_fetched_histo
     print("✓ Retrospective genuinely wires the conviction-tier chart, reusing already-fetched history with the correct, real min_n")
 
 
+def test_retrospective_wires_game_margin_computation_gated_by_real_engine_capability():
+    # ADDED DIRECTLY ON REQUEST, part of a real, two-part fix for a real, repeated community
+    # pain point: "blowouts causing failed parlays" / "players forget how to play after
+    # halftime." Confirms load_retro_generic genuinely computes and merges GameMargin, gated by
+    # hasattr (a sport without get_game_margin on its own engine module -- MLB, or a basketball
+    # sport not yet wired -- must be genuinely unaffected), computed once per real game (not
+    # once per play, which would needlessly refetch the exact same real margin many times over).
+    src = (_HERE / "views" / "16_#L01f50d_Retrospective.py").read_text()
+    assert 'hasattr(sport.engine, "get_game_margin")' in src, (
+        "must gate by real engine capability, not assume every sport has this")
+    assert "_margin_by_label[m[\"label\"]] = sport.engine.get_game_margin(gid)" in src, (
+        "must compute the real margin once per real game (via meta), not once per play")
+    assert "graded = [dict(p, GameMargin=_margin_by_label.get(p.get(\"Game\")))" in src, (
+        "must merge the real margin onto every real play sharing that same real game")
+    print("✓ Retrospective genuinely wires GameMargin computation, gated by real engine capability, computed once per real game")
+
+
+def test_retrospective_wires_blowout_margin_chart_with_adjustable_threshold():
+    # ADDED DIRECTLY ON REQUEST, the display half of the real blowout-margin validation work.
+    # Confirms the real chart is genuinely gated by real engine capability (only a sport with
+    # get_game_margin ever accumulates real GameMargin data), reuses _rank_history (already
+    # fetched, zero new queries), and exposes threshold as a real, live, adjustable slider --
+    # not a fixed number -- so a person can actually test whether 10 is the right real cutoff.
+    src = (_HERE / "views" / "16_#L01f50d_Retrospective.py").read_text()
+    assert 'hasattr(_rank_sport.engine, "get_game_margin")' in src, (
+        "the real chart must be gated by real engine capability, not shown for every sport")
+    assert '_margin_threshold = st.slider("Blowout threshold' in src, (
+        "threshold must be a real, live, adjustable slider, not a fixed, hardcoded number")
+    assert "R.catch_rate_by_blowout_margin(\n        _rank_history, threshold=_margin_threshold" in src, (
+        "must reuse the already-fetched _rank_history and the real, live slider value")
+    print("✓ Retrospective genuinely wires the blowout-margin validation chart, gated correctly, with a real adjustable threshold")
+
+
 def test_bet_log_manual_form_wires_same_team_recent_bets():
     # ADDED DIRECTLY ON REQUEST, a real, confirmed fix for a real, reported pattern: "If onky i
     # put the under on red sox instead.of money line what a joke... I officially hate red sox
@@ -1799,6 +1832,42 @@ def test_quick_log_wires_same_team_recent_bets_with_consolidated_notice():
     )
     assert "if _team_notices:" in src, "the real, consolidated notice must actually render when real matches exist"
     print("✓ quick_log genuinely wires the same-team recent-bets check into the primary real logging path, with a consolidated, deduplicated notice")
+
+
+def test_best_bets_wires_blowout_risk_opt_in_and_separate_from_grading():
+    # ADDED DIRECTLY ON REQUEST, a real, confirmed fix for a real, repeated community pain
+    # point: "blowouts causing failed parlays" / "players forget how to play after halftime" --
+    # both real descriptions of garbage time. Confirms the real, existing signal (basketball_
+    # projections.blowout_risk_tag, driven by real, live spreads) is now genuinely surfaced on
+    # this page, gated by hasattr (not a hardcoded sport list -- every current/future basketball
+    # sport gets this automatically, MLB/NFL genuinely don't), opt-in (a real, live spreads
+    # fetch costs real odds-API quota), and still kept separate from grading -- the same real
+    # design principle the original Hot Hand Engine wiring already established.
+    src = (_HERE / "views" / "1_#U2b50_Best_Bets.py").read_text()
+    assert 'hasattr(P, "blowout_risk_tag")' in src, "must gate by real capability, not a hardcoded sport list"
+    assert "BSC.load_team_spreads_cached(_active.key, date_str, BBD.get_odds_api_key())" in src, (
+        "must fetch real spreads through the shared cache, not a new, separate implementation")
+    assert '_cols.insert(_cols.index("Team") + 1, "_blowout_risk")' in src, (
+        "the real column must only be added when the checkbox is genuinely on"
+    )
+    print("✓ Best Bets genuinely wires the real blowout-risk signal, opt-in and gated by real sport capability")
+
+
+def test_graded_picks_wires_blowout_risk_as_a_real_game_level_banner():
+    src = (_HERE / "views" / "2_Graded_Picks.py").read_text()
+    assert 'hasattr(P, "blowout_risk_tag")' in src, "must gate by real capability, not a hardcoded sport list"
+    assert "BSC.load_team_spreads_cached(_active.key, date_str, BBD.get_odds_api_key())" in src
+    assert "for _team_part in game_label.split(\" @ \")" in src, (
+        "must check both real teams involved in the game, matching same_team_recent_bets' own established approach")
+    print("✓ Graded Picks genuinely wires the real blowout-risk signal as a real, game-level banner")
+
+
+def test_suggested_parlays_wires_blowout_risk_per_leg():
+    src = (_HERE / "views" / "3_Suggested_Parlays.py").read_text()
+    assert 'hasattr(P, "blowout_risk_tag")' in src, "must gate by real capability, not a hardcoded sport list"
+    assert "BSC.blowout_risk_for_team(leg.get(\"Team\"), _spreads, P)" in src, (
+        "must check each real leg's own team, since a parlay can span several real, different games")
+    print("✓ Suggested Parlays genuinely wires the real blowout-risk signal per leg")
 
 
 if __name__ == "__main__":

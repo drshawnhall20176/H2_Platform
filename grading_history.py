@@ -75,12 +75,13 @@ CREATE TABLE IF NOT EXISTS graded_plays (
     hit          INTEGER,
     actual_value REAL,
     rank         INTEGER,
-    of_total     INTEGER
+    of_total     INTEGER,
+    game_margin  REAL
 );
 """
 
 _FIELDS = ["graded_at", "slate_date", "sport", "market", "player", "player_id", "side", "line",
-           "model_prob", "conviction", "hit", "actual_value", "rank", "of_total"]
+           "model_prob", "conviction", "hit", "actual_value", "rank", "of_total", "game_margin"]
 
 
 # ===========================================================================
@@ -124,6 +125,12 @@ def _sqlite_conn(db_path: str = DB_PATH):
             con.execute("ALTER TABLE graded_plays ADD COLUMN rank INTEGER")
         if "of_total" not in cols:
             con.execute("ALTER TABLE graded_plays ADD COLUMN of_total INTEGER")
+        # Same real migration pattern, for game_margin (added directly on request, for retro.
+        # catch_rate_by_blowout_margin -- see that function's own docstring for the full
+        # reasoning: a real, retroactively-computable substitute for a pre-game spread, which
+        # can never be recovered for an already-completed game).
+        if "game_margin" not in cols:
+            con.execute("ALTER TABLE graded_plays ADD COLUMN game_margin REAL")
         yield con
         con.commit()
     finally:
@@ -170,6 +177,7 @@ CREATE TABLE IF NOT EXISTS graded_plays (
 );
 ALTER TABLE graded_plays ADD COLUMN IF NOT EXISTS rank INTEGER;
 ALTER TABLE graded_plays ADD COLUMN IF NOT EXISTS of_total INTEGER;
+ALTER TABLE graded_plays ADD COLUMN IF NOT EXISTS game_margin REAL;
 """
 
 
@@ -234,6 +242,15 @@ def record_graded_slate(slate_date: str, sport: str, graded_plays: List[Dict],
     (as "Rank"/"OfTotal") BEFORE calling this -- see views/16_Retrospective.py's own real usage.
     Missing here too is fine, stored as NULL, same as every other optional field.
 
+    GameMargin (ADDED DIRECTLY ON REQUEST, for retro.catch_rate_by_blowout_margin) is the SAME
+    real, deliberate pattern as Rank/OfTotal, not new plumbing: also not part of grade_slate's
+    own output, also expected to be merged in by the real caller (via basketball_engine.
+    game_margin_from_totals / wnba_engine.get_game_margin, keyed by the SAME game a play's own
+    Game field refers to) BEFORE calling this. Exists because a completed game's real final
+    margin is the one real, retroactively-computable substitute for a pre-game spread that can
+    never be recovered once the game is over -- see game_margin_from_totals' own docstring for
+    the full reasoning. Missing here too is fine, stored as NULL.
+
     Replaces (not appends to) any existing rows for this exact (slate_date, sport) -- see this
     module's own docstring for why per-day replacement, not per-row upsert, is the real
     idempotency unit here. Returns the number of rows written.
@@ -256,6 +273,7 @@ def record_graded_slate(slate_date: str, sport: str, graded_plays: List[Dict],
             "hit": (1 if hit is True else 0 if hit is False else None),
             "actual_value": p.get("Actual"),
             "rank": p.get("Rank"), "of_total": p.get("OfTotal"),
+            "game_margin": p.get("GameMargin"),
         })
 
     if USING_POSTGRES:
@@ -277,7 +295,9 @@ def fetch_graded_plays(sport: str, market: Optional[str] = None, since_date: Opt
     grade_slate's own output already uses, so downstream code never has to know this passed
     through storage at all. Rank/OfTotal (ADDED DIRECTLY ON REQUEST, for retro.catch_rate_by_
     rank) come back as stored -- real ints when record_graded_slate was given real rank data,
-    None otherwise (never guessed).
+    None otherwise (never guessed). GameMargin (ADDED DIRECTLY ON REQUEST, for retro.catch_
+    rate_by_blowout_margin) comes back the same honest way -- a real float when record_graded_
+    slate was given one, None otherwise.
 
     Same dynamic db_path resolution as record_graded_slate, for the same reason."""
     db_path = db_path if db_path is not None else DB_PATH
@@ -294,6 +314,7 @@ def fetch_graded_plays(sport: str, market: Optional[str] = None, since_date: Opt
             "Hit": (True if hit == 1 else False if hit == 0 else None),
             "Actual": r.get("actual_value"),
             "Rank": r.get("rank"), "OfTotal": r.get("of_total"),
+            "GameMargin": r.get("game_margin"),
             # ADDED DIRECTLY ON REQUEST: needed to look up which specific real game a graded
             # play belongs to (e.g. for retro.lineup_neighbor_analysis, which needs the real
             # boxscore for that exact date to check batting-order neighbors) -- was already

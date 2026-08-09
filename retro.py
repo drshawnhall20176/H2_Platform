@@ -674,6 +674,62 @@ def catch_rate_by_conviction_tier(graded_plays: List[Dict], market: Optional[str
     return out
 
 
+def catch_rate_by_blowout_margin(graded_plays: List[Dict], threshold: float = 10.0,
+                                 market: Optional[str] = None, min_n: int = 20) -> List[Dict]:
+    """Real hit rate for a game's real, FINAL margin above vs. below `threshold` -- ADDED
+    DIRECTLY ON REQUEST, the real validation half of a real, two-part fix for a real, repeated
+    community pain point: "blowouts causing failed parlays" / "players forget how to play after
+    halftime," both real descriptions of garbage time (once a game is decided, the favorite
+    rests its stars, the underdog's bench gets extended run). basketball_projections.
+    blowout_risk_tag already flags this LIVE, pre-game, off a real spread -- but that threshold
+    (10.0, matching this function's own default) was explicitly, honestly marked in its own
+    docstring as "not a backtested cutoff." This function is the real, honest way to check that:
+    does a genuinely lopsided FINAL game actually correlate with a lower real hit rate for props
+    in that same game, and is 10.0 actually the right real number to draw that line at.
+
+    USES THE REAL, FINAL MARGIN, NOT THE PRE-GAME SPREAD -- a deliberate, necessary substitution,
+    not a shortcut: The Odds API's own real spread data only ever exists for a live/upcoming
+    game, never a real, already-completed one, so there is no way to backfill a real, historical
+    pre-game spread for validation. A completed game's own real, final margin (retro.py's own
+    GameMargin field, merged in by views/16_Retrospective.py at grading time via basketball_
+    engine.game_margin_from_totals) is the honest, retroactively-computable substitute -- it
+    answers a genuinely related real question using data that already exists for every real,
+    past game, rather than a number that can never be recovered for one.
+
+    threshold is a real, adjustable parameter, DELIBERATELY not a fixed set of buckets the way
+    CONVICTION_TIER_BUCKETS above is -- there's only one real, meaningful cutoff here ("was this
+    game a blowout"), not several real grade boundaries, so exposing it directly lets a real
+    caller (e.g. a slider on Retrospective) actually test whether 10.0 is the right real number,
+    not just accept it.
+
+    Real plays with no real GameMargin (a sport whose own engine has no get_game_margin yet, or
+    a game that hasn't been graded through the real Retrospective flow that computes it) are
+    honestly excluded from BOTH buckets, never guessed into either one.
+
+    ALWAYS RETURNS BOTH REAL BUCKETS, EVERY CALL -- same real, deliberate honesty catch_rate_by_
+    rank and catch_rate_by_conviction_tier above already establish: hit_rate is None (not a
+    fabricated number) whenever a real bucket has fewer than min_n real settled plays."""
+    if market is not None:
+        graded_plays = [p for p in graded_plays if p.get("Market") == market]
+
+    buckets = [
+        (f"Competitive (< {threshold:g} pt margin)", 0.0, threshold),
+        (f"Blowout (\u2265 {threshold:g} pt margin)", threshold, float("inf")),
+    ]
+    out = []
+    for label, lo, hi in buckets:
+        bucket_plays = [p for p in graded_plays
+                        if p.get("GameMargin") is not None and p.get("Hit") is not None
+                        and lo <= p["GameMargin"] < hi]
+        n = len(bucket_plays)
+        if n < min_n:
+            out.append({"bucket": label, "n": n, "hit_rate": None})
+            continue
+        hits = sum(1 for p in bucket_plays if p["Hit"])
+        out.append({"bucket": label, "n": n, "hit_rate": round(hits / n, 3)})
+    return out
+
+
 
 def market_report(plays: List[Dict], results: Dict[int, Dict], market: str, top_n: int = 15,
                   default_line: Optional[float] = None) -> Dict:

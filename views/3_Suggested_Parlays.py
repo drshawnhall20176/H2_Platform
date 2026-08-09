@@ -212,6 +212,24 @@ if not plays:
     st.info("No plays clear the current min probability floor — try lowering it.")
     st.stop()
 
+# ADDED DIRECTLY ON REQUEST, the same real fix already wired into Best Bets and Graded Picks --
+# see either page's own comment for the full reasoning. Per-leg here (not a per-game banner like
+# Graded Picks), matching this page's own real structure: a parlay's own legs can span several
+# real, different games at once, so a per-leg marker next to each leg's own Team is the natural
+# fit, the same way TeamTrend already appears there.
+_show_blowout_risk = False
+_spreads: dict = {}
+if hasattr(P, "blowout_risk_tag"):
+    _show_blowout_risk = st.checkbox(
+        "⚠️ Show blowout risk (uses live odds API quota)", key=f"{_active.key.lower()}_sp_blowout",
+        help="Fetches tonight's real, live point spreads and flags each leg's own team as "
+            "elevated blowout risk when that game looks lopsided -- the real, structural reason "
+            "stars can see reduced minutes and props can fail even on a genuinely good read. A "
+            "real, separate signal, never folded into any grade above.")
+    if _show_blowout_risk:
+        import basketball_shared_cache as BSC
+        _spreads, _spreads_info = BSC.load_team_spreads_cached(_active.key, date_str, BBD.get_odds_api_key())
+
 # --- parlay mode: Suggested tiers vs Game Coverage parlay ---------------------------------
 # Added directly on request, after the same real gap Speculative Basket's own Game Coverage
 # mode was built to answer: even Suggested Parlays' own "safety"-objective tiers (Safer/Steady)
@@ -390,8 +408,12 @@ for parlay in parlays:
             rank_prefix = f"**#{leg['_rank']}** · " if leg.get("_rank") else ""
             _team_trend = leg.get("TeamTrend")
             _trend_str = f" {_team_trend}" if _team_trend and _team_trend != "➡️ Steady" else ""
+            _blowout_str = ""
+            if _show_blowout_risk:
+                _risk = BSC.blowout_risk_for_team(leg.get("Team"), _spreads, P)
+                _blowout_str = " ⚠️" if _risk == "⚠️ Blowout risk" else ""
             st.markdown(
-                f"{rank_prefix}{grade_html} {lineup_icon}**{leg['Player']}** ({leg['Team']}{_trend_str}) — {leg['Market']} "
+                f"{rank_prefix}{grade_html} {lineup_icon}**{leg['Player']}** ({leg['Team']}{_trend_str}{_blowout_str}) — {leg['Market']} "
                 f"{leg['Side']} {leg['Line']:g} · Fair odds {leg_fair_str}",
                 unsafe_allow_html=True,
             )
