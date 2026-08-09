@@ -191,6 +191,30 @@ with st.expander("➕ Log a bet", expanded=False):
                 _label = f"{_player} " if _player else ""
                 st.success(f"Logged: {_label}{market} {side} {line}{id_note}"
                            + (f"  ·  ticket “{ticket.strip()}”" if ticket.strip() else ""))
+
+                # ADDED DIRECTLY ON REQUEST, a real, confirmed fix for a real, reported pattern:
+                # "If onky i put the under on red sox instead.of money line what a joke... I
+                # officially hate red sox fked me 2 days in a row." Deliberately a neutral,
+                # informational note, not a judgment call on whether the two real bets are
+                # "opposed" -- see same_team_recent_bets' own docstring for why. Splits the real
+                # "game" string on " @ " (this platform's own established Away @ Home format) so
+                # both real teams involved get checked, not just whichever one happens first.
+                _all_bets_this_sport = B.list_bets(sport=_active.key)   # one real fetch, reused below
+                _prior_bets_this_team = []
+                for _team_part in game.split(" @ "):
+                    _team_part = _team_part.strip()
+                    if _team_part:
+                        _prior_bets_this_team.extend(
+                            B.same_team_recent_bets(_team_part, _all_bets_this_sport,
+                                                    before_date=d.isoformat()))
+                if _prior_bets_this_team:
+                    _lines = "\n".join(
+                        f"- {b.get('slate_date', '?')}: {b.get('market', '?')} {b.get('side', '?')} "
+                        f"{b.get('line', '')} ({b.get('game', '?')})"
+                        for b in _prior_bets_this_team)
+                    st.info(f"📋 You've also bet on this same team in the last few real days:\n\n{_lines}\n\n"
+                           "Not a judgment on whether these agree — just a real, honest reminder "
+                           "so you can check for yourself before the real bet goes in.")
                 st.session_state["selected_player_id"] = None
                 st.session_state["selected_player_name"] = ""
                 st.session_state["player_search_results"] = []

@@ -605,6 +605,75 @@ def catch_rate_by_rank(graded_plays: List[Dict], market: Optional[str] = None,
     return out
 
 
+# ADDED DIRECTLY ON REQUEST, a real, confirmed fix for a real, repeated community frustration:
+# "I bet theres like 4 more players I wanted to pick but stats said no... research is shit i was
+# gunna pick bobby witt Jr and josh bell both hit but research said helllll no." The model's own
+# "no" decisions were never visible anywhere -- grade_slate already grades every play, whether
+# recommended or not (see grading_history.py's own module docstring), and the calibration fit
+# already learns from that full pool (refresh_calibration.py), but no page ever SHOWED a person
+# how often the model's own low-conviction plays hit versus its high-conviction ones. This
+# closes that real, honest gap.
+#
+# Reuses the EXACT SAME real tier boundaries grade_slate's own per-slate discrimination check
+# already uses (see that function's own "tiers" section above) -- deliberately NOT a new,
+# separately-invented set of cutoffs, so this cross-slate view can never quietly disagree with
+# the per-slate one about where one tier ends and the next begins.
+CONVICTION_TIER_BUCKETS: List[Tuple[str, float, float]] = [
+    ("\u22651.75\u00d7 (Top tier)", 1.75, float("inf")),
+    ("1.4\u20131.75\u00d7 (Strong)", 1.4, 1.75),
+    ("1.2\u20131.4\u00d7 (Lean)", 1.2, 1.4),
+    ("<1.2\u00d7 (below the real grading floor \u2014 a real pass)", 0.0, 1.2),
+]
+
+
+def catch_rate_by_conviction_tier(graded_plays: List[Dict], market: Optional[str] = None,
+                                  min_n: int = 20) -> List[Dict]:
+    """Real hit rate per CONVICTION_TIER_BUCKETS tier, across real accumulated graded plays --
+    meant to be called on grading_history.fetch_graded_plays' own output, the exact same real
+    "accumulated history, zero new statistical logic" design catch_rate_by_rank (above) and
+    fit_market_calibration already established. Answers a real, direct, honest question: does
+    the model's own confidence actually track real outcomes, all the way down -- including the
+    real plays it never recommended at all?
+
+    The LOWEST real tier ("<1.2\u00d7... a real pass") is the real point of this function: those
+    are plays that never cleared conviction_to_grade's own real floor, so they never showed up
+    as a graded pick anywhere a person would see them, on any page. If that real tier's own hit
+    rate runs meaningfully close to (or above) the higher real tiers, that's genuine, honest
+    evidence the model is leaving real value on the table by passing on them -- not a vague
+    feeling, a real, checkable number built from the model's own real accumulated history.
+    Equally, if that real tier's own hit rate runs meaningfully lower, that's real, honest
+    confirmation the model's own passes are correctly earning their real pass.
+
+    Real plays are grouped by their own real, RAW Conviction number directly -- deliberately NOT
+    by re-deriving a letter grade via conviction_to_grade, since that function also needs each
+    play's own real ceiling (its theoretical maximum) to normalize correctly across markets, and
+    grading_history's own real persisted schema stores raw conviction only, not ceiling. Reusing
+    the raw number directly, at the exact same real boundaries grade_slate itself already uses,
+    is the honest choice here -- re-deriving an un-normalized letter grade from history could
+    quietly disagree with the real, normalized letter a person actually saw live at the time.
+
+    ALWAYS RETURNS ALL 4 REAL TIERS, EVERY CALL -- same real, deliberate honesty catch_rate_by_
+    rank already established: hit_rate is None (not a fabricated number, and not silent absence
+    either) whenever a real tier has fewer than min_n real settled plays, so a caller can always
+    tell "truly zero/little real data here yet" apart from "this tier just isn't real yet."
+    """
+    if market is not None:
+        graded_plays = [p for p in graded_plays if p.get("Market") == market]
+
+    out = []
+    for label, lo, hi in CONVICTION_TIER_BUCKETS:
+        bucket_plays = [p for p in graded_plays
+                        if p.get("Conviction") is not None and p.get("Hit") is not None
+                        and lo <= p["Conviction"] < hi]
+        n = len(bucket_plays)
+        if n < min_n:
+            out.append({"tier": label, "n": n, "hit_rate": None})
+            continue
+        hits = sum(1 for p in bucket_plays if p["Hit"])
+        out.append({"tier": label, "n": n, "hit_rate": round(hits / n, 3)})
+    return out
+
+
 
 def market_report(plays: List[Dict], results: Dict[int, Dict], market: str, top_n: int = 15,
                   default_line: Optional[float] = None) -> Dict:

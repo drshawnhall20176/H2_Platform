@@ -1752,6 +1752,55 @@ def test_retrospective_wires_team_environment_diagnostic_using_full_slate():
     print("✓ Retrospective genuinely wires the team-environment diagnostic using the full real slate, gated correctly to MLB")
 
 
+def test_retrospective_wires_conviction_tier_chart_reusing_already_fetched_history():
+    # ADDED DIRECTLY ON REQUEST, a real, confirmed fix for a real, repeated community
+    # frustration -- "research said no but it hit." Confirms Retrospective genuinely wires the
+    # new conviction-tier chart in, reusing _rank_history (already fetched for the rank chart
+    # right above it) rather than issuing a second, redundant real query, and using a real,
+    # deliberately NOT-lowered min_n=20 (conviction tiers aren't a structurally one-per-day event
+    # the way Rank 1 is, so they don't need Rank 1's own lowered floor for a short window).
+    src = (_HERE / "views" / "16_#L01f50d_Retrospective.py").read_text()
+    assert "R.catch_rate_by_conviction_tier(_rank_history, min_n=20" in src, (
+        "must reuse the already-fetched _rank_history, not issue a second, redundant real query, "
+        "and must use a real, fixed min_n=20, not _rank_min_n's own lowered value")
+    assert 'C.section_header("🔍", "Does conviction itself track real outcomes' in src, (
+        "the real chart section must genuinely be present"
+    )
+    print("✓ Retrospective genuinely wires the conviction-tier chart, reusing already-fetched history with the correct, real min_n")
+
+
+def test_bet_log_manual_form_wires_same_team_recent_bets():
+    # ADDED DIRECTLY ON REQUEST, a real, confirmed fix for a real, reported pattern: "If onky i
+    # put the under on red sox instead.of money line what a joke... I officially hate red sox
+    # fked me 2 days in a row." Confirms the manual "Log a bet" form genuinely checks for real,
+    # recent bets on the same team right after a new one is logged, and fetches the real bet
+    # list only ONCE, reused for every real team-part checked, not re-fetched per team.
+    src = (_HERE / "views" / "18_#L01f4d2_Bet_Log.py").read_text()
+    assert "_all_bets_this_sport = B.list_bets(sport=_active.key)" in src, (
+        "the real bet list must be fetched once, outside the per-team-part loop")
+    assert "B.same_team_recent_bets(_team_part, _all_bets_this_sport" in src, (
+        "must call the real check, reusing the already-fetched real bet list")
+    assert "game.split(\" @ \")" in src, "must check both real teams involved, not just one side of the real game string"
+    print("✓ Bet Log's manual form genuinely wires the same-team recent-bets check, fetching the real bet list only once")
+
+
+def test_quick_log_wires_same_team_recent_bets_with_consolidated_notice():
+    # A SECOND real integration, extending the same real check to the PRIMARY real path most
+    # picks actually get logged through (Best Bets, Graded Picks, Game Watch, etc., not just the
+    # manual fallback form). Confirms real results are consolidated into ONE real, deduplicated
+    # notice across every real pick logged in one action, not one separate notice per pick --
+    # a real parlay/singles batch can log several picks on the same real game at once.
+    src = (_HERE / "quick_log.py").read_text()
+    assert "_all_bets_this_sport = B.list_bets(sport=sport_key)" in src, (
+        "the real bet list must be fetched once for the whole real logging action")
+    assert "_team_notices = {}" in src, "results must be consolidated into one real, deduplicated collection"
+    assert "_team_notices[(b.get(\"game\"), b.get(\"slate_date\"), b.get(\"market\"), b.get(\"side\"))] = b" in src, (
+        "must dedupe by the real bet's own identity, so the same real prior bet isn't reported twice"
+    )
+    assert "if _team_notices:" in src, "the real, consolidated notice must actually render when real matches exist"
+    print("✓ quick_log genuinely wires the same-team recent-bets check into the primary real logging path, with a consolidated, deduplicated notice")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

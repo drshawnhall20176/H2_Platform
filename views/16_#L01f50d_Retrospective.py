@@ -537,3 +537,45 @@ else:
     st.info("Not enough real accumulated history yet for this sport/market/scope to show a real "
            "rank-vs-hit-rate read. Keep grading real dates on this page — this fills in on its "
            "own, the same way Track Record's own calibration chart does.")
+
+# ADDED DIRECTLY ON REQUEST, a real, confirmed fix for a real, repeated community frustration:
+# "research is shit i was gunna pick bobby witt Jr and josh bell both hit but research said
+# helllll no." Reuses _rank_history (already fetched above, zero new queries) -- the same real
+# sport/market/scope controls, just a genuinely different real question: not "does pre-game rank
+# track outcomes" but "does conviction itself track outcomes, all the way down to the plays that
+# never got shown anywhere at all." A fixed min_n=20 regardless of scope, deliberately NOT
+# reusing _rank_min_n's own lowered value -- conviction tiers aren't structurally a one-per-day
+# event the way Rank 1 is (many real plays can share a tier on the same real day), so they don't
+# need the same real, lowered floor Rank 1 needed for a short window.
+C.section_header("🔍", "Does conviction itself track real outcomes — including the model's own passes?")
+st.caption("The lowest real tier below is Conviction under 1.2× — plays that never cleared the "
+          "real grading floor, so they never showed up as a graded pick anywhere on this "
+          "platform. If that tier's own real hit rate runs close to (or above) the higher real "
+          "tiers, that's honest evidence the model may be leaving real value on the table by "
+          "passing on them. If it runs meaningfully lower, that's real, honest confirmation "
+          "those passes are correctly earning their pass.")
+_tier_result = R.catch_rate_by_conviction_tier(_rank_history, min_n=20,
+                                               market=None if _rank_market == "All markets" else _rank_market)
+if any(b["n"] > 0 for b in _tier_result):
+    _tier_colors = [_PALETTE["model"] if b["hit_rate"] is not None else _PALETTE["muted"]
+                    for b in _tier_result]
+    _tier_heights = [b["hit_rate"] if b["hit_rate"] is not None else 0 for b in _tier_result]
+    _tier_text = [f"n={b['n']}" if b["hit_rate"] is not None else f"n={b['n']} (needs 20+)"
+                 for b in _tier_result]
+    figt = go.Figure(go.Bar(
+        x=[b["tier"] for b in _tier_result], y=_tier_heights,
+        marker_color=_tier_colors,
+        text=_tier_text, textposition="outside",
+        hovertemplate="%{x}<br>hit rate %{y:.0%}<br>%{text}<extra></extra>",
+    ))
+    figt.update_layout(template="plotly_white", height=360, margin=dict(l=10, r=10, t=30, b=10),
+                       yaxis=dict(title="Real hit rate", range=[0, 1], tickformat=".0%"),
+                       xaxis=dict(title="Conviction tier at pick time"))
+    st.plotly_chart(figt, width="stretch")
+    st.caption(f"Blue bars clear their own real floor (20+ real graded plays for this scope) — a "
+              f"genuine, trustworthy read. Grey bars have real plays too, just not enough of "
+              f"them yet — this fills in on its own as more real slates get graded here.")
+else:
+    st.info("Not enough real accumulated history yet for this sport/market/scope to show a real "
+           "conviction-vs-hit-rate read. Keep grading real dates on this page — this fills in on "
+           "its own, the same way Track Record's own calibration chart does.")

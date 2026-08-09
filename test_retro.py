@@ -655,6 +655,73 @@ def test_catch_rate_by_rank_narrows_to_one_market_when_asked():
     print("✓ catch_rate_by_rank correctly narrows to one real market when asked")
 
 
+def test_catch_rate_by_conviction_tier_catches_the_real_reported_pattern():
+    # ADDED DIRECTLY ON REQUEST, a real, confirmed fix for a real, repeated community
+    # frustration: "research is shit i was gunna pick bobby witt Jr and josh bell both hit but
+    # research said helllll no." Real, exact, hand-verifiable construction: the model's own real
+    # passes (Conviction < 1.2x, below the real grading floor) hit 70% of the time (14/20) --
+    # meaningfully close to its own top tier (Conviction >= 1.75x), which hits 80% (16/20). This
+    # is exactly the honest evidence this function exists to surface either way.
+    top = [dict(_graded(f"T{i}", i, 0.6, i < 16), Conviction=1.9) for i in range(20)]
+    passed = [dict(_graded(f"P{i}", 100 + i, 0.5, i < 14), Conviction=0.9) for i in range(20)]
+    result = R.catch_rate_by_conviction_tier(top + passed, min_n=20)
+    by_tier = {b["tier"]: b for b in result}
+    assert len(result) == 4, "all 4 real CONVICTION_TIER_BUCKETS must always appear"
+    top_tier = next(b for t, b in by_tier.items() if t.startswith("≥1.75"))
+    pass_tier = next(b for t, b in by_tier.items() if t.startswith("<1.2"))
+    assert top_tier["n"] == 20 and top_tier["hit_rate"] == 0.8
+    assert pass_tier["n"] == 20 and pass_tier["hit_rate"] == 0.7
+    print("✓ catch_rate_by_conviction_tier correctly surfaces how often the model's own real passes actually hit, alongside its top tier")
+
+
+def test_catch_rate_by_conviction_tier_below_min_n_bucket_has_honest_none_not_absence():
+    # Same real, deliberate honesty catch_rate_by_rank's own equivalent test already locks in --
+    # a real, thin tier must still appear, with its own real n, honestly None for hit_rate.
+    graded = [dict(_graded(f"P{i}", i, 0.5, i % 2 == 0), Conviction=2.0) for i in range(5)]   # only 5, below min_n=20
+    result = R.catch_rate_by_conviction_tier(graded)
+    assert len(result) == 4
+    top_tier = next(b for b in result if b["tier"].startswith("≥1.75"))
+    assert top_tier["n"] == 5 and top_tier["hit_rate"] is None
+    empty_tier = next(b for b in result if b["tier"].startswith("1.4"))
+    assert empty_tier["n"] == 0 and empty_tier["hit_rate"] is None
+    print("✓ catch_rate_by_conviction_tier always returns all 4 real tiers, with an honest None for any tier below its real min_n floor")
+
+
+def test_catch_rate_by_conviction_tier_excludes_plays_with_no_real_conviction():
+    graded = [dict(_graded(f"P{i}", i, 0.5, True)) for i in range(30)]   # NO Conviction key at all
+    result = R.catch_rate_by_conviction_tier(graded, min_n=20)
+    assert all(b["n"] == 0 and b["hit_rate"] is None for b in result), (
+        "plays with no real Conviction must be excluded from every real tier's own count, never guessed into a tier")
+    print("✓ catch_rate_by_conviction_tier excludes real plays with no conviction data from every tier, rather than guessing")
+
+
+def test_catch_rate_by_conviction_tier_narrows_to_one_market_when_asked():
+    hr = [dict(_graded(f"HR{i}", i, 0.5, True, market="Batter HR"), Conviction=2.0) for i in range(20)]
+    ks = [dict(_graded(f"K{i}", 100 + i, 0.5, False, market="Pitcher Strikeouts"), Conviction=2.0) for i in range(20)]
+    result = R.catch_rate_by_conviction_tier(hr + ks, market="Batter HR", min_n=20)
+    top_tier = next(b for b in result if b["tier"].startswith("≥1.75"))
+    assert top_tier["hit_rate"] == 1.0   # only the real HR plays counted
+    print("✓ catch_rate_by_conviction_tier correctly narrows to one real market when asked")
+
+
+def test_catch_rate_by_conviction_tier_boundaries_are_lo_inclusive_hi_exclusive():
+    # A real, direct boundary check, matching grade_slate's own real "lo <= conviction < hi"
+    # convention exactly -- a play sitting exactly on a real boundary (1.2, 1.4, 1.75) must land
+    # in the tier that boundary value STARTS, never the one it ends, and never both or neither.
+    plays = [
+        dict(_graded("A", 1, 0.5, True), Conviction=1.2),    # exactly on the 1.2 boundary -> "1.2-1.4" tier
+        dict(_graded("B", 2, 0.5, True), Conviction=1.4),    # exactly on the 1.4 boundary -> "1.4-1.75" tier
+        dict(_graded("C", 3, 0.5, True), Conviction=1.75),   # exactly on the 1.75 boundary -> top tier
+    ]
+    result = R.catch_rate_by_conviction_tier(plays, min_n=1)
+    by_tier = {b["tier"]: b["n"] for b in result}
+    lean_tier = next(t for t in by_tier if t.startswith("1.2"))
+    strong_tier = next(t for t in by_tier if t.startswith("1.4"))
+    top_tier = next(t for t in by_tier if t.startswith("≥1.75"))
+    assert by_tier[lean_tier] == 1 and by_tier[strong_tier] == 1 and by_tier[top_tier] == 1
+    print("✓ catch_rate_by_conviction_tier's own boundaries are correctly lo-inclusive/hi-exclusive, matching grade_slate's own real convention exactly")
+
+
 def test_market_report_works_for_hits_runs_rbis():
     # Regression guard, same shape as the NFL Pass Yards test above: Batter Hits+Runs+RBIs plays
     # were being built and shown on the board (projections.build_best_bets) but had no MARKET_STAT

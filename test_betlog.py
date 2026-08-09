@@ -180,6 +180,77 @@ def test_filter_bets_since_real_regression_a_since_date_actually_narrows_the_rea
              "a function that exists but doesn't change anything")
 
 
+# ----------------------------------------------------------------- same_team_recent_bets
+def test_same_team_recent_bets_catches_the_real_reported_pattern():
+    # ADDED DIRECTLY ON REQUEST, a real, confirmed fix for a real, reported pattern: "If onky i
+    # put the under on red sox instead.of money line what a joke... I officially hate red sox
+    # fked me 2 days in a row." Simulates exactly that real shape: a real Red Sox moneyline bet
+    # logged the day before a new Red Sox total pick is being considered.
+    bets = [
+        {"game": "New York Yankees @ Boston Red Sox", "market": "Moneyline", "side": "Boston Red Sox",
+        "line": None, "slate_date": "2026-08-07"},
+    ]
+    result = B.same_team_recent_bets("Boston Red Sox", bets, before_date="2026-08-08")
+    assert len(result) == 1
+    assert result[0]["market"] == "Moneyline" and result[0]["slate_date"] == "2026-08-07"
+    print("✓ same_team_recent_bets correctly surfaces the real prior bet on the same real team, matching the real reported pattern")
+
+
+def test_same_team_recent_bets_excludes_bets_outside_the_real_lookback_window():
+    bets = [{"game": "Yankees @ Red Sox", "slate_date": "2026-07-20"}]   # 19 real days before, well outside default lookback
+    result = B.same_team_recent_bets("Red Sox", bets, before_date="2026-08-08", lookback_days=3)
+    assert result == []
+    print("✓ same_team_recent_bets correctly excludes a real bet outside the real lookback window, not treated as still-fresh context")
+
+
+def test_same_team_recent_bets_never_includes_the_pick_being_considered_or_a_later_one():
+    bets = [
+        {"game": "Yankees @ Red Sox", "slate_date": "2026-08-08"},   # same real date as before_date -- must not be self-included
+        {"game": "Yankees @ Red Sox", "slate_date": "2026-08-09"},   # a real date AFTER before_date
+    ]
+    result = B.same_team_recent_bets("Red Sox", bets, before_date="2026-08-08")
+    assert result == []
+    print("✓ same_team_recent_bets never includes the pick being considered itself or a real, later bet")
+
+
+def test_same_team_recent_bets_does_not_false_match_a_different_real_team():
+    # A real, direct check against exactly the false-match risk this function's own docstring
+    # names -- "Sox" alone would wrongly match both the Red Sox and the White Sox; a real,
+    # full team name must not accidentally match an unrelated real team's own game.
+    bets = [{"game": "Chicago White Sox @ Cleveland Guardians", "slate_date": "2026-08-07"}]
+    result = B.same_team_recent_bets("Boston Red Sox", bets, before_date="2026-08-08")
+    assert result == []
+    print("✓ same_team_recent_bets does not false-match a real, different team sharing a partial name")
+
+
+def test_same_team_recent_bets_excludes_bets_with_no_real_game_or_slate_date():
+    bets = [{"market": "Moneyline", "slate_date": "2026-08-07"},        # no real game at all
+           {"game": "Yankees @ Red Sox"},                              # no real slate_date at all
+           {"game": "Yankees @ Red Sox", "slate_date": "2026-08-07"}]  # the one real, complete bet
+    result = B.same_team_recent_bets("Red Sox", bets, before_date="2026-08-08")
+    assert len(result) == 1
+    print("✓ same_team_recent_bets honestly excludes a real bet missing game or slate_date, never guesses it into the window")
+
+
+def test_same_team_recent_bets_sorted_most_recent_first():
+    bets = [
+        {"game": "Yankees @ Red Sox", "slate_date": "2026-08-06", "market": "Older"},
+        {"game": "Yankees @ Red Sox", "slate_date": "2026-08-07", "market": "Newer"},
+    ]
+    result = B.same_team_recent_bets("Red Sox", bets, before_date="2026-08-08")
+    assert [r["market"] for r in result] == ["Newer", "Older"]
+    print("✓ same_team_recent_bets returns real matches sorted most-recent-first")
+
+
+def test_same_team_recent_bets_honest_empty_for_missing_team_or_bad_date():
+    assert B.same_team_recent_bets("", [{"game": "Yankees @ Red Sox", "slate_date": "2026-08-07"}],
+                                   before_date="2026-08-08") == []
+    assert B.same_team_recent_bets("Red Sox", [{"game": "Yankees @ Red Sox", "slate_date": "2026-08-07"}],
+                                   before_date="not-a-real-date") == []
+    print("✓ same_team_recent_bets honestly returns an empty list for a missing team or an unparseable date, never crashes")
+
+
+
 def test_player_id_field():
     # Added directly on request, for automated result settlement -- retro.py's existing,
     # already-tested grade_play/get_player_results match by numeric player ID, not name.

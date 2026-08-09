@@ -19,7 +19,7 @@ from __future__ import annotations
 import os
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
  
 from odds_api import american_to_decimal
@@ -281,6 +281,57 @@ def filter_bets_since(bets: List[Dict], since_date_str: Optional[str]) -> List[D
     if not since_date_str:
         return bets
     return [b for b in bets if (b.get("ts_placed") or "")[:10] >= since_date_str]
+
+
+def same_team_recent_bets(team: str, bets: List[Dict], before_date: str,
+                          lookback_days: int = 3) -> List[Dict]:
+    """Every real, already-logged bet involving this same real team, from the real slate_date
+    window just before before_date -- ADDED DIRECTLY ON REQUEST, a real, confirmed fix for a
+    real, reported pattern: "If onky i put the under on red sox instead.of money line what a
+    joke... I officially hate red sox fked me 2 days in a row." A real person took the Red Sox
+    moneyline one real day, then their own real under the very next real day, on the same real
+    team, with no new real signal driving the switch -- a real, catchable pattern with no way to
+    see it coming before the second real bet was already placed.
+
+    DELIBERATELY DOES NOT judge whether two real bets are "opposed" -- a moneyline vs. a game
+    total vs. a player prop on the same real team aren't cleanly "for" or "against" each other
+    the same way two moneylines on opposite real teams would be, and getting that judgment wrong
+    across every real market combination this platform supports would be a worse, more
+    misleading real feature than having none at all. Instead, surfaces the real, neutral fact --
+    "you've also bet on this team recently" -- with every real detail (market, side, line, date)
+    a real person needs to judge consistency themselves, the honest choice over a confident-but-
+    possibly-wrong automated verdict.
+
+    Matches by real team NAME appearing anywhere in the bet's own real "game" field (e.g. "New
+    York Yankees @ Boston Red Sox") -- deliberately a plain, real substring check, not a fuzzy
+    match, so a caller should pass the SAME real, full team name spelling this platform's own
+    engines already use elsewhere (Team/home_name/away_name), not an abbreviation, to avoid a
+    real false match (e.g. "Sox" alone would wrongly match both the Red Sox and the White Sox).
+
+    before_date: the real slate_date of the NEW pick being considered -- only real bets strictly
+    BEFORE this date are ever returned, never the pick itself or a later real one. lookback_days
+    (default 3, a real, deliberately short window -- long enough to catch the exact real
+    back-to-back pattern reported, short enough that a real bet from three weeks ago on the same
+    team isn't treated as if it were still fresh, actionable context).
+
+    Real bets with no real "game" or "slate_date" at all are honestly excluded, never guessed
+    into (or out of) the window. Returns real bets sorted most-recent-first, exactly as logged --
+    no re-shaping, so every real field (market, side, line, entry_odds, result) is still there
+    for a caller to display in full."""
+    if not team:
+        return []
+    try:
+        cutoff = (datetime.strptime(before_date, "%Y-%m-%d") - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+    except (TypeError, ValueError):
+        return []
+
+    matches = [
+        b for b in bets
+        if team in (b.get("game") or "")
+        and b.get("slate_date") and cutoff <= b["slate_date"] < before_date
+    ]
+    return sorted(matches, key=lambda b: b.get("slate_date") or "", reverse=True)
+
 
 
 def list_bets(db_path: str = DB_PATH, settled: Optional[bool] = None,

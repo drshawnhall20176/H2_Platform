@@ -367,6 +367,14 @@ def render_quick_log(plays: List[Dict], date_str: str, sport_key: str, key_prefi
             import betlog as B
             logged_sigs = st.session_state.setdefault("logged_sigs", set())
             n_parlay = n_singles = n_skipped = 0
+            # ADDED DIRECTLY ON REQUEST, extending the same real check Bet Log's own manual form
+            # already has to this, the PRIMARY real path most picks actually get logged through.
+            # Collected across every real pick logged in this one real action, deduplicated by
+            # (game, prior bet's own real slate_date, market, side) -- a real parlay/singles
+            # batch can log several picks on the same real game at once, and each one would
+            # otherwise independently re-discover and re-report the exact same real prior bets.
+            _all_bets_this_sport = B.list_bets(sport=sport_key)
+            _team_notices = {}
 
             if log_parlay and ticket:
                 for i in picks:
@@ -378,6 +386,11 @@ def render_quick_log(plays: List[Dict], date_str: str, sport_key: str, key_prefi
                     fields["ticket"] = ticket
                     B.add_bet(**fields)
                     n_parlay += 1
+                    for _team_part in (fields.get("game") or "").split(" @ "):
+                        _team_part = _team_part.strip()
+                        if _team_part:
+                            for b in B.same_team_recent_bets(_team_part, _all_bets_this_sport, before_date=date_str):
+                                _team_notices[(b.get("game"), b.get("slate_date"), b.get("market"), b.get("side"))] = b
 
             if log_singles:
                 for i in picks:
@@ -393,6 +406,11 @@ def render_quick_log(plays: List[Dict], date_str: str, sport_key: str, key_prefi
                     B.add_bet(**fields)
                     logged_sigs.add(sig)
                     n_singles += 1
+                    for _team_part in (fields.get("game") or "").split(" @ "):
+                        _team_part = _team_part.strip()
+                        if _team_part:
+                            for b in B.same_team_recent_bets(_team_part, _all_bets_this_sport, before_date=date_str):
+                                _team_notices[(b.get("game"), b.get("slate_date"), b.get("market"), b.get("side"))] = b
 
             parts = []
             if n_parlay:
@@ -403,4 +421,13 @@ def render_quick_log(plays: List[Dict], date_str: str, sport_key: str, key_prefi
             if n_skipped:
                 parts.append(f"{n_skipped} already logged (skipped)")
             st.success("✅ Logged: " + " + ".join(parts) + " → Bet Log")
+
+            if _team_notices:
+                _lines = "\n".join(
+                    f"- {b.get('slate_date', '?')}: {b.get('market', '?')} {b.get('side', '?')} "
+                    f"{b.get('line', '')} ({b.get('game', '?')})"
+                    for b in _team_notices.values())
+                st.info(f"📋 You've also bet on the same team(s) involved here in the last few "
+                       f"real days:\n\n{_lines}\n\nNot a judgment on whether these agree — just "
+                       "a real, honest reminder so you can check for yourself.")
 
