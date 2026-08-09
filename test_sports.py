@@ -1774,16 +1774,23 @@ def test_retrospective_wires_game_margin_computation_gated_by_real_engine_capabi
     # pain point: "blowouts causing failed parlays" / "players forget how to play after
     # halftime." Confirms load_retro_generic genuinely computes and merges GameMargin, gated by
     # hasattr (a sport without get_game_margin on its own engine module -- MLB, or a basketball
-    # sport not yet wired -- must be genuinely unaffected), computed once per real game (not
-    # once per play, which would needlessly refetch the exact same real margin many times over).
+    # sport not yet wired -- must be genuinely unaffected).
+    #
+    # REAL, CONFIRMED PERFORMANCE FIX, not the original design: the first version fetched every
+    # real game's own margin SEQUENTIALLY -- a real, reported slowdown. Confirms the real fix:
+    # concurrent fetching via ThreadPoolExecutor, the same established pattern already proven
+    # for wnba_engine.build_slate's own roster fetch, not a second, blocking loop.
     src = (_HERE / "views" / "16_#L01f50d_Retrospective.py").read_text()
     assert 'hasattr(sport.engine, "get_game_margin")' in src, (
         "must gate by real engine capability, not assume every sport has this")
-    assert "_margin_by_label[m[\"label\"]] = sport.engine.get_game_margin(gid)" in src, (
-        "must compute the real margin once per real game (via meta), not once per play")
+    assert "with ThreadPoolExecutor(max_workers=8) as ex:" in src, (
+        "must fetch every real game's own margin CONCURRENTLY, not sequentially -- the exact "
+        "real regression already fixed once for the roster fetch, reintroduced here and now fixed the same way")
+    assert "_margins = list(ex.map(sport.engine.get_game_margin, _gids))" in src, (
+        "must genuinely parallelize the real fetch across every real game id")
     assert "graded = [dict(p, GameMargin=_margin_by_label.get(p.get(\"Game\")))" in src, (
         "must merge the real margin onto every real play sharing that same real game")
-    print("✓ Retrospective genuinely wires GameMargin computation, gated by real engine capability, computed once per real game")
+    print("✓ Retrospective genuinely wires GameMargin computation, gated by real engine capability, fetched CONCURRENTLY not sequentially")
 
 
 def test_retrospective_wires_blowout_margin_chart_with_adjustable_threshold():
@@ -1792,14 +1799,23 @@ def test_retrospective_wires_blowout_margin_chart_with_adjustable_threshold():
     # get_game_margin ever accumulates real GameMargin data), reuses _rank_history (already
     # fetched, zero new queries), and exposes threshold as a real, live, adjustable slider --
     # not a fixed number -- so a person can actually test whether 10 is the right real cutoff.
+    #
+    # REAL, CONFIRMED PERFORMANCE FIX, not the original design: this chart (and the conviction-
+    # tier chart above it) used to render UNCONDITIONALLY on every real page load -- real,
+    # additive Plotly rendering weight nobody asked for on every single visit. Confirms the real
+    # fix: a real checkbox gate, matching this page's own established L5/L10 pattern, so the
+    # real work only happens when genuinely requested.
     src = (_HERE / "views" / "16_#L01f50d_Retrospective.py").read_text()
+    assert '_show_validation_charts = st.checkbox(' in src, (
+        "both real charts must be gated behind a real, explicit checkbox, not render unconditionally on every load")
+    assert 'if _show_validation_charts:' in src, "the real charts must genuinely be skipped when the checkbox is off"
     assert 'hasattr(_rank_sport.engine, "get_game_margin")' in src, (
         "the real chart must be gated by real engine capability, not shown for every sport")
     assert '_margin_threshold = st.slider("Blowout threshold' in src, (
         "threshold must be a real, live, adjustable slider, not a fixed, hardcoded number")
-    assert "R.catch_rate_by_blowout_margin(\n        _rank_history, threshold=_margin_threshold" in src, (
+    assert "R.catch_rate_by_blowout_margin(\n            _rank_history, threshold=_margin_threshold" in src, (
         "must reuse the already-fetched _rank_history and the real, live slider value")
-    print("✓ Retrospective genuinely wires the blowout-margin validation chart, gated correctly, with a real adjustable threshold")
+    print("✓ Retrospective genuinely wires the blowout-margin validation chart, gated correctly, with a real adjustable threshold, AND behind a real performance-conscious checkbox")
 
 
 def test_bet_log_manual_form_wires_same_team_recent_bets():

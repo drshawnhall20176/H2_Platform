@@ -12,6 +12,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
  
 import retro as R
 import sports
@@ -111,13 +112,20 @@ def load_retro_generic(sport_key: str, date_str: str):
     # slate (not once per play), then merged onto every real play for that game -- a real game
     # can have many real plays, all sharing the exact same real margin.
     if hasattr(sport.engine, "get_game_margin"):
-        _margin_by_label = {}
-        for m in meta:
-            gid = m.get("game_id")
-            if gid is not None:
-                _margin_by_label[m["label"]] = sport.engine.get_game_margin(gid)
-        graded = [dict(p, GameMargin=_margin_by_label.get(p.get("Game")))
-                 if p.get("Game") in _margin_by_label else p for p in graded]
+        # REAL, CONFIRMED PERFORMANCE FIX, not the original design: the first version fetched
+        # each real game's own margin SEQUENTIALLY, one blocking network call at a time -- the
+        # exact same real bottleneck wnba_engine.build_slate's own roster fetch already had
+        # (and already fixed, see that function's own ThreadPoolExecutor). A real slate has only
+        # a handful of real games, so fetching every real margin concurrently removes the
+        # bottleneck directly, the same fix applied the same way for the same real reason.
+        _games_with_id = [(m["label"], m["game_id"]) for m in meta if m.get("game_id") is not None]
+        if _games_with_id:
+            _labels, _gids = zip(*_games_with_id)
+            with ThreadPoolExecutor(max_workers=8) as ex:
+                _margins = list(ex.map(sport.engine.get_game_margin, _gids))
+            _margin_by_label = dict(zip(_labels, _margins))
+            graded = [dict(p, GameMargin=_margin_by_label.get(p.get("Game")))
+                     if p.get("Game") in _margin_by_label else p for p in graded]
 
     reports = {m: R.market_report(plays, results, m) for m in _active_markets}
     rows_by_pid = {r.get("_pid"): r for r in rows}
@@ -565,86 +573,96 @@ else:
 # reusing _rank_min_n's own lowered value -- conviction tiers aren't structurally a one-per-day
 # event the way Rank 1 is (many real plays can share a tier on the same real day), so they don't
 # need the same real, lowered floor Rank 1 needed for a short window.
-C.section_header("🔍", "Does conviction itself track real outcomes — including the model's own passes?")
-st.caption("The lowest real tier below is Conviction under 1.2× — plays that never cleared the "
-          "real grading floor, so they never showed up as a graded pick anywhere on this "
-          "platform. If that tier's own real hit rate runs close to (or above) the higher real "
-          "tiers, that's honest evidence the model may be leaving real value on the table by "
-          "passing on them. If it runs meaningfully lower, that's real, honest confirmation "
-          "those passes are correctly earning their pass.")
-_tier_result = R.catch_rate_by_conviction_tier(_rank_history, min_n=20,
-                                               market=None if _rank_market == "All markets" else _rank_market)
-if any(b["n"] > 0 for b in _tier_result):
-    _tier_colors = [_PALETTE["model"] if b["hit_rate"] is not None else _PALETTE["muted"]
-                    for b in _tier_result]
-    _tier_heights = [b["hit_rate"] if b["hit_rate"] is not None else 0 for b in _tier_result]
-    _tier_text = [f"n={b['n']}" if b["hit_rate"] is not None else f"n={b['n']} (needs 20+)"
-                 for b in _tier_result]
-    figt = go.Figure(go.Bar(
-        x=[b["tier"] for b in _tier_result], y=_tier_heights,
-        marker_color=_tier_colors,
-        text=_tier_text, textposition="outside",
-        hovertemplate="%{x}<br>hit rate %{y:.0%}<br>%{text}<extra></extra>",
-    ))
-    figt.update_layout(template="plotly_white", height=360, margin=dict(l=10, r=10, t=30, b=10),
-                       yaxis=dict(title="Real hit rate", range=[0, 1], tickformat=".0%"),
-                       xaxis=dict(title="Conviction tier at pick time"))
-    st.plotly_chart(figt, width="stretch")
-    st.caption(f"Blue bars clear their own real floor (20+ real graded plays for this scope) — a "
-              f"genuine, trustworthy read. Grey bars have real plays too, just not enough of "
-              f"them yet — this fills in on its own as more real slates get graded here.")
-else:
-    st.info("Not enough real accumulated history yet for this sport/market/scope to show a real "
-           "conviction-vs-hit-rate read. Keep grading real dates on this page — this fills in on "
-           "its own, the same way Track Record's own calibration chart does.")
-
-# ADDED DIRECTLY ON REQUEST, the real validation half of a real, two-part fix for a real,
-# repeated community pain point: "blowouts causing failed parlays" / "players forget how to play
-# after halftime." Gated by hasattr on the real sport's own engine module (only a sport with
-# get_game_margin -- currently WNBA -- ever accumulates real GameMargin data at all; showing this
-# chart for MLB/NFL would just be a permanently-empty, confusing section). Reuses _rank_history
-# (already fetched above, zero new queries) -- the same real sport/market/scope controls, one
-# more genuinely different real question: does the FINAL outcome of a game (not pre-game
-# conviction) correlate with real hit rate.
-if hasattr(_rank_sport.engine, "get_game_margin"):
-    C.section_header("⚠️", "Does a lopsided final game actually predict a lower real hit rate?")
-    st.caption("basketball_projections.blowout_risk_tag already flags a game as elevated risk "
-              "live, pre-game, off a real spread — but its own 10-point threshold was honestly "
-              "marked as \"not a backtested cutoff.\" This is the real check: using each real "
-              "game's own FINAL margin (the one real, retroactively-computable substitute for a "
-              "pre-game spread, which can never be recovered once a game is over), does a "
-              "genuinely lopsided game actually correlate with a lower real hit rate for props "
-              "in that same game — and is 10 points actually the right real number.")
-    _margin_threshold = st.slider("Blowout threshold (final margin, points)", 5.0, 25.0, 10.0, 1.0,
-                                  key="retro_blowout_threshold",
-                                  help="The real cutoff between 'Competitive' and 'Blowout' below "
-                                      "-- move this to see whether a different real number "
-                                      "separates hit rates more clearly than 10.")
-    _margin_result = R.catch_rate_by_blowout_margin(
-        _rank_history, threshold=_margin_threshold, min_n=20,
-        market=None if _rank_market == "All markets" else _rank_market)
-    if any(b["n"] > 0 for b in _margin_result):
-        _margin_colors = [_PALETTE["model"] if b["hit_rate"] is not None else _PALETTE["muted"]
-                          for b in _margin_result]
-        _margin_heights = [b["hit_rate"] if b["hit_rate"] is not None else 0 for b in _margin_result]
-        _margin_text = [f"n={b['n']}" if b["hit_rate"] is not None else f"n={b['n']} (needs 20+)"
-                        for b in _margin_result]
-        figm = go.Figure(go.Bar(
-            x=[b["bucket"] for b in _margin_result], y=_margin_heights,
-            marker_color=_margin_colors,
-            text=_margin_text, textposition="outside",
+# ADDED DIRECTLY ON REQUEST, a real, confirmed performance fix: these two real charts
+# render every real load regardless of whether anyone looks at them -- real, additive
+# Plotly rendering weight (this page already has one real chart above; this was two more,
+# unconditionally, every time). A real checkbox gate, matching the SAME established pattern
+# this page's own L5/L10 section already uses above -- the real work only happens when
+# genuinely requested, not hidden behind a visually-collapsed but still-executing expander.
+_show_validation_charts = st.checkbox(
+    "📊 Show conviction/blowout-margin validation charts (adds real chart-render cost)",
+    key="retro_show_validation_charts")
+if _show_validation_charts:
+    C.section_header("🔍", "Does conviction itself track real outcomes — including the model's own passes?")
+    st.caption("The lowest real tier below is Conviction under 1.2× — plays that never cleared the "
+              "real grading floor, so they never showed up as a graded pick anywhere on this "
+              "platform. If that tier's own real hit rate runs close to (or above) the higher real "
+              "tiers, that's honest evidence the model may be leaving real value on the table by "
+              "passing on them. If it runs meaningfully lower, that's real, honest confirmation "
+              "those passes are correctly earning their pass.")
+    _tier_result = R.catch_rate_by_conviction_tier(_rank_history, min_n=20,
+                                                   market=None if _rank_market == "All markets" else _rank_market)
+    if any(b["n"] > 0 for b in _tier_result):
+        _tier_colors = [_PALETTE["model"] if b["hit_rate"] is not None else _PALETTE["muted"]
+                        for b in _tier_result]
+        _tier_heights = [b["hit_rate"] if b["hit_rate"] is not None else 0 for b in _tier_result]
+        _tier_text = [f"n={b['n']}" if b["hit_rate"] is not None else f"n={b['n']} (needs 20+)"
+                     for b in _tier_result]
+        figt = go.Figure(go.Bar(
+            x=[b["tier"] for b in _tier_result], y=_tier_heights,
+            marker_color=_tier_colors,
+            text=_tier_text, textposition="outside",
             hovertemplate="%{x}<br>hit rate %{y:.0%}<br>%{text}<extra></extra>",
         ))
-        figm.update_layout(template="plotly_white", height=360, margin=dict(l=10, r=10, t=30, b=10),
+        figt.update_layout(template="plotly_white", height=360, margin=dict(l=10, r=10, t=30, b=10),
                            yaxis=dict(title="Real hit rate", range=[0, 1], tickformat=".0%"),
-                           xaxis=dict(title="Game's own final margin"))
-        st.plotly_chart(figm, width="stretch")
-        st.caption(f"Blue bars clear their own real floor (20+ real graded plays for this "
-                  f"scope) — a genuine, trustworthy read. Grey bars have real plays too, just "
-                  f"not enough of them yet — this fills in on its own as more real WNBA slates "
-                  f"get graded here, going forward from when this was added.")
+                           xaxis=dict(title="Conviction tier at pick time"))
+        st.plotly_chart(figt, width="stretch")
+        st.caption(f"Blue bars clear their own real floor (20+ real graded plays for this scope) — a "
+                  f"genuine, trustworthy read. Grey bars have real plays too, just not enough of "
+                  f"them yet — this fills in on its own as more real slates get graded here.")
     else:
-        st.info("Not enough real accumulated history yet for this sport/market/scope to show a "
-               "real blowout-vs-hit-rate read. GameMargin only starts accumulating from real "
-               "slates graded through this page after this feature was added — keep grading "
-               "real dates here, and this fills in on its own.")
+        st.info("Not enough real accumulated history yet for this sport/market/scope to show a real "
+               "conviction-vs-hit-rate read. Keep grading real dates on this page — this fills in on "
+               "its own, the same way Track Record's own calibration chart does.")
+
+    # ADDED DIRECTLY ON REQUEST, the real validation half of a real, two-part fix for a real,
+    # repeated community pain point: "blowouts causing failed parlays" / "players forget how to play
+    # after halftime." Gated by hasattr on the real sport's own engine module (only a sport with
+    # get_game_margin -- currently WNBA -- ever accumulates real GameMargin data at all; showing this
+    # chart for MLB/NFL would just be a permanently-empty, confusing section). Reuses _rank_history
+    # (already fetched above, zero new queries) -- the same real sport/market/scope controls, one
+    # more genuinely different real question: does the FINAL outcome of a game (not pre-game
+    # conviction) correlate with real hit rate.
+    if hasattr(_rank_sport.engine, "get_game_margin"):
+        C.section_header("⚠️", "Does a lopsided final game actually predict a lower real hit rate?")
+        st.caption("basketball_projections.blowout_risk_tag already flags a game as elevated risk "
+                  "live, pre-game, off a real spread — but its own 10-point threshold was honestly "
+                  "marked as \"not a backtested cutoff.\" This is the real check: using each real "
+                  "game's own FINAL margin (the one real, retroactively-computable substitute for a "
+                  "pre-game spread, which can never be recovered once a game is over), does a "
+                  "genuinely lopsided game actually correlate with a lower real hit rate for props "
+                  "in that same game — and is 10 points actually the right real number.")
+        _margin_threshold = st.slider("Blowout threshold (final margin, points)", 5.0, 25.0, 10.0, 1.0,
+                                      key="retro_blowout_threshold",
+                                      help="The real cutoff between 'Competitive' and 'Blowout' below "
+                                          "-- move this to see whether a different real number "
+                                          "separates hit rates more clearly than 10.")
+        _margin_result = R.catch_rate_by_blowout_margin(
+            _rank_history, threshold=_margin_threshold, min_n=20,
+            market=None if _rank_market == "All markets" else _rank_market)
+        if any(b["n"] > 0 for b in _margin_result):
+            _margin_colors = [_PALETTE["model"] if b["hit_rate"] is not None else _PALETTE["muted"]
+                              for b in _margin_result]
+            _margin_heights = [b["hit_rate"] if b["hit_rate"] is not None else 0 for b in _margin_result]
+            _margin_text = [f"n={b['n']}" if b["hit_rate"] is not None else f"n={b['n']} (needs 20+)"
+                            for b in _margin_result]
+            figm = go.Figure(go.Bar(
+                x=[b["bucket"] for b in _margin_result], y=_margin_heights,
+                marker_color=_margin_colors,
+                text=_margin_text, textposition="outside",
+                hovertemplate="%{x}<br>hit rate %{y:.0%}<br>%{text}<extra></extra>",
+            ))
+            figm.update_layout(template="plotly_white", height=360, margin=dict(l=10, r=10, t=30, b=10),
+                               yaxis=dict(title="Real hit rate", range=[0, 1], tickformat=".0%"),
+                               xaxis=dict(title="Game's own final margin"))
+            st.plotly_chart(figm, width="stretch")
+            st.caption(f"Blue bars clear their own real floor (20+ real graded plays for this "
+                      f"scope) — a genuine, trustworthy read. Grey bars have real plays too, just "
+                      f"not enough of them yet — this fills in on its own as more real WNBA slates "
+                      f"get graded here, going forward from when this was added.")
+        else:
+            st.info("Not enough real accumulated history yet for this sport/market/scope to show a "
+                   "real blowout-vs-hit-rate read. GameMargin only starts accumulating from real "
+                   "slates graded through this page after this feature was added — keep grading "
+                   "real dates here, and this fills in on its own.")
