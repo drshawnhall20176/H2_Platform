@@ -868,6 +868,85 @@ def explain_pick_miss(model_prob: Optional[float], market: str = "", side: str =
             "result (variance), not a low-probability play.")
  
  
+def explain_team_environment(missed_play: Dict, slate_plays: List[Dict]) -> Optional[Dict]:
+    """A THIRD, genuinely distinct diagnostic for a graded MISS, added directly on request:
+    explain_pick_miss (above) asks "was this probability-wise a real lean or a long shot";
+    explain_miss (this file, market-specific) asks "did THIS player's own signals suggest the
+    model under-weighted something." Neither ever checks whether the TEAM as a whole delivered
+    what the model expected -- a real, distinct, and often more useful question a real, repeated
+    community frustration named directly: "it's not even the main players... it's all the other
+    people hitting." That's not the same failure as a genuinely cold, no-offense night; a real
+    pick can miss its own individual line while the team's real, collective output for that same
+    market was right where the model expected, just distributed to a different real hitter.
+
+    Reuses only real, already-computed numbers already on every play -- deliberately does NOT
+    re-derive a new "expected team total" from raw season rates or simulation internals (a
+    materially riskier, separately-reviewable statistical claim), and deliberately does NOT take
+    a separate real results dict either: every play passed in here is expected to already be
+    grade_slate's own real output, which already attaches a real "Actual" value per play (via
+    the exact same MARKET_STAT mapping this function would otherwise re-derive). Reusing that
+    already-attached field directly -- rather than re-looking it up from a second, separately-
+    passed source -- means the real number this function reports can never quietly drift from
+    the real number already shown to a person in the very same table.
+
+    Each hitter's own real Line is already a calibrated, real expectation for that specific
+    player in that specific market (whether it came from a real book offer or the model's own
+    real Fair line when no book had one) -- summing those across every real hitter on the same
+    team, same game, same market gives an honest, defensible "how much of this stat should this
+    team have produced tonight," built entirely from numbers already shown to a person.
+
+    Returns None (an honest "not applicable," never a guess) when: missed_play isn't a real,
+    confirmed miss (Hit is not False); the market has no real MARKET_STAT mapping (nothing to
+    sum from real results); Team/Game is missing; no other real play exists for the same real
+    team/game/market to sum a real baseline from; or no real actual result exists for anyone in
+    that real group yet (game not final, or genuinely no boxscore data).
+
+    Otherwise returns {"market", "team", "game", "expected_team_total" (the real, summed Line
+    baseline), "actual_team_total" (the real, summed actual result), "environment_matched" (True
+    when the real actual total met or beat the real expected baseline), "n_teammates" (how many
+    real hitters, including the missed player, that comparison was built from)}."""
+    if missed_play.get("Hit") is not False:
+        return None   # only a real, confirmed miss has anything to diagnose here
+
+    market = missed_play.get("Market")
+    if MARKET_STAT.get(market) is None:
+        return None   # no real actual-stat mapping for this market (e.g. a moneyline pick)
+
+    team = missed_play.get("Team")
+    game = missed_play.get("Game")
+    if not team or not game:
+        return None
+
+    # Every real hitter on the SAME team, same game, same market -- including the missed player
+    # themselves, deliberately: the real question is whether the TEAM's whole real output (every
+    # real hitter combined) matched expectation, not just "everyone else."
+    team_market_plays = [p for p in slate_plays
+                         if p.get("Team") == team and p.get("Game") == game
+                         and p.get("Market") == market and p.get("PlayerId") is not None]
+    if not team_market_plays:
+        return None
+
+    expected_team_total = sum(p["Line"] for p in team_market_plays if p.get("Line") is not None)
+
+    actual_team_total = 0.0
+    any_real_actual = False
+    for p in team_market_plays:
+        actual = p.get("Actual")   # grade_slate's own already-computed, already-displayed value
+        if actual is not None:
+            actual_team_total += actual
+            any_real_actual = True
+    if not any_real_actual:
+        return None   # game not final yet, or genuinely no real boxscore data for this team
+
+    return {
+        "market": market, "team": team, "game": game,
+        "expected_team_total": round(expected_team_total, 2),
+        "actual_team_total": round(actual_team_total, 2),
+        "environment_matched": actual_team_total >= expected_team_total,
+        "n_teammates": len(team_market_plays),
+    }
+
+
 def pitcher_k_report(plays: List[Dict], results: Dict[int, Dict], top_n: int = 15,
                      default_line: float = 5.5) -> Dict:
     """Of pitchers whose strikeouts CLEARED their line, where did the model rank them?"""

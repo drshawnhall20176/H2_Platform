@@ -868,3 +868,112 @@ def test_explain_miss_every_market_stat_key_covers_returns_something_honest():
         result = R.explain_miss({}, market)
         assert isinstance(result, str) and len(result) > 0
     print("✓ explain_miss returns a real string for every market MARKET_STAT covers, no exceptions")
+
+
+# ----------------------------------------------------------------- explain_team_environment
+def test_explain_team_environment_catches_the_real_reported_pattern():
+    # ADDED DIRECTLY ON REQUEST, a real, confirmed fix for a real, repeated community
+    # frustration: "it's not even the main players... it's all the other people hitting."
+    # Simulates exactly that real shape: the missed player's own real Line was 1.5 hits, he got
+    # 0 -- but two real teammates on the same real team, same real game, same real market
+    # combined for 4 real hits against their own real, lower 1.0 lines, so the team's real
+    # combined output (4) genuinely cleared the real combined expectation (3.5). Actual is
+    # reused directly from each play, the exact same field grade_slate already attaches and a
+    # person already sees on screen -- not a separately-passed results dict.
+    missed = {"PlayerId": 1, "Team": "Red Sox", "Game": "Yankees @ Red Sox",
+             "Market": "Batter Total Hits", "Line": 1.5, "Hit": False, "Actual": 0}
+    teammate_a = {"PlayerId": 2, "Team": "Red Sox", "Game": "Yankees @ Red Sox",
+                 "Market": "Batter Total Hits", "Line": 1.0, "Hit": True, "Actual": 2}
+    teammate_b = {"PlayerId": 3, "Team": "Red Sox", "Game": "Yankees @ Red Sox",
+                 "Market": "Batter Total Hits", "Line": 1.0, "Hit": True, "Actual": 2}
+    slate_plays = [missed, teammate_a, teammate_b]
+
+    result = R.explain_team_environment(missed, slate_plays)
+    assert result is not None
+    assert result["expected_team_total"] == 3.5   # 1.5 + 1.0 + 1.0
+    assert result["actual_team_total"] == 4.0      # 0 + 2 + 2
+    assert result["environment_matched"] is True
+    assert result["n_teammates"] == 3
+    print("✓ explain_team_environment correctly identifies the real 'wrong player, right environment' pattern")
+
+
+def test_explain_team_environment_honest_when_environment_also_missed():
+    # The genuine opposite case: the team as a whole was also cold, not just the missed player
+    # -- environment_matched must honestly be False, not defaulted to True.
+    missed = {"PlayerId": 1, "Team": "Marlins", "Game": "Marlins @ Braves",
+             "Market": "Batter Total Hits", "Line": 1.5, "Hit": False, "Actual": 0}
+    teammate = {"PlayerId": 2, "Team": "Marlins", "Game": "Marlins @ Braves",
+               "Market": "Batter Total Hits", "Line": 1.0, "Hit": False, "Actual": 0}
+    slate_plays = [missed, teammate]
+
+    result = R.explain_team_environment(missed, slate_plays)
+    assert result is not None
+    assert result["expected_team_total"] == 2.5
+    assert result["actual_team_total"] == 0.0
+    assert result["environment_matched"] is False
+    print("✓ explain_team_environment honestly reports a genuinely cold team environment, not a false positive")
+
+
+def test_explain_team_environment_none_when_not_a_real_miss():
+    # A play that hit, or hasn't graded at all (Hit is None), has nothing to diagnose here --
+    # this is a MISS-specific diagnostic, not a general team-total calculator.
+    hit_play = {"PlayerId": 1, "Team": "Cubs", "Game": "Cubs @ Cardinals",
+               "Market": "Batter Total Hits", "Line": 1.5, "Hit": True, "Actual": 2}
+    assert R.explain_team_environment(hit_play, [hit_play]) is None
+
+    ungraded_play = {**hit_play, "Hit": None, "Actual": None}
+    assert R.explain_team_environment(ungraded_play, [ungraded_play]) is None
+    print("✓ explain_team_environment correctly returns None for a real hit or an ungraded play, not a fabricated diagnosis")
+
+
+def test_explain_team_environment_none_for_a_market_with_no_real_stat_mapping():
+    # A moneyline/fight-winner pick has no real MARKET_STAT entry to sum real results from --
+    # an honest None, not a crash or a fabricated zero.
+    missed = {"PlayerId": None, "Team": "Yankees", "Game": "Yankees @ Red Sox",
+             "Market": "Moneyline", "Line": None, "Hit": False, "Actual": None}
+    assert R.explain_team_environment(missed, [missed]) is None
+    print("✓ explain_team_environment honestly returns None for a market with no real actual-stat mapping")
+
+
+def test_explain_team_environment_none_when_game_not_final_yet():
+    # No real actual result exists anywhere in the group yet -- an honest None, not a
+    # fabricated 0-vs-0 "environment matched" false positive.
+    missed = {"PlayerId": 1, "Team": "Astros", "Game": "Astros @ Rangers",
+             "Market": "Batter Total Hits", "Line": 1.5, "Hit": False, "Actual": None}
+    result = R.explain_team_environment(missed, [missed])   # no real Actual anywhere yet
+    assert result is None
+    print("✓ explain_team_environment honestly returns None rather than a false 'environment matched' when no real result exists yet")
+
+
+def test_explain_team_environment_does_not_leak_across_different_teams_or_games():
+    # A real, direct check that the grouping is genuinely scoped -- a play from a DIFFERENT
+    # real team, or the SAME team on a different real date/game, must never be pulled into the
+    # comparison just because the market name matches.
+    missed = {"PlayerId": 1, "Team": "Mets", "Game": "Mets @ Phillies",
+             "Market": "Batter Total Hits", "Line": 1.5, "Hit": False, "Actual": 0}
+    different_team = {"PlayerId": 2, "Team": "Phillies", "Game": "Mets @ Phillies",
+                      "Market": "Batter Total Hits", "Line": 1.0, "Hit": True, "Actual": 3}
+    different_game = {"PlayerId": 3, "Team": "Mets", "Game": "Mets @ Braves",
+                      "Market": "Batter Total Hits", "Line": 1.0, "Hit": True, "Actual": 3}
+    slate_plays = [missed, different_team, different_game]
+
+    result = R.explain_team_environment(missed, slate_plays)
+    assert result["n_teammates"] == 1   # only the missed player themselves -- no real teammates this game
+    assert result["expected_team_total"] == 1.5
+    assert result["actual_team_total"] == 0.0
+    print("✓ explain_team_environment correctly scopes the real comparison to the same team AND same game, never leaking across either")
+
+
+def test_explain_team_environment_reuses_grade_slates_own_actual_not_a_separate_recompute():
+    # A REAL, DIRECT CHECK of the actual design decision this function makes: it must read the
+    # real "Actual" field grade_slate already attached to each play, not silently re-derive its
+    # own number some other way. A deliberately wrong/mismatched Actual on a teammate proves
+    # this function trusts and uses exactly that value, not a value from anywhere else.
+    missed = {"PlayerId": 1, "Team": "Padres", "Game": "Padres @ Giants",
+             "Market": "Batter Total Hits", "Line": 1.5, "Hit": False, "Actual": 0}
+    teammate = {"PlayerId": 2, "Team": "Padres", "Game": "Padres @ Giants",
+               "Market": "Batter Total Hits", "Line": 1.0, "Hit": True, "Actual": 99}
+    result = R.explain_team_environment(missed, [missed, teammate])
+    assert result["actual_team_total"] == 99.0   # 0 + 99 -- confirms the real teammate's own real Actual was used directly
+    print("✓ explain_team_environment genuinely reuses each play's own real, already-attached Actual field, not a separate recompute")
+

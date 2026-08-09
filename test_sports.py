@@ -1736,6 +1736,22 @@ def test_bet_log_manual_form_placeholders_are_sport_aware():
     print("✓ Bet Log's manual form placeholders are genuinely sport-aware, with a real, correct UFC example")
 
 
+def test_retrospective_wires_team_environment_diagnostic_using_full_slate():
+    # ADDED DIRECTLY ON REQUEST: a real, distinct diagnostic from "Why it missed" (probability-
+    # based) -- confirms Retrospective genuinely wires it in, gated to MLB (explain_team_
+    # environment lives in retro.py, the MLB-specific module), and critically uses _graded_all
+    # (the full real slate) rather than the possibly-filtered subset, since a missed player's
+    # own real teammates could otherwise be filtered out of view entirely (e.g. "Misses only"),
+    # silently starving the real comparison of the very plays it needs.
+    src = (_HERE / "views" / "16_#L01f50d_Retrospective.py").read_text()
+    assert 'if _active.key == "MLB":' in src, "the diagnostic must be gated to MLB, matching explain_team_environment's own real home"
+    assert "R.explain_team_environment(r.to_dict(), _graded_all)" in src, (
+        "must call the real diagnostic with the full real slate (_graded_all), not the possibly-filtered subset")
+    assert 'g["Team environment"] = g.apply(_env_summary, axis=1)' in src, (
+        "the real column must actually be attached to the displayed table")
+    print("✓ Retrospective genuinely wires the team-environment diagnostic using the full real slate, gated correctly to MLB")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
