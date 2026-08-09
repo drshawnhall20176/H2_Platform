@@ -354,6 +354,27 @@ def _render_graded(subset):
            "Result", "Why it missed", "Why"]
     fmt = {"Model %": "{:.0%}", "Conviction": "{:.2f}×", "Line": "{:g}", "Actual": "{:.1f}"}
 
+    # Team environment -- ADDED DIRECTLY ON REQUEST, a real, distinct diagnostic from "Why it
+    # missed" above (that one's about probability/variance; this one's about whether the TEAM's
+    # own real collective output for this market still matched the model's real expectation,
+    # just landed on a different real hitter). MLB only: explain_team_environment lives in
+    # retro.py, the MLB-specific module, matching the same real _explain_miss routing this page
+    # already does a few lines up. Uses _graded_all (the full real slate), not subset -- a
+    # missed player's own real teammates could be filtered out of subset entirely (e.g. "Misses
+    # only"), which would silently starve this real comparison of the very plays it needs.
+    if _active.key == "MLB":
+        def _env_summary(r):
+            if r["Hit"]:
+                return ""
+            result = R.explain_team_environment(r.to_dict(), _graded_all)
+            if result is None:
+                return ""
+            verdict = "✅ matched" if result["environment_matched"] else "❌ also cold"
+            return (f"{verdict} — team {result['actual_team_total']:g} vs "
+                   f"{result['expected_team_total']:g} expected ({result['n_teammates']} hitters)")
+        g["Team environment"] = g.apply(_env_summary, axis=1)
+        cols.insert(cols.index("Why it missed") + 1, "Team environment")
+
     if _show_l5_l10:
         # Real, market-and-line-aware L5/L10 -- see retro.l5_l10_hit_rate's own docstring for
         # why this is NOT the same fixed ">=1 hit" shortcut Dinger Engine's own L5 column uses.
