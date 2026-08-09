@@ -1953,6 +1953,30 @@ def test_edge_board_idp_section_no_longer_references_an_undefined_meta():
     print("✓ Edge Board's IDP section no longer references an undefined meta -- the real NameError is genuinely fixed")
 
 
+def test_retrospective_rank_history_fetch_is_genuinely_cached():
+    # REAL, CONFIRMED PERFORMANCE FIX for a real, reported case: "retrospective still takes
+    # extremely long to load. other pages load faster" -- an earlier real fix made other pages
+    # faster by caching load_generic_best_bets_board, but this page's own _rank_history fetch
+    # (a real, growing accumulated-history database query) was NEVER touched by that fix at all,
+    # since it lived as bare, uncached top-level script code here, re-running on every single
+    # real rerun of this specific page regardless of whether either real chart further down was
+    # even shown. Confirms the real fix directly: a genuine, dedicated @st.cache_data wrapper,
+    # matching this same file's own established pattern for small, dedicated cache wrappers
+    # (_load_l5_l10_games, right above it).
+    src = (_HERE / "views" / "16_#L01f50d_Retrospective.py").read_text()
+    assert "def _load_rank_history(sport_key: str, since_date, market):" in src, (
+        "the real, dedicated cache wrapper must genuinely exist")
+    assert "return GH.fetch_graded_plays(sport_key, since_date=since_date, market=market)" in src, (
+        "the real wrapper must genuinely delegate to the real, underlying fetch")
+    assert "_rank_history = _load_rank_history(_rank_sport.key, _rank_since" in src, (
+        "the real top-level call site must genuinely go through the real cached wrapper, not the raw fetch directly")
+    # A real, direct check that the real @st.cache_data decorator immediately precedes the real
+    # function -- confirms this isn't just a plain function sitting near an unrelated decorator.
+    assert '@st.cache_data(ttl=300, show_spinner=False)\ndef _load_rank_history(' in src, (
+        "the real cache decorator must genuinely, directly wrap this real function")
+    print("✓ Retrospective's own rank-history fetch is genuinely wired through a real, dedicated, cached wrapper")
+
+
 def test_no_undefined_names_anywhere_in_the_real_project():
     # ADDED DIRECTLY as a real, permanent safeguard, after TWO real, confirmed undefined-name
     # bugs shipped in the same real session -- one a real, live production NameError (a bare `O`

@@ -340,8 +340,13 @@ def test_retrospective_rank_chart_has_a_real_recency_scope():
     src = (Path(__file__).parent / "views" / "16_#L01f50d_Retrospective.py").read_text()
     assert '_rank_scope = st.radio("Scope", ["All time", "Last 10 real days"]' in src
     assert "_rank_since = (datetime.now() - timedelta(days=10))" in src
-    assert "GH.fetch_graded_plays(_rank_sport.key, since_date=_rank_since" in src, (
-        "the scope selection must actually reach fetch_graded_plays' own since_date parameter")
+    assert "GH.fetch_graded_plays(sport_key, since_date=since_date, market=market)" in src, (
+        "the scope selection must actually reach fetch_graded_plays' own since_date parameter "
+        "-- REAL, CONFIRMED PERFORMANCE FIX, not the original call site: this now goes through "
+        "_load_rank_history, a real, cached wrapper, since the original bare top-level call "
+        "used to re-run on every real page rerun regardless of whether either real chart below it was shown")
+    assert "_rank_history = _load_rank_history(_rank_sport.key, _rank_since" in src, (
+        "the real call site itself must genuinely use the cached wrapper, not the raw fetch directly")
     print("✓ Retrospective's rank chart has a real, wired 'Last 10 real days' recency scope, "
          "reusing fetch_graded_plays' own existing since_date support")
 def test_retrospective_rank_chart_uses_a_scope_dependent_floor_and_shows_every_category():

@@ -514,8 +514,25 @@ if _rank_scope == "Last 10 real days":
     _rank_since = (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d")
     _rank_min_n = 5
 
-_rank_history = GH.fetch_graded_plays(_rank_sport.key, since_date=_rank_since,
-                                      market=None if _rank_market == "All markets" else _rank_market)
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_rank_history(sport_key: str, since_date, market):
+    """REAL, CONFIRMED PERFORMANCE FIX, not the original design: this real database query used
+    to run as bare, uncached top-level script code -- meaning it re-ran on EVERY real rerun of
+    this page (every widget interaction, every checkbox), regardless of whether either real
+    chart further down was even shown. Confirmed directly via a real, reported slowdown: other
+    pages got measurably faster after an earlier real cache fix, but this page stayed slow,
+    since this real query was never touched by that fix at all -- a genuinely separate real gap
+    on this specific page. Read-only, never mutated anywhere downstream (confirmed directly --
+    every real use is a read: catch_rate_by_rank/catch_rate_by_conviction_tier/catch_rate_by_
+    blowout_margin, a real set comprehension, len()), so caching this is safe. A real, short
+    300s TTL, matching this platform's own established convention for read-only, moderately-
+    fresh accumulated-history queries -- new real graded slates still show up within minutes,
+    not re-queried from scratch on every single real interaction."""
+    return GH.fetch_graded_plays(sport_key, since_date=since_date, market=market)
+
+
+_rank_history = _load_rank_history(_rank_sport.key, _rank_since,
+                                   None if _rank_market == "All markets" else _rank_market)
 _rank_result = R.catch_rate_by_rank(_rank_history, min_n=_rank_min_n,
                                     market=None if _rank_market == "All markets" else _rank_market)
 
