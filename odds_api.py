@@ -381,6 +381,65 @@ def real_moneyline_price(moneylines: Dict[str, Dict[str, float]], team_name: str
         return None
 
 
+def real_moneyline_devig(moneylines: Dict[str, Dict[str, float]], team_a: str, team_b: str,
+                         preferred_book: Optional[str] = None) -> Optional[Tuple[float, str]]:
+    """The REAL, no-vig probability of team_a winning, from one book's own real moneyline prices
+    on BOTH teams -- ADDED DIRECTLY ON REQUEST, extending devig_two_way's own proven math (see
+    that function's own docstring) from player props to game-level moneylines, the exact gap
+    identified directly: Best Bets' own "vs XX% typical" display already shows this same real
+    math for player props whenever a book posted both sides, but nothing did the equivalent for
+    a game's own moneyline, spread, or total -- despite devig_two_way itself never having been
+    prop-specific in the first place, just never wired up one level higher until now.
+
+    SAME-BOOK DISCIPLINE, same real reason real_market_prob's own docstring already establishes:
+    mixing team_a's price at one book with team_b's price at a DIFFERENT book is not a genuine
+    devig, since each book's own two-sided price reflects that SAME book's own margin -- a
+    cross-book pair would silently blend two different books' own vig into one meaningless
+    number. Book selection: preferred_book when it genuinely posted BOTH teams, otherwise the
+    first book found that posted both -- deliberately not "each team's own best price," which
+    would reintroduce exactly the cross-book mixing this function exists to avoid.
+
+    TEAM NAME MATCHING: same lightly-normalized exact match as real_moneyline_price, for the
+    same real reason (see that function's own docstring) -- neither side of the comparison is
+    user-typed here either.
+
+    Returns (no_vig_probability_of_team_a, book_used), or None if no single real book posted
+    real prices for both teams right now -- never a guessed or partially-devigged number."""
+    try:
+        target_a = (team_a or "").strip().lower()
+        target_b = (team_b or "").strip().lower()
+        if not target_a or not target_b:
+            return None
+        prices_a, prices_b = None, None
+        for team, prices in (moneylines or {}).items():
+            if not isinstance(prices, dict):
+                continue
+            t = (team or "").strip().lower()
+            if t == target_a:
+                prices_a = prices
+            elif t == target_b:
+                prices_b = prices
+        if not prices_a or not prices_b:
+            return None
+        # Prefer a book that genuinely posted both sides; try preferred_book first, then any
+        # book common to both, in a real, stable order (sorted) rather than dict-iteration
+        # order, which Python doesn't guarantee is meaningful here.
+        common_books = sorted(set(prices_a) & set(prices_b))
+        if not common_books:
+            return None
+        book = preferred_book if preferred_book in common_books else common_books[0]
+        no_vig_a = devig_two_way(float(prices_a[book]), float(prices_b[book]))
+        if no_vig_a is None:
+            return None
+        return no_vig_a, book
+    except Exception as e:  # noqa: BLE001
+        # Same posture as real_moneyline_price's own hardening just above -- a live data-shape
+        # surprise must degrade to "no real devig available," never crash the page this renders on.
+        print(f"[real_moneyline_devig] unexpected error for team_a={team_a!r} team_b={team_b!r}: "
+             f"{type(e).__name__}: {e}")
+        return None
+
+
 def fetch_slate_spreads(date_str: str, api_key: str, sport: str = SPORT) -> Tuple[Dict[str, float], Dict]:
     """{team_name: spread} for every team playing on date_str, plus (info) with remaining quota —
     same (result, info) contract as fetch_slate_props so pages can show cost the same way. Only
