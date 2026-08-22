@@ -154,6 +154,71 @@ else:
     st.caption("v1 model — opponent defense and pace aren't incorporated yet.")
  
 st.divider()
+
+# ---------- today's game lines, de-vigged (EXTENDED DIRECTLY ON REQUEST) ----------
+# A real, direct extension of odds_api.devig_two_way -- that function already powers Best Bets'
+# own "vs XX% typical" display for player props (via real_market_prob) whenever a real book
+# posted both sides, but nothing did the same real math one level up, for a game's own real
+# moneyline. real_moneyline_devig (odds_api.py) closes that gap using the SAME proven formula,
+# never a reimplementation -- see that function's own docstring for the full reasoning,
+# including why it refuses to mix two different books' own real prices together.
+#
+# OPT-IN, matching this platform's own established pattern for any feature needing a genuinely
+# NEW live-odds fetch (see Best Bets' own "Show blowout risk (uses live odds API quota)"
+# checkbox) -- this costs real API quota fetching a "h2h" market per game, so it never fires
+# silently just because Command Center loaded.
+C.section_header("⚖️", "Today's game lines — de-vigged")
+st.caption("Real, no-vig probability from today's actual moneyline, with the sportsbook's own "
+          "margin removed — the exact same math Best Bets already applies to player props "
+          "(via the 📊 icon on \"vs XX% typical\"), one level up to the game itself.")
+_show_game_devig = st.checkbox("Show de-vigged moneylines (uses live odds API quota)",
+                               key="_show_game_devig")
+if _show_game_devig:
+    @st.cache_data(ttl=600, show_spinner=False)
+    def _load_game_moneylines(date_str_inner: str, odds_sport_key: str):
+        """Real, captured moneyline prices for every team playing today, for whichever sport is
+        currently active -- same real caching contract (600s ttl, None on no API key configured
+        vs {} on a genuine "fetched, nothing found") as Game Watch's own load_real_moneylines,
+        just sport-aware via odds_sport_key rather than hardcoded to O.SPORT, since Command
+        Center itself is multi-sport."""
+        api_key = BBD.get_odds_api_key()
+        if not api_key:
+            return None
+        try:
+            moneylines, _info = BBD.O.fetch_slate_moneylines(date_str_inner, api_key, sport=odds_sport_key)
+            return moneylines
+        except Exception:
+            return None
+
+    _game_moneylines = _load_game_moneylines(today, _active.odds_sport_key)
+    if _game_moneylines is None:
+        st.info("No live odds API key configured — de-vigged lines aren't available right now.")
+    else:
+        _plays_gd, _meta_gd = _board(_active.key, today)
+        _preferred_book_gd = st.session_state.get(f"_preferred_book_{_active.key.lower()}", BBD.O.DEFAULT_BOOK)
+        _devig_rows = []
+        for g in _meta_gd:
+            result = BBD.O.real_moneyline_devig(_game_moneylines, g.get("away_name", ""),
+                                                g.get("home_name", ""),
+                                                preferred_book=_preferred_book_gd)
+            if result is None:
+                continue
+            no_vig_away, book = result
+            _devig_rows.append({
+                "Game": g.get("label", f"{g.get('away_name','?')} @ {g.get('home_name','?')}"),
+                g.get("away_name", "Away"): f"{no_vig_away:.1%}",
+                g.get("home_name", "Home"): f"{1 - no_vig_away:.1%}",
+                "Book": book,
+            })
+        if _devig_rows:
+            st.dataframe(pd.DataFrame(_devig_rows), hide_index=True, width="stretch")
+            st.caption("Only games where a single real book posted both real prices are shown — "
+                      "never a guessed or cross-book-mixed number.")
+        else:
+            st.info("No real, same-book, two-sided moneyline found for today's games yet — "
+                   "check back closer to first pitch.")
+
+st.divider()
 left, right = st.columns([3, 2])
  
 # ---------- tonight's top plays ----------
