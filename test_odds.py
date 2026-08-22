@@ -629,7 +629,105 @@ def test_real_moneyline_price_survives_non_dict_price_entry():
          "still correctly serves every other real entry in the same dict")
 
 
-def test_parse_event_moneyline_skips_a_malformed_outcome():
+# ----------------------------------------------------------------- real_moneyline_devig
+def test_real_moneyline_devig_uses_the_real_reported_example():
+    # EXTENDED DIRECTLY ON REQUEST: the exact real, live TOR @ NYY moneyline a real user showed
+    # directly (DraftKings, TOR -102 / NYY -105). Hand-verified: implied TOR ≈ 0.504950, implied
+    # NYY ≈ 0.512195, total ≈ 1.017146, no-vig TOR ≈ 0.496439 -- confirms the real math matches
+    # devig_two_way's own proven formula, one level up (game moneyline instead of a player prop).
+    moneylines = {
+        "Toronto Blue Jays": {"draftkings": -102},
+        "New York Yankees": {"draftkings": -105},
+    }
+    result = O.real_moneyline_devig(moneylines, "Toronto Blue Jays", "New York Yankees")
+    assert result is not None
+    no_vig_tor, book = result
+    assert book == "draftkings"
+    assert abs(no_vig_tor - 0.496439) < 0.0001
+    print("✓ real_moneyline_devig correctly de-vigs the real, reported TOR @ NYY moneyline")
+
+
+def test_real_moneyline_devig_matches_devig_two_way_directly():
+    # A real, direct sanity check that this is genuinely the SAME math as devig_two_way, not a
+    # reimplementation that could quietly drift from it over time.
+    moneylines = {"Team A": {"fanduel": -150}, "Team B": {"fanduel": +130}}
+    result = O.real_moneyline_devig(moneylines, "Team A", "Team B")
+    expected = O.devig_two_way(-150, 130)
+    assert result is not None
+    assert abs(result[0] - expected) < 1e-9
+    print("✓ real_moneyline_devig produces exactly the same real result as calling devig_two_way directly")
+
+
+def test_real_moneyline_devig_never_mixes_two_different_books():
+    # The real, core discipline this function exists to protect -- see its own docstring. Team A
+    # only has a real price at one book, Team B only at a different book, so there is no single
+    # book that genuinely posted both real sides -- must honestly return None, never blend them.
+    moneylines = {
+        "Team A": {"draftkings": -150},
+        "Team B": {"fanduel": 130},
+    }
+    assert O.real_moneyline_devig(moneylines, "Team A", "Team B") is None
+    print("✓ real_moneyline_devig returns None rather than mixing two different books' own real prices")
+
+
+def test_real_moneyline_devig_prefers_preferred_book_when_it_has_both_sides():
+    moneylines = {
+        "Team A": {"draftkings": -150, "fanduel": -145},
+        "Team B": {"draftkings": 130, "fanduel": 125},
+    }
+    result = O.real_moneyline_devig(moneylines, "Team A", "Team B", preferred_book="fanduel")
+    assert result is not None
+    assert result[1] == "fanduel"
+    expected = O.devig_two_way(-145, 125)
+    assert abs(result[0] - expected) < 1e-9
+    print("✓ real_moneyline_devig uses the preferred book's own real, matched pair when it posted both sides")
+
+
+def test_real_moneyline_devig_falls_back_when_preferred_book_lacks_one_side():
+    # Preferred book only has Team A's real price, not Team B's -- must fall back to a real,
+    # common book rather than silently using a mismatched pair.
+    moneylines = {
+        "Team A": {"draftkings": -150, "fanduel": -145},
+        "Team B": {"fanduel": 125},
+    }
+    result = O.real_moneyline_devig(moneylines, "Team A", "Team B", preferred_book="draftkings")
+    assert result is not None
+    assert result[1] == "fanduel"
+    print("✓ real_moneyline_devig falls back to a real, genuinely common book when the preferred one lacks one side")
+
+
+def test_real_moneyline_devig_case_and_whitespace_insensitive_team_match():
+    moneylines = {"New York Yankees": {"draftkings": -105}, "Toronto Blue Jays": {"draftkings": -102}}
+    result = O.real_moneyline_devig(moneylines, "  new york yankees  ", "TORONTO BLUE JAYS")
+    assert result is not None
+    print("✓ real_moneyline_devig matches team names regardless of case or surrounding whitespace")
+
+
+def test_real_moneyline_devig_none_when_a_team_is_missing():
+    moneylines = {"New York Yankees": {"draftkings": -105}}
+    assert O.real_moneyline_devig(moneylines, "New York Yankees", "Boston Red Sox") is None
+    assert O.real_moneyline_devig({}, "New York Yankees", "Boston Red Sox") is None
+    assert O.real_moneyline_devig(moneylines, "", "New York Yankees") is None
+    print("✓ real_moneyline_devig returns None (never a guess) when either real team has no offer at all")
+
+
+def test_real_moneyline_devig_survives_malformed_price_values():
+    # Same real regression-guard posture as real_moneyline_price's own hardening just above.
+    moneylines = {
+        "Team A": {"draftkings": "not-a-real-price"},
+        "Team B": {"draftkings": 130},
+    }
+    assert O.real_moneyline_devig(moneylines, "Team A", "Team B") is None
+    print("✓ real_moneyline_devig survives a malformed (non-numeric) price value instead of raising")
+
+
+def test_real_moneyline_devig_survives_non_dict_price_entry():
+    moneylines = {"Team A": "not-a-dict-at-all", "Team B": {"draftkings": 130}}
+    assert O.real_moneyline_devig(moneylines, "Team A", "Team B") is None
+    print("✓ real_moneyline_devig skips a non-dict per-team entry instead of crashing")
+
+
+
     # Same real production risk, one layer earlier: a malformed individual outcome in a live
     # response must be skipped (with the real raw entry logged for diagnosis), not crash the
     # whole parse and lose every other real price in the same event.
