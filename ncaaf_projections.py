@@ -502,3 +502,208 @@ def build_qb_efficiency_table(rows: List[Dict], season_logs_by_pid: Dict[str, Li
     out.sort(key=lambda x: (x["TD-INT Delta (recent vs season)"]
                             if x["TD-INT Delta (recent vs season)"] is not None else 0), reverse=True)
     return out
+
+
+# ============================================================================ Matchup Lab
+# BUILT DIRECTLY ON REQUEST, adapting nfl_projections.py's own proven Matchup Lab functions
+# (build_trend_series/stat_key_for/_extra_profile_row/build_matchup_profile) rather than
+# reinventing them -- see nfl_projections.py's own docstrings for the shared reasoning behind
+# each real signal. ONE GENUINE, CONFIRMED DIFFERENCE FROM NFL THROUGHOUT, not a copy-paste
+# oversight: NFL's own stat_key_for is an identity function, since NFL's _MARKET_SPEC already
+# stores the real nflreadpy column name directly. NCAAF's own _MARKET_SPEC stores a SHORT
+# display key ("PassYds"), not the raw CFBD per-game column ("passing_YDS") -- confirmed by
+# reading _MARKET_SPEC/_ROW_FIELD_TO_CFBD_COL above, not assumed -- so stat_key_for here does
+# real work, not a passthrough.
+
+def build_trend_series(log: List[Dict]) -> List[Dict]:
+    """Chronological (oldest-to-newest) copy of a player's recent-game log, for a trend chart
+    that reads left-to-right as time moving forward -- the opposite of ncaaf_engine.
+    player_recent_games's own most-recent-first contract. Identical role and implementation to
+    every other sport's build_trend_series on this platform."""
+    return list(reversed(log))
+
+
+def stat_key_for(col: str) -> str:
+    """Row-column ("PassYds") -> real game-log dict key ("passing_YDS") -- REAL translation here,
+    unlike NFL's own identity-function version (see this section's own module-level note for
+    why). Reuses _ROW_FIELD_TO_CFBD_COL directly, the SAME real, already-tested mapping
+    build_best_bets/_simulate_for_row already depend on, rather than a second, parallel mapping
+    that could quietly drift out of sync with it."""
+    return _ROW_FIELD_TO_CFBD_COL.get(col, col)
+
+
+# Positions eligible for a Touchdowns row in Matchup Lab -- CONFIRMED against ncaaf_engine.
+# _MARKETS_FOR_POSITION's own real, complete position set (QB/RB/WR/TE), not blindly copied from
+# NFL's own _TD_ELIGIBLE_POSITIONS, which also includes "FB" -- a position this platform's own
+# NCAAF build doesn't track at all (confirmed: FB appears nowhere in _MARKETS_FOR_POSITION).
+_TD_ELIGIBLE_POSITIONS = {"QB", "RB", "WR", "TE"}
+
+
+def is_td_eligible_position(position: str) -> bool:
+    """Whether this position gets a Touchdowns row/chart in Matchup Lab -- public wrapper around
+    _TD_ELIGIBLE_POSITIONS, same convention as market_list/stat_key_for/default_line above: view
+    files call this rather than reaching into a private module-level set directly."""
+    return position in _TD_ELIGIBLE_POSITIONS
+
+
+def _extra_profile_row(market_name: str, log: List[Dict], season_log: Optional[List[Dict]],
+                       h2h_log: List[Dict], opp_recent_allowed_val: Optional[float],
+                       opp_season_allowed_val: Optional[float], stat_fn,
+                       round_digits: int = 1, variance_floor: float = 0.75,
+                       variance_min_abs: float = 0.0) -> Dict:
+    """Direct port of nfl_projections._extra_profile_row -- fully sport-agnostic already (takes
+    a stat_fn callable, never touches a sport-specific column name directly), so this needed
+    zero real changes beyond living in this module. See NFL's own docstring for the full
+    reasoning behind variance_min_abs and why this stays separate from the core yardage-market
+    loop in build_matchup_profile below."""
+    recent_vals = [stat_fn(g) for g in log]
+    recent_avg = (sum(recent_vals) / len(recent_vals)) if recent_vals else 0.0
+    season_vals = [stat_fn(g) for g in season_log] if season_log else []
+    season_avg = (sum(season_vals) / len(season_vals)) if season_vals else None
+    h2h_vals = [stat_fn(g) for g in h2h_log]
+    h2h_avg = (sum(h2h_vals) / len(h2h_vals)) if h2h_vals else None
+    h2h_spread = f"{min(h2h_vals):.0f}\u2013{max(h2h_vals):.0f}" if len(h2h_vals) >= 2 else None
+    high_variance = False
+    if len(h2h_vals) >= 2 and season_avg and season_avg > 0:
+        high_variance = (max(h2h_vals) - min(h2h_vals)) > max(season_avg * variance_floor, variance_min_abs)
+
+    recent_allowed = opp_recent_allowed_val or 0.0
+    season_allowed = opp_season_allowed_val or 0.0
+    trend = (recent_allowed / season_allowed) if season_allowed > 0 else 1.0
+    if trend >= 1.08:
+        trend_tag = "\U0001F4C8 Looser lately"
+    elif trend <= 0.92:
+        trend_tag = "\U0001F4C9 Tighter lately"
+    else:
+        trend_tag = "\u27A1\uFE0F Steady"
+
+    return {
+        "Market": market_name,
+        "Recent Avg": round(recent_avg, round_digits),
+        "Season Avg": round(season_avg, round_digits) if season_avg is not None else None,
+        "H2H Games": len(h2h_vals),
+        "H2H Avg": round(h2h_avg, round_digits) if h2h_avg is not None else None,
+        "H2H Spread": h2h_spread,
+        "High Variance": high_variance,
+        "Suppressed": False,   # not part of the yardage-market H2H-comparison logic
+        "Opp Recent Allowed": round(recent_allowed, round_digits) if recent_allowed else None,
+        "Opp Season Allowed": round(season_allowed, round_digits) if season_allowed else None,
+        "Defense Trend": round(trend, 2),
+        "Trend Tag": trend_tag,
+    }
+
+
+def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_recent_allowed: Dict[str, float],
+                          opp_season_allowed: Dict[str, float],
+                          season_log: Optional[List[Dict]] = None,
+                          opp_recent_tds_allowed: Optional[float] = None,
+                          opp_season_tds_allowed: Optional[float] = None,
+                          opp_recent_passing_tds_allowed: Optional[float] = None,
+                          opp_season_passing_tds_allowed: Optional[float] = None,
+                          opp_recent_rushing_tds_allowed: Optional[float] = None,
+                          opp_season_rushing_tds_allowed: Optional[float] = None) -> List[Dict]:
+    """One row per market for Matchup Lab's deep-dive on a single player vs their upcoming
+    opponent -- adapted directly from nfl_projections.build_matchup_profile, same real signals,
+    same real logic. See that function's own docstring for the full shared reasoning behind
+    each. ONLY ITERATES row["_markets"] -- same real discipline, a QB never gets a phantom
+    Receptions row.
+
+    THE ONE REAL, CONFIRMED DIFFERENCE FROM NFL, THROUGHOUT: every `g.get(col)` lookup against a
+    real game-log entry uses stat_key_for(col) first, not col directly -- NFL's own version can
+    read `g.get(col)` straight, since NFL's _MARKET_SPEC already stores the raw game-log key.
+    NCAAF's _MARKET_SPEC stores a short display key ("PassYds"), and the real game-log entries
+    use CFBD's own raw column name ("passing_YDS") -- using col directly here would silently get
+    None -> 0 for every real game, the exact real bug _ROW_FIELD_TO_CFBD_COL's own docstring
+    already warns about, just one level up in a new function that could reintroduce it."""
+    season_avgs: Dict[str, Optional[float]] = {}
+    h2h_avgs: Dict[str, Optional[float]] = {}
+    ratios: Dict[str, float] = {}
+    markets = row.get("_markets") or []
+    log = row.get("_recent_games") or []
+    position = row.get("Position")
+
+    for mkey in markets:
+        col, _disp, _line = _MARKET_SPEC[mkey]
+        gcol = stat_key_for(col)   # the REAL game-log key -- see this function's own docstring
+        if season_log:
+            svals = [g.get(gcol) or 0 for g in season_log]
+            season_avgs[col] = (sum(svals) / len(svals)) if svals else None
+        else:
+            season_avgs[col] = None
+        hvals = [g.get(gcol) or 0 for g in h2h_log]
+        h2h_avgs[col] = (sum(hvals) / len(hvals)) if hvals else None
+        sa, ha = season_avgs[col], h2h_avgs[col]
+        if sa and sa > 0 and ha is not None:
+            ratios[col] = ha / sa
+
+    suppressed_key = None
+    if len(ratios) >= 2:
+        ranked = sorted(ratios.items(), key=lambda kv: kv[1])
+        lowest_key, lowest_val = ranked[0]
+        next_val = ranked[1][1]
+        if lowest_val < 0.75 and (next_val - lowest_val) >= 0.15:
+            suppressed_key = lowest_key
+
+    out: List[Dict] = []
+    for mkey in markets:
+        col, disp, _line = _MARKET_SPEC[mkey]
+        gcol = stat_key_for(col)
+        rvals = [g.get(gcol) or 0 for g in log]
+        recent_avg = (sum(rvals) / len(rvals)) if rvals else 0.0
+        season_avg = season_avgs.get(col)
+        h2h_avg = h2h_avgs.get(col)
+
+        hvals = [g.get(gcol) or 0 for g in h2h_log]
+        h2h_spread = f"{min(hvals):.0f}\u2013{max(hvals):.0f}" if len(hvals) >= 2 else None
+        high_variance = False
+        if len(hvals) >= 2 and season_avg and season_avg > 0:
+            spread = max(hvals) - min(hvals)
+            high_variance = spread > season_avg * 0.75
+
+        recent_allowed = opp_recent_allowed.get(gcol, 0.0)
+        season_allowed = opp_season_allowed.get(gcol, 0.0)
+        trend = (recent_allowed / season_allowed) if season_allowed > 0 else 1.0
+        if trend >= 1.08:
+            trend_tag = "\U0001F4C8 Looser lately"
+        elif trend <= 0.92:
+            trend_tag = "\U0001F4C9 Tighter lately"
+        else:
+            trend_tag = "\u27A1\uFE0F Steady"
+
+        out.append({
+            "Market": disp,
+            "Recent Avg": round(recent_avg, 1),
+            "Season Avg": round(season_avg, 1) if season_avg is not None else None,
+            "H2H Games": len(hvals),
+            "H2H Avg": round(h2h_avg, 1) if h2h_avg is not None else None,
+            "H2H Spread": h2h_spread,
+            "High Variance": high_variance,
+            "Suppressed": col == suppressed_key,
+            "Opp Recent Allowed": round(recent_allowed, 1) if recent_allowed else None,
+            "Opp Season Allowed": round(season_allowed, 1) if season_allowed else None,
+            "Defense Trend": round(trend, 2),
+            "Trend Tag": trend_tag,
+        })
+
+    if position == "QB":
+        out.append(_extra_profile_row(
+            "Rush Yards", log, season_log, h2h_log,
+            opp_recent_allowed.get("rushing_YDS"), opp_season_allowed.get("rushing_YDS"),
+            stat_fn=lambda g: g.get("rushing_YDS") or 0, round_digits=1, variance_floor=0.75))
+        out.append(_extra_profile_row(
+            "Passing TDs", log, season_log, h2h_log,
+            opp_recent_passing_tds_allowed, opp_season_passing_tds_allowed,
+            stat_fn=lambda g: g.get("passing_TD") or 0, round_digits=2,
+            variance_floor=0.75, variance_min_abs=1.0))
+        out.append(_extra_profile_row(
+            "Rushing TDs", log, season_log, h2h_log,
+            opp_recent_rushing_tds_allowed, opp_season_rushing_tds_allowed,
+            stat_fn=lambda g: g.get("rushing_TD") or 0, round_digits=2,
+            variance_floor=0.75, variance_min_abs=1.0))
+    elif position in _TD_ELIGIBLE_POSITIONS:
+        out.append(_extra_profile_row(
+            "Touchdowns", log, season_log, h2h_log,
+            opp_recent_tds_allowed, opp_season_tds_allowed,
+            stat_fn=lambda g: (g.get("rushing_TD") or 0) + (g.get("receiving_TD") or 0),
+            round_digits=2, variance_floor=0.75, variance_min_abs=1.0))
+    return out
