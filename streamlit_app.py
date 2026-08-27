@@ -110,6 +110,9 @@ def run():
         "29": ("NCAAF",),                                # QB Lab (NCAAF) -- adapted directly from
                                                           # NFL QB Lab (page 14), confirmed-matching
                                                           # function signatures and output shapes.
+        "30": ("NCAAF",),                                # Matchup Lab (NCAAF) -- adapted directly
+                                                          # from NFL Matchup Lab (page 12), on real,
+                                                          # individually-tested engine functions.
     }
 
     # REAL, REPORTED GAP CLOSED HERE: these titles all carry a has_projections check that shows
@@ -178,6 +181,7 @@ def run():
         "27": ("First Innings Totals", "1️⃣", "mlb_first_innings_totals"),
         "28": ("League Schedules", "📅", "league_schedules"),
         "29": ("QB Lab",         "🏈", "ncaaf_qb_lab"),   # NCAAF version — same title as page 14, distinct url_path
+        "30": ("Matchup Lab",    "🔬", "ncaaf_matchup_lab"),   # NCAAF version — same title as page 9/11/12, distinct url_path
     }
 
     # SIDEBAR SECTIONS, added directly on request: st.navigation natively supports a
@@ -207,7 +211,7 @@ def run():
         SECTION_OF[k] = "🎯 RECOMMENDATIONS"
     for k in ("5", "6"):
         SECTION_OF[k] = "🛰️ LIVE SIGNALS"
-    for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26", "27", "29"):
+    for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26", "27", "29", "30"):
         SECTION_OF[k] = "🔬 DEEP RESEARCH"
     for k in ("16", "17", "18", "19"):
         SECTION_OF[k] = "🔍 SELF-GRADING & PROOF"

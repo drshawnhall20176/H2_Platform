@@ -304,6 +304,132 @@ def test_build_best_bets_falls_back_honestly_when_offers_dont_cover_this_player(
     print("✓ NCAAF build_best_bets falls back honestly when offers exist but don't cover this specific player")
 
 
+# ============================================================================ Matchup Lab
+def test_build_trend_series_reverses_to_chronological_order():
+    log = [{"week": 5}, {"week": 4}, {"week": 3}]   # most-recent-first, as player_recent_games returns
+    assert P.build_trend_series(log) == [{"week": 3}, {"week": 4}, {"week": 5}]
+    print("✓ build_trend_series correctly reverses to oldest-to-newest chronological order")
+
+
+def test_stat_key_for_does_real_translation_not_identity():
+    # THE real, confirmed difference from NFL's own identity-function version -- see this
+    # section's own module-level comment for the full reasoning. Must genuinely translate, not
+    # pass through unchanged, or every real game-log lookup downstream silently gets None -> 0.
+    assert P.stat_key_for("PassYds") == "passing_YDS"
+    assert P.stat_key_for("RushYds") == "rushing_YDS"
+    assert P.stat_key_for("Receptions") == "receiving_REC"
+    assert P.stat_key_for("RecYds") == "receiving_YDS"
+    assert P.stat_key_for("Unknown") == "Unknown"   # honest passthrough for anything not in the real map
+    print("✓ stat_key_for genuinely translates NCAAF's own short display keys to real CFBD game-log column names")
+
+
+def test_is_td_eligible_position_matches_ncaaf_real_position_set():
+    assert P.is_td_eligible_position("QB") is True
+    assert P.is_td_eligible_position("RB") is True
+    assert P.is_td_eligible_position("WR") is True
+    assert P.is_td_eligible_position("TE") is True
+    assert P.is_td_eligible_position("FB") is False   # NFL has FB, NCAAF's own real position set doesn't
+    assert P.is_td_eligible_position("K") is False
+    print("✓ is_td_eligible_position matches NCAAF's own real, confirmed position set, not NFL's (no FB)")
+
+
+def test_extra_profile_row_computes_real_averages_and_trend():
+    log = [{"rushing_TD": 2}, {"rushing_TD": 0}]
+    season_log = [{"rushing_TD": 1}, {"rushing_TD": 1}, {"rushing_TD": 1}]
+    h2h_log = [{"rushing_TD": 3}]
+    row = P._extra_profile_row("Rushing TDs", log, season_log, h2h_log,
+                               opp_recent_allowed_val=2.0, opp_season_allowed_val=1.0,
+                               stat_fn=lambda g: g.get("rushing_TD") or 0,
+                               round_digits=2, variance_floor=0.75, variance_min_abs=1.0)
+    assert row["Recent Avg"] == 1.0    # (2+0)/2
+    assert row["Season Avg"] == 1.0    # (1+1+1)/3
+    assert row["H2H Avg"] == 3.0
+    assert row["Defense Trend"] == 2.0   # 2.0/1.0, genuinely looser lately
+    assert row["Trend Tag"] == "\U0001F4C8 Looser lately"
+    print("✓ _extra_profile_row correctly computes real recent/season/H2H averages and the real defense trend")
+
+
+def _matchup_row(player="Star QB", position="QB", markets=None):
+    return {
+        "Player": player, "Team": "Ohio State", "Opp": "Texas", "Position": position,
+        "_markets": ["player_pass_yds", "player_rush_yds"] if markets is None else markets,
+        "_recent_games": [
+            {"passing_YDS": 320, "rushing_YDS": 40, "passing_TD": 3, "rushing_TD": 1},
+            {"passing_YDS": 280, "rushing_YDS": 20, "passing_TD": 1, "rushing_TD": 0},
+        ],
+    }
+
+
+def test_build_matchup_profile_uses_real_translated_keys_not_raw_display_names():
+    # THE single most important real regression guard for this whole build -- confirms
+    # build_matchup_profile genuinely reads the REAL CFBD game-log keys via stat_key_for, not
+    # the short display keys ("PassYds") directly. Using the wrong key here would silently
+    # produce Recent Avg == 0.0 for every real game, exactly the bug _ROW_FIELD_TO_CFBD_COL's
+    # own docstring already warns about elsewhere in this file.
+    row = _matchup_row()
+    profile = P.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={})
+    pass_row = next(r for r in profile if r["Market"] == "Pass Yards")
+    assert pass_row["Recent Avg"] == 300.0, (
+        f"expected real (320+280)/2=300.0, got {pass_row['Recent Avg']} -- stat_key_for "
+        f"translation is genuinely broken, silently reading the wrong game-log key")
+    print("✓ build_matchup_profile genuinely uses stat_key_for's real translation, not the raw display key")
+
+
+def test_build_matchup_profile_qb_gets_three_extra_rows():
+    row = _matchup_row(position="QB")
+    profile = P.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={},
+                                      opp_recent_passing_tds_allowed=1.5, opp_season_passing_tds_allowed=1.2,
+                                      opp_recent_rushing_tds_allowed=0.5, opp_season_rushing_tds_allowed=0.4)
+    markets = {r["Market"] for r in profile}
+    assert {"Rush Yards", "Passing TDs", "Rushing TDs"}.issubset(markets)
+    assert "Touchdowns" not in markets   # QB gets the split rows, never the combined one
+    rush_yds_row = next(r for r in profile if r["Market"] == "Rush Yards")
+    assert rush_yds_row["Recent Avg"] == 30.0   # (40+20)/2, via the real rushing_YDS translation
+    passing_tds_row = next(r for r in profile if r["Market"] == "Passing TDs")
+    assert passing_tds_row["Recent Avg"] == 2.0   # (3+1)/2
+    print("✓ build_matchup_profile gives QB the three real split rows (Rush Yards/Passing TDs/Rushing TDs), never a combined Touchdowns row")
+
+
+def test_build_matchup_profile_rb_gets_combined_touchdowns_row():
+    row = _matchup_row(player="Star RB", position="RB", markets=["player_rush_yds", "player_receptions"])
+    row["_recent_games"] = [
+        {"rushing_YDS": 80, "rushing_TD": 1, "receiving_TD": 0},
+        {"rushing_YDS": 60, "rushing_TD": 0, "receiving_TD": 1},
+    ]
+    profile = P.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={},
+                                      opp_recent_tds_allowed=1.0, opp_season_tds_allowed=0.8)
+    markets = {r["Market"] for r in profile}
+    assert "Touchdowns" in markets
+    assert not {"Passing TDs", "Rushing TDs"} & markets   # the QB-only split TD rows must NOT leak into RB's profile
+    td_row = next(r for r in profile if r["Market"] == "Touchdowns")
+    assert td_row["Recent Avg"] == 1.0   # (1+1)/2 across both games, rushing_TD + receiving_TD summed per game
+    print("✓ build_matchup_profile gives a non-QB TD-eligible position the real combined Touchdowns row, never the QB-only split rows")
+
+
+def test_build_matchup_profile_kicker_gets_no_td_row_at_all():
+    row = _matchup_row(player="Kicker Guy", position="K", markets=[])
+    profile = P.build_matchup_profile(row, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={})
+    assert profile == []   # no yardage markets, not TD-eligible -- honestly empty, not a guess
+    print("✓ build_matchup_profile returns an honestly empty profile for a non-TD-eligible position with no markets")
+
+
+def test_build_matchup_profile_flags_a_genuinely_suppressed_market():
+    row = _matchup_row(player="Star WR", position="WR",
+                       markets=["player_receptions", "player_reception_yds"])
+    row["_recent_games"] = [{"receiving_REC": 5, "receiving_YDS": 70}]
+    # Season: normal production. H2H (this exact opponent): receptions crater, yards stay fine --
+    # a real, genuine same-unit suppression signal.
+    season_log = [{"receiving_REC": 5, "receiving_YDS": 70} for _ in range(4)]
+    h2h_log = [{"receiving_REC": 1, "receiving_YDS": 65}]   # receptions ratio 0.2, yards ratio ~0.93
+    profile = P.build_matchup_profile(row, h2h_log=h2h_log, opp_recent_allowed={}, opp_season_allowed={},
+                                      season_log=season_log)
+    rec_row = next(r for r in profile if r["Market"] == "Receptions")
+    assert rec_row["Suppressed"] is True
+    yds_row = next(r for r in profile if r["Market"] == "Receiving Yards")
+    assert yds_row["Suppressed"] is False
+    print("✓ build_matchup_profile correctly flags the genuinely suppressed market against this specific opponent, not the other, healthy one")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

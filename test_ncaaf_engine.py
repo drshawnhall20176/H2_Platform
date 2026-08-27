@@ -333,6 +333,110 @@ def test_league_average_rush_yards_allowed_uses_rushing_column():
     print("✓ get_league_average_rush_yards_allowed reads the rushing column, not passing")
 
 
+# ----------------------------------------------------------------- get_player_history_vs_opponent
+def test_get_player_history_vs_opponent_filters_by_real_opponent_and_week():
+    schedule = _dh_schedule(n_weeks=5)
+    game_rows = [
+        {"player_id": "p1", "week": 1, "opponent_team": "Rival U", "passing_YDS": 200},
+        {"player_id": "p1", "week": 2, "opponent_team": "Someone Else", "passing_YDS": 999},
+        {"player_id": "p1", "week": 4, "opponent_team": "Rival U", "passing_YDS": 999},   # not-yet-played (>= resolved week) -- excluded
+    ]
+    with patch.object(ND, "load_schedule", return_value=schedule), \
+        patch.object(ND, "load_player_game_stats", return_value=game_rows):
+        games = E.get_player_history_vs_opponent("p1", "Rival U", "2025-09-04")   # resolves to week 3
+    assert len(games) == 1
+    assert games[0]["passing_YDS"] == 200
+    print("✓ get_player_history_vs_opponent isolates the real opponent, excludes other opponents and not-yet-played weeks")
+
+
+def test_get_player_history_vs_opponent_honestly_empty_for_first_ever_meeting():
+    schedule = _dh_schedule(n_weeks=5)
+    game_rows = [{"player_id": "p1", "week": 1, "opponent_team": "Someone Else", "passing_YDS": 200}]
+    with patch.object(ND, "load_schedule", return_value=schedule), \
+        patch.object(ND, "load_player_game_stats", return_value=game_rows):
+        assert E.get_player_history_vs_opponent("p1", "Never Played Them", "2025-09-30") == []
+    print("✓ get_player_history_vs_opponent honestly returns [] for an opponent never actually played, not a guess")
+
+
+# ----------------------------------------------------------------- get_team_rest_info
+def test_get_team_rest_info_computes_real_days_since_last_game():
+    schedule = _season_schedule(2025, "Ohio State", "Rival", 3)
+    with patch.object(ND, "load_schedule", return_value=schedule):
+        info = E.get_team_rest_info("Ohio State", "2025-09-10")   # last game was week 2 = 2025-09-02
+    assert info["rest_days"] == 8   # 09-10 minus 09-02
+    assert info["last_opp_name"] == "Rival"
+    print("✓ get_team_rest_info correctly computes real days-since-last-game from real start_date values")
+
+
+def test_get_team_rest_info_empty_before_any_games():
+    schedule = _season_schedule(2025, "Ohio State", "Rival", 3)
+    with patch.object(ND, "load_schedule", return_value=schedule):
+        info = E.get_team_rest_info("Ohio State", "2025-09-01")   # before week 1 has even happened
+    assert info["rest_days"] is None
+    assert info["last_game_date"] is None
+    print("✓ get_team_rest_info honestly returns None (never a fabricated value) before any real game has been played")
+
+
+def test_get_team_rest_info_never_returns_a_fake_short_week_flag():
+    # A real, deliberate omission this function's own docstring explains -- confirms it doesn't
+    # silently reappear as a guessed value.
+    schedule = _season_schedule(2025, "Ohio State", "Rival", 3)
+    with patch.object(ND, "load_schedule", return_value=schedule):
+        info = E.get_team_rest_info("Ohio State", "2025-09-10")
+    assert "is_short_week" not in info, (
+        "is_short_week must stay genuinely absent -- NFL's own definition has no honest FBS "
+        "equivalent, so fabricating one here would be a guess dressed up as a signal")
+    print("✓ get_team_rest_info never reintroduces a fabricated is_short_week flag")
+
+
+# ----------------------------------------------------------------- TD-allowed functions
+def test_get_team_passing_tds_allowed_averages_correctly():
+    game_rows = [
+        {"game_id": 1, "week": 1, "opponent_team": "Weak Defense", "passing_TD": 3},
+        {"game_id": 2, "week": 2, "opponent_team": "Weak Defense", "passing_TD": 1},
+    ]
+    with patch.object(ND, "load_schedule", return_value=_dh_schedule()), \
+        patch.object(ND, "load_player_game_stats", return_value=game_rows):
+        avg = E.get_team_passing_tds_allowed("Weak Defense", "2025-09-20")
+    assert avg == 2.0
+    print("✓ get_team_passing_tds_allowed correctly averages real passing TDs allowed across real games")
+
+
+def test_get_team_rushing_and_total_tds_allowed():
+    game_rows = [
+        {"game_id": 1, "week": 1, "opponent_team": "Weak Defense", "rushing_TD": 2, "receiving_TD": 1},
+        {"game_id": 2, "week": 2, "opponent_team": "Weak Defense", "rushing_TD": 0, "receiving_TD": 3},
+    ]
+    with patch.object(ND, "load_schedule", return_value=_dh_schedule()), \
+        patch.object(ND, "load_player_game_stats", return_value=game_rows):
+        rushing_avg = E.get_team_rushing_tds_allowed("Weak Defense", "2025-09-20")
+        total_avg = E.get_team_tds_allowed("Weak Defense", "2025-09-20")
+    assert rushing_avg == 1.0   # (2+0)/2
+    assert total_avg == 3.0     # rushing (1.0) + receiving ((1+3)/2=2.0), NOT rushing+passing
+    print("✓ get_team_tds_allowed correctly sums real rushing + receiving (not passing), matching NFL's own real convention")
+
+
+def test_get_team_tds_allowed_honest_none_for_no_games():
+    with patch.object(ND, "load_schedule", return_value=_dh_schedule()), \
+        patch.object(ND, "load_player_game_stats", return_value=[]):
+        assert E.get_team_tds_allowed("Nobody", "2025-09-20") is None
+        assert E.get_team_passing_tds_allowed("Nobody", "2025-09-20") is None
+    print("✓ TD-allowed functions honestly return None (never a fabricated 0.0) with no real per-game data yet")
+
+
+def test_get_team_td_stat_allowed_respects_recent_n_window():
+    game_rows = [
+        {"game_id": 1, "week": 1, "opponent_team": "D1", "passing_TD": 5},
+        {"game_id": 2, "week": 2, "opponent_team": "D1", "passing_TD": 1},
+        {"game_id": 3, "week": 3, "opponent_team": "D1", "passing_TD": 1},
+    ]
+    with patch.object(ND, "load_schedule", return_value=_dh_schedule(n_weeks=4)), \
+        patch.object(ND, "load_player_game_stats", return_value=game_rows):
+        recent = E.get_team_passing_tds_allowed("D1", "2025-09-25", n=2)   # last 2 of the 3 real games
+    assert recent == 1.0   # weeks 2+3 only: (1+1)/2, excludes week 1's real 5
+    print("✓ TD-allowed functions correctly respect a real n= recent-games window, not always the whole season")
+
+
 def test_get_player_season_games_uses_player_recent_games_with_resolved_week():
     schedule = _dh_schedule(n_weeks=5)
     game_rows = [
