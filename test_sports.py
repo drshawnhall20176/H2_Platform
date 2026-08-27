@@ -274,22 +274,36 @@ def test_player_lines_includes_pitcher_and_batter_walks():
     print("✓ Player Lines genuinely includes both Pitcher Walks and Batter Walks, using the real, already-established default lines")
 
 
-def test_ncaaf_has_no_dedicated_pages_yet_matching_the_real_audit_finding():
-    # A REAL, CONFIRMED FINDING from the same real module-audit pass that found NFL's own
-    # redundancy: at the time ncaaf_shared_cache.py was built (proactively, before the problem
-    # exists), NCAAF had zero dedicated view files of its own -- confirmed directly, not
-    # assumed. This test exists to flag itself the moment that's no longer true: once a real
-    # NCAAF-dedicated page gets built, it should reach for ncaaf_shared_cache.load_ncaaf_slate_
-    # cached from its own first line, not define a new local wrapper -- the exact real mistake
-    # NFL's own four pages made independently before being found and fixed after the fact.
+def test_every_ncaaf_dedicated_page_uses_the_real_shared_slate_cache():
+    # UPDATED DIRECTLY, not deleted, now that the real event this test's own predecessor was
+    # built to flag has genuinely happened: NCAAF's first real dedicated page (NCAAF QB Lab) now
+    # exists, adapted directly from NFL QB Lab with every function signature and output dict key
+    # confirmed to match exactly first. This test now verifies the actual, ongoing discipline the
+    # original test existed to protect -- not "NCAAF has zero pages" (no longer true, and no
+    # longer the real risk), but "every real NCAAF page that DOES exist reaches for
+    # ncaaf_shared_cache.load_ncaaf_slate_cached, never a local, duplicate wrapper around
+    # ncaaf_engine.build_slate" -- the exact real mistake NFL's own four pages made
+    # independently, found and fixed only after the fact, and precisely what
+    # ncaaf_shared_cache.py was built proactively to prevent from recurring.
     ncaaf_view_files = [f for f in (_HERE / "views").glob("*.py")
                        if "import ncaaf_engine as E" in f.read_text()]
-    assert ncaaf_view_files == [], (
-        f"NCAAF now has its own dedicated view file(s): {[f.name for f in ncaaf_view_files]} -- "
-        f"time to apply the same real audit NFL already went through: read each one's own "
-        f"cached loaders, confirm which genuinely duplicate the same real fetch, and wire them "
-        f"into ncaaf_shared_cache.py the same way, BEFORE it ships, not after")
-    print("✓ Confirms NCAAF still has no dedicated pages of its own -- ncaaf_shared_cache.py is ready and waiting for when that changes")
+    assert len(ncaaf_view_files) > 0, (
+        "this test's own real purpose only applies once a real NCAAF page exists -- if this "
+        "fails, something upstream removed the page(s) this test expects to find")
+    for f in ncaaf_view_files:
+        src = f.read_text()
+        assert "import ncaaf_shared_cache as NSC" in src, (
+            f"{f.name} imports ncaaf_engine directly but never imports ncaaf_shared_cache -- "
+            f"a real, likely sign it's about to define its own local, duplicate wrapper around "
+            f"E.build_slate instead of reaching for the real, shared one")
+        assert "NSC.load_ncaaf_slate_cached(" in src, (
+            f"{f.name} imports ncaaf_shared_cache but never actually calls "
+            f"load_ncaaf_slate_cached -- confirm it isn't calling E.build_slate directly instead, "
+            f"the exact real, duplicate-fetch mistake this whole module exists to prevent")
+        assert "def load_ncaaf_slate_cached" not in src, (
+            f"{f.name} appears to define its own load_ncaaf_slate_cached rather than importing "
+            f"the real, shared one from ncaaf_shared_cache.py")
+    print(f"✓ All {len(ncaaf_view_files)} real NCAAF dedicated page(s) genuinely reach for the shared slate cache, matching the discipline ncaaf_shared_cache.py was built to enforce")
 
 
 def test_edge_board_market_selector_excludes_unpriceable_mlb_markets():
@@ -578,6 +592,7 @@ def test_sidebar_sections_match_the_documented_grouping():
         "10": "🔬 DEEP RESEARCH", "11": "🔬 DEEP RESEARCH", "12": "🔬 DEEP RESEARCH",
         "13": "🔬 DEEP RESEARCH", "14": "🔬 DEEP RESEARCH", "15": "🔬 DEEP RESEARCH",
         "25": "🔬 DEEP RESEARCH", "26": "🔬 DEEP RESEARCH", "27": "🔬 DEEP RESEARCH",
+        "29": "🔬 DEEP RESEARCH",
         "16": "🔍 SELF-GRADING & PROOF", "17": "🔍 SELF-GRADING & PROOF",
         "18": "🔍 SELF-GRADING & PROOF", "19": "🔍 SELF-GRADING & PROOF",
         "20": "📣 OPS & CONTENT", "21": "📣 OPS & CONTENT", "22": "📣 OPS & CONTENT",
@@ -1172,6 +1187,11 @@ def test_sport_only_page_visibility_matches_expected_config():
     # own get_team_recent_first_innings_runs/get_pitcher_recent_first_innings_allowed and
     # projections' own project_team_first_innings_total/prob_over_first_innings_line, no WNBA/NFL
     # equivalent exists yet, same MLB-only posture as Bullpen Watch/Game Watch/Highlights above.
+    #
+    # QB Lab (NCAAF, 29) added directly on request -- NCAAF's first real dedicated page, adapted
+    # directly from NFL QB Lab (14) with every function signature and output dict key confirmed
+    # to match exactly first. Same real reasoning as the sport-only gates above: this page's own
+    # ncaaf_engine/ncaaf_projections calls have no meaning for any other sport's own data.
     src = (_HERE / "streamlit_app.py").read_text()
     m = re.search(r"sport_only_leads = \{([^}]*)\}", src, re.DOTALL)
     assert m, "streamlit_app.py must define sport_only_leads"
@@ -1182,11 +1202,12 @@ def test_sport_only_page_visibility_matches_expected_config():
                      "10": ("WNBA", "NBA", "NCAAMB"), "11": ("WNBA", "NBA", "NCAAMB"),
                      "12": ("NFL",), "13": ("NFL",), "14": ("NFL",),
                      "23": ("UFC",), "24": ("MLB",), "25": ("NFL",), "26": ("MLB",),
-                     "27": ("MLB",)}, pairs
+                     "27": ("MLB",), "29": ("NCAAF",)}, pairs
     print("✓ sport_only_leads matches expected config (Bullpen Watch/Game Watch/Pitching Lab/"
           "Dinger Engine/Matchup Lab(MLB)/Player Lines/First Innings Totals -> MLB, Hot Hand "
           "Engine/Matchup Lab(WNBA/NBA/NCAAMB) -> WNBA+NBA+NCAAMB, Matchup Lab(NFL)/Anytime TD "
-          "Engine/QB Lab/Hot Hand Engine(NFL) -> NFL, UFC Fight Card -> UFC, Highlights -> MLB)")
+          "Engine/QB Lab/Hot Hand Engine(NFL) -> NFL, UFC Fight Card -> UFC, Highlights -> MLB, "
+          "QB Lab(NCAAF) -> NCAAF)")
 
 
 def test_projections_only_pages_hidden_for_sports_without_projections():
@@ -2054,6 +2075,32 @@ def test_command_center_wires_devigged_game_lines_correctly():
         "a real game with no genuine same-book, two-sided price must be honestly skipped, never "
         "guessed or fabricated into a row")
     print("✓ Command Center genuinely wires the de-vigged game-lines section, opt-in, sport-aware, reusing real_moneyline_devig")
+
+
+def test_ncaaf_qb_lab_wires_correctly_and_carries_its_own_honest_caveat():
+    # BUILT DIRECTLY ON REQUEST: NCAAF's first real dedicated page, adapted from NFL QB Lab
+    # (views/14_QB_Lab.py) with every function signature and output dict key confirmed to match
+    # exactly first (see this file's own module docstring for the full reasoning). Confirms the
+    # real page genuinely gates to NCAAF (not NFL, not left open to every sport), genuinely
+    # reuses ncaaf_projections.build_qb_matchup_projections/build_qb_efficiency_table rather than
+    # a parallel reimplementation, and genuinely carries forward sports.py's own honest note that
+    # NCAAF's whole pipeline was verified against realistic constructed data, not an actual live
+    # CFBD fetch -- that caveat needed to stay visible on the page itself, not buried in a
+    # comment only a developer would ever read.
+    src = (_HERE / "views" / "29_NCAAF_QB_Lab.py").read_text()
+    assert 'sports.require_sport(["NCAAF"], "NCAAF QB Lab")' in src, (
+        "must gate to NCAAF specifically, not NFL and not left ungated")
+    assert "import ncaaf_engine as E" in src and "import ncaaf_projections as P" in src, (
+        "must genuinely use NCAAF's own engine/projections modules, not NFL's"
+    )
+    assert "P.build_qb_matchup_projections(rows, opp_pass_allowed, league_avg_pass," in src, (
+        "must genuinely reuse the real, confirmed-matching projections function, not a parallel reimplementation")
+    assert "P.build_qb_efficiency_table(rows, season_logs)" in src, (
+        "must genuinely reuse the real, confirmed-matching efficiency table function")
+    assert "This page's own first real live load is part of this platform's first real," in src, (
+        "the real, honest caveat about this being NCAAF's first real live verification must stay "
+        "visible on the page itself, not just in a developer-facing comment")
+    print("✓ NCAAF QB Lab genuinely gates to NCAAF, reuses the real confirmed-matching projections functions, and carries its own honest first-load caveat")
 
 
 def test_no_undefined_names_anywhere_in_the_real_project():
