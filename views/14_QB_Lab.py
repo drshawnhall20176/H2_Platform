@@ -73,7 +73,16 @@ with st.spinner("Loading QBs and building matchup-aware projections..."):
     matchup_proj, efficiency, n_games, n_qbs = load(date_str)
 
 if not matchup_proj and not efficiency:
-    st.info("No projectable QBs for this date. Pick a date within an NFL week with a real slate.")
+    st.info(
+        "No QB has a completed game yet **this season**, so there's no real recent-form data to "
+        "project from — this is expected for the first week of a new season, not a data problem "
+        "with this specific date. This page's own signals stay empty until real Week 1 games are "
+        "actually in the books (deliberately: blending last season's game log with this one's "
+        "risks mixing the wrong 'week 6' together). **For player prop decisions right now, use "
+        "Best Bets or Graded Picks instead** — those already fall back to last season's full "
+        "stats as a real, tested baseline, so they keep working even before this season's first "
+        "snap. This page will start filling in once real games are actually completed.",
+        icon="🕐")
     st.stop()
 
 st.caption(f"{n_games} game(s) · {n_qbs} QB(s) on the slate")
