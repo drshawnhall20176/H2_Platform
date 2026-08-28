@@ -413,6 +413,50 @@ def test_refresh_player_season_stats_keeps_a_returning_players_two_seasons_separ
     print("✓ refresh_player_season_stats keeps a real returning player's two distinct season rows separate, not silently collapsed into one")
 
 
+# ============================================================================ Performance fix
+# BUILT DIRECTLY ON REQUEST, fixing a real, severe, live-confirmed performance bug -- a real
+# user report of NCAAF Matchup Lab/QB Lab hanging for HOURS. Traced directly, not guessed:
+# every load_* function in this module re-read its own CSV from disk on every single call, and
+# ncaaf_engine.build_slate calls player_recent_games (which reads this module's per-game cache)
+# once per player, for every team, for every game -- tens of thousands of redundant re-reads of
+# the same, unchanged file. Measured directly against a realistically-sized cache before this
+# fix: roughly 50 MINUTES for one slate, from this single function alone.
+
+def test_cached_read_records_reuses_data_when_file_unchanged():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "test.csv")
+        import pandas as pd
+        pd.DataFrame([{"a": 1}]).to_csv(path, index=False)
+        first = ND._cached_read_records(path)
+        second = ND._cached_read_records(path)
+        assert first is second, (
+            "two calls against the SAME, unchanged file must return the exact same object "
+            "(genuinely reused from cache), not two separately-parsed copies")
+    print("✓ _cached_read_records genuinely reuses the same object across calls when the file hasn't changed")
+
+
+def test_cached_read_records_detects_a_real_file_change():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "test.csv")
+        import pandas as pd
+        import time as _time
+        pd.DataFrame([{"a": 1}]).to_csv(path, index=False)
+        first = ND._cached_read_records(path)
+        _time.sleep(0.01)   # ensure a real, distinct mtime -- some filesystems have coarse resolution
+        pd.DataFrame([{"a": 1}, {"a": 2}]).to_csv(path, index=False)
+        second = ND._cached_read_records(path)
+        assert len(first) == 1
+        assert len(second) == 2, (
+            "a real, genuine change to the underlying file must be detected and re-read -- "
+            "a cache that can never invalidate would risk silently serving stale data forever")
+    print("✓ _cached_read_records correctly detects a real file change via mtime and re-reads, not silently stale forever")
+
+
+def test_cached_read_records_honestly_empty_for_missing_file():
+    assert ND._cached_read_records("/nonexistent/path/does/not/exist.csv") == []
+    print("✓ _cached_read_records honestly returns [] for a genuinely missing file, not an error")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

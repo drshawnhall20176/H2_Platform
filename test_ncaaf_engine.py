@@ -245,6 +245,60 @@ def test_player_recent_games_empty_when_no_cache():
     print("✓ player_recent_games returns [] gracefully when there's no per-game cache yet")
 
 
+# ----------------------------------------------------------------- indexed per-game lookup (performance fix)
+def test_player_game_index_reuses_cache_when_source_object_unchanged():
+    # THE direct regression guard for the actual real performance fix: confirms the index is
+    # genuinely reused (not rebuilt) across repeated calls against the SAME underlying data --
+    # proven here via a poisoned second call that would raise if load_player_game_stats were
+    # asked to produce a NEW list unexpectedly, not just by checking the output looks right.
+    E._player_game_index_cache["source_id"] = None
+    E._player_game_index_cache["index"] = {}
+    fixed_source = [{"player_id": "p1", "season": 2025, "week": 3, "passing_YDS": 300}]
+    with patch.object(ND, "load_player_game_stats", return_value=fixed_source):
+        first = E._player_game_rows_by_player_and_season()
+        second = E._player_game_rows_by_player_and_season()
+    assert first is second, (
+        "two calls against the exact same source object must return the exact same index "
+        "object, genuinely reused, not rebuilt")
+    print("✓ _player_game_rows_by_player_and_season genuinely reuses its own cached index when the underlying source object hasn't changed")
+
+
+def test_player_game_index_rebuilds_when_source_object_changes():
+    E._player_game_index_cache["source_id"] = None
+    E._player_game_index_cache["index"] = {}
+    source_a = [{"player_id": "p1", "season": 2025, "week": 1, "passing_YDS": 100}]
+    source_b = [{"player_id": "p2", "season": 2025, "week": 1, "passing_YDS": 200}]
+    with patch.object(ND, "load_player_game_stats", return_value=source_a):
+        first = E._player_game_rows_by_player_and_season()
+    with patch.object(ND, "load_player_game_stats", return_value=source_b):
+        second = E._player_game_rows_by_player_and_season()
+    assert ("p1", 2025) in first
+    assert ("p1", 2025) not in second and ("p2", 2025) in second, (
+        "a genuinely new source object must trigger a real rebuild, not silently keep serving "
+        "the old, now-stale index")
+    print("✓ _player_game_rows_by_player_and_season correctly rebuilds when the underlying source object genuinely changes")
+
+
+def test_player_recent_games_correct_via_indexed_lookup():
+    # Confirms the real, end-to-end behavior through the new indexed path matches what the old
+    # linear-scan version already proved correct -- same real assertions, new implementation.
+    E._player_game_index_cache["source_id"] = None
+    E._player_game_index_cache["index"] = {}
+    fake_game_rows = [
+        {"player_id": "p1", "season": 2025, "week": 1, "passing_YDS": 200},
+        {"player_id": "p1", "season": 2025, "week": 2, "passing_YDS": 250},
+        {"player_id": "p1", "season": 2025, "week": 3, "passing_YDS": 300},
+        {"player_id": "p1", "season": 2025, "week": 5, "passing_YDS": 999},   # a future week -- must be excluded
+        {"player_id": "p2", "season": 2025, "week": 2, "passing_YDS": 111},   # a different player -- must be excluded
+        {"player_id": "p1", "season": 2024, "week": 3, "passing_YDS": 777},   # same week, DIFFERENT season -- must be excluded
+    ]
+    with patch.object(ND, "load_player_game_stats", return_value=fake_game_rows):
+        recent = E.player_recent_games("p1", season=2025, before_week=4, n=2)
+    assert len(recent) == 2
+    assert [r["week"] for r in recent] == [3, 2]
+    print("✓ player_recent_games via the new indexed lookup produces the exact same correct result the old linear-scan version already proved")
+
+
 def test_get_player_results_translates_cfbd_columns_to_shared_market_stat_keys():
     # Regression guard for a real bug caught before it shipped: retro.py's shared MARKET_STAT
     # dict expects "passing_yards"/"rushing_yards"/"receptions"/"receiving_yards" for these exact

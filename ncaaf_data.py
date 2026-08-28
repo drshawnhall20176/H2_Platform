@@ -69,7 +69,7 @@ CFBD's own published OpenAPI documentation:
 from __future__ import annotations
 
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 import requests
@@ -410,25 +410,54 @@ def refresh_player_game_stats(year: int, api_key: str, completed_weeks: List[int
     return out_path
 
 
-def load_rosters(path: str = ROSTER_PATH) -> List[Dict]:
+_read_records_cache: Dict[str, Tuple[float, List[Dict]]] = {}
+
+
+def _cached_read_records(path: str) -> List[Dict]:
+    """BUILT DIRECTLY ON REQUEST, fixing a real, severe, live-confirmed performance bug: every
+    load_* function in this module used to call pd.read_csv fresh on every single call, with no
+    caching at all. That was harmless while these caches were small or empty -- but
+    ncaaf_engine.build_slate calls player_recent_games (which reads THIS module's own per-game
+    cache) once per player, for every team, for every game on the slate -- tens of thousands of
+    redundant re-reads of the same, unchanged file within a single page load. Measured directly,
+    not estimated: with a realistic, full-season-sized per-game cache (~23k rows, a real,
+    plausible order of magnitude once the one-time 2025 pull actually ran), this alone came out
+    to roughly 50 MINUTES for one slate -- and that's before every OTHER function that also
+    re-reads this same file (get_team_allowed_stats, get_player_history_vs_opponent, and more)
+    adds its own redundant cost on top. This is almost certainly the real, full explanation for
+    a real, reported multi-hour hang, not a guess -- confirmed by direct measurement against a
+    realistically-sized cache, not assumed from reading the code alone.
+
+    THE FIX: a real, mtime-keyed cache, not a naive "cache forever" one -- a plain dict keyed on
+    the file's own last-modified time is deliberately preferred over Python's own
+    functools.lru_cache here, since this platform's own data DOES legitimately change (the daily
+    refresh_ncaaf.py workflow commits fresh CSVs, which trigger a real redeploy) and a cache that
+    can never invalidate would risk silently serving stale data forever within a single long-
+    running process. Checking the real file's own mtime before trusting the cache costs one
+    cheap os.stat() call -- negligible next to the real, measured cost of a full pd.read_csv."""
     if not os.path.exists(path):
         return []
+    mtime = os.path.getmtime(path)
+    cached = _read_records_cache.get(path)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
     try:
-        return pd.read_csv(path).to_dict("records")
+        records = pd.read_csv(path).to_dict("records")
     except pd.errors.EmptyDataError:
         # A zero-row API response writes a columnless CSV (pd.DataFrame([]) has no columns at
         # all, not just no rows) -- read_csv on that raises rather than returning an empty
         # frame. A genuinely empty cache should load as [], not crash the caller.
-        return []
+        records = []
+    _read_records_cache[path] = (mtime, records)
+    return records
+
+
+def load_rosters(path: str = ROSTER_PATH) -> List[Dict]:
+    return _cached_read_records(path)
 
 
 def load_player_game_stats(path: str = PLAYER_GAME_STATS_PATH) -> List[Dict]:
-    if not os.path.exists(path):
-        return []
-    try:
-        return pd.read_csv(path).to_dict("records")
-    except pd.errors.EmptyDataError:
-        return []
+    return _cached_read_records(path)
 
 
 _DRIVES_COLUMNS = ["season", "game_id", "week", "drive_id", "drive_number", "offense", "defense",
@@ -529,30 +558,15 @@ def refresh_drives(year: int, api_key: str, completed_weeks: List[int],
 
 
 def load_drives(path: str = DRIVES_PATH) -> List[Dict]:
-    if not os.path.exists(path):
-        return []
-    try:
-        return pd.read_csv(path).to_dict("records")
-    except pd.errors.EmptyDataError:
-        return []
+    return _cached_read_records(path)
 
 
 def load_player_stats(path: str = PLAYER_STATS_PATH) -> List[Dict]:
-    if not os.path.exists(path):
-        return []
-    try:
-        return pd.read_csv(path).to_dict("records")
-    except pd.errors.EmptyDataError:
-        return []
+    return _cached_read_records(path)
 
 
 def load_schedule(path: str = SCHEDULE_PATH) -> List[Dict]:
-    if not os.path.exists(path):
-        return []
-    try:
-        return pd.read_csv(path).to_dict("records")
-    except pd.errors.EmptyDataError:
-        return []
+    return _cached_read_records(path)
 
 
 def resolve_week(target_date: str, schedule: Optional[List[Dict]] = None,

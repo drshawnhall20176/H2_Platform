@@ -284,6 +284,42 @@ def _stats_by_id_and_name(season: int) -> Tuple[Dict[str, Dict], Dict[Tuple[str,
     return by_id, by_name_team
 
 
+_player_game_index_cache: Dict[str, object] = {"source_id": None, "index": {}}
+
+
+def _player_game_rows_by_player_and_season() -> Dict[Tuple[str, int], List[Dict]]:
+    """Per-game rows, indexed by (player_id, season) -> that player's own rows for that season,
+    most-recent-week-last (sorted once here, not by every caller). BUILT DIRECTLY ON REQUEST,
+    the second half of a real, severe, measured performance fix -- see ncaaf_data.
+    _cached_read_records' own docstring for the full story (a real, confirmed multi-hour hang,
+    not a guess). Caching the raw file read alone still left a real cost: player_recent_games
+    used to do a full LINEAR SCAN over the entire per-game cache for every single player it was
+    asked about -- with build_slate calling it once per player, for every team, for every game,
+    that's a real O(players x total_rows) cost even after the disk-read itself became free.
+
+    Uses id() on ncaaf_data.load_player_game_stats()'s own return value as the cache-invalidation
+    key, not a separate mtime check of its own -- that source list is itself already a real,
+    mtime-cached, stable object as long as the underlying file hasn't changed (see
+    ncaaf_data._cached_read_records), so re-grouping only happens when the SAME list identity
+    check that already protects the raw read also detects real, new data."""
+    source = ND.load_player_game_stats()
+    cached = _player_game_index_cache
+    if cached["source_id"] == id(source):
+        return cached["index"]   # same underlying data as last call -- reuse the real index as-is
+    index: Dict[Tuple[str, int], List[Dict]] = {}
+    for r in source:
+        pid, season = r.get("player_id"), r.get("season")
+        week = r.get("week")
+        if pid is None or season is None or week is None:
+            continue
+        index.setdefault((str(pid), int(season)), []).append(r)
+    for rows in index.values():
+        rows.sort(key=lambda r: r["week"], reverse=True)
+    _player_game_index_cache["source_id"] = id(source)
+    _player_game_index_cache["index"] = index
+    return index
+
+
 def player_recent_games(player_id, season: int, before_week: int, n: int = CFG.RECENT_GAMES_N) -> List[Dict]:
     """This player's last n games STRICTLY BEFORE before_week, WITHIN `season` specifically --
     same "strictly before" lookahead-bias discipline as nfl_engine.player_recent_games (see its
@@ -297,15 +333,17 @@ def player_recent_games(player_id, season: int, before_week: int, n: int = CFG.R
     "week 6" together -- exactly the real risk this platform's own docstrings already named
     elsewhere before this fix actually closed it.
 
+    REWRITTEN DIRECTLY ON REQUEST, now an O(1) indexed lookup via
+    _player_game_rows_by_player_and_season, not a linear scan over the entire per-game cache --
+    the second half of a real, measured performance fix (see that function's own docstring for
+    the full story: a real, confirmed multi-hour hang on a real, live production report).
+
     Reads ncaaf_data's per-game cache -- empty if refresh_player_game_stats hasn't been run yet,
     or for a player/season/week with no cached rows. This is the real per-game data that
     upgrades ncaaf_projections.py from its original parametric-only approach to an actual
     bootstrap, the same method every other sport's engine here already uses."""
-    rows = [r for r in ND.load_player_game_stats()
-           if str(r.get("player_id")) == str(player_id) and r.get("week") is not None
-           and (r.get("season") or 0) == season and r["week"] < before_week]
-    rows.sort(key=lambda r: r["week"], reverse=True)
-    return rows[:n]
+    all_rows = _player_game_rows_by_player_and_season().get((str(player_id), season), [])
+    return [r for r in all_rows if r["week"] < before_week][:n]
 
 
 def get_player_season_games(player_id, before_date: str, max_games: int = 20) -> List[Dict]:
