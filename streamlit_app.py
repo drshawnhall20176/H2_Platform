@@ -113,6 +113,9 @@ def run():
         "30": ("NCAAF",),                                # Matchup Lab (NCAAF) -- adapted directly
                                                           # from NFL Matchup Lab (page 12), on real,
                                                           # individually-tested engine functions.
+        "31": ("NCAAF",),                                # Player Lines (NCAAF) -- adapted directly
+                                                          # from MLB Player Lines (page 26), the fast
+                                                          # browse-by-position trend-chart tool.
     }
 
     # REAL, REPORTED GAP CLOSED HERE: these titles all carry a has_projections check that shows
@@ -182,6 +185,7 @@ def run():
         "28": ("League Schedules", "📅", "league_schedules"),
         "29": ("QB Lab",         "🏈", "ncaaf_qb_lab"),   # NCAAF version — same title as page 14, distinct url_path
         "30": ("Matchup Lab",    "🔬", "ncaaf_matchup_lab"),   # NCAAF version — same title as page 9/11/12, distinct url_path
+        "31": ("Player Lines",   "📉", "ncaaf_player_lines"),   # NCAAF version — same title as page 26, distinct url_path
     }
 
     # SIDEBAR SECTIONS, added directly on request: st.navigation natively supports a
@@ -211,7 +215,7 @@ def run():
         SECTION_OF[k] = "🎯 RECOMMENDATIONS"
     for k in ("5", "6"):
         SECTION_OF[k] = "🛰️ LIVE SIGNALS"
-    for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26", "27", "29", "30"):
+    for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26", "27", "29", "30", "31"):
         SECTION_OF[k] = "🔬 DEEP RESEARCH"
     for k in ("16", "17", "18", "19"):
         SECTION_OF[k] = "🔍 SELF-GRADING & PROOF"

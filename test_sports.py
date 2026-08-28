@@ -592,7 +592,7 @@ def test_sidebar_sections_match_the_documented_grouping():
         "10": "🔬 DEEP RESEARCH", "11": "🔬 DEEP RESEARCH", "12": "🔬 DEEP RESEARCH",
         "13": "🔬 DEEP RESEARCH", "14": "🔬 DEEP RESEARCH", "15": "🔬 DEEP RESEARCH",
         "25": "🔬 DEEP RESEARCH", "26": "🔬 DEEP RESEARCH", "27": "🔬 DEEP RESEARCH",
-        "29": "🔬 DEEP RESEARCH", "30": "🔬 DEEP RESEARCH",
+        "29": "🔬 DEEP RESEARCH", "30": "🔬 DEEP RESEARCH", "31": "🔬 DEEP RESEARCH",
         "16": "🔍 SELF-GRADING & PROOF", "17": "🔍 SELF-GRADING & PROOF",
         "18": "🔍 SELF-GRADING & PROOF", "19": "🔍 SELF-GRADING & PROOF",
         "20": "📣 OPS & CONTENT", "21": "📣 OPS & CONTENT", "22": "📣 OPS & CONTENT",
@@ -1197,6 +1197,11 @@ def test_sport_only_page_visibility_matches_expected_config():
     # five new real engine functions (get_player_history_vs_opponent, get_team_rest_info, the
     # three TD-allowed functions) and five new real projections functions (build_matchup_profile
     # chief among them), each individually tested, not assumed correct by analogy to NFL's own.
+    #
+    # Player Lines (NCAAF, 31) added directly on request -- adapted from MLB Player Lines (26),
+    # the fast browse-by-position trend-chart tool, built entirely on functions already tested
+    # for QB Lab/Matchup Lab (get_player_season_games, build_trend_series, market_list/
+    # default_line/stat_key_for) -- no new engine work needed for this one.
     src = (_HERE / "streamlit_app.py").read_text()
     m = re.search(r"sport_only_leads = \{([^}]*)\}", src, re.DOTALL)
     assert m, "streamlit_app.py must define sport_only_leads"
@@ -1207,12 +1212,12 @@ def test_sport_only_page_visibility_matches_expected_config():
                      "10": ("WNBA", "NBA", "NCAAMB"), "11": ("WNBA", "NBA", "NCAAMB"),
                      "12": ("NFL",), "13": ("NFL",), "14": ("NFL",),
                      "23": ("UFC",), "24": ("MLB",), "25": ("NFL",), "26": ("MLB",),
-                     "27": ("MLB",), "29": ("NCAAF",), "30": ("NCAAF",)}, pairs
+                     "27": ("MLB",), "29": ("NCAAF",), "30": ("NCAAF",), "31": ("NCAAF",)}, pairs
     print("✓ sport_only_leads matches expected config (Bullpen Watch/Game Watch/Pitching Lab/"
           "Dinger Engine/Matchup Lab(MLB)/Player Lines/First Innings Totals -> MLB, Hot Hand "
           "Engine/Matchup Lab(WNBA/NBA/NCAAMB) -> WNBA+NBA+NCAAMB, Matchup Lab(NFL)/Anytime TD "
           "Engine/QB Lab/Hot Hand Engine(NFL) -> NFL, UFC Fight Card -> UFC, Highlights -> MLB, "
-          "QB Lab(NCAAF)/Matchup Lab(NCAAF) -> NCAAF)")
+          "QB Lab(NCAAF)/Matchup Lab(NCAAF)/Player Lines(NCAAF) -> NCAAF)")
 
 
 def test_projections_only_pages_hidden_for_sports_without_projections():
@@ -2216,6 +2221,38 @@ def test_ncaaf_matchup_lab_wires_correctly_and_carries_both_its_honest_gaps():
         "the real, flagged uncertainty on TD-allowed column names must stay visible on the page "
         "itself, not presented as a confirmed fact")
     print("✓ NCAAF Matchup Lab genuinely gates to NCAAF, reuses the real tested build_matchup_profile, and honestly carries both its real, flagged gaps")
+
+
+def test_ncaaf_player_lines_wires_correctly_and_covers_every_position_group():
+    # BUILT DIRECTLY ON REQUEST: the fast, browse-by-position trend-chart tool, adapted from MLB
+    # Player Lines (26). Confirms the real page genuinely gates to NCAAF, reuses
+    # get_player_season_games/build_trend_series rather than a parallel reimplementation, defines
+    # all three real position groups with their own real, position-appropriate chart specs
+    # (QB gets split Passing/Rushing TDs, RB and WR/TE get the combined Touchdowns row -- same
+    # real distinction build_matchup_profile already established and tested), and carries the
+    # same real TD-column-guess flag QB Lab/Matchup Lab already carry, not silently dropped just
+    # because it's the third page to reuse those columns.
+    src = (_HERE / "views" / "31_NCAAF_Player_Lines.py").read_text()
+    assert 'sports.require_sport(["NCAAF"], "NCAAF Player Lines")' in src, (
+        "must gate to NCAAF specifically, not NFL and not left ungated")
+    assert "import ncaaf_engine as E" in src and "import ncaaf_projections as P" in src, (
+        "must genuinely use NCAAF's own engine/projections modules, not NFL's"
+    )
+    assert "games = E.get_player_season_games(player_id, stats_date_str)" in src, (
+        "must genuinely reuse the real, tested get_player_season_games, not a parallel reimplementation")
+    assert '"QB": {' in src and '"RB": {' in src and '"WR / TE": {' in src, (
+        "all three real position groups must be defined"
+    )
+    assert '("Passing TDs", lambda g: g.get("passing_TD") or 0)' in src, (
+        "QB must get the real split Passing TDs row, not the combined one"
+    )
+    assert 'lambda g: (g.get("rushing_TD") or 0) + (g.get("receiving_TD") or 0)' in src, (
+        "RB and WR/TE must get the real combined Touchdowns row, matching build_matchup_profile's own convention"
+    )
+    assert "yet live-verified guess" in src, (
+        "the real, flagged uncertainty on TD-allowed-style column names must stay visible on "
+        "this page too, not silently dropped just because it's the third page to reuse them")
+    print("✓ NCAAF Player Lines genuinely gates to NCAAF, reuses the real tested data functions, covers all three real position groups with correct chart specs, and carries its own honest TD-column flag")
 
 
 def test_no_undefined_names_anywhere_in_the_real_project():
