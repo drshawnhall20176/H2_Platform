@@ -589,6 +589,144 @@ def test_get_team_drive_outcomes_honest_empty_before_any_games():
     print("✓ get_team_drive_outcomes honestly returns [] before any real drives are on file")
 
 
+# ============================================================================ Per-team stats-season fallback
+# BUILT DIRECTLY ON REQUEST, fixing a real, live-confirmed bug: a real refresh run against CFBD
+# returned 1,082 real player-stat rows for season=2026, but every one of them belonged to one of
+# 37 FCS/D-II programs whose seasons start earlier than FBS's own Week 1 -- ZERO overlap against
+# the real roster's 138 FBS teams. The old "is the whole file empty" fallback never fired, since
+# the file wasn't empty, and the whole real slate came back with 0 rows. See ncaaf_data.
+# refresh_player_season_stats' own docstring for the full story.
+
+def test_stats_by_id_and_name_prefers_target_season_over_prior_when_both_exist():
+    fake_stats = [
+        {"season": 2025, "player_id": "1", "player": "Returning Player", "team": "Georgia",
+         "passing_YDS": 3200},
+        {"season": 2026, "player_id": "1", "player": "Returning Player", "team": "Georgia",
+         "passing_YDS": 400},
+    ]
+    with patch.object(ND, "load_player_stats", return_value=fake_stats):
+        by_id, by_name_team = E._stats_by_id_and_name(2026)
+    assert by_id["1"]["season"] == 2026
+    assert by_id["1"]["passing_YDS"] == 400
+    print("✓ _stats_by_id_and_name prefers the target season's own row over a prior one when both exist for the same player")
+
+
+def test_stats_by_id_and_name_falls_back_to_prior_season_when_target_missing():
+    fake_stats = [
+        {"season": 2025, "player_id": "1", "player": "FBS Player", "team": "Alabama",
+         "passing_YDS": 3200},
+    ]
+    with patch.object(ND, "load_player_stats", return_value=fake_stats):
+        by_id, by_name_team = E._stats_by_id_and_name(2026)
+    assert by_id["1"]["season"] == 2025
+    assert by_id["1"]["passing_YDS"] == 3200
+    print("✓ _stats_by_id_and_name genuinely falls back to a prior season's row when the target season has none for that player")
+
+
+def test_stats_by_id_and_name_never_leaks_a_future_season_lookahead_bias():
+    # THE real, deliberate fix over this function's own prior version, which accepted `season`
+    # but never used it at all: a query for season=2025 (the 2025-baseline toggle's own real use
+    # case) must never surface a season=2026 row, even if the cache happens to contain one.
+    fake_stats = [
+        {"season": 2025, "player_id": "1", "player": "X", "team": "Georgia", "passing_YDS": 3000},
+        {"season": 2026, "player_id": "1", "player": "X", "team": "Georgia", "passing_YDS": 50},
+    ]
+    with patch.object(ND, "load_player_stats", return_value=fake_stats):
+        by_id, by_name_team = E._stats_by_id_and_name(2025)
+    assert by_id["1"]["season"] == 2025, (
+        "querying for season=2025 must never leak a real season=2026 row -- a genuine lookahead-bias violation")
+    assert by_id["1"]["passing_YDS"] == 3000
+    print("✓ _stats_by_id_and_name never leaks a future season's row into a query for an earlier one")
+
+
+def test_team_stats_season_resolves_per_team_not_globally():
+    # THE direct regression guard for the real live bug: two teams playing the same real week,
+    # one with real target-season data (FCS team whose season already started), one without
+    # (major FBS team not yet underway) -- each team's OWN resolution must be independent.
+    fake_stats = [
+        {"season": 2026, "player_id": "1", "player": "FCS Player", "team": "Elon", "passing_YDS": 500},
+        {"season": 2025, "player_id": "2", "player": "FBS Player", "team": "Alabama", "passing_YDS": 3000},
+    ]
+    roster = {
+        "Elon": [{"id": 1, "name": "FCS Player", "team": "Elon"}],
+        "Alabama": [{"id": 2, "name": "FBS Player", "team": "Alabama"}],
+        "Georgia": [{"id": 3, "name": "No Data Guy", "team": "Georgia"}],
+    }
+    with patch.object(ND, "load_player_stats", return_value=fake_stats):
+        stats_by_id, stats_by_name_team = E._stats_by_id_and_name(2026)
+        id_join_misses = 0
+
+        def _lookup(player):
+            nonlocal id_join_misses
+            pid = player.get("id")
+            if pid is not None and str(pid) in stats_by_id:
+                return stats_by_id[str(pid)]
+            return stats_by_name_team.get((E._normalize_name(player.get("name")), player.get("team")))
+
+        def _team_stats_season(team):
+            for p in roster.get(team, []):
+                row = _lookup(p)
+                if row is not None:
+                    return row.get("season")
+            return None
+
+        assert _team_stats_season("Elon") == 2026
+        assert _team_stats_season("Alabama") == 2025
+        assert _team_stats_season("Georgia") is None
+    print("✓ per-team stats-season resolution is genuinely independent per team, not one global value for the whole slate")
+
+
+def test_build_slate_correctly_handles_a_real_mixed_season_scenario():
+    # THE full, real, end-to-end regression guard for the exact live bug -- one team with real
+    # target-season data, one team requiring a real prior-season fallback (with that season's
+    # own real schedule needed for the games-played denominator), verified together in one real
+    # build_slate call, not just each piece tested in isolation.
+    #
+    # Elon gets a real, PRIOR, completed 2026 game (week 0) before the week-1 matchup being
+    # queried -- the same real-world shape the live bug's own data had: FCS programs like Elon
+    # genuinely start their season before FBS's own week 1, so their real week-1-and-earlier
+    # stats already exist by the time this specific week-1 slate is being built. Omitting this
+    # prior game would make team_games_played_before(week=1) genuinely, correctly resolve to 0
+    # for Elon regardless of any fix here -- a real games-played-denominator gap, not a stats-
+    # season resolution bug, and testing the wrong thing if left in by accident.
+    schedule_2026 = [
+        {"id": 0, "season": 2026, "week": 0, "start_date": "2026-08-22T19:00:00Z",
+        "completed": True, "home_team": "Elon", "away_team": "Warmup Opponent",
+        "home_id": 1, "away_id": 9},
+        {"id": 1, "season": 2026, "week": 1, "start_date": "2026-08-29T19:00:00Z",
+        "completed": False, "home_team": "Elon", "away_team": "Furman",
+        "home_id": 1, "away_id": 2},
+    ]
+    schedule_2025 = _season_schedule(2025, "Furman", "Rival", 10, completed=True)
+    combined_schedule = schedule_2026 + schedule_2025
+
+    roster = [
+        {"id": 1, "name": "Elon QB", "team": "Elon", "position": "QB"},
+        {"id": 2, "name": "Furman QB", "team": "Furman", "position": "QB"},
+    ]
+    stats = [
+        {"season": 2026, "player_id": "1", "player": "Elon QB", "team": "Elon",
+         "passing_YDS": 300, "passing_ATT": 40},
+        {"season": 2025, "player_id": "2", "player": "Furman QB", "team": "Furman",
+         "passing_YDS": 2500, "passing_ATT": 300},
+    ]
+    with patch.object(ND, "load_schedule", return_value=combined_schedule), \
+        patch.object(ND, "load_rosters", return_value=roster), \
+        patch.object(ND, "load_player_stats", return_value=stats), \
+        patch.object(ND, "load_player_game_stats", return_value=[]):
+        rows, meta = E.build_slate("2026-08-29")
+
+    assert len(rows) == 2, f"expected both QBs to clear the rotation floor, got {len(rows)}: {rows}"
+    by_team = {r["Team"]: r for r in rows}
+    assert by_team["Elon"]["_stats_row"]["season"] == 2026
+    assert by_team["Furman"]["_stats_row"]["season"] == 2025
+    # Elon QB: 300 real yards over their 1 real, prior, completed 2026 game (week 0) = 300.0/game.
+    # Furman QB: 2500 real yards over the real 10-game 2025 season = 250.0/game.
+    assert by_team["Elon"]["PassYds"] == 300.0
+    assert by_team["Furman"]["PassYds"] == 250.0
+    print("✓ build_slate correctly produces real rows for BOTH a target-season team and a prior-season-fallback team in the same real slate")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

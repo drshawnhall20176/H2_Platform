@@ -161,30 +161,39 @@ def refresh_rosters(year: int, api_key: str, out_path: str = ROSTER_PATH) -> str
 
 
 def refresh_player_season_stats(year: int, api_key: str, out_path: str = PLAYER_STATS_PATH) -> str:
-    """Season stat lines for every player, ONE call. CFBD returns this in LONG format (one row
-    per player-category-stat_type combo) -- pivoted here into one row per player with a column
-    per (category, stat_type) pair, so the cached CSV is directly usable the way every other
-    sport's cached/season-stat table already is, without a future reader needing to know CFBD's
-    own wire format. Prints the real resulting column names so the exact stat_type strings CFBD
-    actually used are visible in the refresh log, not just assumed.
+    """Season stat lines for every player, for BOTH `year` and `year - 1`, TWO calls -- REWRITTEN
+    DIRECTLY ON REQUEST, replacing the original "fall back to year-1 only if year is completely
+    empty" logic with something the real, live data proved necessary: a REAL, CONFIRMED bug this
+    fix exists to close, not a theoretical one -- a live pull against year=2026, early in a new
+    season, returned 1,082 real rows, NOT zero, so the old empty-check fallback never fired --
+    but every one of those 1,082 rows belonged to one of 37 FCS/D-II programs whose seasons
+    start earlier than FBS's own Week 1, with ZERO overlap against the real roster's 138 FBS
+    teams. "Returned some rows" is not the same claim as "covers the teams that matter" -- CFBD
+    returns whichever teams have actually played a game so far, not every team in the division
+    regardless of progress. Confirmed directly, not theorized: a real player search across both
+    the real roster and real stats caches this bug produced found 0 shared player_ids and 0
+    shared (name, team) pairs at all.
 
-    Same year-fallback as refresh_rosters, for the same confirmed-real reason: season stats for
-    a not-yet-started season are empty by definition (no games played yet to generate stats
-    from) -- last year's full-season stats are a far more useful starting projection basis than
-    an empty cache until the current season's own games start accumulating real stats."""
+    THE FIX: always pull both years, always cache both (never dropped, never overwritten), and
+    let downstream per-team lookup logic (see ncaaf_engine._stats_by_id_and_name's own docstring)
+    prefer year's own row for a given player when it exists, falling back to year-1's row for
+    that SAME player when it doesn't -- a real, per-player/per-team decision, not the old
+    all-or-nothing global one. CFBD returns "season" on every row already, so both years'
+    worth of rows can share one cache file/column set with zero schema change -- only the
+    dedup/pivot logic below needed to change, to key on (player_id, season) instead of
+    player_id alone, since a returning player can legitimately have a real row in BOTH years."""
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
     def _fetch(y):
         return _get("/stats/player/season", {"year": y}, api_key)
 
-    stats = _fetch(year)
-    used_year = year
-    if not stats:
-        print(f"[NCAAF] GET /stats/player/season?year={year} returned 0 rows -- likely no games "
-             f"played yet this season. Falling back to year={year - 1}.")
-        stats = _fetch(year - 1)
-        used_year = year - 1
+    stats_by_year: Dict[int, list] = {}
+    for y in (year, year - 1):
+        rows = _fetch(y)
+        stats_by_year[y] = rows
+        print(f"[NCAAF] GET /stats/player/season?year={y}: {len(rows)} row(s).")
 
+    all_stats = stats_by_year[year] + stats_by_year[year - 1]
     long_rows = [{
         "season": s.get("season"),
         "player_id": s.get("playerId") or s.get("player_id"),
@@ -192,11 +201,11 @@ def refresh_player_season_stats(year: int, api_key: str, out_path: str = PLAYER_
         "team": s.get("team"), "conference": s.get("conference"),
         "stat_col": f"{s.get('category')}_{s.get('statType') or s.get('stat_type')}".strip("_"),
         "value": s.get("stat"),
-    } for s in stats]
+    } for s in all_stats]
     if not long_rows:
         df = pd.DataFrame(columns=["season", "player_id", "player", "position", "team", "conference"])
         df.to_csv(out_path, index=False)
-        print(f"[NCAAF] GET /stats/player/season?year={used_year} also returned 0 rows -- wrote an empty cache.")
+        print(f"[NCAAF] Both {year} and {year - 1} returned 0 rows -- wrote an empty cache.")
         return out_path
 
     long_df = pd.DataFrame(long_rows)
@@ -204,16 +213,23 @@ def refresh_player_season_stats(year: int, api_key: str, out_path: str = PLAYER_
     # this module's docstring), so this cast is required, not defensive-for-no-reason.
     long_df["value"] = pd.to_numeric(long_df["value"], errors="coerce")
 
+    # KEY CHANGE: dedup/pivot on (player_id, season) together, NOT player_id alone -- the old
+    # single-key version would have silently collapsed a real returning player's two real,
+    # distinct season rows into one, keeping only whichever the pivot happened to see first.
     identity = (long_df[["season", "player_id", "player", "position", "team", "conference"]]
-               .drop_duplicates("player_id").set_index("player_id"))
-    wide = long_df.pivot_table(index="player_id", columns="stat_col", values="value",
+               .drop_duplicates(["player_id", "season"]).set_index(["player_id", "season"]))
+    wide = long_df.pivot_table(index=["player_id", "season"], columns="stat_col", values="value",
                                aggfunc="first")
     out = identity.join(wide, how="left").reset_index()
     out.to_csv(out_path, index=False)
-    print(f"[NCAAF] GET /stats/player/season?year={used_year}: {len(out)} players, "
-         f"{len(wide.columns)} stat columns.{' (fallback year)' if used_year != year else ''}")
+    n_target = (out["season"] == year).sum()
+    n_prior = (out["season"] == year - 1).sum()
+    print(f"[NCAAF] Player season stats cache: {len(out)} total row(s) -- {n_target} for "
+         f"{year}, {n_prior} for {year - 1} (kept as real, separate fallback data, not merged "
+         f"or overwritten). {len(wide.columns)} stat columns.")
     print(f"[NCAAF] ALL stat columns: {sorted(wide.columns)}")
     return out_path
+
 
 
 _SCHEDULE_COLUMNS = ["id", "season", "week", "start_date", "start_time_tbd", "completed",

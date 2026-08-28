@@ -332,10 +332,12 @@ def test_refresh_rosters_stays_on_requested_year_when_it_has_real_data():
     print("✓ refresh_rosters does not fall back when the requested year already has real data")
 
 
-def test_refresh_player_season_stats_falls_back_to_prior_year_when_current_year_is_empty():
-    # Same real-world cause as the roster fallback above, applied to season stats: a
-    # not-yet-started season has zero games played, so /stats/player/season for the current
-    # year is empty by definition until the season is underway.
+def test_refresh_player_season_stats_year_1_still_contributes_when_year_is_empty():
+    # RENAMED AND REWRITTEN, not just re-verified: the OLD conditional "only fetch year-1 if
+    # year returned zero rows" logic is gone entirely, replaced by "always fetch both, always
+    # keep both" -- this test now confirms the specific case that logic still needs to handle
+    # correctly: when the target year genuinely has 0 rows, the prior year's real rows must
+    # still make it into the combined output, not get lost.
     fake_2025 = [{"season": 2025, "player_id": "1", "player": "X", "position": "QB", "team": "T",
                  "conference": "C", "category": "passing", "stat_type": "YDS", "stat": "3000"}]
     calls = []
@@ -352,8 +354,63 @@ def test_refresh_player_season_stats_falls_back_to_prior_year_when_current_year_
 
     assert calls == [2026, 2025]
     assert len(rows) == 1 and rows[0]["passing_YDS"] == 3000
-    print("✓ refresh_player_season_stats falls back to year-1 when the current season has no "
-         "games played yet")
+    print("✓ refresh_player_season_stats still surfaces year-1's real rows when the target year genuinely has none")
+
+
+def test_refresh_player_season_stats_always_fetches_both_years_even_when_target_has_real_data():
+    # THE real, direct regression guard for the actual live bug this whole rewrite exists to
+    # fix: confirms BOTH years are fetched even when the target year ALREADY has real, non-empty
+    # data -- the old code would have stopped after year alone here, exactly the gap that let a
+    # real, live pull return 1,082 real rows for the wrong 37 teams and silently never even try
+    # year-1 for the 138 real FBS teams missing from it.
+    fake_2026 = [{"season": 2026, "player_id": "1", "player": "FCS Player", "position": "QB",
+                 "team": "Elon", "conference": "CAA", "category": "passing", "stat_type": "YDS", "stat": "500"}]
+    fake_2025 = [{"season": 2025, "player_id": "2", "player": "FBS Player", "position": "QB",
+                 "team": "Alabama", "conference": "SEC", "category": "passing", "stat_type": "YDS", "stat": "3500"}]
+    calls = []
+
+    def fake_get(path, params, api_key):
+        calls.append(params["year"])
+        return fake_2026 if params["year"] == 2026 else fake_2025
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "stats.csv")
+        with patch.object(ND, "_get", side_effect=fake_get):
+            ND.refresh_player_season_stats(2026, "FAKE_KEY", out_path=out)
+        rows = ND.load_player_stats(out)
+
+    assert calls == [2026, 2025], (
+        "year-1 must genuinely be fetched even though year already returned real, non-empty "
+        "data -- this is the actual real-world bug this rewrite fixes")
+    assert len(rows) == 2   # both years' real rows present, neither dropped
+    seasons_present = {r["season"] for r in rows}
+    assert seasons_present == {2026, 2025}
+    print("✓ refresh_player_season_stats genuinely fetches AND KEEPS both years even when the target year already has real data -- the actual fix for the live FCS/FBS team-coverage gap")
+
+
+def test_refresh_player_season_stats_keeps_a_returning_players_two_seasons_separate():
+    # A REAL edge case worth its own direct test: the same real player (same player_id) has a
+    # real row in BOTH years -- confirms the (player_id, season) composite key genuinely keeps
+    # both, rather than the old single-player_id dedup silently collapsing them into one.
+    fake_2026 = [{"season": 2026, "player_id": "99", "player": "Returning Player", "position": "QB",
+                 "team": "Georgia", "conference": "SEC", "category": "passing", "stat_type": "YDS", "stat": "400"}]
+    fake_2025 = [{"season": 2025, "player_id": "99", "player": "Returning Player", "position": "QB",
+                 "team": "Georgia", "conference": "SEC", "category": "passing", "stat_type": "YDS", "stat": "3200"}]
+
+    def fake_get(path, params, api_key):
+        return fake_2026 if params["year"] == 2026 else fake_2025
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "stats.csv")
+        with patch.object(ND, "_get", side_effect=fake_get):
+            ND.refresh_player_season_stats(2026, "FAKE_KEY", out_path=out)
+        rows = ND.load_player_stats(out)
+
+    assert len(rows) == 2, "the same real player_id in two different real seasons must produce two rows, not one collapsed row"
+    by_season = {r["season"]: r for r in rows}
+    assert by_season[2026]["passing_YDS"] == 400
+    assert by_season[2025]["passing_YDS"] == 3200
+    print("✓ refresh_player_season_stats keeps a real returning player's two distinct season rows separate, not silently collapsed into one")
 
 
 if __name__ == "__main__":

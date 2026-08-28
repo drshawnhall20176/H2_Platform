@@ -73,14 +73,12 @@ def main() -> int:
         print(tb)
         return 1
 
-    print(f"\nPulling NCAAF player season stats for {year}...")
-    stats_year = year
+    print(f"\nPulling NCAAF player season stats for {year} and {year - 1}...")
     try:
         path = ND.refresh_player_season_stats(year, api_key)
         stats = ND.load_player_stats(path)
-        print(f"Cached {len(stats)} players' season stat lines.")
-        if stats and stats[0].get("season") is not None:
-            stats_year = int(stats[0]["season"])
+        seasons_present = sorted({s.get("season") for s in stats if s.get("season") is not None})
+        print(f"Cached {len(stats)} players' season stat lines, covering season(s): {seasons_present}.")
     except Exception as e:  # noqa: BLE001
         tb = traceback.format_exc()
         first_line = str(e).replace("\n", " ")[:300]
@@ -89,13 +87,17 @@ def main() -> int:
         print(tb)
         return 1
 
-    # Real bug this fixes, confirmed via a live run: refresh_schedule used to pull only `year`.
-    # When player season stats fall back to year-1 (the block above), ncaaf_engine.
-    # _team_games_played_for_stats_season needs THAT year's own schedule too, to count its real
-    # completed games as the rate denominator -- without it, every team's games-played resolves
-    # to 0 and player_row's own zero-games guard silently drops every player from the slate. See
-    # ncaaf_data.refresh_schedule's own docstring for the full story.
-    needed_years = sorted({year, stats_year})
+    # UPDATED DIRECTLY: refresh_player_season_stats now ALWAYS fetches and keeps BOTH year and
+    # year-1 (see its own docstring for the real, live-confirmed bug this replaced -- the old
+    # "detect which single year stats actually landed on" approach broke the moment a real pull
+    # returned real, non-empty, but incomplete-coverage data, exactly what happened live). Since
+    # ncaaf_engine.build_slate now resolves each TEAM's own stats-season independently (see its
+    # own _team_stats_season docstring) and any team can fall back to year-1, the schedule pull
+    # must unconditionally cover both years too, or _team_games_played_for_stats_season has no
+    # real schedule to count year-1's completed games against -- confirmed as a real, live gap,
+    # not theoretical: this exact scenario zeroed out the games-played denominator for every
+    # team using the fallback, even after the stats-layer fix alone.
+    needed_years = sorted({year, year - 1})
     print(f"\nPulling NCAAF schedule for {needed_years}...")
     completed_weeks: list = []
     try:

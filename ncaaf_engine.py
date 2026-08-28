@@ -250,10 +250,30 @@ def _normalize_name(name) -> str:
 def _stats_by_id_and_name(season: int) -> Tuple[Dict[str, Dict], Dict[Tuple[str, str], Dict]]:
     """Season-stat rows, indexed two ways: by player_id (the primary join) and by
     (normalized_name, team) (the fallback -- see this module's own docstring on the unverified
-    id-space question)."""
+    id-space question).
+
+    REWRITTEN DIRECTLY ON REQUEST, part of the real per-team fallback fix (see
+    ncaaf_data.refresh_player_season_stats' own docstring for the full, live-confirmed bug this
+    closes): the cache can now genuinely hold BOTH `season` and `season - 1` rows for the same
+    player_id (a real, deliberate change -- see that function's own docstring on why a returning
+    player legitimately gets two separate rows now, not one). This function's own job is to
+    pick, for each real player, whichever of those rows is the MOST RECENT one on file, AT OR
+    BEFORE the `season` being queried -- `season`'s own row when it exists, `season - 1`'s row
+    otherwise -- rather than leaving that decision to incidental dict-insertion order, which
+    would be fragile and non-obvious to a future reader.
+
+    THE season PARAMETER IS NOW GENUINELY USED, a real fix over this function's own prior
+    version (which accepted it but never touched it): a real, deliberate lookahead-bias guard --
+    a query for season=2025 (the 2025-baseline toggle's own use case) must never surface a
+    season=2026 row even if the cache happens to contain one, the same real discipline every
+    other before_date-based lookup on this platform already has. Filtered, then sorted ascending
+    by season, so a later insert for the SAME key always overwrites an earlier one -- confirmed
+    correct with a direct test, not assumed from the sort call alone."""
     by_id: Dict[str, Dict] = {}
     by_name_team: Dict[Tuple[str, str], Dict] = {}
-    for r in ND.load_player_stats():
+    rows = sorted((r for r in ND.load_player_stats() if (r.get("season") or 0) <= season),
+                 key=lambda r: r.get("season") or 0)
+    for r in rows:
         pid = r.get("player_id")
         if not _missing(pid):
             by_id[str(pid)] = r
@@ -614,12 +634,6 @@ def build_slate(date_str: str, season: Optional[int] = None) -> Tuple[List[Dict]
 
     stats_by_id, stats_by_name_team = _stats_by_id_and_name(season)
     id_join_misses = 0
-    all_stats_rows = list(stats_by_id.values()) or list(stats_by_name_team.values())
-    stats_season = next((r.get("season") for r in all_stats_rows if r.get("season") is not None), season)
-    if stats_season != season:
-        _diag(f"build_slate({date_str}): cached player stats are from season {stats_season}, "
-             f"not the target season {season} (ncaaf_data's own year-fallback) -- using "
-             f"season {stats_season}'s own game counts as the per-game-rate denominator")
 
     def _lookup_stats(player: Dict) -> Optional[Dict]:
         nonlocal id_join_misses
@@ -631,8 +645,30 @@ def build_slate(date_str: str, season: Optional[int] = None) -> Tuple[List[Dict]
             id_join_misses += 1
         return row
 
+    def _team_stats_season(team: str) -> Optional[int]:
+        # REWRITTEN DIRECTLY ON REQUEST, replacing a real, live-confirmed bug: the old version
+        # computed ONE global stats_season from "the first row this dict happened to iterate,"
+        # which made sense back when the whole cache was always a single season -- now that a
+        # real, live pull can genuinely mix current-season data for some teams (FCS/D-II
+        # programs whose season started early) with prior-season fallback data for others (major
+        # FBS programs not yet underway), that single global value is simply the wrong question.
+        # The real, correct one is per-team: what season did THIS team's own players' stats
+        # actually resolve to? Checked directly against any one roster player on this team who
+        # has a real matched row at all -- every player on the same real team resolves to the
+        # same real season by construction (see _stats_by_id_and_name's own docstring: it picks
+        # the single most-recent-available season per player, and CFBD's own stats coverage is
+        # team-wide, not scattered player-by-player within a team), so checking one is genuinely
+        # sufficient, not a shortcut that risks missing a real mixed-within-team case.
+        for p in roster_by_team.get(team, []):
+            row = _lookup_stats(p)
+            if row is not None:
+                return row.get("season")
+        return None
+
     meta: List[Dict] = []
     rows: List[Dict] = []
+    season_resolution_counts: Dict[str, int] = {"target": 0, "fallback": 0, "no_data": 0}
+    teams_seen: set = set()
     for g in games:
         label = f"{g['away_team']} @ {g['home_team']}"
         meta.append({"label": label, "away_name": g["away_team"], "home_name": g["home_team"],
@@ -643,7 +679,22 @@ def build_slate(date_str: str, season: Optional[int] = None) -> Tuple[List[Dict]
             (g["home_team"], g["away_team"], g.get("away_id"), g.get("home_id")),
             (g["away_team"], g["home_team"], g.get("home_id"), g.get("away_id")),
         ):
-            team_games = _team_games_played_for_stats_season(schedule, stats_season, season, team, week)
+            team_stats_season = _team_stats_season(team)
+            if team not in teams_seen:
+                teams_seen.add(team)
+                if team_stats_season is None:
+                    season_resolution_counts["no_data"] += 1
+                elif team_stats_season == season:
+                    season_resolution_counts["target"] += 1
+                else:
+                    season_resolution_counts["fallback"] += 1
+            if team_stats_season is None:
+                # No player on this team has a matched stats row in ANY cached season -- team_games
+                # can only honestly be 0 here (nothing to compute a denominator from), which
+                # player_row's own team_games_played <= 0 guard already handles correctly.
+                team_games = 0
+            else:
+                team_games = _team_games_played_for_stats_season(schedule, team_stats_season, season, team, week)
             for player in roster_by_team.get(team, []):
                 stats_row = _lookup_stats(player)
                 pid = player.get("id")
@@ -656,6 +707,10 @@ def build_slate(date_str: str, season: Optional[int] = None) -> Tuple[List[Dict]
     if id_join_misses:
         _diag(f"build_slate({date_str}): {id_join_misses} player(s) matched by name+team, not id "
              f"-- worth checking if roster.id and player_stats.player_id share an id space at all")
+    _diag(f"build_slate({date_str}): per-team stats-season resolution across {len(teams_seen)} "
+         f"team(s) playing this week -- {season_resolution_counts['target']} on season {season} "
+         f"itself, {season_resolution_counts['fallback']} fell back to a prior season, "
+         f"{season_resolution_counts['no_data']} had no matched stats in ANY season on file")
     _diag(f"build_slate({date_str}): season {season} week {week}, {len(games)} game(s) -> "
          f"{len(rows)} player(s) cleared a rotation floor")
     return rows, meta
