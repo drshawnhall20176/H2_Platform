@@ -145,6 +145,27 @@ def main() -> int:
             print("Full traceback:")
             print(tb)
 
+    print(f"\nPulling NCAAF drives for {len(completed_weeks)} completed week(s)...")
+    if not completed_weeks:
+        print("No completed weeks yet this season -- skipping. Drive-level simulation stays on "
+             "its own honest \"no data yet\" path until this has real data (see ncaaf_engine.py's "
+             "own get_team_drive_outcomes docstring for what that fallback is).")
+    else:
+        try:
+            path = ND.refresh_drives(year, api_key, completed_weeks)
+            drives = ND.load_drives(path)
+            print(f"Cached {len(drives)} drive row(s).")
+        except Exception as e:  # noqa: BLE001
+            # Non-fatal, same posture as the two pulls above: this is what powers the real
+            # possession-level drive simulation, but the platform still functions -- including
+            # every other real NCAAF signal already built -- without it.
+            tb = traceback.format_exc()
+            first_line = str(e).replace("\n", " ")[:300]
+            print(f"::warning::NCAAF drives refresh failed (roster/season-stats/schedule/"
+                 f"player-game-stats still cached): {first_line}")
+            print("Full traceback:")
+            print(tb)
+
     print("\nDone.")
     return 0
 

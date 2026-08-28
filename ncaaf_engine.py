@@ -659,3 +659,119 @@ def build_slate(date_str: str, season: Optional[int] = None) -> Tuple[List[Dict]
     _diag(f"build_slate({date_str}): season {season} week {week}, {len(games)} game(s) -> "
          f"{len(rows)} player(s) cleared a rotation floor")
     return rows, meta
+
+
+# ============================================================================ Drive-level simulation
+# BUILT DIRECTLY ON REQUEST, second piece of the drive-level simulation build (see ncaaf_data.
+# refresh_drives' own docstring for the full reasoning behind the new /drives endpoint this
+# section builds on). This is the FIRST genuinely new data source this NCAAF build has added --
+# everything else built on data this platform already had cached and proven.
+
+def compute_drive_points(game_drives: List[Dict]) -> List[Dict]:
+    """The single most important, easiest-to-get-wrong piece of this whole build, done once here
+    rather than left for every future caller to reimplement (and possibly get wrong). Adds two
+    real, honest fields to each drive: "points_this_drive" (points the OFFENSE scored on this
+    specific drive -- TD/FG/safety they earned) and "defensive_points_this_drive" (points the
+    DEFENSE scored during this same drive -- a pick-six, a fumble return TD, a blocked-punt
+    return -- genuinely rare, but real, and a naive version of this function that only tracks
+    offense_score deltas would silently miss these entirely, since the scoring team is never
+    listed as "offense" on that drive).
+
+    THE REAL, CONFIRMED DATA-SHAPE ISSUE THIS SOLVES: offense_score/defense_score are CUMULATIVE
+    running totals as of the end of that drive, not points scored on it (see refresh_drives' own
+    docstring). Getting the real per-drive point value requires comparing THIS team's own score
+    now to the LAST time this exact team's own score was known -- not just the immediately
+    preceding drive (which was the other team's own possession), and not just this team's own
+    previous OFFENSIVE drive either, since a defensive score also changes their running total.
+
+    Sorts by drive_number (the one unambiguous chronological-order field within a single game --
+    start_period+clock is a real, plausible alternative but drive_number is simpler and, per the
+    real sources this build's data shape is corroborated against, reliably present). Expects
+    game_drives to already be filtered to ONE real game -- mixing drives from different games
+    would silently corrupt the running-score tracking, since team names aren't unique to a game."""
+    sorted_drives = sorted(game_drives, key=lambda d: d.get("drive_number") or 0)
+    last_score: Dict[str, float] = {}
+    out: List[Dict] = []
+    for d in sorted_drives:
+        offense, defense = d.get("offense"), d.get("defense")
+        off_score_now, def_score_now = d.get("offense_score"), d.get("defense_score")
+
+        off_points = None
+        if offense and off_score_now is not None and not _missing(off_score_now):
+            off_points = float(off_score_now) - last_score.get(offense, 0.0)
+            last_score[offense] = float(off_score_now)
+
+        def_points = None
+        if defense and def_score_now is not None and not _missing(def_score_now):
+            def_points = float(def_score_now) - last_score.get(defense, 0.0)
+            last_score[defense] = float(def_score_now)
+
+        out.append({**d, "points_this_drive": off_points, "defensive_points_this_drive": def_points})
+    return out
+
+
+def _outcome_for_drive(points_this_drive: Optional[float], defensive_points_this_drive: Optional[float]) -> Optional[str]:
+    """One drive's own outcome, bucketed into the real, standard categories a possession
+    simulation needs: touchdown / field_goal / safety / defensive_score / no_score. Honest None
+    (never a guessed bucket) when the real point value isn't known for this drive at all.
+
+    6 or 7 or 8 real points -> touchdown (7 is the modal case -- a made extra point -- but 6 (a
+    missed/blocked PAT or a real, deliberate 2pt-conversion miss) and 8 (a real, made 2pt
+    conversion) are both genuinely possible and must not be misclassified as anything else, since
+    this same 6-8 range is exactly the ambiguity a naive "== 7" check would get wrong)."""
+    if defensive_points_this_drive and defensive_points_this_drive > 0:
+        return "defensive_score"
+    if points_this_drive is None:
+        return None
+    if points_this_drive in (6, 7, 8):
+        return "touchdown"
+    if points_this_drive == 3:
+        return "field_goal"
+    if points_this_drive == 2:
+        return "safety"
+    if points_this_drive == 0:
+        return "no_score"
+    return "no_score"   # a real, negative or otherwise unexpected value -- treated as no real score for this team, not silently dropped
+
+
+def get_team_drive_outcomes(team_name: str, before_date: str, n: Optional[int] = None) -> List[str]:
+    """This team's own real, bucketed drive outcomes (touchdown/field_goal/safety/
+    defensive_score/no_score) across every real completed drive on offense before before_date --
+    n=None for the whole season so far, n=int for their last n real games' worth of drives. The
+    real, direct input a possession-level Monte Carlo simulation needs: real empirical rates,
+    not an assumed distribution.
+
+    Groups drives by game_id first, since compute_drive_points' own running-score tracking is
+    only valid WITHIN one real game -- computing it across multiple games at once would silently
+    corrupt the delta math (see compute_drive_points' own docstring)."""
+    season = _infer_season(before_date)
+    if season is None:
+        return []
+    schedule = get_schedule(season)
+    week = _resolve_week(schedule, before_date)
+    if week is None:
+        return []
+    rows = [r for r in ND.load_drives()
+           if r.get("offense") == team_name and r.get("week") is not None and r["week"] < week]
+    if not rows:
+        return []
+    by_game: Dict[object, List[Dict]] = {}
+    for r in rows:
+        by_game.setdefault(r.get("game_id"), []).append(r)
+
+    if n is not None:
+        game_weeks = {gid: g[0]["week"] for gid, g in by_game.items()}
+        ordered_ids = sorted(game_weeks, key=lambda gid: game_weeks[gid], reverse=True)[:n]
+        by_game = {gid: g for gid, g in by_game.items() if gid in ordered_ids}
+
+    outcomes: List[str] = []
+    for gid, game_drives in by_game.items():
+        with_points = compute_drive_points(game_drives)
+        for d in with_points:
+            if d.get("offense") != team_name:
+                continue
+            outcome = _outcome_for_drive(d.get("points_this_drive"), d.get("defensive_points_this_drive"))
+            if outcome is not None:
+                outcomes.append(outcome)
+    return outcomes
+

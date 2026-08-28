@@ -480,6 +480,115 @@ def test_get_team_recent_scoring_none_when_no_games_played_yet():
          "before the given week yet")
 
 
+# ----------------------------------------------------------------- compute_drive_points
+def test_compute_drive_points_normal_alternating_drives():
+    # A real, ordinary sequence: Team A scores a TD (0->7), Team B kicks a FG (0->3), Team A adds
+    # another FG (7->10). Confirms the delta math is genuinely correct, not just plausible.
+    drives = [
+        {"drive_number": 1, "offense": "Team A", "defense": "Team B", "offense_score": 7, "defense_score": 0},
+        {"drive_number": 2, "offense": "Team B", "defense": "Team A", "offense_score": 3, "defense_score": 7},
+        {"drive_number": 3, "offense": "Team A", "defense": "Team B", "offense_score": 10, "defense_score": 3},
+    ]
+    out = E.compute_drive_points(drives)
+    assert out[0]["points_this_drive"] == 7.0
+    assert out[1]["points_this_drive"] == 3.0
+    assert out[2]["points_this_drive"] == 3.0   # 10 - 7 (their own prior score), not 10 - 3
+    assert all(d["defensive_points_this_drive"] == 0.0 for d in out)
+    print("✓ compute_drive_points correctly computes real per-drive points for a normal, alternating sequence")
+
+
+def test_compute_drive_points_catches_a_real_defensive_score():
+    # THE real, critical edge case this function exists to handle correctly: Team B's defense
+    # returns a pick-six while Team A is on offense. Team A's own drive ends in a real turnover
+    # (0 points for them), but Team B's own score jumps by 7 -- attributed as a real, honest
+    # defensive_points_this_drive, not silently lost.
+    drives = [
+        {"drive_number": 1, "offense": "Team A", "defense": "Team B", "offense_score": 0, "defense_score": 7},
+    ]
+    out = E.compute_drive_points(drives)
+    assert out[0]["points_this_drive"] == 0.0
+    assert out[0]["defensive_points_this_drive"] == 7.0
+    print("✓ compute_drive_points correctly catches a real defensive/special-teams score, never silently loses it")
+
+
+def test_compute_drive_points_survives_missing_data_without_corrupting_the_running_score():
+    # Team A's own 2nd drive has no real offense_score on file. Their 3rd real drive must still
+    # compute correctly against their real, LAST KNOWN score (7 from drive 1), not against a
+    # corrupted or reset running total.
+    drives = [
+        {"drive_number": 1, "offense": "Team A", "defense": "Team B", "offense_score": 7, "defense_score": 0},
+        {"drive_number": 2, "offense": "Team A", "defense": "Team B", "offense_score": None, "defense_score": 0},
+        {"drive_number": 3, "offense": "Team A", "defense": "Team B", "offense_score": 14, "defense_score": 0},
+    ]
+    out = E.compute_drive_points(drives)
+    assert out[1]["points_this_drive"] is None   # honest None, not a guessed 0
+    assert out[2]["points_this_drive"] == 7.0    # 14 - 7 (drive 1's real known score), NOT 14 - 0
+    print("✓ compute_drive_points survives a real missing value without corrupting the running score for later drives")
+
+
+def test_compute_drive_points_sorts_by_drive_number_not_input_order():
+    drives = [
+        {"drive_number": 2, "offense": "Team B", "defense": "Team A", "offense_score": 3, "defense_score": 7},
+        {"drive_number": 1, "offense": "Team A", "defense": "Team B", "offense_score": 7, "defense_score": 0},
+    ]
+    out = E.compute_drive_points(drives)
+    assert out[0]["drive_number"] == 1 and out[1]["drive_number"] == 2
+    print("✓ compute_drive_points correctly sorts by drive_number regardless of real input order")
+
+
+# ----------------------------------------------------------------- _outcome_for_drive
+def test_outcome_for_drive_buckets_touchdowns_correctly():
+    # The real, deliberate 6/7/8 ambiguity this function's own docstring names directly.
+    assert E._outcome_for_drive(7.0, 0.0) == "touchdown"
+    assert E._outcome_for_drive(6.0, 0.0) == "touchdown"   # missed/blocked PAT
+    assert E._outcome_for_drive(8.0, 0.0) == "touchdown"   # made 2pt conversion
+    print("✓ _outcome_for_drive correctly buckets all three real touchdown point values (6/7/8)")
+
+
+def test_outcome_for_drive_buckets_field_goal_safety_and_no_score():
+    assert E._outcome_for_drive(3.0, 0.0) == "field_goal"
+    assert E._outcome_for_drive(2.0, 0.0) == "safety"
+    assert E._outcome_for_drive(0.0, 0.0) == "no_score"
+    print("✓ _outcome_for_drive correctly buckets field goal, safety, and no-score drives")
+
+
+def test_outcome_for_drive_defensive_score_overrides_offense_points():
+    assert E._outcome_for_drive(0.0, 7.0) == "defensive_score"
+    print("✓ _outcome_for_drive correctly classifies a real defensive score as its own real bucket")
+
+
+def test_outcome_for_drive_honest_none_when_points_unknown():
+    assert E._outcome_for_drive(None, None) is None
+    assert E._outcome_for_drive(None, 0.0) is None
+    print("✓ _outcome_for_drive honestly returns None (never a guessed bucket) when the real point value isn't known")
+
+
+# ----------------------------------------------------------------- get_team_drive_outcomes
+def test_get_team_drive_outcomes_full_integration():
+    schedule = _dh_schedule(n_weeks=5)
+    drive_rows = [
+        {"game_id": 1, "week": 1, "drive_number": 1, "offense": "Ohio State", "defense": "Rival",
+        "offense_score": 7, "defense_score": 0},
+        {"game_id": 1, "week": 1, "drive_number": 2, "offense": "Ohio State", "defense": "Rival",
+        "offense_score": 10, "defense_score": 0},
+        {"game_id": 1, "week": 1, "drive_number": 3, "offense": "Rival", "defense": "Ohio State",
+        "offense_score": 7, "defense_score": 10},   # a different team's own offense -- must be excluded
+    ]
+    with patch.object(ND, "load_schedule", return_value=schedule), \
+        patch.object(ND, "load_drives", return_value=drive_rows):
+        outcomes = E.get_team_drive_outcomes("Ohio State", "2025-09-30")   # after week 1
+    assert outcomes == ["touchdown", "field_goal"]   # 7-0=7 (TD), 10-7=3 (FG); Rival's own drive excluded
+    print("✓ get_team_drive_outcomes correctly isolates one real team's own offensive drives and buckets them")
+
+
+def test_get_team_drive_outcomes_honest_empty_before_any_games():
+    schedule = _dh_schedule(n_weeks=5)
+    with patch.object(ND, "load_schedule", return_value=schedule), \
+        patch.object(ND, "load_drives", return_value=[]):
+        assert E.get_team_drive_outcomes("Ohio State", "2025-09-01") == []
+    print("✓ get_team_drive_outcomes honestly returns [] before any real drives are on file")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
