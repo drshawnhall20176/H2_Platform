@@ -100,20 +100,24 @@ def main() -> int:
     needed_years = sorted({year, year - 1})
     print(f"\nPulling NCAAF schedule for {needed_years}...")
     completed_weeks: list = []
+    prior_completed_weeks: list = []
     try:
         path = ND.refresh_schedule(needed_years, api_key)
         games = ND.load_schedule(path)
         print(f"Cached {len(games)} games total.")
-        # Per-game stats below stay scoped to the TARGET year's own completed weeks only, not
-        # stats_year's -- week numbers collide across seasons (both have a "week 6"), and the
-        # per-game cache doesn't carry a season column yet, so mixing years in there would let
-        # player_recent_games silently blend two different seasons' games together. A real,
-        # separate concern from this fix, not solved here -- the bootstrap upgrade stays on its
-        # honest parametric fallback until the TARGET season has its own completed weeks, even
-        # though season-average projections now work correctly via the fix above.
+        # Per-game stats below stay scoped to the TARGET year's own completed weeks for the
+        # regular (every-run) pull -- the prior year's own completed weeks are computed here too,
+        # but only actually fetched ONCE, conditionally, further below (see the real one-time
+        # prior-season block after both regular pulls) -- both the schedule needed to compute
+        # this AND the per-game/drives caches now carry a real "season" column (see ncaaf_data.
+        # refresh_player_game_stats/refresh_drives' own docstrings), so mixing years no longer
+        # risks player_recent_games silently blending two different seasons' "week 6" together.
         completed_weeks = sorted({g["week"] for g in games
                                   if g.get("season") == year and g.get("completed")
                                   and g.get("week") is not None})
+        prior_completed_weeks = sorted({g["week"] for g in games
+                                       if g.get("season") == year - 1 and g.get("completed")
+                                       and g.get("week") is not None})
     except Exception as e:  # noqa: BLE001
         # Non-fatal, same posture refresh_statcast.py already has for its own secondary pulls:
         # roster + player stats are the core dependency for a projections engine; the schedule
@@ -165,6 +169,61 @@ def main() -> int:
             first_line = str(e).replace("\n", " ")[:300]
             print(f"::warning::NCAAF drives refresh failed (roster/season-stats/schedule/"
                  f"player-game-stats still cached): {first_line}")
+            print("Full traceback:")
+            print(tb)
+
+    # BUILT DIRECTLY ON REQUEST: a real, separate, ONE-TIME pull for the prior season's own
+    # per-game stats and drives -- the exact real gap the 2025-baseline toggle exposed live:
+    # neither cache had EVER been fetched for a prior season at all, only ever the current
+    # target year's own completed weeks, every single run. This is what actually gives that
+    # toggle real data to show, not just the season-average pathway the earlier fix repaired.
+    #
+    # DELIBERATELY ONE-TIME, NOT EVERY RUN -- a real, computed budget concern, not a vague
+    # worry: the prior season is fully complete and never changes, so re-fetching its ~15 weeks
+    # of per-game stats AND ~15 weeks of drives every single day would cost ~30 extra calls/day
+    # (~900/month) for data that's already sitting in the cache, unchanged, comfortably eating
+    # most of CFBD's own ~1,000/month budget for nothing. Checked directly against the cache
+    # itself (not a separate marker file) -- if the prior season's own season number already
+    # appears in either cache, this year's own portion of that cache is treated as complete and
+    # skipped; a prior partial/failed pull would still show 0 rows for that season and correctly
+    # retry on the next run.
+    prior_year = year - 1
+    print(f"\nChecking whether {prior_year}'s own per-game stats/drives are already cached "
+         f"(one-time pull, not every run)...")
+    try:
+        already_cached = {int(s) for s in {r.get("season") for r in ND.load_player_game_stats()}
+                          if s is not None}
+    except Exception:  # noqa: BLE001
+        already_cached = set()
+    if prior_year in already_cached:
+        print(f"{prior_year}'s per-game stats already on file -- skipping (one-time pull already done).")
+    elif not prior_completed_weeks:
+        print(f"No completed weeks found for {prior_year} in the cached schedule -- skipping "
+             f"(the schedule pull above may have failed, or {prior_year}'s own schedule genuinely "
+             f"has no completed games on file yet).")
+    else:
+        print(f"{prior_year} not yet cached -- pulling its {len(prior_completed_weeks)} "
+             f"completed week(s) now, once.")
+        try:
+            path = ND.refresh_player_game_stats(prior_year, api_key, prior_completed_weeks)
+            game_stats = ND.load_player_game_stats(path)
+            print(f"Cached {len(game_stats)} total player-game row(s) (all seasons combined).")
+        except Exception as e:  # noqa: BLE001
+            tb = traceback.format_exc()
+            first_line = str(e).replace("\n", " ")[:300]
+            print(f"::warning::NCAAF prior-season ({prior_year}) per-game stats refresh failed "
+                 f"(current season's own cache untouched): {first_line}")
+            print("Full traceback:")
+            print(tb)
+        try:
+            path = ND.refresh_drives(prior_year, api_key, prior_completed_weeks)
+            drives = ND.load_drives(path)
+            print(f"Cached {len(drives)} total drive row(s) (all seasons combined).")
+        except Exception as e:  # noqa: BLE001
+            tb = traceback.format_exc()
+            first_line = str(e).replace("\n", " ")[:300]
+            print(f"::warning::NCAAF prior-season ({prior_year}) drives refresh failed "
+                 f"(current season's own cache untouched): {first_line}")
             print("Full traceback:")
             print(tb)
 

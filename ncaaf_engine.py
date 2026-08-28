@@ -213,7 +213,8 @@ def get_player_results(date_str: str) -> Dict[str, Dict[str, float]]:
     if week is None:
         return {}
 
-    rows = [r for r in ND.load_player_game_stats() if r.get("week") == week]
+    rows = [r for r in ND.load_player_game_stats()
+           if r.get("week") == week and (r.get("season") or 0) == season]
     out: Dict[str, Dict[str, float]] = {}
     for r in rows:
         pid = r.get("player_id")
@@ -283,18 +284,26 @@ def _stats_by_id_and_name(season: int) -> Tuple[Dict[str, Dict], Dict[Tuple[str,
     return by_id, by_name_team
 
 
-def player_recent_games(player_id, before_week: int, n: int = CFG.RECENT_GAMES_N) -> List[Dict]:
-    """This player's last n games STRICTLY BEFORE before_week this season, most recent first --
+def player_recent_games(player_id, season: int, before_week: int, n: int = CFG.RECENT_GAMES_N) -> List[Dict]:
+    """This player's last n games STRICTLY BEFORE before_week, WITHIN `season` specifically --
     same "strictly before" lookahead-bias discipline as nfl_engine.player_recent_games (see its
     own docstring for the full reasoning; identical concern applies here).
 
+    THE season PARAMETER IS A REAL FIX, not a formality, added directly on request: the cache
+    can now genuinely hold multiple seasons at once (see ncaaf_data.refresh_player_game_stats'
+    own docstring on why -- the 2025-baseline toggle needs a real prior season's own per-game
+    data, cached alongside the current season's, not instead of it). Filtering on week alone,
+    the way this function's own prior version did, would silently blend two different seasons'
+    "week 6" together -- exactly the real risk this platform's own docstrings already named
+    elsewhere before this fix actually closed it.
+
     Reads ncaaf_data's per-game cache -- empty if refresh_player_game_stats hasn't been run yet,
-    or for a player/week with no cached rows. This is the real per-game data that upgrades
-    ncaaf_projections.py from its original parametric-only approach to an actual bootstrap, the
-    same method every other sport's engine here already uses."""
+    or for a player/season/week with no cached rows. This is the real per-game data that
+    upgrades ncaaf_projections.py from its original parametric-only approach to an actual
+    bootstrap, the same method every other sport's engine here already uses."""
     rows = [r for r in ND.load_player_game_stats()
            if str(r.get("player_id")) == str(player_id) and r.get("week") is not None
-           and r["week"] < before_week]
+           and (r.get("season") or 0) == season and r["week"] < before_week]
     rows.sort(key=lambda r: r["week"], reverse=True)
     return rows[:n]
 
@@ -304,7 +313,15 @@ def get_player_season_games(player_id, before_date: str, max_games: int = 20) ->
     the baseline QB Lab's TD:INT efficiency table and Matchup Lab compare a recent/head-to-head
     sample against. Same role as nfl_engine.get_player_season_games; max_games=20 comfortably
     covers a full ~14-game FBS regular season plus a conference championship, without needing
-    NFL's 25 (a shorter season overall)."""
+    NFL's 25 (a shorter season overall).
+
+    A REAL SPECIAL CASE, added directly on request: when `season` is a fully-completed PRIOR
+    season (the 2025-baseline toggle's own use case), before_week resolves to whatever week
+    THAT season's own schedule last had -- correctly capturing every real game in a completed
+    season, not just "before the current in-progress week" the way a live, in-progress season
+    needs. _resolve_week already handles this correctly for a completed season (see its own
+    docstring); this function just needed to genuinely pass `season` through to
+    player_recent_games, which it silently never did before this fix."""
     season = _infer_season(before_date)
     if season is None:
         return []
@@ -312,7 +329,7 @@ def get_player_season_games(player_id, before_date: str, max_games: int = 20) ->
     week = _resolve_week(schedule, before_date)
     if week is None:
         return []
-    return player_recent_games(player_id, before_week=week, n=max_games)
+    return player_recent_games(player_id, season=season, before_week=week, n=max_games)
 
 
 _ALLOWED_STAT_COLS = ["passing_YDS", "rushing_YDS", "receiving_REC", "receiving_YDS"]
@@ -334,9 +351,8 @@ def get_team_allowed_stats(team: str, before_date: str, n: Optional[int] = None)
     if week is None:
         return {}
     rows = [r for r in ND.load_player_game_stats()
-           if r.get("opponent_team") == team and r.get("week") is not None and r["week"] < week]
-    if not rows:
-        return {}
+           if r.get("opponent_team") == team and r.get("week") is not None
+           and (r.get("season") or 0) == season and r["week"] < week]
     by_game: Dict[object, Dict[str, float]] = {}
     for r in rows:
         gid = r.get("game_id")
@@ -370,7 +386,12 @@ def get_player_history_vs_opponent(player_id, opp_name: str, before_date: str,
 
     opp_name: the real school name string (e.g. "Alabama"), matching get_team_allowed_stats'
     own convention -- NOT a numeric team_id, since NCAAF's own per-game cache stores
-    opponent_team as a name, unlike NFL's abbreviation-keyed data."""
+    opponent_team as a name, unlike NFL's abbreviation-keyed data.
+
+    FILTERS ON season NOW, a real fix added directly on request: the per-game cache can
+    genuinely hold multiple seasons at once (see ncaaf_data.refresh_player_game_stats' own
+    docstring), and week alone was never enough to keep two different seasons' own "week 6"
+    from silently blending together."""
     season = _infer_season(before_date)
     if season is None:
         return []
@@ -380,7 +401,8 @@ def get_player_history_vs_opponent(player_id, opp_name: str, before_date: str,
         return []
     rows = [r for r in ND.load_player_game_stats()
            if str(r.get("player_id")) == str(player_id) and r.get("week") is not None
-           and r["week"] < week and r.get("opponent_team") == opp_name]
+           and (r.get("season") or 0) == season and r["week"] < week
+           and r.get("opponent_team") == opp_name]
     rows.sort(key=lambda r: r["week"], reverse=True)
     return rows[:max_games]
 
@@ -450,7 +472,8 @@ def _get_team_td_stat_allowed(team: str, before_date: str, td_col: str,
     if week is None:
         return None
     rows = [r for r in ND.load_player_game_stats()
-           if r.get("opponent_team") == team and r.get("week") is not None and r["week"] < week]
+           if r.get("opponent_team") == team and r.get("week") is not None
+           and (r.get("season") or 0) == season and r["week"] < week]
     if not rows:
         return None
     by_game: Dict[object, float] = {}
@@ -512,7 +535,7 @@ def _get_league_average_allowed(before_date: str, stat_col: str) -> float:
     if week is None:
         return 0.0
     rows = [r for r in ND.load_player_game_stats()
-           if r.get("week") is not None and r["week"] < week]
+           if r.get("week") is not None and (r.get("season") or 0) == season and r["week"] < week]
     if not rows:
         return 0.0
     # Group by (opponent_team, game_id), NOT game_id alone -- a real bug caught by testing
@@ -698,7 +721,7 @@ def build_slate(date_str: str, season: Optional[int] = None) -> Tuple[List[Dict]
             for player in roster_by_team.get(team, []):
                 stats_row = _lookup_stats(player)
                 pid = player.get("id")
-                recent = player_recent_games(pid, week) if not _missing(pid) else []
+                recent = player_recent_games(pid, season=season, before_week=week) if not _missing(pid) else []
                 row = player_row(player, team, opp, label, g.get("start_date"), stats_row,
                                  team_games, opp_id=opp_id, team_id=team_id, recent_games=recent)
                 if row is not None:
@@ -798,7 +821,12 @@ def get_team_drive_outcomes(team_name: str, before_date: str, n: Optional[int] =
 
     Groups drives by game_id first, since compute_drive_points' own running-score tracking is
     only valid WITHIN one real game -- computing it across multiple games at once would silently
-    corrupt the delta math (see compute_drive_points' own docstring)."""
+    corrupt the delta math (see compute_drive_points' own docstring).
+
+    FILTERS ON season NOW, a real fix added directly on request: the drives cache can genuinely
+    hold multiple seasons at once (see ncaaf_data.refresh_drives' own docstring), and week alone
+    was never enough to keep two different seasons' own "week 6" from silently blending
+    together."""
     season = _infer_season(before_date)
     if season is None:
         return []
@@ -807,7 +835,8 @@ def get_team_drive_outcomes(team_name: str, before_date: str, n: Optional[int] =
     if week is None:
         return []
     rows = [r for r in ND.load_drives()
-           if r.get("offense") == team_name and r.get("week") is not None and r["week"] < week]
+           if r.get("offense") == team_name and r.get("week") is not None
+           and (r.get("season") or 0) == season and r["week"] < week]
     if not rows:
         return []
     by_game: Dict[object, List[Dict]] = {}

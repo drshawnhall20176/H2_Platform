@@ -224,23 +224,24 @@ def test_build_slate_produces_real_rows_when_schedule_spans_both_target_and_fall
 
 def test_player_recent_games_respects_strictly_before_and_n():
     fake_game_rows = [
-        {"player_id": "p1", "week": 1, "passing_YDS": 200},
-        {"player_id": "p1", "week": 2, "passing_YDS": 250},
-        {"player_id": "p1", "week": 3, "passing_YDS": 300},
-        {"player_id": "p1", "week": 5, "passing_YDS": 999},   # a future week -- must be excluded
-        {"player_id": "p2", "week": 2, "passing_YDS": 111},   # a different player -- must be excluded
+        {"player_id": "p1", "season": 2025, "week": 1, "passing_YDS": 200},
+        {"player_id": "p1", "season": 2025, "week": 2, "passing_YDS": 250},
+        {"player_id": "p1", "season": 2025, "week": 3, "passing_YDS": 300},
+        {"player_id": "p1", "season": 2025, "week": 5, "passing_YDS": 999},   # a future week -- must be excluded
+        {"player_id": "p2", "season": 2025, "week": 2, "passing_YDS": 111},   # a different player -- must be excluded
+        {"player_id": "p1", "season": 2024, "week": 3, "passing_YDS": 777},   # same week, DIFFERENT season -- must be excluded
     ]
     with patch.object(ND, "load_player_game_stats", return_value=fake_game_rows):
-        recent = E.player_recent_games("p1", before_week=4, n=2)
+        recent = E.player_recent_games("p1", season=2025, before_week=4, n=2)
     assert len(recent) == 2
     assert [r["week"] for r in recent] == [3, 2]   # most recent first, only 2 (n=2), week 5 excluded
     print("✓ player_recent_games returns only this player's games strictly before the given "
-         "week, most recent first, capped at n")
+         "week, WITHIN the given season, most recent first, capped at n")
 
 
 def test_player_recent_games_empty_when_no_cache():
     with patch.object(ND, "load_player_game_stats", return_value=[]):
-        assert E.player_recent_games("p1", before_week=5) == []
+        assert E.player_recent_games("p1", season=2025, before_week=5) == []
     print("✓ player_recent_games returns [] gracefully when there's no per-game cache yet")
 
 
@@ -253,7 +254,7 @@ def test_get_player_results_translates_cfbd_columns_to_shared_market_stat_keys()
     schedule = [{"id": 1, "season": 2025, "week": 6, "start_date": "2025-10-11T19:30:00Z",
                 "completed": True, "home_team": "Ohio State", "away_team": "Texas",
                 "home_id": 1, "away_id": 2, "venue": "X", "neutral_site": False}]
-    game_rows = [{"player_id": "p1", "week": 6, "passing_YDS": 312, "receiving_REC": None}]
+    game_rows = [{"player_id": "p1", "season": 2025, "week": 6, "passing_YDS": 312, "receiving_REC": None}]
 
     with patch.object(ND, "load_schedule", return_value=schedule), \
         patch.object(ND, "load_player_game_stats", return_value=game_rows):
@@ -281,9 +282,9 @@ def _dh_schedule(n_weeks=3):
 
 def test_get_team_allowed_stats_averages_correctly_across_games():
     game_rows = [
-        {"game_id": 1, "week": 1, "team": "Team A", "opponent_team": "Weak Defense",
+        {"game_id": 1, "season": 2025, "week": 1, "team": "Team A", "opponent_team": "Weak Defense",
          "passing_YDS": 300, "rushing_YDS": 100},
-        {"game_id": 2, "week": 2, "team": "Team B", "opponent_team": "Weak Defense",
+        {"game_id": 2, "season": 2025, "week": 2, "team": "Team B", "opponent_team": "Weak Defense",
          "passing_YDS": 350, "rushing_YDS": 120},
     ]
     with patch.object(ND, "load_schedule", return_value=_dh_schedule()), \
@@ -307,10 +308,10 @@ def test_league_average_allowed_isolates_each_defense_not_both_sides_of_a_game()
     # counting a game as if it were a single "defense allowed" data point, when it's actually
     # TWO (one per team's defense that day). Must group by (opponent_team, game_id).
     game_rows = [
-        {"game_id": 1, "week": 1, "team": "Team A", "opponent_team": "Weak Defense", "passing_YDS": 300},
-        {"game_id": 1, "week": 1, "team": "Weak Defense", "opponent_team": "Team A", "passing_YDS": 50},
-        {"game_id": 2, "week": 2, "team": "Team B", "opponent_team": "Weak Defense", "passing_YDS": 350},
-        {"game_id": 3, "week": 2, "team": "Team C", "opponent_team": "Strong Defense", "passing_YDS": 150},
+        {"game_id": 1, "season": 2025, "week": 1, "team": "Team A", "opponent_team": "Weak Defense", "passing_YDS": 300},
+        {"game_id": 1, "season": 2025, "week": 1, "team": "Weak Defense", "opponent_team": "Team A", "passing_YDS": 50},
+        {"game_id": 2, "season": 2025, "week": 2, "team": "Team B", "opponent_team": "Weak Defense", "passing_YDS": 350},
+        {"game_id": 3, "season": 2025, "week": 2, "team": "Team C", "opponent_team": "Strong Defense", "passing_YDS": 150},
     ]
     with patch.object(ND, "load_schedule", return_value=_dh_schedule()), \
         patch.object(ND, "load_player_game_stats", return_value=game_rows):
@@ -323,8 +324,8 @@ def test_league_average_allowed_isolates_each_defense_not_both_sides_of_a_game()
 
 def test_league_average_rush_yards_allowed_uses_rushing_column():
     game_rows = [
-        {"game_id": 1, "week": 1, "team": "Team A", "opponent_team": "D1", "rushing_YDS": 100},
-        {"game_id": 2, "week": 2, "team": "Team B", "opponent_team": "D2", "rushing_YDS": 200},
+        {"game_id": 1, "season": 2025, "week": 1, "team": "Team A", "opponent_team": "D1", "rushing_YDS": 100},
+        {"game_id": 2, "season": 2025, "week": 2, "team": "Team B", "opponent_team": "D2", "rushing_YDS": 200},
     ]
     with patch.object(ND, "load_schedule", return_value=_dh_schedule()), \
         patch.object(ND, "load_player_game_stats", return_value=game_rows):
@@ -337,9 +338,9 @@ def test_league_average_rush_yards_allowed_uses_rushing_column():
 def test_get_player_history_vs_opponent_filters_by_real_opponent_and_week():
     schedule = _dh_schedule(n_weeks=5)
     game_rows = [
-        {"player_id": "p1", "week": 1, "opponent_team": "Rival U", "passing_YDS": 200},
-        {"player_id": "p1", "week": 2, "opponent_team": "Someone Else", "passing_YDS": 999},
-        {"player_id": "p1", "week": 4, "opponent_team": "Rival U", "passing_YDS": 999},   # not-yet-played (>= resolved week) -- excluded
+        {"player_id": "p1", "season": 2025, "week": 1, "opponent_team": "Rival U", "passing_YDS": 200},
+        {"player_id": "p1", "season": 2025, "week": 2, "opponent_team": "Someone Else", "passing_YDS": 999},
+        {"player_id": "p1", "season": 2025, "week": 4, "opponent_team": "Rival U", "passing_YDS": 999},   # not-yet-played (>= resolved week) -- excluded
     ]
     with patch.object(ND, "load_schedule", return_value=schedule), \
         patch.object(ND, "load_player_game_stats", return_value=game_rows):
@@ -392,8 +393,8 @@ def test_get_team_rest_info_never_returns_a_fake_short_week_flag():
 # ----------------------------------------------------------------- TD-allowed functions
 def test_get_team_passing_tds_allowed_averages_correctly():
     game_rows = [
-        {"game_id": 1, "week": 1, "opponent_team": "Weak Defense", "passing_TD": 3},
-        {"game_id": 2, "week": 2, "opponent_team": "Weak Defense", "passing_TD": 1},
+        {"game_id": 1, "season": 2025, "week": 1, "opponent_team": "Weak Defense", "passing_TD": 3},
+        {"game_id": 2, "season": 2025, "week": 2, "opponent_team": "Weak Defense", "passing_TD": 1},
     ]
     with patch.object(ND, "load_schedule", return_value=_dh_schedule()), \
         patch.object(ND, "load_player_game_stats", return_value=game_rows):
@@ -404,8 +405,8 @@ def test_get_team_passing_tds_allowed_averages_correctly():
 
 def test_get_team_rushing_and_total_tds_allowed():
     game_rows = [
-        {"game_id": 1, "week": 1, "opponent_team": "Weak Defense", "rushing_TD": 2, "receiving_TD": 1},
-        {"game_id": 2, "week": 2, "opponent_team": "Weak Defense", "rushing_TD": 0, "receiving_TD": 3},
+        {"game_id": 1, "season": 2025, "week": 1, "opponent_team": "Weak Defense", "rushing_TD": 2, "receiving_TD": 1},
+        {"game_id": 2, "season": 2025, "week": 2, "opponent_team": "Weak Defense", "rushing_TD": 0, "receiving_TD": 3},
     ]
     with patch.object(ND, "load_schedule", return_value=_dh_schedule()), \
         patch.object(ND, "load_player_game_stats", return_value=game_rows):
@@ -426,9 +427,9 @@ def test_get_team_tds_allowed_honest_none_for_no_games():
 
 def test_get_team_td_stat_allowed_respects_recent_n_window():
     game_rows = [
-        {"game_id": 1, "week": 1, "opponent_team": "D1", "passing_TD": 5},
-        {"game_id": 2, "week": 2, "opponent_team": "D1", "passing_TD": 1},
-        {"game_id": 3, "week": 3, "opponent_team": "D1", "passing_TD": 1},
+        {"game_id": 1, "season": 2025, "week": 1, "opponent_team": "D1", "passing_TD": 5},
+        {"game_id": 2, "season": 2025, "week": 2, "opponent_team": "D1", "passing_TD": 1},
+        {"game_id": 3, "season": 2025, "week": 3, "opponent_team": "D1", "passing_TD": 1},
     ]
     with patch.object(ND, "load_schedule", return_value=_dh_schedule(n_weeks=4)), \
         patch.object(ND, "load_player_game_stats", return_value=game_rows):
@@ -440,9 +441,9 @@ def test_get_team_td_stat_allowed_respects_recent_n_window():
 def test_get_player_season_games_uses_player_recent_games_with_resolved_week():
     schedule = _dh_schedule(n_weeks=5)
     game_rows = [
-        {"player_id": "p1", "week": 1, "passing_YDS": 200},
-        {"player_id": "p1", "week": 3, "passing_YDS": 300},
-        {"player_id": "p1", "week": 5, "passing_YDS": 999},   # resolves as "current" week -- excluded
+        {"player_id": "p1", "season": 2025, "week": 1, "passing_YDS": 200},
+        {"player_id": "p1", "season": 2025, "week": 3, "passing_YDS": 300},
+        {"player_id": "p1", "season": 2025, "week": 5, "passing_YDS": 999},   # resolves as "current" week -- excluded
     ]
     with patch.object(ND, "load_schedule", return_value=schedule), \
         patch.object(ND, "load_player_game_stats", return_value=game_rows):
@@ -567,11 +568,11 @@ def test_outcome_for_drive_honest_none_when_points_unknown():
 def test_get_team_drive_outcomes_full_integration():
     schedule = _dh_schedule(n_weeks=5)
     drive_rows = [
-        {"game_id": 1, "week": 1, "drive_number": 1, "offense": "Ohio State", "defense": "Rival",
+        {"game_id": 1, "season": 2025, "week": 1, "drive_number": 1, "offense": "Ohio State", "defense": "Rival",
         "offense_score": 7, "defense_score": 0},
-        {"game_id": 1, "week": 1, "drive_number": 2, "offense": "Ohio State", "defense": "Rival",
+        {"game_id": 1, "season": 2025, "week": 1, "drive_number": 2, "offense": "Ohio State", "defense": "Rival",
         "offense_score": 10, "defense_score": 0},
-        {"game_id": 1, "week": 1, "drive_number": 3, "offense": "Rival", "defense": "Ohio State",
+        {"game_id": 1, "season": 2025, "week": 1, "drive_number": 3, "offense": "Rival", "defense": "Ohio State",
         "offense_score": 7, "defense_score": 10},   # a different team's own offense -- must be excluded
     ]
     with patch.object(ND, "load_schedule", return_value=schedule), \

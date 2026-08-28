@@ -300,10 +300,29 @@ def refresh_player_game_stats(year: int, api_key: str, completed_weeks: List[int
     completed=True (see refresh_ncaaf.py), not every week 1-15 blindly; querying a week with no
     games played yet just burns a call for an empty result.
 
+    REWRITTEN DIRECTLY ON REQUEST, two real, coordinated changes, both closing the same real gap
+    the 2025-baseline toggle exposed live: this cache never had a "season" column at all, and
+    calling this function a second time (for a different year) used to silently OVERWRITE
+    whatever the first call had already written, rather than combining them.
+
+    1) EVERY row now carries a real "season" column (=year, known at call time -- this function
+       is still called one real year at a time, not redesigned into a multi-year signature,
+       since that would touch every real caller for no real benefit over this simpler fix).
+       Downstream readers (player_recent_games, get_team_drive_outcomes's own sibling logic)
+       MUST filter on season now, not week alone -- see player_recent_games' own docstring for
+       why mixing two different seasons' "week 6" together would be a real, silent bug.
+    2) This function now MERGES with whatever's already cached at out_path, rather than
+       overwriting it -- reads the existing cache first, replaces any row for a (game_id,
+       player_id, season) combination this run just re-fetched (in case CFBD revised a stat),
+       and PRESERVES every row for a season/week this run didn't touch. That's what makes it
+       safe to call this function once for the current season's weeks and, separately, once for
+       a prior season's weeks (see refresh_ncaaf.py's own one-time-prior-season logic) without
+       either call erasing the other's real, already-cached data.
+
     RESPONSE SHAPE, the least-confirmed piece of this whole integration -- flagged directly, not
     glossed over: GET /games/players returns a deeply nested structure, confirmed down to
     {id, teams: [{school, conference, home_away, points, categories: [{name, types: [{...,
-    athletes: [{...}]}]}]}]} against CFBD's own published model docs (PlayerGame -> 
+    athletes: [{...}]}]}]}]} against CFBD's own published model docs (PlayerGame ->
     PlayerGameTeams -> PlayerGameCategories -> PlayerGameTypes -> PlayerGameAthletes). The two
     deepest models' exact field names (does a "type" entry key its name as "name" or "type"? does
     an athlete entry use "id"/"name"/"stat" like PlayerStat, or different keys?) resisted full
@@ -347,30 +366,47 @@ def refresh_player_game_stats(year: int, api_key: str, completed_weeks: List[int
                             if athlete_id is None or not cat_name or not type_name:
                                 continue
                             long_rows.append({
-                                "game_id": game_id, "week": week, "team": school,
+                                "season": year, "game_id": game_id, "week": week, "team": school,
                                 "opponent_team": opponent,
                                 "player_id": athlete_id, "player": athlete_name,
                                 "stat_col": f"{cat_name}_{type_name}".strip("_"),
                                 "value": stat_val,
                             })
 
+    _id_cols = ["season", "game_id", "week", "team", "opponent_team", "player_id", "player"]
     if not long_rows:
-        cols = ["game_id", "week", "team", "opponent_team", "player_id", "player"]
-        pd.DataFrame(columns=cols).to_csv(out_path, index=False)
-        print(f"[NCAAF] GET /games/players: 0 rows across {len(completed_weeks)} week(s) -- "
-             "wrote an empty cache.")
+        print(f"[NCAAF] GET /games/players?year={year}: 0 rows across {len(completed_weeks)} "
+             f"week(s) -- leaving any existing cached data for other seasons/weeks untouched.")
+        if not os.path.exists(out_path):
+            pd.DataFrame(columns=_id_cols).to_csv(out_path, index=False)
         return out_path
 
     long_df = pd.DataFrame(long_rows)
     long_df["value"] = pd.to_numeric(long_df["value"], errors="coerce")
-    identity = (long_df[["game_id", "week", "team", "opponent_team", "player_id", "player"]]
+    identity = (long_df[_id_cols]
                .drop_duplicates(["game_id", "player_id"]).set_index(["game_id", "player_id"]))
     wide = long_df.pivot_table(index=["game_id", "player_id"], columns="stat_col",
                                values="value", aggfunc="first")
-    out = identity.join(wide, how="left").reset_index()
-    out.to_csv(out_path, index=False)
-    print(f"[NCAAF] GET /games/players: {len(out)} player-game row(s) across "
-         f"{len(completed_weeks)} week(s), {len(wide.columns)} stat columns: {sorted(wide.columns)}")
+    new_rows = identity.join(wide, how="left").reset_index()
+
+    # MERGE with whatever's already cached, rather than overwrite -- the real fix. Existing rows
+    # for a (game_id, player_id) THIS run re-fetched are replaced (CFBD may have revised a stat);
+    # existing rows for any OTHER season/week this run didn't touch are preserved untouched.
+    existing = load_player_game_stats(out_path)
+    if existing:
+        existing_df = pd.DataFrame(existing)
+        refetched_keys = set(zip(new_rows["game_id"], new_rows["player_id"]))
+        keep_mask = ~existing_df.apply(lambda r: (r["game_id"], r["player_id"]) in refetched_keys, axis=1)
+        combined = pd.concat([existing_df[keep_mask], new_rows], ignore_index=True)
+    else:
+        combined = new_rows
+
+    combined.to_csv(out_path, index=False)
+    seasons_now_present = sorted({int(s) for s in combined["season"].dropna().unique()})
+    print(f"[NCAAF] GET /games/players?year={year}: {len(new_rows)} player-game row(s) across "
+         f"{len(completed_weeks)} week(s) merged in -- cache now covers season(s) "
+         f"{seasons_now_present}, {len(combined)} total row(s), {len(wide.columns)} stat "
+         f"columns: {sorted(wide.columns)}")
     return out_path
 
 
@@ -395,7 +431,7 @@ def load_player_game_stats(path: str = PLAYER_GAME_STATS_PATH) -> List[Dict]:
         return []
 
 
-_DRIVES_COLUMNS = ["game_id", "week", "drive_id", "drive_number", "offense", "defense",
+_DRIVES_COLUMNS = ["season", "game_id", "week", "drive_id", "drive_number", "offense", "defense",
                   "offense_score", "defense_score", "scoring", "start_period", "start_yardline"]
 
 
@@ -423,7 +459,14 @@ def refresh_drives(year: int, api_key: str, completed_weeks: List[int],
     per-drive points requires a real delta computation against this same team's own PREVIOUS
     drive on offense -- see compute_drive_points below, which does that computation once, in one
     place, rather than leaving every future caller to reimplement (and possibly get wrong) the
-    same delta logic."""
+    same delta logic.
+
+    REWRITTEN DIRECTLY ON REQUEST, same real fix and same real reason as
+    refresh_player_game_stats' own rewrite: every row now carries a real "season" column (this
+    cache never had one), and this function now MERGES with whatever's already cached rather
+    than overwriting it, so a real, separate call for a prior season's own complete drive data
+    (see refresh_ncaaf.py's own one-time-prior-season logic) doesn't erase the current season's
+    already-cached drives, or vice versa."""
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     rows: List[Dict] = []
     printed_sample = False
@@ -451,19 +494,37 @@ def refresh_drives(year: int, api_key: str, completed_weeks: List[int],
             if game_id is None or not offense or not defense:
                 continue
             rows.append({
-                "game_id": game_id, "week": week, "drive_id": drive_id, "drive_number": drive_number,
-                "offense": offense, "defense": defense,
+                "season": year, "game_id": game_id, "week": week, "drive_id": drive_id,
+                "drive_number": drive_number, "offense": offense, "defense": defense,
                 "offense_score": offense_score, "defense_score": defense_score,
                 "scoring": scoring, "start_period": start_period, "start_yardline": start_yardline,
             })
 
     if not rows:
-        pd.DataFrame(columns=_DRIVES_COLUMNS).to_csv(out_path, index=False)
-        print(f"[NCAAF] GET /drives: 0 rows across {len(completed_weeks)} week(s) -- wrote an empty cache.")
+        print(f"[NCAAF] GET /drives?year={year}: 0 rows across {len(completed_weeks)} week(s) "
+             f"-- leaving any existing cached data for other seasons/weeks untouched.")
+        if not os.path.exists(out_path):
+            pd.DataFrame(columns=_DRIVES_COLUMNS).to_csv(out_path, index=False)
         return out_path
 
-    pd.DataFrame(rows)[_DRIVES_COLUMNS].to_csv(out_path, index=False)
-    print(f"[NCAAF] GET /drives: {len(rows)} drive row(s) across {len(completed_weeks)} week(s).")
+    new_rows = pd.DataFrame(rows)[_DRIVES_COLUMNS]
+
+    # MERGE with whatever's already cached, rather than overwrite -- same real fix as
+    # refresh_player_game_stats' own rewrite, for the same real reason.
+    existing = load_drives(out_path)
+    if existing:
+        existing_df = pd.DataFrame(existing)
+        refetched_games = set(new_rows["game_id"])
+        combined = pd.concat([existing_df[~existing_df["game_id"].isin(refetched_games)], new_rows],
+                             ignore_index=True)
+    else:
+        combined = new_rows
+
+    combined.to_csv(out_path, index=False)
+    seasons_now_present = sorted({int(s) for s in combined["season"].dropna().unique()})
+    print(f"[NCAAF] GET /drives?year={year}: {len(new_rows)} drive row(s) across "
+         f"{len(completed_weeks)} week(s) merged in -- cache now covers season(s) "
+         f"{seasons_now_present}, {len(combined)} total row(s).")
     return out_path
 
 
