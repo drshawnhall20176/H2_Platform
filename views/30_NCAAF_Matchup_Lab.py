@@ -85,19 +85,25 @@ def load_slate(date_str: str):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_matchup(date_str: str, player_id, opp_name: str, team_name: str):
-    h2h_log = E.get_player_history_vs_opponent(player_id, opp_name, date_str)
-    season_log = E.get_player_season_games(player_id, date_str)
-    opp_recent = E.get_team_allowed_stats(opp_name, date_str, n=5)
-    opp_season = E.get_team_allowed_stats(opp_name, date_str, n=None)
-    opp_recent_tds = E.get_team_tds_allowed(opp_name, date_str, n=5)
-    opp_season_tds = E.get_team_tds_allowed(opp_name, date_str, n=None)
-    opp_recent_pass_tds = E.get_team_passing_tds_allowed(opp_name, date_str, n=5)
-    opp_season_pass_tds = E.get_team_passing_tds_allowed(opp_name, date_str, n=None)
-    opp_recent_rush_tds = E.get_team_rushing_tds_allowed(opp_name, date_str, n=5)
-    opp_season_rush_tds = E.get_team_rushing_tds_allowed(opp_name, date_str, n=None)
-    team_rest = E.get_team_rest_info(team_name, date_str)
-    opp_rest = E.get_team_rest_info(opp_name, date_str)
+def load_matchup(date_str: str, stats_date_str: str, player_id, opp_name: str, team_name: str):
+    # TWO DIFFERENT DATES, same real reasoning as NCAAF QB Lab's own load() -- see that page's
+    # own docstring for the full explanation. date_str stays on today's real slate (unused inside
+    # this function directly, but kept in the signature/cache key so switching slate dates
+    # doesn't reuse a stale cached matchup from a different real date); every real stats-lookup
+    # call below uses stats_date_str, which the 2025-baseline toggle below can redirect to a
+    # real, already-completed prior season.
+    h2h_log = E.get_player_history_vs_opponent(player_id, opp_name, stats_date_str)
+    season_log = E.get_player_season_games(player_id, stats_date_str)
+    opp_recent = E.get_team_allowed_stats(opp_name, stats_date_str, n=5)
+    opp_season = E.get_team_allowed_stats(opp_name, stats_date_str, n=None)
+    opp_recent_tds = E.get_team_tds_allowed(opp_name, stats_date_str, n=5)
+    opp_season_tds = E.get_team_tds_allowed(opp_name, stats_date_str, n=None)
+    opp_recent_pass_tds = E.get_team_passing_tds_allowed(opp_name, stats_date_str, n=5)
+    opp_season_pass_tds = E.get_team_passing_tds_allowed(opp_name, stats_date_str, n=None)
+    opp_recent_rush_tds = E.get_team_rushing_tds_allowed(opp_name, stats_date_str, n=5)
+    opp_season_rush_tds = E.get_team_rushing_tds_allowed(opp_name, stats_date_str, n=None)
+    team_rest = E.get_team_rest_info(team_name, stats_date_str)
+    opp_rest = E.get_team_rest_info(opp_name, stats_date_str)
     return (h2h_log, season_log, opp_recent, opp_season, opp_recent_tds, opp_season_tds,
            opp_recent_pass_tds, opp_season_pass_tds, opp_recent_rush_tds, opp_season_rush_tds,
            team_rest, opp_rest)
@@ -124,14 +130,40 @@ with st.spinner("Loading this week's slate..."):
     rows, n_games = load_slate(date_str)
 
 if not rows:
+    st.info("No games scheduled for this date — try a different date.", icon="🕐")
+    st.stop()
+
+# 2025-baseline toggle -- ADDED DIRECTLY ON REQUEST, same real reasoning and same "2026-02-01"
+# date as NCAAF QB Lab's own toggle (see that page's own comment for why that specific date is
+# safe). A REAL, EASY MISTAKE THIS SECTION AVOIDS: row["_recent_games"] is baked into each row at
+# SLATE-BUILD time, using TODAY's real date, regardless of stats_date_str below -- redirecting
+# load_matchup's own stats-lookup calls alone would leave the trend charts and "recent games"
+# table silently empty even in baseline mode, since those read from the row directly, not from
+# load_matchup's return values. Fixed below by using season_log (which DOES respect
+# stats_date_str) as the real recent-games log whenever baseline mode is active.
+show_2025_baseline = st.checkbox(
+    "📊 Show 2025 season baseline instead (2026 hasn't started yet)",
+    help="Uses last season's real, complete stats as a starting-point baseline for the same "
+        "real players — clearly a stand-in for 2026 form, not a claim about it. A transfer, "
+        "true freshman, or backup who barely played in 2025 will honestly show no baseline at "
+        "all, not a guessed one.")
+stats_date_str = "2026-02-01" if show_2025_baseline else date_str
+
+if show_2025_baseline:
+    st.info("📊 **Showing 2025 season data as a baseline.** Today's real matchups above are "
+           "current — the numbers below are last season's, since 2026 has no games yet. Real "
+           "roster and scheme changes since 2025 aren't reflected here.", icon="📊")
+elif not any(r.get("_recent_games") for r in rows):
     st.info(
         "No player has a completed game yet **this season**, so there's no real recent-form data "
         "to project from — this is expected for the first week of a new season, not a data "
         "problem with this specific date. This page's own signals stay empty until real Week 1 "
-        "games are actually in the books. **For player prop decisions right now, use Best Bets "
-        "or Graded Picks instead** — those already fall back to last season's full stats as a "
-        "real, tested baseline, so they keep working even before this season's first snap.",
+        "games are actually in the books. **Check the \"Show 2025 season baseline\" box above** "
+        "for real, honest content to work with in the meantime — or use Best Bets or Graded "
+        "Picks instead for actual prop decisions right now, since those already fall back to "
+        "last season's full stats as a real, tested baseline.",
         icon="🕐")
+    st.stop()
     st.stop()
 
 rows_sorted = sorted(rows, key=lambda r: (r["GameLabel"], r["Player"]))
@@ -176,7 +208,7 @@ if not row.get("_markets"):
 with st.spinner(f"Pulling {row['Opp']}'s matchup history and defensive trend..."):
     (h2h_log, season_log, opp_recent, opp_season, opp_recent_tds, opp_season_tds,
     opp_recent_pass_tds, opp_season_pass_tds, opp_recent_rush_tds, opp_season_rush_tds,
-    team_rest, opp_rest) = load_matchup(date_str, pid, opp_name, team_name)
+    team_rest, opp_rest) = load_matchup(date_str, stats_date_str, pid, opp_name, team_name)
 
 profile = P.build_matchup_profile(row, h2h_log, opp_recent, opp_season, season_log=season_log,
                                   opp_recent_tds_allowed=opp_recent_tds, opp_season_tds_allowed=opp_season_tds,
@@ -251,7 +283,7 @@ if offers_info:
 
 live_lines = O.market_lines_for_player(offers, row["Player"], projections_module=P) if offers else {}
 
-log = row.get("_recent_games") or []
+log = season_log if show_2025_baseline else (row.get("_recent_games") or [])
 trend_log = P.build_trend_series(log)   # oldest -> newest, for left-to-right reading
 market_slots = P.market_list()          # only 1-2 entries for a real row, position-gated already
 active_markets = [(mkey, col, disp) for mkey, col, disp in market_slots if mkey in row["_markets"]]

@@ -53,11 +53,22 @@ st.info("🆕 This page's own first real live load is part of this platform's fi
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def load(date_str: str):
+def load(date_str: str, stats_date_str: str):
     # Same real, established shared-cache discipline as NFL QB Lab's own load() -- see
     # ncaaf_shared_cache.py's own module docstring for the full reasoning (built proactively,
     # specifically so this page's own first real caller would reach for it from line one rather
     # than defining a local, soon-to-be-duplicated wrapper).
+    #
+    # TWO DIFFERENT DATES, ADDED DIRECTLY ON REQUEST, on purpose, not a bug: date_str picks which
+    # REAL, ACTUAL games/players show up (today's real 2026 slate, always) -- stats_date_str
+    # picks which season's data POWERS the numbers for those same real players. Normally these
+    # are identical. The one real exception is the 2025-baseline mode below: _infer_season
+    # already, correctly resolves any January/February date to the PRIOR year's season (see its
+    # own docstring) -- so passing a real date like "2026-02-01" here, while date_str stays on
+    # today's real slate date, gives every stats-lookup function below the real, complete,
+    # already-finished 2025 season, with zero new functions needed and zero risk of the real
+    # week-number collision a same-season blend would risk (see get_team_drive_outcomes' own
+    # docstring for why that collision is a real, named concern elsewhere in this build).
     rows, meta = NSC.load_ncaaf_slate_cached(date_str)
     qb_rows = [r for r in rows if r["Position"] == "QB"]
 
@@ -65,15 +76,15 @@ def load(date_str: str):
     # get_team_allowed_stats already returns both passing_yards AND rushing_yards in one call per
     # opponent — no second round of per-opponent calls needed for the rushing side. Same real
     # confirmed behavior as NFL's own get_team_allowed_stats.
-    opp_stats = {opp: E.get_team_allowed_stats(opp, date_str, n=None) for opp in opps}
+    opp_stats = {opp: E.get_team_allowed_stats(opp, stats_date_str, n=None) for opp in opps}
     opp_pass_allowed = {opp: s.get("passing_yards", 0.0) for opp, s in opp_stats.items()}
     opp_rush_allowed = {opp: s.get("rushing_yards", 0.0) for opp, s in opp_stats.items()}
-    league_avg_pass = E.get_league_average_pass_yards_allowed(date_str)
-    league_avg_rush = E.get_league_average_rush_yards_allowed(date_str)
+    league_avg_pass = E.get_league_average_pass_yards_allowed(stats_date_str)
+    league_avg_rush = E.get_league_average_rush_yards_allowed(stats_date_str)
     matchup_proj = P.build_qb_matchup_projections(rows, opp_pass_allowed, league_avg_pass,
                                                   opp_rush_allowed, league_avg_rush)
 
-    season_logs = {r["_pid"]: E.get_player_season_games(r["_pid"], date_str) for r in qb_rows}
+    season_logs = {r["_pid"]: E.get_player_season_games(r["_pid"], stats_date_str) for r in qb_rows}
     efficiency = P.build_qb_efficiency_table(rows, season_logs)
 
     return matchup_proj, efficiency, len(meta), len(qb_rows)
@@ -82,20 +93,45 @@ def load(date_str: str):
 target_date = st.date_input("Slate date", datetime.now(eastern))
 date_str = target_date.strftime("%Y-%m-%d")
 
+# 2025-baseline toggle -- ADDED DIRECTLY ON REQUEST, specifically so there's real, honest content
+# to discuss before 2026 has any completed games at all. "2026-02-01" is deliberately AFTER the
+# real CFP National Championship (mid-January) and BEFORE the 2026 season could plausibly start
+# -- _infer_season resolves it to season 2025, the full, real, already-completed season, cleanly.
+show_2025_baseline = st.checkbox(
+    "📊 Show 2025 season baseline instead (2026 hasn't started yet)",
+    help="Uses last season's real, complete stats as a starting-point baseline for the same "
+        "real players — clearly a stand-in for 2026 form, not a claim about it. A transfer, "
+        "true freshman, or backup who barely played in 2025 will honestly show no baseline at "
+        "all, not a guessed one.")
+stats_date_str = "2026-02-01" if show_2025_baseline else date_str
+
+if show_2025_baseline:
+    st.info("📊 **Showing 2025 season data as a baseline.** Today's real matchups above are "
+           "current — the numbers below are last season's, since 2026 has no games yet. Real "
+           "roster and scheme changes since 2025 aren't reflected here.", icon="📊")
+
 with st.spinner("Loading QBs and building matchup-aware projections..."):
-    matchup_proj, efficiency, n_games, n_qbs = load(date_str)
+    matchup_proj, efficiency, n_games, n_qbs = load(date_str, stats_date_str)
 
 if not matchup_proj and not efficiency:
-    st.info(
-        "No QB has a completed game yet **this season**, so there's no real recent-form data to "
-        "project from — this is expected for the first week of a new season, not a data problem "
-        "with this specific date. This page's own signals stay empty until real Week 1 games are "
-        "actually in the books (deliberately: blending last season's game log with this one's "
-        "risks mixing the wrong 'week 6' together). **For player prop decisions right now, use "
-        "Best Bets or Graded Picks instead** — those already fall back to last season's full "
-        "stats as a real, tested baseline, so they keep working even before this season's first "
-        "snap. This page will start filling in once real games are actually completed.",
-        icon="🕐")
+    if show_2025_baseline:
+        st.info(
+            "No 2025 data on file for any QB on today's slate — likely means these are new "
+            "transfers, true freshmen, or backups who didn't see meaningful action last season. "
+            "Try a different game/date, or uncheck the baseline toggle above.",
+            icon="📊")
+    else:
+        st.info(
+            "No QB has a completed game yet **this season**, so there's no real recent-form data to "
+            "project from — this is expected for the first week of a new season, not a data "
+            "problem with this specific date. This page's own signals stay empty until real Week "
+            "1 games are actually in the books (deliberately: blending last season's game log "
+            "with this one's risks mixing the wrong 'week 6' together). **Check the \"Show 2025 "
+            "season baseline\" box above** for real, honest content to work with in the "
+            "meantime — or use Best Bets or Graded Picks instead for actual prop decisions right "
+            "now, since those already fall back to last season's full stats as a real, tested "
+            "baseline.",
+            icon="🕐")
     st.stop()
 
 st.caption(f"{n_games} game(s) · {n_qbs} QB(s) on the slate")
