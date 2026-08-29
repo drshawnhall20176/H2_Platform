@@ -592,7 +592,8 @@ def test_sidebar_sections_match_the_documented_grouping():
         "10": "🔬 DEEP RESEARCH", "11": "🔬 DEEP RESEARCH", "12": "🔬 DEEP RESEARCH",
         "13": "🔬 DEEP RESEARCH", "14": "🔬 DEEP RESEARCH", "15": "🔬 DEEP RESEARCH",
         "25": "🔬 DEEP RESEARCH", "26": "🔬 DEEP RESEARCH", "27": "🔬 DEEP RESEARCH",
-        "29": "🔬 DEEP RESEARCH", "30": "🔬 DEEP RESEARCH", "31": "🔬 DEEP RESEARCH", "32": "🔬 DEEP RESEARCH",
+        "29": "🔬 DEEP RESEARCH", "30": "🔬 DEEP RESEARCH", "31": "🔬 DEEP RESEARCH",
+        "32": "🔬 DEEP RESEARCH", "33": "🔬 DEEP RESEARCH", "34": "🔬 DEEP RESEARCH",
         "16": "🔍 SELF-GRADING & PROOF", "17": "🔍 SELF-GRADING & PROOF",
         "18": "🔍 SELF-GRADING & PROOF", "19": "🔍 SELF-GRADING & PROOF",
         "20": "📣 OPS & CONTENT", "21": "📣 OPS & CONTENT", "22": "📣 OPS & CONTENT",
@@ -1202,6 +1203,12 @@ def test_sport_only_page_visibility_matches_expected_config():
     # the fast browse-by-position trend-chart tool, built entirely on functions already tested
     # for QB Lab/Matchup Lab (get_player_season_games, build_trend_series, market_list/
     # default_line/stat_key_for) -- no new engine work needed for this one.
+    #
+    # Player Lines (NFL, 33) and Game Lab (NFL, 34) added directly on request -- wiring up NFL
+    # with the same tools built for NCAAF. Player Lines adapts from page 31; Game Lab adapts
+    # from NCAAF's Game Lab (32) adding a real, live injury report via nflreadpy (not a
+    # placeholder). Two new engine functions (get_team_points_allowed, get_league_average_scoring)
+    # added to nfl_engine.py; simulate_nfl_game added to nfl_projections.py.
     src = (_HERE / "streamlit_app.py").read_text()
     m = re.search(r"sport_only_leads = \{([^}]*)\}", src, re.DOTALL)
     assert m, "streamlit_app.py must define sport_only_leads"
@@ -1212,7 +1219,8 @@ def test_sport_only_page_visibility_matches_expected_config():
                      "10": ("WNBA", "NBA", "NCAAMB"), "11": ("WNBA", "NBA", "NCAAMB"),
                      "12": ("NFL",), "13": ("NFL",), "14": ("NFL",),
                      "23": ("UFC",), "24": ("MLB",), "25": ("NFL",), "26": ("MLB",),
-                     "27": ("MLB",), "29": ("NCAAF",), "30": ("NCAAF",), "31": ("NCAAF",), "32": ("NCAAF",)}, pairs
+                     "27": ("MLB",), "29": ("NCAAF",), "30": ("NCAAF",), "31": ("NCAAF",),
+                     "32": ("NCAAF",), "33": ("NFL",), "34": ("NFL",)}, pairs
     print("✓ sport_only_leads matches expected config (Bullpen Watch/Game Watch/Pitching Lab/"
           "Dinger Engine/Matchup Lab(MLB)/Player Lines/First Innings Totals -> MLB, Hot Hand "
           "Engine/Matchup Lab(WNBA/NBA/NCAAMB) -> WNBA+NBA+NCAAMB, Matchup Lab(NFL)/Anytime TD "
@@ -2362,6 +2370,58 @@ def test_ncaaf_game_lab_wires_correctly_with_two_honest_tiers():
         "period probabilities as if they were equally confirmed as the schedule-based moneyline"
     )
     print("✓ NCAAF Game Lab genuinely gates to NCAAF, wires both real simulation functions, sorts games by time, and maintains two honest data tiers")
+
+
+def test_nfl_player_lines_wires_correctly_with_confirmed_column_names():
+    # BUILT DIRECTLY ON REQUEST: NFL Player Lines (33), adapted from NCAAF Player Lines (31).
+    # Confirms it gates to NFL, uses the correct NFL column names for TDs (rushing_tds /
+    # receiving_tds from nflreadpy -- confirmed live, not a cross-referenced guess like NCAAF's),
+    # and sorts games by time rather than alphabetically.
+    src = (_HERE / "views" / "33_NFL_Player_Lines.py").read_text()
+    assert 'sports.require_sport(["NFL"], "NFL Player Lines")' in src, (
+        "must gate to NFL specifically"
+    )
+    assert 'lambda g: g.get("passing_tds") or 0' in src, (
+        "QB's passing TD chart must use NFL's confirmed nflreadpy column name 'passing_tds', "
+        "not NCAAF's 'passing_TD'"
+    )
+    assert 'lambda g: (g.get("rushing_tds") or 0) + (g.get("receiving_tds") or 0)' in src, (
+        "non-QB TD chart must use NFL's confirmed 'rushing_tds'/'receiving_tds', not NCAAF's"
+    )
+    assert 'key=lambda g: game_date_by_label[g] or "~"' in src, (
+        "games must sort by real kickoff time, matching the established convention"
+    )
+    assert "import nfl_engine as E" in src and "import nfl_projections as P" in src, (
+        "must use NFL's own engine/projections, not NCAAF's"
+    )
+    print("✓ NFL Player Lines genuinely gates to NFL, uses confirmed nflreadpy TD column names, and sorts games by time")
+
+
+def test_nfl_game_lab_wires_correctly_with_real_injury_report():
+    # BUILT DIRECTLY ON REQUEST: NFL Game Lab (34), the genuine upgrade over NCAAF's version --
+    # a real, live injury report via nflreadpy, not the honest placeholder NCAAF carries.
+    # Confirms it gates to NFL, calls simulate_nfl_game (not NCAAF's version), calls
+    # get_team_injuries for both teams, and sorts games by time.
+    src = (_HERE / "views" / "34_NFL_Game_Lab.py").read_text()
+    assert 'sports.require_sport(["NFL"], "NFL Game Lab")' in src, (
+        "must gate to NFL specifically"
+    )
+    assert "P.simulate_nfl_game(" in src, (
+        "must call simulate_nfl_game specifically -- not NCAAF's simulate_ncaaf_game"
+    )
+    assert "E.get_team_injuries(home_abbr, season, week)" in src, (
+        "must call get_team_injuries for the home team -- the real, live upgrade over NCAAF"
+    )
+    assert "E.get_team_injuries(away_abbr, season, week)" in src, (
+        "must call get_team_injuries for the away team too"
+    )
+    assert 'key=lambda m: m.get("game_date") or "~"' in src, (
+        "must sort games by real kickoff time"
+    )
+    assert "import nfl_engine as E" in src and "import nfl_projections as P" in src, (
+        "must use NFL's own engine/projections"
+    )
+    print("✓ NFL Game Lab genuinely gates to NFL, wires simulate_nfl_game, calls real get_team_injuries for both teams, and sorts games by time")
 
 
 def test_no_undefined_names_anywhere_in_the_real_project():
