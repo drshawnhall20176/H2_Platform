@@ -59,25 +59,32 @@ def load_slate_meta(date_str: str):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_game(date_str: str, home_abbr: str, away_abbr: str):
-    """All game-level signals for one matchup -- cached per game."""
-    season = E._infer_season(date_str)
-    schedule = E.get_schedule(season) if season else []
-    week = E._resolve_week(schedule, date_str) or 999
+def load_game(date_str: str, stats_date_str: str, home_abbr: str, away_abbr: str):
+    """All game-level signals for one matchup -- cached per game.
+    Two dates: date_str picks the game; stats_date_str picks which season's scoring rates power
+    the simulation -- the same two-dates pattern QB Lab, Matchup Lab, Player Lines, and NCAAF
+    Game Lab all use. stats_date_str = '2026-02-01' resolves to the 2025 NFL season via
+    _infer_season's own Jan/Feb subtraction rule (month <= 2 -> season - 1)."""
+    stats_season = E._infer_season(stats_date_str)
+    stats_schedule = E.get_schedule(stats_season) if stats_season else []
+    stats_week = E._resolve_week(stats_schedule, stats_date_str) or 999
 
-    league_avg = E.get_league_average_scoring(date_str)
-    home_scoring = E.get_team_recent_scoring(home_abbr, schedule, week)
-    away_scoring = E.get_team_recent_scoring(away_abbr, schedule, week)
-    home_allowed = E.get_team_points_allowed(home_abbr, date_str)
-    away_allowed = E.get_team_points_allowed(away_abbr, date_str)
+    league_avg = E.get_league_average_scoring(stats_date_str)
+    home_scoring = E.get_team_recent_scoring(home_abbr, stats_schedule, stats_week)
+    away_scoring = E.get_team_recent_scoring(away_abbr, stats_schedule, stats_week)
+    home_allowed = E.get_team_points_allowed(home_abbr, stats_date_str)
+    away_allowed = E.get_team_points_allowed(away_abbr, stats_date_str)
 
     game_result = P.simulate_nfl_game(home_scoring, away_scoring, home_allowed, away_allowed,
                                       league_avg)
 
-    # Real injury reports -- the genuine upgrade over NCAAF's placeholder.
-    # week is the CURRENT week (games haven't been played yet), not before_week.
-    home_injuries = E.get_team_injuries(home_abbr, season, week) if season else []
-    away_injuries = E.get_team_injuries(away_abbr, season, week) if season else []
+    # Injury report uses the CURRENT date's week, not stats_date_str -- we want this week's
+    # real injury status, not last season's. date_str drives this, always.
+    current_season = E._infer_season(date_str)
+    current_schedule = E.get_schedule(current_season) if current_season else []
+    current_week = E._resolve_week(current_schedule, date_str) or 1
+    home_injuries = E.get_team_injuries(home_abbr, current_season, current_week) if current_season else []
+    away_injuries = E.get_team_injuries(away_abbr, current_season, current_week) if current_season else []
 
     return game_result, home_scoring, away_scoring, home_allowed, away_allowed, league_avg, \
            home_injuries, away_injuries
@@ -111,9 +118,24 @@ away_name = selected["away_name"]
 home_abbr = selected.get("home_abbr") or selected.get("home_name")
 away_abbr = selected.get("away_abbr") or selected.get("away_name")
 
+# 2025-BASELINE TOGGLE — same real mechanism as every other NCAAF/NFL page this session.
+# "2026-02-01" resolves to the 2025 NFL season via _infer_season's own confirmed Jan/Feb rule.
+# Injury report always uses the current date's own real week regardless of this toggle -- we
+# want actual current-week injury status, not last season's.
+show_2025_baseline = st.checkbox(
+    "📊 Use 2025 season baseline (2026 NFL hasn't started yet)",
+    value=True,
+    help="Uses last season's real scoring rates for both teams. The injury report below always "
+        "reflects the current real week regardless of this toggle.")
+stats_date_str = "2026-02-01" if show_2025_baseline else date_str
+
+if show_2025_baseline:
+    st.info("📊 **Using 2025 season data.** Scoring rates and simulation below use last season's "
+           "real rates. Injury report reflects this week's actual status.", icon="📊")
+
 with st.spinner(f"Simulating {away_name} @ {home_name} + loading injury reports..."):
     game_result, home_scoring, away_scoring, home_allowed, away_allowed, league_avg, \
-    home_injuries, away_injuries = load_game(date_str, home_abbr, away_abbr)
+    home_injuries, away_injuries = load_game(date_str, stats_date_str, home_abbr, away_abbr)
 
 st.markdown(f"## {away_name} @ {home_name}")
 st.caption(f"20,000 simulations · Normal score distribution · Odds-ratio blend · "
