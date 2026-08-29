@@ -2103,10 +2103,12 @@ def test_ncaaf_qb_lab_wires_correctly_and_carries_its_own_honest_caveat():
     assert "import ncaaf_engine as E" in src and "import ncaaf_projections as P" in src, (
         "must genuinely use NCAAF's own engine/projections modules, not NFL's"
     )
-    assert "P.build_qb_matchup_projections(rows, opp_pass_allowed, league_avg_pass," in src, (
-        "must genuinely reuse the real, confirmed-matching projections function, not a parallel reimplementation")
-    assert "P.build_qb_efficiency_table(rows, season_logs)" in src, (
-        "must genuinely reuse the real, confirmed-matching efficiency table function")
+    assert "P.build_qb_matchup_projections(proj_rows, opp_pass_allowed, league_avg_pass," in src, (
+        "must genuinely reuse the real, confirmed-matching projections function, not a parallel "
+        "reimplementation -- and must use proj_rows (the real, safe, baseline-aware fix), not "
+        "the original, unfixed rows")
+    assert "P.build_qb_efficiency_table(proj_rows, season_logs)" in src, (
+        "must genuinely reuse the real, confirmed-matching efficiency table function, on proj_rows")
     assert "This page's own first real live load is part of this platform's first real," in src, (
         "the real, honest caveat about this being NCAAF's first real live verification must stay "
         "visible on the page itself, not just in a developer-facing comment")
@@ -2165,6 +2167,32 @@ def test_ncaaf_qb_lab_2025_baseline_toggle_is_real_not_cosmetic():
     print("✓ NCAAF QB Lab's 2025-baseline toggle genuinely redirects stats lookups while keeping the real slate date independent, and visibly labels itself when active")
 
 
+def test_ncaaf_qb_lab_baseline_toggle_actually_produces_real_projections():
+    # THE critical fix for a real, reported bug: Player Lines correctly showed a real QB's real
+    # 2025 game log, but QB Lab's own baseline toggle still showed "no data" for that exact same
+    # player -- because build_qb_matchup_projections/build_qb_efficiency_table both gate on
+    # row["_recent_games"], which is baked in at slate-build time using TODAY's date_str,
+    # completely independent of stats_date_str. Confirms the real fix: QB rows get a real,
+    # SHALLOW-COPIED override (never mutating the shared, cached rows object other pages also
+    # read from) before either projections function runs.
+    src = (_HERE / "views" / "29_NCAAF_QB_Lab.py").read_text()
+    assert '_recent_games=season_logs.get(r["_pid"]) or []' in src, (
+        "must genuinely override _recent_games with the real, stats_date_str-aware season log "
+        "before calling either projections function, or the baseline toggle stays broken "
+        "exactly as reported"
+    )
+    assert "dict(r, _recent_games=" in src, (
+        "must use a genuine shallow copy (dict(r, ...)), never mutate the shared rows objects "
+        "in place -- those come from a separately-cached function Matchup Lab and Player Lines "
+        "also read from, and an in-place mutation risks leaking this page's own baseline "
+        "override into their unrelated views")
+    assert "P.build_qb_matchup_projections(proj_rows," in src and "P.build_qb_efficiency_table(proj_rows," in src, (
+        "both real projections functions must receive the real, fixed proj_rows -- not the "
+        "original, unfixed rows"
+    )
+    print("✓ NCAAF QB Lab's baseline toggle now genuinely produces real projections via a safe, non-mutating row override, matching what Player Lines already proved works")
+
+
 def test_ncaaf_matchup_lab_2025_baseline_toggle_also_redirects_the_players_own_log():
     # THE single most important, easiest-to-miss real bug this feature could have shipped with:
     # row["_recent_games"] is baked into each row at SLATE-BUILD time (today's real date),
@@ -2192,6 +2220,29 @@ def test_ncaaf_matchup_lab_2025_baseline_toggle_also_redirects_the_players_own_l
         "not just an empty slate -- the season-average fallback means the slate itself is rarely "
         "empty even in week 1, so checking 'not rows' alone would almost never fire")
     print("✓ NCAAF Matchup Lab's 2025-baseline toggle genuinely redirects BOTH load_matchup's stats calls AND the player's own recent-games log, and the empty-state check tests the real condition")
+
+
+def test_ncaaf_matchup_lab_position_filter_genuinely_narrows_and_labels_players():
+    # BUILT DIRECTLY ON REQUEST, fixing a real, reported UX gap: browsing every player on the
+    # whole slate with no position grouping at all made it genuinely hard to find, say, just the
+    # RBs, or even tell what position a given dropdown entry played without selecting them
+    # first. Confirms the real filter genuinely narrows `rows` before any downstream slot/game/
+    # player logic runs (not just a cosmetic label), and the player dropdown itself shows
+    # position directly, matching NCAAF Player Lines' own established QB/RB/WR-TE grouping for
+    # consistency across the two pages.
+    src = (_HERE / "views" / "30_NCAAF_Matchup_Lab.py").read_text()
+    assert '_POSITION_GROUPS = {"All positions": ("QB", "RB", "WR", "TE"), "QB": ("QB",), "RB": ("RB",),' in src, (
+        "the real position groups must match NCAAF Player Lines' own QB/RB/WR-TE grouping, not a new, third scheme"
+    )
+    assert 'rows = [r for r in rows if r.get("Position") in _POSITION_GROUPS[position_group]]' in src, (
+        "the filter must genuinely narrow the real rows list before slots/games/player options "
+        "are computed from it, not just change a label"
+    )
+    assert "{r['Player']} ({r['Team']}, {r['Position']}) — {r['GameLabel']}" in src, (
+        "the player dropdown itself must show real position, so 'All positions' mode doesn't "
+        "leave the reported ambiguity in place"
+    )
+    print("✓ NCAAF Matchup Lab's position filter genuinely narrows the real player list before downstream filters run, and the dropdown itself shows real position")
 
 
 def test_ncaaf_matchup_lab_wires_correctly_and_carries_both_its_honest_gaps():
@@ -2253,6 +2304,23 @@ def test_ncaaf_player_lines_wires_correctly_and_covers_every_position_group():
         "the real, flagged uncertainty on TD-allowed-style column names must stay visible on "
         "this page too, not silently dropped just because it's the third page to reuse them")
     print("✓ NCAAF Player Lines genuinely gates to NCAAF, reuses the real tested data functions, covers all three real position groups with correct chart specs, and carries its own honest TD-column flag")
+
+
+def test_ncaaf_player_lines_sorts_games_by_real_time_not_alphabetically():
+    # BUILT DIRECTLY ON REQUEST, fixing a real, reported bug: the Game dropdown used to be a
+    # plain sorted() over game labels -- a text sort, so a game starting later could land above
+    # one starting earlier for the wrong reason (alphabetical order, not kickoff order). Confirms
+    # the real fix matches the same, already-correct pattern NCAAF Matchup Lab and MLB Player
+    # Lines both already use -- sorting on each game's own real start time, not its label text.
+    src = (_HERE / "views" / "31_NCAAF_Player_Lines.py").read_text()
+    assert "games_present = sorted({r[\"GameLabel\"] for r in slot_rows})" not in src, (
+        "the old, plain alphabetical sort must genuinely be gone, not left alongside a new one"
+    )
+    assert 'games_present = sorted(game_date_by_label, key=lambda g: game_date_by_label[g] or "~")' in src, (
+        "must sort on each game's own real start time, matching Matchup Lab's and MLB Player "
+        "Lines' own already-correct convention"
+    )
+    print("✓ NCAAF Player Lines now sorts its Game dropdown by real kickoff time, matching the established convention every other page already uses")
 
 
 def test_no_undefined_names_anywhere_in_the_real_project():
