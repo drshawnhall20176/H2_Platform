@@ -164,6 +164,18 @@ elif not any(r.get("_recent_games") for r in rows):
         "last season's full stats as a real, tested baseline.",
         icon="🕐")
     st.stop()
+
+# POSITION GROUP FILTER, added directly on request: browsing "every player on the whole slate"
+# with no position grouping at all made it genuinely hard to find, say, just the RBs, or even
+# tell what position a given name in the dropdown played without selecting them first. Same
+# real position groups NCAAF Player Lines already established (page 31) -- QB / RB / WR+TE --
+# for consistency across the two pages, not a new, third grouping scheme.
+_POSITION_GROUPS = {"All positions": ("QB", "RB", "WR", "TE"), "QB": ("QB",), "RB": ("RB",),
+                   "WR / TE": ("WR", "TE")}
+position_group = st.radio("Position", list(_POSITION_GROUPS.keys()), horizontal=True)
+rows = [r for r in rows if r.get("Position") in _POSITION_GROUPS[position_group]]
+if not rows:
+    st.info(f"No {position_group} players on today's real slate — try a different position or date.")
     st.stop()
 
 rows_sorted = sorted(rows, key=lambda r: (r["GameLabel"], r["Player"]))
@@ -196,7 +208,7 @@ if not final_rows:
     st.info("No players match the current filters — try a different time slot or game.")
     st.stop()
 
-options = {f"{r['Player']} ({r['Team']}) — {r['GameLabel']}": r for r in final_rows}
+options = {f"{r['Player']} ({r['Team']}, {r['Position']}) — {r['GameLabel']}": r for r in final_rows}
 choice = st.selectbox("Player", list(options.keys()))
 row = options[choice]
 

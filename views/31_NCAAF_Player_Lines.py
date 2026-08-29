@@ -139,7 +139,15 @@ with c_slot:
     slot_pick = st.selectbox("Time slot", ["All slate"] + slots_present)
 slot_rows = group_rows if slot_pick == "All slate" else [r for r in group_rows if r["_slot"] == slot_pick]
 
-games_present = sorted({r["GameLabel"] for r in slot_rows})
+# SORTED BY REAL GAME TIME, not alphabetically -- a real, reported bug fix: this used to be a
+# plain sorted() over game labels (a text sort, so "Alabama @ Ohio State" could land before
+# "Army @ Navy" for the wrong reason -- alphabetical order, not kickoff order). Matches
+# Matchup Lab's own, already-correct game_date_by_label pattern (see that page's own comment)
+# and MLB Player Lines' own real convention (sorted(pk_date, key=lambda p: pk_date[p] or "~")).
+game_date_by_label = {}
+for r in slot_rows:
+    game_date_by_label.setdefault(r["GameLabel"], r.get("_game_date"))
+games_present = sorted(game_date_by_label, key=lambda g: game_date_by_label[g] or "~")
 with c_game:
     game_pick = st.selectbox("Game", ["All games in this slot"] + games_present)
 final_rows = slot_rows if game_pick == "All games in this slot" else [r for r in slot_rows if r["GameLabel"] == game_pick]

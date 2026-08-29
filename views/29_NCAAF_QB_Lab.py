@@ -72,6 +72,30 @@ def load(date_str: str, stats_date_str: str):
     rows, meta = NSC.load_ncaaf_slate_cached(date_str)
     qb_rows = [r for r in rows if r["Position"] == "QB"]
 
+    season_logs = {r["_pid"]: E.get_player_season_games(r["_pid"], stats_date_str) for r in qb_rows}
+
+    # THE REAL FIX, added directly on request, catching a real bug that shipped alongside the
+    # baseline toggle itself: row["_recent_games"] is baked into each row at SLATE-BUILD time,
+    # using TODAY's real date_str, completely independent of stats_date_str -- the exact same
+    # real gap Matchup Lab's own load_matchup already had fixed (see that page's own comment for
+    # the full reasoning), just never carried over here. Both build_qb_matchup_projections and
+    # build_qb_efficiency_table gate on `if not log: continue` using THIS row field specifically
+    # -- with 2026 genuinely having zero games, that field is empty for every real QB regardless
+    # of the toggle, so both functions silently skipped every QB before ever touching the real,
+    # correctly-computed season_logs above.
+    #
+    # SHALLOW-COPIED, not mutated in place -- a real, deliberate safety choice: `rows` comes from
+    # NSC.load_ncaaf_slate_cached, a SEPARATELY cached function Matchup Lab and Player Lines also
+    # call. Mutating those same row dicts directly would risk leaking this page's own baseline
+    # override into their own, separate views if Streamlit's cache ever returns the same
+    # underlying objects rather than fresh copies -- not worth relying on cache internals to
+    # avoid, when a plain dict copy costs nothing here.
+    if stats_date_str != date_str:
+        proj_rows = [dict(r, _recent_games=season_logs.get(r["_pid"]) or []) if r["Position"] == "QB" else r
+                    for r in rows]
+    else:
+        proj_rows = rows
+
     opps = sorted({r["Opp"] for r in qb_rows if r.get("Opp")})
     # get_team_allowed_stats already returns both passing_yards AND rushing_yards in one call per
     # opponent — no second round of per-opponent calls needed for the rushing side. Same real
@@ -81,11 +105,10 @@ def load(date_str: str, stats_date_str: str):
     opp_rush_allowed = {opp: s.get("rushing_yards", 0.0) for opp, s in opp_stats.items()}
     league_avg_pass = E.get_league_average_pass_yards_allowed(stats_date_str)
     league_avg_rush = E.get_league_average_rush_yards_allowed(stats_date_str)
-    matchup_proj = P.build_qb_matchup_projections(rows, opp_pass_allowed, league_avg_pass,
+    matchup_proj = P.build_qb_matchup_projections(proj_rows, opp_pass_allowed, league_avg_pass,
                                                   opp_rush_allowed, league_avg_rush)
 
-    season_logs = {r["_pid"]: E.get_player_season_games(r["_pid"], stats_date_str) for r in qb_rows}
-    efficiency = P.build_qb_efficiency_table(rows, season_logs)
+    efficiency = P.build_qb_efficiency_table(proj_rows, season_logs)
 
     return matchup_proj, efficiency, len(meta), len(qb_rows)
 
