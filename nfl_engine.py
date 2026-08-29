@@ -259,14 +259,38 @@ _IDP_STAT_COLS = ["def_tackles_solo", "def_tackles_with_assist", "def_tackles_fo
 def load_season_weekly_stats(season: int) -> pd.DataFrame:
     """The season's full weekly player-stats table, loaded ONCE — see module docstring for why
     this matters (the performance bug this replaces). Callers (build_slate) load this a single
-    time per build and pass the DataFrame around; nothing in this module re-fetches per player."""
-    try:
-        df = nfl.load_player_stats([season], summary_level="week").to_pandas()
-    except Exception:
-        logger.exception("NFL load_player_stats failed for season %s", season)
-        return pd.DataFrame()
+    time per build and pass the DataFrame around; nothing in this module re-fetches per player.
+
+    AUTO-FALLBACK ADDED DIRECTLY FROM LIVE LOG: nflreadpy raises a 404 (not a ValueError) for
+    any season whose weekly stats file doesn't exist yet on nflverse-data. Before the 2026 NFL
+    season's first game, stats_player_week_2026.parquet doesn't exist, so every page that calls
+    build_slate without an explicit baseline toggle would fail loudly and repeatedly. The fallback
+    to season-1 handles this correctly: it's the same prior-season data the baseline toggle
+    explicitly requests, just applied automatically rather than requiring every caller to know
+    about it. The diag message distinguishes a clean auto-fallback from an unexpected failure."""
+    def _load(s: int) -> pd.DataFrame:
+        try:
+            return nfl.load_player_stats([s], summary_level="week").to_pandas()
+        except Exception:
+            logger.exception("NFL load_player_stats failed for season %s", s)
+            return pd.DataFrame()
+
+    df = _load(season)
+    if df.empty and season >= 2024:
+        # Auto-fallback: try the prior season before giving up. Only for recent seasons --
+        # a failure on an old season (2019, 2020) is probably a real, unexpected data problem
+        # rather than "this season hasn't started yet."
+        fallback = season - 1
+        _diag(f"load_season_weekly_stats({season}): empty -- auto-falling back to {fallback} "
+             "(season hasn't started yet, or nflreadpy hasn't published the file)")
+        df = _load(fallback)
+        if df.empty:
+            _diag(f"load_season_weekly_stats: fallback to {fallback} also empty")
+            return pd.DataFrame()
+
     if df.empty:
         _diag(f"load_season_weekly_stats({season}): load_player_stats returned 0 rows")
+        return pd.DataFrame()
     # NOT df.get("carries", 0).fillna(0): DataFrame.get() returns the literal default (an int,
     # not a Series) when the column is entirely absent from the response, and .fillna() on an int
     # crashes — a real pandas gotcha, not a hypothetical one (caught by this module's own test
@@ -409,8 +433,12 @@ def get_team_injuries(team_abbr: str, season: int, week: int) -> List[Dict[str, 
     endpoint does; reporting one anyway would mean inventing it. comment combines the primary and
     secondary reported injury (e.g. "Knee" or "Knee, Ankle"), the closest real analog to ESPN's
     shortComment field this data actually has."""
+    # SEASON CAP: nflreadpy raises ValueError when season > get_current_season() (confirmed from
+    # live log: "Season must be between 2009 and 2025"). Cap to avoid crashing before 2026 data
+    # is published. nfl is the module-level nflreadpy import.
     try:
-        df = nfl.load_injuries([season]).to_pandas()
+        safe_season = min(season, nfl.get_current_season())
+        df = nfl.load_injuries([safe_season]).to_pandas()
     except Exception:
         logger.exception("NFL load_injuries failed for season %s", season)
         return []
