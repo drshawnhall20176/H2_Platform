@@ -592,7 +592,7 @@ def test_sidebar_sections_match_the_documented_grouping():
         "10": "🔬 DEEP RESEARCH", "11": "🔬 DEEP RESEARCH", "12": "🔬 DEEP RESEARCH",
         "13": "🔬 DEEP RESEARCH", "14": "🔬 DEEP RESEARCH", "15": "🔬 DEEP RESEARCH",
         "25": "🔬 DEEP RESEARCH", "26": "🔬 DEEP RESEARCH", "27": "🔬 DEEP RESEARCH",
-        "29": "🔬 DEEP RESEARCH", "30": "🔬 DEEP RESEARCH", "31": "🔬 DEEP RESEARCH",
+        "29": "🔬 DEEP RESEARCH", "30": "🔬 DEEP RESEARCH", "31": "🔬 DEEP RESEARCH", "32": "🔬 DEEP RESEARCH",
         "16": "🔍 SELF-GRADING & PROOF", "17": "🔍 SELF-GRADING & PROOF",
         "18": "🔍 SELF-GRADING & PROOF", "19": "🔍 SELF-GRADING & PROOF",
         "20": "📣 OPS & CONTENT", "21": "📣 OPS & CONTENT", "22": "📣 OPS & CONTENT",
@@ -1212,7 +1212,7 @@ def test_sport_only_page_visibility_matches_expected_config():
                      "10": ("WNBA", "NBA", "NCAAMB"), "11": ("WNBA", "NBA", "NCAAMB"),
                      "12": ("NFL",), "13": ("NFL",), "14": ("NFL",),
                      "23": ("UFC",), "24": ("MLB",), "25": ("NFL",), "26": ("MLB",),
-                     "27": ("MLB",), "29": ("NCAAF",), "30": ("NCAAF",), "31": ("NCAAF",)}, pairs
+                     "27": ("MLB",), "29": ("NCAAF",), "30": ("NCAAF",), "31": ("NCAAF",), "32": ("NCAAF",)}, pairs
     print("✓ sport_only_leads matches expected config (Bullpen Watch/Game Watch/Pitching Lab/"
           "Dinger Engine/Matchup Lab(MLB)/Player Lines/First Innings Totals -> MLB, Hot Hand "
           "Engine/Matchup Lab(WNBA/NBA/NCAAMB) -> WNBA+NBA+NCAAMB, Matchup Lab(NFL)/Anytime TD "
@@ -2321,6 +2321,47 @@ def test_ncaaf_player_lines_sorts_games_by_real_time_not_alphabetically():
         "Lines' own already-correct convention"
     )
     print("✓ NCAAF Player Lines now sorts its Game dropdown by real kickoff time, matching the established convention every other page already uses")
+
+
+def test_ncaaf_game_lab_wires_correctly_with_two_honest_tiers():
+    # BUILT DIRECTLY ON REQUEST: game-level modeling for moneyline/spread/total/quarter/half
+    # winners -- the first game-level modeling page for NCAAF. Confirms the real page genuinely
+    # gates to NCAAF, uses the correct simulation functions, sorts games by real time (same fix
+    # as Player Lines), and honestly maintains two distinct data tiers: Tier 1 (schedule-based,
+    # always shown) and Tier 2 (drives-based, opt-in checkbox, explicitly flagged as unverified).
+    src = (_HERE / "views" / "32_NCAAF_Game_Lab.py").read_text()
+    assert 'sports.require_sport(["NCAAF"], "NCAAF Game Lab")' in src, (
+        "must gate to NCAAF specifically"
+    )
+    assert "P.simulate_ncaaf_game(" in src, (
+        "must genuinely call the real schedule-based simulation function, not a parallel implementation"
+    )
+    assert "P.simulate_period_winners(" in src, (
+        "must genuinely call the real period simulation function for the drives-based tier"
+    )
+    assert 'key=lambda m: m.get("game_date") or "~"' in src, (
+        "must sort games by real start time, matching the established convention"
+    )
+    assert "show_period = st.checkbox(" in src, (
+        "the drives-based quarter/half section must be genuinely opt-in, not shown by default"
+    )
+    assert "show_2025_baseline = st.checkbox(" in src, (
+        "must have a real 2025 baseline toggle -- the actual fix for Week 1 having no data, "
+        "matching the same pattern QB Lab/Matchup Lab/Player Lines already use"
+    )
+    assert 'stats_date_str = "2026-02-01" if show_2025_baseline else date_str' in src, (
+        "stats_date_str must genuinely redirect to 2025 when the baseline is active -- a cosmetic "
+        "toggle that still passes date_str to all functions would show empty results regardless"
+    )
+    assert "load_game(\n        date_str, stats_date_str," in src, (
+        "load_game must receive stats_date_str as a real, separate argument -- a single date_str "
+        "passed to both would make the baseline toggle completely non-functional"
+    )
+    assert "unverified" in src and "drives cache" in src.lower(), (
+        "the drives-based tier must honestly flag its data-provenance uncertainty, not present "
+        "period probabilities as if they were equally confirmed as the schedule-based moneyline"
+    )
+    print("✓ NCAAF Game Lab genuinely gates to NCAAF, wires both real simulation functions, sorts games by time, and maintains two honest data tiers")
 
 
 def test_no_undefined_names_anywhere_in_the_real_project():
