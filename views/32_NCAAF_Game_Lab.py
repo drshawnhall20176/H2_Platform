@@ -65,24 +65,31 @@ def load_slate_meta(date_str: str):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_game(date_str: str, home_name: str, away_name: str):
-    """All signals for one specific game -- cached per game so switching games reuses data."""
-    season = E._infer_season(date_str)
-    schedule = E.get_schedule(season) if season else []
-    league_avg = E.get_league_average_scoring(date_str)
+def load_game(date_str: str, stats_date_str: str, home_name: str, away_name: str):
+    """All signals for one specific game -- cached per game so switching games reuses data.
 
-    home_scoring = E.get_team_recent_scoring(home_name, schedule,
-                                             E._resolve_week(schedule, date_str) or 999)
-    away_scoring = E.get_team_recent_scoring(away_name, schedule,
-                                             E._resolve_week(schedule, date_str) or 999)
-    home_allowed = E.get_team_points_allowed(home_name, date_str)
-    away_allowed = E.get_team_points_allowed(away_name, date_str)
+    TWO DIFFERENT DATES, same real pattern as QB Lab/Matchup Lab/Player Lines: date_str picks
+    which GAME to analyze (tomorrow's real 2026 matchup); stats_date_str picks which season's
+    own historical data POWERS the scoring rates. When the baseline toggle is active,
+    stats_date_str resolves to 2025 via _infer_season("2026-02-01") -- the full, complete prior
+    season -- so the simulation uses last season's real scoring context for both teams."""
+    # Stats date drives schedule/week for scoring rate lookups
+    stats_season = E._infer_season(stats_date_str)
+    stats_schedule = E.get_schedule(stats_season) if stats_season else []
+    stats_week = E._resolve_week(stats_schedule, stats_date_str) or 999
+
+    league_avg = E.get_league_average_scoring(stats_date_str)
+
+    home_scoring = E.get_team_recent_scoring(home_name, stats_schedule, stats_week)
+    away_scoring = E.get_team_recent_scoring(away_name, stats_schedule, stats_week)
+    home_allowed = E.get_team_points_allowed(home_name, stats_date_str)
+    away_allowed = E.get_team_points_allowed(away_name, stats_date_str)
 
     game_result = P.simulate_ncaaf_game(home_scoring, away_scoring, home_allowed, away_allowed,
                                         league_avg)
 
-    home_period = E.get_team_period_scoring(home_name, date_str)
-    away_period = E.get_team_period_scoring(away_name, date_str)
+    home_period = E.get_team_period_scoring(home_name, stats_date_str)
+    away_period = E.get_team_period_scoring(away_name, stats_date_str)
     period_result = P.simulate_period_winners(home_period, away_period)
 
     return game_result, period_result, home_scoring, away_scoring, home_allowed, away_allowed, league_avg
@@ -113,6 +120,24 @@ selected = game_options[game_label]
 home_name = selected["home_name"]
 away_name = selected["away_name"]
 
+# 2025-BASELINE TOGGLE — same real mechanism as QB Lab/Matchup Lab/Player Lines.
+# This is the direct fix for "no completed games yet": the 2025 schedule and scoring data
+# are already cached (refresh_ncaaf.py always pulls both years since the fix earlier this
+# session), so _infer_season("2026-02-01") correctly resolves to 2025 and returns a full
+# season of real scoring rates for both teams.
+show_2025_baseline = st.checkbox(
+    "📊 Use 2025 season baseline (2026 hasn't started yet)",
+    value=True,   # on by default since Week 1 has no data yet -- the common case right now
+    help="Uses last season's real scoring rates for both teams. Real transfers, scheme changes, "
+        "and personnel differences since 2025 aren't reflected -- clearly a stand-in, not a "
+        "claim about 2026 form. The model will update automatically as 2026 games are played.")
+stats_date_str = "2026-02-01" if show_2025_baseline else date_str
+
+if show_2025_baseline:
+    st.info("📊 **Using 2025 season data.** Today's real matchup is current — scoring rates "
+           "below are last season's. Roster and scheme changes since 2025 aren't reflected.",
+           icon="📊")
+
 show_period = st.checkbox(
     "📡 Show quarter and half winner probabilities (requires drive data — flagged as unverified)",
     help="Period-level probabilities are computed from the drives cache, which was built against "
@@ -121,12 +146,12 @@ show_period = st.checkbox(
 
 with st.spinner(f"Simulating {away_name} @ {home_name}..."):
     game_result, period_result, home_scoring, away_scoring, home_allowed, away_allowed, league_avg = load_game(
-        date_str, home_name, away_name)
+        date_str, stats_date_str, home_name, away_name)
 
 st.markdown(f"## {away_name} @ {home_name}")
 st.caption(f"20,000 simulations · Normal score distribution · Odds-ratio blend · "
           f"League avg scoring: {league_avg:.1f} pts/team-game" if league_avg else
-          "20,000 simulations · Limited data available — check back after Week 1 completes")
+          "20,000 simulations · No completed 2026 games yet — check the \"Use 2025 season baseline\" box above")
 
 # --- Team strength indicators -----------------------------------------------
 C.section_header("📊", "Team scoring context")
