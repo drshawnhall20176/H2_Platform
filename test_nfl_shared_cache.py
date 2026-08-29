@@ -13,9 +13,9 @@ def test_load_nfl_slate_cached_wraps_build_slate():
     fake_result = ([{"Player": "Test QB"}], [{"label": "Team A @ Team B"}])
     with patch.object(NSC.E, "build_slate", return_value=fake_result) as mock_build:
         result = NSC.load_nfl_slate_cached.__wrapped__("2026-09-08")
-    mock_build.assert_called_once_with("2026-09-08")
+    mock_build.assert_called_once_with("2026-09-08", stats_date_str=None)
     assert result == fake_result
-    print("✓ load_nfl_slate_cached correctly wraps nfl_engine.build_slate with the real date passed through")
+    print("✓ load_nfl_slate_cached correctly wraps nfl_engine.build_slate with date and stats_date_str passed through")
 
 
 def test_load_nfl_slate_cached_is_genuinely_cached():
