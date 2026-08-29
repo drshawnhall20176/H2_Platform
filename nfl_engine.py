@@ -813,3 +813,59 @@ def get_league_average_rush_yards_allowed(before_date: str) -> float:
     adjusted Rush Yards projection compares one opponent's own allowed rate against, same role
     get_league_average_pass_yards_allowed plays for the Pass Yards projection."""
     return _get_league_average_allowed(before_date, "rushing_yards")
+
+
+# ============================================================================ Game Lab
+# BUILT DIRECTLY ON REQUEST: game-level modeling for NFL Game Lab (moneyline/spread/total).
+# Deliberately mirrors ncaaf_engine.py's own get_team_points_allowed and
+# get_league_average_scoring -- same logic, NFL's own confirmed field names (home_score/
+# away_score, from get_schedule's own confirmed output at line ~150) instead of NCAAF's
+# home_points/away_points.
+
+def get_team_points_allowed(team_abbr: str, before_date: str,
+                            n: Optional[int] = None) -> Optional[Dict[str, float]]:
+    """This team's own points ALLOWED per game -- defensive counterpart to get_team_recent_scoring,
+    built the same way (schedule home_score/away_score, zero new network calls). n=None -> whole
+    season; n=int -> last n games only. Returns None when no completed games exist yet."""
+    season = _infer_season(before_date)
+    if season is None:
+        return None
+    schedule = get_schedule(season)
+    week = _resolve_week(schedule, before_date)
+    if week is None:
+        return None
+    played = sorted([g for g in schedule if g["week"] < week
+                    and (g.get("home_team") == team_abbr or g.get("away_team") == team_abbr)],
+                   key=lambda g: g["week"])
+    allowed: List[float] = []
+    for g in played:
+        is_home = g.get("home_team") == team_abbr
+        opp_pts = g.get("away_score") if is_home else g.get("home_score")
+        if opp_pts is not None:
+            allowed.append(float(opp_pts))
+    if not allowed:
+        return None
+    window = allowed[-n:] if n is not None else allowed
+    return {"recent_avg": sum(window) / len(window), "season_avg": sum(allowed) / len(allowed),
+           "recent_games": len(window), "season_games": len(allowed)}
+
+
+def get_league_average_scoring(before_date: str) -> Optional[float]:
+    """League-wide average points scored per team-game -- the odds-ratio normalization baseline
+    NFL Game Lab's score projection needs. Computed from the full cached schedule, zero new calls.
+    Returns None before any games have been completed."""
+    season = _infer_season(before_date)
+    if season is None:
+        return None
+    schedule = get_schedule(season)
+    week = _resolve_week(schedule, before_date)
+    if week is None:
+        return None
+    completed = [g for g in schedule if g.get("week", 999) < week]
+    scores: List[float] = []
+    for g in completed:
+        for field in ("home_score", "away_score"):
+            v = g.get(field)
+            if v is not None:
+                scores.append(float(v))
+    return sum(scores) / len(scores) if scores else None

@@ -120,6 +120,11 @@ def run():
                                                           # modeling page (moneyline/spread/total/
                                                           # quarter/half), built from schedule data
                                                           # + drives cache.
+        "33": ("NFL",),                                  # Player Lines (NFL) -- browse-by-position
+                                                          # trend charts, adapted from NCAAF/MLB
+                                                          # versions, using nflreadpy column names.
+        "34": ("NFL",),                                  # Game Lab (NFL) -- moneyline/spread/total
+                                                          # + real injury reports via nflreadpy.
     }
 
     # REAL, REPORTED GAP CLOSED HERE: these titles all carry a has_projections check that shows
@@ -191,6 +196,8 @@ def run():
         "30": ("Matchup Lab",    "🔬", "ncaaf_matchup_lab"),   # NCAAF version — same title as page 9/11/12, distinct url_path
         "31": ("Player Lines",   "📉", "ncaaf_player_lines"),   # NCAAF version — same title as page 26, distinct url_path
         "32": ("Game Lab",      "🏟️", "ncaaf_game_lab"),
+        "33": ("Player Lines",   "📉", "nfl_player_lines"),   # NFL version — same title, distinct url_path
+        "34": ("Game Lab",      "🏟️", "nfl_game_lab"),       # NFL version — same title, distinct url_path
     }
 
     # SIDEBAR SECTIONS, added directly on request: st.navigation natively supports a
@@ -220,7 +227,7 @@ def run():
         SECTION_OF[k] = "🎯 RECOMMENDATIONS"
     for k in ("5", "6"):
         SECTION_OF[k] = "🛰️ LIVE SIGNALS"
-    for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26", "27", "29", "30", "31", "32"):
+    for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26", "27", "29", "30", "31", "32", "33", "34"):
         SECTION_OF[k] = "🔬 DEEP RESEARCH"
     for k in ("16", "17", "18", "19"):
         SECTION_OF[k] = "🔍 SELF-GRADING & PROOF"

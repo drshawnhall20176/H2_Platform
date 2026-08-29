@@ -834,3 +834,60 @@ def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[str, Dict[str, floa
             })
     out.sort(key=lambda x: x["Hot Hand Score"], reverse=True)
     return out
+
+
+# ============================================================================ NFL Game Lab
+# BUILT DIRECTLY ON REQUEST: game-level win probability for NFL Game Lab.
+# simulate_nfl_game is a thin alias over the same Monte Carlo logic ncaaf_projections.
+# simulate_ncaaf_game uses -- deliberately NOT imported from there (cross-module circular
+# concern), just re-implemented as a one-liner that calls the shared _blend_score helper
+# rebuilt here. The math is identical; only the name distinguishes NFL callers from NCAAF ones.
+
+_NFL_GAME_DEFAULT_STD = 7.5   # slightly higher than NCAAF's 7.0 -- NFL games have real,
+                               # documented higher variance per score than college; the floor
+                               # is a proxy for this, not a precisely calibrated number.
+
+DEFAULT_NFL_GAME_SIMS = 20_000
+
+
+def _nfl_blend_score(own_rate: float, opp_allowed: float, league_avg: float) -> float:
+    if league_avg <= 0 or opp_allowed <= 0:
+        return own_rate
+    return own_rate * (opp_allowed / league_avg)
+
+
+def simulate_nfl_game(home_scoring: Optional[Dict[str, float]],
+                      away_scoring: Optional[Dict[str, float]],
+                      home_allowed: Optional[Dict[str, float]],
+                      away_allowed: Optional[Dict[str, float]],
+                      league_avg_scoring: Optional[float],
+                      n_sims: int = DEFAULT_NFL_GAME_SIMS,
+                      seed: Optional[int] = None) -> Optional[Dict]:
+    """Monte Carlo NFL game simulation: moneyline win probability, projected spread, projected
+    total. Identical method to ncaaf_projections.simulate_ncaaf_game -- Normal distribution
+    for scores, odds-ratio blend for projected points. See that function's own docstring for
+    the full modeling rationale. Returns None when either team lacks completed-game data."""
+    if not home_scoring or not away_scoring or not home_allowed or not away_allowed:
+        return None
+    if league_avg_scoring is None or league_avg_scoring <= 0:
+        return None
+    home_proj = _nfl_blend_score(home_scoring["recent_avg"], away_allowed["recent_avg"], league_avg_scoring)
+    away_proj = _nfl_blend_score(away_scoring["recent_avg"], home_allowed["recent_avg"], league_avg_scoring)
+    home_std = max(_NFL_GAME_DEFAULT_STD, abs(home_scoring["recent_avg"] - home_scoring["season_avg"]))
+    away_std = max(_NFL_GAME_DEFAULT_STD, abs(away_scoring["recent_avg"] - away_scoring["season_avg"]))
+    rng = np.random.default_rng(seed)
+    home_scores = rng.normal(home_proj, home_std, n_sims)
+    away_scores = rng.normal(away_proj, away_std, n_sims)
+    home_wins = (home_scores > away_scores).sum()
+    ties = (home_scores == away_scores).sum()
+    return {
+        "home_win_prob": round(float(home_wins / n_sims), 4),
+        "away_win_prob": round(float((n_sims - home_wins - ties) / n_sims), 4),
+        "proj_home_score": round(home_proj, 1),
+        "proj_away_score": round(away_proj, 1),
+        "proj_spread": round(home_proj - away_proj, 1),
+        "proj_total": round(home_proj + away_proj, 1),
+        "home_std": round(home_std, 1),
+        "away_std": round(away_std, 1),
+        "n_sims": n_sims,
+    }
