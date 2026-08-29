@@ -89,6 +89,52 @@ def test_nfl_shared_cache_importable_without_streamlit():
     print("✓ nfl_shared_cache is safely importable without streamlit, correctly omitting the cached function rather than crashing")
 
 
+def test_build_slate_prior_season_baseline_uses_999_not_current_week():
+    """BUILT DIRECTLY FROM A REAL LIVE LOG: this test exists because build_slate was confirmed
+    to return 0 players with the baseline toggle active, with this exact diagnostic line:
+    'season 2026 week 1, 16 game(s) -> 0 player(s) cleared rotation floor (using 2025 stats
+    as baseline)'. Root cause: player_recent_games was called with before_week=1 (from the
+    2026 schedule), but the weekly data was 2025. Games before week 1 of ANY season = empty.
+    Fix: before_week=999 when stats_season != season, so all of last season's games are
+    included. player_recent_games is already capped by n=CFG.RECENT_GAMES_N."""
+    import nfl_engine as E
+    import pandas as pd
+    from unittest.mock import patch, MagicMock
+
+    # Fake 2026 schedule: one week-1 game
+    schedule_2026 = [{"season": 2026, "week": 1, "home_team": "KC", "away_team": "PHI",
+                      "game_date": "2026-09-09", "home_rest": 7, "away_rest": 7}]
+    # Fake 2025 weekly data with a player who played in weeks 15-17 of 2025
+    fake_weekly = pd.DataFrame([
+        {"player_id": "p1", "player_display_name": "Test QB", "week": 15,
+         "season": 2025, "recent_team": "KC", "passing_yards": 310},
+        {"player_id": "p1", "player_display_name": "Test QB", "week": 16,
+         "season": 2025, "recent_team": "KC", "passing_yards": 280},
+    ])
+    fake_roster = [{"id": "p1", "name": "Test QB", "position": "QB"}]
+
+    before_weeks_seen = []
+    real_player_recent_games = E.player_recent_games
+
+    def spy_player_recent_games(weekly, player_id, before_week, n=None):
+        before_weeks_seen.append(before_week)
+        return real_player_recent_games(weekly, player_id, before_week,
+                                        n=n or E.CFG.RECENT_GAMES_N)
+
+    with patch.object(E, "get_schedule", return_value=schedule_2026), \
+         patch.object(E, "load_season_weekly_stats", return_value=fake_weekly), \
+         patch.object(E, "get_team_roster", return_value=fake_roster), \
+         patch.object(E, "player_recent_games", side_effect=spy_player_recent_games), \
+         patch.object(E, "_infer_season", side_effect=lambda d: 2026 if "2026" in str(d) else 2025):
+        rows, meta = E.build_slate("2026-09-09", stats_date_str="2025-12-01")
+
+    assert all(w == 999 for w in before_weeks_seen), (
+        f"player_recent_games must be called with before_week=999 when using prior-season "
+        f"baseline, not before_week=1 (which returns empty by definition). "
+        f"Got before_weeks: {before_weeks_seen}")
+    print("✓ build_slate prior-season baseline correctly passes before_week=999 to player_recent_games, not before_week=1 (the confirmed live bug)")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
