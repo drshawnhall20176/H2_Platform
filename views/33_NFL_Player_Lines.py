@@ -62,8 +62,8 @@ def get_api_key():
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_slate(date_str: str):
-    rows, meta = NSC.load_nfl_slate_cached(date_str)
+def load_slate(date_str: str, stats_date_str: str):
+    rows, meta = NSC.load_nfl_slate_cached(date_str, stats_date_str=stats_date_str)
     return rows
 
 
@@ -103,8 +103,14 @@ with c2:
         st.rerun()
 date_str = target_date.strftime("%Y-%m-%d")
 
+show_2025_baseline = st.checkbox("📊 Use 2025 season baseline (2026 hasn't started yet)", value=True,
+    help="Uses last season's real player data. Uncheck once 2026 Week 1 games are in the books.")
+stats_date_str = "2025-12-01" if show_2025_baseline else date_str
+if show_2025_baseline:
+    st.info("📊 **Using 2025 season data.** Today's real matchups are current — player stats use last season's game logs.", icon="📊")
+
 with st.spinner("Loading this week's slate..."):
-    rows = load_slate(date_str)
+    rows = load_slate(date_str, stats_date_str)
 
 if not rows:
     st.info("No NFL players on today's slate — try a different date.", icon="🕐")
@@ -150,7 +156,7 @@ if not player_id:
     st.stop()
 
 with st.spinner(f"Loading {player_name}'s real game log..."):
-    games = E.get_player_season_games(player_id, date_str)
+    games = E.get_player_season_games(player_id, stats_date_str)
 trend_log = P.build_trend_series(games)
 
 # --- live lines, same opt-in fetch pattern as Matchup Lab and NCAAF Player Lines -----------
