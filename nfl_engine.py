@@ -584,7 +584,15 @@ def build_slate(date_str: str, season: Optional[int] = None,
             if team not in roster_cache:
                 roster_cache[team] = get_team_roster(team, stats_season)
             for player in roster_cache[team]:
-                recent = player_recent_games(weekly, player["id"], week)
+                # CRITICAL FIX, found directly from live log output: when stats_season != season
+                # (prior-season baseline mode), `week` is from the CURRENT season (e.g. week 1
+                # of 2026), but `weekly` contains PRIOR season data (e.g. 2025). Passing
+                # before_week=1 to a 2025 dataset means "games before week 1 of 2025" -- an
+                # empty result by definition. Use 999 instead to include ALL prior-season games;
+                # player_recent_games is already capped by n=CFG.RECENT_GAMES_N, so this
+                # correctly returns the last N games of the prior season, not the whole year.
+                stats_before_week = 999 if stats_season != season else week
+                recent = player_recent_games(weekly, player["id"], stats_before_week)
                 row = player_row(player, team, opp, label, g.get("game_date"), recent,
                                  opp_id=opp, team_id=team)
                 if row is not None:
