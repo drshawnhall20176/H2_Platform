@@ -782,6 +782,70 @@ def test_build_slate_correctly_handles_a_real_mixed_season_scenario():
     print("✓ build_slate correctly produces real rows for BOTH a target-season team and a prior-season-fallback team in the same real slate")
 
 
+# ============================================================================ Game Lab engine functions
+def test_get_team_points_allowed_mirrors_scoring_for_opponent():
+    schedule = [
+        {"id": 1, "season": 2025, "week": 1, "start_date": "2025-09-01T19:00:00Z", "completed": True,
+        "home_team": "Ohio State", "away_team": "Rival", "home_points": 42, "away_points": 14},
+        {"id": 2, "season": 2025, "week": 2, "start_date": "2025-09-08T19:00:00Z", "completed": True,
+        "home_team": "Rival", "away_team": "Ohio State", "home_points": 21, "away_points": 35},
+        {"id": 3, "season": 2025, "week": 3, "start_date": "2025-09-15T19:00:00Z", "completed": False,
+        "home_team": "Ohio State", "away_team": "Foe3", "home_points": None, "away_points": None},
+    ]
+    with patch.object(ND, "load_schedule", return_value=schedule):
+        # Date resolves to week 3, so completed weeks 1 and 2 are both in scope
+        result = E.get_team_points_allowed("Ohio State", "2025-09-20")
+    assert result is not None
+    # Week 1: Ohio State HOME, allowed = away_points = 14
+    # Week 2: Ohio State AWAY, allowed = home_points = 21
+    assert result["season_avg"] == 17.5
+    print("✓ get_team_points_allowed correctly extracts opponent points from the real schedule, not the team's own score")
+
+
+def test_get_league_average_scoring_aggregates_both_teams():
+    schedule = [
+        {"id": 1, "season": 2025, "week": 1, "start_date": "2025-09-01T19:00:00Z", "completed": True,
+        "home_team": "A", "away_team": "B", "home_points": 28, "away_points": 14},
+        {"id": 2, "season": 2025, "week": 1, "start_date": "2025-09-01T22:00:00Z", "completed": True,
+        "home_team": "C", "away_team": "D", "home_points": 42, "away_points": 35},
+        {"id": 3, "season": 2025, "week": 2, "start_date": "2025-09-08T19:00:00Z", "completed": False,
+        "home_team": "A", "away_team": "C", "home_points": None, "away_points": None},
+    ]
+    with patch.object(ND, "load_schedule", return_value=schedule):
+        avg = E.get_league_average_scoring("2025-09-12")   # resolves to week 2; week 1 completed games included
+    # Both home and away points from both completed games: 28+14+42+35=119, /4 = 29.75
+    assert avg == 29.75
+    print("✓ get_league_average_scoring correctly aggregates both teams' scores across all completed games")
+
+
+def test_get_team_period_scoring_correctly_attributes_offense_and_defense_scores():
+    schedule = _dh_schedule(n_weeks=4)
+    drives = [
+        # Q1: Team B on offense, Team A's defense returns a pick-six. Team A cumulative: 0->7.
+        {"game_id": 1, "season": 2025, "week": 1, "drive_number": 1, "offense": "Team B", "defense": "Team A",
+        "start_period": 1, "offense_score": 0, "defense_score": 7},
+        # Q2: Team A on offense, scores a TD. Team A cumulative: 7->14.
+        {"game_id": 1, "season": 2025, "week": 1, "drive_number": 2, "offense": "Team A", "defense": "Team B",
+        "start_period": 2, "offense_score": 14, "defense_score": 0},
+    ]
+    with patch.object(ND, "load_schedule", return_value=schedule), \
+        patch.object(ND, "load_drives", return_value=drives):
+        result = E.get_team_period_scoring("Team A", "2025-09-20")
+    assert result is not None
+    # Q1: Team A's defensive pick-six = 7 (via defensive_points_this_drive on drive 1)
+    assert result[1]["mean"] == 7.0
+    # Q2: TD = 7 (14 cumulative - 7 from pick-six = 7 new offensive points)
+    assert result[2]["mean"] == 7.0
+    print("✓ get_team_period_scoring correctly attributes both offensive points (drive 2) and defensive/special-teams scores (drive 1) to the right period")
+
+
+def test_get_team_period_scoring_honest_none_when_no_drives_cached():
+    with patch.object(ND, "load_schedule", return_value=_dh_schedule()), \
+        patch.object(ND, "load_drives", return_value=[]):
+        assert E.get_team_period_scoring("Ohio State", "2025-09-20") is None
+    print("✓ get_team_period_scoring honestly returns None when no drive data is cached yet, never a fabricated rate")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

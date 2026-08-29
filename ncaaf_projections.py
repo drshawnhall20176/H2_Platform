@@ -707,3 +707,144 @@ def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_recent_allowed: Di
             stat_fn=lambda g: (g.get("rushing_TD") or 0) + (g.get("receiving_TD") or 0),
             round_digits=2, variance_floor=0.75, variance_min_abs=1.0))
     return out
+
+
+# ============================================================================ Game Lab projections
+# BUILT DIRECTLY ON REQUEST: game-level win probability for moneyline, spread, total, quarter
+# winners, and half winners -- the first game-level modeling on this platform for NCAAF.
+#
+# METHOD, STATED PLAINLY: final-score simulation uses a NORMAL distribution for each team's
+# total points, not Poisson -- a real, deliberate choice. Football scoring doesn't arrive as
+# independent unit events; it comes in fixed chunks (3, 6, 7, 8), and the Central Limit Theorem
+# gives a normal approximation for the SUM of those chunks over a full game, which is a much
+# better fit than Poisson for final scores. The std is calibrated from the same schedule data:
+# the difference between each team's recent and season avg, as a simple honest variance proxy.
+#
+# ODDS-RATIO BLEND: same math the existing yardage matchup model already uses -- a multiplicative
+# adjustment of each team's own rate by (opponent_allowed / league_avg), rather than a simple
+# average. A strong offense facing a strong defense blends correctly, not just halving a number.
+
+DEFAULT_GAME_SIMS = 20_000
+
+
+def _blend_score(own_rate: float, opp_allowed: float, league_avg: float) -> float:
+    """Odds-ratio team-score projection -- same math as build_qb_matchup_projections' own
+    pass_factor, applied at the game-score level. Returns own_rate (neutral) when league_avg
+    or opp_allowed is zero, matching the established neutral-fallback behavior."""
+    if league_avg <= 0 or opp_allowed <= 0:
+        return own_rate
+    return own_rate * (opp_allowed / league_avg)
+
+
+def simulate_ncaaf_game(home_scoring: Optional[Dict[str, float]],
+                        away_scoring: Optional[Dict[str, float]],
+                        home_allowed: Optional[Dict[str, float]],
+                        away_allowed: Optional[Dict[str, float]],
+                        league_avg_scoring: Optional[float],
+                        n_sims: int = DEFAULT_GAME_SIMS,
+                        seed: Optional[int] = None) -> Optional[Dict]:
+    """Monte Carlo game simulation: moneyline win probability, projected spread, projected total.
+    Uses schedule-based scoring data ONLY -- proven, Week-1 ready, no drives cache dependency.
+
+    Inputs: dicts with {recent_avg, season_avg} from get_team_recent_scoring /
+    get_team_points_allowed. Returns None when either team has no completed games on file --
+    an honest 'not enough data yet', never a fabricated probability.
+    proj_spread is positive when home team is favored."""
+    if not home_scoring or not away_scoring or not home_allowed or not away_allowed:
+        return None
+    if league_avg_scoring is None or league_avg_scoring <= 0:
+        return None
+
+    home_proj = _blend_score(home_scoring["recent_avg"], away_allowed["recent_avg"], league_avg_scoring)
+    away_proj = _blend_score(away_scoring["recent_avg"], home_allowed["recent_avg"], league_avg_scoring)
+
+    # Std proxy: difference between recent and season averages. Floor at 7.0 pts -- the minimum
+    # meaningful variance for a full football game (a single scoring play swings 3-8 points and
+    # games routinely differ from expectations by 1-2 scores). Floor of 0 would produce
+    # unrealistically tight win-probability distributions especially early in the season.
+    home_std = max(7.0, abs(home_scoring["recent_avg"] - home_scoring["season_avg"]))
+    away_std = max(7.0, abs(away_scoring["recent_avg"] - away_scoring["season_avg"]))
+
+    rng = np.random.default_rng(seed)
+    home_scores = rng.normal(home_proj, home_std, n_sims)
+    away_scores = rng.normal(away_proj, away_std, n_sims)
+
+    home_wins = (home_scores > away_scores).sum()
+    ties = (home_scores == away_scores).sum()
+
+    return {
+        "home_win_prob": round(float(home_wins / n_sims), 4),
+        "away_win_prob": round(float((n_sims - home_wins - ties) / n_sims), 4),
+        "proj_home_score": round(home_proj, 1),
+        "proj_away_score": round(away_proj, 1),
+        "proj_spread": round(home_proj - away_proj, 1),
+        "proj_total": round(home_proj + away_proj, 1),
+        "home_std": round(home_std, 1),
+        "away_std": round(away_std, 1),
+        "n_sims": n_sims,
+    }
+
+
+def simulate_period_winners(home_period_scoring: Optional[Dict[int, Dict]],
+                            away_period_scoring: Optional[Dict[int, Dict]],
+                            n_sims: int = DEFAULT_GAME_SIMS,
+                            seed: Optional[int] = None) -> Optional[Dict]:
+    """Per-period and per-half win probabilities from the drives cache.
+
+    A REAL, EXPLICIT DATA-PROVENANCE CAVEAT: period scoring rates depend on start_period from
+    the drives cache, built against CFBD field names cross-confirmed from third-party sources
+    but not CFBD's own official schema directly. Gated behind an opt-in checkbox on the Game
+    Lab page -- not shown by default, unlike the schedule-based simulate_ncaaf_game above.
+
+    Returns {1: {home_win_prob, away_win_prob, proj_home, proj_away}, 2: ..., 3: ..., 4: ...,
+    'h1': {...}, 'h2': {...}, 'full': {...}} or None if either team has no period data."""
+    if not home_period_scoring or not away_period_scoring:
+        return None
+
+    rng = np.random.default_rng(seed)
+    results: Dict = {}
+
+    # Simulate each period independently, then aggregate for half/full totals
+    period_home_sims: Dict[int, np.ndarray] = {}
+    period_away_sims: Dict[int, np.ndarray] = {}
+
+    for period in (1, 2, 3, 4):
+        h_data = home_period_scoring.get(period)
+        a_data = away_period_scoring.get(period)
+        if not h_data or not a_data:
+            continue
+        h_mean, h_std = h_data["mean"], max(3.0, h_data["std"])
+        a_mean, a_std = a_data["mean"], max(3.0, a_data["std"])
+        h_pts = np.clip(rng.normal(h_mean, h_std, n_sims), 0, None)
+        a_pts = np.clip(rng.normal(a_mean, a_std, n_sims), 0, None)
+        period_home_sims[period] = h_pts
+        period_away_sims[period] = a_pts
+        results[period] = {
+            "home_win_prob": round(float((h_pts > a_pts).sum() / n_sims), 4),
+            "away_win_prob": round(float((a_pts > h_pts).sum() / n_sims), 4),
+            "proj_home": round(h_mean, 1),
+            "proj_away": round(a_mean, 1),
+        }
+
+    if not results:
+        return None
+
+    def _half_result(periods):
+        h = sum(period_home_sims[p] for p in periods if p in period_home_sims)
+        a = sum(period_away_sims[p] for p in periods if p in period_away_sims)
+        if not isinstance(h, np.ndarray):
+            return None
+        return {"home_win_prob": round(float((h > a).sum() / n_sims), 4),
+                "away_win_prob": round(float((a > h).sum() / n_sims), 4),
+                "proj_home": round(float(h.mean()), 1), "proj_away": round(float(a.mean()), 1)}
+
+    h1 = _half_result([1, 2])
+    h2 = _half_result([3, 4])
+    full = _half_result([1, 2, 3, 4])
+    if h1:
+        results["h1"] = h1
+    if h2:
+        results["h2"] = h2
+    if full:
+        results["full"] = full
+    return results

@@ -897,3 +897,141 @@ def get_team_drive_outcomes(team_name: str, before_date: str, n: Optional[int] =
                 outcomes.append(outcome)
     return outcomes
 
+
+# ============================================================================ Game Lab
+# BUILT DIRECTLY ON REQUEST: game-level modeling for moneyline/spread/total/quarter/half
+# winners -- a genuinely different category from everything else on this platform, which was
+# player-props-only until now. THREE SEPARATE DATA SOURCES, with real, honest provenance per:
+
+def get_team_points_allowed(team_name: str, before_date: str,
+                            n: Optional[int] = None) -> Optional[Dict[str, float]]:
+    """This team's own points ALLOWED per game -- the defensive counterpart to
+    get_team_recent_scoring, built the same way (schedule home_points/away_points, zero new
+    data needed). Same real honest-None posture when no completed games exist yet.
+    n=None -> whole season so far; n=int -> last n games only (for a recent-trend signal)."""
+    season = _infer_season(before_date)
+    if season is None:
+        return None
+    schedule = get_schedule(season)
+    week = _resolve_week(schedule, before_date)
+    if week is None:
+        return None
+    played = [g for g in schedule if g.get("completed") and g.get("week", 999) < week
+             and (g.get("home_team") == team_name or g.get("away_team") == team_name)]
+    if not played:
+        return None
+    played_sorted = sorted(played, key=lambda g: g["week"])
+    allowed = []
+    for g in played_sorted:
+        is_home = g.get("home_team") == team_name
+        # Points ALLOWED = what the OPPONENT scored (home scored if we're away, vice versa)
+        opp_pts = g.get("away_points") if is_home else g.get("home_points")
+        if opp_pts is not None:
+            allowed.append(float(opp_pts))
+    if not allowed:
+        return None
+    window = allowed[-n:] if n is not None else allowed
+    return {"recent_avg": sum(window) / len(window), "season_avg": sum(allowed) / len(allowed),
+           "recent_games": len(window), "season_games": len(allowed)}
+
+
+def get_league_average_scoring(before_date: str) -> Optional[float]:
+    """League-wide average points scored per team-game up through before_date -- the normalization
+    baseline the odds-ratio blend needs to project fairly across matchups (same real role
+    get_league_average_pass_yards_allowed plays for the yardage matchup model). Computed from
+    the full cached schedule, zero new network calls. Returns None if no completed games exist
+    yet (Week 1 before any completions), never a fabricated number."""
+    season = _infer_season(before_date)
+    if season is None:
+        return None
+    schedule = get_schedule(season)
+    week = _resolve_week(schedule, before_date)
+    if week is None:
+        return None
+    completed = [g for g in schedule if g.get("completed") and g.get("week", 999) < week]
+    scores: List[float] = []
+    for g in completed:
+        for field in ("home_points", "away_points"):
+            v = g.get(field)
+            if v is not None:
+                scores.append(float(v))
+    if not scores:
+        return None
+    return sum(scores) / len(scores)
+
+
+def get_team_period_scoring(team_name: str, before_date: str,
+                            n: Optional[int] = None) -> Optional[Dict[int, Dict[str, float]]]:
+    """This team's own points scored PER PERIOD (periods 1-4), computed from the drive-level
+    cache (compute_drive_points + start_period). Returns a dict keyed on period number
+    {1: {mean, std, games}, 2: ..., 3: ..., 4: ...}, or None if no drive data exists yet.
+
+    A REAL, EXPLICIT DATA-PROVENANCE CAVEAT carried forward from the drives cache itself (see
+    ncaaf_data.refresh_drives' own docstring and ncaaf_engine._TD_STAT_COLS): the drives cache
+    was built against CFBD field names cross-confirmed from third-party sources, not CFBD's own
+    official schema verified directly, because CFBD's API isn't reachable from this build
+    environment. start_period is the field this function's per-period bucketing depends on --
+    it's plausible but still unverified against a real, completed-week drives response. This
+    function is therefore explicitly gated behind an opt-in checkbox on the Game Lab page, not
+    shown by default alongside the schedule-based (fully proven) moneyline section.
+
+    DRIVE-ATTRIBUTION: a drive that STARTS in period P is counted in period P, even if it
+    crosses the period boundary. This is a real, deliberate simplification -- the drives cache
+    stores start_period but not end_period, so attributing to start_period is the only accurate
+    option given what's actually available. The practical effect is minor (end-of-period drives
+    represent a small fraction of total possessions) but stated plainly rather than glossed over.
+
+    Points allocated per period include BOTH offensive points (points_this_drive for drives where
+    this team is on offense) AND defensive/special-teams scores (defensive_points_this_drive for
+    drives where this team is on defense) -- a real pick-six or punt return TD in Q1 should
+    correctly show up in this team's Q1 score, not be silently dropped."""
+    season = _infer_season(before_date)
+    if season is None:
+        return None
+    schedule = get_schedule(season)
+    week = _resolve_week(schedule, before_date)
+    if week is None:
+        return None
+    all_drives = [r for r in ND.load_drives()
+                 if r.get("week") is not None and (r.get("season") or 0) == season
+                 and r["week"] < week
+                 and (r.get("offense") == team_name or r.get("defense") == team_name)]
+    if not all_drives:
+        return None
+    by_game: Dict[object, List[Dict]] = {}
+    for r in all_drives:
+        by_game.setdefault(r.get("game_id"), []).append(r)
+    if n is not None:
+        # Restrict to last n games by week
+        game_weeks = {gid: g[0]["week"] for gid, g in by_game.items()}
+        ordered = sorted(game_weeks, key=lambda gid: game_weeks[gid], reverse=True)[:n]
+        by_game = {gid: g for gid, g in by_game.items() if gid in ordered}
+    period_pts_by_game: Dict[int, List[float]] = {1: [], 2: [], 3: [], 4: []}
+    for gid, game_drives in by_game.items():
+        with_points = compute_drive_points(game_drives)
+        game_period_pts: Dict[int, float] = {1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0}
+        for d in with_points:
+            period = int(d.get("start_period") or 0)
+            if period not in (1, 2, 3, 4):
+                continue   # overtime, missing, or unknown -- excluded rather than guessed
+            if d.get("offense") == team_name:
+                off_pts = d.get("points_this_drive")
+                if off_pts is not None:
+                    game_period_pts[period] += max(0.0, float(off_pts))
+            elif d.get("defense") == team_name:
+                # Defensive/special-teams score attributed to the TEAM that SCORED it, not the team on offense
+                def_pts = d.get("defensive_points_this_drive")
+                if def_pts is not None:
+                    game_period_pts[period] += max(0.0, float(def_pts))
+        for p in (1, 2, 3, 4):
+            period_pts_by_game[p].append(game_period_pts[p])
+    result: Dict[int, Dict[str, float]] = {}
+    for p in (1, 2, 3, 4):
+        pts_list = period_pts_by_game[p]
+        if pts_list:
+            mean = sum(pts_list) / len(pts_list)
+            variance = sum((x - mean) ** 2 for x in pts_list) / len(pts_list)
+            result[p] = {"mean": mean, "std": variance ** 0.5, "games": len(pts_list)}
+    return result if result else None
+
+
