@@ -848,3 +848,127 @@ def simulate_period_winners(home_period_scoring: Optional[Dict[int, Dict]],
     if full:
         results["full"] = full
     return results
+
+
+# ============================================================================ Hot Hand + Anytime TD
+# BUILT DIRECTLY ON REQUEST: NCAAF versions of NFL's own Hot Hand Engine and Anytime TD Engine.
+# Same real logic, NCAAF's own confirmed data shape:
+#   - TD columns: passing_TD / rushing_TD / receiving_TD (confirmed from real 2025 refresh log,
+#     same columns build_qb_matchup_projections and _extra_profile_row already use)
+#   - Row fields: PassYds / RushYds / Receptions / RecYds (from ncaaf_engine.player_row's own
+#     confirmed output; NOT the raw CFBD names -- _ROW_FIELD_TO_CFBD_COL translates these)
+#   - opp_allowed keys: from ncaaf_engine.get_team_allowed_stats's own _ALLOWED_STAT_COLS
+#     (passing_YDS / rushing_YDS / receiving_REC / receiving_YDS -- confirmed same session)
+
+_NCAAF_ALLOWED_KEY_TO_ROW_FIELD: Dict[str, str] = {
+    "passing_YDS": "PassYds",
+    "rushing_YDS": "RushYds",
+    "receiving_REC": "Receptions",
+    "receiving_YDS": "RecYds",
+}
+
+
+def build_ncaaf_hot_hand_board(rows: List[Dict],
+                                opp_allowed: Dict[str, Dict[str, float]]) -> List[Dict]:
+    """NCAAF matchup-adjusted leaderboard -- same intent as nfl_projections.build_hot_hand_board
+    (see its own full docstring for the shared reasoning on slate-relative baseline vs. full-
+    league-average, and the deliberate no-pace-adjustment posture). Adapted for NCAAF's own
+    confirmed row structure (PassYds/RushYds/Receptions/RecYds from ncaaf_engine.player_row,
+    NOT nflreadpy's column names) and NCAAF's own opp_allowed dict shape from
+    ncaaf_engine.get_team_allowed_stats.
+
+    NCAAF-SPECIFIC HONEST NOTE: Hot Hand signals built on per-game data are more meaningful once
+    several weeks of real game logs exist. Week 1 will show season-average rates as the 'recent
+    average' (no per-game cache yet), which is honest and still useful as a baseline -- just not
+    a true recency signal until real games fill the cache."""
+    baseline_samples: Dict[str, List[float]] = {k: [] for k in _NCAAF_ALLOWED_KEY_TO_ROW_FIELD}
+    for stats in opp_allowed.values():
+        for k in baseline_samples:
+            v = stats.get(k)
+            if v:
+                baseline_samples[k].append(v)
+    baseline = {k: (sum(v) / len(v) if v else 0.0) for k, v in baseline_samples.items()}
+
+    out: List[Dict] = []
+    for r in rows:
+        opp = r.get("Opp")
+        opp_stats = opp_allowed.get(opp) if opp else None
+        for mkey in (r.get("_markets") or []):
+            spec = _MARKET_SPEC.get(mkey)
+            if not spec:
+                continue
+            col, disp, _line = spec
+            allowed_key = _ROW_FIELD_TO_CFBD_COL.get(col, col)   # PassYds -> passing_YDS
+            row_allowed_key = next((k for k, v in _NCAAF_ALLOWED_KEY_TO_ROW_FIELD.items()
+                                   if k == allowed_key), None)
+            if not row_allowed_key:
+                continue
+            recent_avg = r.get(col)   # the row-level field (PassYds etc.) already is per-game avg
+            if not recent_avg:
+                continue
+            opp_rate = (opp_stats or {}).get(allowed_key)
+            slate_avg = baseline.get(row_allowed_key, 0.0)
+            matchup_factor = (opp_rate / slate_avg) if (opp_rate and slate_avg > 0) else 1.0
+            hot_hand_score = recent_avg * matchup_factor
+            out.append({
+                "Player": r["Player"], "Team": r["Team"], "Opp": opp,
+                "Position": r.get("Position", ""), "Market": disp,
+                "Recent Avg": round(recent_avg, 1),
+                "Opp Allows": round(opp_rate, 1) if opp_rate else None,
+                "Slate Avg": round(slate_avg, 1) if slate_avg else None,
+                "Matchup Factor": round(matchup_factor, 2),
+                "Hot Hand Score": round(hot_hand_score, 1),
+                "Game": r.get("GameLabel"), "Team Trend": r.get("TeamTrend"),
+            })
+    out.sort(key=lambda x: x["Hot Hand Score"], reverse=True)
+    return out
+
+
+def build_ncaaf_anytime_td_board(rows: List[Dict], seed: Optional[int] = None) -> List[Dict]:
+    """NCAAF anytime TD probability board -- same shrinkage-based Bernoulli method as
+    nfl_projections.build_anytime_td_board (see its own full docstring for the full shared
+    reasoning: why Bernoulli shrinkage is the CLEANER approach for a binary outcome than
+    bootstrapping a continuous stat, and why ranking by raw ModelProb is honest where Conviction
+    would not be).
+
+    NCAAF TD COLUMNS: rushing_TD and receiving_TD -- confirmed from the real 2025 refresh log
+    (passing_TD, rushing_TD, receiving_TD all appeared in the printed stat-column list),
+    matching the same column names _extra_profile_row and get_team_period_scoring already use.
+
+    NCAAF-SPECIFIC HONEST NOTE: the same as Hot Hand -- this is most meaningful once real per-game
+    data exists. Until then, rows with empty _recent_games are skipped honestly rather than
+    estimated. The 2025-baseline toggle on the parent page (when implemented) would provide game
+    logs; this function reads from _recent_games directly, which the view can override."""
+    try:
+        from basketball_projections import shrink_prob
+    except ImportError:
+        try:
+            from projections import shrink_prob  # type: ignore
+        except ImportError:
+            def shrink_prob(rate, n, prior_n=10):   # type: ignore
+                return (rate * n + 0.15 * prior_n) / (n + prior_n)
+
+    out: List[Dict] = []
+    for r in rows:
+        position = r.get("Position")
+        log = r.get("_recent_games") or []
+        if position not in _TD_ELIGIBLE_POSITIONS or not log:
+            continue
+        n = len(log)
+        td_games = sum(1 for g in log
+                       if (g.get("rushing_TD") or 0) + (g.get("receiving_TD") or 0) > 0)
+        if position == "QB":
+            td_games = sum(1 for g in log
+                          if (g.get("passing_TD") or 0) + (g.get("rushing_TD") or 0) > 0)
+        raw_rate = td_games / n
+        shrunk = shrink_prob(raw_rate, n)
+        prob = _clip_prob(shrunk)
+        out.append({
+            "Player": r["Player"], "Team": r["Team"], "Position": position,
+            "Game": r.get("GameLabel"), "Opp": r.get("Opp"),
+            "TDGames": td_games, "GamesPlayed": n,
+            "ModelProb": round(prob, 4),
+            "Why": f"scored a TD in {td_games} of last {n} game(s) on file",
+        })
+    out.sort(key=lambda x: x["ModelProb"], reverse=True)
+    return out
