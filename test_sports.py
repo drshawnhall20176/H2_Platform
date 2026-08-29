@@ -594,6 +594,7 @@ def test_sidebar_sections_match_the_documented_grouping():
         "25": "🔬 DEEP RESEARCH", "26": "🔬 DEEP RESEARCH", "27": "🔬 DEEP RESEARCH",
         "29": "🔬 DEEP RESEARCH", "30": "🔬 DEEP RESEARCH", "31": "🔬 DEEP RESEARCH",
         "32": "🔬 DEEP RESEARCH", "33": "🔬 DEEP RESEARCH", "34": "🔬 DEEP RESEARCH",
+        "35": "🔬 DEEP RESEARCH", "36": "🔬 DEEP RESEARCH",
         "16": "🔍 SELF-GRADING & PROOF", "17": "🔍 SELF-GRADING & PROOF",
         "18": "🔍 SELF-GRADING & PROOF", "19": "🔍 SELF-GRADING & PROOF",
         "20": "📣 OPS & CONTENT", "21": "📣 OPS & CONTENT", "22": "📣 OPS & CONTENT",
@@ -1209,6 +1210,10 @@ def test_sport_only_page_visibility_matches_expected_config():
     # from NCAAF's Game Lab (32) adding a real, live injury report via nflreadpy (not a
     # placeholder). Two new engine functions (get_team_points_allowed, get_league_average_scoring)
     # added to nfl_engine.py; simulate_nfl_game added to nfl_projections.py.
+    #
+    # Hot Hand Engine (NCAAF, 35) and Anytime TD Engine (NCAAF, 36) added directly on request.
+    # Both adapted from NFL's own pages (25/13) using NCAAF's confirmed column names (rushing_TD
+    # etc. from the real 2025 refresh log). New projections functions added to ncaaf_projections.
     src = (_HERE / "streamlit_app.py").read_text()
     m = re.search(r"sport_only_leads = \{([^}]*)\}", src, re.DOTALL)
     assert m, "streamlit_app.py must define sport_only_leads"
@@ -1220,7 +1225,8 @@ def test_sport_only_page_visibility_matches_expected_config():
                      "12": ("NFL",), "13": ("NFL",), "14": ("NFL",),
                      "23": ("UFC",), "24": ("MLB",), "25": ("NFL",), "26": ("MLB",),
                      "27": ("MLB",), "29": ("NCAAF",), "30": ("NCAAF",), "31": ("NCAAF",),
-                     "32": ("NCAAF",), "33": ("NFL",), "34": ("NFL",)}, pairs
+                     "32": ("NCAAF",), "33": ("NFL",), "34": ("NFL",),
+                     "35": ("NCAAF",), "36": ("NCAAF",)}, pairs
     print("✓ sport_only_leads matches expected config (Bullpen Watch/Game Watch/Pitching Lab/"
           "Dinger Engine/Matchup Lab(MLB)/Player Lines/First Innings Totals -> MLB, Hot Hand "
           "Engine/Matchup Lab(WNBA/NBA/NCAAMB) -> WNBA+NBA+NCAAMB, Matchup Lab(NFL)/Anytime TD "
@@ -2409,10 +2415,10 @@ def test_nfl_game_lab_wires_correctly_with_real_injury_report():
     assert "P.simulate_nfl_game(" in src, (
         "must call simulate_nfl_game specifically -- not NCAAF's simulate_ncaaf_game"
     )
-    assert "E.get_team_injuries(home_abbr, season, week)" in src, (
+    assert "E.get_team_injuries(home_abbr, current_season, current_week)" in src, (
         "must call get_team_injuries for the home team -- the real, live upgrade over NCAAF"
     )
-    assert "E.get_team_injuries(away_abbr, season, week)" in src, (
+    assert "E.get_team_injuries(away_abbr, current_season, current_week)" in src, (
         "must call get_team_injuries for the away team too"
     )
     assert 'key=lambda m: m.get("game_date") or "~"' in src, (

@@ -125,6 +125,10 @@ def run():
                                                           # versions, using nflreadpy column names.
         "34": ("NFL",),                                  # Game Lab (NFL) -- moneyline/spread/total
                                                           # + real injury reports via nflreadpy.
+        "35": ("NCAAF",),                                # Hot Hand Engine (NCAAF) -- matchup-
+                                                          # adjusted slate-wide leaderboard.
+        "36": ("NCAAF",),                                # Anytime TD Engine (NCAAF) -- Bernoulli
+                                                          # TD probability board.
     }
 
     # REAL, REPORTED GAP CLOSED HERE: these titles all carry a has_projections check that shows
@@ -198,6 +202,8 @@ def run():
         "32": ("Game Lab",      "🏟️", "ncaaf_game_lab"),
         "33": ("Player Lines",   "📉", "nfl_player_lines"),   # NFL version — same title, distinct url_path
         "34": ("Game Lab",      "🏟️", "nfl_game_lab"),       # NFL version — same title, distinct url_path
+        "35": ("Hot Hand Engine", "🔥", "ncaaf_hot_hand_engine"),   # NCAAF version
+        "36": ("Anytime TD Engine", "🎯", "ncaaf_anytime_td_engine"),  # NCAAF version
     }
 
     # SIDEBAR SECTIONS, added directly on request: st.navigation natively supports a
@@ -227,7 +233,7 @@ def run():
         SECTION_OF[k] = "🎯 RECOMMENDATIONS"
     for k in ("5", "6"):
         SECTION_OF[k] = "🛰️ LIVE SIGNALS"
-    for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26", "27", "29", "30", "31", "32", "33", "34"):
+    for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26", "27", "29", "30", "31", "32", "33", "34", "35", "36"):
         SECTION_OF[k] = "🔬 DEEP RESEARCH"
     for k in ("16", "17", "18", "19"):
         SECTION_OF[k] = "🔍 SELF-GRADING & PROOF"
