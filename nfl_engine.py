@@ -528,7 +528,8 @@ def get_player_results(date_str: str) -> Dict[str, Dict[str, float]]:
     return out
 
 
-def build_slate(date_str: str, season: Optional[int] = None) -> Tuple[List[Dict], List[Dict]]:
+def build_slate(date_str: str, season: Optional[int] = None,
+                stats_date_str: Optional[str] = None) -> Tuple[List[Dict], List[Dict]]:
     """Fetch and assemble the full NFL slate for whichever week date_str resolves into (see
     _resolve_week's own docstring for the resolution rule).
 
@@ -536,12 +537,23 @@ def build_slate(date_str: str, season: Optional[int] = None) -> Tuple[List[Dict]
     Hot Hand Engine/Matchup Lab don't need to know NFL's slate is weekly under the hood.
 
     season defaults to _infer_season(date_str) — see that function's own docstring for why this
-    is NOT nflreadpy's get_current_season()."""
+    is NOT nflreadpy's get_current_season().
+
+    stats_date_str ADDED DIRECTLY ON REQUEST: the same two-dates pattern NCAAF QB Lab/Matchup
+    Lab/Player Lines/Game Lab all use. When provided and different from date_str:
+    - SCHEDULE (which week, which matchups): still comes from date_str
+    - PLAYER DATA (weekly stats, roster): comes from stats_date_str's own resolved season
+    This is what makes "today's real 2026 matchups + 2025 player data" work before any 2026
+    games have been played -- the confirmed, real reason NFL's own pre-season week showed
+    nothing on every deep research page."""
     if season is None:
         season = _infer_season(date_str)
         if season is None:
             _diag(f"build_slate({date_str}): could not infer season from date_str, aborting")
             return [], []
+
+    # Stats season: from stats_date_str when provided, else same as schedule season
+    stats_season = (_infer_season(stats_date_str) if stats_date_str else None) or season
 
     schedule = get_schedule(season)
     week = _resolve_week(schedule, date_str)
@@ -554,9 +566,9 @@ def build_slate(date_str: str, season: Optional[int] = None) -> Tuple[List[Dict]
         _diag(f"build_slate({date_str}): resolved to week {week} but 0 games found")
         return [], []
 
-    weekly = load_season_weekly_stats(season)
+    weekly = load_season_weekly_stats(stats_season)
     if weekly.empty:
-        _diag(f"build_slate({date_str}): resolved to week {week}, but weekly stats fetch failed/empty")
+        _diag(f"build_slate({date_str}): weekly stats for stats_season={stats_season} empty")
         return [], []
 
     meta: List[Dict] = []
@@ -570,7 +582,7 @@ def build_slate(date_str: str, season: Optional[int] = None) -> Tuple[List[Dict]
                     "home_rest": g.get("home_rest"), "away_rest": g.get("away_rest")})
         for team, opp in ((g["home_team"], g["away_team"]), (g["away_team"], g["home_team"])):
             if team not in roster_cache:
-                roster_cache[team] = get_team_roster(team, season)
+                roster_cache[team] = get_team_roster(team, stats_season)
             for player in roster_cache[team]:
                 recent = player_recent_games(weekly, player["id"], week)
                 row = player_row(player, team, opp, label, g.get("game_date"), recent,
@@ -578,8 +590,12 @@ def build_slate(date_str: str, season: Optional[int] = None) -> Tuple[List[Dict]
                 if row is not None:
                     rows.append(row)
 
-    _diag(f"build_slate({date_str}): season {season} week {week}, {len(games)} game(s) -> "
-         f"{len(rows)} player(s) cleared a rotation floor")
+    if stats_season != season:
+        _diag(f"build_slate({date_str}): season {season} week {week}, {len(games)} game(s) -> "
+             f"{len(rows)} player(s) cleared rotation floor (using {stats_season} stats as baseline)")
+    else:
+        _diag(f"build_slate({date_str}): season {season} week {week}, {len(games)} game(s) -> "
+             f"{len(rows)} player(s) cleared a rotation floor")
     return rows, meta
 
 

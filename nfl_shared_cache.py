@@ -52,16 +52,24 @@ import nfl_engine as E
 
 if st is not None:
     @st.cache_data(ttl=300, show_spinner=False)
-    def load_nfl_slate_cached(date_str: str) -> Tuple[List[Dict], List[Dict]]:
+    def load_nfl_slate_cached(date_str: str,
+                              stats_date_str: Optional[str] = None) -> Tuple[List[Dict], List[Dict]]:
         """Cached companion to nfl_engine.build_slate -- the ONE real, shared entry point every
         NFL page needing today's slate (rows, meta) should call, instead of each defining its
         own local wrapper. See this module's own docstring for the full, confirmed reasoning.
+
+        stats_date_str ADDED DIRECTLY ON REQUEST, same real two-dates pattern as every other
+        sport's own baseline toggle (NCAAF QB Lab/Matchup Lab/Player Lines/Game Lab all use it,
+        and now NFL pages get the same). When provided and different from date_str, the player
+        stats come from stats_date_str's own resolved season while the MATCHUPS still come from
+        date_str's own resolved season -- so "today's real 2026 games with 2025 player data"
+        is genuinely possible, which is what the NFL pre-season week needs.
 
         DEFINED ONLY WHEN STREAMLIT IS ACTUALLY IMPORTABLE (see the module-level try/except
         above) -- a standalone script that imports nfl_engine directly never imports THIS module
         and never calls this function; every real caller of load_nfl_slate_cached is a live
         Streamlit page, which already requires Streamlit to run at all."""
-        return E.build_slate(date_str)
+        return E.build_slate(date_str, stats_date_str=stats_date_str)
 
     @st.cache_data(ttl=300, show_spinner=False)
     def resolve_nfl_week_cached(date_str: str) -> Tuple[Optional[int], Optional[int]]:
