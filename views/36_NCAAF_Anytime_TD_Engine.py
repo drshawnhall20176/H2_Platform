@@ -27,6 +27,7 @@ import ncaaf_projections as P
 
 _active = sports.active()
 eastern = pytz.timezone("US/Eastern")
+game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER
 
 C.base_css()
 C.page_header("🎯", "NCAAF Anytime TD Engine",
@@ -39,14 +40,15 @@ if not sports.require_sport(["NCAAF"], "NCAAF Anytime TD Engine"):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load(date_str: str, stats_date_str: str):
+def load_slate(date_str: str, stats_date_str: str):
     rows, meta = NSC.load_ncaaf_slate_cached(date_str)
+    for r in rows:
+        r["_slot"] = slot_of(game_dt(r.get("_game_date")))
     season_logs = {r["_pid"]: E.get_player_season_games(r["_pid"], stats_date_str)
                   for r in rows if r.get("_pid")}
     proj_rows = [dict(r, _recent_games=season_logs.get(r["_pid"]) or [])
                 if stats_date_str != date_str else r for r in rows]
-    board = P.build_ncaaf_anytime_td_board(proj_rows)
-    return board, len(meta)
+    return proj_rows, len(meta)
 
 
 c1, c2 = st.columns([2, 1])
@@ -69,8 +71,27 @@ if show_2025_baseline:
     st.info("📊 **Showing 2025 season data as a baseline.** Today's matchups are current — "
            "TD probability rates are built from last season's real game logs.", icon="📊")
 
+with st.spinner("Loading slate..."):
+    all_rows, n_games = load_slate(date_str, stats_date_str)
+
+if not all_rows:
+    st.info("No players on the slate for this date — try a different date.", icon="🕐")
+    st.stop()
+
+slots_present = sorted({r["_slot"] for r in all_rows}, key=lambda s: SLOT_ORDER.get(s, 9))
+c_slot, c_game = st.columns(2)
+with c_slot:
+    slot_pick = st.selectbox("Time slot", ["All slate"] + slots_present, key="td_slot")
+slot_rows = all_rows if slot_pick == "All slate" else [r for r in all_rows if r["_slot"] == slot_pick]
+
+game_date_by_label = {r["GameLabel"]: r.get("_game_date") for r in slot_rows}
+games_present = sorted(game_date_by_label, key=lambda g: game_date_by_label[g] or "~")
+with c_game:
+    game_pick = st.selectbox("Game", ["All games in this slot"] + games_present, key="td_game")
+final_rows = slot_rows if game_pick == "All games in this slot" else [r for r in slot_rows if r["GameLabel"] == game_pick]
+
 with st.spinner("Building TD probability board..."):
-    board, n_games = load(date_str, stats_date_str)
+    board = P.build_ncaaf_anytime_td_board(final_rows)
 
 if not board:
     st.info(

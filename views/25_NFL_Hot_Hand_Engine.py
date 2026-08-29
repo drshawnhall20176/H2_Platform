@@ -57,7 +57,7 @@ def load_board(date_str: str):
     # fetch separately too. See nfl_shared_cache.py's own module docstring for the full,
     # confirmed reasoning. Only the fetch is shared; this page's own real post-processing (the
     # per-opponent allowed-stats fetches below) stays exactly as it was.
-    rows, meta = NSC.load_nfl_slate_cached(date_str)
+    rows, meta = NSC.load_nfl_slate_cached(date_str, stats_date_str=stats_date_str)
     if not rows:
         return [], 0, {}
 
@@ -93,6 +93,13 @@ with c2:
         st.cache_data.clear()
         st.rerun()
 date_str = target_date.strftime("%Y-%m-%d")
+
+show_2025_baseline = st.checkbox("📊 Use 2025 season baseline (2026 hasn't started yet)", value=True,
+    help="Uses last season's real player data. Uncheck once 2026 Week 1 games are in the books.")
+stats_date_str = "2025-12-01" if show_2025_baseline else date_str
+if show_2025_baseline:
+    st.info("📊 **Using 2025 season data.** Today's real matchups are current — player stats use last season's game logs.", icon="📊")
+
 
 with st.spinner("Building the matchup-adjusted board..."):
     board, n_games, team_abbrs = load_board(date_str)

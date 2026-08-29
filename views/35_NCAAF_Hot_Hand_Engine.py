@@ -27,6 +27,7 @@ import ncaaf_projections as P
 
 _active = sports.active()
 eastern = pytz.timezone("US/Eastern")
+game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER
 
 C.base_css()
 C.page_header("🔥", "NCAAF Hot Hand Engine",
@@ -38,12 +39,17 @@ if not sports.require_sport(["NCAAF"], "NCAAF Hot Hand Engine"):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load(date_str: str, stats_date_str: str):
+def load_slate(date_str: str, stats_date_str: str):
     rows, meta = NSC.load_ncaaf_slate_cached(date_str)
+    for r in rows:
+        r["_slot"] = slot_of(game_dt(r.get("_game_date")))
+    return rows, meta
+
+
+def build_board(rows: list, stats_date_str: str):
     opps = sorted({r["Opp"] for r in rows if r.get("Opp")})
     opp_allowed = {opp: E.get_team_allowed_stats(opp, stats_date_str, n=None) for opp in opps}
-    board = P.build_ncaaf_hot_hand_board(rows, opp_allowed)
-    return board, len(meta)
+    return P.build_ncaaf_hot_hand_board(rows, opp_allowed)
 
 
 c1, c2 = st.columns([2, 1])
@@ -66,8 +72,27 @@ if show_2025_baseline:
     st.info("📊 **Showing 2025 season data as a baseline.** Today's matchups are current — "
            "the Hot Hand scores below use last season's per-game rates.", icon="📊")
 
+with st.spinner("Loading slate..."):
+    all_rows, n_games = load_slate(date_str, stats_date_str)
+
+if not all_rows:
+    st.info("No players on the slate for this date — try a different date.", icon="🕐")
+    st.stop()
+
+slots_present = sorted({r["_slot"] for r in all_rows}, key=lambda s: SLOT_ORDER.get(s, 9))
+c_slot, c_game = st.columns(2)
+with c_slot:
+    slot_pick = st.selectbox("Time slot", ["All slate"] + slots_present, key="hh_slot")
+slot_rows = all_rows if slot_pick == "All slate" else [r for r in all_rows if r["_slot"] == slot_pick]
+
+game_date_by_label = {r["GameLabel"]: r.get("_game_date") for r in slot_rows}
+games_present = sorted(game_date_by_label, key=lambda g: game_date_by_label[g] or "~")
+with c_game:
+    game_pick = st.selectbox("Game", ["All games in this slot"] + games_present, key="hh_game")
+final_rows = slot_rows if game_pick == "All games in this slot" else [r for r in slot_rows if r["GameLabel"] == game_pick]
+
 with st.spinner("Building matchup-adjusted board..."):
-    board, n_games = load(date_str, stats_date_str)
+    board = build_board(final_rows, stats_date_str)
 
 if not board:
     st.info(

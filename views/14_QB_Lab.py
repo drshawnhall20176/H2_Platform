@@ -38,29 +38,20 @@ if not sports.require_sport(["NFL"], "QB Lab"):
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def load(date_str: str):
-    # A REAL, CONFIRMED FIX, not the original design: the actual network fetch here (E.build_
-    # slate) used to be called directly, independently cached under THIS page's own function
-    # identity -- NFL Matchup Lab, Anytime TD Engine, and NFL Hot Hand Engine each cached the
-    # exact same real fetch separately too. See nfl_shared_cache.py's own module docstring for
-    # the full, confirmed reasoning. Only the fetch is shared; this page's own real post-
-    # processing (QB filtering, the per-opponent allowed-stats fetches below) stays exactly as
-    # it was.
-    rows, meta = NSC.load_nfl_slate_cached(date_str)
+def load(date_str: str, stats_date_str: str):
+    rows, meta = NSC.load_nfl_slate_cached(date_str, stats_date_str=stats_date_str)
     qb_rows = [r for r in rows if r["Position"] == "QB"]
 
     opps = sorted({r["Opp"] for r in qb_rows if r.get("Opp")})
-    # get_team_allowed_stats already returns both passing_yards AND rushing_yards in one call per
-    # opponent — no second round of per-opponent calls needed for the rushing side.
-    opp_stats = {opp: E.get_team_allowed_stats(opp, date_str, n=None) for opp in opps}
+    opp_stats = {opp: E.get_team_allowed_stats(opp, stats_date_str, n=None) for opp in opps}
     opp_pass_allowed = {opp: s.get("passing_yards", 0.0) for opp, s in opp_stats.items()}
     opp_rush_allowed = {opp: s.get("rushing_yards", 0.0) for opp, s in opp_stats.items()}
-    league_avg_pass = E.get_league_average_pass_yards_allowed(date_str)
-    league_avg_rush = E.get_league_average_rush_yards_allowed(date_str)
+    league_avg_pass = E.get_league_average_pass_yards_allowed(stats_date_str)
+    league_avg_rush = E.get_league_average_rush_yards_allowed(stats_date_str)
     matchup_proj = P.build_qb_matchup_projections(rows, opp_pass_allowed, league_avg_pass,
                                                   opp_rush_allowed, league_avg_rush)
 
-    season_logs = {r["_pid"]: E.get_player_season_games(r["_pid"], date_str) for r in qb_rows}
+    season_logs = {r["_pid"]: E.get_player_season_games(r["_pid"], stats_date_str) for r in qb_rows}
     efficiency = P.build_qb_efficiency_table(rows, season_logs)
 
     return matchup_proj, efficiency, len(meta), len(qb_rows)
@@ -69,8 +60,14 @@ def load(date_str: str):
 target_date = st.date_input("Slate date", datetime.now(eastern))
 date_str = target_date.strftime("%Y-%m-%d")
 
+show_2025_baseline = st.checkbox("📊 Use 2025 season baseline (2026 hasn't started yet)", value=True,
+    help="Uses last season's real player data. Uncheck once 2026 Week 1 games are in the books.")
+stats_date_str = "2025-12-01" if show_2025_baseline else date_str
+if show_2025_baseline:
+    st.info("📊 **Using 2025 season data.** Today's real matchups are current — projections use last season's game logs.", icon="📊")
+
 with st.spinner("Loading QBs and building matchup-aware projections..."):
-    matchup_proj, efficiency, n_games, n_qbs = load(date_str)
+    matchup_proj, efficiency, n_games, n_qbs = load(date_str, stats_date_str)
 
 if not matchup_proj and not efficiency:
     st.info(

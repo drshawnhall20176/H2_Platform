@@ -55,14 +55,14 @@ def get_api_key():
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_slate(date_str: str):
+def load_slate(date_str: str, stats_date_str: str):
     # A REAL, CONFIRMED FIX, not the original design: the actual network fetch here (E.build_
     # slate) used to be called directly, independently cached under THIS page's own function
     # identity -- Anytime TD Engine, QB Lab, and NFL Hot Hand Engine each cached the exact same
     # real fetch separately too. See nfl_shared_cache.py's own module docstring for the full,
     # confirmed reasoning. Only the fetch is shared; this page's own real post-processing
     # (team_abbrs_from_meta) stays exactly as it was.
-    rows, meta = NSC.load_nfl_slate_cached(date_str)
+    rows, meta = NSC.load_nfl_slate_cached(date_str, stats_date_str=stats_date_str)
     team_abbrs = E.team_abbrs_from_meta(meta)   # zero extra cost — meta already has this
     return rows, len(meta), team_abbrs
 
@@ -116,8 +116,15 @@ with c2:
         st.rerun()
 date_str = target_date.strftime("%Y-%m-%d")
 
+show_2025_baseline = st.checkbox("📊 Use 2025 season baseline (2026 hasn't started yet)", value=True,
+    help="Uses last season's real player data. Uncheck once 2026 Week 1 games are in the books.")
+stats_date_str = "2025-12-01" if show_2025_baseline else date_str
+if show_2025_baseline:
+    st.info("📊 **Using 2025 season data.** Today's real matchups are current — player stats use last season's game logs.", icon="📊")
+
+
 with st.spinner("Loading this week's slate..."):
-    rows, n_games, team_abbrs = load_slate(date_str)
+    rows, n_games, team_abbrs = load_slate(date_str, stats_date_str)
 
 if not rows:
     st.info("No projectable players for this date. Pick a date within an NFL week with a real slate.")
