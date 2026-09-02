@@ -21,6 +21,7 @@ import pytz
 
 import sports
 import nfl_engine as E
+game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER
 import nfl_shared_cache as NSC
 import nfl_projections as P
 
@@ -54,7 +55,7 @@ def load(date_str: str, stats_date_str: str):
     season_logs = {r["_pid"]: E.get_player_season_games(r["_pid"], stats_date_str) for r in qb_rows}
     efficiency = P.build_qb_efficiency_table(rows, season_logs)
 
-    return matchup_proj, efficiency, len(meta), len(qb_rows)
+    return matchup_proj, efficiency, meta, len(qb_rows)
 
 
 target_date = st.date_input("Slate date", datetime.now(eastern))
@@ -67,7 +68,7 @@ if show_2025_baseline:
     st.info("📊 **Using 2025 season data.** Today's real matchups are current — projections use last season's game logs.", icon="📊")
 
 with st.spinner("Loading QBs and building matchup-aware projections..."):
-    matchup_proj, efficiency, n_games, n_qbs = load(date_str, stats_date_str)
+    matchup_proj, efficiency, meta, n_qbs = load(date_str, stats_date_str)
 
 if not matchup_proj and not efficiency:
     st.info(
@@ -82,7 +83,25 @@ if not matchup_proj and not efficiency:
         icon="🕐")
     st.stop()
 
-st.caption(f"{n_games} game(s) · {n_qbs} QB(s) on the slate")
+# Slot and game filters -------------------------------------------------------
+for _m in meta:
+    _m["_slot"] = slot_of(game_dt(_m.get("game_date")))
+slots_present = sorted({m["_slot"] for m in meta}, key=lambda s: SLOT_ORDER.get(s, 9))
+cf1, cf2 = st.columns(2)
+with cf1:
+    slot_pick = st.selectbox("Time slot", ["All slate"] + slots_present, key="qb_slot")
+slot_meta = meta if slot_pick == "All slate" else [m for m in meta if m["_slot"] == slot_pick]
+game_date_by_label = {m["label"]: m.get("game_date") for m in slot_meta}
+games_present = sorted(game_date_by_label, key=lambda g: game_date_by_label[g] or "~")
+with cf2:
+    game_pick = st.selectbox("Game", ["All games in this slot"] + games_present, key="qb_game")
+# Filter projection tables by the selected game label
+_game_filter = None if game_pick == "All games in this slot" else game_pick
+if _game_filter:
+    matchup_proj = [r for r in matchup_proj if r.get("Game") == _game_filter]
+    efficiency  = [r for r in efficiency  if r.get("Game") == _game_filter]
+
+st.caption(f"{len(meta)} game(s) on slate · {n_qbs} QB(s) total · showing {len(matchup_proj)} QB(s) for the current filter")
 
 # === Matchup-aware projections =============================================
 C.section_header("⚡", "Matchup-aware Pass Yards + Rush Yards projections")

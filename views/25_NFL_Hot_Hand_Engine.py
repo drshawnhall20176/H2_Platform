@@ -32,6 +32,7 @@ import pytz
 
 import sports
 import nfl_engine as E
+game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER
 import nfl_shared_cache as NSC
 import nfl_projections as P
 
@@ -50,25 +51,20 @@ if not sports.require_sport(["NFL"], "Hot Hand Engine"):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_board(date_str: str):
-    # A REAL, CONFIRMED FIX, not the original design: the actual network fetch here (E.build_
-    # slate) used to be called directly, independently cached under THIS page's own function
-    # identity -- NFL Matchup Lab, Anytime TD Engine, and QB Lab each cached the exact same real
-    # fetch separately too. See nfl_shared_cache.py's own module docstring for the full,
-    # confirmed reasoning. Only the fetch is shared; this page's own real post-processing (the
-    # per-opponent allowed-stats fetches below) stays exactly as it was.
+def load_slate(date_str: str, stats_date_str: str):
     rows, meta = NSC.load_nfl_slate_cached(date_str, stats_date_str=stats_date_str)
-    if not rows:
-        return [], 0, {}
+    for r in rows:
+        r["_slot"] = slot_of(game_dt(r.get("_game_date")))
+    team_abbrs = E.team_abbrs_from_meta(meta)
+    return rows, meta, team_abbrs
 
-    # Opponent allowed-stats, one real fetch per UNIQUE opponent on this week's slate (not per
-    # player) -- the caller's job, matching every other sport's own hot-hand board, keeping
-    # nfl_projections.build_hot_hand_board itself free of its own network fetching.
+
+def build_hh_board(rows: list, date_str: str):
+    if not rows:
+        return []
     opps = sorted({r["Opp"] for r in rows if r.get("Opp")})
     opp_allowed = {abbr: E.get_team_allowed_stats(abbr, date_str) for abbr in opps}
-    board = P.build_hot_hand_board(rows, opp_allowed)
-    team_abbrs = E.team_abbrs_from_meta(meta)   # zero extra cost -- meta already has this
-    return board, len(meta), team_abbrs
+    return P.build_hot_hand_board(rows, opp_allowed)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -101,8 +97,29 @@ if show_2025_baseline:
     st.info("📊 **Using 2025 season data.** Today's real matchups are current — player stats use last season's game logs.", icon="📊")
 
 
+with st.spinner("Loading this week's NFL slate..."):
+    all_rows, meta, team_abbrs = load_slate(date_str, stats_date_str)
+
+if not all_rows:
+    st.info("No players on the slate for this date — try a different date.", icon="🕐")
+    st.stop()
+
+slots_present = sorted({r["_slot"] for r in all_rows}, key=lambda s: SLOT_ORDER.get(s, 9))
+c_slot, c_game = st.columns(2)
+with c_slot:
+    slot_pick = st.selectbox("Time slot", ["All slate"] + slots_present, key="hh_slot")
+slot_rows = all_rows if slot_pick == "All slate" else [r for r in all_rows if r["_slot"] == slot_pick]
+
+game_date_by_label = {r["GameLabel"]: r.get("_game_date") for r in slot_rows}
+games_present = sorted(game_date_by_label, key=lambda g: game_date_by_label[g] or "~")
+with c_game:
+    game_pick = st.selectbox("Game", ["All games in this slot"] + games_present, key="hh_game")
+final_rows = slot_rows if game_pick == "All games in this slot" else [r for r in slot_rows if r["GameLabel"] == game_pick]
+
+n_games = len(meta)
+
 with st.spinner("Building the matchup-adjusted board..."):
-    board, n_games, team_abbrs = load_board(date_str)
+    board = build_hh_board(final_rows, date_str)
 
 if not board:
     st.info("No projectable players for this date/week. Pick a date within an active NFL week.")

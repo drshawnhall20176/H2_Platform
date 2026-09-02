@@ -108,7 +108,15 @@ if not meta:
     st.stop()
 
 meta_sorted = sorted(meta, key=lambda m: m.get("game_date") or "~")
-game_options = {f"{m['away_name']} @ {m['home_name']}": m for m in meta_sorted}
+for _m in meta_sorted:
+    _m["_slot"] = slot_of(game_dt(_m.get("game_date")))
+slots_present = sorted({m["_slot"] for m in meta_sorted}, key=lambda s: SLOT_ORDER.get(s, 9))
+slot_pick = st.selectbox("Time slot", ["All slate"] + slots_present, key="gl_slot")
+slot_meta = meta_sorted if slot_pick == "All slate" else [m for m in meta_sorted if m["_slot"] == slot_pick]
+game_options = {f"{m['away_name']} @ {m['home_name']}": m for m in slot_meta}
+if not game_options:
+    st.info("No games in this time slot — try a different slot.", icon="🕐")
+    st.stop()
 game_label = st.selectbox("Game", list(game_options.keys()))
 selected = game_options[game_label]
 home_name = selected["home_name"]
