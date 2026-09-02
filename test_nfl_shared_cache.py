@@ -96,15 +96,19 @@ def test_build_slate_prior_season_baseline_uses_999_not_current_week():
     as baseline)'. Root cause: player_recent_games was called with before_week=1 (from the
     2026 schedule), but the weekly data was 2025. Games before week 1 of ANY season = empty.
     Fix: before_week=999 when stats_season != season, so all of last season's games are
-    included. player_recent_games is already capped by n=CFG.RECENT_GAMES_N."""
+    included. player_recent_games is already capped by n=CFG.RECENT_GAMES_N.
+
+    ALSO TESTS the build_slate-level stats_season cap: when stats_date_str is None (no
+    explicit baseline), build_slate now caps stats_season to nfl.get_current_season() before
+    even calling load_season_weekly_stats -- confirmed from live log showing repeated 404s
+    being triggered by pages without baseline toggles, because the nested-function auto-fallback
+    approach in load_season_weekly_stats was unreliable in the deployed environment."""
     import nfl_engine as E
     import pandas as pd
     from unittest.mock import patch, MagicMock
 
-    # Fake 2026 schedule: one week-1 game
     schedule_2026 = [{"season": 2026, "week": 1, "home_team": "KC", "away_team": "PHI",
                       "game_date": "2026-09-09", "home_rest": 7, "away_rest": 7}]
-    # Fake 2025 weekly data with a player who played in weeks 15-17 of 2025
     fake_weekly = pd.DataFrame([
         {"player_id": "p1", "player_display_name": "Test QB", "week": 15,
          "season": 2025, "recent_team": "KC", "passing_yards": 310},
@@ -114,6 +118,7 @@ def test_build_slate_prior_season_baseline_uses_999_not_current_week():
     fake_roster = [{"id": "p1", "name": "Test QB", "position": "QB"}]
 
     before_weeks_seen = []
+    stats_seasons_requested = []
     real_player_recent_games = E.player_recent_games
 
     def spy_player_recent_games(weekly, player_id, before_week, n=None):
@@ -121,18 +126,41 @@ def test_build_slate_prior_season_baseline_uses_999_not_current_week():
         return real_player_recent_games(weekly, player_id, before_week,
                                         n=n or E.CFG.RECENT_GAMES_N)
 
+    def spy_load_season_weekly_stats(s):
+        stats_seasons_requested.append(s)
+        return fake_weekly
+
     with patch.object(E, "get_schedule", return_value=schedule_2026), \
-         patch.object(E, "load_season_weekly_stats", return_value=fake_weekly), \
+         patch.object(E, "load_season_weekly_stats", side_effect=spy_load_season_weekly_stats), \
          patch.object(E, "get_team_roster", return_value=fake_roster), \
          patch.object(E, "player_recent_games", side_effect=spy_player_recent_games), \
-         patch.object(E, "_infer_season", side_effect=lambda d: 2026 if "2026" in str(d) else 2025):
+         patch.object(E, "_infer_season", side_effect=lambda d: 2026 if "2026" in str(d) else 2025), \
+         patch.object(E.nfl, "get_current_season", return_value=2025):
         rows, meta = E.build_slate("2026-09-09", stats_date_str="2025-12-01")
 
     assert all(w == 999 for w in before_weeks_seen), (
         f"player_recent_games must be called with before_week=999 when using prior-season "
-        f"baseline, not before_week=1 (which returns empty by definition). "
-        f"Got before_weeks: {before_weeks_seen}")
-    print("✓ build_slate prior-season baseline correctly passes before_week=999 to player_recent_games, not before_week=1 (the confirmed live bug)")
+        f"baseline. Got: {before_weeks_seen}")
+
+    # Test the build_slate-level cap: with no explicit stats_date_str
+    before_weeks_seen.clear()
+    stats_seasons_requested.clear()
+    with patch.object(E, "get_schedule", return_value=schedule_2026), \
+         patch.object(E, "load_season_weekly_stats", side_effect=spy_load_season_weekly_stats), \
+         patch.object(E, "get_team_roster", return_value=fake_roster), \
+         patch.object(E, "player_recent_games", side_effect=spy_player_recent_games), \
+         patch.object(E, "_infer_season", return_value=2026), \
+         patch.object(E.nfl, "get_current_season", return_value=2025):
+        rows2, meta2 = E.build_slate("2026-09-09")  # no stats_date_str -- should auto-cap
+
+    assert all(s == 2025 for s in stats_seasons_requested), (
+        f"load_season_weekly_stats must never be called with season 2026 when get_current_season "
+        f"returns 2025 -- the 404 loop happens because nflreadpy is called for a season that "
+        f"doesn't exist. Got seasons requested: {stats_seasons_requested}")
+    assert all(w == 999 for w in before_weeks_seen), (
+        f"before_week must be 999 even without explicit stats_date_str when build_slate auto-caps. "
+        f"Got: {before_weeks_seen}")
+    print("✓ build_slate prior-season baseline correctly passes before_week=999, and auto-cap prevents any 2026 nflreadpy call when get_current_season() returns 2025")
 
 
 if __name__ == "__main__":
