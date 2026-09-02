@@ -261,36 +261,25 @@ def load_season_weekly_stats(season: int) -> pd.DataFrame:
     this matters (the performance bug this replaces). Callers (build_slate) load this a single
     time per build and pass the DataFrame around; nothing in this module re-fetches per player.
 
-    AUTO-FALLBACK ADDED DIRECTLY FROM LIVE LOG: nflreadpy raises a 404 (not a ValueError) for
-    any season whose weekly stats file doesn't exist yet on nflverse-data. Before the 2026 NFL
-    season's first game, stats_player_week_2026.parquet doesn't exist, so every page that calls
-    build_slate without an explicit baseline toggle would fail loudly and repeatedly. The fallback
-    to season-1 handles this correctly: it's the same prior-season data the baseline toggle
-    explicitly requests, just applied automatically rather than requiring every caller to know
-    about it. The diag message distinguishes a clean auto-fallback from an unexpected failure."""
-    def _load(s: int) -> pd.DataFrame:
-        try:
-            return nfl.load_player_stats([s], summary_level="week").to_pandas()
-        except Exception:
-            logger.exception("NFL load_player_stats failed for season %s", s)
-            return pd.DataFrame()
+    PRE-SEASON GUARD: nflreadpy raises 404 before the new season's weekly stats file exists on
+    nflverse-data. Confirmed from live log: stats_player_week_2026.parquet 404s before Week 1.
+    Capped to nfl.get_current_season() so we never even attempt the 404 -- a clean skip, not a
+    failed download. The corresponding before_week adjustment (999 instead of current week) is
+    handled in build_slate itself, which is the only caller and the right place to own it."""
+    # Cap season to what nflreadpy actually has -- get_current_season() returns 2025 pre-season
+    max_available = nfl.get_current_season()
+    if season > max_available:
+        _diag(f"load_season_weekly_stats({season}): season not yet published by nflreadpy "
+             f"(max={max_available}), using {max_available}")
+        season = max_available
 
-    df = _load(season)
-    if df.empty and season >= 2024:
-        # Auto-fallback: try the prior season before giving up. Only for recent seasons --
-        # a failure on an old season (2019, 2020) is probably a real, unexpected data problem
-        # rather than "this season hasn't started yet."
-        fallback = season - 1
-        _diag(f"load_season_weekly_stats({season}): empty -- auto-falling back to {fallback} "
-             "(season hasn't started yet, or nflreadpy hasn't published the file)")
-        df = _load(fallback)
-        if df.empty:
-            _diag(f"load_season_weekly_stats: fallback to {fallback} also empty")
-            return pd.DataFrame()
-
+    try:
+        df = nfl.load_player_stats([season], summary_level="week").to_pandas()
+    except Exception:
+        logger.exception("NFL load_player_stats failed for season %s", season)
+        return pd.DataFrame()
     if df.empty:
         _diag(f"load_season_weekly_stats({season}): load_player_stats returned 0 rows")
-        return pd.DataFrame()
     # NOT df.get("carries", 0).fillna(0): DataFrame.get() returns the literal default (an int,
     # not a Series) when the column is entirely absent from the response, and .fillna() on an int
     # crashes — a real pandas gotcha, not a hypothetical one (caught by this module's own test
@@ -582,6 +571,17 @@ def build_slate(date_str: str, season: Optional[int] = None,
 
     # Stats season: from stats_date_str when provided, else same as schedule season
     stats_season = (_infer_season(stats_date_str) if stats_date_str else None) or season
+
+    # PRE-SEASON GUARD: if stats_season is beyond what nflreadpy actually has, cap it. This
+    # handles pages without an explicit baseline toggle -- they pass stats_date_str=None, which
+    # sets stats_season=season=2026, but 2026 weekly data doesn't exist yet. Capping here (not
+    # just in load_season_weekly_stats) ensures before_week is also set correctly (999, not week
+    # 1), which is the other half of the pre-season fix confirmed from live log diagnostics.
+    max_available = nfl.get_current_season()
+    if stats_season > max_available:
+        _diag(f"build_slate({date_str}): stats_season {stats_season} > nflreadpy max "
+             f"({max_available}), auto-using {max_available} with before_week=999")
+        stats_season = max_available
 
     schedule = get_schedule(season)
     week = _resolve_week(schedule, date_str)
