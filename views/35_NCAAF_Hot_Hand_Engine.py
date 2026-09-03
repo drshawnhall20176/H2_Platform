@@ -73,7 +73,7 @@ if show_2025_baseline:
            "the Hot Hand scores below use last season's per-game rates.", icon="📊")
 
 with st.spinner("Loading slate..."):
-    all_rows, n_games = load_slate(date_str, stats_date_str)
+    all_rows, meta = load_slate(date_str, stats_date_str)
 
 if not all_rows:
     st.info("No players on the slate for this date — try a different date.", icon="🕐")
@@ -115,7 +115,7 @@ if not filtered:
     st.info("No results match the current filters.")
     st.stop()
 
-st.markdown(f"**{len(filtered)} player-market combinations · {n_games} game(s) on slate**")
+st.markdown(f"**{len(filtered)} player-market combinations · {len(meta)} game(s) on slate**")
 
 df = pd.DataFrame(filtered)[["Player", "Team", "Opp", "Position", "Market",
                               "Recent Avg", "Opp Allows", "Slate Avg", "Matchup Factor",

@@ -72,7 +72,7 @@ if show_2025_baseline:
            "TD probability rates are built from last season's real game logs.", icon="📊")
 
 with st.spinner("Loading slate..."):
-    all_rows, n_games = load_slate(date_str, stats_date_str)
+    all_rows, meta = load_slate(date_str, stats_date_str)
 
 if not all_rows:
     st.info("No players on the slate for this date — try a different date.", icon="🕐")
@@ -109,7 +109,7 @@ if not filtered:
     st.info("No results match the current filters.")
     st.stop()
 
-st.markdown(f"**{len(filtered)} players · {n_games} game(s) on slate**")
+st.markdown(f"**{len(filtered)} players · {len(meta)} game(s) on slate**")
 
 df = pd.DataFrame(filtered)[["Player", "Team", "Position", "Opp", "Game",
                               "TDGames", "GamesPlayed", "ModelProb", "Why"]]
