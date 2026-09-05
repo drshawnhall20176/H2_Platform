@@ -41,6 +41,7 @@ import sports
 import ncaaf_engine as E
 import ncaaf_shared_cache as NSC
 import ncaaf_projections as P
+from streamlit_page_cache import compute_once, invalidate_page
 
 _active = sports.active()
 eastern = pytz.timezone("US/Eastern")
@@ -101,6 +102,7 @@ with c1:
     target_date = st.date_input("Slate date", datetime.now(eastern))
 with c2:
     if st.button("🔄 Refresh"):
+        invalidate_page("ncaaf_gl")
         st.cache_data.clear()
         st.rerun()
 date_str = target_date.strftime("%Y-%m-%d")

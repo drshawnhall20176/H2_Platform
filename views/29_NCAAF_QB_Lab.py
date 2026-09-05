@@ -32,6 +32,7 @@ import sports
 import ncaaf_engine as E
 import ncaaf_shared_cache as NSC
 import ncaaf_projections as P
+from streamlit_page_cache import compute_once, invalidate_page
 
 _active = sports.active()
 eastern = pytz.timezone("US/Eastern")
@@ -133,8 +134,8 @@ if show_2025_baseline:
            "current — the numbers below are last season's, since 2026 has no games yet. Real "
            "roster and scheme changes since 2025 aren't reflected here.", icon="📊")
 
-with st.spinner("Loading QBs and building matchup-aware projections..."):
-    matchup_proj, efficiency, n_games, n_qbs = load(date_str, stats_date_str)
+with st.spinner("Loading..."):
+    matchup_proj, efficiency, n_games, n_qbs = compute_once("ncaaf_qb", load, date_str, stats_date_str)
 
 if not matchup_proj and not efficiency:
     if show_2025_baseline:

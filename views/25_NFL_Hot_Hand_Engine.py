@@ -35,6 +35,7 @@ import nfl_engine as E
 game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER
 import nfl_shared_cache as NSC
 import nfl_projections as P
+from streamlit_page_cache import compute_once, invalidate_page
 
 _active = sports.active()
 eastern = pytz.timezone("US/Eastern")
@@ -86,6 +87,7 @@ with c1:
     target_date = st.date_input("Slate date", datetime.now(eastern))
 with c2:
     if st.button("🔄 Refresh"):
+        invalidate_page("nfl_hh")
         st.cache_data.clear()
         st.rerun()
 date_str = target_date.strftime("%Y-%m-%d")
@@ -97,8 +99,8 @@ if show_2025_baseline:
     st.info("📊 **Using 2025 season data.** Today's real matchups are current — player stats use last season's game logs.", icon="📊")
 
 
-with st.spinner("Loading this week's NFL slate..."):
-    all_rows, meta, team_abbrs = load_slate(date_str, stats_date_str)
+with st.spinner("Loading..."):
+    all_rows, meta, team_abbrs = compute_once("nfl_hh", load_slate, date_str, stats_date_str)
 
 if not all_rows:
     st.info("No players on the slate for this date — try a different date.", icon="🕐")

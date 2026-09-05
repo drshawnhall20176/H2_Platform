@@ -24,6 +24,7 @@ import nfl_engine as E
 game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER
 import nfl_shared_cache as NSC
 import nfl_projections as P
+from streamlit_page_cache import compute_once, invalidate_page
 
 _active = sports.active()
 eastern = pytz.timezone("US/Eastern")
@@ -67,8 +68,8 @@ stats_date_str = "2025-12-01" if show_2025_baseline else date_str
 if show_2025_baseline:
     st.info("📊 **Using 2025 season data.** Today's real matchups are current — projections use last season's game logs.", icon="📊")
 
-with st.spinner("Loading QBs and building matchup-aware projections..."):
-    matchup_proj, efficiency, meta, n_qbs = load(date_str, stats_date_str)
+with st.spinner("Loading..."):
+    matchup_proj, efficiency, meta, n_qbs = compute_once("nfl_qb", load, date_str, stats_date_str)
 
 if not matchup_proj and not efficiency:
     st.info(

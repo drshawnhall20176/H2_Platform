@@ -25,6 +25,7 @@ import pytz
 
 import sports
 import odds_api as O
+from streamlit_page_cache import compute_once, invalidate_page
 
 _active = sports.active()
 
@@ -95,6 +96,7 @@ with c1:
     target_date = st.date_input("Slate date", datetime.now(eastern))
 with c2:
     if st.button("🔄 Refresh"):
+        invalidate_page("bball_hh")
         st.cache_data.clear()
         st.rerun()
 date_str = target_date.strftime("%Y-%m-%d")

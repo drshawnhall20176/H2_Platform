@@ -39,6 +39,7 @@ import odds_api as O
 import nfl_engine as E
 import nfl_shared_cache as NSC
 import nfl_projections as P
+from streamlit_page_cache import compute_once, invalidate_page
 
 _active = sports.active()
 eastern = pytz.timezone("US/Eastern")
@@ -99,6 +100,7 @@ with c1:
     target_date = st.date_input("Slate date", datetime.now(eastern))
 with c2:
     if st.button("🔄 Refresh"):
+        invalidate_page("nfl_pl")
         st.cache_data.clear()
         st.rerun()
 date_str = target_date.strftime("%Y-%m-%d")

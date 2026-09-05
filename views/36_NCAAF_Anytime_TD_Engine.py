@@ -24,6 +24,7 @@ import sports
 import ncaaf_engine as E
 import ncaaf_shared_cache as NSC
 import ncaaf_projections as P
+from streamlit_page_cache import compute_once, invalidate_page
 
 _active = sports.active()
 eastern = pytz.timezone("US/Eastern")
@@ -56,6 +57,7 @@ with c1:
     target_date = st.date_input("Slate date", datetime.now(eastern))
 with c2:
     if st.button("🔄 Refresh"):
+        invalidate_page("ncaaf_td")
         st.cache_data.clear()
         st.rerun()
 date_str = target_date.strftime("%Y-%m-%d")
@@ -71,8 +73,8 @@ if show_2025_baseline:
     st.info("📊 **Showing 2025 season data as a baseline.** Today's matchups are current — "
            "TD probability rates are built from last season's real game logs.", icon="📊")
 
-with st.spinner("Loading slate..."):
-    all_rows, meta = load_slate(date_str, stats_date_str)
+with st.spinner("Loading..."):
+    all_rows, meta = compute_once("ncaaf_td", load_slate, date_str, stats_date_str)
 
 if not all_rows:
     st.info("No players on the slate for this date — try a different date.", icon="🕐")
