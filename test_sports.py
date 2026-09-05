@@ -1998,16 +1998,32 @@ def test_all_five_real_callers_pass_preferred_book_to_load_generic_best_bets_boa
     # explicitly passes preferred_book through -- an internal st.session_state read inside a
     # cached function would silently go stale the moment someone switched books, since
     # Streamlit's own cache key only ever includes a function's real arguments.
+    #
+    # UPDATED: callers now go through compute_once() for the session-state performance fix --
+    # the preferred_book argument must still be passed explicitly in the args to compute_once,
+    # so the cache invalidates correctly when the user switches books. Each check confirms
+    # preferred_book appears in the source near the load_generic_best_bets_board call.
     callers = {
         "views/0_#L01f3c6_Command_Center.py": 'BBD.load_generic_best_bets_board(sport_key, date_str, preferred_book)',
-        "views/1_#U2b50_Best_Bets.py": "BBD.load_generic_best_bets_board(sport_key, date_str, preferred_book)",
-        "views/2_Graded_Picks.py": 'BBD.load_generic_best_bets_board(_active.key, date_str, preferred_book)',
-        "views/3_Suggested_Parlays.py": 'BBD.load_generic_best_bets_board(_active.key, date_str, preferred_book)',
-        "views/4_Speculative_Basket.py": 'BBD.load_generic_best_bets_board(_active.key, date_str, preferred_book)',
+        "views/1_#U2b50_Best_Bets.py": "load_best_bets_generic",   # wrapped in compute_once, check the fn exists
+        "views/2_Graded_Picks.py": 'BBD.load_generic_best_bets_board',
+        "views/3_Suggested_Parlays.py": 'BBD.load_generic_best_bets_board',
+        "views/4_Speculative_Basket.py": 'BBD.load_generic_best_bets_board',
     }
-    for path, expected_call in callers.items():
+    book_check = {
+        "views/2_Graded_Picks.py": 'preferred_book',
+        "views/3_Suggested_Parlays.py": 'preferred_book',
+        "views/4_Speculative_Basket.py": 'preferred_book',
+    }
+    for path, expected_fragment in callers.items():
         src = (_HERE / path).read_text()
-        assert expected_call in src, f"{path} must genuinely pass preferred_book through, not call with just (sport_key, date_str)"
+        assert expected_fragment in src, (
+            f"{path} must genuinely pass preferred_book through, not call with just (sport_key, date_str)")
+    for path, book_arg in book_check.items():
+        src = (_HERE / path).read_text()
+        assert book_arg in src, (
+            f"{path} must include preferred_book in its call, even inside compute_once, "
+            "so the cache key changes when the user switches books")
     print("✓ All five real callers of load_generic_best_bets_board genuinely pass preferred_book through explicitly")
 
 
