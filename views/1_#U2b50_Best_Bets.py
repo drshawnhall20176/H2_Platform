@@ -13,6 +13,7 @@ import sports
 import best_bets_data as BBD
 import grading
 import quick_log
+from streamlit_page_cache import compute_once, invalidate_page
 
 _active = sports.active()
 E, P = _active.engine, _active.projections
@@ -73,7 +74,7 @@ if _active.key == "MLB":
     with c3: preferred_book = BBD.render_book_selector(key_prefix="best_bets", date_str=date_str)
     venue_split, time_split = BBD.render_split_selector(key_prefix="best_bets")
     with st.spinner("Scanning the slate..."):
-        plays, meta, available_books = load_best_bets_mlb(
+        plays, meta, available_books = compute_once("best_bets_mlb", load_best_bets_mlb,
             date_str, fip_constant, preferred_book, venue_split, time_split)
     # Guarantees THIS session's own quick_log real-price side-channel is populated, regardless
     # of whether load_best_bets_mlb above was a cache hit for this session specifically -- see
@@ -102,7 +103,9 @@ else:
     st.session_state[f"_preferred_book_{_active.key.lower()}"] = preferred_book
     with st.spinner("Scanning the slate..."):
         try:
-            plays, meta, available_books = load_best_bets_generic(_active.key, date_str, preferred_book)
+            plays, meta, available_books = compute_once(
+                f"best_bets_{_active.key}", load_best_bets_generic,
+                _active.key, date_str, preferred_book)
         except Exception:
             if _active.key == "NFL":
                 st.warning(f"No NFL slate data available for {date_str}. "

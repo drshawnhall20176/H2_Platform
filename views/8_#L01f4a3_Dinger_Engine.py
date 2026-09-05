@@ -144,6 +144,7 @@ def load_l5_context(pid: int, season: int, date_str_inner: str):
 
 
 import best_bets_data as BBD
+from streamlit_page_cache import compute_once, invalidate_page
 
 eastern = pytz.timezone("US/Eastern")
 default_date = datetime.now(eastern)
@@ -156,6 +157,7 @@ with c2:
 with c3:
     st.write("")
     if st.button("🔄 Refresh"):
+        invalidate_page("dinger_engine")
         st.cache_data.clear()
         st.rerun()
 

@@ -22,6 +22,7 @@ import mlb_engine as E
 import mlb_shared_cache as MSC
 import matchup_data as MD
 import statcast_data as SC
+from streamlit_page_cache import compute_once, invalidate_page
 from datetime import datetime
 
 game_dt, slot_of, SLOT_ORDER = sports.game_dt, sports.slot_of, sports.SLOT_ORDER   # shared with Best Bets
@@ -72,6 +73,7 @@ with c1:
     date_str = st.date_input("Slate date", datetime.now()).strftime("%Y-%m-%d")
 with c2:
     if st.button("🔄 Refresh"):
+        invalidate_page("bball_ml2")
         st.cache_data.clear()
         st.rerun()
 
@@ -155,6 +157,7 @@ pitcher_pid = pitcher.get("_pid")
 # doesn't reset the game picker. The user picks their game and pitcher first, then
 # applies the split lens to see that specific pitcher's context-specific profile.
 import best_bets_data as BBD
+from streamlit_page_cache import compute_once, invalidate_page
 venue_split, time_split = BBD.render_split_selector(key_prefix="matchup_lab")
 
 # Apply split filter to pitcher list for the split profile section -- but DON'T

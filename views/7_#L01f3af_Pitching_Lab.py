@@ -188,6 +188,7 @@ def load(date_str: str, fip_constant: float, venue_split=None, time_split=None):
 
 
 import best_bets_data as BBD
+from streamlit_page_cache import compute_once, invalidate_page
 col_a, col_b = st.columns([2, 1])
 with col_a:
     target_date = st.date_input("Analysis Date", datetime.now())

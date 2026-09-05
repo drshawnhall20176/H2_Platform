@@ -31,6 +31,7 @@ import sports
 import best_bets_data as BBD
 import grading
 import quick_log
+from streamlit_page_cache import compute_once, invalidate_page
 
 _active = sports.active()
 E, P = _active.engine, _active.projections
@@ -63,7 +64,8 @@ if _active.key == "MLB":
     with c2: preferred_book = BBD.render_book_selector(key_prefix="graded_picks", date_str=date_str)
     venue_split, time_split = BBD.render_split_selector(key_prefix="graded_picks")
     with st.spinner("Grading the slate..."):
-        plays, meta, rows, available_books = BBD.load_mlb_graded_picks_board(
+        plays, meta, rows, available_books = compute_once(
+            "graded_mlb", BBD.load_mlb_graded_picks_board,
             date_str, E.FIP_CONSTANT_DEFAULT, preferred_book, venue_split, time_split)
     BBD.ensure_mlb_offers_session_state(date_str, BBD.get_odds_api_key(), preferred_book)
     plays = BBD.filter_by_split_situation(plays, venue_split, time_split)
@@ -88,7 +90,9 @@ else:
     preferred_book = st.session_state.get(f"_preferred_book_{_active.key.lower()}", BBD.O.DEFAULT_BOOK)
     with st.spinner("Grading the slate..."):
         try:
-            plays, meta, _books = BBD.load_generic_best_bets_board(_active.key, date_str, preferred_book)
+            plays, meta, _books = compute_once(
+                f"graded_{_active.key}", BBD.load_generic_best_bets_board,
+                _active.key, date_str, preferred_book)
         except Exception:
             st.warning(f"No slate data available for {_active.label} on {date_str}. "
                       "Normal during off-season. Try a date when games are scheduled.")
