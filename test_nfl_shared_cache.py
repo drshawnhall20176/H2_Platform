@@ -145,22 +145,60 @@ def test_build_slate_prior_season_baseline_uses_999_not_current_week():
     # Test the build_slate-level cap: with no explicit stats_date_str
     before_weeks_seen.clear()
     stats_seasons_requested.clear()
+    # Test the build_slate-level early-season guard: no explicit stats_date_str,
+    # 2026 probe returns empty, guard auto-falls back to 2025 with before_week=999.
+    before_weeks_seen.clear()
+    stats_seasons_requested.clear()
+
+    def spy_load_2026_empty(s):
+        stats_seasons_requested.append(s)
+        if s == 2026:
+            import pandas as pd
+            return pd.DataFrame()  # simulate: no 2026 prior-game data yet
+        return fake_weekly
+
     with patch.object(E, "get_schedule", return_value=schedule_2026), \
-         patch.object(E, "load_season_weekly_stats", side_effect=spy_load_season_weekly_stats), \
+         patch.object(E, "load_season_weekly_stats", side_effect=spy_load_2026_empty), \
          patch.object(E, "get_team_roster", return_value=fake_roster), \
          patch.object(E, "player_recent_games", side_effect=spy_player_recent_games), \
-         patch.object(E, "_infer_season", return_value=2026), \
-         patch.object(E.nfl, "get_current_season", return_value=2025):
-        rows2, meta2 = E.build_slate("2026-09-09")  # no stats_date_str -- should auto-cap
+         patch.object(E, "_infer_season", return_value=2026):
+        rows2, meta2 = E.build_slate("2026-09-09")  # no stats_date_str -- should auto-fallback
 
-    assert all(s == 2025 for s in stats_seasons_requested), (
-        f"load_season_weekly_stats must never be called with season 2026 when get_current_season "
-        f"returns 2025 -- the 404 loop happens because nflreadpy is called for a season that "
-        f"doesn't exist. Got seasons requested: {stats_seasons_requested}")
+    assert 2025 in stats_seasons_requested, (
+        f"build_slate must request 2025 after 2026 probe returns no prior-game data. "
+        f"Got: {stats_seasons_requested}")
     assert all(w == 999 for w in before_weeks_seen), (
-        f"before_week must be 999 even without explicit stats_date_str when build_slate auto-caps. "
+        f"before_week must be 999 after auto-fallback. Got: {before_weeks_seen}")
+
+    # Test the build_slate-level early-season guard: with no explicit stats_date_str
+    # The new guard probes load_season_weekly_stats(2026) to check for prior games,
+    # finds none (empty probe), then falls back to 2025. Both calls are correct:
+    # the probe call (2026) and the actual data call (2025).
+    before_weeks_seen.clear()
+    stats_seasons_requested.clear()
+
+    def spy_load_season_weekly_stats_with_empty_probe(s):
+        stats_seasons_requested.append(s)
+        if s == 2026:
+            import pandas as pd
+            return pd.DataFrame()  # simulate: no 2026 games yet, triggers fallback
+        return fake_weekly  # 2025 data works fine
+
+    with patch.object(E, "get_schedule", return_value=schedule_2026), \
+         patch.object(E, "load_season_weekly_stats",
+                      side_effect=spy_load_season_weekly_stats_with_empty_probe), \
+         patch.object(E, "get_team_roster", return_value=fake_roster), \
+         patch.object(E, "player_recent_games", side_effect=spy_player_recent_games), \
+         patch.object(E, "_infer_season", return_value=2026):
+        rows2, meta2 = E.build_slate("2026-09-09")  # no stats_date_str -- should auto-fallback
+
+    assert 2025 in stats_seasons_requested, (
+        f"build_slate must fall back to 2025 when 2026 has no prior-game data. "
+        f"Seasons requested: {stats_seasons_requested}")
+    assert all(w == 999 for w in before_weeks_seen), (
+        f"before_week must be 999 even without explicit stats_date_str when build_slate auto-falls back. "
         f"Got: {before_weeks_seen}")
-    print("✓ build_slate prior-season baseline correctly passes before_week=999, and auto-cap prevents any 2026 nflreadpy call when get_current_season() returns 2025")
+    print("✓ build_slate early-season guard correctly probes 2026, finds no prior games, and falls back to 2025 with before_week=999")
 
 
 if __name__ == "__main__":
