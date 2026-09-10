@@ -105,7 +105,10 @@ if not plays:
     if not _active.has_projections:
         st.info("🥊 This page doesn't apply to UFC — head to **UFC Fight Card** in the sidebar.")
     else:
-        st.info("No games on the board right now. Parlay suggestions appear here on an active slate.")
+        st.info(
+            f"No {_active.label} games found for {date_str}. "
+            "Try a different date, hit Refresh, or switch sports in the selector above.",
+            icon="📅")
     st.stop()
 
 # Exclude plays from a game that's already started or finished -- added directly on request
