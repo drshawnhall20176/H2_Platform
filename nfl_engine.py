@@ -572,22 +572,29 @@ def build_slate(date_str: str, season: Optional[int] = None,
     # Stats season: from stats_date_str when provided, else same as schedule season
     stats_season = (_infer_season(stats_date_str) if stats_date_str else None) or season
 
-    # PRE-SEASON GUARD: if stats_season is beyond what nflreadpy actually has, cap it. This
-    # handles pages without an explicit baseline toggle -- they pass stats_date_str=None, which
-    # sets stats_season=season=2026, but 2026 weekly data doesn't exist yet. Capping here (not
-    # just in load_season_weekly_stats) ensures before_week is also set correctly (999, not week
-    # 1), which is the other half of the pre-season fix confirmed from live log diagnostics.
-    max_available = nfl.get_current_season()
-    if stats_season > max_available:
-        _diag(f"build_slate({date_str}): stats_season {stats_season} > nflreadpy max "
-             f"({max_available}), auto-using {max_available} with before_week=999")
-        stats_season = max_available
-
     schedule = get_schedule(season)
     week = _resolve_week(schedule, date_str)
     if week is None:
         _diag(f"build_slate({date_str}): no schedule data for season {season} -> nothing to build")
         return [], []
+
+    # EARLY-SEASON GUARD: the old approach capped stats_season when it exceeded
+    # nfl.get_current_season() -- this worked before Week 1 games were played, but once
+    # nflreadpy updates get_current_season() to the new season (which it does when Week 1 starts),
+    # the cap silently stops firing even though Week 1 has no prior-game data yet.
+    #
+    # CORRECT CHECK: does the weekly data for stats_season have ANY games before `week`?
+    # If stats_season == season and week == 1, the answer is always NO. Fall back to prior season
+    # automatically -- same as the baseline toggle explicitly does. After Week 2+ real games
+    # accumulate and this guard stops firing.
+    if stats_season == season and week <= 2:
+        _probe = load_season_weekly_stats(stats_season)
+        has_prior = (not _probe.empty and "week" in _probe.columns
+                     and not _probe[_probe["week"] < week].empty)
+        if not has_prior:
+            _diag(f"build_slate({date_str}): stats_season={stats_season} week {week} has no "
+                 f"prior-game data (early season) -- auto-using {stats_season - 1}")
+            stats_season = stats_season - 1
 
     games = games_for_week(schedule, week)
     if not games:
