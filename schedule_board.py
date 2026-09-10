@@ -53,6 +53,7 @@ DATE HANDLING, PER SPORT -- real, confirmed differences, not a uniform assumptio
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -63,6 +64,7 @@ import league_structure as LS
 import sports
 
 _ET_TZ = _pytz.timezone("US/Eastern")
+_LOGGER = logging.getLogger(__name__)
 
 # Sports this section covers -- see module docstring for why UFC is excluded and NCAAMB isn't.
 SUPPORTED_SPORTS = {"MLB", "NBA", "WNBA", "NFL", "NCAAF", "NCAAMB"}
@@ -179,6 +181,17 @@ def _nfl_games(date_str: str) -> List[Dict[str, Any]]:
     schedule = E.get_schedule(season)
     week = E._resolve_week(schedule, date_str)
     if week is None:
+        return []
+
+    # DIAGNOSTIC: log which game_dates are in this week so missing games are visible
+    week_games = E.games_for_week(schedule, week)
+    dates_in_week = sorted({g.get("game_date") for g in week_games if g.get("game_date")})
+    if date_str not in dates_in_week:
+        _LOGGER.warning(
+            "NFL schedule: date %s not found in week %s game_dates. "
+            "Dates present: %s. This means the nflreadpy schedule for season %s "
+            "may not yet include this date, or gameday field is null for these games.",
+            date_str, week, dates_in_week, season)
         return []
     out = []
     for g in E.games_for_week(schedule, week):
