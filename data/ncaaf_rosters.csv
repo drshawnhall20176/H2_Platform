@@ -839,6 +839,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 4837327,Christian,Ellis,Christian Ellis,Virginia,S,4,8.0,72.0,206.0
 4837351,Bryce,Cowan,Bryce Cowan,Vanderbilt,LB,4,22.0,76.0,235.0
 4837371,Maverick,Baranowski,Maverick Baranowski,Minnesota,LB,4,6.0,74.0,230.0
+4837372,Ty,Anderson,Ty Anderson,Tulsa,LB,4,10.0,73.0,210.0
 4837377,Mo,Clipper Jr.,Mo Clipper Jr.,Georgia Southern,OL,4,56.0,76.0,320.0
 4837378,Caleb,Coley,Caleb Coley,Eastern Michigan,DB,4,16.0,72.0,162.0
 4837384,Bradley,Mann,Bradley Mann,Vanderbilt,DL,4,94.0,78.0,308.0
@@ -1599,6 +1600,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 4905245,Jason,Oliver,Jason Oliver,San Diego State,CB,4,26.0,72.0,170.0
 4905248,Carson,Tabaracci,Carson Tabaracci,USC,TE,4,24.0,73.0,230.0
 4905591,Bryce,Grays,Bryce Grays,UTSA,LB,4,26.0,73.0,205.0
+4905593,Brylan,Green,Brylan Green,Arkansas,S,4,15.0,69.0,180.0
 4905609,Fredrick,Moore,Fredrick Moore,Michigan State,WR,3,6.0,73.0,187.0
 4905690,Samuel,Okunlola,Samuel Okunlola,Virginia Tech,DL,4,51.0,75.0,249.0
 4905925,Devan,Thompkins,Devan Thompkins,Alabama,DL,4,1.0,77.0,300.0
@@ -2864,6 +2866,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 5081207,Noah,Hartsoe,Noah Hartsoe,Virginia,OL,4,58.0,75.0,317.0
 5081208,Snoop,Leota-Amaama,Snoop Leota-Amaama,Nevada,OL,4,70.0,76.0,331.0
 5081209,Eli,Wood,Eli Wood,Utah State,WR,4,7.0,74.0,210.0
+5081211,DQ,Smith,DQ Smith,Virginia Tech,DB,4,1.0,73.0,219.0
 5081213,DJ,Black,DJ Black,South Carolina,WR,4,83.0,74.0,205.0
 5081220,Mac,Walters,Mac Walters,App State,OL,4,65.0,78.0,300.0
 5081241,Johnny,Martin,Johnny Martin,Temple,RB,4,22.0,70.0,200.0
@@ -2986,6 +2989,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 5082315,Nathan,Acevedo,Nathan Acevedo,San Diego State,WR,4,13.0,70.0,170.0
 5082330,John Alan,Richter,John Alan Richter,Toledo,QB,3,6.0,75.0,225.0
 5082336,CJ,Wilson,CJ Wilson,UL Monroe,DL,4,44.0,74.0,250.0
+5082358,Luke,Drzewiecki,Luke Drzewiecki,Minnesota,PK,4,13.0,72.0,186.0
 5082374,AJ,Brown,AJ Brown,Rice,DE,4,7.0,72.0,188.0
 5082407,Connor,Barry,Connor Barry,Penn State,QB,4,10.0,73.0,211.0
 5082412,Carter,Everett,Carter Everett,App State,PK,4,29.0,70.0,195.0
@@ -3717,6 +3721,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 5095256,Tray,Franklin,Tray Franklin,Coastal Carolina,OL,4,56.0,77.0,315.0
 5095360,Eric,Singleton Jr.,Eric Singleton Jr.,Florida,WR,4,2.0,70.0,184.0
 5095368,Jack,Procter,Jack Procter,Washington State,DE,4,96.0,74.0,243.0
+5095820,Jayden,Flaker,Jayden Flaker,New Mexico,LB,4,48.0,74.0,222.0
 5095828,Trevon,Humphrey,Trevon Humphrey,Boston College,OL,4,53.0,77.0,310.0
 5095838,Kendrick,DuJour,Kendrick DuJour,East Carolina,DL,4,9.0,77.0,223.0
 5095851,Jackson,Barker,Jackson Barker,East Carolina,LB,4,1.0,74.0,227.0
@@ -7362,6 +7367,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 5193337,Cam,Chmura,Cam Chmura,Marshall,DL,2,92.0,75.0,298.0
 5193338,J'Quan,Mason,J'Quan Mason,UAB,DE,2,58.0,76.0,240.0
 5193340,Kingtriton,Samuela,Kingtriton Samuela,Georgia Southern,OL,3,75.0,74.0,300.0
+5193341,Marcel,Williams,Marcel Williams,Akron,,2026,,,
 5193342,Luke,Wisham,Luke Wisham,Arkansas State,CB,3,29.0,74.0,184.0
 5193345,Colin,Alexander,Colin Alexander,Georgia Southern,OL,3,63.0,76.0,305.0
 5193346,Quinn,Henicle,Quinn Henicle,Old Dominion,QB,2,10.0,74.0,215.0
@@ -8219,6 +8225,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 5211434,Terrell,Holcomb,Terrell Holcomb,Cincinnati,EDGE,2,24.0,73.0,230.0
 5211437,Aariz,Taylor,Aariz Taylor,Miami (OH),DL,1,95.0,75.0,242.0
 5211474,Jay,Brewer III,Jay Brewer III,Ohio,CB,1,29.0,74.0,190.0
+5211475,Nathan,Gersh,Nathan Gersh,Toledo,,2026,,,
 5211476,Jacob,Bell,Jacob Bell,Indiana,QB,1,12.0,74.0,208.0
 5211478,Trenton,Nixon,Trenton Nixon,Northern Illinois,DE,1,45.0,74.0,245.0
 5211482,Bryson,Williams,Bryson Williams,Michigan State,WR,1,14.0,74.0,225.0
@@ -8328,6 +8335,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 5212980,Gordy,Sulfsted,Gordy Sulfsted,Notre Dame,DL,1,91.0,77.0,275.0
 5212988,Austin,Tillman,Austin Tillman,Northern Illinois,DB,1,21.0,71.0,190.0
 5212990,Darius,Johnson,Darius Johnson,Georgia State,CB,1,12.0,70.0,180.0
+5212990,Darius,Johnson,Darius Johnson,Syracuse,CB,1,12.0,70.0,180.0
 5213121,Parker,Brault,Parker Brault,Marshall,OL,1,65.0,74.0,286.0
 5213123,Antoni,Ogumoro,Antoni Ogumoro,Tennessee,OL,2,55.0,76.0,320.0
 5213124,Ike,Okafor,Ike Okafor,Washington State,DT,1,92.0,75.0,279.0
@@ -9329,6 +9337,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 5220158,Jake,Chellman,Jake Chellman,Western Michigan,OL,2,57.0,77.0,297.0
 5220159,Jacob,Krause,Jacob Krause,Western Michigan,OL,2,61.0,78.0,285.0
 5220161,JR,Hays,JR Hays,Western Michigan,RB,2,27.0,69.0,187.0
+5220193,Jordan,Scruggs,Jordan Scruggs,Maryland,CB,4,6.0,71.0,166.0
 5220194,Noah,Toster,Noah Toster,South Alabama,WR,4,8.0,76.0,200.0
 5220195,Rod,Gibbs,Rod Gibbs,South Alabama,TE,4,9.0,76.0,250.0
 5220197,Fluff,Bothwell,Fluff Bothwell,Mississippi State,RB,3,24.0,70.0,230.0
@@ -9346,6 +9355,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 5220221,Kelbee,Holmes,Kelbee Holmes,UL Monroe,LB,4,0.0,71.0,220.0
 5220222,Javon,Campbell,Javon Campbell,UL Monroe,WR,4,2.0,73.0,195.0
 5220224,Seidrion,Langston,Seidrion Langston,South Alabama,LB,4,16.0,73.0,220.0
+5220227,Kevontay,Wells,Kevontay Wells,UL Monroe,DL,4,1.0,75.0,265.0
 5220230,Bret,Vincent,Bret Vincent,UL Monroe,WR,3,17.0,68.0,150.0
 5220239,Jordyn,Williams,Jordyn Williams,UL Monroe,DB,3,20.0,70.0,175.0
 5220241,Makenzie,Ryan,Makenzie Ryan,UL Monroe,P,3,47.0,73.0,210.0
@@ -10396,6 +10406,9 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 5231306,Landon,Meier,Landon Meier,North Dakota State,S,2,27.0,71.0,195.0
 5231325,Cedric,Roberts,Cedric Roberts,North Texas,LB,3,17.0,73.0,226.0
 5231354,Caden,High,Caden High,Stanford,WR,4,0.0,70.0,165.0
+5231360,Nick,Sowell,Nick Sowell,Bowling Green,WR,3,9.0,77.0,205.0
+5231369,Demario,Bookhart,Demario Bookhart,Louisiana Tech,DB,2,17.0,73.0,175.0
+5231749,Azariah,Levells,Azariah Levells,New Mexico,CB,4,24.0,71.0,186.0
 5231815,Jordan,Foy,Jordan Foy,Memphis,OL,3,56.0,77.0,340.0
 5231851,Keaton,Emmett,Keaton Emmett,Oregon,PK,3,35.0,72.0,198.0
 5231956,Blake,Howard,Blake Howard,Tennessee,LS,3,53.0,74.0,222.0
@@ -13801,6 +13814,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 5323149,Dorian,Patterson,Dorian Patterson,New Mexico,WR,1,25.0,75.0,192.0
 5323360,CJ,Toney,CJ Toney,Washington State,RB,1,21.0,68.0,200.0
 5323401,Damonte,Tabb,Damonte Tabb,Auburn,S,1,25.0,74.0,192.0
+5323455,Jarvse,Dickerson,Jarvse Dickerson,UTSA,,2026,,,
 5323499,Charlie,Mandabach,Charlie Mandabach,Central Michigan,OL,1,67.0,78.0,260.0
 5323605,Landon,Harper,Landon Harper,Central Michigan,OL,1,68.0,75.0,280.0
 5323606,Eyan,Stead,Eyan Stead,Temple,CB,1,49.0,69.0,155.0
