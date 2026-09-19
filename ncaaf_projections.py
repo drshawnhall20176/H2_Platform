@@ -88,8 +88,16 @@ def default_line(market_key: str) -> Optional[float]:
 
 def _dist(samples: np.ndarray) -> np.ndarray:
     """Normalized histogram: index i -> P(outcome == i). Same shape/semantics as
-    projections._dist, so odds_api.compute_edges works identically for every sport."""
-    counts = np.bincount(samples.astype(np.int64)).astype(np.float64)
+    projections._dist, so odds_api.compute_edges works identically for every sport.
+
+    CLIP TO ZERO: np.bincount requires non-negative integers. The NCAAF odds-ratio
+    blend can produce negative projected stats when a very weak player faces a dominant
+    defense (e.g. matchup factor < 0.3 on a low baseline). A negative yard projection
+    is a real, valid signal (player is unlikely to hit any line) -- clamping to zero
+    rather than crashing is the correct behavior, confirmed from live ValueError on the
+    Edge Board (ncaaf_projections.py line 92, logged Sept 2026)."""
+    samples_safe = np.clip(samples.astype(np.int64), 0, None)
+    counts = np.bincount(samples_safe).astype(np.float64)
     total = counts.sum()
     return counts / total if total > 0 else counts
 

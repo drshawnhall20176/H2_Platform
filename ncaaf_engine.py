@@ -380,7 +380,14 @@ def get_team_allowed_stats(team: str, before_date: str, n: Optional[int] = None)
     stat line against this team, summed per game = that game's real team total against them),
     then average across games. Depends on the per-game cache's opponent_team field (added
     specifically to support this function -- see ncaaf_data.refresh_player_game_stats's own
-    docstring)."""
+    docstring).
+
+    FALLBACK ADDED DIRECTLY FROM LIVE OBSERVATION: when the per-game cache has 0 rows for an
+    opponent (common early in the season or when refresh_ncaaf hasn't populated the cache yet),
+    returns an EMPTY dict rather than a neutral {0s} dict -- callers check truthiness to decide
+    whether to apply a 1.00x neutral matchup factor vs. having real data. The fallback is a real
+    honest empty, not a fabricated zero-impact dict that would silently suppress the neutral
+    signal."""
     season = _infer_season(before_date)
     if season is None:
         return {}
@@ -388,9 +395,17 @@ def get_team_allowed_stats(team: str, before_date: str, n: Optional[int] = None)
     week = _resolve_week(schedule, before_date)
     if week is None:
         return {}
-    rows = [r for r in ND.load_player_game_stats()
+    all_game_stats = ND.load_player_game_stats()
+    rows = [r for r in all_game_stats
            if r.get("opponent_team") == team and r.get("week") is not None
            and (r.get("season") or 0) == season and r["week"] < week]
+    if not rows:
+        total = len(all_game_stats)
+        sample_opps = sorted({r.get("opponent_team") for r in all_game_stats
+                              if r.get("opponent_team") and r.get("season") == season})[:5]
+        _diag(f"get_team_allowed_stats({team!r}, season={season}, before_week={week}): "
+             f"0 rows from {total} total cache rows -- sample opponent_team values: {sample_opps}")
+        return {}
     by_game: Dict[object, Dict[str, float]] = {}
     for r in rows:
         gid = r.get("game_id")

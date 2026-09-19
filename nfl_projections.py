@@ -79,7 +79,8 @@ def default_line(market_key: str) -> Optional[float]:
 def _dist(samples: np.ndarray) -> np.ndarray:
     """Normalized histogram: index i -> P(outcome == i). Same shape/semantics as
     projections._dist, so odds_api.compute_edges works identically for every sport."""
-    counts = np.bincount(samples.astype(np.int64)).astype(np.float64)
+    samples_safe = np.clip(samples.astype(np.int64), 0, None)  # bincount requires non-negative
+    counts = np.bincount(samples_safe).astype(np.float64)
     total = counts.sum()
     return counts / total if total > 0 else counts
 

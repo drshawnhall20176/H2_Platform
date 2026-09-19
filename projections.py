@@ -1399,7 +1399,8 @@ def normalize_name(name: str) -> str:
  
 def _dist(samples: np.ndarray) -> np.ndarray:
     """Normalized histogram: index i -> P(outcome == i)."""
-    counts = np.bincount(samples.astype(np.int64)).astype(np.float64)
+    samples_safe = np.clip(samples.astype(np.int64), 0, None)  # bincount requires non-negative
+    counts = np.bincount(samples_safe).astype(np.float64)
     total = counts.sum()
     return counts / total if total > 0 else counts
  
