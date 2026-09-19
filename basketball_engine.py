@@ -28,7 +28,10 @@ cross-sport cache-collision question that a single shared cache dict would raise
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+import threading
+import weakref
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 
 FetchFn = Callable[..., Optional[Dict]]
@@ -75,6 +78,103 @@ def find_team_stat(stats_by_name: Dict[str, str], *candidates: str, side: str = 
 
 
 # --------------------------------------------------------------------------- schedule scanning
+
+# --------------------------------------------------------------------------- scoreboard windows
+# A REAL, CONFIRMED BREAKAGE (2026-09-19, checked live in a real browser against every basketball
+# scoreboard this platform reads -- WNBA, NBA and men's college): ESPN's `dates=START-END` range
+# syntax now answers HTTP 400 ("Failed to get events endpoint") for EVERY range, however short
+# (even a two-day one), with or without `limit`. That range query is exactly what this module's
+# trailing-window scan used, so every player's recent-game lookup came back empty, zero players
+# cleared the rotation-minutes bar, and Matchup Lab / Hot Hand Engine / Best Bets showed "No
+# projectable players" on a night with real games. What DOES still work, confirmed live:
+#   - a single day:   dates=YYYYMMDD
+#   - a whole month:  dates=YYYYMM  (WNBA ~40-100 events, NBA ~240 -- comfortably under the limit)
+# Month queries are the cheap fallback (a 45-day window is 2 requests, a whole season ~7). A month
+# that comes back at or near the request limit is TRUNCATED, not complete (confirmed: men's
+# college basketball's March returns exactly `limit` events ending mid-month), so that month is
+# re-fetched one day at a time instead of trusted -- slower, but never silently short.
+_RANGE_BROKEN = weakref.WeakSet()    # fetch callables whose range query has already failed once
+_WINDOW_LOCK = threading.RLock()      # one thread assembles a window; the rest then hit fetch's cache
+_MONTH_LIMIT = 1000
+_TRUNCATION_SUSPECT = 400            # a month this large may have been cut off -> go day by day
+_DAY_LIMIT = 500
+
+
+def _month_starts(start: date, end: date) -> List[date]:
+    out, cur = [], date(start.year, start.month, 1)
+    while cur <= end:
+        out.append(cur)
+        cur = date(cur.year + (cur.month == 12), (cur.month % 12) + 1, 1)
+    return out
+
+
+def scoreboard_events_in_window(site_api: str, fetch: FetchFn, start: date, end: date,
+                                diag: DiagFn = _noop_diag,
+                                extra_params: Optional[Dict[str, Any]] = None) -> Optional[List[Dict]]:
+    """Every scoreboard event from `start` through `end` (inclusive, UTC calendar days), deduped by
+    event id, or None if the scoreboard could not be read at all. Callers still filter by the
+    event's own date/status -- this only guarantees the window is COVERED, however ESPN is willing
+    to serve it (see the block comment above for why the range query is only tried first)."""
+    url = f"{site_api}/scoreboard"
+    extra = dict(extra_params or {})
+
+    def _range_known_broken() -> bool:
+        try:
+            return fetch in _RANGE_BROKEN
+        except TypeError:      # a callable that can't be weakly referenced -> just always retry it
+            return False
+
+    if not _range_known_broken():
+        rng = {"dates": f"{start.strftime('%Y%m%d')}-{end.strftime('%Y%m%d')}", "limit": 500, **extra}
+        data = fetch(url, params=rng)
+        if data is not None:
+            return list(data.get("events") or [])
+        try:
+            _RANGE_BROKEN.add(fetch)
+        except TypeError:
+            pass
+        diag("scoreboard date-range query failed; using month/day queries for trailing windows instead")
+
+    # ESPN files each game under its EASTERN calendar day, but callers compare the event's UTC
+    # date -- a late-evening game on the window's first Eastern day carries the NEXT UTC date, so
+    # the fallback reaches back one extra day to be sure that game is fetched.
+    start = start - timedelta(days=1)
+    with _WINDOW_LOCK:
+        events: Dict[Any, Dict] = {}
+        any_ok = False
+
+        def take(data: Optional[Dict]) -> None:
+            nonlocal any_ok
+            if data is None:
+                return
+            any_ok = True
+            for ev in data.get("events") or []:
+                key = ev.get("id") if ev.get("id") is not None else id(ev)
+                events.setdefault(key, ev)
+
+        def days_in(first: date, last: date) -> List[date]:
+            return [first + timedelta(days=i) for i in range((last - first).days + 1)]
+
+        def fetch_days(days: List[date]) -> None:
+            with ThreadPoolExecutor(max_workers=8) as ex:
+                for data in ex.map(lambda d: fetch(url, params={"dates": d.strftime("%Y%m%d"),
+                                                                "limit": _DAY_LIMIT, **extra}), days):
+                    take(data)
+
+        for month_first in _month_starts(start, end):
+            nxt = date(month_first.year + (month_first.month == 12), (month_first.month % 12) + 1, 1)
+            month_last = nxt - timedelta(days=1)
+            data = fetch(url, params={"dates": month_first.strftime("%Y%m"), "limit": _MONTH_LIMIT, **extra})
+            n = len((data or {}).get("events") or [])
+            if data is not None and n < _TRUNCATION_SUSPECT:
+                take(data)
+                continue
+            # Month failed outright, or came back big enough that it may be cut off -> day by day,
+            # only for the days of this month the window actually needs.
+            fetch_days(days_in(max(start, month_first), min(end, month_last)))
+        return list(events.values()) if any_ok else None
+
+
 def get_team_recent_game_ids(team_id: int, before_date: str, site_api: str,
                              fetch: FetchFn, diag: DiagFn = _noop_diag,
                              n: int = 10, days_back: int = 45,
@@ -101,28 +201,29 @@ def get_team_recent_game_ids(team_id: int, before_date: str, site_api: str,
     day), so rather than risk changing their already-live behavior, this stays opt-in per caller."""
     end = datetime.strptime(before_date, "%Y-%m-%d")
     start = end - timedelta(days=days_back)
-    date_range = f"{start.strftime('%Y%m%d')}-{end.strftime('%Y%m%d')}"
-    # limit=500: a full-season window can hold hundreds of league games across every team, and a
-    # truncated result here would silently under-count a head-to-head history rather than error.
-    params = {"dates": date_range, "limit": 500}
-    if extra_params:
-        params.update(extra_params)
-    data = fetch(f"{site_api}/scoreboard", params=params)
+    # limit=500 on the range query: a full-season window can hold hundreds of league games across
+    # every team, and a truncated result here would silently under-count a head-to-head history
+    # rather than error. (ESPN's range syntax itself is currently rejected outright -- see
+    # scoreboard_events_in_window for the month/day fallback that actually serves these windows.)
+    events = scoreboard_events_in_window(site_api, fetch, start.date(), end.date(), diag, extra_params)
     seen = diag_seen if diag_seen is not None else set()
     diag_key = (team_id, before_date, days_back)
-    if not data:
+    if events is None:
         if diag_key not in seen:
             diag(f"get_team_recent_game_ids(team={team_id}): trailing-window scoreboard fetch returned nothing")
             seen.add(diag_key)
         return []
+    start_str = start.strftime("%Y-%m-%d")
 
     found: List[Dict[str, Any]] = []
-    for event in data.get("events", []):
+    for event in events:
         status = ((event.get("status") or {}).get("type") or {})
         if not status.get("completed"):
             continue
         ev_date = (event.get("date") or "")[:10]
         if not ev_date or ev_date >= before_date:   # strictly before, not at-or-before
+            continue
+        if ev_date < start_str:   # month/day queries can reach back past the requested window
             continue
         comps = event.get("competitions") or []
         if not comps:
@@ -149,7 +250,7 @@ def get_team_recent_game_ids(team_id: int, before_date: str, site_api: str,
     result = found[:n]
     if diag_key not in seen:
         diag(f"get_team_recent_game_ids(team={team_id}, before={before_date}, days_back={days_back}): "
-            f"{len(result)} completed game(s) found ({len(data.get('events', []))} raw events scanned)")
+            f"{len(result)} completed game(s) found ({len(events)} raw events scanned)")
         seen.add(diag_key)
     return result
 

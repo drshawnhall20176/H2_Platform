@@ -394,3 +394,99 @@ if __name__ == "__main__":
         except Exception as e:  # noqa: BLE001
             print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
     print(f"\n{passed}/{len(tests)} tests passed")
+
+
+# ----------------------------------------------------------------- scoreboard window fallback
+# ESPN began answering HTTP 400 for every `dates=START-END` range on 2026-09-19 (confirmed live on
+# the WNBA, NBA and men's-college scoreboards), which silently emptied every trailing-window
+# lookup -- and with it every basketball slate ("No projectable players"). These pin the fallback.
+def _ev(gid, date_utc, team_a, team_b, completed=True):
+    return {"id": gid, "date": date_utc, "status": {"type": {"completed": completed}},
+            "competitions": [{"competitors": [{"team": {"id": str(team_a)}},
+                                              {"team": {"id": str(team_b), "displayName": f"T{team_b}"}}]}]}
+
+
+def _espn_without_ranges(by_month, by_day=None, month_limit_hit=()):
+    """A fake ESPN: range queries -> None (the real 400), YYYYMM -> that month's events, YYYYMMDD
+    -> that day's events. Records every params dict it was asked for."""
+    calls = []
+
+    def fetch(url, params=None):
+        calls.append(dict(params or {}))
+        d = str((params or {}).get("dates", ""))
+        if "-" in d:
+            return None
+        if len(d) == 6:
+            if d in month_limit_hit:      # simulate a truncated month: exactly `limit` events
+                return {"events": [_ev(f"pad{i}", f"{d[:4]}-{d[4:]}-01T00:00Z", 900 + i, 901 + i, True)
+                                   for i in range(500)]}
+            return {"events": by_month.get(d, [])}
+        return {"events": (by_day or {}).get(d, [])}
+    fetch.calls = calls
+    return fetch
+
+
+def test_window_falls_back_to_month_queries_when_espn_rejects_ranges():
+    aug = [_ev("g1", "2026-08-20T23:00Z", 20, 19), _ev("g0", "2026-07-01T23:00Z", 20, 19)]   # g0: before window
+    sep = [_ev("g2", "2026-09-10T23:00Z", 20, 16), _ev("g3", "2026-09-18T23:00Z", 20, 5),
+           _ev("g4", "2026-09-19T17:00Z", 20, 5, completed=False),      # tonight, not played
+           _ev("g5", "2026-09-19T23:00Z", 20, 5)]                       # on/after before_date
+    fetch = _espn_without_ranges({"202608": aug, "202609": sep})
+    games = BB.get_team_recent_game_ids(20, "2026-09-19", SITE_API, fetch, n=10)
+    assert [g["gameId"] for g in games] == ["g3", "g2", "g1"]           # newest first, window-bounded, completed only
+    assert games[0]["opp_id"] == "5"
+    dates_asked = [c["dates"] for c in fetch.calls]
+    assert "202608" in dates_asked and "202609" in dates_asked
+    assert not any(len(d) == 8 for d in dates_asked)                    # never needed day-by-day
+
+
+def test_window_month_fallback_dedupes_and_respects_days_back():
+    ev = _ev("g1", "2026-09-10T23:00Z", 20, 19)
+    fetch = _espn_without_ranges({"202609": [ev, ev], "202608": [ev]})   # same game served twice
+    assert len(BB.get_team_recent_game_ids(20, "2026-09-19", SITE_API, fetch, n=10)) == 1
+    far = _ev("gfar", "2026-08-01T23:00Z", 20, 19)
+    fetch2 = _espn_without_ranges({"202608": [far], "202609": []})
+    assert BB.get_team_recent_game_ids(20, "2026-09-19", SITE_API, fetch2, n=10, days_back=10) == []
+    assert len(BB.get_team_recent_game_ids(20, "2026-09-19", SITE_API, fetch2, n=10, days_back=60)) == 1
+
+
+def test_window_truncated_month_is_refetched_day_by_day_not_trusted():
+    # men's-college March came back with exactly `limit` events ending mid-month -- must not be trusted.
+    by_day = {"20260305": [_ev("d5", "2026-03-05T23:00Z", 20, 19)],
+              "20260310": [_ev("d10", "2026-03-10T23:00Z", 20, 19)]}
+    fetch = _espn_without_ranges({}, by_day=by_day, month_limit_hit=("202603",))
+    games = BB.get_team_recent_game_ids(20, "2026-03-12", SITE_API, fetch, n=10, days_back=10,
+                                        extra_params={"groups": 50})
+    assert [g["gameId"] for g in games] == ["d10", "d5"]
+    day_calls = [c for c in fetch.calls if len(str(c["dates"])) == 8]
+    assert day_calls and all(c["groups"] == 50 for c in day_calls)      # extra params ride along on every request
+    assert all(c["dates"] >= "20260301" for c in day_calls)             # only the window's own days
+
+
+def test_window_range_failure_is_remembered_per_fetch_function():
+    fetch = _espn_without_ranges({"202609": [_ev("g1", "2026-09-10T23:00Z", 20, 19)]})
+    BB.get_team_recent_game_ids(20, "2026-09-19", SITE_API, fetch, n=10)
+    BB.get_team_recent_game_ids(19, "2026-09-19", SITE_API, fetch, n=10)
+    range_calls = [c for c in fetch.calls if "-" in str(c["dates"])]
+    assert len(range_calls) == 1                                        # tried once, then skipped
+
+
+def test_window_uses_the_range_query_when_espn_serves_it():
+    calls = []
+
+    def fetch(url, params=None):
+        calls.append(params)
+        return {"events": [_ev("g1", "2026-09-10T23:00Z", 20, 19)]}
+    games = BB.get_team_recent_game_ids(20, "2026-09-19", SITE_API, fetch, n=10)
+    assert len(games) == 1 and len(calls) == 1 and "-" in calls[0]["dates"]
+
+
+def test_window_none_when_nothing_is_reachable():
+    from datetime import date
+    assert BB.scoreboard_events_in_window(SITE_API, lambda url, params=None: None,
+                                          date(2026, 9, 1), date(2026, 9, 5)) is None
+
+
+def test_month_starts_crosses_year_boundary():
+    from datetime import date
+    assert BB._month_starts(date(2026, 11, 20), date(2027, 1, 5)) == [date(2026, 11, 1), date(2026, 12, 1), date(2027, 1, 1)]
