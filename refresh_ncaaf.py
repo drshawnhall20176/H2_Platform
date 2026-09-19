@@ -115,9 +115,31 @@ def main() -> int:
         completed_weeks = sorted({g["week"] for g in games
                                   if g.get("season") == year and g.get("completed")
                                   and g.get("week") is not None})
+        # FALLBACK: if CFBD isn't marking completed=True yet but games have real scores, treat
+        # those weeks as completed. This handles the confirmed pattern where the refresh workflow
+        # completes in ~90s with no per-game stats fetched because completed_weeks is empty,
+        # even though 2-3 weeks of real games have been played and have scores in the cache.
+        if not completed_weeks:
+            scored_weeks = sorted({g["week"] for g in games
+                                  if g.get("season") == year and g.get("week") is not None
+                                  and g.get("home_points") is not None
+                                  and g.get("away_points") is not None})
+            if scored_weeks:
+                print(f"[NCAAF] WARNING: completed_weeks empty but games have real scores in "
+                     f"weeks {scored_weeks} -- using scored weeks as fallback for per-game stats fetch")
+                completed_weeks = scored_weeks
         prior_completed_weeks = sorted({g["week"] for g in games
                                        if g.get("season") == year - 1 and g.get("completed")
                                        and g.get("week") is not None})
+        # DIAGNOSTIC: log exactly what completed field looks like so the Actions log shows
+        # whether CFBD is returning completed=True or something else (e.g. None, False, "false")
+        sample_games_current = [g for g in games if g.get("season") == year][:3]
+        for sg in sample_games_current:
+            print(f"[NCAAF] sample 2026 game: week={sg.get('week')} "
+                 f"completed={sg.get('completed')!r} (type={type(sg.get('completed')).__name__}) "
+                 f"home_points={sg.get('home_points')!r}")
+        print(f"[NCAAF] completed_weeks for {year}: {completed_weeks}")
+        print(f"[NCAAF] prior_completed_weeks for {year-1}: {prior_completed_weeks}")
     except Exception as e:  # noqa: BLE001
         # Non-fatal, same posture refresh_statcast.py already has for its own secondary pulls:
         # roster + player stats are the core dependency for a projections engine; the schedule
