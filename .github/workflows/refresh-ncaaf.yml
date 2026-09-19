@@ -1,28 +1,43 @@
-# Auto-refresh the NCAAF roster + player season stats + schedule + per-game player stats
-# caches — entirely in the cloud, no local step. Same pattern as refresh-statcast.yml.
+# Auto-refresh the NCAAF roster + player season stats + schedule + per-game player stats +
+# drives caches — entirely in the cloud, no local step. Same pattern as refresh-statcast.yml.
 #
 # WHAT IT DOES:
 #   Once a day this pulls the season's roster, player season stats, schedule, and (for every
-#   COMPLETED week) per-game player stats from CollegeFootballData.com (CFBD), writes
-#   data/ncaaf_rosters.csv, data/ncaaf_player_stats.csv, data/ncaaf_schedule.csv, and
-#   data/ncaaf_player_game_stats.csv, and commits them back to the repo. That commit triggers a
-#   Streamlit Cloud redeploy, so the deployed app picks up the fresh files with zero manual work.
-#   The per-game cache is what upgrades ncaaf_projections.py from a season-average parametric
-#   model to a real bootstrap (matching every other sport here) and enables real Retrospective
-#   grading (ncaaf_engine.get_player_results) -- see both modules' own docstrings.
+#   COMPLETED week) per-game player stats AND drive-level data from CollegeFootballData.com
+#   (CFBD), writes data/ncaaf_rosters.csv, data/ncaaf_player_stats.csv, data/ncaaf_schedule.csv,
+#   data/ncaaf_player_game_stats.csv, and data/ncaaf_drives.csv, and commits them back to the
+#   repo. That commit triggers a Streamlit Cloud redeploy, so the deployed app picks up the
+#   fresh files with zero manual work. The per-game cache is what upgrades ncaaf_projections.py
+#   from a season-average parametric model to a real bootstrap (matching every other sport
+#   here) and enables real Retrospective grading (ncaaf_engine.get_player_results) -- see both
+#   modules' own docstrings. The drives cache is what powers the drive-level simulation build
+#   (see ncaaf_engine.get_team_drive_outcomes' own docstring) -- added after this workflow was
+#   first written, and a real, caught-late gap: refresh_ncaaf.py already pulled it, but this
+#   workflow's own commit step didn't stage it until this fix, so it would have silently never
+#   reached the deployed app even with everything else configured correctly.
+#
+#   A REAL, ONE-TIME EXTRA PULL, added directly on request, happens INSIDE refresh_ncaaf.py
+#   itself (not a separate workflow step): the first time this ever runs, it also pulls the
+#   PRIOR season's own complete per-game stats and drives, once, so the platform's own
+#   2025-baseline toggle (QB Lab/Matchup Lab) has real data to show before the current season
+#   has any completed games at all. Checked against the cache itself before fetching -- once
+#   that prior season is on file, every later run skips it automatically, so this shows up as a
+#   one-time spike in this workflow's own logged call count, not a recurring daily cost.
 #
 # WHY DAILY, NOT MORE OFTEN — A REAL BUDGET CONSTRAINT, NOT JUST "stable data, no rush":
 #   CollegeFootballData's free tier is metered at roughly 1,000 API calls/month (confirmed
 #   against CFBD's own published blog post at time of scoping). This workflow makes 3 calls for
-#   roster/season-stats/schedule PLUS one call per completed week for per-game stats (grows
-#   from 0 calls in week 1 to ~15 by season's end, and every completed week is re-pulled in
-#   full on every run -- no incremental/delta logic). Computed directly, not guessed: run daily
-#   every single day of a ~15-week season, that totals roughly 1,050 calls for the ENTIRE
-#   season, averaging ~260/month across a ~4-month season -- comfortably inside budget on
-#   average, though the later weeks (more completed weeks to re-pull) cost more per day than the
-#   early ones. If real usage printed in this workflow's own logs starts running tight against
-#   the monthly cap, switching this to a weekly cadence is the first lever -- per-game results
-#   don't change faster than weekly anyway once a week's games are actually final.
+#   roster/season-stats/schedule PLUS TWO calls per completed week (per-game stats AND drives,
+#   added later -- this doubled the original per-week cost, recomputed here, not left stale).
+#   Computed directly, not guessed: run daily every single day of a ~15-week season, that totals
+#   roughly 1,815 calls for the ENTIRE season, averaging ~454/month across a ~4-month season --
+#   still comfortably inside budget on average, but the LATE-season days cost meaningfully more
+#   than that average suggests: once all 15 weeks are completed, a single day's pull alone is 33
+#   calls, and sustaining that daily rate for a full month would be ~990 calls -- right at the
+#   cap, not comfortably under it. If real usage printed in this workflow's own logs starts
+#   running tight against the monthly cap, switching this to a weekly cadence is the first lever
+#   -- per-game results and drive data don't change faster than weekly anyway once a week's
+#   games are actually final.
 #
 # ONE-TIME SETUP (do this before the first run):
 #   1) Add the CFBD_API_KEY secret (Settings -> Secrets and variables -> Actions) — get a free
@@ -31,7 +46,7 @@
 #      refresh_ncaaf.py. (No .gitignore change needed — checked directly: this repo has no
 #      .gitignore restricting data/, the same way data/statcast_batters.csv etc. are already
 #      tracked plainly.)
-#   3) Go to the repo's Actions tab -> "refresh-ncaaf" -> "Run workflow" to populate all four
+#   3) Go to the repo's Actions tab -> "refresh-ncaaf" -> "Run workflow" to populate all five
 #      files immediately (otherwise they first populate at the scheduled time below).
 #
 # NOTES:
@@ -69,7 +84,7 @@ jobs:
       - name: Install dependencies
         run: pip install --no-cache-dir --upgrade pandas requests
 
-      - name: Pull NCAAF roster + player season stats + schedule + per-game stats and write the caches
+      - name: Pull NCAAF roster + player season stats + schedule + per-game stats + drives and write the caches
         env:
           CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
         run: python refresh_ncaaf.py     # defaults to the current season; schedule and per-game
@@ -106,13 +121,32 @@ jobs:
               print("::warning::Schedule cache looks thin or missing after this run — see the earlier pull step's own log for the actual error. Committing roster/stats caches anyway (non-fatal).")
           seasons_present = sorted({g.get("season") for g in games if g.get("season") is not None})
           stats = ND.load_player_stats()
-          stats_season = stats[0].get("season") if stats else None
+          # UPDATED DIRECTLY: refresh_player_season_stats now ALWAYS keeps BOTH the target year
+          # and year-1 (see its own docstring), so stats can genuinely contain rows from two
+          # different seasons at once -- checking only stats[0]'s own season (the old logic) is
+          # the same real "first row" hack already fixed in ncaaf_engine.py itself, and would
+          # miss a real gap if, say, only the FALLBACK year's row happened to load first.
+          stats_seasons_present = sorted({s.get("season") for s in stats if s.get("season") is not None})
           # Regression check for the real bug this workflow's own history recorded: the schedule
-          # cache must include whichever season player stats actually landed on (target or
-          # fallback), or ncaaf_engine's games-played denominator silently resolves to 0 for
-          # every team and the whole slate goes empty downstream.
-          if stats_season is not None and stats_season not in seasons_present:
-              print(f"::warning::Player stats are for season {stats_season}, but the schedule cache only has {seasons_present} — this WILL produce zero plays downstream (games-played resolves to 0 for every team). See refresh_ncaaf.py's own needed_years logic.")
+          # cache must include EVERY season player stats actually cover (target and/or fallback),
+          # or ncaaf_engine's games-played denominator silently resolves to 0 for any team whose
+          # own stats-season isn't covered, and that team's whole slate contribution goes empty.
+          missing_seasons = set(stats_seasons_present) - set(seasons_present)
+          if missing_seasons:
+              print(f"::warning::Player stats cover season(s) {stats_seasons_present}, but the schedule cache is missing {sorted(missing_seasons)} entirely — this WILL produce zero plays for any team whose own stats resolve to a missing season (games-played resolves to 0 for that team). See refresh_ncaaf.py's own needed_years logic.")
+          # A NEW, direct diagnostic added on request, after a real live incident this exact
+          # check would have caught immediately instead of requiring a multi-step investigation:
+          # team-level stats coverage, not just row counts. A file with "1,082 real rows" can
+          # still cover almost none of the real teams that matter if it's concentrated in a
+          # handful of programs -- exactly what happened live (37 FCS/D-II teams, 0 overlap with
+          # the roster's 138 real FBS teams).
+          roster = ND.load_rosters()
+          roster_teams = {p.get("team") for p in roster if p.get("team")}
+          stats_teams = {s.get("team") for s in stats if s.get("team")}
+          covered = roster_teams & stats_teams
+          print(f"Team-level stats coverage: {len(covered)}/{len(roster_teams)} real roster teams have at least one player with stats on file (either season).")
+          if roster_teams and len(covered) < len(roster_teams) * 0.5:
+              print(f"::warning::Fewer than half of real roster teams have ANY matched player-stats row in either season — a real, possible sign of a team-name mismatch or coverage gap between the roster and stats endpoints, worth a direct look before trusting today's slate.")
           game_stats = ND.load_player_game_stats()
           completed = sorted({g["week"] for g in games if g.get("completed") and g.get("week") is not None})
           print(f"Loaded {len(game_stats)} player-game row(s) across {len(completed)} completed week(s) (any season).")
@@ -123,7 +157,7 @@ jobs:
         # Same atomic-git-add lesson refresh-statcast.yml's own comment records: `git add` with
         # multiple pathspecs fails ATOMICALLY if any one doesn't match a file on disk, silently
         # blocking the commit of files that DID succeed. Stage the two core files
-        # unconditionally first, then only add schedule/per-game-stats if they actually exist.
+        # unconditionally first, then only add schedule/per-game-stats/drives if they actually exist.
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -139,9 +173,14 @@ jobs:
           else
             echo "No per-game stats cache yet (no completed weeks this season, or the pull failed — see the pull step's own log). Expected before the season's first completed week."
           fi
+          if [ -f data/ncaaf_drives.csv ]; then
+            git add data/ncaaf_drives.csv
+          else
+            echo "No drives cache yet (no completed weeks this season, or the pull failed — see the pull step's own log). Expected before the season's first completed week, same as per-game stats."
+          fi
           if git diff --staged --quiet; then
             echo "No change in NCAAF caches — nothing to commit."
           else
-            git commit -m "Auto-refresh NCAAF roster/player-stats/schedule/per-game-stats caches ($(date -u +%Y-%m-%d))"
+            git commit -m "Auto-refresh NCAAF roster/player-stats/schedule/per-game-stats/drives caches ($(date -u +%Y-%m-%d))"
             git push
           fi
