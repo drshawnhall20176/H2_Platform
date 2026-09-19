@@ -102,8 +102,11 @@ def load(date_str: str, stats_date_str: str):
     # opponent — no second round of per-opponent calls needed for the rushing side. Same real
     # confirmed behavior as NFL's own get_team_allowed_stats.
     opp_stats = {opp: E.get_team_allowed_stats(opp, stats_date_str, n=None) for opp in opps}
-    opp_pass_allowed = {opp: s.get("passing_yards", 0.0) for opp, s in opp_stats.items()}
-    opp_rush_allowed = {opp: s.get("rushing_yards", 0.0) for opp, s in opp_stats.items()}
+    # NCAAF's keys are CFBD's ("passing_YDS"), NOT NFL's ("passing_yards") -- the old
+    # s.get("passing_yards", 0.0) here silently returned 0.0 for every opponent (see
+    # ncaaf_engine.allowed_by_opponent's docstring); the helper raises on an unknown key instead.
+    opp_pass_allowed = E.allowed_by_opponent(opp_stats, "passing_YDS")
+    opp_rush_allowed = E.allowed_by_opponent(opp_stats, "rushing_YDS")
     league_avg_pass = E.get_league_average_pass_yards_allowed(stats_date_str)
     league_avg_rush = E.get_league_average_rush_yards_allowed(stats_date_str)
     matchup_proj = P.build_qb_matchup_projections(proj_rows, opp_pass_allowed, league_avg_pass,

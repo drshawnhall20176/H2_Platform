@@ -857,3 +857,24 @@ if __name__ == "__main__":
         except Exception as e:  # noqa: BLE001
             print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
     print(f"\n{passed}/{len(tests)} tests passed")
+
+
+# ----------------------------------------------------------------- allowed_by_opponent (QB Lab wrong-key bug)
+def test_allowed_by_opponent_reads_cfbd_column_names():
+    stats = {"Minnesota": {"passing_YDS": 143.0, "rushing_YDS": 151.5, "receiving_REC": 12.5, "receiving_YDS": 143.0},
+             "Montana": {"passing_YDS": 268.0, "rushing_YDS": 136.0}}
+    assert E.allowed_by_opponent(stats, "passing_YDS") == {"Minnesota": 143.0, "Montana": 268.0}
+    assert E.allowed_by_opponent(stats, "rushing_YDS") == {"Minnesota": 151.5, "Montana": 136.0}
+
+
+def test_allowed_by_opponent_maps_an_opponent_with_no_data_to_the_zero_sentinel():
+    assert E.allowed_by_opponent({"Nowhere State": {}}, "passing_YDS") == {"Nowhere State": 0.0}
+
+
+def test_allowed_by_opponent_rejects_nfl_style_key_names_instead_of_silently_returning_zero():
+    # REAL BUG: QB Lab used s.get("passing_yards", 0.0) (NFL's key) against NCAAF's "passing_YDS"
+    # -> 0.0 for every opponent -> "no data" -> None / 1.00x for every QB despite a full cache.
+    import pytest
+    for wrong in ("passing_yards", "rushing_yards", "PassYds"):
+        with pytest.raises(KeyError):
+            E.allowed_by_opponent({"Minnesota": {"passing_YDS": 143.0}}, wrong)

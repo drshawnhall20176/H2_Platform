@@ -373,6 +373,21 @@ def get_player_season_games(player_id, before_date: str, max_games: int = 20) ->
 _ALLOWED_STAT_COLS = ["passing_YDS", "rushing_YDS", "receiving_REC", "receiving_YDS"]
 
 
+def allowed_by_opponent(opp_stats: Dict[str, Dict[str, float]], col: str) -> Dict[str, float]:
+    """{opponent: value} for ONE stat out of a {opponent: get_team_allowed_stats(...)} mapping.
+
+    STRICT ON PURPOSE. NCAAF QB Lab was adapted from NFL's page and kept NFL's key names
+    ("passing_yards"); this module's keys are CFBD's ("passing_YDS"). `s.get("passing_yards", 0.0)`
+    quietly returned 0.0 for every opponent, which build_qb_matchup_projections reads as "no
+    data" -> neutral 1.00x -- so QB Lab showed None / 1.00x for every QB even with a fully
+    populated cache. An unknown column name now raises instead of silently becoming 0.0.
+    Opponents with no data (empty dict) still map to 0.0, the existing "no data" sentinel."""
+    if col not in _ALLOWED_STAT_COLS:
+        raise KeyError(f"{col!r} is not a stat get_team_allowed_stats returns; "
+                       f"valid columns: {_ALLOWED_STAT_COLS}")
+    return {opp: float((stats or {}).get(col) or 0.0) for opp, stats in opp_stats.items()}
+
+
 def get_team_allowed_stats(team: str, before_date: str, n: Optional[int] = None) -> Dict[str, float]:
     """Average PassYds/RushYds/Receptions/RecYds ALLOWED by this team's defense -- n=None for the
     whole season so far, n=int for just their last n games. Same construction as

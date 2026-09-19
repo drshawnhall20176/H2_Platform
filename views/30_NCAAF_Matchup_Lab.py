@@ -381,6 +381,10 @@ if profile:
 
     pdf["Notes"] = pdf.apply(_notes, axis=1)
     pdf = pdf[["Market", "Recent Avg", "Season Avg", "H2H Avg", "H2H Games", "Notes"]]
+    if not (row.get("_recent_games") or []):
+        # No games on file: the profile's Recent Avg is a 0.0 placeholder, not a real average.
+        # Show "—" (na_rep below) instead of a fabricated zero next to "no recent games on file".
+        pdf["Recent Avg"] = float("nan")
     st.markdown(f"**{row['Player']} — recent form, season form, and this matchup**")
     st.dataframe(
         pdf.style.format({"Recent Avg": "{:.1f}", "Season Avg": "{:.1f}", "H2H Avg": "{:.1f}"}, na_rep="—"),
