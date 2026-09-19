@@ -1227,3 +1227,37 @@ def test_explain_team_environment_reuses_grade_slates_own_actual_not_a_separate_
     assert result["actual_team_total"] == 99.0   # 0 + 99 -- confirms the real teammate's own real Actual was used directly
     print("✓ explain_team_environment genuinely reuses each play's own real, already-attached Actual field, not a separate recompute")
 
+
+
+def test_grade_slate_matches_int_play_ids_against_str_keyed_results_and_vice_versa():
+    # Exact-type dict lookups silently graded nothing when one side used "123" and the other 123.
+    play = {"Player": "QB One", "PlayerId": 4431009, "Market": "Pass Yards", "Side": "Over",
+            "Line": 200.5, "ModelProb": 0.6, "Conviction": 1.5, "Team": "T", "Game": "G"}
+    for key in ("4431009", 4431009):
+        graded, summary = R.grade_slate([dict(play)], {key: {"passing_yards": 250.0}})
+        assert summary["graded"] == 1 and summary["hits"] == 1, f"results keyed {key!r} did not match"
+    graded, summary = R.grade_slate([dict(play, PlayerId="4431009")], {4431009: {"passing_yards": 250.0}})
+    assert summary["graded"] == 1
+    graded, summary = R.grade_slate([dict(play, PlayerId=None)], {4431009: {"passing_yards": 250.0}})
+    assert summary["graded"] == 0
+
+
+def test_filter_plays_to_date_keeps_only_games_on_that_eastern_date():
+    # REAL BUG: weekly sports (NCAAF/NFL) resolve ANY date to the whole week's slate, so 9/12 and
+    # 9/13 returned identical plays and the Model Dashboard's 7-night trend double counted.
+    meta = [{"label": "A @ B", "game_date": "2026-09-12T19:30:00Z"},      # 3:30 PM ET Sat 9/12
+            {"label": "C @ D", "game_date": "2026-09-13T01:00:00Z"},      # 9 PM ET Sat 9/12 (UTC says 9/13)
+            {"label": "E @ F", "game_date": "2026-09-11T23:00Z"},         # Fri 9/11, no-seconds shape
+            {"label": "G @ H", "game_date": "2026-09-13T17:00:00Z"}]      # Sun 9/13
+    plays = [{"Game": g, "Player": g} for g in ("A @ B", "C @ D", "E @ F", "G @ H")]
+    assert [p["Game"] for p in R.filter_plays_to_date(plays, meta, "2026-09-12")] == ["A @ B", "C @ D"]
+    assert [p["Game"] for p in R.filter_plays_to_date(plays, meta, "2026-09-11")] == ["E @ F"]
+    assert R.filter_plays_to_date(plays, meta, "2026-09-14") == []       # a non-game day grades nothing
+    assert len(R.games_on_date(meta, "2026-09-12")) == 2
+
+
+def test_filter_plays_to_date_leaves_plays_untouched_when_meta_has_no_parseable_dates():
+    plays = [{"Game": "A @ B"}]
+    assert R.filter_plays_to_date(plays, [{"label": "A @ B"}], "2026-09-12") == plays
+    assert R.filter_plays_to_date(plays, [], "2026-09-12") == plays
+    assert R.games_on_date([{"label": "A @ B", "game_date": "junk"}], "2026-09-12") is None

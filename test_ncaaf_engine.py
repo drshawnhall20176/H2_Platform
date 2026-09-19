@@ -878,3 +878,20 @@ def test_allowed_by_opponent_rejects_nfl_style_key_names_instead_of_silently_ret
     for wrong in ("passing_yards", "rushing_yards", "PassYds"):
         with pytest.raises(KeyError):
             E.allowed_by_opponent({"Minnesota": {"passing_YDS": 143.0}}, wrong)
+
+
+def test_get_player_results_keys_numeric_ids_as_ints_matching_the_plays_PlayerId():
+    # REAL BUG: results were keyed str(pid) while every NCAAF play's PlayerId is an int, so
+    # retro.grade_slate's exact-type lookup graded 0 of 2,930 plays on a slate where 2,039 of
+    # those players had real results -- Retrospective/Model Dashboard showed "no graded picks".
+    schedule = [{"id": 1, "season": 2026, "week": 2, "start_date": "2026-09-12T19:30:00Z",
+                 "completed": True, "home_team": "A", "away_team": "B", "home_id": 1, "away_id": 2,
+                 "venue": "X", "neutral_site": False}]
+    game_rows = [{"player_id": 4431009, "season": 2026, "week": 2, "passing_YDS": 250},
+                 {"player_id": "5126468", "season": 2026, "week": 2, "passing_YDS": 100},
+                 {"player_id": 7.0, "season": 2026, "week": 2, "passing_YDS": 50}]
+    with patch.object(ND, "load_schedule", return_value=schedule), \
+        patch.object(ND, "load_player_game_stats", return_value=game_rows):
+        results = E.get_player_results("2026-09-12")
+    assert 4431009 in results and 5126468 in results and 7 in results
+    assert "4431009" not in results

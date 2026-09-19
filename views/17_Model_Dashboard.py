@@ -141,6 +141,9 @@ else:
             return []   # UFC is outcome-based -- no graded plays pipeline
         rows, meta = sport.engine.build_slate(date_str_inner)
         plays = sport.projections.build_best_bets(rows)
+        # Weekly sports resolve any date to the whole week's slate -- without this, the trend
+        # pooled the same plays once per calendar day (see retro.filter_plays_to_date).
+        plays = R.filter_plays_to_date(plays, meta, date_str_inner)
         results = sport.engine.get_player_results(date_str_inner)
         graded, _ = R.grade_slate(plays, results)
         return graded

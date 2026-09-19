@@ -197,7 +197,22 @@ _RESULT_KEY_MAP = {
 }
 
 
-def get_player_results(date_str: str) -> Dict[str, Dict[str, float]]:
+def _result_key(pid):
+    """Key type for get_player_results: an INT for numeric ids, matching the type of the
+    PlayerId every NCAAF play carries (roster ids read back from CSV are ints) and the platform's
+    own contract (retro.grade_slate is typed Dict[int, ...]; settle_results calls results.get(int(pid))).
+    This used to be str(pid) for everything: exact-type dict lookups never matched, so
+    grade_slate graded 0 of 2,930 NCAAF plays on a night where 2,039 of those players HAD results
+    -- Retrospective and Model Dashboard showed "no graded picks" for real, completed slates.
+    Non-numeric ids stay strings."""
+    try:
+        f = float(pid)
+        return int(f) if f == int(f) else str(pid)
+    except (TypeError, ValueError):
+        return str(pid)
+
+
+def get_player_results(date_str: str) -> Dict[object, Dict[str, float]]:
     """Same contract as mlb_engine.get_player_results/nfl_engine.get_player_results (keyed by
     player id, {stat_col: value}) -- required by Retrospective's grading logic. Real per-game
     results, from ncaaf_data's per-game cache (populated by refresh_player_game_stats) -- no
@@ -226,7 +241,7 @@ def get_player_results(date_str: str) -> Dict[str, Dict[str, float]]:
             if not _missing(val):
                 translated[market_key] = float(val)
         if translated:
-            out[str(pid)] = translated
+            out[_result_key(pid)] = translated
     _diag(f"get_player_results({date_str}): season {season} week {week}, {len(out)} player result(s)")
     return out
 

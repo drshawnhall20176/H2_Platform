@@ -263,11 +263,68 @@ def apply_calibration_correction(raw_prob: Optional[float], correction: Optional
 
  
  
+def _result_for(results: Dict, pid) -> Optional[Dict]:
+    """A player's actuals, tolerant of int-vs-str id types (4431009 vs "4431009"). An exact-type
+    dict lookup silently returned None for every NCAAF play, zeroing out grading with no error --
+    so this tries the id as given, then as an int, then as a string, before giving up."""
+    if pid is None:
+        return None
+    hit = results.get(pid)
+    if hit is not None:
+        return hit
+    try:
+        hit = results.get(int(pid))
+        if hit is not None:
+            return hit
+    except (TypeError, ValueError):
+        pass
+    return results.get(str(pid))
+
+
+def games_on_date(meta: List[Dict], date_str: str) -> Optional[List[Dict]]:
+    """The games in `meta` played on date_str by US/Eastern calendar date (each game's UTC
+    game_date converted -- a 10 PM ET kickoff is already the next day in UTC). Returns None when
+    NO game in meta carries a parseable game_date, meaning "can't tell" (callers leave their data
+    untouched); an empty list means "dates are known and none fall on date_str"."""
+    import pytz
+    eastern = pytz.timezone("US/Eastern")
+    parsed_any, on_date = False, []
+    for m in meta or []:
+        gd = m.get("game_date")
+        try:
+            d = (datetime.fromisoformat(str(gd).replace("Z", "+00:00"))
+                 .astimezone(eastern).strftime("%Y-%m-%d"))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        parsed_any = True
+        if d == date_str:
+            on_date.append(m)
+    return on_date if parsed_any else None
+
+
+def filter_plays_to_date(plays: List[Dict], meta: List[Dict], date_str: str) -> List[Dict]:
+    """Keep only plays whose game was actually played on date_str.
+
+    WHY: weekly sports (NCAAF, NFL) resolve ANY date to that WEEK's slate, so 9/12 and 9/13
+    returned the identical 1,959 graded plays, and five different non-game days each returned
+    the same 90 plays from a game not yet played -- the Model Dashboard's 7-night trend pooled
+    4,368 graded plays of which only 2,102 were unique, and the Retrospective would have saved
+    a full copy of the week's plays under every date viewed (grading_history replaces per
+    (date, sport), so Track Record would double count). Daily sports are unaffected: all their
+    games already fall on the requested date. If meta has no parseable dates the plays are
+    returned unchanged."""
+    on_date = games_on_date(meta, date_str)
+    if on_date is None:
+        return plays
+    labels = {m.get("label") for m in on_date}
+    return [p for p in plays if p.get("Game") in labels]
+
+
 def grade_slate(plays: List[Dict], results: Dict[int, Dict]) -> Tuple[List[Dict], Dict]:
     """Attach Hit/Actual to every play and summarize. Returns (graded_plays, summary)."""
     graded = []
     for p in plays:
-        actuals = results.get(p.get("PlayerId")) if p.get("PlayerId") is not None else None
+        actuals = _result_for(results, p.get("PlayerId"))
         hit = grade_play(p["Market"], p["Side"], p["Line"], actuals)
         graded.append({**p, "Hit": hit,
                        "Actual": (actuals or {}).get(MARKET_STAT.get(p["Market"]))})

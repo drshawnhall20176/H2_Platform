@@ -100,6 +100,9 @@ def load_retro_generic(sport_key: str, date_str: str):
             real_lines = None   # fall back to DEFAULT_LINES, not a page crash
 
     plays = sport.projections.build_best_bets(rows, real_lines=real_lines)
+    # Only games actually played on THIS date (weekly sports resolve any date to the whole
+    # week's slate -- see retro.filter_plays_to_date); also keeps grading_history one-copy-per-game.
+    plays = R.filter_plays_to_date(plays, meta, date_str)
     results = sport.engine.get_player_results(date_str)
     graded, summary = R.grade_slate(plays, results)
 
@@ -153,7 +156,8 @@ def load_retro_generic(sport_key: str, date_str: str):
 
     reports = {m: R.market_report(plays, results, m) for m in _active_markets}
     rows_by_pid = {r.get("_pid"): r for r in rows}
-    return graded, summary, reports, rows_by_pid, len(meta), len(results)
+    _on_date = R.games_on_date(meta, date_str)
+    return graded, summary, reports, rows_by_pid, (len(_on_date) if _on_date is not None else len(meta)), len(results)
  
  
 if _active.key == "MLB":
