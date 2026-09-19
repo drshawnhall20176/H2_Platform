@@ -92,7 +92,7 @@ with c2:
         st.rerun()
 date_str = target_date.strftime("%Y-%m-%d")
 
-show_2025_baseline = st.checkbox("📊 Use 2025 season baseline (2026 hasn't started yet)", value=True,
+show_2025_baseline = st.checkbox("📊 Use 2025 season baseline (limited 2026 data so far)", value=True,
     help="Uses last season's real player data. Uncheck once 2026 Week 1 games are in the books.")
 stats_date_str = "2025-12-01" if show_2025_baseline else date_str
 if show_2025_baseline:

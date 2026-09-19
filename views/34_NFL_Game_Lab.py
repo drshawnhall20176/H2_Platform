@@ -133,7 +133,7 @@ away_abbr = selected.get("away_abbr") or selected.get("away_name")
 # Injury report always uses the current date's own real week regardless of this toggle -- we
 # want actual current-week injury status, not last season's.
 show_2025_baseline = st.checkbox(
-    "📊 Use 2025 season baseline (2026 NFL hasn't started yet)",
+    "📊 Use 2025 season baseline (limited 2026 NFL data so far)",
     value=True,
     help="Uses last season's real scoring rates for both teams. The injury report below always "
         "reflects the current real week regardless of this toggle.")

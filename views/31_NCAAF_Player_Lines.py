@@ -105,7 +105,7 @@ date_str = target_date.strftime("%Y-%m-%d")
 # the full reasoning). date_str (the slate/player-picker date) stays independent of
 # stats_date_str (what actually powers the charts below).
 show_2025_baseline = st.checkbox(
-    "📊 Show 2025 season baseline instead (2026 hasn't started yet)",
+    "📊 Show 2025 season baseline instead (limited 2026 data so far)",
     help="Uses last season's real, complete game log as a starting-point baseline for the same "
         "real players — clearly a stand-in for 2026 form, not a claim about it. A transfer, "
         "true freshman, or backup who barely played in 2025 will honestly show no games at all, "

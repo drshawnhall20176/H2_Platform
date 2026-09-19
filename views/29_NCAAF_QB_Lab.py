@@ -122,7 +122,7 @@ date_str = target_date.strftime("%Y-%m-%d")
 # real CFP National Championship (mid-January) and BEFORE the 2026 season could plausibly start
 # -- _infer_season resolves it to season 2025, the full, real, already-completed season, cleanly.
 show_2025_baseline = st.checkbox(
-    "📊 Show 2025 season baseline instead (2026 hasn't started yet)",
+    "📊 Show 2025 season baseline instead (limited 2026 data so far)",
     help="Uses last season's real, complete stats as a starting-point baseline for the same "
         "real players — clearly a stand-in for 2026 form, not a claim about it. A transfer, "
         "true freshman, or backup who barely played in 2025 will honestly show no baseline at "

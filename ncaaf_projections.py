@@ -31,7 +31,11 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from projections import (  # genuinely sport-agnostic — reused, not duplicated
-    prob_over, normalize_name, prob_to_decimal, prob_to_american, curate_selections,
+    # prob_for_side and format_et are REQUIRED by shared pages (odds_api.compute_edges calls
+    # P.prob_for_side; Edge Board / Matchup Lab call P.format_et) -- their absence here was a real
+    # production AttributeError on the NCAAF Edge Board. Every other sport's module re-exports them.
+    prob_over, prob_for_side, normalize_name, format_et,
+    prob_to_decimal, prob_to_american, curate_selections,
 )
 import basketball_projections as BB_P   # shrink_prob only — pure probability math, zero
                                         # basketball-specific assumptions, same reuse nfl_

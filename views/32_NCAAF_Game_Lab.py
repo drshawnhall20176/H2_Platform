@@ -128,7 +128,7 @@ away_name = selected["away_name"]
 # session), so _infer_season("2026-02-01") correctly resolves to 2025 and returns a full
 # season of real scoring rates for both teams.
 show_2025_baseline = st.checkbox(
-    "📊 Use 2025 season baseline (2026 hasn't started yet)",
+    "📊 Use 2025 season baseline (limited 2026 data so far)",
     value=True,   # on by default since Week 1 has no data yet -- the common case right now
     help="Uses last season's real scoring rates for both teams. Real transfers, scheme changes, "
         "and personnel differences since 2025 aren't reflected -- clearly a stand-in, not a "

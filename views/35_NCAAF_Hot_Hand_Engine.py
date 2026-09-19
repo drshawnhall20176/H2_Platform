@@ -64,7 +64,7 @@ with c2:
 date_str = target_date.strftime("%Y-%m-%d")
 
 show_2025_baseline = st.checkbox(
-    "📊 Show 2025 season baseline instead (2026 hasn't started yet)",
+    "📊 Show 2025 season baseline instead (limited 2026 data so far)",
     value=True,
     help="Uses last season's real game logs as the recent-form signal. Week-by-week recency "
         "will emerge automatically as 2026 games are completed.")

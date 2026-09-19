@@ -1377,7 +1377,13 @@ def test_best_bets_and_matchup_lab_use_the_shared_time_slot_helpers():
 # enumerates the full contract explicitly and checks every currently-live sport against it, so a
 # future sport's launch (or a future shared page's new function call) gets caught here first.
 _ENGINE_CONTRACT = ["build_slate", "get_player_results"]
-_PROJECTIONS_CONTRACT = ["build_best_bets", "build_projection_index", "curate_selections", "explain_miss"]
+_PROJECTIONS_CONTRACT = [
+    "build_best_bets", "build_projection_index", "curate_selections", "explain_miss",
+    # Sport-agnostic helpers that shared code calls directly on sport.projections. The contract
+    # used to omit these, so NCAAF could ship without prob_for_side/format_et and only crash in
+    # production on the Edge Board (odds_api.compute_edges -> P.prob_for_side; views -> P.format_et).
+    "prob_for_side", "prob_over", "normalize_name", "format_et", "prob_to_american", "prob_to_decimal",
+]
 
 
 def test_every_live_sport_implements_the_full_shared_page_contract():

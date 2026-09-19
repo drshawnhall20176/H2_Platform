@@ -212,42 +212,59 @@ def main() -> int:
     prior_year = year - 1
     print(f"\nChecking whether {prior_year}'s own per-game stats/drives are already cached "
          f"(one-time pull, not every run)...")
+    # A season merely being PRESENT is not "done": the 2025 rows sat in the cache with team and
+    # opponent_team EMPTY on every row (a field-name bug in refresh_player_game_stats, since
+    # fixed), and the old "season present -> skip" check treated that as complete forever. The
+    # per-game check now requires real opponent data; the drives check is independent, because
+    # both used to live in one branch and prior-season drives could never be pulled once stats
+    # had been.
     try:
-        already_cached = {int(s) for s in {r.get("season") for r in ND.load_player_game_stats()}
-                          if s is not None}
+        stats_ok = ND.seasons_with_opponent_data(ND.load_player_game_stats())
     except Exception:  # noqa: BLE001
-        already_cached = set()
-    if prior_year in already_cached:
-        print(f"{prior_year}'s per-game stats already on file -- skipping (one-time pull already done).")
+        stats_ok = set()
+    try:
+        drives_ok = {int(s) for s in {r.get("season") for r in ND.load_drives()}
+                     if s is not None and s == s}
+    except Exception:  # noqa: BLE001
+        drives_ok = set()
+    need_stats = prior_year not in stats_ok
+    need_drives = prior_year not in drives_ok
+    if not need_stats and not need_drives:
+        print(f"{prior_year}'s per-game stats (with opponent data) and drives already on file -- "
+             f"skipping (one-time pull already done).")
     elif not prior_completed_weeks:
         print(f"No completed weeks found for {prior_year} in the cached schedule -- skipping "
              f"(the schedule pull above may have failed, or {prior_year}'s own schedule genuinely "
              f"has no completed games on file yet).")
     else:
-        print(f"{prior_year} not yet cached -- pulling its {len(prior_completed_weeks)} "
-             f"completed week(s) now, once.")
-        try:
-            path = ND.refresh_player_game_stats(prior_year, api_key, prior_completed_weeks)
-            game_stats = ND.load_player_game_stats(path)
-            print(f"Cached {len(game_stats)} total player-game row(s) (all seasons combined).")
-        except Exception as e:  # noqa: BLE001
-            tb = traceback.format_exc()
-            first_line = str(e).replace("\n", " ")[:300]
-            print(f"::warning::NCAAF prior-season ({prior_year}) per-game stats refresh failed "
-                 f"(current season's own cache untouched): {first_line}")
-            print("Full traceback:")
-            print(tb)
-        try:
-            path = ND.refresh_drives(prior_year, api_key, prior_completed_weeks)
-            drives = ND.load_drives(path)
-            print(f"Cached {len(drives)} total drive row(s) (all seasons combined).")
-        except Exception as e:  # noqa: BLE001
-            tb = traceback.format_exc()
-            first_line = str(e).replace("\n", " ")[:300]
-            print(f"::warning::NCAAF prior-season ({prior_year}) drives refresh failed "
-                 f"(current season's own cache untouched): {first_line}")
-            print("Full traceback:")
-            print(tb)
+        if need_stats:
+            print(f"{prior_year} per-game stats missing or lacking opponent data -- pulling its "
+                 f"{len(prior_completed_weeks)} completed week(s) now, once.")
+            try:
+                path = ND.refresh_player_game_stats(prior_year, api_key, prior_completed_weeks)
+                game_stats = ND.load_player_game_stats(path)
+                print(f"Cached {len(game_stats)} total player-game row(s) (all seasons combined).")
+            except Exception as e:  # noqa: BLE001
+                tb = traceback.format_exc()
+                first_line = str(e).replace("\n", " ")[:300]
+                print(f"::warning::NCAAF prior-season ({prior_year}) per-game stats refresh failed "
+                     f"(current season's own cache untouched): {first_line}")
+                print("Full traceback:")
+                print(tb)
+        if need_drives:
+            print(f"{prior_year} drives not yet cached -- pulling its "
+                 f"{len(prior_completed_weeks)} completed week(s) now, once.")
+            try:
+                path = ND.refresh_drives(prior_year, api_key, prior_completed_weeks)
+                drives = ND.load_drives(path)
+                print(f"Cached {len(drives)} total drive row(s) (all seasons combined).")
+            except Exception as e:  # noqa: BLE001
+                tb = traceback.format_exc()
+                first_line = str(e).replace("\n", " ")[:300]
+                print(f"::warning::NCAAF prior-season ({prior_year}) drives refresh failed "
+                     f"(current season's own cache untouched): {first_line}")
+                print("Full traceback:")
+                print(tb)
 
     print("\nDone.")
     return 0

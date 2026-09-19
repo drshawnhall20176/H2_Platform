@@ -971,3 +971,37 @@ if __name__ == "__main__":
         except Exception as e:  # noqa: BLE001
             print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
     print(f"\n{passed}/{len(tests)} tests passed")
+
+
+# ----------------------------------------------------------------- compute_edges works for EVERY live sport
+def test_compute_edges_and_format_et_work_with_every_live_sports_own_projections_module():
+    # REGRESSION GUARD for a real production crash: the NCAAF Edge Board raised
+    #   AttributeError at odds_api.compute_edges -> P.prob_for_side
+    # because ncaaf_projections never re-exported prob_for_side (or format_et, which Edge Board
+    # calls a few lines later). Every other sport's module had them, and the shared-contract test
+    # didn't list them, so nothing caught it before a live run. This exercises the real join with
+    # each sport's OWN projections module -- exactly how Edge Board calls it.
+    import numpy as np
+    import sports as S
+
+    for sport in S.enabled_sports():
+        if sport.key == "MLB" or not sport.has_projections:
+            continue
+        P_mod = sport.projections
+        name = P_mod.normalize_name("Test Player")
+        index = {(name, "player_test_market"): {
+            # dist is a NORMALIZED HISTOGRAM (index i -> P(outcome == i)), same as every sport's _dist
+            "dist": P._dist(np.array([0, 1, 1, 2, 2, 2, 3, 3, 4, 5])),
+            "mean": 2.3,
+            "ctx": {"player": "Test Player", "team": "TST", "game": "AAA @ BBB",
+                    "game_date": "2026-09-19T23:30:00Z"},
+        }}
+        offers = [{"market": "player_test_market", "player": "Test Player", "point": 1.5,
+                   "over": {"fd": -110}, "under": {"fd": -110}}]
+        edges, stats = O.compute_edges(index, offers, projections_module=P_mod)
+        assert stats["matched"] == 1, f"{sport.key}: offer did not match the index"
+        assert {e["Side"] for e in edges} == {"Over", "Under"}, f"{sport.key}: expected both sides priced"
+        assert all(0.0 <= e["ModelProb"] <= 1.0 for e in edges), f"{sport.key}: bad ModelProb"
+        et = P_mod.format_et("2026-09-19T23:30:00Z")
+        assert et and "PM" in et.upper(), f"{sport.key}: format_et returned {et!r}"
+    print("✓ compute_edges + format_et work with every live stat-based sport's own projections module")

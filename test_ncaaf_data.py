@@ -468,3 +468,78 @@ if __name__ == "__main__":
         except Exception as e:  # noqa: BLE001
             print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
     print(f"\n{passed}/{len(tests)} tests passed")
+
+
+# ----------------------------------------------------------------- per-game cache: live-confirmed bugs (2026-09-19)
+def _cfbd_v2_game(game_id, home, away, home_qb_id, away_qb_id):
+    """/games/players in CFBD's CURRENT shape: the team name is under "team" (NOT "school") and
+    athlete ids are STRINGS."""
+    def team(name, aid, pname, yds):
+        return {"team": name, "categories": [{"name": "passing", "types": [
+            {"name": "YDS", "athletes": [{"id": aid, "name": pname, "stat": str(yds)}]}]}]}
+    return {"id": game_id, "teams": [team(home, home_qb_id, f"{home} QB", 300),
+                                     team(away, away_qb_id, f"{away} QB", 150)]}
+
+
+def test_per_game_stats_read_team_name_from_the_current_api_key_team_not_only_school():
+    # REAL BUG: the real, committed cache had team AND opponent_team empty on 100% of 425k rows,
+    # because the parser only read "school" and CFBD's current API says "team". Result: every
+    # get_team_allowed_stats lookup found 0 rows, every NCAAF matchup factor was 1.00x, and
+    # "Opp Allows" showed None everywhere.
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "games.csv")
+        with patch.object(ND, "_get", return_value=[_cfbd_v2_game(1, "Oregon State", "Montana", "111", "222")]):
+            ND.refresh_player_game_stats(2026, "K", completed_weeks=[1], out_path=out)
+        rows = ND.load_player_game_stats(out)
+    osu = next(r for r in rows if r["player"] == "Oregon State QB")
+    assert osu["team"] == "Oregon State" and osu["opponent_team"] == "Montana"
+    mt = next(r for r in rows if r["player"] == "Montana QB")
+    assert mt["team"] == "Montana" and mt["opponent_team"] == "Oregon State"
+
+
+def test_per_game_stats_refresh_twice_does_not_duplicate_rows_when_api_ids_are_strings():
+    # REAL BUG: API athlete ids are strings ("111"); the cache reads them back as ints (111). The
+    # merge compared raw tuples, never matched, never replaced anything, and APPENDED the whole
+    # week every run: 112k unique player-games grew to 425k rows (up to 21 copies each, 47 MB).
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "games.csv")
+        for _ in range(3):   # three "daily runs"
+            with patch.object(ND, "_get", return_value=[_cfbd_v2_game(1, "Oregon State", "Montana", "111", "222")]):
+                ND.refresh_player_game_stats(2026, "K", completed_weeks=[1], out_path=out)
+        rows = ND.load_player_game_stats(out)
+    assert len(rows) == 2, f"expected 2 unique player-game rows after 3 identical runs, got {len(rows)}"
+
+
+def test_per_game_stats_refresh_repairs_an_already_bloated_cache():
+    # The live cache is ALREADY bloated. The next run must collapse it, including rows for weeks
+    # the run doesn't re-fetch, and replace the old empty-team rows for weeks it does.
+    import pandas as pd
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "games.csv")
+        legacy = pd.DataFrame([
+            # week 1 (will be re-fetched): 3 stale copies with NO team/opponent, int ids
+            *[{"season": 2026, "game_id": 1, "week": 1, "team": None, "opponent_team": None,
+               "player_id": 111, "player": "Oregon State QB", "passing_YDS": 300.0}] * 3,
+            # week 9 of 2025 (NOT re-fetched): 4 identical copies -> must collapse to exactly 1
+            *[{"season": 2025, "game_id": 9, "week": 9, "team": None, "opponent_team": None,
+               "player_id": 999, "player": "Old QB", "passing_YDS": 200.0}] * 4,
+        ])
+        legacy.to_csv(out, index=False)
+        with patch.object(ND, "_get", return_value=[_cfbd_v2_game(1, "Oregon State", "Montana", "111", "222")]):
+            ND.refresh_player_game_stats(2026, "K", completed_weeks=[1], out_path=out)
+        rows = ND.load_player_game_stats(out)
+    keys = [(int(r["game_id"]), int(r["player_id"])) for r in rows]
+    assert len(keys) == len(set(keys)), f"duplicates remain: {keys}"
+    assert sorted(keys) == [(1, 111), (1, 222), (9, 999)]
+    osu = next(r for r in rows if r["player_id"] == 111)
+    assert osu["team"] == "Oregon State" and osu["opponent_team"] == "Montana"
+
+
+def test_seasons_with_opponent_data_ignores_a_season_that_is_present_but_has_no_opponents():
+    # The prior-season "already cached, skip" check used mere presence; 2025 was present with
+    # opponent_team empty on every row, so it was never re-pulled and stayed unusable.
+    nan = float("nan")
+    rows = [{"season": 2025, "opponent_team": nan}, {"season": 2025, "opponent_team": None},
+            {"season": 2026, "opponent_team": "Texas"}, {"season": nan, "opponent_team": "X"}]
+    assert ND.seasons_with_opponent_data(rows) == {2026}
+    assert ND.seasons_with_opponent_data([]) == set()

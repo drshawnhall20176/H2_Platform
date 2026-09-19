@@ -285,6 +285,44 @@ def refresh_schedule(years: List[int], api_key: str, out_path: str = SCHEDULE_PA
     return out_path
 
 
+def _team_name(team_entry: Dict) -> Optional[str]:
+    """A team's display name from one entry of /games/players' `teams` list. CFBD's current API
+    keys it as "team"; the older API used "school" -- reading only "school" left every row's
+    team AND opponent_team empty (confirmed against the real, committed cache: 0% populated
+    across 425k rows), which silently pinned every NCAAF matchup factor at 1.00x."""
+    return team_entry.get("team") or team_entry.get("school") or team_entry.get("name")
+
+
+def _norm_id(x) -> str:
+    """Canonical string form of an id: 4426348, 4426348.0 and "4426348" are all "4426348"."""
+    try:
+        if x is None or (isinstance(x, float) and x != x):
+            return ""
+        return str(int(float(x)))
+    except (TypeError, ValueError):
+        return str(x).strip()
+
+
+def _norm_key_series(df: pd.DataFrame) -> pd.Series:
+    """One canonical "game_id|player_id" string per row (vectorized -- the cache is 100k+ rows)."""
+    return df["game_id"].map(_norm_id) + "|" + df["player_id"].map(_norm_id)
+
+
+def seasons_with_opponent_data(rows: List[Dict]) -> set:
+    """Seasons present in the per-game cache that actually carry opponent_team on at least one
+    row. A season merely being PRESENT isn't enough: 2025 sat in the cache with opponent_team
+    empty on every row, and refresh_ncaaf's "already cached, skip" check treated that as done."""
+    out = set()
+    for r in rows:
+        s, opp = r.get("season"), r.get("opponent_team")
+        if s is None or (isinstance(s, float) and s != s):
+            continue
+        if opp is None or (isinstance(opp, float) and opp != opp) or opp == "":
+            continue
+        out.add(int(s))
+    return out
+
+
 def refresh_player_game_stats(year: int, api_key: str, completed_weeks: List[int],
                               out_path: str = PLAYER_GAME_STATS_PATH) -> str:
     """Per-game player stat logs -- ONE call per completed week (see this module's own docstring
@@ -344,9 +382,9 @@ def refresh_player_game_stats(year: int, api_key: str, completed_weeks: List[int
         for game in games:
             game_id = game.get("id")
             teams_in_game = game.get("teams") or []
-            schools_in_game = [t.get("school") for t in teams_in_game]
+            schools_in_game = [_team_name(t) for t in teams_in_game]
             for team in teams_in_game:
-                school = team.get("school")
+                school = _team_name(team)
                 # The opponent is simply the OTHER school in this same game's teams list --
                 # already present in the raw response, no extra call or schedule join needed.
                 opponent = next((s for s in schools_in_game if s and s != school), None)
@@ -395,11 +433,21 @@ def refresh_player_game_stats(year: int, api_key: str, completed_weeks: List[int
     existing = load_player_game_stats(out_path)
     if existing:
         existing_df = pd.DataFrame(existing)
-        refetched_keys = set(zip(new_rows["game_id"], new_rows["player_id"]))
-        keep_mask = ~existing_df.apply(lambda r: (r["game_id"], r["player_id"]) in refetched_keys, axis=1)
+        # REAL, LIVE-CONFIRMED BUG FIX (2026-09-19): this used to compare raw (game_id, player_id)
+        # tuples. CFBD returns athlete ids as STRINGS ("4426348"); the cache reads them back from
+        # CSV as INTS (4426348) -- so "refetched?" was never true, no old row was ever replaced,
+        # and every daily run APPENDED the whole week again (a real cache: 112k unique player-games
+        # bloated to 425k rows, up to 21 copies each, ~47 MB and growing toward GitHub's 100 MB
+        # push limit). Keys are normalized to one canonical string form on BOTH sides now.
+        refetched_keys = set(_norm_key_series(new_rows))
+        keep_mask = ~_norm_key_series(existing_df).isin(refetched_keys).to_numpy()
         combined = pd.concat([existing_df[keep_mask], new_rows], ignore_index=True)
     else:
         combined = new_rows
+    # Belt and braces, and what repairs an ALREADY-bloated cache even for weeks this run didn't
+    # re-fetch: one row per (game, player), latest wins.
+    combined = combined.loc[~_norm_key_series(combined).duplicated(keep="last").to_numpy()] \
+                       .reset_index(drop=True)
 
     combined.to_csv(out_path, index=False)
     seasons_now_present = sorted({int(s) for s in combined["season"].dropna().unique()})
