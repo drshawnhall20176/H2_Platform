@@ -43,6 +43,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from curl_cffi import requests
+import pytz
 
 import config_nba as CFG
 import basketball_engine as BB
@@ -142,8 +143,17 @@ def get_schedule(date_str: str) -> List[Dict[str, Any]]:
             all_events.append(event)
 
     if not any_real_response:
+        # Same real, confirmed production bug fixed on wnba_engine.get_schedule: a HARD ESPN
+        # failure (all three queries return None, e.g. a real 403) must reach the stats.nba.com
+        # fallback, not bypass it with an early return -- "ESPN refused the request" needs the
+        # same fallback as "ESPN answered with nothing."
         _diag(f"get_schedule({date_str}): all three real scoreboard fetches failed (request failed)")
-        return []
+        import nba_stats_engine as NS
+        games = NS.get_schedule(date_str, NS.LEAGUE_ID_NBA)
+        if games:
+            _diag(f"get_schedule({date_str}): ESPN's own fetch failed outright; the stats.nba.com "
+                 f"real fallback found {len(games)} real game(s) instead")
+        return games
     if not all_events:
         _diag(f"get_schedule({date_str}): real fetches succeeded but returned zero events across all three real dates queried")
 
@@ -184,7 +194,42 @@ def get_schedule(date_str: str) -> List[Dict[str, Any]]:
         except (KeyError, TypeError, ValueError):
             logger.exception("NBA scoreboard event had an unexpected shape: %s", event.get("id"))
             continue
+
+    # Same real, confirmed fix already applied to wnba_engine.get_schedule: the three-date merge
+    # above (needed to dodge ESPN's real 403 on a range query) means `games` holds events from
+    # THREE calendar dates, not just the one requested. Callers that don't re-filter externally
+    # (build_slate does not) would otherwise get adjacent-day games mixed into the slate -- the
+    # same real team appearing in two games on one apparent slate. Narrowed here, at the source,
+    # by each game's real US/Eastern date (NOT a naive UTC string compare -- a 10 PM ET tip is
+    # already the next day in UTC).
+    eastern = pytz.timezone("US/Eastern")
+    filtered = []
+    for g in games:
+        gd = g.get("game_date")
+        try:
+            # Deliberately not a rigid strptime: ESPN returns both "...T23:00:00Z" and
+            # "...T23:00Z" (no seconds) in this same response shape.
+            local_date = (datetime.fromisoformat(gd.replace("Z", "+00:00"))
+                          .astimezone(eastern).strftime("%Y-%m-%d"))
+        except (TypeError, ValueError, AttributeError):
+            continue   # an honest skip for a genuinely unparseable game_date, not a guess
+        if local_date == date_str:
+            filtered.append(g)
+    if len(filtered) != len(games):
+        _diag(f"get_schedule({date_str}): filtered {len(games)} raw game(s) across 3 real dates "
+              f"down to {len(filtered)} real game(s) actually on {date_str} (Eastern)")
+    games = filtered
     _diag(f"get_schedule({date_str}): {len(games)} game(s) found ({len(all_events)} raw events across 3 real queries)")
+
+    if not games:
+        # Real FALLBACK, not a replacement (see nba_stats_engine's docstring for why): tried ONLY
+        # when the ESPN path genuinely found nothing, so if ESPN is healthy the separately-risky
+        # stats.nba.com source is never touched.
+        import nba_stats_engine as NS
+        games = NS.get_schedule(date_str, NS.LEAGUE_ID_NBA)
+        if games:
+            _diag(f"get_schedule({date_str}): ESPN returned nothing; the stats.nba.com real "
+                  f"fallback found {len(games)} real game(s) instead")
     return games
 
 

@@ -432,7 +432,11 @@ def _pearson_r(xs: List[float], ys: List[float]) -> Optional[float]:
     cov = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
     var_x = sum((x - mean_x) ** 2 for x in xs)
     var_y = sum((y - mean_y) ** 2 for y in ys)
-    if var_x == 0 or var_y == 0:
+    # Zero-variance check with a RELATIVE tolerance, not `== 0`: a constant series like [0.55]*10
+    # does not average back to exactly 0.55 in floating point (mean is 0.5499999999999999), so its
+    # variance comes out ~1e-31 instead of 0 and the old exact check let float noise through as a
+    # bogus ~1e-15 "correlation". Real variance is many orders of magnitude above this floor.
+    if var_x <= 1e-24 * n * mean_x ** 2 or var_y <= 1e-24 * n * mean_y ** 2:
         return None
     return cov / ((var_x ** 0.5) * (var_y ** 0.5))
 

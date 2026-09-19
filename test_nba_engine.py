@@ -11,7 +11,19 @@ test_basketball_engine.py, so it isn't re-tested exhaustively per sport.
     python test_nba_engine.py     # or: pytest test_nba_engine.py
 """
 
+import pytest
+from unittest.mock import patch
+
 import nba_engine as E
+import nba_stats_engine as NS
+
+
+@pytest.fixture(autouse=True)
+def _no_real_stats_nba_com_fallback(monkeypatch):
+    """get_schedule now falls back to stats.nba.com when ESPN returns nothing. Default that
+    fallback to an empty result for every test in this file so no test can ever reach the real
+    network through it; tests that exercise the fallback override this themselves."""
+    monkeypatch.setattr(NS, "get_schedule", lambda date_str, league_id: [])
 
 
 def _log(pts, reb, ast, fg3m, minutes, opp="Boston Celtics", date="2026-01-14T00:00Z"):
@@ -62,7 +74,7 @@ def test_get_schedule_parses_espn_scoreboard_shape(monkeypatch):
         "events": [
             {
                 "id": "401810001",
-                "date": "2026-01-14T00:00Z",
+                "date": "2026-01-14T23:00Z",   # 6 PM Eastern on the requested date
                 "competitions": [{
                     "competitors": [
                         {"homeAway": "home", "team": {"id": "2", "displayName": "Boston Celtics", "abbreviation": "BOS"}},
@@ -137,6 +149,88 @@ def test_get_schedule_dedupes_the_same_real_event_across_multiple_queries(monkey
     games = E.get_schedule("2026-01-14")
     assert len(games) == 1, f"expected the real shared event deduped to exactly 1, got {len(games)}"
     print("✓ get_schedule correctly dedupes the same real event id when it appears in more than one of the three real queries")
+
+
+# ----------------------------------------------------------------- get_schedule: stats.nba.com fallback
+_FALLBACK_GAME = {"gameId": "1", "game_date": "2026-10-22", "home_id": 1, "away_id": 2,
+                  "home_name": "Team A", "away_name": "Team B", "home_abbr": "A",
+                  "away_abbr": "B", "home_logo": None, "away_logo": None,
+                  "status_state": None, "status_detail": "7:30 pm ET"}
+
+
+def _event(eid, date_utc, home="Team A", away="Team B"):
+    return {"id": eid, "date": date_utc, "competitions": [{"competitors": [
+        {"homeAway": "home", "team": {"id": "1", "displayName": home, "abbreviation": "A"}},
+        {"homeAway": "away", "team": {"id": "2", "displayName": away, "abbreviation": "B"}},
+    ], "status": {"type": {}}}]}
+
+
+def test_get_schedule_falls_back_to_stats_nba_com_when_espn_returns_nothing(monkeypatch):
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: {"events": []})
+    calls = []
+    monkeypatch.setattr(NS, "get_schedule", lambda d, lid: calls.append((d, lid)) or [_FALLBACK_GAME])
+    assert E.get_schedule("2026-10-22") == [_FALLBACK_GAME]
+    assert calls == [("2026-10-22", NS.LEAGUE_ID_NBA)], f"fallback must use the NBA league id, got {calls}"
+
+
+def test_get_schedule_falls_back_when_espn_fails_outright_not_just_when_empty(monkeypatch):
+    # A hard ESPN failure (all three queries return None, e.g. a real 403) used to hit an early
+    # `return []` -- the exact production bug fixed on WNBA -- and must reach the fallback too.
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: None)
+    monkeypatch.setattr(NS, "get_schedule", lambda d, lid: [_FALLBACK_GAME])
+    assert E.get_schedule("2026-10-22") == [_FALLBACK_GAME]
+
+
+def test_get_schedule_never_calls_the_fallback_when_espn_has_real_games(monkeypatch):
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: {"events": [_event("1", "2026-10-22T23:30Z")]})
+    with patch.object(NS, "get_schedule") as mock_fallback:
+        games = E.get_schedule("2026-10-22")
+    assert len(games) == 1
+    mock_fallback.assert_not_called()
+
+
+def test_get_schedule_fallback_fires_when_espn_only_has_adjacent_date_games(monkeypatch):
+    # ESPN answers successfully, but every event is from an adjacent day -> after the Eastern
+    # filter nothing is left for the requested date, so the fallback gets its chance.
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: {"events": [_event("1", "2026-10-21T23:30Z")]})
+    monkeypatch.setattr(NS, "get_schedule", lambda d, lid: [_FALLBACK_GAME])
+    assert E.get_schedule("2026-10-22") == [_FALLBACK_GAME]
+
+
+# ----------------------------------------------------------------- get_schedule: Eastern-date filtering
+def test_get_schedule_filters_out_a_game_from_an_adjacent_date(monkeypatch):
+    # 2026-10-21T23:00Z is 7 PM ET on Oct 21 -- not the requested Oct 22.
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: {"events": [_event("1", "2026-10-21T23:00Z")]})
+    assert E.get_schedule("2026-10-22") == []
+
+
+def test_get_schedule_keeps_a_late_game_that_crosses_midnight_utc_but_matches_eastern(monkeypatch):
+    # 2026-10-23T02:00Z is 10 PM ET on Oct 22: raw UTC date differs, Eastern date matches.
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: {"events": [_event("1", "2026-10-23T02:00Z")]})
+    games = E.get_schedule("2026-10-22")
+    assert len(games) == 1
+
+
+def test_get_schedule_handles_both_iso_timestamp_shapes(monkeypatch):
+    # ESPN mixes "...T23:00:00Z" and "...T23:00Z" in the same response shape; neither may be dropped.
+    events = [_event("1", "2026-10-22T23:00:00Z"), _event("2", "2026-10-22T23:30Z", "Team C", "Team D")]
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: {"events": events})
+    assert len(E.get_schedule("2026-10-22")) == 2
+
+
+def test_get_schedule_skips_a_game_with_an_unparseable_date(monkeypatch):
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: {"events": [_event("1", "not-a-date")]})
+    assert E.get_schedule("2026-10-22") == []
+
+
+def test_get_schedule_same_team_never_appears_in_two_games_on_one_slate(monkeypatch):
+    # The real reported WNBA bug (a team in two games on one apparent slate, the second from an
+    # adjacent date), reproduced for NBA: only the game on the requested date may survive.
+    today = _event("1", "2026-10-22T23:30Z", "Boston Celtics", "New York Knicks")
+    tomorrow = _event("2", "2026-10-23T23:30Z", "Boston Celtics", "Miami Heat")
+    monkeypatch.setattr(E, "_get_json", lambda url, params=None: {"events": [today, tomorrow]})
+    games = E.get_schedule("2026-10-22")
+    assert [g["gameId"] for g in games] == ["1"]
 
 
 # ----------------------------------------------------------------- team_abbrs_from_meta
