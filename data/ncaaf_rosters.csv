@@ -727,6 +727,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 4816324,Jake,Maikkula,Jake Maikkula,Oklahoma,OL,4,69.0,78.0,305.0
 4816326,Braden,Miller,Braden Miller,Duke,OL,4,77.0,78.0,315.0
 4819223,Ryan,Baer,Ryan Baer,Pittsburgh,OL,4,70.0,79.0,325.0
+4819224,Alex,Afari Jr.,Alex Afari Jr.,Kentucky,LB,4,3.0,74.0,227.0
 4819226,Brody,Foley,Brody Foley,Louisville,TE,4,80.0,78.0,260.0
 4819228,Rodney,Harris II,Rodney Harris II,Oklahoma State,WR,4,11.0,73.0,207.0
 4819232,Isaiah,Jones,Isaiah Jones,Indiana,LB,4,46.0,74.0,225.0
@@ -1136,6 +1137,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 4870826,Micah,Mays Jr.,Micah Mays Jr.,Florida,WR,4,5.0,73.0,197.0
 4870828,Grayson,Howard,Grayson Howard,South Florida,LB,3,0.0,76.0,240.0
 4870829,Dontay,Joyner,Dontay Joyner,Maryland,DB,4,6.0,72.0,180.0
+4870832,Moussa,Kane,Moussa Kane,UConn,CB,2,22.0,73.0,195.0
 4870834,Roderick,Kearney,Roderick Kearney,Florida,OL,4,71.0,76.0,303.0
 4870835,Brandon,Inniss,Brandon Inniss,Ohio State,WR,4,0.0,72.0,197.0
 4870838,Corey,Kelly,Corey Kelly,Kennesaw State,LB,3,8.0,75.0,238.0
@@ -1530,6 +1532,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 4898018,Josh,Sapp,Josh Sapp,West Virginia,TE,4,0.0,74.0,238.0
 4898201,Trey,White,Trey White,Texas Tech,LB,4,2.0,74.0,250.0
 4898202,Nathan,Elu,Nathan Elu,Oregon State,OL,4,78.0,77.0,320.0
+4898589,Oliver,Straw,Oliver Straw,UAB,P,4,41.0,74.0,210.0
 4898892,Joey,Schlaffer,Joey Schlaffer,Temple,TE,4,18.0,77.0,250.0
 4899096,Evan,Crenshaw,Evan Crenshaw,Troy,P,4,28.0,76.0,184.0
 4899136,Micah,Bell,Micah Bell,Georgia,RB,4,26.0,70.0,185.0
@@ -2890,6 +2893,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 5081387,Christian,Harrison,Christian Harrison,Arkansas,DB,4,1.0,72.0,202.0
 5081391,Jayson,Jenkins,Jayson Jenkins,Mississippi State,DL,4,97.0,78.0,280.0
 5081393,Connor,Meadows,Connor Meadows,UCF,OL,4,58.0,76.0,300.0
+5081395,Kalib,Perry,Kalib Perry,Louisville,LB,4,12.0,75.0,230.0
 5081400,Josh,Turbyville,Josh Turbyville,Tennessee,PK,4,94.0,74.0,195.0
 5081405,AJ,Swann,AJ Swann,Mississippi State,QB,4,17.0,74.0,220.0
 5081408,Grady,Sherrill,Grady Sherrill,Clemson,WR,4,89.0,70.0,185.0
@@ -7393,6 +7397,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 5193557,Xavier,Thorpe,Xavier Thorpe,Washington State,OL,2,54.0,77.0,313.0
 5193566,Kade,Reynoldson,Kade Reynoldson,Duke,P,3,41.0,74.0,195.0
 5193580,Cameron,Dickey,Cameron Dickey,Texas Tech,RB,3,8.0,70.0,215.0
+5193582,Jatavious,Johnson,Jatavious Johnson,Mississippi State,S,1,29.0,74.0,200.0
 5193588,Jackson,Hildebrand,Jackson Hildebrand,Texas Tech,OL,3,66.0,74.0,295.0
 5193589,Qayvier,Johnson,Qayvier Johnson,Northwestern,LB,2,50.0,75.0,225.0
 5193637,Ethan,Wilder,Ethan Wilder,Memphis,CB,2,19.0,70.0,170.0
