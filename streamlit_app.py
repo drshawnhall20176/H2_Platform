@@ -144,7 +144,7 @@ def run():
     # any sport with a market_map (UFC has one), not projections-dependent at all.
     projections_only_titles = {"Best Bets", "Graded Picks", "Suggested Parlays", "Speculative Basket",
                                "Edge Board", "Retrospective", "Model Dashboard", "Track Record",
-                               "Media Room", "Podcast Studio"}
+                               "Media Room", "Podcast Studio", "Slip Lab"}
 
     # Internal/paid tools kept off the Discord/public build — matched by TITLE (not page number)
     # so a future re-numbering of the views/ files can't silently un-gate one of these by
@@ -153,7 +153,7 @@ def run():
     owner_only_titles = {"Bet Log", "Media Room", "Podcast Studio", "Edge Board",
                          "Matchup Lab", "Track Record", "Data Health",
                          "Suggested Parlays", "Speculative Basket", "Graded Picks",
-                         "Model Dashboard", "First Innings Totals", "Player Lines"}
+                         "Model Dashboard", "First Innings Totals", "Player Lines", "Slip Lab"}
 
     # leading page-number -> (title, icon, stable url slug). The url_path is the key fix: it pins
     # each page to a predictable URL so reruns keep you on the same page instead of defaulting to
@@ -171,6 +171,7 @@ def run():
         "2": ("Graded Picks",   "🏅", "graded_picks"),
         "3": ("Suggested Parlays", "🎫", "suggested_parlays"),
         "4": ("Speculative Basket", "🧺", "speculative_basket"),
+        "37": ("Slip Lab", "🧪", "slip_lab"),   # model + pressure-test singles/parlays/pick'em slips
         "5": ("Bullpen Watch",  "🛡️", "bullpen_watch"),
         "6": ("Game Watch",     "📡", "game_watch"),
         "7": ("Pitching Lab",   "🎯", "pitching_lab"),
@@ -229,7 +230,7 @@ def run():
     SECTION_OF = {}
     for k in ("0", "28"):
         SECTION_OF[k] = "🏠 START HERE"
-    for k in ("1", "2", "3", "4", "23", "24"):
+    for k in ("1", "2", "3", "4", "37", "23", "24"):
         SECTION_OF[k] = "🎯 RECOMMENDATIONS"
     for k in ("5", "6"):
         SECTION_OF[k] = "🛰️ LIVE SIGNALS"

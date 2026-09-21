@@ -129,13 +129,58 @@ def fetch_events(api_key: str, sport: str = SPORT) -> List[Dict]:
     return data if isinstance(data, list) else []
 
 
+# Set once a bookmakers=-style request is rejected with a 4xx (a bad key or parameter): every later
+# call then goes straight to the old regions="us" request instead of paying for a doomed first try
+# each time. Module-level so a single rejection protects the whole process.
+_BOOKMAKERS_REJECTED = {"multipliers": False, "bookmakers": False}
+
+
+def _is_client_error(err: Exception) -> bool:
+    """True for the 4xx responses that mean 'the request itself was wrong' (bad parameter/key),
+    NOT auth (401) or quota (429) — retrying those differently would not help."""
+    msg = str(err)
+    return msg.startswith("HTTP 4") and not msg.startswith("HTTP 429")
+
+
 def fetch_event_props(event_id: str, api_key: str, markets: List[str],
-                      regions: str = "us", sport: str = SPORT) -> Tuple[Dict, Dict]:
-    return _get(
-        f"sports/{sport}/events/{event_id}/odds",
-        {"apiKey": api_key, "regions": regions, "markets": ",".join(markets),
-         "oddsFormat": "american", "dateFormat": "iso"},
-    )
+                      regions: str = "us", sport: str = SPORT,
+                      bookmakers: Optional[List[str]] = None) -> Tuple[Dict, Dict]:
+    """One event's odds for `markets`.
+
+    DEFAULT (regions == "us", no explicit bookmakers): asks for exactly FETCH_BOOKMAKERS — the US
+    sportsbooks plus Hard Rock Bet (region "us2") and the pick'em books PrizePicks / DK Pick6
+    (region "us_dfs"), none of which the plain "us" region returns. That is 10 books, which the API
+    bills as ONE region-equivalent, so the credit cost per market is unchanged from before.
+
+    Fails safe: if the API rejects the richer request (a 4xx — bad key/parameter) the call is
+    retried without includeMultipliers, then as the original regions="us" request, and the
+    rejection is remembered so later calls skip the doomed attempts. A 401 (bad API key) or 429
+    (quota) is raised as-is — retrying differently cannot fix those.
+
+    An explicit `bookmakers` list, or any non-default `regions`, is sent exactly as given."""
+    path = f"sports/{sport}/events/{event_id}/odds"
+    base = {"apiKey": api_key, "markets": ",".join(markets),
+            "oddsFormat": "american", "dateFormat": "iso"}
+    if bookmakers is not None:
+        return _get(path, {**base, "bookmakers": ",".join(bookmakers)})
+    if regions != "us" or _BOOKMAKERS_REJECTED["bookmakers"]:
+        return _get(path, {**base, "regions": regions})
+
+    books = ",".join(FETCH_BOOKMAKERS)
+    if not _BOOKMAKERS_REJECTED["multipliers"]:
+        try:
+            return _get(path, {**base, "bookmakers": books, "includeMultipliers": "true"})
+        except OddsAPIError as e:
+            if not _is_client_error(e):
+                raise
+            _BOOKMAKERS_REJECTED["multipliers"] = True
+    try:
+        return _get(path, {**base, "bookmakers": books})
+    except OddsAPIError as e:
+        if not _is_client_error(e):
+            raise
+        _BOOKMAKERS_REJECTED["bookmakers"] = True
+    return _get(path, {**base, "regions": regions})
 
 
 # ---- historical (backfill for already-completed games) ---------------------
@@ -199,6 +244,17 @@ def fetch_historical_event_props(event_id: str, api_key: str, markets: List[str]
 
 
 # ---- parsing ---------------------------------------------------------------
+def _pickem_side(name: str) -> Optional[str]:
+    """Normalize a pick'em outcome name to "over"/"under" — DFS apps say More/Less or
+    Higher/Lower where sportsbooks say Over/Under; the API may pass either through."""
+    n = (name or "").strip().lower()
+    if n.startswith(("o", "m", "h")):
+        return "over"
+    if n.startswith(("u", "l")):
+        return "under"
+    return None
+
+
 def parse_event_offers(event_json: Dict, supported_markets: Optional[List[str]] = None) -> List[Dict]:
     """Collapse all bookmakers into per-(market, player, line) offers with both sides.
 
@@ -206,12 +262,20 @@ def parse_event_offers(event_json: Dict, supported_markets: Optional[List[str]] 
     the sport registry passes each sport's own list.
 
     Returns list of dicts:
-      {market, player, point, over:{book:price}, under:{book:price}}
+      {market, player, point, over:{book:price}, under:{book:price},
+       pickem:{book:{"over":{...}, "under":{...}}}}      # "pickem" only when a DFS book posted it
+
+    Pick'em books (PICKEM_BOOKS) are deliberately kept OUT of over/under: their "price" is a fixed
+    payout placeholder, not a sportsbook price, and mixing it in would corrupt every de-vig and
+    best-price lookup. Their line lives in offer["pickem"][book] (each side may carry the
+    provider's price and, when includeMultipliers was on, its multiplier — captured as given,
+    never invented). A DFS outcome without a price is kept (the line is the useful part); a
+    sportsbook outcome without a price is still dropped, as before.
     """
     offers: Dict[Tuple, Dict] = {}
     markets_allowed = supported_markets if supported_markets is not None else SUPPORTED_MARKETS
     for bm in event_json.get("bookmakers", []):
-        book = bm.get("key", "?")
+        book = canonical_book(bm.get("key", "?")) or "?"
         for mk in bm.get("markets", []):
             mkey = mk.get("key")
             if mkey not in markets_allowed:
@@ -221,6 +285,20 @@ def parse_event_offers(event_json: Dict, supported_markets: Optional[List[str]] 
                 point = oc.get("point")
                 side = (oc.get("name") or "").lower()
                 price = oc.get("price")
+                if book in PICKEM_BOOKS:
+                    if player is None or point is None:
+                        continue
+                    pside = _pickem_side(oc.get("name"))
+                    if pside is None:
+                        continue
+                    k = (mkey, player, point)
+                    slot = offers.setdefault(k, {"market": mkey, "player": player,
+                                                 "point": point, "over": {}, "under": {}})
+                    entry = {"price": price}
+                    if oc.get("multiplier") is not None:
+                        entry["multiplier"] = oc.get("multiplier")
+                    slot.setdefault("pickem", {}).setdefault(book, {})[pside] = entry
+                    continue
                 if player is None or point is None or price is None:
                     continue
                 k = (mkey, player, point)
@@ -640,33 +718,88 @@ def real_market_prob(offers: List[Dict], player_name: str, market_key: str, side
     return over_prob if want_over else (1.0 - over_prob)
 
 
-# Real US sportsbook keys as returned by The Odds API (Pro tier), with their display names.
-# Confirmed directly against the-odds-api.com's own Bookmaker APIs documentation.
+# Real US sportsbook keys as returned by The Odds API, with their display names.
+# Re-confirmed 2026-09-21 against the-odds-api.com/sports-odds-data/bookmaker-apis.html:
+#   - Caesars' key is "williamhill_us" (NOT "caesars" — that key never existed, so Caesars lines
+#     were silently never matched before this fix; BOOK_ALIASES below maps the old spelling for
+#     bets already logged under it).
+#   - Hard Rock Bet is "hardrockbet" and lives in the API's "us2" region, which is why the fetch
+#     below names books explicitly (bookmakers=) rather than asking for the "us" region.
 # DraftKings is default because that's the primary book for this platform's own users.
 US_BOOKS: Dict[str, str] = {
     "draftkings": "DraftKings",
     "fanduel": "FanDuel",
     "betmgm": "BetMGM",
-    "caesars": "Caesars",
+    "williamhill_us": "Caesars",
     "betrivers": "BetRivers",
     "fanatics": "Fanatics",
     "bovada": "Bovada",
+    "hardrockbet": "Hard Rock Bet",
 }
 DEFAULT_BOOK = "draftkings"
 
+# Pick'em (DFS) books: no two-sided American prices — a fixed line plus a payout multiplier per
+# entry (PrizePicks, DraftKings Pick6). Both live in the API's "us_dfs" region. They are NEVER
+# mixed into an offer's over/under price dicts (a pick'em "price" is not a sportsbook price, and
+# blending it in would corrupt every de-vig and best-price lookup); parse_event_offers keeps them
+# in offer["pickem"] instead.
+PICKEM_BOOKS: Dict[str, str] = {
+    "prizepicks": "PrizePicks",
+    "pick6": "DK Pick6",
+}
+
+# Books with NO usable feed: selectable for logging and for typing a line/price by hand, but never
+# fetched. Bet365 is here because The Odds API carries it only as "bet365_au" (Australian region,
+# h2h/spreads/totals for AFL and NRL only — no US player props at all).
+MANUAL_BOOKS: Dict[str, str] = {
+    "bet365": "Bet365",
+}
+
+# Everything a person can pick as "the book I'm using" (logging, Slip Lab), display order.
+ALL_BOOKS: Dict[str, str] = {**US_BOOKS, **PICKEM_BOOKS, **MANUAL_BOOKS}
+
+# Old/alternate spellings -> the key the API actually returns.
+BOOK_ALIASES: Dict[str, str] = {"caesars": "williamhill_us"}
+
+# Exactly the books fetched. Kept at <=10 on purpose: the API bills "every group of 10 bookmakers
+# as the equivalent of 1 region", so this costs the same 1x per market as the old regions="us".
+FETCH_BOOKMAKERS: Tuple[str, ...] = tuple(list(US_BOOKS) + list(PICKEM_BOOKS))
+
+
+def canonical_book(book: Optional[str]) -> str:
+    """Lower-cased, alias-resolved book key ("caesars" -> "williamhill_us"); "" for None."""
+    b = (book or "").strip().lower()
+    return BOOK_ALIASES.get(b, b)
+
+
+def is_pickem_book(book: Optional[str]) -> bool:
+    return canonical_book(book) in PICKEM_BOOKS
+
+
+def is_manual_book(book: Optional[str]) -> bool:
+    return canonical_book(book) in MANUAL_BOOKS
+
+
+def book_label(book: Optional[str]) -> str:
+    b = canonical_book(book)
+    return ALL_BOOKS.get(b, b or "—")
+
 
 def books_in_offers(offers: List[Dict]) -> List[str]:
-    """Returns a sorted list of Odds API book keys that actually appear in this slate's offers,
-    filtered to the ones in US_BOOKS. Used to show only books with real coverage in tonight's
-    data rather than the full hardcoded list -- a user can only meaningfully select a book that
-    actually posted lines for this slate."""
+    """Returns the Odds API book keys that actually appear in this slate's offers (sportsbooks
+    first, then pick'em books), filtered to the known books. Used to show only books with real
+    coverage in tonight's data rather than the full hardcoded list -- a user can only meaningfully
+    select a book that actually posted lines for this slate."""
     seen = set()
     for off in offers:
         for book in list((off.get("over") or {}).keys()) + list((off.get("under") or {}).keys()):
             if book in US_BOOKS:
                 seen.add(book)
-    # Return in US_BOOKS display order so DraftKings is always first
-    return [k for k in US_BOOKS if k in seen]
+        for book in (off.get("pickem") or {}):
+            if book in PICKEM_BOOKS:
+                seen.add(book)
+    # Display order: US_BOOKS then PICKEM_BOOKS, so DraftKings is always first
+    return [k for k in list(US_BOOKS) + list(PICKEM_BOOKS) if k in seen]
 
 
 def market_lines_for_slate(offers: List[Dict], projections_module=None,
@@ -697,6 +830,7 @@ def market_lines_for_slate(offers: List[Dict], projections_module=None,
     if projections_module is None:
         import projections as projections_module
     P = projections_module
+    preferred_book = canonical_book(preferred_book) or None   # legacy "caesars" -> "williamhill_us"
 
     preferred: Dict[Tuple[str, str], float] = {}   # entries where preferred_book has coverage
     fallback: Dict[Tuple[str, str], float] = {}    # minimum across all books (fallback)
@@ -708,7 +842,10 @@ def market_lines_for_slate(offers: List[Dict], projections_module=None,
         if not name or mkey is None or point is None:
             continue
         book_count = len(off.get("over") or {}) + len(off.get("under") or {})
-        if book_count == 0:
+        # A pick'em book (PrizePicks / Pick6) has a real LINE but no sportsbook prices: when it is
+        # the preferred book its line wins, exactly like a sportsbook's would.
+        pickem_hit = bool(preferred_book and preferred_book in (off.get("pickem") or {}))
+        if book_count == 0 and not pickem_hit:
             continue
         key = (name, mkey)
         point = float(point)
@@ -717,15 +854,17 @@ def market_lines_for_slate(offers: List[Dict], projections_module=None,
         if preferred_book:
             over_books = off.get("over") or {}
             under_books = off.get("under") or {}
-            if preferred_book in over_books or preferred_book in under_books:
+            if pickem_hit or preferred_book in over_books or preferred_book in under_books:
                 cur = preferred.get(key)
                 if cur is None or point < cur:   # still take the minimum if same book posts multiple
                     preferred[key] = point
 
-        # Minimum fallback: always track the lowest real line across all books
-        cur = fallback.get(key)
-        if cur is None or point < cur:
-            fallback[key] = point
+        # Minimum fallback: the lowest real SPORTSBOOK line (a pick'em-only point is not a line a
+        # sportsbook bettor can take, so it never becomes the fallback)
+        if book_count > 0:
+            cur = fallback.get(key)
+            if cur is None or point < cur:
+                fallback[key] = point
 
     # Merge: preferred book's line where available, minimum everywhere else
     result = dict(fallback)
@@ -780,6 +919,8 @@ def compute_edges(index: Dict, offers: List[Dict],
                                if all_active_names is not None else None)
 
     for off in offers:
+        if not off.get("over") and not off.get("under"):
+            continue   # a pick'em-only point: no sportsbook price to compute an edge against
         mkey, point = off["market"], off["point"]
         nm = P.normalize_name(off["player"])
         entry = index.get((nm, mkey))

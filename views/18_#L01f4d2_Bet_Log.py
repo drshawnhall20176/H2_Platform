@@ -157,8 +157,9 @@ with st.expander("➕ Log a bet", expanded=False):
             _ss_book = (st.session_state.get("best_bets_book_selector")
                         or st.session_state.get("graded_picks_book_selector")
                         or st.session_state.get("speculative_basket_book_selector")
-                        or st.session_state.get("suggested_parlays_book_selector"))
-            from odds_api import US_BOOKS, DEFAULT_BOOK
+                        or st.session_state.get("suggested_parlays_book_selector")
+                        or st.session_state.get("slip_lab_book_selector"))
+            from odds_api import ALL_BOOKS as US_BOOKS, DEFAULT_BOOK   # incl. PrizePicks / Pick6 / Bet365
             _book_keys = list(US_BOOKS.keys())
             _book_labels = [US_BOOKS[k] for k in _book_keys]
             # _ss_book is already the display label from the selectbox widget

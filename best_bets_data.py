@@ -163,7 +163,7 @@ def render_book_selector(key_prefix: str = "book",
     if O.DEFAULT_BOOK not in books_to_show:
         books_to_show = [O.DEFAULT_BOOK] + books_to_show
 
-    book_labels = [O.US_BOOKS.get(k, k) for k in books_to_show]
+    book_labels = [O.ALL_BOOKS.get(k, k) for k in books_to_show]
     default_idx = books_to_show.index(O.DEFAULT_BOOK) if O.DEFAULT_BOOK in books_to_show else 0
 
     selected_label = st.selectbox(
@@ -612,6 +612,18 @@ def filter_by_split_situation(plays: List[Dict],
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+def fetch_generic_offers(sport_key: str, date_str: str, api_key: str) -> List[Dict]:
+    """The ONE real-offers fetch for every non-MLB sport (MLB has fetch_mlb_real_lines): cached, so
+    load_generic_best_bets_board and Slip Lab — which needs the raw per-book offers, not just the
+    plays built from them — share a single Odds API spend instead of each paying for the same
+    slate. Raises on failure (callers already have their own fail-soft handling)."""
+    sport = sports.get(sport_key)
+    offers, _ = O.fetch_slate_props(date_str, api_key, list(sport.markets),
+                                    sport=sport.odds_sport_key)
+    return offers
+
+
+@st.cache_data(ttl=300, show_spinner=False)
 def load_generic_best_bets_board(sport_key: str, date_str: str,
                                  preferred_book: str = O.DEFAULT_BOOK) -> tuple:
     """Any sport whose engine/projections don't need MLB's statcast/weather/bullpen-blend
@@ -673,9 +685,7 @@ def load_generic_best_bets_board(sport_key: str, date_str: str,
            "offers": 0, "matched_lines": 0, "error": None}
     if api_key and sport.markets:
         try:
-            offers, _ = O.fetch_slate_props(
-                date_str, api_key, list(sport.markets),
-                sport=sport.odds_sport_key)
+            offers = fetch_generic_offers(sport_key, date_str, api_key)
             real_lines = O.market_lines_for_slate(offers, preferred_book=preferred_book)
             real_offers = offers
             diag["offers"] = len(offers)

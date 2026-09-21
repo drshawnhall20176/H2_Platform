@@ -95,7 +95,8 @@ else:
                 for off in offers:
                     books_seen.update((off.get("over") or {}).keys())
                     books_seen.update((off.get("under") or {}).keys())
-                us_books_seen = {k: O.US_BOOKS[k] for k in books_seen if k in O.US_BOOKS}
+                    books_seen.update((off.get("pickem") or {}).keys())   # PrizePicks / Pick6 lines
+                us_books_seen = {k: O.ALL_BOOKS[k] for k in books_seen if k in O.ALL_BOOKS}
 
                 col1, col2 = st.columns(2)
                 with col1:
@@ -108,13 +109,14 @@ else:
                     st.dataframe(pd.DataFrame(market_rows), hide_index=True, width="stretch")
 
                 with col2:
-                    st.markdown("**US sportsbooks in the response:**")
+                    st.markdown("**Sportsbooks & pick'em apps in the response:**")
                     if us_books_seen:
                         for key, name in sorted(us_books_seen.items(), key=lambda x: x[1]):
                             st.markdown(f"✅ {name} (`{key}`)")
                     else:
                         st.warning("No recognized US sportsbooks in the response.")
-                    missing_books = {k: v for k, v in O.US_BOOKS.items() if k not in books_seen}
+                    missing_books = {k: v for k, v in {**O.US_BOOKS, **O.PICKEM_BOOKS}.items()
+                                     if k not in books_seen}
                     if missing_books:
                         st.markdown("**Not in response:**")
                         for key, name in missing_books.items():

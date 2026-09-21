@@ -73,7 +73,8 @@ def bet_close_price(bet: Dict, offers: List[Dict], market_map: Optional[Dict] = 
     mmap = market_map if market_map is not None else MARKET_TO_ODDS_KEY
     singles = single_line_markets if single_line_markets is not None else _MLB_SINGLE_LINE
     okey = mmap.get(bet.get("market"))
-    book = (bet.get("book") or "").strip().lower()
+    import odds_api as _O
+    book = _O.canonical_book(bet.get("book"))   # "caesars" (old logs) -> the API's "williamhill_us"
     side = _side_key(bet.get("side"))
     if not okey or not book or side is None:
         return None

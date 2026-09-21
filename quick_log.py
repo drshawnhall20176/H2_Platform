@@ -238,11 +238,14 @@ def render_quick_log(plays: List[Dict], date_str: str, sport_key: str, key_prefi
 
         # ── Book selector ─────────────────────────────────────────────────────
         try:
-            from odds_api import US_BOOKS, DEFAULT_BOOK
+            # ALL_BOOKS, not just the fetched sportsbooks: a bet can be placed at PrizePicks, DK
+            # Pick6 or Bet365 too, and the Bet Log needs to be able to record that.
+            from odds_api import ALL_BOOKS as US_BOOKS, DEFAULT_BOOK
             _ss_book = (st.session_state.get("best_bets_book_selector")
                         or st.session_state.get("graded_picks_book_selector")
                         or st.session_state.get("speculative_basket_book_selector")
-                        or st.session_state.get("suggested_parlays_book_selector"))
+                        or st.session_state.get("suggested_parlays_book_selector")
+                        or st.session_state.get("slip_lab_book_selector"))
             _book_keys = list(US_BOOKS.keys())
             _book_labels = [US_BOOKS[k] for k in _book_keys]
             _default_label = (_ss_book if _ss_book in _book_labels
@@ -352,14 +355,14 @@ def render_quick_log(plays: List[Dict], date_str: str, sport_key: str, key_prefi
         # ── Summary before logging ────────────────────────────────────────────
         summary_parts = []
         if log_parlay:
-            summary_parts.append(f"1 parlay ticket (${parlay_stake:.2f})")
+            summary_parts.append(f"1 parlay ticket (\\${parlay_stake:.2f})")
         if log_singles:
             summary_parts.append(f"{len(picks)} straight bet{'s' if len(picks) != 1 else ''} "
-                                 f"(${singles_stake:.2f} each)")
+                                 f"(\\${singles_stake:.2f} each)")
         if summary_parts:
             total = ((parlay_stake if log_parlay else 0)
                      + (singles_stake * len(picks) if log_singles else 0))
-            st.info(f"Will log: {' + '.join(summary_parts)} = **${total:.2f} total risk**")
+            st.info(f"Will log: {' + '.join(summary_parts)} = **\\${total:.2f} total risk**")
 
         # ── Log button ────────────────────────────────────────────────────────
         if st.button("Log to Bet Log", type="primary",

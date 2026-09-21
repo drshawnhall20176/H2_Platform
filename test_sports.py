@@ -110,7 +110,8 @@ def test_owner_only_pages_match_expected_titles():
     # typo here would silently fail to hide a page from the public build). Graded Picks moved to
     # owner-only directly on request, specifically to guarantee no public page could ever link to
     # it as the subscriber-only split hardens. Model Dashboard / First Innings Totals / Player
-    # Lines moved to owner-only directly on request too, same real reasoning.
+    # Lines moved to owner-only directly on request too, same real reasoning. Slip Lab (the
+    # book-specific slip modeller / pressure tester) is owner-only from day one.
     src = (_HERE / "streamlit_app.py").read_text()
     m = re.search(r'owner_only_titles = \{([^}]*)\}', src)
     assert m, "streamlit_app.py must define owner_only_titles"
@@ -118,7 +119,7 @@ def test_owner_only_pages_match_expected_titles():
     assert gated == {"Bet Log", "Media Room", "Podcast Studio", "Edge Board",
                      "Matchup Lab", "Track Record", "Data Health",
                      "Suggested Parlays", "Speculative Basket", "Graded Picks",
-                     "Model Dashboard", "First Innings Totals", "Player Lines"}, gated
+                     "Model Dashboard", "First Innings Totals", "Player Lines", "Slip Lab"}, gated
     all_titles = set(re.findall(r'\("([^"]+)",\s*"[^"]*",\s*"[^"]*"\)', src))
     assert gated <= all_titles, f"gated titles not found in _META: {gated - all_titles}"
     print("✓ owner-only gate targets exactly Bet Log / Media Room / Podcast Studio / Edge Board / "
@@ -599,7 +600,8 @@ def test_sidebar_sections_match_the_documented_grouping():
     expected = {
         "0": "🏠 START HERE", "28": "🏠 START HERE",
         "1": "🎯 RECOMMENDATIONS", "2": "🎯 RECOMMENDATIONS", "3": "🎯 RECOMMENDATIONS",
-        "4": "🎯 RECOMMENDATIONS", "23": "🎯 RECOMMENDATIONS", "24": "🎯 RECOMMENDATIONS",
+        "4": "🎯 RECOMMENDATIONS", "37": "🎯 RECOMMENDATIONS", "23": "🎯 RECOMMENDATIONS",
+        "24": "🎯 RECOMMENDATIONS",
         "5": "🛰️ LIVE SIGNALS", "6": "🛰️ LIVE SIGNALS",
         "7": "🔬 DEEP RESEARCH", "8": "🔬 DEEP RESEARCH", "9": "🔬 DEEP RESEARCH",
         "10": "🔬 DEEP RESEARCH", "11": "🔬 DEEP RESEARCH", "12": "🔬 DEEP RESEARCH",
@@ -1261,7 +1263,7 @@ def test_projections_only_pages_hidden_for_sports_without_projections():
     gated = {t.strip().strip('"') for t in m.group(1).split(",") if t.strip()}
     assert gated == {"Best Bets", "Graded Picks", "Suggested Parlays", "Speculative Basket",
                      "Edge Board", "Retrospective", "Model Dashboard", "Track Record",
-                     "Media Room", "Podcast Studio"}, gated
+                     "Media Room", "Podcast Studio", "Slip Lab"}, gated
     assert "Bet Log" not in gated and "Data Health" not in gated
     all_titles = set(re.findall(r'\("([^"]+)",\s*"[^"]*",\s*"[^"]*"\)', src))
     assert gated <= all_titles, f"gated titles not found in meta: {gated - all_titles}"
@@ -2523,3 +2525,16 @@ if __name__ == "__main__":
         except Exception as e:  # noqa: BLE001
             print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
     print(f"\n{passed}/{len(tests)} tests passed")
+
+
+def test_slip_lab_is_registered_gated_and_shown_only_for_sports_with_projections():
+    src = (_HERE / "streamlit_app.py").read_text()
+    assert '"37": ("Slip Lab", "🧪", "slip_lab")' in src
+    m = re.search(r'projections_only_titles = \{([^}]*)\}', src, re.DOTALL)
+    assert m and '"Slip Lab"' in m.group(1)              # a dead end for UFC, like Best Bets
+    assert (_HERE / "views" / "37_Slip_Lab.py").exists()
+    assert '"37"' in re.search(r'for k in \(("1".*?)\):\s*\n\s*SECTION_OF\[k\] = "🎯 RECOMMENDATIONS"', src, re.DOTALL).group(1)
+    # the public (Discord) build must not expose the page or its module by any path
+    discord = (_HERE / "streamlit_app_discord.py")
+    if discord.exists():
+        assert "Slip Lab" not in discord.read_text() and "slip_lab" not in discord.read_text()
