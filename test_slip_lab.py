@@ -521,3 +521,73 @@ def test_pressure_test_counts_market_probability_legs():
     r = SL.run_pressure_test([a, b], "parlay", payout, stake=10, bankroll=1000, n_sims=3000, n_slips=10)
     assert r["n_market_prob"] == 1
     assert any("1 of 2 legs" in t for _, t in r["verdict"])
+
+
+# --------------------------------------------------------------------------- time slot / game filter
+def _dleg(pid, game, game_date):
+    return {"id": pid, "player": pid, "game": game, "game_date": game_date}
+
+
+AFTERNOON = "2026-09-21T18:05:00Z"     # 2:05 PM ET
+EVENING = "2026-09-21T22:30:00Z"       # 6:30 PM ET
+LATE = "2026-09-22T00:30:00Z"          # 8:30 PM ET
+DATED = [_dleg("a", "LAL @ DEN", LATE), _dleg("b", "BOS @ NYK", EVENING), _dleg("c", "BOS @ NYK", EVENING),
+         _dleg("d", "MIA @ ATL", AFTERNOON), _dleg("e", "TBD @ TBD2", None)]
+
+
+def test_slots_present_are_in_clock_order_and_include_unknown_times():
+    assert SL.slots_present(DATED) == ["Afternoon", "Evening", "Late", "TBD"]
+    assert SL.slots_present([DATED[1]]) == ["Evening"]
+    assert SL.slots_present([]) == []
+
+
+def test_game_choices_are_chronological_with_the_eastern_start_time():
+    ch = SL.game_choices(DATED)
+    assert [k for k, _ in ch] == ["MIA @ ATL", "BOS @ NYK", "LAL @ DEN", "TBD @ TBD2"]   # unknown time last
+    labels = dict(ch)
+    assert labels["MIA @ ATL"] == "2:05 PM ET — MIA @ ATL"
+    assert labels["BOS @ NYK"] == "6:30 PM ET — BOS @ NYK"
+    assert labels["LAL @ DEN"] == "8:30 PM ET — LAL @ DEN"
+    assert labels["TBD @ TBD2"] == "TBD @ TBD2"                                        # no time to show
+
+
+def test_a_slot_narrows_the_game_list_and_the_legs():
+    late = SL.filter_slot_game(DATED, "Late")
+    assert [l["id"] for l in late] == ["a"]
+    assert [k for k, _ in SL.game_choices(late)] == ["LAL @ DEN"]
+    assert [l["id"] for l in SL.filter_slot_game(DATED, "Evening", "BOS @ NYK")] == ["b", "c"]
+    assert SL.filter_slot_game(DATED, "Evening", "LAL @ DEN") == []                     # game outside the slot
+
+
+def test_defaults_keep_every_leg_and_legs_without_a_game_label_only_survive_all_games():
+    assert SL.filter_slot_game(DATED) == DATED
+    legs = DATED + [{"id": "z", "player": "z", "game": "", "game_date": None}]
+    assert "z" in [l["id"] for l in SL.filter_slot_game(legs)]
+    assert "z" not in [l["id"] for l in SL.filter_slot_game(legs, SL.ALL_SLOTS, "BOS @ NYK")]
+    assert SL.game_choices(legs) == SL.game_choices(DATED)                              # unlabelled leg adds no game
+
+
+def test_a_doubleheader_keeps_its_two_games_separate():
+    legs = [_dleg("g1a", "NYY @ BOS", AFTERNOON), _dleg("g1b", "NYY @ BOS", AFTERNOON),
+            _dleg("g2a", "NYY @ BOS", LATE), _dleg("o", "SEA @ HOU", EVENING)]
+    ch = SL.game_choices(legs)
+    assert [label for _, label in ch] == ["2:05 PM ET — NYY @ BOS (Game 1)", "6:30 PM ET — SEA @ HOU",
+                                          "8:30 PM ET — NYY @ BOS (Game 2)"]
+    game1 = ch[0][0]
+    assert [l["id"] for l in SL.filter_slot_game(legs, SL.ALL_SLOTS, game1)] == ["g1a", "g1b"]
+    game2 = ch[2][0]
+    assert [l["id"] for l in SL.filter_slot_game(legs, SL.ALL_SLOTS, game2)] == ["g2a"]
+
+
+def test_a_single_game_label_with_one_start_time_is_not_treated_as_a_doubleheader():
+    keys = SL.game_keys(DATED)
+    assert keys["b"] == keys["c"] == "BOS @ NYK"
+    assert "e" in keys and keys["e"] == "TBD @ TBD2"
+
+
+def test_the_filter_works_on_real_pool_and_menu_legs():
+    plays = [play(player="P1", game="AAA @ BBB", GameDate=AFTERNOON), play(player="P2", game="CCC @ DDD", GameDate=LATE)]
+    pool = SL.build_leg_pool(plays, [offer(player="P1"), offer(player="P2")], "draftkings", MARKET_MAP, NORM)
+    assert SL.slots_present(pool) == ["Afternoon", "Late"]
+    assert {l["player"] for l in SL.filter_slot_game(pool, "Late")} == {"P2"}
+    assert {l["game"] for l in SL.filter_slot_game(pool, SL.ALL_SLOTS, "AAA @ BBB")} == {"AAA @ BBB"}

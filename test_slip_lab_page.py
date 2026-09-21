@@ -526,3 +526,77 @@ def test_a_large_fetch_needs_an_explicit_credit_confirmation(patched, monkeypatc
     at.checkbox(key="slip_lab_menu_confirm").check()
     at.run()
     assert not _btn(at, "Fetch menu")[0].disabled
+
+
+# =========================================================================== time slot / game filter
+def _dated_plays():
+    plays = _plays()
+    when = {"BOS @ NYK": "2099-01-01T18:05:00Z",      # 1:05 PM ET  -> Afternoon
+            "DEN @ LAL": "2099-01-02T01:30:00Z"}      # 8:30 PM ET  -> Late
+    for pl in plays:
+        pl["GameDate"] = when[pl["Game"]]
+    return plays
+
+
+def _sel(at, label):
+    return [s for s in at.selectbox if s.label == label][0]
+
+
+def _dated_app(monkeypatch, patched):
+    monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda *a, **k: (_dated_plays(), [], ["draftkings"]))
+    return _app(legs=False)
+
+
+def _pool_rows(at):
+    """The leg-pool table's players, read back from the page's own filtered list."""
+    return {df.value.iloc[i]["Player"] for df in at.dataframe for i in range(len(df.value))
+            if "Player" in df.value.columns and "Add" in df.value.columns}
+
+
+def test_time_slot_and_game_filters_appear_and_default_to_everything(monkeypatch, patched):
+    at = _dated_app(monkeypatch, patched)
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    slot, game = _sel(at, "Time slot"), _sel(at, "Game")
+    assert slot.options == ["All slate", "Afternoon", "Late"]
+    assert slot.value == "All slate" and game.value == "All games in this slot"
+    # chronological, each with its real Eastern start time
+    assert game.options == ["All games in this slot", "1:05 PM ET — BOS @ NYK", "8:30 PM ET — DEN @ LAL"]
+
+
+def test_picking_a_time_slot_narrows_the_game_list_and_the_suggestions(monkeypatch, patched):
+    at = _dated_app(monkeypatch, patched)
+    at.run()
+    _sel(at, "Time slot").set_value("Late")
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert _sel(at, "Game").options == ["All games in this slot", "8:30 PM ET — DEN @ LAL"]
+    assert any("Late" in c.value and "time slot" in c.value for c in at.caption)
+    for t in at.session_state["slip_lab_ticket_store"].values():
+        assert {l["game"] for l in t["legs"]} <= {"DEN @ LAL"}
+    singles = at.session_state["slip_lab_single_store"]
+    for row in singles["likely"] + singles["value"]:
+        assert row["leg"]["game"] == "DEN @ LAL"
+
+
+def test_picking_a_game_limits_the_pool_to_that_game(monkeypatch, patched):
+    at = _dated_app(monkeypatch, patched)
+    at.run()
+    _sel(at, "Game").set_value("1:05 PM ET — BOS @ NYK")
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("time slot" not in c.value and "Narrowed to" in c.value and "BOS @ NYK" in c.value for c in at.caption)
+    assert at.session_state["slip_lab_ticket_store"], "the BOS @ NYK legs alone should still make tickets"
+    for t in at.session_state["slip_lab_ticket_store"].values():
+        assert {l["game"] for l in t["legs"]} <= {"BOS @ NYK"}
+
+
+def test_a_slot_with_no_matching_legs_says_so_instead_of_breaking(monkeypatch, patched):
+    at = _dated_app(monkeypatch, patched)
+    at.run()
+    _sel(at, "Time slot").set_value("Afternoon")
+    at.run()
+    _sel(at, "Time slot").set_value("Late")           # the game selected below no longer exists in the new slot
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert _sel(at, "Game").value == "All games in this slot"

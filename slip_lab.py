@@ -157,6 +157,80 @@ def build_leg_pool(plays: List[Dict], offers: List[Dict], book: str, market_map:
     return legs
 
 
+# --------------------------------------------------------------------------- time slot / game filter
+# The same "Time slot" + "Game" pair every other page carries (Best Bets, Graded Picks, the Matchup
+# Labs, Player Lines...): the slot buckets each game by its real Eastern start time, and the game list
+# is chronological, shows the start time, and defaults to "everything in this slot". Built from the
+# legs themselves (game label + game_date) so it works for board legs and full-menu legs alike.
+ALL_SLOTS = "All slate"
+ALL_GAMES = "All games in this slot"
+
+
+def leg_slot(leg: Dict) -> str:
+    """Afternoon / Evening / Late / TBD, from the leg's real start time (sports.slot_of)."""
+    import sports
+    return sports.slot_of(sports.game_dt(leg.get("game_date")))
+
+
+def slots_present(legs: Sequence[Dict]) -> List[str]:
+    """Time slots that actually occur among `legs`, in clock order."""
+    import sports
+    return sorted({leg_slot(l) for l in legs}, key=lambda s: sports.SLOT_ORDER.get(s, 9))
+
+
+def game_keys(legs: Sequence[Dict]) -> Dict[str, str]:
+    """{leg id: game key}. The key is the game label ("BOS @ NYK"); when the same label appears with
+    two different start times (a doubleheader) each game gets its own key, so game 2 is never folded
+    into game 1. Legs with no game label get no key."""
+    dates: Dict[str, set] = {}
+    for l in legs:
+        if l.get("game") and l.get("game_date"):
+            dates.setdefault(l["game"], set()).add(l["game_date"])
+    out: Dict[str, str] = {}
+    for l in legs:
+        g = l.get("game")
+        if not g:
+            continue
+        out[l["id"]] = f"{g}|{l.get('game_date') or ''}" if len(dates.get(g, ())) > 1 else g
+    return out
+
+
+def game_choices(legs: Sequence[Dict], keys: Optional[Dict[str, str]] = None) -> List[Tuple[str, str]]:
+    """[(game key, display label)] for the games among `legs`, chronological by real start time (games
+    with no known time last). The label leads with the Eastern start time — "7:05 PM ET — BOS @ NYK" —
+    and adds "(Game 1)" / "(Game 2)" for a doubleheader."""
+    import sports
+    keys = keys if keys is not None else game_keys(legs)
+    first: Dict[str, Dict] = {}
+    for l in legs:
+        k = keys.get(l["id"])
+        if k is not None:
+            first.setdefault(k, l)
+    by_label: Dict[str, List[str]] = {}
+    for k, l in first.items():
+        by_label.setdefault(l["game"], []).append(k)
+    out = []
+    for k, l in first.items():
+        label = l["game"]
+        siblings = by_label[label]
+        if len(siblings) > 1:
+            order = sorted(siblings, key=lambda x: first[x].get("game_date") or "~")
+            label = f"{label} (Game {order.index(k) + 1})"
+        dt = sports.game_dt(l.get("game_date"))
+        out.append((k, label if dt is None else f"{dt.strftime('%-I:%M %p ET')} — {label}", l.get("game_date") or "~"))
+    out.sort(key=lambda t: (t[2], t[1]))
+    return [(k, label) for k, label, _ in out]
+
+
+def filter_slot_game(legs: Sequence[Dict], slot: str = ALL_SLOTS, game: str = ALL_GAMES,
+                     keys: Optional[Dict[str, str]] = None) -> List[Dict]:
+    """Keep the legs in the chosen time slot and game (a key from game_choices). The defaults keep all."""
+    keys = keys if keys is not None else game_keys(legs)
+    return [l for l in legs
+            if (slot == ALL_SLOTS or leg_slot(l) == slot)
+            and (game == ALL_GAMES or keys.get(l["id"]) == game)]
+
+
 # --------------------------------------------------------------------------- manual legs
 def empirical_over_prob(values: Sequence[float], line: float, reference: float = 0.5) -> Optional[float]:
     """P(stat > line) from a player's recent games (a push counts half), shrunk toward `reference`

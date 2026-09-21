@@ -365,14 +365,26 @@ def _fkey(name, options):
 
 
 markets_present = sorted({l["market"] for l in source_legs})
-games_present = sorted({l["game"] for l in source_legs if l.get("game")})
-f1, f2, f3, f4 = st.columns([2, 2, 1.3, 1.7])
+
+# Time slot + Game — the same pair every other page carries: the slot buckets games by real Eastern start
+# time, the game list is chronological with the start time shown, and it defaults to everything in the slot.
+slots_avail = SL.slots_present(source_legs)
+gkeys = SL.game_keys(source_legs)
+h1, h2 = st.columns(2)
+with h1:
+    slot_pick = st.selectbox("Time slot", [SL.ALL_SLOTS] + slots_avail, key=_fkey("slot", slots_avail))
+slot_legs = SL.filter_slot_game(source_legs, slot_pick, SL.ALL_GAMES, keys=gkeys)
+game_opts_f = SL.game_choices(slot_legs, gkeys)
+game_label = dict(game_opts_f)
+with h2:
+    game_pick = st.selectbox("Game", [SL.ALL_GAMES] + [k for k, _ in game_opts_f],
+                             format_func=lambda k: game_label.get(k, k), key=_fkey("game", [k for k, _ in game_opts_f]))
+
+f1, f3, f4 = st.columns([3, 1.5, 2])
 with f1:
     default_mk = markets_present if use_menu else (
         [m for m in (_active.default_markets or markets_present) if m in markets_present] or markets_present)
     sel_markets = st.multiselect("Markets", markets_present, default=default_mk, key=_fkey("markets", markets_present))
-with f2:
-    game_pick = st.selectbox("Game", ["All games"] + games_present, key=_fkey("game", games_present))
 with f3:
     side_pick = st.radio("Side", ["Both", "Over", "Under"], horizontal=True, key="slip_lab_f_side" + _sfx)
 with f4:
@@ -390,9 +402,9 @@ with g3:
                               key="slip_lab_f_posted" + _sfx,
                               help="Hide legs the chosen book doesn't have a line for.")
 
-filtered = [l for l in source_legs
+filtered = [l for l in slot_legs
             if l["market"] in sel_markets
-            and (game_pick == "All games" or l.get("game") == game_pick)
+            and (game_pick == SL.ALL_GAMES or gkeys.get(l["id"]) == game_pick)
             and (side_pick == "Both" or l["side"] == side_pick)
             and (not name_q or name_q.lower() in str(l["player"]).lower())
             and (not only_posted or l["at_book"])]
@@ -410,7 +422,7 @@ if not shown:
     if use_menu and not menu_legs:
         pass
     else:
-        st.info("No legs match the current filters — loosen the min hit chance, markets or the "
+        st.info("No legs match the current filters — loosen the time slot, game, min hit chance, markets or the "
                 f"\"only legs {book_label} posts\" box.")
 else:
     pool_df = pd.DataFrame([{
@@ -493,9 +505,12 @@ with sugg_box:
                 sug_n = st.slider("Singles to list", 3, 10, 5, key="slip_lab_sug_n")
         sug_bank = float(st.session_state.get("slip_lab_bankroll", 1000.0))
         # In the model-priced view the suggestions respect the Markets / Game / Side / search filters above
-        # (not the hit-chance slider — they have their own). In the full-menu view they always come from the
-        # model-priced props, whatever the menu filters say. Either way only legs the MODEL prices are used.
-        sug_input = pool if use_menu else filtered
+        # (not the hit-chance slider — they have their own). In the full-menu view they come from the
+        # model-priced props in the chosen Time slot / Game (the other menu filters don't apply to them).
+        # Either way only legs the MODEL prices are used.
+        sug_input = (SL.filter_slot_game(pool, slot_pick, game_pick, keys=SL.game_keys(pool))
+                     if use_menu else filtered)
+        narrowed = slot_pick != SL.ALL_SLOTS or game_pick != SL.ALL_GAMES
         sug_sig = hashlib.md5(json.dumps({
             "b": book, "s": sorted(sug_sizes or []), "m": sug_minp, "g": sug_per_game, "n": sug_n, "bank": sug_bank,
             "legs": [(l["id"], l["p"], l.get("price"), l.get("n_eff"), l.get("at_book"), l.get("p_source"))
@@ -511,7 +526,16 @@ with sugg_box:
         st.session_state["slip_lab_ticket_store"] = {f"t{i}": t for i, t in enumerate(sug["tickets"])}
         st.session_state["slip_lab_single_store"] = {"likely": sug["singles"]["likely"], "value": sug["singles"]["value"]}
 
-        st.caption(f"Ranked from {sug['eligible']} model-priced leg(s) that {book_label} posts. These are candidates to "
+        narrow_txt = ""
+        if narrowed:
+            bits = []
+            if slot_pick != SL.ALL_SLOTS:
+                bits.append(f"the **{slot_pick}** time slot")
+            if game_pick != SL.ALL_GAMES:
+                bits.append("**" + game_label.get(game_pick, game_pick.split("|")[0]) + "**")
+            narrow_txt = "Narrowed to " + " · ".join(bits) + " by the Time slot / Game filters in the leg pool below. "
+        st.caption(narrow_txt
+                   + f"Ranked from {sug['eligible']} model-priced leg(s) that {book_label} posts. These are candidates to "
                    "pressure-test, not picks: every number comes from the model, and *confidence floor* shows how much "
                    "each depends on a small sample.")
 
