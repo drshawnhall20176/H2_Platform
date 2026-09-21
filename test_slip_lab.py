@@ -570,19 +570,32 @@ def test_defaults_keep_every_leg_and_legs_without_a_game_label_only_survive_all_
 def test_a_doubleheader_keeps_its_two_games_separate():
     legs = [_dleg("g1a", "NYY @ BOS", AFTERNOON), _dleg("g1b", "NYY @ BOS", AFTERNOON),
             _dleg("g2a", "NYY @ BOS", LATE), _dleg("o", "SEA @ HOU", EVENING)]
-    ch = SL.game_choices(legs)
+    dh = SL.dh_labels(legs)
+    assert dh == {"NYY @ BOS"}
+    ch = SL.game_choices(legs, dh)
     assert [label for _, label in ch] == ["2:05 PM ET — NYY @ BOS (Game 1)", "6:30 PM ET — SEA @ HOU",
                                           "8:30 PM ET — NYY @ BOS (Game 2)"]
-    game1 = ch[0][0]
-    assert [l["id"] for l in SL.filter_slot_game(legs, SL.ALL_SLOTS, game1)] == ["g1a", "g1b"]
-    game2 = ch[2][0]
-    assert [l["id"] for l in SL.filter_slot_game(legs, SL.ALL_SLOTS, game2)] == ["g2a"]
+    assert [l["id"] for l in SL.filter_slot_game(legs, SL.ALL_SLOTS, ch[0][0], dh)] == ["g1a", "g1b"]
+    assert [l["id"] for l in SL.filter_slot_game(legs, SL.ALL_SLOTS, ch[2][0], dh)] == ["g2a"]
+    assert [l["id"] for l in SL.filter_slot_game(legs, "Late", ch[2][0], dh)] == ["g2a"]
 
 
-def test_a_single_game_label_with_one_start_time_is_not_treated_as_a_doubleheader():
-    keys = SL.game_keys(DATED)
-    assert keys["b"] == keys["c"] == "BOS @ NYK"
-    assert "e" in keys and keys["e"] == "TBD @ TBD2"
+def test_a_game_label_with_one_start_time_is_not_a_doubleheader():
+    assert SL.dh_labels(DATED) == frozenset()
+    assert SL.game_key(DATED[1]) == "BOS @ NYK" and SL.game_key({"id": "x", "game": ""}) is None
+
+
+def test_the_same_instant_written_two_ways_is_still_one_game():
+    a = _dleg("a", "BOS @ NYK", "2026-09-21T22:30:00Z")
+    b = _dleg("b", "BOS @ NYK", "2026-09-21T22:30:00+00:00")
+    assert SL.dh_labels([a, b]) == frozenset()
+
+
+def test_the_board_and_the_menu_are_checked_for_doubleheaders_separately():
+    board = [_dleg("a", "BOS @ NYK", "2026-09-21T22:30:00Z")]
+    menu = [_dleg("m", "BOS @ NYK", "2026-09-21T22:35:00Z")]      # the odds feed's clock is a few minutes off
+    assert SL.dh_labels(board, menu) == frozenset()                # not two games
+    assert SL.dh_labels(board + menu) == {"BOS @ NYK"}            # (which is what pooling them would have said)
 
 
 def test_the_filter_works_on_real_pool_and_menu_legs():

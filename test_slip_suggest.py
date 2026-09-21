@@ -179,6 +179,25 @@ def test_every_ticket_honours_the_constraints_and_is_positive_ev_as_modelled():
         assert all(l["p"] >= 0.45 for l in t["legs"])
 
 
+def _one_game_pool(n=6):
+    return [leg(i, p=0.60, price=100, game="BOS @ NYK", n_eff=25) for i in range(n)]
+
+
+def test_the_per_game_cap_blocks_big_tickets_from_one_game_and_no_cap_allows_them():
+    pool = _one_game_pool()
+    capped = SS.suggest_tickets(pool, "draftkings", sizes=(2, 3, 4), max_per_game=2, simulate=False)
+    assert {t["k"] for t in capped["tickets"]} == {2}                        # 3- and 4-leg tickets would break the cap
+    free = SS.suggest_tickets(pool, "draftkings", sizes=(2, 3, 4), max_per_game=SS.NO_GAME_CAP, simulate=False)
+    assert {t["k"] for t in free["tickets"]} == {2, 3, 4}
+    for t in free["tickets"]:
+        assert {l["game"] for l in t["legs"]} == {"BOS @ NYK"}
+        assert len({l["player"] for l in t["legs"]}) == t["k"]               # still one leg per player
+
+
+def test_no_game_cap_is_bigger_than_any_ticket_size():
+    assert SS.NO_GAME_CAP > 12
+
+
 def test_min_leg_probability_filters_candidates():
     r = SS.suggest_tickets(pool_mixed(), "draftkings", min_leg_p=0.60, simulate=False)
     assert all(l["p"] >= 0.60 for t in r["tickets"] for l in t["legs"])

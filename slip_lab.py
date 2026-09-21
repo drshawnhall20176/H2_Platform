@@ -178,32 +178,45 @@ def slots_present(legs: Sequence[Dict]) -> List[str]:
     return sorted({leg_slot(l) for l in legs}, key=lambda s: sports.SLOT_ORDER.get(s, 9))
 
 
-def game_keys(legs: Sequence[Dict]) -> Dict[str, str]:
-    """{leg id: game key}. The key is the game label ("BOS @ NYK"); when the same label appears with
-    two different start times (a doubleheader) each game gets its own key, so game 2 is never folded
-    into game 1. Legs with no game label get no key."""
-    dates: Dict[str, set] = {}
-    for l in legs:
-        if l.get("game") and l.get("game_date"):
-            dates.setdefault(l["game"], set()).add(l["game_date"])
-    out: Dict[str, str] = {}
-    for l in legs:
-        g = l.get("game")
-        if not g:
-            continue
-        out[l["id"]] = f"{g}|{l.get('game_date') or ''}" if len(dates.get(g, ())) > 1 else g
-    return out
+def _when(leg: Dict) -> str:
+    """The leg's game start as a canonical Eastern "YYYY-MM-DDTHH:MM" string ("" when unknown), so the same
+    instant written two ways ("...Z" vs "...+00:00") compares equal."""
+    import sports
+    dt = sports.game_dt(leg.get("game_date"))
+    return "" if dt is None else dt.strftime("%Y-%m-%dT%H:%M")
 
 
-def game_choices(legs: Sequence[Dict], keys: Optional[Dict[str, str]] = None) -> List[Tuple[str, str]]:
+def dh_labels(*leg_lists: Sequence[Dict]) -> frozenset:
+    """Game labels that are a doubleheader: the same label with two different start times inside ONE list
+    of legs (each list is checked on its own, so the board's and the menu's slightly different clocks
+    for the same game can't be mistaken for two games)."""
+    out = set()
+    for legs in leg_lists:
+        times: Dict[str, set] = {}
+        for l in legs:
+            if l.get("game") and _when(l):
+                times.setdefault(l["game"], set()).add(_when(l))
+        out |= {g for g, t in times.items() if len(t) > 1}
+    return frozenset(out)
+
+
+def game_key(leg: Dict, dh: frozenset = frozenset()) -> Optional[str]:
+    """The game's key: its label ("BOS @ NYK"), plus its start time when the label is a doubleheader so
+    game 2 is never folded into game 1. None for a leg with no game label."""
+    g = leg.get("game")
+    if not g:
+        return None
+    return f"{g}|{_when(leg)}" if g in dh else g
+
+
+def game_choices(legs: Sequence[Dict], dh: frozenset = frozenset()) -> List[Tuple[str, str]]:
     """[(game key, display label)] for the games among `legs`, chronological by real start time (games
     with no known time last). The label leads with the Eastern start time — "7:05 PM ET — BOS @ NYK" —
-    and adds "(Game 1)" / "(Game 2)" for a doubleheader."""
+    and adds "(Game 1)" / "(Game 2)" when a doubleheader's two games are both present."""
     import sports
-    keys = keys if keys is not None else game_keys(legs)
     first: Dict[str, Dict] = {}
     for l in legs:
-        k = keys.get(l["id"])
+        k = game_key(l, dh)
         if k is not None:
             first.setdefault(k, l)
     by_label: Dict[str, List[str]] = {}
@@ -214,21 +227,20 @@ def game_choices(legs: Sequence[Dict], keys: Optional[Dict[str, str]] = None) ->
         label = l["game"]
         siblings = by_label[label]
         if len(siblings) > 1:
-            order = sorted(siblings, key=lambda x: first[x].get("game_date") or "~")
+            order = sorted(siblings, key=lambda x: _when(first[x]) or "~")
             label = f"{label} (Game {order.index(k) + 1})"
         dt = sports.game_dt(l.get("game_date"))
-        out.append((k, label if dt is None else f"{dt.strftime('%-I:%M %p ET')} — {label}", l.get("game_date") or "~"))
+        out.append((k, label if dt is None else f"{dt.strftime('%-I:%M %p ET')} — {label}", _when(l) or "~"))
     out.sort(key=lambda t: (t[2], t[1]))
     return [(k, label) for k, label, _ in out]
 
 
 def filter_slot_game(legs: Sequence[Dict], slot: str = ALL_SLOTS, game: str = ALL_GAMES,
-                     keys: Optional[Dict[str, str]] = None) -> List[Dict]:
+                     dh: frozenset = frozenset()) -> List[Dict]:
     """Keep the legs in the chosen time slot and game (a key from game_choices). The defaults keep all."""
-    keys = keys if keys is not None else game_keys(legs)
     return [l for l in legs
             if (slot == ALL_SLOTS or leg_slot(l) == slot)
-            and (game == ALL_GAMES or keys.get(l["id"]) == game)]
+            and (game == ALL_GAMES or game_key(l, dh) == game)]
 
 
 # --------------------------------------------------------------------------- manual legs

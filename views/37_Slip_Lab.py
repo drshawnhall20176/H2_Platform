@@ -4,6 +4,8 @@ them in.
 
 The flow, top to bottom:
   1. Pick a slate date and a book (DraftKings, FanDuel, Hard Rock Bet, PrizePicks, DK Pick6, Bet365 ...).
+  1b. TIME SLOT + GAME — the same two filters as every other page, at the top; they narrow the suggested
+     tickets, the leg pool and the full menu (one game selected = no per-game leg cap on the suggestions).
   2. SUGGESTED TICKETS — ready-made singles and parlay / pick'em tickets built from the props the
      model prices at that book, three ways (safest, best value, balanced), each already run through
      the correlated simulation. "Load into slip" sends one to step 4.
@@ -224,7 +226,8 @@ with st.expander("🧭 How to use Slip Lab — start here", expanded=not legs):
         "**1. Pick the book you'll bet at** (top of the page).  \n"
         "**2. Look at *Suggested tickets*.** Slip Lab ranks every prop the model prices at that book and "
         "builds the singles and parlays it thinks are best, three ways — *safest*, *best value*, *balanced*. "
-        "Press **Load into slip** on one you like.  \n"
+        "Use **Time slot** and **Game** above them to narrow the slate (pick one game and the suggestions come "
+        "only from it). Press **Load into slip** on one you like.  \n"
         "**3. Or build your own.** In *Leg pool*, tick legs — the model's props, or switch to **Full book menu** "
         "to see everything the book offers (spreads, totals, team totals, alternate lines, every player prop).  \n"
         "**4. Press *Run pressure test*.** The **Leg ranking** tab shows which legs are strongest and which are "
@@ -236,7 +239,10 @@ with st.expander("🧭 How to use Slip Lab — start here", expanded=not legs):
                "the legs interact. Legs from the book's menu that the model doesn't price use the book's own "
                "probability, so they carry no edge unless you enter your own number.")
 
-# Suggestions are drawn into this slot further down, once the leg filters (which they respect) exist.
+# The Time slot / Game filters are drawn into this slot at the TOP of the page (so they read as page-wide,
+# like every other page), but their options depend on the leg pool and the fetched menu, which are built
+# further down — so the widgets are filled in once those exist. The suggestions below them respect them too.
+filter_box = st.container()
 sugg_box = st.container()
 
 # --------------------------------------------------------------------------- 2. leg pool
@@ -288,6 +294,18 @@ if use_menu:
             st.info("The Odds API lists no games for this date yet.")
         else:
             ev_by_label = {f"{e['away']} @ {e['home']} · {_clock(e['commence'])}".strip(" ·"): e for e in events}
+            # When a single game is picked in the Time slot / Game filter, fetch just that game's menu by
+            # default (fewer credits). The board's own offers tie each Odds API event to the board's game label.
+            filt_game = st.session_state.get("slip_lab_game")
+            if st.session_state.get("slip_lab_menu_game_seen") != filt_game:
+                st.session_state["slip_lab_menu_game_seen"] = filt_game
+                if filt_game and filt_game != SL.ALL_GAMES:
+                    ev_game = BM.label_events({e["id"]: e for e in events}, [], BM.board_player_info(pool, P.normalize_name),
+                                              P.normalize_name, offers=offers)
+                    hit = [lbl for lbl, e in ev_by_label.items()
+                           if ev_game.get(e["id"], {}).get("game") == filt_game.split("|")[0]]
+                    if hit:
+                        st.session_state["slip_lab_menu_games"] = hit
             m1, m2 = st.columns(2)
             with m1:
                 sel_games = st.multiselect("Games", list(ev_by_label), default=list(ev_by_label)[:1],
@@ -368,17 +386,29 @@ markets_present = sorted({l["market"] for l in source_legs})
 
 # Time slot + Game — the same pair every other page carries: the slot buckets games by real Eastern start
 # time, the game list is chronological with the start time shown, and it defaults to everything in the slot.
-slots_avail = SL.slots_present(source_legs)
-gkeys = SL.game_keys(source_legs)
-h1, h2 = st.columns(2)
-with h1:
-    slot_pick = st.selectbox("Time slot", [SL.ALL_SLOTS] + slots_avail, key=_fkey("slot", slots_avail))
-slot_legs = SL.filter_slot_game(source_legs, slot_pick, SL.ALL_GAMES, keys=gkeys)
-game_opts_f = SL.game_choices(slot_legs, gkeys)
-game_label = dict(game_opts_f)
-with h2:
-    game_pick = st.selectbox("Game", [SL.ALL_GAMES] + [k for k, _ in game_opts_f],
-                             format_func=lambda k: game_label.get(k, k), key=_fkey("game", [k for k, _ in game_opts_f]))
+# Page-wide: options come from the board's legs AND any fetched menu, and the choice narrows the leg pool,
+# the menu list and the Suggested tickets.
+all_filter_legs = list(pool) + list(menu_legs)
+dh = SL.dh_labels(pool, menu_legs)
+slot_options = [SL.ALL_SLOTS] + SL.slots_present(all_filter_legs)
+if st.session_state.get("slip_lab_slot") not in slot_options:      # a stale pick can't outlive its option
+    st.session_state["slip_lab_slot"] = SL.ALL_SLOTS
+with filter_box:
+    st.caption("🕒 **Narrow the slate** — the Time slot and Game you pick here apply to the suggested tickets and "
+               "the leg pool below. Leave both on \"All\" to see everything.")
+    h1, h2 = st.columns(2)
+    with h1:
+        slot_pick = st.selectbox("Time slot", slot_options, key="slip_lab_slot")
+    game_opts_f = SL.game_choices(SL.filter_slot_game(all_filter_legs, slot_pick, SL.ALL_GAMES, dh), dh)
+    game_label = dict(game_opts_f)
+    game_options = [SL.ALL_GAMES] + [k for k, _ in game_opts_f]
+    if st.session_state.get("slip_lab_game") not in game_options:
+        st.session_state["slip_lab_game"] = SL.ALL_GAMES
+    with h2:
+        game_pick = st.selectbox("Game", game_options, format_func=lambda k: game_label.get(k, k),
+                                 key="slip_lab_game")
+single_game = game_pick != SL.ALL_GAMES
+narrowed = slot_pick != SL.ALL_SLOTS or single_game
 
 f1, f3, f4 = st.columns([3, 1.5, 2])
 with f1:
@@ -402,9 +432,8 @@ with g3:
                               key="slip_lab_f_posted" + _sfx,
                               help="Hide legs the chosen book doesn't have a line for.")
 
-filtered = [l for l in slot_legs
+filtered = [l for l in SL.filter_slot_game(source_legs, slot_pick, game_pick, dh)
             if l["market"] in sel_markets
-            and (game_pick == SL.ALL_GAMES or gkeys.get(l["id"]) == game_pick)
             and (side_pick == "Both" or l["side"] == side_pick)
             and (not name_q or name_q.lower() in str(l["player"]).lower())
             and (not only_posted or l["at_book"])]
@@ -500,19 +529,21 @@ with sugg_box:
                                      help="Legs below this are never put in a ticket.")
             with t3:
                 sug_per_game = st.select_slider("Max legs from one game", [1, 2, 3], value=2, key="slip_lab_sug_pg",
-                                                help="1 = every leg from a different game (least correlated).")
+                                                disabled=single_game,
+                                                help="1 = every leg from a different game (least correlated). Off "
+                                                     "while a single game is selected in the Game filter — every "
+                                                     "leg has to come from that game.")
             with t4:
                 sug_n = st.slider("Singles to list", 3, 10, 5, key="slip_lab_sug_n")
         sug_bank = float(st.session_state.get("slip_lab_bankroll", 1000.0))
+        eff_per_game = SS.NO_GAME_CAP if single_game else sug_per_game       # no cap when only one game is in play
         # In the model-priced view the suggestions respect the Markets / Game / Side / search filters above
         # (not the hit-chance slider — they have their own). In the full-menu view they come from the
         # model-priced props in the chosen Time slot / Game (the other menu filters don't apply to them).
         # Either way only legs the MODEL prices are used.
-        sug_input = (SL.filter_slot_game(pool, slot_pick, game_pick, keys=SL.game_keys(pool))
-                     if use_menu else filtered)
-        narrowed = slot_pick != SL.ALL_SLOTS or game_pick != SL.ALL_GAMES
+        sug_input = SL.filter_slot_game(pool, slot_pick, game_pick, dh) if use_menu else filtered
         sug_sig = hashlib.md5(json.dumps({
-            "b": book, "s": sorted(sug_sizes or []), "m": sug_minp, "g": sug_per_game, "n": sug_n, "bank": sug_bank,
+            "b": book, "s": sorted(sug_sizes or []), "m": sug_minp, "g": eff_per_game, "n": sug_n, "bank": sug_bank,
             "legs": [(l["id"], l["p"], l.get("price"), l.get("n_eff"), l.get("at_book"), l.get("p_source"))
                      for l in sug_input]}, sort_keys=True, default=str).encode()).hexdigest()
         cached = st.session_state.get("slip_lab_sugg")
@@ -520,7 +551,7 @@ with sugg_box:
             sug = cached["out"]
         else:
             with st.spinner("Ranking legs and building tickets..."):
-                sug = SS.suggest_tickets(sug_input, book, sizes=sug_sizes or [2, 3], max_per_game=sug_per_game,
+                sug = SS.suggest_tickets(sug_input, book, sizes=sug_sizes or [2, 3], max_per_game=eff_per_game,
                                          min_leg_p=sug_minp / 100.0, n_singles=sug_n, bankroll=sug_bank)
             st.session_state["slip_lab_sugg"] = {"sig": sug_sig, "out": sug}
         st.session_state["slip_lab_ticket_store"] = {f"t{i}": t for i, t in enumerate(sug["tickets"])}
@@ -533,7 +564,11 @@ with sugg_box:
                 bits.append(f"the **{slot_pick}** time slot")
             if game_pick != SL.ALL_GAMES:
                 bits.append("**" + game_label.get(game_pick, game_pick.split("|")[0]) + "**")
-            narrow_txt = "Narrowed to " + " · ".join(bits) + " by the Time slot / Game filters in the leg pool below. "
+            narrow_txt = "Narrowed to " + " · ".join(bits) + " by the Time slot / Game filters above. "
+        if single_game:
+            narrow_txt += ("With one game selected there is no limit on legs from the same game. Legs in one game move "
+                           "together: tickets are ranked as if legs were independent, then the numbers shown come from "
+                           "the correlated simulation — trust those numbers over the order. ")
         st.caption(narrow_txt
                    + f"Ranked from {sug['eligible']} model-priced leg(s) that {book_label} posts. These are candidates to "
                    "pressure-test, not picks: every number comes from the model, and *confidence floor* shows how much "

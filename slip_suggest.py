@@ -38,6 +38,7 @@ import slip_lab as SL
 import slip_sim as SIM
 
 FLOOR_Q = 25            # confidence floor = this percentile of the model-uncertainty band
+NO_GAME_CAP = 99        # max_per_game value meaning "no limit" (the page uses it when one game is selected)
 STRATEGIES = {
     "Safest": "Highest chance the ticket pays, among tickets that are +EV as modelled.",
     "Best value": "Biggest EV that still holds when every leg is taken at its confidence floor.",

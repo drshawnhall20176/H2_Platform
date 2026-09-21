@@ -600,3 +600,130 @@ def test_a_slot_with_no_matching_legs_says_so_instead_of_breaking(monkeypatch, p
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     assert _sel(at, "Game").value == "All games in this slot"
+
+
+# =========================================================================== build 208: filters at the top, single-game
+def _one_game_plays():
+    """Four different players in BOS @ NYK (enough for a 3- or 4-leg ticket from one game) and one in DEN @ LAL."""
+    rows = [("Jayson Tatum", "Points", 27.5, 0.60, "BOS @ NYK"), ("Jalen Brunson", "Points", 26.5, 0.61, "BOS @ NYK"),
+            ("Josh Hart", "Rebounds", 8.5, 0.59, "BOS @ NYK"), ("Derrick White", "Assists", 5.5, 0.60, "BOS @ NYK"),
+            ("Nikola Jokic", "Assists", 8.5, 0.57, "DEN @ LAL"), ("Austin Reaves", "Points", 18.5, 0.58, "DEN @ LAL")]
+    plays = [{"Player": n, "PlayerId": i, "Team": "T", "Game": g, "Opp": "X", "Market": m, "Side": "Over", "Line": ln,
+              "ModelProb": p, "Fair": -130, "Conviction": 1.2, "Why": "w",
+              "GameDate": "2099-01-01T18:05:00Z" if g == "BOS @ NYK" else "2099-01-02T01:30:00Z",
+              "_stat_key": "pts", "_game_log": [{"pts": v} for v in (30, 20, 28, 31, 25, 22, 27, 26)]}
+             for i, (n, m, ln, p, g) in enumerate(rows)]
+    mk = {"Points": "player_points", "Rebounds": "player_rebounds", "Assists": "player_assists"}
+    offers = [{"market": mk[pl["Market"]], "player": pl["Player"], "point": pl["Line"], "event_id":
+               "EVT1" if pl["Game"] == "BOS @ NYK" else "EVT2",
+               "over": {"draftkings": 105, "fanduel": 100}, "under": {"draftkings": -125, "fanduel": -120}}
+              for pl in plays]
+    return plays, offers
+
+
+@pytest.fixture
+def one_game_slate(monkeypatch):
+    plays, offers = _one_game_plays()
+    monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda *a, **k: (plays, [], ["draftkings"]))
+    monkeypatch.setattr(BBD, "fetch_generic_offers", lambda *a, **k: offers)
+    monkeypatch.setattr(BBD, "get_odds_api_key", lambda: "KEY")
+    monkeypatch.setattr(quick_log, "render_quick_log", lambda *a, **k: None)
+
+
+def _slider(at, label):
+    return [s for s in at.select_slider if s.label == label][0]
+
+
+def _sizes(at):
+    return {t["k"] for t in at.session_state["slip_lab_ticket_store"].values()}
+
+
+def test_with_every_game_in_play_the_per_game_cap_still_applies(one_game_slate):
+    at = _app(legs=False)
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert _slider(at, "Max legs from one game").disabled is False
+    for t in at.session_state["slip_lab_ticket_store"].values():
+        per = {}
+        for l in t["legs"]:
+            per[l["game"]] = per.get(l["game"], 0) + 1
+        assert max(per.values()) <= 2
+
+
+def test_selecting_one_game_removes_the_per_game_cap(one_game_slate):
+    at = _app(legs=False)
+    at.run()
+    _sel(at, "Game").set_value("1:05 PM ET — BOS @ NYK")
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert _slider(at, "Max legs from one game").disabled is True
+    assert max(_sizes(at)) >= 3, "with four BOS @ NYK players and no cap, a 3+ leg ticket must be possible"
+    for t in at.session_state["slip_lab_ticket_store"].values():
+        assert {l["game"] for l in t["legs"]} == {"BOS @ NYK"}
+    assert any("no limit on legs from the same game" in c.value for c in at.caption)
+
+
+def test_going_back_to_all_games_restores_the_cap(one_game_slate):
+    at = _app(legs=False)
+    at.run()
+    _sel(at, "Game").set_value("1:05 PM ET — BOS @ NYK")
+    at.run()
+    _sel(at, "Game").set_value("All games in this slot")
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert _slider(at, "Max legs from one game").disabled is False
+    assert not any("no limit on legs from the same game" in c.value for c in at.caption)
+
+
+def test_the_filters_sit_above_the_suggested_tickets(one_game_slate):
+    at = _app(legs=False)
+    at.run()
+    order = [(getattr(e, "type", None), getattr(e, "label", None)) for e in at.main]     # document order of the widgets
+    labels = [lbl for _, lbl in order if lbl]
+    assert labels.index("Time slot") < labels.index("Game") < labels.index("Ticket sizes (legs)")
+    assert labels.index("Game") < labels.index("Markets")
+
+
+def test_a_game_filter_that_stops_existing_falls_back_to_all(one_game_slate):
+    at = _app(legs=False)
+    at.run()
+    _sel(at, "Game").set_value("1:05 PM ET — BOS @ NYK")
+    at.run()
+    _sel(at, "Time slot").set_value("Late")                 # BOS @ NYK is an Afternoon game
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.session_state["slip_lab_game"] == "All games in this slot"
+    assert _sel(at, "Game").options == ["All games in this slot", "8:30 PM ET — DEN @ LAL"]
+
+
+def test_picking_a_game_preselects_just_that_game_in_the_menu_fetch(one_game_slate, menu_api, monkeypatch):
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    monkeypatch.setattr(O, "fetch_events", lambda *a, **k: [
+        {"id": "EVT1", "home_team": "New York Knicks", "away_team": "Boston Celtics", "commence_time": now},
+        {"id": "EVT2", "home_team": "Los Angeles Lakers", "away_team": "Denver Nuggets", "commence_time": now}])
+    at = _app(legs=False)
+    at.run()
+    _sel(at, "Game").set_value("8:30 PM ET — DEN @ LAL")
+    at.run()
+    _radio(at, "Where do legs come from").set_value("📖 Full book menu")
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    picked = at.multiselect(key="slip_lab_menu_games").value
+    assert len(picked) == 1 and picked[0].startswith("Denver Nuggets @ Los Angeles Lakers")
+    assert menu_api == []                                                    # choosing a game never spends credits
+    _sel(at, "Game").set_value("All games in this slot")                    # back to All leaves the selection alone
+    at.run()
+    assert len(at.multiselect(key="slip_lab_menu_games").value) == 1
+
+
+def test_in_the_full_menu_view_the_suggestions_still_follow_the_time_slot_and_game(one_game_slate, menu_api):
+    at = _app(legs=False)
+    at.run()
+    _radio(at, "Where do legs come from").set_value("📖 Full book menu")
+    at.run()
+    _sel(at, "Game").set_value("8:30 PM ET — DEN @ LAL")
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    tickets = at.session_state["slip_lab_ticket_store"].values()
+    assert tickets and all({l["game"] for l in t["legs"]} == {"DEN @ LAL"} for t in tickets)
+    assert any("Narrowed to" in c.value and "DEN @ LAL" in c.value for c in at.caption)
