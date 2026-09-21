@@ -244,6 +244,11 @@ def get_team_recent_game_ids(team_id: int, before_date: str, site_api: str,
             found.append({
                 "gameId": event["id"], "date": event.get("date") or "",
                 "opp_id": opp_info.get("id"), "opp_name": opp_info.get("displayName", "Unknown"),
+                # Final scores straight off the scoreboard event (strings as ESPN sends them, or
+                # None) — additive fields, free because the events are already in hand. Lets a
+                # caller build a team's scoring trend without downloading a single boxscore (NHL's
+                # team-trend tag does exactly this: its boxscores are ~400 KB each).
+                "score": this_team.get("score"), "opp_score": (opp_team or {}).get("score"),
             })
 
     found.sort(key=lambda g: g["date"], reverse=True)

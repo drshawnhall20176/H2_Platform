@@ -82,6 +82,34 @@ NBA_TEAM_CONFERENCE = {
     "San Antonio Spurs": ("Western", "Southwest"),
 }
 
+# --------------------------------------------------------------------------------------- NHL
+# Conference + division, keyed by ESPN's own displayName (same convention as the NBA table). 32
+# teams in the four-division alignment (Atlantic/Metropolitan under the Eastern Conference,
+# Central/Pacific under the Western). Two names carry a real spelling risk, so both spellings are
+# listed rather than guessed: ESPN spells Montreal with an accent ("Montréal Canadiens"), and the
+# Utah franchise went from "Utah Hockey Club" to "Utah Mammoth". A team whose name still isn't
+# matched lands in the schedule board's "Other" bucket (fails safe, never dropped).
+NHL_TEAM_CONFERENCE = {
+    "Boston Bruins": ("Eastern", "Atlantic"), "Buffalo Sabres": ("Eastern", "Atlantic"),
+    "Detroit Red Wings": ("Eastern", "Atlantic"), "Florida Panthers": ("Eastern", "Atlantic"),
+    "Montréal Canadiens": ("Eastern", "Atlantic"), "Montreal Canadiens": ("Eastern", "Atlantic"),
+    "Ottawa Senators": ("Eastern", "Atlantic"), "Tampa Bay Lightning": ("Eastern", "Atlantic"),
+    "Toronto Maple Leafs": ("Eastern", "Atlantic"),
+    "Carolina Hurricanes": ("Eastern", "Metropolitan"), "Columbus Blue Jackets": ("Eastern", "Metropolitan"),
+    "New Jersey Devils": ("Eastern", "Metropolitan"), "New York Islanders": ("Eastern", "Metropolitan"),
+    "New York Rangers": ("Eastern", "Metropolitan"), "Philadelphia Flyers": ("Eastern", "Metropolitan"),
+    "Pittsburgh Penguins": ("Eastern", "Metropolitan"), "Washington Capitals": ("Eastern", "Metropolitan"),
+    "Chicago Blackhawks": ("Western", "Central"), "Colorado Avalanche": ("Western", "Central"),
+    "Dallas Stars": ("Western", "Central"), "Minnesota Wild": ("Western", "Central"),
+    "Nashville Predators": ("Western", "Central"), "St. Louis Blues": ("Western", "Central"),
+    "Utah Mammoth": ("Western", "Central"), "Utah Hockey Club": ("Western", "Central"),
+    "Winnipeg Jets": ("Western", "Central"),
+    "Anaheim Ducks": ("Western", "Pacific"), "Calgary Flames": ("Western", "Pacific"),
+    "Edmonton Oilers": ("Western", "Pacific"), "Los Angeles Kings": ("Western", "Pacific"),
+    "San Jose Sharks": ("Western", "Pacific"), "Seattle Kraken": ("Western", "Pacific"),
+    "Vancouver Canucks": ("Western", "Pacific"), "Vegas Golden Knights": ("Western", "Pacific"),
+}
+
 # --------------------------------------------------------------------------------------- NFL
 # Conference + division, keyed by nflreadr's own standard current-location abbreviation
 # (confirmed against nflreadr's clean_team_abbrs() reference table -- "LA" for the Rams, "LV" for

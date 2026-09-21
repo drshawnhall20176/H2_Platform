@@ -101,6 +101,18 @@ def attach_team_trend(sport_key: str, plays: List[Dict], rows: List[Dict], date_
                                                                      n=40, days_back=200)
                     if recent and season_stats:
                         tag, ratio = sports.team_trend_tag(recent.get("pts"), season_stats.get("pts"))
+            elif sport_key == "NHL":
+                team_id = team_ids.get(team_name)
+                if team_id:
+                    eng = sports.get(sport_key).engine
+                    # Goals for, read off the scoreboard (get_team_recent_scoring downloads no
+                    # boxscores — NHL's are ~400 KB apiece): last 10 games vs the team's own longer
+                    # norm, the same hot/cold tag every other sport feeds into team_trend_tag.
+                    recent = eng.get_team_recent_scoring(team_id, date_str)
+                    season_stats = eng.get_team_recent_scoring(team_id, date_str, n=40, days_back=200)
+                    if recent.get("games") and season_stats.get("games"):
+                        tag, ratio = sports.team_trend_tag(recent.get("goals_for"),
+                                                           season_stats.get("goals_for"))
             elif sport_key == "NFL" and nfl_schedule and nfl_week is not None:
                 import nfl_engine as NE
                 form = NE.get_team_recent_scoring(team_name, nfl_schedule, nfl_week)

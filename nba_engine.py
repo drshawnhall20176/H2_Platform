@@ -486,16 +486,16 @@ def get_player_recent_games(player_id: int, last_n: int = CFG.RECENT_GAMES_N,
     return out[:last_n]
 
 
-# 2026-27 NBA regular season start. NOT YET CONFIRMED LIVE — flagged honestly: this build happened
-# during the NBA's off-season (2026-07-15; the 2025-26 season ran Oct 21, 2025 - Apr 12, 2026,
-# confirmed live), and the 2026-27 schedule wasn't officially set at build time. "2026-10-01" is a
-# placeholder aligned with the league's typical mid-to-late-October openers (2025-26 opened Oct
-# 21), not a confirmed date. MUST be re-verified against NBA.com/ESPN once the 2026-27 schedule is
-# announced — same re-verify discipline config_wnba.TEAMS documents for its own season-boundary
-# facts. get_team_recent_game_ids clips its own scan window regardless, so an off-by-a-few-weeks
-# SEASON_START only affects how wide season-long scans (head-to-head, season-baseline) reach, not
-# correctness.
-SEASON_START = "2026-10-01"
+# 2026-27 NBA regular season start: CONFIRMED (NBA.com's own schedule announcement) -- opening night
+# is Tuesday, Oct 20, 2026, and the regular season ends Sunday, Apr 11, 2027. This used to be a
+# placeholder ("2026-10-01"); it is set to the real opener now so the season-long scans
+# (head-to-head, season-baseline) don't fold PRESEASON exhibitions into "this season" -- ESPN
+# lists preseason games as ordinary completed events, and starters play limited, atypical minutes
+# in them. The 45-day RECENT-FORM window is a different thing and deliberately still includes
+# preseason games: in the first week or two of the season it is the only current-team data there
+# is, so early-season projections lean on those exhibitions and are thin (the shrinkage in
+# basketball_projections.shrink_prob is what keeps a short log from being over-trusted).
+SEASON_START = "2026-10-20"
 
 
 def _days_since_season_start(before_date: str) -> int:

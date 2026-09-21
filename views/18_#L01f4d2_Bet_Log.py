@@ -114,6 +114,9 @@ with st.expander("➕ Log a bet", expanded=False):
     _FORM_EXAMPLES = {
         "MLB":   {"game": "HOU @ DET", "player": "Jose Altuve", "side": "Over"},
         "WNBA":  {"game": "Aces @ Fever", "player": "A'ja Wilson", "side": "Over"},
+        "NBA":   {"game": "Celtics @ Knicks", "player": "Jayson Tatum", "side": "Over"},
+        "NHL":   {"game": "Oilers @ Avalanche", "player": "Connor McDavid", "side": "Over"},
+        "NCAAMB": {"game": "Duke @ North Carolina", "player": "e.g. a starting guard", "side": "Over"},
         "NFL":   {"game": "KC @ BUF", "player": "Patrick Mahomes", "side": "Over"},
         "NCAAF": {"game": "Georgia @ Alabama", "player": "e.g. a skill player", "side": "Over"},
         "UFC":   {"game": "Islam Makhachev vs. Arman Tsarukyan", "player": "leave blank for a fight-level pick",

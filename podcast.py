@@ -148,13 +148,54 @@ TEACHING_SEGMENTS_WNBA = [
 ]
 
 
+TEACHING_SEGMENTS_NHL = [
+    {
+        "topic": "What CLV is (why we 'win' even when the bet loses)",
+        "beats": [
+            _line("Deezy", "Dad, you keep sayin' we 'beat the number' on a bet that LOST. That makes zero sense. We lost. L. Loss."),
+            _line("Dr. Hall", "Right, but here's the thing — closing-line value. We took a shots prop in the morning at one number. By puck drop the whole market moved past it. We got a better price than everyone who bet it later."),
+            _line("Deezy", "Okay but the puck didn't go in. We still lost the money."),
+            _line("Dr. Hall", "One night, yeah. But if we consistently get better numbers than where the line closes, the math says we win long-term — even with cold nights mixed in. CLV is the proof we're on the right side."),
+            _note("Land it: results are one night of luck; beating the close, over and over, is skill. That's why we track CLV, not just W/L."),
+        ],
+    },
+    TEACHING_SEGMENTS_WNBA[1],   # parlays
+    {
+        "topic": "Why recent form beats season averages",
+        "beats": [
+            _line("Deezy", "Why you always talkin' 'last 10 games' instead of just the season average? Ain't that more data?"),
+            _line("Dr. Hall", "More data, but staler data. A line change, a new power-play unit, coming back from an injury — season averages blend all of that together. The last ten games are what he's actually doing right now."),
+            _line("Deezy", "So the season average is basically lying to us?"),
+            _line("Dr. Hall", "Not lying — just slow. Recent form catches a guy who got bumped up to the top line before the season stats do. And early in the year, honestly, we're leaning on preseason and a handful of games, so we shrink the numbers toward normal until there's more to go on."),
+            _note("Land it: recency isn't a gimmick, it's the model refusing to trust a number that's stale — and refusing to trust a tiny sample too much."),
+        ],
+    },
+    {
+        "topic": "Ice time, role, and the goalie question",
+        "beats": [
+            _line("Deezy", "Why'd we skip that dude, he scores every time he touches the puck."),
+            _line("Dr. Hall", "'Every time he touches it' — but how much is he on the ice? A guy who bounces between the second and fourth line has a wildly different shot total night to night. Steady ice time is what makes a shots or points line projectable."),
+            _line("Deezy", "And the goalie props? Saves seems like free money."),
+            _line("Dr. Hall", "Only if he actually starts. Goalies aren't confirmed until game day, so every saves number is an 'if he plays' number. Check the confirmed starter before you touch it."),
+            _note("Land it: role and confirmed lineup matter more than a hot name. A saves prop with an unconfirmed starter is a coin flip on who's in net."),
+        ],
+    },
+    TEACHING_SEGMENTS_WNBA[4],   # variance
+]
+
+
 def rotating_teaching(date_str: str, sport: str = "MLB") -> Dict:
     """Deterministically rotate the teaching topic by date, so each show gets a fresh one."""
     try:
         doy = datetime.fromisoformat(date_str).timetuple().tm_yday
     except (ValueError, TypeError):
         doy = 0
-    segments = TEACHING_SEGMENTS if sport == "MLB" else TEACHING_SEGMENTS_WNBA
+    if sport == "MLB":
+        segments = TEACHING_SEGMENTS
+    elif sport == "NHL":
+        segments = TEACHING_SEGMENTS_NHL
+    else:
+        segments = TEACHING_SEGMENTS_WNBA
     return segments[doy % len(segments)]
 
 
@@ -170,6 +211,10 @@ _DEEZY_PUSH = {
     "Points": "{prob}% to clear that? So she's UNDER it {inv}% of the time and we're pumped about that?",
     "Rebounds": "Rebounds, really? We're out here bettin' on boxing out. Thrilling stuff.",
     "Assists": "So we need her to be UNSELFISH tonight specifically? What if she just goes bucket mode instead?",
+    "Goals": "{prob}% to score? So he does NOT light the lamp {inv}% of the time and we're hyped?",
+    "Shots on Goal": "Shots on goal — so he just has to throw pucks at the net. What if the coach parks him on the fourth line?",
+    "Blocked Shots": "Blocked shots?! We're rooting for a guy to eat a puck for a living. Who hurt you, Dad?",
+    "Saves": "Saves depends on the goalie even starting, Dad. What if the backup gets the nod?",
     "Threes Made": "Threes are the most streaky shot in the sport and THAT'S the one we're leanin' on?",
 }
 
@@ -226,6 +271,8 @@ def assemble_script(date_str: str, headliners: List[Dict], sleepers: List[Dict],
                        "we GOTTA talk about last night, because it was a MOVIE."),
         _fill(("⚡ Wild moment of the night? (ejection, walk-off, meltdown — whatever you actually saw)")
              if is_mlb else
+             ("⚡ Wild moment of the night? (overtime winner, goalie meltdown, a brawl — whatever you actually saw)")
+             if sport == "NHL" else
              ("⚡ Wild moment of the night? (buzzer-beater, blowout, meltdown — whatever you actually saw)")),
         _fill("⚡ Who let us down? (the team/player that went ice cold)"),
         _fill("⚡ Any robbery? (a great play, a blown call, something that made you yell)"),
@@ -289,6 +336,8 @@ def assemble_script(date_str: str, headliners: List[Dict], sleepers: List[Dict],
         _line("Deezy", "Now hit me with the under-the-radar stuff — the ones nobody's talkin' about."),
         _note(("Interesting plays that didn't crack the headline list — a sleeper bat, a fade, a "
               "weather/platoon angle worth a mention. Lighter touch than the top tier.") if is_mlb else
+             ("Interesting plays that didn't crack the headline list — a depth forward getting more ice "
+              "time, a shots-trend worth a mention. Lighter touch than the top tier.") if sport == "NHL" else
              ("Interesting plays that didn't crack the headline list — a role player heating up, a "
               "minutes-trend worth a mention. Lighter touch than the top tier.")),
     ]

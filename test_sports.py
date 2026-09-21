@@ -36,12 +36,12 @@ def test_registry_has_all_eight_leagues():
     print("✓ all 8 leagues registered")
 
 
-def test_mlb_wnba_nba_ncaamb_nfl_ncaaf_enabled_today():
+def test_every_league_is_enabled_today():
     live = {s.key for s in S.enabled_sports()}
-    assert live == {"MLB", "WNBA", "NBA", "NCAAMB", "NFL", "NCAAF", "UFC"}, (
-        f"expected MLB+WNBA+NBA+NCAAMB+NFL+NCAAF+UFC live, got {live}"
+    assert live == {"MLB", "WNBA", "NBA", "NHL", "NCAAMB", "NFL", "NCAAF", "UFC"}, (
+        f"expected all eight leagues live, got {live}"
     )
-    print("✓ MLB, WNBA, NBA, NCAAMB, NFL, NCAAF, and UFC are the enabled/live sports")
+    print("✓ all eight leagues (incl. NBA, NCAAMB and NHL) are enabled/live")
 
 
 def test_get_falls_back_to_default_for_unknown_key():
@@ -73,20 +73,33 @@ def test_require_live_engine_true_for_wnba(monkeypatch):
 
 
 def test_require_live_engine_false_for_unwired_sport(monkeypatch):
+    import dataclasses
     import streamlit as st
-    st.session_state["sport"] = "NHL"   # markets=[] (not wired) — NFL now has real markets, so
-                                        # this test needs a genuinely-still-unwired sport instead
+    # Every registered sport is wired now (NHL was the last placeholder), so build a genuinely
+    # unwired one on the fly: a sport with markets=[] must be blocked cleanly, not crash.
+    monkeypatch.setitem(S.REGISTRY, "NHL", dataclasses.replace(S.REGISTRY["NHL"], markets=[]))
+    st.session_state["sport"] = "NHL"
     assert S.require_live_engine("Edge Board") is False
     st.session_state["sport"] = "MLB"   # reset for other tests
     print("✓ require_live_engine blocks a sport with no markets configured yet, no crash")
 
 
-def test_market_map_present_for_live_sports_only():
-    for key in ("MLB", "WNBA", "NBA", "NCAAMB", "NFL", "NCAAF"):
+def test_market_map_present_for_every_odds_sport():
+    for key in ("MLB", "WNBA", "NBA", "NHL", "NCAAMB", "NFL", "NCAAF", "UFC"):
         assert S.REGISTRY[key].market_map, f"{key} must have a market_map (CLV capture depends on it)"
-    for key in ("NHL",):
-        assert S.REGISTRY[key].market_map == {}, f"{key} should still be a placeholder"
-    print("✓ MLB, WNBA, NBA, NCAAMB, NFL, and NCAAF have filled market_maps; the rest are honest placeholders")
+    print("✓ every registered sport has a filled market_map")
+
+
+def test_nhl_is_fully_wired():
+    nhl = S.REGISTRY["NHL"]
+    assert nhl.enabled and nhl.has_projections
+    assert nhl.odds_sport_key == "icehockey_nhl"
+    assert set(nhl.market_map) == {"Points", "Assists", "Goals", "Shots on Goal",
+                                   "Blocked Shots", "Saves"}
+    # every mapped odds key is one the platform actually requests
+    assert set(nhl.market_map.values()) <= set(nhl.markets)
+    assert "NHL" in [s.key for s in S.enabled_sports()]
+    print("✓ NHL is enabled with engine, projections and a full market map")
 
 
 def test_owner_only_pages_match_expected_titles():

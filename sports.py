@@ -173,12 +173,39 @@ REGISTRY: Dict[str, Sport] = {
                         # build cleared before its own launch (see PLATFORM_CHECKPOINT.md for the
                         # full verification writeup, including a real "points" field bug caught
                         # and fixed along the way). Hot Hand Engine/Matchup Lab's require_sport
-                        # gates updated to accept NBA too. Not yet independently re-verified:
-                        # get_team_roster's exact live shape (same pattern already proven for
-                        # WNBA, low risk); SEASON_START is a placeholder pending the 2026-27
-                        # schedule announcement — re-check both once real slate data is flowing.
+                        # gates updated to accept NBA too. Since re-verified live
+                        # (2026-09-21, real 2025-26 game PHI @ WSH): scoreboard, roster shape,
+                        # and the CDN per-player boxscore all match. SEASON_START is now the real,
+                        # confirmed 2026-27 opener (Oct 20, 2026). Early-season note: the first
+                        # slates lean on preseason games (see nba_engine's SEASON_START comment).
     ),
-    "NHL":    Sport("NHL",   "NHL — Hockey",            "🏒", "icehockey_nhl",        [], {}, enabled=False),
+    "NHL":    Sport(
+        key="NHL", label="NHL — Hockey", icon="🏒", odds_sport_key="icehockey_nhl",
+        markets=["player_points", "player_assists", "player_goals", "player_shots_on_goal",
+                 "player_blocked_shots", "player_total_saves"],
+        market_map={"Points": "player_points", "Assists": "player_assists", "Goals": "player_goals",
+                    "Shots on Goal": "player_shots_on_goal", "Blocked Shots": "player_blocked_shots",
+                    "Saves": "player_total_saves"},
+        engine_module="nhl_engine", projections_module="nhl_projections",
+        config_module="config_nhl",
+        enabled=True,    # LIVE as of 2026-09-21, the first day of NHL preseason data. Built on
+                        # ESPN's hockey API with every shape CONFIRMED live before code was
+                        # written (real 2025-26 game VAN 8 @ COL 6, gameId 401803539): scoreboard,
+                        # team roster (grouped by position), injuries, and the per-game
+                        # `summary?event=` boxscore with full player lines (the cdn.espn.com boxscore
+                        # the basketball engines use 404s for NHL). Market keys are the real Odds
+                        # API NHL keys, checked against the-odds-api.com's own market list.
+                        # SCOPE, same staged-build honesty as NFL/NCAAF: Edge Board, Best Bets,
+                        # Graded Picks, Parlays, Basket, Retrospective, Model Dashboard, Bet Log,
+                        # Track Record and the schedule board work; there is NO Hot Hand Engine or
+                        # Matchup Lab for hockey yet (those pages are basketball-shaped).
+                        # NOT verified from the sandbox: the deployed page itself (ESPN is not
+                        # reachable from here), and the Odds API's actual NHL prop coverage/prices —
+                        # the first real slate load is the real test. Early season projections
+                        # lean on preseason games (thin, and lineups are experimental), and a
+                        # goalie's Saves play is "if he starts": the starter is only confirmed on
+                        # game day.
+    ),
     "NCAAF":  Sport(
         key="NCAAF", label="NCAA Football", icon="🏈", odds_sport_key="americanfootball_ncaaf",
         markets=["player_pass_yds", "player_rush_yds", "player_receptions", "player_reception_yds"],

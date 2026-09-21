@@ -8,7 +8,7 @@ lightweight, games-only fetch every engine already has (team names, start time, 
 separate from the heavy per-player projection pipeline build_slate runs. A schedule display has no
 reason to wait on player-level data it isn't showing.
 
-SCOPE: MLB, NBA, WNBA, NFL, NCAAF, NCAAMB. UFC (individual bouts, not team matchups -- UFC Fight
+SCOPE: MLB, NBA, WNBA, NHL, NFL, NCAAF, NCAAMB. UFC (individual bouts, not team matchups -- UFC Fight
 Card already IS its own schedule) is deliberately not covered here -- see league_structure.py's
 own docstring. Home.py's own caller is responsible for simply not rendering this section for that
 one sport, the same "hidden entirely, not shown broken" posture the rest of this platform already
@@ -67,7 +67,7 @@ _ET_TZ = _pytz.timezone("US/Eastern")
 _LOGGER = logging.getLogger(__name__)
 
 # Sports this section covers -- see module docstring for why UFC is excluded and NCAAMB isn't.
-SUPPORTED_SPORTS = {"MLB", "NBA", "WNBA", "NFL", "NCAAF", "NCAAMB"}
+SUPPORTED_SPORTS = {"MLB", "NBA", "WNBA", "NHL", "NFL", "NCAAF", "NCAAMB"}
 
 
 def _categorize_status(raw_text: Optional[str], espn_state: Optional[str] = None) -> str:
@@ -257,6 +257,8 @@ def _conference_lookup(sport_key: str):
         return LS.NBA_TEAM_CONFERENCE, True
     if sport_key == "NFL":
         return LS.NFL_TEAM_CONFERENCE, True
+    if sport_key == "NHL":
+        return LS.NHL_TEAM_CONFERENCE, True
     if sport_key == "WNBA":
         return {name: (conf, None) for name, conf in LS.wnba_team_conference().items()}, False
     if sport_key == "NCAAF":
@@ -314,6 +316,10 @@ def todays_schedule(sport_key: str, date_str: str) -> Optional[Dict[str, Any]]:
             games = _basketball_games(date_str, "nba_engine")
         elif sport_key == "WNBA":
             games = _basketball_games(date_str, "wnba_engine")
+        elif sport_key == "NHL":
+            # Same ESPN scoreboard shape as the basketball engines (nhl_engine.get_schedule returns
+            # the identical field names), so the shared row builder applies unchanged.
+            games = _basketball_games(date_str, "nhl_engine")
         elif sport_key == "NFL":
             games = _nfl_games(date_str)
         elif sport_key == "NCAAF":
@@ -382,7 +388,7 @@ def next_scheduled_date(sport_key: str, date_str: str, max_days_ahead: int = 21)
             return future_dates[0] if future_dates else None
 
         engine_name = {"MLB": "mlb_engine", "NBA": "nba_engine", "WNBA": "wnba_engine",
-                      "NCAAMB": "ncaamb_engine"}.get(sport_key)
+                      "NHL": "nhl_engine", "NCAAMB": "ncaamb_engine"}.get(sport_key)
         if engine_name is None:
             return None
 

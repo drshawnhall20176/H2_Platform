@@ -455,8 +455,9 @@ def test_player_row_builds_correctly_for_a_rotation_player():
 
 # ----------------------------------------------------------------- season-start bound
 def test_season_start_bounds_days_since_start():
+    assert E.SEASON_START == "2026-10-20"   # the confirmed 2026-27 opener, not a placeholder
     days = E._days_since_season_start("2026-11-01")
-    assert days == (31 + 1)   # Nov 1 minus SEASON_START (2026-10-01) = 31 days, +1
+    assert days == (12 + 1)   # Nov 1 minus SEASON_START (2026-10-20) = 12 days, +1
 
 
 def test_days_since_season_start_falls_back_on_bad_date():

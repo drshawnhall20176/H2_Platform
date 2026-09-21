@@ -52,6 +52,11 @@ MARKET_STAT = {
     # Core-4 convention), so one entry per name covers all of them; no separate NBA/NCAAMB rows
     # needed. Keys match wnba_engine.get_player_results()'s (and NBA's/NCAAMB's) result dict exactly.
     "Points": "pts", "Rebounds": "reb", "Assists": "ast", "Threes Made": "fg3m",
+    # NHL — "Points" and "Assists" reuse the basketball keys above ON PURPOSE: nhl_engine.
+    # get_player_results() returns hockey points as "pts" and assists as "ast", and a sport's
+    # results dict is only ever graded against that same sport's plays, so the shared display names
+    # can't cross-contaminate. The four below are hockey-only names.
+    "Goals": "goals", "Shots on Goal": "sog", "Blocked Shots": "blk", "Saves": "saves",
     # NFL — display names are entirely different from basketball's, so these DO need their own
     # entries (unlike the three basketball sports above). Keys match nfl_engine.get_player_
     # results()'s result dict exactly — confirmed the pairing explicitly, not just assumed, since
