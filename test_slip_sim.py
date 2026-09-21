@@ -260,3 +260,91 @@ def test_repeat_play_zero_stake_never_moves():
     R = np.array([[0.0, 2.0, 0.0, 2.0]])
     r = S.repeat_play(R, stake_fraction=0.0, n_slips=20, n_paths=50, seed=1)
     assert r["final_p05"] == r["final_p95"] == 1.0 and r["p_ahead"] == 0.0
+
+
+# --------------------------------------------------------------------------- build 206: team / game legs
+def _leg(kind=None, side="Over", team=None, game="A @ B", player="P", **kw):
+    d = {"player": player, "game": game, "side": side, "p": 0.5, "n_eff": 30}
+    if kind:
+        d["kind"] = kind
+    if team is not None:
+        d["team"] = team
+    d.update(kw)
+    return d
+
+
+def _rho(a, b):
+    return S.correlation_matrix([a, b])[0, 1]
+
+
+def test_player_only_slips_are_unchanged_by_the_team_rules():
+    """No 'kind' anywhere -> exactly the original same-player / same-game / sign behaviour."""
+    a, b, c = _leg(player="X"), _leg(player="X", side="Over"), _leg(player="Y", side="Under")
+    R = S.correlation_matrix([a, b, c], rho_player=0.4, rho_game=0.1)
+    assert R[0, 1] == pytest.approx(0.4) and R[0, 2] == pytest.approx(-0.1) and R[1, 2] == pytest.approx(-0.1)
+    assert S.correlation_matrix([_leg(kind="player"), _leg(player="Q")])[0, 1] == pytest.approx(0.08)
+
+
+def test_moneyline_and_spread_on_the_same_team_move_together_and_opposite_teams_against():
+    ml_a, sp_a, ml_b = (_leg("moneyline", "Win", "AAA", player="AAA"), _leg("spread", "Cover", "AAA", player="AAA"),
+                        _leg("moneyline", "Win", "BBB", player="BBB"))
+    assert _rho(ml_a, sp_a) == pytest.approx(S.RHO_SAME_MARGIN)
+    assert _rho(ml_a, ml_b) == pytest.approx(-S.RHO_SAME_MARGIN)
+
+
+def test_game_total_over_and_under_oppose_and_two_overs_agree():
+    o1, o2, u = _leg("total", "Over", player="G"), _leg("total", "Over", player="G"), _leg("total", "Under", player="G")
+    assert _rho(o1, o2) == pytest.approx(S.RHO_TOTAL_TOTAL)
+    assert _rho(o1, u) == pytest.approx(-S.RHO_TOTAL_TOTAL)
+
+
+def test_a_teams_win_barely_says_anything_about_the_game_total():
+    assert _rho(_leg("moneyline", "Win", "AAA", player="AAA"), _leg("total", "Over", player="G")) == 0.0
+
+
+def test_team_total_links():
+    tt_a = _leg("team_total", "Over", "AAA", player="AAA")
+    tt_b = _leg("team_total", "Over", "BBB", player="BBB")
+    tot = _leg("total", "Over", player="G")
+    win_a = _leg("moneyline", "Win", "AAA", player="AAA")
+    win_b = _leg("moneyline", "Win", "BBB", player="BBB")
+    assert _rho(tt_a, tt_b) == pytest.approx(S.RHO_TEAMTOT_OPP)
+    assert _rho(tt_a, _leg("team_total", "Over", "AAA", player="AAA")) == pytest.approx(S.RHO_TEAMTOT_SAME)
+    assert _rho(tot, tt_a) == pytest.approx(S.RHO_TOTAL_TEAMTOT)
+    assert _rho(win_a, tt_a) == pytest.approx(S.RHO_MARGIN_TEAMTOT)
+    assert _rho(win_b, tt_a) < 0                       # the OTHER team winning is against my team's total going over
+    assert _rho(win_a, _leg("team_total", "Under", "AAA", player="AAA")) == pytest.approx(-S.RHO_MARGIN_TEAMTOT)
+
+
+def test_a_player_prop_links_to_its_own_teams_result_more_than_the_opponents():
+    win_a = _leg("moneyline", "Win", "AAA", player="AAA")
+    mine, theirs = _leg(player="Q1", team="AAA"), _leg(player="Q2", team="BBB")
+    assert _rho(win_a, mine) == pytest.approx(S.RHO_MARGIN_PLAYER)
+    assert _rho(win_a, theirs) == pytest.approx(-S.RHO_MARGIN_PLAYER * 0.7)
+    # unknown team on the player -> no rule, never a guess
+    assert _rho(win_a, _leg(player="Q3")) == 0.0
+    # an Under flips the sign
+    assert _rho(win_a, _leg(player="Q1", team="AAA", side="Under")) == pytest.approx(-S.RHO_MARGIN_PLAYER)
+
+
+def test_total_vs_player_prop_and_different_games_are_independent():
+    assert _rho(_leg("total", "Over", player="G"), _leg(player="Q")) == pytest.approx(S.RHO_TOTAL_PLAYER)
+    assert _rho(_leg("total", "Over", player="G"), _leg(player="Q", game="C @ D")) == 0.0
+
+
+def test_mixed_team_and_player_matrix_is_a_valid_correlation_matrix():
+    legs = [_leg("moneyline", "Win", "AAA", player="AAA"), _leg("spread", "Cover", "AAA", player="AAA"),
+            _leg("total", "Over", player="G"), _leg("total", "Under", player="G"),
+            _leg("team_total", "Over", "BBB", player="BBB"), _leg(player="Q1", team="AAA"),
+            _leg(player="Q2", team="BBB", side="Under")]
+    R = S.correlation_matrix(legs)
+    assert np.allclose(R, R.T) and np.allclose(np.diag(R), 1.0)
+    assert np.linalg.eigvalsh(R).min() > -1e-8
+
+
+def test_ml_plus_spread_same_team_hit_together_far_more_often_than_independent():
+    ml = dict(_leg("moneyline", "Win", "AAA", player="AAA"), p=0.6)
+    sp = dict(_leg("spread", "Cover", "AAA", player="AAA"), p=0.5)
+    r = S.evaluate([ml, sp], {"mode": "parlay", "decimal": 4.0}, n_sims=40000, n_worlds=1, seed=3, uncertainty=False)
+    assert r["p_all_independent"] == pytest.approx(0.30)
+    assert r["p_all"] > 0.42                          # a 0.85-correlated pair is nowhere near independent

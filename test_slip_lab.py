@@ -439,3 +439,85 @@ def test_verdict_is_quiet_about_correlation_when_it_is_negligible_and_for_single
     assert not any("Correlation" in t for _, t in SL.verdict(_res(p_all=0.205)))
     singles = _res(mode="singles", leg_drop=[{"leg": "x", "delta_ev": -0.5}, {"leg": "y", "delta_ev": 0.1}])
     assert not any("Weakest" in t for _, t in SL.verdict(singles))
+
+
+# --------------------------------------------------------------------------- build 206: menu legs on a slip
+def team_leg(team="DAL", kind="moneyline", market="Moneyline", side="Win", line=None, game="NYG @ DAL", mk="h2h", price=-150, p=0.6):
+    return {"id": SL.leg_id(team, market, side, line), "player": team, "player_id": None, "team": team, "game": game,
+            "opp": None, "market": market, "side": side, "line": line, "p": p, "n_eff": 40.0, "price": price,
+            "best_price": price, "best_book": "draftkings", "p_mkt": p, "edge": 0.0, "ev_pct": -3.0, "at_book": True,
+            "book": "draftkings", "conviction": None, "why": "menu", "game_date": None, "line_source": "menu",
+            "source": "menu", "play": None, "kind": kind, "event_id": "E1", "market_key": mk, "p_source": "market"}
+
+
+def test_conflicts_blocks_same_leg_other_side_and_opposing_team_results():
+    over = SL.manual_leg(player="A Guy", market="Points", side="Over", line=20.5, p=0.6, game="g")
+    under = SL.manual_leg(player="A Guy", market="Points", side="Under", line=20.5, p=0.4, game="g")
+    other_line = SL.manual_leg(player="A Guy", market="Points", side="Under", line=24.5, p=0.4, game="g")
+    assert SL.conflicts([over], over) == "that leg is already on the slip"
+    assert "other side" in SL.conflicts([over], under)
+    assert SL.conflicts([over], other_line) is None                      # a different line is a different bet
+    dal, nyg = team_leg("DAL"), team_leg("NYG")
+    assert "opposes" in SL.conflicts([dal], nyg)
+    sp_dal = team_leg("DAL", "spread", "Spread", "Cover", -3.5, mk="spreads")
+    sp_nyg = team_leg("NYG", "spread", "Spread", "Cover", 3.5, mk="spreads")
+    assert "opposes" in SL.conflicts([sp_dal], sp_nyg)
+    assert SL.conflicts([dal], sp_dal) is None                           # ML + spread, same team: allowed (correlated, not contradictory)
+    assert SL.conflicts([dal], team_leg("NYG", game="A @ B")) is None    # another game entirely
+    over_t = team_leg("NYG @ DAL", "total", "Game Total", "Over", 44.5, mk="totals")
+    under_t = team_leg("NYG @ DAL", "total", "Game Total", "Under", 47.5, mk="totals")
+    assert SL.conflicts([over_t], under_t) is None                       # a middle is a deliberate bet
+
+
+def test_team_level_legs_are_logged_playerless_like_game_watch_moneylines():
+    dal = team_leg("DAL")
+    sp = team_leg("DAL", "spread", "Spread", "Cover", -3.5, mk="spreads")
+    tt = team_leg("DAL", "team_total", "Team Total", "Over", 24.5, mk="team_totals")
+    tot = team_leg("NYG @ DAL", "total", "Game Total", "Under", 44.5, mk="totals")
+    ml, spread, team_total, total = SL.legs_to_plays([dal, sp, tt, tot])
+    assert ml["Player"] is None and ml["PlayerId"] is None and ml["Side"] == "DAL" and ml["Market"] == "Moneyline"
+    assert spread["Player"] is None and spread["Side"] == "DAL" and spread["Line"] == -3.5
+    assert team_total["Player"] is None and team_total["Side"] == "DAL Over" and team_total["Line"] == 24.5
+    assert total["Player"] is None and total["Side"] == "Under" and total["Line"] == 44.5
+    for pl in (ml, spread, team_total, total):
+        assert pl["PriceSource"] == "book" and pl["RealPrice"] == -150
+    f = quick_log.bet_log_fields_from_play(ml, "2026-09-21", "NFL", stake=5)
+    assert f["player"] is None and f["side"] == "DAL" and f["entry_odds"] == -150 and f["entry_odds_source"] == "book"
+    assert quick_log.format_play_label(ml).startswith("Moneyline DAL")
+
+
+def test_player_legs_are_still_logged_with_their_player():
+    leg = SL.manual_leg(player="A Guy", market="Points", side="Over", line=20.5, p=0.6, price=-110, game="g")
+    (pl,) = SL.legs_to_plays([leg])
+    assert pl["Player"] == "A Guy" and pl["Side"] == "Over"
+
+
+def _vres(**kw):
+    base = dict(ev=-0.04, k=2, scenarios=[{"scenario": "Model as-is", "ev": -0.04}], p_ev_positive=0.1, p_all=0.3,
+                p_all_independent=0.3, leg_drop=[], mode="parlay", avg_n_eff=40.0,
+                repeat={"p_ahead": None, "n_slips": 10})
+    base.update(kw)
+    return base
+
+
+def test_verdict_for_an_all_market_slip_does_not_blame_the_model():
+    v = SL.verdict(_vres(n_market_prob=2))
+    assert v[0][0] == "info" and "book's own probabilities" in v[0][1]
+    assert not any("The model itself" in t for _, t in v)
+
+
+def test_verdict_notes_partial_market_legs_and_stays_silent_without_them():
+    v = SL.verdict(_vres(n_market_prob=1))
+    assert any("1 of 2 leg use" in t or "1 of 2 legs use" in t for _, t in v)
+    assert not any("use the book's own probability" in t for _, t in SL.verdict(_vres()))
+    assert any("The model itself" in t for _, t in SL.verdict(_vres(n_market_prob=0)))
+
+
+def test_pressure_test_counts_market_probability_legs():
+    a = team_leg("DAL", p=0.6)
+    b = SL.manual_leg(player="A Guy", market="Points", side="Over", line=20.5, p=0.6, price=-110, game="NYG @ DAL", team="DAL")
+    b["source"] = "board"
+    payout = SL.slip_payout("parlay", [a, b])
+    r = SL.run_pressure_test([a, b], "parlay", payout, stake=10, bankroll=1000, n_sims=3000, n_slips=10)
+    assert r["n_market_prob"] == 1
+    assert any("1 of 2 legs" in t for _, t in r["verdict"])

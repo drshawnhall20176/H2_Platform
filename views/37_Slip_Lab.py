@@ -1,24 +1,30 @@
 """
-Slip Lab — build a slip from one book's REAL lines, then pressure-test it before you lock it in.
+Slip Lab — find, build and pressure-test singles and parlays from one book's REAL lines, then lock
+them in.
 
 The flow, top to bottom:
   1. Pick a slate date and a book (DraftKings, FanDuel, Hard Rock Bet, PrizePicks, DK Pick6, Bet365 ...).
-  2. The leg pool is the same board Best Bets already computed (same model probabilities, same real
-     Odds API lines) with THIS book's price on each side — or, for a pick'em app, whether the app
-     posts the line at all. Bet365 has no US prop feed on The Odds API, so there you type the line
-     and price in by hand.
-  3. Add legs, pick how the slip pays (parlay / singles / PrizePicks Power or Flex / Pick6), and see
-     the instant independent-legs math.
-  4. "Run pressure test": correlated Monte Carlo (same-player and same-game legs move together),
-     model-uncertainty worlds, overconfidence haircuts, "the book is right" scenario, leg-by-leg
-     drop analysis and a repeat-play bankroll projection — then a plain-language read.
-  5. Lock it in to the Bet Log with the same widget every other page uses.
+  2. SUGGESTED TICKETS — ready-made singles and parlay / pick'em tickets built from the props the
+     model prices at that book, three ways (safest, best value, balanced), each already run through
+     the correlated simulation. "Load into slip" sends one to step 4.
+  3. LEG POOL — browse every leg and tick the ones you want. Either the model-priced props (same
+     numbers as Best Bets, with a "confidence floor" showing how much to trust each), or the book's
+     FULL MENU: game lines, alternates, team totals, period markets and every player prop the book
+     lists (fetched on demand, with a credit estimate first).
+  4. YOUR SLIP — pick how it pays (parlay / singles / Power / Flex / Pick6), edit any probability or
+     price, and see the instant math.
+  5. PRESSURE TEST — correlated Monte Carlo, model-uncertainty worlds, overconfidence haircuts, a
+     leg ranking (which legs are strongest, which drag), leg-drop analysis and a repeat-play
+     bankroll projection, then a plain-language read.
+  6. LOCK IT IN — send the tested slip to the Bet Log with the same widget every other page uses.
 
-All the math lives in slip_lab.py / slip_sim.py (unit-tested); this file is layout only.
+All the math lives in slip_lab.py / slip_sim.py / slip_suggest.py / book_menu.py (unit-tested);
+this file is layout only.
 """
 
 import hashlib
 import json
+import time
 from datetime import datetime
 
 import pandas as pd
@@ -29,10 +35,12 @@ import streamlit as st
 import components as C
 import styling  # noqa: F401  (installs the theme-proof styles)
 import best_bets_data as BBD
+import book_menu as BM
 import odds_api as O
 import quick_log
 import slip_lab as SL
 import slip_sim as SIM
+import slip_suggest as SS
 import sports
 
 _active = sports.active()
@@ -163,52 +171,235 @@ if st.session_state.get("slip_lab_ctx") != ctx:
 legs = _ss("slip_lab_legs", [])
 ver = _ss("slip_lab_ver", 0)
 
-# Switching book re-prices the legs already on the slip from the new book's real prices.
+# Switching book re-prices the legs already on the slip from the new book's real prices. A leg
+# from a book's full menu belongs to THAT book's menu, so it loses its price on a switch.
 if st.session_state.get("slip_lab_book_seen") != book:
     st.session_state["slip_lab_book_seen"] = book
     for i, leg in enumerate(legs):
         fresh = pool_by_id.get(leg["id"])
         if fresh is not None and leg.get("source") == "board":
             legs[i] = dict(fresh, p=leg["p"], stake=leg.get("stake"))
-        elif leg.get("source") == "board":
+        elif leg.get("source") in ("board", "menu"):
             legs[i] = dict(leg, price=None, at_book=False, book=book)
     st.session_state["slip_lab_ver"] = ver = ver + 1
 
-# --------------------------------------------------------------------------- 2. leg pool
-C.section_header("🎯", "Leg pool", f"Every prop on the board, priced at {book_label}", "#1f6feb")
 
-markets_present = sorted({l["market"] for l in pool})
-games_present = sorted({l["game"] for l in pool if l.get("game")})
+# --------------------------------------------------------------------------- loading tickets into the slip
+def _load_legs(new_legs, mode, stake=None, message=""):
+    """Callback for every 'Load into slip' button: replace the slip, set how it pays, and clear any
+    stale result. Runs BEFORE the page re-renders, so the widgets pick the new values up."""
+    ss = st.session_state
+    ss["slip_lab_legs"] = [dict(l, stake=float(l.get("stake") or 10.0)) for l in new_legs]
+    ss["slip_lab_mode"] = mode
+    ss["slip_lab_parlay_price"] = 0          # a typed price belonged to the previous slip
+    if stake:
+        ss["slip_lab_stake_in"] = float(max(1.0, round(stake, 2)))
+    ss["slip_lab_result"] = None
+    ss["slip_lab_ver"] = ss.get("slip_lab_ver", 0) + 1
+    ss["slip_lab_flash"] = message or f"Loaded {len(new_legs)} leg(s) into Your slip below."
+
+
+def _load_ticket(key):
+    tk = st.session_state.get("slip_lab_ticket_store", {}).get(key)
+    if tk:
+        _load_legs(tk["legs"], tk["mode"], stake=tk.get("stake") or 10.0,
+                   message=f"Loaded the {SS.ticket_title(tk)} into Your slip below — run the pressure test to "
+                           "see how it holds up.")
+
+
+def _load_singles(key):
+    rows = st.session_state.get("slip_lab_single_store", {}).get(key) or []
+    if rows:
+        _load_legs([dict(r["leg"], stake=(r["stake"] or 10.0)) for r in rows], "singles",
+                   message=f"Loaded {len(rows)} singles into Your slip below (a stake of 10 where the sizing rule "
+                           "gave 0 — edit any stake in the table).")
+
+
+flash = st.session_state.pop("slip_lab_flash", None)
+if flash:
+    st.success(flash + " ⬇️")
+
+with st.expander("🧭 How to use Slip Lab — start here", expanded=not legs):
+    st.markdown(
+        "**1. Pick the book you'll bet at** (top of the page).  \n"
+        "**2. Look at *Suggested tickets*.** Slip Lab ranks every prop the model prices at that book and "
+        "builds the singles and parlays it thinks are best, three ways — *safest*, *best value*, *balanced*. "
+        "Press **Load into slip** on one you like.  \n"
+        "**3. Or build your own.** In *Leg pool*, tick legs — the model's props, or switch to **Full book menu** "
+        "to see everything the book offers (spreads, totals, team totals, alternate lines, every player prop).  \n"
+        "**4. Press *Run pressure test*.** The **Leg ranking** tab shows which legs are strongest and which are "
+        "dragging the slip down; the other tabs show what happens if the model is a bit too confident.  \n"
+        "**5. Lock it in** to the Bet Log.")
+    st.caption("What the numbers can and can't tell you: a leg's *hit chance* is the model's probability — a "
+               "simulation can't make a leg likelier than the model says. What it adds is (a) the **confidence "
+               "floor** — how low the true chance plausibly is given how few games back the number — and (b) how "
+               "the legs interact. Legs from the book's menu that the model doesn't price use the book's own "
+               "probability, so they carry no edge unless you enter your own number.")
+
+# Suggestions are drawn into this slot further down, once the leg filters (which they respect) exist.
+sugg_box = st.container()
+
+# --------------------------------------------------------------------------- 2. leg pool
+can_menu = bool(API_KEY) and not is_pickem and not is_manual
+src_options = ["🎯 Model-priced props", "📖 Full book menu"]
+C.section_header("🎯", "Leg pool", f"Pick legs to build a slip — priced at {book_label}", "#1f6feb")
+src = st.radio("Where do legs come from?", src_options, horizontal=True, key="slip_lab_src",
+               help="Model-priced props are the ones the model has a view on (with an edge you can trust or not). "
+                    "The full book menu is everything the book lists, fetched on demand.")
+use_menu = src == src_options[1]
+if use_menu and not can_menu:
+    st.info("The full menu is available for sportsbooks with an Odds API key. Pick'em apps (PrizePicks, DK Pick6) "
+            "only post a line per player, which the model-priced list already covers, and Bet365 has no feed here "
+            "— use *Add a leg by hand* for anything else.")
+    use_menu = False
+
+menu_legs = []
+if use_menu:
+    menu_key = (SPORT_KEY, date_str, book)
+    menu = st.session_state.get("slip_lab_menu")
+    if not menu or menu.get("ctx") != menu_key:
+        menu = {"ctx": menu_key, "quotes": [], "events": {}, "pairs": set(), "unavailable": set(),
+                "errors": [], "remaining": None, "ts": None, "aborted": None}
+        st.session_state["slip_lab_menu"] = menu
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _events_for_date(api_key, odds_sport, day):
+        rows = []
+        for e in O.fetch_events(api_key, sport=odds_sport):
+            if O._eastern_date_str(e.get("commence_time")) == day:
+                rows.append({"id": e["id"], "away": e.get("away_team"), "home": e.get("home_team"),
+                             "commence": e.get("commence_time")})
+        return rows
+
+    def _clock(iso):
+        try:
+            return datetime.fromisoformat(str(iso).replace("Z", "+00:00")).astimezone(eastern).strftime("%I:%M %p").lstrip("0")
+        except (ValueError, TypeError):
+            return ""
+
+    try:
+        events = _events_for_date(API_KEY, _active.odds_sport_key, date_str)
+    except Exception as exc:                                    # noqa: BLE001
+        events = []
+        st.warning(f"Couldn't load the games list from The Odds API ({exc}).")
+    groups = BM.catalog(_active.odds_sport_key, _active.markets)
+    with st.expander("📖 Fetch the book's menu", expanded=not menu["quotes"]):
+        if not events:
+            st.info("The Odds API lists no games for this date yet.")
+        else:
+            ev_by_label = {f"{e['away']} @ {e['home']} · {_clock(e['commence'])}".strip(" ·"): e for e in events}
+            m1, m2 = st.columns(2)
+            with m1:
+                sel_games = st.multiselect("Games", list(ev_by_label), default=list(ev_by_label)[:1],
+                                           key="slip_lab_menu_games")
+            with m2:
+                default_groups = [g for g in ("Game lines", "Team totals") if g in groups]
+                sel_groups = st.multiselect("What to fetch", list(groups), default=default_groups,
+                                            key="slip_lab_menu_groups")
+            mkeys = BM.all_keys(groups, sel_groups)
+            cost = BM.estimate_cost(len(sel_games), len(mkeys))
+            st.caption(f"{len(sel_games)} game(s) × {len(mkeys)} market(s) → up to **{cost} Odds API credits** "
+                       f"(one request per game and market at {book_label} only; you're billed for markets the book "
+                       "actually returns, so this is a ceiling).")
+            ok_to_go = True
+            if cost > 150:
+                ok_to_go = st.checkbox(f"I understand this may use up to {cost} credits", key="slip_lab_menu_confirm")
+            b1, b2 = st.columns([1, 1])
+            with b1:
+                go_fetch = st.button("📥 Fetch menu", type="primary", disabled=not (sel_games and mkeys and ok_to_go),
+                                     key="slip_lab_menu_fetch")
+            with b2:
+                if st.button("🗑️ Clear fetched menu", key="slip_lab_menu_clear", disabled=not menu["quotes"]):
+                    st.session_state["slip_lab_menu"] = None
+                    st.rerun()
+            if go_fetch:
+                ids = [ev_by_label[g]["id"] for g in sel_games]
+                bar = st.progress(0.0, text="Fetching...")
+                res_m = BM.fetch_menu(API_KEY, _active.odds_sport_key, ids, mkeys, book,
+                                      progress=lambda d, n: bar.progress(d / max(n, 1), text=f"Fetched {d} of {n}"))
+                bar.empty()
+                pairs = {(e, m) for e in ids for m in mkeys}
+                menu["quotes"] = [q for q in menu["quotes"] if (q["event_id"], q["market"]) not in pairs] + res_m["quotes"]
+                menu["events"].update(res_m["events"])
+                menu["pairs"] |= pairs
+                menu["unavailable"] |= set(res_m["unavailable"])
+                menu["errors"] = res_m["errors"]
+                menu["remaining"] = res_m["remaining"] or menu["remaining"]
+                menu["aborted"] = res_m["aborted"]
+                menu["ts"] = time.time()
+                st.rerun()
+    if menu.get("aborted"):
+        st.error(f"The fetch stopped early: {menu['aborted']}")
+    if menu["ts"]:
+        age = (time.time() - menu["ts"]) / 60
+        n_unavail = len({m for _, m in menu["unavailable"]})
+        st.caption(f"Menu fetched {age:.0f} min ago · {len(menu['quotes']):,} prices from {len(menu['events'])} game(s)"
+                   + (f" · {n_unavail} market(s) not offered for this sport/book" if n_unavail else "")
+                   + (f" · {menu['remaining']} credits remaining" if menu.get("remaining") else "")
+                   + (" · **prices may have moved — refetch before betting**" if age > 10 else ""))
+        if menu["errors"]:
+            with st.expander(f"{len(menu['errors'])} request(s) failed"):
+                st.dataframe(pd.DataFrame(menu["errors"]), hide_index=True, width="stretch")
+    board_info = BM.board_player_info(pool, P.normalize_name)
+    labels_m = BM.label_events(menu["events"], menu["quotes"], board_info, P.normalize_name, offers=offers)
+    menu_legs = BM.build_menu_legs(menu["quotes"], labels_m, book, market_map=_active.market_map,
+                                   info=board_info, normalize_name=P.normalize_name)
+    menu_legs = BM.attach_model(menu_legs, BM.model_index(pool, _active.market_map, P.normalize_name),
+                                P.normalize_name)
+    if menu["quotes"] and not menu_legs:
+        st.info("The menu came back with nothing usable for the markets chosen.")
+    elif not menu["quotes"]:
+        st.info("Fetch a menu above to browse it here.")
+
+source_legs = menu_legs if use_menu else pool
+_sfx = "_menu" if use_menu else ""
+
+
+def _basis(l):
+    return {"market": "Book no-vig", "implied": "Book implied*", "yours": "Yours"}.get(l.get("p_source"), "Model")
+
+
+def _fkey(name, options):
+    """Widget key that changes when the option list does, so a stale selection can't outlive its options."""
+    return f"slip_lab_f_{name}{_sfx}_" + hashlib.md5("|".join(map(str, options)).encode()).hexdigest()[:6]
+
+
+markets_present = sorted({l["market"] for l in source_legs})
+games_present = sorted({l["game"] for l in source_legs if l.get("game")})
 f1, f2, f3, f4 = st.columns([2, 2, 1.3, 1.7])
 with f1:
-    sel_markets = st.multiselect("Markets", markets_present,
-                                 default=[m for m in (_active.default_markets or markets_present) if m in markets_present]
-                                 or markets_present, key="slip_lab_f_markets")
+    default_mk = markets_present if use_menu else (
+        [m for m in (_active.default_markets or markets_present) if m in markets_present] or markets_present)
+    sel_markets = st.multiselect("Markets", markets_present, default=default_mk, key=_fkey("markets", markets_present))
 with f2:
-    game_pick = st.selectbox("Game", ["All games"] + games_present, key="slip_lab_f_game")
+    game_pick = st.selectbox("Game", ["All games"] + games_present, key=_fkey("game", games_present))
 with f3:
-    side_pick = st.radio("Side", ["Both", "Over", "Under"], horizontal=True, key="slip_lab_f_side")
+    side_pick = st.radio("Side", ["Both", "Over", "Under"], horizontal=True, key="slip_lab_f_side" + _sfx)
 with f4:
-    sort_pick = st.selectbox("Sort by", ["Model %", "EV at this book", "Edge vs market", "Conviction"],
-                             key="slip_lab_f_sort")
+    sort_pick = st.selectbox("Sort by", ["Confidence floor", "Model %", "EV at this book", "Edge vs market", "Conviction"],
+                             key="slip_lab_f_sort" + _sfx,
+                             help="Confidence floor = the low end of how likely the leg really is, given how many "
+                                  "games back the model's number. It ranks a well-supported 60% above a thin one.")
 g1, g2, g3 = st.columns([2, 2, 2])
 with g1:
-    min_p = st.slider("Min model %", 0, 95, 50, 5, key="slip_lab_f_minp")
+    min_p = st.slider("Min hit chance %", 0, 95, 0 if use_menu else 50, 5, key="slip_lab_f_minp" + _sfx)
 with g2:
-    name_q = st.text_input("Player search", key="slip_lab_f_name", placeholder="e.g. Judge")
+    name_q = st.text_input("Player / team search", key="slip_lab_f_name" + _sfx, placeholder="e.g. Judge")
 with g3:
     only_posted = st.checkbox(f"Only legs {book_label} posts", value=bool(API_KEY) and not is_manual,
-                              key="slip_lab_f_posted",
+                              key="slip_lab_f_posted" + _sfx,
                               help="Hide legs the chosen book doesn't have a line for.")
 
-view = [l for l in pool
-        if l["market"] in sel_markets
-        and (game_pick == "All games" or l.get("game") == game_pick)
-        and (side_pick == "Both" or l["side"] == side_pick)
-        and l["p"] * 100 >= min_p
-        and (not name_q or name_q.lower() in str(l["player"]).lower())
-        and (not only_posted or l["at_book"])]
-sort_key = {"Model %": lambda l: -l["p"],
+filtered = [l for l in source_legs
+            if l["market"] in sel_markets
+            and (game_pick == "All games" or l.get("game") == game_pick)
+            and (side_pick == "Both" or l["side"] == side_pick)
+            and (not name_q or name_q.lower() in str(l["player"]).lower())
+            and (not only_posted or l["at_book"])]
+view = [l for l in filtered if l["p"] * 100 >= min_p]
+scores = SS.score_lookup(view[:1500]) if view else {}
+sort_key = {"Confidence floor": lambda l: -scores.get(l["id"], {}).get("floor", 0.0),
+            "Model %": lambda l: -l["p"],
             "EV at this book": lambda l: -(l["ev_pct"] if l["ev_pct"] is not None else -1e9),
             "Edge vs market": lambda l: -(l["edge"] if l["edge"] is not None else -1e9),
             "Conviction": lambda l: -(l["conviction"] if l["conviction"] is not None else -1e9)}[sort_pick]
@@ -216,19 +407,23 @@ view.sort(key=sort_key)
 shown = view[:300]
 
 if not shown:
-    st.info("No legs match the current filters — loosen the min model %, markets or the "
-            f"\"only legs {book_label} posts\" box.")
+    if use_menu and not menu_legs:
+        pass
+    else:
+        st.info("No legs match the current filters — loosen the min hit chance, markets or the "
+                f"\"only legs {book_label} posts\" box.")
 else:
     pool_df = pd.DataFrame([{
         "Add": False, "Player": l["player"], "Team": l.get("team"), "Game": l.get("game"),
-        "Market": l["market"], "Side": l["side"], "Line": l["line"], "Model %": l["p"] * 100,
+        "Market": l["market"], "Side": l["side"], "Line": l["line"], "Hit chance %": l["p"] * 100,
+        "Floor %": scores.get(l["id"], {}).get("floor", float("nan")) * 100, "Basis": _basis(l),
         ("Posts line" if is_pickem else "Price"): (("✓" if l["at_book"] else "—") if is_pickem else l["price"]),
         "Best price": l["best_price"], "Best at": O.book_label(l["best_book"]) if l["best_book"] else None,
         "Market %": None if l["p_mkt"] is None else l["p_mkt"] * 100,
         "Edge (pts)": None if l["edge"] is None else l["edge"] * 100,
         "EV %": l["ev_pct"],
     } for l in shown])
-    for col in ("Price", "Best price", "Market %", "Edge (pts)", "EV %"):
+    for col in ("Price", "Best price", "Market %", "Edge (pts)", "EV %", "Floor %"):
         if col in pool_df and not (col == "Price" and is_pickem):
             pool_df[col] = pd.to_numeric(pool_df[col], errors="coerce")
     pool_sig = hashlib.md5("|".join(l["id"] for l in shown).encode()).hexdigest()[:10]
@@ -240,7 +435,9 @@ else:
             column_config={
                 "Add": st.column_config.CheckboxColumn("Add", width="small"),
                 "Line": st.column_config.NumberColumn(format="%g"),
-                "Model %": st.column_config.NumberColumn(format="%.1f"),
+                "Hit chance %": st.column_config.NumberColumn(format="%.1f"),
+                "Floor %": st.column_config.NumberColumn(format="%.1f", help="Low end of the plausible true hit "
+                                                         "chance (25th percentile of the model's uncertainty)."),
                 "Price": st.column_config.NumberColumn(format="%+d"),
                 "Best price": st.column_config.NumberColumn(format="%+d"),
                 "Market %": st.column_config.NumberColumn(format="%.1f"),
@@ -250,28 +447,136 @@ else:
         add_clicked = st.form_submit_button("➕ Add checked legs to slip", type="primary")
     if len(view) > len(shown):
         st.caption(f"Showing the top {len(shown)} of {len(view)} legs — narrow the filters to see the rest.")
+    if use_menu:
+        st.caption("**Basis** says where the hit chance comes from: *Model* = the model's own number; *Book no-vig* = the "
+                   "book's price with its margin removed (no edge by construction); *Book implied\\** = a one-sided "
+                   "price, which still includes the margin. Type your own probability into the slip table to test a view.")
     if add_clicked:
         default_stake = float(st.session_state.get("slip_lab_single_stake", 10.0))
-        have = {l["id"] for l in legs}
         msgs = []
         for idx in edited.index[edited["Add"]]:
             cand = shown[idx]
-            if cand["id"] in have:
-                continue
-            twin = [x for x in legs if (x["player"], x["market"], x["line"]) == (cand["player"], cand["market"], cand["line"])]
-            if twin:
-                msgs.append(f"Skipped {SL.leg_label(cand)} — the slip already has the other side of that prop.")
+            why = SL.conflicts(legs, cand)
+            if why:
+                if not why.startswith("that leg is already"):
+                    msgs.append(f"Skipped {SL.leg_label(cand)} — {why}.")
                 continue
             if len(legs) >= MAX_LEGS:
                 msgs.append(f"A slip holds at most {MAX_LEGS} legs here.")
                 break
             legs.append(dict(cand, stake=default_stake))
-            have.add(cand["id"])
         for m in msgs:
             st.warning(m)
         st.session_state["slip_lab_ver"] = ver + 1
         st.session_state["slip_lab_result"] = None
         st.rerun()
+
+# --------------------------------------------------------------------------- 1b. suggested tickets
+with sugg_box:
+    C.section_header("🏆", "Suggested tickets", f"What the model likes at {book_label} — load one to pressure-test it",
+                     "#16783c")
+    if is_manual:
+        st.info("Bet365 has no live prop feed here, so there's nothing to rank — build a slip by hand below.")
+    else:
+        with st.expander("Suggestion settings", expanded=False):
+            t1, t2, t3, t4 = st.columns(4)
+            with t1:
+                size_opts = [2, 3, 4, 5, 6] if is_pickem else [2, 3, 4, 5]
+                sug_sizes = st.multiselect("Ticket sizes (legs)", size_opts, default=[2, 3, 4], key="slip_lab_sug_sizes")
+            with t2:
+                sug_minp = st.slider("Min hit chance per leg %", 30, 80, 45, 5, key="slip_lab_sug_minp",
+                                     help="Legs below this are never put in a ticket.")
+            with t3:
+                sug_per_game = st.select_slider("Max legs from one game", [1, 2, 3], value=2, key="slip_lab_sug_pg",
+                                                help="1 = every leg from a different game (least correlated).")
+            with t4:
+                sug_n = st.slider("Singles to list", 3, 10, 5, key="slip_lab_sug_n")
+        sug_bank = float(st.session_state.get("slip_lab_bankroll", 1000.0))
+        # In the model-priced view the suggestions respect the Markets / Game / Side / search filters above
+        # (not the hit-chance slider — they have their own). In the full-menu view they always come from the
+        # model-priced props, whatever the menu filters say. Either way only legs the MODEL prices are used.
+        sug_input = pool if use_menu else filtered
+        sug_sig = hashlib.md5(json.dumps({
+            "b": book, "s": sorted(sug_sizes or []), "m": sug_minp, "g": sug_per_game, "n": sug_n, "bank": sug_bank,
+            "legs": [(l["id"], l["p"], l.get("price"), l.get("n_eff"), l.get("at_book"), l.get("p_source"))
+                     for l in sug_input]}, sort_keys=True, default=str).encode()).hexdigest()
+        cached = st.session_state.get("slip_lab_sugg")
+        if cached and cached["sig"] == sug_sig:
+            sug = cached["out"]
+        else:
+            with st.spinner("Ranking legs and building tickets..."):
+                sug = SS.suggest_tickets(sug_input, book, sizes=sug_sizes or [2, 3], max_per_game=sug_per_game,
+                                         min_leg_p=sug_minp / 100.0, n_singles=sug_n, bankroll=sug_bank)
+            st.session_state["slip_lab_sugg"] = {"sig": sug_sig, "out": sug}
+        st.session_state["slip_lab_ticket_store"] = {f"t{i}": t for i, t in enumerate(sug["tickets"])}
+        st.session_state["slip_lab_single_store"] = {"likely": sug["singles"]["likely"], "value": sug["singles"]["value"]}
+
+        st.caption(f"Ranked from {sug['eligible']} model-priced leg(s) that {book_label} posts. These are candidates to "
+                   "pressure-test, not picks: every number comes from the model, and *confidence floor* shows how much "
+                   "each depends on a small sample.")
+
+        def _singles_table(rows, key, title, blurb):
+            st.markdown(f"**{title}**")
+            st.caption(blurb)
+            if not rows:
+                st.caption("Nothing qualifies right now.")
+                return
+            st.dataframe(pd.DataFrame([{
+                "Leg": SL.leg_label(r["leg"]), "Hit chance": r["score"]["p"], "Floor": r["score"]["floor"],
+                "Price": r["leg"]["price"], "EV %": r["score"]["ev_pct"], "EV at floor %": r["score"]["ev_floor_pct"],
+                "Chance +EV": r["score"]["p_ev_pos"], "Suggested stake $": r["stake"], "Grade": r["grade"],
+            } for r in rows]), hide_index=True, width="stretch", column_config={
+                "Hit chance": st.column_config.NumberColumn(format="percent"),
+                "Floor": st.column_config.NumberColumn(format="percent"),
+                "Price": st.column_config.NumberColumn(format="%+d"),
+                "EV %": st.column_config.NumberColumn(format="%+.1f"),
+                "EV at floor %": st.column_config.NumberColumn(format="%+.1f"),
+                "Chance +EV": st.column_config.NumberColumn(format="percent"),
+                "Suggested stake $": st.column_config.NumberColumn(format="$%.2f")})
+            st.button(f"Load these {len(rows)} as a singles slip", key=f"slip_lab_load_{key}",
+                      on_click=_load_singles, args=(key,))
+
+        if not is_pickem:
+            _singles_table(sug["singles"]["likely"], "likely", "🎯 Most likely to hit",
+                           "Highest confidence floor first. A likely leg isn't necessarily good value — check EV.")
+            _singles_table(sug["singles"]["value"], "value", "💎 Best value",
+                           "Only legs where the model beats the price, ranked by EV if the leg hits at its floor.")
+            st.caption("Suggested stake = quarter-Kelly on the confidence floor, capped at 2% of your bankroll "
+                       "(0 = no edge at the floor). Bankroll comes from the box in *Your slip*.")
+
+        st.markdown("**🎫 " + ("Entries" if is_pickem else "Parlays") + "**")
+        strat_pick = st.radio("Show", ["All"] + list(SS.STRATEGIES), horizontal=True, key="slip_lab_sug_strat",
+                              help=" · ".join(f"{k}: {v}" for k, v in SS.STRATEGIES.items()))
+        tickets = [(f"t{i}", t) for i, t in enumerate(sug["tickets"]) if strat_pick == "All" or strat_pick in t["strategies"]]
+        if not tickets:
+            st.caption("No ticket to show — see the notes below.")
+        for key, tk in tickets:
+            with st.container(border=True):
+                head, btn = st.columns([4, 1.4])
+                with head:
+                    st.markdown(f"**{SS.ticket_title(tk)}** · " + " · ".join(f"*{s_}*" for s_ in tk["strategies"]))
+                with btn:
+                    st.button("➕ Load into slip", key=f"slip_lab_load_{key}", on_click=_load_ticket, args=(key,),
+                              type="primary")
+                st.markdown("  \n".join(
+                    f"▸ **{SL.leg_label(l)}** — {l['p'] * 100:.0f}% hit, floor {sug['scores'][l['id']]['floor'] * 100:.0f}%"
+                    + ("" if l.get("price") is None else f", {l['price']:+.0f}")
+                    + (f" · {l['game']}" if l.get("game") else "") for l in tk["legs"]))
+                ev_show = tk["ev"] if tk["ev"] is not None else tk["ev_indep"]
+                pays = (f"{tk['decimal']:.2f}x ({SL.decimal_to_american(tk['decimal']):+d})" if tk["mode"] == "parlay"
+                        else f"up to {tk['decimal']:.1f}x")
+                bits = [f"**Pays** {pays}",
+                        f"**All legs hit** {(tk['p_all'] if tk['p_all'] is not None else tk['p_all_indep']) * 100:.1f}%",
+                        f"**EV** {ev_show * 100:+.0f}%"
+                        + ("" if tk["ev_haircut"] is None else f" ({tk['ev_haircut'] * 100:+.0f}% if the model is 3 pts high)")]
+                if tk["p_ev_positive"] is not None:
+                    bits.append(f"**+EV in** {tk['p_ev_positive'] * 100:.0f}% of uncertainty worlds")
+                bits.append("**Stake** " + ("—" if not tk["stake"] else f"{tk['stake']:.2f} USD"))
+                st.caption(" · ".join(bits))
+        for n in sug["notes"]:
+            st.caption("ℹ️ " + n)
+        st.caption("Parlay prices here multiply each leg's own price; a sportsbook re-prices same-game legs, so "
+                   "type the price your slip actually shows into *Your slip* before you rely on the EV.")
 
 # --- manual leg ------------------------------------------------------------------------------
 with st.expander("✍️ Add a leg by hand — Bet365, or any line the board doesn't list", expanded=is_manual and not legs):
@@ -309,7 +614,7 @@ with st.expander("✍️ Add a leg by hand — Bet365, or any line the board doe
     with m6:
         m_price = st.number_input("American price (0 = none)", value=0, step=5, key="slip_lab_m_price")
     with m7:
-        game_opts = ["(none)"] + games_present
+        game_opts = ["(none)"] + sorted({l["game"] for l in list(pool) + list(menu_legs) if l.get("game")})
         default_game = next((pl.get("Game") for pl in plays if pl.get("Player") == player_name), None)
         m_game = st.selectbox("Game (for correlation)", game_opts,
                               index=game_opts.index(default_game) if default_game in game_opts else 0,
@@ -341,7 +646,7 @@ if not legs:
     st.stop()
 
 slip_df = pd.DataFrame([{
-    "Leg": SL.leg_label(l), "Game": l.get("game"), "Model %": l["p"] * 100,
+    "Leg": SL.leg_label(l), "Game": l.get("game"), "Prob %": l["p"] * 100, "Basis": _basis(l),
     "Price": l.get("price"), "Stake $": l.get("stake") or 10.0,
     "Market %": None if l.get("p_mkt") is None else l["p_mkt"] * 100,
     "Posted": "✓" if l.get("at_book") else "—", "Remove": False,
@@ -349,10 +654,14 @@ slip_df = pd.DataFrame([{
 slip_df["Price"] = pd.to_numeric(slip_df["Price"], errors="coerce")
 slip_df["Market %"] = pd.to_numeric(slip_df["Market %"], errors="coerce")
 slip_edit = st.data_editor(
-    slip_df, hide_index=True, column_order=["Remove", "Leg", "Model %"] + ([] if is_pickem else ["Price"]) + ["Stake $", "Market %", "Posted", "Game"], key=f"slip_lab_slip_{ver}", width="stretch",
-    disabled=["Leg", "Game", "Market %", "Posted"],
+    slip_df, hide_index=True,
+    column_order=["Remove", "Leg", "Prob %"] + ([] if is_pickem else ["Price"]) + ["Stake $", "Basis", "Market %", "Posted", "Game"],
+    key=f"slip_lab_slip_{ver}", width="stretch",
+    disabled=["Leg", "Game", "Basis", "Market %", "Posted"],
     column_config={
-        "Model %": st.column_config.NumberColumn(min_value=1.0, max_value=99.0, step=0.5, format="%.1f"),
+        "Prob %": st.column_config.NumberColumn(min_value=1.0, max_value=99.0, step=0.5, format="%.1f",
+                                                help="The chance this leg hits. Edit it to test your own view — a leg "
+                                                     "whose number you change is marked Yours."),
         "Price": st.column_config.NumberColumn(format="%+d", help="American price at the chosen book. "
                                                "Type the one your slip shows if it's blank."),
         "Stake $": st.column_config.NumberColumn(min_value=0.0, step=1.0, format="$%.2f",
@@ -365,7 +674,11 @@ for i, row in slip_edit.iterrows():
         removed = True
         continue
     leg = legs[i]
-    leg["p"] = round(min(0.99, max(0.01, float(row["Model %"]) / 100.0)), 4)
+    new_p = round(min(0.99, max(0.01, float(row["Prob %"]) / 100.0)), 4)
+    if leg.get("source") == "menu" and abs(new_p - leg["p"]) > 1e-9:
+        leg["p_source"] = "yours"                       # the user's own number: now a model view, not the book's
+        leg["why"] = "your own probability"
+    leg["p"] = new_p
     pr = row["Price"]
     leg["price"] = None if pd.isna(pr) or pr == 0 else float(pr)
     leg["stake"] = float(row["Stake $"]) if not pd.isna(row["Stake $"]) else 0.0
@@ -527,8 +840,59 @@ if stored and stored["sig"] == sig:
     for level, text in res["verdict"]:
         {"good": st.success, "warn": st.warning, "bad": st.error, "info": st.info}[level](text)
 
-    t_hits, t_stress, t_legs, t_repeat = st.tabs(
-        ["📊 Hit distribution", "🌪️ Stress tests", "🔎 Leg by leg", "🔁 Repeat play"])
+    t_rank, t_hits, t_stress, t_legs, t_repeat = st.tabs(
+        ["🏅 Leg ranking", "📊 Hit distribution", "🌪️ Stress tests", "🔎 Drop a leg", "🔁 Repeat play"])
+
+    with t_rank:
+        # Which legs are strongest? Hit chance (simulated) and the confidence floor, side by side.
+        sc = SS.leg_scorecard(legs, evidence_mult=res["settings"]["evidence_mult"])
+        sim_hit = {l["id"]: h for l, h in zip(legs, res["leg_hit_rate"])}
+        drop_effect = {d["leg"]: d["delta_ev"] for d in res["leg_drop"]}
+        for r_ in sc:
+            r_["sim_hit"] = sim_hit.get(r_["id"], r_["p"])
+            r_["effect"] = drop_effect.get(r_["label"]) if res["mode"] != "singles" else None
+            r_["grade"] = SS.grade(r_)
+        best, worst = sc[0], sc[-1]
+        st.success(f"**Strongest leg: {best['label']}** — hits {best['sim_hit'] * 100:.0f}% in the simulation, "
+                   f"and even at the low end of the model's uncertainty it's {best['floor'] * 100:.0f}% "
+                   f"({best['evidence']} evidence, {best['n_eff']:.0f} games behind it).")
+        if len(sc) > 1:
+            eff = worst.get("effect")
+            tail = ("." if eff is None else
+                    f"; the slip is {abs(eff) * 100:.1f} EV-points better without it — worth dropping." if eff < 0 else
+                    f"; even so it adds {eff * 100:.1f} EV-points to the slip, so it's still pulling its weight.")
+            msg = (f"**Weakest leg: {worst['label']}** — {worst['sim_hit'] * 100:.0f}% to hit, "
+                   f"{worst['floor'] * 100:.0f}% at the low end" + tail)
+            (st.warning if (eff is not None and eff < 0) else st.info)(msg)
+        st.dataframe(pd.DataFrame([{
+            "Rank": r_["rank"], "Leg": r_["label"], "Hit chance": r_["sim_hit"], "Confidence floor": r_["floor"],
+            "Evidence": r_["evidence"], "Price": r_["price"], "EV %": r_["ev_pct"],
+            "EV at floor %": r_["ev_floor_pct"], "Chance price is +EV": r_["p_ev_pos"],
+            "Effect on slip (EV pts)": r_["effect"], "Grade": r_["grade"],
+        } for r_ in sc]), hide_index=True, width="stretch", column_config={
+            "Hit chance": st.column_config.NumberColumn(format="percent"),
+            "Confidence floor": st.column_config.NumberColumn(format="percent"),
+            "Price": st.column_config.NumberColumn(format="%+d"),
+            "EV %": st.column_config.NumberColumn(format="%+.1f"),
+            "EV at floor %": st.column_config.NumberColumn(format="%+.1f"),
+            "Chance price is +EV": st.column_config.NumberColumn(format="percent"),
+            "Effect on slip (EV pts)": st.column_config.NumberColumn(
+                format="percent", help="How much EV this leg adds to the slip (negative = the slip is better without it).")})
+        fig = go.Figure()
+        ordered = list(reversed(sc))
+        fig.add_bar(y=[r_["label"] for r_ in ordered], x=[r_["sim_hit"] * 100 for r_ in ordered], orientation="h",
+                    name="Hit chance", marker_color="#1f6feb",
+                    error_x=dict(type="data", symmetric=False,
+                                 array=[(r_["ceiling"] - r_["sim_hit"]) * 100 for r_ in ordered],
+                                 arrayminus=[(r_["sim_hit"] - r_["floor"]) * 100 for r_ in ordered]))
+        fig.update_layout(height=max(200, 60 + 42 * len(sc)), xaxis_title="Chance the leg hits (%) — whiskers span "
+                          "the plausible range", margin=dict(l=10, r=10, t=10, b=10), showlegend=False)
+        st.plotly_chart(fig, width="stretch")
+        st.caption("Read this table with one fact in mind: a leg's simulated hit chance is the model's own probability — "
+                   "the simulation can't make a leg likelier than the model says. What separates the rows is the "
+                   "**confidence floor** (a number resting on few games can sit far below its headline), whether the "
+                   "**price is still +EV** across the plausible range, and how much each leg **adds to or drags** the "
+                   "slip. Legs priced off the book's own probabilities (Basis: Book) have no edge to rank.")
 
     with t_hits:
         xs = [f"{h} hit{'s' if h != 1 else ''}" for h in range(k + 1)]
@@ -637,8 +1001,16 @@ if is_pickem:
     st.caption("Pick'em entries have no per-leg price — the Bet Log will record the model's own fair price "
                "for each pick; edit the entry stake/payout there after logging.")
 tested_stake = (f"\\${sum(stakes):,.2f} across the singles" if mode == "singles" else f"\\${stake:,.2f} entry")
-st.caption(f"You tested a {tested_stake} — enter the same stake below. Each leg is logged at the price on your "
-           "slip (the table above), not re-looked-up, so what you tested is what gets recorded.")
+st.caption(f"You tested a {tested_stake} — the stake below is filled in to match (change it if you like). Each leg is "
+           "logged at the price on your slip (the table above), not re-looked-up, so what you tested is what gets recorded.")
+if any(l.get("kind") in SL.TEAM_KINDS or "(alt)" in str(l.get("market")) for l in legs):
+    st.caption("Team, game-total and alternate-line legs are logged like any other, but the Bet Log can't "
+               "auto-settle them yet — mark those won or lost there.")
+# The logging widget opens on the slip you just tested: every leg ticked, the right mode, the tested stake.
+_prefill_sig = hashlib.md5(json.dumps([mode, stake, stakes, [l["id"] for l in legs]], default=str).encode()).hexdigest()
+if st.session_state.get("slip_lab_prefill_sig") != _prefill_sig:
+    st.session_state["slip_lab_prefill_sig"] = _prefill_sig
+    st.session_state.update(SL.quick_log_prefill("slip_lab", mode, stake, stakes, len(legs)))
 # offers=None on purpose: every leg already carries the price it was tested at (or none, which logs the
 # model's own fair price), so the Bet Log must not go looking for a different book's price to substitute.
 quick_log.render_quick_log(SL.legs_to_plays(legs), date_str, SPORT_KEY, key_prefix="slip_lab",

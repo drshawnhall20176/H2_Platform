@@ -233,3 +233,51 @@ def test_clv_capture_resolves_the_legacy_caesars_book():
     assert clv_capture.bet_close_price(bet, offers, market_map={"Points": "player_points"}) == -118
     bet["book"] = "hardrockbet"      # a book with no posted price for this offer -> no match, not a crash
     assert clv_capture.bet_close_price(bet, offers, market_map={"Points": "player_points"}) is None
+
+
+# --------------------------------------------------------------------------- build 206: market errors + event ids
+@pytest.mark.parametrize("msg", [
+    'HTTP 422: {"message":"Invalid market(s): player_foo","error_code":"INVALID_MARKET"}',
+    "HTTP 422: INVALID_MARKET",
+    "HTTP 422: Markets not supported for this sport",
+])
+def test_a_rejected_market_key_never_triggers_or_poisons_the_bookmakers_fallback(monkeypatch, msg):
+    """One bad market key (e.g. a menu market a sport doesn't have) is not a bad bookmakers=
+    parameter: it must raise as-is and must NOT flip the remembered 'bookmakers rejected' flags,
+    which would silently downgrade every later fetch to the book-poorer regions='us' request."""
+    rec = _Recorder([O.OddsAPIError(msg)])
+    monkeypatch.setattr(O, "_get", rec)
+    with pytest.raises(O.OddsAPIError):
+        O.fetch_event_props("evt", "KEY", ["player_nonsense"])
+    assert len(rec.calls) == 1
+    assert O._BOOKMAKERS_REJECTED == {"multipliers": False, "bookmakers": False}
+
+
+def test_a_plain_bad_parameter_4xx_still_falls_back(monkeypatch):
+    rec = _Recorder([O.OddsAPIError("HTTP 422: unknown parameter includeMultipliers"), {"ok": 1}])
+    monkeypatch.setattr(O, "_get", rec)
+    out, _ = O.fetch_event_props("evt", "KEY", ["player_points"])
+    assert out == {"ok": 1} and len(rec.calls) == 2
+
+
+def test_offers_carry_the_event_id_and_teams_for_sportsbook_and_pickem_slots():
+    ev = {"id": "abc123", "home_team": "Home FC", "away_team": "Away FC", "commence_time": "2026-09-21T23:00:00Z",
+          "bookmakers": [
+              {"key": "draftkings", "markets": [{"key": "player_points", "outcomes": [
+                  {"name": "Over", "description": "A Guy", "point": 20.5, "price": -110},
+                  {"name": "Under", "description": "A Guy", "point": 20.5, "price": -110}]}]},
+              {"key": "prizepicks", "markets": [{"key": "player_points", "outcomes": [
+                  {"name": "Over", "description": "B Guy", "point": 15.5, "price": -119}]}]}]}
+    offers = {o["player"]: o for o in O.parse_event_offers(ev, supported_markets=["player_points"])}
+    for who in ("A Guy", "B Guy"):
+        assert offers[who]["event_id"] == "abc123"
+        assert offers[who]["home_team"] == "Home FC" and offers[who]["away_team"] == "Away FC"
+        assert offers[who]["commence_time"] == "2026-09-21T23:00:00Z"
+    assert offers["A Guy"]["over"] == {"draftkings": -110}
+
+
+def test_offers_from_an_event_without_metadata_still_parse():
+    ev = {"bookmakers": [{"key": "fanduel", "markets": [{"key": "player_points", "outcomes": [
+        {"name": "Over", "description": "A Guy", "point": 1.5, "price": 120}]}]}]}
+    (o,) = O.parse_event_offers(ev, supported_markets=["player_points"])
+    assert o["over"] == {"fanduel": 120} and "event_id" not in o

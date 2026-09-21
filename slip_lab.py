@@ -296,6 +296,53 @@ def payout_for_subset_factory(mode: str, *, decimal_override: Optional[float], t
     return f
 
 
+# --------------------------------------------------------------------------- Bet Log hand-off defaults
+def quick_log_prefill(prefix: str, mode: str, stake: float, stakes: Optional[Sequence[float]], n_legs: int,
+                      max_stake: float = 500.0) -> Dict:
+    """Session-state values that make the shared quick-log widget open on THE SLIP THAT WAS TESTED
+    — every leg ticked, parlay-vs-singles logging matching the slip's mode, and the stake filled in
+    (quick_log's stake pickers move in 0.5 steps, so the value is rounded to the nearest half dollar
+    and capped at `max_stake`). Singles use the average stake, since the widget has one per-pick box."""
+    def near(x: float) -> float:
+        return float(min(max_stake, max(0.0, round(float(x) * 2) / 2)))
+
+    out: Dict = {f"{prefix}_ql_picks": list(range(n_legs))}
+    if mode == "singles":
+        stk = [float(x) for x in (stakes or []) if x is not None]
+        per = near(sum(stk) / len(stk)) if stk else 0.0
+        out.update({f"{prefix}_ql_mode_parlay": False, f"{prefix}_ql_mode_singles": True,
+                    f"{prefix}_ql_s_stake_pick": per, f"{prefix}_ql_s_stake_{per}": per})
+    else:
+        amt = near(stake)
+        out.update({f"{prefix}_ql_mode_parlay": True, f"{prefix}_ql_mode_singles": False,
+                    f"{prefix}_ql_p_stake_pick": amt, f"{prefix}_ql_p_stake_{amt}": amt})
+    return out
+
+
+# --------------------------------------------------------------------------- can two legs share a slip?
+TEAM_KINDS = ("moneyline", "spread", "total", "team_total")
+
+
+def conflicts(existing: Sequence[Dict], cand: Dict) -> Optional[str]:
+    """Why `cand` cannot go on a slip that already holds `existing` (None = it can).
+
+    Two bets on the two sides of the SAME proposition can't both win, so a slip holding both is
+    nonsense: the other side of the same prop (same subject, market and line), or the opposing
+    team's moneyline / spread in the same market of the same game. A middle (Over 44.5 with
+    Under 47.5) is a real, deliberate bet and is allowed."""
+    for x in existing:
+        if x["id"] == cand["id"]:
+            return "that leg is already on the slip"
+        if (x["player"], x["market"], x["line"]) == (cand["player"], cand["market"], cand["line"]):
+            return "the slip already has the other side of that prop"
+        margin = ("moneyline", "spread")
+        if (x.get("kind") in margin and cand.get("kind") in margin and x.get("game") == cand.get("game")
+                and x.get("market_key") == cand.get("market_key") and x.get("kind") == cand.get("kind")
+                and x.get("team") != cand.get("team")):
+            return "it opposes a team leg already on the slip (the other side of that game's result)"
+    return None
+
+
 # --------------------------------------------------------------------------- hand-off to Bet Log
 def legs_to_plays(legs: List[Dict]) -> List[Dict]:
     """Play-shaped dicts (what quick_log.render_quick_log / bet_log_fields_from_play expect) so a
@@ -308,10 +355,16 @@ def legs_to_plays(legs: List[Dict]) -> List[Dict]:
     for l in legs:
         p = float(l["p"])
         play = dict(l.get("play") or {})
+        team_level = l.get("kind") in TEAM_KINDS
+        side = l["side"]
+        if team_level and l.get("kind") in ("moneyline", "spread"):
+            side = l["player"]                       # the team backed, exactly as Game Watch logs a moneyline
+        elif l.get("kind") == "team_total":
+            side = f"{l['player']} {l['side']}"
         play.update({
-            "Player": l["player"], "PlayerId": l.get("player_id"), "Team": l.get("team"),
-            "Game": l.get("game"), "Opp": l.get("opp"), "Market": l["market"], "Side": l["side"],
-            "Line": l["line"], "ModelProb": p, "Fair": prob_to_american(p),
+            "Player": None if team_level else l["player"], "PlayerId": None if team_level else l.get("player_id"),
+            "Team": l.get("team"), "Game": l.get("game"), "Opp": l.get("opp"), "Market": l["market"],
+            "Side": side, "Line": l["line"], "ModelProb": p, "Fair": prob_to_american(p),
             "Why": l.get("why") or play.get("Why"),
         })
         if l.get("price") is not None:
@@ -379,6 +432,8 @@ def run_pressure_test(legs: List[Dict], mode: str, payout: Dict, *, stake: float
         d = list(payout["table"].values())[0]
         result["breakeven_leg_prob"] = SIM.breakeven_leg_prob(d, len(sim_legs))
         result["kelly_fraction"] = O.kelly_fraction(base["p_all"], decimal_to_american(d) or 0)
+    result["n_market_prob"] = sum(1 for l in legs if l.get("source") == "menu"
+                                  and l.get("p_source") in ("market", "implied"))
     result["geo_mean_leg_prob"] = float(np.exp(np.mean(np.log(np.clip(ps, 1e-6, 1)))))
     result["verdict"] = verdict(result)
     return result
@@ -393,7 +448,12 @@ def verdict(r: Dict) -> List[Tuple[str, str]]:
     ev = r["ev"]
     h3 = rows.get("Model 3 pts too bullish", {}).get("ev")
     h5 = rows.get("Model 5 pts too bullish", {}).get("ev")
-    if ev <= 0:
+    nm_all = (r.get("n_market_prob") or 0) >= r["k"]
+    if nm_all:
+        out.append(("info", f"Priced entirely off the book's own probabilities: {ev*100:+.1f}% EV per $1 — the book's "
+                            "margin, as expected when nobody has a view. Enter your own probability on a leg to test "
+                            "an actual opinion."))
+    elif ev <= 0:
         out.append(("bad", f"The model itself has this slip losing money: {ev*100:+.1f}% EV per $1 at these "
                            "prices, before any stress."))
     elif h5 is not None and h5 > 0 and r["p_ev_positive"] >= 0.70:
@@ -426,6 +486,14 @@ def verdict(r: Dict) -> List[Tuple[str, str]]:
         if worst["delta_ev"] < 0:
             out.append(("warn", f"Weakest leg: {worst['leg']} — the slip is {abs(worst['delta_ev'])*100:.1f} "
                                 "EV-points better without it."))
+    nm = r.get("n_market_prob") or 0
+    if nm:
+        out.append(("info", f"{nm} of {r['k']} leg{'s' if r['k'] != 1 else ''} use the book's own probability "
+                            "(no model view of them), so there is no edge built into "
+                            f"{'those legs' if nm < r['k'] else 'this slip'}: their EV is minus the book's margin by "
+                            "construction. What the test tells you there is how the legs interact and how wide the "
+                            "outcomes are — not whether the bet is +EV. Type your own probability into the slip "
+                            "table to test a view."))
     if r["avg_n_eff"] < 8:
         out.append(("warn", f"Thin evidence: about {r['avg_n_eff']:.0f} games behind each leg on average, so the "
                             "uncertainty band is wide — early-season slips deserve extra skepticism."))

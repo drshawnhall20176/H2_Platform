@@ -135,11 +135,22 @@ def fetch_events(api_key: str, sport: str = SPORT) -> List[Dict]:
 _BOOKMAKERS_REJECTED = {"multipliers": False, "bookmakers": False}
 
 
+def _is_market_error(err: Exception) -> bool:
+    """True when the API rejected the MARKET KEY itself (e.g. a market a sport doesn't have). That
+    says nothing about the bookmakers/includeMultipliers parameters, so it must never trigger (or be
+    remembered as) the bookmakers-rejected fallback — one bad market key would otherwise silently
+    switch every later fetch to the cheaper, book-poorer regions='us' request."""
+    msg = str(err).lower()
+    return "invalid_market" in msg or "invalid market" in msg or "markets not supported" in msg \
+        or "market_not" in msg
+
+
 def _is_client_error(err: Exception) -> bool:
     """True for the 4xx responses that mean 'the request itself was wrong' (bad parameter/key),
-    NOT auth (401) or quota (429) — retrying those differently would not help."""
+    NOT auth (401) or quota (429) — retrying those differently would not help. A rejected MARKET
+    KEY is excluded too (see _is_market_error)."""
     msg = str(err)
-    return msg.startswith("HTTP 4") and not msg.startswith("HTTP 429")
+    return msg.startswith("HTTP 4") and not msg.startswith("HTTP 429") and not _is_market_error(err)
 
 
 def fetch_event_props(event_id: str, api_key: str, markets: List[str],
@@ -244,6 +255,13 @@ def fetch_historical_event_props(event_id: str, api_key: str, markets: List[str]
 
 
 # ---- parsing ---------------------------------------------------------------
+def _slot_meta(ev_meta: Dict) -> Dict:
+    """The event this offer came from (id + teams + start), carried on every offer so a page can
+    tie a player prop to its game without guessing from names. Purely additive keys."""
+    return {"event_id": ev_meta.get("id"), "home_team": ev_meta.get("home_team"),
+            "away_team": ev_meta.get("away_team"), "commence_time": ev_meta.get("commence_time")} if ev_meta else {}
+
+
 def _pickem_side(name: str) -> Optional[str]:
     """Normalize a pick'em outcome name to "over"/"under" — DFS apps say More/Less or
     Higher/Lower where sportsbooks say Over/Under; the API may pass either through."""
@@ -274,6 +292,8 @@ def parse_event_offers(event_json: Dict, supported_markets: Optional[List[str]] 
     """
     offers: Dict[Tuple, Dict] = {}
     markets_allowed = supported_markets if supported_markets is not None else SUPPORTED_MARKETS
+    ev_meta = {k: event_json.get(k) for k in ("id", "home_team", "away_team", "commence_time")
+               if event_json.get(k) is not None}
     for bm in event_json.get("bookmakers", []):
         book = canonical_book(bm.get("key", "?")) or "?"
         for mk in bm.get("markets", []):
@@ -293,7 +313,7 @@ def parse_event_offers(event_json: Dict, supported_markets: Optional[List[str]] 
                         continue
                     k = (mkey, player, point)
                     slot = offers.setdefault(k, {"market": mkey, "player": player,
-                                                 "point": point, "over": {}, "under": {}})
+                                                 "point": point, "over": {}, "under": {}, **_slot_meta(ev_meta)})
                     entry = {"price": price}
                     if oc.get("multiplier") is not None:
                         entry["multiplier"] = oc.get("multiplier")
@@ -303,7 +323,7 @@ def parse_event_offers(event_json: Dict, supported_markets: Optional[List[str]] 
                     continue
                 k = (mkey, player, point)
                 slot = offers.setdefault(k, {"market": mkey, "player": player,
-                                             "point": point, "over": {}, "under": {}})
+                                             "point": point, "over": {}, "under": {}, **_slot_meta(ev_meta)})
                 if side.startswith("o"):
                     slot["over"][book] = price
                 elif side.startswith("u"):

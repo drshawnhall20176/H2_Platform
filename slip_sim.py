@@ -136,6 +136,71 @@ def _side_sign(leg: Dict) -> int:
     return -1 if str(leg.get("side", "Over")).lower().startswith("u") else 1
 
 
+# Leg "kinds" beyond a player prop, from the full book menu (Slip Lab). A leg with no "kind" (every
+# board leg, every hand-typed leg) is a player prop and is treated EXACTLY as before.
+MARGIN_KINDS = ("moneyline", "spread")          # "team T wins / covers" — leg["team"] is T
+TOTAL_KINDS = ("total", "team_total")           # over/under on points; team_total also has leg["team"]
+
+# Correlation between a team/game-level leg and another leg in the SAME game. These are fixed,
+# deliberately rounded rules of thumb (documented in the Slip Lab page), not fitted numbers —
+# what they capture is the direction and rough size of the link, so a same-game parlay is not
+# treated as independent legs. Only same-game pairs are ever correlated.
+RHO_SAME_MARGIN = 0.85      # ML + spread, same team (or the two teams' sides: negative)
+RHO_TOTAL_TOTAL = 0.90      # game total vs game total (alt lines of the same over/under)
+RHO_TOTAL_TEAMTOT = 0.60    # game total vs a team total
+RHO_TEAMTOT_SAME = 0.90     # two totals on the same team
+RHO_TEAMTOT_OPP = 0.30      # totals on the two opposing teams (a shootout lifts both)
+RHO_MARGIN_TEAMTOT = 0.25   # team wins/covers vs that team's own total (opponent's: negative)
+RHO_TOTAL_PLAYER = 0.20     # game / team total vs a player prop in that game
+RHO_MARGIN_PLAYER = 0.15    # team wins/covers vs its own player's prop (opponent's: 0.7x, negative)
+
+
+def _kind(leg: Dict) -> str:
+    return str(leg.get("kind") or "player")
+
+
+def _same_team(a: Dict, b: Dict) -> Optional[bool]:
+    """True/False when both legs name a team, None when either doesn't (then no team rule applies)."""
+    ta, tb = a.get("team"), b.get("team")
+    if not ta or not tb:
+        return None
+    return str(ta) == str(tb)
+
+
+def _team_kind_rho(a: Dict, b: Dict) -> float:
+    """Correlation for a same-game pair where at least one leg is a team/game-level kind."""
+    ka, kb = _kind(a), _kind(b)
+    sa, sb = _side_sign(a), _side_sign(b)
+    same = _same_team(a, b)
+    a_margin, b_margin = ka in MARGIN_KINDS, kb in MARGIN_KINDS
+    if a_margin and b_margin:
+        if same is None:
+            return 0.0
+        return RHO_SAME_MARGIN if same else -RHO_SAME_MARGIN
+    if a_margin or b_margin:
+        m, o = (a, b) if a_margin else (b, a)
+        ko, so = _kind(o), _side_sign(o)
+        if ko == "total":
+            return 0.0                                  # who wins says little about the total
+        if same is None:
+            return 0.0
+        if ko == "team_total":
+            return so * (RHO_MARGIN_TEAMTOT if same else -RHO_MARGIN_TEAMTOT * 0.6)
+        return so * (RHO_MARGIN_PLAYER if same else -RHO_MARGIN_PLAYER * 0.7)   # a player prop
+    # no margin leg: totals and player props
+    if ka == "total" and kb == "total":
+        return RHO_TOTAL_TOTAL * sa * sb
+    if "total" in (ka, kb):
+        other = kb if ka == "total" else ka
+        return (RHO_TOTAL_TEAMTOT if other == "team_total" else RHO_TOTAL_PLAYER) * sa * sb
+    if ka == "team_total" and kb == "team_total":
+        if same is None:
+            return 0.0
+        return (RHO_TEAMTOT_SAME if same else RHO_TEAMTOT_OPP) * sa * sb
+    # team_total vs a player prop
+    return (RHO_TOTAL_PLAYER if same in (True, None) else RHO_TOTAL_PLAYER * 0.25) * sa * sb
+
+
 def correlation_matrix(legs: List[Dict], rho_player: float = 0.30, rho_game: float = 0.08) -> np.ndarray:
     """Correlation between legs' outcomes, as a positive-semidefinite k x k matrix.
 
@@ -145,6 +210,9 @@ def correlation_matrix(legs: List[Dict], rho_player: float = 0.30, rho_game: flo
     against each other, two Overs move together. Legs in different games are independent. The
     raw matrix is repaired to the nearest valid correlation matrix if the chosen values make it
     indefinite (possible when many same-game legs are stacked with mixed signs).
+
+    Team- and game-level legs (moneyline, spread, game total, team total — leg["kind"]) use the
+    fixed rules above instead; a slip with only player props behaves exactly as it always did.
     """
     k = len(legs)
     R = np.eye(k)
@@ -153,6 +221,9 @@ def correlation_matrix(legs: List[Dict], rho_player: float = 0.30, rho_game: flo
             a, b = legs[i], legs[j]
             same_game = bool(a.get("game")) and a.get("game") == b.get("game")
             if not same_game:
+                continue
+            if _kind(a) != "player" or _kind(b) != "player":
+                R[i, j] = R[j, i] = float(np.clip(_team_kind_rho(a, b), -0.95, 0.95))
                 continue
             same_player = bool(a.get("player")) and a.get("player") == b.get("player")
             rho = rho_player if same_player else rho_game

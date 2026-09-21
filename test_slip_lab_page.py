@@ -97,7 +97,7 @@ def test_empty_slip_shows_pool_and_prompt_without_errors(patched):
 ])
 def test_pressure_test_runs_for_every_book_and_mode(patched, book, mode):
     at = _run_test(_app(book), mode)
-    assert [t.label for t in at.tabs] == ["📊 Hit distribution", "🌪️ Stress tests", "🔎 Leg by leg", "🔁 Repeat play"]
+    assert [t.label for t in at.tabs] == ["🏅 Leg ranking", "📊 Hit distribution", "🌪️ Stress tests", "🔎 Drop a leg", "🔁 Repeat play"]
     assert at.session_state["slip_lab_result"]["res"]["k"] == 3
     verdicts = [m.value for m in list(at.success) + list(at.warning) + list(at.error)]
     assert verdicts, "the plain-language verdict should render"
@@ -224,3 +224,305 @@ def test_mlb_path_loads_and_prices_home_run_yes_legs(monkeypatch):
                              single_line_markets=sp.single_line_markets)
     hr = [l for l in pool if l["market"] == "Batter HR"]
     assert len(hr) == 1 and hr[0]["side"] == "Yes" and hr[0]["price"] == 380
+
+
+# =========================================================================== build 206
+import book_menu as BM
+import slip_suggest as SS
+from datetime import timezone
+
+
+def _radio(at, prefix):
+    return [r for r in at.radio if r.label.startswith(prefix)][0]
+
+
+def _btn(at, text):
+    return [b for b in at.button if text in b.label]
+
+
+def _menu_event_json(market):
+    """A DraftKings response for one market of one game, players from the synthetic board."""
+    def outs(key):
+        if key == "h2h":
+            return [{"name": "New York Knicks", "price": -140}, {"name": "Boston Celtics", "price": 120}]
+        if key == "spreads":
+            return [{"name": "New York Knicks", "price": -110, "point": -2.5}, {"name": "Boston Celtics", "price": -110, "point": 2.5}]
+        if key == "totals":
+            return [{"name": "Over", "price": -110, "point": 221.5}, {"name": "Under", "price": -110, "point": 221.5}]
+        if key == "player_points":
+            return [{"name": "Over", "description": "Jayson Tatum", "price": -115, "point": 27.5},
+                    {"name": "Under", "description": "Jayson Tatum", "price": -105, "point": 27.5},
+                    {"name": "Over", "description": "Jalen Brunson", "price": -110, "point": 24.5},
+                    {"name": "Under", "description": "Jalen Brunson", "price": -110, "point": 24.5}]
+        return []
+    o = outs(market)
+    return {"id": "EVT1", "home_team": "New York Knicks", "away_team": "Boston Celtics",
+            "commence_time": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "bookmakers": [{"key": "draftkings", "markets": [{"key": market, "outcomes": o}]}] if o else []}
+
+
+@pytest.fixture
+def menu_api(monkeypatch):
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    monkeypatch.setattr(O, "fetch_events", lambda *a, **k: [{"id": "EVT1", "home_team": "New York Knicks",
+                                                              "away_team": "Boston Celtics", "commence_time": now}])
+    seen = []
+
+    def fake_get(path, params):
+        seen.append((path, dict(params)))
+        return _menu_event_json(params["markets"]), {"remaining": "480"}
+    monkeypatch.setattr(O, "_get", fake_get)
+    return seen
+
+
+def _open_menu(at):
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    _radio(at, "Where do legs come from").set_value("📖 Full book menu")
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    return at
+
+
+# ---- suggested tickets -------------------------------------------------------
+def test_suggestions_render_singles_and_parlays_and_load_into_the_slip(patched):
+    at = _app("DraftKings", legs=False)
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    store = at.session_state["slip_lab_ticket_store"]
+    assert store, "the synthetic slate has +EV legs, so there must be suggested tickets"
+    for tk in store.values():
+        assert tk["mode"] == "parlay" and tk["ev_indep"] > 0 and tk["p_all"] is not None
+        assert all(SS.is_model_priced(l) and l["at_book"] for l in tk["legs"])
+    assert at.session_state["slip_lab_single_store"]["likely"]
+    assert any("Most likely to hit" in m.value for m in at.markdown) and any("Best value" in m.value for m in at.markdown)
+    load = _btn(at, "Load into slip")
+    assert load
+    ids_of_first = [l["id"] for l in store["t0"]["legs"]]
+    load[0].click()
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert [l["id"] for l in at.session_state["slip_lab_legs"]] == ids_of_first
+    assert at.session_state["slip_lab_mode"] == "parlay"
+    assert any("Loaded the" in s.value for s in at.success)
+    assert not any("Add legs from the pool" in i.value for i in at.info)          # the slip is now populated
+
+
+def test_loading_singles_sets_singles_mode_and_stakes(patched):
+    at = _app("DraftKings", legs=False)
+    at.run()
+    btn = _btn(at, "as a singles slip")
+    assert btn
+    btn[0].click()
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.session_state["slip_lab_mode"] == "singles"
+    loaded = at.session_state["slip_lab_legs"]
+    assert loaded and all(l["stake"] > 0 for l in loaded)
+
+
+def test_loading_a_ticket_clears_a_stale_result_and_typed_parlay_price(patched):
+    at = _run_test(_app("DraftKings"))
+    assert at.session_state["slip_lab_result"] is not None
+    at.session_state["slip_lab_parlay_price"] = 350
+    _btn(at, "Load into slip")[0].click()
+    at.run()
+    assert not at.exception
+    assert at.session_state["slip_lab_result"] is None
+    assert at.session_state["slip_lab_parlay_price"] == 0
+
+
+def test_pickem_suggestions_are_entries_only_never_singles(patched):
+    at = _app("PrizePicks", legs=False)
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.session_state["slip_lab_single_store"] == {"likely": [], "value": []}
+    assert not _btn(at, "as a singles slip")
+    modes = {t["mode"] for t in at.session_state["slip_lab_ticket_store"].values()}
+    assert modes <= {"power", "flex"}
+
+
+def test_bet365_explains_there_is_nothing_to_rank(patched):
+    at = _app("Bet365", legs=False)
+    at.run()
+    assert not at.exception
+    assert any("nothing to rank" in i.value for i in at.info)
+
+
+def test_suggestions_ignore_market_only_legs(patched):
+    at = _app("DraftKings", legs=False)
+    at.run()
+    for tk in at.session_state["slip_lab_ticket_store"].values():
+        assert not any(l.get("p_source") in ("market", "implied") for l in tk["legs"])
+
+
+# ---- leg ranking tab ---------------------------------------------------------
+def test_leg_ranking_tab_names_the_strongest_and_weakest_leg(patched):
+    at = _run_test(_app("DraftKings"))
+    texts = [m.value for m in list(at.success) + list(at.warning) + list(at.info)]
+    assert any("Strongest leg" in t for t in texts) and any("Weakest leg" in t for t in texts)
+    res = at.session_state["slip_lab_result"]["res"]
+    sc = SS.leg_scorecard(at.session_state["slip_lab_legs"])
+    assert len(sc) == res["k"] == 3
+    strongest = sc[0]["label"]
+    assert any(strongest in t for t in texts if "Strongest leg" in t)
+
+
+# ---- prefilled logging widget ---------------------------------------------------
+def test_quick_log_opens_on_the_tested_slip(patched):
+    at = _run_test(_app("DraftKings"))
+    ss = at.session_state
+    assert ss["slip_lab_ql_picks"] == [0, 1, 2]
+    assert ss["slip_lab_ql_mode_parlay"] is True and ss["slip_lab_ql_mode_singles"] is False
+    assert ss["slip_lab_ql_p_stake_pick"] == 10.0 and ss["slip_lab_ql_p_stake_10.0"] == 10.0
+
+
+def test_quick_log_prefill_for_singles_uses_the_average_stake(patched):
+    at = _app("DraftKings")
+    for i, l in enumerate(at.session_state["slip_lab_legs"]):
+        l["stake"] = [5.0, 10.0, 15.0][i]
+    at = _run_test(at, "singles")
+    ss = at.session_state
+    assert ss["slip_lab_ql_mode_singles"] is True and ss["slip_lab_ql_mode_parlay"] is False
+    assert ss["slip_lab_ql_s_stake_pick"] == 10.0
+
+
+def test_prefill_does_not_overwrite_a_stake_the_user_typed_for_logging(patched):
+    at = _run_test(_app("DraftKings"))
+    at.session_state["slip_lab_ql_p_stake_pick"] = 25.0
+    at.run()
+    assert at.session_state["slip_lab_ql_p_stake_pick"] == 25.0          # same slip -> left alone
+
+
+# ---- full book menu -------------------------------------------------------------
+def test_menu_is_unavailable_for_pickem_and_manual_books(patched):
+    for book in ("PrizePicks", "Bet365"):
+        at = _app(book, legs=False)
+        _open_menu(at)
+        assert any("full menu is available for sportsbooks" in i.value for i in at.info), book
+
+
+def test_fetching_the_menu_costs_one_request_per_game_and_market_at_one_book(patched, menu_api):
+    at = _open_menu(_app("DraftKings", legs=False))
+    assert any("up to **" in c.value and "Odds API credits" in c.value for c in at.caption)     # estimate shown first
+    assert menu_api == []                                                                    # nothing fetched until pressed
+    _btn(at, "Fetch menu")[0].click()
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    markets = [q["markets"] for _, q in menu_api]
+    assert sorted(markets) == sorted(BM.all_keys(BM.catalog("basketball_nba", sports.get("NBA").markets),
+                                                 ["Game lines", "Team totals"]))
+    assert all(q["bookmakers"] == "draftkings" and "regions" not in q for _, q in menu_api)
+    menu = at.session_state["slip_lab_menu"]
+    assert menu["ctx"][2] == "draftkings" and menu["quotes"] and menu["remaining"] == "480"
+    assert any("Menu fetched" in c.value and "480 credits remaining" in c.value for c in at.caption)
+
+
+def test_menu_legs_show_team_and_game_markets_and_match_the_model(patched, menu_api):
+    at = _open_menu(_app("DraftKings", legs=False))
+    at.multiselect(key="slip_lab_menu_groups").set_value(["Game lines", "Player props — main"])
+    at.run()
+    _btn(at, "Fetch menu")[0].click()
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    menu = at.session_state["slip_lab_menu"]
+    sp = sports.get("NBA")
+    norm = sp.projections.normalize_name
+    pool = SL.build_leg_pool(_plays(), _offers(), "draftkings", sp.market_map, norm)
+    info = BM.board_player_info(pool, norm)
+    labels = BM.label_events(menu["events"], menu["quotes"], info, norm)
+    legs = BM.attach_model(BM.build_menu_legs(menu["quotes"], labels, "draftkings", market_map=sp.market_map, info=info,
+                                              normalize_name=norm), BM.model_index(pool, sp.market_map, norm), norm)
+    kinds = {l["kind"] for l in legs}
+    assert {"moneyline", "spread", "total", "player"} <= kinds
+    tatum = [l for l in legs if l["player"] == "Jayson Tatum" and l["side"] == "Over"][0]
+    assert tatum["p"] == 0.58 and tatum["p_source"] == "model"              # the board's number, not the book's
+    ml = [l for l in legs if l["kind"] == "moneyline"][0]
+    assert ml["game"] == "BOS @ NYK"                                       # tied to the board's own game label
+    # the page rendered the menu table without error and offers the "Basis" explanation
+    assert any("Basis" in c.value for c in at.caption)
+
+
+def test_a_menu_slip_pressure_tests_and_says_the_market_legs_have_no_edge(patched, menu_api):
+    at = _app("DraftKings", legs=False)
+    sp = sports.get("NBA")
+    norm = sp.projections.normalize_name
+    quotes = BM.parse_menu_event(_menu_event_json("h2h"), "draftkings") + BM.parse_menu_event(_menu_event_json("spreads"), "draftkings")
+    pool = SL.build_leg_pool(_plays(), _offers(), "draftkings", sp.market_map, norm)
+    info = BM.board_player_info(pool, norm)
+    labels = BM.label_events({"EVT1": {"id": "EVT1", "home": "New York Knicks", "away": "Boston Celtics"}}, quotes, info, norm)
+    legs = BM.build_menu_legs(quotes, labels, "draftkings", market_map=sp.market_map, info=info, normalize_name=norm)
+    ml = [l for l in legs if l["kind"] == "moneyline" and l["team"] == "NYK" or l["kind"] == "moneyline" and l["player"] == "New York Knicks"][:1]
+    sprd = [l for l in legs if l["kind"] == "spread" and l["player"] == "New York Knicks"][:1]
+    board = [l for l in pool if l["side"] == "Over"][:1]
+    assert ml and sprd and board
+    at.session_state["slip_lab_ctx"] = ("NBA", _date())
+    at.session_state["slip_lab_legs"] = [dict(l, stake=10.0) for l in ml + sprd + board]
+    at.session_state["slip_lab_ver"] = 1
+    at.session_state["slip_lab_book_seen"] = "draftkings"
+    at = _run_test(at)
+    res = at.session_state["slip_lab_result"]["res"]
+    assert res["k"] == 3 and res["n_market_prob"] == 2
+    texts = [m.value for m in list(at.success) + list(at.warning) + list(at.error) + list(at.info)]
+    assert any("2 of 3 legs use the book's own probability" in t for t in texts)
+    calls = patched
+    plays = calls[-1][0][0]
+    team_plays = [p for p in plays if p["Player"] is None]
+    assert len(team_plays) == 2 and {p["Market"] for p in team_plays} == {"Moneyline", "Spread"}
+
+
+def test_switching_book_strips_the_price_from_menu_legs(patched):
+    at = _app("DraftKings")
+    legs = at.session_state["slip_lab_legs"]
+    legs[0] = dict(legs[0], source="menu", p_source="market")
+    at.session_state["slip_lab_book_seen"] = "draftkings"
+    at.session_state["slip_lab_book_selector"] = "FanDuel"
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    first = at.session_state["slip_lab_legs"][0]
+    assert first["price"] is None and first["at_book"] is False
+
+
+def test_menu_fetch_failures_are_reported_not_fatal(patched, monkeypatch):
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    monkeypatch.setattr(O, "fetch_events", lambda *a, **k: [{"id": "EVT1", "home_team": "H", "away_team": "A", "commence_time": now}])
+
+    def boom(path, params):
+        if params["markets"] == "h2h":
+            raise O.OddsAPIError("HTTP 500: kaboom")
+        return _menu_event_json(params["markets"]), {"remaining": "9"}
+    monkeypatch.setattr(O, "_get", boom)
+    at = _open_menu(_app("DraftKings", legs=False))
+    _btn(at, "Fetch menu")[0].click()
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert [e["market"] for e in at.session_state["slip_lab_menu"]["errors"]] == ["h2h"]
+    assert any("1 request(s) failed" in e.label for e in at.expander)
+
+
+def test_quota_exhaustion_stops_the_fetch_and_says_so(patched, monkeypatch):
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    monkeypatch.setattr(O, "fetch_events", lambda *a, **k: [{"id": "EVT1", "home_team": "H", "away_team": "A", "commence_time": now}])
+    monkeypatch.setattr(O, "_get", lambda p, q: (_ for _ in ()).throw(O.OddsAPIError("429 — out of quota for this period.")))
+    at = _open_menu(_app("DraftKings", legs=False))
+    _btn(at, "Fetch menu")[0].click()
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("fetch stopped early" in e.value and "quota" in e.value for e in at.error)
+
+
+def test_a_large_fetch_needs_an_explicit_credit_confirmation(patched, monkeypatch):
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    monkeypatch.setattr(O, "fetch_events", lambda *a, **k: [
+        {"id": f"EVT{i}", "home_team": f"H{i}", "away_team": f"A{i}", "commence_time": now} for i in range(5)])
+    calls = []
+    monkeypatch.setattr(O, "_get", lambda p, q: (calls.append(q), ({"id": "x", "bookmakers": []}, {}))[1])
+    at = _open_menu(_app("DraftKings", legs=False))
+    at.multiselect(key="slip_lab_menu_games").set_value([o for o in at.multiselect(key="slip_lab_menu_games").options])
+    at.multiselect(key="slip_lab_menu_groups").set_value(list(BM.catalog("basketball_nba", sports.get("NBA").markets)))
+    at.run()
+    assert any("may use up to" in c.label for c in at.checkbox)
+    assert _btn(at, "Fetch menu")[0].disabled and calls == []
+    at.checkbox(key="slip_lab_menu_confirm").check()
+    at.run()
+    assert not _btn(at, "Fetch menu")[0].disabled
