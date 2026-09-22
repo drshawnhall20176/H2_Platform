@@ -604,3 +604,45 @@ def test_the_filter_works_on_real_pool_and_menu_legs():
     assert SL.slots_present(pool) == ["Afternoon", "Late"]
     assert {l["player"] for l in SL.filter_slot_game(pool, "Late")} == {"P2"}
     assert {l["game"] for l in SL.filter_slot_game(pool, SL.ALL_SLOTS, "AAA @ BBB")} == {"AAA @ BBB"}
+
+
+# --------------------------------------------------------------------------- why / weather
+def _play(**kw):
+    base = {"Player": "A Guy", "Market": "Batter HR", "Side": "Over", "Why": "barrels ahead of results"}
+    base.update(kw)
+    return base
+
+
+def test_leg_why_reads_the_models_own_reasoning_off_the_leg():
+    assert SL.leg_why({"why": "hitting .312 this season, projected for 4.1 PA tonight"}) == \
+        "hitting .312 this season, projected for 4.1 PA tonight"
+    assert SL.leg_why({"why": ""}) is None
+    assert SL.leg_why({}) is None
+
+
+def test_leg_weather_reads_temp_and_wind_off_the_attached_play():
+    leg = {"play": _play(Temp=82, WxDesc="6 mph out to CF", WxDriver="wind")}
+    assert SL.leg_weather(leg) == "82°F, 6 mph out to CF — a wind-driven estimate, verify before leaning on it"
+
+
+def test_leg_weather_marks_temperature_driven_conditions_without_the_wind_caveat():
+    leg = {"play": _play(Temp=91, WxDesc="3 mph crosswind", WxDriver="temperature")}
+    assert SL.leg_weather(leg) == "91°F, 3 mph crosswind"
+
+
+def test_leg_weather_says_indoors_for_a_dome_with_no_real_temperature():
+    leg = {"play": _play(Temp=None, WxDesc="indoors", WxDriver="indoors")}
+    assert SL.leg_weather(leg) == "indoors (fixed roof) — weather has no effect here"
+
+
+def test_leg_weather_is_none_without_an_attached_play_or_without_a_known_park():
+    assert SL.leg_weather({}) is None
+    assert SL.leg_weather({"play": None}) is None
+    assert SL.leg_weather({"play": _play()}) is None                 # no WxDesc -> park/fetch unknown
+    assert SL.leg_weather({"play": _play(Temp=82)}) is None           # Temp alone, still no WxDesc
+
+
+def test_weather_modeled_markets_is_the_honest_boundary_the_model_actually_uses():
+    assert SL.WEATHER_MODELED_MARKETS == {"Batter HR", "Batter Total Bases"}
+    assert "Batter Hits+Runs+RBIs" not in SL.WEATHER_MODELED_MARKETS
+    assert "Pitcher Strikeouts" not in SL.WEATHER_MODELED_MARKETS

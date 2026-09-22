@@ -727,3 +727,82 @@ def test_in_the_full_menu_view_the_suggestions_still_follow_the_time_slot_and_ga
     tickets = at.session_state["slip_lab_ticket_store"].values()
     assert tickets and all({l["game"] for l in t["legs"]} == {"DEN @ LAL"} for t in tickets)
     assert any("Narrowed to" in c.value and "DEN @ LAL" in c.value for c in at.caption)
+
+
+# =========================================================================== build 209: Why + Weather
+def _weather_mlb_plays():
+    """Three MLB batters in one game, real weather attached to the board play the way
+    best_bets_data.py's own pipeline does it (Temp/WxDesc/WxDriver via _hitter_diag). Caminero and
+    Paredes both clear the suggester's default min-leg-probability so a real 2-leg ticket forms;
+    Judge's HR leg (a real quiet-power read, not a bug) stays below it on purpose, same shape as
+    the live Caminero/Judge surprise this was built to explain."""
+    common = {"GameDate": None, "Temp": 58, "WxDesc": "9 mph in from CF", "WxDriver": "wind"}
+    plays = [{"Player": "Junior Caminero", "PlayerId": 1, "Team": "TB", "Game": "TB @ NYY", "Opp": "X",
+              "Market": "Batter Total Hits", "Side": "Over", "Line": 0.5, "ModelProb": 0.55, "Fair": 100,
+              "Conviction": 1.1, "Why": "hitting .290 this season, projected for 4.1 PA tonight",
+              "_stat_key": "hits", "_game_log": [{"hits": v} for v in (1, 0, 2, 1, 0, 1)], **common},
+             {"Player": "Isaac Paredes", "PlayerId": 2, "Team": "TB", "Game": "TB @ NYY", "Opp": "X",
+              "Market": "Batter Total Hits", "Side": "Over", "Line": 0.5, "ModelProb": 0.60, "Fair": 100,
+              "Conviction": 1.2, "Why": "hitting .265 this season, projected for 3.9 PA tonight",
+              "_stat_key": "hits", "_game_log": [{"hits": v} for v in (1, 1, 0, 2, 0, 1)], **common},
+             {"Player": "Aaron Judge", "PlayerId": 3, "Team": "NYY", "Game": "TB @ NYY", "Opp": "X",
+              "Market": "Batter HR", "Side": "Yes", "Line": None, "ModelProb": 0.24, "Fair": 320,
+              "Conviction": 1.3, "Why": "barrels imply his real HR/PA rate should run 1.5 points higher",
+              "_stat_key": "hr", "_game_log": [{"hr": v} for v in (0, 1, 0, 0, 0, 1)], **common}]
+    offers = [{"market": "batter_hits", "player": "Junior Caminero", "point": 0.5,
+               "over": {"draftkings": 100, "fanduel": -105}, "under": {"draftkings": -120, "fanduel": -115}},
+              {"market": "batter_hits", "player": "Isaac Paredes", "point": 0.5,
+               "over": {"draftkings": 100, "fanduel": -105}, "under": {"draftkings": -120, "fanduel": -115}},
+              {"market": "batter_home_runs", "player": "Aaron Judge", "point": 0.5,
+               "over": {"draftkings": 320, "fanduel": 340}, "under": {}}]
+    return plays, offers
+
+
+@pytest.fixture
+def weather_slate(monkeypatch):
+    plays, offers = _weather_mlb_plays()
+    monkeypatch.setattr(BBD, "load_mlb_best_bets_board", lambda *a, **k: (plays, [], ["draftkings"]))
+    monkeypatch.setattr(BBD, "fetch_mlb_real_lines", lambda *a, **k: ({}, offers, ["draftkings"]))
+    monkeypatch.setattr(BBD, "get_odds_api_key", lambda: "KEY")
+    monkeypatch.setattr(quick_log, "render_quick_log", lambda *a, **k: None)
+
+
+def _dataframe_with(at, col):
+    for df in at.dataframe:
+        if col in df.value.columns:
+            return df.value
+    return None
+
+
+def test_singles_tables_show_why_and_weather_when_the_game_has_real_weather(weather_slate):
+    at = AppTest.from_file(PAGE, default_timeout=90)
+    at.session_state["sport"] = "MLB"
+    at.session_state["slip_lab_book_selector"] = "DraftKings"
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    why_df = _dataframe_with(at, "Why")
+    assert why_df is not None and "Weather" in why_df.columns
+    assert all(why_df["Weather"] == "58°F, 9 mph in from CF — a wind-driven estimate, verify before leaning on it")
+    assert any("projected for 4.1 PA tonight" in w or "barrels imply" in w for w in why_df["Why"])
+    assert any("only feeds weather into Batter HR and Batter Total Bases" in c.value for c in at.caption)
+
+
+def test_ticket_legs_show_weather_and_why_inline(weather_slate):
+    at = AppTest.from_file(PAGE, default_timeout=90)
+    at.session_state["sport"] = "MLB"
+    at.session_state["slip_lab_book_selector"] = "DraftKings"
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    md = " ".join(m.value for m in at.markdown)
+    assert "9 mph in from CF" in md
+    assert "barrels imply" in md or "projected for 4.1 PA tonight" in md
+
+
+def test_no_weather_caption_or_column_content_when_the_sport_has_none(patched):
+    at = _app(legs=False)
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert not any("only feeds weather into" in c.value for c in at.caption)
+    why_df = _dataframe_with(at, "Why")
+    if why_df is not None:
+        assert set(why_df["Weather"]) <= {"—"}
