@@ -573,6 +573,12 @@ with sugg_box:
                    + f"Ranked from {sug['eligible']} model-priced leg(s) that {book_label} posts. These are candidates to "
                    "pressure-test, not picks: every number comes from the model, and *confidence floor* shows how much "
                    "each depends on a small sample.")
+        any_wx = any(SL.leg_weather(l) for l in sug_input)
+        if any_wx:
+            st.caption("🌤️ **Why** is the model's own real reasoning for that leg; **Weather** is that game's real "
+                       "conditions (MLB only). The model only feeds weather into Batter HR and Batter Total Bases "
+                       "probabilities — shown for every leg as context, but it only explains the number itself on "
+                       "those two markets.")
 
         def _singles_table(rows, key, title, blurb):
             st.markdown(f"**{title}**")
@@ -584,6 +590,7 @@ with sugg_box:
                 "Leg": SL.leg_label(r["leg"]), "Hit chance": r["score"]["p"], "Floor": r["score"]["floor"],
                 "Price": r["leg"]["price"], "EV %": r["score"]["ev_pct"], "EV at floor %": r["score"]["ev_floor_pct"],
                 "Chance +EV": r["score"]["p_ev_pos"], "Suggested stake $": r["stake"], "Grade": r["grade"],
+                "Why": SL.leg_why(r["leg"]) or "—", "Weather": SL.leg_weather(r["leg"]) or "—",
             } for r in rows]), hide_index=True, width="stretch", column_config={
                 "Hit chance": st.column_config.NumberColumn(format="percent"),
                 "Floor": st.column_config.NumberColumn(format="percent"),
@@ -620,7 +627,9 @@ with sugg_box:
                 st.markdown("  \n".join(
                     f"▸ **{SL.leg_label(l)}** — {l['p'] * 100:.0f}% hit, floor {sug['scores'][l['id']]['floor'] * 100:.0f}%"
                     + ("" if l.get("price") is None else f", {l['price']:+.0f}")
-                    + (f" · {l['game']}" if l.get("game") else "") for l in tk["legs"]))
+                    + (f" · {l['game']}" if l.get("game") else "")
+                    + (f" · 🌤️ {SL.leg_weather(l)}" if SL.leg_weather(l) else "")
+                    + (f"  \n   *{SL.leg_why(l)}*" if SL.leg_why(l) else "") for l in tk["legs"]))
                 ev_show = tk["ev"] if tk["ev"] is not None else tk["ev_indep"]
                 pays = (f"{tk['decimal']:.2f}x ({SL.decimal_to_american(tk['decimal']):+d})" if tk["mode"] == "parlay"
                         else f"up to {tk['decimal']:.1f}x")
