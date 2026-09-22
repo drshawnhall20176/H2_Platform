@@ -775,7 +775,8 @@ with p1:
     mode = st.radio("How does this slip pay?", mode_opts, format_func=MODE_LABELS.get, horizontal=False,
                     key="slip_lab_mode")
 with p2:
-    stake = (st.number_input("Stake for the entry ($)", min_value=1.0, value=10.0, step=1.0,
+    st.session_state.setdefault("slip_lab_stake_in", 10.0)
+    stake = (st.number_input("Stake for the entry ($)", min_value=1.0, step=1.0,
                              key="slip_lab_stake_in") if mode != "singles" else 0.0)
     if mode == "singles":
         st.number_input("Default stake per single ($)", min_value=1.0, value=10.0, step=1.0,
@@ -787,8 +788,9 @@ decimal_override = None
 table = None
 tables_for_drop = {}
 if mode == "parlay":
+    st.session_state.setdefault("slip_lab_parlay_price", 0)
     typed_price = st.number_input(
-        "Parlay price shown on your book's slip (American, 0 = multiply the legs)", value=0, step=10,
+        "Parlay price shown on your book's slip (American, 0 = multiply the legs)", step=10,
         key="slip_lab_parlay_price",
         help="Books re-price same-game parlays for correlation. If your slip shows a different price than "
              "the product of the legs, type it here — the pressure test uses it.")

@@ -4,6 +4,7 @@ monkeypatched to a small synthetic NBA slate (no network). Covers each kind of b
 pick'em, manual), each payout mode, the pressure-test button, and the lock-in hand-off.
 """
 
+import logging
 from datetime import datetime
 from pathlib import Path
 
@@ -330,6 +331,23 @@ def test_loading_a_ticket_clears_a_stale_result_and_typed_parlay_price(patched):
     assert not at.exception
     assert at.session_state["slip_lab_result"] is None
     assert at.session_state["slip_lab_parlay_price"] == 0
+
+
+def test_loading_a_ticket_never_triggers_streamlits_session_state_widget_warning(patched, caplog):
+    """`_load_legs` sets slip_lab_stake_in and slip_lab_parlay_price via the Session State API before
+    the number_input widgets sharing those keys render. Streamlit warns ("created with a default value
+    but also had its value set via the Session State API") whenever a widget's key was already set that
+    way AND the widget call also passes its own `value=` default — seen live in the deployed app's logs,
+    pointing at the stake widget. Both widgets now rely on `st.session_state.setdefault(...)` for their
+    first-run default instead of a `value=` kwarg, the same pattern already used for `slip_lab_mode`."""
+    caplog.set_level(logging.WARNING, logger="streamlit")
+    at = _run_test(_app("DraftKings"))
+    at.session_state["slip_lab_parlay_price"] = 350
+    _btn(at, "Load into slip")[0].click()
+    at.run()
+    assert not at.exception
+    noisy = [r.message for r in caplog.records if "Session State API" in r.message]
+    assert not noisy, noisy
 
 
 def test_pickem_suggestions_are_entries_only_never_singles(patched):
