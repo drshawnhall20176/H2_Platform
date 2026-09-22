@@ -235,6 +235,27 @@ def get_available_books_for_date(date_str: str) -> List[str]:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+def fetch_mlb_offers(date_str: str, odds_api_key: str):
+    """The real, expensive Odds API network call underneath fetch_mlb_real_lines (255 quota units
+    for a full slate — see that function's own docstring), split out and cached on (date_str,
+    odds_api_key) ONLY — never preferred_book. A single fetch already returns every requested
+    bookmaker's prices in one response, so which book a person prefers cannot change what this
+    call needs to fetch; only fetch_mlb_real_lines' own market_lines_for_slate step (a plain local
+    pass over the offers already in memory, no network involved) actually depends on it.
+
+    A REAL, CONFIRMED FIX, not the original design: fetch_mlb_real_lines used to do this fetch
+    directly inside its own preferred_book-keyed cache, so switching the book selector on any
+    page (Slip Lab's most directly, since it puts that selector at the top of the page and
+    invites switching it) was a full cache MISS on the whole function — repeating this exact same
+    255-quota real network fetch for data that had not changed, on every single switch. Reported
+    directly: "runs fine until I change to a different book." This is the identical split
+    load_generic_best_bets_board's own fetch_generic_offers already uses for every non-MLB sport
+    (see that function's docstring) — MLB was the one board-building path that never got it."""
+    offers, _info = O.fetch_slate_props(date_str, odds_api_key, list(O.SUPPORTED_MARKETS), sport=O.SPORT)
+    return offers
+
+
+@st.cache_data(ttl=300, show_spinner=False)
 def fetch_mlb_real_lines(date_str: str, odds_api_key: Optional[str],
                          preferred_book: str = O.DEFAULT_BOOK):
     """The ONE real-lines fetch for MLB — extracted directly out of build_mlb_board so every
@@ -264,6 +285,12 @@ def fetch_mlb_real_lines(date_str: str, odds_api_key: Optional[str],
     genuinely separate real Odds API fetch for identical data -- real, wasted quota cost, not
     just a style concern.
 
+    THE REAL NETWORK FETCH ITSELF LIVES IN fetch_mlb_offers (date_str, odds_api_key only, no
+    preferred_book) -- this function still caches its own preferred_book-keyed result (every
+    caller's return shape is unchanged), but a book switch is now a cheap re-filter of offers
+    already sitting in fetch_mlb_offers' own cache, not a second real Odds API fetch. See that
+    function's docstring for the full, confirmed cause this split fixes.
+
     DOES NOT WRITE session_state ITSELF -- a real, confirmed bug this function used to have,
     caught during a final pre-deploy review, not found earlier: st.cache_data caches GLOBALLY
     across ALL users/sessions by default (Streamlit's own docs confirm this directly). A cache
@@ -283,8 +310,7 @@ def fetch_mlb_real_lines(date_str: str, odds_api_key: Optional[str],
     available_books: List[str] = list(O.US_BOOKS.keys())
     if odds_api_key:
         try:
-            offers, _info = O.fetch_slate_props(date_str, odds_api_key,
-                                                list(O.SUPPORTED_MARKETS), sport=O.SPORT)
+            offers = fetch_mlb_offers(date_str, odds_api_key)
             real_lines = O.market_lines_for_slate(offers, preferred_book=preferred_book)
             real_offers = offers
             live_books = O.books_in_offers(offers)

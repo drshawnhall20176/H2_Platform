@@ -575,6 +575,41 @@ def test_fetch_mlb_real_lines_fetch_failure_degrades_gracefully():
          "crashing the page")
 
 
+def test_switching_preferred_book_reuses_the_cached_real_offers_fetch_not_a_second_real_fetch():
+    """The actual regression fix for a live report on Slip Lab: "runs fine until I change to a
+    different book." Before fetch_mlb_offers existed, fetch_mlb_real_lines cached its WHOLE body
+    -- the real 255-quota Odds API fetch included -- keyed on preferred_book too, so every book
+    switch was a full cache miss that repeated that exact same real network fetch for data that
+    had not changed (The Odds API already returns every requested bookmaker in one response).
+    Confirms the fix directly: two different preferred_book values still correctly get their own
+    different real line (nothing about real behavior changed) while the real network fetch itself
+    -- the actually expensive, actually slow part -- only happens once."""
+    calls = []
+
+    def fake_fetch_slate_props(date_str, api_key, markets, sport=None):
+        calls.append((date_str, api_key))
+        offers = [{"player": "Wade Meckler", "market": "batter_total_bases", "point": 1.5,
+                   "over": {"draftkings": -140}, "under": {"draftkings": 115}},
+                  {"player": "Wade Meckler", "market": "batter_total_bases", "point": 0.5,
+                   "over": {"fanduel": -110}, "under": {"fanduel": -110}}]
+        return offers, {}
+
+    with patch.object(BBD.O, "fetch_slate_props", side_effect=fake_fetch_slate_props), \
+        patch.object(BBD.O, "books_in_offers", return_value=["draftkings", "fanduel"]):
+        BBD.fetch_mlb_offers.clear()      # a clean real cache for this real test
+        BBD.fetch_mlb_real_lines.clear()
+        dk_lines, _, _ = BBD.fetch_mlb_real_lines("2026-07-28", "FAKE_KEY", preferred_book="draftkings")
+        fd_lines, _, _ = BBD.fetch_mlb_real_lines("2026-07-28", "FAKE_KEY", preferred_book="fanduel")
+
+    assert len(calls) == 1, ("switching preferred_book must not repeat the real Odds API fetch "
+                             "for the same (date_str, odds_api_key) -- a book switch used to "
+                             "trigger a second, identical real fetch here")
+    assert dk_lines[("wade meckler", "batter_total_bases")] == 1.5   # DraftKings' own real line
+    assert fd_lines[("wade meckler", "batter_total_bases")] == 0.5   # FanDuel's own real line
+    print("✓ a book switch reuses the cached real offers fetch (one real fetch, not two), while "
+         "each book still gets correctly its own real line")
+
+
 # ----------------------------------------------------------------- ensure_mlb_offers_session_state
 def test_ensure_mlb_offers_session_state_writes_the_real_side_channel():
     fake_offers = [{"player": "X", "market": "batter_total_bases", "point": 1.5,
