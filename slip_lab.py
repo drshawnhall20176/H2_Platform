@@ -92,6 +92,26 @@ def leg_weather(leg: Dict) -> Optional[str]:
     return tag
 
 
+def game_weather_lines(legs: Sequence[Dict], dh: frozenset = frozenset()) -> List[str]:
+    """One "GAME — conditions" line per distinct game among `legs`, in the order each game first
+    appears — not one line per leg. Weather is a property of the game, not the player, so showing it
+    on every leg's own row/bullet repeats the identical string once per hitter in that game (a full
+    lineup's worth); this is what a caller displays once instead. A game with no weather info (no
+    attached play, or a non-MLB sport) is left out rather than shown as a blank line."""
+    seen: Dict[Optional[str], str] = {}
+    order: List[Optional[str]] = []
+    for l in legs:
+        k = game_key(l, dh)
+        if k is None or k in seen:
+            continue
+        wx = leg_weather(l)
+        if wx is None:
+            continue
+        seen[k] = f"{l.get('game')} — {wx}"
+        order.append(k)
+    return [seen[k] for k in order]
+
+
 # --------------------------------------------------------------------------- pool from the board
 def _novig_over(off: Dict, book: Optional[str]) -> Optional[float]:
     """No-vig P(Over) at one point: the chosen book's own two-sided price when it posted both
