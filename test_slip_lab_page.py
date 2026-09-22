@@ -792,28 +792,36 @@ def _dataframe_with(at, col):
     return None
 
 
-def test_singles_tables_show_why_and_weather_when_the_game_has_real_weather(weather_slate):
+def test_singles_tables_show_why_per_leg_and_weather_once_per_game(weather_slate):
+    """Why is leg-specific (each batter's own reasoning) so it stays a per-row column. Weather is a
+    property of the game, not the batter — Caminero, Paredes and Judge share one game in this fixture,
+    so build 210 stopped repeating the identical weather string on every one of their rows and instead
+    shows it once, in the caption above the tables (see slip_lab.game_weather_lines)."""
     at = AppTest.from_file(PAGE, default_timeout=90)
     at.session_state["sport"] = "MLB"
     at.session_state["slip_lab_book_selector"] = "DraftKings"
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     why_df = _dataframe_with(at, "Why")
-    assert why_df is not None and "Weather" in why_df.columns
-    assert all(why_df["Weather"] == "58°F, 9 mph in from CF — a wind-driven estimate, verify before leaning on it")
+    assert why_df is not None and "Weather" not in why_df.columns
     assert any("projected for 4.1 PA tonight" in w or "barrels imply" in w for w in why_df["Why"])
-    assert any("only feeds weather into Batter HR and Batter Total Bases" in c.value for c in at.caption)
+    # The explanatory caption above the tables names the game's conditions once for the whole slate,
+    # not once per row of the two singles tables below it (which together list this game's legs twice).
+    top_caption = next(c.value for c in at.caption if "only feeds weather into Batter HR" in c.value)
+    assert top_caption.count("58°F, 9 mph in from CF") == 1
 
 
-def test_ticket_legs_show_weather_and_why_inline(weather_slate):
+def test_ticket_legs_show_why_inline_and_weather_once_per_game(weather_slate):
     at = AppTest.from_file(PAGE, default_timeout=90)
     at.session_state["sport"] = "MLB"
     at.session_state["slip_lab_book_selector"] = "DraftKings"
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     md = " ".join(m.value for m in at.markdown)
-    assert "9 mph in from CF" in md
     assert "barrels imply" in md or "projected for 4.1 PA tonight" in md
+    assert "9 mph in from CF" not in md                 # no longer inline on the leg bullet
+    ticket_wx = [c.value for c in at.caption if "9 mph in from CF" in c.value]
+    assert ticket_wx and all(c.count("9 mph in from CF") == 1 for c in ticket_wx)   # once per ticket
 
 
 def test_no_weather_caption_or_column_content_when_the_sport_has_none(patched):
@@ -823,4 +831,4 @@ def test_no_weather_caption_or_column_content_when_the_sport_has_none(patched):
     assert not any("only feeds weather into" in c.value for c in at.caption)
     why_df = _dataframe_with(at, "Why")
     if why_df is not None:
-        assert set(why_df["Weather"]) <= {"—"}
+        assert "Weather" not in why_df.columns

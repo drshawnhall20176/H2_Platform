@@ -646,3 +646,31 @@ def test_weather_modeled_markets_is_the_honest_boundary_the_model_actually_uses(
     assert SL.WEATHER_MODELED_MARKETS == {"Batter HR", "Batter Total Bases"}
     assert "Batter Hits+Runs+RBIs" not in SL.WEATHER_MODELED_MARKETS
     assert "Pitcher Strikeouts" not in SL.WEATHER_MODELED_MARKETS
+
+
+def test_game_weather_lines_collapses_a_full_lineups_worth_of_legs_to_one_line_per_game():
+    """A real MLB slate hands the suggester every hitter in a game's lineup, all sharing that game's
+    one real weather reading — build 210's fix for the redundant "same string on every row" complaint
+    on the deployed app. One line per game, not one per leg, however many legs share it."""
+    wx = {"Temp": 58, "WxDesc": "9 mph in from CF", "WxDriver": "wind"}
+    legs = [{"game": "TB @ NYY", "play": _play(**wx)} for _ in range(9)]      # a full lineup, one game
+    assert SL.game_weather_lines(legs) == \
+        ["TB @ NYY — 58°F, 9 mph in from CF — a wind-driven estimate, verify before leaning on it"]
+
+
+def test_game_weather_lines_one_line_per_distinct_game_in_first_seen_order():
+    legs = [{"game": "TB @ NYY", "play": _play(Temp=58, WxDesc="9 mph in from CF", WxDriver="wind")},
+            {"game": "LAD @ SF", "play": _play(Temp=64, WxDesc="calm", WxDriver="temperature")},
+            {"game": "TB @ NYY", "play": _play(Temp=58, WxDesc="9 mph in from CF", WxDriver="wind")}]
+    assert SL.game_weather_lines(legs) == [
+        "TB @ NYY — 58°F, 9 mph in from CF — a wind-driven estimate, verify before leaning on it",
+        "LAD @ SF — 64°F, calm",
+    ]
+
+
+def test_game_weather_lines_skips_a_game_with_no_weather_info():
+    legs = [{"game": "TB @ NYY", "play": _play(Temp=58, WxDesc="9 mph in from CF", WxDriver="wind")},
+            {"game": "NO @ DOME", "play": _play()},                          # no WxDesc -> unknown
+            {"game": "NO GAME"}]                                             # no play attached at all
+    assert SL.game_weather_lines(legs) == \
+        ["TB @ NYY — 58°F, 9 mph in from CF — a wind-driven estimate, verify before leaning on it"]
