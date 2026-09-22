@@ -57,6 +57,41 @@ def leg_label(leg: Dict) -> str:
     return f"{leg.get('player')} · {leg.get('market')} {leg.get('side')}{line_s}"
 
 
+def leg_why(leg: Dict) -> Optional[str]:
+    """The model's own real reasoning behind this leg's probability (projections._hitter_reasons /
+    _pitcher_reasons, already computed once per play and carried on it as "Why"). None for a leg
+    with no model view of its own (a market-only menu leg, or a hand-typed one with no matched play)."""
+    return leg.get("why") or None
+
+
+# Markets whose MODEL probability actually factors in ballpark weather (projections.py's own
+# batter_pa_probs only applies _weather_hr — temperature + out-to-CF wind — to home run and total
+# base outcomes; every other batter/pitcher market is weather-BLIND in this model, however much
+# a real game's conditions might plausibly matter to a person watching it). Kept as an honest
+# boundary so leg_weather's caller can say plainly when a shown number is/isn't weather-adjusted.
+WEATHER_MODELED_MARKETS = {"Batter HR", "Batter Total Bases"}
+
+
+def leg_weather(leg: Dict) -> Optional[str]:
+    """Short real weather line for the leg's own game — MLB only, and only once a real play (board
+    or a menu leg matched to one) is attached, since that's the only place Temp/WxDesc/WxDriver get
+    computed (best_bets_data.py's own load_slate_weather -> weather.hr_factor_breakdown). None when
+    the park or fetch is unknown (an honest "we don't know", never a guessed 70°F/no-wind default)."""
+    pl = leg.get("play")
+    if not pl:
+        return None
+    desc = pl.get("WxDesc")
+    if desc is None:
+        return None
+    temp = pl.get("Temp")
+    if temp is None:
+        return "indoors (fixed roof) — weather has no effect here"
+    tag = f"{temp:g}°F, {desc}"
+    if pl.get("WxDriver") == "wind":
+        tag += " — a wind-driven estimate, verify before leaning on it"
+    return tag
+
+
 # --------------------------------------------------------------------------- pool from the board
 def _novig_over(off: Dict, book: Optional[str]) -> Optional[float]:
     """No-vig P(Over) at one point: the chosen book's own two-sided price when it posted both
