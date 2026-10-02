@@ -52922,3 +52922,61 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401872618,4,40187261827,20,Merrimack,New Haven,,,False,4,20
 2026,401872618,4,40187261828,21,New Haven,Merrimack,,,False,4,58
 2026,401872618,4,40187261829,22,Merrimack,New Haven,,,False,4,20
+2026,401862786,5,4018627862,1,Tulsa,North Texas,,,False,1,25
+2026,401862786,5,4018627863,2,North Texas,Tulsa,,,False,1,71
+2026,401862786,5,4018627864,3,Tulsa,North Texas,,,False,1,35
+2026,401862786,5,4018627865,4,North Texas,Tulsa,,,True,1,74
+2026,401862786,5,4018627867,5,Tulsa,North Texas,,,True,1,25
+2026,401862786,5,4018627869,6,North Texas,Tulsa,,,False,2,84
+2026,401862786,5,40186278610,7,Tulsa,North Texas,,,True,2,82
+2026,401862786,5,40186278612,8,North Texas,Tulsa,,,False,2,82
+2026,401862786,5,40186278613,9,Tulsa,North Texas,,,False,2,22
+2026,401862786,5,40186278614,10,North Texas,Tulsa,,,True,2,61
+2026,401862786,5,40186278616,11,Tulsa,North Texas,,,False,2,17
+2026,401862786,5,40186278617,12,North Texas,Tulsa,,,False,2,65
+2026,401862786,5,40186278618,13,Tulsa,North Texas,,,True,2,53
+2026,401862786,5,40186278620,14,North Texas,Tulsa,,,False,2,83
+2026,401862786,5,40186278622,15,North Texas,Tulsa,,,True,3,75
+2026,401862786,5,40186278624,16,Tulsa,North Texas,,,False,3,33
+2026,401862786,5,40186278625,17,North Texas,Tulsa,,,True,3,90
+2026,401862786,5,40186278627,18,Tulsa,North Texas,,,False,3,13
+2026,401862786,5,40186278628,19,North Texas,Tulsa,,,True,3,57
+2026,401862786,5,40186278630,20,Tulsa,North Texas,,,True,3,25
+2026,401862786,5,40186278632,21,North Texas,Tulsa,,,False,3,75
+2026,401862786,5,40186278633,22,Tulsa,North Texas,,,False,3,30
+2026,401862786,5,40186278634,23,North Texas,Tulsa,,,False,3,47
+2026,401862786,5,40186278635,24,Tulsa,North Texas,,,True,4,15
+2026,401862786,5,40186278637,25,North Texas,Tulsa,,,True,4,75
+2026,401862786,5,40186278639,26,Tulsa,North Texas,,,False,4,25
+2026,401862786,5,40186278640,27,North Texas,Tulsa,,,False,4,86
+2026,401862786,5,40186278641,28,Tulsa,North Texas,,,True,4,62
+2026,401862786,5,40186278643,29,North Texas,Tulsa,,,False,4,75
+2026,401862786,5,40186278644,30,North Texas,Tulsa,,,True,5,25
+2026,401862786,5,40186278645,31,Tulsa,North Texas,,,True,5,25
+2026,401871049,5,4018710492,1,New Mexico State,Western Kentucky,,,False,1,25
+2026,401871049,5,4018710493,2,Western Kentucky,New Mexico State,,,True,1,73
+2026,401871049,5,4018710495,3,New Mexico State,Western Kentucky,,,True,1,25
+2026,401871049,5,4018710497,4,Western Kentucky,New Mexico State,,,False,1,72
+2026,401871049,5,4018710498,5,New Mexico State,Western Kentucky,,,True,1,39
+2026,401871049,5,40187104910,6,Western Kentucky,New Mexico State,,,False,1,73
+2026,401871049,5,40187104911,7,New Mexico State,Western Kentucky,,,False,2,43
+2026,401871049,5,40187104912,8,Western Kentucky,New Mexico State,,,True,2,94
+2026,401871049,5,40187104914,9,Western Kentucky,New Mexico State,,,False,2,75
+2026,401871049,5,40187104915,10,New Mexico State,Western Kentucky,,,True,2,22
+2026,401871049,5,40187104917,11,Western Kentucky,New Mexico State,,,False,2,79
+2026,401871049,5,40187104918,12,New Mexico State,Western Kentucky,,,False,2,49
+2026,401871049,5,40187104919,13,Western Kentucky,New Mexico State,,,True,2,63
+2026,401871049,5,40187104921,14,New Mexico State,Western Kentucky,,,False,2,34
+2026,401871049,5,40187104923,15,Western Kentucky,New Mexico State,,,False,3,83
+2026,401871049,5,40187104924,16,New Mexico State,Western Kentucky,,,True,3,33
+2026,401871049,5,40187104926,17,Western Kentucky,New Mexico State,,,True,3,79
+2026,401871049,5,40187104928,18,New Mexico State,Western Kentucky,,,False,3,25
+2026,401871049,5,40187104929,19,Western Kentucky,New Mexico State,,,False,3,89
+2026,401871049,5,40187104930,20,New Mexico State,Western Kentucky,,,False,3,44
+2026,401871049,5,40187104931,21,Western Kentucky,New Mexico State,,,False,4,86
+2026,401871049,5,40187104932,22,New Mexico State,Western Kentucky,,,False,4,50
+2026,401871049,5,40187104933,23,Western Kentucky,New Mexico State,,,False,4,96
+2026,401871049,5,40187104934,24,New Mexico State,Western Kentucky,,,True,4,37
+2026,401871049,5,40187104936,25,Western Kentucky,New Mexico State,,,False,4,75
+2026,401871049,5,40187104937,26,New Mexico State,Western Kentucky,,,False,4,37
+2026,401871049,5,40187104938,27,Western Kentucky,New Mexico State,,,False,4,93
