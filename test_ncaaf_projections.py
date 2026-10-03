@@ -270,6 +270,18 @@ def _ncaaf_row(player="Star QB", pid="p1"):
     }
 
 
+def test_build_best_bets_carries_the_games_real_scheduled_start_time():
+    """Regression for a confirmed, reported bug: Slip Lab's Time slot filter reads a play's
+    GameDate to bucket it into Afternoon/Evening/Late/TBD, but build_best_bets never put GameDate
+    on the play at all -- see nfl_projections's own regression test for the full reasoning (the
+    reported symptom, NFL's Time slot dropdown only ever offering "All slate"/"TBD", was identical
+    here since NCAAF's build_best_bets had the exact same gap)."""
+    row = {**_ncaaf_row(), "_game_date": "2026-09-26T23:30:00Z"}
+    plays = P.build_best_bets([row], sims=8000, seed=13)
+    assert plays and all(p["GameDate"] == "2026-09-26T23:30:00Z" for p in plays)
+    print("✓ NCAAF build_best_bets now carries the row's real _game_date onto every play as GameDate")
+
+
 def test_build_best_bets_matches_original_behavior_with_no_offers():
     plays = P.build_best_bets([_ncaaf_row()], sims=8000, seed=13)
     assert plays[0]["RealPrice"] is None

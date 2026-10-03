@@ -144,6 +144,19 @@ def test_best_bets_schema_matches_the_shared_play_contract():
     assert [p["Conviction"] for p in plays] == sorted((p["Conviction"] for p in plays), reverse=True)
 
 
+def test_best_bets_carries_the_games_real_scheduled_start_time():
+    """Regression for a confirmed, reported bug: Slip Lab's Time slot filter reads a play's
+    GameDate to bucket it into Afternoon/Evening/Late/TBD, but build_best_bets never put GameDate
+    on the play at all -- see nfl_projections's own regression test for the full reasoning (the
+    reported symptom, NFL's Time slot dropdown only ever offering "All slate"/"TBD", was identical
+    here since NHL's build_best_bets had the exact same gap). _skater_row/_goalie_row's own default
+    _game_date ("2026-10-21T23:00Z") is used unchanged, so this also confirms the real value flows
+    through, not just a non-None placeholder."""
+    plays = NP.build_best_bets([_skater_row(), _goalie_row()], sims=3000, seed=2)
+    assert plays and all(p["GameDate"] == "2026-10-21T23:00Z" for p in plays)
+    print("✓ NHL build_best_bets now carries the row's real _game_date onto every play as GameDate")
+
+
 def test_best_bets_role_split_and_market_names():
     plays = NP.build_best_bets([_skater_row(), _goalie_row()], sims=2000, seed=2)
     by_player = {}

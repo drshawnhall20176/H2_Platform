@@ -308,6 +308,10 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
             plays.append({
                 "Player": r["Player"], "PlayerId": r.get("_pid"), "Team": r["Team"],
                 "Game": r["GameLabel"], "Opp": r.get("Opp"), "Versus": r.get("Opp"),
+                # GameDate: this game's real, scheduled UTC start time, already sitting on every
+                # row -- see nfl_projections.build_best_bets's own comment for the full reasoning
+                # (a confirmed, reported Slip Lab Time slot bug this same gap caused there).
+                "GameDate": r.get("_game_date"),
                 "Market": disp, "Side": side, "Line": line, "LineSource": line_src,
                 "ModelProb": round(sp, 4), "Fair": fair,
                 "RealPrice": real_price, "RealPriceBook": real_price_book, "PriceSource": price_src,

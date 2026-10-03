@@ -109,6 +109,22 @@ def test_build_best_bets_only_produces_plays_for_a_rows_own_markets():
     print("✓ build_best_bets only produces plays for a row's own gated markets, no phantom markets")
 
 
+def test_build_best_bets_carries_the_games_real_scheduled_start_time():
+    """Regression for a confirmed, reported bug: Slip Lab's Time slot filter (sports.leg_slot ->
+    sports.game_dt) reads a play's GameDate to bucket it into Afternoon/Evening/Late/TBD, but
+    NFL's build_best_bets never put GameDate on the play at all -- every NFL leg silently fell
+    into "TBD" regardless of its real kickoff time, reported directly as the Time slot dropdown
+    only ever offering "All slate" and "TBD" on an NFL Sunday. build_projection_index already read
+    this same row["_game_date"] for its own ctx dict; build_best_bets just never carried it onto
+    the play it actually returns. Confirms the fix directly."""
+    row = {"Player": "Ground Only RB", "Team": "KC", "Opp": "LAC", "GameLabel": "KC @ LAC",
+          "_pid": "p1", "_markets": ["player_rush_yds"], "_game_date": "2026-09-27T17:00:00Z",
+          "_recent_games": [{"rushing_yards": 60, "receiving_yards": 0, "receptions": 0}] * 3}
+    plays = NP.build_best_bets([row], sims=2000, seed=1)
+    assert plays and all(p["GameDate"] == "2026-09-27T17:00:00Z" for p in plays)
+    print("✓ NFL build_best_bets now carries the row's real _game_date onto every play as GameDate")
+
+
 def test_build_best_bets_matches_original_behavior_with_no_offers():
     # Backward-compatibility guarantee: no offers supplied -- every existing caller must see
     # the exact original always-theoretical PriceSource/ConvictionSource behavior.

@@ -254,6 +254,89 @@ def test_get_raises_cfbd_error_on_401():
          "own error-handling convention")
 
 
+def test_get_retries_a_read_timeout_and_succeeds_on_a_later_attempt():
+    # Regression for a real, confirmed failure: a GitHub Actions run against the real CFBD API
+    # hit a single requests.exceptions.ReadTimeout and failed the whole player-season-stats
+    # refresh (refresh_ncaaf.py treats that pull as fatal on purpose). _get now retries a
+    # network-level failure instead of raising on the first one.
+    import requests as _requests
+
+    class _FakeResp:
+        status_code = 200
+        text = "ok"
+
+        @staticmethod
+        def json():
+            return [{"ok": True}]
+
+    calls = {"n": 0}
+
+    def _flaky_get(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise _requests.exceptions.ReadTimeout("read timeout=30")
+        return _FakeResp()
+
+    with patch.object(_requests, "get", side_effect=_flaky_get), \
+         patch.object(ND.time, "sleep", return_value=None) as fake_sleep:
+        result = ND._get("/stats/player/season", {"year": 2026}, "FAKE_KEY")
+
+    assert result == [{"ok": True}]
+    assert calls["n"] == 3
+    assert fake_sleep.call_count == 2
+    print("✓ _get retries a ReadTimeout (2 failures) and succeeds on the 3rd attempt, without "
+         "actually sleeping in the test")
+
+
+def test_get_raises_cfbd_error_after_exhausting_all_retries_on_repeated_timeout():
+    import requests as _requests
+
+    def _always_times_out(*args, **kwargs):
+        raise _requests.exceptions.ReadTimeout("read timeout=30")
+
+    with patch.object(_requests, "get", side_effect=_always_times_out), \
+         patch.object(ND.time, "sleep", return_value=None) as fake_sleep:
+        try:
+            ND._get("/stats/player/season", {"year": 2026}, "FAKE_KEY")
+            assert False, "expected CFBDError"
+        except ND.CFBDError as e:
+            assert "network error" in str(e) and "timeout" in str(e).lower()
+
+    assert fake_sleep.call_count == 2  # 3 total attempts, backoff sleeps between them only
+    print("✓ _get gives up and raises a clear CFBDError after exhausting retries on a "
+         "persistent timeout (not an infinite or unbounded retry loop)")
+
+
+def test_get_does_not_retry_a_real_http_error_response_like_401_or_429():
+    # A 401/429 is a real response from CFBD, not a network failure -- retrying won't fix a bad
+    # key or exhausted quota, so these must still raise immediately, unretried, exactly as
+    # before this change (see test_get_raises_cfbd_error_on_401 above for the 401 case already
+    # covered; this confirms the retry logic didn't change that fast-fail path or add a sleep).
+    import requests as _requests
+
+    class _FakeResp:
+        status_code = 429
+        text = "out of quota"
+
+    calls = {"n": 0}
+
+    def _rate_limited(*args, **kwargs):
+        calls["n"] += 1
+        return _FakeResp()
+
+    with patch.object(_requests, "get", side_effect=_rate_limited), \
+         patch.object(ND.time, "sleep", return_value=None) as fake_sleep:
+        try:
+            ND._get("/roster", {"year": 2026}, "FAKE_KEY")
+            assert False, "expected CFBDError"
+        except ND.CFBDError as e:
+            assert "429" in str(e)
+
+    assert calls["n"] == 1
+    assert fake_sleep.call_count == 0
+    print("✓ _get does not retry a real 429 response (single attempt, no sleep, same as before)")
+
+
 def test_load_rosters_handles_a_genuinely_empty_api_response_without_crashing():
     # Regression guard for a real, live-confirmed crash: a GitHub Actions run against the real
     # CFBD API returned 0 roster rows for 2026 (a month before the season -- rosters likely

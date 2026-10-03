@@ -69,6 +69,7 @@ CFBD's own published OpenAPI documentation:
 from __future__ import annotations
 
 import os
+import time
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -87,16 +88,51 @@ class CFBDError(Exception):
     pass
 
 
+_MAX_ATTEMPTS = 3
+
+
 def _get(path: str, params: Dict, api_key: str) -> list:
     """Raw GET against the CFBD REST API. Bearer-token auth, confirmed via CFBD's own docs
     ("Configure Bearer authorization: apiKey") -- same shape as odds_api.py's own _get(), same
     reason: a thin, dependency-free wrapper is easier to keep correct than a generated client,
-    and here it's not just easier, it's required (see this module's own docstring)."""
-    try:
-        r = requests.get(f"{BASE}{path}", params=params,
-                         headers={"Authorization": f"Bearer {api_key}"}, timeout=30)
-    except requests.RequestException as e:
-        raise CFBDError(f"network error: {e}") from e
+    and here it's not just easier, it's required (see this module's own docstring).
+
+    RETRIES ON NETWORK-LEVEL FAILURES ONLY, with a short backoff between attempts -- added
+    directly in response to a REAL, CONFIRMED failure, not a theoretical one: a GitHub Actions
+    run against this exact endpoint hit a single requests.exceptions.ReadTimeout and failed the
+    whole player-season-stats refresh (refresh_ncaaf.py treats that pull as fatal on purpose --
+    see its own main()'s comment -- roster+stats are the core dependency a projections engine
+    needs, so one transient timeout shouldn't throw away a run that would have succeeded a few
+    seconds later against a free-tier API that is occasionally just slow, not down).
+
+    Deliberately checked against the rest of this codebase first (odds_api.py's and
+    ufc_engine.py's own _get() are the identical single-attempt shape; mlb_engine.py's
+    fetch_json() is the only retry precedent anywhere here, and it's a silent fail-soft loop
+    with no backoff and no exception-type discrimination) -- there was no existing
+    retry/backoff convention to reuse, so this one is deliberately narrow: it retries ONLY a
+    raised requests.RequestException (no HTTP response came back at all -- a timeout, a reset
+    connection, a DNS hiccup), never a real HTTP response. A 401 or 429 is CFBD telling us
+    something concrete (bad key, no quota) -- hammering the same request again within the same
+    run won't fix either one, so those still raise immediately, unretried, exactly as before."""
+    last_err: Optional[requests.RequestException] = None
+    r = None
+    for attempt in range(_MAX_ATTEMPTS):
+        try:
+            r = requests.get(f"{BASE}{path}", params=params,
+                             headers={"Authorization": f"Bearer {api_key}"}, timeout=30)
+            last_err = None
+            break
+        except requests.RequestException as e:
+            last_err = e
+            if attempt < _MAX_ATTEMPTS - 1:
+                wait = 5 * (attempt + 1)  # 5s, then 10s -- short enough to stay well inside the
+                                           # GitHub Action's own 10-minute job timeout even if
+                                           # several different _get() calls each hit this path.
+                print(f"[NCAAF] GET {path} attempt {attempt + 1}/{_MAX_ATTEMPTS} failed "
+                     f"({e}) -- retrying in {wait}s.")
+                time.sleep(wait)
+    if last_err is not None:
+        raise CFBDError(f"network error: {last_err}") from last_err
     if r.status_code == 401:
         raise CFBDError("401 Unauthorized — check CFBD_API_KEY.")
     if r.status_code == 429:

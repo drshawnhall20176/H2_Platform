@@ -145,6 +145,21 @@ def test_build_best_bets_no_longer_clusters_different_streak_lengths_identically
     print("✓ NCAAMB's build_best_bets Conviction ranking also no longer ties streak lengths together")
 
 
+def test_build_best_bets_carries_the_games_real_scheduled_start_time():
+    """Regression for a confirmed, reported bug: Slip Lab's Time slot filter reads a play's
+    GameDate to bucket it into Afternoon/Evening/Late/TBD, but build_best_bets never put GameDate
+    on the play at all -- see nfl_projections's own regression test for the full reasoning (the
+    reported symptom, NFL's Time slot dropdown only ever offering "All slate"/"TBD", was identical
+    here since NCAAMB's build_best_bets had the exact same gap)."""
+    log = [_log(14, 6, 3, 2), _log(11, 5, 4, 1), _log(16, 7, 2, 2)]
+    rows = [{"Player": "Cooper Flagg", "Team": "Duke", "Opp": "UNC",
+            "GameLabel": "UNC @ Duke", "_pid": 1, "_game_log": log,
+            "_game_date": "2026-11-05T00:00:00Z"}]
+    plays = NP.build_best_bets(rows, sims=8000, seed=5)
+    assert plays and all(p["GameDate"] == "2026-11-05T00:00:00Z" for p in plays)
+    print("✓ NCAAMB build_best_bets now carries the row's real _game_date onto every play as GameDate")
+
+
 # ----------------------------------------------------------------- real price/reference wiring
 def test_build_best_bets_matches_original_behavior_with_no_real_data():
     log = [_log(14, 6, 3, 2), _log(11, 5, 4, 1), _log(16, 7, 2, 2)]
