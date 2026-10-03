@@ -52922,6 +52922,60 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401872618,4,40187261827,20,Merrimack,New Haven,,,False,4,20
 2026,401872618,4,40187261828,21,New Haven,Merrimack,,,False,4,58
 2026,401872618,4,40187261829,22,Merrimack,New Haven,,,False,4,20
+2026,401858245,5,4018582452,1,Virginia Tech,Pittsburgh,,,True,1,25
+2026,401858245,5,4018582454,2,Pittsburgh,Virginia Tech,,,False,1,75
+2026,401858245,5,4018582455,3,Virginia Tech,Pittsburgh,,,True,1,23
+2026,401858245,5,4018582457,4,Pittsburgh,Virginia Tech,,,False,1,75
+2026,401858245,5,4018582458,5,Virginia Tech,Pittsburgh,,,False,1,28
+2026,401858245,5,4018582459,6,Pittsburgh,Virginia Tech,,,False,1,91
+2026,401858245,5,40185824510,7,Virginia Tech,Pittsburgh,,,False,1,27
+2026,401858245,5,40185824511,8,Pittsburgh,Virginia Tech,,,True,1,65
+2026,401858245,5,40185824513,9,Virginia Tech,Pittsburgh,,,True,1,29
+2026,401858245,5,40185824515,10,Pittsburgh,Virginia Tech,,,True,2,75
+2026,401858245,5,40185824517,11,Virginia Tech,Pittsburgh,,,True,2,25
+2026,401858245,5,40185824519,12,Pittsburgh,Virginia Tech,,,False,2,75
+2026,401858245,5,40185824520,13,Virginia Tech,Pittsburgh,,,False,2,15
+2026,401858245,5,40185824521,14,Pittsburgh,Virginia Tech,,,True,2,23
+2026,401858245,5,40185824523,15,Virginia Tech,Pittsburgh,,,False,2,25
+2026,401858245,5,40185824525,16,Pittsburgh,Virginia Tech,,,True,3,75
+2026,401858245,5,40185824527,17,Virginia Tech,Pittsburgh,,,False,3,25
+2026,401858245,5,40185824528,18,Pittsburgh,Virginia Tech,,,False,3,28
+2026,401858245,5,40185824529,19,Virginia Tech,Pittsburgh,,,False,3,19
+2026,401858245,5,40185824530,20,Pittsburgh,Virginia Tech,,,False,3,41
+2026,401858245,5,40185824531,21,Virginia Tech,Pittsburgh,,,False,3,41
+2026,401858245,5,40185824532,22,Pittsburgh,Virginia Tech,,,True,3,41
+2026,401858245,5,40185824534,23,Virginia Tech,Pittsburgh,,,False,4,25
+2026,401858245,5,40185824535,24,Pittsburgh,Virginia Tech,,,True,4,97
+2026,401858245,5,40185824537,25,Virginia Tech,Pittsburgh,,,True,4,70
+2026,401858245,5,40185824539,26,Pittsburgh,Virginia Tech,,,False,4,75
+2026,401858245,5,40185824540,27,Virginia Tech,Pittsburgh,,,False,4,35
+2026,401858245,5,40185824541,28,Pittsburgh,Virginia Tech,,,False,4,55
+2026,401858245,5,40185824542,29,Virginia Tech,Pittsburgh,,,False,4,20
+2026,401858476,5,4018584762,1,Northwestern,Penn State,,,True,1,25
+2026,401858476,5,4018584764,2,Penn State,Northwestern,,,False,1,75
+2026,401858476,5,4018584765,3,Northwestern,Penn State,,,True,1,12
+2026,401858476,5,4018584767,4,Penn State,Northwestern,,,False,1,75
+2026,401858476,5,4018584768,5,Northwestern,Penn State,,,False,1,19
+2026,401858476,5,4018584769,6,Penn State,Northwestern,,,False,2,80
+2026,401858476,5,40185847610,7,Northwestern,Penn State,,,False,2,24
+2026,401858476,5,40185847611,8,Penn State,Northwestern,,,True,2,34
+2026,401858476,5,40185847613,9,Northwestern,Penn State,,,True,2,25
+2026,401858476,5,40185847615,10,Penn State,Northwestern,,,False,2,80
+2026,401858476,5,40185847616,11,Northwestern,Penn State,,,False,2,21
+2026,401858476,5,40185847617,12,Penn State,Northwestern,,,False,2,88
+2026,401858476,5,40185847618,13,Northwestern,Penn State,,,True,2,65
+2026,401858476,5,40185847620,14,Penn State,Northwestern,,,False,2,75
+2026,401858476,5,40185847621,15,Northwestern,Penn State,,,False,2,27
+2026,401858476,5,40185847623,16,Penn State,Northwestern,,,False,3,76
+2026,401858476,5,40185847624,17,Northwestern,Penn State,,,False,3,20
+2026,401858476,5,40185847625,18,Penn State,Northwestern,,,False,3,83
+2026,401858476,5,40185847626,19,Northwestern,Penn State,,,True,3,21
+2026,401858476,5,40185847628,20,Penn State,Northwestern,,,False,3,75
+2026,401858476,5,40185847629,21,Northwestern,Penn State,,,False,4,51
+2026,401858476,5,40185847630,22,Penn State,Northwestern,,,True,4,68
+2026,401858476,5,40185847632,23,Northwestern,Penn State,,,True,4,25
+2026,401858476,5,40185847634,24,Penn State,Northwestern,,,False,4,75
+2026,401858476,5,40185847635,25,Northwestern,Penn State,,,False,4,29
 2026,401862786,5,4018627862,1,Tulsa,North Texas,,,False,1,25
 2026,401862786,5,4018627863,2,North Texas,Tulsa,,,False,1,71
 2026,401862786,5,4018627864,3,Tulsa,North Texas,,,False,1,35
@@ -52953,6 +53007,28 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401862786,5,40186278643,29,North Texas,Tulsa,,,False,4,75
 2026,401862786,5,40186278644,30,North Texas,Tulsa,,,True,5,25
 2026,401862786,5,40186278645,31,Tulsa,North Texas,,,True,5,25
+2026,401868094,5,4018680942,1,Montana State,Idaho,,,True,1,66
+2026,401868094,5,4018680944,2,Idaho,Montana State,,,True,1,25
+2026,401868094,5,4018680946,3,Montana State,Idaho,,,False,1,75
+2026,401868094,5,4018680947,4,Idaho,Montana State,,,False,1,7
+2026,401868094,5,4018680948,5,Montana State,Idaho,,,True,1,58
+2026,401868094,5,40186809410,6,Idaho,Montana State,,,True,1,25
+2026,401868094,5,40186809412,7,Montana State,Idaho,,,False,2,81
+2026,401868094,5,40186809413,8,Idaho,Montana State,,,True,2,68
+2026,401868094,5,40186809415,9,Montana State,Idaho,,,True,2,65
+2026,401868094,5,40186809417,10,Idaho,Montana State,,,True,2,25
+2026,401868094,5,40186809419,11,Montana State,Idaho,,,True,2,75
+2026,401868094,5,40186809421,12,Idaho,Montana State,,,False,2,25
+2026,401868094,5,40186809422,13,Montana State,Idaho,,,False,2,55
+2026,401868094,5,40186809424,14,Idaho,Montana State,,,False,3,25
+2026,401868094,5,40186809425,15,Montana State,Idaho,,,True,3,82
+2026,401868094,5,40186809427,16,Idaho,Montana State,,,False,3,25
+2026,401868094,5,40186809428,17,Montana State,Idaho,,,True,3,38
+2026,401868094,5,40186809430,18,Idaho,Montana State,,,True,4,25
+2026,401868094,5,40186809432,19,Montana State,Idaho,,,False,4,75
+2026,401868094,5,40186809433,20,Idaho,Montana State,,,False,4,34
+2026,401868094,5,40186809434,21,Montana State,Idaho,,,False,4,53
+2026,401868094,5,40186809435,22,Idaho,Montana State,,,True,4,20
 2026,401871049,5,4018710492,1,New Mexico State,Western Kentucky,,,False,1,25
 2026,401871049,5,4018710493,2,Western Kentucky,New Mexico State,,,True,1,73
 2026,401871049,5,4018710495,3,New Mexico State,Western Kentucky,,,True,1,25
@@ -52980,3 +53056,29 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401871049,5,40187104936,25,Western Kentucky,New Mexico State,,,False,4,75
 2026,401871049,5,40187104937,26,New Mexico State,Western Kentucky,,,False,4,37
 2026,401871049,5,40187104938,27,Western Kentucky,New Mexico State,,,False,4,93
+2026,401871050,5,4018710502,1,Liberty,Delaware,,,True,1,75
+2026,401871050,5,4018710504,2,Delaware,Liberty,,,False,1,25
+2026,401871050,5,4018710505,3,Liberty,Delaware,,,True,1,89
+2026,401871050,5,4018710507,4,Delaware,Liberty,,,False,1,25
+2026,401871050,5,4018710508,5,Liberty,Delaware,,,False,2,92
+2026,401871050,5,4018710509,6,Delaware,Liberty,,,False,2,10
+2026,401871050,5,40187105010,7,Liberty,Delaware,,,True,2,64
+2026,401871050,5,40187105012,8,Delaware,Liberty,,,False,2,12
+2026,401871050,5,40187105013,9,Liberty,Delaware,,,True,2,98
+2026,401871050,5,40187105015,10,Delaware,Liberty,,,False,2,25
+2026,401871050,5,40187105017,11,Delaware,Liberty,,,False,3,25
+2026,401871050,5,40187105018,12,Liberty,Delaware,,,False,3,69
+2026,401871050,5,40187105019,13,Delaware,Liberty,,,False,3,8
+2026,401871050,5,40187105020,14,Liberty,Delaware,,,False,3,48
+2026,401871050,5,40187105021,15,Delaware,Liberty,,,False,3,18
+2026,401871050,5,40187105022,16,Liberty,Delaware,,,True,3,9
+2026,401871050,5,40187105024,17,Delaware,Liberty,,,False,3,25
+2026,401871050,5,40187105025,18,Liberty,Delaware,,,False,3,32
+2026,401871050,5,40187105026,19,Delaware,Liberty,,,False,3,21
+2026,401871050,5,40187105027,20,Liberty,Delaware,,,True,4,22
+2026,401871050,5,40187105029,21,Delaware,Liberty,,,True,4,27
+2026,401871050,5,40187105031,22,Liberty,Delaware,,,False,4,68
+2026,401871050,5,40187105032,23,Delaware,Liberty,,,False,4,34
+2026,401871050,5,40187105033,24,Liberty,Delaware,,,False,4,52
+2026,401871050,5,40187105034,25,Delaware,Liberty,,,True,4,33
+2026,401871050,5,40187105036,26,Liberty,Delaware,,,False,4,63
