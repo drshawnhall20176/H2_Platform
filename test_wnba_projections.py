@@ -213,6 +213,21 @@ def test_build_best_bets_covers_all_four_markets_and_ranks_by_conviction():
     print("✓ build_best_bets covers all 4 markets, ranks by conviction, includes recent-form reasoning")
 
 
+def test_build_best_bets_carries_the_games_real_scheduled_start_time():
+    """Regression for a confirmed, reported bug: Slip Lab's Time slot filter reads a play's
+    GameDate to bucket it into Afternoon/Evening/Late/TBD, but build_best_bets never put GameDate
+    on the play at all -- see nfl_projections's own regression test for the full reasoning (the
+    reported symptom, NFL's Time slot dropdown only ever offering "All slate"/"TBD", was identical
+    here since WNBA's build_best_bets had the exact same gap). _row's own default _game_date
+    ("2026-07-13T23:00:00Z") is used unchanged, so this also confirms the real value flows through,
+    not just a non-None placeholder."""
+    log_hot = [_log(p, 3, 2, 4) for p in (28, 30, 26, 29, 31, 27, 30, 28, 29, 27)]
+    rows = [_row("Hot Scorer", "Las Vegas Aces", "Seattle Storm", "Seattle Storm @ Las Vegas Aces", log_hot)]
+    plays = WP.build_best_bets(rows, sims=8000, seed=3)
+    assert plays and all(p["GameDate"] == "2026-07-13T23:00:00Z" for p in plays)
+    print("✓ WNBA build_best_bets now carries the row's real _game_date onto every play as GameDate")
+
+
 def test_build_best_bets_skips_players_with_no_game_log():
     rows = [_row("No Log", "Atlanta Dream", "Chicago Sky", "Chicago Sky @ Atlanta Dream", [])]
     assert WP.build_best_bets(rows, sims=1000, seed=1) == []

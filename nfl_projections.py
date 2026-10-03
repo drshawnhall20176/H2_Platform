@@ -336,6 +336,16 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
             plays.append({
                 "Player": r["Player"], "PlayerId": r.get("_pid"), "Team": r["Team"],
                 "Game": r["GameLabel"], "Opp": r.get("Opp"), "Versus": r.get("Opp"),
+                # GameDate: this game's real, scheduled UTC start time, already sitting on every
+                # row (build_projection_index's own ctx dict reads the same r["_game_date"]) --
+                # just never carried onto the play before now. Confirmed, reported gap: without
+                # it, Slip Lab's Time slot filter (sports.leg_slot -> sports.game_dt) had no start
+                # time to bucket NFL legs by and silently dumped every single one into "TBD",
+                # leaving "Afternoon"/"Evening"/"Late" always empty for this sport -- MLB's own
+                # projections.build_best_bets already sets this; the other five sports' own
+                # build_best_bets (NBA/NCAAF/NCAAMB/NHL/WNBA) had the identical gap, fixed
+                # alongside this one.
+                "GameDate": r.get("_game_date"),
                 "Market": disp, "Side": side, "Line": line, "LineSource": line_src,
                 "ModelProb": round(sp, 4), "Fair": fair,
                 "RealPrice": real_price, "RealPriceBook": real_price_book, "PriceSource": price_src,
