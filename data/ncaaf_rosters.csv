@@ -521,6 +521,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 4702572,Aaron,Hester,Aaron Hester,Liberty,DL,4,18.0,74.0,245.0
 4702578,Dainsus,Miller,Dainsus Miller,Wyoming,CB,4,20.0,70.0,180.0
 4702579,Daughtry,Richardson,Daughtry Richardson,Coastal Carolina,OL,4,78.0,78.0,328.0
+4702581,JaCorey,Thomas,JaCorey Thomas,West Virginia,DB,4,20.0,72.0,205.0
 4702728,Kristian,Phillips,Kristian Phillips,Boston College,OL,4,71.0,76.0,315.0
 4702748,Kailep,Edwards,Kailep Edwards,Louisiana,LB,4,16.0,72.0,220.0
 4702749,Fitzgerald,West Jr.,Fitzgerald West Jr.,Louisiana,DL,4,68.0,74.0,300.0
@@ -3007,6 +3008,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 5082458,Maurion,Eleam,Maurion Eleam,Louisiana,S,4,21.0,70.0,180.0
 5082503,James,Gillespie,James Gillespie,Nevada,DT,4,91.0,75.0,315.0
 5082548,A.J.,Turner,A.J. Turner,Minnesota,RB,4,2.0,72.0,200.0
+5082559,Rece,Verhoff,Rece Verhoff,North Carolina,PK,4,90.0,71.0,190.0
 5082572,Justin,Powe,Justin Powe,Troy,S,4,6.0,72.0,210.0
 5082584,DJ,Epps,DJ Epps,West Virginia,WR,4,2.0,71.0,188.0
 5082587,Matt,Coleman,Matt Coleman,Sacramento State,WR,4,2.0,72.0,173.0
@@ -3412,6 +3414,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 5086711,Caleb,Cortez,Caleb Cortez,TCU,LB,4,41.0,72.0,225.0
 5086808,Brendan,Bett,Brendan Bett,Florida,DL,4,90.0,76.0,319.0
 5086842,DaShawn,Stone,DaShawn Stone,Duke,S,3,8.0,75.0,195.0
+5086869,Jamel,Johnson,Jamel Johnson,NC State,CB,4,21.0,71.0,191.0
 5086872,Bryce,Llewellyn,Bryce Llewellyn,Eastern Michigan,DB,4,6.0,71.0,207.0
 5086874,Davion,Williams,Davion Williams,Eastern Michigan,DB,4,9.0,71.0,183.0
 5086897,Diego,Davis,Diego Davis,Sacramento State,LB,4,44.0,72.0,235.0
@@ -3730,6 +3733,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 5095256,Tray,Franklin,Tray Franklin,Coastal Carolina,OL,4,56.0,77.0,315.0
 5095360,Eric,Singleton Jr.,Eric Singleton Jr.,Florida,WR,4,2.0,70.0,184.0
 5095368,Jack,Procter,Jack Procter,Washington State,DE,4,96.0,74.0,243.0
+5095810,Jason,Chambers,Jason Chambers,West Virginia,CB,4,23.0,71.0,189.0
 5095820,Jayden,Flaker,Jayden Flaker,New Mexico,LB,4,48.0,74.0,222.0
 5095828,Trevon,Humphrey,Trevon Humphrey,Boston College,OL,4,53.0,77.0,310.0
 5095838,Kendrick,DuJour,Kendrick DuJour,East Carolina,DL,4,9.0,77.0,223.0
