@@ -75,14 +75,16 @@ def load_slate(date_str: str, stats_date_str: str):
 _POSITION_GROUPS = {
     "QB": {
         "positions": ("QB",),
-        "line_markets": [("player_pass_yds", "Pass Yards")],
+        "line_markets": [("player_pass_yds", "Pass Yards"), ("player_pass_attempts", "Pass Attempts"),
+                         ("player_pass_completions", "Pass Completions"),
+                         ("player_pass_interceptions", "Interceptions")],
         "td_charts": [("Passing TDs", lambda g: g.get("passing_tds") or 0),
                      ("Rushing TDs", lambda g: g.get("rushing_tds") or 0)],
     },
     "RB": {
         "positions": ("RB", "FB"),
-        "line_markets": [("player_rush_yds", "Rush Yards"), ("player_receptions", "Receptions"),
-                         ("player_reception_yds", "Receiving Yards")],
+        "line_markets": [("player_rush_yds", "Rush Yards"), ("player_rush_attempts", "Rush Attempts"),
+                         ("player_receptions", "Receptions"), ("player_reception_yds", "Receiving Yards")],
         "td_charts": [("Touchdowns", lambda g: (g.get("rushing_tds") or 0) + (g.get("receiving_tds") or 0))],
     },
     "WR / TE": {
@@ -90,9 +92,14 @@ _POSITION_GROUPS = {
         "line_markets": [("player_receptions", "Receptions"), ("player_reception_yds", "Receiving Yards")],
         "td_charts": [("Touchdowns", lambda g: (g.get("rushing_tds") or 0) + (g.get("receiving_tds") or 0))],
     },
+    "K": {
+        "positions": ("K",),
+        "line_markets": [("player_field_goals", "FG Made"), ("player_fg_attempts", "FG Attempted")],
+        "td_charts": [],
+    },
 }
 
-_market_col_by_key = {mk: c for mk, c, _d in P.market_list()}
+_market_col_by_key = {mk: c for mk, c, _d in P.all_market_list()}
 
 
 c1, c2 = st.columns([2, 1])

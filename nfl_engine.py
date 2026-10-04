@@ -81,12 +81,21 @@ def _diag(msg: str) -> None:
 # RBs would mix two very different opportunity profiles under one line/market — worth a real,
 # separate design decision later, not a quick addition here.
 _MARKETS_FOR_POSITION: Dict[str, List[str]] = {
-    "QB": ["player_pass_yds"],
-    "RB": ["player_rush_yds", "player_receptions", "player_reception_yds"],
+    "QB": ["player_pass_yds", "player_pass_attempts", "player_pass_completions",
+           "player_pass_interceptions"],
+    "RB": ["player_rush_yds", "player_rush_attempts", "player_receptions", "player_reception_yds"],
     "WR": ["player_receptions", "player_reception_yds"],
     "TE": ["player_receptions", "player_reception_yds"],
-    "FB": ["player_rush_yds", "player_receptions", "player_reception_yds"],
+    "FB": ["player_rush_yds", "player_rush_attempts", "player_receptions", "player_reception_yds"],
+    "K": ["player_field_goals", "player_fg_attempts"],
 }
+
+# Anytime TD is a market for every position that can score a rushing/receiving touchdown (the same
+# set nfl_projections._TD_ELIGIBLE_POSITIONS uses), but it is NOT in _MARKETS_FOR_POSITION/_MARKET_SPEC:
+# it has no rotation floor of its own. player_row adds it to a player's markets only when he already
+# cleared a real role floor for his position, so adding this market never changes who is on the slate.
+ANYTIME_TD_MARKET = "player_anytime_td"
+_ANYTIME_TD_POSITIONS = {"QB", "RB", "WR", "TE", "FB"}
 
 # odds_market_key -> (weekly-stats column, display name, rotation-floor stat column, floor value).
 # The rotation floor is checked against the SAME player's own average of the floor column — see
@@ -97,6 +106,14 @@ _MARKET_SPEC: Dict[str, Tuple[str, str, str, float]] = {
     "player_rush_yds":     ("rushing_yards",   "Rush Yards",     "_touches",  CFG.MIN_RB_TOUCHES),
     "player_receptions":   ("receptions",      "Receptions",     "targets",   CFG.MIN_WR_TARGETS),
     "player_reception_yds": ("receiving_yards", "Receiving Yards", "targets", CFG.MIN_WR_TARGETS),
+    # Added on request. nflreadpy's own weekly columns: "attempts" = PASS attempts, "completions",
+    # "passing_interceptions" (thrown), "carries" = rush attempts, "fg_made" / "fg_att" (kickers).
+    "player_pass_attempts":      ("attempts",              "Pass Attempts",     "attempts", CFG.MIN_QB_ATTEMPTS),
+    "player_pass_completions":   ("completions",           "Pass Completions",  "attempts", CFG.MIN_QB_ATTEMPTS),
+    "player_pass_interceptions": ("passing_interceptions", "Interceptions",     "attempts", CFG.MIN_QB_ATTEMPTS),
+    "player_rush_attempts":      ("carries",               "Rush Attempts",     "carries",  CFG.MIN_RB_CARRIES),
+    "player_field_goals":        ("fg_made",               "FG Made",           "fg_att",   CFG.MIN_K_FG_ATT),
+    "player_fg_attempts":        ("fg_att",                "FG Attempted",      "fg_att",   CFG.MIN_K_FG_ATT),
 }
 
 
@@ -312,6 +329,20 @@ def load_season_weekly_stats(season: int) -> pd.DataFrame:
     for col in ("carries", "targets"):
         if col not in df.columns:
             df[col] = 0
+    # Columns the newer markets (pass attempts/completions/interceptions, rush attempts, field goals,
+    # anytime TD) read. nflverse's own name for interceptions thrown is "passing_interceptions"
+    # (older exports called it "interceptions"); a column a given response doesn't carry defaults
+    # to 0 and a null becomes 0 (a null is truthy-NaN in the `g.get(col) or 0` reads downstream).
+    if "passing_interceptions" not in df.columns:
+        df["passing_interceptions"] = df["interceptions"] if "interceptions" in df.columns else 0
+    for col in ("completions", "attempts", "passing_interceptions", "fg_made", "fg_att",
+                "rushing_tds", "receiving_tds"):
+        if col not in df.columns:
+            df[col] = 0
+        df[col] = df[col].fillna(0)
+    # Anytime TD's stat: a rushing or receiving touchdown (the same definition the Anytime TD
+    # Engine board uses; passing TDs are not "scoring a touchdown" for a QB).
+    df["scrimmage_tds"] = df["rushing_tds"] + df["receiving_tds"]
     df["_touches"] = df["carries"].fillna(0) + df["targets"].fillna(0)
     for col in _IDP_STAT_COLS:
         if col not in df.columns:
@@ -494,6 +525,8 @@ def player_row(player: Dict, team: str, opp: str, game_label: str, game_date: Op
             cleared_markets.append(mkey)
     if not cleared_markets:
         return None   # e.g. a WR who's barely played recently — real player, no real recent role
+    if position in _ANYTIME_TD_POSITIONS:
+        cleared_markets.append(ANYTIME_TD_MARKET)   # see ANYTIME_TD_MARKET: never changes slate membership
 
     row = {
         "Player": player.get("name"), "Team": team, "GameLabel": game_label, "Opp": opp,
@@ -564,6 +597,14 @@ def get_player_results(date_str: str) -> Dict[str, Dict[str, float]]:
             "rushing_yards": float(r.get("rushing_yards") or 0),
             "receptions": float(r.get("receptions") or 0),
             "receiving_yards": float(r.get("receiving_yards") or 0),
+            # newer markets (see _MARKET_SPEC); retro.MARKET_STAT maps display names to these keys
+            "attempts": float(r.get("attempts") or 0),
+            "completions": float(r.get("completions") or 0),
+            "passing_interceptions": float(r.get("passing_interceptions") or 0),
+            "carries": float(r.get("carries") or 0),
+            "fg_made": float(r.get("fg_made") or 0),
+            "fg_att": float(r.get("fg_att") or 0),
+            "scrimmage_tds": float((r.get("rushing_tds") or 0) + (r.get("receiving_tds") or 0)),
         }
     _diag(f"get_player_results({date_str}): season {season} week {week}, {len(out)} player result(s)")
     return out

@@ -63,6 +63,12 @@ MARKET_STAT = {
     # this dict is the one place a mismatch would silently grade zero plays rather than crash.
     "Pass Yards": "passing_yards", "Rush Yards": "rushing_yards",
     "Receptions": "receptions", "Receiving Yards": "receiving_yards",
+    # Added with the newer NFL markets; keys match nfl_engine.get_player_results. "Anytime TD" is
+    # graded as TDs > 0.5. First/Last TD Scorer are deliberately absent: weekly stats can't say who
+    # scored first or last, so grade_play returns None (ungraded) for them.
+    "Pass Attempts": "attempts", "Pass Completions": "completions",
+    "Interceptions": "passing_interceptions", "Rush Attempts": "carries",
+    "FG Made": "fg_made", "FG Attempted": "fg_att", "Anytime TD": "scrimmage_tds",
 }
  
  

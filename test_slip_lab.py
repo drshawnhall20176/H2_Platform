@@ -149,6 +149,17 @@ def test_yes_only_market_gets_a_single_yes_leg_with_no_line():
     assert leg["p_mkt"] is None                          # one-sided market: no no-vig probability
 
 
+def test_anytime_td_board_play_prices_at_the_book_through_the_yes_only_hint():
+    # NFL's Anytime TD play (Over 0.5, as MLB's Batter HR) matched on player + market, not on a line.
+    mm = {"Anytime TD": "player_anytime_td"}
+    td = play(market="Anytime TD", line=0.5, side="Over", prob=0.34)
+    off = offer(market="player_anytime_td", point=0.5, over={"draftkings": 140, "fanduel": 125}, under={})
+    pool = SL.build_leg_pool([td], [off], "draftkings", mm, NORM, single_line_markets={"player_anytime_td"})
+    over = next(l for l in pool if l["side"] == "Over")
+    assert over["price"] == 140 and over["at_book"] and over["ev_pct"] == round((0.34 * 2.4 - 1) * 100, 2)
+    print("✓ an NFL Anytime TD board play prices against the book's Yes-only offer in the Slip Lab")
+
+
 def test_yes_only_market_without_the_single_line_hint_is_skipped_like_any_lineless_play():
     hr = play(market="Batter HR", line=None, side="Yes")
     assert pool_of([hr], []) == []

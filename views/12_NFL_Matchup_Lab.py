@@ -132,7 +132,13 @@ if not rows:
     st.info("No projectable players for this date. Pick a date within an NFL week with a real slate.")
     st.stop()
 
-rows_sorted = sorted(rows, key=lambda r: (r["GameLabel"], r["Player"]))
+# Kickers are on the slate for the FG Made / FG Attempted markets (board, Slip Lab, Player Lines) but have
+# no yardage/TD matchup to show here, so they're left out of this page's player picker.
+rows_sorted = sorted((r for r in rows if r.get("Position") != "K"),
+                     key=lambda r: (r["GameLabel"], r["Player"]))
+if not rows_sorted:
+    st.info("No projectable players for this date. Pick a date within an NFL week with a real slate.")
+    st.stop()
 
 # Time slot + Game filters — same convention Best Bets/basketball Matchup Lab already established
 # (shared via sports.py), doubly useful here: an NFL week's games span Thu-Mon across multiple

@@ -125,6 +125,132 @@ def test_build_best_bets_carries_the_games_real_scheduled_start_time():
     print("✓ NFL build_best_bets now carries the row's real _game_date onto every play as GameDate")
 
 
+# ----------------------------------------------------------------- newer markets (added on request)
+def _qb_game(att=34, comp=22, ints=1, yds=250, rush_td=0):
+    return {"attempts": att, "completions": comp, "passing_interceptions": ints, "passing_yards": yds,
+            "rushing_tds": rush_td, "receiving_tds": 0}
+
+
+QB_MARKETS = ["player_pass_yds", "player_pass_attempts", "player_pass_completions",
+              "player_pass_interceptions", "player_anytime_td"]
+
+
+def _new_market_row(name="Test QB", team="KC", opp="LAC", pos="QB", markets=None, log=None, pid="p1"):
+    return {"Player": name, "Team": team, "Opp": opp, "GameLabel": "LAC @ KC", "_pid": pid, "Position": pos,
+            "_markets": markets or QB_MARKETS, "_game_date": "2026-10-04T17:00:00Z",
+            "_recent_games": log or [_qb_game(34 + i, 22 + i, i % 2, 240 + i) for i in range(5)]}
+
+
+def test_all_market_list_has_every_market_but_market_list_stays_the_four_core_ones():
+    allm = {m for m, _c, _d in NP.all_market_list()}
+    assert {"player_pass_attempts", "player_pass_completions", "player_pass_interceptions",
+            "player_rush_attempts", "player_field_goals", "player_fg_attempts", "player_anytime_td"} <= allm
+    assert {m for m, _c, _d in NP.market_list()} == {
+        "player_pass_yds", "player_rush_yds", "player_receptions", "player_reception_yds"}
+    print("✓ all_market_list covers the new markets; market_list (Matchup Lab) stays the four core ones")
+
+
+def test_build_best_bets_prices_every_new_market_for_its_position():
+    qb = _new_market_row()
+    rb = _new_market_row("Test RB", pos="RB", pid="p2", markets=["player_rush_yds", "player_rush_attempts", "player_anytime_td"],
+                         log=[{"rushing_yards": 70, "carries": 16, "rushing_tds": i % 2, "receiving_tds": 0} for i in range(5)])
+    k = _new_market_row("Test K", pos="K", pid="p3", markets=["player_field_goals", "player_fg_attempts"],
+                        log=[{"fg_made": 2, "fg_att": 2 + (i % 2)} for i in range(5)])
+    plays = NP.build_best_bets([qb, rb, k], sims=3000, seed=4)
+    got = {(p["Player"], p["Market"]) for p in plays}
+    assert {("Test QB", m) for m in ("Pass Yards", "Pass Attempts", "Pass Completions", "Interceptions")} <= got
+    assert {("Test RB", "Rush Attempts"), ("Test K", "FG Made"), ("Test K", "FG Attempted")} <= got
+    attempts = next(p for p in plays if p["Player"] == "Test QB" and p["Market"] == "Pass Attempts")
+    assert attempts["Line"] == 33.5 and attempts["LineSource"] == "default"
+    print("✓ build_best_bets prices pass attempts/completions/interceptions, rush attempts and FG made/attempted")
+
+
+def test_new_markets_use_real_book_lines_and_prices_when_offered_except_fg_attempted():
+    qb = _new_market_row()
+    k = _new_market_row("Test K", pos="K", pid="p3", markets=["player_field_goals", "player_fg_attempts"],
+                        log=[{"fg_made": 2, "fg_att": 3}] * 5)
+    real_lines = {(NP.normalize_name("Test QB"), "player_pass_attempts"): 36.5,
+                  (NP.normalize_name("Test K"), "player_field_goals"): 1.5}
+    offers = [{"market": "player_pass_attempts", "player": "Test QB", "point": 36.5,
+               "over": {"draftkings": -115}, "under": {"draftkings": -105}}]
+    plays = NP.build_best_bets([qb, k], sims=3000, seed=4, real_lines=real_lines, offers=offers,
+                               preferred_book="draftkings")
+    pa = next(p for p in plays if p["Market"] == "Pass Attempts")
+    assert pa["Line"] == 36.5 and pa["LineSource"] == "book"
+    assert pa["PriceSource"] == "book" and pa["RealPriceBook"] == "draftkings"
+    fga = next(p for p in plays if p["Market"] == "FG Attempted")
+    assert fga["LineSource"] == "default" and fga["PriceSource"] == "model_fair"   # no book market exists
+    assert "FG Attempted" not in NP.NFL_MARKET_TO_ODDS_KEY
+    print("✓ real lines/prices flow through for the new markets; FG Attempted stays model-only")
+
+
+def test_anytime_td_play_is_over_half_a_td_only_and_never_an_under():
+    scorer = _new_market_row("Scorer", pos="RB", pid="p2", markets=["player_rush_yds", "player_anytime_td"],
+                             log=[{"rushing_yards": 70, "carries": 16, "rushing_tds": 1, "receiving_tds": 0}] * 5)
+    nonscorer = _new_market_row("Non Scorer", pos="WR", pid="p4", markets=["player_receptions", "player_anytime_td"],
+                                log=[{"receptions": 4, "receiving_yards": 40, "targets": 6, "rushing_tds": 0,
+                                      "receiving_tds": 0}] * 5)
+    plays = NP.build_best_bets([scorer, nonscorer], sims=3000, seed=2)
+    td = [p for p in plays if p["Market"] == "Anytime TD"]
+    assert [p["Player"] for p in td] == ["Scorer"]            # the WR's "Under" play is dropped
+    assert td[0]["Side"] == "Over" and td[0]["Line"] == 0.5
+    assert td[0]["Why"] == "scored a rushing/receiving TD in 5 of last 5 game(s) on file"
+    print("✓ Anytime TD plays are Over 0.5 only (a 'won't score' Under isn't a play), like MLB's Batter HR")
+
+
+def test_scrimmage_td_stat_works_from_logs_with_or_without_the_derived_column():
+    assert NP._stat_value({"rushing_tds": 1, "receiving_tds": 2}, "scrimmage_tds") == 3
+    assert NP._stat_value({"scrimmage_tds": 2, "rushing_tds": 9}, "scrimmage_tds") == 2
+    assert NP._stat_value({"scrimmage_tds": float("nan"), "rushing_tds": 1}, "scrimmage_tds") == 1
+    assert NP._stat_value({"attempts": 30}, "attempts") == 30
+    print("✓ _stat_value derives scrimmage TDs from rushing + receiving when the column is absent or NaN")
+
+
+def _td_player(name, tds, pid, team="KC", game="LAC @ KC"):
+    r = _new_market_row(name, team=team, pos="WR", pid=pid, markets=["player_receptions", "player_anytime_td"],
+                        log=[{"receptions": 4, "targets": 6, "rushing_tds": 0,
+                              "receiving_tds": 1 if i < tds else 0} for i in range(5)])
+    r["GameLabel"] = game
+    return r
+
+
+def test_first_and_last_td_scorer_plays_split_the_games_scoring_chance():
+    rows = [_td_player("Hot", 4, "a"), _td_player("Warm", 2, "b"), _td_player("Cold", 1, "c", team="LAC")]
+    plays = NP.build_best_bets(rows, sims=2000, seed=3)
+    first = {p["Player"]: p for p in plays if p["Market"] == "First TD Scorer"}
+    last = {p["Player"]: p for p in plays if p["Market"] == "Last TD Scorer"}
+    assert set(first) == set(last) == {"Hot", "Warm", "Cold"}
+    # hotter scorer is more likely to be first; first and last are symmetric in this model
+    assert first["Hot"]["ModelProb"] > first["Warm"]["ModelProb"] > first["Cold"]["ModelProb"]
+    assert all(first[n]["ModelProb"] == last[n]["ModelProb"] for n in first)
+    # the shares can't add up to more than certainty -- and, since it's a first-scorer pool, to less than 1
+    assert 0 < sum(p["ModelProb"] for p in first.values()) < 1
+    assert first["Hot"]["Side"] == "Over" and first["Hot"]["Line"] == 0.5
+    print("✓ First/Last TD Scorer probabilities rank by scoring rate and sum to under 1 across a game")
+
+
+def test_first_td_scorer_prices_against_the_books_yes_only_price():
+    rows = [_td_player("Hot", 4, "a"), _td_player("Cold", 1, "b")]
+    offers = [{"market": "player_1st_td", "player": "Hot", "point": 0.5, "over": {"fanduel": 650}, "under": {}}]
+    plays = NP.build_best_bets(rows, sims=2000, seed=3, offers=offers, preferred_book="fanduel")
+    hot = next(p for p in plays if p["Market"] == "First TD Scorer" and p["Player"] == "Hot")
+    cold = next(p for p in plays if p["Market"] == "First TD Scorer" and p["Player"] == "Cold")
+    assert hot["RealPrice"] == 650 and hot["PriceSource"] == "book"
+    assert cold["RealPrice"] is None and cold["PriceSource"] == "model_fair"
+    print("✓ First TD Scorer picks up a real Yes-only book price when one exists")
+
+
+def test_matchup_profile_rows_stay_on_the_core_markets_only():
+    # A QB row now carries attempts/completions/interceptions/anytime-TD markets too, but the Matchup
+    # Lab profile must still be exactly what it was: the core Pass Yards row + the QB's own extra rows.
+    profile = NP.build_matchup_profile(_new_market_row(), h2h_log=[], opp_recent_allowed={}, opp_season_allowed={})
+    assert [r["Market"] for r in profile] == ["Pass Yards", "Rush Yards", "Passing TDs", "Rushing TDs"]
+    kicker = _new_market_row("Test K", pos="K", markets=["player_field_goals", "player_fg_attempts"],
+                             log=[{"fg_made": 2, "fg_att": 3}] * 3)
+    assert NP.build_matchup_profile(kicker, h2h_log=[], opp_recent_allowed={}, opp_season_allowed={}) == []
+    print("✓ the Matchup Lab profile is unchanged by the new markets (and a kicker has no matchup rows)")
+
+
 def test_build_best_bets_matches_original_behavior_with_no_offers():
     # Backward-compatibility guarantee: no offers supplied -- every existing caller must see
     # the exact original always-theoretical PriceSource/ConvictionSource behavior.

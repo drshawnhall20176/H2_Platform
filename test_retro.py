@@ -23,6 +23,22 @@ def test_grade_play():
     assert R.grade_play("Batter HR", "Over", 0.5, None) is None
 
 
+def test_grade_play_covers_the_newer_nfl_markets():
+    a = {"attempts": 36, "completions": 24, "passing_interceptions": 2, "carries": 14,
+         "fg_made": 2, "fg_att": 3, "scrimmage_tds": 1}
+    assert R.grade_play("Pass Attempts", "Over", 33.5, a) is True
+    assert R.grade_play("Pass Completions", "Under", 24.5, a) is True
+    assert R.grade_play("Interceptions", "Over", 0.5, a) is True
+    assert R.grade_play("Rush Attempts", "Over", 14.5, a) is False
+    assert R.grade_play("FG Made", "Over", 1.5, a) is True
+    assert R.grade_play("FG Attempted", "Under", 2.5, a) is False
+    assert R.grade_play("Anytime TD", "Over", 0.5, a) is True
+    assert R.grade_play("Anytime TD", "Over", 0.5, {**a, "scrimmage_tds": 0}) is False
+    # first/last TD can't be graded from weekly stats -> ungraded, never wrongly graded
+    assert R.grade_play("First TD Scorer", "Over", 0.5, a) is None
+    assert R.grade_play("Last TD Scorer", "Over", 0.5, a) is None
+
+
 # ----------------------------------------------------------------- settle_bet_result
 def test_settle_bet_result_win_and_loss():
     a = {"hr": 1, "tb": 5, "hits": 2, "so": 1, "hrr": 4}

@@ -34,6 +34,14 @@ RECENT_GAMES_N = 5
 MIN_QB_ATTEMPTS = 10.0
 MIN_RB_TOUCHES = 4.0     # carries + targets combined
 MIN_WR_TARGETS = 2.0
+# Rush Attempts market only: a back has to average this many CARRIES (not carries + targets) to be a
+# real rush-attempts prop -- a pass-catching back who touches the ball 5 times a game, 4 of them
+# targets, has no meaningful carries line to project.
+MIN_RB_CARRIES = 4.0
+# Kicker markets (FG Made / FG Attempted): a kicker averaging at least this many field-goal attempts
+# a game over the recent window is a real field-goal prop; below it is a kicker on a team that
+# almost never kicks (or a backup), which is noise, not a projection.
+MIN_K_FG_ATT = 0.75
 
 # Monte Carlo-style resample count for the bootstrap projection (see nfl_projections.py).
 DEFAULT_SIMS = 10000

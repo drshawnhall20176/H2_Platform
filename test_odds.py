@@ -41,6 +41,42 @@ def test_best_price_picks_highest_payout():
     assert price == 120
 
 
+def test_parse_event_offers_records_yes_only_td_markets_as_a_half_point_over():
+    # Anytime / first / last TD scorer: a single "Yes" outcome per player with NO point. Previously every
+    # one of these was dropped (the parser requires a point); now they are recorded so they can be priced.
+    event = {"id": "e1", "bookmakers": [
+        {"key": "draftkings", "markets": [{"key": "player_anytime_td", "outcomes": [
+            {"name": "Yes", "description": "Travis Kelce", "price": -120},
+            {"name": "Yes", "description": "Rashee Rice", "price": 140}]},
+            {"key": "player_1st_td", "outcomes": [{"name": "Yes", "description": "Travis Kelce", "price": 700}]}]},
+        {"key": "fanduel", "markets": [{"key": "player_anytime_td", "outcomes": [
+            {"name": "Yes", "description": "Travis Kelce", "price": -110}]}]}]}
+    offers = O.parse_event_offers(event, supported_markets=O.NFL_SUPPORTED_MARKETS)
+    kelce = next(o for o in offers if o["market"] == "player_anytime_td" and o["player"] == "Travis Kelce")
+    assert kelce["point"] == 0.5 and kelce["over"] == {"draftkings": -120, "fanduel": -110} and kelce["under"] == {}
+    assert any(o["market"] == "player_1st_td" and o["over"] == {"draftkings": 700} for o in offers)
+    # and the existing price lookup finds it (as the "Over"/Yes side), including at a preferred book
+    assert O.real_entry_price(offers, "Travis Kelce", "player_anytime_td", "Over", preferred_book="fanduel")[0::2] == (-110.0, "fanduel")
+    assert O.real_entry_price(offers, "Travis Kelce", "player_anytime_td", "Under") is None
+    print("✓ Yes-only TD markets parse into a priced 0.5-point offer; there is no Under side")
+
+
+def test_parse_event_offers_ignores_a_non_yes_outcome_on_a_yes_only_market():
+    event = {"bookmakers": [{"key": "draftkings", "markets": [{"key": "player_anytime_td", "outcomes": [
+        {"name": "No", "description": "Travis Kelce", "price": -150},
+        {"name": "Yes", "description": None, "price": 100}]}]}]}
+    assert O.parse_event_offers(event, supported_markets=O.NFL_SUPPORTED_MARKETS) == []
+
+
+def test_new_nfl_markets_are_requested_from_the_odds_api():
+    for key in ("player_pass_attempts", "player_pass_completions", "player_pass_interceptions",
+                "player_rush_attempts", "player_field_goals", "player_anytime_td", "player_1st_td", "player_last_td"):
+        assert key in O.NFL_SUPPORTED_MARKETS
+    import sports
+    assert set(sports.get("NFL").markets) == set(O.NFL_SUPPORTED_MARKETS)
+    assert sports.get("NFL").single_line_markets == O.YES_ONLY_MARKETS
+
+
 def test_parse_event_offers():
     event = {
         "bookmakers": [{

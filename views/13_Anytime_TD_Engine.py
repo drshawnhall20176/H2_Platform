@@ -47,7 +47,9 @@ st.info("**Model-only board, not yet priced against live odds.** Anytime TD is t
        "as a single-sided Yes/No market at sportsbooks — a different shape than the four Core "
        "markets' Over/Under, and one this platform hasn't verified against a real response yet. "
        "Rather than guess at that shape, this shows the model's own ranked probabilities only, "
-       "the same way every sport's first board here started before live pricing was added.",
+       "the same way every sport's first board here started before live pricing was added. "
+       "(Anytime TD, First TD Scorer and Last TD Scorer are also priced against live books on "
+       "**Best Bets** and **Slip Lab** — see those for edges.)",
        icon="ℹ️")
 
 

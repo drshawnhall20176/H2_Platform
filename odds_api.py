@@ -48,7 +48,20 @@ def _eastern_date_str(iso_utc: Optional[str]) -> Optional[str]:
 # (player_anytime_td) but uses a binary market structure (not Over/Under), not wired yet.
 NFL_SUPPORTED_MARKETS = [
     "player_pass_yds", "player_rush_yds", "player_receptions", "player_reception_yds",
+    # Added on request (keys as listed in book_menu.py's football markets). The three TD markets are
+    # Yes-only -- see YES_ONLY_MARKETS / parse_event_offers. NOT verified against a live response
+    # from this sandbox (no route to the Odds API); check the first real fetch.
+    "player_pass_attempts", "player_pass_completions", "player_pass_interceptions",
+    "player_rush_attempts", "player_field_goals",
+    "player_anytime_td", "player_1st_td", "player_last_td",
 ]
+
+# Markets a sportsbook posts as a single "Yes" outcome per player, with no Over/Under and (as far as
+# the provider documents) no point. parse_event_offers stores them like a 0.5-line Over so the rest
+# of the pipeline (real_entry_price, the Slip Lab leg pool, which matches these on player + market
+# alone) can price them; a "No" side is never recorded, so they are never de-vigged.
+YES_ONLY_MARKETS = {"player_anytime_td", "player_1st_td", "player_last_td"}
+YES_ONLY_POINT = 0.5
 
 # The model's markets, expressed as Odds API market keys.
 # EXPANDED from the original 7 to the full 16, matching sports.py's own _MLB_MARKET_MAP exactly
@@ -305,6 +318,17 @@ def parse_event_offers(event_json: Dict, supported_markets: Optional[List[str]] 
                 point = oc.get("point")
                 side = (oc.get("name") or "").lower()
                 price = oc.get("price")
+                if mkey in YES_ONLY_MARKETS and book not in PICKEM_BOOKS:
+                    # Yes-only market: the outcome is name="Yes", description=player, no point.
+                    # Recorded as the "over" side at a fixed 0.5 point; any other outcome name is skipped.
+                    if side != "yes" or player is None or price is None:
+                        continue
+                    k = (mkey, player, YES_ONLY_POINT)
+                    slot = offers.setdefault(k, {"market": mkey, "player": player,
+                                                 "point": YES_ONLY_POINT, "over": {}, "under": {},
+                                                 **_slot_meta(ev_meta)})
+                    slot["over"][book] = price
+                    continue
                 if book in PICKEM_BOOKS:
                     if player is None or point is None:
                         continue

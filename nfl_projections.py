@@ -35,6 +35,7 @@ their core pricing pages before their own Hot Hand Engine/Matchup Lab equivalent
 
 from __future__ import annotations
 
+import math
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -63,12 +64,48 @@ _MARKET_SPEC: Dict[str, Tuple[str, str, float]] = {
     "player_rush_yds":      ("rushing_yards",   "Rush Yards",      44.5),
     "player_receptions":    ("receptions",      "Receptions",      3.5),
     "player_reception_yds": ("receiving_yards", "Receiving Yards", 39.5),
+    # Added on request. Same placeholder-default caveat as above (round numbers near a typical
+    # starter's per-game figure, used only before a real book line is fetched; FG Attempted has
+    # no sportsbook market at all, so its default is always what the model shows).
+    "player_pass_attempts":      ("attempts",              "Pass Attempts",    33.5),
+    "player_pass_completions":   ("completions",           "Pass Completions", 21.5),
+    "player_pass_interceptions": ("passing_interceptions", "Interceptions",    0.5),
+    "player_rush_attempts":      ("carries",               "Rush Attempts",    12.5),
+    "player_field_goals":        ("fg_made",               "FG Made",          1.5),
+    "player_fg_attempts":        ("fg_att",                "FG Attempted",     1.5),
+    # A binary market, not an Over/Under: the stat is "scored a rushing or receiving TD" (see
+    # _stat_value), the line is 0.5 (P(TDs >= 1)). The odds-API key is the Yes-only anytime market.
+    "player_anytime_td":         ("scrimmage_tds",         "Anytime TD",       0.5),
 }
+
+# The four yardage markets the Matchup Lab / Player Lines pages were built around. market_list()
+# stays exactly these (the Matchup Lab lays one chart per market in a single row and keeps its
+# own separate Touchdowns bar chart, so folding the newer markets in would crowd it and duplicate
+# the TD chart); all_market_list() is the full set, for the board, Edge Board and Player Lines.
+_CORE_MARKET_KEYS = ("player_pass_yds", "player_rush_yds", "player_receptions", "player_reception_yds")
 
 
 def market_list() -> List[Tuple[str, str, str]]:
-    """[(market_key, stat_column, display_name), ...] — public, iterable form of _MARKET_SPEC."""
+    """[(market_key, stat_column, display_name), ...] for the four core yardage markets."""
+    return [(mkey, col, disp) for mkey, (col, disp, _line) in _MARKET_SPEC.items()
+            if mkey in _CORE_MARKET_KEYS]
+
+
+def all_market_list() -> List[Tuple[str, str, str]]:
+    """Every modeled market, core and newer: [(market_key, stat_column, display_name), ...]."""
     return [(mkey, col, disp) for mkey, (col, disp, _line) in _MARKET_SPEC.items()]
+
+
+def _stat_value(g: Dict, col: str) -> float:
+    """One game-log entry's value for a stat column. "scrimmage_tds" (the Anytime TD stat) is a rushing
+    plus receiving touchdown count: read the derived column when the log carries it, else sum the two
+    source columns, so a log from any source works."""
+    if col == "scrimmage_tds":
+        v = g.get("scrimmage_tds")
+        if v is not None and v == v:
+            return v
+        return (g.get("rushing_tds") or 0) + (g.get("receiving_tds") or 0)
+    return g.get(col) or 0
 
 
 def default_line(market_key: str) -> Optional[float]:
@@ -136,7 +173,7 @@ def build_projection_index(rows: List[Dict], meta: List[Dict],
               }
         for mkey in markets:
             col, _disp, _line = _MARKET_SPEC[mkey]
-            values = [g.get(col) or 0 for g in log]
+            values = [_stat_value(g, col) for g in log]
             sim = simulate_player_stat(values, sims, rng)
             if sim.size == 0:
                 continue
@@ -161,7 +198,11 @@ def default_board_from_index(index: Dict,
         raw = prob_over(dist, line)
         shrunk = BB_P.shrink_prob(raw, entry.get("n_games", 0))
         over = _clip_prob(shrunk)
-        side, prob = ("Over", over) if over >= 0.5 else ("Under", 1 - over)
+        if mkey == "player_anytime_td":
+            # A "won't score" Under isn't a real play (same as MLB's Batter HR): always the Yes side.
+            side, prob, line = "Yes", over, None
+        else:
+            side, prob = ("Over", over) if over >= 0.5 else ("Under", 1 - over)
         out.append(_signal(ctx["player"], ctx["team"], ctx["game"], disp, side, line, prob,
                            entry["mean"], Opp=ctx.get("opp"), Lineup=ctx.get("lineup"),
                            GameTime=ctx.get("game_date"), LineSource=line_src))
@@ -171,7 +212,15 @@ def default_board_from_index(index: Dict,
 # --------------------------------------------------------------------------- Best Bets
 # Reference (typical/coin-flip) hit-rate per market — 0.5 for all four, honest given the default
 # lines above are round-number estimates, not book-calibrated (same reasoning every sport uses).
-BEST_BET_REF = {"Pass Yards": 0.5, "Rush Yards": 0.5, "Receptions": 0.5, "Receiving Yards": 0.5}
+BEST_BET_REF = {"Pass Yards": 0.5, "Rush Yards": 0.5, "Receptions": 0.5, "Receiving Yards": 0.5,
+                "Pass Attempts": 0.5, "Pass Completions": 0.5, "Interceptions": 0.5,
+                "Rush Attempts": 0.5, "FG Made": 0.5, "FG Attempted": 0.5,
+                # Binary scoring markets sit well below a coin flip. Anytime TD: a typical rotation
+                # skill player scores in roughly 3 of 10 games. First/Last TD Scorer: with ~16-20
+                # eligible players on a game, an average one is roughly a 1-in-17 shot. Hand-typed
+                # reasoned estimates (not fit to graded history), used only when no real book
+                # price exists to reference.
+                "Anytime TD": 0.30, "First TD Scorer": 0.06, "Last TD Scorer": 0.06}
 
 # =============================================================================================
 # REAL SPORTSBOOK LINES -- ported directly from the MLB pipeline (see projections.py's own
@@ -186,6 +235,15 @@ NFL_MARKET_TO_ODDS_KEY: Dict[str, str] = {
     "Rush Yards":      "player_rush_yds",
     "Receptions":      "player_receptions",
     "Receiving Yards": "player_reception_yds",
+    "Pass Attempts":    "player_pass_attempts",
+    "Pass Completions": "player_pass_completions",
+    "Interceptions":    "player_pass_interceptions",
+    "Rush Attempts":    "player_rush_attempts",
+    "FG Made":          "player_field_goals",
+    "Anytime TD":       "player_anytime_td",
+    "First TD Scorer":  "player_1st_td",
+    "Last TD Scorer":   "player_last_td",
+    # "FG Attempted" is deliberately absent: no sportsbook posts it, so it is model-only (default line).
 }
 
 
@@ -250,7 +308,7 @@ def explain_miss(row: Optional[Dict], market: str = "Pass Yards") -> str:
     col = next((c for c, disp, _l in _MARKET_SPEC.values() if disp == market), None)
     if not log or not col:
         return "No recent-game data available for this player."
-    values = [g.get(col) or 0 for g in log]
+    values = [_stat_value(g, col) for g in log]
     avg = sum(values) / len(values)
     recent = values[:2]     # most recent first (see nfl_engine.player_recent_games)
     recent_avg = sum(recent) / len(recent) if recent else avg
@@ -301,7 +359,7 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
         for mkey in markets:
             col, disp, default_ln = _MARKET_SPEC[mkey]
             line, line_src = real_line_or_default_nfl(disp, r["Player"], real_lines, default_ln)
-            values = [g.get(col) or 0 for g in log]
+            values = [_stat_value(g, col) for g in log]
             sim = simulate_player_stat(values, sims, rng)
             if sim.size == 0:
                 continue
@@ -321,6 +379,8 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
                 if real_over_prob is not None:
                     ref, ref_src = real_over_prob, "book"
             side, sp, ref_s = _favored_side(over, ref)
+            if mkey == "player_anytime_td" and side == "Under":
+                continue   # "won't score a TD" isn't a real play (same rule as MLB's Batter HR)
 
             # Real captured price when available, the model's own theoretical Fair price
             # otherwise -- Fair itself never changes meaning, RealPrice is purely additive.
@@ -355,11 +415,81 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
                 # grading.conviction_to_grade normalize fairly across markets with very
                 # different reference rates, see that function's own docstring
                 "_ceiling": round(1.0 / ref_s, 2) if ref_s > 0 else None,
-                "Why": _player_reasons(values, line, side),
+                "Why": (_td_reason(values, len(values)) if mkey == "player_anytime_td"
+                        else _player_reasons(values, line, side)),
                 "_stat_key": col, "_game_log": log,
             })
 
+    plays.extend(_td_scorer_plays(rows, offers, preferred_book))
     plays.sort(key=lambda x: x["Conviction"], reverse=True)
+    return plays
+
+
+def _td_reason(values: List[float], n: int) -> str:
+    td_games = sum(1 for v in values if v > 0)
+    return f"scored a rushing/receiving TD in {td_games} of last {n} game(s) on file"
+
+
+# First/Last TD Scorer: priced against the sportsbook's Yes-only first/last TD markets.
+_TD_SCORER_MARKETS = (("First TD Scorer", "player_1st_td"), ("Last TD Scorer", "player_last_td"))
+
+
+def _td_scorer_plays(rows: List[Dict], offers: Optional[List[Dict]],
+                     preferred_book: Optional[str]) -> List[Dict]:
+    """First TD Scorer / Last TD Scorer plays, derived from each player's Anytime TD rate.
+
+    MODEL, AN HONEST APPROXIMATION, not a fitted one: treat each eligible player's chance to score
+    a TD in the game as a constant-rate (Poisson) process with rate lam_i = -ln(1 - p_i), where p_i
+    is the same shrunk anytime-TD rate the Anytime TD market uses. With independent players, the
+    chance player i scores FIRST is lam_i / sum(lam) of the game's total, times the chance anyone
+    scores at all (1 - exp(-sum(lam))). By the same symmetry the chance he scores LAST is identical,
+    so both markets carry the same model probability. It ignores game script, who gets goal-line
+    carries, and defensive/special-teams scores (which book "first TD" markets usually include as a
+    separate outcome), so treat it as a ranking of who is most likely to be first, not a sharp
+    price. Only players already carrying the Anytime TD market are included. First/Last TD can't
+    be graded from weekly stats (that needs play order), so they stay ungraded in Retrospective."""
+    by_game: Dict[str, List[Tuple[Dict, float]]] = {}
+    for r in rows:
+        log = r.get("_recent_games") or []
+        if not log or "player_anytime_td" not in (r.get("_markets") or []):
+            continue
+        values = [_stat_value(g, "scrimmage_tds") for g in log]
+        p = _clip_prob(BB_P.shrink_prob(sum(1 for v in values if v > 0) / len(values), len(values)))
+        by_game.setdefault(r["GameLabel"], []).append((r, p))
+
+    plays: List[Dict] = []
+    for _label, members in by_game.items():
+        lams = [(r, p, -math.log(1.0 - p)) for r, p in members]
+        total = sum(l for _r, _p, l in lams)
+        if total <= 0:
+            continue
+        any_td = 1.0 - math.exp(-total)
+        for r, p_any, lam in lams:
+            prob = min(max(lam / total * any_td, 0.005), 0.98)
+            log = r.get("_recent_games") or []
+            values = [_stat_value(g, "scrimmage_tds") for g in log]
+            for disp, odds_key in _TD_SCORER_MARKETS:
+                ref, ref_src = BEST_BET_REF[disp], "model_typical"
+                real_price, real_price_book, price_src = None, None, "model_fair"
+                if offers:
+                    real = O.real_entry_price(offers, r["Player"], odds_key, "Over",
+                                              preferred_book=preferred_book)
+                    if real is not None:
+                        real_price, _pt, real_price_book = real
+                        price_src = "book"
+                plays.append({
+                    "Player": r["Player"], "PlayerId": r.get("_pid"), "Team": r["Team"],
+                    "Game": r["GameLabel"], "Opp": r.get("Opp"), "Versus": r.get("Opp"),
+                    "GameDate": r.get("_game_date"),
+                    "Market": disp, "Side": "Over", "Line": 0.5, "LineSource": "default",
+                    "ModelProb": round(prob, 4), "Fair": prob_to_american(prob),
+                    "RealPrice": real_price, "RealPriceBook": real_price_book, "PriceSource": price_src,
+                    "Conviction": round(prob / ref, 2), "ConvictionSource": ref_src,
+                    "_ceiling": round(1.0 / ref, 2),
+                    "Why": (f"~{p_any:.0%} to score any TD; ~{lam / total:.0%} of this game's expected "
+                            f"TD-scorer pool ({_td_reason(values, len(values))})"),
+                    "_stat_key": "scrimmage_tds", "_game_log": log,
+                })
     return plays
 
 
@@ -493,6 +623,10 @@ def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_recent_allowed: Di
     log = row.get("_recent_games") or []
     position = row.get("Position")
 
+    # Core yardage markets only: the Matchup Lab's rows (and its cross-market "Suppressed" flag) were
+    # built around these four. The newer markets (attempts, completions, field goals, anytime TD...)
+    # are covered by the board and Player Lines; Touchdowns has its own separate row below.
+    markets = [m for m in markets if m in _CORE_MARKET_KEYS]
     for mkey in markets:
         col, _disp, _line = _MARKET_SPEC[mkey]
         if season_log:

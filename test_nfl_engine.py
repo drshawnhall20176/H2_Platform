@@ -305,13 +305,15 @@ def test_get_team_injuries_real_confirmed_shape(monkeypatch):
 
 
 # ----------------------------------------------------------------- player_row (position gating)
-def test_player_row_qb_gets_only_pass_yards_market():
+def test_player_row_qb_gets_only_passing_markets_plus_anytime_td():
     player = {"id": "00-0033873", "name": "Patrick Mahomes", "position": "QB"}
     log = [{"passing_yards": 258, "attempts": 39}, {"passing_yards": 187, "attempts": 29}]
     row = E.player_row(player, "KC", "LAC", "KC @ LAC", "2025-09-05", log)
     assert row is not None
-    assert row["_markets"] == ["player_pass_yds"]
-    print("✓ player_row gives a QB only the Pass Yards market, never Receptions")
+    assert row["_markets"] == ["player_pass_yds", "player_pass_attempts", "player_pass_completions",
+                               "player_pass_interceptions", "player_anytime_td"]
+    assert "player_receptions" not in row["_markets"] and "player_rush_yds" not in row["_markets"]
+    print("✓ player_row gives a QB the passing markets (yards/attempts/completions/interceptions) + anytime TD, never Receptions or Rush Yards")
 
 
 def test_player_row_rb_gets_rush_and_receiving_markets_when_both_clear_floor():
@@ -319,8 +321,9 @@ def test_player_row_rb_gets_rush_and_receiving_markets_when_both_clear_floor():
     log = [{"rushing_yards": 80, "carries": 18, "targets": 4, "receptions": 3,
            "receiving_yards": 25, "_touches": 22}] * 3
     row = E.player_row(player, "KC", "LAC", "KC @ LAC", "2025-09-05", log)
-    assert set(row["_markets"]) == {"player_rush_yds", "player_receptions", "player_reception_yds"}
-    print("✓ player_row gives a productive RB both rushing and receiving markets")
+    assert set(row["_markets"]) == {"player_rush_yds", "player_rush_attempts", "player_receptions",
+                                    "player_reception_yds", "player_anytime_td"}
+    print("✓ player_row gives a productive RB rushing (yards + attempts), receiving and anytime TD markets")
 
 
 def test_player_row_rb_with_no_targets_gets_only_rush_market():
@@ -330,8 +333,79 @@ def test_player_row_rb_with_no_targets_gets_only_rush_market():
     log = [{"rushing_yards": 60, "carries": 15, "targets": 0, "receptions": 0,
            "receiving_yards": 0, "_touches": 15}] * 5
     row = E.player_row(player, "KC", "LAC", "KC @ LAC", "2025-09-05", log)
-    assert row["_markets"] == ["player_rush_yds"]
+    assert row["_markets"] == ["player_rush_yds", "player_rush_attempts", "player_anytime_td"]
     print("✓ player_row correctly excludes receiving markets for a RB with no real target volume")
+
+
+def test_player_row_rush_attempts_needs_real_carries_not_just_touches():
+    # A pass-catching back: 5 touches a game but only 1 carry -> a Rush Yards/Receptions player
+    # (touches floor met) with no meaningful Rush Attempts line.
+    player = {"id": "p1", "name": "Receiving Back", "position": "RB"}
+    log = [{"rushing_yards": 6, "carries": 1, "targets": 4, "receptions": 3, "receiving_yards": 30,
+           "_touches": 5}] * 4
+    row = E.player_row(player, "KC", "LAC", "KC @ LAC", "2025-09-05", log)
+    assert "player_rush_attempts" not in row["_markets"]
+    assert "player_rush_yds" in row["_markets"] and "player_receptions" in row["_markets"]
+    print("✓ Rush Attempts is gated on real carries, not carries + targets")
+
+
+def test_player_row_kicker_gets_field_goal_markets_and_no_anytime_td():
+    player = {"id": "k1", "name": "Test Kicker", "position": "K"}
+    log = [{"fg_made": 2, "fg_att": 2}, {"fg_made": 1, "fg_att": 2}, {"fg_made": 3, "fg_att": 3}]
+    row = E.player_row(player, "KC", "LAC", "KC @ LAC", "2025-09-05", log)
+    assert row is not None
+    assert row["_markets"] == ["player_field_goals", "player_fg_attempts"]
+    print("✓ player_row gives a kicker FG Made + FG Attempted and no anytime TD")
+
+
+def test_player_row_kicker_with_almost_no_field_goal_attempts_is_dropped():
+    player = {"id": "k2", "name": "Idle Kicker", "position": "K"}
+    log = [{"fg_made": 0, "fg_att": 0}, {"fg_made": 1, "fg_att": 1}, {"fg_made": 0, "fg_att": 0},
+           {"fg_made": 0, "fg_att": 0}, {"fg_made": 0, "fg_att": 0}]
+    assert E.player_row(player, "KC", "LAC", "KC @ LAC", "2025-09-05", log) is None
+    print("✓ a kicker averaging well under one attempt a game is not on the slate")
+
+
+def test_player_row_wr_gets_anytime_td_but_adding_it_never_admits_a_player():
+    wr = {"id": "w1", "name": "Slot WR", "position": "WR"}
+    log = [{"targets": 6, "receptions": 4, "receiving_yards": 50}] * 3
+    row = E.player_row(wr, "KC", "LAC", "KC @ LAC", "2025-09-05", log)
+    assert row["_markets"] == ["player_receptions", "player_reception_yds", "player_anytime_td"]
+    # a WR clearing no floor stays off the slate even though WRs are TD-eligible
+    bench = {"id": "w2", "name": "Bench WR", "position": "WR"}
+    assert E.player_row(bench, "KC", "LAC", "KC @ LAC", "2025-09-05", [{"targets": 0}] * 3) is None
+    print("✓ anytime TD is added only for players who already cleared a role floor")
+
+
+def test_load_season_weekly_stats_fills_the_new_market_columns(monkeypatch):
+    fake_df = pd.DataFrame([
+        {"player_id": "p1", "week": 1, "passing_yards": 250, "attempts": 30, "completions": 20,
+         "interceptions": 1, "rushing_tds": 1, "receiving_tds": None},
+    ])
+    monkeypatch.setattr(E.nfl, "get_current_season", lambda: 2026)
+    monkeypatch.setattr(E.nfl, "load_player_stats", lambda seasons, summary_level="week": _FakePolarsDF(fake_df))
+    df = E.load_season_weekly_stats(2026)
+    r = df.iloc[0]
+    assert r["passing_interceptions"] == 1          # falls back to the legacy "interceptions" name
+    assert r["fg_made"] == 0 and r["fg_att"] == 0   # absent columns default to 0
+    assert r["scrimmage_tds"] == 1                  # null receiving_tds counts as 0
+    print("✓ weekly stats carry completions/interceptions/FG/scrimmage-TD columns, null-safe")
+
+
+def test_get_player_results_returns_the_new_market_stats(monkeypatch):
+    sched = pd.DataFrame([{"game_id": "g", "week": 1, "gameday": "2026-09-10", "gametime": "20:20",
+                           "home_team": "KC", "away_team": "LAC", "home_score": 24, "away_score": 20,
+                           "home_rest": 7, "away_rest": 7}])
+    stats = pd.DataFrame([{"player_id": "p1", "week": 1, "passing_yards": 250, "attempts": 33,
+                           "completions": 22, "passing_interceptions": 2, "carries": 3,
+                           "fg_made": 0, "fg_att": 0, "rushing_tds": 1, "receiving_tds": 1}])
+    monkeypatch.setattr(E.nfl, "load_schedules", lambda seasons: _FakePolarsDF(sched))
+    monkeypatch.setattr(E.nfl, "get_current_season", lambda: 2026)
+    monkeypatch.setattr(E.nfl, "load_player_stats", lambda seasons, summary_level="week": _FakePolarsDF(stats))
+    res = E.get_player_results("2026-09-10")["p1"]
+    assert (res["attempts"], res["completions"], res["passing_interceptions"], res["carries"]) == (33, 22, 2, 3)
+    assert res["scrimmage_tds"] == 2
+    print("✓ get_player_results returns attempts/completions/interceptions/carries/FG/scrimmage TDs for grading")
 
 
 def test_player_row_none_when_no_market_clears_the_floor():
