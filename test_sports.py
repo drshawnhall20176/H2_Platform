@@ -1313,6 +1313,14 @@ def test_game_dt_none_for_missing_or_malformed():
     assert S.game_dt("not-a-date") is None
 
 
+def test_game_dt_treats_a_bare_calendar_date_as_an_unknown_time():
+    # A date with no clock ("2026-10-04") used to parse as midnight in the SERVER's timezone and land
+    # on the previous evening in Eastern ("Late", and has_started() True) -- it is not a start time.
+    assert S.game_dt("2026-10-04") is None
+    assert S.slot_of(S.game_dt("2026-10-04")) == "TBD"
+    assert S.has_started("2026-10-04") is None
+
+
 def test_has_started_true_for_a_game_already_underway():
     # The exact real-world scenario this was built for: prepping for a 1:40pm game while an
     # earlier 12:10pm game is already in progress.

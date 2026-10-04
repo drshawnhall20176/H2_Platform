@@ -189,6 +189,30 @@ def _resolve_week(schedule: List[Dict], date_str: str) -> Optional[int]:
     return max(ranges) if ranges else None
 
 
+def kickoff_utc_iso(game_date: Optional[str], game_time: Optional[str]) -> Optional[str]:
+    """A game's real kickoff as an ISO-8601 UTC string ("2026-10-04T17:00:00Z"), built from the
+    schedule's bare calendar date plus nflreadpy's own "gametime" (Eastern Time, 24-hour HH:MM, so
+    "13:00" is 1:00 PM ET -- see get_schedule's own docstring). Returns None when either piece is
+    missing/unparseable (an honest "we don't know the kickoff", never a guessed time).
+
+    A REAL, CONFIRMED BUG THIS CLOSES: every NFL page that buckets games by time (Slip Lab's Time
+    slot, Best Bets, the Matchup/Hot Hand/TD labs...) reads a game's start through sports.game_dt,
+    which expects a full timestamp like every other sport carries. NFL's `game_date` was only ever
+    the bare date ("2026-10-04"), with the kickoff clock sitting unused next to it in the schedule --
+    so NFL games had no real start time to bucket by (Time slot showed only "TBD", Game list fell
+    back to alphabetical). The schedule's own `game_date` stays a bare date on purpose (week
+    resolution and the schedule page compare it as a plain YYYY-MM-DD string)."""
+    if not game_date or not isinstance(game_date, str) or not game_time or not isinstance(game_time, str):
+        return None
+    try:
+        import pytz
+        hour, minute = (int(x) for x in game_time.split(":")[:2])
+        naive = datetime.strptime(game_date[:10], "%Y-%m-%d").replace(hour=hour, minute=minute)
+        return pytz.timezone("US/Eastern").localize(naive).astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (ValueError, TypeError):
+        return None
+
+
 def games_for_week(schedule: List[Dict], week: int) -> List[Dict]:
     return [g for g in schedule if g["week"] == week]
 
@@ -611,8 +635,11 @@ def build_slate(date_str: str, season: Optional[int] = None,
     roster_cache: Dict[str, List[Dict]] = {}
     for g in games:
         label = f"{g['away_team']} @ {g['home_team']}"
+        # Real kickoff (UTC ISO) when the schedule has it, else the bare date -- which sports.game_dt
+        # treats as "time unknown" (TBD) rather than guessing midnight. See kickoff_utc_iso.
+        game_start = kickoff_utc_iso(g.get("game_date"), g.get("game_time")) or g.get("game_date")
         meta.append({"label": label, "away_name": g["away_team"], "home_name": g["home_team"],
-                    "game_date": g.get("game_date"), "week": week,
+                    "game_date": game_start, "week": week,
                     "home_id": g["home_team"], "away_id": g["away_team"],
                     "home_rest": g.get("home_rest"), "away_rest": g.get("away_rest")})
         for team, opp in ((g["home_team"], g["away_team"]), (g["away_team"], g["home_team"])):
@@ -628,7 +655,7 @@ def build_slate(date_str: str, season: Optional[int] = None,
                 # correctly returns the last N games of the prior season, not the whole year.
                 stats_before_week = 999 if stats_season != season else week
                 recent = player_recent_games(weekly, player["id"], stats_before_week)
-                row = player_row(player, team, opp, label, g.get("game_date"), recent,
+                row = player_row(player, team, opp, label, game_start, recent,
                                  opp_id=opp, team_id=team)
                 if row is not None:
                     rows.append(row)

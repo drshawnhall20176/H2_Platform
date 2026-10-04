@@ -103,6 +103,49 @@ def test_get_schedule_extracts_the_real_gametime_column(monkeypatch):
     print("✓ get_schedule now correctly extracts the real gametime column (e.g. 8:20 PM ET), not just the bare date")
 
 
+def test_kickoff_utc_iso_converts_eastern_gametime_to_utc():
+    # 1:00 PM ET on Oct 4 2026 (EDT, UTC-4) = 17:00Z; 8:20 PM ET = 00:20Z the NEXT day.
+    assert E.kickoff_utc_iso("2026-10-04", "13:00") == "2026-10-04T17:00:00Z"
+    assert E.kickoff_utc_iso("2026-10-04", "20:20") == "2026-10-05T00:20:00Z"
+    # Standard time (EST, UTC-5) after the November change.
+    assert E.kickoff_utc_iso("2026-11-29", "13:00") == "2026-11-29T18:00:00Z"
+    print("✓ kickoff_utc_iso turns the schedule's bare date + Eastern gametime into a real UTC kickoff, DST-aware")
+
+
+def test_kickoff_utc_iso_is_none_when_the_time_is_unknown_or_unparseable():
+    assert E.kickoff_utc_iso("2026-10-04", None) is None
+    assert E.kickoff_utc_iso("2026-10-04", float("nan")) is None   # pandas NaN for older seasons
+    assert E.kickoff_utc_iso("2026-10-04", "TBD") is None
+    assert E.kickoff_utc_iso(None, "13:00") is None
+    print("✓ kickoff_utc_iso returns None (an honest unknown), never a guessed time")
+
+
+def test_build_slate_carries_the_real_kickoff_on_every_row_and_meta(monkeypatch):
+    # Regression for a confirmed, reported bug: NFL's game_date was only ever the bare calendar date, so
+    # Slip Lab's Time slot showed only "TBD" and its Game list fell back to alphabetical on an NFL Sunday.
+    sched = [
+        {"game_id": "g1", "week": 5, "game_date": "2026-10-04", "game_time": "13:00",
+         "home_team": "KC", "away_team": "LAC", "home_score": None, "away_score": None,
+         "home_rest": 7, "away_rest": 7},
+        {"game_id": "g2", "week": 5, "game_date": "2026-10-04", "game_time": "20:20",
+         "home_team": "BUF", "away_team": "NE", "home_score": None, "away_score": None,
+         "home_rest": 7, "away_rest": 7},
+    ]
+    monkeypatch.setattr(E, "get_schedule", lambda season: sched)
+    monkeypatch.setattr(E, "load_season_weekly_stats", lambda season: pd.DataFrame({"week": [1, 2, 3, 4]}))
+    monkeypatch.setattr(E, "get_team_roster", lambda team, season: [{"id": f"{team}1", "name": f"{team} QB", "position": "QB"}])
+    games = [{"passing_yards": 250, "attempts": 40, "rushing_yards": 5, "receptions": 0, "receiving_yards": 0}] * 3
+    monkeypatch.setattr(E, "player_recent_games", lambda weekly, pid, before_week: games)
+    rows, meta = E.build_slate("2026-10-04")
+    assert {m["label"]: m["game_date"] for m in meta} == {
+        "LAC @ KC": "2026-10-04T17:00:00Z", "NE @ BUF": "2026-10-05T00:20:00Z"}
+    assert rows and all(r["_game_date"] == {"LAC @ KC": "2026-10-04T17:00:00Z",
+                                            "NE @ BUF": "2026-10-05T00:20:00Z"}[r["GameLabel"]] for r in rows)
+    import sports
+    assert {sports.slot_of(sports.game_dt(m["game_date"])) for m in meta} == {"Afternoon", "Late"}
+    print("✓ NFL build_slate puts each game's real UTC kickoff on its meta and rows, so Time slots bucket correctly")
+
+
 def test_get_schedule_empty_on_fetch_failure(monkeypatch):
     def raise_err(seasons):
         raise ConnectionError("simulated failure")
