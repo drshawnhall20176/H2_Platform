@@ -405,6 +405,11 @@ def game_dt(iso_utc: Optional[str]):
     "TBD" by slot_of below), not something to silently paper over with a guessed time."""
     if not iso_utc:
         return None
+    # A bare calendar date ("2026-10-04", no clock) is a date, not a start time: parsing it would
+    # silently become midnight in the SERVER's timezone and land on the previous evening in Eastern.
+    # Report it as "time unknown" (TBD) like any other missing time instead.
+    if len(str(iso_utc).strip()) <= 10:
+        return None
     try:
         return _datetime.fromisoformat(iso_utc.replace("Z", "+00:00")).astimezone(_EASTERN)
     except (ValueError, TypeError):
