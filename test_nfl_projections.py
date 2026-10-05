@@ -184,6 +184,29 @@ def test_new_markets_use_real_book_lines_and_prices_when_offered_except_fg_attem
     print("✓ real lines/prices flow through for the new markets; FG Attempted stays model-only")
 
 
+def test_passing_and_rushing_td_markets_are_priced_with_the_right_lines_and_keys():
+    qb = _new_market_row(markets=["player_pass_yds", "player_pass_tds", "player_rush_tds"],
+                         log=[{"attempts": 34, "passing_tds": [3, 2, 2, 1, 2][i], "rushing_tds": [1, 0, 0, 0, 0][i],
+                               "passing_yards": 260} for i in range(5)])
+    rb = _new_market_row("Test RB", pos="RB", pid="p2", markets=["player_rush_yds", "player_rush_tds"],
+                         log=[{"rushing_yards": 70, "carries": 16, "rushing_tds": 0, "receiving_tds": 0}] * 5)
+    real_lines = {(NP.normalize_name("Test QB"), "player_pass_tds"): 1.5}
+    offers = [{"market": "player_pass_tds", "player": "Test QB", "point": 1.5,
+               "over": {"draftkings": -140}, "under": {"draftkings": 115}}]
+    plays = NP.build_best_bets([qb, rb], sims=4000, seed=6, real_lines=real_lines, offers=offers,
+                               preferred_book="draftkings")
+    ptd = next(p for p in plays if p["Market"] == "Passing TDs")
+    assert ptd["Line"] == 1.5 and ptd["LineSource"] == "book" and ptd["PriceSource"] == "book"
+    assert ptd["Side"] == "Over"                           # 2+ passing TDs in 4 of 5 games
+    qrtd = next(p for p in plays if p["Market"] == "Rushing TDs" and p["Player"] == "Test QB")
+    rrtd = next(p for p in plays if p["Market"] == "Rushing TDs" and p["Player"] == "Test RB")
+    assert qrtd["Line"] == rrtd["Line"] == 0.5 and rrtd["LineSource"] == "default"
+    assert rrtd["Side"] == "Under" and rrtd["ModelProb"] > 0.5      # 0 rushing TDs in 5 games
+    assert rrtd["PriceSource"] == "model_fair" and "Rushing TDs" not in NP.NFL_MARKET_TO_ODDS_KEY
+    assert NP.NFL_MARKET_TO_ODDS_KEY["Passing TDs"] == "player_pass_tds"
+    print("✓ Passing TDs prices against the real player_pass_tds line; Rushing TDs is model-only (no book market)")
+
+
 def test_anytime_td_play_is_over_half_a_td_only_and_never_an_under():
     scorer = _new_market_row("Scorer", pos="RB", pid="p2", markets=["player_rush_yds", "player_anytime_td"],
                              log=[{"rushing_yards": 70, "carries": 16, "rushing_tds": 1, "receiving_tds": 0}] * 5)

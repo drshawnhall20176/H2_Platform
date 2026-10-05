@@ -13,12 +13,14 @@ import os
  
 import streamlit as st
 import components as C
-from datetime import datetime
+from datetime import datetime  # noqa
  
 import sports
 import odds_api as O
 import selections as SEL
 import retro as R
+import media_focus as MF
+import promotions as PR
 
 _active = sports.active()
 
@@ -66,10 +68,17 @@ SIDE_PHRASE = {
     ("Rebounds", "Over"): "Over on rebounds", ("Rebounds", "Under"): "Under on rebounds",
     ("Assists", "Over"): "Over on assists", ("Assists", "Under"): "Under on assists",
     ("Threes Made", "Over"): "Over on threes", ("Threes Made", "Under"): "Under on threes",
+    ("Anytime TD", "Over"): "to score a touchdown", ("First TD Scorer", "Over"): "to score the first TD",
+    ("Last TD Scorer", "Over"): "to score the last TD", ("Passing TDs", "Over"): "Over on passing TDs",
+    ("Pass Attempts", "Over"): "Over on pass attempts", ("Rush Attempts", "Over"): "Over on rush attempts",
 }
+# Yes/no touchdown-scorer markets read "Anytime", not "Over 0.5".
+_YES_NO_MARKETS = {"Anytime TD", "First TD Scorer", "Last TD Scorer"}
  
  
 def line_label(p):
+    if p.get("Market") in _YES_NO_MARKETS:
+        return {"Anytime TD": "Anytime", "First TD Scorer": "First TD", "Last TD Scorer": "Last TD"}[p["Market"]]
     return f"{p['Side']} {p['Line']:g}"
  
  
@@ -109,17 +118,12 @@ def get_key():
         return os.environ.get("ODDS_API_KEY")
  
  
+
+
 @st.cache_data(ttl=300, show_spinner=False)
-def load_selections_mlb(date_str, n, cap, ev_mode):
-    # Real, confirmed fix for a structural gap -- same class of bug build_mlb_board's own
-    # docstring documents already causing one real, confirmed production issue (a Command
-    # Center/Best Bets conviction mismatch) before it was made "PUBLIC, NOT INTERNAL" so every
-    # page could share it. This page never actually did: it used to rebuild the slate and every
-    # hitter/pitcher projection independently, WITHOUT ever fetching real sportsbook lines or
-    # prices, even after every other page sharing this pipeline was already fixed. Every play
-    # shown here (including the "Fair price ~X" text in value_text, which now sometimes shows a
-    # REAL price instead) was silently always measured against this platform's own DEFAULT_LINES
-    # /BEST_BET_REF placeholders regardless of what real_lines had already fixed elsewhere.
+def load_plays_mlb(date_str, ev_mode):
+    """Every candidate play for the slate (NOT yet curated — curation happens per game/day below).
+    Same shared pipeline as before (BBD.build_mlb_board: real lines/prices, no duplicate logic)."""
     import best_bets_data as BBD
     import statcast_data as SC
 
@@ -127,15 +131,7 @@ def load_selections_mlb(date_str, n, cap, ev_mode):
     api_key = get_key()
     rows, meta, plays, _books = BBD.build_mlb_board(date_str, fip_constant, odds_api_key=api_key)
     plays = SEL.filter_known_pitcher(plays)   # drop TBD-pitcher plays
-
-    # Statcast loaded separately here specifically for ev_mode's own build_projection_index call
-    # below, which build_mlb_board doesn't expose internally -- not a new parallel pipeline,
-    # rows/meta/plays above all still come from the one real source. SC.load_cached() (not a
-    # local wrapper redefined here) so this shares ONE real cache entry platform-wide instead of
-    # its own separate, unshared one -- see that function's own docstring for the real, confirmed
-    # finding this fixes (this exact page was one of 6 places independently re-parsing the same
-    # file from disk).
-    sc, k = SC.load_cached()
+    sc, k = SC.load_cached()                  # shared platform-wide cache (see its docstring)
 
     ev_used = False
     if ev_mode:
@@ -148,13 +144,11 @@ def load_selections_mlb(date_str, n, cap, ev_mode):
             SEL.attach_live_ev(plays, edges)
             plays = [p for p in plays if p.get("EV") is not None]
             ev_used = True
-
-    rank = "EV" if ev_used else "Conviction"
-    return P.curate_selections(plays, n=n, per_market_cap=cap, rank_key=rank), len(meta), ev_used
+    return plays, meta, ev_used
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_selections_generic(sport_key, date_str, n, cap, ev_mode):
+def load_plays_generic(sport_key, date_str, ev_mode):
     sport = sports.get(sport_key)
     engine, proj = sport.engine, sport.projections
     if not sport.has_projections:
@@ -173,14 +167,12 @@ def load_selections_generic(sport_key, date_str, n, cap, ev_mode):
             SEL.attach_live_ev(plays, edges, market_map=sport.market_map)
             plays = [p for p in plays if p.get("EV") is not None]
             ev_used = True
+    return plays, meta, ev_used
 
-    rank = "EV" if ev_used else "Conviction"
-    return proj.curate_selections(plays, n=n, per_market_cap=cap, rank_key=rank), len(meta), ev_used
- 
- 
+
 c1, c2, c3 = st.columns([2, 1, 1])
 with c1:
-    target = st.date_input("Slate date", datetime.now())
+    target = st.date_input("Slate date", MF.today_eastern())
 with c2:
     n = st.slider("How many selections", 5, 8, 6)
 with c3:
@@ -189,30 +181,75 @@ ev_mode = st.toggle("Rank by live value (uses odds quota)", value=False,
                     help="On: pulls live prices and ranks by real EV% (same math as the Edge Board). "
                          "Off: ranks by model conviction and shows fair price — no odds spent.")
 date_str = target.strftime("%Y-%m-%d")
- 
+
 with st.spinner("Curating selections..."):
     if _active.key == "MLB":
-        sel, n_games, ev_used = load_selections_mlb(date_str, n, cap, ev_mode)
+        all_plays, meta, ev_used = load_plays_mlb(date_str, ev_mode)
     else:
-        sel, n_games, ev_used = load_selections_generic(_active.key, date_str, n, cap, ev_mode)
- 
-if not sel:
-    msg = ("No live-value plays cleared the filters today." if ev_mode
-           else "No selections for this date. Pick a date with scheduled games.")
+        all_plays, meta, ev_used = load_plays_generic(_active.key, date_str, ev_mode)
+
+# --- the day's games: a weekly slate (NFL/NCAAF) is narrowed to the chosen date -----------------
+day_plays = MF.plays_on_date(all_plays, date_str)
+games = MF.games_on_date(meta, day_plays, date_str)
+n_games = len(games)
+
+if not games or not day_plays:
+    msg = ("No live-value plays cleared the filters today." if (ev_mode and games)
+           else "No games on this date. Pick a date with scheduled games.")
     st.info(msg)
+    other = MF.other_days_with_games(meta, date_str)
+    if other:
+        st.caption("This slate has games on: " + ", ".join(other) + " — pick one of those dates.")
     st.stop()
- 
+
+rank_key = "EV" if ev_used else "Conviction"
+st.markdown(f"### 🗓️ {MF.slate_phrase(games, date_str, _active.key)}")
+
+if n_games == 1:
+    focus_labels = [games[0]["label"]]
+    st.caption(f"Only one game on the ticket — the whole segment is built around "
+               f"**{games[0]['matchup']}**.")
+else:
+    options = ["All games on the ticket"] + [f"{g['matchup']} · {g['time_text']}" for g in games]
+    choice = st.selectbox("Focus", options,
+                          help="Pick one game to build the segment around, or keep the whole day.")
+    focus_labels = ([g["label"] for g in games] if choice == options[0]
+                    else [games[options.index(choice) - 1]["label"]])
+focus_games = [g for g in games if g["label"] in focus_labels]
+focus_plays = [p for p in day_plays if p.get("Game") in focus_labels]
+breakdown = False
+if len(focus_games) > 1:
+    breakdown = st.toggle("Break it down game by game", value=len(focus_games) <= 6,
+                          help="On: the top selections for each game, in kickoff order. "
+                               "Off: the top selections across the whole day.")
+
+# --- build the sections: [(heading, [plays])] --------------------------------------------------
+if breakdown:
+    sections = [(f"{g['matchup']} · {g['time_text']}", picks) for g, picks in
+                MF.curate_per_game(focus_plays, focus_games, P.curate_selections,
+                                   per_game=3, per_market_cap=cap, rank_key=rank_key)]
+else:
+    head = (f"{focus_games[0]['matchup']} · {focus_games[0]['time_text']}" if len(focus_games) == 1
+            else "Top selections across the day")
+    sections = [(head, P.curate_selections(focus_plays, n=n, per_market_cap=cap, rank_key=rank_key))]
+sel = [p for _h, picks in sections for p in picks]
+
+if not sel:
+    st.info("No selections cleared the filters for this focus.")
+    st.stop()
+
 mode_label = "ranked by **live EV%**" if ev_used else "ranked by **model conviction** (prices not checked)"
-st.caption(f"{n_games} games scanned · {len(sel)} selections · {mode_label} · TBD-pitcher plays excluded")
+st.caption(f"{n_games} game{'s' if n_games != 1 else ''} on the ticket · {len(sel)} selections · "
+           f"{mode_label} · TBD-pitcher plays excluded")
 if ev_mode and not ev_used:
     st.warning("Live value is on but no Odds API key was found — showing conviction instead. Add "
                "ODDS_API_KEY in secrets to enable live EV.", icon="⚠️")
- 
+
 # --- result lights: grade past-date selections by the pick's SIDE and LINE -----------------
 # Only for finalized (past) dates — today's games have no results, so no lights are shown.
 # Graded via retro.grade_play so a 🟢/🔴 matches how the Retrospective and Bet Log score:
 # an Under is 🟢 only if the player stayed UNDER the line, not if he "did something".
-_is_past = target < datetime.now().date()
+_is_past = target < MF.today_eastern()
 _results = {}
 if _is_past:
     try:
@@ -220,16 +257,16 @@ if _is_past:
     except Exception:
         _results = {}
 _graded_on = _is_past and bool(_results)
- 
- 
+
+
 def result_mark(p):
     """🟢 hit / 🔴 miss / 🟡 no result (didn't appear), or '' when the date isn't finalized."""
     if not _graded_on:
         return ""
     hit = R.grade_play(p["Market"], p["Side"], p.get("Line"), _results.get(p.get("PlayerId")))
     return "🟢" if hit is True else "🔴" if hit is False else "🟡"
- 
- 
+
+
 if _graded_on:
     _marks = [result_mark(p) for p in sel]
     _h, _m, _p = _marks.count("🟢"), _marks.count("🔴"), _marks.count("🟡")
@@ -240,34 +277,111 @@ if _graded_on:
                    f"(graded by the pick's side and line). 🟡 = player didn't appear / no result.")
 elif _is_past:
     st.caption("🚦 Results for this date aren't available to grade yet.")
- 
+
 # --- on-screen cards -------------------------------------------------------
-for i, p in enumerate(sel, 1):
-    val = (f"<span class='sel-val'>{p['EV']:+.1f}% EV</span>" if p.get("EV") is not None else "")
-    mark = result_mark(p)
-    mark_html = f"{mark} " if mark else ""
-    st.markdown(
-        f"""<div class="sel-card">
-        <h4>{mark_html}{i}. {headline(p)} <span class="sel-badge">{p['Market']} · {line_label(p)}</span>{val}</h4>
-        <div class="case"><b>The case:</b> {p['Why']}.</div>
-        <div class="rc">{reality_check(p)}</div>
-        </div>""", unsafe_allow_html=True)
- 
+_i = 0
+for heading, picks in sections:
+    if breakdown or len(focus_games) == 1:
+        st.markdown(f"#### 🏟️ {heading}")
+    if not picks:
+        st.caption("Nothing we love in this one — a fine thing to say on the show.")
+    for p in picks:
+        _i += 1
+        val = (f"<span class='sel-val'>{p['EV']:+.1f}% EV</span>" if p.get("EV") is not None else "")
+        mark = result_mark(p)
+        mark_html = f"{mark} " if mark else ""
+        st.markdown(
+            f"""<div class="sel-card">
+            <h4>{mark_html}{_i}. {headline(p)} <span class="sel-badge">{p['Market']} · {line_label(p)}</span>{val}</h4>
+            <div class="case"><b>The case:</b> {p['Why']}.</div>
+            <div class="rc">{reality_check(p)}</div>
+            </div>""", unsafe_allow_html=True)
+
+# --- sportsbook promotions --------------------------------------------------------------------
+C.section_header("💰", "Sportsbook promotions")
+st.caption("Promo terms change weekly and this page can't read a sportsbook's live promo page — "
+           "switch on the ones actually running for this slate, and confirm the terms in the book's app.")
+if "custom_promos" not in st.session_state:
+    st.session_state["custom_promos"] = []
+available = PR.catalog_for(_active.key, st.session_state["custom_promos"])
+with st.expander("➕ Add a promotion that's running (this session only)"):
+    with st.form("add_promo", clear_on_submit=True):
+        f1, f2 = st.columns(2)
+        pbook = f1.text_input("Sportsbook", placeholder="FanDuel")
+        pname = f2.text_input("Promotion name", placeholder="Anytime TD boost")
+        pkind = st.selectbox("What kind of picks fit it?", list(PR.KINDS),
+                             format_func=lambda k: {"longest_td": "Longest TD", "anytime_td": "Anytime TD",
+                                                    "first_td": "First TD scorer", "last_td": "Last TD scorer",
+                                                    "info": "Just mention it (no picks)"}[k])
+        psum = st.text_area("How it works (your words)", height=70)
+        if st.form_submit_button("Add promotion"):
+            try:
+                st.session_state["custom_promos"].append(
+                    PR.make_custom_promo(pbook, pname, _active.key, pkind, psum))
+                st.rerun()
+            except ValueError as e:
+                st.error(str(e))
+
+promo_lines = []
+if not available:
+    st.caption(f"No promotions on file for {_active.label} yet — add one above and the model will "
+               f"suggest who fits it.")
+else:
+    by_id = {p["id"]: p for p in available}
+    live_ids = st.multiselect("Promotions running for this slate", list(by_id),
+                              default=[i for i in by_id if not i.startswith("custom:")] or list(by_id)[:0],
+                              format_func=lambda i: f"{by_id[i]['book']} — {by_id[i]['name']}")
+    for pid in live_ids:
+        promo = by_id[pid]
+        st.markdown(f"#### 🎰 {promo['book']} — {promo['name']}")
+        st.markdown(f"{promo.get('summary') or 'See the book for terms.'}")
+        st.caption(f"Source: {promo.get('source', '')} · {promo.get('note', '')}")
+        promo_lines += [f"🎰 {PR.promo_blurb(promo)}", f"   ⚠️ {promo.get('note', '')}"]
+        _, _, how = PR.KINDS[promo["kind"]]
+        pools = ([(g["matchup"] + " · " + g["time_text"], [p for p in focus_plays if p.get("Game") == g["label"]])
+                  for g in focus_games])
+        any_picks = False
+        for ghead, gplays in pools:
+            picks = PR.promo_picks(gplays, promo, n=3)
+            if not picks:
+                continue
+            any_picks = True
+            st.markdown(f"**Who we like for it — {ghead}** <span style='color:#9aa4b2'>({how})</span>",
+                        unsafe_allow_html=True)
+            promo_lines.append(f"   Who we like — {ghead}:")
+            for k, pk in enumerate(picks, 1):
+                st.markdown(f"{k}. {PR.pick_line(pk)}")
+                promo_lines.append(f"     {k}) {PR.pick_line(pk)}")
+        if not any_picks and promo["kind"] != "info":
+            st.caption("The model has no priced candidates for this promotion in the chosen game(s).")
+        if promo["kind"] == "longest_td":
+            st.caption("Popularity isn't measured — \"likely a popular name\" just means one of the model's "
+                       "three likeliest scorers. Not a lock, not advice; bet responsibly.")
+        promo_lines.append("")
+
 # --- copy-all block --------------------------------------------------------
 C.section_header("📋", "Copy for the show / Discord")
 st.caption("One click the copy icon (top-right of the block) to grab the whole segment.")
 lines = [f"🎙️ H2 Sports Media — Selections we found interesting · {date_str}",
+         MF.slate_phrase(games, date_str, _active.key),
          f"({'live value' if ev_used else 'model conviction — prices not checked'})", ""]
 if _graded_on and (_h + _m):
     lines.append(f"🚦 Scorecard: {_h}-for-{_h + _m}  ({_tally})")
     lines.append("")
-for i, p in enumerate(sel, 1):
-    mark = result_mark(p)
-    prefix = f"{mark} " if mark else ""
-    lines.append(f"{prefix}{i}) {headline(p)}  [{p['Market']} · {line_label(p)}]")
-    lines.append(f"   The case: {p['Why']}.")
-    lines.append(f"   {reality_check(p)}")
-    lines.append("")
+_i = 0
+for heading, picks in sections:
+    if breakdown or len(focus_games) == 1:
+        lines += [f"🏟️ {heading}", ""]
+    for p in picks:
+        _i += 1
+        mark = result_mark(p)
+        prefix = f"{mark} " if mark else ""
+        lines.append(f"{prefix}{_i}) {headline(p)}  [{p['Market']} · {line_label(p)}]")
+        lines.append(f"   The case: {p['Why']}.")
+        lines.append(f"   {reality_check(p)}")
+        lines.append("")
+if promo_lines:
+    lines += ["💰 Sportsbook promotions", ""] + promo_lines
 lines.append("⚖️ For entertainment. Selections we found interesting with our reasoning — not locks "
              "and not betting advice. Variance is real; always check the price and bet responsibly.")
 st.code("\n".join(lines), language=None)

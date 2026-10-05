@@ -122,3 +122,12 @@ if __name__ == "__main__":
         except Exception as e:  # noqa: BLE001
             print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
     print(f"\n{passed}/{len(tests)} tests passed")
+
+
+def test_assemble_script_adds_the_slate_note_to_the_overview_only_when_given():
+    base = PC.assemble_script("2026-10-05", [], [], None, None, sport="NFL")
+    noted = PC.assemble_script("2026-10-05", [], [], None, None, sport="NFL",
+                               slate_note="Monday night — one game on the ticket: Falcons at Saints (8:15 PM ET)")
+    pick = lambda S: [b["text"] for s in S if "Slate Overview" in s["title"] for b in s["beats"]]
+    assert not any("TONIGHT'S TICKET" in t for t in pick(base))
+    assert any("TONIGHT'S TICKET: Monday night — one game on the ticket: Falcons at Saints" in t for t in pick(noted))

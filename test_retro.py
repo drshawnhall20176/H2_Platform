@@ -34,6 +34,11 @@ def test_grade_play_covers_the_newer_nfl_markets():
     assert R.grade_play("FG Attempted", "Under", 2.5, a) is False
     assert R.grade_play("Anytime TD", "Over", 0.5, a) is True
     assert R.grade_play("Anytime TD", "Over", 0.5, {**a, "scrimmage_tds": 0}) is False
+    t = {"passing_tds": 3, "rushing_tds": 0}
+    assert R.grade_play("Passing TDs", "Over", 1.5, t) is True
+    assert R.grade_play("Passing TDs", "Under", 2.5, t) is False
+    assert R.grade_play("Rushing TDs", "Over", 0.5, t) is False
+    assert R.grade_play("Rushing TDs", "Under", 0.5, t) is True
     # first/last TD can't be graded from weekly stats -> ungraded, never wrongly graded
     assert R.grade_play("First TD Scorer", "Over", 0.5, a) is None
     assert R.grade_play("Last TD Scorer", "Over", 0.5, a) is None

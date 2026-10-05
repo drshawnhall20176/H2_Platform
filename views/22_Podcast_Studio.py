@@ -17,6 +17,7 @@ import odds_api as O
 import retro as R
 import podcast as PC
 import selections as SEL
+import media_focus as MF
 
 _active = sports.active()
 
@@ -103,6 +104,14 @@ def load_today(sport_key, date_str, ev_mode):
     sport = sports.get(sport_key)
     plays, n_games, rows, meta, sc, k = _board(sport_key, date_str)
     plays = SEL.filter_known_pitcher(plays)             # never headline a TBD-pitcher matchup
+    # A weekly slate (NFL/NCAAF) spans several days: build tonight's show from the games actually
+    # on THIS date, not the whole week (same reported gap as the Media Room).
+    plays = MF.plays_on_date(plays, date_str)
+    games = MF.games_on_date(meta, plays, date_str)
+    n_games = len(games)
+    slate_note = (MF.slate_phrase(games, date_str, sport_key)
+                  + (": " + "; ".join(f"{g['matchup']} ({g['time_text']})" for g in games)
+                     if len(games) > 1 else "")) if games else ""
     ev_used = False
     if ev_mode:
         key = get_key()
@@ -125,7 +134,7 @@ def load_today(sport_key, date_str, ev_mode):
     hl = {id(p) for p in headliners}
     sleepers = sport.projections.curate_selections(
         [p for p in plays if id(p) not in hl], n=3, per_market_cap=1, rank_key=rank)
-    return headliners, sleepers, n_games, ev_used
+    return headliners, sleepers, n_games, ev_used, slate_note
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -144,7 +153,7 @@ def load_yesterday(sport_key, date_str):
         return None, None
 
 
-target = st.date_input("Show date (tonight's slate)", datetime.now())
+target = st.date_input("Show date (tonight's slate)", MF.today_eastern())
 ev_mode = st.toggle("Feature live-value plays (uses odds quota)", value=False,
                     help="On: ranks the show's selections by real EV% against live prices (same math "
                          "as the Edge Board). Off: ranks by model conviction. Either way, TBD-pitcher "
@@ -153,16 +162,17 @@ date_str = target.strftime("%Y-%m-%d")
 yest = (target - timedelta(days=1)).strftime("%Y-%m-%d")
 
 with st.spinner("Writing tonight's rundown..."):
-    headliners, sleepers, n_games, ev_used = load_today(_active.key, date_str, ev_mode)
+    headliners, sleepers, n_games, ev_used, slate_note = load_today(_active.key, date_str, ev_mode)
     retro, caught = load_yesterday(_active.key, yest)
 
 if not headliners:
     st.info("No games on this date to build a show around. Pick a date with a scheduled slate.")
     st.stop()
 
-sections = PC.assemble_script(date_str, headliners, sleepers, retro, caught, sport=_active.key)
+sections = PC.assemble_script(date_str, headliners, sleepers, retro, caught, sport=_active.key,
+                          slate_note=slate_note)
 
-st.caption(f"{n_games} games tonight · {len(headliners)} headline selections · "
+st.caption(f"{n_games} game{'s' if n_games != 1 else ''} tonight · {len(headliners)} headline selections · "
            f"{len(sleepers)} sleepers · teaching + yesterday's review included")
 st.info("This is a talking-points rundown — riff, don't read. Yellow blocks are **FILL IN** prompts "
         "for the stuff only you two know (last night's chaos, tonight's storyline). The model never "

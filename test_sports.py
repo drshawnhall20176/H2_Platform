@@ -2432,10 +2432,15 @@ def test_nfl_player_lines_wires_correctly_with_confirmed_column_names():
     assert 'sports.require_sport(["NFL"], "NFL Player Lines")' in src, (
         "must gate to NFL specifically"
     )
-    assert 'lambda g: g.get("passing_tds") or 0' in src, (
+    # QB Passing TDs is now a line chart driven by the shared market spec (so it can show the book's
+    # line); the spec's column must still be NFL's confirmed nflreadpy name 'passing_tds'.
+    import nfl_projections as _NP
+    assert '("player_pass_tds", "Passing TDs")' in src
+    assert {m: c for m, c, _d in _NP.all_market_list()}["player_pass_tds"] == "passing_tds", (
         "QB's passing TD chart must use NFL's confirmed nflreadpy column name 'passing_tds', "
         "not NCAAF's 'passing_TD'"
     )
+    assert 'lambda g: g.get("rushing_tds") or 0' in src
     assert 'lambda g: (g.get("rushing_tds") or 0) + (g.get("receiving_tds") or 0)' in src, (
         "non-QB TD chart must use NFL's confirmed 'rushing_tds'/'receiving_tds', not NCAAF's"
     )

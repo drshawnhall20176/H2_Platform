@@ -311,7 +311,8 @@ def test_player_row_qb_gets_only_passing_markets_plus_anytime_td():
     row = E.player_row(player, "KC", "LAC", "KC @ LAC", "2025-09-05", log)
     assert row is not None
     assert row["_markets"] == ["player_pass_yds", "player_pass_attempts", "player_pass_completions",
-                               "player_pass_interceptions", "player_anytime_td"]
+                               "player_pass_interceptions", "player_pass_tds", "player_rush_tds",
+                               "player_anytime_td"]
     assert "player_receptions" not in row["_markets"] and "player_rush_yds" not in row["_markets"]
     print("✓ player_row gives a QB the passing markets (yards/attempts/completions/interceptions) + anytime TD, never Receptions or Rush Yards")
 
@@ -321,8 +322,8 @@ def test_player_row_rb_gets_rush_and_receiving_markets_when_both_clear_floor():
     log = [{"rushing_yards": 80, "carries": 18, "targets": 4, "receptions": 3,
            "receiving_yards": 25, "_touches": 22}] * 3
     row = E.player_row(player, "KC", "LAC", "KC @ LAC", "2025-09-05", log)
-    assert set(row["_markets"]) == {"player_rush_yds", "player_rush_attempts", "player_receptions",
-                                    "player_reception_yds", "player_anytime_td"}
+    assert set(row["_markets"]) == {"player_rush_yds", "player_rush_attempts", "player_rush_tds",
+                                    "player_receptions", "player_reception_yds", "player_anytime_td"}
     print("✓ player_row gives a productive RB rushing (yards + attempts), receiving and anytime TD markets")
 
 
@@ -333,7 +334,8 @@ def test_player_row_rb_with_no_targets_gets_only_rush_market():
     log = [{"rushing_yards": 60, "carries": 15, "targets": 0, "receptions": 0,
            "receiving_yards": 0, "_touches": 15}] * 5
     row = E.player_row(player, "KC", "LAC", "KC @ LAC", "2025-09-05", log)
-    assert row["_markets"] == ["player_rush_yds", "player_rush_attempts", "player_anytime_td"]
+    assert row["_markets"] == ["player_rush_yds", "player_rush_attempts", "player_rush_tds",
+                               "player_anytime_td"]
     print("✓ player_row correctly excludes receiving markets for a RB with no real target volume")
 
 
@@ -347,6 +349,28 @@ def test_player_row_rush_attempts_needs_real_carries_not_just_touches():
     assert "player_rush_attempts" not in row["_markets"]
     assert "player_rush_yds" in row["_markets"] and "player_receptions" in row["_markets"]
     print("✓ Rush Attempts is gated on real carries, not carries + targets")
+
+
+def test_player_row_rushing_tds_floor_is_carries_for_backs_but_pass_attempts_for_a_qb():
+    # An RB with real carries gets Rushing TDs; a QB gets it on the strength of his PASS attempts (a QB
+    # almost never averages 4 carries), and a QB's Passing TDs likewise.
+    rb = {"id": "r", "name": "Back", "position": "RB"}
+    rb_log = [{"carries": 12, "rushing_yards": 50, "_touches": 14}] * 4
+    assert "player_rush_tds" in E.player_row(rb, "KC", "LAC", "KC @ LAC", "2025-09-05", rb_log)["_markets"]
+    qb = {"id": "q", "name": "QB", "position": "QB"}
+    qb_log = [{"attempts": 30, "carries": 2, "passing_yards": 200}] * 4
+    qb_markets = E.player_row(qb, "KC", "LAC", "KC @ LAC", "2025-09-05", qb_log)["_markets"]
+    assert "player_rush_tds" in qb_markets and "player_pass_tds" in qb_markets
+    # a receiving back with 1 carry a game gets neither Rush Attempts nor Rushing TDs
+    pc = {"id": "p", "name": "PC Back", "position": "RB"}
+    pc_log = [{"carries": 1, "targets": 4, "receptions": 3, "_touches": 5}] * 4
+    pc_markets = E.player_row(pc, "KC", "LAC", "KC @ LAC", "2025-09-05", pc_log)["_markets"]
+    assert "player_rush_tds" not in pc_markets and "player_rush_attempts" not in pc_markets
+    # WR/TE get neither
+    wr = {"id": "w", "name": "WR", "position": "WR"}
+    assert "player_rush_tds" not in E.player_row(wr, "KC", "LAC", "KC @ LAC", "2025-09-05",
+                                                 [{"targets": 6, "receptions": 4}] * 3)["_markets"]
+    print("✓ Rushing TDs uses a carries floor for RB/FB and a pass-attempts floor for a QB; Passing TDs is QB-only")
 
 
 def test_player_row_kicker_gets_field_goal_markets_and_no_anytime_td():
@@ -398,13 +422,14 @@ def test_get_player_results_returns_the_new_market_stats(monkeypatch):
                            "home_rest": 7, "away_rest": 7}])
     stats = pd.DataFrame([{"player_id": "p1", "week": 1, "passing_yards": 250, "attempts": 33,
                            "completions": 22, "passing_interceptions": 2, "carries": 3,
-                           "fg_made": 0, "fg_att": 0, "rushing_tds": 1, "receiving_tds": 1}])
+                           "fg_made": 0, "fg_att": 0, "passing_tds": 2, "rushing_tds": 1, "receiving_tds": 1}])
     monkeypatch.setattr(E.nfl, "load_schedules", lambda seasons: _FakePolarsDF(sched))
     monkeypatch.setattr(E.nfl, "get_current_season", lambda: 2026)
     monkeypatch.setattr(E.nfl, "load_player_stats", lambda seasons, summary_level="week": _FakePolarsDF(stats))
     res = E.get_player_results("2026-09-10")["p1"]
     assert (res["attempts"], res["completions"], res["passing_interceptions"], res["carries"]) == (33, 22, 2, 3)
     assert res["scrimmage_tds"] == 2
+    assert res["passing_tds"] == 2 and res["rushing_tds"] == 1
     print("✓ get_player_results returns attempts/completions/interceptions/carries/FG/scrimmage TDs for grading")
 
 

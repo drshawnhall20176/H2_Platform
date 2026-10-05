@@ -69,7 +69,7 @@ def test_parse_event_offers_ignores_a_non_yes_outcome_on_a_yes_only_market():
 
 
 def test_new_nfl_markets_are_requested_from_the_odds_api():
-    for key in ("player_pass_attempts", "player_pass_completions", "player_pass_interceptions",
+    for key in ("player_pass_attempts", "player_pass_completions", "player_pass_interceptions", "player_pass_tds",
                 "player_rush_attempts", "player_field_goals", "player_anytime_td", "player_1st_td", "player_last_td"):
         assert key in O.NFL_SUPPORTED_MARKETS
     import sports

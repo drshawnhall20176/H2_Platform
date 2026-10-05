@@ -77,13 +77,16 @@ _POSITION_GROUPS = {
         "positions": ("QB",),
         "line_markets": [("player_pass_yds", "Pass Yards"), ("player_pass_attempts", "Pass Attempts"),
                          ("player_pass_completions", "Pass Completions"),
-                         ("player_pass_interceptions", "Interceptions")],
-        "td_charts": [("Passing TDs", lambda g: g.get("passing_tds") or 0),
-                     ("Rushing TDs", lambda g: g.get("rushing_tds") or 0)],
+                         ("player_pass_interceptions", "Interceptions"),
+                         ("player_pass_tds", "Passing TDs")],
+        # Passing TDs is a line chart above now (with the book's line when fetched); Rushing TDs has no
+        # book market, so it stays a plain bar chart.
+        "td_charts": [("Rushing TDs", lambda g: g.get("rushing_tds") or 0)],
     },
     "RB": {
         "positions": ("RB", "FB"),
         "line_markets": [("player_rush_yds", "Rush Yards"), ("player_rush_attempts", "Rush Attempts"),
+                         ("player_rush_tds", "Rushing TDs"),
                          ("player_receptions", "Receptions"), ("player_reception_yds", "Receiving Yards")],
         "td_charts": [("Touchdowns", lambda g: (g.get("rushing_tds") or 0) + (g.get("receiving_tds") or 0))],
     },
