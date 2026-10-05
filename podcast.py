@@ -253,7 +253,7 @@ def selection_beats(p: Dict) -> List[Dict]:
 # --- full script assembly --------------------------------------------------
 def assemble_script(date_str: str, headliners: List[Dict], sleepers: List[Dict],
                     retro: Optional[Dict], caught_homers: Optional[List[Dict]],
-                    sport: str = "MLB") -> List[Dict]:
+                    sport: str = "MLB", slate_note: str = "") -> List[Dict]:
     """Return ordered sections: {title, time, beats[]}. Pure — no Streamlit, fully testable.
 
     `sport` swaps the handful of baseball-flavored phrases (park/weather, "went deep", the
@@ -319,6 +319,10 @@ def assemble_script(date_str: str, headliners: List[Dict], sleepers: List[Dict],
              ("Dr. Hall: give the shape of the slate — number of games, any rest/back-to-back spots, "
               "the one matchup you're most fired up about.")),
     ]
+    if slate_note:
+        # Day/game framing (see media_focus.slate_phrase): the real shape of tonight's ticket, so a
+        # one-game night is framed as ONE game rather than a generic "how many games" riff.
+        overview.insert(1, _note(f"TONIGHT'S TICKET: {slate_note}."))
     S.append({"title": "🗒️ Slate Overview", "time": "8:00–13:00", "beats": overview})
 
     # 3) Top selections (the meat)

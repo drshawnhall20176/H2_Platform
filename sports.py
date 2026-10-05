@@ -121,12 +121,13 @@ REGISTRY: Dict[str, Sport] = {
         markets=["player_pass_yds", "player_rush_yds", "player_receptions", "player_reception_yds",
                  # added on request: odds-API keys confirmed in book_menu.py's football list
                  "player_pass_attempts", "player_pass_completions", "player_pass_interceptions",
-                 "player_rush_attempts", "player_field_goals",
+                 "player_pass_tds", "player_rush_attempts", "player_field_goals",
                  "player_anytime_td", "player_1st_td", "player_last_td"],
         market_map={"Pass Yards": "player_pass_yds", "Rush Yards": "player_rush_yds",
                     "Receptions": "player_receptions", "Receiving Yards": "player_reception_yds",
                     "Pass Attempts": "player_pass_attempts", "Pass Completions": "player_pass_completions",
-                    "Interceptions": "player_pass_interceptions", "Rush Attempts": "player_rush_attempts",
+                    "Interceptions": "player_pass_interceptions", "Passing TDs": "player_pass_tds",
+                    "Rush Attempts": "player_rush_attempts",
                     "FG Made": "player_field_goals", "Anytime TD": "player_anytime_td",
                     "First TD Scorer": "player_1st_td", "Last TD Scorer": "player_last_td"},
         # Yes-only markets (no Over/Under): matched on player + market, not on a line.

@@ -71,6 +71,10 @@ _MARKET_SPEC: Dict[str, Tuple[str, str, float]] = {
     "player_pass_completions":   ("completions",           "Pass Completions", 21.5),
     "player_pass_interceptions": ("passing_interceptions", "Interceptions",    0.5),
     "player_rush_attempts":      ("carries",               "Rush Attempts",    12.5),
+    # Touchdown COUNTS (distinct from the binary Anytime TD below). Passing TDs has a real book market
+    # (usually Over/Under 1.5); Rushing TDs has none in this platform's odds feed, so it is model-only.
+    "player_pass_tds":           ("passing_tds",           "Passing TDs",      1.5),
+    "player_rush_tds":           ("rushing_tds",           "Rushing TDs",      0.5),
     "player_field_goals":        ("fg_made",               "FG Made",          1.5),
     "player_fg_attempts":        ("fg_att",                "FG Attempted",     1.5),
     # A binary market, not an Over/Under: the stat is "scored a rushing or receiving TD" (see
@@ -214,6 +218,11 @@ def default_board_from_index(index: Dict,
 # lines above are round-number estimates, not book-calibrated (same reasoning every sport uses).
 BEST_BET_REF = {"Pass Yards": 0.5, "Rush Yards": 0.5, "Receptions": 0.5, "Receiving Yards": 0.5,
                 "Pass Attempts": 0.5, "Pass Completions": 0.5, "Interceptions": 0.5,
+                "Passing TDs": 0.5,
+                # A 0.5 line on a rushing-TD count is "scores one or more": a typical back/QB clears it
+                # in roughly a quarter of games, so the coin-flip reference would mislabel every Under
+                # as a big edge. Reasoned estimate, used only when no real price exists to reference.
+                "Rushing TDs": 0.25,
                 "Rush Attempts": 0.5, "FG Made": 0.5, "FG Attempted": 0.5,
                 # Binary scoring markets sit well below a coin flip. Anytime TD: a typical rotation
                 # skill player scores in roughly 3 of 10 games. First/Last TD Scorer: with ~16-20
@@ -238,12 +247,15 @@ NFL_MARKET_TO_ODDS_KEY: Dict[str, str] = {
     "Pass Attempts":    "player_pass_attempts",
     "Pass Completions": "player_pass_completions",
     "Interceptions":    "player_pass_interceptions",
+    "Passing TDs":      "player_pass_tds",
     "Rush Attempts":    "player_rush_attempts",
     "FG Made":          "player_field_goals",
     "Anytime TD":       "player_anytime_td",
     "First TD Scorer":  "player_1st_td",
     "Last TD Scorer":   "player_last_td",
-    # "FG Attempted" is deliberately absent: no sportsbook posts it, so it is model-only (default line).
+    # "FG Attempted" and "Rushing TDs" are deliberately absent: this platform's odds feed has no market
+    # for them (the Anytime TD / Rush+Rec TD markets are different bets), so they are model-only
+    # (default line, no book price) rather than guessing at an Odds API key.
 }
 
 
@@ -396,6 +408,7 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
             plays.append({
                 "Player": r["Player"], "PlayerId": r.get("_pid"), "Team": r["Team"],
                 "Game": r["GameLabel"], "Opp": r.get("Opp"), "Versus": r.get("Opp"),
+                "Position": r.get("Position"),
                 # GameDate: this game's real, scheduled UTC start time, already sitting on every
                 # row (build_projection_index's own ctx dict reads the same r["_game_date"]) --
                 # just never carried onto the play before now. Confirmed, reported gap: without
@@ -480,6 +493,7 @@ def _td_scorer_plays(rows: List[Dict], offers: Optional[List[Dict]],
                 plays.append({
                     "Player": r["Player"], "PlayerId": r.get("_pid"), "Team": r["Team"],
                     "Game": r["GameLabel"], "Opp": r.get("Opp"), "Versus": r.get("Opp"),
+                    "Position": r.get("Position"),
                     "GameDate": r.get("_game_date"),
                     "Market": disp, "Side": "Over", "Line": 0.5, "LineSource": "default",
                     "ModelProb": round(prob, 4), "Fair": prob_to_american(prob),

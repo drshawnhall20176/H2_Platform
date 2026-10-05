@@ -51,7 +51,7 @@ NFL_SUPPORTED_MARKETS = [
     # Added on request (keys as listed in book_menu.py's football markets). The three TD markets are
     # Yes-only -- see YES_ONLY_MARKETS / parse_event_offers. NOT verified against a live response
     # from this sandbox (no route to the Odds API); check the first real fetch.
-    "player_pass_attempts", "player_pass_completions", "player_pass_interceptions",
+    "player_pass_attempts", "player_pass_completions", "player_pass_interceptions", "player_pass_tds",
     "player_rush_attempts", "player_field_goals",
     "player_anytime_td", "player_1st_td", "player_last_td",
 ]

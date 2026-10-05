@@ -69,6 +69,7 @@ MARKET_STAT = {
     "Pass Attempts": "attempts", "Pass Completions": "completions",
     "Interceptions": "passing_interceptions", "Rush Attempts": "carries",
     "FG Made": "fg_made", "FG Attempted": "fg_att", "Anytime TD": "scrimmage_tds",
+    "Passing TDs": "passing_tds", "Rushing TDs": "rushing_tds",
 }
  
  

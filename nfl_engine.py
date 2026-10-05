@@ -82,11 +82,13 @@ def _diag(msg: str) -> None:
 # separate design decision later, not a quick addition here.
 _MARKETS_FOR_POSITION: Dict[str, List[str]] = {
     "QB": ["player_pass_yds", "player_pass_attempts", "player_pass_completions",
-           "player_pass_interceptions"],
-    "RB": ["player_rush_yds", "player_rush_attempts", "player_receptions", "player_reception_yds"],
+           "player_pass_interceptions", "player_pass_tds", "player_rush_tds"],
+    "RB": ["player_rush_yds", "player_rush_attempts", "player_rush_tds", "player_receptions",
+           "player_reception_yds"],
     "WR": ["player_receptions", "player_reception_yds"],
     "TE": ["player_receptions", "player_reception_yds"],
-    "FB": ["player_rush_yds", "player_rush_attempts", "player_receptions", "player_reception_yds"],
+    "FB": ["player_rush_yds", "player_rush_attempts", "player_rush_tds", "player_receptions",
+           "player_reception_yds"],
     "K": ["player_field_goals", "player_fg_attempts"],
 }
 
@@ -96,6 +98,10 @@ _MARKETS_FOR_POSITION: Dict[str, List[str]] = {
 # cleared a real role floor for his position, so adding this market never changes who is on the slate.
 ANYTIME_TD_MARKET = "player_anytime_td"
 _ANYTIME_TD_POSITIONS = {"QB", "RB", "WR", "TE", "FB"}
+
+# A market's floor can differ by position: a QB's Rushing TDs market is gated on his PASS attempts (a
+# starting QB), not on carries, which a QB rarely reaches 4 of -- only RB/FB use the carries floor.
+_FLOOR_OVERRIDE = {("QB", "player_rush_tds"): ("attempts", CFG.MIN_QB_ATTEMPTS)}
 
 # odds_market_key -> (weekly-stats column, display name, rotation-floor stat column, floor value).
 # The rotation floor is checked against the SAME player's own average of the floor column — see
@@ -112,6 +118,10 @@ _MARKET_SPEC: Dict[str, Tuple[str, str, str, float]] = {
     "player_pass_completions":   ("completions",           "Pass Completions",  "attempts", CFG.MIN_QB_ATTEMPTS),
     "player_pass_interceptions": ("passing_interceptions", "Interceptions",     "attempts", CFG.MIN_QB_ATTEMPTS),
     "player_rush_attempts":      ("carries",               "Rush Attempts",     "carries",  CFG.MIN_RB_CARRIES),
+    # Passing / rushing touchdown COUNTS (Over/Under, e.g. Over 1.5 passing TDs) -- distinct from
+    # Anytime TD, which is "any rushing or receiving TD". A QB's rushing TDs are his own market here.
+    "player_pass_tds":           ("passing_tds",           "Passing TDs",       "attempts", CFG.MIN_QB_ATTEMPTS),
+    "player_rush_tds":           ("rushing_tds",           "Rushing TDs",       "carries",  CFG.MIN_RB_CARRIES),
     "player_field_goals":        ("fg_made",               "FG Made",           "fg_att",   CFG.MIN_K_FG_ATT),
     "player_fg_attempts":        ("fg_att",                "FG Attempted",      "fg_att",   CFG.MIN_K_FG_ATT),
 }
@@ -336,7 +346,7 @@ def load_season_weekly_stats(season: int) -> pd.DataFrame:
     if "passing_interceptions" not in df.columns:
         df["passing_interceptions"] = df["interceptions"] if "interceptions" in df.columns else 0
     for col in ("completions", "attempts", "passing_interceptions", "fg_made", "fg_att",
-                "rushing_tds", "receiving_tds"):
+                "passing_tds", "rushing_tds", "receiving_tds"):
         if col not in df.columns:
             df[col] = 0
         df[col] = df[col].fillna(0)
@@ -520,7 +530,7 @@ def player_row(player: Dict, team: str, opp: str, game_label: str, game_date: Op
 
     cleared_markets = []
     for mkey in markets:
-        _stat_col, _disp, floor_col, floor_val = _MARKET_SPEC[mkey]
+        floor_col, floor_val = _FLOOR_OVERRIDE.get((position, mkey), _MARKET_SPEC[mkey][2:])
         if avg(floor_col) >= floor_val:
             cleared_markets.append(mkey)
     if not cleared_markets:
@@ -605,6 +615,8 @@ def get_player_results(date_str: str) -> Dict[str, Dict[str, float]]:
             "fg_made": float(r.get("fg_made") or 0),
             "fg_att": float(r.get("fg_att") or 0),
             "scrimmage_tds": float((r.get("rushing_tds") or 0) + (r.get("receiving_tds") or 0)),
+            "passing_tds": float(r.get("passing_tds") or 0),
+            "rushing_tds": float(r.get("rushing_tds") or 0),
         }
     _diag(f"get_player_results({date_str}): season {season} week {week}, {len(out)} player result(s)")
     return out
