@@ -64,28 +64,79 @@ def nice_matchup(label: str) -> str:
 
 def games_on_date(meta: List[Dict], plays: List[Dict], date_str: str) -> List[Dict]:
     """Games on `date_str`, kickoff order (unknown time last). Built from slate meta; falls back
-    to the plays' own Game/GameDate if meta is empty. Each: label, matchup, start, time_text, slot."""
-    raw: Dict[str, Optional[str]] = {}
+    to the plays' own Game/GameDate if meta is empty. Each: key, label, iso, dh, matchup, start,
+    time_text, slot. A doubleheader (same label twice) gets a distinct key per game and a
+    "(Game n)" suffix on its matchup — plays are told apart by their own GameDate."""
+    raw: List[Tuple[str, Optional[str]]] = []
     for m in meta or []:
         if m.get("label"):
-            raw[m["label"]] = m.get("game_date") or m.get("GameDate")
+            raw.append((m["label"], m.get("game_date") or m.get("GameDate")))
     if not raw:
+        seen = set()
         for p in plays or []:
-            if p.get("Game"):
-                raw.setdefault(p["Game"], p.get("GameDate"))
+            k = (p.get("Game"), p.get("GameDate"))
+            if p.get("Game") and k not in seen:
+                seen.add(k)
+                raw.append(k)
+    counts: Dict[str, int] = {}
+    for label, _ in raw:
+        counts[label] = counts.get(label, 0) + 1
     games = []
-    for label, iso in raw.items():
+    for label, iso in raw:
         d = day_of(iso)
         if d is not None and d != date_str:
             continue
         dt = sports.game_dt(iso)
+        dh = counts[label] > 1
         games.append({
-            "label": label, "matchup": nice_matchup(label), "start": dt,
+            "key": f"{label}|{iso}" if dh else label, "label": label, "iso": iso, "dh": dh,
+            "game_no": None, "matchup": nice_matchup(label), "start": dt,
             "time_text": dt.strftime("%-I:%M %p ET") if dt else "time TBD",
             "slot": sports.slot_of(dt),
         })
     games.sort(key=lambda g: (g["start"] is None, g["start"] or 0, g["label"]))
+    nth: Dict[str, int] = {}
+    for g in games:
+        if g["dh"]:
+            nth[g["label"]] = nth.get(g["label"], 0) + 1
+            g["game_no"] = nth[g["label"]]
+            g["matchup"] = f"{g['matchup']} (Game {g['game_no']})"
     return games
+
+
+def plays_for_game(plays: List[Dict], game: Dict) -> List[Dict]:
+    """The plays belonging to one game (doubleheader-safe: matched on GameDate too)."""
+    return [p for p in plays if p.get("Game") == game["label"]
+            and (not game.get("dh") or p.get("GameDate") == game.get("iso"))]
+
+
+ALL_SLATE = "All slate"
+ALL_GAMES_IN_SLOT = "All games in this slot"
+
+
+def slot_options(games: List[Dict]) -> List[str]:
+    """The site-standard Time slot choices: 'All slate' + the slots present (Afternoon/Evening/Late/TBD)."""
+    present = {g["slot"] for g in games}
+    return [ALL_SLATE] + [s for s in sorted(sports.SLOT_ORDER, key=sports.SLOT_ORDER.get) if s in present]
+
+
+def game_options(games: List[Dict], slot: str = ALL_SLATE) -> List[Tuple[str, str]]:
+    """The site-standard Game choices for a slot: [(key, '8:15 PM ET — ATL @ NO')], chronological.
+    (The caller adds the 'All games in this slot' entry.)"""
+    out = []
+    for g in games:
+        if slot != ALL_SLATE and g["slot"] != slot:
+            continue
+        label = g["label"] + (f" (Game {g['game_no']})" if g["game_no"] else "")
+        out.append((g["key"], label if g["start"] is None else f"{g['time_text']} — {label}"))
+    return out
+
+
+def select_games(games: List[Dict], slot: str, game_key: str) -> List[Dict]:
+    """Apply the Time slot + Game picks (as the other pages do): game_key == ALL_GAMES_IN_SLOT keeps
+    every game in the slot; otherwise exactly that game."""
+    in_slot = [g for g in games if slot == ALL_SLATE or g["slot"] == slot]
+    return in_slot if game_key == ALL_GAMES_IN_SLOT else [g for g in in_slot if g["key"] == game_key]
 
 
 def other_days_with_games(meta: List[Dict], date_str: str) -> List[str]:
@@ -116,15 +167,18 @@ def slate_phrase(games: List[Dict], date_str: str, sport_key: str = "") -> str:
 
 def group_by_game(plays: List[Dict], games: List[Dict]) -> List[Tuple[Dict, List[Dict]]]:
     """[(game, plays)] in kickoff order; plays for unlisted games get a trailing synthetic game."""
-    by = {g["label"]: [] for g in games}
+    out, used = [], set()
+    for g in games:
+        ps = plays_for_game(plays, g)
+        used.update(id(p) for p in ps)
+        out.append((g, ps))
     extra: Dict[str, List[Dict]] = {}
     for p in plays:
-        lab = p.get("Game")
-        (by if lab in by else extra).setdefault(lab, []).append(p)
-    out = [(g, by[g["label"]]) for g in games]
+        if id(p) not in used:
+            extra.setdefault(p.get("Game"), []).append(p)
     for lab, ps in extra.items():
-        out.append(({"label": lab, "matchup": nice_matchup(lab), "start": None,
-                     "time_text": "time TBD", "slot": "TBD"}, ps))
+        out.append(({"key": lab, "label": lab, "iso": None, "dh": False, "game_no": None, "matchup": nice_matchup(lab),
+                     "start": None, "time_text": "time TBD", "slot": "TBD"}, ps))
     return out
 
 
