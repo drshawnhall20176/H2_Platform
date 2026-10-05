@@ -68,18 +68,55 @@ def test_monday_night_focuses_on_the_single_game_not_the_whole_week(patched):
     assert not at.selectbox or all("Focus" != s.label for s in at.selectbox)   # single game: no picker
 
 
-def test_promotion_section_recommends_td_scorers_for_king_of_the_end_zone(patched):
+def test_default_book_shows_its_monday_promotions_with_picks(patched):
     at = _app()
     at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert [s for s in at.selectbox if s.label == "📖 Book"][0].value == "DraftKings"
     t = _text(at)
-    assert "DraftKings — King of the End Zone" in t
+    assert "DraftKings promotions" in t
+    assert "DraftKings — King of the End Zone" in t and "DraftKings — MNF SGP No Sweat" in t
+    assert "50% Boost Every Gameday" in t
     assert "confirm" in t.lower()                                      # honesty about unverified terms
     promo_block = t.split("Who we like for it")[1]
     assert "Drake London" in promo_block and "yds/touch" in promo_block
-    on_screen_promo = promo_block.split("Copy for the show")[0]
-    assert "Kirk Cousins" not in on_screen_promo                       # Pass Attempts isn't a TD-promo market
     copy = at.code[-1].value
-    assert "💰 Sportsbook promotions" in copy and "Who we like" in copy
+    assert "💰 DraftKings promotions" in copy and "Who we like" in copy and "📖 Prices/promotions: DraftKings" in copy
+    assert "TD Jackpot" not in t                                       # FanDuel's, and Thursday-only
+
+
+def test_switching_book_switches_the_promotions_and_unlisted_books_say_so(patched):
+    at = _app()
+    at.run()
+    [s for s in at.selectbox if s.label == "📖 Book"][0].set_value("FanDuel")
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    t = _text(at)
+    assert "FanDuel promotions" in t and "Free Full-Game Injury Protection" in t
+    assert "King of the End Zone" not in t.split("FanDuel promotions")[1]
+    assert "TD Jackpot" not in t                                       # Thursday-only promo, today is Monday
+    [s for s in at.selectbox if s.label == "📖 Book"][0].set_value("Hard Rock Bet")
+    at.run()
+    assert not at.exception
+    assert any("No Hard Rock Bet promotions on file" in i.value and "DraftKings" in i.value for i in at.info)
+
+
+def test_pickem_book_prices_from_a_sportsbook_and_explains(patched):
+    at = _app()
+    at.run()
+    [s for s in at.selectbox if s.label == "📖 Book"][0].set_value("PrizePicks")
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("PrizePicks" in c.value and "DraftKings prices" in c.value for c in at.caption)
+
+
+def test_sgp_promo_suggests_one_leg_per_player_in_the_game(patched):
+    at = _app()
+    at.run()
+    t = _text(at)
+    sgp = t.split("MNF SGP No Sweat")[1].split("50% Boost")[0]
+    assert "Who we like for it — Falcons at Saints" in sgp
+    assert "Pass Attempts Over" in sgp or "Anytime TD" in sgp
 
 
 def test_multi_game_day_offers_a_picker_and_breakdown_and_focus_filters(patched, monkeypatch):
@@ -96,8 +133,11 @@ def test_multi_game_day_offers_a_picker_and_breakdown_and_focus_filters(patched,
     assert "Sunday afternoon — 2 games on the ticket" in t
     assert "Josh Allen" in t and "CeeDee Lamb" in t and "Drake London" not in t   # Monday's game excluded
     assert "Chiefs at Bills" in t and "Cowboys at Giants" in t                    # per-game sections
-    focus = [s for s in at.selectbox if s.label == "Focus"][0]
-    focus.set_value([o for o in focus.options if o.startswith("Cowboys at Giants")][0])
+    assert [s.label for s in at.selectbox][:3] == ["📖 Book", "Time slot", "Game"]
+    game = [s for s in at.selectbox if s.label == "Game"][0]
+    assert game.options[0] == "All games in this slot"
+    assert game.options[1:] == ["1:00 PM ET — KC @ BUF", "4:25 PM ET — DAL @ NYG"]
+    game.set_value("DAL @ NYG")
     at.run()
     assert not at.exception
     t2 = _text(at)
@@ -113,20 +153,41 @@ def test_no_games_on_date_explains_where_games_are(patched, monkeypatch):
     assert any("2026-10-04" in c.value and "2026-10-05" in c.value for c in at.caption)
 
 
-def test_owner_can_add_a_custom_promotion_and_gets_picks_for_it(patched):
+def test_owner_can_add_a_custom_promotion_for_the_selected_book(patched):
     at = _app()
     at.run()
-    [t for t in at.text_input if t.label == "Sportsbook"][0].set_value("FanDuel")
+    [s for s in at.selectbox if s.label == "📖 Book"][0].set_value("FanDuel")
+    at.run()
     [t for t in at.text_input if t.label == "Promotion name"][0].set_value("TD Boost")
     [s for s in at.selectbox if s.label.startswith("What kind")][0].set_value("anytime_td")
     [b for b in at.button if b.label == "Add promotion"][0].click()
     at.run()
     assert not at.exception, [e.value for e in at.exception]
-    assert [p["name"] for p in at.session_state["custom_promos"]] == ["TD Boost"]
-    ms = [m for m in at.multiselect if m.label.startswith("Promotions running")][0]
-    ms.set_value(ms.value + ["custom:fanduel:td boost"])
-    at.run()
+    assert [(p["book"], p["name"]) for p in at.session_state["custom_promos"]] == [("fanduel", "TD Boost")]
     assert "FanDuel — TD Boost" in _text(at)
+    [s for s in at.selectbox if s.label == "📖 Book"][0].set_value("DraftKings")
+    at.run()
+    assert "TD Boost" not in _text(at)                                  # belongs to FanDuel only
+
+
+def test_time_slot_filter_narrows_the_game_list(patched, monkeypatch):
+    monkeypatch.setattr(MF, "today_eastern", lambda: __import__("datetime").date(2026, 10, 4))
+    meta = [{"label": "KC @ BUF", "game_date": SUN}, {"label": "SEA @ LAR", "game_date": "2026-10-05T00:20:00+00:00"}]
+    plays = [_p("Travis Kelce", "KC", "KC @ BUF", SUN, "Anytime TD", .48, 1.8, rec_yds=60, rec=6),
+             _p("Kenneth Walker", "SEA", "SEA @ LAR", "2026-10-05T00:20:00+00:00", "Anytime TD", .45, 1.6,
+                rush_yds=70, car=15)]
+    monkeypatch.setattr(nfl_engine, "build_slate", lambda d: ([], meta))
+    monkeypatch.setattr(nfl_projections, "build_best_bets", lambda rows, *a, **k: plays)
+    at = _app()
+    at.run()
+    slot = [s for s in at.selectbox if s.label == "Time slot"][0]
+    assert slot.options == ["All slate", "Afternoon", "Late"]
+    slot.set_value("Late")
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert [s for s in at.selectbox if s.label == "Game"][0].options == ["All games in this slot", "8:20 PM ET — SEA @ LAR"]
+    t = _text(at)
+    assert "Kenneth Walker" in t and "Travis Kelce" not in t
 
 
 def test_podcast_studio_builds_tonights_show_from_the_one_game(patched):
@@ -137,3 +198,40 @@ def test_podcast_studio_builds_tonights_show_from_the_one_game(patched):
     t = _text(at)
     assert "TONIGHT'S TICKET: Monday night — one game on the ticket: Falcons at Saints" in t
     assert "Josh Allen" not in t and "1 game tonight" in t
+
+
+def test_mlb_board_is_priced_for_the_selected_book_and_games_filter_by_time(monkeypatch):
+    import best_bets_data as BBD
+    import statcast_data as SC
+    calls = []
+    meta = [{"label": "NYY @ BOS", "game_date": "2026-06-10T17:05:00Z"},
+            {"label": "LAD @ SF", "game_date": "2026-06-10T23:45:00Z"}]
+    plays = [{"Player": "Aaron Judge", "PlayerId": 1, "Team": "NYY", "Game": "NYY @ BOS", "Opp": "Sale",
+              "GameDate": "2026-06-10T17:05:00Z", "Market": "Batter HR", "Side": "Over", "Line": 0.5,
+              "ModelProb": .3, "Fair": 230, "Conviction": 1.8, "Why": "hot bat", "RealPrice": None,
+              "PriceSource": "model_fair", "_game_log": []},
+             {"Player": "Shohei Ohtani", "PlayerId": 2, "Team": "LAD", "Game": "LAD @ SF", "Opp": "Webb",
+              "GameDate": "2026-06-10T23:45:00Z", "Market": "Batter HR", "Side": "Over", "Line": 0.5,
+              "ModelProb": .32, "Fair": 210, "Conviction": 1.9, "Why": "hot bat", "RealPrice": None,
+              "PriceSource": "model_fair", "_game_log": []}]
+
+    def fake_board(date_str, fip, odds_api_key=None, preferred_book="draftkings", **k):
+        calls.append(preferred_book)
+        return [], meta, plays, []
+
+    monkeypatch.setattr(BBD, "build_mlb_board", fake_board)
+    monkeypatch.setattr(SC, "load_cached", lambda: (None, None))
+    monkeypatch.setattr(MF, "today_eastern", lambda: __import__("datetime").date(2026, 6, 10))
+    at = AppTest.from_file(PAGE, default_timeout=90)
+    at.session_state["sport"] = "MLB"
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert calls[-1] == "draftkings" and "Aaron Judge" in _text(at) and "Shohei Ohtani" in _text(at)
+    [s for s in at.selectbox if s.label == "📖 Book"][0].set_value("FanDuel")
+    [s for s in at.selectbox if s.label == "Time slot"][0].set_value("Evening")
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert calls[-1] == "fanduel"                                        # the board is rebuilt for that book
+    t = _text(at)
+    assert "Shohei Ohtani" in t and "Aaron Judge" not in t
+    assert any("No FanDuel promotions on file for MLB" in i.value for i in at.info)

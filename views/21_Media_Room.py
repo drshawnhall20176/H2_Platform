@@ -19,6 +19,7 @@ import sports
 import odds_api as O
 import selections as SEL
 import retro as R
+import best_bets_data as BBD
 import media_focus as MF
 import promotions as PR
 
@@ -121,15 +122,16 @@ def get_key():
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_plays_mlb(date_str, ev_mode):
+def load_plays_mlb(date_str, ev_mode, book):
     """Every candidate play for the slate (NOT yet curated — curation happens per game/day below).
-    Same shared pipeline as before (BBD.build_mlb_board: real lines/prices, no duplicate logic)."""
-    import best_bets_data as BBD
+    Same shared pipeline as before (BBD.build_mlb_board: real lines/prices for the chosen book, no
+    duplicate logic). `book` is part of the cache key on purpose — see build_mlb_board's docstring."""
     import statcast_data as SC
 
     fip_constant = E.FIP_CONSTANT_DEFAULT
     api_key = get_key()
-    rows, meta, plays, _books = BBD.build_mlb_board(date_str, fip_constant, odds_api_key=api_key)
+    rows, meta, plays, _books = BBD.build_mlb_board(date_str, fip_constant, odds_api_key=api_key,
+                                                    preferred_book=book)
     plays = SEL.filter_known_pitcher(plays)   # drop TBD-pitcher plays
     sc, k = SC.load_cached()                  # shared platform-wide cache (see its docstring)
 
@@ -148,19 +150,20 @@ def load_plays_mlb(date_str, ev_mode):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_plays_generic(sport_key, date_str, ev_mode):
+def load_plays_generic(sport_key, date_str, ev_mode, book):
+    """Same shared board every other page uses (BBD.load_generic_best_bets_board — real lines/prices
+    for the chosen book, one cached odds fetch shared across pages), so a selection's price here is
+    the one Best Bets shows."""
     sport = sports.get(sport_key)
     engine, proj = sport.engine, sport.projections
-    if not sport.has_projections:
-        rows, meta = [], []
-    else:
-        rows, meta = engine.build_slate(date_str)
-    plays = SEL.filter_known_pitcher(proj.build_best_bets(rows))
+    plays, meta, _books = BBD.load_generic_best_bets_board(sport_key, date_str, book)
+    plays = SEL.filter_known_pitcher(plays)
 
     ev_used = False
-    if ev_mode:
+    if ev_mode and sport.has_projections:
         key = get_key()
         if key:
+            rows, _meta = engine.build_slate(date_str)
             index = proj.build_projection_index(rows, meta)
             offers, _ = O.fetch_slate_props(date_str, key, sport.markets, sport=sport.odds_sport_key)
             edges, _ = O.compute_edges(index, offers, projections_module=proj)
@@ -170,23 +173,47 @@ def load_plays_generic(sport_key, date_str, ev_mode):
     return plays, meta, ev_used
 
 
-c1, c2, c3 = st.columns([2, 1, 1])
-with c1:
+c_date, c_book = st.columns([1, 2])
+with c_date:
     target = st.date_input("Slate date", MF.today_eastern())
+date_str = target.strftime("%Y-%m-%d")
+
+# Book selector — the same 📖 Book pick Slip Lab uses (every sportsbook + the pick'em apps + Bet365).
+# It sets whose prices the selections show AND whose promotions are suggested below.
+_label_to_key = {label: key for key, label in O.ALL_BOOKS.items()}
+_labels = list(_label_to_key)
+_pref = st.session_state.get(f"_preferred_book_{_active.key.lower()}", O.DEFAULT_BOOK)
+_default_label = O.ALL_BOOKS.get(_pref, O.ALL_BOOKS.get(O.DEFAULT_BOOK, "DraftKings"))
+with c_book:
+    book_label = st.selectbox(
+        "📖 Book", _labels, index=_labels.index(_default_label) if _default_label in _labels else 0,
+        key="media_room_book_selector",
+        help="Prices on the selections come from this book where it posts them, and the promotions "
+             "section suggests plays for what this book is running. PrizePicks and DK Pick6 post a "
+             "line only; Bet365 has no live US prop feed here.")
+book = _label_to_key[book_label]
+# The board is always priced against a real sportsbook feed: the chosen book when it is one,
+# DraftKings' otherwise (pick'em apps and Bet365 have no two-sided prices to show).
+board_book = book if book in O.US_BOOKS else O.DEFAULT_BOOK
+if board_book != book:
+    st.caption(f"**{book_label}** has no two-sided sportsbook prices here — selections show "
+               f"{O.ALL_BOOKS[board_book]} prices; the promotions below are for {book_label}.")
+
+c2, c3, c4 = st.columns([1, 1, 2])
 with c2:
     n = st.slider("How many selections", 5, 8, 6)
 with c3:
     cap = st.slider("Max per market", 1, 3, 2)
-ev_mode = st.toggle("Rank by live value (uses odds quota)", value=False,
-                    help="On: pulls live prices and ranks by real EV% (same math as the Edge Board). "
-                         "Off: ranks by model conviction and shows fair price — no odds spent.")
-date_str = target.strftime("%Y-%m-%d")
+with c4:
+    ev_mode = st.toggle("Rank by live value (uses odds quota)", value=False,
+                        help="On: pulls live prices and ranks by real EV% (same math as the Edge Board). "
+                             "Off: ranks by model conviction and shows fair price — no odds spent.")
 
 with st.spinner("Curating selections..."):
     if _active.key == "MLB":
-        all_plays, meta, ev_used = load_plays_mlb(date_str, ev_mode)
+        all_plays, meta, ev_used = load_plays_mlb(date_str, ev_mode, board_book)
     else:
-        all_plays, meta, ev_used = load_plays_generic(_active.key, date_str, ev_mode)
+        all_plays, meta, ev_used = load_plays_generic(_active.key, date_str, ev_mode, board_book)
 
 # --- the day's games: a weekly slate (NFL/NCAAF) is narrowed to the chosen date -----------------
 day_plays = MF.plays_on_date(all_plays, date_str)
@@ -205,18 +232,29 @@ if not games or not day_plays:
 rank_key = "EV" if ev_used else "Conviction"
 st.markdown(f"### 🗓️ {MF.slate_phrase(games, date_str, _active.key)}")
 
+# Time slot + Game — the same pair every other page carries: the slot buckets games by real Eastern
+# start time, the game list is chronological with the start time shown, and both default to everything.
+_slot_opts = MF.slot_options(games)
+if st.session_state.get("media_room_slot") not in _slot_opts:      # a stale pick can't outlive its option
+    st.session_state["media_room_slot"] = MF.ALL_SLATE
+fs1, fs2 = st.columns(2)
+with fs1:
+    slot_pick = st.selectbox("Time slot", _slot_opts, key="media_room_slot")
+_game_opts = MF.game_options(games, slot_pick)
+_game_label = dict(_game_opts)
+_game_keys = [MF.ALL_GAMES_IN_SLOT] + [k for k, _ in _game_opts]
+if st.session_state.get("media_room_game") not in _game_keys:
+    st.session_state["media_room_game"] = MF.ALL_GAMES_IN_SLOT
+with fs2:
+    game_pick = st.selectbox("Game", _game_keys, key="media_room_game",
+                             format_func=lambda k: _game_label.get(k, k))
+focus_games = MF.select_games(games, slot_pick, game_pick)
+focus_plays = [p for g in focus_games for p in MF.plays_for_game(day_plays, g)]
 if n_games == 1:
-    focus_labels = [games[0]["label"]]
     st.caption(f"Only one game on the ticket — the whole segment is built around "
                f"**{games[0]['matchup']}**.")
-else:
-    options = ["All games on the ticket"] + [f"{g['matchup']} · {g['time_text']}" for g in games]
-    choice = st.selectbox("Focus", options,
-                          help="Pick one game to build the segment around, or keep the whole day.")
-    focus_labels = ([g["label"] for g in games] if choice == options[0]
-                    else [games[options.index(choice) - 1]["label"]])
-focus_games = [g for g in games if g["label"] in focus_labels]
-focus_plays = [p for p in day_plays if p.get("Game") in focus_labels]
+elif len(focus_games) == 1:
+    st.caption(f"Segment built around **{focus_games[0]['matchup']}** ({focus_games[0]['time_text']}).")
 breakdown = False
 if len(focus_games) > 1:
     breakdown = st.toggle("Break it down game by game", value=len(focus_games) <= 6,
@@ -236,7 +274,6 @@ sel = [p for _h, picks in sections for p in picks]
 
 if not sel:
     st.info("No selections cleared the filters for this focus.")
-    st.stop()
 
 mode_label = "ranked by **live EV%**" if ev_used else "ranked by **model conviction** (prices not checked)"
 st.caption(f"{n_games} game{'s' if n_games != 1 else ''} on the ticket · {len(sel)} selections · "
@@ -297,55 +334,66 @@ for heading, picks in sections:
             <div class="rc">{reality_check(p)}</div>
             </div>""", unsafe_allow_html=True)
 
-# --- sportsbook promotions --------------------------------------------------------------------
-C.section_header("💰", "Sportsbook promotions")
+# --- sportsbook promotions (for the book picked above) ---------------------------------------
+C.section_header("💰", f"{book_label} promotions")
 st.caption("Promo terms change weekly and this page can't read a sportsbook's live promo page — "
-           "switch on the ones actually running for this slate, and confirm the terms in the book's app.")
+           "these come from a hand-kept list of recurring promos plus any you add. Switch on the ones "
+           "actually running for this slate, and confirm the terms in the book's app.")
 if "custom_promos" not in st.session_state:
     st.session_state["custom_promos"] = []
-available = PR.catalog_for(_active.key, st.session_state["custom_promos"])
-with st.expander("➕ Add a promotion that's running (this session only)"):
+available = PR.catalog_for(_active.key, st.session_state["custom_promos"], book=book, date_str=date_str)
+_weekday = target.strftime("%A")
+
+with st.expander(f"➕ Add a {book_label} promotion that's running (this session only)"):
     with st.form("add_promo", clear_on_submit=True):
-        f1, f2 = st.columns(2)
-        pbook = f1.text_input("Sportsbook", placeholder="FanDuel")
-        pname = f2.text_input("Promotion name", placeholder="Anytime TD boost")
+        pname = st.text_input("Promotion name", placeholder="Anytime TD boost")
         pkind = st.selectbox("What kind of picks fit it?", list(PR.KINDS),
                              format_func=lambda k: {"longest_td": "Longest TD", "anytime_td": "Anytime TD",
                                                     "first_td": "First TD scorer", "last_td": "Last TD scorer",
+                                                    "first_last_td": "First/Last TD pool",
+                                                    "boost": "Profit boost (best-priced plays)",
+                                                    "sgp": "Same-game parlay",
                                                     "info": "Just mention it (no picks)"}[k])
         psum = st.text_area("How it works (your words)", height=70)
         if st.form_submit_button("Add promotion"):
             try:
                 st.session_state["custom_promos"].append(
-                    PR.make_custom_promo(pbook, pname, _active.key, pkind, psum))
+                    PR.make_custom_promo(book, pname, _active.key, pkind, psum))
                 st.rerun()
             except ValueError as e:
                 st.error(str(e))
 
 promo_lines = []
 if not available:
-    st.caption(f"No promotions on file for {_active.label} yet — add one above and the model will "
-               f"suggest who fits it.")
+    others = sorted({O.ALL_BOOKS.get(p["book"], p["book"]) for p in
+                     PR.catalog_for(_active.key, st.session_state["custom_promos"], date_str=date_str)})
+    msg = f"No {book_label} promotions on file for {_active.label} on a {_weekday}."
+    if others:
+        msg += " On file for this day: " + ", ".join(others) + " — switch the 📖 Book above to see them."
+    st.info(msg + f" If {book_label} is running something, add it above and the model will suggest who fits.")
+    if O.is_pickem_book(book):
+        st.caption("Pick'em apps post a fixed line and pay by entry multiplier — use the selections above as "
+                   "candidates, and check each line in the app before using it.")
 else:
     by_id = {p["id"]: p for p in available}
-    live_ids = st.multiselect("Promotions running for this slate", list(by_id),
-                              default=[i for i in by_id if not i.startswith("custom:")] or list(by_id)[:0],
-                              format_func=lambda i: f"{by_id[i]['book']} — {by_id[i]['name']}")
+    live_ids = st.multiselect("Promotions running for this slate", list(by_id), default=list(by_id),
+                              key=f"media_room_promos_{book}_{date_str}_{len(st.session_state['custom_promos'])}",   # a newly added promo starts switched on
+                              format_func=lambda i: by_id[i]["name"])
     for pid in live_ids:
         promo = by_id[pid]
-        st.markdown(f"#### 🎰 {promo['book']} — {promo['name']}")
+        st.markdown(f"#### 🎰 {book_label} — {promo['name']}")
         st.markdown(f"{promo.get('summary') or 'See the book for terms.'}")
         st.caption(f"Source: {promo.get('source', '')} · {promo.get('note', '')}")
-        promo_lines += [f"🎰 {PR.promo_blurb(promo)}", f"   ⚠️ {promo.get('note', '')}"]
+        promo_lines += [f"🎰 {PR.promo_blurb(promo, book_label)}", f"   ⚠️ {promo.get('note', '')}"]
         _, _, how = PR.KINDS[promo["kind"]]
-        pools = ([(g["matchup"] + " · " + g["time_text"], [p for p in focus_plays if p.get("Game") == g["label"]])
-                  for g in focus_games])
         any_picks = False
-        for ghead, gplays in pools:
-            picks = PR.promo_picks(gplays, promo, n=3)
+        for g in focus_games:
+            gplays = MF.plays_for_game(focus_plays, g)
+            picks = PR.promo_picks(gplays, promo, n=4 if promo["kind"] == "sgp" else 3)
             if not picks:
                 continue
             any_picks = True
+            ghead = f"{g['matchup']} · {g['time_text']}"
             st.markdown(f"**Who we like for it — {ghead}** <span style='color:#9aa4b2'>({how})</span>",
                         unsafe_allow_html=True)
             promo_lines.append(f"   Who we like — {ghead}:")
@@ -354,7 +402,7 @@ else:
                 promo_lines.append(f"     {k}) {PR.pick_line(pk)}")
         if not any_picks and promo["kind"] != "info":
             st.caption("The model has no priced candidates for this promotion in the chosen game(s).")
-        if promo["kind"] == "longest_td":
+        if promo["kind"] in ("longest_td", "first_last_td"):
             st.caption("Popularity isn't measured — \"likely a popular name\" just means one of the model's "
                        "three likeliest scorers. Not a lock, not advice; bet responsibly.")
         promo_lines.append("")
@@ -364,6 +412,7 @@ C.section_header("📋", "Copy for the show / Discord")
 st.caption("One click the copy icon (top-right of the block) to grab the whole segment.")
 lines = [f"🎙️ H2 Sports Media — Selections we found interesting · {date_str}",
          MF.slate_phrase(games, date_str, _active.key),
+         f"📖 Prices/promotions: {book_label}",
          f"({'live value' if ev_used else 'model conviction — prices not checked'})", ""]
 if _graded_on and (_h + _m):
     lines.append(f"🚦 Scorecard: {_h}-for-{_h + _m}  ({_tally})")
@@ -381,7 +430,7 @@ for heading, picks in sections:
         lines.append(f"   {reality_check(p)}")
         lines.append("")
 if promo_lines:
-    lines += ["💰 Sportsbook promotions", ""] + promo_lines
+    lines += [f"💰 {book_label} promotions", ""] + promo_lines
 lines.append("⚖️ For entertainment. Selections we found interesting with our reasoning — not locks "
              "and not betting advice. Variance is real; always check the price and bet responsibly.")
 st.code("\n".join(lines), language=None)
