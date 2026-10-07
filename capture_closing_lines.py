@@ -60,7 +60,7 @@ def capture_for_sport(sport_key: str, sport_bets: List[Dict], api_key: str) -> D
         return {"updates": {}, "no_book": [], "no_match": [b.get("id") for b in sport_bets],
                "events_checked": 0, "live_events": 0}
 
-    events = O.fetch_events(api_key, sport=sport.odds_sport_key)
+    events = O.fetch_events_all(api_key, sport=sport.odds_sport_key)
     live = not_started(events)
     if not live:
         return {"updates": {}, "no_book": [], "no_match": [b.get("id") for b in sport_bets],
@@ -69,7 +69,7 @@ def capture_for_sport(sport_key: str, sport_bets: List[Dict], api_key: str) -> D
     offers = []
     for e in live:
         try:
-            js, _ = O.fetch_event_props(e["id"], api_key, needed, sport=sport.odds_sport_key)
+            js, _ = O.fetch_event_props(e["id"], api_key, needed, sport=O.feed_for(e, sport.odds_sport_key))
             offers.extend(O.parse_event_offers(js, supported_markets=needed))
         except Exception as ex:  # noqa: BLE001
             print(f"  (skip {sport_key} event {e.get('id')}: {type(ex).__name__})")

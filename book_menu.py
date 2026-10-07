@@ -212,7 +212,7 @@ def _is_unavailable(msg: str) -> bool:
 
 def fetch_menu(api_key: str, sport: str, event_ids: Sequence[str], market_keys: Sequence[str], book: str,
                *, progress: Optional[Callable[[int, int], None]] = None, max_workers: int = 4,
-               get: Optional[Callable] = None) -> Dict:
+               get: Optional[Callable] = None, feed_by_event: Optional[Dict[str, str]] = None) -> Dict:
     """Fetch `market_keys` for each event at ONE book. Returns
     {"quotes": [...], "events": {id: {home, away, commence}}, "errors": [...], "unavailable": [...],
      "remaining": str|None, "requests": n, "aborted": str|None}.
@@ -234,7 +234,7 @@ def fetch_menu(api_key: str, sport: str, event_ids: Sequence[str], market_keys: 
 
     def one(job):
         eid, mk = job
-        return get(f"sports/{sport}/events/{eid}/odds",
+        return get(f"sports/{(feed_by_event or {}).get(eid, sport)}/events/{eid}/odds",
                    {"apiKey": api_key, "markets": mk, "oddsFormat": "american", "dateFormat": "iso",
                     "bookmakers": book})
 

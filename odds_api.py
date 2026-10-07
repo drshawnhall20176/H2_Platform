@@ -142,6 +142,43 @@ def fetch_events(api_key: str, sport: str = SPORT) -> List[Dict]:
     return data if isinstance(data, list) else []
 
 
+# Some leagues' exhibition games are listed under their OWN Odds API sport key, so the regular key
+# never returns them: NBA preseason is `basketball_nba_preseason` (confirmed from The Odds API's
+# sports list), which is why NBA preseason slates showed no real lines or Slip Lab legs for a book.
+# Every sport-wide fetch below goes through fetch_events_all, which asks the regular key first and
+# then these extras, and tags each event with the key it came from (`_feed`) so the per-event props
+# request goes to the right URL.
+EXTRA_FEED_KEYS: Dict[str, Tuple[str, ...]] = {"basketball_nba": ("basketball_nba_preseason",)}
+
+
+def feed_for(event: Dict, default: str) -> str:
+    """The Odds API sport key an event from fetch_events_all must be queried under."""
+    return event.get("_feed") or default
+
+
+def fetch_events_all(api_key: str, sport: str = SPORT) -> List[Dict]:
+    """fetch_events for `sport` plus any extra feeds that carry the same league's other games (see
+    EXTRA_FEED_KEYS), de-duplicated by event id, each tagged with `_feed`. An error from an EXTRA
+    feed (not in season, not available on the plan) is swallowed — the regular feed still returns —
+    while an error from the regular feed propagates exactly as before. The events listing is free."""
+    out: List[Dict] = []
+    seen = set()
+    for i, key in enumerate((sport,) + EXTRA_FEED_KEYS.get(sport, ())):
+        try:
+            evs = fetch_events(api_key, sport=key)
+        except OddsAPIError:
+            if i == 0:
+                raise
+            continue
+        for e in evs:
+            eid = e.get("id")
+            if eid in seen:
+                continue
+            seen.add(eid)
+            out.append(dict(e, _feed=key))
+    return out
+
+
 # Set once a bookmakers=-style request is rejected with a 4xx (a bad key or parameter): every later
 # call then goes straight to the old regions="us" request instead of paying for a doomed first try
 # each time. Module-level so a single rejection protects the whole process.
@@ -432,14 +469,14 @@ def fetch_slate_moneylines(date_str: str, api_key: str,
     sport: any Odds API sport key -- deliberately sport-agnostic, not MLB-specific. Moneylines
     exist the same way (an "h2h" market) across every sport this platform covers, so this one
     function serves all of them, not a copy per sport."""
-    events = fetch_events(api_key, sport=sport)
+    events = fetch_events_all(api_key, sport=sport)
     todays = [e for e in events if _eastern_date_str(e.get("commence_time")) == date_str]
     moneylines: Dict[str, Dict[str, float]] = {}
     remaining = None
     fetched = 0
     for e in todays:
         try:
-            ej, hdr = fetch_event_props(e["id"], api_key, ["h2h"], sport=sport)
+            ej, hdr = fetch_event_props(e["id"], api_key, ["h2h"], sport=feed_for(e, sport))
         except OddsAPIError:
             continue
         remaining = hdr.get("remaining") or remaining
@@ -569,14 +606,14 @@ def fetch_slate_spreads(date_str: str, api_key: str, sport: str = SPORT) -> Tupl
     fetch), since this exists for game-level blowout-risk context, not player pricing — pages
     that need both call this separately from fetch_slate_props rather than this function trying
     to do double duty."""
-    events = fetch_events(api_key, sport=sport)
+    events = fetch_events_all(api_key, sport=sport)
     todays = [e for e in events if _eastern_date_str(e.get("commence_time")) == date_str]
     spreads: Dict[str, float] = {}
     remaining = None
     fetched = 0
     for e in todays:
         try:
-            ej, hdr = fetch_event_props(e["id"], api_key, ["spreads"], sport=sport)
+            ej, hdr = fetch_event_props(e["id"], api_key, ["spreads"], sport=feed_for(e, sport))
         except OddsAPIError:
             continue
         remaining = hdr.get("remaining") or remaining
@@ -1037,7 +1074,7 @@ def fetch_slate_props(date_str: str, api_key: str, markets: List[str], sport: st
     """Pull props for every event on the slate date. Returns (offers, info).
 
     info includes remaining quota and event counts so the UI can show cost."""
-    events = fetch_events(api_key, sport=sport)
+    events = fetch_events_all(api_key, sport=sport)
     todays = [e for e in events if _eastern_date_str(e.get("commence_time")) == date_str]
     # Raw, unfiltered summary of exactly what the provider's own /events listing returned for
     # today -- the fastest way to confirm or rule out a real external-data limitation (e.g. a
@@ -1051,7 +1088,7 @@ def fetch_slate_props(date_str: str, api_key: str, markets: List[str], sport: st
     no_offer_events: List[str] = []
     for e in todays:
         try:
-            ej, hdr = fetch_event_props(e["id"], api_key, markets, sport=sport)
+            ej, hdr = fetch_event_props(e["id"], api_key, markets, sport=feed_for(e, sport))
         except OddsAPIError:
             continue
         remaining = hdr.get("remaining") or remaining

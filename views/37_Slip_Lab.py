@@ -272,10 +272,10 @@ if use_menu:
     @st.cache_data(ttl=300, show_spinner=False)
     def _events_for_date(api_key, odds_sport, day):
         rows = []
-        for e in O.fetch_events(api_key, sport=odds_sport):
+        for e in O.fetch_events_all(api_key, sport=odds_sport):
             if O._eastern_date_str(e.get("commence_time")) == day:
                 rows.append({"id": e["id"], "away": e.get("away_team"), "home": e.get("home_team"),
-                             "commence": e.get("commence_time")})
+                             "commence": e.get("commence_time"), "feed": e.get("_feed")})
         return rows
 
     def _clock(iso):
@@ -335,6 +335,7 @@ if use_menu:
                 ids = [ev_by_label[g]["id"] for g in sel_games]
                 bar = st.progress(0.0, text="Fetching...")
                 res_m = BM.fetch_menu(API_KEY, _active.odds_sport_key, ids, mkeys, book,
+                                      feed_by_event={e["id"]: e["feed"] for e in events if e.get("feed")},
                                       progress=lambda d, n: bar.progress(d / max(n, 1), text=f"Fetched {d} of {n}"))
                 bar.empty()
                 pairs = {(e, m) for e in ids for m in mkeys}

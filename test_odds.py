@@ -1041,3 +1041,72 @@ def test_compute_edges_and_format_et_work_with_every_live_sports_own_projections
         et = P_mod.format_et("2026-09-19T23:30:00Z")
         assert et and "PM" in et.upper(), f"{sport.key}: format_et returned {et!r}"
     print("✓ compute_edges + format_et work with every live stat-based sport's own projections module")
+
+
+# ---- NBA preseason lives under its own Odds API key (basketball_nba_preseason) ----------------
+def _patch_feeds(monkeypatch, by_key, props_seen, fail_extra=False):
+    def fake_events(api_key, sport=O.SPORT):
+        if fail_extra and sport != "basketball_nba":
+            raise O.OddsAPIError("404 unknown sport")
+        return [dict(e) for e in by_key.get(sport, [])]
+
+    def fake_props(event_id, api_key, markets, regions="us", sport=O.SPORT):
+        props_seen.append((event_id, sport))
+        return {"bookmakers": []}, {"remaining": "9"}
+
+    monkeypatch.setattr(O, "fetch_events", fake_events)
+    monkeypatch.setattr(O, "fetch_event_props", fake_props)
+
+
+def test_nba_preseason_events_are_fetched_from_the_preseason_feed(monkeypatch):
+    seen = []
+    _patch_feeds(monkeypatch, {"basketball_nba": [],
+                               "basketball_nba_preseason": [{"id": "pre1", "commence_time": "2026-10-08T00:00:00Z"}]}, seen)
+    offers, info = O.fetch_slate_props("2026-10-07", "k", ["player_points"], sport="basketball_nba")
+    assert info["events_total"] == 1 and seen == [("pre1", "basketball_nba_preseason")]   # props asked under the PRESEASON key
+
+
+def test_regular_and_preseason_events_both_listed_each_under_its_own_feed(monkeypatch):
+    seen = []
+    _patch_feeds(monkeypatch, {"basketball_nba": [{"id": "reg1", "commence_time": "2026-10-08T00:00:00Z"}],
+                               "basketball_nba_preseason": [{"id": "pre1", "commence_time": "2026-10-08T00:00:00Z"}]}, seen)
+    O.fetch_slate_props("2026-10-07", "k", ["player_points"], sport="basketball_nba")
+    assert sorted(seen) == [("pre1", "basketball_nba_preseason"), ("reg1", "basketball_nba")]
+    seen.clear()
+    O.fetch_slate_moneylines("2026-10-07", "k", sport="basketball_nba")
+    O.fetch_slate_spreads("2026-10-07", "k", sport="basketball_nba")
+    assert sorted(set(seen)) == [("pre1", "basketball_nba_preseason"), ("reg1", "basketball_nba")]
+
+
+def test_a_failing_preseason_feed_never_breaks_the_regular_feed_and_other_sports_are_untouched(monkeypatch):
+    seen = []
+    _patch_feeds(monkeypatch, {"basketball_nba": [{"id": "reg1", "commence_time": "2026-10-08T00:00:00Z"}]}, seen, fail_extra=True)
+    assert [e["id"] for e in O.fetch_events_all("k", sport="basketball_nba")] == ["reg1"]
+    asked = []
+    monkeypatch.setattr(O, "fetch_events", lambda api_key, sport=O.SPORT: asked.append(sport) or [])
+    O.fetch_events_all("k", sport="basketball_wnba")
+    assert asked == ["basketball_wnba"]                            # no extra feed for sports without one
+
+
+def test_the_regular_feed_failing_still_raises_and_duplicate_event_ids_are_dropped(monkeypatch):
+    def boom(api_key, sport=O.SPORT):
+        raise O.OddsAPIError("401")
+    monkeypatch.setattr(O, "fetch_events", boom)
+    import pytest
+    with pytest.raises(O.OddsAPIError):
+        O.fetch_events_all("k", sport="basketball_nba")
+    same = {"id": "x", "commence_time": "2026-10-08T00:00:00Z"}
+    monkeypatch.setattr(O, "fetch_events", lambda api_key, sport=O.SPORT: [dict(same)])
+    assert len(O.fetch_events_all("k", sport="basketball_nba")) == 1
+
+
+def test_book_menu_fetch_uses_each_events_own_feed():
+    import book_menu as BM
+    urls = []
+
+    def fake_get(path, params):
+        urls.append(path)
+        return {"bookmakers": []}, {}
+    BM.fetch_menu("k", "basketball_nba", ["pre1", "reg1"], ["h2h"], "draftkings", get=fake_get,
+                  feed_by_event={"pre1": "basketball_nba_preseason"})
+    assert sorted(urls) == ["sports/basketball_nba/events/reg1/odds", "sports/basketball_nba_preseason/events/pre1/odds"]

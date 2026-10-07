@@ -48,7 +48,7 @@ def capture_for_sport(sport_key: str, api_key: str) -> Dict:
     if not sport.markets:
         return empty   # placeholder sport, nothing to capture yet
 
-    events = O.fetch_events(api_key, sport=sport.odds_sport_key)
+    events = O.fetch_events_all(api_key, sport=sport.odds_sport_key)
     live = not_started(events)
     if not live:
         return {**empty, "events_checked": len(events)}
@@ -58,7 +58,7 @@ def capture_for_sport(sport_key: str, api_key: str) -> Dict:
     for e in live:
         game_label = f"{e.get('away_team', '?')} @ {e.get('home_team', '?')}"
         try:
-            js, _ = O.fetch_event_props(e["id"], api_key, sport.markets, sport=sport.odds_sport_key)
+            js, _ = O.fetch_event_props(e["id"], api_key, sport.markets, sport=O.feed_for(e, sport.odds_sport_key))
             offers = O.parse_event_offers(js, supported_markets=sport.markets)
         except Exception as ex:  # noqa: BLE001
             print(f"  (skip {sport_key} event {e.get('id')}: {type(ex).__name__})")

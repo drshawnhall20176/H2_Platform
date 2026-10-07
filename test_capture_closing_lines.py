@@ -110,3 +110,16 @@ if __name__ == "__main__":
         except Exception as e:  # noqa: BLE001
             print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
     print(f"\n{passed}/{len(tests)} tests passed")
+
+
+def test_capture_for_sport_queries_nba_preseason_games_under_the_preseason_feed(monkeypatch):
+    seen = []
+    soon = _iso(datetime.now(timezone.utc) + timedelta(hours=3))
+    monkeypatch.setattr(O, "fetch_events", lambda api_key, sport=O.SPORT: (
+        [{"id": "pre1", "commence_time": soon}] if sport == "basketball_nba_preseason" else []))
+    monkeypatch.setattr(O, "fetch_event_props",
+                        lambda event_id, api_key, markets, regions="us", sport=O.SPORT: seen.append((event_id, sport)) or ({"bookmakers": []}, {}))
+    monkeypatch.setattr(O, "parse_event_offers", lambda js, supported_markets=None: [])
+    bets = [{"id": 1, "market": "Points", "book": "fanduel", "side": "Over", "line": 15.5, "player": "P", "sport": "NBA"}]
+    CCL.capture_for_sport("NBA", bets, "fake_key")
+    assert seen == [("pre1", "basketball_nba_preseason")]
