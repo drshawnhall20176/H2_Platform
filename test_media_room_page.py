@@ -93,7 +93,7 @@ def test_switching_book_switches_the_promotions_and_unlisted_books_say_so(patche
     assert not at.exception, [e.value for e in at.exception]
     t = _text(at)
     assert "FanDuel promotions" in t and "Free Full-Game Injury Protection" in t
-    assert "King of the End Zone" not in t.split("FanDuel promotions")[1]
+    assert "DraftKings — King of the End Zone" not in t and "FanDuel — King of the End Zone" not in t
     assert "TD Jackpot" not in t                                       # Thursday-only promo, today is Monday
     [s for s in at.selectbox if s.label == "📖 Book"][0].set_value("Hard Rock Bet")
     at.run()
@@ -235,3 +235,98 @@ def test_mlb_board_is_priced_for_the_selected_book_and_games_filter_by_time(monk
     t = _text(at)
     assert "Shohei Ohtani" in t and "Aaron Judge" not in t
     assert any("No FanDuel promotions on file for MLB" in i.value for i in at.info)
+
+
+def _pool():
+    """The wider TD field: every player with the market, including low-chance ones best-bets drops."""
+    mnf = "ATL @ NO"
+    def row(name, team, prob, ypt_rec_yds, rec, tgt, tds=0):
+        log = [{"receiving_yards": ypt_rec_yds, "receptions": rec, "targets": tgt, "carries": 0, "rushing_yards": 0,
+                "receiving_tds": tds, "rushing_tds": 0}] * 3
+        p = _p(name, team, mnf, MNF, "Anytime TD", prob, round(prob / .3, 2))
+        p.update({"_game_log": log, "_pool_only": True})
+        return p
+    return [row("Drake London", "ATL", .286, 65, 4, 6), row("Jahan Dotson", "ATL", .286, 11, 2, 3),
+            row("Chris Olave", "NO", .429, 70, 9, 12, tds=1), row("Devaughn Vele", "NO", .429, 40, 5, 7, tds=1),
+            row("Bijan Robinson", "ATL", .571, 40, 3, 4, tds=1)]
+
+
+@pytest.fixture
+def pooled(patched, monkeypatch):
+    monkeypatch.setattr(nfl_projections, "build_td_pool", lambda rows, offers=None, preferred_book=None: _pool())
+
+
+def test_king_of_the_end_zone_picks_use_the_whole_field_so_explosive_scoreless_receivers_appear(pooled):
+    at = _app()
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    block = _text(at).split("Who we like for it — Falcons at Saints")[1].split("Check a player")[0]
+    assert "Drake London" in block                                     # no TD yet, but 16 yds/touch: now in the field
+    assert "Jahan Dotson" not in block                                  # 5.5 yds/touch: not a top-3 fit
+    assert block.index("Bijan Robinson") < block.index("Drake London")  # still led by the likelier scorer
+
+
+def test_player_check_ranks_the_player_in_his_game_with_caveats(pooled):
+    at = _app()
+    at.run()
+    [t for t in at.text_input if t.label == "Player"][0].set_value("dotson")
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    t = _text(at)
+    assert "Jahan Dotson (ATL, WR) — Weak fit for King of the End Zone" in t and "of 5 in ATL @ NO" in t
+    assert "Only 3 game(s) of data" in t and "No TD yet" in t
+    assert "🔎 Player check" in at.code[-1].value and "Jahan Dotson" in at.code[-1].value
+    [t for t in at.text_input if t.label == "Player"][0].set_value("vele")
+    at.run()
+    assert "Devaughn Vele (NO, WR) — " in _text(at) and "3 TD game(s)" in _text(at)
+
+
+def test_player_check_handles_no_match_and_other_sports(pooled):
+    at = _app()
+    at.run()
+    [t for t in at.text_input if t.label == "Player"][0].set_value("zzzz nobody")
+    at.run()
+    assert not at.exception
+    assert any("No player matching" in w.value for w in at.warning)
+
+
+def test_player_check_not_available_without_a_td_pool(patched, monkeypatch):
+    monkeypatch.setattr(nfl_projections, "build_td_pool", lambda *a, **k: [])
+    at = _app()
+    at.run()
+    [t for t in at.text_input if t.label == "Player"][0].set_value("vele")
+    at.run()
+    assert not at.exception
+    assert any("player check isn't available" in i.value for i in at.info)
+
+
+def test_player_check_ranks_only_within_the_players_own_game(pooled, monkeypatch):
+    other = _pool()[0].copy()
+    other.update({"Player": "Kenneth Walker", "Team": "SEA", "Game": "SEA @ LAR", "_game_log": _pool()[0]["_game_log"]})
+    monkeypatch.setattr(nfl_projections, "build_td_pool",
+                        lambda rows, offers=None, preferred_book=None: _pool() + [other])
+    at = _app()
+    at.run()
+    [t for t in at.text_input if t.label == "Player"][0].set_value("dotson")
+    at.run()
+    assert "of 5 in ATL @ NO" in _text(at)                            # the SEA @ LAR player isn't counted
+
+
+def test_nba_preseason_slate_shows_the_warning_and_the_last_season_note(monkeypatch):
+    import nba_engine
+    import nba_projections
+    meta = [{"label": "Minnesota Timberwolves @ Indiana Pacers", "game_date": "2026-10-07T23:00:00Z"}]
+    plays = [{"Player": "Tyrese Haliburton", "PlayerId": 1, "Team": "Indiana Pacers", "Game": meta[0]["label"],
+              "Opp": "Minnesota Timberwolves", "GameDate": "2026-10-07T23:00:00Z", "Market": "Assists", "Side": "Over",
+              "Line": 8.5, "ModelProb": .6, "Fair": -150, "Conviction": 1.4, "RealPrice": None,
+              "PriceSource": "model_fair", "Why": "averaging 9.1 over his last 10 [7 of last 10 games are from last season]",
+              "_game_log": []}]
+    monkeypatch.setattr(nba_engine, "build_slate", lambda d: ([], meta))
+    monkeypatch.setattr(nba_projections, "build_best_bets", lambda rows, *a, **k: plays)
+    monkeypatch.setattr(MF, "today_eastern", lambda: __import__("datetime").date(2026, 10, 7))
+    at = AppTest.from_file(PAGE, default_timeout=90)
+    at.session_state["sport"] = "NBA"
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("NBA preseason" in i.value for i in at.info)
+    assert "Tyrese Haliburton" in _text(at) and "7 of last 10 games are from last season" in _text(at)

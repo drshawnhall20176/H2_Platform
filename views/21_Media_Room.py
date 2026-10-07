@@ -173,10 +173,41 @@ def load_plays_generic(sport_key, date_str, ev_mode, book):
     return plays, meta, ev_used
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def load_td_pool(sport_key, date_str, book):
+    """Anytime-TD plays for EVERY eligible player (including those under the typical-rate cutoff that
+    Best Bets drops) — the field for TD promotions and the player check. [] for sports without one."""
+    sport = sports.get(sport_key)
+    proj = sport.projections
+    if not sport.has_projections or not hasattr(proj, "build_td_pool"):
+        return []
+    rows, _meta = sport.engine.build_slate(date_str)
+    offers, key = [], get_key()
+    if key and sport.markets:
+        try:
+            offers = BBD.fetch_generic_offers(sport_key, date_str, key)
+        except Exception:
+            offers = []
+    return proj.build_td_pool(rows, offers=offers, preferred_book=book)
+
+
+_pool_state = {}
+
+
+def get_td_pool():
+    """Today's TD pool, loaded once per run and only when something needs it."""
+    if "pool" not in _pool_state:
+        with st.spinner("Loading every player's touchdown profile..."):
+            allp = load_td_pool(_active.key, date_str, board_book)
+        _pool_state["pool"] = MF.plays_on_date(allp, date_str)
+    return _pool_state["pool"]
+
+
 c_date, c_book = st.columns([1, 2])
 with c_date:
     target = st.date_input("Slate date", MF.today_eastern())
 date_str = target.strftime("%Y-%m-%d")
+C.season_notice(_active.key, date_str)   # NBA preseason / early-season data warning (no-op otherwise)
 
 # Book selector — the same 📖 Book pick Slip Lab uses (every sportsbook + the pick'em apps + Bet365).
 # It sets whose prices the selections show AND whose promotions are suggested below.
@@ -389,6 +420,9 @@ else:
         any_picks = False
         for g in focus_games:
             gplays = MF.plays_for_game(focus_plays, g)
+            if PR.KINDS[promo["kind"]][0] == [PR.ANYTIME_TD]:
+                # The whole field, not just the players above the typical-rate cutoff (see build_td_pool).
+                gplays = MF.plays_for_game(get_td_pool(), g) or gplays
             picks = PR.promo_picks(gplays, promo, n=4 if promo["kind"] == "sgp" else 3)
             if not picks:
                 continue
@@ -406,6 +440,30 @@ else:
             st.caption("Popularity isn't measured — \"likely a popular name\" just means one of the model's "
                        "three likeliest scorers. Not a lock, not advice; bet responsibly.")
         promo_lines.append("")
+
+# --- player check ----------------------------------------------------------------------------
+C.section_header("🔎", "Check a player")
+st.caption("Type a name to see how he fits King of the End Zone — chance to score, big-play ability, where he "
+           "ranks in his game, and the caveats. Searches every player on the day's slate.")
+check_lines = []
+_q = st.text_input("Player", placeholder="e.g. Devaughn Vele", key="media_room_player_check")
+if _q.strip():
+    _pool = get_td_pool()
+    if not _pool:
+        st.info(f"The player check isn't available for {_active.label} yet.")
+    else:
+        _hits = PR.find_players(_q, _pool)
+        if not _hits:
+            st.warning(f"No player matching \"{_q.strip()}\" on this day's slate with a touchdown market. "
+                       f"Check the spelling, or the player may not meet the model's playing-time floor.")
+        for _p in _hits:
+            _game_pool = [x for x in _pool if x["Game"] == _p["Game"] and x["GameDate"] == _p["GameDate"]]
+            _pf = PR.player_profile(_p, _game_pool, first_td_plays=day_plays)
+            _pl = PR.profile_lines(_pf)
+            st.markdown(f"**{_pl[0]}**")
+            for _line in _pl[1:]:
+                st.markdown(_line)
+            check_lines += _pl + [""]
 
 # --- copy-all block --------------------------------------------------------
 C.section_header("📋", "Copy for the show / Discord")
@@ -431,6 +489,8 @@ for heading, picks in sections:
         lines.append("")
 if promo_lines:
     lines += [f"💰 {book_label} promotions", ""] + promo_lines
+if check_lines:
+    lines += ["🔎 Player check", ""] + check_lines
 lines.append("⚖️ For entertainment. Selections we found interesting with our reasoning — not locks "
              "and not betting advice. Variance is real; always check the price and bet responsibly.")
 st.code("\n".join(lines), language=None)

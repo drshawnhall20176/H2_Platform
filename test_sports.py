@@ -2551,3 +2551,51 @@ def test_slip_lab_is_registered_gated_and_shown_only_for_sports_with_projections
     discord = (_HERE / "streamlit_app_discord.py")
     if discord.exists():
         assert "Slip Lab" not in discord.read_text() and "slip_lab" not in discord.read_text()
+
+
+# ----------------------------------------------------------------- season_notice (NBA preseason / early season)
+def test_season_notice_phases_follow_the_nba_opener():
+    import sports as S
+    start = S.get("NBA").engine.SEASON_START
+    assert start == "2026-10-20"
+    assert S.season_notice("NBA", "2026-08-01") is None                      # deep off-season: nothing to warn about
+    pre = S.season_notice("NBA", "2026-10-07")
+    assert "NBA preseason" in pre and "Oct 20" in pre and "placeholder lines" in pre
+    assert "NBA preseason" in S.season_notice("NBA", "2026-09-05") and S.season_notice("NBA", "2026-09-04") is None
+    assert "NBA preseason" in S.season_notice("NBA", "2026-10-19")
+    early = S.season_notice("NBA", "2026-10-20")
+    assert "Early NBA season" in early and "Nov 19" in early
+    assert "Early NBA season" in S.season_notice("NBA", "2026-11-19")
+    assert S.season_notice("NBA", "2026-11-20") is None
+
+
+def test_season_notice_is_nba_only_and_never_raises_on_bad_dates():
+    import sports as S
+    assert S.season_notice("MLB", "2026-10-07") is None and S.season_notice("NFL", "2026-10-07") is None
+    assert S.season_notice("NBA", "not-a-date") is None and S.season_notice("NBA", "") is None
+
+
+def test_season_notice_renders_on_the_betting_pages_for_nba_preseason_only():
+    from streamlit.testing.v1 import AppTest
+
+    def app(sport, date_str):
+        import streamlit as st
+        import components as C
+        C.season_notice(sport, date_str)
+
+    at = AppTest.from_function(app, args=("NBA", "2026-10-07"))
+    at.run()
+    assert any("NBA preseason" in i.value for i in at.info)
+    at = AppTest.from_function(app, args=("NBA", "2026-12-07"))
+    at.run()
+    assert not at.info
+
+
+def test_every_nba_betting_page_shows_the_season_notice():
+    from pathlib import Path
+    views = Path(__file__).parent / "views"
+    pages = ["1_#U2b50_Best_Bets.py", "2_Graded_Picks.py", "3_Suggested_Parlays.py", "4_Speculative_Basket.py",
+             "37_Slip_Lab.py", "15_#L01f4c8_Edge_Board.py", "21_Media_Room.py", "22_Podcast_Studio.py"]
+    for name in pages:
+        src = (views / name).read_text()
+        assert "C.season_notice(_active.key, date_str)" in src, name

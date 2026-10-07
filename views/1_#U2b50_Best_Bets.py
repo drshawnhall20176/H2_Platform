@@ -95,6 +95,7 @@ else:
     c1, c2 = st.columns([2, 1])
     with c1: target = st.date_input("Slate date", datetime.now(eastern))
     date_str = target.strftime("%Y-%m-%d")
+    C.season_notice(_active.key, date_str)   # NBA preseason / early-season data warning (no-op otherwise)
     with c2: preferred_book = BBD.render_book_selector(
         key_prefix=f"{_active.key.lower()}_best_bets", date_str=date_str)
     # Retrospective's own load_retro_generic still reads this same session-state key

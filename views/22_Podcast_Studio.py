@@ -159,6 +159,7 @@ ev_mode = st.toggle("Feature live-value plays (uses odds quota)", value=False,
                          "as the Edge Board). Off: ranks by model conviction. Either way, TBD-pitcher "
                          "plays are excluded.")
 date_str = target.strftime("%Y-%m-%d")
+C.season_notice(_active.key, date_str)   # NBA preseason / early-season data warning (no-op otherwise)
 yest = (target - timedelta(days=1)).strftime("%Y-%m-%d")
 
 with st.spinner("Writing tonight's rundown..."):

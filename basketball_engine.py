@@ -249,6 +249,10 @@ def get_team_recent_game_ids(team_id: int, before_date: str, site_api: str,
                 # caller build a team's scoring trend without downloading a single boxscore (NHL's
                 # team-trend tag does exactly this: its boxscores are ~400 KB each).
                 "score": this_team.get("score"), "opp_score": (opp_team or {}).get("score"),
+                # ESPN's own season type for the event (1 preseason, 2 regular season, 3 postseason,
+                # None when the scoreboard didn't say). Additive: lets a caller leave exhibition games
+                # out of "recent form" (see nba_engine.get_player_recent_games).
+                "season_type": (event.get("season") or {}).get("type"),
             })
 
     found.sort(key=lambda g: g["date"], reverse=True)

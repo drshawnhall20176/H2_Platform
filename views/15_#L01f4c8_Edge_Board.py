@@ -137,6 +137,7 @@ with c3:
         st.rerun()
  
 date_str = target_date.strftime("%Y-%m-%d")
+C.season_notice(_active.key, date_str)   # NBA preseason / early-season data warning (no-op otherwise)
 
 with st.spinner("Projecting the slate..."):
     index, meta, known_names, all_active_names = load_index(_active.key, date_str, P.DEFAULT_SIMS, seed=7)

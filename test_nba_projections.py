@@ -352,3 +352,38 @@ if __name__ == "__main__":
         except Exception as e:  # noqa: BLE001
             print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
     print(f"\n{passed}/{len(tests)} tests passed")
+
+
+# ----------------------------------------------------------------- early-season data transparency
+def _lg(pts, src=None):
+    g = {"pts": pts, "reb": 5, "ast": 4, "fg3m": 2, "min": 30}
+    if src:
+        g["src"] = src
+    return g
+
+
+def test_data_note_reports_last_season_carryover_and_preseason_only_logs():
+    assert NP.data_note_for([_lg(20)] * 10) == (0, 0, "")
+    assert NP.data_note_for([_lg(20, "current")] * 4 + [_lg(20, "prior")] * 6)[:2] == (6, 0)
+    assert "6 of last 10 games are from last season" in NP.data_note_for([_lg(20, "current")] * 4 + [_lg(20, "prior")] * 6)[2]
+    n_prior, n_pre, note = NP.data_note_for([_lg(12, "preseason"), _lg(8, "preseason")])
+    assert (n_prior, n_pre) == (0, 2) and "only 2 preseason game(s)" in note and "low confidence" in note
+
+
+def test_best_bets_plays_carry_the_data_note_and_counts():
+    def row(name, log):
+        return {"Player": name, "Team": "BOS", "GameLabel": "BOS @ NYK", "Opp": "NYK", "_pid": name,
+                "_game_log": log, "_game_date": "2026-10-08T00:00:00Z"}
+    rows = [row("Carry", [_lg(20, "current")] * 3 + [_lg(24, "prior")] * 7),
+            row("Rookie", [_lg(11, "preseason")] * 2), row("Normal", [_lg(22)] * 10)]
+    plays = NP.build_best_bets(rows, sims=200, seed=1)
+    by = {p["Player"]: p for p in plays if p["Market"] == "Points"}
+    assert by["Carry"]["PriorGames"] == 7 and "7 of last 10 games are from last season" in by["Carry"]["Why"]
+    assert by["Rookie"]["PreseasonGames"] == 2 and "preseason" in by["Rookie"]["Why"]
+    assert by["Normal"]["PriorGames"] == 0 and "last season" not in by["Normal"]["Why"]
+
+
+def test_data_note_for_a_mixed_log_only_calls_out_preseason_when_that_is_all_there_is():
+    # a log with SOME preseason lines next to real ones is not a "preseason only" log
+    assert NP.data_note_for([_lg(20, "current")] * 6 + [_lg(9, "preseason")] * 2)[2] == ""
+    assert "only 1 preseason" in NP.data_note_for([_lg(9, "preseason")])[2]

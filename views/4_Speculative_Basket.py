@@ -80,6 +80,7 @@ else:
         st.stop()
     target = st.date_input("Slate date", datetime.now(eastern))
     date_str = target.strftime("%Y-%m-%d")
+    C.season_notice(_active.key, date_str)   # NBA preseason / early-season data warning (no-op otherwise)
     # No book-selector widget of its own on this real branch -- reads whichever real book was
     # last chosen on a page that does (Best Bets, etc.), same real pattern Command Center's own
     # _board_generic already uses.

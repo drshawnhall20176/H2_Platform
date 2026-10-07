@@ -268,6 +268,7 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
         log = r.get("_game_log") or []
         if not log:
             continue
+        n_prior, n_pre, data_note = data_note_for(log)
         for mkey, (col, disp, default_line) in _MARKET_SPEC.items():
             values = [g[_STAT_KEY[col]] for g in log]
             norm_name = normalize_name(r["Player"])
@@ -321,12 +322,26 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
                 # grading.conviction_to_grade normalize fairly across markets with very
                 # different reference rates, see that function's own docstring
                 "_ceiling": round(1.0 / ref_s, 2) if ref_s > 0 else None,
-                "Why": _player_reasons(values, line, side),
+                "Why": _player_reasons(values, line, side) + data_note,
+                "PriorGames": n_prior, "PreseasonGames": n_pre,
                 "_stat_key": _STAT_KEY[col], "_game_log": log,
             })
 
     plays.sort(key=lambda x: x["Conviction"], reverse=True)
     return plays
+
+
+def data_note_for(log: List[Dict]) -> Tuple[int, int, str]:
+    """(games from last season, games from the preseason, short note) for a game log — the early-season
+    transparency the Why text carries. nba_engine.get_player_recent_games tags each line's `src`
+    ("current" / "prior" / "preseason"); a log without tags (older callers, tests) reads as all current."""
+    n_prior = sum(1 for g in log if g.get("src") == "prior")
+    n_pre = sum(1 for g in log if g.get("src") == "preseason")
+    if n_pre and n_pre == len(log):
+        return n_prior, n_pre, f" [only {n_pre} preseason game(s) on file — exhibition minutes, low confidence]"
+    if n_prior:
+        return n_prior, n_pre, f" [{n_prior} of last {len(log)} games are from last season]"
+    return n_prior, n_pre, ""
 
 
 # Thin alias — the actual logic lives in basketball_projections.py (shared with wnba_projections.py).

@@ -469,21 +469,70 @@ def get_player_results(date_str: str) -> Dict[int, Dict[str, float]]:
     return results
 
 
-def get_player_recent_games(player_id: int, last_n: int = CFG.RECENT_GAMES_N,
-                            team_id: Optional[int] = None,
-                            before_date: Optional[str] = None, days_back: int = 45) -> List[Dict[str, float]]:
-    """Last N game logs for a player: [{pts, reb, ast, fg3m, min, opp, date}, ...], most recent
-    first. Requires team_id and before_date (build_slate always supplies both)."""
-    if team_id is None or before_date is None:
-        return []
-    games_info = get_team_recent_game_ids(team_id, before_date, last_n, days_back=days_back)
+PRESEASON, REGULAR_SEASON = 1, 2     # ESPN's own season-type codes on a scoreboard event
+PRIOR_LOOKBACK_DAYS = 230            # reaches back from the opener to the last weeks of last regular season
+PAD_PRIOR_DAYS_AFTER_OPENER = 30     # last season's games only fill thin logs this long after opening night
+
+
+def _season_start_str() -> str:
+    return SEASON_START
+
+
+def _prior_padding_allowed(before_date: str) -> bool:
+    """True from the off-season through ~a month after opening night — after that a player's own
+    current-season games are the sample, however few (an injured player's gap is not padded)."""
+    try:
+        d = datetime.strptime(before_date, "%Y-%m-%d")
+        return d <= datetime.strptime(SEASON_START, "%Y-%m-%d") + timedelta(days=PAD_PRIOR_DAYS_AFTER_OPENER)
+    except ValueError:
+        return False
+
+
+def _boxlines(games_info: List[Dict], player_id: int, src: str) -> List[Dict[str, float]]:
     out = []
     for g in games_info:
-        box = get_game_boxscore(g["gameId"])
-        line = box.get(player_id)
+        line = get_game_boxscore(g["gameId"]).get(player_id)
         if line:
-            out.append({**line, "opp": g.get("opp_name"), "date": g.get("date")})
-    return out[:last_n]
+            out.append({**line, "opp": g.get("opp_name"), "date": g.get("date"), "src": src})
+    return out
+
+
+def get_player_recent_games(player_id: int, last_n: int = CFG.RECENT_GAMES_N,
+                            team_id: Optional[int] = None,
+                            before_date: Optional[str] = None, days_back: int = 45,
+                            pad_prior: bool = True) -> List[Dict[str, float]]:
+    """Last N game logs for a player: [{pts, reb, ast, fg3m, min, opp, date, src}, ...], most recent
+    first. Requires team_id and before_date (build_slate always supplies both).
+
+    PRESEASON / EARLY-SEASON RULES (added when the 2026-27 preseason started and almost no team had a
+    game on file yet — the old 45-day window held nothing but 1-2 exhibitions, and exhibition minutes
+    are unrepresentative: starters play ~20 and the rotation is experimental):
+      * preseason games (ESPN season type 1) are NOT part of recent form;
+      * when the log is shorter than `last_n` and it is still the off-season or within
+        PAD_PRIOR_DAYS_AFTER_OPENER of opening night, it is filled from the end of LAST regular season
+        (type 2 only, games before the opener) — each such line carries src="prior";
+      * a player with no regular-season history at all (a rookie, or a player on a new team — last
+        season's games are looked up through his CURRENT team) falls back to the preseason games, each
+        line carrying src="preseason", so he isn't dropped outright. Every other line has src="current".
+    `pad_prior=False` is for season-baseline callers that want only this season's games."""
+    if team_id is None or before_date is None:
+        return []
+    # Fetch past `last_n` because exhibition games are dropped below (a team can have 5-6 of them in the
+    # window); a wide days_back (a season-baseline call) already asks for everything.
+    info = get_team_recent_game_ids(team_id, before_date, last_n + 10 if days_back <= 45 else 82,
+                                    days_back=days_back)
+    pre_info = [g for g in info if g.get("season_type") == PRESEASON]
+    current = _boxlines([g for g in info if g.get("season_type") != PRESEASON], player_id, "current")
+
+    log = current[:last_n]
+    if pad_prior and len(log) < last_n and _prior_padding_allowed(before_date):
+        cutoff = min(before_date, SEASON_START)
+        prior_info = [g for g in get_team_recent_game_ids(team_id, cutoff, 60, days_back=PRIOR_LOOKBACK_DAYS)
+                      if g.get("season_type") == REGULAR_SEASON]
+        log += _boxlines(prior_info[:last_n - len(log)], player_id, "prior")
+    if not log and pre_info:
+        log = _boxlines(pre_info[:last_n], player_id, "preseason")
+    return log[:last_n]
 
 
 # 2026-27 NBA regular season start: CONFIRMED (NBA.com's own schedule announcement) -- opening night
@@ -512,7 +561,7 @@ def get_player_season_games(player_id: int, team_id: int, before_date: str,
     the baseline Matchup Lab compares a head-to-head sample against."""
     days_back = _days_since_season_start(before_date)
     return get_player_recent_games(player_id, last_n=max_games, team_id=team_id,
-                                   before_date=before_date, days_back=days_back)
+                                   before_date=before_date, days_back=days_back, pad_prior=False)
 
 
 def get_player_history_vs_opponent(player_id: int, team_id: int, opp_id: int, before_date: str,

@@ -207,6 +207,14 @@ def kpi_row(items: List[dict]) -> None:
         unsafe_allow_html=True)
 
 
+def season_notice(sport_key: str, date_str: str) -> None:
+    """Show sports.season_notice's early-season / preseason warning (when there is one) as an info box."""
+    import sports
+    msg = sports.season_notice(sport_key, date_str)
+    if msg:
+        st.info(msg)
+
+
 def section_header(icon: str, title: str, subtitle: Optional[str] = None,
                    color: str = "#1f6feb") -> None:
     """PropFinder-style dense section header: icon in a colored circular badge + bold title,

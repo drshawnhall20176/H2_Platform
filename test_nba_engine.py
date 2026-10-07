@@ -477,3 +477,83 @@ if __name__ == "__main__":
         except Exception as e:  # noqa: BLE001
             print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
     print(f"\n{passed}/{len(tests)} tests passed")
+
+
+# ----------------------------------------------------------------- preseason / early-season recent form
+def _g(i, st, date="2026-04-01T00:00Z"):
+    return {"gameId": f"g{i}", "date": date, "opp_id": "9", "opp_name": "Opp", "season_type": st}
+
+
+def _wire(monkeypatch, current, prior, boxes, calls=None):
+    """current = games the 45-day window returns; prior = games the wide (prior-season) window returns."""
+    def fake_ids(team_id, before_date, n=10, days_back=45):
+        if calls is not None:
+            calls.append((before_date, n, days_back))
+        return list(prior if days_back == E.PRIOR_LOOKBACK_DAYS else current)
+    monkeypatch.setattr(E, "get_team_recent_game_ids", fake_ids)
+    monkeypatch.setattr(E, "get_game_boxscore", lambda gid: boxes.get(gid, {}))
+
+
+def _box(pid, pts, minutes=30):
+    return {pid: {"pts": pts, "reb": 5, "ast": 4, "fg3m": 2, "min": minutes}}
+
+
+def test_preseason_date_ignores_exhibitions_and_pads_from_last_regular_season(monkeypatch):
+    current = [_g("p1", 1), _g("p2", 1)]
+    prior = [_g("po1", 3), _g("po2", 3)] + [_g(f"r{i}", 2) for i in range(12)]
+    boxes = {g["gameId"]: _box(7, 10 if g["season_type"] == 1 else (44 if g["season_type"] == 3 else 25)) for g in current + prior}
+    _wire(monkeypatch, current, prior, boxes)
+    log = E.get_player_recent_games(7, 10, team_id=1, before_date="2026-10-07")
+    assert len(log) == 10 and {x["src"] for x in log} == {"prior"}
+    assert all(x["pts"] == 25 for x in log)                      # no 10-pt exhibition lines, no playoff games
+    assert [x["date"] for x in log] == [prior[2 + i]["date"] for i in range(10)]
+
+
+def test_player_with_no_regular_season_history_falls_back_to_preseason_lines(monkeypatch):
+    current = [_g("p1", 1), _g("p2", 1)]
+    prior = [_g(f"r{i}", 2) for i in range(12)]
+    boxes = {"gp1": _box(7, 12, 20), "gp2": _box(7, 8, 18)}          # rookie / new-team: only the exhibitions
+    _wire(monkeypatch, current, prior, boxes)
+    log = E.get_player_recent_games(7, 10, team_id=1, before_date="2026-10-07")
+    assert [x["src"] for x in log] == ["preseason", "preseason"] and [x["pts"] for x in log] == [12, 8]
+
+
+def test_after_opening_night_current_games_come_first_then_last_season_fills_the_gap(monkeypatch):
+    current = [_g("c1", 2), _g("c2", 2), _g("c3", 2), _g("c4", 2), _g("p1", 1), _g("p2", 1)]
+    prior = [_g(f"r{i}", 2) for i in range(12)]
+    boxes = {g["gameId"]: _box(7, 30 if g["gameId"].startswith("gc") else 20) for g in current + prior}
+    _wire(monkeypatch, current, prior, boxes)
+    log = E.get_player_recent_games(7, 10, team_id=1, before_date="2026-10-28")
+    assert [x["src"] for x in log] == ["current"] * 4 + ["prior"] * 6 and len(log) == 10
+
+
+def test_no_padding_once_a_month_past_opening_night_or_when_the_log_is_full_or_asked_not_to(monkeypatch):
+    current = [_g(f"c{i}", 2) for i in range(7)]
+    calls = []
+    boxes = {g["gameId"]: _box(7, 30) for g in current}
+    _wire(monkeypatch, current, [_g("r1", 2)], {**boxes, "gr1": _box(7, 5)}, calls)
+    assert [x["src"] for x in E.get_player_recent_games(7, 10, team_id=1, before_date="2026-12-10")] == ["current"] * 7
+    assert all(c[2] != E.PRIOR_LOOKBACK_DAYS for c in calls)       # the prior-season window was never even fetched
+    assert len(E.get_player_recent_games(7, 10, team_id=1, before_date="2026-10-28", pad_prior=False)) == 7
+    full = [_g(f"c{i}", 2) for i in range(10)]
+    _wire(monkeypatch, full, [_g("r1", 2)], {**{g["gameId"]: _box(7, 30) for g in full}, "gr1": _box(7, 5)}, calls := [])
+    assert all(x["src"] == "current" for x in E.get_player_recent_games(7, 10, team_id=1, before_date="2026-10-28"))
+    assert all(c[2] != E.PRIOR_LOOKBACK_DAYS for c in calls)
+
+
+def test_games_with_no_season_type_count_as_current_and_prior_fetch_stops_at_the_opener(monkeypatch):
+    calls = []
+    _wire(monkeypatch, [_g("c1", None)], [_g(f"r{i}", 2) for i in range(12)],
+          {**{f"gr{i}": _box(7, 20) for i in range(12)}, "gc1": _box(7, 40)}, calls)
+    log = E.get_player_recent_games(7, 10, team_id=1, before_date="2026-11-05")
+    assert log[0]["src"] == "current" and log[0]["pts"] == 40 and len(log) == 10
+    prior_calls = [c for c in calls if c[2] == E.PRIOR_LOOKBACK_DAYS]
+    assert prior_calls and prior_calls[0][0] == E.SEASON_START      # padding looks BEFORE the opener, not at today
+
+
+def test_season_baseline_never_pads_from_last_season(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(E, "get_player_recent_games",
+                        lambda pid, last_n=0, team_id=None, before_date=None, days_back=0, pad_prior=True: seen.update(pad=pad_prior) or [])
+    E.get_player_season_games(7, 1, "2026-11-01")
+    assert seen["pad"] is False

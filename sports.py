@@ -348,6 +348,33 @@ def require_sport(required_keys, feature_name: str = "This page") -> bool:
     return True
 
 
+def season_notice(sport_key: str, date_str: str) -> Optional[str]:
+    """A short plain-language warning for the part of the year when a sport's form data is unreliable,
+    or None. NBA only for now: from ~45 days before opening night the slate is PRESEASON (exhibition
+    minutes and rotations aren't predictive; few props are posted), and for ~30 days after opening
+    night thin logs are still being padded from last season (see nba_engine.get_player_recent_games).
+    Dates are compared as plain YYYY-MM-DD strings' calendar dates."""
+    if sport_key != "NBA":
+        return None
+    try:
+        start = _datetime.strptime(get("NBA").engine.SEASON_START, "%Y-%m-%d")
+        d = _datetime.strptime(date_str, "%Y-%m-%d")
+    except (ValueError, AttributeError, TypeError):
+        return None
+    days = (d - start).days
+    if -45 <= days < 0:
+        return (f"🏀 **NBA preseason** — the regular season opens {start.strftime('%b %-d')}. Exhibition rotations and "
+                "minutes aren't predictive, so this board ignores preseason box scores and leans on the end of last "
+                "regular season (each play's reasoning says how many games are from last season). Players new to a "
+                "team and rookies can be missing. Sportsbooks post few preseason props, so many plays are measured "
+                "against placeholder lines — only plays showing a real book line (📊) are actionable; treat the rest as ideas.")
+    if 0 <= days <= 30:
+        return ("🏀 **Early NBA season** — until about "
+                f"{(start + _timedelta(days=30)).strftime('%b %-d')}, thin logs are filled from "
+                "the end of last regular season (marked in each play's reasoning), so form-based reads are less reliable than usual.")
+    return None
+
+
 def require_live_engine(feature_name: str = "This page") -> bool:
     """Call at the top of a page that pulls real slate data from an engine (Edge Board, Media
     Room, Podcast Studio, Retrospective, Best Bets, Command Center). Returns True when the active
@@ -402,7 +429,7 @@ def render_sport_selector():
 # philosophy basketball_engine.py's own extraction already follows.
 # ================================================================================================
 import pytz as _pytz
-from datetime import datetime as _datetime
+from datetime import datetime as _datetime, timedelta as _timedelta
 
 _EASTERN = _pytz.timezone("US/Eastern")
 

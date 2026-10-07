@@ -100,6 +100,7 @@ c_date, c_book = st.columns([1, 2])
 with c_date:
     target = st.date_input("Slate date", datetime.now(eastern), key="slip_lab_date")
 date_str = target.strftime("%Y-%m-%d")
+C.season_notice(_active.key, date_str)   # NBA preseason / early-season data warning (no-op otherwise)
 
 label_to_key = {label: key for key, label in O.ALL_BOOKS.items()}
 with c_book:
