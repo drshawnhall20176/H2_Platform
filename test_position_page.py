@@ -6,7 +6,9 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 import position_data as PD
+import position_lines as PL
 import position_matchups as PM
+import position_pbp as PP
 
 PAGE = str(Path(__file__).parent / "views" / "38_Position_Matchups.py")
 
@@ -48,6 +50,48 @@ def basketball_bundle(sport="NBA", home=1, away=2, ranked=True):
     return PD.build_bundle(sport, home, away, pgames, {}, [], names=names, meta_games=meta)
 
 
+def fake_nfl_log(with_pbp=True):
+    """Stand-in for PD.load_nfl_log: twelve ordinary defenses plus HOME0, a defense with four varied games
+    (venue / kickoff / roof / spread / result differ), a regular-defender list and two games with defenders out."""
+    pgames, lookup, games_meta = [], {}, []
+
+    def add(order, team, opp, pid, name, tgt, rec, yds, long_, td=0):
+        pgames.append(dict(game=f"{order}-{team}", order=order, team=team, opp=opp, pid=pid, name=name, pos="WR",
+                           stats=dict(tgt=tgt, rec=rec, rec_yds=yds, rec_td=td)))
+        full = dict({k: 0.0 for k in PP.STAT_KEYS}, tgt=tgt, rec=rec, rec_yds=yds, rec_long=long_, td=td, atd=1.0 if td else 0.0,
+                    tgt_share=25.0)
+        half = dict(full, tgt=tgt / 2, rec=rec / 2, rec_yds=yds / 2, rec_long=long_ / 2)
+        lookup[(order, team, pid)] = {"Full Game": full, "1st Half": half, "2nd Half": dict(full, rec_yds=yds - yds / 2)}
+
+    for i in range(12):
+        for wk in (1, 2, 3):
+            add(202600 + wk, "OFF", f"D{i}", f"o{i}", f"Rec{i}", 6, 3 + i, 30 + 10 * i, 20 + i)
+    homes = [  # order, offense, kickoff, roof, spread (home team's expected margin), home score, away score, HOME0 is home?
+        (202601, "OFF1", "20:15", "dome", 3.0, 24, 20, True), (202602, "OFF2", "13:00", "outdoors", 3.0, 27, 20, False),
+        (202603, "AWAY0", "13:00", "outdoors", -2.5, 21, 17, True), (202604, "OFF4", "20:20", "outdoors", -1.0, 10, 14, False)]
+    for order, off, tm, roof, spread, hs, as_, is_home in homes:
+        wk = order % 100
+        add(order, off, "HOME0", f"s{wk}", f"Star{wk}", 8, 5, 50 + 10 * wk, 20 + wk, td=1 if wk == 2 else 0)
+        h, a = ("HOME0", off) if is_home else (off, "HOME0")
+        games_meta.append(dict(order=order, date=f"2026-09-{10 + wk}", home=h, away=a, home_score=hs, away_score=as_, time=tm,
+                               spread=spread, roof=roof, total=44.5))
+    for wk in (1, 2, 3):                                                  # AWAY0 also has a defensive record (it is one of the game's two sides)
+        add(202600 + wk, "OFF", "AWAY0", "oa", "RecA", 7, 4, 55, 22)
+    allowed = PM.allowed_by_slot(pgames, "NFL")
+    allowed_chart = {}
+    if with_pbp:
+        PM.attach_periods(allowed, lookup)
+        lookup[(202601, "OFF1", "c1")] = {"Full Game": dict({k: 0.0 for k in PP.STAT_KEYS}, tgt=3, rec=2, rec_yds=20, rec_long=15, tgt_share=10.0)}
+        allowed_chart = PM.chart_allowed(allowed, {(202601, "OFF1"): {"WR1": ("c1", "ChartGuy")}}, lookup)
+    teams = {"HOME0", "AWAY0", "OFF", "OFF1", "OFF2", "OFF4"} | {f"D{i}" for i in range(12)}
+    return {"allowed": allowed, "allowed_chart": allowed_chart, "meta": PM.build_game_meta(games_meta),
+            "all_names": {t: f"{t} FC" for t in teams},
+            "logos": {"OFF1": "https://x.test/off1.png"}, "headshots": {"s1": "https://x.test/s1.png"},
+            "absences": {(202602, "HOME0"): ["Star D"], (202603, "HOME0"): ["Star D", "Edge R"]},
+            "regulars": {"HOME0": [{"name": "Star D", "avg_pct": 0.9, "games": 4}, {"name": "Edge R", "avg_pct": 0.7, "games": 4}]},
+            "notes": ["Fake note about the sample."], "season": 2026, "week": 5, "has_pbp": with_pbp}
+
+
 def games(slots=("2026-10-11T17:00:00Z",)):
     return [dict(label=f"AWAY{i} @ HOME{i}", home=f"HOME{i}", away=f"AWAY{i}", home_id=f"HOME{i}", away_id=f"AWAY{i}",
                  home_abbr=f"HOME{i}", away_abbr=f"AWAY{i}", game_date=iso) for i, iso in enumerate(slots)]
@@ -57,9 +101,10 @@ def games(slots=("2026-10-11T17:00:00Z",)):
 def page(monkeypatch):
     calls = {"bundle": []}
 
-    def run(sport="NFL", glist=None, ranked=True, session=None, bundle_fn=None):
+    def run(sport="NFL", glist=None, ranked=True, session=None, bundle_fn=None, nfl_log=None):
         import streamlit as st
         st.cache_data.clear()                                          # the page caches by (sport, date, game)
+        monkeypatch.setattr(PD, "load_nfl_log", lambda d: (nfl_log if nfl_log is not None else fake_nfl_log()))
         monkeypatch.setattr(PD, "list_games", lambda s, d: list(glist if glist is not None else games()))
 
         def fake_bundle(sport_key, date_str, game, use_previous=False):
@@ -90,7 +135,7 @@ def test_nfl_page_shows_both_directions_targets_and_fades_and_the_h2h(page):
     assert "🟢 Targets" in t and "🔴 Fades" in t and "Based on 2026 games through week 4." in t
     assert "PPR-style fantasy points" in t and "usage, not just the depth-chart label" in t
     frames = [d.value for d in at.dataframe]
-    assert len(frames) == 5                                               # two position tables + the game log and its average + the meetings table
+    assert len(frames) == 3                                               # two position tables + the meetings table (the game log is an HTML table)
     home_tbl = [f for f in frames if "Starter" in f.columns and any("HomeWr" in s for s in f["Starter"])]
     assert len(home_tbl) == 1 and "HomeWr 🚫 Questionable"[:6] in " ".join(home_tbl[0]["Starter"]) and "⚠️ Questionable" in " ".join(home_tbl[0]["Starter"])
     wr = home_tbl[0][home_tbl[0]["Slot"] == "WR1"].iloc[0]
@@ -182,126 +227,329 @@ def test_the_page_is_registered_for_its_four_sports_and_owner_only():
     assert (Path(__file__).parent / "views" / "38_Position_Matchups.py").exists()
 
 
+
+
 # ------------------------------------------------------------------ the position-vs-defense game log
 def pick(at, label):
     return [s for s in at.selectbox if s.label == label][0]
 
 
-def log_frames(at):
-    """(game log table, its average row) — the two frames right after the two position tables."""
-    frames = [d.value for d in at.dataframe]
-    i = [k for k, f in enumerate(frames) if "Opponent" in f.columns and "W/L" in f.columns][0]
-    return frames[i], frames[i + 1]
+def log_html(at):
+    found = [m.value for m in at.markdown if 'class="pmlog"' in m.value]
+    assert len(found) == 1, f"expected one game-log table, found {len(found)}"
+    return found[0]
 
 
-def test_game_log_defaults_to_the_home_defense_first_position(page):
+def cells(row_html):
+    import html as _html
+    return [" ".join(_html.unescape(re.sub(r"<[^>]+>", " ", c)).split()) for c in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", row_html, flags=re.S)]
+
+
+def log_rows(at):
+    """(header cells, body rows, footer rows) of the game-log table, as plain text."""
+    h = log_html(at)
+    section = lambda tag: re.findall(r"<tr[^>]*>.*?</tr>", re.search(rf"<{tag}>(.*?)</{tag}>", h, re.S).group(1), re.S)
+    return cells(section("thead")[0]), [cells(r) for r in section("tbody")], [cells(r) for r in section("tfoot")]
+
+
+def to_wr1(at, defense="HOME0 FC  ★ this game"):
+    pick(at, "Position").set_value("WR1 — Wide receiver 1").run()
+    if defense != "HOME0 FC  ★ this game":
+        pick(at, "Defense").set_value(defense).run()
+    return at
+
+
+def test_game_log_defaults_to_the_home_defense_and_lists_every_filter(page):
     at = page("NFL")
     assert not at.exception, [e.value for e in at.exception]
-    assert "📋 Game log — a position against one defense" in texts(at) and "QBs vs HOME0 defense" in texts(at)
+    assert "📋 Game log — a position against one defense" in texts(at) and "QBs vs HOME0 FC defense** · Full Game" in texts(at)
     pos, d = pick(at, "Position"), pick(at, "Defense")
     assert pos.options[0] == "QB — Quarterback" and len(pos.options) == len(PM.FOOTBALL_SLOTS)
-    assert d.options[:2] == ["HOME0  ★ this game", "AWAY0  ★ this game"] and "D3" in d.options and d.value == "HOME0"
+    assert d.options[:2] == ["HOME0 FC  ★ this game", "AWAY0 FC  ★ this game"] and "D3 FC" in d.options and d.value == "HOME0"
+    assert pick(at, "Part of the game").options == list(PM.GAME_PERIODS) and pick(at, "Stadium").options == ["All", "Indoors", "Outdoors"]
+    assert pick(at, "Defense was").options == ["All", "Favorite", "Underdog"] and at.checkbox(key="pm_log_prime").value is False
+    assert "ℹ️ Fake note about the sample." in texts(at)
 
 
-def test_game_log_shows_a_position_in_each_game_with_colour_ready_numbers_and_an_average(page):
-    at = page("NFL")
-    pick(at, "Position").set_value("WR1 — Wide receiver 1").run()
-    pick(at, "Defense").set_value("D3").run()
-    assert "WR1s vs D3 defense" in texts(at)
-    table, avg = log_frames(at)
-    assert list(table.columns) == ["Date", "Opponent", "W/L", "Score", "Player", "rec", "rec yds", "rec TD", "Fantasy pts"]
-    assert list(table["Date"]) == ["Wk 3", "Wk 2", "Wk 1"] and list(table["Player"]) == ["Rec3"] * 3
-    assert list(table["rec yds"]) == [60.0] * 3 and avg.iloc[0]["rec yds"] == "60.0" and avg.iloc[0]["Average"] == "3 game(s)"
+def test_wr_log_has_the_doink_columns_newest_first_with_logo_headshot_and_result(page):
+    at = to_wr1(page("NFL"))
+    head, body, foot = log_rows(at)
+    assert head == ["DATE", "OPPONENT", "W/L", "PLAYER", "TD", "TGT SHARE", "REC TGT", "REC", "REC YDS", "REC LONG", "FANTASY PTS"]
+    assert [r[0] for r in body] == ["Wk 4 · 09/14/26", "Wk 3 · 09/13/26", "Wk 2 · 09/12/26", "Wk 1 · 09/11/26"]
+    assert body[0][1:] == ["at OFF4 FC", "W 14-10", "Star4", "0", "25%", "8", "5", "90", "24", "14.0"]
+    wk1, wk2 = body[3], body[2]
+    assert wk1[1] == "vs OFF1 FC" and wk1[2] == "W 24-20" and wk2[1] == "at OFF2 FC" and wk2[2] == "L 20-27" and wk2[4] == "1"
+    assert body[1][2] == "W 21-17"
+    h = log_html(at)
+    assert 'src="https://x.test/off1.png"' in h and 'src="https://x.test/s1.png"' in h and "rgba(" in h               # logo, headshot, shading
+    assert len(foot) == 1 and foot[0][0].startswith("AVG (4 games)")                                               # no book lines loaded yet
+    assert "HIT RATE" not in h
 
 
-def test_game_log_knows_venue_and_result_when_the_schedule_does(page):
-    at = page("NFL")
-    pick(at, "Position").set_value("WR1 — Wide receiver 1").run()
-    pick(at, "Defense").set_value("D0").run()
-    table, _ = log_frames(at)                                                       # D0 also faced HOME's own offense, which the schedule doesn't list
-    known = table[table["Opponent"].str.endswith("OFF")]
-    assert list(known["W/L"]) == ["W", "L", "W"] and list(known["Opponent"]) == ["vs OFF", "at OFF", "vs OFF"] and known.iloc[0]["Score"] == "24-20"
-    assert known.iloc[1]["Date"] == "Wk 2 · 09/12/26"
-    at.radio(key="pm_log_venue").set_value("Away").run()
-    table, avg = log_frames(at)
-    assert len(table) == 1 and table.iloc[0]["Opponent"] == "at OFF" and avg.iloc[0]["Average"] == "1 game(s)"
+def test_period_selector_switches_to_the_halves(page):
+    at = to_wr1(page("NFL"))
+    pick(at, "Part of the game").set_value("1st Half").run()
+    _, body, _ = log_rows(at)
+    assert "QBs" not in texts(at) and "WR1s vs HOME0 FC defense** · 1st Half" in texts(at)
+    assert [r[8] for r in body][::-1] == ["30", "35", "40", "45"] and [r[6] for r in body] == ["4"] * 4          # half the yards of each game
+    pick(at, "Part of the game").set_value("Q3").run()
+    assert [r[8] for r in log_rows(at)[1]] == ["0"] * 4                                                          # no Q3 line in the data: zeros, not full-game numbers
+
+
+def test_without_play_by_play_the_period_picker_is_off_and_totals_still_show(page):
+    at = to_wr1(page("NFL", nfl_log=fake_nfl_log(with_pbp=False)))
+    assert pick(at, "Part of the game").disabled is True
+    head, body, _ = log_rows(at)
+    assert "REC LONG" not in head and "TGT SHARE" not in head and "REC YDS" in head and len(body) == 4           # weekly stats have no longs or shares
+    assert not any("Half and quarter splits" in i.value for i in at.info)
+    stale = to_wr1(page("NFL", nfl_log=fake_nfl_log(with_pbp=False), session={"pm_log_period": "1st Half"}))      # a half picked before the data went away
+    assert any("Half and quarter splits need play-by-play" in i.value for i in stale.info) and len(log_rows(stale)[1]) == 4
+
+
+def test_venue_primetime_stadium_and_role_filters(page):
+    at = to_wr1(page("NFL"))
+    at.radio(key="pm_log_venue").set_value("Home").run()
+    assert [r[0][:4] for r in log_rows(at)[1]] == ["Wk 3", "Wk 1"]
+    at.radio(key="pm_log_venue").set_value("All").run()
+    at.checkbox(key="pm_log_prime").set_value(True).run()
+    assert [r[0][:4] for r in log_rows(at)[1]] == ["Wk 4", "Wk 1"]                                              # the two 8 PM kickoffs
+    at.checkbox(key="pm_log_prime").set_value(False).run()
+    pick(at, "Stadium").set_value("Indoors").run()
+    assert [r[0][:4] for r in log_rows(at)[1]] == ["Wk 1"]
+    pick(at, "Stadium").set_value("Outdoors").run()
+    assert [r[0][:4] for r in log_rows(at)[1]] == ["Wk 4", "Wk 3", "Wk 2"]
+    pick(at, "Defense was").set_value("Favorite").run()                                                         # wk4 away with the home side a 1-pt dog; wk3 home a 2.5-pt dog -> not favoured
+    assert [r[0][:4] for r in log_rows(at)[1]] == ["Wk 4"]
+    pick(at, "Defense was").set_value("Underdog").run()
+    assert [r[0][:4] for r in log_rows(at)[1]] == ["Wk 3", "Wk 2"]
+
+
+def test_only_vs_the_opponent_and_without_defenders_filters(page):
+    at = to_wr1(page("NFL"))
+    assert at.checkbox(key="pm_log_only_opp").label == "Only vs AWAY0 FC"
+    at.checkbox(key="pm_log_only_opp").set_value(True).run()
+    assert [r[0][:4] for r in log_rows(at)[1]] == ["Wk 3"]
+    at.checkbox(key="pm_log_only_opp").set_value(False).run()
+    ms = [m for m in at.multiselect if m.label.startswith("Without these defenders")][0]
+    assert ms.options == ["Star D", "Edge R"]
+    ms.set_value(["Star D"]).run()
+    assert [r[0][:4] for r in log_rows(at)[1]] == ["Wk 3", "Wk 2"]
+    [m for m in at.multiselect if m.label.startswith("Without these defenders")][0].set_value(["Star D", "Edge R"]).run()
+    assert [r[0][:4] for r in log_rows(at)[1]] == ["Wk 3"]                                                       # both had to sit out
+    pick(at, "Defense").set_value("D3 FC").run()
+
+
+def test_a_defense_outside_this_game_has_no_only_vs_box(page):
+    at = to_wr1(page("NFL"), defense="D3 FC")
+    assert not [c for c in at.checkbox if c.key == "pm_log_only_opp"] and not [m for m in at.multiselect if m.label.startswith("Without")]
+    assert len(log_rows(at)[1]) == 3 and log_rows(at)[1][0][3] == "Rec3"
+
+
+def test_stat_range_filter_keeps_games_inside_the_range(page):
+    at = to_wr1(page("NFL"))
+    [s for s in at.selectbox if s.label == "Filter by a stat"][0].set_value("REC YDS").run()
+    lo = [n for n in at.number_input if n.label == "Min"][0]
+    lo.set_value(75.0).run()
+    assert [r[0][:4] for r in log_rows(at)[1]] == ["Wk 4", "Wk 3"]                                               # 90 and 80 yards; 70 and 60 drop out
+    [n for n in at.number_input if n.label == "Max"][0].set_value(85.0).run()
+    assert [r[0][:4] for r in log_rows(at)[1]] == ["Wk 3"]
+    [n for n in at.number_input if n.label == "Min"][0].set_value(500.0).run()
+    assert any("No games for HOME0 FC match those filters" in i.value for i in at.info)
 
 
 def test_game_log_window_size_limits_rows(page):
-    at = page("NFL")
-    pick(at, "Position").set_value("WR1 — Wide receiver 1").run()
-    pick(at, "Defense").set_value("D3").run()
+    at = to_wr1(page("NFL"))
     at.selectbox(key="pm_log_n").set_value("Last 5").run()
-    assert len(log_frames(at)[0]) == 3                                              # only three games exist
-    assert at.selectbox(key="pm_log_n").options == ["Last 5", "Last 10", "Last 16", "All sampled"]
+    assert len(log_rows(at)[1]) == 4 and at.selectbox(key="pm_log_n").options == ["Last 5", "Last 10", "Last 16", "All sampled"]
+    assert at.selectbox(key="pm_log_n").value == "Last 5"
 
 
-def test_game_log_with_no_games_for_the_filter_says_so(page):
+def test_game_log_controls_start_on_last_ten_all_venues(page):
     at = page("NFL")
-    pick(at, "Defense").set_value("D5").run()
-    at.radio(key="pm_log_venue").set_value("Home").run()                           # D5 has no schedule rows, so no known home games
-    assert not at.exception and any("No home games for D5" in i.value and "venue unknown" in i.value for i in at.info)
-
-
-def test_game_log_hit_rate_uses_the_chosen_stat_and_line(page):
-    at = page("NFL")
-    pick(at, "Position").set_value("WR1 — Wide receiver 1").run()
-    pick(at, "Defense").set_value("D3").run()
-    assert pick(at, "Hit rate on").options == ["rec", "rec yds", "rec TD", "Fantasy pts"]
-    pick(at, "Hit rate on").set_value("rec yds").run()
-    line = [n for n in at.number_input if n.label == "Line"][0]
-    assert line.value == 60.0                                                       # starts at the sample's own average
-    line.set_value(59.5).run()
-    m = [m for m in at.metric if m.label.startswith("Over")][0]
-    assert m.label == "Over 59.5 rec yds" and m.value == "3/3  (100%)"
-    [n for n in at.number_input if n.label == "Line"][0].set_value(60.0).run()
-    assert [m for m in at.metric if m.label.startswith("Over")][0].value == "0/3  (0%)"      # exactly on the line is not a hit
+    assert at.selectbox(key="pm_log_n").value == "Last 10" and at.radio(key="pm_log_venue").value == "All"
+    assert at.radio(key="pm_log_venue").options == ["All", "Home", "Away"]
 
 
 def test_game_log_follows_the_game_and_resets_the_defense_when_the_game_changes(page):
     at = page("NFL", games(["2026-10-11T17:00:00Z", "2026-10-11T20:25:00Z"]))
     pick(at, "Defense").set_value("D3").run()
-    at.selectbox(key="pm_game").select_index(1).run()
-    assert not at.exception and pick(at, "Defense").options[0] == "HOME1  ★ this game" and "QBs vs HOME1 defense" in texts(at)
+    at.selectbox(key="pm_game").select_index(1).run()                          # HOME1 / AWAY1 have no games in the log data, so the list starts without a ★ pair
+    assert not at.exception and not any("★" in o for o in pick(at, "Defense").options)
+    assert pick(at, "Defense").value == "AWAY0" and f"QBs vs {pick(at, 'Defense').options[0].strip()} defense** · Full Game" in texts(at)
 
 
-def test_game_log_for_basketball_shows_groups_dates_and_venue(page):
+def test_nothing_in_the_nfl_log_says_so(page):
+    empty = {"allowed": {}, "meta": {}, "all_names": {}, "logos": {}, "headshots": {}, "absences": {}, "regulars": {}, "notes": [],
+             "season": 2026, "week": 5, "has_pbp": False}
+    at = page("NFL", nfl_log=empty)
+    assert not at.exception and "No defense has games in the sample yet" in texts(at)
+
+
+def test_a_failed_nfl_log_load_degrades_to_a_warning(monkeypatch, page):
+    at = page("NFL")
+    monkeypatch.setattr(PD, "load_nfl_log", lambda d: (_ for _ in ()).throw(RuntimeError("feed down")))
+    import streamlit as st
+    st.cache_data.clear()
+    at.run()
+    assert not at.exception and any("Couldn't load the NFL game-log data (RuntimeError)" in w.value for w in at.warning)
+    assert len(at.dataframe) == 3                                                                                # the rest of the page still renders
+
+
+def test_manual_hit_rate_tool_uses_the_chosen_stat_and_line(page):
+    at = to_wr1(page("NFL"))
+    assert pick(at, "Test your own line on").options == ["TD", "TGT SHARE", "REC TGT", "REC", "REC YDS", "REC LONG", "Fantasy pts"]
+    pick(at, "Test your own line on").set_value("REC YDS").run()
+    line = [n for n in at.number_input if n.label == "Line"][0]
+    assert line.value == 75.0                                                                                     # the sample average (75), rounded to .5
+    line.set_value(69.5).run()
+    m = [m for m in at.metric if m.label.startswith("Over")][0]
+    assert m.label == "Over 69.5 REC YDS" and m.value == "3/4  (75%)"
+    [n for n in at.number_input if n.label == "Line"][0].set_value(80.0).run()
+    assert [m for m in at.metric if m.label.startswith("Over")][0].value == "1/4  (25%)"                           # exactly on the line is not a hit
+
+
+# ------------------------------------------------------------------ book lines (Best lines / hit rate rows)
+def offers_for(player="AwayWr", market="player_reception_yds", point=60.5):
+    return [dict(market=market, player=player, point=point, over={"fanduel": -115, "draftkings": -110}, under={"fanduel": -105, "draftkings": -110}),
+            dict(market="player_anytime_td", player=player, point=0.5, over={"fanduel": 220, "draftkings": 240}, under={}),
+            dict(market=market, player="Somebody Else", point=10.5, over={"fanduel": -110}, under={"fanduel": -110})]
+
+
+@pytest.fixture
+def lines(monkeypatch):
+    import best_bets_data as BBD
+    import odds_api as O
+    state = {"events": [dict(id="ev1", home_team="HOME0 FC", away_team="AWAY0 FC")], "offers": offers_for(), "error": None, "markets": [], "key": "k"}
+    monkeypatch.setattr(BBD, "get_odds_api_key", lambda: state["key"])
+    monkeypatch.setattr(O, "fetch_events_all", lambda api_key, sport=None: state["events"])
+
+    def fake_fetch(api_key, event, markets, sport):
+        state["markets"].append((event["id"], list(markets), sport))
+        return state["offers"], state["error"]
+    monkeypatch.setattr(PL, "fetch_offers", fake_fetch)
+    return state
+
+
+def load_button(at):
+    return [b for b in at.button if b.key == "pm_load_lines"][0]
+
+
+def test_book_lines_button_offers_the_cost_and_loads_the_best_lines_and_hit_rates(page, lines):
+    at = to_wr1(page("NFL"))
+    assert "Load book lines" in load_button(at).label and "~" in load_button(at).label
+    assert [s for s in at.selectbox if s.label.startswith("Book lines for")][0].options == ["AwayWr"]
+    assert "HIT RATE" not in log_html(at) and not lines["markets"]                                              # nothing is fetched until the button is pressed
+    load_button(at).click().run()
+    assert lines["markets"] == [("ev1", ["player_anytime_td", "player_receptions", "player_reception_yds", "player_reception_longest"],
+                                 "americanfootball_nfl")]
+    _, body, foot = log_rows(at)
+    labels = [f[0].split(" (")[0] for f in foot]
+    assert labels == ["AVG", "HIT RATE", "LINE", "BEST OVER", "BEST UNDER"]
+    ys = [f for f in foot if f[0].startswith("LINE")][0]
+    head = log_rows(at)[0]
+    assert ys[head.index("REC YDS") - 3] == "60.5" and ys[head.index("TD") - 3] == "0.5"
+    over = [f for f in foot if f[0] == "BEST OVER"][0]
+    assert over[head.index("REC YDS") - 3] == "-110 DraftKings" and over[head.index("TD") - 3] == "+240 DraftKings"
+    assert [f for f in foot if f[0] == "BEST UNDER"][0][head.index("TD") - 3] == "—"                              # anytime TD is a yes-only market
+
+
+def test_hit_rate_row_counts_games_over_the_posted_line(page, lines):
+    at = to_wr1(page("NFL"))
+    load_button(at).click().run()
+    head, body, foot = log_rows(at)
+    hit = [f for f in foot if f[0].startswith("HIT RATE")][0]
+    # yards 90, 80, 70, 60 against 60.5: three overs; touchdowns 0, 1, 0, 0 against 0.5: one over
+    assert hit[head.index("REC YDS") - 3] == "75% 3/4" and hit[head.index("TD") - 3] == "25% 1/4" and hit[head.index("REC TGT") - 3] == "—"
+
+
+def test_book_lines_follow_the_chosen_defense_side_and_player(page, lines):
+    at = to_wr1(page("NFL"), defense="AWAY0 FC  ★ this game")
+    assert [s for s in at.selectbox if s.label.startswith("Book lines for")][0].label.startswith("Book lines for (HOME0 FC WR1)")
+    other = to_wr1(page("NFL"), defense="D3 FC")
+    assert not [b for b in other.button if b.key == "pm_load_lines"] and any("Book lines are available for the two teams" in c.value for c in other.caption)
+
+
+def test_book_lines_problems_are_reported_not_raised(page, lines):
+    lines["key"] = None
+    at = to_wr1(page("NFL"))
+    load_button(at).click().run()
+    assert any("No Odds API key" in w.value for w in at.warning) and "HIT RATE" not in log_html(at)
+    lines["key"], lines["events"] = "k", [dict(id="x", home_team="Other", away_team="Team")]
+    at = to_wr1(page("NFL"))
+    load_button(at).click().run()
+    assert any("haven't listed this game yet" in w.value for w in at.warning)
+    lines["events"], lines["error"], lines["offers"] = [dict(id="ev1", home_team="HOME0 FC", away_team="AWAY0 FC")], "HTTP 429 quota", []
+    at = to_wr1(page("NFL"))
+    load_button(at).click().run()
+    assert any("HTTP 429 quota" in w.value for w in at.warning)
+    lines["error"], lines["offers"] = None, offers_for(player="Someone New")
+    at = to_wr1(page("NFL"))
+    load_button(at).click().run()
+    assert any("No posted lines for AwayWr yet" in c.value for c in at.caption) and "HIT RATE" not in log_html(at)
+
+
+def test_listing_failure_is_reported(page, lines, monkeypatch):
+    import odds_api as O
+    monkeypatch.setattr(O, "fetch_events_all", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")))
+    at = to_wr1(page("NFL"))
+    load_button(at).click().run()
+    assert any("Couldn't list the games at the books (RuntimeError)" in w.value for w in at.warning)
+
+
+# ------------------------------------------------------------------ the log for the other sports
+def test_basketball_log_shows_groups_dates_and_venue_without_nfl_only_filters(page):
     gl = [dict(label="Team 2 @ Team 1", home="Team 1", away="Team 2", home_id=1, away_id=2, home_abbr="T1", away_abbr="T2", game_date="2026-10-08T23:00:00Z")]
     at = page("NBA", gl, bundle_fn=lambda sport, g: basketball_bundle(sport))
     assert not at.exception, [e.value for e in at.exception]
-    assert pick(at, "Position").options == ["G — Guards", "F — Forwards", "C — Centers"] and "Guards" not in pick(at, "Position").value[:2]
+    assert pick(at, "Position").options == ["G — Guards", "F — Forwards", "C — Centers"]
     assert pick(at, "Defense").options[:2] == ["Team 1  ★ this game", "Team 2  ★ this game"]
-    table, avg = log_frames(at)
-    assert list(table.columns) == ["Date", "Opponent", "W/L", "Score", "Player", "pts", "reb", "ast", "3PM", "PRA"]
-    assert list(table["Date"]) == ["10/03/26", "10/02/26", "10/01/26"] and list(table["Player"]) == ["Guard1"] * 3
-    assert list(table["Opponent"]) == ["vs Opp 1", "at Opp 1", "vs Opp 1"] and list(table["W/L"]) == ["W", "L", "W"]
+    assert not [s for s in at.selectbox if s.label == "Part of the game"] and not at.checkbox and not [b for b in at.button if b.key == "pm_load_lines"]
+    head, body, foot = log_rows(at)
+    assert head == ["DATE", "OPPONENT", "W/L", "PLAYER", "pts", "reb", "ast", "3PM", "PRA"]
+    assert [r[0] for r in body] == ["10/03/26", "10/02/26", "10/01/26"] and [r[3] for r in body] == ["Guard1"] * 3
+    assert [r[1] for r in body] == ["vs Opp 1", "at Opp 1", "vs Opp 1"] and [r[2][0] for r in body] == ["W", "L", "W"]
     assert "Basketball rows are the whole position group" in texts(at)
+    assert foot[0][0].startswith("AVG (3 games)") and body[0][4].count(".") == 1                                  # basketball keeps decimals
 
 
-def test_ncaamb_game_log_offers_only_the_two_teams(page):
+def test_ncaamb_log_offers_only_the_two_teams(page):
     gl = [dict(label="Two @ One", home="One", away="Two", home_id=1, away_id=2, home_abbr=None, away_abbr=None, game_date="2026-12-01T01:00:00Z")]
     at = page("NCAAMB", gl, bundle_fn=lambda sport, g: basketball_bundle(sport, ranked=True))
     assert pick(at, "Defense").options == ["Team 1  ★ this game", "Team 2  ★ this game"]
 
 
-def test_game_log_with_nothing_sampled_says_so(page):
+def test_game_log_with_nothing_sampled_says_so_for_other_sports(page):
     empty = lambda sport, g: PD.build_bundle(sport, g["home"], g["away"], [], {}, [])
-    at = page("NFL", bundle_fn=empty)
+    at = page("NBA", bundle_fn=empty)
     assert not at.exception and "No defense has games in the sample yet" in texts(at)
 
 
-def test_game_log_colours_every_stat_column_and_the_headline(page, monkeypatch):
-    seen = []
-    real = PM.heat_css
-    monkeypatch.setattr(PM, "heat_css", lambda values: seen.append(list(values)) or real(values))
-    at = page("NFL")
-    pick(at, "Position").set_value("WR1 — Wide receiver 1").run()
-    pick(at, "Defense").set_value("D3").run()
-    assert not at.exception
-    assert seen[-4:] == [[6.0] * 3, [60.0] * 3, [0.0] * 3, [12.0] * 3]               # rec, rec yds, rec TD, Fantasy pts — one call per numeric column
+def test_slot_defined_by_switches_between_usage_and_the_depth_chart(page):
+    at = to_wr1(page("NFL"))
+    sel = pick(at, "Slot defined by")
+    assert sel.options == ["Usage", "Depth chart"] and sel.value == "Usage" and not sel.disabled
+    assert log_rows(at)[1][3][3] == "Star1"                                                                       # week 1 by usage
+    sel.set_value("Depth chart").run()
+    body = log_rows(at)[1]
+    assert [r[3] for r in body] == ["Star4", "Star3", "Star2", "ChartGuy"] and "by depth chart" in " ".join(m.value for m in at.markdown)
+    assert body[3][-1] == "4.0"                                                                                   # ChartGuy: 2 rec + 2.0 yds-pts
+    assert "listed there the day before" in " ".join(c.value for c in at.caption)
+    pick(at, "Slot defined by").set_value("Usage").run()
+    assert log_rows(at)[1][3][3] == "Star1" and "by depth chart" not in " ".join(m.value for m in at.markdown)
 
 
-def test_game_log_controls_start_on_all_games_last_ten(page):
-    at = page("NFL")
-    assert at.selectbox(key="pm_log_n").value == "Last 10" and at.radio(key="pm_log_venue").value == "All"
-    assert at.radio(key="pm_log_venue").options == ["All", "Home", "Away"]
+def test_slot_defined_by_is_disabled_when_no_depth_chart_data_loaded(page):
+    log = fake_nfl_log()
+    log["allowed_chart"] = {}
+    at = to_wr1(page("NFL", nfl_log=log))
+    sel = pick(at, "Slot defined by")
+    assert sel.disabled and log_rows(at)[1][3][3] == "Star1"
+
+
+def test_depth_chart_choice_survives_other_filters(page):
+    at = to_wr1(page("NFL"))
+    pick(at, "Slot defined by").set_value("Depth chart").run()
+    pick(at, "Part of the game").set_value("1st Half").run()
+    body = log_rows(at)[1]
+    assert body[3][3] == "ChartGuy" and set(body[3][4:-1]) <= {"0", "0%"}                                          # he has no 1st-half play-by-play
+    assert body[0][3] == "Star4" and body[0][4 + 3 - 1] != "0"                                                    # the others still show their first half

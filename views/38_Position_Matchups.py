@@ -16,7 +16,11 @@ import pytz
 import streamlit as st
 
 import components as C
+import best_bets_data as BBD
+import odds_api as O
 import position_data as PD
+import position_lines as PL
+import position_logview as PV
 import position_matchups as PM
 import sports
 import styling  # noqa: F401  (installs the theme-proof styles)
@@ -142,54 +146,141 @@ def render_side(side, off_name, def_name):
     st.dataframe(df, hide_index=True, width="stretch")
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def load_nfl_log(date_str: str):
+    return PD.load_nfl_log(date_str)
+
+
+def _game_log_source():
+    """What the game log reads: the stacked two-season NFL data (loaded once per date), or the game's own bundle."""
+    if SPORT_KEY == "NFL":
+        with st.spinner("Loading last season + this season's play-by-play for the game log (first load only)..."):
+            try:
+                d = load_nfl_log(date_str)
+            except Exception as exc:                                    # noqa: BLE001
+                return None, f"Couldn't load the NFL game-log data ({type(exc).__name__}). Try Refresh."
+        return d, None
+    return {"allowed": bundle.get("allowed") or {}, "meta": bundle.get("meta") or {},
+            "all_names": bundle.get("all_names") or names, "logos": {}, "headshots": {}, "absences": {}, "regulars": {},
+            "notes": [], "has_pbp": False}, None
+
+
+def _opposing_starters(defense, slot):
+    """Names of the opposing offense's players at `slot` (starter first) when `defense` is one of this game's two teams."""
+    if defense == bundle["home"]:
+        side = bundle["away_off"]
+    elif defense == bundle["away"]:
+        side = bundle["home_off"]
+    else:
+        return None, []
+    row = next((r for r in side["rows"] if r["slot"] == slot), None)
+    return side["offense"], [p["name"] for p in (row or {}).get("players", []) if p.get("name")]
+
+
 def render_game_log():
     """Pick a position and a defense — see that position's line in each of the defense's recent games."""
-    all_names = bundle.get("all_names") or names
-    allowed = bundle.get("allowed") or {}
     st.markdown("#### 📋 Game log — a position against one defense")
+    src, err = _game_log_source()
+    if err:
+        st.warning(err)
+        return
+    allowed, all_names = src["allowed"], src["all_names"]
     options = PM.defense_options(allowed, bundle["home"], bundle["away"], all_names, SPORT_KEY)
     if not options:
         st.caption("No defense has games in the sample yet, so there is no game log to show.")
         return
+    for note in src["notes"]:
+        st.caption(f"ℹ️ {note}")
     slots = PM.SLOTS_BY_SPORT[SPORT_KEY]
-    # (No widget keys on the two pickers: their identity follows their options, so a new game's defense list or
-    # another sport's slots gets a fresh default instead of a stale choice that isn't on offer.)
+    nfl = SPORT_KEY == "NFL"
+    pair = {bundle["home"], bundle["away"]}
+    # (No widget keys on the pickers whose options change with the game / sport / defense: their identity follows
+    # their options, so a new list starts at its default instead of a stale choice that isn't on offer.)
     g1, g2, g3, g4 = st.columns([2, 3, 2, 2])
     with g1:
         slot = st.selectbox("Position", slots, format_func=lambda x: f"{x} — {PM.SLOT_LABEL[x]}")
     with g2:
-        pair = {bundle["home"], bundle["away"]}
         defense = st.selectbox("Defense", options, index=0,
                                format_func=lambda t: f"{all_names.get(t, t)}" + ("  ★ this game" if t in pair else ""))
     with g3:
         size_label = st.selectbox("Games", [lbl for lbl, _ in PM.LOG_SIZES], index=1, key="pm_log_n")
     with g4:
         venue = st.radio("Where the defense played", list(PM.LOG_VENUES), horizontal=True, key="pm_log_venue")
+    period, primetime, setting, role, only_opp, without, ranges = "Full Game", False, "All", "All", None, [], []
+    slot_by = "Usage"
+    columns = PM.log_columns(SPORT_KEY, slot)
+    if nfl:
+        f0, f1, f2, f3, f4 = st.columns([2, 2, 2, 2, 2])
+        with f0:
+            slot_by = st.selectbox("Slot defined by", ["Usage", "Depth chart"], key="pm_log_slotby",
+                                   disabled=not src.get("allowed_chart"),
+                                   help="Usage: whoever was targeted / carried most in the game. Depth chart: the player listed at that "
+                                        "spot on the chart published the day before the game (how Doink picks its WR1).")
+        with f1:
+            period = st.selectbox("Part of the game", list(PM.GAME_PERIODS), key="pm_log_period",
+                                  disabled=not src["has_pbp"],
+                                  help="Halves and quarters come from play-by-play. Overtime counts in the 2nd half.")
+        with f2:
+            setting = st.selectbox("Stadium", list(PM.LOG_SETTINGS), key="pm_log_setting")
+        with f3:
+            role = st.selectbox("Defense was", list(PM.LOG_ROLES), key="pm_log_role",
+                                help="Favorite / underdog by the closing spread.")
+        with f4:
+            st.write("")
+            primetime = st.checkbox("Primetime only", key="pm_log_prime", help="Kickoffs at 7:00 PM Eastern or later.")
+        offense_key, _ = _opposing_starters(defense, slot)
+        h1, h2 = st.columns([1, 3])
+        with h1:
+            if offense_key is not None and st.checkbox(f"Only vs {all_names.get(offense_key, offense_key)}", key="pm_log_only_opp"):
+                only_opp = offense_key
+        with h2:
+            pool = [r["name"] for r in src["regulars"].get(defense, [])]
+            if pool:
+                without = st.multiselect("Without these defenders (games they didn't play)", pool,
+                                         help="Regular defenders by snaps. Counted as out when the snap counts show no "
+                                              "defensive snaps in a game between two they did play.")
+    r1, r2, r3 = st.columns([2, 1, 1])
+    stat_labels = {label: key for key, label in columns}
+    with r1:
+        rng_label = st.selectbox("Filter by a stat", ["(none)"] + list(stat_labels), key=f"pm_rng_stat_{slot}",
+                                 help="Keep only games where the position's number falls in a range.")
+    if rng_label != "(none)":
+        with r2:
+            lo = st.number_input("Min", value=None, step=1.0, key=f"pm_rng_lo_{slot}_{rng_label}")
+        with r3:
+            hi = st.number_input("Max", value=None, step=1.0, key=f"pm_rng_hi_{slot}_{rng_label}")
+        ranges = [(stat_labels[rng_label], lo, hi)]
     n = dict(PM.LOG_SIZES)[size_label]
-    log = PM.slot_game_log(allowed, defense, slot, SPORT_KEY, bundle.get("meta"), n=n, venue=venue)
+    if nfl and slot_by == "Depth chart" and src.get("allowed_chart"):
+        allowed = src["allowed_chart"]
+    log = PM.slot_game_log(allowed, defense, slot, SPORT_KEY, src["meta"], n=n, venue=venue, period=period,
+                           primetime=primetime, setting=setting, role=role, only_opp=only_opp, ranges=ranges,
+                           without=without, absences=src["absences"], columns=columns)
     def_name = all_names.get(defense, defense)
-    st.markdown(f"**{slot}s vs {def_name} defense**")
+    st.markdown(f"**{slot}s vs {def_name} defense** · {period}" + (" · by depth chart" if nfl and slot_by == "Depth chart"
+                                                                   and src.get("allowed_chart") else ""))
+    if not log["period_ok"]:
+        st.info("Half and quarter splits need play-by-play, which isn't loaded here — showing full games.", icon="ℹ️")
     if not log["rows"]:
-        st.info(f"No {venue.lower() if venue != 'All' else ''} games for {def_name} in the sample"
-                f"{' (venue unknown for some games)' if venue != 'All' else ''}. Try All, or a longer window.", icon="🔎")
+        st.info(f"No games for {def_name} match those filters in the sample"
+                f"{' (venue unknown for some games)' if venue != 'All' else ''}. Loosen a filter or widen the window.",
+                icon="🔎")
         return
     metric_name = PM.METRIC_SHORT[FAMILY]
-    table = pd.DataFrame(PM.log_table(log, all_names, metric_name))
-    num_cols = [lbl for _, lbl in log["stat_cols"]] + [metric_name]
-    styled = (table.style.format({c: "{:.1f}" for c in num_cols})
-              .apply(lambda col: PM.heat_css(list(col)), subset=num_cols))
-    st.dataframe(styled, hide_index=True, width="stretch")
-    avg = log["avg"]
-    avg_row = {"Average": f"{log['games']} game(s)"}
-    avg_row.update({lbl: f"{avg['stats'][key]:.1f}" for key, lbl in log["stat_cols"]})
-    avg_row[metric_name] = f"{avg['pts']:.1f}"
-    st.dataframe(pd.DataFrame([avg_row]), hide_index=True, width="stretch")
+    best, hits = {}, {}
+    if nfl:
+        best = _book_lines_panel(defense, slot, columns, all_names)
+        if best:
+            hits = PM.hit_rates(log["rows"], PL.lines_from(best))
+    st.markdown(PV.log_html(log, all_names, metric_name, whole=nfl, logos=src["logos"], headshots=src["headshots"],
+                            hits=hits, best=best), unsafe_allow_html=True)
 
     h1, h2, h3 = st.columns([2, 2, 3])
+    avg = log["avg"]
     stat_choices = {lbl: key for key, lbl in log["stat_cols"]}
     stat_choices[metric_name] = "pts"
     with h1:
-        hit_label = st.selectbox("Hit rate on", list(stat_choices), key="pm_hit_stat")
+        hit_label = st.selectbox("Test your own line on", list(stat_choices), key="pm_hit_stat")
     key = stat_choices[hit_label]
     mean = avg["pts"] if key == "pts" else avg["stats"][key]
     with h2:
@@ -198,12 +289,61 @@ def render_game_log():
     hr = PM.hit_rate(log["rows"], key, line)
     with h3:
         st.metric(f"Over {line:g} {hit_label}", f"{hr['hits']}/{hr['games']}  ({hr['pct']:.0f}%)")
-    st.caption("Colours compare each game with that column's average (green = more than average). The window is "
-               "applied after the Home / Away choice. A game where the opponent had nobody at the slot counts as zero, "
-               "the same way the league rank treats it. "
+    st.caption("Colours compare each game with that column's average (green = more than average). Every filter is "
+               "applied before the window, so \"Home, Last 5\" is five home games. A game where the opponent had nobody "
+               "at the slot counts as zero, the same way the league rank treats it. "
                + ("Basketball rows are the whole position group's totals; the Player column lists its top scorers."
                   if FAMILY == "basketball" else
-                  "Player is whoever held the slot that game by usage (carries for backs, targets for receivers)."))
+                  ("Player is whoever the depth chart listed there the day before the game (games with no chart on file fall back to usage)."
+                   if nfl and slot_by == "Depth chart" and src.get("allowed_chart") else
+                   "Player is whoever held the slot that game by usage (carries for backs, targets for receivers).")
+                  + (" The log stacks last season with this season, so ten games usually span both." if nfl else "")))
+
+
+def _book_lines_panel(defense, slot, columns, all_names):
+    """The Best lines / hit-rate machinery: a button (it costs Odds API credits) that loads the books' lines for the
+    opposing starter, then the best line per column. Returns {column key: best line} or {} when not loaded."""
+    offense_key, starters = _opposing_starters(defense, slot)
+    if offense_key is None:
+        st.caption("Book lines are available for the two teams in this game (pick one of the ★ defenses).")
+        return {}
+    if not starters:
+        st.caption(f"No {all_names.get(offense_key, offense_key)} player found at {slot} to look up book lines for.")
+        return {}
+    markets = PL.markets_for(columns)
+    c1, c2 = st.columns([2, 3])
+    with c1:
+        player = st.selectbox(f"Book lines for ({all_names.get(offense_key, offense_key)} {slot})", starters)
+    store = st.session_state.setdefault("pm_lines", {})
+    skey = (bundle["home"], bundle["away"], date_str, tuple(markets))
+    with c2:
+        st.write("")
+        if st.button(f"📈 Load book lines  (~{len(markets)} Odds API credits)", key="pm_load_lines",
+                     help="One request for this game's props at the major books. Cached for this session."):
+            api_key = BBD.get_odds_api_key()
+            if not api_key:
+                store[skey] = {"error": "No Odds API key is configured on this deployment."}
+            else:
+                try:
+                    ev = PL.match_event(O.fetch_events_all(api_key, sport=_active.odds_sport_key),
+                                        all_names.get(bundle["home"]), all_names.get(bundle["away"]))
+                except Exception as exc:                              # noqa: BLE001
+                    ev, store[skey] = None, {"error": f"Couldn't list the games at the books ({type(exc).__name__})."}
+                if ev is None and skey not in store:
+                    store[skey] = {"error": "The books haven't listed this game yet."}
+                elif ev is not None:
+                    offers, e = PL.fetch_offers(api_key, ev, markets, _active.odds_sport_key)
+                    store[skey] = {"error": e, "offers": offers}
+    got = store.get(skey)
+    if not got:
+        return {}
+    if got.get("error"):
+        st.warning(got["error"])
+        return {}
+    best = PL.best_lines(got.get("offers") or [], player, columns)
+    if not best:
+        st.caption(f"No posted lines for {player} yet — books usually post props a few days before kickoff.")
+    return best
 
 
 with tab_pos:

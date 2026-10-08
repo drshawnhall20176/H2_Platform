@@ -280,9 +280,10 @@ def test_build_game_meta_indexes_both_directions_and_drops_bad_rows():
                             dict(order=2, date="d", home="A", away="A", home_score=1, away_score=2),
                             dict(order=None, home="A", away="B"), dict(order=3, home=None, away="B"),
                             dict(order=4, date=None, home="A", away="B", home_score=float("nan"), away_score="x")])
-    assert m[(1, "A", "B")] == {"date": "2026-09-06", "venue": "Home", "def_score": 30.0, "off_score": 20.0}
-    assert m[(1, "B", "A")] == {"date": "2026-09-06", "venue": "Away", "def_score": 20.0, "off_score": 30.0}
-    assert m[(4, "A", "B")] == {"date": "", "venue": "Home", "def_score": None, "off_score": None}
+    none = {"primetime": None, "setting": None, "role": None, "total": None}
+    assert m[(1, "A", "B")] == {"date": "2026-09-06", "venue": "Home", "def_score": 30.0, "off_score": 20.0, **none}
+    assert m[(1, "B", "A")] == {"date": "2026-09-06", "venue": "Away", "def_score": 20.0, "off_score": 30.0, **none}
+    assert m[(4, "A", "B")] == {"date": "", "venue": "Home", "def_score": None, "off_score": None, **none}
     assert set(k[0] for k in m) == {1, 4} and PM.build_game_meta(None) == {}
 
 
@@ -390,3 +391,143 @@ def test_log_table_flattens_the_log_for_display():
     assert rows[0]["rec yds"] == 50.0 and rows[0]["Player"] == "Star5" and abs(rows[0]["Fantasy pts"] - 16.0) < 1e-9
     bare = PM.log_table(PM.slot_game_log(allowed, "DAL", "WR1", "NFL", {}, n=1), {}, "Fantasy pts")
     assert bare[0]["Opponent"] == "O5" and bare[0]["Date"] == "Wk 5"
+
+
+# ------------------------------------------------------------------ build 225: NFL log filters, periods, charts
+def test_build_game_meta_derives_primetime_stadium_role_and_total():
+    m = PM.build_game_meta([dict(order=1, date="2026-09-06", home="A", away="B", time="20:20", roof="dome", spread=3.5, total=47),
+                            dict(order=2, date="2026-09-13", home="A", away="B", time="13:00", roof="outdoors", spread=-2.5)])
+    assert m[(1, "A", "B")]["primetime"] is True and m[(1, "A", "B")]["setting"] == "Indoors"
+    assert (m[(1, "A", "B")]["role"], m[(1, "B", "A")]["role"], m[(1, "A", "B")]["total"]) == ("Favorite", "Underdog", 47.0)
+    assert m[(2, "A", "B")]["primetime"] is False and m[(2, "A", "B")]["setting"] == "Outdoors"
+    assert (m[(2, "A", "B")]["role"], m[(2, "B", "A")]["role"]) == ("Underdog", "Favorite")      # spread is the HOME margin
+
+
+def test_primetime_roof_and_pickem_edges():
+    assert PM.is_primetime("19:00") is True and PM.is_primetime("18:59") is False and PM.is_primetime("12:30") is False
+    assert PM.is_primetime(None) is None and PM.is_primetime("") is None and PM.is_primetime("xx:yy") is None and PM.is_primetime("n/a") is None
+    assert [PM.roof_setting(x) for x in ("dome", "CLOSED", "outdoors", "open", "", None, "retractable")] == \
+        ["Indoors", "Indoors", "Outdoors", "Outdoors", None, None, None]
+    m = PM.build_game_meta([dict(order=1, home="A", away="B", spread=0)])
+    assert m[(1, "A", "B")]["role"] is None and m[(1, "B", "A")]["role"] is None                   # a pick'em has no favourite
+
+
+def per_fixture():
+    """DAL's defense over four games; WR1 = Star{n}. Weekly totals plus play-by-play halves for each."""
+    pgs, look = [], {}
+    for wk in range(1, 5):
+        pgs.append(pg(f"g{wk}", wk, f"O{wk}", "DAL", f"a{wk}", f"Star{wk}", "WR", tgt=10, rec=wk, rec_yds=10 * wk))
+        full = {"tgt": 10.0, "rec": float(wk), "rec_yds": 10.0 * wk, "rec_td": 0.0, "rec_long": 5.0 * wk, "tgt_share": 25.0, "td": 0.0}
+        h1 = dict(full, rec=1.0, rec_yds=4.0 * wk)
+        h2 = dict(full, rec=float(wk - 1), rec_yds=6.0 * wk)
+        look[(wk, f"O{wk}", f"a{wk}")] = {"Full Game": full, "1st Half": h1, "2nd Half": h2}
+    games = [dict(order=1, date="2026-09-06", home="DAL", away="O1", home_score=30, away_score=20, time="20:15", roof="dome", spread=3),
+             dict(order=2, date="2026-09-13", home="O2", away="DAL", home_score=17, away_score=20, time="13:00", roof="outdoors", spread=-3),
+             dict(order=3, date="2026-09-20", home="DAL", away="O3", home_score=10, away_score=24, time="13:00", roof="outdoors", spread=-4),
+             dict(order=4, date="2026-09-27", home="O4", away="DAL", home_score=7, away_score=3, time="20:15", roof="dome", spread=1)]
+    allowed = PM.allowed_by_slot(pgs, "NFL")
+    return allowed, PM.build_game_meta(games), look
+
+
+def test_attach_periods_counts_matches_and_gives_empty_for_missing_players():
+    allowed, _, look = per_fixture()
+    del look[(2, "O2", "a2")]
+    assert PM.attach_periods(allowed, look) == 3
+    by = {g["order"]: g for g in allowed["DAL"]}
+    assert by[1]["periods"]["WR1"]["1st Half"]["rec"] == 1.0 and by[2]["periods"]["WR1"] == {}
+
+
+def test_period_selects_the_part_of_the_game_and_unavailable_falls_back_with_flag():
+    allowed, meta, look = per_fixture()
+    PM.attach_periods(allowed, look)
+    cols = PM.log_columns("NFL", "WR1")
+    h1 = PM.slot_game_log(allowed, "DAL", "WR1", "NFL", meta, period="1st Half", columns=cols)
+    assert h1["period_ok"] and [r["stats"]["rec_yds"] for r in h1["rows"]] == [16.0, 12.0, 8.0, 4.0]
+    h2 = PM.slot_game_log(allowed, "DAL", "WR1", "NFL", meta, period="2nd Half", columns=cols)
+    assert [r["stats"]["rec"] for r in h2["rows"]] == [3.0, 2.0, 1.0, 0.0]
+    q3 = PM.slot_game_log(allowed, "DAL", "WR1", "NFL", meta, period="Q3", columns=cols)
+    assert all(r["stats"]["rec_yds"] == 0 for r in q3["rows"])                                  # no Q3 entry = all zeros
+    plain, _m, _l = per_fixture()                                                                 # no periods attached
+    p = PM.slot_game_log(plain, "DAL", "WR1", "NFL", meta, period="1st Half")
+    assert p["period_ok"] is False and [r["stats"]["rec_yds"] for r in p["rows"]] == [40.0, 30.0, 20.0, 10.0]
+    assert PM.slot_game_log(plain, "DAL", "WR1", "NFL", meta)["period_ok"] is True
+
+
+def test_columns_follow_the_data_and_keep_the_order_of_the_slot_set():
+    allowed, meta, look = per_fixture()
+    PM.attach_periods(allowed, look)
+    log = PM.slot_game_log(allowed, "DAL", "WR1", "NFL", meta, columns=PM.log_columns("NFL", "WR1"))
+    keys = [k for k, _ in log["stat_cols"]]
+    assert "rec_yds" in keys and "pass_att" not in keys and "tgt_share" in keys
+    assert keys == [k for k, _ in PM.log_columns("NFL", "WR1") if k in keys]
+    assert {k for k, _ in PM.log_columns("NFL", "QB")} >= {"atd", "pass_att", "pass_cmp", "pass_yds", "pass_long", "pass_td", "pass_int"}
+    assert {k for k, _ in PM.log_columns("NFL", "RB1")} >= {"rush_att", "rush_yds", "rush_long", "rush_share", "rush_rec_yds", "td"}
+    assert "rec_long" in {k for k, _ in PM.log_columns("NFL", "TE1")} and PM.log_columns("NBA", "G")
+
+
+def test_every_filter_applies_before_the_window():
+    allowed, meta, look = per_fixture()
+    PM.attach_periods(allowed, look)
+    def rows(**kw):
+        return [r["order"] for r in PM.slot_game_log(allowed, "DAL", "WR1", "NFL", meta, **kw)["rows"]]
+    assert rows(primetime=True) == [4, 1] and rows(primetime=True, n=1) == [4]
+    assert PM.build_game_meta([dict(order=9, home="DAL", away="O9")])[(9, "DAL", "O9")]["primetime"] is None       # unknown kickoff: neither
+    assert rows(setting="Indoors") == [4, 1] and rows(setting="Outdoors") == [3, 2]
+    assert rows(role="Favorite") == [2, 1] and rows(role="Underdog") == [4, 3]                   # spread is the HOME margin
+    assert rows(venue="Home") == [3, 1] and rows(venue="Home", n=1) == [3]
+    assert rows(only_opp="O2") == [2] and rows(only_opp="NOPE") == []
+    assert rows(ranges=[("rec_yds", 25, None)]) == [4, 3] and rows(ranges=[("rec_yds", None, 20)]) == [2, 1]
+    assert rows(ranges=[("rec_yds", 20, 30)]) == [3, 2] and rows(ranges=[("nope", 999, None)]) == [4, 3, 2, 1]
+    assert rows(primetime=True, setting="Indoors", venue="Away") == [4]
+
+
+def test_without_filter_needs_every_named_defender_out():
+    allowed, meta, look = per_fixture()
+    ab = {(1, "DAL"): ["Parsons", "Diggs"], (3, "DAL"): ["Parsons"], (4, "DAL"): []}
+    f = lambda w: [r["order"] for r in PM.slot_game_log(allowed, "DAL", "WR1", "NFL", meta, without=w, absences=ab)["rows"]]
+    assert f(["Parsons"]) == [3, 1] and f(["Parsons", "Diggs"]) == [1] and f(["Nobody"]) == [] and f([]) == [4, 3, 2, 1]
+
+
+def test_hit_rates_over_posted_lines():
+    allowed, meta, look = per_fixture()
+    log = PM.slot_game_log(allowed, "DAL", "WR1", "NFL", meta)
+    hr = PM.hit_rates(log["rows"], {"rec_yds": 25.0, "rec": 2.0, "tgt_share": 40.0})
+    assert hr["rec_yds"] == {"hits": 2, "games": 4, "pct": 50.0} and hr["rec"]["hits"] == 2 and hr["tgt_share"]["hits"] == 0
+    assert PM.hit_rates(log["rows"], {}) == {} and PM.hit_rate([], "rec", 1.0) is None
+    assert PM.hit_rate(log["rows"], "rec", 2.0)["hits"] == 2                                      # exactly on the line is a push, not a hit
+
+
+def test_chart_allowed_uses_the_charted_player_and_falls_back_sensibly():
+    pgs = [pg("g1", 1, "O1", "DAL", "w1", "UsageWr", "WR", tgt=9, rec=5, rec_yds=60),
+           pg("g1", 1, "O1", "DAL", "w2", "ChartWr", "WR", tgt=4, rec=2, rec_yds=20),
+           pg("g1", 1, "O1", "DAL", "q1", "BackupQb", "QB", pass_att=30, pass_yds=250),
+           pg("g2", 2, "O2", "DAL", "w3", "OtherWr", "WR", tgt=7, rec=4, rec_yds=44)]
+    allowed = PM.allowed_by_slot(pgs, "NFL")
+    look = {(1, "O1", "w1"): {"Full Game": {"rec": 5.0, "rec_yds": 60.0}}, (1, "O1", "w2"): {"Full Game": {"rec": 2.0, "rec_yds": 20.0}},
+            (1, "O1", "q1"): {"Full Game": {"pass_yds": 250.0}}, (2, "O2", "w3"): {"Full Game": {"rec": 4.0, "rec_yds": 44.0}}}
+    charts = {(1, "O1"): {"WR1": ("w2", "ChartWr"), "WR2": ("w9", "Inactive"), "QB": ("q0", "InactiveQb")}}
+    out = PM.chart_allowed(allowed, charts, look)
+    g1 = [g for g in out["DAL"] if g["order"] == 1][0]
+    assert g1["slot_source"] == "chart" and g1["who"]["WR1"] == ["ChartWr"] and g1["slots"]["WR1"]["rec_yds"] == 20.0
+    assert g1["pids"]["WR1"] == ["w2"] and g1["periods"]["WR1"]["Full Game"]["rec"] == 2.0
+    assert g1["who"]["WR2"] == ["Inactive"] and g1["slots"]["WR2"] == {} and g1["periods"]["WR2"] == {}      # listed, did nothing
+    assert g1["who"]["QB"] == ["BackupQb"] and g1["slots"]["QB"]["pass_yds"] == 250.0                          # listed QB never played
+    g2 = [g for g in out["DAL"] if g["order"] == 2][0]
+    assert g2["slot_source"] == "usage" and g2["who"]["WR1"] == ["OtherWr"]                                    # no chart on file
+    assert [g["who"]["WR1"] for g in allowed["DAL"] if g["order"] == 1] == [["UsageWr"]]                      # input untouched
+
+
+def test_primetime_filter_drops_games_with_an_unknown_kickoff():
+    allowed, meta, look = per_fixture()
+    meta[(2, "DAL", "O2")]["primetime"] = None
+    meta[(3, "DAL", "O3")]["primetime"] = None
+    assert [r["order"] for r in PM.slot_game_log(allowed, "DAL", "WR1", "NFL", meta, primetime=True)["rows"]] == [4, 1]
+    assert [r["order"] for r in PM.slot_game_log(allowed, "DAL", "WR1", "NFL", meta)["rows"]] == [4, 3, 2, 1]
+
+
+def test_requested_columns_the_data_cannot_fill_are_dropped_with_periods_and_without():
+    allowed, meta, look = per_fixture()
+    asked = (("rec", "REC"), ("pass_att", "PASS ATT"))
+    assert [k for k, _ in PM.slot_game_log(allowed, "DAL", "WR1", "NFL", meta, columns=asked)["stat_cols"]] == ["rec"]
+    PM.attach_periods(allowed, look)
+    assert [k for k, _ in PM.slot_game_log(allowed, "DAL", "WR1", "NFL", meta, columns=asked)["stat_cols"]] == ["rec"]

@@ -194,8 +194,11 @@ def allowed_by_slot(pgames: Iterable[Dict], sport: str) -> Dict[str, List[Dict]]
         slots = {slot: _sum_stats(lst) for slot, lst in assigned.items()}
         who = {slot: [p.get("name") for p in sorted(lst, key=lambda p: -metric_value(sport, p.get("stats") or {})) if p.get("name")]
                for slot, lst in assigned.items()}
+        pids = {slot: [p.get("pid") for p in sorted(lst, key=lambda p: -metric_value(sport, p.get("stats") or {})) if p.get("name")]
+                for slot, lst in assigned.items()}
         order = max((p.get("order") for p in players if p.get("order") is not None), default=None)
-        out.setdefault(defense, []).append({"game": gid, "order": order, "offense": offense, "slots": slots, "who": who})
+        out.setdefault(defense, []).append({"game": gid, "order": order, "offense": offense, "slots": slots, "who": who,
+                                            "pids": pids})
     for lst in out.values():
         lst.sort(key=lambda g: (g["order"] is None, g["order"]), reverse=True)     # newest first
     return out
@@ -442,9 +445,36 @@ def build_game_meta(games: Iterable[Dict]) -> Dict[Tuple, Dict]:
             continue
         hs, as_ = score(g.get("home_score")), score(g.get("away_score"))
         date = str(g.get("date") or "")[:10]
-        meta[(g["order"], home, away)] = {"date": date, "venue": "Home", "def_score": hs, "off_score": as_}
-        meta[(g["order"], away, home)] = {"date": date, "venue": "Away", "def_score": as_, "off_score": hs}
+        spread = score(g.get("spread"))                                  # the HOME team's expected margin (positive = home favoured)
+        extra = {"primetime": is_primetime(g.get("time")), "setting": roof_setting(g.get("roof")),
+                 "total": score(g.get("total"))}
+        meta[(g["order"], home, away)] = {"date": date, "venue": "Home", "def_score": hs, "off_score": as_,
+                                          "role": None if not spread else ("Favorite" if spread > 0 else "Underdog"), **extra}
+        meta[(g["order"], away, home)] = {"date": date, "venue": "Away", "def_score": as_, "off_score": hs,
+                                          "role": None if not spread else ("Favorite" if spread < 0 else "Underdog"), **extra}
     return meta
+
+
+def is_primetime(game_time) -> Optional[bool]:
+    """True for a kickoff at 7:00 PM Eastern or later ('20:15' style, the schedule's own clock); None when the time
+    is missing or unreadable (a game we can't place is neither primetime nor not)."""
+    text = str(game_time or "").strip()
+    if len(text) < 4 or ":" not in text:
+        return None
+    try:
+        return int(text.split(":")[0]) >= 19
+    except ValueError:
+        return None
+
+
+def roof_setting(roof) -> Optional[str]:
+    """'Indoors' for a dome or a closed roof, 'Outdoors' for open air or an open roof, None when unknown."""
+    r = str(roof or "").strip().lower()
+    if r in ("dome", "closed"):
+        return "Indoors"
+    if r in ("outdoors", "open"):
+        return "Outdoors"
+    return None
 
 
 def defense_options(allowed: Dict, home, away, names: Dict, sport: str) -> List:
@@ -463,35 +493,147 @@ def _result(def_score, off_score) -> Optional[str]:
     return "W" if def_score > off_score else "L" if def_score < off_score else "T"
 
 
+# Columns of the NFL log, per slot, in Doink's order: (stat key, header). Keys come from position_pbp.STAT_KEYS.
+_NFL_QB_COLS = (("atd", "ATD"), ("pass_att", "PASS ATT"), ("pass_cmp", "PASS CMP"), ("pass_yds", "PASS YDS"),
+                ("pass_long", "PASS LONG"), ("pass_td", "PASS TD"), ("pass_int", "PASS INT"), ("rush_att", "RUSH ATT"),
+                ("rush_yds", "RUSH YDS"), ("rush_long", "RUSH LONG"))
+_NFL_RB_COLS = (("td", "TD"), ("rush_share", "RUSH SHARE"), ("rush_att", "RUSH ATT"), ("rush_yds", "RUSH YDS"),
+                ("rush_long", "RUSH LONG"), ("tgt", "REC TGT"), ("rec", "REC"), ("rec_yds", "REC YDS"),
+                ("rec_long", "REC LONG"), ("rush_rec_yds", "RUSH+REC"))
+_NFL_WR_COLS = (("td", "TD"), ("tgt_share", "TGT SHARE"), ("tgt", "REC TGT"), ("rec", "REC"), ("rec_yds", "REC YDS"),
+                ("rec_long", "REC LONG"))
+NFL_LOG_COLUMNS: Dict[str, Tuple[Tuple[str, str], ...]] = {
+    "QB": _NFL_QB_COLS, "RB1": _NFL_RB_COLS, "RB2": _NFL_RB_COLS, "WR1": _NFL_WR_COLS, "WR2": _NFL_WR_COLS,
+    "WR3": _NFL_WR_COLS, "TE1": _NFL_WR_COLS}
+PERCENT_KEYS = ("rush_share", "tgt_share")
+GAME_PERIODS: Tuple[str, ...] = ("Full Game", "1st Half", "2nd Half", "Q1", "Q2", "Q3", "Q4")
+LOG_SETTINGS: Tuple[str, ...] = ("All", "Indoors", "Outdoors")
+LOG_ROLES: Tuple[str, ...] = ("All", "Favorite", "Underdog")
+
+
+def log_columns(sport: str, slot: str) -> Tuple[Tuple[str, str], ...]:
+    """The columns the game log shows for a slot: the full NFL set for the NFL, the slot's standard stats elsewhere."""
+    return NFL_LOG_COLUMNS[slot] if sport == "NFL" and slot in NFL_LOG_COLUMNS else tuple(SLOT_STATS.get(slot, ()))
+
+
+def attach_periods(allowed: Dict[str, List[Dict]], lookup: Dict) -> int:
+    """Attach per-period stat lines to every game entry of `allowed`, in place: g["periods"] = {slot: {period:
+    stats}} for the player who held each (single-player) slot, looked up as lookup[(order, offense, player id)].
+    A slot whose player has no play-by-play line gets an empty dict (all zeros). Returns how many slots matched."""
+    matched = 0
+    for games in allowed.values():
+        for g in games:
+            periods: Dict[str, Dict] = {}
+            for slot, pids in (g.get("pids") or {}).items():
+                found = lookup.get((g.get("order"), g.get("offense"), pids[0])) if pids else None
+                periods[slot] = found or {}
+                matched += 1 if found else 0
+            g["periods"] = periods
+    return matched
+
+
+def chart_allowed(allowed: Dict[str, List[Dict]], charts: Dict[Tuple, Dict[str, Tuple]], lookup: Dict) -> Dict[str, List[Dict]]:
+    """The same `allowed` structure, but with each slot held by the player the offense's DEPTH CHART listed there (the
+    chart as published the day before the game) instead of whoever was used most — how Doink picks its "WR1".
+
+    `charts` is {(order, offense): {slot: (player id, name)}}; `lookup` is position_pbp.period_lines(). A game with no
+    chart on file keeps its usage-based slots; a charted player with no play-by-play line gets an all-zero line (he was
+    listed and did nothing) — except at QB, where a listed QB1 who never played is replaced by the QB who did.
+    Needs play-by-play, so every slot carries per-period lines. Returns new dicts (the input is untouched); each entry is tagged g["slot_source"] = "chart" | "usage"."""
+    out: Dict[str, List[Dict]] = {}
+    for defense, games in (allowed or {}).items():
+        lst = []
+        for g in games:
+            chart = charts.get((g.get("order"), g.get("offense")))
+            if not chart:
+                lst.append(dict(g, slot_source="usage"))
+                continue
+            slots, who, pids, periods = {}, {}, {}, {}
+            for slot, (pid, name) in chart.items():
+                per = lookup.get((g.get("order"), g.get("offense"), pid)) or {}
+                if not per and slot == "QB" and (g.get("pids") or {}).get(slot):   # a listed QB1 who never played: the QB who did stands in
+                    slots[slot], who[slot], pids[slot] = g["slots"][slot], g["who"][slot], g["pids"][slot]
+                    periods[slot] = (g.get("periods") or {}).get(slot) or {}
+                    continue
+                periods[slot] = per
+                slots[slot] = dict(per.get("Full Game") or {})
+                who[slot] = [name] if name else []
+                pids[slot] = [pid]
+            lst.append(dict(g, slots=slots, who=who, pids=pids, periods=periods, slot_source="chart"))
+        out[defense] = lst
+    return out
+
+
 def slot_game_log(allowed: Dict[str, List[Dict]], defense, slot: str, sport: str, meta: Optional[Dict] = None,
-                  n: Optional[int] = 10, venue: str = "All") -> Dict:
+                  n: Optional[int] = 10, venue: str = "All", *, period: str = "Full Game",
+                  primetime: bool = False, setting: str = "All", role: str = "All", only_opp=None,
+                  ranges: Sequence[Tuple[str, Optional[float], Optional[float]]] = (), without: Sequence[str] = (),
+                  absences: Optional[Dict] = None, columns: Optional[Sequence[Tuple[str, str]]] = None) -> Dict:
     """What one POSITION did in each of one DEFENSE's recent games — the "QB1s vs Dallas Defense" game log.
 
-    Newest first. `venue` ("Home"/"Away", from the DEFENSE's side) is applied before `n`, so "Home / Last 5" is
-    five home games. A game where the opponent had nobody at the slot is kept as a row of zeros (a real "allowed
-    nothing") because the league rank counts it the same way. Returns {"rows", "avg", "stat_cols", "games"}; the
-    average is None for an empty log."""
+    Newest first. EVERY filter (venue, primetime, indoors/outdoors, the defense being favourite or underdog,
+    `only_opp` = only games against that offense, `ranges` = [(stat key, min, max)] on the numbers shown, `without`
+    = defenders who must all have sat out that game) is applied BEFORE the window `n`, so "Home, Last 5" is five
+    home games. `period` picks which part of each game the numbers cover when play-by-play lines are attached
+    (see attach_periods); without them the full-game weekly numbers are shown and `period_ok` is False.
+
+    A game where the opponent had nobody at the slot is kept as a row of zeros (a real "allowed nothing")
+    because the league rank counts it the same way. Returns {"rows", "avg", "stat_cols", "games", "period",
+    "period_ok"}; the average is None for an empty log."""
     meta = meta or {}
-    cols = tuple(SLOT_STATS.get(slot, ()))
+    absences = absences or {}
+    cols = tuple(columns) if columns is not None else tuple(SLOT_STATS.get(slot, ()))
+    games = (allowed or {}).get(defense, [])
+    has_periods = any(g.get("periods") for g in games)
+    period_ok = has_periods or period == "Full Game"
+    if games and has_periods:                              # keep only the columns this data can fill
+        present = {k for g in games for st in (g.get("periods") or {}).values() for per in st.values() for k in per}
+        cols = tuple(c for c in cols if c[0] in present) or cols
+    elif games:
+        present = {k for g in games for st in g["slots"].values() for k in st}
+        cols = tuple(c for c in cols if c[0] in present) or cols
     rows: List[Dict] = []
-    for g in (allowed or {}).get(defense, []):
+    for g in games:
         m = meta.get((g.get("order"), defense, g.get("offense"))) or {}
         if venue in ("Home", "Away") and m.get("venue") != venue:
             continue
-        stats = g["slots"].get(slot) or {}
+        if primetime and m.get("primetime") is not True:
+            continue
+        if setting in ("Indoors", "Outdoors") and m.get("setting") != setting:
+            continue
+        if role in ("Favorite", "Underdog") and m.get("role") != role:
+            continue
+        if only_opp is not None and g.get("offense") != only_opp:
+            continue
+        if without and not set(without) <= set(absences.get((g.get("order"), defense), ())):
+            continue
+        if has_periods:
+            stats = ((g.get("periods") or {}).get(slot) or {}).get(period if period_ok else "Full Game") or {}
+        else:
+            stats = g["slots"].get(slot) or {}
+        vals = {k: _num(stats.get(k)) for k, _ in cols}
+        if any(not _within(vals.get(k), lo, hi) for k, lo, hi in ranges if k in vals):
+            continue
+        pids = (g.get("pids") or {}).get(slot) or []
         rows.append({"order": g.get("order"), "date": m.get("date") or "", "opp": g.get("offense"), "venue": m.get("venue"),
                      "result": _result(m.get("def_score"), m.get("off_score")),
                      "score": (f"{m['def_score']:.0f}-{m['off_score']:.0f}"
                                if m.get("def_score") is not None and m.get("off_score") is not None else ""),
-                     "who": ", ".join((g.get("who") or {}).get(slot, [])[:3]),
-                     "stats": {k: _num(stats.get(k)) for k, _ in cols}, "pts": metric_value(sport, stats)})
+                     "who": ", ".join((g.get("who") or {}).get(slot, [])[:3]), "pid": pids[0] if pids else None,
+                     "stats": vals, "pts": metric_value(sport, stats),
+                     "primetime": m.get("primetime"), "setting": m.get("setting"), "role": m.get("role")})
     if n is not None:
         rows = rows[:n]
     avg = None
     if rows:
         avg = {"stats": {k: sum(r["stats"][k] for r in rows) / len(rows) for k, _ in cols},
                "pts": sum(r["pts"] for r in rows) / len(rows)}
-    return {"rows": rows, "avg": avg, "stat_cols": cols, "games": len(rows)}
+    return {"rows": rows, "avg": avg, "stat_cols": cols, "games": len(rows), "period": period, "period_ok": period_ok}
+
+
+def _within(value: Optional[float], lo: Optional[float], hi: Optional[float]) -> bool:
+    v = _num(value)
+    return (lo is None or v >= lo) and (hi is None or v <= hi)
 
 
 def hit_rate(rows: Sequence[Dict], key: str, line: float) -> Optional[Dict]:
@@ -502,6 +644,11 @@ def hit_rate(rows: Sequence[Dict], key: str, line: float) -> Optional[Dict]:
     vals = [(r["pts"] if key == "pts" else r["stats"].get(key, 0.0)) for r in rows]
     hits = sum(1 for v in vals if v > line)
     return {"hits": hits, "games": len(vals), "pct": hits / len(vals) * 100.0}
+
+
+def hit_rates(rows: Sequence[Dict], lines: Dict[str, float]) -> Dict[str, Optional[Dict]]:
+    """hit_rate() for every stat in `lines` ({stat key: posted line}) — the HIT RATE row of the log."""
+    return {k: hit_rate(rows, k, line) for k, line in lines.items()}
 
 
 def heat_css(values: Sequence[Optional[float]]) -> List[str]:
@@ -529,7 +676,8 @@ def when_label(order, date: str) -> str:
     d = str(date or "")[:10]
     pretty = f"{d[5:7]}/{d[8:10]}/{d[2:4]}" if len(d) == 10 and d[4] == "-" and d[7] == "-" else ""
     if isinstance(order, int):
-        return f"Wk {order}" + (f" · {pretty}" if pretty else "")
+        week = order % 100 if order >= 190000 else order                  # football logs use season * 100 + week
+        return f"Wk {week}" + (f" · {pretty}" if pretty else "")
     if not pretty:
         o = str(order or "")[:10]
         return f"{o[5:7]}/{o[8:10]}/{o[2:4]}" if len(o) == 10 and o[4] == "-" else ""

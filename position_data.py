@@ -25,6 +25,7 @@ from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import position_matchups as PM
+import position_pbp as PP
 
 MIN_GAMES_FOR_RANK = PM.MIN_GAMES_FOR_RANK
 MIN_TEAMS_FOR_RANK = PM.MIN_TEAMS_FOR_RANK
@@ -156,6 +157,151 @@ def latest_depth_chart_rows(df, team: str) -> List[Dict]:
     mine = mine[mine["dt"] == newest]
     mine = mine[~mine["pos_grp"].astype(str).str.startswith(("Base", "Special"))]
     return mine.to_dict("records")
+
+
+# =========================================================================== NFL game log (two seasons stacked)
+def stack_nfl_pgames(weekly, season: int, before_order: Optional[int] = None) -> List[Dict]:
+    """One season's weekly player stats -> player-game lines whose `order` is the composite season * 100 + week
+    (so two seasons sort together), stopping short of `before_order` (exclusive). Playoff weeks are included."""
+    out = []
+    for p in nfl_pgames(weekly, 999):
+        order = PP.season_order(season, p["order"])
+        if before_order is not None and order >= before_order:
+            continue
+        out.append(dict(p, order=order, game=f"{order}-{p['team']}"))
+    return out
+
+
+def load_season_pbp(season: int):
+    """One season of NFL play-by-play, trimmed to the columns the log needs (pandas), or raises."""
+    import nflreadpy as nfl
+    df = nfl.load_pbp([season])
+    return df.select([c for c in PP.PBP_COLUMNS if c in df.columns]).to_pandas()
+
+
+def load_season_snaps(season: int):
+    """One season of NFL snap counts (pandas), or raises."""
+    import nflreadpy as nfl
+    return nfl.load_snap_counts([season]).to_pandas()
+
+
+def chart_slots_by_game(chart_df, team_games: Dict[Tuple[int, str], str]) -> Dict[Tuple[int, str], Dict[str, Tuple]]:
+    """Depth-chart snapshots + {(order, team): game date 'YYYY-MM-DD'} -> {(order, team): {slot: (player id, name)}}.
+
+    For each team-game the newest snapshot dated STRICTLY BEFORE the game date is used (the chart as it stood the day
+    before), read with football_depth_from_chart so QB / RB1-2 / WR1-3 / TE1 follow chart order. A team-game with no
+    earlier snapshot is simply absent."""
+    if chart_df is None or len(chart_df) == 0 or not team_games:
+        return {}
+    df = chart_df[chart_df["team"].notna()].copy()
+    df["_day"] = df["dt"].astype(str).str[:10]
+    df = df[~df["pos_grp"].astype(str).str.startswith(("Base", "Special"))]
+    by_team = {t: g for t, g in df.groupby("team")}
+    cache: Dict[Tuple[str, str], Dict] = {}
+    out: Dict[Tuple[int, str], Dict[str, Tuple]] = {}
+    for (order, team), day in team_games.items():
+        tdf = by_team.get(team)
+        if tdf is None or not day:
+            continue
+        earlier = tdf[tdf["_day"] < str(day)[:10]]
+        if len(earlier) == 0:
+            continue
+        snap = earlier["_day"].max()
+        if (team, snap) not in cache:
+            slots = football_depth_from_chart(tdf[tdf["_day"] == snap].to_dict("records"))
+            cache[(team, snap)] = {s: (lst[0].get("pid"), lst[0].get("name")) for s, lst in slots.items() if lst and lst[0].get("pid")}
+        if cache[(team, snap)]:
+            out[(order, team)] = cache[(team, snap)]
+    return out
+
+
+def load_season_charts(season: int):
+    """One season of NFL depth-chart snapshots (pandas), or raises."""
+    import nflreadpy as nfl
+    return nfl.load_depth_charts([season]).to_pandas()
+
+
+def _nfl_team_info(notes: List[str]) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """({abbr: full team name}, {abbr: ESPN logo url}) from nflreadpy's team table; empty on failure."""
+    def go():
+        import nflreadpy as nfl
+        t = nfl.load_teams().to_pandas()
+        return ({r["team_abbr"]: r["team_name"] for r in t.to_dict("records")},
+                {r["team_abbr"]: r.get("team_logo_espn") for r in t.to_dict("records") if r.get("team_logo_espn")})
+    return _safe(go, ({}, {}), notes, "team names and logos")
+
+
+def load_nfl_log(date_str: str) -> Dict:
+    """Everything the NFL game log needs for the week `date_str` falls in — league-wide, so it is loaded once per
+    date and shared by every game on the slate. TWO seasons are stacked (the previous full season plus this season's
+    weeks before the game), because a defense's last ten games usually straddle the season boundary.
+
+    {"allowed": {defense: [game entries, each with per-period stat lines attached]}, "meta": {(order, defense,
+    offense): date / venue / result / primetime / roof / role}, "all_names": {abbr: team name}, "logos", "headshots":
+    {player id: url}, "absences": {(order, team): [defenders who sat]}, "regulars": {team: [defenders]}, "notes",
+    "season", "week", "has_pbp"}. Every source fails soft: a missing one empties its feature and adds a note."""
+    import sports
+    notes: List[str] = []
+    eng = sports.get("NFL").engine
+    season = eng._infer_season(date_str)
+    empty = {"allowed": {}, "allowed_chart": {}, "meta": {}, "all_names": {}, "logos": {}, "headshots": {}, "absences": {}, "regulars": {},
+             "notes": notes, "season": season, "week": None, "has_pbp": False}
+    if season is None:
+        notes.append("Couldn't work out the season for this date.")
+        return empty
+    sched = {season: _safe(lambda: eng.get_schedule(season), [], notes, "this season's schedule")}
+    week = eng._resolve_week(sched[season], date_str) or 1
+    before = PP.season_order(season, week)
+    seasons = (season - 1, season)
+    sched[season - 1] = _safe(lambda: eng.get_schedule(season - 1), [], notes, "last season's schedule")
+    pgames: List[Dict] = []
+    headshots: Dict[str, str] = {}
+    for s_ in seasons:
+        weekly = _safe(lambda s_=s_: eng.load_season_weekly_stats(s_), None, notes, f"{s_} weekly stats")
+        pgames += stack_nfl_pgames(weekly, s_, before)
+        if weekly is not None and len(weekly) and "headshot_url" in weekly.columns:
+            for r in weekly[["player_id", "headshot_url"]].dropna().drop_duplicates("player_id").to_dict("records"):
+                headshots[r["player_id"]] = r["headshot_url"]
+    meta_games = [g for s_ in seasons for g in football_meta_games("NFL", sched[s_], s_)]
+    allowed = PM.allowed_by_slot(pgames, "NFL")
+    if not pgames:
+        notes.append("No player-game data on file yet for the game log.")
+    pbp_frames = [f for f in (_safe(lambda s_=s_: load_season_pbp(s_), None, notes, f"{s_} play-by-play") for s_ in seasons)
+                  if f is not None and len(f)]
+    lookup: Dict = {}
+    if pbp_frames:
+        import pandas as pd
+        lookup = _safe(lambda: PP.period_lines(pd.concat(pbp_frames, ignore_index=True), before), {}, notes, "play-by-play lines")
+    has_pbp = bool(lookup) and PM.attach_periods(allowed, lookup) > 0
+    if not has_pbp:
+        notes.append("Play-by-play wasn't available, so longest plays, shares and half / quarter splits are turned off "
+                     "(full-game totals still work).")
+    snap_frames = [f for f in (_safe(lambda s_=s_: load_season_snaps(s_), None, notes, f"{s_} snap counts") for s_ in seasons)
+                   if f is not None and len(f)]
+    absences, regulars = {}, {}
+    if snap_frames:
+        import pandas as pd
+        absences, regulars = _safe(lambda: PP.defense_absences(pd.concat(snap_frames, ignore_index=True)), ({}, {}), notes,
+                                   "snap counts")
+    allowed_chart = {}
+    if has_pbp:
+        chart_frames = [f for f in (_safe(lambda s_=s_: load_season_charts(s_), None, notes, f"{s_} depth charts") for s_ in seasons)
+                        if f is not None and len(f)]
+        if chart_frames:
+            import pandas as pd
+            team_games = {}
+            for (order, dfn, off), m in PM.build_game_meta(meta_games).items():
+                if m.get("date"):
+                    team_games[(order, dfn)] = team_games[(order, off)] = m["date"]
+            charts = _safe(lambda: chart_slots_by_game(pd.concat(chart_frames, ignore_index=True), team_games), {}, notes,
+                           "depth charts")
+            if charts:
+                allowed_chart = PM.chart_allowed(allowed, charts, lookup)
+    names, logos = _nfl_team_info(notes)
+    teams = set(allowed) | {g["offense"] for lst in allowed.values() for g in lst}
+    return {"allowed": allowed, "allowed_chart": allowed_chart, "meta": PM.build_game_meta(meta_games), "all_names": {t: names.get(t, t) for t in teams},
+            "logos": logos, "headshots": headshots, "absences": absences, "regulars": regulars, "notes": notes,
+            "season": season, "week": week, "has_pbp": has_pbp}
 
 
 # =========================================================================== basketball: box-score sample
@@ -361,19 +507,23 @@ def _nfl_depths(eng, season: int, week: int, teams: Tuple[str, str], notes: List
     return out
 
 
-def football_meta_games(sport_key: str, sched: Iterable[Dict]) -> List[Dict]:
-    """A football schedule -> the rows PM.build_game_meta wants (order = the week, matching the player-game
-    lines). NFL and CFBD name their date and score fields differently."""
+def football_meta_games(sport_key: str, sched: Iterable[Dict], season: Optional[int] = None) -> List[Dict]:
+    """A football schedule -> the rows PM.build_game_meta wants. `order` is the week (matching the rank tables'
+    player-game lines) — or, with `season`, the composite season * 100 + week the stacked NFL log uses. NFL and CFBD
+    name their date and score fields differently; the NFL rows also carry kickoff time, spread, total and roof for the
+    log's Primetime / Indoors / Favorite filters."""
     out = []
     for g in sched or []:
         if g.get("week") is None:
             continue
+        order = int(g["week"]) if season is None else PP.season_order(season, int(g["week"]))
         if sport_key == "NFL":
-            date, hs, as_ = g.get("game_date"), g.get("home_score"), g.get("away_score")
+            out.append({"order": order, "date": g.get("game_date"), "home": g.get("home_team"), "away": g.get("away_team"),
+                        "home_score": g.get("home_score"), "away_score": g.get("away_score"), "time": g.get("game_time"),
+                        "spread": g.get("spread_line"), "total": g.get("total_line"), "roof": g.get("roof")})
         else:
-            date, hs, as_ = g.get("start_date"), g.get("home_points"), g.get("away_points")
-        out.append({"order": int(g["week"]), "date": date, "home": g.get("home_team"), "away": g.get("away_team"),
-                    "home_score": hs, "away_score": as_})
+            out.append({"order": order, "date": g.get("start_date"), "home": g.get("home_team"), "away": g.get("away_team"),
+                        "home_score": g.get("home_points"), "away_score": g.get("away_points")})
     return out
 
 

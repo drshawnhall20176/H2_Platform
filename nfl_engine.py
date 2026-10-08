@@ -176,6 +176,10 @@ def get_schedule(season: int) -> List[Dict[str, Any]]:
                 "home_team": r["home_team"], "away_team": r["away_team"],
                 "home_score": r.get("home_score"), "away_score": r.get("away_score"),
                 "home_rest": r.get("home_rest"), "away_rest": r.get("away_rest"),
+                # Game-environment fields (additive; None when a season's data lacks them): the home team's
+                # expected margin (positive = home favoured), the closing total, and the roof type. The Position
+                # Matchups game log filters on them.
+                "spread_line": r.get("spread_line"), "total_line": r.get("total_line"), "roof": r.get("roof"),
             })
         except (KeyError, ValueError):
             continue

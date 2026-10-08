@@ -100,7 +100,17 @@ def test_get_schedule_extracts_the_real_gametime_column(monkeypatch):
     monkeypatch.setattr(E.nfl, "load_schedules", lambda seasons: _FakePolarsDF(fake_df))
     sched = E.get_schedule(2026)
     assert sched[0]["game_time"] == "20:20"
+    assert sched[0]["spread_line"] is None and sched[0]["total_line"] is None and sched[0]["roof"] is None   # absent columns stay None
     print("✓ get_schedule now correctly extracts the real gametime column (e.g. 8:20 PM ET), not just the bare date")
+
+
+def test_get_schedule_carries_spread_total_and_roof(monkeypatch):
+    fake_df = pd.DataFrame([
+        {"game_id": "2026_01_NE_SEA", "week": 1, "gameday": "2026-09-09", "gametime": "20:20", "home_team": "SEA", "away_team": "NE",
+         "home_score": None, "away_score": None, "home_rest": 7, "away_rest": 7, "spread_line": 3.0, "total_line": 44.5, "roof": "outdoors"}])
+    monkeypatch.setattr(E.nfl, "load_schedules", lambda seasons: _FakePolarsDF(fake_df))
+    g = E.get_schedule(2026)[0]
+    assert (g["spread_line"], g["total_line"], g["roof"]) == (3.0, 44.5, "outdoors")
 
 
 def test_kickoff_utc_iso_converts_eastern_gametime_to_utc():

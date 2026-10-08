@@ -460,7 +460,11 @@ def test_scoreboard_parse_carries_names_and_scores_for_the_game_log():
 def test_football_meta_games_reads_each_sources_own_field_names():
     nfl = PD.football_meta_games("NFL", [dict(week=3, game_date="2026-09-27", home_team="A", away_team="B", home_score=10, away_score=7),
                                          dict(week=None, game_date="x", home_team="A", away_team="B")])
-    assert nfl == [dict(order=3, date="2026-09-27", home="A", away="B", home_score=10, away_score=7)]
+    assert nfl == [dict(order=3, date="2026-09-27", home="A", away="B", home_score=10, away_score=7, time=None, spread=None,
+                        total=None, roof=None)]
+    stacked = PD.football_meta_games("NFL", [dict(week=3, game_date="d", home_team="A", away_team="B", game_time="20:15",
+                                                  spread_line=2.5, total_line=44.5, roof="dome")], 2025)
+    assert stacked[0]["order"] == 202503 and (stacked[0]["time"], stacked[0]["spread"], stacked[0]["total"], stacked[0]["roof"]) == ("20:15", 2.5, 44.5, "dome")
     col = PD.football_meta_games("NCAAF", [dict(week=4, start_date="2026-09-26T19:00Z", home_team="Ohio", away_team="Iowa", home_points=31, away_points=17)])
     assert col == [dict(order=4, date="2026-09-26T19:00Z", home="Ohio", away="Iowa", home_score=31, away_score=17)]
     assert PD.football_meta_games("NFL", None) == []
@@ -471,7 +475,8 @@ def test_build_bundle_carries_what_the_game_log_needs():
                         meta_games=[dict(order=2, date="2026-09-20", home="D3", away="OFF", home_score=20, away_score=10)])
     assert set(b["allowed"]) >= {"D0", "D3", "D1"} and b["allowed"]["D3"][0]["who"]["WR1"] == ["Rec3"]
     assert b["all_names"]["D3"] == "Dee Three" and b["all_names"]["HOME"] == "Home FC" and b["all_names"]["D0"] == "D0" and b["all_names"]["AWAY"] == "AWAY"
-    assert b["meta"][(2, "D3", "OFF")] == {"date": "2026-09-20", "venue": "Home", "def_score": 20.0, "off_score": 10.0}
+    assert {k: b["meta"][(2, "D3", "OFF")][k] for k in ("date", "venue", "def_score", "off_score")} == \
+        {"date": "2026-09-20", "venue": "Home", "def_score": 20.0, "off_score": 10.0}
     assert PD.build_bundle("NFL", "HOME", "AWAY", [], {}, [])["meta"] == {}
 
 
@@ -525,3 +530,80 @@ def test_ncaamb_games_are_labelled_with_the_real_home_side_and_both_names(basket
             expect[(e["date"], sides["away"] if sides["home"] == 1 else sides["home"])] = "Home" if sides["home"] == 1 else "Away"
     assert all(r["venue"] == expect[(r["order"], r["opp"])] for r in log["rows"])
     assert {"Home", "Away"} == {r["venue"] for r in log["rows"]}                      # the sample really has both, so the check above bites
+
+
+# ------------------------------------------------------------------ build 225: stacked NFL log
+def test_stack_nfl_pgames_gives_composite_orders_and_stops_before_the_cutoff():
+    df = weekly_df([dict(player_id="1", week=2, targets=5), dict(player_id="2", week=5, targets=9), dict(player_id="3", week=18, targets=1)])
+    out = PD.stack_nfl_pgames(df, 2025, before_order=202505)
+    assert [(p["pid"], p["order"], p["game"]) for p in out] == [("1", 202502, "202502-A")]
+    assert [p["order"] for p in PD.stack_nfl_pgames(df, 2025)] == [202502, 202505, 202518]
+    assert PD.stack_nfl_pgames(None, 2025) == []
+
+
+def chart_frame():
+    rows = []
+    for day, pid, name in (("2026-09-26T08:00:00", "old", "OldWr"), ("2026-09-27T08:00:00", "new", "NewWr"), ("2026-09-28T08:00:00", "later", "LaterWr")):
+        rows.append(dict(team="OFF2", dt=day, pos_grp="3WR 1TE", pos_abb="WR", pos_rank=1, player_name=name, gsis_id=pid))
+        rows.append(dict(team="OFF2", dt=day, pos_grp="Base 4-3 D", pos_abb="DE", pos_rank=1, player_name="Defender", gsis_id="d"))
+    rows.append(dict(team="OFF2", dt="2026-09-27T08:00:00", pos_grp="QB", pos_abb="QB", pos_rank=1, player_name="Signal", gsis_id="q"))
+    return pd.DataFrame(rows)
+
+
+def test_chart_slots_use_the_newest_snapshot_strictly_before_game_day():
+    out = PD.chart_slots_by_game(chart_frame(), {(3, "OFF2"): "2026-09-28", (2, "OFF2"): "2026-09-27", (1, "OFF2"): "2026-09-26", (4, "NOPE"): "2026-09-28"})
+    assert out[(3, "OFF2")] == {"WR1": ("new", "NewWr"), "QB": ("q", "Signal")}                   # 9/27, not 9/28
+    assert out[(2, "OFF2")]["WR1"] == ("old", "OldWr")                                             # 9/26
+    assert (1, "OFF2") not in out and (4, "NOPE") not in out                                       # nothing earlier / unknown team
+    assert "Defender" not in str(out)
+    assert PD.chart_slots_by_game(None, {(1, "A"): "d"}) == {} and PD.chart_slots_by_game(chart_frame(), {}) == {}
+
+
+def test_load_nfl_log_stacks_two_seasons_and_attaches_everything(fake_nfl, monkeypatch):
+    seen = {"pbp": [], "snaps": [], "charts": []}
+
+    def pbp(season):
+        seen["pbp"].append(season)
+        return pd.DataFrame([dict(season=season, week=1, posteam="OFF", qtr=1, yards_gained=15.0, complete_pass=1.0, pass_attempt=1.0,
+                                  passer_player_id="q", receiver_player_id="o0", pass_touchdown=0.0, rush_touchdown=0.0, interception=0.0,
+                                  rush_attempt=0.0, rusher_player_id=None, sack=0.0, two_point_attempt=0.0)])
+
+    monkeypatch.setattr(PD, "load_season_pbp", pbp)
+    monkeypatch.setattr(PD, "load_season_snaps", lambda s: seen["snaps"].append(s) or pd.DataFrame(
+        [dict(season=s, week=w, team="D0", player="Tackler", defense_snaps=0.0 if w == 2 else 50.0, defense_pct=0.0 if w == 2 else 0.8) for w in (1, 2, 3)]))
+    monkeypatch.setattr(PD, "load_season_charts", lambda s: seen["charts"].append(s) or chart_frame())
+    monkeypatch.setattr(PD, "_nfl_team_info", lambda notes: ({"D0": "Dee Zero", "OFF": "Off FC"}, {"D0": "https://logo/d0.png"}))
+    d = PD.load_nfl_log("2026-10-07")
+    assert seen["pbp"] == [2025, 2026] and seen["snaps"] == [2025, 2026] and seen["charts"] == [2025, 2026]       # last season + this
+    assert d["season"] == 2026 and d["week"] == 5 and d["has_pbp"] is True
+    wk1 = [g for g in d["allowed"]["D0"] if g["order"] == 202601][0]
+    assert wk1["periods"]["WR1"]["Full Game"]["rec_yds"] == 15.0 and wk1["who"]["WR1"] == ["Rec0"]
+    assert [g for g in d["allowed"]["D0"] if g["order"] == 202501][0]["periods"]["WR1"]["Full Game"]["rec_yds"] == 15.0     # last season stacked
+    assert max(g["order"] for lst in d["allowed"].values() for g in lst) == 202604                                # week 5 excluded, no leak
+    assert d["all_names"]["D0"] == "Dee Zero" and d["logos"] == {"D0": "https://logo/d0.png"}
+    assert d["absences"][(202602, "D0")] == ["Tackler"] and [r["name"] for r in d["regulars"]["D0"]] == ["Tackler"]
+    assert d["meta"][(202603, "AWAY", "OFF2")]["def_score"] == 24.0 and d["meta"][(202502, "AWAY", "HOME")]["def_score"] == 17.0
+    chart_game = [g for g in d["allowed_chart"]["AWAY"] if g["order"] == 202603][0]
+    assert chart_game["slot_source"] == "chart" and chart_game["who"]["WR1"] == ["OldWr"]                         # chart of 9/26, not 9/27
+    assert [g for g in d["allowed_chart"]["AWAY"] if g["order"] == 202604][0]["slot_source"] == "usage" and d["notes"] == []
+
+
+def test_load_nfl_log_degrades_with_notes_when_pbp_and_snaps_fail(fake_nfl, monkeypatch):
+    def boom(season):
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(PD, "load_season_pbp", boom)
+    monkeypatch.setattr(PD, "load_season_snaps", boom)
+    monkeypatch.setattr(PD, "load_season_charts", lambda s: chart_frame())               # charts load fine, but need play-by-play
+    monkeypatch.setattr(PD, "_nfl_team_info", lambda notes: ({}, {}))
+    d = PD.load_nfl_log("2026-10-07")
+    assert d["has_pbp"] is False and d["allowed_chart"] == {} and d["absences"] == {} and d["regulars"] == {}
+    assert d["allowed"] and any("Play-by-play wasn't available" in n for n in d["notes"]) and any("play-by-play" in n for n in d["notes"])
+    log = PM.slot_game_log(d["allowed"], "D0", "WR1", "NFL", d["meta"], n=10)
+    assert log["rows"] and log["period_ok"] is True                                                            # full-game numbers still work
+
+
+def test_load_nfl_log_without_a_season_returns_an_empty_shell_with_a_note(fake_nfl, monkeypatch):
+    monkeypatch.setattr(fake_nfl, "_infer_season", lambda d: None)
+    d = PD.load_nfl_log("2026-10-07")
+    assert d["allowed"] == {} and d["allowed_chart"] == {} and d["has_pbp"] is False and d["notes"]
