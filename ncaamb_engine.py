@@ -197,7 +197,8 @@ def get_team_roster(team_id: int) -> List[Dict[str, Any]]:
             if pid is None:
                 continue
             try:
-                out.append({"id": int(pid), "name": item.get("displayName", "Unknown")})
+                out.append({"id": int(pid), "name": item.get("displayName", "Unknown"),
+                        "pos": (item.get("position") or {}).get("abbreviation")})
             except (TypeError, ValueError):
                 continue
     if flat_count and flat_count == len(data.get("athletes", [])):

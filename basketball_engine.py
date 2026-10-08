@@ -253,6 +253,9 @@ def get_team_recent_game_ids(team_id: int, before_date: str, site_api: str,
                 # None when the scoreboard didn't say). Additive: lets a caller leave exhibition games
                 # out of "recent form" (see nba_engine.get_player_recent_games).
                 "season_type": (event.get("season") or {}).get("type"),
+                # "home" / "away" for THIS team (None when the scoreboard didn't say) — lets a
+                # head-to-head table say where each meeting was played.
+                "home_away": this_team.get("homeAway"),
             })
 
     found.sort(key=lambda g: g["date"], reverse=True)
@@ -374,6 +377,47 @@ def get_game_team_totals(game_id: str, cdn_api: str, fetch: FetchFn,
         if any_poss_zero and not all_core_zero:
             diag(f"get_game_team_totals({game_id}): poss=0 while pts/reb/ast/fg3m parsed fine — "
                 f"FGA/FTA/OREB/TOV candidate field names likely wrong, see values above")
+    return out
+
+
+def get_game_player_lines(game_id: str, cdn_api: str, fetch: FetchFn) -> Dict[int, List[Dict[str, Any]]]:
+    """{team_id: [{"id","name","pos","starter","min","pts","reb","ast","fg3m"}]} for every player who
+    played, from a CDN boxscore response — the TEAM-attributed counterpart of each engine's
+    get_game_boxscore (which flattens both teams into one {player_id: line} dict and so can't say which
+    side a player was on). Position comes from the athlete's own `position.abbreviation` when ESPN
+    sends it, else None (the caller fills it in from a roster). Same defensive parsing as the engines'
+    boxscore readers: any missing piece skips that player/team instead of raising; an unreadable
+    response is {}."""
+    data = fetch(cdn_api, params={"xhr": "1", "gameId": game_id})
+    if not data:
+        return {}
+    box = ((data.get("gamepackageJSON") or {}).get("boxscore") or {})
+    out: Dict[int, List[Dict[str, Any]]] = {}
+    for group in box.get("players") or []:
+        try:
+            tid = int((group.get("team") or {}).get("id"))
+        except (TypeError, ValueError):
+            continue
+        for stat_group in group.get("statistics") or []:
+            names = stat_group.get("names") or []
+            for a in stat_group.get("athletes") or []:
+                if a.get("didNotPlay") or not names:
+                    continue
+                athlete = a.get("athlete") or {}
+                stats = a.get("stats") or []
+                try:
+                    pid = int(athlete.get("id"))
+                except (TypeError, ValueError):
+                    continue
+                if not stats:
+                    continue
+                row = {n: parse_stat_value(v) for n, v in zip(names, stats)}
+                out.setdefault(tid, []).append({
+                    "id": pid, "name": athlete.get("displayName") or athlete.get("shortName") or "Unknown",
+                    "pos": (athlete.get("position") or {}).get("abbreviation"),
+                    "starter": bool(a.get("starter")),
+                    "min": row.get("MIN", 0.0), "pts": row.get("PTS", 0.0), "reb": row.get("REB", 0.0),
+                    "ast": row.get("AST", 0.0), "fg3m": row.get("3PT", 0.0)})
     return out
 
 

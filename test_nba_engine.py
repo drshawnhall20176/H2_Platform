@@ -252,10 +252,11 @@ def test_get_team_roster_handles_grouped_shape(monkeypatch):
 
 
 def test_get_team_roster_handles_flat_shape(monkeypatch):
-    fake_response = {"athletes": [{"id": "1966", "displayName": "LeBron James"}]}
+    fake_response = {"athletes": [{"id": "1966", "displayName": "LeBron James", "position": {"abbreviation": "SF"}},
+                                  {"id": "7", "displayName": "No Position Listed"}]}
     monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_response)
     roster = E.get_team_roster(13)
-    assert roster == [{"id": 1966, "name": "LeBron James"}]
+    assert roster == [{"id": 1966, "name": "LeBron James", "pos": "SF"}, {"id": 7, "name": "No Position Listed", "pos": None}]   # pos feeds Position Matchups
     print("✓ get_team_roster correctly handles a flat (non-grouped) athletes list")
 
 

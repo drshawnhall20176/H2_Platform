@@ -490,3 +490,16 @@ def test_window_none_when_nothing_is_reachable():
 def test_month_starts_crosses_year_boundary():
     from datetime import date
     assert BB._month_starts(date(2026, 11, 20), date(2027, 1, 5)) == [date(2026, 11, 1), date(2026, 12, 1), date(2027, 1, 1)]
+
+
+def test_recent_game_ids_report_which_side_the_team_was_on_and_the_season_type():
+    import basketball_engine as BB
+
+    def ev(eid, date, home, away, stype):
+        return {"id": eid, "date": date, "status": {"type": {"completed": True}}, "season": {"type": stype},
+                "competitions": [{"competitors": [{"homeAway": "home", "score": "101", "team": {"id": str(home), "displayName": f"T{home}"}},
+                                                  {"homeAway": "away", "score": "99", "team": {"id": str(away), "displayName": f"T{away}"}}]}]}
+    events = [ev("a", "2026-10-01T23:00Z", 1, 2, 2), ev("b", "2026-10-02T23:00Z", 3, 1, 1)]
+    got = BB.get_team_recent_game_ids(1, "2026-10-07", "https://x", lambda url, params=None: {"events": events})
+    assert [(g["gameId"], g["home_away"], g["season_type"], g["score"], g["opp_score"]) for g in got] == \
+        [("b", "away", 1, "99", "101"), ("a", "home", 2, "101", "99")]
