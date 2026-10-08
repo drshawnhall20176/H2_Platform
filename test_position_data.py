@@ -165,7 +165,8 @@ class FakeNfl:
         if season == 2025:
             return [dict(game_id="p", week=2, game_date="2025-09-14", game_time="13:00", home_team="AWAY", away_team="HOME", home_score=17, away_score=24)]
         if season == 2026:
-            return [dict(game_id="g", week=5, game_date="2026-10-11", game_time="13:00", home_team="HOME", away_team="AWAY", home_score=None, away_score=None)]
+            return [dict(game_id="g", week=5, game_date="2026-10-11", game_time="13:00", home_team="HOME", away_team="AWAY", home_score=None, away_score=None),
+                    dict(game_id="m", week=3, game_date="2026-09-27", game_time="13:00", home_team="AWAY", away_team="OFF2", home_score=24, away_score=20)]
         return []
 
     @staticmethod
@@ -442,3 +443,85 @@ def test_previous_season_option_reads_last_seasons_file_and_every_week(fake_nfl,
     f = lambda b: [r for r in b["home_off"]["rows"] if r["slot"] == "WR1"][0]["players"][0]["recent"]
     assert abs(f(cur)["avg"] - 14.0) < 1e-9                                          # weeks 1-4 only (week 5 is the game's own week)
     assert abs(f(prev)["avg"] - (198.9 + 14 * 3) / 4) < 1e-9                         # last season = every week the file has
+
+
+# ------------------------------------------------------------------ game-log data (dates / venue / results / names)
+def test_scoreboard_parse_carries_names_and_scores_for_the_game_log():
+    e = ev("1", "2026-10-05T23:00Z", 1, 2)
+    comps = e["competitions"][0]["competitors"]
+    comps[0].update(score="101", team={"id": "1", "displayName": "Team One"})
+    comps[1].update(score="99", team={"id": "2", "displayName": "Team Two"})
+    g = PD.parse_scoreboard_events([e], "2026-10-07", "2026-09-20", lambda t: True)[0]
+    assert (g["home_name"], g["away_name"], g["home_score"], g["away_score"]) == ("Team One", "Team Two", "101", "99")
+    bare = PD.parse_scoreboard_events([ev("2", "2026-10-05T23:00Z", 3, 4)], "2026-10-07", "2026-09-20", lambda t: True)[0]
+    assert bare["home_name"] is None and bare["home_score"] is None
+
+
+def test_football_meta_games_reads_each_sources_own_field_names():
+    nfl = PD.football_meta_games("NFL", [dict(week=3, game_date="2026-09-27", home_team="A", away_team="B", home_score=10, away_score=7),
+                                         dict(week=None, game_date="x", home_team="A", away_team="B")])
+    assert nfl == [dict(order=3, date="2026-09-27", home="A", away="B", home_score=10, away_score=7)]
+    col = PD.football_meta_games("NCAAF", [dict(week=4, start_date="2026-09-26T19:00Z", home_team="Ohio", away_team="Iowa", home_points=31, away_points=17)])
+    assert col == [dict(order=4, date="2026-09-26T19:00Z", home="Ohio", away="Iowa", home_score=31, away_score=17)]
+    assert PD.football_meta_games("NFL", None) == []
+
+
+def test_build_bundle_carries_what_the_game_log_needs():
+    b = PD.build_bundle("NFL", "HOME", "AWAY", football_pgames(), {}, [], names={"D3": "Dee Three", "HOME": "Home FC"},
+                        meta_games=[dict(order=2, date="2026-09-20", home="D3", away="OFF", home_score=20, away_score=10)])
+    assert set(b["allowed"]) >= {"D0", "D3", "D1"} and b["allowed"]["D3"][0]["who"]["WR1"] == ["Rec3"]
+    assert b["all_names"]["D3"] == "Dee Three" and b["all_names"]["HOME"] == "Home FC" and b["all_names"]["D0"] == "D0" and b["all_names"]["AWAY"] == "AWAY"
+    assert b["meta"][(2, "D3", "OFF")] == {"date": "2026-09-20", "venue": "Home", "def_score": 20.0, "off_score": 10.0}
+    assert PD.build_bundle("NFL", "HOME", "AWAY", [], {}, [])["meta"] == {}
+
+
+def test_football_log_end_to_end_has_venue_and_result_from_the_schedule(fake_nfl):
+    b = PD.load_bundle("NFL", "2026-10-07", PD.list_games("NFL", "2026-10-07")[0])
+    log = PM.slot_game_log(b["allowed"], "AWAY", "WR1", "NFL", b["meta"], n=10)
+    assert [r["order"] for r in log["rows"]] == [4, 3, 2, 1]                      # newest first
+    wk3 = [r for r in log["rows"] if r["order"] == 3][0]
+    assert (wk3["venue"], wk3["result"], wk3["score"], wk3["date"], wk3["who"], wk3["opp"]) == ("Home", "W", "24-20", "2026-09-27", "Rival", "OFF2")
+    assert [r["venue"] for r in log["rows"] if r["order"] != 3] == [None, None, None]      # weeks the schedule fake doesn't list
+    home_only = PM.slot_game_log(b["allowed"], "AWAY", "WR1", "NFL", b["meta"], n=10, venue="Home")
+    assert [r["order"] for r in home_only["rows"]] == [3]
+
+
+def test_previous_season_log_uses_last_seasons_schedule(fake_nfl):
+    b = PD.load_bundle("NFL", "2026-10-07", PD.list_games("NFL", "2026-10-07")[0], use_previous_season=True)
+    assert (2, "AWAY", "HOME") in b["meta"] and b["meta"][(2, "AWAY", "HOME")]["def_score"] == 17.0
+    assert (3, "AWAY", "OFF2") not in b["meta"]                                      # this season's schedule is not mixed in
+
+
+def test_nba_log_names_every_team_and_dates_each_game(basketball):
+    events = league_events()
+    for e in events:
+        for c in e["competitions"][0]["competitors"]:
+            c["team"]["displayName"] = f"Team {c['team']['id']}"
+            c["score"] = "110" if c["homeAway"] == "home" else "100"
+    fake = FakeBasketball(events)
+    basketball("NBA", fake, scoreboard=events)
+    b = PD.load_basketball("NBA", "2026-10-01", 1, 2, "Team One", "Team Two", "T1", "T2")
+    assert b["all_names"][5] == "Team 5" and b["all_names"][1] == "Team One" and len(b["all_names"]) >= 20
+    log = PM.slot_game_log(b["allowed"], 2, "G", "NBA", b["meta"], n=10)
+    by_opp = {}
+    for r in log["rows"]:
+        by_opp.setdefault(r["opp"], []).append((r["venue"], r["result"], r["score"], r["who"]))
+    assert set(by_opp[1]) == {("Away", "L", "100-110", "G1")}                      # team 1 hosts team 2: the defense lost on the road
+    assert set(by_opp[3]) == {("Home", "W", "110-100", "G3")}                      # team 2 hosts team 3: the defense won at home
+
+
+def test_ncaamb_games_are_labelled_with_the_real_home_side_and_both_names(basketball):
+    events = league_events(n_teams=6, days=5, start="2026-11-20")
+    fake = FakeBasketball(events)
+    basketball("NCAAMB", fake)
+    b = PD.load_basketball("NCAAMB", "2026-12-01", 1, 2, "One", "Two", "T1", "T2")
+    assert set(b["all_names"]) >= {1, 2} and b["all_names"][1] == "One" and b["all_names"][3] == "Team 3"       # an opponent's name comes off the scoreboard
+    log = PM.slot_game_log(b["allowed"], 1, "G", "NCAAMB", b["meta"], n=10)
+    assert log["rows"] and all(r["venue"] in ("Home", "Away") and r["result"] in ("W", "L") for r in log["rows"])
+    expect = {}
+    for e in events:
+        sides = {c["homeAway"]: int(c["team"]["id"]) for c in e["competitions"][0]["competitors"]}
+        if 1 in sides.values():
+            expect[(e["date"], sides["away"] if sides["home"] == 1 else sides["home"])] = "Home" if sides["home"] == 1 else "Away"
+    assert all(r["venue"] == expect[(r["order"], r["opp"])] for r in log["rows"])
+    assert {"Home", "Away"} == {r["venue"] for r in log["rows"]}                      # the sample really has both, so the check above bites

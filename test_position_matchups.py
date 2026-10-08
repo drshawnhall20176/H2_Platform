@@ -247,3 +247,146 @@ def test_callouts_put_the_biggest_gaps_first():
 def test_basketball_rotation_is_ordered_by_minutes_not_by_production():
     bb = [pg("g1", "2026-10-01", "A", "B", 1, "Starter", "PG", min=34, pts=8), pg("g1", "2026-10-01", "A", "B", 2, "Hot sub", "SG", min=12, pts=30)]
     assert [p["name"] for p in PM.usage_depth(bb, "A", "NBA")["G"]] == ["Starter", "Hot sub"]
+
+
+# ------------------------------------------------------------------ slot game log (one position vs one defense)
+def log_fixture():
+    """Defense DAL over five weeks; each week a different offense's WR1 (by targets) plus a lesser WR2. Week 4 has no WR2 at all."""
+    pgs = []
+    for wk in range(1, 6):
+        pgs.append(pg(f"g{wk}", wk, f"O{wk}", "DAL", f"a{wk}", f"Star{wk}", "WR", tgt=10, rec=wk, rec_yds=10 * wk, rec_td=1 if wk == 5 else 0))
+        if wk != 4:
+            pgs.append(pg(f"g{wk}", wk, f"O{wk}", "DAL", f"b{wk}", f"Sub{wk}", "WR", tgt=3, rec=1, rec_yds=5))
+    pgs.append(pg("x", 3, "DAL", "O3", "d1", "DalWr", "WR", tgt=5, rec=2, rec_yds=20))             # DAL's own offense must not appear in DAL's log
+    games = [dict(order=1, date="2026-09-06", home="DAL", away="O1", home_score=30, away_score=20),
+             dict(order=2, date="2026-09-13", home="O2", away="DAL", home_score=17, away_score=17),
+             dict(order=3, date="2026-09-20", home="O3", away="DAL", home_score=10, away_score=24),
+             dict(order=4, date="2026-09-27", home="DAL", away="O4", home_score=None, away_score=None),
+             dict(order=5, date="2026-10-04", home="DAL", away="O5", home_score=21, away_score=27)]
+    return PM.allowed_by_slot(pgs, "NFL"), PM.build_game_meta(games)
+
+
+def test_allowed_by_slot_remembers_who_held_each_slot_best_first():
+    allowed, _ = log_fixture()
+    wk1 = [g for g in allowed["DAL"] if g["order"] == 1][0]
+    assert wk1["who"] == {"WR1": ["Star1"], "WR2": ["Sub1"]}
+    bb = PM.allowed_by_slot([pg("g", 1, "A", "B", 1, "Low", "G", min=20, pts=2), pg("g", 1, "A", "B", 2, "High", "PG", min=30, pts=30),
+                             pg("g", 1, "A", "B", 3, "Unnamed", "G", min=10, pts=9)], "NBA")
+    assert bb["B"][0]["who"]["G"] == ["High", "Unnamed", "Low"]                      # the group's top producers first
+
+
+def test_build_game_meta_indexes_both_directions_and_drops_bad_rows():
+    m = PM.build_game_meta([dict(order=1, date="2026-09-06T17:00Z", home="A", away="B", home_score="30", away_score=20),
+                            dict(order=2, date="d", home="A", away="A", home_score=1, away_score=2),
+                            dict(order=None, home="A", away="B"), dict(order=3, home=None, away="B"),
+                            dict(order=4, date=None, home="A", away="B", home_score=float("nan"), away_score="x")])
+    assert m[(1, "A", "B")] == {"date": "2026-09-06", "venue": "Home", "def_score": 30.0, "off_score": 20.0}
+    assert m[(1, "B", "A")] == {"date": "2026-09-06", "venue": "Away", "def_score": 20.0, "off_score": 30.0}
+    assert m[(4, "A", "B")] == {"date": "", "venue": "Home", "def_score": None, "off_score": None}
+    assert set(k[0] for k in m) == {1, 4} and PM.build_game_meta(None) == {}
+
+
+def test_slot_game_log_rows_are_newest_first_with_venue_result_player_and_stats():
+    allowed, meta = log_fixture()
+    log = PM.slot_game_log(allowed, "DAL", "WR1", "NFL", meta, n=10)
+    assert [r["order"] for r in log["rows"]] == [5, 4, 3, 2, 1] and log["games"] == 5
+    wk5, wk4, wk3, wk2, wk1 = log["rows"]
+    assert (wk5["opp"], wk5["venue"], wk5["result"], wk5["score"], wk5["who"], wk5["date"]) == ("O5", "Home", "L", "21-27", "Star5", "2026-10-04")
+    assert (wk3["venue"], wk3["result"], wk3["score"]) == ("Away", "W", "24-10") and (wk2["result"], wk2["score"]) == ("T", "17-17")
+    assert (wk4["result"], wk4["score"]) == (None, "") and wk4["venue"] == "Home"                    # a game with no final score
+    assert wk5["stats"] == {"rec": 5.0, "rec_yds": 50.0, "rec_td": 1.0} and abs(wk5["pts"] - (5 + 5 + 6)) < 1e-9
+    assert [k for k, _ in log["stat_cols"]] == ["rec", "rec_yds", "rec_td"]
+    assert abs(log["avg"]["stats"]["rec_yds"] - 30.0) < 1e-9 and abs(log["avg"]["pts"] - (2 + 4 + 6 + 8 + 16) / 5) < 1e-9
+
+
+def test_slot_game_log_average_is_over_the_rows_shown():
+    allowed, meta = log_fixture()
+    five = PM.slot_game_log(allowed, "DAL", "WR1", "NFL", meta, n=None)
+    three = PM.slot_game_log(allowed, "DAL", "WR1", "NFL", meta, n=3)
+    assert five["games"] == 5 and three["games"] == 3
+    assert abs(five["avg"]["pts"] - sum(1 * k + 1 * k + (6 if k == 5 else 0) for k in range(1, 6)) / 5) < 1e-9
+    assert abs(three["avg"]["stats"]["rec"] - (5 + 4 + 3) / 3) < 1e-9 and [r["order"] for r in three["rows"]] == [5, 4, 3]
+
+
+def test_slot_game_log_venue_filters_before_the_window_and_unknown_venues_drop_out():
+    allowed, meta = log_fixture()
+    home = PM.slot_game_log(allowed, "DAL", "WR1", "NFL", meta, n=2, venue="Home")
+    assert [r["order"] for r in home["rows"]] == [5, 4]                           # the two NEWEST home games, not "home games among the last two"
+    away = PM.slot_game_log(allowed, "DAL", "WR1", "NFL", meta, n=10, venue="Away")
+    assert [r["order"] for r in away["rows"]] == [3, 2]
+    nometa = PM.slot_game_log(allowed, "DAL", "WR1", "NFL", {}, n=10, venue="Home")
+    assert nometa["rows"] == [] and nometa["avg"] is None and nometa["games"] == 0
+    assert PM.slot_game_log(allowed, "DAL", "WR1", "NFL", {}, n=10)["games"] == 5            # no schedule at all still lists the games
+
+
+def test_a_game_where_the_opponent_had_nobody_at_the_slot_is_a_row_of_zeros():
+    allowed, meta = log_fixture()
+    log = PM.slot_game_log(allowed, "DAL", "WR2", "NFL", meta, n=10)
+    wk4 = [r for r in log["rows"] if r["order"] == 4][0]
+    assert wk4["who"] == "" and wk4["pts"] == 0.0 and set(wk4["stats"].values()) == {0.0}
+    assert abs(log["avg"]["stats"]["rec"] - 4 / 5) < 1e-9                             # the zero week is in the average
+
+
+def test_slot_game_log_for_an_unknown_defense_is_empty():
+    allowed, meta = log_fixture()
+    log = PM.slot_game_log(allowed, "NOPE", "QB", "NFL", meta)
+    assert log["rows"] == [] and log["avg"] is None and [k for k, _ in log["stat_cols"]] == ["pass_yds", "pass_td", "rush_yds"]
+
+
+def test_basketball_log_lists_a_group_with_its_top_three_names():
+    pgs = [pg("g", "2026-10-01T00:00Z", "A", "B", i, f"P{i}", "G", min=30 - i, pts=10 + i, reb=1, ast=1, fg3m=i) for i in range(1, 5)]
+    allowed = PM.allowed_by_slot(pgs, "NBA")
+    meta = PM.build_game_meta([dict(order="2026-10-01T00:00Z", date="2026-10-01T00:00Z", home="A", away="B", home_score=100, away_score=90)])
+    log = PM.slot_game_log(allowed, "B", "G", "NBA", meta)
+    r = log["rows"][0]
+    assert r["who"] == "P4, P3, P2" and (r["venue"], r["result"]) == ("Away", "L") and abs(r["pts"] - (11 + 12 + 13 + 14 + 4 + 4)) < 1e-9
+    assert [lbl for _, lbl in log["stat_cols"]] == ["pts", "reb", "ast", "3PM"]
+
+
+def test_defense_options_puts_the_game_first_and_ncaamb_stays_to_the_two_teams():
+    allowed = {k: [] for k in ("Zed", "Home", "Alpha", "Away", "Beta")}
+    names = {"Zed": "Zed FC", "Alpha": "alpha FC", "Beta": "Beta FC", "Home": "Home", "Away": "Away"}
+    assert PM.defense_options(allowed, "Home", "Away", names, "NFL") == ["Home", "Away", "Alpha", "Beta", "Zed"]      # A-Z by display name, case-blind
+    assert PM.defense_options(allowed, "Home", "Away", names, "NCAAMB") == ["Home", "Away"]
+    assert PM.defense_options({"Away": []}, "Home", "Away", names, "NFL") == ["Away"]          # a team with no games is not offered
+    assert PM.defense_options({}, "Home", "Away", names, "NBA") == []
+
+
+def test_hit_rate_counts_overs_and_treats_the_line_as_a_push():
+    allowed, meta = log_fixture()
+    rows = PM.slot_game_log(allowed, "DAL", "WR1", "NFL", meta, n=10)["rows"]              # rec yds 50, 40, 30, 20, 10
+    assert PM.hit_rate(rows, "rec_yds", 30) == {"hits": 2, "games": 5, "pct": 40.0}
+    assert PM.hit_rate(rows, "rec_yds", 29.5)["hits"] == 3 and PM.hit_rate(rows, "rec_yds", 0)["pct"] == 100.0
+    assert PM.hit_rate(rows, "pts", 100)["hits"] == 0 and PM.hit_rate(rows, "pts", 6)["hits"] == 2        # points 2, 4, 6, 8, 16 — the 6 is a push
+    assert PM.hit_rate(rows, "nope", 0.5)["hits"] == 0 and PM.hit_rate([], "rec", 1) is None
+
+
+def test_heat_css_is_green_above_average_red_below_deeper_further_out():
+    css = PM.heat_css([10, 20, 30, 40, 50])
+    assert css[2] == "" and css[4].startswith("background-color: rgba(34, 170, 85") and css[0].startswith("background-color: rgba(214, 68, 68")
+    alpha = lambda c: float(c.rsplit(",", 1)[1].strip(" )"))
+    assert alpha(css[4]) > alpha(css[3]) > 0.12 and alpha(css[0]) > alpha(css[1]) > 0.12 and abs(alpha(css[4]) - 0.55) < 1e-9
+    assert PM.heat_css([5, 5, 5]) == ["", "", ""] and PM.heat_css([]) == [] and PM.heat_css([None, None]) == ["", ""]
+    mixed = PM.heat_css([None, 0, 10])
+    assert mixed[0] == "" and mixed[1].startswith("background-color: rgba(214") and mixed[2].startswith("background-color: rgba(34")
+
+
+def test_when_label_handles_football_weeks_and_basketball_dates():
+    assert PM.when_label(5, "2026-10-04") == "Wk 5 · 10/04/26" and PM.when_label(5, "") == "Wk 5"
+    assert PM.when_label("2026-10-04T23:00Z", "2026-10-04") == "10/04/26"
+    assert PM.when_label(5, "2026/10/04") == "Wk 5" and PM.when_label(5, "10-04-2026!") == "Wk 5"            # only a YYYY-MM-DD date is reformatted
+    assert dict(PM.LOG_SIZES) == {"Last 5": 5, "Last 10": 10, "Last 16": 16, "All sampled": None} and PM.LOG_VENUES == ("All", "Home", "Away")
+    assert PM.when_label("2026-10-04T23:00Z", "") == "10/04/26" and PM.when_label(None, "") == "" and PM.when_label("x", "junk") == ""
+
+
+def test_log_table_flattens_the_log_for_display():
+    allowed, meta = log_fixture()
+    log = PM.slot_game_log(allowed, "DAL", "WR1", "NFL", meta, n=3)
+    names = {"O5": "Five FC", "O3": "Three FC"}
+    rows = PM.log_table(log, names, PM.METRIC_SHORT["football"])
+    assert list(rows[0]) == ["Date", "Opponent", "W/L", "Score", "Player", "rec", "rec yds", "rec TD", "Fantasy pts"]
+    assert rows[0]["Opponent"] == "vs Five FC" and rows[2]["Opponent"] == "at Three FC" and rows[1]["Opponent"] == "vs O4"
+    assert rows[0]["W/L"] == "L" and rows[1]["W/L"] == "—" and rows[1]["Score"] == "—" and rows[0]["Date"] == "Wk 5 · 10/04/26"
+    assert rows[0]["rec yds"] == 50.0 and rows[0]["Player"] == "Star5" and abs(rows[0]["Fantasy pts"] - 16.0) < 1e-9
+    bare = PM.log_table(PM.slot_game_log(allowed, "DAL", "WR1", "NFL", {}, n=1), {}, "Fantasy pts")
+    assert bare[0]["Opponent"] == "O5" and bare[0]["Date"] == "Wk 5"

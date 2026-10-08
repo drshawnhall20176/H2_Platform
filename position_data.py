@@ -178,16 +178,22 @@ def parse_scoreboard_events(events: Iterable[Dict], before_date: str, start_date
         if not comps or not ev.get("id"):
             continue
         sides: Dict[str, int] = {}
+        info: Dict[str, Dict] = {}
         for c in comps[0].get("competitors") or []:
             try:
-                sides[c.get("homeAway") or f"x{len(sides)}"] = int((c.get("team") or {}).get("id"))
+                side = c.get("homeAway") or f"x{len(sides)}"
+                sides[side] = int((c.get("team") or {}).get("id"))
             except (TypeError, ValueError):
                 continue
+            info[side] = {"name": (c.get("team") or {}).get("displayName"), "score": c.get("score")}
         ids = list(sides.values())
         if len(sides) != 2 or ids[0] == ids[1]:
             continue
+        h_key, a_key = ("home" if "home" in sides else list(sides)[0]), ("away" if "away" in sides else list(sides)[1])
         out.append({"gid": ev["id"], "date": ev.get("date") or d, "home": sides.get("home", ids[0]),
-                    "away": sides.get("away", ids[1]), "type": stype})
+                    "away": sides.get("away", ids[1]), "type": stype,
+                    "home_name": info[h_key]["name"], "away_name": info[a_key]["name"],
+                    "home_score": info[h_key]["score"], "away_score": info[a_key]["score"]})
     return out
 
 
@@ -266,14 +272,21 @@ def fill_depth_from_usage(depth: Dict[str, List[Dict]], usage: Dict[str, List[Di
 
 
 def build_bundle(sport: str, home: Any, away: Any, pgames: List[Dict], depth: Dict[Any, Dict[str, List[Dict]]],
-                 h2h_games: List[Dict], names: Optional[Dict[Any, str]] = None, notes: Optional[List[str]] = None) -> Dict:
+                 h2h_games: List[Dict], names: Optional[Dict[Any, str]] = None, notes: Optional[List[str]] = None,
+                 meta_games: Optional[List[Dict]] = None) -> Dict:
     """Everything the page renders for one game. `home`/`away` are the keys used in `pgames` (names or
-    ids); `names` maps a key to its display name."""
+    ids); `names` maps a key to its display name (every team in the sample, not just these two — the game
+    log's defense dropdown shows them all). `meta_games` is the schedule rows behind the game log's date /
+    venue / result columns (see PM.build_game_meta)."""
     names = names or {}
     allowed = PM.allowed_by_slot(pgames, sport)
     bundle = {"sport": sport, "metric": PM.METRIC_LABEL[PM.FAMILY_BY_SPORT[sport]],
               "home": home, "away": away, "names": {home: names.get(home, home), away: names.get(away, away)},
-              "notes": list(notes or [])}
+              "notes": list(notes or []),
+              "allowed": allowed, "meta": PM.build_game_meta(meta_games),
+              "all_names": {t: names.get(t, t) for t in allowed}}
+    bundle["all_names"].update(names)                    # opponents who only appear as an offense still get their name in the log
+    bundle["all_names"].update(bundle["names"])
     for side, off, de in (("home_off", home, away), ("away_off", away, home)):
         usage = PM.usage_depth(pgames, off, sport)
         dep = fill_depth_from_usage(depth.get(off) or {}, usage, sport)
@@ -329,7 +342,9 @@ def load_football(sport_key: str, date_str: str, home: str, away: str, use_previ
     else:
         notes.append("College football has no published depth-chart feed here, so depth is the usage ranking "
                      f"over each team's last {PM.RECENT_N} games.")
-    return build_bundle(sport_key, home, away, pgames, depth, _football_h2h_games(sport_key, eng, season), notes=notes)
+    meta_sched = sched if not use_previous_season else _safe(lambda: eng.get_schedule(stats_season), [], notes, "last season's schedule")
+    return build_bundle(sport_key, home, away, pgames, depth, _football_h2h_games(sport_key, eng, season), notes=notes,
+                        meta_games=football_meta_games(sport_key, meta_sched))
 
 
 def _nfl_depths(eng, season: int, week: int, teams: Tuple[str, str], notes: List[str]) -> Dict[str, Dict[str, List[Dict]]]:
@@ -343,6 +358,22 @@ def _nfl_depths(eng, season: int, week: int, teams: Tuple[str, str], notes: List
     for t in teams:
         inj = {i.get("player"): clean_status(i.get("status")) for i in _safe(lambda: eng.get_team_injuries(t, season, week), [], notes, "injuries")}
         out[t] = football_depth_from_chart(latest_depth_chart_rows(df, t), inj)
+    return out
+
+
+def football_meta_games(sport_key: str, sched: Iterable[Dict]) -> List[Dict]:
+    """A football schedule -> the rows PM.build_game_meta wants (order = the week, matching the player-game
+    lines). NFL and CFBD name their date and score fields differently."""
+    out = []
+    for g in sched or []:
+        if g.get("week") is None:
+            continue
+        if sport_key == "NFL":
+            date, hs, as_ = g.get("game_date"), g.get("home_score"), g.get("away_score")
+        else:
+            date, hs, as_ = g.get("start_date"), g.get("home_points"), g.get("away_points")
+        out.append({"order": int(g["week"]), "date": date, "home": g.get("home_team"), "away": g.get("away_team"),
+                    "home_score": hs, "away_score": as_})
     return out
 
 
@@ -408,11 +439,19 @@ def load_basketball(sport_key: str, date_str: str, home_id: int, away_id: int, h
         if src_note:
             notes.append(src_note)
     else:
+        team_names = {home_id: home_name, away_id: away_name}
         for tid in (home_id, away_id):
             for g in _safe(lambda: eng.get_team_recent_game_ids(tid, date_str, 10), [], notes, "recent games"):
                 if g.get("season_type") == 1:
                     continue
-                games.setdefault(g["gameId"], {"date": g.get("date") or "", "home": tid, "away": g.get("opp_id")})
+                at_home = g.get("home_away") != "away"
+                opp_id, opp_name = _int_or(g.get("opp_id")), g.get("opp_name")
+                mine, theirs = g.get("score"), g.get("opp_score")
+                games.setdefault(g["gameId"], {
+                    "date": g.get("date") or "",
+                    "home": tid if at_home else opp_id, "away": opp_id if at_home else tid,
+                    "home_name": team_names[tid] if at_home else opp_name, "away_name": opp_name if at_home else team_names[tid],
+                    "home_score": mine if at_home else theirs, "away_score": theirs if at_home else mine})
         notes.append("College basketball has 360 teams, so only these two teams' own recent games are used: "
                      "allowed-per-game by position is shown, with no league rank.")
     lines = _fetch_lines(eng, list(games))
@@ -428,12 +467,25 @@ def load_basketball(sport_key: str, date_str: str, home_id: int, away_id: int, h
         depth[tid] = {slot: [dict(u, status=inj.get(u["name"]), note=f"{u['avg_min']:.0f} min") for u in lst]
                       for slot, lst in usage.items()}
     h2h = basketball_h2h_games(eng, home_id, away_id, date_str, home_name, away_name)
-    bundle = build_bundle(sport_key, home_id, away_id, pgames, depth, [], names={home_id: home_name, away_id: away_name},
-                          notes=notes)
+    names = {home_id: home_name, away_id: away_name}
+    for g in games.values():
+        for side in ("home", "away"):
+            if g.get(side) is not None and g.get(f"{side}_name"):
+                names.setdefault(g[side], g[f"{side}_name"])
+    meta_games = [{"order": g.get("date"), "date": g.get("date"), "home": g.get("home"), "away": g.get("away"),
+                   "home_score": g.get("home_score"), "away_score": g.get("away_score")} for g in games.values()]
+    bundle = build_bundle(sport_key, home_id, away_id, pgames, depth, [], names=names, notes=notes, meta_games=meta_games)
     meetings = PM.h2h_meetings(h2h, home_name, away_name)
     summ = PM.h2h_summary(meetings, home_name, away_name)
     bundle["h2h"] = {"meetings": meetings, "summary": summ, "sentence": PM.h2h_sentence(summ, home_name, away_name)}
     return bundle
+
+
+def _int_or(x):
+    try:
+        return int(x)
+    except (TypeError, ValueError):
+        return x
 
 
 def _injury_map(eng, abbr: Optional[str]) -> Dict[str, str]:

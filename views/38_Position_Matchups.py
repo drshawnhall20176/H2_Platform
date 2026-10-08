@@ -142,6 +142,70 @@ def render_side(side, off_name, def_name):
     st.dataframe(df, hide_index=True, width="stretch")
 
 
+def render_game_log():
+    """Pick a position and a defense — see that position's line in each of the defense's recent games."""
+    all_names = bundle.get("all_names") or names
+    allowed = bundle.get("allowed") or {}
+    st.markdown("#### 📋 Game log — a position against one defense")
+    options = PM.defense_options(allowed, bundle["home"], bundle["away"], all_names, SPORT_KEY)
+    if not options:
+        st.caption("No defense has games in the sample yet, so there is no game log to show.")
+        return
+    slots = PM.SLOTS_BY_SPORT[SPORT_KEY]
+    # (No widget keys on the two pickers: their identity follows their options, so a new game's defense list or
+    # another sport's slots gets a fresh default instead of a stale choice that isn't on offer.)
+    g1, g2, g3, g4 = st.columns([2, 3, 2, 2])
+    with g1:
+        slot = st.selectbox("Position", slots, format_func=lambda x: f"{x} — {PM.SLOT_LABEL[x]}")
+    with g2:
+        pair = {bundle["home"], bundle["away"]}
+        defense = st.selectbox("Defense", options, index=0,
+                               format_func=lambda t: f"{all_names.get(t, t)}" + ("  ★ this game" if t in pair else ""))
+    with g3:
+        size_label = st.selectbox("Games", [lbl for lbl, _ in PM.LOG_SIZES], index=1, key="pm_log_n")
+    with g4:
+        venue = st.radio("Where the defense played", list(PM.LOG_VENUES), horizontal=True, key="pm_log_venue")
+    n = dict(PM.LOG_SIZES)[size_label]
+    log = PM.slot_game_log(allowed, defense, slot, SPORT_KEY, bundle.get("meta"), n=n, venue=venue)
+    def_name = all_names.get(defense, defense)
+    st.markdown(f"**{slot}s vs {def_name} defense**")
+    if not log["rows"]:
+        st.info(f"No {venue.lower() if venue != 'All' else ''} games for {def_name} in the sample"
+                f"{' (venue unknown for some games)' if venue != 'All' else ''}. Try All, or a longer window.", icon="🔎")
+        return
+    metric_name = PM.METRIC_SHORT[FAMILY]
+    table = pd.DataFrame(PM.log_table(log, all_names, metric_name))
+    num_cols = [lbl for _, lbl in log["stat_cols"]] + [metric_name]
+    styled = (table.style.format({c: "{:.1f}" for c in num_cols})
+              .apply(lambda col: PM.heat_css(list(col)), subset=num_cols))
+    st.dataframe(styled, hide_index=True, width="stretch")
+    avg = log["avg"]
+    avg_row = {"Average": f"{log['games']} game(s)"}
+    avg_row.update({lbl: f"{avg['stats'][key]:.1f}" for key, lbl in log["stat_cols"]})
+    avg_row[metric_name] = f"{avg['pts']:.1f}"
+    st.dataframe(pd.DataFrame([avg_row]), hide_index=True, width="stretch")
+
+    h1, h2, h3 = st.columns([2, 2, 3])
+    stat_choices = {lbl: key for key, lbl in log["stat_cols"]}
+    stat_choices[metric_name] = "pts"
+    with h1:
+        hit_label = st.selectbox("Hit rate on", list(stat_choices), key="pm_hit_stat")
+    key = stat_choices[hit_label]
+    mean = avg["pts"] if key == "pts" else avg["stats"][key]
+    with h2:
+        line = st.number_input("Line", min_value=0.0, step=0.5, value=round(mean * 2) / 2,
+                               key=f"pm_hit_line_{defense}_{slot}_{key}")
+    hr = PM.hit_rate(log["rows"], key, line)
+    with h3:
+        st.metric(f"Over {line:g} {hit_label}", f"{hr['hits']}/{hr['games']}  ({hr['pct']:.0f}%)")
+    st.caption("Colours compare each game with that column's average (green = more than average). The window is "
+               "applied after the Home / Away choice. A game where the opponent had nobody at the slot counts as zero, "
+               "the same way the league rank treats it. "
+               + ("Basketball rows are the whole position group's totals; the Player column lists its top scorers."
+                  if FAMILY == "basketball" else
+                  "Player is whoever held the slot that game by usage (carries for backs, targets for receivers)."))
+
+
 with tab_pos:
     st.caption("1 = the defense that allows the MOST to that slot (softest). Soft = top third, Tough = bottom third. "
                + ("A slot is the player used most there that game (running backs by carries, receivers by targets), "
@@ -150,6 +214,8 @@ with tab_pos:
     render_side(bundle["away_off"], away_name, home_name)
     st.divider()
     render_side(bundle["home_off"], home_name, away_name)
+    st.divider()
+    render_game_log()
 
 with tab_h2h:
     h = bundle["h2h"]

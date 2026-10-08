@@ -34,6 +34,7 @@ FAMILY_BY_SPORT: Dict[str, str] = {"NFL": "football", "NCAAF": "football", "NBA"
 SUPPORTED_SPORTS: Tuple[str, ...] = tuple(SLOTS_BY_SPORT)
 
 METRIC_LABEL = {"football": "PPR-style fantasy points", "basketball": "points + rebounds + assists"}
+METRIC_SHORT = {"football": "Fantasy pts", "basketball": "PRA"}
 SLOT_LABEL = {"QB": "Quarterback", "RB1": "Running back 1", "RB2": "Running back 2", "WR1": "Wide receiver 1",
               "WR2": "Wide receiver 2", "WR3": "Wide receiver 3", "TE1": "Tight end 1",
               "G": "Guards", "F": "Forwards", "C": "Centers"}
@@ -189,9 +190,12 @@ def allowed_by_slot(pgames: Iterable[Dict], sport: str) -> Dict[str, List[Dict]]
         by_game.setdefault((p.get("game"), p["team"], p["opp"]), []).append(p)
     out: Dict[str, List[Dict]] = {}
     for (gid, offense, defense), players in by_game.items():
-        slots = {slot: _sum_stats(lst) for slot, lst in assign(players).items()}
+        assigned = assign(players)
+        slots = {slot: _sum_stats(lst) for slot, lst in assigned.items()}
+        who = {slot: [p.get("name") for p in sorted(lst, key=lambda p: -metric_value(sport, p.get("stats") or {})) if p.get("name")]
+               for slot, lst in assigned.items()}
         order = max((p.get("order") for p in players if p.get("order") is not None), default=None)
-        out.setdefault(defense, []).append({"game": gid, "order": order, "offense": offense, "slots": slots})
+        out.setdefault(defense, []).append({"game": gid, "order": order, "offense": offense, "slots": slots, "who": who})
     for lst in out.values():
         lst.sort(key=lambda g: (g["order"] is None, g["order"]), reverse=True)     # newest first
     return out
@@ -412,6 +416,139 @@ def h2h_sentence(summary: Dict, team_a: str, team_b: str) -> str:
     margin = f"; {team_a} average margin {m:+.1f}" if m is not None else ""
     total = f"; average total {summary['avg_total']:.1f}" if summary["avg_total"] is not None else ""
     return f"{who} over {n} meeting(s){margin}{total}."
+
+
+# --------------------------------------------------------------------------- slot game log (one position vs one defense)
+LOG_SIZES: Tuple[Tuple[str, Optional[int]], ...] = (("Last 5", 5), ("Last 10", 10), ("Last 16", 16), ("All sampled", None))
+LOG_VENUES: Tuple[str, ...] = ("All", "Home", "Away")
+
+
+def build_game_meta(games: Iterable[Dict]) -> Dict[Tuple, Dict]:
+    """Schedule rows -> {(order, defense, offense): {"date", "venue", "def_score", "off_score"}} so a game in the
+    log can say WHEN it was, where the DEFENSE played it and who won. games: [{"order","date","home","away",
+    "home_score","away_score"}]; "order" is the same value the player-game lines carry (the week in football,
+    the game's date stamp in basketball). Both directions are indexed; unreadable scores become None."""
+    def score(x):
+        try:
+            v = float(x)
+        except (TypeError, ValueError):
+            return None
+        return None if math.isnan(v) or math.isinf(v) else v
+
+    meta: Dict[Tuple, Dict] = {}
+    for g in games or []:
+        home, away = g.get("home"), g.get("away")
+        if home is None or away is None or home == away or g.get("order") is None:
+            continue
+        hs, as_ = score(g.get("home_score")), score(g.get("away_score"))
+        date = str(g.get("date") or "")[:10]
+        meta[(g["order"], home, away)] = {"date": date, "venue": "Home", "def_score": hs, "off_score": as_}
+        meta[(g["order"], away, home)] = {"date": date, "venue": "Away", "def_score": as_, "off_score": hs}
+    return meta
+
+
+def defense_options(allowed: Dict, home, away, names: Dict, sport: str) -> List:
+    """Defenses to offer in the log's dropdown: the game's two teams first (home, then away), then every other
+    defense with games, A-Z. NCAAMB only samples these two teams' own games, so it offers just the two."""
+    pair = [t for t in (home, away) if t in allowed]
+    if sport == "NCAAMB":
+        return pair
+    rest = sorted((t for t in allowed if t not in pair), key=lambda t: str(names.get(t, t)).lower())
+    return pair + rest
+
+
+def _result(def_score, off_score) -> Optional[str]:
+    if def_score is None or off_score is None:
+        return None
+    return "W" if def_score > off_score else "L" if def_score < off_score else "T"
+
+
+def slot_game_log(allowed: Dict[str, List[Dict]], defense, slot: str, sport: str, meta: Optional[Dict] = None,
+                  n: Optional[int] = 10, venue: str = "All") -> Dict:
+    """What one POSITION did in each of one DEFENSE's recent games — the "QB1s vs Dallas Defense" game log.
+
+    Newest first. `venue` ("Home"/"Away", from the DEFENSE's side) is applied before `n`, so "Home / Last 5" is
+    five home games. A game where the opponent had nobody at the slot is kept as a row of zeros (a real "allowed
+    nothing") because the league rank counts it the same way. Returns {"rows", "avg", "stat_cols", "games"}; the
+    average is None for an empty log."""
+    meta = meta or {}
+    cols = tuple(SLOT_STATS.get(slot, ()))
+    rows: List[Dict] = []
+    for g in (allowed or {}).get(defense, []):
+        m = meta.get((g.get("order"), defense, g.get("offense"))) or {}
+        if venue in ("Home", "Away") and m.get("venue") != venue:
+            continue
+        stats = g["slots"].get(slot) or {}
+        rows.append({"order": g.get("order"), "date": m.get("date") or "", "opp": g.get("offense"), "venue": m.get("venue"),
+                     "result": _result(m.get("def_score"), m.get("off_score")),
+                     "score": (f"{m['def_score']:.0f}-{m['off_score']:.0f}"
+                               if m.get("def_score") is not None and m.get("off_score") is not None else ""),
+                     "who": ", ".join((g.get("who") or {}).get(slot, [])[:3]),
+                     "stats": {k: _num(stats.get(k)) for k, _ in cols}, "pts": metric_value(sport, stats)})
+    if n is not None:
+        rows = rows[:n]
+    avg = None
+    if rows:
+        avg = {"stats": {k: sum(r["stats"][k] for r in rows) / len(rows) for k, _ in cols},
+               "pts": sum(r["pts"] for r in rows) / len(rows)}
+    return {"rows": rows, "avg": avg, "stat_cols": cols, "games": len(rows)}
+
+
+def hit_rate(rows: Sequence[Dict], key: str, line: float) -> Optional[Dict]:
+    """How often the slot went OVER `line` on `key` ("pts" = the headline metric, else a stat key) across the
+    log's rows. None for an empty log. Exactly on the line is a push, not a hit."""
+    if not rows:
+        return None
+    vals = [(r["pts"] if key == "pts" else r["stats"].get(key, 0.0)) for r in rows]
+    hits = sum(1 for v in vals if v > line)
+    return {"hits": hits, "games": len(vals), "pct": hits / len(vals) * 100.0}
+
+
+def heat_css(values: Sequence[Optional[float]]) -> List[str]:
+    """Per-cell CSS for one column of the game log: green above the column's average, red below, deeper the
+    further out (relative to the column's own best/worst). Blank for a flat column, a missing value or a cell
+    exactly on the average. Translucent so it reads on a light or a dark theme."""
+    nums = [v for v in values if v is not None]
+    if not nums:
+        return ["" for _ in values]
+    mean = sum(nums) / len(nums)
+    hi, lo = max(nums), min(nums)
+    out = []
+    for v in values:
+        if v is None or hi - lo < 1e-9 or abs(v - mean) < 1e-9:
+            out.append("")
+        elif v > mean:
+            out.append(f"background-color: rgba(34, 170, 85, {0.12 + 0.43 * (v - mean) / (hi - mean):.2f})")
+        else:
+            out.append(f"background-color: rgba(214, 68, 68, {0.12 + 0.43 * (mean - v) / (mean - lo):.2f})")
+    return out
+
+
+def when_label(order, date: str) -> str:
+    """'Wk 5 · 10/04/26' for a football game, '10/04/26' for a dated basketball game, 'Wk 5' with no date."""
+    d = str(date or "")[:10]
+    pretty = f"{d[5:7]}/{d[8:10]}/{d[2:4]}" if len(d) == 10 and d[4] == "-" and d[7] == "-" else ""
+    if isinstance(order, int):
+        return f"Wk {order}" + (f" · {pretty}" if pretty else "")
+    if not pretty:
+        o = str(order or "")[:10]
+        return f"{o[5:7]}/{o[8:10]}/{o[2:4]}" if len(o) == 10 and o[4] == "-" else ""
+    return pretty
+
+
+def log_table(log: Dict, names: Dict, metric_name: str) -> List[Dict]:
+    """The game log -> flat rows for the table: text for date / opponent / result, NUMBERS for the stat columns
+    (so they can be coloured and sorted). Column order follows the slot's stat list, then the headline metric."""
+    out = []
+    for r in log["rows"]:
+        row = {"Date": when_label(r["order"], r["date"]),
+               "Opponent": f"{'at' if r['venue'] == 'Away' else 'vs' if r['venue'] else ''} {names.get(r['opp'], r['opp'])}".strip(),
+               "W/L": r["result"] or "—", "Score": r["score"] or "—", "Player": r["who"] or "—"}
+        for key, label in log["stat_cols"]:
+            row[label] = r["stats"][key]
+        row[metric_name] = r["pts"]
+        out.append(row)
+    return out
 
 
 # --------------------------------------------------------------------------- display helpers (pure)
