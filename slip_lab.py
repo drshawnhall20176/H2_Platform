@@ -221,6 +221,42 @@ ALL_SLOTS = "All slate"
 ALL_GAMES = "All games in this slot"
 
 
+def lines_problem(info: Optional[Dict], fetch_error: Optional[str], label: str, date_str: str, n_offers: int,
+                  ) -> Optional[Tuple[str, str]]:
+    """Why a slate has no (or only partial) real book lines, as (level, message) — level "warning" when nothing came
+    back at all, "caption" when only some games came back empty; None when there is nothing to say.
+
+    `info` is odds_api.fetch_slate_props's info (or {"listing_error": ...}) and `fetch_error` the exception text when
+    the whole fetch failed. Games are named as the Odds API names them ("Tampa Bay Buccaneers @ Dallas Cowboys")."""
+    info = info or {}
+    err = fetch_error or info.get("listing_error")
+    if err:
+        return "warning", (f"Couldn't get real book lines for {label} on {date_str}: {err}. The legs below use the model's own "
+                           "numbers with no book price — try Refresh, or check the Odds API key and quota.")
+    errors = list(info.get("errors") or [])
+    empty = list(info.get("no_offer_events") or [])
+    if n_offers == 0:
+        if errors:
+            return "warning", (f"The Odds API refused the props request for {', '.join(e['game'] for e in errors[:3])}: "
+                               f"{errors[0]['error']}. No book prices are loaded, so nothing can be ranked yet.")
+        if info and info.get("events_total") == 0:
+            listed = info.get("events_listed")
+            return "warning", (f"The Odds API lists no {label} games on {date_str}" +
+                               (f" ({listed} upcoming game(s) on other dates)" if listed else "") +
+                               ", so there are no book prices to rank. Pick the date the games are listed under.")
+        if empty:
+            return "warning", (f"The Odds API listed {', '.join(empty[:3])} but returned no player props for it — books haven't "
+                               "posted them yet, or pulled them. Try again closer to kickoff.")
+        return "warning", (f"No real book lines came back for {label} on {date_str}, so there is nothing priced to rank. "
+                           "Try Refresh, or check the Odds API quota.")
+    bits = []
+    if errors:
+        bits.append("refused: " + "; ".join(f"{e['game']} ({e['error']})" for e in errors[:3]))
+    if empty:
+        bits.append("no props posted for: " + ", ".join(empty[:3]))
+    return ("caption", "Some games have no book lines — " + " · ".join(bits) + ".") if bits else None
+
+
 def leg_slot(leg: Dict) -> str:
     """Afternoon / Evening / Late / TBD, from the leg's real start time (sports.slot_of)."""
     import sports

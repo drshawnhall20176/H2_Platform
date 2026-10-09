@@ -1110,3 +1110,29 @@ def test_book_menu_fetch_uses_each_events_own_feed():
     BM.fetch_menu("k", "basketball_nba", ["pre1", "reg1"], ["h2h"], "draftkings", get=fake_get,
                   feed_by_event={"pre1": "basketball_nba_preseason"})
     assert sorted(urls) == ["sports/basketball_nba/events/reg1/odds", "sports/basketball_nba_preseason/events/pre1/odds"]
+
+
+def test_fetch_slate_props_reports_which_games_errored_and_which_came_back_empty():
+    # A game whose props request fails must be NAMED in info (quota, a rejected market, ...) — it used to be
+    # skipped silently, which left Slip Lab showing nothing with no reason.
+    events = [{"id": "a", "commence_time": "2026-10-09T00:15:00Z", "away_team": "Tampa Bay Buccaneers", "home_team": "Dallas Cowboys"},
+              {"id": "b", "commence_time": "2026-10-09T01:00:00Z", "away_team": "X", "home_team": "Y"},
+              {"id": "c", "commence_time": "2026-10-12T17:00:00Z", "away_team": "P", "home_team": "Q"}]
+
+    def fake_events(api_key, sport=O.SPORT):
+        return events
+
+    def fake_props(event_id, api_key, markets, regions="us", sport=O.SPORT):
+        if event_id == "a":
+            raise O.OddsAPIError("429 — out of quota for this period.")
+        return {"bookmakers": []}, {"remaining": "7"}
+
+    orig_events, orig_props = O.fetch_events, O.fetch_event_props
+    O.fetch_events, O.fetch_event_props = fake_events, fake_props
+    try:
+        offers, info = O.fetch_slate_props("2026-10-08", "k", ["player_pass_yds"], sport="americanfootball_nfl")
+    finally:
+        O.fetch_events, O.fetch_event_props = orig_events, orig_props
+    assert offers == [] and info["events_total"] == 2 and info["events_fetched"] == 1 and info["events_listed"] == 3
+    assert info["errors"] == [{"game": "Tampa Bay Buccaneers @ Dallas Cowboys", "error": "429 — out of quota for this period."}]
+    assert info["no_offer_events"] == ["X @ Y"]

@@ -123,6 +123,7 @@ st.caption(f"**{book_label}**: {book_kind}.")
 # API carries it, DraftKings' board for a manual (Bet365) selection.
 board_book = O.DEFAULT_BOOK if is_manual else book
 
+fetch_error = None
 with st.spinner(f"Loading {_active.label} board and lines..."):
     try:
         if SPORT_KEY == "MLB":
@@ -134,8 +135,9 @@ with st.spinner(f"Loading {_active.label} board and lines..."):
             if API_KEY and _active.markets:
                 try:
                     offers = BBD.fetch_generic_offers(SPORT_KEY, date_str, API_KEY)
-                except Exception:
+                except Exception as exc:                      # noqa: BLE001 — shown below instead of silently empty
                     offers = []
+                    fetch_error = f"{type(exc).__name__}: {exc}"
     except Exception:
         st.warning(f"No slate data available for {_active.label} on {date_str}. Normal during the "
                    "off-season — try a date with games, or switch sports.")
@@ -159,6 +161,11 @@ else:
                    "price your book shows.")
     elif live_books:
         st.caption("Lines posted today by: " + ", ".join(O.book_label(b) for b in live_books))
+    if SPORT_KEY != "MLB" and not is_manual:
+        _problem = SL.lines_problem(BBD.generic_fetch_info(SPORT_KEY, date_str), fetch_error, _active.label, date_str,
+                                    len(offers))
+        if _problem:
+            (st.warning if _problem[0] == "warning" else st.caption)(("⚠️ " if _problem[0] == "warning" else "ℹ️ ") + _problem[1])
 
 pool = SL.build_leg_pool(plays, offers, book, _active.market_map, P.normalize_name,
                          single_line_markets=_active.single_line_markets)

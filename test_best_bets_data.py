@@ -13,6 +13,7 @@ No network required.
 """
 
 import inspect
+import pytest
 import os
 import tempfile
 from unittest.mock import patch
@@ -782,3 +783,20 @@ if __name__ == "__main__":
         except Exception as e:  # noqa: BLE001
             print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
     print(f"\n{passed}/{len(tests)} tests passed")
+
+
+def test_fetch_generic_offers_records_what_the_fetch_found_out_for_the_page(monkeypatch):
+    import streamlit as st
+    import odds_api as O
+    st.cache_data.clear()
+    info = {"events_total": 1, "events_fetched": 1, "no_offer_events": ["A @ B"], "errors": [], "events_listed": 4}
+    monkeypatch.setattr(O, "fetch_slate_props", lambda *a, **k: ([{"x": 1}], info))
+    assert BBD.fetch_generic_offers("NFL", "2026-10-08", "KEY") == [{"x": 1}]
+    assert BBD.generic_fetch_info("NFL", "2026-10-08") == info and BBD.generic_fetch_info("NFL", "2030-01-01") is None
+
+    def boom(*a, **k):
+        raise O.OddsAPIError("401 Unauthorized — check your API key.")
+    monkeypatch.setattr(O, "fetch_slate_props", boom)
+    with pytest.raises(O.OddsAPIError):
+        BBD.fetch_generic_offers("NFL", "2026-10-09", "KEY")
+    assert BBD.generic_fetch_info("NFL", "2026-10-09") == {"listing_error": "401 Unauthorized — check your API key."}

@@ -1086,10 +1086,14 @@ def fetch_slate_props(date_str: str, api_key: str, markets: List[str], sport: st
     remaining = None
     fetched = 0
     no_offer_events: List[str] = []
+    errors: List[Dict] = []
     for e in todays:
         try:
             ej, hdr = fetch_event_props(e["id"], api_key, markets, sport=feed_for(e, sport))
-        except OddsAPIError:
+        except OddsAPIError as exc:
+            # Kept (not just skipped) so a page can say WHY a game has no lines: quota used up, a rejected
+            # market, a network blip — instead of silently showing nothing.
+            errors.append({"game": f"{e.get('away_team', '?')} @ {e.get('home_team', '?')}", "error": str(exc)[:200]})
             continue
         remaining = hdr.get("remaining") or remaining
         event_offers = parse_event_offers(ej, supported_markets=markets)
@@ -1107,7 +1111,7 @@ def fetch_slate_props(date_str: str, api_key: str, markets: List[str], sport: st
         fetched += 1
     return offers, {"events_total": len(todays), "events_fetched": fetched,
                     "remaining": remaining, "no_offer_events": no_offer_events,
-                    "todays_events": todays_summary}
+                    "todays_events": todays_summary, "errors": errors, "events_listed": len(events)}
 
 
 # ---- Kelly stake sizing ----------------------------------------------------

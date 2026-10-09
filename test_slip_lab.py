@@ -685,3 +685,31 @@ def test_game_weather_lines_skips_a_game_with_no_weather_info():
             {"game": "NO GAME"}]                                             # no play attached at all
     assert SL.game_weather_lines(legs) == \
         ["TB @ NYY — 58°F, 9 mph in from CF — a wind-driven estimate, verify before leaning on it"]
+
+
+# ------------------------------------------------------------------ why there are no lines
+def test_lines_problem_names_a_failed_fetch_and_the_listing_error():
+    lvl, msg = SL.lines_problem(None, "OddsAPIError: 429 — out of quota for this period.", "NFL — Football", "2026-10-08", 0)
+    assert lvl == "warning" and "429" in msg and "2026-10-08" in msg
+    lvl, msg = SL.lines_problem({"listing_error": "401 Unauthorized"}, None, "NFL", "2026-10-08", 0)
+    assert lvl == "warning" and "401 Unauthorized" in msg
+
+
+def test_lines_problem_explains_each_way_a_game_ends_up_without_lines():
+    base = {"events_total": 1, "events_fetched": 1, "no_offer_events": [], "errors": [], "events_listed": 14}
+    lvl, msg = SL.lines_problem(dict(base, errors=[{"game": "Tampa Bay Buccaneers @ Dallas Cowboys", "error": "429 — out of quota"}]),
+                                None, "NFL", "2026-10-08", 0)
+    assert lvl == "warning" and "refused" in msg and "Tampa Bay Buccaneers @ Dallas Cowboys" in msg and "429" in msg
+    lvl, msg = SL.lines_problem(dict(base, events_total=0), None, "NFL", "2026-10-08", 0)
+    assert "lists no NFL games on 2026-10-08" in msg and "14 upcoming" in msg
+    lvl, msg = SL.lines_problem(dict(base, no_offer_events=["Tampa Bay Buccaneers @ Dallas Cowboys"]), None, "NFL", "2026-10-08", 0)
+    assert "returned no player props" in msg and "Tampa Bay" in msg
+    lvl, msg = SL.lines_problem({}, None, "NFL", "2026-10-08", 0)
+    assert lvl == "warning" and "No real book lines came back" in msg
+
+
+def test_lines_problem_is_quiet_when_everything_came_back_and_a_caption_when_only_some_did():
+    ok = {"events_total": 2, "no_offer_events": [], "errors": [], "events_listed": 2}
+    assert SL.lines_problem(ok, None, "NFL", "2026-10-08", 40) is None and SL.lines_problem(None, None, "NFL", "d", 40) is None
+    lvl, msg = SL.lines_problem(dict(ok, no_offer_events=["A @ B"], errors=[{"game": "C @ D", "error": "HTTP 422"}]), None, "NFL", "d", 40)
+    assert lvl == "caption" and "A @ B" in msg and "C @ D" in msg and "422" in msg

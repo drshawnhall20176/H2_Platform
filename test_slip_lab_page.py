@@ -144,6 +144,34 @@ def test_book_with_no_lines_warns_but_does_not_crash(patched, monkeypatch):
     assert not at.exception
 
 
+def test_no_lines_at_all_says_why_instead_of_showing_nothing(patched, monkeypatch):
+    monkeypatch.setattr(BBD, "fetch_generic_offers", lambda *a, **k: [])
+    monkeypatch.setattr(BBD, "generic_fetch_info", lambda s, d: {"events_total": 1, "events_fetched": 1, "no_offer_events": [],
+                        "errors": [{"game": "BOS @ NYK", "error": "429 — out of quota for this period."}], "events_listed": 3})
+    at = _app("DraftKings", legs=False)
+    at.run()
+    assert not at.exception
+    assert any("refused the props request" in w.value and "BOS @ NYK" in w.value and "429" in w.value for w in at.warning)
+
+
+def test_a_failed_fetch_is_reported_with_its_error(patched, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("socket closed")
+    monkeypatch.setattr(BBD, "fetch_generic_offers", boom)
+    at = _app("DraftKings", legs=False)
+    at.run()
+    assert not at.exception
+    assert any("Couldn't get real book lines" in w.value and "socket closed" in w.value for w in at.warning)
+
+
+def test_lines_present_shows_no_problem_message(patched, monkeypatch):
+    monkeypatch.setattr(BBD, "generic_fetch_info", lambda s, d: {"events_total": 2, "no_offer_events": [], "errors": [], "events_listed": 2})
+    at = _app("DraftKings", legs=False)
+    at.run()
+    assert not at.exception
+    assert not any("book lines" in w.value for w in at.warning)
+
+
 def test_missing_api_key_still_renders_with_a_warning(patched, monkeypatch):
     monkeypatch.setattr(BBD, "get_odds_api_key", lambda: None)
     at = _app(legs=False)

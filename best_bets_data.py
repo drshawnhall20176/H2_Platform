@@ -637,6 +637,16 @@ def filter_by_split_situation(plays: List[Dict],
     return filtered
 
 
+# What the last real fetch for (sport, date) found out — events listed, games that came back empty, per-game errors,
+# or the listing error itself — so Slip Lab can say WHY there are no lines instead of showing nothing. Written by
+# fetch_generic_offers (a cache hit leaves the earlier entry in place, which is still the right answer).
+_FETCH_INFO: Dict[Tuple[str, str], Dict] = {}
+
+
+def generic_fetch_info(sport_key: str, date_str: str) -> Optional[Dict]:
+    return _FETCH_INFO.get((sport_key, date_str))
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_generic_offers(sport_key: str, date_str: str, api_key: str) -> List[Dict]:
     """The ONE real-offers fetch for every non-MLB sport (MLB has fetch_mlb_real_lines): cached, so
@@ -644,8 +654,12 @@ def fetch_generic_offers(sport_key: str, date_str: str, api_key: str) -> List[Di
     plays built from them — share a single Odds API spend instead of each paying for the same
     slate. Raises on failure (callers already have their own fail-soft handling)."""
     sport = sports.get(sport_key)
-    offers, _ = O.fetch_slate_props(date_str, api_key, list(sport.markets),
-                                    sport=sport.odds_sport_key)
+    try:
+        offers, info = O.fetch_slate_props(date_str, api_key, list(sport.markets), sport=sport.odds_sport_key)
+    except Exception as exc:                                    # noqa: BLE001 — recorded for the page, then raised as before
+        _FETCH_INFO[(sport_key, date_str)] = {"listing_error": str(exc)[:200]}
+        raise
+    _FETCH_INFO[(sport_key, date_str)] = info
     return offers
 
 
