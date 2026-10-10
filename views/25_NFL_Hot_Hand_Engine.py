@@ -105,6 +105,7 @@ with st.spinner("Loading..."):
 if not all_rows:
     st.info("No players on the slate for this date — try a different date.", icon="🕐")
     st.stop()
+all_rows = C.scope_rows("NFL", "NFL", all_rows, date_str, key="hh_scope")
 
 slots_present = sorted({r["_slot"] for r in all_rows}, key=lambda s: SLOT_ORDER.get(s, 9))
 c_slot, c_game = st.columns(2)
@@ -118,7 +119,7 @@ with c_game:
     game_pick = st.selectbox("Game", ["All games in this slot"] + games_present, key="hh_game")
 final_rows = slot_rows if game_pick == "All games in this slot" else [r for r in slot_rows if r["GameLabel"] == game_pick]
 
-n_games = len(meta)
+n_games = len({r["GameLabel"] for r in all_rows})
 
 with st.spinner("Building the matchup-adjusted board..."):
     board = build_hh_board(final_rows, date_str)
@@ -160,7 +161,7 @@ if min_factor == "🟢 Favorable only (1.08×+)":
 elif min_factor == "🔴 Tough only (0.92×-)":
     view = [b for b in view if b["Matchup Factor"] <= 0.92]
 
-st.caption(f"{n_games} game(s) this week · {len(view)} of {len(board)} player-market rows shown")
+st.caption(f"{n_games} game(s) shown · {len(view)} of {len(board)} player-market rows shown")
 
 st.info(
     "**What 'Opp Allows' actually measures — read this before the table:** each opponent's "

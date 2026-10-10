@@ -145,6 +145,7 @@ with st.spinner(f"Loading {_active.label} board and lines..."):
 offers = offers or []
 
 plays = [pl for pl in (plays or []) if sports.has_started(pl.get("GameDate")) is not True]
+plays, meta = C.scope_plays(SPORT_KEY, _active.label, plays, meta, date_str, key="slip_lab_scope")
 if not plays:
     st.info(f"No {_active.label} plays on the board for {date_str} (or every game has started). "
             "Try another date, hit Refresh, or switch sports.", icon="📅")
@@ -408,7 +409,8 @@ with filter_box:
     h1, h2 = st.columns(2)
     with h1:
         slot_pick = st.selectbox("Time slot", slot_options, key="slip_lab_slot")
-    game_opts_f = SL.game_choices(SL.filter_slot_game(all_filter_legs, slot_pick, SL.ALL_GAMES, dh), dh)
+    game_opts_f = SL.game_choices(SL.filter_slot_game(all_filter_legs, slot_pick, SL.ALL_GAMES, dh), dh,
+                                with_day=C.scope_is_week(SPORT_KEY))
     game_label = dict(game_opts_f)
     game_options = [SL.ALL_GAMES] + [k for k, _ in game_opts_f]
     if st.session_state.get("slip_lab_game") not in game_options:

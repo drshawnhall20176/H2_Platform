@@ -2601,3 +2601,30 @@ def test_every_nba_betting_page_shows_the_season_notice():
     for name in pages:
         src = (views / name).read_text()
         assert "C.season_notice(_active.key, date_str)" in src, name
+
+
+# ------------------------------------------------------------------ Selected date vs This week
+def test_game_on_date_uses_the_eastern_calendar_day_not_the_utc_one():
+    assert S.game_on_date("2026-10-09T00:15:00Z", "2026-10-08") is True          # 8:15 PM ET Thursday is Friday in UTC
+    assert S.game_on_date("2026-10-09T00:15:00Z", "2026-10-09") is False
+    assert S.game_on_date("2026-10-10T16:00:00Z", "2026-10-10") is True
+    assert S.game_on_date("2026-10-10", "2026-10-10") is True and S.game_on_date("2026-10-10", "2026-10-11") is False
+    assert S.game_on_date(None, "2026-10-10") is None and S.game_on_date("", "d") is None
+    assert S.game_on_date("2026-1", "2026-10-10") is None and S.game_on_date("garbage-not-a-date", "x") is None
+
+
+def test_scope_filter_keeps_the_picked_dates_games_or_the_whole_week():
+    games = [{"id": 1, "t": "2026-10-06T00:00:00Z"}, {"id": 2, "t": "2026-10-10T16:00:00Z"}, {"id": 3, "t": "2026-10-11T02:00:00Z"},
+             {"id": 4, "t": None}, {"id": 5, "t": "2026-10-11T17:00:00Z"}]
+    day = S.scope_filter(games, lambda g: g["t"], "2026-10-10", S.SCOPE_DATE)
+    assert [g["id"] for g in day] == [2, 3, 4]                                       # 3 = 10 PM ET Saturday; unknown date stays
+    assert [g["id"] for g in S.scope_filter(games, lambda g: g["t"], "2026-10-10", S.SCOPE_WEEK)] == [1, 2, 3, 4, 5]
+    assert S.scope_filter(None, lambda g: g, "d", S.SCOPE_DATE) == []
+    assert S.in_scope("2026-10-12T00:00:00Z", "2026-10-10", S.SCOPE_DATE) is False
+    assert S.WEEKLY_SLATE_SPORTS == ("NFL", "NCAAF") and S.SCOPES == ("Selected date", "This week")
+
+
+def test_kickoff_text_adds_the_weekday_only_for_the_week_list():
+    dt = S.game_dt("2026-10-10T19:30:00Z")
+    assert S.kickoff_text(dt) == "3:30 PM ET" and S.kickoff_text(dt, with_day=True) == "Sat 3:30 PM ET"
+    assert S.kickoff_text(None) == "time TBD"

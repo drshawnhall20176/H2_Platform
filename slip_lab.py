@@ -300,10 +300,11 @@ def game_key(leg: Dict, dh: frozenset = frozenset()) -> Optional[str]:
     return f"{g}|{_when(leg)}" if g in dh else g
 
 
-def game_choices(legs: Sequence[Dict], dh: frozenset = frozenset()) -> List[Tuple[str, str]]:
+def game_choices(legs: Sequence[Dict], dh: frozenset = frozenset(), with_day: bool = False) -> List[Tuple[str, str]]:
     """[(game key, display label)] for the games among `legs`, chronological by real start time (games
     with no known time last). The label leads with the Eastern start time — "7:05 PM ET — BOS @ NYK" —
-    and adds "(Game 1)" / "(Game 2)" when a doubleheader's two games are both present."""
+    and adds "(Game 1)" / "(Game 2)" when a doubleheader's two games are both present. `with_day` puts the weekday
+    in front ("Sat 3:30 PM ET — ...") for a list that spans a whole football week."""
     import sports
     first: Dict[str, Dict] = {}
     for l in legs:
@@ -321,7 +322,7 @@ def game_choices(legs: Sequence[Dict], dh: frozenset = frozenset()) -> List[Tupl
             order = sorted(siblings, key=lambda x: _when(first[x]) or "~")
             label = f"{label} (Game {order.index(k) + 1})"
         dt = sports.game_dt(l.get("game_date"))
-        out.append((k, label if dt is None else f"{dt.strftime('%-I:%M %p ET')} — {label}", _when(l) or "~"))
+        out.append((k, label if dt is None else f"{sports.kickoff_text(dt, with_day)} — {label}", _when(l) or "~"))
     out.sort(key=lambda t: (t[2], t[1]))
     return [(k, label) for k, label, _ in out]
 

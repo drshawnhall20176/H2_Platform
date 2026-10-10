@@ -84,6 +84,13 @@ if not games:
             "basketball is that day's games.", icon="🕐")
     st.stop()
 
+scope = C.slate_scope(SPORT_KEY, key="pm_scope")
+week_games = games
+games = C.scope_items(SPORT_KEY, scope, games, lambda g: g.get("game_date"), date_str)
+if not games:
+    C.no_games_in_scope(_active.label, date_str, len(week_games))
+    st.stop()
+
 for g in games:
     dt = game_dt(g.get("game_date"))
     g["_slot"] = slot_of(dt)

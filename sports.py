@@ -496,6 +496,46 @@ def slot_of(dt) -> str:
     return "Late"
 
 
+# --------------------------------------------------------------------------- "Selected date" vs "This week"
+# Football slates are WEEKLY: pick any date and every game in that week comes back (a Saturday shows Tuesday's
+# game first). Every page narrows them with the same two helpers so the games for the picked date lead and the
+# rest of the week is one switch away.
+WEEKLY_SLATE_SPORTS = ("NFL", "NCAAF")
+SCOPE_DATE, SCOPE_WEEK = "Selected date", "This week"
+SCOPES = (SCOPE_DATE, SCOPE_WEEK)
+
+
+def game_on_date(game_iso: Optional[str], date_str: str) -> Optional[bool]:
+    """Whether a game falls on the Eastern calendar date `date_str` (YYYY-MM-DD). A bare date ("2026-10-04") is
+    compared as written; a full timestamp is converted to Eastern first (an 8:15 PM ET kickoff is the NEXT day in
+    UTC). None when the game has no usable date — callers keep such a game rather than hide it."""
+    if not game_iso:
+        return None
+    text = str(game_iso).strip()
+    if len(text) <= 10:
+        return text == date_str if len(text) == 10 else None
+    dt = game_dt(text)
+    return None if dt is None else dt.strftime("%Y-%m-%d") == date_str
+
+
+def in_scope(game_iso: Optional[str], date_str: str, scope: str) -> bool:
+    """True when a game belongs in the page: always for This week; for Selected date, unless the game is known to
+    be on another day (an unknown date stays visible)."""
+    return scope != SCOPE_DATE or game_on_date(game_iso, date_str) is not False
+
+
+def scope_filter(items, date_of: Callable, date_str: str, scope: str) -> List:
+    """The items (rows, plays, games, meta) whose game is in scope — `date_of(item)` returns the game's start."""
+    return [it for it in (items or []) if in_scope(date_of(it), date_str, scope)]
+
+
+def kickoff_text(dt, with_day: bool = False) -> str:
+    """'3:30 PM ET', or 'Sat 3:30 PM ET' when the list spans several days; 'time TBD' for an unknown time."""
+    if dt is None:
+        return "time TBD"
+    return dt.strftime("%a %-I:%M %p ET" if with_day else "%-I:%M %p ET")
+
+
 def _check_trading_password(entered: str, expected) -> bool:
     """Pure, testable comparison — the actual widget/session-state handling lives in
     require_trading_access below, which needs a real Streamlit context this doesn't.

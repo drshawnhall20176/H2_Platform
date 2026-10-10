@@ -401,6 +401,12 @@ else:
                                                 per_game_pct=per_game_pct)
                 edf["Tier"] = edf["Stake $"].map(lambda s: BS.stake_tier(s, bankroll))
  
+                # Games shown: football slates are weekly, so show only the picked date's games unless
+                # "This week" is chosen (every other sport's slate already is the picked date).
+                _scope = C.slate_scope(_active.key, key="edge_scope")
+                if _active.key in sports.WEEKLY_SLATE_SPORTS and "GameTime" in edf.columns:
+                    edf = edf[[sports.in_scope(t, date_str, _scope) for t in edf["GameTime"]]].copy()
+
                 # Filter by game — narrow the whole section to one or more games (empty = all).
                 if "Game" in edf.columns:
                     if "GameTime" in edf.columns:
@@ -422,7 +428,8 @@ else:
                         edf = edf[edf["Game"].isin(_picked)].copy()
  
                 if edf.empty:
-                    st.info("No plays for the selected game(s). Clear the filter to see the full slate.")
+                    st.info("No plays for the selected game(s). Clear the filter to see the full slate — or, for football, switch "
+                            "Games shown to This week.")
                     st.stop()
  
                 total_stake = edf["Stake $"].sum()

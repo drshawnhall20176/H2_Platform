@@ -157,6 +157,10 @@ if not plays:
     st.stop()
 
 # --- filters ---------------------------------------------------------------
+plays, meta = C.scope_plays(_active.key, _active.label, plays, meta, date_str)
+if not plays:
+    st.info("No plays for the games in this view — switch Games shown to This week, or pick another date.")
+    st.stop()
 slots_present = sorted({p["Slot"] for p in plays}, key=lambda s: SLOT_ORDER.get(s, 9))
 f1, f2 = st.columns(2)
 with f1:
@@ -176,7 +180,7 @@ games_in_slot = sorted({p["Game"] for p in slot_plays},
 
 def _game_label_fmt(g: str) -> str:
     dt = game_dt(game_date_by_label.get(g))   # already Eastern-localized by game_dt itself
-    return g if dt is None else f"{dt.strftime('%-I:%M %p ET')} — {g}"
+    return g if dt is None else f"{C.kickoff_label(dt)} — {g}"
 
 
 with f2:

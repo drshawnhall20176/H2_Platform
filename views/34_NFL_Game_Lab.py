@@ -109,6 +109,7 @@ if not meta:
     st.info("No NFL games scheduled for this date — try a different date.", icon="🕐")
     st.stop()
 
+meta = C.scope_meta("NFL", "NFL", meta, date_str, key="gl_scope")
 meta_sorted = sorted(meta, key=lambda m: m.get("game_date") or "~")
 for _m in meta_sorted:
     _m["_slot"] = slot_of(game_dt(_m.get("game_date")))

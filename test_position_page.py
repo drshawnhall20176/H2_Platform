@@ -1,4 +1,5 @@
 """AppTest coverage for views/38_Position_Matchups.py (loaders replaced with synthetic data)."""
+import datetime
 import re
 from pathlib import Path
 
@@ -115,6 +116,7 @@ def page(monkeypatch):
         monkeypatch.setattr(PD, "load_bundle", fake_bundle)
         at = AppTest.from_file(PAGE, default_timeout=60)
         at.session_state["sport"] = sport
+        at.session_state["pm_date"] = datetime.date(2026, 10, 11)       # the day the fake football games kick off
         for k, v in (session or {}).items():
             at.session_state[k] = v
         at.run()
@@ -202,6 +204,7 @@ def test_loader_failure_degrades_to_a_warning(monkeypatch, page):
     monkeypatch.setattr(PD, "load_bundle", boom)
     at = AppTest.from_file(PAGE, default_timeout=60)
     at.session_state["sport"] = "NFL"
+    at.session_state["pm_date"] = datetime.date(2026, 10, 11)
     at.run()
     assert not at.exception and any("Couldn't build this matchup" in w.value for w in at.warning)
 
@@ -553,3 +556,33 @@ def test_depth_chart_choice_survives_other_filters(page):
     body = log_rows(at)[1]
     assert body[3][3] == "ChartGuy" and set(body[3][4:-1]) <= {"0", "0%"}                                          # he has no 1st-half play-by-play
     assert body[0][3] == "Star4" and body[0][4 + 3 - 1] != "0"                                                    # the others still show their first half
+
+
+# ------------------------------------------------------------------ Games shown: Selected date / This week
+WEEK = ["2026-10-08T23:00:00Z", "2026-10-11T17:00:00Z", "2026-10-12T00:20:00Z", "2026-10-13T00:15:00Z"]   # Thu, Sun 1 PM, Sun 8:20 PM, Mon
+
+
+def test_the_picked_dates_games_lead_and_the_rest_of_the_week_is_one_switch_away(page):
+    at = page("NFL", games(WEEK))
+    scope = [r for r in at.radio if r.label == "Games shown"][0]
+    assert scope.options == ["Selected date", "This week"] and scope.value == "Selected date"
+    assert len(at.selectbox(key="pm_game").options) == 2                                   # the two Sunday games only
+    assert all("Sun" in o for o in at.selectbox(key="pm_game").options)
+    [r for r in at.radio if r.label == "Games shown"][0].set_value("This week").run()
+    opts = at.selectbox(key="pm_game").options
+    assert len(opts) == 4 and opts[0].startswith("Thu") and opts[-1].startswith("Mon")      # the whole week, chronological
+
+
+def test_a_date_with_no_games_points_at_this_week_instead_of_showing_nothing(page):
+    at = page("NFL", games(WEEK), session={"pm_date": datetime.date(2026, 10, 9)})
+    assert not at.exception
+    assert any("No NFL" in i.value and "This week" in i.value and "4 game" in i.value for i in at.info)
+    [r for r in at.radio if r.label == "Games shown"][0].set_value("This week").run()
+    assert len(at.selectbox(key="pm_game").options) == 4
+
+
+def test_non_football_sports_have_no_week_switch_and_keep_every_game(page):
+    at = page("NBA", [dict(label="B @ A", home="A", away="B", home_id=1, away_id=2, home_abbr="A", away_abbr="B",
+                           game_date="2026-10-20T23:00:00Z")], ranked=False)
+    assert not [r for r in at.radio if r.label == "Games shown"]
+    assert len(at.selectbox(key="pm_game").options) == 1

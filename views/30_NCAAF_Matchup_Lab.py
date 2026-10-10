@@ -174,6 +174,7 @@ elif not any(r.get("_recent_games") for r in rows):
 # for consistency across the two pages, not a new, third grouping scheme.
 _POSITION_GROUPS = {"All positions": ("QB", "RB", "WR", "TE"), "QB": ("QB",), "RB": ("RB",),
                    "WR / TE": ("WR", "TE")}
+rows = C.scope_rows("NCAAF", "NCAAF", rows, date_str, key="ml_scope")
 position_group = st.radio("Position", list(_POSITION_GROUPS.keys()), horizontal=True)
 rows = [r for r in rows if r.get("Position") in _POSITION_GROUPS[position_group]]
 if not rows:

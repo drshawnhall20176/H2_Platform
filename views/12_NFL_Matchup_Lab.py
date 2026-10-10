@@ -132,6 +132,8 @@ if not rows:
     st.info("No projectable players for this date. Pick a date within an NFL week with a real slate.")
     st.stop()
 
+rows = C.scope_rows("NFL", "NFL", rows, date_str, key="ml_scope")
+
 # Kickers are on the slate for the FG Made / FG Attempted markets (board, Slip Lab, Player Lines) but have
 # no yardage/TD matchup to show here, so they're left out of this page's player picker.
 rows_sorted = sorted((r for r in rows if r.get("Position") != "K"),

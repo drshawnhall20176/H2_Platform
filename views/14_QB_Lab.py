@@ -85,6 +85,10 @@ if not matchup_proj and not efficiency:
     st.stop()
 
 # Slot and game filters -------------------------------------------------------
+meta = C.scope_meta("NFL", "NFL", meta, date_str, key="qb_scope")
+_shown = {m["label"] for m in meta}
+matchup_proj = [r for r in matchup_proj if r.get("Game") in _shown]
+efficiency = [r for r in efficiency if r.get("Game") in _shown]
 for _m in meta:
     _m["_slot"] = slot_of(game_dt(_m.get("game_date")))
 slots_present = sorted({m["_slot"] for m in meta}, key=lambda s: SLOT_ORDER.get(s, 9))
@@ -102,7 +106,7 @@ if _game_filter:
     matchup_proj = [r for r in matchup_proj if r.get("Game") == _game_filter]
     efficiency  = [r for r in efficiency  if r.get("Game") == _game_filter]
 
-st.caption(f"{len(meta)} game(s) on slate · {n_qbs} QB(s) total · showing {len(matchup_proj)} QB(s) for the current filter")
+st.caption(f"{len(meta)} game(s) shown · {n_qbs} QB(s) total · showing {len(matchup_proj)} QB(s) for the current filter")
 
 # === Matchup-aware projections =============================================
 C.section_header("⚡", "Matchup-aware Pass Yards + Rush Yards projections")

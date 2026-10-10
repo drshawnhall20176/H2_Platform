@@ -124,6 +124,8 @@ if not rows:
     st.info("No games scheduled for this date — try a different date.", icon="🕐")
     st.stop()
 
+rows = C.scope_rows("NCAAF", "NCAAF", rows, date_str, key="pl_scope")
+
 group_name = st.radio("Position", list(_POSITION_GROUPS.keys()), horizontal=True)
 group = _POSITION_GROUPS[group_name]
 group_rows = [r for r in rows if r.get("Position") in group["positions"]]

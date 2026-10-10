@@ -215,6 +215,88 @@ def season_notice(sport_key: str, date_str: str) -> None:
         st.info(msg)
 
 
+def slate_scope(sport_key: str, key: str = "slate_scope") -> str:
+    """The "Games shown" switch every football page carries: Selected date (default) or This week. Football slates
+    are weekly, so a Saturday would otherwise list Tuesday's game first. Drawn only for NFL / NCAAF — every other
+    sport's slate already is the picked date. The choice follows the user from page to page. Returns sports.SCOPE_*."""
+    import sports
+    if sport_key not in sports.WEEKLY_SLATE_SPORTS:
+        return sports.SCOPE_DATE
+    pref = st.session_state.get("_slate_scope_pref", sports.SCOPE_DATE)
+    choice = st.radio("Games shown", list(sports.SCOPES), index=list(sports.SCOPES).index(pref) if pref in sports.SCOPES else 0,
+                      horizontal=True, key=key,
+                      help="Selected date: only the games kicking off on the date you picked. This week: every game in "
+                           "that week (football slates are weekly).")
+    st.session_state["_slate_scope_pref"] = choice
+    return choice
+
+
+def scope_items(sport_key: str, scope: str, items, date_of, date_str: str) -> list:
+    """`items` narrowed to the picked date's games when the sport is a weekly-slate one and Selected date is on;
+    every other sport (and This week) returns them untouched."""
+    import sports
+    if sport_key not in sports.WEEKLY_SLATE_SPORTS:
+        return list(items or [])
+    return sports.scope_filter(items, date_of, date_str, scope)
+
+
+def scope_plays(sport_key: str, label: str, plays, meta, date_str: str, key: str = "slate_scope"):
+    """The control + the narrowing for pages that work from a plays list and a per-game meta list (Best Bets, Graded
+    Picks, Suggested Parlays, Speculative Basket, Highlights): returns (plays, meta) for the games in scope. If the
+    picked date has no games but the week does, says so and stops the page."""
+    import sports
+    scope = slate_scope(sport_key, key=key)
+    if sport_key not in sports.WEEKLY_SLATE_SPORTS:
+        return plays, meta
+    day_meta = sports.scope_filter(meta, lambda m: m.get("game_date"), date_str, scope)
+    if meta and not day_meta:
+        no_games_in_scope(label, date_str, len(meta))
+        st.stop()
+    labels = {m.get("label") for m in day_meta}
+    return [p for p in plays if p.get("Game") in labels], day_meta
+
+
+def scope_rows(sport_key: str, label: str, rows, date_str: str, key: str = "slate_scope", date_of=None) -> list:
+    """The control + the narrowing for pages built on per-player rows that carry the game's start in `_game_date`
+    (the Hot Hand / Anytime TD / Matchup Lab / Player Lines pages): returns the rows for the games in scope. If the
+    picked date has no games but the week does, says so and stops the page."""
+    import sports
+    scope = slate_scope(sport_key, key=key)
+    if sport_key not in sports.WEEKLY_SLATE_SPORTS:
+        return rows
+    date_of = date_of or (lambda r: r.get("_game_date"))
+    kept = sports.scope_filter(rows, date_of, date_str, scope)
+    if rows and not kept:
+        no_games_in_scope(label, date_str, len({(r.get("GameLabel") or r.get("label"), date_of(r)) for r in rows}))
+        st.stop()
+    return kept
+
+
+def scope_meta(sport_key: str, label: str, meta, date_str: str, key: str = "slate_scope") -> list:
+    """The control + the narrowing for pages that pick a game from the slate's per-game meta (the Game Labs, QB
+    Labs): returns the games in scope; stops the page with a hint when the picked date has none but the week does."""
+    return scope_rows(sport_key, label, meta, date_str, key=key, date_of=lambda m: m.get("game_date"))
+
+
+def scope_is_week(sport_key: Optional[str] = None) -> bool:
+    """Whether the football week list is on right now (for labels that should then carry the weekday)."""
+    import sports
+    key = sport_key or sports.active_key()
+    return key in sports.WEEKLY_SLATE_SPORTS and st.session_state.get("_slate_scope_pref") == sports.SCOPE_WEEK
+
+
+def kickoff_label(dt, sport_key: Optional[str] = None) -> str:
+    """A game's kickoff for a picker label: the weekday is added when the This-week list is showing."""
+    import sports
+    return sports.kickoff_text(dt, with_day=scope_is_week(sport_key))
+
+
+def no_games_in_scope(sport_key_label: str, date_str: str, n_week: int) -> None:
+    """The message when the picked date has no games but the week does."""
+    st.info(f"No {sport_key_label} games kick off on {date_str}. Switch **Games shown** to **This week** to see the "
+            f"{n_week} game(s) later or earlier that week, or pick another date.", icon="📅")
+
+
 def section_header(icon: str, title: str, subtitle: Optional[str] = None,
                    color: str = "#1f6feb") -> None:
     """PropFinder-style dense section header: icon in a colored circular badge + bold title,

@@ -114,6 +114,7 @@ if not meta:
     st.info("No games scheduled for this date — try a different date.", icon="🕐")
     st.stop()
 
+meta = C.scope_meta("NCAAF", "NCAAF", meta, date_str, key="gl_scope")
 # Sort by real game time, not alphabetically -- same established pattern as Matchup Lab
 meta_sorted = sorted(meta, key=lambda m: m.get("game_date") or "~")
 game_options = {f"{m['away_name']} @ {m['home_name']}": m for m in meta_sorted}

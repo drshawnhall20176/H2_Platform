@@ -113,6 +113,10 @@ if not plays:
 # it. Filters on meta (already generic across every sport in Best Bets' own existing code, not a
 # new assumption for this page) rather than pitcher rows, since Graded Picks works from the
 # flattened plays/meta shape, not per-pitcher rows the way Matchup Lab does.
+plays, meta = C.scope_plays(_active.key, _active.label, plays, meta, date_str)
+if not plays:
+    st.info("No graded plays for the games in this view — switch Games shown to This week, or pick another date.")
+    st.stop()
 for m in meta:
     m["_slot"] = slot_of(game_dt(m.get("game_date")))
 slots_present = sorted({m["_slot"] for m in meta}, key=lambda s: SLOT_ORDER.get(s, 9))
@@ -134,7 +138,7 @@ def _game_label_fmt(g: str) -> str:
     dt = game_dt(game_date_by_label.get(g))   # already Eastern-localized by game_dt itself
     if dt is None:
         return g
-    return f"{dt.strftime('%-I:%M %p ET')} — {g}"
+    return f"{C.kickoff_label(dt)} — {g}"
 
 
 with c_game:

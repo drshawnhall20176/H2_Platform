@@ -124,6 +124,10 @@ if not plays:
 # enough legs to chain together" concern the way a parlay has, since build_speculative_basket
 # already returns however many real, qualifying positions actually exist rather than requiring
 # an exact count.
+plays, meta = C.scope_plays(_active.key, _active.label, plays, meta, date_str)
+if not plays:
+    st.info("No plays for the games in this view — switch Games shown to This week, or pick another date.")
+    st.stop()
 for m in meta:
     m["_slot"] = slot_of(game_dt(m.get("game_date")))
 slots_present = sorted({m["_slot"] for m in meta}, key=lambda s: SLOT_ORDER.get(s, 9))
@@ -145,7 +149,7 @@ def _game_label_fmt(g: str) -> str:
     dt = game_dt(game_date_by_label.get(g))   # already Eastern-localized by game_dt itself
     if dt is None:
         return g
-    return f"{dt.strftime('%-I:%M %p ET')} — {g}"
+    return f"{C.kickoff_label(dt)} — {g}"
 
 
 with c_game:

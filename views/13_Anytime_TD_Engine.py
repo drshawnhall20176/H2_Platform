@@ -84,6 +84,7 @@ with st.spinner("Loading..."):
 if not all_rows:
     st.info("No players on the slate for this date — try a different date.", icon="🕐")
     st.stop()
+all_rows = C.scope_rows("NFL", "NFL", all_rows, date_str, key="td_scope")
 
 slots_present = sorted({r["_slot"] for r in all_rows}, key=lambda s: SLOT_ORDER.get(s, 9))
 c_slot, c_game = st.columns(2)
@@ -104,7 +105,7 @@ if not board:
     st.info("No projectable players for the current filters — try a different slot or game.", icon="🕐")
     st.stop()
 
-st.caption(f"{len(meta)} game(s) on slate · {len(board)} player(s) with a recent-game log to project from")
+st.caption(f"{len({r['GameLabel'] for r in all_rows})} game(s) shown · {len(board)} player(s) with a recent-game log to project from")
 
 # --- position filter ---------------------------------------------------------
 positions_present = sorted({b["Position"] for b in board})

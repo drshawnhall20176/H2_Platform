@@ -79,6 +79,7 @@ with st.spinner("Loading..."):
 if not all_rows:
     st.info("No players on the slate for this date — try a different date.", icon="🕐")
     st.stop()
+all_rows = C.scope_rows("NCAAF", "NCAAF", all_rows, date_str, key="td_scope")
 
 slots_present = sorted({r["_slot"] for r in all_rows}, key=lambda s: SLOT_ORDER.get(s, 9))
 c_slot, c_game = st.columns(2)
@@ -111,7 +112,7 @@ if not filtered:
     st.info("No results match the current filters.")
     st.stop()
 
-st.markdown(f"**{len(filtered)} players · {n_games} game(s) on slate**")
+st.markdown(f"**{len(filtered)} players · {len({r['GameLabel'] for r in all_rows})} game(s) shown**")
 
 df = pd.DataFrame(filtered)[["Player", "Team", "Position", "Opp", "Game",
                               "TDGames", "GamesPlayed", "ModelProb", "Why"]]

@@ -128,6 +128,8 @@ if not rows:
     st.info("No NFL players on today's slate — try a different date.", icon="🕐")
     st.stop()
 
+rows = C.scope_rows("NFL", "NFL", rows, date_str, key="pl_scope")
+
 group_name = st.radio("Position", list(_POSITION_GROUPS.keys()), horizontal=True)
 group = _POSITION_GROUPS[group_name]
 group_rows = [r for r in rows if r.get("Position") in group["positions"]]
