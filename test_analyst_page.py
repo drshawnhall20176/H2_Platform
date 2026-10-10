@@ -76,7 +76,7 @@ def texts(at):
 def test_the_desk_reads_the_slate_names_the_gem_and_locks_the_call(desk):
     at = desk()
     assert not at.exception, [e.value for e in at.exception]
-    assert [t.label for t in at.tabs] == ["🎙️ The Desk", "💎 Hidden gems", "🧭 Every angle", "🧾 Proof"]
+    assert [t.label for t in at.tabs] == ["🎙️ The Desk", "💎 Hidden gems", "🧭 Every angle", "📡 Locked calls & share", "🧾 Proof"]
     joined = " ".join(texts(at))
     assert "NBA" in at.subheader[0].value or "NBA" in joined
     assert "hidden-gem candidate" in joined and "Gem Guy" in joined and "model 66% vs market 51%" in joined
@@ -404,3 +404,164 @@ def test_each_game_says_when_the_selected_book_has_nothing_up_for_it(monkeypatch
     assert "DraftKings has no player props posted for this game. Other books do (FanDuel 1)" in joined   # AFT @ BOS
     assert joined.count("DraftKings has no player props posted for this game") == 1                  # LAT @ NYK has DK props
     assert "nothing I can take" not in joined                                                          # one game does have a play
+
+
+# ------------------------------------------------- Build 232: locked calls, closing line, Discord, Ask the Analyst
+def _live(desk, monkeypatch):
+    """The desk fixture, but with a mutable offers list so a later run can see the market move."""
+    plays, _meta = _board()
+    offers = _offers(plays)
+    monkeypatch.setattr(BBD, "fetch_generic_offers", lambda *a, **k: offers)
+    return offers
+
+
+def _df_with(at, col):
+    found = [d.value for d in at.dataframe if col in d.value.columns]
+    return found[0] if found else None
+
+
+def test_the_locked_calls_tab_shows_each_locked_call_against_the_books_current_price(desk, monkeypatch):
+    offers = _live(desk, monkeypatch)
+    at = desk()
+    assert any("1 locked at DraftKings; 0 moved" in t for t in texts(at))
+    t = _df_with(at, "Now")
+    assert list(t["Player"]) == ["Gem Guy"] and t.iloc[0]["Now"] == "Unchanged" and t.iloc[0]["Locked price"] == -115
+    for o in offers:                                           # the market moves: Gem Guy's over gets shorter
+        if o["player"] == "Gem Guy":
+            o["over"]["draftkings"] = -140
+    at = desk()
+    assert any("1 locked at DraftKings; 1 moved" in t for t in texts(at))
+    assert _df_with(at, "Now").iloc[0]["Now"] == "Price -115 → -140 (toward the call)"
+    offers[:] = [o for o in offers if o["player"] != "Gem Guy"]                                   # then he is pulled
+    at = desk()
+    assert _df_with(at, "Now").iloc[0]["Now"] == "Pulled — no longer posted"
+
+
+def test_the_closing_line_check_fills_in_as_the_market_moves_after_the_lock(desk, monkeypatch):
+    offers = _live(desk, monkeypatch)
+    at = desk()
+    assert _df_with(at, "Moved toward") is None or int(_df_with(at, "Moved toward").iloc[0]["Moved toward"]) == 0
+    for o in offers:
+        if o["player"] == "Gem Guy":
+            o["over"]["draftkings"] = -140
+    at = desk()
+    clv = _df_with(at, "Moved toward")
+    row = clv[clv["Angle"] == "All published calls"].iloc[0]
+    assert row["Tracked"] == 1 and row["Moved toward"] == 1 and row["Moved away"] == 0
+    (locked,) = AL.fetch_calls(db_path=desk.db)
+    assert locked["price"] == -115 and locked["last_price"] == -140 and locked["line"] == 20.5          # the lock never moves
+
+
+def test_the_closing_line_section_explains_itself_before_there_is_anything_to_show(monkeypatch, tmp_path):
+    plays, meta = _board()
+    at = _desk_with(monkeypatch, tmp_path, _offers(plays, books=("fanduel",)))                    # nothing can lock at DraftKings
+    assert any("closing-line check" in m.value for m in at.markdown)
+    assert _df_with(at, "Moved toward") is None and any("Once calls have been locked" in c.value for c in at.caption)
+
+
+def test_the_locked_table_lists_only_todays_open_calls(desk, monkeypatch):
+    _live(desk, monkeypatch)
+    at = desk()
+    base = ("INSERT INTO analyst_calls (logged_at, call_date, sport, player, market, side, line, price, price_book, angles, settled_at) "
+            "VALUES ('t', '{d}', 'NBA', '{p}', 'Points', 'Over', 20.5, -110, 'draftkings', '[]', {s})")
+    tomorrow = (datetime.now(ET) + timedelta(days=1)).strftime("%Y-%m-%d")
+    today = datetime.now(ET).strftime("%Y-%m-%d")
+    AL._run(desk.db, base.format(d=tomorrow, p="Tomorrow Guy", s="NULL"))
+    AL._run(desk.db, base.format(d=today, p="Graded Guy", s="'t'"))
+    at = desk()
+    assert list(_df_with(at, "Now")["Player"]) == ["Gem Guy"]
+
+
+def test_discord_posting_needs_a_webhook_and_posts_the_edited_text_once_asked(desk, monkeypatch):
+    import analyst_tools as AT
+    _live(desk, monkeypatch)
+    monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
+    at = desk()
+    btn = [b for b in at.button if b.key == "analyst_post_picks"][0]
+    assert btn.disabled and any("add DISCORD_WEBHOOK_URL" in c.value for c in at.caption)
+    box = [t for t in at.text_area if t.label.startswith("Today's picks")][0]
+    assert "Gem Guy Over 20.5 Points" in box.value and box.value.endswith(AT.DISCLAIMER)
+
+    sent = []
+    monkeypatch.setattr(AT, "post_to_discord", lambda url, text, **k: sent.append((url, text)))
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1/abc")
+    at = desk()
+    assert sent == []                                                      # nothing is posted just by viewing the page
+    [t for t in at.text_area if t.label.startswith("Today's picks")][0].set_value("my edited picks").run()
+    [b for b in at.button if b.key == "analyst_post_picks"][0].click().run()
+    assert sent == [("https://discord.com/api/webhooks/1/abc", "my edited picks")]
+    assert any("Posted to Discord." in s.value for s in at.success)
+
+
+def test_a_discord_failure_is_shown_not_swallowed(desk, monkeypatch):
+    import analyst_tools as AT
+    _live(desk, monkeypatch)
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1/abc")
+
+    def bad(url, text, **k):
+        raise RuntimeError("Discord answered 404 — the webhook link may have been deleted")
+    monkeypatch.setattr(AT, "post_to_discord", bad)
+    at = desk()
+    [b for b in at.button if b.key == "analyst_post_picks"][0].click().run()
+    assert any("Not posted — Discord answered 404" in e.value for e in at.error)
+
+
+def test_nothing_is_offered_to_post_when_the_book_has_no_suggestion(monkeypatch, tmp_path):
+    plays, meta = _board()
+    at = _desk_with(monkeypatch, tmp_path, _offers(plays, books=("fanduel",)))                     # DraftKings posts nothing
+    assert not [t for t in at.text_area if t.label.startswith("Today's picks")]
+    assert any("Nothing to post" in i.value for i in at.info)
+
+
+def test_a_graded_recap_can_be_previewed_and_posted(desk, monkeypatch):
+    import analyst_tools as AT
+    _live(desk, monkeypatch)
+    at = desk()
+    assert any("A graded recap appears here" in c.value for c in at.caption)                     # nothing graded yet
+    AL._run(desk.db, "INSERT INTO analyst_calls (logged_at, call_date, sport, player, market, side, line, model_prob, hit, actual, settled_at, "
+                     "angles, price_book) VALUES ('t','2026-01-02','NBA','Old Gem','Points','Over',20.5,0.6,1,25,'t','[]','draftkings')")
+    sent = []
+    monkeypatch.setattr(AT, "post_to_discord", lambda url, text, **k: sent.append(text))
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1/abc")
+    at = desk()
+    box = [t for t in at.text_area if t.label.startswith("Graded recap")][0]
+    assert "recap — NBA, 2026-01-02" in box.value and "✅ Old Gem Over 20.5 Points (actual 25)" in box.value
+    [b for b in at.button if b.key == "analyst_post_recap"][0].click().run()
+    assert len(sent) == 1 and "Old Gem" in sent[0]
+
+
+def test_ask_the_analyst_answers_from_the_days_facts_and_explains_failures(desk, monkeypatch):
+    _live(desk, monkeypatch)
+    plays, meta = _board()
+    monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda *a, **k: (plays, meta, ["draftkings", "fanduel"]))
+    at = desk()
+    assert not at.text_input and any("once ANTHROPIC_API_KEY is added" in c.value for c in at.caption)      # no key, no box
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    seen = {}
+
+    def fake(payload, key, model=None, **k):
+        seen.update(p=payload, k=k)
+        return "The gem is Gem Guy."
+    monkeypatch.setattr(A, "llm_commentary", fake)
+    at = desk()
+    [t for t in at.text_input if t.label == "Ask about this slate"][0].set_value("Who is the gem?")
+    [b for b in at.button if b.label == "Ask"][0].click().run()
+    assert "**You:** Who is the gem?" in " ".join(texts(at)) and "The gem is Gem Guy." in " ".join(texts(at))
+    assert seen["p"]["question"] == "Who is the gem?" and seen["p"]["facts"]["sportsbook"] == "DraftKings"
+    assert seen["p"]["facts"]["plays"][0]["play"].startswith("Gem Guy Over 20.5 Points")
+    assert seen["k"]["system"].startswith("You are the on-air analyst for H2 Sports answering a question")
+
+    def fail(payload, key, model=None, **k):
+        raise RuntimeError("the Anthropic API answered 429")
+    monkeypatch.setattr(A, "llm_commentary", fail)
+    [t for t in at.text_input if t.label == "Ask about this slate"][0].set_value("And now?")
+    [b for b in at.button if b.label == "Ask"][0].click().run()
+    assert any("The analyst couldn't answer — the Anthropic API answered 429" in w.value for w in at.warning)
+    assert "The gem is Gem Guy." in " ".join(texts(at))                                              # earlier answer is kept
+    monkeypatch.setattr(A, "llm_commentary", lambda payload, key, model=None, **k: "Second answer.")
+    [t for t in at.text_input if t.label == "Ask about this slate"][0].set_value("One more?")
+    [b for b in at.button if b.label == "Ask"][0].click().run()
+    shown = [m.value for m in at.markdown if m.value in ("Second answer.", "The gem is Gem Guy.")]
+    assert shown == ["Second answer.", "The gem is Gem Guy."]                                        # newest first
+    [s for s in at.selectbox if s.label == "📖 Sportsbook"][0].set_value("FanDuel").run()
+    assert "Second answer." not in " ".join(texts(at))                                               # a different book is a different conversation

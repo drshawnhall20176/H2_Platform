@@ -19,6 +19,7 @@ import streamlit as st
 
 import analyst as A
 import analyst_ledger as AL
+import analyst_tools as AT
 import best_bets_data as BBD
 import components as C
 import line_history
@@ -153,6 +154,14 @@ if loggable_calls:
         except Exception as exc:                       # noqa: BLE001
             locked_note = f"⚠️ Couldn't write to the record ({str(exc)[:90]}) — calls below are not being tracked."
 
+# Note the latest pre-game line/price for calls already locked, so the market's move since the lock can be
+# measured (closing-line tracking). Best effort: it never changes a locked call.
+if loggable_calls:
+    try:
+        AL.mark_calls(loggable_calls, today_str)
+    except Exception:                                  # noqa: BLE001
+        pass
+
 # Grade earlier days that are still open (a few per visit, so a cold page stays quick).
 settle_note = ""
 try:
@@ -173,6 +182,7 @@ if captions:
     st.caption(" · ".join(captions))
 
 board = A.scoreboard(history)
+clv_rows = AT.clv_board(AL.fetch_calls(sport=_active.key))
 # Everything below is the VIEW: the calls for the games picked above. (Logging and grading above always
 # use the whole slate, so a filter never changes what is on the record.)
 view_calls = [c for c in calls if c["game"] in view_set]
@@ -207,8 +217,8 @@ day = A.write_commentary(sug_calls, sport_label=_active.label, date_str=date_str
                          breakdown=A.book_breakdown(off_calls), coverage_note=coverage_note,
                          withheld_games=withheld_games)
 
-tab_desk, tab_gems, tab_all, tab_proof = st.tabs(
-    ["🎙️ The Desk", "💎 Hidden gems", "🧭 Every angle", "🧾 Proof"])
+tab_desk, tab_gems, tab_all, tab_live, tab_proof = st.tabs(
+    ["🎙️ The Desk", "💎 Hidden gems", "🧭 Every angle", "📡 Locked calls & share", "🧾 Proof"])
 
 
 def _call_rows(cs):
@@ -273,6 +283,34 @@ with tab_desk:
                     st.write(g["text"])
     st.caption("Commentary describes what the data shows; it is analysis, not a guarantee of any outcome.")
 
+    # --- Ask the Analyst: free-text questions, answered from the findings above and nothing else ---
+    st.markdown("#### 💬 Ask the Analyst")
+    if not ai_key:
+        st.caption("Ask questions about this slate in plain English once ANTHROPIC_API_KEY is added to the app "
+                   "secrets (the same key that powers the AI write-up). Answers use only the findings on this page.")
+    else:
+        qa_ctx = (_active.key, date_str, str(preferred_book), tuple(view_games))
+        chat = st.session_state.setdefault("_analyst_chat", [])
+        mine = [h for h in chat if h["ctx"] == qa_ctx]
+        with st.form("analyst_ask", clear_on_submit=True):
+            question = st.text_input("Ask about this slate", placeholder="Which game has the most angles at this book? "
+                                     "Why is the top gem a gem? What should I be wary of today?")
+            asked = st.form_submit_button("Ask")
+        if asked:
+            facts = AT.qa_facts(view_calls, sport_label=_active.label, date_str=date_str, book_label=book_name,
+                                coverage_note=coverage_note, board=board, clv=clv_rows)
+            try:
+                answer = AT.ask_analyst(question, facts, ai_key, _secret("ANALYST_MODEL"), history=mine)
+                chat.append({"ctx": qa_ctx, "q": question.strip(), "a": answer})
+                mine = [h for h in chat if h["ctx"] == qa_ctx]
+            except RuntimeError as exc:
+                st.warning(f"The analyst couldn't answer — {exc}.")
+        for h in reversed(mine[-5:]):
+            st.markdown(f"**You:** {h['q']}")
+            st.markdown(h["a"])
+        if mine:
+            st.caption("Answers come from this page's findings only; they are analysis, not guarantees.")
+
 # --- Hidden gems ---------------------------------------------------------------
 with tab_gems:
     gems = [c for c in sug_calls if c["gem"]]
@@ -314,6 +352,62 @@ with tab_all:
             for k, (label, desc) in A.ANGLES.items():
                 st.markdown(f"- **{label}** — {desc}")
 
+# --- Locked calls & share ----------------------------------------------------------
+with tab_live:
+    st.markdown("#### Today's locked calls — what the book shows now")
+    day_rows = [r for r in AL.fetch_calls(sport=_active.key, since=date_str)
+                if r["date"] == date_str and not r.get("settled_at")]
+    status_rows = AT.locked_status(day_rows, A.index_offers(offers), _active.market_map, preferred_book)
+    if not status_rows:
+        st.info(f"No calls are locked at {book_name} for {date_str} yet. Calls lock the first time the desk "
+                f"publishes them for a game that hasn't started.")
+    else:
+        moved = sum(1 for r in status_rows if r["state"] != A.STATE_POSTED
+                    or (r["move_pts"] is not None and abs(r["move_pts"]) >= AT.FLAT_BAND * 100))
+        st.write(f"{len(status_rows)} locked at {book_name}; {moved} moved, changed line or were pulled since the lock.")
+        st.dataframe(pd.DataFrame([{
+            "Game": r["game"], "Player": r["player"], "Play": f"{r['side']} {r['line']:g} {r['market']}",
+            "Locked price": r["locked_price"], "Now": r["text"], "💎": "💎" if r["gem"] else "",
+        } for r in status_rows]), width="stretch", hide_index=True,
+            column_config={"Locked price": st.column_config.NumberColumn(format="%+d")})
+        st.caption("Prices are the selected book's. A call locked at another book isn't listed here — switch the "
+                   "Sportsbook selector to that book to see it.")
+
+    st.markdown("#### 📣 Share to Discord")
+    webhook = _secret("DISCORD_WEBHOOK_URL")
+    if not webhook:
+        st.caption("To post from here, add DISCORD_WEBHOOK_URL (a webhook link from your Discord channel's "
+                   "Integrations settings) to the app secrets. You can still copy the previews below.")
+    short_label = _active.label.split(" — ")[0]                  # "NBA — Basketball" -> "NBA" in a chat message
+    picks_default = AT.discord_picks_text(sug_calls, sport_label=short_label, date_str=date_str, book_label=book_name)
+    if not picks_default:
+        st.info(f"Nothing to post: no call is available at {book_name} for the games picked above.")
+    else:
+        picks_text = st.text_area("Today's picks — edit freely before posting", picks_default, height=220,
+                                  key=f"analyst_discord_picks_{A.facts_hash({'t': picks_default})}")
+        if st.button("Post picks to Discord", key="analyst_post_picks", disabled=not webhook):
+            try:
+                AT.post_to_discord(webhook, picks_text)
+                st.success("Posted to Discord.")
+            except RuntimeError as exc:
+                st.error(f"Not posted — {exc}.")
+    settled_dates = sorted({r["date"] for r in AL.fetch_calls(sport=_active.key) if r.get("settled_at")})
+    if settled_dates:
+        recap_date = st.selectbox("Recap for", settled_dates[::-1], key="analyst_recap_date")
+        recap_default = AT.discord_recap_text([r for r in AL.fetch_calls(sport=_active.key) if r["date"] == recap_date],
+                                              sport_label=short_label, date_str=recap_date, board=board)
+        if recap_default:
+            recap_text = st.text_area("Graded recap — edit freely before posting", recap_default, height=200,
+                                      key=f"analyst_discord_recap_{A.facts_hash({'t': recap_default})}")
+            if st.button("Post recap to Discord", key="analyst_post_recap", disabled=not webhook):
+                try:
+                    AT.post_to_discord(webhook, recap_text)
+                    st.success("Posted to Discord.")
+                except RuntimeError as exc:
+                    st.error(f"Not posted — {exc}.")
+    else:
+        st.caption("A graded recap appears here once a locked day's games are final.")
+
 # --- Proof -------------------------------------------------------------------------
 with tab_proof:
     st.markdown("Every call is **locked the first time it is published** (later line moves never rewrite it, and a "
@@ -348,6 +442,21 @@ with tab_proof:
                          width="stretch", hide_index=True,
                          column_config={"Avg stated": st.column_config.NumberColumn(format="percent"),
                                         "Actual hit rate": st.column_config.NumberColumn(format="percent")})
+    clv_b = [r for r in clv_rows if r["marked"]]
+    st.markdown("#### Did the market agree? (closing-line check)")
+    if not clv_b:
+        st.caption("Once calls have been locked and the page has been reopened before kickoff, this shows how often "
+                   "the market moved toward each angle's calls after they were locked — a read on the angle that "
+                   "doesn't have to wait for results.")
+    else:
+        st.dataframe(pd.DataFrame([{
+            "Angle": r["label"], "Tracked": r["marked"], "Moved toward": r["toward"], "Moved away": r["away"],
+            "Flat": r["flat"], "Toward rate": r["toward_rate"],
+            "95% range": "" if r["ci_low"] is None else f"{r['ci_low']:.0%}–{r['ci_high']:.0%}", "Status": r["status"],
+        } for r in clv_b]), width="stretch", hide_index=True,
+            column_config={"Toward rate": st.column_config.NumberColumn(format="percent")})
+        st.caption(f"'Toward' = the line or price later moved to agree with the call. Judged only after "
+                   f"{AT.CLV_MIN_N} moves. It is a second opinion on an angle, never a promise of a result.")
     recent = AL.fetch_calls(sport=_active.key)[-15:][::-1]
     if recent:
         with st.expander("Most recent locked calls"):

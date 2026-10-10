@@ -582,3 +582,83 @@ def test_a_genuinely_quiet_day_is_still_called_quiet_and_a_book_with_no_props_ke
     none_up = A.write_commentary([], sport_label="NBA", date_str="d", n_games=1, book_label="DraftKings",
                                  not_offered=4, lines_posted=False)
     assert "has no player props posted for this slate yet" in none_up["overview"] and "nothing I can take" not in none_up["headline"]
+
+
+# ------------------------------------------------- other markets' line (Build 232)
+def _ml_ctx(*offers, book="draftkings"):
+    return ctx(offer_index=A.index_offers(list(offers)), odds_map=OMAP, book=book)
+
+
+def _o(point, books, pickem=None, player="Pat Player"):
+    d = offer(point=point, over={b: -110 for b in books}, under={b: -110 for b in books}, player=player)
+    if pickem:
+        d["pickem"] = {b: {"over": {"price": 1}, "under": {"price": 1}} for b in pickem}
+    return d
+
+
+def test_other_market_line_fires_when_other_books_and_pickem_set_the_number_higher_for_an_over():
+    mine = _o(240.5, ["draftkings"])
+    theirs = _o(255.5, ["fanduel", "betmgm"], pickem=["prizepicks"])
+    r = A.detect_market_line(play(), _ml_ctx(mine, theirs))
+    assert r and "3 other markets" in r["evidence"] and "255.5 vs 240.5 at DraftKings" in r["evidence"]
+    assert "15 on this side of the line" in r["evidence"] and 0 < r["strength"] <= 1
+    assert r["strength"] == pytest.approx(min(1.0, (15 / 240.5) / 0.12))
+
+
+def test_other_market_line_reads_an_under_in_the_other_direction():
+    mine = _o(240.5, ["draftkings"])
+    low = _o(225.5, ["fanduel", "betmgm"])
+    assert A.detect_market_line(play(Side="Under"), _ml_ctx(mine, low))
+    assert A.detect_market_line(play(Side="Over"), _ml_ctx(mine, low)) is None            # same gap, wrong side for an Over
+
+
+def test_other_market_line_stays_quiet_without_enough_sources_a_real_gap_or_a_selected_book():
+    mine = _o(240.5, ["draftkings"])
+    assert A.detect_market_line(play(), _ml_ctx(mine, _o(255.5, ["fanduel"]))) is None          # one other source is not a market
+    assert A.detect_market_line(play(), _ml_ctx(mine, _o(241.5, ["fanduel", "betmgm"]))) is None   # 1 yard is noise (< 4%)
+    assert A.detect_market_line(play(Line=0.5, Market="Pass Yards"), _ml_ctx(mine, _o(0.5, ["fanduel", "betmgm"]))) is None
+    assert A.detect_market_line(play(), _ml_ctx(mine, _o(255.5, ["fanduel", "betmgm"]), book=None)) is None   # no 'your line' without a book
+    assert A.detect_market_line(play(Line=None), _ml_ctx(mine, _o(255.5, ["fanduel", "betmgm"]))) is None
+
+
+def test_other_market_line_never_counts_the_selected_book_and_takes_the_median_when_a_book_posts_several_lines():
+    mine = _o(240.5, ["draftkings"])
+    assert A.other_market_lines(play(), idx(mine), OMAP, "draftkings") == {}
+    two = [_o(250.5, ["fanduel"]), _o(270.5, ["fanduel"]), _o(256.5, ["betmgm"])]
+    got = A.other_market_lines(play(), idx(mine, *two), OMAP, "draftkings")
+    assert got == {"fanduel": 260.5, "betmgm": 256.5}                                        # 250.5/270.5 -> median 260.5
+
+
+def test_scan_reports_the_new_angle_and_learned_weights_know_it():
+    assert "market_line" in A.ANGLES and "market_line" in A.DETECTORS and A.learned_weights([])["market_line"] == 1.0
+    offs = [dict(_o(240.5, ["draftkings"]), market="player_pass_yds"), dict(_o(255.5, ["fanduel", "betmgm"]), market="player_pass_yds")]
+    calls = A.scan([play()], "NFL", "d", offers=offs, odds_map=OMAP, book="draftkings")
+    assert [a["angle"] for a in calls[0]["angles"]] == ["market_line"] and calls[0]["book_state"] == "posted"
+
+
+def test_llm_commentary_accepts_another_system_prompt_and_length():
+    seen = {}
+
+    class R:
+        status_code = 200
+        def json(self):
+            return {"content": [{"type": "text", "text": "ok"}]}
+
+    def post(url, headers, json, timeout):
+        seen.update(json)
+        return R()
+    assert A.llm_commentary({"a": 1}, "k", post=post, system="SYS", max_tokens=77) == "ok"
+    assert seen["system"] == "SYS" and seen["max_tokens"] == 77
+    A.llm_commentary({"a": 1}, "k", post=post)
+    assert seen["system"] == A.LLM_SYSTEM and seen["max_tokens"] == 1200
+
+
+def test_other_market_line_needs_both_an_absolute_and_a_relative_gap_and_averages_two_sources():
+    small = _ml_ctx(_o(4.5, ["draftkings"]), _o(4.7, ["fanduel", "betmgm"]))
+    assert A.detect_market_line(play(Line=4.5), small) is None                                   # 4% of the line, but only 0.2 of a unit
+    two = _ml_ctx(_o(240.5, ["draftkings"]), _o(250.5, ["fanduel"]), _o(256.5, ["betmgm"]))
+    r = A.detect_market_line(play(), two)
+    assert "253.5 vs 240.5" in r["evidence"]                                                       # the midpoint of an even count
+    assert "BetMGM, FanDuel" in r["evidence"] and "and others" not in r["evidence"]
+    many = _ml_ctx(_o(240.5, ["draftkings"]), _o(255.5, ["fanduel", "betmgm", "bovada", "betrivers"]))
+    assert "and others" in A.detect_market_line(play(), many)["evidence"]

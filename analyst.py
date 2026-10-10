@@ -53,12 +53,16 @@ ANGLES: Dict[str, Tuple[str, str]] = {
     "team_surge":     ("Team momentum",     "His whole team is scoring above (or below) its own norm, in the direction of the play."),
     "regression_due": ("Regression due",    "His underlying contact quality says the results should catch up."),
     "line_move":      ("Line moving our way", "The market has moved toward this side since it opened."),
+    "market_line":    ("Other markets' line", "Other books and pick'em apps set this player's number away from your book's line, on this side of it — the wider market thinks the typical result sits there."),
 }
 
 # thresholds — named so the tests (and the owner) can see exactly what "fires" means
 GAP_MIN = 0.05            # model prob minus book prob, in probability points
 SOFT_MIN = 0.03           # median-book implied prob minus best-price implied prob
 SOFT_MIN_BOOKS = 3
+LINE_GAP_MIN_SOURCES = 2   # other books / pick'em apps that must post the player before their line means anything
+LINE_GAP_MIN_ABS = 0.5     # the other markets' median line must be at least this far from the book's line…
+LINE_GAP_MIN_REL = 0.04    # …and at least this fraction of it
 FORM_MIN_GAMES = 5
 FORM_WINDOW = 8
 FORM_MIN_RATE = 0.80
@@ -165,6 +169,52 @@ def detect_soft_book(p: Dict, ctx: Dict) -> Optional[Dict]:
     return {"strength": _clip(gap / 0.08),
             "evidence": f"{O.book_label(book)} pays {price:+.0f} while the median of {n} books implies {mid:.0%} "
                         f"({gap * 100:.1f} pts richer)"}
+
+
+def other_market_lines(p: Dict, index: Dict, odds_map: Dict[str, str], book: Optional[str]) -> Dict[str, float]:
+    """{book key: that book's line} for this player/market at every book OTHER than `book`, pick'em
+    apps included (a book posting several lines counts once, at the median of them)."""
+    okey = (odds_map or {}).get(p.get("Market"))
+    bk = O.canonical_book(book) if book else None
+    if not index or not okey or not bk:
+        return {}
+    pts: Dict[str, List[float]] = {}
+    for o in index.get((_norm(p.get("Player")), okey), []):
+        pt = o.get("point")
+        if pt is None:
+            continue
+        for b in set(o.get("over") or {}) | set(o.get("under") or {}) | set(o.get("pickem") or {}):
+            if b != bk:
+                pts.setdefault(b, []).append(float(pt))
+    out = {}
+    for b, v in pts.items():
+        v.sort()
+        out[b] = v[len(v) // 2] if len(v) % 2 else (v[len(v) // 2 - 1] + v[len(v) // 2]) / 2
+    return out
+
+
+def detect_market_line(p: Dict, ctx: Dict) -> Optional[Dict]:
+    """The selected book's line sits on the soft side of where the rest of the market (other sportsbooks
+    AND pick'em apps) has set the same player: for an Over the others' median line is higher, for an
+    Under it is lower. That is the market's own estimate of his typical result disagreeing with this
+    one number — line shopping, not a model opinion. Needs a selected book (otherwise there is no
+    'your line' to compare)."""
+    if p.get("Line") is None:
+        return None
+    others = other_market_lines(p, ctx.get("offer_index"), ctx.get("odds_map") or {}, ctx.get("book"))
+    if len(others) < LINE_GAP_MIN_SOURCES:
+        return None
+    vals = sorted(others.values())
+    med = vals[len(vals) // 2] if len(vals) % 2 else (vals[len(vals) // 2 - 1] + vals[len(vals) // 2]) / 2
+    line = float(p["Line"])
+    diff = (med - line) if p.get("Side") == "Over" else (line - med)
+    rel = diff / max(abs(line), 1.0)
+    if diff < LINE_GAP_MIN_ABS or rel < LINE_GAP_MIN_REL:
+        return None
+    names = ", ".join(O.book_label(b) for b in sorted(others)[:3]) + (" and others" if len(others) > 3 else "")
+    return {"strength": _clip(rel / 0.12),
+            "evidence": f"{len(others)} other markets ({names}) have this at {med:g} vs {line:g} at "
+                        f"{O.book_label(ctx['book'])} — {diff:g} on this side of the line"}
 
 
 def _values(p: Dict, sport_key: str) -> List[float]:
@@ -292,6 +342,7 @@ DETECTORS: Dict[str, Callable[[Dict, Dict], Optional[Dict]]] = {
     "team_surge": detect_team_surge,
     "regression_due": detect_regression_due,
     "line_move": detect_line_move,
+    "market_line": detect_market_line,
 }
 
 
@@ -866,7 +917,8 @@ def facts_hash(facts: Dict) -> str:
 
 
 def llm_commentary(facts: Dict, api_key: str, model: Optional[str] = None,
-                   post: Optional[Callable] = None, timeout: int = 60) -> str:
+                   post: Optional[Callable] = None, timeout: int = 60,
+                   system: Optional[str] = None, max_tokens: int = 1200) -> str:
     """One Messages-API call. Raises RuntimeError with a plain reason on ANY failure so the page can
     say why (never a silent fallback). `post` is injectable for tests."""
     if not api_key:
@@ -874,7 +926,7 @@ def llm_commentary(facts: Dict, api_key: str, model: Optional[str] = None,
     if post is None:
         import requests
         post = requests.post
-    body = {"model": model or LLM_DEFAULT_MODEL, "max_tokens": 1200, "system": LLM_SYSTEM,
+    body = {"model": model or LLM_DEFAULT_MODEL, "max_tokens": max_tokens, "system": system or LLM_SYSTEM,
             "messages": [{"role": "user", "content": json.dumps(facts, default=str)}]}
     headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
     try:

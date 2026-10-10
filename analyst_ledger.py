@@ -61,10 +61,16 @@ CREATE TABLE IF NOT EXISTS analyst_calls (
     why         TEXT,
     hit         INTEGER,
     actual      REAL,
-    settled_at  TEXT
+    settled_at  TEXT,
+    last_line   REAL,
+    last_price  REAL,
+    marked_at   TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_analyst_call ON analyst_calls (call_date, sport, player, market, side);
 """
+
+# Columns added after the first release: an existing database gets them with ALTER TABLE.
+_MARK_COLS = (("last_line", "REAL"), ("last_price", "REAL"), ("marked_at", "TEXT"))
 
 _PG_SCHEMA = """
 CREATE TABLE IF NOT EXISTS analyst_calls (
@@ -73,7 +79,8 @@ CREATE TABLE IF NOT EXISTS analyst_calls (
     player TEXT NOT NULL, player_id TEXT, team TEXT, market TEXT NOT NULL, side TEXT NOT NULL,
     line REAL, model_prob REAL, conviction REAL, price REAL, price_book TEXT, angles TEXT,
     cautions TEXT, score REAL, gem INTEGER, chalk INTEGER, why TEXT,
-    hit INTEGER, actual REAL, settled_at TEXT
+    hit INTEGER, actual REAL, settled_at TEXT,
+    last_line REAL, last_price REAL, marked_at TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_analyst_call ON analyst_calls (call_date, sport, player, market, side);
 """
@@ -102,6 +109,10 @@ def _sqlite_conn(db_path: str):
     con.row_factory = sqlite3.Row
     try:
         con.executescript(_SCHEMA)
+        have = {r[1] for r in con.execute("PRAGMA table_info(analyst_calls)")}
+        for col, typ in _MARK_COLS:
+            if col not in have:
+                con.execute(f"ALTER TABLE analyst_calls ADD COLUMN {col} {typ}")
         yield con
         con.commit()
     finally:
@@ -117,6 +128,8 @@ def _pg_conn():
     try:
         with con.cursor() as cur:
             cur.execute(_PG_SCHEMA)
+            for col, typ in _MARK_COLS:
+                cur.execute(f"ALTER TABLE analyst_calls ADD COLUMN IF NOT EXISTS {col} {typ}")
         con.commit()
         yield con
         con.commit()
@@ -178,6 +191,36 @@ def record_calls(calls: List[Dict], today_str: str, now: Optional[datetime] = No
                f"ON CONFLICT (call_date, sport, player, market, side) DO NOTHING")
         new += 1 if _run(db_path, sql, vals) else 0
     return new
+
+
+def mark_calls(calls: List[Dict], today_str: str, now: Optional[datetime] = None,
+               db_path: Optional[str] = None) -> int:
+    """Record the latest PRE-GAME line/price seen for calls already in the ledger, so the market's move
+    since the call was locked can be measured later (the closing line is the last mark before the
+    game starts). Only unsettled, still-pre-game calls are marked, and only at the book the call was
+    locked at: a price at some other book says nothing about that call. The locked line/price/
+    probability are never touched. Returns how many rows were updated."""
+    stamp = (now or datetime.now(timezone.utc)).isoformat(timespec="seconds")
+    n = 0
+    for c in calls:
+        if not loggable(c, today_str, now):
+            continue
+        line = c.get("line")
+        if c.get("book_state") == "posted":
+            price = c.get("price")
+        elif c.get("book_state") == "other_line" and line is not None and c.get("book_lines"):
+            line = min((float(x) for x in c["book_lines"]), key=lambda x: abs(x - float(line)))
+            price = None                          # the line itself moved; no like-for-like price
+        else:
+            continue
+        book = c.get("price_book")
+        if book is None or line is None:
+            continue
+        n += 1 if _run(db_path, "UPDATE analyst_calls SET last_line=?, last_price=?, marked_at=? "
+                                "WHERE call_date=? AND sport=? AND player=? AND market=? AND side=? "
+                                "AND settled_at IS NULL AND price_book=?",
+                       (line, price, stamp, c["date"], c["sport"], c["player"], c["market"], c["side"], book)) else 0
+    return n
 
 
 # ---------------------------------------------------------------------------

@@ -88,3 +88,56 @@ def test_ledger_rows_feed_the_scoreboard_directly(db):
     AL.settle_day("NFL", "2026-10-08", {11: {"passing_yards": 300}}, db, NOW)
     board = {r["angle"]: r for r in A.scoreboard(AL.fetch_calls(settled_only=True, db_path=db))}
     assert board["ALL"]["n"] == 1 and board["market_gap"]["hits"] == 1 and board["gem"]["n"] == 1 and board["form_run"]["n"] == 0
+
+
+# ------------------------------------------------- pre-game marks (Build 232)
+def _posted(**kw):
+    return call(book_state="posted", **kw)
+
+
+def test_marks_record_the_latest_pregame_line_and_price_without_touching_the_lock(db):
+    AL.record_calls([call()], "2026-10-08", NOW, db)
+    later = NOW + timedelta(hours=2)
+    assert AL.mark_calls([_posted(price=-135)], "2026-10-08", later, db) == 1
+    (row,) = AL.fetch_calls(db_path=db)
+    assert row["last_line"] == 240.5 and row["last_price"] == -135 and row["marked_at"] == later.isoformat(timespec="seconds")
+    assert row["price"] == -115 and row["line"] == 240.5 and row["model_prob"] == 0.62          # the lock is untouched
+    AL.mark_calls([_posted(price=-150)], "2026-10-08", later, db)                              # the newest mark replaces the last
+    assert AL.fetch_calls(db_path=db)[0]["last_price"] == -150
+
+
+def test_a_moved_line_is_marked_at_the_nearest_posted_line_with_no_price(db):
+    AL.record_calls([call()], "2026-10-08", NOW, db)
+    c = call(book_state="other_line", book_lines=["238.5", "250.5"], price=-110)               # a stale price must not be carried over
+    assert AL.mark_calls([c], "2026-10-08", NOW, db) == 1
+    row = AL.fetch_calls(db_path=db)[0]
+    assert row["last_line"] == 238.5 and row["last_price"] is None
+
+
+def test_marks_only_apply_to_open_pregame_calls_at_the_same_book(db):
+    AL.record_calls([call()], "2026-10-08", NOW, db)
+    assert AL.mark_calls([_posted(game_date=PAST)], "2026-10-08", NOW, db) == 0                # the game has started
+    assert AL.mark_calls([_posted(price_book="fanduel")], "2026-10-08", NOW, db) == 0          # a different book's price
+    assert AL.mark_calls([call(book_state="not_posted")], "2026-10-08", NOW, db) == 0          # pulled: nothing to mark
+    assert AL.mark_calls([_posted(player="Never Locked")], "2026-10-08", NOW, db) == 0         # not in the ledger
+    assert AL.fetch_calls(db_path=db)[0]["last_line"] is None
+    AL.settle_day("NFL", "2026-10-08", {"11": {"passing_yards": 300}}, db, NOW)
+    assert AL.mark_calls([_posted()], "2026-10-08", NOW, db) == 0                              # graded rows are frozen
+
+
+def test_an_existing_database_without_the_mark_columns_is_upgraded(tmp_path):
+    import sqlite3
+    path = str(tmp_path / "old.db")
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE analyst_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, logged_at TEXT NOT NULL, call_date TEXT NOT NULL, "
+                "sport TEXT NOT NULL, game TEXT, game_date TEXT, player TEXT NOT NULL, player_id TEXT, team TEXT, market TEXT NOT NULL, "
+                "side TEXT NOT NULL, line REAL, model_prob REAL, conviction REAL, price REAL, price_book TEXT, angles TEXT, cautions TEXT, "
+                "score REAL, gem INTEGER, chalk INTEGER, why TEXT, hit INTEGER, actual REAL, settled_at TEXT)")
+    con.execute("INSERT INTO analyst_calls (logged_at, call_date, sport, player, market, side, line, price_book) "
+                "VALUES ('x','2026-10-08','NFL','Old Timer','Pass Yards','Over',200.5,'draftkings')")
+    con.commit()
+    con.close()
+    rows = AL.fetch_calls(db_path=path)
+    assert rows[0]["player"] == "Old Timer" and rows[0]["last_line"] is None
+    assert AL.mark_calls([call(player="Old Timer", line=200.5, book_state="posted", price=-110)], "2026-10-08", NOW, path) == 1
+    assert AL.fetch_calls(db_path=path)[0]["last_price"] == -110
