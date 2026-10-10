@@ -56,21 +56,25 @@ def _secret(name: str):
 target = st.date_input("Slate date", datetime.now(eastern))
 date_str = target.strftime("%Y-%m-%d")
 C.season_notice(_active.key, date_str)
-preferred_book = st.session_state.get(f"_preferred_book_{_active.key.lower()}", BBD.O.DEFAULT_BOOK)
+_books_key = f"_analyst_books_{_active.key}_{date_str}"
+preferred_book = BBD.render_book_selector(key_prefix=f"{_active.key.lower()}_analyst",
+                                          available_books=st.session_state.get(_books_key))
+st.session_state[f"_preferred_book_{_active.key.lower()}"] = preferred_book     # shared with the other pages
+book_name = BBD.O.book_label(preferred_book)
 
 
 # --- the board ---------------------------------------------------------------
 def _load_board(sport_key: str, d: str, book: str):
     if sport_key == "MLB":
-        plays, meta, _books = BBD.load_mlb_best_bets_board(d, E.FIP_CONSTANT_DEFAULT, book, None, None)
+        plays, meta, books = BBD.load_mlb_best_bets_board(d, E.FIP_CONSTANT_DEFAULT, book, None, None)
     else:
-        plays, meta, _books = BBD.load_generic_best_bets_board(sport_key, d, book)
-    return plays, meta
+        plays, meta, books = BBD.load_generic_best_bets_board(sport_key, d, book)
+    return plays, meta, books
 
 
 with st.spinner("Reading the slate..."):
     try:
-        plays, meta = compute_once(f"analyst_{_active.key}", _load_board, _active.key, date_str, preferred_book)
+        plays, meta, available_books = compute_once(f"analyst_{_active.key}", _load_board, _active.key, date_str, preferred_book)
     except Exception:                                  # noqa: BLE001
         st.warning(f"No slate data available for {_active.label} on {date_str}. "
                    "Normal during the off-season — try a date when games are scheduled.")
@@ -79,6 +83,9 @@ with st.spinner("Reading the slate..."):
 if not plays:
     st.info(f"No {_active.label} plays found for {date_str}. Try a different date or switch sports.", icon="📅")
     st.stop()
+if available_books and st.session_state.get(_books_key) != available_books:
+    st.session_state[_books_key] = available_books          # the selector then lists the books that really posted lines
+    st.rerun()
 
 plays, meta = C.scope_plays(_active.key, _active.label, plays, meta, date_str, key="analyst_scope")
 
@@ -129,14 +136,17 @@ def _line_rows(sport_key, player, market, side):
 
 calls = A.scan(plays, _active.key, date_str, offers=offers, odds_map=_active.market_map,
                history_fn=_line_rows, weights=weights, expect_book_lines=bool(offers),
-               times=times, with_day=_with_day)
+               times=times, with_day=_with_day, book=preferred_book)
+lines_posted = bool(offers)
+# Only calls the selected book really posts, at the model's own line, are ever suggested or locked.
+loggable_calls = [c for c in calls if c["book_state"] == A.STATE_POSTED]
 
 locked_note = ""
-if calls:
-    sig = (_active.key, date_str, len(calls), hash(tuple(c["key"] for c in calls)))
+if loggable_calls:
+    sig = (_active.key, date_str, len(loggable_calls), hash(tuple(c["key"] for c in loggable_calls)))
     if st.session_state.get("_analyst_logged") != sig:
         try:
-            new = AL.record_calls(calls, today_str)
+            new = AL.record_calls(loggable_calls, today_str)
             st.session_state["_analyst_logged"] = sig
             if new:
                 locked_note = f"{new} new call(s) locked to the record."
@@ -168,9 +178,12 @@ board = A.scoreboard(history)
 view_calls = [c for c in calls if c["game"] in view_set]
 if order == "Start time":
     view_calls = sorted(view_calls, key=lambda c: A.chrono_key(c["slot"], c["start"], -c["score"]))
+sug_calls = [c for c in view_calls if c["bettable"]]          # what the desk will actually suggest
+off_calls = [c for c in view_calls if not c["bettable"]]      # angles that exist, but not at this book
 notes = {g: n for g, n in A.game_notes(meta).items() if g in view_set}
-day = A.write_commentary(view_calls, sport_label=_active.label, date_str=date_str, n_games=len(view_games),
-                         notes=notes, board=board, times={g: times[g] for g in view_games})
+day = A.write_commentary(sug_calls, sport_label=_active.label, date_str=date_str, n_games=len(view_games),
+                         notes=notes, board=board, times={g: times[g] for g in view_games},
+                         book_label=book_name, not_offered=len(off_calls), lines_posted=lines_posted)
 
 tab_desk, tab_gems, tab_all, tab_proof = st.tabs(
     ["🎙️ The Desk", "💎 Hidden gems", "🧭 Every angle", "🧾 Proof"])
@@ -182,7 +195,7 @@ def _call_rows(cs):
         out.append({
             "Time": c["kickoff"], "Slot": c["slot"], "Game": c["game"], "Player": c["player"], "Play": f"{c['side']} {c['line']:g} {c['market']}"
             if c.get("line") is not None else f"{c['side']} {c['market']}",
-            "Model": c["model_prob"], "Book price": c["price"], "Angles": ", ".join(a["label"] for a in c["angles"]),
+            "At book": A.status_text(c, book_name), "Model": c["model_prob"], "Book price": c["price"], "Angles": ", ".join(a["label"] for a in c["angles"]),
             "Gem": "💎" if c["gem"] else "", "Cautions": "; ".join(c["cautions"]), "Score": c["score"],
         })
     return pd.DataFrame(out)
@@ -196,7 +209,7 @@ _COLS_CFG = {"Model": st.column_config.NumberColumn(format="percent"),
 with tab_desk:
     ai_key = _secret("ANTHROPIC_API_KEY")
     use_ai = False
-    if view_calls:
+    if sug_calls:
         if ai_key:
             use_ai = st.toggle("Write it up in the analyst's voice (AI)", value=False, key="analyst_ai",
                                help="Sends only the structured findings below to the model, which is told not to add facts.")
@@ -240,7 +253,7 @@ with tab_desk:
 
 # --- Hidden gems ---------------------------------------------------------------
 with tab_gems:
-    gems = [c for c in view_calls if c["gem"]]
+    gems = [c for c in sug_calls if c["gem"]]
     st.caption("A hidden gem has two or more independent angles agreeing, isn't already at the top of the day's "
                "conviction list, carries a model chance of at least 55%, and has at most one caution.")
     if not gems:
@@ -262,12 +275,18 @@ with tab_all:
     if not view_calls:
         st.info("No play has an angle behind it in the games picked above.")
     else:
+        if not sug_calls and not lines_posted:
+            st.info(f"{book_name} has no player props posted for these games yet, so nothing is suggested. "
+                    f"Tick the box below to see the model's plays anyway — their lines are placeholders, not bettable.")
         pick = st.multiselect("Angles", [v[0] for v in A.ANGLES.values()], default=[], key="analyst_angle_pick",
                               help="Leave empty to show every angle.")
         show_chalk = st.checkbox("Include the day's chalk (top 10% of conviction)", value=True, key="analyst_chalk")
-        rows = [c for c in view_calls if (show_chalk or not c["chalk"])
+        show_off = st.checkbox(f"Also show plays {book_name} doesn't offer at the model's line ({len(off_calls)})",
+                               value=False, key="analyst_show_off", disabled=not off_calls)
+        pool = view_calls if show_off else sug_calls
+        rows = [c for c in pool if (show_chalk or not c["chalk"])
                 and (not pick or any(a["label"] in pick for a in c["angles"]))]
-        st.write(f"{len(rows)} of {len(view_calls)} plays")
+        st.write(f"{len(rows)} of {len(pool)} plays" + ("" if show_off else f" — only lines {book_name} posts"))
         st.dataframe(_call_rows(rows), width="stretch", hide_index=True, column_config=_COLS_CFG)
         with st.expander("What each angle means"):
             for k, (label, desc) in A.ANGLES.items():

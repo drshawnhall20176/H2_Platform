@@ -404,3 +404,102 @@ def test_commentary_lists_every_game_in_start_order_with_its_slot_even_with_no_c
     assert d["games"][0]["text"] == "No play clears an angle here." and "Gem" in d["games"][1]["text"]
     assert "(7:30 PM ET)" in d["focus"][0]["text"] and d["facts"]["calls"][0]["kickoff"] == "7:30 PM ET"
     assert set(A.SLOT_TITLES) == {"Afternoon", "Evening", "Late", "TBD"}
+
+
+# ------------------------------------------------------------------ sportsbook: only lines the book really posts
+OMAP = {"Pass Yards": "player_pass_yds"}
+
+
+def idx(*offers):
+    return A.index_offers(list(offers))
+
+
+def test_book_status_posted_means_the_book_has_that_player_side_and_line():
+    o = offer(over={"draftkings": -120, "fanduel": -110}, under={"draftkings": +100})
+    s = A.book_status(play(), idx(o), OMAP, "draftkings")
+    assert s == {"state": "posted", "price": -120.0, "lines": ["240.5"], "elsewhere": ["FanDuel"]}
+    assert A.book_status(play(Side="Under"), idx(o), OMAP, "draftkings")["price"] == 100.0           # the other side is priced separately
+    assert A.book_status(play(), idx(o), OMAP, "caesars")["state"] == "not_posted"                    # alias resolves to williamhill_us, which isn't there
+
+
+def test_a_line_the_book_does_not_post_is_not_available_even_when_other_books_have_it():
+    # the platform falls back to the LOWEST line posted anywhere, so a 0.5 can come from a book you aren't using
+    other = offer(point=0.5, over={"fanduel": -150}, market="player_pass_yds")
+    mine = offer(point=1.5, over={"draftkings": +110}, market="player_pass_yds")
+    s = A.book_status(play(Line=0.5), idx(other, mine), OMAP, "draftkings")
+    assert s["state"] == "other_line" and s["lines"] == ["1.5"] and s["price"] is None and s["elsewhere"] == ["FanDuel"]
+    assert A.book_status(play(Line=1.5), idx(other, mine), OMAP, "draftkings")["state"] == "posted"
+
+
+def test_book_status_not_posted_names_where_it_can_be_found_and_unverified_means_no_props():
+    o = offer(over={"fanduel": -110, "betmgm": -105})
+    s = A.book_status(play(), idx(o), OMAP, "draftkings")
+    assert s["state"] == "not_posted" and s["elsewhere"] == ["BetMGM", "FanDuel"]
+    assert A.book_status(play(), {}, OMAP, "draftkings")["state"] == "unverified"
+    assert A.book_status(play(Market="Nope"), idx(o), OMAP, "draftkings")["state"] == "unverified"       # a market with no odds key can't be checked
+    assert A.book_status(play(), idx(o), OMAP, None)["state"] == "unchecked"
+
+
+def test_a_pickem_book_counts_when_it_posts_the_line():
+    o = offer(over={"draftkings": -110})
+    o["pickem"] = {"prizepicks": {"over": {"price": None}, "under": {"price": None}}}
+    assert A.book_status(play(), idx(o), OMAP, "prizepicks")["state"] == "posted"
+
+
+def test_status_text_reads_plainly():
+    assert A.status_text({"book_state": "posted"}, "DraftKings") == "Posted"
+    assert A.status_text({"book_state": "other_line", "book_lines": ["1.5", "2.5"]}, "DraftKings") == "DraftKings posts 1.5, 2.5 instead"
+    assert A.status_text({"book_state": "not_posted", "book_elsewhere": ["FanDuel"]}, "DraftKings") == "Not posted at DraftKings (at FanDuel)"
+    assert A.status_text({"book_state": "not_posted", "book_elsewhere": []}, "DraftKings") == "Not posted at DraftKings"
+    assert A.status_text({"book_state": "unverified"}, "DraftKings") == "No props posted yet"
+    assert A.status_text({"book_state": "unchecked"}) == ""
+
+
+def test_scan_with_a_book_prices_the_call_at_that_book_and_flags_what_is_bettable():
+    mine = offer(player="Gem", over={"draftkings": -125, "fanduel": -105})
+    off = offer(player="Away", over={"fanduel": -105})
+    g, a = gem_play(), gem_play(Player="Away", PlayerId=8)
+    calls = {c["player"]: c for c in A.scan([g, a], "NBA", "d", offers=[mine, off], odds_map=OMAP, book="draftkings")}
+    assert calls["Gem"]["bettable"] and calls["Gem"]["price"] == -125 and calls["Gem"]["price_book"] == "draftkings"
+    assert not calls["Away"]["bettable"] and calls["Away"]["price"] is None and calls["Away"]["book_state"] == "not_posted"
+    nothing = {c["player"]: c for c in A.scan([g], "NBA", "d", offers=[], odds_map=OMAP, book="draftkings")}
+    assert nothing["Gem"]["book_state"] == "unverified" and not nothing["Gem"]["bettable"]
+    free = A.scan([g], "NBA", "d")[0]                                                       # no book chosen: nothing is withheld
+    assert free["bettable"] and free["book_state"] == "unchecked"
+
+
+def test_soft_price_is_asked_about_the_selected_book_not_whichever_book_is_richest():
+    o = offer(over={"draftkings": -115, "fanduel": -115, "betmgm": -112, "caesars": +110})
+    assert A.detect_soft_book(play(), ctx(offer_index=idx(o), odds_map=OMAP))                         # nobody chosen: the rich book is named
+    assert A.detect_soft_book(play(), ctx(offer_index=idx(o), odds_map=OMAP, book="draftkings")) is None   # DK is not the soft one
+    rich = offer(over={"draftkings": +115, "fanduel": -115, "betmgm": -112, "caesars": -110})
+    r = A.detect_soft_book(play(), ctx(offer_index=idx(rich), odds_map=OMAP, book="draftkings"))
+    assert r and "DraftKings pays +115" in r["evidence"]
+    assert A.detect_soft_book(play(), ctx(offer_index=idx(rich), odds_map=OMAP, book="williamhill_us")) is None   # the chosen book isn't in the quote set at all
+
+
+def test_line_movement_only_counts_at_the_selected_book():
+    def both(*a):
+        return ([{"price": -110, "line": 240.5, "book": "fanduel"}, {"price": -150, "line": 240.5, "book": "fanduel"}]
+                + [{"price": -110, "line": 240.5, "book": "draftkings"}, {"price": -111, "line": 240.5, "book": "draftkings"}])
+    assert A.detect_line_move(play(), ctx(history_fn=both))                                    # no book: biggest move anywhere
+    assert A.detect_line_move(play(), ctx(history_fn=both, book="draftkings")) is None         # DK barely moved
+    assert A.detect_line_move(play(), ctx(history_fn=both, book="fanduel"))
+
+
+def test_commentary_says_which_book_it_is_limited_to_and_what_it_left_out():
+    calls = A.scan(board() + [gem_play()], "NBA", "d")
+    d = A.write_commentary(calls, sport_label="NBA", date_str="d", n_games=1, book_label="DraftKings", not_offered=2)
+    assert "limited to lines DraftKings actually posts; 2 more plays with angles are left out" in d["overview"]
+    assert d["facts"]["sportsbook"] == "DraftKings" and "available at DraftKings at exactly the stated line" in d["facts"]["lines_note"]
+    one = A.write_commentary(calls, sport_label="NBA", date_str="d", n_games=1, book_label="DraftKings", not_offered=1)
+    assert "1 more play with angles is left out" in one["overview"] and "doesn't offer it" in one["overview"]
+    none_up = A.write_commentary([], sport_label="NBA", date_str="d", n_games=1, book_label="DraftKings", lines_posted=False)
+    assert "DraftKings has no player props posted for this slate yet" in none_up["overview"]
+    assert "no props posted yet; no plays are listed" in none_up["facts"]["lines_note"]
+    assert "every play listed" not in none_up["facts"]["lines_note"]
+    assert "Suggestions are limited" not in A.write_commentary(calls, sport_label="NBA", date_str="d", n_games=1)["overview"]
+
+
+def test_the_ai_is_told_not_to_leave_the_books_lines():
+    assert "never suggest a different line, a different book" in A.LLM_SYSTEM

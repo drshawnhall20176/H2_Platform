@@ -34,13 +34,26 @@ def _board(extra=True):
     return plays, meta
 
 
+def _offers(plays, sport="NBA", books=("draftkings", "fanduel"), skip=(), point=None, prices=None):
+    """Book offers posting every play at its own line at each of `books` (minus any player in `skip`)."""
+    mmap = sports.get(sport).market_map
+    out = []
+    for p in plays:
+        if p["Player"] in skip:
+            continue
+        prices_p = prices or {b: -115 + 5 * i for i, b in enumerate(books)}
+        out.append({"market": mmap[p["Market"]], "player": p["Player"], "point": point if point is not None else p["Line"],
+                    "over": dict(prices_p), "under": {b: +100 for b in books}})
+    return out
+
+
 @pytest.fixture
 def desk(monkeypatch, tmp_path):
     import streamlit as st
     st.cache_data.clear()
     plays, meta = _board()
     monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda *a, **k: (plays, meta, ["draftkings"]))
-    monkeypatch.setattr(BBD, "fetch_generic_offers", lambda *a, **k: [])
+    monkeypatch.setattr(BBD, "fetch_generic_offers", lambda *a, **k: _offers(plays))
     monkeypatch.setattr(BBD, "get_odds_api_key", lambda: "KEY")
     monkeypatch.setattr(line_history, "line_series", lambda *a, **k: [])
     monkeypatch.setattr(AL, "DB_PATH", str(tmp_path / "ledger.db"))
@@ -164,6 +177,7 @@ def test_football_shows_the_picked_dates_games_and_the_week_on_request(desk, mon
     plays = [play("Today Guy", 1, "AAA @ BBB", when_today), play("Later Guy", 2, "CCC @ DDD", when_later)]
     meta = [{"label": "AAA @ BBB", "game_date": when_today}, {"label": "CCC @ DDD", "game_date": when_later}]
     monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda *a, **k: (plays, meta, ["draftkings"]))
+    monkeypatch.setattr(BBD, "fetch_generic_offers", lambda *a, **k: _offers(plays, "NFL"))
     at = AppTest.from_file(PAGE, default_timeout=60)
     at.session_state["sport"] = "NFL"
     at.run()
@@ -197,7 +211,7 @@ def _run_slots(monkeypatch, sport):
     st.cache_data.clear()
     plays, meta = _three_game_board()
     monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda *a, **k: (plays, meta, ["draftkings"]))
-    monkeypatch.setattr(BBD, "fetch_generic_offers", lambda *a, **k: [])
+    monkeypatch.setattr(BBD, "fetch_generic_offers", lambda *a, **k: _offers(plays, sport))
     monkeypatch.setattr(BBD, "get_odds_api_key", lambda: "KEY")
     monkeypatch.setattr(line_history, "line_series", lambda *a, **k: [])
     at = AppTest.from_file(PAGE, default_timeout=60)
@@ -264,3 +278,77 @@ def test_a_game_missing_from_the_slate_meta_still_gets_its_time_from_its_plays(m
     assert [s for s in at.selectbox if s.label == "Time slot"][0].options == ["All slate", "Afternoon", "Evening", "Late"]
     assert [m.value for m in at.markdown if m.value.startswith("##### ")] == [
         "##### Afternoon games (before 5 PM ET)", "##### Evening games (5–8 PM ET)", "##### Late games (8 PM ET and after)"]
+
+
+# ------------------------------------------------------------------ sportsbook: suggestions follow the selected book's real lines
+def _desk_with(monkeypatch, tmp_path, offers, plays_meta=None):
+    import streamlit as st
+    st.cache_data.clear()
+    plays, meta = plays_meta or _board()
+    monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda *a, **k: (plays, meta, ["draftkings", "fanduel"]))
+    monkeypatch.setattr(BBD, "fetch_generic_offers", lambda *a, **k: offers)
+    monkeypatch.setattr(BBD, "get_odds_api_key", lambda: "KEY")
+    monkeypatch.setattr(line_history, "line_series", lambda *a, **k: [])
+    monkeypatch.setattr(AL, "DB_PATH", str(tmp_path / "ledger.db"))
+    at = AppTest.from_file(PAGE, default_timeout=60)
+    at.session_state["sport"] = "NBA"
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    return at
+
+
+def test_the_page_has_a_sportsbook_selector_listing_the_books_that_posted_lines(monkeypatch, tmp_path):
+    plays, meta = _board()
+    at = _desk_with(monkeypatch, tmp_path, _offers(plays))
+    book = [s for s in at.selectbox if s.label == "📖 Sportsbook"][0]
+    assert set(book.options) == {"DraftKings", "FanDuel"} and book.value == "DraftKings"
+
+
+def test_a_play_the_selected_book_does_not_post_is_not_suggested_or_locked(monkeypatch, tmp_path):
+    plays, meta = _board()
+    at = _desk_with(monkeypatch, tmp_path, _offers(plays, books=("fanduel",)) + _offers([p for p in plays if p["Player"] != "Gem Guy"], books=("draftkings",)))
+    joined = " ".join(texts(at))
+    assert "Gem Guy" not in str(at.dataframe[0].value) and any("No play has cleared the hidden-gem bar" in i.value for i in at.info)
+    assert "limited to lines DraftKings actually posts; 1 more play with angles is left out" in joined
+    assert AL.fetch_calls(db_path=str(tmp_path / "ledger.db")) == []                            # nothing unbettable is locked
+    default_table = [d.value for d in at.dataframe if "At book" in d.value.columns]
+    assert not default_table or "Gem Guy" not in set(default_table[0]["Player"])            # unticked: only what DraftKings posts
+    # still reachable, clearly labelled, on request
+    [c for c in at.checkbox if c.key == "analyst_show_off"][0].set_value(True).run()
+    table = [d.value for d in at.dataframe if "At book" in d.value.columns][0]
+    row = table[table["Player"] == "Gem Guy"].iloc[0]
+    assert row["At book"] == "Not posted at DraftKings (at FanDuel)" and row["Book price"] is None            # no price at DK
+
+
+def test_a_book_that_only_posts_a_different_line_is_called_out_not_suggested(monkeypatch, tmp_path):
+    plays, meta = _board()
+    only_other = [o for o in _offers(plays, books=("draftkings",)) if o["player"] != "Gem Guy"] + \
+                 _offers([p for p in plays if p["Player"] == "Gem Guy"], books=("draftkings",), point=21.5)
+    at = _desk_with(monkeypatch, tmp_path, only_other)
+    assert "Gem Guy" not in str(at.dataframe[0].value)
+    [c for c in at.checkbox if c.key == "analyst_show_off"][0].set_value(True).run()
+    table = [d.value for d in at.dataframe if "At book" in d.value.columns][0]
+    assert table[table["Player"] == "Gem Guy"].iloc[0]["At book"] == "DraftKings posts 21.5 instead"
+
+
+def test_the_price_shown_is_the_selected_books_not_the_best_price(monkeypatch, tmp_path):
+    plays, meta = _board()
+    offers = _offers(plays, prices={"draftkings": -130, "fanduel": +105})
+    at = _desk_with(monkeypatch, tmp_path, offers)
+    assert at.dataframe[0].value["Book price"].iloc[0] == -130
+    assert AL.fetch_calls(db_path=str(tmp_path / "ledger.db"))[0]["price"] == -130
+    book = [s for s in at.selectbox if s.label == "📖 Sportsbook"][0]
+    book.set_value("FanDuel").run()
+    assert not at.exception
+    assert at.dataframe[0].value["Book price"].iloc[0] == 105
+
+
+def test_with_no_props_posted_the_desk_makes_no_line_specific_suggestion(monkeypatch, tmp_path):
+    at = _desk_with(monkeypatch, tmp_path, [])
+    joined = " ".join(texts(at))
+    assert "DraftKings has no player props posted for this slate yet" in joined
+    assert any("No play has cleared the hidden-gem bar" in i.value for i in at.info)
+    assert AL.fetch_calls(db_path=str(tmp_path / "ledger.db")) == []
+    [c for c in at.checkbox if c.key == "analyst_show_off"][0].set_value(True).run()
+    table = [d.value for d in at.dataframe if "At book" in d.value.columns][0]
+    assert set(table["At book"]) == {"No props posted yet"} and len(table) >= 1

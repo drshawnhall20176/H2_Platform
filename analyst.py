@@ -116,11 +116,15 @@ def detect_market_gap(p: Dict, ctx: Dict) -> Optional[Dict]:
 
 
 def detect_soft_book(p: Dict, ctx: Dict) -> Optional[Dict]:
+    """One book paying noticeably more than the median book for the same side at the same line.
+    With a sportsbook selected (ctx["book"]) the question is asked ABOUT THAT BOOK — is the selected
+    book the rich one? — because a price at some other book is not something this reader can take."""
     idx, omap = ctx.get("offer_index"), ctx.get("odds_map") or {}
     okey = omap.get(p.get("Market"))
     if not idx or not okey or p.get("Line") is None:
         return None
     side = "over" if p.get("Side") == "Over" else "under"
+    chosen = O.canonical_book(ctx.get("book")) if ctx.get("book") else None
     best = None
     for o in idx.get((_norm(p.get("Player")), okey), []):
         pt = o.get("point")
@@ -131,7 +135,12 @@ def detect_soft_book(p: Dict, ctx: Dict) -> Optional[Dict]:
             continue
         probs = sorted((O.implied_prob(pr), b, pr) for b, pr in prices.items())
         mid = probs[len(probs) // 2][0] if len(probs) % 2 else (probs[len(probs) // 2 - 1][0] + probs[len(probs) // 2][0]) / 2
-        top = probs[0]                  # lowest implied prob = richest payout
+        if chosen:
+            if chosen not in prices:
+                continue
+            top = (O.implied_prob(prices[chosen]), chosen, prices[chosen])
+        else:
+            top = probs[0]              # lowest implied prob = richest payout
         gap = mid - top[0]
         if best is None or gap > best[0]:
             best = (gap, top[1], top[2], mid, len(probs))
@@ -242,10 +251,14 @@ def line_move_toward(p: Dict, ctx: Dict) -> Optional[float]:
         rows = fn(ctx.get("sport_key"), p.get("Player"), p.get("Market"), p.get("Side")) or []
     except Exception:           # noqa: BLE001 — history is context, never a reason to break the page
         return None
+    chosen = O.canonical_book(ctx.get("book")) if ctx.get("book") else None
     by_book: Dict[str, List[Dict]] = {}
     for r in rows:
         if r.get("price") is not None and r.get("line") == p.get("Line"):
-            by_book.setdefault(r.get("book") or "?", []).append(r)
+            b = O.canonical_book(r.get("book")) or "?"
+            if chosen and b != chosen:
+                continue                 # a move at some other book is not this reader's price
+            by_book.setdefault(b, []).append(r)
     best: Optional[float] = None
     for series in by_book.values():
         if len(series) < 2:
@@ -289,6 +302,74 @@ def cautions_for(p: Dict, ctx: Dict) -> List[str]:
 
 
 # ---------------------------------------------------------------------------
+# Book check: is this play actually offered at the selected sportsbook, at this line?
+# ---------------------------------------------------------------------------
+STATE_POSTED = "posted"          # the book posts this player/market/side at exactly the play's line
+STATE_OTHER_LINE = "other_line"  # the book posts it, but only at a different line
+STATE_NOT_POSTED = "not_posted"  # the book doesn't post it (others may)
+STATE_UNVERIFIED = "unverified"  # no props are posted for the slate yet, so nothing can be checked
+STATE_UNCHECKED = "unchecked"    # no sportsbook was selected (callers that don't care)
+
+
+def _fmt_line(x) -> str:
+    return f"{float(x):g}"
+
+
+def book_status(p: Dict, index: Dict, odds_map: Dict[str, str], book: Optional[str]) -> Dict:
+    """{"state", "price", "lines", "elsewhere"} for one play at `book`. A play counts as available
+    ONLY when the selected book posts that player's market on that side at the play's own line —
+    the model's line can come from another book (the platform falls back to the lowest line posted
+    anywhere), and a line you can't take at your book is not a suggestion."""
+    if not book:
+        return {"state": STATE_UNCHECKED, "price": None, "lines": [], "elsewhere": []}
+    okey = (odds_map or {}).get(p.get("Market"))
+    if not index or not okey:
+        return {"state": STATE_UNVERIFIED, "price": None, "lines": [], "elsewhere": []}
+    bk = O.canonical_book(book)
+    side = "over" if p.get("Side") == "Over" else "under"
+    at_book, elsewhere = [], set()
+    for o in index.get((_norm(p.get("Player")), okey), []):
+        pt = o.get("point")
+        if pt is None:
+            continue
+        for b, price in (o.get(side) or {}).items():
+            if price is None:
+                continue
+            if b == bk:
+                at_book.append((float(pt), float(price)))
+            else:
+                elsewhere.add(b)
+        pk = ((o.get("pickem") or {}).get(bk) or {}).get(side)
+        if pk is not None:
+            at_book.append((float(pt), pk.get("price")))
+    others = sorted(O.book_label(b) for b in elsewhere)
+    if not at_book:
+        return {"state": STATE_NOT_POSTED, "price": None, "lines": [], "elsewhere": others}
+    line = p.get("Line")
+    for pt, price in sorted(at_book):
+        if line is not None and abs(pt - float(line)) <= 1e-6:
+            return {"state": STATE_POSTED, "price": price, "lines": [_fmt_line(pt)], "elsewhere": others}
+    return {"state": STATE_OTHER_LINE, "price": None, "lines": sorted({_fmt_line(pt) for pt, _ in at_book}),
+            "elsewhere": others}
+
+
+def status_text(c: Dict, book_label_text: str = "") -> str:
+    """Plain-language 'At <book>' cell for a call."""
+    st = c.get("book_state")
+    where = book_label_text or "the book"
+    if st == STATE_POSTED:
+        return "Posted"
+    if st == STATE_OTHER_LINE:
+        return f"{where} posts {', '.join(c.get('book_lines') or [])} instead"
+    if st == STATE_NOT_POSTED:
+        more = c.get("book_elsewhere") or []
+        return f"Not posted at {where}" + (f" (at {', '.join(more)})" if more else "")
+    if st == STATE_UNVERIFIED:
+        return "No props posted yet"
+    return ""
+
+
+# ---------------------------------------------------------------------------
 # Game times (slot + kickoff), shared by the scan, the commentary and the page filters
 # ---------------------------------------------------------------------------
 SLOT_TITLES = {"Afternoon": "Afternoon games (before 5 PM ET)", "Evening": "Evening games (5–8 PM ET)",
@@ -327,12 +408,17 @@ def scan(plays: Iterable[Dict], sport_key: str, date_str: str, *, offers: Option
          odds_map: Optional[Dict[str, str]] = None, history_fn: Optional[Callable] = None,
          weights: Optional[Dict[str, float]] = None, expect_book_lines: bool = False,
          history_limit: int = 60, times: Optional[Dict[str, Dict]] = None,
-         with_day: bool = False) -> List[Dict]:
+         with_day: bool = False, book: Optional[str] = None) -> List[Dict]:
     """Run every detector over every play. Returns one CALL per play that has at least one angle,
     ranked best-first. A call:
         key, sport, date, player, player_id, team, game, game_date, market, side, line, model_prob,
         conviction, price, price_book, why, angles [{angle,label,strength,evidence}], cautions,
-        score, chalk (bool), gem (bool), slot, kickoff, start (when the game starts)
+        score, chalk (bool), gem (bool), slot, kickoff, start (when the game starts),
+        book_state / book_lines / book_elsewhere / bettable (see book_status)
+
+    With `book` set, `price` is THAT book's price at the play's line (None when it isn't posted
+    there) and `bettable` is True only when the book really posts the line. The caller shows
+    suggestions from bettable calls only.
     """
     plays = list(plays)
     weights = weights or {}
@@ -341,7 +427,7 @@ def scan(plays: Iterable[Dict], sport_key: str, date_str: str, *, offers: Option
     top = sorted(plays, key=lambda q: q.get("Conviction") or 0, reverse=True)[:max(0, history_limit)]
     ctx = {"sport_key": sport_key, "offer_index": index_offers(offers), "odds_map": odds_map or {},
            "history_fn": history_fn, "expect_book_lines": expect_book_lines,
-           "history_ids": {id(q) for q in top}}
+           "history_ids": {id(q) for q in top}, "book": book}
     by_market: Dict[str, List[float]] = {}
     for p in plays:
         if p.get("Conviction") is not None:
@@ -364,6 +450,7 @@ def scan(plays: Iterable[Dict], sport_key: str, date_str: str, *, offers: Option
         chalk = bool(cuts_m is not None and p.get("Conviction") is not None
                      and len(by_market.get(p.get("Market"), [])) >= 10 and p["Conviction"] >= cuts_m)
         cautions = cautions_for(p, ctx)
+        st_ = book_status(p, ctx["offer_index"], odds_map or {}, book)
         score = sum(weights.get(h["angle"], 1.0) * h["strength"] for h in hits)
         gem = (len(hits) >= GEM_MIN_ANGLES and not chalk and p["ModelProb"] >= GEM_MIN_PROB
                and len(cautions) <= GEM_MAX_CAUTIONS)
@@ -373,7 +460,10 @@ def scan(plays: Iterable[Dict], sport_key: str, date_str: str, *, offers: Option
             "team": p.get("Team"), "game": p.get("Game"), "game_date": p.get("GameDate"),
             "market": p.get("Market"), "side": p.get("Side"), "line": p.get("Line"),
             "model_prob": p.get("ModelProb"), "conviction": p.get("Conviction"),
-            "price": p.get("RealPrice"), "price_book": p.get("RealPriceBook"), "why": p.get("Why"),
+            "price": (st_["price"] if book else p.get("RealPrice")),
+            "price_book": (O.canonical_book(book) if book else p.get("RealPriceBook")), "why": p.get("Why"),
+            "book_state": st_["state"], "book_lines": st_["lines"], "book_elsewhere": st_["elsewhere"],
+            "bettable": st_["state"] in (STATE_POSTED, STATE_UNCHECKED),
             "angles": hits, "cautions": cautions, "score": round(score - 0.25 * len(cautions), 3),
             "chalk": chalk, "gem": gem, **_call_time(p, times, with_day),
         })
@@ -528,7 +618,9 @@ def focus_areas(calls: List[Dict], top: int = 5) -> List[Dict]:
 def write_commentary(calls: List[Dict], *, sport_label: str, date_str: str, n_games: int,
                      notes: Optional[Dict[str, List[str]]] = None,
                      board: Optional[List[Dict]] = None,
-                     times: Optional[Dict[str, Dict]] = None) -> Dict:
+                     times: Optional[Dict[str, Dict]] = None,
+                     book_label: Optional[str] = None, not_offered: int = 0,
+                     lines_posted: bool = True) -> Dict:
     """The day, in words. Returns {"headline", "overview", "focus": [..], "games": [{game, text, calls}],
     "facts": <the JSON-able facts the LLM layer is given>}. Wording only ever restates numbers that
     are in `calls`; with no calls it says so plainly.
@@ -536,7 +628,12 @@ def write_commentary(calls: List[Dict], *, sport_label: str, date_str: str, n_ga
     `times` ({game label: time_info}) puts the game-by-game read in start-time order — every game in
     it is listed, with or without a call — each entry carrying its slot and kickoff text, so the page
     can group them under Afternoon / Evening / Late headers. Without it, games with calls are ordered
-    by how much angle support they have."""
+    by how much angle support they have.
+
+    SPORTSBOOK: pass `calls` that are all bettable at the selected book (the page does), the book's
+    name as `book_label`, how many further plays had angles but aren't posted there (`not_offered`),
+    and whether that book has any props up for the slate (`lines_posted`). The wording then says so
+    — and, when nothing is posted, makes no line-specific suggestion at all."""
     notes = notes or {}
     times = times or {}
     gems = [c for c in calls if c["gem"]]
@@ -563,6 +660,14 @@ def write_commentary(calls: List[Dict], *, sport_label: str, date_str: str, n_ga
             parts.append("The angles carrying the day: " + ", ".join(
                 f"{ANGLES[a][0].lower()} ({angle_counts[a]})" for a in top_angles) + ".")
         overview = " ".join(parts)
+
+    if book_label and not lines_posted:
+        overview = (f"{book_label} has no player props posted for this slate yet, so there is nothing line-specific "
+                    f"I can suggest. The model's lines are placeholders until props go up; check back then.")
+    elif book_label and not_offered:
+        overview += (f" Suggestions are limited to lines {book_label} actually posts; {_count(not_offered, 'more play')} "
+                     f"with angles {'is' if not_offered == 1 else 'are'} left out because {book_label} doesn't offer "
+                     f"{'it' if not_offered == 1 else 'them'} at the model's line.")
 
     focus = []
     for f in focus_areas(calls):
@@ -617,6 +722,10 @@ def write_commentary(calls: List[Dict], *, sport_label: str, date_str: str, n_ga
                    "cautions": c["cautions"], "book_price": c.get("price")} for c in calls[:25]],
         "game_notes": notes,
     }
+    if book_label:
+        facts["sportsbook"] = book_label
+        facts["lines_note"] = (f"every play listed is available at {book_label} at exactly the stated line"
+                               if lines_posted else f"{book_label} has no props posted yet; no plays are listed")
     if board:
         facts["track_record"] = [{"angle": r["label"], "settled_calls": r["n"],
                                   "hit_rate": None if r["hit_rate"] is None else round(r["hit_rate"], 3),
@@ -637,7 +746,9 @@ LLM_SYSTEM = (
     "facts in the JSON the user sends — never add a stat, injury, quote, weather detail, odds figure "
     "or storyline that is not in it; keep every number exactly as given; never promise or guarantee "
     "an outcome, never tell anyone to bet any amount, and say plainly where the evidence is thin or "
-    "a caution is listed; if track_record is present you may mention how an angle has performed, "
+    "a caution is listed; every play in the JSON is posted at the sportsbook named in the JSON at exactly "
+    "its stated line — never suggest a different line, a different book, or a play that is not listed; "
+    "if track_record is present you may mention how an angle has performed, "
     "using those numbers only. Plain markdown, no tables, under 450 words."
 )
 
