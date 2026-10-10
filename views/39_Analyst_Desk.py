@@ -82,6 +82,26 @@ if not plays:
 
 plays, meta = C.scope_plays(_active.key, _active.label, plays, meta, date_str, key="analyst_scope")
 
+# --- Time slot + Game filters (same shape as the other pages), and the order the lists use ---
+_with_day = C.scope_is_week(_active.key)
+times = A.game_times(meta, with_day=_with_day)
+for _p in plays:                                       # a game missing from meta still gets a time from its plays
+    times.setdefault(_p.get("Game"), A.time_info(_p.get("GameDate"), _with_day))
+_chrono = lambda g: A.chrono_key(times[g]["slot"], times[g]["start"])
+slots_present = sorted({t["slot"] for t in times.values()}, key=lambda s: sports.SLOT_ORDER.get(s, 9))
+f1, f2, f3 = st.columns([1, 2, 1])
+with f1:
+    slot_pick = st.selectbox("Time slot", ["All slate"] + slots_present)
+games_in_slot = sorted((g for g, t in times.items() if slot_pick == "All slate" or t["slot"] == slot_pick), key=_chrono)
+ALL_GAMES = "All games in this slot"
+with f2:
+    game_pick = st.selectbox("Game", [ALL_GAMES] + games_in_slot,
+                             format_func=lambda g: g if g == ALL_GAMES else f"{times[g]['kickoff']} — {g}")
+with f3:
+    order = st.radio("Order by", ["Start time", "Strongest first"], horizontal=True)
+view_games = games_in_slot if game_pick == ALL_GAMES else [game_pick]
+view_set = set(view_games)
+
 # Odds (soft-price angle). Fail-soft: no key or a failed fetch just means that angle stays quiet.
 offers, offers_note = None, None
 api_key = BBD.get_odds_api_key()
@@ -108,7 +128,8 @@ def _line_rows(sport_key, player, market, side):
 
 
 calls = A.scan(plays, _active.key, date_str, offers=offers, odds_map=_active.market_map,
-               history_fn=_line_rows, weights=weights, expect_book_lines=bool(offers))
+               history_fn=_line_rows, weights=weights, expect_book_lines=bool(offers),
+               times=times, with_day=_with_day)
 
 locked_note = ""
 if calls:
@@ -142,10 +163,14 @@ if captions:
     st.caption(" · ".join(captions))
 
 board = A.scoreboard(history)
-notes = A.game_notes(meta)
-n_games = len({p.get("Game") for p in plays})
-day = A.write_commentary(calls, sport_label=_active.label, date_str=date_str, n_games=n_games,
-                         notes=notes, board=board)
+# Everything below is the VIEW: the calls for the games picked above. (Logging and grading above always
+# use the whole slate, so a filter never changes what is on the record.)
+view_calls = [c for c in calls if c["game"] in view_set]
+if order == "Start time":
+    view_calls = sorted(view_calls, key=lambda c: A.chrono_key(c["slot"], c["start"], -c["score"]))
+notes = {g: n for g, n in A.game_notes(meta).items() if g in view_set}
+day = A.write_commentary(view_calls, sport_label=_active.label, date_str=date_str, n_games=len(view_games),
+                         notes=notes, board=board, times={g: times[g] for g in view_games})
 
 tab_desk, tab_gems, tab_all, tab_proof = st.tabs(
     ["🎙️ The Desk", "💎 Hidden gems", "🧭 Every angle", "🧾 Proof"])
@@ -155,7 +180,7 @@ def _call_rows(cs):
     out = []
     for c in cs:
         out.append({
-            "Game": c["game"], "Player": c["player"], "Play": f"{c['side']} {c['line']:g} {c['market']}"
+            "Time": c["kickoff"], "Slot": c["slot"], "Game": c["game"], "Player": c["player"], "Play": f"{c['side']} {c['line']:g} {c['market']}"
             if c.get("line") is not None else f"{c['side']} {c['market']}",
             "Model": c["model_prob"], "Book price": c["price"], "Angles": ", ".join(a["label"] for a in c["angles"]),
             "Gem": "💎" if c["gem"] else "", "Cautions": "; ".join(c["cautions"]), "Score": c["score"],
@@ -171,7 +196,7 @@ _COLS_CFG = {"Model": st.column_config.NumberColumn(format="percent"),
 with tab_desk:
     ai_key = _secret("ANTHROPIC_API_KEY")
     use_ai = False
-    if calls:
+    if view_calls:
         if ai_key:
             use_ai = st.toggle("Write it up in the analyst's voice (AI)", value=False, key="analyst_ai",
                                help="Sends only the structured findings below to the model, which is told not to add facts.")
@@ -204,14 +229,18 @@ with tab_desk:
                 st.markdown(f"- {f['text']}")
         if day["games"]:
             st.markdown("#### Game by game")
+            last_slot = None
             for g in day["games"]:
-                with st.expander(g["game"], expanded=False):
+                if g["slot"] != last_slot:
+                    st.markdown(f"##### {A.SLOT_TITLES.get(g['slot'], g['slot'])}")
+                    last_slot = g["slot"]
+                with st.expander(f"{g['kickoff']} — {g['game']}", expanded=False):
                     st.write(g["text"])
     st.caption("Commentary describes what the data shows; it is analysis, not a guarantee of any outcome.")
 
 # --- Hidden gems ---------------------------------------------------------------
 with tab_gems:
-    gems = [c for c in calls if c["gem"]]
+    gems = [c for c in view_calls if c["gem"]]
     st.caption("A hidden gem has two or more independent angles agreeing, isn't already at the top of the day's "
                "conviction list, carries a model chance of at least 55%, and has at most one caution.")
     if not gems:
@@ -220,7 +249,7 @@ with tab_gems:
     else:
         st.dataframe(_call_rows(gems), width="stretch", hide_index=True, column_config=_COLS_CFG)
         for c in gems[:10]:
-            with st.expander(f"{c['player']} — {c['side']} {c['line']:g} {c['market']} ({c['game']})"):
+            with st.expander(f"{c['kickoff']} · {c['player']} — {c['side']} {c['line']:g} {c['market']} ({c['game']})"):
                 for a in c["angles"]:
                     st.markdown(f"- **{a['label']}** — {a['evidence']}")
                 for w in c["cautions"]:
@@ -230,15 +259,15 @@ with tab_gems:
 
 # --- Every angle -----------------------------------------------------------------
 with tab_all:
-    if not calls:
-        st.info("No play has an angle behind it on this slate.")
+    if not view_calls:
+        st.info("No play has an angle behind it in the games picked above.")
     else:
         pick = st.multiselect("Angles", [v[0] for v in A.ANGLES.values()], default=[], key="analyst_angle_pick",
                               help="Leave empty to show every angle.")
         show_chalk = st.checkbox("Include the day's chalk (top 10% of conviction)", value=True, key="analyst_chalk")
-        rows = [c for c in calls if (show_chalk or not c["chalk"])
+        rows = [c for c in view_calls if (show_chalk or not c["chalk"])
                 and (not pick or any(a["label"] in pick for a in c["angles"]))]
-        st.write(f"{len(rows)} of {len(calls)} plays")
+        st.write(f"{len(rows)} of {len(view_calls)} plays")
         st.dataframe(_call_rows(rows), width="stretch", hide_index=True, column_config=_COLS_CFG)
         with st.expander("What each angle means"):
             for k, (label, desc) in A.ANGLES.items():

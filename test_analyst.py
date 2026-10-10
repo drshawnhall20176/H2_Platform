@@ -357,3 +357,50 @@ def test_llm_with_no_key_or_no_network_says_why():
 
 def test_facts_hash_is_stable_and_changes_with_content():
     assert A.facts_hash({"a": 1, "b": 2}) == A.facts_hash({"b": 2, "a": 1}) != A.facts_hash({"a": 1, "b": 3})
+
+
+# ------------------------------------------------------------------ game times: slot + kickoff
+def test_time_info_buckets_by_eastern_start_and_marks_unknown_times():
+    aft = A.time_info("2026-10-10T17:00:00Z")                      # 1:00 PM ET
+    eve = A.time_info("2026-10-10T23:30:00Z")                      # 7:30 PM ET
+    late = A.time_info("2026-10-11T01:00:00Z")                     # 9:00 PM ET
+    assert (aft["slot"], aft["kickoff"]) == ("Afternoon", "1:00 PM ET")
+    assert (eve["slot"], eve["kickoff"]) == ("Evening", "7:30 PM ET")
+    assert (late["slot"], late["kickoff"]) == ("Late", "9:00 PM ET")
+    assert A.time_info("2026-10-10T23:30:00Z", with_day=True)["kickoff"] == "Sat 7:30 PM ET"
+    tbd = A.time_info("2026-10-10")                                # a bare date is not a start time
+    assert tbd == {"start": None, "slot": "TBD", "kickoff": "time TBD"}
+    assert A.time_info(None)["slot"] == "TBD"
+
+
+def test_game_times_covers_every_game_in_meta_and_chrono_key_orders_slots_then_starts():
+    t = A.game_times([{"label": "B", "game_date": "2026-10-11T01:00:00Z"}, {"label": "A", "game_date": "2026-10-10T17:00:00Z"},
+                      {"label": "C", "game_date": None}, {"game_date": "x"}])
+    assert set(t) == {"A", "B", "C"}
+    assert sorted(t, key=lambda g: A.chrono_key(t[g]["slot"], t[g]["start"])) == ["A", "B", "C"]      # afternoon, late, TBD last
+    same_slot = [("2026-10-10T23:30:00Z", 1), ("2026-10-10T22:00:00Z", 1), ("2026-10-10T23:30:00Z", 5)]
+    assert [x[1] for x in sorted(same_slot, key=lambda x: A.chrono_key("Evening", x[0], -x[1]))] == [1, 5, 1]
+
+
+def test_scan_stamps_each_call_with_its_games_slot_and_kickoff():
+    times = A.game_times([{"label": "TB @ DAL", "game_date": "2026-10-11T01:00:00Z"}])
+    c = A.scan(board() + [gem_play()], "NBA", "d", times=times)[0]
+    assert (c["slot"], c["kickoff"], c["start"]) == ("Late", "9:00 PM ET", "2026-10-11T01:00:00Z")
+    via_play = A.scan([gem_play(GameDate="2026-10-10T17:00:00Z")], "NBA", "d")[0]            # no times map: read off the play
+    assert (via_play["slot"], via_play["kickoff"]) == ("Afternoon", "1:00 PM ET")
+    assert A.scan([gem_play()], "NBA", "d")[0]["slot"] == "TBD"
+
+
+def test_commentary_lists_every_game_in_start_order_with_its_slot_even_with_no_call():
+    times = A.game_times([{"label": "Late @ Game", "game_date": "2026-10-11T01:00:00Z"},
+                          {"label": "Quiet @ Game", "game_date": "2026-10-10T17:00:00Z"},
+                          {"label": "TB @ DAL", "game_date": "2026-10-10T23:30:00Z"},
+                          {"label": "Unset @ Game", "game_date": None}])
+    calls = A.scan(board() + [gem_play()], "NBA", "d", times=times)
+    d = A.write_commentary(calls, sport_label="NBA", date_str="d", n_games=4, times=times)
+    assert [(g["game"], g["slot"], g["kickoff"]) for g in d["games"]] == [
+        ("Quiet @ Game", "Afternoon", "1:00 PM ET"), ("TB @ DAL", "Evening", "7:30 PM ET"),
+        ("Late @ Game", "Late", "9:00 PM ET"), ("Unset @ Game", "TBD", "time TBD")]
+    assert d["games"][0]["text"] == "No play clears an angle here." and "Gem" in d["games"][1]["text"]
+    assert "(7:30 PM ET)" in d["focus"][0]["text"] and d["facts"]["calls"][0]["kickoff"] == "7:30 PM ET"
+    assert set(A.SLOT_TITLES) == {"Afternoon", "Evening", "Late", "TBD"}

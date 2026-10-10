@@ -173,3 +173,94 @@ def test_football_shows_the_picked_dates_games_and_the_week_on_request(desk, mon
     assert list(at.dataframe[0].value["Player"]) == ["Today Guy"]
     radio.set_value("This week").run()
     assert sorted(at.dataframe[0].value["Player"]) == ["Later Guy", "Today Guy"]
+
+
+# ------------------------------------------------------------------ games grouped by slot and start time
+def _today_iso(hour, minute=0):
+    d = datetime.now(ET).replace(hour=hour, minute=minute, second=0, microsecond=0, tzinfo=None)
+    return ET.localize(d).astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _three_game_board():
+    games = [("LAT @ NYK", _today_iso(21, 0)), ("AFT @ BOS", _today_iso(13, 0)), ("EVE @ CHI", _today_iso(19, 30)), ("QUI @ DEN", _today_iso(14, 0))]
+    plays = []
+    for i, (g, when) in enumerate(games[:3]):                   # QUI @ DEN has no play with an angle (and no plays at all)
+        plays.append({"Player": f"Gem{i}", "PlayerId": 10 + i, "Team": "T", "Game": g, "GameDate": when, "Market": "Points", "Side": "Over",
+                      "Line": 20.5, "ModelProb": 0.66, "Conviction": 1.3, "ConvictionSource": "book", "TeamTrend": "📈 Hot",
+                      "TeamTrendRatio": 1.3, "Why": "w"})
+    meta = [{"label": g, "game_date": when, "away_name": g.split(" @ ")[0], "home_name": g.split(" @ ")[1]} for g, when in games]
+    return plays, meta
+
+
+def _run_slots(monkeypatch, sport):
+    import streamlit as st
+    st.cache_data.clear()
+    plays, meta = _three_game_board()
+    monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda *a, **k: (plays, meta, ["draftkings"]))
+    monkeypatch.setattr(BBD, "fetch_generic_offers", lambda *a, **k: [])
+    monkeypatch.setattr(BBD, "get_odds_api_key", lambda: "KEY")
+    monkeypatch.setattr(line_history, "line_series", lambda *a, **k: [])
+    at = AppTest.from_file(PAGE, default_timeout=60)
+    at.session_state["sport"] = sport
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    return at
+
+
+@pytest.fixture
+def isolated_ledger(monkeypatch, tmp_path):
+    monkeypatch.setattr(AL, "DB_PATH", str(tmp_path / "ledger.db"))
+
+
+@pytest.mark.parametrize("sport", ["NBA", "NCAAMB"])
+def test_games_are_grouped_under_slot_headers_in_start_order_for_basketball(monkeypatch, isolated_ledger, sport):
+    at = _run_slots(monkeypatch, sport)
+    heads = [m.value for m in at.markdown if m.value.startswith("##### ")]
+    assert heads == ["##### Afternoon games (before 5 PM ET)", "##### Evening games (5–8 PM ET)", "##### Late games (8 PM ET and after)"]
+    labels = [e.label for e in at.expander if " · " not in e.label and " @ " in e.label]
+    assert labels == ["1:00 PM ET — AFT @ BOS", "2:00 PM ET — QUI @ DEN", "7:30 PM ET — EVE @ CHI", "9:00 PM ET — LAT @ NYK"]
+    quiet = [e for e in at.expander if e.label.endswith("QUI @ DEN")][0]
+    assert "No play clears an angle here." in " ".join(m.value for m in quiet.markdown)
+
+
+def test_time_slot_and_game_filters_narrow_the_whole_page(monkeypatch, isolated_ledger):
+    at = _run_slots(monkeypatch, "NBA")
+    slot = [s for s in at.selectbox if s.label == "Time slot"][0]
+    assert slot.options == ["All slate", "Afternoon", "Evening", "Late"]
+    slot.set_value("Late").run()
+    assert not at.exception
+    assert list(at.dataframe[0].value["Player"]) == ["Gem0"]
+    assert list(at.dataframe[0].value["Slot"]) == ["Late"] and list(at.dataframe[0].value["Time"]) == ["9:00 PM ET"]
+    game = [s for s in at.selectbox if s.label == "Game"][0]
+    assert game.options == ["All games in this slot", "9:00 PM ET — LAT @ NYK"]
+    heads = [m.value for m in at.markdown if m.value.startswith("##### ")]
+    assert heads == ["##### Late games (8 PM ET and after)"]
+    # the record is the whole slate no matter what is being looked at
+    assert {r["game"] for r in AL.fetch_calls(db_path=AL.DB_PATH)} <= {"LAT @ NYK", "AFT @ BOS", "EVE @ CHI"}
+
+
+def test_one_game_can_be_picked_and_the_table_order_follows_the_choice(monkeypatch, isolated_ledger):
+    at = _run_slots(monkeypatch, "NBA")
+    assert list(at.dataframe[0].value["Time"]) == ["1:00 PM ET", "7:30 PM ET", "9:00 PM ET"]          # start time is the default order
+    [r for r in at.radio if r.label == "Order by"][0].set_value("Strongest first").run()
+    assert sorted(at.dataframe[0].value["Time"]) == ["1:00 PM ET", "7:30 PM ET", "9:00 PM ET"]
+    game = [s for s in at.selectbox if s.label == "Game"][0]
+    game.set_value("7:30 PM ET — EVE @ CHI").run()
+    assert list(at.dataframe[0].value["Game"]) == ["EVE @ CHI"]
+
+
+def test_a_game_missing_from_the_slate_meta_still_gets_its_time_from_its_plays(monkeypatch, isolated_ledger):
+    import streamlit as st
+    st.cache_data.clear()
+    plays, _meta = _three_game_board()
+    monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda *a, **k: (plays, [], ["draftkings"]))
+    monkeypatch.setattr(BBD, "fetch_generic_offers", lambda *a, **k: [])
+    monkeypatch.setattr(BBD, "get_odds_api_key", lambda: "KEY")
+    monkeypatch.setattr(line_history, "line_series", lambda *a, **k: [])
+    at = AppTest.from_file(PAGE, default_timeout=60)
+    at.session_state["sport"] = "NBA"
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert [s for s in at.selectbox if s.label == "Time slot"][0].options == ["All slate", "Afternoon", "Evening", "Late"]
+    assert [m.value for m in at.markdown if m.value.startswith("##### ")] == [
+        "##### Afternoon games (before 5 PM ET)", "##### Evening games (5–8 PM ET)", "##### Late games (8 PM ET and after)"]

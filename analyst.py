@@ -40,6 +40,7 @@ import math
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import odds_api as O
+import sports
 
 # ---------------------------------------------------------------------------
 # Angle registry
@@ -288,6 +289,31 @@ def cautions_for(p: Dict, ctx: Dict) -> List[str]:
 
 
 # ---------------------------------------------------------------------------
+# Game times (slot + kickoff), shared by the scan, the commentary and the page filters
+# ---------------------------------------------------------------------------
+SLOT_TITLES = {"Afternoon": "Afternoon games (before 5 PM ET)", "Evening": "Evening games (5–8 PM ET)",
+               "Late": "Late games (8 PM ET and after)", "TBD": "Start time not posted yet"}
+
+
+def time_info(game_iso: Optional[str], with_day: bool = False) -> Dict:
+    """{"start", "slot", "kickoff"} for one game's start (UTC ISO or a bare date). A game with no clock
+    time is slot "TBD" and sorts last; start is the ISO string used only to order games."""
+    dt = sports.game_dt(game_iso)
+    return {"start": game_iso if dt is not None else None, "slot": sports.slot_of(dt),
+            "kickoff": sports.kickoff_text(dt, with_day) if dt is not None else "time TBD"}
+
+
+def game_times(meta: Iterable[Dict], with_day: bool = False) -> Dict[str, Dict]:
+    """{game label: time_info} for every game on the slate (from the engine's per-game meta)."""
+    return {m["label"]: time_info(m.get("game_date"), with_day) for m in meta or [] if m.get("label")}
+
+
+def chrono_key(slot: str, start: Optional[str], tiebreak=0):
+    """Sort key: slot order, then actual start, then the tiebreak (a score, descending)."""
+    return (sports.SLOT_ORDER.get(slot, 9), start or "~", tiebreak)
+
+
+# ---------------------------------------------------------------------------
 # Scan -> calls
 # ---------------------------------------------------------------------------
 def _percentile_cut(values: List[float], q: float) -> Optional[float]:
@@ -300,12 +326,13 @@ def _percentile_cut(values: List[float], q: float) -> Optional[float]:
 def scan(plays: Iterable[Dict], sport_key: str, date_str: str, *, offers: Optional[List[Dict]] = None,
          odds_map: Optional[Dict[str, str]] = None, history_fn: Optional[Callable] = None,
          weights: Optional[Dict[str, float]] = None, expect_book_lines: bool = False,
-         history_limit: int = 60) -> List[Dict]:
+         history_limit: int = 60, times: Optional[Dict[str, Dict]] = None,
+         with_day: bool = False) -> List[Dict]:
     """Run every detector over every play. Returns one CALL per play that has at least one angle,
     ranked best-first. A call:
         key, sport, date, player, player_id, team, game, game_date, market, side, line, model_prob,
         conviction, price, price_book, why, angles [{angle,label,strength,evidence}], cautions,
-        score, chalk (bool), gem (bool)
+        score, chalk (bool), gem (bool), slot, kickoff, start (when the game starts)
     """
     plays = list(plays)
     weights = weights or {}
@@ -348,10 +375,15 @@ def scan(plays: Iterable[Dict], sport_key: str, date_str: str, *, offers: Option
             "model_prob": p.get("ModelProb"), "conviction": p.get("Conviction"),
             "price": p.get("RealPrice"), "price_book": p.get("RealPriceBook"), "why": p.get("Why"),
             "angles": hits, "cautions": cautions, "score": round(score - 0.25 * len(cautions), 3),
-            "chalk": chalk, "gem": gem,
+            "chalk": chalk, "gem": gem, **_call_time(p, times, with_day),
         })
     calls.sort(key=lambda c: (c["gem"], c["score"], c["model_prob"]), reverse=True)
     return calls
+
+
+def _call_time(p: Dict, times: Optional[Dict[str, Dict]], with_day: bool) -> Dict:
+    info = (times or {}).get(p.get("Game")) or time_info(p.get("GameDate"), with_day)
+    return {"slot": info["slot"], "kickoff": info["kickoff"], "start": info["start"]}
 
 
 def angle_names(call: Dict) -> List[str]:
@@ -495,11 +527,18 @@ def focus_areas(calls: List[Dict], top: int = 5) -> List[Dict]:
 
 def write_commentary(calls: List[Dict], *, sport_label: str, date_str: str, n_games: int,
                      notes: Optional[Dict[str, List[str]]] = None,
-                     board: Optional[List[Dict]] = None) -> Dict:
+                     board: Optional[List[Dict]] = None,
+                     times: Optional[Dict[str, Dict]] = None) -> Dict:
     """The day, in words. Returns {"headline", "overview", "focus": [..], "games": [{game, text, calls}],
     "facts": <the JSON-able facts the LLM layer is given>}. Wording only ever restates numbers that
-    are in `calls`; with no calls it says so plainly."""
+    are in `calls`; with no calls it says so plainly.
+
+    `times` ({game label: time_info}) puts the game-by-game read in start-time order — every game in
+    it is listed, with or without a call — each entry carrying its slot and kickoff text, so the page
+    can group them under Afternoon / Evening / Late headers. Without it, games with calls are ordered
+    by how much angle support they have."""
     notes = notes or {}
+    times = times or {}
     gems = [c for c in calls if c["gem"]]
     angle_counts: Dict[str, int] = {}
     for c in calls:
@@ -529,9 +568,10 @@ def write_commentary(calls: List[Dict], *, sport_label: str, date_str: str, n_ga
     for f in focus_areas(calls):
         lead = f["calls"][0]
         why = "; ".join(a["evidence"] for a in lead["angles"][:2])
-        text = (f"{f['market']} in {f['game']}: {describe_call(lead)} — {why}."
+        when = f" ({lead['kickoff']})" if lead.get("kickoff") and lead["kickoff"] != "time TBD" else ""
+        text = (f"{f['market']} in {f['game']}{when}: {describe_call(lead)} — {why}."
                 if f["n"] == 1 else
-                f"{f['market']} in {f['game']}: {f['n']} plays with angles, led by {describe_call(lead)} — {why}.")
+                f"{f['market']} in {f['game']}{when}: {f['n']} plays with angles, led by {describe_call(lead)} — {why}.")
         focus.append({"game": f["game"], "market": f["market"], "text": text, "n": f["n"],
                       "keys": [c["key"] for c in f["calls"]]})
 
@@ -539,8 +579,20 @@ def write_commentary(calls: List[Dict], *, sport_label: str, date_str: str, n_ga
     by_game: Dict[str, List[Dict]] = {}
     for c in calls:
         by_game.setdefault(c.get("game") or "?", []).append(c)
-    for game in sorted(set(by_game) | set(notes), key=lambda g: -sum(c["score"] for c in by_game.get(g, []))):
+    def _info(g):
+        if g in times:
+            return times[g]
+        cs0 = by_game.get(g) or []
+        return ({"slot": cs0[0].get("slot", "TBD"), "kickoff": cs0[0].get("kickoff", "time TBD"), "start": cs0[0].get("start")}
+                if cs0 else {"slot": "TBD", "kickoff": "time TBD", "start": None})
+
+    def _order(g):
+        i = _info(g)
+        return chrono_key(i["slot"], i["start"], -sum(c["score"] for c in by_game.get(g, [])))
+
+    for game in sorted(set(by_game) | set(notes) | set(times), key=_order):
         cs = by_game.get(game, [])
+        info = _info(game)
         bits: List[str] = []
         if cs:
             top = cs[0]
@@ -555,11 +607,12 @@ def write_commentary(calls: List[Dict], *, sport_label: str, date_str: str, n_ga
             bits.append("No play clears an angle here.")
         for n in notes.get(game, []):
             bits.append(n[0].upper() + n[1:] + ".")
-        games.append({"game": game, "text": " ".join(bits), "keys": [c["key"] for c in cs]})
+        games.append({"game": game, "text": " ".join(bits), "keys": [c["key"] for c in cs],
+                      "slot": info["slot"], "kickoff": info["kickoff"]})
 
     facts = {
         "sport": sport_label, "date": date_str, "games_on_slate": n_games,
-        "calls": [{"key": c["key"], "game": c["game"], "play": describe_call(c), "team": c.get("team"),
+        "calls": [{"key": c["key"], "game": c["game"], "kickoff": c.get("kickoff"), "play": describe_call(c), "team": c.get("team"),
                    "gem": c["gem"], "chalk": c["chalk"], "angles": [a["evidence"] for a in c["angles"]],
                    "cautions": c["cautions"], "book_price": c.get("price")} for c in calls[:25]],
         "game_notes": notes,
