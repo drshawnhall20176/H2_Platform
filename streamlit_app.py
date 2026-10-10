@@ -146,7 +146,7 @@ def run():
     # any sport with a market_map (UFC has one), not projections-dependent at all.
     projections_only_titles = {"Best Bets", "Graded Picks", "Suggested Parlays", "Speculative Basket",
                                "Edge Board", "Retrospective", "Model Dashboard", "Track Record",
-                               "Media Room", "Podcast Studio", "Slip Lab"}
+                               "Media Room", "Podcast Studio", "Slip Lab", "Analyst Desk"}
 
     # Internal/paid tools kept off the Discord/public build — matched by TITLE (not page number)
     # so a future re-numbering of the views/ files can't silently un-gate one of these by
@@ -209,6 +209,7 @@ def run():
         "35": ("Hot Hand Engine", "🔥", "ncaaf_hot_hand_engine"),   # NCAAF version
         "36": ("Anytime TD Engine", "🎯", "ncaaf_anytime_td_engine"),  # NCAAF version
         "38": ("Position Matchups", "🧭", "position_matchups"),   # depth chart vs opposing defense + H2H
+        "39": ("Analyst Desk", "🎙️", "analyst_desk"),   # angles + hidden gems + commentary + graded record
     }
 
     # SIDEBAR SECTIONS, added directly on request: st.navigation natively supports a
@@ -234,7 +235,7 @@ def run():
     SECTION_OF = {}
     for k in ("0", "28"):
         SECTION_OF[k] = "🏠 START HERE"
-    for k in ("1", "2", "3", "4", "37", "23", "24"):
+    for k in ("1", "2", "3", "4", "37", "23", "24", "39"):
         SECTION_OF[k] = "🎯 RECOMMENDATIONS"
     for k in ("5", "6"):
         SECTION_OF[k] = "🛰️ LIVE SIGNALS"

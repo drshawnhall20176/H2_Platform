@@ -602,7 +602,7 @@ def test_sidebar_sections_match_the_documented_grouping():
         "0": "🏠 START HERE", "28": "🏠 START HERE",
         "1": "🎯 RECOMMENDATIONS", "2": "🎯 RECOMMENDATIONS", "3": "🎯 RECOMMENDATIONS",
         "4": "🎯 RECOMMENDATIONS", "37": "🎯 RECOMMENDATIONS", "23": "🎯 RECOMMENDATIONS",
-        "24": "🎯 RECOMMENDATIONS",
+        "24": "🎯 RECOMMENDATIONS", "39": "🎯 RECOMMENDATIONS",
         "5": "🛰️ LIVE SIGNALS", "6": "🛰️ LIVE SIGNALS",
         "7": "🔬 DEEP RESEARCH", "8": "🔬 DEEP RESEARCH", "9": "🔬 DEEP RESEARCH",
         "10": "🔬 DEEP RESEARCH", "11": "🔬 DEEP RESEARCH", "12": "🔬 DEEP RESEARCH",
@@ -1265,7 +1265,7 @@ def test_projections_only_pages_hidden_for_sports_without_projections():
     gated = {t.strip().strip('"') for t in m.group(1).split(",") if t.strip()}
     assert gated == {"Best Bets", "Graded Picks", "Suggested Parlays", "Speculative Basket",
                      "Edge Board", "Retrospective", "Model Dashboard", "Track Record",
-                     "Media Room", "Podcast Studio", "Slip Lab"}, gated
+                     "Media Room", "Podcast Studio", "Slip Lab", "Analyst Desk"}, gated
     assert "Bet Log" not in gated and "Data Health" not in gated
     all_titles = set(re.findall(r'\("([^"]+)",\s*"[^"]*",\s*"[^"]*"\)', src))
     assert gated <= all_titles, f"gated titles not found in meta: {gated - all_titles}"
