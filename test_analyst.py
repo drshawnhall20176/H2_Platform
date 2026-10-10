@@ -503,3 +503,82 @@ def test_commentary_says_which_book_it_is_limited_to_and_what_it_left_out():
 
 def test_the_ai_is_told_not_to_leave_the_books_lines():
     assert "never suggest a different line, a different book" in A.LLM_SYSTEM
+
+
+# ------------------------------------------------- why a book shows nothing (Build 231)
+def test_player_names_are_matched_the_platform_way_so_suffixes_and_accents_do_not_hide_a_posted_prop():
+    o = offer(player="Marvin Harrison Jr.", over={"draftkings": -115})
+    assert A.book_status(play(Player="Marvin Harrison"), idx(o), OMAP, "draftkings")["state"] == "posted"
+    o2 = offer(player="José Álvarez", over={"draftkings": -115})
+    assert A.book_status(play(Player="Jose Alvarez"), idx(o2), OMAP, "draftkings")["state"] == "posted"
+    assert A.book_status(play(Player="Marvin Harrison"), idx(offer(player="Someone Else", over={"draftkings": -115})),
+                         OMAP, "draftkings")["state"] == "not_posted"          # still not a free-for-all
+
+
+def _ev(eid, home, away, player, books, point=240.5):
+    return {"market": "player_pass_yds", "player": player, "point": point, "event_id": eid, "home_team": home,
+            "away_team": away, "over": {b: -110 for b in books}, "under": {b: -110 for b in books}}
+
+
+def test_event_ids_for_game_matches_by_team_names_or_by_the_games_own_players():
+    offs = [_ev("e1", "Notre Dame Fighting Irish", "Stanford Cardinal", "A QB", ["fanduel"]),
+            _ev("e2", "Ohio State Buckeyes", "Texas Longhorns", "B QB", ["fanduel"])]
+    assert A.event_ids_for_game("Stanford @ Notre Dame", [], offs) == {"e1"}               # teams only
+    assert A.event_ids_for_game("Cardinal vs Irish", ["a qb"], offs) == {"e1"}             # a player name alone
+    assert A.event_ids_for_game("Nobody @ Nowhere", [], offs) == set()
+    assert A.event_ids_for_game("Stanford @ Ohio State", [], offs) == set()               # sharing one team is not the same game
+    assert A.event_ids_for_game(None, [], None) == set()
+
+
+def test_book_coverage_counts_each_books_props_for_the_games_asked_about():
+    offs = [_ev("e1", "H", "A", "P1", ["fanduel", "betmgm"]), _ev("e1", "H", "A", "P2", ["fanduel"]),
+            _ev("e2", "H2", "A2", "P3", ["draftkings"])]
+    assert A.book_coverage(offs) == {"fanduel": 2, "betmgm": 1, "draftkings": 1}
+    assert A.book_coverage(offs, {"e1"}) == {"fanduel": 2, "betmgm": 1}
+    assert A.book_coverage(offs, set()) == {} and A.book_coverage(None) == {}
+    pk = dict(_ev("e1", "H", "A", "P4", []), pickem={"prizepicks": {"over": {"price": 1}}})
+    assert A.book_coverage([pk]) == {"prizepicks": 1}
+
+
+def test_coverage_text_names_the_selected_book_first_and_says_when_it_has_nothing():
+    cov = {"fanduel": 12, "betmgm": 7}
+    none = A.coverage_text(cov, "draftkings", "Stanford @ Notre Dame")
+    assert none.startswith("DraftKings has no player props posted for Stanford @ Notre Dame.")
+    assert "FanDuel 12, BetMGM 7" in none and "pick one of them" in none
+    some = A.coverage_text({"draftkings": 5, **cov}, "draftkings", "this slate")
+    assert some == "Player props posted for this slate: DraftKings 5 · FanDuel 12, BetMGM 7"
+    assert A.coverage_text({}, "draftkings", "x") == ""
+    assert A.coverage_text(cov, None, "x") == "Player props posted for x: FanDuel 12, BetMGM 7"
+
+
+def test_book_breakdown_counts_plays_by_what_the_book_does_with_them():
+    cs = [{"book_state": "not_posted"}, {"book_state": "not_posted"}, {"book_state": "other_line"}, {}]
+    bd = A.book_breakdown(cs)
+    assert bd["not_posted"] == 2 and bd["other_line"] == 1 and bd["unchecked"] == 1 and bd["posted"] == 0
+
+
+def test_plays_withheld_by_the_book_are_not_called_a_quiet_read():
+    d = A.write_commentary([], sport_label="NCAA Football", date_str="2026-10-10", n_games=1, book_label="DraftKings",
+                           not_offered=19, breakdown={"not_posted": 18, "other_line": 1},
+                           coverage_note="DraftKings has no player props posted for X.",
+                           withheld_games={"Stanford @ Notre Dame": 19})
+    assert d["headline"] == "NCAA Football: nothing I can take at DraftKings for 2026-10-10"
+    assert "quiet" not in d["headline"] + d["overview"] and "no play had a single angle" not in d["overview"]
+    assert "19 plays have angles behind them, but none is available at DraftKings at the model's line." in d["overview"]
+    assert "18 aren't posted at DraftKings at all; 1 is posted there at a different line." in d["overview"]
+    assert "DraftKings has no player props posted for X." in d["overview"]
+    one = A.write_commentary([], sport_label="S", date_str="d", n_games=1, book_label="DK", not_offered=1,
+                             breakdown={"not_posted": 1}, withheld_games={"G": 1}, times={"G": A.time_info(None, False)})
+    assert "1 play has angles behind it" in one["overview"] and "1 isn't posted at DK at all." in one["overview"]
+    assert "1 play here has angles, but it isn't available at DK at the model's line." in one["games"][0]["text"]
+    many = A.write_commentary([], sport_label="S", date_str="d", n_games=1, book_label="DK", not_offered=3,
+                              withheld_games={"G": 3}, times={"G": A.time_info(None, False)})
+    assert "3 plays here have angles, but they aren't available at DK" in many["games"][0]["text"]
+
+
+def test_a_genuinely_quiet_day_is_still_called_quiet_and_a_book_with_no_props_keeps_its_own_wording():
+    q = A.write_commentary([], sport_label="NBA", date_str="d", n_games=2, book_label="DraftKings", not_offered=0)
+    assert q["headline"] == "NBA: a quiet read for d" and "no play had a single angle" in q["overview"]
+    none_up = A.write_commentary([], sport_label="NBA", date_str="d", n_games=1, book_label="DraftKings",
+                                 not_offered=4, lines_posted=False)
+    assert "has no player props posted for this slate yet" in none_up["overview"] and "nothing I can take" not in none_up["headline"]

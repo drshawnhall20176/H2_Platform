@@ -309,7 +309,8 @@ def test_a_play_the_selected_book_does_not_post_is_not_suggested_or_locked(monke
     at = _desk_with(monkeypatch, tmp_path, _offers(plays, books=("fanduel",)) + _offers([p for p in plays if p["Player"] != "Gem Guy"], books=("draftkings",)))
     joined = " ".join(texts(at))
     assert "Gem Guy" not in str(at.dataframe[0].value) and any("No play has cleared the hidden-gem bar" in i.value for i in at.info)
-    assert "limited to lines DraftKings actually posts; 1 more play with angles is left out" in joined
+    assert "nothing I can take at DraftKings" in joined and "1 isn't posted at DraftKings at all" in joined
+    assert "a quiet read" not in joined                                          # withheld by the book is not "quiet"
     assert AL.fetch_calls(db_path=str(tmp_path / "ledger.db")) == []                            # nothing unbettable is locked
     default_table = [d.value for d in at.dataframe if "At book" in d.value.columns]
     assert not default_table or "Gem Guy" not in set(default_table[0]["Player"])            # unticked: only what DraftKings posts
@@ -352,3 +353,54 @@ def test_with_no_props_posted_the_desk_makes_no_line_specific_suggestion(monkeyp
     [c for c in at.checkbox if c.key == "analyst_show_off"][0].set_value(True).run()
     table = [d.value for d in at.dataframe if "At book" in d.value.columns][0]
     assert set(table["At book"]) == {"No props posted yet"} and len(table) >= 1
+
+
+def _with_event(offers, eid="ev1", home="New York Knicks", away="Boston Celtics"):
+    return [dict(o, event_id=eid, home_team=home, away_team=away) for o in offers]
+
+
+def test_when_the_selected_book_has_nothing_up_for_the_game_the_page_says_so_and_who_does(monkeypatch, tmp_path):
+    plays, meta = _board()
+    fd_only = _with_event(_offers(plays, books=("fanduel",)))
+    other_game = _with_event(_offers(plays[:2], books=("draftkings",)), eid="ev2", home="Miami Heat", away="Chicago Bulls")
+    other_game = [dict(o, player=f"Elsewhere {i}") for i, o in enumerate(other_game)]     # DK's props are for a different game
+    at = _desk_with(monkeypatch, tmp_path, fd_only + other_game)
+    joined = " ".join(texts(at))
+    assert "nothing I can take at DraftKings" in joined and "a quiet read" not in joined
+    assert "DraftKings has no player props posted for BOS @ NYK." in joined
+    assert "FanDuel 13" in joined and "pick one of them" in joined                          # 12 + Gem Guy, all at FanDuel
+    assert "No play clears an angle here" not in joined                                      # the game isn't empty — the book is
+    assert "angles, but they aren't available at DraftKings at the model's line" in joined or \
+           "angles, but it isn't available at DraftKings at the model's line" in joined
+    assert AL.fetch_calls(db_path=str(tmp_path / "ledger.db")) == []
+
+
+def test_a_suffix_in_the_books_spelling_does_not_make_a_posted_prop_look_missing(monkeypatch, tmp_path):
+    plays, meta = _board()
+    offs = _offers(plays)
+    for o in offs:
+        if o["player"] == "Gem Guy":
+            o["player"] = "Gem Guy Jr."                                                      # the book's spelling
+    at = _desk_with(monkeypatch, tmp_path, offs)
+    assert "nothing I can take" not in " ".join(texts(at))
+
+
+def test_each_game_says_when_the_selected_book_has_nothing_up_for_it(monkeypatch, isolated_ledger):
+    import streamlit as st
+    st.cache_data.clear()
+    plays, meta = _three_game_board()
+    by = {p["Game"]: p for p in plays}
+    offs = (_with_event(_offers([by["LAT @ NYK"]], books=("draftkings", "fanduel")), "e1", "NYK", "LAT")
+            + _with_event(_offers([by["AFT @ BOS"]], books=("fanduel",)), "e2", "BOS", "AFT"))
+    monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda *a, **k: (plays, meta, ["draftkings", "fanduel"]))
+    monkeypatch.setattr(BBD, "fetch_generic_offers", lambda *a, **k: offs)
+    monkeypatch.setattr(BBD, "get_odds_api_key", lambda: "KEY")
+    monkeypatch.setattr(line_history, "line_series", lambda *a, **k: [])
+    at = AppTest.from_file(PAGE, default_timeout=60)
+    at.session_state["sport"] = "NBA"
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    joined = " ".join(texts(at))
+    assert "DraftKings has no player props posted for this game. Other books do (FanDuel 1)" in joined   # AFT @ BOS
+    assert joined.count("DraftKings has no player props posted for this game") == 1                  # LAT @ NYK has DK props
+    assert "nothing I can take" not in joined                                                          # one game does have a play

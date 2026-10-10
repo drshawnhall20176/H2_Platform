@@ -181,9 +181,31 @@ if order == "Start time":
 sug_calls = [c for c in view_calls if c["bettable"]]          # what the desk will actually suggest
 off_calls = [c for c in view_calls if not c["bettable"]]      # angles that exist, but not at this book
 notes = {g: n for g, n in A.game_notes(meta).items() if g in view_set}
+
+# WHY a book shows nothing: who has props up for the games in view, and what happened to the plays.
+_plays_by_game: dict = {}
+for _p in plays:
+    _plays_by_game.setdefault(_p.get("Game"), []).append(_p.get("Player"))
+_view_events: set = set()
+_game_events: dict = {}
+for _g in view_games:
+    _game_events[_g] = A.event_ids_for_game(_g, _plays_by_game.get(_g, []), offers)
+    _view_events |= _game_events[_g]
+_scope_txt = (view_games[0] if len(view_games) == 1 else "these games")
+coverage_note = A.coverage_text(A.book_coverage(offers, _view_events), preferred_book, _scope_txt) if offers else ""
+for _g in view_games:                                  # per-game line in the game-by-game read, when the book is missing there
+    _gc = A.book_coverage(offers, _game_events[_g]) if offers else {}
+    _bk = BBD.O.canonical_book(preferred_book) if preferred_book else None
+    if _gc and _bk and not _gc.get(_bk):
+        notes.setdefault(_g, []).append(A.coverage_text(_gc, preferred_book, "this game"))
+withheld_games: dict = {}
+for _c in off_calls:
+    withheld_games[_c["game"]] = withheld_games.get(_c["game"], 0) + 1
 day = A.write_commentary(sug_calls, sport_label=_active.label, date_str=date_str, n_games=len(view_games),
                          notes=notes, board=board, times={g: times[g] for g in view_games},
-                         book_label=book_name, not_offered=len(off_calls), lines_posted=lines_posted)
+                         book_label=book_name, not_offered=len(off_calls), lines_posted=lines_posted,
+                         breakdown=A.book_breakdown(off_calls), coverage_note=coverage_note,
+                         withheld_games=withheld_games)
 
 tab_desk, tab_gems, tab_all, tab_proof = st.tabs(
     ["🎙️ The Desk", "💎 Hidden gems", "🧭 Every angle", "🧾 Proof"])

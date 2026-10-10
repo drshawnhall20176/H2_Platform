@@ -74,8 +74,23 @@ CHALK_PERCENTILE = 0.90   # top 10% of the day's conviction is "main road"
 NEWEST_FIRST_SPORTS = {"NFL", "NHL"}
 
 
+try:                                    # the platform's own name matcher (accents, Jr./III, "(2002)")
+    from projections import normalize_name as _platform_norm
+except Exception:                       # noqa: BLE001 — a bare script/test context without numpy etc.
+    _platform_norm = None
+
+
 def _norm(s: Optional[str]) -> str:
-    return "".join(c for c in (s or "").lower() if c.isalnum())
+    """Player-name key. Uses projections.normalize_name — the SAME matcher that gave each play its
+    book line — so 'Marvin Harrison' on the model's roster finds 'Marvin Harrison Jr.' in the book's
+    list. (A looser alnum-only key here would call that player 'not posted' at every book.)"""
+    s = s or ""
+    if _platform_norm is not None:
+        try:
+            s = _platform_norm(s)
+        except Exception:               # noqa: BLE001
+            pass
+    return "".join(c for c in s.lower() if c.isalnum())
 
 
 def _clip(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
@@ -369,6 +384,68 @@ def status_text(c: Dict, book_label_text: str = "") -> str:
     return ""
 
 
+def _team_match(a: Optional[str], b: Optional[str]) -> bool:
+    x, y = _norm(a), _norm(b)
+    return bool(x and y and (x in y or y in x))
+
+
+def event_ids_for_game(game: Optional[str], player_names: Iterable[str],
+                       offers: Optional[List[Dict]]) -> set:
+    """Which Odds-API events are this game? An offer belongs to the game when its home AND away team
+    names match the 'Away @ Home' label, or when it prices one of the game's own players (names are
+    matched the platform's way), so a team-name spelling difference alone can't hide a game's props."""
+    ids = set()
+    away, _, home = (game or "").partition(" @ ")
+    names = {_norm(n) for n in player_names if n}
+    for o in offers or []:
+        eid = o.get("event_id")
+        if eid is None:
+            continue
+        if (home and away and _team_match(o.get("home_team"), home) and _team_match(o.get("away_team"), away)) \
+                or _norm(o.get("player")) in names:
+            ids.add(eid)
+    return ids
+
+
+def book_coverage(offers: Optional[List[Dict]], event_ids: Optional[set] = None) -> Dict[str, int]:
+    """{canonical book key: how many player props (player + market + line) it has posted} over the
+    offers — only those in `event_ids` when given. This is the plain answer to 'does this book have
+    anything up for this game?'."""
+    out: Dict[str, int] = {}
+    for o in offers or []:
+        if event_ids is not None and o.get("event_id") not in event_ids:
+            continue
+        books = set((o.get("over") or {})) | set((o.get("under") or {})) | set((o.get("pickem") or {}))
+        for b in books:
+            out[b] = out.get(b, 0) + 1
+    return out
+
+
+def book_breakdown(calls: List[Dict]) -> Dict[str, int]:
+    """How the angle-bearing plays split by what the selected book does with them."""
+    out = {STATE_POSTED: 0, STATE_OTHER_LINE: 0, STATE_NOT_POSTED: 0, STATE_UNVERIFIED: 0, STATE_UNCHECKED: 0}
+    for c in calls:
+        out[c.get("book_state") or STATE_UNCHECKED] = out.get(c.get("book_state") or STATE_UNCHECKED, 0) + 1
+    return out
+
+
+def coverage_text(cov: Dict[str, int], book: Optional[str], scope: str) -> str:
+    """One plain sentence on who has props up for `scope` (a game or 'this slate'), naming the
+    selected book first. Empty when nobody has anything."""
+    if not cov:
+        return ""
+    bk = O.canonical_book(book) if book else None
+    mine = cov.get(bk, 0) if bk else 0
+    others = sorted(((n, b) for b, n in cov.items() if b != bk), reverse=True)
+    other_txt = ", ".join(f"{O.book_label(b)} {n}" for n, b in others[:6])
+    if bk and mine == 0:
+        return (f"{O.book_label(bk)} has no player props posted for {scope}. "
+                f"Other books do ({other_txt}) — pick one of them in the Sportsbook selector to see the analysis there.")
+    if bk:
+        return f"Player props posted for {scope}: {O.book_label(bk)} {mine}" + (f" · {other_txt}" if other_txt else "")
+    return f"Player props posted for {scope}: " + other_txt
+
+
 # ---------------------------------------------------------------------------
 # Game times (slot + kickoff), shared by the scan, the commentary and the page filters
 # ---------------------------------------------------------------------------
@@ -620,7 +697,9 @@ def write_commentary(calls: List[Dict], *, sport_label: str, date_str: str, n_ga
                      board: Optional[List[Dict]] = None,
                      times: Optional[Dict[str, Dict]] = None,
                      book_label: Optional[str] = None, not_offered: int = 0,
-                     lines_posted: bool = True) -> Dict:
+                     lines_posted: bool = True, breakdown: Optional[Dict[str, int]] = None,
+                     coverage_note: str = "",
+                     withheld_games: Optional[Dict[str, int]] = None) -> Dict:
     """The day, in words. Returns {"headline", "overview", "focus": [..], "games": [{game, text, calls}],
     "facts": <the JSON-able facts the LLM layer is given>}. Wording only ever restates numbers that
     are in `calls`; with no calls it says so plainly.
@@ -633,7 +712,11 @@ def write_commentary(calls: List[Dict], *, sport_label: str, date_str: str, n_ga
     SPORTSBOOK: pass `calls` that are all bettable at the selected book (the page does), the book's
     name as `book_label`, how many further plays had angles but aren't posted there (`not_offered`),
     and whether that book has any props up for the slate (`lines_posted`). The wording then says so
-    — and, when nothing is posted, makes no line-specific suggestion at all."""
+    — and, when nothing is posted, makes no line-specific suggestion at all. When plays had angles
+    but the book offers none of them, the read is NOT called quiet: it says the plays were withheld
+    (`breakdown` = book_breakdown of the withheld plays; `coverage_note` = coverage_text;
+    `withheld_games` = {game: how many of its plays were withheld} so a game with none left doesn't
+    claim 'no play clears an angle')."""
     notes = notes or {}
     times = times or {}
     gems = [c for c in calls if c["gem"]]
@@ -643,7 +726,13 @@ def write_commentary(calls: List[Dict], *, sport_label: str, date_str: str, n_ga
             angle_counts[a] = angle_counts.get(a, 0) + 1
     top_angles = sorted(angle_counts, key=lambda a: -angle_counts[a])[:3]
 
-    if not calls:
+    withheld = bool(not calls and book_label and lines_posted and not_offered)
+    if withheld:
+        headline = f"{sport_label}: nothing I can take at {book_label} for {date_str}"
+        overview = (f"I looked at {_count(n_games, 'game')}. {_count(not_offered, 'play')} "
+                    f"{'has' if not_offered == 1 else 'have'} angles behind {'it' if not_offered == 1 else 'them'}, "
+                    f"but none is available at {book_label} at the model's line.")
+    elif not calls:
         headline = f"{sport_label}: a quiet read for {date_str}"
         overview = (f"I looked at {_count(n_games, 'game')} and no play had a single angle clear its bar today. "
                     f"That is information too: nothing here is worth forcing.")
@@ -664,6 +753,20 @@ def write_commentary(calls: List[Dict], *, sport_label: str, date_str: str, n_ga
     if book_label and not lines_posted:
         overview = (f"{book_label} has no player props posted for this slate yet, so there is nothing line-specific "
                     f"I can suggest. The model's lines are placeholders until props go up; check back then.")
+    elif withheld:
+        bd = breakdown or {}
+        bits = []
+        if bd.get(STATE_NOT_POSTED):
+            n_np = bd[STATE_NOT_POSTED]
+            bits.append(f"{n_np} {'isn' if n_np == 1 else 'aren'}'t posted at {book_label} at all")
+        if bd.get(STATE_OTHER_LINE):
+            n_ol = bd[STATE_OTHER_LINE]
+            bits.append(f"{n_ol} {'is' if n_ol == 1 else 'are'} posted there at a different line")
+        if bits:
+            txt = "; ".join(bits)
+            overview += " " + txt[0].upper() + txt[1:] + "."
+        if coverage_note:
+            overview += " " + coverage_note
     elif book_label and not_offered:
         overview += (f" Suggestions are limited to lines {book_label} actually posts; {_count(not_offered, 'more play')} "
                      f"with angles {'is' if not_offered == 1 else 'are'} left out because {book_label} doesn't offer "
@@ -708,6 +811,11 @@ def write_commentary(calls: List[Dict], *, sport_label: str, date_str: str, n_ga
             extra = [c for c in cs[1:3]]
             if extra:
                 bits.append("Also worth a look: " + "; ".join(describe_call(c) for c in extra) + ".")
+        elif (withheld_games or {}).get(game):
+            n_w = withheld_games[game]
+            bits.append(f"{_count(n_w, 'play')} here {'has' if n_w == 1 else 'have'} angles, but "
+                        f"{'it isn' if n_w == 1 else 'they aren'}'t available at {book_label or 'the selected book'} "
+                        f"at the model's line.")
         else:
             bits.append("No play clears an angle here.")
         for n in notes.get(game, []):
