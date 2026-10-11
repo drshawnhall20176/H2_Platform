@@ -104,6 +104,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 4565357,Brenden,Deasfernandes,Brenden Deasfernandes,Northwestern,DB,4,3.0,74.0,200.0
 4565488,Pat,Barnett,Pat Barnett,Fresno State,OL,4,50.0,78.0,315.0
 4565536,Dave,Herard,Dave Herard,Western Kentucky,DB,4,5.0,72.0,204.0
+4566116,Chevy,Trask,Chevy Trask,Northern Illinois,OL,4,70.0,77.0,300.0
 4566164,Jack,Olsen,Jack Olsen,Miami,PK,4,82.0,70.0,195.0
 4567252,Brandon,Mack II,Brandon Mack II,Houston,LB,4,4.0,76.0,255.0
 4567748,Sam,Huard,Sam Huard,USC,QB,4,7.0,73.0,205.0
@@ -5796,6 +5797,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 5152214,Ray,Lotten,Ray Lotten,New Mexico State,TE,3,19.0,77.0,240.0
 5152215,Luke,Beard,Luke Beard,Southern Miss,LS,3,46.0,73.0,218.0
 5152253,Precious,Ekeh,Precious Ekeh,Kennesaw State,OL,3,75.0,75.0,325.0
+5152261,Clifton,Thompson,Clifton Thompson,Kansas,DL,4,0.0,73.0,340.0
 5152266,Gavin,Willis,Gavin Willis,Charlotte,LB,4,13.0,72.0,230.0
 5152288,Xavier,Allen,Xavier Allen,Memphis,OL,4,71.0,77.0,299.0
 5152347,Adam,Zouagui,Adam Zouagui,Kentucky,PK,4,88.0,71.0,191.0
@@ -12854,6 +12856,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 5295957,Atley,Cowan,Atley Cowan,Marshall,CB,2,37.0,74.0,192.0
 5295958,Lorcan,Quinn,Lorcan Quinn,Alabama,PK,2,90.0,73.0,196.0
 5295959,Ty,Powell,Ty Powell,Marshall,PK,1,96.0,72.0,185.0
+5295963,Jayden,Glosten,Jayden Glosten,Louisiana,DB,1,25.0,,
 5295965,Aiden,Falgout,Aiden Falgout,Louisiana,TE,1,43.0,73.0,235.0
 5295966,Maurice,Brown Jr.,Maurice Brown Jr.,Louisiana,CB,1,47.0,72.0,173.0
 5295969,Brady,Hart,Brady Hart,Texas A&M,QB,2,13.0,76.0,200.0
