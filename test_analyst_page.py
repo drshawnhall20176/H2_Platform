@@ -69,9 +69,11 @@ def desk(monkeypatch, tmp_path):
     monkeypatch.setattr(sports.get("NBA").engine, "get_player_results", lambda d: {}, raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
-    def run():
+    def run(script=False, matchup=False):
         at = AppTest.from_file(PAGE, default_timeout=60)
         at.session_state["sport"] = "NBA"
+        at.session_state["analyst_script"] = script
+        at.session_state["analyst_matchup"] = matchup
         at.run()
         return at
     run.db = str(tmp_path / "ledger.db")
@@ -696,9 +698,22 @@ def test_the_public_build_never_marks_or_grades_earlier_days_but_the_owner_does(
 
 
 # ------------------------------------------------------------------ game-script / opponent-matchup evidence
+def test_the_evidence_is_off_by_default_so_the_desk_opens_fast(desk, monkeypatch):
+    calls = []
+    monkeypatch.setattr(AC, "load_game_env", lambda *a, **k: calls.append("env") or ({}, ""))
+    monkeypatch.setattr(AC, "load_matchups", lambda *a, **k: calls.append("mu") or ({}, ""))
+    at = AppTest.from_file(PAGE, default_timeout=60)
+    at.session_state["sport"] = "NBA"
+    at.run()                                                        # nothing set: the widgets' own defaults
+    assert not at.exception, [e.value for e in at.exception]
+    assert calls == []
+    boxes = {c.label: c.value for c in at.checkbox if c.label.startswith("Add ")}
+    assert boxes == {"Add game-script evidence (spread & total)": False, "Add opponent-matchup evidence": False}
+
+
 def test_matchup_evidence_becomes_an_angle_and_is_locked_with_the_call(desk, monkeypatch):
     monkeypatch.setattr(AC, "load_matchups", lambda *a, **k: ({("gemguy", "Points"): {"factor": 1.2, "opp": "BOS", "allows": 22.0}}, ""))
-    at = desk()
+    at = desk(matchup=True)
     assert not at.exception, [e.value for e in at.exception]
     (row,) = AL.fetch_calls(db_path=desk.db)
     assert row["player"] == "Gem Guy" and row["angles"] == ["market_gap", "team_surge", "matchup"]
@@ -708,13 +723,13 @@ def test_matchup_evidence_becomes_an_angle_and_is_locked_with_the_call(desk, mon
 def test_a_script_against_the_pick_shows_up_as_a_caution(desk, monkeypatch):
     env = {"BOS @ NYK": {"home_name": "NYK", "away_name": "BOS", "home_spread": -12.0, "away_spread": 12.0, "total": None, "total_pct": None}}
     monkeypatch.setattr(AC, "load_game_env", lambda *a, **k: (env, ""))
-    at = desk()
+    at = desk(script=True)
     assert not at.exception, [e.value for e in at.exception]
     cautions = [str(v) for df in at.dataframe for v in df.value.get("Cautions", [])]
     assert any("game script points the other way: NYK is a 12-point favorite" in c for c in cautions)
 
 
-def test_the_loaders_get_the_slate_the_key_and_the_sports_modules(desk, monkeypatch):
+def test_each_loader_gets_the_slate_the_key_and_the_sports_modules_and_only_when_ticked(desk, monkeypatch):
     seen = {}
 
     def env(sport_key, d, meta, api_key, odds_sport_key):
@@ -726,32 +741,29 @@ def test_the_loaders_get_the_slate_the_key_and_the_sports_modules(desk, monkeypa
         return {}, ""
     monkeypatch.setattr(AC, "load_game_env", env)
     monkeypatch.setattr(AC, "load_matchups", mu)
-    at = desk()
+    at = desk(script=True)
     assert not at.exception, [e.value for e in at.exception]
     today = at.date_input[0].value.strftime("%Y-%m-%d")
-    assert seen["env"] == ("NBA", today, ["BOS @ NYK"], "KEY", "basketball_nba")
-    assert seen["mu"] == ("NBA", today, True, True)
+    assert seen == {"env": ("NBA", today, ["BOS @ NYK"], "KEY", "basketball_nba")}          # matchups were not asked for
+    seen.clear()
+    desk(matchup=True)
+    assert seen == {"mu": ("NBA", today, True, True)}
 
 
 def test_a_source_that_is_missing_is_said_out_loud_and_never_breaks_the_page(desk, monkeypatch):
     monkeypatch.setattr(AC, "load_game_env", lambda *a, **k: ({}, "no game spreads or totals are posted yet, so the game-script angle is quiet"))
     monkeypatch.setattr(AC, "load_matchups", lambda *a, **k: ({}, "no opponent-matchup data is available for this slate yet"))
-    at = desk()
+    at = desk(script=True, matchup=True)
     assert not at.exception, [e.value for e in at.exception]
     joined = " ".join(texts(at))
     assert "Heads up: no game spreads or totals are posted yet, so the game-script angle is quiet." in joined
     assert "Heads up: no opponent-matchup data is available for this slate yet." in joined
 
 
-def test_the_evidence_can_be_switched_off(desk, monkeypatch):
+def test_the_loaders_are_cached_so_a_second_visit_does_not_repeat_the_work(desk, monkeypatch):
     calls = []
     monkeypatch.setattr(AC, "load_game_env", lambda *a, **k: calls.append("env") or ({}, ""))
     monkeypatch.setattr(AC, "load_matchups", lambda *a, **k: calls.append("mu") or ({}, ""))
-    at = AppTest.from_file(PAGE, default_timeout=60)
-    at.session_state["sport"] = "NBA"
-    at.session_state["analyst_context"] = False
-    at.run()
-    assert not at.exception, [e.value for e in at.exception]
-    assert calls == []
-    box = [c for c in at.checkbox if c.label.startswith("Include game-script")]
-    assert box and box[0].value is False
+    desk(script=True, matchup=True)
+    desk(script=True, matchup=True)
+    assert calls == ["env", "mu"]

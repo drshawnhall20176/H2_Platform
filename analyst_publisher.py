@@ -82,7 +82,7 @@ def default_deps() -> Dict[str, Callable]:
 # ---------------------------------------------------------------------------
 # Building the day's calls (the page's scan, headless)
 # ---------------------------------------------------------------------------
-def build_calls(sport_key: str, date_str: str, book: str, deps: Dict[str, Callable]) -> Dict:
+def build_calls(sport_key: str, date_str: str, book: str, deps: Dict[str, Callable], evidence: bool = True) -> Dict:
     """{'calls': [...], 'notes': [...], 'n_games': int}. Never raises for a missing source: a source that fails
     only removes the angles that depend on it, and says so in `notes`."""
     notes: List[str] = []
@@ -106,12 +106,13 @@ def build_calls(sport_key: str, date_str: str, book: str, deps: Dict[str, Callab
     for p in plays:
         times.setdefault(p.get("Game"), A.time_info(p.get("GameDate")))
     game_env, matchups = {}, {}
-    try:
-        game_env, n1 = deps["game_env"](sport_key, date_str, meta, key)
-        matchups, n2 = deps["matchups"](sport_key, date_str)
-        notes += [n for n in (n1, n2) if n]
-    except Exception as exc:                                   # noqa: BLE001
-        notes.append(f"the extra evidence couldn't be loaded ({str(exc)[:90]})")
+    if evidence:                                               # the heavy reads (a request per game; every opponent's games)
+        try:
+            game_env, n1 = deps["game_env"](sport_key, date_str, meta, key)
+            matchups, n2 = deps["matchups"](sport_key, date_str)
+            notes += [n for n in (n1, n2) if n]
+        except Exception as exc:                               # noqa: BLE001
+            notes.append(f"the extra evidence couldn't be loaded ({str(exc)[:90]})")
     weights = A.learned_weights(AL.fetch_calls(sport=sport_key, settled_only=True))
     calls = A.scan(plays, sport_key, date_str, offers=offers, odds_map=sports.get(sport_key).market_map,
                    history_fn=deps["history_fn"], weights=weights, expect_book_lines=bool(offers), times=times,
@@ -145,7 +146,9 @@ def publish_sport(sport_key: str, date_str: str, today_str: str, deps: Dict[str,
             res = AL.settle_day(sport_key, d, deps["results"](sport_key, d))
             out["graded"] += res["settled"]
 
-    built = build_calls(sport_key, date_str, book, deps)
+    # Once the card is out the angles can't change what was posted; a later run only needs the book's current lines (for
+    # the closing-line marks), so it skips the heavy evidence reads and the credits they cost.
+    built = build_calls(sport_key, date_str, book, deps, evidence=not (post and AL.posted("picks", sport_key, date_str)))
     out["notes"] = built["notes"]
     cards = [c for c in built["calls"] if c["book_state"] == A.STATE_POSTED and AL.loggable(c, today_str)]
     if post and cards:

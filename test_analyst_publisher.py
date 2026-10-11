@@ -347,3 +347,15 @@ def test_a_later_day_with_only_unpublished_calls_does_not_hide_the_published_day
     assert r["recap"] == "posted"
     recap = [t for t in send.sent if "recap" in t][0]
     assert f"NBA, {_day(-2)}" in recap and "Posted Earlier" in recap
+
+
+def test_a_later_run_skips_the_heavy_evidence_reads_once_the_card_is_out(env):
+    calls = []
+    env["deps"]["game_env"] = lambda *a: calls.append("env") or ({}, "")
+    env["deps"]["matchups"] = lambda *a: calls.append("mu") or ({}, "")
+    go(env)
+    assert calls == ["env", "mu"]                                    # the first run reads them
+    go(env)
+    assert calls == ["env", "mu"]                                    # the second does not
+    go(env, post=False)                                              # a dry run before the card exists still would; after it, post=False reads
+    assert calls == ["env", "mu", "env", "mu"]

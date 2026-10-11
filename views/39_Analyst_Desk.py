@@ -140,24 +140,40 @@ else:
             offers_note = "no player props are posted yet, so the soft-price angle is quiet"
 
 # Independent evidence (analyst_context.py): the point spread and game total, and what each opponent has allowed.
-# Both come from data the model's own percentage does not use. Fail-soft: a missing source only means fewer angles.
-use_context = st.checkbox("Include game-script and opponent-matchup evidence", value=True, key="analyst_context",
-                          help="Adds two kinds of evidence that don't come from the player's recent games: the point spread / "
-                               "game total, and how much the opponent has allowed at this stat. Untick it if the page is slow.")
+# Both come from data the model's own percentage does not use. OFF BY DEFAULT: each reads fresh data (one odds request
+# per game; every opponent's recent games), which can take a minute or more the first time, so the Desk opens fast and
+# the owner opts in. Results are cached for 15 minutes. Fail-soft: a missing source only means fewer angles.
+@st.cache_data(ttl=900, show_spinner=False)
+def _cached_game_env(sport_key: str, d: str, _meta, _api_key, odds_sport_key: str):
+    return AC.load_game_env(sport_key, d, _meta, _api_key, odds_sport_key)
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _cached_matchups(sport_key: str, d: str):
+    return AC.load_matchups(sport_key, d, E, _active.projections)
+
+
+ev1, ev2 = st.columns(2)
+with ev1:
+    use_script = st.checkbox("Add game-script evidence (spread & total)", value=False, key="analyst_script",
+                             help="Adds the point spread and game total as a separate kind of evidence. Reads one odds request per game "
+                                  "(extra Odds API credits); cached for 15 minutes.")
+with ev2:
+    use_matchup = st.checkbox("Add opponent-matchup evidence", value=False, key="analyst_matchup",
+                              help="Adds what each opponent has allowed at the stat, from the Hot Hand Engine's own numbers. Reads every "
+                                   "opponent's recent games, so the first load can take a minute or more; cached for 15 minutes.")
 game_env: dict = {}
 matchups: dict = {}
 context_notes: list = []
-if use_context:
-    def _env_loader(sport_key, d):
-        return AC.load_game_env(sport_key, d, meta, api_key, _active.odds_sport_key)
-
-    def _matchup_loader(sport_key, d):
-        return AC.load_matchups(sport_key, d, E, _active.projections)
-
-    with st.spinner("Reading the spreads, totals and opponent matchups..."):
-        game_env, _env_note = compute_once(f"analyst_env_{_active.key}", _env_loader, _active.key, date_str)
-        matchups, _mu_note = compute_once(f"analyst_mu_{_active.key}", _matchup_loader, _active.key, date_str)
-    context_notes = [n for n in (_env_note, _mu_note) if n]
+if use_script:
+    with st.spinner("Reading the spreads and totals..."):
+        game_env, _env_note = _cached_game_env(_active.key, date_str, meta, api_key, _active.odds_sport_key)
+    context_notes.append(_env_note)
+if use_matchup:
+    with st.spinner("Reading opponent matchups (the first time can take a minute)..."):
+        matchups, _mu_note = _cached_matchups(_active.key, date_str)
+    context_notes.append(_mu_note)
+context_notes = [n for n in context_notes if n]
 
 # --- learn from the record, scan, lock ---------------------------------------
 history = AL.fetch_calls(sport=_active.key, settled_only=True)
