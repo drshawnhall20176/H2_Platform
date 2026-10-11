@@ -434,14 +434,14 @@ def _df_with(at, col):
 def test_the_locked_calls_tab_shows_each_locked_call_against_the_books_current_price(desk, monkeypatch):
     offers = _live(desk, monkeypatch)
     at = desk()
-    assert any("1 locked at DraftKings; 0 moved" in t for t in texts(at))
+    assert any("1 locked at DraftKings for the whole slate; 0 moved" in t for t in texts(at))
     t = _df_with(at, "Now")
     assert list(t["Player"]) == ["Gem Guy"] and t.iloc[0]["Now"] == "Unchanged" and t.iloc[0]["Locked price"] == -115
     for o in offers:                                           # the market moves: Gem Guy's over gets shorter
         if o["player"] == "Gem Guy":
             o["over"]["draftkings"] = -140
     at = desk()
-    assert any("1 locked at DraftKings; 1 moved" in t for t in texts(at))
+    assert any("1 locked at DraftKings for the whole slate; 1 moved" in t for t in texts(at))
     assert _df_with(at, "Now").iloc[0]["Now"] == "Price -115 → -140 (toward the call)"
     offers[:] = [o for o in offers if o["player"] != "Gem Guy"]                                   # then he is pulled
     at = desk()
@@ -848,3 +848,27 @@ def test_grading_an_earlier_day_on_a_rerun_refreshes_the_record_shown(desk, monk
     assert "Graded 1 call(s) from 2026-09-30" in " ".join(texts(at))
     board = [d.value for d in at.dataframe if "Angle" in d.value.columns][0]
     assert board.loc[board["Angle"] == "All published calls", "Graded"].iloc[0] == 1
+
+
+def _locked_table(at):
+    return _df_with(at, "Now")
+
+
+def test_the_locked_calls_table_follows_the_time_slot_and_game_pickers(monkeypatch, isolated_ledger):
+    at = _run_slots(monkeypatch, "NBA")
+    assert not at.exception, [e.value for e in at.exception]
+    full = _locked_table(at)
+    games = sorted(set(full["Game"]))
+    assert len(games) >= 2                                                         # the whole slate, with nothing narrowed
+    assert any("locked at DraftKings for the whole slate" in w.value for w in at.markdown)
+    [s for s in at.selectbox if s.label == "Time slot"][0].set_value("Late").run()
+    late = _locked_table(at)
+    assert set(late["Game"]) == {"LAT @ NYK"} and len(late) < len(full)
+    assert any("for the late games" in w.value for w in at.markdown)
+    [s for s in at.selectbox if s.label == "Time slot"][0].set_value("All slate").run()
+    game = [s for s in at.selectbox if s.label == "Game"][0]
+    game.set_value("2:00 PM ET — QUI @ DEN").run()
+    assert not at.exception, [e.value for e in at.exception]
+    quiet = _locked_table(at)
+    assert quiet is None or set(quiet["Game"]) == {"QUI @ DEN"}                  # a game with no locked call shows none, not the others
+    assert not any("for the whole slate" in w.value for w in at.markdown)

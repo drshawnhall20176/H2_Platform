@@ -461,14 +461,19 @@ with tab_all:
 with tab_live:
     st.markdown("#### Today's locked calls — what the book shows now")
     day_rows = [r for r in sport_rows if r["date"] == date_str and not r.get("settled_at")]
+    # Follows the Time slot / Game pickers above, like the rest of the page. With nothing narrowed it shows every locked call.
+    _narrowed = slot_pick != "All slate" or game_pick != ALL_GAMES
+    if _narrowed:
+        day_rows = [r for r in day_rows if r.get("game") in view_set]
     status_rows = AT.locked_status(day_rows, A.index_offers(offers), _active.market_map, preferred_book)
+    _where = (game_pick if game_pick != ALL_GAMES else f"the {slot_pick.lower()} games") if _narrowed else "the whole slate"
     if not status_rows:
-        st.info(f"No calls are locked at {book_name} for {date_str} yet. Calls lock the first time the desk "
+        st.info(f"No calls are locked at {book_name} for {_where if _narrowed else date_str} yet. Calls lock the first time the desk "
                 f"publishes them for a game that hasn't started.")
     else:
         moved = sum(1 for r in status_rows if r["state"] != A.STATE_POSTED
                     or (r["move_pts"] is not None and abs(r["move_pts"]) >= AT.FLAT_BAND * 100))
-        st.write(f"{len(status_rows)} locked at {book_name}; {moved} moved, changed line or were pulled since the lock.")
+        st.write(f"{len(status_rows)} locked at {book_name} for {_where}; {moved} moved, changed line or were pulled since the lock.")
         st.dataframe(pd.DataFrame([{
             "Game": r["game"], "Player": r["player"], "Play": f"{r['side']} {r['line']:g} {r['market']}",
             "Locked price": r["locked_price"], "Now": r["text"], "💎": "💎" if r["gem"] else "",
