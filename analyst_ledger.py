@@ -64,13 +64,18 @@ CREATE TABLE IF NOT EXISTS analyst_calls (
     settled_at  TEXT,
     last_line   REAL,
     last_price  REAL,
-    marked_at   TEXT
+    marked_at   TEXT,
+    published_at TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_analyst_call ON analyst_calls (call_date, sport, player, market, side);
+CREATE TABLE IF NOT EXISTS analyst_posts (
+    kind TEXT NOT NULL, sport TEXT NOT NULL, post_date TEXT NOT NULL, posted_at TEXT NOT NULL,
+    PRIMARY KEY (kind, sport, post_date)
+);
 """
 
 # Columns added after the first release: an existing database gets them with ALTER TABLE.
-_MARK_COLS = (("last_line", "REAL"), ("last_price", "REAL"), ("marked_at", "TEXT"))
+_MARK_COLS = (("last_line", "REAL"), ("last_price", "REAL"), ("marked_at", "TEXT"), ("published_at", "TEXT"))
 
 _PG_SCHEMA = """
 CREATE TABLE IF NOT EXISTS analyst_calls (
@@ -80,9 +85,13 @@ CREATE TABLE IF NOT EXISTS analyst_calls (
     line REAL, model_prob REAL, conviction REAL, price REAL, price_book TEXT, angles TEXT,
     cautions TEXT, score REAL, gem INTEGER, chalk INTEGER, why TEXT,
     hit INTEGER, actual REAL, settled_at TEXT,
-    last_line REAL, last_price REAL, marked_at TEXT
+    last_line REAL, last_price REAL, marked_at TEXT, published_at TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_analyst_call ON analyst_calls (call_date, sport, player, market, side);
+CREATE TABLE IF NOT EXISTS analyst_posts (
+    kind TEXT NOT NULL, sport TEXT NOT NULL, post_date TEXT NOT NULL, posted_at TEXT NOT NULL,
+    PRIMARY KEY (kind, sport, post_date)
+);
 """
 
 
@@ -221,6 +230,67 @@ def mark_calls(calls: List[Dict], today_str: str, now: Optional[datetime] = None
                                 "AND settled_at IS NULL AND price_book=?",
                        (line, price, stamp, c["date"], c["sport"], c["player"], c["market"], c["side"], book)) else 0
     return n
+
+
+def mark_published(calls: List[Dict], posted_at: Optional[datetime] = None, db_path: Optional[str] = None) -> int:
+    """Stamp calls as PUBLISHED — actually shown to the audience (posted to Discord) — as opposed to merely
+    flagged by the model. Only rows already in the ledger are stamped, only once (the first publication
+    time stands), and nothing else about the row changes. Returns how many rows were stamped."""
+    stamp = (posted_at or datetime.now(timezone.utc)).isoformat(timespec="seconds")
+    n = 0
+    for c in calls:
+        n += 1 if _run(db_path, "UPDATE analyst_calls SET published_at=? WHERE call_date=? AND sport=? AND player=? "
+                                "AND market=? AND side=? AND published_at IS NULL",
+                       (stamp, c["date"], c["sport"], c["player"], c["market"], c["side"])) else 0
+    return n
+
+
+# ---------------------------------------------------------------------------
+# Post claims (the scheduled publisher posts each card and recap once)
+# ---------------------------------------------------------------------------
+def claim_post(kind: str, sport: str, date_str: str, now: Optional[datetime] = None, db_path: Optional[str] = None) -> bool:
+    """Claim the right to publish one (kind, sport, date) message. True for the first caller, False for every
+    later one — so two overlapping runs, or a re-run, can never post the same card twice. A caller whose post
+    then fails gives the claim back with release_post."""
+    stamp = (now or datetime.now(timezone.utc)).isoformat(timespec="seconds")
+    return bool(_run(db_path, "INSERT INTO analyst_posts (kind, sport, post_date, posted_at) VALUES (?, ?, ?, ?) "
+                              "ON CONFLICT (kind, sport, post_date) DO NOTHING", (kind, sport, date_str, stamp)))
+
+
+def release_post(kind: str, sport: str, date_str: str, db_path: Optional[str] = None) -> None:
+    _run(db_path, "DELETE FROM analyst_posts WHERE kind=? AND sport=? AND post_date=?", (kind, sport, date_str))
+
+
+def posted(kind: str, sport: str, date_str: str, db_path: Optional[str] = None) -> bool:
+    return bool(_run(db_path, "SELECT 1 AS x FROM analyst_posts WHERE kind=? AND sport=? AND post_date=?",
+                     (kind, sport, date_str), fetch=True))
+
+
+# Fields that fix a call at the moment it was locked. The fingerprint covers ONLY these (never a result,
+# never a later market mark), so it can be published the day it is made and checked against the full
+# list long afterwards.
+FINGERPRINT_FIELDS = ("logged_at", "call_date", "sport", "player", "market", "side", "line", "model_prob", "price", "price_book")
+
+
+def _fp_cell(v) -> str:
+    return "" if v is None else str(v)
+
+
+def fingerprint_rows(rows: List[Dict]) -> List[List[str]]:
+    """The canonical, sorted table behind the fingerprint (also what the record page's CSV contains)."""
+    table = [[_fp_cell(r.get(f)) for f in FINGERPRINT_FIELDS] for r in rows]
+    return sorted(table, key=lambda t: (t[1], t[2], t[3], t[4], t[5], t[0]))
+
+
+def record_fingerprint(rows: List[Dict]) -> str:
+    """SHA-256 (first 16 hex characters) of the locked-fields table: one line per call, fields joined with
+    '|', lines joined with '\n', in the order fingerprint_rows returns. Empty record -> ''."""
+    import hashlib
+    table = fingerprint_rows(rows)
+    if not table:
+        return ""
+    text = "\n".join("|".join(t) for t in table)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
 # ---------------------------------------------------------------------------

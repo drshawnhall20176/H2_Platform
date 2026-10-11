@@ -1,0 +1,77 @@
+# Post the Analyst Desk's daily card and recap to Discord automatically — H2 Sports Media's publishing rhythm.
+#
+# WHAT IT DOES:
+#   Runs analyst_publisher.py --post a few times a day. Each run, for every sport with a slate:
+#     1. grades earlier locked days against the final box scores,
+#     2. locks today's calls (only lines your sportsbook really posts, only games that haven't started),
+#     3. posts ONE picks card per sport per day to your Discord channel (the first run that has calls posts it;
+#        later runs see it is already out and do nothing — the claim lives in your database),
+#     4. posts ONE recap per sport for the latest fully graded day whose calls were published.
+#   A sport with no games, or no props at your book yet, is skipped quietly. A failed post is retried by the next run.
+#
+# SECRETS (repo Settings -> Secrets and variables -> Actions) — all three are required:
+#     ODDS_API_KEY          to read lines, spreads and totals
+#     DATABASE_URL          your Supabase/Postgres URL — the SAME one the app uses, so the record, the "already
+#                           posted" claims and the public Analyst Record page all see these calls.
+#                           Without it the job refuses to post (a throwaway file would let it repeat itself).
+#     DISCORD_WEBHOOK_URL   the channel's webhook link (Discord: channel Settings -> Integrations -> Webhooks)
+#
+# OPTIONAL variables (Settings -> Secrets and variables -> Actions -> Variables):
+#     ANALYST_SPORTS        e.g. "NBA,NFL" — limit which sports it covers (default: every sport with projections)
+#     ANALYST_BOOK          e.g. "fanduel" — the sportsbook the card is built for (default: draftkings)
+#
+# TRY IT FIRST: run "Run workflow" with dry_run ticked (the default for manual runs). It prints what it WOULD post in
+#   the job log and writes and sends nothing. Post to a private test channel first, then switch the webhook.
+#
+# SCHEDULE (UTC; ET is 4-5 hours behind): 14:23 and 17:41 catch the morning/midday props for evening games and the
+#   previous night's results; 21:07 catches late-posted afternoon-to-evening lines. GitHub may start a run a few
+#   minutes late. Because each card is posted once, the extra runs cost nothing when the card is already out.
+
+name: analyst-publish
+
+on:
+  schedule:
+    - cron: "23 14 * * *"
+    - cron: "41 17 * * *"
+    - cron: "7 21 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (print what would be posted; write and send nothing)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: analyst-publish          # two runs never overlap
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Lock, grade and post
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          ANALYST_SPORTS: ${{ vars.ANALYST_SPORTS }}
+          ANALYST_BOOK: ${{ vars.ANALYST_BOOK }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            python analyst_publisher.py
+          else
+            python analyst_publisher.py --post
+          fi

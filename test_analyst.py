@@ -175,7 +175,8 @@ def test_a_thin_market_has_no_chalk_so_nothing_is_called_overlooked_by_accident(
     assert not calls[0]["chalk"] and calls[0]["gem"]
 
 
-def test_gems_need_a_real_probability_and_at_most_one_caution():
+def test_gems_need_a_real_probability_and_at_most_one_caution(monkeypatch):
+    monkeypatch.setitem(A.ANGLE_FAMILY, "form_run", "a separate family")      # this test is about probability and cautions, not families
     low = A.scan(board() + [gem_play(ModelProb=0.54, Conviction=1.2)], "NBA", "d")
     assert not [c for c in low if c["player"] == "Gem"][0]["gem"]
     # market_gap + form_run agree; a cold team is one caution, a market moving away is a second
@@ -662,3 +663,93 @@ def test_other_market_line_needs_both_an_absolute_and_a_relative_gap_and_average
     assert "BetMGM, FanDuel" in r["evidence"] and "and others" not in r["evidence"]
     many = _ml_ctx(_o(240.5, ["draftkings"]), _o(255.5, ["fanduel", "betmgm", "bovada", "betrivers"]))
     assert "and others" in A.detect_market_line(play(), many)["evidence"]
+
+
+# ------------------------------------------------- independence, "why this side", one-sided days (Build 233)
+def test_a_gem_needs_angles_from_two_different_kinds_of_evidence():
+    base = dict(TeamTrend="steady", **log([300] * 6, key="pass_yds"))
+    same = [c for c in A.scan(board() + [gem_play(**base)], "NBA", "d") if c["player"] == "Gem"][0]
+    assert [a["angle"] for a in same["angles"]] == ["market_gap", "form_run"]                  # both read from his recent games
+    assert A.angle_families(same["angles"]) == {"his recent games"} and not same["gem"]
+    mixed = [c for c in A.scan(board() + [gem_play()], "NBA", "d") if c["player"] == "Gem"][0]
+    assert {a["angle"] for a in mixed["angles"]} == {"market_gap", "team_surge"} and mixed["gem"]
+    assert A.angle_families(mixed["angles"]) == {"his recent games", "team context"}
+
+
+def test_every_angle_belongs_to_a_family_and_the_family_rule_is_two():
+    assert set(A.ANGLE_FAMILY) == set(A.ANGLES) and A.GEM_MIN_FAMILIES == 2
+    assert A.ANGLE_FAMILY["soft_book"] == A.ANGLE_FAMILY["line_move"] == A.ANGLE_FAMILY["market_line"]
+
+
+def test_the_reasoning_lists_the_games_the_line_both_sides_and_the_books_price():
+    p = play(Side="Under", Line=3.5, ModelProb=0.75, Conviction=1.53, ConvictionSource="book", Market="Receptions",
+             _stat_key="rec", _game_log=[{"rec": 3}, {"rec": 2}, {"rec": 1}, {"rec": 2}])
+    r = A.reasoning_for(p, "NBA")                                                    # NBA logs are oldest first
+    assert r[0] == "Last 4 games (oldest to newest): 3, 2, 1, 2, against a line of 3.5 — 4 of 4 went under, 0 did not; his average is 2.0."
+    assert r[1] == ("The model gives Under 75% and Over 25%. A 4-game sample is pulled toward 50%, so 4 for 4 tops out at 75% — "
+                    "read it as 'every recent game went this way', not as a precise 75%.")
+    assert r[2] == "The book prices Under at 49%." and len(r) == 3
+    newest_first = A.reasoning_for(p, "NFL")                                         # NFL logs are newest first
+    assert newest_first[0].startswith("Last 4 games (oldest to newest): 2, 1, 2, 3,")
+
+
+def test_the_ceiling_note_appears_only_when_the_number_really_is_at_the_ceiling():
+    base = dict(Side="Over", Line=3.5, Market="Receptions", _stat_key="rec")
+    mixed = A.reasoning_for(play(ModelProb=0.5, _game_log=[{"rec": 5}, {"rec": 5}, {"rec": 1}, {"rec": 5}], **base), "NBA")
+    assert "3 of 4 went over, 1 did not" in mixed[0] and "tops out" not in mixed[1]          # not 4 for 4
+    longer = A.reasoning_for(play(ModelProb=0.93, _game_log=[{"rec": 5}] * 12, **base), "NBA")
+    assert "tops out" not in longer[1]                                                       # 93% is not what 12 for 12 is capped at
+    assert "12 for 12 tops out at 88%" in A.reasoning_for(play(ModelProb=0.875, _game_log=[{"rec": 5}] * 12, **base), "NBA")[1]
+    partial = A.reasoning_for(play(ModelProb=0.75, _game_log=[{"rec": 5}] * 3 + [{"rec": 1}], **base), "NBA")
+    assert "3 of 4 went over" in partial[0] and "tops out" not in partial[1]               # the ceiling needs every game on this side
+    off = A.reasoning_for(play(ModelProb=0.62, _game_log=[{"rec": 5}] * 4, **base), "NBA")
+    assert "tops out" not in off[1]                                                          # a number that isn't the ceiling isn't called one
+    assert "1 game (oldest" in A.reasoning_for(play(ModelProb=0.5, _game_log=[{"rec": 5}], **base), "NBA")[0]
+
+
+def test_reasoning_without_a_game_log_says_so_and_still_gives_both_sides():
+    r = A.reasoning_for(play(ModelProb=0.64), "NBA")
+    assert r == ["No game log is attached to this play, so the reasoning rests on the model's number alone (Over 64%, Under 36%)."]
+    assert A.reasoning_for(play(ModelProb=None), "NBA") == ["No game log is attached to this play, so the reasoning rests on the model's number alone."]
+
+
+def test_scan_attaches_the_reasoning_to_every_call():
+    calls = A.scan(board() + [gem_play()], "NBA", "d")
+    assert all(c["reasoning"] for c in calls)
+    assert [c for c in calls if c["player"] == "Gem"][0]["reasoning"][-1].startswith("The book prices Over at")
+
+
+def _calls(sides, **kw):
+    out = []
+    for i, sd in enumerate(sides):
+        out.append({"key": f"k{i}", "player": f"P{i}", "side": sd, "line": 3.5, "market": "Receptions", "model_prob": 0.75,
+                    "game": "A @ B", "gem": False, "chalk": False, "score": 1.0, "angles": [{"angle": "market_gap", "label": "Model vs market",
+                    "evidence": "model 75% vs market 49% (+26 pts)"}], "cautions": [], "slot": "Afternoon", "kickoff": "9:30 AM ET",
+                    "start": None, "reasoning": [f"Last 4 games: 1, 2, 1, 2 vs 3.5 — 4 of 4 went {sd.lower()}.", "second line"], **kw})
+    return out
+
+
+def test_a_one_sided_day_is_called_out_in_plain_words():
+    d = A.write_commentary(_calls(["Under"] * 6), sport_label="NFL", date_str="d", n_games=1)
+    assert "Heads up: 6 of 6 calls lean Under." in d["overview"] and "short recent-game samples or lines sitting high" in d["overview"]
+    assert d["facts"]["lean_note"].startswith("Heads up: 6 of 6 calls lean Under.")
+    seven = A.write_commentary(_calls(["Over"] * 6 + ["Under"]), sport_label="NFL", date_str="d", n_games=1)
+    assert "6 of 7 calls lean Over" in seven["overview"]                                    # 86% is over the 85% bar
+    mixed = A.write_commentary(_calls(["Over"] * 4 + ["Under"] * 2), sport_label="NFL", date_str="d", n_games=1)
+    assert "Heads up" not in mixed["overview"] and "lean_note" not in mixed["facts"]
+    five_of_six = A.write_commentary(_calls(["Under"] * 5 + ["Over"]), sport_label="NFL", date_str="d", n_games=1)
+    assert "Heads up" not in five_of_six["overview"]                                        # 83% is under the 85% bar
+    few = A.write_commentary(_calls(["Under"] * 4), sport_label="NFL", date_str="d", n_games=1)
+    assert "Heads up" not in few["overview"]                                                # four calls aren't a pattern yet
+    exact = A.write_commentary(_calls(["Under"] * 17 + ["Over"] * 3), sport_label="NFL", date_str="d", n_games=1)
+    assert "17 of 20 calls lean Under" in exact["overview"]                                 # exactly 85% counts
+
+
+def test_the_game_read_explains_why_the_top_play_is_on_its_side_and_the_ai_gets_the_notes():
+    d = A.write_commentary(_calls(["Under", "Under"]), sport_label="NFL", date_str="d", n_games=1)
+    text = d["games"][0]["text"]
+    assert "Why under: Last 4 games: 1, 2, 1, 2 vs 3.5 — 4 of 4 went under. second line" in text
+    assert d["facts"]["calls"][0]["why_this_side"][0].startswith("Last 4 games")
+    assert "why_this_side" in A.LLM_SYSTEM and "lean_note" in A.LLM_SYSTEM
+    nothing = A.write_commentary(_calls(["Under"], reasoning=[]), sport_label="NFL", date_str="d", n_games=1)
+    assert "Why under" not in nothing["games"][0]["text"]

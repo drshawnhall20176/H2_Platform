@@ -18,6 +18,7 @@ import pytz
 import streamlit as st
 
 import analyst as A
+import analyst_context as AC
 import analyst_ledger as AL
 import analyst_tools as AT
 import best_bets_data as BBD
@@ -51,6 +52,18 @@ def _secret(name: str):
     except Exception:                                  # noqa: BLE001
         v = None
     return (str(v).strip() if v else None) or os.environ.get(name)
+
+
+def _is_owner() -> bool:
+    """Only the owner deployment writes the record, posts to Discord or spends the AI key; the public build
+    is read-only (see streamlit_app.py: AUDIENCE)."""
+    try:
+        return st.secrets.get("AUDIENCE", "owner") == "owner"
+    except Exception:                                  # noqa: BLE001 — no secrets file = a local/owner run
+        return True
+
+
+is_owner = _is_owner()
 
 
 # --- controls ----------------------------------------------------------------
@@ -126,6 +139,26 @@ else:
         if not offers:
             offers_note = "no player props are posted yet, so the soft-price angle is quiet"
 
+# Independent evidence (analyst_context.py): the point spread and game total, and what each opponent has allowed.
+# Both come from data the model's own percentage does not use. Fail-soft: a missing source only means fewer angles.
+use_context = st.checkbox("Include game-script and opponent-matchup evidence", value=True, key="analyst_context",
+                          help="Adds two kinds of evidence that don't come from the player's recent games: the point spread / "
+                               "game total, and how much the opponent has allowed at this stat. Untick it if the page is slow.")
+game_env: dict = {}
+matchups: dict = {}
+context_notes: list = []
+if use_context:
+    def _env_loader(sport_key, d):
+        return AC.load_game_env(sport_key, d, meta, api_key, _active.odds_sport_key)
+
+    def _matchup_loader(sport_key, d):
+        return AC.load_matchups(sport_key, d, E, _active.projections)
+
+    with st.spinner("Reading the spreads, totals and opponent matchups..."):
+        game_env, _env_note = compute_once(f"analyst_env_{_active.key}", _env_loader, _active.key, date_str)
+        matchups, _mu_note = compute_once(f"analyst_mu_{_active.key}", _matchup_loader, _active.key, date_str)
+    context_notes = [n for n in (_env_note, _mu_note) if n]
+
 # --- learn from the record, scan, lock ---------------------------------------
 history = AL.fetch_calls(sport=_active.key, settled_only=True)
 weights = A.learned_weights(history)
@@ -137,13 +170,13 @@ def _line_rows(sport_key, player, market, side):
 
 calls = A.scan(plays, _active.key, date_str, offers=offers, odds_map=_active.market_map,
                history_fn=_line_rows, weights=weights, expect_book_lines=bool(offers),
-               times=times, with_day=_with_day, book=preferred_book)
+               times=times, with_day=_with_day, book=preferred_book, game_env=game_env, matchups=matchups)
 lines_posted = bool(offers)
 # Only calls the selected book really posts, at the model's own line, are ever suggested or locked.
 loggable_calls = [c for c in calls if c["book_state"] == A.STATE_POSTED]
 
 locked_note = ""
-if loggable_calls:
+if is_owner and loggable_calls:
     sig = (_active.key, date_str, len(loggable_calls), hash(tuple(c["key"] for c in loggable_calls)))
     if st.session_state.get("_analyst_logged") != sig:
         try:
@@ -156,7 +189,7 @@ if loggable_calls:
 
 # Note the latest pre-game line/price for calls already locked, so the market's move since the lock can be
 # measured (closing-line tracking). Best effort: it never changes a locked call.
-if loggable_calls:
+if is_owner and loggable_calls:
     try:
         AL.mark_calls(loggable_calls, today_str)
     except Exception:                                  # noqa: BLE001
@@ -165,7 +198,7 @@ if loggable_calls:
 # Grade earlier days that are still open (a few per visit, so a cold page stays quick).
 settle_note = ""
 try:
-    for d in AL.unsettled_dates(_active.key, today_str)[:3]:
+    for d in (AL.unsettled_dates(_active.key, today_str)[:3] if is_owner else []):
         res = AL.settle_day(_active.key, d, E.get_player_results(d))
         if res["settled"]:
             voids = f" ({res['voids']} void — player didn't play)" if res["voids"] else ""
@@ -178,6 +211,8 @@ history = AL.fetch_calls(sport=_active.key, settled_only=True) if settle_note el
 captions = [t for t in (locked_note, settle_note) if t]
 if offers_note:
     captions.append(f"Heads up: {offers_note}.")
+for _n in context_notes:
+    captions.append(f"Heads up: {_n}.")
 if captions:
     st.caption(" · ".join(captions))
 
@@ -227,6 +262,7 @@ def _call_rows(cs):
         out.append({
             "Time": c["kickoff"], "Slot": c["slot"], "Game": c["game"], "Player": c["player"], "Play": f"{c['side']} {c['line']:g} {c['market']}"
             if c.get("line") is not None else f"{c['side']} {c['market']}",
+            "Recent games": ", ".join(f"{v:g}" for v in c.get("recent") or []),
             "At book": A.status_text(c, book_name), "Model": c["model_prob"], "Book price": c["price"], "Angles": ", ".join(a["label"] for a in c["angles"]),
             "Gem": "💎" if c["gem"] else "", "Cautions": "; ".join(c["cautions"]), "Score": c["score"],
         })
@@ -241,7 +277,7 @@ _COLS_CFG = {"Model": st.column_config.NumberColumn(format="percent"),
 with tab_desk:
     ai_key = _secret("ANTHROPIC_API_KEY")
     use_ai = False
-    if sug_calls:
+    if sug_calls and is_owner:
         if ai_key:
             use_ai = st.toggle("Write it up in the analyst's voice (AI)", value=False, key="analyst_ai",
                                help="Sends only the structured findings below to the model, which is told not to add facts.")
@@ -282,10 +318,27 @@ with tab_desk:
                 with st.expander(f"{g['kickoff']} — {g['game']}", expanded=False):
                     st.write(g["text"])
     st.caption("Commentary describes what the data shows; it is analysis, not a guarantee of any outcome.")
+    with st.expander("Where do these numbers come from? How independent are they?"):
+        st.markdown(
+            "**The model's chance** is the platform's standard projection, the same number Best Bets and Slip Lab show: "
+            "it replays the player's recent games for that stat against the line, then pulls small samples toward 50%. "
+            "It is *not* a separate model built for this page.\n\n"
+            "**The angles are different tests laid over it.** They fall into kinds of evidence: *his recent games* "
+            "(model vs market, form run, role surge), *underlying quality*, *team context*, *the betting market* "
+            "(soft price, line movement, other markets' line), *the game environment* (the spread and total) and *the "
+            "opponent's defense* (what it has allowed at this stat). The last two come from data the model's percentage "
+            "doesn't use. Two angles from the same kind aren't independent confirmation, so a 💎 hidden gem needs angles "
+            "from at least two different kinds.\n\n"
+            "**Small samples cap the number.** With 4 recent games, 4-for-4 is shown as 75% — the most a 4-game sample can "
+            "support — so a column of 75%s means 'every recent game went that way', not 75 separate measurements. "
+            "Each play's *Why this side* note shows the games it rests on.")
 
     # --- Ask the Analyst: free-text questions, answered from the findings above and nothing else ---
-    st.markdown("#### 💬 Ask the Analyst")
-    if not ai_key:
+    if is_owner:
+        st.markdown("#### 💬 Ask the Analyst")
+    if not is_owner:
+        pass
+    elif not ai_key:
         st.caption("Ask questions about this slate in plain English once ANTHROPIC_API_KEY is added to the app "
                    "secrets (the same key that powers the AI write-up). Answers use only the findings on this page.")
     else:
@@ -325,6 +378,7 @@ with tab_gems:
             with st.expander(f"{c['kickoff']} · {c['player']} — {c['side']} {c['line']:g} {c['market']} ({c['game']})"):
                 for a in c["angles"]:
                     st.markdown(f"- **{a['label']}** — {a['evidence']}")
+                st.markdown(f"**Why {c['side'].lower()}:** " + " ".join(c.get("reasoning") or []))
                 for w in c["cautions"]:
                     st.markdown(f"- ⚠️ {w}")
                 if c.get("why"):
@@ -373,40 +427,54 @@ with tab_live:
         st.caption("Prices are the selected book's. A call locked at another book isn't listed here — switch the "
                    "Sportsbook selector to that book to see it.")
 
-    st.markdown("#### 📣 Share to Discord")
-    webhook = _secret("DISCORD_WEBHOOK_URL")
-    if not webhook:
-        st.caption("To post from here, add DISCORD_WEBHOOK_URL (a webhook link from your Discord channel's "
-                   "Integrations settings) to the app secrets. You can still copy the previews below.")
-    short_label = _active.label.split(" — ")[0]                  # "NBA — Basketball" -> "NBA" in a chat message
-    picks_default = AT.discord_picks_text(sug_calls, sport_label=short_label, date_str=date_str, book_label=book_name)
-    if not picks_default:
-        st.info(f"Nothing to post: no call is available at {book_name} for the games picked above.")
+    if not is_owner:
+        st.markdown("#### 🧾 The permanent record")
+        st.markdown("Every call is locked before kickoff and graded afterwards by H2 Sports Media. The full, verifiable "
+                    "record is on the **Analyst Record** page.")
     else:
-        picks_text = st.text_area("Today's picks — edit freely before posting", picks_default, height=220,
-                                  key=f"analyst_discord_picks_{A.facts_hash({'t': picks_default})}")
-        if st.button("Post picks to Discord", key="analyst_post_picks", disabled=not webhook):
-            try:
-                AT.post_to_discord(webhook, picks_text)
-                st.success("Posted to Discord.")
-            except RuntimeError as exc:
-                st.error(f"Not posted — {exc}.")
-    settled_dates = sorted({r["date"] for r in AL.fetch_calls(sport=_active.key) if r.get("settled_at")})
-    if settled_dates:
-        recap_date = st.selectbox("Recap for", settled_dates[::-1], key="analyst_recap_date")
-        recap_default = AT.discord_recap_text([r for r in AL.fetch_calls(sport=_active.key) if r["date"] == recap_date],
-                                              sport_label=short_label, date_str=recap_date, board=board)
-        if recap_default:
-            recap_text = st.text_area("Graded recap — edit freely before posting", recap_default, height=200,
-                                      key=f"analyst_discord_recap_{A.facts_hash({'t': recap_default})}")
-            if st.button("Post recap to Discord", key="analyst_post_recap", disabled=not webhook):
+        st.markdown("#### 📣 Share to Discord")
+        webhook = _secret("DISCORD_WEBHOOK_URL")
+        if not webhook:
+            st.caption("To post from here, add DISCORD_WEBHOOK_URL (a webhook link from your Discord channel's "
+                       "Integrations settings) to the app secrets. You can still copy the previews below.")
+        short_label = _active.label.split(" — ")[0]              # "NBA — Basketball" -> "NBA" in a chat message
+        all_rows = AL.fetch_calls()
+        fp_line = AT.fingerprint_line(all_rows)                  # pins the whole record, so later edits would show
+        picks_default = AT.discord_picks_text(sug_calls, sport_label=short_label, date_str=date_str, book_label=book_name,
+                                              extra_line=fp_line)
+        if not picks_default:
+            st.info(f"Nothing to post: no call is available at {book_name} for the games picked above.")
+        else:
+            picks_text = st.text_area("Today's picks — edit freely before posting", picks_default, height=240,
+                                      key=f"analyst_discord_picks_{A.facts_hash({'t': picks_default})}")
+            if st.button("Post picks to Discord", key="analyst_post_picks", disabled=not webhook):
                 try:
-                    AT.post_to_discord(webhook, recap_text)
-                    st.success("Posted to Discord.")
+                    AT.post_to_discord(webhook, picks_text)
+                    shown = AT.published_in_text(sug_calls, picks_text)
+                    n_pub = 0
+                    try:
+                        n_pub = AL.mark_published(shown)
+                    except Exception:                          # noqa: BLE001 — the post went out; the stamp is best effort
+                        pass
+                    st.success("Posted to Discord." + (f" {n_pub} call(s) recorded as published." if n_pub else ""))
                 except RuntimeError as exc:
                     st.error(f"Not posted — {exc}.")
-    else:
-        st.caption("A graded recap appears here once a locked day's games are final.")
+        settled_dates = sorted({r["date"] for r in all_rows if r["sport"] == _active.key and r.get("settled_at")})
+        if settled_dates:
+            recap_date = st.selectbox("Recap for", settled_dates[::-1], key="analyst_recap_date")
+            recap_default = AT.discord_recap_text([r for r in all_rows if r["sport"] == _active.key and r["date"] == recap_date],
+                                                  sport_label=short_label, date_str=recap_date, board=board, extra_line=fp_line)
+            if recap_default:
+                recap_text = st.text_area("Graded recap — edit freely before posting", recap_default, height=220,
+                                          key=f"analyst_discord_recap_{A.facts_hash({'t': recap_default})}")
+                if st.button("Post recap to Discord", key="analyst_post_recap", disabled=not webhook):
+                    try:
+                        AT.post_to_discord(webhook, recap_text)
+                        st.success("Posted to Discord.")
+                    except RuntimeError as exc:
+                        st.error(f"Not posted — {exc}.")
+        else:
+            st.caption("A graded recap appears here once a locked day's games are final.")
 
 # --- Proof -------------------------------------------------------------------------
 with tab_proof:

@@ -54,7 +54,23 @@ ANGLES: Dict[str, Tuple[str, str]] = {
     "regression_due": ("Regression due",    "His underlying contact quality says the results should catch up."),
     "line_move":      ("Line moving our way", "The market has moved toward this side since it opened."),
     "market_line":    ("Other markets' line", "Other books and pick'em apps set this player's number away from your book's line, on this side of it — the wider market thinks the typical result sits there."),
+    "game_script":    ("Game script",       "The point spread and the game total say how this game is likely to be played (a blowout, a shootout, a slog), and that favors this side of his stat."),
+    "matchup":        ("Opponent matchup",  "The opponent has allowed more (or less) of this stat than the typical opponent on the slate, in the direction of the play."),
 }
+
+# Which KIND of evidence each angle rests on. Two angles from the same family are not independent
+# confirmation of each other (the model's chance, a form run and a role surge are all read from the same
+# recent games), so a hidden gem needs angles from at least GEM_MIN_FAMILIES different families.
+ANGLE_FAMILY: Dict[str, str] = {
+    "market_gap": "his recent games", "form_run": "his recent games", "role_surge": "his recent games",
+    "regression_due": "underlying quality", "team_surge": "team context",
+    "soft_book": "the betting market", "line_move": "the betting market", "market_line": "the betting market",
+    # separate evidence from separate data (analyst_context.py): the spread/total, and what the opponent allows
+    "game_script": "game environment", "matchup": "opponent defense",
+}
+GEM_MIN_FAMILIES = 2
+LEAN_MIN_CALLS = 5        # a day with at least this many calls…
+LEAN_SHARE = 0.85         # …where at least this share go the same way (all Under, say) gets a plain warning
 
 # thresholds — named so the tests (and the owner) can see exactly what "fires" means
 GAP_MIN = 0.05            # model prob minus book prob, in probability points
@@ -70,9 +86,22 @@ SURGE_RATIO = 1.25
 SURGE_MIN_GAMES = 6
 MOVE_MIN = 0.03           # implied-probability move toward the side
 GEM_MIN_ANGLES = 2
+SHRINK_PRIOR_GAMES = 4    # basketball_projections.shrink_prob's prior strength, used by every game-log sport
 GEM_MIN_PROB = 0.55
 GEM_MAX_CAUTIONS = 1
 CHALK_PERCENTILE = 0.90   # top 10% of the day's conviction is "main road"
+
+MATCHUP_PLUS = 1.08       # the platform's own Hot Hand Engine tags: >= 1.08 "Plus matchup", <= 0.92 "Tough matchup"
+MATCHUP_TOUGH = 0.92
+BLOWOUT_SPREAD = {"NBA": 10.0, "WNBA": 10.0, "NCAAMB": 14.0}   # a favorite by this much risks starters' late minutes
+FOOTBALL_LEAN_SPREAD = 6.5      # by this many points the favorite runs more and the underdog throws more
+FOOTBALL_BLOWOUT_SPREAD = 10.0  # a favorite by this much throws less
+TOTAL_HIGH_PCT = 0.80           # a game total in the top fifth of the slate is "high"
+TOTAL_LOW_PCT = 0.20            # …and in the bottom fifth is "low"
+BASKETBALL_STAT_MARKETS = {"Points", "Rebounds", "Assists", "Threes Made"}
+BASKETBALL_SCORING_MARKETS = {"Points", "Assists", "Threes Made"}
+FOOTBALL_RUSH_MARKETS = {"Rush Yards", "Rush Attempts"}
+FOOTBALL_PASS_MARKETS = {"Pass Yards", "Pass Attempts", "Pass Completions", "Receptions", "Receiving Yards"}
 
 # newest-first game logs (nfl_engine.player_recent_games, nhl_engine.get_player_recent_games)
 NEWEST_FIRST_SPORTS = {"NFL", "NHL"}
@@ -217,6 +246,100 @@ def detect_market_line(p: Dict, ctx: Dict) -> Optional[Dict]:
                         f"{O.book_label(ctx['book'])} — {diff:g} on this side of the line"}
 
 
+def team_side(p: Dict, entry: Dict) -> Optional[str]:
+    """'home' or 'away': which team is this player on, in a game-environment entry?"""
+    me = _norm(p.get("Team"))
+    if not me:
+        return None
+    if me == _norm(entry.get("home_name")):
+        return "home"
+    if me == _norm(entry.get("away_name")):
+        return "away"
+    return None
+
+
+def script_signals(p: Dict, ctx: Dict) -> List[Dict]:
+    """What the spread and the game total say about THIS stat: [{prefers: 'Over'|'Under', strength, text}].
+    Each rule is a hypothesis about how a game is played (a lopsided basketball game costs starters their
+    late minutes; a football favorite runs and an underdog throws; a high total means more of everything),
+    not a fact — which is exactly why it is an angle the ledger grades rather than a built-in adjustment.
+    Empty when the game has no posted spread/total or the sport/market has no rule."""
+    entry = (ctx.get("game_env") or {}).get(p.get("Game"))
+    sport, market = ctx.get("sport_key"), p.get("Market")
+    if not entry or not market:
+        return []
+    side = team_side(p, entry)
+    spread = entry.get(f"{side}_spread") if side else None
+    total, pct = entry.get("total"), entry.get("total_pct")
+    team = p.get("Team") or "his team"
+    out: List[Dict] = []
+
+    def add(prefers: str, strength: float, text: str) -> None:
+        out.append({"prefers": prefers, "strength": _clip(strength), "text": text})
+
+    def total_rule(markets) -> None:
+        if pct is None or total is None or market not in markets:
+            return
+        if pct >= TOTAL_HIGH_PCT:
+            add("Over", 0.4 + 0.6 * (pct - TOTAL_HIGH_PCT) / (1 - TOTAL_HIGH_PCT),
+                f"the game total of {total:g} is among the highest on the slate")
+        elif pct <= TOTAL_LOW_PCT:
+            add("Under", 0.4 + 0.6 * (TOTAL_LOW_PCT - pct) / TOTAL_LOW_PCT,
+                f"the game total of {total:g} is among the lowest on the slate")
+
+    if sport in BLOWOUT_SPREAD:
+        thr = BLOWOUT_SPREAD[sport]
+        if spread is not None and market in BASKETBALL_STAT_MARKETS and spread <= -thr:
+            add("Under", 0.4 + (-spread - thr) / 10,
+                f"{team} is a {abs(spread):g}-point favorite — in a game this lopsided the starters' minutes are at risk late")
+        total_rule(BASKETBALL_SCORING_MARKETS)
+    elif sport in ("NFL", "NCAAF"):
+        if spread is not None and market in FOOTBALL_RUSH_MARKETS:
+            if spread <= -FOOTBALL_LEAN_SPREAD:
+                add("Over", 0.4 + (-spread - FOOTBALL_LEAN_SPREAD) / 8,
+                    f"{team} is a {abs(spread):g}-point favorite — favorites run more when they lead")
+            elif spread >= FOOTBALL_LEAN_SPREAD:
+                add("Under", 0.4 + (spread - FOOTBALL_LEAN_SPREAD) / 8,
+                    f"{team} is a {spread:g}-point underdog — trailing teams run less")
+        if spread is not None and market in FOOTBALL_PASS_MARKETS:
+            if spread >= FOOTBALL_LEAN_SPREAD:
+                add("Over", 0.4 + (spread - FOOTBALL_LEAN_SPREAD) / 8,
+                    f"{team} is a {spread:g}-point underdog — trailing teams throw more")
+            elif spread <= -FOOTBALL_BLOWOUT_SPREAD:
+                add("Under", 0.4 + (-spread - FOOTBALL_BLOWOUT_SPREAD) / 8,
+                    f"{team} is a {abs(spread):g}-point favorite — big favorites throw less once ahead")
+        total_rule(FOOTBALL_PASS_MARKETS)
+    return out
+
+
+def detect_game_script(p: Dict, ctx: Dict) -> Optional[Dict]:
+    sigs = [s for s in script_signals(p, ctx) if s["prefers"] == p.get("Side")]
+    if not sigs:
+        return None
+    return {"strength": max(s["strength"] for s in sigs), "evidence": "; ".join(s["text"] for s in sigs)}
+
+
+def matchup_for(p: Dict, ctx: Dict) -> Optional[Dict]:
+    return (ctx.get("matchups") or {}).get((_norm(p.get("Player")), p.get("Market")))
+
+
+def detect_matchup(p: Dict, ctx: Dict) -> Optional[Dict]:
+    """The opponent has allowed more (Over) or less (Under) of this stat than the slate's typical opponent,
+    by the platform's own Plus/Tough thresholds. Separate data from the model's probability."""
+    m = matchup_for(p, ctx)
+    side = p.get("Side")
+    if not m or m.get("factor") is None:
+        return None
+    f = m["factor"]
+    if not ((side == "Over" and f >= MATCHUP_PLUS) or (side == "Under" and f <= MATCHUP_TOUGH)):
+        return None
+    allows = f" ({m['allows']:g} per game)" if m.get("allows") else ""
+    return {"strength": _clip(abs(f - 1.0) / 0.25),
+            "evidence": f"{m.get('opp') or 'the opponent'} has allowed {'more' if f > 1 else 'less'} of this stat than the typical "
+                        f"opponent on the slate — {f:.2f}x{allows}"}
+
+
+
 def _values(p: Dict, sport_key: str) -> List[float]:
     """The play's recent stat values, OLDEST first (or [] when the play carries no usable log)."""
     log, key = p.get("_game_log"), p.get("_stat_key")
@@ -234,6 +357,39 @@ def _values(p: Dict, sport_key: str) -> List[float]:
         except (TypeError, ValueError):
             continue
     return out[::-1] if sport_key in NEWEST_FIRST_SPORTS else out
+
+
+def angle_families(hits: List[Dict]) -> set:
+    return {ANGLE_FAMILY.get(h["angle"], h["angle"]) for h in hits}
+
+
+def reasoning_for(p: Dict, sport_key: str) -> List[str]:
+    """Plain sentences on WHY this side and not the other, built only from what the play carries: the
+    recent-game values against the line, the model's chance on both sides, and what the book prices."""
+    line, side, mp = p.get("Line"), p.get("Side"), p.get("ModelProb")
+    other = "Under" if side == "Over" else "Over"
+    vals = _values(p, sport_key)
+    out: List[str] = []
+    if vals and line is not None:
+        n = len(vals)
+        hits = sum(1 for v in vals if _clears(v, float(line), side))
+        shown = ", ".join(f"{v:g}" for v in vals[-10:])
+        out.append(f"Last {_count(n, 'game')} (oldest to newest): {shown}, against a line of {float(line):g} — {hits} of {n} "
+                   f"went {side.lower()}, {n - hits} did not; his average is {sum(vals) / n:.1f}.")
+        if mp is not None:
+            text = f"The model gives {side} {mp:.0%} and {other} {1 - mp:.0%}."
+            ceiling = (n + SHRINK_PRIOR_GAMES / 2) / (n + SHRINK_PRIOR_GAMES)
+            if hits == n and abs(mp - ceiling) <= 0.015:
+                text += (f" A {n}-game sample is pulled toward 50%, so {n} for {n} tops out at {ceiling:.0%} — read it as "
+                         f"'every recent game went this way', not as a precise {mp:.0%}.")
+            out.append(text)
+    else:
+        out.append("No game log is attached to this play, so the reasoning rests on the model's number alone"
+                   + (f" ({side} {mp:.0%}, {other} {1 - mp:.0%})." if mp is not None else "."))
+    conv = p.get("Conviction")
+    if p.get("ConvictionSource") == "book" and mp and conv:
+        out.append(f"The book prices {side} at {mp / conv:.0%}.")
+    return out
 
 
 def _clears(v: float, line: float, side: str) -> bool:
@@ -343,6 +499,8 @@ DETECTORS: Dict[str, Callable[[Dict, Dict], Optional[Dict]]] = {
     "regression_due": detect_regression_due,
     "line_move": detect_line_move,
     "market_line": detect_market_line,
+    "game_script": detect_game_script,
+    "matchup": detect_matchup,
 }
 
 
@@ -364,6 +522,16 @@ def cautions_for(p: Dict, ctx: Dict) -> List[str]:
         out.append(f"only {len(vals)} recent game(s) behind the numbers")
     if p.get("LineSource") not in (None, "book") and ctx.get("expect_book_lines"):
         out.append("priced off the model's default line, not a posted book line")
+    for s in script_signals(p, ctx):
+        if s["prefers"] != side:
+            out.append(f"game script points the other way: {s['text']}")
+    m = matchup_for(p, ctx)
+    if m and m.get("factor") is not None:
+        f = m["factor"]
+        if side == "Over" and f <= MATCHUP_TOUGH:
+            out.append(f"{m.get('opp') or 'the opponent'} has been tough on this stat ({f:.2f}x the slate's typical opponent)")
+        elif side == "Under" and f >= MATCHUP_PLUS:
+            out.append(f"{m.get('opp') or 'the opponent'} has been generous on this stat ({f:.2f}x the slate's typical opponent)")
     return out
 
 
@@ -536,7 +704,8 @@ def scan(plays: Iterable[Dict], sport_key: str, date_str: str, *, offers: Option
          odds_map: Optional[Dict[str, str]] = None, history_fn: Optional[Callable] = None,
          weights: Optional[Dict[str, float]] = None, expect_book_lines: bool = False,
          history_limit: int = 60, times: Optional[Dict[str, Dict]] = None,
-         with_day: bool = False, book: Optional[str] = None) -> List[Dict]:
+         with_day: bool = False, book: Optional[str] = None, game_env: Optional[Dict[str, Dict]] = None,
+         matchups: Optional[Dict[Tuple[str, str], Dict]] = None) -> List[Dict]:
     """Run every detector over every play. Returns one CALL per play that has at least one angle,
     ranked best-first. A call:
         key, sport, date, player, player_id, team, game, game_date, market, side, line, model_prob,
@@ -555,7 +724,7 @@ def scan(plays: Iterable[Dict], sport_key: str, date_str: str, *, offers: Option
     top = sorted(plays, key=lambda q: q.get("Conviction") or 0, reverse=True)[:max(0, history_limit)]
     ctx = {"sport_key": sport_key, "offer_index": index_offers(offers), "odds_map": odds_map or {},
            "history_fn": history_fn, "expect_book_lines": expect_book_lines,
-           "history_ids": {id(q) for q in top}, "book": book}
+           "history_ids": {id(q) for q in top}, "book": book, "game_env": game_env or {}, "matchups": matchups or {}}
     by_market: Dict[str, List[float]] = {}
     for p in plays:
         if p.get("Conviction") is not None:
@@ -580,7 +749,8 @@ def scan(plays: Iterable[Dict], sport_key: str, date_str: str, *, offers: Option
         cautions = cautions_for(p, ctx)
         st_ = book_status(p, ctx["offer_index"], odds_map or {}, book)
         score = sum(weights.get(h["angle"], 1.0) * h["strength"] for h in hits)
-        gem = (len(hits) >= GEM_MIN_ANGLES and not chalk and p["ModelProb"] >= GEM_MIN_PROB
+        gem = (len(hits) >= GEM_MIN_ANGLES and len(angle_families(hits)) >= GEM_MIN_FAMILIES
+               and not chalk and p["ModelProb"] >= GEM_MIN_PROB
                and len(cautions) <= GEM_MAX_CAUTIONS)
         calls.append({
             "key": call_key(sport_key, date_str, p.get("Player"), p.get("Market"), p.get("Side")),
@@ -592,6 +762,7 @@ def scan(plays: Iterable[Dict], sport_key: str, date_str: str, *, offers: Option
             "price_book": (O.canonical_book(book) if book else p.get("RealPriceBook")), "why": p.get("Why"),
             "book_state": st_["state"], "book_lines": st_["lines"], "book_elsewhere": st_["elsewhere"],
             "bettable": st_["state"] in (STATE_POSTED, STATE_UNCHECKED),
+            "reasoning": reasoning_for(p, sport_key), "recent": _values(p, sport_key)[-10:],
             "angles": hits, "cautions": cautions, "score": round(score - 0.25 * len(cautions), 3),
             "chalk": chalk, "gem": gem, **_call_time(p, times, with_day),
         })
@@ -801,6 +972,16 @@ def write_commentary(calls: List[Dict], *, sport_label: str, date_str: str, n_ga
                 f"{ANGLES[a][0].lower()} ({angle_counts[a]})" for a in top_angles) + ".")
         overview = " ".join(parts)
 
+    lean = ""
+    if calls and len(calls) >= LEAN_MIN_CALLS:
+        n_over = sum(1 for c in calls if c.get("side") == "Over")
+        n_main = max(n_over, len(calls) - n_over)
+        if n_main / len(calls) >= LEAN_SHARE:
+            lean_side = "Over" if n_over == n_main else "Under"
+            lean = (f"Heads up: {n_main} of {len(calls)} calls lean {lean_side}. When nearly every call goes the same way, "
+                    f"it more often reflects short recent-game samples or lines sitting high than {len(calls)} separate "
+                    f"insights — read each play's 'why this side' note before leaning on it.")
+            overview += " " + lean
     if book_label and not lines_posted:
         overview = (f"{book_label} has no player props posted for this slate yet, so there is nothing line-specific "
                     f"I can suggest. The model's lines are placeholders until props go up; check back then.")
@@ -857,6 +1038,8 @@ def write_commentary(calls: List[Dict], *, sport_label: str, date_str: str, n_ga
             top = cs[0]
             bits.append(f"The best-supported play is {describe_call(top)}: "
                         + "; ".join(a["evidence"] for a in top["angles"]) + ".")
+            if top.get("reasoning"):
+                bits.append(f"Why {top['side'].lower()}: " + " ".join(top["reasoning"][:2]))
             if top["cautions"]:
                 bits.append("Against it: " + "; ".join(top["cautions"]) + ".")
             extra = [c for c in cs[1:3]]
@@ -878,13 +1061,16 @@ def write_commentary(calls: List[Dict], *, sport_label: str, date_str: str, n_ga
         "sport": sport_label, "date": date_str, "games_on_slate": n_games,
         "calls": [{"key": c["key"], "game": c["game"], "kickoff": c.get("kickoff"), "play": describe_call(c), "team": c.get("team"),
                    "gem": c["gem"], "chalk": c["chalk"], "angles": [a["evidence"] for a in c["angles"]],
-                   "cautions": c["cautions"], "book_price": c.get("price")} for c in calls[:25]],
+                   "cautions": c["cautions"], "book_price": c.get("price"), "why_this_side": c.get("reasoning")}
+                  for c in calls[:25]],
         "game_notes": notes,
     }
     if book_label:
         facts["sportsbook"] = book_label
         facts["lines_note"] = (f"every play listed is available at {book_label} at exactly the stated line"
                                if lines_posted else f"{book_label} has no props posted yet; no plays are listed")
+    if lean:
+        facts["lean_note"] = lean
     if board:
         facts["track_record"] = [{"angle": r["label"], "settled_calls": r["n"],
                                   "hit_rate": None if r["hit_rate"] is None else round(r["hit_rate"], 3),
@@ -899,7 +1085,7 @@ def write_commentary(calls: List[Dict], *, sport_label: str, date_str: str, n_ga
 LLM_URL = "https://api.anthropic.com/v1/messages"
 LLM_DEFAULT_MODEL = "claude-sonnet-5-5"
 LLM_SYSTEM = (
-    "You are the on-air analyst for H2 Sports, a sports-analytics community. Write a daily desk "
+    "You are the on-air analyst for H2 Sports Media, a sports-analytics brand and community. Write a daily desk "
     "segment: a short headline, a paragraph that frames the day, then the focus areas and a "
     "game-by-game read, in the voice of a sharp, warm broadcast analyst. HARD RULES: use ONLY the "
     "facts in the JSON the user sends — never add a stat, injury, quote, weather detail, odds figure "
@@ -907,6 +1093,7 @@ LLM_SYSTEM = (
     "an outcome, never tell anyone to bet any amount, and say plainly where the evidence is thin or "
     "a caution is listed; every play in the JSON is posted at the sportsbook named in the JSON at exactly "
     "its stated line — never suggest a different line, a different book, or a play that is not listed; "
+    "explain why a play is on its side using only its why_this_side notes, and if lean_note is present say it plainly; "
     "if track_record is present you may mention how an angle has performed, "
     "using those numbers only. Plain markdown, no tables, under 450 words."
 )

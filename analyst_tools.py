@@ -127,7 +127,23 @@ def locked_status(rows: List[Dict], index: Dict, odds_map: Dict[str, str], book:
 DISCORD_LIMIT = 2000
 _DISCORD_HOSTS = ("https://discord.com/api/webhooks/", "https://discordapp.com/api/webhooks/",
                   "https://ptb.discord.com/api/webhooks/", "https://canary.discord.com/api/webhooks/")
-DISCLAIMER = "Analysis from the model's own numbers, not a guarantee of any result."
+BRAND = "H2 Sports Media"
+DISCLAIMER = ("Analysis from the model's own numbers, not a guarantee of any result. 21+. "
+              "Problem gambling? Call 1-800-GAMBLER.")
+
+
+def fingerprint_line(rows: List[Dict]) -> str:
+    """One line that pins the record as of now (all locked calls so far), for posts. Empty when there is none.
+    Anyone can later download the record and recompute it — see the Analyst Record page."""
+    import analyst_ledger as AL
+    fp = AL.record_fingerprint(rows)
+    return f"Record fingerprint ({len(rows)} locked calls to date): {fp}" if fp else ""
+
+
+def published_in_text(calls: List[Dict], text: str) -> List[Dict]:
+    """The calls whose play appears in a message — the ones actually shown to the audience, even if the
+    owner edited the draft before posting."""
+    return [c for c in calls if A.describe_call(c) in text]
 
 
 def _fit(lines: List[str], footer: str, more_word: str) -> str:
@@ -146,24 +162,24 @@ def _fit(lines: List[str], footer: str, more_word: str) -> str:
 
 
 def discord_picks_text(calls: List[Dict], *, sport_label: str, date_str: str, book_label: str,
-                       max_calls: int = 8) -> str:
+                       max_calls: int = 8, extra_line: str = "") -> str:
     """The desk's suggestions as a Discord message. `calls` must already be the bettable ones; gems
     lead, then the strongest. Empty string when there is nothing to post."""
     if not calls:
         return ""
     ordered = sorted(calls, key=lambda c: (c.get("gem", False), c.get("score", 0)), reverse=True)[:max_calls]
-    lines = [f"🎙️ **H2 Analyst Desk — {sport_label}, {date_str}**",
+    lines = [f"🎙️ **{BRAND} — Analyst Desk · {sport_label}, {date_str}**",
              f"Lines are from {book_label} at the time of posting. Each call is locked to the public record before kickoff."]
     for c in ordered:
         price = f" at {c['price']:+.0f}" if c.get("price") is not None else ""
         when = f" · {c['kickoff']}" if c.get("kickoff") and c["kickoff"] != "time TBD" else ""
         angles = ", ".join(a["label"] for a in c.get("angles", []))
         lines.append(f"{'💎' if c.get('gem') else '•'} **{A.describe_call(c)}**{price}{when} — {angles}")
-    return _fit(lines, DISCLAIMER, "plays")
+    return _fit(lines, (extra_line + "\n" if extra_line else "") + DISCLAIMER, "plays")
 
 
 def discord_recap_text(rows: List[Dict], *, sport_label: str, date_str: str,
-                       board: Optional[List[Dict]] = None) -> str:
+                       board: Optional[List[Dict]] = None, extra_line: str = "") -> str:
     """The graded results for one day's locked calls (ledger rows for that day). Empty string when none
     of them has been graded yet."""
     graded = [r for r in rows if r.get("settled_at")]
@@ -172,7 +188,7 @@ def discord_recap_text(rows: List[Dict], *, sport_label: str, date_str: str,
     hits = [r for r in graded if r.get("hit") == 1]
     misses = [r for r in graded if r.get("hit") == 0]
     voids = [r for r in graded if r.get("hit") is None]
-    lines = [f"🧾 **H2 Analyst Desk recap — {sport_label}, {date_str}**",
+    lines = [f"🧾 **{BRAND} — Analyst Desk recap · {sport_label}, {date_str}**",
              f"{len(hits)}-{len(misses)}" + (f" ({len(voids)} void — didn't play)" if voids else "") + " on the day's locked calls."]
     for r in hits + misses:
         mark = "✅" if r.get("hit") == 1 else "❌"
@@ -184,7 +200,7 @@ def discord_recap_text(rows: List[Dict], *, sport_label: str, date_str: str,
         if al:
             lines.append(f"Record so far: {al['hits']}-{al['n'] - al['hits']} ({al['hit_rate']:.0%}); the model said "
                          f"{al['mean_prob']:.0%} on average — {al['status'].lower()}.")
-    return _fit(lines, DISCLAIMER, "results")
+    return _fit(lines, (extra_line + "\n" if extra_line else "") + DISCLAIMER, "results")
 
 
 def post_to_discord(webhook_url: Optional[str], text: str, post: Optional[Callable] = None, timeout: int = 15) -> None:
@@ -212,13 +228,14 @@ def post_to_discord(webhook_url: Optional[str], text: str, post: Optional[Callab
 # Ask the Analyst
 # ---------------------------------------------------------------------------
 ASK_SYSTEM = (
-    "You are the on-air analyst for H2 Sports answering a question from the owner about today's slate. "
+    "You are the on-air analyst for H2 Sports Media answering a question from the owner about today's slate. "
     "HARD RULES: answer ONLY from the JSON facts you are given — never add a stat, injury, news item, odds "
     "figure or storyline that is not in them, and keep every number exactly as given. If the facts don't "
     "contain the answer, say the desk doesn't have it. Every play in `plays` is posted at the sportsbook "
     "named in the JSON at exactly its stated line; plays in `not_at_book` are NOT available there, so "
     "never suggest them as bets (you may say where else they are posted). Never promise or guarantee an "
-    "outcome and never tell anyone how much to bet. Be concise: a few sentences, a short list only if asked. "
+    "outcome and never tell anyone how much to bet. When asked why a play is on its side, use its why_this_side "
+    "notes, and be plain about small samples. Be concise: a few sentences, a short list only if asked. "
     "Plain markdown, no tables."
 )
 ASK_MAX_QUESTION = 500
@@ -232,7 +249,7 @@ def qa_facts(calls: List[Dict], *, sport_label: str, date_str: str, book_label: 
     def row(c):
         return {"game": c.get("game"), "kickoff": c.get("kickoff"), "play": A.describe_call(c), "team": c.get("team"),
                 "gem": c.get("gem"), "chalk": c.get("chalk"), "angles": [a["evidence"] for a in c.get("angles", [])],
-                "cautions": c.get("cautions"), "book_price": c.get("price")}
+                "cautions": c.get("cautions"), "book_price": c.get("price"), "why_this_side": c.get("reasoning")}
     ok = [c for c in calls if c.get("bettable")]
     off = [c for c in calls if not c.get("bettable")]
     facts: Dict = {"sport": sport_label, "date": date_str, "sportsbook": book_label,
@@ -263,3 +280,35 @@ def ask_analyst(question: str, facts: Dict, api_key: Optional[str], model: Optio
     if history:
         payload["earlier_in_this_chat"] = [{"q": h["q"], "a": h["a"][:600]} for h in history[-3:]]
     return A.llm_commentary(payload, api_key or "", model, post=post, system=ASK_SYSTEM, max_tokens=700)
+
+
+# ---------------------------------------------------------------------------
+# The public record (Analyst Record page)
+# ---------------------------------------------------------------------------
+RECORD_EXTRA_COLUMNS = ("game", "angles", "gem", "published_at", "hit", "actual", "settled_at")
+
+
+def result_label(r: Dict) -> str:
+    if r.get("hit") == 1:
+        return "Hit"
+    if r.get("hit") == 0:
+        return "Miss"
+    return "Void" if r.get("settled_at") else "Open"
+
+
+def record_csv(rows: List[Dict]) -> str:
+    """The whole record as CSV. The FIRST ten columns are exactly the locked fields the fingerprint covers,
+    already in the canonical order, so anyone can recompute the fingerprint from the file alone (the Analyst
+    Record page shows how). The remaining columns are context and results, which the fingerprint ignores."""
+    import csv
+    import io
+    import analyst_ledger as AL
+    canon = sorted(rows, key=lambda r: tuple(AL._fp_cell(r.get(f)) for f in ("call_date", "sport", "player", "market", "side", "logged_at")))
+    out = io.StringIO()
+    w = csv.writer(out, lineterminator="\n")
+    w.writerow(list(AL.FINGERPRINT_FIELDS) + list(RECORD_EXTRA_COLUMNS))
+    for r in canon:
+        extra = [r.get("game"), ";".join(r.get("angles") or []), 1 if r.get("gem") else 0, r.get("published_at"),
+                 r.get("hit"), r.get("actual"), r.get("settled_at")]
+        w.writerow([AL._fp_cell(r.get(f)) for f in AL.FINGERPRINT_FIELDS] + ["" if x is None else x for x in extra])
+    return out.getvalue()

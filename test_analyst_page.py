@@ -7,6 +7,7 @@ import pytz
 from streamlit.testing.v1 import AppTest
 
 import analyst as A
+import analyst_context as AC
 import analyst_ledger as AL
 import best_bets_data as BBD
 import line_history
@@ -45,6 +46,14 @@ def _offers(plays, sport="NBA", books=("draftkings", "fanduel"), skip=(), point=
         out.append({"market": mmap[p["Market"]], "player": p["Player"], "point": point if point is not None else p["Line"],
                     "over": dict(prices_p), "under": {b: +100 for b in books}})
     return out
+
+
+@pytest.fixture(autouse=True)
+def _no_context_network(monkeypatch):
+    """The game-script / matchup loaders reach the odds feed and the sport engine; every page test starts with
+    them quiet (nothing fetched). The tests that exercise them patch their own."""
+    monkeypatch.setattr(AC, "load_game_env", lambda *a, **k: ({}, ""))
+    monkeypatch.setattr(AC, "load_matchups", lambda *a, **k: ({}, ""))
 
 
 @pytest.fixture
@@ -525,7 +534,7 @@ def test_a_graded_recap_can_be_previewed_and_posted(desk, monkeypatch):
     monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1/abc")
     at = desk()
     box = [t for t in at.text_area if t.label.startswith("Graded recap")][0]
-    assert "recap — NBA, 2026-01-02" in box.value and "✅ Old Gem Over 20.5 Points (actual 25)" in box.value
+    assert "Analyst Desk recap · NBA, 2026-01-02" in box.value and "Record fingerprint (2 locked calls to date):" in box.value and "✅ Old Gem Over 20.5 Points (actual 25)" in box.value
     [b for b in at.button if b.key == "analyst_post_recap"][0].click().run()
     assert len(sent) == 1 and "Old Gem" in sent[0]
 
@@ -549,7 +558,7 @@ def test_ask_the_analyst_answers_from_the_days_facts_and_explains_failures(desk,
     assert "**You:** Who is the gem?" in " ".join(texts(at)) and "The gem is Gem Guy." in " ".join(texts(at))
     assert seen["p"]["question"] == "Who is the gem?" and seen["p"]["facts"]["sportsbook"] == "DraftKings"
     assert seen["p"]["facts"]["plays"][0]["play"].startswith("Gem Guy Over 20.5 Points")
-    assert seen["k"]["system"].startswith("You are the on-air analyst for H2 Sports answering a question")
+    assert seen["k"]["system"].startswith("You are the on-air analyst for H2 Sports Media answering a question")
 
     def fail(payload, key, model=None, **k):
         raise RuntimeError("the Anthropic API answered 429")
@@ -565,3 +574,184 @@ def test_ask_the_analyst_answers_from_the_days_facts_and_explains_failures(desk,
     assert shown == ["Second answer.", "The gem is Gem Guy."]                                        # newest first
     [s for s in at.selectbox if s.label == "📖 Sportsbook"][0].set_value("FanDuel").run()
     assert "Second answer." not in " ".join(texts(at))                                               # a different book is a different conversation
+
+
+def _unders_board():
+    when = _tomorrow_iso()
+    plays = [{"Player": f"U{i}", "PlayerId": 300 + i, "Team": "PHI", "Game": "PHI @ JAX", "GameDate": when, "Market": "Points", "Side": "Under",
+              "Line": 20.5, "ModelProb": 0.75, "Conviction": 1.5 + i * 0.01, "ConvictionSource": "book", "TeamTrend": "steady",
+              "Why": "w", "_stat_key": "pts", "_game_log": [{"pts": v} for v in (18, 12, 15, 10)]} for i in range(6)]
+    return plays, [{"label": "PHI @ JAX", "game_date": when, "away_name": "PHI", "home_name": "JAX"}]
+
+
+def test_a_one_sided_day_shows_the_warning_the_notes_and_where_the_numbers_come_from(monkeypatch, tmp_path):
+    plays, meta = _unders_board()
+    at = _desk_with(monkeypatch, tmp_path, _offers(plays), plays_meta=(plays, meta))
+    joined = " ".join(texts(at))
+    assert "Heads up: 6 of 6 calls lean Under." in joined
+    assert "Why under: Last 4 games (oldest to newest): 10, 15, 12, 18, against a line of 20.5 — 4 of 4 went under" in joined or \
+           "Why under: Last 4 games (oldest to newest): 18, 12, 15, 10, against a line of 20.5 — 4 of 4 went under" in joined
+    assert "tops out at 75%" in joined
+    assert any(e.label == "Where do these numbers come from? How independent are they?" for e in at.expander)
+    assert "not* a separate model" in joined.replace("\\*", "*") or "not a separate model" in joined.replace("*", "")
+    table = _df_with(at, "Recent games")
+    assert table is not None and set(table["Recent games"]) <= {"18, 12, 15, 10", "10, 15, 12, 18"}
+
+
+def test_a_hidden_gem_shows_why_it_is_on_its_side(desk):
+    at = desk()
+    gem = [e for e in at.expander if "Gem Guy" in e.label][0]
+    assert any(m.value.startswith("**Why over:** ") for m in gem.markdown)
+
+
+# ------------------------------------------------- Build 234: owner-only writes, published card, fingerprint
+def _public(monkeypatch):
+    import streamlit as st
+
+    class Secrets(dict):
+        def get(self, k, default=None):
+            return dict.get(self, k, default)
+    monkeypatch.setattr(st, "secrets", Secrets({"AUDIENCE": "public"}), raising=False)
+
+
+def test_the_public_build_reads_but_never_writes_posts_or_spends_the_ai_key(desk, monkeypatch):
+    import analyst_tools as AT
+    _live(desk, monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1/abc")
+    AL._run(desk.db, "INSERT INTO analyst_calls (logged_at, call_date, sport, player, market, side, line, model_prob, hit, actual, settled_at, "
+                     "angles, price_book) VALUES ('t','2026-01-02','NBA','Old Gem','Points','Over',20.5,0.6,1,25,'t','[]','draftkings')")
+    _public(monkeypatch)
+    at = desk()
+    assert not at.exception
+    rows = AL.fetch_calls(db_path=desk.db)
+    assert [r["player"] for r in rows] == ["Old Gem"]                                          # visiting locked nothing
+    assert not at.toggle and not at.text_input                                                 # no AI toggle, no Ask box
+    assert not [b for b in at.button if b.key in ("analyst_post_picks", "analyst_post_recap")]
+    assert not at.text_area and any("Analyst Record" in m.value for m in at.markdown)
+
+
+def test_posting_picks_records_the_posted_calls_as_published_with_the_fingerprint(desk, monkeypatch):
+    import analyst_tools as AT
+    _live(desk, monkeypatch)
+    at = desk()
+    (locked,) = AL.fetch_calls(db_path=desk.db)
+    assert locked["published_at"] is None                                                       # flagged by the model, not yet published
+    sent = []
+    monkeypatch.setattr(AT, "post_to_discord", lambda url, text, **k: sent.append(text))
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1/abc")
+    at = desk()
+    box = [t for t in at.text_area if t.label.startswith("Today's picks")][0]
+    assert f"Record fingerprint (1 locked calls to date): {AL.record_fingerprint(AL.fetch_calls(db_path=desk.db))}" in box.value
+    assert "H2 Sports Media — Analyst Desk · NBA" in box.value
+    [b for b in at.button if b.key == "analyst_post_picks"][0].click().run()
+    assert any("1 call(s) recorded as published." in s.value for s in at.success)
+    assert AL.fetch_calls(db_path=desk.db)[0]["published_at"]
+    assert sent and "Gem Guy Over 20.5 Points" in sent[0]
+
+
+def test_a_failed_post_publishes_nothing(desk, monkeypatch):
+    import analyst_tools as AT
+    _live(desk, monkeypatch)
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1/abc")
+
+    def bad(url, text, **k):
+        raise RuntimeError("Discord answered 500")
+    monkeypatch.setattr(AT, "post_to_discord", bad)
+    at = desk()
+    [b for b in at.button if b.key == "analyst_post_picks"][0].click().run()
+    assert AL.fetch_calls(db_path=desk.db)[0]["published_at"] is None
+
+
+def test_an_edited_post_publishes_only_the_calls_left_in_it(desk, monkeypatch):
+    import analyst_tools as AT
+    _live(desk, monkeypatch)
+    desk()
+    monkeypatch.setattr(AT, "post_to_discord", lambda url, text, **k: None)
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1/abc")
+    at = desk()
+    [t for t in at.text_area if t.label.startswith("Today's picks")][0].set_value("I removed the pick, just chatting").run()
+    [b for b in at.button if b.key == "analyst_post_picks"][0].click().run()
+    assert AL.fetch_calls(db_path=desk.db)[0]["published_at"] is None
+
+
+def test_the_public_build_never_marks_or_grades_earlier_days_but_the_owner_does(desk, monkeypatch):
+    _live(desk, monkeypatch)
+    today = datetime.now(ET).strftime("%Y-%m-%d")
+    yesterday = (datetime.now(ET) - timedelta(days=1)).strftime("%Y-%m-%d")
+    AL._run(desk.db, "INSERT INTO analyst_calls (logged_at, call_date, sport, player, market, side, line, price_book, angles) VALUES "
+                     f"('t', '{today}', 'NBA', 'Gem Guy', 'Points', 'Over', 20.5, 'draftkings', '[]')")
+    AL._run(desk.db, "INSERT INTO analyst_calls (logged_at, call_date, sport, player, market, side, line, price_book, angles) VALUES "
+                     f"('t', '{yesterday}', 'NBA', 'Old One', 'Points', 'Over', 20.5, 'draftkings', '[]')")
+    graded = []
+    monkeypatch.setattr(AL, "settle_day", lambda sport, d, results, **k: graded.append(d) or {"settled": 0, "hits": 0, "voids": 0})
+    _public(monkeypatch)
+    desk()
+    assert graded == [] and [r for r in AL.fetch_calls(db_path=desk.db) if r["player"] == "Gem Guy"][0]["last_line"] is None   # no grading, no marking
+    import streamlit as st
+    monkeypatch.setattr(st, "secrets", {"AUDIENCE": "owner"}, raising=False)
+    desk()
+    assert graded == [yesterday]
+    assert [r for r in AL.fetch_calls(db_path=desk.db) if r["player"] == "Gem Guy"][0]["last_line"] == 20.5   # the owner's visit marks it
+
+
+# ------------------------------------------------------------------ game-script / opponent-matchup evidence
+def test_matchup_evidence_becomes_an_angle_and_is_locked_with_the_call(desk, monkeypatch):
+    monkeypatch.setattr(AC, "load_matchups", lambda *a, **k: ({("gemguy", "Points"): {"factor": 1.2, "opp": "BOS", "allows": 22.0}}, ""))
+    at = desk()
+    assert not at.exception, [e.value for e in at.exception]
+    (row,) = AL.fetch_calls(db_path=desk.db)
+    assert row["player"] == "Gem Guy" and row["angles"] == ["market_gap", "team_surge", "matchup"]
+    assert any("Opponent matchup" in str(v) for df in at.dataframe for v in df.value.get("Angles", []))
+
+
+def test_a_script_against_the_pick_shows_up_as_a_caution(desk, monkeypatch):
+    env = {"BOS @ NYK": {"home_name": "NYK", "away_name": "BOS", "home_spread": -12.0, "away_spread": 12.0, "total": None, "total_pct": None}}
+    monkeypatch.setattr(AC, "load_game_env", lambda *a, **k: (env, ""))
+    at = desk()
+    assert not at.exception, [e.value for e in at.exception]
+    cautions = [str(v) for df in at.dataframe for v in df.value.get("Cautions", [])]
+    assert any("game script points the other way: NYK is a 12-point favorite" in c for c in cautions)
+
+
+def test_the_loaders_get_the_slate_the_key_and_the_sports_modules(desk, monkeypatch):
+    seen = {}
+
+    def env(sport_key, d, meta, api_key, odds_sport_key):
+        seen["env"] = (sport_key, d, [m["label"] for m in meta], api_key, odds_sport_key)
+        return {}, ""
+
+    def mu(sport_key, d, engine, projections):
+        seen["mu"] = (sport_key, d, engine is sports.get("NBA").engine, projections is sports.get("NBA").projections)
+        return {}, ""
+    monkeypatch.setattr(AC, "load_game_env", env)
+    monkeypatch.setattr(AC, "load_matchups", mu)
+    at = desk()
+    assert not at.exception, [e.value for e in at.exception]
+    today = at.date_input[0].value.strftime("%Y-%m-%d")
+    assert seen["env"] == ("NBA", today, ["BOS @ NYK"], "KEY", "basketball_nba")
+    assert seen["mu"] == ("NBA", today, True, True)
+
+
+def test_a_source_that_is_missing_is_said_out_loud_and_never_breaks_the_page(desk, monkeypatch):
+    monkeypatch.setattr(AC, "load_game_env", lambda *a, **k: ({}, "no game spreads or totals are posted yet, so the game-script angle is quiet"))
+    monkeypatch.setattr(AC, "load_matchups", lambda *a, **k: ({}, "no opponent-matchup data is available for this slate yet"))
+    at = desk()
+    assert not at.exception, [e.value for e in at.exception]
+    joined = " ".join(texts(at))
+    assert "Heads up: no game spreads or totals are posted yet, so the game-script angle is quiet." in joined
+    assert "Heads up: no opponent-matchup data is available for this slate yet." in joined
+
+
+def test_the_evidence_can_be_switched_off(desk, monkeypatch):
+    calls = []
+    monkeypatch.setattr(AC, "load_game_env", lambda *a, **k: calls.append("env") or ({}, ""))
+    monkeypatch.setattr(AC, "load_matchups", lambda *a, **k: calls.append("mu") or ({}, ""))
+    at = AppTest.from_file(PAGE, default_timeout=60)
+    at.session_state["sport"] = "NBA"
+    at.session_state["analyst_context"] = False
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert calls == []
+    box = [c for c in at.checkbox if c.label.startswith("Include game-script")]
+    assert box and box[0].value is False

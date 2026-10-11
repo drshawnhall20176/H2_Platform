@@ -109,7 +109,7 @@ def test_discord_picks_lead_with_gems_then_the_strongest_and_cap_the_list():
     calls = [call(1, score=0.5), call(2, gem=True, score=0.2), call(3, score=2.0)] + [call(i, score=0.1) for i in range(10, 20)]
     text = AT.discord_picks_text(calls, sport_label="NBA", date_str="2026-10-10", book_label="DraftKings", max_calls=3)
     lines = text.split("\n")
-    assert lines[0] == "🎙️ **H2 Analyst Desk — NBA, 2026-10-10**" and "Lines are from DraftKings at the time of posting." in lines[1]
+    assert lines[0] == "🎙️ **H2 Sports Media — Analyst Desk · NBA, 2026-10-10**" and "Lines are from DraftKings at the time of posting." in lines[1]
     assert lines[2].startswith("💎 **Player 2 Over 20.5 Points (60%)** at -115 · 7:30 PM ET — Form run, Soft price")
     assert lines[3].startswith("• **Player 3") and lines[4].startswith("• **Player 1")
     assert text.endswith(AT.DISCLAIMER) and "Player 10" not in text
@@ -134,7 +134,7 @@ def test_discord_recap_lists_hits_misses_voids_and_the_running_record():
     rows = [_g("Hit One", 1), _g("Miss One", 0, 12.0), _g("Void One", None, None), _g("Open One", None, None, settled=None)]
     board = [{"angle": "ALL", "n": 10, "hits": 6, "hit_rate": 0.6, "mean_prob": 0.62, "status": "Calibrated"}]
     t = AT.discord_recap_text(rows, sport_label="NBA", date_str="2026-10-09", board=board)
-    assert "recap — NBA, 2026-10-09" in t and "1-1 (1 void — didn't play) on the day's locked calls." in t
+    assert "H2 Sports Media — Analyst Desk recap · NBA, 2026-10-09" in t and "1-1 (1 void — didn't play) on the day's locked calls." in t
     assert "✅ Hit One Over 20.5 Points (actual 22)" in t and "❌ Miss One Over 20.5 Points (actual 12)" in t
     assert "Void One" not in t and "Open One" not in t
     assert "Record so far: 6-4 (60%); the model said 62% on average — calibrated." in t and t.endswith(AT.DISCLAIMER)
@@ -236,3 +236,51 @@ def test_the_ask_prompt_forbids_inventing_facts_or_suggesting_unavailable_plays(
     s = AT.ASK_SYSTEM
     assert "ONLY from the JSON facts" in s and "doesn't contain the answer" in s.replace("don't contain", "doesn't contain") or "say the desk doesn't have it" in s
     assert "not_at_book" in s and "never suggest them as bets" in s and "never tell anyone how much to bet" in s
+
+
+def test_the_ask_facts_carry_each_plays_why_this_side_and_the_prompt_uses_it():
+    c = dict(call(1, bettable=True, game="A @ B"), reasoning=["Last 4 games: 1, 2, 1, 2 vs 3.5."])
+    c["angles"] = [{"label": "Form run", "evidence": "e"}]
+    assert AT.qa_facts([c], sport_label="S", date_str="d", book_label="B")["plays"][0]["why_this_side"] == ["Last 4 games: 1, 2, 1, 2 vs 3.5."]
+    assert "why_this_side" in AT.ASK_SYSTEM
+
+
+# ------------------------------------------------- brand, fingerprint, published card (Build 234)
+def test_posts_carry_the_brand_the_fingerprint_and_the_responsible_gambling_line():
+    assert AT.BRAND == "H2 Sports Media" and "1-800-GAMBLER" in AT.DISCLAIMER and "21+" in AT.DISCLAIMER
+    t = AT.discord_picks_text([call(1)], sport_label="NBA", date_str="d", book_label="DK", extra_line="Record fingerprint (3 locked calls to date): ab12")
+    assert t.endswith("Record fingerprint (3 locked calls to date): ab12\n" + AT.DISCLAIMER)
+    r = AT.discord_recap_text([_g("Hit One", 1)], sport_label="NBA", date_str="d", extra_line="FP line")
+    assert r.endswith("FP line\n" + AT.DISCLAIMER) and r.startswith("🧾 **H2 Sports Media")
+    assert "FP line" not in AT.discord_picks_text([call(1)], sport_label="NBA", date_str="d", book_label="DK")
+
+
+def test_the_fingerprint_line_names_how_many_calls_it_covers_and_is_empty_for_an_empty_record():
+    import analyst_ledger as AL
+    rows = [{"logged_at": "t", "call_date": "d", "sport": "NBA", "player": "P", "market": "Points", "side": "Over", "line": 20.5,
+             "model_prob": 0.6, "price": -110, "price_book": "draftkings"}]
+    assert AT.fingerprint_line(rows) == f"Record fingerprint (1 locked calls to date): {AL.record_fingerprint(rows)}"
+    assert AT.fingerprint_line([]) == ""
+
+
+def test_published_in_text_finds_the_calls_actually_in_the_message_even_after_editing():
+    a, b = call(1, game="g", date="d"), call(2, game="g", date="d")
+    text = f"my edit: {A.describe_call(b)} is my favorite"
+    assert AT.published_in_text([a, b], text) == [b]
+    assert AT.published_in_text([a, b], "nothing") == []
+
+
+def test_the_record_csv_has_the_angles_the_gem_flag_and_results_for_each_call():
+    import csv
+    import io
+    rows = [{"logged_at": "t1", "call_date": "d1", "sport": "NBA", "player": "Smith, Jr.", "market": "Points", "side": "Over", "line": 20.5,
+             "model_prob": 0.6, "price": -110, "price_book": "draftkings", "game": "A @ B", "angles": ["form_run", "soft_book"], "gem": True,
+             "published_at": "p", "hit": 1, "actual": 25, "settled_at": "s"},
+            {"logged_at": "t0", "call_date": "d0", "sport": "NBA", "player": "Early", "market": "Points", "side": "Under", "line": 5.5,
+             "model_prob": 0.5, "price": None, "price_book": None, "angles": [], "gem": False, "hit": None, "settled_at": None}]
+    out = list(csv.reader(io.StringIO(AT.record_csv(rows))))
+    assert out[1][3] == "Early" and out[2][3] == "Smith, Jr."                                   # canonical order: by date first; commas survive
+    assert out[2][10:] == ["A @ B", "form_run;soft_book", "1", "p", "1", "25", "s"]
+    assert out[1][10:] == ["", "", "0", "", "", "", ""] and out[1][8:10] == ["", ""]
+    assert [AT.result_label(r) for r in rows] == ["Hit", "Open"]
+    assert AT.result_label({"hit": 0}) == "Miss" and AT.result_label({"hit": None, "settled_at": "x"}) == "Void"

@@ -622,6 +622,43 @@ def fetch_slate_spreads(date_str: str, api_key: str, sport: str = SPORT) -> Tupl
     return spreads, {"events_total": len(todays), "events_fetched": fetched, "remaining": remaining}
 
 
+def parse_game_total(event_json: Dict) -> Optional[float]:
+    """The game total (combined points) for one event: the mean of the Over line across the books
+    that post a "totals" market, or None when none does. Same separate-parser reasoning as
+    parse_game_spread: a totals outcome has name Over/Under and a `point`, no player description."""
+    pts: List[float] = []
+    for bm in event_json.get("bookmakers", []):
+        for mk in bm.get("markets", []):
+            if mk.get("key") != "totals":
+                continue
+            for oc in mk.get("outcomes", []):
+                if str(oc.get("name")).lower() == "over" and oc.get("point") is not None:
+                    pts.append(float(oc["point"]))
+    return sum(pts) / len(pts) if pts else None
+
+
+def fetch_slate_game_lines(date_str: str, api_key: str, sport: str = SPORT) -> Tuple[List[Dict], Dict]:
+    """One dict per game on date_str: {event_id, home_team, away_team, commence_time, spreads
+    {team: points, negative = favorite}, total}. Spreads and totals come back from ONE event request
+    (2 market units per event), so the Analyst Desk's game-script angle costs a single extra pass over
+    the slate. Same (result, info) contract as fetch_slate_spreads."""
+    events = fetch_events_all(api_key, sport=sport)
+    todays = [e for e in events if _eastern_date_str(e.get("commence_time")) == date_str]
+    games: List[Dict] = []
+    remaining = None
+    for e in todays:
+        try:
+            ej, hdr = fetch_event_props(e["id"], api_key, ["spreads", "totals"], sport=feed_for(e, sport))
+        except OddsAPIError:
+            continue
+        remaining = hdr.get("remaining") or remaining
+        games.append({"event_id": e["id"], "home_team": ej.get("home_team") or e.get("home_team"),
+                      "away_team": ej.get("away_team") or e.get("away_team"),
+                      "commence_time": e.get("commence_time"),
+                      "spreads": parse_game_spread(ej), "total": parse_game_total(ej)})
+    return games, {"events_total": len(todays), "events_fetched": len(games), "remaining": remaining}
+
+
 
 def market_lines_for_player(offers: List[Dict], player_name: str, projections_module=None) -> Dict[str, float]:
     """{market_key: point} — the actual sportsbook prop line(s) for one player, picked from

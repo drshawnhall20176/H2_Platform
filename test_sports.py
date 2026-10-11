@@ -612,7 +612,7 @@ def test_sidebar_sections_match_the_documented_grouping():
         "32": "🔬 DEEP RESEARCH", "33": "🔬 DEEP RESEARCH", "34": "🔬 DEEP RESEARCH",
         "35": "🔬 DEEP RESEARCH", "36": "🔬 DEEP RESEARCH", "38": "🔬 DEEP RESEARCH",
         "16": "🔍 SELF-GRADING & PROOF", "17": "🔍 SELF-GRADING & PROOF",
-        "18": "🔍 SELF-GRADING & PROOF", "19": "🔍 SELF-GRADING & PROOF",
+        "18": "🔍 SELF-GRADING & PROOF", "19": "🔍 SELF-GRADING & PROOF", "40": "🔍 SELF-GRADING & PROOF",
         "20": "📣 OPS & CONTENT", "21": "📣 OPS & CONTENT", "22": "📣 OPS & CONTENT",
     }
     assert actual == expected, f"section grouping drifted from expected: {actual}"

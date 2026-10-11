@@ -141,3 +141,73 @@ def test_an_existing_database_without_the_mark_columns_is_upgraded(tmp_path):
     assert rows[0]["player"] == "Old Timer" and rows[0]["last_line"] is None
     assert AL.mark_calls([call(player="Old Timer", line=200.5, book_state="posted", price=-110)], "2026-10-08", NOW, path) == 1
     assert AL.fetch_calls(db_path=path)[0]["last_price"] == -110
+
+
+# ------------------------------------------------- published card + fingerprint (Build 234)
+def test_publishing_stamps_only_ledger_rows_once_and_changes_nothing_else(db):
+    AL.record_calls([call(), call(player="Other Guy", pid=12)], "2026-10-08", NOW, db)
+    first = NOW + timedelta(hours=1)
+    assert AL.mark_published([call(), call(player="Never Locked")], first, db) == 1
+    rows = {r["player"]: r for r in AL.fetch_calls(db_path=db)}
+    assert rows["Pat Player"]["published_at"] == first.isoformat(timespec="seconds") and rows["Other Guy"]["published_at"] is None
+    assert rows["Pat Player"]["line"] == 240.5 and rows["Pat Player"]["model_prob"] == 0.62          # the lock is untouched
+    assert AL.mark_published([call()], NOW + timedelta(hours=5), db) == 0                              # the first publication time stands
+    assert AL.fetch_calls(db_path=db)[0]["published_at"] == first.isoformat(timespec="seconds")
+
+
+def _fp_rows():
+    return [{"logged_at": "2026-10-08T18:00:00+00:00", "call_date": "2026-10-08", "sport": "NFL", "player": "A", "market": "Pass Yards",
+             "side": "Over", "line": 240.5, "model_prob": 0.62, "price": -115, "price_book": "draftkings", "hit": 1, "last_price": -140},
+            {"logged_at": "2026-10-08T18:00:00+00:00", "call_date": "2026-10-08", "sport": "NFL", "player": "B", "market": "Rush Yards",
+             "side": "Under", "line": 60.5, "model_prob": 0.58, "price": None, "price_book": None}]
+
+
+def test_the_fingerprint_is_stable_order_free_and_covers_only_the_locked_fields():
+    rows = _fp_rows()
+    fp = AL.record_fingerprint(rows)
+    assert len(fp) == 16 and fp == AL.record_fingerprint(list(reversed(rows)))
+    later = [dict(r, hit=0, actual=5, settled_at="x", last_price=+120, last_line=1.0, marked_at="y", published_at="z") for r in rows]
+    assert AL.record_fingerprint(later) == fp                                                       # results/marks/publication don't change it
+    for field, new in (("line", 241.5), ("model_prob", 0.63), ("price", -110), ("player", "C"), ("logged_at", "2026-10-08T19:00:00+00:00"),
+                       ("side", "Under"), ("market", "Points"), ("sport", "NBA"), ("call_date", "2026-10-09"), ("price_book", "fanduel")):
+        changed = [dict(rows[0], **{field: new}), rows[1]]
+        assert AL.record_fingerprint(changed) != fp, field
+    assert AL.record_fingerprint(rows[:1]) != fp and AL.record_fingerprint([]) == ""
+
+
+def test_the_fingerprint_can_be_recomputed_by_anyone_from_the_published_table():
+    import hashlib
+    table = AL.fingerprint_rows(_fp_rows())
+    assert table[0][:4] == ["2026-10-08T18:00:00+00:00", "2026-10-08", "NFL", "A"] and table[1][-2:] == ["", ""]      # blanks for None
+    text = "\n".join("|".join(t) for t in table)
+    assert AL.record_fingerprint(_fp_rows()) == hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def test_an_existing_database_gets_the_published_column_too(tmp_path):
+    import sqlite3
+    path = str(tmp_path / "old2.db")
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE analyst_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, logged_at TEXT NOT NULL, call_date TEXT NOT NULL, "
+                "sport TEXT NOT NULL, game TEXT, game_date TEXT, player TEXT NOT NULL, player_id TEXT, team TEXT, market TEXT NOT NULL, "
+                "side TEXT NOT NULL, line REAL, model_prob REAL, conviction REAL, price REAL, price_book TEXT, angles TEXT, cautions TEXT, "
+                "score REAL, gem INTEGER, chalk INTEGER, why TEXT, hit INTEGER, actual REAL, settled_at TEXT, last_line REAL, last_price REAL, marked_at TEXT)")
+    con.commit()
+    con.close()
+    assert AL.fetch_calls(db_path=path) == []
+    AL.record_calls([call()], "2026-10-08", NOW, path)
+    assert AL.mark_published([call()], NOW, path) == 1
+
+
+# ------------------------------------------------------------------ post claims (the scheduled publisher posts once)
+def test_a_post_can_be_claimed_once_released_and_claimed_again(db):
+    assert not AL.posted("picks", "NBA", "2026-10-08", db_path=db)
+    assert AL.claim_post("picks", "NBA", "2026-10-08", now=NOW, db_path=db) is True
+    assert AL.posted("picks", "NBA", "2026-10-08", db_path=db)
+    assert AL.claim_post("picks", "NBA", "2026-10-08", now=NOW, db_path=db) is False       # the second caller loses
+    assert AL.claim_post("recap", "NBA", "2026-10-08", db_path=db) is True                 # another kind is its own claim
+    assert AL.claim_post("picks", "NFL", "2026-10-08", db_path=db) is True                 # …and another sport
+    assert AL.claim_post("picks", "NBA", "2026-10-09", db_path=db) is True                 # …and another day
+    AL.release_post("picks", "NBA", "2026-10-08", db_path=db)
+    assert not AL.posted("picks", "NBA", "2026-10-08", db_path=db)
+    assert AL.posted("recap", "NBA", "2026-10-08", db_path=db) and AL.posted("picks", "NFL", "2026-10-08", db_path=db)
+    assert AL.claim_post("picks", "NBA", "2026-10-08", db_path=db) is True
