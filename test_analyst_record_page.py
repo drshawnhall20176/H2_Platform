@@ -146,3 +146,26 @@ def test_the_csv_and_the_fingerprint_always_cover_the_whole_record_whatever_is_f
     assert seen and set(seen) == {5}                                                          # never the filtered subset
     fp = AL.record_fingerprint(AL.fetch_calls(db_path=db))
     assert any(f"`{fp}`" in m.value and "5 locked calls" in m.value for m in at.markdown)
+
+
+def test_the_sport_list_names_every_sport_the_desk_covers_even_before_it_has_calls(db):
+    add(db, "Only NFL", sp="NFL", hit=1, act=250, settled=True)
+    at = run()
+    sport = [s for s in at.selectbox if s.label == "Sport"][0]
+    assert sport.options == ["All sports", "MLB", "NFL", "WNBA", "NBA", "NHL", "NCAAF", "NCAAMB"]        # UFC has no Desk, so it is not listed
+
+
+def test_a_sport_with_no_calls_yet_says_so_and_the_record_stays_whole(db):
+    seed(db)
+    at = run()
+    [s for s in at.selectbox if s.label == "Sport"][0].set_value("NHL").run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("No NHL calls have been locked yet" in i.value for i in at.info)
+    assert {x.label: x.value for x in at.metric}["Calls locked"] == "0"
+    assert any("5 locked calls" in m.value for m in at.markdown)                                      # the fingerprint still covers everything
+
+
+def test_a_sport_in_the_ledger_but_no_longer_covered_is_still_listed(db):
+    add(db, "Old Sport", sp="XFL", hit=1, act=20, settled=True)
+    at = run()
+    assert "XFL" in [s for s in at.selectbox if s.label == "Sport"][0].options

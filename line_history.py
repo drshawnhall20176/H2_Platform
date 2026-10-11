@@ -32,7 +32,7 @@ import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 DB_PATH = os.path.join(DATA_DIR, "line_history.db")
@@ -138,16 +138,22 @@ CREATE TABLE IF NOT EXISTS line_snapshots (
 """
 
 
+_PG_READY = False                            # the table is created once per process, not once per query
+
+
 @contextmanager
 def _pg_conn():
+    global _PG_READY
     import psycopg2                          # imported lazily so offline paths never need it
     dsn = _DATABASE_URL or ""
     kwargs = {} if "sslmode" in dsn else {"sslmode": "require"}   # Supabase requires SSL
     con = psycopg2.connect(dsn, **kwargs)
     try:
-        with con.cursor() as cur:
-            cur.execute(_PG_SCHEMA)
-        con.commit()
+        if not _PG_READY:
+            with con.cursor() as cur:
+                cur.execute(_PG_SCHEMA)
+            con.commit()
+            _PG_READY = True
         yield con
         con.commit()
     finally:
@@ -187,6 +193,26 @@ def _pg_series(sport, player, market, side=None, book=None) -> List[Dict]:
     with _pg_conn() as con, con.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(q, params)
         return [dict(r) for r in cur.fetchall()]
+
+
+def _pg_index(sport, since=None) -> List[Dict]:
+    from psycopg2.extras import RealDictCursor
+    q, params = "SELECT * FROM line_snapshots WHERE sport=%s", [sport]
+    if since:
+        q += " AND captured_at>=%s"
+        params.append(since)
+    with _pg_conn() as con, con.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(q + " ORDER BY id ASC", params)
+        return [dict(r) for r in cur.fetchall()]
+
+
+def _sqlite_index(db_path, sport, since=None) -> List[Dict]:
+    q, params = "SELECT * FROM line_snapshots WHERE sport=?", [sport]
+    if since:
+        q += " AND captured_at>=?"
+        params.append(since)
+    with _sqlite_conn(db_path) as con:
+        return [dict(r) for r in con.execute(q + " ORDER BY id ASC", params).fetchall()]
 
 
 # ---- public API — identical signatures, dispatches to the active backend ---
@@ -236,3 +262,16 @@ def line_series(sport: str, player: str, market: str, side: Optional[str] = None
     if USING_POSTGRES:
         return _pg_series(sport, player, market, side, book)
     return _sqlite_series(db_path, sport, player, market, side, book)
+
+
+def sport_index(sport: str, since: Optional[str] = None, db_path: Optional[str] = None) -> Dict[Tuple[str, str], List[Dict]]:
+    """Every recorded snapshot for one sport in ONE query, grouped as {(player, market): rows oldest first}. The Analyst
+    Desk looks up the line movement of dozens of plays per page; asking the database once instead of once per play is
+    the difference between one round trip and sixty on the cloud backend. `since` (an ISO date or time) leaves out
+    snapshots captured before it."""
+    db_path = db_path if db_path is not None else DB_PATH
+    rows = _pg_index(sport, since) if USING_POSTGRES else _sqlite_index(db_path, sport, since)
+    out: Dict[Tuple[str, str], List[Dict]] = {}
+    for r in rows:
+        out.setdefault((r["player"], r["market"]), []).append(r)
+    return out

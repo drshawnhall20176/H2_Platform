@@ -64,7 +64,7 @@ def desk(monkeypatch, tmp_path):
     monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda *a, **k: (plays, meta, ["draftkings"]))
     monkeypatch.setattr(BBD, "fetch_generic_offers", lambda *a, **k: _offers(plays))
     monkeypatch.setattr(BBD, "get_odds_api_key", lambda: "KEY")
-    monkeypatch.setattr(line_history, "line_series", lambda *a, **k: [])
+    monkeypatch.setattr(line_history, "sport_index", lambda *a, **k: {})
     monkeypatch.setattr(AL, "DB_PATH", str(tmp_path / "ledger.db"))
     monkeypatch.setattr(sports.get("NBA").engine, "get_player_results", lambda d: {}, raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
@@ -224,7 +224,7 @@ def _run_slots(monkeypatch, sport):
     monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda *a, **k: (plays, meta, ["draftkings"]))
     monkeypatch.setattr(BBD, "fetch_generic_offers", lambda *a, **k: _offers(plays, sport))
     monkeypatch.setattr(BBD, "get_odds_api_key", lambda: "KEY")
-    monkeypatch.setattr(line_history, "line_series", lambda *a, **k: [])
+    monkeypatch.setattr(line_history, "sport_index", lambda *a, **k: {})
     at = AppTest.from_file(PAGE, default_timeout=60)
     at.session_state["sport"] = sport
     at.run()
@@ -281,7 +281,7 @@ def test_a_game_missing_from_the_slate_meta_still_gets_its_time_from_its_plays(m
     monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda *a, **k: (plays, [], ["draftkings"]))
     monkeypatch.setattr(BBD, "fetch_generic_offers", lambda *a, **k: [])
     monkeypatch.setattr(BBD, "get_odds_api_key", lambda: "KEY")
-    monkeypatch.setattr(line_history, "line_series", lambda *a, **k: [])
+    monkeypatch.setattr(line_history, "sport_index", lambda *a, **k: {})
     at = AppTest.from_file(PAGE, default_timeout=60)
     at.session_state["sport"] = "NBA"
     at.run()
@@ -299,7 +299,7 @@ def _desk_with(monkeypatch, tmp_path, offers, plays_meta=None):
     monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda *a, **k: (plays, meta, ["draftkings", "fanduel"]))
     monkeypatch.setattr(BBD, "fetch_generic_offers", lambda *a, **k: offers)
     monkeypatch.setattr(BBD, "get_odds_api_key", lambda: "KEY")
-    monkeypatch.setattr(line_history, "line_series", lambda *a, **k: [])
+    monkeypatch.setattr(line_history, "sport_index", lambda *a, **k: {})
     monkeypatch.setattr(AL, "DB_PATH", str(tmp_path / "ledger.db"))
     at = AppTest.from_file(PAGE, default_timeout=60)
     at.session_state["sport"] = "NBA"
@@ -406,7 +406,7 @@ def test_each_game_says_when_the_selected_book_has_nothing_up_for_it(monkeypatch
     monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda *a, **k: (plays, meta, ["draftkings", "fanduel"]))
     monkeypatch.setattr(BBD, "fetch_generic_offers", lambda *a, **k: offs)
     monkeypatch.setattr(BBD, "get_odds_api_key", lambda: "KEY")
-    monkeypatch.setattr(line_history, "line_series", lambda *a, **k: [])
+    monkeypatch.setattr(line_history, "sport_index", lambda *a, **k: {})
     at = AppTest.from_file(PAGE, default_timeout=60)
     at.session_state["sport"] = "NBA"
     at.run()
@@ -767,3 +767,84 @@ def test_the_loaders_are_cached_so_a_second_visit_does_not_repeat_the_work(desk,
     desk(script=True, matchup=True)
     desk(script=True, matchup=True)
     assert calls == ["env", "mu"]
+
+
+# --- speed: the page reads the database in a few round trips, not hundreds --------------------------------
+def test_line_movement_is_read_in_one_query_for_the_whole_sport_not_one_per_play(desk, monkeypatch):
+    calls = []
+
+    def index(sport, since=None, db_path=None):
+        calls.append((sport, since))
+        return {("Gem Guy", "Points"): [
+            {"side": "Over", "line": 20.5, "price": -110, "book": "draftkings", "captured_at": "x"},
+            {"side": "Over", "line": 20.5, "price": -140, "book": "draftkings", "captured_at": "y"},
+            {"side": "Under", "line": 20.5, "price": +300, "book": "draftkings", "captured_at": "z"}]}
+    monkeypatch.setattr(line_history, "sport_index", index)
+    monkeypatch.setattr(line_history, "line_series", lambda *a, **k: pytest.fail("one query per play is the slow path"))
+    at = desk()
+    assert not at.exception, [e.value for e in at.exception]
+    assert len(calls) == 1 and calls[0][0] == "NBA"                              # one read…
+    assert calls[0][1] == (datetime.now(ET) - timedelta(days=14)).strftime("%Y-%m-%d")      # …bounded to the last two weeks
+    desk()
+    assert len(calls) == 1                                                       # and a second visit within minutes reuses it
+    (row,) = AL.fetch_calls(db_path=desk.db)
+    assert "line_move" in row["angles"]                                           # the Over series moved; the Under row was ignored
+
+
+def test_an_unreadable_line_history_only_removes_that_angle(desk, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("database down")
+    monkeypatch.setattr(line_history, "sport_index", boom)
+    at = desk()
+    assert not at.exception, [e.value for e in at.exception]
+    (row,) = AL.fetch_calls(db_path=desk.db)
+    assert "line_move" not in row["angles"]
+
+
+def test_a_rerun_that_changes_nothing_does_not_rewrite_the_market_marks(desk, monkeypatch):
+    n = []
+    real = AL.mark_calls
+    monkeypatch.setattr(AL, "mark_calls", lambda *a, **k: n.append(1) or real(*a, **k))
+    at = desk()
+    assert len(n) == 1
+    at.run()                                                                     # a filter click: same plays, same prices
+    assert len(n) == 1
+
+
+def test_a_changed_price_is_marked_again(desk, monkeypatch):
+    offers = _live(desk, monkeypatch)
+    n = []
+    real = AL.mark_calls
+    monkeypatch.setattr(AL, "mark_calls", lambda *a, **k: n.append(1) or real(*a, **k))
+    at = desk()
+    for o in offers:
+        if o["player"] == "Gem Guy":
+            o["over"]["draftkings"] = -140
+    at.run()                                                                     # the same session, the market has moved
+    assert len(n) == 2
+
+
+def test_an_earlier_days_results_are_fetched_once_while_they_are_still_unpublished(desk, monkeypatch):
+    old = {"key": "k", "sport": "NBA", "date": "2026-09-30", "player": "Old Timer", "player_id": 55, "team": "BOS", "game": "BOS @ NYK",
+           "game_date": "2026-09-30", "market": "Points", "side": "Over", "line": 20.5, "model_prob": 0.62, "conviction": 1.3,
+           "price": None, "price_book": None, "why": "", "score": 1.0, "gem": False, "chalk": False, "cautions": [], "angles": []}
+    AL.record_calls([old], "2026-09-30", None, desk.db)
+    n = []
+    monkeypatch.setattr(sports.get("NBA").engine, "get_player_results", lambda d: n.append(d) or {}, raising=False)
+    at = desk()
+    at.run()
+    at.run()
+    assert n == ["2026-09-30"]                                                    # not once per click
+
+
+def test_grading_an_earlier_day_on_a_rerun_refreshes_the_record_shown(desk, monkeypatch):
+    at = desk()                                                                  # locks today's call; nothing else to grade yet
+    old = {"key": "k", "sport": "NBA", "date": "2026-09-30", "player": "Old Timer", "player_id": 55, "team": "BOS", "game": "BOS @ NYK",
+           "game_date": "2026-09-30", "market": "Points", "side": "Over", "line": 20.5, "model_prob": 0.62, "conviction": 1.3,
+           "price": None, "price_book": None, "why": "", "score": 1.0, "gem": False, "chalk": False, "cautions": [], "angles": []}
+    AL.record_calls([old], "2026-09-30", None, desk.db)
+    monkeypatch.setattr(sports.get("NBA").engine, "get_player_results", lambda d: {55: {"pts": 31}}, raising=False)
+    at.run()                                                                     # same session: nothing new to lock or mark
+    assert "Graded 1 call(s) from 2026-09-30" in " ".join(texts(at))
+    board = [d.value for d in at.dataframe if "Angle" in d.value.columns][0]
+    assert board.loc[board["Angle"] == "All published calls", "Graded"].iloc[0] == 1

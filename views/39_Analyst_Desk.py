@@ -11,7 +11,7 @@ of profit. See analyst.py / analyst_ledger.py for the rules.
 """
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import pytz
@@ -176,12 +176,27 @@ if use_matchup:
 context_notes = [n for n in context_notes if n]
 
 # --- learn from the record, scan, lock ---------------------------------------
-history = AL.fetch_calls(sport=_active.key, settled_only=True)
+# ONE read of this sport's ledger per run (each read is a network round trip on the cloud database); the settled set, the
+# market-move board, today's locked calls and the "most recent" list below are all cut from it.
+sport_rows = AL.fetch_calls(sport=_active.key)
+history = [r for r in sport_rows if r.get("hit") is not None]
 weights = A.learned_weights(history)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _line_index(sport_key: str, since: str):
+    return line_history.sport_index(sport_key, since)
+
+
+_since = (datetime.now(eastern) - timedelta(days=14)).strftime("%Y-%m-%d")
+try:
+    _line_idx = _line_index(_active.key, _since)         # every snapshot in one query, not one query per play
+except Exception:                                      # noqa: BLE001 — line movement is context, never a reason to break the page
+    _line_idx = {}
+
+
 def _line_rows(sport_key, player, market, side):
-    return line_history.line_series(sport_key, player, market, side)
+    return [r for r in _line_idx.get((player, market), []) if side is None or r.get("side") == side]
 
 
 calls = A.scan(plays, _active.key, date_str, offers=offers, odds_map=_active.market_map,
@@ -192,6 +207,7 @@ lines_posted = bool(offers)
 loggable_calls = [c for c in calls if c["book_state"] == A.STATE_POSTED]
 
 locked_note = ""
+_ledger_changed = False                                # set when this run wrote to the ledger, so it is re-read once, below
 if is_owner and loggable_calls:
     sig = (_active.key, date_str, len(loggable_calls), hash(tuple(c["key"] for c in loggable_calls)))
     if st.session_state.get("_analyst_logged") != sig:
@@ -200,29 +216,48 @@ if is_owner and loggable_calls:
             st.session_state["_analyst_logged"] = sig
             if new:
                 locked_note = f"{new} new call(s) locked to the record."
+                _ledger_changed = True
         except Exception as exc:                       # noqa: BLE001
             locked_note = f"⚠️ Couldn't write to the record ({str(exc)[:90]}) — calls below are not being tracked."
 
 # Note the latest pre-game line/price for calls already locked, so the market's move since the lock can be
 # measured (closing-line tracking). Best effort: it never changes a locked call.
+# Skipped when nothing about the marks changed since this session's last run (a rerun from a filter click), so a click
+# doesn't rewrite hundreds of rows.
 if is_owner and loggable_calls:
-    try:
-        AL.mark_calls(loggable_calls, today_str)
-    except Exception:                                  # noqa: BLE001
-        pass
+    _mark_sig = (_active.key, date_str, tuple((c["key"], c.get("line"), c.get("price"), c.get("book_state")) for c in loggable_calls))
+    if st.session_state.get("_analyst_marked") != _mark_sig:
+        try:
+            AL.mark_calls(loggable_calls, today_str)
+            st.session_state["_analyst_marked"] = _mark_sig
+            _ledger_changed = True
+        except Exception:                              # noqa: BLE001
+            pass
 
 # Grade earlier days that are still open (a few per visit, so a cold page stays quick).
 settle_note = ""
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _results_for(sport_key: str, d: str):
+    """Actual results for one earlier day, cached: while a day's results aren't published yet this used to be re-read on
+    every click (for the NFL, a whole week's player table)."""
+    return E.get_player_results(d)
+
+
 try:
-    for d in (AL.unsettled_dates(_active.key, today_str)[:3] if is_owner else []):
-        res = AL.settle_day(_active.key, d, E.get_player_results(d))
+    _open_days = sorted({r["date"] for r in sport_rows if not r.get("settled_at") and r["date"] < today_str}) if is_owner else []
+    for d in _open_days[:3]:
+        res = AL.settle_day(_active.key, d, _results_for(_active.key, d))
         if res["settled"]:
             voids = f" ({res['voids']} void — player didn't play)" if res["voids"] else ""
             settle_note = (settle_note + f" Graded {res['settled']} call(s) from {d}{voids}.").strip()
 except Exception as exc:                               # noqa: BLE001
     settle_note = f"⚠️ Grading earlier calls hit a problem ({str(exc)[:90]})."
 
-history = AL.fetch_calls(sport=_active.key, settled_only=True) if settle_note else history
+if settle_note or _ledger_changed:
+    sport_rows = AL.fetch_calls(sport=_active.key)
+    history = [r for r in sport_rows if r.get("hit") is not None]
 
 captions = [t for t in (locked_note, settle_note) if t]
 if offers_note:
@@ -233,7 +268,7 @@ if captions:
     st.caption(" · ".join(captions))
 
 board = A.scoreboard(history)
-clv_rows = AT.clv_board(AL.fetch_calls(sport=_active.key))
+clv_rows = AT.clv_board(sport_rows)
 # Everything below is the VIEW: the calls for the games picked above. (Logging and grading above always
 # use the whole slate, so a filter never changes what is on the record.)
 view_calls = [c for c in calls if c["game"] in view_set]
@@ -425,8 +460,7 @@ with tab_all:
 # --- Locked calls & share ----------------------------------------------------------
 with tab_live:
     st.markdown("#### Today's locked calls — what the book shows now")
-    day_rows = [r for r in AL.fetch_calls(sport=_active.key, since=date_str)
-                if r["date"] == date_str and not r.get("settled_at")]
+    day_rows = [r for r in sport_rows if r["date"] == date_str and not r.get("settled_at")]
     status_rows = AT.locked_status(day_rows, A.index_offers(offers), _active.market_map, preferred_book)
     if not status_rows:
         st.info(f"No calls are locked at {book_name} for {date_str} yet. Calls lock the first time the desk "
@@ -541,7 +575,7 @@ with tab_proof:
             column_config={"Toward rate": st.column_config.NumberColumn(format="percent")})
         st.caption(f"'Toward' = the line or price later moved to agree with the call. Judged only after "
                    f"{AT.CLV_MIN_N} moves. It is a second opinion on an angle, never a promise of a result.")
-    recent = AL.fetch_calls(sport=_active.key)[-15:][::-1]
+    recent = sport_rows[-15:][::-1]
     if recent:
         with st.expander("Most recent locked calls"):
             st.dataframe(pd.DataFrame([{

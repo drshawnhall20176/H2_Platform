@@ -109,3 +109,58 @@ if __name__ == "__main__":
         except Exception as e:  # noqa: BLE001
             print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
     print(f"\n{passed}/{len(tests)} tests passed")
+
+
+def test_sport_index_reads_a_whole_sport_in_one_query_grouped_by_player_and_market():
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "line_history.db")
+        for player, price, when in (("A", -110, "2026-10-01T10:00:00"), ("A", -125, "2026-10-02T10:00:00"),
+                                    ("B", +100, "2026-10-02T11:00:00")):
+            LH.record_snapshot("NBA", player, "Points", "Over", 20.5, price, "fanduel", db_path=db, captured_at=when)
+        LH.record_snapshot("NFL", "A", "Points", "Over", 20.5, -110, "fanduel", db_path=db, captured_at="2026-10-02T10:00:00")
+        idx = LH.sport_index("NBA", db_path=db)
+        assert set(idx) == {("A", "Points"), ("B", "Points")}                        # the NFL row is not in it
+        assert [r["price"] for r in idx[("A", "Points")]] == [-110, -125]            # oldest first
+        recent = LH.sport_index("NBA", since="2026-10-02", db_path=db)
+        assert [r["price"] for r in recent[("A", "Points")]] == [-125] and ("B", "Points") in recent
+        assert LH.sport_index("MLB", db_path=db) == {}
+
+
+def test_the_cloud_table_is_created_once_per_process_not_once_per_query(monkeypatch):
+    import sys
+    import types
+    log = []
+
+    class Cur:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, sql, params=None):
+            log.append(sql.strip().split()[0])
+
+        def fetchall(self):
+            return []
+
+    class Con:
+        def cursor(self, cursor_factory=None):
+            return Cur()
+
+        def commit(self):
+            pass
+
+        def close(self):
+            pass
+    pg = types.ModuleType("psycopg2")
+    pg.connect = lambda dsn, **kw: Con()
+    pg.extras = types.SimpleNamespace(RealDictCursor=object)
+    monkeypatch.setitem(sys.modules, "psycopg2", pg)
+    monkeypatch.setitem(sys.modules, "psycopg2.extras", pg.extras)
+    monkeypatch.setattr(LH, "USING_POSTGRES", True)
+    monkeypatch.setattr(LH, "_DATABASE_URL", "postgres://u:p@h/db")
+    monkeypatch.setattr(LH, "_PG_READY", False)
+    for _ in range(3):
+        assert LH.sport_index("NBA") == {}
+    assert log.count("CREATE") == 1 and log.count("SELECT") == 3

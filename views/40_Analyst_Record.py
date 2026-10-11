@@ -15,6 +15,7 @@ import analyst as A
 import analyst_ledger as AL
 import analyst_tools as AT
 import components as C
+import sports
 
 C.base_css()
 C.page_header("🧾", "Analyst Record",
@@ -31,10 +32,13 @@ if not all_rows:
             "that hasn't started — nothing is ever added after the fact.")
     st.stop()
 
-sports_present = sorted({r["sport"] for r in all_rows})
+# Every sport the Desk covers, not just the ones with calls so far: a sport with no calls yet should read as "none yet",
+# not look like it's missing from the record.
+_covered = [s.key for s in sports.enabled_sports() if s.has_projections]
+sport_options = _covered + sorted({r["sport"] for r in all_rows} - set(_covered))
 c1, c2 = st.columns([1, 2])
 with c1:
-    sport_pick = st.selectbox("Sport", ["All sports"] + sports_present, key="record_sport")
+    sport_pick = st.selectbox("Sport", ["All sports"] + sport_options, key="record_sport")
 with c2:
     basis = st.radio("Record basis", ["Everything the model flagged", "Published to the audience only"], horizontal=True,
                      key="record_basis",
@@ -43,6 +47,9 @@ with c2:
 rows = [r for r in all_rows if sport_pick == "All sports" or r["sport"] == sport_pick]
 if basis.startswith("Published"):
     rows = [r for r in rows if r.get("published_at")]
+if not rows and sport_pick != "All sports":
+    st.info(f"No {sport_pick} calls have been locked yet" + (" for the audience." if basis.startswith("Published") else ".")
+            + " The record for a sport starts the first time the Desk locks a call for it.")
 graded = [r for r in rows if r.get("hit") is not None]      # a void (player didn't play) or an open call is neither a hit nor a miss
 board = A.scoreboard(graded)
 overall = board[0]

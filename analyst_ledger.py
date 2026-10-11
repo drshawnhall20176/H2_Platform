@@ -26,7 +26,7 @@ import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 DB_PATH = os.path.join(DATA_DIR, "analyst_ledger.db")
@@ -128,6 +128,34 @@ def _sqlite_conn(db_path: str):
         con.close()
 
 
+_PG_READY = False             # the schema is checked/migrated ONCE per process, not on every query
+_PG_LOCK_ID = 7352001         # advisory-lock key that serialises schema changes across app instances
+
+
+def _pg_ensure_schema(con) -> None:
+    """Make sure the tables and columns exist, touching the schema only when something is actually missing.
+    The old code ran CREATE TABLE and four ALTER TABLE ... IF NOT EXISTS on EVERY query; ALTER TABLE takes a table
+    lock even when it changes nothing, so two sessions (the app, the public app, the scheduled job, several reruns)
+    could deadlock on each other (psycopg2.errors.DeadlockDetected). Now: read the catalog first (no lock), and when a
+    change is needed take one advisory lock so only one session makes it at a time."""
+    global _PG_READY
+    if _PG_READY:
+        return
+    with con.cursor() as cur:
+        cur.execute("SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'analyst_calls' AND table_schema = current_schema()")
+        have = {r[0] for r in cur.fetchall()}
+        cur.execute("SELECT to_regclass('analyst_posts')")
+        posts = cur.fetchone()[0]
+        if posts is None or any(col not in have for col, _typ in _MARK_COLS):
+            cur.execute("SELECT pg_advisory_xact_lock(%s)", (_PG_LOCK_ID,))
+            cur.execute(_PG_SCHEMA)
+            for col, typ in _MARK_COLS:
+                cur.execute(f"ALTER TABLE analyst_calls ADD COLUMN IF NOT EXISTS {col} {typ}")
+    con.commit()
+    _PG_READY = True
+
+
 @contextmanager
 def _pg_conn():
     import psycopg2
@@ -135,28 +163,62 @@ def _pg_conn():
     kwargs = {} if "sslmode" in dsn else {"sslmode": "require"}
     con = psycopg2.connect(dsn, **kwargs)
     try:
-        with con.cursor() as cur:
-            cur.execute(_PG_SCHEMA)
-            for col, typ in _MARK_COLS:
-                cur.execute(f"ALTER TABLE analyst_calls ADD COLUMN IF NOT EXISTS {col} {typ}")
-        con.commit()
+        _pg_ensure_schema(con)
         yield con
         con.commit()
     finally:
         con.close()
 
 
+PG_RETRIES = 3                # a query that loses a deadlock/serialization race is simply tried again
+
+
 def _run(db_path: Optional[str], sql: str, params: tuple = (), fetch: bool = False):
     """Run one statement on the active backend. `sql` is written with ? placeholders."""
     if USING_POSTGRES:
+        import time
+        from psycopg2 import errors
         from psycopg2.extras import RealDictCursor
-        with _pg_conn() as con, con.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(sql.replace("?", "%s"), params)
-            return [dict(r) for r in cur.fetchall()] if fetch else cur.rowcount
+        for attempt in range(PG_RETRIES):
+            try:
+                with _pg_conn() as con, con.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute(sql.replace("?", "%s"), params)
+                    return [dict(r) for r in cur.fetchall()] if fetch else cur.rowcount
+            except (errors.DeadlockDetected, errors.SerializationFailure):
+                if attempt == PG_RETRIES - 1:
+                    raise
+                time.sleep(0.2 * (attempt + 1))
     path = db_path if db_path is not None else DB_PATH
     with _sqlite_conn(path) as con:
         cur = con.execute(sql, params)
         return [dict(r) for r in cur.fetchall()] if fetch else cur.rowcount
+
+
+def _run_many(db_path: Optional[str], jobs: List[Tuple[str, tuple]]) -> List[int]:
+    """Run several write statements on ONE connection and return each one's row count. On the cloud database every
+    connection is a network handshake, so a card of 300 calls written one connection each took minutes; on one
+    connection it is a single round trip's worth of setup. A deadlock retries the whole batch (nothing was committed)."""
+    if not jobs:
+        return []
+    if USING_POSTGRES:
+        import time
+        from psycopg2 import errors
+        from psycopg2.extras import RealDictCursor
+        for attempt in range(PG_RETRIES):
+            try:
+                with _pg_conn() as con, con.cursor(cursor_factory=RealDictCursor) as cur:
+                    counts = []
+                    for sql, params in jobs:
+                        cur.execute(sql.replace("?", "%s"), params)
+                        counts.append(cur.rowcount)
+                    return counts
+            except (errors.DeadlockDetected, errors.SerializationFailure):
+                if attempt == PG_RETRIES - 1:
+                    raise
+                time.sleep(0.2 * (attempt + 1))
+    path = db_path if db_path is not None else DB_PATH
+    with _sqlite_conn(path) as con:
+        return [con.execute(sql, params).rowcount for sql, params in jobs]
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +247,7 @@ def record_calls(calls: List[Dict], today_str: str, now: Optional[datetime] = No
                  db_path: Optional[str] = None) -> int:
     """Insert every loggable call that is not already in the ledger. Returns how many were NEW."""
     logged_at = (now or datetime.now(timezone.utc)).isoformat(timespec="seconds")
-    new = 0
+    jobs: List[Tuple[str, tuple]] = []
     for c in calls:
         if not loggable(c, today_str, now):
             continue
@@ -198,8 +260,8 @@ def record_calls(calls: List[Dict], today_str: str, now: Optional[datetime] = No
                 1 if c.get("gem") else 0, 1 if c.get("chalk") else 0, c.get("why"))
         sql = (f"INSERT INTO analyst_calls ({','.join(_COLS)}) VALUES ({','.join('?' * len(_COLS))}) "
                f"ON CONFLICT (call_date, sport, player, market, side) DO NOTHING")
-        new += 1 if _run(db_path, sql, vals) else 0
-    return new
+        jobs.append((sql, vals))
+    return sum(1 for n in _run_many(db_path, jobs) if n)
 
 
 def mark_calls(calls: List[Dict], today_str: str, now: Optional[datetime] = None,
@@ -210,7 +272,7 @@ def mark_calls(calls: List[Dict], today_str: str, now: Optional[datetime] = None
     locked at: a price at some other book says nothing about that call. The locked line/price/
     probability are never touched. Returns how many rows were updated."""
     stamp = (now or datetime.now(timezone.utc)).isoformat(timespec="seconds")
-    n = 0
+    jobs: List[Tuple[str, tuple]] = []
     for c in calls:
         if not loggable(c, today_str, now):
             continue
@@ -225,11 +287,11 @@ def mark_calls(calls: List[Dict], today_str: str, now: Optional[datetime] = None
         book = c.get("price_book")
         if book is None or line is None:
             continue
-        n += 1 if _run(db_path, "UPDATE analyst_calls SET last_line=?, last_price=?, marked_at=? "
-                                "WHERE call_date=? AND sport=? AND player=? AND market=? AND side=? "
-                                "AND settled_at IS NULL AND price_book=?",
-                       (line, price, stamp, c["date"], c["sport"], c["player"], c["market"], c["side"], book)) else 0
-    return n
+        jobs.append(("UPDATE analyst_calls SET last_line=?, last_price=?, marked_at=? "
+                     "WHERE call_date=? AND sport=? AND player=? AND market=? AND side=? "
+                     "AND settled_at IS NULL AND price_book=?",
+                     (line, price, stamp, c["date"], c["sport"], c["player"], c["market"], c["side"], book)))
+    return sum(1 for n in _run_many(db_path, jobs) if n)
 
 
 def mark_published(calls: List[Dict], posted_at: Optional[datetime] = None, db_path: Optional[str] = None) -> int:
@@ -237,12 +299,10 @@ def mark_published(calls: List[Dict], posted_at: Optional[datetime] = None, db_p
     flagged by the model. Only rows already in the ledger are stamped, only once (the first publication
     time stands), and nothing else about the row changes. Returns how many rows were stamped."""
     stamp = (posted_at or datetime.now(timezone.utc)).isoformat(timespec="seconds")
-    n = 0
-    for c in calls:
-        n += 1 if _run(db_path, "UPDATE analyst_calls SET published_at=? WHERE call_date=? AND sport=? AND player=? "
-                                "AND market=? AND side=? AND published_at IS NULL",
-                       (stamp, c["date"], c["sport"], c["player"], c["market"], c["side"])) else 0
-    return n
+    jobs = [("UPDATE analyst_calls SET published_at=? WHERE call_date=? AND sport=? AND player=? "
+             "AND market=? AND side=? AND published_at IS NULL",
+             (stamp, c["date"], c["sport"], c["player"], c["market"], c["side"])) for c in calls]
+    return sum(1 for n in _run_many(db_path, jobs) if n)
 
 
 # ---------------------------------------------------------------------------
@@ -346,15 +406,17 @@ def settle_day(sport: str, date_str: str, results: Dict, db_path: Optional[str] 
     stamp = (now or datetime.now(timezone.utc)).isoformat(timespec="seconds")
     rows = _run(db_path, "SELECT id, player_id, market, side, line FROM analyst_calls "
                          "WHERE sport=? AND call_date=? AND settled_at IS NULL", (sport, date_str), fetch=True)
+    jobs: List[Tuple[str, tuple]] = []
     for r in rows:
         actuals = R._result_for(results, r.get("player_id"))
         hit = R.grade_play(r["market"], r["side"], r["line"], actuals) if r.get("line") is not None else None
         actual = (actuals or {}).get(R.MARKET_STAT.get(r["market"])) if actuals else None
-        _run(db_path, "UPDATE analyst_calls SET hit=?, actual=?, settled_at=? WHERE id=?",
-             (None if hit is None else (1 if hit else 0), actual, stamp, r["id"]))
+        jobs.append(("UPDATE analyst_calls SET hit=?, actual=?, settled_at=? WHERE id=?",
+                     (None if hit is None else (1 if hit else 0), actual, stamp, r["id"])))
         out["settled"] += 1
         if hit is None:
             out["voids"] += 1
         elif hit:
             out["hits"] += 1
+    _run_many(db_path, jobs)
     return out
