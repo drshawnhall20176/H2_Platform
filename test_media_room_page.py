@@ -430,3 +430,30 @@ def test_a_slate_with_no_player_rows_is_not_enriched_and_shows_no_source_notes(p
     assert not at.exception, [e.value for e in at.exception]
     t = _text(at)
     assert "Heads up: season-long" not in t and "three shortest touchdown prices" not in t
+
+
+def test_a_sport_with_no_touchdown_pool_still_renders_and_falls_back_to_the_board(patched, monkeypatch):
+    # load_td_pool must hand back (plays, notes) on EVERY path, including the "this sport has no TD pool" early exit.
+    monkeypatch.delattr(nfl_projections, "build_td_pool")
+    __import__("streamlit").cache_data.clear()
+    at = _app()
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    t = _text(at)
+    assert "King of the End Zone" in t and "Who we like for it — Falcons at Saints" in t
+    assert "Heads up: season-long" not in t
+
+
+def test_a_failure_while_building_the_independent_read_degrades_instead_of_crashing(evidence, monkeypatch):
+    import td_evidence as TE
+
+    def boom(*a, **k):
+        raise ValueError("bad row")
+    monkeypatch.setattr(TE, "enrich_pool", boom)
+    __import__("streamlit").cache_data.clear()
+    at = _app()
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    t = _text(at)
+    assert "Heads up: the independent read couldn't be built (bad row)" in t
+    assert "Who we like for it — Falcons at Saints" in t

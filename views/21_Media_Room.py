@@ -177,11 +177,12 @@ def load_plays_generic(sport_key, date_str, ev_mode, book):
 @st.cache_data(ttl=300, show_spinner=False)
 def load_td_pool(sport_key, date_str, book):
     """Anytime-TD plays for EVERY eligible player (including those under the typical-rate cutoff that
-    Best Bets drops) — the field for TD promotions and the player check. [] for sports without one."""
+    Best Bets drops) — the field for TD promotions and the player check. Returns (plays, notes); ([], []) for sports
+    without one."""
     sport = sports.get(sport_key)
     proj = sport.projections
     if not sport.has_projections or not hasattr(proj, "build_td_pool"):
-        return []
+        return [], []
     rows, meta = sport.engine.build_slate(date_str)
     offers, key = [], get_key()
     if key and sport.markets:
@@ -194,8 +195,11 @@ def load_td_pool(sport_key, date_str, book):
     if pool and rows and hasattr(sport.engine, "get_season_logs"):
         # The independent read (td_evidence.py): season role, the book's price, the spread/total and the injury report,
         # instead of the last five games alone. Each source fails on its own and says so in `notes`.
-        logs, injuries, env, notes = TE.load_context(sport_key, date_str, sport.engine, rows, meta, key, sport.odds_sport_key)
-        pool = TE.enrich_pool(pool, logs, injuries, env)
+        try:
+            logs, injuries, env, notes = TE.load_context(sport_key, date_str, sport.engine, rows, meta, key, sport.odds_sport_key)
+            pool = TE.enrich_pool(pool, logs, injuries, env)
+        except Exception as exc:                                # noqa: BLE001 — fall back to the plain pool, and say so
+            notes = [f"the independent read couldn't be built ({str(exc)[:70]}), so the ranking uses the board's own numbers"]
     return pool, notes
 
 
@@ -206,7 +210,9 @@ def get_td_pool():
     """Today's TD pool, loaded once per run and only when something needs it."""
     if "pool" not in _pool_state:
         with st.spinner("Loading every player's touchdown profile..."):
-            allp, notes = load_td_pool(_active.key, date_str, board_book)
+            loaded = load_td_pool(_active.key, date_str, board_book)
+        # tolerate a bare list (an older cached shape) rather than crash the whole page
+        allp, notes = loaded if isinstance(loaded, tuple) and len(loaded) == 2 else (loaded or [], [])
         _pool_state["pool"] = MF.plays_on_date(allp, date_str)
         _pool_state["notes"] = notes
     return _pool_state["pool"]
@@ -448,11 +454,12 @@ else:
         if promo["kind"] == "longest_td" and any(p.get("_td_ev") for p in get_td_pool()):
             st.caption("Popularity isn't measured — \"likely a popular name\" means one of the three shortest touchdown "
                        "prices at the book (the crowd piles onto short prices). Not a lock, not advice; bet responsibly.")
-            for _n in _pool_state.get("notes", []):
-                st.caption(f"Heads up: {_n}.")
         elif promo["kind"] in ("longest_td", "first_last_td"):
             st.caption("Popularity isn't measured — \"likely a popular name\" just means one of the model's "
                        "three likeliest scorers. Not a lock, not advice; bet responsibly.")
+        if promo["kind"] == "longest_td":
+            for _n in _pool_state.get("notes", []):
+                st.caption(f"Heads up: {_n}.")
         promo_lines.append("")
 
 # --- player check ----------------------------------------------------------------------------
