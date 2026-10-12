@@ -105,7 +105,7 @@ def test_a_high_scoring_game_lifts_and_a_low_one_trims_the_role_chance_within_bo
 def test_big_play_index_is_neutral_at_eight_yards_and_clipped():
     assert TE.explosive_index("RB", {"ypt": 8.0}) == 1.0
     assert TE.explosive_index("RB", {"ypt": 40.0}) == 1.8 and TE.explosive_index("RB", {"ypt": 0.5}) == 0.5
-    assert TE.explosive_index("QB", {"ypt": 30.0}) == 0.5
+    assert TE.explosive_index("QB", {"ypt": 30.0}) == 0.2
 
 
 def test_pass_catchers_also_count_depth_of_target():
@@ -362,3 +362,18 @@ def test_an_empty_player_list_never_reads_the_season_stats(monkeypatch):
     monkeypatch.setattr(NE, "get_schedule", lambda s: pytest.fail("no players, nothing to read"))
     monkeypatch.setattr(NE, "load_season_weekly_stats", lambda s: pytest.fail("no players, nothing to read"))
     assert NE.get_season_logs("2026-10-12", []) == {}
+
+
+def test_a_quarterback_who_scores_on_sneaks_does_not_beat_a_receiver_for_the_longest_td():
+    qb = play(name="Sneak QB", pid="q", pos="QB", price=-300)
+    wr = play(name="Deep WR", pid="w", price=+250)
+    pool = TE.enrich_pool([qb, wr], {"q": [g(tds=1, yds=0, rec=0, car=6, rush=25)] * 6, "w": [g(tds=1, yds=90, rec=5, air=90)] * 6}, None, None)
+    assert pool[0]["_td_ev"]["chance"] > pool[1]["_td_ev"]["chance"]                     # the QB is far likelier to score…
+    assert [p["play"]["Player"] for p in _ranked(pool)] == ["Deep WR", "Sneak QB"]        # …and still ranks below the receiver
+
+
+def test_check_a_player_tells_a_quarterbacks_owner_why_he_is_rated_low():
+    pool = TE.enrich_pool([play(name="Sneak QB", pid="q", pos="QB", price=-300), play(name="Deep WR", pid="w", price=+250)], None, None, None)
+    notes = PR.player_profile(pool[0], pool)["notes"]
+    assert any("sneaks and goal-line runs" in n for n in notes)
+    assert not any("sneaks" in n for n in PR.player_profile(pool[1], pool)["notes"])

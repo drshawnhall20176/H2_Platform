@@ -39,7 +39,7 @@ SCRIPT_EXPONENT = 0.8    # how strongly a team's implied points scale its player
 SCRIPT_MIN, SCRIPT_MAX = 0.8, 1.25
 BOOK_MARGIN = 1.10       # an anytime-TD price carries roughly this much hold; the implied chance is divided by it
 MARKET_WEIGHT = 0.6      # with a book price: this share market, the rest his season role
-QB_EXPLOSIVE = 0.5       # a QB's rushing/receiving TDs are almost never the long ones
+QB_EXPLOSIVE = 0.2       # a QB's rushing TDs are mostly sneaks and goal-line runs — almost never the longest of the night
 OUT_STATUSES = {"out", "doubtful"}
 NOTE_STATUSES = {"questionable"}
 

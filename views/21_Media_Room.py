@@ -22,6 +22,7 @@ import retro as R
 import best_bets_data as BBD
 import media_focus as MF
 import promotions as PR
+import td_evidence as TE
 
 _active = sports.active()
 
@@ -181,14 +182,21 @@ def load_td_pool(sport_key, date_str, book):
     proj = sport.projections
     if not sport.has_projections or not hasattr(proj, "build_td_pool"):
         return []
-    rows, _meta = sport.engine.build_slate(date_str)
+    rows, meta = sport.engine.build_slate(date_str)
     offers, key = [], get_key()
     if key and sport.markets:
         try:
             offers = BBD.fetch_generic_offers(sport_key, date_str, key)
         except Exception:
             offers = []
-    return proj.build_td_pool(rows, offers=offers, preferred_book=book)
+    pool = proj.build_td_pool(rows, offers=offers, preferred_book=book)
+    notes: list = []
+    if pool and rows and hasattr(sport.engine, "get_season_logs"):
+        # The independent read (td_evidence.py): season role, the book's price, the spread/total and the injury report,
+        # instead of the last five games alone. Each source fails on its own and says so in `notes`.
+        logs, injuries, env, notes = TE.load_context(sport_key, date_str, sport.engine, rows, meta, key, sport.odds_sport_key)
+        pool = TE.enrich_pool(pool, logs, injuries, env)
+    return pool, notes
 
 
 _pool_state = {}
@@ -198,8 +206,9 @@ def get_td_pool():
     """Today's TD pool, loaded once per run and only when something needs it."""
     if "pool" not in _pool_state:
         with st.spinner("Loading every player's touchdown profile..."):
-            allp = load_td_pool(_active.key, date_str, board_book)
+            allp, notes = load_td_pool(_active.key, date_str, board_book)
         _pool_state["pool"] = MF.plays_on_date(allp, date_str)
+        _pool_state["notes"] = notes
     return _pool_state["pool"]
 
 
@@ -423,7 +432,7 @@ else:
             if PR.KINDS[promo["kind"]][0] == [PR.ANYTIME_TD]:
                 # The whole field, not just the players above the typical-rate cutoff (see build_td_pool).
                 gplays = MF.plays_for_game(get_td_pool(), g) or gplays
-            picks = PR.promo_picks(gplays, promo, n=4 if promo["kind"] == "sgp" else 3)
+            picks = PR.promo_picks(gplays, promo, n=4 if promo["kind"] == "sgp" else 5 if promo["kind"] == "longest_td" else 3)
             if not picks:
                 continue
             any_picks = True
@@ -436,7 +445,12 @@ else:
                 promo_lines.append(f"     {k}) {PR.pick_line(pk)}")
         if not any_picks and promo["kind"] != "info":
             st.caption("The model has no priced candidates for this promotion in the chosen game(s).")
-        if promo["kind"] in ("longest_td", "first_last_td"):
+        if promo["kind"] == "longest_td" and any(p.get("_td_ev") for p in get_td_pool()):
+            st.caption("Popularity isn't measured — \"likely a popular name\" means one of the three shortest touchdown "
+                       "prices at the book (the crowd piles onto short prices). Not a lock, not advice; bet responsibly.")
+            for _n in _pool_state.get("notes", []):
+                st.caption(f"Heads up: {_n}.")
+        elif promo["kind"] in ("longest_td", "first_last_td"):
             st.caption("Popularity isn't measured — \"likely a popular name\" just means one of the model's "
                        "three likeliest scorers. Not a lock, not advice; bet responsibly.")
         promo_lines.append("")

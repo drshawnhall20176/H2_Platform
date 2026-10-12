@@ -125,3 +125,74 @@ def test_boost_prefers_a_real_price_even_without_ev_over_a_higher_conviction_unp
     unpriced = _gp("U", "Pass Yds", 3.0)
     priced = _gp("R", "Receptions", 1.0, PriceSource="book", RealPrice=-115)
     assert [x["play"]["Player"] for x in PR.promo_picks([unpriced, priced], {"kind": "boost"}, n=2)] == ["R", "U"]
+
+
+def _pp(name, prob, rec_yds, rec, tgt, tds=0, n=3, game="ATL @ NO"):
+    log = [{"receiving_yards": rec_yds, "receptions": rec, "targets": tgt, "carries": 0, "rushing_yards": 0,
+            "receiving_tds": tds, "rushing_tds": 0}] * n
+    return {"Player": name, "Team": "ATL", "Market": "Anytime TD", "ModelProb": prob, "Game": game,
+            "Position": "WR", "_game_log": log, "Fair": 250}
+
+
+def test_find_players_matches_every_word_ignoring_case_and_punctuation():
+    pool = [_pp("Michael Penix Jr.", .3, 0, 0, 0), _pp("Drake London", .3, 60, 4, 6), _pp("Drake Maye", .2, 0, 0, 0)]
+    assert [p["Player"] for p in PR.find_players("drake", pool)] == ["Drake Maye", "Drake London"] or \
+        {p["Player"] for p in PR.find_players("drake", pool)} == {"Drake London", "Drake Maye"}
+    assert [p["Player"] for p in PR.find_players("PENIX jr", pool)] == ["Michael Penix Jr."]
+    assert [p["Player"] for p in PR.find_players("drake maye", pool)] == ["Drake Maye"]      # every word must match
+    assert PR.find_players("", pool) == [] and PR.find_players("nobody here", pool) == []
+    assert PR.find_players("drake", [{**pool[1], "Market": "First TD Scorer"}]) == []      # anytime plays only
+
+
+def test_player_profile_ranks_within_game_and_flags_small_sample_and_scoreless():
+    pool = [_pp("Burner", .286, 65, 4, 6), _pp("Chalk", .571, 40, 3, 4, tds=1), _pp("Mid", .429, 50, 5, 7, tds=1),
+            _pp("Dotson", .286, 11, 2, 3), _pp("Other", .286, 6, 2, 4)]
+    top = PR.player_profile(pool[0], pool)
+    weak = PR.player_profile(pool[3], pool, first_td_plays=[{"Player": "Dotson", "Market": "First TD Scorer", "ModelProb": .03}])
+    assert top["verdict"] in ("Strong fit", "Reasonable fit") and top["rank"] < weak["rank"]
+    assert weak["verdict"] == "Weak fit" and weak["pool_size"] == 5 and weak["first_td_prob"] == .03
+    assert any("Only 3 game(s)" in n for n in weak["notes"]) and any("No TD yet" in n for n in weak["notes"])
+    assert any("less explosive" in n for n in weak["notes"]) and any("more explosive" in n for n in top["notes"])
+    assert weak["targets_pg"] == 3 and weak["td_games"] == 0
+    lines = PR.profile_lines(weak)
+    assert "Weak fit for King of the End Zone" in lines[0] and "#4 of 5" in lines[0] and "~3% to score first" in lines[1]
+
+
+def test_player_profile_with_too_few_touches_says_so():
+    p = _pp("Ghost", .286, 0, 0, 0)
+    pf = PR.player_profile(p, [p])
+    assert pf["ypt"] is None and any("Too few touches" in n for n in pf["notes"])
+
+
+def test_explosiveness_factor_keeps_separating_big_play_receivers_instead_of_capping_early():
+    assert PR._factor(None) == 1.0
+    assert PR._factor(8.0) == 1.0 and PR._factor(2.0) == 0.4 and PR._factor(30.0) == 2.0
+    assert PR._factor(11.5) < PR._factor(13.9) < PR._factor(16.4)          # a Vele < Olave < London ordering
+
+
+def test_longest_td_lets_a_scoreless_deep_threat_overtake_a_likelier_possession_receiver():
+    deep = _play("Deep", 0.286, rec_yds=65, rec=4)                       # 16 yds/touch, no TD yet
+    slot = _play("Slot", 0.40, rec_yds=24, rec=4)                         # 6 yds/touch
+    picks = PR.promo_picks([deep, slot], PR.PROMO_CATALOG[0], n=2)
+    assert [x["play"]["Player"] for x in picks] == ["Deep", "Slot"]
+
+
+def test_qbs_and_unreadable_players_are_penalised_not_given_a_free_pass_in_the_longest_td_ranking():
+    qb = {**_pp("Qb", .40, 0, 0, 0), "Position": "QB"}
+    unknown = _pp("Unknown", .30, 0, 0, 0)                                  # no touches -> ypt None
+    wr = _pp("Wr", .286, 40, 4, 6)                                           # 10 yds/touch
+    order = [x["play"]["Player"] for x in PR.promo_picks([qb, unknown, wr], PR.PROMO_CATALOG[0], n=3)]
+    assert order == ["Wr", "Unknown", "Qb"]                                  # .286*1.25=.36 > .30*.8=.24 > .40*.5=.20
+    assert PR._factor_for({"Position": "QB"}, 20.0) == PR._QB_FACTOR and PR._factor_for({}, None) == PR._UNKNOWN_FACTOR
+    sneak_qb = {**_pp("Sneak Qb", .90, 0, 0, 0), "Position": "QB"}            # very likely to score, but on sneaks
+    assert PR._QB_FACTOR == 0.2
+    assert [x["play"]["Player"] for x in PR.promo_picks([sneak_qb, wr], PR.PROMO_CATALOG[0], n=2)] == ["Wr", "Sneak Qb"]
+
+
+def test_profile_compares_explosiveness_with_the_player_s_own_position_group():
+    rb = {**_pp("Back", .5, 30, 6, 6), "Position": "RB"}                     # 5 yds/touch
+    wr1, wr2 = _pp("Wr1", .3, 60, 4, 6), _pp("Wr2", .3, 20, 4, 6)             # 15 and 5
+    pf = PR.player_profile(wr2, [rb, wr1, wr2])
+    assert any("less explosive than most" in n for n in pf["notes"])           # 5 vs the WR median of 10, not vs the back
+    assert any("receivers and tight ends" in n for n in pf["notes"])
+    assert not any("backs" in n for n in pf["notes"])

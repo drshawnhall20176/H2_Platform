@@ -178,7 +178,7 @@ def explosiveness(play: Dict, min_touches: int = 3) -> Optional[float]:
 
 
 _UNKNOWN_FACTOR = 0.8     # too few touches to read big-play ability: a modest penalty, not a free pass
-_QB_FACTOR = 0.5          # a QB's rushing/receiving TDs are almost never the long ones
+_QB_FACTOR = 0.2          # a QB's rushing TDs are mostly sneaks and goal-line runs — almost never the longest of the night
 
 
 def _factor_for(play: Dict, ypt: Optional[float]) -> float:
@@ -411,6 +411,9 @@ def player_profile(play: Dict, game_pool: List[Dict], first_td_plays: Optional[L
         verdict = "Weak fit"
 
     notes = []
+    if (play.get("Position") or "").upper() == "QB":
+        notes.append("A quarterback's touchdowns are mostly sneaks and goal-line runs, so for a LONGEST-touchdown promo he is "
+                     "rated low however likely he is to score.")
     if ev:
         if ev["out"]:
             notes.append(f"The injury report lists him {ev['status']}, so he is left out of the ranking.")
