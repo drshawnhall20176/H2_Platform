@@ -23,8 +23,9 @@ LAST_TD = "Last TD Scorer"
 #          plain-words explanation shown with the picks)
 KINDS = {
     "longest_td": ([ANYTIME_TD], "longest-TD score",
-                   "ranked by chance to score a rushing/receiving TD, weighted up for explosive "
-                   "players (yards per touch) since the LONGEST TD wins"),
+                   "ranked by chance to score a rushing/receiving TD — the book's price blended with his season "
+                   "role and the game's scoring environment — weighted up for big-play ability (season yards per "
+                   "touch, depth of target) since the LONGEST TD wins; players listed Out or Doubtful are left out"),
     "anytime_td": ([ANYTIME_TD], "model probability", "ranked by modeled chance to score a TD"),
     "first_td": ([FIRST_TD], "model probability", "ranked by modeled chance to score the first TD"),
     "last_td": ([LAST_TD], "model probability", "ranked by modeled chance to score the last TD"),
@@ -176,11 +177,29 @@ def explosiveness(play: Dict, min_touches: int = 3) -> Optional[float]:
     return yds / touches
 
 
+_UNKNOWN_FACTOR = 0.8     # too few touches to read big-play ability: a modest penalty, not a free pass
+_QB_FACTOR = 0.5          # a QB's rushing/receiving TDs are almost never the long ones
+
+
+def _factor_for(play: Dict, ypt: Optional[float]) -> float:
+    """The explosiveness multiplier for one play (see _factor): QBs are fixed low, players without enough
+    touches to read get a modest penalty."""
+    if (play.get("Position") or "").upper() == "QB":
+        return _QB_FACTOR
+    if ypt is None:
+        return _UNKNOWN_FACTOR
+    return _factor(ypt)
+
+
 def _factor(ypt: Optional[float]) -> float:
-    """Explosiveness multiplier: ~4.5 yds/touch is neutral; clipped so it nudges, never dominates."""
+    """Explosiveness multiplier for the longest-TD ranking: 8 yards per touch is neutral (a typical
+    pass-catcher), a goal-line back at ~3 is cut hard, a 16+ yds/touch deep threat roughly doubles. Clipped
+    to 0.4-2.0 so it shapes the ranking without letting one hot stretch overrule how likely a player is
+    to score at all. A heuristic, not a fitted model — and with only a few games on file yards per touch
+    is noisy too (the page says so)."""
     if ypt is None:
         return 1.0
-    return min(max(ypt / 4.5, 0.7), 1.6)
+    return min(max(ypt / 8.0, 0.4), 2.0)
 
 
 def _is_td_kind(kind: Optional[str]) -> bool:
@@ -205,11 +224,13 @@ def promo_picks(plays: List[Dict], promo: Dict, n: int = 3) -> List[Dict]:
         pool = [p for p in plays if p.get("Market") in markets and p.get("ModelProb") is not None]
         if not pool:
             return []
+        if kind == "longest_td" and any(p.get("_td_ev") for p in pool):
+            return _independent_longest_td([p for p in pool if p.get("_td_ev")], basis, n)
         chalk_ids = {id(p) for p in sorted(pool, key=lambda p: p["ModelProb"], reverse=True)[:3]}
         scored = []
         for p in pool:
             ypt = explosiveness(p) if kind == "longest_td" else None
-            score = p["ModelProb"] * (_factor(ypt) if kind == "longest_td" else 1.0)
+            score = p["ModelProb"] * (_factor_for(p, ypt) if kind == "longest_td" else 1.0)
             scored.append({"play": p, "score": round(score, 4), "rank_basis": basis, "ypt": ypt,
                            "tag": "chalk" if id(p) in chalk_ids else "leverage", "kind": kind})
         scored.sort(key=lambda x: x["score"], reverse=True)
@@ -237,6 +258,23 @@ def promo_picks(plays: List[Dict], promo: Dict, n: int = 3) -> List[Dict]:
     return out
 
 
+def _independent_longest_td(pool: List[Dict], basis: str, n: int) -> List[Dict]:
+    """The longest-TD ranking built on td_evidence's separate evidence (book price, season role, game environment,
+    season big-play numbers, injury report). Anyone listed Out/Doubtful is left out; `tag` is 'chalk' for the three
+    players the crowd most likely backs (shortest price, else highest chance)."""
+    import td_evidence as TE
+    popular = TE.popular_ids(pool, 3)
+    out = []
+    for p in pool:
+        ev = p["_td_ev"]
+        if ev["out"]:
+            continue
+        out.append({"play": p, "score": round(ev["score"], 4), "rank_basis": basis, "ypt": ev["summary"]["ypt"],
+                    "tag": "chalk" if id(p) in popular else "leverage", "kind": "longest_td"})
+    out.sort(key=lambda x: x["score"], reverse=True)
+    return out[:max(0, n)]
+
+
 def _price_bit(p: Dict) -> Optional[str]:
     if p.get("PriceSource") == "book" and p.get("RealPrice") is not None:
         book = f" at {p['RealPriceBook']}" if p.get("RealPriceBook") else ""
@@ -250,6 +288,21 @@ def pick_line(pick: Dict) -> str:
     """One readable line for a promo pick (TD kinds: chance to score, yards/touch, tag; boost/sgp kinds:
     the market and line, model chance, price, EV)."""
     p = pick["play"]
+    ev = p.get("_td_ev")
+    if ev and pick.get("kind") == "longest_td":
+        import td_evidence as TE
+        chance = f"~{ev['chance'] * 100:.0f}% to score"
+        parts = [f"book {_price_bit(p)}" if ev["market"] is not None else "no book price found",
+                 f"season role {ev['role'] * 100:.0f}%"]
+        bits = [f"{p['Player']} ({p.get('Team', '')})", f"{chance} ({', '.join(parts)})", TE.evidence_text(ev)]
+        if ev.get("status"):
+            bits.append(f"injury report: {ev['status']}")
+        line = " · ".join(bits)
+        if pick.get("tag") == "chalk":
+            line += " · likely a popular name — a shared pool pays less"
+        elif pick.get("tag"):
+            line += " · less obvious — more upside if it hits"
+        return line
     if _is_td_kind(pick.get("kind", "longest_td")):
         bits = [f"{p['Player']} ({p.get('Team', '')})", f"model ~{p['ModelProb'] * 100:.0f}% to score"]
         if pick.get("ypt") is not None:
@@ -278,3 +331,151 @@ def promo_blurb(promo: Dict, book_label: Optional[str] = None) -> str:
     _, _, how = KINDS.get(promo.get("kind"), ([], "", ""))
     base = f"{book_label or promo['book']} — {promo['name']}: {promo.get('summary') or 'see the book for terms'}"
     return base + (f" (Picks: {how}.)" if how else "")
+
+
+# --------------------------------------------------------------------------- player check
+def _norm(s: str) -> str:
+    return "".join(c for c in (s or "").lower() if c.isalnum() or c == " ").strip()
+
+
+def find_players(query: str, plays: List[Dict], limit: int = 5) -> List[Dict]:
+    """Anytime-TD plays whose player name contains every word of `query` (case/punctuation-blind),
+    best (shortest-name, i.e. closest) match first. One play per player."""
+    words = _norm(query).split()
+    if not words:
+        return []
+    seen, out = set(), []
+    for p in plays:
+        if p.get("Market") != ANYTIME_TD or p.get("Player") in seen:
+            continue
+        name = _norm(p.get("Player", ""))
+        if all(w in name for w in words):
+            seen.add(p["Player"])
+            out.append(p)
+    out.sort(key=lambda p: len(p["Player"]))
+    return out[:limit]
+
+
+def _median(xs: List[float]) -> Optional[float]:
+    xs = sorted(xs)
+    if not xs:
+        return None
+    m = len(xs) // 2
+    return xs[m] if len(xs) % 2 else (xs[m - 1] + xs[m]) / 2
+
+
+def _pos_group(pos: Optional[str]) -> str:
+    pos = (pos or "").upper()
+    return "rec" if pos in ("WR", "TE") else "rb" if pos in ("RB", "FB") else pos
+
+
+_GROUP_NAME = {"rec": "receivers and tight ends", "rb": "backs", "QB": "quarterbacks"}
+
+
+def player_profile(play: Dict, game_pool: List[Dict], first_td_plays: Optional[List[Dict]] = None) -> Dict:
+    """How one player fits the 'longest TD' promo (King of the End Zone): his numbers, where he ranks
+    among the plays in his game (`game_pool` — Anytime-TD pool plays for that game), a verdict, and the
+    caveats that matter. Everything is computed from the model's own inputs; nothing is invented."""
+    log = play.get("_game_log") or []
+    n = len(log)
+    td_games = sum(1 for g in log if float(g.get("receiving_tds") or 0) + float(g.get("rushing_tds") or 0) > 0)
+    targets = sum(float(g.get("targets") or 0) for g in log)
+    carries = sum(float(g.get("carries") or 0) for g in log)
+    rec_yds = sum(float(g.get("receiving_yards") or 0) for g in log)
+    ypt = explosiveness(play)
+    ev = play.get("_td_ev")
+    if ev:                                        # the independent read: season numbers, not the last five games
+        s = ev["summary"]
+        n, td_games, ypt = s["games"], s["td_games"], s["ypt"]
+        targets = (s["targets_pg"] or 0) * n
+        carries = (s["carries_pg"] or 0) * n
+
+    promo = {"kind": "longest_td"}
+    ranked = promo_picks(game_pool, promo, n=len(game_pool))
+    rank = next((i for i, x in enumerate(ranked, 1) if x["play"].get("Player") == play.get("Player")), None)
+    entry = ranked[rank - 1] if rank else None
+    size = len(ranked)
+    group = _pos_group(play.get("Position"))
+    ypts = [x["ypt"] for x in ranked if x["ypt"] is not None and _pos_group(x["play"].get("Position")) == group]
+    med = _median(ypts)
+
+    if ev and ev["out"]:
+        verdict = f"Listed {ev['status']} — not picked"
+    elif rank is None:
+        verdict = "Not enough to rank"
+    elif rank <= 3:
+        verdict = "Strong fit"
+    elif rank <= (size + 1) // 2:
+        verdict = "Reasonable fit"
+    else:
+        verdict = "Weak fit"
+
+    notes = []
+    if ev:
+        if ev["out"]:
+            notes.append(f"The injury report lists him {ev['status']}, so he is left out of the ranking.")
+        elif ev.get("status"):
+            notes.append(f"The injury report lists him {ev['status']} — confirm he plays before using him.")
+        if ev["market"] is None:
+            notes.append("No sportsbook TD price was found for him (the book may not list him), so his chance rests on his "
+                         "season role and the game's scoring environment alone.")
+        if ev["summary"]["src"] == "recent":
+            notes.append("Season-long stats weren't available, so this uses only his last few games.")
+    if n < 5:
+        notes.append(f"Only {n} game(s) of data this year — the TD chance leans on a small sample.")
+    if td_games == 0 and n:
+        notes.append("No TD yet, so his chance is the small-sample floor every scoreless player shares — "
+                     "use yards per touch and targets to tell them apart.")
+    if ypt is None:
+        notes.append("Too few touches to read his big-play ability.")
+    elif med is not None:
+        peers = _GROUP_NAME.get(group, "players")
+        notes.append(f"Yards per touch {ypt:.1f} vs a median of {med:.1f} for {peers} in this game — "
+                     + ("more explosive than most of them." if ypt > med * 1.1 else
+                        "less explosive than most of them." if ypt < med * 0.9 else
+                        "about typical for them."))
+    first = next((fp for fp in (first_td_plays or []) if fp.get("Player") == play.get("Player")
+                  and fp.get("Market") == FIRST_TD), None)
+    return {
+        "player": play.get("Player"), "team": play.get("Team"), "position": play.get("Position"),
+        "game": play.get("Game"), "games_used": n, "td_games": td_games,
+        "targets_pg": (targets / n) if n else None, "carries_pg": (carries / n) if n else None,
+        "rec_yds": rec_yds, "ypt": ypt, "prob": ev["chance"] if ev else play.get("ModelProb"),
+        "role_prob": ev["role"] if ev else None, "market_prob": ev["market"] if ev else None,
+        "points": ev["points"] if ev else None, "status": ev["status"] if ev else None,
+        "first_td_prob": first.get("ModelProb") if first else None,
+        "price_text": _price_bit(play), "score": entry["score"] if entry else None,
+        "rank": rank, "pool_size": size, "tag": entry["tag"] if entry else None,
+        "verdict": verdict, "notes": notes,
+    }
+
+
+def profile_lines(pf: Dict) -> List[str]:
+    """Readable lines for a player_profile (shown on screen and in the copy block)."""
+    head = f"{pf['player']} ({pf['team']}, {pf.get('position') or '?'}) — {pf['verdict']} for King of the End Zone"
+    if pf["rank"]:
+        head += f" · #{pf['rank']} of {pf['pool_size']} in {pf['game']}"
+    bits = []
+    if pf["prob"] is not None and pf.get("role_prob") is not None:
+        src = (f"book {pf['market_prob'] * 100:.0f}% after the hold, season role {pf['role_prob'] * 100:.0f}%"
+               if pf.get("market_prob") is not None else f"season role {pf['role_prob'] * 100:.0f}%, no book price")
+        bits.append(f"~{pf['prob'] * 100:.0f}% to score a TD ({src})")
+        if pf.get("points") is not None:
+            bits.append(f"team implied ~{pf['points']:.0f} pts")
+    elif pf["prob"] is not None:
+        bits.append(f"model ~{pf['prob'] * 100:.0f}% to score a TD")
+    if pf.get("first_td_prob") is not None:
+        bits.append(f"~{pf['first_td_prob'] * 100:.0f}% to score first")
+    if pf.get("ypt") is not None:
+        bits.append(f"{pf['ypt']:.1f} yds/touch")
+    if pf.get("targets_pg") is not None:
+        bits.append(f"{pf['targets_pg']:.1f} targets + {pf['carries_pg']:.1f} carries per game "
+                    f"over {pf['games_used']} game(s)")
+    bits.append(f"{pf['td_games']} TD game(s)")
+    if pf.get("price_text"):
+        bits.append(pf["price_text"])
+    if pf.get("tag") == "chalk":
+        bits.append("likely a popular name")
+    elif pf.get("tag"):
+        bits.append("less obvious")
+    return [head, "   " + " · ".join(bits)] + [f"   ⚠️ {x}" for x in pf["notes"]]

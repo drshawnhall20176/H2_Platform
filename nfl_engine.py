@@ -757,6 +757,41 @@ def get_player_season_games(player_id: str, before_date: str, max_games: int = 2
     return player_recent_games(weekly, player_id, before_week=week, n=max_games)
 
 
+def get_season_logs(date_str: str, player_ids: List[str], max_games: int = 25) -> Dict[str, List[Dict]]:
+    """{player id: this season's games before the slate's week, most recent first} for many players from ONE read of the
+    season's weekly stats (get_player_season_games reads it once per player). A player with no games yet is simply
+    absent from the result. Empty when the schedule or the stats aren't available."""
+    wanted = set(player_ids or [])
+    season = _infer_season(date_str)
+    if not wanted or season is None:
+        return {}
+    schedule = get_schedule(season)
+    week = _resolve_week(schedule, date_str)
+    if week is None:
+        return {}
+    weekly = load_season_weekly_stats(season)
+    if weekly.empty:
+        return {}
+    sub = weekly[(weekly["player_id"].isin(wanted)) & (weekly["week"] < week)].sort_values("week", ascending=False)
+    out: Dict[str, List[Dict]] = {}
+    for rec in sub.to_dict("records"):
+        games = out.setdefault(rec["player_id"], [])
+        if len(games) < max_games:
+            games.append(rec)
+    return out
+
+
+def get_team_injuries_for_date(team_abbr: str, date_str: str) -> List[Dict[str, Any]]:
+    """get_team_injuries for the week the slate date falls in. [] when the season or week can't be resolved."""
+    season = _infer_season(date_str)
+    if season is None:
+        return []
+    week = _resolve_week(get_schedule(season), date_str)
+    if week is None:
+        return []
+    return get_team_injuries(team_abbr, season, week)
+
+
 def get_player_history_vs_opponent(player_id: str, opp_abbr: str, before_date: str,
                                    max_games: int = 10) -> List[Dict]:
     """This player's stats in every game THIS SEASON their team has played against one specific

@@ -262,7 +262,7 @@ def test_king_of_the_end_zone_picks_use_the_whole_field_so_explosive_scoreless_r
     assert not at.exception, [e.value for e in at.exception]
     block = _text(at).split("Who we like for it — Falcons at Saints")[1].split("Check a player")[0]
     assert "Drake London" in block                                     # no TD yet, but 16 yds/touch: now in the field
-    assert "Jahan Dotson" not in block                                  # 5.5 yds/touch: not a top-3 fit
+    assert all(block.index(n) < block.index("Jahan Dotson") for n in ("Drake London", "Bijan Robinson"))   # 5.5 yds/touch: last of five
     assert block.index("Bijan Robinson") < block.index("Drake London")  # still led by the likelier scorer
 
 
@@ -330,3 +330,103 @@ def test_nba_preseason_slate_shows_the_warning_and_the_last_season_note(monkeypa
     assert not at.exception, [e.value for e in at.exception]
     assert any("NBA preseason" in i.value for i in at.info)
     assert "Tyrese Haliburton" in _text(at) and "7 of last 10 games are from last season" in _text(at)
+
+
+# --- the independent ranking (td_evidence): season role, book price, injuries, spread/total ---------------
+def _slate_rows():
+    return [{"_pid": "g1", "Team": "ATL"}, {"_pid": "g2", "Team": "NO"}, {"_pid": "g3", "Team": "NO"}]
+
+
+def _evidence_pool():
+    mnf = "ATL @ NO"
+    def pl(name, team, pid, price=None):
+        p = _p(name, team, mnf, MNF, "Anytime TD", .3, 1.0, pid=pid)
+        p.update({"_pool_only": True, "_stat_key": "scrimmage_tds", "RealPrice": price, "RealPriceBook": "draftkings" if price else None,
+                  "PriceSource": "book" if price else "model_fair", "Position": "WR"})
+        return p
+    return [pl("Chris Olave", "NO", "g2", -120), pl("Rashid Shaheed", "NO", "g3", +250), pl("Drake London", "ATL", "g1", +150)]
+
+
+def _season(tds, games=6, yds=80, rec=6):
+    return [{"receiving_yards": yds, "receptions": rec, "targets": rec + 2, "carries": 0, "rushing_yards": 0,
+             "receiving_tds": 1 if i < tds else 0, "rushing_tds": 0, "receiving_air_yards": 70} for i in range(games)]
+
+
+@pytest.fixture
+def evidence(patched, monkeypatch):
+    import analyst_context as AC
+    st_cache = __import__("streamlit")
+    monkeypatch.setattr(nfl_engine, "build_slate", lambda d: (_slate_rows(), _meta()))
+    monkeypatch.setattr(nfl_projections, "build_td_pool", lambda rows, offers=None, preferred_book=None: _evidence_pool())
+    monkeypatch.setattr(nfl_engine, "get_season_logs", lambda d, pids: {"g1": _season(4), "g2": _season(5), "g3": _season(1, yds=20, rec=3)}, raising=False)
+    monkeypatch.setattr(nfl_engine, "get_team_injuries_for_date", lambda t, d: [{"player": "Chris Olave", "status": "Out"}] if t == "NO" else [], raising=False)
+    monkeypatch.setattr(AC, "load_game_env", lambda *a, **k: ({}, ""))
+    st_cache.cache_data.clear()
+
+
+def test_a_player_listed_out_is_not_picked_and_the_check_says_why(evidence):
+    at = _app()
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    block = _text(at).split("Who we like for it — Falcons at Saints")[1].split("Check a player")[0]
+    assert "Drake London" in block and "Rashid Shaheed" in block
+    assert "Chris Olave" not in block.split("MNF SGP No Sweat")[0]                  # Out: left out of King of the End Zone
+    [t for t in at.text_input if t.label == "Player"][0].set_value("olave")
+    at.run()
+    t = _text(at)
+    assert "Listed Out — not picked" in t and "left out of the ranking" in t
+
+
+def test_each_pick_shows_where_its_number_comes_from(evidence):
+    at = _app()
+    at.run()
+    t = _text(at)
+    block = t.split("Who we like for it — Falcons at Saints")[1].split("MNF SGP No Sweat")[0]
+    assert "Drake London (ATL)" in block and "season role" in block and "TDs in 4 of 6 game(s) this season" in block
+    assert "book +150 at draftkings" in block and "yds/touch (season" in block
+    assert "three shortest touchdown prices" in t
+
+
+def test_a_missing_source_is_named_and_the_ranking_still_runs(evidence, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("feed down")
+    monkeypatch.setattr(nfl_engine, "get_season_logs", boom, raising=False)
+    monkeypatch.setattr(nfl_engine, "get_team_injuries_for_date", boom, raising=False)
+    __import__("streamlit").cache_data.clear()
+    at = _app()
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    t = _text(at)
+    assert "Heads up: season-long stats couldn't be loaded" in t and "the injury report couldn't be loaded" in t
+    assert "Drake London" in t.split("Who we like for it — Falcons at Saints")[1]
+
+
+def test_the_player_check_shows_the_book_and_role_numbers_and_says_when_there_is_no_price(evidence, monkeypatch):
+    at = _app()
+    at.run()
+    [t for t in at.text_input if t.label == "Player"][0].set_value("shaheed")
+    at.run()
+    t = _text(at)
+    assert "Rashid Shaheed (NO, WR)" in t and "book 26% after the hold, season role 19%" in t        # priced at +250
+    assert "No sportsbook TD price was found" not in t
+    unpriced = _evidence_pool()
+    unpriced[1].update({"RealPrice": None, "RealPriceBook": None, "PriceSource": "model_fair"})
+    monkeypatch.setattr(nfl_projections, "build_td_pool", lambda rows, offers=None, preferred_book=None: unpriced)
+    __import__("streamlit").cache_data.clear()
+    at = _app()
+    at.run()
+    [t for t in at.text_input if t.label == "Player"][0].set_value("shaheed")
+    at.run()
+    t = _text(at)
+    assert "season role 19%, no book price" in t and "No sportsbook TD price was found" in t
+
+
+def test_a_slate_with_no_player_rows_is_not_enriched_and_shows_no_source_notes(patched, monkeypatch):
+    monkeypatch.setattr(nfl_projections, "build_td_pool", lambda rows, offers=None, preferred_book=None: _evidence_pool())
+    monkeypatch.setattr(nfl_engine, "get_season_logs", lambda d, pids: pytest.fail("no rows, so nothing to enrich"), raising=False)
+    __import__("streamlit").cache_data.clear()
+    at = _app()
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    t = _text(at)
+    assert "Heads up: season-long" not in t and "three shortest touchdown prices" not in t
