@@ -11,12 +11,13 @@ import analyst_tools as AT
 
 PAGE = "views/40_Analyst_Record.py"
 _SQL = ("INSERT INTO analyst_calls (logged_at, call_date, sport, game, player, market, side, line, model_prob, price, price_book, angles, gem, "
-        "hit, actual, settled_at, published_at) VALUES ('{ts}', '{d}', '{sp}', 'A @ B', '{pl}', 'Points', '{sd}', 20.5, {mp}, -115, 'draftkings', "
+        "hit, actual, settled_at, published_at) VALUES ('{ts}', '{d}', '{sp}', 'A @ B', '{pl}', '{mk}', '{sd}', 20.5, {mp}, -115, 'draftkings', "
         "'[\"form_run\"]', {gem}, {hit}, {act}, {st}, {pub})")
 
 
-def add(db, pl, d="2026-10-01", sp="NBA", sd="Over", mp=0.6, gem=0, hit="NULL", act="NULL", settled=False, pub=False, ts=None):
-    AL._run(db, _SQL.format(ts=ts or f"{d}T18:00:00+00:00", d=d, sp=sp, pl=pl, sd=sd, mp=mp, gem=gem, hit=hit, act=act,
+def add(db, pl, d="2026-10-01", sp="NBA", sd="Over", mp=0.6, gem=0, hit="NULL", act="NULL", settled=False, pub=False, ts=None,
+        mk="Points"):
+    AL._run(db, _SQL.format(ts=ts or f"{d}T18:00:00+00:00", d=d, sp=sp, pl=pl, sd=sd, mp=mp, mk=mk, gem=gem, hit=hit, act=act,
                             st="'x'" if settled else "NULL", pub="'2026-10-01T19:00:00+00:00'" if pub else "NULL"))
 
 
@@ -59,7 +60,7 @@ def test_the_headline_numbers_are_the_graded_record_and_the_status_waits_for_eno
     joined = texts(at)
     assert f"A verdict needs 30 graded calls" in joined or "Collecting data (3/30)" in joined
     assert "Status: Collecting data (3/30)." in joined and "does not mean the calls were profitable" in joined
-    assert [t.label for t in at.tabs] == ["🧭 By angle", "🎯 Calibration", "📋 Every call", "🔐 Verify it", "📖 Method & limits"]
+    assert [t.label for t in at.tabs] == ["🧭 By angle", "🧩 By market", "🎯 Calibration", "📋 Every call", "🔐 Verify it", "📖 Method & limits"]
 
 
 def test_the_page_can_be_narrowed_to_a_sport_or_to_what_was_actually_published(db):
@@ -169,3 +170,61 @@ def test_a_sport_in_the_ledger_but_no_longer_covered_is_still_listed(db):
     add(db, "Old Sport", sp="XFL", hit=1, act=20, settled=True)
     at = run()
     assert "XFL" in [s for s in at.selectbox if s.label == "Sport"][0].options
+
+
+# ------------------------------------------------------------------ grading status, by market, and the correction test
+def test_a_sport_with_many_calls_waiting_for_results_is_called_out_and_not_counted_as_losses(db):
+    seed(db)
+    for i in range(12):
+        add(db, f"Stuck {i}", d="2026-09-01", sp="NCAAF")                       # game long over, never graded
+    at = run()
+    warn = " ".join(w.value for w in at.warning)
+    assert "NCAAF: 12 locked call(s) from 1 earlier day(s) have no result yet (oldest 2026-09-01)" in warn
+    assert "NBA:" not in warn and "NFL:" not in warn                              # the healthy sports are not flagged
+    table = [d.value for d in at.dataframe if "Waiting for results" in d.value.columns][0]
+    row = table[table["Sport"] == "NCAAF"].iloc[0]
+    assert row["Locked"] == 12 and row["Graded"] == 0 and row["Waiting for results"] == 12 and row["Oldest waiting"] == "2026-09-01"
+    m = {x.label: x.value for x in at.metric}
+    assert m["Graded"] == "3"                                                    # waiting calls are never graded as misses
+
+
+def test_a_few_open_calls_for_a_sport_are_not_a_warning(db):
+    seed(db)
+    add(db, "Just Open", d="2026-09-01", sp="NFL")
+    assert not run().warning
+
+
+def test_each_market_has_its_own_hit_rate_against_what_the_model_said(db):
+    for i in range(4):
+        add(db, f"T{i}", mk="Anytime TD", mp=0.7, hit=1 if i == 0 else 0, act=1, settled=True)
+    for i in range(2):
+        add(db, f"Y{i}", mk="Pass Yards", mp=0.6, hit=1, act=250, settled=True)
+    at = run()
+    t = [d.value for d in at.dataframe if "Market" in d.value.columns][0]
+    assert list(t["Market"]) == ["Anytime TD", "Pass Yards"]                      # biggest first
+    td = t.iloc[0]
+    assert td["Graded"] == 4 and abs(td["Hit rate"] - 0.25) < 1e-9 and abs(td["Model said"] - 0.7) < 1e-9 and abs(td["Gap"] - (-0.45)) < 1e-9
+
+
+def _overconfident(db, sport="NFL", days=40, per=6, stated=0.7, hits_per_day=3):
+    for d in range(days):
+        day = f"2026-08-{d + 1:02d}" if d < 31 else f"2026-09-{d - 30:02d}"
+        for i in range(per):
+            add(db, f"{sport}{d}-{i}", d=day, sp=sport, mp=stated, hit=1 if i < hits_per_day else 0, act=1, settled=True, mk="Anytime TD")
+
+
+def test_the_record_says_when_correcting_the_stated_chance_beats_it_on_recent_calls(db):
+    _overconfident(db)                                                            # says 70%, hits 50%
+    at = run()
+    t = [d.value for d in at.dataframe if "Tested on (newest)" in d.value.columns][0].iloc[0]
+    assert t["Sport"] == "NFL" and t["Graded"] == 240 and t["Fitted on"] + t["Tested on (newest)"] == 240
+    assert t["Verdict"].startswith("Yes") and t["Error after"] < t["Error before"]
+    assert "a stated 70% has really behaved like" in texts(at)
+
+
+def test_a_sport_without_enough_graded_calls_says_so_instead_of_correcting(db):
+    seed(db)
+    at = run()
+    t = [d.value for d in at.dataframe if "Tested on (newest)" in d.value.columns][0]
+    assert all(v.startswith("Not enough yet") for v in t["Verdict"])
+    assert "has really behaved like" not in texts(at)

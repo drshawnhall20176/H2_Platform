@@ -19,6 +19,7 @@ import streamlit as st
 
 import analyst as A
 import analyst_context as AC
+import analyst_calibration as CAL
 import analyst_ledger as AL
 import analyst_tools as AT
 import best_bets_data as BBD
@@ -247,11 +248,14 @@ def _results_for(sport_key: str, d: str):
 
 try:
     _open_days = sorted({r["date"] for r in sport_rows if not r.get("settled_at") and r["date"] < today_str}) if is_owner else []
-    for d in _open_days[:3]:
-        res = AL.settle_day(_active.key, d, _results_for(_active.key, d))
-        if res["settled"]:
-            voids = f" ({res['voids']} void — player didn't play)" if res["voids"] else ""
-            settle_note = (settle_note + f" Graded {res['settled']} call(s) from {d}{voids}.").strip()
+    _res = AL.settle_open_days(_active.key, _open_days, lambda d: _results_for(_active.key, d))
+    for d, res in sorted(_res["days"]):
+        voids = f" ({res['voids']} void — player didn't play)" if res["voids"] else ""
+        settle_note = (settle_note + f" Graded {res['settled']} call(s) from {d}{voids}.").strip()
+    if _res["waiting"]:
+        _w = sorted(_res["waiting"])
+        settle_note = (settle_note + f" {len(_w)} earlier day(s) are still waiting for results to be published "
+                                     f"(oldest {_w[0]}); those calls stay open until the stats arrive.").strip()
 except Exception as exc:                               # noqa: BLE001
     settle_note = f"⚠️ Grading earlier calls hit a problem ({str(exc)[:90]})."
 
@@ -259,7 +263,14 @@ if settle_note or _ledger_changed:
     sport_rows = AL.fetch_calls(sport=_active.key)
     history = [r for r in sport_rows if r.get("hit") is not None]
 
+# A corrected chance, shown beside the stated one — only for a sport whose correction beat the stated numbers on recent calls
+# it was not fitted on (analyst_calibration.py). It never changes a lock, a rule or a published number.
+_adj_model = CAL.corrected_for_sport(history)
+
 captions = [t for t in (locked_note, settle_note) if t]
+if _adj_model:
+    captions.append("Adjusted = the stated chance corrected for how this sport's calls have actually hit so far (tested on recent "
+                    "calls it was not fitted on). The locks and the Model number are unchanged")
 if offers_note:
     captions.append(f"Heads up: {offers_note}.")
 for _n in context_notes:
@@ -317,10 +328,13 @@ def _call_rows(cs):
             "At book": A.status_text(c, book_name), "Model": c["model_prob"], "Book price": c["price"], "Angles": ", ".join(a["label"] for a in c["angles"]),
             "Gem": "💎" if c["gem"] else "", "Cautions": "; ".join(c["cautions"]), "Score": c["score"],
         })
+        if _adj_model:
+            out[-1]["Adjusted"] = CAL.apply(_adj_model, c["model_prob"])
     return pd.DataFrame(out)
 
 
 _COLS_CFG = {"Model": st.column_config.NumberColumn(format="percent"),
+             "Adjusted": st.column_config.NumberColumn(format="percent"),
              "Book price": st.column_config.NumberColumn(format="%+d"),
              "Score": st.column_config.NumberColumn(format="%.2f")}
 

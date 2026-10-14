@@ -384,3 +384,47 @@ def test_settling_a_day_grades_every_call_in_one_batch(db, monkeypatch):
     monkeypatch.setattr(AL, "_run_many", lambda p, jobs: seen.append(len(jobs)) or real(p, jobs))
     out = AL.settle_day("NFL", "2026-10-08", {1: {"passing_yards": 300}, 2: {"passing_yards": 100}}, db)
     assert out["settled"] == 3 and out["voids"] == 1 and seen == [3]
+
+
+# ------------------------------------------------------------------ grading the backlog without getting stuck
+def _lock_days(db, days):
+    for d in days:
+        AL.record_calls([call(player=f"P{d}", date=d)], d, NOW, db)
+
+
+def test_a_day_with_no_results_does_not_block_the_newer_days_behind_it(db):
+    _lock_days(db, ["2026-10-01", "2026-10-05", "2026-10-06"])
+    asked = []
+    out = AL.settle_open_days("NFL", ["2026-10-01", "2026-10-05", "2026-10-06"],
+                              lambda d: asked.append(d) or ({} if d == "2026-10-01" else {11: {"passing_yards": 300}}), db_path=db)
+    assert out["settled"] == 2 and out["waiting"] == ["2026-10-01"]
+    assert asked == ["2026-10-06", "2026-10-05", "2026-10-01"]                   # newest first
+    done = {r["date"] for r in AL.fetch_calls(db_path=db) if r["settled_at"]}
+    assert done == {"2026-10-05", "2026-10-06"}
+
+
+def test_only_max_days_with_results_are_graded_per_call_and_the_rest_wait_for_the_next(db):
+    days = [f"2026-10-0{i}" for i in range(1, 7)]
+    _lock_days(db, days)
+    out = AL.settle_open_days("NFL", days, lambda d: {11: {"passing_yards": 300}}, max_days=2, db_path=db)
+    assert [d for d, _ in out["days"]] == ["2026-10-06", "2026-10-05"] and out["settled"] == 2
+    assert len(AL.unsettled_dates("NFL", "2026-10-30", db)) == 4
+
+
+def test_the_number_of_days_looked_at_is_bounded_so_a_stuck_sport_stays_quick(db):
+    days = [f"2026-10-0{i}" for i in range(1, 7)]
+    _lock_days(db, days)
+    asked = []
+    out = AL.settle_open_days("NFL", days, lambda d: asked.append(d) or {}, max_tries=4, db_path=db)
+    assert len(asked) == 4 and out["settled"] == 0 and len(out["waiting"]) == 4
+
+
+def test_a_day_whose_results_fail_to_load_is_waiting_and_the_others_still_grade(db):
+    _lock_days(db, ["2026-10-05", "2026-10-06"])
+
+    def results(d):
+        if d == "2026-10-06":
+            raise RuntimeError("feed down")
+        return {11: {"passing_yards": 300}}
+    out = AL.settle_open_days("NFL", ["2026-10-05", "2026-10-06"], results, db_path=db)
+    assert out["settled"] == 1 and out["waiting"] == ["2026-10-06"] and "feed down" in out["errors"][0]

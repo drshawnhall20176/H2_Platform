@@ -8,10 +8,14 @@ and a fingerprint anyone can recompute. It is read-only — nothing here writes,
 it is safe for the public build. See analyst.py / analyst_ledger.py / analyst_tools.py for the rules.
 """
 
+from datetime import datetime
+
 import pandas as pd
+import pytz
 import streamlit as st
 
 import analyst as A
+import analyst_calibration as CAL
 import analyst_ledger as AL
 import analyst_tools as AT
 import components as C
@@ -66,8 +70,25 @@ st.markdown(f"**Status: {overall['status']}.** " + (
 st.caption("'Predictable' here means the hit rate matches the chance the model stated, over enough calls. It does not mean "
            "the calls were profitable.")
 
-tab_angle, tab_cal, tab_calls, tab_verify, tab_method = st.tabs(
-    ["🧭 By angle", "🎯 Calibration", "📋 Every call", "🔐 Verify it", "📖 Method & limits"])
+# Which locked calls are graded, void, or waiting for a result. A big "waiting" count means grading isn't getting results for that
+# sport (the game is over but no stat line has been recorded) — not that the calls lost.
+_today = datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d")
+_status = AT.grading_status([r for r in all_rows if sport_pick == "All sports" or r["sport"] == sport_pick], _today)
+_stuck = [x for x in _status if x["waiting"] >= max(10, 0.2 * x["locked"])]
+with st.expander("📬 Grading status — which calls are still waiting for a result", expanded=bool(_stuck)):
+    for x in _stuck:
+        st.warning(f"{x['sport']}: {x['waiting']} locked call(s) from {x['waiting_days']} earlier day(s) have no result yet "
+                   f"(oldest {x['oldest_waiting']}). The game is over, so this means the stats for that sport haven't come back — "
+                   "the calls are not losses, they just aren't counted until results arrive.")
+    st.dataframe(pd.DataFrame([{
+        "Sport": x["sport"], "Locked": x["locked"], "Graded": x["graded"], "Void (didn't play)": x["void"],
+        "Today / upcoming": x["open_today"], "Waiting for results": x["waiting"], "Days waiting": x["waiting_days"],
+        "Oldest waiting": x["oldest_waiting"] or ""} for x in _status]), width="stretch", hide_index=True)
+    st.caption("Void = the player didn't play. Waiting = the game date has passed but no result has been recorded; the Analyst "
+               "Desk and the scheduled run grade these as soon as the sport's results are published.")
+
+tab_angle, tab_market, tab_cal, tab_calls, tab_verify, tab_method = st.tabs(
+    ["🧭 By angle", "🧩 By market", "🎯 Calibration", "📋 Every call", "🔐 Verify it", "📖 Method & limits"])
 
 with tab_angle:
     shown = [r for r in board if r["n"]]
@@ -89,6 +110,22 @@ with tab_angle:
             "Toward rate": r["toward_rate"], "Status": r["status"]} for r in clv]),
             width="stretch", hide_index=True, column_config={"Toward rate": st.column_config.NumberColumn(format="percent")})
 
+with tab_market:
+    mkts = AT.market_board(graded)
+    if not mkts:
+        st.info("No call has been graded yet in this view.")
+    else:
+        st.dataframe(pd.DataFrame([{
+            "Market": r["market"], "Graded": r["n"], "Hit rate": r["hit_rate"], "Model said": r["mean_prob"],
+            "Gap": r["gap"], "95% range": "" if r["ci_low"] is None else f"{r['ci_low']:.0%}–{r['ci_high']:.0%}",
+            "Status": r["status"]} for r in mkts]), width="stretch", hide_index=True, column_config={
+            "Hit rate": st.column_config.NumberColumn(format="percent"),
+            "Model said": st.column_config.NumberColumn(format="percent"),
+            "Gap": st.column_config.NumberColumn(format="%+.1f%%", help="Hit rate minus the chance the model stated, in "
+                                                 "percentage points. Negative = the model was overconfident for this market.")})
+        st.caption("This shows WHERE a shortfall lives. A market with a large negative gap over 30+ graded calls is the place to "
+                   "look first; a market that is calibrated is one the stated chance can be trusted for.")
+
 with tab_cal:
     rel = A.reliability(graded)
     if not rel:
@@ -101,6 +138,35 @@ with tab_cal:
         st.bar_chart(df.set_index("Model said")[["Avg stated", "Actual hit rate"]])
         st.caption("If the bars match within each bucket, the model's stated chances can be trusted. Small buckets swing "
                    "widely, so read the Calls column before the bars.")
+    st.markdown("##### Would correcting the stated chance help?")
+    _evs = []
+    for _sp in sorted({r["sport"] for r in graded}):
+        _ev = CAL.evaluate([r for r in graded if r["sport"] == _sp])
+        _evs.append((_sp, _ev))
+    if not _evs:
+        st.info("Appears once calls have been graded.")
+    else:
+        def _verdict(ev):
+            if ev["status"] != "ok":
+                return f"Not enough yet (needs {CAL.MIN_TRAIN}+ older and {CAL.MIN_TEST}+ recent graded calls)"
+            return "Yes — the correction beat the stated chance on recent calls" if ev["helps"] else "No — the stated chance did as well or better"
+        st.dataframe(pd.DataFrame([{
+            "Sport": sp, "Graded": ev["n"], "Fitted on": ev["n_train"], "Tested on (newest)": ev["n_test"],
+            "Stated (tested)": ev.get("test_stated"), "Actually hit": ev.get("test_hit"), "Corrected": ev.get("test_adjusted"),
+            "Error before": ev.get("brier_raw"), "Error after": ev.get("brier_adj"), "Verdict": _verdict(ev)}
+            for sp, ev in _evs]), width="stretch", hide_index=True, column_config={
+            "Stated (tested)": st.column_config.NumberColumn(format="percent"),
+            "Actually hit": st.column_config.NumberColumn(format="percent"),
+            "Corrected": st.column_config.NumberColumn(format="percent"),
+            "Error before": st.column_config.NumberColumn(format="%.3f"),
+            "Error after": st.column_config.NumberColumn(format="%.3f")})
+        for sp, ev in _evs:
+            if ev["status"] == "ok" and ev["helps"]:
+                ex = CAL.examples(ev["model"])
+                st.write(f"**{sp}:** " + ", ".join(f"a stated {k:.0%} has really behaved like {v:.0%}" for k, v in ex.items()) + ".")
+        st.caption("The correction is fitted on the OLDER graded calls and scored on the newest ones it never saw; 'Error' is the "
+                   "Brier score (lower is better). A sport only shows a corrected chance on the Analyst Desk when it passed that "
+                   "test. It never changes a lock or a published number.")
 
 with tab_calls:
     result_pick = st.multiselect("Result", ["Hit", "Miss", "Void", "Open"], default=[], key="record_result",

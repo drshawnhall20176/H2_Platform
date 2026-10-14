@@ -284,13 +284,14 @@ def test_only_the_calls_shown_in_the_card_are_stamped_published(env):
     assert len(rows) == 10 and sum(1 for x in rows if x["published_at"]) == 8          # the card shows eight
 
 
-def test_a_run_grades_at_most_three_open_days(env):
-    for d in (-1, -2, -3, -4):
+def test_a_run_grades_at_most_a_set_number_of_open_days_newest_first(env):
+    for d in range(-8, 0):
         _lock_yesterday(env, days=d)
     env["results"] = {9: {"pts": 25}}
     r, _ = go(env)
-    assert r["graded"] == 3
-    assert sum(1 for x in AL.fetch_calls() if x["settled_at"]) == 3
+    assert r["graded"] == PUB.SETTLE_PER_RUN
+    done = sorted(x["date"] for x in AL.fetch_calls() if x["settled_at"])
+    assert len(done) == PUB.SETTLE_PER_RUN and done[-1] == _day(-1)               # the most recent days go first
 
 
 def test_the_recap_is_for_the_latest_fully_graded_published_day(env):

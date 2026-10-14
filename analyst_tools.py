@@ -312,3 +312,45 @@ def record_csv(rows: List[Dict]) -> str:
                  r.get("hit"), r.get("actual"), r.get("settled_at")]
         w.writerow([AL._fp_cell(r.get(f)) for f in AL.FINGERPRINT_FIELDS] + ["" if x is None else x for x in extra])
     return out.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Record-page breakdowns
+# ---------------------------------------------------------------------------
+def grading_status(rows: List[Dict], today_str: str) -> List[Dict]:
+    """Per sport: how many locked calls are graded, void, still open for a game that hasn't been played, or WAITING (open
+    for a date before today — the game is over but no result has been recorded). A big `waiting` count is the sign grading
+    isn't getting results for that sport. Rows: sport, locked, graded, void, open_today, waiting, waiting_days, oldest_waiting."""
+    by: Dict[str, Dict] = {}
+    for r in rows:
+        s = by.setdefault(r["sport"], {"sport": r["sport"], "locked": 0, "graded": 0, "void": 0, "open_today": 0,
+                                       "waiting": 0, "_days": set()})
+        s["locked"] += 1
+        if r.get("hit") is not None:
+            s["graded"] += 1
+        elif r.get("settled_at"):
+            s["void"] += 1
+        elif r["date"] < today_str:
+            s["waiting"] += 1
+            s["_days"].add(r["date"])
+        else:
+            s["open_today"] += 1
+    out = []
+    for s in sorted(by.values(), key=lambda x: x["sport"]):
+        days = s.pop("_days")
+        s["waiting_days"] = len(days)
+        s["oldest_waiting"] = min(days) if days else None
+        out.append(s)
+    return out
+
+
+def market_board(rows: List[Dict]) -> List[Dict]:
+    """Hit rate against the stated chance for each market (Anytime TD, Pass Yards, …), from graded rows, biggest first.
+    Same fields and status wording as the angle board, plus the market name and the gap (hit rate minus stated)."""
+    import analyst as A
+    by: Dict[str, List[Dict]] = {}
+    for r in rows:
+        if r.get("hit") is not None and r.get("market"):
+            by.setdefault(r["market"], []).append(r)
+    out = [{"market": m, **A._summ(rs)} for m, rs in by.items()]
+    return sorted(out, key=lambda x: (-x["n"], x["market"]))

@@ -872,3 +872,38 @@ def test_the_locked_calls_table_follows_the_time_slot_and_game_pickers(monkeypat
     quiet = _locked_table(at)
     assert quiet is None or set(quiet["Game"]) == {"QUI @ DEN"}                  # a game with no locked call shows none, not the others
     assert not any("for the whole slate" in w.value for w in at.markdown)
+
+
+# ------------------------------------------------------------------ waiting days and the adjusted chance
+def test_the_desk_says_how_many_earlier_days_are_still_waiting_for_results_and_keeps_grading_the_rest(desk, monkeypatch):
+    import streamlit as st
+    monkeypatch.setattr(st, "secrets", {"AUDIENCE": "owner"}, raising=False)
+    today = datetime.now(ET)
+    d1, d2 = [(today - timedelta(days=n)).strftime("%Y-%m-%d") for n in (1, 3)]
+    for d, who in ((d1, "Fresh"), (d2, "Stuck")):
+        AL._run(desk.db, "INSERT INTO analyst_calls (logged_at, call_date, sport, player, player_id, market, side, line, price_book, angles) VALUES "
+                         f"('t', '{d}', 'NBA', '{who}', '{who}', 'Points', 'Over', 20.5, 'draftkings', '[]')")
+    monkeypatch.setattr(sports.get("NBA").engine, "get_player_results",
+                        lambda d: {"Fresh": {"pts": 30}} if d == d1 else {}, raising=False)
+    st.cache_data.clear()
+    at = desk()
+    joined = " ".join(texts(at))
+    assert f"Graded 1 call(s) from {d1}" in joined
+    assert f"1 earlier day(s) are still waiting for results to be published (oldest {d2})" in joined
+    rows = {r["player"]: r for r in AL.fetch_calls(db_path=desk.db)}
+    assert rows["Fresh"]["settled_at"] and not rows["Stuck"]["settled_at"]                # the stuck day did not block the fresh one
+
+
+def test_the_adjusted_chance_appears_beside_the_model_chance_only_when_the_correction_earned_it(desk, monkeypatch):
+    import analyst_calibration as CAL
+    assert "Adjusted" not in at_cols(desk())                                               # a new sport has no correction yet
+    monkeypatch.setattr(CAL, "corrected_for_sport", lambda rows: {"a": 1.0, "b": -0.5})
+    at = desk()
+    t = [d.value for d in at.dataframe if "Adjusted" in d.value.columns][0]
+    assert t["Model"].iloc[0] > t["Adjusted"].iloc[0] > 0
+    assert abs(t["Adjusted"].iloc[0] - CAL.apply({"a": 1.0, "b": -0.5}, t["Model"].iloc[0])) < 1e-9
+    assert any("Adjusted = the stated chance corrected" in x for x in texts(at))
+
+
+def at_cols(at):
+    return {c for d in at.dataframe for c in d.value.columns}

@@ -46,7 +46,7 @@ import odds_api as O
 import sports
 
 EASTERN = pytz.timezone("US/Eastern")
-SETTLE_PER_RUN = 3          # earlier open days graded per sport per run (same as the page)
+SETTLE_PER_RUN = 6          # earlier open days graded per sport per run (a backlog clears over a few runs)
 
 
 def today_eastern() -> str:
@@ -142,9 +142,9 @@ def publish_sport(sport_key: str, date_str: str, today_str: str, deps: Dict[str,
     out: Dict = {"sport": sport_key, "locked": 0, "graded": 0, "picks": "nothing to post", "recap": "nothing to post",
                  "notes": [], "text": {}}
     if post:
-        for d in AL.unsettled_dates(sport_key, today_str)[:SETTLE_PER_RUN]:
-            res = AL.settle_day(sport_key, d, deps["results"](sport_key, d))
-            out["graded"] += res["settled"]
+        res = AL.settle_open_days(sport_key, AL.unsettled_dates(sport_key, today_str),
+                                  lambda d: deps["results"](sport_key, d), max_days=SETTLE_PER_RUN)
+        out["graded"] += res["settled"]
 
     # Once the card is out the angles can't change what was posted; a later run only needs the book's current lines (for
     # the closing-line marks), so it skips the heavy evidence reads and the credits they cost.

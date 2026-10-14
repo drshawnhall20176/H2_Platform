@@ -26,7 +26,7 @@ import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 DB_PATH = os.path.join(DATA_DIR, "analyst_ledger.db")
@@ -419,4 +419,38 @@ def settle_day(sport: str, date_str: str, results: Dict, db_path: Optional[str] 
         elif hit:
             out["hits"] += 1
     _run_many(db_path, jobs)
+    return out
+
+
+def settle_open_days(sport: str, dates: List[str], results_for: Callable[[str], Dict], *, max_days: int = 3,
+                     max_tries: int = 12, db_path: Optional[str] = None) -> Dict:
+    """Grade earlier open days, NEWEST first, skipping any day whose results aren't published.
+
+    Why not the oldest three: a day whose results never arrive (a feed that was down that week, a sport whose per-game
+    stats haven't been loaded) used to sit at the front of the queue and block every newer day behind it, so a sport
+    could lock hundreds of calls and never grade one. Now a day with no results is only "waiting": it costs a try,
+    not a slot, and the days after it still get graded. `max_days` bounds the days actually graded per call and
+    `max_tries` the days looked at, so a cold page stays quick.
+
+    Returns {"settled", "hits", "voids", "days": [(date, result)], "waiting": [dates with no results yet]}."""
+    out: Dict = {"settled": 0, "hits": 0, "voids": 0, "days": [], "waiting": []}
+    graded_days = tries = 0
+    for d in sorted(set(dates), reverse=True):
+        if graded_days >= max_days or tries >= max_tries:
+            break
+        tries += 1
+        try:
+            res = settle_day(sport, d, results_for(d), db_path=db_path)
+        except Exception as exc:                                # noqa: BLE001 — one bad day must not block the others
+            out["waiting"].append(d)
+            out.setdefault("errors", []).append(f"{d}: {str(exc)[:80]}")
+            continue
+        if res["settled"]:
+            graded_days += 1
+            out["settled"] += res["settled"]
+            out["hits"] += res["hits"]
+            out["voids"] += res["voids"]
+            out["days"].append((d, res))
+        else:
+            out["waiting"].append(d)
     return out
