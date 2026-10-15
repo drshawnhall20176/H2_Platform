@@ -163,7 +163,7 @@ markets_present = sorted({pl.get("Market") for pl in plays if pl.get("Market")})
 # full reasoning. Intersected with markets_present so a curated-in market genuinely absent from
 # tonight's board never appears as a phantom default; falls back to every market on the board
 # for any sport without a curation yet.
-_default_markets = (_active.default_markets or markets_present)
+_default_markets = (_active.board_defaults() or markets_present)       # curated defaults + the sport's featured markets (MLB: HR, Stolen Bases)
 _default_selected = [m for m in _default_markets if m in markets_present] or markets_present
 selected_markets = st.multiselect("Markets to include", options=markets_present,
                                   default=_default_selected)

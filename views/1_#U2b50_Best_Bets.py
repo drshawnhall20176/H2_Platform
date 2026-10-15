@@ -197,7 +197,7 @@ with f3:
     # sports.py's own comment for the full reasoning. Intersected with markets so a curated-in
     # market genuinely absent from tonight's board never appears as a phantom default; falls
     # back to every market for any sport without a curation yet.
-    _default_markets = (_active.default_markets or markets)
+    _default_markets = (_active.board_defaults() or markets)       # curated defaults + the sport's featured markets (MLB: HR, Stolen Bases)
     _default_mkt_pick = [m for m in _default_markets if m in markets] or markets
     mkt_pick = st.multiselect("Markets", markets, default=_default_mkt_pick)
 with f4: min_conv = st.slider("Min conviction", 1.0, 3.0, 1.2, 0.1,

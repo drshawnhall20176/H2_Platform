@@ -44,6 +44,10 @@ class Sport:
     # Nothing is removed -- every market remains one click away in the same multiselect, this
     # only changes what's pre-selected before a person touches anything.
     single_line_markets: set = field(default_factory=set)  # markets matched w/o a point (e.g. HR)
+    # Markets switched on by default on the SINGLE-PLAY boards (Best Bets, Graded Picks) on top of default_markets. The
+    # parlay builders (Suggested Parlays, Speculative Basket, Slip Lab) keep default_markets alone, because stacking
+    # several long-shot legs is what pushed combined parlay odds into the millions (see default_markets above).
+    featured_markets: Optional[List[str]] = None
     engine_module: str = ""        # import path of the sport's data engine
     projections_module: str = ""   # import path of the sport's projections
     config_module: str = ""        # import path of the sport's config
@@ -52,6 +56,12 @@ class Sport:
     # lazily-imported modules (populated by .engine / .projections)
     _engine: object = None
     _projections: object = None
+
+    def board_defaults(self) -> Optional[List[str]]:
+        """default_markets plus featured_markets, for the single-play boards. None when the sport has no curation."""
+        if not self.default_markets:
+            return self.default_markets
+        return list(self.default_markets) + [m for m in (self.featured_markets or []) if m not in self.default_markets]
 
     @property
     def has_projections(self) -> bool:
@@ -113,6 +123,7 @@ REGISTRY: Dict[str, Sport] = {
                          "Batter Total Hits", "Pitcher Earned Runs", "Pitcher Hits Allowed",
                          "Pitcher Outs", "Pitcher Strikeouts", "Pitcher Walks"],
         single_line_markets={"batter_home_runs"},
+        featured_markets=["Batter HR", "Batter Stolen Bases"],     # key props, especially in the postseason
         engine_module="mlb_engine", projections_module="projections", config_module="config",
         enabled=True,
     ),

@@ -74,6 +74,12 @@ LEAN_SHARE = 0.85         # …where at least this share go the same way (all Un
 
 # thresholds — named so the tests (and the owner) can see exactly what "fires" means
 GAP_MIN = 0.05            # model prob minus book prob, in probability points
+# Long-shot props (a home run is ~15%, a stolen base ~10-20%): a 5-point gap would mean the model has to be 30%+ above the
+# book, so the flat rule above could almost never fire for them. For these Over plays the gap is also judged against the price:
+# the model must be this far ABOVE the book's chance (and at least LONGSHOT_MIN_GAP points above it).
+LONGSHOT_MARKETS = {"Batter HR", "Batter Stolen Bases"}
+LONGSHOT_RATIO = 1.20     # model chance / book chance
+LONGSHOT_MIN_GAP = 0.02
 SOFT_MIN = 0.03           # median-book implied prob minus best-price implied prob
 SOFT_MIN_BOOKS = 3
 LINE_GAP_MIN_SOURCES = 2   # other books / pick'em apps that must post the player before their line means anything
@@ -158,6 +164,11 @@ def detect_market_gap(p: Dict, ctx: Dict) -> Optional[Dict]:
     ref = mp / conv                    # Conviction = model prob / reference prob
     gap = mp - ref
     if gap < GAP_MIN:
+        if (p.get("Market") in LONGSHOT_MARKETS and p.get("Side") == "Over" and ref > 0
+                and mp / ref >= LONGSHOT_RATIO and gap >= LONGSHOT_MIN_GAP):
+            rel = mp / ref - 1.0
+            return {"strength": _clip(rel / 0.6),
+                    "evidence": f"model {mp:.0%} vs market {ref:.0%} (+{rel:.0%} on the price, +{gap * 100:.1f} pts)"}
         return None
     return {"strength": _clip(gap / 0.15),
             "evidence": f"model {mp:.0%} vs market {ref:.0%} (+{gap * 100:.0f} pts)"}

@@ -48,6 +48,10 @@ MARKET_STAT = {
     # get_player_results()'s own "hrr" field (real hits+runs+rbi from that night's boxscore),
     # the same 1.5-line Over/Under every other market here grades against via grade_play.
     "Batter Hits+Runs+RBIs": "hrr",
+    # The remaining batter markets the board prices; keys match mlb_engine.parse_boxscore_results. Without them a call or
+    # bet on one of these could never grade (no stat key -> void).
+    "Batter Stolen Bases": "sb", "Batter Runs": "runs", "Batter RBIs": "rbi", "Batter Singles": "singles",
+    "Batter Doubles": "doubles", "Batter Triples": "triples", "Batter Walks": "bb",
     # WNBA/NBA/NCAAMB — all three basketball sports share the same display market names (the
     # Core-4 convention), so one entry per name covers all of them; no separate NBA/NCAAMB rows
     # needed. Keys match wnba_engine.get_player_results()'s (and NBA's/NCAAMB's) result dict exactly.

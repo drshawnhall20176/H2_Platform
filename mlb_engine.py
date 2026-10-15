@@ -854,7 +854,7 @@ def _ip_to_outs(ip) -> int:
 def parse_boxscore_results(box: Dict) -> Dict[int, Dict]:
     """Per-player actuals from one boxscore, keyed by player id.
 
-    Batting: hr, hits, tb, so, hrr (Hits+Runs+RBIs combined). Pitching: p_k, p_outs, p_bb, p_h, p_er.
+    Batting: hr, hits, tb, so, hrr (Hits+Runs+RBIs combined), sb, runs, rbi, singles, doubles, triples, bb. Pitching: p_k, p_outs, p_bb, p_h, p_er.
     (A player may have both.)
 
     Promoted from a module-private helper (_parse_boxscore_results) to this real, public name
@@ -884,7 +884,12 @@ def parse_boxscore_results(box: Dict) -> Dict[int, Dict]:
                 runs = int(bat.get("runs", 0) or 0)
                 rbi = int(bat.get("rbi", 0) or 0)
                 singles = max(h - d - t - hr, 0)
+                # sb/runs/rbi/singles/doubles/triples/bb: the other batter markets the board prices (Batter Stolen Bases,
+                # Runs, RBIs, Singles, Doubles, Triples, Walks). They were missing, so a call or bet on any of them could
+                # never grade and settled as a void. Same boxscore batting fields as the lines above.
                 rec.update(hr=hr, hits=h, tb=singles + 2 * d + 3 * t + 4 * hr,
+                           sb=int(bat.get("stolenBases", 0) or 0), runs=runs, rbi=rbi, singles=singles,
+                           doubles=d, triples=t, bb=int(bat.get("baseOnBalls", 0) or 0),
                            so=int(bat.get("strikeOuts", 0) or 0),
                            # hrr: the actual combined Hits+Runs+RBIs total for the night -- the
                            # real stat "Batter Hits+Runs+RBIs" plays (graded against the 1.5
@@ -1966,7 +1971,7 @@ def get_hitter_recent_games(player_id: int, season: int, before_date: Optional[s
                             venue: Optional[str] = None, time_of_day: Optional[str] = None,
                             n: int = 10) -> List[Dict[str, Any]]:
     """Last n real games, oldest-to-newest (chart-ready order) -- Hits/Total Bases/HRR/HR/
-    Strikeouts per game, for the Player Lines trend charts. ADDED DIRECTLY ON REQUEST.
+    Strikeouts/Walks/Stolen Bases per game, for the Player Lines trend charts. ADDED DIRECTLY ON REQUEST.
 
     SAME real gameLog fetch and venue/isHome/time-of-day detection get_hitter_split_stat already
     uses (that function aggregates into one stat dict for a split; this one keeps each game as
@@ -2042,6 +2047,8 @@ def get_hitter_recent_games(player_id: int, season: int, before_date: Optional[s
             # calls -- the fetch this function wraps already pulled this data in, it just
             # wasn't surfaced here before now.
             "walks": safe_float(stat.get("baseOnBalls")),
+            # Stolen bases, for the Player Lines "Batter Stolen Bases" chart (same stat dict, no new request).
+            "sb": safe_float(stat.get("stolenBases")),
         })
     return out
 
@@ -2053,6 +2060,7 @@ def get_hitter_recent_games(player_id: int, season: int, before_date: Optional[s
 _MARKET_TO_RECENT_GAME_FIELD = {
     "Batter Total Hits": "hits", "Batter Total Bases": "total_bases",
     "Batter Hits+Runs+RBIs": "hrr", "Batter HR": "hr", "Batter Strikeouts": "strikeouts",
+    "Batter Stolen Bases": "sb",
 }
 
 

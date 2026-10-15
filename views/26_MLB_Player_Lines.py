@@ -12,7 +12,7 @@ PITCHER: Outs, Hits Allowed, Earned Runs, Strikeouts, Walks -- built on mlb_engi
 recent_games (a thin wrapper around the same real starts data the pitcher regression tracker
 uses).
 
-BATTER: Hits, Total Bases, Hits+Runs+RBIs, HR, Strikeouts, and Walks -- built on mlb_engine.
+BATTER: Hits, Total Bases, Hits+Runs+RBIs, HR, Stolen Bases, Strikeouts, and Walks -- built on mlb_engine.
 get_hitter_recent_games. HRR here is the REAL per-game sum (hits+runs+rbi actually recorded),
 not the simulated market probability build_best_bets computes elsewhere.
 """
@@ -116,6 +116,8 @@ BATTER_CHARTS = [
     ("total_bases", "Batter Total Bases", P.DEFAULT_LINES["Batter Total Bases"]),
     ("hrr", "Batter Hits+Runs+RBIs", P.DEFAULT_LINES["Batter Hits+Runs+RBIs"]),
     ("hr", "Batter HR", 0.5),
+    # Stolen Bases: a key postseason prop. 0.5 matches how the board prices it (P.DEFAULT_LINES["Batter Stolen Bases"]).
+    ("sb", "Batter Stolen Bases", P.DEFAULT_LINES.get("Batter Stolen Bases", 0.5)),
     ("strikeouts", "Batter Strikeouts", P.DEFAULT_LINES["Batter Strikeouts"]),
     # ADDED DIRECTLY ON REQUEST: "Batter Walks" is already a real, established, graded market
     # elsewhere on this platform -- same DEFAULT_LINES source every other entry above already
