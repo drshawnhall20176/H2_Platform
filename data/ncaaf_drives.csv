@@ -58136,3 +58136,93 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401871473,6,40187147329,19,Southeast Missouri State,Lindenwood,,,True,4,60
 2026,401871473,6,40187147331,20,Lindenwood,Southeast Missouri State,,,True,4,25
 2026,401871473,6,40187147333,21,Southeast Missouri State,Lindenwood,,,False,4,75
+2026,401871053,7,4018710532,1,Jacksonville State,Florida International,,,True,1,37
+2026,401871053,7,4018710534,2,Florida International,Jacksonville State,,,False,1,76
+2026,401871053,7,4018710535,3,Jacksonville State,Florida International,,,False,1,51
+2026,401871053,7,4018710536,4,Florida International,Jacksonville State,,,True,1,73
+2026,401871053,7,4018710538,5,Jacksonville State,Florida International,,,True,1,24
+2026,401871053,7,40187105310,6,Florida International,Jacksonville State,,,False,1,75
+2026,401871053,7,40187105311,7,Jacksonville State,Florida International,,,True,1,53
+2026,401871053,7,40187105313,8,Florida International,Jacksonville State,,,True,2,75
+2026,401871053,7,40187105315,9,Jacksonville State,Florida International,,,False,2,24
+2026,401871053,7,40187105316,10,Florida International,Jacksonville State,,,True,2,52
+2026,401871053,7,40187105318,11,Jacksonville State,Florida International,,,False,2,25
+2026,401871053,7,40187105319,12,Florida International,Jacksonville State,,,False,2,32
+2026,401871053,7,40187105321,13,Florida International,Jacksonville State,,,False,3,75
+2026,401871053,7,40187105322,14,Jacksonville State,Florida International,,,True,3,54
+2026,401871053,7,40187105324,15,Florida International,Jacksonville State,,,True,3,75
+2026,401871053,7,40187105326,16,Jacksonville State,Florida International,,,False,3,27
+2026,401871053,7,40187105327,17,Florida International,Jacksonville State,,,False,4,81
+2026,401871053,7,40187105328,18,Jacksonville State,Florida International,,,False,4,21
+2026,401871053,7,40187105329,19,Florida International,Jacksonville State,,,False,4,54
+2026,401871053,7,40187105330,20,Jacksonville State,Florida International,,,True,4,9
+2026,401871053,7,40187105332,21,Florida International,Jacksonville State,,,False,4,75
+2026,401871054,7,4018710542,1,Missouri State,Kennesaw State,,,False,1,25
+2026,401871054,7,4018710543,2,Kennesaw State,Missouri State,,,False,1,98
+2026,401871054,7,4018710544,3,Missouri State,Kennesaw State,,,False,1,49
+2026,401871054,7,4018710545,4,Kennesaw State,Missouri State,,,False,1,81
+2026,401871054,7,4018710546,5,Missouri State,Kennesaw State,,,True,1,40
+2026,401871054,7,4018710548,6,Kennesaw State,Missouri State,,,False,2,35
+2026,401871054,7,4018710549,7,Missouri State,Kennesaw State,,,True,2,37
+2026,401871054,7,40187105411,8,Kennesaw State,Missouri State,,,False,2,77
+2026,401871054,7,40187105412,9,Missouri State,Kennesaw State,,,False,2,9
+2026,401871054,7,40187105413,10,Kennesaw State,Missouri State,,,False,2,81
+2026,401871054,7,40187105414,11,Missouri State,Kennesaw State,,,False,2,54
+2026,401871054,7,40187105415,12,Kennesaw State,Missouri State,,,True,2,74
+2026,401871054,7,40187105417,13,Kennesaw State,Missouri State,,,False,3,75
+2026,401871054,7,40187105418,14,Missouri State,Kennesaw State,,,True,3,50
+2026,401871054,7,40187105420,15,Kennesaw State,Missouri State,,,True,3,75
+2026,401871054,7,40187105422,16,Missouri State,Kennesaw State,,,False,3,25
+2026,401871054,7,40187105423,17,Kennesaw State,Missouri State,,,False,3,85
+2026,401871054,7,40187105424,18,Missouri State,Kennesaw State,,,True,4,24
+2026,401871054,7,40187105426,19,Kennesaw State,Missouri State,,,True,4,75
+2026,401871054,7,40187105428,20,Missouri State,Kennesaw State,,,False,4,25
+2026,401871067,7,4018710672,1,Delaware,Middle Tennessee,,,True,1,75
+2026,401871067,7,4018710674,2,Middle Tennessee,Delaware,,,True,1,25
+2026,401871067,7,4018710676,3,Delaware,Middle Tennessee,,,False,1,75
+2026,401871067,7,4018710677,4,Middle Tennessee,Delaware,,,False,1,15
+2026,401871067,7,4018710678,5,Delaware,Middle Tennessee,,,True,1,85
+2026,401871067,7,40187106710,6,Middle Tennessee,Delaware,,,True,1,25
+2026,401871067,7,40187106712,7,Delaware,Middle Tennessee,,,True,2,80
+2026,401871067,7,40187106714,8,Middle Tennessee,Delaware,,,False,2,25
+2026,401871067,7,40187106715,9,Delaware,Middle Tennessee,,,False,2,85
+2026,401871067,7,40187106716,10,Middle Tennessee,Delaware,,,False,2,36
+2026,401871067,7,40187106717,11,Delaware,Middle Tennessee,,,False,2,90
+2026,401871067,7,40187106718,12,Middle Tennessee,Delaware,,,False,2,35
+2026,401871067,7,40187106719,13,Delaware,Middle Tennessee,,,True,2,15
+2026,401871067,7,40187106721,14,Middle Tennessee,Delaware,,,False,2,25
+2026,401871067,7,40187106723,15,Middle Tennessee,Delaware,,,True,3,20
+2026,401871067,7,40187106725,16,Delaware,Middle Tennessee,,,False,3,75
+2026,401871067,7,40187106726,17,Middle Tennessee,Delaware,,,False,3,13
+2026,401871067,7,40187106727,18,Delaware,Middle Tennessee,,,True,3,68
+2026,401871067,7,40187106729,19,Middle Tennessee,Delaware,,,True,3,30
+2026,401871067,7,40187106731,20,Delaware,Middle Tennessee,,,False,3,75
+2026,401871067,7,40187106732,21,Middle Tennessee,Delaware,,,False,4,1
+2026,401871067,7,40187106733,22,Delaware,Middle Tennessee,,,True,4,91
+2026,401871067,7,40187106735,23,Delaware,Middle Tennessee,,,False,4,65
+2026,401871067,7,40187106736,24,Middle Tennessee,Delaware,,,True,4,7
+2026,401871067,7,40187106738,25,Delaware,Middle Tennessee,,,False,4,73
+2026,401871067,7,40187106739,26,Middle Tennessee,Delaware,,,False,4,51
+2026,401871068,7,4018710682,1,Sam Houston,Western Kentucky,,,False,1,25
+2026,401871068,7,4018710683,2,Western Kentucky,Sam Houston,,,True,1,65
+2026,401871068,7,4018710685,3,Sam Houston,Western Kentucky,,,False,1,25
+2026,401871068,7,4018710686,4,Western Kentucky,Sam Houston,,,False,1,65
+2026,401871068,7,4018710687,5,Sam Houston,Western Kentucky,,,False,1,2
+2026,401871068,7,4018710688,6,Western Kentucky,Sam Houston,,,True,1,65
+2026,401871068,7,40187106810,7,Sam Houston,Western Kentucky,,,False,2,35
+2026,401871068,7,40187106811,8,Western Kentucky,Sam Houston,,,False,2,87
+2026,401871068,7,40187106812,9,Sam Houston,Western Kentucky,,,True,2,56
+2026,401871068,7,40187106814,10,Western Kentucky,Sam Houston,,,False,2,75
+2026,401871068,7,40187106815,11,Sam Houston,Western Kentucky,,,False,2,35
+2026,401871068,7,40187106816,12,Western Kentucky,Sam Houston,,,False,2,90
+2026,401871068,7,40187106818,13,Western Kentucky,Sam Houston,,,False,3,75
+2026,401871068,7,40187106819,14,Sam Houston,Western Kentucky,,,False,3,40
+2026,401871068,7,40187106820,15,Western Kentucky,Sam Houston,,,False,3,95
+2026,401871068,7,40187106821,16,Sam Houston,Western Kentucky,,,False,3,35
+2026,401871068,7,40187106822,17,Western Kentucky,Sam Houston,,,False,3,80
+2026,401871068,7,40187106823,18,Sam Houston,Western Kentucky,,,False,3,35
+2026,401871068,7,40187106824,19,Western Kentucky,Sam Houston,,,True,3,80
+2026,401871068,7,40187106826,20,Sam Houston,Western Kentucky,,,False,3,29
+2026,401871068,7,40187106827,21,Western Kentucky,Sam Houston,,,True,4,40
+2026,401871068,7,40187106829,22,Sam Houston,Western Kentucky,,,False,4,10
+2026,401871068,7,40187106830,23,Western Kentucky,Sam Houston,,,False,4,77
