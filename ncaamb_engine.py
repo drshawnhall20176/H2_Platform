@@ -56,8 +56,9 @@ first real deploy, not a launch blocker the way the CDN boxscore was.
 from __future__ import annotations
 
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -105,11 +106,21 @@ def _get_json(url: str, params: Optional[Dict] = None) -> Optional[Dict]:
         return None
 
 
+_key_locks: Dict[Tuple, threading.Lock] = {}
+_key_locks_guard = threading.Lock()
+
+
 def _get_json_cached(url: str, params: Optional[Dict] = None) -> Optional[Dict]:
-    """_get_json, but de-duplicated within this process — see _response_cache above."""
+    """_get_json, but de-duplicated within this process — see _response_cache above. One lock PER URL: on opening night
+    eight workers ask for the same scoreboard month at the same moment, and without it each would download it."""
     key = (url, tuple(sorted((params or {}).items())))
-    if key not in _response_cache:
-        _response_cache[key] = _get_json(url, params)
+    if key in _response_cache:
+        return _response_cache[key]
+    with _key_locks_guard:
+        lock = _key_locks.setdefault(key, threading.Lock())
+    with lock:
+        if key not in _response_cache:
+            _response_cache[key] = _get_json(url, params)
     return _response_cache[key]
 
 
@@ -222,9 +233,17 @@ def get_team_recent_game_ids(team_id: int, before_date: str,
     in per-call here rather than changed in the shared function's own defaults).
 
     days_back defaults to 45 — NCAAMB teams typically play 2-3 games/week, comfortably covered."""
-    return BB.get_team_recent_game_ids(team_id, before_date, SITE_API, _get_json_cached, _diag,
-                                       n=n, days_back=days_back, diag_seen=_diag_seen,
-                                       extra_params=_ALL_D1)
+    # Memoised per team for the life of one slate build (cleared with _response_cache): every player on a roster asks the
+    # same question, and each answer scans every event in the window — 40k+ events for the 275-day opening-week lookback,
+    # about 50 ms apiece, so ~13 players x 300 teams would burn minutes of CPU on opening night for 300 distinct answers.
+    key = ("team_games", team_id, before_date, n, days_back)
+    hit = _response_cache.get(key)
+    if hit is None:
+        hit = BB.get_team_recent_game_ids(team_id, before_date, SITE_API, _get_json_cached, _diag,
+                                          n=n, days_back=days_back, diag_seen=_diag_seen,
+                                          extra_params=_ALL_D1)
+        _response_cache[key] = hit
+    return [dict(x) for x in hit]
 
 
 CDN_API = "https://cdn.espn.com/core/mens-college-basketball/boxscore"
@@ -396,21 +415,68 @@ def get_player_results(date_str: str) -> Dict[int, Dict[str, float]]:
     return results
 
 
-def get_player_recent_games(player_id: int, last_n: int = CFG.RECENT_GAMES_N,
-                            team_id: Optional[int] = None,
-                            before_date: Optional[str] = None, days_back: int = 45) -> List[Dict[str, float]]:
-    """Last N game logs for a player: [{pts, reb, ast, fg3m, min, opp, date}, ...], most recent
-    first. Requires team_id and before_date (build_slate always supplies both)."""
-    if team_id is None or before_date is None:
-        return []
-    games_info = get_team_recent_game_ids(team_id, before_date, last_n, days_back=days_back)
+PRESEASON, REGULAR_SEASON, POSTSEASON = 1, 2, 3   # ESPN's own season-type codes on a scoreboard event
+# Last season's games only pad a thin log. The regular season AND the postseason both count (a team that played into
+# March has its last ten games there: conference tournament, NCAA Tournament). The lookback must reach back past
+# Selection Sunday to the late-February games of a team that went out early: Nov 1 minus 275 days is Feb 1. That window
+# is cheap to scan (ESPN serves the empty summer months as single month requests).
+PRIOR_LOOKBACK_DAYS = 275
+PAD_PRIOR_DAYS_AFTER_OPENER = 30     # last season's games only fill thin logs this long after opening night
+_PRIOR_TYPES = (REGULAR_SEASON, POSTSEASON)
+
+
+def _prior_padding_allowed(before_date: str) -> bool:
+    """True from the off-season through ~a month after opening night; after that a player's own current-season games
+    are the sample, however few (an injured player's gap is not padded)."""
+    try:
+        d = datetime.strptime(before_date, "%Y-%m-%d")
+        return d <= datetime.strptime(SEASON_START, "%Y-%m-%d") + timedelta(days=PAD_PRIOR_DAYS_AFTER_OPENER)
+    except ValueError:
+        return False
+
+
+def _boxlines(games_info: List[Dict[str, Any]], player_id: int, src: str) -> List[Dict[str, float]]:
     out = []
     for g in games_info:
-        box = get_game_boxscore(g["gameId"])
-        line = box.get(player_id)
+        line = get_game_boxscore(g["gameId"]).get(player_id)
         if line:
-            out.append({**line, "opp": g.get("opp_name"), "date": g.get("date")})
-    return out[:last_n]
+            out.append({**line, "opp": g.get("opp_name"), "date": g.get("date"), "src": src})
+    return out
+
+
+def get_player_recent_games(player_id: int, last_n: int = CFG.RECENT_GAMES_N,
+                            team_id: Optional[int] = None,
+                            before_date: Optional[str] = None, days_back: int = 45,
+                            pad_prior: bool = True) -> List[Dict[str, float]]:
+    """Last N game logs for a player: [{pts, reb, ast, fg3m, min, opp, date, src}, ...], most recent
+    first. Requires team_id and before_date (build_slate always supplies both).
+
+    EARLY-SEASON RULES (the same design as nba_engine, adapted for college): the 45-day recent-form window is EMPTY on
+    opening night (no games since March), which used to leave every player with no log, so the slate came back with
+    zero players until teams had played several games. Now:
+      * preseason games (ESPN season type 1) are not part of recent form;
+      * when the log is shorter than `last_n` and it is still the off-season or within PAD_PRIOR_DAYS_AFTER_OPENER of
+        opening night, it is filled from the end of LAST season (regular season and postseason, games before the
+        opener), looked up through the player's CURRENT team — each such line carries src="prior";
+      * a player with no history at all (a freshman, or a transfer: his old games belong to his old team) falls back to
+        any preseason games on file (src="preseason") and is otherwise left off the slate until he has played.
+    Every other line has src="current". `pad_prior=False` is for season-baseline callers that want only this
+    season's games."""
+    if team_id is None or before_date is None:
+        return []
+    info = get_team_recent_game_ids(team_id, before_date, last_n + 10 if days_back <= 45 else 82, days_back=days_back)
+    pre_info = [g for g in info if g.get("season_type") == PRESEASON]
+    current = _boxlines([g for g in info if g.get("season_type") != PRESEASON], player_id, "current")
+
+    log = current[:last_n]
+    if pad_prior and len(log) < last_n and _prior_padding_allowed(before_date):
+        cutoff = min(before_date, SEASON_START)
+        prior_info = [g for g in get_team_recent_game_ids(team_id, cutoff, 60, days_back=PRIOR_LOOKBACK_DAYS)
+                      if g.get("season_type") in _PRIOR_TYPES]
+        log += _boxlines(prior_info[:last_n - len(log)], player_id, "prior")
+    if not log and pre_info:
+        log = _boxlines(pre_info[:last_n], player_id, "preseason")
+    return log[:last_n]
 
 
 # 2026-27 NCAA Division I men's basketball regular season: Nov 1, 2026 – Mar 14, 2027. CONFIRMED
@@ -436,7 +502,7 @@ def get_player_season_games(player_id: int, team_id: int, before_date: str,
     season length."""
     days_back = _days_since_season_start(before_date)
     return get_player_recent_games(player_id, last_n=max_games, team_id=team_id,
-                                   before_date=before_date, days_back=days_back)
+                                   before_date=before_date, days_back=days_back, pad_prior=False)
 
 
 def get_player_history_vs_opponent(player_id: int, team_id: int, opp_id: int, before_date: str,
@@ -514,6 +580,7 @@ def build_slate(date_str: str, min_avg_minutes: float = CFG.MIN_AVG_MINUTES,
     from hammering ESPN with an unbounded burst of concurrent requests just because the slate is
     much bigger than a pro league's; it makes the build take longer on a big night, not riskier."""
     _response_cache.clear()
+    _key_locks.clear()
     _diag_seen.clear()
     games = get_schedule(date_str)
     if not games:

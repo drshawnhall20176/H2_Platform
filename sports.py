@@ -365,6 +365,8 @@ def season_notice(sport_key: str, date_str: str) -> Optional[str]:
     minutes and rotations aren't predictive; few props are posted), and for ~30 days after opening
     night thin logs are still being padded from last season (see nba_engine.get_player_recent_games).
     Dates are compared as plain YYYY-MM-DD strings' calendar dates."""
+    if sport_key == "NCAAMB":
+        return _ncaamb_season_notice(date_str)
     if sport_key != "NBA":
         return None
     try:
@@ -383,6 +385,30 @@ def season_notice(sport_key: str, date_str: str) -> Optional[str]:
         return ("🏀 **Early NBA season** — until about "
                 f"{(start + _timedelta(days=30)).strftime('%b %-d')}, thin logs are filled from "
                 "the end of last regular season (marked in each play's reasoning), so form-based reads are less reliable than usual.")
+    return None
+
+
+def _ncaamb_season_notice(date_str: str) -> Optional[str]:
+    """College basketball's version of season_notice. Opening week is the thinnest data of the year: no team has played, so
+    form comes from LAST season (marked in each play's reasoning), and roster turnover is large — freshmen and transfers
+    have no game history with their current team, so they are left off the board until they have played."""
+    try:
+        start = _datetime.strptime(get("NCAAMB").engine.SEASON_START, "%Y-%m-%d")
+        d = _datetime.strptime(date_str, "%Y-%m-%d")
+    except (ValueError, AttributeError, TypeError):
+        return None
+    days = (d - start).days
+    if -14 <= days < 0:
+        return (f"🏀 **College basketball is about to start** — the first games are {start.strftime('%b %-d')}. Until then the "
+                "board has no current-season games to read, so it leans on the end of last season. Sportsbooks post few player "
+                "props for early games, so many plays are measured against placeholder lines — only plays showing a real book "
+                "line (📊) are actionable.")
+    if 0 <= days <= 30:
+        return ("🏀 **Early college basketball season** — until about "
+                f"{(start + _timedelta(days=30)).strftime('%b %-d')}, thin game logs are filled from the end of last season "
+                "(marked in each play's reasoning), so form-based reads are less reliable than usual. Freshmen and transfers have "
+                "no history with their current team and are missing until they have played. Sportsbooks post props for only a "
+                "fraction of early games; plays without a real book line (📊) are ideas, not bets.")
     return None
 
 
