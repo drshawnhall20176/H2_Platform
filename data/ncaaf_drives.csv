@@ -58136,6 +58136,77 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401871473,6,40187147329,19,Southeast Missouri State,Lindenwood,,,True,4,60
 2026,401871473,6,40187147331,20,Lindenwood,Southeast Missouri State,,,True,4,25
 2026,401871473,6,40187147333,21,Southeast Missouri State,Lindenwood,,,False,4,75
+2026,401860923,7,4018609232,1,Texas State,Colorado State,,,False,1,25
+2026,401860923,7,4018609233,2,Colorado State,Texas State,,,False,1,76
+2026,401860923,7,4018609234,3,Texas State,Colorado State,,,True,1,31
+2026,401860923,7,4018609236,4,Colorado State,Texas State,,,False,1,75
+2026,401860923,7,4018609237,5,Texas State,Colorado State,,,True,1,40
+2026,401860923,7,4018609239,6,Colorado State,Texas State,,,False,1,75
+2026,401860923,7,40186092310,7,Texas State,Colorado State,,,True,1,18
+2026,401860923,7,40186092312,8,Colorado State,Texas State,,,False,1,75
+2026,401860923,7,40186092313,9,Texas State,Colorado State,,,True,2,56
+2026,401860923,7,40186092315,10,Colorado State,Texas State,,,False,2,75
+2026,401860923,7,40186092316,11,Colorado State,Texas State,,,True,2,28
+2026,401860923,7,40186092318,12,Texas State,Colorado State,,,True,2,25
+2026,401860923,7,40186092320,13,Colorado State,Texas State,,,True,2,75
+2026,401860923,7,40186092322,14,Texas State,Colorado State,,,True,2,21
+2026,401860923,7,40186092324,15,Colorado State,Texas State,,,True,2,75
+2026,401860923,7,40186092326,16,Texas State,Colorado State,,,True,2,35
+2026,401860923,7,40186092328,17,Colorado State,Texas State,,,True,3,75
+2026,401860923,7,40186092330,18,Texas State,Colorado State,,,True,3,25
+2026,401860923,7,40186092332,19,Colorado State,Texas State,,,False,3,75
+2026,401860923,7,40186092333,20,Texas State,Colorado State,,,True,3,43
+2026,401860923,7,40186092335,21,Colorado State,Texas State,,,False,3,75
+2026,401860923,7,40186092336,22,Texas State,Colorado State,,,True,3,56
+2026,401860923,7,40186092338,23,Colorado State,Texas State,,,False,3,75
+2026,401860923,7,40186092339,24,Texas State,Colorado State,,,False,4,37
+2026,401860923,7,40186092340,25,Colorado State,Texas State,,,False,4,80
+2026,401860923,7,40186092341,26,Texas State,Colorado State,,,False,4,49
+2026,401862800,7,4018628002,1,East Carolina,UAB,,,True,1,75
+2026,401862800,7,4018628004,2,UAB,East Carolina,,,False,1,25
+2026,401862800,7,4018628005,3,East Carolina,UAB,,,False,1,55
+2026,401862800,7,4018628006,4,UAB,East Carolina,,,False,1,16
+2026,401862800,7,4018628007,5,East Carolina,UAB,,,True,1,60
+2026,401862800,7,4018628009,6,UAB,East Carolina,,,False,2,25
+2026,401862800,7,40186280010,7,East Carolina,UAB,,,False,2,69
+2026,401862800,7,40186280011,8,UAB,East Carolina,,,True,2,16
+2026,401862800,7,40186280013,9,East Carolina,UAB,,,False,2,75
+2026,401862800,7,40186280014,10,UAB,East Carolina,,,False,2,6
+2026,401862800,7,40186280015,11,East Carolina,UAB,,,False,2,60
+2026,401862800,7,40186280016,12,UAB,East Carolina,,,False,2,8
+2026,401862800,7,40186280017,13,East Carolina,UAB,,,False,2,92
+2026,401862800,7,40186280019,14,UAB,East Carolina,,,False,3,25
+2026,401862800,7,40186280020,15,East Carolina,UAB,,,False,3,90
+2026,401862800,7,40186280021,16,UAB,East Carolina,,,True,3,54
+2026,401862800,7,40186280023,17,East Carolina,UAB,,,False,3,75
+2026,401862800,7,40186280024,18,UAB,East Carolina,,,True,3,32
+2026,401862800,7,40186280026,19,East Carolina,UAB,,,True,3,75
+2026,401862800,7,40186280028,20,UAB,East Carolina,,,False,4,25
+2026,401862800,7,40186280029,21,East Carolina,UAB,,,False,4,69
+2026,401862800,7,40186280030,22,UAB,East Carolina,,,True,4,7
+2026,401862800,7,40186280032,23,East Carolina,UAB,,,False,4,75
+2026,401862800,7,40186280033,24,UAB,East Carolina,,,True,5,75
+2026,401862800,7,40186280034,25,East Carolina,UAB,,,True,5,25
+2026,401869950,7,4018699502,1,Old Dominion,Georgia Southern,,,True,1,25
+2026,401869950,7,4018699504,2,Georgia Southern,Old Dominion,,,True,1,75
+2026,401869950,7,4018699506,3,Old Dominion,Georgia Southern,,,False,1,21
+2026,401869950,7,4018699507,4,Georgia Southern,Old Dominion,,,True,1,46
+2026,401869950,7,4018699509,5,Old Dominion,Georgia Southern,,,False,2,25
+2026,401869950,7,40186995010,6,Georgia Southern,Old Dominion,,,True,2,67
+2026,401869950,7,40186995012,7,Old Dominion,Georgia Southern,,,False,2,14
+2026,401869950,7,40186995013,8,Georgia Southern,Old Dominion,,,True,2,60
+2026,401869950,7,40186995015,9,Old Dominion,Georgia Southern,,,False,2,25
+2026,401869950,7,40186995017,10,Georgia Southern,Old Dominion,,,False,3,78
+2026,401869950,7,40186995018,11,Old Dominion,Georgia Southern,,,False,3,20
+2026,401869950,7,40186995019,12,Georgia Southern,Old Dominion,,,True,3,66
+2026,401869950,7,40186995021,13,Old Dominion,Georgia Southern,,,False,3,25
+2026,401869950,7,40186995022,14,Georgia Southern,Old Dominion,,,False,3,75
+2026,401869950,7,40186995023,15,Old Dominion,Georgia Southern,,,True,4,14
+2026,401869950,7,40186995025,16,Georgia Southern,Old Dominion,,,False,4,75
+2026,401869950,7,40186995026,17,Old Dominion,Georgia Southern,,,False,4,10
+2026,401869950,7,40186995027,18,Georgia Southern,Old Dominion,,,False,4,90
+2026,401869950,7,40186995028,19,Old Dominion,Georgia Southern,,,False,4,5
+2026,401869950,7,40186995029,20,Georgia Southern,Old Dominion,,,False,4,15
 2026,401871053,7,4018710532,1,Jacksonville State,Florida International,,,True,1,37
 2026,401871053,7,4018710534,2,Florida International,Jacksonville State,,,False,1,76
 2026,401871053,7,4018710535,3,Jacksonville State,Florida International,,,False,1,51
