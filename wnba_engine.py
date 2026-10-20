@@ -43,6 +43,7 @@ import pytz
 
 import config_wnba as CFG
 import basketball_engine as BB
+import basketball_markets as BM
 
 logger = logging.getLogger(__name__)
 
@@ -388,6 +389,10 @@ def get_game_boxscore(game_id: str) -> Dict[int, Dict[str, float]]:
                     "fg3m": row.get("3PT", 0.0),
                     "min": row.get("MIN", 0.0),
                 }
+                # steals / blocks / turnovers / threes attempted (build 246): only the stats the feed reported, so an absent
+                # column reads as 'unknown', never as a zero. Combos (pr, pa, ra, pra, bs) are derived from the parts.
+                out[pid_int].update(BM.player_stats_from_box(names, stats))
+                BM.add_derived(out[pid_int])
 
     # One more diagnostic layer in case `statistics[].names/athletes/stats` isn't quite the right
     # shape at this new location either — this fires only if extraction is still empty.
@@ -462,7 +467,7 @@ def get_team_recent_allowed_stats(team_id: int, before_date: str,
     rate downstream (build_hot_hand_board divides by it) — without it, a fast-paced team looks
     like a bad defense simply because there were more possessions to allow stats in."""
     games = get_team_recent_game_ids(team_id, before_date, n, days_back=days_back)
-    totals = {"pts": [], "reb": [], "ast": [], "fg3m": [], "poss": []}
+    totals = BM.empty_team_totals()
     for g in games:
         opp_id = g.get("opp_id")
         if opp_id is None:
@@ -474,8 +479,7 @@ def get_team_recent_allowed_stats(team_id: int, before_date: str,
         game_totals = get_game_team_totals(g["gameId"])
         opp_totals = game_totals.get(opp_id)
         if opp_totals:
-            for k in totals:
-                totals[k].append(opp_totals.get(k, 0.0))
+            BM.accumulate_team_totals(totals, opp_totals)
     return {k: (sum(v) / len(v) if v else 0.0) for k, v in totals.items()}
 
 
@@ -493,13 +497,12 @@ def get_team_recent_scored_stats(team_id: int, before_date: str,
     produce while their own specific pick didn't, and this is the missing half of that picture.
     Same "poss" pace field as the allowed version, for the same pace-adjustment reason."""
     games = get_team_recent_game_ids(team_id, before_date, n, days_back=days_back)
-    totals = {"pts": [], "reb": [], "ast": [], "fg3m": [], "poss": []}
+    totals = BM.empty_team_totals()
     for g in games:
         game_totals = get_game_team_totals(g["gameId"])
         own_totals = game_totals.get(int(team_id))
         if own_totals:
-            for k in totals:
-                totals[k].append(own_totals.get(k, 0.0))
+            BM.accumulate_team_totals(totals, own_totals)
     return {k: (sum(v) / len(v) if v else 0.0) for k, v in totals.items()}
 
 
@@ -675,6 +678,7 @@ def player_row(player: Dict, team_name: str, opp_name: str, game_label: str,
         "REB": round(sum(g["reb"] for g in game_log) / n, 1),
         "AST": round(sum(g["ast"] for g in game_log) / n, 1),
         "FG3M": round(sum(g["fg3m"] for g in game_log) / n, 1),
+        **BM.row_columns(game_log),   # STL, BLK, TOV, FG3A, PRA, PR, PA, RA, BLKSTL (None when the log lacks the stat)
         # private fields consumed by wnba_projections.py
         "_pid": player["id"],
         "_game_log": game_log,

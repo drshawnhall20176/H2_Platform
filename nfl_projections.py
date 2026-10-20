@@ -507,6 +507,50 @@ def _td_scorer_plays(rows: List[Dict], offers: Optional[List[Dict]],
     return plays
 
 
+def build_td_pool(rows: List[Dict], offers: Optional[List[Dict]] = None,
+                  preferred_book: Optional[str] = None) -> List[Dict]:
+    """Anytime TD "Over" plays for EVERY player carrying that market — including those whose modeled
+    chance is BELOW the market's typical rate, which build_best_bets deliberately drops (it keeps only
+    the favored side, and "Under" is not a play for a yes/no TD market).
+
+    Why this exists: promotions and the Media Room's player check need the whole candidate field. A
+    receiver with no TDs yet but big-play ability (an explosive WR in week 4, say) falls under the
+    typical-rate cutoff and so was invisible to a "who fits King of the End Zone" ranking, even though
+    for THAT promo what matters is chance-to-score times explosiveness, not edge versus a typical line.
+    Same probability rule as First/Last TD Scorer (_td_scorer_plays): the player's recent rate of
+    scoring a rushing/receiving TD, shrunk by sample size, clipped. Deterministic (no simulation).
+
+    These plays are NOT mixed into build_best_bets output — they are `_pool_only`, for pages that ask for
+    them. `Conviction` is relative to the market's typical rate, so it is often below 1.0 here."""
+    plays: List[Dict] = []
+    for r in rows:
+        log = r.get("_recent_games") or []
+        if not log or "player_anytime_td" not in (r.get("_markets") or []):
+            continue
+        values = [_stat_value(g, "scrimmage_tds") for g in log]
+        p = _clip_prob(BB_P.shrink_prob(sum(1 for v in values if v > 0) / len(values), len(values)))
+        ref = BEST_BET_REF["Anytime TD"]
+        real_price, real_price_book, price_src = None, None, "model_fair"
+        if offers:
+            real = O.real_entry_price(offers, r["Player"], "player_anytime_td", "Over",
+                                      preferred_book=preferred_book)
+            if real is not None:
+                real_price, _pt, real_price_book = real
+                price_src = "book"
+        plays.append({
+            "Player": r["Player"], "PlayerId": r.get("_pid"), "Team": r["Team"],
+            "Game": r["GameLabel"], "Opp": r.get("Opp"), "Versus": r.get("Opp"),
+            "Position": r.get("Position"), "GameDate": r.get("_game_date"),
+            "Market": "Anytime TD", "Side": "Over", "Line": 0.5, "LineSource": "default",
+            "ModelProb": round(p, 4), "Fair": prob_to_american(p),
+            "RealPrice": real_price, "RealPriceBook": real_price_book, "PriceSource": price_src,
+            "Conviction": round(p / ref, 2), "ConvictionSource": "model_typical", "_ceiling": round(1.0 / ref, 2),
+            "Why": _td_reason(values, len(values)),
+            "_stat_key": "scrimmage_tds", "_game_log": log, "_pool_only": True,
+        })
+    return plays
+
+
 # --------------------------------------------------------------------------- Matchup Lab
 def build_trend_series(log: List[Dict]) -> List[Dict]:
     """Chronological (oldest-to-newest) copy of a player's recent-game log, for a trend chart

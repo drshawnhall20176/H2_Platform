@@ -1107,6 +1107,26 @@ def compute_edges(index: Dict, offers: List[Dict],
     return rows, {"matched": matched, "unmatched": unmatched, "unmatched_names": deduped_unmatched}
 
 
+def _fetch_markets_one_by_one(event: Dict, api_key: str, markets: List[str], sport: str) -> Tuple[List[Dict], Optional[str], set]:
+    """Fallback for fetch_slate_props when a combined request was refused over a market key: request each market on its own,
+    parse the ones that answer, collect the refused keys. A non-market error (quota, auth, network) on any one stops the
+    loop and is not swallowed silently — the markets already read are kept and the rest are left for the next refresh."""
+    got: List[Dict] = []
+    refused: set = set()
+    remaining = None
+    for m in markets:
+        try:
+            ej, hdr = fetch_event_props(event["id"], api_key, [m], sport=feed_for(event, sport))
+        except OddsAPIError as exc:
+            if _is_market_error(exc):
+                refused.add(m)
+                continue
+            break
+        remaining = hdr.get("remaining") or remaining
+        got.extend(parse_event_offers(ej, supported_markets=[m]))
+    return got, remaining, refused
+
+
 def fetch_slate_props(date_str: str, api_key: str, markets: List[str], sport: str = SPORT) -> Tuple[List[Dict], Dict]:
     """Pull props for every event on the slate date. Returns (offers, info).
 
@@ -1124,10 +1144,23 @@ def fetch_slate_props(date_str: str, api_key: str, markets: List[str], sport: st
     fetched = 0
     no_offer_events: List[str] = []
     errors: List[Dict] = []
+    rejected_markets: set = set()
     for e in todays:
         try:
             ej, hdr = fetch_event_props(e["id"], api_key, markets, sport=feed_for(e, sport))
         except OddsAPIError as exc:
+            if _is_market_error(exc) and len(markets) > 1:
+                # One market key the provider does not offer for this league/feed must not blank every other market's
+                # lines (the basketball combo/steals/blocks/turnovers keys were added in build 246). Ask again one
+                # market at a time, keep what answers, and report what was refused.
+                got, left, refused = _fetch_markets_one_by_one(e, api_key, markets, sport)
+                offers.extend(got)
+                rejected_markets.update(refused)
+                remaining = left or remaining
+                fetched += 1
+                if not got:
+                    no_offer_events.append(f"{e.get('away_team', '?')} @ {e.get('home_team', '?')}")
+                continue
             # Kept (not just skipped) so a page can say WHY a game has no lines: quota used up, a rejected
             # market, a network blip — instead of silently showing nothing.
             errors.append({"game": f"{e.get('away_team', '?')} @ {e.get('home_team', '?')}", "error": str(exc)[:200]})
@@ -1148,7 +1181,8 @@ def fetch_slate_props(date_str: str, api_key: str, markets: List[str], sport: st
         fetched += 1
     return offers, {"events_total": len(todays), "events_fetched": fetched,
                     "remaining": remaining, "no_offer_events": no_offer_events,
-                    "todays_events": todays_summary, "errors": errors, "events_listed": len(events)}
+                    "todays_events": todays_summary, "errors": errors, "events_listed": len(events),
+                    "rejected_markets": sorted(rejected_markets)}
 
 
 # ---- Kelly stake sizing ----------------------------------------------------

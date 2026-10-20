@@ -19,6 +19,12 @@ def _log(pts, reb, ast, fg3m, minutes, opp="Duke Blue Devils", date="2027-01-14T
 
 
 # ----------------------------------------------------------------- basic module wiring
+
+def _only(d, like):
+    """The original five stats of a box-score / team-totals dict: build 246 added steals, blocks, turnovers, threes
+    attempted and combos beside them (see test_basketball_markets.py), which these older assertions do not pin."""
+    return {k: d[k] for k in like}
+
 def test_site_api_and_cdn_api_use_mens_college_basketball_slug():
     assert E.SITE_API == "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball"
     assert E.CDN_API == "https://cdn.espn.com/core/mens-college-basketball/boxscore"
@@ -137,7 +143,7 @@ def test_get_game_boxscore_parses_cdn_shape(monkeypatch):
     ]}}}
     monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_cdn)
     box = E.get_game_boxscore("g1")
-    assert box[5001] == {"pts": 18.0, "reb": 6.0, "ast": 4.0, "fg3m": 2.0, "min": 30.0}
+    assert _only(box[5001], {"pts": 18.0, "reb": 6.0, "ast": 4.0, "fg3m": 2.0, "min": 30.0}) == {"pts": 18.0, "reb": 6.0, "ast": 4.0, "fg3m": 2.0, "min": 30.0}
     print("✓ get_game_boxscore correctly parses the CDN player-stats shape (as coded against, not yet live-confirmed for NCAAMB)")
 
 
@@ -162,8 +168,8 @@ def test_get_game_boxscore_real_confirmed_live_shape(monkeypatch):
     ]}}}
     monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_cdn)
     box = E.get_game_boxscore("401856577")
-    assert box[4917149] == {"pts": 5.0, "reb": 3.0, "ast": 3.0, "fg3m": 1.0, "min": 38.0}     # Alex Karaban
-    assert box[5105809] == {"pts": 26.0, "reb": 9.0, "ast": 3.0, "fg3m": 0.0, "min": 32.0}    # Tarris Reed Jr.
+    assert _only(box[4917149], {"pts": 5.0, "reb": 3.0, "ast": 3.0, "fg3m": 1.0, "min": 38.0}) == {"pts": 5.0, "reb": 3.0, "ast": 3.0, "fg3m": 1.0, "min": 38.0}     # Alex Karaban
+    assert _only(box[5105809], {"pts": 26.0, "reb": 9.0, "ast": 3.0, "fg3m": 0.0, "min": 32.0}) == {"pts": 26.0, "reb": 9.0, "ast": 3.0, "fg3m": 0.0, "min": 32.0}    # Tarris Reed Jr.
     print("✓ get_game_boxscore correctly parses the real, confirmed-live UConn/Duke CDN response — zero bugs found")
 
 
@@ -294,7 +300,7 @@ def test_get_team_recent_scored_stats_empty_when_no_recent_games(monkeypatch):
     monkeypatch.setattr(E, "get_team_recent_game_ids",
                         lambda team_id, before_date, n=10, days_back=45: [])
     scored = E.get_team_recent_scored_stats(20, "2026-07-14")
-    assert scored == {"pts": 0.0, "reb": 0.0, "ast": 0.0, "fg3m": 0.0, "poss": 0.0}
+    assert _only(scored, {"pts": 0.0, "reb": 0.0, "ast": 0.0, "fg3m": 0.0, "poss": 0.0}) == {"pts": 0.0, "reb": 0.0, "ast": 0.0, "fg3m": 0.0, "poss": 0.0}
 
 
 # ----------------------------------------------------------------- get_team_rest_info

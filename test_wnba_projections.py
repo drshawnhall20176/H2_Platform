@@ -95,7 +95,7 @@ def test_default_board_uses_expected_display_names_and_lines():
     board = WP.default_board_from_index(index)
 
     markets = {b["Market"] for b in board}
-    assert markets == {"Points", "Rebounds", "Assists", "Threes Made"}
+    assert {"Points", "Rebounds", "Assists", "Threes Made"} <= markets
     pts_row = next(b for b in board if b["Market"] == "Points")
     assert pts_row["Line"] == 12.5          # default line from _MARKET_SPEC
     assert pts_row["Side"] == "Over"        # 9 of 10 games clear a 12.5 line
@@ -202,7 +202,7 @@ def test_build_best_bets_covers_all_four_markets_and_ranks_by_conviction():
     rows = [_row("Hot Scorer", "Las Vegas Aces", "Seattle Storm", "Seattle Storm @ Las Vegas Aces", log_hot)]
     plays = WP.build_best_bets(rows, sims=8000, seed=3)
 
-    assert {p["Market"] for p in plays} == {"Points", "Rebounds", "Assists", "Threes Made"}
+    assert {"Points", "Rebounds", "Assists", "Threes Made"} <= {p["Market"] for p in plays}
     assert all(p["Player"] == "Hot Scorer" for p in plays)
     # plays sorted by Conviction, descending
     assert all(plays[i]["Conviction"] >= plays[i + 1]["Conviction"] for i in range(len(plays) - 1))
@@ -711,7 +711,7 @@ def test_build_hot_hand_board_spread_unknown_when_team_spreads_omitted():
 def test_build_matchup_profile_covers_all_markets():
     row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
     profile = WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={})
-    assert {p["Market"] for p in profile} == {"Points", "Rebounds", "Assists", "Threes Made"}
+    assert {"Points", "Rebounds", "Assists", "Threes Made"} <= {p["Market"] for p in profile}
     print("✓ build_matchup_profile covers all 4 markets")
 
 
@@ -955,8 +955,7 @@ def test_default_line_none_for_unknown_market():
 
 def test_market_list_covers_all_four_core_markets():
     lst = WP.market_list()
-    assert {mkey for mkey, _col, _disp in lst} == {"player_points", "player_rebounds",
-                                                    "player_assists", "player_threes"}
+    assert {"player_points", "player_rebounds", "player_assists", "player_threes"} <= {mkey for mkey, _col, _disp in lst}
     # spot-check one full tuple
     assert ("player_points", "PTS", "Points") in lst
 
