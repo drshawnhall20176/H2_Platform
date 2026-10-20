@@ -37,6 +37,7 @@ import streamlit as st
 import components as C
 import styling  # noqa: F401  (installs the theme-proof styles)
 import best_bets_data as BBD
+import basketball_markets as BM_
 import book_menu as BM
 import odds_api as O
 import quick_log
@@ -680,7 +681,7 @@ with st.expander("✍️ Add a leg by hand — Bet365, or any line the board doe
                      and pl.get("_game_log") and pl.get("_stat_key")), None)
     suggested = None
     if src_play is not None:
-        vals = [g.get(src_play["_stat_key"]) for g in src_play["_game_log"]]
+        vals = [BM_.game_value(g, src_play["_stat_key"]) for g in src_play["_game_log"]]   # combos are summed from the parts
         p_over = SL.empirical_over_prob([v for v in vals if v is not None], float(m_line))
         if p_over is not None:
             suggested = p_over if m_side == "Over" else 1 - p_over

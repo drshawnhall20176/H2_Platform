@@ -20,6 +20,7 @@ from datetime import datetime
 import pytz
 
 import sports
+import basketball_markets as BM
 import odds_api as O
 from streamlit_page_cache import compute_once, invalidate_page
 
@@ -176,7 +177,7 @@ with st.spinner(f"Pulling {row['Opp']}'s matchup history and defensive trend..."
 # recomputed for the SAME window) -- not the earlier, less complete version, which only ever
 # added the player's own L5/L10 as extra columns next to a fixed "last 10" opponent number.
 # Default "Season" preserves the exact prior baseline behavior for anyone who never touches this.
-_WINDOW_OPTIONS = {"Season": (None, None), "Last 10 Games": (10, opp_l10), "Last 5 Games": (5, opp_l5)}
+_WINDOW_OPTIONS = {"Season": (None, opp_season), "Last 10 Games": (10, opp_l10), "Last 5 Games": (5, opp_l5)}
 window_label = st.radio("Window", list(_WINDOW_OPTIONS.keys()), horizontal=True,
                         key="matchup_lab_window")
 window_n, opp_allowed_for_window = _WINDOW_OPTIONS[window_label]
@@ -264,21 +265,28 @@ live_lines = O.market_lines_for_player(offers, row["Player"], projections_module
 
 log = row.get("_game_log") or []
 trend_log = P.build_trend_series(log)   # oldest -> newest, for left-to-right reading
-tc1, tc2 = st.columns(2)
-tc3, tc4 = st.columns(2)
-for (mkey, col, disp), slot in zip(P.market_list(), (tc1, tc2, tc3, tc4)):
+# Two charts per row, for as many markets as the sport has (the four core stats, then — build 246 — combos, steals, blocks,
+# blocks+steals, turnovers and threes attempted). A stat the player's game lines don't carry is skipped, not drawn as zeros.
+_chart_slots = []
+for _i in range(0, len(P.market_list()), 2):
+    _chart_slots.extend(st.columns(2))
+for (mkey, col, disp), slot in zip(P.market_list(), _chart_slots):
     stat_key = P.stat_key_for(col)
     with slot:
         if not trend_log:
             st.caption(f"{disp}: no recent games on file yet.")
             continue
+        if not BM.values_for(trend_log, stat_key):
+            st.caption(f"{disp}: not in this player's recent game lines yet.")
+            continue
         line_val = live_lines.get(mkey)
         is_live = line_val is not None
         if line_val is None:
             line_val = P.default_line(mkey)
-        xs = [g.get("date", "—")[5:10] for g in trend_log]   # MM-DD, short enough for a small chart
-        ys = [g.get(stat_key, 0.0) for g in trend_log]
-        hover = [f"{disp}: {y:g}<br>vs {g.get('opp', '—')}" for y, g in zip(ys, trend_log)]
+        _pts = [(g, BM.game_value(g, stat_key)) for g in trend_log if BM.game_value(g, stat_key) is not None]
+        xs = [g.get("date", "—")[5:10] for g, _v in _pts]   # MM-DD, short enough for a small chart
+        ys = [v for _g, v in _pts]
+        hover = [f"{disp}: {y:g}<br>vs {g.get('opp', '—')}" for g, y in _pts]
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines+markers", name=disp,
                                  line=dict(color="#3b82f6"), marker=dict(size=8),
@@ -426,6 +434,12 @@ with st.expander("Full column reference"):
     """)
 
 # --- supporting detail: recent game log + H2H game log ----------------------
+def _extra_stats(g):
+    """Points+rebounds+assists, steals, blocks, turnovers and threes attempted for one game line (blank when the line lacks it)."""
+    return {"PRA": BM.game_value(g, "pra"), "STL": BM.game_value(g, "stl"), "BLK": BM.game_value(g, "blk"),
+            "TO": BM.game_value(g, "tov"), "3PA": BM.game_value(g, "fg3a")}
+
+
 gc1, gc2 = st.columns(2)
 with gc1:
     st.markdown("**Recent games (any opponent)**")
@@ -433,7 +447,7 @@ with gc1:
     if log:
         rec_df = pd.DataFrame([{"Date": g.get("date", "—")[:10], "Opp": g.get("opp", "—"),
                                 "PTS": g.get("pts", 0), "REB": g.get("reb", 0),
-                                "AST": g.get("ast", 0), "3PM": g.get("fg3m", 0),
+                                "AST": g.get("ast", 0), "3PM": g.get("fg3m", 0), **_extra_stats(g),
                                 "MIN": g.get("min", 0)} for g in log])
         st.dataframe(rec_df, hide_index=True, width="stretch", height=250)
     else:
@@ -444,7 +458,7 @@ with gc2:
     if h2h_log:
         h2h_df = pd.DataFrame([{"Date": g.get("date", "—")[:10], "PTS": g.get("pts", 0),
                                 "REB": g.get("reb", 0), "AST": g.get("ast", 0),
-                                "3PM": g.get("fg3m", 0), "MIN": g.get("min", 0)} for g in h2h_log])
+                                "3PM": g.get("fg3m", 0), **_extra_stats(g), "MIN": g.get("min", 0)} for g in h2h_log])
         st.dataframe(h2h_df, hide_index=True, width="stretch", height=250)
     else:
         st.caption("No meetings yet this season.")

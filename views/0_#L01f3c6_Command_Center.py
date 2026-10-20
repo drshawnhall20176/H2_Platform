@@ -42,6 +42,8 @@ _MARKET_ICONS = {
     "Batter Total Hits": "✅", "Batter Strikeouts": "🌀", "Pitcher Outs": "🎯", "Pitcher Walks": "🚶",
     "Batter Runs": "🏃", "Batter RBIs": "💪", "Batter Stolen Bases": "💨", "Pitcher Earned Runs": "🛡️",
     "Points": "🏀", "Rebounds": "🔁", "Assists": "🤝", "Threes Made": "3️⃣",
+    "Pts+Reb+Ast": "🔢", "Pts+Reb": "➕", "Pts+Ast": "➕", "Reb+Ast": "➕",   # basketball combos (build 246)
+    "Steals": "🖐️", "Blocks": "🧱", "Blocks+Steals": "🛡️", "Turnovers": "🔄", "Threes Attempted": "🎯",
     "Goals": "🚨", "Shots on Goal": "🎯", "Blocked Shots": "🧱", "Saves": "🥅",   # NHL
 }
 

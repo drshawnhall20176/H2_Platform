@@ -10,6 +10,7 @@ from datetime import datetime
 import pytz
 
 import sports
+import basketball_markets as BM
 import best_bets_data as BBD
 import grading
 import quick_log
@@ -450,13 +451,16 @@ with st.expander("Diagnostic Inspector", expanded=True):
         # precisely what the bootstrap model resampled from rather than trusting a black box.
         log = p.get("_game_log") or []
         stat_key = p.get("_stat_key")
-        if not log or not stat_key:
-            st.caption("No recent-game log attached to this play.")
+        # Combos (Pts+Reb+Ast, Blocks+Steals, ...) are summed from the game's parts; games that lack a stat are left out.
+        sample = [g for g in log if BM.game_value(g, stat_key) is not None] if stat_key else []
+        if not log or not stat_key or not sample:
+            st.caption("No recent-game log attached to this play." if not log or not stat_key
+                       else "This player's recent game lines don't include that stat yet.")
         else:
-            n = len(log)
-            hits = sum(1 for g in log if (g.get(stat_key, 0) > p["Line"] if p["Side"] == "Over"
-                                          else g.get(stat_key, 0) < p["Line"]))
-            avg = sum(g.get(stat_key, 0) for g in log) / n
+            n = len(sample)
+            hits = sum(1 for g in sample if (BM.game_value(g, stat_key) > p["Line"] if p["Side"] == "Over"
+                                              else BM.game_value(g, stat_key) < p["Line"]))
+            avg = sum(BM.game_value(g, stat_key) for g in sample) / n
             c1, c2, c3 = st.columns(3)
             c1.metric("Games sampled", n, help="How many recent games the bootstrap model drew from")
             c2.metric(f"Cleared {p['Line']:g}", f"{hits}/{n}")
@@ -472,7 +476,7 @@ with st.expander("Diagnostic Inspector", expanded=True):
                     return iso or "—"
 
             log_df = pd.DataFrame([{"Date": _fmt_date(g.get("date")), "Opponent": g.get("opp") or "—",
-                                    stat_key.upper(): g.get(stat_key, 0), "Minutes": g.get("min", 0)}
+                                    stat_key.upper(): BM.game_value(g, stat_key) or 0, "Minutes": g.get("min", 0)}
                                    for g in log])
             st.dataframe(log_df, hide_index=True, width="stretch")
             st.caption("Most recent game first. This is the exact data the bootstrap resampled from — "
