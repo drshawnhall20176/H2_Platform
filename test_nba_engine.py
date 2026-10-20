@@ -31,6 +31,12 @@ def _log(pts, reb, ast, fg3m, minutes, opp="Boston Celtics", date="2026-01-14T00
 
 
 # ----------------------------------------------------------------- _get_json: real TLS fingerprint fix
+
+def _only(d, like):
+    """The original five stats of a box-score / team-totals dict: build 246 added steals, blocks, turnovers, threes
+    attempted and combos beside them (see test_basketball_markets.py), which these older assertions do not pin."""
+    return {k: d[k] for k in like}
+
 def test_get_json_uses_real_browser_impersonation(monkeypatch):
     # Same real, confirmed fix as wnba_engine.py's own -- already proven working there before
     # being applied here. Confirms _get_json genuinely passes impersonate="chrome" to the real
@@ -275,7 +281,7 @@ def test_get_game_boxscore_parses_cdn_shape(monkeypatch):
     ]}}}
     monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_cdn)
     box = E.get_game_boxscore("g1")
-    assert box[1966] == {"pts": 25.0, "reb": 8.0, "ast": 7.0, "fg3m": 3.0, "min": 36.0}
+    assert _only(box[1966], {"pts": 25.0, "reb": 8.0, "ast": 7.0, "fg3m": 3.0, "min": 36.0}) == {"pts": 25.0, "reb": 8.0, "ast": 7.0, "fg3m": 3.0, "min": 36.0}
     print("✓ get_game_boxscore correctly parses the CDN player-stats shape")
 
 
@@ -296,7 +302,7 @@ def test_get_game_boxscore_real_confirmed_live_shape(monkeypatch):
     monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_cdn)
     box = E.get_game_boxscore("g1")
     # Michael Porter Jr.'s real confirmed line: 22 MIN, 9 PTS, 3-11 FG, 0-4 3PT (0 makes), 2 REB, 4 AST
-    assert box[4278104] == {"pts": 9.0, "reb": 2.0, "ast": 4.0, "fg3m": 0.0, "min": 22.0}
+    assert _only(box[4278104], {"pts": 9.0, "reb": 2.0, "ast": 4.0, "fg3m": 0.0, "min": 22.0}) == {"pts": 9.0, "reb": 2.0, "ast": 4.0, "fg3m": 0.0, "min": 22.0}
     print("✓ get_game_boxscore correctly parses the real, confirmed-live Nets/Clippers player data")
 
 
@@ -408,7 +414,7 @@ def test_get_team_recent_scored_stats_empty_when_no_recent_games(monkeypatch):
     monkeypatch.setattr(E, "get_team_recent_game_ids",
                         lambda team_id, before_date, n=10, days_back=45: [])
     scored = E.get_team_recent_scored_stats(20, "2026-07-14")
-    assert scored == {"pts": 0.0, "reb": 0.0, "ast": 0.0, "fg3m": 0.0, "poss": 0.0}
+    assert _only(scored, {"pts": 0.0, "reb": 0.0, "ast": 0.0, "fg3m": 0.0, "poss": 0.0}) == {"pts": 0.0, "reb": 0.0, "ast": 0.0, "fg3m": 0.0, "poss": 0.0}
 
 
 # ----------------------------------------------------------------- get_team_rest_info

@@ -39,6 +39,7 @@ import json
 import math
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
+import basketball_markets as BM
 import odds_api as O
 import sports
 
@@ -104,8 +105,11 @@ FOOTBALL_LEAN_SPREAD = 6.5      # by this many points the favorite runs more and
 FOOTBALL_BLOWOUT_SPREAD = 10.0  # a favorite by this much throws less
 TOTAL_HIGH_PCT = 0.80           # a game total in the top fifth of the slate is "high"
 TOTAL_LOW_PCT = 0.20            # …and in the bottom fifth is "low"
-BASKETBALL_STAT_MARKETS = {"Points", "Rebounds", "Assists", "Threes Made"}
-BASKETBALL_SCORING_MARKETS = {"Points", "Assists", "Threes Made"}
+# Build 246 added the combo props, steals, blocks, blocks+steals and turnovers. A blowout cuts a starter's minutes, so it lowers
+# every counting stat; a high game total lifts the scoring ones (the combos that contain points are scoring markets too).
+BASKETBALL_STAT_MARKETS = {"Points", "Rebounds", "Assists", "Threes Made", "Pts+Reb+Ast", "Pts+Reb", "Pts+Ast", "Reb+Ast",
+                           "Steals", "Blocks", "Blocks+Steals", "Turnovers"}
+BASKETBALL_SCORING_MARKETS = {"Points", "Assists", "Threes Made", "Pts+Reb+Ast", "Pts+Reb", "Pts+Ast"}
 FOOTBALL_RUSH_MARKETS = {"Rush Yards", "Rush Attempts"}
 FOOTBALL_PASS_MARKETS = {"Pass Yards", "Pass Attempts", "Pass Completions", "Receptions", "Receiving Yards"}
 
@@ -360,7 +364,7 @@ def _values(p: Dict, sport_key: str) -> List[float]:
     for g in log:
         if not isinstance(g, dict):
             continue
-        v = g.get(key)
+        v = BM.game_value(g, key)   # basketball combos (Pts+Reb+Ast, ...) are summed from the game's parts
         if v is None and key == "scrimmage_tds":
             v = (g.get("rushing_tds") or 0) + (g.get("receiving_tds") or 0)
         try:

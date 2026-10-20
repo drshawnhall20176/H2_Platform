@@ -56,6 +56,10 @@ MARKET_STAT = {
     # Core-4 convention), so one entry per name covers all of them; no separate NBA/NCAAMB rows
     # needed. Keys match wnba_engine.get_player_results()'s (and NBA's/NCAAMB's) result dict exactly.
     "Points": "pts", "Rebounds": "reb", "Assists": "ast", "Threes Made": "fg3m",
+    # Build 246 basketball additions (combos, steals, blocks, blocks+steals, turnovers, threes attempted): keys come from
+    # basketball_markets, which also adds the combo keys to every parsed box score line.
+    "Pts+Reb+Ast": "pra", "Pts+Reb": "pr", "Pts+Ast": "pa", "Reb+Ast": "ra",
+    "Steals": "stl", "Blocks": "blk", "Blocks+Steals": "bs", "Turnovers": "tov", "Threes Attempted": "fg3a",
     # NHL — "Points" and "Assists" reuse the basketball keys above ON PURPOSE: nhl_engine.
     # get_player_results() returns hockey points as "pts" and assists as "ast", and a sport's
     # results dict is only ever graded against that same sport's plays, so the shared display names

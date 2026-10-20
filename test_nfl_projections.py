@@ -828,3 +828,21 @@ if __name__ == "__main__":
         except Exception as e:  # noqa: BLE001
             print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
     print(f"\n{passed}/{len(tests)} tests passed")
+
+
+def test_build_td_pool_includes_every_anytime_td_player_even_below_the_typical_rate_and_is_not_best_bets():
+    def row(name, tds, games=3, markets=("player_anytime_td",)):
+        log = [{"scrimmage_tds": 1 if i < tds else 0, "receiving_yards": 30, "receptions": 3} for i in range(games)]
+        return {"Player": name, "Team": "ATL", "GameLabel": "ATL @ NO", "Opp": "NO", "Position": "WR",
+                "_pid": name, "_recent_games": log, "_markets": list(markets), "_game_date": "2026-10-06T00:15:00+00:00"}
+    rows = [row("Scorer", 2), row("Scoreless", 0), row("NoMarket", 1, markets=("player_receptions",)),
+            {**row("NoLog", 0), "_recent_games": []}]
+    pool = NP.build_td_pool(rows)
+    assert [p["Player"] for p in pool] == ["Scorer", "Scoreless"]
+    assert all(p["Market"] == "Anytime TD" and p["Side"] == "Over" and p["_pool_only"] and p["Position"] == "WR"
+               for p in pool)
+    scorer, scoreless = pool
+    assert scorer["ModelProb"] > scoreless["ModelProb"] > 0
+    assert scoreless["Conviction"] < 1.0                              # under the typical rate: best-bets would drop it
+    assert pool == NP.build_td_pool(rows)                             # deterministic
+    assert not any(p.get("_pool_only") for p in NP.build_best_bets(rows, sims=50, seed=1))

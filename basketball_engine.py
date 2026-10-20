@@ -28,6 +28,8 @@ cross-sport cache-collision question that a single shared cache dict would raise
 
 from __future__ import annotations
 
+import basketball_markets as BM
+
 import threading
 import weakref
 from concurrent.futures import ThreadPoolExecutor
@@ -346,6 +348,7 @@ def get_game_team_totals(game_id: str, cdn_api: str, fetch: FetchFn,
             "fg3m": find_team_stat(stats_by_name, "threePointFieldGoalsMade"),
             "poss": poss if poss > 0 else 0.0,
         }
+        BM.extend_team_totals(stats_by_name, out[tid], find_team_stat)   # steals/blocks/turnovers/3PA/combos, when reported
 
     seen = diag_seen if diag_seen is not None else set()
     dump_key = f"_team_totals_shape_dump:{game_id}"
@@ -490,7 +493,7 @@ def get_team_recent_allowed_stats(team_id: int, before_date: str, site_api: str,
     simply because there were more possessions to allow stats in."""
     games = get_team_recent_game_ids(team_id, before_date, site_api, fetch, diag, n,
                                      days_back=days_back, diag_seen=diag_seen)
-    totals = {"pts": [], "reb": [], "ast": [], "fg3m": [], "poss": []}
+    totals = BM.empty_team_totals()
     for g in games:
         opp_id = g.get("opp_id")
         if opp_id is None:
@@ -502,8 +505,7 @@ def get_team_recent_allowed_stats(team_id: int, before_date: str, site_api: str,
         game_totals = get_game_team_totals(g["gameId"], cdn_api, fetch, diag, diag_seen=diag_seen)
         opp_totals = game_totals.get(opp_id)
         if opp_totals:
-            for k in totals:
-                totals[k].append(opp_totals.get(k, 0.0))
+            BM.accumulate_team_totals(totals, opp_totals)
     return {k: (sum(v) / len(v) if v else 0.0) for k, v in totals.items()}
 
 
