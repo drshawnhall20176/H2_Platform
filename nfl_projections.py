@@ -1094,3 +1094,15 @@ def simulate_nfl_game(home_scoring: Optional[Dict[str, float]],
         "away_std": round(away_std, 1),
         "n_sims": n_sims,
     }
+
+
+def edge_side_prob(entry: Dict, mkey: str, point, side: str) -> float:
+    """Model probability for one side at a book's line, for Edge Board / compute_edges.
+
+    Applies the SAME small-sample shrinkage (then the same clamp) this sport's own boards apply in
+    default_board_from_index, so Edge Board and Best Bets price a play with the same probability.
+    Before this existed, compute_edges used the raw bootstrap fraction: with a ~10-game log that
+    can read 75% on a play the board itself would shrink toward 50/50, which is how a third of a
+    live NBA slate showed up as "implausibly high EV" (over 25%) on Edge Board."""
+    over = _clip_prob(BB_P.shrink_prob(prob_over(entry["dist"], point), entry.get("n_games", 0)))
+    return over if str(side).lower().startswith("o") else 1.0 - over

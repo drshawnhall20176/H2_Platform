@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import math
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import pytz
 import requests
@@ -856,6 +856,12 @@ US_BOOKS: Dict[str, str] = {
 }
 DEFAULT_BOOK = "draftkings"
 
+# The owner's own sportsbook accounts that have a live price feed here -- Edge Board's default
+# "Books I can bet" selection, so it line-shops only among books he can actually use (and never
+# recommends one he can't, e.g. Bovada). Pick'em apps (Pick6, PrizePicks, Underdog) and Bet365 have
+# no two-sided US prop prices in the feed, so they can't be priced on Edge Board at all.
+MY_BOOKS_DEFAULT: Tuple[str, ...] = ("draftkings", "fanduel", "fanatics", "hardrockbet")
+
 # Pick'em (DFS) books: no two-sided American prices — a fixed line plus a payout multiplier per
 # entry (PrizePicks, DraftKings Pick6). Both live in the API's "us_dfs" region. They are NEVER
 # mixed into an offer's over/under price dicts (a pick'em "price" is not a sportsbook price, and
@@ -992,7 +998,8 @@ def market_lines_for_slate(offers: List[Dict], projections_module=None,
 
 def compute_edges(index: Dict, offers: List[Dict],
                   projections_module=None, known_names: Optional[set] = None,
-                  all_active_names: Optional[set] = None) -> Tuple[List[Dict], Dict]:
+                  all_active_names: Optional[set] = None,
+                  allowed_books: Optional[Iterable[str]] = None) -> Tuple[List[Dict], Dict]:
     """Join book offers to the model index and compute EV/edge per playable side.
 
     `projections_module` supplies normalize_name for the sport — defaults to MLB's projections;
@@ -1022,7 +1029,14 @@ def compute_edges(index: Dict, offers: List[Dict],
     Backward compatible at every layer: any real caller that skips known_names gets "unknown"
     for every entry (the exact original, undifferentiated behavior); a caller that passes
     known_names but not all_active_names still gets the real two-way split from the first fix,
-    with the new third category simply unavailable, not a crash or a silently wrong guess."""
+    with the new third category simply unavailable, not a crash or a silently wrong guess.
+
+    allowed_books (optional): the books the bettor can actually use. When given, each side's best
+    price (and so EV, stake and the "Book" shown) comes ONLY from these books, and a side none of
+    them posts is skipped. The consensus no-vig market probability still averages EVERY book in the
+    feed -- a book you can't bet (an offshore one, or one not licensed where you are) is still real
+    information about where the market is, it just can't be the recommended place to bet."""
+    allowed = ({canonical_book(b) for b in allowed_books} if allowed_books is not None else None)
     if projections_module is None:
         import projections as projections_module
     P = projections_module
@@ -1072,11 +1086,18 @@ def compute_edges(index: Dict, offers: List[Dict],
         novig_over = sum(novig_overs) / len(novig_overs) if novig_overs else None
 
         for side, prices in (("Over", off["over"]), ("Under", off["under"])):
+            if allowed is not None:
+                prices = {bk: px for bk, px in (prices or {}).items() if canonical_book(bk) in allowed}
             bp = _best_price(prices)
             if bp is None:
                 continue
             book, price = bp
-            model_p = P.prob_for_side(dist, point, side)
+            # Sports whose boards shrink small-sample probabilities expose edge_side_prob so Edge
+            # Board prices with the SAME probability; others (MLB) keep the plain side probability.
+            if hasattr(P, "edge_side_prob"):
+                model_p = P.edge_side_prob(entry, mkey, point, side)
+            else:
+                model_p = P.prob_for_side(dist, point, side)
             novig_side = (novig_over if side == "Over" else (1 - novig_over)) if novig_over is not None else None
             rows.append({
                 "Player": entry["ctx"]["player"],

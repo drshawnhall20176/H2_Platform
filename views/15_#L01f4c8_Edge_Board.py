@@ -114,13 +114,21 @@ def load_index(sport_key: str, date_str: str, sims: int, seed: int):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_edges(sport_key: str, date_str: str, markets_tuple: tuple, _index: dict, _api_key: str,
-               _known_names: Optional[set] = None, _all_active_names: Optional[set] = None):
+def load_offers(sport_key: str, date_str: str, markets_tuple: tuple, _api_key: str):
+    """The quota-spending part, cached on its own: changing which books you can bet re-prices the
+    SAME fetched offers instead of paying for another fetch."""
     sport = sports.get(sport_key)
-    offers, info = O.fetch_slate_props(date_str, _api_key, list(markets_tuple),
-                                       sport=sport.odds_sport_key)
+    return O.fetch_slate_props(date_str, _api_key, list(markets_tuple), sport=sport.odds_sport_key)
+
+
+def load_edges(sport_key: str, date_str: str, markets_tuple: tuple, _index: dict, _api_key: str,
+               _known_names: Optional[set] = None, _all_active_names: Optional[set] = None,
+               allowed_books: Optional[tuple] = None):
+    sport = sports.get(sport_key)
+    offers, info = load_offers(sport_key, date_str, markets_tuple, _api_key)
     edges, stats = O.compute_edges(_index, offers, projections_module=sport.projections,
-                                   known_names=_known_names, all_active_names=_all_active_names)
+                                   known_names=_known_names, all_active_names=_all_active_names,
+                                   allowed_books=allowed_books)
     return edges, {**info, **stats}
  
  
@@ -249,14 +257,30 @@ else:
                                       "so it overbets one game. This caps total exposure per game and scales "
                                       "that game's bets down proportionally.") / 100.0
  
-    if st.button("📡 Fetch live odds & compute edges", type="primary", disabled=not chosen):
+    _bettable = list(O.US_BOOKS.keys())
+    my_books = st.multiselect(
+        "Books I can bet", _bettable,
+        default=[b for b in O.MY_BOOKS_DEFAULT if b in _bettable],
+        format_func=lambda k: O.US_BOOKS.get(k, k), key="edge_my_books",
+        help="Best price, EV and stake come ONLY from these books — the board line-shops among "
+             "books you can actually use and never recommends one you can't (e.g. an offshore book, "
+             "or one not licensed in the state you're betting from). The market's fair price still "
+             "averages every book in the feed. Changing this re-prices the same fetched odds — no "
+             "extra quota.")
+    st.caption("Pick'em apps (DK Pick6, PrizePicks, Underdog) and Bet365 don't appear here: the odds "
+               "feed has no two-sided US prop prices for them, so they can't be priced on Edge Board. "
+               "Log those bets from Bet Log.")
+    if not my_books:
+        st.warning("Pick at least one book you can bet, or the board has nowhere to price a bet.")
+    if st.button("📡 Fetch live odds & compute edges", type="primary", disabled=not (chosen and my_books)):
         st.session_state["do_fetch"] = True
  
     if st.session_state.get("do_fetch"):
         try:
             with st.spinner("Fetching odds and computing edges..."):
                 edges, info = load_edges(_active.key, date_str, tuple(sorted(chosen)), index, api_key,
-                                         known_names, all_active_names)
+                                         known_names, all_active_names,
+                                         allowed_books=tuple(my_books) if my_books else None)
         except O.OddsAPIError as e:
             st.error(f"Odds API error: {e}")
             edges, info = [], {}

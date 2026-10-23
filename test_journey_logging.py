@@ -191,3 +191,75 @@ def test_calibration_five_point_buckets_separate_prop_probabilities():
             {"model_prob": 0.63, "result": "win"}, {"model_prob": 0.71, "result": "win"}]
     cal = B.calibration(bets, n_bins=20)
     assert [(c["lo"], c["hi"], c["n"]) for c in cal] == [(0.55, 0.6, 2), (0.6, 0.65, 1), (0.7, 0.75, 1)]
+
+
+# --------------------------------------------------------------------------- books I can bet
+def _mlb_index():
+    slug = dict(plateAppearances=600, atBats=540, hits=165, doubles=34, triples=2,
+                homeRuns=38, baseOnBalls=55, strikeOuts=140)
+    row = {"Hitter": "José Ramírez", "Team": "CLE", "GameLabel": "CLE @ DET", "_pid": 608070,
+           "Opp Pitcher": "P", "Lineup": "Confirmed", "_stat": slug, "_exp_pa": 4.5, "_venue_id": None}
+    meta = [{"label": "CLE @ DET", "game_date": None,
+             "home_pm": E.PitcherMetrics(id=None), "home_name": "DET",
+             "away_pm": E.PitcherMetrics(id=None), "away_name": "CLE"}]
+    return P.build_projection_index([row], meta, sims=2000, seed=3)
+
+
+def test_allowed_books_limits_recommended_book_but_not_market_consensus():
+    index = _mlb_index()
+    offers = [{"market": "batter_hits", "player": "Jose Ramirez", "point": 0.5,
+               "over": {"bovada": -150, "draftkings": -190, "fanduel": -185},
+               "under": {"bovada": 125, "draftkings": 150, "fanduel": 145}}]
+    all_books, _ = O.compute_edges(index, offers)
+    mine, _ = O.compute_edges(index, offers, allowed_books=["DraftKings".lower(), "fanduel"])
+    over_all = next(e for e in all_books if e["Side"] == "Over")
+    over_mine = next(e for e in mine if e["Side"] == "Over")
+    assert over_all["Book"] == "bovada"                       # best price overall is offshore
+    assert over_mine["Book"] == "fanduel" and over_mine["Price"] == -185
+    assert over_mine["NoVigMkt"] == over_all["NoVigMkt"]      # consensus still uses every book
+
+
+def test_allowed_books_skips_sides_none_of_my_books_post():
+    index = _mlb_index()
+    offers = [{"market": "batter_hits", "player": "Jose Ramirez", "point": 0.5,
+               "over": {"bovada": -150}, "under": {"bovada": 125}}]
+    edges, _ = O.compute_edges(index, offers, allowed_books=["draftkings"])
+    assert edges == []
+
+
+def test_my_books_default_are_priced_feed_books():
+    assert set(O.MY_BOOKS_DEFAULT) <= set(O.US_BOOKS)
+    assert "bovada" not in O.MY_BOOKS_DEFAULT
+
+
+# --------------------------------------------------------------------------- Edge Board shrinkage
+def test_edge_side_prob_matches_board_shrinkage():
+    import numpy as np
+    import nba_projections as NP
+    import basketball_projections as BB_P
+    vals = [4, 5, 6, 7, 7, 8, 8, 9, 22, 24]          # mean 10, but 8 of 10 games under 9.5
+    entry = {"dist": NP._dist(np.array(vals * 200)), "n_games": len(vals)}
+    raw_under = 1 - P.prob_over(entry["dist"], 9.5)
+    shrunk_under = NP.edge_side_prob(entry, "player_rebounds_assists", 9.5, "Under")
+    assert raw_under > 0.75
+    expected = 1 - NP._clip_prob(BB_P.shrink_prob(1 - raw_under, len(vals)))
+    assert abs(shrunk_under - expected) < 1e-12
+    assert 0.5 < shrunk_under < raw_under                 # pulled toward 50/50, same side
+    over = NP.edge_side_prob(entry, "player_rebounds_assists", 9.5, "Over")
+    assert abs(over + shrunk_under - 1) < 1e-12
+
+
+def test_compute_edges_uses_sport_shrinkage_when_available():
+    import numpy as np
+    import nba_projections as NP
+    vals = [4, 5, 6, 7, 7, 8, 8, 9, 22, 24]
+    entry = {"dist": NP._dist(np.array(vals * 200)), "mean": 10.0, "n_games": len(vals),
+             "ctx": {"player": "Ryan Rollins", "player_id": 1, "team": "MIL", "game": "CHI @ MIL",
+                     "game_date": None}}
+    index = {(NP.normalize_name("Ryan Rollins"), "player_rebounds_assists"): entry}
+    offers = [{"market": "player_rebounds_assists", "player": "Ryan Rollins", "point": 9.5,
+               "over": {"draftkings": 120}, "under": {"draftkings": -150}}]
+    edges, _ = O.compute_edges(index, offers, projections_module=NP)
+    under = next(e for e in edges if e["Side"] == "Under")
+    assert abs(under["ModelProb"] - round(NP.edge_side_prob(entry, "player_rebounds_assists", 9.5, "Under"), 4)) < 1e-9
+    assert under["ModelProb"] < 0.75
