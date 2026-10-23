@@ -1080,6 +1080,10 @@ def compute_edges(index: Dict, offers: List[Dict],
             novig_side = (novig_over if side == "Over" else (1 - novig_over)) if novig_over is not None else None
             rows.append({
                 "Player": entry["ctx"]["player"],
+                # Carried through so a bet logged from Edge Board can be auto-settled overnight
+                # (settle_results.py matches by numeric player ID, never by name). None when the
+                # sport's projection rows had no ID -- such a bet simply settles manually.
+                "PlayerId": entry["ctx"].get("player_id"),
                 "Team": entry["ctx"]["team"],
                 "Game": entry["ctx"]["game"],
                 "GameTime": entry["ctx"].get("game_date"),

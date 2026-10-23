@@ -160,6 +160,55 @@ def bet_log_fields_from_play(play: Dict, date_str: str, sport_key: str,
         "model_prob": float(play.get("ModelProb") or 0.0),
         "stake": float(stake or 0.0),
         "sport": sport_key,
+        "category": _default_category(sport_key),
+    }
+
+
+def _default_category(sport_key: Optional[str]) -> str:
+    """Every play this widget logs comes from an H2 board, so it's model-sourced: "H2", or
+    "H2-beta" for a sport whose model the registry flags as unvalidated. Imported lazily so this
+    module's pure helpers stay importable without the bet store."""
+    import betlog as _B
+    return _B.default_category(sport_key, from_model=True)
+
+
+def edge_board_bet_fields(row: Dict, date_str: str, sport_key: str, *, book: Optional[str],
+                          price, stake, category: Optional[str] = None,
+                          notes: Optional[str] = None) -> Dict:
+    """Bet Log fields for one Edge Board row, as actually PLACED.
+
+    The row carries what the board suggested (its best book and price, its sized stake); `book`,
+    `price` and `stake` are what you really got after line-shopping. Both are kept: the fill goes
+    in book/entry_odds/stake (so closing-line capture checks the book you actually used), and the
+    board's sized stake goes in suggested_stake (so the record can show how often sizing was
+    followed). entry_odds_source is "book" -- this is a real sportsbook price you typed or
+    accepted, not a model fair price -- so the bet counts toward real-price CLV.
+
+    player_id rides along from the row's PlayerId so overnight settlement can grade it; a missing
+    ID is stored as None (the bet then settles manually), never guessed."""
+    pid = row.get("PlayerId")
+    try:
+        pid = int(pid) if pid is not None and pid == pid else None   # NaN-safe (pid == pid)
+    except (TypeError, ValueError):
+        pid = None
+    suggested = row.get("Stake $")
+    return {
+        "slate_date": date_str,
+        "game": row.get("Game"),
+        "player": row.get("Player"),
+        "player_id": pid,
+        "market": row.get("Market"),
+        "side": row.get("Side"),
+        "line": float(row["Line"]) if row.get("Line") is not None else None,
+        "entry_odds": int(price),
+        "entry_odds_source": "book",
+        "model_prob": float(row["ModelProb"]) if row.get("ModelProb") is not None else None,
+        "stake": float(stake or 0.0),
+        "suggested_stake": float(suggested) if suggested is not None else None,
+        "book": book,
+        "sport": sport_key,
+        "category": category or _default_category(sport_key),
+        "notes": (notes or "").strip() or None,
     }
 
 

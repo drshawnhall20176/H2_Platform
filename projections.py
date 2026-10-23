@@ -1444,7 +1444,7 @@ def build_projection_index(rows: List[Dict], meta: List[Dict],
             continue
         sim = simulate_batter(probs, r.get("_exp_pa", DEFAULT_UNKNOWN_PA), sims, rng)
         nm = normalize_name(r["Hitter"])
-        ctx = {"player": r["Hitter"], "team": r["Team"], "game": r["GameLabel"],
+        ctx = {"player": r["Hitter"], "player_id": r.get("_pid"), "team": r["Team"], "game": r["GameLabel"],
                "opp": r.get("Opp Pitcher"), "lineup": r.get("Lineup"),
                "game_date": label_to_time.get(r["GameLabel"])}
         for key, arr in (("batter_home_runs", sim["hr"]), ("batter_total_bases", sim["tb"]),
@@ -1475,7 +1475,7 @@ def build_projection_index(rows: List[Dict], meta: List[Dict],
                 continue
             sim = simulate_pitcher(proj, sims, rng)
             nm = normalize_name(pm.name)
-            ctx = {"player": pm.name, "team": team, "game": m["label"], "opp": opp,
+            ctx = {"player": pm.name, "player_id": pm.id, "team": team, "game": m["label"], "opp": opp,
                    "lineup": "SP", "game_date": m.get("game_date")}
             for key, arr, mean in (("pitcher_strikeouts", sim["k"], proj["exp_k"]),
                                    ("pitcher_outs", sim["outs"], proj["exp_outs"]),

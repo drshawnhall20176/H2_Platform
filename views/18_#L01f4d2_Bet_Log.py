@@ -172,7 +172,19 @@ with st.expander("➕ Log a bet", expanded=False):
             ticket = st.text_input("Parlay ticket (optional)", placeholder="e.g. Parlay 6/28 #1",
                                    help="Give every leg of the same parlay the SAME tag to group them. "
                                         "Leave blank for a straight single.")
-        notes = st.text_input("Notes", placeholder="optional")
+        col_c, col_n = st.columns([1, 2])
+        with col_c:
+            _cat_default = B.CATEGORIES.index(B.default_category(_active.key, from_model=False))
+            category = st.selectbox(
+                "Category", B.CATEGORIES, index=_cat_default,
+                format_func=lambda c: f"{c} — {B.CATEGORY_HELP[c]}",
+                help="What kind of bet this is. Only H2 / H2-beta bets count toward the model's "
+                     "record and calibration; everything else stays visible but separate.")
+        with col_n:
+            notes = st.text_input("Notes", placeholder="optional — e.g. a one-line pre-game thesis")
+        st.caption("Enter the **actual** book, price and stake you got — this form records a real "
+                   "fill, so it counts toward real-price CLV. The model prob is only stored for "
+                   "H2 / H2-beta bets (an off-model bet has no model probability to calibrate).")
         if st.form_submit_button("Log bet", type="primary"):
             if game and side:
                 _pid = st.session_state.get("selected_player_id")
@@ -188,8 +200,10 @@ with st.expander("➕ Log a bet", expanded=False):
                 _player = player.strip() or None
                 B.add_bet(slate_date=d.isoformat(), game=game, player=_player, player_id=_pid,
                           market=market, side=side, line=line, entry_odds=int(entry_odds),
-                          model_prob=model_prob, stake=stake, book=book, notes=notes,
-                          ticket=ticket.strip(), sport=_active.key)
+                          model_prob=(model_prob if category in ("H2", "H2-beta") else None),
+                          stake=stake, book=book, notes=notes,
+                          ticket=ticket.strip(), sport=_active.key,
+                          category=category, entry_odds_source="book")
                 id_note = f" (player ID {_pid} attached — will auto-settle)" if _pid else \
                           " (no player ID attached — will need manual settlement)"
                 _label = f"{_player} " if _player else ""
@@ -230,20 +244,48 @@ if not bets:
     st.info(f"No {_active.label} bets logged yet. Use **Log a bet** above to start your record.")
     st.stop()
  
-s = B.summary(bets)
- 
+# --- Category filter ----------------------------------------------------------
+# Model attribution needs the H2-sourced bets on their own: a record that mixes model plays with
+# boosts, parlays, lottos and unmodeled sports can't say whether the MODEL works. Bets logged before
+# categories existed show as "Uncategorized" -- never silently counted as H2.
+_present_cats = sorted({(b.get("category") or "Uncategorized") for b in bets},
+                       key=lambda c: (B.CATEGORIES + ["Uncategorized"]).index(c)
+                       if c in B.CATEGORIES + ["Uncategorized"] else 99)
+_default_cats = [c for c in _present_cats if c in ("H2", "H2-beta")] or _present_cats
+_cats = st.multiselect(
+    "Categories in the numbers below", _present_cats, default=_default_cats,
+    help="Defaults to model-sourced bets (H2, H2-beta) so the headline answers 'is the model "
+         "working?'. " + " · ".join(f"**{k}**: {v}" for k, v in B.CATEGORY_HELP.items()))
+view_bets = B.filter_by_category(bets, _cats) if _cats else bets
+
+s = B.summary(view_bets)
+rp = B.real_price_clv_summary(view_bets)
+adh = B.stake_adherence(view_bets)
+
 # --- Summary ----------------------------------------------------------------
 C.section_header("📈", "Performance")
-m1, m2, m3, m4, m5 = st.columns(5)
+m1, m2, m3, m4, m5, m6 = st.columns(6)
 m1.metric("Record", f"{s['wins']}-{s['losses']}", help=f"{s['open']} open, {s['settled']} settled")
 m2.metric("Profit", f"${s['profit']:,.2f}")
 m3.metric("ROI", f"{s['roi']:+.1f}%" if s["roi"] is not None else "—")
-m4.metric("Avg CLV", f"{s['avg_clv']:+.2f}%" if s["avg_clv"] is not None else "—",
-          help=f"Over {s['clv_n']} bets with a closing line recorded.")
-m5.metric("Beat-close rate", f"{s['beat_close_rate']:.0f}%" if s["beat_close_rate"] is not None else "—",
-          help="Share of bets where you got a better price than the close. >50% is the goal.")
- 
-if s["clv_n"] == 0:
+# Headline CLV is REAL-PRICE ONLY: a bet whose entry odds were the model's own fair price can't say
+# whether you beat the market, so it's left out here (it still counts toward record/profit/ROI).
+m4.metric("Avg CLV (real prices)", f"{rp['avg_clv']:+.2f}%" if rp["avg_clv"] is not None else "—",
+          help=f"Over {rp['clv_n']} bets logged at a real book price with a closing line captured "
+               f"({rp['n_real_price']} of {rp['n_total']} bets were logged at a real price). "
+               f"All-bets CLV including fair-price rows: "
+               f"{(format(s['avg_clv'], '+.2f') + '%') if s['avg_clv'] is not None else '—'}.")
+m5.metric("Beat-close rate", f"{rp['beat_close_rate']:.0f}%" if rp["beat_close_rate"] is not None else "—",
+          help="Share of real-price bets where you got a better price than the close. >50% is the goal.")
+m6.metric("Followed sizing", f"{adh['rate']:.0f}%" if adh["rate"] is not None else "—",
+          help=f"Of {adh['n_measured']} bets with a platform-suggested stake, how many you staked "
+               f"within 10% (or $0.50) of it. Over: {adh['n_over']} · under: {adh['n_under']}.")
+if rp["n_total"] and rp["n_real_price"] < rp["n_total"]:
+    st.caption(f"ℹ️ {rp['n_total'] - rp['n_real_price']} bet(s) here weren't logged at a real book "
+               "price (model fair price, or logged before price-source tracking), so they're "
+               "excluded from CLV.")
+
+if rp["clv_n"] == 0:
     st.caption("💡 Enter **closing odds** when you settle bets below to unlock CLV — it's the "
                "fastest signal that you're beating the market, long before ROI stabilizes.")
  
@@ -381,7 +423,10 @@ if open_bets:
  
 # --- Calibration ------------------------------------------------------------
 C.section_header("📐", "Calibration — do your probabilities tell the truth?")
-cal = B.calibration(bets, n_bins=5)
+# 20 bins = 5-point-wide buckets. Prop probabilities cluster in roughly 55-75%, so the old 20-point
+# buckets lumped nearly every bet into one or two points and couldn't tell whether the model's
+# shading is right. Same category filter as the headline, so this reads the MODEL's calibration.
+cal = B.calibration(view_bets, n_bins=20)
 settled_n = s["settled"]
 if settled_n < 20:
     st.caption(f"Only {settled_n} settled bets so far. Calibration needs volume to mean anything "

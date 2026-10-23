@@ -190,7 +190,7 @@ def build_projection_index(rows: List[Dict], meta: List[Dict],
         if not markets or n_games <= 0:
             continue
         nm = normalize_name(r["Player"])
-        ctx = {"player": r["Player"], "team": r["Team"], "game": r["GameLabel"],
+        ctx = {"player": r["Player"], "player_id": r.get("_pid"), "team": r["Team"], "game": r["GameLabel"],
               "opp": r.get("Opp"), "lineup": "Active", "game_date": r.get("_game_date"),
               "position": r.get("Position", "")}
         for mkey in markets:

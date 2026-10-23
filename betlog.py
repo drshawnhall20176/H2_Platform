@@ -50,7 +50,9 @@ CREATE TABLE IF NOT EXISTS bets (
     trader     TEXT,
     is_real_bet INTEGER DEFAULT 1,
     cashed_out_amount REAL,
-    entry_odds_source TEXT
+    entry_odds_source TEXT,
+    suggested_stake REAL,
+    category TEXT
 );
 """
 # is_real_bet: added directly on request, to distinguish real, placed wagers from tracking-only
@@ -83,7 +85,38 @@ CREATE TABLE IF NOT EXISTS bets (
 
 _FIELDS = ["ts_placed", "slate_date", "game", "player", "player_id", "market", "side", "line",
            "entry_odds", "model_prob", "stake", "book", "close_odds", "result", "notes",
-           "ticket", "sport", "trader", "is_real_bet", "cashed_out_amount", "entry_odds_source"]
+           "ticket", "sport", "trader", "is_real_bet", "cashed_out_amount", "entry_odds_source",
+           "suggested_stake", "category"]
+
+# suggested_stake: the stake the platform's own sizing (Edge Board's shaded quarter-Kelly) recommended
+# at log time, stored ALONGSIDE `stake` (what was actually wagered) rather than instead of it -- so the
+# record can show both "what the model said to bet" and "what was really bet", and how often the two
+# matched (stake_adherence below). None when no sizing ran (manual entries, model-only pages).
+#
+# category: what KIND of bet this is, so a model-attribution question ("did the H2 model beat the
+# close?") can be answered without parsing free-text notes. See CATEGORIES. A bet with no category
+# (every row logged before this column existed) reads as uncategorized, never silently as "H2".
+CATEGORIES = ["H2", "H2-beta", "OFF", "BOOST", "PARLAY", "LOTTO", "PICK6"]
+CATEGORY_HELP = {
+    "H2": "Sourced from an H2 model that's fully validated for this sport",
+    "H2-beta": "Sourced from an H2 model the platform itself flags as not yet validated (NCAAF today)",
+    "OFF": "Not from the model -- unmodeled sport or league (UFC, international hoops) or a gut play",
+    "BOOST": "A sportsbook profit boost -- promo value, not model skill",
+    "PARLAY": "Parlay or same-game parlay leg",
+    "LOTTO": "Long-shot lotto slip",
+    "PICK6": "DraftKings Pick6 / pick'em entry",
+}
+# Sports whose projection model the platform's own registry flags as unvalidated -- a bet sourced from
+# one of these defaults to "H2-beta", not "H2" (see sports.py's NCAAF entry for the stated gap).
+BETA_MODEL_SPORTS = {"NCAAF"}
+
+
+def default_category(sport_key: Optional[str], from_model: bool = True) -> str:
+    """Default category for a newly logged bet: model-sourced bets are "H2" (or "H2-beta" for a sport
+    whose model is flagged unvalidated); anything not from the model is "OFF"."""
+    if not from_model:
+        return "OFF"
+    return "H2-beta" if (sport_key or "").upper() in BETA_MODEL_SPORTS else "H2"
  
  
 # ===========================================================================
@@ -136,6 +169,10 @@ def _sqlite_conn(db_path: str = DB_PATH):
             con.execute("ALTER TABLE bets ADD COLUMN cashed_out_amount REAL")
         if "entry_odds_source" not in cols:  # migrate DBs that predate real-price-vs-Fair-odds tracking
             con.execute("ALTER TABLE bets ADD COLUMN entry_odds_source TEXT")
+        if "suggested_stake" not in cols:   # migrate DBs that predate stake-adherence tracking
+            con.execute("ALTER TABLE bets ADD COLUMN suggested_stake REAL")
+        if "category" not in cols:          # migrate DBs that predate bet categories
+            con.execute("ALTER TABLE bets ADD COLUMN category TEXT")
         yield con
         con.commit()
     finally:
@@ -176,7 +213,8 @@ CREATE TABLE IF NOT EXISTS bets (
     slate_date TEXT, game TEXT, player TEXT, player_id INTEGER, market TEXT, side TEXT,
     line REAL, entry_odds INTEGER, model_prob REAL, stake REAL, book TEXT,
     close_odds INTEGER, result TEXT, notes TEXT, ticket TEXT, sport TEXT, trader TEXT,
-    is_real_bet BOOLEAN DEFAULT TRUE, cashed_out_amount REAL, entry_odds_source TEXT
+    is_real_bet BOOLEAN DEFAULT TRUE, cashed_out_amount REAL, entry_odds_source TEXT,
+    suggested_stake REAL, category TEXT
 );
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS sport TEXT;
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS trader TEXT;
@@ -184,6 +222,8 @@ ALTER TABLE bets ADD COLUMN IF NOT EXISTS player_id INTEGER;
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS is_real_bet BOOLEAN DEFAULT TRUE;
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS cashed_out_amount REAL;
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS entry_odds_source TEXT;
+ALTER TABLE bets ADD COLUMN IF NOT EXISTS suggested_stake REAL;
+ALTER TABLE bets ADD COLUMN IF NOT EXISTS category TEXT;
 """
  
  
@@ -560,6 +600,49 @@ def real_price_clv_summary(bets: List[Dict]) -> Dict:
         "avg_clv": round(avg_clv, 2) if avg_clv is not None else None,
         "beat_close_rate": round(beat, 1) if beat is not None else None,
     }
+
+
+def filter_by_category(bets: List[Dict], categories) -> List[Dict]:
+    """Bets whose category is in `categories` (a str or an iterable of str). Uncategorized bets
+    (category None/blank -- everything logged before the column existed) match only the
+    pseudo-category "Uncategorized", never a real one, so old rows can't leak into an "H2" view."""
+    if isinstance(categories, str):
+        categories = [categories]
+    wanted = set(categories)
+    out = []
+    for b in bets:
+        cat = b.get("category")
+        cat = cat if isinstance(cat, str) and cat.strip() else "Uncategorized"
+        if cat in wanted:
+            out.append(b)
+    return out
+
+
+def stake_adherence(bets: List[Dict], rel_tol: float = 0.10, abs_tol: float = 0.50) -> Dict:
+    """How often the stake actually wagered matched the platform's suggested stake.
+
+    A bet "followed sizing" when |stake - suggested_stake| <= max(abs_tol, rel_tol * suggested) --
+    i.e. within 10% or 50 cents by default, so rounding $4.37 to $4.50 still counts as following
+    it. Only bets with BOTH a real stake and a suggested stake are judged; everything else is
+    reported as not measurable rather than guessed at.
+
+    Returns {"n_measured", "n_followed", "rate", "n_over", "n_under"} -- rate in percent or None."""
+    measured = followed = over = under = 0
+    for b in bets:
+        s, sug = b.get("stake"), b.get("suggested_stake")
+        if _missing(s) or _missing(sug):
+            continue
+        s, sug = float(s), float(sug)
+        measured += 1
+        if abs(s - sug) <= max(abs_tol, rel_tol * sug):
+            followed += 1
+        elif s > sug:
+            over += 1
+        else:
+            under += 1
+    return {"n_measured": measured, "n_followed": followed,
+            "rate": round(followed / measured * 100, 1) if measured else None,
+            "n_over": over, "n_under": under}
 
 
 def calibration(bets: List[Dict], n_bins: int = 5) -> List[Dict]:

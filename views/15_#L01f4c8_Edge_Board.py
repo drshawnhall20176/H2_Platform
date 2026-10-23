@@ -530,30 +530,95 @@ else:
                         return (f"{r['Player']} · {r['Market']} {r['Side']} {float(r['Line']):g} "
                                 f"@ {int(r['Price']):+d}  (EV {r['EV%']:+.1f}%, ${r['Stake $']:.2f})")
  
-                    picks = st.multiselect("Pick the bets you placed — they log with the odds, model "
-                                           "probability, and Kelly stake already filled in",
-                                           list(logable.index), format_func=_label)
+                    picks = st.multiselect("Pick the bets you placed", list(logable.index),
+                                           format_func=_label,
+                                           help="Then confirm what you ACTUALLY got below — the "
+                                                "book you placed it at, the price, and your stake.")
+                    if picks:
+                        import quick_log as QL
+                        _book_keys = list(O.ALL_BOOKS.keys())
+                        _key_to_label = dict(O.ALL_BOOKS)
+                        _label_to_key = {v: k for k, v in _key_to_label.items()}
+                        _fill = pd.DataFrame([{
+                            "_idx": i,
+                            "Bet": f"{logable.loc[i, 'Player']} · {logable.loc[i, 'Market']} "
+                                   f"{logable.loc[i, 'Side']} {float(logable.loc[i, 'Line']):g}",
+                            "Book": _key_to_label.get(O.canonical_book(logable.loc[i, "Book"]),
+                                                      logable.loc[i, "Book"]),
+                            "Odds": int(logable.loc[i, "Price"]),
+                            "Stake $": round(float(logable.loc[i, "Stake $"]), 2),
+                            "Suggested $": round(float(logable.loc[i, "Stake $"]), 2),
+                            "Category": B.default_category(_active.key, from_model=True),
+                            "Notes": "",
+                        } for i in picks])
+                        st.caption("Pre-filled with the board's best book, price and sized stake. "
+                                   "**Change them to what you actually got** after line-shopping — "
+                                   "the closing line is captured at the book you enter here, and "
+                                   "the record keeps your stake next to the suggested one. Only "
+                                   "log a different book if it offered the **same line**; a "
+                                   "different line is a different bet (log it from Bet Log).")
+                        _edited = st.data_editor(
+                            _fill, hide_index=True, width="stretch", key="edge_fill_editor",
+                            disabled=["_idx", "Bet", "Suggested $"],
+                            column_order=["Bet", "Book", "Odds", "Stake $", "Suggested $",
+                                          "Category", "Notes"],
+                            column_config={
+                                "Book": st.column_config.SelectboxColumn(
+                                    "Book (where you placed it)",
+                                    options=[_key_to_label[k] for k in _book_keys], required=True),
+                                "Odds": st.column_config.NumberColumn(
+                                    "Odds you got", step=1, format="%+d", required=True),
+                                "Stake $": st.column_config.NumberColumn(
+                                    "Stake you placed ($)", min_value=0.0, step=0.5,
+                                    format="%.2f", required=True),
+                                "Suggested $": st.column_config.NumberColumn(
+                                    "Suggested ($)", format="%.2f",
+                                    help="The board's shaded fractional-Kelly stake."),
+                                "Category": st.column_config.SelectboxColumn(
+                                    "Category", options=B.CATEGORIES, required=True,
+                                    help=" · ".join(f"{k}: {v}" for k, v in B.CATEGORY_HELP.items())),
+                                "Notes": st.column_config.TextColumn(
+                                    "Notes", help="Optional one-line pre-game thesis."),
+                            },
+                        )
                     if st.button("Log selected bets", type="primary", disabled=not picks):
                         logged_sigs = st.session_state.setdefault("logged_sigs", set())
-                        n = skipped = 0
-                        for i in picks:
+                        n = skipped = invalid = no_id = 0
+                        for _, f in _edited.iterrows():
+                            i = f["_idx"]
                             r = logable.loc[i]
-                            sig = (date_str, r["Player"], r["Market"], r["Side"],
-                                   float(r["Line"]), int(r["Price"]))
+                            sig = (date_str, r["Player"], r["Market"], r["Side"], float(r["Line"]))
                             if sig in logged_sigs:
                                 skipped += 1
                                 continue
-                            B.add_bet(slate_date=date_str, game=r.get("Game"), player=r["Player"],
-                                      market=r["Market"], side=r["Side"], line=float(r["Line"]),
-                                      entry_odds=int(r["Price"]), model_prob=float(r["ModelProb"]),
-                                      stake=float(r.get("Stake $", 0) or 0), book=r.get("Book"),
-                                      sport=_active.key)
+                            try:
+                                price = int(f["Odds"])
+                                stake_placed = float(f["Stake $"])
+                            except (TypeError, ValueError):
+                                invalid += 1
+                                continue
+                            if -100 < price < 100:   # not a valid American price
+                                invalid += 1
+                                continue
+                            fields = QL.edge_board_bet_fields(
+                                r.to_dict(), date_str, _active.key,
+                                book=_label_to_key.get(f["Book"], O.canonical_book(f["Book"])),
+                                price=price, stake=stake_placed,
+                                category=f["Category"], notes=f.get("Notes"))
+                            if fields["player_id"] is None:
+                                no_id += 1
+                            B.add_bet(**fields)
                             logged_sigs.add(sig)
                             n += 1
-                        msg = f"Logged {n} bet(s) to the Bet Log — settle them there after the games."
+                        msg = f"Logged {n} bet(s) to the Bet Log at the prices you entered."
                         if skipped:
                             msg += f" Skipped {skipped} already logged this session."
+                        if invalid:
+                            msg += f" Skipped {invalid} with odds that aren't a valid American price."
                         st.success(msg)
+                        if no_id:
+                            st.caption(f"{no_id} of these had no player ID from the projection data, "
+                                       "so they'll need manual settlement in Bet Log.")
         else:
             st.info("No edges to show (no props matched, or all below the EV filter).")
  
