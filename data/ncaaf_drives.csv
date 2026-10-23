@@ -43648,6 +43648,35 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401874042,1,40187404234,25,Mercer,East Texas A&M,,,False,4,14
 2026,401874042,1,40187404235,26,East Texas A&M,Mercer,,,False,4,62
 2026,401874042,1,40187404236,27,Mercer,East Texas A&M,,,False,4,9
+2026,401891332,1,4018913322,1,St. Francis (IL),Illinois State,,,False,1,75
+2026,401891332,1,4018913323,2,Illinois State,St. Francis (IL),,,True,1,50
+2026,401891332,1,4018913325,3,St. Francis (IL),Illinois State,,,False,1,75
+2026,401891332,1,4018913326,4,Illinois State,St. Francis (IL),,,True,1,38
+2026,401891332,1,4018913328,5,St. Francis (IL),Illinois State,,,False,1,87
+2026,401891332,1,4018913329,6,Illinois State,St. Francis (IL),,,True,1,62
+2026,401891332,1,40189133211,7,St. Francis (IL),Illinois State,,,False,1,75
+2026,401891332,1,40189133212,8,Illinois State,St. Francis (IL),,,True,1,44
+2026,401891332,1,40189133214,9,St. Francis (IL),Illinois State,,,False,2,87
+2026,401891332,1,40189133215,10,Illinois State,St. Francis (IL),,,True,2,81
+2026,401891332,1,40189133217,11,St. Francis (IL),Illinois State,,,False,2,74
+2026,401891332,1,40189133218,12,Illinois State,St. Francis (IL),,,True,2,15
+2026,401891332,1,40189133220,13,St. Francis (IL),Illinois State,,,False,2,86
+2026,401891332,1,40189133221,14,Illinois State,St. Francis (IL),,,True,2,10
+2026,401891332,1,40189133223,15,St. Francis (IL),Illinois State,,,False,2,75
+2026,401891332,1,40189133224,16,Illinois State,St. Francis (IL),,,False,2,45
+2026,401891332,1,40189133226,17,Illinois State,St. Francis (IL),,,True,3,55
+2026,401891332,1,40189133228,18,St. Francis (IL),Illinois State,,,False,3,79
+2026,401891332,1,40189133229,19,Illinois State,St. Francis (IL),,,True,3,91
+2026,401891332,1,40189133231,20,St. Francis (IL),Illinois State,,,False,3,83
+2026,401891332,1,40189133232,21,Illinois State,St. Francis (IL),,,True,3,58
+2026,401891332,1,40189133234,22,St. Francis (IL),Illinois State,,,False,3,78
+2026,401891332,1,40189133235,23,Illinois State,St. Francis (IL),,,False,3,20
+2026,401891332,1,40189133236,24,St. Francis (IL),Illinois State,,,False,4,78
+2026,401891332,1,40189133237,25,Illinois State,St. Francis (IL),,,False,4,19
+2026,401891332,1,40189133238,26,St. Francis (IL),Illinois State,,,False,4,97
+2026,401891332,1,40189133239,27,Illinois State,St. Francis (IL),,,True,4,59
+2026,401891332,1,40189133241,28,St. Francis (IL),Illinois State,,,False,4,75
+2026,401891332,1,40189133242,29,Illinois State,St. Francis (IL),,,False,4,31
 2026,401896383,1,4018963832,1,Morehead State,Ohio Dominican,,,False,1,21
 2026,401896383,1,4018963833,2,Ohio Dominican,Morehead State,,,True,1,95
 2026,401896383,1,4018963835,3,Morehead State,Ohio Dominican,,,True,1,35
@@ -57065,6 +57094,28 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401867930,6,40186793025,17,Princeton,Wagner,,,False,4,99
 2026,401867930,6,40186793026,18,Wagner,Princeton,,,False,4,14
 2026,401867930,6,40186793027,19,Princeton,Wagner,,,False,4,10
+2026,401867954,6,4018679542,1,Franklin Pierce,Delaware State,,,False,1,75
+2026,401867954,6,4018679543,2,Delaware State,Franklin Pierce,,,False,1,10
+2026,401867954,6,4018679544,3,Franklin Pierce,Delaware State,,,False,1,78
+2026,401867954,6,4018679545,4,Delaware State,Franklin Pierce,,,True,1,6
+2026,401867954,6,4018679547,5,Franklin Pierce,Delaware State,,,False,1,65
+2026,401867954,6,4018679548,6,Delaware State,Franklin Pierce,,,False,1,19
+2026,401867954,6,4018679549,7,Franklin Pierce,Delaware State,,,False,1,33
+2026,401867954,6,40186795410,8,Delaware State,Franklin Pierce,,,True,2,20
+2026,401867954,6,40186795412,9,Franklin Pierce,Delaware State,,,False,2,85
+2026,401867954,6,40186795413,10,Delaware State,Franklin Pierce,,,True,2,49
+2026,401867954,6,40186795415,11,Franklin Pierce,Delaware State,,,False,2,75
+2026,401867954,6,40186795416,12,Delaware State,Franklin Pierce,,,False,2,18
+2026,401867954,6,40186795417,13,Franklin Pierce,Delaware State,,,False,2,85
+2026,401867954,6,40186795419,14,Delaware State,Franklin Pierce,,,True,3,100
+2026,401867954,6,40186795421,15,Franklin Pierce,Delaware State,,,False,3,75
+2026,401867954,6,40186795422,16,Delaware State,Franklin Pierce,,,True,3,35
+2026,401867954,6,40186795424,17,Franklin Pierce,Delaware State,,,False,3,73
+2026,401867954,6,40186795425,18,Delaware State,Franklin Pierce,,,False,3,20
+2026,401867954,6,40186795426,19,Franklin Pierce,Delaware State,,,False,3,65
+2026,401867954,6,40186795427,20,Delaware State,Franklin Pierce,,,True,4,6
+2026,401867954,6,40186795429,21,Franklin Pierce,Delaware State,,,False,4,80
+2026,401867954,6,40186795430,22,Delaware State,Franklin Pierce,,,False,4,26
 2026,401867960,6,4018679602,1,Pennsylvania,Howard,,,False,1,25
 2026,401867960,6,4018679603,2,Howard,Pennsylvania,,,True,1,88
 2026,401867960,6,4018679605,3,Pennsylvania,Howard,,,True,1,41
@@ -60879,3 +60930,189 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401874037,7,40187403731,23,West Florida,West Alabama,,,True,4,25
 2026,401874037,7,40187403733,24,West Alabama,West Florida,,,False,4,72
 2026,401874037,7,40187403734,25,West Florida,West Alabama,,,False,4,20
+2026,401862807,8,4018628072,1,East Carolina,Memphis,,,False,1,75
+2026,401862807,8,4018628073,2,Memphis,East Carolina,,,False,1,20
+2026,401862807,8,4018628074,3,East Carolina,Memphis,,,True,1,46
+2026,401862807,8,4018628076,4,Memphis,East Carolina,,,False,1,25
+2026,401862807,8,4018628077,5,East Carolina,Memphis,,,True,1,80
+2026,401862807,8,4018628079,6,Memphis,East Carolina,,,False,1,25
+2026,401862807,8,40186280710,7,East Carolina,Memphis,,,False,1,85
+2026,401862807,8,40186280711,8,Memphis,East Carolina,,,True,2,49
+2026,401862807,8,40186280713,9,East Carolina,Memphis,,,False,2,75
+2026,401862807,8,40186280714,10,Memphis,East Carolina,,,False,2,35
+2026,401862807,8,40186280715,11,East Carolina,Memphis,,,True,2,67
+2026,401862807,8,40186280717,12,Memphis,East Carolina,,,False,2,16
+2026,401862807,8,40186280718,13,East Carolina,Memphis,,,False,2,88
+2026,401862807,8,40186280719,14,Memphis,East Carolina,,,False,2,52
+2026,401862807,8,40186280720,15,East Carolina,Memphis,,,False,2,90
+2026,401862807,8,40186280721,16,East Carolina,Memphis,,,True,2,46
+2026,401862807,8,40186280723,17,Memphis,East Carolina,,,True,3,25
+2026,401862807,8,40186280725,18,East Carolina,Memphis,,,True,3,75
+2026,401862807,8,40186280727,19,Memphis,East Carolina,,,True,3,25
+2026,401862807,8,40186280729,20,East Carolina,Memphis,,,False,3,75
+2026,401862807,8,40186280730,21,Memphis,East Carolina,,,True,3,32
+2026,401862807,8,40186280732,22,East Carolina,Memphis,,,True,3,75
+2026,401862807,8,40186280734,23,Memphis,East Carolina,,,False,4,25
+2026,401862807,8,40186280735,24,Memphis,East Carolina,,,True,4,72
+2026,401862807,8,40186280737,25,East Carolina,Memphis,,,False,4,75
+2026,401862807,8,40186280738,26,Memphis,East Carolina,,,True,4,20
+2026,401862807,8,40186280740,27,East Carolina,Memphis,,,True,4,75
+2026,401862807,8,40186280742,28,Memphis,East Carolina,,,False,4,25
+2026,401862807,8,40186280743,29,Memphis,East Carolina,,,True,5,75
+2026,401862807,8,40186280744,30,East Carolina,Memphis,,,False,5,85
+2026,401869845,8,4018698452,1,James Madison,App State,,,True,1,75
+2026,401869845,8,4018698454,2,App State,James Madison,,,False,1,25
+2026,401869845,8,4018698455,3,James Madison,App State,,,False,1,67
+2026,401869845,8,4018698456,4,App State,James Madison,,,False,1,23
+2026,401869845,8,4018698457,5,James Madison,App State,,,False,1,49
+2026,401869845,8,4018698458,6,App State,James Madison,,,False,1,10
+2026,401869845,8,4018698459,7,James Madison,App State,,,False,1,55
+2026,401869845,8,40186984510,8,App State,James Madison,,,False,1,11
+2026,401869845,8,40186984511,9,James Madison,App State,,,False,1,62
+2026,401869845,8,40186984512,10,App State,James Madison,,,True,1,20
+2026,401869845,8,40186984514,11,James Madison,App State,,,False,2,75
+2026,401869845,8,40186984515,12,App State,James Madison,,,False,2,2
+2026,401869845,8,40186984516,13,James Madison,App State,,,False,2,38
+2026,401869845,8,40186984517,14,App State,James Madison,,,False,2,30
+2026,401869845,8,40186984518,15,James Madison,App State,,,True,2,70
+2026,401869845,8,40186984520,16,App State,James Madison,,,True,2,25
+2026,401869845,8,40186984522,17,James Madison,App State,,,False,2,75
+2026,401869845,8,40186984524,18,App State,James Madison,,,True,3,25
+2026,401869845,8,40186984526,19,James Madison,App State,,,False,3,75
+2026,401869845,8,40186984527,20,App State,James Madison,,,False,3,21
+2026,401869845,8,40186984528,21,James Madison,App State,,,True,3,67
+2026,401869845,8,40186984530,22,App State,James Madison,,,True,3,25
+2026,401869845,8,40186984532,23,James Madison,App State,,,True,4,75
+2026,401869845,8,40186984534,24,App State,James Madison,,,True,4,25
+2026,401869845,8,40186984536,25,James Madison,App State,,,False,4,75
+2026,401869845,8,40186984537,26,App State,James Madison,,,True,4,86
+2026,401869845,8,40186984539,27,James Madison,App State,,,False,4,75
+2026,401869845,8,40186984540,28,App State,James Madison,,,False,4,30
+2026,401869845,8,40186984541,29,James Madison,App State,,,True,4,71
+2026,401869845,8,40186984543,30,App State,James Madison,,,False,4,25
+2026,401869845,8,40186984544,31,James Madison,App State,,,False,5,25
+2026,401869845,8,40186984545,32,App State,James Madison,,,True,5,16
+2026,401871055,8,4018710552,1,Florida International,Middle Tennessee,,,False,1,22
+2026,401871055,8,4018710553,2,Middle Tennessee,Florida International,,,False,1,75
+2026,401871055,8,4018710554,3,Florida International,Middle Tennessee,,,True,1,51
+2026,401871055,8,4018710556,4,Middle Tennessee,Florida International,,,True,1,72
+2026,401871055,8,4018710558,5,Florida International,Middle Tennessee,,,False,1,25
+2026,401871055,8,4018710559,6,Middle Tennessee,Florida International,,,False,1,32
+2026,401871055,8,40187105510,7,Florida International,Middle Tennessee,,,False,1,1
+2026,401871055,8,40187105511,8,Middle Tennessee,Florida International,,,True,1,50
+2026,401871055,8,40187105513,9,Florida International,Middle Tennessee,,,False,2,55
+2026,401871055,8,40187105514,10,Middle Tennessee,Florida International,,,False,2,91
+2026,401871055,8,40187105515,11,Florida International,Middle Tennessee,,,False,2,27
+2026,401871055,8,40187105516,12,Middle Tennessee,Florida International,,,False,2,58
+2026,401871055,8,40187105517,13,Florida International,Middle Tennessee,,,False,2,9
+2026,401871055,8,40187105518,14,Middle Tennessee,Florida International,,,True,2,50
+2026,401871055,8,40187105520,15,Florida International,Middle Tennessee,,,False,2,27
+2026,401871055,8,40187105522,16,Middle Tennessee,Florida International,,,False,3,90
+2026,401871055,8,40187105523,17,Florida International,Middle Tennessee,,,False,3,53
+2026,401871055,8,40187105524,18,Middle Tennessee,Florida International,,,True,3,57
+2026,401871055,8,40187105526,19,Florida International,Middle Tennessee,,,True,3,25
+2026,401871055,8,40187105528,20,Middle Tennessee,Florida International,,,True,3,75
+2026,401871055,8,40187105530,21,Florida International,Middle Tennessee,,,False,3,35
+2026,401871055,8,40187105531,22,Middle Tennessee,Florida International,,,True,4,89
+2026,401871055,8,40187105533,23,Florida International,Middle Tennessee,,,True,4,25
+2026,401871055,8,40187105535,24,Middle Tennessee,Florida International,,,False,4,75
+2026,401871056,8,4018710562,1,Kennesaw State,Liberty,,,False,1,32
+2026,401871056,8,4018710563,2,Liberty,Kennesaw State,,,True,1,85
+2026,401871056,8,4018710565,3,Kennesaw State,Liberty,,,False,1,25
+2026,401871056,8,4018710566,4,Liberty,Kennesaw State,,,False,1,76
+2026,401871056,8,4018710567,5,Kennesaw State,Liberty,,,False,1,40
+2026,401871056,8,4018710568,6,Liberty,Kennesaw State,,,True,1,72
+2026,401871056,8,40187105610,7,Kennesaw State,Liberty,,,False,1,16
+2026,401871056,8,40187105611,8,Liberty,Kennesaw State,,,False,2,62
+2026,401871056,8,40187105612,9,Kennesaw State,Liberty,,,False,2,11
+2026,401871056,8,40187105613,10,Liberty,Kennesaw State,,,False,2,75
+2026,401871056,8,40187105614,11,Kennesaw State,Liberty,,,True,2,15
+2026,401871056,8,40187105616,12,Liberty,Kennesaw State,,,False,2,75
+2026,401871056,8,40187105618,13,Liberty,Kennesaw State,,,False,3,75
+2026,401871056,8,40187105619,14,Kennesaw State,Liberty,,,False,3,9
+2026,401871056,8,40187105620,15,Liberty,Kennesaw State,,,True,3,12
+2026,401871056,8,40187105622,16,Kennesaw State,Liberty,,,False,3,23
+2026,401871056,8,40187105623,17,Liberty,Kennesaw State,,,True,3,63
+2026,401871056,8,40187105625,18,Kennesaw State,Liberty,,,False,3,15
+2026,401871056,8,40187105626,19,Liberty,Kennesaw State,,,True,3,24
+2026,401871056,8,40187105628,20,Kennesaw State,Liberty,,,False,4,5
+2026,401871056,8,40187105629,21,Liberty,Kennesaw State,,,True,4,70
+2026,401871056,8,40187105631,22,Kennesaw State,Liberty,,,True,4,25
+2026,401871056,8,40187105633,23,Liberty,Kennesaw State,,,False,4,75
+2026,401871069,8,4018710692,1,Missouri State,Delaware,,,False,1,75
+2026,401871069,8,4018710693,2,Delaware,Missouri State,,,True,1,32
+2026,401871069,8,4018710695,3,Missouri State,Delaware,,,True,1,75
+2026,401871069,8,4018710697,4,Delaware,Missouri State,,,True,1,20
+2026,401871069,8,4018710699,5,Delaware,Missouri State,,,True,1,35
+2026,401871069,8,40187106911,6,Missouri State,Delaware,,,False,2,75
+2026,401871069,8,40187106912,7,Delaware,Missouri State,,,True,2,38
+2026,401871069,8,40187106914,8,Missouri State,Delaware,,,True,2,82
+2026,401871069,8,40187106916,9,Delaware,Missouri State,,,True,2,30
+2026,401871069,8,40187106918,10,Missouri State,Delaware,,,True,2,78
+2026,401871069,8,40187106920,11,Delaware,Missouri State,,,False,2,10
+2026,401871069,8,40187106922,12,Delaware,Missouri State,,,True,3,66
+2026,401871069,8,40187106924,13,Missouri State,Delaware,,,True,3,82
+2026,401871069,8,40187106926,14,Delaware,Missouri State,,,True,3,67
+2026,401871069,8,40187106928,15,Missouri State,Delaware,,,False,3,55
+2026,401871069,8,40187106929,16,Delaware,Missouri State,,,True,3,96
+2026,401871069,8,40187106931,17,Missouri State,Delaware,,,False,3,66
+2026,401871069,8,40187106932,18,Delaware,Missouri State,,,True,3,34
+2026,401871069,8,40187106934,19,Missouri State,Delaware,,,False,4,75
+2026,401871069,8,40187106935,20,Delaware,Missouri State,,,True,4,77
+2026,401871069,8,40187106937,21,Missouri State,Delaware,,,False,4,75
+2026,401871069,8,40187106938,22,Delaware,Missouri State,,,True,4,59
+2026,401871069,8,40187106940,23,Missouri State,Delaware,,,True,4,75
+2026,401871069,8,40187106942,24,Delaware,Missouri State,,,False,4,25
+2026,401871070,8,4018710702,1,New Mexico State,Sam Houston,,,True,1,75
+2026,401871070,8,4018710704,2,New Mexico State,Sam Houston,,,False,1,75
+2026,401871070,8,4018710705,3,Sam Houston,New Mexico State,,,False,1,29
+2026,401871070,8,4018710706,4,New Mexico State,Sam Houston,,,False,1,82
+2026,401871070,8,4018710707,5,Sam Houston,New Mexico State,,,False,1,55
+2026,401871070,8,4018710708,6,New Mexico State,Sam Houston,,,False,1,93
+2026,401871070,8,4018710709,7,Sam Houston,New Mexico State,,,False,2,26
+2026,401871070,8,40187107010,8,New Mexico State,Sam Houston,,,False,2,70
+2026,401871070,8,40187107011,9,Sam Houston,New Mexico State,,,False,2,9
+2026,401871070,8,40187107012,10,New Mexico State,Sam Houston,,,True,2,1
+2026,401871070,8,40187107014,11,Sam Houston,New Mexico State,,,False,2,21
+2026,401871070,8,40187107015,12,New Mexico State,Sam Houston,,,False,2,76
+2026,401871070,8,40187107016,13,Sam Houston,New Mexico State,,,True,2,80
+2026,401871070,8,40187107018,14,New Mexico State,Sam Houston,,,False,2,84
+2026,401871070,8,40187107019,15,Sam Houston,New Mexico State,,,False,2,40
+2026,401871070,8,40187107020,16,New Mexico State,Sam Houston,,,False,2,85
+2026,401871070,8,40187107021,17,Sam Houston,New Mexico State,,,False,2,36
+2026,401871070,8,40187107022,18,New Mexico State,Sam Houston,,,True,2,43
+2026,401871070,8,40187107024,19,Sam Houston,New Mexico State,,,False,2,27
+2026,401871070,8,40187107026,20,Sam Houston,New Mexico State,,,True,3,19
+2026,401871070,8,40187107028,21,New Mexico State,Sam Houston,,,True,3,60
+2026,401871070,8,40187107030,22,Sam Houston,New Mexico State,,,False,3,18
+2026,401871070,8,40187107031,23,New Mexico State,Sam Houston,,,False,3,82
+2026,401871070,8,40187107032,24,Sam Houston,New Mexico State,,,False,3,13
+2026,401871070,8,40187107033,25,New Mexico State,Sam Houston,,,True,3,35
+2026,401871070,8,40187107035,26,Sam Houston,New Mexico State,,,False,3,28
+2026,401871070,8,40187107036,27,New Mexico State,Sam Houston,,,True,3,27
+2026,401871070,8,40187107038,28,Sam Houston,New Mexico State,,,False,3,14
+2026,401871070,8,40187107039,29,New Mexico State,Sam Houston,,,False,4,91
+2026,401871070,8,40187107040,30,Sam Houston,New Mexico State,,,True,4,68
+2026,401871070,8,40187107042,31,New Mexico State,Sam Houston,,,False,4,75
+2026,401871092,8,4018710922,1,Marshall,South Alabama,,,False,1,35
+2026,401871092,8,4018710923,2,South Alabama,Marshall,,,False,1,90
+2026,401871092,8,4018710924,3,Marshall,South Alabama,,,False,1,42
+2026,401871092,8,4018710925,4,South Alabama,Marshall,,,False,1,69
+2026,401871092,8,4018710926,5,Marshall,South Alabama,,,False,1,33
+2026,401871092,8,4018710927,6,South Alabama,Marshall,,,True,1,81
+2026,401871092,8,4018710929,7,Marshall,South Alabama,,,True,1,25
+2026,401871092,8,40187109211,8,South Alabama,Marshall,,,False,2,69
+2026,401871092,8,40187109212,9,Marshall,South Alabama,,,False,2,19
+2026,401871092,8,40187109213,10,South Alabama,Marshall,,,False,2,94
+2026,401871092,8,40187109214,11,Marshall,South Alabama,,,True,2,49
+2026,401871092,8,40187109216,12,South Alabama,Marshall,,,True,2,55
+2026,401871092,8,40187109218,13,South Alabama,Marshall,,,False,3,75
+2026,401871092,8,40187109219,14,Marshall,South Alabama,,,False,3,10
+2026,401871092,8,40187109220,15,South Alabama,Marshall,,,False,3,56
+2026,401871092,8,40187109221,16,Marshall,South Alabama,,,True,3,45
+2026,401871092,8,40187109223,17,South Alabama,Marshall,,,False,3,75
+2026,401871092,8,40187109224,18,Marshall,South Alabama,,,False,3,27
+2026,401871092,8,40187109225,19,South Alabama,Marshall,,,True,4,80
+2026,401871092,8,40187109227,20,Marshall,South Alabama,,,True,4,25
+2026,401871092,8,40187109229,21,South Alabama,Marshall,,,False,4,84
+2026,401871092,8,40187109230,22,Marshall,South Alabama,,,False,4,66
