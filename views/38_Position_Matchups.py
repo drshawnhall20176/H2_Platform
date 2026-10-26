@@ -151,6 +151,12 @@ def render_side(side, off_name, def_name):
                 st.markdown(f"- {t}")
     df = pd.DataFrame(PM.display_rows(side["rows"]))
     st.dataframe(df, hide_index=True, width="stretch")
+    moved = [r for r in side["rows"] if r.get("role_change") and r["players"]]
+    if moved:
+        st.caption("⚠️ **Role changes:** " + "; ".join(
+            f"{r['players'][0]['name']} fills {r['slot']} ({PM.role_change_text(r['role_change'])})" for r in moved)
+            + ". Players ruled out are skipped and the next man up is graded against the slot he's actually "
+              "filling. His *Last 4* comes from a smaller role, so treat these reads as lower confidence.")
 
 
 @st.cache_data(ttl=900, show_spinner=False)

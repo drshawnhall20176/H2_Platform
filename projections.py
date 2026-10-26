@@ -1444,9 +1444,9 @@ def build_projection_index(rows: List[Dict], meta: List[Dict],
             continue
         sim = simulate_batter(probs, r.get("_exp_pa", DEFAULT_UNKNOWN_PA), sims, rng)
         nm = normalize_name(r["Hitter"])
-        ctx = {"player": r["Hitter"], "player_id": r.get("_pid"), "team": r["Team"], "game": r["GameLabel"],
+        ctx = {"player": r["Hitter"], "team": r["Team"], "game": r["GameLabel"],
                "opp": r.get("Opp Pitcher"), "lineup": r.get("Lineup"),
-               "game_date": label_to_time.get(r["GameLabel"])}
+               "game_date": label_to_time.get(r["GameLabel"]), "pid": r.get("_pid")}
         for key, arr in (("batter_home_runs", sim["hr"]), ("batter_total_bases", sim["tb"]),
                          ("batter_hits", sim["hits"]), ("batter_strikeouts", sim["k"])):
             idx_key = (nm, key)
@@ -1475,8 +1475,8 @@ def build_projection_index(rows: List[Dict], meta: List[Dict],
                 continue
             sim = simulate_pitcher(proj, sims, rng)
             nm = normalize_name(pm.name)
-            ctx = {"player": pm.name, "player_id": pm.id, "team": team, "game": m["label"], "opp": opp,
-                   "lineup": "SP", "game_date": m.get("game_date")}
+            ctx = {"player": pm.name, "team": team, "game": m["label"], "opp": opp,
+                   "lineup": "SP", "game_date": m.get("game_date"), "pid": getattr(pm, "id", None)}
             for key, arr, mean in (("pitcher_strikeouts", sim["k"], proj["exp_k"]),
                                    ("pitcher_outs", sim["outs"], proj["exp_outs"]),
                                    ("pitcher_walks", sim["bb"], proj["exp_bb"])):
@@ -1556,7 +1556,8 @@ def default_board_from_index(index: Dict) -> List[Dict]:
         out.append(_signal(ctx["player"], ctx["team"], ctx["game"], disp, side,
                            None if mkey == "batter_home_runs" else line, prob, entry["mean"],
                            Opp=ctx.get("opp"), Lineup=ctx.get("lineup"),
-                           GameTime=ctx.get("game_date")))
+                           GameTime=ctx.get("game_date"), PlayerId=ctx.get("pid"),
+                           MarketKey=mkey))
     return out
  
  

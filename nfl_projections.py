@@ -171,9 +171,10 @@ def build_projection_index(rows: List[Dict], meta: List[Dict],
         if not log or not markets:
             continue
         nm = normalize_name(r["Player"])
-        ctx = {"player": r["Player"], "player_id": r.get("_pid"), "team": r["Team"], "game": r["GameLabel"],
+        ctx = {"player": r["Player"], "team": r["Team"], "game": r["GameLabel"],
               "opp": r.get("Opp"), "lineup": "Active", "game_date": r.get("_game_date"),
               "position": r.get("Position", ""),   # needed for fantasy rankings on Edge Board
+              "pid": r.get("_pid"),              # lets a Model Board pick auto-settle
               }
         for mkey in markets:
             col, _disp, _line = _MARKET_SPEC[mkey]
@@ -209,7 +210,8 @@ def default_board_from_index(index: Dict,
             side, prob = ("Over", over) if over >= 0.5 else ("Under", 1 - over)
         out.append(_signal(ctx["player"], ctx["team"], ctx["game"], disp, side, line, prob,
                            entry["mean"], Opp=ctx.get("opp"), Lineup=ctx.get("lineup"),
-                           GameTime=ctx.get("game_date"), LineSource=line_src))
+                           GameTime=ctx.get("game_date"), LineSource=line_src,
+                           PlayerId=ctx.get("pid"), MarketKey=mkey))
     return out
 
 
@@ -1094,15 +1096,3 @@ def simulate_nfl_game(home_scoring: Optional[Dict[str, float]],
         "away_std": round(away_std, 1),
         "n_sims": n_sims,
     }
-
-
-def edge_side_prob(entry: Dict, mkey: str, point, side: str) -> float:
-    """Model probability for one side at a book's line, for Edge Board / compute_edges.
-
-    Applies the SAME small-sample shrinkage (then the same clamp) this sport's own boards apply in
-    default_board_from_index, so Edge Board and Best Bets price a play with the same probability.
-    Before this existed, compute_edges used the raw bootstrap fraction: with a ~10-game log that
-    can read 75% on a play the board itself would shrink toward 50/50, which is how a third of a
-    live NBA slate showed up as "implausibly high EV" (over 25%) on Edge Board."""
-    over = _clip_prob(BB_P.shrink_prob(prob_over(entry["dist"], point), entry.get("n_games", 0)))
-    return over if str(side).lower().startswith("o") else 1.0 - over

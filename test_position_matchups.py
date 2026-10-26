@@ -531,3 +531,58 @@ def test_requested_columns_the_data_cannot_fill_are_dropped_with_periods_and_wit
     assert [k for k, _ in PM.slot_game_log(allowed, "DAL", "WR1", "NFL", meta, columns=asked)["stat_cols"]] == ["rec"]
     PM.attach_periods(allowed, look)
     assert [k for k, _ in PM.slot_game_log(allowed, "DAL", "WR1", "NFL", meta, columns=asked)["stat_cols"]] == ["rec"]
+
+
+# ------------------------------------------------------------------ absences -> role changes
+def _p(name, status=None, pid=None):
+    return {"pid": pid or name, "name": name, "status": status}
+
+
+def test_out_receivers_are_skipped_and_the_wr3_moves_up_to_wr1():
+    # The MNF Eagles case: WR1 and WR2 ruled out, so the WR3 is tonight's WR1.
+    d = PM.promote_for_absences({"WR": [_p("Smith", "Out"), _p("Wicks", "Out"), _p("Lemon"), _p("Wilson"), _p("Hall")]})
+    assert [d[s][0]["name"] for s in ("WR1", "WR2", "WR3")] == ["Lemon", "Wilson", "Hall"]
+    assert d["WR1"][0]["role_change"] == {"from": "WR3", "for": "Smith"}
+    assert d["WR2"][0]["role_change"] == {"from": "WR4", "for": "Wicks"}
+    assert d["WR3"][0]["role_change"] == {"from": "WR5", "for": None}       # opened up because Lemon moved, not an injury
+    assert all(p["name"] not in ("Smith", "Wicks") for lst in d.values() for p in lst)
+
+
+def test_questionable_and_doubtful_players_keep_their_slot():
+    d = PM.promote_for_absences({"RB": [_p("Barkley", "Questionable"), _p("Pierce"), _p("Third", "Doubtful")]})
+    assert d["RB1"][0]["name"] == "Barkley" and "role_change" not in d["RB1"][0]
+    assert d["RB2"][0]["name"] == "Pierce" and "role_change" not in d["RB2"][0]
+
+
+def test_out_starting_qb_promotes_the_backup_and_every_slot_gets_a_next_up():
+    d = PM.promote_for_absences({"QB": [_p("Starter", "Injured Reserve"), _p("Backup"), _p("Third")],
+                                 "RB": [_p("R1"), _p("R2"), _p("R3"), _p("R4")],
+                                 "WR": [_p("W1"), _p("W2"), _p("W3"), _p("W4")], "TE": [_p("T1"), _p("T2")]})
+    assert d["QB"][0]["name"] == "Backup" and d["QB"][0]["role_change"] == {"from": "QB2", "for": "Starter"}
+    assert [p["name"] for p in d["QB"][1:]] == ["Third"]
+    assert [p["name"] for p in d["RB1"][1:]] == ["R3", "R4"] and [p["name"] for p in d["WR1"][1:]] == ["W4"]
+    assert [p["name"] for p in d["TE1"]] == ["T1", "T2"]
+
+
+def test_a_group_with_everyone_out_still_shows_the_starter():
+    d = PM.promote_for_absences({"TE": [_p("Only", "Out")]})
+    assert d["TE1"][0]["name"] == "Only" and d["TE1"][0]["status"] == "Out"
+
+
+def test_role_change_shows_in_table_callouts_and_lowers_confidence():
+    pgames = table_inputs()
+    al = PM.allowed_by_slot(pgames, "NFL")
+    summ = PM.summarize(al, "NFL")
+    depth = PM.promote_for_absences({"WR": [_p("Star", "Out", 7), _p("Backup", None, 8)]})
+    rows = PM.matchup_rows("NFL", depth, "D9", summ, None, pgames)
+    wr1 = {r["Slot"]: r for r in PM.display_rows(rows)}["WR1"]
+    assert wr1["Starter"] == "Backup ↑ from WR2, for Star (out)"
+    assert wr1["Verdict"].endswith("⚠️ new role")
+    target = PM.callouts({"rows": rows}, "HOME", "D9")["targets"][0]
+    assert "Backup (WR1)" in target and "role change" in target and "lower confidence" in target
+
+
+def test_no_absences_means_no_role_change_text():
+    assert PM.role_change_text(None) == ""
+    d = PM.promote_for_absences({"WR": [_p("A"), _p("B")]})
+    assert all("role_change" not in lst[0] for lst in d.values())

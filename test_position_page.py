@@ -586,3 +586,18 @@ def test_non_football_sports_have_no_week_switch_and_keep_every_game(page):
                            game_date="2026-10-20T23:00:00Z")], ranked=False)
     assert not [r for r in at.radio if r.label == "Games shown"]
     assert len(at.selectbox(key="pm_game").options) == 1
+
+
+def test_a_promoted_receiver_is_flagged_as_a_role_change_on_the_page(page):
+    def promoted(sport_key, game):
+        b = synthetic_bundle(sport_key, game["home"], game["away"], True)
+        depth = PM.promote_for_absences({"WR": [{"pid": "x", "name": "Hurt", "status": "Out"},
+                                                {"pid": "h1", "name": "HomeWr", "status": None}]})
+        b["home_off"] = PD.build_side(sport_key, game["home"], game["away"], depth, b["allowed"], [])
+        return b
+    at = page("NFL", bundle_fn=promoted)
+    assert not at.exception, [e.value for e in at.exception]
+    frames = [d.value for d in at.dataframe if "Starter" in d.value.columns]
+    starters = " ".join(s for f in frames for s in f["Starter"])
+    assert "HomeWr ↑ from WR2, for Hurt (out)" in starters and "Hurt 🚫" not in starters
+    assert "Role changes:" in texts(at) and "lower confidence" in texts(at)

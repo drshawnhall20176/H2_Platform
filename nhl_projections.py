@@ -153,8 +153,9 @@ def build_projection_index(rows: List[Dict], meta: List[Dict],
         if not log:
             continue
         nm = normalize_name(r["Player"])
-        ctx = {"player": r["Player"], "player_id": r.get("_pid"), "team": r["Team"], "game": r["GameLabel"],
-               "opp": r.get("Opp"), "lineup": "Active", "game_date": r.get("_game_date")}
+        ctx = {"player": r["Player"], "team": r["Team"], "game": r["GameLabel"],
+               "opp": r.get("Opp"), "lineup": "Active", "game_date": r.get("_game_date"),
+               "pid": r.get("_pid")}
         for mkey in markets_for_role(_role_of(r)):
             skey = _MARKET_SPEC[mkey][4]
             values = [g.get(skey, 0.0) for g in log]
@@ -177,7 +178,8 @@ def default_board_from_index(index: Dict) -> List[Dict]:
         side, prob = ("Over", over) if over >= 0.5 else ("Under", 1 - over)
         out.append(_signal(ctx["player"], ctx["team"], ctx["game"], disp, side, line, prob,
                            entry["mean"], Opp=ctx.get("opp"), Lineup=ctx.get("lineup"),
-                           GameTime=ctx.get("game_date")))
+                           GameTime=ctx.get("game_date"), PlayerId=ctx.get("pid"),
+                           MarketKey=mkey))
     return out
 
 
@@ -308,12 +310,3 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
             })
     plays.sort(key=lambda x: x["Conviction"], reverse=True)
     return plays
-
-
-def edge_side_prob(entry: Dict, mkey: str, point, side: str) -> float:
-    """Model probability for one side at a book's line, for Edge Board / compute_edges -- the same
-    shrinkage toward this market's typical rate that default_board_from_index applies, so Edge
-    Board and the boards price a play with the same probability (see nba_projections.edge_side_prob)."""
-    _col, disp, _line, _role, _skey = _MARKET_SPEC.get(mkey, (mkey, mkey, 0.5, "skater", ""))
-    over = _shrunk_over(prob_over(entry["dist"], point), entry.get("n_games", 0), disp)
-    return over if str(side).lower().startswith("o") else 1.0 - over

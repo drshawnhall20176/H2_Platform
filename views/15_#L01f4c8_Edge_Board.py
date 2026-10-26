@@ -24,6 +24,7 @@ import sports
 import odds_api as O
 import betlog as B
 import bet_sizing as BS
+import model_board_log as MBL
 import statcast_data as SC
 import weather as WX
 import mlb_shared_cache as MSC
@@ -114,21 +115,13 @@ def load_index(sport_key: str, date_str: str, sims: int, seed: int):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_offers(sport_key: str, date_str: str, markets_tuple: tuple, _api_key: str):
-    """The quota-spending part, cached on its own: changing which books you can bet re-prices the
-    SAME fetched offers instead of paying for another fetch."""
-    sport = sports.get(sport_key)
-    return O.fetch_slate_props(date_str, _api_key, list(markets_tuple), sport=sport.odds_sport_key)
-
-
 def load_edges(sport_key: str, date_str: str, markets_tuple: tuple, _index: dict, _api_key: str,
-               _known_names: Optional[set] = None, _all_active_names: Optional[set] = None,
-               allowed_books: Optional[tuple] = None):
+               _known_names: Optional[set] = None, _all_active_names: Optional[set] = None):
     sport = sports.get(sport_key)
-    offers, info = load_offers(sport_key, date_str, markets_tuple, _api_key)
+    offers, info = O.fetch_slate_props(date_str, _api_key, list(markets_tuple),
+                                       sport=sport.odds_sport_key)
     edges, stats = O.compute_edges(_index, offers, projections_module=sport.projections,
-                                   known_names=_known_names, all_active_names=_all_active_names,
-                                   allowed_books=allowed_books)
+                                   known_names=_known_names, all_active_names=_all_active_names)
     return edges, {**info, **stats}
  
  
@@ -257,30 +250,14 @@ else:
                                       "so it overbets one game. This caps total exposure per game and scales "
                                       "that game's bets down proportionally.") / 100.0
  
-    _bettable = list(O.US_BOOKS.keys())
-    my_books = st.multiselect(
-        "Books I can bet", _bettable,
-        default=[b for b in O.MY_BOOKS_DEFAULT if b in _bettable],
-        format_func=lambda k: O.US_BOOKS.get(k, k), key="edge_my_books",
-        help="Best price, EV and stake come ONLY from these books — the board line-shops among "
-             "books you can actually use and never recommends one you can't (e.g. an offshore book, "
-             "or one not licensed in the state you're betting from). The market's fair price still "
-             "averages every book in the feed. Changing this re-prices the same fetched odds — no "
-             "extra quota.")
-    st.caption("Pick'em apps (DK Pick6, PrizePicks, Underdog) and Bet365 don't appear here: the odds "
-               "feed has no two-sided US prop prices for them, so they can't be priced on Edge Board. "
-               "Log those bets from Bet Log.")
-    if not my_books:
-        st.warning("Pick at least one book you can bet, or the board has nowhere to price a bet.")
-    if st.button("📡 Fetch live odds & compute edges", type="primary", disabled=not (chosen and my_books)):
+    if st.button("📡 Fetch live odds & compute edges", type="primary", disabled=not chosen):
         st.session_state["do_fetch"] = True
  
     if st.session_state.get("do_fetch"):
         try:
             with st.spinner("Fetching odds and computing edges..."):
                 edges, info = load_edges(_active.key, date_str, tuple(sorted(chosen)), index, api_key,
-                                         known_names, all_active_names,
-                                         allowed_books=tuple(my_books) if my_books else None)
+                                         known_names, all_active_names)
         except O.OddsAPIError as e:
             st.error(f"Odds API error: {e}")
             edges, info = [], {}
@@ -554,95 +531,30 @@ else:
                         return (f"{r['Player']} · {r['Market']} {r['Side']} {float(r['Line']):g} "
                                 f"@ {int(r['Price']):+d}  (EV {r['EV%']:+.1f}%, ${r['Stake $']:.2f})")
  
-                    picks = st.multiselect("Pick the bets you placed", list(logable.index),
-                                           format_func=_label,
-                                           help="Then confirm what you ACTUALLY got below — the "
-                                                "book you placed it at, the price, and your stake.")
-                    if picks:
-                        import quick_log as QL
-                        _book_keys = list(O.ALL_BOOKS.keys())
-                        _key_to_label = dict(O.ALL_BOOKS)
-                        _label_to_key = {v: k for k, v in _key_to_label.items()}
-                        _fill = pd.DataFrame([{
-                            "_idx": i,
-                            "Bet": f"{logable.loc[i, 'Player']} · {logable.loc[i, 'Market']} "
-                                   f"{logable.loc[i, 'Side']} {float(logable.loc[i, 'Line']):g}",
-                            "Book": _key_to_label.get(O.canonical_book(logable.loc[i, "Book"]),
-                                                      logable.loc[i, "Book"]),
-                            "Odds": int(logable.loc[i, "Price"]),
-                            "Stake $": round(float(logable.loc[i, "Stake $"]), 2),
-                            "Suggested $": round(float(logable.loc[i, "Stake $"]), 2),
-                            "Category": B.default_category(_active.key, from_model=True),
-                            "Notes": "",
-                        } for i in picks])
-                        st.caption("Pre-filled with the board's best book, price and sized stake. "
-                                   "**Change them to what you actually got** after line-shopping — "
-                                   "the closing line is captured at the book you enter here, and "
-                                   "the record keeps your stake next to the suggested one. Only "
-                                   "log a different book if it offered the **same line**; a "
-                                   "different line is a different bet (log it from Bet Log).")
-                        _edited = st.data_editor(
-                            _fill, hide_index=True, width="stretch", key="edge_fill_editor",
-                            disabled=["_idx", "Bet", "Suggested $"],
-                            column_order=["Bet", "Book", "Odds", "Stake $", "Suggested $",
-                                          "Category", "Notes"],
-                            column_config={
-                                "Book": st.column_config.SelectboxColumn(
-                                    "Book (where you placed it)",
-                                    options=[_key_to_label[k] for k in _book_keys], required=True),
-                                "Odds": st.column_config.NumberColumn(
-                                    "Odds you got", step=1, format="%+d", required=True),
-                                "Stake $": st.column_config.NumberColumn(
-                                    "Stake you placed ($)", min_value=0.0, step=0.5,
-                                    format="%.2f", required=True),
-                                "Suggested $": st.column_config.NumberColumn(
-                                    "Suggested ($)", format="%.2f",
-                                    help="The board's shaded fractional-Kelly stake."),
-                                "Category": st.column_config.SelectboxColumn(
-                                    "Category", options=B.CATEGORIES, required=True,
-                                    help=" · ".join(f"{k}: {v}" for k, v in B.CATEGORY_HELP.items())),
-                                "Notes": st.column_config.TextColumn(
-                                    "Notes", help="Optional one-line pre-game thesis."),
-                            },
-                        )
+                    picks = st.multiselect("Pick the bets you placed — they log with the odds, model "
+                                           "probability, and Kelly stake already filled in",
+                                           list(logable.index), format_func=_label)
                     if st.button("Log selected bets", type="primary", disabled=not picks):
                         logged_sigs = st.session_state.setdefault("logged_sigs", set())
-                        n = skipped = invalid = no_id = 0
-                        for _, f in _edited.iterrows():
-                            i = f["_idx"]
+                        n = skipped = 0
+                        for i in picks:
                             r = logable.loc[i]
-                            sig = (date_str, r["Player"], r["Market"], r["Side"], float(r["Line"]))
+                            sig = (date_str, r["Player"], r["Market"], r["Side"],
+                                   float(r["Line"]), int(r["Price"]))
                             if sig in logged_sigs:
                                 skipped += 1
                                 continue
-                            try:
-                                price = int(f["Odds"])
-                                stake_placed = float(f["Stake $"])
-                            except (TypeError, ValueError):
-                                invalid += 1
-                                continue
-                            if -100 < price < 100:   # not a valid American price
-                                invalid += 1
-                                continue
-                            fields = QL.edge_board_bet_fields(
-                                r.to_dict(), date_str, _active.key,
-                                book=_label_to_key.get(f["Book"], O.canonical_book(f["Book"])),
-                                price=price, stake=stake_placed,
-                                category=f["Category"], notes=f.get("Notes"))
-                            if fields["player_id"] is None:
-                                no_id += 1
-                            B.add_bet(**fields)
+                            B.add_bet(slate_date=date_str, game=r.get("Game"), player=r["Player"],
+                                      market=r["Market"], side=r["Side"], line=float(r["Line"]),
+                                      entry_odds=int(r["Price"]), model_prob=float(r["ModelProb"]),
+                                      stake=float(r.get("Stake $", 0) or 0), book=r.get("Book"),
+                                      sport=_active.key)
                             logged_sigs.add(sig)
                             n += 1
-                        msg = f"Logged {n} bet(s) to the Bet Log at the prices you entered."
+                        msg = f"Logged {n} bet(s) to the Bet Log — settle them there after the games."
                         if skipped:
                             msg += f" Skipped {skipped} already logged this session."
-                        if invalid:
-                            msg += f" Skipped {invalid} with odds that aren't a valid American price."
                         st.success(msg)
-                        if no_id:
-                            st.caption(f"{no_id} of these had no player ID from the projection data, "
-                                       "so they'll need manual settlement in Bet Log.")
         else:
             st.info("No edges to show (no props matched, or all below the EV filter).")
  
@@ -742,6 +654,113 @@ st.caption("**Room** redirects the eye from raw certainty to actual opportunity:
            "rows are usually near-locks (no room), so the green here marks the **value zone** instead — "
            "where a model edge can exist *and* be bet. **Shaded %** previews a 5-point haircut. This is "
            "scouting only; confirm real edge against live prices on the Edge Board above.")
+
+
+# --- Log a Model Board pick (owner only) --------------------------------------
+# Live edges can log because every row there carries a real book price. Model Board rows don't,
+# so this asks for the price you actually got, re-prices the model at the line you bet, and
+# tags the row entry_odds_source="manual" -- see model_board_log.py for the reasoning.
+def _is_owner() -> bool:
+    try:
+        return st.secrets.get("AUDIENCE", "owner") == "owner"
+    except Exception:
+        return True   # no secrets file at all = local owner run, same default quick_log uses
+
+
+if _is_owner() and not view.empty:
+    with st.expander("📒 Log a Model Board pick (enter the price you got)"):
+        st.caption("For plays the live odds feed doesn't price. Pick the row, set the side, line and "
+                   "odds exactly as your book shows them, and the model re-prices at **your** line. "
+                   "Logged with entry source **manual** — it counts toward record, profit and "
+                   "calibration, but not the verified-price CLV figure, which only uses captured "
+                   "book prices.")
+        _mb_rows = view.head(400)
+
+        def _mb_label(r) -> str:
+            ln = r.get("Line")
+            ln_txt = "" if ln is None or pd.isna(ln) else f" {float(ln):g}"
+            when = r.get("Time (ET)") or ""
+            head = f"{when} · " if when else ""
+            return (f"{head}{r['Player']} · {r['Market']} {r['Side']}{ln_txt}"
+                    f"  (model {float(r['ModelProb']):.0%}, fair {float(r['FairAm']):+.0f})")
+
+        _mb_labels = {i: _mb_label(r) for i, r in _mb_rows.iterrows()}
+        _mb_pick = st.selectbox("Pick", list(_mb_labels), format_func=_mb_labels.get, key="mb_pick")
+        _mb_row = {k: (None if (not isinstance(v, (list, dict)) and pd.isna(v)) else v)
+                   for k, v in _mb_rows.loc[_mb_pick].to_dict().items()}
+
+        from odds_api import ALL_BOOKS as _MB_BOOKS, DEFAULT_BOOK as _MB_DEFAULT_BOOK
+        _mb_book_keys = list(_MB_BOOKS)
+        mc1, mc2, mc3, mc4 = st.columns(4)
+        with mc1:
+            _mb_book = st.selectbox("Book", _mb_book_keys, format_func=_MB_BOOKS.get,
+                                    index=_mb_book_keys.index(_MB_DEFAULT_BOOK)
+                                    if _MB_DEFAULT_BOOK in _mb_book_keys else 0,
+                                    key="mb_book")
+        with mc2:
+            _mb_side = st.selectbox("Side", [_mb_row["Side"], MBL.flip_side(_mb_row["Side"])],
+                                    key=f"mb_side_{_mb_pick}")
+        with mc3:
+            if _mb_row.get("Line") is None:
+                _mb_line = None
+                st.text_input("Line", value="— (yes/no market)", disabled=True, key=f"mb_line_{_mb_pick}")
+            else:
+                _mb_line = st.number_input("Line", value=float(_mb_row["Line"]), step=0.5,
+                                           key=f"mb_line_{_mb_pick}",
+                                           help="Change this to the number your book actually posted.")
+        with mc4:
+            _mb_odds = st.number_input("Odds you got (American)", value=int(round(float(_mb_row["FairAm"]))),
+                                       step=5, key=f"mb_odds_{_mb_pick}",
+                                       help="Pre-filled with the model's fair price only as a starting "
+                                            "point — overwrite it with your book's real price.")
+
+        _mb_prob, _mb_how = MBL.model_prob_for_bet(_mb_row, index, P, _mb_side, _mb_line,
+                                                   market_map=_active.market_map)
+        _mb_br = bankroll if api_key else st.number_input(
+            "Bankroll ($)", min_value=1.0, value=150.0, step=5.0, key="mb_bankroll",
+            help="Used only to suggest a quarter-Kelly stake (5-pt shade, 5% cap).")
+        _mb_valid_odds = _mb_odds <= -100 or _mb_odds >= 100
+        _mb_suggest = MBL.suggested_stake(_mb_prob, _mb_odds, _mb_br) if _mb_valid_odds else 0.0
+        _mb_ev = MBL.ev_at_price(_mb_prob, _mb_odds) if _mb_valid_odds else None
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Model % at your line", "—" if _mb_prob is None else f"{_mb_prob:.1%}",
+                  help={"board": "Same side and line as the board row.",
+                        "repriced": "Re-priced from the slate's own simulation at your line/side.",
+                        "board_only": "Board probability (this player/market isn't re-priceable).",
+                        "unavailable": "Can't re-price this player/market at a different line — "
+                                       "logged with no model probability rather than a guess."}[_mb_how])
+        m2.metric("EV at your price", "—" if _mb_ev is None else f"{_mb_ev:+.1f}%")
+        m3.metric("Suggested stake", f"${_mb_suggest:.2f}",
+                  help="Quarter-Kelly on the model % minus a 5-point shade, capped at 5% of bankroll. "
+                       "$0 means no edge left after shading.")
+
+        sc1, sc2 = st.columns([1, 2])
+        with sc1:
+            _mb_stake = st.number_input("Stake ($)", min_value=0.0, value=float(_mb_suggest), step=0.5,
+                                        key=f"mb_stake_{_mb_pick}_{_mb_side}_{_mb_line}_{_mb_odds}")
+        with sc2:
+            _mb_notes = st.text_input("Notes", key="mb_notes", placeholder="optional")
+
+        if not _mb_valid_odds:
+            st.warning("American odds must be -100 or lower, or +100 or higher.")
+        if st.button("Log this bet", type="primary", key="mb_log", disabled=not _mb_valid_odds):
+            _mb_fields = MBL.build_bet_fields(_mb_row, date_str=date_str, sport_key=_active.key,
+                                              side=_mb_side, line=_mb_line, entry_odds=int(_mb_odds),
+                                              stake=_mb_stake, book=_mb_book, model_prob=_mb_prob,
+                                              notes=_mb_notes)
+            _mb_sigs = st.session_state.setdefault("logged_sigs", set())
+            _mb_sig = MBL.signature(_mb_fields)
+            if _mb_sig in _mb_sigs:
+                st.info("Already logged this exact bet this session.")
+            else:
+                B.add_bet(**_mb_fields)
+                _mb_sigs.add(_mb_sig)
+                _settle = ("will auto-settle" if _mb_fields["player_id"] is not None
+                           else "no player ID, so settle it manually in Bet Log")
+                st.success(f"Logged {_mb_fields['player']} · {_mb_fields['market']} {_mb_side} "
+                           f"{'' if _mb_line is None else f'{_mb_line:g} '}@ {int(_mb_odds):+d} "
+                           f"for ${_mb_stake:.2f} — {_settle}.")
  
 with st.expander("How edge is computed (read me)"):
     st.markdown(

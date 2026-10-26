@@ -53,6 +53,65 @@ SLOT_STATS: Dict[str, Tuple[Tuple[str, str], ...]] = {
     "C": (("pts", "pts"), ("reb", "reb"), ("ast", "ast"), ("fg3m", "3PM")),
 }
 
+# --------------------------------------------------------------------------- absences -> role changes
+# Injury-report statuses that mean the player will not play. Questionable / doubtful are NOT here: those
+# players usually stay in the slot (the table already flags them), and guessing them out would be worse.
+OUT_STATUSES = frozenset({"out", "injured reserve", "ir", "suspended", "pup", "physically unable to perform",
+                          "nfi", "non-football injury", "reserve/injured", "inactive"})
+
+# Football slot groups in depth order: a position group's chart fills its slots top-down.
+FOOTBALL_SLOT_GROUPS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("QB", ("QB",)), ("RB", ("RB1", "RB2")), ("WR", ("WR1", "WR2", "WR3")), ("TE", ("TE1",)))
+BENCH_SHOWN = 2                # how many backups ride along as "Next up" behind each slot
+
+
+def is_out(status) -> bool:
+    return str(status or "").strip().lower() in OUT_STATUSES
+
+
+def promote_for_absences(by_group: Dict[str, List[Dict]],
+                         slot_groups: Sequence[Tuple[str, Sequence[str]]] = FOOTBALL_SLOT_GROUPS,
+                         bench: int = BENCH_SHOWN) -> Dict[str, List[Dict]]:
+    """A team's depth chart by position group (chart order, each {"pid","name","status"}) -> {slot: [occupant,
+    next up...]}, with players who are OUT skipped and everyone behind them moved up.
+
+    Why: a slot's defensive numbers describe what the defense allows to whoever FILLS that role. When the WR1
+    and WR2 are out, the old WR3 is tonight's WR1, so he has to be graded against the WR1 numbers, and his
+    own "lately" average (earned in a smaller role) understates his volume. Each promoted occupant carries a
+    "role_change" dict: {"from": his chart spot, e.g. "WR3", "for": the OUT player who held this slot, or None
+    when the slot opened because someone above him moved up}. The page shows it and lowers confidence.
+
+    "Next up" behind every slot is the first active players NOT already holding a slot in the group, so a
+    backup is visible at every position, not only QB / TE. A slot whose whole group is out still shows the
+    out starter (so the row doesn't silently vanish)."""
+    out: Dict[str, List[Dict]] = {}
+    for grp, slots in slot_groups:
+        players = list(by_group.get(grp) or [])
+        if not players:
+            continue
+        active = [p for p in players if not is_out(p.get("status"))]
+        reserves = active[len(slots):][:bench]
+        for i, slot in enumerate(slots):
+            if i < len(active):
+                occ = dict(active[i])
+                chart_i = players.index(active[i])
+                if chart_i != i:
+                    held_by = players[i] if i < len(players) else None
+                    occ["role_change"] = {"from": f"{grp}{chart_i + 1}",
+                                          "for": held_by.get("name") if held_by and is_out(held_by.get("status")) else None}
+                out[slot] = [occ] + [dict(p) for p in reserves]
+            elif not active and i == 0:
+                out[slot] = [dict(players[0])]          # whole group out: keep the out starter visible
+    return out
+
+
+def role_change_text(rc: Optional[Dict]) -> str:
+    """'↑ from WR3, for DeVonta Smith (out)' -- empty when there's no role change."""
+    if not rc:
+        return ""
+    return f"↑ from {rc['from']}" + (f", for {rc['for']} (out)" if rc.get("for") else "")
+
+
 THIN_SAMPLE_GAMES = 3          # a defense with fewer games than this at a slot is flagged as a thin sample
 MIN_GAMES_FOR_RANK = 3         # a defense needs this many games at a slot to be ranked at all
 MIN_TEAMS_FOR_RANK = 8         # below this many ranked defenses a rank / tier / league average means nothing
@@ -350,12 +409,14 @@ def matchup_rows(sport: str, depth: Dict[str, List[Dict]], defense_team: str,
         for pl in (depth.get(slot) or [])[:max_players]:
             players.append({
                 "name": pl.get("name"), "status": pl.get("status"), "note": pl.get("note"),
+                "role_change": pl.get("role_change"),
                 "recent": player_form(pgames, pl.get("pid"), sport),
                 "h2h": player_form(pgames, pl.get("pid"), sport, n=10, opp=defense_team),
             })
         allowed = d["pts"] if d else None
         rows.append({
             "slot": slot, "label": SLOT_LABEL.get(slot, slot), "players": players,
+            "role_change": players[0]["role_change"] if players else None,
             "rank": rank, "n_teams": n_ranked, "tier": tier(rank, n_ranked),
             "allowed": allowed, "league_avg": league,
             "vs_league_pct": None if not d or not league else (allowed - league) / league * 100.0,
@@ -723,13 +784,20 @@ def display_rows(rows: Sequence[Dict]) -> List[Dict]:
         first = pls[0] if pls else None
         rank_txt = "—" if not r["rank"] else f"{r['rank']}/{r['n_teams']}"
         vs = r["vs_league_pct"]
+        rc = r.get("role_change")
+        starter = _player_text(first) if first else "—"
+        if rc:
+            starter += f" {role_change_text(rc)}"
+        verdict = TIER_BADGE.get(r["tier"], "—")
+        if rc and verdict != "—":
+            verdict += " · ⚠️ new role"
         out.append({
             "Slot": r["slot"],
-            "Starter": _player_text(first) if first else "—",
-            "Last 4": _form_text(first["recent"]) if first else "—",
+            "Starter": starter,
+            "Last 4": (_form_text(first["recent"]) + (" (smaller role)" if rc and first["recent"] else "")) if first else "—",
             "vs this D": _form_text(first["h2h"]) if first else "—",
             "D rank (1 = softest)": rank_txt,
-            "Verdict": TIER_BADGE.get(r["tier"], "—"),
+            "Verdict": verdict,
             "Allowed / g": "—" if r["allowed"] is None else f"{r['allowed']:.1f}" + (" ⚠️ thin" if r["thin"] else ""),
             "League avg": "—" if r["league_avg"] is None else f"{r['league_avg']:.1f}",
             "vs league": "—" if vs is None else f"{vs:+.0f}%",
@@ -752,7 +820,9 @@ def callouts(side: Dict, off_name: str, def_name: str, limit: int = 3) -> Dict[s
                 f"allowing {r['allowed']:.1f} vs a {r['league_avg']:.1f} league average ({r['vs_league_pct']:+.0f}%)"
                 + (f"; he's averaging {p['recent']['avg']:.1f} lately" if p.get("recent") else "")
                 + (f"; {r['trend']}" if r["trend"] in ("▲ softer lately", "▼ tougher lately") else "")
-                + (f" [{p['status']}]" if p.get("status") else ""))
+                + (f" [{p['status']}]" if p.get("status") else "")
+                + (f" — ⚠️ role change: moves up {role_change_text(p['role_change'])[2:]}, so his recent numbers "
+                   f"come from a smaller role; lower confidence" if p.get("role_change") else ""))
         if r["tier"] == "Soft":
             soft.append((r["vs_league_pct"], text))
         elif r["tier"] == "Tough":

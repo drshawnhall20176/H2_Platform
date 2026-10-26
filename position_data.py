@@ -129,20 +129,10 @@ def football_depth_from_chart(chart_rows: Iterable[Dict], injuries: Optional[Dic
         seen.add(key)
         by_pos.setdefault(grp, []).append({"pid": r.get("gsis_id"), "name": r.get("player_name"),
                                            "status": clean_status(injuries.get(r.get("player_name")))})
-    out: Dict[str, List[Dict]] = {}
-    if by_pos.get("QB"):
-        out["QB"] = by_pos["QB"]
-    rbs = by_pos.get("RB", [])
-    if rbs:
-        out["RB1"] = rbs[:1]
-    if len(rbs) > 1:
-        out["RB2"] = rbs[1:2]
-    for i, slot in enumerate(("WR1", "WR2", "WR3")):
-        if len(by_pos.get("WR", [])) > i:
-            out[slot] = [by_pos["WR"][i]]
-    if by_pos.get("TE"):
-        out["TE1"] = by_pos["TE"][:2]
-    return out
+    # Players ruled OUT are skipped and everyone behind them moves up a slot, flagged as a role change --
+    # see position_matchups.promote_for_absences. With no one out this is plain chart order, as before,
+    # plus the next healthy backups as "Next up" behind every slot.
+    return PM.promote_for_absences(by_pos)
 
 
 def latest_depth_chart_rows(df, team: str) -> List[Dict]:

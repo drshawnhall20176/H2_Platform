@@ -607,3 +607,13 @@ def test_load_nfl_log_without_a_season_returns_an_empty_shell_with_a_note(fake_n
     monkeypatch.setattr(fake_nfl, "_infer_season", lambda d: None)
     d = PD.load_nfl_log("2026-10-07")
     assert d["allowed"] == {} and d["allowed_chart"] == {} and d["has_pbp"] is False and d["notes"]
+
+
+def test_depth_chart_with_two_receivers_out_grades_the_wr3_as_wr1():
+    rows = chart([("WR", 1, "Smith", "g1"), ("WR", 2, "Wicks", "g2"), ("WR", 3, "Lemon", "g3"), ("WR", 4, "Wilson", "g4"),
+                  ("RB", 1, "Barkley", "g5"), ("RB", 2, "Pierce", "g6"), ("RB", 3, "Shipley", "g7")])
+    d = PD.football_depth_from_chart(rows, {"Smith": "Out", "Wicks": "Out", "Barkley": "Questionable"})
+    assert d["WR1"][0]["name"] == "Lemon" and d["WR1"][0]["role_change"] == {"from": "WR3", "for": "Smith"}
+    assert d["WR2"][0]["name"] == "Wilson" and "WR3" not in d                  # only two healthy receivers on this chart
+    assert d["RB1"][0]["name"] == "Barkley" and d["RB1"][0]["status"] == "Questionable"
+    assert [p["name"] for p in d["RB1"][1:]] == ["Shipley"]                     # a backup now shows behind RB1 too
