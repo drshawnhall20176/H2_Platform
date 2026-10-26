@@ -138,7 +138,7 @@ def render_side(side, off_name, def_name):
         st.caption("Not enough defenses with a full sample to rank yet, so the table shows what this defense has "
                    "allowed per game without a league rank." if FAMILY == "basketball" and SPORT_KEY == "NCAAMB" else
                    "Not enough games yet to rank the defenses at these slots — try the other season option.")
-    co = PM.callouts(side, off_name, def_name)
+    co = PM.callouts(side, off_name, def_name, family=FAMILY)
     if co["targets"] or co["fades"]:
         left, right = st.columns(2)
         with left:
@@ -156,7 +156,9 @@ def render_side(side, off_name, def_name):
         st.caption("⚠️ **Role changes:** " + "; ".join(
             f"{r['players'][0]['name']} fills {r['slot']} ({PM.role_change_text(r['role_change'])})" for r in moved)
             + ". Players ruled out are skipped and the next man up is graded against the slot he's actually "
-              "filling. His *Last 4* comes from a smaller role, so treat these reads as lower confidence.")
+              "filling (**↑** in the table). His *Last 4* comes from a smaller role (**⚠️**), so treat these reads "
+              "as lower confidence. Targets and Fades skip anyone with under 2 recent games or barely any "
+              "production, and rank by how much of the slot a player will actually see.")
 
 
 @st.cache_data(ttl=900, show_spinner=False)

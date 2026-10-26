@@ -787,14 +787,14 @@ def display_rows(rows: Sequence[Dict]) -> List[Dict]:
         rc = r.get("role_change")
         starter = _player_text(first) if first else "—"
         if rc:
-            starter += f" {role_change_text(rc)}"
+            starter += f" ↑{rc['from']}"            # short in the cell; the full "for X (out)" is in the note below
         verdict = TIER_BADGE.get(r["tier"], "—")
         if rc and verdict != "—":
-            verdict += " · ⚠️ new role"
+            verdict += " ⚠️"
         out.append({
             "Slot": r["slot"],
             "Starter": starter,
-            "Last 4": (_form_text(first["recent"]) + (" (smaller role)" if rc and first["recent"] else "")) if first else "—",
+            "Last 4": (_form_text(first["recent"]) + (" ⚠️" if rc and first["recent"] else "")) if first else "—",
             "vs this D": _form_text(first["h2h"]) if first else "—",
             "D rank (1 = softest)": rank_txt,
             "Verdict": verdict,
@@ -808,14 +808,38 @@ def display_rows(rows: Sequence[Dict]) -> List[Dict]:
     return out
 
 
-def callouts(side: Dict, off_name: str, def_name: str, limit: int = 3) -> Dict[str, List[str]]:
-    """Plain-language targets and fades for one direction of a game, biggest gaps first. Only slots that
-    have a rank (enough defenses to compare) and a starter qualify."""
+# How much of a slot's softness a player in it can actually use. A defense that leaks to the WR3 is real,
+# but the WR3 sees a fraction of the WR1's targets, so a +35% WR3 matchup is worth less than a +10% WR1 one.
+# Ordering only -- the table's own rank / allowed / vs-league numbers are untouched.
+SLOT_ROLE_WEIGHT: Dict[str, float] = {"QB": 1.0, "RB1": 1.0, "RB2": 0.6, "WR1": 1.0, "WR2": 0.85, "WR3": 0.6, "TE1": 0.8}
+# A callout needs a player who has actually produced: at least this many recent games and this average.
+CALLOUT_MIN_GAMES = 2
+CALLOUT_MIN_AVG = {"football": 3.0, "basketball": 5.0}
+
+
+def callout_eligible(player: Dict, family: str = "football") -> bool:
+    """Too little evidence to name a player in Targets / Fades: fewer than CALLOUT_MIN_GAMES recent games or a
+    tiny average (a one-game WR5 at 1.2 points), or a promoted backup with no recent games at all. He stays in
+    the table -- he just isn't headlined. A player whose form is simply unknown (no game log loaded) and who
+    isn't a promotion keeps his callout, same as before."""
+    form = player.get("recent")
+    if form is None:
+        return not player.get("role_change")
+    return form.get("games", 0) >= CALLOUT_MIN_GAMES and form.get("avg", 0.0) >= CALLOUT_MIN_AVG.get(family, 0.0)
+
+
+def callouts(side: Dict, off_name: str, def_name: str, limit: int = 3, family: str = "football") -> Dict[str, List[str]]:
+    """Plain-language targets and fades for one direction of a game, best plays first. Only slots that have a
+    rank (enough defenses to compare) and a starter with real recent production qualify (callout_eligible).
+    Ordered by the defensive gap weighted by the slot's role (SLOT_ROLE_WEIGHT), so tonight's WR1 in a soft
+    spot outranks a deep backup who happens to fill a softer, lower-volume slot."""
     soft, tough = [], []
     for r in side["rows"]:
         if not r["rank"] or not r["players"] or r["vs_league_pct"] is None:
             continue
         p = r["players"][0]
+        if not callout_eligible(p, family):
+            continue
         text = (f"{p['name']} ({r['slot']}) — {def_name} rank {r['rank']}/{r['n_teams']} against the position, "
                 f"allowing {r['allowed']:.1f} vs a {r['league_avg']:.1f} league average ({r['vs_league_pct']:+.0f}%)"
                 + (f"; he's averaging {p['recent']['avg']:.1f} lately" if p.get("recent") else "")
@@ -823,10 +847,11 @@ def callouts(side: Dict, off_name: str, def_name: str, limit: int = 3) -> Dict[s
                 + (f" [{p['status']}]" if p.get("status") else "")
                 + (f" — ⚠️ role change: moves up {role_change_text(p['role_change'])[2:]}, so his recent numbers "
                    f"come from a smaller role; lower confidence" if p.get("role_change") else ""))
+        score = r["vs_league_pct"] * SLOT_ROLE_WEIGHT.get(r["slot"], 1.0)
         if r["tier"] == "Soft":
-            soft.append((r["vs_league_pct"], text))
+            soft.append((score, text))
         elif r["tier"] == "Tough":
-            tough.append((r["vs_league_pct"], text))
+            tough.append((score, text))
     soft.sort(key=lambda t: -t[0])
     tough.sort(key=lambda t: t[0])
     return {"targets": [t for _, t in soft[:limit]], "fades": [t for _, t in tough[:limit]]}

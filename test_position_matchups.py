@@ -573,12 +573,14 @@ def test_role_change_shows_in_table_callouts_and_lowers_confidence():
     pgames = table_inputs()
     al = PM.allowed_by_slot(pgames, "NFL")
     summ = PM.summarize(al, "NFL")
-    depth = PM.promote_for_absences({"WR": [_p("Star", "Out", 7), _p("Backup", None, 8)]})
+    depth = PM.promote_for_absences({"WR": [_p("Hurt", "Out", 99), _p("Backup", None, 7)]})    # pid 7 has 4 games of form
     rows = PM.matchup_rows("NFL", depth, "D9", summ, None, pgames)
     wr1 = {r["Slot"]: r for r in PM.display_rows(rows)}["WR1"]
-    assert wr1["Starter"] == "Backup ↑ from WR2, for Star (out)"
-    assert wr1["Verdict"].endswith("⚠️ new role")
+    assert wr1["Starter"] == "Backup ↑WR2"
+    assert wr1["Verdict"].endswith("⚠️")
     target = PM.callouts({"rows": rows}, "HOME", "D9")["targets"][0]
+    assert PM.callouts({"rows": PM.matchup_rows("NFL", PM.promote_for_absences(
+        {"WR": [_p("Hurt", "Out", 99), _p("NoForm", None, 8)]}), "D9", summ, None, pgames)}, "H", "D9")["targets"] == []
     assert "Backup (WR1)" in target and "role change" in target and "lower confidence" in target
 
 
@@ -586,3 +588,36 @@ def test_no_absences_means_no_role_change_text():
     assert PM.role_change_text(None) == ""
     d = PM.promote_for_absences({"WR": [_p("A"), _p("B")]})
     assert all("role_change" not in lst[0] for lst in d.values())
+
+
+# ------------------------------------------------------------------ callout ordering (MNF Eagles fix)
+def _co_row(slot, name, pct, avg, games, rc=None, tier_="Soft"):
+    return dict(slot=slot, rank=1, n_teams=32, tier=tier_, vs_league_pct=pct, allowed=10.0, league_avg=8.0,
+                trend="steady", players=[dict(name=name, status=None, h2h=None, role_change=rc,
+                                              recent=dict(avg=avg, games=games))])
+
+
+def test_tonights_wr1_outranks_a_one_game_wr5_in_a_softer_slot():
+    side = {"rows": [_co_row("QB", "McKee", 18, 12.6, 2), _co_row("RB2", "Pierce", 34, 9.1, 2),
+                     _co_row("WR1", "Lemon", 10, 6.5, 4, {"from": "WR3", "for": "Smith"}),
+                     _co_row("WR3", "Brown", 35, 1.2, 1, {"from": "WR5", "for": None})]}
+    names = [t.split(" (")[0] for t in PM.callouts(side, "PHI", "DAL")["targets"]]
+    assert "Brown" not in names                         # one game, 1.2 points: not a headline
+    assert "Lemon" in names                              # tonight's WR1 is listed, flagged as a role change
+    lemon = next(t for t in PM.callouts(side, "PHI", "DAL")["targets"] if t.startswith("Lemon"))
+    assert "role change" in lemon and "lower confidence" in lemon
+
+
+def test_role_weight_orders_dallas_side_as_before():
+    side = {"rows": [_co_row("WR2", "Pickens", 40, 16.5, 4), _co_row("WR1", "Lamb", 20, 19.6, 4),
+                     _co_row("QB", "Prescott", 13, 14.7, 4), _co_row("RB1", "Williams", 8, 19.2, 4)]}
+    assert [t.split(" (")[0] for t in PM.callouts(side, "DAL", "PHI")["targets"]] == ["Pickens", "Lamb", "Prescott"]
+
+
+def test_callout_eligibility_rules():
+    assert PM.callout_eligible({"recent": {"avg": 6.5, "games": 4}})
+    assert not PM.callout_eligible({"recent": {"avg": 1.2, "games": 1}})
+    assert not PM.callout_eligible({"recent": {"avg": 2.0, "games": 4}})          # barely produces: a fade on him isn't a bet
+    assert PM.callout_eligible({"recent": None})                                    # unknown form, not a promotion: kept
+    assert not PM.callout_eligible({"recent": None, "role_change": {"from": "WR4", "for": None}})
+    assert not PM.callout_eligible({"recent": {"avg": 4.0, "games": 3}}, "basketball")

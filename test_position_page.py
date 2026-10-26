@@ -599,5 +599,6 @@ def test_a_promoted_receiver_is_flagged_as_a_role_change_on_the_page(page):
     assert not at.exception, [e.value for e in at.exception]
     frames = [d.value for d in at.dataframe if "Starter" in d.value.columns]
     starters = " ".join(s for f in frames for s in f["Starter"])
-    assert "HomeWr ↑ from WR2, for Hurt (out)" in starters and "Hurt 🚫" not in starters
+    assert "HomeWr ↑WR2" in starters and "Hurt 🚫" not in starters
+    assert "HomeWr fills WR1 (↑ from WR2, for Hurt (out))" in texts(at)
     assert "Role changes:" in texts(at) and "lower confidence" in texts(at)
