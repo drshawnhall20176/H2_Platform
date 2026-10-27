@@ -62365,7 +62365,7 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401867913,8,40186791314,11,Long Island University,Stonehill,,,False,2,20
 2026,401867913,8,40186791315,12,Stonehill,Long Island University,,,False,2,78
 2026,401867913,8,40186791316,13,Long Island University,Stonehill,,,False,2,10
-2026,401867913,8,40186791318,14,Stonehill,Long Island University,,,True,3,56
+2026,401867913,8,40186791318,14,Stonehill,Long Island University,,,False,3,56
 2026,401867913,8,40186791320,15,Stonehill,Long Island University,,,True,3,58
 2026,401867913,8,40186791322,16,Long Island University,Stonehill,,,False,3,34
 2026,401867913,8,40186791323,17,Stonehill,Long Island University,,,False,3,62
@@ -62377,7 +62377,7 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401867913,8,40186791330,23,Stonehill,Long Island University,,,False,4,60
 2026,401867913,8,40186791331,24,Long Island University,Stonehill,,,False,4,71
 2026,401867913,8,40186791332,25,Stonehill,Long Island University,,,True,4,68
-2026,401867913,8,40186791334,26,Stonehill,Long Island University,,,False,4,65
+2026,401867913,8,40186791334,26,Long Island University,Stonehill,,,False,4,25
 2026,401867921,8,4018679212,1,Robert Morris,Mercyhurst,,,True,1,39
 2026,401867921,8,4018679214,2,Mercyhurst,Robert Morris,,,False,1,75
 2026,401867921,8,4018679215,3,Robert Morris,Mercyhurst,,,False,1,25
@@ -62424,6 +62424,7 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401867931,8,40186793130,19,Wagner,Duquesne,,,True,4,75
 2026,401867931,8,40186793132,20,Wagner,Duquesne,,,True,4,75
 2026,401867931,8,40186793134,21,Wagner,Duquesne,,,False,4,63
+2026,401867931,8,40186793135,22,Duquesne,Wagner,,,False,4,41
 2026,401867955,8,4018679552,1,Delaware State,North Carolina Central,,,False,1,42
 2026,401867955,8,4018679553,2,Delaware State,North Carolina Central,,,True,1,74
 2026,401867955,8,4018679555,3,North Carolina Central,Delaware State,,,False,1,75
@@ -62512,6 +62513,28 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401867994,8,40186799426,19,Holy Cross,Bucknell,,,True,4,68
 2026,401867994,8,40186799428,20,Bucknell,Holy Cross,,,False,4,80
 2026,401867994,8,40186799429,21,Holy Cross,Bucknell,,,False,4,15
+2026,401868003,8,4018680032,1,Richmond,Colgate,,,False,1,25
+2026,401868003,8,4018680033,2,Colgate,Richmond,,,False,1,79
+2026,401868003,8,4018680034,3,Richmond,Colgate,,,False,1,36
+2026,401868003,8,4018680035,4,Colgate,Richmond,,,True,1,88
+2026,401868003,8,4018680037,5,Richmond,Colgate,,,True,1,25
+2026,401868003,8,4018680039,6,Colgate,Richmond,,,True,1,87
+2026,401868003,8,40186800311,7,Richmond,Colgate,,,False,2,25
+2026,401868003,8,40186800312,8,Colgate,Richmond,,,False,2,69
+2026,401868003,8,40186800313,9,Richmond,Colgate,,,True,2,15
+2026,401868003,8,40186800315,10,Colgate,Richmond,,,False,2,80
+2026,401868003,8,40186800316,11,Richmond,Colgate,,,False,2,20
+2026,401868003,8,40186800317,12,Richmond,Colgate,,,True,2,77
+2026,401868003,8,40186800319,13,Colgate,Richmond,,,False,3,75
+2026,401868003,8,40186800320,14,Richmond,Colgate,,,False,3,47
+2026,401868003,8,40186800321,15,Colgate,Richmond,,,False,3,72
+2026,401868003,8,40186800322,16,Richmond,Colgate,,,False,3,20
+2026,401868003,8,40186800323,17,Colgate,Richmond,,,False,3,88
+2026,401868003,8,40186800324,18,Richmond,Colgate,,,False,4,16
+2026,401868003,8,40186800325,19,Colgate,Richmond,,,False,4,55
+2026,401868003,8,40186800326,20,Richmond,Colgate,,,False,4,27
+2026,401868003,8,40186800327,21,Colgate,Richmond,,,False,4,79
+2026,401868003,8,40186800328,22,Richmond,Colgate,,,False,4,65
 2026,401868013,8,4018680132,1,Lafayette,Fordham,,,False,1,65
 2026,401868013,8,4018680133,2,Fordham,Lafayette,,,False,1,7
 2026,401868013,8,4018680134,3,Lafayette,Fordham,,,False,1,63
@@ -62619,7 +62642,7 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401868080,8,40186808031,21,Cal Poly,Utah Tech,,,False,4,26
 2026,401868080,8,40186808032,22,Utah Tech,Cal Poly,,,True,4,9
 2026,401868080,8,40186808034,23,Cal Poly,Utah Tech,,,False,4,25
-2026,401868080,8,40186808035,24,Utah Tech,Cal Poly,,,False,4,79
+2026,401868080,8,40186808035,24,Utah Tech,Cal Poly,,,False,4,80
 2026,401868080,8,40186808036,25,Utah Tech,Cal Poly,,,True,4,24
 2026,401868080,8,40186808038,26,Cal Poly,Utah Tech,,,True,4,32
 2026,401868080,8,40186808040,27,Utah Tech,Cal Poly,,,False,4,44
@@ -62668,7 +62691,7 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401868106,8,40186810621,16,Portland State,Idaho State,,,False,2,50
 2026,401868106,8,40186810623,17,Portland State,Idaho State,,,True,3,75
 2026,401868106,8,40186810625,18,Idaho State,Portland State,,,False,3,17
-2026,401868106,8,40186810626,19,Portland State,Idaho State,,,False,3,68
+2026,401868106,8,40186810626,19,Portland State,Idaho State,,,False,3,78
 2026,401868106,8,40186810627,20,Idaho State,Portland State,,,True,3,1
 2026,401868106,8,40186810629,21,Portland State,Idaho State,,,False,3,55
 2026,401868106,8,40186810630,22,Idaho State,Portland State,,,False,3,8
@@ -62682,7 +62705,7 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401868121,8,4018681215,3,Montana State,Weber State,,,True,1,27
 2026,401868121,8,4018681217,4,Weber State,Montana State,,,True,1,75
 2026,401868121,8,4018681219,5,Montana State,Weber State,,,True,1,28
-2026,401868121,8,40186812111,6,Montana State,Weber State,,,True,2,35
+2026,401868121,8,40186812111,6,Weber State,Montana State,,,True,2,22
 2026,401868121,8,40186812112,7,Montana State,Weber State,,,True,2,24
 2026,401868121,8,40186812114,8,Weber State,Montana State,,,True,2,78
 2026,401868121,8,40186812116,9,Weber State,Montana State,,,True,2,65
@@ -62698,7 +62721,7 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401868121,8,40186812130,19,Weber State,Montana State,,,False,4,78
 2026,401868121,8,40186812131,20,Montana State,Weber State,,,True,4,12
 2026,401868121,8,40186812133,21,Weber State,Montana State,,,True,4,72
-2026,401868121,8,40186812135,22,Montana State,Weber State,,,False,4,57
+2026,401868121,8,40186812135,22,Montana State,Weber State,,,False,4,100
 2026,401868132,8,4018681322,1,Northern Colorado,UC Davis,,,False,1,75
 2026,401868132,8,4018681323,2,UC Davis,Northern Colorado,,,True,1,60
 2026,401868132,8,4018681325,3,Northern Colorado,UC Davis,,,False,1,75
@@ -62940,6 +62963,7 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401868266,8,40186826626,18,Marist,St. Thomas (MN),,,True,4,29
 2026,401868266,8,40186826628,19,St. Thomas (MN),Marist,,,True,4,44
 2026,401868266,8,40186826630,20,Marist,St. Thomas (MN),,,False,4,25
+2026,401868266,8,40186826631,21,St. Thomas (MN),Marist,,,False,4,80
 2026,401868271,8,4018682712,1,Stetson,Morehead State,,,False,1,75
 2026,401868271,8,4018682713,2,Morehead State,Stetson,,,True,1,23
 2026,401868271,8,4018682715,3,Stetson,Morehead State,,,False,1,75
