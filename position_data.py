@@ -481,8 +481,15 @@ def load_football(sport_key: str, date_str: str, home: str, away: str, use_previ
         notes.append("College football has no published depth-chart feed here, so depth is the usage ranking "
                      f"over each team's last {PM.RECENT_N} games.")
     meta_sched = sched if not use_previous_season else _safe(lambda: eng.get_schedule(stats_season), [], notes, "last season's schedule")
-    return build_bundle(sport_key, home, away, pgames, depth, _football_h2h_games(sport_key, eng, season), notes=notes,
-                        meta_games=football_meta_games(sport_key, meta_sched))
+    bundle = build_bundle(sport_key, home, away, pgames, depth, _football_h2h_games(sport_key, eng, season), notes=notes,
+                          meta_games=football_meta_games(sport_key, meta_sched))
+    import football_props as FP
+    roster = {}
+    for team in (home, away):
+        dep = fill_depth_from_usage(depth.get(team) or {}, PM.usage_depth(pgames, team, sport_key), sport_key)
+        roster[team] = FP.roster_from_depth(dep)
+    bundle["props"] = {"family": "football", "pgames": pgames, "roster": roster, "rest": {}}
+    return bundle
 
 
 def _nfl_depths(eng, season: int, week: int, teams: Tuple[str, str], notes: List[str]) -> Dict[str, Dict[str, List[Dict]]]:
@@ -631,9 +638,9 @@ def load_basketball(sport_key: str, date_str: str, home_id: int, away_id: int, h
     meta_games = [{"order": g.get("date"), "date": g.get("date"), "home": g.get("home"), "away": g.get("away"),
                    "home_score": g.get("home_score"), "away_score": g.get("away_score")} for g in games.values()]
     bundle = build_bundle(sport_key, home_id, away_id, pgames, depth, [], names=names, notes=notes, meta_games=meta_games)
-    bundle["props"] = {"pgames": pgames, "cur_pgames": cur_pgames, "prior_pgames": prior_pgames,
+    bundle["props"] = {"family": "basketball", "pgames": pgames, "cur_pgames": cur_pgames, "prior_pgames": prior_pgames,
                        "ranked_on_prior": sport_key == "NBA" and bool(prior_games) and set(games) <= set(prior_games),
-                       "rotation": rotation}
+                       "rotation": rotation, "rest": _rest_info(eng, (home_id, away_id), date_str, notes)}
     meetings = PM.h2h_meetings(h2h, home_name, away_name)
     summ = PM.h2h_summary(meetings, home_name, away_name)
     bundle["h2h"] = {"meetings": meetings, "summary": summ, "sentence": PM.h2h_sentence(summ, home_name, away_name)}
@@ -729,6 +736,82 @@ def _roster_positions(eng, game_lines: Dict[str, Dict], notes: List[str]) -> Dic
     return pos
 
 
+def _rest_info(eng, team_ids, date_str: str, notes: List[str]) -> Dict:
+    """{team id: {"rest_days", "is_back_to_back", ...}} -- days since each team's last game (1 = back-to-back)."""
+    out: Dict = {}
+    fn = getattr(eng, "get_team_rest_info", None)
+    if fn is None:
+        return out
+    for tid in team_ids:
+        out[tid] = _safe(lambda: fn(tid, date_str), {}, notes, "rest days") or {}
+    return out
+
+
+HOCKEY_GAMES_PER_TEAM = 10
+
+
+def load_hockey(date_str: str, home_id: int, away_id: int, home_name: str, away_name: str,
+                home_abbr: Optional[str] = None, away_abbr: Optional[str] = None) -> Dict:
+    """NHL bundle for one game: both teams' last 10 games (every skater's and goalie's line), the current
+    rosters (names, positions -- and who's still on the team), injuries, rest days and the meetings between the
+    two teams in that window. Player props only -- hockey has no slot-vs-defense table."""
+    import hockey_props as HP
+    import sports
+    eng = sports.get("NHL").engine
+    notes: List[str] = []
+    recent: Dict[int, List[Dict]] = {}
+    for tid in (home_id, away_id):
+        recent[tid] = _safe(lambda: eng.get_team_recent_game_ids(tid, date_str, HOCKEY_GAMES_PER_TEAM), [], notes,
+                            "recent games")
+    games: Dict[str, Dict] = {}
+    for tid, lst in recent.items():
+        for g in lst:
+            gid = str(g.get("gameId"))
+            at_home = g.get("home_away") != "away"
+            opp = _int_or(g.get("opp_id"))
+            games.setdefault(gid, {"date": (g.get("date") or "")[:10], "home": tid if at_home else opp,
+                                   "away": opp if at_home else tid, "home_score": g.get("score") if at_home else g.get("opp_score"),
+                                   "away_score": g.get("opp_score") if at_home else g.get("score")})
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        recs = list(ex.map(lambda gid: _safe(lambda: eng.get_game(gid), None, notes, "a box score"), list(games)))
+    for gid, rec in zip(list(games), recs):
+        games[gid]["rec"] = rec
+    names: Dict[int, Dict] = {}
+    on_roster: Dict[int, set] = {}
+    for tid in (home_id, away_id):
+        roster = _safe(lambda: eng.get_team_roster(tid), [], notes, "a roster")
+        on_roster[tid] = {p.get("id") for p in roster}
+        for p in roster:
+            names[p.get("id")] = {"name": p.get("name"), "pos": "G" if p.get("is_goalie") else p.get("pos")}
+    pgames = HP.pgames_from_games({g: v for g, v in games.items() if v.get("rec")}, names)
+    if not pgames:
+        notes.append("No NHL box scores found for these teams in the last few weeks yet.")
+    rotation, team_games = {}, {}
+    for tid, abbr in ((home_id, home_abbr), (away_id, away_abbr)):
+        inj = _injury_map(eng, abbr)
+        rot = HP.rotation(pgames, tid, inj)
+        if on_roster.get(tid):
+            rot = {k: [r for r in v if r["pid"] in on_roster[tid]] for k, v in rot.items()}
+        rotation[tid] = rot
+        team_games[tid] = [str(g.get("gameId")) for g in recent.get(tid) or []]
+    meetings_src = [{"date": g["date"], "home": g["home"], "away": g["away"], "home_score": g.get("home_score"),
+                     "away_score": g.get("away_score")} for g in games.values()
+                    if {g.get("home"), g.get("away")} == {home_id, away_id}]
+    meetings = PM.h2h_meetings(meetings_src, home_id, away_id)
+    summ = PM.h2h_summary(meetings, home_id, away_id)
+    for m in meetings:
+        for k in ("home", "away", "winner"):
+            m[k] = {home_id: home_name, away_id: away_name}.get(m.get(k), m.get(k))
+    notes.append("Hockey is Player props only here: each skater's ice time and rates over his team's last "
+                 f"{HOCKEY_GAMES_PER_TEAM} games, against what the opponent allows.")
+    return {"sport": "NHL", "metric": PM.METRIC_LABEL["hockey"], "home": home_id, "away": away_id,
+            "names": {home_id: home_name, away_id: away_name}, "notes": notes,
+            "games_sampled": (len(recent.get(home_id) or []), len(recent.get(away_id) or [])),
+            "h2h": {"meetings": meetings, "summary": summ, "sentence": PM.h2h_sentence(summ, home_name, away_name)},
+            "props": {"family": "hockey", "pgames": pgames, "rotation": rotation, "team_games": team_games,
+                      "rest": _rest_info(eng, (home_id, away_id), date_str, notes)}}
+
+
 # =========================================================================== the game list
 def list_games(sport_key: str, date_str: str) -> List[Dict]:
     """The games the page offers for `date_str`, chronological, each
@@ -769,5 +852,8 @@ def load_bundle(sport_key: str, date_str: str, game: Dict, use_previous_season: 
     """One call for the page: the bundle for one game from list_games()."""
     if PM.FAMILY_BY_SPORT[sport_key] == "football":
         return load_football(sport_key, date_str, game["home"], game["away"], use_previous_season)
+    if PM.FAMILY_BY_SPORT[sport_key] == "hockey":
+        return load_hockey(date_str, game["home_id"], game["away_id"], game["home"], game["away"],
+                           game.get("home_abbr"), game.get("away_abbr"))
     return load_basketball(sport_key, date_str, game["home_id"], game["away_id"], game["home"], game["away"],
                            game.get("home_abbr"), game.get("away_abbr"))

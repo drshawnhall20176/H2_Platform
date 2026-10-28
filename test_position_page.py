@@ -101,6 +101,9 @@ def games(slots=("2026-10-11T17:00:00Z",)):
 @pytest.fixture
 def page(monkeypatch):
     calls = {"bundle": []}
+    import quick_log
+    # The logging widget reads st.secrets, which AppTest doesn't have; tests that check logging patch it themselves.
+    monkeypatch.setattr(quick_log, "render_quick_log", lambda *a, **k: None)
 
     def run(sport="NFL", glist=None, ranked=True, session=None, bundle_fn=None, nfl_log=None):
         import streamlit as st
@@ -223,7 +226,7 @@ def test_long_slates_get_a_team_search(page):
 # ------------------------------------------------------------------ registration
 def test_the_page_is_registered_for_its_four_sports_and_owner_only():
     src = (Path(__file__).parent / "streamlit_app.py").read_text()
-    assert '"38": ("NFL", "NCAAF", "NBA", "NCAAMB")' in src
+    assert '"38": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL")' in src
     assert '"38": ("Position Matchups", "🧭", "position_matchups")' in src
     assert re.search(r'for k in \("7".*?"38"\):\s*\n\s*SECTION_OF\[k\] = "🔬 DEEP RESEARCH"', src, re.DOTALL)
     assert '"Position Matchups"}' in src.split("owner_only_titles = {")[1].split("}")[0] + "}"
@@ -680,3 +683,137 @@ def test_typing_a_line_gives_hit_rate_and_a_lean_and_offers_logging(monkeypatch,
     assert star["Line"] == 35.5 and star["Hit rate"] == "5/5" and "Over" in star["Lean"]
     assert logged and logged[-1][0]["Player"] == "Star Guard" and logged[-1][0]["Market"] == "PRA" \
         and logged[-1][0]["Line"] == 35.5 and logged[-1][0]["Side"] == "Over"
+
+
+# ------------------------------------------------------------------ Oct 28: props everywhere, game lines, SGP, Scorecard
+def football_props_bundle(sport="NFL", home="HOME0", away="AWAY0"):
+    import football_props as FP
+    b = synthetic_bundle(sport, home, away)
+    pg = []
+    for wk in (1, 2, 3, 4):
+        for team, opp in ((home, away + "x"), (away, home + "x")):
+            pg += [dict(game=f"{wk}-{team}", order=wk, team=team, opp=opp, pid=f"{team}-wr", name=f"{team} Wideout",
+                        pos="WR", stats=dict(tgt=8, rec=5, rec_yds=70)),
+                   dict(game=f"{wk}-{team}", order=wk, team=team, opp=opp, pid=f"{team}-rb", name=f"{team} Back",
+                        pos="RB", stats=dict(rush_att=18, rush_yds=80, tgt=3, rec=2, rec_yds=14, rush_td=1 if wk % 2 else 0))]
+    roster = {t: FP.roster_from_depth({"WR1": [{"pid": f"{t}-wr", "name": f"{t} Wideout"}],
+                                       "RB1": [{"pid": f"{t}-rb", "name": f"{t} Back"}]}) for t in (home, away)}
+    b["props"] = {"family": "football", "pgames": pg, "roster": roster, "rest": {}}
+    return b
+
+
+def test_nfl_gets_a_player_props_tab_with_volume_based_projections(page):
+    at = page("NFL", bundle_fn=lambda sport, g: football_props_bundle(sport, g["home"], g["away"]))
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.selectbox(key="pm_props_market_football").value == "Receiving Yards"
+    tables = [d.value for d in at.dataframe if "Projection" in d.value.columns]
+    assert tables and "Tgt" in tables[0].columns and any("Wideout" in x for x in tables[0]["Player"])
+    at.selectbox(key="pm_props_market_football").set_value("Rush Yards").run()
+    assert not at.exception
+    rush = [d.value for d in at.dataframe if "Projection" in d.value.columns][0]
+    assert "Carries" in rush.columns and all("Back" in x for x in rush["Player"])
+
+
+def test_typed_spread_and_total_flow_into_the_projections(page):
+    at = page("NBA", nba_games(), bundle_fn=lambda sport, g: props_bundle(sport))
+    before = [d.value for d in at.dataframe if "Projection" in d.value.columns][0].iloc[0]["Projection"]
+    spread_key = [n.key for n in at.number_input if n.key.startswith("pm_spread_")][0]
+    total_key = [n.key for n in at.number_input if n.key.startswith("pm_total_")][0]
+    at.number_input(key=spread_key).set_value(-3.0)
+    at.number_input(key=total_key).set_value(260.0).run()
+    assert not at.exception, [e.value for e in at.exception]
+    after = [d.value for d in at.dataframe if "Projection" in d.value.columns][0].iloc[0]["Projection"]
+    assert float(after) > float(before)
+    assert "Implied team totals" in texts(at)
+
+
+def test_loading_book_lines_fills_lines_prices_and_best_price(monkeypatch, page):
+    import best_bets_data as BBD
+    import props_odds as PO
+    monkeypatch.setattr(BBD, "get_odds_api_key", lambda: "k")
+    offers = [{"market": "player_points_rebounds_assists", "player": "Star Guard", "point": 40.5,
+               "over": {"draftkings": -110, "fanduel": -105}, "under": {"draftkings": -110, "fanduel": -115}}]
+    calls = []
+    monkeypatch.setattr(PO, "fetch_game", lambda *a, **k: calls.append(a) or
+                        {"offers": offers, "lines": {"spread_home": -4.5, "total": 228.5, "p_home": 0.64},
+                         "remaining": 480, "error": None})
+    at = page("NBA", nba_games(), bundle_fn=lambda sport, g: props_bundle(sport))
+    at.button(key="pm_props_load").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert calls and calls[0][4] == ["player_points_rebounds_assists"]
+    star = [d.value for d in at.dataframe if "Projection" in d.value.columns and
+            any("Star Guard" in x for x in d.value["Player"])][0].iloc[0]
+    assert star["Line"] == 40.5 and star["Over odds"] == -105 and "fanduel" in star["Best price"]
+    assert [n.value for n in at.number_input if n.key.startswith("pm_spread_")] == [-4.5]
+
+
+def test_book_line_problems_are_reported(monkeypatch, page):
+    import best_bets_data as BBD
+    monkeypatch.setattr(BBD, "get_odds_api_key", lambda: None)
+    at = page("NBA", nba_games(), bundle_fn=lambda sport, g: props_bundle(sport))
+    at.button(key="pm_props_load").click().run()
+    assert not at.exception and any("No Odds API key" in w.value for w in at.warning)
+
+
+def test_sgp_pricer_adds_legs_and_prices_them(page):
+    at = page("NBA", nba_games(), bundle_fn=lambda sport, g: props_bundle(sport))
+    game = at.selectbox(key="pm_game").value
+    at.session_state[f"pm_props_NBA_{game}_PRA_1"] = {"edited_rows": {0: {"Line": 35.5}, 1: {"Line": 17.5}},
+                                                       "added_rows": [], "deleted_rows": []}
+    at.run()
+    opts = at.multiselect(key="pm_sgp_pick_PRA").options
+    assert len(opts) == 2
+    at.multiselect(key="pm_sgp_pick_PRA").set_value(opts).run()
+    at.button(key="pm_sgp_add").click().run()
+    at.number_input(key="pm_sgp_price").set_value(150.0).run()
+    assert not at.exception, [e.value for e in at.exception]
+    labels = [m.label for m in at.metric]
+    assert "Hit chance" in labels and "EV at your price" in labels
+    at.button(key="pm_sgp_clear").click().run()
+    assert not at.exception and "0 legs" in " ".join(e.label for e in at.expander)
+
+
+def test_scorecard_runs_and_its_calibration_can_be_applied(page):
+    at = page("NBA", nba_games(), bundle_fn=lambda sport, g: props_bundle(sport))
+    at.button(key="pm_sc_run").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    t = texts(at)
+    assert "Graded player-games" in [m.label for m in at.metric] or "Not enough games" in t
+
+
+def nhl_bundle():
+    import hockey_props as HP
+    pg = []
+    for i in range(8):
+        d, g = f"2026-10-{10 + i:02d}", f"g{i}"
+        for team, opp, base in ((1, 2, 0), (2, 1, 10)):
+            pg.append(dict(game=g, order=d, team=team, opp=opp, pid=base + 1, name=f"Center {team}", pos="C", role="skater",
+                           stats=dict(toi=20, sog=4, g=i % 2, a=1, pts=1 + i % 2, blk=0.5)))
+            pg.append(dict(game=g, order=d, team=team, opp=opp, pid=base + 2, name=f"Defense {team}", pos="D", role="skater",
+                           stats=dict(toi=24, sog=2, g=0, a=1, pts=1, blk=2)))
+            pg.append(dict(game=g, order=d, team=team, opp=opp, pid=base + 9, name=f"Goalie {team}", pos="G", role="goalie",
+                           stats=dict(toi=60, saves=27, sa=30, ga=3, gs=True)))
+    rot = {t: HP.rotation(pg, t) for t in (1, 2)}
+    return {"sport": "NHL", "metric": "per-player props", "home": 1, "away": 2,
+            "names": {1: "Team 1", 2: "Team 2"}, "notes": ["Hockey note."], "games_sampled": (8, 8),
+            "h2h": {"meetings": [], "summary": {"games": 0}, "sentence": "No recent meetings."},
+            "props": {"family": "hockey", "pgames": pg, "rotation": rot, "team_games": {1: ["g7", "g6"], 2: ["g7", "g6"]},
+                      "rest": {1: {"rest_days": 1}, 2: {"rest_days": 3}}}}
+
+
+def test_nhl_page_is_props_head_to_head_and_scorecard_with_a_primer(page):
+    at = page("NHL", nba_games(), bundle_fn=lambda sport, g: nhl_bundle())
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.selectbox(key="pm_props_market_hockey").value == "Shots on Goal"
+    assert any("Ice time is volume" in i.value for i in at.info)
+    t = texts(at)
+    assert "back-to-back" in t and "Depth vs defense" not in t
+    tables = [d.value for d in at.dataframe if "Projection" in d.value.columns]
+    assert all("TOI" in t.columns for t in tables) and any("B2B" in n for t in tables for n in t["Notes"])
+    at.selectbox(key="pm_props_market_hockey").set_value("Saves").run()
+    assert not at.exception
+    saves = [d.value for d in at.dataframe if "Projection" in d.value.columns]
+    assert all(any("Goalie" in x for x in t["Player"]) for t in saves)
+    assert any("backup goalie likely" in n for t in saves for n in t["Notes"])         # team 1 played last night
+    at.button(key="pm_sc_run").click().run()
+    assert not at.exception, [e.value for e in at.exception]

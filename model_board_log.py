@@ -12,8 +12,8 @@ often the ones worth recording most.
 The fix keeps the Bet Log honest:
   * entry_odds is the price YOU type in from your book, never silently the model's fair price.
   * entry_odds_source is "manual", a third value next to "book" (captured by the Odds API) and
-    "model_fair" (quick_log's fallback). betlog.real_price_clv_summary only counts "book", so a
-    hand-typed price never inflates the "verified price" CLV number.
+    "model_fair" (quick_log's fallback). Since Oct 28 betlog.real_price_clv_summary counts "book" AND
+    "manual" (a typed price is a real price), and reports how many of each.
   * model_prob is re-evaluated AT THE LINE YOU BET (from the same Monte Carlo distribution the
     board was built from), not left at the default line's probability -- otherwise a bet at a
     different number would be graded against the wrong belief.

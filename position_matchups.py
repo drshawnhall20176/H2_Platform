@@ -30,11 +30,14 @@ FOOTBALL_SLOTS: Tuple[str, ...] = ("QB", "RB1", "RB2", "WR1", "WR2", "WR3", "TE1
 BASKETBALL_SLOTS: Tuple[str, ...] = ("G", "F", "C")
 SLOTS_BY_SPORT: Dict[str, Tuple[str, ...]] = {
     "NFL": FOOTBALL_SLOTS, "NCAAF": FOOTBALL_SLOTS, "NBA": BASKETBALL_SLOTS, "NCAAMB": BASKETBALL_SLOTS}
-FAMILY_BY_SPORT: Dict[str, str] = {"NFL": "football", "NCAAF": "football", "NBA": "basketball", "NCAAMB": "basketball"}
-SUPPORTED_SPORTS: Tuple[str, ...] = tuple(SLOTS_BY_SPORT)
+FAMILY_BY_SPORT: Dict[str, str] = {"NFL": "football", "NCAAF": "football", "NBA": "basketball", "NCAAMB": "basketball",
+                                   "NHL": "hockey"}
+# NHL is Player-props only (no slot-vs-defense ranking table): forwards / defense / goalies, see hockey_props.py.
+SUPPORTED_SPORTS: Tuple[str, ...] = tuple(SLOTS_BY_SPORT) + ("NHL",)
 
-METRIC_LABEL = {"football": "PPR-style fantasy points", "basketball": "points + rebounds + assists"}
-METRIC_SHORT = {"football": "Fantasy pts", "basketball": "PRA"}
+METRIC_LABEL = {"football": "PPR-style fantasy points", "basketball": "points + rebounds + assists",
+                "hockey": "per-player props (shots, points, goals, saves)"}
+METRIC_SHORT = {"football": "Fantasy pts", "basketball": "PRA", "hockey": "Props"}
 SLOT_LABEL = {"QB": "Quarterback", "RB1": "Running back 1", "RB2": "Running back 2", "WR1": "Wide receiver 1",
               "WR2": "Wide receiver 2", "WR3": "Wide receiver 3", "TE1": "Tight end 1",
               "G": "Guards", "F": "Forwards", "C": "Centers"}

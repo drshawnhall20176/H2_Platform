@@ -66,6 +66,9 @@ MARKETS = list(_active.market_map.keys()) + ["Other"] if _active.market_map else
 if _active.key in ("NBA", "WNBA", "NCAAMB"):
     import player_props as _PPR
     MARKETS = [m for m in _PPR.MARKETS if m not in MARKETS[:-1]] + MARKETS
+elif _active.key in ("NFL", "NCAAF"):                     # Position Matchups' football Player props markets
+    import football_props as _FP
+    MARKETS = [m for m in _FP.MARKETS if m not in MARKETS[:-1]] + [m for m in MARKETS if m not in _FP.MARKETS]
  
 # --- Log a bet --------------------------------------------------------------
 with st.expander("➕ Log a bet", expanded=False):

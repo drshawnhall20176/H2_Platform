@@ -129,7 +129,7 @@ def test_logged_row_uses_your_price_and_is_tagged_manual():
     assert f["player_id"] == 2544 and f["book"] == "draftkings" and f["sport"] == "NBA"
 
 
-def test_manual_price_is_excluded_from_verified_clv_but_kept_in_record():
+def test_manual_price_counts_toward_clv_and_is_reported_separately():
     with tempfile.TemporaryDirectory() as d:
         db = os.path.join(d, "bets.db")
         row = {"Player": "A", "Game": "X @ Y", "Market": "Points", "Side": "Over", "Line": 20.5,
@@ -141,7 +141,8 @@ def test_manual_price_is_excluded_from_verified_clv_but_kept_in_record():
         B.update_bet(bid, db_path=db, close_odds=-130, result="win")
         bets = B.list_bets(db_path=db)
         assert bets[0]["entry_odds_source"] == "manual"
-        assert B.real_price_clv_summary(bets)["n_real_price"] == 0
+        clv = B.real_price_clv_summary(bets)
+        assert clv["n_real_price"] == 1 and clv["n_manual"] == 1 and clv["n_book"] == 0 and clv["avg_clv"] > 0
         assert B.summary(bets)["wins"] == 1
 
 

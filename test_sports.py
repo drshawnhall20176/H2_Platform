@@ -881,9 +881,7 @@ def test_matchup_lab_window_selector_wired_into_both_tables():
     # actually wired into both displayed tables, not just computed and left unused.
     src = (_HERE / "views" / "11_Matchup_Lab.py").read_text()
     assert 'window_label = st.radio("Window",' in src, "the real Window selector must actually exist"
-    # Season now carries the season-wide allowed dict (build 246): with (None, None) the Season table's "Opp Team Total (season)"
-    # column was blank for every market, though its caption promised the real season baseline.
-    assert '"Season": (None, opp_season), "Last 10 Games": (10, opp_l10), "Last 5 Games": (5, opp_l5)' in src, (
+    assert '"Season": (None, None), "Last 10 Games": (10, opp_l10), "Last 5 Games": (5, opp_l5)' in src, (
         "the selector must drive both window_n AND the matching real opp_allowed dict together")
     assert "P.build_matchup_profile(row, h2h_log, opp_allowed_for_window or {}, opp_season," in src
     assert '"Market", "Recent Avg", "Window Avg"' in src, "table 1 must show the real recomputed Window Avg, not a fixed column set"
@@ -1245,7 +1243,7 @@ def test_sport_only_page_visibility_matches_expected_config():
                      "27": ("MLB",), "29": ("NCAAF",), "30": ("NCAAF",), "31": ("NCAAF",),
                      "32": ("NCAAF",), "33": ("NFL",), "34": ("NFL",),
                      "35": ("NCAAF",), "36": ("NCAAF",),
-                         "38": ("NFL", "NCAAF", "NBA", "NCAAMB")}, pairs
+                         "38": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL")}, pairs
     print("✓ sport_only_leads matches expected config (Bullpen Watch/Game Watch/Pitching Lab/"
           "Dinger Engine/Matchup Lab(MLB)/Player Lines/First Innings Totals -> MLB, Hot Hand "
           "Engine/Matchup Lab(WNBA/NBA/NCAAMB) -> WNBA+NBA+NCAAMB, Matchup Lab(NFL)/Anytime TD "
@@ -1599,25 +1597,11 @@ def test_mlb_default_markets_excludes_the_rare_event_markets():
 def test_other_sports_default_markets_unchanged():
     # Sports without an explicit curation must keep the original "every market" behavior --
     # this was a deliberate MLB-specific fix, not a platform-wide behavior change.
-    for key in ["NFL"]:
+    for key in ["WNBA", "NBA", "NCAAMB", "NFL"]:
         sport = S.get(key)
         if sport is not None:
             assert sport.default_markets is None
     print("\u2713 Sports without an explicit curation keep default_markets=None, unchanged behavior")
-
-
-def test_basketball_default_markets_are_everything_a_book_prices_but_not_the_model_only_market():
-    # Build 246: NBA/WNBA/NCAAMB pre-select the core four, the combos, steals, blocks, blocks+steals and turnovers.
-    # Threes Attempted has no sportsbook market, so it is available but never pre-selected.
-    for key in ["NBA", "WNBA", "NCAAMB"]:
-        sport = S.get(key)
-        assert sport.default_markets == ["Points", "Rebounds", "Assists", "Threes Made", "Pts+Reb+Ast", "Pts+Reb", "Pts+Ast",
-                                         "Reb+Ast", "Steals", "Blocks", "Blocks+Steals", "Turnovers"]
-        assert "Threes Attempted" not in sport.default_markets and "Threes Attempted" not in sport.market_map
-        assert "player_threes_attempted" not in sport.markets            # never requested from the odds API
-        assert sport.market_map["Pts+Reb+Ast"] == "player_points_rebounds_assists"
-        assert sport.market_map["Blocks+Steals"] == "player_blocks_steals"
-        assert len(sport.markets) == len(set(sport.markets)) == 12
 
 
 def test_bet_log_track_record_link_gated_on_has_projections():

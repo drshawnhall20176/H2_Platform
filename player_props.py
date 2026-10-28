@@ -15,14 +15,21 @@ PURE LOGIC, NO NETWORK (position_data.py loads; the page renders). Built to fix 
      Over / Under / no lean.
   5. Pace is flagged. Two fast, high-scoring teams inflate every counting-stat prop; that's called out per game.
 
-HONEST LIMITS: the probability is a normal approximation around the projection using the player's own game-to-game
-spread -- a guide, not a priced model; minutes, blowouts and overtime aren't modelled (pace is a flag, not an input).
+UPGRADED (Oct 28): projections are now opportunity-first and market-aware -- see props_engine.py: recency-weighted
+per-minute rate x projected minutes, next-man-up minutes/usage when a teammate is freshly ruled out, back-to-back /
+rest and blowout adjustments, the implied team total from the spread + total, count distributions for low-count
+markets, and a blend with the books' no-vig price when lines are loaded or typed.
+
+HONEST LIMITS: overtime isn't modelled, injury news is only as fresh as ESPN's report, and every adjustment size is
+a starting point the Scorecard tab checks against real results.
 """
 
 from __future__ import annotations
 
 import math
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+
+import props_engine as PE
 
 # Display name -> the box-score stats it sums. PRA first: it's the default market.
 MARKETS: Dict[str, Tuple[str, ...]] = {
@@ -50,9 +57,18 @@ MIN_MINUTES = 10.0         # rotation cut-off (average minutes)
 MAX_PLAYERS = 10
 LEAN_EDGE = 0.05           # projection must clear the line by 5% (and the probability agree) to call a lean
 PACE_FLAG_PCT = 4.0
-MIN_DEFENSES = 8           # a league average from fewer defenses than this isn't one (college: two teams only)        # a game total this far from the league average gets flagged
+MIN_DEFENSES = 8           # a league average from fewer defenses than this isn't one (college: two teams only)
 
 _OUT = {"out", "injured reserve", "ir", "suspended", "inactive"}
+
+# How each market is shaped: low counts get a negative binomial, totals a normal curve.
+DIST = {"Rebounds": "count", "Assists": "count", "Blocks": "count", "Steals": "count"}
+# How strongly each stat moves with a game's scoring environment (points fully, rebounds a little).
+ENV_WEIGHTS = {"pts": 1.0, "ast": 0.7, "reb": 0.4, "stl": 0.3, "blk": 0.3, "_default": 0.8}
+# The Odds API market key behind each market (Points + Blocks isn't posted there).
+ODDS_MARKETS = {"Points": "player_points", "Rebounds": "player_rebounds", "Assists": "player_assists",
+                "Blocks": "player_blocks", "Steals": "player_steals", "PRA": "player_points_rebounds_assists",
+                "PR": "player_points_rebounds", "PA": "player_points_assists", "RA": "player_rebounds_assists"}
 
 
 def _num(x) -> float:
@@ -90,15 +106,17 @@ def is_out(status) -> bool:
 
 
 # --------------------------------------------------------------------------- defense factor (fixes 2 + 3)
-def defense_allowed(allowed: Dict, market: str, min_games: int = 3) -> Dict[str, Dict[str, Dict]]:
+def defense_allowed(allowed: Dict, market: str, min_games: int = 3, value_fn=None) -> Dict[str, Dict[str, Dict]]:
     """position_matchups.allowed_by_slot output -> {defense: {slot: {"avg", "games"}}} of the MARKET allowed per game
-    to each position group, plus a "_league" entry {slot: average across defenses with >= min_games}."""
+    to each position group, plus a "_league" entry {slot: average across defenses with >= min_games}. `value_fn`
+    (stats -> number) replaces the basketball market sum (football / hockey markets)."""
+    value_fn = value_fn or (lambda st: market_value(st, market))
     out: Dict[str, Dict[str, Dict]] = {}
     for defense, games in (allowed or {}).items():
         per: Dict[str, Dict] = {}
         slots = {s for g in games for s in (g.get("slots") or {})}
         for slot in slots:
-            vals = [market_value((g.get("slots") or {}).get(slot) or {}, market) for g in games]
+            vals = [value_fn((g.get("slots") or {}).get(slot) or {}) for g in games]
             per[slot] = {"avg": sum(vals) / len(vals), "games": len(vals)}
         out[defense] = per
     league: Dict[str, float] = {}
@@ -148,51 +166,46 @@ def blended_factor(current: Optional[Tuple[float, int]], prior: Optional[Tuple[f
 
 
 # --------------------------------------------------------------------------- player form + the line read (fix 4)
-def player_values(pgames: Iterable[Dict], pid, market: str, n: int) -> List[float]:
+def _games(pgames, pid, n: int) -> List[Dict]:
+    """A player's games with minutes, newest first."""
     mine = [p for p in pgames or [] if p.get("pid") == pid and _num((p.get("stats") or {}).get("min")) > 0]
     mine.sort(key=lambda p: (p.get("order") is None, p.get("order")), reverse=True)
-    return [market_value(p.get("stats") or {}, market) for p in mine[:n]]
+    return mine[:n]
+
+
+def player_values(pgames: Iterable[Dict], pid, market: str, n: int) -> List[float]:
+    return [market_value(p.get("stats") or {}, market) for p in _games(pgames, pid, n)]
+
+
+def form_games(cur_pgames, prior_pgames, pid) -> Dict:
+    """His recent games (newest first): this season's, topped up from the end of last season when he has fewer
+    than FILL_BELOW this season (flagged). {"games", "season_games", "filled"}."""
+    cur = _games(cur_pgames, pid, HIT_N)
+    games, filled = list(cur), False
+    if len(cur) < FILL_BELOW:
+        extra = _games(prior_pgames, pid, HIT_N)
+        if extra:
+            games = cur + extra[: HIT_N - len(cur)]
+            filled = True
+    return {"games": games, "season_games": len(cur), "filled": filled}
 
 
 def form(cur_pgames, prior_pgames, pid, market: str) -> Dict:
-    """His recent values for the market, newest first: this season's games, topped up from the end of last season
-    when he has fewer than FILL_BELOW this season (flagged). {"values", "season_games", "filled"}."""
-    cur = player_values(cur_pgames, pid, market, HIT_N)
-    filled = False
-    vals = list(cur)
-    if len(cur) < FILL_BELOW:
-        extra = player_values(prior_pgames, pid, market, HIT_N)
-        if extra:
-            vals = cur + extra[: HIT_N - len(cur)]
-            filled = True
-    return {"values": vals, "season_games": len(cur), "filled": filled}
+    """His recent values for the market, newest first. {"values", "season_games", "filled"}."""
+    f = form_games(cur_pgames, prior_pgames, pid)
+    return {"values": [market_value(g.get("stats") or {}, market) for g in f["games"]],
+            "season_games": f["season_games"], "filled": f["filled"]}
 
 
 def prob_over(projection: float, values: Sequence[float], line: float) -> Optional[float]:
-    """P(stat > line), normal approximation around the projection with the player's own spread (floored, so a
-    three-game sample can't claim certainty). A rough guide, not a priced model."""
-    if line is None or projection is None:
-        return None
-    vals = list(values)
-    if len(vals) >= 2:
-        m = sum(vals) / len(vals)
-        sd = math.sqrt(sum((v - m) ** 2 for v in vals) / (len(vals) - 1))
-    else:
-        sd = 0.0
-    sd = max(sd, 0.25 * max(projection, 1.0), 1.0)
-    z = (threshold(line) - projection) / sd
-    return max(0.01, min(0.99, 0.5 * (1 - math.erf(z / math.sqrt(2)))))
+    """P(stat > line), normal approximation (kept for callers of the original API; the table uses
+    props_engine.prob_over with each market's own distribution)."""
+    return PE.prob_over(projection, values, line, "normal")
 
 
-def threshold(line: float) -> float:
-    """A whole-number line is an alt "N+" ladder line (DraftKings' 40+ means 40 or more), so it's cleared at N --
-    the continuity point is N - 0.5. A half line (39.5) is cleared above it."""
-    line = float(line)
-    return line - 0.5 if line == int(line) else line
-
-
-def clears(value: float, line: float) -> bool:
-    return value > threshold(line)
+threshold = PE.threshold
+clears = PE.clears
+american = PE.american
 
 
 def lean(projection: Optional[float], line: Optional[float], p_over: Optional[float]) -> str:
@@ -206,83 +219,145 @@ def lean(projection: Optional[float], line: Optional[float], p_over: Optional[fl
     return "No lean"
 
 
-def american(p: Optional[float]) -> Optional[int]:
-    if p is None or p <= 0 or p >= 1:
-        return None
-    return int(round(-100 * p / (1 - p))) if p >= 0.5 else int(round(100 * (1 - p) / p))
+def team_recent_games(pgames, team, n: int = PE.FRESH_OUT_GAMES) -> List:
+    """The team's most recent game ids, newest first."""
+    order: Dict = {}
+    for p in pgames or []:
+        if p.get("team") == team and p.get("game") is not None:
+            o = p.get("order")
+            order[p["game"]] = max(o, order.get(p["game"], o)) if o is not None else order.get(p["game"])
+    return sorted(order, key=lambda g: (order[g] is None, order[g]), reverse=True)[:n]
+
+
+def _component_shares(games: Sequence[Dict], market: str) -> Dict[str, float]:
+    return {k: sum(_num((g.get("stats") or {}).get(k)) for g in games) for k in MARKETS[market]}
+
+
+def _num_or_none(x):
+    return PE.maybe(x)
 
 
 def player_rows(rotation_list: Sequence[Dict], defense, market: str, cur_table: Dict, prior_table: Optional[Dict],
                 cur_pgames, prior_pgames, lines: Optional[Dict] = None, mode: str = "blend",
-                current_is_prior: bool = False) -> List[Dict]:
-    """One row per rotation player for `market` against `defense`. `lines` is {pid: line} typed by the user.
-    `current_is_prior` means the season table is really last season's (opening weeks) -- then it's used as the prior
-    and there's no separate this-season factor."""
+                current_is_prior: bool = False, context: Optional[Dict] = None) -> List[Dict]:
+    """One row per rotation player for `market` against `defense`.
+
+    projection = per-minute rate x projected minutes x matchup factor x game environment, where
+      * rate and minutes are recency weighted over his last 10 games (props_engine.rate_and_opportunity);
+      * a FRESH absence's minutes and usage go to teammates (props_engine.redistribute) -- the basketball
+        "next man up";
+      * rest (back-to-backs, a tired opponent) and blowout risk (big spreads) adjust minutes and rate;
+      * the game environment is the implied team total from the spread + total vs the team's normal scoring.
+
+    `lines` is {pid: line} typed by the user. `context` (all optional):
+      team, rest_days, opp_rest_days, spread (THIS team's, negative = favored), env (factor from
+      props_engine.env_factor), offers (the books' parsed player-prop offers), prices {pid: {"over","under"}}
+      typed by the user, slope (calibration), model_weight.
+    `current_is_prior` means the season table is really last season's (opening weeks)."""
     lines = lines or {}
-    rows = []
+    ctx = context or {}
+    prices = ctx.get("prices") or {}
+    odds_key = ODDS_MARKETS.get(market)
+    dist = DIST.get(market, "normal")
+    team_games = team_recent_games(cur_pgames, ctx.get("team")) if ctx.get("team") is not None else []
+
+    base = []
     for r in rotation_list:
+        f = form_games(cur_pgames, prior_pgames, r["pid"])
+        games = f["games"]
+        values = [market_value(g.get("stats") or {}, market) for g in games]
+        mins = [_num((g.get("stats") or {}).get("min")) for g in games]
+        rate, proj_min = PE.rate_and_opportunity(values, mins)
+        out = is_out(r.get("status"))
+        fresh = out and PE.fresh_absence([g.get("game") for g in _games(cur_pgames, r["pid"], HIT_N)], team_games)
+        base.append({"r": r, "f": f, "values": values, "games": games, "rate": rate, "proj_min": proj_min,
+                     "out": out, "fresh": fresh})
+    shifts = PE.redistribute([{"pid": b["r"]["pid"], "name": b["r"]["name"], "slot": b["r"]["slot"],
+                               "opp": b["proj_min"] or 0.0, "rate": b["rate"] or 0.0, "out": b["out"],
+                               "fresh": b["fresh"]} for b in base], cap=42.0)
+
+    rows = []
+    for b in base:
+        r = b["r"]
         slot = r["slot"]
         cur = None if current_is_prior else raw_factor(cur_table, defense, slot)
         pri = raw_factor(prior_table, defense, slot) if prior_table else (raw_factor(cur_table, defense, slot)
                                                                           if current_is_prior else None)
         fac = blended_factor(cur, pri, mode)
-        f = form(cur_pgames, prior_pgames, r["pid"], market)
-        recent = f["values"][:FORM_N]
-        avg = sum(recent) / len(recent) if recent else None
-        out = is_out(r.get("status"))
-        proj = None if (avg is None or out) else avg * fac["factor"]
-        line = lines.get(r["pid"])
-        try:
-            line = float(line) if line not in (None, "") and not (isinstance(line, float) and math.isnan(line)) else None
-        except (TypeError, ValueError):
-            line = None
-        p = prob_over(proj, f["values"], line) if (proj is not None and line is not None) else None
-        hits = [v for v in f["values"] if line is not None and clears(v, line)]
+        values = b["values"]
+        recent_avg = PE.wmean(values) if values else None
+        flags: List[str] = []
+        proj, opp = None, None
+        env_mult = 1.0
+        if not b["out"] and b["rate"] is not None:
+            sh = shifts.get(r["pid"], {"opp_add": 0.0, "rate_mult": 1.0, "from": []})
+            opp = (b["proj_min"] or 0.0) + sh["opp_add"]
+            rate = b["rate"] * sh["rate_mult"]
+            if sh["from"]:
+                flags.append("↑ usage bump (" + ", ".join(n for n in sh["from"] if n) + " out)")
+            rest = PE.rest_effect(ctx.get("rest_days"), ctx.get("opp_rest_days"), r["avg_min"], "basketball")
+            blow = PE.blowout_effect(ctx.get("spread"), r["avg_min"], "basketball")
+            opp *= rest["opp_mult"] * blow["opp_mult"]
+            rate *= rest["rate_mult"]
+            flags += rest["flags"] + blow["flags"]
+            env_mult = PE.env_multiplier(ctx.get("env"), _component_shares(b["games"], market), ENV_WEIGHTS)
+            proj = rate * opp * fac["factor"] * env_mult
+        if b["f"]["filled"]:
+            flags.append("form incl. last season")
+        if b["out"] and not b["fresh"]:
+            flags.append("already out — teammates' numbers include it")
+
+        typed_line = lines.get(r["pid"])
+        line = _num_or_none(typed_line)
+        line_src = "typed" if line is not None else None
+        book = None
+        if odds_key and ctx.get("offers"):
+            mine = PE.offers_for(ctx["offers"], r["name"], odds_key)
+            book = PE.shop(mine, line) if line is not None else PE.shop(mine)
+            if line is None and book:
+                line, line_src = book["line"], "book"
+        typed = prices.get(r["pid"]) or {}
+        t_over, t_under = _num_or_none(typed.get("over")), _num_or_none(typed.get("under"))
+        if t_over is not None or t_under is not None:
+            over_p, under_p, price_src, p_mkt = t_over, t_under, "manual", None
+        elif book:
+            over_p = book["best_over"][1] if book.get("best_over") else None
+            under_p = book["best_under"][1] if book.get("best_under") else None
+            price_src, p_mkt = "book", book.get("p_market")
+        else:
+            over_p = under_p = price_src = p_mkt = None
+        read = PE.read_line(proj, values, line, dist, over_p, under_p, p_mkt, ctx.get("slope", 1.0),
+                            ctx.get("model_weight", PE.MODEL_WEIGHT))
+        hits = [v for v in values if line is not None and clears(v, line)]
         rows.append({
-            "pid": r["pid"], "player": r["name"], "slot": slot, "status": r.get("status"), "out": out,
-            "avg_min": r["avg_min"], "recent_avg": avg, "games": len(recent), "season_games": f["season_games"],
-            "filled": f["filled"], "factor": fac["factor"], "season_weight": fac["season_weight"],
-            "basis": fac["basis"], "projection": proj, "line": line,
-            "hit": (len(hits), len(f["values"])) if line is not None and f["values"] else None,
-            "p_over": p, "lean": lean(proj, line, p),
+            "pid": r["pid"], "player": r["name"], "slot": slot, "status": r.get("status"), "out": b["out"],
+            "avg_min": r["avg_min"], "opp": opp, "recent_avg": recent_avg, "form": recent_avg,
+            "games": len(values), "season_games": b["f"]["season_games"], "filled": b["f"]["filled"],
+            "factor": fac["factor"], "season_weight": fac["season_weight"], "basis": fac["basis"],
+            "env": env_mult, "projection": proj, "line": line, "line_src": line_src,
+            "over_price": over_p, "under_price": under_p, "price_src": price_src, "book": book,
+            "hit": (len(hits), len(values)) if line is not None and values else None,
+            "p_model": read["p_model"], "p_market": read["p_market"], "p_final": read["p_final"],
+            "p_over": read["p_final"], "side": read["side"], "ev": read["ev"], "lean": read["lean"],
+            "flags": flags, "dist": dist,
         })
     return rows
 
 
 def display(rows: Sequence[Dict]) -> List[Dict]:
-    """Rows -> table strings. 'Line' stays numeric (it's the editable column)."""
-    out = []
-    for r in rows:
-        status = f" 🚫 {r['status']}" if r["out"] else (f" ⚠️ {r['status']}" if r.get("status") else "")
-        fac = r["factor"] - 1
-        out.append({
-            "Player": f"{r['player']}{status}",
-            "Pos": r["slot"],
-            "Min": f"{r['avg_min']:.0f}",
-            "Last 5": "—" if r["recent_avg"] is None else
-                      f"{r['recent_avg']:.1f} ({r['games']} g{', incl. last season' if r['filled'] else ''})",
-            "Matchup": f"{fac:+.0%}",
-            "Projection": "—" if r["projection"] is None else f"{r['projection']:.1f}",
-            "Line": r["line"],
-            "Hit rate": "—" if not r["hit"] else f"{r['hit'][0]}/{r['hit'][1]}",
-            "P(over)": "—" if r["p_over"] is None else f"{r['p_over']:.0%}",
-            "Lean": {"Over": "🟢 Over", "Under": "🔴 Under", "No lean": "⚪ No lean"}.get(r["lean"], "—"),
-        })
-    return out
+    """Rows -> table strings (props_engine.display); 'Line' and the odds columns stay numeric (editable)."""
+    return PE.display(rows, "Min")
 
 
 def plays_for_log(rows: Sequence[Dict], market: str, game_label: str) -> List[Dict]:
-    """Rows with a line -> quick_log play dicts. Side follows the lean (Under only when the read is Under); the
-    probability is for that side; Fair is its no-vig price -- edit to the price you actually got in Bet Log."""
-    plays = []
-    for r in rows:
-        if r["line"] is None or r["p_over"] is None:
-            continue
-        side = "Under" if r["lean"] == "Under" else "Over"
-        p = r["p_over"] if side == "Over" else 1 - r["p_over"]
-        plays.append({"Player": r["player"], "PlayerId": r["pid"], "Game": game_label, "Market": market,
-                      "Side": side, "Line": r["line"], "ModelProb": round(p, 4), "Fair": american(p)})
-    return plays
+    """Rows with a line -> quick_log play dicts (see props_engine.plays_for_log)."""
+    return PE.plays_for_log([dict(r, p_final=r.get("p_final", r.get("p_over"))) for r in rows], market, game_label)
+
+
+def team_baseline(pgames, team) -> Optional[float]:
+    """The team's normal points per game in the sample (the yardstick an implied team total is read against)."""
+    ts = team_scoring(pgames).get(team)
+    return ts["for"] if ts else None
 
 
 # --------------------------------------------------------------------------- pace (fix 5)

@@ -623,3 +623,78 @@ def test_depth_chart_with_two_receivers_out_grades_the_wr3_as_wr1():
     assert d["WR2"][0]["name"] == "Wilson" and "WR3" not in d                  # only two healthy receivers on this chart
     assert d["RB1"][0]["name"] == "Barkley" and d["RB1"][0]["status"] == "Questionable"
     assert [p["name"] for p in d["RB1"][1:]] == ["Shipley"]                     # a backup now shows behind RB1 too
+
+
+# --------------------------------------------------------------------------- Oct 28: props data for every sport
+def test_load_football_carries_props_roster_and_player_games(fake_nfl):
+    b = PD.load_bundle("NFL", "2026-10-07", PD.list_games("NFL", "2026-10-07")[0])
+    props = b["props"]
+    assert props["family"] == "football" and props["pgames"]
+    home = props["roster"]["HOME"]
+    assert any(r["name"] == "HomeWr" and r["slot"] == "WR1" for r in home)
+
+
+def test_basketball_props_carry_each_teams_rest(basketball):
+    events = league_events()
+    fake = FakeBasketball(events)
+    mod = basketball("NBA", fake, scoreboard=events)
+    mod.get_team_rest_info = lambda tid, d: {"rest_days": 1 if tid == 1 else 2, "is_back_to_back": tid == 1}
+    b = PD.load_bundle("NBA", "2026-09-28", {"home_id": 1, "away_id": 2, "home": "Team One", "away": "Team Two",
+                                             "home_abbr": "T1", "away_abbr": "T2"})
+    assert b["props"]["family"] == "basketball" and b["props"]["rest"][1]["rest_days"] == 1
+
+
+class FakeNhl:
+    @staticmethod
+    def get_team_recent_game_ids(tid, before, n=10, days_back=45):
+        out = []
+        for i in range(6):
+            home = i % 2 == 0
+            out.append({"gameId": f"n{i}", "date": f"2026-10-{10 + i:02d}T23:00Z", "opp_id": str(2 if tid == 1 else 1),
+                        "opp_name": "x", "score": "3", "opp_score": "2", "home_away": "home" if (home == (tid == 1)) else "away"})
+        return list(reversed(out))[:n]
+
+    @staticmethod
+    def get_game(gid):
+        return {"final": True, "players": {
+            11: {"team_id": 1, "pos": "C", "role": "skater", "toi": 20.0, "g": 1, "a": 0, "pts": 1, "sog": 4, "blk": 0},
+            12: {"team_id": 1, "pos": "D", "role": "skater", "toi": 23.0, "g": 0, "a": 1, "pts": 1, "sog": 2, "blk": 2},
+            19: {"team_id": 1, "pos": "G", "role": "goalie", "toi": 60.0, "saves": 25, "sa": 27, "ga": 2, "gs": True},
+            21: {"team_id": 2, "pos": "C", "role": "skater", "toi": 18.0, "g": 0, "a": 1, "pts": 1, "sog": 3, "blk": 1},
+            29: {"team_id": 2, "pos": "G", "role": "goalie", "toi": 60.0, "saves": 30, "sa": 33, "ga": 3, "gs": True},
+            77: {"team_id": 2, "pos": "LW", "role": "skater", "toi": 15.0, "g": 0, "a": 0, "pts": 0, "sog": 1, "blk": 0}},
+            "teams": {}}
+
+    @staticmethod
+    def get_team_roster(tid):
+        return ([dict(id=11, name="Home Center", pos="C"), dict(id=12, name="Home D", pos="D"),
+                 dict(id=19, name="Home Goalie", pos="G", is_goalie=True)] if tid == 1 else
+                [dict(id=21, name="Away Center", pos="C"), dict(id=29, name="Away Goalie", pos="G", is_goalie=True)])
+
+    @staticmethod
+    def get_team_injuries(abbr):
+        return [dict(player="Home D", status="Day-To-Day")] if abbr == "H" else []
+
+    @staticmethod
+    def get_team_rest_info(tid, d):
+        return {"rest_days": 1 if tid == 1 else 3}
+
+
+def test_load_hockey_builds_lineups_goalies_rest_and_meetings(monkeypatch):
+    import sys, types, dataclasses
+    mod = types.ModuleType("test_position_data_fake_nhl")
+    for k in ("get_team_recent_game_ids", "get_game", "get_team_roster", "get_team_injuries", "get_team_rest_info"):
+        setattr(mod, k, getattr(FakeNhl, k))
+    monkeypatch.setitem(sys.modules, "test_position_data_fake_nhl", mod)
+    monkeypatch.setitem(sports.REGISTRY, "NHL", dataclasses.replace(sports.get("NHL"), engine_module="test_position_data_fake_nhl",
+                                                                   _engine=None))
+    b = PD.load_bundle("NHL", "2026-10-20", {"home_id": 1, "away_id": 2, "home": "Home Club", "away": "Away Club",
+                                             "home_abbr": "H", "away_abbr": "A"})
+    p = b["props"]
+    assert p["family"] == "hockey" and p["rest"][1]["rest_days"] == 1
+    home = p["rotation"][1]
+    assert [s["name"] for s in home["skaters"]] == ["Home D", "Home Center"] and home["skaters"][0]["status"] == "Day-To-Day"
+    assert home["goalies"][0]["name"] == "Home Goalie"
+    assert all(s["pid"] != 77 for s in p["rotation"][2]["skaters"])            # no longer on the roster: left out
+    assert b["h2h"]["summary"]["games"] == 6 and b["names"][1] == "Home Club"
+    assert p["team_games"][1][0] == "n5"
