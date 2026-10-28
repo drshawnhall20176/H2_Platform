@@ -129,3 +129,52 @@ def test_targets_and_fades_need_the_model_to_agree():
     assert len(PM.callouts({"rows": [row("Soft", 16.0, 1.06)]}, "MIA", "ATL", family="basketball")["targets"]) == 1
     assert PM.callouts({"rows": [row("Tough", -20.0, 1.01)]}, "MIA", "ATL", family="basketball")["fades"] == []
     assert len(PM.callouts({"rows": [row("Soft", 16.0, None)]}, "MIA", "ATL", family="basketball")["targets"]) == 1
+
+
+# --------------------------------------------------------------------------- Oct 28 Edgecombe retest
+def test_pricing_at_draftkings_uses_its_line_and_prices_but_the_consensus_probability():
+    offers = [{"market": "player_rebounds", "player": "VJ Edgecombe", "point": 5.5,
+               "over": {"draftkings": -125, "betrivers": 102}, "under": {"draftkings": -105, "betrivers": -130}},
+              {"market": "player_rebounds", "player": "VJ Edgecombe", "point": 6.5,
+               "over": {"fanduel": 120}, "under": {"fanduel": -150}}]
+    dk = PE.shop(offers, book="draftkings")
+    assert dk["line"] == 5.5 and dk["best_over"] == ("draftkings", -125) and dk["best_under"] == ("draftkings", -105)
+    best = PE.shop(offers)
+    assert best["best_over"] == ("betrivers", 102)
+    assert abs(dk["p_market"] - best["p_market"]) < 1e-12                     # consensus either way
+    gone = PE.shop(offers[1:], book="draftkings")
+    assert gone["missing_book"] and gone["best_over"] is None and gone["line"] == 6.5
+
+
+def test_a_combo_a_quarter_off_the_line_is_flagged_even_with_a_wide_spread():
+    vals = [24, 24, 14, 27, 30, 12, 35]                                         # PRA: wide game-to-game swings
+    assert PE.market_gap(27.3, vals, 20.5)["level"] == "big"                  # +33%: outright rule
+    assert PE.market_gap(23.7, [23, 32, 23, 22, 13, 26], 19.5)["level"] != "big"   # +22%, inside his swing
+
+
+def test_no_lean_when_his_own_hit_rate_contradicts_it():
+    threes = [5, 1, 0, 1, 0]                                                    # one big night, misses 1.5 otherwise
+    r = PE.read_line(2.1, threes, 1.5, "count", over_price=108, under_price=-140)
+    assert r["lean"] == "No lean"
+    ok = PE.read_line(2.1, [2, 3, 1, 2, 3], 1.5, "count", over_price=108, under_price=-140)
+    assert ok["lean"] in ("Over", "No lean")
+
+
+def test_a_player_who_missed_the_teams_last_game_gets_a_news_check_on_overs():
+    def g(game, d, pid, name, pts, reb):
+        return dict(game=game, order=d, team="PHI", opp="X", pid=pid, name=name, pos="SG",
+                    stats=dict(min=34, pts=pts, reb=reb, ast=3))
+    cur = [g("a", "2026-10-20", 5, "VJ Edgecombe", 9, 4), g("b", "2026-10-22", 5, "VJ Edgecombe", 11, 7),
+           g("c", "2026-10-24", 5, "VJ Edgecombe", 17, 13)]
+    cur += [g(x, d, 6, "Maxey", 30, 4) for x, d in (("a", "2026-10-20"), ("b", "2026-10-22"), ("c", "2026-10-24"),
+                                                     ("d", "2026-10-25"))]                 # PHI played the 25th without him
+    rot = [{"pid": 5, "name": "VJ Edgecombe", "slot": "G", "avg_min": 33, "status": None}]
+    row = PPR.player_rows(rot, "D", "Rebounds", {}, None, cur, [], lines={5: 5.5}, mode="season",
+                          context={"team": "PHI", "prices": {5: {"over": 102, "under": -130}}})[0]
+    assert row["returning"] and row["flags"][0].startswith("⚠️ Missed the team's last game")
+    assert row["lean"] == "Check news"
+    listed = PE.market_gaps([row], {5: "76ers"})
+    assert listed and "missed team's last game" in listed[0]["Why flagged"]
+    freed = PPR.player_rows(rot, "D", "Rebounds", {}, None, cur, [], lines={5: 5.5}, mode="season",
+                            context={"team": "PHI", "news_checked": True, "prices": {5: {"over": 102, "under": -130}}})[0]
+    assert freed["lean"] != "Check news" or freed["gap"] == "big"

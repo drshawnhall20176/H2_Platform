@@ -748,10 +748,15 @@ def test_loading_book_lines_fills_lines_prices_and_best_price(monkeypatch, page)
     star = [d.value for d in at.dataframe if "Projection" in d.value.columns and
             any("Star Guard" in x for x in d.value["Player"])][0].iloc[0]
     assert star["Line"] == "40.5" and star["Pick"].endswith("40.5") and star["Chance"] != "—" and star["Price"] != "—"
-    at.toggle(key="pm_props_edit").set_value(True).run()                       # edit mode shows every book price
+    assert "draftkings" in star["Price"]                                        # DraftKings is the default book
+    at.toggle(key="pm_props_edit").set_value(True).run()
     star = [d.value for d in at.dataframe if "Projection" in d.value.columns and
             any("Star Guard" in x for x in d.value["Player"])][0].iloc[0]
-    assert star["Line"] == 40.5 and star["Over odds"] == -105 and "fanduel" in star["Best price"]
+    assert star["Line"] == 40.5 and star["Over odds"] == -110 and "draftkings" in star["Best price"]
+    at.selectbox(key="pm_price_book").set_value("best").run()                  # best available across books
+    star = [d.value for d in at.dataframe if "Projection" in d.value.columns and
+            any("Star Guard" in x for x in d.value["Player"])][0].iloc[0]
+    assert star["Over odds"] == -105 and "fanduel" in star["Best price"]
     assert [n.value for n in at.number_input if n.key.startswith("pm_spread_")] == [-4.5]
 
 

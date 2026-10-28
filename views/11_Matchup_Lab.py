@@ -365,7 +365,8 @@ for _c in ("Window Prior", "Window Games"):
     if _c not in _pf.columns:
         _pf[_c] = None
 _stat_of = {"Points": "pts", "Rebounds": "reb", "Assists": "ast", "Threes Made": "fg3m"}
-_pf["Position Matchup"] = [pos_factor.get(_stat_of.get(m)) for m in _pf["Market"]]
+_pf["Position Matchup"] = [("—" if pos_factor.get(_stat_of.get(m)) is None else f"{pos_factor[_stat_of[m]] - 1:+.0%}")
+                           for m in _pf["Market"]]   # text: st.dataframe ignores Styler callables
 pdf = _pf[["Market", "Recent Avg", "Window Avg", "Position Matchup", "H2H Avg", "H2H Games",
            "H2H Spread", "High Variance", "Suppressed"]]
 
@@ -392,8 +393,7 @@ elif window_n is not None and _games_used and _games_used < window_n:
 pdf = pdf.rename(columns={"Window Avg": _window_col_label, "Recent Avg": "Form"})
 st.markdown(f"**{row['Player']} — recent form, {window_label.lower()}, and this matchup**")
 st.dataframe(
-    pdf.style.format({"Form": "{:.1f}", _window_col_label: "{:.1f}", "H2H Avg": "{:.1f}",
-                      "Position Matchup": lambda v: "—" if v is None or v != v else f"{v - 1:+.0%}"}, na_rep="—"),
+    pdf.style.format({"Form": "{:.1f}", _window_col_label: "{:.1f}", "H2H Avg": "{:.1f}"}, na_rep="—"),
     hide_index=True, width="stretch",
 )
 _window_phrase = {None: "the full season so far", 10: "the last 10 games", 6: "the last 6 games",

@@ -307,6 +307,12 @@ def player_rows(rotation_list: Sequence[Dict], defense, market: str, cur_table: 
             flags.append("form incl. last season")
         if b["out"] and not b["fresh"]:
             flags.append("already out — teammates' numbers include it")
+        # Missed his team's most recent game but isn't listed out tonight: likely returning from something (an
+        # injury, rest, illness). Minutes may be limited -- exactly what a low book line can be pricing.
+        my_games = {g.get("game") for g in _games(cur_pgames, r["pid"], HIT_N)}
+        returning = (not b["out"] and bool(team_games) and bool(my_games) and team_games[0] not in my_games)
+        if returning:
+            flags.insert(0, "⚠️ Missed the team's last game — returning? minutes may be limited")
 
         typed_line = lines.get(r["pid"])
         line = _num_or_none(typed_line)
@@ -314,7 +320,7 @@ def player_rows(rotation_list: Sequence[Dict], defense, market: str, cur_table: 
         book = None
         if odds_key and ctx.get("offers"):
             mine = PE.offers_for(ctx["offers"], r["name"], odds_key)
-            book = PE.shop(mine, line) if line is not None else PE.shop(mine)
+            book = PE.shop(mine, line, ctx.get("book")) if line is not None else PE.shop(mine, None, ctx.get("book"))
             if line is None and book:
                 line, line_src = book["line"], "book"
         typed = prices.get(r["pid"]) or {}
@@ -329,9 +335,12 @@ def player_rows(rotation_list: Sequence[Dict], defense, market: str, cur_table: 
             over_p = under_p = price_src = p_mkt = None
         read = PE.read_line(proj, values, line, dist, over_p, under_p, p_mkt, ctx.get("slope", 1.0),
                             ctx.get("model_weight", PE.MODEL_WEIGHT), news_checked=bool(ctx.get("news_checked")))
+        if returning and read["lean"] == "Over" and not ctx.get("news_checked"):
+            read["lean"] = "Check news"
         hits = [v for v in values if line is not None and clears(v, line)]
         rows.append({
             "pid": r["pid"], "player": r["name"], "slot": slot, "status": r.get("status"), "out": b["out"],
+            "returning": returning,
             "avg_min": r["avg_min"], "opp": opp, "recent_avg": recent_avg, "form": recent_avg,
             "games": len(values), "season_games": b["f"]["season_games"], "filled": b["f"]["filled"],
             "factor": fac["factor"], "season_weight": fac["season_weight"], "basis": fac["basis"],

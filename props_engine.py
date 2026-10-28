@@ -56,6 +56,12 @@ CALIBRATION_RANGE = (0.3, 1.3)
 # time, who was right on these -- the model or the market.
 GAP_PCT = 0.20
 GAP_Z = 1.0
+GAP_PCT_OUTRIGHT = 0.25
+# A lean the player's own recent results flatly contradict isn't one: Over when he's cleared the line in a quarter
+# or fewer of his recent games (Under when he's cleared it in three quarters or more) -- one big night shouldn't
+# drag the average over a line he usually misses.
+HIT_CONFLICT = 0.25
+HIT_CONFLICT_MIN_GAMES = 4
 GAP_MODEL_WEIGHT = 0.20
 GAP_TAG = "market-gap"
 
@@ -279,34 +285,51 @@ def _book_count(o: Dict) -> int:
     return len(set(o.get("over") or {}) | set(o.get("under") or {}))
 
 
-def shop(player_offers: Sequence[Dict], line: Optional[float] = None) -> Optional[Dict]:
+def shop(player_offers: Sequence[Dict], line: Optional[float] = None, book: Optional[str] = None) -> Optional[Dict]:
     """The books' read on one player market. Without `line`: the MAIN line (posted by the most books, then the
     most balanced). With `line`: that exact line, or None when no book posts it.
 
+    `book` (e.g. "draftkings"): price everything AT THAT BOOK -- its own line (its most balanced one when it
+    posts several) and its own over / under prices. The no-vig probability stays the all-books consensus at that
+    line (the sharpest read of the market). When the book doesn't post this player, the consensus line is
+    returned with no prices and "missing_book": True.
+
     {"line", "best_over": (book, price) | None, "best_under": ..., "p_market": no-vig consensus P(over)
-     (each book de-vigged, then averaged), "books": count}"""
+     (each book de-vigged, then averaged), "books": count, "book": book | None, "missing_book": bool}"""
     pool = list(player_offers or [])
     if line is not None:
         pool = [o for o in pool if maybe(o.get("point")) is not None and abs(float(o["point"]) - float(line)) < 1e-9]
     if not pool:
         return None
 
-    def balance(o):
-        p = market_prob(*(lambda bo, bu: (bo[1] if bo else None, bu[1] if bu else None))(
-            best_price(o.get("over") or {}), best_price(o.get("under") or {})))
+    def balance(o, only=None):
+        ov, un = o.get("over") or {}, o.get("under") or {}
+        if only:
+            ov, un = {k: v for k, v in ov.items() if k == only}, {k: v for k, v in un.items() if k == only}
+        bo_, bu_ = best_price(ov), best_price(un)
+        p = market_prob(bo_[1] if bo_ else None, bu_[1] if bu_ else None)
         return -abs((p if p is not None else 0.0) - 0.5)
 
-    o = max(pool, key=lambda x: (_book_count(x), balance(x)))
+    at_book = [o for o in pool if book and (book in (o.get("over") or {}) or book in (o.get("under") or {}))]
+    if at_book:
+        o = max(at_book, key=lambda x: balance(x, book))
+    else:
+        o = max(pool, key=lambda x: (_book_count(x), balance(x)))
     over, under = o.get("over") or {}, o.get("under") or {}
     per_book = [devig(over[b], under[b]) for b in set(over) & set(under)]
     per_book = [p for p in per_book if p is not None]
-    bo, bu = best_price(over), best_price(under)
+    if book:
+        bo = (book, over[book]) if book in over and at_book else None
+        bu = (book, under[book]) if book in under and at_book else None
+    else:
+        bo, bu = best_price(over), best_price(under)
     if per_book:
         p_mkt = sum(per_book) / len(per_book)
     else:
-        p_mkt = market_prob(bo[1] if bo else None, bu[1] if bu else None)
+        b_o, b_u = best_price(over), best_price(under)
+        p_mkt = market_prob(b_o[1] if b_o else None, b_u[1] if b_u else None)
     return {"line": float(o["point"]), "best_over": bo, "best_under": bu, "p_market": p_mkt,
-            "books": _book_count(o)}
+            "books": _book_count(o), "book": book, "missing_book": bool(book) and not at_book}
 
 
 # --------------------------------------------------------------------------- 4b. the game environment
@@ -486,7 +509,7 @@ def read_line(projection: Optional[float], values: Sequence[float], line: Option
             e, side, price = max(cands)
             out.update(side=side, price=price, ev=e)
             agrees = above if side == "Over" else not above
-            out["lean"] = side if (e >= MIN_EV and agrees) else "No lean"
+            out["lean"] = side if (e >= MIN_EV and agrees and not _hit_conflict(values, line, side)) else "No lean"
             if out["gap"] == "big" and not news_checked and out["lean"] in ("Over", "Under"):
                 out["lean"] = "Check news"
             return out
@@ -494,13 +517,21 @@ def read_line(projection: Optional[float], values: Sequence[float], line: Option
     side = "Over" if above else "Under"
     out["side"] = side
     out["ev"] = None          # no real price (none typed, or only a pick'em app posts this line): no edge to show
-    if edge >= LEAN_EDGE and p >= LEAN_P:
+    if edge >= LEAN_EDGE and p >= LEAN_P and not _hit_conflict(values, line, "Over"):
         out["lean"] = "Over"
-    elif edge <= -LEAN_EDGE and p <= 1 - LEAN_P:
+    elif edge <= -LEAN_EDGE and p <= 1 - LEAN_P and not _hit_conflict(values, line, "Under"):
         out["lean"] = "Under"
     else:
         out["lean"] = "No lean"
     return out
+
+
+def _hit_conflict(values: Sequence[float], line: float, side: str) -> bool:
+    vals = list(values)
+    if len(vals) < HIT_CONFLICT_MIN_GAMES:
+        return False
+    rate = sum(1 for v in vals if clears(v, line)) / len(vals)
+    return rate <= HIT_CONFLICT if side == "Over" else rate >= 1 - HIT_CONFLICT
 
 
 def market_gap(projection: float, values: Sequence[float], line: float, dist: str = "normal",
@@ -515,7 +546,10 @@ def market_gap(projection: float, values: Sequence[float], line: float, dist: st
         sd = max(math.sqrt(v or 0.0), sd_floor_frac * max(projection, 1.0), sd_floor_abs)
     pct = (projection - thr) / thr if thr > 0 else 0.0
     z = (projection - thr) / sd if sd > 0 else 0.0
-    level = "big" if (abs(pct) >= GAP_PCT and abs(z) >= GAP_Z) else ("lean" if abs(z) >= 0.5 else "agree")
+    # Big when the line is a quarter or more off the projection outright, or a fifth off AND outside his usual
+    # game-to-game swing. (The outright rule stops high-variance combos -- PRA, PR -- slipping under the z test.)
+    level = ("big" if (abs(pct) >= GAP_PCT_OUTRIGHT or (abs(pct) >= GAP_PCT and abs(z) >= GAP_Z))
+             else ("lean" if abs(z) >= 0.5 else "agree"))
     return {"pct": pct, "z": z, "level": level}
 
 
@@ -711,6 +745,9 @@ def display_compact(rows: Sequence[Dict], details: bool = False, opp_label: str 
             pick = f"{side} {line:g}" if side else f"{line:g}"
             lean = LEAN_ICON.get(r.get("lean"), "—") if r.get("lean") != "No lean" else "⚪ No edge"
         flags = list(r.get("flags") or [])
+        bk = r.get("book") or {}
+        if bk.get("missing_book"):
+            flags.insert(0, f"not posted at {bk.get('book')}")
         if r.get("gap") == "big" and r.get("gap_pct") is not None:
             flags.insert(0, f"⚠️ Market disagrees: line {line:g} vs projection {r['projection']:.1f} "
                             f"({r['gap_pct']:+.0%}) — check minutes / role / injury news")
@@ -749,17 +786,26 @@ def best_reads(rows: Sequence[Dict], team_of: Dict, limit: int = 6) -> List[Dict
 
 
 def market_gaps(rows: Sequence[Dict], team_of: Dict) -> List[Dict]:
-    """Rows where the books and the model disagree by a lot -- the "check before betting" list."""
+    """The "check before betting" list: rows where the books and the model disagree by a lot, and players who
+    missed their team's last game (returning, maybe on a minutes limit) with an Over the model likes."""
     out = []
     for r in rows:
-        if r.get("gap") != "big" or r.get("projection") is None or r.get("line") is None:
+        big = r.get("gap") == "big"
+        back = bool(r.get("returning")) and r.get("lean") in ("Check news", "Over")
+        if not (big or back) or r.get("projection") is None or r.get("line") is None:
             continue
+        why = []
+        if big:
+            why.append("line far from projection")
+        if r.get("returning"):
+            why.append("missed team's last game")
+        sp = _side_prob(r)
         out.append({"Player": r["player"], "Team": team_of.get(r.get("pid"), ""),
                     "Line": f"{r['line']:g}", "Projection": f"{r['projection']:.1f}",
-                    "Gap": f"{r['gap_pct']:+.0%}",
-                    "Model says": f"{r['side']} ({_side_prob(r):.0%} after leaning on the market)"
-                    if _side_prob(r) is not None else "—",
+                    "Gap": "—" if r.get("gap_pct") is None else f"{r['gap_pct']:+.0%}",
+                    "Why flagged": " + ".join(why),
+                    "Model says": f"{r['side']} ({sp:.0%} after leaning on the market)" if sp is not None else "—",
                     "Status": "news checked — lean shown" if r.get("lean") in ("Over", "Under") else
                               ("⚠️ check news first" if r.get("lean") == "Check news" else "no value at this price")})
-    out.sort(key=lambda d: -abs(float(d["Gap"].rstrip("%"))))
+    out.sort(key=lambda d: -abs(float(d["Gap"].rstrip("%"))) if d["Gap"] != "—" else 0)
     return out

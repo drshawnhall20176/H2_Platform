@@ -556,6 +556,16 @@ def render_game_context(market: str) -> dict:
                             + _rest_text(home_name, _rest_days(bundle["home"])))
             else:
                 st.caption("Football is weekly — rest isn't a factor; the spread drives run/pass game script.")
+        _books = [b for b in O.books_in_offers(got.get("offers") or []) if b in O.US_BOOKS]
+        _book_opts = ["best"] + _books
+        _pref = st.session_state.get("pm_price_book", O.DEFAULT_BOOK)
+        price_book = st.selectbox(
+            "Price at", _book_opts, key="pm_price_book",
+            index=_book_opts.index(_pref) if _pref in _book_opts else (_book_opts.index(O.DEFAULT_BOOK)
+                                                                      if O.DEFAULT_BOOK in _book_opts else 0),
+            format_func=lambda b: "Best available (any book)" if b == "best" else O.book_label(b),
+            help="Whose line and prices to use. Your book (DraftKings by default) shows the number you can actually "
+                 "bet; the probability still leans on every book's consensus.")
         k1, k2 = st.columns(2)
         fitted = (st.session_state.get("pm_slope") or {}).get((SPORT_KEY, market))
         with k1:
@@ -574,7 +584,8 @@ def render_game_context(market: str) -> dict:
         st.caption(f"Implied team totals: **{away_name} {implied[1]:.1f}**, **{home_name} {implied[0]:.1f}**"
                    + (" — favored side runs more, underdog throws more." if PFAM == "football" else "."))
     return {"spread_home": spread, "total": total, "implied": implied, "offers": got.get("offers"),
-            "slope": fitted if (use_cal and fitted) else 1.0, "model_weight": w}
+            "slope": fitted if (use_cal and fitted) else 1.0, "model_weight": w,
+            "book": None if price_book == "best" else price_book}
 
 
 def render_props_team(team, opp, off_name, def_name, market, mode, tables, g):
@@ -584,7 +595,7 @@ def render_props_team(team, opp, off_name, def_name, market, mode, tables, g):
     opp_imp = (implied[1] if is_home else implied[0]) if implied else None
     spread_team = None if g["spread_home"] is None else (g["spread_home"] if is_home else -g["spread_home"])
     base_ctx = {"rest_days": _rest_days(team), "opp_rest_days": _rest_days(opp), "spread": spread_team,
-                "offers": g["offers"], "slope": g["slope"], "model_weight": g["model_weight"],
+                "offers": g["offers"], "slope": g["slope"], "model_weight": g["model_weight"], "book": g.get("book"),
                 "news_checked": bool(st.session_state.get("pm_news_checked"))}
     key = f"pm_props_{SPORT_KEY}_{game_label}_{market}_{team}"
     st.markdown(f"#### {off_name}  vs  {def_name} defense · {market}")

@@ -225,8 +225,9 @@ def player_rows(roster: Sequence[Dict], team, defense, market: str, pgames, allo
         book = None
         if ctx.get("offers") and m["odds"]:
             mine = PE.offers_for(ctx["offers"], r.get("name"), m["odds"])
-            book = PE.shop(mine, line) if line_src == "typed" else (PE.shop(mine) if market != "Anytime TD"
-                                                                    else PE.shop(mine, 0.5))
+            bk = ctx.get("book")
+            book = PE.shop(mine, line, bk) if line_src == "typed" else (PE.shop(mine, None, bk) if market != "Anytime TD"
+                                                                        else PE.shop(mine, 0.5, bk))
             if line_src is None and book:
                 line, line_src = book["line"], "book"
         tp = prices.get(key) or {}

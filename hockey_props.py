@@ -218,7 +218,7 @@ def player_rows(rot: Dict[str, List[Dict]], team, opp, market: str, pgames, line
         book = None
         if ctx.get("offers") and m["odds"]:
             mine = PE.offers_for(ctx["offers"], r.get("name"), m["odds"])
-            book = PE.shop(mine, line) if line is not None else PE.shop(mine)
+            book = PE.shop(mine, line, ctx.get("book")) if line is not None else PE.shop(mine, None, ctx.get("book"))
             if line is None and book:
                 line, line_src = book["line"], "book"
         tp = prices.get(key) or {}
