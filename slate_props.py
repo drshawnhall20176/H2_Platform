@@ -154,12 +154,15 @@ def play_from_row(row: Dict, slate_row: Optional[Dict] = None) -> Optional[Dict]
     side, p_final = sp["side"], sp["p_final"]
     p_mkt = sp["p_market"]
     lean = row.get("lean")
-    leaning = lean in ("Over", "Under") and lean == side
+    price = row.get("over_price") if side == "Over" else row.get("under_price")
+    # Graded only with a real sportsbook price for that side: without one there's no market to blend with, so the
+    # probability is the raw model's and can't be ranked against priced plays (pick'em-only lines stay on
+    # Position Matchups, unranked here).
+    leaning = lean in ("Over", "Under") and lean == side and price is not None
     if leaning and p_mkt and sp["p_model"] is not None and p_mkt > 0:
         conviction = round(max(sp["p_model"] / p_mkt, 1.0), 2)
     else:
         conviction = 1.0
-    price = row.get("over_price") if side == "Over" else row.get("under_price")
     bk = row.get("book") or {}
     best = bk.get("best_over") if side == "Over" else bk.get("best_under")
     s = slate_row or {}

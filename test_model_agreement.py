@@ -143,7 +143,8 @@ def test_pricing_at_draftkings_uses_its_line_and_prices_but_the_consensus_probab
     assert best["best_over"] == ("betrivers", 102)
     assert abs(dk["p_market"] - best["p_market"]) < 1e-12                     # consensus either way
     gone = PE.shop(offers[1:], book="draftkings")
-    assert gone["missing_book"] and gone["best_over"] is None and gone["line"] == 6.5
+    # DraftKings doesn't post him: the best price elsewhere, flagged (Oct 28 -- was: no price at all)
+    assert gone["missing_book"] and gone["best_over"] == ("fanduel", 120) and gone["line"] == 6.5
 
 
 def test_a_combo_a_quarter_off_the_line_is_flagged_even_with_a_wide_spread():

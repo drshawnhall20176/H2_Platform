@@ -60,12 +60,19 @@ def load_slate(date_str: str, stats_date_str: str):
     return rows, meta, team_abbrs
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def load_opp_allowed(opps: tuple, date_str: str) -> dict:
+    return {abbr: E.get_team_allowed_stats(abbr, date_str) for abbr in opps}
+
+
 def build_hh_board(rows: list, date_str: str):
+    """The board for the WHOLE slate in view (the date, or the week): "Slate Avg" is the average of every
+    opponent on it. The time-slot / game filters narrow the finished board (below) -- building from one game's
+    rows made its two defenses the whole "slate" and every factor a mirrored pair."""
     if not rows:
         return []
-    opps = sorted({r["Opp"] for r in rows if r.get("Opp")})
-    opp_allowed = {abbr: E.get_team_allowed_stats(abbr, date_str) for abbr in opps}
-    return P.build_hot_hand_board(rows, opp_allowed)
+    opps = tuple(sorted({r["Opp"] for r in rows if r.get("Opp")}))
+    return P.build_hot_hand_board(rows, load_opp_allowed(opps, date_str))
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -122,7 +129,9 @@ final_rows = slot_rows if game_pick == "All games in this slot" else [r for r in
 n_games = len({r["GameLabel"] for r in all_rows})
 
 with st.spinner("Building the matchup-adjusted board..."):
-    board = build_hh_board(final_rows, date_str)
+    board = build_hh_board(all_rows, date_str)
+_shown_games = {r["GameLabel"] for r in final_rows}
+board = [b for b in board if b.get("Game") in _shown_games]
 
 if not board:
     st.info("No projectable players for this date/week. Pick a date within an active NFL week.")

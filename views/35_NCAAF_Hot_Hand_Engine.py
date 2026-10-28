@@ -47,10 +47,18 @@ def load_slate(date_str: str, stats_date_str: str):
     return rows, meta
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def load_opp_allowed(opps: tuple, stats_date_str: str) -> dict:
+    return {opp: E.get_team_allowed_stats(opp, stats_date_str, n=None) for opp in opps}
+
+
 def build_board(rows: list, stats_date_str: str):
-    opps = sorted({r["Opp"] for r in rows if r.get("Opp")})
-    opp_allowed = {opp: E.get_team_allowed_stats(opp, stats_date_str, n=None) for opp in opps}
-    return P.build_ncaaf_hot_hand_board(rows, opp_allowed)
+    """The board for the WHOLE slate in view (the date, or the week): the "Slate Avg" every Matchup Factor is
+    measured against is the average of every opponent on that slate. Narrowing to a time slot or one game happens
+    AFTER this (see below) -- building from one game's rows made its two defenses the whole "slate", so every
+    factor came out as a mirrored pair (1.08x / 0.92x) that only said which of the two was worse."""
+    opps = tuple(sorted({r["Opp"] for r in rows if r.get("Opp")}))
+    return P.build_ncaaf_hot_hand_board(rows, load_opp_allowed(opps, stats_date_str))
 
 
 c1, c2 = st.columns([2, 1])
@@ -95,7 +103,9 @@ with c_game:
 final_rows = slot_rows if game_pick == "All games in this slot" else [r for r in slot_rows if r["GameLabel"] == game_pick]
 
 with st.spinner("Building matchup-adjusted board..."):
-    board = build_board(final_rows, stats_date_str)
+    board = build_board(all_rows, stats_date_str)
+_shown_games = {r["GameLabel"] for r in final_rows}
+board = [b for b in board if b.get("Game") in _shown_games]
 
 if not board:
     st.info(

@@ -252,3 +252,20 @@ def test_compact_view_orders_leans_first_and_never_leaves_a_cell_blank():
     reads = PE.best_reads(rows, {2: "ATL"})
     assert len(reads) == 1 and reads[0]["Team"] == "ATL" and reads[0]["Why"].startswith("projects 24.0")
     assert "Form" in PE.display_compact(rows, details=True)[0]
+
+
+def test_a_fresh_absence_bump_is_dampened_and_capped():
+    """Oct 28: the bumps ran far past the books (Jay Huff 7.6 -> 14.4). Only part of the minutes reach the rotation,
+    and no teammate's minutes jump more than 35% of his own or 8."""
+    players = [
+        {"pid": 1, "name": "Starter C", "slot": "C", "opp": 32, "rate": 0.5, "out": True, "fresh": True},
+        {"pid": 2, "name": "Backup C", "slot": "C", "opp": 15, "rate": 0.5, "out": False},
+        {"pid": 3, "name": "Guard", "slot": "G", "opp": 34, "rate": 0.6, "out": False},
+    ]
+    res = PE.redistribute(players, cap=42)
+    assert res[2]["opp_add"] <= min(PE.BUMP_MAX_ABS, PE.BUMP_MAX_FRAC * 15) + 1e-9      # 5.25, not ~19
+    assert res[3]["opp_add"] <= PE.BUMP_MAX_ABS + 1e-9
+    assert sum(r["opp_add"] for r in res.values()) <= 32 * PE.REDISTRIBUTE_SHARE + 1e-9
+    assert all(r["rate_mult"] <= 1 + PE.USAGE_RATE_CAP + 1e-9 for r in res.values())
+    proj = (15 + res[2]["opp_add"]) * 0.5 * res[2]["rate_mult"]
+    assert proj < 7.5 * 1.5                                                           # a bump, not a doubling

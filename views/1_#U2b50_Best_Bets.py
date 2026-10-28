@@ -240,7 +240,7 @@ if not mkt_pick:
     st.stop()
 
 view = [p for p in slot_plays if p["Market"] in mkt_pick and p["Conviction"] >= min_conv
-        and (not _props_model or p.get("Lean") in ("Over", "Under"))]
+        and (not _props_model or (p.get("Lean") in ("Over", "Under") and p["Conviction"] > 1.0))]
 _held = [p for p in slot_plays if p["Market"] in mkt_pick and p.get("Lean") == "Check news"]
 view = grading.filter_min_probability(view, min_prob_pct / 100.0)
 # A REAL, CONFIRMED FIX, not the original design -- re-sorted here by ModelProb (real
@@ -304,6 +304,9 @@ for p in view:
     # price; a plain "+138" with no marker is still the model's own independent estimate.
     if p.get("PriceSource") == "book" and p.get("RealPrice") is not None:
         p["_display_price"] = f"📊 {p['RealPrice']:+.0f}"
+        _bk = p.get("RealPriceBook")
+        if _props_model and _bk and preferred_book not in (None, "best") and _bk != preferred_book:
+            p["_display_price"] += f" ({BBD.O.book_label(_bk)})"     # your book doesn't post him
     else:
         p["_display_price"] = f"{p['Fair']:+.0f}" if p.get("Fair") is not None else "—"
 _cols = ["ModelProb", "Conviction", "Time", "Slot", "Player", "Team", "TeamTrend",
@@ -323,7 +326,8 @@ st.dataframe(df.style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×", "Pr
              width="stretch", hide_index=True, height=400)
 if _props_model:
     st.caption("🧭 Same model as **Position Matchups → Player props**: Projection, Model % (its Chance) and Side match "
-               "that page at the book's line. Only plays it leans on are listed; players without a book line aren't.")
+               "that page at the book's line. Only priced plays it leans on are listed. A price with a book name in "
+               "brackets is the best price elsewhere — your book doesn't post that player.")
     if _held:
         with st.expander(f"⚠️ Model vs the books — check the news before betting ({len(_held)})"):
             st.caption("The book's line is far from the projection — usually minutes, a role change or an injury the "

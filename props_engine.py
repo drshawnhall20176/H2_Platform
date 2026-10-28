@@ -44,7 +44,14 @@ ASSUMED_VIG = 0.045          # a single posted price with no other side: assume 
 ENV_RANGE = (0.88, 1.12)     # how far a game environment (implied team total vs normal) may move a projection
 REDISTRIBUTE_SAME_SLOT = 0.6 # share of an absent player's minutes that goes to his own position group
 USAGE_GAP_FILL = 0.5         # share of his remaining lost production picked up by teammates' higher usage
-USAGE_RATE_CAP = 0.15        # nobody's per-minute rate goes up more than 15% from one absence set
+USAGE_RATE_CAP = 0.10        # nobody's per-minute rate goes up more than 10% from one absence set
+# Toned down Oct 28: the books disagreed with most "next man up" bumps (Jay Huff form 7.6 -> projection 14.4,
+# Terrence Shannon 14.2 -> 20.5). Coaches don't hand an absent starter's minutes out in proportion -- some go
+# to the end of the bench, some to a lineup change -- so only part of them reaches the rotation, and no one
+# player's minutes jump by more than this. The Scorecard tab checks these against results.
+REDISTRIBUTE_SHARE = 0.75    # share of an absent player's minutes (TOI...) that reaches the rotation we model
+BUMP_MAX_FRAC = 0.35         # a teammate's minutes go up at most 35% of his own ...
+BUMP_MAX_ABS = 8.0           # ... and at most 8 (minutes / TOI minutes)
 FRESH_OUT_GAMES = 3          # an absence is "fresh" when he played in at least 2 of the team's last 3 games
 BLOWOUT_SPREAD = 10.0        # basketball: spreads this big start to cost starters late minutes
 CALIBRATION_RANGE = (0.3, 1.3)
@@ -297,8 +304,9 @@ def shop(player_offers: Sequence[Dict], line: Optional[float] = None, book: Opti
 
     `book` (e.g. "draftkings"): price everything AT THAT BOOK -- its own line (its most balanced one when it
     posts several) and its own over / under prices. The no-vig probability stays the all-books consensus at that
-    line (the sharpest read of the market). When the book doesn't post this player, the consensus line is
-    returned with no prices and "missing_book": True.
+    line (the sharpest read of the market). When the book doesn't post this player, the consensus line is priced
+    at the best available book instead (so the market blend and EV still apply, and the page says where), with
+    "missing_book": True.
 
     {"line", "best_over": (book, price) | None, "best_under": ..., "p_market": no-vig consensus P(over)
      (each book de-vigged, then averaged), "books": count, "book": book | None, "missing_book": bool}"""
@@ -324,10 +332,10 @@ def shop(player_offers: Sequence[Dict], line: Optional[float] = None, book: Opti
     over, under = o.get("over") or {}, o.get("under") or {}
     per_book = [devig(over[b], under[b]) for b in set(over) & set(under)]
     per_book = [p for p in per_book if p is not None]
-    if book:
-        bo = (book, over[book]) if book in over and at_book else None
-        bu = (book, under[book]) if book in under and at_book else None
-    else:
+    if book and at_book:
+        bo = (book, over[book]) if book in over else None
+        bu = (book, under[book]) if book in under else None
+    else:                       # no book chosen, or your book doesn't post him: the best price anywhere
         bo, bu = best_price(over), best_price(under)
     if per_book:
         p_mkt = sum(per_book) / len(per_book)
@@ -440,8 +448,9 @@ def redistribute(players: Sequence[Dict], cap: float = 40.0) -> Dict:
 
     players: [{"pid","name","slot","opp" (minutes / TOI / ...), "rate" (production per unit), "out", "fresh"}].
     Returns {pid: {"opp_add", "rate_mult", "from": [names]}} for the healthy players. An absent player's
-    opportunity goes REDISTRIBUTE_SAME_SLOT to his own position group (by their opportunity) and the rest to
-    everyone (capped at `cap`); whatever production that doesn't replace, teammates make up USAGE_GAP_FILL of
+    opportunity (REDISTRIBUTE_SHARE of it) goes REDISTRIBUTE_SAME_SLOT to his own position group (by their
+    opportunity) and the rest to everyone (capped at `cap`, and no one gains more than BUMP_MAX_FRAC of his own
+    or BUMP_MAX_ABS); whatever production that doesn't replace, teammates make up USAGE_GAP_FILL of
     through a higher rate (more shots / touches), spread by current production and capped at USAGE_RATE_CAP."""
     live = [p for p in players if not p.get("out") and num(p.get("opp")) > 0]
     res = {p["pid"]: {"opp_add": 0.0, "rate_mult": 1.0, "from": []} for p in live}
@@ -459,8 +468,9 @@ def redistribute(players: Sequence[Dict], cap: float = 40.0) -> Dict:
             tot = sum(num(p["opp"]) for p in pool)
             for p in pool:
                 r = res[p["pid"]]
-                room = max(0.0, cap - num(p["opp"]) - r["opp_add"])
-                add = min(room, m * share * num(p["opp"]) / tot) if tot else 0.0
+                gain_cap = min(BUMP_MAX_ABS, BUMP_MAX_FRAC * num(p["opp"]))
+                room = max(0.0, min(cap - num(p["opp"]), gain_cap) - r["opp_add"])
+                add = min(room, m * REDISTRIBUTE_SHARE * share * num(p["opp"]) / tot) if tot else 0.0
                 r["opp_add"] += add
                 recovered += add * num(p.get("rate"))
                 if add > 0.05 and a.get("name") not in r["from"]:
@@ -757,7 +767,9 @@ def display_compact(rows: Sequence[Dict], details: bool = False, opp_label: str 
         flags = list(r.get("flags") or [])
         bk = r.get("book") or {}
         if bk.get("missing_book"):
-            flags.insert(0, f"not posted at {bk.get('book')}")
+            where = sorted({b for b in (x[0] for x in (bk.get("best_over"), bk.get("best_under")) if x)})
+            flags.insert(0, f"not posted at {bk.get('book')}"
+                         + (f" — priced at {', '.join(where)}" if where else " — no sportsbook price"))
         if r.get("gap_from"):
             flags.insert(0, f"⚠️ {r['gap_from']} — check minutes / role / injury news")
         elif r.get("gap") in ("big", "big-low-count") and r.get("gap_pct") is not None:

@@ -234,3 +234,25 @@ def test_nba_pick_pages_render_the_shared_model(monkeypatch, page):
         assert board and list(board[0]["Player"]) == ["Davion Mitchell"]                  # the held play isn't ranked
         assert any("Check the news" in e.label or "check the news" in e.label for e in at.expander)
         assert any("Same model as" in c.value for c in at.caption)
+
+
+# --------------------------------------------------------------------------- your book doesn't post him (Oct 28)
+def test_a_player_your_book_skips_is_priced_at_the_best_book_elsewhere():
+    offers = [{"market": "player_rebounds", "player": "Duncan Robinson", "point": 2.5,
+               "over": {"fanduel": 140, "betmgm": 130}, "under": {"fanduel": -180, "betmgm": -170}}]
+    b = PE.shop(offers, book="draftkings")
+    assert b["missing_book"] and b["line"] == 2.5
+    assert b["best_over"] == ("fanduel", 140) and b["best_under"] == ("betmgm", -170)
+    row = {"pid": 1, "player": "Duncan Robinson", "slot": "F", "out": False, "line": 2.5, "projection": 1.2,
+           "side": "Under", "p_final": 0.3, "lean": "Under", "ev": 0.05, "over_price": 140, "under_price": -170,
+           "price_src": "book", "book": b, "flags": []}
+    note = PE.display_compact([row])[0]["Notes"]
+    assert "not posted at draftkings — priced at betmgm, fanduel" in note
+
+
+def test_a_lean_with_no_sportsbook_price_is_not_graded():
+    row = {"pid": 1, "player": "A", "market": "Rebounds", "line": 2.5, "line_src": "book", "projection": 1.2,
+           "side": "Under", "p_final": 0.15, "p_model": 0.15, "p_market": None, "lean": "Under",
+           "over_price": None, "under_price": None, "out": False, "flags": []}
+    p = SP.play_from_row(row, None)
+    assert p["Conviction"] == 1.0 and p["RealPrice"] is None

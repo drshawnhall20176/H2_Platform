@@ -1036,6 +1036,7 @@ def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[str, Dict[str, floa
                 "Slate Avg": round(slate_avg, 1) if slate_avg else None,
                 "Matchup Factor": round(matchup_factor, 2),
                 "Hot Hand Score": round(recent_avg * matchup_factor, 1),
+                "Game": r.get("GameLabel"),
             })
     out.sort(key=lambda x: x["Hot Hand Score"], reverse=True)
     return out
