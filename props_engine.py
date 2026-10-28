@@ -471,7 +471,7 @@ def read_line(projection: Optional[float], values: Sequence[float], line: Option
     edge = (projection - thr) / thr if thr > 0 else 0.0
     side = "Over" if above else "Under"
     out["side"] = side
-    out["ev"] = ev(p if side == "Over" else 1 - p, -110)
+    out["ev"] = None          # no real price (none typed, or only a pick'em app posts this line): no edge to show
     if edge >= LEAN_EDGE and p >= LEAN_P:
         out["lean"] = "Over"
     elif edge <= -LEAN_EDGE and p <= 1 - LEAN_P:
