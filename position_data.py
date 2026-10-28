@@ -389,7 +389,8 @@ def build_side(sport: str, offense: Any, defense: Any, depth: Dict[str, List[Dic
     ranked (the most at any slot) — 0 means no ranks could be given."""
     season_sum = PM.summarize(allowed, sport)
     recent_sum = PM.summarize(allowed, sport, n=PM.RECENT_N)
-    rows = PM.matchup_rows(sport, depth, defense, season_sum, recent_sum, pgames)
+    rows = PM.matchup_rows(sport, depth, defense, season_sum, recent_sum, pgames,
+                           max_players=PM.BASKETBALL_MAX_PLAYERS if PM.FAMILY_BY_SPORT.get(sport) == "basketball" else 3)
     pool = PM.ranking_pool(season_sum)
     ranked = max((len(PM.rank_slot(pool, s)) for s in PM.SLOTS_BY_SPORT[sport]), default=0)
     return {"offense": offense, "defense": defense, "rows": rows, "ranked": ranked if ranked >= MIN_TEAMS_FOR_RANK else 0}
@@ -402,7 +403,7 @@ def fill_depth_from_usage(depth: Dict[str, List[Dict]], usage: Dict[str, List[Di
         if out.get(slot):
             continue
         if usage.get(slot):
-            out[slot] = [{"pid": u["pid"], "name": u["name"], "status": None,
+            out[slot] = [{"pid": u["pid"], "name": u["name"], "status": None, "avg_min": u.get("avg_min"),
                           "note": (f"{u['avg_min']:.0f} min" if PM.FAMILY_BY_SPORT[sport] == "basketball"
                                    else f"held the slot in {u['games_in_slot']} of the last {PM.RECENT_N} games")}
                          for u in usage[slot]]

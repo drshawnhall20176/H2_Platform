@@ -621,3 +621,17 @@ def test_callout_eligibility_rules():
     assert PM.callout_eligible({"recent": None})                                    # unknown form, not a promotion: kept
     assert not PM.callout_eligible({"recent": None, "role_change": {"from": "WR4", "for": None}})
     assert not PM.callout_eligible({"recent": {"avg": 4.0, "games": 3}}, "basketball")
+
+
+def test_basketball_depth_gives_every_rotation_player_a_row_and_names_more_than_one_target():
+    rows = [{"slot": "F", "rank": 3, "n_teams": 29, "tier": "Soft", "allowed": 85.0, "league_avg": 69.8,
+             "vs_league_pct": 22.0, "thin": False, "trend": "steady", "line": "51.8 pts", "role_change": None,
+             "players": [{"name": "Jalen Johnson", "avg_min": 32, "recent": {"avg": 39.5, "games": 4}, "h2h": None},
+                         {"name": "Onyeka Okongwu", "avg_min": 27, "recent": {"avg": 18.0, "games": 4}, "h2h": None},
+                         {"name": "Deep Bench", "avg_min": 6, "recent": {"avg": 4.0, "games": 2}, "h2h": None}]}]
+    disp = PM.display_rows_by_player(rows)
+    assert [d["Player"] for d in disp] == ["Jalen Johnson", "Onyeka Okongwu"]            # 6-minute player left out
+    assert [d["Role"] for d in disp] == ["Starter", "Rotation"] and disp[1]["vs league"] == "+22%"
+    co = PM.callouts({"rows": rows}, "ATL", "MIA", family="basketball", limit=4)
+    assert len(co["targets"]) == 2 and co["targets"][0].startswith("Jalen Johnson")
+    assert len(PM.callouts({"rows": rows}, "ATL", "MIA", family="football")["targets"]) == 1

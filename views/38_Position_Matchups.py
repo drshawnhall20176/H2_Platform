@@ -170,7 +170,7 @@ def render_side(side, off_name, def_name):
         st.caption("Not enough defenses with a full sample to rank yet, so the table shows what this defense has "
                    "allowed per game without a league rank." if FAMILY == "basketball" and SPORT_KEY == "NCAAMB" else
                    "Not enough games yet to rank the defenses at these slots — try the other season option.")
-    co = PM.callouts(side, off_name, def_name, family=FAMILY)
+    co = PM.callouts(side, off_name, def_name, family=FAMILY, limit=4 if FAMILY == "basketball" else 3)
     if co["targets"] or co["fades"]:
         left, right = st.columns(2)
         with left:
@@ -181,7 +181,7 @@ def render_side(side, off_name, def_name):
             st.markdown("**🔴 Fades**")
             for t in co["fades"] or ["Nothing clearly tough."]:
                 st.markdown(f"- {t}")
-    df = pd.DataFrame(PM.display_rows(side["rows"]))
+    df = pd.DataFrame(PM.display_rows_by_player(side["rows"]) if FAMILY == "basketball" else PM.display_rows(side["rows"]))
     st.dataframe(df, hide_index=True, width="stretch")
     moved = [r for r in side["rows"] if r.get("role_change") and r["players"]]
     if moved:
@@ -809,7 +809,8 @@ if tab_pos is not None:
         st.caption("1 = the defense that allows the MOST to that slot (softest). Soft = top third, Tough = bottom third. "
                    + ("A slot is the player used most there that game (running backs by carries, receivers by targets), "
                       "so WR1 is usage, not just the depth-chart label." if FAMILY == "football" else
-                      "Guards / Forwards / Centers use each player's ESPN position; the numbers are the whole group's totals."
+                      "Guards / Forwards / Centers use each player's ESPN position; the numbers are the whole group's totals, and "
+                      "every rotation player (10+ min) gets his own row against his group."
                       + (" Every rotation player, with his own projection, is on the **🎯 Player props** tab." if HAS_PROPS else "")))
         render_side(bundle["away_off"], away_name, home_name)
         st.divider()

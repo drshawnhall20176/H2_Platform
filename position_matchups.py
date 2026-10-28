@@ -412,7 +412,7 @@ def matchup_rows(sport: str, depth: Dict[str, List[Dict]], defense_team: str,
         for pl in (depth.get(slot) or [])[:max_players]:
             players.append({
                 "name": pl.get("name"), "status": pl.get("status"), "note": pl.get("note"),
-                "role_change": pl.get("role_change"),
+                "role_change": pl.get("role_change"), "avg_min": pl.get("avg_min"),
                 "recent": player_form(pgames, pl.get("pid"), sport),
                 "h2h": player_form(pgames, pl.get("pid"), sport, n=10, opp=defense_team),
             })
@@ -811,6 +811,42 @@ def display_rows(rows: Sequence[Dict]) -> List[Dict]:
     return out
 
 
+BASKETBALL_MAX_PLAYERS = 8      # basketball: every rotation player in a position group gets a row, not just the top one
+BASKETBALL_ROW_MIN = 10.0       # ... down to this many minutes a game
+
+
+def _in_rotation(p: Dict) -> bool:
+    m = p.get("avg_min")
+    return m is None or _num(m) >= BASKETBALL_ROW_MIN
+
+
+def display_rows_by_player(rows: Sequence[Dict]) -> List[Dict]:
+    """Basketball: one table row per rotation player (most minutes first within his group), each beside his
+    position group's defensive numbers -- nobody is tucked into a "Next up" cell."""
+    out: List[Dict] = []
+    for r in rows:
+        rank_txt = "—" if not r["rank"] else f"{r['rank']}/{r['n_teams']}"
+        vs = r["vs_league_pct"]
+        players = [p for p in r["players"] if _in_rotation(p)] or r["players"][:1]
+        for i, p in enumerate(players):
+            out.append({
+                "Pos": r["slot"],
+                "Player": _player_text(p),
+                "Min": "—" if p.get("avg_min") is None else f"{_num(p['avg_min']):.0f}",
+                "Role": "Starter" if i == 0 else "Rotation",
+                "Last 4": _form_text(p.get("recent")),
+                "vs this D": _form_text(p.get("h2h")),
+                "D rank (1 = softest)": rank_txt,
+                "Verdict": TIER_BADGE.get(r["tier"], "—"),
+                "Allowed / g": "—" if r["allowed"] is None else f"{r['allowed']:.1f}" + (" ⚠️ thin" if r["thin"] else ""),
+                "League avg": "—" if r["league_avg"] is None else f"{r['league_avg']:.1f}",
+                "vs league": "—" if vs is None else f"{vs:+.0f}%",
+                "Trend": r["trend"],
+                "What it allows": r["line"] or "—",
+            })
+    return out
+
+
 # How much of a slot's softness a player in it can actually use. A defense that leaks to the WR3 is real,
 # but the WR3 sees a fraction of the WR1's targets, so a +35% WR3 matchup is worth less than a +10% WR1 one.
 # Ordering only -- the table's own rank / allowed / vs-league numbers are untouched.
@@ -840,21 +876,32 @@ def callouts(side: Dict, off_name: str, def_name: str, limit: int = 3, family: s
     for r in side["rows"]:
         if not r["rank"] or not r["players"] or r["vs_league_pct"] is None:
             continue
-        p = r["players"][0]
-        if not callout_eligible(p, family):
-            continue
-        text = (f"{p['name']} ({r['slot']}) — {def_name} rank {r['rank']}/{r['n_teams']} against the position, "
-                f"allowing {r['allowed']:.1f} vs a {r['league_avg']:.1f} league average ({r['vs_league_pct']:+.0f}%)"
-                + (f"; he's averaging {p['recent']['avg']:.1f} lately" if p.get("recent") else "")
-                + (f"; {r['trend']}" if r["trend"] in ("▲ softer lately", "▼ tougher lately") else "")
-                + (f" [{p['status']}]" if p.get("status") else "")
-                + (f" — ⚠️ role change: moves up {role_change_text(p['role_change'])[2:]}, so his recent numbers "
-                   f"come from a smaller role; lower confidence" if p.get("role_change") else ""))
-        score = r["vs_league_pct"] * SLOT_ROLE_WEIGHT.get(r["slot"], 1.0)
-        if r["tier"] == "Soft":
-            soft.append((score, text))
-        elif r["tier"] == "Tough":
-            tough.append((score, text))
+        # Football: the slot's occupant. Basketball: every real rotation player in the group (20+ minutes), so a
+        # soft forward matchup names both forwards who'll see it, weighted by how much they play.
+        cands = r["players"][:1] if family != "basketball" else \
+            [p for p in r["players"] if p.get("avg_min") is None or _num(p.get("avg_min")) >= 20] or r["players"][:1]
+        for p in cands:
+            if callout_eligible(p, family):
+                _callout(r, p, def_name, soft, tough, family)
     soft.sort(key=lambda t: -t[0])
     tough.sort(key=lambda t: t[0])
     return {"targets": [t for _, t in soft[:limit]], "fades": [t for _, t in tough[:limit]]}
+
+
+def _callout(r: Dict, p: Dict, def_name: str, soft: List, tough: List, family: str) -> None:
+    """One Targets / Fades line for player `p` in slot row `r`, scored by the gap weighted by his role."""
+    text = (f"{p['name']} ({r['slot']}) — {def_name} rank {r['rank']}/{r['n_teams']} against the position, "
+            f"allowing {r['allowed']:.1f} vs a {r['league_avg']:.1f} league average ({r['vs_league_pct']:+.0f}%)"
+            + (f"; he's averaging {p['recent']['avg']:.1f} lately" if p.get("recent") else "")
+            + (f"; {r['trend']}" if r["trend"] in ("▲ softer lately", "▼ tougher lately") else "")
+            + (f" [{p['status']}]" if p.get("status") else "")
+            + (f" — ⚠️ role change: moves up {role_change_text(p['role_change'])[2:]}, so his recent numbers "
+               f"come from a smaller role; lower confidence" if p.get("role_change") else ""))
+    weight = SLOT_ROLE_WEIGHT.get(r["slot"], 1.0)
+    if family == "basketball" and p.get("avg_min") is not None:
+        weight = min(1.0, _num(p["avg_min"]) / 32.0)          # a 34-minute forward uses the matchup more than a 21
+    score = r["vs_league_pct"] * weight
+    if r["tier"] == "Soft":
+        soft.append((score, text))
+    elif r["tier"] == "Tough":
+        tough.append((score, text))
