@@ -827,11 +827,11 @@ def display_rows_by_player(rows: Sequence[Dict]) -> List[Dict]:
     for r in rows:
         rank_txt = "—" if not r["rank"] else f"{r['rank']}/{r['n_teams']}"
         vs = r["vs_league_pct"]
-        players = [p for p in r["players"] if _in_rotation(p)] or r["players"][:1]
+        players = [p for p in r["players"] if _in_rotation(p)] or r["players"][:1] or [{}]
         for i, p in enumerate(players):
             out.append({
                 "Pos": r["slot"],
-                "Player": _player_text(p),
+                "Player": _player_text(p) if p else "—",
                 "Min": "—" if p.get("avg_min") is None else f"{_num(p['avg_min']):.0f}",
                 "Role": "Starter" if i == 0 else "Rotation",
                 "Last 4": _form_text(p.get("recent")),
@@ -841,6 +841,7 @@ def display_rows_by_player(rows: Sequence[Dict]) -> List[Dict]:
                 "Allowed / g": "—" if r["allowed"] is None else f"{r['allowed']:.1f}" + (" ⚠️ thin" if r["thin"] else ""),
                 "League avg": "—" if r["league_avg"] is None else f"{r['league_avg']:.1f}",
                 "vs league": "—" if vs is None else f"{vs:+.0f}%",
+                "Model matchup": "—" if r.get("model_factor") is None else f"{r['model_factor'] - 1:+.0%}",
                 "Trend": r["trend"],
                 "What it allows": r["line"] or "—",
             })
@@ -894,6 +895,8 @@ def _callout(r: Dict, p: Dict, def_name: str, soft: List, tough: List, family: s
             f"allowing {r['allowed']:.1f} vs a {r['league_avg']:.1f} league average ({r['vs_league_pct']:+.0f}%)"
             + (f"; he's averaging {p['recent']['avg']:.1f} lately" if p.get("recent") else "")
             + (f"; {r['trend']}" if r["trend"] in ("▲ softer lately", "▼ tougher lately") else "")
+            + (f"; model {r['model_factor'] - 1:+.0%} after adjusting for the small sample"
+               if r.get("model_factor") is not None else "")
             + (f" [{p['status']}]" if p.get("status") else "")
             + (f" — ⚠️ role change: moves up {role_change_text(p['role_change'])[2:]}, so his recent numbers "
                f"come from a smaller role; lower confidence" if p.get("role_change") else ""))

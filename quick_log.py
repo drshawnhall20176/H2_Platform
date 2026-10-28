@@ -165,6 +165,9 @@ def bet_log_fields_from_play(play: Dict, date_str: str, sport_key: str,
         "model_prob": float(play.get("ModelProb") or 0.0),
         "stake": float(stake or 0.0),
         "sport": sport_key,
+        # "market-gap" when the model and the books disagreed by a lot on this pick (props_engine.GAP_TAG) --
+        # lets the Scorecard track who turns out right on those. None for everything else.
+        "notes": play.get("Notes"),
     }
 
 

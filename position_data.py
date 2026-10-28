@@ -813,6 +813,24 @@ def load_hockey(date_str: str, home_id: int, away_id: int, home_name: str, away_
                       "rest": _rest_info(eng, (home_id, away_id), date_str, notes)}}
 
 
+def nba_league_props_sample(date_str: str) -> Dict:
+    """This season's league-wide player-games and the end of last season's -- the same samples Position Matchups'
+    Player props uses -- for pages that want the same position-level matchup number (Hot Hand Engine, Matchup
+    Lab). {"cur": pgames, "prior": pgames, "notes": [...]}. Fails soft to empty lists."""
+    import sports
+    eng = sports.get("NBA").engine
+    notes: List[str] = []
+    cur_games, prior_games = _nba_props_samples(eng, date_str, notes)
+    all_games = {**prior_games, **cur_games}
+    if not all_games:
+        return {"cur": [], "prior": [], "notes": notes}
+    lines = _fetch_lines(eng, list(all_games))
+    all_lines = {gid: {"date": all_games[gid].get("date"), "lines": lines.get(gid) or {}} for gid in all_games}
+    roster_pos = _roster_positions(eng, all_lines, notes)
+    return {"cur": basketball_pgames({g: all_lines[g] for g in cur_games}, roster_pos),
+            "prior": basketball_pgames({g: all_lines[g] for g in prior_games}, roster_pos), "notes": notes}
+
+
 # =========================================================================== the game list
 def list_games(sport_key: str, date_str: str) -> List[Dict]:
     """The games the page offers for `date_str`, chronological, each

@@ -95,7 +95,7 @@ def test_default_board_uses_expected_display_names_and_lines():
     board = WP.default_board_from_index(index)
 
     markets = {b["Market"] for b in board}
-    assert {"Points", "Rebounds", "Assists", "Threes Made"} <= markets
+    assert markets == {"Points", "Rebounds", "Assists", "Threes Made"}
     pts_row = next(b for b in board if b["Market"] == "Points")
     assert pts_row["Line"] == 12.5          # default line from _MARKET_SPEC
     assert pts_row["Side"] == "Over"        # 9 of 10 games clear a 12.5 line
@@ -202,7 +202,7 @@ def test_build_best_bets_covers_all_four_markets_and_ranks_by_conviction():
     rows = [_row("Hot Scorer", "Las Vegas Aces", "Seattle Storm", "Seattle Storm @ Las Vegas Aces", log_hot)]
     plays = WP.build_best_bets(rows, sims=8000, seed=3)
 
-    assert {"Points", "Rebounds", "Assists", "Threes Made"} <= {p["Market"] for p in plays}
+    assert {p["Market"] for p in plays} == {"Points", "Rebounds", "Assists", "Threes Made"}
     assert all(p["Player"] == "Hot Scorer" for p in plays)
     # plays sorted by Conviction, descending
     assert all(plays[i]["Conviction"] >= plays[i + 1]["Conviction"] for i in range(len(plays) - 1))
@@ -711,7 +711,7 @@ def test_build_hot_hand_board_spread_unknown_when_team_spreads_omitted():
 def test_build_matchup_profile_covers_all_markets():
     row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
     profile = WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={})
-    assert {"Points", "Rebounds", "Assists", "Threes Made"} <= {p["Market"] for p in profile}
+    assert {p["Market"] for p in profile} == {"Points", "Rebounds", "Assists", "Threes Made"}
     print("✓ build_matchup_profile covers all 4 markets")
 
 
@@ -824,35 +824,29 @@ def test_build_matchup_profile_window_avg_recomputes_for_l5_and_l10_separately()
     print("✓ Window Avg correctly recomputes for L5, L10, and Season as three separate real calls, hand-verified numbers")
 
 
-def test_build_matchup_profile_window_avg_none_with_fewer_than_5_real_games():
+def test_build_matchup_profile_last_n_uses_the_games_there_are_and_counts_them():
+    # Changed Oct 28: a last-N window no longer goes blank in the first weeks -- it averages the games that exist
+    # (topped up from last season when the row's log has them) and says how many it used.
     row = {"PTS": 24.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
-    season_log = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2} for _ in range(3)]   # only 3 real games this season
-    l5_profile = WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
-                                          season_log=season_log, window_n=5)
-    season_profile = WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
-                                              season_log=season_log)
-    l5_pts = next(p for p in l5_profile if p["Market"] == "Points")
-    season_pts = next(p for p in season_profile if p["Market"] == "Points")
-    assert l5_pts["Window Avg"] is None    # honest "not enough real games yet," never a padded average
-    assert season_pts["Window Avg"] == 20.0   # the real Season window is unaffected -- it never required a fixed count
-    print("✓ Window Avg is honestly None (not a padded/partial average) on L5 with fewer than 5 real games, unaffected on Season")
+    season_log = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2} for _ in range(3)]
+    l5 = next(p for p in WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
+                                                     season_log=season_log, window_n=5) if p["Market"] == "Points")
+    assert l5["Window Avg"] == 20.0 and l5["Window Games"] == 3 and l5["Window Prior"] == 0
+    season = next(p for p in WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
+                                                         season_log=season_log) if p["Market"] == "Points")
+    assert season["Window Avg"] == 20.0
 
 
-def test_build_matchup_profile_window_avg_l5_real_but_l10_none_with_seven_real_games():
-    # The real, in-between case: enough real games for L5, not yet enough for L10 -- each
-    # window's own honesty is independent, not an all-or-nothing gate.
-    row = {"PTS": 24.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
-    season_log = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2} for _ in range(7)]
-    l5_profile = WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
-                                          season_log=season_log, window_n=5)
-    l10_profile = WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
-                                           season_log=season_log, window_n=10)
-    l5_pts = next(p for p in l5_profile if p["Market"] == "Points")
-    l10_pts = next(p for p in l10_profile if p["Market"] == "Points")
-    assert l5_pts["Window Avg"] == 20.0
-    assert l10_pts["Window Avg"] is None
-    print("✓ Window Avg computes correctly on L5 even when L10 honestly can't yet, with 7 real games")
-
+def test_build_matchup_profile_last_n_tops_up_from_last_season_and_offers_last_6():
+    row = {"PTS": 24.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0,
+           "_game_log": [{"pts": 10, "reb": 2, "ast": 1, "fg3m": 0, "src": "prior"} for _ in range(6)]}
+    season_log = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2} for _ in range(4)]
+    six = next(p for p in WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
+                                                      season_log=season_log, window_n=6) if p["Market"] == "Points")
+    assert six["Window Games"] == 6 and six["Window Prior"] == 2 and abs(six["Window Avg"] - (80 + 20) / 6) < 0.06
+    ten = next(p for p in WP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
+                                                      season_log=season_log, window_n=10) if p["Market"] == "Points")
+    assert ten["Window Games"] == 10 and ten["Window Prior"] == 6
 
 def test_build_matchup_profile_window_avg_none_for_unsupported_window_n():
     row = {"PTS": 20.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
@@ -955,7 +949,8 @@ def test_default_line_none_for_unknown_market():
 
 def test_market_list_covers_all_four_core_markets():
     lst = WP.market_list()
-    assert {"player_points", "player_rebounds", "player_assists", "player_threes"} <= {mkey for mkey, _col, _disp in lst}
+    assert {mkey for mkey, _col, _disp in lst} == {"player_points", "player_rebounds",
+                                                    "player_assists", "player_threes"}
     # spot-check one full tuple
     assert ("player_points", "PTS", "Points") in lst
 

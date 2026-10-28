@@ -666,6 +666,9 @@ def test_switching_the_market_reprices_the_props(page):
     at.selectbox(key="pm_props_market").set_value("Blocks").run()
     assert not at.exception, [e.value for e in at.exception]
     assert at.selectbox(key="pm_props_market").value == "Blocks"
+    heads = [m.value for m in at.markdown]
+    assert any("Best Blocks reads" in h for h in heads) and not any("PRA" in h for h in heads if h.startswith("####"))
+    assert sum(1 for h in heads if h.startswith("####") and h.endswith("· Blocks")) == 2
 
 
 def test_typing_a_line_gives_hit_rate_and_a_lean_and_offers_logging(monkeypatch, page):
@@ -843,3 +846,29 @@ def test_best_reads_lead_the_tab_once_lines_are_in(page):
     at.run()
     reads = [d.value for d in at.dataframe if "Why" in d.value.columns]
     assert reads and reads[0].iloc[0]["Player"] == "Star Guard" and reads[0].iloc[0]["Pick"] == "Over 35.5"
+
+
+def test_a_line_far_from_the_projection_asks_for_a_news_check_before_any_lean(page):
+    at = page("NBA", nba_games(), bundle_fn=lambda sport, g: props_bundle(sport))
+    game = at.selectbox(key="pm_game").value
+    at.session_state[f"pm_props_NBA_{game}_PRA_1"] = {"edited_rows": {0: {"Line": 28.5, "Over odds": -110,
+                                                                          "Under odds": -110}},
+                                                       "added_rows": [], "deleted_rows": []}
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    heads = " ".join(m.value for m in at.markdown)
+    assert "Model vs the books" in heads
+    star = [d.value for d in at.dataframe if "Lean" in d.value.columns and
+            any("Star Guard" in x for x in d.value["Player"])][0].iloc[0]
+    assert star["Lean"] == "⚠️ Check news" and star["Notes"].startswith("⚠️ Market disagrees")
+    at.toggle(key="pm_news_checked").set_value(True).run()
+    star = [d.value for d in at.dataframe if "Lean" in d.value.columns and
+            any("Star Guard" in x for x in d.value["Player"])][0].iloc[0]
+    assert star["Lean"] != "⚠️ Check news"
+
+
+def test_depth_tab_carries_the_model_matchup_column(page):
+    at = page("NBA", nba_games(), bundle_fn=lambda sport, g: props_bundle(sport))
+    assert not at.exception
+    depth = [d.value for d in at.dataframe if "Model matchup" in d.value.columns]
+    assert depth

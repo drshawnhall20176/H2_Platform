@@ -175,6 +175,21 @@ def scoreboard_events_in_window(site_api: str, fetch: FetchFn, start: date, end:
         return list(events.values()) if any_ok else None
 
 
+def eastern_date(iso) -> str:
+    """'2026-10-24T00:00Z' (a 8 PM ET Oct 23 tip) -> '2026-10-23'. A bare 'YYYY-MM-DD' passes through; junk -> ''."""
+    s = str(iso or "").strip()
+    if len(s) <= 10:
+        return s[:10]
+    try:
+        import pytz
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            return s[:10]
+        return dt.astimezone(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d")
+    except (TypeError, ValueError):
+        return s[:10]
+
+
 def get_team_recent_game_ids(team_id: int, before_date: str, site_api: str,
                              fetch: FetchFn, diag: DiagFn = _noop_diag,
                              n: int = 10, days_back: int = 45,
@@ -220,7 +235,10 @@ def get_team_recent_game_ids(team_id: int, before_date: str, site_api: str,
         status = ((event.get("status") or {}).get("type") or {})
         if not status.get("completed"):
             continue
-        ev_date = (event.get("date") or "")[:10]
+        # The game's EASTERN calendar date, not the UTC timestamp's: a 7:30 PM ET tip is already "tomorrow"
+        # in UTC, which used to (a) list two games on one day in a player's log and (b) drop last night's
+        # late game from "strictly before today" -- so a back-to-back could read as a day of rest.
+        ev_date = eastern_date(event.get("date"))
         if not ev_date or ev_date >= before_date:   # strictly before, not at-or-before
             continue
         if ev_date < start_str:   # month/day queries can reach back past the requested window
@@ -242,7 +260,7 @@ def get_team_recent_game_ids(team_id: int, before_date: str, site_api: str,
         if this_team is not None and event.get("id"):
             opp_info = (opp_team or {}).get("team") or {}
             found.append({
-                "gameId": event["id"], "date": event.get("date") or "",
+                "gameId": event["id"], "date": ev_date, "date_utc": event.get("date") or "",
                 "opp_id": opp_info.get("id"), "opp_name": opp_info.get("displayName", "Unknown"),
                 # Final scores straight off the scoreboard event (strings as ESPN sends them, or
                 # None) — additive fields, free because the events are already in hand. Lets a
@@ -336,7 +354,10 @@ def get_game_team_totals(game_id: str, cdn_api: str, fetch: FetchFn,
         # score map rather than silently reporting 0.0. Tried second, not first, since a stats-
         # based "points" entry IS confirmed live for WNBA — this keeps that path working exactly
         # as before for the sport where it's real, and only falls through where it genuinely isn't.
-        pts = find_team_stat(stats_by_name, "points")
+        # EXACT name only for points. The prefix fallback used to match "pointsInPaint" (NBA box scores carry
+        # pointsInPaint / fastBreakPoints but no plain "points"), so a team's "points allowed" was really its
+        # paint points allowed (~50 a game) -- found Oct 28 when Matchup Lab showed Atlanta allowing 52.4.
+        pts = parse_stat_value(stats_by_name["points"]) if "points" in stats_by_name else 0.0
         if pts == 0.0:
             pts = score_by_team.get(tid, 0.0)
         out[tid] = {

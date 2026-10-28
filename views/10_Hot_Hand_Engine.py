@@ -25,6 +25,7 @@ import pytz
 
 import sports
 import odds_api as O
+import form_policy as FPol
 from streamlit_page_cache import compute_once, invalidate_page
 
 _active = sports.active()
@@ -50,6 +51,22 @@ def get_api_key():
         return os.environ.get("ODDS_API_KEY")
 
 
+def _position_factors(sport_key: str, date_str: str, rows) -> dict:
+    """NBA: the same position-level matchup factor Position Matchups' Player props uses (shrunk for small samples,
+    blended with last season), so a player's matchup reads the same on both pages. Other sports: none (the
+    team-wide factor is used)."""
+    if sport_key != "NBA":
+        return {}
+    try:
+        import player_props as PPR
+        import position_data as PD
+        sample = PD.nba_league_props_sample(date_str)
+        players = {(r.get("_pid"), r.get("_opp_id")) for r in rows if r.get("_pid") is not None}
+        return PPR.position_factors(players, sample["cur"], sample["prior"], "NBA")
+    except Exception:                                              # noqa: BLE001 — fall back to team-wide
+        return {}
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def load_board(sport_key: str, date_str: str):
     # sport_key is unused inside the function body (E/P are already correctly re-resolved to the
@@ -67,7 +84,9 @@ def load_board(sport_key: str, date_str: str):
     opp_allowed = {oid: E.get_team_recent_allowed_stats(oid, date_str) for oid in opp_ids}
     team_ids = sorted({r["_team_id"] for r in rows if r.get("_team_id") is not None})
     team_rest = {tid: E.get_team_rest_info(tid, date_str) for tid in team_ids}
-    board = P.build_hot_hand_board(rows, opp_allowed, team_rest)   # no team_spreads yet — Spread/
+    pos_factors = _position_factors(sport_key, date_str, rows)
+    board = P.build_hot_hand_board(rows, opp_allowed, team_rest,   # no team_spreads yet — Spread/
+                                   position_factors=pos_factors)
                                                                    # Blowout Risk are merged in below,
                                                                    # only after a live, button-gated fetch
     team_abbrs = E.team_abbrs_from_meta(meta)   # zero extra cost — meta already has this
@@ -192,14 +211,16 @@ st.info(
     "is on a back-to-back (real fatigue risk); Blowout Risk is whether tonight's game spread is "
     "wide enough that garbage time becomes a real possibility — a heavy favorite's stars can see "
     "reduced 4th-quarter minutes, a heavy underdog's bench can see extended run. Neither says "
-    "which specific player is affected — that's still a judgment call based on her role.",
+    "which specific player is affected — that's still a judgment call based on the player's role.",
     icon="ℹ️")
 
 # --- the board -----------------------------------------------------------------
-def _rest_display(r):
-    if r["Rest Days"] is None:
+def _rest_display(r, key="Rest Days"):
+    days = r.get(key)
+    if days is None:
         return "—"
-    return "⚠️ B2B" if r["B2B"] else f"{r['Rest Days']}d rest"
+    txt = FPol.rest_text(days)                    # the one wording every page uses
+    return "⚠️ " + txt if txt == "back-to-back" else txt
 
 
 def _spread_display(r):
@@ -209,32 +230,44 @@ def _spread_display(r):
 
 for b in view:
     b["Rest"] = _rest_display(b)
+    b["Opp Rest"] = _rest_display(b, "Opp Rest Days")
     b["Spread"] = _spread_display(b)
 
-df = pd.DataFrame(view)[["Player", "Team", "Opp", "Market", "Recent Avg", "Opp Allows", "Opp Pace",
-                         "Opp Allows /100 Poss", "Slate Avg /100 Poss", "Matchup Factor",
-                         "Matchup Score", "Tag", "Rest", "Spread", "Blowout Risk", "Game"]]
-df = df.rename(columns={"Opp Allows": "Opp Team Total"})
+_cols = ["Player", "Team", "Opp", "Market", "Recent Avg", "Matchup Factor", "Matchup Score", "Tag", "Rest",
+         "Opp Rest", "Fatigue", "Position Matchup", "Team D Factor", "Opp Allows", "Opp Pace",
+         "Opp Allows /100 Poss", "Slate Avg /100 Poss", "Spread", "Blowout Risk", "Game"]
+_vdf = pd.DataFrame(view)
+for _c in _cols:
+    if _c not in _vdf.columns:
+        _vdf[_c] = None
+df = _vdf[_cols].rename(columns={"Opp Allows": "Opp Team Total", "Recent Avg": "Form"})
+df["Fatigue"] = df["Fatigue"].fillna("").replace("", "—")
 st.dataframe(
-    df.style.format({"Recent Avg": "{:.1f}", "Opp Team Total": "{:.1f}", "Opp Pace": "{:.1f}",
+    df.style.format({"Form": "{:.1f}", "Opp Team Total": "{:.1f}", "Opp Pace": "{:.1f}",
                      "Opp Allows /100 Poss": "{:.1f}", "Slate Avg /100 Poss": "{:.1f}",
-                     "Matchup Factor": "{:.2f}×", "Matchup Score": "{:.1f}"}, na_rep="—")
+                     "Matchup Factor": "{:.2f}×", "Team D Factor": "{:.2f}×", "Position Matchup": "{:.2f}×",
+                     "Matchup Score": "{:.1f}"}, na_rep="—")
     .theme_gradient(cmap="RdYlGn", subset=["Matchup Factor"]),
     hide_index=True, width="stretch", height=520,
 )
+st.caption("**Form** is the same number everywhere on the platform: this season's games, topped up to five from "
+           "last season at half weight, newer games counting more. **Matchup Factor** is the position-level matchup "
+           "(the same number as Position Matchups' Player props) when one is available, else the team-wide "
+           "pace-adjusted factor (**Team D Factor**). **Matchup Score** = Form × Matchup Factor × fatigue (own and "
+           "opponent's back-to-backs).")
 st.caption("\"Opp Team Total\" = that opponent's entire team combined for that stat, raw per-game "
            "(not a per-player or per-position figure). \"Opp Pace\" = their estimated possessions "
            "per game recently. \"Matchup Factor\" = Opp Allows /100 Poss ÷ Slate Avg /100 Poss — "
            "the pace-adjusted rate driving color and sort — above 1.08 is 🟢, below 0.92 is 🔴, "
-           "in between is 🟡 neutral. \"Rest\" = her OWN team's rest, separate from the matchup "
+           "in between is 🟡 neutral. \"Rest\" = the player's OWN team's rest, separate from the matchup "
            "read entirely — \"—\" means no recent game was found to compute it from (start of "
-           "season, not a claim she's fresh). \"Spread\"/\"Blowout Risk\" need the button above "
+           "season, not a claim the player is fresh). \"Spread\"/\"Blowout Risk\" need the button above "
            "clicked once — until then they show \"—\", not a fabricated \"competitive\" guess.")
 
 with st.expander("Full column reference"):
     st.markdown("""
-- **Recent Avg** — the player's own bootstrap-model average over their last 10 games (same number
-  Best Bets/Edge Board use), with no opponent adjustment.
+- **Form** — the player's recent form under the platform-wide rule (form_policy): this season first, topped up
+  to five games from last season at half weight, newer games weighted more. No opponent adjustment.
 - **Opp Team Total** — how much tonight's opponent has been giving up at this stat over *their*
   last 10 games, as a WHOLE TEAM (all 5 players combined, not per-position), raw per-game. Built
   from box score data already fetched for the slate — no extra API cost.
@@ -252,22 +285,23 @@ with st.expander("Full column reference"):
 - **Matchup Factor** — see the note above the table for what the color and tags mean. A missing
   opponent or possession read (too few recent games for that team) stays neutral (1.00×) rather
   than guessing.
-- **Matchup Score** — Recent Avg × Matchup Factor. The number this board is sorted by.
+- **Matchup Score** — Form × Matchup Factor × fatigue (own back-to-back, opponent back-to-back). The number this board is sorted by.
+- **Position Matchup** — NBA: what this opponent allows to this player's position (G/F/C), shrunk for small samples and
+  blended with last season — identical to Position Matchups. When present it is the Matchup Factor.
 - **Rest** — the PLAYER'S OWN team's rest heading into tonight (not the opponent's), computed from
   game dates already on file — zero extra API cost. "⚠️ B2B" = second night of a back-to-back, a
   well-documented real fatigue risk. Deliberately separate from Matchup Factor/Score, which are
   entirely about the opponent's defense — rest is a different kind of risk, not another input into
   the same number. "—" means no recent game was found in the lookback window (start of season),
   reported honestly as unknown rather than assumed "well-rested."
-- **Spread / Blowout Risk** — her OWN team's live game spread (negative = favorite, positive =
+- **Spread / Blowout Risk** — the player's OWN team's live game spread (negative = favorite, positive =
   underdog) and a simple ±10-point threshold flag on it. Needs the "📡 Fetch game spreads" button
   clicked once (a cheap, slate-wide fetch, cached — switching players/markets afterward doesn't
   re-fetch). NOT a claim about which specific player is affected: a wide spread means the
   favorite's stars risk reduced 4th-quarter minutes AND the underdog's bench risks extended run —
-  read it alongside her own role (AvgMin), not as a directional adjustment to her number.
+  read it alongside the player's own role (AvgMin), not as a directional adjustment to the player's number.
     """)
 
-st.caption("v1 signal, now pace-, rest-, and blowout-aware — still no positional matchup data "
-           "(who's actually likely to guard this player) or injury/availability context. This "
-           "measures team-wide generosity at a stat, per possession, not a specific positional "
-           "mismatch. A reasonable next layer, not built yet.")
+st.caption("Pace-, rest- and blowout-aware, and (NBA) position-level: the matchup and form here match Position "
+           "Matchups and Matchup Lab. Still no individual-defender data or injury-driven usage changes on this page "
+           "— those live on Position Matchups' Player props tab.")

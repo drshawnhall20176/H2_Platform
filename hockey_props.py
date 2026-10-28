@@ -233,7 +233,7 @@ def player_rows(rot: Dict[str, List[Dict]], team, opp, market: str, pgames, line
             over_p = under_p = price_src = p_mkt = None
         floor = (0.12, 3.0) if m["dist"] == "normal" else (0.25, 1.0)
         read = PE.read_line(proj, b["vals"], line, m["dist"], over_p, under_p, p_mkt, ctx.get("slope", 1.0),
-                            ctx.get("model_weight", PE.MODEL_WEIGHT), *floor)
+                            ctx.get("model_weight", PE.MODEL_WEIGHT), *floor, news_checked=bool(ctx.get("news_checked")))
         hits = [v for v in b["vals"] if line is not None and PE.clears(v, line)]
         rows.append({
             "pid": key, "player": r.get("name"), "slot": r.get("slot"), "status": r.get("status"), "out": b["out"],
@@ -242,7 +242,7 @@ def player_rows(rot: Dict[str, List[Dict]], team, opp, market: str, pgames, line
             "projection": proj, "line": line, "line_src": line_src, "over_price": over_p, "under_price": under_p,
             "price_src": price_src, "book": book,
             "hit": (len(hits), len(b["vals"])) if line is not None and b["vals"] else None,
-            "p_model": read["p_model"], "p_market": read["p_market"], "p_final": read["p_final"],
+            "p_model": read["p_model"], "p_market": read["p_market"], "p_final": read["p_final"], "gap": read.get("gap"), "gap_pct": read.get("gap_pct"),
             "side": read["side"], "ev": read["ev"], "lean": read["lean"], "flags": flags, "dist": m["dist"],
         })
     return rows

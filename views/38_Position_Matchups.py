@@ -27,6 +27,7 @@ import position_lines as PL
 import position_logview as PV
 import position_matchups as PM
 import player_props as PPR
+import form_policy as FPol
 import quick_log
 import sports
 import styling  # noqa: F401  (installs the theme-proof styles)
@@ -164,8 +165,29 @@ else:
     tab_pos, tab_h2h = st.tabs(["🧭 Depth vs defense", "⚔️ Head-to-head"])
 
 
+def _model_factors(defense) -> dict:
+    """Basketball: {slot: the Player props tab's matchup factor for PRA} -- the raw 4-game numbers adjusted for
+    the small sample and blended with last season, so this tab and the props tab show the same matchup."""
+    props = bundle.get("props") or {}
+    if FAMILY != "basketball" or not props.get("cur_pgames"):
+        return {}
+    cur_t = PPR.defense_allowed(PM.allowed_by_slot(props["cur_pgames"], SPORT_KEY), "PRA")
+    pri_t = (PPR.defense_allowed(PM.allowed_by_slot(props["prior_pgames"], SPORT_KEY), "PRA")
+             if props.get("prior_pgames") else None)
+    out = {}
+    for slot in PM.SLOTS_BY_SPORT[SPORT_KEY]:
+        cur = PPR.raw_factor(cur_t, defense, slot)
+        pri = PPR.raw_factor(pri_t, defense, slot) if pri_t else None
+        if cur is not None or pri is not None:
+            out[slot] = PPR.blended_factor(cur, pri, "blend" if SPORT_KEY == "NBA" else "season")["factor"]
+    return out
+
+
 def render_side(side, off_name, def_name):
     st.markdown(f"#### {off_name} offense  vs  {def_name} defense")
+    mf = _model_factors(side["defense"])
+    for r in side["rows"]:
+        r["model_factor"] = mf.get(r["slot"])
     if not side["ranked"]:
         st.caption("Not enough defenses with a full sample to rank yet, so the table shows what this defense has "
                    "allowed per game without a league rank." if FAMILY == "basketball" and SPORT_KEY == "NCAAMB" else
@@ -451,11 +473,8 @@ def _rest_days(team):
 
 
 def _rest_text(name, days) -> str:
-    if days is None:
-        return f"{name}: rest unknown"
-    if days <= 1:
-        return f"{name}: **back-to-back** (played yesterday)"
-    return f"{name}: {days - 1} day{'s' if days - 1 != 1 else ''} off"
+    txt = FPol.rest_text(days)                       # the one wording every page uses
+    return f"{name}: **back-to-back** (played yesterday)" if txt == "back-to-back" else f"{name}: {txt}"
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -476,7 +495,7 @@ def render_game_context(market: str) -> dict:
     skey = gkey + (okey,)
     if skey not in store and st.session_state.get("pm_props_auto", True):
         try:
-            with st.spinner("Getting tonight's lines from the books..."):
+            with st.spinner(f"Getting tonight's {market} lines from the books..."):
                 auto = _auto_book_lines(_active.odds_sport_key, date_str, home_name, away_name, okey)
         except Exception as exc:                                   # noqa: BLE001
             auto = {"error": f"Couldn't reach the books ({type(exc).__name__})."}
@@ -565,9 +584,10 @@ def render_props_team(team, opp, off_name, def_name, market, mode, tables, g):
     opp_imp = (implied[1] if is_home else implied[0]) if implied else None
     spread_team = None if g["spread_home"] is None else (g["spread_home"] if is_home else -g["spread_home"])
     base_ctx = {"rest_days": _rest_days(team), "opp_rest_days": _rest_days(opp), "spread": spread_team,
-                "offers": g["offers"], "slope": g["slope"], "model_weight": g["model_weight"]}
+                "offers": g["offers"], "slope": g["slope"], "model_weight": g["model_weight"],
+                "news_checked": bool(st.session_state.get("pm_news_checked"))}
     key = f"pm_props_{SPORT_KEY}_{game_label}_{market}_{team}"
-    st.markdown(f"#### {off_name}  vs  {def_name} defense")
+    st.markdown(f"#### {off_name}  vs  {def_name} defense · {market}")
     if PFAM == "football":
         mk = FP.MARKETS[market]
         roster = (PROPS.get("roster") or {}).get(team) or []
@@ -712,56 +732,75 @@ if tab_props is not None:
             elif SPORT_KEY == "NCAAMB":
                 st.caption("College basketball: only these two teams' games are loaded, so there's no league average "
                            "for the matchup factor — projections are form, minutes, rest and the game lines.")
-        g = render_game_context(market)
-        tables = {}
-        if PFAM == "basketball":
-            tables = {"cur": PPR.defense_allowed(PM.allowed_by_slot(PROPS.get("cur_pgames") or [], SPORT_KEY), market),
-                      "prior": (PPR.defense_allowed(PM.allowed_by_slot(PROPS["prior_pgames"], SPORT_KEY), market)
-                                if PROPS.get("prior_pgames") else None)}
-            if not g["implied"]:
-                pace = PPR.pace_flag(PROPS.get("cur_pgames") or PROPS.get("pgames"), bundle["home"], bundle["away"])
-                if pace:
-                    msg = (f"{pace['label']}: these two teams project to about **{pace['projected_total']:.0f}** total "
-                           f"points vs a {pace['league_total']:.0f} average ({pace['pct']:+.0f}%).")
-                    (st.warning if pace["label"] != "Normal pace" else st.caption)(
-                        msg + (" Load or type the game total to fold this into every projection."
-                               if abs(pace["pct"]) >= PPR.PACE_FLAG_PCT else ""))
-        v1, v2 = st.columns(2)
-        with v1:
-            st.toggle("✏️ Enter my own lines & prices", key="pm_props_edit",
-                      help="Switches the tables to edit mode: type your book's line and odds for any player. What you "
-                           "type is kept when you switch back.")
-        with v2:
-            st.toggle("Show the model's working", key="pm_props_details",
-                      help="Adds minutes / volume, recent form, the matchup and the game-environment adjustment.")
-        top = st.container()
-        away_rows = render_props_team(bundle["away"], bundle["home"], away_name, home_name, market, mode, tables, g)
-        st.divider()
-        home_rows = render_props_team(bundle["home"], bundle["away"], home_name, away_name, market, mode, tables, g)
-        all_rows = away_rows + home_rows
-        with top:
-            team_of = {r["pid"]: away_name for r in away_rows}
-            team_of.update({r["pid"]: home_name for r in home_rows})
-            reads = PE.best_reads(all_rows, team_of)
-            st.markdown(f"#### 🔥 Best {market} reads in this game")
-            if reads:
-                st.dataframe(pd.DataFrame(reads), hide_index=True, width="stretch")
-            elif not any(r.get("line") is not None for r in all_rows):
-                st.info("No lines posted for this market yet — books usually post player props the afternoon of the "
-                        "game. The projections below are ready; picks appear once lines are up (or type your own).",
-                        icon="🕐")
-            else:
-                st.caption("No side clears the bar for value in this market right now — try another market.")
-        st.caption("**Pick** = the side the model favors; **Chance** = how likely it is; **Lean** = 🟢/🔴 only when "
-                   "that side has **+3% value at the price shown** (no price: the projection 5%+ past the line and "
-                   "55%+ to hit). Low counts (rebounds, assists, blocks, steals, "
-                   "receptions, shots, goals) use count odds, not a bell curve. **Notes** flag back-to-backs, blowout "
-                   "risk, game script and next-man-up bumps. Overtime isn't modelled.")
-        render_sgp(all_rows, market)
-        log_fn = {"football": FP.plays_for_log, "hockey": HP.plays_for_log}.get(PFAM, PPR.plays_for_log)
-        plays = log_fn(all_rows, market, f"{away_name} @ {home_name}")
-        if plays:
-            quick_log.render_quick_log(plays, date_str, SPORT_KEY, key_prefix=f"pm_props_{game_label}_{market}")
+        # Everything below the market picker lives in ONE slot that is emptied the moment the script gets here, so
+        # switching markets never leaves the previous market's tables on screen while the new lines load.
+        _body = st.empty()
+        _body.empty()
+        with _body.container():
+            g = render_game_context(market)
+            tables = {}
+            if PFAM == "basketball":
+                tables = {"cur": PPR.defense_allowed(PM.allowed_by_slot(PROPS.get("cur_pgames") or [], SPORT_KEY), market),
+                          "prior": (PPR.defense_allowed(PM.allowed_by_slot(PROPS["prior_pgames"], SPORT_KEY), market)
+                                    if PROPS.get("prior_pgames") else None)}
+                if not g["implied"]:
+                    pace = PPR.pace_flag(PROPS.get("cur_pgames") or PROPS.get("pgames"), bundle["home"], bundle["away"])
+                    if pace:
+                        msg = (f"{pace['label']}: these two teams project to about **{pace['projected_total']:.0f}** total "
+                               f"points vs a {pace['league_total']:.0f} average ({pace['pct']:+.0f}%).")
+                        (st.warning if pace["label"] != "Normal pace" else st.caption)(
+                            msg + (" Load or type the game total to fold this into every projection."
+                                   if abs(pace["pct"]) >= PPR.PACE_FLAG_PCT else ""))
+            v1, v2 = st.columns(2)
+            with v1:
+                st.toggle("✏️ Enter my own lines & prices", key="pm_props_edit",
+                          help="Switches the tables to edit mode: type your book's line and odds for any player. What you "
+                               "type is kept when you switch back.")
+            with v2:
+                st.toggle("Show the model's working", key="pm_props_details",
+                          help="Adds minutes / volume, recent form, the matchup and the game-environment adjustment.")
+            st.toggle("📰 I've checked the news for the ⚠️ market-disagreement plays", key="pm_news_checked",
+                      help="When the books' line is far from the model's projection (20%+ and more than his usual "
+                           "game-to-game swing), the market usually knows something — a minutes limit, a role change, "
+                           "an injury. Those plays get no lean until you've checked. Even then the model only gets "
+                           "20% of the vote on them.")
+            top = st.container()
+            away_rows = render_props_team(bundle["away"], bundle["home"], away_name, home_name, market, mode, tables, g)
+            st.divider()
+            home_rows = render_props_team(bundle["home"], bundle["away"], home_name, away_name, market, mode, tables, g)
+            all_rows = away_rows + home_rows
+            with top:
+                team_of = {r["pid"]: away_name for r in away_rows}
+                team_of.update({r["pid"]: home_name for r in home_rows})
+                reads = PE.best_reads(all_rows, team_of)
+                st.markdown(f"#### 🔥 Best {market} reads in this game")
+                if reads:
+                    st.dataframe(pd.DataFrame(reads), hide_index=True, width="stretch")
+                gaps = PE.market_gaps(all_rows, team_of)
+                if gaps:
+                    st.markdown("#### ⚠️ Model vs the books — check before betting")
+                    st.dataframe(pd.DataFrame(gaps), hide_index=True, width="stretch")
+                    st.caption("These lines sit far from the model's projection. Usually the books know something "
+                               "the box scores don't (a minutes limit, a returning starter, an injury). Check the "
+                               "injury report and lineup news; if nothing explains it, the 📰 toggle above shows "
+                               "leans — with the market getting 80% of the vote. Bets logged on these are tagged "
+                               "**market-gap**, and the Scorecard tracks who turns out right.")
+                if not reads and not any(r.get("line") is not None for r in all_rows):
+                    st.info("No lines posted for this market yet — books usually post player props the afternoon of the "
+                            "game. The projections below are ready; picks appear once lines are up (or type your own).",
+                            icon="🕐")
+                elif not reads and not gaps:
+                    st.caption("No side clears the bar for value in this market right now — try another market.")
+            st.caption("**Pick** = the side the model favors; **Chance** = how likely it is; **Lean** = 🟢/🔴 only when "
+                       "that side has **+3% value at the price shown** (no price: the projection 5%+ past the line and "
+                       "55%+ to hit). Low counts (rebounds, assists, blocks, steals, "
+                       "receptions, shots, goals) use count odds, not a bell curve. **Notes** flag back-to-backs, blowout "
+                       "risk, game script and next-man-up bumps. Overtime isn't modelled.")
+            render_sgp(all_rows, market)
+            log_fn = {"football": FP.plays_for_log, "hockey": HP.plays_for_log}.get(PFAM, PPR.plays_for_log)
+            plays = log_fn(all_rows, market, f"{away_name} @ {home_name}")
+            if plays:
+                quick_log.render_quick_log(plays, date_str, SPORT_KEY, key_prefix=f"pm_props_{game_label}_{market}")
 
 
 def render_logged_props(markets) -> None:
@@ -792,6 +831,20 @@ def render_logged_props(markets) -> None:
     m3.metric("Avg CLV", "—" if clv.get("avg_clv") is None else f"{clv['avg_clv']:+.1f}%",
               help=f"{clv.get('n_book', 0)} book-captured + {clv.get('n_manual', 0)} hand-typed prices.")
     m4.metric("Beat the close", "—" if clv.get("beat_close_rate") is None else f"{clv['beat_close_rate']:.0f}%")
+    gap_bets = [b for b in bets if (b.get("notes") or "") == PE.GAP_TAG]
+    if gap_bets:
+        rest = [b for b in bets if b not in gap_bets]
+        rows_ = []
+        for label, grp in (("⚠️ Market-gap plays", gap_bets), ("Everything else", rest)):
+            sm, cl = B.summary(grp), B.real_price_clv_summary(grp)
+            rows_.append({"Bets": label, "Record": f"{sm.get('wins', 0)}-{sm.get('losses', 0)}",
+                          "Profit": f"${sm.get('profit', 0):,.2f}",
+                          "ROI": "—" if sm.get("roi") is None else f"{sm['roi']:+.1f}%",
+                          "Avg CLV": "—" if cl.get("avg_clv") is None else f"{cl['avg_clv']:+.1f}%"})
+        st.markdown("**Who's been right when the model and the books disagree?**")
+        st.dataframe(pd.DataFrame(rows_), hide_index=True, width="stretch")
+        st.caption("If market-gap plays keep losing (or closing worse than you bet them), the books knew something — "
+                   "keep skipping them. If they win and beat the close, the model is spotting real mispricings.")
     cal = B.calibration(bets)
     if cal:
         st.dataframe(pd.DataFrame([{"Model said": f"{c['lo']:.0%}–{c['hi']:.0%}", "Avg model": f"{c['predicted']:.0%}",
@@ -867,7 +920,9 @@ if tab_pos is not None:
                    + ("A slot is the player used most there that game (running backs by carries, receivers by targets), "
                       "so WR1 is usage, not just the depth-chart label." if FAMILY == "football" else
                       "Guards / Forwards / Centers use each player's ESPN position; the numbers are the whole group's totals, and "
-                      "every rotation player (10+ min) gets his own row against his group."
+                      "every rotation player (10+ min) gets his own row against his group. **Model matchup** is the same number "
+                      "the Player props tab uses: these raw numbers adjusted for the small sample and blended with last "
+                      "season."
                       + (" Every rotation player, with his own projection, is on the **🎯 Player props** tab." if HAS_PROPS else "")))
         render_side(bundle["away_off"], away_name, home_name)
         st.divider()

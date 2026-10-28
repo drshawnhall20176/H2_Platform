@@ -29,6 +29,9 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+import form_policy as FPol
+import props_engine as PE
+
 import retro as R
 import calibration_corrections as CC
 import player_calibration_corrections as PCC
@@ -51,6 +54,22 @@ _MARKET_SPEC = {
     "player_threes":   ("FG3M", "Threes Made", 1.5),
 }
 _STAT_KEY = {"PTS": "pts", "REB": "reb", "AST": "ast", "FG3M": "fg3m"}
+
+
+def _form(row: Dict, col: str) -> float:
+    """The player's recent form for one stat under the platform-wide rule (form_policy): this season first,
+    topped up to five games from last season at half weight, newer games counting more. The same number
+    Position Matchups' Player props uses. Falls back to the row's plain average when it has no game log."""
+    log = row.get("_game_log") or []
+    v = FPol.form_avg(log, _STAT_KEY[col]) if log else None
+    return round(v, 1) if v is not None else row.get(col, 0.0)
+
+
+def _window_log(season_log: Optional[List[Dict]], row: Dict) -> List[Dict]:
+    """This season's games (current) followed by the row's last-season lines (prior), for last-N windows."""
+    cur = [dict(g, src="current") for g in (season_log or [])]
+    prior = [g for g in (row.get("_game_log") or []) if g.get("src") == "prior"]
+    return cur + prior
 
 
 def market_list() -> List[Tuple[str, str, str]]:
@@ -365,7 +384,8 @@ blowout_risk_tag = BB_P.blowout_risk_tag
 # --------------------------------------------------------------------------- Hot Hand Engine
 def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[int, Dict[str, float]],
                          team_rest: Optional[Dict[int, Dict]] = None,
-                         team_spreads: Optional[Dict[str, float]] = None) -> List[Dict]:
+                         team_spreads: Optional[Dict[str, float]] = None,
+                         position_factors: Optional[Dict] = None) -> List[Dict]:
     """Matchup-adjusted leaderboard: each rotation player's recent-form average, scaled by how
     much their tonight's opponent has been allowing at that stat, RELATIVE to the average allowed
     rate across every opponent actually on tonight's slate (not a full-league scan — deliberately
@@ -426,9 +446,15 @@ def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[int, Dict[str, floa
         opp_poss = (opp_stats or {}).get("poss", 0.0)
         rest = team_rest.get(r.get("_team_id")) or {}
         spread = team_spreads.get(r["Team"])
+        opp_rest = team_rest.get(r.get("_opp_id")) or {}
+        # Fatigue, the same way every page reads it (props_engine.rest_effect): own back-to-back trims heavy-
+        # minute players and everyone's efficiency a little; an opponent on a back-to-back gives a little back.
+        fatigue = PE.rest_effect(rest.get("rest_days"), opp_rest.get("rest_days"), r.get("AvgMin") or 0.0,
+                                 "basketball")
+        rest_mult = fatigue["opp_mult"] * fatigue["rate_mult"]
         for _mkey, (col, disp, _line) in _MARKET_SPEC.items():
             stat_key = _STAT_KEY[col]
-            player_avg = r.get(col, 0.0)
+            player_avg = _form(r, col)
             base_rate = baseline.get(stat_key, 0.0)          # per-100-poss, constant across rows
             allowed = (opp_stats or {}).get(stat_key, 0.0)   # raw per-game, for display context
             allowed_rate = (allowed / opp_poss * 100) if opp_poss > 0 else 0.0
@@ -436,6 +462,13 @@ def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[int, Dict[str, floa
                 factor = allowed_rate / base_rate
             else:
                 factor = 1.0   # no opponent/pace data yet -> neutral, never a fabricated boost/penalty
+            team_factor = factor
+            # One matchup number across the platform: when Position Matchups' position-level factor (shrunk for
+            # small samples, blended with last season) is available for this player + stat, it IS the matchup;
+            # the team-wide pace-adjusted factor stays visible as its own column.
+            pos_f = (position_factors or {}).get((r.get("_pid"), stat_key))
+            if pos_f is not None:
+                factor = pos_f
             if factor >= 1.08:
                 tag = "🟢 Plus matchup"
             elif factor <= 0.92:
@@ -451,7 +484,12 @@ def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[int, Dict[str, floa
                 "Opp Allows /100 Poss": round(allowed_rate, 1) if allowed_rate else None,
                 "Slate Avg /100 Poss": round(base_rate, 1) if base_rate else None,
                 "Matchup Factor": round(factor, 2),
-                "Matchup Score": round(player_avg * factor, 1),
+                "Team D Factor": round(team_factor, 2),
+                "Position Matchup": round(pos_f, 2) if pos_f is not None else None,
+                "Matchup Score": round(player_avg * factor * rest_mult, 1),
+                "Opp Rest Days": opp_rest.get("rest_days"),
+                "Opp B2B": bool(opp_rest.get("is_back_to_back", False)),
+                "Fatigue": " · ".join(fatigue["flags"]),
                 "Tag": tag,
                 "Rest Days": rest.get("rest_days"),
                 "B2B": bool(rest.get("is_back_to_back", False)),
@@ -590,17 +628,19 @@ def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_allowed: Dict[str,
     out: List[Dict] = []
     for _mkey, (col, disp, _line) in _MARKET_SPEC.items():
         stat_key = _STAT_KEY[col]
-        recent_avg = row.get(col, 0.0)
+        recent_avg = _form(row, col)
         season_avg = season_avgs.get(stat_key)
         h2h_avg = h2h_avgs.get(stat_key)
 
-        if window_n is None:
-            window_avg = season_avg
-        elif window_n == 5:
-            window_avg = l5_avgs.get(stat_key)
-        elif window_n == 10:
-            window_avg = l10_avgs.get(stat_key)
-        else:
+        window_avg = season_avg if window_n is None else None
+        window_prior = 0
+        window_games = None
+        if window_n in (5, 6, 10):
+            # Last N: this season's games, topped up from last season when this season is shorter (counted in
+            # "Window Prior", so the page can say "incl. N from last season") -- never blank in the first weeks.
+            wa = FPol.window_avg(_window_log(season_log, row), stat_key, window_n)
+            window_avg, window_prior, window_games = wa["avg"], wa["prior"], wa["games"]
+        elif window_n is not None:
             window_avg = None   # an unsupported window is an honest None, never a silent fallback
 
         hvals = [g.get(stat_key, 0.0) for g in h2h_log]
@@ -627,6 +667,8 @@ def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_allowed: Dict[str,
             "Market": disp,
             "Recent Avg": recent_avg,
             "Window Avg": round(window_avg, 1) if window_avg is not None else None,
+            "Window Prior": window_prior,
+            "Window Games": window_games,
             "Opp Window Allowed": round(window_allowed, 1) if window_allowed else None,
             "H2H Games": len(hvals),
             "H2H Avg": round(h2h_avg, 1) if h2h_avg is not None else None,

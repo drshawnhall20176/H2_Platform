@@ -344,7 +344,7 @@ def test_get_team_recent_allowed_stats_averages_opponent_totals():
 # ----------------------------------------------------------------- get_team_rest_info
 def test_get_team_rest_info_flags_back_to_back():
     events = {"events": [{
-        "id": "g1", "date": "2026-07-13T00:00Z", "status": {"type": {"completed": True}},
+        "id": "g1", "date": "2026-07-13T23:00Z", "status": {"type": {"completed": True}},
         "competitions": [{"competitors": [{"team": {"id": "20"}},
                                           {"team": {"id": "19", "displayName": "Chicago Sky"}}]}],
     }]}

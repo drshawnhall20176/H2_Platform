@@ -29,6 +29,7 @@ from __future__ import annotations
 import math
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
+import form_policy as FPol
 import props_engine as PE
 
 # Display name -> the box-score stats it sums. PRA first: it's the default market.
@@ -43,14 +44,15 @@ MARKETS: Dict[str, Tuple[str, ...]] = {
     "PR": ("pts", "reb"),
     "PB": ("pts", "blk"),
     "RA": ("reb", "ast"),
+    "Threes Made": ("fg3m",),
 }
 DEFAULT_MARKET = "PRA"
 MARKET_HELP = {"PRA": "Points + Rebounds + Assists", "PA": "Points + Assists", "PR": "Points + Rebounds",
-               "PB": "Points + Blocks", "RA": "Rebounds + Assists"}
+               "PB": "Points + Blocks", "RA": "Rebounds + Assists", "Threes Made": "3-pointers made"}
 
 FORM_N = 5                 # a player's "lately" window, games
 HIT_N = 10                 # the window his hit rate against a line is counted over
-FILL_BELOW = 3             # fewer than this many games this season -> fill his form from the end of last season
+FILL_BELOW = 5             # = form_policy.MIN_CURRENT: fewer games this season -> topped up from last season (half weight)
 SHRINK_K = 10.0            # games of a defense that count as half-trusted (n / (n + K))
 FACTOR_RANGE = (0.80, 1.20)
 MIN_MINUTES = 10.0         # rotation cut-off (average minutes)
@@ -62,13 +64,14 @@ MIN_DEFENSES = 8           # a league average from fewer defenses than this isn'
 _OUT = {"out", "injured reserve", "ir", "suspended", "inactive"}
 
 # How each market is shaped: low counts get a negative binomial, totals a normal curve.
-DIST = {"Rebounds": "count", "Assists": "count", "Blocks": "count", "Steals": "count"}
+DIST = {"Rebounds": "count", "Assists": "count", "Blocks": "count", "Steals": "count", "Threes Made": "count"}
 # How strongly each stat moves with a game's scoring environment (points fully, rebounds a little).
-ENV_WEIGHTS = {"pts": 1.0, "ast": 0.7, "reb": 0.4, "stl": 0.3, "blk": 0.3, "_default": 0.8}
+ENV_WEIGHTS = {"pts": 1.0, "ast": 0.7, "reb": 0.4, "stl": 0.3, "blk": 0.3, "fg3m": 0.9, "_default": 0.8}
 # The Odds API market key behind each market (Points + Blocks isn't posted there).
 ODDS_MARKETS = {"Points": "player_points", "Rebounds": "player_rebounds", "Assists": "player_assists",
                 "Blocks": "player_blocks", "Steals": "player_steals", "PRA": "player_points_rebounds_assists",
-                "PR": "player_points_rebounds", "PA": "player_points_assists", "RA": "player_rebounds_assists"}
+                "PR": "player_points_rebounds", "PA": "player_points_assists", "RA": "player_rebounds_assists",
+                "Threes Made": "player_threes"}
 
 
 def _num(x) -> float:
@@ -178,16 +181,13 @@ def player_values(pgames: Iterable[Dict], pid, market: str, n: int) -> List[floa
 
 
 def form_games(cur_pgames, prior_pgames, pid) -> Dict:
-    """His recent games (newest first): this season's, topped up from the end of last season when he has fewer
-    than FILL_BELOW this season (flagged). {"games", "season_games", "filled"}."""
-    cur = _games(cur_pgames, pid, HIT_N)
-    games, filled = list(cur), False
-    if len(cur) < FILL_BELOW:
-        extra = _games(prior_pgames, pid, HIT_N)
-        if extra:
-            games = cur + extra[: HIT_N - len(cur)]
-            filled = True
-    return {"games": games, "season_games": len(cur), "filled": filled}
+    """His form games (newest first) under the platform-wide rule (form_policy): this season's, topped up to five
+    from the end of last season (those count half). {"games", "weights", "season_games", "filled"}."""
+    cur = [dict(g, src="current") for g in _games(cur_pgames, pid, HIT_N)]
+    prior = [dict(g, src="prior") for g in _games(prior_pgames, pid, HIT_N)]
+    games = FPol.select(cur + prior, window=HIT_N)
+    return {"games": games, "weights": FPol.weights(games), "season_games": len(cur),
+            "filled": any(g.get("src") == "prior" for g in games)}
 
 
 def form(cur_pgames, prior_pgames, pid, market: str) -> Dict:
@@ -267,10 +267,11 @@ def player_rows(rotation_list: Sequence[Dict], defense, market: str, cur_table: 
         games = f["games"]
         values = [market_value(g.get("stats") or {}, market) for g in games]
         mins = [_num((g.get("stats") or {}).get("min")) for g in games]
-        rate, proj_min = PE.rate_and_opportunity(values, mins)
+        rate, proj_min = PE.rate_and_opportunity(values, mins, f["weights"])
         out = is_out(r.get("status"))
         fresh = out and PE.fresh_absence([g.get("game") for g in _games(cur_pgames, r["pid"], HIT_N)], team_games)
         base.append({"r": r, "f": f, "values": values, "games": games, "rate": rate, "proj_min": proj_min,
+                     "w": f["weights"],
                      "out": out, "fresh": fresh})
     shifts = PE.redistribute([{"pid": b["r"]["pid"], "name": b["r"]["name"], "slot": b["r"]["slot"],
                                "opp": b["proj_min"] or 0.0, "rate": b["rate"] or 0.0, "out": b["out"],
@@ -285,7 +286,7 @@ def player_rows(rotation_list: Sequence[Dict], defense, market: str, cur_table: 
                                                                           if current_is_prior else None)
         fac = blended_factor(cur, pri, mode)
         values = b["values"]
-        recent_avg = PE.wmean(values) if values else None
+        recent_avg = PE.wmean(values, b["w"]) if values else None
         flags: List[str] = []
         proj, opp = None, None
         env_mult = 1.0
@@ -327,7 +328,7 @@ def player_rows(rotation_list: Sequence[Dict], defense, market: str, cur_table: 
         else:
             over_p = under_p = price_src = p_mkt = None
         read = PE.read_line(proj, values, line, dist, over_p, under_p, p_mkt, ctx.get("slope", 1.0),
-                            ctx.get("model_weight", PE.MODEL_WEIGHT))
+                            ctx.get("model_weight", PE.MODEL_WEIGHT), news_checked=bool(ctx.get("news_checked")))
         hits = [v for v in values if line is not None and clears(v, line)]
         rows.append({
             "pid": r["pid"], "player": r["name"], "slot": slot, "status": r.get("status"), "out": b["out"],
@@ -337,7 +338,7 @@ def player_rows(rotation_list: Sequence[Dict], defense, market: str, cur_table: 
             "env": env_mult, "projection": proj, "line": line, "line_src": line_src,
             "over_price": over_p, "under_price": under_p, "price_src": price_src, "book": book,
             "hit": (len(hits), len(values)) if line is not None and values else None,
-            "p_model": read["p_model"], "p_market": read["p_market"], "p_final": read["p_final"],
+            "p_model": read["p_model"], "p_market": read["p_market"], "p_final": read["p_final"], "gap": read.get("gap"), "gap_pct": read.get("gap_pct"),
             "p_over": read["p_final"], "side": read["side"], "ev": read["ev"], "lean": read["lean"],
             "flags": flags, "dist": dist,
         })
@@ -396,3 +397,49 @@ def pace_flag(pgames: Iterable[Dict], home, away) -> Optional[Dict]:
     label = ("⚡ Fast, high-scoring matchup" if pct >= PACE_FLAG_PCT else
              "🐢 Slow, low-scoring matchup" if pct <= -PACE_FLAG_PCT else "Normal pace")
     return {"projected_total": proj, "league_total": league, "pct": pct, "label": label}
+
+
+# --------------------------------------------------------------------------- one matchup number for every page
+STAT_MARKET = {"pts": "Points", "reb": "Rebounds", "ast": "Assists", "fg3m": "Threes Made"}
+
+
+def player_slots(pgames) -> Dict:
+    """{player id: G/F/C} from each player's most recent game in the sample."""
+    import position_matchups as PM
+    latest: Dict = {}
+    for p in pgames or []:
+        pid = p.get("pid")
+        if pid is None:
+            continue
+        o = str(p.get("order") or "")
+        if pid not in latest or o > latest[pid][0]:
+            latest[pid] = (o, PM.position_group(p.get("pos")))
+    return {pid: slot for pid, (_, slot) in latest.items() if slot}
+
+
+def position_factors(players: Iterable[Tuple], cur_pgames, prior_pgames, sport: str = "NBA",
+                     mode: str = "blend") -> Dict:
+    """The position-level matchup factor -- shrunk for small samples and blended with last season, exactly as the
+    Player props tab computes it -- for each (player id, opponent id) in `players`, for every stat in STAT_MARKET.
+    Returns {(player id, stat key): factor}. Hot Hand Engine and Matchup Lab show this same number, so a player's
+    matchup reads the same on every page."""
+    import position_matchups as PM
+    slots = player_slots(list(cur_pgames or []) + list(prior_pgames or []))
+    cur_allowed = PM.allowed_by_slot(cur_pgames or [], sport)
+    prior_allowed = PM.allowed_by_slot(prior_pgames or [], sport) if prior_pgames else None
+    tables = {}
+    for stat, market in STAT_MARKET.items():
+        tables[stat] = (defense_allowed(cur_allowed, market),
+                        defense_allowed(prior_allowed, market) if prior_allowed else None)
+    out: Dict = {}
+    for pid, opp in players:
+        slot = slots.get(pid)
+        if slot is None:
+            continue
+        for stat, (cur_t, pri_t) in tables.items():
+            cur = raw_factor(cur_t, opp, slot)
+            pri = raw_factor(pri_t, opp, slot) if pri_t else None
+            if cur is None and pri is None:
+                continue
+            out[(pid, stat)] = blended_factor(cur, pri, mode)["factor"]
+    return out

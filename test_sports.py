@@ -881,10 +881,10 @@ def test_matchup_lab_window_selector_wired_into_both_tables():
     # actually wired into both displayed tables, not just computed and left unused.
     src = (_HERE / "views" / "11_Matchup_Lab.py").read_text()
     assert 'window_label = st.radio("Window",' in src, "the real Window selector must actually exist"
-    assert '"Season": (None, None), "Last 10 Games": (10, opp_l10), "Last 5 Games": (5, opp_l5)' in src, (
+    assert '"Season": (None, None), "Last 10 Games": (10, opp_l10), "Last 6 Games": (6, opp_l6),' in src, (
         "the selector must drive both window_n AND the matching real opp_allowed dict together")
     assert "P.build_matchup_profile(row, h2h_log, opp_allowed_for_window or {}, opp_season," in src
-    assert '"Market", "Recent Avg", "Window Avg"' in src, "table 1 must show the real recomputed Window Avg, not a fixed column set"
+    assert '"Market", "Recent Avg", "Window Avg", "Position Matchup"' in src, "table 1 must show the real recomputed Window Avg, not a fixed column set"
     assert '"Opp Window Allowed"' in src, "table 2 must show the real recomputed opponent side too, not just the player's own"
     print("✓ Matchup Lab's real Window selector is genuinely wired into both tables — player's "
          "own rate AND opponent's own allowed rate both recompute for the same selected window")

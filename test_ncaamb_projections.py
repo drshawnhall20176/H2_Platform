@@ -23,7 +23,8 @@ def test_market_spec_is_wnba_scale_not_nba_scale():
 
 def test_market_list_covers_all_four_core_markets():
     lst = NP.market_list()
-    assert {"player_points", "player_rebounds", "player_assists", "player_threes"} <= {mkey for mkey, _col, _disp in lst}
+    assert {mkey for mkey, _col, _disp in lst} == {"player_points", "player_rebounds",
+                                                    "player_assists", "player_threes"}
 
 
 def test_stat_key_for_maps_row_columns_to_game_log_keys():
@@ -69,7 +70,7 @@ def test_build_projection_index_covers_all_four_markets():
           "_game_log": [{"pts": 15, "reb": 6, "ast": 4, "fg3m": 2} for _ in range(8)]}
     index = NP.build_projection_index([row], meta=[], sims=2000, seed=1)
     keys = {mkey for (_nm, mkey) in index.keys()}
-    assert {"player_points", "player_rebounds", "player_assists", "player_threes"} <= keys
+    assert keys == {"player_points", "player_rebounds", "player_assists", "player_threes"}
 
 
 # ----------------------------------------------------------------- build_hot_hand_board
@@ -314,34 +315,29 @@ def test_build_matchup_profile_window_avg_recomputes_for_l5_and_l10_separately()
     print("✓ Window Avg correctly recomputes for L5, L10, and Season as three separate real calls, hand-verified numbers")
 
 
-def test_build_matchup_profile_window_avg_none_with_fewer_than_5_real_games():
+def test_build_matchup_profile_last_n_uses_the_games_there_are_and_counts_them():
+    # Changed Oct 28: a last-N window no longer goes blank in the first weeks -- it averages the games that exist
+    # (topped up from last season when the row's log has them) and says how many it used.
     row = {"PTS": 24.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
     season_log = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2} for _ in range(3)]
-    l5_profile = NP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
-                                          season_log=season_log, window_n=5)
-    season_profile = NP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
-                                              season_log=season_log)
-    l5_pts = next(p for p in l5_profile if p["Market"] == "Points")
-    season_pts = next(p for p in season_profile if p["Market"] == "Points")
-    assert l5_pts["Window Avg"] is None
-    assert season_pts["Window Avg"] == 20.0
-    print("✓ Window Avg is honestly None on L5 with fewer than 5 real games, unaffected on Season")
+    l5 = next(p for p in NP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
+                                                     season_log=season_log, window_n=5) if p["Market"] == "Points")
+    assert l5["Window Avg"] == 20.0 and l5["Window Games"] == 3 and l5["Window Prior"] == 0
+    season = next(p for p in NP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
+                                                         season_log=season_log) if p["Market"] == "Points")
+    assert season["Window Avg"] == 20.0
 
 
-def test_build_matchup_profile_window_avg_l5_real_but_l10_none_with_seven_real_games():
-    row = {"PTS": 24.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0}
-    season_log = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2} for _ in range(7)]
-    l5_profile = NP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
-                                          season_log=season_log, window_n=5)
-    l10_profile = NP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
-                                           season_log=season_log, window_n=10)
-    l5_pts = next(p for p in l5_profile if p["Market"] == "Points")
-    l10_pts = next(p for p in l10_profile if p["Market"] == "Points")
-    assert l5_pts["Window Avg"] == 20.0
-    assert l10_pts["Window Avg"] is None
-    print("✓ Window Avg computes correctly on L5 even when L10 honestly can't yet, with 7 real games")
-
-
+def test_build_matchup_profile_last_n_tops_up_from_last_season_and_offers_last_6():
+    row = {"PTS": 24.0, "REB": 5.0, "AST": 3.0, "FG3M": 2.0,
+           "_game_log": [{"pts": 10, "reb": 2, "ast": 1, "fg3m": 0, "src": "prior"} for _ in range(6)]}
+    season_log = [{"pts": 20, "reb": 5, "ast": 3, "fg3m": 2} for _ in range(4)]
+    six = next(p for p in NP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
+                                                      season_log=season_log, window_n=6) if p["Market"] == "Points")
+    assert six["Window Games"] == 6 and six["Window Prior"] == 2 and abs(six["Window Avg"] - (80 + 20) / 6) < 0.06
+    ten = next(p for p in NP.build_matchup_profile(row, h2h_log=[], opp_allowed={}, opp_season_allowed={},
+                                                      season_log=season_log, window_n=10) if p["Market"] == "Points")
+    assert ten["Window Games"] == 10 and ten["Window Prior"] == 6
 
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

@@ -20,8 +20,9 @@ from datetime import datetime
 import pytz
 
 import sports
-import basketball_markets as BM
 import odds_api as O
+import form_policy as FPol
+import props_engine as PE
 from streamlit_page_cache import compute_once, invalidate_page
 
 _active = sports.active()
@@ -84,11 +85,28 @@ def load_matchup(sport_key: str, date_str: str, player_id: int, team_id: int, op
     # the pattern Dinger Engine's own L5 Hit Rate needed for a genuinely NEW per-player fetch)
     # lets a person freely switch between them with no real cost tradeoff to explain.
     opp_l5 = E.get_team_recent_allowed_stats(opp_id, date_str, n=5)
+    opp_l6 = E.get_team_recent_allowed_stats(opp_id, date_str, n=6)
     opp_l10 = E.get_team_recent_allowed_stats(opp_id, date_str)                        # n=10, the real default
     opp_season = E.get_team_recent_allowed_stats(opp_id, date_str, n=82, days_back=200)  # season-wide
     team_rest = E.get_team_rest_info(team_id, date_str)
     opp_rest = E.get_team_rest_info(opp_id, date_str)
-    return h2h_log, season_log, opp_l5, opp_l10, opp_season, team_rest, opp_rest
+    return h2h_log, season_log, opp_l5, opp_l6, opp_l10, opp_season, team_rest, opp_rest
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def load_position_factor(sport_key: str, date_str: str, player_id: int, opp_id: int):
+    """NBA: this player's position-level matchup by stat -- the SAME number Position Matchups' Player props and
+    Hot Hand Engine use (shrunk for small samples, blended with last season). {stat: factor}; {} elsewhere."""
+    if sport_key != "NBA":
+        return {}
+    try:
+        import player_props as PPR
+        import position_data as PD
+        sample = PD.nba_league_props_sample(date_str)
+        f = PPR.position_factors({(player_id, opp_id)}, sample["cur"], sample["prior"], "NBA")
+        return {stat: v for (pid, stat), v in f.items() if pid == player_id}
+    except Exception:                                              # noqa: BLE001
+        return {}
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -169,15 +187,17 @@ if team_id is None or opp_id is None:
     st.stop()
 
 with st.spinner(f"Pulling {row['Opp']}'s matchup history and defensive trend..."):
-    h2h_log, season_log, opp_l5, opp_l10, opp_season, team_rest, opp_rest = load_matchup(
+    h2h_log, season_log, opp_l5, opp_l6, opp_l10, opp_season, team_rest, opp_rest = load_matchup(
         _active.key, date_str, pid, team_id, opp_id)
+    pos_factor = load_position_factor(_active.key, date_str, pid, opp_id)
 
 # THE real redesign, added directly on request: ONE real window selector drives BOTH sides of
 # the matchup read together (the player's own rate AND the opponent's own allowed rate,
 # recomputed for the SAME window) -- not the earlier, less complete version, which only ever
 # added the player's own L5/L10 as extra columns next to a fixed "last 10" opponent number.
 # Default "Season" preserves the exact prior baseline behavior for anyone who never touches this.
-_WINDOW_OPTIONS = {"Season": (None, opp_season), "Last 10 Games": (10, opp_l10), "Last 5 Games": (5, opp_l5)}
+_WINDOW_OPTIONS = {"Season": (None, None), "Last 10 Games": (10, opp_l10), "Last 6 Games": (6, opp_l6),
+                   "Last 5 Games": (5, opp_l5)}
 window_label = st.radio("Window", list(_WINDOW_OPTIONS.keys()), horizontal=True,
                         key="matchup_lab_window")
 window_n, opp_allowed_for_window = _WINDOW_OPTIONS[window_label]
@@ -196,12 +216,10 @@ st.caption(f"{row['GameLabel']}  ·  averaging {row['AvgMin']:.0f} min/game over
 
 
 def _rest_line(label: str, rest: dict) -> str:
-    days = rest.get("rest_days")
-    if days is None:
-        return f"{label}: rest unknown (no recent game on file)"
-    if rest.get("is_back_to_back"):
+    txt = FPol.rest_text(rest.get("rest_days"))         # the one wording every page uses
+    if txt == "back-to-back":
         return f"⚠️ {label}: back-to-back (played yesterday)"
-    return f"{label}: {days} day{'s' if days != 1 else ''} rest"
+    return f"{label}: {txt}"
 
 
 rc1, rc2 = st.columns(2)
@@ -226,17 +244,15 @@ if team_injuries or opp_injuries:
                    "on this page. \"Day-To-Day\"/\"Questionable\" isn't a hard out.")
 
 st.info(
-    f"**How {row['Player']} does against {row['Opp']} specifically, vs. how she's played "
-    "overall:** the table below compares her head-to-head average against this exact opponent "
-    "to her SEASON average (not just her last-10 recent form) — that isolates what THIS TEAM "
-    "does to her specifically from her just being generally hot or cold lately. A wide swing "
-    "between her H2H games (⚠️ flagged) is a real but less trustworthy signal than a small, "
-    "consistent one. 🎯 A flagged market means her performance in THAT specific stat is "
-    "distinctly lower against this team than her other stats are — the closest honest read on "
-    "\"how do they play her\" that box-score data supports (not a scheme detail — just which "
-    "specific stat category dips more than the others).", icon="🎯")
+    f"**How {row['Player']} does against {row['Opp']} specifically, vs. how the player has played "
+    "overall:** the table below compares the head-to-head average against this exact opponent "
+    "to the SEASON average (not just recent form) — that isolates what THIS TEAM does to the player "
+    "from simply running hot or cold lately. A wide swing between the H2H games (⚠️ flagged) is a real but "
+    "less trustworthy signal than a small, consistent one. 🎯 A flagged market is one where performance in "
+    "THAT stat is distinctly lower against this team than the player's other stats are — the closest honest "
+    "read on \"how do they defend this player\" that box-score data supports.", icon="🎯")
 
-# --- trend charts: is she trending toward or away from the number? ----------
+# --- trend charts: is the player trending toward or away from the number? ----------
 st.markdown(f"**{row['Player']} — recent-form trend vs. the line**")
 
 api_key = get_api_key()
@@ -265,35 +281,39 @@ live_lines = O.market_lines_for_player(offers, row["Player"], projections_module
 
 log = row.get("_game_log") or []
 trend_log = P.build_trend_series(log)   # oldest -> newest, for left-to-right reading
-# Two charts per row, for as many markets as the sport has (the four core stats, then — build 246 — combos, steals, blocks,
-# blocks+steals, turnovers and threes attempted). A stat the player's game lines don't carry is skipped, not drawn as zeros.
-_chart_slots = []
-for _i in range(0, len(P.market_list()), 2):
-    _chart_slots.extend(st.columns(2))
-for (mkey, col, disp), slot in zip(P.market_list(), _chart_slots):
+tc1, tc2 = st.columns(2)
+tc3, tc4 = st.columns(2)
+for (mkey, col, disp), slot in zip(P.market_list(), (tc1, tc2, tc3, tc4)):
     stat_key = P.stat_key_for(col)
     with slot:
         if not trend_log:
             st.caption(f"{disp}: no recent games on file yet.")
             continue
-        if not BM.values_for(trend_log, stat_key):
-            st.caption(f"{disp}: not in this player's recent game lines yet.")
-            continue
         line_val = live_lines.get(mkey)
         is_live = line_val is not None
         if line_val is None:
-            line_val = P.default_line(mkey)
-        _pts = [(g, BM.game_value(g, stat_key)) for g in trend_log if BM.game_value(g, stat_key) is not None]
-        xs = [g.get("date", "—")[5:10] for g, _v in _pts]   # MM-DD, short enough for a small chart
-        ys = [v for _g, v in _pts]
-        hover = [f"{disp}: {y:g}<br>vs {g.get('opp', '—')}" for g, y in _pts]
+            # No book line loaded: the player's own form, rounded to a half point -- not one generic number
+            # (22.5 points for everybody) that has nothing to do with this player.
+            _f = FPol.form_avg(log, stat_key)
+            line_val = (int(_f) + 0.5) if _f is not None else P.default_line(mkey)
+        else:
+            _g = PE.market_gap(FPol.form_avg(log, stat_key) or 0.0,
+                               [g.get(stat_key, 0.0) for g in FPol.select(log)], line_val,
+                               "count" if stat_key in ("reb", "ast", "fg3m") else "normal")
+            if _g["level"] == "big":
+                st.warning(f"⚠️ {disp}: the books' line ({line_val:g}) is {abs(_g['pct']):.0%} "
+                           f"{'below' if _g['pct'] > 0 else 'above'} the player's form — the market may know something "
+                           "(minutes, role, injury). Check the news before betting it.", icon="📰")
+        xs = [g.get("date", "—")[5:10] for g in trend_log]   # MM-DD, short enough for a small chart
+        ys = [g.get(stat_key, 0.0) for g in trend_log]
+        hover = [f"{disp}: {y:g}<br>vs {g.get('opp', '—')}" for y, g in zip(ys, trend_log)]
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines+markers", name=disp,
                                  line=dict(color="#3b82f6"), marker=dict(size=8),
                                  text=hover, hoverinfo="text"))
         if line_val is not None:
             fig.add_hline(y=line_val, line_dash="dash", line_color="#f97316",
-                         annotation_text=f"{'Line' if is_live else 'Model default'}: {line_val:g}",
+                         annotation_text=f"{'Line' if is_live else 'Form line'}: {line_val:g}",
                          annotation_position="top left")
         fig.update_xaxes(type="category")   # MM-DD strings are LABELS, not dates — stops Plotly
                                             # from auto-parsing them as full dates (which produced
@@ -303,8 +323,7 @@ for (mkey, col, disp), slot in zip(P.market_list(), _chart_slots):
                           showlegend=False)
         st.plotly_chart(fig, width="stretch")
 st.caption("Dashed line is tonight's actual sportsbook number once fetched above; otherwise it's "
-           "the model's own default line, clearly labeled as such, never presented as a live "
-           "quote it isn't.")
+           "the player's own form rounded to a half point (\"Form line\"), never presented as a live quote.")
 
 # --- Minutes Played -- playing-time context, NOT a market this platform trades -----------------
 # Full-width and visually separate from the 2x2 grid above on purpose -- reinforces that this
@@ -332,7 +351,7 @@ if trend_log:
                           margin=dict(l=10, r=10, t=30, b=10), title="Minutes",
                           showlegend=False)
     st.plotly_chart(fig_min, width="stretch")
-    st.caption("No betting line for minutes played -- dashed line (when shown) is her own season "
+    st.caption("No betting line for minutes played -- dashed line (when shown) is the player's own season "
               "average, for scale, not a sportsbook number.")
 
 # --- table 1: player signals (recent form / season form / this matchup) -----
@@ -341,33 +360,48 @@ if trend_log:
 # table just needs to LABEL that column by the real selected window, not maintain three separate
 # fixed columns the way the earlier, less complete version did.
 _window_col_label = f"{window_label} Avg"
-pdf = pd.DataFrame(profile)[["Market", "Recent Avg", "Window Avg", "H2H Avg", "H2H Games",
-                             "H2H Spread", "High Variance", "Suppressed"]]
+_pf = pd.DataFrame(profile)
+for _c in ("Window Prior", "Window Games"):
+    if _c not in _pf.columns:
+        _pf[_c] = None
+_stat_of = {"Points": "pts", "Rebounds": "reb", "Assists": "ast", "Threes Made": "fg3m"}
+_pf["Position Matchup"] = [pos_factor.get(_stat_of.get(m)) for m in _pf["Market"]]
+pdf = _pf[["Market", "Recent Avg", "Window Avg", "Position Matchup", "H2H Avg", "H2H Games",
+           "H2H Spread", "High Variance", "Suppressed"]]
 
 
 def _notes(r):
     bits = []
     if r["Suppressed"]:
-        bits.append("🎯 Suppressed vs her other markets")
+        bits.append("🎯 Suppressed vs the player's other markets")
     if r["High Variance"]:
         bits.append(f"⚠️ Wide swing ({r['H2H Spread']})")
     return " · ".join(bits) if bits else "—"
 
 
 pdf["Notes"] = pdf.apply(_notes, axis=1)
-pdf = pdf[["Market", "Recent Avg", "Window Avg", "H2H Avg", "H2H Games", "Notes"]]
-pdf = pdf.rename(columns={"Window Avg": _window_col_label})
+pdf = pdf[["Market", "Recent Avg", "Window Avg", "Position Matchup", "H2H Avg", "H2H Games", "Notes"]]
+_prior_used = int(max([p or 0 for p in _pf["Window Prior"].tolist()] or [0]))
+_games_used = int(max([g or 0 for g in _pf["Window Games"].tolist()] or [0]))
+if window_n is not None and _prior_used:
+    _window_col_label = f"{window_label} Avg (incl. {_prior_used} from last season)"
+elif window_n is not None and _games_used and _games_used < window_n:
+    _window_col_label = f"{window_label} Avg (only {_games_used} played)"
+pdf = pdf.rename(columns={"Window Avg": _window_col_label, "Recent Avg": "Form"})
 st.markdown(f"**{row['Player']} — recent form, {window_label.lower()}, and this matchup**")
 st.dataframe(
-    pdf.style.format({"Recent Avg": "{:.1f}", _window_col_label: "{:.1f}", "H2H Avg": "{:.1f}"}, na_rep="—"),
+    pdf.style.format({"Form": "{:.1f}", _window_col_label: "{:.1f}", "H2H Avg": "{:.1f}",
+                      "Position Matchup": lambda v: "—" if v is None or v != v else f"{v - 1:+.0%}"}, na_rep="—"),
     hide_index=True, width="stretch",
 )
-_window_phrase = {None: "her real full season", 10: "her literal last 10 games", 5: "her literal last 5 games"}[window_n]
-st.caption(f"**{_window_col_label}**: this player's own real average over {_window_phrase}, any "
-          "opponent — a plain, un-weighted read (the same shape a sportsbook's own \"last N\" "
-          "column shows), genuinely different from Recent Avg above it (the model's own recency "
-          "signal, a fixed 45-day rolling window that doesn't change with this selector). "
-          "\"—\" means fewer than that many real games exist yet this season, never a padded average.")
+_window_phrase = {None: "the full season so far", 10: "the last 10 games", 6: "the last 6 games",
+                  5: "the last 5 games"}[window_n]
+st.caption(f"**Form** is the same number on every page (Position Matchups, Hot Hand Engine): this season's games, "
+           "topped up to five from last season at half weight, newer games counting more. "
+           f"**{window_label} Avg** is a plain average over {_window_phrase} — this season first, topped up from the "
+           "end of last season when there aren't enough games yet (the header says how many). **Position Matchup** "
+           "(NBA) is what this opponent allows to the player's position, adjusted for small samples — the same "
+           "number Position Matchups and Hot Hand Engine show.")
 
 if not h2h_log:
     st.caption(f"ℹ️ {row['Team']} and {row['Opp']} haven't played each other yet this season — "
@@ -375,7 +409,7 @@ if not h2h_log:
                "trend are still real signals on their own.")
 if not season_log:
     st.caption(f"ℹ️ No season-long log available yet — early in the season {_window_col_label} "
-               "may just equal her recent form.")
+               "may just equal the player's recent form.")
 
 # --- table 2: opponent's whole-team defensive trend --------------------------
 st.markdown(f"**{row['Opp']} — whole-team defensive trend (not player- or position-specific)**")
@@ -388,7 +422,7 @@ if window_n is None:
     st.dataframe(odf.style.format({"Opp Team Total (season)": "{:.1f}"}, na_rep="—"),
                 hide_index=True, width="stretch")
     st.caption(f"\"Opp Team Total\" = {row['Opp']}'s **entire team combined**, their real "
-              "full-season baseline. Pick Last 10 Games or Last 5 Games above to see whether "
+              "full-season baseline. Pick a Last N window above to see whether "
               "their defense has been trending looser or tighter than this real baseline.")
 else:
     odf = pd.DataFrame(profile)[["Market", "Opp Window Allowed", "Defense Trend", "Trend Tag"]]
@@ -410,21 +444,23 @@ else:
 with st.expander("Full column reference"):
     st.markdown(f"""
 **Player signals**
-- **Recent Avg** — the player's own bootstrap-model average over her last 10 games (a fixed
-  45-day recency window), no opponent adjustment (the same number Best Bets/Edge Board price
-  off). Doesn't change with the Window selector above — it's the model's own real signal, not a
-  comparison point.
-- **{_window_col_label}** — her own real average over {_window_phrase}, any opponent — recomputes
-  when you change the Window selector above. H2H Avg is compared against her real SEASON average
-  specifically (never this selector) — that separates "this team's specific effect on her" from
-  "she's just been hot or cold lately."
-- **H2H Avg / H2H Games** — her actual average in every game her team has played against this
+- **Form** — the platform-wide recent-form number (form_policy): this season first, topped up to five games
+  from last season at half weight, newer games counting more. Identical on Position Matchups and Hot Hand
+  Engine. Doesn't change with the Window selector.
+- **{_window_col_label}** — the player's own real average over {_window_phrase}, any opponent — recomputes
+  when you change the Window selector above. H2H Avg is compared against the player's real SEASON average
+  specifically (never this selector) — that separates "this team's specific effect on the player" from
+  "the player has just been hot or cold lately."
+- **H2H Avg / H2H Games** — the player's actual average in every game the team has played against this
   specific opponent *this season*. Teams typically meet 2-4 times a season, so a small sample
   here is expected, not a bug — read it as a data point, not a verdict.
-- **Notes** — 🎯 flags the one market (if any) where her H2H performance is distinctly lower than
-  her other markets against this same opponent. ⚠️ flags a wide swing between her H2H meetings
+- **Notes** — 🎯 flags the one market (if any) where the player's H2H performance is distinctly lower than
+  the player's other markets against this same opponent. ⚠️ flags a wide swing between the H2H meetings
   (shown as the min–max spread) — a real signal, but a less trustworthy one than a consistent
   small sample.
+
+- **Position Matchup** (NBA) — what tonight's opponent allows to this player's position (G/F/C) vs the league,
+  shrunk while the sample is small and blended with last season. Same number as Position Matchups / Hot Hand.
 
 **Opponent signals**
 - **Opp Team Total** — tonight's opponent's WHOLE TEAM combined total at each stat, recomputed
@@ -434,12 +470,6 @@ with st.expander("Full column reference"):
     """)
 
 # --- supporting detail: recent game log + H2H game log ----------------------
-def _extra_stats(g):
-    """Points+rebounds+assists, steals, blocks, turnovers and threes attempted for one game line (blank when the line lacks it)."""
-    return {"PRA": BM.game_value(g, "pra"), "STL": BM.game_value(g, "stl"), "BLK": BM.game_value(g, "blk"),
-            "TO": BM.game_value(g, "tov"), "3PA": BM.game_value(g, "fg3a")}
-
-
 gc1, gc2 = st.columns(2)
 with gc1:
     st.markdown("**Recent games (any opponent)**")
@@ -447,7 +477,7 @@ with gc1:
     if log:
         rec_df = pd.DataFrame([{"Date": g.get("date", "—")[:10], "Opp": g.get("opp", "—"),
                                 "PTS": g.get("pts", 0), "REB": g.get("reb", 0),
-                                "AST": g.get("ast", 0), "3PM": g.get("fg3m", 0), **_extra_stats(g),
+                                "AST": g.get("ast", 0), "3PM": g.get("fg3m", 0),
                                 "MIN": g.get("min", 0)} for g in log])
         st.dataframe(rec_df, hide_index=True, width="stretch", height=250)
     else:
@@ -458,12 +488,11 @@ with gc2:
     if h2h_log:
         h2h_df = pd.DataFrame([{"Date": g.get("date", "—")[:10], "PTS": g.get("pts", 0),
                                 "REB": g.get("reb", 0), "AST": g.get("ast", 0),
-                                "3PM": g.get("fg3m", 0), **_extra_stats(g), "MIN": g.get("min", 0)} for g in h2h_log])
+                                "3PM": g.get("fg3m", 0), "MIN": g.get("min", 0)} for g in h2h_log])
         st.dataframe(h2h_df, hide_index=True, width="stretch", height=250)
     else:
         st.caption("No meetings yet this season.")
 
-st.caption("v1 signals — no positional matchup data (who's likely to guard this player), no pace "
-           "adjustment. Recent Avg here is deliberately NOT adjusted by the Defense Trend column "
-           "(unlike Hot Hand Engine's Matchup Score) — this page is meant to show you the raw "
-           "signals side by side so you can weigh them yourself, not hand you one blended number.")
+st.caption("Signals side by side, not blended: Form, the last-N window, the position matchup (NBA) and the "
+           "opponent's whole-team trend. Hot Hand Engine multiplies Form by the matchup and fatigue; Position "
+           "Matchups' Player props turns all of it into a projection and a probability.")

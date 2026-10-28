@@ -89,7 +89,7 @@ def test_thin_season_form_is_filled_from_last_season_and_flagged():
     cur = [pg("t1", "2026-10-22", "BKN", "X", 9, "Randle", "PF", pts=20, reb=10, ast=5)]
     prior = [pg(f"p{g}", f"2026-04-0{g + 1}", "MIN", "Y", 9, "Randle", "PF", pts=22, reb=9, ast=4) for g in range(6)]
     f = PPR.form(cur, prior, 9, "PRA")
-    assert f["filled"] and f["season_games"] == 1 and len(f["values"]) == 7 and f["values"][0] == 35
+    assert f["filled"] and f["season_games"] == 1 and len(f["values"]) == 5 and f["values"][0] == 35   # topped up to 5
 
 
 def test_out_players_get_no_projection_and_display_says_so():

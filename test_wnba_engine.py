@@ -19,12 +19,6 @@ def _log(pts, reb, ast, fg3m, minutes):
 
 
 # ----------------------------------------------------------------- _get_json: real TLS fingerprint fix
-
-def _only(d, like):
-    """The original five stats of a box-score / team-totals dict: build 246 added steals, blocks, turnovers, threes
-    attempted and combos beside them (see test_basketball_markets.py), which these older assertions do not pin."""
-    return {k: d[k] for k in like}
-
 def test_get_json_uses_real_browser_impersonation(monkeypatch):
     # A REAL, CONFIRMED FIX, not a style choice: confirmed directly against a real, live test
     # that the actual block was TLS/JA3 fingerprinting, not IP-based -- the identical URL
@@ -619,7 +613,7 @@ def test_get_team_recent_game_ids_excludes_games_on_the_target_date_itself(monke
              "status": {"type": {"completed": True}},
              "competitions": [{"competitors": [{"team": {"id": "20", "displayName": "Atlanta Dream"}},
                                                {"team": {"id": "19", "displayName": "Chicago Sky"}}]}]},
-            {"id": "g_same_day", "date": "2026-07-14T00:00Z",   # same calendar day as before_date
+            {"id": "g_same_day", "date": "2026-07-14T23:00Z",   # 7 PM ET on before_date itself
              "status": {"type": {"completed": True}},
              "competitions": [{"competitors": [{"team": {"id": "20", "displayName": "Atlanta Dream"}},
                                                {"team": {"id": "16", "displayName": "Washington Mystics"}}]}]},
@@ -690,7 +684,7 @@ def test_get_game_boxscore_extracts_every_player_from_both_teams(monkeypatch):
 
     box = E.get_game_boxscore("g1")
     assert set(box.keys()) == {111, 222}   # 112 excluded (didNotPlay)
-    assert _only(box[111], {"pts": 23.0, "reb": 6.0, "ast": 5.0, "fg3m": 3.0, "min": 32.0}) == {"pts": 23.0, "reb": 6.0, "ast": 5.0, "fg3m": 3.0, "min": 32.0}
+    assert box[111] == {"pts": 23.0, "reb": 6.0, "ast": 5.0, "fg3m": 3.0, "min": 32.0}
     assert box[222]["pts"] == 13.0 and box[222]["min"] == 28.0
     print("✓ get_game_boxscore extracts both teams' players from the CDN's sibling players array, skips DNPs")
 
@@ -777,7 +771,7 @@ def test_get_game_team_totals_parses_both_teams(monkeypatch):
     }
     monkeypatch.setattr(E, "_get_json", lambda url, params=None: fake_cdn)
     totals = E.get_game_team_totals("g1")
-    assert _only(totals[20], {"pts": 88.0, "reb": 36.0, "ast": 20.0, "fg3m": 9.0, "poss": 0.0}) == {"pts": 88.0, "reb": 36.0, "ast": 20.0, "fg3m": 9.0, "poss": 0.0}
+    assert totals[20] == {"pts": 88.0, "reb": 36.0, "ast": 20.0, "fg3m": 9.0, "poss": 0.0}
     assert totals[19]["pts"] == 81.0
     print("✓ get_game_team_totals parses team-level totals for both teams")
 
@@ -963,7 +957,7 @@ def test_get_team_recent_allowed_stats_empty_when_no_recent_games(monkeypatch):
     monkeypatch.setattr(E, "get_team_recent_game_ids",
                         lambda team_id, before_date, n=10, days_back=45: [])
     allowed = E.get_team_recent_allowed_stats(20, "2026-07-14")
-    assert _only(allowed, {"pts": 0.0, "reb": 0.0, "ast": 0.0, "fg3m": 0.0, "poss": 0.0}) == {"pts": 0.0, "reb": 0.0, "ast": 0.0, "fg3m": 0.0, "poss": 0.0}
+    assert allowed == {"pts": 0.0, "reb": 0.0, "ast": 0.0, "fg3m": 0.0, "poss": 0.0}
 
 
 def test_get_team_recent_scored_stats_averages_own_totals(monkeypatch):
@@ -997,7 +991,7 @@ def test_get_team_recent_scored_stats_empty_when_no_recent_games(monkeypatch):
     monkeypatch.setattr(E, "get_team_recent_game_ids",
                         lambda team_id, before_date, n=10, days_back=45: [])
     scored = E.get_team_recent_scored_stats(20, "2026-07-14")
-    assert _only(scored, {"pts": 0.0, "reb": 0.0, "ast": 0.0, "fg3m": 0.0, "poss": 0.0}) == {"pts": 0.0, "reb": 0.0, "ast": 0.0, "fg3m": 0.0, "poss": 0.0}
+    assert scored == {"pts": 0.0, "reb": 0.0, "ast": 0.0, "fg3m": 0.0, "poss": 0.0}
 
 
 # ----------------------------------------------------------------- get_team_rest_info

@@ -48,6 +48,16 @@ USAGE_RATE_CAP = 0.15        # nobody's per-minute rate goes up more than 15% fr
 FRESH_OUT_GAMES = 3          # an absence is "fresh" when he played in at least 2 of the team's last 3 games
 BLOWOUT_SPREAD = 10.0        # basketball: spreads this big start to cost starters late minutes
 CALIBRATION_RANGE = (0.3, 1.3)
+# MARKET DISAGREEMENT. When the projection sits this far from a book's posted line -- at least GAP_PCT of the line
+# AND at least GAP_Z of the player's own game-to-game spread -- the books almost always know something the box
+# scores don't (a minutes cap, a role change, a returning starter, an injury not yet on the report). Such a row
+# is flagged, the model's share of the probability drops to GAP_MODEL_WEIGHT, and it gets no lean until someone
+# has checked the news ("news_checked"). Bets logged on it are tagged "market-gap" so the Scorecard can say, over
+# time, who was right on these -- the model or the market.
+GAP_PCT = 0.20
+GAP_Z = 1.0
+GAP_MODEL_WEIGHT = 0.20
+GAP_TAG = "market-gap"
 
 _SUFFIX = {"jr", "sr", "ii", "iii", "iv", "v"}
 
@@ -105,13 +115,17 @@ def wvar(values: Sequence[float]) -> Optional[float]:
     return sum(x * (v - m) ** 2 for v, x in zip(vals, w)) / denom if denom > 0 else None
 
 
-def rate_and_opportunity(values: Sequence[float], opps: Sequence[float]) -> Tuple[Optional[float], Optional[float]]:
+def rate_and_opportunity(values: Sequence[float], opps: Sequence[float],
+                         game_weights: Optional[Sequence[float]] = None) -> Tuple[Optional[float], Optional[float]]:
     """(production per unit of opportunity, projected opportunity), both recency weighted, newest first.
-    Games with no opportunity (a DNP) are skipped."""
-    pairs = [(v, o) for v, o in zip(values, opps) if o > 0]
+    Games with no opportunity (a DNP) are skipped. `game_weights` (one per game, e.g. form_policy.weights)
+    replaces the plain recency weights."""
+    triples = [(v, o, (game_weights[i] if game_weights is not None else None))
+               for i, (v, o) in enumerate(zip(values, opps)) if o > 0]
+    pairs = [(v, o) for v, o, _ in triples]
     if not pairs:
         return None, None
-    w = recency_weights(len(pairs))
+    w = [t[2] for t in triples] if game_weights is not None else recency_weights(len(pairs))
     tot_o = sum(x * o for (_, o), x in zip(pairs, w))
     rate = sum(x * v for (v, _), x in zip(pairs, w)) / tot_o if tot_o else None
     return rate, wmean([o for _, o in pairs], w)
@@ -440,7 +454,8 @@ def redistribute(players: Sequence[Dict], cap: float = 40.0) -> Dict:
 # --------------------------------------------------------------------------- the read on one line
 def read_line(projection: Optional[float], values: Sequence[float], line: Optional[float], dist: str,
               over_price=None, under_price=None, p_market: Optional[float] = None, slope: float = 1.0,
-              model_weight: float = MODEL_WEIGHT, sd_floor_frac: float = 0.25, sd_floor_abs: float = 1.0) -> Dict:
+              model_weight: float = MODEL_WEIGHT, sd_floor_frac: float = 0.25, sd_floor_abs: float = 1.0,
+              news_checked: bool = False) -> Dict:
     """Everything the table shows for one line: model probability (calibrated), the market's, the blend,
     the side worth betting and its EV at the price you'd get. Prices are American odds (None when unknown).
 
@@ -448,16 +463,21 @@ def read_line(projection: Optional[float], values: Sequence[float], line: Option
     of the line (the model and the blend agree). Without a price: projection 5%+ past the line and the
     model's probability 55%+ (about +5% at -110)."""
     out = {"p_model": None, "p_market": None, "p_final": None, "side": None, "price": None, "ev": None,
-           "lean": "—"}
+           "lean": "—", "gap": None, "gap_pct": None}
     if projection is None or line is None:
         return out
     p_model = calibrate(prob_over(projection, values, line, dist, sd_floor_frac, sd_floor_abs), slope)
     p_mkt = p_market if p_market is not None else (market_prob(over_price, under_price)
                                                   if (over_price is not None or under_price is not None) else None)
-    p = blend(p_model, p_mkt, model_weight)
-    out.update(p_model=p_model, p_market=p_mkt, p_final=p)
     thr = threshold(line)
     above = projection > thr
+    if p_mkt is not None and thr > 0:
+        g = market_gap(projection, values, line, dist, sd_floor_frac, sd_floor_abs)
+        out.update(gap_pct=g["pct"], gap=g["level"])
+        if g["level"] == "big":
+            model_weight = min(model_weight, GAP_MODEL_WEIGHT)
+    p = blend(p_model, p_mkt, model_weight)
+    out.update(p_model=p_model, p_market=p_mkt, p_final=p)
     if over_price is not None or under_price is not None:
         ev_o, ev_u = ev(p, over_price), ev(1 - p if p is not None else None, under_price)
         cands = [(e, s, pr) for e, s, pr in ((ev_o, "Over", over_price), (ev_u, "Under", under_price))
@@ -467,6 +487,8 @@ def read_line(projection: Optional[float], values: Sequence[float], line: Option
             out.update(side=side, price=price, ev=e)
             agrees = above if side == "Over" else not above
             out["lean"] = side if (e >= MIN_EV and agrees) else "No lean"
+            if out["gap"] == "big" and not news_checked and out["lean"] in ("Over", "Under"):
+                out["lean"] = "Check news"
             return out
     edge = (projection - thr) / thr if thr > 0 else 0.0
     side = "Over" if above else "Under"
@@ -481,8 +503,24 @@ def read_line(projection: Optional[float], values: Sequence[float], line: Option
     return out
 
 
+def market_gap(projection: float, values: Sequence[float], line: float, dist: str = "normal",
+               sd_floor_frac: float = 0.25, sd_floor_abs: float = 1.0) -> Dict:
+    """How far the model's projection is from the book's line: {"pct" (share of the line), "z" (in the player's
+    own game-to-game spreads), "level": "agree" | "lean" | "big"}."""
+    thr = threshold(line)
+    v = wvar(list(values))
+    if dist == "count":
+        sd = math.sqrt(max(v if v is not None else projection, projection, 0.25))
+    else:
+        sd = max(math.sqrt(v or 0.0), sd_floor_frac * max(projection, 1.0), sd_floor_abs)
+    pct = (projection - thr) / thr if thr > 0 else 0.0
+    z = (projection - thr) / sd if sd > 0 else 0.0
+    level = "big" if (abs(pct) >= GAP_PCT and abs(z) >= GAP_Z) else ("lean" if abs(z) >= 0.5 else "agree")
+    return {"pct": pct, "z": z, "level": level}
+
+
 # --------------------------------------------------------------------------- shared table + logging
-LEAN_ICON = {"Over": "🟢 Over", "Under": "🔴 Under", "No lean": "⚪ No lean"}
+LEAN_ICON = {"Over": "🟢 Over", "Under": "🔴 Under", "No lean": "⚪ No lean", "Check news": "⚠️ Check news"}
 
 
 def display(rows: Sequence[Dict], opp_label: str = "Min") -> List[Dict]:
@@ -529,6 +567,8 @@ def plays_for_log(rows: Sequence[Dict], market: str, game_label: str) -> List[Di
         p = r["p_final"] if side == "Over" else 1 - r["p_final"]
         play = {"Player": r["player"], "PlayerId": r.get("pid"), "Game": game_label, "Market": market,
                 "Side": side, "Line": r["line"], "ModelProb": round(p, 4), "Fair": american(p)}
+        if r.get("gap") == "big":
+            play["Notes"] = GAP_TAG
         price = r.get("over_price") if side == "Over" else r.get("under_price")
         if price is not None:
             play.update(RealPrice=price, PriceSource=r.get("price_src") or "manual")
@@ -537,23 +577,69 @@ def plays_for_log(rows: Sequence[Dict], market: str, game_label: str) -> List[Di
 
 
 # --------------------------------------------------------------------------- 6. same-game parlays
-def sgp(legs: Sequence[Dict], book_price=None, rho_game: float = 0.10, rho_player: float = 0.30,
-        n_sims: int = 40000, seed: int = 11) -> Optional[Dict]:
-    """Price a same-game parlay with correlation. legs: [{"player","game","side","p"}] (p = that side's
-    probability). Two legs on the same player move together (rho_player); two players in the same game a little
-    (rho_game -- a fast game lifts everyone's overs); an Over with an Under pulls the other way.
+def market_stats(market: Optional[str]) -> Tuple[str, ...]:
+    """The box-score stats a market is made of (PRA -> pts, reb, ast), across every sport's props menu."""
+    if not market:
+        return ()
+    try:
+        import player_props as _PPR
+        if market in _PPR.MARKETS:
+            return tuple(_PPR.MARKETS[market])
+        import football_props as _FP
+        if market in _FP.MARKETS:
+            return tuple(_FP.MARKETS[market]["stats"])
+        import hockey_props as _HP
+        if market in _HP.MARKETS:
+            return (_HP.MARKETS[market]["stat"],)
+    except Exception:                                             # noqa: BLE001
+        pass
+    return (market,)
+
+
+SAME_PLAYER_BASE = 0.25     # two different stats of one player still share his minutes / usage
+SAME_PLAYER_SHARED = 0.65   # ... plus this much more the more of the same box-score stats they share
+SAME_GAME = 0.10            # two different players in one game share its pace
+
+
+def leg_correlation(a: Dict, b: Dict) -> float:
+    """Correlation between two legs' outcomes. Same player: 0.25 for unrelated stats (rebounds vs points move
+    together through minutes), rising with shared stats (points vs PRA ~0.6, the same market at two lines 0.9).
+    Same game, different players: 0.10 (pace). Signed by the sides: an Over with an Under pulls the other way --
+    if he plays more, his points over AND his rebounds over both get likelier, so "Under rebounds + Over points"
+    is (correctly) slightly negatively correlated."""
+    if not a.get("game") or a.get("game") != b.get("game"):
+        return 0.0
+    sign = (1 if str(a.get("side")).lower() != "under" else -1) * (1 if str(b.get("side")).lower() != "under" else -1)
+    if a.get("player") and a.get("player") == b.get("player"):
+        sa, sb = set(market_stats(a.get("market"))), set(market_stats(b.get("market")))
+        overlap = len(sa & sb) / math.sqrt(len(sa) * len(sb)) if sa and sb else 0.0
+        return sign * min(0.95, SAME_PLAYER_BASE + SAME_PLAYER_SHARED * overlap)
+    return sign * SAME_GAME
+
+
+def sgp(legs: Sequence[Dict], book_price=None, n_sims: int = 40000, seed: int = 11) -> Optional[Dict]:
+    """Price a same-game parlay with correlation (leg_correlation), not as independent legs.
+    legs: [{"player","game","side","p","market"}] (p = that side's probability).
 
     {"p_joint" (correlated), "p_independent", "fair" (American), "ev" at book_price (None without one),
      "lift" (joint / independent)}."""
     legs = [l for l in legs if l.get("p") is not None]
     if len(legs) < 2:
         return None
+    import numpy as np
     import slip_sim as S
+    k = len(legs)
+    R = np.eye(k)
+    for i in range(k):
+        for j in range(i + 1, k):
+            R[i, j] = R[j, i] = leg_correlation(legs[i], legs[j])
+    R = S._nearest_psd_correlation(R)
+    Z = S.draw_normals(R, n_sims, np.random.default_rng(seed))
     sim_legs = [{"p": float(l["p"]), "game": l.get("game"), "player": l.get("player"), "side": l.get("side"),
                  "n_eff": 40} for l in legs]
     dec = decimal(book_price)
-    res = S.evaluate(sim_legs, {"mode": "parlay", "decimal": dec or 2.0}, rho_player=rho_player, rho_game=rho_game,
-                     n_sims=n_sims, n_worlds=1, seed=seed, uncertainty=False)
+    res = S.evaluate(sim_legs, {"mode": "parlay", "decimal": dec or 2.0}, n_sims=n_sims, n_worlds=1, seed=seed,
+                     uncertainty=False, _Z=Z)
     pj, pi = res["p_all"], res["p_all_independent"]
     return {"p_joint": pj, "p_independent": pi, "fair": american(pj) if 0 < pj < 1 else None,
             "ev": (pj * dec - 1) if dec else None, "lift": (pj / pi) if pi else None, "legs": len(legs)}
@@ -601,7 +687,7 @@ def view_order(rows: Sequence[Dict]) -> List[Dict]:
     """Leans first (best edge, then highest chance), then everything else with a line, then players with no line
     posted, then players who are out."""
     def key(r):
-        tier = 0 if r.get("lean") in ("Over", "Under") else (1 if r.get("line") is not None else (3 if r.get("out") else 2))
+        tier = 0 if r.get("lean") in ("Over", "Under", "Check news") else (1 if r.get("line") is not None else (3 if r.get("out") else 2))
         return (tier, -(r.get("ev") or -1), -(_side_prob(r) or 0))
     return sorted(rows, key=key)
 
@@ -624,6 +710,10 @@ def display_compact(rows: Sequence[Dict], details: bool = False, opp_label: str 
         else:
             pick = f"{side} {line:g}" if side else f"{line:g}"
             lean = LEAN_ICON.get(r.get("lean"), "—") if r.get("lean") != "No lean" else "⚪ No edge"
+        flags = list(r.get("flags") or [])
+        if r.get("gap") == "big" and r.get("gap_pct") is not None:
+            flags.insert(0, f"⚠️ Market disagrees: line {line:g} vs projection {r['projection']:.1f} "
+                            f"({r['gap_pct']:+.0%}) — check minutes / role / injury news")
         row = {"Player": f"{r['player']}{status}", "Pos": r.get("slot") or "",
                "Projection": "—" if r.get("projection") is None else f"{r['projection']:.1f}",
                "Line": "—" if line is None else f"{line:g}",
@@ -633,7 +723,7 @@ def display_compact(rows: Sequence[Dict], details: bool = False, opp_label: str 
                "Edge": "—" if r.get("ev") is None else f"{r['ev']:+.1%}",
                "Lean": lean,
                "Hit rate": "—" if not r.get("hit") else f"{r['hit'][0]}/{r['hit'][1]}",
-               "Notes": " · ".join(r.get("flags") or []) or "—"}
+               "Notes": " · ".join(flags) or "—"}
         if details:
             row.update({opp_label: "—" if r.get("opp") is None else (f"{r['opp']:.0f}" if r["opp"] >= 10 else f"{r['opp']:.1f}"),
                         "Form": "—" if r.get("form") is None else f"{r['form']:.1f} ({r['games']} g)",
@@ -655,4 +745,21 @@ def best_reads(rows: Sequence[Dict], team_of: Dict, limit: int = 6) -> List[Dict
                     "Price": "—" if price is None else f"{price:+.0f}",
                     "Edge": "—" if r.get("ev") is None else f"{r['ev']:+.1%}",
                     "Why": " · ".join([f"projects {r['projection']:.1f}"] + list((r.get("flags") or [])[:2]))})
+    return out
+
+
+def market_gaps(rows: Sequence[Dict], team_of: Dict) -> List[Dict]:
+    """Rows where the books and the model disagree by a lot -- the "check before betting" list."""
+    out = []
+    for r in rows:
+        if r.get("gap") != "big" or r.get("projection") is None or r.get("line") is None:
+            continue
+        out.append({"Player": r["player"], "Team": team_of.get(r.get("pid"), ""),
+                    "Line": f"{r['line']:g}", "Projection": f"{r['projection']:.1f}",
+                    "Gap": f"{r['gap_pct']:+.0%}",
+                    "Model says": f"{r['side']} ({_side_prob(r):.0%} after leaning on the market)"
+                    if _side_prob(r) is not None else "—",
+                    "Status": "news checked — lean shown" if r.get("lean") in ("Over", "Under") else
+                              ("⚠️ check news first" if r.get("lean") == "Check news" else "no value at this price")})
+    out.sort(key=lambda d: -abs(float(d["Gap"].rstrip("%"))))
     return out
