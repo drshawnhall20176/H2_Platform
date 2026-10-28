@@ -680,7 +680,7 @@ def test_typing_a_line_gives_hit_rate_and_a_lean_and_offers_logging(monkeypatch,
     assert not at.exception, [e.value for e in at.exception]
     star = [d.value for d in at.dataframe if "Projection" in d.value.columns and
             any("Star Guard" in x for x in d.value["Player"])][0].iloc[0]
-    assert star["Line"] == 35.5 and star["Hit rate"] == "5/5" and "Over" in star["Lean"]
+    assert star["Line"] == "35.5" and star["Hit rate"] == "5/5" and "Over" in star["Lean"] and star["Pick"] == "Over 35.5"
     assert logged and logged[-1][0]["Player"] == "Star Guard" and logged[-1][0]["Market"] == "PRA" \
         and logged[-1][0]["Line"] == 35.5 and logged[-1][0]["Side"] == "Over"
 
@@ -706,6 +706,7 @@ def test_nfl_gets_a_player_props_tab_with_volume_based_projections(page):
     at = page("NFL", bundle_fn=lambda sport, g: football_props_bundle(sport, g["home"], g["away"]))
     assert not at.exception, [e.value for e in at.exception]
     assert at.selectbox(key="pm_props_market_football").value == "Receiving Yards"
+    at.toggle(key="pm_props_details").set_value(True).run()
     tables = [d.value for d in at.dataframe if "Projection" in d.value.columns]
     assert tables and "Tgt" in tables[0].columns and any("Wideout" in x for x in tables[0]["Player"])
     at.selectbox(key="pm_props_market_football").set_value("Rush Yards").run()
@@ -741,6 +742,10 @@ def test_loading_book_lines_fills_lines_prices_and_best_price(monkeypatch, page)
     at.button(key="pm_props_load").click().run()
     assert not at.exception, [e.value for e in at.exception]
     assert calls and calls[0][4] == ["player_points_rebounds_assists"]
+    star = [d.value for d in at.dataframe if "Projection" in d.value.columns and
+            any("Star Guard" in x for x in d.value["Player"])][0].iloc[0]
+    assert star["Line"] == "40.5" and star["Pick"].endswith("40.5") and star["Chance"] != "—" and star["Price"] != "—"
+    at.toggle(key="pm_props_edit").set_value(True).run()                       # edit mode shows every book price
     star = [d.value for d in at.dataframe if "Projection" in d.value.columns and
             any("Star Guard" in x for x in d.value["Player"])][0].iloc[0]
     assert star["Line"] == 40.5 and star["Over odds"] == -105 and "fanduel" in star["Best price"]
@@ -808,6 +813,7 @@ def test_nhl_page_is_props_head_to_head_and_scorecard_with_a_primer(page):
     assert any("Ice time is volume" in i.value for i in at.info)
     t = texts(at)
     assert "back-to-back" in t and "Depth vs defense" not in t
+    at.toggle(key="pm_props_details").set_value(True).run()
     tables = [d.value for d in at.dataframe if "Projection" in d.value.columns]
     assert all("TOI" in t.columns for t in tables) and any("B2B" in n for t in tables for n in t["Notes"])
     at.selectbox(key="pm_props_market_hockey").set_value("Saves").run()
@@ -817,3 +823,23 @@ def test_nhl_page_is_props_head_to_head_and_scorecard_with_a_primer(page):
     assert any("backup goalie likely" in n for t in saves for n in t["Notes"])         # team 1 played last night
     at.button(key="pm_sc_run").click().run()
     assert not at.exception, [e.value for e in at.exception]
+
+
+def test_default_view_has_no_blank_columns_and_says_when_no_line_is_posted(page):
+    at = page("NBA", nba_games(), bundle_fn=lambda sport, g: props_bundle(sport))
+    assert not at.exception, [e.value for e in at.exception]
+    table = [d.value for d in at.dataframe if "Projection" in d.value.columns][0]
+    assert "Over odds" not in table.columns and "Pick" in table.columns
+    assert not table.isna().any().any() and all(str(v).strip() for v in table.to_numpy().ravel())
+    assert set(table["Pick"]) == {"No line posted"}
+    assert any("No lines posted for this market yet" in i.value for i in at.info)
+
+
+def test_best_reads_lead_the_tab_once_lines_are_in(page):
+    at = page("NBA", nba_games(), bundle_fn=lambda sport, g: props_bundle(sport))
+    game = at.selectbox(key="pm_game").value
+    at.session_state[f"pm_props_NBA_{game}_PRA_1"] = {"edited_rows": {0: {"Line": 35.5}}, "added_rows": [],
+                                                       "deleted_rows": []}
+    at.run()
+    reads = [d.value for d in at.dataframe if "Why" in d.value.columns]
+    assert reads and reads[0].iloc[0]["Player"] == "Star Guard" and reads[0].iloc[0]["Pick"] == "Over 35.5"

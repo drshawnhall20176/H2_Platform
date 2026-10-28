@@ -236,3 +236,19 @@ def test_typed_prices_log_as_manual_and_count_toward_clv():
                                     {"entry_odds": -110, "close_odds": -120, "entry_odds_source": "book"},
                                     {"entry_odds": -110, "close_odds": -150, "entry_odds_source": "model_fair"}])
     assert clv["n_real_price"] == 2 and clv["n_manual"] == 1 and clv["n_book"] == 1 and clv["clv_n"] == 2
+
+
+def test_compact_view_orders_leans_first_and_never_leaves_a_cell_blank():
+    rows = [{"pid": 1, "player": "NoLine", "slot": "G", "out": False, "line": None, "projection": 9.0, "flags": []},
+            {"pid": 2, "player": "Lean", "slot": "F", "out": False, "line": 20.5, "side": "Over", "p_final": 0.62,
+             "over_price": -110, "under_price": -110, "ev": 0.18, "lean": "Over", "projection": 24.0, "hit": (3, 4),
+             "book": {"best_over": ("fanduel", -110)}, "flags": ["B2B"]},
+            {"pid": 3, "player": "Hurt", "slot": "C", "out": True, "status": "Out", "line": None, "projection": None}]
+    view = PE.display_compact(rows)
+    assert [v["Player"].split()[0] for v in view] == ["Lean", "NoLine", "Hurt"]
+    assert view[0]["Pick"] == "Over 20.5" and view[0]["Chance"] == "62%" and view[0]["Price"] == "-110 fanduel"
+    assert view[1]["Pick"] == "No line posted" and view[2]["Lean"] == "Out tonight"
+    assert all(str(v).strip() for row in view for v in row.values())
+    reads = PE.best_reads(rows, {2: "ATL"})
+    assert len(reads) == 1 and reads[0]["Team"] == "ATL" and reads[0]["Why"].startswith("projects 24.0")
+    assert "Form" in PE.display_compact(rows, details=True)[0]

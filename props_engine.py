@@ -587,3 +587,72 @@ def brier(preds: Sequence[Tuple[float, bool]]) -> Optional[float]:
     if not preds:
         return None
     return sum((p - (1.0 if y else 0.0)) ** 2 for p, y in preds) / len(preds)
+
+
+# --------------------------------------------------------------------------- the at-a-glance view
+def _side_prob(r: Dict) -> Optional[float]:
+    p, side = r.get("p_final"), r.get("side")
+    if p is None or side not in ("Over", "Under"):
+        return None
+    return p if side == "Over" else 1 - p
+
+
+def view_order(rows: Sequence[Dict]) -> List[Dict]:
+    """Leans first (best edge, then highest chance), then everything else with a line, then players with no line
+    posted, then players who are out."""
+    def key(r):
+        tier = 0 if r.get("lean") in ("Over", "Under") else (1 if r.get("line") is not None else (3 if r.get("out") else 2))
+        return (tier, -(r.get("ev") or -1), -(_side_prob(r) or 0))
+    return sorted(rows, key=key)
+
+
+def display_compact(rows: Sequence[Dict], details: bool = False, opp_label: str = "Min") -> List[Dict]:
+    """The default table: what someone needs to make a pick and nothing blank-looking. Every cell has words in it
+    -- a player with no posted line says so instead of showing empty columns. `details` adds the model's working
+    (minutes / volume, form, matchup, game environment)."""
+    out = []
+    for r in view_order(rows):
+        status = f" 🚫 {r['status']}" if r.get("out") else (f" ⚠️ {r['status']}" if r.get("status") else "")
+        side, line = r.get("side"), r.get("line")
+        price = r.get("over_price") if side == "Over" else r.get("under_price")
+        best = (r.get("book") or {}).get("best_over" if side == "Over" else "best_under")
+        chance = _side_prob(r)
+        if r.get("out"):
+            pick, lean = "—", "Out tonight"
+        elif line is None:
+            pick, lean = "No line posted", "—"
+        else:
+            pick = f"{side} {line:g}" if side else f"{line:g}"
+            lean = LEAN_ICON.get(r.get("lean"), "—") if r.get("lean") != "No lean" else "⚪ No edge"
+        row = {"Player": f"{r['player']}{status}", "Pos": r.get("slot") or "",
+               "Projection": "—" if r.get("projection") is None else f"{r['projection']:.1f}",
+               "Line": "—" if line is None else f"{line:g}",
+               "Pick": pick,
+               "Chance": "—" if chance is None else f"{chance:.0%}",
+               "Price": ("—" if price is None else f"{price:+.0f}" + (f" {best[0]}" if best and best[1] == price else "")),
+               "Edge": "—" if r.get("ev") is None else f"{r['ev']:+.1%}",
+               "Lean": lean,
+               "Hit rate": "—" if not r.get("hit") else f"{r['hit'][0]}/{r['hit'][1]}",
+               "Notes": " · ".join(r.get("flags") or []) or "—"}
+        if details:
+            row.update({opp_label: "—" if r.get("opp") is None else (f"{r['opp']:.0f}" if r["opp"] >= 10 else f"{r['opp']:.1f}"),
+                        "Form": "—" if r.get("form") is None else f"{r['form']:.1f} ({r['games']} g)",
+                        "Matchup": "—" if r.get("factor") is None else f"{r['factor'] - 1:+.0%}",
+                        "Game env": "—" if r.get("env", 1.0) in (None, 1.0) else f"{r['env'] - 1:+.0%}"})
+        out.append(row)
+    return out
+
+
+def best_reads(rows: Sequence[Dict], team_of: Dict, limit: int = 6) -> List[Dict]:
+    """The game's strongest leans across both teams: real leans first by edge, then the most likely sides."""
+    leans = [r for r in rows if r.get("lean") in ("Over", "Under")]
+    leans.sort(key=lambda r: (-(r.get("ev") or 0), -(_side_prob(r) or 0)))
+    out = []
+    for r in leans[:limit]:
+        price = r.get("over_price") if r["side"] == "Over" else r.get("under_price")
+        out.append({"Player": r["player"], "Team": team_of.get(r.get("pid"), ""),
+                    "Pick": f"{r['side']} {r['line']:g}", "Chance": f"{_side_prob(r):.0%}",
+                    "Price": "—" if price is None else f"{price:+.0f}",
+                    "Edge": "—" if r.get("ev") is None else f"{r['ev']:+.1%}",
+                    "Why": " · ".join([f"projects {r['projection']:.1f}"] + list((r.get("flags") or [])[:2]))})
+    return out

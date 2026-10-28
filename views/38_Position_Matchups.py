@@ -408,7 +408,11 @@ EDITABLE = ("Line", "Over odds", "Under odds")
 def _editor_values(key: str, rows_order) -> dict:
     """{column: {row key: value}} typed into a props table so far (Line / Over odds / Under odds), read from the
     editor's own saved edits."""
-    edits = (st.session_state.get(key) or {}).get("edited_rows") or {}
+    saved = st.session_state.setdefault("pm_typed", {})
+    live = (st.session_state.get(key) or {}).get("edited_rows")
+    if live is not None:                       # the editor is on screen: remember its edits for the read-only view
+        saved[key] = live
+    edits = live if live is not None else (saved.get(key) or {})
     out = {c: {} for c in EDITABLE}
     for idx, change in edits.items():
         try:
@@ -454,17 +458,40 @@ def _rest_text(name, days) -> str:
     return f"{name}: {days - 1} day{'s' if days - 1 != 1 else ''} off"
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def _auto_book_lines(sport_odds_key: str, date_s: str, home: str, away: str, okey):
+    """The books' lines for one game + market, fetched automatically and kept 10 minutes (so switching markets
+    and coming back doesn't spend credits again)."""
+    api_key = BBD.get_odds_api_key()
+    if not api_key:
+        return {"error": None, "offers": [], "lines": {}, "no_key": True}
+    return PO.fetch_game(api_key, sport_odds_key, home, away, [okey] if okey else [])
+
+
 def render_game_context(market: str) -> dict:
     """Spread / total (loaded from the books or typed), both teams' rest, and the market-blend settings."""
     store = st.session_state.setdefault("pm_mkt", {})
     okey = _odds_key(market)
     gkey = (SPORT_KEY, date_str, str(bundle["home"]), str(bundle["away"]))
     skey = gkey + (okey,)
-    with st.expander("🎲 Game lines, rest & the market", expanded=True):
+    if skey not in store and st.session_state.get("pm_props_auto", True):
+        try:
+            with st.spinner("Getting tonight's lines from the books..."):
+                auto = _auto_book_lines(_active.odds_sport_key, date_str, home_name, away_name, okey)
+        except Exception as exc:                                   # noqa: BLE001
+            auto = {"error": f"Couldn't reach the books ({type(exc).__name__})."}
+        if not auto.get("no_key"):
+            store[skey] = auto
+            if auto.get("lines"):
+                store[gkey] = auto["lines"]
+    with st.expander("🎲 Game lines, rest & the market", expanded=not (store.get(skey) or {}).get("offers")):
         c1, c2 = st.columns([2, 3])
         with c1:
             cost = len(PO.GAME_MARKETS) + (1 if okey else 0)
-            if st.button(f"📈 Load book lines  (~{cost} Odds API credits)", key="pm_props_load",
+            st.toggle("Load book lines automatically", value=True, key="pm_props_auto",
+                      help=f"Fetches this game's lines when you open it or switch markets (~{cost} Odds API credits, "
+                           "reused for 10 minutes).")
+            if st.button(f"🔄 Refresh book lines  (~{cost} credits)", key="pm_props_load",
                          help="One request: this game's spread, total and moneyline plus every posted line for the "
                               "market above at the major books. Fills the Line and odds columns, shows the best price "
                               "and blends the books' no-vig price into the probability."):
@@ -485,10 +512,10 @@ def render_game_context(market: str) -> dict:
             elif got:
                 st.caption(f"Loaded {len(got.get('offers') or [])} posted {market} lines"
                            + (f" · {got['remaining']} Odds API credits left" if got.get("remaining") else "")
-                           + ". Type over any number to use your book's.")
+                           + ". Use ✏️ **Enter my own lines & prices** below to use your book's numbers instead.")
             else:
-                st.caption("No book lines loaded — type the spread / total and each player's line and price from "
-                           "your book, or load them (costs credits).")
+                st.caption("No book lines loaded — load them, or use ✏️ **Enter my own lines & prices** below to "
+                           "type the numbers from your book.")
         sp_default = gl.get("spread_home")
         if PFAM == "hockey":
             sp_default = PO.hockey_spread_from_ml(gl.get("p_home"))
@@ -583,6 +610,12 @@ def render_props_team(team, opp, off_name, def_name, market, mode, tables, g):
         rows = PPR.player_rows(rot, opp, market, tables["cur"], tables["prior"], PROPS.get("cur_pgames") or [],
                                PROPS.get("prior_pgames") or [], lines=ed["Line"], mode=mode, context=ctx)
         disp = PPR.display(rows)
+    if not st.session_state.get("pm_props_edit"):
+        opp_label = list(disp[0])[2] if disp else "Min"
+        st.dataframe(pd.DataFrame(PE.display_compact(rows, details=bool(st.session_state.get("pm_props_details")),
+                                                     opp_label=opp_label)),
+                     hide_index=True, width="stretch")
+        return rows
     df = pd.DataFrame(disp)
     for c in EDITABLE:
         if c in df.columns:
@@ -693,11 +726,35 @@ if tab_props is not None:
                     (st.warning if pace["label"] != "Normal pace" else st.caption)(
                         msg + (" Load or type the game total to fold this into every projection."
                                if abs(pace["pct"]) >= PPR.PACE_FLAG_PCT else ""))
-        all_rows = render_props_team(bundle["away"], bundle["home"], away_name, home_name, market, mode, tables, g)
+        v1, v2 = st.columns(2)
+        with v1:
+            st.toggle("✏️ Enter my own lines & prices", key="pm_props_edit",
+                      help="Switches the tables to edit mode: type your book's line and odds for any player. What you "
+                           "type is kept when you switch back.")
+        with v2:
+            st.toggle("Show the model's working", key="pm_props_details",
+                      help="Adds minutes / volume, recent form, the matchup and the game-environment adjustment.")
+        top = st.container()
+        away_rows = render_props_team(bundle["away"], bundle["home"], away_name, home_name, market, mode, tables, g)
         st.divider()
-        all_rows += render_props_team(bundle["home"], bundle["away"], home_name, away_name, market, mode, tables, g)
-        st.caption("Lean = 🟢 Over / 🔴 Under only with **+3% value at the price in the odds columns** (no price: the "
-                   "projection 5%+ past the line and 55%+ to hit). Low counts (rebounds, assists, blocks, steals, "
+        home_rows = render_props_team(bundle["home"], bundle["away"], home_name, away_name, market, mode, tables, g)
+        all_rows = away_rows + home_rows
+        with top:
+            team_of = {r["pid"]: away_name for r in away_rows}
+            team_of.update({r["pid"]: home_name for r in home_rows})
+            reads = PE.best_reads(all_rows, team_of)
+            st.markdown(f"#### 🔥 Best {market} reads in this game")
+            if reads:
+                st.dataframe(pd.DataFrame(reads), hide_index=True, width="stretch")
+            elif not any(r.get("line") is not None for r in all_rows):
+                st.info("No lines posted for this market yet — books usually post player props the afternoon of the "
+                        "game. The projections below are ready; picks appear once lines are up (or type your own).",
+                        icon="🕐")
+            else:
+                st.caption("No side clears the bar for value in this market right now — try another market.")
+        st.caption("**Pick** = the side the model favors; **Chance** = how likely it is; **Lean** = 🟢/🔴 only when "
+                   "that side has **+3% value at the price shown** (no price: the projection 5%+ past the line and "
+                   "55%+ to hit). Low counts (rebounds, assists, blocks, steals, "
                    "receptions, shots, goals) use count odds, not a bell curve. **Notes** flag back-to-backs, blowout "
                    "risk, game script and next-man-up bumps. Overtime isn't modelled.")
         render_sgp(all_rows, market)
