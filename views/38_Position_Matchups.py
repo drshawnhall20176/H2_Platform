@@ -478,25 +478,28 @@ def _rest_text(name, days) -> str:
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def _auto_book_lines(sport_odds_key: str, date_s: str, home: str, away: str, okey):
+def _auto_book_lines(sport_odds_key: str, date_s: str, home: str, away: str, keys):
     """The books' lines for one game + market, fetched automatically and kept 10 minutes (so switching markets
     and coming back doesn't spend credits again)."""
     api_key = BBD.get_odds_api_key()
     if not api_key:
         return {"error": None, "offers": [], "lines": {}, "no_key": True}
-    return PO.fetch_game(api_key, sport_odds_key, home, away, [okey] if okey else [])
+    return PO.fetch_game(api_key, sport_odds_key, home, away, list(keys or ()))
 
 
 def render_game_context(market: str) -> dict:
     """Spread / total (loaded from the books or typed), both teams' rest, and the market-blend settings."""
     store = st.session_state.setdefault("pm_mkt", {})
     okey = _odds_key(market)
+    # A points combo also loads the Points lines: a flagged Points line flags PA / PR / PRA / PB for that player.
+    fetch_keys = tuple(k for k in ([okey] + (["player_points"] if PFAM == "basketball"
+                                              and market in PPR.POINTS_COMBOS else [])) if k)
     gkey = (SPORT_KEY, date_str, str(bundle["home"]), str(bundle["away"]))
-    skey = gkey + (okey,)
+    skey = gkey + fetch_keys
     if skey not in store and st.session_state.get("pm_props_auto", True):
         try:
             with st.spinner(f"Getting tonight's {market} lines from the books..."):
-                auto = _auto_book_lines(_active.odds_sport_key, date_str, home_name, away_name, okey)
+                auto = _auto_book_lines(_active.odds_sport_key, date_str, home_name, away_name, fetch_keys)
         except Exception as exc:                                   # noqa: BLE001
             auto = {"error": f"Couldn't reach the books ({type(exc).__name__})."}
         if not auto.get("no_key"):
@@ -506,7 +509,7 @@ def render_game_context(market: str) -> dict:
     with st.expander("🎲 Game lines, rest & the market", expanded=not (store.get(skey) or {}).get("offers")):
         c1, c2 = st.columns([2, 3])
         with c1:
-            cost = len(PO.GAME_MARKETS) + (1 if okey else 0)
+            cost = len(PO.GAME_MARKETS) + len(fetch_keys)
             st.toggle("Load book lines automatically", value=True, key="pm_props_auto",
                       help=f"Fetches this game's lines when you open it or switch markets (~{cost} Odds API credits, "
                            "reused for 10 minutes).")
@@ -520,7 +523,7 @@ def render_game_context(market: str) -> dict:
                 else:
                     with st.spinner("Asking the books..."):
                         store[skey] = PO.fetch_game(api_key, _active.odds_sport_key, home_name, away_name,
-                                                    [okey] if okey else [])
+                                                    list(fetch_keys))
                 if (store[skey] or {}).get("lines"):
                     store[gkey] = store[skey]["lines"]
         got = store.get(skey) or {}
@@ -636,7 +639,10 @@ def render_props_team(team, opp, off_name, def_name, market, mode, tables, g):
         order = [r["pid"] for r in rot]
         ed = _editor_values(key, order)
         base_pg = PROPS.get("cur_pgames") or PROPS.get("pgames") or []
-        ctx = dict(base_ctx, team=team, env=PE.env_factor(team_imp, PPR.team_baseline(base_pg, team)),
+        ctx = dict(PPR.game_context(team, is_home, g["spread_home"], g["total"], base_ctx["rest_days"],
+                                    base_ctx["opp_rest_days"], base_pg, offers=g["offers"], book=g.get("book"),
+                                    news_checked=base_ctx["news_checked"], slope=g["slope"],
+                                    model_weight=g["model_weight"], sport=SPORT_KEY),
                    prices={k: {"over": ed["Over odds"].get(k), "under": ed["Under odds"].get(k)} for k in order})
         rows = PPR.player_rows(rot, opp, market, tables["cur"], tables["prior"], PROPS.get("cur_pgames") or [],
                                PROPS.get("prior_pgames") or [], lines=ed["Line"], mode=mode, context=ctx)
@@ -751,9 +757,7 @@ if tab_props is not None:
             g = render_game_context(market)
             tables = {}
             if PFAM == "basketball":
-                tables = {"cur": PPR.defense_allowed(PM.allowed_by_slot(PROPS.get("cur_pgames") or [], SPORT_KEY), market),
-                          "prior": (PPR.defense_allowed(PM.allowed_by_slot(PROPS["prior_pgames"], SPORT_KEY), market)
-                                    if PROPS.get("prior_pgames") else None)}
+                tables = PPR.market_tables(PROPS.get("cur_pgames") or [], PROPS.get("prior_pgames"), market, SPORT_KEY)
                 if not g["implied"]:
                     pace = PPR.pace_flag(PROPS.get("cur_pgames") or PROPS.get("pgames"), bundle["home"], bundle["away"])
                     if pace:

@@ -10,7 +10,6 @@ from datetime import datetime
 import pytz
 
 import sports
-import basketball_markets as BM
 import best_bets_data as BBD
 import grading
 import quick_log
@@ -201,7 +200,10 @@ with f3:
     _default_markets = (_active.board_defaults() or markets)       # curated defaults + the sport's featured markets (MLB: HR, Stolen Bases)
     _default_mkt_pick = [m for m in _default_markets if m in markets] or markets
     mkt_pick = st.multiselect("Markets", markets, default=_default_mkt_pick)
-with f4: min_conv = st.slider("Min conviction", 1.0, 3.0, 1.2, 0.1,
+# NBA reads players through the Player props model (slate_props): every play is a Position Matchups read at the
+# book's line, and only the ones Player props leans on carry Conviction above 1.0.
+_props_model = any(p.get("Model") == "player-props" for p in plays)
+with f4: min_conv = st.slider("Min conviction", 1.0, 3.0, 1.0 if _props_model else 1.2, 0.1,
                               help="Conviction is now measured against the real, live no-vig "
                                    "market probability for a play whenever one exists (📊 on "
                                    "the grade badge elsewhere on this platform), not always this "
@@ -237,7 +239,9 @@ if not mkt_pick:
     st.info("Select at least one market above to see plays.")
     st.stop()
 
-view = [p for p in slot_plays if p["Market"] in mkt_pick and p["Conviction"] >= min_conv]
+view = [p for p in slot_plays if p["Market"] in mkt_pick and p["Conviction"] >= min_conv
+        and (not _props_model or p.get("Lean") in ("Over", "Under"))]
+_held = [p for p in slot_plays if p["Market"] in mkt_pick and p.get("Lean") == "Check news"]
 view = grading.filter_min_probability(view, min_prob_pct / 100.0)
 # A REAL, CONFIRMED FIX, not the original design -- re-sorted here by ModelProb (real
 # probability of hitting), not left in the plays list's own Conviction-descending order. Same
@@ -307,14 +311,27 @@ _cols = ["ModelProb", "Conviction", "Time", "Slot", "Player", "Team", "TeamTrend
 _rename = {"ModelProb": "Model %", "_display_line": "Line",
           "_display_price": "Fair", "Why": "Why the model likes it",
           "TeamTrend": "Team Trend"}
+if _props_model:
+    _cols.insert(_cols.index("Side") + 1, "Projection")
 if _show_blowout_risk:
     _cols.insert(_cols.index("Team") + 1, "_blowout_risk")
     _rename["_blowout_risk"] = "Blowout Risk"
 df = pd.DataFrame(view)[_cols]
 df = df.rename(columns=_rename)
-st.dataframe(df.style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×"}, na_rep="—")
+st.dataframe(df.style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×", "Projection": "{:.1f}"}, na_rep="—")
              .theme_gradient(cmap="Greens", subset=["Model %"]),
              width="stretch", hide_index=True, height=400)
+if _props_model:
+    st.caption("🧭 Same model as **Position Matchups → Player props**: Projection, Model % (its Chance) and Side match "
+               "that page at the book's line. Only plays it leans on are listed; players without a book line aren't.")
+    if _held:
+        with st.expander(f"⚠️ Model vs the books — check the news before betting ({len(_held)})"):
+            st.caption("The book's line is far from the projection — usually minutes, a role change or an injury the "
+                       "box scores don't show yet. Not ranked until the news is checked on Position Matchups.")
+            st.dataframe(pd.DataFrame([{"Player": p["Player"], "Team": p["Team"], "Market": p["Market"],
+                                        "Line": p["Line"], "Projection": p.get("Projection"),
+                                        "Why": p.get("Why")} for p in _held]),
+                         hide_index=True, width="stretch")
 st.caption("Team Trend: this player's own team, scoring recently vs. their season norm -- 📈 Hot "
           "means the whole offense has been running above its own baseline lately, 📉 Cold below "
           "it, ➡️ Steady in between or not enough data yet. A real, separate signal from this "
@@ -451,16 +468,13 @@ with st.expander("Diagnostic Inspector", expanded=True):
         # precisely what the bootstrap model resampled from rather than trusting a black box.
         log = p.get("_game_log") or []
         stat_key = p.get("_stat_key")
-        # Combos (Pts+Reb+Ast, Blocks+Steals, ...) are summed from the game's parts; games that lack a stat are left out.
-        sample = [g for g in log if BM.game_value(g, stat_key) is not None] if stat_key else []
-        if not log or not stat_key or not sample:
-            st.caption("No recent-game log attached to this play." if not log or not stat_key
-                       else "This player's recent game lines don't include that stat yet.")
+        if not log or not stat_key:
+            st.caption("No recent-game log attached to this play.")
         else:
-            n = len(sample)
-            hits = sum(1 for g in sample if (BM.game_value(g, stat_key) > p["Line"] if p["Side"] == "Over"
-                                              else BM.game_value(g, stat_key) < p["Line"]))
-            avg = sum(BM.game_value(g, stat_key) for g in sample) / n
+            n = len(log)
+            hits = sum(1 for g in log if (g.get(stat_key, 0) > p["Line"] if p["Side"] == "Over"
+                                          else g.get(stat_key, 0) < p["Line"]))
+            avg = sum(g.get(stat_key, 0) for g in log) / n
             c1, c2, c3 = st.columns(3)
             c1.metric("Games sampled", n, help="How many recent games the bootstrap model drew from")
             c2.metric(f"Cleared {p['Line']:g}", f"{hits}/{n}")
@@ -476,7 +490,7 @@ with st.expander("Diagnostic Inspector", expanded=True):
                     return iso or "—"
 
             log_df = pd.DataFrame([{"Date": _fmt_date(g.get("date")), "Opponent": g.get("opp") or "—",
-                                    stat_key.upper(): BM.game_value(g, stat_key) or 0, "Minutes": g.get("min", 0)}
+                                    stat_key.upper(): g.get(stat_key, 0), "Minutes": g.get("min", 0)}
                                    for g in log])
             st.dataframe(log_df, hide_index=True, width="stretch")
             st.caption("Most recent game first. This is the exact data the bootstrap resampled from — "

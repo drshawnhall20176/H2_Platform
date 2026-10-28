@@ -100,11 +100,12 @@ def test_the_opening_night_slate_is_no_longer_empty(monkeypatch):
     rows, meta = E.build_slate("2026-11-02")
     assert len(rows) == 6 and len(meta) == 1 and {len(r["_game_log"]) for r in rows} == {10}
     plays = NP.build_best_bets(rows)
-    assert plays and all(p["PriorGames"] == 10 for p in plays) and all("10 of last 10 games are from last season" in p["Why"] for p in plays)
+    # the platform-wide form rule: with no game this season, form is the last 5 of last season
+    assert plays and all(p["PriorGames"] == 5 for p in plays) and all("5 of last 5 games are from last season]" in p["Why"] for p in plays)
 
 
 def test_the_why_note_says_how_many_games_are_from_last_season():
-    assert NP.data_note_for([{"src": "current"}] * 3 + [{"src": "prior"}] * 7) == (7, 0, " [7 of last 10 games are from last season]")
+    assert NP.data_note_for([{"src": "current"}] * 3 + [{"src": "prior"}] * 7) == (7, 0, " [7 of last 10 games are from last season, at half weight]")
     assert NP.data_note_for([{"src": "preseason"}] * 2)[2].startswith(" [only 2 preseason game(s)")
     assert NP.data_note_for([{"pts": 1}] * 4) == (0, 0, "")                                   # untagged logs read as all current
 

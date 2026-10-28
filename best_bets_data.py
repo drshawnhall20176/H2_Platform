@@ -663,6 +663,83 @@ def fetch_generic_offers(sport_key: str, date_str: str, api_key: str) -> List[Di
     return offers
 
 
+# --------------------------------------------------------------------------- one model on every page (Oct 28)
+# Sports whose pick pages read players through the Player props model (slate_props) instead of the older
+# recent-games resample. NBA first: it has the league-wide box-score sample the matchup factor needs.
+PROPS_MODEL_SPORTS = ("NBA",)
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def fetch_slate_game_lines_cached(sport_key: str, date_str: str, api_key: str) -> List[Dict]:
+    """Every game's spread and total (2 Odds API credits a game, kept 30 minutes) -- the game environment Player
+    props folds into each projection."""
+    try:
+        games, _info = O.fetch_slate_game_lines(date_str, api_key, sport=sports.get(sport_key).odds_sport_key)
+        return games
+    except Exception:                                           # noqa: BLE001 -- neutral environment instead
+        return []
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def load_props_model_inputs(sport_key: str, date_str: str, teams: tuple) -> Dict:
+    """The league player-game sample (this season + the end of last), each team's injuries and rest -- exactly
+    what Position Matchups' Player props reads. `teams` is ((team id, abbreviation), ...)."""
+    import position_data as PD
+    eng = sports.get(sport_key).engine
+    sample = PD.nba_league_props_sample(date_str)
+    injuries, rest = {}, {}
+    for tid, abbr in teams:
+        injuries[tid] = PD._injury_map(eng, abbr)
+        try:
+            rest[tid] = (eng.get_team_rest_info(tid, date_str) or {}).get("rest_days")
+        except Exception:                                       # noqa: BLE001
+            rest[tid] = None
+    return {"sample": sample, "injuries": injuries, "rest": rest}
+
+
+def slate_reads_for(sport_key: str, date_str: str, meta: List[Dict], offers: List[Dict],
+                    preferred_book: Optional[str]) -> Optional[Dict]:
+    """The Player props reads for every game on the slate, or None when this sport isn't on the shared model yet
+    or there are no book lines to read against."""
+    if sport_key not in PROPS_MODEL_SPORTS or not offers or not meta:
+        return None
+    import slate_props as SP
+    teams = tuple(sorted({(SP._int_or(m.get(f"{s}_id")), m.get(f"{s}_abbr")) for m in meta for s in ("home", "away")},
+                         key=lambda t: str(t[0])))
+    inputs = load_props_model_inputs(sport_key, date_str, teams)
+    api_key = get_odds_api_key()
+    lines = fetch_slate_game_lines_cached(sport_key, date_str, api_key) if api_key else []
+    book = None if preferred_book in (None, "best") else preferred_book
+    reads = SP.slate_reads(meta, inputs["sample"], offers, book=book, injuries=inputs["injuries"],
+                           rest=inputs["rest"], game_lines=lines, sport=sport_key)
+    return reads or None
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_slate_reads(sport_key: str, date_str: str, preferred_book: str = O.DEFAULT_BOOK) -> Optional[Dict]:
+    """slate_reads_for with its own slate + offers fetch (both shared with Best Bets through their caches), for
+    pages that build their own board (Edge Board)."""
+    if sport_key not in PROPS_MODEL_SPORTS:
+        return None
+    api_key = get_odds_api_key()
+    if not api_key:
+        return None
+    _rows, meta = sports.get(sport_key).engine.build_slate(date_str)
+    try:
+        offers = fetch_generic_offers(sport_key, date_str, api_key)
+    except Exception:                                           # noqa: BLE001
+        return None
+    return slate_reads_for(sport_key, date_str, meta, offers, preferred_book)
+
+
+def drop_placeholder_plays(plays: List[Dict]) -> List[Dict]:
+    """When the books have posted lines for the slate, a play measured against the platform's placeholder line
+    (22.5 points for a bench player...) isn't a bet -- only real-line plays stay on the boards."""
+    if any(p.get("LineSource") == "book" for p in plays):
+        return [p for p in plays if p.get("LineSource") != "default"]
+    return plays
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def load_generic_best_bets_board(sport_key: str, date_str: str,
                                  preferred_book: str = O.DEFAULT_BOOK) -> tuple:
@@ -746,7 +823,22 @@ def load_generic_best_bets_board(sport_key: str, date_str: str,
     except Exception:
         pass   # no Streamlit runtime (e.g. a test or script context) -- both are optional
 
-    plays = sport.projections.build_best_bets(rows, real_lines=real_lines, offers=real_offers,
-                                              preferred_book=preferred_book if api_key and sport.markets else O.DEFAULT_BOOK)
+    book = preferred_book if api_key and sport.markets else O.DEFAULT_BOOK
+    reads = None
+    try:
+        reads = slate_reads_for(sport_key, date_str, meta, real_offers, book)
+    except Exception as e:                                      # noqa: BLE001 -- fall back to the recent-games model
+        diag["props_model_error"] = str(e)[:200]
+    diag["model"] = "player-props" if reads else "recent-games"
+    try:
+        st.session_state[diag_key] = diag
+    except Exception:
+        pass
+    if reads:
+        plays = sport.projections.build_best_bets(rows, real_lines=real_lines, offers=real_offers,
+                                                  preferred_book=book, reads=reads)
+    else:
+        plays = drop_placeholder_plays(sport.projections.build_best_bets(rows, real_lines=real_lines,
+                                                                         offers=real_offers, preferred_book=book))
     attach_team_trend(sport_key, plays, rows, date_str)
     return plays, meta, available_books

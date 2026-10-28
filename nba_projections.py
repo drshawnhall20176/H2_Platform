@@ -125,22 +125,29 @@ def _signal(player, team, game, market, side, line, prob, projection, **extra) -
     return sig
 
 
-def simulate_player_stat(recent_values: List[float], sims: int, rng: np.random.Generator) -> np.ndarray:
+def simulate_player_stat(recent_values: List[float], sims: int, rng: np.random.Generator,
+                         weights: Optional[List[float]] = None) -> np.ndarray:
     """Bootstrap `sims` draws (with replacement) from a player's recent-game values for one stat.
     Values are rounded to the nearest non-negative integer (counting stats can't be fractional or
     negative). Returns an empty array if there's no game log to sample from."""
     if not recent_values:
         return np.array([], dtype=np.int64)
-    draws = rng.choice(np.asarray(recent_values, dtype=np.float64), size=sims, replace=True)
+    p = None
+    if weights and len(weights) == len(recent_values) and sum(weights) > 0:
+        p = np.asarray(weights, dtype=np.float64) / float(sum(weights))
+    draws = rng.choice(np.asarray(recent_values, dtype=np.float64), size=sims, replace=True, p=p)
     return np.clip(np.round(draws), 0, None).astype(np.int64)
 
 
 def build_projection_index(rows: List[Dict], meta: List[Dict],
-                           sims: int = DEFAULT_SIMS, seed: Optional[int] = None) -> Dict:
+                           sims: int = DEFAULT_SIMS, seed: Optional[int] = None,
+                           reads: Optional[Dict] = None) -> Dict:
     """Return {(normalized_name, odds_market_key): {dist, mean, n_games, ctx}} for the slate —
     identical shape to projections.build_projection_index (plus n_games, needed for
     basketball_projections.shrink_prob downstream), so downstream code (Edge Board, odds_api.
     compute_edges) doesn't need to know which sport it's looking at."""
+    if reads:
+        return index_from_reads(reads, rows)
     rng = np.random.default_rng(seed)
     index: Dict = {}
 
@@ -148,18 +155,43 @@ def build_projection_index(rows: List[Dict], meta: List[Dict],
         log = r.get("_game_log") or []
         if not log:
             continue
+        sel = FPol.select(log)            # the platform-wide form rule: this season first, topped up to 5
+        sel_w = FPol.weights(sel)         # from last season at half weight, newer games counting more
         nm = normalize_name(r["Player"])
         ctx = {"player": r["Player"], "team": r["Team"], "game": r["GameLabel"],
               "opp": r.get("Opp"), "lineup": "Active", "game_date": r.get("_game_date"),
               "pid": r.get("_pid")}
         for mkey, (col, _disp, _line) in _MARKET_SPEC.items():
-            values = [g[_STAT_KEY[col]] for g in log]
-            sim = simulate_player_stat(values, sims, rng)
+            values = [g[_STAT_KEY[col]] for g in sel]
+            sim = simulate_player_stat(values, sims, rng, sel_w)
             if sim.size == 0:
                 continue
             index[(nm, mkey)] = {"dist": _dist(sim), "mean": float(sim.mean()),
                                  "n_games": len(values), "ctx": ctx}
 
+    return index
+
+
+def index_from_reads(reads: Dict, rows: List[Dict]) -> Dict:
+    """Edge Board's index from the Player props reads (slate_props.slate_reads): each entry's probability array is
+    the Player props distribution around ITS projection, so Edge Board's model probability at any line is Player
+    props' -- and the entry carries the read itself, so odds_api.compute_edges blends with the market and applies
+    the same gap policy (see compute_edges)."""
+    import slate_props as SP
+    by_pid = {r.get("_pid"): r for r in rows or []}
+    index: Dict = {}
+    for (pid, mkey), row in reads.items():
+        if row.get("out") or row.get("projection") is None:
+            continue
+        s = by_pid.get(pid) or {}
+        values = list(row.get("values") or [])
+        ctx = {"player": row["player"], "team": s.get("Team") or row.get("team_name"), "game": row.get("game"),
+               "opp": s.get("Opp") or row.get("opp_name"), "lineup": "Active",
+               "game_date": s.get("_game_date") or row.get("game_date"), "pid": pid}
+        index[(normalize_name(row["player"]), mkey)] = {
+            "dist": np.asarray(SP.pmf(row["projection"], values, row.get("dist") or "normal"), dtype=np.float64),
+            "mean": float(row["projection"]), "n_games": row.get("games") or 0, "ctx": ctx, "read": row,
+            "line": row.get("line") if row.get("line_src") == "book" else None}
     return index
 
 
@@ -180,6 +212,19 @@ def default_board_from_index(index: Dict) -> List[Dict]:
     neutral baseline by sample size (see basketball_projections.shrink_prob) before being
     clipped — a 4-game "perfect" streak and a 40-game one no longer produce the identical number."""
     out: List[Dict] = []
+    if any("read" in e for e in index.values()):
+        # Player props reads: the book's own line and Player props' Chance -- no placeholder lines.
+        import slate_props as SP
+        for (nm, mkey), entry in index.items():
+            row, ctx = entry.get("read") or {}, entry["ctx"]
+            sp = SP.side_probs(row) if entry.get("line") is not None else None
+            if sp is None:
+                continue
+            out.append(_signal(ctx["player"], ctx["team"], ctx["game"], row.get("market"), sp["side"], entry["line"],
+                               sp["p_final"], entry["mean"], Opp=ctx.get("opp"), Lineup=ctx.get("lineup"),
+                               GameTime=ctx.get("game_date"), PlayerId=ctx.get("pid"), MarketKey=mkey,
+                               Lean=row.get("lean")))
+        return out
     for (nm, mkey), entry in index.items():
         _col, disp, line = _MARKET_SPEC.get(mkey, (mkey, mkey, 0.5))
         dist, ctx = entry["dist"], entry["ctx"]
@@ -255,7 +300,8 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
                     seed: Optional[int] = None,
                     real_lines: Optional[Dict] = None,
                     offers: Optional[List[Dict]] = None,
-                    preferred_book: Optional[str] = None) -> List[Dict]:
+                    preferred_book: Optional[str] = None,
+                    reads: Optional[Dict] = None) -> List[Dict]:
     """Rank candidate plays across all four markets by conviction (model prob vs the reference
     prob for that market), each with recent-form reasoning. No odds required — output schema
     (Player/PlayerId/Team/Game/Opp/Versus/Market/Side/Line/ModelProb/Fair/Conviction/Why) matches
@@ -281,7 +327,14 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
         available, the model's own theoretical Fair price otherwise (PriceSource records
         which) -- Fair itself is unchanged; RealPrice is new, additive.
     None for real_lines/offers (the default) preserves the exact original always-placeholder,
-    always-theoretical behavior for any existing caller."""
+    always-theoretical behavior for any existing caller.
+
+    `reads` (slate_props.slate_reads -- the Player props model across the slate, Oct 28 sync): when given, every
+    play IS a Player props read at the book's line (same projection, Chance, side and lean as Position Matchups),
+    players without a book line get no play, and the rest of this function is skipped."""
+    if reads is not None:
+        import slate_props as SP
+        return SP.plays(reads, rows)
     rng = np.random.default_rng(seed)
     plays: List[Dict] = []
 
@@ -289,16 +342,18 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
         log = r.get("_game_log") or []
         if not log:
             continue
-        n_prior, n_pre, data_note = data_note_for(log)
+        sel = FPol.select(log)            # the platform-wide form rule: this season first, topped up to 5
+        sel_w = FPol.weights(sel)         # from last season at half weight, newer games counting more
+        n_prior, n_pre, data_note = data_note_for(sel)
         for mkey, (col, disp, default_line) in _MARKET_SPEC.items():
-            values = [g[_STAT_KEY[col]] for g in log]
+            values = [g[_STAT_KEY[col]] for g in sel]
             norm_name = normalize_name(r["Player"])
             line, line_src = default_line, "default"
             if real_lines is not None:
                 real = real_lines.get((norm_name, mkey))
                 if real is not None:
                     line, line_src = float(real), "book"
-            sim = simulate_player_stat(values, sims, rng)
+            sim = simulate_player_stat(values, sims, rng, sel_w)
             if sim.size == 0:
                 continue
             raw = prob_over(_dist(sim), line)
@@ -345,7 +400,7 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
                 "_ceiling": round(1.0 / ref_s, 2) if ref_s > 0 else None,
                 "Why": _player_reasons(values, line, side) + data_note,
                 "PriorGames": n_prior, "PreseasonGames": n_pre,
-                "_stat_key": _STAT_KEY[col], "_game_log": log,
+                "_stat_key": _STAT_KEY[col], "_game_log": sel,
             })
 
     plays.sort(key=lambda x: x["Conviction"], reverse=True)
@@ -361,7 +416,8 @@ def data_note_for(log: List[Dict]) -> Tuple[int, int, str]:
     if n_pre and n_pre == len(log):
         return n_prior, n_pre, f" [only {n_pre} preseason game(s) on file — exhibition minutes, low confidence]"
     if n_prior:
-        return n_prior, n_pre, f" [{n_prior} of last {len(log)} games are from last season]"
+        half = ", at half weight" if n_prior < len(log) else ""       # all-prior: equal weights, nothing halved
+        return n_prior, n_pre, f" [{n_prior} of last {len(log)} games are from last season{half}]"
     return n_prior, n_pre, ""
 
 

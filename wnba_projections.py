@@ -122,13 +122,17 @@ def _signal(player, team, game, market, side, line, prob, projection, **extra) -
     return sig
 
 
-def simulate_player_stat(recent_values: List[float], sims: int, rng: np.random.Generator) -> np.ndarray:
+def simulate_player_stat(recent_values: List[float], sims: int, rng: np.random.Generator,
+                         weights: Optional[List[float]] = None) -> np.ndarray:
     """Bootstrap `sims` draws (with replacement) from a player's recent-game values for one stat.
     Values are rounded to the nearest non-negative integer (counting stats can't be fractional or
     negative). Returns an empty array if there's no game log to sample from."""
     if not recent_values:
         return np.array([], dtype=np.int64)
-    draws = rng.choice(np.asarray(recent_values, dtype=np.float64), size=sims, replace=True)
+    p = None
+    if weights and len(weights) == len(recent_values) and sum(weights) > 0:
+        p = np.asarray(weights, dtype=np.float64) / float(sum(weights))
+    draws = rng.choice(np.asarray(recent_values, dtype=np.float64), size=sims, replace=True, p=p)
     return np.clip(np.round(draws), 0, None).astype(np.int64)
 
 
@@ -145,13 +149,15 @@ def build_projection_index(rows: List[Dict], meta: List[Dict],
         log = r.get("_game_log") or []
         if not log:
             continue
+        sel = FPol.select(log)            # the platform-wide form rule: this season first, topped up to 5
+        sel_w = FPol.weights(sel)         # from last season at half weight, newer games counting more
         nm = normalize_name(r["Player"])
         ctx = {"player": r["Player"], "team": r["Team"], "game": r["GameLabel"],
               "opp": r.get("Opp"), "lineup": "Active", "game_date": r.get("_game_date"),
               "pid": r.get("_pid")}
         for mkey, (col, _disp, _line) in _MARKET_SPEC.items():
-            values = [g[_STAT_KEY[col]] for g in log]
-            sim = simulate_player_stat(values, sims, rng)
+            values = [g[_STAT_KEY[col]] for g in sel]
+            sim = simulate_player_stat(values, sims, rng, sel_w)
             if sim.size == 0:
                 continue
             index[(nm, mkey)] = {"dist": _dist(sim), "mean": float(sim.mean()),
@@ -312,15 +318,17 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
         log = r.get("_game_log") or []
         if not log:
             continue
+        sel = FPol.select(log)            # the platform-wide form rule: this season first, topped up to 5
+        sel_w = FPol.weights(sel)         # from last season at half weight, newer games counting more
         for mkey, (col, disp, default_line) in _MARKET_SPEC.items():
-            values = [g[_STAT_KEY[col]] for g in log]
+            values = [g[_STAT_KEY[col]] for g in sel]
             norm_name = normalize_name(r["Player"])
             line, line_src = default_line, "default"
             if real_lines is not None:
                 real = real_lines.get((norm_name, mkey))
                 if real is not None:
                     line, line_src = float(real), "book"
-            sim = simulate_player_stat(values, sims, rng)
+            sim = simulate_player_stat(values, sims, rng, sel_w)
             if sim.size == 0:
                 continue
             raw = prob_over(_dist(sim), line)
@@ -368,7 +376,7 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
                 # different reference rates, see that function's own docstring
                 "_ceiling": round(1.0 / ref_s, 2) if ref_s > 0 else None,
                 "Why": _player_reasons(values, line, side),
-                "_stat_key": _STAT_KEY[col], "_game_log": log,
+                "_stat_key": _STAT_KEY[col], "_game_log": sel,
             })
 
     plays.sort(key=lambda x: x["Conviction"], reverse=True)

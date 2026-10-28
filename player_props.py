@@ -67,6 +67,8 @@ _OUT = {"out", "injured reserve", "ir", "suspended", "inactive"}
 DIST = {"Rebounds": "count", "Assists": "count", "Blocks": "count", "Steals": "count", "Threes Made": "count"}
 # How strongly each stat moves with a game's scoring environment (points fully, rebounds a little).
 ENV_WEIGHTS = {"pts": 1.0, "ast": 0.7, "reb": 0.4, "stl": 0.3, "blk": 0.3, "fg3m": 0.9, "_default": 0.8}
+# Combos that contain points: a flagged Points line (the cleanest read on minutes / role) flags these too.
+POINTS_COMBOS = ("PA", "PR", "PRA", "PB")
 # The Odds API market key behind each market (Points + Blocks isn't posted there).
 ODDS_MARKETS = {"Points": "player_points", "Rebounds": "player_rebounds", "Assists": "player_assists",
                 "Blocks": "player_blocks", "Steals": "player_steals", "PRA": "player_points_rebounds_assists",
@@ -349,9 +351,73 @@ def player_rows(rotation_list: Sequence[Dict], defense, market: str, cur_table: 
             "hit": (len(hits), len(values)) if line is not None and values else None,
             "p_model": read["p_model"], "p_market": read["p_market"], "p_final": read["p_final"], "gap": read.get("gap"), "gap_pct": read.get("gap_pct"),
             "p_over": read["p_final"], "side": read["side"], "ev": read["ev"], "lean": read["lean"],
-            "flags": flags, "dist": dist,
+            "flags": flags, "dist": dist, "values": list(values),
         })
+    return carry_points_flags(rows, rotation_list, defense, market, cur_pgames, prior_pgames, mode,
+                              current_is_prior, ctx)
+
+
+def carry_points_flags(rows: List[Dict], rotation_list, defense, market: str, cur_pgames, prior_pgames,
+                       mode: str, current_is_prior: bool, ctx: Dict) -> List[Dict]:
+    """When the books' POINTS line for a player is far from his points projection -- the clearest sign of a minutes
+    or role change the box scores don't show -- his points combos (PA, PR, PRA, PB) inherit the flag: a news check
+    before any lean. Needs the Points offers loaded alongside (the page fetches them with any points combo)."""
+    if market not in POINTS_COMBOS or ctx.get("_no_carry"):
+        return rows
+    offers = ctx.get("offers") or []
+    if not any(o.get("market") == ODDS_MARKETS["Points"] for o in offers):
+        return rows
+    import position_matchups as PM
+    sport = ctx.get("sport", "NBA")
+    ct = defense_allowed(PM.allowed_by_slot(cur_pgames or [], sport), "Points")
+    pt = defense_allowed(PM.allowed_by_slot(prior_pgames, sport), "Points") if prior_pgames else None
+    pts = player_rows(rotation_list, defense, "Points", ct, pt, cur_pgames, prior_pgames, lines=None, mode=mode,
+                      current_is_prior=current_is_prior, context=dict(ctx, prices={}, _no_carry=True))
+    flagged = {x["pid"]: x for x in pts if x.get("gap") == "big"}
+    for row in rows:
+        f = flagged.get(row["pid"])
+        if not f or row.get("gap") == "big":
+            continue
+        row["gap"], row["gap_pct"] = "big", f["gap_pct"]
+        row["gap_from"] = (f"Points line {f['line']:g} vs points projection {f['projection']:.1f} "
+                           f"({f['gap_pct']:+.0%})")
+        if row.get("lean") in ("Over", "Under") and not ctx.get("news_checked"):
+            row["lean"] = "Check news"
     return rows
+
+
+# --------------------------------------------------------------------------- one recipe, every page
+# Position Matchups' Player props and the slate-wide pick pages (Best Bets, Edge Board, Graded Picks, Parlays,
+# Slip Lab...) build a team's reads through THESE helpers, so the same player never gets two projections.
+def market_tables(cur_pgames, prior_pgames, market: str, sport: str = "NBA") -> Dict:
+    """{"cur", "prior"} defense-allowed tables for `market` (what player_rows' matchup factor reads)."""
+    import position_matchups as PM
+    return {"cur": defense_allowed(PM.allowed_by_slot(cur_pgames or [], sport), market),
+            "prior": defense_allowed(PM.allowed_by_slot(prior_pgames, sport), market) if prior_pgames else None}
+
+
+def team_rotation(cur_pgames, fallback_pgames, team, injuries: Optional[Dict[str, str]] = None,
+                  sport: str = "NBA", last_n: int = 7) -> List[Dict]:
+    """Every rotation player of `team`, from THIS season's games when the team has any (a traded player belongs
+    to his new team), otherwise from `fallback_pgames`."""
+    import position_matchups as PM
+    own = cur_pgames if any(p.get("team") == team for p in cur_pgames or []) else (fallback_pgames or [])
+    return rotation(PM.usage_depth(own, team, sport, last_n=last_n), injuries)
+
+
+def game_context(team, is_home: bool, spread_home: Optional[float], total: Optional[float],
+                 rest_days: Optional[int], opp_rest_days: Optional[int], baseline_pgames, offers=None,
+                 book: Optional[str] = None, news_checked: bool = False, slope: float = 1.0,
+                 model_weight: float = PE.MODEL_WEIGHT, sport: str = "NBA") -> Dict:
+    """player_rows' `context` for one team in one game: rest both ways, this team's spread, the game environment
+    (implied team total vs the team's normal scoring), the books' offers and whose prices to use."""
+    implied = PE.implied_team_totals(total, spread_home)
+    team_imp = (implied[0] if is_home else implied[1]) if implied else None
+    spread_team = None if spread_home is None else (spread_home if is_home else -spread_home)
+    return {"team": team, "sport": sport, "rest_days": rest_days, "opp_rest_days": opp_rest_days,
+            "spread": spread_team, "env": PE.env_factor(team_imp, team_baseline(baseline_pgames, team)),
+            "offers": offers, "book": book, "news_checked": bool(news_checked), "slope": slope,
+            "model_weight": model_weight}
 
 
 def display(rows: Sequence[Dict]) -> List[Dict]:

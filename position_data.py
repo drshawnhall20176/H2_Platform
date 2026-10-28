@@ -631,8 +631,7 @@ def load_basketball(sport_key: str, date_str: str, home_id: int, away_id: int, h
         depth[tid] = {slot: [dict(u, status=inj.get(u["name"]), note=f"{u['avg_min']:.0f} min") for u in lst]
                       for slot, lst in usage.items()}
         # Every rotation player, from THIS season's own games (a traded player belongs to his new team).
-        own = cur_pgames if any(p.get("team") == tid for p in cur_pgames) else pgames
-        rotation[tid] = PPR.rotation(PM.usage_depth(own, tid, sport_key, last_n=LEAGUE_GAMES_PER_TEAM), inj)
+        rotation[tid] = PPR.team_rotation(cur_pgames, pgames, tid, inj, sport_key, last_n=LEAGUE_GAMES_PER_TEAM)
     h2h = basketball_h2h_games(eng, home_id, away_id, date_str, home_name, away_name)
     names = {home_id: home_name, away_id: away_name}
     for g in games.values():

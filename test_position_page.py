@@ -744,7 +744,7 @@ def test_loading_book_lines_fills_lines_prices_and_best_price(monkeypatch, page)
     at = page("NBA", nba_games(), bundle_fn=lambda sport, g: props_bundle(sport))
     at.button(key="pm_props_load").click().run()
     assert not at.exception, [e.value for e in at.exception]
-    assert calls and calls[0][4] == ["player_points_rebounds_assists"]
+    assert calls and calls[0][4] == ["player_points_rebounds_assists", "player_points"]   # Points rides along with combos
     star = [d.value for d in at.dataframe if "Projection" in d.value.columns and
             any("Star Guard" in x for x in d.value["Player"])][0].iloc[0]
     assert star["Line"] == "40.5" and star["Pick"].endswith("40.5") and star["Chance"] != "—" and star["Price"] != "—"

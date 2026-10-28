@@ -373,7 +373,8 @@ def test_best_bets_plays_carry_the_data_note_and_counts():
             row("Rookie", [_lg(11, "preseason")] * 2), row("Normal", [_lg(22)] * 10)]
     plays = NP.build_best_bets(rows, sims=200, seed=1)
     by = {p["Player"]: p for p in plays if p["Market"] == "Points"}
-    assert by["Carry"]["PriorGames"] == 7 and "7 of last 10 games are from last season" in by["Carry"]["Why"]
+    # the platform-wide form rule: 3 games this season, topped up to 5 with 2 from last season (half weight)
+    assert by["Carry"]["PriorGames"] == 2 and "2 of last 5 games are from last season, at half weight" in by["Carry"]["Why"]
     assert by["Rookie"]["PreseasonGames"] == 2 and "preseason" in by["Rookie"]["Why"]
     assert by["Normal"]["PriorGames"] == 0 and "last season" not in by["Normal"]["Why"]
 

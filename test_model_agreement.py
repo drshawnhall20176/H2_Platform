@@ -178,3 +178,49 @@ def test_a_player_who_missed_the_teams_last_game_gets_a_news_check_on_overs():
     freed = PPR.player_rows(rot, "D", "Rebounds", {}, None, cur, [], lines={5: 5.5}, mode="season",
                             context={"team": "PHI", "news_checked": True, "prices": {5: {"over": 102, "under": -130}}})[0]
     assert freed["lean"] != "Check news" or freed["gap"] == "big"
+
+
+# --------------------------------------------------------------------------- gap policy (Oct 28)
+def test_a_low_count_gap_is_not_held_for_news_but_needs_more_value():
+    vals = [5, 4, 6, 3, 5]                                     # rebounds ~4.6; the books hang 2.5
+    r = PE.read_line(4.6, vals, 2.5, "count", over_price=-105, under_price=-115)
+    assert r["gap"] == "big-low-count" and r["lean"] != "Check news"
+    assert abs(r["p_final"] - (0.2 * r["p_model"] + 0.8 * r["p_market"])) < 1e-9   # still 80% market
+    if r["lean"] == "Over":
+        assert r["ev"] >= PE.LOW_COUNT_MIN_EV
+    row = {"pid": 1, "player": "A", "slot": "G", "out": False, "line": 2.5, "projection": 4.6, "side": "Over",
+           "p_final": r["p_final"], "lean": r["lean"], "gap": r["gap"], "gap_pct": r["gap_pct"], "ev": r["ev"],
+           "over_price": -105, "under_price": -115, "price_src": "book", "flags": []}
+    assert "low count" in PE.market_gaps([row], {1: "T"})[0]["Why flagged"]
+    assert PE.plays_for_log([row], "Rebounds", "X @ Y")[0]["Notes"] == PE.GAP_TAG if r["lean"] == "Over" else True
+    # a points-sized line with the same gap is still held for news
+    assert PE.read_line(18.2, [21, 22, 18, 11, 12], 11.5, "normal", over_price=-114,
+                        under_price=-104)["lean"] == "Check news"
+
+
+def _pts_log():
+    return [dict(game=f"g{i}", order=f"2026-10-2{i}", team="MIA", opp="X", pid=7, name="Davion Mitchell", pos="PG",
+                 stats=dict(min=33, pts=p, reb=2, ast=6)) for i, p in enumerate((21, 22, 18, 17, 19))]
+
+
+def _offer(mkt, point, over, under):
+    return {"market": mkt, "player": "Davion Mitchell", "point": point,
+            "over": {"draftkings": over}, "under": {"draftkings": under}}
+
+
+def test_a_flagged_points_line_flags_his_points_combos_too():
+    rot = [{"pid": 7, "name": "Davion Mitchell", "slot": "G", "avg_min": 33, "status": None}]
+    offers = [_offer("player_points", 11.5, -114, -104), _offer("player_points_assists", 25.5, -110, -110)]
+    row = PPR.player_rows(rot, "D", "PA", {}, None, _pts_log(), [], mode="season",
+                          context={"offers": offers, "team": "MIA"})[0]
+    assert row["gap"] == "big" and "Points line 11.5" in row["gap_from"]
+    assert row["lean"] in ("Check news", "No lean")
+    assert "Points line 11.5" in PE.market_gaps([row], {7: "Heat"})[0]["Why flagged"]
+    assert PE.display_compact([row])[0]["Notes"].startswith("⚠️ Points line 11.5")
+    # with a normal Points line the combo is read on its own
+    fair = [_offer("player_points", 18.5, -110, -110), _offer("player_points_assists", 25.5, -110, -110)]
+    own = PPR.player_rows(rot, "D", "PA", {}, None, _pts_log(), [], mode="season",
+                          context={"offers": fair, "team": "MIA"})[0]
+    assert own["gap"] != "big" and not own.get("gap_from")
+    # rebounds / assists flags do not carry; Points itself is unchanged
+    assert "PA" in PPR.POINTS_COMBOS and "Rebounds" not in PPR.POINTS_COMBOS

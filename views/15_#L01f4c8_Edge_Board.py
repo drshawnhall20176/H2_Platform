@@ -107,6 +107,12 @@ def load_index(sport_key: str, date_str: str, sims: int, seed: int):
             r["_weather_hr"] = w["hr_factor"] if w else 1.0   # temp + wind on HR, matches Dinger Engine
         extra = {"statcast": sc, "statcast_k": k}
     # Statcast + weather attached (MLB only) -> HR probabilities here are consistent with Dinger Engine.
+    # NBA: the Player props model across the slate (best_bets_data.load_slate_reads) -- the same projection,
+    # probability and gap policy as Position Matchups and Best Bets.
+    import best_bets_data as BBD
+    reads = BBD.load_slate_reads(sport_key, date_str, O.DEFAULT_BOOK) if sport_key in BBD.PROPS_MODEL_SPORTS else None
+    if reads:
+        extra = {"reads": reads}
     index = proj.build_projection_index(rows, meta, sims=sims, seed=seed, **extra)
     known_names = proj.known_roster_names(rows, meta) if hasattr(proj, "known_roster_names") else set()
     all_active_names = (MSC.get_all_active_player_names_cached(int(date_str[:4]))
@@ -458,7 +464,7 @@ else:
  
                 show = edf.rename(columns={"ModelProb": "Model %", "ImpliedBest": "Impl %",
                                            "NoVigMkt": "NoVig %", "EdgeVsMkt": "Edge", "Price": "Odds"})
-                cols = ["Player", "Team", "Market", "Side", "Line", "Proj", "Model %", "Shaded %",
+                cols = ["Player", "Team", "Market", "Side", "Line", "Proj", "Model %", "Lean", "Shaded %",
                         "Book", "Odds", "EV%", "Stake $", "Stake %", "Tier", "Game"]
                 show = show[[c for c in cols if c in show.columns]]
  
@@ -624,7 +630,7 @@ if zone_only:
  
 disp = view.rename(columns={"ModelProb": "Model %", "Projection": "Proj",
                             "FairDec": "Fair (dec)", "FairAm": "Fair (am)"})
-cols = ["Time (ET)", "Player", "Team", "Market", "Side", "Line", "Proj", "Model %", "Shaded %",
+cols = ["Time (ET)", "Player", "Team", "Market", "Side", "Line", "Proj", "Model %", "Lean", "Shaded %",
         "Fair (dec)", "Fair (am)", "Room", "Opp", "Game"]
 disp = disp[[c for c in cols if c in disp.columns]]
  

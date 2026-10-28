@@ -61,6 +61,12 @@ GAP_PCT_OUTRIGHT = 0.25
 # or fewer of his recent games (Under when he's cleared it in three quarters or more) -- one big night shouldn't
 # drag the average over a line he usually misses.
 HIT_CONFLICT = 0.25
+# LOW-COUNT MARKETS (a count line under LOW_COUNT_LINE: rebounds 2.5, assists 3.5, steals, blocks, threes): a gap of
+# a rebound or two looks enormous in percent but rarely means hidden news -- minutes and role news shows up in the
+# points and combo lines. So a big gap here still hands the market 80% of the vote, but asks for LOW_COUNT_MIN_EV
+# value instead of a news check. (A player who missed his team's last game is still gated, separately.)
+LOW_COUNT_LINE = 5.0
+LOW_COUNT_MIN_EV = 0.06
 HIT_CONFLICT_MIN_GAMES = 4
 GAP_MODEL_WEIGHT = 0.20
 GAP_TAG = "market-gap"
@@ -509,7 +515,11 @@ def read_line(projection: Optional[float], values: Sequence[float], line: Option
             e, side, price = max(cands)
             out.update(side=side, price=price, ev=e)
             agrees = above if side == "Over" else not above
-            out["lean"] = side if (e >= MIN_EV and agrees and not _hit_conflict(values, line, side)) else "No lean"
+            low_count = dist == "count" and thr < LOW_COUNT_LINE
+            need = LOW_COUNT_MIN_EV if (out["gap"] == "big" and low_count) else MIN_EV
+            out["lean"] = side if (e >= need and agrees and not _hit_conflict(values, line, side)) else "No lean"
+            if out["gap"] == "big" and low_count:
+                out["gap"] = "big-low-count"          # listed, market-weighted, but no news check
             if out["gap"] == "big" and not news_checked and out["lean"] in ("Over", "Under"):
                 out["lean"] = "Check news"
             return out
@@ -601,7 +611,7 @@ def plays_for_log(rows: Sequence[Dict], market: str, game_label: str) -> List[Di
         p = r["p_final"] if side == "Over" else 1 - r["p_final"]
         play = {"Player": r["player"], "PlayerId": r.get("pid"), "Game": game_label, "Market": market,
                 "Side": side, "Line": r["line"], "ModelProb": round(p, 4), "Fair": american(p)}
-        if r.get("gap") == "big":
+        if r.get("gap") in ("big", "big-low-count"):
             play["Notes"] = GAP_TAG
         price = r.get("over_price") if side == "Over" else r.get("under_price")
         if price is not None:
@@ -748,9 +758,13 @@ def display_compact(rows: Sequence[Dict], details: bool = False, opp_label: str 
         bk = r.get("book") or {}
         if bk.get("missing_book"):
             flags.insert(0, f"not posted at {bk.get('book')}")
-        if r.get("gap") == "big" and r.get("gap_pct") is not None:
+        if r.get("gap_from"):
+            flags.insert(0, f"⚠️ {r['gap_from']} — check minutes / role / injury news")
+        elif r.get("gap") in ("big", "big-low-count") and r.get("gap_pct") is not None:
             flags.insert(0, f"⚠️ Market disagrees: line {line:g} vs projection {r['projection']:.1f} "
-                            f"({r['gap_pct']:+.0%}) — check minutes / role / injury news")
+                            f"({r['gap_pct']:+.0%}) — "
+                            + ("low-count market: books weighted 80%, needs +6% value" if r.get("gap") == "big-low-count"
+                               else "check minutes / role / injury news"))
         row = {"Player": f"{r['player']}{status}", "Pos": r.get("slot") or "",
                "Projection": "—" if r.get("projection") is None else f"{r['projection']:.1f}",
                "Line": "—" if line is None else f"{line:g}",
@@ -790,13 +804,16 @@ def market_gaps(rows: Sequence[Dict], team_of: Dict) -> List[Dict]:
     missed their team's last game (returning, maybe on a minutes limit) with an Over the model likes."""
     out = []
     for r in rows:
-        big = r.get("gap") == "big"
+        big = r.get("gap") in ("big", "big-low-count")
         back = bool(r.get("returning")) and r.get("lean") in ("Check news", "Over")
         if not (big or back) or r.get("projection") is None or r.get("line") is None:
             continue
         why = []
-        if big:
-            why.append("line far from projection")
+        if r.get("gap_from"):
+            why.append(r["gap_from"])
+        elif big:
+            why.append("line far from projection" + (" (low count — no news check)" if r.get("gap") == "big-low-count"
+                                                     else ""))
         if r.get("returning"):
             why.append("missed team's last game")
         sp = _side_prob(r)
