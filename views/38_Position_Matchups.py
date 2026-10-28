@@ -42,9 +42,19 @@ SPORT_KEY = _active.key
 FAMILY = PM.FAMILY_BY_SPORT[SPORT_KEY]
 
 
+class _NoGames(Exception):
+    """Raised (never returned) for an empty schedule, so st.cache_data doesn't keep it."""
+
+
 @st.cache_data(ttl=600, show_spinner=False)
 def load_games(sport_key: str, date_str: str):
-    return PD.list_games(sport_key, date_str)
+    # An empty list is NOT cached. A schedule feed that hiccups for one request used to come back as [],
+    # get cached for 10 minutes, and make a real slate (e.g. yesterday's NBA games) read "No games found"
+    # until someone pressed Refresh. Exceptions aren't cached, so the next run simply asks again.
+    games = PD.list_games(sport_key, date_str)
+    if not games:
+        raise _NoGames()
+    return games
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -75,13 +85,21 @@ date_str = target_date.strftime("%Y-%m-%d")
 C.season_notice(_active.key, date_str)
 
 with st.spinner(f"Loading the {_active.label} schedule..."):
+    load_failed = False
     try:
         games = load_games(SPORT_KEY, date_str)
-    except Exception:
+    except _NoGames:
         games = []
+    except Exception:                                              # noqa: BLE001
+        games, load_failed = [], True
 if not games:
-    st.info(f"No {_active.label} games found for {date_str}. Try another date — football slates are weekly, "
-            "basketball is that day's games.", icon="🕐")
+    if load_failed:
+        st.warning(f"Couldn't load the {_active.label} schedule for {date_str} — the schedule feed didn't answer. "
+                   "Press **Refresh** or try again in a moment.", icon="📡")
+    else:
+        st.info(f"No {_active.label} games found for {date_str}. Try another date — football slates are weekly, "
+                "basketball is that day's games. If you know there were games, press **Refresh**: the schedule "
+                "feed occasionally comes back empty, and this page now asks again on every load.", icon="🕐")
     st.stop()
 
 scope = C.slate_scope(SPORT_KEY, key="pm_scope")

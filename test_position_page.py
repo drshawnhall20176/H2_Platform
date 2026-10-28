@@ -602,3 +602,23 @@ def test_a_promoted_receiver_is_flagged_as_a_role_change_on_the_page(page):
     assert "HomeWr ↑WR2" in starters and "Hurt 🚫" not in starters
     assert "HomeWr fills WR1 (↑ from WR2, for Hurt (out))" in texts(at)
     assert "Role changes:" in texts(at) and "lower confidence" in texts(at)
+
+
+def test_an_empty_schedule_is_not_cached_so_the_next_load_finds_the_games(monkeypatch, page):
+    # Live bug: a one-off empty answer from the schedule feed was cached for 10 minutes, so a real NBA slate
+    # read "No games found" until Refresh. Now the page asks again on the very next run.
+    answers = [[], games()]
+    at = page("NFL", glist=[])
+    assert any("games found for" in i.value for i in at.info)
+    monkeypatch.setattr(PD, "list_games", lambda s, d: list(answers[1]))
+    at.run()                                                   # same date, no Refresh pressed
+    assert not at.exception and not any("games found for" in i.value for i in at.info)
+    assert [d for d in at.dataframe]                            # the matchup tables rendered
+
+
+def test_a_schedule_that_errors_says_it_could_not_load(page):
+    class Down:                                                  # list(...) of this raises, like a feed that's down
+        def __iter__(self):
+            raise RuntimeError("feed down")
+    at = page("NFL", glist=Down())
+    assert not at.exception and any("Couldn't load" in w.value for w in at.warning)
