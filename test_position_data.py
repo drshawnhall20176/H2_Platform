@@ -429,7 +429,13 @@ def test_nba_sample_falls_back_to_last_season_when_only_a_few_teams_have_games(b
     fake = FakeBasketball(few + last)
     basketball("NBA", fake, scoreboard=few + last)
     b = PD.load_basketball("NBA", "2026-10-24", 1, 2, "Team One", "Team Two", "T1", "T2")
-    assert any("end of last regular season" in n for n in b["notes"]) and all(g.startswith("reg") for g in fake.fetched)
+    assert any("end of last regular season" in n for n in b["notes"])
+    assert all(str(g["game"]).startswith("reg") for lst in b["allowed"].values() for g in lst)     # ranks: last season only
+    assert b["props"]["ranked_on_prior"]
+    # Player props still read THIS season's games (form, current team) alongside last season's (the defense prior).
+    assert {str(p["game"])[:3] for p in b["props"]["cur_pgames"]} == {"cur"}
+    assert {str(p["game"])[:3] for p in b["props"]["prior_pgames"]} == {"reg"}
+    assert set(b["props"]["rotation"]) == {1, 2}
 
 
 def test_previous_season_option_reads_last_seasons_file_and_every_week(fake_nfl, monkeypatch):

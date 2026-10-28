@@ -28,8 +28,6 @@ cross-sport cache-collision question that a single shared cache dict would raise
 
 from __future__ import annotations
 
-import basketball_markets as BM
-
 import threading
 import weakref
 from concurrent.futures import ThreadPoolExecutor
@@ -348,7 +346,6 @@ def get_game_team_totals(game_id: str, cdn_api: str, fetch: FetchFn,
             "fg3m": find_team_stat(stats_by_name, "threePointFieldGoalsMade"),
             "poss": poss if poss > 0 else 0.0,
         }
-        BM.extend_team_totals(stats_by_name, out[tid], find_team_stat)   # steals/blocks/turnovers/3PA/combos, when reported
 
     seen = diag_seen if diag_seen is not None else set()
     dump_key = f"_team_totals_shape_dump:{game_id}"
@@ -384,7 +381,7 @@ def get_game_team_totals(game_id: str, cdn_api: str, fetch: FetchFn,
 
 
 def get_game_player_lines(game_id: str, cdn_api: str, fetch: FetchFn) -> Dict[int, List[Dict[str, Any]]]:
-    """{team_id: [{"id","name","pos","starter","min","pts","reb","ast","fg3m"}]} for every player who
+    """{team_id: [{"id","name","pos","starter","min","pts","reb","ast","fg3m","stl","blk","tov"}]} for every player who
     played, from a CDN boxscore response — the TEAM-attributed counterpart of each engine's
     get_game_boxscore (which flattens both teams into one {player_id: line} dict and so can't say which
     side a player was on). Position comes from the athlete's own `position.abbreviation` when ESPN
@@ -420,7 +417,10 @@ def get_game_player_lines(game_id: str, cdn_api: str, fetch: FetchFn) -> Dict[in
                     "pos": (athlete.get("position") or {}).get("abbreviation"),
                     "starter": bool(a.get("starter")),
                     "min": row.get("MIN", 0.0), "pts": row.get("PTS", 0.0), "reb": row.get("REB", 0.0),
-                    "ast": row.get("AST", 0.0), "fg3m": row.get("3PT", 0.0)})
+                    "ast": row.get("AST", 0.0), "fg3m": row.get("3PT", 0.0),
+                    # Steals / blocks / turnovers ride along in the same box score (ESPN labels STL / BLK / TO),
+                    # so the Player props view can price those markets and the combos built on them (PB, etc.).
+                    "stl": row.get("STL", 0.0), "blk": row.get("BLK", 0.0), "tov": row.get("TO", 0.0)})
     return out
 
 
@@ -493,7 +493,7 @@ def get_team_recent_allowed_stats(team_id: int, before_date: str, site_api: str,
     simply because there were more possessions to allow stats in."""
     games = get_team_recent_game_ids(team_id, before_date, site_api, fetch, diag, n,
                                      days_back=days_back, diag_seen=diag_seen)
-    totals = BM.empty_team_totals()
+    totals = {"pts": [], "reb": [], "ast": [], "fg3m": [], "poss": []}
     for g in games:
         opp_id = g.get("opp_id")
         if opp_id is None:
@@ -505,7 +505,8 @@ def get_team_recent_allowed_stats(team_id: int, before_date: str, site_api: str,
         game_totals = get_game_team_totals(g["gameId"], cdn_api, fetch, diag, diag_seen=diag_seen)
         opp_totals = game_totals.get(opp_id)
         if opp_totals:
-            BM.accumulate_team_totals(totals, opp_totals)
+            for k in totals:
+                totals[k].append(opp_totals.get(k, 0.0))
     return {k: (sum(v) / len(v) if v else 0.0) for k, v in totals.items()}
 
 

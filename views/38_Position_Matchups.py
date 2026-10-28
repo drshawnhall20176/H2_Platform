@@ -22,6 +22,8 @@ import position_data as PD
 import position_lines as PL
 import position_logview as PV
 import position_matchups as PM
+import player_props as PPR
+import quick_log
 import sports
 import styling  # noqa: F401  (installs the theme-proof styles)
 from streamlit_page_cache import invalidate_page
@@ -147,7 +149,12 @@ st.caption(f"**{away_name} @ {home_name}** · {game['_when']} · slots are measu
 for note in bundle["notes"]:
     st.caption(f"ℹ️ {note}")
 
-tab_pos, tab_h2h = st.tabs(["🧭 Depth vs defense", "⚔️ Head-to-head"])
+HAS_PROPS = FAMILY == "basketball" and bool(bundle.get("props"))
+if HAS_PROPS:
+    tab_props, tab_pos, tab_h2h = st.tabs(["🎯 Player props", "🧭 Depth vs defense", "⚔️ Head-to-head"])
+else:
+    tab_props = None
+    tab_pos, tab_h2h = st.tabs(["🧭 Depth vs defense", "⚔️ Head-to-head"])
 
 
 def render_side(side, off_name, def_name):
@@ -379,11 +386,86 @@ def _book_lines_panel(defense, slot, columns, all_names):
     return best
 
 
+def _props_lines(key: str, rows_order) -> dict:
+    """The lines typed into a props table so far ({pid: line}), read from the editor's own saved edits."""
+    edits = (st.session_state.get(key) or {}).get("edited_rows") or {}
+    out = {}
+    for idx, change in edits.items():
+        try:
+            pid = rows_order[int(idx)]
+        except (ValueError, IndexError):
+            continue
+        if "Line" in change:
+            out[pid] = change["Line"]
+    return out
+
+
+def render_props_side(team, defense, off_name, def_name, market, mode, tables):
+    props = bundle["props"]
+    rot = props["rotation"].get(team) or []
+    st.markdown(f"#### {off_name}  vs  {def_name} defense")
+    if not rot:
+        st.caption("No rotation found for this team in the sample yet.")
+        return []
+    key = f"pm_props_{SPORT_KEY}_{game_label}_{market}_{team}"
+    order = [r["pid"] for r in rot]
+    rows = PPR.player_rows(rot, defense, market, tables["cur"], tables["prior"], props["cur_pgames"],
+                           props["prior_pgames"], lines=_props_lines(key, order), mode=mode)
+    df = pd.DataFrame(PPR.display(rows))
+    st.data_editor(df, key=key, hide_index=True, width="stretch",
+                   disabled=[c for c in df.columns if c != "Line"],
+                   column_config={"Line": st.column_config.NumberColumn(
+                       "Line ✏️", step=0.5, format="%.1f",
+                       help="Type the book's number. 39.5 = over 39.5; a whole number like 40 = an alt 40+ line.")})
+    return rows
+
+
+if tab_props is not None:
+    with tab_props:
+        st.caption("Every rotation player, for the market you pick. **Projection** = his last 5 games × the matchup "
+                   "(what this defense allows his position group vs the league, shrunk while the sample is small). "
+                   "Type a **Line** to get his hit rate, a rough P(over) and a lean.")
+        pc1, pc2 = st.columns([1, 2])
+        with pc1:
+            market = st.selectbox("Market", list(PPR.MARKETS), index=0, key="pm_props_market",
+                                  format_func=lambda m: f"{m} — {PPR.MARKET_HELP[m]}" if m in PPR.MARKET_HELP else m)
+        with pc2:
+            mode = "season"
+            if SPORT_KEY == "NBA":
+                _modes = {"Blend this season + last (recommended)": "blend", "This season only": "season",
+                          "Last season only": "prior"}
+                mode = _modes[st.radio(
+                    "Defense data", list(_modes), horizontal=True, key="pm_props_mode",
+                    help="Early in the season a defense has 2–3 games. Blend starts from last season's numbers and "
+                         "moves toward this season's as games pile up (10 games ≈ half weight).")]
+        props = bundle["props"]
+        tables = {"cur": PPR.defense_allowed(PM.allowed_by_slot(props["cur_pgames"], SPORT_KEY), market),
+                  "prior": (PPR.defense_allowed(PM.allowed_by_slot(props["prior_pgames"], SPORT_KEY), market)
+                            if props["prior_pgames"] else None)}
+        pace = PPR.pace_flag(props["cur_pgames"] or props["pgames"], bundle["home"], bundle["away"])
+        if pace:
+            msg = (f"{pace['label']}: these two teams project to about **{pace['projected_total']:.0f}** total points vs a "
+                   f"{pace['league_total']:.0f} average ({pace['pct']:+.0f}%).")
+            (st.warning if pace["label"] != "Normal pace" else st.caption)(
+                msg + (" Every counting-stat prop runs hotter in a game like this — the projections don't add that in."
+                       if pace["pct"] >= PPR.PACE_FLAG_PCT else
+                       " Counting stats run cooler in a game like this." if pace["pct"] <= -PPR.PACE_FLAG_PCT else ""))
+        all_rows = render_props_side(bundle["away"], bundle["home"], away_name, home_name, market, mode, tables)
+        st.divider()
+        all_rows += render_props_side(bundle["home"], bundle["away"], home_name, away_name, market, mode, tables)
+        st.caption("Lean = 🟢 Over when the projection beats the line by 5%+ and P(over) ≥ 55% (🔴 Under the mirror "
+                   "image). P(over) is a rough normal estimate from his own game-to-game spread, not a priced model. "
+                   "Minutes, blowouts and overtime aren't modelled.")
+        plays = PPR.plays_for_log(all_rows, market, f"{away_name} @ {home_name}")
+        if plays:
+            quick_log.render_quick_log(plays, date_str, SPORT_KEY, key_prefix=f"pm_props_{game_label}_{market}")
+
 with tab_pos:
     st.caption("1 = the defense that allows the MOST to that slot (softest). Soft = top third, Tough = bottom third. "
                + ("A slot is the player used most there that game (running backs by carries, receivers by targets), "
                   "so WR1 is usage, not just the depth-chart label." if FAMILY == "football" else
-                  "Guards / Forwards / Centers use each player's ESPN position; the numbers are the whole group's totals."))
+                  "Guards / Forwards / Centers use each player's ESPN position; the numbers are the whole group's totals."
+                  + (" Every rotation player, with his own projection, is on the **🎯 Player props** tab." if HAS_PROPS else "")))
     render_side(bundle["away_off"], away_name, home_name)
     st.divider()
     render_side(bundle["home_off"], home_name, away_name)

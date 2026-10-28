@@ -622,3 +622,61 @@ def test_a_schedule_that_errors_says_it_could_not_load(page):
             raise RuntimeError("feed down")
     at = page("NFL", glist=Down())
     assert not at.exception and any("Couldn't load" in w.value for w in at.warning)
+
+
+# ------------------------------------------------------------------ basketball Player props tab
+def props_bundle(sport="NBA"):
+    import player_props as PPR
+    b = basketball_bundle(sport)
+    cur = []
+    for g in range(5):
+        for tid, opp, pid, name, pos, pts in ((1, 2, "t1", "Star Guard", "PG", 30), (1, 2, "t2", "Bench Big", "C", 8),
+                                              (2, 1, "a1", "Away Wing", "SF", 22)):
+            cur.append(dict(game=f"m{g}", order=f"2026-10-2{g}T23:00Z", team=tid, opp=opp, pid=pid, name=name, pos=pos,
+                            stats=dict(min=32, pts=pts, reb=6, ast=5, blk=1, stl=1, fg3m=2)))
+    rot = {1: PPR.rotation({"G": [{"pid": "t1", "name": "Star Guard", "avg_min": 34}],
+                            "C": [{"pid": "t2", "name": "Bench Big", "avg_min": 18}]}),
+           2: PPR.rotation({"F": [{"pid": "a1", "name": "Away Wing", "avg_min": 33}]}, {"Away Wing": "Questionable"})}
+    b["props"] = {"pgames": cur, "cur_pgames": cur, "prior_pgames": [], "ranked_on_prior": False, "rotation": rot}
+    return b
+
+
+def nba_games():
+    return [{"label": "Team 2 @ Team 1", "home": "Team 1", "away": "Team 2", "home_id": 1, "away_id": 2,
+             "home_abbr": "T1", "away_abbr": "T2", "game_date": "2026-10-11T23:00:00Z"}]
+
+
+def test_nba_player_props_tab_lists_every_rotation_player_with_pra_default(page):
+    at = page("NBA", nba_games(), bundle_fn=lambda sport, g: props_bundle(sport))
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.selectbox(key="pm_props_market").value == "PRA"
+    opts = at.selectbox(key="pm_props_market").options
+    for m in ("Points", "Rebounds", "Assists", "Blocks", "Steals", "PA", "PR", "PB", "PRA"):
+        assert any(o.startswith(m) for o in opts), m
+    t = texts(at)
+    assert "Every rotation player" in t
+    assert at.radio(key="pm_props_mode").value.startswith("Blend")
+
+
+def test_switching_the_market_reprices_the_props(page):
+    at = page("NBA", nba_games(), bundle_fn=lambda sport, g: props_bundle(sport))
+    at.selectbox(key="pm_props_market").set_value("Blocks").run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.selectbox(key="pm_props_market").value == "Blocks"
+
+
+def test_typing_a_line_gives_hit_rate_and_a_lean_and_offers_logging(monkeypatch, page):
+    import quick_log
+    logged = []
+    monkeypatch.setattr(quick_log, "render_quick_log", lambda plays, *a, **k: logged.append(plays))
+    at = page("NBA", nba_games(), bundle_fn=lambda sport, g: props_bundle(sport))
+    game = at.selectbox(key="pm_game").value
+    at.session_state[f"pm_props_NBA_{game}_PRA_1"] = {"edited_rows": {0: {"Line": 35.5}}, "added_rows": [],
+                                                       "deleted_rows": []}
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    star = [d.value for d in at.dataframe if "Projection" in d.value.columns and
+            any("Star Guard" in x for x in d.value["Player"])][0].iloc[0]
+    assert star["Line"] == 35.5 and star["Hit rate"] == "5/5" and "Over" in star["Lean"]
+    assert logged and logged[-1][0]["Player"] == "Star Guard" and logged[-1][0]["Market"] == "PRA" \
+        and logged[-1][0]["Line"] == 35.5 and logged[-1][0]["Side"] == "Over"

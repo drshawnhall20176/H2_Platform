@@ -26,6 +26,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import position_matchups as PM
 import position_pbp as PP
+import player_props as PPR
 
 MIN_GAMES_FOR_RANK = PM.MIN_GAMES_FOR_RANK
 MIN_TEAMS_FOR_RANK = PM.MIN_TEAMS_FOR_RANK
@@ -376,7 +377,8 @@ def basketball_pgames(game_lines: Dict[str, Dict], roster_pos: Dict[int, str]) -
                 out.append({"game": gid, "order": g.get("date"), "team": tid, "opp": opp, "pid": p["id"],
                             "name": p["name"], "pos": pos,
                             "stats": {"min": _n(p.get("min")), "pts": _n(p.get("pts")), "reb": _n(p.get("reb")),
-                                      "ast": _n(p.get("ast")), "fg3m": _n(p.get("fg3m"))}})
+                                      "ast": _n(p.get("ast")), "fg3m": _n(p.get("fg3m")), "stl": _n(p.get("stl")),
+                                      "blk": _n(p.get("blk")), "tov": _n(p.get("tov"))}})
     return out
 
 
@@ -594,18 +596,32 @@ def load_basketball(sport_key: str, date_str: str, home_id: int, away_id: int, h
                     "home_score": mine if at_home else theirs, "away_score": theirs if at_home else mine})
         notes.append("College basketball has 360 teams, so only these two teams' own recent games are used: "
                      "allowed-per-game by position is shown, with no league rank.")
-    lines = _fetch_lines(eng, list(games))
-    game_lines = {gid: {"date": games[gid].get("date"), "lines": lines.get(gid) or {}} for gid in games}
-    roster_pos = _roster_positions(eng, game_lines, notes)
+    # Player props (NBA): this season's own games for each player's form / rotation, and last season's end for the
+    # early-season blend of a defense's numbers. Fetched alongside the ranking sample (same cached box scores).
+    cur_games: Dict[str, Dict] = {}
+    prior_games: Dict[str, Dict] = {}
+    if sport_key == "NBA":
+        cur_games, prior_games = _nba_props_samples(eng, date_str, notes)
+    all_games = {**prior_games, **cur_games, **games}
+    lines = _fetch_lines(eng, list(all_games))
+    all_lines = {gid: {"date": all_games[gid].get("date"), "lines": lines.get(gid) or {}} for gid in all_games}
+    game_lines = {gid: all_lines[gid] for gid in games}
+    roster_pos = _roster_positions(eng, all_lines, notes)
     pgames = basketball_pgames(game_lines, roster_pos)
+    cur_pgames = basketball_pgames({g: all_lines[g] for g in cur_games}, roster_pos) if cur_games else pgames
+    prior_pgames = basketball_pgames({g: all_lines[g] for g in prior_games}, roster_pos) if prior_games else []
     if not pgames:
         notes.append("No box-score data found for this window yet.")
     depth: Dict[Any, Dict[str, List[Dict]]] = {}
+    rotation: Dict[Any, List[Dict]] = {}
     for tid, abbr in ((home_id, home_abbr), (away_id, away_abbr)):
         inj = _injury_map(eng, abbr)
         usage = PM.usage_depth(pgames, tid, sport_key, last_n=LEAGUE_GAMES_PER_TEAM)
         depth[tid] = {slot: [dict(u, status=inj.get(u["name"]), note=f"{u['avg_min']:.0f} min") for u in lst]
                       for slot, lst in usage.items()}
+        # Every rotation player, from THIS season's own games (a traded player belongs to his new team).
+        own = cur_pgames if any(p.get("team") == tid for p in cur_pgames) else pgames
+        rotation[tid] = PPR.rotation(PM.usage_depth(own, tid, sport_key, last_n=LEAGUE_GAMES_PER_TEAM), inj)
     h2h = basketball_h2h_games(eng, home_id, away_id, date_str, home_name, away_name)
     names = {home_id: home_name, away_id: away_name}
     for g in games.values():
@@ -615,6 +631,9 @@ def load_basketball(sport_key: str, date_str: str, home_id: int, away_id: int, h
     meta_games = [{"order": g.get("date"), "date": g.get("date"), "home": g.get("home"), "away": g.get("away"),
                    "home_score": g.get("home_score"), "away_score": g.get("away_score")} for g in games.values()]
     bundle = build_bundle(sport_key, home_id, away_id, pgames, depth, [], names=names, notes=notes, meta_games=meta_games)
+    bundle["props"] = {"pgames": pgames, "cur_pgames": cur_pgames, "prior_pgames": prior_pgames,
+                       "ranked_on_prior": sport_key == "NBA" and bool(prior_games) and set(games) <= set(prior_games),
+                       "rotation": rotation}
     meetings = PM.h2h_meetings(h2h, home_name, away_name)
     summ = PM.h2h_summary(meetings, home_name, away_name)
     bundle["h2h"] = {"meetings": meetings, "summary": summ, "sentence": PM.h2h_sentence(summ, home_name, away_name)}
@@ -635,6 +654,29 @@ def _injury_map(eng, abbr: Optional[str]) -> Dict[str, str]:
         return {i.get("player"): clean_status(i.get("status")) for i in eng.get_team_injuries(abbr)}
     except Exception:                                           # noqa: BLE001
         return {}
+
+
+def _nba_props_samples(eng, date_str: str, notes: List[str]) -> Tuple[Dict[str, Dict], Dict[str, Dict]]:
+    """(this season's recent games, the end of last regular season) for the Player props view -- both always,
+    unlike _nba_league_sample, which picks ONE of them for the defense ranks. This season's games give each
+    player's form and his current team; last season's give the early-season prior a defense is blended with."""
+    import basketball_engine as BB
+    end = datetime.strptime(date_str, "%Y-%m-%d")
+
+    def collect(cutoff: datetime, days: int, keep) -> Dict[str, Dict]:
+        start = cutoff - timedelta(days=days)
+        ev = BB.scoreboard_events_in_window(eng.SITE_API, eng._get_json_cached, start.date(), cutoff.date())
+        return pick_recent_per_team(parse_scoreboard_events(ev or [], cutoff.strftime("%Y-%m-%d"),
+                                                            start.strftime("%Y-%m-%d"), keep), LEAGUE_GAMES_PER_TEAM)
+
+    cur = _safe(lambda: collect(end, LEAGUE_WINDOW_DAYS, lambda t: t != 1), {}, notes, "this season's games")
+    try:
+        opener = datetime.strptime(eng.SEASON_START, "%Y-%m-%d")
+    except Exception:                                           # noqa: BLE001
+        return cur, {}
+    prior = _safe(lambda: collect(min(end, opener), eng.PRIOR_LOOKBACK_DAYS, lambda t: t == 2), {}, notes,
+                  "last season's games")
+    return cur, prior
 
 
 def _nba_league_sample(eng, date_str: str, notes: List[str]) -> Tuple[Dict[str, Dict], Optional[str]]:
