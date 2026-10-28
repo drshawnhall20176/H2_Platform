@@ -854,6 +854,7 @@ def display_rows_by_player(rows: Sequence[Dict]) -> List[Dict]:
 SLOT_ROLE_WEIGHT: Dict[str, float] = {"QB": 1.0, "RB1": 1.0, "RB2": 0.6, "WR1": 1.0, "WR2": 0.85, "WR3": 0.6, "TE1": 0.8}
 # A callout needs a player who has actually produced: at least this many recent games and this average.
 CALLOUT_MIN_GAMES = 2
+CALLOUT_MODEL_AGREE = 0.02     # Targets need the model's adjusted matchup at +2% or better; Fades at -2% or worse
 CALLOUT_MIN_AVG = {"football": 3.0, "basketball": 5.0}
 
 
@@ -881,6 +882,12 @@ def callouts(side: Dict, off_name: str, def_name: str, limit: int = 3, family: s
         # soft forward matchup names both forwards who'll see it, weighted by how much they play.
         cands = r["players"][:1] if family != "basketball" else \
             [p for p in r["players"] if p.get("avg_min") is None or _num(p.get("avg_min")) >= 20] or r["players"][:1]
+        # The raw verdict and the model must point the same way: a slot that's soft on its raw 4 games but
+        # tough once the model adjusts for the small sample (and last season) isn't a Target, and vice versa.
+        mf = r.get("model_factor")
+        if mf is not None and ((r["tier"] == "Soft" and mf < 1 + CALLOUT_MODEL_AGREE)
+                               or (r["tier"] == "Tough" and mf > 1 - CALLOUT_MODEL_AGREE)):
+            continue
         for p in cands:
             if callout_eligible(p, family):
                 _callout(r, p, def_name, soft, tough, family)

@@ -305,7 +305,10 @@ def parse_scoreboard_events(events: Iterable[Dict], before_date: str, start_date
         status = ((ev.get("status") or {}).get("type") or {})
         if not status.get("completed"):
             continue
-        d = (ev.get("date") or "")[:10]
+        # Eastern calendar day, not the UTC timestamp's (a 8:30 PM ET tip is "tomorrow" in UTC -- that put
+        # Atlanta's Oct 26 game at Houston on Oct 27 and made tonight read as a back-to-back).
+        import basketball_engine as BB
+        d = BB.eastern_date(ev.get("date"))
         if not d or d >= before_date or d < start_date:
             continue
         stype = (ev.get("season") or {}).get("type")
@@ -327,7 +330,7 @@ def parse_scoreboard_events(events: Iterable[Dict], before_date: str, start_date
         if len(sides) != 2 or ids[0] == ids[1]:
             continue
         h_key, a_key = ("home" if "home" in sides else list(sides)[0]), ("away" if "away" in sides else list(sides)[1])
-        out.append({"gid": ev["id"], "date": ev.get("date") or d, "home": sides.get("home", ids[0]),
+        out.append({"gid": ev["id"], "date": d, "home": sides.get("home", ids[0]),
                     "away": sides.get("away", ids[1]), "type": stype,
                     "home_name": info[h_key]["name"], "away_name": info[a_key]["name"],
                     "home_score": info[h_key]["score"], "away_score": info[a_key]["score"]})

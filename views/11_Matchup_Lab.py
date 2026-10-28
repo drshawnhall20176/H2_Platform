@@ -381,8 +381,10 @@ def _notes(r):
 
 pdf["Notes"] = pdf.apply(_notes, axis=1)
 pdf = pdf[["Market", "Recent Avg", "Window Avg", "Position Matchup", "H2H Avg", "H2H Games", "Notes"]]
-_prior_used = int(max([p or 0 for p in _pf["Window Prior"].tolist()] or [0]))
-_games_used = int(max([g or 0 for g in _pf["Window Games"].tolist()] or [0]))
+# NaN-safe: Season has no window counts and the Minutes row never has them (pandas turns those Nones into NaN,
+# and `NaN or 0` is NaN -- int(NaN) crashed the page on its default window).
+_prior_used = int(pd.to_numeric(_pf["Window Prior"], errors="coerce").fillna(0).max() or 0)
+_games_used = int(pd.to_numeric(_pf["Window Games"], errors="coerce").fillna(0).max() or 0)
 if window_n is not None and _prior_used:
     _window_col_label = f"{window_label} Avg (incl. {_prior_used} from last season)"
 elif window_n is not None and _games_used and _games_used < window_n:

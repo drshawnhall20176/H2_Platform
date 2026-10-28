@@ -117,3 +117,15 @@ def test_same_player_correlation_follows_shared_stats_and_sides():
 def test_threes_made_is_a_props_market():
     assert PPR.MARKETS["Threes Made"] == ("fg3m",) and PPR.DIST["Threes Made"] == "count"
     assert PPR.ODDS_MARKETS["Threes Made"] == "player_threes"
+
+
+def test_targets_and_fades_need_the_model_to_agree():
+    def row(tier, vs, mf):
+        return {"slot": "F", "rank": 4 if tier == "Soft" else 26, "n_teams": 29, "tier": tier, "allowed": 81.2,
+                "league_avg": 69.8, "vs_league_pct": vs, "thin": False, "trend": "steady", "line": "",
+                "role_change": None, "model_factor": mf,
+                "players": [{"name": "Giannis", "avg_min": 32, "recent": {"avg": 43.0, "games": 4}, "h2h": None}]}
+    assert PM.callouts({"rows": [row("Soft", 16.0, 0.96)]}, "MIA", "ATL", family="basketball")["targets"] == []
+    assert len(PM.callouts({"rows": [row("Soft", 16.0, 1.06)]}, "MIA", "ATL", family="basketball")["targets"]) == 1
+    assert PM.callouts({"rows": [row("Tough", -20.0, 1.01)]}, "MIA", "ATL", family="basketball")["fades"] == []
+    assert len(PM.callouts({"rows": [row("Soft", 16.0, None)]}, "MIA", "ATL", family="basketball")["targets"]) == 1
