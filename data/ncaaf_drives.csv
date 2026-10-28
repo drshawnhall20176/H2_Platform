@@ -63569,3 +63569,47 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401871094,8,40187109430,24,Troy,UL Monroe,,,False,4,25
 2026,401871094,8,40187109431,25,UL Monroe,Troy,,,True,4,86
 2026,401871094,8,40187109433,26,Troy,UL Monroe,,,True,4,25
+2026,401871071,9,4018710712,1,Western Kentucky,Delaware,,,True,1,25
+2026,401871071,9,4018710714,2,Delaware,Western Kentucky,,,True,1,82
+2026,401871071,9,4018710716,3,Western Kentucky,Delaware,,,True,1,25
+2026,401871071,9,4018710718,4,Delaware,Western Kentucky,,,False,1,75
+2026,401871071,9,4018710719,5,Western Kentucky,Delaware,,,False,1,64
+2026,401871071,9,40187107110,6,Delaware,Western Kentucky,,,True,1,78
+2026,401871071,9,40187107112,7,Western Kentucky,Delaware,,,True,2,25
+2026,401871071,9,40187107114,8,Delaware,Western Kentucky,,,True,2,80
+2026,401871071,9,40187107116,9,Western Kentucky,Delaware,,,False,2,25
+2026,401871071,9,40187107117,10,Delaware,Western Kentucky,,,True,2,90
+2026,401871071,9,40187107119,11,Western Kentucky,Delaware,,,False,2,25
+2026,401871071,9,40187107121,12,Delaware,Western Kentucky,,,False,3,75
+2026,401871071,9,40187107122,13,Western Kentucky,Delaware,,,False,3,11
+2026,401871071,9,40187107123,14,Delaware,Western Kentucky,,,False,3,53
+2026,401871071,9,40187107124,15,Western Kentucky,Delaware,,,False,3,20
+2026,401871071,9,40187107125,16,Delaware,Western Kentucky,,,True,3,76
+2026,401871071,9,40187107127,17,Western Kentucky,Delaware,,,False,3,31
+2026,401871071,9,40187107128,18,Delaware,Western Kentucky,,,False,4,67
+2026,401871071,9,40187107129,19,Western Kentucky,Delaware,,,False,4,21
+2026,401871071,9,40187107130,20,Delaware,Western Kentucky,,,False,4,51
+2026,401871071,9,40187107131,21,Western Kentucky,Delaware,,,False,4,44
+2026,401871071,9,40187107132,22,Delaware,Western Kentucky,,,False,4,37
+2026,401871071,9,40187107133,23,Western Kentucky,Delaware,,,False,4,25
+2026,401871071,9,40187107134,24,Delaware,Western Kentucky,,,False,4,97
+2026,401871072,9,4018710722,1,Missouri State,Sam Houston,,,False,1,28
+2026,401871072,9,4018710723,2,Sam Houston,Missouri State,,,False,1,67
+2026,401871072,9,4018710724,3,Missouri State,Sam Houston,,,True,1,23
+2026,401871072,9,4018710726,4,Sam Houston,Missouri State,,,True,1,73
+2026,401871072,9,4018710728,5,Missouri State,Sam Houston,,,True,1,25
+2026,401871072,9,40187107210,6,Sam Houston,Missouri State,,,False,2,76
+2026,401871072,9,40187107211,7,Missouri State,Sam Houston,,,False,2,31
+2026,401871072,9,40187107212,8,Sam Houston,Missouri State,,,False,2,66
+2026,401871072,9,40187107213,9,Missouri State,Sam Houston,,,False,2,20
+2026,401871072,9,40187107214,10,Sam Houston,Missouri State,,,False,2,70
+2026,401871072,9,40187107215,11,Missouri State,Sam Houston,,,False,2,29
+2026,401871072,9,40187107217,12,Sam Houston,Missouri State,,,False,3,79
+2026,401871072,9,40187107218,13,Missouri State,Sam Houston,,,False,3,9
+2026,401871072,9,40187107219,14,Sam Houston,Missouri State,,,False,3,87
+2026,401871072,9,40187107220,15,Missouri State,Sam Houston,,,True,3,20
+2026,401871072,9,40187107222,16,Sam Houston,Missouri State,,,False,4,87
+2026,401871072,9,40187107223,17,Missouri State,Sam Houston,,,False,4,15
+2026,401871072,9,40187107224,18,Missouri State,Sam Houston,,,True,4,82
+2026,401871072,9,40187107226,19,Sam Houston,Missouri State,,,False,4,75
+2026,401871072,9,40187107227,20,Missouri State,Sam Houston,,,False,4,8
