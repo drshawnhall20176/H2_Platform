@@ -118,7 +118,7 @@ def props_markets(sport: str) -> Dict[str, str]:
         return {k: v for k, v in CORE_MARKETS.items() if k in wanted}
     if fam == "football":
         import football_props as FP
-        return {m["odds"]: name for name, m in FP.MARKETS.items() if m.get("odds") in wanted}
+        return {m["odds"]: name for name, m in FP.markets_for(sport).items() if m.get("odds") in wanted}
     if fam == "hockey":
         import hockey_props as HP
         return {m["odds"]: name for name, m in HP.MARKETS.items() if m.get("odds") in wanted}

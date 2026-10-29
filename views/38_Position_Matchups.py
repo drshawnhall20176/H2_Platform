@@ -463,7 +463,7 @@ def _props_lines(key: str, rows_order) -> dict:
 
 def _market_menu():
     if PFAM == "football":
-        return FP.MARKETS, FP.DEFAULT_MARKET, FP.MARKET_HELP
+        return FP.markets_for(SPORT_KEY), FP.DEFAULT_MARKET, FP.MARKET_HELP
     if PFAM == "hockey":
         return HP.MARKETS, HP.DEFAULT_MARKET, HP.MARKET_HELP
     return PPR.MARKETS, PPR.DEFAULT_MARKET, PPR.MARKET_HELP

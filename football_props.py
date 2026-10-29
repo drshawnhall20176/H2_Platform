@@ -40,6 +40,12 @@ MARKETS: Dict[str, Dict] = {
                        "slots": ("QB",)},
     "Passing TDs":       {"stats": ("pass_td",), "opp": "pass_att", "dist": "count", "odds": "player_pass_tds",
                        "slots": ("QB",)},
+    # Oct 29: QB volume props. Attempts move with game script (the spread) more than with scoring, and their spread is
+    # wider than a plain count's, so they read on a normal curve with their own floor (sd >= 18% / 5 attempts).
+    "Pass Attempts":    {"stats": ("pass_att",), "opp": "pass_att", "dist": "normal", "odds": "player_pass_attempts",
+                       "slots": ("QB",), "floor": (0.18, 5.0)},
+    "Pass Completions": {"stats": ("pass_cmp",), "opp": "pass_att", "dist": "normal", "odds": "player_pass_completions",
+                       "slots": ("QB",), "floor": (0.20, 3.5), "sports": ("NFL",)},   # the college feed has no completions
     "Rush Attempts":       {"stats": ("rush_att",), "opp": "rush_att", "dist": "count", "odds": "player_rush_attempts",
                        "slots": ("RB1", "RB2", "QB")},
     "Anytime TD":     {"stats": ("rush_td", "rec_td"), "opp": "touch", "dist": "count", "odds": "player_anytime_td",
@@ -47,9 +53,15 @@ MARKETS: Dict[str, Dict] = {
 }
 DEFAULT_MARKET = "Receiving Yards"
 MARKET_HELP = {"Anytime TD": "1+ rushing or receiving TD (line 0.5)", "Rush + Rec Yards": "rushing + receiving yards"}
+
+
+def markets_for(sport: str) -> Dict[str, Dict]:
+    """The markets this sport's data can price (completions are NFL-only)."""
+    return {k: v for k, v in MARKETS.items() if sport in v.get("sports", (sport,))}
 # How strongly each market moves with the game's implied scoring.
 ENV_WEIGHT = {"Receptions": 0.4, "Receiving Yards": 0.7, "Rush Yards": 0.6, "Rush + Rec Yards": 0.7, "Pass Yards": 0.7,
-              "Passing TDs": 1.0, "Rush Attempts": 0.3, "Anytime TD": 1.0}
+              "Passing TDs": 1.0, "Rush Attempts": 0.3, "Anytime TD": 1.0,
+              "Pass Attempts": 0.2, "Pass Completions": 0.3}
 LEAGUE_TEAM_POINTS = {"NFL": 22.5, "NCAAF": 28.5}
 EFF_SHRINK = {"tgt": 30.0, "rush_att": 40.0, "pass_att": 120.0, "touch": 50.0}   # opportunities of half-trust
 PROMOTED_SHRINK_MULT = 2.0
@@ -240,7 +252,7 @@ def player_rows(roster: Sequence[Dict], team, defense, market: str, pgames, allo
             price_src, p_mkt = "book", book.get("p_market")
         else:
             over_p = under_p = price_src = p_mkt = None
-        floor = (0.45, 8.0) if m["dist"] == "normal" else (0.25, 1.0)      # yardage is lumpy: one 60-yard catch
+        floor = m.get("floor") or ((0.45, 8.0) if m["dist"] == "normal" else (0.25, 1.0))   # yardage is lumpy: one 60-yard catch
         read = PE.read_line(proj, i["vals"], line, m["dist"], over_p, under_p, p_mkt, ctx.get("slope", 1.0),
                             ctx.get("model_weight", PE.MODEL_WEIGHT), *floor, news_checked=bool(ctx.get("news_checked")))
         hits = [v for v in i["vals"] if line is not None and PE.clears(v, line)]

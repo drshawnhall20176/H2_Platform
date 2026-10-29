@@ -44,7 +44,7 @@ SLOT_LABEL = {"QB": "Quarterback", "RB1": "Running back 1", "RB2": "Running back
 
 # The stat lines shown next to the headline metric for each slot (key, short label).
 SLOT_STATS: Dict[str, Tuple[Tuple[str, str], ...]] = {
-    "QB": (("pass_yds", "pass yds"), ("pass_td", "pass TD"), ("rush_yds", "rush yds")),
+    "QB": (("pass_att", "pass att"), ("pass_yds", "pass yds"), ("pass_td", "pass TD"), ("rush_yds", "rush yds")),
     "RB1": (("rush_yds", "rush yds"), ("rec", "rec"), ("rush_td", "rush TD")),
     "RB2": (("rush_yds", "rush yds"), ("rec", "rec"), ("rush_td", "rush TD")),
     "WR1": (("rec", "rec"), ("rec_yds", "rec yds"), ("rec_td", "rec TD")),

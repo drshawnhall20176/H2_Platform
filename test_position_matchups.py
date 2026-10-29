@@ -331,7 +331,7 @@ def test_a_game_where_the_opponent_had_nobody_at_the_slot_is_a_row_of_zeros():
 def test_slot_game_log_for_an_unknown_defense_is_empty():
     allowed, meta = log_fixture()
     log = PM.slot_game_log(allowed, "NOPE", "QB", "NFL", meta)
-    assert log["rows"] == [] and log["avg"] is None and [k for k, _ in log["stat_cols"]] == ["pass_yds", "pass_td", "rush_yds"]
+    assert log["rows"] == [] and log["avg"] is None and [k for k, _ in log["stat_cols"]] == ["pass_att", "pass_yds", "pass_td", "rush_yds"]
 
 
 def test_basketball_log_lists_a_group_with_its_top_three_names():

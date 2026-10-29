@@ -44,7 +44,7 @@ def _n(x) -> float:
 
 
 # =========================================================================== football: player-game lines
-_NFL_COLS = {"pass_att": "attempts", "pass_yds": "passing_yards", "pass_td": "passing_tds",
+_NFL_COLS = {"pass_att": "attempts", "pass_cmp": "completions", "pass_yds": "passing_yards", "pass_td": "passing_tds",
              "pass_int": "passing_interceptions", "rush_att": "carries", "rush_yds": "rushing_yards",
              "rush_td": "rushing_tds", "tgt": "targets", "rec": "receptions", "rec_yds": "receiving_yards",
              "rec_td": "receiving_tds"}
