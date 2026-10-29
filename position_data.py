@@ -378,7 +378,7 @@ def basketball_pgames(game_lines: Dict[str, Dict], roster_pos: Dict[int, str]) -
             for p in lines[tid]:
                 pos = p.get("pos") or roster_pos.get(p["id"])
                 out.append({"game": gid, "order": g.get("date"), "team": tid, "opp": opp, "pid": p["id"],
-                            "name": p["name"], "pos": pos,
+                            "name": p["name"], "pos": pos, "starter": p.get("starter"),
                             "stats": {"min": _n(p.get("min")), "pts": _n(p.get("pts")), "reb": _n(p.get("reb")),
                                       "ast": _n(p.get("ast")), "fg3m": _n(p.get("fg3m")), "stl": _n(p.get("stl")),
                                       "blk": _n(p.get("blk")), "tov": _n(p.get("tov"))}})
@@ -407,6 +407,7 @@ def fill_depth_from_usage(depth: Dict[str, List[Dict]], usage: Dict[str, List[Di
             continue
         if usage.get(slot):
             out[slot] = [{"pid": u["pid"], "name": u["name"], "status": None, "avg_min": u.get("avg_min"),
+                          "start_rate": u.get("start_rate"),
                           "note": (f"{u['avg_min']:.0f} min" if PM.FAMILY_BY_SPORT[sport] == "basketball"
                                    else f"held the slot in {u['games_in_slot']} of the last {PM.RECENT_N} games")}
                          for u in usage[slot]]

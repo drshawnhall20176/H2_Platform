@@ -363,16 +363,21 @@ def usage_depth(pgames: Iterable[Dict], team: str, sport: str, last_n: int = REC
         for slot, lst in assign(by_game[g]).items():
             for p in lst:
                 rec = tally.setdefault(slot, {}).setdefault(p.get("pid"), {"pid": p.get("pid"), "name": p.get("name"),
-                                                                           "games_in_slot": 0, "total": 0.0, "mins": 0.0})
+                                                                           "games_in_slot": 0, "total": 0.0, "mins": 0.0,
+                                                                           "starts": 0})
                 rec["games_in_slot"] += 1
+                rec["starts"] += 1 if p.get("starter") else 0
                 rec["total"] += metric_value(sport, p.get("stats") or {})
                 rec["mins"] += _num((p.get("stats") or {}).get("min"))
+    # The box score's own starter flag (ESPN), when the feed carries one: his share of the team's games STARTED.
+    flagged = any(p.get("starter") for g in games for p in by_game[g])   # all-False = the feed has no flags
     out: Dict[str, List[Dict]] = {}
     for slot, recs in tally.items():
         rows = []
         for r in recs.values():
             rows.append({"pid": r["pid"], "name": r["name"], "games_in_slot": r["games_in_slot"],
-                         "avg": r["total"] / r["games_in_slot"], "avg_min": r["mins"] / r["games_in_slot"]})
+                         "avg": r["total"] / r["games_in_slot"], "avg_min": r["mins"] / r["games_in_slot"],
+                         "start_rate": (r["starts"] / len(games)) if flagged and games else None})
         key = (lambda r: (r["avg_min"], r["avg"])) if FAMILY_BY_SPORT.get(sport) == "basketball" else \
               (lambda r: (r["games_in_slot"], r["avg"]))
         rows.sort(key=key, reverse=True)
@@ -412,7 +417,7 @@ def matchup_rows(sport: str, depth: Dict[str, List[Dict]], defense_team: str,
         for pl in (depth.get(slot) or [])[:max_players]:
             players.append({
                 "name": pl.get("name"), "status": pl.get("status"), "note": pl.get("note"),
-                "role_change": pl.get("role_change"), "avg_min": pl.get("avg_min"),
+                "role_change": pl.get("role_change"), "avg_min": pl.get("avg_min"), "start_rate": pl.get("start_rate"),
                 "recent": player_form(pgames, pl.get("pid"), sport),
                 "h2h": player_form(pgames, pl.get("pid"), sport, n=10, opp=defense_team),
             })
@@ -820,10 +825,28 @@ def _in_rotation(p: Dict) -> bool:
     return m is None or _num(m) >= BASKETBALL_ROW_MIN
 
 
+STARTER_RATE = 0.5             # started at least half the team's recent games -> "Starter"
+TEAM_STARTERS = 5
+
+
+def roles(rows: Sequence[Dict]) -> Dict[str, str]:
+    """{player name: "Starter" | "Rotation"} for one team's matchup rows. From the box scores' own starter flags
+    when the data has them (started half or more of the team's recent games); otherwise the team's top five by
+    minutes. NOT "first in his position group" -- a team starts two guards and two forwards, so that rule called
+    Fred VanVleet and Kevin Durant bench players (Oct 28)."""
+    players = [p for r in rows for p in r.get("players") or [] if p and p.get("name")]
+    if any(p.get("start_rate") is not None for p in players):
+        return {p["name"]: "Starter" if _num(p.get("start_rate")) >= STARTER_RATE else "Rotation" for p in players}
+    top = sorted(players, key=lambda p: -_num(p.get("avg_min")))[:TEAM_STARTERS]
+    names = {p["name"] for p in top}
+    return {p["name"]: "Starter" if p["name"] in names else "Rotation" for p in players}
+
+
 def display_rows_by_player(rows: Sequence[Dict]) -> List[Dict]:
     """Basketball: one table row per rotation player (most minutes first within his group), each beside his
     position group's defensive numbers -- nobody is tucked into a "Next up" cell."""
     out: List[Dict] = []
+    role_of = roles(rows)
     for r in rows:
         rank_txt = "—" if not r["rank"] else f"{r['rank']}/{r['n_teams']}"
         vs = r["vs_league_pct"]
@@ -833,7 +856,7 @@ def display_rows_by_player(rows: Sequence[Dict]) -> List[Dict]:
                 "Pos": r["slot"],
                 "Player": _player_text(p) if p else "—",
                 "Min": "—" if p.get("avg_min") is None else f"{_num(p['avg_min']):.0f}",
-                "Role": "Starter" if i == 0 else "Rotation",
+                "Role": role_of.get(p.get("name"), "Rotation") if p else "—",
                 "Last 4": _form_text(p.get("recent")),
                 "vs this D": _form_text(p.get("h2h")),
                 "D rank (1 = softest)": rank_txt,

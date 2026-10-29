@@ -631,7 +631,42 @@ def test_basketball_depth_gives_every_rotation_player_a_row_and_names_more_than_
                          {"name": "Deep Bench", "avg_min": 6, "recent": {"avg": 4.0, "games": 2}, "h2h": None}]}]
     disp = PM.display_rows_by_player(rows)
     assert [d["Player"] for d in disp] == ["Jalen Johnson", "Onyeka Okongwu"]            # 6-minute player left out
-    assert [d["Role"] for d in disp] == ["Starter", "Rotation"] and disp[1]["vs league"] == "+22%"
+    # no starter flags in this data: the team's top five by minutes start (both of these)
+    assert [d["Role"] for d in disp] == ["Starter", "Starter"] and disp[1]["vs league"] == "+22%"
     co = PM.callouts({"rows": rows}, "ATL", "MIA", family="basketball", limit=4)
     assert len(co["targets"]) == 2 and co["targets"][0].startswith("Jalen Johnson")
     assert len(PM.callouts({"rows": rows}, "ATL", "MIA", family="football")["targets"]) == 1
+
+
+def test_roles_come_from_who_actually_starts_not_first_in_the_position_group():
+    """Oct 28 report (Houston): Fred VanVleet and Kevin Durant were labeled Rotation because Amen Thompson and Jabari
+    Smith Jr. were first in their groups. A team starts two guards and two forwards."""
+    def line(game, d, pid, name, pos, mins, starter):
+        return dict(game=game, order=d, team="HOU", opp="MIL", pid=pid, name=name, pos=pos, starter=starter,
+                    stats=dict(min=mins, pts=10, reb=4, ast=3))
+    roster = [(1, "Amen Thompson", "SG", 34, True), (2, "Fred VanVleet", "PG", 30, True),
+              (3, "Reed Sheppard", "PG", 23, False), (4, "Jabari Smith Jr.", "PF", 36, True),
+              (5, "Kevin Durant", "SF", 35, True), (6, "Tari Eason", "PF", 24, False),
+              (7, "Alperen Sengun", "C", 34, True)]
+    pgames = [line(f"g{i}", f"2026-10-2{i}", *r) for i in range(4) for r in roster]
+    usage = PM.usage_depth(pgames, "HOU", "NBA")
+    rows = [{"slot": slot, "rank": 10, "n_teams": 30, "tier": "Neutral", "allowed": 80.0, "league_avg": 80.0,
+             "vs_league_pct": 0.0, "thin": False, "trend": "steady", "line": "", "role_change": None,
+             "players": [{"name": u["name"], "avg_min": u["avg_min"], "start_rate": u["start_rate"],
+                          "recent": None, "h2h": None} for u in lst]} for slot, lst in usage.items()]
+    role = {d["Player"]: d["Role"] for d in PM.display_rows_by_player(rows)}
+    assert role["Fred VanVleet"] == "Starter" and role["Kevin Durant"] == "Starter"
+    assert role["Amen Thompson"] == "Starter" and role["Alperen Sengun"] == "Starter"
+    assert role["Reed Sheppard"] == "Rotation" and role["Tari Eason"] == "Rotation"
+
+
+def test_a_feed_without_starter_flags_falls_back_to_the_top_five_by_minutes():
+    lines = [dict(game="g", order="2026-10-20", team="T", opp="O", pid=i, name=f"P{i}", pos=pos, starter=False,
+                  stats=dict(min=m, pts=5)) for i, (pos, m) in enumerate(
+                      [("PG", 34), ("SG", 32), ("SF", 33), ("PF", 31), ("C", 30), ("PG", 18), ("C", 14)])]
+    usage = PM.usage_depth(lines, "T", "NBA")
+    assert all(u["start_rate"] is None for lst in usage.values() for u in lst)
+    rows = [{"players": [{"name": u["name"], "avg_min": u["avg_min"], "start_rate": None} for u in lst]}
+            for lst in usage.values()]
+    r = PM.roles(rows)
+    assert sum(1 for v in r.values() if v == "Starter") == 5 and r["P5"] == "Rotation" and r["P6"] == "Rotation"
