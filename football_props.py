@@ -252,6 +252,7 @@ def player_rows(roster: Sequence[Dict], team, defense, market: str, pgames, allo
             "book": book, "hit": (len(hits), len(i["vals"])) if line is not None and i["vals"] else None,
             "p_model": read["p_model"], "p_market": read["p_market"], "p_final": read["p_final"], "gap": read.get("gap"), "gap_pct": read.get("gap_pct"),
             "side": read["side"], "ev": read["ev"], "lean": read["lean"], "flags": flags, "dist": m["dist"],
+            "values": list(i["vals"]), "sd_floor": floor,
         })
     return rows
 

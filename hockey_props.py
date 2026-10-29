@@ -244,6 +244,7 @@ def player_rows(rot: Dict[str, List[Dict]], team, opp, market: str, pgames, line
             "hit": (len(hits), len(b["vals"])) if line is not None and b["vals"] else None,
             "p_model": read["p_model"], "p_market": read["p_market"], "p_final": read["p_final"], "gap": read.get("gap"), "gap_pct": read.get("gap_pct"),
             "side": read["side"], "ev": read["ev"], "lean": read["lean"], "flags": flags, "dist": m["dist"],
+            "values": list(b["vals"]), "sd_floor": floor,
         })
     return rows
 

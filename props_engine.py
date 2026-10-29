@@ -746,7 +746,8 @@ def view_order(rows: Sequence[Dict]) -> List[Dict]:
     return sorted(rows, key=key)
 
 
-def display_compact(rows: Sequence[Dict], details: bool = False, opp_label: str = "Min") -> List[Dict]:
+def display_compact(rows: Sequence[Dict], details: bool = False, opp_label: str = "Min",
+                    market: Optional[str] = None) -> List[Dict]:
     """The default table: what someone needs to make a pick and nothing blank-looking. Every cell has words in it
     -- a player with no posted line says so instead of showing empty columns. `details` adds the model's working
     (minutes / volume, form, matchup, game environment)."""
@@ -782,6 +783,8 @@ def display_compact(rows: Sequence[Dict], details: bool = False, opp_label: str 
                "Line": "—" if line is None else f"{line:g}",
                "Pick": pick,
                "Chance": "—" if chance is None else f"{chance:.0%}",
+               "Cushion": cushion_text(cushion(r.get("projection"), line, side)) if not r.get("out") else "—",
+               "Milestones": ladder_text(r, market) if not r.get("out") else "—",
                "Price": ("—" if price is None else f"{price:+.0f}" + (f" {best[0]}" if best and best[1] == price else "")),
                "Edge": "—" if r.get("ev") is None else f"{r['ev']:+.1%}",
                "Lean": lean,
@@ -796,6 +799,99 @@ def display_compact(rows: Sequence[Dict], details: bool = False, opp_label: str 
     return out
 
 
+# --------------------------------------------------------------------------- cushion, milestones, leg warnings (Oct 29)
+# After the Oct 28 tickets: every leg whose projection cleared its number by 30%+ hit; legs within ~10% went 2 for 6
+# -- coin flips. The "X+" milestone legs (Durant 40+, LaMelo 30+) had no probability on the page at all, and the
+# pricer couldn't see a whole multi-game ticket.
+CUSHION_MIN = 0.15            # a parlay leg wants its projection 15%+ past the number
+BLOWOUT_WORDS = ("blowout",)
+
+
+def cushion(projection: Optional[float], line: Optional[float], side: Optional[str]) -> Optional[float]:
+    """How far the projection sits past the number, as a share of it, on the side you're betting (negative = the
+    projection is on the other side)."""
+    if projection is None or line is None or side not in ("Over", "Under"):
+        return None
+    thr = threshold(line)
+    if thr <= 0:
+        return None
+    return (projection - thr) / thr if side == "Over" else (thr - projection) / thr
+
+
+# Milestone ladders the books post ("25+", "30+"...), by market.
+LADDER_STEP = {"Points": 5, "PRA": 5, "PR": 5, "PA": 5, "PB": 5, "RA": 2, "Rebounds": 2, "Assists": 2,
+               "Threes Made": 1, "Blocks": 1, "Steals": 1}
+
+
+def ladder_step(market: Optional[str], projection: float) -> float:
+    if market in LADDER_STEP:
+        return LADDER_STEP[market]
+    for step in (1, 2, 5, 10, 25):                 # yards, shots...: a rung roughly every 15-25% of the projection
+        if step >= 0.15 * max(projection, 1.0):
+            return step
+    return 25
+
+
+def milestone_chance(row: Dict, n: float) -> Optional[float]:
+    """The model's chance of N or more (an "N+" milestone) for a props row -- the model alone, since the books'
+    milestone prices aren't loaded."""
+    if row.get("projection") is None or row.get("out"):
+        return None
+    floor = row.get("sd_floor") or (0.25, 1.0)
+    p = prob_over(row["projection"], row.get("values") or [], float(n) - 0.5, row.get("dist") or "normal", *floor)
+    return calibrate(p, row.get("slope", 1.0)) if p is not None else None
+
+
+def ladder(row: Dict, market: Optional[str], rungs: int = 3) -> List[Tuple[float, float]]:
+    """[(N, chance of N+)] for the milestone rungs around his projection (one below, the nearest, one above)."""
+    proj = row.get("projection")
+    if proj is None or row.get("out"):
+        return []
+    step = ladder_step(market, proj)
+    base = math.floor(proj / step) * step
+    ns = [base - step, base, base + step] if rungs == 3 else [base + step * k for k in range(-(rungs // 2), rungs - rungs // 2)]
+    out = []
+    for n in ns:
+        if n < step or n <= 0:
+            continue
+        p = milestone_chance(row, n)
+        if p is not None:
+            out.append((n, p))
+    return out
+
+
+def ladder_text(row: Dict, market: Optional[str]) -> str:
+    rungs = ladder(row, market)
+    return " · ".join(f"{n:g}+ {p:.0%}" for n, p in rungs) or "—"
+
+
+def leg_warnings(row: Dict, side: Optional[str], line: Optional[float]) -> List[str]:
+    """Why a leg is risky in a parlay: a news check, a returning player, the projection on the wrong side or thin,
+    blowout risk."""
+    w = []
+    if row.get("out"):
+        w.append("ruled out")
+    if row.get("lean") == "Check news" or row.get("gap") == "big" or row.get("gap_from"):
+        w.append("check news (line far from projection)")
+    if row.get("returning"):
+        w.append("missed his team's last game")
+    c = cushion(row.get("projection"), line, side)
+    if c is not None:
+        if c < 0:
+            w.append(f"projection {row['projection']:.1f} is on the other side")
+        elif c < CUSHION_MIN:
+            w.append(f"thin cushion ({c:+.0%})")
+    if any(any(k in str(f).lower() for k in BLOWOUT_WORDS) for f in row.get("flags") or []):
+        w.append("blowout risk")
+    return w
+
+
+def cushion_text(c: Optional[float]) -> str:
+    if c is None:
+        return "—"
+    return f"{c:+.0%}" + (" ⚠️" if c < CUSHION_MIN else "")
+
+
 def best_reads(rows: Sequence[Dict], team_of: Dict, limit: int = 6) -> List[Dict]:
     """The game's strongest leans across both teams: real leans first by edge, then the most likely sides."""
     leans = [r for r in rows if r.get("lean") in ("Over", "Under")]
@@ -805,6 +901,7 @@ def best_reads(rows: Sequence[Dict], team_of: Dict, limit: int = 6) -> List[Dict
         price = r.get("over_price") if r["side"] == "Over" else r.get("under_price")
         out.append({"Player": r["player"], "Team": team_of.get(r.get("pid"), ""),
                     "Pick": f"{r['side']} {r['line']:g}", "Chance": f"{_side_prob(r):.0%}",
+                    "Cushion": cushion_text(cushion(r.get("projection"), r.get("line"), r.get("side"))),
                     "Price": "—" if price is None else f"{price:+.0f}",
                     "Edge": "—" if r.get("ev") is None else f"{r['ev']:+.1%}",
                     "Why": " · ".join([f"projects {r['projection']:.1f}"] + list((r.get("flags") or [])[:2]))})

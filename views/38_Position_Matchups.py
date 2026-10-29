@@ -650,7 +650,7 @@ def render_props_team(team, opp, off_name, def_name, market, mode, tables, g):
     if not st.session_state.get("pm_props_edit"):
         opp_label = list(disp[0])[2] if disp else "Min"
         st.dataframe(pd.DataFrame(PE.display_compact(rows, details=bool(st.session_state.get("pm_props_details")),
-                                                     opp_label=opp_label)),
+                                                     opp_label=opp_label, market=market)),
                      hide_index=True, width="stretch")
         return rows
     df = pd.DataFrame(disp)
@@ -670,53 +670,94 @@ def render_props_team(team, opp, off_name, def_name, market, mode, tables, g):
     return rows
 
 
-def render_sgp(all_rows, market):
-    """Collect legs across markets for this game and price them together, with correlation."""
-    gk = f"{SPORT_KEY}|{date_str}|{game_label}"
-    legs = st.session_state.setdefault("pm_sgp", {}).setdefault(gk, [])
-    with st.expander(f"🧮 Same-game parlay pricer — {len(legs)} leg{'s' if len(legs) != 1 else ''}"):
+def _ticket_leg(r, side, line, p, market, label):
+    """One ticket leg from a props row: the chance of that side, the cushion and anything that makes it risky."""
+    c = PE.cushion(r.get("projection"), line, side)
+    return {"label": label, "player": r["player"], "game": game_label, "side": side, "market": market,
+            "line": line, "p": p, "projection": r.get("projection"), "cushion": c,
+            "warnings": PE.leg_warnings(r, side, line)}
+
+
+def render_ticket(all_rows, market):
+    """🎟️ The ticket builder (Oct 29): legs from ANY game on this date -- the book's line or an "N+" milestone --
+    each with its chance, cushion and warnings, priced together (same-game legs move together; different games
+    don't). Replaces the one-game SGP pricer."""
+    tk = f"{SPORT_KEY}|{date_str}"
+    legs = st.session_state.setdefault("pm_ticket", {}).setdefault(tk, [])
+    n_games = len({l["game"] for l in legs})
+    with st.expander(f"🎟️ Ticket builder — {len(legs)} leg{'s' if len(legs) != 1 else ''}"
+                     + (f" from {n_games} game{'s' if n_games != 1 else ''}" if legs else "")):
+        safe = st.toggle(f"Only suggest legs with a {PE.CUSHION_MIN:.0%}+ cushion and no warnings", value=True,
+                         key="pm_tk_safe",
+                         help="Cushion = how far the projection sits past the number. On Oct 28, legs with a big "
+                              "cushion hit; legs within ~10% of the number were coin flips.")
         cands = {}
         for r in all_rows:
-            if r.get("p_final") is None or r.get("line") is None:
+            if r.get("out") or r.get("projection") is None:
                 continue
-            side = r["lean"] if r.get("lean") in ("Over", "Under") else (r.get("side") or "Over")
-            label = f"{r['player']} {side} {r['line']:g} {market}"
-            cands[label] = {"label": label, "player": r["player"], "game": game_label, "side": side, "market": market,
-                            "p": r["p_final"] if side == "Over" else 1 - r["p_final"]}
+            if r.get("line") is not None and r.get("p_final") is not None:
+                side = r["lean"] if r.get("lean") in ("Over", "Under") else (r.get("side") or "Over")
+                p = r["p_final"] if side == "Over" else 1 - r["p_final"]
+                lab = f"{r['player']} {side} {r['line']:g} {market} ({p:.0%})"
+                cands[lab] = _ticket_leg(r, side, r["line"], p, market, f"{r['player']} {side} {r['line']:g} {market}")
+            for n, p in PE.ladder(r, market):
+                lab = f"{r['player']} {n:g}+ {market} — milestone ({p:.0%})"
+                cands[lab] = _ticket_leg(r, "Over", float(n), p, market, f"{r['player']} {n:g}+ {market}")
+        if safe:
+            cands = {k: v for k, v in cands.items() if not v["warnings"]}
         a1, a2 = st.columns([4, 1])
         with a1:
-            pick = st.multiselect("Add legs from this table (any market — switch markets and add more)", list(cands),
-                                  key=f"pm_sgp_pick_{market}")
+            pick = st.multiselect("Add legs (switch markets or games and keep adding — the ticket stays)", list(cands),
+                                  key=f"pm_tk_pick_{game_label}_{market}")
         with a2:
             st.write("")
-            if st.button("➕ Add", key="pm_sgp_add") and pick:
+            if st.button("➕ Add", key="pm_tk_add") and pick:
                 have = {l["label"] for l in legs}
-                legs.extend(cands[k] for k in pick if k not in have)
+                legs.extend(cands[k] for k in pick if cands[k]["label"] not in have)
+                st.rerun()
         if not legs:
-            st.caption("Pick two or more legs. The pricer accounts for legs moving together — two overs in a fast "
-                       "game hit together more often than multiplying their odds says; an over and an under, less.")
+            st.caption("Milestone legs (**N+**) are priced by the model alone — the books' milestone prices aren't "
+                       "loaded. Two legs from the same game move together (two overs in a fast game hit together "
+                       "more often than multiplying says); legs from different games don't.")
             return
-        st.dataframe(pd.DataFrame([{"Leg": l["label"], "Model chance": f"{l['p']:.0%}"} for l in legs]),
-                     hide_index=True, width="stretch")
+        st.dataframe(pd.DataFrame([{
+            "Leg": l["label"], "Game": l["game"], "Chance": f"{l['p']:.0%}",
+            "Projection": "—" if l.get("projection") is None else f"{l['projection']:.1f}",
+            "Cushion": PE.cushion_text(l.get("cushion")),
+            "Warnings": " · ".join(l.get("warnings") or []) or "—"} for l in legs]), hide_index=True, width="stretch")
+        risky = [l for l in legs if l.get("warnings")]
+        if risky:
+            st.warning(f"{len(risky)} of {len(legs)} legs carry a warning: "
+                       + "; ".join(f"{l['label']} ({', '.join(l['warnings'])})" for l in risky))
         p1, p2 = st.columns([1, 3])
         with p1:
-            price = st.number_input("Book's SGP price", value=None, step=5.0, format="%+.0f", key="pm_sgp_price",
-                                    help="The American odds your book offers for this exact SGP (+450).")
-        res = PE.sgp(legs, price)
-        with p2:
-            if res:
+            price = st.number_input("Book's price for the ticket", value=None, step=5.0, format="%+.0f",
+                                    key="pm_tk_price", help="The American odds your book offers (+1784).")
+        if len(legs) == 1:
+            with p2:
+                st.metric("Hit chance", f"{legs[0]['p']:.1%}")
+            res = None
+        else:
+            res = PE.sgp(legs, price)
+            with p2:
                 m1, m2, m3, m4 = st.columns(4)
-                m1.metric("Hit chance", f"{res['p_joint']:.1%}", help="With correlation between the legs.")
+                m1.metric("Hit chance", f"{res['p_joint']:.1%}", help="Legs from the same game move together.")
                 m2.metric("If independent", f"{res['p_independent']:.1%}")
                 m3.metric("Fair price", f"{res['fair']:+d}" if res["fair"] is not None else "—")
                 m4.metric("EV at your price", "—" if res["ev"] is None else f"{res['ev']:+.0%}")
-            else:
-                st.caption("Add at least two legs.")
         if res and res["ev"] is not None:
             (st.success if res["ev"] > 0 else st.warning)(
                 "Positive expected value at that price." if res["ev"] > 0 else
-                "Negative expected value at that price — the book's SGP price is shorter than the fair price.")
-        if st.button("🗑️ Clear the SGP", key="pm_sgp_clear"):
+                "Negative expected value at that price — the book pays less than the ticket's fair price.")
+        r1, r2 = st.columns([3, 1])
+        with r1:
+            drop = st.multiselect("Remove legs", [l["label"] for l in legs], key="pm_tk_drop")
+        with r2:
+            st.write("")
+            if st.button("Remove", key="pm_tk_remove") and drop:
+                legs[:] = [l for l in legs if l["label"] not in drop]
+                st.rerun()
+        if st.button("🗑️ Clear the ticket", key="pm_tk_clear"):
             legs.clear()
             st.rerun()
 
@@ -808,10 +849,12 @@ if tab_props is not None:
                     st.caption("No side clears the bar for value in this market right now — try another market.")
             st.caption("**Pick** = the side the model favors; **Chance** = how likely it is; **Lean** = 🟢/🔴 only when "
                        "that side has **+3% value at the price shown** (no price: the projection 5%+ past the line and "
-                       "55%+ to hit). Low counts (rebounds, assists, blocks, steals, "
+                       "55%+ to hit). **Cushion** = how far the projection sits past the line (⚠️ under 15%: close to a coin "
+                       "flip — keep those out of parlays). **Milestones** = the model's chance of each **N+** rung "
+                       "around his projection. Low counts (rebounds, assists, blocks, steals, "
                        "receptions, shots, goals) use count odds, not a bell curve. **Notes** flag back-to-backs, blowout "
                        "risk, game script and next-man-up bumps. Overtime isn't modelled.")
-            render_sgp(all_rows, market)
+            render_ticket(all_rows, market)
             log_fn = {"football": FP.plays_for_log, "hockey": HP.plays_for_log}.get(PFAM, PPR.plays_for_log)
             plays = log_fn(all_rows, market, f"{away_name} @ {home_name}")
             if plays:

@@ -641,6 +641,9 @@ def _tier_sort_key(objective: str):
     return lambda p: p.get("Conviction", 0.0)   # "conviction" / any unrecognized objective
 
 
+PARLAY_MIN_CUSHION = 0.15
+
+
 def build_parlay_leg_pool(plays: List[Dict], max_per_game: int = 2, max_per_market: int = 2,
                           min_pool_size: int = 0, sort_key=None,
                           exclude_players: Optional[set] = None,
@@ -710,6 +713,11 @@ def build_parlay_leg_pool(plays: List[Dict], max_per_game: int = 2, max_per_mark
 
     exclude_players = exclude_players or set()
     graded = [p for p in graded if (p.get("Player"), p.get("Team")) not in exclude_players]
+    # Oct 29: a parlay leg needs room. Plays that carry a cushion (NBA's shared props model) must clear the line by
+    # PARLAY_MIN_CUSHION and carry no warning (news check, returning player, blowout risk) -- the Oct 28 tickets lost
+    # on legs within ~10% of their numbers. Plays without the field (other sports' models) are unaffected.
+    graded = [p for p in graded if not p.get("Warnings")
+              and (p.get("Cushion") is None or p["Cushion"] >= PARLAY_MIN_CUSHION)]
 
     key_fn = sort_key if sort_key is not None else (lambda p: p.get("Conviction", 0.0))
     graded.sort(key=key_fn, reverse=True)

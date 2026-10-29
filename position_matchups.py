@@ -339,7 +339,10 @@ def player_form(pgames: Iterable[Dict], pid, sport: str, n: int = RECENT_N, opp:
     if not mine:
         return None
     vals = [metric_value(sport, p.get("stats") or {}) for p in mine]
-    return {"avg": sum(vals) / len(vals), "games": len(vals)}
+    out = {"avg": sum(vals) / len(vals), "games": len(vals)}
+    if FAMILY_BY_SPORT.get(sport) == "basketball":      # the parts of PRA, so nobody reads 16.5 PRA as 16.5 points
+        out["split"] = {k: sum(_num((p.get("stats") or {}).get(k)) for p in mine) / len(mine) for k in ("pts", "reb", "ast")}
+    return out
 
 
 def usage_depth(pgames: Iterable[Dict], team: str, sport: str, last_n: int = RECENT_N) -> Dict[str, List[Dict]]:
@@ -777,6 +780,11 @@ def _form_text(form: Optional[Dict]) -> str:
     return "—" if not form else f"{form['avg']:.1f} ({form['games']} g)"
 
 
+def _split_text(form: Optional[Dict]) -> str:
+    sp = (form or {}).get("split")
+    return "—" if not sp else f"{sp['pts']:.1f} pts · {sp['reb']:.1f} reb · {sp['ast']:.1f} ast"
+
+
 def _player_text(pl: Dict) -> str:
     status = str(pl.get("status") or "").strip()
     flag = _STATUS_FLAG.get(status.lower(), "⚠️") if status else ""
@@ -857,12 +865,14 @@ def display_rows_by_player(rows: Sequence[Dict]) -> List[Dict]:
                 "Player": _player_text(p) if p else "—",
                 "Min": "—" if p.get("avg_min") is None else f"{_num(p['avg_min']):.0f}",
                 "Role": role_of.get(p.get("name"), "Rotation") if p else "—",
-                "Last 4": _form_text(p.get("recent")),
-                "vs this D": _form_text(p.get("h2h")),
+                # Oct 29: the stat named in every header -- "Last 4" read as points cost a Tari Eason points leg.
+                "Last 4 (PRA)": _form_text(p.get("recent")),
+                "Last 4 split": _split_text(p.get("recent")),
+                "vs this D (PRA)": _form_text(p.get("h2h")),
                 "D rank (1 = softest)": rank_txt,
                 "Verdict": TIER_BADGE.get(r["tier"], "—"),
-                "Allowed / g": "—" if r["allowed"] is None else f"{r['allowed']:.1f}" + (" ⚠️ thin" if r["thin"] else ""),
-                "League avg": "—" if r["league_avg"] is None else f"{r['league_avg']:.1f}",
+                "Allowed / g (PRA)": "—" if r["allowed"] is None else f"{r['allowed']:.1f}" + (" ⚠️ thin" if r["thin"] else ""),
+                "League avg (PRA)": "—" if r["league_avg"] is None else f"{r['league_avg']:.1f}",
                 "vs league": "—" if vs is None else f"{vs:+.0f}%",
                 "Model matchup": "—" if r.get("model_factor") is None else f"{r['model_factor'] - 1:+.0%}",
                 "Trend": r["trend"],
@@ -921,9 +931,11 @@ def callouts(side: Dict, off_name: str, def_name: str, limit: int = 3, family: s
 
 def _callout(r: Dict, p: Dict, def_name: str, soft: List, tough: List, family: str) -> None:
     """One Targets / Fades line for player `p` in slot row `r`, scored by the gap weighted by his role."""
+    unit = f" {METRIC_SHORT[family]}" if family in ("basketball", "football") else ""
     text = (f"{p['name']} ({r['slot']}) — {def_name} rank {r['rank']}/{r['n_teams']} against the position, "
-            f"allowing {r['allowed']:.1f} vs a {r['league_avg']:.1f} league average ({r['vs_league_pct']:+.0f}%)"
-            + (f"; he's averaging {p['recent']['avg']:.1f} lately" if p.get("recent") else "")
+            f"allowing {r['allowed']:.1f}{unit} vs a {r['league_avg']:.1f} league average ({r['vs_league_pct']:+.0f}%)"
+            + (f"; he's averaging {p['recent']['avg']:.1f} {METRIC_SHORT.get(family, '')} lately".replace("  ", " ")
+               + (f" ({_split_text(p['recent'])})" if p['recent'].get("split") else "") if p.get("recent") else "")
             + (f"; {r['trend']}" if r["trend"] in ("▲ softer lately", "▼ tougher lately") else "")
             + (f"; model {r['model_factor'] - 1:+.0%} after adjusting for the small sample"
                if r.get("model_factor") is not None else "")

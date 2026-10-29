@@ -12,6 +12,7 @@ import pytz
 import sports
 import best_bets_data as BBD
 import grading
+import props_engine as BBD_PE
 import quick_log
 from streamlit_page_cache import compute_once, invalidate_page
 
@@ -316,6 +317,12 @@ _rename = {"ModelProb": "Model %", "_display_line": "Line",
           "TeamTrend": "Team Trend"}
 if _props_model:
     _cols.insert(_cols.index("Side") + 1, "Projection")
+    for p in view:
+        p["_cushion"] = BBD_PE.cushion_text(p.get("Cushion"))
+        p["_warn"] = " · ".join(p.get("Warnings") or []) or "—"
+    _cols.insert(_cols.index("_display_line") + 1, "_cushion")
+    _cols.append("_warn")
+    _rename.update({"_cushion": "Cushion", "_warn": "Warnings"})
 if _show_blowout_risk:
     _cols.insert(_cols.index("Team") + 1, "_blowout_risk")
     _rename["_blowout_risk"] = "Blowout Risk"

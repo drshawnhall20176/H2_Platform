@@ -768,22 +768,37 @@ def test_book_line_problems_are_reported(monkeypatch, page):
     assert not at.exception and any("No Odds API key" in w.value for w in at.warning)
 
 
-def test_sgp_pricer_adds_legs_and_prices_them(page):
+def test_ticket_builder_adds_legs_and_milestones_and_prices_them(page):
     at = page("NBA", nba_games(), bundle_fn=lambda sport, g: props_bundle(sport))
     game = at.selectbox(key="pm_game").value
     at.session_state[f"pm_props_NBA_{game}_PRA_1"] = {"edited_rows": {0: {"Line": 35.5}, 1: {"Line": 17.5}},
                                                        "added_rows": [], "deleted_rows": []}
     at.run()
-    opts = at.multiselect(key="pm_sgp_pick_PRA").options
-    assert len(opts) == 2
-    at.multiselect(key="pm_sgp_pick_PRA").set_value(opts).run()
-    at.button(key="pm_sgp_add").click().run()
-    at.number_input(key="pm_sgp_price").set_value(150.0).run()
+    at.toggle(key="pm_tk_safe").set_value(False).run()                     # every leg, warnings or not
+    ms = [m for m in at.multiselect if m.key.startswith("pm_tk_pick_")][0]
+    main = [o for o in ms.options if "milestone" not in o]
+    miles = [o for o in ms.options if "milestone" in o]
+    assert len(main) == 2 and miles and all("+" in o for o in miles)
+    ms.set_value(main[:1] + miles[:1]).run()
+    at.button(key="pm_tk_add").click().run()
+    at.number_input(key="pm_tk_price").set_value(150.0).run()
     assert not at.exception, [e.value for e in at.exception]
     labels = [m.label for m in at.metric]
     assert "Hit chance" in labels and "EV at your price" in labels
-    at.button(key="pm_sgp_clear").click().run()
+    tickets = [d.value for d in at.dataframe if "Cushion" in d.value.columns and "Leg" in d.value.columns]
+    assert tickets and len(tickets[0]) == 2 and "Warnings" in tickets[0].columns
+    at.button(key="pm_tk_clear").click().run()
     assert not at.exception and "0 legs" in " ".join(e.label for e in at.expander)
+
+
+def test_props_table_shows_cushion_and_milestones(page):
+    at = page("NBA", nba_games(), bundle_fn=lambda sport, g: props_bundle(sport))
+    game = at.selectbox(key="pm_game").value
+    at.session_state[f"pm_props_NBA_{game}_PRA_1"] = {"edited_rows": {0: {"Line": 35.5}}, "added_rows": [],
+                                                       "deleted_rows": []}
+    at.run()
+    t = [d.value for d in at.dataframe if "Milestones" in getattr(d.value, "columns", [])]
+    assert t and "Cushion" in t[0].columns and any("+ " in str(x) and "%" in str(x) for x in t[0]["Milestones"])
 
 
 def test_scorecard_runs_and_its_calibration_can_be_applied(page):

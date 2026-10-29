@@ -177,6 +177,8 @@ def play_from_row(row: Dict, slate_row: Optional[Dict] = None) -> Optional[Dict]
         "Conviction": conviction, "ConvictionSource": "book" if p_mkt else "model_typical",
         "_ceiling": round(1.0 / p_mkt, 2) if p_mkt else None,
         "Lean": lean, "EV": row.get("ev"), "Gap": row.get("gap"), "GapPct": row.get("gap_pct"),
+        "Cushion": PE.cushion(row.get("projection"), row["line"], side),
+        "Warnings": [w for w in PE.leg_warnings(row, side, row["line"]) if not w.startswith("thin cushion")],
         "Notes": PE.GAP_TAG if row.get("gap") in ("big", "big-low-count") or row.get("gap_from") else None,
         "Why": why(row), "Model": "player-props",
         "PriorGames": row.get("games", 0) - row.get("season_games", 0) if row.get("filled") else 0,
