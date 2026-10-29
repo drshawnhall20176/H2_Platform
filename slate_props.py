@@ -67,12 +67,12 @@ def game_lines_for(game_lines: Iterable[Dict], home_name: str, away_name: str) -
 def slate_reads(games: Sequence[Dict], sample: Dict, offers: Optional[List[Dict]], book: Optional[str] = None,
                 injuries: Optional[Dict] = None, rest: Optional[Dict] = None, game_lines: Optional[List[Dict]] = None,
                 markets: Optional[Dict[str, str]] = None, mode: str = "blend", sport: str = "NBA",
-                news_checked: bool = False) -> Dict[Tuple, Dict]:
+                news_checked: bool = False, charts: Optional[Dict] = None) -> Dict[Tuple, Dict]:
     """{(player id, odds market key): Player props row} for every rotation player in every game.
 
     games: build_slate meta ({"label","home_id","away_id","home_name","away_name",...}); sample: {"cur","prior"}
     league player-games (position_data.nba_league_props_sample); injuries: {team id: {name: status}};
-    rest: {team id: rest days}; game_lines: odds_api.fetch_slate_game_lines' list. Each row also carries
+    rest: {team id: rest days}; charts: {team id: tonight's depth chart}; game_lines: odds_api.fetch_slate_game_lines' list. Each row also carries
     "game", "team_id", "opp_id" and "market_key"."""
     cur, prior = list(sample.get("cur") or []), list(sample.get("prior") or [])
     if not cur and not prior:
@@ -87,7 +87,8 @@ def slate_reads(games: Sequence[Dict], sample: Dict, offers: Optional[List[Dict]
         gl = (game_lines.get(g.get("label")) or {}) if isinstance(game_lines, dict) else \
             game_lines_for(game_lines, g.get("home_name"), g.get("away_name"))
         for team, opp, is_home in ((home, away, True), (away, home, False)):
-            rot = PPR.team_rotation(cur, prior, team, injuries.get(team), sport, last_n=ROTATION_GAMES)
+            rot = PPR.team_rotation(cur, prior, team, injuries.get(team), sport, last_n=ROTATION_GAMES,
+                                    chart=(charts or {}).get(team))
             if not rot:
                 continue
             ctx = PPR.game_context(team, is_home, gl.get("spread_home"), gl.get("total"), rest.get(team),

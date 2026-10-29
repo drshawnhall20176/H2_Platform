@@ -102,7 +102,8 @@ def rotation(usage: Dict[str, List[Dict]], injuries: Optional[Dict[str, str]] = 
             seen.add(u.get("pid"))
             out.append({"pid": u.get("pid"), "name": u.get("name"), "slot": slot, "avg_min": _num(u.get("avg_min")),
                         "status": injuries.get(u.get("name")), "slot2": u.get("slot2"),
-                        "start_rate": u.get("start_rate")})
+                        "start_rate": u.get("start_rate"), "pos": u.get("pos"),
+                        "chart_starter": u.get("chart_starter")})
     out.sort(key=lambda r: -r["avg_min"])
     return out[:limit]
 
@@ -406,12 +407,13 @@ def market_tables(cur_pgames, prior_pgames, market: str, sport: str = "NBA") -> 
 
 
 def team_rotation(cur_pgames, fallback_pgames, team, injuries: Optional[Dict[str, str]] = None,
-                  sport: str = "NBA", last_n: int = 7) -> List[Dict]:
+                  sport: str = "NBA", last_n: int = 7, chart: Optional[Dict] = None) -> List[Dict]:
     """Every rotation player of `team`, from THIS season's games when the team has any (a traded player belongs
-    to his new team), otherwise from `fallback_pgames`."""
+    to his new team), otherwise from `fallback_pgames`. `chart` (tonight's depth chart) puts each listed player in
+    the group he is playing tonight (position_matchups.apply_depth_chart)."""
     import position_matchups as PM
     own = cur_pgames if any(p.get("team") == team for p in cur_pgames or []) else (fallback_pgames or [])
-    return rotation(PM.usage_depth(own, team, sport, last_n=last_n), injuries)
+    return rotation(PM.apply_depth_chart(PM.usage_depth(own, team, sport, last_n=last_n), chart), injuries)
 
 
 def game_context(team, is_home: bool, spread_home: Optional[float], total: Optional[float],
@@ -502,13 +504,15 @@ def player_slots(pgames) -> Dict:
 
 
 def position_factors(players: Iterable[Tuple], cur_pgames, prior_pgames, sport: str = "NBA",
-                     mode: str = "blend") -> Dict:
+                     mode: str = "blend", charts: Optional[Dict] = None) -> Dict:
     """The position-level matchup factor -- shrunk for small samples and blended with last season, exactly as the
     Player props tab computes it -- for each (player id, opponent id) in `players`, for every stat in STAT_MARKET.
     Returns {(player id, stat key): factor}. Hot Hand Engine and Matchup Lab show this same number, so a player's
     matchup reads the same on every page."""
     import position_matchups as PM
     slots = player_slots(list(cur_pgames or []) + list(prior_pgames or []))
+    charted = PM.chart_groups(charts)          # tonight's depth chart wins over the roster label
+    slots.update(charted)
     cur_allowed = PM.allowed_by_slot(cur_pgames or [], sport)
     prior_allowed = PM.allowed_by_slot(prior_pgames or [], sport) if prior_pgames else None
     tables = {}
@@ -527,7 +531,7 @@ def position_factors(players: Iterable[Tuple], cur_pgames, prior_pgames, sport: 
             if cur is None and pri is None:
                 continue
             f = blended_factor(cur, pri, mode)["factor"]
-            s2 = second.get(pid)
+            s2 = None if pid in charted else second.get(pid)
             if s2 and s2 != slot:                 # a double big (position_matchups.secondary_slots)
                 c2, p2 = raw_factor(cur_t, opp, s2), (raw_factor(pri_t, opp, s2) if pri_t else None)
                 if c2 is not None or p2 is not None:

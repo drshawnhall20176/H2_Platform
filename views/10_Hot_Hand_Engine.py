@@ -62,7 +62,8 @@ def _position_factors(sport_key: str, date_str: str, rows) -> dict:
         import position_data as PD
         sample = PD.nba_league_props_sample(date_str)
         players = {(r.get("_pid"), r.get("_opp_id")) for r in rows if r.get("_pid") is not None}
-        return PPR.position_factors(players, sample["cur"], sample["prior"], "NBA")
+        charts = PD.depth_chart_players("NBA", {opp for _pid, opp in players})   # every team tonight is someone's opponent
+        return PPR.position_factors(players, sample["cur"], sample["prior"], "NBA", charts=charts)
     except Exception:                                              # noqa: BLE001 — fall back to team-wide
         return {}
 
@@ -252,7 +253,9 @@ st.dataframe(
 )
 st.caption("**Form** is the same number everywhere on the platform: this season's games, topped up to five from "
            "last season at half weight, newer games counting more. **Matchup Factor** is the position-level matchup "
-           "(the same number as Position Matchups' Player props) when one is available, else the team-wide "
+           + C.for_audience("(the same number as Position Matchups' Player props)",
+                            "(the same number the H2 props model behind Best Bets uses)")
+           + " when one is available, else the team-wide "
            "pace-adjusted factor (**Team D Factor**). **Matchup Score** = Form × Matchup Factor × fatigue (own and "
            "opponent's back-to-backs).")
 st.caption("\"Opp Team Total\" = that opponent's entire team combined for that stat, raw per-game "
@@ -287,7 +290,7 @@ with st.expander("Full column reference"):
   than guessing.
 - **Matchup Score** — Form × Matchup Factor × fatigue (own back-to-back, opponent back-to-back). The number this board is sorted by.
 - **Position Matchup** — NBA: what this opponent allows to this player's position (G/F/C), shrunk for small samples and
-  blended with last season — identical to Position Matchups. When present it is the Matchup Factor.
+  blended with last season — the same number the H2 props model uses. When present it is the Matchup Factor.
 - **Rest** — the PLAYER'S OWN team's rest heading into tonight (not the opponent's), computed from
   game dates already on file — zero extra API cost. "⚠️ B2B" = second night of a back-to-back, a
   well-documented real fatigue risk. Deliberately separate from Matchup Factor/Score, which are
@@ -302,6 +305,10 @@ with st.expander("Full column reference"):
   read it alongside the player's own role (AvgMin), not as a directional adjustment to the player's number.
     """)
 
-st.caption("Pace-, rest- and blowout-aware, and (NBA) position-level: the matchup and form here match Position "
-           "Matchups and Matchup Lab. Still no individual-defender data or injury-driven usage changes on this page "
-           "— those live on Position Matchups' Player props tab.")
+st.caption(C.for_audience(
+    "Pace-, rest- and blowout-aware, and (NBA) position-level: the matchup and form here match Position "
+    "Matchups and Matchup Lab. Still no individual-defender data or injury-driven usage changes on this page "
+    "— those live on Position Matchups' Player props tab.",
+    "Pace-, rest- and blowout-aware, and (NBA) position-level: the matchup and form here match the H2 props model "
+    "behind Best Bets. No individual-defender data or injury-driven usage changes on this page — Best Bets' "
+    "projections include those."))

@@ -695,7 +695,8 @@ def load_props_model_inputs(sport_key: str, date_str: str, teams: tuple) -> Dict
             rest[tid] = (eng.get_team_rest_info(tid, date_str) or {}).get("rest_days")
         except Exception:                                       # noqa: BLE001
             rest[tid] = None
-    return {"sample": sample, "injuries": injuries, "rest": rest}
+    charts = PD.depth_charts(sport_key, [t for t, _a in teams])
+    return {"sample": sample, "injuries": injuries, "rest": rest, "charts": charts}
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -771,7 +772,7 @@ def slate_reads_for(sport_key: str, date_str: str, meta: List[Dict], offers: Lis
     lines = fetch_slate_game_lines_cached(sport_key, date_str, api_key) if api_key else []
     book = None if preferred_book in (None, "best") else preferred_book
     reads = SP.slate_reads(meta, inputs["sample"], offers, book=book, injuries=inputs["injuries"],
-                           rest=inputs["rest"], game_lines=lines, sport=sport_key)
+                           rest=inputs["rest"], game_lines=lines, sport=sport_key, charts=inputs.get("charts"))
     return _with_display_names(sport_key, reads) or None
 
 

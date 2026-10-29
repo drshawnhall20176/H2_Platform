@@ -47,7 +47,6 @@ import pytz
 
 import config_nba as CFG
 import basketball_engine as BB
-import basketball_markets as BM
 
 logger = logging.getLogger(__name__)
 
@@ -353,10 +352,6 @@ def get_game_boxscore(game_id: str) -> Dict[int, Dict[str, float]]:
                     "fg3m": row.get("3PT", 0.0),
                     "min": row.get("MIN", 0.0),
                 }
-                # steals / blocks / turnovers / threes attempted (build 246): only the stats the feed reported, so an absent
-                # column reads as 'unknown', never as a zero. Combos (pr, pa, ra, pra, bs) are derived from the parts.
-                out[pid_int].update(BM.player_stats_from_box(names, stats))
-                BM.add_derived(out[pid_int])
 
     if not out and player_groups and "_cdn_stat_shape_dump" not in _diag_seen:
         _diag_seen.add("_cdn_stat_shape_dump")
@@ -397,7 +392,7 @@ def get_team_recent_allowed_stats(team_id: int, before_date: str,
     module's own get_team_recent_game_ids/get_game_team_totals by name, keeping this module's
     functions independently monkeypatch-able the same way wnba_engine.py's are."""
     games = get_team_recent_game_ids(team_id, before_date, n, days_back=days_back)
-    totals = BM.empty_team_totals()
+    totals = {"pts": [], "reb": [], "ast": [], "fg3m": [], "poss": []}
     for g in games:
         opp_id = g.get("opp_id")
         if opp_id is None:
@@ -409,7 +404,8 @@ def get_team_recent_allowed_stats(team_id: int, before_date: str,
         game_totals = get_game_team_totals(g["gameId"])
         opp_totals = game_totals.get(opp_id)
         if opp_totals:
-            BM.accumulate_team_totals(totals, opp_totals)
+            for k in totals:
+                totals[k].append(opp_totals.get(k, 0.0))
     return {k: (sum(v) / len(v) if v else 0.0) for k, v in totals.items()}
 
 
@@ -423,12 +419,13 @@ def get_team_recent_scored_stats(team_id: int, before_date: str,
     ADDED DIRECTLY ON REQUEST, closing a real, evidenced gap -- see wnba_engine.py's own
     identical function for the full reasoning. Same "poss" pace field, same reason."""
     games = get_team_recent_game_ids(team_id, before_date, n, days_back=days_back)
-    totals = BM.empty_team_totals()
+    totals = {"pts": [], "reb": [], "ast": [], "fg3m": [], "poss": []}
     for g in games:
         game_totals = get_game_team_totals(g["gameId"])
         own_totals = game_totals.get(int(team_id))
         if own_totals:
-            BM.accumulate_team_totals(totals, own_totals)
+            for k in totals:
+                totals[k].append(own_totals.get(k, 0.0))
     return {k: (sum(v) / len(v) if v else 0.0) for k, v in totals.items()}
 
 
@@ -460,6 +457,14 @@ def get_team_injuries(team_abbr: str) -> List[Dict[str, Any]]:
     scoping pass (site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries?team=ATL returned
     real, current per-player injury records), unlike get_game_boxscore's CDN endpoint above."""
     return BB.get_team_injuries(team_abbr, SITE_API, _get_json_cached, _diag, diag_seen=_diag_seen)
+
+
+def get_team_depth_chart(team_id) -> Dict[Any, Dict[str, Any]]:
+    """Tonight's depth chart by ESPN team id (basketball_engine.get_team_depth_chart); {} on any failure."""
+    try:
+        return BB.get_team_depth_chart(team_id, SITE_API, _get_json_cached) or {}
+    except Exception:                                           # noqa: BLE001 -- roster positions instead
+        return {}
 
 
 def get_player_results(date_str: str) -> Dict[int, Dict[str, float]]:
@@ -616,7 +621,6 @@ def player_row(player: Dict, team_name: str, opp_name: str, game_label: str,
         "REB": round(sum(g["reb"] for g in game_log) / n, 1),
         "AST": round(sum(g["ast"] for g in game_log) / n, 1),
         "FG3M": round(sum(g["fg3m"] for g in game_log) / n, 1),
-        **BM.row_columns(game_log),   # STL, BLK, TOV, FG3A, PRA, PR, PA, RA, BLKSTL (None when the log lacks the stat)
         # private fields consumed by nba_projections.py
         "_pid": player["id"],
         "_game_log": game_log,

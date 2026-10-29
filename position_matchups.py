@@ -275,6 +275,74 @@ def secondary_slots(pgames: Iterable[Dict], last_n: int = 7) -> Dict:
     return out
 
 
+# --------------------------------------------------------------------------- tonight's depth chart (Oct 29)
+# The roster lists Peyton Watson "G" and Evan Mobley "C"; tonight's depth chart has them at SF and PF. A team's
+# OWN players are sorted into G/F/C by the chart when it lists them (PG/SG -> G, SF/PF -> F, C -> C), so each is
+# read against what the defense allows to the position he is actually playing. The defense tables themselves
+# (what a defense allowed to each group in past games) are unchanged.
+def _norm_name(name) -> str:
+    import re
+    t = re.sub(r"[^a-z ]", "", str(name or "").lower())
+    return " ".join(w for w in t.split() if w not in ("jr", "sr", "ii", "iii", "iv"))
+
+
+def chart_entry(chart: Optional[Dict], pid, name=None) -> Optional[Dict]:
+    """This player's depth-chart listing ({"pos", "rank", "name"}), by ESPN id, else by name; None when unlisted."""
+    if not chart:
+        return None
+    for key in (pid, _int_key(pid)):
+        if key in chart:
+            return chart[key]
+    if name:
+        n = _norm_name(name)
+        for e in chart.values():
+            if n and _norm_name(e.get("name")) == n:
+                return e
+    return None
+
+
+def _int_key(x):
+    try:
+        return int(x)
+    except (TypeError, ValueError):
+        return x
+
+
+def apply_depth_chart(usage: Dict[str, List[Dict]], chart: Optional[Dict]) -> Dict[str, List[Dict]]:
+    """usage_depth output re-sorted by tonight's depth chart: every listed player moves to his chart group (one
+    entry each -- his most-held one), carries "pos" (PG/SG/SF/PF/C) and "chart_starter", and loses the double-big
+    guess (slot2) because the chart already says where he plays. Unlisted players keep their roster group. No chart
+    -> usage unchanged."""
+    if not chart or not usage:
+        return usage
+    best: Dict = {}
+    for slot, rows in usage.items():
+        for u in rows:
+            e = chart_entry(chart, u.get("pid"), u.get("name"))
+            if e is None or position_group(e.get("pos")) is None:
+                continue
+            prev = best.get(u.get("pid"))
+            if prev is None or _num(u.get("games_in_slot")) > _num(prev[0].get("games_in_slot")):
+                best[u.get("pid")] = (u, e)
+    out: Dict[str, List[Dict]] = {}
+    for slot, rows in usage.items():
+        for u in rows:
+            if u.get("pid") in best:
+                continue
+            out.setdefault(slot, []).append(dict(u, chart_starter=False if chart else None))
+    for pid, (u, e) in best.items():
+        out.setdefault(position_group(e["pos"]), []).append(
+            dict(u, slot2=None, pos=e["pos"], depth_rank=e.get("rank"), chart_starter=e.get("rank") == 0))
+    for rows in out.values():
+        rows.sort(key=lambda r: (_num(r.get("avg_min")), _num(r.get("avg"))), reverse=True)
+    return out
+
+
+def chart_groups(charts: Optional[Dict]) -> Dict:
+    """{player id: G/F/C} from one or more teams' depth charts merged ({athlete id: entry})."""
+    return {pid: position_group(e.get("pos")) for pid, e in (charts or {}).items() if position_group(e.get("pos"))}
+
+
 def blend_factor(primary: Optional[float], secondary: Optional[float]) -> Optional[float]:
     """A double big's matchup: half his listed group's, half the forwards'."""
     if primary is None or secondary is None:
@@ -482,7 +550,7 @@ def matchup_rows(sport: str, depth: Dict[str, List[Dict]], defense_team: str,
             players.append({
                 "name": pl.get("name"), "status": pl.get("status"), "note": pl.get("note"),
                 "role_change": pl.get("role_change"), "avg_min": pl.get("avg_min"), "start_rate": pl.get("start_rate"),
-                "slot2": pl.get("slot2"),
+                "slot2": pl.get("slot2"), "pos": pl.get("pos"), "chart_starter": pl.get("chart_starter"),
                 "recent": player_form(pgames, pl.get("pid"), sport),
                 "h2h": player_form(pgames, pl.get("pid"), sport, n=10, opp=defense_team),
             })
@@ -905,6 +973,8 @@ def roles(rows: Sequence[Dict]) -> Dict[str, str]:
     minutes. NOT "first in his position group" -- a team starts two guards and two forwards, so that rule called
     Fred VanVleet and Kevin Durant bench players (Oct 28)."""
     players = [p for r in rows for p in r.get("players") or [] if p and p.get("name")]
+    if any(p.get("chart_starter") is not None for p in players):      # tonight's depth chart says who starts
+        return {p["name"]: "Starter" if p.get("chart_starter") else "Rotation" for p in players}
     if any(p.get("start_rate") is not None for p in players):
         return {p["name"]: "Starter" if _num(p.get("start_rate")) >= STARTER_RATE else "Rotation" for p in players}
     top = sorted(players, key=lambda p: -_num(p.get("avg_min")))[:TEAM_STARTERS]
@@ -920,6 +990,13 @@ def player_model_factor(r: Dict, p: Dict, mf_by_slot: Dict) -> Optional[float]:
     return mf
 
 
+def _pos_text(slot: str, p: Dict) -> str:
+    """"SF (F)" for a depth-chart position read as its group, "C" when they're the same, "C/F" for a double big."""
+    if p and p.get("pos"):
+        return p["pos"] if p["pos"] == slot else f"{p['pos']} ({slot})"
+    return slot + (f"/{p['slot2']}" if p and p.get("slot2") else "")
+
+
 def display_rows_by_player(rows: Sequence[Dict]) -> List[Dict]:
     """Basketball: one table row per rotation player (most minutes first within his group), each beside his
     position group's defensive numbers -- nobody is tucked into a "Next up" cell."""
@@ -933,7 +1010,7 @@ def display_rows_by_player(rows: Sequence[Dict]) -> List[Dict]:
         for i, p in enumerate(players):
             mf = player_model_factor(r, p, mf_by_slot)
             out.append({
-                "Pos": r["slot"] + (f"/{p['slot2']}" if p.get("slot2") else ""),
+                "Pos": _pos_text(r["slot"], p),
                 "Player": _player_text(p) if p else "—",
                 "Min": "—" if p.get("avg_min") is None else f"{_num(p['avg_min']):.0f}",
                 "Role": role_of.get(p.get("name"), "Rotation") if p else "—",

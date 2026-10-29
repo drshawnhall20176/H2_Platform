@@ -563,6 +563,39 @@ def get_team_rest_info(team_id: int, before_date: str, site_api: str,
             "last_game_date": last_date_str, "last_opp_name": last.get("opp_name")}
 
 
+# --------------------------------------------------------------------------- depth chart (Oct 29)
+DEPTH_POSITIONS = ("pg", "sg", "sf", "pf", "c")
+
+
+def get_team_depth_chart(team_id, site_api: str, fetch: FetchFn) -> Dict[Any, Dict[str, Any]]:
+    """Tonight's depth chart for one team (ESPN, maintained by RotoWire): {athlete id: {"pos": "SF", "rank": 0,
+    "name"}}. rank 0 = the starter at that spot. A player listed at several spots (Watson: SF starter, PF backup) keeps
+    his HIGHEST listing (lowest rank; ties go to the earlier position, PG first). {} when the feed has nothing --
+    callers then fall back to roster positions."""
+    if team_id is None:
+        return {}
+    data = fetch(f"{site_api}/teams/{team_id}/depthcharts")
+    out: Dict[Any, Dict[str, Any]] = {}
+    for chart in (data or {}).get("depthchart") or []:
+        positions = (chart or {}).get("positions") or {}
+        for key in DEPTH_POSITIONS:
+            pos = positions.get(key) or {}
+            abbr = ((pos.get("position") or {}).get("abbreviation") or key).upper()
+            for rank, a in enumerate(pos.get("athletes") or []):
+                aid = a.get("id")
+                if aid is None:
+                    continue
+                try:
+                    aid = int(aid)
+                except (TypeError, ValueError):
+                    pass
+                if aid not in out or rank < out[aid]["rank"]:
+                    out[aid] = {"pos": abbr, "rank": rank, "name": a.get("displayName")}
+        if out:
+            break
+    return out
+
+
 # --------------------------------------------------------------------------- injuries
 def get_team_injuries(team_abbr: str, site_api: str, fetch: FetchFn,
                       diag: DiagFn = _noop_diag, diag_seen: Optional[set] = None) -> List[Dict[str, Any]]:

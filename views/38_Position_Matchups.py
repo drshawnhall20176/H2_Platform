@@ -205,6 +205,10 @@ def render_side(side, off_name, def_name):
                 st.markdown(f"- {t}")
     df = pd.DataFrame(PM.display_rows_by_player(side["rows"]) if FAMILY == "basketball" else PM.display_rows(side["rows"]))
     st.dataframe(df, hide_index=True, width="stretch")
+    if FAMILY == "basketball" and any(p.get("pos") for r in side["rows"] for p in r.get("players") or []):
+        st.caption("**Pos** is tonight's depth-chart spot with the group it's graded against: **SF (F)** = starting "
+                   "at small forward, read against what this defense allows to forwards. Players not on the depth "
+                   "chart keep their roster group. **Role** follows the depth chart's starters.")
     moved = [r for r in side["rows"] if r.get("role_change") and r["players"]]
     if moved:
         st.caption("⚠️ **Role changes:** " + "; ".join(

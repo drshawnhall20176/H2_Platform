@@ -94,7 +94,7 @@ def load_matchup(sport_key: str, date_str: str, player_id: int, team_id: int, op
 
 
 @st.cache_data(ttl=900, show_spinner=False)
-def load_position_factor(sport_key: str, date_str: str, player_id: int, opp_id: int):
+def load_position_factor(sport_key: str, date_str: str, player_id: int, opp_id: int, team_id=None):
     """NBA: this player's position-level matchup by stat -- the SAME number Position Matchups' Player props and
     Hot Hand Engine use (shrunk for small samples, blended with last season). {stat: factor}; {} elsewhere."""
     if sport_key != "NBA":
@@ -103,7 +103,8 @@ def load_position_factor(sport_key: str, date_str: str, player_id: int, opp_id: 
         import player_props as PPR
         import position_data as PD
         sample = PD.nba_league_props_sample(date_str)
-        f = PPR.position_factors({(player_id, opp_id)}, sample["cur"], sample["prior"], "NBA")
+        charts = PD.depth_chart_players("NBA", [team_id, opp_id] if team_id is not None else [opp_id])
+        f = PPR.position_factors({(player_id, opp_id)}, sample["cur"], sample["prior"], "NBA", charts=charts)
         return {stat: v for (pid, stat), v in f.items() if pid == player_id}
     except Exception:                                              # noqa: BLE001
         return {}
@@ -189,7 +190,7 @@ if team_id is None or opp_id is None:
 with st.spinner(f"Pulling {row['Opp']}'s matchup history and defensive trend..."):
     h2h_log, season_log, opp_l5, opp_l6, opp_l10, opp_season, team_rest, opp_rest = load_matchup(
         _active.key, date_str, pid, team_id, opp_id)
-    pos_factor = load_position_factor(_active.key, date_str, pid, opp_id)
+    pos_factor = load_position_factor(_active.key, date_str, pid, opp_id, team_id)
 
 # THE real redesign, added directly on request: ONE real window selector drives BOTH sides of
 # the matchup read together (the player's own rate AND the opponent's own allowed rate,

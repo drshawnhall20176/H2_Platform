@@ -643,13 +643,19 @@ def load_basketball(sport_key: str, date_str: str, home_id: int, away_id: int, h
         notes.append("No box-score data found for this window yet.")
     depth: Dict[Any, Dict[str, List[Dict]]] = {}
     rotation: Dict[Any, List[Dict]] = {}
+    charts = depth_charts(sport_key, (home_id, away_id))
     for tid, abbr in ((home_id, home_abbr), (away_id, away_abbr)):
         inj = _injury_map(eng, abbr)
-        usage = PM.usage_depth(pgames, tid, sport_key, last_n=LEAGUE_GAMES_PER_TEAM)
+        usage = PM.apply_depth_chart(PM.usage_depth(pgames, tid, sport_key, last_n=LEAGUE_GAMES_PER_TEAM),
+                                     charts.get(tid))
         depth[tid] = {slot: [dict(u, status=inj.get(u["name"]), note=f"{u['avg_min']:.0f} min") for u in lst]
                       for slot, lst in usage.items()}
         # Every rotation player, from THIS season's own games (a traded player belongs to his new team).
-        rotation[tid] = PPR.team_rotation(cur_pgames, pgames, tid, inj, sport_key, last_n=LEAGUE_GAMES_PER_TEAM)
+        rotation[tid] = PPR.team_rotation(cur_pgames, pgames, tid, inj, sport_key, last_n=LEAGUE_GAMES_PER_TEAM,
+                                          chart=charts.get(tid))
+    missing = [n for tid, n in ((home_id, home_name), (away_id, away_name)) if not charts.get(tid)]
+    if sport_key == "NBA" and missing and hasattr(eng, "get_team_depth_chart"):
+        notes.append(f"No depth chart posted yet for {', '.join(missing)} -- roster positions used for them.")
     h2h = basketball_h2h_games(eng, home_id, away_id, date_str, home_name, away_name)
     names = {home_id: home_name, away_id: away_name}
     for g in games.values():
@@ -666,6 +672,35 @@ def load_basketball(sport_key: str, date_str: str, home_id: int, away_id: int, h
     summ = PM.h2h_summary(meetings, home_name, away_name)
     bundle["h2h"] = {"meetings": meetings, "summary": summ, "sentence": PM.h2h_sentence(summ, home_name, away_name)}
     return bundle
+
+
+def depth_charts(sport_key: str, team_ids: Iterable) -> Dict[Any, Dict]:
+    """{team id: tonight's depth chart} for the teams that have one (NBA only); missing teams fall back to roster
+    positions. Fetched in parallel through the engine's own response cache."""
+    if sport_key != "NBA":
+        return {}
+    import sports
+    eng = sports.get(sport_key).engine
+    fn = getattr(eng, "get_team_depth_chart", None)
+    ids = [t for t in dict.fromkeys(team_ids or []) if t is not None]
+    if fn is None or not ids:
+        return {}
+
+    def one(t):
+        try:
+            return t, fn(t) or {}
+        except Exception:                                       # noqa: BLE001
+            return t, {}
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        return {t: c for t, c in ex.map(one, ids) if c}
+
+
+def depth_chart_players(sport_key: str, team_ids: Iterable) -> Dict:
+    """Every listed player of these teams' depth charts merged: {athlete id: {"pos", "rank", "name"}}."""
+    out: Dict = {}
+    for chart in depth_charts(sport_key, team_ids).values():
+        out.update(chart)
+    return out
 
 
 def _int_or(x):
