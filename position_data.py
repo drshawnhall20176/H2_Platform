@@ -407,7 +407,7 @@ def fill_depth_from_usage(depth: Dict[str, List[Dict]], usage: Dict[str, List[Di
             continue
         if usage.get(slot):
             out[slot] = [{"pid": u["pid"], "name": u["name"], "status": None, "avg_min": u.get("avg_min"),
-                          "start_rate": u.get("start_rate"),
+                          "start_rate": u.get("start_rate"), "slot2": u.get("slot2"),
                           "note": (f"{u['avg_min']:.0f} min" if PM.FAMILY_BY_SPORT[sport] == "basketball"
                                    else f"held the slot in {u['games_in_slot']} of the last {PM.RECENT_N} games")}
                          for u in usage[slot]]

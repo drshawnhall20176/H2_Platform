@@ -224,6 +224,64 @@ def assign_basketball_slots(players: Iterable[Dict]) -> Dict[str, List[Dict]]:
     return out
 
 
+# --------------------------------------------------------------------------- double bigs (Oct 29)
+# Cleveland starts Evan Mobley AND Jarrett Allen, both listed C, so both got Atlanta's center matchup (+20%) -- but
+# Mobley plays the 4 on offense, where Atlanta's number is about neutral. When a team starts two listed centers
+# together, the more perimeter one (more threes + assists a minute) also counts as a forward: every matchup number
+# he gets is a blend of the two groups (DOUBLE_BIG_BLEND each).
+DOUBLE_BIG_SHARE = 0.5      # the pair started together in half or more of the team's recent games
+DOUBLE_BIG_BLEND = 0.5      # his matchup = half center, half forward
+DOUBLE_BIG_MIN_MINUTES = 20.0
+
+
+def secondary_slots(pgames: Iterable[Dict], last_n: int = 7) -> Dict:
+    """{player id: "F"} for the stretch big of every team that starts two listed centers together. Uses the box
+    scores' starter flags when the sample has them, otherwise 20+ minutes each in the same game."""
+    pgames = list(pgames or [])
+    flagged = any(p.get("starter") for p in pgames)
+    team_games: Dict[object, Dict[object, object]] = {}
+    for p in pgames:
+        team_games.setdefault(p.get("team"), {})
+        o = p.get("order")
+        g = p.get("game")
+        if g not in team_games[p.get("team")] or (o is not None and str(o) > str(team_games[p.get("team")][g] or "")):
+            team_games[p.get("team")][g] = o
+    by_tg: Dict[Tuple, List[Dict]] = {}
+    for p in pgames:
+        by_tg.setdefault((p.get("team"), p.get("game")), []).append(p)
+    out: Dict = {}
+    for team, games in team_games.items():
+        recent = sorted(games, key=lambda g: str(games[g] or ""), reverse=True)[:last_n]
+        if not recent:
+            continue
+        pairs: Dict[Tuple, int] = {}
+        for g in recent:
+            cs = [p for p in by_tg.get((team, g), []) if position_group(p.get("pos")) == "C"
+                  and (p.get("starter") if flagged else _num((p.get("stats") or {}).get("min")) >= DOUBLE_BIG_MIN_MINUTES)]
+            if len(cs) >= 2:
+                cs.sort(key=lambda p: -_num((p.get("stats") or {}).get("min")))
+                pairs[tuple(sorted((cs[0].get("pid"), cs[1].get("pid")), key=str))] = \
+                    pairs.get(tuple(sorted((cs[0].get("pid"), cs[1].get("pid")), key=str)), 0) + 1
+        for pair, n in pairs.items():
+            if n < max(2, DOUBLE_BIG_SHARE * len(recent)):
+                continue
+
+            def stretch(pid):
+                lines = [p for g in recent for p in by_tg.get((team, g), []) if p.get("pid") == pid]
+                mins = sum(_num((p.get("stats") or {}).get("min")) for p in lines)
+                return sum(_num((p.get("stats") or {}).get("fg3m")) + _num((p.get("stats") or {}).get("ast"))
+                           for p in lines) / mins if mins else 0.0
+            out[max(pair, key=stretch)] = "F"
+    return out
+
+
+def blend_factor(primary: Optional[float], secondary: Optional[float]) -> Optional[float]:
+    """A double big's matchup: half his listed group's, half the forwards'."""
+    if primary is None or secondary is None:
+        return primary
+    return (1 - DOUBLE_BIG_BLEND) * primary + DOUBLE_BIG_BLEND * secondary
+
+
 def assigner_for(sport: str) -> Callable[[Iterable[Dict]], Dict[str, List[Dict]]]:
     return assign_football_slots if FAMILY_BY_SPORT.get(sport) == "football" else assign_basketball_slots
 
@@ -374,13 +432,16 @@ def usage_depth(pgames: Iterable[Dict], team: str, sport: str, last_n: int = REC
                 rec["mins"] += _num((p.get("stats") or {}).get("min"))
     # The box score's own starter flag (ESPN), when the feed carries one: his share of the team's games STARTED.
     flagged = any(p.get("starter") for g in games for p in by_game[g])   # all-False = the feed has no flags
+    second = secondary_slots([p for g in games for p in by_game[g]], last_n=last_n) \
+        if FAMILY_BY_SPORT.get(sport) == "basketball" else {}
     out: Dict[str, List[Dict]] = {}
     for slot, recs in tally.items():
         rows = []
         for r in recs.values():
             rows.append({"pid": r["pid"], "name": r["name"], "games_in_slot": r["games_in_slot"],
                          "avg": r["total"] / r["games_in_slot"], "avg_min": r["mins"] / r["games_in_slot"],
-                         "start_rate": (r["starts"] / len(games)) if flagged and games else None})
+                         "start_rate": (r["starts"] / len(games)) if flagged and games else None,
+                         "slot2": second.get(r["pid"]) if slot != second.get(r["pid"]) else None})
         key = (lambda r: (r["avg_min"], r["avg"])) if FAMILY_BY_SPORT.get(sport) == "basketball" else \
               (lambda r: (r["games_in_slot"], r["avg"]))
         rows.sort(key=key, reverse=True)
@@ -421,6 +482,7 @@ def matchup_rows(sport: str, depth: Dict[str, List[Dict]], defense_team: str,
             players.append({
                 "name": pl.get("name"), "status": pl.get("status"), "note": pl.get("note"),
                 "role_change": pl.get("role_change"), "avg_min": pl.get("avg_min"), "start_rate": pl.get("start_rate"),
+                "slot2": pl.get("slot2"),
                 "recent": player_form(pgames, pl.get("pid"), sport),
                 "h2h": player_form(pgames, pl.get("pid"), sport, n=10, opp=defense_team),
             })
@@ -850,18 +912,28 @@ def roles(rows: Sequence[Dict]) -> Dict[str, str]:
     return {p["name"]: "Starter" if p["name"] in names else "Rotation" for p in players}
 
 
+def player_model_factor(r: Dict, p: Dict, mf_by_slot: Dict) -> Optional[float]:
+    """The model matchup for player `p` in slot row `r` -- blended with his second group's for a double big."""
+    mf = r.get("model_factor")
+    if p and p.get("slot2"):
+        return blend_factor(mf, mf_by_slot.get(p["slot2"]))
+    return mf
+
+
 def display_rows_by_player(rows: Sequence[Dict]) -> List[Dict]:
     """Basketball: one table row per rotation player (most minutes first within his group), each beside his
     position group's defensive numbers -- nobody is tucked into a "Next up" cell."""
     out: List[Dict] = []
     role_of = roles(rows)
+    mf_by_slot = {r.get("slot"): r.get("model_factor") for r in rows}
     for r in rows:
         rank_txt = "—" if not r["rank"] else f"{r['rank']}/{r['n_teams']}"
         vs = r["vs_league_pct"]
         players = [p for p in r["players"] if _in_rotation(p)] or r["players"][:1] or [{}]
         for i, p in enumerate(players):
+            mf = player_model_factor(r, p, mf_by_slot)
             out.append({
-                "Pos": r["slot"],
+                "Pos": r["slot"] + (f"/{p['slot2']}" if p.get("slot2") else ""),
                 "Player": _player_text(p) if p else "—",
                 "Min": "—" if p.get("avg_min") is None else f"{_num(p['avg_min']):.0f}",
                 "Role": role_of.get(p.get("name"), "Rotation") if p else "—",
@@ -874,7 +946,7 @@ def display_rows_by_player(rows: Sequence[Dict]) -> List[Dict]:
                 "Allowed / g (PRA)": "—" if r["allowed"] is None else f"{r['allowed']:.1f}" + (" ⚠️ thin" if r["thin"] else ""),
                 "League avg (PRA)": "—" if r["league_avg"] is None else f"{r['league_avg']:.1f}",
                 "vs league": "—" if vs is None else f"{vs:+.0f}%",
-                "Model matchup": "—" if r.get("model_factor") is None else f"{r['model_factor'] - 1:+.0%}",
+                "Model matchup": "—" if mf is None else f"{mf - 1:+.0%}" + (" (C/F blend)" if p.get("slot2") else ""),
                 "Trend": r["trend"],
                 "What it allows": r["line"] or "—",
             })
@@ -917,13 +989,14 @@ def callouts(side: Dict, off_name: str, def_name: str, limit: int = 3, family: s
             [p for p in r["players"] if p.get("avg_min") is None or _num(p.get("avg_min")) >= 20] or r["players"][:1]
         # The raw verdict and the model must point the same way: a slot that's soft on its raw 4 games but
         # tough once the model adjusts for the small sample (and last season) isn't a Target, and vice versa.
-        mf = r.get("model_factor")
-        if mf is not None and ((r["tier"] == "Soft" and mf < 1 + CALLOUT_MODEL_AGREE)
-                               or (r["tier"] == "Tough" and mf > 1 - CALLOUT_MODEL_AGREE)):
-            continue
+        mf_by_slot = {x.get("slot"): x.get("model_factor") for x in side["rows"]}
         for p in cands:
+            mf = player_model_factor(r, p, mf_by_slot)
+            if mf is not None and ((r["tier"] == "Soft" and mf < 1 + CALLOUT_MODEL_AGREE)
+                                   or (r["tier"] == "Tough" and mf > 1 - CALLOUT_MODEL_AGREE)):
+                continue
             if callout_eligible(p, family):
-                _callout(r, p, def_name, soft, tough, family)
+                _callout(dict(r, model_factor=mf), p, def_name, soft, tough, family)
     soft.sort(key=lambda t: -t[0])
     tough.sort(key=lambda t: t[0])
     return {"targets": [t for _, t in soft[:limit]], "fades": [t for _, t in tough[:limit]]}

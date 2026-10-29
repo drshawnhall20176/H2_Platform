@@ -101,7 +101,8 @@ def rotation(usage: Dict[str, List[Dict]], injuries: Optional[Dict[str, str]] = 
                 continue
             seen.add(u.get("pid"))
             out.append({"pid": u.get("pid"), "name": u.get("name"), "slot": slot, "avg_min": _num(u.get("avg_min")),
-                        "status": injuries.get(u.get("name"))})
+                        "status": injuries.get(u.get("name")), "slot2": u.get("slot2"),
+                        "start_rate": u.get("start_rate")})
     out.sort(key=lambda r: -r["avg_min"])
     return out[:limit]
 
@@ -287,6 +288,14 @@ def player_rows(rotation_list: Sequence[Dict], defense, market: str, cur_table: 
         pri = raw_factor(prior_table, defense, slot) if prior_table else (raw_factor(cur_table, defense, slot)
                                                                           if current_is_prior else None)
         fac = blended_factor(cur, pri, mode)
+        if r.get("slot2"):                      # a double big: half his group's matchup, half the forwards'
+            import position_matchups as PM
+            s2 = r["slot2"]
+            cur2 = None if current_is_prior else raw_factor(cur_table, defense, s2)
+            pri2 = raw_factor(prior_table, defense, s2) if prior_table else (raw_factor(cur_table, defense, s2)
+                                                                             if current_is_prior else None)
+            fac = dict(fac, factor=PM.blend_factor(fac["factor"], blended_factor(cur2, pri2, mode)["factor"]),
+                       basis=fac["basis"] + f" · {slot}/{s2} blend")
         values = b["values"]
         recent_avg = PE.wmean(values, b["w"]) if values else None
         flags: List[str] = []
@@ -506,6 +515,7 @@ def position_factors(players: Iterable[Tuple], cur_pgames, prior_pgames, sport: 
     for stat, market in STAT_MARKET.items():
         tables[stat] = (defense_allowed(cur_allowed, market),
                         defense_allowed(prior_allowed, market) if prior_allowed else None)
+    second = PM.secondary_slots(cur_pgames or prior_pgames or [])
     out: Dict = {}
     for pid, opp in players:
         slot = slots.get(pid)
@@ -516,5 +526,11 @@ def position_factors(players: Iterable[Tuple], cur_pgames, prior_pgames, sport: 
             pri = raw_factor(pri_t, opp, slot) if pri_t else None
             if cur is None and pri is None:
                 continue
-            out[(pid, stat)] = blended_factor(cur, pri, mode)["factor"]
+            f = blended_factor(cur, pri, mode)["factor"]
+            s2 = second.get(pid)
+            if s2 and s2 != slot:                 # a double big (position_matchups.secondary_slots)
+                c2, p2 = raw_factor(cur_t, opp, s2), (raw_factor(pri_t, opp, s2) if pri_t else None)
+                if c2 is not None or p2 is not None:
+                    f = PM.blend_factor(f, blended_factor(c2, p2, mode)["factor"])
+            out[(pid, stat)] = f
     return out
