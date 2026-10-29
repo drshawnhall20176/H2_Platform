@@ -110,6 +110,7 @@ def page(monkeypatch):
         st.cache_data.clear()                                          # the page caches by (sport, date, game)
         monkeypatch.setattr(PD, "load_nfl_log", lambda d: (nfl_log if nfl_log is not None else fake_nfl_log()))
         monkeypatch.setattr(PD, "list_games", lambda s, d: list(glist if glist is not None else games()))
+        monkeypatch.setattr(PD, "depth_charts", lambda s, t: {})          # no live ESPN depth-chart calls in tests
 
         def fake_bundle(sport_key, date_str, game, use_previous=False):
             calls["bundle"].append((sport_key, game["label"], use_previous))
@@ -892,3 +893,43 @@ def test_depth_tab_carries_the_model_matchup_column(page):
     assert not at.exception
     depth = [d.value for d in at.dataframe if "Model matchup" in d.value.columns]
     assert depth
+
+
+# ------------------------------------------------------------------ NBA position breakout (beta)
+def test_breakout_tab_says_so_when_no_depth_charts(page):
+    at = page("NBA", nba_games(), bundle_fn=lambda sport, g: props_bundle(sport))
+    assert not at.exception, [e.value for e in at.exception]
+    assert "No depth charts could be read" in texts(at)
+
+
+def test_breakout_tab_lines_up_each_position_against_the_defense(monkeypatch):
+    import nba_engine
+    chart = {1: {"t1": {"pos": "PG", "rank": 0, "name": "Star Guard"}, "t2": {"pos": "C", "rank": 0, "name": "Bench Big"}},
+             2: {"a1": {"pos": "SF", "rank": 0, "name": "Away Wing"}}}
+    feed = {1: {"depthchart": [{"positions": {"pg": {"athletes": [{"id": "t1", "displayName": "Star Guard"}]},
+                                              "c": {"athletes": [{"id": "t2", "displayName": "Bench Big"}]}}}]},
+            2: {"depthchart": [{"positions": {"sf": {"athletes": [{"id": "a1", "displayName": "Away Wing"}]}}}]}}
+    monkeypatch.setattr(nba_engine, "_get_json_cached",
+                        lambda url, params=None: feed.get(int(url.split("/teams/")[1].split("/")[0])))
+
+    def run():
+        monkeypatch.setattr(PD, "depth_charts", lambda s, t: chart)
+        return AppTest.from_file(PAGE, default_timeout=60)
+    import streamlit as st
+    st.cache_data.clear()
+    monkeypatch.setattr(PD, "list_games", lambda s, d: nba_games())
+    monkeypatch.setattr(PD, "load_bundle", lambda sk, d, g, prev=False: props_bundle(sk))
+    import quick_log
+    monkeypatch.setattr(quick_log, "render_quick_log", lambda *a, **k: None)
+    at = run()
+    at.session_state["sport"] = "NBA"
+    at.session_state["pm_date"] = datetime.date(2026, 10, 11)
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert "Beta. Display only" in texts(at)
+    frames = [d.value for d in at.dataframe if "Starter" in d.value.columns]
+    assert len(frames) == 2
+    away = frames[0]
+    assert list(away["Pos"]) == ["PG", "SG", "SF", "PF", "C"]
+    assert away.loc[away["Pos"] == "SF", "Starter"].iloc[0].startswith("Away Wing")
+    assert frames[1].loc[frames[1]["Pos"] == "PG", "Starter"].iloc[0] == "Star Guard"

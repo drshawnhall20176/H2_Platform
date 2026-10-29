@@ -155,9 +155,13 @@ for note in bundle["notes"]:
     st.caption(f"ℹ️ {note}")
 
 HAS_PROPS = bool(bundle.get("props"))
-tab_pos = tab_props = tab_score = None
+tab_pos = tab_props = tab_score = tab_breakout = None
 if FAMILY == "hockey":
     tab_props, tab_h2h, tab_score = st.tabs(["🎯 Player props", "⚔️ Head-to-head", "📊 Scorecard"])
+elif HAS_PROPS and SPORT_KEY == "NBA":
+    # Position breakout (beta, Oct 29): display only. To back it out, drop it from this list and delete its block below.
+    tab_props, tab_pos, tab_breakout, tab_h2h, tab_score = st.tabs(
+        ["🎯 Player props", "🧭 Depth vs defense", "🧪 Position breakout (beta)", "⚔️ Head-to-head", "📊 Scorecard"])
 elif HAS_PROPS:
     tab_props, tab_pos, tab_h2h, tab_score = st.tabs(["🎯 Player props", "🧭 Depth vs defense", "⚔️ Head-to-head",
                                                       "📊 Scorecard"])
@@ -1028,6 +1032,30 @@ if tab_pos is not None:
         render_side(bundle["home_off"], home_name, away_name)
         st.divider()
         render_game_log()
+
+if tab_breakout is not None:
+    with tab_breakout:
+        # ---- Position breakout (beta) -- self-contained; nothing else on the platform reads it.
+        try:
+            import nba_positions as NPOS
+            import sports as _sports
+            with st.spinner("Reading every team's depth chart..."):
+                brk = NPOS.build(bundle, _sports.get("NBA").engine)
+        except Exception as exc:                                   # noqa: BLE001
+            brk = None
+            st.warning(f"The position breakout couldn't be built ({type(exc).__name__}). The other tabs are unaffected.")
+        if not brk:
+            st.info("No depth charts could be read right now. Use the 🧭 Depth vs defense tab.")
+        else:
+            st.caption("**Beta. Display only:** these numbers don't feed projections, Use tags or other pages. Each starter is "
+                       "read against what this defense has allowed to **his exact position** (PG / SG / SF / PF / C), "
+                       "ranked across the league (1 = softest). Past games are labelled from every team's current ESPN "
+                       f"depth chart ({brk['labelled']} players across {brk['teams_charted']} teams); players on no "
+                       "chart are left out of the five-position totals. **Group vs league** is the G/F/C number the "
+                       "model uses today; **Blended** pulls the position number toward it until the sample grows.")
+            for side, off, de in (("away_off", away_name, home_name), ("home_off", home_name, away_name)):
+                st.markdown(f"**{off} offense vs {de} defense**")
+                st.dataframe(pd.DataFrame(NPOS.display(brk[side])), hide_index=True, width="stretch")
 
 with tab_h2h:
     h = bundle["h2h"]
