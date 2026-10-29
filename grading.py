@@ -717,7 +717,8 @@ def build_parlay_leg_pool(plays: List[Dict], max_per_game: int = 2, max_per_mark
     # PARLAY_MIN_CUSHION and carry no warning (news check, returning player, blowout risk) -- the Oct 28 tickets lost
     # on legs within ~10% of their numbers. Plays without the field (other sports' models) are unaffected.
     graded = [p for p in graded if not p.get("Warnings")
-              and (p.get("Cushion") is None or p["Cushion"] >= PARLAY_MIN_CUSHION)]
+              and (p.get("Cushion") is None or p["Cushion"] >= PARLAY_MIN_CUSHION)
+              and (p.get("Use") is None or str(p["Use"]).startswith("🎟️"))]       # parlay-tagged plays only
 
     key_fn = sort_key if sort_key is not None else (lambda p: p.get("Conviction", 0.0))
     graded.sort(key=key_fn, reverse=True)

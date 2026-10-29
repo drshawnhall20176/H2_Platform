@@ -240,8 +240,15 @@ if not mkt_pick:
     st.info("Select at least one market above to see plays.")
     st.stop()
 
+_USE_FILTER = {"All playable": ("🎟️ Parlay + Single", "🎟️ Parlay leg", "🎯 Single only"),
+               "Singles": ("🎟️ Parlay + Single", "🎯 Single only"),
+               "Parlay legs": ("🎟️ Parlay + Single", "🎟️ Parlay leg")}
+_use_pick = (st.radio("Show", list(_USE_FILTER), horizontal=True, key="bb_use_filter",
+                      help="🎟️ Parlay legs: 15%+ cushion, 60%+ to hit, a positive edge, no warnings. 🎯 Singles: a real "
+                           "edge (+3% at the price) — some are too close to the number to chain into a parlay.")
+             if _props_model else "All playable")
 view = [p for p in slot_plays if p["Market"] in mkt_pick and p["Conviction"] >= min_conv
-        and (not _props_model or (p.get("Lean") in ("Over", "Under") and p["Conviction"] > 1.0))]
+        and (not _props_model or p.get("Use") in _USE_FILTER[_use_pick])]
 _held = [p for p in slot_plays if p["Market"] in mkt_pick and p.get("Lean") == "Check news"]
 view = grading.filter_min_probability(view, min_prob_pct / 100.0)
 # A REAL, CONFIRMED FIX, not the original design -- re-sorted here by ModelProb (real
@@ -303,7 +310,9 @@ for p in view:
     # shown alongside it was ALWAYS the model's own theoretical number (Fair), with zero attempt
     # to check for a real captured price at that same real line. "📊 -140" is a real DraftKings
     # price; a plain "+138" with no marker is still the model's own independent estimate.
-    if p.get("PriceSource") == "book" and p.get("RealPrice") is not None:
+    if p.get("Pickem"):
+        p["_display_price"] = f"📊 {BBD.O.book_label(p.get('PricedAt'))} (multiplier)"
+    elif p.get("PriceSource") == "book" and p.get("RealPrice") is not None:
         p["_display_price"] = f"📊 {p['RealPrice']:+.0f}"
         _bk = p.get("RealPriceBook")
         if _props_model and _bk and preferred_book not in (None, "best") and _bk != preferred_book:
@@ -321,6 +330,7 @@ if _props_model:
         p["_cushion"] = BBD_PE.cushion_text(p.get("Cushion"))
         p["_warn"] = " · ".join(p.get("Warnings") or []) or "—"
     _cols.insert(_cols.index("_display_line") + 1, "_cushion")
+    _cols.insert(_cols.index("_cushion") + 1, "Use")
     _cols.append("_warn")
     _rename.update({"_cushion": "Cushion", "_warn": "Warnings"})
 if _show_blowout_risk:

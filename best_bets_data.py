@@ -171,10 +171,11 @@ def render_book_selector(key_prefix: str = "book",
         book_labels,
         index=default_idx,
         key=f"{key_prefix}_book_selector",
-        help=f"Lines and model probabilities will use this book's specific line where available. "
-            f"{len(books_to_show)} book(s) active on tonight's slate. "
-            "Falls back to the lowest available line across all books when your selected "
-            "book doesn't have coverage for a specific player."
+        help=f"Lines and model probabilities use this book's line where it posts the player. "
+            f"{len(books_to_show)} book(s) active on tonight's slate. When it doesn't, NBA plays try "
+            "DraftKings, then FanDuel (the book that priced it is shown beside the price). DK Pick6 / PrizePicks "
+            "show the app's line with no odds — only 🎟️ parlay-tagged picks qualify, measured against the "
+            "entry's payout."
     )
     return books_to_show[book_labels.index(selected_label)]
 

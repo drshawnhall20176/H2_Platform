@@ -99,8 +99,8 @@ def test_gap_plays_are_listed_tagged_and_logged_with_the_tag():
     view = PE.display_compact([row])[0]
     assert view["Lean"] == "⚠️ Check news" and view["Notes"].startswith("⚠️ Market disagrees")
     play = PE.plays_for_log([row], "Points", "MIA @ ATL")[0]
-    assert play["Notes"] == PE.GAP_TAG
-    assert quick_log.bet_log_fields_from_play(play, "2026-10-28", "NBA")["notes"] == PE.GAP_TAG
+    assert PE.has_tag(play["Notes"], PE.GAP_TAG) and PE.has_tag(play["Notes"], "use:pass")
+    assert PE.has_tag(quick_log.bet_log_fields_from_play(play, "2026-10-28", "NBA")["notes"], PE.GAP_TAG)
     assert PE.best_reads([row], {}) == []                       # never in "best reads" until the news is checked
 
 
@@ -193,7 +193,7 @@ def test_a_low_count_gap_is_not_held_for_news_but_needs_more_value():
            "p_final": r["p_final"], "lean": r["lean"], "gap": r["gap"], "gap_pct": r["gap_pct"], "ev": r["ev"],
            "over_price": -105, "under_price": -115, "price_src": "book", "flags": []}
     assert "low count" in PE.market_gaps([row], {1: "T"})[0]["Why flagged"]
-    assert PE.plays_for_log([row], "Rebounds", "X @ Y")[0]["Notes"] == PE.GAP_TAG if r["lean"] == "Over" else True
+    assert PE.has_tag(PE.plays_for_log([row], "Rebounds", "X @ Y")[0]["Notes"], PE.GAP_TAG) if r["lean"] == "Over" else True
     # a points-sized line with the same gap is still held for news
     assert PE.read_line(18.2, [21, 22, 18, 11, 12], 11.5, "normal", over_price=-114,
                         under_price=-104)["lean"] == "Check news"

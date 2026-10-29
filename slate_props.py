@@ -155,15 +155,19 @@ def play_from_row(row: Dict, slate_row: Optional[Dict] = None) -> Optional[Dict]
     p_mkt = sp["p_market"]
     lean = row.get("lean")
     price = row.get("over_price") if side == "Over" else row.get("under_price")
-    # Graded only with a real sportsbook price for that side: without one there's no market to blend with, so the
-    # probability is the raw model's and can't be ranked against priced plays (pick'em-only lines stay on
-    # Position Matchups, unranked here).
-    leaning = lean in ("Over", "Under") and lean == side and price is not None
-    if leaning and p_mkt and sp["p_model"] is not None and p_mkt > 0:
+    bk = row.get("book") or {}
+    if bk.get("missing_book") and bk.get("wanted") in PE.PICKEM_BOOKS:
+        return None                      # pricing at Pick6 / PrizePicks: a player the app doesn't post isn't a pick
+    # What the play is fit for (props_engine.use_tag): only playable ones get a Conviction (and so a grade). A
+    # sportsbook play needs a real price for that side; a pick'em play is measured against the entry break-even.
+    use, use_why = PE.use_tag(row, side, row["line"])
+    playable = use in (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE)
+    if playable and bk.get("pickem"):
+        conviction = round(max(p_final / PE.PICKEM_BREAKEVEN, 1.0), 2)
+    elif playable and price is not None and p_mkt and sp["p_model"] is not None and p_mkt > 0:
         conviction = round(max(sp["p_model"] / p_mkt, 1.0), 2)
     else:
         conviction = 1.0
-    bk = row.get("book") or {}
     best = bk.get("best_over") if side == "Over" else bk.get("best_under")
     s = slate_row or {}
     return {
@@ -179,7 +183,9 @@ def play_from_row(row: Dict, slate_row: Optional[Dict] = None) -> Optional[Dict]
         "Lean": lean, "EV": row.get("ev"), "Gap": row.get("gap"), "GapPct": row.get("gap_pct"),
         "Cushion": PE.cushion(row.get("projection"), row["line"], side),
         "Warnings": [w for w in PE.leg_warnings(row, side, row["line"]) if not w.startswith("thin cushion")],
-        "Notes": PE.GAP_TAG if row.get("gap") in ("big", "big-low-count") or row.get("gap_from") else None,
+        "Use": use, "UseWhy": use_why, "Pickem": bk.get("pickem", False), "PricedAt": bk.get("book"),
+        "Notes": ",".join(([PE.GAP_TAG] if row.get("gap") in ("big", "big-low-count") or row.get("gap_from") else [])
+                          + ([f"use:{PE.USE_KEY[use]}"] if use in PE.USE_KEY else [])) or None,
         "Why": why(row), "Model": "player-props",
         "PriorGames": row.get("games", 0) - row.get("season_games", 0) if row.get("filled") else 0,
         "PreseasonGames": 0,

@@ -114,7 +114,8 @@ def test_a_line_far_from_the_projection_is_held_for_news_on_every_page():
     row = reads[(7, "player_points")]
     assert row["gap"] == "big"
     p = SP.play_from_row(row, None)
-    assert p["Lean"] in ("Check news", "No lean") and p["Conviction"] == 1.0 and p["Notes"] == PE.GAP_TAG
+    assert p["Lean"] in ("Check news", "No lean") and p["Conviction"] == 1.0 and PE.has_tag(p["Notes"], PE.GAP_TAG)
+    assert p["Use"] == PE.USE_PASS
     assert p["Why"].startswith("⚠️")
 
 
@@ -205,8 +206,8 @@ def _page_board():
         p["TeamTrend"] = "➡️ Steady"                    # attach_team_trend's column (the real loader adds it)
         plays.append(p)
     # make the first one a lean whatever the toy numbers say, so the board has a row to show
-    plays[0].update(Lean=plays[0]["Side"], Conviction=1.3)
-    plays[1].update(Lean="Check news", Conviction=1.0)
+    plays[0].update(Lean=plays[0]["Side"], Conviction=1.3, Use=PE.USE_BOTH)
+    plays[1].update(Lean="Check news", Conviction=1.0, Use=PE.USE_PASS)
     return plays, [game]
 
 
@@ -242,10 +243,13 @@ def test_a_player_your_book_skips_is_priced_at_the_best_book_elsewhere():
                "over": {"fanduel": 140, "betmgm": 130}, "under": {"fanduel": -180, "betmgm": -170}}]
     b = PE.shop(offers, book="draftkings")
     assert b["missing_book"] and b["line"] == 2.5
-    assert b["best_over"] == ("fanduel", 140) and b["best_under"] == ("betmgm", -170)
+    # DraftKings first, then FanDuel (Oct 29 book order): FanDuel posts him, so both sides come from FanDuel
+    assert b["best_over"] == ("fanduel", 140) and b["best_under"] == ("fanduel", -180) and b["book"] == "fanduel"
+    anywhere = PE.shop(offers, book=["draftkings"])                       # an explicit one-book order: best anywhere
+    assert anywhere["best_under"] == ("betmgm", -170)
     row = {"pid": 1, "player": "Duncan Robinson", "slot": "F", "out": False, "line": 2.5, "projection": 1.2,
            "side": "Under", "p_final": 0.3, "lean": "Under", "ev": 0.05, "over_price": 140, "under_price": -170,
-           "price_src": "book", "book": b, "flags": []}
+           "price_src": "book", "book": anywhere, "flags": []}
     note = PE.display_compact([row])[0]["Notes"]
     assert "not posted at draftkings — priced at betmgm, fanduel" in note
 

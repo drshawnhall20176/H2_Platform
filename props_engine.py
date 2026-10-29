@@ -298,23 +298,44 @@ def _book_count(o: Dict) -> int:
     return len(set(o.get("over") or {}) | set(o.get("under") or {}))
 
 
-def shop(player_offers: Sequence[Dict], line: Optional[float] = None, book: Optional[str] = None) -> Optional[Dict]:
+PICKEM_BOOKS = ("prizepicks", "pick6")        # = odds_api.PICKEM_BOOKS: a line and a payout multiplier, no odds
+BOOK_PRIORITY = ("draftkings", "fanduel")      # Oct 29: your book first, then the next one that posts the player
+
+
+def book_order(selected) -> Optional[List[str]]:
+    """The books to try, in order, for a "Price at" choice: None / "best" -> no preference (best price anywhere);
+    "priority" -> BOOK_PRIORITY; a sportsbook -> it, then the rest of BOOK_PRIORITY; a pick'em app -> only it."""
+    if selected in (None, "best"):
+        return None
+    if selected == "priority":
+        return list(BOOK_PRIORITY)
+    if isinstance(selected, (list, tuple)):
+        return [b for b in selected if b]
+    if selected in PICKEM_BOOKS:
+        return [selected]
+    return [selected] + [b for b in BOOK_PRIORITY if b != selected]
+
+
+def shop(player_offers: Sequence[Dict], line: Optional[float] = None, book=None) -> Optional[Dict]:
     """The books' read on one player market. Without `line`: the MAIN line (posted by the most books, then the
     most balanced). With `line`: that exact line, or None when no book posts it.
 
-    `book` (e.g. "draftkings"): price everything AT THAT BOOK -- its own line (its most balanced one when it
-    posts several) and its own over / under prices. The no-vig probability stays the all-books consensus at that
-    line (the sharpest read of the market). When the book doesn't post this player, the consensus line is priced
-    at the best available book instead (so the market blend and EV still apply, and the page says where), with
-    "missing_book": True.
+    `book`: a book key ("draftkings"), an ORDER of books (["draftkings", "fanduel"] -- see book_order), or None
+    for the best price anywhere. The line and prices come from the first book in the order that posts the
+    player (its most balanced line when it posts several); when none does, the consensus line at the best
+    price anywhere, with "missing_book": True. A pick'em app ("pick6", "prizepicks") gives its LINE and no odds
+    ("pickem": True) -- it pays a multiplier per entry, not a price per pick. The no-vig probability is always
+    the sportsbooks' consensus at that line.
 
-    {"line", "best_over": (book, price) | None, "best_under": ..., "p_market": no-vig consensus P(over)
-     (each book de-vigged, then averaged), "books": count, "book": book | None, "missing_book": bool}"""
+    {"line", "best_over": (book, price) | None, "best_under": ..., "p_market", "books": count, "book": the book
+     used | None, "wanted": your first choice | None, "missing_book": bool, "pickem": bool}"""
     pool = list(player_offers or [])
     if line is not None:
         pool = [o for o in pool if maybe(o.get("point")) is not None and abs(float(o["point"]) - float(line)) < 1e-9]
     if not pool:
         return None
+    prefs = book_order(book) if not isinstance(book, (list, tuple)) else [b for b in book if b]
+    prefs = prefs or []
 
     def balance(o, only=None):
         ov, un = o.get("over") or {}, o.get("under") or {}
@@ -324,26 +345,37 @@ def shop(player_offers: Sequence[Dict], line: Optional[float] = None, book: Opti
         p = market_prob(bo_[1] if bo_ else None, bu_[1] if bu_ else None)
         return -abs((p if p is not None else 0.0) - 0.5)
 
-    at_book = [o for o in pool if book and (book in (o.get("over") or {}) or book in (o.get("under") or {}))]
-    if at_book:
-        o = max(at_book, key=lambda x: balance(x, book))
-    else:
-        o = max(pool, key=lambda x: (_book_count(x), balance(x)))
-    over, under = o.get("over") or {}, o.get("under") or {}
-    per_book = [devig(over[b], under[b]) for b in set(over) & set(under)]
-    per_book = [p for p in per_book if p is not None]
-    if book and at_book:
-        bo = (book, over[book]) if book in over else None
-        bu = (book, under[book]) if book in under else None
-    else:                       # no book chosen, or your book doesn't post him: the best price anywhere
-        bo, bu = best_price(over), best_price(under)
-    if per_book:
-        p_mkt = sum(per_book) / len(per_book)
-    else:
+    def consensus(o):
+        over, under = o.get("over") or {}, o.get("under") or {}
+        per_book = [devig(over[b], under[b]) for b in set(over) & set(under)]
+        per_book = [p for p in per_book if p is not None]
+        if per_book:
+            return sum(per_book) / len(per_book)
         b_o, b_u = best_price(over), best_price(under)
-        p_mkt = market_prob(b_o[1] if b_o else None, b_u[1] if b_u else None)
-    return {"line": float(o["point"]), "best_over": bo, "best_under": bu, "p_market": p_mkt,
-            "books": _book_count(o), "book": book, "missing_book": bool(book) and not at_book}
+        return market_prob(b_o[1] if b_o else None, b_u[1] if b_u else None)
+
+    wanted = prefs[0] if prefs else None
+    for i, b in enumerate(prefs):
+        if b in PICKEM_BOOKS:
+            at = [o for o in pool if b in (o.get("pickem") or {})]
+            if at:
+                o = max(at, key=lambda x: (_book_count(x), balance(x)))
+                return {"line": float(o["point"]), "best_over": None, "best_under": None, "p_market": consensus(o),
+                        "books": _book_count(o), "book": b, "wanted": wanted, "missing_book": i > 0, "pickem": True}
+            continue
+        at = [o for o in pool if b in (o.get("over") or {}) or b in (o.get("under") or {})]
+        if at:
+            o = max(at, key=lambda x: balance(x, b))
+            over, under = o.get("over") or {}, o.get("under") or {}
+            return {"line": float(o["point"]), "best_over": (b, over[b]) if b in over else None,
+                    "best_under": (b, under[b]) if b in under else None, "p_market": consensus(o),
+                    "books": _book_count(o), "book": b, "wanted": wanted, "missing_book": i > 0, "pickem": False}
+    priced = [o for o in pool if o.get("over") or o.get("under")]
+    o = max(priced or pool, key=lambda x: (_book_count(x), balance(x)))
+    over, under = o.get("over") or {}, o.get("under") or {}
+    return {"line": float(o["point"]), "best_over": best_price(over), "best_under": best_price(under),
+            "p_market": consensus(o), "books": _book_count(o), "book": None if prefs else None, "wanted": wanted,
+            "missing_book": bool(prefs), "pickem": False}
 
 
 # --------------------------------------------------------------------------- 4b. the game environment
@@ -621,8 +653,12 @@ def plays_for_log(rows: Sequence[Dict], market: str, game_label: str) -> List[Di
         p = r["p_final"] if side == "Over" else 1 - r["p_final"]
         play = {"Player": r["player"], "PlayerId": r.get("pid"), "Game": game_label, "Market": market,
                 "Side": side, "Line": r["line"], "ModelProb": round(p, 4), "Fair": american(p)}
-        if r.get("gap") in ("big", "big-low-count"):
-            play["Notes"] = GAP_TAG
+        tags = [GAP_TAG] if r.get("gap") in ("big", "big-low-count") else []
+        tag = use_tag(r, side, r["line"])[0]
+        if tag in USE_KEY:
+            tags.append(f"use:{USE_KEY[tag]}")              # the Scorecard grades each tag
+        if tags:
+            play["Notes"] = ",".join(tags)
         price = r.get("over_price") if side == "Over" else r.get("under_price")
         if price is not None:
             play.update(RealPrice=price, PriceSource=r.get("price_src") or "manual")
@@ -767,9 +803,11 @@ def display_compact(rows: Sequence[Dict], details: bool = False, opp_label: str 
             lean = LEAN_ICON.get(r.get("lean"), "—") if r.get("lean") != "No lean" else "⚪ No edge"
         flags = list(r.get("flags") or [])
         bk = r.get("book") or {}
+        if bk.get("pickem"):
+            flags.insert(0, f"{bk.get('book')} line — pays a multiplier per entry, no odds")
         if bk.get("missing_book"):
             where = sorted({b for b in (x[0] for x in (bk.get("best_over"), bk.get("best_under")) if x)})
-            flags.insert(0, f"not posted at {bk.get('book')}"
+            flags.insert(0, f"not posted at {bk.get('wanted') or bk.get('book')}"
                          + (f" — priced at {', '.join(where)}" if where else " — no sportsbook price"))
         if r.get("gap_from"):
             flags.insert(0, f"⚠️ {r['gap_from']} — check minutes / role / injury news")
@@ -784,6 +822,7 @@ def display_compact(rows: Sequence[Dict], details: bool = False, opp_label: str 
                "Pick": pick,
                "Chance": "—" if chance is None else f"{chance:.0%}",
                "Cushion": cushion_text(cushion(r.get("projection"), line, side)) if not r.get("out") else "—",
+               "Use": use_tag(r)[0],
                "Milestones": ladder_text(r, market) if not r.get("out") else "—",
                "Price": ("—" if price is None else f"{price:+.0f}" + (f" {best[0]}" if best and best[1] == price else "")),
                "Edge": "—" if r.get("ev") is None else f"{r['ev']:+.1%}",
@@ -892,6 +931,80 @@ def cushion_text(c: Optional[float]) -> str:
     return f"{c:+.0%}" + (" ⚠️" if c < CUSHION_MIN else "")
 
 
+# --------------------------------------------------------------------------- what a play is fit for (Oct 29)
+# Cushion says how SAFE a leg is (how wrong the model can be and still win) -- what a parlay needs, since every leg
+# must hit. Edge says whether the PRICE pays enough -- what a single needs. A parlay leg also needs a positive edge:
+# a parlay's value compounds, so legs without one compound the book's cut instead.
+USE_BOTH, USE_PARLAY, USE_SINGLE, USE_PASS = "🎟️ Parlay + Single", "🎟️ Parlay leg", "🎯 Single only", "⛔ Pass"
+USE_KEY = {USE_BOTH: "both", USE_PARLAY: "parlay", USE_SINGLE: "single", USE_PASS: "pass"}
+PARLAY_MIN_CHANCE = 0.60          # each parlay leg 60%+ to hit ...
+MILESTONE_PARLAY_CHANCE = 0.70    # ... a model-only milestone leg 70%+ (no market check on it)
+PICKEM_BREAKEVEN = 3.0 ** -0.5    # a 2-pick entry paying 3x needs ~57.7% a pick; the ticket builder uses yours
+
+
+def is_parlay_use(tag: Optional[str]) -> bool:
+    return tag in (USE_BOTH, USE_PARLAY)
+
+
+def use_tag(row: Dict, side: Optional[str] = None, line: Optional[float] = None, p: Optional[float] = None,
+            ev=..., milestone: bool = False) -> Tuple[str, str]:
+    """(tag, reason): 🎟️ Parlay + Single / 🎟️ Parlay leg / 🎯 Single only / ⛔ Pass / "—" for one play.
+
+    Parlay leg: cushion CUSHION_MIN+, chance PARLAY_MIN_CHANCE+ (MILESTONE_PARLAY_CHANCE for a model-only "N+"),
+      a positive edge at the price (pick'em: the chance clears PICKEM_BREAKEVEN), no warnings.
+    Single: a real lean -- MIN_EV+ at a real price, the model on that side (pick'em apps have no singles).
+    Pass: a warning (news check, missed last game, blowout risk), the projection on the other side, or neither."""
+    side = side or row.get("side")
+    line = row.get("line") if line is None else line
+    if row.get("out") or line is None or side not in ("Over", "Under") or row.get("projection") is None:
+        return "—", "no line"
+    if p is None:
+        p = _side_prob(row) if side == row.get("side") else (None if row.get("p_final") is None else
+                                                               (row["p_final"] if side == "Over" else 1 - row["p_final"]))
+    if milestone:
+        ev = None                                   # an "N+" rung has no market price of its own
+    elif ev is ...:
+        ev = row.get("ev") if side == row.get("side") else None
+    pickem = bool((row.get("book") or {}).get("pickem"))
+    warns = [w for w in leg_warnings(row, side, line) if not w.startswith("thin cushion")]
+    if warns:
+        return USE_PASS, "; ".join(warns)
+    c = cushion(row.get("projection"), line, side)
+    if c is None or c < 0:
+        return USE_PASS, "projection on the other side of the number"
+    need = MILESTONE_PARLAY_CHANCE if milestone else PARLAY_MIN_CHANCE
+    if pickem:
+        value_ok = p is not None and p >= PICKEM_BREAKEVEN
+    else:
+        value_ok = ev is None if milestone else (ev is not None and ev > 0)
+    parlay = c >= CUSHION_MIN and p is not None and p >= need and value_ok
+    single = (not milestone and not pickem and row.get("lean") == side and ev is not None and ev >= MIN_EV)
+    bits = [f"cushion {c:+.0%}"] + ([f"chance {p:.0%}"] if p is not None else []) + \
+           ([f"edge {ev:+.1%}"] if ev is not None else (["model-only milestone"] if milestone else []))
+    if parlay and single:
+        return USE_BOTH, ", ".join(bits)
+    if parlay:
+        return USE_PARLAY, ", ".join(bits) + ("" if pickem or milestone else " — edge under +3%, not enough alone")
+    if single:
+        return USE_SINGLE, ", ".join(bits) + " — too close to the number to chain"
+    why = []
+    if c < CUSHION_MIN:
+        why.append("thin cushion")
+    if p is not None and p < need:
+        why.append(f"chance under {need:.0%}")
+    if not value_ok:
+        why.append("below the pick'em break-even" if pickem else "no edge at this price")
+    return USE_PASS, ", ".join(bits) + (" — " + ", ".join(why) if why else "")
+
+
+def note_tags(notes) -> List[str]:
+    return [t.strip() for t in str(notes or "").split(",") if t.strip()]
+
+
+def has_tag(notes, tag: str) -> bool:
+    return tag in note_tags(notes)
+
+
 def best_reads(rows: Sequence[Dict], team_of: Dict, limit: int = 6) -> List[Dict]:
     """The game's strongest leans across both teams: real leans first by edge, then the most likely sides."""
     leans = [r for r in rows if r.get("lean") in ("Over", "Under")]
@@ -902,6 +1015,7 @@ def best_reads(rows: Sequence[Dict], team_of: Dict, limit: int = 6) -> List[Dict
         out.append({"Player": r["player"], "Team": team_of.get(r.get("pid"), ""),
                     "Pick": f"{r['side']} {r['line']:g}", "Chance": f"{_side_prob(r):.0%}",
                     "Cushion": cushion_text(cushion(r.get("projection"), r.get("line"), r.get("side"))),
+                    "Use": use_tag(r)[0],
                     "Price": "—" if price is None else f"{price:+.0f}",
                     "Edge": "—" if r.get("ev") is None else f"{r['ev']:+.1%}",
                     "Why": " · ".join([f"projects {r['projection']:.1f}"] + list((r.get("flags") or [])[:2]))})

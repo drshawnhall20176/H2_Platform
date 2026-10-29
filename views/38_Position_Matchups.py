@@ -559,16 +559,24 @@ def render_game_context(market: str) -> dict:
                             + _rest_text(home_name, _rest_days(bundle["home"])))
             else:
                 st.caption("Football is weekly — rest isn't a factor; the spread drives run/pass game script.")
-        _books = [b for b in O.books_in_offers(got.get("offers") or []) if b in O.US_BOOKS]
-        _book_opts = ["best"] + _books
-        _pref = st.session_state.get("pm_price_book", O.DEFAULT_BOOK)
+        _live = O.books_in_offers(got.get("offers") or [])
+        _books = [b for b in _live if b in O.US_BOOKS]
+        _pick = [b for b in _live if b in O.PICKEM_BOOKS]
+        _order_label = " → ".join(O.book_label(b) for b in PE.BOOK_PRIORITY)
+        _book_opts = ["priority"] + _books + _pick + ["best"]
+        _pref = st.session_state.get("pm_price_book", "priority")
         price_book = st.selectbox(
             "Price at", _book_opts, key="pm_price_book",
-            index=_book_opts.index(_pref) if _pref in _book_opts else (_book_opts.index(O.DEFAULT_BOOK)
-                                                                      if O.DEFAULT_BOOK in _book_opts else 0),
-            format_func=lambda b: "Best available (any book)" if b == "best" else O.book_label(b),
-            help="Whose line and prices to use. Your book (DraftKings by default) shows the number you can actually "
-                 "bet; the probability still leans on every book's consensus.")
+            index=_book_opts.index(_pref) if _pref in _book_opts else 0,
+            format_func=lambda b: (f"My books ({_order_label})" if b == "priority" else
+                                   "Best available (any book)" if b == "best" else
+                                   f"{O.book_label(b)} — pick'em (line only, pays a multiplier)" if b in O.PICKEM_BOOKS
+                                   else O.book_label(b) + f", then {O.book_label(next((x for x in PE.BOOK_PRIORITY if x != b), b))}"),
+            help=f"Whose line and prices to use. **My books** tries {_order_label} in that order and says which one "
+                 "priced each player (some sports — college football — have no DraftKings props). A pick'em app "
+                 "(DK Pick6) shows its line with no odds: picks are measured against the entry's payout instead, "
+                 "and only 🎟️ parlay-tagged picks qualify. The probability always leans on every sportsbook's "
+                 "consensus.")
         k1, k2 = st.columns(2)
         fitted = (st.session_state.get("pm_slope") or {}).get((SPORT_KEY, market))
         with k1:
@@ -588,7 +596,7 @@ def render_game_context(market: str) -> dict:
                    + (" — favored side runs more, underdog throws more." if PFAM == "football" else "."))
     return {"spread_home": spread, "total": total, "implied": implied, "offers": got.get("offers"),
             "slope": fitted if (use_cal and fitted) else 1.0, "model_weight": w,
-            "book": None if price_book == "best" else price_book}
+            "book": PE.book_order(price_book)}
 
 
 def render_props_team(team, opp, off_name, def_name, market, mode, tables, g):
@@ -670,12 +678,14 @@ def render_props_team(team, opp, off_name, def_name, market, mode, tables, g):
     return rows
 
 
-def _ticket_leg(r, side, line, p, market, label):
-    """One ticket leg from a props row: the chance of that side, the cushion and anything that makes it risky."""
+def _ticket_leg(r, side, line, p, market, label, milestone=False):
+    """One ticket leg from a props row: the chance of that side, the cushion, what it's fit for and anything that
+    makes it risky."""
     c = PE.cushion(r.get("projection"), line, side)
+    use, why = PE.use_tag(r, side, line, p=p, ev=None if milestone else ..., milestone=milestone)
     return {"label": label, "player": r["player"], "game": game_label, "side": side, "market": market,
-            "line": line, "p": p, "projection": r.get("projection"), "cushion": c,
-            "warnings": PE.leg_warnings(r, side, line)}
+            "line": line, "p": p, "projection": r.get("projection"), "cushion": c, "use": use, "use_why": why,
+            "pickem": bool((r.get("book") or {}).get("pickem")), "warnings": PE.leg_warnings(r, side, line)}
 
 
 def render_ticket(all_rows, market):
@@ -687,10 +697,11 @@ def render_ticket(all_rows, market):
     n_games = len({l["game"] for l in legs})
     with st.expander(f"🎟️ Ticket builder — {len(legs)} leg{'s' if len(legs) != 1 else ''}"
                      + (f" from {n_games} game{'s' if n_games != 1 else ''}" if legs else "")):
-        safe = st.toggle(f"Only suggest legs with a {PE.CUSHION_MIN:.0%}+ cushion and no warnings", value=True,
-                         key="pm_tk_safe",
-                         help="Cushion = how far the projection sits past the number. On Oct 28, legs with a big "
-                              "cushion hit; legs within ~10% of the number were coin flips.")
+        safe = st.toggle("Only suggest 🎟️ parlay-tagged legs", value=True, key="pm_tk_safe",
+                         help=f"A parlay leg: {PE.CUSHION_MIN:.0%}+ cushion (how far the projection sits past the "
+                              f"number), {PE.PARLAY_MIN_CHANCE:.0%}+ to hit ({PE.MILESTONE_PARLAY_CHANCE:.0%}+ for a "
+                              "model-only milestone), a positive edge at the price and no warnings. On Oct 28, legs "
+                              "within ~10% of their number were coin flips.")
         cands = {}
         for r in all_rows:
             if r.get("out") or r.get("projection") is None:
@@ -702,9 +713,10 @@ def render_ticket(all_rows, market):
                 cands[lab] = _ticket_leg(r, side, r["line"], p, market, f"{r['player']} {side} {r['line']:g} {market}")
             for n, p in PE.ladder(r, market):
                 lab = f"{r['player']} {n:g}+ {market} — milestone ({p:.0%})"
-                cands[lab] = _ticket_leg(r, "Over", float(n), p, market, f"{r['player']} {n:g}+ {market}")
+                cands[lab] = _ticket_leg(r, "Over", float(n), p, market, f"{r['player']} {n:g}+ {market}",
+                                         milestone=True)
         if safe:
-            cands = {k: v for k, v in cands.items() if not v["warnings"]}
+            cands = {k: v for k, v in cands.items() if PE.is_parlay_use(v["use"])}
         a1, a2 = st.columns([4, 1])
         with a1:
             pick = st.multiselect("Add legs (switch markets or games and keep adding — the ticket stays)", list(cands),
@@ -723,16 +735,30 @@ def render_ticket(all_rows, market):
         st.dataframe(pd.DataFrame([{
             "Leg": l["label"], "Game": l["game"], "Chance": f"{l['p']:.0%}",
             "Projection": "—" if l.get("projection") is None else f"{l['projection']:.1f}",
-            "Cushion": PE.cushion_text(l.get("cushion")),
+            "Cushion": PE.cushion_text(l.get("cushion")), "Use": l.get("use", "—"),
             "Warnings": " · ".join(l.get("warnings") or []) or "—"} for l in legs]), hide_index=True, width="stretch")
+        not_parlay = [l for l in legs if not PE.is_parlay_use(l.get("use"))]
+        if not_parlay and len(legs) > 1:
+            st.info(f"{len(not_parlay)} leg(s) aren't parlay-tagged: "
+                    + "; ".join(f"{l['label']} ({l.get('use')}: {l.get('use_why')})" for l in not_parlay))
         risky = [l for l in legs if l.get("warnings")]
         if risky:
             st.warning(f"{len(risky)} of {len(legs)} legs carry a warning: "
                        + "; ".join(f"{l['label']} ({', '.join(l['warnings'])})" for l in risky))
         p1, p2 = st.columns([1, 3])
         with p1:
-            price = st.number_input("Book's price for the ticket", value=None, step=5.0, format="%+.0f",
-                                    key="pm_tk_price", help="The American odds your book offers (+1784).")
+            mode = st.radio("Entry", ["Sportsbook parlay", "Pick6 entry"], key="pm_tk_mode",
+                            index=1 if legs and all(l.get("pickem") for l in legs) else 0,
+                            help="Pick6 pays a fixed multiplier for the whole entry instead of American odds.")
+            if mode == "Pick6 entry":
+                mult = st.number_input("Payout multiplier", value=3.0, min_value=1.1, step=0.5, format="%.1f",
+                                       key="pm_tk_mult", help="What the entry pays if every pick hits (3.0 = 3x).")
+                price = PE.american(1.0 / mult) if mult else None
+                st.caption(f"Break-even: {(1.0 / mult) ** (1.0 / len(legs)):.1%} a pick "
+                           f"({1.0 / mult:.1%} for all {len(legs)})." if mult else "")
+            else:
+                price = st.number_input("Book's price for the ticket", value=None, step=5.0, format="%+.0f",
+                                        key="pm_tk_price", help="The American odds your book offers (+1784).")
         if len(legs) == 1:
             with p2:
                 st.metric("Hit chance", f"{legs[0]['p']:.1%}")
@@ -889,7 +915,22 @@ def render_logged_props(markets) -> None:
     m3.metric("Avg CLV", "—" if clv.get("avg_clv") is None else f"{clv['avg_clv']:+.1f}%",
               help=f"{clv.get('n_book', 0)} book-captured + {clv.get('n_manual', 0)} hand-typed prices.")
     m4.metric("Beat the close", "—" if clv.get("beat_close_rate") is None else f"{clv['beat_close_rate']:.0f}%")
-    gap_bets = [b for b in bets if (b.get("notes") or "") == PE.GAP_TAG]
+    use_rows = []
+    for key, label in (("both", PE.USE_BOTH), ("parlay", PE.USE_PARLAY), ("single", PE.USE_SINGLE), ("pass", PE.USE_PASS)):
+        grp = [b for b in bets if PE.has_tag(b.get("notes"), f"use:{key}")]
+        if grp:
+            sm = B.summary(grp)
+            use_rows.append({"Tag when logged": label, "Bets": len(grp),
+                             "Record": f"{sm.get('wins', 0)}-{sm.get('losses', 0)}",
+                             "Hit rate": "—" if not (sm.get("wins", 0) + sm.get("losses", 0)) else
+                             f"{sm['wins'] / (sm['wins'] + sm['losses']):.0%}",
+                             "ROI": "—" if sm.get("roi") is None else f"{sm['roi']:+.1f}%"})
+    if use_rows:
+        st.markdown("**Do the 🎟️ / 🎯 tags hold up?**")
+        st.dataframe(pd.DataFrame(use_rows), hide_index=True, width="stretch")
+        st.caption("Parlay-tagged legs should hit noticeably more often than single-only ones; if they don't, the "
+                   "15% cushion / 60% chance bar needs moving.")
+    gap_bets = [b for b in bets if PE.has_tag(b.get("notes"), PE.GAP_TAG)]
     if gap_bets:
         rest = [b for b in bets if b not in gap_bets]
         rows_ = []
