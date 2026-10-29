@@ -63569,6 +63569,53 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401871094,8,40187109430,24,Troy,UL Monroe,,,False,4,25
 2026,401871094,8,40187109431,25,UL Monroe,Troy,,,True,4,86
 2026,401871094,8,40187109433,26,Troy,UL Monroe,,,True,4,25
+2026,401871057,9,4018710572,1,Jacksonville State,New Mexico State,,,False,1,25
+2026,401871057,9,4018710573,2,New Mexico State,Jacksonville State,,,False,1,9
+2026,401871057,9,4018710574,3,Jacksonville State,New Mexico State,,,True,1,80
+2026,401871057,9,4018710576,4,New Mexico State,Jacksonville State,,,False,2,25
+2026,401871057,9,4018710577,5,Jacksonville State,New Mexico State,,,False,2,75
+2026,401871057,9,4018710578,6,New Mexico State,Jacksonville State,,,False,2,18
+2026,401871057,9,4018710579,7,Jacksonville State,New Mexico State,,,False,2,77
+2026,401871057,9,40187105710,8,New Mexico State,Jacksonville State,,,False,2,1
+2026,401871057,9,40187105712,9,New Mexico State,Jacksonville State,,,False,3,25
+2026,401871057,9,40187105713,10,Jacksonville State,New Mexico State,,,True,3,54
+2026,401871057,9,40187105715,11,New Mexico State,Jacksonville State,,,False,3,25
+2026,401871057,9,40187105716,12,Jacksonville State,New Mexico State,,,False,3,62
+2026,401871057,9,40187105717,13,New Mexico State,Jacksonville State,,,False,3,71
+2026,401871057,9,40187105718,14,Jacksonville State,New Mexico State,,,True,3,85
+2026,401871057,9,40187105720,15,New Mexico State,Jacksonville State,,,False,3,25
+2026,401871057,9,40187105721,16,Jacksonville State,New Mexico State,,,True,4,80
+2026,401871057,9,40187105723,17,New Mexico State,Jacksonville State,,,False,4,50
+2026,401871057,9,40187105724,18,Jacksonville State,New Mexico State,,,False,4,59
+2026,401871058,9,4018710582,1,Kennesaw State,Middle Tennessee,,,True,1,81
+2026,401871058,9,4018710584,2,Middle Tennessee,Kennesaw State,,,True,1,25
+2026,401871058,9,4018710586,3,Kennesaw State,Middle Tennessee,,,False,1,75
+2026,401871058,9,4018710587,4,Middle Tennessee,Kennesaw State,,,True,1,24
+2026,401871058,9,4018710589,5,Kennesaw State,Middle Tennessee,,,True,2,45
+2026,401871058,9,40187105811,6,Middle Tennessee,Kennesaw State,,,False,2,25
+2026,401871058,9,40187105812,7,Kennesaw State,Middle Tennessee,,,True,2,31
+2026,401871058,9,40187105814,8,Middle Tennessee,Kennesaw State,,,False,2,25
+2026,401871058,9,40187105815,9,Kennesaw State,Middle Tennessee,,,False,2,88
+2026,401871058,9,40187105816,10,Middle Tennessee,Kennesaw State,,,True,2,21
+2026,401871058,9,40187105818,11,Middle Tennessee,Kennesaw State,,,True,3,25
+2026,401871058,9,40187105820,12,Middle Tennessee,Kennesaw State,,,False,3,25
+2026,401871058,9,40187105821,13,Kennesaw State,Middle Tennessee,,,False,3,84
+2026,401871058,9,40187105822,14,Middle Tennessee,Kennesaw State,,,False,3,25
+2026,401871058,9,40187105823,15,Kennesaw State,Middle Tennessee,,,False,3,68
+2026,401871058,9,40187105824,16,Middle Tennessee,Kennesaw State,,,True,3,57
+2026,401871058,9,40187105826,17,Kennesaw State,Middle Tennessee,,,False,3,73
+2026,401871058,9,40187105827,18,Middle Tennessee,Kennesaw State,,,False,3,75
+2026,401871058,9,40187105828,19,Kennesaw State,Middle Tennessee,,,False,3,73
+2026,401871058,9,40187105829,20,Middle Tennessee,Kennesaw State,,,False,3,21
+2026,401871058,9,40187105830,21,Kennesaw State,Middle Tennessee,,,True,4,79
+2026,401871058,9,40187105832,22,Middle Tennessee,Kennesaw State,,,False,4,25
+2026,401871058,9,40187105833,23,Kennesaw State,Middle Tennessee,,,False,4,60
+2026,401871058,9,40187105834,24,Middle Tennessee,Kennesaw State,,,False,4,25
+2026,401871058,9,40187105835,25,Kennesaw State,Middle Tennessee,,,True,4,2
+2026,401871058,9,40187105837,26,Middle Tennessee,Kennesaw State,,,False,4,25
+2026,401871058,9,40187105838,27,Kennesaw State,Middle Tennessee,,,True,4,33
+2026,401871058,9,40187105840,28,Kennesaw State,Middle Tennessee,,,True,4,65
+2026,401871058,9,40187105841,29,Kennesaw State,Middle Tennessee,,,False,4,60
 2026,401871071,9,4018710712,1,Western Kentucky,Delaware,,,True,1,25
 2026,401871071,9,4018710714,2,Delaware,Western Kentucky,,,True,1,82
 2026,401871071,9,4018710716,3,Western Kentucky,Delaware,,,True,1,25
