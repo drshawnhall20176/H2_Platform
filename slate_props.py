@@ -32,6 +32,7 @@ import player_props as PPR
 import props_engine as PE
 
 # Best Bets' four basketball markets: Odds API key -> Player props market.
+YES_ONLY = ("player_anytime_td", "player_1st_td", "player_last_td")   # = odds_api.YES_ONLY_MARKETS ("Yes" only)
 CORE_MARKETS = {"player_points": "Points", "player_rebounds": "Rebounds", "player_assists": "Assists",
                 "player_threes": "Threes Made"}
 ROTATION_GAMES = 7          # = position_data.LEAGUE_GAMES_PER_TEAM
@@ -83,7 +84,8 @@ def slate_reads(games: Sequence[Dict], sample: Dict, offers: Optional[List[Dict]
     out: Dict[Tuple, Dict] = {}
     for g in games:
         home, away = _int_or(g.get("home_id")), _int_or(g.get("away_id"))
-        gl = game_lines_for(game_lines, g.get("home_name"), g.get("away_name"))
+        gl = (game_lines.get(g.get("label")) or {}) if isinstance(game_lines, dict) else \
+            game_lines_for(game_lines, g.get("home_name"), g.get("away_name"))
         for team, opp, is_home in ((home, away, True), (away, home, False)):
             rot = PPR.team_rotation(cur, prior, team, injuries.get(team), sport, last_n=ROTATION_GAMES)
             if not rot:
@@ -100,6 +102,137 @@ def slate_reads(games: Sequence[Dict], sample: Dict, offers: Optional[List[Dict]
                                opp_name=g.get("away_name" if is_home else "home_name"),
                                game_date=g.get("game_date"))
                     out[(row["pid"], mk)] = row
+    return out
+
+
+# --------------------------------------------------------------------------- football + hockey (Oct 29)
+def props_markets(sport: str) -> Dict[str, str]:
+    """{Odds API market key: Player props market} for the markets both this sport's pick pages and its props model
+    cover. Markets the props model doesn't have keep the older engine (placeholder lines dropped)."""
+    import position_matchups as PM
+    import sports
+    fam = PM.FAMILY_BY_SPORT.get(sport)
+    wanted = set(sports.get(sport).markets or [])
+    if fam == "basketball":
+        return {k: v for k, v in CORE_MARKETS.items() if k in wanted}
+    if fam == "football":
+        import football_props as FP
+        return {m["odds"]: name for name, m in FP.MARKETS.items() if m.get("odds") in wanted}
+    if fam == "hockey":
+        import hockey_props as HP
+        return {m["odds"]: name for name, m in HP.MARKETS.items() if m.get("odds") in wanted}
+    return {}
+
+
+def team_rows(family: str, sport: str, bundle: Dict, team, opp, market: str, spread_home: Optional[float],
+              total: Optional[float], offers=None, book=None, news_checked: bool = False, slope: float = 1.0,
+              model_weight: float = PE.MODEL_WEIGHT, lines: Optional[Dict] = None,
+              prices: Optional[Dict] = None) -> List[Dict]:
+    """One team's football or hockey Player props rows for one market -- the ONE recipe Position Matchups and the
+    slate pages share. `bundle` is position_data.load_bundle's game bundle; spread_home is the home side's spread
+    (hockey: the goal margin worked out from the moneyline, props_odds.hockey_spread_from_ml)."""
+    props = bundle.get("props") or {}
+    is_home = team == bundle.get("home")
+    implied = PE.implied_team_totals(total, spread_home)
+    team_imp = (implied[0] if is_home else implied[1]) if implied else None
+    opp_imp = (implied[1] if is_home else implied[0]) if implied else None
+    spread_team = None if spread_home is None else (spread_home if is_home else -spread_home)
+    rest = props.get("rest") or {}
+    ctx = {"rest_days": (rest.get(team) or {}).get("rest_days"), "opp_rest_days": (rest.get(opp) or {}).get("rest_days"),
+           "spread": spread_team, "offers": offers, "slope": slope, "model_weight": model_weight, "book": book,
+           "news_checked": bool(news_checked), "prices": prices or {}}
+    if family == "football":
+        import football_props as FP
+        roster = (props.get("roster") or {}).get(team) or []
+        return FP.player_rows(roster, team, opp, market, props.get("pgames") or [], bundle.get("allowed") or {},
+                              lines=lines, context=dict(ctx, implied=team_imp), sport=sport)
+    if family == "hockey":
+        import hockey_props as HP
+        pg = props.get("pgames") or []
+        rot = (props.get("rotation") or {}).get(team) or {}
+        return HP.player_rows(rot, team, opp, market, pg, lines=lines,
+                              context=dict(ctx, env=PE.env_factor(team_imp, HP.team_goals(pg, team)),
+                                           opp_env=PE.env_factor(opp_imp, HP.team_goals(pg, opp)),
+                                           team_games=(props.get("team_games") or {}).get(team)))
+    return []
+
+
+def game_line_values(family: str, gl: Optional[Dict]) -> Tuple[Optional[float], Optional[float]]:
+    """(spread_home, total) the page would default to from props_odds.game_lines -- hockey's spread from the
+    moneyline (the +/-1.5 puck line says little), exactly as Position Matchups does."""
+    gl = gl or {}
+    if family == "hockey":
+        import props_odds as PO
+        return PO.hockey_spread_from_ml(gl.get("p_home")), gl.get("total")
+    return gl.get("spread_home"), gl.get("total")
+
+
+def family_slate_reads(sport: str, games: Sequence[Dict], bundles: Dict, offers, game_lines: Dict, book=None,
+                       markets: Optional[Dict[str, str]] = None, news_checked: bool = False) -> Dict[Tuple, Dict]:
+    """{(player key, market key): row} for every football / hockey game on the slate. `bundles` {label: bundle},
+    `game_lines` {label: props_odds.game_lines}."""
+    import position_matchups as PM
+    family = PM.FAMILY_BY_SPORT.get(sport)
+    markets = markets or props_markets(sport)
+    out: Dict[Tuple, Dict] = {}
+    for g in games:
+        b = bundles.get(g.get("label"))
+        if not b or not b.get("props"):
+            continue
+        spread_home, total = game_line_values(family, game_lines.get(g.get("label")))
+        names = b.get("names") or {}
+        for team, opp in ((b["home"], b["away"]), (b["away"], b["home"])):
+            for mk, market in markets.items():
+                for row in team_rows(family, sport, b, team, opp, market, spread_home, total, offers=offers,
+                                     book=book, news_checked=news_checked):
+                    row.update(game=g.get("label"), team_id=team, opp_id=opp, market_key=mk, market=market,
+                               home=team == b["home"], team_name=names.get(team, team),
+                               opp_name=names.get(opp, opp), game_date=g.get("game_date"))
+                    out[(row["pid"], mk)] = row
+    return out
+
+
+def index_from_reads(reads: Dict[Tuple, Dict], rows: Sequence[Dict], normalize_name) -> Dict:
+    """Edge Board index entries from the reads (any sport): the Player props distribution around ITS projection,
+    the read itself (odds_api.compute_edges blends it with the market and applies the gap policy) and the book line."""
+    import numpy as np
+    by_pid = {r.get("_pid"): r for r in rows or []}
+    index: Dict = {}
+    for (pid, mkey), row in reads.items():
+        if row.get("out") or row.get("projection") is None:
+            continue
+        s = by_pid.get(pid) or {}
+        values = list(row.get("values") or [])
+        ctx = {"player": row["player"], "team": s.get("Team") or row.get("team_name"), "game": row.get("game"),
+               "opp": s.get("Opp") or row.get("opp_name"), "lineup": "Active",
+               "game_date": s.get("_game_date") or row.get("game_date"), "pid": pid, "position": row.get("slot")}
+        floor = row.get("sd_floor") or (0.25, 1.0)
+        index[(normalize_name(row["player"]), mkey)] = {
+            "dist": np.asarray(pmf(row["projection"], values, row.get("dist") or "normal", sd_floor=floor), dtype=np.float64),
+            "mean": float(row["projection"]), "n_games": row.get("games") or 0, "ctx": ctx, "read": row,
+            "line": row.get("line") if row.get("line_src") == "book" else None}
+    return index
+
+
+def board_from_index(index: Dict, P) -> List[Dict]:
+    """The model board for an index mixing Player props reads with the older engine's entries: reads at the
+    book's line with Player props' Chance (no placeholder lines), the rest from P.default_board_from_index."""
+    reads = {k: v for k, v in index.items() if "read" in v}
+    rest = {k: v for k, v in index.items() if "read" not in v}
+    out = []
+    for (_nm, mkey), entry in reads.items():
+        row, ctx = entry["read"], entry["ctx"]
+        sp = side_probs(row) if entry.get("line") is not None else None
+        if sp is None:
+            continue
+        use = PE.use_tag(row)[0]
+        out.append(P._signal(ctx["player"], ctx["team"], ctx["game"], row.get("market"), sp["side"], entry["line"],
+                             sp["p_final"], entry["mean"], Opp=ctx.get("opp"), Lineup=ctx.get("lineup"),
+                             GameTime=ctx.get("game_date"), PlayerId=ctx.get("pid"), MarketKey=mkey,
+                             LineSource="book", Lean=row.get("lean"), Use=use))
+    if rest:
+        out += [b for b in P.default_board_from_index(rest) if b.get("LineSource", "book") != "default"
+                or not reads]
     return out
 
 
@@ -148,10 +281,13 @@ def play_from_row(row: Dict, slate_row: Optional[Dict] = None) -> Optional[Dict]
     no book line or no side. Conviction and grade go only to plays Player props leans on."""
     if row.get("line") is None or row.get("line_src") != "book" or row.get("out"):
         return None
+    yes_only = row.get("market_key") in YES_ONLY
     sp = side_probs(row)
     if sp is None:
         return None
     side, p_final = sp["side"], sp["p_final"]
+    if row.get("market_key") in YES_ONLY and side != "Over":
+        return None                                      # "won't score" isn't a play (no Under is posted)
     p_mkt = sp["p_market"]
     lean = row.get("lean")
     price = row.get("over_price") if side == "Over" else row.get("under_price")
@@ -174,7 +310,8 @@ def play_from_row(row: Dict, slate_row: Optional[Dict] = None) -> Optional[Dict]
         "Player": row["player"], "PlayerId": row["pid"], "Team": s.get("Team") or row.get("team_name"), "Game": row.get("game") or s.get("GameLabel"),
         "Opp": s.get("Opp") or row.get("opp_name"), "Versus": s.get("Opp") or row.get("opp_name"),
         "GameDate": s.get("_game_date") or row.get("game_date"),
-        "Market": row["market"], "Side": side, "Line": row["line"], "LineSource": "book",
+        "Market": row["market"], "Side": "Yes" if yes_only else side, "Line": None if yes_only else row["line"],
+        "LineSource": "book",
         "Projection": round(row["projection"], 2) if row.get("projection") is not None else None,
         "ModelProb": round(p_final, 4), "Fair": PE.american(p_final),
         "RealPrice": price, "RealPriceBook": best[0] if best else None, "PriceSource": "book" if price is not None else "model_fair",
@@ -207,13 +344,14 @@ def plays(reads: Dict[Tuple, Dict], slate_rows: Sequence[Dict]) -> List[Dict]:
 
 
 # --------------------------------------------------------------------------- Edge Board
-def pmf(projection: Optional[float], values: Sequence[float], dist: str, max_k: Optional[int] = None) -> List[float]:
+def pmf(projection: Optional[float], values: Sequence[float], dist: str, max_k: Optional[int] = None,
+        sd_floor: Tuple[float, float] = (0.25, 1.0)) -> List[float]:
     """P(X = k) for k = 0..max_k under the Player props distribution, so P(X > line) read off this array equals
     props_engine.prob_over(projection, values, line, dist) at every half line."""
     if projection is None:
         return []
     top = max_k or int(max(projection * 3 + 10, max(values or [0]) + 10))
-    sf = [1.0] + [PE.prob_over(projection, values, k - 0.5, dist) or 0.0 for k in range(1, top + 1)]
+    sf = [1.0] + [PE.prob_over(projection, values, k - 0.5, dist, *sd_floor) or 0.0 for k in range(1, top + 1)]
     sf = [min(sf[k], sf[k - 1]) if k else sf[k] for k in range(len(sf))]          # never increasing
     probs = [sf[k] - sf[k + 1] for k in range(top)] + [sf[top]]                   # the tail sits in the last cell
     return probs

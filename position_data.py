@@ -453,6 +453,10 @@ def _safe(fn: Callable, default, notes: List[str], what: str):
         return default
 
 
+# (sport, stats season, before week) -> player-game lines. Games before `before_week` don't change during a week.
+_FOOTBALL_PGAMES: Dict[Tuple, List[Dict]] = {}
+
+
 def load_football(sport_key: str, date_str: str, home: str, away: str, use_previous_season: bool = False) -> Dict:
     """NFL or NCAAF bundle for one game. Football keys are team names/abbreviations on both sides."""
     import sports
@@ -467,13 +471,26 @@ def load_football(sport_key: str, date_str: str, home: str, away: str, use_previ
     before_week = 999 if use_previous_season else week
     if sport_key == "NFL":
         weekly = _safe(lambda: eng.load_season_weekly_stats(stats_season), None, notes, "NFL weekly stats")
-        pgames = nfl_pgames(weekly, before_week)
+        src = weekly
     else:
         import ncaaf_data as ND
         roster = _safe(ND.load_rosters, [], notes, "the college roster cache")
-        pos_by_id = {str(p.get("id")): p.get("position") for p in roster if p.get("id") is not None}
         rows = _safe(ND.load_player_game_stats, [], notes, "the college per-game cache")
+        src = rows
+    # A slate page builds every game: convert the season's lines once per (source, week), not once per game. Keyed
+    # on the source object itself, so refreshed (or different) data is never served from an old conversion.
+    memo_key = (sport_key, stats_season, before_week, id(src)) if src is not None else None
+    if memo_key is not None and memo_key in _FOOTBALL_PGAMES and _FOOTBALL_PGAMES[memo_key][0] is src:
+        pgames = _FOOTBALL_PGAMES[memo_key][1]
+    elif sport_key == "NFL":
+        pgames = nfl_pgames(weekly, before_week)
+    else:
+        pos_by_id = {str(p.get("id")): p.get("position") for p in roster if p.get("id") is not None}
         pgames = ncaaf_pgames(rows, stats_season, before_week, pos_by_id)
+    if pgames and memo_key is not None:
+        if len(_FOOTBALL_PGAMES) > 8:
+            _FOOTBALL_PGAMES.clear()
+        _FOOTBALL_PGAMES[memo_key] = (src, pgames)
     if not pgames:
         notes.append(f"No {stats_season} player-game data on file yet — try the other season option.")
     elif not use_previous_season:

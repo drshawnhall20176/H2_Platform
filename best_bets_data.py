@@ -667,7 +667,7 @@ def fetch_generic_offers(sport_key: str, date_str: str, api_key: str) -> List[Di
 # --------------------------------------------------------------------------- one model on every page (Oct 28)
 # Sports whose pick pages read players through the Player props model (slate_props) instead of the older
 # recent-games resample. NBA first: it has the league-wide box-score sample the matchup factor needs.
-PROPS_MODEL_SPORTS = ("NBA",)
+PROPS_MODEL_SPORTS = ("NBA", "NFL", "NCAAF", "NHL")       # Oct 29: football + hockey on their props models too
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -698,13 +698,72 @@ def load_props_model_inputs(sport_key: str, date_str: str, teams: tuple) -> Dict
     return {"sample": sample, "injuries": injuries, "rest": rest}
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def fetch_game_lines_by_label(sport_key: str, date_str: str, api_key: str, games_json: str) -> Dict:
+    """{game label: props_odds.game_lines} -- spread, total and moneyline for every game on the slate from ONE
+    sport-wide request (3 credits), matched to each game the way Position Matchups matches it."""
+    import json
+    import position_lines as PL
+    import props_odds as PO
+    try:
+        events, _hdr = O.fetch_sport_game_lines(api_key, sport=sports.get(sport_key).odds_sport_key)
+    except Exception:                                           # noqa: BLE001 -- neutral environment instead
+        return {}
+    out = {}
+    for g in json.loads(games_json):
+        ev = PL.match_event(events, g["home"], g["away"])
+        if ev:
+            out[g["label"]] = PO.game_lines(ev)
+    return out
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def load_family_bundles(sport_key: str, date_str: str, labels: tuple) -> Dict:
+    """{label: position_data game bundle} for the football / hockey games on the slate -- the same bundles
+    Position Matchups builds for one game at a time."""
+    from concurrent.futures import ThreadPoolExecutor
+    import position_data as PD
+    games = [g for g in PD.list_games(sport_key, date_str) if g["label"] in set(labels)]
+
+    def one(g):
+        try:
+            return g["label"], PD.load_bundle(sport_key, date_str, g)
+        except Exception:                                       # noqa: BLE001 -- that game falls back to the old engine
+            return g["label"], None
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        return {lab: b for lab, b in ex.map(one, games) if b}
+
+
 def slate_reads_for(sport_key: str, date_str: str, meta: List[Dict], offers: List[Dict],
                     preferred_book: Optional[str]) -> Optional[Dict]:
     """The Player props reads for every game on the slate, or None when this sport isn't on the shared model yet
     or there are no book lines to read against."""
     if sport_key not in PROPS_MODEL_SPORTS or not offers or not meta:
         return None
+    import json
+    import position_data as PD
+    import position_lines as PL
+    import position_matchups as PM
     import slate_props as SP
+    if PM.FAMILY_BY_SPORT.get(sport_key) in ("football", "hockey"):
+        labels = tuple(sorted({m.get("label") for m in meta if m.get("label")}))
+        games = [g for g in PD.list_games(sport_key, date_str) if g["label"] in set(labels)]
+        # Only games the books posted player props for (a college Saturday lists 60+ games; props come for a few).
+        posted = list({(o.get("home_team"), o.get("away_team")): {"home_team": o.get("home_team"),
+                                                                  "away_team": o.get("away_team")}
+                       for o in offers if o.get("home_team")}.values())
+        if posted:
+            games = [g for g in games if PL.match_event(posted, g["home"], g["away"])]
+        if not games:
+            return None
+        labels = tuple(sorted(g["label"] for g in games))
+        api_key = get_odds_api_key()
+        gjson = json.dumps([{k: g.get(k) for k in ("label", "home", "away")} for g in games])
+        lines = fetch_game_lines_by_label(sport_key, date_str, api_key, gjson) if api_key else {}
+        bundles = load_family_bundles(sport_key, date_str, labels)
+        reads = SP.family_slate_reads(sport_key, games, bundles, offers, lines,
+                                      book=None if preferred_book in (None, "best") else preferred_book)
+        return _with_display_names(sport_key, reads) or None
     teams = tuple(sorted({(SP._int_or(m.get(f"{s}_id")), m.get(f"{s}_abbr")) for m in meta for s in ("home", "away")},
                          key=lambda t: str(t[0])))
     inputs = load_props_model_inputs(sport_key, date_str, teams)
@@ -713,7 +772,27 @@ def slate_reads_for(sport_key: str, date_str: str, meta: List[Dict], offers: Lis
     book = None if preferred_book in (None, "best") else preferred_book
     reads = SP.slate_reads(meta, inputs["sample"], offers, book=book, injuries=inputs["injuries"],
                            rest=inputs["rest"], game_lines=lines, sport=sport_key)
-    return reads or None
+    return _with_display_names(sport_key, reads) or None
+
+
+def _with_display_names(sport_key: str, reads: Dict) -> Dict:
+    """Each read's market named the way this sport's pick pages name it (their filters and defaults use it)."""
+    spec = getattr(sports.get(sport_key).projections, "_MARKET_SPEC", {}) or {}
+    for (_pid, mk), row in (reads or {}).items():
+        if mk in spec:
+            row["market"] = spec[mk][1]
+    return reads
+
+
+def compose_board(sport_key: str, reads: Optional[Dict], rows: List[Dict], legacy_plays: List[Dict]) -> List[Dict]:
+    """The pick pages' plays: Player props reads for every market they cover, the older engine (placeholder lines
+    dropped) for markets the props model doesn't have."""
+    import slate_props as SP
+    if not reads:
+        return drop_placeholder_plays(legacy_plays)
+    covered = {row.get("market") for row in reads.values()}
+    rest = [p for p in drop_placeholder_plays(legacy_plays) if p.get("Market") not in covered]
+    return SP.plays(reads, rows) + rest
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -835,11 +914,7 @@ def load_generic_best_bets_board(sport_key: str, date_str: str,
         st.session_state[diag_key] = diag
     except Exception:
         pass
-    if reads:
-        plays = sport.projections.build_best_bets(rows, real_lines=real_lines, offers=real_offers,
-                                                  preferred_book=book, reads=reads)
-    else:
-        plays = drop_placeholder_plays(sport.projections.build_best_bets(rows, real_lines=real_lines,
-                                                                         offers=real_offers, preferred_book=book))
+    legacy = sport.projections.build_best_bets(rows, real_lines=real_lines, offers=real_offers, preferred_book=book)
+    plays = compose_board(sport_key, reads, rows, legacy)
     attach_team_trend(sport_key, plays, rows, date_str)
     return plays, meta, available_books

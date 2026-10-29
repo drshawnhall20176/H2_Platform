@@ -110,10 +110,15 @@ def load_index(sport_key: str, date_str: str, sims: int, seed: int):
     # NBA: the Player props model across the slate (best_bets_data.load_slate_reads) -- the same projection,
     # probability and gap policy as Position Matchups and Best Bets.
     import best_bets_data as BBD
+    import slate_props as SP
     reads = BBD.load_slate_reads(sport_key, date_str, O.DEFAULT_BOOK) if sport_key in BBD.PROPS_MODEL_SPORTS else None
-    if reads:
-        extra = {"reads": reads}
     index = proj.build_projection_index(rows, meta, sims=sims, seed=seed, **extra)
+    if reads:
+        # The props model for every market it covers (same projection, chance and gap policy as Position
+        # Matchups); the older engine only for markets it doesn't.
+        covered = {mk for (_pid, mk) in reads}
+        index = {k: v for k, v in index.items() if k[1] not in covered}
+        index.update(SP.index_from_reads(reads, rows, proj.normalize_name))
     known_names = proj.known_roster_names(rows, meta) if hasattr(proj, "known_roster_names") else set()
     all_active_names = (MSC.get_all_active_player_names_cached(int(date_str[:4]))
                         if sport_key == "MLB" else set())
@@ -153,7 +158,8 @@ if not index:
     st.info(f"No projectable props for this date. Pick a date with scheduled {_active.label} games.")
     st.stop()
  
-board = pd.DataFrame(P.default_board_from_index(index))
+import slate_props as _SP
+board = pd.DataFrame(_SP.board_from_index(index, P))
  
 # ============================================================================
 # LIVE EDGES

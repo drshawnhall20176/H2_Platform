@@ -622,6 +622,16 @@ def fetch_slate_spreads(date_str: str, api_key: str, sport: str = SPORT) -> Tupl
     return spreads, {"events_total": len(todays), "events_fetched": fetched, "remaining": remaining}
 
 
+def fetch_sport_game_lines(api_key: str, sport: str = SPORT) -> Tuple[List[Dict], Dict]:
+    """Spread, total and moneyline for EVERY upcoming game of `sport` in ONE request (the sport-wide odds
+    endpoint bills markets x regions = 3 credits, however many games) -- each item has the same shape as one
+    event's response, so props_odds.game_lines reads it. Used by the slate pages (Oct 29), where asking game by
+    game cost ~3 credits a game (150+ on a college Saturday)."""
+    data, hdr = _get(f"sports/{sport}/odds", {"apiKey": api_key, "regions": "us", "markets": "h2h,spreads,totals",
+                                              "oddsFormat": "american", "dateFormat": "iso"})
+    return (data if isinstance(data, list) else []), hdr
+
+
 def parse_game_total(event_json: Dict) -> Optional[float]:
     """The game total (combined points) for one event: the mean of the Over line across the books
     that post a "totals" market, or None when none does. Same separate-parser reasoning as
@@ -1078,8 +1088,10 @@ def compute_edges(index: Dict, offers: List[Dict],
         if r0 is not None:
             import props_engine as PE
             bo, bu = _best_price(off["over"]), _best_price(off["under"])
+            floor = r0.get("sd_floor") or (0.25, 1.0)
             read = PE.read_line(entry["mean"], r0.get("values") or [], point, r0.get("dist") or "normal",
-                                bo[1] if bo else None, bu[1] if bu else None, novig_over)
+                                bo[1] if bo else None, bu[1] if bu else None, novig_over, 1.0, PE.MODEL_WEIGHT,
+                                *floor)
         for side, prices in (("Over", off["over"]), ("Under", off["under"])):
             bp = _best_price(prices)
             if bp is None:

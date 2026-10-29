@@ -46,12 +46,53 @@ def markets_for(columns: Iterable[Tuple[str, str]]) -> List[str]:
     return out
 
 
+# nflreadpy keys NFL teams by abbreviation ("KC"); The Odds API names them in full ("Kansas City Chiefs"). Without
+# this, Position Matchups never matched an NFL game to the books (found Oct 29: "The books haven't listed this
+# game yet" for Thursday night's CAR @ GB).
+NFL_TEAMS = {
+    "ARI": "Arizona Cardinals", "ATL": "Atlanta Falcons", "BAL": "Baltimore Ravens", "BUF": "Buffalo Bills",
+    "CAR": "Carolina Panthers", "CHI": "Chicago Bears", "CIN": "Cincinnati Bengals", "CLE": "Cleveland Browns",
+    "DAL": "Dallas Cowboys", "DEN": "Denver Broncos", "DET": "Detroit Lions", "GB": "Green Bay Packers",
+    "HOU": "Houston Texans", "IND": "Indianapolis Colts", "JAX": "Jacksonville Jaguars", "JAC": "Jacksonville Jaguars",
+    "KC": "Kansas City Chiefs", "LA": "Los Angeles Rams", "LAR": "Los Angeles Rams", "LAC": "Los Angeles Chargers",
+    "LV": "Las Vegas Raiders", "OAK": "Las Vegas Raiders", "MIA": "Miami Dolphins", "MIN": "Minnesota Vikings",
+    "NE": "New England Patriots", "NO": "New Orleans Saints", "NYG": "New York Giants", "NYJ": "New York Jets",
+    "PHI": "Philadelphia Eagles", "PIT": "Pittsburgh Steelers", "SEA": "Seattle Seahawks", "SF": "San Francisco 49ers",
+    "TB": "Tampa Bay Buccaneers", "TEN": "Tennessee Titans", "WAS": "Washington Commanders", "WSH": "Washington Commanders",
+}
+
+
+def _norm_team(x) -> str:
+    return " ".join(str(x or "").lower().replace(".", "").replace("&", "and").split())
+
+
+def _team_keys(name) -> set:
+    keys = {_norm_team(name)}
+    full = NFL_TEAMS.get(str(name or "").strip().upper())
+    if full:
+        keys.add(_norm_team(full))
+    return keys
+
+
+def _same_team(a, b, prefix: bool) -> bool:
+    ka, kb = _team_keys(a), _team_keys(b)
+    if ka & kb:
+        return True
+    # College: the schedule says "Ohio State", the books "Ohio State Buckeyes".
+    return prefix and any(y.startswith(x + " ") or x.startswith(y + " ") for x in ka for y in kb if x and y)
+
+
 def match_event(events: Iterable[Dict], home_name: str, away_name: str) -> Optional[Dict]:
-    """The Odds API event for a game: the one whose two teams are these two (any order, case-blind). None if absent."""
-    want = {str(home_name or "").strip().lower(), str(away_name or "").strip().lower()}
-    for e in events or []:
-        if {str(e.get("home_team") or "").strip().lower(), str(e.get("away_team") or "").strip().lower()} == want:
-            return e
+    """The Odds API event for a game: the one whose two teams are these two (any order). Exact names (or an NFL
+    abbreviation's full name) first; then a name that is the start of the other ("Ohio State" / "Ohio State
+    Buckeyes") -- only when exactly one event matches that way. None if absent or ambiguous."""
+    events = list(events or [])
+    for prefix in (False, True):
+        hits = [e for e in events
+                if (_same_team(e.get("home_team"), home_name, prefix) and _same_team(e.get("away_team"), away_name, prefix))
+                or (_same_team(e.get("home_team"), away_name, prefix) and _same_team(e.get("away_team"), home_name, prefix))]
+        if len(hits) == 1 or (hits and not prefix):
+            return hits[0]
     return None
 
 

@@ -420,6 +420,7 @@ import football_props as FP
 import hockey_props as HP
 import props_backtest as BT
 import props_engine as PE
+import slate_props as SP
 import props_odds as PO
 
 PROPS = bundle.get("props") or {}
@@ -601,9 +602,6 @@ def render_game_context(market: str) -> dict:
 
 def render_props_team(team, opp, off_name, def_name, market, mode, tables, g):
     is_home = team == bundle["home"]
-    implied = g["implied"]
-    team_imp = (implied[0] if is_home else implied[1]) if implied else None
-    opp_imp = (implied[1] if is_home else implied[0]) if implied else None
     spread_team = None if g["spread_home"] is None else (g["spread_home"] if is_home else -g["spread_home"])
     base_ctx = {"rest_days": _rest_days(team), "opp_rest_days": _rest_days(opp), "spread": spread_team,
                 "offers": g["offers"], "slope": g["slope"], "model_weight": g["model_weight"], "book": g.get("book"),
@@ -618,10 +616,10 @@ def render_props_team(team, opp, off_name, def_name, market, mode, tables, g):
             st.caption(f"No {off_name} player at the positions this market is offered for.")
             return []
         ed = _editor_values(key, order)
-        ctx = dict(base_ctx, implied=team_imp,
-                   prices={k: {"over": ed["Over odds"].get(k), "under": ed["Under odds"].get(k)} for k in order})
-        rows = FP.player_rows(roster, team, opp, market, PROPS.get("pgames") or [], bundle.get("allowed") or {},
-                              lines=ed["Line"], context=ctx, sport=SPORT_KEY)
+        rows = SP.team_rows("football", SPORT_KEY, bundle, team, opp, market, g["spread_home"], g["total"],
+                            offers=g["offers"], book=g.get("book"), news_checked=base_ctx["news_checked"],
+                            slope=g["slope"], model_weight=g["model_weight"], lines=ed["Line"],
+                            prices={k: {"over": ed["Over odds"].get(k), "under": ed["Under odds"].get(k)} for k in order})
         disp = FP.display(rows, market, FP.has_targets(PROPS.get("pgames")))
     elif PFAM == "hockey":
         rot = (PROPS.get("rotation") or {}).get(team) or {}
@@ -632,12 +630,10 @@ def render_props_team(team, opp, off_name, def_name, market, mode, tables, g):
             return []
         order = [p["pid"] for p in players]
         ed = _editor_values(key, order)
-        pg = PROPS.get("pgames") or []
-        ctx = dict(base_ctx, env=PE.env_factor(team_imp, HP.team_goals(pg, team)),
-                   opp_env=PE.env_factor(opp_imp, HP.team_goals(pg, opp)),
-                   team_games=(PROPS.get("team_games") or {}).get(team),
-                   prices={k: {"over": ed["Over odds"].get(k), "under": ed["Under odds"].get(k)} for k in order})
-        rows = HP.player_rows(rot, team, opp, market, pg, lines=ed["Line"], context=ctx)
+        rows = SP.team_rows("hockey", SPORT_KEY, bundle, team, opp, market, g["spread_home"], g["total"],
+                            offers=g["offers"], book=g.get("book"), news_checked=base_ctx["news_checked"],
+                            slope=g["slope"], model_weight=g["model_weight"], lines=ed["Line"],
+                            prices={k: {"over": ed["Over odds"].get(k), "under": ed["Under odds"].get(k)} for k in order})
         disp = HP.display(rows, market)
     else:
         rot = (PROPS.get("rotation") or {}).get(team) or []
