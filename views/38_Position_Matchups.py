@@ -169,14 +169,14 @@ else:
     tab_pos, tab_h2h = st.tabs(["🧭 Depth vs defense", "⚔️ Head-to-head"])
 
 
-def _model_factors(defense) -> dict:
-    """Basketball: {slot: the Player props tab's matchup factor for PRA} -- the raw 4-game numbers adjusted for
+def _model_factors(defense, market: str = "PRA") -> dict:
+    """Basketball: {slot: the Player props tab's matchup factor for `market`} -- the raw 4-game numbers adjusted for
     the small sample and blended with last season, so this tab and the props tab show the same matchup."""
     props = bundle.get("props") or {}
     if FAMILY != "basketball" or not props.get("cur_pgames"):
         return {}
-    cur_t = PPR.defense_allowed(PM.allowed_by_slot(props["cur_pgames"], SPORT_KEY), "PRA")
-    pri_t = (PPR.defense_allowed(PM.allowed_by_slot(props["prior_pgames"], SPORT_KEY), "PRA")
+    cur_t = PPR.defense_allowed(PM.allowed_by_slot(props["cur_pgames"], SPORT_KEY), market)
+    pri_t = (PPR.defense_allowed(PM.allowed_by_slot(props["prior_pgames"], SPORT_KEY), market)
              if props.get("prior_pgames") else None)
     out = {}
     for slot in PM.SLOTS_BY_SPORT[SPORT_KEY]:
@@ -187,16 +187,29 @@ def _model_factors(defense) -> dict:
     return out
 
 
-def render_side(side, off_name, def_name):
-    st.markdown(f"#### {off_name} offense  vs  {def_name} defense")
-    mf = _model_factors(side["defense"])
+def _side_in_stat(side, stat):
+    """The side's table rebuilt in another stat (the bundle's own is PRA / fantasy points)."""
+    if not stat or (PM.STAT_CHOICES.get(FAMILY) or {}).get(stat) is None or not side.get("depth"):
+        return side
+    with PM.using_metric(FAMILY, stat):
+        new = PD.build_side(SPORT_KEY, side["offense"], side["defense"], side["depth"], bundle.get("allowed") or {},
+                            (bundle.get("props") or {}).get("pgames") or [])
+    return dict(side, rows=new["rows"], ranked=new["ranked"])
+
+
+def render_side(side, off_name, def_name, stat=None):
+    custom = bool(stat and (PM.STAT_CHOICES.get(FAMILY) or {}).get(stat))
+    st.markdown(f"#### {off_name} offense  vs  {def_name} defense" + (f" · {stat}" if custom else ""))
+    side = _side_in_stat(side, stat)
+    mf = _model_factors(side["defense"], PM.STAT_MARKET.get(stat or "PRA", "PRA"))
     for r in side["rows"]:
         r["model_factor"] = mf.get(r["slot"])
     if not side["ranked"]:
         st.caption("Not enough defenses with a full sample to rank yet, so the table shows what this defense has "
                    "allowed per game without a league rank." if FAMILY == "basketball" and SPORT_KEY == "NCAAMB" else
                    "Not enough games yet to rank the defenses at these slots — try the other season option.")
-    co = PM.callouts(side, off_name, def_name, family=FAMILY, limit=4 if FAMILY == "basketball" else 3)
+    with PM.using_metric(FAMILY, stat):
+        co = PM.callouts(side, off_name, def_name, family=FAMILY, limit=4 if FAMILY == "basketball" else 3)
     if co["targets"] or co["fades"]:
         left, right = st.columns(2)
         with left:
@@ -207,7 +220,8 @@ def render_side(side, off_name, def_name):
             st.markdown("**🔴 Fades**")
             for t in co["fades"] or ["Nothing clearly tough."]:
                 st.markdown(f"- {t}")
-    df = pd.DataFrame(PM.display_rows_by_player(side["rows"]) if FAMILY == "basketball" else PM.display_rows(side["rows"]))
+    with PM.using_metric(FAMILY, stat):
+        df = pd.DataFrame(PM.display_rows_by_player(side["rows"]) if FAMILY == "basketball" else PM.display_rows(side["rows"]))
     st.dataframe(df, hide_index=True, width="stretch")
     if FAMILY == "basketball" and any(p.get("pos") for r in side["rows"] for p in r.get("players") or []):
         st.caption("**Pos** is tonight's depth-chart spot with the group it's graded against: **SF (F)** = starting "
@@ -1035,9 +1049,13 @@ if tab_pos is not None:
                       "the Player props tab uses: these raw numbers adjusted for the small sample and blended with last "
                       "season."
                       + (" Every rotation player, with his own projection, is on the **🎯 Player props** tab." if HAS_PROPS else "")))
-        render_side(bundle["away_off"], away_name, home_name)
+        choices = list(PM.STAT_CHOICES.get(FAMILY) or {})
+        stat = st.selectbox("Stat", choices, key=f"pm_depth_stat_{FAMILY}",
+                            help="Rank the defenses and read every player in this stat instead of "
+                                 + ("PRA." if FAMILY == "basketball" else "fantasy points.")) if choices else None
+        render_side(bundle["away_off"], away_name, home_name, stat)
         st.divider()
-        render_side(bundle["home_off"], home_name, away_name)
+        render_side(bundle["home_off"], home_name, away_name, stat)
         st.divider()
         render_game_log()
 
@@ -1047,8 +1065,10 @@ if tab_breakout is not None:
         try:
             import nba_positions as NPOS
             import sports as _sports
+            bstat = st.selectbox("Stat", list(PM.STAT_CHOICES["basketball"]), key="pm_breakout_stat",
+                                 help="Rank each position's defense and read each starter in this stat.")
             with st.spinner("Reading every team's depth chart..."):
-                brk = NPOS.build(bundle, _sports.get("NBA").engine)
+                brk = NPOS.build(bundle, _sports.get("NBA").engine, bstat)
         except Exception as exc:                                   # noqa: BLE001
             brk = None
             st.warning(f"The position breakout couldn't be built ({type(exc).__name__}). The other tabs are unaffected.")
@@ -1063,7 +1083,7 @@ if tab_breakout is not None:
                        "model uses today; **Blended** pulls the position number toward it until the sample grows.")
             for side, off, de in (("away_off", away_name, home_name), ("home_off", home_name, away_name)):
                 st.markdown(f"**{off} offense vs {de} defense**")
-                st.dataframe(pd.DataFrame(NPOS.display(brk[side])), hide_index=True, width="stretch")
+                st.dataframe(pd.DataFrame(NPOS.display(brk[side], bstat)), hide_index=True, width="stretch")
 
 with tab_h2h:
     h = bundle["h2h"]

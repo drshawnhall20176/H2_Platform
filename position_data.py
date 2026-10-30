@@ -477,6 +477,7 @@ def build_bundle(sport: str, home: Any, away: Any, pgames: List[Dict], depth: Di
         usage = PM.usage_depth(pgames, off, sport)
         dep = fill_depth_from_usage(depth.get(off) or {}, usage, sport)
         bundle[side] = build_side(sport, off, de, dep, allowed, pgames)
+        bundle[side]["depth"] = dep                       # so the page can rebuild the table in another stat
         if not bundle[side]["rows"] or all(not r["players"] for r in bundle[side]["rows"]):
             bundle["notes"].append(f"No depth chart or recent usage found for {names.get(off, off)}.")
     meetings = PM.h2h_meetings(h2h_games, home, away)

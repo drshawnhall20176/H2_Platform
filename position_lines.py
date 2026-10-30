@@ -71,6 +71,12 @@ def _team_keys(name) -> set:
     full = NFL_TEAMS.get(str(name or "").strip().upper())
     if full:
         keys.add(_norm_team(full))
+    # ESPN says "LA Clippers", the books "Los Angeles Clippers" (Oct 30: no lines loaded for LAC @ MIN).
+    for k in list(keys):
+        if k.startswith("la "):
+            keys.add("los angeles " + k[3:])
+        elif k.startswith("los angeles "):
+            keys.add("la " + k[12:])
     return keys
 
 

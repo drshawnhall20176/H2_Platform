@@ -23,7 +23,9 @@ no published depth-chart feed here, so its depth is the usage ranking over recen
 
 from __future__ import annotations
 
+import contextvars
 import math
+from contextlib import contextmanager
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 FOOTBALL_SLOTS: Tuple[str, ...] = ("QB", "RB1", "RB2", "WR1", "WR2", "WR3", "TE1")
@@ -51,9 +53,9 @@ SLOT_STATS: Dict[str, Tuple[Tuple[str, str], ...]] = {
     "WR2": (("rec", "rec"), ("rec_yds", "rec yds"), ("rec_td", "rec TD")),
     "WR3": (("rec", "rec"), ("rec_yds", "rec yds"), ("rec_td", "rec TD")),
     "TE1": (("rec", "rec"), ("rec_yds", "rec yds"), ("rec_td", "rec TD")),
-    "G": (("pts", "pts"), ("reb", "reb"), ("ast", "ast"), ("fg3m", "3PM")),
-    "F": (("pts", "pts"), ("reb", "reb"), ("ast", "ast"), ("fg3m", "3PM")),
-    "C": (("pts", "pts"), ("reb", "reb"), ("ast", "ast"), ("fg3m", "3PM")),
+    "G": (("pts", "pts"), ("reb", "reb"), ("ast", "ast"), ("fg3m", "3PM"), ("stl", "stl"), ("blk", "blk")),
+    "F": (("pts", "pts"), ("reb", "reb"), ("ast", "ast"), ("fg3m", "3PM"), ("stl", "stl"), ("blk", "blk")),
+    "C": (("pts", "pts"), ("reb", "reb"), ("ast", "ast"), ("fg3m", "3PM"), ("stl", "stl"), ("blk", "blk")),
 }
 
 # --------------------------------------------------------------------------- absences -> role changes
@@ -143,7 +145,44 @@ def basketball_pra(s: Dict) -> float:
     return _num(s.get("pts")) + _num(s.get("reb")) + _num(s.get("ast"))
 
 
+# Oct 30: the Depth tab and the position breakout can be read in any stat, not just PRA / fantasy points. The choice
+# lives in a context variable (per Streamlit session thread), so the same tables and rankings rebuild in that stat.
+STAT_CHOICES: Dict[str, Dict[str, Optional[Tuple[str, ...]]]] = {
+    "basketball": {"PRA": None, "Points": ("pts",), "Rebounds": ("reb",), "Assists": ("ast",), "3PM": ("fg3m",),
+                   "PR": ("pts", "reb"), "PA": ("pts", "ast"), "RA": ("reb", "ast"), "Steals": ("stl",),
+                   "Blocks": ("blk",)},
+    "football": {"Fantasy pts": None, "Pass yds": ("pass_yds",), "Pass att": ("pass_att",), "Completions": ("pass_cmp",),
+                 "Pass TDs": ("pass_td",), "Rush yds": ("rush_yds",), "Carries": ("rush_att",), "Receptions": ("rec",),
+                 "Rec yds": ("rec_yds",), "Targets": ("tgt",), "Rush+Rec yds": ("rush_yds", "rec_yds"),
+                 "TDs": ("rush_td", "rec_td")},
+}
+# The Player props market behind each basketball choice (for the Model matchup column).
+STAT_MARKET = {"PRA": "PRA", "Points": "Points", "Rebounds": "Rebounds", "Assists": "Assists", "3PM": "Threes Made",
+               "PR": "PR", "PA": "PA", "RA": "RA", "Steals": "Steals", "Blocks": "Blocks"}
+_METRIC: "contextvars.ContextVar" = contextvars.ContextVar("pm_metric", default=None)
+
+
+@contextmanager
+def using_metric(family: str, choice: Optional[str]):
+    """Inside this block every ranking, allowed-per-game and form number is measured in `choice` (a STAT_CHOICES
+    name). The default choice (PRA / fantasy points) changes nothing."""
+    keys = (STAT_CHOICES.get(family) or {}).get(choice) if choice else None
+    token = _METRIC.set((choice, keys) if keys else None)
+    try:
+        yield
+    finally:
+        _METRIC.reset(token)
+
+
+def metric_short(family: str) -> str:
+    m = _METRIC.get()
+    return m[0] if m else METRIC_SHORT.get(family, "")
+
+
 def metric_value(sport: str, stats: Dict) -> float:
+    m = _METRIC.get()
+    if m:
+        return sum(_num((stats or {}).get(k)) for k in m[1])
     return football_points(stats) if FAMILY_BY_SPORT.get(sport) == "football" else basketball_pra(stats)
 
 
@@ -1001,6 +1040,7 @@ def display_rows_by_player(rows: Sequence[Dict]) -> List[Dict]:
     """Basketball: one table row per rotation player (most minutes first within his group), each beside his
     position group's defensive numbers -- nobody is tucked into a "Next up" cell."""
     out: List[Dict] = []
+    u = metric_short("basketball")
     role_of = roles(rows)
     mf_by_slot = {r.get("slot"): r.get("model_factor") for r in rows}
     for r in rows:
@@ -1015,13 +1055,13 @@ def display_rows_by_player(rows: Sequence[Dict]) -> List[Dict]:
                 "Min": "—" if p.get("avg_min") is None else f"{_num(p['avg_min']):.0f}",
                 "Role": role_of.get(p.get("name"), "Rotation") if p else "—",
                 # Oct 29: the stat named in every header -- "Last 4" read as points cost a Tari Eason points leg.
-                "Last 4 (PRA)": _form_text(p.get("recent")),
+                f"Last 4 ({u})": _form_text(p.get("recent")),
                 "Last 4 split": _split_text(p.get("recent")),
-                "vs this D (PRA)": _form_text(p.get("h2h")),
+                f"vs this D ({u})": _form_text(p.get("h2h")),
                 "D rank (1 = softest)": rank_txt,
                 "Verdict": TIER_BADGE.get(r["tier"], "—"),
-                "Allowed / g (PRA)": "—" if r["allowed"] is None else f"{r['allowed']:.1f}" + (" ⚠️ thin" if r["thin"] else ""),
-                "League avg (PRA)": "—" if r["league_avg"] is None else f"{r['league_avg']:.1f}",
+                f"Allowed / g ({u})": "—" if r["allowed"] is None else f"{r['allowed']:.1f}" + (" ⚠️ thin" if r["thin"] else ""),
+                f"League avg ({u})": "—" if r["league_avg"] is None else f"{r['league_avg']:.1f}",
                 "vs league": "—" if vs is None else f"{vs:+.0f}%",
                 "Model matchup": "—" if mf is None else f"{mf - 1:+.0%}" + (" (C/F blend)" if p.get("slot2") else ""),
                 "Trend": r["trend"],
@@ -1081,7 +1121,7 @@ def callouts(side: Dict, off_name: str, def_name: str, limit: int = 3, family: s
 
 def _callout(r: Dict, p: Dict, def_name: str, soft: List, tough: List, family: str) -> None:
     """One Targets / Fades line for player `p` in slot row `r`, scored by the gap weighted by his role."""
-    unit = f" {METRIC_SHORT[family]}" if family in ("basketball", "football") else ""
+    unit = f" {metric_short(family)}" if family in ("basketball", "football") else ""
     text = (f"{p['name']} ({r['slot']}) — {def_name} rank {r['rank']}/{r['n_teams']} against the position, "
             f"allowing {r['allowed']:.1f}{unit} vs a {r['league_avg']:.1f} league average ({r['vs_league_pct']:+.0f}%)"
             + (f"; he's averaging {p['recent']['avg']:.1f} {METRIC_SHORT.get(family, '')} lately".replace("  ", " ")

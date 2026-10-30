@@ -13,7 +13,7 @@ are left out of the five-position totals.
 Small samples: each position's number is also shown blended toward the defense's broader group (PG/SG -> guards,
 SF/PF -> forwards): weight n / (n + SHRINK_GAMES) on the position's own number.
 """
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Sequence
 
 import position_matchups as PM
 
@@ -21,6 +21,8 @@ POSITIONS = ("PG", "SG", "SF", "PF", "C")
 GROUP_OF = {"PG": "G", "SG": "G", "SF": "F", "PF": "F", "C": "C"}
 LABEL = {"PG": "Point guard", "SG": "Shooting guard", "SF": "Small forward", "PF": "Power forward", "C": "Center"}
 SHRINK_GAMES = 10.0
+STATS = ("pts", "reb", "ast", "fg3m", "stl", "blk")
+PRA = ("pts", "reb", "ast")
 BACKUPS_SHOWN = 2
 
 
@@ -66,7 +68,7 @@ def allowed_by_position(pgames: Iterable[Dict], labels: Dict, key=lambda p: p) -
             if not k:
                 continue
             tot = g[bucket].setdefault(k, {})
-            for stat in ("pts", "reb", "ast", "fg3m"):
+            for stat in STATS:
                 tot[stat] = tot.get(stat, 0.0) + _num((p.get("stats") or {}).get(stat))
     out: Dict = {}
     for (gid, defense), g in games.items():
@@ -76,20 +78,20 @@ def allowed_by_position(pgames: Iterable[Dict], labels: Dict, key=lambda p: p) -
     return out
 
 
-def summarize(allowed: Dict, n: Optional[int] = None) -> Dict:
-    """{defense: {"pos": {PG: {"pra","games","stats"}}, "grp": {G: {...}}}} over each defense's latest `n` games."""
+def summarize(allowed: Dict, n: Optional[int] = None, keys: Sequence[str] = PRA) -> Dict:
+    """{defense: {"pos": {PG: {"pra","games","stats"}}, "grp": {G: {...}}}} over each defense's latest `n` games.
+    "pra" is the chosen stat (`keys` summed; PRA by default)."""
     out: Dict = {}
     for d, games in allowed.items():
         window = games[:n] if n else games
         if not window:
             continue
         per = {"pos": {}, "grp": {}}
-        for bucket, keys in (("pos", POSITIONS), ("grp", ("G", "F", "C"))):
-            for k in keys:
+        for bucket, spots in (("pos", POSITIONS), ("grp", ("G", "F", "C"))):
+            for k in spots:
                 lines = [g[bucket].get(k) or {} for g in window]
-                stats = {s: sum(_num(l.get(s)) for l in lines) / len(lines) for s in ("pts", "reb", "ast", "fg3m")}
-                per[bucket][k] = {"pra": stats["pts"] + stats["reb"] + stats["ast"], "games": len(window),
-                                  "stats": stats}
+                stats = {s: sum(_num(l.get(s)) for l in lines) / len(lines) for s in STATS}
+                per[bucket][k] = {"pra": sum(stats[x] for x in keys), "games": len(window), "stats": stats}
         out[d] = per
     return out
 
@@ -171,7 +173,7 @@ def _name(p: Optional[Dict], status: Dict) -> str:
     return p["name"] + (f" ({s})" if s else "")
 
 
-def display(rows: List[Dict]) -> List[Dict]:
+def display(rows: List[Dict], unit: str = "PRA") -> List[Dict]:
     out = []
     for r in rows:
         st = r["status"]
@@ -180,23 +182,24 @@ def display(rows: List[Dict]) -> List[Dict]:
             "Pos": r["pos"],
             "Starter": _name(r["starter"], st),
             "Backups": ", ".join(_name(b, st) for b in r["backups"]) or "—",
-            "Last 4 (PRA)": PM._form_text(r["form"]),
+            f"Last 4 ({unit})": PM._form_text(r["form"]),
             "D rank (1 = softest)": f"{r['rank']}/{r['n_teams']}" if r["rank"] else "—",
             "Verdict": PM.TIER_BADGE.get(r["tier"], "—"),
-            "Allowed / g (PRA)": "—" if r["allowed"] is None else
+            f"Allowed / g ({unit})": "—" if r["allowed"] is None else
                                  f"{r['allowed']:.1f}" + (" ⚠️ thin" if r["games"] < PM.THIN_SAMPLE_GAMES else ""),
-            "League avg (PRA)": "—" if r["league"] is None else f"{r['league']:.1f}",
+            f"League avg ({unit})": "—" if r["league"] is None else f"{r['league']:.1f}",
             "vs league": "—" if r["pos_pct"] is None else f"{r['pos_pct']:+.0f}%",
             "Group vs league": "—" if r["grp_pct"] is None else f"{r['grp']} {r['grp_pct']:+.0f}%",
             "Blended": "—" if r["blend_pct"] is None else f"{r['blend_pct']:+.0f}%",
             "Trend": r["trend"],
             "What it allows": "—" if not s else
-                              f"{s['pts']:.1f} pts · {s['reb']:.1f} reb · {s['ast']:.1f} ast · {s['fg3m']:.1f} 3PM",
+                              f"{s['pts']:.1f} pts · {s['reb']:.1f} reb · {s['ast']:.1f} ast · {s['fg3m']:.1f} 3PM"
+                              f" · {s['stl']:.1f} stl · {s['blk']:.1f} blk",
         })
     return out
 
 
-def build(bundle: Dict, eng) -> Optional[Dict]:
+def build(bundle: Dict, eng, stat: str = "PRA") -> Optional[Dict]:
     """Both directions of one NBA game's breakout from a Position Matchups bundle, or None when no depth charts
     could be read (the tab then says so). Fetches every team's depth chart in the sample (cached by the engine)."""
     import position_data as PD
@@ -210,7 +213,8 @@ def build(bundle: Dict, eng) -> Optional[Dict]:
         return None
     labels = label_players(charts)
     allowed = allowed_by_position(pgames, labels)
-    season, recent = summarize(allowed), summarize(allowed, PM.RECENT_N)
+    keys = (PM.STAT_CHOICES["basketball"].get(stat) or PRA)
+    season, recent = summarize(allowed, keys=keys), summarize(allowed, PM.RECENT_N, keys=keys)
     status = {}
     for rot in (props.get("rotation") or {}).values():
         for r in rot or []:
@@ -224,5 +228,6 @@ def build(bundle: Dict, eng) -> Optional[Dict]:
             feed = eng._get_json_cached(f"{eng.SITE_API}/teams/{off}/depthcharts")
         except Exception:                                       # noqa: BLE001
             feed = None
-        out[side] = breakout_rows(de, depth_lists(feed), season, recent, form_pgames, status)
+        with PM.using_metric("basketball", stat):
+            out[side] = breakout_rows(de, depth_lists(feed), season, recent, form_pgames, status)
     return out
