@@ -120,7 +120,7 @@ def test_owner_only_pages_match_expected_titles():
                      "Matchup Lab", "Track Record", "Data Health",
                      "Suggested Parlays", "Speculative Basket", "Graded Picks",
                      "Model Dashboard", "First Innings Totals", "Player Lines", "Slip Lab",
-                     "Position Matchups"}, gated
+                     "Position Matchups", "Postgame Review"}, gated
     all_titles = set(re.findall(r'\("([^"]+)",\s*"[^"]*",\s*"[^"]*"\)', src))
     assert gated <= all_titles, f"gated titles not found in _META: {gated - all_titles}"
     print("✓ owner-only gate targets exactly Bet Log / Media Room / Podcast Studio / Edge Board / "
@@ -613,6 +613,7 @@ def test_sidebar_sections_match_the_documented_grouping():
         "35": "🔬 DEEP RESEARCH", "36": "🔬 DEEP RESEARCH", "38": "🔬 DEEP RESEARCH",
         "16": "🔍 SELF-GRADING & PROOF", "17": "🔍 SELF-GRADING & PROOF",
         "18": "🔍 SELF-GRADING & PROOF", "19": "🔍 SELF-GRADING & PROOF", "40": "🔍 SELF-GRADING & PROOF",
+        "41": "🔍 SELF-GRADING & PROOF",
         "20": "📣 OPS & CONTENT", "21": "📣 OPS & CONTENT", "22": "📣 OPS & CONTENT",
     }
     assert actual == expected, f"section grouping drifted from expected: {actual}"
@@ -1243,7 +1244,7 @@ def test_sport_only_page_visibility_matches_expected_config():
                      "27": ("MLB",), "29": ("NCAAF",), "30": ("NCAAF",), "31": ("NCAAF",),
                      "32": ("NCAAF",), "33": ("NFL",), "34": ("NFL",),
                      "35": ("NCAAF",), "36": ("NCAAF",),
-                         "38": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL")}, pairs
+                         "38": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL"), "41": ("NFL", "NCAAF", "NBA")}, pairs
     print("✓ sport_only_leads matches expected config (Bullpen Watch/Game Watch/Pitching Lab/"
           "Dinger Engine/Matchup Lab(MLB)/Player Lines/First Innings Totals -> MLB, Hot Hand "
           "Engine/Matchup Lab(WNBA/NBA/NCAAMB) -> WNBA+NBA+NCAAMB, Matchup Lab(NFL)/Anytime TD "

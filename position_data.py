@@ -47,7 +47,7 @@ def _n(x) -> float:
 _NFL_COLS = {"pass_att": "attempts", "pass_cmp": "completions", "pass_yds": "passing_yards", "pass_td": "passing_tds",
              "pass_int": "passing_interceptions", "rush_att": "carries", "rush_yds": "rushing_yards",
              "rush_td": "rushing_tds", "tgt": "targets", "rec": "receptions", "rec_yds": "receiving_yards",
-             "rec_td": "receiving_tds"}
+             "rec_td": "receiving_tds", "sacked": "sacks_suffered"}
 _NCAAF_COLS = {"pass_att": "passing_ATT", "pass_yds": "passing_YDS", "pass_td": "passing_TD",
                "pass_int": "passing_INT", "rush_att": "rushing_CAR", "rush_yds": "rushing_YDS",
                "rush_td": "rushing_TD", "rec": "receiving_REC", "rec_yds": "receiving_YDS",
@@ -81,6 +81,49 @@ def nfl_pgames(weekly, before_week: int) -> List[Dict]:
                     "pid": r.get("player_id"), "name": r.get("player_display_name") or r.get("player_name"),
                     "pos": pos, "stats": {k: _n(r.get(c)) for k, c in _NFL_COLS.items()}})
     return out
+
+
+# Kickers and defenders (Oct 30): their own player-game lines, kept OUT of the offensive slot tables.
+_KICK_POS = {"K", "PK"}
+_DEF_POS = {"DE": "DL", "DT": "DL", "NT": "DL", "DL": "DL", "EDGE": "DL",
+            "LB": "LB", "ILB": "LB", "OLB": "LB", "MLB": "LB",
+            "CB": "DB", "DB": "DB", "S": "DB", "SS": "DB", "FS": "DB", "SAF": "DB"}
+_SPECIAL_COLS = {"fg_made": "fg_made", "fg_att": "fg_att", "pat_made": "pat_made", "pat_att": "pat_att",
+                 "tkl_solo": "def_tackles_solo", "tkl_w_ast": "def_tackles_with_assist", "tkl_ast": "def_tackle_assists",
+                 "sacks": "def_sacks", "qb_hits": "def_qb_hits", "def_int": "def_interceptions"}
+
+
+def nfl_special_pgames(weekly, before_week: int, game_prefix: str = "") -> List[Dict]:
+    """Kicker and defender player-game lines (weeks before `before_week`). `pos` is K / DL / LB / DB. Derived stats:
+    kick_pts (3 a field goal + 1 an extra point) and tkl (solo + assisted, the books' "tackles + assists")."""
+    if weekly is None or len(weekly) == 0:
+        return []
+    out: List[Dict] = []
+    for r in weekly.to_dict("records"):
+        raw = str(r.get("position") or "").upper()
+        pos = "K" if raw in _KICK_POS else _DEF_POS.get(raw)
+        wk = r.get("week")
+        if pos is None or wk is None or not (int(wk) < before_week):
+            continue
+        team, opp = r.get("team"), r.get("opponent_team")
+        if not _has(team) or not _has(opp):
+            continue
+        st = {k: _n(r.get(c)) for k, c in _SPECIAL_COLS.items()}
+        st["kick_pts"] = 3 * st["fg_made"] + st["pat_made"]
+        st["tkl"] = st["tkl_solo"] + st["tkl_w_ast"] + st["tkl_ast"]
+        if pos == "K" and st["fg_att"] + st["pat_att"] <= 0:
+            continue
+        if pos != "K" and st["tkl"] + st["sacks"] + st["qb_hits"] <= 0:
+            continue
+        out.append({"game": f"{game_prefix}{int(wk)}-{team}", "order": int(wk) - (100 if game_prefix else 0),
+                    "team": team, "opp": opp, "pid": r.get("player_id"),
+                    "name": r.get("player_display_name") or r.get("player_name"), "pos": pos, "stats": st})
+    return out
+
+
+def prior_season_pgames(pgames: List[Dict]) -> List[Dict]:
+    """Last season's lines re-keyed so they sort before this season's and never share a game id with it."""
+    return [dict(p, order=p["order"] - 100, game=f"p{p['game']}") for p in pgames or []]
 
 
 def ncaaf_pgames(rows: Iterable[Dict], season: int, before_week: int, position_by_id: Dict[str, str]) -> List[Dict]:
@@ -510,8 +553,38 @@ def load_football(sport_key: str, date_str: str, home: str, away: str, use_previ
     for team in (home, away):
         dep = fill_depth_from_usage(depth.get(team) or {}, PM.usage_depth(pgames, team, sport_key), sport_key)
         roster[team] = FP.roster_from_depth(dep)
-    bundle["props"] = {"family": "football", "pgames": pgames, "roster": roster, "rest": {}}
+    props = {"family": "football", "pgames": pgames, "roster": roster, "rest": {}, "prior_pgames": [],
+             "special": {}, "special_roster": {}}
+    if sport_key == "NFL" and not use_previous_season:
+        props.update(_nfl_props_extras(eng, season, week, weekly, (home, away), notes))
+    bundle["props"] = props
     return bundle
+
+
+_NFL_PRIOR: Dict[Tuple, Tuple] = {}
+
+
+def _nfl_props_extras(eng, season: int, week: int, weekly, teams, notes: List[str]) -> Dict:
+    """Last season's offensive lines (thin-sample players borrow them), kicker / defender lines both seasons, and
+    each team's kicker + defenders with injury status -- the inputs the kicking and defensive props read."""
+    key = (season, week, id(weekly))
+    if key in _NFL_PRIOR and _NFL_PRIOR[key][0] is weekly:
+        prior, special, special_prior = _NFL_PRIOR[key][1]
+    else:
+        last = _safe(lambda: eng.load_season_weekly_stats(season - 1), None, notes, "last season's weekly stats")
+        prior = prior_season_pgames(nfl_pgames(last, 999)) if last is not None else []
+        special = nfl_special_pgames(weekly, week)
+        special_prior = nfl_special_pgames(last, 999, game_prefix="p") if last is not None else []
+        if len(_NFL_PRIOR) > 6:
+            _NFL_PRIOR.clear()
+        _NFL_PRIOR[key] = (weekly, (prior, special, special_prior))
+    import football_special as FS
+    sroster = {}
+    for t in teams:
+        inj = {i.get("player"): clean_status(i.get("status"))
+               for i in _safe(lambda t=t: eng.get_team_injuries(t, season, week), [], notes, "injuries")}
+        sroster[t] = FS.team_roster(special, t, inj)
+    return {"prior_pgames": prior, "special": {"pgames": special, "prior": special_prior}, "special_roster": sroster}
 
 
 def _nfl_depths(eng, season: int, week: int, teams: Tuple[str, str], notes: List[str]) -> Dict[str, Dict[str, List[Dict]]]:

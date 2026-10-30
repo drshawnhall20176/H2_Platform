@@ -215,12 +215,16 @@ def backtest_football(pgames: Sequence[Dict], sport: str, market: str, max_cases
                       min_history: int = 3) -> Dict:
     import football_props as FP
     m = FP.MARKETS[market]
+    if FP.is_special(market):                       # kickers / defenders replay from their own lines (not here)
+        out = summarize([])
+        out["dates"] = None
+        return out
     pg = [p for p in pgames or [] if p.get("order") is not None]
     tgt_ok = FP.has_targets(pg)
     grp_ok = {"Receptions": {"WR", "TE", "RB"}, "Receiving Yards": {"WR", "TE", "RB"}, "Rush Yards": {"RB", "QB"},
               "Rush + Rec Yards": {"RB", "WR", "TE"}, "Pass Yards": {"QB"}, "Passing TDs": {"QB"}, "Rush Attempts": {"RB"},
-              "Pass Attempts": {"QB"}, "Pass Completions": {"QB"},
-              "Anytime TD": {"RB", "WR", "TE"}}[market]
+              "Pass Attempts": {"QB"}, "Pass Completions": {"QB"}, "Targets": {"WR", "TE", "RB"},
+              "Interceptions": {"QB"}, "Anytime TD": {"RB", "WR", "TE"}}[market]
     by_player: Dict = {}
     for q in pg:
         by_player.setdefault(q["pid"], []).append(q)

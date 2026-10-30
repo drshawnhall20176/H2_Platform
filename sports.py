@@ -115,20 +115,6 @@ _MLB_MARKET_MAP = {
     "Batter Hits+Runs+RBIs": "batter_hits_runs_rbis",
 }
 
-# Basketball (NBA / WNBA / NCAAMB share one set of market names). The four core props plus the build-246 additions:
-# combos (Pts+Reb+Ast, Pts+Reb, Pts+Ast, Reb+Ast), Steals, Blocks, Blocks+Steals and Turnovers — all real Odds API markets — and
-# Threes Attempted, which has NO sportsbook market (model-only: never requested, never pre-selected).
-import basketball_markets as _BM
-
-_BB_CORE_MARKETS = ["player_points", "player_rebounds", "player_assists", "player_threes"]
-_BB_CORE_MAP = {"Points": "player_points", "Rebounds": "player_rebounds", "Assists": "player_assists",
-                "Threes Made": "player_threes"}
-_BB_MARKETS = _BB_CORE_MARKETS + list(_BM.EXTRA_ODDS_KEYS)
-_BB_MARKET_MAP = {**_BB_CORE_MAP, **_BM.EXTRA_DISPLAY_TO_ODDS_KEY}
-# Pre-selected on the boards and parlay builders: everything a book prices. Threes Attempted is left out (no book line,
-# so every play on it would sit on a placeholder number) and stays one click away in the same picker.
-_BB_DEFAULT_MARKETS = list(_BB_CORE_MAP) + [d for d in _BM.EXTRA_DISPLAY if d not in _BM.MODEL_ONLY_DISPLAY]
-
 REGISTRY: Dict[str, Sport] = {
     "MLB": Sport(
         key="MLB", label="MLB — Baseball", icon="⚾", odds_sport_key="baseball_mlb",
@@ -147,6 +133,9 @@ REGISTRY: Dict[str, Sport] = {
                  # added on request: odds-API keys confirmed in book_menu.py's football list
                  "player_pass_attempts", "player_pass_completions", "player_pass_interceptions",
                  "player_pass_tds", "player_rush_attempts", "player_field_goals",
+                 # Oct 30: kicking + defensive props (Position Matchups' football_special model)
+                 "player_kicking_points", "player_pats", "player_sacks", "player_tackles_assists",
+                 "player_solo_tackles",
                  "player_anytime_td", "player_1st_td", "player_last_td"],
         market_map={"Pass Yards": "player_pass_yds", "Rush Yards": "player_rush_yds",
                     "Receptions": "player_receptions", "Receiving Yards": "player_reception_yds",
@@ -154,6 +143,8 @@ REGISTRY: Dict[str, Sport] = {
                     "Interceptions": "player_pass_interceptions", "Passing TDs": "player_pass_tds",
                     "Rush Attempts": "player_rush_attempts",
                     "FG Made": "player_field_goals", "Anytime TD": "player_anytime_td",
+                    "Kicking Points": "player_kicking_points", "PATs Made": "player_pats", "Sacks": "player_sacks",
+                    "Tackles + Assists": "player_tackles_assists", "Solo Tackles": "player_solo_tackles",
                     "First TD Scorer": "player_1st_td", "Last TD Scorer": "player_last_td"},
         # Yes-only markets (no Over/Under): matched on player + market, not on a line.
         single_line_markets={"player_anytime_td", "player_1st_td", "player_last_td"},
@@ -187,16 +178,18 @@ REGISTRY: Dict[str, Sport] = {
     # ---- vision placeholders (become live as each engine is built) ----
     "WNBA":   Sport(
         key="WNBA", label="WNBA — Basketball", icon="🏀", odds_sport_key="basketball_wnba",
-        markets=list(_BB_MARKETS), market_map=dict(_BB_MARKET_MAP),
-        default_markets=list(_BB_DEFAULT_MARKETS),
+        markets=["player_points", "player_rebounds", "player_assists", "player_threes"],
+        market_map={"Points": "player_points", "Rebounds": "player_rebounds",
+                    "Assists": "player_assists", "Threes Made": "player_threes"},
         engine_module="wnba_engine", projections_module="wnba_projections",
         config_module="config_wnba",
         enabled=True,   # live as of Stage 2's WNBA build — Core 4 markets (Pts/Reb/Ast/3PM)
     ),
     "NBA":    Sport(
         key="NBA", label="NBA — Basketball", icon="🏀", odds_sport_key="basketball_nba",
-        markets=list(_BB_MARKETS), market_map=dict(_BB_MARKET_MAP),
-        default_markets=list(_BB_DEFAULT_MARKETS),
+        markets=["player_points", "player_rebounds", "player_assists", "player_threes"],
+        market_map={"Points": "player_points", "Rebounds": "player_rebounds",
+                    "Assists": "player_assists", "Threes Made": "player_threes"},
         engine_module="nba_engine", projections_module="nba_projections",
         config_module="config_nba",
         enabled=True,   # live as of 2026-07-15 — built as a copy-adapt of the WNBA engine (see
@@ -288,8 +281,9 @@ REGISTRY: Dict[str, Sport] = {
     ),
     "NCAAMB": Sport(
         key="NCAAMB", label="NCAA Men's Basketball", icon="🏀", odds_sport_key="basketball_ncaab",
-        markets=list(_BB_MARKETS), market_map=dict(_BB_MARKET_MAP),
-        default_markets=list(_BB_DEFAULT_MARKETS),
+        markets=["player_points", "player_rebounds", "player_assists", "player_threes"],
+        market_map={"Points": "player_points", "Rebounds": "player_rebounds",
+                    "Assists": "player_assists", "Threes Made": "player_threes"},
         engine_module="ncaamb_engine", projections_module="ncaamb_projections",
         config_module="config_ncaamb",
         enabled=True,    # LIVE as of 2026-07-16, flipped after Shawn's own live verification —

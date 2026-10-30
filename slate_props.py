@@ -144,9 +144,10 @@ def team_rows(family: str, sport: str, bundle: Dict, team, opp, market: str, spr
            "news_checked": bool(news_checked), "prices": prices or {}}
     if family == "football":
         import football_props as FP
-        roster = (props.get("roster") or {}).get(team) or []
+        roster = FP.roster_for(props, team, market)
         return FP.player_rows(roster, team, opp, market, props.get("pgames") or [], bundle.get("allowed") or {},
-                              lines=lines, context=dict(ctx, implied=team_imp), sport=sport)
+                              lines=lines, context=dict(ctx, implied=team_imp), sport=sport,
+                              prior_pgames=props.get("prior_pgames"), special=props.get("special"))
     if family == "hockey":
         import hockey_props as HP
         pg = props.get("pgames") or []

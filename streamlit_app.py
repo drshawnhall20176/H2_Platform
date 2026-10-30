@@ -129,6 +129,7 @@ def run():
                                                           # adjusted slate-wide leaderboard.
         "36": ("NCAAF",),                                # Anytime TD Engine (NCAAF) -- Bernoulli
                                                           # TD probability board.
+        "41": ("NFL", "NCAAF", "NBA"),                    # Postgame Review -- kickoff snapshots graded vs box scores
         "38": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL"),  # Position Matchups -- depth chart vs the opposing
                                                           # defense by position + team head-to-head.
     }
@@ -156,7 +157,7 @@ def run():
                          "Matchup Lab", "Track Record", "Data Health",
                          "Suggested Parlays", "Speculative Basket", "Graded Picks",
                          "Model Dashboard", "First Innings Totals", "Player Lines", "Slip Lab",
-                         "Position Matchups"}
+                         "Postgame Review", "Position Matchups"}
 
     # leading page-number -> (title, icon, stable url slug). The url_path is the key fix: it pins
     # each page to a predictable URL so reruns keep you on the same page instead of defaulting to
@@ -211,6 +212,7 @@ def run():
         "38": ("Position Matchups", "🧭", "position_matchups"),   # depth chart vs opposing defense + H2H
         "39": ("Analyst Desk", "🎙️", "analyst_desk"),   # angles + hidden gems + commentary + graded record
         "40": ("Analyst Record", "🧾", "analyst_record"),   # public, verifiable record of every locked call
+        "41": ("Postgame Review", "🩻", "postgame_review"),   # kickoff snapshots graded vs box scores + approvals
     }
 
     # SIDEBAR SECTIONS, added directly on request: st.navigation natively supports a
@@ -242,7 +244,7 @@ def run():
         SECTION_OF[k] = "🛰️ LIVE SIGNALS"
     for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26", "27", "29", "30", "31", "32", "33", "34", "35", "36", "38"):
         SECTION_OF[k] = "🔬 DEEP RESEARCH"
-    for k in ("16", "17", "18", "19", "40"):
+    for k in ("16", "17", "18", "19", "40", "41"):
         SECTION_OF[k] = "🔍 SELF-GRADING & PROOF"
     for k in ("20", "21", "22"):
         SECTION_OF[k] = "📣 OPS & CONTENT"

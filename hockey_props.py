@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Sequence
 
 import props_engine as PE
+import player_props as PPR
 
 MARKETS: Dict[str, Dict] = {
     "Shots on Goal": {"stat": "sog", "dist": "count", "odds": "player_shots_on_goal", "role": "skater",
@@ -211,7 +212,8 @@ def player_rows(rot: Dict[str, List[Dict]], team, opp, market: str, pgames, line
                 flags += rest["flags"]
                 env_mult = 1 + m["env"] * ((ctx.get("env") or 1.0) - 1)
                 opp_val = toi
-                proj = b["rate"] * sh["rate_mult"] * rest["rate_mult"] * toi * factor * env_mult
+                proj = b["rate"] * sh["rate_mult"] * rest["rate_mult"] * toi * factor * env_mult * \
+                    PPR._tuning("NHL", market, r.get("slot") or "")
         key = r["pid"]
         line = PE.maybe(lines.get(key))
         line_src = "typed" if line is not None else None

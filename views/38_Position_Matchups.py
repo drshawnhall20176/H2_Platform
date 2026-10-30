@@ -618,7 +618,7 @@ def render_props_team(team, opp, off_name, def_name, market, mode, tables, g):
     st.markdown(f"#### {off_name}  vs  {def_name} defense · {market}")
     if PFAM == "football":
         mk = FP.MARKETS[market]
-        roster = (PROPS.get("roster") or {}).get(team) or []
+        roster = FP.roster_for(PROPS, team, market)
         order = [(r.get("pid") if r.get("pid") is not None else r.get("name")) for r in roster if r["slot"] in mk["slots"]]
         if not order:
             st.caption(f"No {off_name} player at the positions this market is offered for.")
@@ -659,6 +659,12 @@ def render_props_team(team, opp, off_name, def_name, market, mode, tables, g):
         rows = PPR.player_rows(rot, opp, market, tables["cur"], tables["prior"], PROPS.get("cur_pgames") or [],
                                PROPS.get("prior_pgames") or [], lines=ed["Line"], mode=mode, context=ctx)
         disp = PPR.display(rows)
+    try:                                    # what the model said before kickoff, for the Postgame Review
+        import model_store as MS
+        MS.save_rows(SPORT_KEY, date_str, game.get("label") or game_label, rows, market, team=team, opp=opp,
+                     kickoff=game.get("game_date"), source="position_matchups")
+    except Exception:                                              # noqa: BLE001
+        pass
     if not st.session_state.get("pm_props_edit"):
         opp_label = list(disp[0])[2] if disp else "Min"
         st.dataframe(pd.DataFrame(PE.display_compact(rows, details=bool(st.session_state.get("pm_props_details")),
@@ -964,6 +970,8 @@ if tab_score is not None:
                    "on your real bets is the other half of the proof — see the bottom of this tab.")
         c1, c2 = st.columns([1, 2])
         with c1:
+            if PFAM == "football":          # kicking / defensive markets are graded on the Postgame Review page
+                menu = {k: v for k, v in menu.items() if not FP.is_special(k)}
             sc_market = st.selectbox("Market to grade", list(menu), index=list(menu).index(default_m),
                                      key=f"pm_sc_market_{PFAM}")
         samples = {}

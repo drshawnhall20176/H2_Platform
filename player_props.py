@@ -314,7 +314,7 @@ def player_rows(rotation_list: Sequence[Dict], defense, market: str, cur_table: 
             rate *= rest["rate_mult"]
             flags += rest["flags"] + blow["flags"]
             env_mult = PE.env_multiplier(ctx.get("env"), _component_shares(b["games"], market), ENV_WEIGHTS)
-            proj = rate * opp * fac["factor"] * env_mult
+            proj = rate * opp * fac["factor"] * env_mult * _tuning(ctx.get("sport") or "NBA", market, slot)
         if b["f"]["filled"]:
             flags.append("form incl. last season")
         if b["out"] and not b["fresh"]:
@@ -538,3 +538,12 @@ def position_factors(players: Iterable[Tuple], cur_pgames, prior_pgames, sport: 
                     f = PM.blend_factor(f, blended_factor(c2, p2, mode)["factor"])
             out[(pid, stat)] = f
     return out
+
+
+def _tuning(sport: str, market: str, slot: str = "") -> float:
+    """Approved Postgame Review adjustments (model_tuning); 1.0 when none."""
+    try:
+        import model_tuning as MT
+        return MT.factor(sport, market, slot)
+    except Exception:                                           # noqa: BLE001
+        return 1.0

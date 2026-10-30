@@ -764,6 +764,7 @@ def slate_reads_for(sport_key: str, date_str: str, meta: List[Dict], offers: Lis
         bundles = load_family_bundles(sport_key, date_str, labels)
         reads = SP.family_slate_reads(sport_key, games, bundles, offers, lines,
                                       book=None if preferred_book in (None, "best") else preferred_book)
+        _snapshot(sport_key, date_str, reads)
         return _with_display_names(sport_key, reads) or None
     teams = tuple(sorted({(SP._int_or(m.get(f"{s}_id")), m.get(f"{s}_abbr")) for m in meta for s in ("home", "away")},
                          key=lambda t: str(t[0])))
@@ -773,7 +774,17 @@ def slate_reads_for(sport_key: str, date_str: str, meta: List[Dict], offers: Lis
     book = None if preferred_book in (None, "best") else preferred_book
     reads = SP.slate_reads(meta, inputs["sample"], offers, book=book, injuries=inputs["injuries"],
                            rest=inputs["rest"], game_lines=lines, sport=sport_key, charts=inputs.get("charts"))
+    _snapshot(sport_key, date_str, reads)
     return _with_display_names(sport_key, reads) or None
+
+
+def _snapshot(sport_key: str, date_str: str, reads) -> None:
+    """Keep what the model said before each game started, for the Postgame Review (model_store). Never fails a page."""
+    try:
+        import model_store as MS
+        MS.save_reads(sport_key, date_str, reads or {})
+    except Exception:                                           # noqa: BLE001
+        pass
 
 
 def _with_display_names(sport_key: str, reads: Dict) -> Dict:

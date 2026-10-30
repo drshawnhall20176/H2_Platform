@@ -445,7 +445,7 @@ def test_previous_season_option_reads_last_seasons_file_and_every_week(fake_nfl,
     game = PD.list_games("NFL", "2026-10-07")[0]
     cur = PD.load_bundle("NFL", "2026-10-07", game)
     prev = PD.load_bundle("NFL", "2026-10-07", game, use_previous_season=True)
-    assert asked == [2026, 2025]
+    assert asked == [2026, 2025, 2025]        # Oct 30: this season's view also reads last season (thin-sample players)
     f = lambda b: [r for r in b["home_off"]["rows"] if r["slot"] == "WR1"][0]["players"][0]["recent"]
     assert abs(f(cur)["avg"] - 14.0) < 1e-9                                          # weeks 1-4 only (week 5 is the game's own week)
     assert abs(f(prev)["avg"] - (198.9 + 14 * 3) / 4) < 1e-9                         # last season = every week the file has

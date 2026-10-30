@@ -53,6 +53,7 @@ NFL_SUPPORTED_MARKETS = [
     # from this sandbox (no route to the Odds API); check the first real fetch.
     "player_pass_attempts", "player_pass_completions", "player_pass_interceptions", "player_pass_tds",
     "player_rush_attempts", "player_field_goals",
+    "player_kicking_points", "player_pats", "player_sacks", "player_tackles_assists", "player_solo_tackles",
     "player_anytime_td", "player_1st_td", "player_last_td",
 ]
 

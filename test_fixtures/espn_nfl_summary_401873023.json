@@ -1,0 +1,611 @@
+{
+"boxscore": {
+"players": [
+{
+"team": {
+"id": "29",
+"abbreviation": "CAR",
+"displayName": "Carolina Panthers"
+},
+"statistics": [
+{
+"name": "passing",
+"labels": [
+"C/ATT",
+"YDS",
+"AVG",
+"TD",
+"INT",
+"SACKS",
+"QBR",
+"RTG"
+],
+"athletes": [
+{
+"athlete": {
+"id": "4685720",
+"displayName": "Bryce Young"
+},
+"stats": [
+"23/41",
+"209",
+"5.1",
+"1",
+"1",
+"6-33",
+"36.2",
+"68.0"
+]
+}
+]
+},
+{
+"name": "rushing",
+"labels": [
+"CAR",
+"YDS",
+"AVG",
+"TD",
+"LONG"
+],
+"athletes": [
+{
+"athlete": {
+"id": "4241416",
+"displayName": "Chuba Hubbard"
+},
+"stats": [
+"22",
+"81",
+"3.7",
+"1",
+"18"
+]
+},
+{
+"athlete": {
+"id": "4685350",
+"displayName": "Trevor Etienne"
+},
+"stats": [
+"1",
+"1",
+"1.0",
+"0",
+"1"
+]
+}
+]
+},
+{
+"name": "receiving",
+"labels": [
+"REC",
+"YDS",
+"AVG",
+"TD",
+"LONG",
+"TGTS"
+],
+"athletes": [
+{
+"athlete": {
+"id": "4685472",
+"displayName": "Tetairoa McMillan"
+},
+"stats": [
+"6",
+"58",
+"9.7",
+"0",
+"14",
+"11"
+]
+},
+{
+"athlete": {
+"id": "4241416",
+"displayName": "Chuba Hubbard"
+},
+"stats": [
+"7",
+"38",
+"5.4",
+"0",
+"11",
+"8"
+]
+},
+{
+"athlete": {
+"id": "4695883",
+"displayName": "Jalen Coker"
+},
+"stats": [
+"2",
+"36",
+"18.0",
+"1",
+"26",
+"5"
+]
+},
+{
+"athlete": {
+"id": "4683243",
+"displayName": "Mitchell Evans"
+},
+"stats": [
+"2",
+"22",
+"11.0",
+"0",
+"17",
+"2"
+]
+},
+{
+"athlete": {
+"id": "4372780",
+"displayName": "Tommy Tremble"
+},
+"stats": [
+"1",
+"19",
+"19.0",
+"0",
+"19",
+"3"
+]
+},
+{
+"athlete": {
+"id": "4567096",
+"displayName": "John Metchie III"
+},
+"stats": [
+"3",
+"14",
+"4.7",
+"0",
+"6",
+"3"
+]
+},
+{
+"athlete": {
+"id": "2576925",
+"displayName": "Darren Waller"
+},
+"stats": [
+"1",
+"11",
+"11.0",
+"0",
+"11",
+"2"
+]
+},
+{
+"athlete": {
+"id": "4360763",
+"displayName": "Brycen Tremayne"
+},
+"stats": [
+"1",
+"11",
+"11.0",
+"0",
+"11",
+"1"
+]
+}
+]
+},
+{
+"name": "defensive",
+"labels": [
+"TOT",
+"SOLO",
+"SACKS",
+"TFL",
+"PD",
+"QB HTS",
+"TD"
+],
+"athletes": [
+{
+"athlete": {
+"id": "4240595",
+"displayName": "Marco Wilson"
+},
+"stats": [
+"8",
+"6",
+"0",
+"0",
+"2",
+"0",
+"0"
+]
+},
+{
+"athlete": {
+"id": "4243256",
+"displayName": "Devin Lloyd"
+},
+"stats": [
+"7",
+"3",
+"0",
+"0",
+"0",
+"0",
+"0"
+]
+},
+{
+"athlete": {
+"id": "3117253",
+"displayName": "Bobby Okereke"
+},
+"stats": [
+"5",
+"3",
+"0",
+"0",
+"0",
+"0",
+"0"
+]
+},
+{
+"athlete": {
+"id": "4685720",
+"displayName": "Bryce Young"
+},
+"stats": [
+"1",
+"1",
+"0",
+"0",
+"0",
+"0",
+"0"
+]
+}
+]
+},
+{
+"name": "kicking",
+"labels": [
+"FG",
+"PCT",
+"LONG",
+"XP",
+"PTS"
+],
+"athletes": [
+{
+"athlete": {
+"id": "4568263",
+"displayName": "Ryan Fitzgerald"
+},
+"stats": [
+"2/2",
+"100.0",
+"50",
+"1/1",
+"7"
+]
+}
+]
+}
+]
+},
+{
+"team": {
+"id": "9",
+"abbreviation": "GB",
+"displayName": "Green Bay Packers"
+},
+"statistics": [
+{
+"name": "passing",
+"labels": [
+"C/ATT",
+"YDS",
+"AVG",
+"TD",
+"INT",
+"SACKS",
+"QBR",
+"RTG"
+],
+"athletes": [
+{
+"athlete": {
+"id": "4036378",
+"displayName": "Jordan Love"
+},
+"stats": [
+"30/41",
+"288",
+"7.0",
+"3",
+"1",
+"0-0",
+"80.0",
+"106.6"
+]
+}
+]
+},
+{
+"name": "rushing",
+"labels": [
+"CAR",
+"YDS",
+"AVG",
+"TD",
+"LONG"
+],
+"athletes": [
+{
+"athlete": {
+"id": "4047365",
+"displayName": "Josh Jacobs"
+},
+"stats": [
+"21",
+"39",
+"1.9",
+"1",
+"6"
+]
+},
+{
+"athlete": {
+"id": "4431487",
+"displayName": "Savion Williams"
+},
+"stats": [
+"1",
+"18",
+"18.0",
+"0",
+"18"
+]
+},
+{
+"athlete": {
+"id": "4429023",
+"displayName": "MarShawn Lloyd"
+},
+"stats": [
+"3",
+"7",
+"2.3",
+"0",
+"5"
+]
+}
+]
+},
+{
+"name": "receiving",
+"labels": [
+"REC",
+"YDS",
+"AVG",
+"TD",
+"LONG",
+"TGTS"
+],
+"athletes": [
+{
+"athlete": {
+"id": "4248528",
+"displayName": "Christian Watson"
+},
+"stats": [
+"8",
+"113",
+"14.1",
+"0",
+"53",
+"10"
+]
+},
+{
+"athlete": {
+"id": "4701936",
+"displayName": "Matthew Golden"
+},
+"stats": [
+"7",
+"79",
+"11.3",
+"1",
+"24",
+"13"
+]
+},
+{
+"athlete": {
+"id": "4572680",
+"displayName": "Tucker Kraft"
+},
+"stats": [
+"6",
+"53",
+"8.8",
+"1",
+"14",
+"6"
+]
+},
+{
+"athlete": {
+"id": "4047365",
+"displayName": "Josh Jacobs"
+},
+"stats": [
+"6",
+"13",
+"2.2",
+"1",
+"5",
+"6"
+]
+},
+{
+"athlete": {
+"id": "4429023",
+"displayName": "MarShawn Lloyd"
+},
+"stats": [
+"1",
+"9",
+"9.0",
+"0",
+"9",
+"1"
+]
+},
+{
+"athlete": {
+"id": "4431487",
+"displayName": "Savion Williams"
+},
+"stats": [
+"1",
+"5",
+"5.0",
+"0",
+"5",
+"2"
+]
+}
+]
+},
+{
+"name": "defensive",
+"labels": [
+"TOT",
+"SOLO",
+"SACKS",
+"TFL",
+"PD",
+"QB HTS",
+"TD"
+],
+"athletes": [
+{
+"athlete": {
+"id": "4428863",
+"displayName": "Evan Williams"
+},
+"stats": [
+"10",
+"7",
+"0",
+"0",
+"0",
+"0",
+"0"
+]
+},
+{
+"athlete": {
+"id": "4239947",
+"displayName": "Isaiah McDuffie"
+},
+"stats": [
+"10",
+"3",
+"0",
+"0",
+"0",
+"0",
+"0"
+]
+},
+{
+"athlete": {
+"id": "4686906",
+"displayName": "Lukas Van Ness"
+},
+"stats": [
+"6",
+"3",
+"1",
+"1",
+"1",
+"1",
+"0"
+]
+}
+]
+},
+{
+"name": "kicking",
+"labels": [
+"FG",
+"PCT",
+"LONG",
+"XP",
+"PTS"
+],
+"athletes": [
+{
+"athlete": {
+"id": "4869461",
+"displayName": "Trey Smack"
+},
+"stats": [
+"0/0",
+"0.0",
+"0",
+"3/4",
+"3"
+]
+}
+]
+}
+]
+}
+]
+},
+"header": {
+"competitions": [
+{
+"status": {
+"type": {
+"completed": true
+}
+},
+"competitors": [
+{
+"score": "27",
+"homeAway": "home",
+"team": {
+"id": "9",
+"abbreviation": "GB",
+"displayName": "Green Bay Packers"
+}
+},
+{
+"score": "19",
+"homeAway": "away",
+"team": {
+"id": "29",
+"abbreviation": "CAR",
+"displayName": "Carolina Panthers"
+}
+}
+]
+}
+]
+}
+}
