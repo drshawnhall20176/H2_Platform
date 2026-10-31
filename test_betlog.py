@@ -541,3 +541,48 @@ if __name__ == "__main__":
         except Exception as e:  # noqa: BLE001
             print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
     print(f"\n{passed}/{len(tests)} tests passed")
+
+
+def test_a_parlay_ticket_is_booked_once_and_settles_from_its_legs():
+    # Oct 31: Deezy's 6-leg SGP was $20 at +1200 (paid $260). Logged leg by leg, the Bet Log booked six $20 bets at
+    # -110. As one ticket it's one $20 bet that wins $240, and each leg is still graded for the Scorecard.
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "bets.db")
+        single = B.add_bet(db, player="Embiid", game="NYK @ PHI", market="PA", side="Under", line=28.5,
+                           entry_odds=-106, model_prob=0.57, stake=10, sport="NBA")
+        legs, bad = B.parse_leg_lines("John Collins | Rebounds | Over | 6.5\nJulius Randle | points | over | 14.5\n"
+                                      "Paul Reed | Points | sideways | 11.5\nnot a leg")
+        assert len(legs) == 2 and len(bad) == 2 and legs[1]["side"] == "Over"
+        out = B.log_parlay_ticket("Deezy SGP", legs, 1200, 20.0, "2026-10-30", "NBA", book="draftkings",
+                                  game="DET @ BKN", db_path=db)
+        assert len(out["leg_ids"]) == 2 and B.payout(20, 1200) == 260.0
+        rows = B.list_bets(db)
+        assert {r["id"] for r in B.money_bets(rows)} == {single, out["header_id"]}       # legs carry no money
+        assert out["header_id"] not in {r["id"] for r in B.pick_bets(rows)}
+        assert B.ticket_settlements(rows) == []                                          # legs still open
+        B.update_bet(out["leg_ids"][0], db, result="win")
+        assert B.ticket_settlements(B.list_bets(db)) == []                               # one leg still open
+        B.update_bet(out["leg_ids"][1], db, result="win")
+        upd = B.ticket_settlements(B.list_bets(db))
+        assert upd == [{"id": out["header_id"], "ticket": "Deezy SGP", "result": "win"}]
+        B.update_bet(out["header_id"], db, result="win")
+        B.update_bet(single, db, result="loss")
+        s = B.summary(B.list_bets(db))
+        assert (s["wins"], s["losses"], s["staked"], s["profit"]) == (1, 1, 30.0, 230.0)  # +240 - 10
+        cmp = B.compare_parlay_vs_singles(B.group_tickets(B.list_bets(db))["Deezy SGP"], 5.0)
+        assert cmp["parlay_pnl"] == 240.0 and cmp["parlay_stake"] == 20.0 and cmp["n"] == 2
+
+
+def test_converting_legs_logged_one_by_one_into_a_ticket():
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "bets.db")
+        old = [B.add_bet(db, player=p, market="Points", side="Over", line=9.5, entry_odds=-110, model_prob=0.55,
+                         stake=20, ticket="SGP", sport="NBA", result=r) for p, r in (("A", "win"), ("B", "void"))]
+        before = B.summary(B.list_bets(db))
+        assert before["wins"] == 1 and before["staked"] == 20                            # legacy accounting kept
+        B.log_parlay_ticket("SGP", [], 300, 10.0, "2026-10-30", "NBA", existing=B.list_bets(db), db_path=db)
+        rows = B.list_bets(db)
+        assert all(r["stake"] == 0 for r in rows if r["id"] in old)
+        assert B.ticket_settlements(rows)[0]["result"] == "win"                          # a void leg doesn't sink it
+        assert B.ticket_result([{"result": "win"}, {"result": "loss"}, {"result": ""}]) == "loss"
+        assert B.ticket_result([{"result": "void"}, {"result": "push"}]) == "void"

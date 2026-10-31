@@ -27,6 +27,7 @@ from datetime import datetime
 import sports
 import betlog as B
 import bet_settlement
+import prop_settlement as PS
 import mlb_engine as E
 
 _active = sports.active()
@@ -233,7 +234,84 @@ with st.expander("➕ Log a bet", expanded=False):
             else:
                 st.warning("Game and Side are required. Player is optional — leave it blank for a team/fighter-level pick.")
  
+# --- Log a parlay ticket (Oct 31) --------------------------------------------
+# A same-game parlay is one bet: one stake, one total price, one payout. Logged as one ticket, the Bet Log books it
+# once (not as N straight bets at -110), and each leg is still graded so the Scorecard learns from the picks.
+with st.expander("🎫 Log a parlay ticket (one stake, one total price)", expanded=False):
+    _all_sport = B.list_bets(sport=_active.key)
+    _headed = B.headed_tickets(_all_sport)
+    _legacy = {}
+    for _b in _all_sport:
+        _t = (_b.get("ticket") or "").strip() if isinstance(_b.get("ticket"), str) else ""
+        if _t and _t not in _headed:
+            _legacy.setdefault(_t, []).append(_b)
+    st.caption("One leg per line: **Player | Market | Side | Line** (add **| Away @ Home** for a leg from another "
+               "game). Example: `John Collins | Rebounds | Over | 6.5`. A ticket whose legs you already logged one by "
+               "one can be converted instead: pick it below and leave the legs box empty.")
+    with st.form("log_parlay", clear_on_submit=True):
+        p1, p2, p3 = st.columns(3)
+        with p1:
+            p_date = st.date_input("Slate date", datetime.now(), key="pl_date")
+            p_game = st.text_input("Game (Away @ Home)", placeholder=_ex["game"], key="pl_game")
+            p_ticket = st.text_input("Ticket name", placeholder="e.g. Deezy SGP 10/30", key="pl_ticket")
+        with p2:
+            p_odds = st.text_input("Total odds (American)", placeholder="+1200", key="pl_odds")
+            p_stake = st.text_input("Stake ($)", placeholder="20", key="pl_stake")
+            from odds_api import ALL_BOOKS as _PB
+            p_book = st.selectbox("Book", list(_PB.values()), key="pl_book")
+        with p3:
+            p_existing = st.selectbox("…or convert legs already logged under", ["—"] + sorted(_legacy),
+                                      key="pl_existing")
+            p_notes = st.text_input("Notes", placeholder="optional", key="pl_notes")
+        p_legs = st.text_area("Legs", height=150, key="pl_legs",
+                              placeholder="John Collins | Rebounds | Over | 6.5\nJulius Randle | Points | Over | 14.5")
+        if st.form_submit_button("Log parlay ticket", type="primary"):
+            _problems = []
+            try:
+                _odds = int(str(p_odds).replace("+", "").strip())
+                if -100 < _odds < 100:
+                    raise ValueError
+            except ValueError:
+                _problems.append("Total odds must be American odds like +1200 or -150.")
+                _odds = None
+            try:
+                _stake = float(str(p_stake).replace("$", "").strip())
+                if _stake <= 0:
+                    raise ValueError
+            except ValueError:
+                _problems.append("Stake must be a dollar amount above 0.")
+                _stake = None
+            _legs, _bad = B.parse_leg_lines(p_legs, default_game=p_game.strip() or None)
+            _problems += _bad
+            _conv = _legacy.get(p_existing, []) if p_existing != "—" else []
+            _name = (p_ticket.strip() or (p_existing if p_existing != "—" else ""))
+            if not _name:
+                _problems.append("Give the ticket a name.")
+            if not _legs and not _conv:
+                _problems.append("Add the legs (one per line), or pick logged legs to convert.")
+            if _name in _headed:
+                _problems.append(f"“{_name}” is already logged as a parlay ticket.")
+            if _problems:
+                st.error("Not logged:\n\n- " + "\n- ".join(_problems))
+            else:
+                _book_key = next((k for k, v in _PB.items() if v == p_book), p_book)
+                _out = B.log_parlay_ticket(_name, _legs, _odds, _stake, p_date.isoformat(), _active.key,
+                                           book=_book_key, game=p_game.strip() or None,
+                                           notes=p_notes.strip() or None, existing=_conv)
+                if _conv and _name != p_existing:      # a converted ticket keeps its old name on the legs
+                    for _bid in _out["converted"]:
+                        B.update_bet(_bid, ticket=_name)
+                st.success(f"Logged parlay “{_name}”: {len(_legs) + len(_conv)} legs, ${_stake:,.2f} at "
+                           f"{_odds:+d} — pays ${B.payout(_stake, _odds):,.2f} if it hits. It settles itself "
+                           "once every leg is settled.")
+
 bets = B.list_bets(sport=_active.key)
+# A parlay ticket settles itself once its legs decide it (any loss, or every leg graded).
+_ticket_updates = B.ticket_settlements(bets)
+if _ticket_updates:
+    for _u in _ticket_updates:
+        B.update_bet(int(_u["id"]), result=_u["result"])
+    bets = B.list_bets(sport=_active.key)
 if not bets:
     st.info(f"No {_active.label} bets logged yet. Use **Log a bet** above to start your record.")
     st.stop()
@@ -355,9 +433,65 @@ if open_bets:
                                           f"bets' again to see if it now settles.")
                                 st.rerun()
         st.divider()
+    elif PS.supported(_active.key):
+        st.markdown("**🔄 Auto-settle open bets**")
+        st.caption("Grades each open player prop against ESPN's final box score — the same grading the Postgame "
+                   "Review uses — matching the player by name. A game that isn't final stays pending; a player "
+                   "missing from the box (a DNP, or a different spelling) is listed for you to settle. Nothing "
+                   "changes until you confirm.")
+        if st.button("🔍 Check for settleable bets", key="ps_check"):
+            with st.spinner("Checking ESPN box scores..."):
+                st.session_state["prop_settlement_plan"] = PS.build_plan(open_bets, _active.key)
+        pplan = st.session_state.get("prop_settlement_plan")
+        if pplan:
+            if pplan["proposed"]:
+                st.markdown(f"**{len(pplan['proposed'])} bet(s) ready to settle:**")
+                st.dataframe(pd.DataFrame(pplan["proposed"])[["description", "actual", "new_result"]]
+                             .rename(columns={"description": "Bet", "actual": "Actual", "new_result": "Result"}),
+                             hide_index=True, width="stretch")
+                if st.button(f"✅ Confirm and apply {len(pplan['proposed'])} settlement(s)", type="primary",
+                             key="ps_apply"):
+                    for p_ in pplan["proposed"]:
+                        B.update_bet(int(p_["bet_id"]), result=p_["new_result"])
+                    st.session_state.pop("prop_settlement_plan", None)
+                    st.success(f"Settled {len(pplan['proposed'])} bet(s).")
+                    st.rerun()
+            else:
+                st.caption("Nothing is settleable right now — see below for why.")
+            if pplan["still_pending"]:
+                with st.expander(f"⏳ {len(pplan['still_pending'])} still pending"):
+                    st.dataframe(pd.DataFrame(pplan["still_pending"])[["description", "why"]]
+                                 .rename(columns={"description": "Bet", "why": "Why"}), hide_index=True,
+                                 width="stretch")
+            if pplan["unresolved"]:
+                with st.expander(f"❓ {len(pplan['unresolved'])} need a person"):
+                    st.dataframe(pd.DataFrame(pplan["unresolved"])[["description", "why"]]
+                                 .rename(columns={"description": "Bet", "why": "Why"}), hide_index=True,
+                                 width="stretch")
+        st.divider()
     else:
-        st.caption(f"Auto-settle isn't available for {_active.label} yet — MLB only for now. "
-                  "Enter results manually in the table below.")
+        st.caption(f"Auto-settle isn't available for {_active.label} yet. Use **Quick settle** below or the table.")
+
+    # Quick settle (Oct 31): plain controls -- pick bets, pick a result, save. The table below needs a double-click
+    # per cell; this doesn't.
+    with st.form("quick_settle", clear_on_submit=True):
+        st.markdown("**⚡ Quick settle**")
+        q1, q2 = st.columns([3, 1])
+        with q1:
+            q_ids = st.multiselect(
+                "Bets", [int(b["id"]) for b in open_bets], key="qs_ids",
+                format_func=lambda i: next((f"#{b['id']} {b.get('player') or ''} {b.get('market') or ''} "
+                                            f"{b.get('side') or ''} {'' if b.get('line') is None else b.get('line')}"
+                                            f"{' · ' + str(b.get('ticket')) if b.get('ticket') else ''}"
+                                            for b in open_bets if int(b['id']) == i), f"#{i}"))
+        with q2:
+            q_res = st.selectbox("Result", ["win", "loss", "push", "void"], key="qs_result")
+        if st.form_submit_button("Settle selected"):
+            for i in q_ids:
+                B.update_bet(int(i), result=q_res)
+            if q_ids:
+                st.success(f"Marked {len(q_ids)} bet(s) as {q_res}.")
+                st.rerun()
 
     odf = pd.DataFrame(open_bets)[["id", "player", "market", "side", "line", "entry_odds",
                                    "model_prob", "stake", "close_odds", "result", "cashed_out_amount"]]
@@ -438,7 +572,9 @@ else:
                "money** as straight singles, split evenly across the legs. The honest lesson, in dollars.")
     pick = st.selectbox("Ticket", sorted(multi.keys()))
     legs = multi[pick]
-    default_stake = round(sum(L.get("stake") or 0 for L in legs), 2) or 10.0
+    _hdr = next((L for L in legs if B.is_parlay_header(L)), None)
+    default_stake = (float(_hdr.get("stake") or 0) if _hdr else round(sum(L.get("stake") or 0 for L in legs), 2)) \
+        or 10.0
     pstake = st.number_input("What you risked on this parlay ($)", min_value=0.5,
                              value=float(default_stake), step=0.5)
     cmp = B.compare_parlay_vs_singles(legs, pstake)
