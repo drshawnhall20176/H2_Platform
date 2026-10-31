@@ -698,3 +698,45 @@ def test_load_hockey_builds_lineups_goalies_rest_and_meetings(monkeypatch):
     assert all(s["pid"] != 77 for s in p["rotation"][2]["skaters"])            # no longer on the roster: left out
     assert b["h2h"]["summary"]["games"] == 6 and b["names"][1] == "Home Club"
     assert p["team_games"][1][0] == "n5"
+
+
+def test_ncaamb_opening_week_tops_up_from_last_season_and_keeps_only_this_seasons_roster(basketball):
+    # Oct 31: on opening night the 45-day window is empty, so every college board was blank. Now the end of last season
+    # fills it -- labelled as last season -- and a player who left (graduated / transferred) is not listed.
+    import datetime as _dt
+    events = league_events(n_teams=6, days=5, start="2026-03-01")
+    fake = FakeBasketball(events)
+    mod = basketball("NCAAMB", fake)
+    mod.SEASON_START, mod.PRIOR_LOOKBACK_DAYS, mod._PRIOR_TYPES = "2026-11-01", 275, (2, 3)
+    mod._prior_padding_allowed = lambda d: True
+
+    def recent(team, before, n=10, days_back=45):
+        lo = (_dt.date.fromisoformat(before[:10]) - _dt.timedelta(days=days_back)).isoformat()
+        return [g for g in fake.get_team_recent_game_ids(team, before, n, days_back) if g["date"][:10] >= lo]
+    mod.get_team_recent_game_ids = recent
+    mod.get_team_roster = lambda tid: [dict(id=tid * 10 + 1, name=f"G{tid}", pos="PG")] + \
+        ([] if tid == 1 else [dict(id=tid * 10 + 2, name=f"C{tid}", pos="C")])        # team 1's center has left
+    b = PD.load_basketball("NCAAMB", "2026-11-02", 1, 2, "One", "Two", "T1", "T2")
+    props = b["props"]
+    assert props["cur_pgames"] == [] and props["prior_pgames"]                          # nothing this season yet
+    assert any("topped up from the end of last season" in n for n in b["notes"])
+    assert {r["pid"] for r in props["rotation"][1]} == {11}                            # the departed center is gone
+    assert {r["pid"] for r in props["rotation"][2]} == {21, 22}
+
+
+def test_ncaamb_opening_week_rows_project_from_last_season(basketball):
+    import datetime as _dt
+    import player_props as PPR
+    events = league_events(n_teams=6, days=5, start="2026-03-01")
+    fake = FakeBasketball(events)
+    mod = basketball("NCAAMB", fake)
+    mod.SEASON_START, mod.PRIOR_LOOKBACK_DAYS, mod._PRIOR_TYPES = "2026-11-01", 275, (2, 3)
+    mod._prior_padding_allowed = lambda d: True
+    mod.get_team_recent_game_ids = lambda team, before, n=10, days_back=45: [
+        g for g in fake.get_team_recent_game_ids(team, before, n, days_back)
+        if g["date"][:10] >= (_dt.date.fromisoformat(before[:10]) - _dt.timedelta(days=days_back)).isoformat()]
+    b = PD.load_basketball("NCAAMB", "2026-11-02", 1, 2, "One", "Two", "T1", "T2")
+    p = b["props"]
+    rows = PPR.player_rows(p["rotation"][2], 1, "Points", {}, {}, p["cur_pgames"], p["prior_pgames"],
+                           context={"team": 2, "sport": "NCAAMB"})
+    assert rows and all(r["projection"] is not None and "form incl. last season" in r["flags"] for r in rows)
