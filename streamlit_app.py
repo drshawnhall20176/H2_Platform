@@ -129,7 +129,7 @@ def run():
                                                           # adjusted slate-wide leaderboard.
         "36": ("NCAAF",),                                # Anytime TD Engine (NCAAF) -- Bernoulli
                                                           # TD probability board.
-        "41": ("NFL", "NCAAF", "NBA"),                    # Postgame Review -- kickoff snapshots graded vs box scores
+        "41": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL"),                    # Postgame Review -- kickoff snapshots graded vs box scores
         "38": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL"),  # Position Matchups -- depth chart vs the opposing
                                                           # defense by position + team head-to-head.
     }

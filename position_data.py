@@ -685,33 +685,63 @@ def load_basketball(sport_key: str, date_str: str, home_id: int, away_id: int, h
             notes.append(src_note)
     else:
         team_names = {home_id: home_name, away_id: away_name}
+        ncaa_cur: Dict[str, Dict] = {}
+        ncaa_prior: Dict[str, Dict] = {}
+
+        def _add(tid, g, bucket):
+            at_home = g.get("home_away") != "away"
+            opp_id, opp_name = _int_or(g.get("opp_id")), g.get("opp_name")
+            mine, theirs = g.get("score"), g.get("opp_score")
+            rec = games.setdefault(g["gameId"], {
+                "date": g.get("date") or "",
+                "home": tid if at_home else opp_id, "away": opp_id if at_home else tid,
+                "home_name": team_names[tid] if at_home else opp_name, "away_name": opp_name if at_home else team_names[tid],
+                "home_score": mine if at_home else theirs, "away_score": theirs if at_home else mine})
+            bucket[g["gameId"]] = rec
+
+        pad_ok = bool(getattr(eng, "_prior_padding_allowed", lambda d: False)(date_str))
+        padded = False
         for tid in (home_id, away_id):
-            for g in _safe(lambda: eng.get_team_recent_game_ids(tid, date_str, 10), [], notes, "recent games"):
-                if g.get("season_type") == 1:
-                    continue
-                at_home = g.get("home_away") != "away"
-                opp_id, opp_name = _int_or(g.get("opp_id")), g.get("opp_name")
-                mine, theirs = g.get("score"), g.get("opp_score")
-                games.setdefault(g["gameId"], {
-                    "date": g.get("date") or "",
-                    "home": tid if at_home else opp_id, "away": opp_id if at_home else tid,
-                    "home_name": team_names[tid] if at_home else opp_name, "away_name": opp_name if at_home else team_names[tid],
-                    "home_score": mine if at_home else theirs, "away_score": theirs if at_home else mine})
+            cur = [g for g in _safe(lambda: eng.get_team_recent_game_ids(tid, date_str, 10), [], notes, "recent games")
+                   if g.get("season_type") != 1]
+            for g in cur:
+                _add(tid, g, ncaa_cur)
+            # Oct 31: opening week used to load NOTHING here (the 45-day window is empty until teams have played),
+            # so every college board was blank. Same rule as ncaamb_engine.get_player_recent_games: until a month
+            # after opening night, a thin log is topped up from the end of LAST season (regular + postseason).
+            if pad_ok and len(cur) < 10:
+                cutoff = min(date_str, getattr(eng, "SEASON_START", date_str))
+                prior = [g for g in _safe(lambda: eng.get_team_recent_game_ids(
+                            tid, cutoff, 60, days_back=getattr(eng, "PRIOR_LOOKBACK_DAYS", 275)), [], notes,
+                            "last season's games")
+                         if g.get("season_type") in getattr(eng, "_PRIOR_TYPES", (2, 3))]
+                for g in prior[:10 - len(cur)]:
+                    _add(tid, g, ncaa_prior)
+                    padded = True
         notes.append("College basketball has 360 teams, so only these two teams' own recent games are used: "
                      "allowed-per-game by position is shown, with no league rank.")
+        if padded:
+            notes.append("Early season: these teams' thin logs are topped up from the end of last season (marked "
+                         "“form incl. last season”). Only players on this season's roster are listed — freshmen and "
+                         "transfers appear once they have played for their new team.")
     # Player props (NBA): this season's own games for each player's form / rotation, and last season's end for the
     # early-season blend of a defense's numbers. Fetched alongside the ranking sample (same cached box scores).
     cur_games: Dict[str, Dict] = {}
     prior_games: Dict[str, Dict] = {}
     if sport_key == "NBA":
         cur_games, prior_games = _nba_props_samples(eng, date_str, notes)
+    elif sport_key == "NCAAMB":
+        cur_games, prior_games = ncaa_cur, ncaa_prior
     all_games = {**prior_games, **cur_games, **games}
     lines = _fetch_lines(eng, list(all_games))
     all_lines = {gid: {"date": all_games[gid].get("date"), "lines": lines.get(gid) or {}} for gid in all_games}
     game_lines = {gid: all_lines[gid] for gid in games}
     roster_pos = _roster_positions(eng, all_lines, notes)
     pgames = basketball_pgames(game_lines, roster_pos)
-    cur_pgames = basketball_pgames({g: all_lines[g] for g in cur_games}, roster_pos) if cur_games else pgames
+    if sport_key == "NCAAMB":                   # this season's games only; last season's are the prior (may be empty)
+        cur_pgames = basketball_pgames({g: all_lines[g] for g in cur_games}, roster_pos)
+    else:
+        cur_pgames = basketball_pgames({g: all_lines[g] for g in cur_games}, roster_pos) if cur_games else pgames
     prior_pgames = basketball_pgames({g: all_lines[g] for g in prior_games}, roster_pos) if prior_games else []
     if not pgames:
         notes.append("No box-score data found for this window yet.")
@@ -727,6 +757,11 @@ def load_basketball(sport_key: str, date_str: str, home_id: int, away_id: int, h
         # Every rotation player, from THIS season's own games (a traded player belongs to his new team).
         rotation[tid] = PPR.team_rotation(cur_pgames, pgames, tid, inj, sport_key, last_n=LEAGUE_GAMES_PER_TEAM,
                                           chart=charts.get(tid))
+        if sport_key == "NCAAMB" and prior_games:
+            # Last season's box scores still list players who graduated or transferred: keep this season's roster.
+            roster_ids = {p.get("id") for p in _safe(lambda: eng.get_team_roster(tid), [], notes, "a roster") or []}
+            if roster_ids:
+                rotation[tid] = [r for r in rotation[tid] if r.get("pid") in roster_ids]
     missing = [n for tid, n in ((home_id, home_name), (away_id, away_name)) if not charts.get(tid)]
     if sport_key == "NBA" and missing and hasattr(eng, "get_team_depth_chart"):
         notes.append(f"No depth chart posted yet for {', '.join(missing)} -- roster positions used for them.")

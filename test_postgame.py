@@ -185,3 +185,42 @@ def test_star_out_rows_are_tagged_for_the_bet_log():
     assert PE.is_star_out({"flags": ["↑ usage bump (Egor Demin out)"]})
     assert PE.is_star_out({"absorbs": True, "flags": []})
     assert not PE.is_star_out({"flags": ["form incl. last season"]})
+
+
+def test_nhl_box_reads_shots_from_S_not_the_SOG_label_and_grades():
+    # Oct 31: NHL joins the review. ESPN's "SOG" label is SHOOTOUT goals; shots on goal is "S" (shotsTotal).
+    summary = json.loads((Path(__file__).parent / "test_fixtures" / "espn_nhl_summary_401892612_trimmed.json")
+                         .read_text())
+    box = PG.hockey_box(summary)
+    barron = box["teams"]["28"]["morgan barron"]
+    assert (barron["g"], barron["a"], barron["pts"], barron["sog"], barron["blk"]) == (1, 0, 1, 3, 1)
+    assert abs(barron["toi"] - 15.067) < 0.01 and "scratched guy" not in box["teams"]["28"]
+    assert (box["teams"]["28"]["nico daws"]["saves"], box["teams"]["28"]["nico daws"]["sa"]) == (33, 37)
+    assert box["score"] == {"26": 5, "28": 2} and box["final"]
+    board = {"events": [{"id": "401892612", "competitions": [{"competitors": [
+        {"team": {"abbreviation": "FLA", "displayName": "Florida Panthers", "id": "26"}},
+        {"team": {"abbreviation": "WPG", "displayName": "Winnipeg Jets", "id": "28"}}]}]}]}
+    seen = {}
+
+    def nhl_fetch(url, params=None):
+        seen.setdefault(url.rsplit("/", 1)[-1], params)
+        return board if url.endswith("scoreboard") else summary
+    snaps = [{"sport": "NHL", "slate_date": "2026-10-30", "game": "WPG @ FLA", "team": "28", "opp": "26",
+              "player": "Morgan Barron", "market": "Shots on Goal", "slot": "F", "projection": 1.6, "proj_opp": 14.0,
+              "line": 1.5, "side": "Over", "flags": "[]"},
+             {"sport": "NHL", "slate_date": "2026-10-30", "game": "WPG @ FLA", "team": "28", "opp": "26",
+              "player": "Nico Daws", "market": "Saves", "slot": "G", "projection": 26.0, "proj_opp": 29.0,
+              "line": 27.5, "side": "Under", "flags": "[]"}]
+    res = PG.fetch_results("NHL", "2026-10-30", [("28", "26")], fetch=nhl_fetch)
+    g = {r["player"]: r for r in PG.grade(snaps, res)}
+    assert g["Morgan Barron"]["result"] == "hit" and g["Morgan Barron"]["actual"] == 3
+    assert g["Nico Daws"]["result"] == "miss" and g["Nico Daws"]["actual_opp"] == 37 and g["Nico Daws"]["margin"] == -3
+    assert PG.fetch_results("NCAAMB", "2026-11-03", [("a", "b")], fetch=nhl_fetch) == {}
+    assert seen["scoreboard"]["dates"] == "20261030"
+
+
+def test_college_basketball_scoreboard_asks_for_all_of_division_one():
+    seen = []
+    PG.fetch_results("NCAAMB", "2026-11-03", [("Duke", "Army")],
+                     fetch=lambda url, params=None: seen.append(params) or {"events": []})
+    assert seen[0]["groups"] == 50 and PG.FAMILY["NCAAMB"] == "basketball"

@@ -823,6 +823,8 @@ def display_compact(rows: Sequence[Dict], details: bool = False, opp_label: str 
             pick, lean = "No line posted", "—"
         else:
             pick = f"{side} {line:g}" if side else f"{line:g}"
+            if chance is not None and chance < 0.5:
+                pick += " 🎲"          # Oct 31: the value side is the less likely one -- a plus-money price
             lean = LEAN_ICON.get(r.get("lean"), "—") if r.get("lean") != "No lean" else "⚪ No edge"
         flags = list(r.get("flags") or [])
         bk = r.get("book") or {}
@@ -1057,7 +1059,8 @@ def best_reads(rows: Sequence[Dict], team_of: Dict, limit: int = 6) -> List[Dict
     for r in leans[:limit]:
         price = r.get("over_price") if r["side"] == "Over" else r.get("under_price")
         out.append({"Player": r["player"], "Team": team_of.get(r.get("pid"), ""),
-                    "Pick": f"{r['side']} {r['line']:g}", "Chance": f"{_side_prob(r):.0%}",
+                    "Pick": f"{r['side']} {r['line']:g}" + (" 🎲" if (_side_prob(r) or 1) < 0.5 else ""),
+                    "Chance": f"{_side_prob(r):.0%}",
                     "Cushion": cushion_text(cushion(r.get("projection"), r.get("line"), r.get("side"))),
                     "Use": use_tag(r)[0],
                     "Price": "—" if price is None else f"{price:+.0f}",
@@ -1088,7 +1091,10 @@ def market_gaps(rows: Sequence[Dict], team_of: Dict) -> List[Dict]:
                     "Line": f"{r['line']:g}", "Projection": f"{r['projection']:.1f}",
                     "Gap": "—" if r.get("gap_pct") is None else f"{r['gap_pct']:+.0%}",
                     "Why flagged": " + ".join(why),
-                    "Model says": f"{r['side']} ({sp:.0%} after leaning on the market)" if sp is not None else "—",
+                    "Model says": ("—" if sp is None else
+                                   f"{r['side']} ({sp:.0%} after leaning on the market)" if sp >= 0.5 else
+                                   f"{'Under' if r['side'] == 'Over' else 'Over'} more likely "
+                                   f"({1 - sp:.0%}); {r['side']} only for the price"),
                     "Status": "news checked — lean shown" if r.get("lean") in ("Over", "Under") else
                               ("⚠️ check news first" if r.get("lean") == "Check news" else "no value at this price")})
     out.sort(key=lambda d: -abs(float(d["Gap"].rstrip("%"))) if d["Gap"] != "—" else 0)

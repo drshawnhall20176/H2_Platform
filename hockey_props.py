@@ -100,6 +100,41 @@ def opponent_factor(pgames, opp, side: str, stat: str) -> Optional[Dict]:
     return {"factor": min(hi, max(lo, 1 + (raw - 1) * w)), "games": len(vals), "raw": raw}
 
 
+# Oct 31: rare events need a prior. A forward with no goal in his last 10 games projected 0.0 goals (as if he can't
+# score) -- the slate pages then flagged lines "-100% from the projection" and the Scorecard showed the model losing to
+# a plain 5-game average on goals, assists and points. A skater's per-minute rate is now pulled toward his position
+# group's rate in the loaded sample by SHRINK_MIN minutes of ice time: little sample, mostly the group; a full season,
+# mostly him. Goalies (saves per shot faced) are not shrunk -- their rate is stable game to game.
+# Strengths picked by replaying 1,461 skater-games (Oct 14-30, 111 games): squared error fell 10-15% on every market
+# vs the unshrunk rate and vs the plain 5-game average; the error curve is flat around these values.
+SHRINK_MIN = {"g": 360.0, "a": 240.0, "pts": 240.0, "sog": 180.0, "blk": 240.0}
+
+
+def group_rates(pgames, stat: str) -> Dict[str, float]:
+    """{"F": rate per minute, "D": rate per minute} for `stat` across every skater-game in the sample."""
+    tot: Dict[str, List[float]] = {}
+    for p in pgames or []:
+        if p.get("role") == "goalie":
+            continue
+        st = p.get("stats") or {}
+        toi = PE.num(st.get("toi"))
+        g = group(p.get("pos")) or "F"
+        if toi > 0:
+            acc = tot.setdefault(g, [0.0, 0.0])
+            acc[0] += PE.num(st.get(stat))
+            acc[1] += toi
+    return {g: (v / t if t else 0.0) for g, (v, t) in tot.items()}
+
+
+def shrunk_rate(rate: Optional[float], opps: Sequence[float], stat: str, prior: Optional[float]) -> Optional[float]:
+    """Pull a per-minute rate toward the position group's by SHRINK_MIN[stat] minutes."""
+    k = SHRINK_MIN.get(stat)
+    if rate is None or prior is None or not k:
+        return rate
+    minutes = sum(o for o in opps if o > 0)
+    return (rate * minutes + prior * k) / (minutes + k)
+
+
 def team_goals(pgames, team) -> Optional[float]:
     vals = [rec["goals"] for (g, t), rec in team_lines(pgames).items() if t == team]
     return sum(vals) / len(vals) if vals else None
@@ -167,6 +202,7 @@ def player_rows(rot: Dict[str, List[Dict]], team, opp, market: str, pgames, line
     else:
         players = rot.get("skaters") or []
     team_games = ctx.get("team_games") or []
+    priors = group_rates(pgames, m["stat"]) if m["role"] == "skater" else {}
     base = []
     for r in players:
         g = _games(pgames, r["pid"], role=m["role"])
@@ -176,6 +212,8 @@ def player_rows(rot: Dict[str, List[Dict]], team, opp, market: str, pgames, line
         else:
             opps = [PE.num((x.get("stats") or {}).get("toi")) for x in g]
         rate, opp_avg = PE.rate_and_opportunity(vals, opps)
+        if m["role"] == "skater":
+            rate = shrunk_rate(rate, opps, m["stat"], priors.get(r.get("slot") or "F", priors.get("F")))
         out = str(r.get("status") or "").strip().lower() in ("out", "injured reserve", "ir")
         fresh = out and PE.fresh_absence([x.get("game") for x in g], team_games)
         base.append({"r": r, "vals": vals, "rate": rate, "opp": opp_avg, "out": out, "fresh": fresh, "games": g})

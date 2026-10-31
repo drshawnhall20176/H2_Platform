@@ -28,8 +28,12 @@ import props_engine as PE
 
 ESPN = {"NFL": "https://site.api.espn.com/apis/site/v2/sports/football/nfl",
         "NCAAF": "https://site.api.espn.com/apis/site/v2/sports/football/college-football",
-        "NBA": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba"}
-FAMILY = {"NFL": "football", "NCAAF": "football", "NBA": "basketball"}
+        "NBA": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba",
+        # Oct 31: NHL and college basketball join the review (and the Bet Log's auto-settle).
+        "NCAAMB": "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball",
+        "NHL": "https://site.api.espn.com/apis/site/v2/sports/hockey/nhl"}
+FAMILY = {"NFL": "football", "NCAAF": "football", "NBA": "basketball", "NCAAMB": "basketball", "NHL": "hockey"}
+SCOREBOARD_GROUPS = {"NCAAF": 80, "NCAAMB": 50}     # FBS / Division I -- without it ESPN lists only featured games
 NFLVERSE_TO_ESPN = {"LA": "LAR", "WAS": "WSH"}
 VOLUME_MISS = 0.25
 BLOWOUT = 17
@@ -174,6 +178,59 @@ def basketball_box(summary: Optional[Dict]) -> Dict:
     return out
 
 
+# ESPN's NHL box: read by `keys`, never labels -- the column LABELLED "SOG" is shootout goals; shots on goal is
+# "S" (key shotsTotal). Same trap nhl_engine.parse_summary documents.
+_HOCKEY_SKATER = {"goals": "g", "assists": "a", "shotsTotal": "sog", "blockedShots": "blk", "timeOnIce": "toi"}
+_HOCKEY_GOALIE = {"saves": "saves", "shotsAgainst": "sa", "goalsAgainst": "ga", "timeOnIce": "toi"}
+
+
+def _minutes(text) -> float:
+    """'18:42' -> 18.7 (ice time)."""
+    parts = str(text or "").split(":")
+    try:
+        return float(parts[0]) + (float(parts[1]) / 60 if len(parts) > 1 else 0.0)
+    except ValueError:
+        return 0.0
+
+
+def hockey_box(summary: Optional[Dict]) -> Dict:
+    """ESPN NHL summary -> the same shape as basketball_box (keyed by team id as text). Skaters get g, a, pts, sog,
+    blk, toi; goalies get saves, sa, ga, toi. Players with no ice time are left out (scratches)."""
+    out = {"teams": {}, "ids": {}, "score": {}, "final": False}
+    if not summary:
+        return out
+    for team in (summary.get("boxscore") or {}).get("players") or []:
+        t = team.get("team") or {}
+        tid = str(t.get("id") or "")
+        if not tid:
+            continue
+        out["ids"][t.get("abbreviation") or tid] = tid
+        players = out["teams"].setdefault(tid, {})
+        for grp in team.get("statistics") or []:
+            goalie = grp.get("name") == "goalies"
+            spec = _HOCKEY_GOALIE if goalie else _HOCKEY_SKATER
+            keys = grp.get("keys") or []
+            for a in grp.get("athletes") or []:
+                vals = dict(zip(keys, a.get("stats") or []))
+                toi = _minutes(vals.get("timeOnIce"))
+                if toi <= 0:
+                    continue
+                name = _norm(PE.norm_name((a.get("athlete") or {}).get("displayName")))
+                st = players.setdefault(name, {"_name": (a.get("athlete") or {}).get("displayName")})
+                for k, ours in spec.items():
+                    if k in vals:
+                        st[ours] = toi if k == "timeOnIce" else _num(vals[k])
+                if not goalie:
+                    st["pts"] = st.get("g", 0.0) + st.get("a", 0.0)
+    comp = ((summary.get("header") or {}).get("competitions") or [{}])[0]
+    for c in comp.get("competitors") or []:
+        tid = str((c.get("team") or {}).get("id") or "")
+        if tid:
+            out["score"][tid] = _num(c.get("score"))
+    out["final"] = bool((((comp.get("status") or {}).get("type") or {}).get("completed")))
+    return out
+
+
 def _aliases(team: Dict) -> set:
     vals = {team.get("abbreviation"), team.get("displayName"), team.get("shortDisplayName"), team.get("location"),
             team.get("name"), str(team.get("id") or "")}
@@ -194,15 +251,15 @@ def fetch_results(sport: str, slate_date: str, games: Sequence[Tuple[str, str]],
     if not base:
         return {}
     params = {"dates": slate_date.replace("-", ""), "limit": 400}
-    if sport == "NCAAF":
-        params["groups"] = 80
+    if sport in SCOREBOARD_GROUPS:
+        params["groups"] = SCOREBOARD_GROUPS[sport]
     board = fetch(f"{base}/scoreboard", params) or {}
     events = []
     for ev in board.get("events") or []:
         comp = (ev.get("competitions") or [{}])[0]
         teams = [c.get("team") or {} for c in comp.get("competitors") or []]
         events.append((ev.get("id"), [_aliases(t) for t in teams]))
-    parse = basketball_box if FAMILY.get(sport) == "basketball" else football_box
+    parse = {"basketball": basketball_box, "hockey": hockey_box}.get(FAMILY.get(sport), football_box)
     out: Dict[Tuple[str, str], Dict] = {}
     cache: Dict[str, Dict] = {}
     for team, opp in dict.fromkeys(games):
@@ -219,7 +276,7 @@ def fetch_results(sport: str, slate_date: str, games: Sequence[Tuple[str, str]],
 def _team_key(sport: str, box: Dict, team) -> Optional[str]:
     """The box's key for a snapshot's team (abbreviation for football, id for basketball)."""
     t = str(team or "")
-    if FAMILY.get(sport) == "basketball":
+    if FAMILY.get(sport) in ("basketball", "hockey"):
         return t if t in box["teams"] else None
     t = NFLVERSE_TO_ESPN.get(t, t) if sport == "NFL" else t
     if t in box["teams"]:
@@ -237,6 +294,10 @@ def _team_key(sport: str, box: Dict, team) -> Optional[str]:
 
 # --------------------------------------------------------------------------- grading
 def stat_value(sport: str, market: str, stats: Dict) -> Optional[float]:
+    if FAMILY.get(sport) == "hockey":
+        import hockey_props as HP
+        m = HP.MARKETS.get(market)
+        return None if not m or m["stat"] not in stats else _num(stats[m["stat"]])
     if FAMILY.get(sport) == "basketball":
         import player_props as PPR
         return PPR.market_value(stats, market) if market in PPR.MARKETS else None
@@ -245,6 +306,9 @@ def stat_value(sport: str, market: str, stats: Dict) -> Optional[float]:
 
 
 def actual_volume(sport: str, market: str, stats: Dict) -> Optional[float]:
+    if FAMILY.get(sport) == "hockey":                     # ice time for skaters, shots faced for a goalie's saves
+        key = "sa" if market == "Saves" else "toi"
+        return _num(stats.get(key)) if key in stats else None
     if FAMILY.get(sport) == "basketball":
         return _num(stats.get("min")) if "min" in stats else None
     import football_props as FP
