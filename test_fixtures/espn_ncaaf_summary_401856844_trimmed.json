@@ -1,0 +1,13 @@
+{"boxscore": {"players": [
+ {"team": {"id": "239", "abbreviation": "BAY", "displayName": "Baylor Bears", "shortDisplayName": "Baylor", "location": "Baylor", "name": "Bears"},
+  "statistics": [
+   {"name": "passing", "labels": ["C/ATT", "YDS", "AVG", "TD", "INT", "QBR"], "athletes": [{"athlete": {"displayName": "DJ Lagway"}, "stats": ["16/25", "319", "12.8", "4", "0", "78.5"]}]},
+   {"name": "rushing", "labels": ["CAR", "YDS", "AVG", "TD", "LONG"], "athletes": [{"athlete": {"displayName": "Caden Knighten"}, "stats": ["7", "31", "4.4", "1", "15"]}, {"athlete": {"displayName": "DJ Lagway"}, "stats": ["11", "23", "2.1", "0", "10"]}]},
+   {"name": "receiving", "labels": ["REC", "YDS", "AVG", "TD", "LONG"], "athletes": [{"athlete": {"displayName": "Gavin Freeman"}, "stats": ["5", "114", "22.8", "1", "77"]}]}]},
+ {"team": {"id": "2116", "abbreviation": "UCF", "displayName": "UCF Knights", "shortDisplayName": "UCF", "location": "UCF", "name": "Knights"},
+  "statistics": [
+   {"name": "passing", "labels": ["C/ATT", "YDS", "AVG", "TD", "INT", "QBR"], "athletes": [{"athlete": {"displayName": "Keyone Jenkins"}, "stats": ["14/21", "82", "3.9", "0", "1", "14.0"]}]},
+   {"name": "rushing", "labels": ["CAR", "YDS", "AVG", "TD", "LONG"], "athletes": [{"athlete": {"displayName": "Duke Watson"}, "stats": ["7", "20", "2.9", "0", "6"]}]}]}]},
+ "header": {"competitions": [{"status": {"type": {"completed": true}}, "competitors": [
+  {"score": "9", "team": {"id": "2116", "abbreviation": "UCF", "displayName": "UCF Knights", "location": "UCF", "name": "Knights"}},
+  {"score": "41", "team": {"id": "239", "abbreviation": "BAY", "displayName": "Baylor Bears", "location": "Baylor", "name": "Bears"}}]}]}}

@@ -37,6 +37,11 @@ CREATE TABLE IF NOT EXISTS prop_snapshots (
     source TEXT,
     UNIQUE (sport, slate_date, game, player, market)
 );
+CREATE TABLE IF NOT EXISTS odds_archive (
+    id {pk},
+    sport TEXT, slate_date TEXT, home TEXT, away TEXT, markets TEXT, payload TEXT, kickoff TEXT, ts TEXT,
+    UNIQUE (sport, slate_date, home, away, markets)
+);
 CREATE TABLE IF NOT EXISTS model_tuning (
     id {pk},
     sport TEXT, market TEXT, slot TEXT, factor REAL, reason TEXT, approved_ts TEXT, active INTEGER DEFAULT 1
@@ -227,6 +232,57 @@ def snapshot_dates(sport: str, db_path: Optional[str] = None) -> List[str]:
             return [r[0] if not isinstance(r, dict) else r["slate_date"] for r in cur.fetchall()]
     except Exception:                                           # noqa: BLE001
         return []
+
+
+# --------------------------------------------------------------------------- odds archive
+# Oct 31: the books' feed drops a game once it's played, so a past date used to come back with no lines at all.
+# Every successful pre-kickoff fetch is kept here (the latest pre-kickoff one wins), so an analyst opening an old
+# date sees the lines the board had -- and it costs no Odds API credits to look back.
+def _odds_key(markets) -> str:
+    return ",".join(sorted(m for m in (markets or ()) if m))
+
+
+def save_odds(sport: str, slate_date: str, home: str, away: str, markets, got: Optional[Dict],
+              kickoff: Optional[str] = None, db_path: Optional[str] = None) -> bool:
+    """Keep one fetch_game result ({"offers", "lines", ...}). Skips empty/error results and in-game fetches."""
+    if _test_run(db_path) or not got or got.get("error") or not (got.get("offers") or got.get("lines")):
+        return False
+    if started(kickoff):
+        return False
+    payload = json.dumps({"offers": got.get("offers") or [], "lines": got.get("lines") or {}}, default=str)
+    try:
+        with _conn(db_path) as (con, ph):
+            con.cursor().execute(
+                f"INSERT INTO odds_archive (sport, slate_date, home, away, markets, payload, kickoff, ts) "
+                f"VALUES ({','.join([ph] * 8)}) ON CONFLICT (sport, slate_date, home, away, markets) DO UPDATE SET "
+                f"payload=excluded.payload, kickoff=excluded.kickoff, ts=excluded.ts",
+                [sport, slate_date, str(home), str(away), _odds_key(markets), payload, kickoff, _now()])
+        return True
+    except Exception:                                           # noqa: BLE001
+        return False
+
+
+def load_odds(sport: str, slate_date: str, home: str, away: str, markets,
+              db_path: Optional[str] = None) -> Optional[Dict]:
+    """The archived {"offers", "lines", "archived_ts", "error": None} for this game + markets, or None."""
+    if db_path is None and not available():
+        return None
+    try:
+        with _conn(db_path) as (con, ph):
+            cur = con.cursor()
+            cur.execute(f"SELECT payload, ts FROM odds_archive WHERE sport={ph} AND slate_date={ph} AND home={ph} "
+                        f"AND away={ph} AND markets={ph}", [sport, slate_date, str(home), str(away), _odds_key(markets)])
+            row = cur.fetchone()
+    except Exception:                                           # noqa: BLE001
+        return None
+    if not row:
+        return None
+    payload, ts = (row["payload"], row["ts"]) if isinstance(row, (dict, sqlite3.Row)) else (row[0], row[1])
+    try:
+        data = json.loads(payload)
+    except (TypeError, ValueError):
+        return None
+    return {"offers": data.get("offers") or [], "lines": data.get("lines") or {}, "error": None, "archived_ts": ts}
 
 
 # --------------------------------------------------------------------------- tuning (approved adjustments)

@@ -279,7 +279,7 @@ def player_rows(rotation_list: Sequence[Dict], defense, market: str, cur_table: 
                      "out": out, "fresh": fresh})
     shifts = PE.redistribute([{"pid": b["r"]["pid"], "name": b["r"]["name"], "slot": b["r"]["slot"],
                                "opp": b["proj_min"] or 0.0, "rate": b["rate"] or 0.0, "out": b["out"],
-                               "fresh": b["fresh"]} for b in base], cap=42.0)
+                               "fresh": b["fresh"]} for b in base], cap=42.0, primary_n=PE.PRIMARY_N)
 
     rows = []
     for b in base:
@@ -349,10 +349,15 @@ def player_rows(rotation_list: Sequence[Dict], defense, market: str, cur_table: 
                             ctx.get("model_weight", PE.MODEL_WEIGHT), news_checked=bool(ctx.get("news_checked")))
         if returning and read["lean"] == "Over" and not ctx.get("news_checked"):
             read["lean"] = "Check news"
+        absorbs = bool(not b["out"] and shifts.get(r["pid"], {}).get("primary"))
+        if absorbs:
+            flags.insert(0, "⚠️ Top option with a teammate freshly out — Unders on this role lost 0-8 Oct 29-30")
+            if read["lean"] == "Under" and not ctx.get("news_checked"):
+                read["lean"] = "Check news"
         hits = [v for v in values if line is not None and clears(v, line)]
         rows.append({
             "pid": r["pid"], "player": r["name"], "slot": slot, "status": r.get("status"), "out": b["out"],
-            "returning": returning,
+            "returning": returning, "absorbs": absorbs,
             "avg_min": r["avg_min"], "opp": opp, "recent_avg": recent_avg, "form": recent_avg,
             "games": len(values), "season_games": b["f"]["season_games"], "filled": b["f"]["filled"],
             "factor": fac["factor"], "season_weight": fac["season_weight"], "basis": fac["basis"],

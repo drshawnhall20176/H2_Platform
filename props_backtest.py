@@ -153,7 +153,7 @@ def backtest_basketball(pgames: Sequence[Dict], sport: str, market: str, max_cas
                               "opp": o_ or 0.0, "rate": r_, "out": absent, "fresh": absent})
         if not any(m["pid"] == p["pid"] for m in mates):
             mates.append({"pid": p["pid"], "name": "self", "slot": slot, "opp": proj_min, "rate": rate, "out": False})
-        sh = PE.redistribute(mates, cap=42.0).get(p["pid"], {"opp_add": 0.0, "rate_mult": 1.0})
+        sh = PE.redistribute(mates, cap=42.0, primary_n=PE.PRIMARY_N).get(p["pid"], {"opp_add": 0.0, "rate_mult": 1.0})
         pd_, od_ = prev_date(p["team"], d), prev_date(p["opp"], d)
         rest = PE.rest_effect(_days_between(pd_, d) if pd_ else None, _days_between(od_, d) if od_ else None,
                               proj_min, "basketball")

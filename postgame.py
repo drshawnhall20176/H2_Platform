@@ -9,6 +9,7 @@ missed, and suggest adjustments from the patterns (Oct 30, after the Packers-Pan
 
 Causes (a miss only):
   Didn't play        no box-score line (void -- not graded)
+  Usage absorbed     an Under on a player a fresh absence moved (usage bump / top option), volume 10%+ above the call
   Role change        volume off 25%+ on a player the model flagged (back from injury, filling in, promoted)
   Volume             volume (targets / carries / attempts / minutes) off 25%+ with no role flag -- a model gap
   Blowout            a game decided by 17+ -- script, partly the model
@@ -33,7 +34,13 @@ NFLVERSE_TO_ESPN = {"LA": "LAR", "WAS": "WSH"}
 VOLUME_MISS = 0.25
 BLOWOUT = 17
 CAUSE_ROLE, CAUSE_VOLUME, CAUSE_BLOWOUT, CAUSE_PLAYER = "Role change", "Volume", "Blowout", "Player"
-MODEL_CAUSES = (CAUSE_ROLE, CAUSE_VOLUME)
+CAUSE_USAGE = "Usage absorbed"
+MODEL_CAUSES = (CAUSE_ROLE, CAUSE_VOLUME, CAUSE_USAGE)
+# Oct 31: Bane's minutes went 33 -> 39 (+18%) with Suggs out and his Under missed by 8 -- under the 25% volume bar,
+# so it was blamed on "Player". An Under on a player a fresh absence moved, whose volume came in USAGE_MISS+ above
+# the call, is the model under-sizing the bump.
+USAGE_MISS = 0.10
+STAR_OUT_WORDS = ("usage bump", "freshly out")
 ROLE_WORDS = ("back", "↑", "fills", "promot", "next man", "missed", "last season blended")
 # suggestions
 MIN_MARKET_N = 15
@@ -87,7 +94,7 @@ def football_box(summary: Optional[Dict]) -> Dict:
     """ESPN football summary -> {"teams": {team abbreviation: {normalized name: stats}}, "ids": {abbr: team id},
     "score": {abbr: points}, "final": bool}. Every player who shows up anywhere in the box gets every stat (0 when
     his group is missing -- a receiver with no catch still played)."""
-    out = {"teams": {}, "ids": {}, "score": {}, "final": False}
+    out = {"teams": {}, "ids": {}, "score": {}, "final": False, "aliases": {}}
     if not summary:
         return out
     box = summary.get("boxscore") or {}
@@ -97,6 +104,8 @@ def football_box(summary: Optional[Dict]) -> Dict:
         if not abbr:
             continue
         out["ids"][abbr] = t.get("id")
+        for a in _aliases(t):                    # "baylor", "baylor bears", "bay", ... -> "BAY"
+            out["aliases"].setdefault(a, abbr)
         players: Dict[str, Dict] = out["teams"].setdefault(abbr, {})
         for grp in team.get("statistics") or []:
             spec = _FOOTBALL.get(grp.get("name"))
@@ -219,7 +228,11 @@ def _team_key(sport: str, box: Dict, team) -> Optional[str]:
     for abbr in box["teams"]:
         if _norm(abbr) == nt:
             return abbr
-    return None
+    # College snapshots carry the school name ("Baylor", "Kent State"), the box keys ESPN's abbreviation ("BAY",
+    # "KENT"). Before Oct 31 only schools whose name IS the abbreviation (UCF, LSU, SMU...) matched, so ~80% of
+    # college props were voided. Match on ESPN's own names for the team as well.
+    abbr = (box.get("aliases") or {}).get(nt)
+    return abbr if abbr in box["teams"] else None
 
 
 # --------------------------------------------------------------------------- grading
@@ -249,6 +262,9 @@ def cause(rec: Dict, margin: Optional[float]) -> Optional[str]:
     flags = " ".join(json.loads(rec.get("flags") or "[]")).lower() if isinstance(rec.get("flags"), str) else \
         " ".join(rec.get("flags") or []).lower()
     pv, av = rec.get("proj_opp"), rec.get("actual_opp")
+    if ((rec.get("side") or "Over") == "Under" and any(w in flags for w in STAR_OUT_WORDS)
+            and (not pv or av is None or av / pv >= 1 + USAGE_MISS)):
+        return CAUSE_USAGE
     if pv and av is not None and pv > 0:
         r = av / pv
         helped = (r > 1) == ((rec.get("side") or "Over") == "Over")     # the volume swing favored the bet anyway

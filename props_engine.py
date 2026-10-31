@@ -50,6 +50,13 @@ USAGE_RATE_CAP = 0.10        # nobody's per-minute rate goes up more than 10% fr
 # to the end of the bench, some to a lineup change -- so only part of them reaches the rotation, and no one
 # player's minutes jump by more than this. The Scorecard tab checks these against results.
 REDISTRIBUTE_SHARE = 0.75    # share of an absent player's minutes (TOI...) that reaches the rotation we model
+# Oct 31: ...but the TOP remaining scorers are the exception. With a star freshly out, Unders on the players who take
+# over his shots went 0-8 on Oct 29-30 (Bane x3 and F. Wagner with Suggs out; LaMelo x2 and McDaniels x2 with Edwards
+# out) while the bench bumps held up. So the top PRIMARY_N by production get a bigger share of the missing usage and a
+# higher rate cap, and an Under on them asks for a news check (props_engine.leg_warnings / player_props).
+PRIMARY_N = 2
+PRIMARY_USAGE_WEIGHT = 2.0   # a primary's share of the leftover usage counts double
+USAGE_RATE_CAP_PRIMARY = 0.20
 BUMP_MAX_FRAC = 0.35         # a teammate's minutes go up at most 35% of his own ...
 BUMP_MAX_ABS = 8.0           # ... and at most 8 (minutes / TOI minutes)
 FRESH_OUT_GAMES = 3          # an absence is "fresh" when he played in at least 2 of the team's last 3 games
@@ -77,6 +84,12 @@ LOW_COUNT_MIN_EV = 0.06
 HIT_CONFLICT_MIN_GAMES = 4
 GAP_MODEL_WEIGHT = 0.20
 GAP_TAG = "market-gap"
+STAR_OUT_TAG = "star-out"    # Oct 31: a teammate freshly out moved this player's projection (bump or top option)
+
+
+def is_star_out(row: Dict) -> bool:
+    """Did a fresh teammate absence move this row -- a usage bump, or a top option absorbing a missing star?"""
+    return bool(row.get("absorbs")) or any(str(f).startswith("↑ usage bump") for f in row.get("flags") or [])
 
 _SUFFIX = {"jr", "sr", "ii", "iii", "iv", "v"}
 
@@ -475,7 +488,7 @@ def fresh_absence(player_games: Sequence[str], team_recent_games: Sequence[str],
     return sum(1 for g in recent if g in set(player_games)) >= min(need, len(recent)) if recent else False
 
 
-def redistribute(players: Sequence[Dict], cap: float = 40.0) -> Dict:
+def redistribute(players: Sequence[Dict], cap: float = 40.0, primary_n: int = 0) -> Dict:
     """Spread FRESH absences' opportunity to the teammates still playing.
 
     players: [{"pid","name","slot","opp" (minutes / TOI / ...), "rate" (production per unit), "out", "fresh"}].
@@ -483,7 +496,10 @@ def redistribute(players: Sequence[Dict], cap: float = 40.0) -> Dict:
     opportunity (REDISTRIBUTE_SHARE of it) goes REDISTRIBUTE_SAME_SLOT to his own position group (by their
     opportunity) and the rest to everyone (capped at `cap`, and no one gains more than BUMP_MAX_FRAC of his own
     or BUMP_MAX_ABS); whatever production that doesn't replace, teammates make up USAGE_GAP_FILL of
-    through a higher rate (more shots / touches), spread by current production and capped at USAGE_RATE_CAP."""
+    through a higher rate (more shots / touches), spread by current production and capped at USAGE_RATE_CAP.
+    With `primary_n`, the top primary_n healthy players by production are the team's primary options: their share
+    of that leftover usage is weighted PRIMARY_USAGE_WEIGHT, their cap is USAGE_RATE_CAP_PRIMARY, and their entry
+    carries "primary": True (an Under on them then asks for a news check)."""
     live = [p for p in players if not p.get("out") and num(p.get("opp")) > 0]
     res = {p["pid"]: {"opp_add": 0.0, "rate_mult": 1.0, "from": []} for p in live}
     absent = [p for p in players if p.get("out") and p.get("fresh") and num(p.get("opp")) > 0]
@@ -509,11 +525,16 @@ def redistribute(players: Sequence[Dict], cap: float = 40.0) -> Dict:
                     r["from"].append(a.get("name"))
         gap += max(0.0, lost - recovered)
     prod = {p["pid"]: (num(p["opp"]) + res[p["pid"]]["opp_add"]) * num(p.get("rate")) for p in live}
-    tot_prod = sum(prod.values())
+    primary = set(sorted((pid for pid in prod if prod[pid] > 0), key=lambda pid: -prod[pid])[:primary_n])
+    for pid in primary:
+        res[pid]["primary"] = True
+    weight = {pid: prod[pid] * (PRIMARY_USAGE_WEIGHT if pid in primary else 1.0) for pid in prod}
+    tot_prod = sum(weight.values())
     if gap > 0 and tot_prod > 0:
         for p in live:
-            share = prod[p["pid"]] / tot_prod
-            bump = min(USAGE_RATE_CAP, USAGE_GAP_FILL * gap * share / prod[p["pid"]]) if prod[p["pid"]] else 0.0
+            share = weight[p["pid"]] / tot_prod
+            rcap = USAGE_RATE_CAP_PRIMARY if p["pid"] in primary else USAGE_RATE_CAP
+            bump = min(rcap, USAGE_GAP_FILL * gap * share / prod[p["pid"]]) if prod[p["pid"]] else 0.0
             res[p["pid"]]["rate_mult"] = 1 + bump
             if bump > 0.005:
                 for a in absent:
@@ -654,6 +675,8 @@ def plays_for_log(rows: Sequence[Dict], market: str, game_label: str) -> List[Di
         play = {"Player": r["player"], "PlayerId": r.get("pid"), "Game": game_label, "Market": market,
                 "Side": side, "Line": r["line"], "ModelProb": round(p, 4), "Fair": american(p)}
         tags = [GAP_TAG] if r.get("gap") in ("big", "big-low-count") else []
+        if is_star_out(r):
+            tags.append(STAR_OUT_TAG)                       # the Scorecard grades star-out nights separately
         tag = use_tag(r, side, r["line"])[0]
         if tag in USE_KEY:
             tags.append(f"use:{USE_KEY[tag]}")              # the Scorecard grades each tag
@@ -914,6 +937,8 @@ def leg_warnings(row: Dict, side: Optional[str], line: Optional[float]) -> List[
         w.append("check news (line far from projection)")
     if row.get("returning"):
         w.append("missed his team's last game")
+    if row.get("absorbs") and side == "Under":
+        w.append("top option with a star freshly out — the books price that bump better; check news")
     c = cushion(row.get("projection"), line, side)
     if c is not None:
         if c < 0:
@@ -940,6 +965,25 @@ USE_KEY = {USE_BOTH: "both", USE_PARLAY: "parlay", USE_SINGLE: "single", USE_PAS
 PARLAY_MIN_CHANCE = 0.60          # each parlay leg 60%+ to hit ...
 MILESTONE_PARLAY_CHANCE = 0.70    # ... a model-only milestone leg 70%+ (no market check on it)
 PICKEM_BREAKEVEN = 3.0 ** -0.5    # a 2-pick entry paying 3x needs ~57.7% a pick; the ticket builder uses yours
+
+
+def same_game_stacks(items: Sequence[Dict], game_key: str = "game", label_key: str = "label") -> Dict[str, List[str]]:
+    """{game: [labels]} for every game with more than one selection. Oct 31: two of the Oct 30 singles came from
+    Magic-Raptors and lost together (same game script, same star out) -- a card should spread across games."""
+    by: Dict[str, List[str]] = {}
+    for it in items or []:
+        g = it.get(game_key)
+        if g:
+            by.setdefault(str(g), []).append(str(it.get(label_key) or "?"))
+    return {g: labs for g, labs in by.items() if len(labs) > 1}
+
+
+def stack_warning(items: Sequence[Dict], game_key: str = "game", label_key: str = "label") -> Optional[str]:
+    stacks = same_game_stacks(items, game_key, label_key)
+    if not stacks:
+        return None
+    return ("More than one pick from the same game — they tend to win or lose together: "
+            + "; ".join(f"{g} ({len(labs)}: {', '.join(labs)})" for g, labs in stacks.items()))
 
 
 def is_parlay_use(tag: Optional[str]) -> bool:

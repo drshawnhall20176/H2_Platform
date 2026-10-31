@@ -510,6 +510,19 @@ def _auto_book_lines(sport_odds_key: str, date_s: str, home: str, away: str, key
     return PO.fetch_game(api_key, sport_odds_key, home, away, list(keys or ()))
 
 
+def _with_archive(got, keys, past: bool):
+    """Oct 31: keep every good pre-kickoff fetch, and fall back to the archive when the books have nothing (a past
+    date: the feed drops a game once it's played). A past date reads the archive first and spends no credits."""
+    import model_store as MS
+    home_k, away_k = str(bundle["home"]), str(bundle["away"])
+    if got is None:
+        return MS.load_odds(SPORT_KEY, date_str, home_k, away_k, keys) if past else None
+    if got.get("offers") or got.get("lines"):
+        MS.save_odds(SPORT_KEY, date_str, home_k, away_k, keys, got, kickoff=game.get("game_date"))
+        return got
+    return MS.load_odds(SPORT_KEY, date_str, home_k, away_k, keys) or got
+
+
 def render_game_context(market: str) -> dict:
     """Spread / total (loaded from the books or typed), both teams' rest, and the market-blend settings."""
     store = st.session_state.setdefault("pm_mkt", {})
@@ -519,6 +532,13 @@ def render_game_context(market: str) -> dict:
                                               and market in PPR.POINTS_COMBOS else [])) if k)
     gkey = (SPORT_KEY, date_str, str(bundle["home"]), str(bundle["away"]))
     skey = gkey + fetch_keys
+    past = target_date < datetime.now(eastern).date()
+    if skey not in store and past:
+        arch = _with_archive(None, fetch_keys, past=True)
+        if arch:
+            store[skey] = arch
+            if arch.get("lines"):
+                store[gkey] = arch["lines"]
     if skey not in store and st.session_state.get("pm_props_auto", True):
         try:
             with st.spinner(f"Getting tonight's {market} lines from the books..."):
@@ -526,6 +546,7 @@ def render_game_context(market: str) -> dict:
         except Exception as exc:                                   # noqa: BLE001
             auto = {"error": f"Couldn't reach the books ({type(exc).__name__})."}
         if not auto.get("no_key"):
+            auto = _with_archive(auto, fetch_keys, past)
             store[skey] = auto
             if auto.get("lines"):
                 store[gkey] = auto["lines"]
@@ -545,8 +566,8 @@ def render_game_context(market: str) -> dict:
                     store[skey] = {"error": "No Odds API key is configured on this deployment."}
                 else:
                     with st.spinner("Asking the books..."):
-                        store[skey] = PO.fetch_game(api_key, _active.odds_sport_key, home_name, away_name,
-                                                    list(fetch_keys))
+                        store[skey] = _with_archive(PO.fetch_game(api_key, _active.odds_sport_key, home_name,
+                                                                  away_name, list(fetch_keys)), fetch_keys, past)
                 if (store[skey] or {}).get("lines"):
                     store[gkey] = store[skey]["lines"]
         got = store.get(skey) or {}
@@ -554,6 +575,9 @@ def render_game_context(market: str) -> dict:
         with c2:
             if got.get("error"):
                 st.warning(got["error"])
+            elif got.get("archived_ts"):
+                st.caption(f"🗄️ {len(got.get('offers') or [])} {market} lines from the archive — the last pre-kickoff "
+                           f"read, saved {str(got['archived_ts'])[:16].replace('T', ' ')} UTC. No credits used.")
             elif got:
                 st.caption(f"Loaded {len(got.get('offers') or [])} posted {market} lines"
                            + (f" · {got['remaining']} Odds API credits left" if got.get("remaining") else "")
@@ -765,6 +789,10 @@ def render_ticket(all_rows, market):
         if not_parlay and len(legs) > 1:
             st.info(f"{len(not_parlay)} leg(s) aren't parlay-tagged: "
                     + "; ".join(f"{l['label']} ({l.get('use')}: {l.get('use_why')})" for l in not_parlay))
+        stack = PE.stack_warning(legs)
+        if stack:
+            st.warning("🔗 " + stack + ". Fine for a same-game parlay on purpose; for a card of singles or a "
+                       "Pick6 entry, spread them out.")
         risky = [l for l in legs if l.get("warnings")]
         if risky:
             st.warning(f"{len(risky)} of {len(legs)} legs carry a warning: "
@@ -968,6 +996,23 @@ def render_logged_props(markets) -> None:
         st.dataframe(pd.DataFrame(rows_), hide_index=True, width="stretch")
         st.caption("If market-gap plays keep losing (or closing worse than you bet them), the books knew something — "
                    "keep skipping them. If they win and beat the close, the model is spotting real mispricings.")
+    star_bets = [b for b in bets if PE.has_tag(b.get("notes"), PE.STAR_OUT_TAG)]
+    if star_bets:
+        rest = [b for b in bets if b not in star_bets]
+        rows_ = []
+        for label, grp in (("↑ Star-out plays", star_bets), ("Everything else", rest)):
+            for side in ("Over", "Under"):
+                g_ = [b for b in grp if b.get("side") == side]
+                if not g_:
+                    continue
+                sm = B.summary(g_)
+                rows_.append({"Bets": f"{label} · {side}", "Record": f"{sm.get('wins', 0)}-{sm.get('losses', 0)}",
+                              "ROI": "—" if sm.get("roi") is None else f"{sm['roi']:+.1f}%"})
+        st.markdown("**When a teammate is freshly out, who's right — the model's bump or the books'?**")
+        st.dataframe(pd.DataFrame(rows_), hide_index=True, width="stretch")
+        st.caption("Star-out plays are bets where a fresh absence moved the projection. If their Unders keep losing, "
+                   "the bump is still too small (Oct 31 raised it for the top two options); if their Overs lose, "
+                   "it's too big.")
     cal = B.calibration(bets)
     if cal:
         st.dataframe(pd.DataFrame([{"Model said": f"{c['lo']:.0%}–{c['hi']:.0%}", "Avg model": f"{c['predicted']:.0%}",
