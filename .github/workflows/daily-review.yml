@@ -1,0 +1,56 @@
+# The 3:30 AM ET morning review (daily_review.py).
+#
+# Every morning, for each sport with a slate yesterday (or open bets): grades the kickoff snapshots against ESPN's
+# box scores, lists the adjustments the last 30 days point to (owners approve them on Postgame Review -- nothing
+# changes on its own), and settles open Bet Log props + parlay tickets by name. Anything uncertain (a DNP, a name
+# spelled differently, a game not final) is left open and listed. The report shows on Postgame Review →
+# 🌅 Morning report.
+#
+# Needs the DATABASE_URL secret (the same one settle-results uses). No odds API key -- ESPN box scores are free.
+#
+# SCHEDULE: cron is UTC and doesn't know about daylight saving, so it fires at both 07:30 UTC (3:30 AM EDT) and
+# 08:30 UTC (3:30 AM EST); the runner only works on the one that lands at 3 AM in New York.
+# "Run workflow" (below) runs it immediately; tick "force" and optionally give a morning date.
+
+name: daily-review
+
+on:
+  schedule:
+    - cron: "30 7 * * *"
+    - cron: "30 8 * * *"
+  workflow_dispatch:
+    inputs:
+      morning:
+        description: "Morning to review (YYYY-MM-DD, New York). Blank = today."
+        required: false
+        default: ""
+
+permissions:
+  contents: read                 # writes go to the database, not the repo
+
+concurrency:
+  group: daily-review
+  cancel-in-progress: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Morning review
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DAILY_REVIEW_FORCE: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
+          MORNING: ${{ github.event.inputs.morning }}
+        run: |
+          if [ -n "$MORNING" ]; then python daily_review.py --date "$MORNING"; else python daily_review.py; fi

@@ -51,7 +51,86 @@ if not dates:
             "back here after the games.")
     st.stop()
 
-tab_day, tab_trend, tab_adj = st.tabs(["📋 One slate", "📈 Patterns & suggestions", "🛠️ Approved adjustments"])
+tab_morning, tab_day, tab_trend, tab_adj = st.tabs(["🌅 Morning report", "📋 One slate", "📈 Patterns & suggestions",
+                                                    "🛠️ Approved adjustments"])
+
+
+def _pct(x):
+    return "—" if x is None else f"{x:.0%}"
+
+
+with tab_morning:
+    mornings = MS.daily_review_mornings(SPORT_KEY)
+    if not mornings:
+        st.info("No morning report yet. One is written at 3:30 AM ET each day for every sport with a slate the day "
+                "before (or open bets): yesterday graded against the box scores, the adjustments the last 30 days "
+                "point to, and open Bet Log props settled.")
+    else:
+        mpick = st.selectbox("Morning", mornings, key="pgr_morning")
+        rep = MS.load_daily_review(SPORT_KEY, mpick) or {}
+        st.caption(f"Written {str(rep.get('created', ''))[:16].replace('T', ' ')} UTC.")
+        for n in rep.get("notes") or []:
+            st.markdown(f"- {n}")
+        for d, s in sorted((rep.get("slates") or {}).items()):
+            c = s["counts"]
+            st.markdown(f"##### Slate {d}")
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Graded", c["hit"] + c["miss"] + c["push"])
+            m2.metric("Hit rate", _pct(c["hit"] / (c["hit"] + c["miss"])) if c["hit"] + c["miss"] else "—")
+            m3.metric("Model side right", _pct(s["model"]["right"] / s["model"]["graded"]) if s["model"]["graded"] else "—")
+            m4.metric("Void / pending", f"{c['void']} / {c['pending']}")
+            if s.get("use"):
+                st.dataframe(pd.DataFrame([{"Use": u["Use"], "Record": f"{u['Hits']}-{u['Graded'] - u['Hits']}",
+                                            "Hit rate": _pct(u["Hit rate"]), "Model said": _pct(u.get("Model said"))}
+                                           for u in s["use"]]), hide_index=True, width="stretch")
+            if s.get("markets"):
+                st.dataframe(pd.DataFrame([{"Market": mk["market"], "Graded": mk["graded"], "Hit rate": _pct(mk["hit_rate"]),
+                                            "Model side": _pct(mk["model_side"]),
+                                            "Results vs projection": "—" if mk["vs_projection"] is None
+                                            else f"{mk['vs_projection']:+.0%}"} for mk in s["markets"]]),
+                             hide_index=True, width="stretch")
+            g, so = s["big_gap"], s["star_out"]
+            st.caption(f"Line far from projection: {g['graded']} props, model right {_pct(g['model_right'])}. "
+                       f"Star-out props: {so['graded']}, hit {_pct(so['hit_rate'])} (Overs {_pct(so['overs'])}, "
+                       f"Unders {_pct(so['unders'])}). Misses by cause: "
+                       + (", ".join(f"{k} {v}" for k, v in s["causes"].items()) or "none") + ".")
+            if s.get("top_misses"):
+                with st.expander(f"Biggest misses among Use-tagged picks ({len(s['top_misses'])})"):
+                    st.dataframe(pd.DataFrame([{"Player": r["player"], "Game": r["game"], "Market": r["market"],
+                                                "Pick": f"{r['side']} {r['line']}", "Proj": r["projection"],
+                                                "Actual": r["actual"], "Use": r["use"], "Cause": r["cause"] or ""}
+                                               for r in s["top_misses"]]), hide_index=True, width="stretch")
+        tr = rep.get("trend") or {}
+        st.markdown(f"##### Suggestions (last {tr.get('days', 30)} days · {tr.get('graded', 0)} graded props)")
+        sugg = rep.get("suggestions") or []
+        if not sugg:
+            st.caption("Nothing consistent enough to act on yet.")
+        for i, sgt in enumerate(sugg):
+            with st.container(border=True):
+                st.markdown(sgt["text"])
+                if sgt["kind"] == "tuning":
+                    c1, c2 = st.columns([3, 1])
+                    c1.caption(f"Approving sets {sgt['market']}{' · ' + sgt['slot'] if sgt['slot'] else ''} projections "
+                               f"to ×{sgt['factor']:.3f}. Nothing changes until someone approves.")
+                    if c2.button("Approve", key=f"pgr_mok_{mpick}_{i}"):
+                        ok = MS.approve_tuning(sgt["sport"], sgt["market"], sgt["factor"], sgt["text"], sgt["slot"])
+                        st.success("Approved.") if ok else st.error("Couldn't save the adjustment.")
+                else:
+                    st.caption("Advice — this one needs a rule change in the model; ask Claude to apply it.")
+        stl = rep.get("settlement") or {}
+        st.markdown("##### Bet Log settlement")
+        done_rows = [{"Bet": x["description"], "Actual": x["actual"], "Result": x["result"]} for x in stl.get("settled") or []]
+        done_rows += [{"Bet": f"Ticket {t['ticket']} (#{t['id']})", "Actual": None, "Result": t["result"]}
+                      for t in stl.get("tickets") or []]
+        if done_rows:
+            st.dataframe(pd.DataFrame(done_rows), hide_index=True, width="stretch")
+        else:
+            st.caption("No open props were settled this morning.")
+        left = (stl.get("unresolved") or []) + (stl.get("still_pending") or [])
+        if left:
+            st.warning(f"{len(left)} left open for a person — settle these in the Bet Log:")
+            st.dataframe(pd.DataFrame([{"Bet": x["description"], "Why": x["why"]} for x in left]),
+                         hide_index=True, width="stretch")
 
 with tab_day:
     pick = st.selectbox("Slate date", dates, key="pgr_date")

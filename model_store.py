@@ -42,6 +42,11 @@ CREATE TABLE IF NOT EXISTS odds_archive (
     sport TEXT, slate_date TEXT, home TEXT, away TEXT, markets TEXT, payload TEXT, kickoff TEXT, ts TEXT,
     UNIQUE (sport, slate_date, home, away, markets)
 );
+CREATE TABLE IF NOT EXISTS daily_reviews (
+    id {pk},
+    sport TEXT, morning TEXT, report TEXT, ts TEXT,
+    UNIQUE (sport, morning)
+);
 CREATE TABLE IF NOT EXISTS model_tuning (
     id {pk},
     sport TEXT, market TEXT, slot TEXT, factor REAL, reason TEXT, approved_ts TEXT, active INTEGER DEFAULT 1
@@ -283,6 +288,52 @@ def load_odds(sport: str, slate_date: str, home: str, away: str, markets,
     except (TypeError, ValueError):
         return None
     return {"offers": data.get("offers") or [], "lines": data.get("lines") or {}, "error": None, "archived_ts": ts}
+
+
+# --------------------------------------------------------------------------- morning reports (daily_review.py)
+def save_daily_review(sport: str, morning: str, report: Dict, db_path: Optional[str] = None) -> bool:
+    """Keep one sport's 3:30 AM report (re-running a morning replaces it)."""
+    if _test_run(db_path):
+        return False
+    try:
+        with _conn(db_path) as (con, ph):
+            con.cursor().execute(
+                f"INSERT INTO daily_reviews (sport, morning, report, ts) VALUES ({ph},{ph},{ph},{ph}) "
+                f"ON CONFLICT (sport, morning) DO UPDATE SET report=excluded.report, ts=excluded.ts",
+                [sport, morning, json.dumps(report, default=str), _now()])
+        return True
+    except Exception:                                           # noqa: BLE001
+        return False
+
+
+def load_daily_review(sport: str, morning: str, db_path: Optional[str] = None) -> Optional[Dict]:
+    if db_path is None and not available():
+        return None
+    try:
+        with _conn(db_path) as (con, ph):
+            cur = con.cursor()
+            cur.execute(f"SELECT report FROM daily_reviews WHERE sport={ph} AND morning={ph}", [sport, morning])
+            row = cur.fetchone()
+    except Exception:                                           # noqa: BLE001
+        return None
+    if not row:
+        return None
+    try:
+        return json.loads(row["report"] if isinstance(row, (dict, sqlite3.Row)) else row[0])
+    except (TypeError, ValueError):
+        return None
+
+
+def daily_review_mornings(sport: str, db_path: Optional[str] = None) -> List[str]:
+    if db_path is None and not available():
+        return []
+    try:
+        with _conn(db_path) as (con, ph):
+            cur = con.cursor()
+            cur.execute(f"SELECT morning FROM daily_reviews WHERE sport={ph} ORDER BY morning DESC", [sport])
+            return [r["morning"] if isinstance(r, (dict, sqlite3.Row)) else r[0] for r in cur.fetchall()]
+    except Exception:                                           # noqa: BLE001
+        return []
 
 
 # --------------------------------------------------------------------------- tuning (approved adjustments)
