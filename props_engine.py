@@ -596,6 +596,14 @@ def read_line(projection: Optional[float], values: Sequence[float], line: Option
         out["lean"] = "Under"
     else:
         out["lean"] = "No lean"
+    # Oct 31: a posted line IS the market even without a price (a pick'em app's). The "far from the line -> check the
+    # news" rule used to run only when there was a price, so an opening-week college guard projected from last
+    # season's bench minutes (4.7) against a starter's line (16.5) showed "Under, 99%".
+    if thr > 0:
+        g = market_gap(projection, values, line, dist, sd_floor_frac, sd_floor_abs)
+        out.update(gap_pct=g["pct"], gap=g["level"])
+        if g["level"] == "big" and not news_checked and out["lean"] in ("Over", "Under"):
+            out["lean"] = "Check news"
     return out
 
 

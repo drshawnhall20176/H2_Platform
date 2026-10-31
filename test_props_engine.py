@@ -311,3 +311,13 @@ def test_hockey_rates_are_pulled_toward_the_position_group():
     hot = HP.shrunk_rate(0.06, [17.0] * 10, "g", pri["F"])
     assert pri["F"] < hot < 0.06                                   # a hot streak is tempered, not erased
     assert HP.shrunk_rate(0.4, [30.0], "saves", 0.9) == 0.4        # goalies' save rate is left alone
+
+
+def test_a_line_far_from_the_projection_needs_a_news_check_even_without_a_price():
+    # Oct 31: an opening-week college guard projected 4.7 (last season's bench minutes) vs a pick'em line of 16.5
+    # showed "Under 99%" -- the gap check only ran when there was a price.
+    vals = [4.0, 6.0, 3.0, 5.0, 5.0]
+    r = PE.read_line(4.7, vals, 16.5, "normal")
+    assert r["gap"] == "big" and r["lean"] == "Check news"
+    assert PE.read_line(4.7, vals, 16.5, "normal", news_checked=True)["lean"] == "Under"
+    assert PE.read_line(15.9, [15, 17, 14, 16, 18], 16.5, "normal")["gap"] != "big"

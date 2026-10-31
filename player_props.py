@@ -315,7 +315,12 @@ def player_rows(rotation_list: Sequence[Dict], defense, market: str, cur_table: 
             flags += rest["flags"] + blow["flags"]
             env_mult = PE.env_multiplier(ctx.get("env"), _component_shares(b["games"], market), ENV_WEIGHTS)
             proj = rate * opp * fac["factor"] * env_mult * _tuning(ctx.get("sport") or "NBA", market, slot)
-        if b["f"]["filled"]:
+        if b["f"]["filled"] and not b["f"]["season_games"]:
+            # Oct 31: no game this season yet -- every number is last season's, on a role that may have changed
+            # (college rosters turn over; a bench player can be this year's starter).
+            flags.insert(0, "⚠️ No games this season yet — all form is last season's; his role and minutes may "
+                            "have changed")
+        elif b["f"]["filled"]:
             flags.append("form incl. last season")
         if b["out"] and not b["fresh"]:
             flags.append("already out — teammates' numbers include it")

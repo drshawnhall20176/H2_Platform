@@ -739,4 +739,4 @@ def test_ncaamb_opening_week_rows_project_from_last_season(basketball):
     p = b["props"]
     rows = PPR.player_rows(p["rotation"][2], 1, "Points", {}, {}, p["cur_pgames"], p["prior_pgames"],
                            context={"team": 2, "sport": "NCAAMB"})
-    assert rows and all(r["projection"] is not None and "form incl. last season" in r["flags"] for r in rows)
+    assert rows and all(r["projection"] is not None and any("No games this season yet" in f for f in r["flags"]) for r in rows)
