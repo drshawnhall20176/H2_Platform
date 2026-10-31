@@ -87,7 +87,7 @@ def football_box(summary: Optional[Dict]) -> Dict:
     """ESPN football summary -> {"teams": {team abbreviation: {normalized name: stats}}, "ids": {abbr: team id},
     "score": {abbr: points}, "final": bool}. Every player who shows up anywhere in the box gets every stat (0 when
     his group is missing -- a receiver with no catch still played)."""
-    out = {"teams": {}, "ids": {}, "score": {}, "final": False}
+    out = {"teams": {}, "ids": {}, "score": {}, "final": False, "aliases": {}}
     if not summary:
         return out
     box = summary.get("boxscore") or {}
@@ -97,6 +97,8 @@ def football_box(summary: Optional[Dict]) -> Dict:
         if not abbr:
             continue
         out["ids"][abbr] = t.get("id")
+        for a in _aliases(t):                    # "baylor", "baylor bears", "bay", ... -> "BAY"
+            out["aliases"].setdefault(a, abbr)
         players: Dict[str, Dict] = out["teams"].setdefault(abbr, {})
         for grp in team.get("statistics") or []:
             spec = _FOOTBALL.get(grp.get("name"))
@@ -219,7 +221,11 @@ def _team_key(sport: str, box: Dict, team) -> Optional[str]:
     for abbr in box["teams"]:
         if _norm(abbr) == nt:
             return abbr
-    return None
+    # College snapshots carry the school name ("Baylor", "Kent State"), the box keys ESPN's abbreviation ("BAY",
+    # "KENT"). Before Oct 31 only schools whose name IS the abbreviation (UCF, LSU, SMU...) matched, so ~80% of
+    # college props were voided. Match on ESPN's own names for the team as well.
+    abbr = (box.get("aliases") or {}).get(nt)
+    return abbr if abbr in box["teams"] else None
 
 
 # --------------------------------------------------------------------------- grading

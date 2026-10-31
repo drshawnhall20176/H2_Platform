@@ -123,3 +123,31 @@ def test_postgame_page_grades_a_slate_and_offers_an_approval(monkeypatch):
     txt = " ".join(m.value for m in at.markdown)
     assert "Was the Use tag right?" in txt and "Pass Attempts: results ran" in txt
     assert any(b.label == "Approve" for b in at.button)
+
+
+def test_college_snapshots_match_on_school_name_not_just_abbreviation():
+    # Oct 31: college snapshots carry CFBD school names ("Baylor"); ESPN keys the box by abbreviation ("BAY").
+    # Only UCF (name == abbreviation) used to match, so 66 of 81 props from Oct 30 were voided.
+    summary = json.loads((Path(__file__).parent / "test_fixtures" / "espn_ncaaf_summary_401856844_trimmed.json")
+                         .read_text())
+    board = {"events": [{"id": "401856844", "competitions": [{"competitors": [
+        {"team": {"abbreviation": "UCF", "displayName": "UCF Knights", "location": "UCF", "id": "2116"}},
+        {"team": {"abbreviation": "BAY", "displayName": "Baylor Bears", "location": "Baylor", "id": "239"}}]}]}]}
+
+    def cfb_fetch(url, params=None):
+        return board if url.endswith("scoreboard") else summary
+
+    def s(player, team, market, proj, line, side):
+        return {"sport": "NCAAF", "slate_date": "2026-10-30", "game": "Baylor @ UCF", "team": team,
+                "opp": "UCF" if team == "Baylor" else "Baylor", "player": player, "market": market, "slot": "WR1",
+                "projection": proj, "proj_opp": None, "line": line, "side": side, "flags": "[]"}
+    snaps = [s("D.J. Lagway", "Baylor", "Pass Yards", 314.2, 256.5, "Over"),
+             s("Caden Knighten", "Baylor", "Rush Attempts", 9.1, 6.5, "Over"),
+             s("Gavin Freeman", "Baylor", "Receiving Yards", 96.4, 81.5, "Over"),
+             s("Duke Watson", "UCF", "Rush Attempts", 12.1, 14.5, "Under")]
+    res = PG.fetch_results("NCAAF", "2026-10-30", [(x["team"], x["opp"]) for x in snaps], fetch=cfb_fetch)
+    g = {r["player"]: r for r in PG.grade(snaps, res)}
+    assert g["D.J. Lagway"]["result"] == "hit" and g["D.J. Lagway"]["actual"] == 319     # "D.J." == "DJ"
+    assert g["Caden Knighten"]["result"] == "hit" and g["Caden Knighten"]["actual"] == 7
+    assert g["Gavin Freeman"]["actual"] == 114
+    assert g["Duke Watson"]["result"] == "hit" and g["Duke Watson"]["margin"] == -32
