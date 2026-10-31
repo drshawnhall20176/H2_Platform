@@ -84,6 +84,12 @@ LOW_COUNT_MIN_EV = 0.06
 HIT_CONFLICT_MIN_GAMES = 4
 GAP_MODEL_WEIGHT = 0.20
 GAP_TAG = "market-gap"
+STAR_OUT_TAG = "star-out"    # Oct 31: a teammate freshly out moved this player's projection (bump or top option)
+
+
+def is_star_out(row: Dict) -> bool:
+    """Did a fresh teammate absence move this row -- a usage bump, or a top option absorbing a missing star?"""
+    return bool(row.get("absorbs")) or any(str(f).startswith("↑ usage bump") for f in row.get("flags") or [])
 
 _SUFFIX = {"jr", "sr", "ii", "iii", "iv", "v"}
 
@@ -669,6 +675,8 @@ def plays_for_log(rows: Sequence[Dict], market: str, game_label: str) -> List[Di
         play = {"Player": r["player"], "PlayerId": r.get("pid"), "Game": game_label, "Market": market,
                 "Side": side, "Line": r["line"], "ModelProb": round(p, 4), "Fair": american(p)}
         tags = [GAP_TAG] if r.get("gap") in ("big", "big-low-count") else []
+        if is_star_out(r):
+            tags.append(STAR_OUT_TAG)                       # the Scorecard grades star-out nights separately
         tag = use_tag(r, side, r["line"])[0]
         if tag in USE_KEY:
             tags.append(f"use:{USE_KEY[tag]}")              # the Scorecard grades each tag

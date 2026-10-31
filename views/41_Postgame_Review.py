@@ -82,7 +82,9 @@ with tab_day:
         st.markdown("##### Why the misses missed")
         st.caption("**Volume** / **Role change**: the targets, carries, attempts or minutes were 25%+ off the model's "
                    "call — that's the model. **Player**: the chances came and weren't converted. **Blowout**: decided by "
-                   "17+. A volume swing that favored the bet doesn't count against the model.")
+                   "17+. **Usage absorbed**: an Under on a player a teammate's fresh absence moved, whose minutes came "
+                   "in 10%+ above the call — the bump was too small. A volume swing that favored the bet doesn't count "
+                   "against the model.")
         if cc:
             st.dataframe(pd.DataFrame([{"Cause": k, "Misses": v} for k, v in sorted(cc.items(), key=lambda kv: -kv[1])]),
                          hide_index=True)

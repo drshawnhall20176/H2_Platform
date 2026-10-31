@@ -169,3 +169,19 @@ def test_odds_archive_keeps_pre_kickoff_lines_for_past_dates(tmp_path):
     again = MS.load_odds("NCAAF", "2026-10-30", "Sacramento State", "Kent State", ("player_receptions",), db_path=db)
     assert again["offers"][0]["line"] == 6.5                                             # untouched
     assert MS.load_odds("NCAAF", "2026-10-30", "Sacramento State", "Kent State", ("player_rush_yds",), db_path=db) is None
+
+
+def test_star_out_under_misses_are_blamed_on_the_bump_not_the_player():
+    # Oct 31: Bane, Suggs out, Under 19.5, minutes 33.1 -> 39 (+18%: under the 25% volume bar) -> was "Player".
+    bane = {"result": "miss", "side": "Under", "proj_opp": 33.1, "actual_opp": 39.0,
+            "flags": json.dumps(["↑ usage bump (Jalen Suggs out)"])}
+    assert PG.cause(bane, 7) == PG.CAUSE_USAGE and PG.CAUSE_USAGE in PG.MODEL_CAUSES
+    assert PG.cause(dict(bane, actual_opp=33.0), 7) == PG.CAUSE_PLAYER          # got his minutes, just shot well
+    assert PG.cause(dict(bane, side="Over", actual_opp=30.0), 7) != PG.CAUSE_USAGE
+    assert PG.cause(dict(bane, result="hit"), 7) is None
+
+
+def test_star_out_rows_are_tagged_for_the_bet_log():
+    assert PE.is_star_out({"flags": ["↑ usage bump (Egor Demin out)"]})
+    assert PE.is_star_out({"absorbs": True, "flags": []})
+    assert not PE.is_star_out({"flags": ["form incl. last season"]})

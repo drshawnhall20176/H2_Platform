@@ -992,6 +992,23 @@ def render_logged_props(markets) -> None:
         st.dataframe(pd.DataFrame(rows_), hide_index=True, width="stretch")
         st.caption("If market-gap plays keep losing (or closing worse than you bet them), the books knew something — "
                    "keep skipping them. If they win and beat the close, the model is spotting real mispricings.")
+    star_bets = [b for b in bets if PE.has_tag(b.get("notes"), PE.STAR_OUT_TAG)]
+    if star_bets:
+        rest = [b for b in bets if b not in star_bets]
+        rows_ = []
+        for label, grp in (("↑ Star-out plays", star_bets), ("Everything else", rest)):
+            for side in ("Over", "Under"):
+                g_ = [b for b in grp if b.get("side") == side]
+                if not g_:
+                    continue
+                sm = B.summary(g_)
+                rows_.append({"Bets": f"{label} · {side}", "Record": f"{sm.get('wins', 0)}-{sm.get('losses', 0)}",
+                              "ROI": "—" if sm.get("roi") is None else f"{sm['roi']:+.1f}%"})
+        st.markdown("**When a teammate is freshly out, who's right — the model's bump or the books'?**")
+        st.dataframe(pd.DataFrame(rows_), hide_index=True, width="stretch")
+        st.caption("Star-out plays are bets where a fresh absence moved the projection. If their Unders keep losing, "
+                   "the bump is still too small (Oct 31 raised it for the top two options); if their Overs lose, "
+                   "it's too big.")
     cal = B.calibration(bets)
     if cal:
         st.dataframe(pd.DataFrame([{"Model said": f"{c['lo']:.0%}–{c['hi']:.0%}", "Avg model": f"{c['predicted']:.0%}",

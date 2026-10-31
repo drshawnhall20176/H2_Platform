@@ -324,6 +324,7 @@ def play_from_row(row: Dict, slate_row: Optional[Dict] = None) -> Optional[Dict]
         "Warnings": [w for w in PE.leg_warnings(row, side, row["line"]) if not w.startswith("thin cushion")],
         "Use": use, "UseWhy": use_why, "Pickem": bk.get("pickem", False), "PricedAt": bk.get("book"),
         "Notes": ",".join(([PE.GAP_TAG] if row.get("gap") in ("big", "big-low-count") or row.get("gap_from") else [])
+                          + ([PE.STAR_OUT_TAG] if PE.is_star_out(row) else [])
                           + ([f"use:{PE.USE_KEY[use]}"] if use in PE.USE_KEY else [])) or None,
         "Why": why(row), "Model": "player-props",
         "PriorGames": row.get("games", 0) - row.get("season_games", 0) if row.get("filled") else 0,
