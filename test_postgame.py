@@ -151,3 +151,21 @@ def test_college_snapshots_match_on_school_name_not_just_abbreviation():
     assert g["Caden Knighten"]["result"] == "hit" and g["Caden Knighten"]["actual"] == 7
     assert g["Gavin Freeman"]["actual"] == 114
     assert g["Duke Watson"]["result"] == "hit" and g["Duke Watson"]["margin"] == -32
+
+
+def test_odds_archive_keeps_pre_kickoff_lines_for_past_dates(tmp_path):
+    # Oct 31: a past date used to show no lines (the books' feed drops played games). Good pre-kickoff fetches are
+    # archived and read back for that date; empty / error / in-game fetches never overwrite them.
+    db = str(tmp_path / "m.db")
+    got = {"offers": [{"player": "Wayne Harris", "line": 6.5}], "lines": {"total": 51.5}, "error": None}
+    assert MS.save_odds("NCAAF", "2026-10-30", "Sacramento State", "Kent State", ("player_receptions",), got,
+                        kickoff="2099-01-01T00:00:00Z", db_path=db)
+    back = MS.load_odds("NCAAF", "2026-10-30", "Sacramento State", "Kent State", ["player_receptions"], db_path=db)
+    assert back["offers"][0]["line"] == 6.5 and back["lines"]["total"] == 51.5 and back["archived_ts"]
+    assert not MS.save_odds("NCAAF", "2026-10-30", "Sacramento State", "Kent State", ("player_receptions",),
+                            dict(got, offers=[{"line": 9.5}]), kickoff="2000-01-01T00:00:00Z", db_path=db)
+    assert not MS.save_odds("NCAAF", "2026-10-30", "Sacramento State", "Kent State", ("player_receptions",),
+                            {"error": "The books haven't listed this game yet"}, db_path=db)
+    again = MS.load_odds("NCAAF", "2026-10-30", "Sacramento State", "Kent State", ("player_receptions",), db_path=db)
+    assert again["offers"][0]["line"] == 6.5                                             # untouched
+    assert MS.load_odds("NCAAF", "2026-10-30", "Sacramento State", "Kent State", ("player_rush_yds",), db_path=db) is None
