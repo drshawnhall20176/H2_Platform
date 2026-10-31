@@ -513,14 +513,21 @@ def _auto_book_lines(sport_odds_key: str, date_s: str, home: str, away: str, key
 def _with_archive(got, keys, past: bool):
     """Oct 31: keep every good pre-kickoff fetch, and fall back to the archive when the books have nothing (a past
     date: the feed drops a game once it's played). A past date reads the archive first and spends no credits."""
-    import model_store as MS
-    home_k, away_k = str(bundle["home"]), str(bundle["away"])
-    if got is None:
-        return MS.load_odds(SPORT_KEY, date_str, home_k, away_k, keys) if past else None
-    if got.get("offers") or got.get("lines"):
-        MS.save_odds(SPORT_KEY, date_str, home_k, away_k, keys, got, kickoff=game.get("game_date"))
+    # The archive is a convenience: it must never break the board (a hot reload can leave an older model_store in
+    # memory without save_odds/load_odds -- Oct 31). Any failure just means "no archive".
+    try:
+        import model_store as MS
+        save, load = getattr(MS, "save_odds", None), getattr(MS, "load_odds", None)
+        home_k, away_k = str(bundle["home"]), str(bundle["away"])
+        if got is None:
+            return load(SPORT_KEY, date_str, home_k, away_k, keys) if (past and load) else None
+        if got.get("offers") or got.get("lines"):
+            if save:
+                save(SPORT_KEY, date_str, home_k, away_k, keys, got, kickoff=(game or {}).get("game_date"))
+            return got
+        return (load(SPORT_KEY, date_str, home_k, away_k, keys) if load else None) or got
+    except Exception:                                              # noqa: BLE001
         return got
-    return MS.load_odds(SPORT_KEY, date_str, home_k, away_k, keys) or got
 
 
 def render_game_context(market: str) -> dict:
