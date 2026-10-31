@@ -63,6 +63,12 @@ def summarize(cases: Sequence[Dict]) -> Dict:
     naive_preds = [(c["p_naive"], c["actual"] > PE.threshold(c["line"])) for c in cases if c.get("p_naive") is not None]
     leans = [c for c in cases if c["lean"] in ("Over", "Under")]
     lean_hits = sum(1 for c in leans if (c["actual"] > PE.threshold(c["line"])) == (c["lean"] == "Over"))
+    # Oct 31: a raw hit rate against the proxy line means little on low counts -- "Under 0.5 goals" hits ~85% because
+    # most skaters don't score, and a book prices that side near -300, not -110. The fair bar is what the player's own
+    # recent history (the naive read) already gives that side; the model's edge is how far its leans beat that.
+    based = [c for c in leans if c.get("p_naive") is not None]
+    lean_base = (sum((c["p_naive"] if c["lean"] == "Over" else 1 - c["p_naive"]) for c in based) / len(based)
+                 if based else None)
     direction = [c for c in cases if abs(c["model"] - PE.threshold(c["line"])) > 1e-9]
     dir_hits = sum(1 for c in direction if (c["model"] > PE.threshold(c["line"])) == (c["actual"] > PE.threshold(c["line"])))
     return {
@@ -71,6 +77,7 @@ def summarize(cases: Sequence[Dict]) -> Dict:
         "brier_model": PE.brier(preds), "brier_naive": PE.brier(naive_preds), "brier_coin": 0.25,
         "lean_n": len(leans), "lean_hits": lean_hits,
         "lean_rate": lean_hits / len(leans) if leans else None,
+        "lean_base": lean_base,
         "side_rate": dir_hits / len(direction) if direction else None,
         "buckets": PE.calibration_buckets(preds),
         "slope": PE.fitted_slope(preds),
@@ -173,12 +180,13 @@ def backtest_basketball(pgames: Sequence[Dict], sport: str, market: str, max_cas
 
 # --------------------------------------------------------------------------- hockey
 def backtest_hockey(pgames: Sequence[Dict], market: str, max_cases: int = MAX_CASES,
-                    min_history: int = MIN_HISTORY) -> Dict:
+                    min_history: int = MIN_HISTORY, shrink: bool = True) -> Dict:
     import hockey_props as HP
     m = HP.MARKETS[market]
     pg = [p for p in pgames or [] if p.get("order") is not None]
     role = m["role"]
     cases: List[Dict] = []
+    priors_by_date: Dict[str, Dict[str, float]] = {}
     for p in sorted(pg, key=lambda x: _date(x["order"]), reverse=True):
         if len(cases) >= max_cases:
             break
@@ -195,6 +203,11 @@ def backtest_hockey(pgames: Sequence[Dict], market: str, max_cases: int = MAX_CA
         rate, opp = PE.rate_and_opportunity(vals, opps)
         if rate is None:
             continue
+        if shrink and role == "skater":                 # the same pull toward the position group as the live board
+            if d not in priors_by_date:
+                priors_by_date[d] = HP.group_rates(before, m["stat"])
+            pri = priors_by_date[d]
+            rate = HP.shrunk_rate(rate, opps, m["stat"], pri.get(HP.group(p.get("pos")) or "F", pri.get("F")))
         of = HP.opponent_factor(before, p["opp"], m["opp_side"], m["opp_stat"])
         fac = of["factor"] if of else 1.0
         model = rate * (opp or 0.0) * fac
@@ -293,9 +306,18 @@ def verdict(card: Dict) -> List[str]:
         out.append(f"Projections were {'closer' if g > 0 else 'further'} to the real result than the plain last-5 "
                    f"average by {abs(g):.1f}% ({card['mae_model']:.2f} vs {card['mae_naive']:.2f} off per game).")
     if card.get("lean_rate") is not None and card["lean_n"]:
-        be = 0.524
-        out.append(f"Leans hit {card['lean_hits']}/{card['lean_n']} ({card['lean_rate']:.0%}) against the proxy line — "
-                   + ("above" if card["lean_rate"] > be else "below") + " the 52.4% you need at -110.")
+        base = card.get("lean_base")
+        if base is not None:
+            edge = card["lean_rate"] - base
+            out.append(f"Leans hit {card['lean_hits']}/{card['lean_n']} ({card['lean_rate']:.0%}) against the proxy line; "
+                       f"the players' own recent history alone said {base:.0%} for those sides — the model "
+                       + (f"adds {edge * 100:+.1f} points." if abs(edge) >= 0.005 else "adds nothing over it.")
+                       + (" (A high hit rate on a low count — Under 0.5 goals, say — is the usual result and the books "
+                          "price it that way; the gap over history is the edge.)" if base > 0.62 else ""))
+        else:
+            be = 0.524
+            out.append(f"Leans hit {card['lean_hits']}/{card['lean_n']} ({card['lean_rate']:.0%}) against the proxy line — "
+                       + ("above" if card["lean_rate"] > be else "below") + " the 52.4% you need at -110.")
     s = card.get("slope")
     if s is not None:
         if s < 0.85:

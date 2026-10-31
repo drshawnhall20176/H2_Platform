@@ -932,7 +932,9 @@ if tab_props is not None:
                             icon="🕐")
                 elif not reads and not gaps:
                     st.caption("No side clears the bar for value in this market right now — try another market.")
-            st.caption("**Pick** = the side the model favors; **Chance** = how likely it is; **Lean** = 🟢/🔴 only when "
+            st.caption("**Pick** = the side with the best value at the price (🎲 = under 50% to hit, worth it only "
+                       "because the price pays more — common on plus-money hockey and low-count props); **Chance** = how "
+                       "likely it is; **Lean** = 🟢/🔴 only when "
                        "that side has **+3% value at the price shown** (no price: the projection 5%+ past the line and "
                        "55%+ to hit). **Cushion** = how far the projection sits past the line (⚠️ under 15%: close to a coin "
                        "flip — keep those out of parlays). **Milestones** = the model's chance of each **N+** rung "
@@ -1072,8 +1074,13 @@ if tab_score is not None:
             m2.metric("Projection miss (model)", f"{card['mae_model']:.2f}",
                       delta=f"{-card['mae_gain_pct']:.1f}% vs last-5 avg" if card.get("mae_gain_pct") is not None else None,
                       delta_color="inverse")
+            _base = card.get("lean_base")
             m3.metric("Lean hit rate", "—" if card.get("lean_rate") is None else f"{card['lean_rate']:.0%}",
-                      help=f"{card['lean_hits']}/{card['lean_n']} leans vs the proxy line. 52.4% breaks even at -110.")
+                      delta=(None if _base is None or card.get("lean_rate") is None
+                             else f"{(card['lean_rate'] - _base) * 100:+.1f} pts vs history"),
+                      help=f"{card['lean_hits']}/{card['lean_n']} leans vs the proxy line. The delta is how much better "
+                           "the leans hit than the players' own recent history says those sides hit — the real edge. "
+                           "On low counts (goals, assists) the raw rate is high for everyone.")
             m4.metric("Calibration slope", "—" if card.get("slope") is None else f"{card['slope']:.2f}",
                       help="1.00 = when it says 60% it hits 60%. Below 1 = over-confident.")
             for v in BT.verdict(card):

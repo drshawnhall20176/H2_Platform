@@ -296,3 +296,18 @@ def test_same_game_picks_are_flagged():
     assert PE.same_game_stacks(picks) == {"ORL @ TOR": ["Bane U19.5", "Murray-Boyles U10.5"]}
     assert "ORL @ TOR" in PE.stack_warning(picks) and PE.stack_warning(picks[1:]) is None
     assert PE.stack_warning([{"Game": "A", "Player": "x"}, {"Game": "A", "Player": "y"}], "Game", "Player")
+
+
+def test_hockey_rates_are_pulled_toward_the_position_group():
+    # Oct 31: a forward with no goal in 10 games projected 0.0 goals. Now his rate leans on the forward group's.
+    import hockey_props as HP
+    pg = [{"role": "skater", "pos": "C", "stats": {"toi": 18.0, "g": 1.0}},
+          {"role": "skater", "pos": "C", "stats": {"toi": 18.0, "g": 0.0}},
+          {"role": "skater", "pos": "D", "stats": {"toi": 22.0, "g": 0.0}}]
+    pri = HP.group_rates(pg, "g")
+    assert abs(pri["F"] - 1 / 36) < 1e-9 and pri["D"] == 0.0
+    cold = HP.shrunk_rate(0.0, [17.0] * 10, "g", pri["F"])
+    assert 0 < cold < pri["F"]                                     # no longer zero, still below the group
+    hot = HP.shrunk_rate(0.06, [17.0] * 10, "g", pri["F"])
+    assert pri["F"] < hot < 0.06                                   # a hot streak is tempered, not erased
+    assert HP.shrunk_rate(0.4, [30.0], "saves", 0.9) == 0.4        # goalies' save rate is left alone

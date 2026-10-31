@@ -1244,7 +1244,7 @@ def test_sport_only_page_visibility_matches_expected_config():
                      "27": ("MLB",), "29": ("NCAAF",), "30": ("NCAAF",), "31": ("NCAAF",),
                      "32": ("NCAAF",), "33": ("NFL",), "34": ("NFL",),
                      "35": ("NCAAF",), "36": ("NCAAF",),
-                         "38": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL"), "41": ("NFL", "NCAAF", "NBA")}, pairs
+                         "38": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL"), "41": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL")}, pairs
     print("✓ sport_only_leads matches expected config (Bullpen Watch/Game Watch/Pitching Lab/"
           "Dinger Engine/Matchup Lab(MLB)/Player Lines/First Innings Totals -> MLB, Hot Hand "
           "Engine/Matchup Lab(WNBA/NBA/NCAAMB) -> WNBA+NBA+NCAAMB, Matchup Lab(NFL)/Anytime TD "
