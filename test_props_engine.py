@@ -269,3 +269,22 @@ def test_a_fresh_absence_bump_is_dampened_and_capped():
     assert all(r["rate_mult"] <= 1 + PE.USAGE_RATE_CAP + 1e-9 for r in res.values())
     proj = (15 + res[2]["opp_add"]) * 0.5 * res[2]["rate_mult"]
     assert proj < 7.5 * 1.5                                                           # a bump, not a doubling
+
+
+def test_star_out_gives_top_options_more_usage_and_flags_their_unders():
+    # Oct 31: with a star freshly out, Unders on the players who take over his shots went 0-8 (Oct 29-30). The top two
+    # by production get a bigger share of the leftover usage (higher rate cap) and are marked primary.
+    team = [{"pid": "star", "name": "Star", "slot": "G", "opp": 36, "rate": 0.80, "out": True, "fresh": True},
+            {"pid": "a", "name": "A", "slot": "G", "opp": 34, "rate": 0.60},
+            {"pid": "b", "name": "B", "slot": "F", "opp": 32, "rate": 0.55},
+            {"pid": "c", "name": "C", "slot": "F", "opp": 22, "rate": 0.40},
+            {"pid": "d", "name": "D", "slot": "C", "opp": 18, "rate": 0.35}]
+    old = PE.redistribute(team, cap=42.0)
+    new = PE.redistribute(team, cap=42.0, primary_n=PE.PRIMARY_N)
+    assert new["a"].get("primary") and new["b"].get("primary") and not new["c"].get("primary")
+    assert new["a"]["rate_mult"] > old["a"]["rate_mult"] and new["a"]["rate_mult"] <= 1 + PE.USAGE_RATE_CAP_PRIMARY
+    assert new["d"]["rate_mult"] <= old["d"]["rate_mult"]                     # bench share shrinks, never grows
+    assert not old["a"].get("primary")                                        # hockey / default callers unchanged
+    row = {"projection": 18.0, "line": 20.5, "absorbs": True}
+    assert any("star freshly out" in w for w in PE.leg_warnings(row, "Under", 20.5))
+    assert not any("star freshly out" in w for w in PE.leg_warnings(row, "Over", 20.5))

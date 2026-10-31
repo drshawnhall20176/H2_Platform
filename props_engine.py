@@ -50,6 +50,13 @@ USAGE_RATE_CAP = 0.10        # nobody's per-minute rate goes up more than 10% fr
 # to the end of the bench, some to a lineup change -- so only part of them reaches the rotation, and no one
 # player's minutes jump by more than this. The Scorecard tab checks these against results.
 REDISTRIBUTE_SHARE = 0.75    # share of an absent player's minutes (TOI...) that reaches the rotation we model
+# Oct 31: ...but the TOP remaining scorers are the exception. With a star freshly out, Unders on the players who take
+# over his shots went 0-8 on Oct 29-30 (Bane x3 and F. Wagner with Suggs out; LaMelo x2 and McDaniels x2 with Edwards
+# out) while the bench bumps held up. So the top PRIMARY_N by production get a bigger share of the missing usage and a
+# higher rate cap, and an Under on them asks for a news check (props_engine.leg_warnings / player_props).
+PRIMARY_N = 2
+PRIMARY_USAGE_WEIGHT = 2.0   # a primary's share of the leftover usage counts double
+USAGE_RATE_CAP_PRIMARY = 0.20
 BUMP_MAX_FRAC = 0.35         # a teammate's minutes go up at most 35% of his own ...
 BUMP_MAX_ABS = 8.0           # ... and at most 8 (minutes / TOI minutes)
 FRESH_OUT_GAMES = 3          # an absence is "fresh" when he played in at least 2 of the team's last 3 games
@@ -475,7 +482,7 @@ def fresh_absence(player_games: Sequence[str], team_recent_games: Sequence[str],
     return sum(1 for g in recent if g in set(player_games)) >= min(need, len(recent)) if recent else False
 
 
-def redistribute(players: Sequence[Dict], cap: float = 40.0) -> Dict:
+def redistribute(players: Sequence[Dict], cap: float = 40.0, primary_n: int = 0) -> Dict:
     """Spread FRESH absences' opportunity to the teammates still playing.
 
     players: [{"pid","name","slot","opp" (minutes / TOI / ...), "rate" (production per unit), "out", "fresh"}].
@@ -483,7 +490,10 @@ def redistribute(players: Sequence[Dict], cap: float = 40.0) -> Dict:
     opportunity (REDISTRIBUTE_SHARE of it) goes REDISTRIBUTE_SAME_SLOT to his own position group (by their
     opportunity) and the rest to everyone (capped at `cap`, and no one gains more than BUMP_MAX_FRAC of his own
     or BUMP_MAX_ABS); whatever production that doesn't replace, teammates make up USAGE_GAP_FILL of
-    through a higher rate (more shots / touches), spread by current production and capped at USAGE_RATE_CAP."""
+    through a higher rate (more shots / touches), spread by current production and capped at USAGE_RATE_CAP.
+    With `primary_n`, the top primary_n healthy players by production are the team's primary options: their share
+    of that leftover usage is weighted PRIMARY_USAGE_WEIGHT, their cap is USAGE_RATE_CAP_PRIMARY, and their entry
+    carries "primary": True (an Under on them then asks for a news check)."""
     live = [p for p in players if not p.get("out") and num(p.get("opp")) > 0]
     res = {p["pid"]: {"opp_add": 0.0, "rate_mult": 1.0, "from": []} for p in live}
     absent = [p for p in players if p.get("out") and p.get("fresh") and num(p.get("opp")) > 0]
@@ -509,11 +519,16 @@ def redistribute(players: Sequence[Dict], cap: float = 40.0) -> Dict:
                     r["from"].append(a.get("name"))
         gap += max(0.0, lost - recovered)
     prod = {p["pid"]: (num(p["opp"]) + res[p["pid"]]["opp_add"]) * num(p.get("rate")) for p in live}
-    tot_prod = sum(prod.values())
+    primary = set(sorted((pid for pid in prod if prod[pid] > 0), key=lambda pid: -prod[pid])[:primary_n])
+    for pid in primary:
+        res[pid]["primary"] = True
+    weight = {pid: prod[pid] * (PRIMARY_USAGE_WEIGHT if pid in primary else 1.0) for pid in prod}
+    tot_prod = sum(weight.values())
     if gap > 0 and tot_prod > 0:
         for p in live:
-            share = prod[p["pid"]] / tot_prod
-            bump = min(USAGE_RATE_CAP, USAGE_GAP_FILL * gap * share / prod[p["pid"]]) if prod[p["pid"]] else 0.0
+            share = weight[p["pid"]] / tot_prod
+            rcap = USAGE_RATE_CAP_PRIMARY if p["pid"] in primary else USAGE_RATE_CAP
+            bump = min(rcap, USAGE_GAP_FILL * gap * share / prod[p["pid"]]) if prod[p["pid"]] else 0.0
             res[p["pid"]]["rate_mult"] = 1 + bump
             if bump > 0.005:
                 for a in absent:
@@ -914,6 +929,8 @@ def leg_warnings(row: Dict, side: Optional[str], line: Optional[float]) -> List[
         w.append("check news (line far from projection)")
     if row.get("returning"):
         w.append("missed his team's last game")
+    if row.get("absorbs") and side == "Under":
+        w.append("top option with a star freshly out — the books price that bump better; check news")
     c = cushion(row.get("projection"), line, side)
     if c is not None:
         if c < 0:
