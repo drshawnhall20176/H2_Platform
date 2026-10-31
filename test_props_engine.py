@@ -288,3 +288,11 @@ def test_star_out_gives_top_options_more_usage_and_flags_their_unders():
     row = {"projection": 18.0, "line": 20.5, "absorbs": True}
     assert any("star freshly out" in w for w in PE.leg_warnings(row, "Under", 20.5))
     assert not any("star freshly out" in w for w in PE.leg_warnings(row, "Over", 20.5))
+
+
+def test_same_game_picks_are_flagged():
+    picks = [{"game": "ORL @ TOR", "label": "Bane U19.5"}, {"game": "ORL @ TOR", "label": "Murray-Boyles U10.5"},
+             {"game": "NYK @ PHI", "label": "Embiid U28.5"}]
+    assert PE.same_game_stacks(picks) == {"ORL @ TOR": ["Bane U19.5", "Murray-Boyles U10.5"]}
+    assert "ORL @ TOR" in PE.stack_warning(picks) and PE.stack_warning(picks[1:]) is None
+    assert PE.stack_warning([{"Game": "A", "Player": "x"}, {"Game": "A", "Player": "y"}], "Game", "Player")

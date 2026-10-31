@@ -286,6 +286,13 @@ def render_quick_log(plays: List[Dict], date_str: str, sport_key: str, key_prefi
 
         st.markdown(f"**{len(picks)} play{'s' if len(picks) != 1 else ''} selected** "
                    f"— choose how to log them:")
+        try:
+            import props_engine as _PE
+            _stack = _PE.stack_warning([plays[i] for i in picks], game_key="Game", label_key="Player")
+            if _stack:
+                st.warning("🔗 " + _stack + ".")
+        except Exception:                                          # noqa: BLE001 — a warning must never block logging
+            pass
 
         # ── Mode toggles ──────────────────────────────────────────────────────
         # Independent checkboxes so the user can mix and match freely.

@@ -789,6 +789,10 @@ def render_ticket(all_rows, market):
         if not_parlay and len(legs) > 1:
             st.info(f"{len(not_parlay)} leg(s) aren't parlay-tagged: "
                     + "; ".join(f"{l['label']} ({l.get('use')}: {l.get('use_why')})" for l in not_parlay))
+        stack = PE.stack_warning(legs)
+        if stack:
+            st.warning("🔗 " + stack + ". Fine for a same-game parlay on purpose; for a card of singles or a "
+                       "Pick6 entry, spread them out.")
         risky = [l for l in legs if l.get("warnings")]
         if risky:
             st.warning(f"{len(risky)} of {len(legs)} legs carry a warning: "

@@ -967,6 +967,25 @@ MILESTONE_PARLAY_CHANCE = 0.70    # ... a model-only milestone leg 70%+ (no mark
 PICKEM_BREAKEVEN = 3.0 ** -0.5    # a 2-pick entry paying 3x needs ~57.7% a pick; the ticket builder uses yours
 
 
+def same_game_stacks(items: Sequence[Dict], game_key: str = "game", label_key: str = "label") -> Dict[str, List[str]]:
+    """{game: [labels]} for every game with more than one selection. Oct 31: two of the Oct 30 singles came from
+    Magic-Raptors and lost together (same game script, same star out) -- a card should spread across games."""
+    by: Dict[str, List[str]] = {}
+    for it in items or []:
+        g = it.get(game_key)
+        if g:
+            by.setdefault(str(g), []).append(str(it.get(label_key) or "?"))
+    return {g: labs for g, labs in by.items() if len(labs) > 1}
+
+
+def stack_warning(items: Sequence[Dict], game_key: str = "game", label_key: str = "label") -> Optional[str]:
+    stacks = same_game_stacks(items, game_key, label_key)
+    if not stacks:
+        return None
+    return ("More than one pick from the same game — they tend to win or lose together: "
+            + "; ".join(f"{g} ({len(labs)}: {', '.join(labs)})" for g, labs in stacks.items()))
+
+
 def is_parlay_use(tag: Optional[str]) -> bool:
     return tag in (USE_BOTH, USE_PARLAY)
 
