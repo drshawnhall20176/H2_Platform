@@ -20,7 +20,7 @@ import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
  
 from odds_api import american_to_decimal
  
@@ -506,7 +506,134 @@ def cash_out_vs_held(bets):
     }
  
  
+# ---------------------------------------------------------------------------
+# PARLAY TICKETS (Oct 31) -- a same-game parlay is ONE bet: one stake, one total price, one payout.
+# Stored as a ticket "header" row (market PARLAY_MARKET, stake + total odds) plus one row per leg under the
+# same ticket name with stake 0 and no price. The legs carry each pick's own result (what the Scorecard,
+# calibration and market breakdowns learn from); the header carries the money. Tickets logged before this
+# (legs only, each with the full stake) keep their old accounting -- nothing about them changes.
+# ---------------------------------------------------------------------------
+PARLAY_MARKET = "Parlay"
+
+
+def is_parlay_header(bet: Dict) -> bool:
+    return (bet.get("market") or "") == PARLAY_MARKET and bool(_ticket(bet))
+
+
+def headed_tickets(bets: List[Dict]) -> set:
+    """Ticket names that have a header row (logged as one parlay)."""
+    return {_ticket(b) for b in bets if is_parlay_header(b)}
+
+
+def is_parlay_leg(bet: Dict, headed: Optional[set] = None) -> bool:
+    """A leg of a parlay that was logged as one ticket (its money lives on the header row)."""
+    return (not is_parlay_header(bet)) and bool(_ticket(bet)) and _ticket(bet) in (headed or set())
+
+
+def money_bets(bets: List[Dict]) -> List[Dict]:
+    """The rows that carry money: singles, parlay headers, and legacy ticket legs. Legs of a headed ticket are
+    left out -- counting them too would book a 6-leg parlay as 6 bets."""
+    headed = headed_tickets(bets)
+    return [b for b in bets if not is_parlay_leg(b, headed)]
+
+
+def pick_bets(bets: List[Dict]) -> List[Dict]:
+    """The rows that are picks (for calibration / hit rates): everything except parlay headers."""
+    return [b for b in bets if not is_parlay_header(b)]
+
+
+def payout(stake: float, american: int) -> float:
+    """Total returned on a win (stake included): $20 at +1200 -> $260."""
+    return round(stake * american_to_decimal(american), 2)
+
+
+def ticket_result(legs: List[Dict]) -> Optional[str]:
+    """A parlay's result from its legs: any loss -> loss; every leg settled with at least one win and the rest
+    win/push/void -> win (books reprice a voided leg, so check the payout); all push/void -> void; else None
+    (still open)."""
+    res = [_result(b) for b in legs]
+    if not res:
+        return None
+    if "loss" in res:
+        return "loss"
+    if "" in res:
+        return None
+    return "win" if "win" in res else "void"
+
+
+def ticket_settlements(bets: List[Dict]) -> List[Dict]:
+    """[{"id", "ticket", "result"}] for open parlay headers whose legs now decide them."""
+    by = group_tickets(bets)
+    out = []
+    for b in bets:
+        if not is_parlay_header(b) or _result(b):
+            continue
+        legs = [x for x in by.get(_ticket(b), []) if not is_parlay_header(x)]
+        r = ticket_result(legs)
+        if r:
+            out.append({"id": b.get("id"), "ticket": _ticket(b), "result": r})
+    return out
+
+
+def log_parlay_ticket(ticket: str, legs: List[Dict], total_odds: int, stake: float, slate_date: str,
+                      sport: str, book: Optional[str] = None, game: Optional[str] = None,
+                      notes: Optional[str] = None, existing: Optional[List[Dict]] = None,
+                      db_path: str = DB_PATH) -> Dict:
+    """Log one parlay: a header row with the stake and total odds, plus each leg (stake 0, no price).
+    `legs`: [{"player", "market", "side", "line", "game"?, "model_prob"?}]. `existing`: legs already in the Bet
+    Log under this ticket name (logged the old way) -- they're converted to legs (stake 0, no price) instead of
+    being logged again. Returns {"header_id", "leg_ids", "converted"}."""
+    ticket = (ticket or "").strip()
+    if not ticket:
+        raise ValueError("A parlay needs a ticket name.")
+    games = {(l.get("game") or game) for l in legs if (l.get("game") or game)}
+    header_game = game or (next(iter(games)) if len(games) == 1 else "Multiple games")
+    n = len(legs) + len(existing or [])
+    hid = add_bet(db_path, slate_date=slate_date, game=header_game, player=None, market=PARLAY_MARKET,
+                  side=f"{n}-leg parlay", line=None, entry_odds=int(total_odds), model_prob=None,
+                  stake=float(stake), book=book, notes=notes, ticket=ticket, sport=sport,
+                  entry_odds_source="manual")
+    ids = []
+    for l in legs:
+        ids.append(add_bet(db_path, slate_date=slate_date, game=l.get("game") or game, player=l.get("player"),
+                           market=l.get("market"), side=l.get("side") or "Over", line=l.get("line"),
+                           entry_odds=None, model_prob=l.get("model_prob"), stake=0.0, book=book,
+                           notes=notes, ticket=ticket, sport=sport))
+    conv = []
+    for b in existing or []:
+        update_bet(int(b["id"]), db_path, stake=0.0, entry_odds=None)
+        conv.append(int(b["id"]))
+    return {"header_id": hid, "leg_ids": ids, "converted": conv}
+
+
+def parse_leg_lines(text: str, default_game: Optional[str] = None) -> Tuple[List[Dict], List[str]]:
+    """One leg per line: "Player | Market | Over | 6.5" (an optional 5th field is the game). Returns
+    (legs, problems) -- a line that can't be read is reported, never guessed."""
+    legs, bad = [], []
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) < 4:
+            bad.append(f"“{line}” — needs Player | Market | Side | Line")
+            continue
+        try:
+            val = float(parts[3])
+        except ValueError:
+            bad.append(f"“{line}” — the line “{parts[3]}” isn't a number")
+            continue
+        side = parts[2].strip().capitalize()
+        if side not in ("Over", "Under", "Yes", "No"):
+            bad.append(f"“{line}” — side should be Over or Under")
+            continue
+        legs.append({"player": parts[0], "market": parts[1], "side": side, "line": val,
+                     "game": (parts[4] if len(parts) > 4 and parts[4] else default_game)})
+    return legs, bad
+
+
 def summary(bets: List[Dict]) -> Dict:
+    bets = money_bets(bets)
     settled = [b for b in bets if _result(b) in ("win", "loss")]
     wins = sum(1 for b in settled if _result(b) == "win")
     losses = sum(1 for b in settled if _result(b) == "loss")
@@ -575,7 +702,7 @@ def calibration(bets: List[Dict], n_bins: int = 5) -> List[Dict]:
  
     Returns non-empty buckets: {lo, hi, predicted (mean model prob), actual (win rate), n}.
     Well-calibrated -> predicted ≈ actual in every bucket."""
-    settled = [b for b in bets
+    settled = [b for b in pick_bets(bets)
                if _result(b) in ("win", "loss") and b.get("model_prob") is not None]
     if not settled:
         return []
@@ -681,16 +808,27 @@ def compare_parlay_vs_singles(legs: List[Dict], parlay_stake: float) -> Optional
  
     Apples-to-apples on risk — parlay_stake on the ticket vs parlay_stake split evenly
     across the legs as singles. Returns P&L for each path and the difference."""
+    header = next((b for b in legs if is_parlay_header(b)), None)
+    legs = [b for b in legs if not is_parlay_header(b)]
     n = len(legs)
+    if header is not None:                       # logged as one ticket: its real price and stake
+        parlay_stake = float(header.get("stake") or parlay_stake or 0.0)
     if n == 0 or not parlay_stake or parlay_stake <= 0:
         return None
- 
-    pdec = parlay_decimal(legs)
-    status = parlay_status(legs)
+
+    if header is not None and header.get("entry_odds") is not None:
+        pdec = american_to_decimal(header["entry_odds"])
+        status = _result(header) or (ticket_result(legs) or "pending")
+        status = "pending" if status not in ("win", "loss", "push", "void") else status
+    else:
+        pdec = parlay_decimal(legs)
+        status = parlay_status(legs)
     if status == "win" and pdec is not None:
         parlay_pnl = round(parlay_stake * (pdec - 1), 2)
     elif status == "loss":
         parlay_pnl = round(-parlay_stake, 2)
+    elif status in ("push", "void"):
+        parlay_pnl = 0.0
     else:
         parlay_pnl = None  # not fully settled yet
  
