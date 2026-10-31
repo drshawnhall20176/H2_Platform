@@ -626,3 +626,34 @@ def test_seasons_with_opponent_data_ignores_a_season_that_is_present_but_has_no_
             {"season": 2026, "opponent_team": "Texas"}, {"season": nan, "opponent_team": "X"}]
     assert ND.seasons_with_opponent_data(rows) == {2026}
     assert ND.seasons_with_opponent_data([]) == set()
+
+
+def test_refresh_player_game_stats_splits_completions_and_attempts():
+    # Oct 31: CFBD's "C/ATT" ("23/36") used to be stored as text -> NaN -> dropped, so every college QB had
+    # 0 attempts and projected 0.0 pass yards. It must land as two numeric columns.
+    fake_response = [{"id": 1, "teams": [
+        {"school": "Tulane", "categories": [{"name": "passing", "types": [
+            {"name": "C/ATT", "athletes": [{"id": "q1", "name": "Conner Harrell", "stat": "23/36"}]},
+            {"name": "YDS", "athletes": [{"id": "q1", "name": "Conner Harrell", "stat": "239"}]},
+        ]}]},
+        {"school": "Charlotte", "categories": []},
+    ]}]
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "games.csv")
+        with patch.object(ND, "_get", return_value=fake_response):
+            ND.refresh_player_game_stats(2026, "K", completed_weeks=[9], out_path=out)
+        row = ND.load_player_game_stats(out)[0]
+    assert row["passing_COMPLETIONS"] == 23 and row["passing_ATT"] == 36 and row["passing_YDS"] == 239
+
+
+def test_load_rebuilds_missing_attempts_from_yards_per_attempt():
+    # Rows cached before the fix have YDS and AVG (yards per attempt) but no ATT: attempts = round(YDS / AVG).
+    rows = ND._fill_pass_attempts([
+        {"passing_YDS": 239.0, "passing_AVG": 6.6},                         # Harrell: 36
+        {"passing_YDS": 319.0, "passing_AVG": 12.8},                        # Lagway: 25
+        {"passing_YDS": 150.0, "passing_AVG": 7.5, "passing_ATT": 21.0},    # already present: untouched
+        {"passing_YDS": float("nan"), "passing_AVG": float("nan")},         # not a passer
+        {"passing_YDS": 0.0, "passing_AVG": 0.0},                           # can't be rebuilt
+    ])
+    assert [r.get("passing_ATT") for r in rows[:3]] == [36.0, 25.0, 21.0]
+    assert rows[3].get("passing_ATT") is None and rows[4].get("passing_ATT") is None

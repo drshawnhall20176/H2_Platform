@@ -68,6 +68,7 @@ CFBD's own published OpenAPI documentation:
 
 from __future__ import annotations
 
+import math
 import os
 import time
 from typing import Dict, List, Optional, Tuple
@@ -439,6 +440,17 @@ def refresh_player_game_stats(year: int, api_key: str, completed_weeks: List[int
                             stat_val = athlete.get("stat") or athlete.get("value")
                             if athlete_id is None or not cat_name or not type_name:
                                 continue
+                            if "/" in str(type_name):
+                                # "C/ATT" = "23/36": two numbers in one cell. Stored as text it became NaN
+                                # and the column vanished (Oct 31) -- split it into _COMPLETIONS / _ATT.
+                                c, a = _split_pair(stat_val)
+                                for suffix, v in (("COMPLETIONS", c), ("ATT", a)):
+                                    long_rows.append({
+                                        "season": year, "game_id": game_id, "week": week, "team": school,
+                                        "opponent_team": opponent, "player_id": athlete_id,
+                                        "player": athlete_name, "stat_col": f"{cat_name}_{suffix}", "value": v,
+                                    })
+                                continue
                             long_rows.append({
                                 "season": year, "game_id": game_id, "week": week, "team": school,
                                 "opponent_team": opponent,
@@ -540,8 +552,39 @@ def load_rosters(path: str = ROSTER_PATH) -> List[Dict]:
     return _cached_read_records(path)
 
 
+def _split_pair(value):
+    """CFBD's passing "C/ATT" arrives as one string ("23/36") -> (23.0, 36.0), or (None, None)."""
+    try:
+        c, a = str(value).split("/", 1)
+        return float(c), float(a)
+    except (TypeError, ValueError):
+        return None, None
+
+
+def _fill_pass_attempts(records: List[Dict]) -> List[Dict]:
+    """Oct 31 fix: CFBD reports passing attempts only inside "C/ATT" ("23/36"), which the refresh used to
+    store as one text value that pandas turned into NaN and then dropped -- so the per-game cache had NO
+    passing_ATT column and every college QB projected 0.0 attempts, 0.0 pass yards, 0 TDs (and the Use tag
+    could even call those Unders parlay legs). Rows written before the fix still lack it, so it is rebuilt
+    here: passing_AVG is yards per attempt, so attempts = round(YDS / AVG). A row that already carries
+    passing_ATT (written by the fixed refresh) is left alone. Idempotent; mutates and returns `records`."""
+    for r in records:
+        att = r.get("passing_ATT")
+        if att is not None and not (isinstance(att, float) and math.isnan(att)):
+            continue
+        yds, avg = r.get("passing_YDS"), r.get("passing_AVG")
+        try:
+            yds, avg = float(yds), float(avg)
+        except (TypeError, ValueError):
+            continue
+        if math.isnan(yds) or math.isnan(avg) or avg <= 0 or yds <= 0:
+            continue
+        r["passing_ATT"] = float(round(yds / avg))
+    return records
+
+
 def load_player_game_stats(path: str = PLAYER_GAME_STATS_PATH) -> List[Dict]:
-    return _cached_read_records(path)
+    return _fill_pass_attempts(_cached_read_records(path))
 
 
 _DRIVES_COLUMNS = ["season", "game_id", "week", "drive_id", "drive_number", "offense", "defense",
