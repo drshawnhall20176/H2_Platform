@@ -196,11 +196,7 @@ f3, f4, f5 = st.columns(3)
 with f3:
     markets = sorted({p["Market"] for p in plays})
     # Nov 1: football boards mix offense, defense (sacks/tackles) and kicking -- narrow the Markets list by unit.
-    import football_props as _FP
-    if any(_FP.market_unit(m) for m in markets):
-        _unit = st.radio("Market group", ("All",) + _FP.UNITS, horizontal=True, key="bb_market_unit")
-        if _unit != "All":
-            markets = [m for m in markets if (_FP.market_unit(m) or "Offense") == _unit]
+    markets = C.market_group_filter(markets, key="bb_market_unit")
     # Same real, deliberate curation as Suggested Parlays/Graded Picks/Speculative Basket -- see
     # sports.py's own comment for the full reasoning. Intersected with markets so a curated-in
     # market genuinely absent from tonight's board never appears as a phantom default; falls
@@ -257,8 +253,7 @@ _use_pick = (st.radio("Show", list(_USE_FILTER), horizontal=True, key="bb_use_fi
                            "edge (+3% at the price) — some are too close to the number to chain into a parlay.")
              if _props_model else "All playable")
 # Nov 1: Over / Under only (other sides -- a team, "Yes" -- show under All Sides).
-_side_pick = (st.radio("Side", ("All Sides", "Under", "Over"), horizontal=True, key="bb_side_filter")
-              if any(p.get("Side") in ("Over", "Under") for p in slot_plays) else "All Sides")
+_side_pick = C.side_filter(slot_plays, key="bb_side_filter")
 view = [p for p in slot_plays if p["Market"] in mkt_pick and p["Conviction"] >= min_conv
         and (not _props_model or p.get("Use") in _USE_FILTER[_use_pick])
         and (_side_pick == "All Sides" or p.get("Side") == _side_pick)]

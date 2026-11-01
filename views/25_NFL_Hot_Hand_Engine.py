@@ -160,7 +160,8 @@ with st.expander("🏥 Team injury report (this week's slate)"):
 markets = sorted({b["Market"] for b in board})
 mc1, mc2 = st.columns([2, 1])
 with mc1:
-    chosen_markets = st.multiselect("Markets", markets, default=markets)
+    _group_markets = C.market_group_filter(markets, key="nflhh_market_unit")   # Nov 1
+    chosen_markets = st.multiselect("Markets", _group_markets, default=_group_markets)
 with mc2:
     min_factor = st.selectbox("Matchup", ["All", "🟢 Favorable only (1.08×+)", "🔴 Tough only (0.92×-)"])
 

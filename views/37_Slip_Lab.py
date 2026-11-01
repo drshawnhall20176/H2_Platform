@@ -426,9 +426,11 @@ f1, f3, f4 = st.columns([3, 1.5, 2])
 with f1:
     default_mk = markets_present if use_menu else (
         [m for m in (_active.default_markets or markets_present) if m in markets_present] or markets_present)
-    sel_markets = st.multiselect("Markets", markets_present, default=default_mk, key=_fkey("markets", markets_present))
+    _group_markets = C.market_group_filter(markets_present, key="slip_lab_f_unit" + _sfx)   # Nov 1: football units
+    default_mk = [m for m in default_mk if m in _group_markets] or _group_markets
+    sel_markets = st.multiselect("Markets", _group_markets, default=default_mk, key=_fkey("markets", _group_markets))
 with f3:
-    side_pick = st.radio("Side", ["Both", "Over", "Under"], horizontal=True, key="slip_lab_f_side" + _sfx)
+    side_pick = st.radio("Side", list(C.SIDES), horizontal=True, key="slip_lab_f_sides" + _sfx)
 with f4:
     sort_pick = st.selectbox("Sort by", ["Confidence floor", "Model %", "EV at this book", "Edge vs market", "Conviction"],
                              key="slip_lab_f_sort" + _sfx,
@@ -446,7 +448,7 @@ with g3:
 
 filtered = [l for l in SL.filter_slot_game(source_legs, slot_pick, game_pick, dh)
             if l["market"] in sel_markets
-            and (side_pick == "Both" or l["side"] == side_pick)
+            and (side_pick == "All Sides" or l["side"] == side_pick)
             and (not name_q or name_q.lower() in str(l["player"]).lower())
             and (not only_posted or l["at_book"])]
 view = [l for l in filtered if l["p"] * 100 >= min_p]

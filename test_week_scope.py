@@ -246,3 +246,25 @@ def test_best_bets_market_group_and_side_filters(monkeypatch):
     assert side.options == ["All Sides", "Under", "Over"] and side.value == "All Sides"
     side.set_value("Over").run()
     assert not at.exception, [e.value for e in at.exception]
+
+
+@pytest.mark.parametrize("page,label", [("2_Graded_Picks.py", "Markets to include"), ("3_Suggested_Parlays.py", "Markets to include"),
+                                        ("4_Speculative_Basket.py", "Markets to include")])
+def test_recommendation_pages_have_market_group_and_side(monkeypatch, page, label):
+    _patched_board(monkeypatch)
+    plays, meta = _board()
+    extra = [dict(plays[1], Player="Def", Market="Sacks", Side="Under", Line=0.5, _stat_key="sacks"),
+             dict(plays[1], Player="Kick", Market="FG Made", Side="Under", Line=1.5, _stat_key="fg_made")]
+    monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda *a, **k: (plays + extra, meta, ["draftkings"]))
+    at = AppTest.from_file(str(VIEWS / page), default_timeout=90)
+    at.session_state["sport"] = "NFL"
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    [r for r in at.radio if r.label == "Market group"][0].set_value("Defense").run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert [m for m in at.multiselect if m.label == label][0].options == ["Sacks"]
+    [r for r in at.radio if r.label == "Market group"][0].set_value("All").run()
+    side = [r for r in at.radio if r.label == "Side"][0]
+    assert side.options == ["All Sides", "Under", "Over"]
+    side.set_value("Under").run()
+    assert not at.exception, [e.value for e in at.exception]
