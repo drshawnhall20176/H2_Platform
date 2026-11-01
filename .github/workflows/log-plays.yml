@@ -1,0 +1,50 @@
+# Log picks to the Bet Log without a browser (log_plays.py). Paste a JSON list of picks; each is matched to today's
+# board for its player ID and model %, and anything already logged is skipped.
+
+name: log-plays
+
+on:
+  workflow_dispatch:
+    inputs:
+      picks:
+        description: 'JSON: [{"player","market","side","line","odds","game"}, ...]'
+        required: true
+      sport:
+        default: "NFL"
+      date:
+        description: "Date (YYYY-MM-DD, New York). Blank = today."
+        default: ""
+      real:
+        description: "true = real wagers; false = tracking picks"
+        default: "false"
+      stake:
+        default: "1"
+      tag:
+        description: "Note tag (e.g. discord-overs)"
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  log:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Log picks
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          PICKS: ${{ inputs.picks }}
+        run: |
+          printf '%s' "$PICKS" > picks.json
+          python log_plays.py --picks @picks.json --sport "${{ inputs.sport }}" --date "${{ inputs.date }}" \
+            --real "${{ inputs.real }}" --stake "${{ inputs.stake }}" --tag "${{ inputs.tag }}"
