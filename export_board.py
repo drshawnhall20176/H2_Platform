@@ -43,9 +43,9 @@ def pick(plays, slot="All slate", unit="All", side="All Sides", show="All playab
             continue
         if side != "All Sides" and p.get("Side") != side:
             continue
-        if p.get("Model") == "player-props" and p.get("Use") not in USES[show]:
+        if show != "Everything" and p.get("Model") == "player-props" and p.get("Use") not in USES[show]:
             continue
-        if (p.get("Conviction") or 0) < min_conv:
+        if show != "Everything" and (p.get("Conviction") or 0) < min_conv:
             continue
         out.append(p)
     return sorted(out, key=lambda p: p.get("ModelProb") or 0, reverse=True)
@@ -81,11 +81,14 @@ def main(argv=None) -> int:
     ap.add_argument("--show", default="All playable")
     ap.add_argument("--min-conv", type=float, default=1.0)
     ap.add_argument("--top", type=int, default=25)
+    ap.add_argument("--market", default="", help="only this market (e.g. Anytime TD)")
     ap.add_argument("--out", default="board.json")
     a = ap.parse_args(argv)
     date_str = a.date or datetime.now(pytz.timezone("US/Eastern")).date().isoformat()
     plays = board(a.sport, date_str, a.book)
     rows = pick(plays, a.slot, a.unit, a.side, a.show, a.min_conv)
+    if a.market:
+        rows = [p for p in rows if str(p.get("Market")).lower() == a.market.lower()]
     title = (f"## {a.sport} Best Bets — {date_str} · {a.slot} · {a.unit} · {a.side} · {a.show}\n\n"
              f"{len(plays)} plays on the board, {len(rows)} pass these filters; top {min(a.top, len(rows))} by Model %.\n\n")
     md = title + table(rows[:a.top])

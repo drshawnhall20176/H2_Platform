@@ -23,11 +23,14 @@ on:
         description: "Side: All Sides / Under / Over"
         default: "All Sides"
       show:
-        description: "Show: All playable / Singles / Parlay legs"
+        description: "Show: All playable / Singles / Parlay legs / Everything"
         default: "All playable"
       top:
         description: "How many rows"
         default: "25"
+      market:
+        description: "Only this market (e.g. Anytime TD). Blank = all."
+        default: ""
       book:
         description: "Book: draftkings, fanduel, pick6 (DK Pick6), prizepicks, underdog, ..."
         default: "draftkings"
@@ -54,7 +57,7 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           python export_board.py --sport "${{ inputs.sport }}" --date "${{ inputs.date }}" --slot "${{ inputs.slot }}" \
-            --unit "${{ inputs.unit }}" --side "${{ inputs.side }}" --show "${{ inputs.show }}" --top "${{ inputs.top }}" --book "${{ inputs.book }}"
+            --unit "${{ inputs.unit }}" --side "${{ inputs.side }}" --show "${{ inputs.show }}" --top "${{ inputs.top }}" --book "${{ inputs.book }}" --market "${{ inputs.market }}"
       - uses: actions/upload-artifact@v4
         with:
           name: board
