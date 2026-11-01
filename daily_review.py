@@ -49,9 +49,14 @@ STAR_OUT_MARKS = ("usage bump", "teammate freshly out")
 
 # --------------------------------------------------------------------------- timing
 def due(now_utc: Optional[datetime] = None) -> bool:
-    """Is it the 3 AM hour in New York? (Two UTC crons; only one of them lands at 3 AM ET on any given day.)"""
+    """Is it 3 AM or later in New York? GitHub's scheduler often starts runs hours late (Nov 1: the 3:30 AM runs never
+    landed in the 3 AM hour, so nothing ran), so every scheduled run from 3 AM on does the work -- once per morning
+    (main checks the done marker)."""
     now_utc = now_utc or datetime.now(timezone.utc)
-    return now_utc.astimezone(ET).hour == RUN_HOUR_ET
+    return now_utc.astimezone(ET).hour >= RUN_HOUR_ET
+
+
+DONE_KEY = "_ALL"          # a marker row in daily_reviews: this morning's review has run
 
 
 def morning_of(now_utc: Optional[datetime] = None) -> str:
@@ -291,8 +296,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
               "daylight-saving slot; nothing to do.")
         return 0
     morning = a.date or morning_of()
+    if not force and not a.date and MS.load_daily_review(DONE_KEY, morning):
+        print(f"The {morning} review already ran — nothing to do.")
+        return 0
     print(f"Morning review for {morning} (America/New_York).")
     run(morning)
+    MS.save_daily_review(DONE_KEY, morning, {"ran_at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
     return 0
 
 

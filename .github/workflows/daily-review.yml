@@ -8,16 +8,16 @@
 #
 # Needs the DATABASE_URL secret (the same one settle-results uses). No odds API key -- ESPN box scores are free.
 #
-# SCHEDULE: cron is UTC and doesn't know about daylight saving, so it fires at both 07:30 UTC (3:30 AM EDT) and
-# 08:30 UTC (3:30 AM EST); the runner only works on the one that lands at 3 AM in New York.
+# SCHEDULE: cron is UTC and doesn't know about daylight saving, and GitHub often starts scheduled runs hours late
+# (Nov 1: nothing had run by 6 AM). So it fires every hour from 07:30 to 15:30 UTC; the first run at or after 3 AM in
+# New York does the review and marks the morning done, and every later one skips.
 # "Run workflow" (below) runs it immediately; tick "force" and optionally give a morning date.
 
 name: daily-review
 
 on:
   schedule:
-    - cron: "30 7 * * *"
-    - cron: "30 8 * * *"
+    - cron: "30 7-15 * * *"
   workflow_dispatch:
     inputs:
       morning:

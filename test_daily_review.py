@@ -30,11 +30,12 @@ def snap(player, team, market, proj, line, side, use=PE.USE_PARLAY, gap=None, fl
     return rec
 
 
-def test_due_only_at_3am_new_york_on_both_sides_of_daylight_saving():
+def test_due_from_3am_new_york_on_both_sides_of_daylight_saving():
     assert D.due(datetime(2026, 10, 31, 7, 30, tzinfo=timezone.utc))        # EDT: 07:30 UTC = 3:30 AM
-    assert not D.due(datetime(2026, 10, 31, 8, 30, tzinfo=timezone.utc))
+    assert D.due(datetime(2026, 10, 31, 11, 30, tzinfo=timezone.utc))       # a run GitHub started 4 hours late
+    assert not D.due(datetime(2026, 10, 31, 6, 30, tzinfo=timezone.utc))    # 2:30 AM EDT
     assert D.due(datetime(2026, 11, 2, 8, 30, tzinfo=timezone.utc))         # EST: 08:30 UTC = 3:30 AM
-    assert not D.due(datetime(2026, 11, 2, 7, 30, tzinfo=timezone.utc))
+    assert not D.due(datetime(2026, 11, 2, 7, 30, tzinfo=timezone.utc))     # 2:30 AM EST
     assert D.morning_of(datetime(2026, 11, 2, 8, 30, tzinfo=timezone.utc)) == "2026-11-02"
 
 
@@ -110,3 +111,19 @@ def test_morning_report_tab_shows_the_stored_report(tmp_path, monkeypatch):
     txt = " ".join(m.value for m in at.markdown)
     assert "Slate 2026-10-30" in txt and "model's side was right on 1 of 2" in txt
     assert any("left open for a person" in w.value for w in at.warning)
+
+
+def test_a_late_scheduled_run_does_the_review_once(tmp_path, monkeypatch):
+    import betlog as B
+    calls = []
+    monkeypatch.setenv("DATABASE_URL", "postgres://unused")
+    monkeypatch.setattr(D, "run", lambda morning: calls.append(morning))
+    monkeypatch.setattr(D, "due", lambda now_utc=None: True)
+    monkeypatch.setattr(D, "morning_of", lambda now_utc=None: "2026-11-01")
+    done = {}
+    monkeypatch.setattr(MS, "load_daily_review", lambda sport, morning, db_path=None: done.get((sport, morning)))
+    monkeypatch.setattr(MS, "save_daily_review",
+                        lambda sport, morning, report, db_path=None: done.__setitem__((sport, morning), report) or True)
+    assert D.main([]) == 0 and calls == ["2026-11-01"]
+    assert D.main([]) == 0 and calls == ["2026-11-01"]                     # the next hourly retry skips it
+    assert D.main(["--force"]) == 0 and calls == ["2026-11-01", "2026-11-01"]
