@@ -713,9 +713,14 @@ def render_props_team(team, opp, off_name, def_name, market, mode, tables, g):
         pass
     if not st.session_state.get("pm_props_edit"):
         opp_label = list(disp[0])[2] if disp else "Min"
-        st.dataframe(pd.DataFrame(PE.display_compact(rows, details=bool(st.session_state.get("pm_props_details")),
-                                                     opp_label=opp_label, market=market)),
-                     hide_index=True, width="stretch")
+        side_pick = st.session_state.get("pm_props_side", "All Sides")       # Nov 1: All Sides / Under / Over
+        shown = rows if side_pick == "All Sides" else [r for r in rows if r.get("side") == side_pick]
+        if shown:
+            st.dataframe(pd.DataFrame(PE.display_compact(shown, details=bool(st.session_state.get("pm_props_details")),
+                                                         opp_label=opp_label, market=market)),
+                         hide_index=True, width="stretch")
+        else:
+            st.caption(f"No {side_pick} picks for this team in this market.")
         return rows
     df = pd.DataFrame(disp)
     for c in EDITABLE:
@@ -906,6 +911,9 @@ if tab_props is not None:
             with v2:
                 st.toggle("Show the model's working", key="pm_props_details",
                           help="Adds minutes / volume, recent form, the matchup and the game-environment adjustment.")
+            st.radio("Side", list(C.SIDES), horizontal=True, key="pm_props_side",
+                     help="Show only the players whose Pick is the Under (or the Over). The ticket builder and the "
+                          "Bet Log list still see every player. Ignored while you're entering your own lines.")
             st.toggle("📰 I've checked the news for the ⚠️ market-disagreement plays", key="pm_news_checked",
                       help="When the books' line is far from the model's projection (20%+ and more than his usual "
                            "game-to-game swing), the market usually knows something — a minutes limit, a role change, "
@@ -919,11 +927,13 @@ if tab_props is not None:
             with top:
                 team_of = {r["pid"]: away_name for r in away_rows}
                 team_of.update({r["pid"]: home_name for r in home_rows})
-                reads = PE.best_reads(all_rows, team_of)
+                _sp = st.session_state.get("pm_props_side", "All Sides")
+                _side_rows = all_rows if _sp == "All Sides" else [r for r in all_rows if r.get("side") == _sp]
+                reads = PE.best_reads(_side_rows, team_of)
                 st.markdown(f"#### 🔥 Best {market} reads in this game")
                 if reads:
                     st.dataframe(pd.DataFrame(reads), hide_index=True, width="stretch")
-                gaps = PE.market_gaps(all_rows, team_of)
+                gaps = PE.market_gaps(_side_rows, team_of)
                 if gaps:
                     st.markdown("#### ⚠️ Model vs the books — check before betting")
                     st.dataframe(pd.DataFrame(gaps), hide_index=True, width="stretch")
@@ -937,6 +947,9 @@ if tab_props is not None:
                     st.info(msg, icon=icon)
                 elif not reads and not gaps:
                     st.caption("No side clears the bar for value in this market right now — try another market.")
+                elif not reads:
+                    st.caption("No lean clears the bar: every line the model disagrees with is in the ⚠️ table below, "
+                               "held until the news is checked, and the rest show no edge at the price.")
             st.caption("**Pick** = the side with the best value at the price (🎲 = under 50% to hit, worth it only "
                        "because the price pays more — common on plus-money hockey and low-count props); **Chance** = how "
                        "likely it is; **Lean** = 🟢/🔴 only when "

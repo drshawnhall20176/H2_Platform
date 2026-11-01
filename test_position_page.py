@@ -934,3 +934,22 @@ def test_breakout_tab_lines_up_each_position_against_the_defense(monkeypatch):
     assert list(away["Pos"]) == ["PG", "SG", "SF", "PF", "C"]
     assert away.loc[away["Pos"] == "SF", "Starter"].iloc[0].startswith("Away Wing")
     assert frames[1].loc[frames[1]["Pos"] == "PG", "Starter"].iloc[0] == "Star Guard"
+
+
+def test_props_side_filter_shows_only_that_pick(page):
+    at = page("NBA", nba_games(), bundle_fn=lambda sport, g: props_bundle(sport))
+    game = at.selectbox(key="pm_game").value
+    at.session_state[f"pm_props_NBA_{game}_PRA_1"] = {"edited_rows": {0: {"Line": 5.5}, 1: {"Line": 99.5}},
+                                                       "added_rows": [], "deleted_rows": []}
+    at.run()
+    assert at.radio(key="pm_props_side").options == ["All Sides", "Under", "Over"]
+    def picks():
+        return [str(x) for d in at.dataframe if "Pick" in getattr(d.value, "columns", []) and "Milestones" in d.value.columns
+                for x in d.value["Pick"]]
+    allp = picks()
+    assert any(p.startswith("Over") for p in allp) and any(p.startswith("Under") for p in allp)
+    at.radio(key="pm_props_side").set_value("Under").run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert picks() and all(p.startswith("Under") for p in picks())
+    at.radio(key="pm_props_side").set_value("Over").run()
+    assert picks() and all(p.startswith("Over") for p in picks())
