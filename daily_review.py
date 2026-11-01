@@ -224,6 +224,18 @@ def settle(sport: str, open_bets: Sequence[Dict], fetch: Callable = PG._http, wr
 def review_sport(sport: str, morning: str, open_bets: Sequence[Dict], fetch: Callable = PG._http,
                  db_path: Optional[str] = None, write: bool = True, bet_db: Optional[str] = None) -> Optional[Dict]:
     """One sport's morning report, or None when the sport had nothing to review (out of season)."""
+    if sport == "UFC":
+        import ufc_review as UR
+        rep = UR.review(morning, open_bets, fetch=fetch, db_path=db_path, write=write, bet_db=bet_db)
+        if rep and rep["settlement"]["settled"] and write:
+            kw = {"db_path": bet_db} if bet_db else {}
+            try:
+                for t in B.ticket_settlements(B.list_bets(**kw)):
+                    B.update_bet(t["id"], result=t["result"], **kw)
+                    rep["settlement"]["tickets"].append(t)
+            except Exception as exc:                                # noqa: BLE001
+                print(f"  [UFC] ticket settlement failed: {type(exc).__name__}: {exc}")
+        return rep
     dates = slates_for(sport, morning, db_path=db_path)
     has_bets = any((b.get("sport") or "") == sport and not b.get("result") for b in open_bets)
     if not dates and not has_bets:
@@ -251,7 +263,7 @@ def review_sport(sport: str, morning: str, open_bets: Sequence[Dict], fetch: Cal
 
 
 def run(morning: str, fetch: Callable = PG._http, db_path: Optional[str] = None, write: bool = True,
-        sports: Sequence[str] = tuple(PG.ESPN), bet_db: Optional[str] = None) -> Dict[str, Dict]:
+        sports: Sequence[str] = tuple(PG.ESPN) + ("UFC",), bet_db: Optional[str] = None) -> Dict[str, Dict]:
     """db_path: the model store (snapshots, tuning, reports); bet_db: the Bet Log. Both default to production."""
     kw = {"db_path": bet_db} if bet_db else {}
     try:
@@ -273,7 +285,7 @@ def run(morning: str, fetch: Callable = PG._http, db_path: Optional[str] = None,
         if write:
             MS.save_daily_review(sport, morning, rep, db_path=db_path)
         s = rep["settlement"]
-        print(f"[{sport}] slates {', '.join(rep['slates']) or '—'} · {len(rep['suggestions'])} suggestion(s) · "
+        print(f"[{sport}] slates {', '.join(rep['slates']) or (rep.get('card') or {}).get('date') or '—'} · {len(rep['suggestions'])} suggestion(s) · "
               f"settled {len(s['settled'])} prop(s) + {len(s['tickets'])} ticket(s) · "
               f"{len(s['unresolved'])} left for a person · {len(s['still_pending'])} not final")
         for n in rep["notes"]:

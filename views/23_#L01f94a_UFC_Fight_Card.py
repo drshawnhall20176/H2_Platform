@@ -128,6 +128,13 @@ st.success(f"Found {len(events)} bout{'s' if len(events) != 1 else ''} on tonigh
 @st.cache_data(ttl=300, show_spinner=False)
 def load_bout_odds(event_id: str, api_key: str, book: str):
     event_data = E.get_event_odds(event_id, api_key, book=book)
+    try:    # keep the pre-fight prices for the morning review (fail-soft; never blocks the page)
+        import ufc_review as UR
+        import model_store as MS
+        if not UR._started(event_data.get("commence_time"), datetime.now(timezone.utc)):
+            MS.save_ufc_odds([UR.record_from_event(event_data)])
+    except Exception:                                           # noqa: BLE001
+        pass
     return E.parse_bout_odds(event_data, preferred_book=book)
 
 def _impl_prob(american: float) -> float:
