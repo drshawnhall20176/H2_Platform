@@ -51,6 +51,46 @@ def pick(plays, slot="All slate", unit="All", side="All Sides", show="All playab
     return sorted(out, key=lambda p: p.get("ModelProb") or 0, reverse=True)
 
 
+def reads_table(sport: str, date_str: str, book: str, market: str, slot: str = "All slate") -> str:
+    """Raw Player props reads for one market (every player with a book line, both sides) -- e.g. Anytime TD, where
+    the board only lists a "Yes" the model makes 50%+. p_* are the Over / Yes probabilities; value = model vs the
+    price (the model's chance x decimal odds - 1)."""
+    import best_bets_data as BBD
+    import props_engine as PE
+    import sports
+    reads = BBD.load_slate_reads(sport, date_str, book) or {}
+    _rows, meta = sports.get(sport).engine.build_slate(date_str)
+    when = {m["label"]: sports.game_dt(m.get("game_date")) for m in meta}
+    out = []
+    for (_pid, _mk), r in reads.items():
+        if str(r.get("market")).lower() != market.lower() or r.get("line") is None or r.get("out"):
+            continue
+        dt = when.get(r.get("game"))
+        if slot != "All slate" and sports.slot_of(dt) != slot:
+            continue
+        price = r.get("over_price")
+        pm = r.get("p_model")
+        val = None if (price is None or pm is None) else pm * PE.decimal(price) - 1 if hasattr(PE, "decimal") else None
+        if val is None and price is not None and pm is not None:
+            dec = 1 + (price / 100 if price > 0 else 100 / -price)
+            val = pm * dec - 1
+        out.append((r, dt, val))
+    out.sort(key=lambda t: -(t[0].get("p_final") or 0))
+    lines = [f"## {market} reads — {date_str} · {slot}\n",
+             "| # | Time | Player | Team | Game | Proj | Model | Market | Blend | Price | Value | Lean | Flags |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    for i, (r, dt, val) in enumerate(out, 1):
+        f = lambda x: "—" if x is None else f"{x:.0%}"
+        lines.append(f"| {i} | {dt.strftime('%I:%M %p').lstrip('0') if dt else 'TBD'} | {r.get('player')} | "
+                     f"{r.get('team_name') or ''} | {r.get('game')} | "
+                     f"{'—' if r.get('projection') is None else format(r['projection'], '.2f')} | {f(r.get('p_model'))} | "
+                     f"{f(r.get('p_market'))} | {f(r.get('p_final'))} | "
+                     f"{'—' if r.get('over_price') is None else format(r['over_price'], '+.0f')} | "
+                     f"{'—' if val is None else format(val, '+.0%')} | {r.get('lean') or '—'} | "
+                     f"{'; '.join(str(x) for x in (r.get('flags') or [])[:2]) or '—'} |")
+    return "\n".join(lines)
+
+
 def _pct(x):
     return "—" if x is None else f"{x:+.0%}"
 
@@ -83,8 +123,18 @@ def main(argv=None) -> int:
     ap.add_argument("--top", type=int, default=25)
     ap.add_argument("--market", default="", help="only this market (e.g. Anytime TD)")
     ap.add_argument("--out", default="board.json")
+    ap.add_argument("--reads", default="", help="dump raw model reads for this market instead (e.g. Anytime TD)")
     a = ap.parse_args(argv)
     date_str = a.date or datetime.now(pytz.timezone("US/Eastern")).date().isoformat()
+    if a.reads:
+        md = reads_table(a.sport, date_str, a.book, a.reads, a.slot)
+        print(md)
+        if os.environ.get("GITHUB_STEP_SUMMARY"):
+            with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+                f.write(md + "\n")
+        with open(a.out, "w") as f:
+            f.write(md)
+        return 0
     plays = board(a.sport, date_str, a.book)
     rows = pick(plays, a.slot, a.unit, a.side, a.show, a.min_conv)
     if a.market:
