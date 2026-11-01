@@ -24,6 +24,66 @@ C.page_header("🧾", "Postgame Review",
               "miss missed, and the adjustments the results point to.")
 
 SPORT_KEY = st.session_state.get("sport", "NFL")
+
+
+def _ufc_page():
+    """UFC: no model yet, so each card is graded against the market's saved prices (ufc_review.py)."""
+    mornings = MS.daily_review_mornings("UFC")
+    if not mornings:
+        st.info("No UFC report yet. The morning after a card, the 3:30 AM review grades every bout against the prices "
+                "saved before it started (favorites, upsets, finishes, rounds over/under) and settles open UFC bets in "
+                "the Bet Log. Prices are saved automatically through fight day and whenever the Fight Card page "
+                "loads a bout.")
+        return
+    mpick = st.selectbox("Morning", mornings, key="pgr_ufc_morning")
+    rep = MS.load_daily_review("UFC", mpick) or {}
+    st.caption(f"Written {str(rep.get('created', ''))[:16].replace('T', ' ')} UTC.")
+    card = rep.get("card") or {}
+    if card:
+        s = card["summary"]
+        st.markdown(f"##### {card.get('event') or 'UFC'} · {card['date']}")
+        if card.get("priced_note"):
+            st.caption(card["priced_note"])
+        m1, m2, m3, m4 = st.columns(4)
+        f = s["favorites"]
+        m1.metric("Favorites", f"{f['won']}-{f['lost']}" if s["priced"] else "—",
+                  f"priced for {f['expected']:.1f} wins" if s["priced"] else None, delta_color="off")
+        bf = s["big_favorites"]
+        m2.metric("Big favorites (70%+)", f"{bf['won']} of {bf['graded']}" if bf["graded"] else "—")
+        m3.metric("Finishes / decisions", f"{s['finishes']} / {s['decisions']}")
+        t = s["totals"]
+        m4.metric("Rounds totals (O-U)", f"{t['over']}-{t['under']}" if t["over"] + t["under"] else "—")
+        rows = [{"Bout": " vs. ".join(b["fighters"]), "Winner": b.get("winner") or "—",
+                 "How": f"{b.get('method') or '—'}" + (f" · R{b['round']} {b['clock']}" if b.get("method") not in ("Decision", None) else ""),
+                 "Favorite": b.get("fav") or "—", "Fav chance": "—" if b.get("fav_p") is None else f"{b['fav_p']:.0%}",
+                 "Fav won": {True: "✅", False: "❌ upset"}.get(b.get("fav_won"), "—"),
+                 "Rounds line": "—" if b.get("total_point") is None else
+                 f"{b['total_point']} · " + {True: "Over", False: "Under"}.get(b.get("over"), "—")}
+                for b in card.get("bouts") or []]
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+        if s.get("brier") is not None:
+            st.caption(f"Brier score of the favorites' prices: {s['brier']:.3f} (0 = perfect; 0.25 = a coin flip).")
+        with st.expander("📣 Discord recap (copy)"):
+            st.code(card.get("recap") or "", language=None)
+    else:
+        st.caption("No card yesterday — this morning only settled open UFC bets.")
+    tr = rep.get("trend") or {}
+    if tr.get("bands"):
+        st.markdown(f"##### Favorites by price, last {tr['days']} days ({tr['bouts']} bouts)")
+        st.dataframe(pd.DataFrame([{"Favorite priced": b["band"], "Bouts": b["bouts"], "Priced at": f"{b['priced_at']:.0%}",
+                                    "Won": f"{b['won']:.0%}"} for b in tr["bands"]]), hide_index=True, width="stretch")
+    stl = rep.get("settlement") or {}
+    if stl.get("settled"):
+        st.markdown("##### Bets settled")
+        st.dataframe(pd.DataFrame(stl["settled"]), hide_index=True, width="stretch")
+    if stl.get("unresolved"):
+        st.markdown("##### Left for you")
+        st.dataframe(pd.DataFrame(stl["unresolved"]), hide_index=True, width="stretch")
+
+
+if SPORT_KEY == "UFC":
+    _ufc_page()
+    st.stop()
 if SPORT_KEY not in PG.ESPN:
     st.info(f"The Postgame Review covers {', '.join(PG.ESPN)} so far. Switch sport on the Home page.")
     st.stop()

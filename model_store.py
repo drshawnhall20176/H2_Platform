@@ -47,6 +47,11 @@ CREATE TABLE IF NOT EXISTS daily_reviews (
     sport TEXT, morning TEXT, report TEXT, ts TEXT,
     UNIQUE (sport, morning)
 );
+CREATE TABLE IF NOT EXISTS ufc_odds (
+    id {pk},
+    event_id TEXT, card_date TEXT, commence TEXT, payload TEXT, ts TEXT,
+    UNIQUE (event_id)
+);
 CREATE TABLE IF NOT EXISTS model_tuning (
     id {pk},
     sport TEXT, market TEXT, slot TEXT, factor REAL, reason TEXT, approved_ts TEXT, active INTEGER DEFAULT 1
@@ -332,6 +337,56 @@ def daily_review_mornings(sport: str, db_path: Optional[str] = None) -> List[str
             cur = con.cursor()
             cur.execute(f"SELECT morning FROM daily_reviews WHERE sport={ph} ORDER BY morning DESC", [sport])
             return [r["morning"] if isinstance(r, (dict, sqlite3.Row)) else r[0] for r in cur.fetchall()]
+    except Exception:                                           # noqa: BLE001
+        return []
+
+
+# --------------------------------------------------------------------------- UFC prices (ufc_review.py)
+def save_ufc_odds(records: List[Dict], db_path: Optional[str] = None) -> int:
+    """Upsert each bout's latest pre-fight prices (ufc_review.record_from_event) by event id."""
+    recs = [r for r in records or [] if r and r.get("event_id")]
+    if not recs or _test_run(db_path):
+        return 0
+    try:
+        with _conn(db_path) as (con, ph):
+            cur = con.cursor()
+            for r in recs:
+                cur.execute(
+                    f"INSERT INTO ufc_odds (event_id, card_date, commence, payload, ts) VALUES ({ph},{ph},{ph},{ph},{ph}) "
+                    f"ON CONFLICT (event_id) DO UPDATE SET card_date=excluded.card_date, commence=excluded.commence, "
+                    f"payload=excluded.payload, ts=excluded.ts",
+                    [r["event_id"], r.get("card_date"), r.get("commence"), json.dumps(r, default=str), _now()])
+        return len(recs)
+    except Exception:                                           # noqa: BLE001
+        return 0
+
+
+def load_ufc_odds(card_date: str, db_path: Optional[str] = None) -> List[Dict]:
+    if db_path is None and not available():
+        return []
+    try:
+        with _conn(db_path) as (con, ph):
+            cur = con.cursor()
+            cur.execute(f"SELECT payload FROM ufc_odds WHERE card_date={ph} ORDER BY commence", [card_date])
+            out = []
+            for r in cur.fetchall():
+                try:
+                    out.append(json.loads(r["payload"] if isinstance(r, (dict, sqlite3.Row)) else r[0]))
+                except (TypeError, ValueError):
+                    pass
+            return out
+    except Exception:                                           # noqa: BLE001
+        return []
+
+
+def ufc_card_dates(db_path: Optional[str] = None) -> List[str]:
+    if db_path is None and not available():
+        return []
+    try:
+        with _conn(db_path) as (con, ph):
+            cur = con.cursor()
+            cur.execute("SELECT DISTINCT card_date FROM ufc_odds WHERE card_date IS NOT NULL ORDER BY card_date")
+            return [r["card_date"] if isinstance(r, (dict, sqlite3.Row)) else r[0] for r in cur.fetchall()]
     except Exception:                                           # noqa: BLE001
         return []
 

@@ -1,0 +1,568 @@
+{
+"events": [
+{
+"id": "600061420",
+"name": "UFC Fight Night: Moicano vs. Nolan",
+"date": "2026-10-31T21:00Z",
+"competitions": [
+{
+"id": "401914105",
+"date": "2026-10-31T21:00Z",
+"status": {
+"period": 3,
+"displayClock": "3:20",
+"type": {
+"completed": true,
+"name": "STATUS_FINAL"
+}
+},
+"format": {
+"regulation": {
+"periods": 3
+}
+},
+"type": {
+"id": "1007",
+"abbreviation": "W Flyweight"
+},
+"details": [
+{
+"type": {
+"text": "Unofficial Winner Kotko"
+}
+},
+{
+"type": {
+"text": "Unofficial Winner Decision"
+}
+}
+],
+"competitors": [
+{
+"id": "4418809",
+"order": 2,
+"winner": false,
+"athlete": {
+"displayName": "Tainara Lisboa"
+}
+},
+{
+"id": "5130185",
+"order": 1,
+"winner": true,
+"athlete": {
+"displayName": "Lucia Szabová"
+}
+}
+]
+},
+{
+"id": "401928105",
+"date": "2026-10-31T21:00Z",
+"status": {
+"period": 3,
+"displayClock": "5:00",
+"type": {
+"completed": true,
+"name": "STATUS_FINAL"
+}
+},
+"format": {
+"regulation": {
+"periods": 3
+}
+},
+"type": {
+"id": "1006",
+"abbreviation": "W Strawweight"
+},
+"details": [
+{
+"type": {
+"text": "Unofficial Winner Decision"
+}
+}
+],
+"competitors": [
+{
+"id": "4816066",
+"order": 2,
+"winner": true,
+"athlete": {
+"displayName": "Piera Rodriguez"
+}
+},
+{
+"id": "5139556",
+"order": 1,
+"winner": false,
+"athlete": {
+"displayName": "Talita Alencar"
+}
+}
+]
+},
+{
+"id": "401914106",
+"date": "2026-10-31T21:00Z",
+"status": {
+"period": 2,
+"displayClock": "1:25",
+"type": {
+"completed": true,
+"name": "STATUS_FINAL"
+}
+},
+"format": {
+"regulation": {
+"periods": 3
+}
+},
+"type": {
+"id": "972",
+"abbreviation": "Middleweight"
+},
+"details": [
+{
+"type": {
+"text": "Unofficial Winner Submission"
+}
+}
+],
+"competitors": [
+{
+"id": "4687604",
+"order": 2,
+"winner": true,
+"athlete": {
+"displayName": "Joe Kropschot"
+}
+},
+{
+"id": "5134399",
+"order": 1,
+"winner": false,
+"athlete": {
+"displayName": "Nick Klein"
+}
+}
+]
+},
+{
+"id": "401931617",
+"date": "2026-10-31T21:00Z",
+"status": {
+"period": 3,
+"displayClock": "5:00",
+"type": {
+"completed": true,
+"name": "STATUS_FINAL"
+}
+},
+"format": {
+"regulation": {
+"periods": 3
+}
+},
+"type": {
+"id": "972",
+"abbreviation": "Middleweight"
+},
+"details": [
+{
+"type": {
+"text": "Unofficial Winner Decision"
+}
+}
+],
+"competitors": [
+{
+"id": "3960470",
+"order": 2,
+"winner": false,
+"athlete": {
+"displayName": "Mickey Gall"
+}
+},
+{
+"id": "5143223",
+"order": 1,
+"winner": true,
+"athlete": {
+"displayName": "Zach Reese"
+}
+}
+]
+},
+{
+"id": "401928109",
+"date": "2026-10-31T21:00Z",
+"status": {
+"period": 1,
+"displayClock": "1:31",
+"type": {
+"completed": true,
+"name": "STATUS_FINAL"
+}
+},
+"format": {
+"regulation": {
+"periods": 3
+}
+},
+"type": {
+"id": "999",
+"abbreviation": "Featherweight"
+},
+"details": [
+{
+"type": {
+"text": "Unofficial Winner Kotko"
+}
+}
+],
+"competitors": [
+{
+"id": "3955577",
+"order": 1,
+"winner": true,
+"athlete": {
+"displayName": "Julian Erosa"
+}
+},
+{
+"id": "5068724",
+"order": 2,
+"winner": false,
+"athlete": {
+"displayName": "JeongYeong Lee"
+}
+}
+]
+},
+{
+"id": "401928106",
+"date": "2026-10-31T21:00Z",
+"status": {
+"period": 2,
+"displayClock": "5:00",
+"type": {
+"completed": true,
+"name": "STATUS_FINAL"
+}
+},
+"format": {
+"regulation": {
+"periods": 3
+}
+},
+"type": {
+"id": "969",
+"abbreviation": "Welterweight"
+},
+"details": [
+{
+"type": {
+"text": "Unofficial Winner Kotko"
+}
+}
+],
+"competitors": [
+{
+"id": "5085010",
+"order": 2,
+"winner": false,
+"athlete": {
+"displayName": "Theodor Berggren"
+}
+},
+{
+"id": "5289853",
+"order": 1,
+"winner": true,
+"athlete": {
+"displayName": "Rodrigo Sezinando"
+}
+}
+]
+},
+{
+"id": "401931615",
+"date": "2026-10-31T21:00Z",
+"status": {
+"period": 3,
+"displayClock": "5:00",
+"type": {
+"completed": true,
+"name": "STATUS_FINAL"
+}
+},
+"format": {
+"regulation": {
+"periods": 3
+}
+},
+"type": {
+"id": "999",
+"abbreviation": "Featherweight"
+},
+"details": [
+{
+"type": {
+"text": "Unofficial Winner Decision"
+}
+}
+],
+"competitors": [
+{
+"id": "4898914",
+"order": 2,
+"winner": true,
+"athlete": {
+"displayName": "Dakota Hope"
+}
+},
+{
+"id": "5060394",
+"order": 1,
+"winner": false,
+"athlete": {
+"displayName": "Francis Marshall"
+}
+}
+]
+},
+{
+"id": "401928107",
+"date": "2026-11-01T00:00Z",
+"status": {
+"period": 3,
+"displayClock": "2:11",
+"type": {
+"completed": true,
+"name": "STATUS_FINAL"
+}
+},
+"format": {
+"regulation": {
+"periods": 3
+}
+},
+"type": {
+"id": "969",
+"abbreviation": "Welterweight"
+},
+"details": [
+{
+"type": {
+"text": "Unofficial Winner Kotko"
+}
+}
+],
+"competitors": [
+{
+"id": "4629138",
+"order": 1,
+"winner": true,
+"athlete": {
+"displayName": "Jean-Paul Lebosnoyani"
+}
+},
+{
+"id": "5350562",
+"order": 2,
+"winner": false,
+"athlete": {
+"displayName": "Farman Hasanov"
+}
+}
+]
+},
+{
+"id": "401928104",
+"date": "2026-11-01T00:00Z",
+"status": {
+"period": 3,
+"displayClock": "5:00",
+"type": {
+"completed": true,
+"name": "STATUS_FINAL"
+}
+},
+"format": {
+"regulation": {
+"periods": 3
+}
+},
+"type": {
+"id": "1003",
+"abbreviation": "W Bantamweight"
+},
+"details": [
+{
+"type": {
+"text": "Unofficial Winner Decision"
+}
+}
+],
+"competitors": [
+{
+"id": "3154898",
+"order": 1,
+"winner": false,
+"athlete": {
+"displayName": "Yana Santos"
+}
+},
+{
+"id": "5110469",
+"order": 2,
+"winner": true,
+"athlete": {
+"displayName": "Luana Santos"
+}
+}
+]
+},
+{
+"id": "401931555",
+"date": "2026-11-01T00:00Z",
+"status": {
+"period": 3,
+"displayClock": "5:00",
+"type": {
+"completed": true,
+"name": "STATUS_FINAL"
+}
+},
+"format": {
+"regulation": {
+"periods": 3
+}
+},
+"type": {
+"id": "956",
+"abbreviation": "Flyweight"
+},
+"details": [
+{
+"type": {
+"text": "Unofficial Winner Decision"
+}
+}
+],
+"competitors": [
+{
+"id": "4424224",
+"order": 1,
+"winner": false,
+"athlete": {
+"displayName": "Ode' Osbourne"
+}
+},
+{
+"id": "4686725",
+"order": 2,
+"winner": true,
+"athlete": {
+"displayName": "Cody Durden"
+}
+}
+]
+},
+{
+"id": "401931616",
+"date": "2026-11-01T00:00Z",
+"status": {
+"period": 3,
+"displayClock": "5:00",
+"type": {
+"completed": true,
+"name": "STATUS_FINAL"
+}
+},
+"format": {
+"regulation": {
+"periods": 3
+}
+},
+"type": {
+"id": "969",
+"abbreviation": "Welterweight"
+},
+"details": [
+{
+"type": {
+"text": "Unofficial Winner Decision"
+}
+}
+],
+"competitors": [
+{
+"id": "3960071",
+"order": 1,
+"winner": false,
+"athlete": {
+"displayName": "Randy Brown"
+}
+},
+{
+"id": "5149961",
+"order": 2,
+"winner": true,
+"athlete": {
+"displayName": "Jacobe Smith"
+}
+}
+]
+},
+{
+"id": "401921310",
+"date": "2026-11-01T00:00Z",
+"status": {
+"period": 3,
+"displayClock": "1:28",
+"type": {
+"completed": true,
+"name": "STATUS_FINAL"
+}
+},
+"format": {
+"regulation": {
+"periods": 5
+}
+},
+"type": {
+"id": "986",
+"abbreviation": "Lightweight"
+},
+"details": [
+{
+"type": {
+"text": "Unofficial Winner Kotko"
+}
+}
+],
+"competitors": [
+{
+"id": "3028863",
+"order": 1,
+"winner": false,
+"athlete": {
+"displayName": "Renato Moicano"
+}
+},
+{
+"id": "5144007",
+"order": 2,
+"winner": true,
+"athlete": {
+"displayName": "Tom Nolan"
+}
+}
+]
+}
+]
+}
+]
+}

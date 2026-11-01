@@ -1,0 +1,43 @@
+# UFC prices before each bout (capture_ufc_odds.py) -> model_store.ufc_odds, for the morning review's UFC report.
+#
+# Each run first checks the free events list and only pulls odds (2 credits) when a bout starts within 14 hours, so
+# non-fight days cost nothing. Fight days: prelims usually start ~6-8 PM ET and main events end past midnight, so the
+# runs bunch from mid-afternoon to 11 PM ET. Each run saves every bout that hasn't started yet, so a bout's saved
+# price is the last run before its walkout. (The Fight Card page also saves a bout's prices whenever it loads them.)
+#
+# Needs the ODDS_API_KEY and DATABASE_URL secrets. "Run workflow" runs it now (and saves even outside the window).
+
+name: capture-ufc-odds
+
+on:
+  schedule:
+    - cron: "0 16,19,21,23 * * *"     # ~noon, 3, 5, 7 PM ET
+    - cron: "0 0,1,2,3 * * *"         # ~8, 9, 10, 11 PM ET
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: capture-ufc-odds
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Save UFC prices
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          UFC_CAPTURE_FORCE: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
+        run: python capture_ufc_odds.py
