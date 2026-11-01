@@ -72,6 +72,18 @@ DEFAULT_MARKET = "Receiving Yards"
 MARKET_HELP = {"Anytime TD": "1+ rushing or receiving TD (line 0.5)", "Rush + Rec Yards": "rushing + receiving yards"}
 
 
+UNITS = ("Offense", "Defense", "Special Teams")
+
+
+def market_unit(market: str) -> Optional[str]:
+    """Offense / Defense / Special Teams for a football market (Interceptions = a QB's thrown picks: Offense);
+    None for a market that isn't football's."""
+    m = MARKETS.get(market)
+    if m is None:
+        return None
+    return {"kicker": "Special Teams", "defense": "Defense"}.get(m.get("group"), "Offense")
+
+
 def is_special(market: str) -> bool:
     return (MARKETS.get(market) or {}).get("group") in ("kicker", "defense")
 
