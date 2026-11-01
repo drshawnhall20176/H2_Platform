@@ -649,6 +649,7 @@ def render_game_context(market: str) -> dict:
         st.caption(f"Implied team totals: **{away_name} {implied[1]:.1f}**, **{home_name} {implied[0]:.1f}**"
                    + (" — favored side runs more, underdog throws more." if PFAM == "football" else "."))
     return {"spread_home": spread, "total": total, "implied": implied, "offers": got.get("offers"),
+            "line_status": PL.line_status(got, game.get("game_date")),
             "slope": fitted if (use_cal and fitted) else 1.0, "model_weight": w,
             "book": PE.book_order(price_book)}
 
@@ -927,9 +928,8 @@ if tab_props is not None:
                                "leans — with the market getting 80% of the vote. Bets logged on these are tagged "
                                "**market-gap**, and the Scorecard tracks who turns out right.")
                 if not reads and not any(r.get("line") is not None for r in all_rows):
-                    st.info("No lines posted for this market yet — books usually post player props the afternoon of the "
-                            "game. The projections below are ready; picks appear once lines are up (or type your own).",
-                            icon="🕐")
+                    icon, msg = PL.line_status_message(g.get("line_status") or "not_posted", market)
+                    st.info(msg, icon=icon)
                 elif not reads and not gaps:
                     st.caption("No side clears the bar for value in this market right now — try another market.")
             st.caption("**Pick** = the side with the best value at the price (🎲 = under 50% to hit, worth it only "

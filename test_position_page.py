@@ -856,7 +856,8 @@ def test_default_view_has_no_blank_columns_and_says_when_no_line_is_posted(page)
     assert "Over odds" not in table.columns and "Pick" in table.columns
     assert not table.isna().any().any() and all(str(v).strip() for v in table.to_numpy().ravel())
     assert set(table["Pick"]) == {"No line posted"}
-    assert any("No lines posted for this market yet" in i.value for i in at.info)
+    # Oct 31: the note says WHY there's no line (this fixture's game date is in the past: it has started)
+    assert any("already started" in i.value for i in at.info)
 
 
 def test_best_reads_lead_the_tab_once_lines_are_in(page):
