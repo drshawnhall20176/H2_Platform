@@ -195,12 +195,20 @@ slot_plays = (slot_plays if game_pick == "All games in this slot"
 f3, f4, f5 = st.columns(3)
 with f3:
     markets = sorted({p["Market"] for p in plays})
+    # Nov 1: football boards mix offense, defense (sacks/tackles) and kicking -- narrow the Markets list by unit.
+    import football_props as _FP
+    if any(_FP.market_unit(m) for m in markets):
+        _unit = st.radio("Market group", ("All",) + _FP.UNITS, horizontal=True, key="bb_market_unit")
+        if _unit != "All":
+            markets = [m for m in markets if (_FP.market_unit(m) or "Offense") == _unit]
     # Same real, deliberate curation as Suggested Parlays/Graded Picks/Speculative Basket -- see
     # sports.py's own comment for the full reasoning. Intersected with markets so a curated-in
     # market genuinely absent from tonight's board never appears as a phantom default; falls
     # back to every market for any sport without a curation yet.
     _default_markets = (_active.board_defaults() or markets)       # curated defaults + the sport's featured markets (MLB: HR, Stolen Bases)
     _default_mkt_pick = [m for m in _default_markets if m in markets] or markets
+    if not markets:
+        st.caption("No markets in this group on tonight's board.")
     mkt_pick = st.multiselect("Markets", markets, default=_default_mkt_pick)
 # NBA reads players through the Player props model (slate_props): every play is a Position Matchups read at the
 # book's line, and only the ones Player props leans on carry Conviction above 1.0.
@@ -248,8 +256,12 @@ _use_pick = (st.radio("Show", list(_USE_FILTER), horizontal=True, key="bb_use_fi
                       help="🎟️ Parlay legs: 15%+ cushion, 60%+ to hit, a positive edge, no warnings. 🎯 Singles: a real "
                            "edge (+3% at the price) — some are too close to the number to chain into a parlay.")
              if _props_model else "All playable")
+# Nov 1: Over / Under only (other sides -- a team, "Yes" -- show under All Sides).
+_side_pick = (st.radio("Side", ("All Sides", "Under", "Over"), horizontal=True, key="bb_side_filter")
+              if any(p.get("Side") in ("Over", "Under") for p in slot_plays) else "All Sides")
 view = [p for p in slot_plays if p["Market"] in mkt_pick and p["Conviction"] >= min_conv
-        and (not _props_model or p.get("Use") in _USE_FILTER[_use_pick])]
+        and (not _props_model or p.get("Use") in _USE_FILTER[_use_pick])
+        and (_side_pick == "All Sides" or p.get("Side") == _side_pick)]
 _held = [p for p in slot_plays if p["Market"] in mkt_pick and p.get("Lean") == "Check news"]
 view = grading.filter_min_probability(view, min_prob_pct / 100.0)
 # A REAL, CONFIRMED FIX, not the original design -- re-sorted here by ModelProb (real

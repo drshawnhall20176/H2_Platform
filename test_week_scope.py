@@ -220,3 +220,29 @@ def test_a_play_page_on_a_day_without_games_points_at_the_week(monkeypatch):
     assert any("games kick off on" in i.value and "2 game(s)" in i.value and "This week" in i.value for i in at.info)
     [r for r in at.radio if r.label == "Games shown"][0].set_value("This week").run()
     assert len([s for s in at.selectbox if s.label == "Game"][0].options) == 3
+
+
+def test_best_bets_market_group_and_side_filters(monkeypatch):
+    _patched_board(monkeypatch)
+    plays, meta = _board()
+    today = [p for p in plays if p["Game"] in ("HOU @ IND", "NE @ MIA")]
+    extra = [dict(today[0], Player="Def", Market="Sacks", Side="Under", Line=0.5, _stat_key="sacks"),
+             dict(today[0], Player="Kick", Market="FG Made", Side="Under", Line=1.5, _stat_key="fg_made")]
+    monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda *a, **k: (plays + extra, meta, ["draftkings"]))
+    monkeypatch.setattr(BBD, "render_book_selector", lambda *a, **k: "draftkings", raising=False)
+    at = AppTest.from_file(str(VIEWS / "1_#U2b50_Best_Bets.py"), default_timeout=90)
+    at.session_state["sport"] = "NFL"
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    group = [r for r in at.radio if r.label == "Market group"][0]
+    assert group.options == ["All", "Offense", "Defense", "Special Teams"]
+    assert set([m for m in at.multiselect if m.label == "Markets"][0].options) == {"Pass Yards", "Sacks", "FG Made"}
+    group.set_value("Defense").run()
+    assert [m for m in at.multiselect if m.label == "Markets"][0].options == ["Sacks"]
+    [r for r in at.radio if r.label == "Market group"][0].set_value("Special Teams").run()
+    assert [m for m in at.multiselect if m.label == "Markets"][0].options == ["FG Made"]
+    [r for r in at.radio if r.label == "Market group"][0].set_value("All").run()
+    side = [r for r in at.radio if r.label == "Side"][0]
+    assert side.options == ["All Sides", "Under", "Over"] and side.value == "All Sides"
+    side.set_value("Over").run()
+    assert not at.exception, [e.value for e in at.exception]
