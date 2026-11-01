@@ -1,0 +1,58 @@
+# The Best Bets board without a browser (export_board.py): same model, same filters, a ranked table in the run
+# summary and board.json as an artifact. "Run workflow" from GitHub on a phone. Each run pulls props odds once
+# (about what opening Best Bets costs).
+
+name: export-board
+
+on:
+  workflow_dispatch:
+    inputs:
+      sport:
+        description: "Sport"
+        default: "NFL"
+      date:
+        description: "Date (YYYY-MM-DD, New York). Blank = today."
+        default: ""
+      slot:
+        description: "Time slot: All slate / Afternoon / Evening / Late"
+        default: "All slate"
+      unit:
+        description: "Market group: All / Offense / Defense / Special Teams"
+        default: "All"
+      side:
+        description: "Side: All Sides / Under / Over"
+        default: "All Sides"
+      show:
+        description: "Show: All playable / Singles / Parlay legs"
+        default: "All playable"
+      top:
+        description: "How many rows"
+        default: "25"
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Export the board
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python export_board.py --sport "${{ inputs.sport }}" --date "${{ inputs.date }}" --slot "${{ inputs.slot }}" \
+            --unit "${{ inputs.unit }}" --side "${{ inputs.side }}" --show "${{ inputs.show }}" --top "${{ inputs.top }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: board
+          path: board.json
