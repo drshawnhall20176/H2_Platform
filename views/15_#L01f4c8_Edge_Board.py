@@ -200,6 +200,7 @@ else:
         # market-spec-driven (covers every registered market with no such gap), so this falls
         # back to the original, still-correct _active.markets for them.
         priceable_markets = list(getattr(P, "_MARKET_DISPLAY", {}).keys()) or _active.markets
+        priceable_markets = C.market_group_filter(priceable_markets, key="eb_market_unit")   # Nov 1: football units
         chosen = st.multiselect(
             "Markets to price (each market × each game = 1 quota unit)",
             priceable_markets, default=priceable_markets,
@@ -207,6 +208,7 @@ else:
         )
     with ec2:
         min_ev = st.slider("Min EV%", -10.0, 30.0, 0.0, 0.5)
+        _side_pick = st.radio("Side", list(C.SIDES), horizontal=True, key="eb_side_filter")   # Nov 1
  
     n_games = len({v["ctx"]["game"] for v in index.values()})
     est_cost = len(chosen) * max(n_games, 1)
@@ -417,6 +419,8 @@ else:
             # [heavy_fav_floor, max_odds], drop implausible EV, keep top N.
             edf = edf[(edf["EV%"] >= min_ev) & (edf["EV%"] <= max_ev)
                       & (edf["Price"] <= max_odds) & (edf["Price"] >= heavy_fav_floor)].copy()
+            if _side_pick != "All Sides" and "Side" in edf.columns:
+                edf = edf[edf["Side"] == _side_pick].copy()
             edf = edf.sort_values("EV%", ascending=False).head(top_n).copy()
             n_longshots = sum(1 for e in edges if e["EV%"] >= min_ev and e["Price"] > max_odds)
             n_heavyfav = sum(1 for e in edges if e["EV%"] >= min_ev and e["Price"] < heavy_fav_floor)

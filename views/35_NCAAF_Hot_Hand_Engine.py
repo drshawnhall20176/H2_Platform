@@ -121,7 +121,8 @@ cf1, cf2 = st.columns(2)
 with cf1:
     pos_filter = st.multiselect("Position", positions_present, default=positions_present)
 with cf2:
-    mkt_filter = st.multiselect("Market", markets_present, default=markets_present)
+    _group_markets = C.market_group_filter(markets_present, key="ncaafhh_market_unit")   # Nov 1
+    mkt_filter = st.multiselect("Market", _group_markets, default=_group_markets)
 
 filtered = [r for r in board if r.get("Position") in pos_filter and r.get("Market") in mkt_filter]
 if not filtered:

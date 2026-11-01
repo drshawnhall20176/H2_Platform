@@ -632,3 +632,35 @@ def is_owner() -> bool:
 
 def for_audience(owner_text: str, public_text: str) -> str:
     return owner_text if is_owner() else public_text
+
+
+
+# --------------------------------------------------------------------------- market group + side filters (Nov 1)
+MARKET_GROUPS = ("All", "Offense", "Defense", "Special Teams")
+SIDES = ("All Sides", "Under", "Over")
+
+
+def market_group_filter(markets, key: str, label: str = "Market group"):
+    """Football boards: an All / Offense / Defense / Special Teams radio that narrows a market list (display names or
+    Odds API keys). Any other sport's list comes back unchanged with no radio drawn."""
+    import football_props as FP
+    markets = list(markets)
+    if not any(FP.market_unit(m) for m in markets):
+        return markets
+    unit = st.radio(label, MARKET_GROUPS, horizontal=True, key=key,
+                    help="Offense: passing, rushing, receiving, TDs (Interceptions = the QB's thrown picks). "
+                         "Defense: sacks and tackles. Special Teams: kicking.")
+    if unit == "All":
+        return markets
+    return [m for m in markets if (FP.market_unit(m) or "Offense") == unit]
+
+
+def side_filter(rows, key: str, label: str = "Side") -> str:
+    """An All Sides / Under / Over radio, drawn only when some row is an Over or Under. Use with side_ok()."""
+    if not any((r.get("Side") if isinstance(r, dict) else None) in ("Over", "Under") for r in rows):
+        return "All Sides"
+    return st.radio(label, SIDES, horizontal=True, key=key)
+
+
+def side_ok(row, pick: str) -> bool:
+    return pick == "All Sides" or row.get("Side") == pick

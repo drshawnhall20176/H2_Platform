@@ -862,7 +862,12 @@ if tab_props is not None:
         pc1, pc2 = st.columns([1, 2])
         with pc1:
             mkey = "pm_props_market" if PFAM == "basketball" else f"pm_props_market_{PFAM}"
-            market = st.selectbox("Market", list(menu), index=list(menu).index(default_m), key=mkey,
+            _mopts = C.market_group_filter(list(menu), key=f"pm_props_unit_{PFAM}") or list(menu)   # Nov 1: football units
+            if default_m not in _mopts:
+                default_m = _mopts[0]
+            if st.session_state.get(mkey) not in _mopts:
+                st.session_state.pop(mkey, None)
+            market = st.selectbox("Market", _mopts, index=_mopts.index(default_m), key=mkey,
                                   format_func=lambda m: f"{m} — {mhelp[m]}" if m in mhelp else m)
         mode = "season"
         with pc2:

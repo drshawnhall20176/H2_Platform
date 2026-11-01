@@ -201,13 +201,15 @@ markets_present = sorted({pl.get("Market") for pl in plays if pl.get("Market")})
 # default. None (any sport without a curation yet) falls back to every market on the board,
 # unchanged from the original behavior.
 _default_markets = (_active.default_markets or markets_present)
+markets_present = C.market_group_filter(markets_present, key="sp_market_unit")   # Nov 1: football Offense/Defense/ST
 _default_selected = [m for m in _default_markets if m in markets_present] or markets_present
 selected_markets = st.multiselect("Markets to include", options=markets_present,
                                   default=_default_selected)
+_side_pick = C.side_filter(plays, key="sp_side_filter")
 if not selected_markets:
     st.info("Select at least one market above to see parlay suggestions.")
     st.stop()
-plays = [pl for pl in plays if pl.get("Market") in selected_markets]
+plays = [pl for pl in plays if pl.get("Market") in selected_markets and C.side_ok(pl, _side_pick)]
 
 # --- min probability floor ----------------------------------------------------
 # A separate, ABSOLUTE floor from every tier's own grading floor below -- added directly on

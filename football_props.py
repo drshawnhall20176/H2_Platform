@@ -78,7 +78,7 @@ UNITS = ("Offense", "Defense", "Special Teams")
 def market_unit(market: str) -> Optional[str]:
     """Offense / Defense / Special Teams for a football market (Interceptions = a QB's thrown picks: Offense);
     None for a market that isn't football's."""
-    m = MARKETS.get(market)
+    m = MARKETS.get(market) or next((v for v in MARKETS.values() if v.get("odds") and v["odds"] == market), None)
     if m is None:
         return None
     return {"kicker": "Special Teams", "defense": "Defense"}.get(m.get("group"), "Offense")
