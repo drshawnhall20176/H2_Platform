@@ -63,7 +63,20 @@ NFL_TEAMS = {
 
 
 def _norm_team(x) -> str:
-    return " ".join(str(x or "").lower().replace(".", "").replace("&", "and").split())
+    import unicodedata
+    t = unicodedata.normalize("NFKD", str(x or "")).encode("ascii", "ignore").decode()   # San José -> San Jose
+    t = t.lower().replace(".", "").replace("'", "").replace("’", "").replace("&", "and")
+    return " ".join(t.split())
+
+
+# Schedule short names -> the books' school names (Oct 31: "App State" never matched "Appalachian State Mountaineers").
+_ALIASES = {"app state": "appalachian state", "uconn": "connecticut", "umass": "massachusetts",
+            "southern miss": "southern mississippi", "fiu": "florida international", "fau": "florida atlantic",
+            "sam houston": "sam houston state", "ul monroe": "louisiana monroe", "ulm": "louisiana monroe",
+            "louisiana": "louisiana ragin cajuns", "hawaii": "hawaii rainbow warriors", "miami (oh)": "miami ohio",
+            "miami oh": "miami ohio", "usf": "south florida", "unlv": "unlv rebels", "utsa": "utsa roadrunners",
+            "pitt": "pittsburgh", "ole miss": "mississippi", "nc state": "north carolina state",
+            "texas aandm": "texas a and m", "kennesaw st": "kennesaw state"}
 
 
 def _team_keys(name) -> set:
@@ -71,6 +84,9 @@ def _team_keys(name) -> set:
     full = NFL_TEAMS.get(str(name or "").strip().upper())
     if full:
         keys.add(_norm_team(full))
+    for k in list(keys):
+        if k in _ALIASES:
+            keys.add(_ALIASES[k])
     # ESPN says "LA Clippers", the books "Los Angeles Clippers" (Oct 30: no lines loaded for LAC @ MIN).
     for k in list(keys):
         if k.startswith("la "):
@@ -161,3 +177,49 @@ def fetch_offers(api_key: str, event: Dict, markets: Sequence[str], sport: str) 
     except Exception as exc:                                              # noqa: BLE001 — never let one bad response sink the page
         return [], f"{type(exc).__name__}: {exc}"
     return O.parse_event_offers(data or {}, supported_markets=list(markets)), None
+
+
+# --------------------------------------------------------------------------- why a market has no lines (Oct 31)
+LINE_STATUS_TEXT = {
+    "started": ("🔒", "This game has already started — the books take their pregame player props down at kickoff, so "
+                     "there's nothing to load. The projections below still show what the model expected."),
+    "unmatched": ("⚠️", "The books' game list didn't match this game's team names, so no lines could be loaded. "
+                        "That's a platform issue worth flagging (send the matchup); meanwhile you can type lines in."),
+    "not_posted": ("🕐", "The books have this game but haven't posted {market} props for it yet. Smaller games often get "
+                        "props late in the afternoon, for only a few players, or not at all — press 🔄 Refresh book "
+                        "lines closer to kickoff, or type your own."),
+    "not_loaded": ("🕐", "Book lines aren't loaded — turn on **Load book lines automatically** or press 🔄 Refresh "
+                        "book lines (or type your own)."),
+    "no_key": ("🔑", "No Odds API key is set on this deployment, so lines can't be loaded — type your own."),
+    "error": ("⚠️", "The books couldn't be reached just now ({detail}). Try 🔄 Refresh book lines in a minute."),
+}
+
+
+def line_status(got: Optional[Dict], kickoff: Optional[str], now=None) -> str:
+    """Why a market shows no lines: started / unmatched / not_posted / not_loaded / no_key / error."""
+    from datetime import datetime, timezone
+    if kickoff:
+        try:
+            k = datetime.fromisoformat(str(kickoff).replace("Z", "+00:00"))
+            if k.tzinfo is None:
+                k = k.replace(tzinfo=timezone.utc)
+            if (now or datetime.now(timezone.utc)) >= k:
+                return "started"
+        except ValueError:
+            pass
+    got = got or {}
+    if got.get("no_key"):
+        return "no_key"
+    err = str(got.get("error") or "")
+    if "haven't listed" in err or "didn't match" in err:
+        return "unmatched"
+    if err:
+        return "error"
+    if not got:
+        return "not_loaded"
+    return "not_posted"
+
+
+def line_status_message(status: str, market: str, got: Optional[Dict] = None) -> Tuple[str, str]:
+    icon, text = LINE_STATUS_TEXT.get(status, LINE_STATUS_TEXT["not_posted"])
+    return icon, text.format(market=market, detail=str((got or {}).get("error") or "")[:80])

@@ -71,10 +71,10 @@ def test_matchup_lab_draws_a_trend_chart_for_every_market_and_profiles_them(nba_
     charts = at.get("plotly_chart")
     assert len(charts) == 13 + 1                                   # one per market, plus Minutes
     shown = {c.proto.figure.layout.title.text if hasattr(c.proto, "figure") else None for c in charts}
-    profile = [d for d in at.dataframe if "Recent Avg" in d.value.columns][0].value
+    profile = [d for d in at.dataframe if "Form" in d.value.columns and "Market" in d.value.columns][0].value
     assert set(profile["Market"]) == set(ALL) | {"Minutes"}
     pra = profile[profile["Market"] == "Pts+Reb+Ast"].iloc[0]
-    assert round(float(pra["Recent Avg"]), 1) == round(BM.average_for(_games(), "pra"), 1)
+    assert round(float(pra["Form"]), 1) == round(BM.average_for(_games(), "pra"), 1)
     opp = [d for d in at.dataframe if "Opp Team Total (season)" in d.value.columns][0].value
     assert float(opp[opp["Market"] == "Pts+Reb+Ast"]["Opp Team Total (season)"].iloc[0]) == 179.0
     assert float(opp[opp["Market"] == "Steals"]["Opp Team Total (season)"].iloc[0]) == 8.0
@@ -99,7 +99,7 @@ def test_hot_hand_lists_the_new_markets_and_sorts_without_error(nba_engine):
     at = _run("10_Hot_Hand_Engine.py")
     board = [d for d in at.dataframe if "Matchup Score" in d.value.columns][0].value
     assert set(board["Market"]) == set(ALL)
-    assert float(board[(board["Market"] == "Pts+Reb+Ast") & (board["Player"] == "Star Guard")]["Recent Avg"].iloc[0]) > 30
+    assert float(board[(board["Market"] == "Pts+Reb+Ast") & (board["Player"] == "Star Guard")]["Form"].iloc[0]) > 30
     picker = [m for m in at.multiselect if m.label == "Markets"][0]
     assert set(picker.value) == set(ALL)
 

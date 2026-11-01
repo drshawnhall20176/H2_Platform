@@ -40,6 +40,7 @@ from projections import (  # genuinely sport-agnostic — reused, not duplicated
     prob_over, prob_for_side, normalize_name, format_et,
     prob_to_decimal, prob_to_american, curate_selections,
 )
+import basketball_markets as BM
 import basketball_projections as BB_P  # league-agnostic basketball logic, shared with wnba_projections.py
 import odds_api as O   # for real_entry_price/real_market_prob -- real price/reference wiring,
                        # same functions MLB and WNBA's own build_best_bets already use
@@ -58,6 +59,10 @@ _MARKET_SPEC = {
     "player_threes":   ("FG3M", "Threes Made", 2.5),
 }
 _STAT_KEY = {"PTS": "pts", "REB": "reb", "AST": "ast", "FG3M": "fg3m"}
+# Build 246: combos (Pts+Reb+Ast, Pts+Reb, Pts+Ast, Reb+Ast), steals, blocks, blocks+steals, turnovers and threes attempted —
+# see basketball_markets.py. Threes Attempted has no sportsbook market, so it is model-only (never requested from the odds API).
+BM.extend_spec(_MARKET_SPEC, _STAT_KEY, "NBA")
+_CORE_STATS = BM.CORE_STATS
 
 
 def _form(row: Dict, col: str) -> float:
@@ -68,6 +73,14 @@ def _form(row: Dict, col: str) -> float:
     v = FPol.form_avg(log, _STAT_KEY[col]) if log else None
     return round(v, 1) if v is not None else row.get(col, 0.0)
 
+
+
+def _sel_values(sel, sel_w, key):
+    """The form-rule games that carry this stat (a combo is summed from its parts; a game missing a part is skipped,
+    build 246) and their form-rule weights."""
+    pairs = [(BM.game_value(g, key), w) for g, w in zip(sel, sel_w)]
+    pairs = [(v, w) for v, w in pairs if v is not None]
+    return [v for v, _ in pairs], [w for _, w in pairs]
 
 def _window_log(season_log: Optional[List[Dict]], row: Dict) -> List[Dict]:
     """This season's games (current) followed by the row's last-season lines (prior), for last-N windows."""
@@ -158,12 +171,12 @@ def build_projection_index(rows: List[Dict], meta: List[Dict],
         sel = FPol.select(log)            # the platform-wide form rule: this season first, topped up to 5
         sel_w = FPol.weights(sel)         # from last season at half weight, newer games counting more
         nm = normalize_name(r["Player"])
-        ctx = {"player": r["Player"], "team": r["Team"], "game": r["GameLabel"],
+        ctx = {"player": r["Player"], "player_id": r.get("_pid"), "team": r["Team"], "game": r["GameLabel"],
               "opp": r.get("Opp"), "lineup": "Active", "game_date": r.get("_game_date"),
               "pid": r.get("_pid")}
         for mkey, (col, _disp, _line) in _MARKET_SPEC.items():
-            values = [g[_STAT_KEY[col]] for g in sel]
-            sim = simulate_player_stat(values, sims, rng, sel_w)
+            values, vw = _sel_values(sel, sel_w, _STAT_KEY[col])
+            sim = simulate_player_stat(values, sims, rng, vw)
             if sim.size == 0:
                 continue
             index[(nm, mkey)] = {"dist": _dist(sim), "mean": float(sim.mean()),
@@ -283,7 +296,9 @@ def explain_miss(row: Optional[Dict], market: str = "Points") -> str:
     stat_key = _STAT_KEY.get(col)
     if not log or not stat_key:
         return "No recent-game data available for this player."
-    values = [g.get(stat_key, 0) for g in log]
+    values = BM.values_for(log, stat_key)
+    if not values:
+        return "No recent-game data available for this player."
     avg = sum(values) / len(values)
     recent = values[:3]
     recent_avg = sum(recent) / len(recent) if recent else avg
@@ -346,14 +361,14 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
         sel_w = FPol.weights(sel)         # from last season at half weight, newer games counting more
         n_prior, n_pre, data_note = data_note_for(sel)
         for mkey, (col, disp, default_line) in _MARKET_SPEC.items():
-            values = [g[_STAT_KEY[col]] for g in sel]
+            values, vw = _sel_values(sel, sel_w, _STAT_KEY[col])
             norm_name = normalize_name(r["Player"])
             line, line_src = default_line, "default"
             if real_lines is not None:
                 real = real_lines.get((norm_name, mkey))
                 if real is not None:
                     line, line_src = float(real), "book"
-            sim = simulate_player_stat(values, sims, rng, sel_w)
+            sim = simulate_player_stat(values, sims, rng, vw)
             if sim.size == 0:
                 continue
             raw = prob_over(_dist(sim), line)
@@ -455,7 +470,7 @@ def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[int, Dict[str, floa
     build_projection_index's probabilities — Edge Board and Best Bets stay recent-form-only."""
     team_rest = team_rest or {}
     team_spreads = team_spreads or {}
-    baseline_samples = {"pts": [], "reb": [], "ast": [], "fg3m": []}
+    baseline_samples = {k: [] for k in _STAT_KEY.values()}
     for stats in opp_allowed.values():
         poss = stats.get("poss", 0)
         if poss <= 0:
@@ -480,7 +495,9 @@ def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[int, Dict[str, floa
         rest_mult = fatigue["opp_mult"] * fatigue["rate_mult"]
         for _mkey, (col, disp, _line) in _MARKET_SPEC.items():
             stat_key = _STAT_KEY[col]
-            player_avg = _form(r, col)
+            player_avg = _form(r, col) if stat_key in _CORE_STATS else r.get(col)
+            if player_avg is None:
+                continue   # this player's log has no steals/blocks/etc. (older cached game lines): leave the market off
             base_rate = baseline.get(stat_key, 0.0)          # per-100-poss, constant across rows
             allowed = (opp_stats or {}).get(stat_key, 0.0)   # raw per-game, for display context
             allowed_rate = (allowed / opp_poss * 100) if opp_poss > 0 else 0.0
@@ -591,7 +608,7 @@ def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_allowed: Dict[str,
     for _mkey, (col, _disp, _line) in _MARKET_SPEC.items():
         stat_key = _STAT_KEY[col]
         if season_log:
-            svals = [g.get(stat_key, 0.0) for g in season_log]
+            svals = BM.values_for(season_log, stat_key)
             season_avgs[stat_key] = (sum(svals) / len(svals)) if svals else None
         else:
             season_avgs[stat_key] = None
@@ -600,14 +617,15 @@ def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_allowed: Dict[str,
         # games yet," never padded.
         l5 = season_log[:5] if season_log else []
         l10 = season_log[:10] if season_log else []
-        l5_avgs[stat_key] = (sum(g.get(stat_key, 0.0) for g in l5) / len(l5)) if len(l5) == 5 else None
-        l10_avgs[stat_key] = (sum(g.get(stat_key, 0.0) for g in l10) / len(l10)) if len(l10) == 10 else None
-        hvals = [g.get(stat_key, 0.0) for g in h2h_log]
+        l5_avgs[stat_key] = BM.window_average(l5, stat_key, 5)
+        l10_avgs[stat_key] = BM.window_average(l10, stat_key, 10)
+        hvals = BM.values_for(h2h_log, stat_key)
         h2h_avgs[stat_key] = (sum(hvals) / len(hvals)) if hvals else None
         sa = season_avgs[stat_key]
         ha = h2h_avgs[stat_key]
         if sa and sa > 0 and ha is not None:
-            ratios[stat_key] = ha / sa
+            if stat_key in _CORE_STATS:   # 'suppressed' compares the four base stats; combos would just double-count them
+                ratios[stat_key] = ha / sa
 
     suppressed_key = None
     if len(ratios) >= 2:
@@ -620,7 +638,7 @@ def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_allowed: Dict[str,
     out: List[Dict] = []
     for _mkey, (col, disp, _line) in _MARKET_SPEC.items():
         stat_key = _STAT_KEY[col]
-        recent_avg = _form(row, col)
+        recent_avg = _form(row, col) if stat_key in _CORE_STATS else row.get(col)
         season_avg = season_avgs.get(stat_key)
         h2h_avg = h2h_avgs.get(stat_key)
 
@@ -630,12 +648,13 @@ def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_allowed: Dict[str,
         if window_n in (5, 6, 10):
             # Last N: this season's games, topped up from last season when this season is shorter (counted in
             # "Window Prior", so the page can say "incl. N from last season") -- never blank in the first weeks.
-            wa = FPol.window_avg(_window_log(season_log, row), stat_key, window_n)
+            wa = FPol.window_avg(_window_log(season_log, row), stat_key if stat_key in _CORE_STATS
+                                 else (lambda g, k=stat_key: BM.game_value(g, k)), window_n)
             window_avg, window_prior, window_games = wa["avg"], wa["prior"], wa["games"]
         elif window_n is not None:
             window_avg = None   # an unsupported window is an honest None, never a silent fallback
 
-        hvals = [g.get(stat_key, 0.0) for g in h2h_log]
+        hvals = BM.values_for(h2h_log, stat_key)
         h2h_spread = f"{min(hvals):.0f}\u2013{max(hvals):.0f}" if len(hvals) >= 2 else None
         high_variance = False
         if len(hvals) >= 2 and season_avg and season_avg > 0:
@@ -671,3 +690,15 @@ def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_allowed: Dict[str,
             "Trend Tag": trend_tag,
         })
     return out
+
+
+def edge_side_prob(entry: Dict, mkey: str, point, side: str) -> float:
+    """Model probability for one side at a book's line, for Edge Board / compute_edges.
+
+    Applies the SAME small-sample shrinkage (then the same clamp) this sport's own boards apply in
+    default_board_from_index, so Edge Board and Best Bets price a play with the same probability.
+    Before this existed, compute_edges used the raw bootstrap fraction: with a ~10-game log that
+    can read 75% on a play the board itself would shrink toward 50/50, which is how a third of a
+    live NBA slate showed up as "implausibly high EV" (over 25%) on Edge Board."""
+    over = _clip_prob(BB_P.shrink_prob(prob_over(entry["dist"], point), entry.get("n_games", 0)))
+    return over if str(side).lower().startswith("o") else 1.0 - over

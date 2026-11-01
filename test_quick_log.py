@@ -272,7 +272,7 @@ def test_bet_log_fields_from_play_only_real_betlog_fields():
     real_betlog_fields = {"ts_placed", "slate_date", "game", "player", "player_id", "market",
                           "side", "line", "entry_odds", "entry_odds_source", "model_prob",
                           "stake", "book", "close_odds", "result", "notes", "ticket", "sport",
-                          "trader"}
+                          "trader", "category", "suggested_stake"}
     fields = Q.bet_log_fields_from_play(_play(), "2026-07-20", "MLB")
     assert set(fields.keys()) <= real_betlog_fields
     print("✓ bet_log_fields_from_play returns only real, valid betlog.py field names")

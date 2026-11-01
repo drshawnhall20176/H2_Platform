@@ -73,7 +73,7 @@ def describe(log: Sequence[Dict], window: int = WINDOW) -> Dict:
     return {"games": len(lines), "current": cur, "prior": pri, "note": note}
 
 
-def window_avg(log: Sequence[Dict], key: str, n: int) -> Dict:
+def window_avg(log: Sequence[Dict], key, n: int) -> Dict:
     """A plain last-N average (what a sportsbook's "last N" column shows), this season first and topped up from
     last season when this season is shorter than N. {"avg", "games", "prior"}; avg None with no games."""
     current = [g for g in log if _src(g) == "current"]
@@ -81,7 +81,10 @@ def window_avg(log: Sequence[Dict], key: str, n: int) -> Dict:
     lines = current[:n] + (prior[: n - len(current)] if len(current) < n else [])
     if not lines:
         return {"avg": None, "games": 0, "prior": 0}
-    vals = [PE.num(g.get(key)) for g in lines]
+    f = key if callable(key) else (lambda g: PE.num(g.get(key)))
+    vals = [f(g) for g in lines]
+    if any(v is None for v in vals):          # a game without the stat (build 246 extras): no honest average
+        return {"avg": None, "games": len(lines), "prior": sum(1 for g in lines if _src(g) == "prior")}
     return {"avg": sum(vals) / len(vals), "games": len(lines),
             "prior": sum(1 for g in lines if _src(g) == "prior")}
 

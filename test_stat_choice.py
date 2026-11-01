@@ -55,3 +55,27 @@ def test_breakout_summarizes_any_stat():
     assert NP.summarize(allowed, keys=("reb",))["D0"]["pos"]["PG"]["pra"] == 12
     d = NP.display(NP.breakout_rows("D0", {}, NP.summarize(allowed, keys=("reb",)), {}, []), "Rebounds")
     assert "Allowed / g (Rebounds)" in d[0] and "stl" in d[0]["What it allows"]
+
+
+def test_college_short_names_match_the_books():
+    ev = [{"home_team": "Georgia Southern Eagles", "away_team": "Appalachian State Mountaineers", "id": "a"},
+          {"home_team": "San Jose State Spartans", "away_team": "Hawaii Rainbow Warriors", "id": "b"},
+          {"home_team": "Ole Miss Rebels", "away_team": "Auburn Tigers", "id": "c"}]
+    assert PL.match_event(ev, "Georgia Southern", "App State")["id"] == "a"
+    assert PL.match_event(ev, "San José State", "Hawai'i")["id"] == "b"
+    assert PL.match_event(ev, "Ole Miss", "Auburn")["id"] == "c"
+
+
+def test_line_status_says_why_there_are_no_lines():
+    from datetime import datetime, timezone
+    now = datetime(2026, 10, 31, 18, 30, tzinfo=timezone.utc)
+    later, earlier = "2026-10-31T23:00:00Z", "2026-10-31T16:00:00Z"
+    assert PL.line_status({"offers": [], "lines": {"total": 47}}, earlier, now) == "started"
+    assert PL.line_status({"offers": [], "lines": {"total": 47}}, later, now) == "not_posted"
+    assert PL.line_status({"error": "The books haven't listed this game yet (or the team names didn't match)."},
+                          later, now) == "unmatched"
+    assert PL.line_status({"error": "Couldn't list the games at the books (Timeout)."}, later, now) == "error"
+    assert PL.line_status({}, later, now) == "not_loaded"
+    assert PL.line_status({"no_key": True}, later, now) == "no_key"
+    icon, msg = PL.line_status_message("not_posted", "Rush Yards")
+    assert icon == "🕐" and "Rush Yards props" in msg

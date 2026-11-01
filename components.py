@@ -617,3 +617,18 @@ def todays_schedule_board(result: Optional[dict], icon: str, label: str,
             st.markdown(_schedule_header_html(columns, show_roster), unsafe_allow_html=True)
             rows = "".join(_schedule_game_row(g, gray, columns, show_roster) for g in other)
             st.markdown(rows, unsafe_allow_html=True)
+
+
+
+# --------------------------------------------------------------------------- owner vs public wording (Oct 29)
+def is_owner() -> bool:
+    """True on the owner deployment (AUDIENCE unset or "owner"), False on the public Discord build -- for text that
+    points at owner-only pages (Position Matchups, Matchup Lab...), which public viewers can't open."""
+    try:
+        return st.secrets.get("AUDIENCE", "owner") == "owner"
+    except Exception:                                       # noqa: BLE001 -- no secrets file: a local/dev run
+        return True
+
+
+def for_audience(owner_text: str, public_text: str) -> str:
+    return owner_text if is_owner() else public_text

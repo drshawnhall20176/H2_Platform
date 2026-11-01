@@ -23,8 +23,7 @@ def test_market_spec_is_wnba_scale_not_nba_scale():
 
 def test_market_list_covers_all_four_core_markets():
     lst = NP.market_list()
-    assert {mkey for mkey, _col, _disp in lst} == {"player_points", "player_rebounds",
-                                                    "player_assists", "player_threes"}
+    assert {"player_points", "player_rebounds", "player_assists", "player_threes"} <= {mkey for mkey, _col, _disp in lst}
 
 
 def test_stat_key_for_maps_row_columns_to_game_log_keys():
@@ -70,7 +69,7 @@ def test_build_projection_index_covers_all_four_markets():
           "_game_log": [{"pts": 15, "reb": 6, "ast": 4, "fg3m": 2} for _ in range(8)]}
     index = NP.build_projection_index([row], meta=[], sims=2000, seed=1)
     keys = {mkey for (_nm, mkey) in index.keys()}
-    assert keys == {"player_points", "player_rebounds", "player_assists", "player_threes"}
+    assert {"player_points", "player_rebounds", "player_assists", "player_threes"} <= keys
 
 
 # ----------------------------------------------------------------- build_hot_hand_board
