@@ -22,6 +22,12 @@ on:
       tag:
         description: "Note tag (e.g. discord-overs)"
         default: ""
+      ticket:
+        description: "Parlay ticket name (blank = log as singles)"
+        default: ""
+      ticket_odds:
+        description: "Parlay total American odds (with a ticket)"
+        default: ""
 
 permissions:
   contents: read
@@ -47,4 +53,5 @@ jobs:
         run: |
           printf '%s' "$PICKS" > picks.json
           python log_plays.py --picks @picks.json --sport "${{ inputs.sport }}" --date "${{ inputs.date }}" \
-            --real "${{ inputs.real }}" --stake "${{ inputs.stake }}" --tag "${{ inputs.tag }}"
+            --real "${{ inputs.real }}" --stake "${{ inputs.stake }}" --tag "${{ inputs.tag }}" \
+            --ticket "${{ inputs.ticket }}" --ticket-odds "${{ inputs.ticket_odds }}"

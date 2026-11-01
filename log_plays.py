@@ -52,6 +52,8 @@ def main(argv=None) -> int:
     ap.add_argument("--real", default="false")
     ap.add_argument("--stake", type=float, default=1.0)
     ap.add_argument("--tag", default="")
+    ap.add_argument("--ticket", default="", help="log the picks as ONE parlay under this ticket name")
+    ap.add_argument("--ticket-odds", default="", help="the parlay's total American odds")
     a = ap.parse_args(argv)
     raw = open(a.picks[1:]).read() if a.picks.startswith("@") else a.picks
     picks = json.loads(raw)
@@ -63,6 +65,17 @@ def main(argv=None) -> int:
         board = []
     rows = build(picks, board, a.sport, date_str, real=a.real.lower() in ("1", "true", "yes"), stake=a.stake,
                  tag=a.tag or None)
+    if a.ticket:
+        if any((b.get("ticket") or "") == a.ticket for b in B.list_bets(sport=a.sport)):
+            print(f"Ticket '{a.ticket}' is already in the Bet Log — nothing logged.")
+            return 0
+        legs = [{"player": r["player"], "market": r["market"], "side": r["side"], "line": r["line"],
+                 "game": r["game"], "model_prob": r["model_prob"]} for r in rows]
+        res = B.log_parlay_ticket(a.ticket, legs, int(float(a.ticket_odds)), a.stake, date_str, a.sport,
+                                  book=rows[0]["book"] if rows else None, notes=a.tag or None)
+        print(f"logged ticket '{a.ticket}': {len(legs)} legs @ {int(float(a.ticket_odds)):+d}, stake {a.stake} "
+              f"(header {res['header_id']})")
+        return 0
     have = {(b.get("slate_date"), _key(b.get("player"), b.get("market"), b.get("side")), float(b.get("line") or 0))
             for b in B.list_bets(sport=a.sport)}
     n = 0

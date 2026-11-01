@@ -28,3 +28,22 @@ def test_picks_get_board_ids_and_rerunning_skips_duplicates(tmp_path, monkeypatc
     assert "discord-unders" in j["notes"]
     L.main(["--picks", f"@{f}", "--date", "2026-11-01"])
     assert len(B.list_bets()) == 2
+
+
+def test_ticket_mode_logs_one_parlay(tmp_path, monkeypatch):
+    db = str(tmp_path / "b.db")
+    import export_board as X
+    monkeypatch.setattr(X, "board", lambda *a, **k: [])
+    monkeypatch.setattr(B, "list_bets", lambda *a, _l=B.list_bets, **k: _l(db_path=db, **{x: y for x, y in k.items() if x != "db_path"}))
+    monkeypatch.setattr(B, "add_bet", lambda *a, _a=B.add_bet, **k: _a(db, **k))
+    picks = [{"player": "Jahmyr Gibbs", "market": "Anytime TD", "side": "Over", "line": 0.5, "odds": -240, "game": "MIN @ DET"},
+             {"player": "CeeDee Lamb", "market": "Anytime TD", "side": "Over", "line": 0.5, "odds": -145, "game": "ARI @ DAL"}]
+    f = tmp_path / "p.json"
+    f.write_text(json.dumps(picks))
+    L.main(["--picks", f"@{f}", "--date", "2026-11-01", "--ticket", "ATD test", "--ticket-odds", "881"])
+    bets = B.list_bets()
+    assert len(bets) == 3 and sum(1 for b in bets if b["ticket"] == "ATD test") == 3
+    hdr = next(b for b in bets if b["player"] is None)
+    assert hdr["entry_odds"] == 881 and hdr["stake"] == 1.0
+    L.main(["--picks", f"@{f}", "--date", "2026-11-01", "--ticket", "ATD test", "--ticket-odds", "881"])
+    assert len(B.list_bets()) == 3
