@@ -1,0 +1,35 @@
+# Read-only research scripts that need secrets (CFBD / odds / database). Prints to the log.
+name: research
+
+on:
+  workflow_dispatch:
+    inputs:
+      script:
+        description: "Script under research/ (e.g. backtest_ncaaf_game_lab.py)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run
+        env:
+          CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SCRIPT: ${{ inputs.script }}
+        run: |
+          case "$SCRIPT" in *..*|/*) echo "bad script path"; exit 1;; esac
+          python "research/$SCRIPT"
