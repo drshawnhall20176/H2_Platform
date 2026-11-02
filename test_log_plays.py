@@ -60,3 +60,19 @@ def test_tracking_ticket_is_not_money(tmp_path, monkeypatch):
     f.write_text(json.dumps([{"player": "A", "market": "Receptions", "side": "Over", "line": 1.5, "odds": -300, "game": "X @ Y"}]))
     L.main(["--picks", f"@{f}", "--date", "2026-11-02", "--ticket", "T", "--ticket-odds", "260"])
     assert all(not b["is_real_bet"] for b in B.list_bets())
+
+
+def test_parlay_leg_does_not_block_the_same_single(tmp_path, monkeypatch):
+    db = str(tmp_path / "b.db")
+    import export_board as X
+    monkeypatch.setattr(X, "board", lambda *a, **k: [])
+    monkeypatch.setattr(B, "list_bets", lambda *a, _l=B.list_bets, **k: _l(db_path=db, **{x: y for x, y in k.items() if x != "db_path"}))
+    monkeypatch.setattr(B, "add_bet", lambda *a, _a=B.add_bet, **k: _a(db, **k))
+    monkeypatch.setattr(B, "update_bet", lambda bid, _u=B.update_bet, **k: _u(bid, db, **k))
+    f = tmp_path / "p.json"
+    f.write_text(json.dumps([{"player": "Cooper Kupp", "market": "Receptions", "side": "Over", "line": 1.5, "odds": -466,
+                              "game": "CHI @ SEA"}]))
+    L.main(["--picks", f"@{f}", "--date", "2026-11-02", "--ticket", "MNF", "--ticket-odds", "260"])
+    L.main(["--picks", f"@{f}", "--date", "2026-11-02", "--real", "true", "--stake", "5"])
+    singles = [b for b in B.list_bets() if not b.get("ticket")]
+    assert len(singles) == 1 and singles[0]["stake"] == 5

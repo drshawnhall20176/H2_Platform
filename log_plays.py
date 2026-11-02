@@ -81,7 +81,8 @@ def main(argv=None) -> int:
               f"(header {res['header_id']})")
         return 0
     have = {(b.get("slate_date"), _key(b.get("player"), b.get("market"), b.get("side")), float(b.get("line") or 0))
-            for b in B.list_bets(sport=a.sport)}
+            for b in B.list_bets(sport=a.sport) if not (b.get("ticket") or "")}   # singles only: a parlay
+    # leg with the same player/line is a different bet, so it must not block logging the single (Nov 2 fix)
     n = 0
     for r in rows:
         k = (r["slate_date"], _key(r["player"], r["market"], r["side"]), r["line"])
