@@ -18,6 +18,12 @@ name: daily-review
 on:
   schedule:
     - cron: "30 7-15 * * *"
+  # Nov 2: GitHub skipped EVERY scheduled run of this workflow that morning while other workflows' schedules still
+  # fired. Backup: also run whenever settle-results or capture-closing-lines finishes. A run before 3 AM in New York,
+  # or after the morning is done, does nothing, so the extra triggers are free.
+  workflow_run:
+    workflows: ["settle-results", "capture-closing-lines"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       morning:
