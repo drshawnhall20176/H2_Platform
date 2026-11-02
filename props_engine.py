@@ -996,6 +996,21 @@ def stack_warning(items: Sequence[Dict], game_key: str = "game", label_key: str 
             + "; ".join(f"{g} ({len(labs)}: {', '.join(labs)})" for g, labs in stacks.items()))
 
 
+# Nov 2 (research/analyze_reads.py, every graded pre-game read so far): the reads most likely to hit are the ones the
+# blended chance AND the cushion agree on -- 60%+ to hit with the projection 15%+ past the line, not held for a
+# news check. They hit NFL 61% (88), NHL 65% (141), NCAAF 78% (18). Edge alone did not rank hits (NHL / NFL: the
+# biggest "edges" were where the market knew better).
+MOST_PROBABLE_CHANCE = 0.60
+MOST_PROBABLE_CUSHION = 0.15
+MOST_PROBABLE = "🔒 Most probable"
+
+
+def most_probable(chance, cushion, gap=None) -> bool:
+    c, k = maybe(chance), maybe(cushion)
+    return (c is not None and k is not None and c >= MOST_PROBABLE_CHANCE and k >= MOST_PROBABLE_CUSHION
+            and str(gap or "") != "big")
+
+
 def is_parlay_use(tag: Optional[str]) -> bool:
     return tag in (USE_BOTH, USE_PARLAY)
 

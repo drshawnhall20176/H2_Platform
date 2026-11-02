@@ -16,7 +16,8 @@ from datetime import datetime
 
 import pytz
 
-USES = {"All playable": ("🎟️ Parlay + Single", "🎟️ Parlay leg", "🎯 Single only"),
+USES = {"🔒 Most probable": (), "Most probable": (),
+        "All playable": ("🎟️ Parlay + Single", "🎟️ Parlay leg", "🎯 Single only"),
         "Singles": ("🎟️ Parlay + Single", "🎯 Single only"),
         "Parlay legs": ("🎟️ Parlay + Single", "🎟️ Parlay leg")}
 
@@ -43,7 +44,11 @@ def pick(plays, slot="All slate", unit="All", side="All Sides", show="All playab
             continue
         if side != "All Sides" and p.get("Side") != side:
             continue
-        if show != "Everything" and p.get("Model") == "player-props" and p.get("Use") not in USES[show]:
+        if show in ("Most probable", "🔒 Most probable"):
+            import props_engine as PE
+            if not PE.most_probable(p.get("ModelProb"), p.get("Cushion"), p.get("Gap")):
+                continue
+        elif show != "Everything" and p.get("Model") == "player-props" and p.get("Use") not in USES[show]:
             continue
         if show != "Everything" and (p.get("Conviction") or 0) < min_conv:
             continue
