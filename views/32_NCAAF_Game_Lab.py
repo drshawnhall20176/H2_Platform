@@ -53,9 +53,51 @@ C.page_header("🏟️", "NCAAF Game Lab",
              "available) quarter and half winner probabilities — the first game-level modeling "
              "on this platform, built specifically for NCAAF slates where player props aren't "
              "available.")
+st.warning("**The win probability / spread / total below are informational — not a betting signal.** Backtested "
+           "against 859 FBS games (2025-26) they lost to the closing line (47-48% against the spread when they "
+           "disagreed; 52.4% breaks even). For spreads, see **📐 Ratings model v2** just below — "
+           "opponent-adjusted ratings that hit 55% in the same backtest, now being tracked live.", icon="⚠️")
 
 if not sports.require_sport(["NCAAF"], "NCAAF Game Lab"):
     st.stop()
+
+# Nov 2: college spreads, ratings model v2 (game_picks.py) -- shown first, whatever the date picker says.
+with st.expander("📐 Ratings model v2 — college spreads (tracking)", expanded=True):
+    st.caption("Opponent-adjusted offense/defense ratings + home field, fitted on this season's FBS results.")
+    try:
+        import game_picks as GP
+        import model_store as _MS
+        _gp = _MS.load_game_picks("NCAAF")
+    except Exception:                                                   # noqa: BLE001
+        GP, _gp = None, []
+    if not _gp:
+        st.caption("No projections saved yet — they're captured several times a day before kickoff "
+                   "(capture-game-picks) and graded the morning after.")
+    else:
+        _now = datetime.now(pytz.utc)
+        _up = [p for p in _gp if datetime.fromisoformat(p["kickoff"]) > _now]
+        _s = GP.summary(_gp)
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Season record (picks)", _s["record"], None if _s["hit"] is None else f"{_s['hit']:.0%}",
+                  delta_color="off", help="Graded against the LAST line captured before kickoff; 52.4% breaks even at -110.")
+        m2.metric("Line moved toward picks", "—" if _s["avg_clv"] is None else f"{_s['avg_clv']:+.1f} pts",
+                  help="Closing-line value: the market moving toward a pick after it was made is the best early sign "
+                       "of a real edge.")
+        m3.metric("Upcoming games", len(_up))
+        if _up:
+            _rows = [{"Kickoff (ET)": datetime.fromisoformat(p["kickoff"]).astimezone(pytz.timezone("US/Eastern")).strftime("%a %-I:%M %p"),
+                      "Game": f"{p['away']} @ {p['home']}" + (" (neutral)" if p.get("neutral") else ""),
+                      "Books": f"{p['home']} {-p['close_line']:+g}",
+                      "Model": f"{p['home']} {-p['model_margin']:+.1f}",
+                      "Gap": f"{abs(p.get('close_edge', p['edge'])):.1f}",
+                      "Pick": p.get("pick_label") or "—"}
+                     for p in sorted(_up, key=lambda p: -abs(p.get("close_edge", p["edge"])))]
+            st.dataframe(pd.DataFrame(_rows), hide_index=True, width="stretch")
+        if _s["by_edge"]:
+            st.caption("By gap: " + " · ".join(f"{b['edge']} pts: {b['record']} ({b['hit']:.0%})" for b in _s["by_edge"]))
+        st.caption(f"A pick is the side the model favors when it's {GP.PICK_EDGE:g}+ points off the books' consensus "
+                   "spread. Tracking only: no 🔒 until the live record holds above ~53% over a few weeks. Spreads only — "
+                   "the same ratings lost on totals in the backtest.")
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -290,3 +332,4 @@ st.caption("v1 — no home-field advantage, no weather/travel/injury adjustment,
           "schedule-based std is a simplification. Quarter/half section additionally depends on "
           "unverified drive cache field names. Compare against the market's own de-vigged "
           "moneyline (Command Center → Show de-vigged moneylines) before acting on this.")
+

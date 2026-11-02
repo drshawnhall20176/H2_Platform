@@ -48,6 +48,11 @@ C.page_header("🏟️", "NFL Game Lab",
              "Moneyline win probability, projected spread and total, and real injury reports for "
              "both teams — the game-level modeling page for NFL slates, with real injury data "
              "NCAAF Game Lab's placeholder explains doesn't yet exist for college football.")
+st.warning("**Informational — not a betting signal.** Backtested against 520 NFL games (2024-26), these projections "
+           "missed the final margin by 11.5 points on average vs the closing line's 9.5, went 52-54% against the "
+           "spread when they disagreed with it (52.4% breaks even), and their Under picks hit 40.5%. An "
+           "opponent-adjusted ratings model didn't beat the NFL line either (50-52%). Use the market's numbers for "
+           "sides and totals.", icon="⚠️")
 
 if not sports.require_sport(["NFL"], "NFL Game Lab"):
     st.stop()

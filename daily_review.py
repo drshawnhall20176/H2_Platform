@@ -133,6 +133,20 @@ def summarize_slate(graded: Sequence[Dict]) -> Dict:
     }
 
 
+def game_pick_notes(rep: Optional[Dict]) -> List[str]:
+    """College spreads v2 (game_picks.py) -- yesterday and the running record, while it's being tracked."""
+    if not rep:
+        return []
+    out = []
+    y, s = rep.get("yesterday") or {}, rep.get("season") or {}
+    if y.get("graded"):
+        out.append(f"College spreads v2 (tracking): {y['record']} yesterday.")
+    if s.get("graded"):
+        clv = "" if s.get("avg_clv") is None else f", lines moved {s['avg_clv']:+.1f} pts toward the picks on average"
+        out.append(f"College spreads v2 season: {s['record']} ({s['hit']:.0%}; 52.4% breaks even at -110){clv}.")
+    return out
+
+
 def calibration_notes(cal: Dict) -> List[str]:
     """One line on how honest the chances have been (calibration.py), once there are enough graded reads."""
     if not cal.get("enough"):
@@ -263,7 +277,8 @@ def review_sport(sport: str, morning: str, open_bets: Sequence[Dict], fetch: Cal
         return rep
     dates = slates_for(sport, morning, db_path=db_path)
     has_bets = any((b.get("sport") or "") == sport and not b.get("result") for b in open_bets)
-    if not dates and not has_bets:
+    has_game_picks = sport == "NCAAF" and bool(MS.load_game_picks("NCAAF", ungraded=True, db_path=db_path))
+    if not dates and not has_bets and not has_game_picks:
         return None
     graded = grade_dates(sport, dates, fetch=fetch, db_path=db_path)
     slates = {d: summarize_slate(rows) for d, rows in graded.items()}
@@ -280,11 +295,19 @@ def review_sport(sport: str, morning: str, open_bets: Sequence[Dict], fetch: Cal
 
     settlement = settle(sport, open_bets, fetch=fetch, write=write, bet_db=bet_db) if has_bets else \
         {"settled": [], "tickets": [], "unresolved": [], "still_pending": []}
+    games_rep = None
+    if sport == "NCAAF":
+        try:
+            import game_picks as GP
+            games_rep = GP.review(morning, fetch=fetch, db_path=db_path)
+        except Exception as exc:                                    # noqa: BLE001
+            print(f"  [NCAAF] game picks review failed: {type(exc).__name__}: {exc}")
     import calibration as CAL
     cal = CAL.fit(trend_rows)
     cal["active"] = CAL.factor(sport)
     return {"sport": sport, "morning": morning, "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "slates": slates, "notes": notes(slates) + calibration_notes(cal), "calibration": cal,
+            "slates": slates, "notes": notes(slates) + calibration_notes(cal) + game_pick_notes(games_rep),
+            "calibration": cal, "game_picks": games_rep,
             "trend": {"days": TREND_DAYS, "slates": len(trend), "graded": len(trend_rows),
                       "use": PG.use_record(trend_rows)},
             "suggestions": sugg, "settlement": settlement}
