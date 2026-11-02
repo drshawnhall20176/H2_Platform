@@ -247,15 +247,19 @@ if not mkt_pick:
 
 _USE_FILTER = {"All playable": ("🎟️ Parlay + Single", "🎟️ Parlay leg", "🎯 Single only"),
                "Singles": ("🎟️ Parlay + Single", "🎯 Single only"),
-               "Parlay legs": ("🎟️ Parlay + Single", "🎟️ Parlay leg")}
+               "Parlay legs": ("🎟️ Parlay + Single", "🎟️ Parlay leg"),
+               BBD_PE.MOST_PROBABLE: ()}      # Nov 2: 60%+ to hit, 15%+ cushion, not held for news (any Use tag)
 _use_pick = (st.radio("Show", list(_USE_FILTER), horizontal=True, key="bb_use_filter",
                       help="🎟️ Parlay legs: 15%+ cushion, 60%+ to hit, a positive edge, no warnings. 🎯 Singles: a real "
-                           "edge (+3% at the price) — some are too close to the number to chain into a parlay.")
+                           "edge (+3% at the price) — some are too close to the number to chain into a parlay. 🔒 Most probable: "
+                           "60%+ to hit with the projection 15%+ past the line, not held for a news check — the reads "
+                           "that have hit most often so far, whatever the price (see Postgame Review).")
              if _props_model else "All playable")
 # Nov 1: Over / Under only (other sides -- a team, "Yes" -- show under All Sides).
 _side_pick = C.side_filter(slot_plays, key="bb_side_filter")
 view = [p for p in slot_plays if p["Market"] in mkt_pick and p["Conviction"] >= min_conv
-        and (not _props_model or p.get("Use") in _USE_FILTER[_use_pick])
+        and (not _props_model or (BBD_PE.most_probable(p.get("ModelProb"), p.get("Cushion"), p.get("Gap"))
+                                  if _use_pick == BBD_PE.MOST_PROBABLE else p.get("Use") in _USE_FILTER[_use_pick]))
         and (_side_pick == "All Sides" or p.get("Side") == _side_pick)]
 _held = [p for p in slot_plays if p["Market"] in mkt_pick and p.get("Lean") == "Check news"]
 view = grading.filter_min_probability(view, min_prob_pct / 100.0)

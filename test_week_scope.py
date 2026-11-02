@@ -268,3 +268,25 @@ def test_recommendation_pages_have_market_group_and_side(monkeypatch, page, labe
     assert side.options == ["All Sides", "Under", "Over"]
     side.set_value("Under").run()
     assert not at.exception, [e.value for e in at.exception]
+
+
+def test_best_bets_most_probable_filter(monkeypatch):
+    _patched_board(monkeypatch)
+    plays, meta = _board()
+    base = dict(plays[1], Model="player-props", Use="⛔ Pass", Conviction=1.0, Gap="agree", Projection=300.0, Warnings=[])
+    board = [dict(base, Player="Sure", ModelProb=0.66, Cushion=0.22),
+             dict(base, Player="Thin", ModelProb=0.66, Cushion=0.05),
+             dict(base, Player="Held", ModelProb=0.70, Cushion=0.40, Gap="big", GapPct=0.4),
+             dict(base, Player="Coin", ModelProb=0.55, Cushion=0.30, Use="🎯 Single only", Conviction=1.2)]
+    monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda *a, **k: (board, meta, ["draftkings"]))
+    monkeypatch.setattr(BBD, "render_book_selector", lambda *a, **k: "draftkings", raising=False)
+    at = AppTest.from_file(str(VIEWS / "1_#U2b50_Best_Bets.py"), default_timeout=90)
+    at.session_state["sport"] = "NFL"
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    show = [r for r in at.radio if r.label == "Show"][0]
+    assert show.value == "All playable" and "🔒 Most probable" in show.options
+    show.set_value("🔒 Most probable").run()
+    assert not at.exception, [e.value for e in at.exception]
+    players = [str(x) for d in at.dataframe if "Player" in getattr(d.value, "columns", []) for x in d.value["Player"]]
+    assert "Sure" in players and not {"Thin", "Held", "Coin"} & set(players)

@@ -127,3 +127,19 @@ def test_a_late_scheduled_run_does_the_review_once(tmp_path, monkeypatch):
     assert D.main([]) == 0 and calls == ["2026-11-01"]
     assert D.main([]) == 0 and calls == ["2026-11-01"]                     # the next hourly retry skips it
     assert D.main(["--force"]) == 0 and calls == ["2026-11-01", "2026-11-01"]
+
+
+def test_most_probable_record_in_the_slate_summary():
+    import props_engine as PE
+    rows = [{"result": "hit", "chance": 0.65, "cushion": 0.2, "gap": "agree", "market": "Points", "projection": 20,
+             "actual": 25, "side": "Over", "line": 18.5},
+            {"result": "miss", "chance": 0.62, "cushion": 0.16, "gap": None, "market": "Points", "projection": 20,
+             "actual": 10, "side": "Over", "line": 17.5},
+            {"result": "hit", "chance": 0.66, "cushion": 0.30, "gap": "big", "market": "Points", "projection": 20,
+             "actual": 25, "side": "Over", "line": 15.5},
+            {"result": "hit", "chance": 0.55, "cushion": 0.30, "gap": None, "market": "Points", "projection": 20,
+             "actual": 25, "side": "Over", "line": 15.5}]
+    s = D.summarize_slate(rows)
+    assert s["most_probable"] == {"hits": 1, "misses": 1, "hit_rate": 0.5}
+    assert any(PE.MOST_PROBABLE in n and "1-1" in n for n in D.notes({"2026-11-01": s}))
+    assert PE.most_probable(0.6, 0.15) and not PE.most_probable(0.6, 0.15, "big") and not PE.most_probable(None, 0.3)

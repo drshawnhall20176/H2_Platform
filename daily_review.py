@@ -91,6 +91,12 @@ def _miss_size(r: Dict) -> float:
     return abs(float(r["actual"]) - line) / max(line, 1.0)
 
 
+def _record(rows: Sequence[Dict]) -> Dict:
+    hits = sum(1 for r in rows if r.get("result") == "hit")
+    misses = sum(1 for r in rows if r.get("result") == "miss")
+    return {"hits": hits, "misses": misses, "hit_rate": hits / (hits + misses) if hits + misses else None}
+
+
 def summarize_slate(graded: Sequence[Dict]) -> Dict:
     """One slate's grading, ready to store as JSON."""
     counts = {k: sum(1 for r in graded if r.get("result") == k) for k in ("hit", "miss", "push", "void", "pending")}
@@ -114,6 +120,7 @@ def summarize_slate(graded: Sequence[Dict]) -> Dict:
         "counts": counts,
         "model": {"right": mh, "graded": mn},
         "use": PG.use_record(done),
+        "most_probable": _record([r for r in done if PE.most_probable(r.get("chance"), r.get("cushion"), r.get("gap"))]),
         "markets": markets,
         "big_gap": {"graded": len(gaps), "model_right": _rate(gaps, "model_hit"), "hit_rate": _rate(gaps)},
         "star_out": {"graded": len(stars), "hit_rate": _rate(stars),
@@ -144,6 +151,9 @@ def notes(slates: Dict[str, Dict]) -> List[str]:
                 continue
             said = f", model said {u['Model said']:.0%}" if u.get("Model said") is not None else ""
             out.append(f"{d}: {u['Use']} {u['Hits']}-{u['Graded'] - u['Hits']} ({u['Hit rate']:.0%}{said}).")
+        mp = s.get("most_probable") or {}
+        if mp.get("hit_rate") is not None:
+            out.append(f"{d}: {PE.MOST_PROBABLE} {mp['hits']}-{mp['misses']} ({mp['hit_rate']:.0%}).")
         g = s["big_gap"]
         if g["graded"] >= 3 and g["model_right"] is not None:
             who = "the model" if g["model_right"] >= 0.5 else "the market"

@@ -23,7 +23,7 @@ on:
         description: "Side: All Sides / Under / Over"
         default: "All Sides"
       show:
-        description: "Show: All playable / Singles / Parlay legs / Everything"
+        description: "Show: All playable / Singles / Parlay legs / Most probable / Everything"
         default: "All playable"
       top:
         description: "How many rows"
