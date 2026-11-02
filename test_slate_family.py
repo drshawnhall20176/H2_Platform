@@ -146,3 +146,21 @@ def test_only_games_with_posted_props_get_built(monkeypatch):
     offers = [dict(o, home_team="Penn State Nittany Lions", away_team="Ohio State Buckeyes") for o in wr_offer()]
     BBD.slate_reads_for("NCAAF", "2026-10-31", [{"label": NFL_GAME["label"]}, {"label": "X @ Y"}], offers, None)
     assert built == [("X @ Y",)]
+
+
+def test_anytime_td_trusts_a_players_own_rate_for_200_touches():
+    import football_props as FP
+    assert FP.MARKET_SHRINK["Anytime TD"] == 200.0 and FP.EFF_SHRINK["touch"] == 50.0   # Rush + Rec Yards unchanged
+
+
+def test_anytime_td_yes_under_50_shows_when_the_price_pays():
+    base = {"pid": 2, "player": "TE", "market": "Anytime TD", "market_key": "player_anytime_td", "line": 0.5,
+            "line_src": "book", "projection": 0.46, "values": [0, 1, 0, 0], "dist": "count", "side": "Under",
+            "p_final": 0.28, "p_model": 0.37, "p_market": 0.21, "lean": "No lean", "ev": None, "over_price": 330,
+            "under_price": None, "flags": [], "out": False, "book": {"best_over": ("draftkings", 330)}}
+    p = SP.play_from_row(base, None)
+    assert p["Side"] == "Yes" and p["Use"] == "🎯 Single only" and abs(p["EV"] - (0.28 * 4.3 - 1)) < 1e-9
+    assert p["Conviction"] > 1.0 and "never a parlay leg" in p["UseWhy"]
+    assert SP.play_from_row(dict(base, over_price=200), None) is None              # 28% at +200: no value
+    held = SP.play_from_row(dict(base, gap="big", gap_pct=0.6), None)
+    assert held["Use"] == "⛔ Pass"                                                 # the news check still applies

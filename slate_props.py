@@ -288,17 +288,31 @@ def play_from_row(row: Dict, slate_row: Optional[Dict] = None) -> Optional[Dict]
     if sp is None:
         return None
     side, p_final = sp["side"], sp["p_final"]
-    if row.get("market_key") in YES_ONLY and side != "Over":
-        return None                                      # "won't score" isn't a play (no Under is posted)
+    td_value = None
+    if yes_only and side != "Over":
+        # Nov 2: "won't score" isn't a play (no Under is posted), but a "Yes" under 50% can still be worth its price
+        # (+300 on a 28% scorer). It shows when the blended chance clears the price by MIN_EV -- a single only.
+        td_value = yes_value(row)
+        if td_value is None:
+            return None
+        side, p_final = "Over", float(row["p_final"])
+        sp = {"side": "Over", "p_final": p_final, "p_model": row.get("p_model"), "p_market": row.get("p_market")}
     p_mkt = sp["p_market"]
-    lean = row.get("lean")
+    lean = "Over" if td_value is not None else row.get("lean")
     price = row.get("over_price") if side == "Over" else row.get("under_price")
     bk = row.get("book") or {}
     if bk.get("missing_book") and bk.get("wanted") in PE.PICKEM_BOOKS:
         return None                      # pricing at Pick6 / PrizePicks: a player the app doesn't post isn't a pick
     # What the play is fit for (props_engine.use_tag): only playable ones get a Conviction (and so a grade). A
     # sportsbook play needs a real price for that side; a pick'em play is measured against the entry break-even.
-    use, use_why = PE.use_tag(row, side, row["line"])
+    if td_value is not None:
+        news = [w for w in PE.leg_warnings(row, side, row["line"])
+                if not w.startswith(("thin cushion", "projection"))]
+        use, use_why = ((PE.USE_PASS, "; ".join(news)) if news else
+                        (PE.USE_SINGLE, f"chance {p_final:.0%}, edge {td_value:+.1%} — a 'Yes' under 50%: "
+                                        "worth its price as a single, never a parlay leg"))
+    else:
+        use, use_why = PE.use_tag(row, side, row["line"])
     playable = use in (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE)
     if playable and bk.get("pickem"):
         conviction = round(max(p_final / PE.PICKEM_BREAKEVEN, 1.0), 2)
@@ -319,7 +333,7 @@ def play_from_row(row: Dict, slate_row: Optional[Dict] = None) -> Optional[Dict]
         "RealPrice": price, "RealPriceBook": best[0] if best else None, "PriceSource": "book" if price is not None else "model_fair",
         "Conviction": conviction, "ConvictionSource": "book" if p_mkt else "model_typical",
         "_ceiling": round(1.0 / p_mkt, 2) if p_mkt else None,
-        "Lean": lean, "EV": row.get("ev"), "Gap": row.get("gap"), "GapPct": row.get("gap_pct"),
+        "Lean": lean, "EV": td_value if td_value is not None else row.get("ev"), "Gap": row.get("gap"), "GapPct": row.get("gap_pct"),
         "Cushion": PE.cushion(row.get("projection"), row["line"], side),
         "Warnings": [w for w in PE.leg_warnings(row, side, row["line"]) if not w.startswith("thin cushion")],
         "Use": use, "UseWhy": use_why, "Pickem": bk.get("pickem", False), "PricedAt": bk.get("book"),
@@ -331,6 +345,17 @@ def play_from_row(row: Dict, slate_row: Optional[Dict] = None) -> Optional[Dict]
         "PreseasonGames": 0,
         "_stat_key": "+".join(PPR.MARKETS.get(row["market"], ())), "_game_log": s.get("_game_log") or [],
     }
+
+
+def yes_value(row: Dict) -> Optional[float]:
+    """Expected value of a "Yes" (Anytime TD) at its posted price from the blended chance, when it's at least MIN_EV;
+    None otherwise (or with no price)."""
+    price, p = row.get("over_price"), row.get("p_final")
+    dec = PE.decimal(price) if price is not None else None
+    if dec is None or p is None:
+        return None
+    ev = float(p) * dec - 1.0
+    return ev if ev >= PE.MIN_EV else None
 
 
 def plays(reads: Dict[Tuple, Dict], slate_rows: Sequence[Dict]) -> List[Dict]:
