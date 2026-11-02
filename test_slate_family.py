@@ -146,3 +146,8 @@ def test_only_games_with_posted_props_get_built(monkeypatch):
     offers = [dict(o, home_team="Penn State Nittany Lions", away_team="Ohio State Buckeyes") for o in wr_offer()]
     BBD.slate_reads_for("NCAAF", "2026-10-31", [{"label": NFL_GAME["label"]}, {"label": "X @ Y"}], offers, None)
     assert built == [("X @ Y",)]
+
+
+def test_anytime_td_trusts_a_players_own_rate_for_200_touches():
+    import football_props as FP
+    assert FP.MARKET_SHRINK["Anytime TD"] == 200.0 and FP.EFF_SHRINK["touch"] == 50.0   # Rush + Rec Yards unchanged
