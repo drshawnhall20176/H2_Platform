@@ -1,0 +1,41 @@
+# The Slip Lab ticket checker without a browser (check_ticket.py). Legs separated by ";":
+#   Jaxon Smith-Njigba | Receiving Yards | 80+ ; Cooper Kupp | Receptions | Over 2.5 | -140
+name: check-ticket
+
+on:
+  workflow_dispatch:
+    inputs:
+      sport:
+        default: "NFL"
+      date:
+        description: "YYYY-MM-DD (blank = today, New York)"
+        default: ""
+      legs:
+        description: "Player | Market | Over 49.5 [| price] ; Player | Market | 50+ ; ..."
+        required: true
+      price:
+        description: "Ticket price (American), optional"
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Check
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          LEGS: ${{ inputs.legs }}
+        run: python check_ticket.py --sport "${{ inputs.sport }}" --date "${{ inputs.date }}" --legs "$LEGS" --price "${{ inputs.price }}"
