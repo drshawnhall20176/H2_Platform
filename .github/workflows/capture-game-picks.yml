@@ -1,0 +1,36 @@
+# College spreads, ratings model v2 (game_picks.py): projections + the books' lines saved before kickoff, finished
+# games graded. TRACKING -- the morning report shows the record; nothing is promoted to a 🔒 until it holds up live.
+# Each run is one odds request (2 credits). Needs ODDS_API_KEY and DATABASE_URL.
+name: capture-game-picks
+
+on:
+  schedule:
+    - cron: "0 15,21 * * *"      # ~10 AM / 4 PM ET daily (midweek MACtion, Saturday slates)
+    - cron: "0 0,3 * * *"        # ~7 PM / 10 PM ET (close lines for night games)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: capture-game-picks
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Capture and grade
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python capture_game_picks.py

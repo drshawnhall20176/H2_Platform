@@ -52,6 +52,12 @@ CREATE TABLE IF NOT EXISTS ufc_odds (
     event_id TEXT, card_date TEXT, commence TEXT, payload TEXT, ts TEXT,
     UNIQUE (event_id)
 );
+CREATE TABLE IF NOT EXISTS game_picks (
+    id {pk},
+    sport TEXT, game_id TEXT, kickoff TEXT, payload TEXT, open_line REAL, close_line REAL,
+    final_home REAL, final_away REAL, result TEXT, ts TEXT,
+    UNIQUE (sport, game_id)
+);
 CREATE TABLE IF NOT EXISTS calibration (
     id {pk},
     sport TEXT, s REAL, details TEXT, approved_ts TEXT, active INTEGER DEFAULT 1
@@ -393,6 +399,80 @@ def ufc_card_dates(db_path: Optional[str] = None) -> List[str]:
             return [r["card_date"] if isinstance(r, (dict, sqlite3.Row)) else r[0] for r in cur.fetchall()]
     except Exception:                                           # noqa: BLE001
         return []
+
+
+# --------------------------------------------------------------------------- game picks (game_picks.py)
+def save_game_picks(records: List[Dict], db_path: Optional[str] = None) -> int:
+    """Upsert pre-kickoff game projections: the first capture keeps its line as the OPEN; every later one (before
+    kickoff) becomes the CLOSE and refreshes the projection and pick. Graded games are never touched."""
+    recs = [r for r in records or [] if r and r.get("game_id")]
+    if not recs or _test_run(db_path):
+        return 0
+    n = 0
+    try:
+        with _conn(db_path) as (con, ph):
+            cur = con.cursor()
+            for r in recs:
+                cur.execute(f"SELECT payload, open_line, result FROM game_picks WHERE sport={ph} AND game_id={ph}",
+                            [r["sport"], r["game_id"]])
+                row = cur.fetchone()
+                if row is None:
+                    rec = dict(r, open_line=r["line"], open_total=r.get("line_total"), open_ts=_now(),
+                               close_line=r["line"], close_total=r.get("line_total"), close_edge=r["edge"])
+                    cur.execute(f"INSERT INTO game_picks (sport, game_id, kickoff, payload, open_line, close_line, ts) "
+                                f"VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                                [r["sport"], r["game_id"], r["kickoff"], json.dumps(rec, default=str), r["line"],
+                                 r["line"], _now()])
+                else:
+                    payload = row["payload"] if isinstance(row, (dict, sqlite3.Row)) else row[0]
+                    graded = row["result"] if isinstance(row, (dict, sqlite3.Row)) else row[2]
+                    if graded:
+                        continue
+                    old = json.loads(payload or "{}")
+                    rec = dict(old, **r)
+                    rec.update(open_line=old.get("open_line", r["line"]), open_total=old.get("open_total"),
+                               open_ts=old.get("open_ts"), close_line=r["line"], close_total=r.get("line_total"),
+                               close_edge=r["edge"], close_ts=_now())
+                    cur.execute(f"UPDATE game_picks SET payload={ph}, close_line={ph}, kickoff={ph}, ts={ph} "
+                                f"WHERE sport={ph} AND game_id={ph}",
+                                [json.dumps(rec, default=str), r["line"], r["kickoff"], _now(), r["sport"], r["game_id"]])
+                n += 1
+        return n
+    except Exception:                                           # noqa: BLE001
+        return 0
+
+
+def load_game_picks(sport: str, ungraded: bool = False, db_path: Optional[str] = None) -> List[Dict]:
+    if db_path is None and not available():
+        return []
+    try:
+        with _conn(db_path) as (con, ph):
+            cur = con.cursor()
+            cur.execute(f"SELECT * FROM game_picks WHERE sport={ph}" + (" AND result IS NULL AND final_home IS NULL"
+                                                                         if ungraded else "") + " ORDER BY kickoff",
+                        [sport])
+            out = []
+            for r in _rows(cur):
+                p = json.loads(r.get("payload") or "{}")
+                p.update(final_home=r.get("final_home"), final_away=r.get("final_away"), result=r.get("result"))
+                out.append(p)
+            return out
+    except Exception:                                           # noqa: BLE001
+        return []
+
+
+def grade_game_pick(sport: str, game_id: str, home_pts: float, away_pts: float, result: Optional[str],
+                    db_path: Optional[str] = None) -> bool:
+    if _test_run(db_path):
+        return False
+    try:
+        with _conn(db_path) as (con, ph):
+            con.cursor().execute(f"UPDATE game_picks SET final_home={ph}, final_away={ph}, result={ph}, ts={ph} "
+                                 f"WHERE sport={ph} AND game_id={ph}",
+                                 [float(home_pts), float(away_pts), result, _now(), sport, str(game_id)])
+        return True
+    except Exception:                                           # noqa: BLE001
+        return False
 
 
 # --------------------------------------------------------------------------- calibration (calibration.py)
