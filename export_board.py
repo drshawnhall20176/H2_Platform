@@ -82,8 +82,8 @@ def reads_table(sport: str, date_str: str, book: str, market: str, slot: str = "
         out.append((r, dt, val))
     out.sort(key=lambda t: -(t[0].get("p_final") or 0))
     lines = [f"## {market} reads — {date_str} · {slot}\n",
-             "| # | Time | Player | Team | Game | Proj | Model | Market | Blend | Price | Value | Lean | Flags |",
-             "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+             "| # | Time | Player | Team | Game | Proj | Model | Market | Blend | Price | Value | Lean | Flags | Line | Recent (newest first) | Min/opp | Season g |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for i, (r, dt, val) in enumerate(out, 1):
         f = lambda x: "—" if x is None else f"{x:.0%}"
         lines.append(f"| {i} | {dt.strftime('%I:%M %p').lstrip('0') if dt else 'TBD'} | {r.get('player')} | "
@@ -92,7 +92,9 @@ def reads_table(sport: str, date_str: str, book: str, market: str, slot: str = "
                      f"{f(r.get('p_market'))} | {f(r.get('p_final'))} | "
                      f"{'—' if r.get('over_price') is None else format(r['over_price'], '+.0f')} | "
                      f"{'—' if val is None else format(val, '+.0%')} | {r.get('lean') or '—'} | "
-                     f"{'; '.join(str(x) for x in (r.get('flags') or [])[:2]) or '—'} |")
+                     f"{'; '.join(str(x) for x in (r.get('flags') or [])[:2]) or '—'} | {r.get('line')} | "
+                     f"{','.join(format(float(v), 'g') for v in (r.get('values') or [])[:8])} | "
+                     f"{'—' if r.get('opp') is None else format(float(r['opp']), '.1f')} | {r.get('season_games', '—')} |")
     return "\n".join(lines)
 
 
