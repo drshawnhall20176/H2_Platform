@@ -20,7 +20,24 @@ def _key(player, market, side):
     return (U.norm(player), str(market).strip().lower(), str(side).strip().lower())
 
 
-def build(picks, board_plays, sport, date_str, real=False, stake=1.0, category=None, tag=None):
+def _model_prob(pk, bp, reads, sport):
+    """The model's chance for THIS pick's line. The board's ModelProb is for the board's own line, so it is used only
+    when the lines match; an alt line ("50+") is read off the projection (parlay_check.read_leg), as the ticket checker
+    does. None when there's no honest read (Nov 2 fix: alt-line bets were stored with the main line's chance)."""
+    if pk.get("model_prob") is not None:
+        return pk["model_prob"]
+    line = float(pk["line"])
+    if bp.get("ModelProb") is not None and bp.get("Line") is not None and abs(float(bp["Line"]) - line) < 1e-9:
+        return bp["ModelProb"]
+    if reads:
+        import parlay_check as PC
+        r = PC.read_leg({"player": pk["player"], "market": pk["market"], "side": pk["side"], "line": line}, reads, sport)
+        if (r.get("source") or "").startswith("model"):
+            return round(float(r["p_raw"]), 4)
+    return None
+
+
+def build(picks, board_plays, sport, date_str, real=False, stake=1.0, category=None, tag=None, reads=None):
     import betlog as B
     by = {_key(p["Player"], p["Market"], p["Side"]): p for p in board_plays}
     out = []
@@ -36,7 +53,7 @@ def build(picks, board_plays, sport, date_str, real=False, stake=1.0, category=N
         out.append({"slate_date": date_str, "sport": sport, "game": pk.get("game") or bp.get("Game"),
                     "player": pk["player"], "player_id": pid, "market": pk["market"], "side": pk["side"],
                     "line": float(pk["line"]), "entry_odds": float(pk["odds"]), "entry_odds_source": "book",
-                    "model_prob": pk.get("model_prob") or bp.get("ModelProb"), "stake": stake,
+                    "model_prob": _model_prob(pk, bp, reads, sport), "stake": stake,
                     "book": pk.get("book", "draftkings"), "is_real_bet": bool(real),
                     "category": category or B.default_category(sport, from_model=True), "notes": notes})
     return out
@@ -54,6 +71,8 @@ def main(argv=None) -> int:
     ap.add_argument("--tag", default="")
     ap.add_argument("--ticket", default="", help="log the picks as ONE parlay under this ticket name")
     ap.add_argument("--ticket-odds", default="", help="the parlay's total American odds")
+    ap.add_argument("--fix-model", default="false",
+                    help="true = don't log; refresh the model %% on already-logged rows (singles AND ticket legs) for these picks")
     a = ap.parse_args(argv)
     raw = open(a.picks[1:]).read() if a.picks.startswith("@") else a.picks
     picks = json.loads(raw)
@@ -63,8 +82,26 @@ def main(argv=None) -> int:
     except Exception as exc:                                    # noqa: BLE001 -- log without IDs rather than not at all
         print(f"Couldn't load the board ({type(exc).__name__}: {exc}); logging without player IDs.")
         board = []
+    try:
+        import best_bets_data as BBD
+        reads = BBD.load_slate_reads(a.sport, date_str, "draftkings") or {}
+    except Exception as exc:                                    # noqa: BLE001 -- alt lines just go without a model %
+        print(f"Couldn't load the model reads ({type(exc).__name__}: {exc}); alt lines logged without a model %.")
+        reads = {}
     rows = build(picks, board, a.sport, date_str, real=a.real.lower() in ("1", "true", "yes"), stake=a.stake,
-                 tag=a.tag or None)
+                 tag=a.tag or None, reads=reads)
+    if a.fix_model.lower() in ("1", "true", "yes"):
+        n = 0
+        for r in rows:
+            k = (r["slate_date"], _key(r["player"], r["market"], r["side"]), r["line"])
+            for b in B.list_bets(sport=a.sport):
+                if (b.get("slate_date"), _key(b.get("player"), b.get("market"), b.get("side")),
+                        float(b.get("line") or 0)) == k and r["model_prob"] is not None:
+                    B.update_bet(int(b["id"]), model_prob=r["model_prob"])
+                    n += 1
+            print(f"model % {r['player']} {r['market']} {r['side']} {r['line']}: {r['model_prob']}")
+        print(f"{n} row(s) refreshed.")
+        return 0
     if a.ticket:
         if any((b.get("ticket") or "") == a.ticket for b in B.list_bets(sport=a.sport)):
             print(f"Ticket '{a.ticket}' is already in the Bet Log — nothing logged.")

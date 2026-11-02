@@ -1,7 +1,24 @@
 import json
 
+import pytest
+
 import betlog as B
 import log_plays as L
+
+
+@pytest.fixture(autouse=True)
+def _no_reads(monkeypatch):
+    import best_bets_data as BBD
+    monkeypatch.setattr(BBD, "load_slate_reads", lambda *a, **k: {})
+
+
+def test_model_prob_matches_the_picks_own_line(monkeypatch):
+    bp = {"ModelProb": 0.58, "Line": 3.5}
+    assert L._model_prob({"player": "K", "market": "Receptions", "side": "Over", "line": 3.5}, bp, {}, "NFL") == 0.58
+    assert L._model_prob({"player": "K", "market": "Receptions", "side": "Over", "line": 1.5}, bp, {}, "NFL") is None
+    import parlay_check as PC
+    monkeypatch.setattr(PC, "read_leg", lambda leg, reads, sport: {"source": "model (alt line)", "p_raw": 0.84})
+    assert L._model_prob({"player": "K", "market": "Receptions", "side": "Over", "line": 1.5}, bp, {"x": 1}, "NFL") == 0.84
 
 
 def test_picks_get_board_ids_and_rerunning_skips_duplicates(tmp_path, monkeypatch):
@@ -76,3 +93,21 @@ def test_parlay_leg_does_not_block_the_same_single(tmp_path, monkeypatch):
     L.main(["--picks", f"@{f}", "--date", "2026-11-02", "--real", "true", "--stake", "5"])
     singles = [b for b in B.list_bets() if not b.get("ticket")]
     assert len(singles) == 1 and singles[0]["stake"] == 5
+
+
+def test_fix_model_refreshes_singles_and_legs(tmp_path, monkeypatch):
+    db = str(tmp_path / "b.db")
+    import export_board as X
+    monkeypatch.setattr(X, "board", lambda *a, **k: [])
+    monkeypatch.setattr(B, "list_bets", lambda *a, _l=B.list_bets, **k: _l(db_path=db, **{x: y for x, y in k.items() if x != "db_path"}))
+    monkeypatch.setattr(B, "add_bet", lambda *a, _a=B.add_bet, **k: _a(db, **k))
+    monkeypatch.setattr(B, "update_bet", lambda bid, _u=B.update_bet, **k: _u(bid, db, **k))
+    f = tmp_path / "p.json"
+    f.write_text(json.dumps([{"player": "Cooper Kupp", "market": "Receptions", "side": "Over", "line": 1.5, "odds": -466,
+                              "game": "CHI @ SEA"}]))
+    L.main(["--picks", f"@{f}", "--date", "2026-11-02", "--ticket", "MNF", "--ticket-odds", "260"])
+    L.main(["--picks", f"@{f}", "--date", "2026-11-02", "--real", "true", "--stake", "5"])
+    monkeypatch.setattr(L, "_model_prob", lambda *a, **k: 0.84)
+    L.main(["--picks", f"@{f}", "--date", "2026-11-02", "--fix-model", "true"])
+    kupp = [b for b in B.list_bets() if b["player"] == "Cooper Kupp"]
+    assert len(kupp) == 2 and all(abs(b["model_prob"] - 0.84) < 1e-9 for b in kupp)
