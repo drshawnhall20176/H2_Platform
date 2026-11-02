@@ -860,3 +860,21 @@ def test_no_weather_caption_or_column_content_when_the_sport_has_none(patched):
     why_df = _dataframe_with(at, "Why")
     if why_df is not None:
         assert "Weather" not in why_df.columns
+
+
+def test_ticket_checker_prices_a_pasted_ticket(patched, monkeypatch):
+    reads = {(1, "player_points"): {"player": "Star Guard", "market": "Points", "projection": 24.0,
+                                    "values": [22, 26, 25, 23], "dist": "normal", "line": 22.5, "p_final": 0.62,
+                                    "slot": "G1", "team_name": "A", "game": "A @ B"}}
+    monkeypatch.setattr(BBD, "load_slate_reads", lambda *a, **k: reads)
+    at = _app(legs=False)
+    at.run()
+    at.text_area(key="pc_legs").set_value("Star Guard | Points | 20+\nBench Guy | Points | Over 7.5 | +110")
+    at.number_input(key="pc_price").set_value(250)
+    at.button(key="pc_go").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    labels = [m.label for m in at.metric]
+    assert "Cashes" in labels and "Misses by one" in labels
+    tbl = [d.value for d in at.dataframe if "From" in getattr(d.value, "columns", [])][0]
+    assert list(tbl["From"]) == ["model (alt line)", "your price (no model read)"]
+    assert any("Weakest leg" in i.value and "Bench Guy" in i.value for i in at.info)

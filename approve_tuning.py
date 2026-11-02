@@ -24,6 +24,11 @@ def main(argv=None) -> int:
     for key, f in json.loads(a.factors).items():
         market, _, slot = key.partition("|")
         f = float(f)
+        if market == "calibration":
+            ok = MS.approve_calibration(a.sport, f, {"reason": a.reason})
+            print(f"{'approved' if ok else 'FAILED  '} {a.sport} honest-chance factor {f}")
+            bad += 0 if ok else 1
+            continue
         if not lo <= f <= hi:
             print(f"skip {key}: {f} is outside {lo}-{hi}")
             bad += 1
