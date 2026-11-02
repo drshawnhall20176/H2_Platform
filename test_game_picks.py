@@ -106,3 +106,35 @@ def test_morning_note():
                                "season": {"graded": 10, "record": "6-4", "hit": 0.6, "avg_clv": 0.8}})
     assert notes[0].endswith("2-1 yesterday.") and "6-4 (60%" in notes[1] and "+0.8" in notes[1]
     assert D.game_pick_notes(None) == []
+
+
+def _passes(team, rows):
+    return [{"season": 2026, "team": team, "game_id": g, "week": w, "player": p, "passing_ATT": a} for g, w, p, a in rows]
+
+
+def test_qb_change_flags_only_a_real_change():
+    rows = (_passes("Injured U", [(1, 1, "Starter", 30), (2, 2, "Starter", 28), (3, 3, "Starter", 31), (4, 4, "Backup", 25)])
+            + _passes("Blowout U", [(5, 1, "Ace", 30), (6, 2, "Ace", 27), (7, 3, "Ace", 24), (8, 4, "Ace", 22),
+                                    (8, 4, "Mop Up", 12)])
+            + _passes("Rainy U", [(9, 1, "Runner", 20), (10, 2, "Runner", 18), (11, 3, "Runner", 15), (12, 4, "Runner", 7)])
+            + _passes("Benched U", [(13, 1, "Vet", 30), (14, 2, "Vet", 30), (15, 3, "Vet", 30), (16, 4, "Kid", 20),
+                                    (16, 4, "Vet", 6)]))
+    f = GP.qb_flags(rows, 2026)
+    assert set(f) == {"Injured U", "Benched U"} and "Backup threw 25" in f["Injured U"]
+
+
+def test_guard_holds_a_pick_the_market_moved_against_or_with_a_qb_change():
+    base = {"game_id": "1", "home": "A", "away": "B", "pick": "home", "line": 4.0}
+    held = GP.guard([dict(base)], {"1": {"open_line": 7.5}}, {})[0]          # A was -7.5, now -4: 3.5 against A
+    assert held["held"] and "3.5 pts against" in held["flags"][0]
+    ok = GP.guard([dict(base)], {"1": {"open_line": 2.0}}, {})[0]            # moved toward A: fine
+    assert not ok["held"] and ok["flags"] == []
+    qb = GP.guard([dict(base, pick=None)], {}, {"B": "QB change: x"})[0]     # no pick: flagged, not "held"
+    assert qb["flags"] == ["QB change: x"] and not qb["held"]
+    assert GP.guard([dict(base)], {}, {"B": "QB change: x"})[0]["held"]
+
+
+def test_held_picks_are_kept_out_of_the_official_record():
+    picks = [{"pick": "home", "result": "win", "held": False, "edge": 8}, {"pick": "away", "result": "loss", "held": True,
+                                                                          "edge": 8}]
+    assert GP.summary(picks)["record"] == "1-0" and GP.summary(picks, held=True)["record"] == "0-1"

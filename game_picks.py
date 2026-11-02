@@ -35,6 +35,12 @@ ODDS_URL = "https://api.the-odds-api.com/v4/sports/americanfootball_ncaaf/odds"
 ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard"
 SCHEDULE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "ncaaf_schedule.csv")
 EDGE_BUCKETS = ((4, 7), (7, 10), (10, 99))
+STATS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "ncaaf_player_game_stats.csv")
+# Nov 2 news guard: the model knows results, not news. A pick is HELD (shown with ⚠️, kept out of the official
+# record) when the market has clearly heard something -- the line moved LINE_MOVE_HOLD+ points against the pick since
+# it opened -- or when a team's quarterback situation changed (its last game's passer isn't its usual starter, or
+# the usual starter sat out the last game).
+LINE_MOVE_HOLD = 3.0
 
 
 def _http(url: str, params: Optional[Dict] = None):
@@ -101,6 +107,72 @@ def load_schedule(path: str = SCHEDULE_PATH) -> List[Dict]:
 
 def _truthy(x) -> bool:
     return str(x).strip().lower() in ("true", "1", "1.0")
+
+
+# --------------------------------------------------------------------------- news guard
+def qb_flags(rows: Iterable[Dict], season: int, min_att: float = 10.0) -> Dict[str, str]:
+    """{team: "QB change: ..."} from this season's passing lines. The usual starter is the player who led the team in
+    passing in most of its games; the flag goes up when he threw fewer than `min_att` passes (or didn't play) in the
+    team's LAST game -- a backup finishing a blowout after the starter's 25 attempts doesn't count."""
+    att: Dict = {}                    # (team, game_id) -> {player: attempts}
+    week_of: Dict = {}
+    for r in rows:
+        if int(_num(r.get("season")) or 0) != int(season) or not r.get("team") or not r.get("player"):
+            continue
+        a = _num(r.get("passing_ATT")) or 0.0
+        if a <= 0:
+            continue
+        key = (r["team"], str(r.get("game_id")))
+        att.setdefault(key, {})
+        att[key][r["player"]] = max(att[key].get(r["player"], 0.0), a)
+        week_of[key] = int(_num(r.get("week")) or 0)
+    by_team: Dict[str, List] = {}
+    for (team, gid), players in att.items():
+        by_team.setdefault(team, []).append((week_of[(team, gid)], players))
+    out = {}
+    for team, gs in by_team.items():
+        if len(gs) < 3:
+            continue
+        gs.sort(key=lambda g: g[0])
+        leads: Dict[str, int] = {}
+        for _w, players in gs:
+            top = max(players, key=players.get)
+            leads[top] = leads.get(top, 0) + 1
+        usual = max(leads, key=leads.get)
+        last = gs[-1][1]
+        who = max(last, key=last.get)
+        if who != usual and last.get(usual, 0.0) < min_att:      # a low-volume game he still led isn't a change
+            out[team] = (f"QB change: {usual} ({leads[usual]} starts) threw {last.get(usual, 0):.0f} passes in "
+                         f"{team}'s last game; {who} threw {last[who]:.0f}")
+    return out
+
+
+def load_stats(path: str = STATS_PATH) -> List[Dict]:
+    import pandas as pd
+    if not os.path.exists(path):
+        return []
+    return pd.read_csv(path, usecols=lambda c: c in ("game_id", "season", "week", "team", "player", "passing_ATT")
+                       ).to_dict("records")
+
+
+def line_move_against(rec: Dict, open_line: Optional[float]) -> Optional[float]:
+    """Points the line has moved AGAINST the pick since it opened (+ = against)."""
+    if not rec.get("pick") or open_line is None or rec.get("line") is None:
+        return None
+    move = rec["line"] - open_line                 # + = toward the home team
+    return -move if rec["pick"] == "home" else move
+
+
+def guard(recs: List[Dict], existing: Dict[str, Dict], qb: Dict[str, str]) -> List[Dict]:
+    """Attach news flags to each record and hold flagged picks."""
+    for r in recs:
+        flags = [qb[t] for t in (r["home"], r["away"]) if t in qb]
+        mv = line_move_against(r, (existing.get(r["game_id"]) or {}).get("open_line"))
+        if mv is not None and mv >= LINE_MOVE_HOLD:
+            flags.append(f"line moved {mv:.1f} pts against the pick since it opened — the market likely heard news")
+        r["flags"] = flags
+        r["held"] = bool(r.get("pick") and flags)
+    return recs
 
 
 # --------------------------------------------------------------------------- the books' line
@@ -174,14 +246,19 @@ def build(schedule: Sequence[Dict], events: Sequence[Dict], now: datetime) -> Li
 
 
 def capture(api_key: str, fetch: Callable = _http, now: Optional[datetime] = None, db_path: Optional[str] = None,
-            schedule: Optional[Sequence[Dict]] = None) -> Dict:
+            schedule: Optional[Sequence[Dict]] = None, stats: Optional[Sequence[Dict]] = None) -> Dict:
     import model_store as MS
     now = now or datetime.now(timezone.utc)
     events = fetch(ODDS_URL, {"apiKey": api_key, "regions": "us", "markets": "spreads,totals", "oddsFormat": "american"})
     recs = build(schedule if schedule is not None else load_schedule(), events or [], now)
+    existing = {p["game_id"]: p for p in MS.load_game_picks(SPORT, db_path=db_path)}
+    season = recs[0]["season"] if recs else None
+    qb = qb_flags(stats if stats is not None else load_stats(), season) if season else {}
+    recs = guard(recs, existing, qb)
     saved = MS.save_game_picks(recs, db_path=db_path)
     graded = grade_open(fetch=fetch, now=now, db_path=db_path)
-    return {"games": len(recs), "picks": sum(1 for r in recs if r["pick"]), "saved": saved, "graded": graded}
+    return {"games": len(recs), "picks": sum(1 for r in recs if r["pick"] and not r["held"]),
+            "held": sum(1 for r in recs if r["held"]), "saved": saved, "graded": graded}
 
 
 # --------------------------------------------------------------------------- grading
@@ -258,8 +335,10 @@ def clv(p: Dict) -> Optional[float]:
     return move if p["pick"] == "home" else -move
 
 
-def summary(picks: Iterable[Dict]) -> Dict:
-    graded = [p for p in picks if p.get("pick") and p.get("result") in ("win", "loss", "push")]
+def summary(picks: Iterable[Dict], held: bool = False) -> Dict:
+    """The official record (held picks left out), or with held=True the record of the HELD picks alone."""
+    graded = [p for p in picks if p.get("pick") and p.get("result") in ("win", "loss", "push")
+              and bool(p.get("held")) == held]
     w = sum(1 for p in graded if p["result"] == "win")
     l_ = sum(1 for p in graded if p["result"] == "loss")
     by = []
@@ -285,6 +364,7 @@ def review(morning: str, fetch: Callable = _http, db_path: Optional[str] = None)
     from zoneinfo import ZoneInfo
     et = ZoneInfo("America/New_York")
     ydp = [p for p in allp if datetime.fromisoformat(p["kickoff"]).astimezone(et).date().isoformat() == yday]
-    return {"yesterday": summary(ydp), "season": summary(allp),
+    return {"yesterday": summary(ydp), "season": summary(allp), "held_season": summary(allp, held=True),
             "yesterday_picks": [{k: p.get(k) for k in ("pick_label", "home", "away", "close_line", "edge", "result",
-                                                        "final_home", "final_away")} for p in ydp if p.get("pick")]}
+                                                        "final_home", "final_away", "held", "flags")}
+                                for p in ydp if p.get("pick")]}
