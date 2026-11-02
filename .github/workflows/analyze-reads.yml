@@ -1,0 +1,33 @@
+# Read-only research: every saved pre-game read graded against ESPN and sliced by signal (research/analyze_reads.py).
+name: analyze-reads
+
+on:
+  workflow_dispatch:
+    inputs:
+      sports:
+        default: "NBA,NHL,NCAAF,NCAAMB,NFL"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Analyze
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python research/analyze_reads.py --sports "${{ inputs.sports }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: graded-reads
+          path: graded_*.jsonl
