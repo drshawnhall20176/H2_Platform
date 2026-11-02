@@ -1047,7 +1047,11 @@ def use_tag(row: Dict, side: Optional[str] = None, line: Optional[float] = None,
     else:
         value_ok = ev is None if milestone else (ev is not None and ev > 0)
     parlay = c >= CUSHION_MIN and p is not None and p >= need and value_ok
-    single = (not milestone and not pickem and row.get("lean") == side and ev is not None and ev >= MIN_EV)
+    # Nov 2: a sport can ask more of a single (row["single_ev"] / row["single_chance"], set by its props model) --
+    # NFL singles at +3% hit 46% on Nov 1 while parlay-grade legs hit 63%.
+    single_ev, single_p = row.get("single_ev", MIN_EV), row.get("single_chance", 0.0)
+    single = (not milestone and not pickem and row.get("lean") == side and ev is not None and ev >= single_ev
+              and (p is None or p >= single_p))
     bits = [f"cushion {c:+.0%}"] + ([f"chance {p:.0%}"] if p is not None else []) + \
            ([f"edge {ev:+.1%}"] if ev is not None else (["model-only milestone"] if milestone else []))
     if parlay and single:
