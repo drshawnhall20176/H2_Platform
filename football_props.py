@@ -104,6 +104,11 @@ ENV_WEIGHT = {"Receptions": 0.4, "Receiving Yards": 0.7, "Rush Yards": 0.6, "Rus
               "Pass Attempts": 0.2, "Pass Completions": 0.3, "Targets": 0.3, "Interceptions": 0.2}
 LEAGUE_TEAM_POINTS = {"NFL": 22.5, "NCAAF": 28.5}
 EFF_SHRINK = {"tgt": 30.0, "rush_att": 40.0, "pass_att": 120.0, "touch": 50.0}   # opportunities of half-trust
+# Nov 2: touchdowns per touch are far noisier than yards per touch. Backtest (research/backtest_td.py, 5,742 NFL
+# player-games, 2025 wk 4-18 + 2026 wk 3-9): trusting a player's own TD rate for 200 touches instead of 50 cut log
+# loss at every position (QB .4445 -> .4387, RB .5472 -> .5374, WR .4727 -> .4697, TE .4713 -> .4678) and fixed the
+# overconfidence at the top (players priced 60%+ scored 50-53%).
+MARKET_SHRINK = {"Anytime TD": 200.0}
 PROMOTED_SHRINK_MULT = 2.0
 PROMOTED_SHARE_MULT = 1.5
 CARRY_TO_REPLACEMENT = 0.7
@@ -358,7 +363,8 @@ def player_rows(roster: Sequence[Dict], team, defense, market: str, pgames, allo
         if not i["out"]:
             grp = "RB" if _group(slot) == "RB" else _group(slot)
             prior = rates.get(grp, rates.get("WR", 0.0))
-            k = (QB_RUSH_SHRINK if (grp == "QB" and kind == "rush_att") else EFF_SHRINK.get(kind, 40.0)) * \
+            k = (QB_RUSH_SHRINK if (grp == "QB" and kind == "rush_att") else
+                 MARKET_SHRINK.get(market, EFF_SHRINK.get(kind, 40.0))) * \
                 (PROMOTED_SHRINK_MULT if r.get("role_change") else 1.0)
             n_opp = i["n_opp"]
             rate = prior if i["rate"] is None else (i["rate"] * n_opp + prior * k) / (n_opp + k)

@@ -159,3 +159,7 @@ def test_anytime_td_yes_under_50_shows_when_the_price_pays():
     assert SP.play_from_row(dict(base, over_price=200), None) is None              # 28% at +200: no value
     held = SP.play_from_row(dict(base, gap="big", gap_pct=0.6), None)
     assert held["Use"] == "⛔ Pass"                                                 # the news check still applies
+
+def test_anytime_td_trusts_a_players_own_rate_for_200_touches():
+    import football_props as FP
+    assert FP.MARKET_SHRINK["Anytime TD"] == 200.0 and FP.EFF_SHRINK["touch"] == 50.0   # Rush + Rec Yards unchanged
