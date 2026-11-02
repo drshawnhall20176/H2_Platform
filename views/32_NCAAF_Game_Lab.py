@@ -90,11 +90,18 @@ with st.expander("📐 Ratings model v2 — college spreads (tracking)", expande
                       "Books": f"{p['home']} {-p['close_line']:+g}",
                       "Model": f"{p['home']} {-p['model_margin']:+.1f}",
                       "Gap": f"{abs(p.get('close_edge', p['edge'])):.1f}",
-                      "Pick": p.get("pick_label") or "—"}
+                      "Pick": ("⚠️ held: " if p.get("held") else "") + (p.get("pick_label") or "—"),
+                      "News check": " · ".join(p.get("flags") or []) or "—"}
                      for p in sorted(_up, key=lambda p: -abs(p.get("close_edge", p["edge"])))]
             st.dataframe(pd.DataFrame(_rows), hide_index=True, width="stretch")
+        _h = GP.summary(_gp, held=True)
+        if _h["graded"]:
+            st.caption(f"Held picks (news flags, not in the record above): {_h['record']}.")
         if _s["by_edge"]:
             st.caption("By gap: " + " · ".join(f"{b['edge']} pts: {b['record']} ({b['hit']:.0%})" for b in _s["by_edge"]))
+        st.caption(f"⚠️ held = the model doesn't know news: a quarterback change, or the line moving "
+                   f"{GP.LINE_MOVE_HOLD:g}+ points against the pick since it opened. Check injuries before betting those; "
+                   "they're tracked separately.")
         st.caption(f"A pick is the side the model favors when it's {GP.PICK_EDGE:g}+ points off the books' consensus "
                    "spread. Tracking only: no 🔒 until the live record holds above ~53% over a few weeks. Spreads only — "
                    "the same ratings lost on totals in the backtest.")

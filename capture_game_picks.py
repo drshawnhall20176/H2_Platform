@@ -12,7 +12,8 @@ def main() -> int:
         print("ODDS_API_KEY isn't set.")
         return 1
     r = GP.capture(key)
-    print(f"{r['games']} upcoming game(s) with a line; {r['picks']} pick(s) at {GP.PICK_EDGE:g}+ points; saved "
+    print(f"{r['games']} upcoming game(s) with a line; {r['picks']} pick(s) at {GP.PICK_EDGE:g}+ points "
+          f"(+{r['held']} held for news); saved "
           f"{r['saved']}; graded {r['graded']} finished game(s).")
     return 0
 
