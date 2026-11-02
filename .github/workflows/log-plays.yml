@@ -28,6 +28,9 @@ on:
       ticket_odds:
         description: "Parlay total American odds (with a ticket)"
         default: ""
+      fix_model:
+        description: "true = don't log; refresh the model % on already-logged rows for these picks"
+        default: "false"
 
 permissions:
   contents: read
@@ -54,4 +57,5 @@ jobs:
           printf '%s' "$PICKS" > picks.json
           python log_plays.py --picks @picks.json --sport "${{ inputs.sport }}" --date "${{ inputs.date }}" \
             --real "${{ inputs.real }}" --stake "${{ inputs.stake }}" --tag "${{ inputs.tag }}" \
-            --ticket "${{ inputs.ticket }}" --ticket-odds "${{ inputs.ticket_odds }}"
+            --ticket "${{ inputs.ticket }}" --ticket-odds "${{ inputs.ticket_odds }}" \
+            --fix-model "${{ inputs.fix_model }}"
