@@ -52,8 +52,42 @@ def no_vig(h, a):
     return p / (p + q)
 
 
+import numpy as np
+
+
+def ratings(prior, lam):
+    """Opponent-adjusted offense / defense ratings (ridge least squares on points scored), plus home field.
+    points(team t vs opp o, home flag) = mu + off[t] - def[o] + hfa * home."""
+    teams = sorted(set(prior["home_team"]) | set(prior["away_team"]))
+    ix = {t: i for i, t in enumerate(teams)}
+    n = len(teams)
+    rows, y = [], []
+    for r in prior.itertuples():
+        for t, o, pts, home in ((r.home_team, r.away_team, r.home_points, 0 if r.neutral_site else 1),
+                                (r.away_team, r.home_team, r.away_points, 0 if r.neutral_site else -1)):
+            x = np.zeros(2 * n + 1)
+            x[ix[t]] = 1
+            x[n + ix[o]] = -1
+            x[2 * n] = home * 0.5
+            rows.append(x)
+            y.append(pts)
+    X, y = np.array(rows), np.array(y, dtype=float)
+    mu = y.mean()
+    reg = np.eye(2 * n + 1) * lam
+    reg[2 * n, 2 * n] = 0.0
+    beta = np.linalg.solve(X.T @ X + reg, X.T @ (y - mu))
+    return mu, {t: beta[ix[t]] for t in teams}, {t: beta[n + ix[t]] for t in teams}, beta[2 * n]
+
+
 res = defaultdict(list)
 for season, gs in sched.groupby("season"):
+    gs = gs.sort_values("week")
+    cache = {}
+    for wk in sorted(gs["week"].unique()):
+        pr = gs[gs["week"] < wk]
+        if len(pr) > 50:
+            for lam in (2.0, 5.0):
+                cache[(wk, lam)] = ratings(pr, lam)
     gs = gs.sort_values("week")
     for row in gs.itertuples(index=False):
         if row.week < 5 or int(row.id) not in lines:
@@ -80,6 +114,16 @@ for season, gs in sched.groupby("season"):
         m, t = row.home_points - row.away_points, row.home_points + row.away_points
         pk = no_vig(*ml) if ml else None
         hfa = 0 if row.neutral_site else 1.25
+        for lam in (2.0, 5.0):
+            if (row.week, lam) in cache:
+                mu, off, de, hf = cache[(row.week, lam)]
+                if h in off and a in off:
+                    hh = 0 if row.neutral_site else hf * 0.5
+                    hp_, ap_ = mu + off[h] - de[a] + hh, mu + off[a] - de[h] - hh
+                    res[f"ratings ridge {lam:g}"].append((hp_ - ap_, hp_ + ap_, m, t, lm, lt, pk))
+                    res[f"ratings ridge {lam:g} x0.5 + market"].append((0.5 * (hp_ - ap_) + 0.5 * lm,
+                                                                         None if lt is None else 0.5 * (hp_ + ap_) + 0.5 * lt,
+                                                                         m, t, lm, lt, pk))
         for name, (hp, ap) in {"Game Lab (current)": (hs4 * aa / lg, as4 * ha / lg),
                                "+ home field 2.5": (hs4 * aa / lg + hfa, as4 * ha / lg - hfa),
                                "season avgs + HFA": (hss * aa / lg + hfa, ass * ha / lg - hfa)}.items():
