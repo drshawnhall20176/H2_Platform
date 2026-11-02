@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import postgame as PG  # noqa: E402
 
 URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
+SUMMARY = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary"
 
 
 def num(x):
@@ -40,14 +41,22 @@ def games_between(a: date, b: date):
                 side = {t.get("homeAway"): t for t in c.get("competitors") or []}
                 if "home" not in side or "away" not in side:
                     continue
-                odds = (c.get("odds") or [{}])[0] if c.get("odds") else {}
-                spread = num(odds.get("spread"))           # home team's spread (negative = home favored)
-                ou = num(odds.get("overUnder"))
-                out.append({"date": d, "home": side["home"]["team"]["abbreviation"], "away": side["away"]["team"]["abbreviation"],
+                out.append({"id": ev.get("id"), "date": d, "home": side["home"]["team"]["abbreviation"], "away": side["away"]["team"]["abbreviation"],
                             "hp": num(side["home"].get("score")), "ap": num(side["away"].get("score")),
-                            "line": None if spread is None else -spread, "total": ou,
-                            "neutral": bool(c.get("neutralSite"))})
+                            "line": None, "total": None, "neutral": bool(c.get("neutralSite"))})
         d += timedelta(days=1)
+    from concurrent.futures import ThreadPoolExecutor
+
+    def add_line(g):
+        data = PG._http(SUMMARY, {"event": g["id"]}) or {}
+        pc = data.get("pickcenter") or []
+        if pc:
+            sp, ou = num(pc[0].get("spread")), num(pc[0].get("overUnder"))
+            g["line"] = None if sp is None else -sp          # ESPN's spread is the home team's (negative = favored)
+            g["total"] = ou
+        return g
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        out = list(ex.map(add_line, out))
     return out
 
 
