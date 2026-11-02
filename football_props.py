@@ -272,6 +272,7 @@ def player_rows(roster: Sequence[Dict], team, defense, market: str, pgames, allo
             team_games[p.get("game")] = p.get("order")
     window = sorted(team_games, key=lambda g_: (team_games[g_] is None, team_games[g_]), reverse=True)[:FORM_N]
     played = {(p.get("game"), p.get("pid")) for p in pgames or [] if p.get("team") == team}
+    played_names = {(p.get("game"), PE.norm_name(p.get("name"))) for p in pgames or [] if p.get("team") == team}
 
     # Each player's own volume and production.
     info = []
@@ -302,7 +303,12 @@ def player_rows(roster: Sequence[Dict], team, defense, market: str, pgames, allo
                 n_opp += p_n
                 read_vals = vals + p_vals[:k]
                 flags0.append(f"＋ last season blended in ({len(g)} game{'s' if len(g) != 1 else ''} this season)")
-        missed = [gid for gid in window if (gid, r.get("pid")) not in played] if r.get("pid") is not None else []
+        if r.get("pid") is not None:
+            missed = [gid for gid in window if (gid, r.get("pid")) not in played]
+        elif g:      # Nov 2: an injury-list entry with no id (Kyle Monangai) -- match his games by name instead
+            missed = [gid for gid in window if (gid, PE.norm_name(r.get("name"))) not in played_names]
+        else:
+            missed = []
         info.append({"r": r, "games": g, "vals": vals, "read_vals": read_vals, "opps": opps, "rate": own_rate,
                      "opp": own_opp or 0.0, "n_opp": n_opp, "flags0": flags0, "missed": missed,
                      "out": PPR.is_out(r.get("status")) or str(r.get("status") or "").lower() == "out"})
@@ -337,7 +343,11 @@ def player_rows(roster: Sequence[Dict], team, defense, market: str, pgames, allo
     adds = {id(i): 0.0 for i in info}
     live = [i for i in info if not i["out"]]
     for o in [i for i in info if i["out"] and i["opp"] > 0]:
-        vac = o["opp"]
+        # Nov 2 (Roschon Johnson, CHI-SEA): a player who has ALREADY been missing hasn't vacated his whole role
+        # today -- his teammates' recent games were played without him and already carry it. Only the share of
+        # the recent sample he was part of is still to be handed out (all of it when he played last week, little
+        # when he's been out for weeks).
+        vac = o["opp"] * present_share(o, window)
         repl = next((i for i in live if i["r"].get("name") == o["r"].get("replaced_by")), None)
         if kind == "pass_att" or (kind == "rush_att" and repl is not None):
             share = 0.95 if kind == "pass_att" else CARRY_TO_REPLACEMENT
@@ -409,6 +419,19 @@ def player_rows(roster: Sequence[Dict], team, defense, market: str, pgames, allo
                               returning=len(i["missed"]) >= RETURN_MISSED and bool(i["games"]) and not i["out"]
                               and i["games"][0].get("game") != (window[0] if window else None)))
     return _single_bar(rows, sport)
+
+
+def present_share(player_info: Dict, window: Sequence) -> float:
+    """The recency-weighted share of the team's recent games (newest first) this player played in -- 1.0 when we
+    can't tell (no games, no window); 0.0 when he missed each of the last RETURN_MISSED."""
+    if not window or not player_info.get("games"):
+        return 1.0
+    missed = set(player_info.get("missed") or [])
+    if all(g in missed for g in window[:RETURN_MISSED]):
+        return 0.0       # out for each of the last RETURN_MISSED games: the depth chart has already moved on
+    w = PE.recency_weights(len(window))
+    tot = sum(w)
+    return sum(x for g, x in zip(window, w) if g not in missed) / tot if tot else 1.0
 
 
 def _single_bar(rows: List[Dict], sport: str) -> List[Dict]:
