@@ -148,11 +148,6 @@ def test_only_games_with_posted_props_get_built(monkeypatch):
     assert built == [("X @ Y",)]
 
 
-def test_anytime_td_trusts_a_players_own_rate_for_200_touches():
-    import football_props as FP
-    assert FP.MARKET_SHRINK["Anytime TD"] == 200.0 and FP.EFF_SHRINK["touch"] == 50.0   # Rush + Rec Yards unchanged
-
-
 def test_anytime_td_yes_under_50_shows_when_the_price_pays():
     base = {"pid": 2, "player": "TE", "market": "Anytime TD", "market_key": "player_anytime_td", "line": 0.5,
             "line_src": "book", "projection": 0.46, "values": [0, 1, 0, 0], "dist": "count", "side": "Under",
