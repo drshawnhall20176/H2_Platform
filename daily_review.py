@@ -133,6 +133,21 @@ def summarize_slate(graded: Sequence[Dict]) -> Dict:
     }
 
 
+def calibration_notes(cal: Dict) -> List[str]:
+    """One line on how honest the chances have been (calibration.py), once there are enough graded reads."""
+    if not cal.get("enough"):
+        return []
+    hi = [b for b in cal["buckets"] if b["shown"] >= 0.6]
+    if not hi:
+        return []
+    n = sum(b["n"] for b in hi)
+    shown = sum(b["shown"] * b["n"] for b in hi) / n
+    hit = sum(b["hit"] * b["n"] for b in hi) / n
+    act = "" if cal["s"] >= 0.99 else f"; an honest-chance factor of {cal['s']:.2f} fits best"
+    return [f"Calibration: reads shown at 60%+ (avg {shown:.0%}) hit {hit:.0%} over the last {n}{act} "
+            f"(active: {cal.get('active', 1.0):.2f})."]
+
+
 def notes(slates: Dict[str, Dict]) -> List[str]:
     """Plain-English takeaways from the slates just graded (the headline bullets on the page)."""
     out = []
@@ -265,8 +280,11 @@ def review_sport(sport: str, morning: str, open_bets: Sequence[Dict], fetch: Cal
 
     settlement = settle(sport, open_bets, fetch=fetch, write=write, bet_db=bet_db) if has_bets else \
         {"settled": [], "tickets": [], "unresolved": [], "still_pending": []}
+    import calibration as CAL
+    cal = CAL.fit(trend_rows)
+    cal["active"] = CAL.factor(sport)
     return {"sport": sport, "morning": morning, "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "slates": slates, "notes": notes(slates),
+            "slates": slates, "notes": notes(slates) + calibration_notes(cal), "calibration": cal,
             "trend": {"days": TREND_DAYS, "slates": len(trend), "graded": len(trend_rows),
                       "use": PG.use_record(trend_rows)},
             "suggestions": sugg, "settlement": settlement}

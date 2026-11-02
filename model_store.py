@@ -52,6 +52,10 @@ CREATE TABLE IF NOT EXISTS ufc_odds (
     event_id TEXT, card_date TEXT, commence TEXT, payload TEXT, ts TEXT,
     UNIQUE (event_id)
 );
+CREATE TABLE IF NOT EXISTS calibration (
+    id {pk},
+    sport TEXT, s REAL, details TEXT, approved_ts TEXT, active INTEGER DEFAULT 1
+);
 CREATE TABLE IF NOT EXISTS model_tuning (
     id {pk},
     sport TEXT, market TEXT, slot TEXT, factor REAL, reason TEXT, approved_ts TEXT, active INTEGER DEFAULT 1
@@ -389,6 +393,47 @@ def ufc_card_dates(db_path: Optional[str] = None) -> List[str]:
             return [r["card_date"] if isinstance(r, (dict, sqlite3.Row)) else r[0] for r in cur.fetchall()]
     except Exception:                                           # noqa: BLE001
         return []
+
+
+# --------------------------------------------------------------------------- calibration (calibration.py)
+def approve_calibration(sport: str, s: float, details: Optional[Dict] = None, db_path: Optional[str] = None) -> bool:
+    """Turn on an honest-chance factor for a sport (replacing the active one)."""
+    if _test_run(db_path):
+        return False
+    try:
+        with _conn(db_path) as (con, ph):
+            cur = con.cursor()
+            cur.execute(f"UPDATE calibration SET active=0 WHERE sport={ph}", [sport])
+            cur.execute(f"INSERT INTO calibration (sport, s, details, approved_ts, active) VALUES ({ph},{ph},{ph},{ph},1)",
+                        [sport, float(s), json.dumps(details or {}, default=str), _now()])
+        import calibration as CAL
+        CAL.clear_cache()
+        return True
+    except Exception:                                           # noqa: BLE001
+        return False
+
+
+def list_calibration(active_only: bool = True, db_path: Optional[str] = None) -> List[Dict]:
+    if db_path is None and not available():
+        return []
+    try:
+        with _conn(db_path) as (con, ph):
+            cur = con.cursor()
+            cur.execute("SELECT * FROM calibration" + (" WHERE active=1" if active_only else "") + " ORDER BY id")
+            return _rows(cur)
+    except Exception:                                           # noqa: BLE001
+        return []
+
+
+def retire_calibration(cal_id: int, db_path: Optional[str] = None) -> bool:
+    try:
+        with _conn(db_path) as (con, ph):
+            con.cursor().execute(f"UPDATE calibration SET active=0 WHERE id={ph}", [cal_id])
+        import calibration as CAL
+        CAL.clear_cache()
+        return True
+    except Exception:                                           # noqa: BLE001
+        return False
 
 
 # --------------------------------------------------------------------------- tuning (approved adjustments)

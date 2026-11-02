@@ -131,6 +131,21 @@ with tab_morning:
         st.caption(f"Written {str(rep.get('created', ''))[:16].replace('T', ' ')} UTC.")
         for n in rep.get("notes") or []:
             st.markdown(f"- {n}")
+        cal = rep.get("calibration") or {}
+        if cal.get("buckets"):
+            with st.expander(f"🎯 How honest the chances have been ({cal.get('n', 0)} graded reads)"):
+                st.dataframe(pd.DataFrame([{"Chance shown": b["range"], "Reads": b["n"], "Avg shown": _pct(b["shown"]),
+                                            "Hit": _pct(b["hit"]), f"Honest at {cal['s']:.2f}": _pct(b["honest"])}
+                                           for b in cal["buckets"]]), hide_index=True, width="stretch")
+                ll = cal.get("log_loss") or (None, None)
+                st.caption(f"Best-fitting honest-chance factor: **{cal['s']:.2f}** (1.00 = trust the chances as "
+                           f"shown; active now: {cal.get('active', 1.0):.2f}). Log loss {ll[0]} → {ll[1]}. Used in "
+                           f"ticket math (Slip Lab's ticket checker); the boards keep showing the model's chance.")
+                if cal.get("enough") and abs(cal["s"] - cal.get("active", 1.0)) >= 0.02 and \
+                        st.button(f"Use {cal['s']:.2f} for {SPORT_KEY} tickets", key=f"pgr_cal_{mpick}"):
+                    if MS.approve_calibration(SPORT_KEY, cal["s"], {"morning": mpick, "n": cal["n"],
+                                                                     "log_loss": ll}):
+                        st.success("Saved — ticket math now uses it.")
         for d, s in sorted((rep.get("slates") or {}).items()):
             c = s["counts"]
             st.markdown(f"##### Slate {d}")

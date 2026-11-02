@@ -37,6 +37,7 @@ import streamlit as st
 import components as C
 import styling  # noqa: F401  (installs the theme-proof styles)
 import best_bets_data as BBD
+import props_engine as PE
 import basketball_markets as BM_
 import book_menu as BM
 import odds_api as O
@@ -258,6 +259,57 @@ sugg_box = st.container()
 # --------------------------------------------------------------------------- 2. leg pool
 can_menu = bool(API_KEY) and not is_pickem and not is_manual
 src_options = ["🎯 Model-priced props", "📖 Full book menu"]
+# Nov 2: check any ticket -- built here or in a book app -- before it's placed (parlay_check.py).
+with st.expander("🩺 Ticket checker — paste a ticket from any app before you place it", expanded=False):
+    import parlay_check as PC
+    st.caption("One leg per line: **Player | Market | Over 49.5 | -300** or an alt line **Player | Market | 50+**. "
+               "The price is optional (it's used when the model has no read for that leg). Each leg is read by the "
+               "same model as the boards, at its own line, then priced together.")
+    pc_txt = st.text_area("Legs", key="pc_legs", height=140,
+                          placeholder="Rachaad White | Rush + Rec Yards | 50+\nAntonio Williams | Receiving Yards | 40+\n"
+                                      "Treylon Burks | Receptions | 2+")
+    pc1, pc2 = st.columns([1, 1])
+    with pc1:
+        pc_price = st.number_input("Ticket price (American, e.g. 4550; 0 = skip)", value=0, step=50, key="pc_price")
+    with pc2:
+        st.write("")
+        pc_go = st.button("Check this ticket", key="pc_go", type="primary")
+    if pc_go and pc_txt.strip():
+        pc_legs, pc_bad = PC.parse(pc_txt)
+        for b in pc_bad:
+            st.warning(b)
+        pc_reads = {}
+        if SPORT_KEY in BBD.PROPS_MODEL_SPORTS:
+            try:
+                pc_reads = BBD.load_slate_reads(SPORT_KEY, date_str, board_book) or {}
+            except Exception as exc:                                     # noqa: BLE001
+                st.caption(f"Couldn't load the model's reads ({type(exc).__name__}); priced from your prices only.")
+        else:
+            st.caption(f"{_active.label} isn't on the player-props model yet — legs are priced from your prices.")
+        pc_read = [PC.read_leg(l, pc_reads, SPORT_KEY) for l in pc_legs]
+        if pc_read:
+            res = PC.check(pc_read, pc_price or None)
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Cashes", f"{res['p_all']:.1%}", help="Every leg hits (legs treated as independent).")
+            m2.metric("Misses by one", f"{res['p_miss_one']:.1%}",
+                      help="Exactly one leg misses — the most common way a long ticket loses.")
+            m3.metric("Fair price", "—" if res["fair_american"] is None else f"{res['fair_american']:+d}")
+            m4.metric("Value at your price", "—" if res["ev"] is None else f"{res['ev']:+.0%}")
+            weak = res["weakest"]
+            st.dataframe(pd.DataFrame([{
+                "Leg": ("⚠️ " if l is weak else "") + f"{l['player']} {l['market']} {l['side']} {l['line']:g}",
+                "Chance": f"{l['p']:.0%}",
+                "Projection": "—" if l.get("projection") is None else f"{l['projection']:.1f}",
+                "Cushion": PE.cushion_text(l.get("cushion")),
+                "From": l["source"], "Notes": " · ".join(l["flags"]) or "—"} for l in pc_read]),
+                hide_index=True, width="stretch")
+            if weak is not None:
+                st.info(f"Weakest leg: **{weak['player']} {weak['market']} {weak['side']} {weak['line']:g}** "
+                        f"({weak['p']:.0%}). Dropping it would make the ticket "
+                        f"{res['p_all'] / max(weak['p'], 1e-9):.0%} to cash.")
+            for w in res["warnings"]:
+                st.warning(w)
+
 C.section_header("🎯", "Leg pool", f"Pick legs to build a slip — priced at {book_label}", "#1f6feb")
 src = st.radio("Where do legs come from?", src_options, horizontal=True, key="slip_lab_src",
                help="Model-priced props are the ones the model has a view on (with an edge you can trust or not). "

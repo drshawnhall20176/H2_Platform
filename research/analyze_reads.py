@@ -93,6 +93,11 @@ def main(argv=None) -> int:
         if not rows:
             continue
         print(f"overall hit {sum(r['y'] for r in rows) / len(rows):.1%}")
+        import calibration as CAL
+        cal = CAL.fit([{"result": "hit" if r["y"] else "miss", "chance": r["chance"], "market": r["market"]} for r in rows])
+        print(f"CALIBRATION s={cal['s']} n={cal['n']} log loss {cal.get('log_loss')} brier {cal.get('brier')}")
+        for b in cal["buckets"]:
+            print(f"CAL   {b['range']:>9s} n={b['n']:4d} shown {b['shown']:.0%}  honest {b['honest']:.0%}  hit {b['hit']:.0%}")
         print("chance   ", bucket(rows, "chance", [0, .5, .55, .6, .65, .7, .75, .8, 1.01], ""))
         print("cushion  ", bucket(rows, "cushion", [-9, 0, .05, .1, .15, .2, .3, .5, 99], ""))
         print("edge     ", bucket(rows, "ev", [-9, -.05, 0, .03, .06, .1, .15, 9], ""))
