@@ -100,6 +100,33 @@ def main(argv=None) -> int:
         print("side     ", group(rows, "side"))
         print("gap      ", group(rows, "gap"))
         print("market   ", group(rows, "market", 30))
+        lean = [r for r in rows if (r["chance"] or 0) >= 0.5 and r["market"] not in ("Anytime TD", "Goals")]
+        print(f"-- reads the model leans on (chance 50%+, no TD/goal scorer props): {len(lean)}, "
+              f"hit {sum(r['y'] for r in lean) / max(len(lean), 1):.1%}")
+        for sd in ("Over", "Under"):
+            g = [r for r in lean if r["side"] == sd]
+            if g:
+                print(f"   {sd:5s} n={len(g)} hit {sum(r['y'] for r in g) / len(g):.0%}   by chance: "
+                      + bucket(g, "chance", [.5, .55, .6, .65, .7, .8, 1.01], ""))
+        ms = defaultdict(list)
+        for r in lean:
+            ms[(r["market"], r["side"])].append(r["y"])
+        print("   market x side: " + "  ".join(f"{m} {sd}: {sum(v) / len(v):.0%} (n={len(v)})"
+                                             for (m, sd), v in sorted(ms.items(), key=lambda t: -len(t[1])) if len(v) >= 12))
+        print("   use: " + group(lean, "use", 8) + "   | gap: " + group(lean, "gap", 8))
+        rules = {
+            "Under & chance 60%+": lambda r: r["side"] == "Under" and r["chance"] >= .6,
+            "Under & chance 55%+ & no big gap": lambda r: r["side"] == "Under" and r["chance"] >= .55 and not str(r["gap"]).startswith("big"),
+            "chance 60%+ & cushion 15%+": lambda r: r["chance"] >= .6 and (r["cushion"] or 0) >= .15,
+            "playable Use (not Pass)": lambda r: r["use"] not in ("⛔ Pass", "—"),
+            "playable & Under": lambda r: r["use"] not in ("⛔ Pass", "—") and r["side"] == "Under",
+            "playable & Over": lambda r: r["use"] not in ("⛔ Pass", "—") and r["side"] == "Over",
+        }
+        for nm, fn in rules.items():
+            g = [r for r in lean if fn(r)]
+            if g:
+                print(f"   rule {nm:34s} hit {sum(r['y'] for r in g) / len(g):.0%} (n={len(g)}, "
+                      f"avg chance {sum(r['chance'] for r in g) / len(g):.0%})")
         for nm, fn in (("chance", lambda r: r["chance"]), ("cushion", lambda r: r["cushion"]),
                        ("edge", lambda r: r["ev"]),
                        ("chance x cushion", lambda r: None if r["chance"] is None or r["cushion"] is None
