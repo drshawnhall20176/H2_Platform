@@ -73,7 +73,11 @@ def main(argv=None) -> int:
                  "game": r["game"], "model_prob": r["model_prob"]} for r in rows]
         res = B.log_parlay_ticket(a.ticket, legs, int(float(a.ticket_odds)), a.stake, date_str, a.sport,
                                   book=rows[0]["book"] if rows else None, notes=a.tag or None)
-        print(f"logged ticket '{a.ticket}': {len(legs)} legs @ {int(float(a.ticket_odds)):+d}, stake {a.stake} "
+        if a.real.lower() not in ("1", "true", "yes"):                # a tracking ticket: never counted as money
+            for bid in [res["header_id"]] + list(res["leg_ids"]):
+                B.update_bet(int(bid), is_real_bet=False)
+        print(f"logged {'REAL' if a.real.lower() in ('1', 'true', 'yes') else 'tracking'} ticket '{a.ticket}': "
+              f"{len(legs)} legs @ {int(float(a.ticket_odds)):+d}, stake {a.stake} "
               f"(header {res['header_id']})")
         return 0
     have = {(b.get("slate_date"), _key(b.get("player"), b.get("market"), b.get("side")), float(b.get("line") or 0))
