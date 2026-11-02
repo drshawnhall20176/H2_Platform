@@ -1,0 +1,38 @@
+# Read-only: one day's morning report, Bet Log rows and graded snapshots for one market (inspect_day.py).
+name: inspect-day
+
+on:
+  workflow_dispatch:
+    inputs:
+      sport:
+        default: "NFL"
+      date:
+        description: "Slate date (YYYY-MM-DD)"
+        required: true
+      market:
+        description: "Grade every snapshot in this market (e.g. Anytime TD). Blank = skip."
+        default: ""
+      part:
+        description: "report / bets / market / all"
+        default: "all"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Inspect
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python inspect_day.py --sport "${{ inputs.sport }}" --date "${{ inputs.date }}" --market "${{ inputs.market }}" --part "${{ inputs.part }}"
