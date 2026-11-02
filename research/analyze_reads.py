@@ -113,6 +113,24 @@ def main(argv=None) -> int:
             ms[(r["market"], r["side"])].append(r["y"])
         print("   market x side: " + "  ".join(f"{m} {sd}: {sum(v) / len(v):.0%} (n={len(v)})"
                                              for (m, sd), v in sorted(ms.items(), key=lambda t: -len(t[1])) if len(v) >= 12))
+        bias = defaultdict(lambda: [0.0, 0.0, 0])
+        for r in rows:
+            if r["actual"] is not None and r["projection"] is not None and r["line"] is not None:
+                b = bias[r["market"]]
+                b[0] += r["actual"]
+                b[1] += r["projection"]
+                b[2] += 1
+        print("   actual vs projection: " + "  ".join(f"{m} {a / p_ - 1:+.0%} (n={n})" for m, (a, p_, n) in
+                                                     sorted(bias.items(), key=lambda t: -t[1][2]) if n >= 20 and p_))
+        lb = defaultdict(lambda: [0.0, 0.0, 0])
+        for r in rows:
+            if r["actual"] is not None and r["line"] is not None and r["projection"] is not None:
+                b = lb[r["market"]]
+                b[0] += r["actual"]
+                b[1] += r["line"]
+                b[2] += 1
+        print("   actual vs BOOK LINE:  " + "  ".join(f"{m} {a / l_ - 1:+.0%}" for m, (a, l_, n) in
+                                                     sorted(lb.items(), key=lambda t: -t[1][2]) if n >= 20 and l_))
         print("   use: " + group(lean, "use", 8) + "   | gap: " + group(lean, "gap", 8))
         rules = {
             "Under & chance 60%+": lambda r: r["side"] == "Under" and r["chance"] >= .6,
