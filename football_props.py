@@ -109,6 +109,12 @@ EFF_SHRINK = {"tgt": 30.0, "rush_att": 40.0, "pass_att": 120.0, "touch": 50.0}  
 # loss at every position (QB .4445 -> .4387, RB .5472 -> .5374, WR .4727 -> .4697, TE .4713 -> .4678) and fixed the
 # overconfidence at the top (players priced 60%+ scored 50-53%).
 MARKET_SHRINK = {"Anytime TD": 200.0}
+# Nov 2: what a 🎯 Single needs, per sport -- (edge at the price, chance). NFL singles at +3% hit 46% (113 graded
+# Nov 1, 9-14 among the day's picks) while 🎟️ parlay-grade legs hit 63%. Anytime TD "Yes" singles keep their own bar.
+SINGLE_BAR = {"NFL": (0.05, 0.55)}
+# Nov 2: QB volume moves less with the opponent than yards do. Backtest (research/backtest_qb_volume.py, 564 starter
+# games 2025-26): the opponent's attempts-allowed factor at half strength cut the miss 6.72 -> 6.55 attempts a game.
+DEFENSE_WEIGHT = {"Pass Attempts": 0.5, "Pass Completions": 0.5}
 PROMOTED_SHRINK_MULT = 2.0
 PROMOTED_SHARE_MULT = 1.5
 CARRY_TO_REPLACEMENT = 0.7
@@ -249,7 +255,8 @@ def player_rows(roster: Sequence[Dict], team, defense, market: str, pgames, allo
     m = MARKETS[market]
     if m.get("group") in ("kicker", "defense"):
         import football_special as FS
-        return FS.player_rows(roster, team, defense, market, special or {}, lines=lines, context=context, sport=sport)
+        return _single_bar(FS.player_rows(roster, team, defense, market, special or {}, lines=lines, context=context,
+                                          sport=sport), sport)
     ctx = context or {}
     lines, prices = lines or {}, ctx.get("prices") or {}
     tgt_ok = has_targets(pgames)
@@ -357,7 +364,9 @@ def player_rows(roster: Sequence[Dict], team, defense, market: str, pgames, allo
         key = r.get("pid") if r.get("pid") is not None else r.get("name")
         flags: List[str] = []
         proj = opp = None
-        f = PPR.blended_factor(PPR.raw_factor(table, defense, slot), None, "season")
+        f = dict(PPR.blended_factor(PPR.raw_factor(table, defense, slot), None, "season"))
+        if market in DEFENSE_WEIGHT and f.get("factor") is not None:
+            f["factor"] = 1.0 + DEFENSE_WEIGHT[market] * (f["factor"] - 1.0)
         env_mult = 1.0
         flags.extend(i["flags0"])
         if not i["out"]:
@@ -399,6 +408,14 @@ def player_rows(roster: Sequence[Dict], team, defense, market: str, pgames, allo
                               f["factor"], env_mult, flags, out=i["out"],
                               returning=len(i["missed"]) >= RETURN_MISSED and bool(i["games"]) and not i["out"]
                               and i["games"][0].get("game") != (window[0] if window else None)))
+    return _single_bar(rows, sport)
+
+
+def _single_bar(rows: List[Dict], sport: str) -> List[Dict]:
+    bar = SINGLE_BAR.get(sport)
+    if bar:
+        for r in rows:
+            r["single_ev"], r["single_chance"] = bar
     return rows
 
 
