@@ -316,17 +316,21 @@ with tab_week:
                 c1.caption("Lower = lean more on the books' line. Every page uses it within 10 minutes; retire it any "
                            "time on the next tab.")
                 if c2.button("Approve", key=f"pgr_blend_{wpick}_{i}"):
+                    if not hasattr(MS, "approve_blend"):
+                        st.error("The app needs a reboot to load this feature (Manage app → Reboot).")
+                        st.stop()
                     ok = MS.approve_blend(p["sport"], p["market"], p["w"], {"week": wpick, "n": p["n"],
                                                                             "gain": p.get("gain")})
                     st.success("Approved.") if ok else st.error("Couldn't save it.")
 
 with tab_adj:
-    for b in MS.list_blend(active_only=False):
+    # getattr: Streamlit Cloud can re-run this page with an older model_store still loaded (until the app reboots)
+    for b in getattr(MS, "list_blend", lambda **k: [])(active_only=False):
         with st.container(border=True):
             st.markdown(f"**{b['sport']} · {b['market']}** — model weight {float(b['w']):.2f} vs the books"
                         f" · {'🟢 active' if b.get('active') else '⚪ retired'} · approved {str(b.get('approved_ts'))[:16]}")
             if b.get("active") and st.button("Retire", key=f"pgr_retire_blend_{b['id']}"):
-                st.success("Retired.") if MS.retire_blend(b["id"]) else st.error("Couldn't retire it.")
+                st.success("Retired.") if getattr(MS, "retire_blend", lambda _i: False)(b["id"]) else st.error("Couldn't retire it.")
     rows = MS.list_tuning(active_only=False)
     if not rows:
         st.info("No adjustments approved yet.")
