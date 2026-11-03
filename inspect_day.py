@@ -34,8 +34,8 @@ def main(argv=None) -> int:
         rep = MS.load_daily_review(a.sport, morning) or {}
         s = (rep.get("slates") or {}).get(a.date) or {}
         _out(f"## {a.sport} morning report {morning}\n")
-        _out("```\n" + json.dumps({k: s.get(k) for k in ("counts", "model", "use", "markets", "big_gap", "causes",
-                                                          "top_misses")}, indent=1, default=str)[:20000] + "\n```")
+        _out("```\n" + json.dumps({k: s.get(k) for k in ("counts", "model", "use", "most_probable", "markets",
+                                                          "big_gap", "causes", "top_misses")}, indent=1, default=str)[:20000] + "\n```")
         _out("Suggestions:\n```\n" + json.dumps(rep.get("suggestions"), indent=1, default=str)[:8000] + "\n```")
     if a.part in ("all", "bets"):
         bets = [b for b in B.list_bets(sport=a.sport) if str(b.get("slate_date") or "")[:10] == a.date]
