@@ -42,17 +42,49 @@ TENNIS_MIN_MATCHES = 30        # both players need this many rated matches
 TENNIS_GAMES_EDGE = None
 HOOPS_RULES = {"EUROLEAGUE": {"spread": 4.0, "total": None, "ml": None},
                "NBL": {"spread": None, "total": None, "ml": 0.05},
-               "NCAAMB": {"spread": 8.0, "total": None, "ml": None}}
+               "NCAAMB": {"spread": 16.0, "total": None, "ml": None}}
 # NCAAMB (research/backtest_ncaamb_games.py, 5,554 games 2024-26 with a pre-game line): spreads improved steadily
 # with the gap -- 4+ 53.1%, 6+ 54.4%, 8+ 55.2% (1065-866), 10+ 57.6% (n=1,425); both seasons alike, November best.
 # Totals 51-53% (off). The moneyline "showed" +15-21%, which is too good to be real (stale outlier prices at
 # small books) -- off.
-HOOPS_EVIDENCE = {
-    "NCAAMB": "Backtest vs real lines (5,554 games, 2024-26): spreads with the model 8+ points off the line went "
-              "1065-866 (55.2%), 10+ points 57.6% over 1,425; both seasons alike, November strongest. Totals showed no "
-              "real edge; moneylines are off.",
+# Nov 3 correction: those cumulative numbers hid where the edge is. By gap BAND the covers were 8-10 48.2% (n=506),
+# 10-16 52.9% (879), 16-20 56.6% (251), 20+ 72.5% (295) -- the edge is in the biggest disagreements only, so the
+# college pick bar is 16+. EuroLeague by band: 4-6 50.4% (119), 6-8 57.1% (56), 8+ 64.3% (42) -> 6+.
+HOOPS_RULES["EUROLEAGUE"]["spread"] = 6.0
+# Estimated cover chance by gap band (from those backtests) -> the same Use tags the props pages show.
+COVER_BANDS = {
+    "NCAAMB": ((0, 8, 0.50, 4612), (8, 10, 0.482, 506), (10, 16, 0.529, 879), (16, 20, 0.566, 251), (20, 999, 0.725, 295)),
+    "EUROLEAGUE": ((0, 4, 0.50, 775), (4, 6, 0.504, 119), (6, 8, 0.571, 56), (8, 999, 0.643, 42)),
 }
-HOOPS_SPREAD_EDGE = HOOPS_RULES["EUROLEAGUE"]["spread"]
+HOOPS_EVIDENCE = {
+    "NCAAMB": "Backtest vs real lines (5,554 games, 2024-26), covers by how far the model was from the spread: 8-10 "
+              "points 48%, 10-16 53% (break-even), 16-20 57% (251 games), 20+ 72.5% (295). The edge is only in the "
+              "biggest disagreements, so picks start at 16+. Totals and moneylines are off.",
+    "EUROLEAGUE": "Backtest vs real lines (2022-26), covers by gap: 4-6 points 50%, 6-8 57% (56 games), 8+ 64% (42). "
+                  "Picks start at 6+; the samples are small. Totals and moneylines showed no edge.",
+}
+
+
+def cover_estimate(league: str, gap: Optional[float]) -> Optional[Dict]:
+    """The backtest's cover rate for this size of disagreement: {"chance", "n", "band"}; None without a table."""
+    if gap is None:
+        return None
+    for lo, hi, ch, n in COVER_BANDS.get(league, ()):
+        if lo <= abs(gap) < hi:
+            return {"chance": ch, "n": n, "band": f"{lo}–{hi}" if hi < 999 else f"{lo}+"}
+    return None
+
+
+def use_tag(chance: Optional[float]) -> Dict:
+    """The props pages' tags for a game line: 60%+ -> Parlay + Single and Most probable; 55-60% -> Single only."""
+    import props_engine as PE
+    if chance is None:
+        return {"use": "—", "lock": False}
+    if chance >= PE.MOST_PROBABLE_CHANCE:
+        return {"use": PE.USE_BOTH, "lock": True}
+    if chance >= 0.55:
+        return {"use": PE.USE_SINGLE, "lock": False}
+    return {"use": PE.USE_PASS, "lock": False}
 HOOPS_ML_EDGE = 0.05
 TENNIS_SEED_FROM = date(2023, 1, 1)
 
@@ -307,7 +339,11 @@ def hoops_build(league: str, r: Optional[Dict], events: Sequence[Dict], now: dat
         p = I.win_prob(proj["margin"])
         ml_edge = None if mk["fair_home"] is None else p - mk["fair_home"]
         tot_edge = None if mk["total"] is None else proj["total"] - mk["total"]
+        ce = cover_estimate(league, edge)
+        tag = use_tag(ce["chance"] if ce else None)
         out.append({"sport": league, "game_id": str(ev.get("id")), "kickoff": ko.isoformat(), "home": home,
+                    "cover_est": None if not ce else ce["chance"], "cover_n": None if not ce else ce["n"],
+                    "use": tag["use"], "lock": tag["lock"],
                     "away": away, "model_margin": round(proj["margin"], 1), "model_total": round(proj["total"], 1),
                     "line": line_margin, "home_spread": mk["home_spread"], "edge": round(edge, 2),
                     "line_total": mk["total"], "total_edge": None if tot_edge is None else round(tot_edge, 1),
