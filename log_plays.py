@@ -71,6 +71,8 @@ def main(argv=None) -> int:
     ap.add_argument("--tag", default="")
     ap.add_argument("--ticket", default="", help="log the picks as ONE parlay under this ticket name")
     ap.add_argument("--ticket-odds", default="", help="the parlay's total American odds")
+    ap.add_argument("--result", default="", help="win / loss / push: record a result that's already known (e.g. a "
+                    "settled live bet in a league the overnight grader doesn't cover) on everything logged in this run")
     ap.add_argument("--fix-model", default="false",
                     help="true = don't log; refresh the model %% on already-logged rows (singles AND ticket legs) for these picks")
     a = ap.parse_args(argv)
@@ -110,6 +112,11 @@ def main(argv=None) -> int:
                  "game": r["game"], "model_prob": r["model_prob"]} for r in rows]
         res = B.log_parlay_ticket(a.ticket, legs, int(float(a.ticket_odds)), a.stake, date_str, a.sport,
                                   book=rows[0]["book"] if rows else None, notes=a.tag or None)
+        if a.result.strip().lower() in ("win", "loss", "push"):
+            B.update_bet(int(res["header_id"]), result=a.result.strip().lower())
+            if a.result.strip().lower() == "win":                  # a won parlay means every leg won; a lost one
+                for bid in res["leg_ids"]:                          # doesn't say which leg missed, so legs stay open
+                    B.update_bet(int(bid), result="win")
         if a.real.lower() not in ("1", "true", "yes"):                # a tracking ticket: never counted as money
             for bid in [res["header_id"]] + list(res["leg_ids"]):
                 B.update_bet(int(bid), is_real_bet=False)
@@ -126,7 +133,9 @@ def main(argv=None) -> int:
         if k in have:
             print(f"skip (already logged): {r['player']} {r['market']} {r['side']} {r['line']}")
             continue
-        B.add_bet(**r)
+        bid = B.add_bet(**r)
+        if a.result.strip().lower() in ("win", "loss", "push") and bid:
+            B.update_bet(int(bid), result=a.result.strip().lower())
         have.add(k)
         n += 1
         print(f"logged: {r['player']} {r['market']} {r['side']} {r['line']} @ {r['entry_odds']:+.0f} "
