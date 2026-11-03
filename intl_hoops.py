@@ -51,9 +51,16 @@ def _num(x) -> Optional[float]:
         return None
 
 
+ALIAS = {"munchen": "munich", "muenchen": "munich", "milano": "milan", "olimpia": "milan", "armani": "milan",
+         "beograd": "belgrade", "zvezda": "crvena", "partizan": "partizan", "olympiakos": "olympiacos",
+         "pireus": "piraeus", "virtus": "virtus", "bologna": "bologna", "baskonia": "baskonia", "vitoria": "baskonia",
+         "gasteiz": "baskonia", "saski": "baskonia", "efes": "efes", "anadolu": "efes", "maccabi": "maccabi",
+         "zalgiris": "zalgiris", "kaunas": "zalgiris", "villeurbanne": "asvel", "lyon": "asvel"}
+
+
 def tokens(name: Optional[str]) -> set:
     s = unicodedata.normalize("NFKD", str(name or "")).encode("ascii", "ignore").decode().lower()
-    return {w for w in re.split(r"[^a-z0-9]+", s) if len(w) >= 3 and w not in STOP}
+    return {ALIAS.get(w, w) for w in re.split(r"[^a-z0-9]+", s) if len(w) >= 3 and w not in STOP}
 
 
 def same_team(a: Optional[str], b: Optional[str]) -> bool:
@@ -64,7 +71,7 @@ def _key(name: Optional[str]) -> str:
     return " ".join(sorted(tokens(name)))
 
 
-def find_team(names: Iterable[str], name: str) -> Optional[str]:
+def find_team(names: Iterable[str], name: str, loose: bool = False) -> Optional[str]:
     """The one name in `names` that is this team: an exact match (ignoring case / accents / filler words) first, else
     the single best word overlap (share of the shorter name's words). None when nothing matches or two tie -- college
     has many "Wildcats" and "Tennessee ..." teams, so a guess is worse than no read."""
@@ -86,6 +93,8 @@ def find_team(names: Iterable[str], name: str) -> Optional[str]:
     scored.sort(reverse=True)
     if len(scored) > 1 and scored[0][:2] == scored[1][:2]:
         return None
+    if loose:                                                   # small leagues: one distinctive shared word is enough
+        return scored[0][2]
     return scored[0][2] if scored[0][0] >= 0.99 or scored[0][1] >= 2 else None
 
 
@@ -237,12 +246,12 @@ def ratings(games: Sequence[Dict], lam: float = 3.0) -> Optional[Dict]:
     return GP.ratings(games, lam)
 
 
-def project(r: Optional[Dict], home: str, away: str, neutral: bool = False) -> Optional[Dict]:
+def project(r: Optional[Dict], home: str, away: str, neutral: bool = False, loose: bool = False) -> Optional[Dict]:
     import game_picks as GP
     if not r:
         return None
-    h = find_team(r["off"], home)
-    a = find_team(r["off"], away)
+    h = find_team(r["off"], home, loose)
+    a = find_team(r["off"], away, loose)
     if not h or not a or h == a:
         return None
     m = GP.project(r, h, a, neutral)
