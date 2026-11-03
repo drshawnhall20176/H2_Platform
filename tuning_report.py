@@ -75,7 +75,8 @@ def prepare(graded: Sequence[Dict], default_w: float) -> List[Dict]:
             w0 = min(default_w, PE.GAP_MODEL_WEIGHT) if r.get("gap") == "big" else default_w
             if w0 > 0:
                 q_mod = _clip((r["chance"] - (1 - w0) * q_mkt) / w0)
-        out.append({"y": 1 if r["result"] == "hit" else 0, "chance": float(r["chance"]), "price": r.get("price"),
+        out.append({"lock": PE.most_probable(r.get("chance"), r.get("cushion"), r.get("gap")),
+                    "y": 1 if r["result"] == "hit" else 0, "chance": float(r["chance"]), "price": r.get("price"),
                     "q_mkt": q_mkt, "q_mod": q_mod, "market": r.get("market") or "?", "side": side,
                     "date": r.get("slate_date"), "gap": r.get("gap")})
     return out
@@ -139,6 +140,25 @@ def build(sport: str, graded: Sequence[Dict], bets: Sequence[Dict], days: int = 
               f"({'a good sign' if c['avg'] > 0 else 'the market moved against us — the picks are not ahead of it yet'})."))
     md.append("")
 
+    locks = [r for r in rows if r.get("lock")]
+    md += [f"### {PE.MOST_PROBABLE} picks (Best Bets' lock)", ""]
+    if not locks:
+        md += ["No lock picks graded in this window.", ""]
+    else:
+        lh = sum(r["y"] for r in locks)
+        md += [f"**{lh}-{len(locks) - lh}** ({lh / len(locks):.0%}) · the model said "
+               f"{sum(r['chance'] for r in locks) / len(locks):.0%} · profit {_pct(profit(locks), True)} per $1 at the "
+               "posted price.", "", "| Market | Side | Record | Hit | Shown | Profit per $1 |", "|---|---|---|---|---|---|"]
+        lby = defaultdict(list)
+        for r in locks:
+            lby[(r["market"], r["side"])].append(r)
+        for (mk, sd), g in sorted(lby.items(), key=lambda kv: -len(kv[1])):
+            if len(g) < 5:
+                continue
+            h = sum(r["y"] for r in g)
+            md.append(f"| {mk} | {sd} | {h}-{len(g) - h} | {h / len(g):.0%} | "
+                      f"{sum(r['chance'] for r in g) / len(g):.0%} | {_pct(profit(g), True)} |")
+        md.append("")
     md += ["### 1. Calibration — does the chance shown match how often it hits?", "",
            "| Chance shown | Reads | Avg shown | Hit | Off by |", "|---|---|---|---|---|"]
     for lo, hi in BUCKETS:
@@ -207,7 +227,10 @@ def build(sport: str, graded: Sequence[Dict], bets: Sequence[Dict], days: int = 
                + "{" + ", ".join(f'"blend:{p["market"]}": {p["w"]:.2f}' for p in proposals) + "}"]
     else:
         md.append("None this week — no market has enough reads with a clear improvement.")
-    return {"sport": sport, "markdown": "\n".join(md), "proposals": proposals, "n": n}
+    lock_rec = None
+    if locks:
+        lock_rec = {"hits": sum(r["y"] for r in locks), "graded": len(locks), "profit": profit(locks)}
+    return {"sport": sport, "markdown": "\n".join(md), "proposals": proposals, "n": n, "locks": lock_rec}
 
 
 def _dates(sport: str, days: int, today: date) -> List[str]:
