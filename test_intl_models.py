@@ -329,3 +329,13 @@ def test_game_lab_shows_model_side_gap_and_tags(monkeypatch):
     assert not at.exception, [e.value for e in at.exception]
     t = at.dataframe[0].value.to_string()
     assert "Army Black Knights +24.5" in t and "21.5" in t and "72%" in t and "🔒 Most probable" in t
+
+
+def test_euroleague_name_variants_match_loosely():
+    names = ["Baskonia Vitoria-Gasteiz", "FC Bayern Munich", "EA7 Emporio Armani Milan", "Fenerbahce Beko Istanbul",
+             "LDLC ASVEL Villeurbanne", "Real Madrid"]
+    assert I.find_team(names, "Saski Baskonia", loose=True) == "Baskonia Vitoria-Gasteiz"
+    assert I.find_team(names, "FC Bayern München", loose=True) == "FC Bayern Munich"
+    assert I.find_team(names, "Pallacanestro Olimpia Milano", loose=True) == "EA7 Emporio Armani Milan"
+    assert I.find_team(names, "ASVEL Lyon Villeurbanne", loose=True) == "LDLC ASVEL Villeurbanne"
+    assert I.find_team(names, "Pallacanestro Olimpia Milano") is None   # strict (college) still refuses one shared word

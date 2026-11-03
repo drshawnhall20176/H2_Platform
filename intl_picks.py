@@ -330,7 +330,7 @@ def hoops_build(league: str, r: Optional[Dict], events: Sequence[Dict], now: dat
         if ko <= now:
             continue
         home, away = ev.get("home_team"), ev.get("away_team")
-        proj = I.project(r, home, away)
+        proj = I.project(r, home, away, loose=league != "NCAAMB")
         mk = market(ev, home, away)
         if not proj or mk["home_spread"] is None:
             continue
@@ -449,9 +449,10 @@ def settle_logged(league: str, db_path: Optional[str] = None) -> int:
     return n
 
 
-def _team_is(a: str, b: str) -> bool:
-    """Strict: the same team by exact name, or a confident word match (never just a shared nickname)."""
-    return I.find_team([a], b) is not None
+def _team_is(a: str, b: str, loose: bool = False) -> bool:
+    """Strict: the same team by exact name, or a confident word match (never just a shared nickname). Loose (small
+    leagues, where club names vary by source): one distinctive shared word."""
+    return I.find_team([a], b, loose) is not None
 
 
 def hoops_grade(league: str, results: Sequence[Dict], db_path: Optional[str] = None) -> int:
@@ -462,9 +463,10 @@ def hoops_grade(league: str, results: Sequence[Dict], db_path: Optional[str] = N
         for g in results:
             if abs((date.fromisoformat(g["date"]) - date.fromisoformat(day)).days) > 1:
                 continue
-            if _team_is(g["home_team"], p["home"]) and _team_is(g["away_team"], p["away"]):
+            lz = league != "NCAAMB"
+            if _team_is(g["home_team"], p["home"], lz) and _team_is(g["away_team"], p["away"], lz):
                 hp, ap = g["home_points"], g["away_points"]
-            elif _team_is(g["home_team"], p["away"]) and _team_is(g["away_team"], p["home"]):
+            elif _team_is(g["home_team"], p["away"], lz) and _team_is(g["away_team"], p["home"], lz):
                 hp, ap = g["away_points"], g["home_points"]
             else:
                 continue
