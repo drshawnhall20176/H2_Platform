@@ -13,6 +13,7 @@ import streamlit as st
 import intl_hoops as I
 import intl_picks as IP
 import model_store as MS
+import props_engine as PE
 
 EVIDENCE = {
     "EUROLEAGUE": "Backtest vs real lines: spreads with the model 4+ points off went 119-98 (54.8%) over 2022-26, 6+ "
@@ -32,6 +33,19 @@ def _pick(p):
     if p.get("ml_pick"):
         out.append(f"{p['home'] if p['ml_pick'] == 'home' else p['away']} ML")
     return " · ".join(out) or "—"
+
+
+def _likes(p):
+    if p.get("home_spread") is None or p.get("edge") is None:
+        return "—"
+    if p["edge"] >= 0:
+        return f"{p['home']} {p['home_spread']:+g}"
+    return f"{p['away']} {-p['home_spread']:+g}"
+
+
+def _use(p):
+    u = p.get("use") or "—"
+    return f"{PE.MOST_PROBABLE} · {u}" if p.get("lock") else u
 
 
 def _tip(p):
@@ -63,12 +77,14 @@ def render(league: str, search: bool = False) -> None:
         st.dataframe(pd.DataFrame([{
             "Tip (ET)": _tip(p),
             "Game": f"{p['away']} @ {p['home']}",
-            "Model margin": f"{p['home']} {p['model_margin']:+.1f}",
             "Line": f"{p['home']} {p['home_spread']:+g}",
-            "Edge (pts)": f"{p['edge']:+.1f}",
+            "Model likes": _likes(p),
+            "Gap (pts)": f"{abs(p['edge']):.1f}",
+            "Est. cover": "—" if p.get("cover_est") is None else f"{p['cover_est']:.0%}",
+            "Use": _use(p),
             "Total: model / line": f"{p.get('model_total')} / {p.get('line_total') or '—'}",
             "Win chance: model / market": f"{p['model_p']:.0%} / " + ("—" if p.get("fair_home") is None else f"{p['fair_home']:.0%}"),
-            "Tracking pick": _pick(p)} for p in sorted(upcoming, key=lambda x: x["kickoff"])]),
+            "Tracking pick": _pick(p)} for p in sorted(upcoming, key=lambda x: (-(abs(x.get("edge") or 0)), x["kickoff"]))]),
             hide_index=True, width="stretch")
         what = []
         if rules.get("spread") is not None:
@@ -77,11 +93,32 @@ def render(league: str, search: bool = False) -> None:
             what.append(f"a total pick needs the model {rules['total']:g}+ points off")
         if rules.get("ml") is not None:
             what.append(f"a moneyline pick needs a {rules['ml']:.0%}+ edge")
-        st.caption("Edge = the model's home margin minus the margin the spread implies; "
+        st.caption("Model likes = the side the model would take against the spread, at the book's number; Gap = how many "
+                   "points the model's margin is from the spread (the size, not the sign, is what matters); Est. cover = "
+                   "how often that size of gap covered in the backtest; Use follows the props pages (🔒 / 🎟️ Parlay + "
+                   "Single at 60%+, 🎯 Single at 55-60%, ⛔ Pass below). "
                    + ("; ".join(what) if what else "no picks for this league — the model is shown for reference") + ".")
     if upcoming:
         log_panel(league, upcoming)
     st.markdown("##### Tracking record")
+    tagged = [p for p in done if p.get("use")]
+    if tagged:
+        rows = []
+        for label, keep in ((PE.MOST_PROBABLE, lambda p: p.get("lock")), (PE.USE_SINGLE, lambda p: p.get("use") == PE.USE_SINGLE),
+                            (PE.USE_PASS, lambda p: p.get("use") == PE.USE_PASS)):
+            res = []
+            for p in tagged:
+                if not keep(p) or p.get("final_home") is None or p.get("home_spread") is None:
+                    continue
+                line = p.get("close_line") if p.get("close_line") is not None else p.get("line")
+                d = (p["final_home"] - p["final_away"]) - line
+                if d != 0 and p.get("edge"):
+                    res.append((d > 0) == (p["edge"] > 0))
+            if res:
+                rows.append({"Use": label, "Record (model's side ATS)": f"{sum(res)}-{len(res) - sum(res)}",
+                             "Hit": f"{sum(res) / len(res):.0%}"})
+        if rows:
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
     rec = IP.record(done)
     if not rec:
         st.caption("Nothing graded yet.")

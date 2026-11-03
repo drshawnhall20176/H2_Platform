@@ -126,7 +126,7 @@ def test_hoops_build_and_record():
                                   ("Fenerbahce", "Real Madrid", 70, 90)] * 6]
     r = I.ratings(games, 3.0)
     recs = IP.hoops_build("EUROLEAGUE", r, [_ev("g1", "Real Madrid", "Monaco", -150, 130, spread=-2.5, total=160)], NOW)
-    assert len(recs) == 1 and recs[0]["pick"] == "home" and recs[0]["edge"] >= IP.HOOPS_SPREAD_EDGE
+    assert len(recs) == 1 and recs[0]["pick"] == "home" and recs[0]["edge"] >= IP.HOOPS_RULES["EUROLEAGUE"]["spread"]
     nbl = IP.hoops_build("NBL", r, [_ev("g1", "Real Madrid", "Monaco", 200, -250, spread=-2.5, total=160)], NOW)
     assert nbl[0]["pick"] is None and nbl[0]["ml_pick"] == "home"           # NBL: moneyline only
     graded = dict(recs[0], final_home=90, final_away=80, result="home", close_line=2.5)
@@ -257,7 +257,7 @@ def test_ncaamb_game_lab_and_intl_page_render(monkeypatch):
     assert not at2.exception, [e.value for e in at2.exception]
 
 
-def test_ncaamb_spread_rule_is_8_points():
+def test_ncaamb_spread_rule_is_16_points_with_use_tags():
     games = [{"home_team": h, "away_team": a, "home_points": hp, "away_points": ap, "neutral_site": False}
              for h, a, hp, ap in [("Duke Blue Devils", "Army Black Knights", 95, 55), ("Army Black Knights", "Duke Blue Devils", 50, 92),
                                   ("Army Black Knights", "Navy Midshipmen", 70, 68), ("Navy Midshipmen", "Duke Blue Devils", 55, 90)] * 5]
@@ -265,8 +265,15 @@ def test_ncaamb_spread_rule_is_8_points():
     recs = IP.hoops_build("NCAAMB", r, [_ev("c1", "Duke Blue Devils", "Army Black Knights", -5000, 2000, spread=-20.5, total=140),
                                         _ev("c2", "Duke Blue Devils", "Navy Midshipmen", -5000, 2000, spread=-38.5, total=140)], NOW)
     by = {x["game_id"]: x for x in recs}
-    assert by["c1"]["edge"] >= 8 and by["c1"]["pick"] == "home"
-    assert by["c2"]["pick"] in (None, "away") and by["c2"]["ml_pick"] is None and by["c2"]["total_pick"] is None
+    import props_engine as PE
+    c1 = by["c1"]
+    assert (c1["pick"] is not None) == (abs(c1["edge"]) >= 16)
+    assert by["c2"]["ml_pick"] is None and by["c2"]["total_pick"] is None
+    assert IP.use_tag(IP.cover_estimate("NCAAMB", 9)["chance"])["use"] == PE.USE_PASS
+    assert IP.use_tag(IP.cover_estimate("NCAAMB", -17)["chance"])["use"] == PE.USE_SINGLE
+    t = IP.use_tag(IP.cover_estimate("NCAAMB", 22)["chance"])
+    assert t["use"] == PE.USE_BOTH and t["lock"]
+    assert IP.cover_estimate("EUROLEAGUE", 7)["chance"] > 0.55 and IP.cover_estimate("NBL", 7) is None
 
 
 def test_logged_game_lab_bets_settle_from_the_graded_game(tmp_path, monkeypatch):
@@ -308,3 +315,17 @@ def test_game_lab_log_panel_logs_the_tracking_pick(monkeypatch):
     assert not at.exception, [e.value for e in at.exception]
     assert got and got[0]["side"] == "Duke Blue Devils" and got[0]["line"] == -20.5 and got[0]["market"] == "Spread"
     assert any("Logged #77" in s.value for s in at.success)
+
+
+def test_game_lab_shows_model_side_gap_and_tags(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    g = {"sport": "NCAAMB", "game_id": "c1", "kickoff": "2099-01-01T23:00:00+00:00", "home": "Duke Blue Devils",
+         "away": "Army Black Knights", "model_margin": 3.0, "home_spread": -24.5, "spread_price": -110, "edge": -21.5,
+         "cover_est": 0.725, "cover_n": 295, "use": "🎟️ Parlay + Single", "lock": True, "model_total": 150.0,
+         "line_total": 140.0, "model_p": 0.6, "fair_home": 0.95, "pick": "away", "result": None}
+    monkeypatch.setattr(MS, "load_game_picks", lambda sport, ungraded=False, db_path=None: [g])
+    at = AppTest.from_file(str(Path(__file__).parent / "views" / "45_NCAAMB_Game_Lab.py"), default_timeout=30)
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    t = at.dataframe[0].value.to_string()
+    assert "Army Black Knights +24.5" in t and "21.5" in t and "72%" in t and "🔒 Most probable" in t
