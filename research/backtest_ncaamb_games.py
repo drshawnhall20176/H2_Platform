@@ -44,7 +44,8 @@ def main() -> int:
         prior = [g for g in games if g["date"] < d and (date.fromisoformat(d) - date.fromisoformat(g["date"])).days <= 400]
         if len(prior) < 500:
             continue
-        r = I.ratings_weighted(prior, I.decay_weights(prior, d, "NCAAMB"), I.LEAGUES["NCAAMB"]["lam"])
+        r = I.ratings_weighted(prior, I.decay_weights(prior, d, "NCAAMB"), I.LEAGUES["NCAAMB"]["lam"],
+                               I.HFA_PRIOR["NCAAMB"])
         snap = H.snapshot("basketball_ncaab", f"{d}T{SNAP}Z")
         for g in by_day[d]:
             ev = I.match_event(snap, g["home_team"], g["away_team"])

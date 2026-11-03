@@ -66,7 +66,7 @@ def test_euroleague_parser():
 
 
 # --------------------------------------------------------------------------- live tracking (intl_picks)
-from datetime import date, datetime, timezone  # noqa: E402
+from datetime import date, datetime, timedelta, timezone  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 import intl_picks as IP  # noqa: E402
@@ -241,7 +241,7 @@ def test_weighted_ratings_and_decay():
              for d, h, a, hp, ap in [("2026-03-01", "A", "B", 70, 80), ("2026-03-02", "B", "A", 80, 70),
                                      ("2026-11-02", "A", "B", 90, 60), ("2026-11-02", "B", "A", 60, 90)] * 5]
     w = I.decay_weights(games, "2026-11-03", "NCAAMB")
-    assert w[2] > 0.95 and w[0] < 0.05                                  # 8 months old and last season
+    assert w[2] > 0.95 and 0.3 < w[0] < 0.6                              # last season: halved, the offseason not counted
     r = I.ratings_weighted(games, w, 1.0)
     assert r["off"]["A"] > r["off"]["B"]                                 # tonight's results dominate
 
@@ -377,3 +377,28 @@ def test_espn_pro_league_parser_and_nba_nhl_pages(monkeypatch):
         assert at.selectbox(key=f"hg_slot_{lg}").options == ["All slate", "Evening"]   # only slots with games
         at.selectbox(key=f"hg_slot_{lg}").set_value("Evening").run()
         assert any("Upcoming (1)" in m.value for m in at.markdown)
+
+
+def test_opening_night_keeps_last_season_and_a_sane_home_edge():
+    import random
+    rnd = random.Random(3)
+    teams = [f"Club{i:02d}x" for i in range(40)]
+    strength = {t: rnd.uniform(-12, 12) for t in teams}
+    games = []
+    d0 = date(2025, 11, 5)
+    for k in range(1200):                                       # last season: everyone plays everyone, home edge 3
+        h, a = rnd.sample(teams, 2)
+        day = d0 + timedelta(days=k % 150)
+        m = strength[h] - strength[a] + 3 + rnd.gauss(0, 10)
+        games.append({"date": day.isoformat(), "home_team": h, "away_team": a, "home_points": 72 + m / 2,
+                      "away_points": 72 - m / 2, "neutral_site": False})
+    for i in range(8):                                          # opening night: strong home teams beat weak visitors
+        h, a = sorted(teams, key=lambda t: -strength[t])[i], sorted(teams, key=lambda t: strength[t])[i]
+        games.append({"date": "2026-11-03", "home_team": h, "away_team": a, "home_points": 95, "away_points": 60,
+                      "neutral_site": False})
+    w = I.decay_weights(games, "2026-11-04", "NCAAMB")
+    assert sum(w[:1200]) > 50                                   # last season still carries real weight
+    r = I.ratings_weighted(games, w, 4.0, I.HFA_PRIOR["NCAAMB"])
+    assert 1.5 < r["hfa"] < 6                                   # not the 20+ the bug produced
+    best, worst = max(teams, key=strength.get), min(teams, key=strength.get)
+    assert I.project(r, best, worst)["margin"] > I.project(r, worst, best)["margin"] + 20

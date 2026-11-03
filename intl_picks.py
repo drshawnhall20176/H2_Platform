@@ -42,7 +42,7 @@ TENNIS_MIN_MATCHES = 30        # both players need this many rated matches
 TENNIS_GAMES_EDGE = None
 HOOPS_RULES = {"EUROLEAGUE": {"spread": 4.0, "total": None, "ml": None},
                "NBL": {"spread": None, "total": None, "ml": 0.05},
-               "NCAAMB": {"spread": 16.0, "total": None, "ml": None},
+               "NCAAMB": {"spread": None, "total": None, "ml": None},   # Nov 3: OFF -- opening-week model bug; re-testing
                "NBA": {"spread": None, "total": None, "ml": None},       # set from research/backtest_pro_games.py
                "NHL": {"spread": None, "total": None, "ml": None}}
 # NCAAMB (research/backtest_ncaamb_games.py, 5,554 games 2024-26 with a pre-game line): spreads improved steadily
@@ -382,7 +382,8 @@ def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optio
     if cfg.get("decay"):                                       # college: last ~13 months, recency-weighted
         since = (now.date() - timedelta(days=400)).isoformat()
         games = MS.load_results(league, since=since, db_path=db_path)
-        r = I.ratings_weighted(games, I.decay_weights(games, now.date().isoformat(), league), cfg["lam"]) \
+        r = I.ratings_weighted(games, I.decay_weights(games, now.date().isoformat(), league), cfg["lam"],
+                               I.HFA_PRIOR.get(league)) \
             if len(games) >= (500 if league == "NCAAMB" else 300) else None
     else:
         games = [g for g in MS.load_results(league, db_path=db_path) if str(g.get("season")) == season]
@@ -400,7 +401,8 @@ def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optio
         settled = settle_logged(league, db_path=db_path)
     except Exception:                                           # noqa: BLE001 -- settling never blocks a capture
         settled = 0
-    return {"archive_added": added, "season_games": len(games), "rated": r is not None, "events": len(future),
+    return {"archive_added": added, "season_games": len(games), "rated": r is not None,
+            "hfa": None if not r else round(r["hfa"], 2), "events": len(future),
             "bets_settled": settled,
             "priced": len(recs), "unmatched": missed[:40], "picks": sum(1 for x in recs if x["pick"]), "saved": saved,
             "graded": graded}
