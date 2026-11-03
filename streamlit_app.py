@@ -157,7 +157,7 @@ def run():
                          "Matchup Lab", "Track Record", "Data Health",
                          "Suggested Parlays", "Speculative Basket", "Graded Picks",
                          "Model Dashboard", "First Innings Totals", "Player Lines", "Slip Lab",
-                         "Postgame Review", "Position Matchups"}
+                         "Postgame Review", "Progression Plan", "Position Matchups"}
 
     # leading page-number -> (title, icon, stable url slug). The url_path is the key fix: it pins
     # each page to a predictable URL so reruns keep you on the same page instead of defaulting to
@@ -213,6 +213,7 @@ def run():
         "39": ("Analyst Desk", "🎙️", "analyst_desk"),   # angles + hidden gems + commentary + graded record
         "40": ("Analyst Record", "🧾", "analyst_record"),   # public, verifiable record of every locked call
         "41": ("Postgame Review", "🩻", "postgame_review"),   # kickoff snapshots graded vs box scores + approvals
+        "42": ("Progression Plan", "🧭", "progression_plan"),   # the slow-build business framework, from the Bet Log
     }
 
     # SIDEBAR SECTIONS, added directly on request: st.navigation natively supports a
@@ -244,7 +245,7 @@ def run():
         SECTION_OF[k] = "🛰️ LIVE SIGNALS"
     for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26", "27", "29", "30", "31", "32", "33", "34", "35", "36", "38"):
         SECTION_OF[k] = "🔬 DEEP RESEARCH"
-    for k in ("16", "17", "18", "19", "40", "41"):
+    for k in ("16", "17", "18", "19", "40", "41", "42"):
         SECTION_OF[k] = "🔍 SELF-GRADING & PROOF"
     for k in ("20", "21", "22"):
         SECTION_OF[k] = "📣 OPS & CONTENT"
