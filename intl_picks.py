@@ -41,7 +41,8 @@ TENNIS_ML_EDGE = None
 TENNIS_MIN_MATCHES = 30        # both players need this many rated matches
 TENNIS_GAMES_EDGE = None
 HOOPS_RULES = {"EUROLEAGUE": {"spread": 4.0, "total": None, "ml": None},
-               "NBL": {"spread": None, "total": None, "ml": 0.05}}
+               "NBL": {"spread": None, "total": None, "ml": 0.05},
+               "NCAAMB": {"spread": None, "total": None, "ml": None}}     # set from research/backtest_ncaamb_games.py
 HOOPS_SPREAD_EDGE = HOOPS_RULES["EUROLEAGUE"]["spread"]
 HOOPS_ML_EDGE = 0.05
 TENNIS_SEED_FROM = date(2023, 1, 1)
@@ -258,6 +259,11 @@ def hoops_refresh(league: str, fetch: Callable = _http, today: Optional[date] = 
     season = I.season_of(league, today.isoformat())
     if league == "EUROLEAGUE":
         rows = I.euroleague_season(f"E{season}", fetch)
+    elif league == "NCAAMB":
+        # first run: last season (Nov-Apr) plus this one so the recency-weighted ratings have a prior; then a week back
+        have = MS.load_results(league, since=(today - timedelta(days=30)).isoformat(), db_path=db_path)
+        start = today - timedelta(days=7) if have else date(int(season) - 1, 11, 1)
+        rows = I.ncaamb_range(start, today, fetch)
     else:
         have = MS.load_results(league, since=f"{season}-07-01", db_path=db_path)
         start = today - timedelta(days=7) if have else date(int(season), 9, 1)
@@ -312,15 +318,27 @@ def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optio
     cfg = I.LEAGUES[league]
     added = hoops_refresh(league, fetch, now.date(), db_path)
     season = I.season_of(league, now.date().isoformat())
-    games = [g for g in MS.load_results(league, db_path=db_path) if str(g.get("season")) == season]
-    r = I.ratings(games, cfg["lam"]) if len(games) >= cfg["min_games"] else None
+    if cfg.get("decay"):                                       # college: last ~13 months, recency-weighted
+        since = (now.date() - timedelta(days=400)).isoformat()
+        games = MS.load_results(league, since=since, db_path=db_path)
+        r = I.ratings_weighted(games, I.decay_weights(games, now.date().isoformat(), league), cfg["lam"]) \
+            if len(games) >= 500 else None
+    else:
+        games = [g for g in MS.load_results(league, db_path=db_path) if str(g.get("season")) == season]
+        r = I.ratings(games, cfg["lam"]) if len(games) >= cfg["min_games"] else None
     evs = fetch(ODDS.format(key=cfg["odds_key"]), {"apiKey": api_key, "regions": "us",
                                                     "markets": "h2h,spreads,totals", "oddsFormat": "american"}) or []
     recs = hoops_build(league, r, evs, now)
     saved = MS.save_game_picks(recs, db_path=db_path)
-    graded = hoops_grade(league, MS.load_results(league, db_path=db_path), db_path=db_path)
+    graded = hoops_grade(league, MS.load_results(league, since=(now.date() - timedelta(days=10)).isoformat(),
+                                                 db_path=db_path), db_path=db_path)
     return {"archive_added": added, "season_games": len(games), "rated": r is not None, "priced": len(recs),
             "picks": sum(1 for x in recs if x["pick"]), "saved": saved, "graded": graded}
+
+
+def _team_is(a: str, b: str) -> bool:
+    """Strict: the same team by exact name, or a confident word match (never just a shared nickname)."""
+    return I.find_team([a], b) is not None
 
 
 def hoops_grade(league: str, results: Sequence[Dict], db_path: Optional[str] = None) -> int:
@@ -331,9 +349,9 @@ def hoops_grade(league: str, results: Sequence[Dict], db_path: Optional[str] = N
         for g in results:
             if abs((date.fromisoformat(g["date"]) - date.fromisoformat(day)).days) > 1:
                 continue
-            if I.same_team(g["home_team"], p["home"]) and I.same_team(g["away_team"], p["away"]):
+            if _team_is(g["home_team"], p["home"]) and _team_is(g["away_team"], p["away"]):
                 hp, ap = g["home_points"], g["away_points"]
-            elif I.same_team(g["home_team"], p["away"]) and I.same_team(g["away_team"], p["home"]):
+            elif _team_is(g["home_team"], p["away"]) and _team_is(g["away_team"], p["home"]):
                 hp, ap = g["away_points"], g["home_points"]
             else:
                 continue
@@ -419,7 +437,7 @@ def main(argv=None) -> int:
     if not api:
         print("ODDS_API_KEY not set")
         return 1
-    which = (argv or sys.argv[1:] or ["TENNIS,EUROLEAGUE,NBL"])[0].split(",")
+    which = (argv or sys.argv[1:] or ["TENNIS,EUROLEAGUE,NBL,NCAAMB"])[0].split(",")
     for s in which:
         try:
             out = tennis_capture(api) if s == "TENNIS" else hoops_capture(s, api)

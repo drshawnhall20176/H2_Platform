@@ -237,3 +237,21 @@ def test_weighted_ratings_and_decay():
     assert w[2] > 0.95 and w[0] < 0.05                                  # 8 months old and last season
     r = I.ratings_weighted(games, w, 1.0)
     assert r["off"]["A"] > r["off"]["B"]                                 # tonight's results dominate
+
+
+def test_ncaamb_game_lab_and_intl_page_render(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    g = {"sport": "NCAAMB", "game_id": "c1", "kickoff": "2099-01-01T23:00:00+00:00", "home": "Tennessee Volunteers",
+         "away": "Wofford Terriers", "model_margin": 22.0, "home_spread": -25.5, "edge": -3.5, "model_total": 150.0,
+         "line_total": 155.5, "model_p": 0.97, "fair_home": 0.98, "pick": None, "total_pick": None, "ml_pick": None,
+         "result": None}
+    monkeypatch.setattr(MS, "load_game_picks", lambda sport, ungraded=False, db_path=None: [g])
+    at = AppTest.from_file(str(Path(__file__).parent / "views" / "45_NCAAMB_Game_Lab.py"), default_timeout=30)
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert "Tennessee Volunteers -25.5" in at.dataframe[0].value.to_string()
+    at.text_input(key="hg_q_NCAAMB").set_value("duke").run()
+    assert any("Upcoming (0)" in m.value for m in at.markdown)
+    at2 = AppTest.from_file(str(Path(__file__).parent / "views" / "44_Intl_Hoops.py"), default_timeout=30)
+    at2.run()
+    assert not at2.exception, [e.value for e in at2.exception]
