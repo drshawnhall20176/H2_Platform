@@ -273,7 +273,7 @@ def player_rows(rot: Dict[str, List[Dict]], team, opp, market: str, pgames, line
             over_p = under_p = price_src = p_mkt = None
         floor = (0.12, 3.0) if m["dist"] == "normal" else (0.25, 1.0)
         read = PE.read_line(proj, b["vals"], line, m["dist"], over_p, under_p, p_mkt, ctx.get("slope", 1.0),
-                            ctx.get("model_weight", PE.MODEL_WEIGHT), *floor, news_checked=bool(ctx.get("news_checked")))
+                            PE.weight_for(ctx, ctx.get("sport") or "NHL", market), *floor, news_checked=bool(ctx.get("news_checked")))
         hits = [v for v in b["vals"] if line is not None and PE.clears(v, line)]
         rows.append({
             "pid": key, "player": r.get("name"), "slot": r.get("slot"), "status": r.get("status"), "out": b["out"],

@@ -417,7 +417,7 @@ def player_rows(roster: Sequence[Dict], team, defense, market: str, pgames, allo
         rows.append(price_row(r, key, slot, proj, opp, market, i["vals"], i["read_vals"], ctx, lines, prices,
                               f["factor"], env_mult, flags, out=i["out"],
                               returning=len(i["missed"]) >= RETURN_MISSED and bool(i["games"]) and not i["out"]
-                              and i["games"][0].get("game") != (window[0] if window else None)))
+                              and i["games"][0].get("game") != (window[0] if window else None), sport=sport))
     return _single_bar(rows, sport)
 
 
@@ -444,7 +444,8 @@ def _single_bar(rows: List[Dict], sport: str) -> List[Dict]:
 
 def price_row(r: Dict, key, slot: str, proj: Optional[float], opp: Optional[float], market: str, vals: List[float],
               read_vals: List[float], ctx: Dict, lines: Dict, prices: Dict, factor: float, env_mult: float,
-              flags: List[str], out: bool = False, returning: bool = False, group: str = "offense") -> Dict:
+              flags: List[str], out: bool = False, returning: bool = False, group: str = "offense",
+              sport: Optional[str] = None) -> Dict:
     """One priced props row (the shape every page reads): the line typed or loaded from the books, prices, the read
     (model + market blend, side, edge, lean), hit rate. Shared by the offensive, kicking and defensive markets."""
     m = MARKETS[market]
@@ -473,7 +474,7 @@ def price_row(r: Dict, key, slot: str, proj: Optional[float], opp: Optional[floa
         over_p = under_p = price_src = p_mkt = None
     floor = m.get("floor") or ((0.45, 8.0) if m["dist"] == "normal" else (0.25, 1.0))   # yardage is lumpy: one 60-yard catch
     read = PE.read_line(proj, read_vals, line, m["dist"], over_p, under_p, p_mkt, ctx.get("slope", 1.0),
-                        ctx.get("model_weight", PE.MODEL_WEIGHT), *floor, news_checked=bool(ctx.get("news_checked")))
+                        PE.weight_for(ctx, sport or ctx.get("sport") or "NFL", market), *floor, news_checked=bool(ctx.get("news_checked")))
     hits = [v for v in vals if line is not None and PE.clears(v, line)]
     return {
         "pid": key, "player": r.get("name"), "slot": slot, "status": r.get("status"), "out": out,

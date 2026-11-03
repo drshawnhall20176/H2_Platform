@@ -111,8 +111,9 @@ if not dates:
             "back here after the games.")
     st.stop()
 
-tab_morning, tab_day, tab_trend, tab_adj = st.tabs(["🌅 Morning report", "📋 One slate", "📈 Patterns & suggestions",
-                                                    "🛠️ Approved adjustments"])
+tab_morning, tab_day, tab_trend, tab_week, tab_adj = st.tabs(["🌅 Morning report", "📋 One slate",
+                                                              "📈 Patterns & suggestions", "📐 Weekly tuning",
+                                                              "🛠️ Approved adjustments"])
 
 
 def _pct(x):
@@ -297,7 +298,35 @@ with tab_trend:
                 else:
                     st.caption("Advice — this one needs a rule change in the model; ask Claude to apply it.")
 
+with tab_week:
+    weeks = MS.daily_review_mornings(f"{SPORT_KEY}-tuning")
+    if not weeks:
+        st.info("No weekly tuning report yet. It runs Tuesday mornings (after Monday Night Football): calibration by "
+                "market and side, profit at the posted price, closing-line value for logged bets, and how much the "
+                "model should count against the books' line in each market.")
+    else:
+        wpick = st.selectbox("Week of", weeks, key="pgr_week")
+        wrep = MS.load_daily_review(f"{SPORT_KEY}-tuning", wpick) or {}
+        st.markdown(wrep.get("markdown") or "")
+        for i, p in enumerate(wrep.get("proposals") or []):
+            with st.container(border=True):
+                c1, c2 = st.columns([3, 1])
+                c1.markdown(f"**{p['market']}** — model weight {p['now']:.2f} → **{p['w']:.2f}** "
+                            f"({p['n']} graded reads)")
+                c1.caption("Lower = lean more on the books' line. Every page uses it within 10 minutes; retire it any "
+                           "time on the next tab.")
+                if c2.button("Approve", key=f"pgr_blend_{wpick}_{i}"):
+                    ok = MS.approve_blend(p["sport"], p["market"], p["w"], {"week": wpick, "n": p["n"],
+                                                                            "gain": p.get("gain")})
+                    st.success("Approved.") if ok else st.error("Couldn't save it.")
+
 with tab_adj:
+    for b in MS.list_blend(active_only=False):
+        with st.container(border=True):
+            st.markdown(f"**{b['sport']} · {b['market']}** — model weight {float(b['w']):.2f} vs the books"
+                        f" · {'🟢 active' if b.get('active') else '⚪ retired'} · approved {str(b.get('approved_ts'))[:16]}")
+            if b.get("active") and st.button("Retire", key=f"pgr_retire_blend_{b['id']}"):
+                st.success("Retired.") if MS.retire_blend(b["id"]) else st.error("Couldn't retire it.")
     rows = MS.list_tuning(active_only=False)
     if not rows:
         st.info("No adjustments approved yet.")
