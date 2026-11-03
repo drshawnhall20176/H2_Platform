@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       sports:
-        description: "TENNIS,EUROLEAGUE,NBL (blank = all)"
+        description: "TENNIS,EUROLEAGUE,NBL,NCAAMB (blank = all)"
         default: ""
 
 permissions:
@@ -37,4 +37,4 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           SPORTS: ${{ inputs.sports }}
         run: |
-          python intl_picks.py "${SPORTS:-TENNIS,EUROLEAGUE,NBL}"
+          python intl_picks.py "${SPORTS:-TENNIS,EUROLEAGUE,NBL,NCAAMB}"
