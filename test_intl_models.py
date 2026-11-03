@@ -73,6 +73,11 @@ import intl_picks as IP  # noqa: E402
 import model_store as MS  # noqa: E402
 
 NOW = datetime(2026, 11, 3, 12, tzinfo=timezone.utc)
+from datetime import timedelta as _td  # noqa: E402
+_TOM = (datetime.now(timezone.utc) + _td(days=1)).date()
+KO23 = f"{_TOM.isoformat()}T23:00:00+00:00"      # 6-7 PM ET tomorrow: a future game on a pickable date
+KO18 = f"{_TOM.isoformat()}T18:00:00+00:00"
+DAY = _TOM
 
 
 def _ev(eid, home, away, ph, pa, spread=None, total=None, ko="2026-11-04T12:00:00Z"):
@@ -171,13 +176,15 @@ def test_pages_render(monkeypatch):
           "tournament": "Paris Masters", "surface": "hard", "home": "A B", "away": "C D", "model_p": 0.6, "line": 0.5,
           "edge": 0.1, "best_home": 110, "best_away": -130, "model_total": 22.1, "line_total": 21.5, "n_home": 40,
           "n_away": 40, "pick": "home", "spread_pick": None, "total_pick": "over", "result": None}
-    hoop = {"sport": "EUROLEAGUE", "game_id": "g1", "kickoff": "2099-01-01T18:00:00+00:00", "home": "Real Madrid",
+    hoop = {"sport": "EUROLEAGUE", "game_id": "g1", "kickoff": KO18, "home": "Real Madrid",
             "away": "Monaco", "model_margin": 8.0, "home_spread": -2.5, "edge": 5.5, "model_total": 165.0,
             "line_total": 160.0, "model_p": 0.75, "fair_home": 0.6, "pick": "home", "result": None}
     monkeypatch.setattr(MS, "load_game_picks", lambda sport, ungraded=False, db_path=None: [up] if sport == "TENNIS" else [hoop])
     for page, needle in (("43_Tennis_Lab.py", "A B ML"), ("44_Intl_Hoops.py", "Real Madrid -2.5")):
         at = AppTest.from_file(str(Path(__file__).parent / "views" / page), default_timeout=30)
         at.run()
+        if page.startswith("44"):
+            at.date_input(key="hg_date_EUROLEAGUE").set_value(DAY).run()
         assert not at.exception, [e.value for e in at.exception]
         assert needle in at.dataframe[0].value.to_string()
 
@@ -241,19 +248,21 @@ def test_weighted_ratings_and_decay():
 
 def test_ncaamb_game_lab_and_intl_page_render(monkeypatch):
     from streamlit.testing.v1 import AppTest
-    g = {"sport": "NCAAMB", "game_id": "c1", "kickoff": "2099-01-01T23:00:00+00:00", "home": "Tennessee Volunteers",
+    g = {"sport": "NCAAMB", "game_id": "c1", "kickoff": KO23, "home": "Tennessee Volunteers",
          "away": "Wofford Terriers", "model_margin": 22.0, "home_spread": -25.5, "edge": -3.5, "model_total": 150.0,
          "line_total": 155.5, "model_p": 0.97, "fair_home": 0.98, "pick": None, "total_pick": None, "ml_pick": None,
          "result": None}
     monkeypatch.setattr(MS, "load_game_picks", lambda sport, ungraded=False, db_path=None: [g])
     at = AppTest.from_file(str(Path(__file__).parent / "views" / "45_NCAAMB_Game_Lab.py"), default_timeout=30)
     at.run()
+    at.date_input(key="hg_date_NCAAMB").set_value(DAY).run()
     assert not at.exception, [e.value for e in at.exception]
     assert "Tennessee Volunteers -25.5" in at.dataframe[0].value.to_string()
     at.text_input(key="hg_q_NCAAMB").set_value("duke").run()
     assert any("Upcoming (0)" in m.value for m in at.markdown)
     at2 = AppTest.from_file(str(Path(__file__).parent / "views" / "44_Intl_Hoops.py"), default_timeout=30)
     at2.run()
+    at2.date_input(key="hg_date_EUROLEAGUE").set_value(DAY).run()
     assert not at2.exception, [e.value for e in at2.exception]
 
 
@@ -301,7 +310,7 @@ def test_logged_game_lab_bets_settle_from_the_graded_game(tmp_path, monkeypatch)
 def test_game_lab_log_panel_logs_the_tracking_pick(monkeypatch):
     from streamlit.testing.v1 import AppTest
     import betlog as B
-    g = {"sport": "NCAAMB", "game_id": "c1", "kickoff": "2099-01-01T23:00:00+00:00", "home": "Duke Blue Devils",
+    g = {"sport": "NCAAMB", "game_id": "c1", "kickoff": KO23, "home": "Duke Blue Devils",
          "away": "Army Black Knights", "model_margin": 30.0, "home_spread": -20.5, "spread_price": -110, "edge": 9.5,
          "model_total": 150.0, "line_total": 140.0, "over_price": -110, "under_price": -110, "model_p": 0.97,
          "fair_home": 0.95, "best_home": -5000, "best_away": 2000, "pick": "home", "total_pick": None, "ml_pick": None,
@@ -311,6 +320,7 @@ def test_game_lab_log_panel_logs_the_tracking_pick(monkeypatch):
     monkeypatch.setattr(B, "add_bet", lambda *a, **k: got.append(k) or 77)
     at = AppTest.from_file(str(Path(__file__).parent / "views" / "45_NCAAMB_Game_Lab.py"), default_timeout=30)
     at.run()
+    at.date_input(key="hg_date_NCAAMB").set_value(DAY).run()
     at.button(key="hg_log_go_NCAAMB").click().run()
     assert not at.exception, [e.value for e in at.exception]
     assert got and got[0]["side"] == "Duke Blue Devils" and got[0]["line"] == -20.5 and got[0]["market"] == "Spread"
@@ -319,13 +329,14 @@ def test_game_lab_log_panel_logs_the_tracking_pick(monkeypatch):
 
 def test_game_lab_shows_model_side_gap_and_tags(monkeypatch):
     from streamlit.testing.v1 import AppTest
-    g = {"sport": "NCAAMB", "game_id": "c1", "kickoff": "2099-01-01T23:00:00+00:00", "home": "Duke Blue Devils",
+    g = {"sport": "NCAAMB", "game_id": "c1", "kickoff": KO23, "home": "Duke Blue Devils",
          "away": "Army Black Knights", "model_margin": 3.0, "home_spread": -24.5, "spread_price": -110, "edge": -21.5,
          "cover_est": 0.725, "cover_n": 295, "use": "🎟️ Parlay + Single", "lock": True, "model_total": 150.0,
          "line_total": 140.0, "model_p": 0.6, "fair_home": 0.95, "pick": "away", "result": None}
     monkeypatch.setattr(MS, "load_game_picks", lambda sport, ungraded=False, db_path=None: [g])
     at = AppTest.from_file(str(Path(__file__).parent / "views" / "45_NCAAMB_Game_Lab.py"), default_timeout=30)
     at.run()
+    at.date_input(key="hg_date_NCAAMB").set_value(DAY).run()
     assert not at.exception, [e.value for e in at.exception]
     t = at.dataframe[0].value.to_string()
     assert "Army Black Knights +24.5" in t and "21.5" in t and "72%" in t and "🔒 Most probable" in t
@@ -339,3 +350,30 @@ def test_euroleague_name_variants_match_loosely():
     assert I.find_team(names, "Pallacanestro Olimpia Milano", loose=True) == "EA7 Emporio Armani Milan"
     assert I.find_team(names, "ASVEL Lyon Villeurbanne", loose=True) == "LDLC ASVEL Villeurbanne"
     assert I.find_team(names, "Pallacanestro Olimpia Milano") is None   # strict (college) still refuses one shared word
+
+
+def test_espn_pro_league_parser_and_nba_nhl_pages(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    data = {"events": [{"season": {"type": 2}, "competitions": [{"id": 5, "date": "2026-11-02T00:30Z",
+            "status": {"type": {"completed": True}}, "competitors": [
+                {"homeAway": "home", "team": {"displayName": "Boston Bruins"}, "score": "4"},
+                {"homeAway": "away", "team": {"displayName": "Toronto Maple Leafs"}, "score": "2"}]}]},
+        {"season": {"type": 1}, "competitions": [{"id": 6, "date": "2026-10-01T00:30Z", "status": {"type": {"completed": True}},
+            "competitors": [{"homeAway": "home", "team": {"displayName": "A"}, "score": "1"},
+                            {"homeAway": "away", "team": {"displayName": "B"}, "score": "2"}]}]}]}
+    g = I.espn_range("NHL", date(2026, 11, 1), date(2026, 11, 1), fetch=lambda url, params=None: data)
+    assert len(g) == 1 and g[0]["home_points"] == 4                      # preseason game dropped
+    assert 0.59 < I.win_prob(0.6, league="NHL") < 0.61 and I.season_of("WNBA", "2026-05-20") == "2026"
+    for lg, page in (("NBA", "46_NBA_Game_Lab.py"), ("NHL", "47_NHL_Game_Lab.py")):
+        game = {"sport": lg, "game_id": "x1", "kickoff": KO23, "home": "Boston Celtics", "away": "Orlando Magic",
+                "model_margin": 4.0, "home_spread": -3.5, "edge": 0.5, "model_total": 220.0, "line_total": 221.5,
+                "model_p": 0.62, "fair_home": 0.6, "pick": None, "result": None, "use": "⛔ Pass"}
+        monkeypatch.setattr(MS, "load_game_picks", lambda sport, ungraded=False, db_path=None, _g=game: [_g])
+        at = AppTest.from_file(str(Path(__file__).parent / "views" / page), default_timeout=30)
+        at.run()
+        at.date_input(key=f"hg_date_{lg}").set_value(DAY).run()
+        assert not at.exception, [e.value for e in at.exception]
+        assert "Boston Celtics -3.5" in at.dataframe[0].value.to_string()
+        assert at.selectbox(key=f"hg_slot_{lg}").options == ["All slate", "Evening"]   # only slots with games
+        at.selectbox(key=f"hg_slot_{lg}").set_value("Evening").run()
+        assert any("Upcoming (1)" in m.value for m in at.markdown)

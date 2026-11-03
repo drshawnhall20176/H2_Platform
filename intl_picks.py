@@ -42,7 +42,9 @@ TENNIS_MIN_MATCHES = 30        # both players need this many rated matches
 TENNIS_GAMES_EDGE = None
 HOOPS_RULES = {"EUROLEAGUE": {"spread": 4.0, "total": None, "ml": None},
                "NBL": {"spread": None, "total": None, "ml": 0.05},
-               "NCAAMB": {"spread": 16.0, "total": None, "ml": None}}
+               "NCAAMB": {"spread": 16.0, "total": None, "ml": None},
+               "NBA": {"spread": None, "total": None, "ml": None},       # set from research/backtest_pro_games.py
+               "NHL": {"spread": None, "total": None, "ml": None}}
 # NCAAMB (research/backtest_ncaamb_games.py, 5,554 games 2024-26 with a pre-game line): spreads improved steadily
 # with the gap -- 4+ 53.1%, 6+ 54.4%, 8+ 55.2% (1065-866), 10+ 57.6% (n=1,425); both seasons alike, November best.
 # Totals 51-53% (off). The moneyline "showed" +15-21%, which is too good to be real (stale outlier prices at
@@ -304,6 +306,10 @@ def hoops_refresh(league: str, fetch: Callable = _http, today: Optional[date] = 
     season = I.season_of(league, today.isoformat())
     if league == "EUROLEAGUE":
         rows = I.euroleague_season(f"E{season}", fetch)
+    elif league in I.ESPN_LEAGUE_URL:
+        have = MS.load_results(league, since=(today - timedelta(days=30)).isoformat(), db_path=db_path)
+        start = today - timedelta(days=7) if have else today - timedelta(days=400)
+        rows = I.espn_range(league, start, today, fetch)
     elif league == "NCAAMB":
         # first run: last season (Nov-Apr) plus this one so the recency-weighted ratings have a prior; then a week back
         have = MS.load_results(league, since=(today - timedelta(days=30)).isoformat(), db_path=db_path)
@@ -336,7 +342,7 @@ def hoops_build(league: str, r: Optional[Dict], events: Sequence[Dict], now: dat
             continue
         line_margin = -mk["home_spread"]
         edge = proj["margin"] - line_margin
-        p = I.win_prob(proj["margin"])
+        p = I.win_prob(proj["margin"], league=league)
         ml_edge = None if mk["fair_home"] is None else p - mk["fair_home"]
         tot_edge = None if mk["total"] is None else proj["total"] - mk["total"]
         ce = cover_estimate(league, edge)
@@ -371,7 +377,7 @@ def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optio
         since = (now.date() - timedelta(days=400)).isoformat()
         games = MS.load_results(league, since=since, db_path=db_path)
         r = I.ratings_weighted(games, I.decay_weights(games, now.date().isoformat(), league), cfg["lam"]) \
-            if len(games) >= 500 else None
+            if len(games) >= (500 if league == "NCAAMB" else 300) else None
     else:
         games = [g for g in MS.load_results(league, db_path=db_path) if str(g.get("season")) == season]
         r = I.ratings(games, cfg["lam"]) if len(games) >= cfg["min_games"] else None
@@ -395,7 +401,8 @@ def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optio
 
 
 # --------------------------------------------------------------------------- logging a Game Lab bet (Nov 3)
-BET_SPORT = {"NCAAMB": "NCAAMB", "EUROLEAGUE": "INTL", "NBL": "INTL", "TENNIS": "TENNIS"}
+BET_SPORT = {"NCAAMB": "NCAAMB", "NBA": "NBA", "NHL": "NHL", "WNBA": "WNBA", "EUROLEAGUE": "INTL", "NBL": "INTL",
+             "TENNIS": "TENNIS"}
 TAG = "gl"                     # notes carry "gl:<league>:<game_id>" so the capture can settle the bet itself
 
 
@@ -552,7 +559,7 @@ def main(argv=None) -> int:
     if not api:
         print("ODDS_API_KEY not set")
         return 1
-    which = (argv or sys.argv[1:] or ["TENNIS,EUROLEAGUE,NBL,NCAAMB"])[0].split(",")
+    which = (argv or sys.argv[1:] or ["TENNIS,EUROLEAGUE,NBL,NCAAMB,NBA,NHL"])[0].split(",")
     for s in which:
         try:
             out = tennis_capture(api) if s == "TENNIS" else hoops_capture(s, api)

@@ -130,6 +130,8 @@ def run():
         "36": ("NCAAF",),                                # Anytime TD Engine (NCAAF) -- Bernoulli
                                                           # TD probability board.
         "45": ("NCAAMB",),                               # Game Lab (college basketball) -- game lines
+        "46": ("NBA",),                                  # Game Lab (NBA)
+        "47": ("NHL",),                                  # Game Lab (NHL)
         "41": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL", "UFC"),                    # Postgame Review -- kickoff snapshots graded vs box scores
         "38": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL"),  # Position Matchups -- depth chart vs the opposing
                                                           # defense by position + team head-to-head.
@@ -219,6 +221,8 @@ def run():
         "43": ("Tennis Lab", "🎾", "tennis_lab"),   # ATP/WTA surface Elo vs the books (tracking)
         "44": ("International Hoops", "🌍", "intl_hoops"),   # EuroLeague / NBL ratings vs the books (tracking)
         "45": ("Game Lab", "🏟️", "ncaamb_game_lab"),   # college basketball spreads/totals/ML (tracking)
+        "46": ("Game Lab", "🏟️", "nba_game_lab"),      # NBA spreads/totals/ML (ratings vs the books)
+        "47": ("Game Lab", "🏟️", "nhl_game_lab"),      # NHL puck lines/totals/ML
     }
 
     # SIDEBAR SECTIONS, added directly on request: st.navigation natively supports a
@@ -248,7 +252,7 @@ def run():
         SECTION_OF[k] = "🎯 RECOMMENDATIONS"
     for k in ("5", "6"):
         SECTION_OF[k] = "🛰️ LIVE SIGNALS"
-    for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26", "27", "29", "30", "31", "32", "33", "34", "35", "36", "43", "44", "45", "38"):
+    for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26", "27", "29", "30", "31", "32", "33", "34", "35", "36", "43", "44", "45", "46", "47", "38"):
         SECTION_OF[k] = "🔬 DEEP RESEARCH"
     for k in ("16", "17", "18", "19", "40", "41", "42"):
         SECTION_OF[k] = "🔍 SELF-GRADING & PROOF"

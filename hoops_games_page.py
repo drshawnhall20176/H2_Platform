@@ -14,6 +14,7 @@ import intl_hoops as I
 import intl_picks as IP
 import model_store as MS
 import props_engine as PE
+import sports
 
 EVIDENCE = {
     "EUROLEAGUE": "Backtest vs real lines: spreads with the model 4+ points off went 119-98 (54.8%) over 2022-26, 6+ "
@@ -48,6 +49,28 @@ def _use(p):
     return f"{PE.MOST_PROBABLE} · {u}" if p.get("lock") else u
 
 
+def _et(p):
+    try:
+        return pd.to_datetime(p["kickoff"]).tz_convert("America/New_York").to_pydatetime()
+    except Exception:                                           # noqa: BLE001
+        return None
+
+
+def _today_et():
+    return pd.Timestamp.now(tz="America/New_York").date()
+
+
+def _ats(p):
+    """Did the model's side cover the close? ✅ / ❌ / push / pending."""
+    if p.get("final_home") is None or p.get("edge") is None:
+        return "pending"
+    line = p.get("close_line") if p.get("close_line") is not None else p.get("line")
+    d = (p["final_home"] - p["final_away"]) - line
+    if d == 0:
+        return "push"
+    return "✅" if (d > 0) == (p["edge"] > 0) else "❌"
+
+
 def _tip(p):
     try:
         return pd.to_datetime(p["kickoff"]).tz_convert("America/New_York").strftime("%a %I:%M %p")
@@ -61,18 +84,29 @@ def render(league: str, search: bool = False) -> None:
     st.warning("Tracking only — not recommendations yet." + (f" {ev}" if ev else ""))
     picks = MS.load_game_picks(league)
     now = datetime.now(timezone.utc).isoformat()
-    upcoming = [p for p in picks if str(p.get("kickoff")) > now and p.get("result") is None]
     done = [p for p in picks if p.get("result")]
     title = I.LEAGUES[league]["title"]
-    if search and upcoming:
+    c1, c2 = st.columns(2)
+    day = c1.date_input("Slate date", _today_et(), key=f"hg_date_{league}")
+    on_day = [p for p in picks if _et(p) is not None and _et(p).date() == day]
+    slots = sorted({sports.slot_of(_et(p)) for p in on_day}, key=lambda x: sports.SLOT_ORDER.get(x, 9))
+    slot = c2.selectbox("Time slot", ["All slate"] + slots, key=f"hg_slot_{league}")
+    if slot != "All slate":
+        on_day = [p for p in on_day if sports.slot_of(_et(p)) == slot]
+    upcoming = [p for p in on_day if str(p.get("kickoff")) > now and p.get("result") is None]
+    finished = [p for p in on_day if p not in upcoming]
+    if search and on_day:
         q = st.text_input("Find a team", key=f"hg_q_{league}").strip()
         if q:
             upcoming = [p for p in upcoming if q.lower() in f"{p['home']} {p['away']}".lower()]
+            finished = [p for p in finished if q.lower() in f"{p['home']} {p['away']}".lower()]
         if st.toggle("Only games with a tracking pick", key=f"hg_only_{league}"):
             upcoming = [p for p in upcoming if _pick(p) != "—"]
+            finished = [p for p in finished if _pick(p) != "—"]
     st.markdown(f"##### Upcoming ({len(upcoming)})")
     if not upcoming:
-        st.info(f"No upcoming {title} games captured yet. The capture runs every 3 hours.")
+        st.info(f"No upcoming {title} games for {day:%a %b %d}" + (f" ({slot})" if slot != "All slate" else "")
+                + ". The capture runs every 3 hours; games appear once the books post lines.")
     else:
         st.dataframe(pd.DataFrame([{
             "Tip (ET)": _tip(p),
@@ -98,6 +132,15 @@ def render(league: str, search: bool = False) -> None:
                    "how often that size of gap covered in the backtest; Use follows the props pages (🔒 / 🎟️ Parlay + "
                    "Single at 60%+, 🎯 Single at 55-60%, ⛔ Pass below). "
                    + ("; ".join(what) if what else "no picks for this league — the model is shown for reference") + ".")
+    if finished:
+        st.markdown(f"##### Started or final ({len(finished)})")
+        st.dataframe(pd.DataFrame([{
+            "Tip (ET)": _tip(p), "Game": f"{p['away']} @ {p['home']}",
+            "Line (close)": f"{p['home']} {(-(p.get('close_line') if p.get('close_line') is not None else p.get('line') or 0)):+g}",
+            "Model likes": _likes(p), "Use": _use(p),
+            "Final": "—" if p.get("final_home") is None else f"{p['away']} {p['final_away']:g} – {p['home']} {p['final_home']:g}",
+            "Model's side": _ats(p), "Tracking pick": _pick(p)} for p in sorted(finished, key=lambda x: x["kickoff"])]),
+            hide_index=True, width="stretch")
     if upcoming:
         log_panel(league, upcoming)
     st.markdown("##### Tracking record")
