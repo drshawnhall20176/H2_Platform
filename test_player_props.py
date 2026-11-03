@@ -77,6 +77,7 @@ def test_player_rows_project_hit_rate_and_lean():
     rot = [{"pid": 7, "name": "Tatum", "slot": "F", "avg_min": 36, "status": None}]
     table = PPR.defense_allowed(PM.allowed_by_slot(league(soft_def=0), "NBA"), "PRA")
     rows = PPR.player_rows(rot, "D5", "PRA", table, None, cur, [], lines={7: 39.5}, mode="season")
+    assert rows[0].get("single_ev") == 0.05 and rows[0].get("single_chance") == 0.55   # NBA single bar stamped
     r = rows[0]
     assert abs(r["recent_avg"] - 43) < 1e-9 and r["hit"] == (5, 5) and r["lean"] == "Over" and r["p_over"] > 0.55
     under = PPR.player_rows(rot, "D5", "PRA", table, None, cur, [], lines={7: 50}, mode="season")[0]
@@ -119,3 +120,14 @@ def test_pace_flag_spots_a_high_scoring_matchup():
             games.append(pg("".join(sorted((t, o))) + str(g), f"d{g}", t, o, f"{t}p", "x", "PG", pts=pts))
     flag = PPR.pace_flag(games, "H", "A")
     assert flag["pct"] > PPR.PACE_FLAG_PCT and flag["label"].startswith("⚡")
+
+
+def test_nba_single_needs_5pct_edge_and_55pct_chance():
+    import props_engine as PE
+    base = {"line": 22.5, "side": "Over", "projection": 25.0, "lean": "Over", "p_final": 0.57, "ev": 0.04,
+            "flags": [], "out": False, "values": [24, 26, 23, 27], "book": {}}
+    nba = PE.single_bar([dict(base)], "NBA")[0]
+    assert PE.use_tag(nba)[0] != PE.USE_SINGLE                                     # +4% isn't enough now
+    assert PE.use_tag(dict(nba, ev=0.06))[0] == PE.USE_SINGLE
+    assert PE.use_tag(dict(nba, ev=0.08, p_final=0.53))[0] != PE.USE_SINGLE        # nor a 53% chance
+    assert PE.single_bar([dict(base)], "WNBA")[0].get("single_ev") is None         # other basketball unchanged

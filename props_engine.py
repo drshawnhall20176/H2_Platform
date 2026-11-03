@@ -273,6 +273,21 @@ def market_prob(over=None, under=None) -> Optional[float]:
     return None
 
 
+# What a single needs, by sport: (value at the price, chance to hit). Default is MIN_EV with no chance floor.
+# NFL Nov 2 (Sunday review). NBA Nov 3 (research/single_bar_study.py, 1,610 priced reads over 4 slates): value >= 3%
+# alone made +0.3% per $1; value >= 5% AND chance >= 55% made +5.0% over 228 (the 50-55% chance band lost 11%).
+SINGLE_BAR = {"NFL": (0.05, 0.55), "NBA": (0.05, 0.55)}
+
+
+def single_bar(rows: List[Dict], sport: Optional[str]) -> List[Dict]:
+    """Stamp the sport's single bar on each row (use_tag reads row["single_ev"] / row["single_chance"])."""
+    bar = SINGLE_BAR.get(sport or "")
+    if bar:
+        for r in rows:
+            r["single_ev"], r["single_chance"] = bar
+    return rows
+
+
 def weight_for(ctx: Dict, sport: Optional[str], market: Optional[str]) -> float:
     """The model's share of the vote for one market: an explicit ctx["model_weight"] wins, then the owner-approved
     per-market weight (blend_weights, fitted by the weekly tuning report), then MODEL_WEIGHT."""

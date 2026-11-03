@@ -373,8 +373,8 @@ def player_rows(rotation_list: Sequence[Dict], defense, market: str, cur_table: 
             "p_over": read["p_final"], "side": read["side"], "ev": read["ev"], "lean": read["lean"],
             "flags": flags, "dist": dist, "values": list(values),
         })
-    return carry_points_flags(rows, rotation_list, defense, market, cur_pgames, prior_pgames, mode,
-                              current_is_prior, ctx)
+    return PE.single_bar(carry_points_flags(rows, rotation_list, defense, market, cur_pgames, prior_pgames, mode,
+                                            current_is_prior, ctx), ctx.get("sport") or "NBA")
 
 
 def carry_points_flags(rows: List[Dict], rotation_list, defense, market: str, cur_pgames, prior_pgames,
