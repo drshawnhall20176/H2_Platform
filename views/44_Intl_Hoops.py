@@ -20,8 +20,10 @@ C.base_css()
 C.page_header("🌍", "International Hoops",
               "EuroLeague and NBL: opponent-adjusted ratings against the spread, total and moneyline. Tracking only "
               "until the record proves it.")
-st.warning("Tracking only. These picks are being recorded to test the model against real lines; they are not "
-           "recommendations to bet yet.")
+st.warning("Tracking only — not recommendations yet. Backtest vs real lines: EuroLeague spreads with the model 4+ "
+           "points off went 119-98 (54.8%) over 2022-26, 6+ points 59-39 (60%); totals and moneylines showed no edge. "
+           "NBL showed no spread or total edge; its moneyline at a 5%+ edge was slightly positive (+2.5% over 204) and is "
+           "tracked.")
 
 league = st.radio("League", list(I.LEAGUES), format_func=lambda k: I.LEAGUES[k]["title"], horizontal=True,
                   key="ih_league")
@@ -58,8 +60,14 @@ else:
         "Win chance: model / market": f"{p['model_p']:.0%} / " + ("—" if p.get("fair_home") is None else f"{p['fair_home']:.0%}"),
         "Tracking pick": _pick(p)} for p in sorted(upcoming, key=lambda x: x["kickoff"])]),
         hide_index=True, width="stretch")
-    st.caption(f"Edge = the model's home margin minus the margin the spread implies. A spread pick needs "
-               f"{IP.HOOPS_SPREAD_EDGE:g}+ points; a moneyline pick a {IP.HOOPS_ML_EDGE:.0%}+ edge.")
+    rules = IP.HOOPS_RULES.get(league, {})
+    what = []
+    if rules.get("spread") is not None:
+        what.append(f"a spread pick needs the model {rules['spread']:g}+ points off the line")
+    if rules.get("ml") is not None:
+        what.append(f"a moneyline pick needs a {rules['ml']:.0%}+ edge")
+    st.caption("Edge = the model's home margin minus the margin the spread implies; "
+               + ("; ".join(what) if what else "no picks for this league") + ".")
 
 st.markdown("##### Tracking record")
 rec = IP.record(done)

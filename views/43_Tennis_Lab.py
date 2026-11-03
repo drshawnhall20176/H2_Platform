@@ -19,8 +19,9 @@ C.base_css()
 C.page_header("🎾", "Tennis Lab",
               "ATP and WTA: surface Elo win chances against the books, total games and game handicaps. Tracking only "
               "until the record proves it.")
-st.warning("Tracking only. These picks are being recorded to test the model against real lines; they are not "
-           "recommendations to bet yet.")
+st.warning("Information only — no picks. Backtested on 5,952 priced 2025-26 matches, the books' prices beat this "
+           "model clearly (log loss 0.558 vs 0.608), and betting its side lost 6–11% at every edge size; game handicaps "
+           "hit 47% and total games 51%. Use it as a second look at a match, not a reason to bet.")
 
 picks = MS.load_game_picks("TENNIS")
 now = datetime.now(timezone.utc).isoformat()
@@ -67,9 +68,8 @@ else:
         "Rated matches": f"{p.get('n_home', 0)} / {p.get('n_away', 0)}",
         "Tracking pick": _pick(p)} for p in sorted(rows, key=lambda x: x["kickoff"])]),
         hide_index=True, width="stretch")
-    st.caption(f"Model = the first-named player's chance from surface Elo; Market = the books' no-vig chance. A "
-               f"match-winner pick needs a {IP.TENNIS_ML_EDGE:.0%}+ edge and {IP.TENNIS_MIN_MATCHES}+ rated matches "
-               f"for both players; game picks need the model {50 + IP.TENNIS_GAMES_EDGE * 100:.0f}%+ on a side.")
+    st.caption("Model = the first-named player's chance from surface Elo; Market = the books' no-vig chance. "
+               "Rated matches = how much history each player's rating has behind it.")
 
 st.markdown("##### Tracking record")
 rec = IP.record(done)

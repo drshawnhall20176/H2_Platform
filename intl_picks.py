@@ -29,11 +29,20 @@ import tennis_model as T
 
 ODDS = "https://api.the-odds-api.com/v4/sports/{key}/odds"
 SPORTS_URL = "https://api.the-odds-api.com/v4/sports"
-TENNIS_ML_EDGE = 0.05          # match winner: Elo 5+ points above the market's no-vig chance
+# Backtests, Nov 3 (research/backtest_tennis.py, backtest_intl_hoops.py, against The Odds API's historical lines):
+# * Tennis, 5,952 priced 2025-26 matches: the market's chance beat surface Elo clearly (log loss 0.558 vs 0.608).
+#   Betting Elo's side lost 6-11% at every edge size (bigger edges lost more); game handicaps hit 47%, total games
+#   51%. NO PICKS: the model is shown for information only. (None = off.)
+# * EuroLeague, 1,001 games 2022-26: spreads with the model 4+ points off the line 119-98 (54.8%), 6+ 59-39
+#   (60.2%), 8+ 27-15; totals and moneylines no edge. Spread picks at 4+.
+# * NBL, 295 games 2023-26: spreads 50-51% at every edge, totals no; moneyline at a 5%+ edge +2.5% over 204 (weak).
+#   Moneyline tracked, nothing else.
+TENNIS_ML_EDGE = None
 TENNIS_MIN_MATCHES = 30        # both players need this many rated matches
-TENNIS_GAMES_EDGE = 0.10       # game handicap / total games: model chance 60%+ on a side
-HOOPS_SPREAD_EDGE = 4.0        # points off the consensus spread
-HOOPS_TOTAL_EDGE = 99.0        # totals off until a backtest supports them
+TENNIS_GAMES_EDGE = None
+HOOPS_RULES = {"EUROLEAGUE": {"spread": 4.0, "total": None, "ml": None},
+               "NBL": {"spread": None, "total": None, "ml": 0.05}}
+HOOPS_SPREAD_EDGE = HOOPS_RULES["EUROLEAGUE"]["spread"]
 HOOPS_ML_EDGE = 0.05
 TENNIS_SEED_FROM = date(2023, 1, 1)
 
@@ -142,18 +151,18 @@ def tennis_build(elo: T.Elo, fit: Dict, key: str, events: Sequence[Dict], now: d
         edge = p - mk["fair_home"]
         rated = min(n1, n2) >= TENNIS_MIN_MATCHES
         pick = None
-        if rated and abs(edge) >= TENNIS_ML_EDGE:
+        if rated and TENNIS_ML_EDGE is not None and abs(edge) >= TENNIS_ML_EDGE:
             pick = "home" if edge > 0 else "away"
         g = T.games(fit, p, bo) if fit else None
         sp_pick = tot_pick = None
         p_cover = p_over = None
         if g and mk["home_spread"] is not None:
             p_cover = T.p_over(g["margin"], g["mar_sd"], -mk["home_spread"])
-            if rated and abs(p_cover - 0.5) >= TENNIS_GAMES_EDGE:
+            if rated and TENNIS_GAMES_EDGE is not None and abs(p_cover - 0.5) >= TENNIS_GAMES_EDGE:
                 sp_pick = "home" if p_cover > 0.5 else "away"
         if g and mk["total"] is not None:
             p_over = T.p_over(g["total"], g["tot_sd"], mk["total"])
-            if rated and abs(p_over - 0.5) >= TENNIS_GAMES_EDGE:
+            if rated and TENNIS_GAMES_EDGE is not None and abs(p_over - 0.5) >= TENNIS_GAMES_EDGE:
                 tot_pick = "over" if p_over > 0.5 else "under"
         out.append({"sport": "TENNIS", "game_id": str(ev.get("id")), "kickoff": ko.isoformat(), "tour": tour,
                     "tournament": title, "surface": surf, "best_of": bo, "home": home, "away": away,
@@ -233,6 +242,8 @@ def hoops_refresh(league: str, fetch: Callable = _http, today: Optional[date] = 
 
 
 def hoops_build(league: str, r: Optional[Dict], events: Sequence[Dict], now: datetime) -> List[Dict]:
+    rules = HOOPS_RULES.get(league, {})
+    se, te, me = rules.get("spread"), rules.get("total"), rules.get("ml")
     out = []
     for ev in events or []:
         try:
@@ -260,11 +271,11 @@ def hoops_build(league: str, r: Optional[Dict], events: Sequence[Dict], now: dat
                     "best_home": mk["best_home"], "best_home_book": mk["best_home_book"], "best_away": mk["best_away"],
                     "best_away_book": mk["best_away_book"], "spread_price": mk["spread_price"],
                     "over_price": mk["over_price"], "under_price": mk["under_price"],
-                    "pick": ("home" if edge > 0 else "away") if abs(edge) >= HOOPS_SPREAD_EDGE else None,
+                    "pick": ("home" if edge > 0 else "away") if se is not None and abs(edge) >= se else None,
                     "total_pick": (("over" if tot_edge > 0 else "under")
-                                   if tot_edge is not None and abs(tot_edge) >= HOOPS_TOTAL_EDGE else None),
+                                   if te is not None and tot_edge is not None and abs(tot_edge) >= te else None),
                     "ml_pick": (("home" if ml_edge > 0 else "away")
-                                if ml_edge is not None and abs(ml_edge) >= HOOPS_ML_EDGE else None)})
+                                if me is not None and ml_edge is not None and abs(ml_edge) >= me else None)})
     return out
 
 
