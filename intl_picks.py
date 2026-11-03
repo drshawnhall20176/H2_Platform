@@ -42,7 +42,16 @@ TENNIS_MIN_MATCHES = 30        # both players need this many rated matches
 TENNIS_GAMES_EDGE = None
 HOOPS_RULES = {"EUROLEAGUE": {"spread": 4.0, "total": None, "ml": None},
                "NBL": {"spread": None, "total": None, "ml": 0.05},
-               "NCAAMB": {"spread": None, "total": None, "ml": None}}     # set from research/backtest_ncaamb_games.py
+               "NCAAMB": {"spread": 8.0, "total": None, "ml": None}}
+# NCAAMB (research/backtest_ncaamb_games.py, 5,554 games 2024-26 with a pre-game line): spreads improved steadily
+# with the gap -- 4+ 53.1%, 6+ 54.4%, 8+ 55.2% (1065-866), 10+ 57.6% (n=1,425); both seasons alike, November best.
+# Totals 51-53% (off). The moneyline "showed" +15-21%, which is too good to be real (stale outlier prices at
+# small books) -- off.
+HOOPS_EVIDENCE = {
+    "NCAAMB": "Backtest vs real lines (5,554 games, 2024-26): spreads with the model 8+ points off the line went "
+              "1065-866 (55.2%), 10+ points 57.6% over 1,425; both seasons alike, November strongest. Totals showed no "
+              "real edge; moneylines are off.",
+}
 HOOPS_SPREAD_EDGE = HOOPS_RULES["EUROLEAGUE"]["spread"]
 HOOPS_ML_EDGE = 0.05
 TENNIS_SEED_FROM = date(2023, 1, 1)

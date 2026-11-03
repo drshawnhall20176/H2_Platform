@@ -255,3 +255,15 @@ def test_ncaamb_game_lab_and_intl_page_render(monkeypatch):
     at2 = AppTest.from_file(str(Path(__file__).parent / "views" / "44_Intl_Hoops.py"), default_timeout=30)
     at2.run()
     assert not at2.exception, [e.value for e in at2.exception]
+
+
+def test_ncaamb_spread_rule_is_8_points():
+    games = [{"home_team": h, "away_team": a, "home_points": hp, "away_points": ap, "neutral_site": False}
+             for h, a, hp, ap in [("Duke Blue Devils", "Army Black Knights", 95, 55), ("Army Black Knights", "Duke Blue Devils", 50, 92),
+                                  ("Army Black Knights", "Navy Midshipmen", 70, 68), ("Navy Midshipmen", "Duke Blue Devils", 55, 90)] * 5]
+    r = I.ratings(games, 4.0)
+    recs = IP.hoops_build("NCAAMB", r, [_ev("c1", "Duke Blue Devils", "Army Black Knights", -5000, 2000, spread=-20.5, total=140),
+                                        _ev("c2", "Duke Blue Devils", "Navy Midshipmen", -5000, 2000, spread=-38.5, total=140)], NOW)
+    by = {x["game_id"]: x for x in recs}
+    assert by["c1"]["edge"] >= 8 and by["c1"]["pick"] == "home"
+    assert by["c2"]["pick"] in (None, "away") and by["c2"]["ml_pick"] is None and by["c2"]["total_pick"] is None
