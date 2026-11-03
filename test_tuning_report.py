@@ -38,6 +38,9 @@ def test_report_proposes_only_with_enough_reads(monkeypatch):
     assert "blend:Points" in rep["markdown"]
     small = T.build("NBA", _graded(60, 0.0), [])
     assert not small["proposals"]
+    few = [dict(r, slate_date="2026-10-0" + str(1 + i % 3)) for i, r in enumerate(_graded(3000, 0.0))]
+    rep3 = T.build("NBA", few, [])
+    assert not rep3["proposals"] and "3 of 5 slates" in rep3["markdown"]
 
 
 def test_backs_out_the_model_chance_for_old_reads():
