@@ -1,0 +1,378 @@
+"""
+intl_picks.py — live tracking for tennis and international basketball (Nov 3). TRACKING ONLY: nothing here is a
+recommendation to bet until the record proves it (the thresholds come from research/backtest_tennis.py and
+research/backtest_intl_hoops.py).
+
+Every capture (capture-intl workflow, every 3 hours):
+  1. refreshes the results archive (model_store.results_archive) -- tennis matches from ESPN, EuroLeague games from
+     its API, NBL games from ESPN -- seeding the full history the first time;
+  2. refits the model (surface Elo for tennis, season ratings for basketball);
+  3. prices every upcoming match / game the books list (The Odds API) and saves it to model_store.game_picks with the
+     model's read and a tracking pick where the model clears its bar. The first capture is the OPEN line, later ones
+     before the start overwrite the CLOSE;
+  4. grades started matches / games from the archive.
+
+Stored per sport key: TENNIS, EUROLEAGUE, NBL. "line" is the home side's market chance (tennis) or the home margin the
+spread implies (basketball); final_home / final_away are games won (tennis) or points (basketball); result is the
+winner ("home" / "away") so each market's pick is graded from the payload by summary().
+"""
+from __future__ import annotations
+
+import os
+import statistics
+import sys
+from datetime import date, datetime, timedelta, timezone
+from typing import Callable, Dict, Iterable, List, Optional, Sequence
+
+import intl_hoops as I
+import tennis_model as T
+
+ODDS = "https://api.the-odds-api.com/v4/sports/{key}/odds"
+SPORTS_URL = "https://api.the-odds-api.com/v4/sports"
+TENNIS_ML_EDGE = 0.05          # match winner: Elo 5+ points above the market's no-vig chance
+TENNIS_MIN_MATCHES = 30        # both players need this many rated matches
+TENNIS_GAMES_EDGE = 0.10       # game handicap / total games: model chance 60%+ on a side
+HOOPS_SPREAD_EDGE = 4.0        # points off the consensus spread
+HOOPS_TOTAL_EDGE = 99.0        # totals off until a backtest supports them
+HOOPS_ML_EDGE = 0.05
+TENNIS_SEED_FROM = date(2023, 1, 1)
+
+
+def _http(url: str, params: Optional[Dict] = None):
+    import requests
+    try:
+        r = requests.get(url, params=params or {}, timeout=30, headers={"User-Agent": "H2Sports/1.0"})
+        return r.json() if r.ok else None
+    except Exception:                                           # noqa: BLE001
+        return None
+
+
+def _implied(a) -> Optional[float]:
+    try:
+        a = float(a)
+    except (TypeError, ValueError):
+        return None
+    if -100 < a < 100:
+        return None
+    return 100 / (a + 100) if a > 0 else -a / (-a + 100)
+
+
+def _dec(a) -> Optional[float]:
+    try:
+        a = float(a)
+    except (TypeError, ValueError):
+        return None
+    return 1 + (a / 100 if a > 0 else 100 / -a) if abs(a) >= 100 else None
+
+
+def market(ev: Dict, home: str, away: str) -> Dict:
+    """Consensus no-vig home chance, best prices by side (with the book), median spread / total lines and prices."""
+    fair, best_h, best_a = [], (None, None), (None, None)
+    sp, sp_price, tot, tot_o, tot_u = [], [], [], [], []
+    for b in ev.get("bookmakers") or []:
+        for m in b.get("markets") or []:
+            oc = m.get("outcomes") or []
+            if m.get("key") == "h2h":
+                d = {o.get("name"): o.get("price") for o in oc}
+                if home in d and away in d:
+                    ph, pa = _implied(d[home]), _implied(d[away])
+                    if ph and pa:
+                        fair.append(ph / (ph + pa))
+                        if best_h[0] is None or _dec(d[home]) > _dec(best_h[0]):
+                            best_h = (d[home], b.get("title"))
+                        if best_a[0] is None or _dec(d[away]) > _dec(best_a[0]):
+                            best_a = (d[away], b.get("title"))
+            elif m.get("key") == "spreads":
+                for o in oc:
+                    if o.get("name") == home and o.get("point") is not None:
+                        sp.append(float(o["point"]))
+                        sp_price.append(float(o.get("price") or -110))
+            elif m.get("key") == "totals":
+                for o in oc:
+                    if o.get("point") is None:
+                        continue
+                    if o.get("name") == "Over":
+                        tot.append(float(o["point"]))
+                        tot_o.append(float(o.get("price") or -110))
+                    elif o.get("name") == "Under":
+                        tot_u.append(float(o.get("price") or -110))
+    return {"fair_home": statistics.mean(fair) if fair else None, "books": len(fair),
+            "best_home": best_h[0], "best_home_book": best_h[1], "best_away": best_a[0], "best_away_book": best_a[1],
+            "home_spread": statistics.median(sp) if sp else None,
+            "spread_price": statistics.median(sp_price) if sp_price else None,
+            "total": statistics.median(tot) if tot else None,
+            "over_price": statistics.median(tot_o) if tot_o else None,
+            "under_price": statistics.median(tot_u) if tot_u else None}
+
+
+# --------------------------------------------------------------------------- tennis
+def tennis_refresh(fetch: Callable = _http, today: Optional[date] = None, db_path: Optional[str] = None) -> int:
+    import model_store as MS
+    today = today or datetime.now(timezone.utc).date()
+    have = MS.load_results("TENNIS", since=(today - timedelta(days=30)).isoformat(), db_path=db_path)
+    start = today - timedelta(days=6) if have else TENNIS_SEED_FROM
+    rows = T.crawl(start, today, fetch=fetch, step_days=1 if have else 2)
+    return MS.save_results("TENNIS", rows, db_path=db_path)
+
+
+def tennis_keys(api_key: str, fetch: Callable = _http) -> List[str]:
+    return [s["key"] for s in fetch(SPORTS_URL, {"apiKey": api_key}) or []
+            if s.get("group") == "Tennis" and s.get("active") and ("_atp_" in s["key"] or "_wta_" in s["key"])]
+
+
+def tennis_build(elo: T.Elo, fit: Dict, key: str, events: Sequence[Dict], now: datetime) -> List[Dict]:
+    tour = "atp" if "_atp_" in key else "wta"
+    title = key.split("_", 2)[2].replace("_", " ").title()
+    out = []
+    for ev in events or []:
+        try:
+            ko = datetime.fromisoformat(str(ev["commence_time"]).replace("Z", "+00:00"))
+        except (KeyError, ValueError):
+            continue
+        if ko <= now:
+            continue
+        home, away = ev.get("home_team"), ev.get("away_team")
+        mk = market(ev, home, away)
+        if mk["fair_home"] is None:
+            continue
+        surf = T.surface(title, ko.date().isoformat())
+        bo = T.best_of(title, tour)
+        p = elo.prob(home, away, surf)
+        n1, n2 = elo.matches(home), elo.matches(away)
+        edge = p - mk["fair_home"]
+        rated = min(n1, n2) >= TENNIS_MIN_MATCHES
+        pick = None
+        if rated and abs(edge) >= TENNIS_ML_EDGE:
+            pick = "home" if edge > 0 else "away"
+        g = T.games(fit, p, bo) if fit else None
+        sp_pick = tot_pick = None
+        p_cover = p_over = None
+        if g and mk["home_spread"] is not None:
+            p_cover = T.p_over(g["margin"], g["mar_sd"], -mk["home_spread"])
+            if rated and abs(p_cover - 0.5) >= TENNIS_GAMES_EDGE:
+                sp_pick = "home" if p_cover > 0.5 else "away"
+        if g and mk["total"] is not None:
+            p_over = T.p_over(g["total"], g["tot_sd"], mk["total"])
+            if rated and abs(p_over - 0.5) >= TENNIS_GAMES_EDGE:
+                tot_pick = "over" if p_over > 0.5 else "under"
+        out.append({"sport": "TENNIS", "game_id": str(ev.get("id")), "kickoff": ko.isoformat(), "tour": tour,
+                    "tournament": title, "surface": surf, "best_of": bo, "home": home, "away": away,
+                    "model_p": round(p, 4), "n_home": n1, "n_away": n2, "line": round(mk["fair_home"], 4),
+                    "edge": round(edge, 4), "line_total": mk["total"], "home_spread": mk["home_spread"],
+                    "best_home": mk["best_home"], "best_home_book": mk["best_home_book"], "best_away": mk["best_away"],
+                    "best_away_book": mk["best_away_book"], "spread_price": mk["spread_price"],
+                    "over_price": mk["over_price"], "under_price": mk["under_price"], "books": mk["books"],
+                    "model_total": round(g["total"], 1) if g else None, "model_margin": round(g["margin"], 1) if g else None,
+                    "p_cover": None if p_cover is None else round(p_cover, 3),
+                    "p_over": None if p_over is None else round(p_over, 3),
+                    "pick": pick, "spread_pick": sp_pick, "total_pick": tot_pick})
+    return out
+
+
+def tennis_capture(api_key: str, fetch: Callable = _http, now: Optional[datetime] = None,
+                   db_path: Optional[str] = None) -> Dict:
+    import model_store as MS
+    now = now or datetime.now(timezone.utc)
+    added = tennis_refresh(fetch, now.date(), db_path)
+    hist = MS.load_results("TENNIS", db_path=db_path)
+    elo, rows = T.run(hist)
+    fit = T.fit_games(rows)
+    recs = []
+    for k in tennis_keys(api_key, fetch):
+        evs = fetch(ODDS.format(key=k), {"apiKey": api_key, "regions": "us", "markets": "h2h,spreads,totals",
+                                         "oddsFormat": "american"})
+        recs += tennis_build(elo, fit, k, evs or [], now)
+    saved = MS.save_game_picks(recs, db_path=db_path)
+    graded = tennis_grade(hist, db_path=db_path)
+    return {"archive_added": added, "matches_rated": len(rows), "priced": len(recs),
+            "picks": sum(1 for r in recs if r["pick"]), "saved": saved, "graded": graded}
+
+
+def _same_player(a: str, b: str) -> bool:
+    ta, tb = T.norm(a).split(), T.norm(b).split()
+    return bool(ta and tb and ta[-1] == tb[-1] and (ta[0][0] == tb[0][0]))
+
+
+def tennis_grade(hist: Sequence[Dict], db_path: Optional[str] = None) -> int:
+    import model_store as MS
+    n = 0
+    for p in MS.load_game_picks("TENNIS", ungraded=True, db_path=db_path):
+        day = str(p.get("kickoff"))[:10]
+        for m in hist:
+            if abs((date.fromisoformat(m["date"]) - date.fromisoformat(day)).days) > 2:
+                continue
+            if _same_player(m["p1"], p["home"]) and _same_player(m["p2"], p["away"]):
+                hg, ag, hw = m["games1"], m["games2"], m["winner"] == 1
+            elif _same_player(m["p2"], p["home"]) and _same_player(m["p1"], p["away"]):
+                hg, ag, hw = m["games2"], m["games1"], m["winner"] == 2
+            else:
+                continue
+            res = "void" if m.get("status") == "walkover" else ("home" if hw else "away")
+            if MS.grade_game_pick("TENNIS", p["game_id"], hg, ag, res if m.get("status") != "retired" else "retired",
+                                  db_path=db_path):
+                n += 1
+            break
+    return n
+
+
+# --------------------------------------------------------------------------- international basketball
+def hoops_refresh(league: str, fetch: Callable = _http, today: Optional[date] = None,
+                  db_path: Optional[str] = None) -> int:
+    import model_store as MS
+    today = today or datetime.now(timezone.utc).date()
+    season = I.season_of(league, today.isoformat())
+    if league == "EUROLEAGUE":
+        rows = I.euroleague_season(f"E{season}", fetch)
+    else:
+        have = MS.load_results(league, since=f"{season}-07-01", db_path=db_path)
+        start = today - timedelta(days=7) if have else date(int(season), 9, 1)
+        rows = I.nbl_range(start, today, fetch)
+    for r in rows:
+        r["season"] = I.season_of(league, r["date"])
+    return MS.save_results(league, rows, db_path=db_path)
+
+
+def hoops_build(league: str, r: Optional[Dict], events: Sequence[Dict], now: datetime) -> List[Dict]:
+    out = []
+    for ev in events or []:
+        try:
+            ko = datetime.fromisoformat(str(ev["commence_time"]).replace("Z", "+00:00"))
+        except (KeyError, ValueError):
+            continue
+        if ko <= now:
+            continue
+        home, away = ev.get("home_team"), ev.get("away_team")
+        proj = I.project(r, home, away)
+        mk = market(ev, home, away)
+        if not proj or mk["home_spread"] is None:
+            continue
+        line_margin = -mk["home_spread"]
+        edge = proj["margin"] - line_margin
+        p = I.win_prob(proj["margin"])
+        ml_edge = None if mk["fair_home"] is None else p - mk["fair_home"]
+        tot_edge = None if mk["total"] is None else proj["total"] - mk["total"]
+        out.append({"sport": league, "game_id": str(ev.get("id")), "kickoff": ko.isoformat(), "home": home,
+                    "away": away, "model_margin": round(proj["margin"], 1), "model_total": round(proj["total"], 1),
+                    "line": line_margin, "home_spread": mk["home_spread"], "edge": round(edge, 2),
+                    "line_total": mk["total"], "total_edge": None if tot_edge is None else round(tot_edge, 1),
+                    "model_p": round(p, 3), "fair_home": mk["fair_home"],
+                    "ml_edge": None if ml_edge is None else round(ml_edge, 3),
+                    "best_home": mk["best_home"], "best_home_book": mk["best_home_book"], "best_away": mk["best_away"],
+                    "best_away_book": mk["best_away_book"], "spread_price": mk["spread_price"],
+                    "over_price": mk["over_price"], "under_price": mk["under_price"],
+                    "pick": ("home" if edge > 0 else "away") if abs(edge) >= HOOPS_SPREAD_EDGE else None,
+                    "total_pick": (("over" if tot_edge > 0 else "under")
+                                   if tot_edge is not None and abs(tot_edge) >= HOOPS_TOTAL_EDGE else None),
+                    "ml_pick": (("home" if ml_edge > 0 else "away")
+                                if ml_edge is not None and abs(ml_edge) >= HOOPS_ML_EDGE else None)})
+    return out
+
+
+def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optional[datetime] = None,
+                  db_path: Optional[str] = None) -> Dict:
+    import model_store as MS
+    now = now or datetime.now(timezone.utc)
+    cfg = I.LEAGUES[league]
+    added = hoops_refresh(league, fetch, now.date(), db_path)
+    season = I.season_of(league, now.date().isoformat())
+    games = [g for g in MS.load_results(league, db_path=db_path) if str(g.get("season")) == season]
+    r = I.ratings(games, cfg["lam"]) if len(games) >= cfg["min_games"] else None
+    evs = fetch(ODDS.format(key=cfg["odds_key"]), {"apiKey": api_key, "regions": "us",
+                                                    "markets": "h2h,spreads,totals", "oddsFormat": "american"}) or []
+    recs = hoops_build(league, r, evs, now)
+    saved = MS.save_game_picks(recs, db_path=db_path)
+    graded = hoops_grade(league, MS.load_results(league, db_path=db_path), db_path=db_path)
+    return {"archive_added": added, "season_games": len(games), "rated": r is not None, "priced": len(recs),
+            "picks": sum(1 for x in recs if x["pick"]), "saved": saved, "graded": graded}
+
+
+def hoops_grade(league: str, results: Sequence[Dict], db_path: Optional[str] = None) -> int:
+    import model_store as MS
+    n = 0
+    for p in MS.load_game_picks(league, ungraded=True, db_path=db_path):
+        day = str(p.get("kickoff"))[:10]
+        for g in results:
+            if abs((date.fromisoformat(g["date"]) - date.fromisoformat(day)).days) > 1:
+                continue
+            if I.same_team(g["home_team"], p["home"]) and I.same_team(g["away_team"], p["away"]):
+                hp, ap = g["home_points"], g["away_points"]
+            elif I.same_team(g["home_team"], p["away"]) and I.same_team(g["away_team"], p["home"]):
+                hp, ap = g["away_points"], g["home_points"]
+            else:
+                continue
+            if MS.grade_game_pick(league, p["game_id"], hp, ap, "home" if hp > ap else "away", db_path=db_path):
+                n += 1
+            break
+    return n
+
+
+# --------------------------------------------------------------------------- the record
+def _outcome(won: Optional[bool], price=None) -> Dict:
+    if won is None:
+        return {"r": "push", "units": 0.0}
+    d = _dec(price) or _dec(-110)
+    return {"r": "win" if won else "loss", "units": (d - 1) if won else -1.0}
+
+
+def grade_markets(p: Dict) -> Dict:
+    """Each tracked market's result for one graded record: {"ml": {...}, "spread": {...}, "total": {...}}."""
+    out = {}
+    fh, fa, res = p.get("final_home"), p.get("final_away"), p.get("result")
+    if fh is None or fa is None or res in (None, "void"):
+        return out
+    margin, total = fh - fa, fh + fa
+    if p.get("sport") == "TENNIS":
+        if p.get("pick") and res in ("home", "away"):
+            out["ml"] = _outcome(p["pick"] == res, p["best_home"] if p["pick"] == "home" else p["best_away"])
+        if p.get("spread_pick") and p.get("home_spread") is not None and res != "retired":
+            d = margin + p["home_spread"]
+            out["spread"] = _outcome(None if d == 0 else (d > 0) == (p["spread_pick"] == "home"), p.get("spread_price"))
+        if p.get("total_pick") and p.get("line_total") is not None and res != "retired":
+            d = total - p["line_total"]
+            out["total"] = _outcome(None if d == 0 else (d > 0) == (p["total_pick"] == "over"),
+                                    p.get("over_price") if p["total_pick"] == "over" else p.get("under_price"))
+        return out
+    line = p.get("close_line") if p.get("close_line") is not None else p.get("line")
+    if p.get("pick") and line is not None:
+        d = margin - line
+        out["spread"] = _outcome(None if d == 0 else (d > 0) == (p["pick"] == "home"), p.get("spread_price"))
+    if p.get("total_pick") and p.get("line_total") is not None:
+        d = total - p["line_total"]
+        out["total"] = _outcome(None if d == 0 else (d > 0) == (p["total_pick"] == "over"),
+                                p.get("over_price") if p["total_pick"] == "over" else p.get("under_price"))
+    if p.get("ml_pick"):
+        out["ml"] = _outcome(p["ml_pick"] == res, p["best_home"] if p["ml_pick"] == "home" else p["best_away"])
+    return out
+
+
+def record(picks: Iterable[Dict]) -> Dict:
+    """{market: {"w","l","p","units","n"}} over graded records."""
+    rec: Dict[str, Dict] = {}
+    for p in picks:
+        for mk, o in grade_markets(p).items():
+            r = rec.setdefault(mk, {"w": 0, "l": 0, "p": 0, "units": 0.0, "n": 0})
+            r["n"] += 1
+            r["units"] += o["units"]
+            r[{"win": "w", "loss": "l", "push": "p"}[o["r"]]] += 1
+    for r in rec.values():
+        r["roi"] = r["units"] / r["n"] if r["n"] else None
+    return rec
+
+
+def main(argv=None) -> int:
+    api = os.environ.get("ODDS_API_KEY")
+    if not api:
+        print("ODDS_API_KEY not set")
+        return 1
+    which = (argv or sys.argv[1:] or ["TENNIS,EUROLEAGUE,NBL"])[0].split(",")
+    for s in which:
+        try:
+            out = tennis_capture(api) if s == "TENNIS" else hoops_capture(s, api)
+        except Exception as exc:                                # noqa: BLE001 -- one sport failing never stops the rest
+            out = {"error": f"{type(exc).__name__}: {exc}"}
+        print(s, out)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

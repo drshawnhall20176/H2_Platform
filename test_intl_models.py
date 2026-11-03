@@ -63,3 +63,108 @@ def test_euroleague_parser():
                      {"identifier": "E2025_2", "played": False, "local": {}, "road": {}}]}
     g = I.euroleague_season("E2025", fetch=lambda url, params=None: data)
     assert len(g) == 1 and g[0]["home_points"] == 90 and g[0]["date"] == "2025-10-01"
+
+
+# --------------------------------------------------------------------------- live tracking (intl_picks)
+from datetime import date, datetime, timezone  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+import intl_picks as IP  # noqa: E402
+import model_store as MS  # noqa: E402
+
+NOW = datetime(2026, 11, 3, 12, tzinfo=timezone.utc)
+
+
+def _ev(eid, home, away, ph, pa, spread=None, total=None, ko="2026-11-04T12:00:00Z"):
+    mk = [{"key": "h2h", "outcomes": [{"name": home, "price": ph}, {"name": away, "price": pa}]}]
+    if spread is not None:
+        mk.append({"key": "spreads", "outcomes": [{"name": home, "price": -110, "point": spread},
+                                                  {"name": away, "price": -110, "point": -spread}]})
+    if total is not None:
+        mk.append({"key": "totals", "outcomes": [{"name": "Over", "price": -110, "point": total},
+                                                 {"name": "Under", "price": -110, "point": total}]})
+    return {"id": eid, "commence_time": ko, "home_team": home, "away_team": away,
+            "bookmakers": [{"key": "draftkings", "title": "DraftKings", "markets": mk}]}
+
+
+def _strong_history():
+    rows = []
+    for i in range(40):
+        rows.append({"id": f"a{i}", "date": f"2026-0{1 + i % 9}-10", "tour": "atp", "tournament": "X", "surface": "hard",
+                     "best_of": 3, "p1": "Ace Server", "p2": f"Opp {i}", "winner": 1, "games1": 12, "games2": 6,
+                     "status": "final"})
+        rows.append({"id": f"b{i}", "date": f"2026-0{1 + i % 9}-11", "tour": "atp", "tournament": "X", "surface": "hard",
+                     "best_of": 3, "p1": "Even Steven", "p2": f"Opp {i}", "winner": 1 if i % 2 else 2, "games1": 10,
+                     "games2": 10, "status": "final"})
+    return rows
+
+
+def test_tennis_build_picks_only_rated_players_with_an_edge():
+    elo, rows = T.run(_strong_history())
+    recs = IP.tennis_build(elo, {}, "tennis_atp_paris_masters",
+                           [_ev("e1", "Ace Server", "Even Steven", 110, -130), _ev("e2", "Ace Server", "Nobody New", -300, 250),
+                            _ev("e0", "Ace Server", "Even Steven", 110, -130, ko="2026-11-02T12:00:00Z")], NOW)
+    by = {r["game_id"]: r for r in recs}
+    assert "e0" not in by                                       # already started
+    assert by["e1"]["pick"] == "home" and by["e1"]["edge"] > IP.TENNIS_ML_EDGE
+    assert by["e2"]["pick"] is None                             # opponent has no rated matches
+    assert by["e1"]["surface"] == "hard" and by["e1"]["tour"] == "atp"
+
+
+def test_hoops_build_and_record():
+    games = [{"home_team": h, "away_team": a, "home_points": hp, "away_points": ap, "neutral_site": False}
+             for h, a, hp, ap in [("Real Madrid", "Monaco", 95, 75), ("Monaco", "Fenerbahce", 80, 82),
+                                  ("Fenerbahce", "Real Madrid", 70, 90)] * 6]
+    r = I.ratings(games, 3.0)
+    recs = IP.hoops_build("EUROLEAGUE", r, [_ev("g1", "Real Madrid", "Monaco", -150, 130, spread=-2.5, total=160)], NOW)
+    assert len(recs) == 1 and recs[0]["pick"] == "home" and recs[0]["edge"] >= IP.HOOPS_SPREAD_EDGE
+    graded = dict(recs[0], final_home=90, final_away=80, result="home", close_line=2.5)
+    rec = IP.record([graded])
+    assert rec["spread"]["w"] == 1 and abs(rec["spread"]["units"] - 100 / 110) < 1e-9
+    lost = dict(graded, final_home=81, final_away=80)
+    assert IP.record([lost])["spread"]["l"] == 1
+
+
+def test_tennis_record_handles_retirements():
+    p = {"sport": "TENNIS", "pick": "home", "best_home": 120, "best_away": -140, "spread_pick": "home", "home_spread": -2.5,
+         "total_pick": "over", "line_total": 21.5, "over_price": -110, "under_price": -110}
+    won = IP.grade_markets(dict(p, final_home=13, final_away=9, result="home"))
+    assert won["ml"]["r"] == "win" and abs(won["ml"]["units"] - 1.2) < 1e-9
+    assert won["spread"]["r"] == "win" and won["total"]["r"] == "win"
+    assert IP.grade_markets(dict(p, final_home=3, final_away=1, result="retired")) == {}
+
+
+def test_capture_end_to_end_with_a_local_store(tmp_path, monkeypatch):
+    db = str(tmp_path / "m.db")
+    MS.save_results("TENNIS", _strong_history(), db_path=db)
+    monkeypatch.setattr(T, "crawl", lambda *a, **k: [])
+
+    def fetch(url, params=None):
+        if url.endswith("/sports"):
+            return [{"key": "tennis_atp_paris_masters", "group": "Tennis", "active": True}]
+        return [_ev("e1", "Ace Server", "Even Steven", 110, -130, spread=-2.5, total=21.5)]
+    out = IP.tennis_capture("k", fetch=fetch, now=NOW, db_path=db)
+    assert out["priced"] == 1 and out["picks"] == 1 and out["saved"] == 1
+    MS.save_results("TENNIS", [{"id": "z", "date": "2026-11-04", "tour": "atp", "tournament": "Paris", "surface": "hard",
+                                "best_of": 3, "p1": "Even Steven", "p2": "Ace Server", "winner": 2, "games1": 8,
+                                "games2": 12, "status": "final"}], db_path=db)
+    assert IP.tennis_grade(MS.load_results("TENNIS", db_path=db), db_path=db) == 1
+    g = MS.load_game_picks("TENNIS", db_path=db)[0]
+    assert g["result"] == "home" and g["final_home"] == 12 and IP.record([g])["ml"]["w"] == 1
+
+
+def test_pages_render(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    up = {"sport": "TENNIS", "game_id": "e1", "kickoff": "2099-01-01T12:00:00+00:00", "tour": "atp",
+          "tournament": "Paris Masters", "surface": "hard", "home": "A B", "away": "C D", "model_p": 0.6, "line": 0.5,
+          "edge": 0.1, "best_home": 110, "best_away": -130, "model_total": 22.1, "line_total": 21.5, "n_home": 40,
+          "n_away": 40, "pick": "home", "spread_pick": None, "total_pick": "over", "result": None}
+    hoop = {"sport": "EUROLEAGUE", "game_id": "g1", "kickoff": "2099-01-01T18:00:00+00:00", "home": "Real Madrid",
+            "away": "Monaco", "model_margin": 8.0, "home_spread": -2.5, "edge": 5.5, "model_total": 165.0,
+            "line_total": 160.0, "model_p": 0.75, "fair_home": 0.6, "pick": "home", "result": None}
+    monkeypatch.setattr(MS, "load_game_picks", lambda sport, ungraded=False, db_path=None: [up] if sport == "TENNIS" else [hoop])
+    for page, needle in (("43_Tennis_Lab.py", "A B ML"), ("44_Intl_Hoops.py", "Real Madrid -2.5")):
+        at = AppTest.from_file(str(Path(__file__).parent / "views" / page), default_timeout=30)
+        at.run()
+        assert not at.exception, [e.value for e in at.exception]
+        assert needle in at.dataframe[0].value.to_string()

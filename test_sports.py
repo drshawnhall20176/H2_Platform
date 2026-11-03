@@ -120,7 +120,8 @@ def test_owner_only_pages_match_expected_titles():
                      "Matchup Lab", "Track Record", "Data Health",
                      "Suggested Parlays", "Speculative Basket", "Graded Picks",
                      "Model Dashboard", "First Innings Totals", "Player Lines", "Slip Lab",
-                     "Position Matchups", "Postgame Review", "Progression Plan"}, gated
+                     "Position Matchups", "Postgame Review", "Progression Plan", "Tennis Lab",
+                     "International Hoops"}, gated
     all_titles = set(re.findall(r'\("([^"]+)",\s*"[^"]*",\s*"[^"]*"\)', src))
     assert gated <= all_titles, f"gated titles not found in _META: {gated - all_titles}"
     print("✓ owner-only gate targets exactly Bet Log / Media Room / Podcast Studio / Edge Board / "
@@ -611,6 +612,7 @@ def test_sidebar_sections_match_the_documented_grouping():
         "29": "🔬 DEEP RESEARCH", "30": "🔬 DEEP RESEARCH", "31": "🔬 DEEP RESEARCH",
         "32": "🔬 DEEP RESEARCH", "33": "🔬 DEEP RESEARCH", "34": "🔬 DEEP RESEARCH",
         "35": "🔬 DEEP RESEARCH", "36": "🔬 DEEP RESEARCH", "38": "🔬 DEEP RESEARCH",
+        "43": "🔬 DEEP RESEARCH", "44": "🔬 DEEP RESEARCH",
         "16": "🔍 SELF-GRADING & PROOF", "17": "🔍 SELF-GRADING & PROOF",
         "18": "🔍 SELF-GRADING & PROOF", "19": "🔍 SELF-GRADING & PROOF", "40": "🔍 SELF-GRADING & PROOF",
         "41": "🔍 SELF-GRADING & PROOF", "42": "🔍 SELF-GRADING & PROOF",
