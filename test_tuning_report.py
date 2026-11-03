@@ -115,3 +115,20 @@ def test_weekly_tab_shows_report_and_approves(monkeypatch):
     btn = next(b for b in at.button if b.key and b.key.startswith("pgr_blend_"))
     btn.click().run()
     assert got and got[0][:2] == ("NBA", "Points")
+
+
+def test_page_survives_an_old_model_store_without_blend_functions(monkeypatch):
+    from pathlib import Path
+    from streamlit.testing.v1 import AppTest
+    import postgame as PG
+    for name in ("list_blend", "approve_blend", "retire_blend"):
+        monkeypatch.delattr(MS, name)
+    monkeypatch.setattr(MS, "snapshot_dates", lambda sport, db_path=None: ["2026-11-01"])
+    monkeypatch.setattr(MS, "load_snapshots", lambda sport=None, dates=None, db_path=None: [])
+    monkeypatch.setattr(MS, "list_tuning", lambda active_only=True, db_path=None: [])
+    monkeypatch.setattr(MS, "daily_review_mornings", lambda sport, db_path=None: [])
+    monkeypatch.setattr(PG, "fetch_results", lambda sport, d, games, fetch=None: {})
+    at = AppTest.from_file(str(Path(__file__).parent / "views" / "41_Postgame_Review.py"), default_timeout=30)
+    at.session_state["sport"] = "NBA"
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
