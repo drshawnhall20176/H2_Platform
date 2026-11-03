@@ -33,8 +33,17 @@ def main(argv=None) -> int:
     import daily_review as D
     import model_store as MS
     ap = argparse.ArgumentParser()
-    ap.add_argument("--sport", default="NFL")
+    ap.add_argument("--sport", default=os.environ.get("STUDY_SPORTS", "NFL,NBA"))
     a = ap.parse_args(argv)
+    for sp in a.sport.split(","):
+        _one(sp.strip(), D, MS)
+    return 0
+
+
+def _one(sport, D, MS):
+    class a:                                                    # noqa: N801 -- keeps the body below unchanged
+        pass
+    a.sport = sport
     dates = MS.snapshot_dates(a.sport)
     graded = D.grade_dates(a.sport, dates)
     rows, seen = [], set()
@@ -74,7 +83,6 @@ def main(argv=None) -> int:
     for d in sorted({r["date"] for r in rows}):
         print(summarize([r for r in cur if r["date"] == d], f"  {d}"))
     print("```")
-    return 0
 
 
 if __name__ == "__main__":
