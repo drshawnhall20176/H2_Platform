@@ -224,3 +224,16 @@ def test_college_basketball_scoreboard_asks_for_all_of_division_one():
     PG.fetch_results("NCAAMB", "2026-11-03", [("Duke", "Army")],
                      fetch=lambda url, params=None: seen.append(params) or {"events": []})
     assert seen[0]["groups"] == 50 and PG.FAMILY["NCAAMB"] == "basketball"
+
+
+def test_lock_record_counts_only_most_probable_and_prices_them():
+    import postgame as PG
+    import props_engine as PE
+    rows = [{"result": "hit", "chance": 0.65, "cushion": 0.2, "gap": None, "price": -150},
+            {"result": "miss", "chance": 0.62, "cushion": 0.16, "gap": None, "price": -120},
+            {"result": "hit", "chance": 0.66, "cushion": 0.3, "gap": "big", "price": -110},     # books far off: not a lock
+            {"result": "hit", "chance": 0.55, "cushion": 0.3, "gap": None, "price": -110}]      # under 60%: not a lock
+    r = PG.lock_record(rows)
+    assert r["Use"] == PE.MOST_PROBABLE and r["Graded"] == 2 and r["Hits"] == 1
+    assert abs(r["Profit per $1"] - ((100 / 150) - 1) / 2) < 1e-9
+    assert PG.lock_record(rows[2:]) is None

@@ -97,6 +97,14 @@ def _record(rows: Sequence[Dict]) -> Dict:
     return {"hits": hits, "misses": misses, "hit_rate": hits / (hits + misses) if hits + misses else None}
 
 
+def _lock(done: Sequence[Dict]) -> Dict:
+    """The 🔒 Most probable record (hits / misses / hit_rate, plus the chance shown and profit at the price)."""
+    rec = _record([r for r in done if PE.most_probable(r.get("chance"), r.get("cushion"), r.get("gap"))])
+    row = PG.lock_record(done) or {}
+    rec.update(chance=row.get("Model said"), profit=row.get("Profit per $1"), priced=row.get("Priced", 0))
+    return rec
+
+
 def summarize_slate(graded: Sequence[Dict]) -> Dict:
     """One slate's grading, ready to store as JSON."""
     counts = {k: sum(1 for r in graded if r.get("result") == k) for k in ("hit", "miss", "push", "void", "pending")}
@@ -120,7 +128,7 @@ def summarize_slate(graded: Sequence[Dict]) -> Dict:
         "counts": counts,
         "model": {"right": mh, "graded": mn},
         "use": PG.use_record(done),
-        "most_probable": _record([r for r in done if PE.most_probable(r.get("chance"), r.get("cushion"), r.get("gap"))]),
+        "most_probable": _lock(done),
         "markets": markets,
         "big_gap": {"graded": len(gaps), "model_right": _rate(gaps, "model_hit"), "hit_rate": _rate(gaps)},
         "star_out": {"graded": len(stars), "hit_rate": _rate(stars),

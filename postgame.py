@@ -408,6 +408,22 @@ def use_record(graded: Sequence[Dict]) -> List[Dict]:
     return out
 
 
+def lock_record(graded: Sequence[Dict]) -> Optional[Dict]:
+    """The 🔒 Most probable picks (Best Bets' lock: 60%+ chance, 15%+ cushion, books not far off) as one row in
+    use_record's shape, plus profit per $1 at the posted price where one was saved. None when none were graded."""
+    g = [r for r in graded if r.get("result") in ("hit", "miss")
+         and PE.most_probable(r.get("chance"), r.get("cushion"), r.get("gap"))]
+    if not g:
+        return None
+    hits = sum(r["result"] == "hit" for r in g)
+    ch = [r["chance"] for r in g if r.get("chance") is not None]
+    priced = [r for r in g if PE.decimal(r.get("price")) is not None]
+    prof = (sum((PE.decimal(r["price"]) - 1) if r["result"] == "hit" else -1 for r in priced) / len(priced)
+            if priced else None)
+    return {"Use": PE.MOST_PROBABLE, "Graded": len(g), "Hits": hits, "Hit rate": hits / len(g),
+            "Model said": (sum(ch) / len(ch)) if ch else None, "Profit per $1": prof, "Priced": len(priced)}
+
+
 def model_record(graded: Sequence[Dict]) -> Tuple[int, int]:
     g = [r for r in graded if r.get("model_hit") is not None]
     return sum(1 for r in g if r["model_hit"]), len(g)
