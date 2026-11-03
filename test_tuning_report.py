@@ -132,3 +132,13 @@ def test_page_survives_an_old_model_store_without_blend_functions(monkeypatch):
     at.session_state["sport"] = "NBA"
     at.run()
     assert not at.exception, [e.value for e in at.exception]
+
+
+def test_report_has_a_lock_section(monkeypatch):
+    monkeypatch.setattr(BW, "_load", lambda: {})
+    rows = [{"result": "hit" if i % 3 else "miss", "slate_date": "2026-11-01", "player": f"L{i}", "market": "Points",
+             "side": "Under", "line": 20.5, "chance": 0.64, "cushion": 0.2, "gap": "agree", "price": -150}
+            for i in range(12)]
+    rep = T.build("NBA", rows, [])
+    assert rep["locks"]["graded"] == 12 and rep["locks"]["hits"] == 8
+    assert "Most probable" in rep["markdown"] and "| Points | Under | 8-4 |" in rep["markdown"]
