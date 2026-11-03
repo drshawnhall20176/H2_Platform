@@ -613,6 +613,7 @@ def test_sidebar_sections_match_the_documented_grouping():
         "32": "🔬 DEEP RESEARCH", "33": "🔬 DEEP RESEARCH", "34": "🔬 DEEP RESEARCH",
         "35": "🔬 DEEP RESEARCH", "36": "🔬 DEEP RESEARCH", "38": "🔬 DEEP RESEARCH",
         "43": "🔬 DEEP RESEARCH", "44": "🔬 DEEP RESEARCH", "45": "🔬 DEEP RESEARCH",
+        "46": "🔬 DEEP RESEARCH", "47": "🔬 DEEP RESEARCH",
         "16": "🔍 SELF-GRADING & PROOF", "17": "🔍 SELF-GRADING & PROOF",
         "18": "🔍 SELF-GRADING & PROOF", "19": "🔍 SELF-GRADING & PROOF", "40": "🔍 SELF-GRADING & PROOF",
         "41": "🔍 SELF-GRADING & PROOF", "42": "🔍 SELF-GRADING & PROOF",
@@ -1247,7 +1248,7 @@ def test_sport_only_page_visibility_matches_expected_config():
                      "27": ("MLB",), "29": ("NCAAF",), "30": ("NCAAF",), "31": ("NCAAF",),
                      "32": ("NCAAF",), "33": ("NFL",), "34": ("NFL",),
                      "35": ("NCAAF",), "36": ("NCAAF",),
-                         "38": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL"), "41": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL", "UFC"), "45": ("NCAAMB",)}, pairs
+                         "38": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL"), "41": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL", "UFC"), "45": ("NCAAMB",), "46": ("NBA",), "47": ("NHL",)}, pairs
     print("✓ sport_only_leads matches expected config (Bullpen Watch/Game Watch/Pitching Lab/"
           "Dinger Engine/Matchup Lab(MLB)/Player Lines/First Innings Totals -> MLB, Hot Hand "
           "Engine/Matchup Lab(WNBA/NBA/NCAAMB) -> WNBA+NBA+NCAAMB, Matchup Lab(NFL)/Anytime TD "
