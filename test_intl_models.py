@@ -215,3 +215,25 @@ def test_tennis_page_shows_schedule_and_checks_a_price(monkeypatch):
     assert "Elizabeth Mandlik" in t and "-150" in t
     at.number_input(key="tl_chk_price").set_value(-120).run()
     assert any("+10.0%" in m.value for m in at.markdown)
+
+
+def test_college_names_never_cross_match():
+    names = ["Kentucky Wildcats", "Arizona Wildcats", "Tennessee Volunteers", "Tennessee State Tigers", "Duke Blue Devils"]
+    assert I.find_team(names, "Kentucky Wildcats") == "Kentucky Wildcats"
+    assert I.find_team(names, "Tennessee Volunteers") == "Tennessee Volunteers"
+    assert I.find_team(names, "Wildcats") is None                       # ambiguous: no guess
+    assert I.find_team(names, "Northwestern Wildcats") is None           # only "wildcats" in common
+    assert I.find_team(names, "Tennessee St Tigers") == "Tennessee State Tigers"
+    ev = [{"home_team": "Tennessee Volunteers", "away_team": "Wofford Terriers"},
+          {"home_team": "Tennessee State Tigers", "away_team": "Wofford Terriers"}]
+    assert I.match_event(ev, "Tennessee Volunteers", "Wofford Terriers") is ev[0]
+
+
+def test_weighted_ratings_and_decay():
+    games = [{"date": d, "home_team": h, "away_team": a, "home_points": hp, "away_points": ap, "neutral_site": False}
+             for d, h, a, hp, ap in [("2026-03-01", "A", "B", 70, 80), ("2026-03-02", "B", "A", 80, 70),
+                                     ("2026-11-02", "A", "B", 90, 60), ("2026-11-02", "B", "A", 60, 90)] * 5]
+    w = I.decay_weights(games, "2026-11-03", "NCAAMB")
+    assert w[2] > 0.95 and w[0] < 0.05                                  # 8 months old and last season
+    r = I.ratings_weighted(games, w, 1.0)
+    assert r["off"]["A"] > r["off"]["B"]                                 # tonight's results dominate

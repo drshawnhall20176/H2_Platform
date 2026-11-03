@@ -20,7 +20,15 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence
 LEAGUES = {
     "EUROLEAGUE": {"title": "EuroLeague", "odds_key": "basketball_euroleague", "min_games": 40, "lam": 3.0},
     "NBL": {"title": "NBL (Australia)", "odds_key": "basketball_nbl", "min_games": 25, "lam": 3.0},
+    # College: ~360 teams and a new season every November, so the ratings are fitted on the last ~13 months with
+    # recent games weighted more (half-life HALF_LIFE days) and last season's games discounted -- usable from opening
+    # night instead of waiting weeks for this season's sample.
+    "NCAAMB": {"title": "College basketball (men)", "odds_key": "basketball_ncaab", "min_games": 0, "lam": 4.0,
+               "decay": True},
 }
+HALF_LIFE = 45.0               # days: a game 45 days old counts half as much as tonight's
+PRIOR_SEASON_WEIGHT = 0.5      # and last season's games count half again (rosters turn over)
+NCAAMB_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard"
 EL_URL = "https://api-live.euroleague.net/v2/competitions/E/seasons/{code}/games"
 NBL_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nbl/scoreboard"
 STOP = {"basket", "basketball", "bc", "kk", "bk", "club", "de", "the", "fc", "sk", "cb", "pbc", "ok", "and"}
@@ -52,11 +60,44 @@ def same_team(a: Optional[str], b: Optional[str]) -> bool:
     return bool(tokens(a) & tokens(b))
 
 
+def _key(name: Optional[str]) -> str:
+    return " ".join(sorted(tokens(name)))
+
+
+def find_team(names: Iterable[str], name: str) -> Optional[str]:
+    """The one name in `names` that is this team: an exact match (ignoring case / accents / filler words) first, else
+    the single best word overlap (share of the shorter name's words). None when nothing matches or two tie -- college
+    has many "Wildcats" and "Tennessee ..." teams, so a guess is worse than no read."""
+    names = list(names)
+    k = _key(name)
+    exact = [n for n in names if _key(n) == k]
+    if len(exact) == 1:
+        return exact[0]
+    t = tokens(name)
+    if not t:
+        return None
+    scored = []
+    for n in names:
+        u = tokens(n)
+        if t & u:
+            scored.append((len(t & u) / min(len(t), len(u)), len(t & u), n))
+    if not scored:
+        return None
+    scored.sort(reverse=True)
+    if len(scored) > 1 and scored[0][:2] == scored[1][:2]:
+        return None
+    return scored[0][2] if scored[0][0] >= 0.99 or scored[0][1] >= 2 else None
+
+
 def match_event(events: Iterable[Dict], home: str, away: str) -> Optional[Dict]:
-    """The odds event for a game: both teams share a distinctive word with the event's (either order); the best
-    overlap wins."""
+    """The odds event for a game: exact team names first (either order), else both teams share a distinctive word
+    with the event's; the best overlap wins."""
+    events = list(events or [])
+    for e in events:
+        if {_key(e.get("home_team")), _key(e.get("away_team"))} == {_key(home), _key(away)}:
+            return e
     best, score = None, 0
-    for e in events or []:
+    for e in events:
         h, a = tokens(e.get("home_team")), tokens(e.get("away_team"))
         for x, y in ((h, a), (a, h)):
             s1, s2 = len(x & tokens(home)), len(y & tokens(away))
@@ -112,6 +153,78 @@ def nbl_range(start: date, end: date, fetch: Callable = _http) -> List[Dict]:
     return sorted(seen.values(), key=lambda g: g["date"])
 
 
+def ncaamb_day(day: date, fetch: Callable = _http) -> List[Dict]:
+    """Division I games final on `day` (ESPN groups=50)."""
+    data = fetch(NCAAMB_URL, {"dates": day.strftime("%Y%m%d"), "groups": 50, "limit": 500}) or {}
+    out = []
+    for ev in data.get("events") or []:
+        for c in ev.get("competitions") or []:
+            if not ((c.get("status") or {}).get("type") or {}).get("completed"):
+                continue
+            side = {}
+            for t in c.get("competitors") or []:
+                side[t.get("homeAway")] = ((t.get("team") or {}).get("displayName"), _num(t.get("score")))
+            if "home" in side and "away" in side and side["home"][1] is not None and side["away"][1] is not None:
+                out.append({"league": "NCAAMB", "id": f"ncaamb-{c.get('id')}", "date": str(c.get("date") or "")[:10],
+                            "home_team": side["home"][0], "away_team": side["away"][0], "home_points": side["home"][1],
+                            "away_points": side["away"][1], "neutral_site": bool(c.get("neutralSite"))})
+    return out
+
+
+def ncaamb_range(start: date, end: date, fetch: Callable = _http) -> List[Dict]:
+    seen = {}
+    d = start
+    while d <= end:
+        for g in ncaamb_day(d, fetch):
+            seen[g["id"]] = g
+        d += timedelta(days=1)
+    return sorted(seen.values(), key=lambda g: g["date"])
+
+
+def decay_weights(games: Sequence[Dict], asof: str, league: str) -> List[float]:
+    """Recency weights for a fit made on `asof`: half-life HALF_LIFE days, last season's games x PRIOR_SEASON_WEIGHT."""
+    a = date.fromisoformat(asof[:10])
+    cur = season_of(league, asof)
+    out = []
+    for g in games:
+        days = max(0, (a - date.fromisoformat(g["date"][:10])).days)
+        w = 0.5 ** (days / HALF_LIFE)
+        if season_of(league, g["date"]) != cur:
+            w *= PRIOR_SEASON_WEIGHT
+        out.append(w)
+    return out
+
+
+def ratings_weighted(games: Sequence[Dict], weights: Sequence[float], lam: float = 4.0) -> Optional[Dict]:
+    """game_picks.ratings with a weight per game (weighted ridge): {"mu","off","def","hfa"}."""
+    import numpy as np
+    rows = [(g, w) for g, w in zip(games, weights) if w > 1e-4 and _num(g.get("home_points")) is not None
+            and _num(g.get("away_points")) is not None]
+    if len(rows) < 2:
+        return None
+    teams = sorted({g["home_team"] for g, _ in rows} | {g["away_team"] for g, _ in rows})
+    ix = {t: i for i, t in enumerate(teams)}
+    n = len(teams)
+    X, y, W = [], [], []
+    for g, w in rows:
+        home = 0.0 if str(g.get("neutral_site")).lower() in ("true", "1") else 1.0
+        for t, o, pts, h in ((g["home_team"], g["away_team"], g["home_points"], home),
+                             (g["away_team"], g["home_team"], g["away_points"], -home)):
+            x = np.zeros(2 * n + 1)
+            x[ix[t]], x[n + ix[o]], x[2 * n] = 1.0, -1.0, 0.5 * h
+            X.append(x)
+            y.append(float(pts))
+            W.append(w)
+    X, y, W = np.array(X), np.array(y), np.array(W)
+    mu = float(np.average(y, weights=W))
+    Xw = X * W[:, None]
+    reg = np.eye(2 * n + 1) * lam
+    reg[2 * n, 2 * n] = 0.0
+    beta = np.linalg.solve(X.T @ Xw + reg, Xw.T @ (y - mu))
+    return {"mu": mu, "off": {t: float(beta[ix[t]]) for t in teams}, "def": {t: float(beta[n + ix[t]]) for t in teams},
+            "hfa": float(beta[2 * n])}
+
+
 def season_of(league: str, day: str) -> str:
     """Both leagues run Sept/Oct to May/June: a season is named by the year it starts."""
     y, m = int(day[:4]), int(day[5:7])
@@ -128,9 +241,8 @@ def project(r: Optional[Dict], home: str, away: str, neutral: bool = False) -> O
     import game_picks as GP
     if not r:
         return None
-    key = {t: t for t in r["off"]}
-    h = next((t for t in key if same_team(t, home)), None)
-    a = next((t for t in key if same_team(t, away)), None)
+    h = find_team(r["off"], home)
+    a = find_team(r["off"], away)
     if not h or not a or h == a:
         return None
     m = GP.project(r, h, a, neutral)
