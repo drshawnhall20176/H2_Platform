@@ -671,8 +671,14 @@ def save_results(sport: str, rows: List[Dict], db_path: Optional[str] = None) ->
             sql = (f"INSERT INTO results_archive (sport, rid, date, payload, ts) VALUES ({ph},{ph},{ph},{ph},{ph}) "
                    f"ON CONFLICT (sport, rid) DO UPDATE SET date=excluded.date, payload=excluded.payload, ts=excluded.ts")
             now = _now()
-            for r in rows:
-                cur.execute(sql, [sport, str(r["id"]), str(r.get("date") or ""), json.dumps(r, default=str), now])
+            vals = [(sport, str(r["id"]), str(r.get("date") or ""), json.dumps(r, default=str), now) for r in rows]
+            if ph == "%s":                                      # Postgres: one round trip per 500 rows, not per row
+                from psycopg2.extras import execute_values
+                execute_values(cur, "INSERT INTO results_archive (sport, rid, date, payload, ts) VALUES %s "
+                                    "ON CONFLICT (sport, rid) DO UPDATE SET date=excluded.date, payload=excluded.payload, "
+                                    "ts=excluded.ts", vals, page_size=500)
+            else:
+                cur.executemany(sql, vals)
         return len(rows)
     except Exception:                                           # noqa: BLE001
         return 0
