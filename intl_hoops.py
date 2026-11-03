@@ -26,6 +26,18 @@ LEAGUES = {
     "NCAAMB": {"title": "College basketball (men)", "odds_key": "basketball_ncaab", "min_games": 0, "lam": 4.0,
                "decay": True},
 }
+# Nov 3: the pro leagues ESPN covers, same ratings machinery (recency-weighted, last season discounted).
+ESPN_LEAGUE_URL = {"NBA": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
+                   "NHL": "https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard",
+                   "WNBA": "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/scoreboard"}
+LEAGUES.update({
+    "NBA": {"title": "NBA", "odds_key": "basketball_nba", "min_games": 0, "lam": 3.0, "decay": True, "sd": 12.5},
+    "NHL": {"title": "NHL", "odds_key": "icehockey_nhl", "min_games": 0, "lam": 3.0, "decay": True, "sd": 2.4},
+    "WNBA": {"title": "WNBA", "odds_key": "basketball_wnba", "min_games": 0, "lam": 3.0, "decay": True, "sd": 12.0},
+})
+LEAGUES["NCAAMB"]["sd"] = 11.0
+LEAGUES["EUROLEAGUE"]["sd"] = 11.5
+LEAGUES["NBL"]["sd"] = 12.0
 HALF_LIFE = 45.0               # days: a game 45 days old counts half as much as tonight's
 PRIOR_SEASON_WEIGHT = 0.5      # and last season's games count half again (rosters turn over)
 NCAAMB_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard"
@@ -180,6 +192,38 @@ def ncaamb_day(day: date, fetch: Callable = _http) -> List[Dict]:
     return out
 
 
+def espn_day(league: str, day: date, fetch: Callable = _http) -> List[Dict]:
+    """Completed games on `day` for an ESPN pro league (NBA / NHL / WNBA)."""
+    data = fetch(ESPN_LEAGUE_URL[league], {"dates": day.strftime("%Y%m%d"), "limit": 100}) or {}
+    out = []
+    for ev in data.get("events") or []:
+        for c in ev.get("competitions") or []:
+            st = ((c.get("status") or {}).get("type") or {})
+            if not st.get("completed"):
+                continue
+            side = {}
+            for t in c.get("competitors") or []:
+                side[t.get("homeAway")] = ((t.get("team") or {}).get("displayName"), _num(t.get("score")))
+            if "home" in side and "away" in side and side["home"][1] is not None and side["away"][1] is not None:
+                out.append({"league": league, "id": f"{league.lower()}-{c.get('id')}", "date": str(c.get("date") or "")[:10],
+                            "home_team": side["home"][0], "away_team": side["away"][0], "home_points": side["home"][1],
+                            "away_points": side["away"][1], "neutral_site": bool(c.get("neutralSite")),
+                            "season_type": ((ev.get("season") or {}).get("type"))})
+    return out
+
+
+def espn_range(league: str, start: date, end: date, fetch: Callable = _http) -> List[Dict]:
+    seen = {}
+    d = start
+    while d <= end:
+        for g in espn_day(league, d, fetch):
+            if g.get("season_type") in (1, "1"):                # preseason games don't count
+                continue
+            seen[g["id"]] = g
+        d += timedelta(days=1)
+    return sorted(seen.values(), key=lambda g: g["date"])
+
+
 def ncaamb_range(start: date, end: date, fetch: Callable = _http) -> List[Dict]:
     seen = {}
     d = start
@@ -235,8 +279,11 @@ def ratings_weighted(games: Sequence[Dict], weights: Sequence[float], lam: float
 
 
 def season_of(league: str, day: str) -> str:
-    """Both leagues run Sept/Oct to May/June: a season is named by the year it starts."""
+    """Winter leagues run Sept/Oct to May/June: a season is named by the year it starts. The WNBA (May-Oct) is
+    named by its calendar year."""
     y, m = int(day[:4]), int(day[5:7])
+    if league == "WNBA":
+        return str(y)
     return str(y if m >= 7 else y - 1)
 
 
@@ -258,6 +305,8 @@ def project(r: Optional[Dict], home: str, away: str, neutral: bool = False, loos
     return None if m is None else {"margin": m[0], "total": m[1]}
 
 
-def win_prob(margin: float, sd: float = 11.5) -> float:
+def win_prob(margin: float, sd: float = 11.5, league: Optional[str] = None) -> float:
     """Home win chance from the projected margin (normal, basketball game-to-game spread ~11-12 points)."""
+    if league:
+        sd = LEAGUES.get(league, {}).get("sd", sd)
     return 0.5 * math.erfc(-margin / (sd * math.sqrt(2)))
