@@ -106,8 +106,17 @@ def test_tennis_build_picks_only_rated_players_with_an_edge():
                             _ev("e0", "Ace Server", "Even Steven", 110, -130, ko="2026-11-02T12:00:00Z")], NOW)
     by = {r["game_id"]: r for r in recs}
     assert "e0" not in by                                       # already started
-    assert by["e1"]["pick"] == "home" and by["e1"]["edge"] > IP.TENNIS_ML_EDGE
-    assert by["e2"]["pick"] is None                             # opponent has no rated matches
+    assert by["e1"]["pick"] is None and by["e1"]["edge"] > 0.05    # picks are off (backtest: no edge)
+    assert by["e2"]["pick"] is None
+    import pytest
+    mp = pytest.MonkeyPatch()
+    mp.setattr(IP, "TENNIS_ML_EDGE", 0.05)
+    try:
+        again = {r["game_id"]: r for r in IP.tennis_build(elo, {}, "tennis_atp_paris_masters",
+                 [_ev("e1", "Ace Server", "Even Steven", 110, -130), _ev("e2", "Ace Server", "Nobody New", -300, 250)], NOW)}
+        assert again["e1"]["pick"] == "home" and again["e2"]["pick"] is None     # unrated opponent never picked
+    finally:
+        mp.undo()
     assert by["e1"]["surface"] == "hard" and by["e1"]["tour"] == "atp"
 
 
@@ -118,6 +127,8 @@ def test_hoops_build_and_record():
     r = I.ratings(games, 3.0)
     recs = IP.hoops_build("EUROLEAGUE", r, [_ev("g1", "Real Madrid", "Monaco", -150, 130, spread=-2.5, total=160)], NOW)
     assert len(recs) == 1 and recs[0]["pick"] == "home" and recs[0]["edge"] >= IP.HOOPS_SPREAD_EDGE
+    nbl = IP.hoops_build("NBL", r, [_ev("g1", "Real Madrid", "Monaco", 200, -250, spread=-2.5, total=160)], NOW)
+    assert nbl[0]["pick"] is None and nbl[0]["ml_pick"] == "home"           # NBL: moneyline only
     graded = dict(recs[0], final_home=90, final_away=80, result="home", close_line=2.5)
     rec = IP.record([graded])
     assert rec["spread"]["w"] == 1 and abs(rec["spread"]["units"] - 100 / 110) < 1e-9
@@ -144,13 +155,14 @@ def test_capture_end_to_end_with_a_local_store(tmp_path, monkeypatch):
             return [{"key": "tennis_atp_paris_masters", "group": "Tennis", "active": True}]
         return [_ev("e1", "Ace Server", "Even Steven", 110, -130, spread=-2.5, total=21.5)]
     out = IP.tennis_capture("k", fetch=fetch, now=NOW, db_path=db)
-    assert out["priced"] == 1 and out["picks"] == 1 and out["saved"] == 1
+    assert out["priced"] == 1 and out["picks"] == 0 and out["saved"] == 1
     MS.save_results("TENNIS", [{"id": "z", "date": "2026-11-04", "tour": "atp", "tournament": "Paris", "surface": "hard",
                                 "best_of": 3, "p1": "Even Steven", "p2": "Ace Server", "winner": 2, "games1": 8,
                                 "games2": 12, "status": "final"}], db_path=db)
     assert IP.tennis_grade(MS.load_results("TENNIS", db_path=db), db_path=db) == 1
     g = MS.load_game_picks("TENNIS", db_path=db)[0]
-    assert g["result"] == "home" and g["final_home"] == 12 and IP.record([g])["ml"]["w"] == 1
+    assert g["result"] == "home" and g["final_home"] == 12 and IP.record([g]) == {}
+    assert IP.record([dict(g, pick="home")])["ml"]["w"] == 1
 
 
 def test_pages_render(monkeypatch):
