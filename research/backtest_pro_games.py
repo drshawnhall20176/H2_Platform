@@ -68,7 +68,7 @@ def main() -> int:
             prior = [g for g in games if g["date"] < d and (date.fromisoformat(d) - date.fromisoformat(g["date"])).days <= 400]
             if len(prior) < 300:
                 continue
-            r = I.ratings_weighted(prior, I.decay_weights(prior, d, lg), I.LEAGUES[lg]["lam"])
+            r = I.ratings_weighted(prior, I.decay_weights(prior, d, lg), I.LEAGUES[lg]["lam"], I.HFA_PRIOR.get(lg))
             snap = H.snapshot(I.LEAGUES[lg]["odds_key"], f"{d}T18:00:00Z")
             for g in by_day[d]:
                 ev = I.match_event(snap, g["home_team"], g["away_team"])

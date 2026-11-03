@@ -235,21 +235,46 @@ def ncaamb_range(start: date, end: date, fetch: Callable = _http) -> List[Dict]:
 
 
 def decay_weights(games: Sequence[Dict], asof: str, league: str) -> List[float]:
-    """Recency weights for a fit made on `asof`: half-life HALF_LIFE days, last season's games x PRIOR_SEASON_WEIGHT."""
+    """Recency weights for a fit made on `asof`: half-life HALF_LIFE days of PLAYED time, last season's games x
+    PRIOR_SEASON_WEIGHT.
+
+    Nov 3 fix: the offseason no longer counts as elapsed time. Counting it (~7 months for college) left last season
+    weighted ~1% on opening night, so the fit had only a handful of games and pinned everything on home court
+    (~22 points -- early-season home teams are mostly favorites hosting small schools). Now a game's age is measured
+    from the end of its own season when it's from a past one."""
     a = date.fromisoformat(asof[:10])
     cur = season_of(league, asof)
+    cur_dates = sorted(g["date"][:10] for g in games if season_of(league, g["date"]) == cur and g["date"][:10] <= asof[:10])
+    cur_start = date.fromisoformat(cur_dates[0]) if cur_dates else a
+    played_this_season = max(0, (a - cur_start).days)
+    last_day: Dict[str, date] = {}
+    for g in games:
+        s = season_of(league, g["date"])
+        d = date.fromisoformat(g["date"][:10])
+        if s != cur and (s not in last_day or d > last_day[s]):
+            last_day[s] = d
     out = []
     for g in games:
-        days = max(0, (a - date.fromisoformat(g["date"][:10])).days)
-        w = 0.5 ** (days / HALF_LIFE)
-        if season_of(league, g["date"]) != cur:
-            w *= PRIOR_SEASON_WEIGHT
+        d = date.fromisoformat(g["date"][:10])
+        s = season_of(league, g["date"])
+        if s == cur:
+            days = max(0, (a - d).days)
+            w = 0.5 ** (days / HALF_LIFE)
+        else:
+            days = played_this_season + max(0, (last_day[s] - d).days)
+            w = PRIOR_SEASON_WEIGHT * 0.5 ** (days / HALF_LIFE)
         out.append(w)
     return out
 
 
-def ratings_weighted(games: Sequence[Dict], weights: Sequence[float], lam: float = 4.0) -> Optional[Dict]:
-    """game_picks.ratings with a weight per game (weighted ridge): {"mu","off","def","hfa"}."""
+HFA_PRIOR = {"NCAAMB": (3.0, 200.0), "NBA": (2.5, 200.0), "NHL": (0.25, 200.0), "WNBA": (2.5, 200.0)}
+
+
+def ratings_weighted(games: Sequence[Dict], weights: Sequence[float], lam: float = 4.0,
+                     hfa_prior: Optional[tuple] = None) -> Optional[Dict]:
+    """game_picks.ratings with a weight per game (weighted ridge): {"mu","off","def","hfa"}. hfa_prior (value,
+    strength) pulls home advantage toward a known size -- in college it otherwise soaks up the early-season
+    scheduling (home teams hosting much weaker opponents)."""
     import numpy as np
     rows = [(g, w) for g, w in zip(games, weights) if w > 1e-4 and _num(g.get("home_points")) is not None
             and _num(g.get("away_points")) is not None]
@@ -273,7 +298,11 @@ def ratings_weighted(games: Sequence[Dict], weights: Sequence[float], lam: float
     Xw = X * W[:, None]
     reg = np.eye(2 * n + 1) * lam
     reg[2 * n, 2 * n] = 0.0
-    beta = np.linalg.solve(X.T @ Xw + reg, Xw.T @ (y - mu))
+    rhs = Xw.T @ (y - mu)
+    if hfa_prior:
+        reg[2 * n, 2 * n] = hfa_prior[1]
+        rhs[2 * n] += hfa_prior[1] * hfa_prior[0]
+    beta = np.linalg.solve(X.T @ Xw + reg, rhs)
     return {"mu": mu, "off": {t: float(beta[ix[t]]) for t in teams}, "def": {t: float(beta[n + ix[t]]) for t in teams},
             "hfa": float(beta[2 * n])}
 
