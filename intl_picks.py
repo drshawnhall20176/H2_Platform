@@ -329,11 +329,15 @@ def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optio
     evs = fetch(ODDS.format(key=cfg["odds_key"]), {"apiKey": api_key, "regions": "us",
                                                     "markets": "h2h,spreads,totals", "oddsFormat": "american"}) or []
     recs = hoops_build(league, r, evs, now)
+    got = {x["game_id"] for x in recs}
+    future = [e for e in evs if str(e.get("commence_time")) > now.isoformat()[:19]]
+    missed = [f"{e.get('away_team')} @ {e.get('home_team')}" for e in future if str(e.get("id")) not in got]
     saved = MS.save_game_picks(recs, db_path=db_path)
     graded = hoops_grade(league, MS.load_results(league, since=(now.date() - timedelta(days=10)).isoformat(),
                                                  db_path=db_path), db_path=db_path)
-    return {"archive_added": added, "season_games": len(games), "rated": r is not None, "priced": len(recs),
-            "picks": sum(1 for x in recs if x["pick"]), "saved": saved, "graded": graded}
+    return {"archive_added": added, "season_games": len(games), "rated": r is not None, "events": len(future),
+            "priced": len(recs), "unmatched": missed[:40], "picks": sum(1 for x in recs if x["pick"]), "saved": saved,
+            "graded": graded}
 
 
 def _team_is(a: str, b: str) -> bool:
