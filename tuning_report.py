@@ -26,6 +26,7 @@ from typing import Dict, List, Optional, Sequence
 import pytz
 
 MIN_N = 150                     # graded reads in a market before its blend weight can be proposed
+MIN_SLATES = 5                  # ... spread over at least this many slates (one slate's results move together)
 MIN_GAIN = 0.002                # log-loss improvement a new weight must show over the current one
 MIN_MOVE = 0.10                 # ... and it must move the weight at least this much
 W_GRID = [round(i * 0.05, 2) for i in range(0, 13)]          # 0.00 .. 0.60 (blend_weights.W_RANGE)
@@ -179,9 +180,12 @@ def build(sport: str, graded: Sequence[Dict], bets: Sequence[Dict], days: int = 
         now = BW.weight(sport, mk, PE.MODEL_WEIGHT)
         cur = min(W_GRID, key=lambda w: abs(w - now))
         gain = f["scores"][cur] - f["scores"][f["best"]]
-        ok = f["n"] >= MIN_N and gain >= MIN_GAIN and abs(f["best"] - now) >= MIN_MOVE - 1e-9
+        slates = len({r["date"] for r in g if r["q_mkt"] is not None})
+        better = gain >= MIN_GAIN and abs(f["best"] - now) >= MIN_MOVE - 1e-9
+        ok = better and f["n"] >= MIN_N and slates >= MIN_SLATES
         why = ("**propose " + format(f["best"], ".2f") + "**") if ok else (
-            f"wait (need {MIN_N} reads)" if f["n"] < MIN_N else "keep")
+            "keep" if not better else f"wait (need {MIN_N} reads)" if f["n"] < MIN_N else
+            f"wait ({slates} of {MIN_SLATES} slates)")
         md.append(f"| {mk} | {f['n']} | {now:.2f} | {f['best']:.2f} | {f['scores'][cur]:.4f} → "
                   f"{f['scores'][f['best']]:.4f} | {why} |")
         if ok:
