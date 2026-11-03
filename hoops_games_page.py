@@ -79,6 +79,8 @@ def render(league: str, search: bool = False) -> None:
             what.append(f"a moneyline pick needs a {rules['ml']:.0%}+ edge")
         st.caption("Edge = the model's home margin minus the margin the spread implies; "
                    + ("; ".join(what) if what else "no picks for this league — the model is shown for reference") + ".")
+    if upcoming:
+        log_panel(league, upcoming)
     st.markdown("##### Tracking record")
     rec = IP.record(done)
     if not rec:
@@ -88,3 +90,74 @@ def render(league: str, search: bool = False) -> None:
         st.dataframe(pd.DataFrame([{"Market": names.get(k, k), "Record": f"{r['w']}-{r['l']}" + (f"-{r['p']}" if r["p"] else ""),
                                     "Profit (units)": f"{r['units']:+.1f}", "Per $1": "—" if r["roi"] is None else f"{r['roi']:+.1%}"}
                                    for k, r in rec.items()]), hide_index=True, width="stretch")
+
+
+def _side_options(p):
+    """[(label, market, side, line, price, model_prob)] for every bet this game offers."""
+    out = []
+    hs = p.get("home_spread")
+    if hs is not None:
+        sp = p.get("spread_price") or -110
+        out.append((f"{p['home']} {hs:+g} (spread)", "Spread", "home", hs, sp, None))
+        out.append((f"{p['away']} {-hs:+g} (spread)", "Spread", "away", -hs, sp, None))
+    if p.get("line_total") is not None:
+        out.append((f"Over {p['line_total']:g}", "Total", "over", p["line_total"], p.get("over_price") or -110, None))
+        out.append((f"Under {p['line_total']:g}", "Total", "under", p["line_total"], p.get("under_price") or -110, None))
+    if p.get("best_home") is not None:
+        out.append((f"{p['home']} moneyline", "Moneyline", "home", None, p["best_home"], p.get("model_p")))
+    if p.get("best_away") is not None:
+        mp = p.get("model_p")
+        out.append((f"{p['away']} moneyline", "Moneyline", "away", None, p["best_away"], None if mp is None else 1 - mp))
+    return out
+
+
+def _default_choice(p, opts):
+    """The tracking pick, if there is one, so one tap logs what the model flagged."""
+    for i, (_, mk, side, *_rest) in enumerate(opts):
+        if (mk == "Spread" and p.get("pick") == side) or (mk == "Total" and p.get("total_pick") == side) or \
+                (mk == "Moneyline" and p.get("ml_pick") == side):
+            return i
+    return 0
+
+
+def log_panel(league: str, games) -> None:
+    """Log a bet on any listed game straight to the Bet Log (it settles itself once the game is graded here)."""
+    import betlog as B
+    with st.expander("📒 Log a bet"):
+        flagged = [p for p in games if _pick(p) != "—"]
+        pool = sorted(flagged or games, key=lambda x: x["kickoff"]) if st.toggle(
+            "Only games with a tracking pick", value=bool(flagged), key=f"hg_log_only_{league}") else \
+            sorted(games, key=lambda x: x["kickoff"])
+        if not pool:
+            st.caption("No games to log.")
+            return
+        labels = {f"{p['away']} @ {p['home']} · {_tip(p)}": p for p in pool}
+        p = labels[st.selectbox("Game", list(labels), key=f"hg_log_game_{league}")]
+        opts = _side_options(p)
+        if not opts:
+            st.caption("No lines for this game yet.")
+            return
+        i = st.selectbox("Bet", range(len(opts)), index=_default_choice(p, opts), format_func=lambda k: opts[k][0],
+                         key=f"hg_log_bet_{league}_{p['game_id']}")
+        label, mk, side, line, price, mprob = opts[i]
+        c1, c2, c3 = st.columns(3)
+        line_in = c1.number_input("Line", value=float(line), step=0.5, key=f"hg_log_line_{league}_{p['game_id']}_{i}") \
+            if line is not None else None
+        odds = c2.number_input("Your price (American)", value=int(round(float(price))), step=5,
+                               key=f"hg_log_odds_{league}_{p['game_id']}_{i}")
+        stake = c3.number_input("Stake ($)", min_value=0.0, value=1.0, step=1.0, key=f"hg_log_stake_{league}")
+        real = st.toggle("Real money (off = tracking only)", value=True, key=f"hg_log_real_{league}")
+        st.caption("Adjust the line and price to what your book shows before logging. It settles automatically once "
+                   "the game is graded.")
+        if st.button("Log it", key=f"hg_log_go_{league}", type="primary"):
+            if abs(odds) < 100:
+                st.error("Enter a price of +100 or more, or -100 or less.")
+                return
+            f = IP.bet_fields(p, mk, side, line_in, odds, stake, real, mprob)
+            try:
+                bid = B.add_bet(**f)
+                what = f"{f['side']} {mk.lower()}" + ("" if line_in is None else
+                                                       f" {line_in:g}" if mk == "Total" else f" {line_in:+g}")
+                st.success(f"Logged #{bid}: {what} at {odds:+d}, ${stake:,.2f} {'real' if real else 'tracking'}.")
+            except Exception as exc:                            # noqa: BLE001
+                st.error(f"Couldn't log it: {exc}")

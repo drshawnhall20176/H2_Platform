@@ -267,3 +267,44 @@ def test_ncaamb_spread_rule_is_8_points():
     by = {x["game_id"]: x for x in recs}
     assert by["c1"]["edge"] >= 8 and by["c1"]["pick"] == "home"
     assert by["c2"]["pick"] in (None, "away") and by["c2"]["ml_pick"] is None and by["c2"]["total_pick"] is None
+
+
+def test_logged_game_lab_bets_settle_from_the_graded_game(tmp_path, monkeypatch):
+    import betlog as B
+    db, bdb = str(tmp_path / "m.db"), str(tmp_path / "b.db")
+    monkeypatch.setattr(B, "list_bets", lambda *a, _l=B.list_bets, **k: _l(db_path=bdb, **{x: y for x, y in k.items() if x != "db_path"}))
+    monkeypatch.setattr(B, "add_bet", lambda *a, _a=B.add_bet, **k: _a(bdb, **k))
+    monkeypatch.setattr(B, "update_bet", lambda bid, _u=B.update_bet, **k: _u(bid, bdb, **k))
+    rec = {"sport": "NCAAMB", "game_id": "c9", "kickoff": "2026-11-03T23:00:00+00:00", "home": "Duke Blue Devils",
+           "away": "Army Black Knights", "line": 20.5, "edge": 9.0, "home_spread": -20.5, "line_total": 140.0,
+           "best_home": -5000, "best_away": 2000, "model_p": 0.97}
+    MS.save_game_picks([rec], db_path=db)
+    for mk, side, line, odds in (("Spread", "home", -20.5, -110), ("Spread", "away", 20.5, -110),
+                                 ("Total", "over", 140.0, -110), ("Moneyline", "away", None, 2000)):
+        f = IP.bet_fields(rec, mk, side, line, odds, 5, True)
+        assert f["sport"] == "NCAAMB" and f["notes"] == "gl:NCAAMB:c9"
+        B.add_bet(**f)
+    MS.grade_game_pick("NCAAMB", "c9", 90, 60, "home", db_path=db)
+    assert IP.settle_logged("NCAAMB", db_path=db) == 4
+    got = {(b["market"], b["side"]): b["result"] for b in B.list_bets()}
+    assert got == {("Spread", "Duke Blue Devils"): "win", ("Spread", "Army Black Knights"): "loss",
+                   ("Total", "Over"): "win", ("Moneyline", "Army Black Knights"): "loss"}
+
+
+def test_game_lab_log_panel_logs_the_tracking_pick(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    import betlog as B
+    g = {"sport": "NCAAMB", "game_id": "c1", "kickoff": "2099-01-01T23:00:00+00:00", "home": "Duke Blue Devils",
+         "away": "Army Black Knights", "model_margin": 30.0, "home_spread": -20.5, "spread_price": -110, "edge": 9.5,
+         "model_total": 150.0, "line_total": 140.0, "over_price": -110, "under_price": -110, "model_p": 0.97,
+         "fair_home": 0.95, "best_home": -5000, "best_away": 2000, "pick": "home", "total_pick": None, "ml_pick": None,
+         "result": None}
+    got = []
+    monkeypatch.setattr(MS, "load_game_picks", lambda sport, ungraded=False, db_path=None: [g])
+    monkeypatch.setattr(B, "add_bet", lambda *a, **k: got.append(k) or 77)
+    at = AppTest.from_file(str(Path(__file__).parent / "views" / "45_NCAAMB_Game_Lab.py"), default_timeout=30)
+    at.run()
+    at.button(key="hg_log_go_NCAAMB").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert got and got[0]["side"] == "Duke Blue Devils" and got[0]["line"] == -20.5 and got[0]["market"] == "Spread"
+    assert any("Logged #77" in s.value for s in at.success)

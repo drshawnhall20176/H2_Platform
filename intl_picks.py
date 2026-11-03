@@ -229,6 +229,10 @@ def tennis_capture(api_key: str, fetch: Callable = _http, now: Optional[datetime
     sched = tennis_schedule(elo, fetch, now, recs)
     saved = MS.save_game_picks(recs + sched, db_path=db_path)
     graded = tennis_grade(hist, db_path=db_path)
+    try:
+        settle_logged("TENNIS", db_path=db_path)
+    except Exception:                                           # noqa: BLE001
+        pass
     return {"archive_added": added, "matches_rated": len(rows), "priced": len(recs), "scheduled_unpriced": len(sched),
             "picks": sum(1 for r in recs if r["pick"]), "saved": saved, "graded": graded}
 
@@ -344,9 +348,69 @@ def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optio
     saved = MS.save_game_picks(recs, db_path=db_path)
     graded = hoops_grade(league, MS.load_results(league, since=(now.date() - timedelta(days=10)).isoformat(),
                                                  db_path=db_path), db_path=db_path)
+    try:
+        settled = settle_logged(league, db_path=db_path)
+    except Exception:                                           # noqa: BLE001 -- settling never blocks a capture
+        settled = 0
     return {"archive_added": added, "season_games": len(games), "rated": r is not None, "events": len(future),
+            "bets_settled": settled,
             "priced": len(recs), "unmatched": missed[:40], "picks": sum(1 for x in recs if x["pick"]), "saved": saved,
             "graded": graded}
+
+
+# --------------------------------------------------------------------------- logging a Game Lab bet (Nov 3)
+BET_SPORT = {"NCAAMB": "NCAAMB", "EUROLEAGUE": "INTL", "NBL": "INTL", "TENNIS": "TENNIS"}
+TAG = "gl"                     # notes carry "gl:<league>:<game_id>" so the capture can settle the bet itself
+
+
+def bet_fields(p: Dict, market: str, side: str, line: Optional[float], odds: float, stake: float, real: bool,
+               model_prob: Optional[float] = None) -> Dict:
+    """Bet Log fields for a Game Lab bet. market: Spread / Total / Moneyline. side: "home" / "away" / "over" /
+    "under". `line` is from that side's point of view (a spread of -7.5 on the team taken)."""
+    import betlog as B
+    team = p["home"] if side == "home" else (p["away"] if side == "away" else None)
+    return {"slate_date": str(p.get("kickoff"))[:10] if p.get("kickoff") else None, "sport": BET_SPORT.get(p["sport"], "INTL"),
+            "game": f"{p['away']} @ {p['home']}", "player": team or "Game total", "market": market,
+            "side": team or side.title(), "line": line, "entry_odds": float(odds), "entry_odds_source": "manual",
+            "model_prob": model_prob, "stake": float(stake), "is_real_bet": bool(real),
+            "category": B.default_category(BET_SPORT.get(p["sport"]), from_model=True),
+            "notes": f"{TAG}:{p['sport']}:{p['game_id']}"}
+
+
+def bet_result(bet: Dict, p: Dict) -> Optional[str]:
+    """win / loss / push for a logged Game Lab bet from its graded record; None until it's graded."""
+    fh, fa, res = p.get("final_home"), p.get("final_away"), p.get("result")
+    if fh is None or fa is None or res in (None, "void", "retired"):
+        return None
+    mk, side = bet.get("market"), bet.get("side")
+    if mk == "Total":
+        d = (fh + fa) - float(bet["line"])
+        return "push" if d == 0 else ("win" if (d > 0) == (str(side).lower() == "over") else "loss")
+    home = side == p["home"]
+    if mk == "Moneyline":
+        return "win" if (res == "home") == home else "loss"
+    if mk == "Spread":
+        d = (fh - fa if home else fa - fh) + float(bet["line"])
+        return "push" if d == 0 else ("win" if d > 0 else "loss")
+    return None
+
+
+def settle_logged(league: str, db_path: Optional[str] = None) -> int:
+    """Settle open Bet Log bets that were logged from a Game Lab page, once their game is graded here."""
+    import betlog as B
+    import model_store as MS
+    graded = {p["game_id"]: p for p in MS.load_game_picks(league, db_path=db_path) if p.get("result")}
+    n = 0
+    for b in B.list_bets(settled=False):
+        tag = str(b.get("notes") or "")
+        if not tag.startswith(f"{TAG}:{league}:"):
+            continue
+        p = graded.get(tag.split(":", 2)[2].split(",")[0])
+        r = bet_result(b, p) if p else None
+        if r:
+            B.update_bet(int(b["id"]), result=r)
+            n += 1
+    return n
 
 
 def _team_is(a: str, b: str) -> bool:
