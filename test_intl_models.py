@@ -180,3 +180,38 @@ def test_pages_render(monkeypatch):
         at.run()
         assert not at.exception, [e.value for e in at.exception]
         assert needle in at.dataframe[0].value.to_string()
+
+
+def test_schedule_lists_unpriced_matches_with_fair_odds():
+    elo, _ = T.run(_strong_history())
+    data = {"events": [{"name": "Reto Win Tennis Cali Open", "groupings": [{"grouping": {"displayName": "Women's Singles"},
+            "competitions": [
+                {"id": 9, "date": "2026-11-04T16:00Z", "round": {"displayName": "Round 2"}, "status": {"type": {"state": "pre"}},
+                 "competitors": [{"athlete": {"displayName": "Ace Server"}}, {"athlete": {"displayName": "Even Steven"}}]},
+                {"id": 10, "date": "2026-11-03T10:00Z", "status": {"type": {"state": "in"}},
+                 "competitors": [{"athlete": {"displayName": "A"}}, {"athlete": {"displayName": "B"}}]}]}]}]}
+    recs = IP.tennis_schedule(elo, fetch=lambda url, params=None: data if "wta" in url else {}, now=NOW)
+    assert len(recs) == 1 and recs[0]["source"] == "espn" and recs[0]["surface"] == "clay" and recs[0]["pick"] is None
+    assert recs[0]["model_p"] > 0.5
+    dup = IP.tennis_schedule(elo, fetch=lambda url, params=None: data if "wta" in url else {}, now=NOW,
+                             priced=[{"home": "Even Steven", "away": "Ace Server"}])
+    assert dup == []
+    assert T.fair_odds(0.75) == -300 and T.fair_odds(0.25) == 300 and T.fair_odds(1.0) is None
+    graded = [dict(recs[0], result="home"), dict(recs[0], result="away", model_p=0.3), dict(recs[0], result="away")]
+    fav = IP.favorite_record(graded)
+    assert fav["espn"]["n"] == 3 and fav["espn"]["won"] == 2
+
+
+def test_tennis_page_shows_schedule_and_checks_a_price(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    sch = {"sport": "TENNIS", "game_id": "espn-wta-9", "kickoff": "2099-01-01T16:00:00+00:00", "tour": "wta",
+           "tournament": "Reto Win Tennis Cali Open", "round": "Round 2", "surface": "clay", "home": "Elizabeth Mandlik",
+           "away": "Jazmin Ortenzi", "model_p": 0.6, "n_home": 80, "n_away": 40, "source": "espn", "result": None}
+    monkeypatch.setattr(MS, "load_game_picks", lambda sport, ungraded=False, db_path=None: [sch])
+    at = AppTest.from_file(str(Path(__file__).parent / "views" / "43_Tennis_Lab.py"), default_timeout=30)
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    t = at.dataframe[0].value.to_string()
+    assert "Elizabeth Mandlik" in t and "-150" in t
+    at.number_input(key="tl_chk_price").set_value(-120).run()
+    assert any("+10.0%" in m.value for m in at.markdown)

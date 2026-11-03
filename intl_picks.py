@@ -178,6 +178,31 @@ def tennis_build(elo: T.Elo, fit: Dict, key: str, events: Sequence[Dict], now: d
     return out
 
 
+def tennis_schedule(elo: T.Elo, fetch: Callable = _http, now: Optional[datetime] = None,
+                    priced: Sequence[Dict] = ()) -> List[Dict]:
+    """Every scheduled ATP / WTA singles match ESPN lists for today and tomorrow -- including WTA 125 / lower-tier
+    events the odds feed doesn't price -- with the model's chance. No line, no pick: the page shows the fair price and
+    lets the owner type the sportsbook's. Matches the odds feed already priced are left to those records."""
+    now = now or datetime.now(timezone.utc)
+    out, seen = [], set()
+    for d in (now.date(), now.date() + timedelta(days=1)):
+        for tour in T.TOURS:
+            for m in T.parse_upcoming(fetch(T.ESPN.format(tour=tour), {"dates": d.strftime("%Y%m%d")}) or {}, tour):
+                if m["id"] in seen:
+                    continue
+                seen.add(m["id"])
+                if any(_same_player(m["p1"], q["home"]) and _same_player(m["p2"], q["away"]) or
+                       _same_player(m["p2"], q["home"]) and _same_player(m["p1"], q["away"]) for q in priced):
+                    continue
+                p = elo.prob(m["p1"], m["p2"], m["surface"])
+                out.append({"sport": "TENNIS", "game_id": f"espn-{m['id']}", "kickoff": m["start"], "tour": tour,
+                            "tournament": m["tournament"], "round": m["round"], "surface": m["surface"],
+                            "best_of": m["best_of"], "home": m["p1"], "away": m["p2"], "model_p": round(p, 4),
+                            "n_home": elo.matches(m["p1"]), "n_away": elo.matches(m["p2"]), "line": None, "edge": None,
+                            "source": "espn", "pick": None, "spread_pick": None, "total_pick": None})
+    return out
+
+
 def tennis_capture(api_key: str, fetch: Callable = _http, now: Optional[datetime] = None,
                    db_path: Optional[str] = None) -> Dict:
     import model_store as MS
@@ -191,9 +216,10 @@ def tennis_capture(api_key: str, fetch: Callable = _http, now: Optional[datetime
         evs = fetch(ODDS.format(key=k), {"apiKey": api_key, "regions": "us", "markets": "h2h,spreads,totals",
                                          "oddsFormat": "american"})
         recs += tennis_build(elo, fit, k, evs or [], now)
-    saved = MS.save_game_picks(recs, db_path=db_path)
+    sched = tennis_schedule(elo, fetch, now, recs)
+    saved = MS.save_game_picks(recs + sched, db_path=db_path)
     graded = tennis_grade(hist, db_path=db_path)
-    return {"archive_added": added, "matches_rated": len(rows), "priced": len(recs),
+    return {"archive_added": added, "matches_rated": len(rows), "priced": len(recs), "scheduled_unpriced": len(sched),
             "picks": sum(1 for r in recs if r["pick"]), "saved": saved, "graded": graded}
 
 
@@ -353,6 +379,24 @@ def grade_markets(p: Dict) -> Dict:
                                 p.get("over_price") if p["total_pick"] == "over" else p.get("under_price"))
     if p.get("ml_pick"):
         out["ml"] = _outcome(p["ml_pick"] == res, p["best_home"] if p["ml_pick"] == "home" else p["best_away"])
+    return out
+
+
+def favorite_record(picks: Iterable[Dict]) -> Dict:
+    """How often the model's favorite won, by tier ("priced" = the odds feed's events, "espn" = everything else), with
+    the average chance it gave -- the honest check for events with no line history to backtest against."""
+    out: Dict[str, Dict] = {}
+    for p in picks:
+        if p.get("sport") != "TENNIS" or p.get("result") not in ("home", "away") or p.get("model_p") is None:
+            continue
+        tier = "espn" if p.get("source") == "espn" else "priced"
+        fav_home = p["model_p"] >= 0.5
+        r = out.setdefault(tier, {"n": 0, "won": 0, "said": 0.0})
+        r["n"] += 1
+        r["won"] += int((p["result"] == "home") == fav_home)
+        r["said"] += max(p["model_p"], 1 - p["model_p"])
+    for r in out.values():
+        r["rate"], r["said"] = r["won"] / r["n"], r["said"] / r["n"]
     return out
 
 
