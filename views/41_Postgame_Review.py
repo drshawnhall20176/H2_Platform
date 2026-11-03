@@ -16,6 +16,7 @@ import components as C
 import model_store as MS
 import model_tuning as MT
 import postgame as PG
+import props_engine as PE
 import sports
 
 C.base_css()
@@ -120,6 +121,19 @@ def _pct(x):
     return "—" if x is None else f"{x:.0%}"
 
 
+def _money(x):
+    return "—" if x is None else f"{x:+.0%}"
+
+
+def _use_table(rows):
+    """Use-tag record with the 🔒 Most probable (Best Bets' lock) row on top."""
+    ur = PG.use_record(rows)
+    lock = PG.lock_record(rows)
+    out = ([lock] if lock else []) + ur
+    return [{"Use": r["Use"], "Record": f"{r['Hits']}-{r['Graded'] - r['Hits']}", "Hit rate": _pct(r["Hit rate"]),
+             "Model said": _pct(r.get("Model said")), "Profit per $1": _money(r.get("Profit per $1"))} for r in out]
+
+
 with tab_morning:
     mornings = MS.daily_review_mornings(SPORT_KEY)
     if not mornings:
@@ -155,10 +169,16 @@ with tab_morning:
             m2.metric("Hit rate", _pct(c["hit"] / (c["hit"] + c["miss"])) if c["hit"] + c["miss"] else "—")
             m3.metric("Model side right", _pct(s["model"]["right"] / s["model"]["graded"]) if s["model"]["graded"] else "—")
             m4.metric("Void / pending", f"{c['void']} / {c['pending']}")
-            if s.get("use"):
-                st.dataframe(pd.DataFrame([{"Use": u["Use"], "Record": f"{u['Hits']}-{u['Graded'] - u['Hits']}",
-                                            "Hit rate": _pct(u["Hit rate"]), "Model said": _pct(u.get("Model said"))}
-                                           for u in s["use"]]), hide_index=True, width="stretch")
+            mp = s.get("most_probable") or {}
+            use_rows = [{"Use": u["Use"], "Record": f"{u['Hits']}-{u['Graded'] - u['Hits']}",
+                         "Hit rate": _pct(u["Hit rate"]), "Model said": _pct(u.get("Model said")),
+                         "Profit per $1": "—"} for u in s.get("use") or []]
+            if (mp.get("hits") or 0) + (mp.get("misses") or 0):
+                use_rows.insert(0, {"Use": PE.MOST_PROBABLE, "Record": f"{mp['hits']}-{mp['misses']}",
+                                    "Hit rate": _pct(mp.get("hit_rate")), "Model said": _pct(mp.get("chance")),
+                                    "Profit per $1": _money(mp.get("profit"))})
+            if use_rows:
+                st.dataframe(pd.DataFrame(use_rows), hide_index=True, width="stretch")
             if s.get("markets"):
                 st.dataframe(pd.DataFrame([{"Market": mk["market"], "Graded": mk["graded"], "Hit rate": _pct(mk["hit_rate"]),
                                             "Model side": _pct(mk["model_side"]),
@@ -229,11 +249,11 @@ with tab_day:
         m4.metric("Misses on the model", f"{model_misses} of {sum(cc.values())}",
                   help="Volume or role misses (the model's opportunity call). The rest is the player or the game script.")
         st.markdown("##### Was the Use tag right?")
-        ur = PG.use_record(done)
+        ur = _use_table(done)
         if ur:
-            st.dataframe(pd.DataFrame([{**r, "Hit rate": f"{r['Hit rate']:.0%}",
-                                        "Model said": "—" if r["Model said"] is None else f"{r['Model said']:.0%}"}
-                                       for r in ur]), hide_index=True, width="stretch")
+            st.dataframe(pd.DataFrame(ur), hide_index=True, width="stretch")
+            st.caption(f"{PE.MOST_PROBABLE} = Best Bets' lock: 60%+ to hit, the projection 15%+ past the line, books "
+                       "not far off. Profit is at the price saved before kickoff.")
         st.markdown("##### Why the misses missed")
         st.caption("**Volume** / **Role change**: the targets, carries, attempts or minutes were 25%+ off the model's "
                    "call — that's the model. **Player**: the chances came and weren't converted. **Blowout**: decided by "
@@ -269,6 +289,8 @@ with tab_trend:
         st.info("No graded props in this window yet.")
     else:
         st.caption(f"{len(graded_all)} graded props across {len(in_window)} slates.")
+        st.markdown("##### Was the Use tag right? (whole window)")
+        st.dataframe(pd.DataFrame(_use_table(graded_all)), hide_index=True, width="stretch")
         by_m = {}
         for r in graded_all:
             by_m.setdefault(r["market"], []).append(r)
