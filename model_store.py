@@ -69,6 +69,9 @@ CREATE TABLE IF NOT EXISTS model_tuning (
     id {pk},
     sport TEXT, market TEXT, slot TEXT, factor REAL, reason TEXT, approved_ts TEXT, active INTEGER DEFAULT 1
 );
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY, value TEXT, ts TEXT
+);
 CREATE TABLE IF NOT EXISTS blend_weights (
     id {pk},
     sport TEXT, market TEXT, w REAL, details TEXT, approved_ts TEXT, active INTEGER DEFAULT 1
@@ -618,6 +621,35 @@ def retire_blend(blend_id: int, db_path: Optional[str] = None) -> bool:
             con.cursor().execute(f"UPDATE blend_weights SET active=0 WHERE id={ph}", [blend_id])
         import blend_weights as BW
         BW.clear_cache()
+        return True
+    except Exception:                                           # noqa: BLE001
+        return False
+
+
+# --------------------------------------------------------------------------- owner settings (Nov 3)
+def get_setting(key: str, default=None, db_path: Optional[str] = None):
+    """A saved JSON value (e.g. the Progression Plan's bankroll settings), or `default`."""
+    if db_path is None and not available():
+        return default
+    try:
+        with _conn(db_path) as (con, ph):
+            cur = con.cursor()
+            cur.execute(f"SELECT value FROM app_settings WHERE key={ph}", [key])
+            row = cur.fetchone()
+        return default if not row else json.loads(row[0])
+    except Exception:                                           # noqa: BLE001
+        return default
+
+
+def save_setting(key: str, value, db_path: Optional[str] = None) -> bool:
+    if _test_run(db_path):
+        return False
+    try:
+        with _conn(db_path) as (con, ph):
+            con.cursor().execute(
+                f"INSERT INTO app_settings (key, value, ts) VALUES ({ph},{ph},{ph}) "
+                f"ON CONFLICT (key) DO UPDATE SET value=excluded.value, ts=excluded.ts",
+                [key, json.dumps(value, default=str), _now()])
         return True
     except Exception:                                           # noqa: BLE001
         return False
