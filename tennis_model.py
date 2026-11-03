@@ -33,7 +33,8 @@ CLAY = ("roland garros", "french open", "monte", "madrid", "internazionali", "it
         "lyon", "houston", "marrakech", "bucharest", "rio", "buenos aires", "argentina open", "santiago", "chile",
         "cordoba", "córdoba", "charleston", "bogota", "bogotá", "rabat", "strasbourg", "parma", "palermo", "prague",
         "budapest", "lausanne", "iasi", "iași", "cluj", "warsaw", "rouen", "oeiras", "portugal", "bad gastein",
-        "hamburg", "stuttgart wta", "porsche tennis grand prix", "istanbul", "morocco", "grand prix hassan")
+        "hamburg", "stuttgart wta", "porsche tennis grand prix", "istanbul", "morocco", "grand prix hassan",
+        "cali open", "reto win", "colsanitas", "medellin", "medellín", "asuncion", "asunción", "montevideo", "lima")
 GRASS = ("wimbledon", "halle", "queen", "hertogenbosch", "libéma", "libema", "eastbourne", "mallorca", "newport",
          "berlin", "bad homburg", "nottingham", "birmingham", "boss open", "stuttgart open", "rothesay")
 
@@ -106,6 +107,38 @@ def parse_day(data: Dict, tour: str) -> List[Dict]:
                             "status": "retired" if "RETIRED" in status else ("walkover" if "WALKOVER" in status
                                                                              else "final")})
     return out
+
+
+def parse_upcoming(data: Dict, tour: str) -> List[Dict]:
+    """Scheduled (not yet started) singles matches in one ESPN scoreboard response -- every event ESPN lists,
+    including the WTA 125 / Challenger-level ones the odds feed doesn't carry."""
+    out = []
+    if not isinstance(data, dict):
+        return out
+    for ev in data.get("events") or []:
+        tname = ev.get("name") or ev.get("shortName") or ""
+        for g in ev.get("groupings") or []:
+            if "singles" not in ((g.get("grouping") or {}).get("displayName") or "").lower():
+                continue
+            for c in g.get("competitions") or []:
+                if ((c.get("status") or {}).get("type") or {}).get("state") != "pre":
+                    continue
+                cps = c.get("competitors") or []
+                names = [((cp.get("athlete") or {}).get("displayName") or "") for cp in cps]
+                if len(names) != 2 or not all(names) or any("tbd" in n.lower() for n in names):
+                    continue
+                when = str(c.get("date") or "")
+                out.append({"id": f"{tour}-{c.get('id')}", "start": when, "tour": tour, "tournament": tname,
+                            "round": (c.get("round") or {}).get("displayName"), "surface": surface(tname, when[:10]),
+                            "best_of": best_of(tname, tour), "p1": names[0], "p2": names[1]})
+    return out
+
+
+def fair_odds(p: float) -> Optional[int]:
+    """American odds with no margin for a chance p."""
+    if not p or p <= 0 or p >= 1:
+        return None
+    return int(round(-100 * p / (1 - p))) if p >= 0.5 else int(round(100 * (1 - p) / p))
 
 
 def _num(x) -> Optional[float]:
