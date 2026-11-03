@@ -69,6 +69,10 @@ CREATE TABLE IF NOT EXISTS model_tuning (
     id {pk},
     sport TEXT, market TEXT, slot TEXT, factor REAL, reason TEXT, approved_ts TEXT, active INTEGER DEFAULT 1
 );
+CREATE TABLE IF NOT EXISTS results_archive (
+    sport TEXT, rid TEXT, date TEXT, payload TEXT, ts TEXT,
+    UNIQUE (sport, rid)
+);
 CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY, value TEXT, ts TEXT
 );
@@ -653,3 +657,38 @@ def save_setting(key: str, value, db_path: Optional[str] = None) -> bool:
         return True
     except Exception:                                           # noqa: BLE001
         return False
+
+
+# --------------------------------------------------------------------------- results archive (Nov 3)
+# Completed tennis matches and international basketball games, kept so the models refit daily without re-crawling.
+def save_results(sport: str, rows: List[Dict], db_path: Optional[str] = None) -> int:
+    rows = [r for r in rows or [] if r and r.get("id")]
+    if not rows or _test_run(db_path):
+        return 0
+    try:
+        with _conn(db_path) as (con, ph):
+            cur = con.cursor()
+            sql = (f"INSERT INTO results_archive (sport, rid, date, payload, ts) VALUES ({ph},{ph},{ph},{ph},{ph}) "
+                   f"ON CONFLICT (sport, rid) DO UPDATE SET date=excluded.date, payload=excluded.payload, ts=excluded.ts")
+            now = _now()
+            for r in rows:
+                cur.execute(sql, [sport, str(r["id"]), str(r.get("date") or ""), json.dumps(r, default=str), now])
+        return len(rows)
+    except Exception:                                           # noqa: BLE001
+        return 0
+
+
+def load_results(sport: str, since: Optional[str] = None, db_path: Optional[str] = None) -> List[Dict]:
+    if db_path is None and not available():
+        return []
+    try:
+        with _conn(db_path) as (con, ph):
+            cur = con.cursor()
+            if since:
+                cur.execute(f"SELECT payload FROM results_archive WHERE sport={ph} AND date>={ph} ORDER BY date",
+                            [sport, since])
+            else:
+                cur.execute(f"SELECT payload FROM results_archive WHERE sport={ph} ORDER BY date", [sport])
+            return [json.loads(r["payload"] if isinstance(r, (dict, sqlite3.Row)) else r[0]) for r in cur.fetchall()]
+    except Exception:                                           # noqa: BLE001
+        return []
