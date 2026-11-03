@@ -273,6 +273,18 @@ def market_prob(over=None, under=None) -> Optional[float]:
     return None
 
 
+def weight_for(ctx: Dict, sport: Optional[str], market: Optional[str]) -> float:
+    """The model's share of the vote for one market: an explicit ctx["model_weight"] wins, then the owner-approved
+    per-market weight (blend_weights, fitted by the weekly tuning report), then MODEL_WEIGHT."""
+    if ctx.get("model_weight") is not None:
+        return ctx["model_weight"]
+    try:
+        import blend_weights as BW
+        return BW.weight(sport, market, MODEL_WEIGHT)
+    except Exception:                                           # noqa: BLE001
+        return MODEL_WEIGHT
+
+
 def blend(p_model: Optional[float], p_market: Optional[float], w: float = MODEL_WEIGHT) -> Optional[float]:
     if p_model is None:
         return p_market

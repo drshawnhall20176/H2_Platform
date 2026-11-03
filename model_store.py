@@ -27,7 +27,10 @@ DB_PATH = os.path.join(DATA_DIR, "model.db")
 
 SNAP_COLS = ["sport", "slate_date", "game", "team", "opp", "player", "player_id", "market", "slot", "grp",
              "projection", "proj_opp", "line", "side", "chance", "cushion", "use_tag", "price", "book", "ev",
-             "lean", "gap", "flags", "kickoff", "ts", "source"]
+             "lean", "gap", "flags", "kickoff", "ts", "source", "p_model", "p_market", "over_price", "under_price"]
+# Nov 2: p_model / p_market (both P(over)) and both prices are stored so the weekly tuning report can fit how much
+# the model should count against the books' line, per market (blend_weights).
+_SNAP_ADDED = ("p_model", "p_market", "over_price", "under_price")
 _SNAP_SCHEMA = """
 CREATE TABLE IF NOT EXISTS prop_snapshots (
     id {pk},
@@ -66,6 +69,10 @@ CREATE TABLE IF NOT EXISTS model_tuning (
     id {pk},
     sport TEXT, market TEXT, slot TEXT, factor REAL, reason TEXT, approved_ts TEXT, active INTEGER DEFAULT 1
 );
+CREATE TABLE IF NOT EXISTS blend_weights (
+    id {pk},
+    sport TEXT, market TEXT, w REAL, details TEXT, approved_ts TEXT, active INTEGER DEFAULT 1
+);
 """
 SAVE_EVERY_S = 600            # the same game + market is re-saved at most every 10 minutes per process
 _last_save: Dict = {}
@@ -99,6 +106,8 @@ def _conn(db_path: Optional[str] = None):
         with B._pg_conn() as con:
             with con.cursor() as cur:
                 cur.execute(_SNAP_SCHEMA.format(pk="SERIAL PRIMARY KEY"))
+                for c in _SNAP_ADDED:
+                    cur.execute(f"ALTER TABLE prop_snapshots ADD COLUMN IF NOT EXISTS {c} REAL")
             con.commit()
             yield con, "%s"
         return
@@ -107,6 +116,10 @@ def _conn(db_path: Optional[str] = None):
     con.row_factory = sqlite3.Row
     try:
         con.executescript(_SNAP_SCHEMA.format(pk="INTEGER PRIMARY KEY AUTOINCREMENT"))
+        have = {r[1] for r in con.execute("PRAGMA table_info(prop_snapshots)")}
+        for c in _SNAP_ADDED:
+            if c not in have:
+                con.execute(f"ALTER TABLE prop_snapshots ADD COLUMN {c} REAL")
         yield con, "?"
         con.commit()
     finally:
@@ -148,7 +161,16 @@ def snapshot_record(sport: str, slate_date: str, game: str, row: Dict, market: s
             "chance": chance, "cushion": PE.cushion(proj, line, side), "use_tag": tag,
             "price": price, "book": book, "ev": row.get("ev") if side == row.get("side") else None,
             "lean": row.get("lean"), "gap": row.get("gap"), "flags": json.dumps(row.get("flags") or []),
-            "kickoff": kickoff, "ts": _now(), "source": source}
+            "kickoff": kickoff, "ts": _now(), "source": source,
+            "p_model": _f(row.get("p_model")), "p_market": _f(row.get("p_market")),
+            "over_price": _f(row.get("over_price")), "under_price": _f(row.get("under_price"))}
+
+
+def _f(x) -> Optional[float]:
+    try:
+        return None if x is None or x != x else float(x)
+    except (TypeError, ValueError):
+        return None
 
 
 def started(kickoff: Optional[str]) -> bool:
@@ -554,6 +576,48 @@ def retire_tuning(tuning_id: int, db_path: Optional[str] = None) -> bool:
             con.cursor().execute(f"UPDATE model_tuning SET active=0 WHERE id={ph}", [tuning_id])
         import model_tuning as MT
         MT.clear_cache()
+        return True
+    except Exception:                                           # noqa: BLE001
+        return False
+
+
+# --------------------------------------------------------------------------- blend weights (Nov 2)
+# How much the model counts against the books' no-vig line, per sport + market, fitted by the weekly tuning report
+# and turned on only by the owner. props_engine.MODEL_WEIGHT is the default where none is approved.
+def approve_blend(sport: str, market: str, w: float, details: Optional[Dict] = None, db_path: Optional[str] = None) -> bool:
+    if _test_run(db_path):
+        return False
+    try:
+        with _conn(db_path) as (con, ph):
+            cur = con.cursor()
+            cur.execute(f"UPDATE blend_weights SET active=0 WHERE sport={ph} AND market={ph}", [sport, market])
+            cur.execute(f"INSERT INTO blend_weights (sport, market, w, details, approved_ts, active) "
+                        f"VALUES ({ph},{ph},{ph},{ph},{ph},1)", [sport, market, float(w), json.dumps(details or {}), _now()])
+        import blend_weights as BW
+        BW.clear_cache()
+        return True
+    except Exception:                                           # noqa: BLE001
+        return False
+
+
+def list_blend(active_only: bool = True, db_path: Optional[str] = None) -> List[Dict]:
+    if db_path is None and not available():
+        return []
+    try:
+        with _conn(db_path) as (con, ph):
+            cur = con.cursor()
+            cur.execute("SELECT * FROM blend_weights" + (" WHERE active=1" if active_only else "") + " ORDER BY id")
+            return _rows(cur)
+    except Exception:                                           # noqa: BLE001
+        return []
+
+
+def retire_blend(blend_id: int, db_path: Optional[str] = None) -> bool:
+    try:
+        with _conn(db_path) as (con, ph):
+            con.cursor().execute(f"UPDATE blend_weights SET active=0 WHERE id={ph}", [blend_id])
+        import blend_weights as BW
+        BW.clear_cache()
         return True
     except Exception:                                           # noqa: BLE001
         return False

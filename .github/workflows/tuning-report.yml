@@ -1,0 +1,40 @@
+# Weekly tuning report (tuning_report.py): calibration, profit at the posted price, closing-line value and the
+# model-vs-books blend fit per market. Tuesday 8:17 AM ET (after Monday Night Football), or on demand.
+name: tuning-report
+
+on:
+  schedule:
+    - cron: "17 13 * * 2"
+  workflow_dispatch:
+    inputs:
+      sports:
+        description: "Comma-separated (blank = all)"
+        default: ""
+      days:
+        description: "Look-back window in days"
+        default: "28"
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Report
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SPORTS: ${{ inputs.sports }}
+          DAYS: ${{ inputs.days }}
+        run: |
+          python tuning_report.py ${SPORTS:+--sports "$SPORTS"} --days "${DAYS:-28}"

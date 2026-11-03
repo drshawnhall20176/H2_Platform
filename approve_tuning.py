@@ -23,7 +23,20 @@ def main(argv=None) -> int:
     bad = 0
     for key, f in json.loads(a.factors).items():
         market, _, slot = key.partition("|")
+        if market.startswith("blend:"):
+            market, slot = "blend", market[len("blend:"):]
         f = float(f)
+        if market == "blend":                                  # {"blend:Points": 0.25} -- the model's share vs the books
+            import blend_weights as BW
+            lo_w, hi_w = BW.W_RANGE
+            if not lo_w <= f <= hi_w:
+                print(f"skip {key}: {f} is outside {lo_w}-{hi_w}")
+                bad += 1
+                continue
+            ok = MS.approve_blend(a.sport, slot, f, {"reason": a.reason})
+            print(f"{'approved' if ok else 'FAILED  '} {a.sport} {slot} model weight {f}")
+            bad += 0 if ok else 1
+            continue
         if market == "calibration":
             ok = MS.approve_calibration(a.sport, f, {"reason": a.reason})
             print(f"{'approved' if ok else 'FAILED  '} {a.sport} honest-chance factor {f}")

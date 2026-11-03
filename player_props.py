@@ -351,7 +351,7 @@ def player_rows(rotation_list: Sequence[Dict], defense, market: str, cur_table: 
         else:
             over_p = under_p = price_src = p_mkt = None
         read = PE.read_line(proj, values, line, dist, over_p, under_p, p_mkt, ctx.get("slope", 1.0),
-                            ctx.get("model_weight", PE.MODEL_WEIGHT), news_checked=bool(ctx.get("news_checked")))
+                            PE.weight_for(ctx, ctx.get("sport") or "NBA", market), news_checked=bool(ctx.get("news_checked")))
         if returning and read["lean"] == "Over" and not ctx.get("news_checked"):
             read["lean"] = "Check news"
         absorbs = bool(not b["out"] and shifts.get(r["pid"], {}).get("primary"))

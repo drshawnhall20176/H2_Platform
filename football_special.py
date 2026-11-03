@@ -144,5 +144,5 @@ def player_rows(roster: Sequence[Dict], team, other, market: str, special: Dict,
         elif not out:
             flags.append("no games in the sample")
         rows.append(FP.price_row(r, key, slot, proj, None, market, vals, read_vals, ctx, lines, prices, fac, env_mult,
-                                 flags, out=out, group=group))
+                                 flags, out=out, group=group, sport=sport))
     return rows
