@@ -111,3 +111,23 @@ def test_fix_model_refreshes_singles_and_legs(tmp_path, monkeypatch):
     L.main(["--picks", f"@{f}", "--date", "2026-11-02", "--fix-model", "true"])
     kupp = [b for b in B.list_bets() if b["player"] == "Cooper Kupp"]
     assert len(kupp) == 2 and all(abs(b["model_prob"] - 0.84) < 1e-9 for b in kupp)
+
+
+def test_known_result_is_recorded_on_a_won_parlay(tmp_path, monkeypatch):
+    db = str(tmp_path / "b.db")
+    import export_board as X
+    monkeypatch.setattr(X, "board", lambda *a, **k: [])
+    monkeypatch.setattr(B, "list_bets", lambda *a, _l=B.list_bets, **k: _l(db_path=db, **{x: y for x, y in k.items() if x != "db_path"}))
+    monkeypatch.setattr(B, "add_bet", lambda *a, _a=B.add_bet, **k: _a(db, **k))
+    monkeypatch.setattr(B, "update_bet", lambda bid, _u=B.update_bet, **k: _u(bid, db, **k))
+    f = tmp_path / "p.json"
+    f.write_text(json.dumps([{"player": "Otef Darom", "market": "Spread", "side": "Otef Darom", "line": -26.5, "odds": -140,
+                              "game": "Hapoel Migdal Haemek @ Otef Darom"},
+                             {"player": "Game total", "market": "Total", "side": "Over", "line": 175.5, "odds": -124,
+                              "game": "Vytis @ Perlas"}]))
+    L.main(["--picks", f"@{f}", "--date", "2026-11-03", "--sport", "INTL", "--ticket", "Live 5", "--ticket-odds", "1740",
+            "--stake", "9", "--real", "true", "--result", "win"])
+    bets = B.list_bets()
+    hdr = next(b for b in bets if B.is_parlay_header(b))
+    assert hdr["result"] == "win" and abs(B.bet_pnl(hdr) - 156.6) < 0.01
+    assert all(b["result"] == "win" for b in bets)

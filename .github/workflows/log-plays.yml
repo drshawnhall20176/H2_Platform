@@ -28,6 +28,9 @@ on:
       ticket_odds:
         description: "Parlay total American odds (with a ticket)"
         default: ""
+      result:
+        description: "win / loss / push if already settled (blank = let overnight grading do it)"
+        default: ""
       fix_model:
         description: "true = don't log; refresh the model % on already-logged rows for these picks"
         default: "false"
@@ -58,4 +61,4 @@ jobs:
           python log_plays.py --picks @picks.json --sport "${{ inputs.sport }}" --date "${{ inputs.date }}" \
             --real "${{ inputs.real }}" --stake "${{ inputs.stake }}" --tag "${{ inputs.tag }}" \
             --ticket "${{ inputs.ticket }}" --ticket-odds "${{ inputs.ticket_odds }}" \
-            --fix-model "${{ inputs.fix_model }}"
+            --fix-model "${{ inputs.fix_model }}" --result "${{ inputs.result }}"
