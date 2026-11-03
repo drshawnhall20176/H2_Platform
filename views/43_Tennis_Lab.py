@@ -87,7 +87,7 @@ else:
                "IF the model is right — on the main tour it usually isn't (see above), so treat thin-history players "
                "(under 30 rated matches) with extra caution.")
 
-    with st.expander("💲 Check a sportsbook price"):
+    with st.expander("💲 Check a price · 📒 log it"):
         opts = {f"{p['home']} vs {p['away']} ({p.get('tournament')})": p for p in sched}
         if opts:
             m = opts[st.selectbox("Match", list(opts), key="tl_chk_match")]
@@ -100,6 +100,18 @@ else:
                 st.markdown(f"Model chance **{pchance:.0%}** · fair **{_odds(T.fair_odds(pchance))}** · at {price:+d}: "
                             f"**{ev:+.1%}** expected value "
                             + ("(value if the model is right)" if ev > 0 else "(no value)"))
+                c1, c2 = st.columns(2)
+                stake = c1.number_input("Stake ($)", min_value=0.0, value=1.0, step=1.0, key="tl_chk_stake")
+                real = c2.toggle("Real money", value=True, key="tl_chk_real")
+                if st.button(f"📒 Log {who} at {price:+d}", key="tl_chk_log", type="primary"):
+                    import betlog as B
+                    f = IP.bet_fields(m, "Moneyline", "home" if who == m["home"] else "away", None, price, stake, real,
+                                      round(pchance, 4))
+                    try:
+                        st.success(f"Logged #{B.add_bet(**f)}: {who} to win at {price:+d}, ${stake:,.2f} "
+                                   f"{'real' if real else 'tracking'}. It settles once the result is in.")
+                    except Exception as exc:                    # noqa: BLE001
+                        st.error(f"Couldn't log it: {exc}")
             else:
                 st.caption("Enter a price of +100 or more, or -100 or less.")
 
