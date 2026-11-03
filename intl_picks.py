@@ -59,6 +59,12 @@ COVER_BANDS = {
     "EUROLEAGUE": ((0, 4, 0.50, 775), (4, 6, 0.504, 119), (6, 8, 0.571, 56), (8, 999, 0.643, 42)),
 }
 HOOPS_EVIDENCE = {
+    "NBA": "Information only — no picks. Backtest vs real lines (779 games, 2024-26): spreads covered 46-54% across gap "
+           "sizes with no steady pattern, totals and moneylines were inconsistent season to season. NBA lines are "
+           "sharp; use the model as a second look.",
+    "NHL": "Information only — no picks. Backtest vs real lines (1,026 games, 2024-26): the model's side of the puck "
+           "line covered 64-67%, but that is the +1.5 side's built-in cover rate (it's priced around -200), not an "
+           "edge; totals 45-55% and moneylines lost at the median price.",
     "NCAAMB": "Backtest vs real lines (5,554 games, 2024-26), covers by how far the model was from the spread: 8-10 "
               "points 48%, 10-16 53% (break-even), 16-20 57% (251 games), 20+ 72.5% (295). The edge is only in the "
               "biggest disagreements, so picks start at 16+. Totals and moneylines are off.",
