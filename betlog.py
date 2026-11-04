@@ -635,15 +635,29 @@ def log_parlay_ticket(ticket: str, legs: List[Dict], total_odds: int, stake: flo
                   entry_odds_source="manual")
     ids = []
     for l in legs:
+        # Nov 4: a leg's own price, when known, rides in its notes (leg_price=-219) so a strategy can be judged leg by
+        # leg -- the leg still carries no stake or entry price, so it can never be counted as a bet.
+        leg_notes = ",".join(x for x in (notes, None if l.get("price") is None else f"leg_price={int(float(l['price']))}") if x) or None
         ids.append(add_bet(db_path, slate_date=slate_date, game=l.get("game") or game, player=l.get("player"),
                            market=l.get("market"), side=l.get("side") or "Over", line=l.get("line"),
                            entry_odds=None, model_prob=l.get("model_prob"), stake=0.0, book=book,
-                           notes=notes, ticket=ticket, sport=sport))
+                           notes=leg_notes, ticket=ticket, sport=sport))
     conv = []
     for b in existing or []:
         update_bet(int(b["id"]), db_path, stake=0.0, entry_odds=None)
         conv.append(int(b["id"]))
     return {"header_id": hid, "leg_ids": ids, "converted": conv}
+
+
+def leg_price(bet: Dict) -> Optional[int]:
+    """The price stored on a parlay leg's notes (leg_price=...), else None."""
+    for part in str(bet.get("notes") or "").split(","):
+        if part.strip().startswith("leg_price="):
+            try:
+                return int(float(part.strip().split("=", 1)[1]))
+            except ValueError:
+                return None
+    return None
 
 
 def parse_leg_lines(text: str, default_game: Optional[str] = None) -> Tuple[List[Dict], List[str]]:
