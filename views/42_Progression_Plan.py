@@ -120,6 +120,20 @@ if r["parlays"]:
     st.caption(f"Parlays: {r['parlays']} settled, ROI {_pct(r['parlay_roi'], True)}. Singles are the plan; "
                "parlays stay small.")
 
+st.markdown("##### Strategies")
+st.caption("Each bet's strategy is the tag it was logged under. Legs = the individual picks (singles, plus parlay legs whose "
+           "own price was logged); Legs won vs Implied shows whether the picks beat what their prices said; As $1 singles "
+           "= what those same picks would have made bet one at a time.")
+_strats = P.strategies(bets, str(s["start_date"]))
+if _strats:
+    st.dataframe(pd.DataFrame([{
+        "Strategy": x["strategy"], "Bets": x["bets"], "Parlays": x["parlays"], "Open": x["open"],
+        "Staked": f"${x['staked']:,.2f}", "Profit": f"${x['profit']:+,.2f}", "ROI": _pct(x["roi"], True),
+        "Legs graded": x["legs"], "Legs won": _pct(x["leg_hit"]), "Implied": _pct(x["leg_implied"]),
+        "As $1 singles (per leg)": _pct(x["singles_per_leg"], True)} for x in _strats]), hide_index=True, width="stretch")
+else:
+    st.caption("No settled real-money bets yet.")
+
 st.markdown("##### The income goal, in numbers")
 g = r["goal"]
 if g["turnover"]:

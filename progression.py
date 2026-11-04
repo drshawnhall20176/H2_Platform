@@ -149,3 +149,73 @@ def plan(settings: Dict, bets: Sequence[Dict], today: Optional[date] = None) -> 
             "goal": {"monthly": goal, "turnover": turnover, "per_bet": per_bet, "bankroll_needed": bank_needed,
                      "pace": pace, "bets_per_month": s["bets_per_month"], "target_roi": tr},
             "tax": {"nondeductible": round(losing_stakes_ytd * TAX_NONDEDUCTIBLE, 2), "losing_stakes": round(losing_stakes_ytd, 2)}}
+
+
+# --------------------------------------------------------------------------- strategies (Nov 4)
+# A "strategy" is the tag a bet was logged under (live-tennis, live-intl-hoops, discord-over...). For each: the real money
+# result, and -- for parlays whose legs carry their own prices -- how the LEGS did against what those prices implied, and
+# what the same legs would have made as $1 singles. That answers the question a parlay result alone can't: is there an
+# edge in the picks, or did the parlay just get lucky?
+AUTO_TAGS = ("use:", "leg_price=", "market-gap", "star-out", "tracking", "honest-chances")
+
+
+def strategy_of(b: Dict) -> str:
+    for part in str(b.get("notes") or "").split(","):
+        t = part.strip()
+        if not t or t.startswith(AUTO_TAGS):
+            continue
+        return "game-lab" if t.startswith("gl:") else t
+    return "untagged"
+
+
+def _implied(a) -> Optional[float]:
+    try:
+        a = float(a)
+    except (TypeError, ValueError):
+        return None
+    if -100 < a < 100:
+        return None
+    return 100 / (a + 100) if a > 0 else -a / (-a + 100)
+
+
+def strategies(bets: Sequence[Dict], start: Optional[str] = None) -> List[Dict]:
+    import betlog as B
+    real = [b for b in bets if b.get("is_real_bet") not in (False, 0, "0", "false")
+            and (not start or _day(b) >= start)]
+    headed = B.headed_tickets(real)
+    groups: Dict[str, Dict] = {}
+    for b in B.money_bets(real):
+        if float(b.get("stake") or 0) <= 0:
+            continue
+        g = groups.setdefault(strategy_of(b), {"strategy": strategy_of(b), "bets": 0, "parlays": 0, "singles": 0,
+                                               "open": 0, "staked": 0.0, "profit": 0.0, "legs": []})
+        g["bets"] += 1
+        g["parlays" if B.is_parlay_header(b) else "singles"] += 1
+        if not _res(b):
+            g["open"] += 1
+            continue
+        g["staked"] += float(b.get("stake") or 0)
+        g["profit"] += B.bet_pnl(b) or 0
+        if not B.is_parlay_header(b):                            # a single is its own "leg"
+            g["legs"].append((b.get("entry_odds"), _res(b)))
+    for b in real:
+        if B.is_parlay_leg(b, headed) and B.leg_price(b) is not None:
+            hdr = next((h for h in real if B.is_parlay_header(h) and B._ticket(h) == B._ticket(b)), None)
+            if hdr is None or float(hdr.get("stake") or 0) <= 0:
+                continue
+            g = groups.get(strategy_of(hdr))
+            if g is not None:
+                g["legs"].append((B.leg_price(b), _res(b)))
+    out = []
+    for g in groups.values():
+        legs = [(pr, r) for pr, r in g.pop("legs") if r in ("win", "loss") and _implied(pr) is not None]
+        n = len(legs)
+        won = sum(1 for _, r in legs if r == "win")
+        implied = sum(_implied(pr) / 1.045 for pr, _ in legs) / n if n else None    # vig taken off (~4.5%)
+        as_singles = sum((100 / -float(pr) if float(pr) < 0 else float(pr) / 100) if r == "win" else -1.0
+                         for pr, r in legs) if n else None
+        g.update(roi=(g["profit"] / g["staked"]) if g["staked"] > 0 else None, legs=n, legs_won=won,
+                 leg_hit=(won / n) if n else None, leg_implied=implied,
+                 singles_per_leg=(as_singles / n) if n else None)
+        out.append(g)
+    return sorted(out, key=lambda x: -x["staked"])

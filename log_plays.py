@@ -94,6 +94,20 @@ def main(argv=None) -> int:
         reads = {}
     rows = build(picks, board, a.sport, date_str, real=a.real.lower() in ("1", "true", "yes"), stake=a.stake,
                  tag=a.tag or None, reads=reads)
+    if a.fix_model.lower() in ("1", "true", "yes") and a.ticket:
+        # Nov 4: add each leg's own price to an already-logged ticket (matched by player), for the strategy tracker.
+        price = {_key(r["player"], r["market"], r["side"]): r["entry_odds"] for r in rows}
+        n = 0
+        for b in B.list_bets(sport=a.sport):
+            if (b.get("ticket") or "") != a.ticket or B.is_parlay_header(b) or B.leg_price(b) is not None:
+                continue
+            pr = price.get(_key(b.get("player"), b.get("market"), b.get("side")))
+            if pr is not None:
+                notes = ",".join(x for x in (b.get("notes"), f"leg_price={int(pr)}") if x)
+                B.update_bet(int(b["id"]), notes=notes)
+                n += 1
+        print(f"leg prices added to {n} leg(s) of '{a.ticket}'.")
+        return 0
     if a.fix_model.lower() in ("1", "true", "yes"):
         n = 0
         for r in rows:
@@ -111,7 +125,7 @@ def main(argv=None) -> int:
             print(f"Ticket '{a.ticket}' is already in the Bet Log — nothing logged.")
             return 0
         legs = [{"player": r["player"], "market": r["market"], "side": r["side"], "line": r["line"],
-                 "game": r["game"], "model_prob": r["model_prob"]} for r in rows]
+                 "game": r["game"], "model_prob": r["model_prob"], "price": r["entry_odds"]} for r in rows]
         res = B.log_parlay_ticket(a.ticket, legs, int(float(a.ticket_odds)), a.stake, date_str, a.sport,
                                   book=rows[0]["book"] if rows else None, notes=a.tag or None)
         if a.result.strip().lower() in ("win", "loss", "push"):

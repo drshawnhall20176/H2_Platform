@@ -73,3 +73,23 @@ def test_zero_stake_rows_are_not_bets():
     bets = [_bet(1, "2026-11-01", "win", stake=0.0), _bet(2, "2026-11-01", "loss", stake=2.0)]
     r = P.plan({"start_date": "2026-11-01", "start_bankroll": 100}, bets, date(2026, 11, 4))
     assert r["singles"] == 1 and r["settled"] == 1 and r["bankroll"] == 98.0
+
+
+def test_strategies_judge_parlay_legs_by_their_own_prices(tmp_path):
+    import betlog as B
+    db = str(tmp_path / "b.db")
+    legs = [{"player": "A", "market": "Moneyline", "side": "A", "line": None, "price": -200},
+            {"player": "C", "market": "Moneyline", "side": "C", "line": None, "price": -300}]
+    res = B.log_parlay_ticket("T1", legs, 125, 10, "2026-11-04", "TENNIS", notes="live-tennis", db_path=db)
+    B.update_bet(res["header_id"], db, result="win")
+    for bid in res["leg_ids"]:
+        B.update_bet(bid, db, result="win")
+    B.add_bet(db, slate_date="2026-11-04", player="X", market="Moneyline", side="X", entry_odds=-150, stake=2,
+              result="loss", notes="live-tennis", sport="TENNIS")
+    bets = B.list_bets(db_path=db)
+    assert {B.leg_price(b) for b in bets if b.get("player") in ("A", "C")} == {-200, -300}
+    st = {x["strategy"]: x for x in P.strategies(bets, "2026-11-01")}["live-tennis"]
+    assert st["bets"] == 2 and st["parlays"] == 1 and abs(st["profit"] - (12.5 - 2)) < 1e-9
+    assert st["legs"] == 3 and st["legs_won"] == 2
+    assert abs(st["singles_per_leg"] - ((0.5 + 1 / 3 - 1) / 3)) < 1e-9
+    assert P.strategy_of({"notes": "gl:NCAAMB:x"}) == "game-lab" and P.strategy_of({"notes": "use:single"}) == "untagged"
