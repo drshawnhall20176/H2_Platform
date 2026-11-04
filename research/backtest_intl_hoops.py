@@ -65,7 +65,10 @@ def main() -> int:
                 ev = I.match_event(snap, g["home_team"], g["away_team"])
                 if not proj or not ev:
                     continue
-                home_name = ev["home_team"] if I.same_team(ev["home_team"], g["home_team"]) else ev["away_team"]
+                fh, fa = I.same_team(ev["home_team"], g["home_team"]), I.same_team(ev["away_team"], g["home_team"])
+                if fh == fa:                                   # Nov 4: never guess the home side (a flip fakes edges)
+                    continue
+                home_name = ev["home_team"] if fh else ev["away_team"]
                 away_name = ev["away_team"] if home_name == ev["home_team"] else ev["home_team"]
                 sp = H.line(ev, "spreads", home_name)
                 to = H.line(ev, "totals", "Over")

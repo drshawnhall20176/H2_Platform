@@ -130,8 +130,12 @@ def test_hoops_build_and_record():
              for h, a, hp, ap in [("Real Madrid", "Monaco", 95, 75), ("Monaco", "Fenerbahce", 80, 82),
                                   ("Fenerbahce", "Real Madrid", 70, 90)] * 6]
     r = I.ratings(games, 3.0)
+    import pytest
+    mp = pytest.MonkeyPatch()
+    mp.setitem(IP.HOOPS_RULES, "EUROLEAGUE", {"spread": 6.0, "total": None, "ml": None})   # the rule when it's on
     recs = IP.hoops_build("EUROLEAGUE", r, [_ev("g1", "Real Madrid", "Monaco", -150, 130, spread=-2.5, total=160)], NOW)
-    assert len(recs) == 1 and recs[0]["pick"] == "home" and recs[0]["edge"] >= IP.HOOPS_RULES["EUROLEAGUE"]["spread"]
+    mp.undo()
+    assert len(recs) == 1 and recs[0]["pick"] == "home" and recs[0]["edge"] >= 6.0
     nbl = IP.hoops_build("NBL", r, [_ev("g1", "Real Madrid", "Monaco", 200, -250, spread=-2.5, total=160)], NOW)
     assert nbl[0]["pick"] is None and nbl[0]["ml_pick"] == "home"           # NBL: moneyline only
     graded = dict(recs[0], final_home=90, final_away=80, result="home", close_line=2.5)
