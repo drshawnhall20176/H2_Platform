@@ -599,3 +599,8 @@ def build_slate(date_str: str, min_avg_toi: float = CFG.MIN_AVG_TOI,
     _diag(f"build_slate({date_str}): {len(rows)} player(s) on the final slate "
           f"({len(rows) - n_g} skaters, {n_g} goalies; of {len(tasks)} roster slots checked)")
     return rows, meta
+
+
+# Nov 4: a built slate is saved and reused (slate_store.py) -- a restart no longer rebuilds it from hundreds of requests.
+import slate_store as _SS  # noqa: E402
+build_slate = _SS.persisted("NHL")(build_slate)

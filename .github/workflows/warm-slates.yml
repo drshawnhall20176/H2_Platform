@@ -1,0 +1,39 @@
+name: warm-slates
+
+# Nov 4: rebuild today's player slates every hour and save them to the database, so the app opens pages from a
+# saved copy instead of rebuilding from hundreds of ESPN requests after every restart (warm_slates.py, slate_store.py).
+on:
+  schedule:
+    - cron: "41 14-23 * * *"   # ~10:41am-7:41pm ET
+    - cron: "41 0-3 * * *"     # ~8:41-11:41pm ET
+  workflow_dispatch:
+    inputs:
+      sports:
+        description: "NBA,NHL,NFL,WNBA,NCAAMB (blank = all enabled)"
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: warm-slates
+  cancel-in-progress: false
+
+jobs:
+  warm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Build and save today's slates
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SPORTS: ${{ github.event.inputs.sports }}
+        run: python warm_slates.py "${SPORTS}"
