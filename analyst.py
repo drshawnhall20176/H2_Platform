@@ -720,8 +720,17 @@ def scan(plays: Iterable[Dict], sport_key: str, date_str: str, *, offers: Option
          weights: Optional[Dict[str, float]] = None, expect_book_lines: bool = False,
          history_limit: int = 60, times: Optional[Dict[str, Dict]] = None,
          with_day: bool = False, book: Optional[str] = None, game_env: Optional[Dict[str, Dict]] = None,
-         matchups: Optional[Dict[Tuple[str, str], Dict]] = None) -> List[Dict]:
-    """Run every detector over every play. Returns one CALL per play that has at least one angle,
+         matchups: Optional[Dict[Tuple[str, str], Dict]] = None, calibrator: Optional[Dict] = None,
+         cold: Optional[Dict[Tuple[str, str], Dict]] = None) -> List[Dict]:
+    """Run every detector over every play.
+
+    Nov 4 (Analyst Record audit, 2,832 graded calls): the Desk's stated chances ran 8.5 points high (said 60.5%, hit
+    51.9%) in every sport, and its own confidence ranked calls BACKWARDS -- top-conviction "main road" calls hit 44%,
+    low-conviction ones 58%. So, with `calibrator` (analyst_calibration's per-sport curve, only when it passed its
+    held-out test), every call also carries `adj_prob`, the record-corrected chance; calls are RANKED by it and a gem
+    needs it, not the stated chance, to clear GEM_MIN_PROB. `cold` (cold_markets: market + side combinations whose own
+    graded record sits clearly below what they stated) adds a caution, sets `cold`, and keeps the call off gems.
+    The stated model_prob is still what's locked and published. Returns one CALL per play that has at least one angle,
     ranked best-first. A call:
         key, sport, date, player, player_id, team, game, game_date, market, side, line, model_prob,
         conviction, price, price_book, why, angles [{angle,label,strength,evidence}], cautions,
@@ -762,17 +771,26 @@ def scan(plays: Iterable[Dict], sport_key: str, date_str: str, *, offers: Option
         chalk = bool(cuts_m is not None and p.get("Conviction") is not None
                      and len(by_market.get(p.get("Market"), [])) >= 10 and p["Conviction"] >= cuts_m)
         cautions = cautions_for(p, ctx)
+        cold_rec = (cold or {}).get((p.get("Market"), p.get("Side")))
+        if cold_rec:
+            cautions = list(cautions) + [f"cold market: {p.get('Market')} {p.get('Side')} calls have hit "
+                                         f"{cold_rec['hit']:.0%} against {cold_rec['said']:.0%} stated over {cold_rec['n']}"]
+        adj = p["ModelProb"]
+        if calibrator:
+            import analyst_calibration as CAL
+            adj = CAL.apply(calibrator, p["ModelProb"])
         st_ = book_status(p, ctx["offer_index"], odds_map or {}, book)
         score = sum(weights.get(h["angle"], 1.0) * h["strength"] for h in hits)
         gem = (len(hits) >= GEM_MIN_ANGLES and len(angle_families(hits)) >= GEM_MIN_FAMILIES
-               and not chalk and p["ModelProb"] >= GEM_MIN_PROB
+               and not chalk and adj >= GEM_MIN_PROB and not cold_rec
                and len(cautions) <= GEM_MAX_CAUTIONS)
         calls.append({
             "key": call_key(sport_key, date_str, p.get("Player"), p.get("Market"), p.get("Side")),
             "sport": sport_key, "date": date_str, "player": p.get("Player"), "player_id": p.get("PlayerId"),
             "team": p.get("Team"), "game": p.get("Game"), "game_date": p.get("GameDate"),
             "market": p.get("Market"), "side": p.get("Side"), "line": p.get("Line"),
-            "model_prob": p.get("ModelProb"), "conviction": p.get("Conviction"),
+            "model_prob": p.get("ModelProb"), "adj_prob": round(adj, 4), "cold": bool(cold_rec),
+            "conviction": p.get("Conviction"),
             "price": (st_["price"] if book else p.get("RealPrice")),
             "price_book": (O.canonical_book(book) if book else p.get("RealPriceBook")), "why": p.get("Why"),
             "book_state": st_["state"], "book_lines": st_["lines"], "book_elsewhere": st_["elsewhere"],
@@ -781,7 +799,9 @@ def scan(plays: Iterable[Dict], sport_key: str, date_str: str, *, offers: Option
             "angles": hits, "cautions": cautions, "score": round(score - 0.25 * len(cautions), 3),
             "chalk": chalk, "gem": gem, **_call_time(p, times, with_day),
         })
-    calls.sort(key=lambda c: (c["gem"], c["score"], c["model_prob"]), reverse=True)
+    # Ranked by the honest (record-corrected) chance; the angle score only breaks ties. The record showed the score and
+    # conviction ordering calls the wrong way round.
+    calls.sort(key=lambda c: (c["gem"], not c["cold"], round(c["adj_prob"], 2), c["score"]), reverse=True)
     return calls
 
 
@@ -861,6 +881,34 @@ def learned_weights(rows: List[Dict]) -> Dict[str, float]:
         shrink = s["n"] / (s["n"] + WEIGHT_PRIOR_N)
         w[name] = round(_clip(1.0 + 4.0 * s["gap"] * shrink, *WEIGHT_RANGE), 3)
     return w
+
+
+COLD_MIN_N = 25           # graded calls in a market + side before it can be called cold
+COLD_GAP = 0.10           # hitting at least this far below what it stated...
+COLD_Z = 1.645            # ...with the 90% upper bound of its hit rate still under the stated average
+
+
+def cold_markets(rows: List[Dict]) -> Dict[Tuple[str, str], Dict]:
+    """(market, side) -> {"n", "hit", "said"} for combinations whose graded calls clearly ran below their stated chance:
+    COLD_MIN_N+ calls, COLD_GAP+ below it, and even the optimistic end of the hit rate (Wilson upper bound) under it.
+    Pass ONE sport's rows. Re-evaluated from the record every time, so a market that recovers drops off by itself."""
+    by: Dict[Tuple[str, str], List[Dict]] = {}
+    for r in rows:
+        if r.get("hit") is None or r.get("model_prob") is None:
+            continue
+        by.setdefault((r.get("market"), r.get("side")), []).append(r)
+    out = {}
+    for k, g in by.items():
+        n = len(g)
+        if n < COLD_MIN_N:
+            continue
+        hit = sum(1 for r in g if r["hit"]) / n
+        said = sum(r["model_prob"] for r in g) / n
+        z = COLD_Z
+        upper = (hit + z * z / (2 * n) + z * math.sqrt(hit * (1 - hit) / n + z * z / (4 * n * n))) / (1 + z * z / n)
+        if said - hit >= COLD_GAP and upper < said:
+            out[k] = {"n": n, "hit": hit, "said": said}
+    return out
 
 
 def reliability(rows: List[Dict], bins: Tuple[float, ...] = (0.0, 0.5, 0.6, 0.7, 0.8, 1.01)) -> List[Dict]:

@@ -182,6 +182,10 @@ context_notes = [n for n in context_notes if n]
 sport_rows = AL.fetch_calls(sport=_active.key)
 history = [r for r in sport_rows if r.get("hit") is not None]
 weights = A.learned_weights(history)
+# Nov 4: the record corrects the ranking -- calls are ranked and gem-gated on the record-corrected chance (when the
+# sport's correction passed its held-out test), and market + sides that have clearly underdelivered are flagged cold.
+_scan_curve = CAL.corrected_for_sport(history)
+_cold = A.cold_markets(history)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -202,10 +206,12 @@ def _line_rows(sport_key, player, market, side):
 
 calls = A.scan(plays, _active.key, date_str, offers=offers, odds_map=_active.market_map,
                history_fn=_line_rows, weights=weights, expect_book_lines=bool(offers),
-               times=times, with_day=_with_day, book=preferred_book, game_env=game_env, matchups=matchups)
+               times=times, with_day=_with_day, book=preferred_book, game_env=game_env, matchups=matchups,
+               calibrator=_scan_curve, cold=_cold)
 lines_posted = bool(offers)
-# Only calls the selected book really posts, at the model's own line, are ever suggested or locked.
-loggable_calls = [c for c in calls if c["book_state"] == A.STATE_POSTED]
+# Only calls the selected book really posts, at the model's own line, are ever suggested or locked -- and never a
+# market + side the record has shown to be cold.
+loggable_calls = [c for c in calls if c["book_state"] == A.STATE_POSTED and not c.get("cold")]
 
 locked_note = ""
 _ledger_changed = False                                # set when this run wrote to the ledger, so it is re-read once, below
@@ -275,6 +281,9 @@ if offers_note:
     captions.append(f"Heads up: {offers_note}.")
 for _n in context_notes:
     captions.append(f"Heads up: {_n}.")
+if _cold:
+    captions.append("Cold markets (kept off the card until their record recovers): " + "; ".join(
+        f"{m} {sd} — {v['hit']:.0%} hit vs {v['said']:.0%} stated over {v['n']}" for (m, sd), v in sorted(_cold.items())))
 if captions:
     st.caption(" · ".join(captions))
 
@@ -285,7 +294,7 @@ clv_rows = AT.clv_board(sport_rows)
 view_calls = [c for c in calls if c["game"] in view_set]
 if order == "Start time":
     view_calls = sorted(view_calls, key=lambda c: A.chrono_key(c["slot"], c["start"], -c["score"]))
-sug_calls = [c for c in view_calls if c["bettable"]]          # what the desk will actually suggest
+sug_calls = [c for c in view_calls if c["bettable"] and not c.get("cold")]   # what the desk will actually suggest
 off_calls = [c for c in view_calls if not c["bettable"]]      # angles that exist, but not at this book
 notes = {g: n for g, n in A.game_notes(meta).items() if g in view_set}
 
