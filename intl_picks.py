@@ -409,14 +409,20 @@ def tennis_grade(hist: Sequence[Dict], db_path: Optional[str] = None) -> int:
 
 # --------------------------------------------------------------------------- international basketball
 def hoops_refresh(league: str, fetch: Callable = _http, today: Optional[date] = None,
-                  db_path: Optional[str] = None) -> int:
+                  db_path: Optional[str] = None, fetch_text: Optional[Callable] = None) -> int:
     import model_store as MS
     today = today or datetime.now(timezone.utc).date()
     season = I.season_of(league, today.isoformat())
+    fetch_text = fetch_text or getattr(I, "_http_text", None)
     if league == "EUROLEAGUE":
         rows = I.euroleague_season(f"E{season}", fetch)
     elif league == "EUROCUP":
         rows = I.euroleague_season(f"U{season}", fetch, comp="U", league="EUROCUP")
+    elif league in getattr(I, "FIBA_PAGES", {}):
+        rows = I.fiba_results(league, I.fiba_season(league, season, fetch_text))
+        prev = str(int(season) - 1)
+        if not MS.load_results(league, since=f"{prev}-07-01", db_path=db_path):          # first run: last season too
+            rows += I.fiba_results(league, I.fiba_season(league, prev, fetch_text, current=False))
     elif league in I.ESPN_LEAGUE_URL:
         have = MS.load_results(league, since=(today - timedelta(days=30)).isoformat(), db_path=db_path)
         start = today - timedelta(days=7) if have else today - timedelta(days=400)
@@ -477,7 +483,7 @@ def hoops_build(league: str, r: Optional[Dict], events: Sequence[Dict], now: dat
     return out
 
 
-TOTAL_SD = {"EUROCUP": 16.0, "EUROLEAGUE": 16.0, "NBL": 18.0, "NCAAMB": 17.0, "NBA": 18.0, "WNBA": 17.0, "NHL": 2.3}
+TOTAL_SD = {"BCL": 16.0, "FEC": 16.5, "EUROCUPW": 15.0, "EUROCUP": 16.0, "EUROLEAGUE": 16.0, "NBL": 18.0, "NCAAMB": 17.0, "NBA": 18.0, "WNBA": 17.0, "NHL": 2.3}
 
 
 def hoops_schedule_build(league: str, r: Optional[Dict], upcoming: Sequence[Dict], now: datetime) -> List[Dict]:
@@ -520,18 +526,19 @@ def fair_chance(p: Dict, market: str, side: str, line: Optional[float]) -> Optio
 
 
 def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optional[datetime] = None,
-                  db_path: Optional[str] = None) -> Dict:
+                  db_path: Optional[str] = None, fetch_text: Optional[Callable] = None) -> Dict:
     import model_store as MS
     now = now or datetime.now(timezone.utc)
     cfg = I.LEAGUES[league]
-    added = hoops_refresh(league, fetch, now.date(), db_path)
+    fetch_text = fetch_text or getattr(I, "_http_text", None)
+    added = hoops_refresh(league, fetch, now.date(), db_path, fetch_text)
     season = I.season_of(league, now.date().isoformat())
     if cfg.get("decay"):                                       # college: last ~13 months, recency-weighted
         since = (now.date() - timedelta(days=400)).isoformat()
         games = MS.load_results(league, since=since, db_path=db_path)
         r = I.ratings_weighted(games, I.decay_weights(games, now.date().isoformat(), league), cfg["lam"],
                                I.HFA_PRIOR.get(league)) \
-            if len(games) >= (500 if league == "NCAAMB" else 300) else None
+            if len(games) >= cfg.get("min_decay_games", 500 if league == "NCAAMB" else 300) else None
     else:
         games = [g for g in MS.load_results(league, db_path=db_path) if str(g.get("season")) == season]
         r = I.ratings(games, cfg["lam"]) if len(games) >= cfg["min_games"] else None
@@ -541,9 +548,12 @@ def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optio
         recs = hoops_build(league, r, evs, now)
     else:                                                      # no odds feed for this league: fair lines from the schedule
         evs = []
-        code = ("U" if league == "EUROCUP" else "E") + I.season_of(league, now.date().isoformat())
-        recs = hoops_schedule_build(league, r, I.euroleague_upcoming(code, fetch, comp=cfg.get("comp", "E"),
-                                                                     league=league), now)
+        if league in getattr(I, "FIBA_PAGES", {}):
+            upcoming = I.fiba_upcoming(league, I.fiba_season(league, season, fetch_text))
+        else:
+            code = ("U" if league == "EUROCUP" else "E") + I.season_of(league, now.date().isoformat())
+            upcoming = I.euroleague_upcoming(code, fetch, comp=cfg.get("comp", "E"), league=league)
+        recs = hoops_schedule_build(league, r, upcoming, now)
     got = {x["game_id"] for x in recs}
     future = [e for e in evs if str(e.get("commence_time")) > now.isoformat()[:19]]
     missed = [f"{e.get('away_team')} @ {e.get('home_team')}" for e in future if str(e.get("id")) not in got]
@@ -563,7 +573,7 @@ def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optio
 
 # --------------------------------------------------------------------------- logging a Game Lab bet (Nov 3)
 BET_SPORT = {"NCAAMB": "NCAAMB", "NBA": "NBA", "NHL": "NHL", "WNBA": "WNBA", "EUROLEAGUE": "INTL", "NBL": "INTL",
-             "EUROCUP": "INTL",
+             "EUROCUP": "INTL", "BCL": "INTL", "FEC": "INTL", "EUROCUPW": "INTL",
              "TENNIS": "TENNIS"}
 TAG = "gl"                     # notes carry "gl:<league>:<game_id>" so the capture can settle the bet itself
 
@@ -722,7 +732,7 @@ def main(argv=None) -> int:
     if not api:
         print("ODDS_API_KEY not set")
         return 1
-    which = (argv or sys.argv[1:] or ["TENNIS,EUROLEAGUE,EUROCUP,NBL,NCAAMB,NBA,NHL"])[0].split(",")
+    which = (argv or sys.argv[1:] or ["TENNIS,EUROLEAGUE,EUROCUP,BCL,FEC,EUROCUPW,NBL,NCAAMB,NBA,NHL"])[0].split(",")
     for s in which:
         try:
             out = tennis_capture(api) if s == "TENNIS" else hoops_capture(s, api)
