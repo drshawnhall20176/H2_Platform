@@ -6,6 +6,7 @@ tracking picks where the backtested rules allow one, and the graded record. Data
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Optional
 
 import pandas as pd
 import streamlit as st
@@ -79,6 +80,8 @@ def _tip(p):
 
 
 def render(league: str, search: bool = False) -> None:
+    if not I.LEAGUES.get(league, {}).get("odds_key"):
+        return render_fair(league)
     rules = IP.HOOPS_RULES.get(league, {})
     ev = getattr(IP, "HOOPS_EVIDENCE", {}).get(league) or EVIDENCE.get(league)
     st.warning("Tracking only — not recommendations yet." + (f" {ev}" if ev else ""))
@@ -241,3 +244,88 @@ def log_panel(league: str, games) -> None:
                 st.success(f"Logged #{bid}: {what} at {odds:+d}, ${stake:,.2f} {'real' if real else 'tracking'}.")
             except Exception as exc:                            # noqa: BLE001
                 st.error(f"Couldn't log it: {exc}")
+
+
+def _fair_american(p: Optional[float]) -> str:
+    if p is None or p <= 0 or p >= 1:
+        return "—"
+    return f"{-100 * p / (1 - p):+.0f}" if p >= 0.5 else f"{100 * (1 - p) / p:+.0f}"
+
+
+def render_fair(league: str) -> None:
+    """A league the odds feed doesn't carry (EuroCup): the model's fair spread, total and moneyline for every scheduled
+    game, a box to check the sportsbook's price against it, and logging. No picks -- there is no line history to test
+    against, so the record kept here is how close the model's margins come and how often its favorite wins."""
+    import betlog as B
+    title = I.LEAGUES[league]["title"]
+    st.info(f"{title} isn't in the odds feed, so there are no book lines here. Each game shows the model's FAIR prices; "
+            "type the sportsbook's price below to see whether it beats them. Information only — the model has no tested "
+            "edge in this league yet; the accuracy record below builds as games finish.")
+    picks = MS.load_game_picks(league)
+    now = datetime.now(timezone.utc).isoformat()
+    c1, c2 = st.columns(2)
+    day = c1.date_input("Slate date", _today_et(), key=f"hg_date_{league}")
+    on_day = [p for p in picks if _et(p) is not None and _et(p).date() == day]
+    slots = sorted({sports.slot_of(_et(p)) for p in on_day}, key=lambda x: sports.SLOT_ORDER.get(x, 9))
+    slot = c2.selectbox("Time slot", ["All slate"] + slots, key=f"hg_slot_{league}")
+    if slot != "All slate":
+        on_day = [p for p in on_day if sports.slot_of(_et(p)) == slot]
+    upcoming = sorted([p for p in on_day if str(p.get("kickoff")) > now and p.get("result") is None], key=lambda x: x["kickoff"])
+    finished = sorted([p for p in on_day if p not in upcoming], key=lambda x: x["kickoff"])
+    st.markdown(f"##### Upcoming ({len(upcoming)})")
+    if not upcoming:
+        st.caption(f"No upcoming {title} games for {day:%a %b %d}" + (f" ({slot})" if slot != "All slate" else "") + ".")
+    else:
+        st.dataframe(pd.DataFrame([{
+            "Tip (ET)": _tip(p), "Game": f"{p['away']} @ {p['home']}",
+            "Fair spread": f"{p['home']} {-p['model_margin']:+.1f}", "Fair total": f"{p['model_total']:.1f}",
+            "Win chance": f"{p['home']} {p['model_p']:.0%}",
+            "Fair ML": f"{_fair_american(p['model_p'])} / {_fair_american(1 - p['model_p'])}"} for p in upcoming]),
+            hide_index=True, width="stretch")
+        with st.expander("💲 Check a sportsbook price · 📒 log it"):
+            labels = {f"{p['away']} @ {p['home']} · {_tip(p)}": p for p in upcoming}
+            p = labels[st.selectbox("Game", list(labels), key=f"hf_game_{league}")]
+            opts = [(f"{p['home']} spread", "Spread", "home"), (f"{p['away']} spread", "Spread", "away"),
+                    ("Over", "Total", "over"), ("Under", "Total", "under"),
+                    (f"{p['home']} moneyline", "Moneyline", "home"), (f"{p['away']} moneyline", "Moneyline", "away")]
+            i = st.selectbox("Bet", range(len(opts)), format_func=lambda k: opts[k][0], key=f"hf_bet_{league}")
+            label, mk, side = opts[i]
+            k1, k2, k3 = st.columns(3)
+            default_line = (-p["model_margin"] if side == "home" else p["model_margin"]) if mk == "Spread" else p["model_total"]
+            line = None if mk == "Moneyline" else k1.number_input("Book's line", value=float(round(default_line * 2) / 2),
+                                                                  step=0.5, key=f"hf_line_{league}_{i}")
+            odds = k2.number_input("Book's price", value=-110, step=5, key=f"hf_odds_{league}")
+            stake = k3.number_input("Stake ($)", min_value=0.0, value=1.0, step=1.0, key=f"hf_stake_{league}")
+            ch = IP.fair_chance(p, mk, side, line)
+            if ch is not None and abs(odds) >= 100:
+                dec = 1 + (odds / 100 if odds > 0 else 100 / -odds)
+                ev_ = ch * dec - 1
+                st.markdown(f"Model chance **{ch:.0%}** · fair **{_fair_american(ch)}** · at {odds:+d}: **{ev_:+.1%}** "
+                            + ("(value if the model is right)" if ev_ > 0 else "(no value)"))
+                real = st.toggle("Real money", value=True, key=f"hf_real_{league}")
+                if st.button("📒 Log it", key=f"hf_log_{league}", type="primary"):
+                    f = IP.bet_fields(p, mk, side, line, odds, stake, real, round(ch, 4))
+                    try:
+                        st.success(f"Logged #{B.add_bet(**f)}: {label}" + ("" if line is None else f" {line:+g}" if mk == "Spread"
+                                                                             else f" {line:g}")
+                                   + f" at {odds:+d}. It settles once the result is in.")
+                    except Exception as exc:                    # noqa: BLE001
+                        st.error(f"Couldn't log it: {exc}")
+    if finished:
+        st.markdown(f"##### Started or final ({len(finished)})")
+        st.dataframe(pd.DataFrame([{
+            "Tip (ET)": _tip(p), "Game": f"{p['away']} @ {p['home']}", "Fair spread": f"{p['home']} {-p['model_margin']:+.1f}",
+            "Final": "—" if p.get("final_home") is None else f"{p['away']} {p['final_away']:g} – {p['home']} {p['final_home']:g}",
+            "Model's favorite": "pending" if p.get("final_home") is None else
+            ("✅" if (p["final_home"] > p["final_away"]) == (p["model_p"] >= 0.5) else "❌")} for p in finished]),
+            hide_index=True, width="stretch")
+    done = [p for p in picks if p.get("final_home") is not None and p.get("model_margin") is not None]
+    st.markdown("##### Accuracy so far")
+    if not done:
+        st.caption("Nothing graded yet.")
+    else:
+        mae = sum(abs((p["final_home"] - p["final_away"]) - p["model_margin"]) for p in done) / len(done)
+        fav = sum(1 for p in done if (p["final_home"] > p["final_away"]) == (p["model_p"] >= 0.5)) / len(done)
+        said = sum(max(p["model_p"], 1 - p["model_p"]) for p in done) / len(done)
+        st.markdown(f"{len(done)} games · the model's favorite won **{fav:.0%}** (it said {said:.0%}) · its margin missed by "
+                    f"**{mae:.1f}** points on average.")

@@ -176,7 +176,7 @@ def test_capture_end_to_end_with_a_local_store(tmp_path, monkeypatch):
 
 def test_pages_render(monkeypatch):
     from streamlit.testing.v1 import AppTest
-    up = {"sport": "TENNIS", "game_id": "e1", "kickoff": "2099-01-01T12:00:00+00:00", "tour": "atp",
+    up = {"sport": "TENNIS", "game_id": "e1", "kickoff": KO23, "tour": "atp",
           "tournament": "Paris Masters", "surface": "hard", "home": "A B", "away": "C D", "model_p": 0.6, "line": 0.5,
           "edge": 0.1, "best_home": 110, "best_away": -130, "model_total": 22.1, "line_total": 21.5, "n_home": 40,
           "n_away": 40, "pick": "home", "spread_pick": None, "total_pick": "over", "result": None}
@@ -189,6 +189,8 @@ def test_pages_render(monkeypatch):
         at.run()
         if page.startswith("44"):
             at.date_input(key="hg_date_EUROLEAGUE").set_value(DAY).run()
+        else:
+            at.date_input(key="tl_date").set_value(DAY).run()
         assert not at.exception, [e.value for e in at.exception]
         assert needle in at.dataframe[0].value.to_string()
 
@@ -215,12 +217,13 @@ def test_schedule_lists_unpriced_matches_with_fair_odds():
 
 def test_tennis_page_shows_schedule_and_checks_a_price(monkeypatch):
     from streamlit.testing.v1 import AppTest
-    sch = {"sport": "TENNIS", "game_id": "espn-wta-9", "kickoff": "2099-01-01T16:00:00+00:00", "tour": "wta",
+    sch = {"sport": "TENNIS", "game_id": "espn-wta-9", "kickoff": KO18, "tour": "wta",
            "tournament": "Reto Win Tennis Cali Open", "round": "Round 2", "surface": "clay", "home": "Elizabeth Mandlik",
            "away": "Jazmin Ortenzi", "model_p": 0.6, "n_home": 80, "n_away": 40, "source": "espn", "result": None}
     monkeypatch.setattr(MS, "load_game_picks", lambda sport, ungraded=False, db_path=None: [sch])
     at = AppTest.from_file(str(Path(__file__).parent / "views" / "43_Tennis_Lab.py"), default_timeout=30)
     at.run()
+    at.date_input(key="tl_date").set_value(DAY).run()
     assert not at.exception, [e.value for e in at.exception]
     t = at.dataframe[0].value.to_string()
     assert "Elizabeth Mandlik" in t and "-150" in t
@@ -404,3 +407,32 @@ def test_opening_night_keeps_last_season_and_a_sane_home_edge():
     assert 1.5 < r["hfa"] < 6                                   # not the 20+ the bug produced
     best, worst = max(teams, key=strength.get), min(teams, key=strength.get)
     assert I.project(r, best, worst)["margin"] > I.project(r, worst, best)["margin"] + 20
+
+
+
+def test_eurocup_schedule_fair_lines_and_page(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    data = {"data": [{"identifier": "U2026_90", "played": False, "utcDate": KO18.replace("+00:00", "Z"),
+                      "local": {"club": {"name": "Turk Telekom Ankara"}}, "road": {"club": {"name": "Skyliners Frankfurt"}}},
+                     {"identifier": "U2026_1", "played": True, "date": "2026-10-01T18:00:00",
+                      "local": {"club": {"name": "Skyliners Frankfurt"}, "score": 80}, "road": {"club": {"name": "Turk Telekom Ankara"}, "score": 88}}]}
+    up = I.euroleague_upcoming("U2026", fetch=lambda url, params=None: data, comp="U", league="EUROCUP")
+    done = I.euroleague_season("U2026", fetch=lambda url, params=None: data, comp="U", league="EUROCUP")
+    assert len(up) == 1 and up[0]["home"] == "Turk Telekom Ankara" and done[0]["league"] == "EUROCUP"
+    games = [{"home_team": h, "away_team": a, "home_points": hp, "away_points": ap, "neutral_site": False}
+             for h, a, hp, ap in [("Turk Telekom Ankara", "Skyliners Frankfurt", 90, 80),
+                                  ("Skyliners Frankfurt", "Turk Telekom Ankara", 78, 84)] * 5]
+    recs = IP.hoops_schedule_build("EUROCUP", I.ratings(games, 3.0), up, datetime.now(timezone.utc))
+    assert len(recs) == 1 and recs[0]["model_margin"] > 0 and recs[0]["line"] is None
+    r = recs[0]
+    assert 0.5 < IP.fair_chance(r, "Moneyline", "home", None) < 1
+    assert abs(IP.fair_chance(r, "Spread", "home", -r["model_margin"]) - 0.5) < 1e-9
+    assert abs(IP.fair_chance(r, "Total", "over", r["model_total"]) - 0.5) < 1e-9
+    monkeypatch.setattr(MS, "load_game_picks", lambda sport, ungraded=False, db_path=None: recs if sport == "EUROCUP" else [])
+    at = AppTest.from_file(str(Path(__file__).parent / "views" / "44_Intl_Hoops.py"), default_timeout=30)
+    at.run()
+    at.radio(key="ih_league").set_value("EUROCUP").run()
+    at.date_input(key="hg_date_EUROCUP").set_value(DAY).run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert "Turk Telekom Ankara" in at.dataframe[0].value.to_string()
+    assert any("Model chance" in m.value for m in at.markdown)

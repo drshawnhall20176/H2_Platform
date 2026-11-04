@@ -316,6 +316,8 @@ def hoops_refresh(league: str, fetch: Callable = _http, today: Optional[date] = 
     season = I.season_of(league, today.isoformat())
     if league == "EUROLEAGUE":
         rows = I.euroleague_season(f"E{season}", fetch)
+    elif league == "EUROCUP":
+        rows = I.euroleague_season(f"U{season}", fetch, comp="U", league="EUROCUP")
     elif league in I.ESPN_LEAGUE_URL:
         have = MS.load_results(league, since=(today - timedelta(days=30)).isoformat(), db_path=db_path)
         start = today - timedelta(days=7) if have else today - timedelta(days=400)
@@ -376,6 +378,48 @@ def hoops_build(league: str, r: Optional[Dict], events: Sequence[Dict], now: dat
     return out
 
 
+TOTAL_SD = {"EUROCUP": 16.0, "EUROLEAGUE": 16.0, "NBL": 18.0, "NCAAMB": 17.0, "NBA": 18.0, "WNBA": 17.0, "NHL": 2.3}
+
+
+def hoops_schedule_build(league: str, r: Optional[Dict], upcoming: Sequence[Dict], now: datetime) -> List[Dict]:
+    """Games with no sportsbook line in the odds feed (EuroCup): the model's fair spread, total and win chance, so the
+    page can show fair prices and check a typed one. No line, no pick."""
+    out = []
+    for g in upcoming:
+        try:
+            ko = datetime.fromisoformat(g["kickoff"])
+        except (KeyError, ValueError):
+            continue
+        if ko <= now or ko > now + timedelta(days=8):
+            continue
+        proj = I.project(r, g["home"], g["away"], g.get("neutral", False), loose=True)
+        if not proj:
+            continue
+        out.append({"sport": league, "game_id": str(g["id"]), "kickoff": ko.isoformat(), "home": g["home"], "away": g["away"],
+                    "model_margin": round(proj["margin"], 1), "model_total": round(proj["total"], 1),
+                    "model_p": round(I.win_prob(proj["margin"], league=league), 3), "line": None, "edge": None,
+                    "home_spread": None, "line_total": None, "source": "schedule", "pick": None, "total_pick": None,
+                    "ml_pick": None})
+    return out
+
+
+def fair_chance(p: Dict, market: str, side: str, line: Optional[float]) -> Optional[float]:
+    """The model's chance for a typed bet on a game: Spread / Total / Moneyline, side home/away/over/under; `line` is from
+    that side's point of view (Spread) or the total."""
+    import math
+    sd = I.LEAGUES.get(p["sport"], {}).get("sd", 11.5)
+    if market == "Moneyline":
+        return p["model_p"] if side == "home" else 1 - p["model_p"]
+    if market == "Spread" and line is not None:
+        m = p["model_margin"] if side == "home" else -p["model_margin"]
+        return 0.5 * math.erfc(-(m + line) / (sd * math.sqrt(2)))
+    if market == "Total" and line is not None:
+        tsd = TOTAL_SD.get(p["sport"], 16.0)
+        over = 0.5 * math.erfc((line - p["model_total"]) / (tsd * math.sqrt(2)))
+        return over if side == "over" else 1 - over
+    return None
+
+
 def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optional[datetime] = None,
                   db_path: Optional[str] = None) -> Dict:
     import model_store as MS
@@ -392,9 +436,15 @@ def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optio
     else:
         games = [g for g in MS.load_results(league, db_path=db_path) if str(g.get("season")) == season]
         r = I.ratings(games, cfg["lam"]) if len(games) >= cfg["min_games"] else None
-    evs = fetch(ODDS.format(key=cfg["odds_key"]), {"apiKey": api_key, "regions": "us",
-                                                    "markets": "h2h,spreads,totals", "oddsFormat": "american"}) or []
-    recs = hoops_build(league, r, evs, now)
+    if cfg.get("odds_key"):
+        evs = fetch(ODDS.format(key=cfg["odds_key"]), {"apiKey": api_key, "regions": "us",
+                                                        "markets": "h2h,spreads,totals", "oddsFormat": "american"}) or []
+        recs = hoops_build(league, r, evs, now)
+    else:                                                      # no odds feed for this league: fair lines from the schedule
+        evs = []
+        code = ("U" if league == "EUROCUP" else "E") + I.season_of(league, now.date().isoformat())
+        recs = hoops_schedule_build(league, r, I.euroleague_upcoming(code, fetch, comp=cfg.get("comp", "E"),
+                                                                     league=league), now)
     got = {x["game_id"] for x in recs}
     future = [e for e in evs if str(e.get("commence_time")) > now.isoformat()[:19]]
     missed = [f"{e.get('away_team')} @ {e.get('home_team')}" for e in future if str(e.get("id")) not in got]
@@ -414,6 +464,7 @@ def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optio
 
 # --------------------------------------------------------------------------- logging a Game Lab bet (Nov 3)
 BET_SPORT = {"NCAAMB": "NCAAMB", "NBA": "NBA", "NHL": "NHL", "WNBA": "WNBA", "EUROLEAGUE": "INTL", "NBL": "INTL",
+             "EUROCUP": "INTL",
              "TENNIS": "TENNIS"}
 TAG = "gl"                     # notes carry "gl:<league>:<game_id>" so the capture can settle the bet itself
 
@@ -571,7 +622,7 @@ def main(argv=None) -> int:
     if not api:
         print("ODDS_API_KEY not set")
         return 1
-    which = (argv or sys.argv[1:] or ["TENNIS,EUROLEAGUE,NBL,NCAAMB,NBA,NHL"])[0].split(",")
+    which = (argv or sys.argv[1:] or ["TENNIS,EUROLEAGUE,EUROCUP,NBL,NCAAMB,NBA,NHL"])[0].split(",")
     for s in which:
         try:
             out = tennis_capture(api) if s == "TENNIS" else hoops_capture(s, api)
