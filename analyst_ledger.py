@@ -22,6 +22,7 @@ clock, so it is logged on the day if the date is today or later; and a player wi
 from __future__ import annotations
 
 import json
+import re
 import os
 import sqlite3
 from contextlib import contextmanager
@@ -194,6 +195,38 @@ def _run(db_path: Optional[str], sql: str, params: tuple = (), fetch: bool = Fal
         return [dict(r) for r in cur.fetchall()] if fetch else cur.rowcount
 
 
+def _pg_batched(cur, jobs: List[Tuple[str, tuple]]) -> List[int]:
+    """Nov 4: runs of the same statement go to the database in a few round trips instead of one each (a card of ~600
+    calls took 20-45s to write on page open). An INSERT ... DO NOTHING run reports exactly which rows were new; an
+    UPDATE run reports each as done (its count is informational only)."""
+    try:
+        from psycopg2.extras import execute_batch, execute_values
+    except ImportError:                                         # a stand-in driver: one statement at a time
+        execute_batch = execute_values = None
+    counts: List[int] = []
+    i = 0
+    while i < len(jobs):
+        sql = jobs[i][0]
+        j = i
+        while j < len(jobs) and jobs[j][0] == sql:
+            j += 1
+        group = [p for _s, p in jobs[i:j]]
+        m = re.match(r"(?is)^(INSERT INTO .+? VALUES )\(\?(?:,\?)*\)(.*DO NOTHING)\s*$", sql.strip())
+        if len(group) >= 5 and m and execute_values is not None:
+            rows = execute_values(cur, (m.group(1) + "%s" + m.group(2) + " RETURNING 1").replace("?", "%s"),
+                                  group, page_size=500, fetch=True)
+            counts += [1] * len(rows) + [0] * (len(group) - len(rows))
+        elif len(group) >= 5 and execute_batch is not None:
+            execute_batch(cur, sql.replace("?", "%s"), group, page_size=250)
+            counts += [1] * len(group)
+        else:
+            for params in group:
+                cur.execute(sql.replace("?", "%s"), params)
+                counts.append(cur.rowcount)
+        i = j
+    return counts
+
+
 def _run_many(db_path: Optional[str], jobs: List[Tuple[str, tuple]]) -> List[int]:
     """Run several write statements on ONE connection and return each one's row count. On the cloud database every
     connection is a network handshake, so a card of 300 calls written one connection each took minutes; on one
@@ -207,11 +240,7 @@ def _run_many(db_path: Optional[str], jobs: List[Tuple[str, tuple]]) -> List[int
         for attempt in range(PG_RETRIES):
             try:
                 with _pg_conn() as con, con.cursor(cursor_factory=RealDictCursor) as cur:
-                    counts = []
-                    for sql, params in jobs:
-                        cur.execute(sql.replace("?", "%s"), params)
-                        counts.append(cur.rowcount)
-                    return counts
+                    return _pg_batched(cur, jobs)
             except (errors.DeadlockDetected, errors.SerializationFailure):
                 if attempt == PG_RETRIES - 1:
                     raise
