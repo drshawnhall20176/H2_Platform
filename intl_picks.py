@@ -508,10 +508,11 @@ def settle_logged(league: str, db_path: Optional[str] = None) -> int:
     graded = {p["game_id"]: p for p in MS.load_game_picks(league, db_path=db_path) if p.get("result")}
     n = 0
     for b in B.list_bets(settled=False):
-        tag = str(b.get("notes") or "")
-        if not tag.startswith(f"{TAG}:{league}:"):
+        # the game link can sit anywhere in the notes (after a strategy tag, Nov 4)
+        link = next((t.strip() for t in str(b.get("notes") or "").split(",") if t.strip().startswith(f"{TAG}:{league}:")), None)
+        if not link:
             continue
-        p = graded.get(tag.split(":", 2)[2].split(",")[0])
+        p = graded.get(link.split(":", 2)[2])
         r = bet_result(b, p) if p else None
         if r:
             B.update_bet(int(b["id"]), result=r)
