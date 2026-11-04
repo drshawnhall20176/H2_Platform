@@ -14,7 +14,7 @@ def main() -> int:
         for p in MS.load_game_picks(lg):
             if str(p.get("kickoff")) < lo:
                 continue
-            print(json.dumps({k: p.get(k) for k in ("sport", "kickoff", "away", "home", "home_spread", "line", "close_line",
+            print(json.dumps({k: p.get(k) for k in ("sport", "game_id", "kickoff", "away", "home", "home_spread", "line", "close_line",
                                                     "model_margin", "edge", "line_total", "model_total", "model_p",
                                                     "fair_home", "use", "pick")}, default=str))
     return 0
