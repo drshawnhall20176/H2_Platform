@@ -128,6 +128,12 @@ def attach_team_trend(sport_key: str, plays: List[Dict], rows: List[Dict], date_
         cache[team_name] = (tag, ratio)
         return cache[team_name]
 
+    # Nov 4: every team's trend fetched side by side, not one game at a time (~45s of a cold NBA board -> a few).
+    teams = sorted({p.get("Team", "") for p in plays if p.get("Team")})
+    if len(teams) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            list(ex.map(_trend_for, teams))
     for p in plays:
         tag, ratio = _trend_for(p.get("Team", ""))
         p["TeamTrend"] = tag
