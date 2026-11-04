@@ -25,12 +25,11 @@ def main() -> int:
         at.run()
         pr.disable()
         print(f"\n===== {label}: {time.time() - t:.1f}s  exceptions={[str(e.value)[:200] for e in at.exception]}")
-        s = io.StringIO()
-        st = pstats.Stats(pr, stream=s).sort_stats("cumulative")
-        st.print_stats(45)
-        out = [l for l in s.getvalue().splitlines() if "/h2_platform/" in l or "{method 'recv" in l or "ssl" in l.lower()
-               or "psycopg" in l]
-        print("\n".join(out[:45]))
+        for key in ("cumulative", "tottime"):
+            s = io.StringIO()
+            pstats.Stats(pr, stream=s).strip_dirs().sort_stats(key).print_stats(40)
+            print(f"--- by {key}")
+            print("\n".join(l for l in s.getvalue().splitlines() if l.strip() and not l.startswith(("   Ordered", "   List"))))
     return 0
 
 
