@@ -428,3 +428,26 @@ def test_a_day_whose_results_fail_to_load_is_waiting_and_the_others_still_grade(
         return {11: {"passing_yards": 300}}
     out = AL.settle_open_days("NFL", ["2026-10-05", "2026-10-06"], results, db_path=db)
     assert out["settled"] == 1 and out["waiting"] == ["2026-10-06"] and "feed down" in out["errors"][0]
+
+
+def test_pg_batches_runs_of_the_same_statement(monkeypatch):
+    import psycopg2.extras as X
+    import analyst_ledger as AL
+    calls = []
+    monkeypatch.setattr(X, "execute_values", lambda cur, sql, rows, page_size=100, fetch=False:
+                        calls.append(("values", sql, len(rows))) or [(1,)] * (len(rows) - 2))
+    monkeypatch.setattr(X, "execute_batch", lambda cur, sql, rows, page_size=100: calls.append(("batch", sql, len(rows))))
+
+    class Cur:
+        rowcount = 1
+
+        def execute(self, sql, params):
+            calls.append(("one", sql, 1))
+
+    ins = "INSERT INTO analyst_calls (a,b) VALUES (?,?) ON CONFLICT (a, b) DO NOTHING"
+    upd = "UPDATE analyst_calls SET x=? WHERE a=?"
+    jobs = [(ins, (i, i)) for i in range(10)] + [(upd, (1, i)) for i in range(6)] + [(upd.replace("x", "y"), (1, 2))]
+    counts = AL._pg_batched(Cur(), jobs)
+    assert sum(counts[:10]) == 8 and len(counts) == 17
+    assert calls[0] == ("values", "INSERT INTO analyst_calls (a,b) VALUES %s ON CONFLICT (a, b) DO NOTHING RETURNING 1", 10)
+    assert calls[1] == ("batch", "UPDATE analyst_calls SET x=%s WHERE a=%s", 6) and calls[2][0] == "one"
