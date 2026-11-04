@@ -199,12 +199,38 @@ def test_plays_without_angles_or_a_side_are_skipped_and_cautions_lower_the_score
 
 
 def test_learned_weights_reorder_calls_but_never_touch_probabilities():
+    # Nov 4: weights order calls with the same honest chance; they no longer lift a lower-chance call over a higher one.
     a = gem_play(Player="A", PlayerId=1, TeamTrend="steady")                    # market_gap only
-    b = gem_play(Player="B", PlayerId=2, ConvictionSource="model_typical", ModelProb=0.62)  # team_surge only
-    flat = [c["player"] for c in A.scan([a, b], "NBA", "d")]
+    b = gem_play(Player="B", PlayerId=2, ConvictionSource="model_typical", ModelProb=0.66)  # team_surge only
+    flat = [c["player"] for c in A.scan([a, b], "NBA", "d", weights={"team_surge": 0.5, "market_gap": 1.5})]
     boosted = A.scan([a, b], "NBA", "d", weights={"team_surge": 1.5, "market_gap": 0.5})
     assert [c["player"] for c in boosted][0] == "B" and flat[0] == "A"
-    assert {c["player"]: c["model_prob"] for c in boosted} == {"A": 0.66, "B": 0.62}
+    assert {c["player"]: c["model_prob"] for c in boosted} == {"A": 0.66, "B": 0.66}
+    lower = gem_play(Player="C", PlayerId=3, ConvictionSource="model_typical", ModelProb=0.58)
+    assert A.scan([a, lower], "NBA", "d", weights={"team_surge": 1.5, "market_gap": 0.5})[0]["player"] == "A"
+
+
+def test_calibrator_ranks_and_gates_gems_on_the_honest_chance():
+    import analyst_calibration as CAL
+    curve = {"a": 1.0, "b": -0.5, "n": 500}                                     # stated chances run high
+    p = gem_play(Player="A", PlayerId=1, ModelProb=0.58)
+    raw = A.scan([p], "NBA", "d")[0]
+    adj = A.scan([p], "NBA", "d", calibrator=curve)[0]
+    assert raw["adj_prob"] == 0.58 and abs(adj["adj_prob"] - CAL.apply(curve, 0.58)) < 1e-4
+    assert adj["model_prob"] == 0.58                                            # the stated chance is never edited
+    assert adj["adj_prob"] < A.GEM_MIN_PROB and not adj["gem"]
+
+
+def test_cold_markets_flag_and_block_gems():
+    hist = ([{"hit": 1 if i < 10 else 0, "model_prob": 0.62, "market": "Rush Attempts", "side": "Over"} for i in range(30)]
+            + [{"hit": 1 if i < 17 else 0, "model_prob": 0.60, "market": "Receptions", "side": "Over"} for i in range(30)]
+            + [{"hit": 0, "model_prob": 0.65, "market": "Pass Yards", "side": "Over"} for _ in range(10)])
+    cold = A.cold_markets(hist)
+    assert set(cold) == {("Rush Attempts", "Over")}                            # 33% vs 62%; Receptions 57% vs 60% isn't
+    assert cold[("Rush Attempts", "Over")]["n"] == 30                         # Pass Yards: too few calls to judge
+    p = gem_play(Player="A", PlayerId=1, Market="Rush Attempts", Side="Over")
+    c = A.scan([p], "NFL", "d", cold=cold)[0]
+    assert c["cold"] and not c["gem"] and any("cold market" in x for x in c["cautions"])
 
 
 def test_line_history_is_only_looked_up_for_the_top_plays():

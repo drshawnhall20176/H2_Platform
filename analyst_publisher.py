@@ -113,10 +113,13 @@ def build_calls(sport_key: str, date_str: str, book: str, deps: Dict[str, Callab
             notes += [n for n in (n1, n2) if n]
         except Exception as exc:                               # noqa: BLE001
             notes.append(f"the extra evidence couldn't be loaded ({str(exc)[:90]})")
-    weights = A.learned_weights(AL.fetch_calls(sport=sport_key, settled_only=True))
+    import analyst_calibration as CAL
+    hist = [r for r in AL.fetch_calls(sport=sport_key, settled_only=True) if r.get("hit") is not None]
+    weights = A.learned_weights(hist)
     calls = A.scan(plays, sport_key, date_str, offers=offers, odds_map=sports.get(sport_key).market_map,
                    history_fn=deps["history_fn"], weights=weights, expect_book_lines=bool(offers), times=times,
-                   book=book, game_env=game_env, matchups=matchups)
+                   book=book, game_env=game_env, matchups=matchups, calibrator=CAL.corrected_for_sport(hist),
+                   cold=A.cold_markets(hist))
     return {"calls": calls, "notes": notes, "n_games": len(meta)}
 
 
@@ -150,7 +153,8 @@ def publish_sport(sport_key: str, date_str: str, today_str: str, deps: Dict[str,
     # the closing-line marks), so it skips the heavy evidence reads and the credits they cost.
     built = build_calls(sport_key, date_str, book, deps, evidence=not (post and AL.posted("picks", sport_key, date_str)))
     out["notes"] = built["notes"]
-    cards = [c for c in built["calls"] if c["book_state"] == A.STATE_POSTED and AL.loggable(c, today_str)]
+    cards = [c for c in built["calls"] if c["book_state"] == A.STATE_POSTED and AL.loggable(c, today_str)
+             and not c.get("cold")]
     if post and cards:
         out["locked"] = AL.record_calls(cards, today_str)
         try:
