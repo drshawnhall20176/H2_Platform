@@ -665,10 +665,13 @@ def basketball_h2h_games(eng, team_id: int, opp_id: int, date_str: str, a_name: 
 
 
 def _fetch_lines(eng, gids: List[str]) -> Dict[str, Dict[int, List[Dict]]]:
+    """Player lines for each finished game. Nov 4: saved to the database once fetched (a finished box score never
+    changes), so a restarted app reads the league sample in one query instead of re-fetching hundreds of games."""
     import basketball_engine as BB
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        results = list(ex.map(lambda g: BB.get_game_player_lines(g, eng.CDN_API, eng._get_json_cached), gids))
-    return dict(zip(gids, results))
+    import slate_store as SS
+    got = SS.cached_many(f"lines:{getattr(eng, '__name__', 'eng')}", gids,
+                         lambda g: BB.get_game_player_lines(g, eng.CDN_API, eng._get_json_cached))
+    return {g: got.get(str(g)) or {} for g in gids}
 
 
 def load_basketball(sport_key: str, date_str: str, home_id: int, away_id: int, home_name: str, away_name: str,

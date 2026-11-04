@@ -73,6 +73,10 @@ CREATE TABLE IF NOT EXISTS results_archive (
     sport TEXT, rid TEXT, date TEXT, payload TEXT, ts TEXT,
     UNIQUE (sport, rid)
 );
+CREATE TABLE IF NOT EXISTS blob_cache (
+    kind TEXT, k TEXT, payload TEXT, ts TEXT,
+    UNIQUE (kind, k)
+);
 CREATE TABLE IF NOT EXISTS slate_snapshots (
     sport TEXT, date TEXT, ts TEXT, payload TEXT,
     UNIQUE (sport, date)
@@ -692,6 +696,43 @@ def load_slate(sport: str, date: str, db_path: Optional[str] = None) -> Optional
         return None if not row else {"ts": row[0], "payload": row[1]}
     except Exception:                                           # noqa: BLE001
         return None
+
+
+# --------------------------------------------------------------------------- finished-game data (Nov 4)
+# Things that never change once a game is over (a box score's player lines), kept so a restarted app reads them in
+# one query instead of re-fetching hundreds of games from ESPN.
+def load_blobs(kind: str, keys: List[str], db_path: Optional[str] = None) -> Dict[str, str]:
+    keys = [str(k) for k in keys or []]
+    if not keys or (db_path is None and not available()):
+        return {}
+    out: Dict[str, str] = {}
+    try:
+        with _conn(db_path) as (con, ph):
+            cur = con.cursor()
+            for i in range(0, len(keys), 500):
+                part = keys[i:i + 500]
+                cur.execute(f"SELECT k, payload FROM blob_cache WHERE kind={ph} AND k IN ({','.join([ph] * len(part))})",
+                            [kind] + part)
+                out.update({str(r[0]): r[1] for r in cur.fetchall()})
+    except Exception:                                           # noqa: BLE001
+        return out
+    return out
+
+
+def save_blobs(kind: str, items: Dict[str, str], db_path: Optional[str] = None) -> int:
+    if not items or _test_run(db_path):
+        return 0
+    try:
+        with _conn(db_path) as (con, ph):
+            cur = con.cursor()
+            ts = _now()
+            for k, v in items.items():
+                cur.execute(f"INSERT INTO blob_cache (kind, k, payload, ts) VALUES ({ph},{ph},{ph},{ph}) "
+                            f"ON CONFLICT (kind, k) DO UPDATE SET payload=excluded.payload, ts=excluded.ts",
+                            [kind, str(k), v, ts])
+        return len(items)
+    except Exception:                                           # noqa: BLE001
+        return 0
 
 
 # --------------------------------------------------------------------------- results archive (Nov 3)

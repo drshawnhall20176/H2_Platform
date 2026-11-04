@@ -38,6 +38,15 @@ def main(argv=None) -> int:
             SS.save(key, day, (rows, meta))
         print(f"{key} {day}: {len(rows)} players, {len(meta)} games, {time.time() - t0:.0f}s"
               + (" -> saved" if rows else " (nothing to save)"))
+        if key == "NBA" and rows:                               # the props model's league sample (finished box scores)
+            t0 = time.time()
+            try:
+                import position_data as PD
+                smp = PD.nba_league_props_sample(day)
+                print(f"NBA league sample: {len(smp.get('cur') or [])} + {len(smp.get('prior') or [])} player-games, "
+                      f"{time.time() - t0:.0f}s")
+            except Exception as exc:                            # noqa: BLE001
+                print(f"NBA league sample failed ({type(exc).__name__}: {exc})")
     return 0
 
 
