@@ -45,9 +45,29 @@ def _likes(p):
     return f"{p['away']} {-p['home_spread']:+g}"
 
 
-def _use(p):
-    u = p.get("use") or "—"
-    return f"{PE.MOST_PROBABLE} · {u}" if p.get("lock") else u
+def _tag(league, p):
+    return IP.hoops_use(league, p) if hasattr(IP, "hoops_use") else {"use": p.get("use") or "—", "lock": p.get("lock")}
+
+
+def _use(p, league=""):
+    return IP.tag_label(_tag(league, p)) if hasattr(IP, "tag_label") else (p.get("use") or "—")
+
+
+USE_LEGEND = ("Use reads like the props pages: 🔒 Most probable = 60%+ with a tested edge behind it; 🎟️ Parlay + Single "
+              "= 60%+; 🎯 Single only = 55-60%, or a tracked rule; ⛔ Pass = no tested edge for this league or gap size.")
+
+
+def _show_filter(key, rows, league):
+    show = st.radio("Show", ["All", PE.MOST_PROBABLE, "Playable (🎟️ / 🎯)", PE.USE_PASS], horizontal=True, key=key)
+    if show == "All":
+        return rows
+    out = []
+    for p in rows:
+        t = _tag(league, p)
+        if (show == PE.MOST_PROBABLE and t.get("lock")) or (show == PE.USE_PASS and t.get("use") == PE.USE_PASS) or \
+                (show.startswith("Playable") and t.get("use") in (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE)):
+            out.append(p)
+    return out
 
 
 def _et(p):
@@ -106,6 +126,8 @@ def render(league: str, search: bool = False) -> None:
         if st.toggle("Only games with a tracking pick", key=f"hg_only_{league}"):
             upcoming = [p for p in upcoming if _pick(p) != "—"]
             finished = [p for p in finished if _pick(p) != "—"]
+    if upcoming:
+        upcoming = _show_filter(f"hg_use_{league}", upcoming, league)
     st.markdown(f"##### Upcoming ({len(upcoming)})")
     if not upcoming:
         st.info(f"No upcoming {title} games for {day:%a %b %d}" + (f" ({slot})" if slot != "All slate" else "")
@@ -114,11 +136,12 @@ def render(league: str, search: bool = False) -> None:
         st.dataframe(pd.DataFrame([{
             "Tip (ET)": _tip(p),
             "Game": f"{p['away']} @ {p['home']}",
-            "Line": f"{p['home']} {p['home_spread']:+g}",
+            "Use": _use(p, league),
             "Model likes": _likes(p),
+            "Why": _tag(league, p).get("why", ""),
+            "Line": f"{p['home']} {p['home_spread']:+g}",
             "Gap (pts)": f"{abs(p['edge']):.1f}",
             "Est. cover": "—" if p.get("cover_est") is None else f"{p['cover_est']:.0%}",
-            "Use": _use(p),
             "Total: model / line": f"{p.get('model_total')} / {p.get('line_total') or '—'}",
             "Win chance: model / market": f"{p['model_p']:.0%} / " + ("—" if p.get("fair_home") is None else f"{p['fair_home']:.0%}"),
             "Tracking pick": _pick(p)} for p in sorted(upcoming, key=lambda x: (-(abs(x.get("edge") or 0)), x["kickoff"]))]),
@@ -132,15 +155,14 @@ def render(league: str, search: bool = False) -> None:
             what.append(f"a moneyline pick needs a {rules['ml']:.0%}+ edge")
         st.caption("Model likes = the side the model would take against the spread, at the book's number; Gap = how many "
                    "points the model's margin is from the spread (the size, not the sign, is what matters); Est. cover = "
-                   "how often that size of gap covered in the backtest; Use follows the props pages (🔒 / 🎟️ Parlay + "
-                   "Single at 60%+, 🎯 Single at 55-60%, ⛔ Pass below). "
+                   "how often that size of gap covered in the backtest. " + USE_LEGEND + " "
                    + ("; ".join(what) if what else "no picks for this league — the model is shown for reference") + ".")
     if finished:
         st.markdown(f"##### Started or final ({len(finished)})")
         st.dataframe(pd.DataFrame([{
             "Tip (ET)": _tip(p), "Game": f"{p['away']} @ {p['home']}",
             "Line (close)": f"{p['home']} {(-(p.get('close_line') if p.get('close_line') is not None else p.get('line') or 0)):+g}",
-            "Model likes": _likes(p), "Use": _use(p),
+            "Use": _use(p, league), "Model likes": _likes(p),
             "Final": "—" if p.get("final_home") is None else f"{p['away']} {p['final_away']:g} – {p['home']} {p['final_home']:g}",
             "Model's side": _ats(p), "Tracking pick": _pick(p)} for p in sorted(finished, key=lambda x: x["kickoff"])]),
             hide_index=True, width="stretch")
@@ -252,6 +274,10 @@ def _fair_american(p: Optional[float]) -> str:
     return f"{-100 * p / (1 - p):+.0f}" if p >= 0.5 else f"{100 * (1 - p) / p:+.0f}"
 
 
+def _fav(p):
+    return (p["home"], p["model_p"]) if p["model_p"] >= 0.5 else (p["away"], 1 - p["model_p"])
+
+
 def render_fair(league: str) -> None:
     """A league the odds feed doesn't carry (EuroCup): the model's fair spread, total and moneyline for every scheduled
     game, a box to check the sportsbook's price against it, and logging. No picks -- there is no line history to test
@@ -278,10 +304,15 @@ def render_fair(league: str) -> None:
     else:
         st.dataframe(pd.DataFrame([{
             "Tip (ET)": _tip(p), "Game": f"{p['away']} @ {p['home']}",
+            "Model's pick": _fav(p)[0] + f" {_fav(p)[1]:.0%}",
+            "Use": IP.tag_label(IP.chance_use(_fav(p)[1], None, trusted=False)),
             "Fair spread": f"{p['home']} {-p['model_margin']:+.1f}", "Fair total": f"{p['model_total']:.1f}",
             "Win chance": f"{p['home']} {p['model_p']:.0%}",
             "Fair ML": f"{_fair_american(p['model_p'])} / {_fair_american(1 - p['model_p'])}"} for p in upcoming]),
             hide_index=True, width="stretch")
+        st.caption("Model's pick = the team the model favors to win and its chance. Use reads like the props pages (🎯 "
+                   "Single only at 55%+, ⛔ Pass below); \"(-150 or better)\" = the moneyline price needed for +3% value. No 🔒 "
+                   "here: the model has no tested edge in this league yet.")
         with st.expander("💲 Check a sportsbook price · 📒 log it"):
             labels = {f"{p['away']} @ {p['home']} · {_tip(p)}": p for p in upcoming}
             p = labels[st.selectbox("Game", list(labels), key=f"hf_game_{league}")]
@@ -300,8 +331,8 @@ def render_fair(league: str) -> None:
             if ch is not None and abs(odds) >= 100:
                 dec = 1 + (odds / 100 if odds > 0 else 100 / -odds)
                 ev_ = ch * dec - 1
-                st.markdown(f"Model chance **{ch:.0%}** · fair **{_fair_american(ch)}** · at {odds:+d}: **{ev_:+.1%}** "
-                            + ("(value if the model is right)" if ev_ > 0 else "(no value)"))
+                st.markdown(f"Model chance **{ch:.0%}** · fair **{_fair_american(ch)}** · at {odds:+d}: **{ev_:+.1%}** → **"
+                            + IP.tag_label(dict(IP.chance_use(ch, odds, trusted=False), priced=True)) + "**")
                 real = st.toggle("Real money", value=True, key=f"hf_real_{league}")
                 if st.button("📒 Log it", key=f"hf_log_{league}", type="primary"):
                     f = IP.bet_fields(p, mk, side, line, odds, stake, real, round(ch, 4))

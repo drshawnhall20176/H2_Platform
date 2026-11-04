@@ -14,6 +14,7 @@ import streamlit as st
 import components as C
 import intl_picks as IP
 import model_store as MS
+import props_engine as PE
 import sports
 import tennis_model as T
 
@@ -68,6 +69,17 @@ if slot != "All slate":
     rows = [p for p in rows if sports.slot_of(_et(p)) == slot]
 tours = f3.radio("Tour", ["All", "ATP", "WTA"], horizontal=True, key="tl_tour")
 rows = [p for p in rows if tours == "All" or p.get("tour") == tours.lower()]
+g1, g2 = st.columns([2, 2])
+_heads = sorted({T.event_label(p).split(" · ")[0] for p in rows})
+ev_pick = g1.multiselect("Events, as DraftKings names them (empty = all)", _heads, key="tl_events_all")
+if ev_pick:
+    rows = [p for p in rows if T.event_label(p).split(" · ")[0] in ev_pick]
+q = g2.text_input("Find a player", key="tl_find").strip().lower()
+if q:
+    rows = [p for p in rows if q in T.norm(f"{p['home']} {p['away']}")]
+st.caption("DraftKings files tennis by tour and city (\"WTA Cali 125\", \"ATP Paris\"), while the data feeds use sponsor "
+           "names (\"Reto Win Tennis Cali Open\"), so each event here leads with DK's tour + city. DK's ATP Challenger, "
+           "ITF and UTR events aren't in either feed, so they don't appear here.")
 priced = [p for p in rows if p.get("source") != "espn"]
 sched = [p for p in rows if p.get("source") == "espn"]
 
@@ -86,21 +98,27 @@ st.caption("All ATP and WTA singles ESPN lists for today and tomorrow, including
 if not sched:
     st.info("Nothing scheduled captured yet — the capture runs every 3 hours.")
 else:
-    events = sorted({p.get("tournament") or "" for p in sched})
-    ev_pick = st.multiselect("Events", events, default=events, key="tl_events")
-    sched = [p for p in sched if (p.get("tournament") or "") in ev_pick]
+    show = st.radio("Show", ["All", PE.MOST_PROBABLE, "Playable (🎟️ / 🎯)", PE.USE_PASS], horizontal=True, key="tl_use_filter")
+    tagged = [(p, IP.tennis_use(p)) for p in sorted(sched, key=lambda x: x["kickoff"])]
+    tagged = [(p, t) for p, t in tagged if show == "All" or (show == PE.MOST_PROBABLE and t.get("lock"))
+              or (show.startswith("Playable") and t.get("use") in (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE))
+              or (show == PE.USE_PASS and t.get("use") == PE.USE_PASS)]
     st.dataframe(pd.DataFrame([{
         "Start (ET)": _start(p),
-        "Event": f"{p.get('tour', '').upper()} {p.get('tournament', '')} · {p.get('surface', '')}",
+        "Event": T.event_label(p),
         "Round": p.get("round") or "",
-        "Player 1": p["home"], "Chance": _pct(p.get("model_p")), "Fair": _odds(T.fair_odds(p.get("model_p"))),
-        "Player 2": p["away"], "Chance ": _pct(1 - p["model_p"]) if p.get("model_p") is not None else "—",
-        "Fair ": _odds(T.fair_odds(1 - p["model_p"])) if p.get("model_p") is not None else "—",
-        "Rated matches": f"{p.get('n_home', 0)} / {p.get('n_away', 0)}"} for p in sorted(sched, key=lambda x: x["kickoff"])]),
+        "Match": f"{p['home']} vs {p['away']}",
+        "Model's pick": f"{t['player']} {t['chance']:.0%}" if t.get("player") else "—",
+        "Fair": _odds(t.get("fair")),
+        "Use": IP.tag_label(t),
+        "Why": t.get("why", ""),
+        "Rated matches": f"{p.get('n_home', 0)} / {p.get('n_away', 0)}"} for p, t in tagged]),
         hide_index=True, width="stretch")
-    st.caption("Fair = the price with no margin at the model's chance. A sportsbook price better than Fair is value "
-               "IF the model is right — on the main tour it usually isn't (see above), so treat thin-history players "
-               "(under 30 rated matches) with extra caution.")
+    st.caption("Model's pick = the player the model favors and its chance. Use reads like the props pages: 🔒 Most probable "
+               "+ 🎟️ Parlay + Single = 60%+ with enough history on both players; 🎯 Single only = 55-60% (or thin history); "
+               "⛔ Pass = too close to call. \"(-150 or better)\" = the price you need for +3% value — at a shorter price it's a "
+               "pass. Fair = the no-margin price at the model's chance. These events have no tested edge yet; the "
+               "favorite record below is the check.")
 
     with st.expander("💲 Check a price · 📒 log it"):
         opts = {f"{p['home']} vs {p['away']} ({p.get('tournament')})": p for p in sched}
@@ -112,9 +130,10 @@ else:
             dec = 1 + (price / 100 if price > 0 else 100 / -price) if abs(price) >= 100 else None
             if dec:
                 ev = pchance * dec - 1
+                trusted = min(int(m.get("n_home") or 0), int(m.get("n_away") or 0)) >= IP.TENNIS_MIN_MATCHES
+                tg = IP.chance_use(pchance, price, trusted)
                 st.markdown(f"Model chance **{pchance:.0%}** · fair **{_odds(T.fair_odds(pchance))}** · at {price:+d}: "
-                            f"**{ev:+.1%}** expected value "
-                            + ("(value if the model is right)" if ev > 0 else "(no value)"))
+                            f"**{ev:+.1%}** expected value → **{IP.tag_label(dict(tg, priced=True))}**")
                 c1, c2 = st.columns(2)
                 stake = c1.number_input("Stake ($)", min_value=0.0, value=1.0, step=1.0, key="tl_chk_stake")
                 real = c2.toggle("Real money", value=True, key="tl_chk_real")
@@ -136,8 +155,10 @@ if not priced:
 else:
     st.dataframe(pd.DataFrame([{
         "Start (ET)": _start(p),
-        "Event": f"{p.get('tour', '').upper()} {p.get('tournament', '')} · {p.get('surface', '')}",
+        "Event": T.event_label(p),
         "Match": f"{p['home']} vs {p['away']}",
+        "Model's pick": (lambda t: f"{t['player']} {t['chance']:.0%}" if t.get("player") else "—")(IP.tennis_use(p)),
+        "Use": IP.tag_label(IP.tennis_use(p)),
         "Model": _pct(p.get("model_p")), "Market": _pct(p.get("line")),
         "Edge": "—" if p.get("edge") is None else f"{p['edge']:+.0%}",
         "Best price": f"{_odds(p.get('best_home'))} / {_odds(p.get('best_away'))}",
@@ -145,7 +166,8 @@ else:
         "Rated matches": f"{p.get('n_home', 0)} / {p.get('n_away', 0)}",
         "Tracking pick": _pick(p)} for p in sorted(priced, key=lambda x: x["kickoff"])]),
         hide_index=True, width="stretch")
-    st.caption("Model = the first-named player's chance from surface Elo; Market = the books' no-vig chance. "
+    st.caption("Use is ⛔ Pass on these main-tour events: in the backtest the books' prices beat the model here. "
+               "Model = the first-named player's chance from surface Elo; Market = the books' no-vig chance. "
                "Rated matches = how much history each player's rating has behind it.")
 
 st.markdown("##### How often the model's favorite wins")

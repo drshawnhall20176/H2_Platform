@@ -450,3 +450,53 @@ def test_game_link_after_a_strategy_tag_still_settles(tmp_path, monkeypatch):
               stake=4, sport="TENNIS", notes="tennis-prematch-singles,gl:TENNIS:espn-wta-1")
     MS.grade_game_pick("TENNIS", "espn-wta-1", 9, 12, "away", db_path=db)
     assert IP.settle_logged("TENNIS", db_path=db) == 1 and B.list_bets()[0]["result"] == "win"
+
+
+def test_use_tags_read_like_the_props_pages():
+    import props_engine as PE
+    # no price: the tag names the price it needs
+    t = IP.chance_use(0.73)
+    assert t["lock"] and t["use"] == PE.USE_BOTH and t["need"] == IP.price_needed(0.73)
+    assert IP.price_needed(0.5) == 106                     # 50% needs +106 for +3%
+    assert IP.chance_use(0.57)["use"] == PE.USE_SINGLE and not IP.chance_use(0.57)["lock"]
+    assert IP.chance_use(0.52)["use"] == PE.USE_PASS
+    assert not IP.chance_use(0.73, trusted=False)["lock"]   # thin history: never a lock
+    # at a price
+    assert IP.chance_use(0.63, 100)["use"] == PE.USE_BOTH          # +26%
+    assert IP.chance_use(0.56, -172)["use"] == PE.USE_PASS         # 56% at -172 is -11%
+    assert IP.chance_use(0.62, -160)["use"] == PE.USE_PARLAY       # +0.8%: a leg, not a single
+
+
+def test_tennis_use_main_tour_is_pass_and_lower_tier_names_the_player():
+    import props_engine as PE
+    espn = {"home": "Solana Sierra", "away": "Leyre Romero Gormaz", "model_p": 0.7262, "n_home": 80, "n_away": 45,
+            "source": "espn"}
+    t = IP.tennis_use(espn)
+    assert t["player"] == "Solana Sierra" and t["lock"] and "🔒" in IP.tag_label(t) and "or better" in IP.tag_label(t)
+    away = dict(espn, model_p=0.3, n_away=10)
+    t = IP.tennis_use(away)
+    assert t["player"] == "Leyre Romero Gormaz" and not t["lock"] and t["use"] == PE.USE_SINGLE
+    main = dict(espn, source=None, best_home=-150)
+    assert IP.tennis_use(main)["use"] == PE.USE_PASS
+
+
+def test_hoops_use_fills_every_league():
+    import props_engine as PE
+    assert IP.hoops_use("NBA", {"home": "A", "away": "B"})["use"] == PE.USE_PASS
+    assert IP.hoops_use("NBL", {"home": "A", "away": "B", "ml_pick": "away"})["use"] == PE.USE_SINGLE
+    t = IP.hoops_use("EUROLEAGUE", {"use": PE.USE_SINGLE, "lock": False, "cover_est": 0.586})
+    assert t["use"] == PE.USE_SINGLE and "59%" in t["why"]
+
+
+def test_events_read_like_the_sportsbook_and_feeds_dont_double_a_match():
+    assert T.event_label({"tour": "wta", "tournament": "Reto Win Tennis Cali Open", "city": "Cali", "surface": "clay"}) \
+        == "WTA Cali · Reto Win Tennis Cali Open · clay"
+    assert T.event_label({"tour": "wta", "tournament": "Angola Ladies Open"}).startswith("WTA Luanda")
+    assert T.event_label({"tour": "atp", "tournament": "Paris Masters"}).startswith("ATP Paris ·")
+    data = {"events": [{"name": "Reto Win Tennis Cali Open", "venue": {"displayName": "Cali, Colombia"}, "groupings": [
+        {"grouping": {"displayName": "Women's Singles"}, "competitions": [{"id": 1, "date": "2026-11-04T16:00Z",
+         "status": {"type": {"state": "pre"}}, "competitors": [{"athlete": {"displayName": "A B"}},
+                                                               {"athlete": {"displayName": "C D"}}]}]}]}]}
+    assert T.parse_upcoming(data, "wta")[0]["city"] == "Cali"
+    assert IP._same_player("Daniel Merida", "Daniel Merida Aguilar")
+    assert not IP._same_player("Julia Riera", "Julia Grabher")
