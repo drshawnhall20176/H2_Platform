@@ -10,12 +10,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 def main() -> int:
     import model_store as MS
     lo = (datetime.now(timezone.utc) - timedelta(hours=8)).isoformat()
-    for lg in os.environ.get("SHOW_LEAGUES", "NCAAMB").split(","):
+    for lg in os.environ.get("SHOW_LEAGUES", "NCAAMB,TENNIS").split(","):
         for p in MS.load_game_picks(lg):
             if str(p.get("kickoff")) < lo:
                 continue
             print(json.dumps({k: p.get(k) for k in ("sport", "game_id", "kickoff", "away", "home", "home_spread", "line", "close_line",
-                                                    "model_margin", "edge", "line_total", "model_total", "model_p",
+                                                    "model_margin", "edge", "line_total", "model_total", "model_p", "home", "tournament",
                                                     "fair_home", "use", "pick")}, default=str))
     return 0
 
