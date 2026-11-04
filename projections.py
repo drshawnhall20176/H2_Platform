@@ -22,6 +22,7 @@ IMPORTANT — what this is and isn't:
  
 from __future__ import annotations
  
+import functools
 import math
 import re
 import unicodedata
@@ -1379,7 +1380,14 @@ def build_signals(rows: List[Dict], meta: List[Dict], sims: int = DEFAULT_SIMS,
 # compact discrete distribution per player+market so any half-line can be scored.
  
 def normalize_name(name: str) -> str:
-    """Lowercase, strip accents/punctuation/suffixes so model names match book names."""
+    """Lowercase, strip accents/punctuation/suffixes so model names match book names. Nov 4: remembered per name --
+    a board compares every play against every book offer, so the same few thousand names were cleaned millions of
+    times (most of a 15-minute Analyst Desk cold open)."""
+    return _normalize_name_cached(str(name))
+
+
+@functools.lru_cache(maxsize=200_000)
+def _normalize_name_cached(name: str) -> str:
     s = unicodedata.normalize("NFD", str(name))
     s = "".join(c for c in s if unicodedata.category(c) != "Mn").lower()
     s = re.sub(r"[^a-z0-9 ]", " ", s)

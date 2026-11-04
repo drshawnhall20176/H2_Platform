@@ -690,9 +690,7 @@ def market_lines_for_player(offers: List[Dict], player_name: str, projections_mo
     P = projections_module
     target = P.normalize_name(player_name)
     best: Dict[str, Tuple[float, int]] = {}   # market -> (point, book_count) with the highest book_count so far
-    for off in offers:
-        if P.normalize_name(off.get("player", "")) != target:
-            continue
+    for off in _offers_for(offers, P, target):
         mkey = off.get("market")
         point = off.get("point")
         if mkey is None or point is None:
@@ -749,9 +747,7 @@ def real_entry_price(offers: List[Dict], player_name: str, market_key: str, side
 
     best_offer = None
     best_count = -1
-    for off in offers:
-        if P.normalize_name(off.get("player", "")) != target_name:
-            continue
+    for off in _offers_for(offers, P, target_name):
         if off.get("market") != market_key:
             continue
         count = len(off.get("over") or {}) + len(off.get("under") or {})
@@ -822,9 +818,7 @@ def real_market_prob(offers: List[Dict], player_name: str, market_key: str, side
 
     best_offer = None
     best_count = -1
-    for off in offers:
-        if P.normalize_name(off.get("player", "")) != target_name:
-            continue
+    for off in _offers_for(offers, P, target_name):
         if off.get("market") != market_key:
             continue
         count = len(off.get("over") or {}) + len(off.get("under") or {})
@@ -1268,3 +1262,22 @@ def kelly_stake(prob: float, american: float, bankroll: float,
     mis-estimated. Quarter-Kelly (0.25) with a hard per-bet cap is the standard discipline."""
     f = min(kelly_fraction(prob, american) * fraction, cap_pct)
     return round(max(f, 0.0) * bankroll, 2)
+
+
+# Nov 4: the offers for one player, from an index built once per offers list. The board asks for a price and a
+# market chance for every player and market, and each used to scan (and re-clean the name of) every offer -- tens
+# of millions of steps on an NBA slate. Same offers, same order, so results are unchanged.
+_OFFER_INDEX: Dict = {}
+
+
+def _offers_for(offers, P, target: str):
+    key = (id(offers), id(P))
+    hit = _OFFER_INDEX.get(key)
+    if hit is None or hit[0] is not offers or hit[1] != len(offers):
+        idx: Dict[str, List[Dict]] = {}
+        for off in offers:
+            idx.setdefault(P.normalize_name(off.get("player", "")), []).append(off)
+        if len(_OFFER_INDEX) > 32:
+            _OFFER_INDEX.clear()
+        hit = _OFFER_INDEX[key] = (offers, len(offers), idx)
+    return hit[2].get(target, ())
