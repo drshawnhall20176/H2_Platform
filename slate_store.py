@@ -114,3 +114,52 @@ def persisted(sport: str) -> Callable:
         wrapper.uncached = fn
         return wrapper
     return deco
+
+
+# --------------------------------------------------------------------------- finished box scores (Nov 4)
+def cached_many(kind: str, keys, fetch_one: Callable, keep: Callable = bool, workers: int = 8) -> Dict:
+    """{key: value} for every key: from this process, then the database (one query), then fetch_one for the rest
+    (in parallel), saving what was fetched when keep(value) says it's final. For box scores of finished games --
+    the league sample behind the NBA props model is several hundred of them."""
+    import base64
+    from concurrent.futures import ThreadPoolExecutor
+    keys = [str(k) for k in keys]
+    if _off():                                                  # tests / switched off: plain fetch, nothing kept
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            return dict(zip(keys, ex.map(fetch_one, keys)))
+    mem = _blob_mem.setdefault(kind, {})
+    out = {k: mem[k] for k in keys if k in mem}
+    need = [k for k in keys if k not in out]
+    if need and not _off():
+        try:
+            import model_store as MS
+            for k, payload in MS.load_blobs(kind, need).items():
+                try:
+                    out[k] = mem[k] = decode(base64.b64decode(payload))
+                except Exception:                               # noqa: BLE001
+                    pass
+        except Exception:                                       # noqa: BLE001
+            pass
+    need = [k for k in keys if k not in out]
+    if need:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            got = dict(zip(need, ex.map(fetch_one, need)))
+        fresh = {}
+        for k, v in got.items():
+            out[k] = v
+            if keep(v):
+                mem[k] = v
+                try:
+                    fresh[k] = base64.b64encode(encode(v)).decode()
+                except Exception:                               # noqa: BLE001
+                    pass
+        if fresh and not _off():
+            try:
+                import model_store as MS
+                MS.save_blobs(kind, fresh)
+            except Exception:                                   # noqa: BLE001
+                pass
+    return out
+
+
+_blob_mem: Dict[str, Dict] = {}
