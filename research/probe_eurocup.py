@@ -6,7 +6,7 @@ import requests
 
 
 def main() -> int:
-    d = requests.get("https://api-live.euroleague.net/v2/competitions/U/seasons/U2025/games", timeout=30).json()["data"]
+    d = requests.get("https://api-live.euroleague.net/v2/competitions/U/seasons/U2026/games", timeout=30).json()["data"]
     up = [g for g in d if not g.get("played")]
     pl = [g for g in d if g.get("played")]
     print("played", len(pl), "upcoming", len(up))
