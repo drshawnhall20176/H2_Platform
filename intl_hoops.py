@@ -167,6 +167,113 @@ def euroleague_upcoming(code: str, fetch: Callable = _http, comp: str = "E", lea
     return out
 
 
+# --------------------------------------------------------------------------- FIBA club competitions (Nov 4)
+# Basketball Champions League, FIBA Europe Cup and EuroCup Women: DraftKings lists them, the odds feed doesn't. FIBA's
+# own competition pages carry every game (teams, scores, UTC start) as embedded JSON, so results and the schedule
+# come from there and the page shows fair lines, as EuroCup does.
+FIBA_PAGES = {
+    "BCL": ["https://www.championsleague.basketball/en/games",
+            "https://www.fiba.basketball/en/events/basketball-champions-league-{a}-{b}/games"],
+    "FEC": ["https://www.fiba.basketball/en/events/fiba-europe-cup-{a}-{b}/games"],
+    "EUROCUPW": ["https://www.fiba.basketball/en/events/eurocup-women-{a}-{b}/games"],
+}
+LEAGUES.update({
+    "BCL": {"title": "Basketball Champions League", "odds_key": None, "min_games": 0, "lam": 3.0, "sd": 11.5,
+            "decay": True, "min_decay_games": 40},
+    "FEC": {"title": "FIBA Europe Cup", "odds_key": None, "min_games": 0, "lam": 3.0, "sd": 12.0, "decay": True,
+            "min_decay_games": 60},
+    "EUROCUPW": {"title": "EuroCup Women", "odds_key": None, "min_games": 0, "lam": 3.0, "sd": 11.0, "decay": True,
+                 "min_decay_games": 60},
+})
+
+
+def _http_text(url: str, params: Optional[Dict] = None) -> Optional[str]:
+    import requests
+    try:
+        r = requests.get(url, params=params or {}, timeout=40, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36"})
+        return r.text if r.ok else None
+    except Exception:                                           # noqa: BLE001
+        return None
+
+
+def fiba_games(text: Optional[str]) -> List[Dict]:
+    """Every distinct game object embedded in a FIBA competition page."""
+    import json
+    if not text:
+        return []
+    t = text.replace('\\"', '"')
+    dec, out, seen, i = json.JSONDecoder(), [], set(), 0
+    while True:
+        i = t.find('{"gameId":', i)
+        if i < 0:
+            break
+        try:
+            g, end = dec.raw_decode(t, i)
+        except ValueError:
+            i += 10
+            continue
+        i = end
+        if isinstance(g, dict) and g.get("gameId") not in seen and g.get("teamA") and g.get("teamB"):
+            seen.add(g.get("gameId"))
+            out.append(g)
+    return out
+
+
+def _fiba_name(team: Dict) -> Optional[str]:
+    return (team or {}).get("shortName") or (team or {}).get("officialName")
+
+
+def _fiba_played(g: Dict) -> bool:
+    return (str(g.get("gameResultStatusCode") or g.get("statusCode") or "").upper() == "VALID"
+            and (_num(g.get("teamAScore")) or 0) + (_num(g.get("teamBScore")) or 0) > 0 and not g.get("isLive"))
+
+
+def fiba_pages(league: str, season: str) -> List[str]:
+    a = int(season) % 100
+    return [u.format(a=f"{a:02d}", b=f"{(a + 1) % 100:02d}") for u in FIBA_PAGES[league]]
+
+
+def fiba_season(league: str, season: str, fetch_text: Callable = _http_text, current: bool = True) -> List[Dict]:
+    """(completed games, upcoming games) of one season. The BCL's own site lists only the current season."""
+    for u in fiba_pages(league, season):
+        if "{" not in u and not current and "championsleague" in u:
+            continue
+        games = fiba_games(fetch_text(u))
+        if games:
+            return games
+    return []
+
+
+def fiba_results(league: str, games: Sequence[Dict]) -> List[Dict]:
+    out = []
+    for g in games:
+        if not _fiba_played(g):
+            continue
+        hn, an = _fiba_name(g["teamA"]), _fiba_name(g["teamB"])
+        when = str(g.get("gameDateTimeUTC") or g.get("gameDateTime") or "")[:10]
+        if not hn or not an or when.startswith("0001"):
+            continue
+        out.append({"league": league, "id": f"fiba-{g.get('gameId')}", "date": when, "home_team": hn, "away_team": an,
+                    "home_points": _num(g["teamAScore"]), "away_points": _num(g["teamBScore"]),
+                    "neutral_site": str((g.get("round") or {}).get("gameSystemCode") or "HA") != "HA"})
+    return out
+
+
+def fiba_upcoming(league: str, games: Sequence[Dict]) -> List[Dict]:
+    out = []
+    for g in games:
+        ko = str(g.get("gameDateTimeUTC") or "")
+        if _fiba_played(g) or g.get("isLive") or g.get("isPostponed") or not ko or ko.startswith("0001"):
+            continue
+        hn, an = _fiba_name(g["teamA"]), _fiba_name(g["teamB"])
+        if not hn or not an:
+            continue
+        out.append({"league": league, "id": f"fiba-{g.get('gameId')}", "kickoff": ko[:19] + "+00:00", "home": hn, "away": an,
+                    "neutral": str((g.get("round") or {}).get("gameSystemCode") or "HA") != "HA"})
+    return out
+
+
 def nbl_day(day: date, fetch: Callable = _http) -> List[Dict]:
     data = fetch(NBL_URL, {"dates": day.strftime("%Y%m%d")}) or {}
     out = []

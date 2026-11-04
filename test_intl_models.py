@@ -500,3 +500,36 @@ def test_events_read_like_the_sportsbook_and_feeds_dont_double_a_match():
     assert T.parse_upcoming(data, "wta")[0]["city"] == "Cali"
     assert IP._same_player("Daniel Merida", "Daniel Merida Aguilar")
     assert not IP._same_player("Julia Riera", "Julia Grabher")
+
+
+def _fiba_page(games):
+    import json
+    body = json.dumps({"games": games})
+    return '<script>self.__next_f.push([1,"' + body.replace('"', '\\"') + '"])</script>'
+
+
+def _fg(gid, a, b, sa, sb, utc, played=True):
+    return {"gameId": gid, "statusCode": "VALID" if played else "SCHED", "gameResultStatusCode": "VALID" if played else None,
+            "teamA": {"officialName": a + " BC", "shortName": a}, "teamB": {"officialName": b + " BC", "shortName": b},
+            "teamAScore": sa if played else 0, "teamBScore": sb if played else 0, "isLive": False,
+            "gameDateTimeUTC": utc, "round": {"gameSystemCode": "HA"}}
+
+
+def test_fiba_pages_give_results_and_schedule(tmp_path):
+    games = [_fg(i, ["Rytas", "Unicaja", "Tenerife", "AEK"][i % 4], ["Sabah", "Galatasaray", "Bonn", "Nanterre"][i % 4],
+                 80 + i % 7, 72 + i % 5, f"2026-10-{6 + i % 20:02d}T16:30:00") for i in range(60)]
+    games += [_fg(900, "Rytas", "Bonn", 0, 0, "2026-11-08T17:00:00", played=False), games[0]]   # a repeat is dropped
+    txt = _fiba_page(games)
+    parsed = I.fiba_games(txt)
+    assert len(parsed) == 61
+    res, up = I.fiba_results("BCL", parsed), I.fiba_upcoming("BCL", parsed)
+    assert len(res) == 60 and res[0]["home_team"] == "Rytas" and res[0]["home_points"] == 80
+    assert up == [{"league": "BCL", "id": "fiba-900", "kickoff": "2026-11-08T17:00:00+00:00", "home": "Rytas", "away": "Bonn",
+                   "neutral": False}]
+    assert I.fiba_pages("FEC", "2026") == ["https://www.fiba.basketball/en/events/fiba-europe-cup-26-27/games"]
+    db = str(tmp_path / "m.db")
+    out = IP.hoops_capture("BCL", "k", fetch=lambda *a, **k: None, now=NOW,
+                           db_path=db, fetch_text=lambda u, params=None: txt if "championsleague" in u else None)
+    assert out["rated"] and out["priced"] == 1
+    p = MS.load_game_picks("BCL", db_path=db)[0]
+    assert p["home"] == "Rytas" and p["model_margin"] is not None and p["line"] is None
