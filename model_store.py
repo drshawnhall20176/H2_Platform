@@ -226,8 +226,16 @@ def save(records: Iterable[Optional[Dict]], db_path: Optional[str] = None, throt
             sql = (f"INSERT INTO prop_snapshots ({cols}) VALUES ({marks}) ON CONFLICT (sport, slate_date, game, player, "
                    f"market) DO UPDATE SET {upd}")
             cur = con.cursor()
-            for r in recs:
-                cur.execute(sql, [r.get(c) for c in SNAP_COLS])
+            if ph == "%s":                                      # Postgres: one round trip per 500 rows (Nov 4)
+                from psycopg2.extras import execute_values
+                keyed = {}
+                for r in recs:                                  # one row per conflict key (last wins), as before
+                    keyed[(r.get("sport"), r.get("slate_date"), r.get("game"), r.get("player"), r.get("market"))] = r
+                execute_values(cur, sql.replace(f"VALUES ({marks})", "VALUES %s"),
+                               [[r.get(c) for c in SNAP_COLS] for r in keyed.values()], page_size=500)
+            else:
+                for r in recs:
+                    cur.execute(sql, [r.get(c) for c in SNAP_COLS])
         if throttle_key is not None:
             _last_save[throttle_key] = time.time()
         return len(recs)
