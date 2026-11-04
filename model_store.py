@@ -73,6 +73,10 @@ CREATE TABLE IF NOT EXISTS results_archive (
     sport TEXT, rid TEXT, date TEXT, payload TEXT, ts TEXT,
     UNIQUE (sport, rid)
 );
+CREATE TABLE IF NOT EXISTS slate_snapshots (
+    sport TEXT, date TEXT, ts TEXT, payload TEXT,
+    UNIQUE (sport, date)
+);
 CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY, value TEXT, ts TEXT
 );
@@ -657,6 +661,37 @@ def save_setting(key: str, value, db_path: Optional[str] = None) -> bool:
         return True
     except Exception:                                           # noqa: BLE001
         return False
+
+
+# --------------------------------------------------------------------------- built slates (Nov 4)
+# A sport's built slate (every rostered player's recent games: hundreds of ESPN requests) saved once, so a restarted app
+# or another page loads it in one read instead of rebuilding it. slate_store.py decides when a saved one is fresh.
+def save_slate(sport: str, date: str, payload: str, db_path: Optional[str] = None) -> bool:
+    if _test_run(db_path):
+        return False
+    try:
+        with _conn(db_path) as (con, ph):
+            con.cursor().execute(
+                f"INSERT INTO slate_snapshots (sport, date, ts, payload) VALUES ({ph},{ph},{ph},{ph}) "
+                f"ON CONFLICT (sport, date) DO UPDATE SET ts=excluded.ts, payload=excluded.payload",
+                [sport, date, _now(), payload])
+        return True
+    except Exception:                                           # noqa: BLE001
+        return False
+
+
+def load_slate(sport: str, date: str, db_path: Optional[str] = None) -> Optional[Dict]:
+    """{"ts", "payload"} or None."""
+    if db_path is None and not available():
+        return None
+    try:
+        with _conn(db_path) as (con, ph):
+            cur = con.cursor()
+            cur.execute(f"SELECT ts, payload FROM slate_snapshots WHERE sport={ph} AND date={ph}", [sport, date])
+            row = cur.fetchone()
+        return None if not row else {"ts": row[0], "payload": row[1]}
+    except Exception:                                           # noqa: BLE001
+        return None
 
 
 # --------------------------------------------------------------------------- results archive (Nov 3)

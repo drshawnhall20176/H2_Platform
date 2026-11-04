@@ -1047,3 +1047,8 @@ def get_league_average_scoring(before_date: str) -> Optional[float]:
             if v is not None:
                 scores.append(float(v))
     return sum(scores) / len(scores) if scores else None
+
+
+# Nov 4: a built slate is saved and reused (slate_store.py) -- a restart no longer rebuilds it from hundreds of requests.
+import slate_store as _SS  # noqa: E402
+build_slate = _SS.persisted("NFL")(build_slate)
