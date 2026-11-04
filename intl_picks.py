@@ -52,11 +52,13 @@ HOOPS_RULES = {"EUROLEAGUE": {"spread": 4.0, "total": None, "ml": None},
 # Nov 3 correction: those cumulative numbers hid where the edge is. By gap BAND the covers were 8-10 48.2% (n=506),
 # 10-16 52.9% (879), 16-20 56.6% (251), 20+ 72.5% (295) -- the edge is in the biggest disagreements only, so the
 # college pick bar is 16+. EuroLeague by band: 4-6 50.4% (119), 6-8 57.1% (56), 8+ 64.3% (42) -> 6+.
-HOOPS_RULES["EUROLEAGUE"]["spread"] = None   # Nov 4: off until the backtest is re-run without home-side guessing
+HOOPS_RULES["EUROLEAGUE"]["spread"] = 6.0    # Nov 4: re-confirmed by the corrected backtest (33-16 at 6+), tracking
 # Estimated cover chance by gap band (from those backtests) -> the same Use tags the props pages show.
 COVER_BANDS = {
-    "NCAAMB": ((0, 8, 0.50, 4612), (8, 10, 0.482, 506), (10, 16, 0.529, 879), (16, 20, 0.566, 251), (20, 999, 0.725, 295)),
-    "EUROLEAGUE": ((0, 4, 0.50, 775), (4, 6, 0.504, 119), (6, 8, 0.571, 56), (8, 999, 0.643, 42)),
+    # Nov 4, corrected backtests (no home-side guessing). Small samples are shrunk toward 50% ((wins+25)/(n+50)) so a
+    # 49-game band can't earn a lock by itself.
+    "NCAAMB": ((0, 999, 0.508, 5184),),                     # 50.8-52.4% at every gap up to 8+; no edge
+    "EUROLEAGUE": ((0, 4, 0.51, 956), (4, 6, 0.514, 109), (6, 999, 0.586, 49)),     # 6+: 33-16 raw, 58.6% shrunk
 }
 HOOPS_EVIDENCE = {
     "NBA": "Information only — no picks. Backtest vs real lines (779 games, 2024-26): spreads covered 46-54% across gap "
@@ -65,11 +67,13 @@ HOOPS_EVIDENCE = {
     "NHL": "Information only — no picks. Backtest vs real lines (1,026 games, 2024-26): the model's side of the puck "
            "line covered 64-67%, but that is the +1.5 side's built-in cover rate (it's priced around -200), not an "
            "edge; totals 45-55% and moneylines lost at the median price.",
-    "NCAAMB": "Backtest vs real lines (5,554 games, 2024-26), covers by how far the model was from the spread: 8-10 "
-              "points 48%, 10-16 53% (break-even), 16-20 57% (251 games), 20+ 72.5% (295). The edge is only in the "
-              "biggest disagreements, so picks start at 16+. Totals and moneylines are off.",
-    "EUROLEAGUE": "Backtest vs real lines (2022-26), covers by gap: 4-6 points 50%, 6-8 57% (56 games), 8+ 64% (42). "
-                  "Picks start at 6+; the samples are small. Totals and moneylines showed no edge.",
+    "NCAAMB": "Information only — no picks. Corrected backtest vs real lines (5,184 games, 2024-26): the model's side "
+              "of the spread covered 50.8-52.4% at every gap size up to 8+ points (10+ was 55% over 502, too thin to "
+              "act on); totals 46-50%, moneylines -5%. An earlier run that looked far better had lines read upside "
+              "down for some games; that's fixed.",
+    "EUROLEAGUE": "Tracking only. Corrected backtest vs real lines (1,124 games, 2022-26): spreads with the model 6+ "
+                  "points off went 33-16 (67%), 4-6 points 51%; by season at 4+: 62%, 47%, 67%, 55%. Promising but small "
+                  "— the cover chance shown is shrunk toward 50% for that reason. Totals and moneylines showed no edge.",
 }
 
 

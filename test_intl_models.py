@@ -280,13 +280,11 @@ def test_ncaamb_spread_rule_is_16_points_with_use_tags():
     by = {x["game_id"]: x for x in recs}
     import props_engine as PE
     c1 = by["c1"]
-    assert (c1["pick"] is not None) == (abs(c1["edge"]) >= 16)
+    assert c1["pick"] is None                                            # college picks off
     assert by["c2"]["ml_pick"] is None and by["c2"]["total_pick"] is None
-    assert IP.use_tag(IP.cover_estimate("NCAAMB", 9)["chance"])["use"] == PE.USE_PASS
-    assert IP.use_tag(IP.cover_estimate("NCAAMB", -17)["chance"])["use"] == PE.USE_SINGLE
-    t = IP.use_tag(IP.cover_estimate("NCAAMB", 22)["chance"])
-    assert t["use"] == PE.USE_BOTH and t["lock"]
-    assert IP.cover_estimate("EUROLEAGUE", 7)["chance"] > 0.55 and IP.cover_estimate("NBL", 7) is None
+    assert all(IP.use_tag(IP.cover_estimate("NCAAMB", g)["chance"])["use"] == PE.USE_PASS for g in (3, 9, -17, 22))
+    t = IP.use_tag(IP.cover_estimate("EUROLEAGUE", 7)["chance"])
+    assert t["use"] == PE.USE_SINGLE and not t["lock"] and IP.cover_estimate("NBL", 7) is None
 
 
 def test_logged_game_lab_bets_settle_from_the_graded_game(tmp_path, monkeypatch):
