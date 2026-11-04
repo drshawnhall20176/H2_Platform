@@ -75,7 +75,11 @@ def main() -> int:
                 proj = I.project(r, g["home_team"], g["away_team"], g.get("neutral_site", False))
                 if not ev or not proj:
                     continue
-                h = ev["home_team"] if I.find_team([ev["home_team"]], g["home_team"]) else ev["away_team"]
+                fh = I.find_team([ev["home_team"]], g["home_team"], True) is not None
+                fa = I.find_team([ev["away_team"]], g["home_team"], True) is not None
+                if fh == fa:                                   # Nov 4: never guess the home side (a flip fakes edges)
+                    continue
+                h = ev["home_team"] if fh else ev["away_team"]
                 a = ev["away_team"] if h == ev["home_team"] else ev["home_team"]
                 sp, to, ml = H.line(ev, "spreads", h), H.line(ev, "totals", "Over"), H.h2h(ev, h)
                 act_m = g["home_points"] - g["away_points"]

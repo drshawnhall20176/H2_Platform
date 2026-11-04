@@ -27,7 +27,22 @@ TEST_FROM = date(2024, 11, 1)
 SNAP = "16:00:00"
 
 
+def home_side(ev, espn_home):
+    """The odds event's name for ESPN's home team, or None when it can't be told for certain."""
+    k = I._key(espn_home)
+    if I._key(ev["home_team"]) == k and I._key(ev["away_team"]) != k:
+        return ev["home_team"]
+    if I._key(ev["away_team"]) == k and I._key(ev["home_team"]) != k:
+        return ev["away_team"]
+    fh = I.find_team([ev["home_team"]], espn_home) is not None
+    fa = I.find_team([ev["away_team"]], espn_home) is not None
+    if fh == fa:
+        return None
+    return ev["home_team"] if fh else ev["away_team"]
+
+
 def main() -> int:
+    skipped = defaultdict(int)
     t0 = datetime.now()
     games = []
     for a, b in SEASONS:
@@ -52,11 +67,10 @@ def main() -> int:
             proj = I.project(r, g["home_team"], g["away_team"], g.get("neutral_site", False))
             if not ev or not proj:
                 continue
-            h_ev = ev["home_team"] if I._key(ev["home_team"]) == I._key(g["home_team"]) else (
-                ev["away_team"] if I._key(ev["away_team"]) == I._key(g["home_team"]) else None)
-            if not h_ev:
-                h_ev = ev["home_team"] if I.find_team([ev["home_team"], ev["away_team"]], g["home_team"]) == ev["home_team"] \
-                    else ev["away_team"]
+            h_ev = home_side(ev, g["home_team"])
+            if h_ev is None:                                   # Nov 4: never guess which side is home -- a flip
+                skipped["orientation"] += 1                    # turns the line inside out and fakes a huge "edge"
+                continue
             a_ev = ev["away_team"] if h_ev == ev["home_team"] else ev["home_team"]
             sp, to = H.line(ev, "spreads", h_ev), H.line(ev, "totals", "Over")
             ml, mla = H.h2h(ev, h_ev), H.h2h(ev, a_ev)
@@ -66,7 +80,8 @@ def main() -> int:
                              n_prior_cur=sum(1 for x in prior if I.season_of("NCAAMB", x["date"]) == I.season_of("NCAAMB", d))))
         if len(rows) and len(rows) % 1000 < len(by_day[d]):
             print(f"  ... {d}: {len(rows)} priced games, {H.usage()}")
-    print(f"{len(rows)} games with ratings and a pre-game line · {H.usage()}")
+    print(f"{len(rows)} games with ratings and a pre-game line · {H.usage()} · skipped (home side unclear): "
+          f"{skipped['orientation']}")
     if not rows:
         return 0
 

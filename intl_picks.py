@@ -52,7 +52,7 @@ HOOPS_RULES = {"EUROLEAGUE": {"spread": 4.0, "total": None, "ml": None},
 # Nov 3 correction: those cumulative numbers hid where the edge is. By gap BAND the covers were 8-10 48.2% (n=506),
 # 10-16 52.9% (879), 16-20 56.6% (251), 20+ 72.5% (295) -- the edge is in the biggest disagreements only, so the
 # college pick bar is 16+. EuroLeague by band: 4-6 50.4% (119), 6-8 57.1% (56), 8+ 64.3% (42) -> 6+.
-HOOPS_RULES["EUROLEAGUE"]["spread"] = 6.0
+HOOPS_RULES["EUROLEAGUE"]["spread"] = None   # Nov 4: off until the backtest is re-run without home-side guessing
 # Estimated cover chance by gap band (from those backtests) -> the same Use tags the props pages show.
 COVER_BANDS = {
     "NCAAMB": ((0, 8, 0.50, 4612), (8, 10, 0.482, 506), (10, 16, 0.529, 879), (16, 20, 0.566, 251), (20, 999, 0.725, 295)),
