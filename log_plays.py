@@ -26,6 +26,8 @@ def _model_prob(pk, bp, reads, sport):
     does. None when there's no honest read (Nov 2 fix: alt-line bets were stored with the main line's chance)."""
     if pk.get("model_prob") is not None:
         return pk["model_prob"]
+    if pk.get("line") is None:                                  # a moneyline: no line to read a chance off
+        return None
     line = float(pk["line"])
     if bp.get("ModelProb") is not None and bp.get("Line") is not None and abs(float(bp["Line"]) - line) < 1e-9:
         return bp["ModelProb"]
@@ -52,7 +54,7 @@ def build(picks, board_plays, sport, date_str, real=False, stake=1.0, category=N
                          + ([bp["Notes"]] if bp.get("Notes") else []) if x) or None
         out.append({"slate_date": date_str, "sport": sport, "game": pk.get("game") or bp.get("Game"),
                     "player": pk["player"], "player_id": pid, "market": pk["market"], "side": pk["side"],
-                    "line": float(pk["line"]), "entry_odds": float(pk["odds"]), "entry_odds_source": "book",
+                    "line": None if pk.get("line") is None else float(pk["line"]), "entry_odds": float(pk["odds"]), "entry_odds_source": "book",
                     "model_prob": _model_prob(pk, bp, reads, sport), "stake": stake,
                     "book": pk.get("book", "draftkings"), "is_real_bet": bool(real),
                     "category": category or B.default_category(sport, from_model=True), "notes": notes})
@@ -95,7 +97,7 @@ def main(argv=None) -> int:
     if a.fix_model.lower() in ("1", "true", "yes"):
         n = 0
         for r in rows:
-            k = (r["slate_date"], _key(r["player"], r["market"], r["side"]), r["line"])
+            k = (r["slate_date"], _key(r["player"], r["market"], r["side"]), float(r["line"] or 0))
             for b in B.list_bets(sport=a.sport):
                 if (b.get("slate_date"), _key(b.get("player"), b.get("market"), b.get("side")),
                         float(b.get("line") or 0)) == k and r["model_prob"] is not None:
@@ -129,7 +131,7 @@ def main(argv=None) -> int:
     # leg with the same player/line is a different bet, so it must not block logging the single (Nov 2 fix)
     n = 0
     for r in rows:
-        k = (r["slate_date"], _key(r["player"], r["market"], r["side"]), r["line"])
+        k = (r["slate_date"], _key(r["player"], r["market"], r["side"]), float(r["line"] or 0))
         if k in have:
             print(f"skip (already logged): {r['player']} {r['market']} {r['side']} {r['line']}")
             continue

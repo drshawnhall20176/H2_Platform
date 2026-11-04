@@ -131,3 +131,22 @@ def test_known_result_is_recorded_on_a_won_parlay(tmp_path, monkeypatch):
     hdr = next(b for b in bets if B.is_parlay_header(b))
     assert hdr["result"] == "win" and abs(B.bet_pnl(hdr) - 156.6) < 0.01
     assert all(b["result"] == "win" for b in bets)
+
+
+def test_moneyline_parlay_without_lines(tmp_path, monkeypatch):
+    db = str(tmp_path / "b.db")
+    import export_board as X
+    monkeypatch.setattr(X, "board", lambda *a, **k: [])
+    monkeypatch.setattr(B, "list_bets", lambda *a, _l=B.list_bets, **k: _l(db_path=db, **{x: y for x, y in k.items() if x != "db_path"}))
+    monkeypatch.setattr(B, "add_bet", lambda *a, _a=B.add_bet, **k: _a(db, **k))
+    monkeypatch.setattr(B, "update_bet", lambda bid, _u=B.update_bet, **k: _u(bid, db, **k))
+    f = tmp_path / "p.json"
+    f.write_text(json.dumps([{"player": "Maxence Rivet", "market": "Moneyline", "side": "Maxence Rivet", "line": None,
+                              "odds": -600, "game": "Rivet vs Barsukov"}]))
+    L.main(["--picks", f"@{f}", "--date", "2026-11-04", "--sport", "TENNIS", "--ticket", "T", "--ticket-odds", "751",
+            "--stake", "11", "--real", "true", "--result", "win"])
+    L.main(["--picks", f"@{f}", "--date", "2026-11-04", "--sport", "TENNIS", "--real", "true", "--stake", "2"])
+    bets = B.list_bets()
+    hdr = next(b for b in bets if B.is_parlay_header(b))
+    assert hdr["result"] == "win" and abs(B.bet_pnl(hdr) - 82.61) < 0.01
+    assert sum(1 for b in bets if not b.get("ticket")) == 1                 # the single logs too (no line is fine)
