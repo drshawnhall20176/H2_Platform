@@ -436,3 +436,17 @@ def test_eurocup_schedule_fair_lines_and_page(monkeypatch):
     assert not at.exception, [e.value for e in at.exception]
     assert "Turk Telekom Ankara" in at.dataframe[0].value.to_string()
     assert any("Model chance" in m.value for m in at.markdown)
+
+
+
+def test_game_link_after_a_strategy_tag_still_settles(tmp_path, monkeypatch):
+    import betlog as B
+    db, bdb = str(tmp_path / "m.db"), str(tmp_path / "b.db")
+    monkeypatch.setattr(B, "list_bets", lambda *a, _l=B.list_bets, **k: _l(db_path=bdb, **{x: y for x, y in k.items() if x != "db_path"}))
+    monkeypatch.setattr(B, "update_bet", lambda bid, _u=B.update_bet, **k: _u(bid, bdb, **k))
+    MS.save_game_picks([{"sport": "TENNIS", "game_id": "espn-wta-1", "kickoff": "2026-11-04T16:00Z", "home": "Carole Monnet",
+                         "away": "Laura Samson", "line": None, "edge": None, "model_p": 0.44}], db_path=db)
+    B.add_bet(bdb, slate_date="2026-11-04", player="Laura Samson", market="Moneyline", side="Laura Samson", entry_odds=-172,
+              stake=4, sport="TENNIS", notes="tennis-prematch-singles,gl:TENNIS:espn-wta-1")
+    MS.grade_game_pick("TENNIS", "espn-wta-1", 9, 12, "away", db_path=db)
+    assert IP.settle_logged("TENNIS", db_path=db) == 1 and B.list_bets()[0]["result"] == "win"
