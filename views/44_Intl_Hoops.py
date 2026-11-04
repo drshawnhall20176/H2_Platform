@@ -15,8 +15,8 @@ import intl_hoops as I
 
 C.base_css()
 C.page_header("🌍", "International Hoops",
-              "EuroLeague and NBL: opponent-adjusted ratings against the spread, total and moneyline. Tracking only "
+              "EuroLeague, EuroCup and NBL: opponent-adjusted ratings against the spread, total and moneyline. Tracking only "
               "until the record proves it.")
-league = st.radio("League", ["EUROLEAGUE", "NBL"], format_func=lambda k: I.LEAGUES[k]["title"], horizontal=True,
+league = st.radio("League", ["EUROLEAGUE", "EUROCUP", "NBL"], format_func=lambda k: I.LEAGUES[k]["title"], horizontal=True,
                   key="ih_league")
 HG.render(league)

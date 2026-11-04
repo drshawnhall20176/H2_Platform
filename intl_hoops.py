@@ -36,12 +36,15 @@ LEAGUES.update({
     "WNBA": {"title": "WNBA", "odds_key": "basketball_wnba", "min_games": 0, "lam": 3.0, "decay": True, "sd": 12.0},
 })
 LEAGUES["NCAAMB"]["sd"] = 11.0
+# Nov 4: EuroCup -- results and schedule from the EuroLeague's own feed (competition "U"); the odds feed doesn't carry it,
+# so the page shows the model's fair lines and checks a typed sportsbook price instead of listing book lines.
+LEAGUES["EUROCUP"] = {"title": "EuroCup", "odds_key": None, "min_games": 30, "lam": 3.0, "sd": 11.5, "comp": "U"}
 LEAGUES["EUROLEAGUE"]["sd"] = 11.5
 LEAGUES["NBL"]["sd"] = 12.0
 HALF_LIFE = 45.0               # days: a game 45 days old counts half as much as tonight's
 PRIOR_SEASON_WEIGHT = 0.5      # and last season's games count half again (rosters turn over)
 NCAAMB_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard"
-EL_URL = "https://api-live.euroleague.net/v2/competitions/E/seasons/{code}/games"
+EL_URL = "https://api-live.euroleague.net/v2/competitions/{comp}/seasons/{code}/games"   # E = EuroLeague, U = EuroCup
 NBL_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nbl/scoreboard"
 STOP = {"basket", "basketball", "bc", "kk", "bk", "club", "de", "the", "fc", "sk", "cb", "pbc", "ok", "and"}
 
@@ -128,9 +131,9 @@ def match_event(events: Iterable[Dict], home: str, away: str) -> Optional[Dict]:
 
 
 # --------------------------------------------------------------------------- results
-def euroleague_season(code: str, fetch: Callable = _http) -> List[Dict]:
-    """Completed games of one EuroLeague season ("E2025" = 2025-26)."""
-    data = fetch(EL_URL.format(code=code)) or {}
+def euroleague_season(code: str, fetch: Callable = _http, comp: str = "E", league: str = "EUROLEAGUE") -> List[Dict]:
+    """Completed games of one EuroLeague ("E2025" = 2025-26) or EuroCup ("U2026", comp="U") season."""
+    data = fetch(EL_URL.format(comp=comp, code=code)) or {}
     out = []
     for g in data.get("data") or []:
         if not g.get("played"):
@@ -141,9 +144,26 @@ def euroleague_season(code: str, fetch: Callable = _http) -> List[Dict]:
         an = ((road.get("club") or {}).get("name"))
         if hs is None or as_ is None or not hn or not an:
             continue
-        out.append({"league": "EUROLEAGUE", "id": str(g.get("identifier") or g.get("id")),
+        out.append({"league": league, "id": str(g.get("identifier") or g.get("id")),
                     "date": str(g.get("date") or g.get("utcDate") or "")[:10], "season": code,
                     "home_team": hn, "away_team": an, "home_points": hs, "away_points": as_, "neutral_site": False})
+    return out
+
+
+def euroleague_upcoming(code: str, fetch: Callable = _http, comp: str = "E", league: str = "EUROLEAGUE") -> List[Dict]:
+    """Scheduled (not yet played) games with their UTC start: [{"league","id","kickoff","home","away","neutral"}]."""
+    data = fetch(EL_URL.format(comp=comp, code=code)) or {}
+    out = []
+    for g in data.get("data") or []:
+        if g.get("played"):
+            continue
+        hn = ((g.get("local") or {}).get("club") or {}).get("name")
+        an = ((g.get("road") or {}).get("club") or {}).get("name")
+        ko = g.get("utcDate")
+        if not hn or not an or not ko:
+            continue
+        out.append({"league": league, "id": str(g.get("identifier") or g.get("id")), "kickoff": str(ko).replace("Z", "+00:00"),
+                    "home": hn, "away": an, "neutral": bool(g.get("isNeutralVenue"))})
     return out
 
 

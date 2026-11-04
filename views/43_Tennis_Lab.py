@@ -14,6 +14,7 @@ import streamlit as st
 import components as C
 import intl_picks as IP
 import model_store as MS
+import sports
 import tennis_model as T
 
 C.base_css()
@@ -51,8 +52,22 @@ def _pick(p):
     return " · ".join(out) or "—"
 
 
-tours = st.radio("Tour", ["All", "ATP", "WTA"], horizontal=True, key="tl_tour")
-rows = [p for p in upcoming if tours == "All" or p.get("tour") == tours.lower()]
+def _et(p):
+    try:
+        return pd.to_datetime(p["kickoff"]).tz_convert("America/New_York").to_pydatetime()
+    except Exception:                                           # noqa: BLE001
+        return None
+
+
+f1, f2, f3 = st.columns([1, 1, 2])
+day = f1.date_input("Slate date", pd.Timestamp.now(tz="America/New_York").date(), key="tl_date")
+rows = [p for p in upcoming if _et(p) is not None and _et(p).date() == day]
+_slots = sorted({sports.slot_of(_et(p)) for p in rows}, key=lambda x: sports.SLOT_ORDER.get(x, 9))
+slot = f2.selectbox("Time slot", ["All slate"] + _slots, key="tl_slot")
+if slot != "All slate":
+    rows = [p for p in rows if sports.slot_of(_et(p)) == slot]
+tours = f3.radio("Tour", ["All", "ATP", "WTA"], horizontal=True, key="tl_tour")
+rows = [p for p in rows if tours == "All" or p.get("tour") == tours.lower()]
 priced = [p for p in rows if p.get("source") != "espn"]
 sched = [p for p in rows if p.get("source") == "espn"]
 
