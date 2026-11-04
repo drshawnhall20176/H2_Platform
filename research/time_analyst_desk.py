@@ -13,12 +13,14 @@ os.chdir(ROOT)
 
 
 def main() -> int:
+    import faulthandler
+    faulthandler.dump_traceback_later(60, repeat=True, file=sys.stdout)   # every minute: what each thread is doing
     from streamlit.testing.v1 import AppTest
     page = str(ROOT / "views" / "39_Analyst_Desk.py")
-    at = AppTest.from_file(page, default_timeout=900)
+    at = AppTest.from_file(page, default_timeout=1700)
     at.session_state["sport"] = os.environ.get("SPORT", "NBA")
     at.secrets["ODDS_API_KEY"] = os.environ.get("ODDS_API_KEY", "")
-    for label in ("cold open", "click (rerun)"):
+    for label in ("cold open",):
         pr = cProfile.Profile()
         t = time.time()
         pr.enable()
