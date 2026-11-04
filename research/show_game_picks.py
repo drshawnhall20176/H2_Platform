@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 def main() -> int:
     import model_store as MS
     lo = (datetime.now(timezone.utc) - timedelta(hours=8)).isoformat()
-    for lg in os.environ.get("SHOW_LEAGUES", "NCAAMB,TENNIS").split(","):
+    for lg in os.environ.get("SHOW_LEAGUES", "NBA").split(","):
         for p in MS.load_game_picks(lg):
             if str(p.get("kickoff")) < lo:
                 continue
