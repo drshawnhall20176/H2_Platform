@@ -64,7 +64,8 @@ def plan(settings: Dict, bets: Sequence[Dict], today: Optional[date] = None) -> 
     start = str(s["start_date"])
     real = [b for b in bets if b.get("is_real_bet") not in (False, 0, "0", "false") and _day(b) >= start]
     money = B.money_bets(real)
-    settled = [b for b in money if _res(b) in ("win", "loss", "push")]
+    # a $0 row (a pick'em leg or a pick logged without a stake) carries no money: it isn't a bet for the plan
+    settled = [b for b in money if _res(b) in ("win", "loss", "push") and float(b.get("stake") or 0) > 0]
     singles = [b for b in settled if not B.is_parlay_header(b) and not B._ticket(b)]
     parlays = [b for b in settled if B.is_parlay_header(b)]
 

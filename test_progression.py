@@ -67,3 +67,9 @@ def test_page_renders_and_saves(monkeypatch):
     at.button[0].click().run()
     assert not at.exception, [e.value for e in at.exception]
     assert got[P.SETTINGS_KEY]["start_bankroll"] == 5000.0
+
+
+def test_zero_stake_rows_are_not_bets():
+    bets = [_bet(1, "2026-11-01", "win", stake=0.0), _bet(2, "2026-11-01", "loss", stake=2.0)]
+    r = P.plan({"start_date": "2026-11-01", "start_bankroll": 100}, bets, date(2026, 11, 4))
+    assert r["singles"] == 1 and r["settled"] == 1 and r["bankroll"] == 98.0
