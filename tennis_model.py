@@ -117,6 +117,7 @@ def parse_upcoming(data: Dict, tour: str) -> List[Dict]:
         return out
     for ev in data.get("events") or []:
         tname = ev.get("name") or ev.get("shortName") or ""
+        city = str((ev.get("venue") or {}).get("displayName") or "").split(",")[0].strip() or None
         for g in ev.get("groupings") or []:
             if "singles" not in ((g.get("grouping") or {}).get("displayName") or "").lower():
                 continue
@@ -128,7 +129,7 @@ def parse_upcoming(data: Dict, tour: str) -> List[Dict]:
                 if len(names) != 2 or not all(names) or any("tbd" in n.lower() for n in names):
                     continue
                 when = str(c.get("date") or "")
-                out.append({"id": f"{tour}-{c.get('id')}", "start": when, "tour": tour, "tournament": tname,
+                out.append({"id": f"{tour}-{c.get('id')}", "start": when, "tour": tour, "tournament": tname, "city": city,
                             "round": (c.get("round") or {}).get("displayName"), "surface": surface(tname, when[:10]),
                             "best_of": best_of(tname, tour), "p1": names[0], "p2": names[1]})
     return out
@@ -253,3 +254,30 @@ def games(fit: Dict, p: float, bo: int) -> Optional[Dict]:
 
 def p_over(mean: float, sd: float, line: float) -> float:
     return 0.5 * math.erfc((line - mean) / (sd * math.sqrt(2)))
+
+
+# --------------------------------------------------------------------------- sportsbook-style event names (Nov 4)
+# DraftKings files tennis by tour and CITY ("WTA Cali 125", "ATP Paris", "Challenger Lyon", "ITF M25 ..."); ESPN and the
+# odds feed use the sponsor's name ("Reto Win Tennis Cali Open", "Angola Ladies Open" = Luanda). The Tennis Lab leads with
+# "WTA Cali" so a match can be found the way the sportsbook lists it, with the official name after it.
+_EVENT_WORDS = {"open", "masters", "championships", "championship", "finals", "cup", "classic", "international",
+                "tennis", "ladies", "american", "rolex", "prudential", "reto", "win", "the", "atp", "wta", "1000", "500", "250", "125"}
+CITY_OF = {"angola ladies open": "Luanda"}       # ESPN names that don't contain the city (venue fills most others)
+
+
+def event_city(p: Dict) -> str:
+    if p.get("city"):
+        return str(p["city"])
+    t = str(p.get("tournament") or "")
+    if norm(t) in CITY_OF:
+        return CITY_OF[norm(t)]
+    words = [w for w in t.split() if norm(w) not in _EVENT_WORDS]
+    return " ".join(words) or t
+
+
+def event_label(p: Dict) -> str:
+    """'WTA Cali · Reto Win Tennis Cali Open · clay' -- the sportsbook's tour + city first, then the event's own name."""
+    tour, city, name = str(p.get("tour") or "").upper(), event_city(p), str(p.get("tournament") or "")
+    head = f"{tour} {city}".strip()
+    tail = [x for x in (name if norm(name) != norm(city) else "", p.get("surface") or "") if x]
+    return " · ".join([head] + tail)

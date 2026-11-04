@@ -97,6 +97,101 @@ def use_tag(chance: Optional[float]) -> Dict:
     if chance >= 0.55:
         return {"use": PE.USE_SINGLE, "lock": False}
     return {"use": PE.USE_PASS, "lock": False}
+
+
+# --------------------------------------------------------------------------- one set of Use tags for every game page (Nov 4)
+# The props pages' symbols, applied to tennis matches and basketball / hockey games so every page reads the same way:
+#   🔒 Most probable  = 60%+ to win AND the backing to trust it (a tested edge, or enough history on both players)
+#   🎟️ Parlay + Single = 60%+ and a price that pays (+3% or better)      🎯 Single only = 55-60% at a price that pays
+#   ⛔ Pass            = a coin flip, a price that doesn't pay, or no tested edge for this league / market
+# Where there's no price yet (lower-tier tennis, EuroCup) the tag says the price it needs ("at -150 or better").
+def american(dec: Optional[float]) -> Optional[int]:
+    if dec is None or dec <= 1:
+        return None
+    return int(round((dec - 1) * 100)) if dec >= 2 else int(round(-100 / (dec - 1)))
+
+
+def price_needed(chance: Optional[float], min_ev: Optional[float] = None) -> Optional[int]:
+    """The worst American price at which this chance still earns min_ev (default the props pages' +3%)."""
+    import props_engine as PE
+    if chance is None or chance <= 0:
+        return None
+    return american((1 + (PE.MIN_EV if min_ev is None else min_ev)) / chance)
+
+
+def _odds_txt(a: Optional[int]) -> str:
+    return "—" if a is None else f"{a:+d}"
+
+
+def chance_use(chance: Optional[float], price=None, trusted: bool = True) -> Dict:
+    """Use tag for one side from its chance and (when there is one) the price you'd get.
+    trusted=False (thin history): never a lock and never a parlay leg -- a single at most."""
+    import props_engine as PE
+    if chance is None:
+        return {"use": "—", "lock": False, "why": "no read"}
+    if chance < 0.55:
+        return {"use": PE.USE_PASS, "lock": False, "why": f"{chance:.0%} is too close to a coin flip"}
+    need = price_needed(chance)
+    if price is None:                                           # no price yet: say what it needs
+        if chance >= PE.MOST_PROBABLE_CHANCE and trusted:
+            return {"use": PE.USE_BOTH, "lock": True, "why": f"{chance:.0%}; a single needs {_odds_txt(need)} or better",
+                    "need": need}
+        return {"use": PE.USE_SINGLE, "lock": False, "need": need,
+                "why": f"{chance:.0%}" + ("" if trusted else ", thin history") + f"; needs {_odds_txt(need)} or better"}
+    dec = _dec(price)
+    if dec is None:
+        return {"use": "—", "lock": False, "why": "no price"}
+    ev = chance * dec - 1
+    bits = f"{chance:.0%} at {float(price):+.0f} = {ev:+.1%}"
+    if chance >= PE.MOST_PROBABLE_CHANCE and trusted and ev > 0:
+        return {"use": PE.USE_BOTH if ev >= PE.MIN_EV else PE.USE_PARLAY, "lock": True, "why": bits, "need": need}
+    if ev >= PE.MIN_EV:
+        return {"use": PE.USE_SINGLE, "lock": False, "why": bits + ("" if trusted else ", thin history"), "need": need}
+    return {"use": PE.USE_PASS, "lock": False, "why": bits + f" (needs {_odds_txt(need)} or better)", "need": need}
+
+
+def tag_label(t: Dict) -> str:
+    import props_engine as PE
+    u = t.get("use") or "—"
+    if t.get("need") is not None and t.get("use") not in (PE.USE_PASS, "—") and not t.get("priced"):
+        u = f"{u} ({_odds_txt(t['need'])} or better)"
+    return f"{PE.MOST_PROBABLE} · {u}" if t.get("lock") else u
+
+
+def tennis_use(p: Dict) -> Dict:
+    """The model's player and Use tag for one tennis record. Main-tour (odds feed) matches: the books beat this model
+    in the backtest, so they're ⛔ Pass whatever the model says; everything else is read off the model's chance with
+    the price it needs (or the best posted price), and a player with under TENNIS_MIN_MATCHES rated matches can't be a lock."""
+    import props_engine as PE
+    mp = p.get("model_p")
+    if mp is None:
+        return {"player": None, "chance": None, "use": "—", "lock": False, "why": "no read"}
+    home = mp >= 0.5
+    who, ch = (p["home"], mp) if home else (p["away"], 1 - mp)
+    trusted = min(int(p.get("n_home") or 0), int(p.get("n_away") or 0)) >= TENNIS_MIN_MATCHES
+    out = {"player": who, "chance": ch, "fair": american(1 / ch) if ch > 0 else None}
+    if p.get("source") != "espn":                               # priced main-tour event
+        price = p.get("best_home") if home else p.get("best_away")
+        out.update(use=PE.USE_PASS, lock=False, priced=True,
+                   why="main tour: the books beat this model in the backtest" + (f"; best price {float(price):+.0f}" if price else ""))
+        return out
+    out.update(chance_use(ch, None, trusted))
+    return out
+
+
+def hoops_use(league: str, p: Dict) -> Dict:
+    """Use tag for a game-lines record: the backtest's cover rate where the league has one (EuroLeague), the tracked
+    moneyline rule (NBL), otherwise ⛔ Pass -- NBA, NHL and college showed no edge against real lines."""
+    import props_engine as PE
+    if p.get("use") and p.get("use") != "—":
+        return {"use": p["use"], "lock": bool(p.get("lock")), "priced": True,
+                "why": f"backtest: this gap covered {p['cover_est']:.0%}" if p.get("cover_est") is not None else ""}
+    if p.get("ml_pick"):
+        side = p["home"] if p["ml_pick"] == "home" else p["away"]
+        return {"use": PE.USE_SINGLE, "lock": False, "priced": True, "why": f"{side} moneyline: the tracked 5%+ edge rule"}
+    if league in COVER_BANDS or HOOPS_EVIDENCE.get(league):
+        return {"use": PE.USE_PASS, "lock": False, "priced": True, "why": "no tested edge in this league"}
+    return {"use": PE.USE_PASS, "lock": False, "priced": True, "why": "no tested edge yet"}
 HOOPS_ML_EDGE = 0.05
 TENNIS_SEED_FROM = date(2023, 1, 1)
 
@@ -250,7 +345,7 @@ def tennis_schedule(elo: T.Elo, fetch: Callable = _http, now: Optional[datetime]
                     continue
                 p = elo.prob(m["p1"], m["p2"], m["surface"])
                 out.append({"sport": "TENNIS", "game_id": f"espn-{m['id']}", "kickoff": m["start"], "tour": tour,
-                            "tournament": m["tournament"], "round": m["round"], "surface": m["surface"],
+                            "tournament": m["tournament"], "city": m.get("city"), "round": m["round"], "surface": m["surface"],
                             "best_of": m["best_of"], "home": m["p1"], "away": m["p2"], "model_p": round(p, 4),
                             "n_home": elo.matches(m["p1"]), "n_away": elo.matches(m["p2"]), "line": None, "edge": None,
                             "source": "espn", "pick": None, "spread_pick": None, "total_pick": None})
@@ -282,8 +377,12 @@ def tennis_capture(api_key: str, fetch: Callable = _http, now: Optional[datetime
 
 
 def _same_player(a: str, b: str) -> bool:
+    """Same first initial and a shared surname word -- "Daniel Merida" is "Daniel Merida Aguilar" (Nov 4: the two
+    feeds spell double surnames differently, so the same match showed up twice)."""
     ta, tb = T.norm(a).split(), T.norm(b).split()
-    return bool(ta and tb and ta[-1] == tb[-1] and (ta[0][0] == tb[0][0]))
+    if not (ta and tb and ta[0][0] == tb[0][0]):
+        return False
+    return ta[-1] == tb[-1] or (len(ta) > 1 and len(tb) > 1 and bool(set(ta[1:]) & set(tb[1:])))
 
 
 def tennis_grade(hist: Sequence[Dict], db_path: Optional[str] = None) -> int:
