@@ -1,0 +1,37 @@
+# Reconcile the Bet Log for given dates (reconcile_bets.py): settle open game-line bets from archived finals and
+# print every bet with results and P&L. Leave apply false to preview.
+name: reconcile-bets
+
+on:
+  workflow_dispatch:
+    inputs:
+      dates:
+        description: "Slate dates, comma-separated (YYYY-MM-DD)"
+        required: true
+      apply:
+        description: "true = write the settlements"
+        default: "false"
+
+permissions:
+  contents: read
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Reconcile
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATES: ${{ inputs.dates }}
+          APPLY: ${{ inputs.apply }}
+        run: |
+          if [ "$APPLY" = "true" ]; then python reconcile_bets.py --dates "$DATES" --apply; else python reconcile_bets.py --dates "$DATES"; fi
