@@ -45,3 +45,22 @@ def test_empty_slate_is_never_saved(tmp_path, monkeypatch):
     SS._mem.clear()
     SS.persisted("NHL")(lambda d: ([], []))("2026-11-04")
     assert saved == [] and not SS._mem
+
+
+def test_finished_box_scores_are_fetched_once(tmp_path, monkeypatch):
+    db = str(tmp_path / "m.db")
+    monkeypatch.setattr(SS, "_off", lambda: False)
+    monkeypatch.setattr(MS, "load_blobs", lambda kind, keys, db_path=None, _l=MS.load_blobs: _l(kind, keys, db))
+    monkeypatch.setattr(MS, "save_blobs", lambda kind, items, db_path=None, _s=MS.save_blobs: _s(kind, items, db))
+    SS._blob_mem.clear()
+    fetched = []
+
+    def one(g):
+        fetched.append(g)
+        return {} if g == "3" else {101: [{"pts": 20}]}       # game 3: empty (not final) -> not kept
+
+    out = SS.cached_many("lines:nba", ["1", "2", "3"], one)
+    assert out["1"] == {101: [{"pts": 20}]} and sorted(fetched) == ["1", "2", "3"]
+    SS._blob_mem.clear()                                      # restarted app: read back from the database
+    out = SS.cached_many("lines:nba", ["1", "2", "3"], one)
+    assert sorted(fetched) == ["1", "2", "3", "3"] and out["2"] == {101: [{"pts": 20}]}
