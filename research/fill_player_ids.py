@@ -14,7 +14,7 @@ def main() -> int:
     rows, _meta = sports.get("NBA").engine.build_slate(day)
     ids = {}
     for r in rows:
-        pid = r.get("_player_id") or r.get("PlayerId") or r.get("player_id") or r.get("id")
+        pid = r.get("_pid") or r.get("_player_id") or r.get("PlayerId") or r.get("player_id") or r.get("id")
         if pid is not None:
             ids.setdefault(U.norm(r.get("Player")), set()).add(int(pid))
     print("sample row keys:", sorted(rows[0].keys())[:40] if rows else None)
