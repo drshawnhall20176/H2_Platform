@@ -130,5 +130,6 @@ jobs:
             echo "No change in Statcast caches — nothing to commit."
           else
             git commit -m "Auto-refresh Statcast batter/pitcher + catcher framing caches ($(date -u +%Y-%m-%d))"
-            git push
+            # Nov 4: retry with a rebase -- a merge landing mid-run made the plain push fail ("fetch first")
+            for i in 1 2 3 4; do git pull --rebase -q origin main && git push && break; sleep $((i * 10)); done
           fi

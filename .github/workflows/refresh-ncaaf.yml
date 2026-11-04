@@ -182,5 +182,6 @@ jobs:
             echo "No change in NCAAF caches — nothing to commit."
           else
             git commit -m "Auto-refresh NCAAF roster/player-stats/schedule/per-game-stats/drives caches ($(date -u +%Y-%m-%d))"
-            git push
+            # Nov 4: retry with a rebase -- a merge landing mid-run made the plain push fail ("fetch first")
+            for i in 1 2 3 4; do git pull --rebase -q origin main && git push && break; sleep $((i * 10)); done
           fi
