@@ -14,11 +14,17 @@ S = requests.Session()
 
 
 def get(u):
-    try:
-        r = S.get(u, timeout=30)
+    import time
+    for attempt in range(6):                                    # the feed rate-limits: back off when it says so
+        try:
+            r = S.get(u, timeout=30)
+        except Exception:                                       # noqa: BLE001
+            return None
+        if r.status_code == 429:
+            time.sleep(float(r.headers.get("Retry-After") or 0) or 5 * (attempt + 1))
+            continue
         return r.json() if r.ok else None
-    except Exception:                                           # noqa: BLE001
-        return None
+    return None
 
 
 def game_ids():
@@ -29,7 +35,7 @@ def game_ids():
         if d.month not in (7, 8, 9) or d >= date(2026, 10, 1):
             days.append(d)
         d += timedelta(days=7)
-    with ThreadPoolExecutor(max_workers=16) as ex:
+    with ThreadPoolExecutor(max_workers=3) as ex:
         for js in ex.map(lambda x: get(f"{API}/schedule/{x.isoformat()}"), days):
             for wk in (js or {}).get("gameWeek") or []:
                 for g in wk.get("games") or []:
@@ -56,16 +62,9 @@ def box(gid):
 def main() -> int:
     ids = game_ids()
     print("games:", len(ids))
-    rr = S.get(f"{API}/gamecenter/{ids[0]}/boxscore", timeout=30)
-    print("DEBUG status:", rr.status_code, rr.url, rr.text[:200].replace("\n", " "))
-    js = get(f"{API}/gamecenter/{ids[0]}/boxscore") or {}
-    print("DEBUG keys:", sorted(js.keys())[:40], "state:", js.get("gameState"))
-    pb = js.get("playerByGameStats") or {}
-    print("DEBUG pbgs:", {k: sorted((v or {}).keys()) for k, v in pb.items()})
-    gl = ((pb.get("homeTeam") or {}).get("goalies") or [{}])[0]
-    print("DEBUG goalie:", sorted(gl.keys()), "| team:", {k: (js.get("homeTeam") or {}).get(k) for k in ("abbrev", "score", "sog")})
-    with ThreadPoolExecutor(max_workers=16) as ex:
+    with ThreadPoolExecutor(max_workers=3) as ex:
         games = [g for g in ex.map(box, ids) if g and g.get("homeTeam", {}).get("goalie")]
+    print("box scores read:", len(games))
     games.sort(key=lambda g: (g["date"], g["id"]))
     starts = defaultdict(list)       # team -> [goalie ids in order]
     scored = defaultdict(list)       # team -> [(goals, sog)]
