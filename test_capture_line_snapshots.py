@@ -175,3 +175,17 @@ def test_capture_for_sport_queries_nba_preseason_games_under_the_preseason_feed(
         monkeypatch.setattr(LH, "DB_PATH", os.path.join(tmp, "line_history.db"))
         CLS.capture_for_sport("NBA", "fake_key")
     assert seen == [("pre1", "basketball_nba_preseason")]
+
+
+def test_bulk_save_writes_only_moved_prices(tmp_path, monkeypatch):
+    import line_history as LH
+    monkeypatch.setattr(LH, "USING_POSTGRES", False)
+    db = str(tmp_path / "lh.db")
+    recs = [{"player": "A", "market": "player_points", "side": "over", "line": 20.5, "price": -110, "book": "dk",
+             "game": "X @ Y"},
+            {"player": "A", "market": "player_points", "side": "under", "line": 20.5, "price": -110, "book": "dk",
+             "game": "X @ Y"}]
+    assert LH.record_snapshots_bulk("NBA", recs, db_path=db) == 2
+    assert LH.record_snapshots_bulk("NBA", recs, db_path=db) == 0           # unchanged -> nothing written
+    recs[0]["price"] = -125
+    assert LH.record_snapshots_bulk("NBA", recs, db_path=db) == 1

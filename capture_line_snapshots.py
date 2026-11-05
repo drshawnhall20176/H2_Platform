@@ -54,7 +54,7 @@ def capture_for_sport(sport_key: str, api_key: str) -> Dict:
         return {**empty, "events_checked": len(events)}
 
     offers_seen = 0
-    snapshots_recorded = 0
+    recs: List[Dict] = []
     for e in live:
         game_label = f"{e.get('away_team', '?')} @ {e.get('home_team', '?')}"
         try:
@@ -63,20 +63,19 @@ def capture_for_sport(sport_key: str, api_key: str) -> Dict:
         except Exception as ex:  # noqa: BLE001
             print(f"  (skip {sport_key} event {e.get('id')}: {type(ex).__name__})")
             continue
-
         for o in offers:
             for side, book_prices in (("over", o.get("over") or {}), ("under", o.get("under") or {})):
                 for book, price in book_prices.items():
                     offers_seen += 1
-                    try:
-                        wrote = LH.record_snapshot(
-                            sport=sport_key, player=o["player"], market=o["market"], side=side,
-                            line=o.get("point"), price=price, book=book, game=game_label,
-                            commence_time=e.get("commence_time"))
-                        if wrote:
-                            snapshots_recorded += 1
-                    except Exception as ex:  # noqa: BLE001
-                        print(f"  (failed to record {sport_key} {o.get('player')}/{o.get('market')}: {ex})")
+                    recs.append({"player": o.get("player"), "market": o.get("market"), "side": side,
+                                 "line": o.get("point"), "price": price, "book": book, "game": game_label,
+                                 "commence_time": e.get("commence_time")})
+    # Nov 5: saved in one pass per sport (it was two database connections per price; every run timed out)
+    try:
+        snapshots_recorded = LH.record_snapshots_bulk(sport_key, recs)
+    except Exception as ex:  # noqa: BLE001
+        print(f"  (failed to record {sport_key} snapshots: {type(ex).__name__}: {ex})")
+        snapshots_recorded = 0
 
     return {"events_checked": len(events), "live_events": len(live),
            "offers_seen": offers_seen, "snapshots_recorded": snapshots_recorded}

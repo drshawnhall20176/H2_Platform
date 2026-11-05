@@ -249,6 +249,45 @@ def record_snapshot(sport: str, player: str, market: str, side: str, line: Optio
     return True
 
 
+def record_snapshots_bulk(sport: str, records: List[Dict], db_path: Optional[str] = None,
+                          captured_at: Optional[str] = None) -> int:
+    """record_snapshot for many prices at once (Nov 5). The capture job saved each price with two fresh database
+    connections (look up the last price, then insert): tens of thousands per run, so every run hit its 45-minute limit
+    and was cancelled. Now: ONE read of the latest price per (player, market, side, book) for these games, the
+    comparison in memory, and one batched insert of the prices that moved. Same rule as record_snapshot: a row is
+    written only when the line or price differs from the last one stored for this game. Returns rows written."""
+    db_path = db_path if db_path is not None else DB_PATH
+    captured_at = captured_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    recs = [r for r in records or [] if r.get("player") and r.get("market") and r.get("side") and r.get("book")]
+    if not recs:
+        return 0
+    if not USING_POSTGRES:
+        return sum(1 for r in recs if record_snapshot(sport, r["player"], r["market"], r["side"], r.get("line"),
+                                                      r.get("price"), r["book"], r.get("game"), r.get("commence_time"),
+                                                      db_path=db_path, captured_at=captured_at))
+    from psycopg2.extras import execute_values
+    games = sorted({r.get("game") for r in recs if r.get("game")})
+    with _pg_conn() as con, con.cursor() as cur:
+        cur.execute("SELECT DISTINCT ON (player, market, side, book) player, market, side, book, line, price "
+                    "FROM line_snapshots WHERE sport=%s AND game = ANY(%s) "
+                    "ORDER BY player, market, side, book, id DESC", (sport, games))
+        last = {(a, b, c, d): (e, f) for a, b, c, d, e, f in cur.fetchall()}
+        new, seen = [], set()
+        for r in recs:
+            k = (r["player"], r["market"], r["side"], r["book"])
+            if k in seen:
+                continue
+            seen.add(k)
+            prev = last.get(k)
+            line = None if r.get("line") is None else float(r["line"])
+            if prev is not None and prev[0] == line and prev[1] == r.get("price"):
+                continue
+            new.append([{**r, "captured_at": captured_at, "sport": sport, "line": line}.get(c) for c in _FIELDS])
+        if new:
+            execute_values(cur, f"INSERT INTO line_snapshots ({','.join(_FIELDS)}) VALUES %s", new, page_size=1000)
+    return len(new)
+
+
 def line_series(sport: str, player: str, market: str, side: Optional[str] = None,
                 book: Optional[str] = None, db_path: Optional[str] = None) -> List[Dict]:
     """Every recorded snapshot for (sport, player, market), oldest first — the actual time series

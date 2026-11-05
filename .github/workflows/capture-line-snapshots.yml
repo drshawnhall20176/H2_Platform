@@ -70,4 +70,4 @@ jobs:
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: python capture_line_snapshots.py
+        run: python -u capture_line_snapshots.py
