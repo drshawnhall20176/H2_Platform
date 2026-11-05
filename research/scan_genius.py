@@ -26,7 +26,7 @@ def one(cid):
         return None
     times = sorted(str(m.get("matchTime") or "") for m in js)
     if not times or times[-1] < "2026-09-01" or times[0] > "2027-01-31":
-        return None
+        return {"cid": cid, "old": times[-1][:10] if times else None}
     teams = Counter()
     for m in js:
         teams[m.get("homename") or ""] += 1
@@ -36,9 +36,14 @@ def one(cid):
 
 
 def main() -> int:
-    lo, hi = int(os.environ.get("LO", "41000")), int(os.environ.get("HI", "46000"))
+    lo, hi = int(os.environ.get("LO", "40000")), int(os.environ.get("HI", "62000"))
     with ThreadPoolExecutor(max_workers=32) as ex:
-        found = [x for x in ex.map(one, range(lo, hi)) if x]
+        allf = [x for x in ex.map(one, range(lo, hi, int(os.environ.get("STEP", "1")))) if x]
+    old = [x for x in allf if "old" in x]
+    found = [x for x in allf if "old" not in x]
+    by_k = Counter((x["cid"] // 1000) * 1000 for x in old)
+    print("non-empty but not this season, per 1000 ids:", dict(sorted(by_k.items())))
+    print("latest-dated old ones:", sorted(old, key=lambda x: str(x["old"]))[-5:])
     for f in sorted(found, key=lambda x: (x["league"] or 0, x["cid"])):
         print(json.dumps(f, ensure_ascii=False))
     print(f"{len(found)} competitions with games Sep 2026 - Jan 2027 in ids {lo}-{hi}")
