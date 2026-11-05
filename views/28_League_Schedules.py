@@ -54,25 +54,19 @@ C.hero_banner("📅", "League Schedules", "Real season schedules, browsed by whi
 
 # ----------------------------------------------------------------- sport tabs (Home.py's own pattern)
 st.divider()
-live = sports.enabled_sports()
+live = [s for s in sports.enabled_sports() if sports.in_season(s.key)]   # Nov 5: in-season leagues only
 keys = [s.key for s in live]
 current = st.session_state.get("sport", sports.DEFAULT_SPORT)
 if current not in keys:
     current = keys[0]
 
 C.section_header("🏟", "Select League")
-cols = st.columns(len(keys) + len([s for s in sports.REGISTRY.values() if not s.enabled]))
-for i, s in enumerate(live):
-    with cols[i]:
+with st.container(horizontal=True, horizontal_alignment="left"):
+    for s in live:
         if st.button(f"{s.icon} {s.label}", key=f"league_sched_sport_btn_{s.key}",
-                    type="primary" if current == s.key else "secondary", width="stretch"):
+                     type="primary" if current == s.key else "secondary", width="content"):
             st.session_state["sport"] = s.key
             st.rerun()
-coming = [s for s in sports.REGISTRY.values() if not s.enabled]
-for i, s in enumerate(coming):
-    with cols[len(live) + i]:
-        st.button(f"{s.icon} {s.label}\n*(coming soon)*", key=f"league_sched_sport_btn_coming_{s.key}",
-                 disabled=True, width="stretch")
 
 _active = sports.REGISTRY.get(current)
 if not _active:

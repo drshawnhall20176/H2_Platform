@@ -19,38 +19,25 @@ C.hero_banner("📈", "H2 Sports — The Sports Trading Desk",
 # ensures it's always visible and unobstructed, at the top of the main content on the
 # landing page every user sees first.
 st.divider()
-live = sports.enabled_sports()
+try:
+    _owner = st.secrets.get("AUDIENCE", "owner") == "owner"
+except Exception:                                               # noqa: BLE001
+    _owner = True
+live = sports.selectable_sports(_owner)          # Nov 5: only sports in season, plus Tennis and Intl Hoops
 keys = [s.key for s in live]
 current = st.session_state.get("sport", sports.DEFAULT_SPORT)
 if current not in keys:
-    current = keys[0]
+    current = sports.default_selectable(_owner)
 
 C.section_header("🏟", "Select Sport")
-cols = st.columns(len(keys) + len([s for s in sports.REGISTRY.values() if not s.enabled]))
-
-for i, s in enumerate(live):
-    with cols[i]:
-        selected = (current == s.key)
-        if st.button(
-            f"{s.icon} {s.label}",
-            key=f"sport_btn_{s.key}",
-            type="primary" if selected else "secondary",
-            width="stretch"
-        ):
+with st.container(horizontal=True, horizontal_alignment="left"):
+    for s in live:
+        if st.button(f"{s.icon} {s.label}", key=f"sport_btn_{s.key}",
+                     type="primary" if current == s.key else "secondary", width="content"):
             st.session_state["sport"] = s.key
             st.rerun()
 
-coming = [s for s in sports.REGISTRY.values() if not s.enabled]
-for i, s in enumerate(coming):
-    with cols[len(live) + i]:
-        st.button(
-            f"{s.icon} {s.label}\n*(coming soon)*",
-            key=f"sport_btn_coming_{s.key}",
-            disabled=True,
-            width="stretch"
-        )
-
-active = sports.REGISTRY.get(current)
+active = sports.get(current)
 if active:
     st.caption(f"Currently viewing: **{active.icon} {active.label}** — select a page from the sidebar to begin.")
     if current == "UFC":
