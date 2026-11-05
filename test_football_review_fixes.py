@@ -118,3 +118,14 @@ def test_markets_by_sport_and_team_rows_wiring():
                                                                   "special": {"pgames": special(), "prior": []}}}
     r = SP.team_rows("football", "NFL", bundle, "GB", "X", "FG Made", -3.0, 47.0)
     assert len(r) == 1 and r[0]["projection"] > 1.5
+
+
+def test_backup_qb_gives_the_backs_more_carries():
+    pg = league()
+    base = {r["player"]: r for r in FP.player_rows(ROSTER, "GB", "CAR", "Rush Attempts", pg, PM.allowed_by_slot(pg, "NFL"))}
+    qb = [{"pid": "bk", "name": "Third String", "slot": "QB1", "status": None,
+           "role_change": {"from": "QB3", "for": "Starter"}}]
+    bk = {r["player"]: r for r in FP.player_rows(ROSTER + qb, "GB", "CAR", "Rush Attempts", pg, PM.allowed_by_slot(pg, "NFL"))}
+    a, b = base["Josh Jacobs"], bk["Josh Jacobs"]
+    assert abs(b["opp"] / a["opp"] - 1.03) < 1e-6
+    assert any("Backup QB starting" in f for f in b["flags"])

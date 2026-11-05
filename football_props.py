@@ -120,6 +120,10 @@ PROMOTED_SHARE_MULT = 1.5
 CARRY_TO_REPLACEMENT = 0.7
 SCRIPT_PASS = 0.006            # per point of spread: underdogs throw more
 SCRIPT_RUSH = 0.008            # favorites run more
+# Nov 5 (Ravens: Lamar out, third-string QB vs JAX). research/backtest_backup_qb_rush.py, 387 backup-QB starts 2022-26:
+# the lead back's carries beat the model's formula by +0.5% in those games vs -2.4% with the usual QB (team runs
+# +5.3% vs -1.1%) -- about 3% more carries for the backs. Small but steady; the underdog rule still holds with a backup.
+BACKUP_QB_RUSH = 0.03
 FORM_N = 8                     # weeks of form
 # Oct 30 (Packers-Panthers review):
 PRIOR_FULL = 4                 # under 4 games this season, last season fills the gap (4 - n game-equivalents)
@@ -361,6 +365,7 @@ def player_rows(roster: Sequence[Dict], team, defense, market: str, pgames, allo
             adds[id(i)] += vac * weights[id(i)] / tot if tot else 0.0
 
     spread = PE.maybe(ctx.get("spread"))
+    backup_qb = any(_group(str(r.get("slot") or "")) == "QB" and r.get("role_change") for r in roster)
     env = None
     imp = ctx.get("implied")
     if imp:
@@ -400,6 +405,9 @@ def player_rows(roster: Sequence[Dict], team, defense, market: str, pgames, allo
                 flags.append(f"↑ +{adds[id(i)]:.1f} {_opp_word(kind, tgt_ok)} from teammates out")
             if r.get("role_change"):
                 flags.append(PPR_role_text(r["role_change"]))
+            if backup_qb and grp == "RB" and kind == "rush_att":
+                opp *= 1 + BACKUP_QB_RUSH
+                flags.append(f"Backup QB starting: +{BACKUP_QB_RUSH:.0%} carries for the backs (387 backup starts, 2022-26)")
             if spread is not None:
                 if kind in ("pass_att", "tgt"):
                     opp *= 1 + SCRIPT_PASS * spread
