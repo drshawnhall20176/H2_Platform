@@ -513,3 +513,36 @@ def suggestions(graded: Sequence[Dict], active: Optional[Dict[Tuple[str, str, st
                         "text": f"{model_share:.0%} of misses came from volume or role (the model's opportunity "
                                 "call), not the player. Look at the Role change / Volume rows below for the pattern."})
     return out
+
+
+
+# --------------------------------------------------------------------------- did players beat the model? (Nov 5)
+def beat_model(graded: Sequence[Dict], min_n: int = 20) -> List[Dict]:
+    """Per market: how often the player finished ABOVE the projection, the typical actual / projection, and -- for the
+    reads where the model took the Under -- how often the player went over the line anyway. Answers "is the model
+    taking too many Unders?": if Under calls lose more than their stated chance says, they are."""
+    by: Dict[str, List[Dict]] = {}
+    for r in graded:
+        if r.get("result") not in ("hit", "miss") or r.get("actual") is None or r.get("projection") is None:
+            continue
+        by.setdefault(r.get("market") or "?", []).append(r)
+    out = []
+    for m, rs in by.items():
+        if len(rs) < min_n:
+            continue
+        proj = [r for r in rs if float(r["projection"]) > 0]
+        above = [r for r in proj if float(r["actual"]) != float(r["projection"])]
+        unders = [r for r in rs if (r.get("side") or "Over") == "Under"]
+        overs = [r for r in rs if (r.get("side") or "Over") == "Over"]
+        said_u = [float(r["chance"]) for r in unders if r.get("chance") is not None]
+        said_o = [float(r["chance"]) for r in overs if r.get("chance") is not None]
+        ratios = sorted(float(r["actual"]) / float(r["projection"]) for r in proj)
+        out.append({"market": m, "n": len(rs),
+                    "beat_proj": (sum(1 for r in above if float(r["actual"]) > float(r["projection"])) / len(above)) if above else None,
+                    "median_ratio": ratios[len(ratios) // 2] if ratios else None,
+                    "under_share": len(unders) / len(rs), "under_n": len(unders),
+                    "under_beaten": (sum(1 for r in unders if r["result"] == "miss") / len(unders)) if unders else None,
+                    "under_said": (sum(said_u) / len(said_u)) if said_u else None,
+                    "over_n": len(overs), "over_hit": (sum(1 for r in overs if r["result"] == "hit") / len(overs)) if overs else None,
+                    "over_said": (sum(said_o) / len(said_o)) if said_o else None})
+    return sorted(out, key=lambda x: -x["n"])
