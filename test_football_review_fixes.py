@@ -129,3 +129,13 @@ def test_backup_qb_gives_the_backs_more_carries():
     a, b = base["Josh Jacobs"], bk["Josh Jacobs"]
     assert abs(b["opp"] / a["opp"] - 1.03) < 1e-6
     assert any("Backup QB starting" in f for f in b["flags"])
+
+
+def test_backup_qb_trims_his_receivers():
+    pg = league()
+    qb = [{"pid": "bk", "name": "Third String", "slot": "QB1", "status": None, "role_change": {"from": "QB3", "for": "S"}}]
+    for market, f in (("Receiving Yards", 0.96), ("Receptions", 0.967)):
+        a = {r["player"]: r for r in FP.player_rows(ROSTER, "GB", "CAR", market, pg, PM.allowed_by_slot(pg, "NFL"))}
+        b = {r["player"]: r for r in FP.player_rows(ROSTER + qb, "GB", "CAR", market, pg, PM.allowed_by_slot(pg, "NFL"))}
+        assert abs(b["Wide Out"]["projection"] / a["Wide Out"]["projection"] - f) < 1e-6
+        assert any("Backup QB starting: receivers" in x for x in b["Wide Out"]["flags"])

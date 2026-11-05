@@ -103,6 +103,7 @@ def slate_reads(games: Sequence[Dict], sample: Dict, offers: Optional[List[Dict]
                                opp_name=g.get("away_name" if is_home else "home_name"),
                                game_date=g.get("game_date"))
                     out[(row["pid"], mk)] = row
+    attach_injury_news(out)
     return out
 
 
@@ -191,6 +192,7 @@ def family_slate_reads(sport: str, games: Sequence[Dict], bundles: Dict, offers,
                                home=team == b["home"], team_name=names.get(team, team),
                                opp_name=names.get(opp, opp), game_date=g.get("game_date"))
                     out[(row["pid"], mk)] = row
+    attach_injury_news(out)
     return out
 
 
@@ -253,6 +255,65 @@ def side_probs(row: Dict) -> Optional[Dict]:
         return None if p is None else (p if side == "Over" else 1.0 - p)
     return {"side": side, "p_final": flip(row["p_final"]), "p_model": flip(row.get("p_model")),
             "p_market": flip(row.get("p_market"))}
+
+
+# --------------------------------------------------------------------------- injury news on every row (Nov 5)
+# A key player OUT changes a game plan for both teams. Each row gets its own team's and the opponent's key absences
+# ("news_team" / "news_opp") and a 🩹 note, and play_from_row downgrades a playable read to ⛔ Pass when there is
+# news AND the model is far from the market (Conviction >= NEWS_CONVICTION): after news, a big disagreement with the
+# books usually means the line already prices something the model can't see.
+# Threshold from research/injury_news_test.py (graded NBA reads): with injury news, Conviction 1.30-1.50 hit 59%
+# (n=69), 1.50+ hit 50% (n=50) vs 58% without news. So 1.50.
+NEWS_CONVICTION = 1.50
+KEY_FOOTBALL_SLOTS = ("QB", "QB1", "RB1", "WR1", "WR2", "TE1")
+KEY_MIN_BASKETBALL = 26.0          # minutes a game: a starter
+KEY_TOI_HOCKEY = 17.0              # minutes a game: top-six forward / top-four defenseman
+
+
+def _is_key_absence(row: Dict) -> bool:
+    if not row.get("out"):
+        return False
+    if row.get("avg_min") is not None:
+        return float(row["avg_min"] or 0) >= KEY_MIN_BASKETBALL
+    if row.get("avg_toi") is not None:
+        return float(row["avg_toi"] or 0) >= KEY_TOI_HOCKEY
+    return str(row.get("slot") or "") in KEY_FOOTBALL_SLOTS
+
+
+def attach_injury_news(reads: Dict) -> Dict:
+    """Stamp news_team / news_opp (names of key players out) and a 🩹 flag on every row, in place."""
+    key_out: Dict = {}
+    for row in reads.values():
+        if _is_key_absence(row):
+            names = key_out.setdefault((row.get("game"), row.get("team_id")), [])
+            label = row.get("player") or "?"
+            slot = str(row.get("slot") or "")
+            label += f" ({slot})" if slot.startswith("QB") else ""
+            if label not in names:
+                names.append(label)
+    for row in reads.values():
+        mine = key_out.get((row.get("game"), row.get("team_id"))) or []
+        theirs = key_out.get((row.get("game"), row.get("opp_id"))) or []
+        mine = [n for n in mine if not n.startswith(str(row.get("player") or "~~"))]
+        row["news_team"], row["news_opp"] = mine, theirs
+        if (mine or theirs) and not row.get("out"):
+            bits = ([f"{row.get('team_name') or 'team'}: " + ", ".join(mine[:3]) + " out"] if mine else []) + \
+                   ([f"{row.get('opp_name') or 'opponent'}: " + ", ".join(theirs[:3]) + " out"] if theirs else [])
+            flags = row.setdefault("flags", [])
+            note = "🩹 Injury news — " + "; ".join(bits)
+            if note not in flags:
+                flags.insert(0, note)
+    return reads
+
+
+def news_guard(row: Dict, use: str, use_why: str, conviction: float):
+    """(use, use_why) after the injury-news rule."""
+    playable = use in (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE)
+    if playable and (row.get("news_team") or row.get("news_opp")) and conviction >= NEWS_CONVICTION:
+        who = ", ".join((row.get("news_team") or []) + (row.get("news_opp") or []))
+        return PE.USE_PASS, (f"injury news ({who} out) and the model is {conviction:.2f}× the market — the line likely "
+                             "already prices it; check the news before betting")
+    return use, use_why
 
 
 def why(row: Dict) -> str:
@@ -320,6 +381,7 @@ def play_from_row(row: Dict, slate_row: Optional[Dict] = None) -> Optional[Dict]
         conviction = round(max(sp["p_model"] / p_mkt, 1.0), 2)
     else:
         conviction = 1.0
+    use, use_why = news_guard(row, use, use_why, conviction)        # Nov 5: injury news + far from the market
     best = bk.get("best_over") if side == "Over" else bk.get("best_under")
     s = slate_row or {}
     return {

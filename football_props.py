@@ -124,6 +124,9 @@ SCRIPT_RUSH = 0.008            # favorites run more
 # the lead back's carries beat the model's formula by +0.5% in those games vs -2.4% with the usual QB (team runs
 # +5.3% vs -1.1%) -- about 3% more carries for the backs. Small but steady; the underdog rule still holds with a backup.
 BACKUP_QB_RUSH = 0.03
+# research/backtest_backup_qb_receivers.py (617 top-two receiver games with a backup QB, 2022-26), vs the usual QB:
+# targets -1.9 pts, receptions -3.2 pts, receiving yards -4.0 pts against the model's formula.
+BACKUP_QB_RECV = {"Targets": 0.98, "Receptions": 0.967, "Receiving Yards": 0.96}
 FORM_N = 8                     # weeks of form
 # Oct 30 (Packers-Panthers review):
 PRIOR_FULL = 4                 # under 4 games this season, last season fills the gap (4 - n game-equivalents)
@@ -408,6 +411,11 @@ def player_rows(roster: Sequence[Dict], team, defense, market: str, pgames, allo
             if backup_qb and grp == "RB" and kind == "rush_att":
                 opp *= 1 + BACKUP_QB_RUSH
                 flags.append(f"Backup QB starting: +{BACKUP_QB_RUSH:.0%} carries for the backs (387 backup starts, 2022-26)")
+            if backup_qb and grp in ("WR", "TE") and market in BACKUP_QB_RECV:
+                env_mult_qb = BACKUP_QB_RECV[market]
+                flags.append(f"Backup QB starting: receivers {env_mult_qb - 1:+.0%} on {market.lower()} (617 games, 2022-26)")
+            else:
+                env_mult_qb = 1.0
             if spread is not None:
                 if kind in ("pass_att", "tgt"):
                     opp *= 1 + SCRIPT_PASS * spread
@@ -419,7 +427,7 @@ def player_rows(roster: Sequence[Dict], team, defense, market: str, pgames, allo
                     flags.append(("Favored" if spread < 0 else "Underdog") + f" {spread:+.1f}: "
                                  + ("more runs" if spread < 0 else "more passes"))
             env_mult = 1.0 + ENV_WEIGHT.get(market, 0.7) * ((env or 1.0) - 1)
-            proj = rate * opp * f["factor"] * env_mult * _tuning(sport, market, slot)
+            proj = rate * opp * f["factor"] * env_mult * env_mult_qb * _tuning(sport, market, slot)
             if not i["games"]:
                 flags.append("no games in the sample")
         rows.append(price_row(r, key, slot, proj, opp, market, i["vals"], i["read_vals"], ctx, lines, prices,
