@@ -56,6 +56,8 @@ def box(gid):
 def main() -> int:
     ids = game_ids()
     print("games:", len(ids))
+    rr = S.get(f"{API}/gamecenter/{ids[0]}/boxscore", timeout=30)
+    print("DEBUG status:", rr.status_code, rr.url, rr.text[:200].replace("\n", " "))
     js = get(f"{API}/gamecenter/{ids[0]}/boxscore") or {}
     print("DEBUG keys:", sorted(js.keys())[:40], "state:", js.get("gameState"))
     pb = js.get("playerByGameStats") or {}
