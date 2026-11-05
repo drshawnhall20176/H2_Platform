@@ -66343,3 +66343,72 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401866454,10,40186645436,24,Buffalo,Miami (OH),,,False,4,70
 2026,401866454,10,40186645437,25,Buffalo,Miami (OH),,,True,5,25
 2026,401866454,10,40186645438,26,Miami (OH),Buffalo,,,False,5,75
+2026,401866455,10,4018664552,1,Massachusetts,Ball State,,,False,1,25
+2026,401866455,10,4018664553,2,Ball State,Massachusetts,,,True,1,80
+2026,401866455,10,4018664555,3,Massachusetts,Ball State,,,False,1,25
+2026,401866455,10,4018664556,4,Ball State,Massachusetts,,,False,1,60
+2026,401866455,10,4018664557,5,Massachusetts,Ball State,,,True,1,13
+2026,401866455,10,4018664559,6,Ball State,Massachusetts,,,False,2,75
+2026,401866455,10,40186645510,7,Massachusetts,Ball State,,,False,2,23
+2026,401866455,10,40186645511,8,Ball State,Massachusetts,,,False,2,23
+2026,401866455,10,40186645512,9,Massachusetts,Ball State,,,False,2,9
+2026,401866455,10,40186645513,10,Ball State,Massachusetts,,,True,2,72
+2026,401866455,10,40186645515,11,Massachusetts,Ball State,,,True,2,36
+2026,401866455,10,40186645517,12,Ball State,Massachusetts,,,False,2,75
+2026,401866455,10,40186645519,13,Ball State,Massachusetts,,,False,3,75
+2026,401866455,10,40186645520,14,Massachusetts,Ball State,,,False,3,29
+2026,401866455,10,40186645521,15,Ball State,Massachusetts,,,True,3,65
+2026,401866455,10,40186645523,16,Massachusetts,Ball State,,,False,3,25
+2026,401866455,10,40186645524,17,Ball State,Massachusetts,,,False,3,63
+2026,401866455,10,40186645525,18,Massachusetts,Ball State,,,True,3,9
+2026,401866455,10,40186645527,19,Ball State,Massachusetts,,,False,3,56
+2026,401866455,10,40186645528,20,Massachusetts,Ball State,,,False,4,15
+2026,401866455,10,40186645529,21,Ball State,Massachusetts,,,False,4,80
+2026,401866455,10,40186645530,22,Massachusetts,Ball State,,,True,4,10
+2026,401866455,10,40186645532,23,Ball State,Massachusetts,,,True,4,75
+2026,401866455,10,40186645534,24,Massachusetts,Ball State,,,False,4,18
+2026,401866455,10,40186645535,25,Ball State,Massachusetts,,,True,5,25
+2026,401866455,10,40186645536,26,Massachusetts,Ball State,,,True,5,75
+2026,401866456,10,4018664562,1,Central Michigan,Eastern Michigan,,,True,1,75
+2026,401866456,10,4018664564,2,Eastern Michigan,Central Michigan,,,False,1,25
+2026,401866456,10,4018664565,3,Central Michigan,Eastern Michigan,,,False,1,80
+2026,401866456,10,4018664566,4,Eastern Michigan,Central Michigan,,,False,1,34
+2026,401866456,10,4018664567,5,Central Michigan,Eastern Michigan,,,True,1,86
+2026,401866456,10,4018664569,6,Eastern Michigan,Central Michigan,,,False,2,17
+2026,401866456,10,40186645610,7,Central Michigan,Eastern Michigan,,,True,2,51
+2026,401866456,10,40186645612,8,Eastern Michigan,Central Michigan,,,False,2,25
+2026,401866456,10,40186645613,9,Central Michigan,Eastern Michigan,,,False,2,85
+2026,401866456,10,40186645615,10,Eastern Michigan,Central Michigan,,,False,3,25
+2026,401866456,10,40186645616,11,Central Michigan,Eastern Michigan,,,True,3,90
+2026,401866456,10,40186645618,12,Eastern Michigan,Central Michigan,,,False,3,25
+2026,401866456,10,40186645619,13,Central Michigan,Eastern Michigan,,,True,3,64
+2026,401866456,10,40186645621,14,Eastern Michigan,Central Michigan,,,False,4,25
+2026,401866456,10,40186645622,15,Central Michigan,Eastern Michigan,,,False,4,65
+2026,401866456,10,40186645623,16,Eastern Michigan,Central Michigan,,,True,4,15
+2026,401866456,10,40186645625,17,Central Michigan,Eastern Michigan,,,False,4,75
+2026,401866457,10,4018664572,1,Toledo,Sacramento State,,,False,1,77
+2026,401866457,10,4018664573,2,Sacramento State,Toledo,,,False,1,39
+2026,401866457,10,4018664574,3,Toledo,Sacramento State,,,True,1,32
+2026,401866457,10,4018664576,4,Sacramento State,Toledo,,,True,1,23
+2026,401866457,10,4018664578,5,Toledo,Sacramento State,,,False,1,73
+2026,401866457,10,4018664579,6,Sacramento State,Toledo,,,False,1,53
+2026,401866457,10,40186645710,7,Toledo,Sacramento State,,,False,1,99
+2026,401866457,10,40186645711,8,Sacramento State,Toledo,,,True,2,57
+2026,401866457,10,40186645713,9,Toledo,Sacramento State,,,False,2,53
+2026,401866457,10,40186645714,10,Sacramento State,Toledo,,,False,2,14
+2026,401866457,10,40186645715,11,Toledo,Sacramento State,,,False,2,92
+2026,401866457,10,40186645716,12,Sacramento State,Toledo,,,False,2,26
+2026,401866457,10,40186645718,13,Sacramento State,Toledo,,,False,3,35
+2026,401866457,10,40186645719,14,Toledo,Sacramento State,,,False,3,69
+2026,401866457,10,40186645720,15,Sacramento State,Toledo,,,False,3,3
+2026,401866457,10,40186645721,16,Toledo,Sacramento State,,,True,3,52
+2026,401866457,10,40186645723,17,Sacramento State,Toledo,,,False,3,25
+2026,401866457,10,40186645724,18,Toledo,Sacramento State,,,True,3,70
+2026,401866457,10,40186645726,19,Sacramento State,Toledo,,,False,3,25
+2026,401866457,10,40186645727,20,Toledo,Sacramento State,,,False,4,73
+2026,401866457,10,40186645728,21,Sacramento State,Toledo,,,False,4,14
+2026,401866457,10,40186645729,22,Toledo,Sacramento State,,,True,4,57
+2026,401866457,10,40186645731,23,Sacramento State,Toledo,,,True,4,25
+2026,401866457,10,40186645733,24,Toledo,Sacramento State,,,False,4,75
+2026,401866457,10,40186645734,25,Sacramento State,Toledo,,,False,4,16
+2026,401866457,10,40186645735,26,Toledo,Sacramento State,,,False,4,22
