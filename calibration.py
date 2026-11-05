@@ -100,3 +100,54 @@ def chance(sport: Optional[str], p: Optional[float], market: Optional[str] = Non
     if p is None or market in SKIP_MARKETS:
         return p
     return honest(p, factor(sport))
+
+
+
+# --------------------------------------------------------------------------- by side (Nov 5)
+# The Nov 5 audit (research/calibration_audit.py, 2,479 NBA reads Oct 30 - Nov 4): the model's UNDER chances were
+# honest (said 55%, hit 56%) but its OVER chances weren't (said 53%, hit 45%; Points 54% -> 41%, combos 53-57% ->
+# 34-41%). One factor for both sides can't fix that, so each side gets its own. Held out (research/
+# side_calibration_test.py, fit on earlier days, scored on later ones): the per-side version beat both "as shown" and
+# one shared factor on log loss in every split, and the Overs it stopped calling singles had hit 46-50%.
+# Applied to the model's P(over) before the lean, edge and Use tag are worked out (props_engine.read_line), so the
+# chance shown, the value and the tags all move together. Owner-approved per sport on Postgame Review, like `s`.
+SIDE_S_RANGE = (0.3, 1.0)
+
+
+def _side_key(sport: Optional[str], side: str) -> str:
+    return f"{sport or ''}:{side}"
+
+
+def side_factors(sport: Optional[str]):
+    """(s_over, s_under) approved for this sport; (1.0, 1.0) = no change."""
+    factor(None)                                                # refreshes the shared cache when it's stale
+    lo, hi = SIDE_S_RANGE
+    m = _cache["map"]
+    return (max(lo, min(hi, m.get(_side_key(sport, "Over"), 1.0))), max(lo, min(hi, m.get(_side_key(sport, "Under"), 1.0))))
+
+
+def apply_side(p_over: Optional[float], factors) -> Optional[float]:
+    """P(over) with the side factor of whichever side it favors pulled toward 50%."""
+    if p_over is None or not factors:
+        return p_over
+    s_over, s_under = factors
+    s = s_over if p_over > 0.5 else s_under
+    return honest(p_over, s)
+
+
+def fit_by_side(rows: Iterable[Dict]) -> Dict:
+    """{"Over": fit, "Under": fit} -- the honest-chance factor for each side the model took (range 0.30-1.00)."""
+    rows = list(rows)
+    out = {}
+    for side in ("Over", "Under"):
+        data = usable([r for r in rows if (r.get("side") or "Over") == side])
+        n = len(data)
+        if n < MIN_N:
+            out[side] = {"s": 1.0, "n": n, "enough": False}
+            continue
+        lo, hi = SIDE_S_RANGE
+        grid = [round(lo + i * 0.01, 2) for i in range(int(round((hi - lo) / 0.01)) + 1)]
+        best = min(grid, key=lambda g: _ll(data, g))
+        out[side] = {"s": best, "n": n, "enough": True, "said": sum(p for p, _ in data) / n,
+                     "hit": sum(y for _, y in data) / n, "log_loss": (round(_ll(data, 1.0), 4), round(_ll(data, best), 4))}
+    return out

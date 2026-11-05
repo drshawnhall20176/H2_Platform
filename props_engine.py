@@ -574,7 +574,7 @@ def redistribute(players: Sequence[Dict], cap: float = 40.0, primary_n: int = 0)
 def read_line(projection: Optional[float], values: Sequence[float], line: Optional[float], dist: str,
               over_price=None, under_price=None, p_market: Optional[float] = None, slope: float = 1.0,
               model_weight: float = MODEL_WEIGHT, sd_floor_frac: float = 0.25, sd_floor_abs: float = 1.0,
-              news_checked: bool = False) -> Dict:
+              news_checked: bool = False, side_factors=None) -> Dict:
     """Everything the table shows for one line: model probability (calibrated), the market's, the blend,
     the side worth betting and its EV at the price you'd get. Prices are American odds (None when unknown).
 
@@ -596,6 +596,9 @@ def read_line(projection: Optional[float], values: Sequence[float], line: Option
         if g["level"] == "big":
             model_weight = min(model_weight, GAP_MODEL_WEIGHT)
     p = blend(p_model, p_mkt, model_weight)
+    if side_factors:                                            # Nov 5: per-side honest chance (calibration.py)
+        import calibration as CAL
+        p = CAL.apply_side(p, side_factors)
     out.update(p_model=p_model, p_market=p_mkt, p_final=p)
     if over_price is not None or under_price is not None:
         ev_o, ev_u = ev(p, over_price), ev(1 - p if p is not None else None, under_price)
@@ -1153,3 +1156,14 @@ def market_gaps(rows: Sequence[Dict], team_of: Dict) -> List[Dict]:
                               ("⚠️ check news first" if r.get("lean") == "Check news" else "no value at this price")})
     out.sort(key=lambda d: -abs(float(d["Gap"].rstrip("%"))) if d["Gap"] != "—" else 0)
     return out
+
+
+
+def side_factors_for(sport: Optional[str]):
+    """The owner-approved per-side honest-chance factors for a sport, or None (no change)."""
+    try:
+        import calibration as CAL
+        f = CAL.side_factors(sport)
+        return None if f == (1.0, 1.0) else f
+    except Exception:                                           # noqa: BLE001
+        return None
