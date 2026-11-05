@@ -418,6 +418,8 @@ def hoops_refresh(league: str, fetch: Callable = _http, today: Optional[date] = 
         rows = I.euroleague_season(f"E{season}", fetch)
     elif league == "EUROCUP":
         rows = I.euroleague_season(f"U{season}", fetch, comp="U", league="EUROCUP")
+    elif league in getattr(I, "GENIUS_COMPS", {}):
+        rows = I.genius_results(league, I.genius_games(league, fetch))
     elif league in getattr(I, "FIBA_PAGES", {}):
         rows = I.fiba_results(league, I.fiba_season(league, season, fetch_text))
         prev = str(int(season) - 1)
@@ -483,7 +485,7 @@ def hoops_build(league: str, r: Optional[Dict], events: Sequence[Dict], now: dat
     return out
 
 
-TOTAL_SD = {"BCL": 16.0, "FEC": 16.5, "EUROCUPW": 15.0, "EUROCUP": 16.0, "EUROLEAGUE": 16.0, "NBL": 18.0, "NCAAMB": 17.0, "NBA": 18.0, "WNBA": 17.0, "NHL": 2.3}
+TOTAL_SD = {"NKL": 17.0, "ICELAND": 17.0, "BAHRAIN": 17.0, "ESTONIA1": 17.0, "QATAR": 17.0, "BCL": 16.0, "FEC": 16.5, "EUROCUPW": 15.0, "EUROCUP": 16.0, "EUROLEAGUE": 16.0, "NBL": 18.0, "NCAAMB": 17.0, "NBA": 18.0, "WNBA": 17.0, "NHL": 2.3}
 
 
 def hoops_schedule_build(league: str, r: Optional[Dict], upcoming: Sequence[Dict], now: datetime) -> List[Dict]:
@@ -548,7 +550,9 @@ def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optio
         recs = hoops_build(league, r, evs, now)
     else:                                                      # no odds feed for this league: fair lines from the schedule
         evs = []
-        if league in getattr(I, "FIBA_PAGES", {}):
+        if league in getattr(I, "GENIUS_COMPS", {}):
+            upcoming = I.genius_upcoming(league, I.genius_games(league, fetch))
+        elif league in getattr(I, "FIBA_PAGES", {}):
             upcoming = I.fiba_upcoming(league, I.fiba_season(league, season, fetch_text))
         else:
             code = ("U" if league == "EUROCUP" else "E") + I.season_of(league, now.date().isoformat())
@@ -573,7 +577,8 @@ def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optio
 
 # --------------------------------------------------------------------------- logging a Game Lab bet (Nov 3)
 BET_SPORT = {"NCAAMB": "NCAAMB", "NBA": "NBA", "NHL": "NHL", "WNBA": "WNBA", "EUROLEAGUE": "INTL", "NBL": "INTL",
-             "EUROCUP": "INTL", "BCL": "INTL", "FEC": "INTL", "EUROCUPW": "INTL",
+             "EUROCUP": "INTL", "BCL": "INTL", "FEC": "INTL", "EUROCUPW": "INTL", "NKL": "INTL", "ICELAND": "INTL",
+             "BAHRAIN": "INTL", "ESTONIA1": "INTL", "QATAR": "INTL",
              "TENNIS": "TENNIS"}
 TAG = "gl"                     # notes carry "gl:<league>:<game_id>" so the capture can settle the bet itself
 
@@ -732,7 +737,7 @@ def main(argv=None) -> int:
     if not api:
         print("ODDS_API_KEY not set")
         return 1
-    which = (argv or sys.argv[1:] or ["TENNIS,EUROLEAGUE,EUROCUP,BCL,FEC,EUROCUPW,NBL,NCAAMB,NBA,NHL"])[0].split(",")
+    which = (argv or sys.argv[1:] or ["TENNIS,EUROLEAGUE,EUROCUP,BCL,FEC,EUROCUPW,NKL,ICELAND,BAHRAIN,ESTONIA1,QATAR,NBL,NCAAMB,NBA,NHL"])[0].split(",")
     for s in which:
         try:
             out = tennis_capture(api) if s == "TENNIS" else hoops_capture(s, api)

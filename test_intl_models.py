@@ -533,3 +533,19 @@ def test_fiba_pages_give_results_and_schedule(tmp_path):
     assert out["rated"] and out["priced"] == 1
     p = MS.load_game_picks("BCL", db_path=db)[0]
     assert p["home"] == "Rytas" and p["model_margin"] is not None and p["line"] is None
+
+
+def test_genius_leagues_record_results_and_wait_for_enough_games(tmp_path):
+    feed = [{"matchId": 1, "matchStatus": "COMPLETE", "matchTimeUTC": "2026-11-04 16:00:00", "homename": "Rytas-2",
+             "awayname": "Perlas", "homescore": "88", "awayscore": "80"},
+            {"matchId": 2, "matchStatus": "SCHEDULED", "matchTimeUTC": "2026-11-06 16:00:00", "homename": "Sūduva",
+             "awayname": "Rytas-2", "homescore": "", "awayscore": "", "live": 0}]
+    games = I.genius_games("NKL", fetch=lambda url, params=None: feed)
+    assert I.genius_results("NKL", games) == [{"league": "NKL", "id": "gs-1", "date": "2026-11-04", "home_team": "Rytas-2",
+                                               "away_team": "Perlas", "home_points": 88.0, "away_points": 80.0,
+                                               "neutral_site": False}]
+    up = I.genius_upcoming("NKL", games)
+    assert up[0]["kickoff"] == "2026-11-06T16:00:00+00:00" and up[0]["home"] == "Sūduva"
+    db = str(tmp_path / "m.db")
+    out = IP.hoops_capture("NKL", "k", fetch=lambda url, params=None: feed, now=NOW, db_path=db)
+    assert out["archive_added"] == 1 and not out["rated"] and out["priced"] == 0      # 1 game: not rated yet

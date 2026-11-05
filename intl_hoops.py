@@ -274,6 +274,68 @@ def fiba_upcoming(league: str, games: Sequence[Dict]) -> List[Dict]:
     return out
 
 
+# --------------------------------------------------------------------------- domestic leagues via FIBA LiveStats (Nov 5)
+# Leagues DraftKings lists that keep their stats on FIBA LiveStats (Genius Sports). Its open competition feed shows each
+# league's CURRENT round only -- no season history -- so these leagues are recorded from Nov 5 on, every capture run,
+# and get fair lines once enough games are stored to rate the teams (min_decay_games). Competition ids were matched to
+# the leagues by their team lists (research/probe_leagues2.py) and change each season.
+GENIUS_URL = "https://fibalivestats.dcd.shared.geniussports.com/data/competition/{}.json"
+GENIUS_COMPS = {
+    "NKL": [49833],        # Lithuania NKL (Žalgiris-2, Rytas-2, Sūduva, Perlas Go, Neptūnas-II, ...)
+    "ICELAND": [49040],    # Iceland Premier League (Tindastóll, Keflavík, KR, Grindavík, Álftanes, ÍR, Höttur, Ármann)
+    "BAHRAIN": [50172],    # Bahrain Premier League (Manama, Al Ahli, Samaheej, Sitra, Nuwaidrat, Isa Town, ...)
+    "ESTONIA1": [49981],   # Estonia 1st League (Rapla, Kohila, Rakvere, Hiiumaa, Askus Jetoil, ...)
+    "QATAR": [49726],      # Qatar QBL (Al Gharafa, Al Khor, ...) -- one game seen so far; confirm as more appear
+}
+for _k, _t in (("NKL", "Lithuania NKL"), ("ICELAND", "Iceland Premier League"), ("BAHRAIN", "Bahrain Premier League"),
+               ("ESTONIA1", "Estonia 1st League"), ("QATAR", "Qatar QBL")):
+    LEAGUES[_k] = {"title": _t, "odds_key": None, "min_games": 0, "lam": 3.0, "sd": 12.0, "decay": True,
+                   "min_decay_games": 30}
+
+
+def genius_games(league: str, fetch: Callable = _http) -> List[Dict]:
+    """The games FIBA LiveStats currently lists for the league's competitions (its current round)."""
+    out, seen = [], set()
+    for cid in GENIUS_COMPS.get(league, []):
+        for m in fetch(GENIUS_URL.format(cid)) or []:
+            if isinstance(m, dict) and m.get("matchId") not in seen:
+                seen.add(m.get("matchId"))
+                out.append(m)
+    return out
+
+
+def _genius_utc(m: Dict) -> Optional[str]:
+    t = str(m.get("matchTimeUTC") or "").strip()
+    return (t.replace(" ", "T")[:19] + "+00:00") if len(t) >= 16 else None
+
+
+def genius_results(league: str, games: Sequence[Dict]) -> List[Dict]:
+    out = []
+    for m in games:
+        if str(m.get("matchStatus") or "").upper() != "COMPLETE":
+            continue
+        hs, as_ = _num(m.get("homescore")), _num(m.get("awayscore"))
+        hn, an = m.get("homename"), m.get("awayname")
+        ko = _genius_utc(m) or str(m.get("matchTime") or "")
+        if hs is None or as_ is None or not hn or not an or not ko:
+            continue
+        out.append({"league": league, "id": f"gs-{m.get('matchId')}", "date": ko[:10], "home_team": hn, "away_team": an,
+                    "home_points": hs, "away_points": as_, "neutral_site": False})
+    return out
+
+
+def genius_upcoming(league: str, games: Sequence[Dict]) -> List[Dict]:
+    out = []
+    for m in games:
+        if str(m.get("matchStatus") or "").upper() == "COMPLETE" or str(m.get("live")) in ("1", "True", "true"):
+            continue
+        ko, hn, an = _genius_utc(m), m.get("homename"), m.get("awayname")
+        if ko and hn and an:
+            out.append({"league": league, "id": f"gs-{m.get('matchId')}", "kickoff": ko, "home": hn, "away": an,
+                        "neutral": False})
+    return out
+
+
 def nbl_day(day: date, fetch: Callable = _http) -> List[Dict]:
     data = fetch(NBL_URL, {"dates": day.strftime("%Y%m%d")}) or {}
     out = []
