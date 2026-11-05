@@ -33,10 +33,13 @@ def run():
     # We read/set session state directly here rather than rendering UI, so the sidebar widget
     # rendered below can pick up the correct current value without a double-render issue.
     import sports as _sports
-    live = _sports.enabled_sports()
-    keys = [s.key for s in live]
+    try:
+        _owner = st.secrets.get("AUDIENCE", "owner") == "owner"
+    except Exception:                                           # noqa: BLE001 -- no secrets file: a local/owner run
+        _owner = True
+    keys = [s.key for s in _sports.selectable_sports(_owner)]     # Nov 5: in-season sports + the labs
     if st.session_state.get("sport") not in keys:
-        st.session_state["sport"] = _sports.DEFAULT_SPORT
+        st.session_state["sport"] = _sports.default_selectable(_owner)
     active_sport = st.session_state["sport"]
 
     # Sidebar sport picker -- called here so it renders in the sidebar. Streamlit places
@@ -129,6 +132,8 @@ def run():
                                                           # adjusted slate-wide leaderboard.
         "36": ("NCAAF",),                                # Anytime TD Engine (NCAAF) -- Bernoulli
                                                           # TD probability board.
+        "43": ("TENNIS",),                               # Tennis Lab -- picked as its own sport on Home (Nov 5)
+        "44": ("INTL",),                                 # International Hoops -- likewise
         "45": ("NCAAMB",),                               # Game Lab (college basketball) -- game lines
         "46": ("NBA",),                                  # Game Lab (NBA)
         "47": ("NHL",),                                  # Game Lab (NHL)
@@ -274,8 +279,11 @@ def run():
     # navigation's dict mode sections everything or nothing, there's no supported way to mix a
     # loose top-level page with sectioned ones (confirmed directly against Streamlit's own docs).
     sections: dict = {"🏠 START HERE": [st.Page(str(here / "Home.py"), title="Home", icon="⚾", url_path="home")]}
+    lab = active_sport in sports.LAB_SPORTS
     for f in view_files:
         key = lead(f.name)
+        if lab and key not in (sports.LAB_PAGES[active_sport],) + sports.LAB_COMMON_PAGES:
+            continue  # Tennis / Intl Hoops: their own lab page, the Bet Log and the Progression Plan only
         required_sports = sport_only_leads.get(key)
         if required_sports and active_sport not in required_sports:
             continue  # e.g. Dinger Engine makes no sense once WNBA/NBA is selected, and vice versa

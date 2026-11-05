@@ -325,7 +325,63 @@ DEFAULT_SPORT = "MLB"
 
 # --------------------------------------------------------------------------- accessors
 def get(sport_key: str) -> Sport:
+    if sport_key in LAB_SPORTS:
+        return LAB_SPORTS[sport_key]
     return REGISTRY.get(sport_key, REGISTRY[DEFAULT_SPORT])
+
+
+# --------------------------------------------------------------------------- in season + the labs (Nov 5)
+# The Home page offers only sports that are in season, plus Tennis and International Hoops, which have their own model
+# pages (Tennis Lab, International Hoops) instead of the props pipeline. The labs are NOT in REGISTRY, so the jobs that
+# walk every enabled sport (line snapshots, settlement, publishing) never see them; picking one shows its lab page,
+# the Bet Log (its bets are logged as TENNIS / INTL) and the Progression Plan.
+# Season windows are (first month-day, last month-day) inclusive; a window that wraps the new year is fine.
+SEASON_WINDOWS = {
+    "MLB": ("03-15", "11-04"),     # spring training opens mid-March; the World Series can run into early November
+    "WNBA": ("05-01", "10-25"),
+    "NFL": ("08-01", "02-15"),     # preseason through the Super Bowl
+    "NCAAF": ("08-20", "01-25"),   # week 0 through the title game
+    "NBA": ("10-01", "06-25"),     # preseason through the Finals
+    "NHL": ("09-20", "06-30"),
+    "NCAAMB": ("11-01", "04-10"),  # opening night through the title game
+    # UFC: year-round (no window)
+}
+LAB_SPORTS = {
+    "TENNIS": Sport(key="TENNIS", label="Tennis — ATP / WTA", icon="🎾", odds_sport_key="tennis", markets=[],
+                    market_map={"Moneyline": "h2h", "Game spread": "spreads", "Total games": "totals"}),
+    "INTL": Sport(key="INTL", label="International Hoops", icon="🌍", odds_sport_key="basketball_euroleague", markets=[],
+                  market_map={"Moneyline": "h2h", "Spread": "spreads", "Total": "totals"}),
+}
+LAB_PAGES = {"TENNIS": "43", "INTL": "44"}       # the views/ page number each lab opens
+LAB_COMMON_PAGES = ("18", "42")                   # Bet Log, Progression Plan
+
+
+def in_season(sport_key: str, day=None) -> bool:
+    w = SEASON_WINDOWS.get(sport_key)
+    if not w:
+        return True
+    from datetime import date as _date
+    day = day or _datetime.now(_ET_TZ()).date()
+    md = day.strftime("%m-%d") if isinstance(day, _date) else str(day)[5:10]
+    lo, hi = w
+    return lo <= md <= hi if lo <= hi else (md >= lo or md <= hi)
+
+
+def _ET_TZ():
+    import pytz
+    return pytz.timezone("US/Eastern")
+
+
+def selectable_sports(owner: bool = True, day=None) -> List[Sport]:
+    """What the sport picker offers: live sports that are in season, then the labs (owner build only -- their pages
+    are owner-only)."""
+    out = [s for s in enabled_sports() if in_season(s.key, day)]
+    return out + (list(LAB_SPORTS.values()) if owner else [])
+
+
+def default_selectable(owner: bool = True, day=None) -> str:
+    keys = [s.key for s in selectable_sports(owner, day)]
+    return DEFAULT_SPORT if DEFAULT_SPORT in keys else (keys[0] if keys else DEFAULT_SPORT)
 
 
 def enabled_sports() -> List[Sport]:
@@ -453,19 +509,19 @@ def render_sport_selector():
     unobstructed. This label keeps sidebar users oriented without taking up space or
     getting buried below a long page list."""
     import streamlit as st
-    live = enabled_sports()
-    keys = [s.key for s in live]
+    try:
+        owner = st.secrets.get("AUDIENCE", "owner") == "owner"
+    except Exception:                                           # noqa: BLE001
+        owner = True
+    keys = [s.key for s in selectable_sports(owner)]
     current = st.session_state.get("sport", DEFAULT_SPORT)
     if current not in keys:
-        current = keys[0]
+        current = default_selectable(owner)
         st.session_state["sport"] = current
 
-    active = REGISTRY.get(current)
+    active = get(current)
     with st.sidebar:
         st.markdown(f"**Sport:** {active.icon} {active.label}" if active else "**Sport:** MLB")
-        coming = [s for s in REGISTRY.values() if not s.enabled]
-        if coming:
-            st.caption("Coming soon: " + " · ".join(f"{s.icon} {s.key}" for s in coming))
     return current
 
 
