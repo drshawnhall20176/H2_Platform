@@ -10,9 +10,22 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def main() -> int:
+    import basketball_engine as BB
     import position_data as PD
-    smp = PD.nba_league_props_sample("2026-11-05")
-    rows = (smp.get("prior") or []) + (smp.get("cur") or [])
+    import sports
+    from datetime import date
+    eng = sports.get("NBA").engine
+    notes = []
+    rows = []
+    for start, end in ((date(2025, 10, 21), date(2026, 4, 13)), (date(2026, 10, 20), date(2026, 11, 5))):
+        ev = BB.scoreboard_events_in_window(eng.SITE_API, eng._get_json_cached, start, end)
+        games = PD.parse_scoreboard_events(ev or [], end.isoformat(), start.isoformat(), lambda t: t == 2)
+        gm = {g["gid"]: g for g in games}
+        lines = PD._fetch_lines(eng, list(gm))
+        all_lines = {gid: {"date": gm[gid].get("date"), "lines": lines.get(gid) or {}} for gid in gm}
+        pos = PD._roster_positions(eng, all_lines, notes)
+        rows += PD.basketball_pgames(all_lines, pos)
+        print(f"{start}..{end}: {len(gm)} games")
     print("player-games:", len(rows))
     games = defaultdict(lambda: defaultdict(list))         # (game, team) -> list of lines
     for p in rows:
