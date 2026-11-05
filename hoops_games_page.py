@@ -298,6 +298,16 @@ def render_fair(league: str) -> None:
         on_day = [p for p in on_day if sports.slot_of(_et(p)) == slot]
     upcoming = sorted([p for p in on_day if str(p.get("kickoff")) > now and p.get("result") is None], key=lambda x: x["kickoff"])
     finished = sorted([p for p in on_day if p not in upcoming], key=lambda x: x["kickoff"])
+    if league in getattr(I, "GENIUS_COMPS", {}):
+        try:
+            stored = len(MS.load_results(league))
+        except Exception:                                       # noqa: BLE001
+            stored = 0
+        need = I.LEAGUES[league].get("min_decay_games", 30)
+        if stored < need:
+            st.warning(f"📥 Building {title}: {stored} of {need} games recorded. This league's stats feed shows only the "
+                       "current round, so results are being recorded from Nov 5 on; fair lines appear once there are "
+                       "enough games to rate the teams.")
     st.markdown(f"##### Upcoming ({len(upcoming)})")
     if not upcoming:
         st.caption(f"No upcoming {title} games for {day:%a %b %d}" + (f" ({slot})" if slot != "All slate" else "") + ".")
