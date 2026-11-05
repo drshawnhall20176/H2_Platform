@@ -112,6 +112,20 @@ def is_out(status) -> bool:
     return str(status or "").strip().lower() in _OUT
 
 
+# Nov 5: research/backtest_nba_rim_protector.py (2025-26 + this season, 1,295 team-games): with the OPPONENT's starting
+# center (24+ minutes) out, teams scored +1.6 pts and rebounded +2.3 pts more vs their own average than when he played
+# (121 games out). Small and steady; applied to the attacking team's scoring / rebounding markets.
+RIM_OUT_EFFECT = {"Points": 1.016, "Rebounds": 1.023, "Pts+Reb": 1.018, "Pts+Reb+Ast": 1.014, "Pts+Ast": 1.012,
+                  "Reb+Ast": 1.015}
+RIM_MIN = 24.0
+
+
+def rim_protectors_out(rot: Sequence[Dict]) -> List[str]:
+    """The team's starting-level centers (24+ minutes) ruled out tonight."""
+    return [r.get("name") for r in rot or [] if r.get("slot") == "C" and _num(r.get("avg_min")) >= RIM_MIN
+            and is_out(r.get("status"))]
+
+
 # --------------------------------------------------------------------------- defense factor (fixes 2 + 3)
 def defense_allowed(allowed: Dict, market: str, min_games: int = 3, value_fn=None) -> Dict[str, Dict[str, Dict]]:
     """position_matchups.allowed_by_slot output -> {defense: {slot: {"avg", "games"}}} of the MARKET allowed per game
@@ -314,6 +328,9 @@ def player_rows(rotation_list: Sequence[Dict], defense, market: str, cur_table: 
             rate *= rest["rate_mult"]
             flags += rest["flags"] + blow["flags"]
             env_mult = PE.env_multiplier(ctx.get("env"), _component_shares(b["games"], market), ENV_WEIGHTS)
+            if ctx.get("opp_rim_out") and market in RIM_OUT_EFFECT and (ctx.get("sport") or "NBA") == "NBA":
+                env_mult *= RIM_OUT_EFFECT[market]
+                flags.append(f"🩹 Their center {', '.join(ctx['opp_rim_out'][:2])} out ({RIM_OUT_EFFECT[market] - 1:+.1%})")
             proj = rate * opp * fac["factor"] * env_mult * _tuning(ctx.get("sport") or "NBA", market, slot)
         if b["f"]["filled"] and not b["f"]["season_games"]:
             # Oct 31: no game this season yet -- every number is last season's, on a role that may have changed

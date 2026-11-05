@@ -86,14 +86,16 @@ def slate_reads(games: Sequence[Dict], sample: Dict, offers: Optional[List[Dict]
         home, away = _int_or(g.get("home_id")), _int_or(g.get("away_id"))
         gl = (game_lines.get(g.get("label")) or {}) if isinstance(game_lines, dict) else \
             game_lines_for(game_lines, g.get("home_name"), g.get("away_name"))
+        rots = {t: PPR.team_rotation(cur, prior, t, injuries.get(t), sport, last_n=ROTATION_GAMES,
+                                     chart=(charts or {}).get(t)) for t in (home, away)}
         for team, opp, is_home in ((home, away, True), (away, home, False)):
-            rot = PPR.team_rotation(cur, prior, team, injuries.get(team), sport, last_n=ROTATION_GAMES,
-                                    chart=(charts or {}).get(team))
+            rot = rots[team]
             if not rot:
                 continue
             ctx = PPR.game_context(team, is_home, gl.get("spread_home"), gl.get("total"), rest.get(team),
                                    rest.get(opp), baseline, offers=offers, book=book, news_checked=news_checked,
                                    sport=sport)
+            ctx["opp_rim_out"] = PPR.rim_protectors_out(rots.get(opp) or [])        # Nov 5
             for mk, market in markets.items():
                 t = tables[mk]
                 for row in PPR.player_rows(rot, opp, market, t["cur"], t["prior"], cur, prior, mode=mode,
@@ -146,8 +148,10 @@ def team_rows(family: str, sport: str, bundle: Dict, team, opp, market: str, spr
     if family == "football":
         import football_props as FP
         roster = FP.roster_for(props, team, market)
+        trench = props.get("trench") or {}
         return FP.player_rows(roster, team, opp, market, props.get("pgames") or [], bundle.get("allowed") or {},
-                              lines=lines, context=dict(ctx, implied=team_imp), sport=sport,
+                              lines=lines, context=dict(ctx, implied=team_imp, trench=trench.get(team),
+                                                        opp_trench=trench.get(opp)), sport=sport,
                               prior_pgames=props.get("prior_pgames"), special=props.get("special"))
     if family == "hockey":
         import hockey_props as HP
