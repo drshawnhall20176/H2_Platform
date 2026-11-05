@@ -127,6 +127,13 @@ BACKUP_QB_RUSH = 0.03
 # research/backtest_backup_qb_receivers.py (617 top-two receiver games with a backup QB, 2022-26), vs the usual QB:
 # targets -1.9 pts, receptions -3.2 pts, receiving yards -4.0 pts against the model's formula.
 BACKUP_QB_RECV = {"Targets": 0.98, "Receptions": 0.967, "Receiving Yards": 0.96}
+# research/backtest_nfl_lines_defense.py (snap counts 2022-26), vs games with nobody out:
+#   own offensive linemen out: QB passing yards -1.7 pts with one out (590 games), -4.1 pts with two+ (134)
+#   opponent missing a regular cornerback: passing yards +5.2 pts, top receiver's yards +2.1 pts (332)
+#   opponent missing a top edge rusher: passing yards +3.2 pts (100); sacks were inconsistent, so not used
+OL_OUT_PASS = {1: 0.983, 2: 0.96}
+OPP_CB_OUT_PASS, OPP_CB_OUT_RECV = 1.05, 1.02
+OPP_EDGE_OUT_PASS = 1.03
 FORM_N = 8                     # weeks of form
 # Oct 30 (Packers-Panthers review):
 PRIOR_FULL = 4                 # under 4 games this season, last season fills the gap (4 - n game-equivalents)
@@ -416,6 +423,21 @@ def player_rows(roster: Sequence[Dict], team, defense, market: str, pgames, allo
                 flags.append(f"Backup QB starting: receivers {env_mult_qb - 1:+.0%} on {market.lower()} (617 games, 2022-26)")
             else:
                 env_mult_qb = 1.0
+            tr, otr = ctx.get("trench") or {}, ctx.get("opp_trench") or {}
+            if grp == "QB" and market == "Pass Yards":
+                n_ol = len(tr.get("ol") or [])
+                if n_ol:
+                    env_mult_qb *= OL_OUT_PASS[min(n_ol, 2)]
+                    flags.append(f"🩹 O-line: {', '.join(tr['ol'][:3])} out ({OL_OUT_PASS[min(n_ol, 2)] - 1:+.1%} passing yards)")
+                if otr.get("cb"):
+                    env_mult_qb *= OPP_CB_OUT_PASS
+                    flags.append(f"🩹 Their CB {', '.join(otr['cb'][:2])} out ({OPP_CB_OUT_PASS - 1:+.0%} passing yards)")
+                if otr.get("edge"):
+                    env_mult_qb *= OPP_EDGE_OUT_PASS
+                    flags.append(f"🩹 Their pass rusher {', '.join(otr['edge'][:2])} out ({OPP_EDGE_OUT_PASS - 1:+.0%} passing yards)")
+            elif grp in ("WR", "TE") and market == "Receiving Yards" and otr.get("cb"):
+                env_mult_qb *= OPP_CB_OUT_RECV
+                flags.append(f"🩹 Their CB {', '.join(otr['cb'][:2])} out ({OPP_CB_OUT_RECV - 1:+.0%} yards)")
             if spread is not None:
                 if kind in ("pass_att", "tgt"):
                     opp *= 1 + SCRIPT_PASS * spread

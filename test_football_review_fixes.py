@@ -139,3 +139,28 @@ def test_backup_qb_trims_his_receivers():
         b = {r["player"]: r for r in FP.player_rows(ROSTER + qb, "GB", "CAR", market, pg, PM.allowed_by_slot(pg, "NFL"))}
         assert abs(b["Wide Out"]["projection"] / a["Wide Out"]["projection"] - f) < 1e-6
         assert any("Backup QB starting: receivers" in x for x in b["Wide Out"]["flags"])
+
+
+def test_trench_regulars_and_who_is_out():
+    import pandas as pd
+    import position_data as PD
+    rows = []
+    for wk in (5, 6, 7, 8):
+        for i, n in enumerate(["LT A", "LG B", "C C", "RG D", "RT E", "Backup F"]):
+            rows.append({"team": "BAL", "week": wk, "player": n, "position": "T" if i != 2 else "C",
+                         "offense_pct": 0.1 if n == "Backup F" else 1.0, "defense_pct": 0.0})
+        rows.append({"team": "BAL", "week": wk, "player": "CB One", "position": "CB", "offense_pct": 0, "defense_pct": 0.95})
+        rows.append({"team": "BAL", "week": wk, "player": "Edge One", "position": "OLB", "offense_pct": 0, "defense_pct": 0.7})
+    regs = PD.trench_regulars(pd.DataFrame(rows), "BAL", 9)
+    assert len(regs["ol"]) == 5 and "Backup F" not in regs["ol"] and regs["cb"] == ["CB One"] and regs["edge"] == ["Edge One"]
+    out = PD.trench_out(regs, {"LT A": "Out", "C C": "Questionable", "CB One": "Doubtful"})
+    assert out == {"ol": ["LT A"], "cb": ["CB One"], "edge": []}
+
+
+def test_line_and_secondary_injuries_move_the_qb_and_receivers():
+    pg = league()
+    a = {r["player"]: r for r in FP.player_rows(ROSTER, "GB", "CAR", "Receiving Yards", pg, PM.allowed_by_slot(pg, "NFL"))}
+    b = {r["player"]: r for r in FP.player_rows(ROSTER, "GB", "CAR", "Receiving Yards", pg, PM.allowed_by_slot(pg, "NFL"),
+                                                context={"opp_trench": {"cb": ["Their CB"], "edge": [], "ol": []}})}
+    assert abs(b["Wide Out"]["projection"] / a["Wide Out"]["projection"] - FP.OPP_CB_OUT_RECV) < 1e-6
+    assert any("Their CB" in f for f in b["Wide Out"]["flags"])
