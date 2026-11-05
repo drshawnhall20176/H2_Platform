@@ -56,6 +56,12 @@ def box(gid):
 def main() -> int:
     ids = game_ids()
     print("games:", len(ids))
+    js = get(f"{API}/gamecenter/{ids[0]}/boxscore") or {}
+    print("DEBUG keys:", sorted(js.keys())[:40], "state:", js.get("gameState"))
+    pb = js.get("playerByGameStats") or {}
+    print("DEBUG pbgs:", {k: sorted((v or {}).keys()) for k, v in pb.items()})
+    gl = ((pb.get("homeTeam") or {}).get("goalies") or [{}])[0]
+    print("DEBUG goalie:", sorted(gl.keys()), "| team:", {k: (js.get("homeTeam") or {}).get(k) for k in ("abbrev", "score", "sog")})
     with ThreadPoolExecutor(max_workers=16) as ex:
         games = [g for g in ex.map(box, ids) if g and g.get("homeTeam", {}).get("goalie")]
     games.sort(key=lambda g: (g["date"], g["id"]))

@@ -278,7 +278,7 @@ def player_rows(rot: Dict[str, List[Dict]], team, opp, market: str, pgames, line
         hits = [v for v in b["vals"] if line is not None and PE.clears(v, line)]
         rows.append({
             "pid": key, "player": r.get("name"), "slot": r.get("slot"), "status": r.get("status"), "out": b["out"],
-            "opp": opp_val, "form": PE.wmean(b["vals"]) if b["vals"] else None, "games": len(b["vals"]),
+            "avg_toi": r.get("avg_toi"), "opp": opp_val, "form": PE.wmean(b["vals"]) if b["vals"] else None, "games": len(b["vals"]),
             "filled": False, "factor": factor, "env": env_mult,
             "projection": proj, "line": line, "line_src": line_src, "over_price": over_p, "under_price": under_p,
             "price_src": price_src, "book": book,
