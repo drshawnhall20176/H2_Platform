@@ -470,7 +470,8 @@ def price_row(r: Dict, key, slot: str, proj: Optional[float], opp: Optional[floa
         over_p = under_p = price_src = p_mkt = None
     floor = m.get("floor") or ((0.45, 8.0) if m["dist"] == "normal" else (0.25, 1.0))   # yardage is lumpy: one 60-yard catch
     read = PE.read_line(proj, read_vals, line, m["dist"], over_p, under_p, p_mkt, ctx.get("slope", 1.0),
-                        PE.weight_for(ctx, sport or ctx.get("sport") or "NFL", market), *floor, news_checked=bool(ctx.get("news_checked")))
+                        PE.weight_for(ctx, sport or ctx.get("sport") or "NFL", market), *floor, news_checked=bool(ctx.get("news_checked")),
+                        side_factors=PE.side_factors_for(sport or ctx.get("sport") or "NFL"))
     hits = [v for v in vals if line is not None and PE.clears(v, line)]
     return {
         "pid": key, "player": r.get("name"), "slot": slot, "status": r.get("status"), "out": out,

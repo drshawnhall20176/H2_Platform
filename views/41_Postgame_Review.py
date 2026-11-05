@@ -161,6 +161,33 @@ with tab_morning:
                     if MS.approve_calibration(SPORT_KEY, cal["s"], {"morning": mpick, "n": cal["n"],
                                                                      "log_loss": ll}):
                         st.success("Saved — ticket math now uses it.")
+        bs = (cal or {}).get("by_side") or {}
+        if bs.get("Over") or bs.get("Under"):
+            act = (cal or {}).get("side_active") or [1.0, 1.0]
+            with st.expander("⚖️ Overs vs Unders — is each side's chance honest?"):
+                st.dataframe(pd.DataFrame([{
+                    "Side": sd, "Reads": v.get("n", 0), "Chance shown": _pct(v.get("said")), "Hit": _pct(v.get("hit")),
+                    "Best factor": f"{v['s']:.2f}" if v.get("enough") else "— (needs more reads)",
+                    "Active now": f"{act[0 if sd == 'Over' else 1]:.2f}"} for sd, v in bs.items()]),
+                    hide_index=True, width="stretch")
+                st.caption("A factor below 1.00 pulls that side's chance toward 50% on the boards — the chance shown, its "
+                           "value at the price and the Use tags all use it, so fewer weak reads on that side qualify. "
+                           "1.00 = trust that side as shown.")
+                ok = [sd for sd in ("Over", "Under") if (bs.get(sd) or {}).get("enough")]
+                if ok and st.button(f"Use these per-side factors for {SPORT_KEY} boards", key=f"pgr_side_{mpick}"):
+                    # the graded chances already carry the active factor, so a new fit stacks on it (honest() composes
+                    # by multiplying: honest(honest(p, a), b) == honest(p, a * b))
+                    done = all(MS.approve_calibration(f"{SPORT_KEY}:{sd}",
+                                                      max(0.3, act[0 if sd == "Over" else 1] * bs[sd]["s"]),
+                                                      {"morning": mpick, "n": bs[sd]["n"], "fit": bs[sd]["s"]})
+                               for sd in ok)
+                    st.success("Saved — the boards use them on their next refresh.") if done else st.error("Couldn't save.")
+                if any(abs(a - 1.0) > 1e-9 for a in act) and st.button(f"Turn per-side factors off for {SPORT_KEY}",
+                                                                          key=f"pgr_side_off_{mpick}"):
+                    for c in MS.list_calibration():
+                        if c["sport"] in (f"{SPORT_KEY}:Over", f"{SPORT_KEY}:Under"):
+                            MS.retire_calibration(int(c["id"]))
+                    st.success("Turned off.")
         for d, s in sorted((rep.get("slates") or {}).items()):
             c = s["counts"]
             st.markdown(f"##### Slate {d}")
@@ -197,6 +224,19 @@ with tab_morning:
                                                 "Actual": r["actual"], "Use": r["use"], "Cause": r["cause"] or ""}
                                                for r in s["top_misses"]]), hide_index=True, width="stretch")
         tr = rep.get("trend") or {}
+        if tr.get("beat"):
+            st.markdown(f"##### 📈 Did players beat the model? (last {tr.get('days', 30)} days)")
+            st.dataframe(pd.DataFrame([{
+                "Market": b["market"], "Graded": b["n"], "Finished above projection": _pct(b["beat_proj"]),
+                "Actual ÷ projection": "—" if b["median_ratio"] is None else f"{b['median_ratio']:.2f}",
+                "Model took Under": _pct(b["under_share"]),
+                "Unders beaten": _pct(b["under_beaten"]), "Unders said they'd lose": _pct(None if b["under_said"] is None
+                                                                                          else 1 - b["under_said"]),
+                "Overs hit": _pct(b["over_hit"]), "Overs said": _pct(b["over_said"])} for b in tr["beat"]]),
+                hide_index=True, width="stretch")
+            st.caption("Finished above projection under 50% = players fall SHORT of the model more often than they beat "
+                       "it. The Under calls are fine when 'Unders beaten' is at or below what they said they'd lose; an "
+                       "Over side that hits well below what it said is the one running hot (see ⚖️ Overs vs Unders above).")
         st.markdown(f"##### Suggestions (last {tr.get('days', 30)} days · {tr.get('graded', 0)} graded props)")
         sugg = rep.get("suggestions") or []
         if not sugg:

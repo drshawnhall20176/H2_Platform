@@ -313,11 +313,13 @@ def review_sport(sport: str, morning: str, open_bets: Sequence[Dict], fetch: Cal
     import calibration as CAL
     cal = CAL.fit(trend_rows)
     cal["active"] = CAL.factor(sport)
+    cal["by_side"] = CAL.fit_by_side(trend_rows)               # Nov 5: Over and Under fitted separately
+    cal["side_active"] = list(CAL.side_factors(sport))
     return {"sport": sport, "morning": morning, "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "slates": slates, "notes": notes(slates) + calibration_notes(cal) + game_pick_notes(games_rep),
             "calibration": cal, "game_picks": games_rep,
             "trend": {"days": TREND_DAYS, "slates": len(trend), "graded": len(trend_rows),
-                      "use": PG.use_record(trend_rows)},
+                      "use": PG.use_record(trend_rows), "beat": PG.beat_model(trend_rows)},
             "suggestions": sugg, "settlement": settlement}
 
 
