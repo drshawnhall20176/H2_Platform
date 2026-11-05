@@ -581,11 +581,62 @@ def _nfl_props_extras(eng, season: int, week: int, weekly, teams, notes: List[st
         _NFL_PRIOR[key] = (weekly, (prior, special, special_prior))
     import football_special as FS
     sroster = {}
+    injuries = {}
     for t in teams:
         inj = {i.get("player"): clean_status(i.get("status"))
                for i in _safe(lambda t=t: eng.get_team_injuries(t, season, week), [], notes, "injuries")}
+        injuries[t] = inj
         sroster[t] = FS.team_roster(special, t, inj)
-    return {"prior_pgames": prior, "special": {"pgames": special, "prior": special_prior}, "special_roster": sroster}
+    trench = _safe(lambda: nfl_trench_report(season, week, teams, injuries), {}, notes, "line / secondary injuries")
+    return {"prior_pgames": prior, "special": {"pgames": special, "prior": special_prior}, "special_roster": sroster,
+            "trench": trench}
+
+
+# --------------------------------------------------------------------------- linemen and defenders out (Nov 5)
+# Which REGULAR offensive linemen, cornerbacks and edge rushers are listed Out / Doubtful tonight. Regulars come from
+# this season's snap counts (the team's last 4 games): linemen 60%+ of offensive snaps (top five), cornerbacks 60%+
+# of defensive snaps (top two), edge rushers (DE / OLB) 50%+ (top two) -- the same definitions
+# research/backtest_nfl_lines_defense.py measured the effects with. football_props applies them.
+_SNAPS: Dict[int, Any] = {}
+TRENCH_GROUPS = {"ol": ({"T", "G", "C", "OL", "OT", "OG"}, "offense_pct", 0.6, 5),
+                 "cb": ({"CB"}, "defense_pct", 0.6, 2),
+                 "edge": ({"DE", "OLB", "EDGE"}, "defense_pct", 0.5, 2)}
+
+
+def _snap_counts(season: int):
+    if season not in _SNAPS:
+        import nflreadpy as nfl
+        _SNAPS.clear()
+        _SNAPS[season] = nfl.load_snap_counts([season]).to_pandas()
+    return _SNAPS[season]
+
+
+def trench_regulars(snaps, team: str, before_week: int) -> Dict[str, List[str]]:
+    """{"ol": [names], "cb": [...], "edge": [...]} -- the team's regulars over its last 4 games before `before_week`."""
+    df = snaps[(snaps["team"] == team) & (snaps["week"].astype(int) < int(before_week))]
+    weeks = sorted(df["week"].astype(int).unique())[-4:]
+    df = df[df["week"].astype(int).isin(weeks)]
+    out = {}
+    for k, (pos, col, need, top) in TRENCH_GROUPS.items():
+        g = df[df["position"].astype(str).isin(pos)]
+        avg = g.groupby("player")[col].sum() / max(len(weeks), 1)
+        cnt = g.groupby("player")[col].count()
+        keep = [(float(v), n) for n, v in avg.items() if float(v) >= need and int(cnt.get(n, 0)) >= 2]
+        out[k] = [n for _, n in sorted(keep, reverse=True)[:top]]
+    return out
+
+
+def trench_out(regulars: Dict[str, List[str]], injuries: Dict[str, Optional[str]]) -> Dict[str, List[str]]:
+    """The regulars listed Out or Doubtful on tonight's injury report."""
+    import props_engine as PE
+    status = {PE.norm_name(n): str(v or "").strip().lower() for n, v in (injuries or {}).items()}
+    return {k: [n for n in names if status.get(PE.norm_name(n)) in ("out", "doubtful")]
+            for k, names in regulars.items()}
+
+
+def nfl_trench_report(season: int, week: int, teams, injuries: Dict[str, Dict[str, Optional[str]]]) -> Dict[str, Dict]:
+    snaps = _snap_counts(season)
+    return {t: trench_out(trench_regulars(snaps, t, week), injuries.get(t) or {}) for t in teams}
 
 
 def _nfl_depths(eng, season: int, week: int, teams: Tuple[str, str], notes: List[str]) -> Dict[str, Dict[str, List[Dict]]]:

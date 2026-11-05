@@ -34,3 +34,12 @@ def test_news_plus_far_from_market_becomes_pass():
     assert use == PE.USE_PASS and "injury news" in why
     assert SP.news_guard(row, PE.USE_BOTH, "x", 1.44)[0] == PE.USE_BOTH          # under 1.50: kept (data: 59% hit)
     assert SP.news_guard({"news_team": [], "news_opp": []}, PE.USE_BOTH, "x", 2.0)[0] == PE.USE_BOTH
+
+
+def test_opponent_center_out_lifts_scoring_and_rebounding():
+    import player_props as PPR
+    rot = [{"name": "Big Man", "slot": "C", "avg_min": 30.0, "status": "Out"},
+           {"name": "Backup C", "slot": "C", "avg_min": 14.0, "status": "Out"},
+           {"name": "Guard", "slot": "G", "avg_min": 34.0, "status": "Out"}]
+    assert PPR.rim_protectors_out(rot) == ["Big Man"]
+    assert PPR.RIM_OUT_EFFECT["Rebounds"] > PPR.RIM_OUT_EFFECT["Points"] > 1.0
