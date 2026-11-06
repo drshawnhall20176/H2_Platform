@@ -501,6 +501,41 @@ def _gap_advice(gaps, right) -> Dict:
                     f"({len(gaps)} props){money} -- mostly short-priced Unders. Keep the news check as it is."}
 
 
+# Nov 6: 23 NFL adjustments were suggested (and approved, twice) off one Sunday's games -- 85% of the graded NFL
+# props came from Nov 1. Re-fitted leaving each slate out, most made the held-out slate WORSE, and their approved
+# factors compounded each morning (x1.10 became x1.21 on the next suggestion). An adjustment is now suggested only
+# when (1) at least HOLD_SLATES slates with HOLD_MIN_N+ props each ran the same way as the move, and (2) fitted
+# without each slate in turn, it lowered the error on that held-out slate overall.
+HOLD_SLATES = 2
+HOLD_MIN_N = 5
+
+
+def holds_up(rows: Sequence[Dict], step: float) -> bool:
+    by: Dict[str, List[Dict]] = {}
+    for r in rows:
+        by.setdefault(str(r.get("slate_date") or ""), []).append(r)
+    if "" in by and len(by) == 1:                                # undated rows (older callers): no slate check
+        return True
+    agree = 0
+    for g in by.values():
+        if len(g) >= HOLD_MIN_N:
+            gr = _ratio(g)
+            agree += 1 if gr is not None and (gr - 1) * (step - 1) > 0 else 0
+    if agree < HOLD_SLATES:
+        return False
+    lo, hi = SUGGEST_RANGE
+    before = after = 0.0
+    for d, te in by.items():
+        tr = [r for k, g in by.items() if k != d for r in g]
+        tr_ratio = _ratio(tr) if tr else None
+        if tr_ratio is None:
+            continue
+        m = max(lo, min(hi, 1 + STEP * (tr_ratio - 1)))
+        before += sum(abs(r["actual"] - r["projection"]) for r in te)
+        after += sum(abs(r["actual"] - r["projection"] * m) for r in te)
+    return after < before
+
+
 def suggestions(graded: Sequence[Dict], active: Optional[Dict[Tuple[str, str, str], float]] = None) -> List[Dict]:
     """[{"kind": "tuning" | "advice", "sport", "market", "slot", "factor", "n", "text"}] from graded props (all dates
     in the window). Tuning suggestions are approvable multipliers; advice needs a code change."""
@@ -517,6 +552,8 @@ def suggestions(graded: Sequence[Dict], active: Optional[Dict[Tuple[str, str, st
             continue
         step = 1 + STEP * (ratio - 1)
         lo, hi = SUGGEST_RANGE
+        if not holds_up(rows, max(lo, min(hi, step))):
+            continue
         f = max(lo, min(hi, step)) * active.get((sport, market, ""), 1.0)
         out.append({"kind": "tuning", "sport": sport, "market": market, "slot": "", "factor": round(f, 3),
                     "n": len(rows), "text": f"{market}: results ran {ratio - 1:+.0%} vs the projections over "
@@ -533,6 +570,8 @@ def suggestions(graded: Sequence[Dict], active: Optional[Dict[Tuple[str, str, st
                 continue
             step = 1 + STEP * (sr / mr - 1)
             lo, hi = SUGGEST_RANGE
+            if not holds_up(srows, max(lo, min(hi, step))):
+                continue
             f = max(lo, min(hi, step)) * active.get((sport, market, slot), 1.0)
             out.append({"kind": "tuning", "sport": sport, "market": market, "slot": slot, "factor": round(f, 3),
                         "n": len(srows), "text": f"{market} · {slot}: results ran {sr - 1:+.0%} vs the projections "
