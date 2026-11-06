@@ -287,7 +287,7 @@ def player_rows(rot: Dict[str, List[Dict]], team, opp, market: str, pgames, line
             "side": read["side"], "ev": read["ev"], "lean": read["lean"], "flags": flags, "dist": m["dist"],
             "values": list(b["vals"]), "sd_floor": floor,
         })
-    return rows
+    return PE.single_bar(rows, "NHL")         # Nov 6: no NHL singles (props_engine.NO_SINGLES)
 
 
 def display(rows: Sequence[Dict], market: str) -> List[Dict]:
