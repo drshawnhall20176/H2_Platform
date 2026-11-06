@@ -163,3 +163,10 @@ def test_player_id_falls_back_to_model_reads(monkeypatch):
     assert rows[0]["player_id"] == 3124890
     rows = LP.build([dict(pk, player_id=77)], [], "NFL", "2026-11-05", reads={"x": 1})
     assert rows[0]["player_id"] == 77
+
+
+def test_against_model_flags_low_chance_and_missing_reads():
+    import log_plays as LP
+    assert "32%" in LP.against_model({"model_prob": 0.3163})
+    assert "no model read" in LP.against_model({"model_prob": None})
+    assert LP.against_model({"model_prob": 0.62}) == ""

@@ -277,6 +277,11 @@ def market_prob(over=None, under=None) -> Optional[float]:
 # NFL Nov 2 (Sunday review). NBA Nov 3 (research/single_bar_study.py, 1,610 priced reads over 4 slates): value >= 3%
 # alone made +0.3% per $1; value >= 5% AND chance >= 55% made +5.0% over 228 (the 50-55% chance band lost 11%).
 SINGLE_BAR = {"NFL": (0.05, 0.55), "NBA": (0.05, 0.55)}
+# Nov 6 (research/single_rules_study.py): NHL 🎯 singles lost on 4 of 5 slates (and broke even on the fifth) -- 97 graded,
+# -16% per $1, hitting 30-50% at prices needing ~52%. NHL reads can still be 🎟️ parlay legs (61% over 26); they just
+# aren't offered as singles until the hockey model earns it back.
+NO_SINGLES = {"NHL"}
+SINGLE_BAR.update({s: (float("inf"), 1.01) for s in NO_SINGLES})
 
 
 def single_bar(rows: List[Dict], sport: Optional[str]) -> List[Dict]:
