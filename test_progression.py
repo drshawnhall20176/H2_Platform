@@ -93,3 +93,14 @@ def test_strategies_judge_parlay_legs_by_their_own_prices(tmp_path):
     assert st["legs"] == 3 and st["legs_won"] == 2
     assert abs(st["singles_per_leg"] - ((0.5 + 1 / 3 - 1) / 3)) < 1e-9
     assert P.strategy_of({"notes": "gl:NCAAMB:x"}) == "game-lab" and P.strategy_of({"notes": "use:single"}) == "untagged"
+
+
+def test_withdrawal_lowers_bankroll_and_unit_but_not_profit_or_drawdown():
+    """Nov 6: money taken out of the book is not a loss."""
+    import progression as P
+    bets = [{"is_real_bet": True, "slate_date": "2026-11-02", "stake": 10, "entry_odds": 100, "result": "win"}]
+    s = {"start_bankroll": 100.0, "start_date": "2026-11-01", "unit_pct": 0.01,
+         "transfers": [{"date": "2026-11-03", "amount": -10.0}]}
+    r = P.plan(s, bets)
+    assert r["bankroll"] == 100.0 and r["profit"] == 10.0 and r["moved"] == -10.0
+    assert r["unit"] == 1.0 and r["parlay_unit"] == 0.5 and r["max_dd"] == 0.0

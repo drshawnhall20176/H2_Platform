@@ -120,7 +120,7 @@ def test_owner_only_pages_match_expected_titles():
                      "Matchup Lab", "Track Record", "Data Health",
                      "Suggested Parlays", "Speculative Basket", "Graded Picks",
                      "Model Dashboard", "First Innings Totals", "Player Lines", "Slip Lab",
-                     "Position Matchups", "Postgame Review", "Progression Plan", "Tennis Lab",
+                     "Position Matchups", "Postgame Review", "Progression Plan", "Reports", "Model Performance", "Tennis Lab",
                      "International Hoops"}, gated
     all_titles = set(re.findall(r'\("([^"]+)",\s*"[^"]*",\s*"[^"]*"\)', src))
     assert gated <= all_titles, f"gated titles not found in _META: {gated - all_titles}"
@@ -616,7 +616,7 @@ def test_sidebar_sections_match_the_documented_grouping():
         "46": "🔬 DEEP RESEARCH", "47": "🔬 DEEP RESEARCH",
         "16": "🔍 SELF-GRADING & PROOF", "17": "🔍 SELF-GRADING & PROOF",
         "18": "🔍 SELF-GRADING & PROOF", "19": "🔍 SELF-GRADING & PROOF", "40": "🔍 SELF-GRADING & PROOF",
-        "41": "🔍 SELF-GRADING & PROOF", "42": "🔍 SELF-GRADING & PROOF",
+        "41": "🔍 SELF-GRADING & PROOF", "42": "🔍 SELF-GRADING & PROOF", "48": "🔍 SELF-GRADING & PROOF", "49": "💼 INVESTOR RELATIONS",
         "20": "📣 OPS & CONTENT", "21": "📣 OPS & CONTENT", "22": "📣 OPS & CONTENT",
     }
     assert actual == expected, f"section grouping drifted from expected: {actual}"

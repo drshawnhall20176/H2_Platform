@@ -50,3 +50,4 @@ curl_cffi==0.16.0      # A REAL, CONFIRMED FIX for a real, confirmed root cause:
                         # wheel exists (stable ABI -- works across 3.10 through this app's own
                         # 3.11 with no risk of the wheel-mismatch problem a Python version drift
                         # already caused once this session).
+fpdf2>=2.7

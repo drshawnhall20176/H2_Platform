@@ -38,3 +38,11 @@ def test_beat_model_summary():
     b = PG.beat_model(rows)[0]
     assert b["n"] == 40 and abs(b["beat_proj"] - 0.25) < 1e-9 and abs(b["under_beaten"] - 0.25) < 1e-9
     assert abs(b["under_said"] - 0.6) < 1e-9 and b["over_n"] == 0
+
+
+def test_nhl_reads_are_never_single_only():
+    """Nov 6: NHL singles lost on 4 of 5 slates -- a strong NHL read can be a parlay leg, never a 🎯 single."""
+    import props_engine as PE
+    rows = PE.single_bar([{"lean": "Under"}], "NHL")
+    assert rows[0]["single_ev"] == float("inf")
+    assert PE.single_bar([{"lean": "Under"}], "NBA")[0]["single_ev"] == 0.05

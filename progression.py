@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Sequence
 DEFAULTS = {"start_bankroll": 1000.0, "start_date": "2026-11-01", "unit_pct": 0.01, "target_roi": 0.03,
             "monthly_goal": 4000.0, "bets_per_month": 300}
 SETTINGS_KEY = "progression_plan"
+PARLAY_UNIT_SHARE = 0.5      # Nov 6: a parlay ticket is half a unit -- it loses far more often than a single
 
 # Gates to move from Prove to Scale (and Scale to Go). Each is (label, key, needed, how it's compared).
 PROVE_GATES = (
@@ -77,9 +78,20 @@ def plan(settings: Dict, bets: Sequence[Dict], today: Optional[date] = None) -> 
     by_day = defaultdict(float)
     for b in settled:
         by_day[_day(b)] += B.bet_pnl(b) or 0
+    # Nov 6: money moved in or out of the book (a withdrawal is negative). It changes the bankroll -- and so the unit --
+    # but it isn't profit or loss, so it moves the drawdown peak with it.
+    moves = defaultdict(float)
+    for t in s.get("transfers") or []:
+        try:
+            if str(t["date"]) >= start:
+                moves[str(t["date"])[:10]] += float(t["amount"])
+        except (KeyError, TypeError, ValueError):
+            continue
     bank, peak, max_dd, path = float(s["start_bankroll"]), float(s["start_bankroll"]), 0.0, []
-    for d in sorted(by_day):
-        bank += by_day[d]
+    for d in sorted(set(by_day) | set(moves)):
+        bank += moves.get(d, 0.0)
+        peak += moves.get(d, 0.0)
+        bank += by_day.get(d, 0.0)
         peak = max(peak, bank)
         if peak > 0:
             max_dd = max(max_dd, (peak - bank) / peak)
@@ -140,8 +152,11 @@ def plan(settings: Dict, bets: Sequence[Dict], today: Optional[date] = None) -> 
 
     losing_stakes_ytd = sum(float(b.get("stake") or 0) for b in settled
                             if _res(b) == "loss" and _day(b)[:4] == str(today.year))
+    moved = sum(moves.values())
     return {"settings": s, "stage": stage, "bankroll": round(bank, 2), "unit": round(unit, 2), "path": path,
-            "profit": round(bank - float(s["start_bankroll"]), 2), "settled": len(settled),
+            "parlay_unit": round(unit * PARLAY_UNIT_SHARE, 2), "moved": round(moved, 2),
+            "above_start": round(max(0.0, bank - float(s["start_bankroll"])), 2),
+            "profit": round(bank - moved - float(s["start_bankroll"]), 2), "settled": len(settled),
             "singles": len(singles), "parlays": len(parlays), "singles_roi": roi(singles), "parlay_roi": roi(parlays),
             "max_dd": max_dd, "months": months, "prove": prove, "scale": scale,
             "discipline": {"parlay_share": parlay_share, "parlay_ok": parlay_share is None or parlay_share <= PARLAY_MONEY_CAP,

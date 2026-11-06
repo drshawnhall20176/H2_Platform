@@ -48,7 +48,10 @@ def pick(plays, slot="All slate", unit="All", side="All Sides", show="All playab
             import props_engine as PE
             if not PE.most_probable(p.get("ModelProb"), p.get("Cushion"), p.get("Gap")):
                 continue
-        elif show != "Everything" and p.get("Model") == "player-props" and p.get("Use") not in USES[show]:
+        # Nov 6: every row, not only the player-props model's -- the older fallback model's rows carry no Use tag (and
+        # inflated chances: an 80% Draymond Green Pts+Ast lost Nov 5), so they slipped into "Parlay legs". They now
+        # show only under "Everything".
+        elif show != "Everything" and p.get("Use") not in USES[show]:
             continue
         if show != "Everything" and (p.get("Conviction") or 0) < min_conv:
             continue

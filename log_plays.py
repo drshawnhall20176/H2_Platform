@@ -52,6 +52,18 @@ def _read_pid(pk, reads):
     return (row or {}).get("pid")
 
 
+def against_model(row) -> str:
+    """Nov 6: why the model doesn't back a logged bet ("" when it does). On Nov 5 the bets placed against the model's
+    read -- Ventrell Miller Under at 32%, a Hagel *points* Under where the pick was goals -- were the losers; this says
+    so at logging time, while the slip can still be checked."""
+    p = row.get("model_prob")
+    if p is None:
+        return "no model read for this market -- check it's the market the platform picked"
+    if p < 0.5:
+        return f"model gives this side only {p:.0%}"
+    return ""
+
+
 def build(picks, board_plays, sport, date_str, real=False, stake=1.0, category=None, tag=None, reads=None):
     import betlog as B
     by = {_key(p["Player"], p["Market"], p["Side"]): p for p in board_plays}
@@ -163,6 +175,7 @@ def main(argv=None) -> int:
             for b in B.list_bets(sport=a.sport) if not (b.get("ticket") or "")}   # singles only: a parlay
     # leg with the same player/line is a different bet, so it must not block logging the single (Nov 2 fix)
     n = 0
+    against = []
     for r in rows:
         k = (r["slate_date"], _key(r["player"], r["market"], r["side"]), float(r["line"] or 0))
         if k in have:
@@ -175,7 +188,13 @@ def main(argv=None) -> int:
         n += 1
         print(f"logged: {r['player']} {r['market']} {r['side']} {r['line']} @ {r['entry_odds']:+.0f} "
               f"(id {'✓' if r['player_id'] else '—'}, model {r['model_prob'] if r['model_prob'] is not None else '—'})")
+        w = against_model(r)
+        if w:
+            print(f"  ⚠️ {w}")
+            against.append(f"{r['player']} {r['market']} {r['side']} {r['line']}: {w}")
     print(f"{n} logged, {len(rows) - n} skipped.")
+    if against:
+        print(f"⚠️ {len(against)} bet(s) the model doesn't back:\n  " + "\n  ".join(against))
     return 0
 
 
