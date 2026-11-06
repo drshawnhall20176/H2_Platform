@@ -121,3 +121,26 @@ def test_lean_carries_backtest_cover(monkeypatch):
          "cover_est": 0.508, "cover_n": 5184}
     b = TB.best_line(p, "NCAAMB", 0.967)
     assert b["best"] == "MVSU +34.5" and b["backtest"] == 0.508 and b["best_value"] is None
+
+
+def test_home_time_and_game_filters(monkeypatch):
+    from pathlib import Path
+    from streamlit.testing.v1 import AppTest
+    import todays_best as TB
+    rows = [{"sport": "NBA", "pick": "A Points Under 20.5", "game": "A @ B", "price": -120, "chance": 0.62,
+             "use": PE.USE_PARLAY, "lock": True, "page": "Best Bets", "time": "7:00 PM"},
+            {"sport": "NBA", "pick": "C Points Under 10.5", "game": "C @ D", "price": -120, "chance": 0.61,
+             "use": PE.USE_PARLAY, "lock": True, "page": "Best Bets", "time": "10:00 PM"}]
+    monkeypatch.setattr(TB, "collect", lambda d, sp: {"rows": rows, "props": {"NBA": "2026-11-06T15:00:00+00:00"}})
+    monkeypatch.setattr(TB, "winner_rows", lambda d, leagues=None: [])
+    at = AppTest.from_file(str(Path(__file__).parent / "Home.py"), default_timeout=30)
+    at.session_state["sport"] = "NBA"
+    at.run()
+    assert at.multiselect(key="home_best_times").options == ["7:00 PM", "10:00 PM"]
+    at.multiselect(key="home_best_times").set_value(["10:00 PM"]).run()
+    shown = at.dataframe[0].value.to_string()
+    assert "C Points" in shown and "A Points" not in shown
+    at.multiselect(key="home_best_times").set_value([]).run()
+    at.multiselect(key="home_best_games").set_value(["A @ B"]).run()
+    shown = at.dataframe[0].value.to_string()
+    assert "A Points" in shown and "C Points" not in shown
