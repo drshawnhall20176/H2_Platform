@@ -150,3 +150,16 @@ def test_moneyline_parlay_without_lines(tmp_path, monkeypatch):
     hdr = next(b for b in bets if B.is_parlay_header(b))
     assert hdr["result"] == "win" and abs(B.bet_pnl(hdr) - 82.61) < 0.01
     assert sum(1 for b in bets if not b.get("ticket")) == 1                 # the single logs too (no line is fine)
+
+
+def test_player_id_falls_back_to_model_reads(monkeypatch):
+    """Nov 5: a defender's tackle prop isn't on the exported board, but the model read has his ID."""
+    import log_plays as LP
+    import parlay_check as PC
+    monkeypatch.setattr(PC, "_find", lambda reads, player, market: {"pid": 3124890} if player == "Roquan Smith" else None)
+    pk = {"player": "Roquan Smith", "market": "Tackles + Assists", "side": "Under", "line": 9.5, "odds": -121,
+          "game": "Jacksonville Jaguars @ Baltimore Ravens", "model_prob": 0.62}
+    rows = LP.build([pk], [], "NFL", "2026-11-05", reads={"x": 1})
+    assert rows[0]["player_id"] == 3124890
+    rows = LP.build([dict(pk, player_id=77)], [], "NFL", "2026-11-05", reads={"x": 1})
+    assert rows[0]["player_id"] == 77
