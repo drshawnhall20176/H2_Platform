@@ -37,6 +37,7 @@ on:
 
 permissions:
   contents: read
+  actions: write          # Nov 6: start close-watch so the new bets get closing prices before their games
 
 jobs:
   log:
@@ -62,3 +63,8 @@ jobs:
             --real "${{ inputs.real }}" --stake "${{ inputs.stake }}" --tag "${{ inputs.tag }}" \
             --ticket "${{ inputs.ticket }}" --ticket-odds "${{ inputs.ticket_odds }}" \
             --fix-model "${{ inputs.fix_model }}" --result "${{ inputs.result }}"
+      - name: Start the closing-price watcher
+        if: ${{ success() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run close-watch.yml --ref "${{ github.ref_name }}" || echo "couldn't start close-watch"
