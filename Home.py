@@ -47,6 +47,53 @@ if active:
 
 st.divider()
 
+# ---------- Today's best (Nov 6) ----------
+# The day's top-tagged picks across every in-season sport and the labs, in one list. Props come from the last Best
+# Bets board built for each sport today (no extra Odds API spend); game lines, international hoops and tennis from
+# their capture jobs. Tags are the same ones each sport's own page shows. Owner build only.
+if _owner:
+    import pandas as _pd
+    import props_engine as _PE
+    import todays_best as _TB
+    _today = _dt.now(_ET).strftime("%Y-%m-%d")
+    _props_sports = [s.key for s in live if s.key in ("NBA", "NFL", "NHL", "NCAAF")]
+    C.section_header("⭐", "Today's best")
+    _best = _TB.collect(_today, _props_sports)
+    _missing = [k for k, at in _best["props"].items() if not at]
+    _c1, _c2 = st.columns([3, 1])
+    _show = _c1.radio("Show", ["🔒 Locks only", "All playable"], horizontal=True, key="home_best_show",
+                      label_visibility="collapsed")
+    if _c2.button("🔄 Refresh props picks", width="stretch",
+                  help="Builds today's Best Bets board for each props sport (the same Odds API use as opening it)."):
+        import best_bets_data as _BBD
+        with st.spinner("Building today's boards…"):
+            for _k in _props_sports:
+                try:
+                    _BBD.load_generic_best_bets_board(_k, _today, _BBD.O.DEFAULT_BOOK)
+                except Exception:                               # noqa: BLE001
+                    pass
+        st.rerun()
+    _rows = [r for r in _best["rows"] if r.get("lock")] if _show.startswith("🔒") else _best["rows"]
+    if _rows:
+        _df = _pd.DataFrame([{"Sport": r["sport"], "Time": r.get("time") or "", "Pick": r["pick"], "Game": r.get("game"),
+                              "Price": (None if r.get("price") is None else f"{float(r['price']):+.0f}"),
+                              "Chance": r.get("chance"), "Use": ("🔒 " if r.get("lock") else "") + (r.get("use") or ""),
+                              "Where": r.get("page")} for r in _rows[:60]])
+        st.dataframe(_df, hide_index=True, width="stretch",
+                     column_config={"Chance": st.column_config.NumberColumn(format="percent")})
+    else:
+        st.caption("No " + ("locks" if _show.startswith("🔒") else "playable picks") + " yet today.")
+    _notes = []
+    if _missing:
+        _notes.append(f"Props not built yet today: {', '.join(_missing)} — open their Best Bets or press Refresh.")
+    _stamps = [f"{k} {_dt.fromisoformat(at).astimezone(_ET):%I:%M %p}".replace(' 0', ' ') for k, at in _best["props"].items() if at]
+    if _stamps:
+        _notes.append("Props as of " + ", ".join(_stamps) + ".")
+    _notes.append("Prices move — confirm on the sport's own page before placing. Tennis and most international "
+                  "leagues rarely show picks: their backtests haven't earned them yet.")
+    st.caption(" ".join(_notes))
+    st.divider()
+
 # ---------- Today's Schedule ----------
 # Sport-aware, and only rendered for the sports schedule_board.py actually covers (MLB, NBA,
 # WNBA, NFL, NCAAF, NCAAMB) -- UFC (individual bouts, not team matchups -- UFC Fight Card already
