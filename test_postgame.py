@@ -108,8 +108,9 @@ def test_postgame_page_grades_a_slate_and_offers_an_approval(monkeypatch):
     from streamlit.testing.v1 import AppTest
     snaps = [snap("Jordan Love", "GB", "Pass Attempts", 30.0, 29.5, "Over", opp=30.0, use=PE.USE_PARLAY, slot="QB")
              for _ in range(1)]
-    many = [dict(snaps[0], player=f"QB{i}") for i in range(16)]
-    monkeypatch.setattr(MS, "snapshot_dates", lambda sport, db_path=None: ["2026-10-29"])
+    # Nov 6: an adjustment needs two slates running the same way, so the QBs span two dates
+    many = [dict(snaps[0], player=f"QB{i}", slate_date=("2026-10-29" if i % 2 else "2026-10-30")) for i in range(16)]
+    monkeypatch.setattr(MS, "snapshot_dates", lambda sport, db_path=None: ["2026-10-29", "2026-10-30"])
     monkeypatch.setattr(MS, "load_snapshots", lambda sport=None, dates=None, db_path=None: snaps + many)
     monkeypatch.setattr(MS, "list_tuning", lambda active_only=True, db_path=None: [])
     box = PG.football_box(SUMMARY)
@@ -269,3 +270,17 @@ def test_gap_advice_needs_profit_not_just_hit_rate():
                  result="hit" if i % 20 < 13 else "miss") for i in range(40)]
     out = [s for s in PG.suggestions(gaps) if "far from the projection" in s["text"]]
     assert out and out[0]["kind"] == "info" and "more vote" not in out[0]["text"]
+
+
+def _t(date, proj, act):
+    return dict(sport="NFL", market="Rush Yards", slot="QB", slate_date=date, projection=proj, actual=act,
+                result="hit", line=proj)
+
+
+def test_tuning_needs_two_slates_that_agree():
+    """Nov 6: one big Sunday can't produce an adjustment on its own."""
+    import postgame as PG
+    one = [_t("2026-11-01", 40.0, 25.0) for _ in range(40)] + [_t("2026-11-02", 40.0, 45.0) for _ in range(3)]
+    assert not [s for s in PG.suggestions(one) if s["kind"] == "tuning"]
+    two = [_t("2026-11-01", 40.0, 25.0) for _ in range(30)] + [_t("2026-11-02", 40.0, 28.0) for _ in range(30)]
+    assert [s for s in PG.suggestions(two) if s["kind"] == "tuning"]
