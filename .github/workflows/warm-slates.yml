@@ -35,5 +35,6 @@ jobs:
       - name: Build and save today's slates
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}     # Nov 6: builds the Best Bets boards for Home's Today's best
           SPORTS: ${{ github.event.inputs.sports }}
         run: python warm_slates.py "${SPORTS}"

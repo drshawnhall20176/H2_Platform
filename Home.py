@@ -106,7 +106,12 @@ if _owner:
     _notes = []
     if _missing:
         _notes.append(f"Props not built yet today: {', '.join(_missing)} — open their Best Bets or press Refresh.")
-    _stamps = [f"{k} {_dt.fromisoformat(at).astimezone(_ET):%I:%M %p}".replace(' 0', ' ') for k, at in _best["props"].items() if at]
+    def _stamp(k, at):
+        try:
+            return f"{k} {_dt.fromisoformat(at).astimezone(_ET):%I:%M %p}".replace(" 0", " ")
+        except (TypeError, ValueError):
+            return None
+    _stamps = [x for x in (_stamp(k, at) for k, at in _best["props"].items() if at) if x]
     if _stamps:
         _notes.append("Props as of " + ", ".join(_stamps) + ".")
     _notes.append("Prices move — confirm on the sport's own page before placing. Tennis and most international "
