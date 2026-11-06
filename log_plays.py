@@ -39,13 +39,26 @@ def _model_prob(pk, bp, reads, sport):
     return None
 
 
+def _read_pid(pk, reads):
+    """The player's ID from the model reads when the board has no row for the pick (Nov 5: defenders' tackle props
+    aren't on the exported board, so three NFL bets went in without IDs and couldn't settle overnight)."""
+    if not reads:
+        return None
+    try:
+        import parlay_check as PC
+        row = PC._find(reads, pk["player"], pk["market"])
+    except Exception:                                           # noqa: BLE001
+        return None
+    return (row or {}).get("pid")
+
+
 def build(picks, board_plays, sport, date_str, real=False, stake=1.0, category=None, tag=None, reads=None):
     import betlog as B
     by = {_key(p["Player"], p["Market"], p["Side"]): p for p in board_plays}
     out = []
     for pk in picks:
         bp = by.get(_key(pk["player"], pk["market"], pk["side"])) or {}
-        pid = bp.get("PlayerId")
+        pid = pk.get("player_id") or bp.get("PlayerId") or _read_pid(pk, reads)
         try:
             pid = int(pid) if pid is not None else None
         except (TypeError, ValueError):
@@ -114,10 +127,16 @@ def main(argv=None) -> int:
             k = (r["slate_date"], _key(r["player"], r["market"], r["side"]), float(r["line"] or 0))
             for b in B.list_bets(sport=a.sport):
                 if (b.get("slate_date"), _key(b.get("player"), b.get("market"), b.get("side")),
-                        float(b.get("line") or 0)) == k and r["model_prob"] is not None:
-                    B.update_bet(int(b["id"]), model_prob=r["model_prob"])
-                    n += 1
-            print(f"model % {r['player']} {r['market']} {r['side']} {r['line']}: {r['model_prob']}")
+                        float(b.get("line") or 0)) == k:
+                    fix = {}
+                    if r["model_prob"] is not None:
+                        fix["model_prob"] = r["model_prob"]
+                    if r["player_id"] and not b.get("player_id"):     # Nov 5: also fill a missing player ID
+                        fix["player_id"] = r["player_id"]
+                    if fix:
+                        B.update_bet(int(b["id"]), **fix)
+                        n += 1
+            print(f"model % {r['player']} {r['market']} {r['side']} {r['line']}: {r['model_prob']} (id {r['player_id'] or '—'})")
         print(f"{n} row(s) refreshed.")
         return 0
     if a.ticket:
