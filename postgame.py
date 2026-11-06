@@ -444,6 +444,63 @@ def _ratio(rows: Sequence[Dict]) -> Optional[float]:
     return a / p if p > 0 else None
 
 
+# Nov 6: the two advice cards below used to judge by hit rate alone, and on Nov 6 both pointed the wrong way
+# (research/advice_study.py, every graded read): 🎯 singles at +3-5% value were the BEST bucket in NBA, NFL and NCAAF
+# (bigger "value" meant the model fighting the market, and losing), so raising the bar would have cut the winners;
+# and the model's 62-72% "right" on big gaps was mostly short Unders -- following it at the posted prices lost money
+# in every sport. They now judge by profit at the posted price before advising a change.
+def _profit(rows) -> Optional[float]:
+    priced = [r for r in rows if PE.decimal(r.get("price")) is not None]
+    if not priced:
+        return None
+    return sum((PE.decimal(r["price"]) - 1) if r.get("result") == "hit" or r.get("y") else -1
+               for r in priced) / len(priced)
+
+
+def _value(r) -> Optional[float]:
+    if r.get("ev") is not None:
+        return r["ev"]
+    d = PE.decimal(r.get("price"))
+    return None if d is None or r.get("chance") is None else r["chance"] * d - 1
+
+
+def _single_advice(graded, row) -> Dict:
+    s = [r for r in graded if r.get("use_tag") == PE.USE_SINGLE and r.get("result") in ("hit", "miss")]
+    lo = [r for r in s if (_value(r) or 0) < 0.05]
+    hi = [r for r in s if (_value(r) or 0) >= 0.05]
+    p_lo, p_hi = _profit(lo), _profit(hi)
+    head = f"{row['Use']} plays hit {row['Hit rate']:.0%} over {row['Graded']}."
+    if len(hi) >= 15 and len(lo) >= 15 and p_lo is not None and p_hi is not None and p_hi > p_lo + 0.03:
+        return {"kind": "advice", "n": row["Graded"],
+                "text": f"{head} Value +5%+ earned {p_hi:+.0%} per $1 vs {p_lo:+.0%} below it -- raise the edge a "
+                        "single needs (+3% -> +5%)."}
+    sides = {sd: [r for r in s if r.get("side") == sd] for sd in ("Over", "Under")}
+    po, pu = _profit(sides["Over"]), _profit(sides["Under"])
+    tail = ("" if p_lo is None or p_hi is None else
+            f" Raising the edge wouldn't help: +5%+ earned {p_hi:+.0%} per $1, +3-5% earned {p_lo:+.0%}.")
+    if len(sides["Over"]) >= 15 and po is not None and pu is not None and po < pu - 0.10:
+        return {"kind": "advice", "n": row["Graded"],
+                "text": f"{head} Over singles are the drain ({po:+.0%} per $1 over {len(sides['Over'])}; Unders "
+                        f"{pu:+.0%}).{tail} Approve the Overs correction under ⚖️ Overs vs Unders."}
+    return {"kind": "info", "n": row["Graded"], "text": f"{head}{tail} No rule change suggested yet."}
+
+
+def _gap_advice(gaps, right) -> Dict:
+    on_model = [dict(r, y=1 if r["model_hit"] else 0) for r in gaps
+                if r.get("price") is not None and r.get("projection") is not None and r.get("line") is not None
+                and ((r["projection"] > r["line"]) == (r.get("side") == "Over"))]
+    prof = _profit(on_model)
+    if prof is not None and len(on_model) >= 12 and prof > 0:
+        return {"kind": "advice", "n": len(gaps),
+                "text": f"When the line sat far from the projection the MODEL was right {right:.0%} of the time "
+                        f"({len(gaps)} props), and following it earned {prof:+.0%} per $1 at the posted prices: "
+                        "the news check may be too cautious -- give the model more vote."}
+    money = "" if prof is None else f", but following it at the posted prices returned {prof:+.0%} per $1"
+    return {"kind": "info", "n": len(gaps),
+            "text": f"When the line sat far from the projection the model was right {right:.0%} of the time "
+                    f"({len(gaps)} props){money} -- mostly short-priced Unders. Keep the news check as it is."}
+
+
 def suggestions(graded: Sequence[Dict], active: Optional[Dict[Tuple[str, str, str], float]] = None) -> List[Dict]:
     """[{"kind": "tuning" | "advice", "sport", "market", "slot", "factor", "n", "text"}] from graded props (all dates
     in the window). Tuning suggestions are approvable multipliers; advice needs a code change."""
@@ -488,9 +545,7 @@ def suggestions(graded: Sequence[Dict], active: Optional[Dict[Tuple[str, str, st
                         "text": f"{row['Use']} legs hit {row['Hit rate']:.0%} over {row['Graded']} -- below what a "
                                 "parlay needs. Tighten the parlay rule (chance 60% -> 65% or cushion 15% -> 20%)."})
         if row["Graded"] >= 20 and row["Use"] == PE.USE_SINGLE and row["Hit rate"] < 0.50:
-            out.append({"kind": "advice", "n": row["Graded"],
-                        "text": f"{row['Use']} plays hit {row['Hit rate']:.0%} over {row['Graded']}. Raise the edge "
-                                "a single needs (+3% -> +5%)."})
+            out.append(_single_advice(g, row))
     # Market gaps: who was right when the line sat far from the projection
     gaps = [r for r in g if (r.get("gap") or "").startswith("big") and r.get("model_hit") is not None]
     if len(gaps) >= 12:
@@ -500,9 +555,7 @@ def suggestions(graded: Sequence[Dict], active: Optional[Dict[Tuple[str, str, st
                         "text": f"When the line sat far from the projection the market was right {1 - right:.0%} of the "
                                 f"time ({len(gaps)} props): keep these as Pass and lean further on the market."})
         elif right >= 0.60:
-            out.append({"kind": "advice", "n": len(gaps),
-                        "text": f"When the line sat far from the projection the MODEL was right {right:.0%} of the time "
-                                f"({len(gaps)} props): the news check may be too cautious -- give the model more vote."})
+            out.append(_gap_advice(gaps, right))
     # Cause mix
     cc = cause_counts(g)
     misses = sum(cc.values())
