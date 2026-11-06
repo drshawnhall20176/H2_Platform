@@ -247,6 +247,15 @@ def best_line(p: Dict, lg: str, home_p: float) -> Dict:
     if leans:
         z, label, detail = max(leans)
         out.update(best=label, lean_detail=detail, lean_z=z)
+    # Where a backtest measured how often spreads with this much disagreement covered (cover_est: NCAAMB and the
+    # international models), that rate is the honest strength of the spread lean -- and it shows the model's biggest
+    # disagreements (lopsided games) are coin flips (~51%), so they rank last, not first.
+    if p.get("cover_est") is not None and p.get("edge") is not None and hs is not None:
+        home = p["edge"] >= 0
+        out.update(best=(f"{p['home']} {float(hs):+g}" if home else f"{p['away']} {-float(hs):+g}"),
+                   lean_detail=f"model {(p['home'] if home else p['away'])} {(-float(mm) if home else float(mm)):+.1f}"
+                   if mm is not None else out.get("lean_detail", ""),
+                   backtest=float(p["cover_est"]), backtest_n=p.get("cover_n"))
     return out
 
 

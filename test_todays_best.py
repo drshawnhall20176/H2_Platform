@@ -110,3 +110,14 @@ def test_best_line_survives_malformed_prices():
          "line_total": 6.5, "model_total": 7.0, "over_price": None, "under_price": -7.5}
     b = TB.best_line(p, "NHL", 0.6)
     assert b["best_value"] is None
+
+
+def test_lean_carries_backtest_cover(monkeypatch):
+    import intl_picks as IP
+    import props_engine as PE
+    import todays_best as TB
+    monkeypatch.setattr(IP, "hoops_use", lambda lg, rec: {"use": PE.USE_PASS})
+    p = {"home": "Oklahoma", "away": "MVSU", "home_spread": -34.5, "model_margin": 14.9, "edge": -19.6,
+         "cover_est": 0.508, "cover_n": 5184}
+    b = TB.best_line(p, "NCAAMB", 0.967)
+    assert b["best"] == "MVSU +34.5" and b["backtest"] == 0.508 and b["best_value"] is None

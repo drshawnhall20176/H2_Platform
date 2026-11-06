@@ -137,7 +137,8 @@ if _owner:
     elif _w:
         # Nov 6 (revised): tested picks first (bet, backtested chance, price, value), then every other game's lean --
         # the spread or total the model disagrees with most, its own number beside the line, no invented value
-        _w = sorted(_w, key=lambda r: (not r.get("best_tested"), -(r.get("lean_z") or 0)))
+        _w = sorted(_w, key=lambda r: (not r.get("best_tested"), r.get("backtest") is None,
+                                       -(r.get("backtest") or 0), -(r.get("lean_z") or 0)))
         _only_tested = st.toggle("Tested picks only", value=False, key="home_win_tested")
         _ws = [r for r in _w if r.get("best_tested")] if _only_tested else _w
         _wdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"],
@@ -145,6 +146,7 @@ if _owner:
                                "Status": (f"✅ {r.get('use')}" if r.get("best_tested") else
                                           ("lean · untested" if r.get("best") else "")),
                                "Model vs line": r.get("lean_detail") or "",
+                               "Backtest cover": r.get("backtest") if not r.get("best_tested") else None,
                                "Chance": r.get("best_chance") if r.get("best_tested") else None,
                                "Price": (f"{float(r['best_price']):+.0f}" if r.get("best_tested") and r.get("best_price")
                                          is not None else ""),
@@ -158,7 +160,8 @@ if _owner:
         else:
             st.dataframe(_wdf, hide_index=True, width="stretch",
                          column_config={"Chance": st.column_config.NumberColumn(format="percent"),
-                                        "Value": st.column_config.NumberColumn(format="percent")})
+                                        "Value": st.column_config.NumberColumn(format="percent"),
+                                        "Backtest cover": st.column_config.NumberColumn(format="percent")})
         _rec = _winner_record()
         _sports_here = sorted({r["sport"] for r in _w})
         _bits = []
@@ -173,8 +176,10 @@ if _owner:
                    + "**✅ Tested picks** come from rules a backtest supports (NCAAMB spreads at 8+ points of "
                      "disagreement, EuroLeague spreads, NBL moneylines): their chance and value are real numbers. Every "
                      "other game shows the model's **lean** — the spread or total it disagrees with most, with its own "
-                     "number — and no chance or value, because nothing has tested those yet; a lean is a read, not a "
-                     "bet. Heavy favorites aren't listed as picks: they usually win but cost more than they're worth. "
+                     "number. Where the spread model was backtested, *Backtest cover* is how often spreads with that much "
+                     "disagreement actually covered (about 52.4% breaks even at −110; the biggest disagreements, in "
+                     "lopsided games, cover only ~51%). Other leans have no chance or value because nothing has tested "
+                     "them yet; a lean is a read, not a bet. Heavy favorites aren't listed as picks: they usually win but cost more than they're worth. "
                      "NFL and UFC aren't covered yet.")
     else:
         st.caption("No games with a model chance today" + ("" if _scope == "All sports" else " for this sport") + ".")
