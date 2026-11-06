@@ -232,7 +232,7 @@ def best_line(p: Dict, lg: str, home_p: float) -> Dict:
             else:
                 rp = raw_home if home else 1 - raw_home
                 ch = min(UNTESTED_MAX, 0.5 + UNTESTED_SHRINK * (rp - 0.5))
-            price = p.get("spread_price") or STD_PRICE
+            price = p.get("spread_price") if _dec(p.get("spread_price")) else STD_PRICE   # a malformed price (-7.5)
             line = float(hs) if home else -float(hs)
             team = p.get("home") if home else p.get("away")
             opts.append((f"{team} {line:+g}", ch, price, ch * _dec(price) - 1, tested and p.get("use") in PLAYABLE))
@@ -242,8 +242,10 @@ def best_line(p: Dict, lg: str, home_p: float) -> Dict:
         for over in (True, False):
             rp = raw_over if over else 1 - raw_over
             ch = min(UNTESTED_MAX, 0.5 + UNTESTED_SHRINK * (rp - 0.5))
-            price = (p.get("over_price") if over else p.get("under_price")) or STD_PRICE
-            d = _dec(price) or _dec(STD_PRICE)
+            price = p.get("over_price") if over else p.get("under_price")
+            if not _dec(price):
+                price = STD_PRICE
+            d = _dec(price)
             opts.append((f"{'Over' if over else 'Under'} {float(lt):g}", ch, price, ch * d - 1, False))
     pos = [o for o in opts if o[3] > 0]
     if not pos:
@@ -279,7 +281,10 @@ def winner_rows(date_str: str, leagues=None) -> List[Dict]:
             ml_tag = ""
             if p.get("ml_pick") and ((p["ml_pick"] == "home") == home):
                 ml_tag = PE.USE_SINGLE
-            best = best_line(p, lg, hp)
+            try:
+                best = best_line(p, lg, hp)
+            except Exception:                                   # noqa: BLE001 -- one bad record never breaks Home
+                best = {"best": None, "best_chance": None, "best_price": None, "best_value": None, "best_tested": False}
             sport = lg if lg in WINNER_LEAGUES else "INTL"
             title = H.LEAGUES.get(lg, {}).get("title", lg) if sport == "INTL" else (p.get("tournament") or lg)
             out.append({"sport": sport, "league": title, "time": _et_time(p.get("kickoff")),
