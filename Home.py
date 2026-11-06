@@ -127,7 +127,7 @@ if _owner:
     def _winners(day):
         return _TB.winner_rows(day)
 
-    st.markdown("##### 🏆 Most likely winners")
+    st.markdown("##### 🏆 Game lines: best bet per game")
     _wall = _winners(_today)
     _w = _wall if _scope == "All sports" else [r for r in _wall if r["sport"] == current]
     if current in ("NFL", "UFC") and _scope != "All sports":
@@ -135,20 +135,27 @@ if _owner:
                    "showed no NFL edge), and UFC's chances come from the odds themselves. Choose All sports to see "
                    "the rest.")
     elif _w:
-        _wdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"], "Model's winner": r["winner"],
-                               "Model": r["chance"], "Books": r["book"],
-                               "Best price": ("—" if r.get("price") is None else f"{float(r['price']):+.0f}"
-                                              + (f" {r['price_book']}" if r.get("price_book") else "")),
-                               "Value at price": r["value"], "Use": r.get("use") or "",
-                               "League": r["league"]} for r in _w[:60]])
-        if _scope != "All sports":
+        # Nov 6: each game's best-value bet across moneyline, spread and total, best value first; games where none of
+        # the three is worth its price say so instead of pushing a heavy favorite
+        _w = sorted(_w, key=lambda r: (r.get("best") is None, -(r.get("best_value") or 0), -r["chance"]))
+        _only_value = st.toggle("Only games with a bet worth its price", value=True, key="home_win_value")
+        _ws = [r for r in _w if r.get("best")] if _only_value else _w
+        _wdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"],
+                               "Best bet": r.get("best") or "No value at today's prices",
+                               "Chance": r.get("best_chance"),
+                               "Price": ("" if r.get("best_price") is None else f"{float(r['best_price']):+.0f}"),
+                               "Value": r.get("best_value"),
+                               "Tested": ("✅ backtested" if r.get("best_tested") else ("untested" if r.get("best") else "")),
+                               "Likely winner": f"{r['winner']} ({r['chance']:.0%})",
+                               "League": r["league"]} for r in _ws[:60]])
+        if _scope != "All sports" and not _wdf.empty:
             _wdf = _wdf.drop(columns=["Sport"])
-        if not _wdf["Use"].any():
-            _wdf = _wdf.drop(columns=["Use"])
-        st.dataframe(_wdf, hide_index=True, width="stretch",
-                     column_config={"Model": st.column_config.NumberColumn("Model's chance", format="percent"),
-                                    "Books": st.column_config.NumberColumn("Books' chance", format="percent"),
-                                    "Value at price": st.column_config.NumberColumn(format="percent")})
+        if _wdf.empty:
+            st.caption("No game today has a moneyline, spread or total priced better than the model's chance.")
+        else:
+            st.dataframe(_wdf, hide_index=True, width="stretch",
+                         column_config={"Chance": st.column_config.NumberColumn(format="percent"),
+                                        "Value": st.column_config.NumberColumn(format="percent")})
         _rec = _winner_record()
         _sports_here = sorted({r["sport"] for r in _w})
         _bits = []
@@ -159,11 +166,12 @@ if _owner:
                 _hn, _hw = sum(n for n, _ in _hi), sum(w for _, w in _hi)
                 _bits.append(f"{_sp}: favorite won {_a['won'] / _a['n']:.0%} of {_a['n']:,}"
                              + (f" ({_hw / _hn:.0%} when it said 70%+, {_hn:,} games)" if _hn >= 10 else ""))
-        st.caption(("**Track record** — " + "; ".join(_bits) + ". " if _bits else "")
-                   + "**Most likely isn't the same as a good bet:** a heavy favorite usually wins but often costs more "
-                     "than it's worth. *Value at price* is the model's chance against the best price (above 0 = the "
-                     "price pays more than the model thinks it should); a Use tag appears only where a tested rule "
-                     "backs the bet. NFL and UFC aren't covered yet.")
+        st.caption(("**Track record** (likely winner) — " + "; ".join(_bits) + ". " if _bits else "")
+                   + "**Best bet** is the moneyline, spread or total whose price pays most against the model's chance "
+                     "(*Value* above 0 = worth the price). **✅ backtested** chances come from tested spread models "
+                     "(NCAAMB, EuroLeague); **untested** ones come from the projected score, pulled halfway to 50% "
+                     "because nothing has checked them yet — treat those as leans, at small stakes. Heavy favorites "
+                     "rarely show: they usually win, but cost more than they're worth. NFL and UFC aren't covered yet.")
     else:
         st.caption("No games with a model chance today" + ("" if _scope == "All sports" else " for this sport") + ".")
     st.divider()
