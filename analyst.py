@@ -742,6 +742,11 @@ def scan(plays: Iterable[Dict], sport_key: str, date_str: str, *, offers: Option
     suggestions from bettable calls only.
     """
     plays = list(plays)
+    # Nov 6 (research/desk_and_clv_audit.py): locked NBA calls from the older fallback rows hit 50.7% against 61.1% stated
+    # (976 calls); calls from the player-props model hit 59.1% against 57.1% (296). Best Bets already hides the fallback
+    # rows when the props model is running -- the Desk now does the same, so it never locks a fallback chance.
+    if any(p.get("Model") == "player-props" for p in plays):
+        plays = [p for p in plays if p.get("Model") == "player-props"]
     weights = weights or {}
     # line history costs one lookup per play (a database round trip on the cloud backend), so only
     # the `history_limit` highest-conviction plays are checked for movement.
