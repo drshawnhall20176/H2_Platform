@@ -105,6 +105,7 @@ if _owner:
 
     _rows = [r for r in _rows if _keep(r)]
     _rows = [r for r in _rows if r.get("lock")] if _show.startswith("🔒") else _rows
+    _rows = sorted(_rows, key=lambda r: _tkey(r.get("time")))   # Nov 6: earliest games first (stable: rank kept within a time)
     if _rows:
         _df = _pd.DataFrame([{"Sport": r["sport"], "Time": r.get("time") or "", "Pick": r["pick"],
                               "Use": ("🔒 " if r.get("lock") else "") + (r.get("use") or ""),
@@ -158,7 +159,8 @@ if _owner:
     elif _w:
         # Nov 6 (revised): tested picks first (bet, backtested chance, price, value), then every other game's lean --
         # the spread or total the model disagrees with most, its own number beside the line, no invented value
-        _w = sorted(_w, key=lambda r: (not r.get("best_tested"), r.get("backtest") is None,
+        # Nov 6: earliest games first; within a start time, tested picks, then the strongest leans
+        _w = sorted(_w, key=lambda r: (_tkey(r.get("time")), not r.get("best_tested"), r.get("backtest") is None,
                                        -(r.get("backtest") or 0), -(r.get("lean_z") or 0)))
         _only_tested = st.toggle("Tested picks only", value=False, key="home_win_tested")
         _ws = [r for r in _w if r.get("best_tested")] if _only_tested else _w
@@ -176,6 +178,9 @@ if _owner:
                                "League": r["league"]} for r in _ws[:60]])
         if _scope != "All sports" and not _wdf.empty:
             _wdf = _wdf.drop(columns=["Sport"])
+        if not _wdf.empty:                                       # columns with nothing in them (no tested picks) go
+            _wdf = _wdf.drop(columns=[c for c in ("Chance", "Price", "Value", "Backtest cover")
+                                      if c in _wdf and not _wdf[c].replace("", None).notna().any()])
         if _wdf.empty:
             st.caption("No tested game-line picks today.")
         else:
