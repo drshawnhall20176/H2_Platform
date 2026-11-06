@@ -117,6 +117,55 @@ if _owner:
     _notes.append("Prices move — confirm on the sport's own page before placing. Tennis and most international "
                   "leagues rarely show picks: their backtests haven't earned them yet.")
     st.caption(" ".join(_notes))
+
+    # ---- Most likely winners (Nov 6): every game today, the side the model thinks wins, for every sport covered
+    @st.cache_data(ttl=21600, show_spinner=False)
+    def _winner_record():
+        return _TB.winner_record()
+
+    @st.cache_data(ttl=900, show_spinner=False)
+    def _winners(day):
+        return _TB.winner_rows(day)
+
+    st.markdown("##### 🏆 Most likely winners")
+    _wall = _winners(_today)
+    _w = _wall if _scope == "All sports" else [r for r in _wall if r["sport"] == current]
+    if current in ("NFL", "UFC") and _scope != "All sports":
+        st.caption("Not covered yet for this sport: there's no stored game model for NFL (the college spread model "
+                   "showed no NFL edge), and UFC's chances come from the odds themselves. Choose All sports to see "
+                   "the rest.")
+    elif _w:
+        _wdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"], "Model's winner": r["winner"],
+                               "Model": r["chance"], "Books": r["book"],
+                               "Best price": ("—" if r.get("price") is None else f"{float(r['price']):+.0f}"
+                                              + (f" {r['price_book']}" if r.get("price_book") else "")),
+                               "Value at price": r["value"], "Use": r.get("use") or "",
+                               "League": r["league"]} for r in _w[:60]])
+        if _scope != "All sports":
+            _wdf = _wdf.drop(columns=["Sport"])
+        if not _wdf["Use"].any():
+            _wdf = _wdf.drop(columns=["Use"])
+        st.dataframe(_wdf, hide_index=True, width="stretch",
+                     column_config={"Model": st.column_config.NumberColumn("Model's chance", format="percent"),
+                                    "Books": st.column_config.NumberColumn("Books' chance", format="percent"),
+                                    "Value at price": st.column_config.NumberColumn(format="percent")})
+        _rec = _winner_record()
+        _sports_here = sorted({r["sport"] for r in _w})
+        _bits = []
+        for _sp in _sports_here:
+            _a = _rec.get(_sp)
+            if _a and _a["n"] >= 20:
+                _hi = [(n, w) for (lo, hi), (n, w) in _a["bands"].items() if lo >= 0.7 and n]
+                _hn, _hw = sum(n for n, _ in _hi), sum(w for _, w in _hi)
+                _bits.append(f"{_sp}: favorite won {_a['won'] / _a['n']:.0%} of {_a['n']:,}"
+                             + (f" ({_hw / _hn:.0%} when it said 70%+, {_hn:,} games)" if _hn >= 10 else ""))
+        st.caption(("**Track record** — " + "; ".join(_bits) + ". " if _bits else "")
+                   + "**Most likely isn't the same as a good bet:** a heavy favorite usually wins but often costs more "
+                     "than it's worth. *Value at price* is the model's chance against the best price (above 0 = the "
+                     "price pays more than the model thinks it should); a Use tag appears only where a tested rule "
+                     "backs the bet. NFL and UFC aren't covered yet.")
+    else:
+        st.caption("No games with a model chance today" + ("" if _scope == "All sports" else " for this sport") + ".")
     st.divider()
 
 # ---------- Today's Schedule ----------

@@ -153,3 +153,100 @@ def collect(date_str: str, props_sports) -> Dict:
         pass
     rows.sort(key=_order)
     return {"rows": rows, "props": fresh}
+
+
+# --------------------------------------------------------------------------- most likely winners (Nov 6)
+# For every game today, the side the model thinks is most likely to win, its chance, what the books say, the best
+# price and whether that price is worth it -- so every sport on Home has a row even on a night with no tested picks.
+# "Most likely" is not "good bet": a -400 favorite usually wins and usually isn't worth -400. The value column and
+# the Use tag (where the sport has a tested rule) say which is which; the record line says how often the model's
+# favorite has actually won.
+WINNER_LEAGUES = ("NCAAMB", "NBA", "NHL", "NCAAF", "TENNIS")
+NCAAF_MARGIN_SD = 15.5          # college football: final margin around the projection (ncaaf_projections)
+
+
+def _home_p(p: Dict, league: str) -> Optional[float]:
+    if p.get("model_p") is not None:
+        return float(p["model_p"])
+    if league == "NCAAF" and p.get("model_margin") is not None:
+        import math
+        return 0.5 * (1 + math.erf(float(p["model_margin"]) / (NCAAF_MARGIN_SD * math.sqrt(2))))
+    return None
+
+
+def _dec(a) -> Optional[float]:
+    try:
+        a = float(a)
+    except (TypeError, ValueError):
+        return None
+    if -100 < a < 100:
+        return None
+    return 1 + (a / 100 if a > 0 else 100 / -a)
+
+
+def winner_rows(date_str: str, leagues=None) -> List[Dict]:
+    import intl_hoops as H
+    import model_store as MS
+    leagues = list(leagues) if leagues is not None else list(WINNER_LEAGUES) + [k for k in H.LEAGUES if k not in WINNER_LEAGUES]
+    out = []
+    for lg in leagues:
+        try:
+            recs = MS.load_game_picks(lg, ungraded=True)
+        except Exception:                                       # noqa: BLE001
+            continue
+        for p in recs:
+            if _et_date(p.get("kickoff")) != date_str:
+                continue
+            hp = _home_p(p, lg)
+            if hp is None:
+                continue
+            home = hp >= 0.5
+            team = p.get("home") if home else p.get("away")
+            chance = hp if home else 1 - hp
+            book = p.get("fair_home")
+            book = None if book is None else (float(book) if home else 1 - float(book))
+            price = p.get("best_home") if home else p.get("best_away")
+            d = _dec(price)
+            value = None if d is None else chance * d - 1
+            ml_tag = ""
+            if p.get("ml_pick") and ((p["ml_pick"] == "home") == home):
+                ml_tag = PE.USE_SINGLE
+            sport = lg if lg in WINNER_LEAGUES else "INTL"
+            title = H.LEAGUES.get(lg, {}).get("title", lg) if sport == "INTL" else (p.get("tournament") or lg)
+            out.append({"sport": sport, "league": title, "time": _et_time(p.get("kickoff")),
+                        "game": f"{p.get('away')} {'vs' if lg == 'TENNIS' else '@'} {p.get('home')}",
+                        "winner": team, "chance": chance, "book": book, "price": price,
+                        "price_book": p.get("best_home_book") if home else p.get("best_away_book"),
+                        "value": value, "use": ml_tag})
+    out.sort(key=lambda r: -r["chance"])
+    return out
+
+
+def winner_record(leagues=None) -> Dict[str, Dict]:
+    """{sport: {"n", "won", "by": [(label, n, won)]}} -- how often the model's favorite actually won, graded games."""
+    import intl_hoops as H
+    import model_store as MS
+    leagues = list(leagues) if leagues is not None else list(WINNER_LEAGUES) + [k for k in H.LEAGUES if k not in WINNER_LEAGUES]
+    acc: Dict[str, Dict] = {}
+    bands = ((0.5, 0.6), (0.6, 0.7), (0.7, 0.8), (0.8, 1.01))
+    for lg in leagues:
+        try:
+            recs = MS.load_game_picks(lg)
+        except Exception:                                       # noqa: BLE001
+            continue
+        sport = lg if lg in WINNER_LEAGUES else "INTL"
+        a = acc.setdefault(sport, {"n": 0, "won": 0, "bands": {b: [0, 0] for b in bands}})
+        for p in recs:
+            fh, fa = p.get("final_home"), p.get("final_away")
+            hp = _home_p(p, lg)
+            if fh is None or fa is None or hp is None or fh == fa or hp == 0.5:
+                continue
+            won = (fh > fa) == (hp > 0.5)
+            ch = max(hp, 1 - hp)
+            a["n"] += 1
+            a["won"] += won
+            for lo, hi in bands:
+                if lo <= ch < hi:
+                    a["bands"][(lo, hi)][0] += 1
+                    a["bands"][(lo, hi)][1] += won
+    return {k: v for k, v in acc.items() if v["n"]}

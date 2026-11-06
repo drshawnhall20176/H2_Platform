@@ -66,3 +66,22 @@ def test_warm_slates_builds_in_season_boards(monkeypatch):
     monkeypatch.setattr(TB, "load_props", lambda k, d: {"rows": []})
     W.boards("2026-11-06")
     assert built == ["NBA", "NHL"]
+
+
+def test_winner_rows_and_record(monkeypatch):
+    import model_store as MS
+    import todays_best as TB
+    recs = {"NBA": [{"kickoff": "2026-11-07T00:30:00Z", "home": "Boston Celtics", "away": "Milwaukee Bucks", "model_p": 0.3,
+                     "fair_home": 0.4, "best_home": 150, "best_away": -160, "best_away_book": "DraftKings"}],
+            "NCAAF": [{"kickoff": "2026-11-06T23:00:00Z", "home": "Ball State", "away": "Buffalo", "model_margin": 15.5},
+                      {"kickoff": "2026-10-30T23:00:00Z", "home": "A", "away": "B", "model_margin": -3,
+                       "final_home": 10, "final_away": 20}]}
+    monkeypatch.setattr(MS, "load_game_picks", lambda lg, ungraded=False, db_path=None:
+                        [r for r in recs.get(lg, []) if not ungraded or r.get("final_home") is None])
+    rows = TB.winner_rows("2026-11-06", leagues=["NBA", "NCAAF"])
+    by = {r["sport"]: r for r in rows}
+    assert by["NBA"]["winner"] == "Milwaukee Bucks" and abs(by["NBA"]["chance"] - 0.7) < 1e-9
+    assert abs(by["NBA"]["book"] - 0.6) < 1e-9 and abs(by["NBA"]["value"] - (0.7 * (1 + 100 / 160) - 1)) < 1e-9
+    assert by["NCAAF"]["winner"] == "Ball State" and 0.83 < by["NCAAF"]["chance"] < 0.85
+    rec = TB.winner_record(leagues=["NCAAF"])
+    assert rec["NCAAF"]["n"] == 1 and rec["NCAAF"]["won"] == 1
