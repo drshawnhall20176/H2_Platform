@@ -131,7 +131,7 @@ def game_rows(date_str: str, leagues=None) -> List[Dict]:
         out.append({"sport": "TENNIS", "kind": p.get("tournament") or "Tennis", "time": _et_time(p.get("kickoff")),
                     "pick": f"{t.get('player')} to win", "game": f"{p.get('away')} vs {p.get('home')}",
                     "price": None, "book": "", "chance": t.get("chance"), "use": t.get("use"), "lock": bool(t.get("lock")),
-                    "need": t.get("need"), "page": "Tennis Lab"})
+                    "need": t.get("need"), "untested": True, "page": "Tennis Lab"})
     return out
 
 

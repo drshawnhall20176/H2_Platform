@@ -46,3 +46,9 @@ def test_home_panel_renders(monkeypatch):
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     assert any("Today's best" in (m.value or "") for m in at.markdown)
+    # Nov 6: follows the picked sport -- an NBA pick doesn't show while NHL is picked, and does under All sports
+    at.session_state["sport"] = "NHL"
+    at.run()
+    assert not at.dataframe or "A Points Under 20.5" not in at.dataframe[0].value.to_string()
+    at.radio(key="home_best_scope").set_value("All sports").run()
+    assert "A Points Under 20.5" in at.dataframe[0].value.to_string()

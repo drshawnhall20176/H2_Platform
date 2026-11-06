@@ -60,10 +60,13 @@ if _owner:
     C.section_header("⭐", "Today's best")
     _best = _TB.collect(_today, _props_sports)
     _missing = [k for k, at in _best["props"].items() if not at]
-    _c1, _c2 = st.columns([3, 1])
-    _show = _c1.radio("Show", ["🔒 Locks only", "All playable"], horizontal=True, key="home_best_show",
+    _c1, _c2, _c3 = st.columns([2, 2, 1])
+    _here = active.label if active else "This sport"
+    _scope = _c1.radio("Sports", [f"{_here} only", "All sports"], horizontal=True, key="home_best_scope",
+                       label_visibility="collapsed")
+    _show = _c2.radio("Show", ["🔒 Locks only", "All playable"], horizontal=True, key="home_best_show",
                       label_visibility="collapsed")
-    if _c2.button("🔄 Refresh props picks", width="stretch",
+    if _c3.button("🔄 Refresh props", width="stretch",
                   help="Builds today's Best Bets board for each props sport (the same Odds API use as opening it)."):
         import best_bets_data as _BBD
         with st.spinner("Building today's boards…"):
@@ -73,16 +76,33 @@ if _owner:
                 except Exception:                               # noqa: BLE001
                     pass
         st.rerun()
-    _rows = [r for r in _best["rows"] if r.get("lock")] if _show.startswith("🔒") else _best["rows"]
+    # Nov 6: follow the sport picked above (the panel showed every sport, so NBA showed tennis); "All sports" for the lot
+    _rows = _best["rows"] if _scope == "All sports" else [r for r in _best["rows"] if r.get("sport") == current]
+    _rows = [r for r in _rows if r.get("lock")] if _show.startswith("🔒") else _rows
     if _rows:
-        _df = _pd.DataFrame([{"Sport": r["sport"], "Time": r.get("time") or "", "Pick": r["pick"], "Game": r.get("game"),
-                              "Price": (None if r.get("price") is None else f"{float(r['price']):+.0f}"),
-                              "Chance": r.get("chance"), "Use": ("🔒 " if r.get("lock") else "") + (r.get("use") or ""),
-                              "Where": r.get("page")} for r in _rows[:60]])
+        _df = _pd.DataFrame([{"Sport": r["sport"], "Time": r.get("time") or "", "Pick": r["pick"],
+                              "Use": ("🔒 " if r.get("lock") else "") + (r.get("use") or ""),
+                              "Chance": r.get("chance"),
+                              "Price": ("—" if r.get("price") is None else f"{float(r['price']):+.0f}"),
+                              "Needs": ("" if r.get("need") is None else f"{float(r['need']):+.0f} or better"),
+                              "Game": r.get("game"), "Where": r.get("page"),
+                              "Tested": "no backtest" if r.get("untested") else ""} for r in _rows[:60]])
+        if not _df["Needs"].any():
+            _df = _df.drop(columns=["Needs"])
+        if not _df["Tested"].any():
+            _df = _df.drop(columns=["Tested"])
+        if _scope != "All sports":
+            _df = _df.drop(columns=["Sport"])
         st.dataframe(_df, hide_index=True, width="stretch",
                      column_config={"Chance": st.column_config.NumberColumn(format="percent")})
+        if any(r.get("untested") for r in _rows):
+            st.caption("**No backtest:** these tennis matches (events only ESPN lists, with no posted prices) are tagged "
+                       "from the model's chance alone — nothing has tested that chance yet. On main-tour matches the "
+                       "books beat this model, so those are always ⛔ Pass. Treat these as reads, and only at the "
+                       "price shown under Needs or better.")
     else:
-        st.caption("No " + ("locks" if _show.startswith("🔒") else "playable picks") + " yet today.")
+        _none = "locks" if _show.startswith("🔒") else "playable picks"
+        st.caption(f"No {_none} for {_here} yet today." if _scope != "All sports" else f"No {_none} yet today.")
     _notes = []
     if _missing:
         _notes.append(f"Props not built yet today: {', '.join(_missing)} — open their Best Bets or press Refresh.")
