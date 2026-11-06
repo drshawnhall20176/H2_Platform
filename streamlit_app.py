@@ -165,7 +165,7 @@ def run():
                          "Matchup Lab", "Track Record", "Data Health",
                          "Suggested Parlays", "Speculative Basket", "Graded Picks",
                          "Model Dashboard", "First Innings Totals", "Player Lines", "Slip Lab",
-                         "Postgame Review", "Progression Plan", "Reports", "Tennis Lab", "International Hoops",
+                         "Postgame Review", "Progression Plan", "Reports", "Model Performance", "Tennis Lab", "International Hoops",
                          "Position Matchups"}
 
     # leading page-number -> (title, icon, stable url slug). The url_path is the key fix: it pins
@@ -229,6 +229,7 @@ def run():
         "46": ("Game Lab", "🏟️", "nba_game_lab"),      # NBA spreads/totals/ML (ratings vs the books)
         "47": ("Game Lab", "🏟️", "nhl_game_lab"),      # NHL puck lines/totals/ML
         "48": ("Reports", "📑", "reports"),             # P&L statements for any period + CSV / PDF (Nov 6)
+        "49": ("Model Performance", "📊", "model_performance"),   # Investor Relations: the edge evidence (Nov 6)
     }
 
     # SIDEBAR SECTIONS, added directly on request: st.navigation natively supports a
@@ -264,6 +265,8 @@ def run():
         SECTION_OF[k] = "🔍 SELF-GRADING & PROOF"
     for k in ("20", "21", "22"):
         SECTION_OF[k] = "📣 OPS & CONTENT"
+    for k in ("49",):
+        SECTION_OF[k] = "💼 INVESTOR RELATIONS"     # Nov 6: material for investors (owner only)
 
     def lead(name: str) -> str:
         """Leading page number as a string ('10_Matchup_Lab.py' -> '10'), else the stem."""
