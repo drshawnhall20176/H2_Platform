@@ -41,3 +41,30 @@ def test_page_renders(monkeypatch):
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     assert any("Recommendations by tag" in m.value for m in at.markdown)
+
+
+def test_closing_line_drops_alt_lines_and_counts_no_move_separately():
+    import investor as I
+    bets = [{"slate_date": "2026-11-05", "entry_odds": -110, "close_odds": -120},    # beat
+            {"slate_date": "2026-11-05", "entry_odds": -110, "close_odds": -110},    # no move
+            {"slate_date": "2026-11-05", "entry_odds": -791, "close_odds": -123},    # alt line: dropped
+            {"slate_date": "2026-07-28", "entry_odds": -110, "close_odds": -100}]    # before the era
+    c = I.closing_line(bets)
+    assert c["n"] == 2 and c["moved"] == 1 and c["beat"] == 1.0 and c["dropped"] == 1 and c["unchanged"] == 1
+    assert I.closing_line(bets, since=None)["moved"] == 2
+
+
+def test_desk_scans_props_model_rows_only_when_present():
+    import analyst as A
+    plays = [{"Model": "player-props", "Side": "Under", "ModelProb": 0.6, "Player": "A", "Market": "Points"},
+             {"Model": "recent-games", "Side": "Under", "ModelProb": 0.8, "Player": "B", "Market": "Points"}]
+    seen = []
+    orig = dict(A.DETECTORS)
+    try:
+        A.DETECTORS.clear()
+        A.DETECTORS["probe"] = lambda p, ctx: seen.append(p["Player"]) or None
+        A.scan(plays, "NBA", "2026-11-06")
+    finally:
+        A.DETECTORS.clear()
+        A.DETECTORS.update(orig)
+    assert seen == ["A"]
