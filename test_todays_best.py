@@ -101,3 +101,11 @@ def test_best_line_picks_value_across_markets():
     assert b2["best"].startswith("Over") and not b2["best_tested"] and b2["best_chance"] == 0.60
     r = dict(p, best_home=-2000, best_away=1000, home_spread=None, line_total=None)
     assert TB.best_line(r, "NCAAMB", 0.9)["best"] is None
+
+
+def test_best_line_survives_malformed_prices():
+    import todays_best as TB
+    p = {"home": "A", "away": "B", "home_spread": -1.5, "model_margin": 2.0, "spread_price": -7.5,
+         "line_total": 6.5, "model_total": 7.0, "over_price": None, "under_price": -7.5}
+    b = TB.best_line(p, "NHL", 0.6)
+    assert b["best"] is None or b["best_price"] == -110
