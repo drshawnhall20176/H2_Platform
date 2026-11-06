@@ -47,7 +47,30 @@ def main(argv=None) -> int:
                       f"{time.time() - t0:.0f}s")
             except Exception as exc:                            # noqa: BLE001
                 print(f"NBA league sample failed ({type(exc).__name__}: {exc})")
+    boards(day)
     return 0
+
+
+BOARD_SPORTS = ("NBA", "NFL", "NHL", "NCAAF")
+
+
+def boards(day: str) -> None:
+    """Nov 6: build each in-season props sport's Best Bets board, so Home's "Today's best" is filled without anyone
+    opening a page (building a board saves its top-tagged picks: todays_best.save_props). About 130-300 Odds API
+    credits a board; hourly across four sports is a small share of the plan."""
+    import best_bets_data as BBD
+    import sports
+    import todays_best as TB
+    for key in BOARD_SPORTS:
+        if not sports.in_season(key):
+            continue
+        t0 = time.time()
+        try:
+            plays, meta, _ = BBD.load_generic_best_bets_board(key, day, BBD.O.DEFAULT_BOOK)
+            saved = (TB.load_props(key, day) or {}).get("rows") or []
+            print(f"{key} board: {len(plays)} plays, {len(saved)} on Today's best, {time.time() - t0:.0f}s")
+        except Exception as exc:                                # noqa: BLE001
+            print(f"{key} board failed ({type(exc).__name__}: {exc})")
 
 
 if __name__ == "__main__":

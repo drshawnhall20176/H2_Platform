@@ -52,3 +52,17 @@ def test_home_panel_renders(monkeypatch):
     assert not at.dataframe or "A Points Under 20.5" not in at.dataframe[0].value.to_string()
     at.radio(key="home_best_scope").set_value("All sports").run()
     assert "A Points Under 20.5" in at.dataframe[0].value.to_string()
+
+
+def test_warm_slates_builds_in_season_boards(monkeypatch):
+    """Nov 6: the hourly job builds the Best Bets boards so Today's best fills without anyone opening a page."""
+    import best_bets_data as BBD
+    import sports
+    import todays_best as TB
+    import warm_slates as W
+    built = []
+    monkeypatch.setattr(sports, "in_season", lambda k, day=None: k in ("NBA", "NHL"))
+    monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda k, d, b: built.append(k) or ([], [], []))
+    monkeypatch.setattr(TB, "load_props", lambda k, d: {"rows": []})
+    W.boards("2026-11-06")
+    assert built == ["NBA", "NHL"]
