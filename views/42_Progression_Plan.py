@@ -6,7 +6,10 @@ unit size as a share of the bankroll, target ROI and the monthly income goal. Sh
 (Prove -> Scale -> Go), the gates still open, the bankroll path, month-by-month results, discipline checks and the
 math behind the income goal. The Bet Log stays the ledger; nothing is entered twice. Numbers: progression.py.
 """
+from datetime import datetime
+
 import pandas as pd
+import pytz
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -40,7 +43,7 @@ with st.expander("⚙️ Your plan", expanded=not saved):
         if st.form_submit_button("Save plan"):
             new = {"start_bankroll": start_bankroll, "start_date": start_date.isoformat(), "unit_pct": unit_pct,
                    "monthly_goal": monthly_goal, "target_roi": target_roi, "bets_per_month": int(bets_pm),
-                   "scaled_from": scaled_from.strip() or None}
+                   "scaled_from": scaled_from.strip() or None, "transfers": s.get("transfers") or []}
             if MS.save_setting(P.SETTINGS_KEY, new):
                 st.success("Saved.")
                 s = dict(P.DEFAULTS, **new)
@@ -65,11 +68,36 @@ def _pct(x, sign=False):
     return "—" if x is None else (f"{x:+.1%}" if sign else f"{x:.0%}")
 
 
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("Bankroll", f"${r['bankroll']:,.0f}", f"{r['profit']:+,.0f} since start")
-m2.metric("Unit (next bet)", f"${r['unit']:,.2f}", f"{s['unit_pct']:.2%} of bankroll", delta_color="off")
-m3.metric("Singles ROI", _pct(r["singles_roi"], True), f"{r['singles']} settled", delta_color="off")
-m4.metric("Largest drawdown", _pct(r["max_dd"]) if r["path"] else "—")
+# Nov 6: the bankroll as money in the book -- start + betting profit + deposits - withdrawals -- and both stake sizes
+m1, m2, m3, m4, m5 = st.columns(5)
+m1.metric("Bankroll (in the book)", f"${r['bankroll']:,.2f}", f"{r['profit']:+,.2f} betting profit", )
+m2.metric("Single unit", f"${r['unit']:,.2f}", f"{s['unit_pct']:.2%} of bankroll", delta_color="off")
+m3.metric("Parlay unit", f"${r['parlay_unit']:,.2f}", f"{s['unit_pct'] * P.PARLAY_UNIT_SHARE:.2%} of bankroll",
+          delta_color="off")
+m4.metric("Singles ROI", _pct(r["singles_roi"], True), f"{r['singles']} settled", delta_color="off")
+m5.metric("Largest drawdown", _pct(r["max_dd"]) if r["path"] else "—")
+st.caption(f"Bankroll = starting ${float(s['start_bankroll']):,.2f} {r['profit']:+,.2f} betting profit"
+           + (f" {r['moved']:+,.2f} moved in/out" if r["moved"] else "")
+           + f". Above your starting bankroll: **${r['above_start']:,.2f}** — what you could withdraw and still "
+             "be at the plan's starting size. Stakes are figured from what's in the book, so record withdrawals below.")
+
+with st.expander("💸 Record a withdrawal or deposit"):
+    with st.form("prog_move"):
+        c1, c2, c3 = st.columns([1, 1, 1])
+        kind = c1.radio("Type", ["Withdrawal", "Deposit"], horizontal=True)
+        amt = c2.number_input("Amount ($)", min_value=0.0, value=float(r["above_start"]), step=10.0)
+        when = c3.date_input("Date", value=datetime.now(pytz.timezone("US/Eastern")).date())
+        if st.form_submit_button("Record") and amt > 0:
+            moves = list(s.get("transfers") or []) + [{"date": when.isoformat(),
+                                                       "amount": -amt if kind == "Withdrawal" else amt}]
+            new = dict({k: v for k, v in s.items()}, transfers=moves)
+            if MS.save_setting(P.SETTINGS_KEY, new):
+                st.success(f"Recorded a {kind.lower()} of ${amt:,.2f}.")
+                st.rerun()
+            else:
+                st.error("Couldn't save it.")
+    for t in reversed(list(s.get("transfers") or [])):
+        st.caption(f"{t['date']}: {'withdrew' if float(t['amount']) < 0 else 'deposited'} ${abs(float(t['amount'])):,.2f}")
 
 
 def _gate_table(gates):
