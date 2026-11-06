@@ -184,6 +184,74 @@ def _dec(a) -> Optional[float]:
     return 1 + (a / 100 if a > 0 else 100 / -a)
 
 
+# Nov 6: the best-value bet per game across moneyline, spread and total (the section only looked at moneylines, and
+# most of those were heavy favorites priced worse than the model's chance). Where a backtest calibrated the chance
+# (cover_est: NCAAMB and the international spread models) it is used as is and the bet is "tested"; otherwise the
+# chance comes from the projected score with the spread of outcomes below, pulled halfway to 50% (UNTESTED_SHRINK)
+# because nothing has checked it yet -- and labeled untested.
+MARGIN_SD = {"NCAAMB": 11.0, "NBA": 12.5, "NHL": 2.3, "NCAAF": 15.5, "INTL": 11.0}
+TOTAL_SD = {"NCAAMB": 17.0, "NBA": 18.0, "NHL": 2.3, "NCAAF": 16.0, "INTL": 16.0}
+UNTESTED_SHRINK = 0.5
+UNTESTED_MAX = 0.60             # a big untested disagreement is more often the model's error than the market's
+STD_PRICE = -110
+ML_PRICE_RANGE = (-250, 250)
+
+
+def _phi(z: float) -> float:
+    import math
+    return 0.5 * (1 + math.erf(z / math.sqrt(2)))
+
+
+def best_line(p: Dict, lg: str, home_p: float) -> Dict:
+    """{"best": label, "best_chance", "best_price", "best_value", "best_tested"} -- the bet with the highest value at its
+    price among moneyline, spread and total; best=None when none has positive value."""
+    fam = lg if lg in MARGIN_SD else "INTL"
+    opts = []
+    for home in (True, False):                                  # moneylines
+        price = p.get("best_home") if home else p.get("best_away")
+        d = _dec(price)
+        # Only prices from -250 to +250: in lopsided games the model's tail chances are its weakest (NCAAMB favorites it
+        # gave 80%+ won 86%; the books said ~97%), so a +7000 underdog at the model's 3% would look like +134% value.
+        if not d or not (ML_PRICE_RANGE[0] <= float(price) <= ML_PRICE_RANGE[1]):
+            continue
+        tested = bool(p.get("ml_pick")) and ((p["ml_pick"] == "home") == home)
+        ch = home_p if home else 1 - home_p
+        fair = p.get("fair_home")
+        if not tested and fair is not None:                     # untested: halfway to the books' (vig-free) chance
+            ch = 0.5 * ch + 0.5 * (float(fair) if home else 1 - float(fair))
+        if not tested:
+            ch = min(ch, max(UNTESTED_MAX, 1 / d))              # never more confident than 60% unless the price says so
+        opts.append((f"{p.get('home') if home else p.get('away')} moneyline", ch, price, ch * d - 1, tested))
+    hs, mm = p.get("home_spread"), p.get("model_margin")
+    if hs is not None and mm is not None:                       # spreads
+        tested = p.get("cover_est") is not None and p.get("edge") is not None
+        raw_home = _phi((float(mm) + float(hs)) / MARGIN_SD[fam])
+        for home in (True, False):
+            if tested:
+                ch = float(p["cover_est"]) if (p["edge"] >= 0) == home else 1 - float(p["cover_est"])
+            else:
+                rp = raw_home if home else 1 - raw_home
+                ch = min(UNTESTED_MAX, 0.5 + UNTESTED_SHRINK * (rp - 0.5))
+            price = p.get("spread_price") or STD_PRICE
+            line = float(hs) if home else -float(hs)
+            team = p.get("home") if home else p.get("away")
+            opts.append((f"{team} {line:+g}", ch, price, ch * _dec(price) - 1, tested and p.get("use") in PLAYABLE))
+    lt, mt = p.get("line_total"), p.get("model_total")
+    if lt is not None and mt is not None:                       # totals (no tested totals rule yet)
+        raw_over = _phi((float(mt) - float(lt)) / TOTAL_SD[fam])
+        for over in (True, False):
+            rp = raw_over if over else 1 - raw_over
+            ch = min(UNTESTED_MAX, 0.5 + UNTESTED_SHRINK * (rp - 0.5))
+            price = (p.get("over_price") if over else p.get("under_price")) or STD_PRICE
+            d = _dec(price) or _dec(STD_PRICE)
+            opts.append((f"{'Over' if over else 'Under'} {float(lt):g}", ch, price, ch * d - 1, False))
+    pos = [o for o in opts if o[3] > 0]
+    if not pos:
+        return {"best": None, "best_chance": None, "best_price": None, "best_value": None, "best_tested": False}
+    b = max(pos, key=lambda o: o[3])
+    return {"best": b[0], "best_chance": b[1], "best_price": b[2], "best_value": b[3], "best_tested": bool(b[4])}
+
+
 def winner_rows(date_str: str, leagues=None) -> List[Dict]:
     import intl_hoops as H
     import model_store as MS
@@ -211,13 +279,14 @@ def winner_rows(date_str: str, leagues=None) -> List[Dict]:
             ml_tag = ""
             if p.get("ml_pick") and ((p["ml_pick"] == "home") == home):
                 ml_tag = PE.USE_SINGLE
+            best = best_line(p, lg, hp)
             sport = lg if lg in WINNER_LEAGUES else "INTL"
             title = H.LEAGUES.get(lg, {}).get("title", lg) if sport == "INTL" else (p.get("tournament") or lg)
             out.append({"sport": sport, "league": title, "time": _et_time(p.get("kickoff")),
                         "game": f"{p.get('away')} {'vs' if lg == 'TENNIS' else '@'} {p.get('home')}",
                         "winner": team, "chance": chance, "book": book, "price": price,
                         "price_book": p.get("best_home_book") if home else p.get("best_away_book"),
-                        "value": value, "use": ml_tag})
+                        "value": value, "use": ml_tag, **best})
     out.sort(key=lambda r: -r["chance"])
     return out
 
