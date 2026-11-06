@@ -127,7 +127,7 @@ if _owner:
     def _winners(day):
         return _TB.winner_rows(day)
 
-    st.markdown("##### 🏆 Game lines: best bet per game")
+    st.markdown("##### 🏆 Game lines: tested picks and model leans")
     _wall = _winners(_today)
     _w = _wall if _scope == "All sports" else [r for r in _wall if r["sport"] == current]
     if current in ("NFL", "UFC") and _scope != "All sports":
@@ -135,23 +135,26 @@ if _owner:
                    "showed no NFL edge), and UFC's chances come from the odds themselves. Choose All sports to see "
                    "the rest.")
     elif _w:
-        # Nov 6: each game's best-value bet across moneyline, spread and total, best value first; games where none of
-        # the three is worth its price say so instead of pushing a heavy favorite
-        _w = sorted(_w, key=lambda r: (r.get("best") is None, -(r.get("best_value") or 0), -r["chance"]))
-        _only_value = st.toggle("Only games with a bet worth its price", value=True, key="home_win_value")
-        _ws = [r for r in _w if r.get("best")] if _only_value else _w
+        # Nov 6 (revised): tested picks first (bet, backtested chance, price, value), then every other game's lean --
+        # the spread or total the model disagrees with most, its own number beside the line, no invented value
+        _w = sorted(_w, key=lambda r: (not r.get("best_tested"), -(r.get("lean_z") or 0)))
+        _only_tested = st.toggle("Tested picks only", value=False, key="home_win_tested")
+        _ws = [r for r in _w if r.get("best_tested")] if _only_tested else _w
         _wdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"],
-                               "Best bet": r.get("best") or "No value at today's prices",
-                               "Chance": r.get("best_chance"),
-                               "Price": ("" if r.get("best_price") is None else f"{float(r['best_price']):+.0f}"),
-                               "Value": r.get("best_value"),
-                               "Tested": ("✅ backtested" if r.get("best_tested") else ("untested" if r.get("best") else "")),
+                               "Pick / lean": r.get("best") or "—",
+                               "Status": (f"✅ {r.get('use')}" if r.get("best_tested") else
+                                          ("lean · untested" if r.get("best") else "")),
+                               "Model vs line": r.get("lean_detail") or "",
+                               "Chance": r.get("best_chance") if r.get("best_tested") else None,
+                               "Price": (f"{float(r['best_price']):+.0f}" if r.get("best_tested") and r.get("best_price")
+                                         is not None else ""),
+                               "Value": r.get("best_value") if r.get("best_tested") else None,
                                "Likely winner": f"{r['winner']} ({r['chance']:.0%})",
                                "League": r["league"]} for r in _ws[:60]])
         if _scope != "All sports" and not _wdf.empty:
             _wdf = _wdf.drop(columns=["Sport"])
         if _wdf.empty:
-            st.caption("No game today has a moneyline, spread or total priced better than the model's chance.")
+            st.caption("No tested game-line picks today.")
         else:
             st.dataframe(_wdf, hide_index=True, width="stretch",
                          column_config={"Chance": st.column_config.NumberColumn(format="percent"),
@@ -167,11 +170,12 @@ if _owner:
                 _bits.append(f"{_sp}: favorite won {_a['won'] / _a['n']:.0%} of {_a['n']:,}"
                              + (f" ({_hw / _hn:.0%} when it said 70%+, {_hn:,} games)" if _hn >= 10 else ""))
         st.caption(("**Track record** (likely winner) — " + "; ".join(_bits) + ". " if _bits else "")
-                   + "**Best bet** is the moneyline, spread or total whose price pays most against the model's chance "
-                     "(*Value* above 0 = worth the price). **✅ backtested** chances come from tested spread models "
-                     "(NCAAMB, EuroLeague); **untested** ones come from the projected score, pulled halfway to 50% "
-                     "because nothing has checked them yet — treat those as leans, at small stakes. Heavy favorites "
-                     "rarely show: they usually win, but cost more than they're worth. NFL and UFC aren't covered yet.")
+                   + "**✅ Tested picks** come from rules a backtest supports (NCAAMB spreads at 8+ points of "
+                     "disagreement, EuroLeague spreads, NBL moneylines): their chance and value are real numbers. Every "
+                     "other game shows the model's **lean** — the spread or total it disagrees with most, with its own "
+                     "number — and no chance or value, because nothing has tested those yet; a lean is a read, not a "
+                     "bet. Heavy favorites aren't listed as picks: they usually win but cost more than they're worth. "
+                     "NFL and UFC aren't covered yet.")
     else:
         st.caption("No games with a model chance today" + ("" if _scope == "All sports" else " for this sport") + ".")
     st.divider()
