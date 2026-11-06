@@ -165,3 +165,12 @@ def test_home_tables_sorted_earliest_first(monkeypatch):
     assert list(at.dataframe[0].value["Time"]) == ["7:00 PM", "8:30 PM", "10:00 PM"]
     assert list(at.dataframe[1].value["Time"]) == ["7:30 PM", "9:00 PM"]
     assert "Chance" not in at.dataframe[1].value.columns
+
+
+def test_ncaamb_total_lean_shows_its_backtest(monkeypatch):
+    import intl_picks as IP
+    import todays_best as TB
+    monkeypatch.setattr(IP, "hoops_use", lambda lg, rec: {"use": PE.USE_PASS})
+    p = {"home": "A", "away": "B", "home_spread": -2.5, "model_margin": 2.0, "line_total": 160.5, "model_total": 151.8}
+    b = TB.best_line(p, "NCAAMB", 0.6)
+    assert b["best"] == "Under 160.5" and b["backtest"] == 0.453 and b["best_value"] is None
