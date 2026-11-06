@@ -210,3 +210,12 @@ def test_kicking_points_grade():
     import retro as R
     assert R.MARKET_STAT["Kicking Points"] == "kick_pts"
     assert R.grade_play("Kicking Points", "Under", 8.5, {"kick_pts": 7.0}) is True
+
+
+def test_roll_tickets_decides_parlays_whose_legs_settled(monkeypatch):
+    import settle_results as S
+    updates = []
+    monkeypatch.setattr(S.B, "list_bets", lambda **kw: [])
+    monkeypatch.setattr(S.B, "ticket_settlements", lambda bets: [{"id": 516, "ticket": "NBA 3-leg Nov 5", "result": "win"}])
+    monkeypatch.setattr(S.B, "update_bet", lambda i, **kw: updates.append((i, kw)))
+    assert S.roll_tickets() == 1 and updates == [(516, {"result": "win"})]

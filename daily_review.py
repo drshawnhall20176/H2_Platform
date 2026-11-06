@@ -256,7 +256,7 @@ def settle(sport: str, open_bets: Sequence[Dict], fetch: Callable = PG._http, wr
             plan["unresolved"].append({"bet_id": p["bet_id"], "description": p["description"],
                                        "why": f"couldn't save the result ({type(exc).__name__})"})
     tickets = []
-    if settled and write:
+    if write:                                                   # Nov 6: also tickets whose legs settled elsewhere
         try:
             for t in B.ticket_settlements(B.list_bets(**kw)):
                 B.update_bet(t["id"], result=t["result"], **kw)
