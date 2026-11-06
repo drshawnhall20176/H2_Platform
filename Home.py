@@ -78,7 +78,34 @@ if _owner:
         st.rerun()
     # Nov 6: follow the sport picked above (the panel showed every sport, so NBA showed tennis); "All sports" for the lot
     _rows = _best["rows"] if _scope == "All sports" else [r for r in _best["rows"] if r.get("sport") == current]
+
+    # Nov 6: start-time and game filters, shared by the picks and the game lines below
+    @st.cache_data(ttl=900, show_spinner=False)
+    def _winners(day):
+        return _TB.winner_rows(day)
+
+    _wall = _winners(_today)
+    _wscope = _wall if _scope == "All sports" else [r for r in _wall if r["sport"] == current]
+
+    def _tkey(t):
+        try:
+            return _dt.strptime(t, "%I:%M %p").time()
+        except (TypeError, ValueError):
+            return _dt.max.time()
+
+    _times = sorted({r.get("time") for r in _rows + _wscope if r.get("time")}, key=_tkey)
+    _games = sorted({r.get("game") for r in _rows + _wscope if r.get("game")})
+    _f1, _f2 = st.columns([1, 2])
+    _pick_times = _f1.multiselect("Start time", _times, key="home_best_times", placeholder="All times")
+    _pick_games = _f2.multiselect("Game", _games, key="home_best_games", placeholder="All games")
+
+    def _keep(r):
+        return ((not _pick_times or r.get("time") in _pick_times)
+                and (not _pick_games or r.get("game") in _pick_games))
+
+    _rows = [r for r in _rows if _keep(r)]
     _rows = [r for r in _rows if r.get("lock")] if _show.startswith("🔒") else _rows
+    _rows = sorted(_rows, key=lambda r: _tkey(r.get("time")))   # Nov 6: earliest games first (stable: rank kept within a time)
     if _rows:
         _df = _pd.DataFrame([{"Sport": r["sport"], "Time": r.get("time") or "", "Pick": r["pick"],
                               "Use": ("🔒 " if r.get("lock") else "") + (r.get("use") or ""),
@@ -123,13 +150,8 @@ if _owner:
     def _winner_record():
         return _TB.winner_record()
 
-    @st.cache_data(ttl=900, show_spinner=False)
-    def _winners(day):
-        return _TB.winner_rows(day)
-
     st.markdown("##### 🏆 Game lines: tested picks and model leans")
-    _wall = _winners(_today)
-    _w = _wall if _scope == "All sports" else [r for r in _wall if r["sport"] == current]
+    _w = [r for r in _wscope if _keep(r)]
     if current in ("NFL", "UFC") and _scope != "All sports":
         st.caption("Not covered yet for this sport: there's no stored game model for NFL (the college spread model "
                    "showed no NFL edge), and UFC's chances come from the odds themselves. Choose All sports to see "
@@ -137,7 +159,8 @@ if _owner:
     elif _w:
         # Nov 6 (revised): tested picks first (bet, backtested chance, price, value), then every other game's lean --
         # the spread or total the model disagrees with most, its own number beside the line, no invented value
-        _w = sorted(_w, key=lambda r: (not r.get("best_tested"), r.get("backtest") is None,
+        # Nov 6: earliest games first; within a start time, tested picks, then the strongest leans
+        _w = sorted(_w, key=lambda r: (_tkey(r.get("time")), not r.get("best_tested"), r.get("backtest") is None,
                                        -(r.get("backtest") or 0), -(r.get("lean_z") or 0)))
         _only_tested = st.toggle("Tested picks only", value=False, key="home_win_tested")
         _ws = [r for r in _w if r.get("best_tested")] if _only_tested else _w
@@ -155,6 +178,9 @@ if _owner:
                                "League": r["league"]} for r in _ws[:60]])
         if _scope != "All sports" and not _wdf.empty:
             _wdf = _wdf.drop(columns=["Sport"])
+        if not _wdf.empty:                                       # columns with nothing in them (no tested picks) go
+            _wdf = _wdf.drop(columns=[c for c in ("Chance", "Price", "Value", "Backtest cover")
+                                      if c in _wdf and not _wdf[c].replace("", None).notna().any()])
         if _wdf.empty:
             st.caption("No tested game-line picks today.")
         else:
