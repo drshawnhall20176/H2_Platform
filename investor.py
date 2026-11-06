@@ -88,15 +88,34 @@ def calibration(reports: Dict[str, Dict]) -> List[Dict]:
     return out
 
 
-def closing_line(bets: Sequence[Dict]) -> Dict:
+# Nov 6 (research/desk_and_clv_audit.py): the all-time closing-line record (34% beat, -1.5%) was mostly July MLB
+# DraftKings pairs priced at DIFFERENT lines (an alt-line entry at -791 "closing" at -123), and a third of all pairs had a
+# close identical to the entry (no close was really captured). So: the current-model era is the headline, a price
+# beyond MAX_ODDS is left out (alt lines), and an unchanged price is reported as "no move", not a loss.
+CLV_ERA = "2026-10-30"          # the player-props model and kickoff snapshots start
+MAX_ODDS = 400
+
+
+def closing_line(bets: Sequence[Dict], since: Optional[str] = CLV_ERA) -> Dict:
     import betlog as B
     money = B.money_bets(list(bets))
-    clvs = [B.clv_pct(b.get("entry_odds"), b.get("close_odds")) for b in money if not B.is_parlay_header(b)]
-    clvs = [c for c in clvs if c is not None]
-    beat = sum(1 for c in clvs if c > 0)
-    lo, hi = wilson(beat, len(clvs))
-    return {"n": len(clvs), "beat": (beat / len(clvs)) if clvs else None, "avg": (sum(clvs) / len(clvs)) if clvs else None,
-            "lo": lo, "hi": hi}
+    pairs = [b for b in money if not B.is_parlay_header(b)
+             and (since is None or str(b.get("slate_date") or "") >= since)]
+    clvs, dropped = [], 0
+    for b in pairs:
+        c = B.clv_pct(b.get("entry_odds"), b.get("close_odds"))
+        if c is None:
+            continue
+        if abs(float(b["entry_odds"])) > MAX_ODDS or abs(float(b["close_odds"])) > MAX_ODDS:
+            dropped += 1
+            continue
+        clvs.append(c)
+    moved = [c for c in clvs if c != 0]
+    beat = sum(1 for c in moved if c > 0)
+    lo, hi = wilson(beat, len(moved))
+    return {"n": len(clvs), "moved": len(moved), "unchanged": len(clvs) - len(moved), "dropped": dropped,
+            "beat": (beat / len(moved)) if moved else None, "avg": (sum(clvs) / len(clvs)) if clvs else None,
+            "lo": lo, "hi": hi, "since": since}
 
 
 def real_money(bets: Sequence[Dict]) -> Dict:

@@ -67,7 +67,7 @@ m1, m2, m3, m4 = st.columns(4)
 m1.metric("Locked calls graded", f"{lc['n']:,}", f"hit {pct(lc['hit'])} vs model said {pct(lc['said'])}", delta_color="off")
 graded_reads = sum(t["n"] for t in tags)
 m2.metric("Model reads graded (30 days)", f"{graded_reads:,}", f"{len(reports)} sports", delta_color="off")
-m3.metric("Beat the closing line", pct(clv["beat"]), f"{clv['n']} bets with a closing price", delta_color="off")
+m3.metric("Beat the closing line", pct(clv["beat"]), f"{clv['moved']} priced moves since {clv['since']}", delta_color="off")
 m4.metric("Real-money singles", f"{rm['singles']}", f"since {rm['first'] or '—'}", delta_color="off")
 need = I.bets_for_edge(0.03)
 st.info(f"**Where this stands:** the platform has been grading itself since late October. A real 3% edge at typical "
@@ -80,6 +80,9 @@ st.markdown("### 1 · Locked, public calls")
 st.caption("Every Analyst Desk call is written to a ledger before the game starts and can't be changed afterward; the "
            "full record downloads as a CSV with a fingerprint on the Analyst Record page. The test: does the hit rate "
            "match the chance the model stated?")
+st.caption("Context: until Nov 6 the Desk also locked calls from an older fallback model whose chances ran high (NBA: "
+           "51% hit vs 61% stated over 976). The current props model's calls were honest (59% vs 57% over 296), and "
+           "from Nov 6 the Desk locks only those. The record keeps every earlier call — nothing is removed.")
 if lc["n"]:
     st.markdown(f"**{lc['n']:,} graded** of {lc['locked']:,} locked ({lc['first']} → {lc['last']}): hit "
                 f"**{pct(lc['hit'])}** (95% range {rng(lc['lo'], lc['hi'])}) against **{pct(lc['said'])}** stated.")
@@ -134,12 +137,18 @@ st.markdown("### 4 · Beating the closing line")
 st.caption("The closing price is the market's final, sharpest estimate. Getting a better price than the close, consistently, "
            "is the standard early proof of an edge — it shows up long before profit does.")
 if clv["n"]:
-    st.markdown(f"**{clv['n']} bets** with a closing price: beat the close **{pct(clv['beat'])}** of the time "
-                f"(95% range {rng(clv['lo'], clv['hi'])}; 50% = no edge), average **{clv['avg']:+.2f}%** per bet.")
-    if clv["n"] < 200:
-        st.caption(f"Early: {clv['n']} is well short of the few hundred this needs.")
+    st.markdown(f"Since **{clv['since']}** (the current model): **{clv['n']} bets** with a closing price. Of the "
+                f"{clv['moved']} whose price moved, the bet got the better number **{pct(clv['beat'])}** of the time "
+                f"(95% range {rng(clv['lo'], clv['hi'])}; 50% = no edge); average **{clv['avg']:+.2f}%** per bet. "
+                f"{clv['unchanged']} closed at the same price.")
+    if clv["moved"] < 200:
+        st.caption(f"Early: {clv['moved']} priced moves is well short of the few hundred this needs.")
 else:
-    st.caption("Closing prices haven't been captured for enough bets yet.")
+    st.caption("Closing prices haven't been captured for enough current-model bets yet.")
+_old = I.closing_line(bets, since=None)
+st.caption(f"Earlier record (all time, {_old['n']} bets): beat the close {pct(_old['beat'])} of the bets whose price moved. "
+           "It is mostly summer MLB bets whose entry and closing prices were taken at different lines, so it isn't a "
+           f"like-for-like comparison; {_old['dropped']} pairs priced beyond ±{I.MAX_ODDS} are left out.")
 
 # ---------------------------------------------------------------- 5. real money
 st.markdown("### 5 · Real money (labeled: the noisiest measure)")
