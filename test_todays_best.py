@@ -87,20 +87,21 @@ def test_winner_rows_and_record(monkeypatch):
     assert rec["NCAAF"]["n"] == 1 and rec["NCAAF"]["won"] == 1
 
 
-def test_best_line_picks_value_across_markets():
-    """Nov 6: a -10000 favorite is never the best bet; a mispriced total or spread is."""
+def test_best_line_tested_pick_vs_lean(monkeypatch):
+    """Nov 6 (revised): a tested pick carries chance and value; anything else is a lean with no invented value."""
+    import intl_picks as IP
+    import props_engine as PE
     import todays_best as TB
-    p = {"home": "Oklahoma", "away": "MVSU", "best_home": -10000, "best_away": 7000, "model_p": 0.967,
-         "home_spread": -34.5, "model_margin": 14.9, "edge": -19.6, "cover_est": 0.508, "use": "⛔ Pass",
-         "spread_price": -105, "line_total": 155.5, "model_total": 154.5, "over_price": -110, "under_price": -110}
-    assert TB.best_line(p, "NCAAMB", 0.967)["best"] is None    # +7000 dog left out; +34.5 at 50.8% isn't worth -105
-    b = TB.best_line(dict(p, spread_price=110), "NCAAMB", 0.967)
-    assert b["best"] == "MVSU +34.5" and abs(b["best_chance"] - 0.508) < 1e-9 and b["best_value"] > 0
-    q = dict(p, cover_est=None, edge=None, model_margin=30.0, best_home=-500, best_away=350, model_total=180.0)
-    b2 = TB.best_line(q, "NCAAMB", 0.9)
-    assert b2["best"].startswith("Over") and not b2["best_tested"] and b2["best_chance"] == 0.60
-    r = dict(p, best_home=-2000, best_away=1000, home_spread=None, line_total=None)
-    assert TB.best_line(r, "NCAAMB", 0.9)["best"] is None
+    p = {"home": "Oklahoma", "away": "MVSU", "best_home": -10000, "best_away": 7000, "home_spread": -34.5,
+         "model_margin": 14.9, "edge": -19.6, "cover_est": 0.56, "spread_price": -105, "line_total": 155.5,
+         "model_total": 154.5}
+    monkeypatch.setattr(IP, "hoops_use", lambda lg, rec: {"use": PE.USE_SINGLE})
+    b = TB.best_line(p, "NCAAMB", 0.967)
+    assert b["best"] == "MVSU +34.5" and b["best_tested"] and abs(b["best_value"] - (0.56 * (1 + 100 / 105) - 1)) < 1e-9
+    monkeypatch.setattr(IP, "hoops_use", lambda lg, rec: {"use": PE.USE_PASS})
+    lean = TB.best_line(p, "NCAAMB", 0.967)
+    assert lean["best"] == "MVSU +34.5" and not lean["best_tested"] and lean["best_value"] is None
+    assert lean["lean_detail"] == "model MVSU +14.9"
 
 
 def test_best_line_survives_malformed_prices():
@@ -108,4 +109,4 @@ def test_best_line_survives_malformed_prices():
     p = {"home": "A", "away": "B", "home_spread": -1.5, "model_margin": 2.0, "spread_price": -7.5,
          "line_total": 6.5, "model_total": 7.0, "over_price": None, "under_price": -7.5}
     b = TB.best_line(p, "NHL", 0.6)
-    assert b["best"] is None or b["best_price"] == -110
+    assert b["best_value"] is None
