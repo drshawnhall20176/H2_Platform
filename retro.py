@@ -78,6 +78,8 @@ MARKET_STAT = {
     "Interceptions": "passing_interceptions", "Rush Attempts": "carries",
     "FG Made": "fg_made", "FG Attempted": "fg_att", "Anytime TD": "scrimmage_tds",
     "Passing TDs": "passing_tds", "Rushing TDs": "rushing_tds",
+    # Nov 5: defenders (nfl_engine.get_player_results; tkl = solo + assisted, the books' "tackles + assists")
+    "Tackles + Assists": "tkl", "Solo Tackles": "tkl_solo", "Sacks": "sacks",
 }
  
  
