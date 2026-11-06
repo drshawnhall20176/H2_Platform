@@ -1,0 +1,5 @@
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import review_approvals as R
+R.APPLY = True
+R.main()
