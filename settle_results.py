@@ -171,7 +171,23 @@ def main() -> int:
                   "later run may catch it).")
 
     print(f"Settled {total_settled} bet(s) total.")
+    print(f"Decided {roll_tickets()} parlay ticket(s) from their legs.")
     return 0
+
+
+def roll_tickets(**kw) -> int:
+    """Nov 6: decide every open parlay header whose legs are now all settled. This used to happen only in the morning
+    review, and only when IT had settled something -- so legs settled here left their tickets open (Nov 5: all
+    three test parlays stayed open with every leg graded)."""
+    n = 0
+    try:
+        for t in B.ticket_settlements(B.list_bets(**kw)):
+            B.update_bet(t["id"], result=t["result"], **kw)
+            print(f"  ticket {t['ticket']} (#{t['id']}): {t['result']}")
+            n += 1
+    except Exception as exc:                                    # noqa: BLE001
+        print(f"  ticket settlement failed: {type(exc).__name__}: {exc}")
+    return n
 
 
 if __name__ == "__main__":
