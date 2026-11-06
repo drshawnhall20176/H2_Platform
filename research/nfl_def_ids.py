@@ -1,4 +1,6 @@
 """Why don't tonight's defender bets get player IDs? Print the model-read rows for them."""
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import best_bets_data as BBD, parlay_check as PC
 reads = BBD.load_slate_reads("NFL", "2026-11-05", "draftkings") or {}
 print("reads:", len(reads))
