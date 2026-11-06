@@ -237,3 +237,35 @@ def test_lock_record_counts_only_most_probable_and_prices_them():
     assert r["Use"] == PE.MOST_PROBABLE and r["Graded"] == 2 and r["Hits"] == 1
     assert abs(r["Profit per $1"] - ((100 / 150) - 1) / 2) < 1e-9
     assert PG.lock_record(rows[2:]) is None
+
+
+def _g(use, side, ev, price, hit, **kw):
+    base = dict(sport="NFL", market="Receptions", actual=1.0, projection=1.0)
+    base.update(kw)
+    return dict(base, use_tag=use, side=side, ev=ev, price=price, chance=0.55, result="hit" if hit else "miss")
+
+
+def test_single_advice_does_not_raise_bar_when_bigger_edges_did_worse():
+    """Nov 6: NFL 🎯 singles at +3-5% earned money; +5%+ lost. Don't advise raising the bar -- point at Overs."""
+    import postgame as PG, props_engine as PE
+    g = ([_g(PE.USE_SINGLE, "Under", 0.04, -110, i % 3 != 0) for i in range(20)]
+         + [_g(PE.USE_SINGLE, "Over", 0.08, -110, i % 4 == 0) for i in range(20)])
+    out = [s for s in PG.suggestions(g) if "single" in s["text"].lower() or "Single" in s["text"]]
+    assert out and "+3% -> +5%" not in out[0]["text"] and "Over singles are the drain" in out[0]["text"]
+
+
+def test_single_advice_raises_bar_when_bigger_edges_earned_more():
+    import postgame as PG, props_engine as PE
+    g = ([_g(PE.USE_SINGLE, "Under", 0.04, -110, i % 3 == 0) for i in range(20)]
+         + [_g(PE.USE_SINGLE, "Under", 0.08, -110, i % 2 == 0 and i % 5 != 0) for i in range(20)])
+    txt = " ".join(s["text"] for s in PG.suggestions(g))
+    assert "+3% -> +5%" in txt
+
+
+def test_gap_advice_needs_profit_not_just_hit_rate():
+    """Short Unders 'right' 65% at -200 lose money: no 'give the model more vote'."""
+    import postgame as PG
+    gaps = [dict(sport="NHL", market="Goals", actual=0.0, gap="big-low-count", model_hit=i % 20 < 13, projection=1.0, line=2.5, side="Under", price=-200,
+                 result="hit" if i % 20 < 13 else "miss") for i in range(40)]
+    out = [s for s in PG.suggestions(gaps) if "far from the projection" in s["text"]]
+    assert out and out[0]["kind"] == "info" and "more vote" not in out[0]["text"]

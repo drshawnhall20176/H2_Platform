@@ -251,6 +251,8 @@ with tab_morning:
                     if c2.button("Approve", key=f"pgr_mok_{mpick}_{i}"):
                         ok = MS.approve_tuning(sgt["sport"], sgt["market"], sgt["factor"], sgt["text"], sgt["slot"])
                         st.success("Approved.") if ok else st.error("Couldn't save the adjustment.")
+                elif sgt["kind"] == "info":
+                    st.caption("For your information — no change suggested.")
                 else:
                     st.caption("Advice — this one needs a rule change in the model; ask Claude to apply it.")
         stl = rep.get("settlement") or {}
@@ -357,6 +359,8 @@ with tab_trend:
                     if c2.button("Approve", key=f"pgr_ok_{i}"):
                         ok = MS.approve_tuning(sgt["sport"], sgt["market"], sgt["factor"], sgt["text"], sgt["slot"])
                         st.success("Approved.") if ok else st.error("Couldn't save the adjustment.")
+                elif sgt["kind"] == "info":
+                    st.caption("For your information — no change suggested.")
                 else:
                     st.caption("Advice — this one needs a rule change in the model; ask Claude to apply it.")
 
