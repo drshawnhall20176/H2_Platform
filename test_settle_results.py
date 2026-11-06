@@ -159,3 +159,48 @@ if __name__ == "__main__":
         except Exception as e:  # noqa: BLE001
             print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
     print(f"\n{passed}/{len(tests)} tests passed (monkeypatch tests need pytest)")
+
+
+def test_legs_and_nfl_defenders_settle_by_name(monkeypatch):
+    """Nov 5: parlay legs have no player ID (take it from a single on the same player that day), and NFL defenders'
+    IDs are text the Bet Log can't store (match by name in the results)."""
+    import settle_results as S
+
+    class Eng:
+        @staticmethod
+        def get_player_results(date_str):
+            return {"00-0034874": {"tkl": 7.0, "tkl_solo": 4.0, "name": "Roquan Smith"},
+                    "00-0033281": {"tkl": 3.0, "tkl_solo": 2.0, "name": "Marlon Humphrey"}}
+
+    class Sp:
+        engine = Eng
+
+    monkeypatch.setattr(S.sports, "get", lambda k: Sp)
+    bets = [{"id": 1, "slate_date": "2026-11-05", "player": "Roquan Smith", "player_id": None,
+             "market": "Tackles + Assists", "side": "Under", "line": 9.5},
+            {"id": 2, "slate_date": "2026-11-05", "player": "Marlon Humphrey", "player_id": None,
+             "market": "Solo Tackles", "side": "Under", "line": 2.5},
+            {"id": 3, "slate_date": "2026-11-05", "player": "Nobody Here", "player_id": None,
+             "market": "Solo Tackles", "side": "Under", "line": 2.5}]
+    rep = S.settle_for_sport("NFL", bets)
+    assert rep["settled"] == {1: "win", 2: "win"}
+    assert rep["skipped_no_player_id"] == [3]
+
+
+def test_leg_takes_id_from_single(monkeypatch):
+    import settle_results as S
+
+    class Eng:
+        @staticmethod
+        def get_player_results(date_str):
+            return {123: {"reb": 4.0}}
+
+    class Sp:
+        engine = Eng
+
+    monkeypatch.setattr(S.sports, "get", lambda k: Sp)
+    bets = [{"id": 1, "slate_date": "2026-11-05", "player": "Draymond Green", "player_id": 123,
+             "market": "Rebounds", "side": "Under", "line": 5.5},
+            {"id": 2, "slate_date": "2026-11-05", "player": "Draymond Green", "player_id": None,
+             "market": "Rebounds", "side": "Under", "line": 5.5}]
+    assert S.settle_for_sport("NBA", bets)["settled"] == {1: "win", 2: "win"}

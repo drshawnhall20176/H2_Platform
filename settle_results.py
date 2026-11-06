@@ -50,11 +50,39 @@ def settle_bet(bet: Dict, results: Dict[int, Dict]) -> Optional[str]:
     pid = bet.get("player_id")
     if pid is None:
         return None
-    actuals = results.get(int(pid))
+    actuals = results.get(pid)
+    if actuals is None:
+        try:
+            actuals = results.get(int(pid))
+        except (TypeError, ValueError):
+            actuals = None
     hit = R.grade_play(bet.get("market"), bet.get("side"), bet.get("line"), actuals)
     if hit is None:
         return None
     return "win" if hit else "loss"
+
+
+def _norm(name) -> str:
+    import ufc_review as U
+    return U.norm(name or "")
+
+
+def _ids_by_name(bets: List[Dict], results: Dict) -> Dict[str, object]:
+    """Nov 5: a player ID for bets logged without one, by name. Parlay legs are logged without IDs, and NFL
+    defenders' IDs are text the Bet Log can't store -- so a leg takes the ID from a single on the same player that
+    day, and otherwise from the results themselves when they carry names (NFL) and exactly one player matches."""
+    out: Dict[str, object] = {}
+    for b in bets:
+        if b.get("player_id") is not None and b.get("player"):
+            out.setdefault(_norm(b["player"]), b["player_id"])
+    by_name: Dict[str, List] = {}
+    for pid, r in (results or {}).items():
+        if isinstance(r, dict) and r.get("name"):
+            by_name.setdefault(_norm(r["name"]), []).append(pid)
+    for n, pids in by_name.items():
+        if len(pids) == 1:
+            out.setdefault(n, pids[0])
+    return out
 
 
 def settle_for_sport(sport_key: str, sport_bets: List[Dict]) -> Dict:
@@ -81,10 +109,14 @@ def settle_for_sport(sport_key: str, sport_bets: List[Dict]) -> Dict:
             continue
         if not results:
             continue   # that date's games aren't final yet -- a later run will catch it
+        known = _ids_by_name(date_bets, results)
         for b in date_bets:
             if b.get("player_id") is None:
-                skipped_no_player_id.append(b["id"])
-                continue
+                pid = known.get(_norm(b.get("player")))
+                if pid is None:
+                    skipped_no_player_id.append(b["id"])
+                    continue
+                b = dict(b, player_id=pid)
             result = settle_bet(b, results)
             if result is not None:
                 settled[b["id"]] = result

@@ -621,6 +621,11 @@ def get_player_results(date_str: str) -> Dict[str, Dict[str, float]]:
             "scrimmage_tds": float((r.get("rushing_tds") or 0) + (r.get("receiving_tds") or 0)),
             "passing_tds": float(r.get("passing_tds") or 0),
             "rushing_tds": float(r.get("rushing_tds") or 0),
+            # Nov 5: defenders' markets and the name (bets logged without an ID are matched by it)
+            "tkl": sum(float(r.get(c) or 0) for c in ("def_tackles_solo", "def_tackles_with_assist", "def_tackle_assists")),
+            "tkl_solo": float(r.get("def_tackles_solo") or 0),
+            "sacks": float(r.get("def_sacks") or 0),
+            "name": r.get("player_display_name") or r.get("player_name"),
         }
     _diag(f"get_player_results({date_str}): season {season} week {week}, {len(out)} player result(s)")
     return out
