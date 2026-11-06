@@ -165,7 +165,7 @@ def run():
                          "Matchup Lab", "Track Record", "Data Health",
                          "Suggested Parlays", "Speculative Basket", "Graded Picks",
                          "Model Dashboard", "First Innings Totals", "Player Lines", "Slip Lab",
-                         "Postgame Review", "Progression Plan", "Tennis Lab", "International Hoops",
+                         "Postgame Review", "Progression Plan", "Reports", "Tennis Lab", "International Hoops",
                          "Position Matchups"}
 
     # leading page-number -> (title, icon, stable url slug). The url_path is the key fix: it pins
@@ -228,6 +228,7 @@ def run():
         "45": ("Game Lab", "🏟️", "ncaamb_game_lab"),   # college basketball spreads/totals/ML (tracking)
         "46": ("Game Lab", "🏟️", "nba_game_lab"),      # NBA spreads/totals/ML (ratings vs the books)
         "47": ("Game Lab", "🏟️", "nhl_game_lab"),      # NHL puck lines/totals/ML
+        "48": ("Reports", "📑", "reports"),             # P&L statements for any period + CSV / PDF (Nov 6)
     }
 
     # SIDEBAR SECTIONS, added directly on request: st.navigation natively supports a
@@ -259,7 +260,7 @@ def run():
         SECTION_OF[k] = "🛰️ LIVE SIGNALS"
     for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26", "27", "29", "30", "31", "32", "33", "34", "35", "36", "43", "44", "45", "46", "47", "38"):
         SECTION_OF[k] = "🔬 DEEP RESEARCH"
-    for k in ("16", "17", "18", "19", "40", "41", "42"):
+    for k in ("16", "17", "18", "19", "40", "41", "42", "48"):
         SECTION_OF[k] = "🔍 SELF-GRADING & PROOF"
     for k in ("20", "21", "22"):
         SECTION_OF[k] = "📣 OPS & CONTENT"

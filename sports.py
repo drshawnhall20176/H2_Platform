@@ -353,7 +353,7 @@ LAB_SPORTS = {
                   market_map={"Moneyline": "h2h", "Spread": "spreads", "Total": "totals"}),
 }
 LAB_PAGES = {"TENNIS": "43", "INTL": "44"}       # the views/ page number each lab opens
-LAB_COMMON_PAGES = ("18", "42")                   # Bet Log, Progression Plan
+LAB_COMMON_PAGES = ("18", "42", "48")             # Bet Log, Progression Plan, Reports
 
 
 def in_season(sport_key: str, day=None) -> bool:
