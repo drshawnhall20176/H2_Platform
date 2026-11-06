@@ -935,4 +935,10 @@ def load_generic_best_bets_board(sport_key: str, date_str: str,
     legacy = sport.projections.build_best_bets(rows, real_lines=real_lines, offers=real_offers, preferred_book=book)
     plays = compose_board(sport_key, reads, rows, legacy)
     attach_team_trend(sport_key, plays, rows, date_str)
+    if reads:                                                   # Nov 6: Home's "Today's best" reads these (no extra credits)
+        try:
+            import todays_best as TB
+            TB.save_props(sport_key, date_str, plays, meta)
+        except Exception:                                       # noqa: BLE001
+            pass
     return plays, meta, available_books

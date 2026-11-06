@@ -1,0 +1,43 @@
+# Close watch (Nov 6): captures each open bet's closing price 45 and 5 minutes before ITS game starts (close_watch.py).
+#
+# Why a long-running job instead of a frequent cron: GitHub skips most scheduled runs -- the 15-30 minute
+# capture-closing-lines cron ran 4 times on Sunday Nov 1, first at 1:17pm ET. One run here stays up to ~6 hours and
+# wakes for each kickoff, so any one start covers a whole window. Started three times a day (a late or skipped start
+# is covered by the next) and right after bets are logged (log-plays dispatches it). The repo is public, so Actions
+# minutes are free; Odds API credits are spent only on games with open bets, once or twice each.
+#
+# A newer run replaces an older one (concurrency below), so there is never more than one watcher.
+name: close-watch
+
+on:
+  schedule:
+    - cron: "40 15 * * *"   # 11:40am ET -- covers early afternoon (NFL 1pm, college noon, day games)
+    - cron: "40 20 * * *"   # 4:40pm ET  -- covers the evening slate
+    - cron: "40 1 * * *"    # 9:40pm ET  -- covers late West Coast starts
+  workflow_dispatch: {}
+
+concurrency:
+  group: close-watch
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Watch kickoffs
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python -u close_watch.py
