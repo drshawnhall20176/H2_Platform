@@ -204,3 +204,9 @@ def test_leg_takes_id_from_single(monkeypatch):
             {"id": 2, "slate_date": "2026-11-05", "player": "Draymond Green", "player_id": None,
              "market": "Rebounds", "side": "Under", "line": 5.5}]
     assert S.settle_for_sport("NBA", bets)["settled"] == {1: "win", 2: "win"}
+
+
+def test_kicking_points_grade():
+    import retro as R
+    assert R.MARKET_STAT["Kicking Points"] == "kick_pts"
+    assert R.grade_play("Kicking Points", "Under", 8.5, {"kick_pts": 7.0}) is True
