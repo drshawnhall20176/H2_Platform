@@ -268,9 +268,9 @@ if _owner:
             st.dataframe(_udf, hide_index=True, width="stretch",
                          column_config={"Market chance": st.column_config.NumberColumn(
                              format="percent", help="The books' no-vig chance for the favorite.")})
-            st.caption(f"{len(_u)} bouts, earliest first, from one odds request. **Market chance** is the books' read "
-                       "with the vig removed — there's no UFC model yet, so these aren't picks. The feed lists every MMA "
-                       "promotion it prices. Details and logging on **UFC Fight Card**.")
+            st.caption(f"{len(_u)} bouts on the main card (priced by most books), earliest first. **Market chance** is "
+                       "the books' read with the vig removed — there's no UFC model yet, so these aren't picks. Smaller "
+                       "promotions' bouts are on **UFC Fight Card** (switch off 'Main cards only').")
         else:
             st.caption("No MMA bouts listed for this date" + (" (completed bouts drop out of the odds feed)." if _past
                                                               else "."))

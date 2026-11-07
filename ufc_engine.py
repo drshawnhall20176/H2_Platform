@@ -286,3 +286,12 @@ def card_dates(api_key: str) -> List[str]:
     """Eastern dates that have bouts listed, soonest first (for an empty date: where the next card is)."""
     data, _ = _get(f"sports/{UFC_SPORT}/events", {"apiKey": api_key})
     return sorted({d for d in (_eastern_date_str(e.get("commence_time")) for e in data or []) if d})
+
+
+MAIN_CARD_MIN_BOOKS = 5     # bouts most US books price: the UFC (and other major) cards; regional shows get 1-3
+
+
+def main_card_only(card: List[Dict]) -> List[Dict]:
+    """The bouts most books price. The odds feed lists every MMA promotion it prices (regional shows too, usually at
+    one book); a UFC card is priced across the board. A heuristic, said so on the pages."""
+    return [b for b in card if (b.get("books") or 0) >= MAIN_CARD_MIN_BOOKS]
