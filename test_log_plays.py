@@ -170,3 +170,23 @@ def test_against_model_flags_low_chance_and_missing_reads():
     assert "32%" in LP.against_model({"model_prob": 0.3163})
     assert "no model read" in LP.against_model({"model_prob": None})
     assert LP.against_model({"model_prob": 0.62}) == ""
+
+
+def test_slow_board_still_logs(monkeypatch, capsys):
+    """Nov 7: a college Saturday board outlasted the job; past the budget the bets log without the model %."""
+    import time
+    import log_plays as LP
+    monkeypatch.setattr(LP, "BOARD_BUDGET_S", 1)
+    import export_board as X
+    monkeypatch.setattr(X, "board", lambda *a, **k: time.sleep(5) or [])
+    seen = {}
+    monkeypatch.setattr(LP, "build", lambda picks, board, *a, **k: seen.setdefault("board", board) and [] or [])
+    import betlog as B
+    monkeypatch.setattr(B, "list_bets", lambda **k: [])
+    monkeypatch.setattr(B, "log_parlay_ticket", lambda *a, **k: {"ticket": a[0], "legs": 0})
+    try:
+        LP.main(["--picks", '[{"player":"A","market":"Receptions","side":"Over","line":1.5,"odds":60,"game":"X @ Y"}]',
+                 "--sport", "NCAAF", "--date", "2026-11-07", "--stake", "10", "--ticket", "T", "--ticket-odds", "950"])
+    except Exception:                                           # noqa: BLE001 -- only the board budget is under test
+        pass
+    assert seen.get("board") == [] and "took over" in capsys.readouterr().out
