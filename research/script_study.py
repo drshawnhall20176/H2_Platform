@@ -336,6 +336,40 @@ def heldout(c, games, rows, how="season"):
     return out
 
 
+def conditional_holdout(rows, games, how):
+    """Given the script happened: do each group's per-script effects repeat on games they weren't fit on?
+    slope per group = sum_s n_s * eA_s * eB_s / sum_s n_s * eA_s^2 (both directions pooled)."""
+    if how == "season":
+        part = lambda r: r["season"]                            # noqa: E731
+    else:
+        part = lambda r: str(r["gi"] % 2)                       # noqa: E731
+    parts = sorted({part(r) for r in rows} - {"x"})
+    if len(parts) < 2:
+        return {}
+
+    def raw(rs):
+        by = defaultdict(lambda: defaultdict(list))
+        for r in rs:
+            by[r["g"]][r["state"]].append(r["beat"])
+        out = {}
+        for g, st in by.items():
+            allv = [b for v in st.values() for b in v]
+            base = sum(allv) / len(allv)
+            out[g] = {s: (sum(v) / len(v) - base, len(v)) for s, v in st.items()}
+        return out
+    num, den = defaultdict(float), defaultdict(float)
+    for a in parts:
+        A = raw([r for r in rows if part(r) == a])
+        B = raw([r for r in rows if part(r) != a])
+        for g in A:
+            for s, (ea, _na) in A[g].items():
+                if g in B and s in B[g]:
+                    eb, nb = B[g][s]
+                    num[g] += nb * ea * eb
+                    den[g] += nb * ea * ea
+    return {g: round(num[g] / den[g], 3) for g in num if den[g] > 0}
+
+
 def run(sport):
     c = CFG[sport]
     ids = event_ids(c)
@@ -353,8 +387,12 @@ def run(sport):
     for g in sorted(eff):
         print(f"EFF {g:18s} n={ns[g]:6d} base={base[g]:.3f} " + " ".join(f"{s}={v:+.3f}" for s, v in eff[g].items()))
     ho = {"season": heldout(c, games, rows, "season"), "alternate": heldout(c, games, rows, "alternate")}
+    cond = {h: conditional_holdout(rows, games, h) for h in ("season", "alternate")}
+    for h, v in cond.items():
+        for g, sl in sorted(v.items()):
+            print(f"  COND {h:9s} {g:18s} {sl:+.2f}")
     print("SCRIPTJSON " + json.dumps({"sport": sport, "close": c["close"], "blow": c["blow"], "shares": shares,
-                                      "effects": eff, "base": base, "n": ns, "heldout": ho,
+                                      "effects": eff, "base": base, "n": ns, "heldout": ho, "conditional": cond,
                                       "games": len(games), "lined": sum(1 for _, p in games if p["strength"] is not None)}))
 
 
