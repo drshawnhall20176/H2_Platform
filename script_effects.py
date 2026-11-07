@@ -413,3 +413,77 @@ def game_teams(rows: Sequence[Dict], game: str) -> List[str]:
 
 def fav_names(g: Optional[Dict]) -> set:
     return set(g["teams"][g["fav"]]["names"]) if g else set()
+
+
+# ---------------------------------------------------------------- the nightly fit (script_learn.py) -- the feedback loop
+_LEARNED: Dict[str, Tuple[float, Optional[Dict]]] = {}
+LEARNED_TTL_S = 1800
+
+
+def learned(sport: str) -> Optional[Dict]:
+    """The latest nightly fit for this sport (settings script_learn:<sport>), or None before the first run."""
+    import time
+    hit = _LEARNED.get(sport)
+    if hit and time.time() - hit[0] < LEARNED_TTL_S:
+        return hit[1]
+    try:
+        import model_store as MS
+        fit = MS.get_setting(f"script_learn:{sport}", None)
+    except Exception:                                           # noqa: BLE001
+        fit = None
+    _LEARNED[sport] = (time.time(), fit)
+    return fit
+
+
+def refresh(sport: str) -> Optional[Dict]:
+    """Overlay the nightly fit on the shipped numbers: scenario table, effects, trust. Returns the fit."""
+    fit = learned(sport)
+    if fit and fit.get("effects") and fit.get("shares"):
+        d = DATA.setdefault(sport, {})
+        for k in ("shares", "effects", "base", "n", "trust", "conditional", "games", "lined", "close", "blow"):
+            if fit.get(k) is not None:
+                d[k] = fit[k]
+        d["fit_at"] = fit.get("fit_at")
+        d["scenario"] = fit.get("scenario")
+        d["track"] = fit.get("track")
+    return fit
+
+
+def scenario_probs(sport: str, strength: Optional[float]) -> Tuple[Dict[str, float], str]:
+    """(scenario chances, source) from the line: the nightly line curve when it beat the table on held-out games,
+    else the table. (The matchup model needs team histories: it arrives through the logged calls, scenario_call.)"""
+    sc = (DATA.get(sport) or {}).get("scenario") or {}
+    if strength is not None and sc.get("source") == "line" and sc.get("model"):
+        import math
+        import scenario_model as M
+        s = float(strength)
+        if strength_kind(sport) == "ml":
+            p = min(0.95, max(0.5, max(s, 1 - s)))
+            x = math.log(p / (1 - p))
+        else:
+            x = abs(s)
+        return M.predict(sc["model"], {"strength": x}), "line"
+    return shares(strength, sport), "table"
+
+
+def calls(sport: str) -> Dict:
+    try:
+        import model_store as MS
+        return MS.get_setting(f"scenario_calls:{sport}", None) or {}
+    except Exception:                                           # noqa: BLE001
+        return {}
+
+
+def scenario_call(sport: str, teams: Sequence[str], day: str, all_calls: Optional[Dict] = None) -> Optional[Dict]:
+    """The pre-game call logged for this game (pending or graded), matched on ESPN ids or names and the date."""
+    cs = all_calls if all_calls is not None else calls(sport)
+    want = {norm(t) for t in teams if t}
+    for k in list(cs.get("pending") or []) + list(cs.get("graded") or []):
+        if k.get("d") not in (day, None) and not str(k.get("kick") or "").startswith(day):
+            if k.get("d") != day:
+                continue
+        names = {norm(k.get("fav")), norm(k.get("dog")), norm(str(k.get("fav_id"))), norm(str(k.get("dog_id")))}
+        hit = sum(1 for t in want if t in names or any(team_matches(t, {n}) for n in names if n))
+        if hit >= 2 or (hit == 1 and len(want) == 1):
+            return k
+    return None

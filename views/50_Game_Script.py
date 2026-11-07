@@ -31,6 +31,7 @@ SPORT = sports.active_key()
 if SPORT not in SE.SPORTS:
     st.info(f"Game Script covers {', '.join(SE.SPORTS)}. Switch sport on the Home page.")
     st.stop()
+FIT = SE.refresh(SPORT)                                         # Nov 7: the nightly fit (script_learn.py), when there is one
 
 ET = pytz.timezone("US/Eastern")
 today = datetime.now(ET).date()
@@ -116,7 +117,14 @@ strength = g_espn["strength"] if g_espn else None
 fav = g_espn["teams"][g_espn["fav"]]["display"] if g_espn else None
 dog = g_espn["teams"][1 - g_espn["fav"]]["display"] if g_espn else None
 FAV_NAMES = SE.fav_names(g_espn)
-sh = SE.shares(strength, SPORT)
+CALL = SE.scenario_call(SPORT, teams, DAY)
+if CALL:                                                        # the call logged before the game (graded once it's final)
+    sh, SRC = dict(CALL["p"]), CALL.get("source") or "table"
+    if not g_espn:
+        strength, fav, dog = CALL.get("strength"), CALL.get("fav"), CALL.get("dog")
+        FAV_NAMES = {SE.norm(fav), SE.norm(str(CALL.get("fav_id")))}
+else:
+    sh, SRC = SE.scenario_probs(SPORT, strength)
 LAB = SE.labels(SPORT)
 D = SE.DATA[SPORT]
 
@@ -143,7 +151,33 @@ if g_espn and g_espn.get("final"):
 if strength is None:
     st.caption("No pre-game line found for this game: script chances use the most even-game mix, and neither side is "
                "treated as the favorite (no prop is shifted).")
-st.caption(f"{LAB['middle']}: {sh['middle']:.0%}. From {D.get('lined') or 0:,} {SPORT} games with a pre-game line.")
+SRC_TEXT = {"table": "the scenario table (how games with this size of line finished)",
+            "line": "the line curve (refit nightly; beat the table on held-out games)",
+            "matchup": "the line + matchup model (refit nightly; beat the line alone on held-out games)"}
+st.caption(f"{LAB['middle']}: {sh['middle']:.0%}. Scenario chances from {SRC_TEXT.get(SRC, SRC)}"
+           + (", logged before the game" if CALL else "") + f" · {D.get('lined') or 0:,} {SPORT} games with a line"
+           + (f", learned through {str(D.get('fit_at'))[:10]}" if D.get("fit_at") else " (shipped numbers — the nightly "
+              "learning job hasn't run yet)") + ".")
+if CALL and CALL.get("why"):
+    st.caption("**Why the call moved off the line:** " + "; ".join(
+        f"{w[0]} → {'more' if w[2] > 0 else 'less'} likely {SE.short(SPORT, w[1]).lower()}" for w in CALL["why"]))
+if CALL and CALL.get("y"):
+    st.caption(f"**Graded:** called {sh[CALL['y']]:.0%} for what happened ({LAB[CALL['y']]}); favorite's margin "
+               f"{CALL.get('margin'):+g}.")
+ctx = (CALL or {}).get("context") or {}
+if ctx.get("fav") or ctx.get("dog"):
+    def _ctx(lbl, t):
+        if not t:
+            return None
+        return {"Team": lbl, "Games": t["n"], f"Won by {D['blow']}+": t["won_big"], f"Lost by {D['blow']}+": t["lost_big"],
+                f"Within {D['close']}": t["close"], "Avg margin": t["avg_margin"],
+                "Last 5 margins": " ".join(f"{m:+d}" for m in t["last5"]), "Back-to-back": "yes" if t["b2b"] else ""}
+    with st.expander("Matchup context this season"):
+        st.dataframe(pd.DataFrame([x for x in (_ctx(f"{_nick(fav)} (fav)", ctx.get("fav")), _ctx(f"{_nick(dog)}", ctx.get("dog"))) if x]),
+                     hide_index=True, width="stretch")
+        st.caption("Background, not part of the numbers: tested nightly against games it wasn't fit on, this season's "
+                   "blowout records, schedule-adjusted margins, pace and rest haven't improved the call beyond the line "
+                   "yet — the line already prices them. The job promotes them automatically if that changes.")
 
 # ---------------------------------------------------------------- condition buttons
 COND = ["model"] + list(SE.SCRIPTS)
@@ -266,3 +300,29 @@ if chosen:
                "the fair price shown.")
 st.caption("⚠️ Script effects are measured against players' own averages, not prop lines — the books know the line too, "
            "so some of it may already be priced in. Ticket results are tracked under the game-script tag.")
+
+# ---------------------------------------------------------------- the feedback loop's record
+with st.expander(f"📈 How the pre-game calls have done ({SPORT})"):
+    tr = D.get("track") or {}
+    sc = D.get("scenario") or {}
+    if tr.get("n"):
+        st.markdown(f"**{tr['n']:,} graded calls.** Log loss {tr['model']:.3f} vs the table's {tr['table']:.3f} on the "
+                    "same games (lower is better).")
+        bands = []
+        for k, v in sorted((tr.get("bands") or {}).items()):
+            cls, rng = k.split("|")
+            bands.append({"Scenario": SE.short(SPORT, cls), "Called": rng.replace("-", "–"), "Games": v["n"],
+                          "Said (avg)": v["said"], "Happened": v["happened"]})
+        if bands:
+            st.dataframe(pd.DataFrame(bands), hide_index=True, width="stretch",
+                         column_config={"Said (avg)": st.column_config.NumberColumn(format="percent"),
+                                        "Happened": st.column_config.NumberColumn(format="percent")})
+    else:
+        st.caption("No graded calls yet: the nightly job logs each game's call before it starts and grades it after.")
+    ev_ = sc.get("eval") or {}
+    if ev_:
+        st.dataframe(pd.DataFrame([{"Held-out test": h, "Games": v["n"], "Table": v["table"], "Line curve": v["line"],
+                                    "Line + matchup": v["matchup"]} for h, v in ev_.items()]),
+                     hide_index=True, width="stretch")
+        st.caption(f"Log loss on games each model wasn't fit on (lower is better). In use: **{SRC_TEXT.get(sc.get('source'), '—')}**. "
+                   "Re-tested every night as games finish.")
