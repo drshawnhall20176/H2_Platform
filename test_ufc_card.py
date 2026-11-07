@@ -30,7 +30,7 @@ def test_today_best_ufc_rows(monkeypatch):
     monkeypatch.setattr(E, "MAIN_CARD_MIN_BOOKS", 0)
     monkeypatch.setattr(E, "get_card", lambda key, d: E.card_from_odds(FEED, d))
     rows = TB.ufc_rows("2026-11-07", "k")
-    assert [r["game"] for r in rows] == ["Prelim A vs Prelim B", "Y vs X", "Main A vs Main B"]
+    assert [r["game"] for r in rows] == ["Prelim A vs Prelim B", "Main A vs Main B"]    # "Y vs X": no major book
     assert rows[0]["fav"] == "Prelim B" and rows[0]["fav_price"] == -140 and rows[0]["dog_price"] == 120
     assert TB.ufc_rows("2026-11-07", None) == []
 
@@ -51,6 +51,9 @@ def test_fight_card_page_shows_the_card(monkeypatch):
     at.session_state["sport"] = "UFC"
     at.run()
     at.date_input[0].set_value(dt.date(2026, 11, 7)).run()
+    overview = next(d.value for d in at.dataframe if "Bout" in d.value.columns)
+    assert list(overview["Bout"]) == ["Prelim A vs Prelim B", "Main A vs Main B"]        # main cards only (default)
+    at.toggle(key="ufc_main_only").set_value(False).run()
     overview = next(d.value for d in at.dataframe if "Bout" in d.value.columns)
     assert list(overview["Bout"]) == ["Prelim A vs Prelim B", "Y vs X", "Main A vs Main B"]
 
@@ -88,8 +91,33 @@ def test_home_fight_card_section(monkeypatch):
     assert list(df["Bout"]) == ["Prelim A vs Prelim B", "Main A vs Main B"]
 
 
-def test_main_card_only():
+def test_main_card_only_major_books_and_stale_duplicates():
     card = E.card_from_odds(FEED, "2026-11-07")
-    assert [b["id"] for b in E.main_card_only(card)] == []                      # no bout here has 5+ books
-    big = [dict(b, books=8) if b["id"] == "late" else b for b in card]
-    assert [b["id"] for b in E.main_card_only(big)] == ["late"]
+    assert [b["id"] for b in E.main_card_only(card)] == ["early", "late"]       # "nobook": no major US book
+    offshore = [dict(b, book_keys=["betus"], prices={"betus": {"a": 100, "b": -120}}) for b in card]
+    assert E.main_card_only(offshore) == []                                     # regional show: offshore only
+    # the feed still lists Parsons vs his old opponent; DraftKings prices only the current bout
+    stale = {"id": "old", "commence_time": "2026-11-07T22:05:00Z", "home_team": "Jose Souza", "away_team": "Jonny Parsons",
+             "bookmakers": [{"key": k, "markets": [{"key": "h2h", "outcomes": [{"name": "Jonny Parsons", "price": 170},
+                                                                               {"name": "Jose Souza", "price": -200}]}]}
+                            for k in ("fanduel", "betmgm", "betus", "bovada")]}
+    cur = {"id": "new", "commence_time": "2026-11-07T22:15:00Z", "home_team": "Jose Henrique", "away_team": "Jonny Parsons",
+           "bookmakers": [{"key": k, "markets": [{"key": "h2h", "outcomes": [{"name": "Jonny Parsons", "price": 185},
+                                                                             {"name": "Jose Henrique", "price": -225}]},
+                                                 {"key": "spreads", "outcomes": [{"name": "Jonny Parsons", "point": 3.5, "price": 130},
+                                                                                 {"name": "Jose Henrique", "point": -3.5, "price": -175}]},
+                                                 {"key": "totals", "outcomes": [{"name": "Over", "point": 2.5, "price": 114},
+                                                                                {"name": "Under", "point": 2.5, "price": -145}]}]}
+                          for k in ("draftkings", "betus", "bovada")]}
+    both = E.card_from_odds([stale, cur], "2026-11-07")
+    assert [b["id"] for b in E.main_card_only(both)] == ["new"]
+    ln = E.book_lines(next(b for b in both if b["id"] == "new"), "draftkings")
+    assert ln["spread"] == "Parsons +3.5 (+130) / Henrique -3.5 (-175)"
+    assert ln["total"] == "O/U 2.5 (+114 / -145)" and ln["ml"] == "Parsons +185 / Henrique -225"
+
+
+def test_parse_bout_odds_spreads():
+    ev = {"bookmakers": [{"key": "draftkings", "markets": [
+        {"key": "spreads", "outcomes": [{"name": "Ko", "point": -7.5, "price": -145}, {"name": "Turman", "point": 7.5, "price": 110}]}]}]}
+    out = E.parse_bout_odds(ev)
+    assert out["spreads"] == {"Ko": -145, "Turman": 110} and out["_spread_points"] == {"Ko": -7.5, "Turman": 7.5}

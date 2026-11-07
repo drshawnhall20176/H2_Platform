@@ -550,15 +550,14 @@ def ufc_rows(date_str: str, api_key: Optional[str]) -> List[Dict]:
         return []
     import ufc_engine as E
     out = []
-    for b in E.get_card(api_key, date_str):
-        if (b.get("books") or 0) < E.MAIN_CARD_MIN_BOOKS:       # the UFC / major card only (regional shows: 1 book)
-            continue
+    for b in E.main_card_only(E.get_card(api_key, date_str)):  # bouts a major US book prices; stale duplicates out
+        ln = E.book_lines(b, "draftkings")
         fav_a = b["p_a"] is not None and b["p_a"] >= 0.5
         fav, dog = (b["a"], b["b"]) if fav_a else (b["b"], b["a"])
         out.append({"sport": "UFC", "time": _et_time(b["commence"]), "game": f"{b['a']} vs {b['b']}",
                     "fav": None if b["p_a"] is None else fav, "dog": None if b["p_a"] is None else dog,
                     "chance": None if b["p_a"] is None else (b["p_a"] if fav_a else 1 - b["p_a"]),
                     "fav_price": b["best_a"] if fav_a else b["best_b"], "dog_price": b["best_b"] if fav_a else b["best_a"],
-                    "books": b["books"], "commence": b["commence"]})
+                    "books": b["books"], "commence": b["commence"], "spread": ln["spread"], "total": ln["total"]})
     out.sort(key=lambda r: r.get("commence") or "")
     return out
