@@ -79,50 +79,53 @@ except E.OddsAPIError as e:
     st.stop()
 
 if not events:
-    # Events disappear from the API feed once completed -- an Abu Dhabi card
-    # (early morning ET) will be gone before US prime time. Show a clear explanation
-    # rather than a generic "no events" message.
-    st.info(
-        f"No upcoming UFC events found for {date_str} — if today's card has already "
-        "concluded (e.g. an Abu Dhabi event that ran early morning ET), the Odds API "
-        "removes completed events from the feed. Try tomorrow's date for next week's card, "
-        "or select a future fight date."
-    )
-
-    # Demo mode: show today's actual card from the API with results so you can
-    # see what the fight card page looks like with real data.
-    st.divider()
-    C.section_header("📋", "Today's completed card — UFC Fight Night: Ankalaev vs. Guskov")
-    st.caption("Abu Dhabi · Etihad Arena · July 25, 2026 — odds have closed, results shown for reference")
-
-    completed_bouts = [
-        ("🏆 Main Event",    "Magomed Ankalaev", "Bogdan Guskov",    "KO/TKO R5 2:41"),
-        ("⭐ Co-Main",       "Ramazan Temirov",  "Steve Erceg",      "KO/TKO R1 4:21"),
-        ("Bout 3",           "Rizvan Kuniev",    "Tyrell Fortune",   "KO/TKO R3 1:12"),
-        ("Bout 4",           "Islam Dulatov",    "Wyatt Turman",     "Unanimous Decision"),
-        ("Bout 5",           "Santiago Ponzinibbio", "Sam Patterson","Decision 29-28"),
-        ("Bout 6",           "Ismael Bonfim",    "Axel Sola",        "KO/TKO R2 4:49"),
-        ("Bout 7",           "Dustin Jacoby",    "Muhammad Said",    "KO/TKO R3 1:12"),
-        ("Bout 8",           "Valter Walker",    "Thomas Petersen",  "Submission R1 1:32 (Calf Slicer)"),
-        ("Bout 9",           "D. Rzepecki",      "M. Zaynukov",      "KO/TKO"),
-        ("Bout 10",          "A. Vagaev",        "S. Izagakhmaev",   "Decision"),
-        ("Bout 11",          "B. Ribeiro",       "M. Tuchalov",      "KO/TKO"),
-        ("Bout 12",          "Nurullo Aliev",    "TBD",              "Win"),
-    ]
-
-    for card_pos, fighter_a, fighter_b, result in completed_bouts:
-        winner = fighter_a
-        with st.expander(f"{card_pos} · {fighter_a} vs. {fighter_b}"):
-            col1, col2, col3 = st.columns([2, 2, 1])
-            with col1:
-                st.markdown(f"**✅ {fighter_a}** (W)")
-            with col2:
-                st.markdown(f"{fighter_b} (L)")
-            with col3:
-                st.markdown(f"**{result}**")
+    # Nov 7: this used to show a hard-coded July 25 Abu Dhabi card as a "demo", which read as the platform being stale.
+    # Now: say plainly there's nothing on this date, and offer the dates that do have bouts.
+    st.info(f"No MMA bouts are listed for {target:%a %b %-d}. Completed bouts drop out of the odds feed, so a card "
+            "that already finished won't show here.")
+    try:
+        _upcoming = [d for d in E.card_dates(api_key) if d >= datetime.now(E._EASTERN).strftime("%Y-%m-%d")][:6]
+    except Exception:                                           # noqa: BLE001
+        _upcoming = []
+    if _upcoming:
+        st.markdown("**Upcoming card dates:** " + " · ".join(
+            datetime.strptime(d, "%Y-%m-%d").strftime("%a %b %-d") for d in _upcoming) + " — pick one above.")
     st.stop()
 
-st.success(f"Found {len(events)} bout{'s' if len(events) != 1 else ''} on tonight's card.")
+st.success(f"Found {len(events)} bout{'s' if len(events) != 1 else ''} on the card for {target:%a %b %-d}.")
+
+
+# ── The whole card at a glance (Nov 7): one odds request for every bout, earliest first ──
+@st.cache_data(ttl=600, show_spinner=False)
+def load_card_odds(date_str: str, api_key: str):
+    return E.get_card(api_key, date_str)
+
+
+try:
+    _card = load_card_odds(date_str, api_key)
+except Exception as _exc:                                       # noqa: BLE001
+    _card = []
+    st.caption(f"Couldn't load the card's prices in one call ({str(_exc)[:80]}); each bout below loads its own.")
+if _card:
+    def _fmt(v):
+        return "—" if v is None else f"{float(v):+.0f}"
+
+    _rows = []
+    for b in _card:
+        fav_a = b["p_a"] is not None and b["p_a"] >= 0.5
+        _rows.append({"Time (ET)": pd.to_datetime(b["commence"]).tz_convert("America/New_York").strftime("%-I:%M %p"),
+                      "Bout": f"{b['a']} vs {b['b']}",
+                      "Favorite": "—" if b["p_a"] is None else (b["a"] if fav_a else b["b"]),
+                      "Market chance": None if b["p_a"] is None else (b["p_a"] if fav_a else 1 - b["p_a"]),
+                      "Best price, 1st named": _fmt(b["best_a"]), "Best price, 2nd named": _fmt(b["best_b"]),
+                      "Books": b["books"]})
+    _df = pd.DataFrame(_rows)
+    st.dataframe(_df, hide_index=True, width="stretch",
+                 column_config={"Market chance": st.column_config.NumberColumn(
+                     format="percent", help="The books' no-vig chance for the favorite (median across books).")})
+    st.caption("The whole card from one odds request, earliest bout first. **Market chance** is what the books' prices "
+               "imply with the vig removed — there's no UFC model yet, so it's the market's read, not a pick. The odds "
+               "feed lists every MMA promotion it prices, not only UFC. Each bout's detail is below.")
 
 # ── Per-fight odds ────────────────────────────────────────────────────────
 @st.cache_data(ttl=300, show_spinner=False)
