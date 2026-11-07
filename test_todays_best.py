@@ -272,3 +272,22 @@ def test_home_shows_blowout_watch(monkeypatch):
     assert not at.exception, [e.value for e in at.exception]
     found = [df.value for df in at.dataframe if "Most likely to win big" in df.value.columns]
     assert found and found[0].iloc[0]["Most likely to win big"] == "Oklahoma City Thunder (favorite)"
+
+
+def test_blowout_watch_lists_earliest_first(monkeypatch):
+    from pathlib import Path
+    from streamlit.testing.v1 import AppTest
+    import todays_best as TB
+    monkeypatch.setattr(TB, "collect", lambda d, sp, past=False: {"rows": [], "props": {}})
+    monkeypatch.setattr(TB, "winner_rows", lambda d, leagues=None, past=False: [])
+    mk = lambda t, g, c: {"sport": "NBA", "time": t, "game": g, "team": g.split(" @ ")[1], "who": "favorite",  # noqa: E731
+                          "chance": c, "close": 0.2, "line": "", "margin": "15+ pts", "happened": None}
+    monkeypatch.setattr(TB, "blowout_rows", lambda d: [mk("8:00 PM", "W @ OKC", 0.41), mk("5:00 PM", "DEN @ IND", 0.30),
+                                                       mk("10:00 PM", "SA @ POR", 0.25), mk("7:30 PM", "BKN @ ATL", 0.27)])
+    at = AppTest.from_file(str(Path(__file__).parent / "Home.py"), default_timeout=60)
+    at.session_state["sport"] = "NBA"
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    df = next(d.value for d in at.dataframe if "Most likely to win big" in d.value.columns)
+    assert list(df["Time"]) == ["5:00 PM", "7:30 PM", "8:00 PM", "10:00 PM"]
+    assert at.multiselect(key="home_best_games").options == ["DEN @ IND", "BKN @ ATL", "W @ OKC", "SA @ POR"]

@@ -204,6 +204,12 @@ if SE.FAMILY[SPORT] == "hoops" and g_espn and all(t.get("id") for t in g_espn["t
     except Exception:                                           # noqa: BLE001
         roster = []
 R_BY = {PE.norm_name(x["player"] or ""): x for x in roster}
+# Nov 7: saved boards store ESPN team ids ("7", "11"); show names
+TEAM_NAME = {str(t.get("id")): t["display"] for t in (g_espn or {}).get("teams", []) if t.get("id") is not None}
+
+
+def _team(t):
+    return TEAM_NAME.get(str(t), t) if t is not None else t
 for r in gp:                                                    # the roster's minutes place props players too
     rr = R_BY.get(PE.norm_name(r.get("player") or ""))
     if rr and rr.get("min") is not None and r.get("mins") is None:
@@ -223,12 +229,14 @@ for r in gp:
     if act is not None:
         thr = PE.threshold(float(r["line"]))
         res = "push" if act == thr else ("win" if (act > thr) == (u["side"] == "Over") else "loss")
-    prepared.append({"r": r, "grp": grp, "is_fav": is_fav, "by": by, "u": u, "actual": act, "result": res})
+    mby = SE.minutes_by_script(SPORT, r.get("mins"), is_fav, sh) if fav else {}
+    prepared.append({"r": r, "grp": grp, "is_fav": is_fav, "by": by, "u": u, "actual": act, "result": res,
+                     "min_if": mby.get(cond) if cond != "model" else None})
 
 g1, g2, g3 = st.columns(3)
 _groups = sorted({SE.role_label(x["grp"]) for x in prepared})
 _markets = sorted({x["r"]["market"] for x in prepared})
-_teams = sorted({_nick(x["r"].get("team")) for x in prepared if x["r"].get("team")})
+_teams = sorted({_nick(_team(x["r"].get("team"))) for x in prepared if x["r"].get("team")})
 pick_groups = g1.multiselect("Group", _groups, key="gs_f_group", placeholder="All groups")
 pick_markets = g2.multiselect("Market", _markets, key="gs_f_market", placeholder="All markets")
 pick_teams = g3.multiselect("Team", _teams, key="gs_f_team", placeholder="Both teams")
@@ -242,7 +250,7 @@ for x in prepared:
         continue
     if pick_markets and x["r"]["market"] not in pick_markets:
         continue
-    if pick_teams and _nick(x["r"].get("team")) not in pick_teams:
+    if pick_teams and _nick(_team(x["r"].get("team"))) not in pick_teams:
         continue
     if only_play and x["u"]["use"] not in PLAY:
         continue
@@ -250,12 +258,44 @@ for x in prepared:
         continue
     show.append(x)
 show.sort(key=lambda x: (x["u"]["use"] not in PLAY, -x["u"]["chance"]))
+# Nov 7: everyone else on both rosters, so a condition shows its whole-roster effect here too (minutes, and how much
+# likelier he is to beat his own points / rebounds / assists average); no line, so no side, price or tag
+with_props = {PE.norm_name(x["r"]["player"] or "") for x in prepared}
+extra = []
+if roster and not pick_markets and not only_play:
+    for x in roster:
+        if PE.norm_name(x["player"] or "") in with_props or not x.get("games"):
+            continue
+        tf = bool(FAV_NAMES) and SE.team_matches(x["team"], FAV_NAMES)
+        rl = SE.role(x["min"], SPORT)
+        if pick_groups and (rl or "—") not in pick_groups:
+            continue
+        if pick_teams and _nick(x["team"]) not in pick_teams:
+            continue
+        bits, moved = [], False
+        if cond != "model" and fav and rl:
+            mby = SE.minutes_by_script(SPORT, x["min"], tf, sh)
+            if mby:
+                bits.append(f"minutes {x['min']:.0f} → {mby[cond]:.0f}")
+            for stat, lab in (("points", "pts"), ("rebounds", "reb"), ("assists", "ast")):
+                g_ = f"{rl}:{stat}"
+                if SE.trust(SPORT, g_) > 0:
+                    d = SE.over_by_script(0.5, g_, tf, sh, SPORT)[cond] - 0.5
+                    if abs(d) >= 0.005:
+                        bits.append(f"{lab} {d * 100:+.0f}%")
+                        moved = moved or abs(d) >= 0.02
+        if only_changed and not moved:
+            continue
+        extra.append({"x": x, "tf": tf, "rl": rl, "mby": (SE.minutes_by_script(SPORT, x["min"], tf, sh) if fav else {}),
+                      "why": ("if it goes this way: " + ", ".join(bits) + " (vs his own averages)") if bits else ""})
 ICON = {"win": "✅", "loss": "❌", "push": "➖"}
-if show:
+MIN_IF = f"Min if {SE.short(SPORT, cond).lower()}" if cond != "model" else "Min if"
+if show or extra:
     df = pd.DataFrame([{
-        "Player": x["r"]["player"], "Team": _nick(x["r"].get("team")) + (" (fav)" if x["is_fav"] else ""),
+        "Player": x["r"]["player"], "Team": _nick(_team(x["r"].get("team"))) + (" (fav)" if x["is_fav"] else ""),
         "Group": SE.role_label(x["grp"]) + ("" if SE.trust(SPORT, x["grp"]) > 0 and fav else " · no shift"),
-        "Min": (R_BY.get(PE.norm_name(x["r"]["player"] or "")) or {}).get("min") or x["r"].get("mins"),
+        "Min": x["r"].get("mins"),
+        "Min if": x["min_if"],
         "Usage %": (R_BY.get(PE.norm_name(x["r"]["player"] or "")) or {}).get("usg"),
         "Market": x["r"]["market"], "Line": x["r"]["line"],
         "Board": f"{x['r']['side']} {(x['r']['p_over'] if x['r']['side'] == 'Over' else 1 - x['r']['p_over']):.0%} · "
@@ -264,17 +304,31 @@ if show:
         "Price": "—" if x["u"].get("price") is None else f"{float(x['u']['price']):+.0f}",
         "Edge": x["u"]["ev"], "Use": x["u"]["use"], "Why": x["u"]["why"],
         "Actual": "" if x["actual"] is None else f"{x['actual']:g}",
-        "Result": ICON.get(x["result"], "")} for x in show])
+        "Result": ICON.get(x["result"], "")} for x in show] + [{
+        "Player": e["x"]["player"], "Team": _nick(e["x"]["team"]) + (" (fav)" if e["tf"] else ""),
+        "Group": e["rl"] or "under 3 min", "Min": e["x"]["min"],
+        "Min if": e["mby"].get(cond) if cond != "model" else None, "Usage %": e["x"]["usg"],
+        "Market": "— no line", "Line": None, "Board": "", "Side": "", "Chance": None, "Price": "", "Edge": None,
+        "Use": "", "Why": e["why"], "Actual": "", "Result": ""} for e in extra])
     if cond == "model":
-        df = df.drop(columns=["Board", "Edge", "Why"])
+        df = df.drop(columns=["Board", "Edge", "Why", "Min if"])
     if not PAST:
         df = df.drop(columns=["Actual", "Result"])
-    df = df.drop(columns=[c for c in ("Min", "Usage %") if c in df and not df[c].notna().any()])
+    df = df.drop(columns=[c for c in ("Min", "Usage %", "Min if") if c in df and not df[c].notna().any()])
+    if "Min if" in df:
+        df = df.rename(columns={"Min if": MIN_IF})
     st.dataframe(df, hide_index=True, width="stretch",
                  column_config={"Chance": st.column_config.NumberColumn(format="percent"),
                                 "Edge": st.column_config.NumberColumn(format="percent"),
                                 "Min": st.column_config.NumberColumn(format="%.1f"),
+                                MIN_IF: st.column_config.NumberColumn(
+                                    format="%.1f", help="His average minutes plus his role's measured change in this "
+                                                        "kind of game (losing starters sit, the winners' bench plays)."),
                                 "Usage %": st.column_config.NumberColumn(format="%.1f%%")})
+    if extra:
+        st.caption(f"Includes **{len(extra)} rostered players with no line posted** (Market '— no line'): their "
+                   "minutes and how much likelier they are to beat their own averages under this condition. Pick a "
+                   "Market or 'Only playable' to see props only.")
     if PAST:
         gr = [x for x in show if x["result"] in ("win", "loss")]
         pl = [x for x in gr if x["u"]["use"] in PLAY]
@@ -300,8 +354,10 @@ if roster:
     for x in roster:
         team_is_fav = bool(FAV_NAMES) and SE.team_matches(x["team"], FAV_NAMES)
         rl = SE.role(x["min"], SPORT)
+        _mby = SE.minutes_by_script(SPORT, x["min"], team_is_fav, sh) if (fav and cond != "model") else {}
         row = {"Player": x["player"], "Team": _nick(x["team"]) + (" (fav)" if team_is_fav else ""),
-               "Role": rl or ("did not play" if not x["games"] else "under 3 min"), "Min": x["min"], "Usage %": x["usg"],
+               "Role": rl or ("did not play" if not x["games"] else "under 3 min"), "Min": x["min"],
+               **({"Min if": _mby.get(cond)} if cond != "model" else {}), "Usage %": x["usg"],
                "Games": x["games"], "Pts": x["pts"], "Reb": x["reb"], "Ast": x["ast"],
                "Props today": have.get(PE.norm_name(x["player"] or ""), 0)}
         if cond != "model":
@@ -316,7 +372,8 @@ if roster:
                 rr_rows.append(row)
     if rr_rows:
         rdf = pd.DataFrame(rr_rows)
-        cfg = {"Min": st.column_config.NumberColumn(format="%.1f"), "Usage %": st.column_config.NumberColumn(format="%.1f%%"),
+        cfg = {"Min": st.column_config.NumberColumn(format="%.1f"), "Min if": st.column_config.NumberColumn(format="%.1f"),
+               "Usage %": st.column_config.NumberColumn(format="%.1f%%"),
                "Pts": st.column_config.NumberColumn(format="%.1f"), "Reb": st.column_config.NumberColumn(format="%.1f"),
                "Ast": st.column_config.NumberColumn(format="%.1f")}
         for col in ("Pts vs avg", "Reb vs avg", "Ast vs avg"):

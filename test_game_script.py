@@ -236,3 +236,63 @@ def test_roster_table_and_filters(monkeypatch):
     at.multiselect(key="gs_f_market").set_value([]).run()
     at.multiselect(key="gs_f_group").set_value(["starter"]).run()
     assert list(at.dataframe[0].value["Player"]) == ["Star One"]
+
+
+def test_minutes_effects_and_projection(monkeypatch):
+    import script_data as D
+    c = D.CFG["NBA"]
+    games = []
+    for k in range(30):
+        blow = k >= 20                                          # the last 10 games: team A wins by 25
+        sa, sb = (130, 105) if blow else (110, 108)
+        games.append((f"2025-11-{k + 1:02d}", {"teams": {"A": {"home": True, "score": sa}, "B": {"home": False, "score": sb}},
+                      "players": {"s": {"team": "B", "minutes": 26.0 if blow else 34.0},
+                                  "b": {"team": "A", "minutes": 24.0 if blow else 16.0}}}))
+    m = D.minutes_effects(c, games)
+    assert m["starter"]["blow_lose"] < -5 and m["bench"]["blow_win"] > 5
+    monkeypatch.setitem(SE.DATA["NBA"], "minutes", {"starter": {"close": 1.0, "mid": 0.5, "blow_win": -3.0, "blow_lose": -7.0},
+                                                    "bench": {"close": -1.0, "mid": 0.0, "blow_win": 5.0, "blow_lose": 2.0}})
+    sh = SE.shares(-13.5, "NBA")
+    dog_star = SE.minutes_by_script("NBA", 34.0, False, sh)
+    assert dog_star["fav_blowout"] < 31 < 34 < dog_star["close"]
+    assert abs(sum(sh[s] * dog_star[s] for s in SE.SCRIPTS) - 34.0) < 1e-9
+    assert SE.minutes_by_script("NBA", 1.0, True, sh) == {}
+
+
+def test_upper_table_carries_the_whole_roster(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    import best_bets_data as BBD
+    import model_store as MS
+    import roster_usage as RU
+    teams = ("Denver Nuggets", "Indiana Pacers")
+    game = f"{teams[0]} @ {teams[1]}"
+    snaps = [{"sport": "NBA", "slate_date": "x", "game": game, "team": "7", "opp": "11", "player": "Big Man",
+              "player_id": "1", "market": "Points", "line": 25.5, "side": "Under", "chance": 0.52, "projection": 25.0,
+              "use_tag": "⛔ Pass", "price": -110, "over_price": -110, "under_price": -110, "lean": None, "gap": None,
+              "flags": "[]", "kickoff": "2026-11-08T00:00:00Z"}]
+    monkeypatch.setattr(MS, "load_snapshots", lambda *a, **k: snaps)
+    monkeypatch.setattr(SE, "calls", lambda sport: {})
+    monkeypatch.setitem(SE.DATA["NBA"], "minutes", {"starter": {"close": 1.0, "mid": 0.5, "blow_win": -3.0, "blow_lose": -7.0},
+                                                    "bench": {"close": -1.0, "mid": 0.0, "blow_win": 5.0, "blow_lose": 2.0},
+                                                    "deep": {"close": -1.5, "mid": 0.0, "blow_win": 6.0, "blow_lose": 4.0}})
+    monkeypatch.setattr(SE, "fetch_lines", lambda sp, days: [{"teams": [
+        {"names": {SE.norm(teams[0]), "7"}, "home": False, "display": teams[0], "score": None, "id": "7"},
+        {"names": {SE.norm(teams[1]), "11"}, "home": True, "display": teams[1], "score": None, "id": "11"}],
+        "fav": 0, "strength": 7.5, "final": False}])
+    monkeypatch.setattr(RU, "game_rows", lambda sport, ts, d, engine=None: [
+        {"player": "Big Man", "pid": 1, "team": teams[0], "games": 8, "min": 34.0, "usg": 28.0, "pts": 26.0, "reb": 12.0, "ast": 9.0},
+        {"player": "Pacers Sub", "pid": 2, "team": teams[1], "games": 8, "min": 16.0, "usg": 20.0, "pts": 8.0, "reb": 3.0, "ast": 2.0}])
+    at = AppTest.from_file(str(Path(__file__).parent / "views" / "50_Game_Script.py"), default_timeout=30)
+    at.session_state["sport"] = "NBA"
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    top = at.dataframe[0].value
+    assert set(top["Player"]) == {"Big Man", "Pacers Sub"}
+    assert top[top["Player"] == "Big Man"].iloc[0]["Team"] == "Nuggets (fav)"            # not "7"
+    at.session_state["gs_cond"] = "dog_blowout"
+    at.run()
+    top = at.dataframe[0].value
+    col = [c for c in top.columns if c.startswith("Min if")][0]
+    big, sub = top[top["Player"] == "Big Man"].iloc[0], top[top["Player"] == "Pacers Sub"].iloc[0]
+    assert big[col] < 34.0 and sub[col] > 16.0                  # the favorite's starter sits, the winners' bench plays
+    assert sub["Market"] == "— no line" and "minutes 16 →" in sub["Why"]
