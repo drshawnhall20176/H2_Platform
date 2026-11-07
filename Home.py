@@ -97,8 +97,22 @@ if _owner:
         except (TypeError, ValueError):
             return _dt.max.time()
 
-    _times = sorted({r.get("time") for r in _rows + _wscope if r.get("time")}, key=_tkey)
-    _games = sorted({r.get("game") for r in _rows + _wscope if r.get("game")})
+    @st.cache_data(ttl=900, show_spinner=False)
+    def _blowouts(day):
+        return _TB.blowout_rows(day)
+
+    try:
+        _ball = _blowouts(_today)
+    except Exception:                                           # noqa: BLE001
+        _ball = []
+    _bscope = _ball if _scope == "All sports" else [r for r in _ball if r["sport"] == current]
+    _every = _rows + _wscope + _bscope
+    _times = sorted({r.get("time") for r in _every if r.get("time")}, key=_tkey)
+    _gtime = {}
+    for r in _every:                                            # Nov 7: games listed by start time, not A-Z
+        if r.get("game"):
+            _gtime[r["game"]] = min(_gtime.get(r["game"], _tkey(r.get("time"))), _tkey(r.get("time")))
+    _games = sorted(_gtime, key=lambda g: (_gtime[g], g))
     _f1, _f2 = st.columns([1, 2])
     _pick_times = _f1.multiselect("Start time", _times, key="home_best_times", placeholder="All times")
     _pick_games = _f2.multiselect("Game", _games, key="home_best_games", placeholder="All games")
@@ -228,23 +242,17 @@ if _owner:
     else:
         st.caption("No games with a model chance today" + ("" if _scope == "All sports" else " for this sport") + ".")
     # ---- Blowout watch (Nov 7): the games most likely to be decided big, and by whom -- the Game Script loop's calls
-    @st.cache_data(ttl=900, show_spinner=False)
-    def _blowouts(day):
-        return _TB.blowout_rows(day)
-
     st.markdown("##### 💥 Blowout watch")
-    try:
-        _bw = _blowouts(_today)
-    except Exception:                                           # noqa: BLE001
-        _bw = []
-    _bw = [r for r in _bw if (_scope == "All sports" or r["sport"] == current) and _keep(r)]
+    _bw = [r for r in _bscope if _keep(r)]
     if _bw:
-        _bn = st.slider("Games shown", 3, 25, 8, key="home_blow_n") if len(_bw) > 3 else len(_bw)
+        _bn = st.slider("Games shown (highest blowout chance)", 3, 25, 8, key="home_blow_n") if len(_bw) > 3 else len(_bw)
+        # the N most likely blowouts, listed earliest game first (like every table here), across sports
+        _btop = sorted(_bw[:_bn], key=lambda r: (_tkey(r.get("time")), -r["chance"]))
         _bdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"],
                                "Most likely to win big": f"{r['team']} ({r['who']})",
                                "Chance": r["chance"], "Win big by": r["margin"],
                                "Close game": r["close"], "Line": r["line"],
-                               "What happened": r.get("happened") or "—"} for r in _bw[:_bn]])
+                               "What happened": r.get("happened") or "—"} for r in _btop])
         if _scope != "All sports":
             _bdf = _bdf.drop(columns=["Sport"])
         if not _past:
@@ -255,7 +263,7 @@ if _owner:
                                     "Close game": st.column_config.NumberColumn(format="percent",
                                         help="Chance the game finishes within the close margin.")})
         if _past:
-            _g = [r for r in _bw[:_bn] if r.get("happened")]
+            _g = [r for r in _btop if r.get("happened")]
             if _g:
                 _hit = sum(1 for r in _g if r["happened"].startswith("✅"))
                 st.caption(f"Of these {len(_g)} graded games, **{_hit}** ended in the called blowout "
