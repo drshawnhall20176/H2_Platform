@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime
 
@@ -64,6 +65,9 @@ def against_model(row) -> str:
     return ""
 
 
+BOARD_BUDGET_S = int(os.environ.get("LOG_BOARD_BUDGET_S", "720"))
+
+
 def build(picks, board_plays, sport, date_str, real=False, stake=1.0, category=None, tag=None, reads=None):
     import betlog as B
     by = {_key(p["Player"], p["Market"], p["Side"]): p for p in board_plays}
@@ -106,17 +110,33 @@ def main(argv=None) -> int:
     raw = open(a.picks[1:]).read() if a.picks.startswith("@") else a.picks
     picks = json.loads(raw)
     date_str = a.date or datetime.now(pytz.timezone("US/Eastern")).date().isoformat()
-    try:
-        board = X.board(a.sport, date_str, "draftkings")
-    except Exception as exc:                                    # noqa: BLE001 -- log without IDs rather than not at all
-        print(f"Couldn't load the board ({type(exc).__name__}: {exc}); logging without player IDs.")
-        board = []
-    try:
-        import best_bets_data as BBD
-        reads = BBD.load_slate_reads(a.sport, date_str, "draftkings") or {}
-    except Exception as exc:                                    # noqa: BLE001 -- alt lines just go without a model %
-        print(f"Couldn't load the model reads ({type(exc).__name__}: {exc}); alt lines logged without a model %.")
-        reads = {}
+    # Nov 7: a big slate (a college football Saturday) took the whole 20-minute job to build twice, and the bets were
+    # never logged. The board and the model reads now get BOARD_BUDGET_S between them; past it the bets are logged
+    # without the model % (a later fix_model run fills it in) -- the bet itself is never lost.
+    def _load():
+        try:
+            bd = X.board(a.sport, date_str, "draftkings")
+        except Exception as exc:                                # noqa: BLE001 -- log without IDs rather than not at all
+            print(f"Couldn't load the board ({type(exc).__name__}: {exc}); logging without player IDs.")
+            bd = []
+        try:
+            import best_bets_data as BBD
+            rd = BBD.load_slate_reads(a.sport, date_str, "draftkings") or {}
+        except Exception as exc:                                # noqa: BLE001 -- alt lines just go without a model %
+            print(f"Couldn't load the model reads ({type(exc).__name__}: {exc}); alt lines logged without a model %.")
+            rd = {}
+        return bd, rd
+    import threading
+    got: dict = {}
+    th = threading.Thread(target=lambda: got.update(v=_load()), daemon=True)   # daemon: never holds the exit
+    th.start()
+    th.join(BOARD_BUDGET_S)
+    if "v" in got:
+        board, reads = got["v"]
+    else:
+        print(f"The {a.sport} board took over {BOARD_BUDGET_S // 60} minutes; logging without the model % "
+              "(run again with fix_model=true later to add it).")
+        board, reads = [], {}
     rows = build(picks, board, a.sport, date_str, real=a.real.lower() in ("1", "true", "yes"), stake=a.stake,
                  tag=a.tag or None, reads=reads)
     if a.fix_model.lower() in ("1", "true", "yes") and a.ticket:
