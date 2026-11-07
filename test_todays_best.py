@@ -236,3 +236,39 @@ def test_collect_past_grades_saved_props(monkeypatch):
     monkeypatch.setattr(TB, "game_rows", lambda d, past=False: [])
     out = TB.collect("2026-11-06", ["NBA"], past=True)
     assert out["rows"][0]["result"] == "win"
+
+
+def test_blowout_rows_rank_and_grade():
+    import todays_best as TB
+    calls = {"NBA": {"pending": [
+        {"gid": "1", "d": "2026-11-07", "kick": "2026-11-08T00:30:00Z", "fav": "Oklahoma City Thunder", "dog": "Utah Jazz",
+         "home": "Oklahoma City Thunder", "away": "Utah Jazz", "strength": 14.5,
+         "p": {"fav_blowout": 0.58, "middle": 0.24, "close": 0.15, "dog_blowout": 0.03}, "source": "line"},
+        {"gid": "2", "d": "2026-11-07", "kick": "2026-11-08T03:00:00Z", "fav": "A", "dog": "B", "strength": 2.0,
+         "p": {"fav_blowout": 0.2, "middle": 0.3, "close": 0.33, "dog_blowout": 0.17}, "source": "line"}],
+        "graded": [{"gid": "3", "d": "2026-11-07", "kick": "2026-11-07T23:00:00Z", "fav": "C", "dog": "D", "strength": 9.0,
+                    "p": {"fav_blowout": 0.33, "middle": 0.3, "close": 0.27, "dog_blowout": 0.1}, "y": "dog_blowout"}]}}
+    rows = TB.blowout_rows("2026-11-07", ("NBA",), calls)
+    assert [r["team"] for r in rows] == ["Oklahoma City Thunder", "C", "A"]
+    assert rows[0]["game"] == "Utah Jazz @ Oklahoma City Thunder" and rows[0]["line"] == "Oklahoma City Thunder −14.5"
+    assert rows[1]["happened"].startswith("↩️") and "D won big" in rows[1]["happened"]
+    assert TB.blowout_rows("2026-11-08", ("NBA",), calls) == []
+
+
+def test_home_shows_blowout_watch(monkeypatch):
+    from pathlib import Path
+    from streamlit.testing.v1 import AppTest
+    import todays_best as TB
+    monkeypatch.setattr(TB, "collect", lambda d, sp, past=False: {"rows": [], "props": {}})
+    monkeypatch.setattr(TB, "winner_rows", lambda d, leagues=None, past=False: [])
+    monkeypatch.setattr(TB, "blowout_rows", lambda d: [
+        {"sport": "NBA", "time": "7:30 PM", "game": "Utah Jazz @ Oklahoma City Thunder", "team": "Oklahoma City Thunder",
+         "who": "favorite", "chance": 0.58, "close": 0.15, "line": "Oklahoma City Thunder −14.5", "margin": "15+ pts",
+         "happened": None}])
+    at = AppTest.from_file(str(Path(__file__).parent / "Home.py"), default_timeout=60)
+    at.session_state["sport"] = "NBA"
+    at.session_state["_owner"] = True
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    found = [df.value for df in at.dataframe if "Most likely to win big" in df.value.columns]
+    assert found and found[0].iloc[0]["Most likely to win big"] == "Oklahoma City Thunder (favorite)"

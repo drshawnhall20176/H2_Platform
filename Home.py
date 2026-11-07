@@ -227,6 +227,46 @@ if _owner:
                      "NFL and UFC aren't covered yet.")
     else:
         st.caption("No games with a model chance today" + ("" if _scope == "All sports" else " for this sport") + ".")
+    # ---- Blowout watch (Nov 7): the games most likely to be decided big, and by whom -- the Game Script loop's calls
+    @st.cache_data(ttl=900, show_spinner=False)
+    def _blowouts(day):
+        return _TB.blowout_rows(day)
+
+    st.markdown("##### 💥 Blowout watch")
+    try:
+        _bw = _blowouts(_today)
+    except Exception:                                           # noqa: BLE001
+        _bw = []
+    _bw = [r for r in _bw if (_scope == "All sports" or r["sport"] == current) and _keep(r)]
+    if _bw:
+        _bn = st.slider("Games shown", 3, 25, 8, key="home_blow_n") if len(_bw) > 3 else len(_bw)
+        _bdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"],
+                               "Most likely to win big": f"{r['team']} ({r['who']})",
+                               "Chance": r["chance"], "Win big by": r["margin"],
+                               "Close game": r["close"], "Line": r["line"],
+                               "What happened": r.get("happened") or "—"} for r in _bw[:_bn]])
+        if _scope != "All sports":
+            _bdf = _bdf.drop(columns=["Sport"])
+        if not _past:
+            _bdf = _bdf.drop(columns=["What happened"])
+        st.dataframe(_bdf, hide_index=True, width="stretch",
+                     column_config={"Chance": st.column_config.NumberColumn(format="percent",
+                                        help="Chance this team wins by the blowout margin, before the game."),
+                                    "Close game": st.column_config.NumberColumn(format="percent",
+                                        help="Chance the game finishes within the close margin.")})
+        if _past:
+            _g = [r for r in _bw[:_bn] if r.get("happened")]
+            if _g:
+                _hit = sum(1 for r in _g if r["happened"].startswith("✅"))
+                st.caption(f"Of these {len(_g)} graded games, **{_hit}** ended in the called blowout "
+                           f"(the calls averaged {sum(r['chance'] for r in _g) / len(_g):.0%}).")
+        st.caption("From the Game Script learning job: every game's chances before it starts, from the line curve that "
+                   "beat the old spread table on games it wasn't fit on (refit twice a day as games finish). "
+                   "Matchup history doesn't move these numbers yet — tested, the line already prices it. Open "
+                   "**Game Script** to see how each player's props read if it goes that way.")
+    else:
+        st.caption("No blowout calls for these games yet — the learning job logs them each morning and afternoon "
+                   "(NBA, college basketball, NFL, college football, NHL).")
     # ---- Log picks straight to the Bet Log (Nov 7): props and game lines from the lists above, singles / parlay / both
     with st.expander("📝 Log picks to the Bet Log" + (" (today only)" if _past else "")):
       if _past:
