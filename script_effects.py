@@ -10,8 +10,11 @@ against each player's own average over his previous games:
   effects  how much more (or less) often a player beats his own average, by group (basketball: role x stat;
            football and hockey: the stat) and how his team's game went, relative to the group's overall rate,
            shrunk toward zero for small samples
-  trust    how much of the effect carried over to games it wasn't fit on (held-out slope, 0..1): the shift
-           actually applied is effect x trust. A sport or market whose effects didn't hold up gets no shift.
+  trust    given the script happens, how much of the effect repeated on games it wasn't fit on (held-out slope
+           over the four scripts, other season and alternate games averaged, 0..1; 0 if either test reversed): the
+           shift actually applied is effect x trust. (A separate test -- does the pre-game line alone predict who beats
+           his average? -- is weaker: NBA and WNBA ~0; NCAAMB, NCAAF, NHL yes. That's why a script is a call you
+           make, and the page treats a tag under it as conditional.)
 
 The shifts are centered so that, averaged over how likely each script is, a player's chance is the model's own: a
 script view re-splits the model's read, it never invents an edge. A ticket's chance under scripts = sum over scripts
@@ -195,8 +198,9 @@ def norm(s: Optional[str]) -> str:
     return re.sub(r"[^a-z0-9 ]", "", (s or "").lower().replace("&", "and")).strip()
 
 
-def parse_event(ev: Dict, sport: str) -> Optional[Dict]:
-    """One scoreboard event -> {teams: [{names, home}], fav (index), strength} or None without a usable line."""
+def parse_event(ev: Dict, sport: str, odds: Optional[Dict] = None) -> Optional[Dict]:
+    """One scoreboard event -> {teams: [{names, home, display, score}], fav (index), strength, final} or None without
+    a usable line. `odds` overrides the event's own (a finished game's line from its summary's pickcenter)."""
     comp = (ev.get("competitions") or [{}])[0]
     teams = []
     for c in comp.get("competitors") or []:
@@ -204,12 +208,13 @@ def parse_event(ev: Dict, sport: str) -> Optional[Dict]:
         names = {norm(t.get(k)) for k in ("displayName", "shortDisplayName", "location", "abbreviation", "name")}
         names.add(norm(f"{t.get('location', '')} {t.get('name', '')}"))
         teams.append({"names": {n for n in names if n}, "home": c.get("homeAway") == "home",
-                      "display": t.get("displayName") or t.get("location") or ""})
+                      "display": t.get("displayName") or t.get("location") or "", "score": _num(c.get("score"))})
     if len(teams) != 2:
         return None
     hi = 0 if teams[0]["home"] else 1
     ai = 1 - hi
-    odds = (comp.get("odds") or [None])[0] or {}
+    final = bool(((comp.get("status") or ev.get("status") or {}).get("type") or {}).get("completed"))
+    odds = odds if odds is not None else ((comp.get("odds") or [None])[0] or {})
     ho, ao = odds.get("homeTeamOdds") or {}, odds.get("awayTeamOdds") or {}
     if strength_kind(sport) == "ml":
         ml = odds.get("moneyline") or {}
@@ -219,7 +224,7 @@ def parse_event(ev: Dict, sport: str) -> Optional[Dict]:
         if not (ph and pa):
             return None
         ph, pa = ph / (ph + pa), pa / (ph + pa)
-        return {"teams": teams, "fav": hi if ph >= pa else ai, "strength": max(ph, pa)}
+        return {"teams": teams, "fav": hi if ph >= pa else ai, "strength": max(ph, pa), "final": final}
     sp = _num(odds.get("spread"))
     if sp is None or sp == 0:
         return None
@@ -228,7 +233,7 @@ def parse_event(ev: Dict, sport: str) -> Optional[Dict]:
         fav = hi
     elif ao.get("favorite") is True:
         fav = ai
-    return {"teams": teams, "fav": fav, "strength": abs(sp)}
+    return {"teams": teams, "fav": fav, "strength": abs(sp), "final": final}
 
 
 def fetch_lines(sport: str, days: Sequence[str]) -> List[Dict]:
@@ -246,9 +251,36 @@ def fetch_lines(sport: str, days: Sequence[str]) -> List[Dict]:
             continue
         for ev in sb.get("events") or []:
             g = parse_event(ev, sport)
+            if g is None and ev.get("id"):                      # finished games drop their odds: the summary keeps them
+                try:
+                    summ = requests.get(f"https://site.api.espn.com/apis/site/v2/sports/{ESPN[sport]}/summary",
+                                        params={"event": ev["id"]}, headers={"User-Agent": "Mozilla/5.0"}, timeout=15).json()
+                    for pc in summ.get("pickcenter") or []:
+                        g = parse_event(ev, sport, odds=pc)
+                        if g:
+                            break
+                except Exception:                               # noqa: BLE001
+                    g = None
             if g:
                 out.append(g)
     return out
+
+
+def actual_script(g: Dict, sport: str) -> Optional[str]:
+    """How a finished game went, as a script (relative to the pre-game favorite)."""
+    if not g or not g.get("final"):
+        return None
+    f, o = g["teams"][g["fav"]].get("score"), g["teams"][1 - g["fav"]].get("score")
+    if f is None or o is None:
+        return None
+    m, d = f - o, DATA[sport]
+    if abs(m) <= d["close"]:
+        return "close"
+    if m >= d["blow"]:
+        return "fav_blowout"
+    if m <= -d["blow"]:
+        return "dog_blowout"
+    return "middle"
 
 
 def team_matches(team: Optional[str], names: set) -> bool:
@@ -258,6 +290,16 @@ def team_matches(team: Optional[str], names: set) -> bool:
     if t in names:
         return True
     return any(n and len(n) > 3 and (t.startswith(n + " ") or n.startswith(t + " ")) for n in names)
+
+
+def game_for(teams: Sequence[str], lines: Sequence[Dict]) -> Optional[Dict]:
+    """The parsed ESPN game these board teams play, or None."""
+    teams = [t for t in teams if t]
+    for g in lines:
+        hit = sum(any(team_matches(t, tm["names"]) for t in teams) for tm in g["teams"])
+        if hit == 2 or (hit == 1 and len(teams) == 1):
+            return g
+    return None
 
 
 def line_for(teams: Sequence[str], lines: Sequence[Dict]) -> Tuple[Optional[float], Optional[str], Optional[str]]:
@@ -275,3 +317,82 @@ def line_for(teams: Sequence[str], lines: Sequence[Dict]) -> Tuple[Optional[floa
             dog = hit.get(1 - fi) or g["teams"][1 - fi]["display"]
             return g["strength"], fav, dog
     return None, None, None
+
+
+# ---------------------------------------------------------------- one prop, normalized (live board or kickoff snapshot)
+def from_play(p: Dict) -> Dict:
+    """A Best Bets board play -> the row the page works with. Only the play's own side has a price."""
+    side = p.get("Side")
+    p_over = p["ModelProb"] if side == "Over" else 1 - p["ModelProb"]
+    log = p.get("_game_log") or []
+    mins = [float(g.get("min") or 0) for g in log[-10:] if g.get("min") is not None]
+    return {"player": p.get("Player"), "pid": p.get("PlayerId"), "team": p.get("Team"), "opp": p.get("Opp"),
+            "game": p.get("Game"), "market": p.get("Market"), "line": p.get("Line"), "side": side, "p_over": p_over,
+            "projection": p.get("Projection"), "over_price": p.get("RealPrice") if side == "Over" else None,
+            "under_price": p.get("RealPrice") if side == "Under" else None, "use": p.get("Use") or "",
+            "lean": p.get("Lean"), "gap": p.get("Gap"), "flags": list(p.get("Warnings") or []),
+            "kickoff": p.get("GameDate"), "mins": (sum(mins) / len(mins)) if mins else None}
+
+
+def from_snapshot(s: Dict) -> Optional[Dict]:
+    """A kickoff snapshot (model_store.prop_snapshots) -> the same row, with both sides' prices."""
+    if s.get("chance") is None or s.get("line") is None:
+        return None
+    ch = float(s["chance"])
+    try:
+        flags = json.loads(s.get("flags") or "[]")
+    except (TypeError, ValueError):
+        flags = []
+    return {"player": s.get("player"), "pid": s.get("player_id"), "team": s.get("team"), "opp": s.get("opp"),
+            "game": s.get("game"), "market": s.get("market"), "line": float(s["line"]), "side": s.get("side"),
+            "p_over": ch if s.get("side") == "Over" else 1 - ch,
+            "projection": None if s.get("projection") is None else float(s["projection"]),
+            "over_price": s.get("over_price") if s.get("over_price") is not None else (s.get("price") if s.get("side") == "Over" else None),
+            "under_price": s.get("under_price") if s.get("under_price") is not None else (s.get("price") if s.get("side") == "Under" else None),
+            "use": s.get("use_tag") or "", "lean": s.get("lean"), "gap": s.get("gap"), "flags": flags,
+            "kickoff": s.get("kickoff"), "mins": None}
+
+
+# ---------------------------------------------------------------- the Use tag under a script (Nov 7)
+def _z(p: float) -> float:
+    from statistics import NormalDist
+    return NormalDist().inv_cdf(min(0.995, max(0.005, p)))
+
+
+def script_projection(projection: Optional[float], line: float, p_model: float, p_script: float) -> Optional[float]:
+    """The projection moved as far as the chance moved: the model's spread of outcomes is read off its own
+    projection vs line vs chance (normal approximation), then the projection shifts by the change in z."""
+    import props_engine as PE
+    if projection is None:
+        return None
+    thr = PE.threshold(line)
+    z0 = _z(p_model)
+    sd = abs(projection - thr) / abs(z0) if abs(z0) > 0.15 and projection != thr else 0.35 * max(abs(projection), 1.0)
+    sd = min(max(sd, 0.15 * max(abs(projection), 1.0)), 0.8 * max(abs(projection), 1.0))
+    return projection + (_z(p_script) - z0) * sd
+
+
+def script_use(row: Dict, p_over: float, sport: str) -> Dict:
+    """The platform's own Use rules (props_engine.use_tag) re-run on the script's numbers: the side the script
+    favors, its chance, the edge at that side's price, the projection moved with the chance. The 'blowout risk'
+    warning is dropped -- the script IS the blowout call; news / returning-player warnings still apply.
+    -> {"side", "chance", "ev", "use", "why"}"""
+    import props_engine as PE
+    side = "Over" if p_over >= 0.5 else "Under"
+    p = p_over if side == "Over" else 1 - p_over
+    price = row.get("over_price") if side == "Over" else row.get("under_price")
+    dec = PE.decimal(price) if price is not None else None
+    ev = (p * dec - 1) if dec else None
+    proj = script_projection(row.get("projection"), float(row["line"]), row["p_over"], p_over)
+    flags = [f for f in row.get("flags") or [] if not any(k in str(f).lower() for k in PE.BLOWOUT_WORDS)]
+    r = {"projection": proj, "line": float(row["line"]), "side": side, "p_final": p_over, "ev": ev,
+         "lean": row.get("lean") if row.get("lean") == "Check news" else (side if ev is not None and ev >= PE.MIN_EV else None),
+         "gap": row.get("gap"), "flags": flags, "returning": any("missed" in str(f) for f in flags)}
+    PE.single_bar([r], sport)
+    try:
+        tag, why = PE.use_tag(r, side, float(row["line"]), p, ev)
+    except Exception as exc:                                    # noqa: BLE001
+        tag, why = "—", type(exc).__name__
+    if price is None and tag == PE.USE_PASS:
+        why = f"no price posted for the {side} — " + why
+    return {"side": side, "chance": p, "ev": ev, "use": tag, "why": why, "price": price}

@@ -5,6 +5,8 @@ import pytest
 
 import script_effects as SE
 
+PE_PASS = "⛔ Pass"
+
 
 def test_every_sport_has_sane_data():
     for sp in ("NBA", "NCAAMB", "WNBA", "NFL", "NCAAF", "NHL"):
@@ -44,8 +46,8 @@ def test_shifts_centered_point_the_right_way_and_respect_trust():
     dog_rb = SE.over_by_script(0.50, "rush_yds", False, sh, "NFL")
     assert dog_rb["fav_blowout"] < dog_rb["close"]
     # a group whose effect didn't hold up gets no shift
-    untrusted = next(g for g, t in SE.DATA["NBA"]["trust"].items() if t == 0)
-    assert set(SE.over_by_script(0.5, untrusted, True, SE.shares(-13.5, "NBA"), "NBA").values()) == {0.5}
+    assert SE.trust("NFL", "rec_yds") == 0                                   # didn't repeat on held-out games
+    assert set(SE.over_by_script(0.5, "rec_yds", True, sh, "NFL").values()) == {0.5}
     assert set(SE.over_by_script(0.5, None, True, sh, "NFL").values()) == {0.5}
 
 
@@ -80,27 +82,83 @@ def test_line_parsing_and_team_matching():
     ("NFL", "Kansas City Chiefs @ Denver Broncos", ("Kansas City Chiefs", "Denver Broncos"), "Rush Yards", 10.5),
     ("NHL", "Utah Mammoth @ Boston Bruins", ("Utah Mammoth", "Boston Bruins"), "Points", 0.70),
 ])
-def test_page_renders_each_sport(monkeypatch, sport, game, teams, market, lines):
+def test_page_renders_each_sport_live(monkeypatch, sport, game, teams, market, lines):
     from streamlit.testing.v1 import AppTest
     import best_bets_data as BBD
+    import model_store as MS
     log = [{"min": 30.0}] * 10
     plays = [{"Model": "player-props", "Player": "A One", "Team": teams[0], "Game": game, "Market": market,
               "Side": "Over", "Line": 5.5, "ModelProb": 0.56, "RealPrice": -112, "Use": "", "_game_log": log,
-              "GameDate": "2026-11-08T00:00:00Z"},
+              "Projection": 6.4, "GameDate": "2026-11-08T00:00:00Z"},
              {"Model": "player-props", "Player": "B Two", "Team": teams[1], "Game": game, "Market": market,
               "Side": "Under", "Line": 4.5, "ModelProb": 0.57, "RealPrice": -104, "Use": "", "_game_log": log,
-              "GameDate": "2026-11-08T00:00:00Z"}]
+              "Projection": 3.9, "GameDate": "2026-11-08T00:00:00Z"}]
     monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda *a, **k: (plays, [], []))
+    monkeypatch.setattr(MS, "load_snapshots", lambda *a, **k: [])
     monkeypatch.setattr(SE, "fetch_lines", lambda sp, days: [{"teams": [
-        {"names": {SE.norm(teams[0])}, "home": False, "display": teams[0]},
-        {"names": {SE.norm(teams[1])}, "home": True, "display": teams[1]}], "fav": 0, "strength": lines}])
+        {"names": {SE.norm(teams[0])}, "home": False, "display": teams[0], "score": None},
+        {"names": {SE.norm(teams[1])}, "home": True, "display": teams[1], "score": None}], "fav": 0, "strength": lines,
+        "final": False}])
     at = AppTest.from_file(str(Path(__file__).parent / "views" / "50_Game_Script.py"), default_timeout=30)
     at.session_state["sport"] = sport
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     assert at.metric[1].value == f"{SE.shares(lines, sport)['fav_blowout']:.0%}"
-    at.radio(key="gs_script").set_value("fav_blowout").run()
-    assert not at.exception
+    at.session_state["gs_cond"] = "fav_blowout"
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+
+
+def test_page_looks_back_with_snapshots_and_results(monkeypatch):
+    """An earlier date: the kickoff snapshots, the final score, the script that happened, each prop graded."""
+    import datetime as dt
+    from streamlit.testing.v1 import AppTest
+    import model_store as MS
+    import postgame as PG
+    game = "SA @ SAC"
+    snaps = [{"sport": "NBA", "slate_date": "2026-11-06", "game": game, "team": "San Antonio Spurs", "opp": "Sacramento Kings",
+              "player": "Bench Guy", "player_id": "1", "market": "Rebounds", "line": 4.5, "side": "Under", "chance": 0.52,
+              "projection": 4.4, "use_tag": PE_PASS, "price": -110, "over_price": -110, "under_price": -110,
+              "lean": None, "gap": None, "flags": "[]", "kickoff": "2026-11-07T03:00:00Z"},
+             {"sport": "NBA", "slate_date": "2026-11-06", "game": game, "team": "Sacramento Kings", "opp": "San Antonio Spurs",
+              "player": "Kings Starter", "player_id": "2", "market": "Assists", "line": 5.5, "side": "Over", "chance": 0.53,
+              "projection": 5.7, "use_tag": PE_PASS, "price": -115, "over_price": -115, "under_price": -105,
+              "lean": None, "gap": None, "flags": "[\"blowout risk\"]", "kickoff": "2026-11-07T03:00:00Z"}]
+    monkeypatch.setattr(MS, "load_snapshots", lambda sport, dates=None, db_path=None: snaps)
+    monkeypatch.setattr(PG, "fetch_results", lambda *a, **k: {})
+    monkeypatch.setattr(PG, "grade", lambda s, r: [dict(x, actual=v) for x, v in zip(s, (8.0, 3.0))])
+    import sports
+    monkeypatch.setattr(sports.get("NBA").engine, "build_slate", lambda d: ([
+        {"Player": "Bench Guy", "AvgMin": 20.0}, {"Player": "Kings Starter", "AvgMin": 32.0}], []))
+    monkeypatch.setattr(SE, "fetch_lines", lambda sp, days: [{"teams": [
+        {"names": {SE.norm("San Antonio Spurs")}, "home": False, "display": "San Antonio Spurs", "score": 128.0},
+        {"names": {SE.norm("Sacramento Kings")}, "home": True, "display": "Sacramento Kings", "score": 101.0}],
+        "fav": 0, "strength": 13.5, "final": True}])
+    at = AppTest.from_file(str(Path(__file__).parent / "views" / "50_Game_Script.py"), default_timeout=30)
+    at.session_state["sport"] = "NBA"
+    at.session_state["gs_date"] = dt.date(2026, 11, 6)
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert "Favorite blows it open" in at.success[0].value
+    at.session_state["gs_cond"] = "fav_blowout"
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    df = at.dataframe[0].value
+    assert "Result" in df.columns and set(df["Result"]) <= {"✅", "❌", "➖", ""}
+
+
+def test_script_use_reruns_the_rules():
+    import props_engine as PE
+    row = {"line": 4.5, "side": "Under", "p_over": 0.48, "projection": 4.4, "over_price": 120, "under_price": -150,
+           "lean": None, "gap": None, "flags": ["blowout risk"]}
+    flat = SE.script_use(row, 0.48, "NBA")
+    assert flat["use"] == PE.USE_PASS
+    hot = SE.script_use(row, 0.66, "NBA")                       # the script moves the chance to 66% Over at +120
+    assert hot["side"] == "Over" and hot["ev"] > 0.4
+    assert hot["use"] in (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE)       # blowout-risk warning dropped
+    news = dict(row, lean="Check news")
+    assert SE.script_use(news, 0.66, "NBA")["use"] == PE.USE_PASS          # news warnings stay
+    assert SE.script_projection(4.4, 4.5, 0.48, 0.66) > 4.5
 
 
 def test_page_explains_uncovered_sport():
