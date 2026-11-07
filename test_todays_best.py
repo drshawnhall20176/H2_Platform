@@ -38,7 +38,7 @@ def test_home_panel_renders(monkeypatch):
     from pathlib import Path
     from streamlit.testing.v1 import AppTest
     import todays_best as TB
-    monkeypatch.setattr(TB, "collect", lambda d, sp: {"rows": [{"sport": "NBA", "pick": "A Points Under 20.5", "game": "A @ B",
+    monkeypatch.setattr(TB, "collect", lambda d, sp, past=False: {"rows": [{"sport": "NBA", "pick": "A Points Under 20.5", "game": "A @ B",
                                                                 "price": -120, "chance": 0.62, "use": PE.USE_PARLAY,
                                                                 "lock": True, "page": "Best Bets", "time": "7:00 PM"}],
                                                       "props": {"NBA": "2026-11-06T15:00:00+00:00"}})
@@ -131,8 +131,8 @@ def test_home_time_and_game_filters(monkeypatch):
              "use": PE.USE_PARLAY, "lock": True, "page": "Best Bets", "time": "7:00 PM"},
             {"sport": "NBA", "pick": "C Points Under 10.5", "game": "C @ D", "price": -120, "chance": 0.61,
              "use": PE.USE_PARLAY, "lock": True, "page": "Best Bets", "time": "10:00 PM"}]
-    monkeypatch.setattr(TB, "collect", lambda d, sp: {"rows": rows, "props": {"NBA": "2026-11-06T15:00:00+00:00"}})
-    monkeypatch.setattr(TB, "winner_rows", lambda d, leagues=None: [])
+    monkeypatch.setattr(TB, "collect", lambda d, sp, past=False: {"rows": rows, "props": {"NBA": "2026-11-06T15:00:00+00:00"}})
+    monkeypatch.setattr(TB, "winner_rows", lambda d, leagues=None, past=False: [])
     at = AppTest.from_file(str(Path(__file__).parent / "Home.py"), default_timeout=30)
     at.session_state["sport"] = "NBA"
     at.run()
@@ -156,8 +156,8 @@ def test_home_tables_sorted_earliest_first(monkeypatch):
     lines = [{"sport": "NBA", "time": t, "game": f"G{i}", "best": f"Team{i} +3", "best_tested": False, "lean_detail": "",
               "backtest": None, "lean_z": 1, "winner": "X", "chance": 0.6, "league": "NBA"}
              for i, t in enumerate(["9:00 PM", "7:30 PM"])]
-    monkeypatch.setattr(TB, "collect", lambda d, sp: {"rows": rows, "props": {"NBA": "2026-11-06T15:00:00+00:00"}})
-    monkeypatch.setattr(TB, "winner_rows", lambda d, leagues=None: lines)
+    monkeypatch.setattr(TB, "collect", lambda d, sp, past=False: {"rows": rows, "props": {"NBA": "2026-11-06T15:00:00+00:00"}})
+    monkeypatch.setattr(TB, "winner_rows", lambda d, leagues=None, past=False: lines)
     monkeypatch.setattr(TB, "winner_record", lambda leagues=None: {})
     at = AppTest.from_file(str(Path(__file__).parent / "Home.py"), default_timeout=30)
     at.session_state["sport"] = "NBA"
@@ -207,8 +207,8 @@ def test_home_log_button(monkeypatch):
              "use": PE.USE_PARLAY, "lock": True, "page": "Best Bets", "time": "7:00 PM", "player": "A", "market": "Points",
              "side": "Under", "line": 20.5}]
     calls = []
-    monkeypatch.setattr(TB, "collect", lambda d, sp: {"rows": rows, "props": {"NBA": "2026-11-06T15:00:00+00:00"}})
-    monkeypatch.setattr(TB, "winner_rows", lambda d, leagues=None: [])
+    monkeypatch.setattr(TB, "collect", lambda d, sp, past=False: {"rows": rows, "props": {"NBA": "2026-11-06T15:00:00+00:00"}})
+    monkeypatch.setattr(TB, "winner_rows", lambda d, leagues=None, past=False: [])
     monkeypatch.setattr(TB, "log_selection", lambda *a, **k: calls.append(a) or {"singles": [7], "ticket": None, "skipped": 0})
     at = AppTest.from_file(str(Path(__file__).parent / "Home.py"), default_timeout=30)
     at.session_state["sport"] = "NBA"
@@ -216,3 +216,23 @@ def test_home_log_button(monkeypatch):
     at.multiselect(key="home_log_pick").set_value([at.multiselect(key="home_log_pick").options[0]]).run()
     at.button(key="home_log_go").click().run()
     assert calls and calls[0][1] == "Singles" and any("1 single(s) logged" in s.value for s in at.success)
+
+
+def test_grade_line_spread_total_moneyline():
+    import todays_best as TB
+    p = {"final_home": 101, "final_away": 128}
+    assert TB.grade_line(p, "Moneyline", "away", None) == "win"
+    assert TB.grade_line(p, "Spread", "away", -13.5) == "win" and TB.grade_line(p, "Spread", "home", 13.5) == "loss"
+    assert TB.grade_line(p, "Total", "over", 229.0) == "push" and TB.grade_line(p, "Total", "under", 230.5) == "win"
+    assert TB.grade_line({"final_home": None}, "Spread", "home", 3.5) is None
+
+
+def test_collect_past_grades_saved_props(monkeypatch):
+    import todays_best as TB
+    monkeypatch.setattr(TB, "load_props", lambda sp, d: {"at": "2026-11-06T20:00:00+00:00", "rows": [
+        {"sport": "NBA", "player": "Dylan Harper", "market": "Points", "side": "Over", "line": 17.5, "pick": "x",
+         "use": "🎟️ Parlay leg"}]})
+    monkeypatch.setattr(TB, "prop_results", lambda sp, d: {(TB.PE.norm_name("Dylan Harper"), "Points", "Over", 17.5): "win"})
+    monkeypatch.setattr(TB, "game_rows", lambda d, past=False: [])
+    out = TB.collect("2026-11-06", ["NBA"], past=True)
+    assert out["rows"][0]["result"] == "win"

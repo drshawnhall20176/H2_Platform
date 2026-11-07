@@ -1,13 +1,17 @@
 """
-Game Script — NBA (Nov 7). Owner only.
+Game Script — every sport with player props (Nov 7). Owner only.
 
-Pick a game; see how likely each kind of game is (from the pre-game spread) and how every player prop reads under each
-one: favorite blows it open, middle, close, underdog blows it open. Then pick a script and build the legs that win
-together under it, with the ticket's chance counting the script (legs that move together) next to the plain multiplied
-chance. Base reads come from today's Best Bets board (player-props model); the script shifts are measured in
-research/blowout_study.py (script_effects.py).
+Pick a date and a game; see how likely each kind of game is (from the pre-game line). Then pick a condition --
+Favorite blows it open / Middle / Close game / Underdog blows it open -- and every prop is re-read under it: the side
+the script favors, its chance, the edge at that side's price, and the Use tag re-run through the platform's own rules
+(props_engine.use_tag) on those numbers. Build the legs that win together under it; the ticket's chance counts the
+script. Earlier dates load the kickoff snapshots (the board as it stood before the game) and show how each prop and the
+game actually went, so a script call can be checked after the fact.
+
+Shifts come from research/script_study.py (script_effects.py), each market only as far as its effect held up when the
+script happens (held-out games).
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import pytz
@@ -16,155 +20,248 @@ import streamlit as st
 import best_bets_data as BBD
 import components as C
 import model_store as MS
+import props_engine as PE
 import script_effects as SE
+import sports
 
 C.base_css()
 C.page_header("🎬", "Game Script", "How each kind of game moves every prop — and the legs that win together.")
 
-today = datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d")
+SPORT = sports.active_key()
+if SPORT not in SE.SPORTS:
+    st.info(f"Game Script covers {', '.join(SE.SPORTS)}. Switch sport on the Home page.")
+    st.stop()
+
+ET = pytz.timezone("US/Eastern")
+today = datetime.now(ET).date()
+day = st.date_input("Date", today, max_value=today, key="gs_date", format="MM/DD/YYYY",
+                    help="Earlier dates show the board as it stood before each game, and how it went.")
+DAY = day.strftime("%Y-%m-%d")
+PAST = day < today
 
 
-@st.cache_data(ttl=900, show_spinner="Loading today's board…")
-def _board(day):
-    plays, meta, _ = BBD.load_generic_best_bets_board("NBA", day, BBD.O.DEFAULT_BOOK)
-    return [p for p in plays if p.get("Model") == "player-props" and p.get("Side") in ("Over", "Under")
-            and p.get("Line") is not None]
+@st.cache_data(ttl=900, show_spinner="Loading the board…")
+def _rows(sport, d, live):
+    snaps = [r for r in (SE.from_snapshot(s) for s in MS.load_snapshots(sport, [d])) if r]
+    if snaps or not live:
+        return snaps, "snapshots"
+    plays, _meta, _ = BBD.load_generic_best_bets_board(sport, d, BBD.O.DEFAULT_BOOK)
+    return [SE.from_play(p) for p in plays if p.get("Side") in ("Over", "Under") and p.get("Line") is not None
+            and p.get("ModelProb") is not None and p.get("LineSource") != "default"], "board"
 
 
-@st.cache_data(ttl=900, show_spinner=False)
-def _lines(day):
-    import todays_best as TB
-    out = {}
-    for r in MS.load_game_picks("NBA", ungraded=True):
-        if TB._et_date(r.get("kickoff")) == day:
-            out[(r.get("away"), r.get("home"))] = r
-    return out
+@st.cache_data(ttl=3600, show_spinner="Reading minutes before that date…")
+def _minutes(sport, d):
+    try:
+        rows, _ = sports.get(sport).engine.build_slate(d)
+    except Exception:                                           # noqa: BLE001
+        return {}
+    return {PE.norm_name(r.get("Player") or ""): r.get("AvgMin") for r in rows or [] if r.get("AvgMin") is not None}
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _lines(sport, d):
+    d0 = datetime.strptime(d, "%Y-%m-%d")
+    return SE.fetch_lines(sport, [d0.strftime("%Y%m%d"), (d0 + timedelta(days=1)).strftime("%Y%m%d")])
+
+
+@st.cache_data(ttl=1800, show_spinner="Grading against the box scores…")
+def _results(sport, d):
+    import postgame as PG
+    snaps = MS.load_snapshots(sport, [d])
+    if not snaps:
+        return {}
+    res = PG.fetch_results(sport, d, sorted({(s["team"], s["opp"]) for s in snaps}))
+    return {(PE.norm_name(g.get("player") or ""), g.get("market")): g.get("actual") for g in PG.grade(snaps, res)
+            if g.get("actual") is not None}
 
 
 try:
-    plays = _board(today)
+    rows, source = _rows(SPORT, DAY, not PAST)
 except Exception as exc:                                        # noqa: BLE001
-    st.error(f"Couldn't load today's NBA board ({type(exc).__name__}).")
+    st.error(f"Couldn't load the {SPORT} board ({type(exc).__name__}).")
     st.stop()
-if not plays:
-    st.info("No NBA props on today's board yet.")
+if not rows:
+    st.info(f"No {SPORT} props saved for {day:%a %b %-d}." if PAST else f"No {SPORT} props on today's board yet.")
     st.stop()
+if SE.FAMILY[SPORT] == "hoops" and any(r.get("mins") is None for r in rows):
+    mins = _minutes(SPORT, DAY)
+    for r in rows:
+        if r.get("mins") is None:
+            r["mins"] = mins.get(PE.norm_name(r.get("player") or ""))
+actuals = _results(SPORT, DAY) if PAST else {}
 
-# Nov 7: games in tip order, each with its start time
-_first = {}
-for p in C.by_kickoff(plays, when=lambda x: x.get("Kickoff") or x.get("kickoff") or x.get("game_date")):
-    if p.get("Game") and p["Game"] not in _first:
-        _first[p["Game"]] = C._kick_dt(p.get("Kickoff") or p.get("kickoff") or p.get("game_date"))
-games = list(_first)
-game = st.selectbox("Game", games, key="gs_game",
-                    format_func=lambda g: g if _first.get(g) is None else f"{_first[g].strftime('%a %-I:%M %p')} — {g}")
-gl = _lines(today)
-rec = next((r for (a, h), r in gl.items() if a and h and a in game and h in game), None)
-if rec and rec.get("home_spread") is not None:
-    spread = float(rec["home_spread"])
-    fav = rec["home"] if spread < 0 else rec["away"]
-    dog = rec["away"] if fav == rec["home"] else rec["home"]
-else:
-    spread, fav, dog = None, None, None
-sh = SE.shares(spread)
+# ---------------------------------------------------------------- evidence for this sport
+ev = SE.evidence(SPORT)
+if not ev["trusted"]:
+    st.warning(f"**{SPORT}: no market's script effect held up** on held-out games, so props read the same under every "
+               "condition. The scenario chances are still real, and the ticket math still counts legs that win together.")
+
+# ---------------------------------------------------------------- game
+_kick = lambda r: r.get("kickoff")                              # noqa: E731
+first = {}
+for r in C.by_kickoff(rows, when=_kick):
+    if r.get("game") and r["game"] not in first:
+        first[r["game"]] = C._kick_dt(_kick(r))
+game = st.selectbox("Game", list(first), key="gs_game",
+                    format_func=lambda g: g if first.get(g) is None else f"{first[g].strftime('%a %-I:%M %p')} — {g}")
+gp = [r for r in rows if r.get("game") == game]
+teams = sorted({t for r in gp for t in (r.get("team"), r.get("opp")) if t})
+if not teams and " @ " in game:
+    teams = [t.strip() for t in game.split(" @ ")]
+try:
+    lines = _lines(SPORT, DAY)
+    g_espn = SE.game_for(teams, lines)
+    strength, fav, dog = SE.line_for(teams, lines)
+except Exception:                                               # noqa: BLE001
+    g_espn, strength, fav, dog = None, None, None, None
+sh = SE.shares(strength, SPORT)
+LAB = SE.labels(SPORT)
+D = SE.DATA[SPORT]
+
+
+def _nick(t):
+    return (t or "").split()[-1] if t else ""
+
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Spread", "—" if spread is None else f"{fav.split()[-1]} −{abs(spread):g}")
-c2.metric(f"{fav.split()[-1] if fav else 'Favorite'} by 15+", f"{sh['fav_blowout']:.0%}")
-c3.metric("Within 6", f"{sh['close']:.0%}")
-c4.metric(f"{dog.split()[-1] if dog else 'Underdog'} by 15+", f"{sh['dog_blowout']:.0%}")
-if spread is None:
-    st.caption("No pre-game spread found for this game: script chances use the close-spread mix.")
-st.caption(f"Middle (decided by 7–14): {sh['middle']:.0%}. From 1,111 NBA games over the last season and a half, by "
-           "the pre-game spread.")
-
-
-def _avg_min(p):
-    log = p.get("_game_log") or []
-    mins = [float(g.get("min") or 0) for g in log[-10:] if g.get("min") is not None]
-    return sum(mins) / len(mins) if mins else None
-
-
-rows = []
-for p in [p for p in plays if p.get("Game") == game]:
-    p_over = p["ModelProb"] if p["Side"] == "Over" else 1 - p["ModelProb"]
-    rl = SE.role(_avg_min(p))
-    is_fav = bool(fav) and p.get("Team") == fav
-    by = SE.over_by_script(p_over, rl, is_fav, p["Market"], sh)
-    rows.append({"p": p, "role": rl, "is_fav": is_fav, "by": by, "p_over": p_over})
-
-st.markdown("##### Every prop under each script")
-show_flips = st.toggle("Only props whose side changes with the script", value=False, key="gs_flips")
-
-
-def _cell(po):
-    return f"O {po:.0%}" if po >= 0.5 else f"U {1 - po:.0%}"
-
-
-tab = []
-for r in rows:
-    p = r["p"]
-    sides = {("Over" if r["by"][s] >= 0.5 else "Under") for s in SE.SCRIPTS}
-    if show_flips and len(sides) < 2:
-        continue
-    tab.append({"Player": p["Player"], "Team": (p.get("Team") or "").split()[-1] + (" (fav)" if r["is_fav"] else ""),
-                "Role": r["role"] or "deep bench", "Market": p["Market"], "Line": p["Line"],
-                "Model": _cell(r["p_over"]),
-                **{SE.LABEL[s].split(" (")[0]: _cell(r["by"][s]) for s in SE.SCRIPTS},
-                "Use": p.get("Use") or ""})
-if tab:
-    st.dataframe(pd.DataFrame(tab), hide_index=True, width="stretch")
+if strength is None:
+    c1.metric("Line", "—")
+elif SE.strength_kind(SPORT) == "ml":
+    c1.metric("Favorite", f"{_nick(fav)} {strength:.0%}")
 else:
-    st.caption("No prop changes side across the scripts in this game.")
-st.caption("Each cell is the side the model favors under that script and its chance. **Model** is the board's own read "
-           "(all scripts mixed by how likely they are). Starters = 26+ minutes; bench = 12–26; deep bench gets no "
-           "script shift (not measured).")
+    c1.metric("Spread", f"{_nick(fav)} −{strength:g}")
+c2.metric(f"{_nick(fav) or 'Favorite'} by {D['blow']}+", f"{sh['fav_blowout']:.0%}")
+c3.metric(f"Within {D['close']}", f"{sh['close']:.0%}")
+c4.metric(f"{_nick(dog) or 'Underdog'} by {D['blow']}+", f"{sh['dog_blowout']:.0%}")
+happened = SE.actual_script(g_espn, SPORT) if g_espn else None
+if g_espn and g_espn.get("final"):
+    t0, t1 = g_espn["teams"]
+    st.success(f"**Final:** {t0['display']} {t0['score']:g} – {t1['display']} {t1['score']:g} → "
+               f"**{LAB[happened]}**" if happened else "Final.")
+if strength is None:
+    st.caption("No pre-game line found for this game: script chances use the most even-game mix, and neither side is "
+               "treated as the favorite (no prop is shifted).")
+st.caption(f"{LAB['middle']}: {sh['middle']:.0%}. From {D.get('lined') or 0:,} {SPORT} games with a pre-game line.")
 
-# ---------------------------------------------------------------- build a script ticket
-st.markdown("##### Build a script ticket")
-script = st.radio("If the game goes…", list(SE.SCRIPTS), format_func=lambda s: SE.LABEL[s], horizontal=True,
-                  key="gs_script")
-cands = []
-for r in rows:
-    po = r["by"][script]
-    side = "Over" if po >= 0.5 else "Under"
-    ch = po if side == "Over" else 1 - po
-    if ch >= 0.55:
-        price = r["p"].get("RealPrice") if side == r["p"]["Side"] else None
-        cands.append({"key": f"{r['p']['Player']} {r['p']['Market']} {side} {r['p']['Line']:g}", "r": r, "side": side,
-                      "ch": ch, "price": price})
-cands.sort(key=lambda c: -c["ch"])
+# ---------------------------------------------------------------- condition buttons
+COND = ["model"] + list(SE.SCRIPTS)
+COND_LABEL = {"model": "Model (no script)", "fav_blowout": f"⬆️ {_nick(fav) or 'Favorite'} blows it open",
+              "middle": "↔️ Middle", "close": "🤝 Close game", "dog_blowout": f"⬇️ {_nick(dog) or 'Underdog'} blows it open"}
+cond = st.segmented_control("If the game goes…", COND, format_func=lambda c: COND_LABEL[c], default="model",
+                            key="gs_cond", selection_mode="single") or "model"
+if cond != "model":
+    st.caption(f"Every prop below re-read **as if the game goes '{SE.short(SPORT, cond)}'** ({sh[cond]:.0%} likely from "
+               "the line): the side the script favors, its chance, the edge at that side's price, and the Use tag from "
+               "the platform's own rules on those numbers. A tag here is conditional — it's only as good as the call.")
+
+prepared = []
+for r in gp:
+    grp = SE.group(SPORT, r["market"], r.get("mins"))
+    is_fav = bool(fav) and SE.team_matches(r.get("team"), {SE.norm(fav)})
+    by = SE.over_by_script(r["p_over"], grp if fav else None, is_fav, sh, SPORT)
+    p_now = r["p_over"] if cond == "model" else by[cond]
+    u = SE.script_use(r, p_now, SPORT) if cond != "model" else {
+        "side": r["side"], "chance": r["p_over"] if r["side"] == "Over" else 1 - r["p_over"], "ev": None,
+        "use": r.get("use") or "", "why": "", "price": r.get("over_price") if r["side"] == "Over" else r.get("under_price")}
+    act = actuals.get((PE.norm_name(r.get("player") or ""), r["market"]))
+    res = None
+    if act is not None:
+        thr = PE.threshold(float(r["line"]))
+        res = "push" if act == thr else ("win" if (act > thr) == (u["side"] == "Over") else "loss")
+    prepared.append({"r": r, "grp": grp, "is_fav": is_fav, "by": by, "u": u, "actual": act, "result": res})
+
+f1, f2 = st.columns(2)
+only_play = f1.toggle("Only playable under this condition", value=False, key="gs_only_play")
+only_changed = f2.toggle("Only props whose read changes", value=False, key="gs_only_changed", disabled=cond == "model")
+PLAY = {PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE}
+show = []
+for x in prepared:
+    if only_play and x["u"]["use"] not in PLAY:
+        continue
+    if only_changed and cond != "model" and x["u"]["use"] == (x["r"].get("use") or "") and x["u"]["side"] == x["r"]["side"]:
+        continue
+    show.append(x)
+show.sort(key=lambda x: (x["u"]["use"] not in PLAY, -x["u"]["chance"]))
+ICON = {"win": "✅", "loss": "❌", "push": "➖"}
+if show:
+    df = pd.DataFrame([{
+        "Player": x["r"]["player"], "Team": _nick(x["r"].get("team")) + (" (fav)" if x["is_fav"] else ""),
+        "Group": SE.role_label(x["grp"]) + ("" if SE.trust(SPORT, x["grp"]) > 0 and fav else " · no shift"),
+        "Market": x["r"]["market"], "Line": x["r"]["line"],
+        "Board": f"{x['r']['side']} {(x['r']['p_over'] if x['r']['side'] == 'Over' else 1 - x['r']['p_over']):.0%} · "
+                 f"{x['r'].get('use') or '—'}",
+        "Side": x["u"]["side"], "Chance": x["u"]["chance"],
+        "Price": "—" if x["u"].get("price") is None else f"{float(x['u']['price']):+.0f}",
+        "Edge": x["u"]["ev"], "Use": x["u"]["use"], "Why": x["u"]["why"],
+        "Actual": "" if x["actual"] is None else f"{x['actual']:g}",
+        "Result": ICON.get(x["result"], "")} for x in show])
+    if cond == "model":
+        df = df.drop(columns=["Board", "Edge", "Why"])
+    if not PAST:
+        df = df.drop(columns=["Actual", "Result"])
+    st.dataframe(df, hide_index=True, width="stretch",
+                 column_config={"Chance": st.column_config.NumberColumn(format="percent"),
+                                "Edge": st.column_config.NumberColumn(format="percent")})
+    if PAST:
+        gr = [x for x in show if x["result"] in ("win", "loss")]
+        pl = [x for x in gr if x["u"]["use"] in PLAY]
+        if gr:
+            st.caption(f"Under **{COND_LABEL[cond]}**: the listed sides went **{sum(x['result'] == 'win' for x in gr)}–"
+                       f"{sum(x['result'] == 'loss' for x in gr)}**"
+                       + (f"; the playable-tagged ones **{sum(x['result'] == 'win' for x in pl)}–"
+                          f"{sum(x['result'] == 'loss' for x in pl)}**" if pl else "") + ".")
+else:
+    st.caption("No props match these filters.")
+st.caption("**Board** = the board's own read and tag before the game. **no shift** = that market's script effect didn't "
+           "hold up (or isn't measured, or there's no line for the game), so it reads the same under every condition — "
+           "its tag can still change when the side's price differs. Blowout-risk warnings are dropped under a script "
+           "(the script is the blowout call); news warnings stay.")
+
+# ---------------------------------------------------------------- build a ticket under this condition
+st.markdown("##### Build a ticket" + ("" if cond == "model" else f" for '{SE.short(SPORT, cond)}'"))
+cands = [x for x in prepared if x["u"]["chance"] >= 0.55]
+cands.sort(key=lambda x: (x["u"]["use"] not in PLAY, -x["u"]["chance"]))
 if not cands:
-    st.caption("No prop reaches 55% under this script.")
+    st.caption("No prop reaches 55% under this condition.")
     st.stop()
+
+
+def _key(x):
+    return f"{x['r']['player']} {x['r']['market']} {x['u']['side']} {x['r']['line']:g}"
+
+
 default, seen = [], set()
-for c in cands:
-    if c["r"]["p"]["Player"] not in seen and len(default) < 3:
-        default.append(c["key"])
-        seen.add(c["r"]["p"]["Player"])
-pick = st.multiselect("Legs (best fits for this script first)", [c["key"] for c in cands], default=default,
-                      key=f"gs_legs_{game}_{script}")
-chosen = [c for c in cands if c["key"] in pick]
+for x in cands:
+    if x["r"]["player"] not in seen and len(default) < 3 and x["u"]["use"] in PLAY:
+        default.append(_key(x))
+        seen.add(x["r"]["player"])
+pick = st.multiselect("Legs (playable under this condition first)", [_key(x) for x in cands], default=default,
+                      key=f"gs_legs_{SPORT}_{DAY}_{game}_{cond}")
+chosen = [x for x in cands if _key(x) in pick]
 if chosen:
-    legs = [SE.side_chance(c["r"]["by"], c["side"]) for c in chosen]
+    legs = [SE.side_chance(x["by"], x["u"]["side"]) for x in chosen]
     scripted, plain, per = SE.ticket(legs, sh)
     k1, k2, k3 = st.columns(3)
     k1.metric("Chance, counting the script", f"{scripted:.1%}",
               f"fair {SE.fair_american(scripted):+d}" if SE.fair_american(scripted) else None, delta_color="off")
     k2.metric("Chance, legs multiplied", f"{plain:.1%}", None)
-    k3.metric(f"If it goes '{SE.LABEL[script].split(' (')[0]}'", f"{per[script]:.1%}",
-              f"that script: {sh[script]:.0%} likely", delta_color="off")
-    st.dataframe(pd.DataFrame([{"Leg": c["key"], "In this script": c["ch"],
-                                "Overall (all scripts)": sum(sh[s] * SE.side_chance(c["r"]["by"], c["side"])[s]
-                                                             for s in SE.SCRIPTS),
-                                "Board price": "" if c["price"] is None else f"{float(c['price']):+.0f}",
-                                "Board's tag": c["r"]["p"].get("Use") or ""} for c in chosen]),
+    if cond != "model":
+        k3.metric(f"If it goes '{SE.short(SPORT, cond)}'", f"{per[cond]:.1%}", f"that script: {sh[cond]:.0%} likely",
+                  delta_color="off")
+    st.dataframe(pd.DataFrame([{"Leg": _key(x), "Chance here": x["u"]["chance"],
+                                "Overall (all scripts)": sum(sh[s] * SE.side_chance(x["by"], x["u"]["side"])[s] for s in SE.SCRIPTS),
+                                "Price": "" if x["u"].get("price") is None else f"{float(x['u']['price']):+.0f}",
+                                "Use here": x["u"]["use"], "Board's tag": x["r"].get("use") or "",
+                                **({"Result": ICON.get(x["result"], "")} if PAST else {})} for x in chosen]),
                  hide_index=True, width="stretch",
-                 column_config={"In this script": st.column_config.NumberColumn(format="percent"),
+                 column_config={"Chance here": st.column_config.NumberColumn(format="percent"),
                                 "Overall (all scripts)": st.column_config.NumberColumn(format="percent")})
+    if PAST and all(x["result"] in ("win", "loss", "push") for x in chosen):
+        won = all(x["result"] in ("win", "push") for x in chosen)
+        st.markdown(f"**This ticket {'✅ would have won' if won else '❌ would have lost'}.**")
     st.caption("**Counting the script** is the honest chance for legs that win together; it's above the multiplied "
                "chance when the legs share a script. A same-game parlay is worth it only if the book's payout beats "
-               "the fair price shown. Legs priced on the board's other side show no price — check the book.")
-st.caption("⚠️ Early tool: script effects are measured against players' own averages (points; other markets get half), "
-           "not against prop lines — the books know the spread too, so some of it may already be priced in. Ticket "
-           "results are tracked under the game-script tag.")
+               "the fair price shown.")
+st.caption("⚠️ Script effects are measured against players' own averages, not prop lines — the books know the line too, "
+           "so some of it may already be priced in. Ticket results are tracked under the game-script tag.")

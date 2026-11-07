@@ -92,7 +92,7 @@ def load_props(sport: str, date_str: str) -> Optional[Dict]:
 
 
 # --------------------------------------------------------------------------- game lines, international, tennis
-def game_rows(date_str: str, leagues=None) -> List[Dict]:
+def game_rows(date_str: str, leagues=None, past: bool = False) -> List[Dict]:
     import intl_hoops as H
     import intl_picks as IP
     import model_store as MS
@@ -100,7 +100,7 @@ def game_rows(date_str: str, leagues=None) -> List[Dict]:
     out = []
     for lg in leagues:
         try:
-            recs = MS.load_game_picks(lg, ungraded=True)
+            recs = MS.load_game_picks(lg, ungraded=not past)
         except Exception:                                       # noqa: BLE001
             continue
         for p in recs:
@@ -116,13 +116,20 @@ def game_rows(date_str: str, leagues=None) -> List[Dict]:
             else:
                 pick = "—"
             title = H.LEAGUES.get(lg, {}).get("title", lg)
+            res = None
+            if past and pick != "—":
+                if p.get("ml_pick"):
+                    res = grade_line(p, "Moneyline", p["ml_pick"], None)
+                elif p.get("home_spread") is not None and p.get("edge") is not None:
+                    hs = float(p["home_spread"])
+                    res = grade_line(p, "Spread", "home" if p["edge"] >= 0 else "away", hs if p["edge"] >= 0 else -hs)
             out.append({"sport": lg if lg in GAME_LEAGUES else "INTL", "kind": "Game line" if lg in GAME_LEAGUES else title,
-                        "time": _et_time(p.get("kickoff")), "pick": pick,
+                        "time": _et_time(p.get("kickoff")), "pick": pick, "result": res,
                         "game": f"{p.get('away')} @ {p.get('home')}", "price": None, "book": "",
                         "chance": p.get("cover_est"), "use": t.get("use"), "lock": bool(t.get("lock")),
                         "page": "International Hoops" if lg not in GAME_LEAGUES else f"{lg} Game Lab"})
     try:
-        recs = MS.load_game_picks("TENNIS", ungraded=True)
+        recs = MS.load_game_picks("TENNIS", ungraded=not past)
     except Exception:                                           # noqa: BLE001
         recs = []
     for p in recs:
@@ -131,10 +138,58 @@ def game_rows(date_str: str, leagues=None) -> List[Dict]:
         t = IP.tennis_use(p)
         if t.get("use") not in PLAYABLE:
             continue
-        out.append({"sport": "TENNIS", "kind": p.get("tournament") or "Tennis", "time": _et_time(p.get("kickoff")),
+        tres = None
+        if past and p.get("final_home") is not None and p.get("final_away") is not None and t.get("player"):
+            won_home = float(p["final_home"]) > float(p["final_away"])
+            tres = "win" if won_home == (t.get("player") == p.get("home")) else "loss"
+        out.append({"sport": "TENNIS", "kind": p.get("tournament") or "Tennis", "time": _et_time(p.get("kickoff")), "result": tres,
                     "pick": f"{t.get('player')} to win", "game": f"{p.get('away')} vs {p.get('home')}",
                     "price": None, "book": "", "chance": t.get("chance"), "use": t.get("use"), "lock": bool(t.get("lock")),
                     "need": t.get("need"), "untested": True, "page": "Tennis Lab"})
+    return out
+
+
+# --------------------------------------------------------------------------- looking back (Nov 7)
+RESULT_ICON = {"win": "✅ won", "loss": "❌ lost", "push": "➖ push", "void": "void"}
+
+
+def grade_line(p: Dict, market: str, side: str, line: Optional[float]) -> Optional[str]:
+    """win / loss / push for a game-line bet on a graded game record, None while it isn't final."""
+    fh, fa = p.get("final_home"), p.get("final_away")
+    if fh is None or fa is None:
+        return None
+    fh, fa = float(fh), float(fa)
+    if market == "Moneyline":
+        if fh == fa:
+            return "push"
+        return "win" if (fh > fa) == (side == "home") else "loss"
+    if line is None:
+        return None
+    if market == "Spread":
+        m = (fh - fa) if side == "home" else (fa - fh)
+        v = m + float(line)
+    else:                                                       # Total
+        v = (fh + fa - float(line)) * (1 if side == "over" else -1)
+    return "push" if v == 0 else ("win" if v > 0 else "loss")
+
+
+def prop_results(sport: str, date_str: str) -> Dict:
+    """{(player, market, side, line): win / loss / push / void} for one date, from the kickoff snapshots graded
+    against ESPN box scores (the Postgame Review's grading). The pick's side, not the snapshot's, decides win/loss."""
+    import model_store as MS
+    import postgame as PG
+    snaps = MS.load_snapshots(sport, [date_str])
+    if not snaps:
+        return {}
+    res = PG.fetch_results(sport, date_str, sorted({(s["team"], s["opp"]) for s in snaps}))
+    out = {}
+    for g in PG.grade(snaps, res):
+        if g.get("actual") is None:
+            continue
+        thr = PE.threshold(float(g["line"]))
+        for side in ("Over", "Under"):
+            r = "push" if g["actual"] == thr else ("win" if (g["actual"] > thr) == (side == "Over") else "loss")
+            out[(PE.norm_name(g.get("player") or ""), g.get("market"), side, float(g["line"]))] = r
     return out
 
 
@@ -143,15 +198,26 @@ def _order(r: Dict):
     return (0 if r.get("lock") else RANK.get(r.get("use"), 9), -(r.get("chance") or 0))
 
 
-def collect(date_str: str, props_sports) -> Dict:
-    """{"rows": [...], "props": {sport: saved-at or None}} for the Home panel."""
+def collect(date_str: str, props_sports, past: bool = False) -> Dict:
+    """{"rows": [...], "props": {sport: saved-at or None}} for the Home panel. past=True (Nov 7: looking back): the
+    picks as they were saved that day, each graded ("result": win / loss / push / void / None)."""
     rows, fresh = [], {}
     for sp in props_sports:
         saved = load_props(sp, date_str)
         fresh[sp] = (saved or {}).get("at")
-        rows += (saved or {}).get("rows") or []
+        got = [dict(r) for r in (saved or {}).get("rows") or []]
+        if past and got:
+            try:
+                res = prop_results(sp, date_str)
+                for r in got:
+                    if r.get("line") is not None:
+                        r["result"] = res.get((PE.norm_name(r.get("player") or ""), r.get("market"), r.get("side"),
+                                               float(r["line"])))
+            except Exception:                                   # noqa: BLE001
+                pass
+        rows += got
     try:
-        rows += game_rows(date_str)
+        rows += game_rows(date_str, past=past)
     except Exception:                                           # noqa: BLE001
         pass
     rows.sort(key=_order)
@@ -284,14 +350,14 @@ def best_line(p: Dict, lg: str, home_p: float) -> Dict:
     return out
 
 
-def winner_rows(date_str: str, leagues=None) -> List[Dict]:
+def winner_rows(date_str: str, leagues=None, past: bool = False) -> List[Dict]:
     import intl_hoops as H
     import model_store as MS
     leagues = list(leagues) if leagues is not None else list(WINNER_LEAGUES) + [k for k in H.LEAGUES if k not in WINNER_LEAGUES]
     out = []
     for lg in leagues:
         try:
-            recs = MS.load_game_picks(lg, ungraded=True)
+            recs = MS.load_game_picks(lg, ungraded=not past)
         except Exception:                                       # noqa: BLE001
             continue
         for p in recs:
@@ -317,6 +383,12 @@ def winner_rows(date_str: str, leagues=None) -> List[Dict]:
                 best = {"best": None, "best_chance": None, "best_price": None, "best_value": None, "best_tested": False}
             sport = lg if lg in WINNER_LEAGUES else "INTL"
             title = H.LEAGUES.get(lg, {}).get("title", lg) if sport == "INTL" else (p.get("tournament") or lg)
+            if past:                                            # Nov 7: how it went
+                fh, fa = p.get("final_home"), p.get("final_away")
+                best["final"] = None if fh is None or fa is None else f"{p.get('away')} {fa:g} – {p.get('home')} {fh:g}"
+                best["winner_result"] = grade_line(p, "Moneyline", "home" if home else "away", None)
+                best["best_result"] = (grade_line(p, best["bet_market"], best.get("bet_side"), best.get("bet_line"))
+                                       if best.get("bet_market") else None)
             out.append({"sport": sport, "league": title, "time": _et_time(p.get("kickoff")),
                         "game": f"{p.get('away')} {'vs' if lg == 'TENNIS' else '@'} {p.get('home')}",
                         "winner": team, "chance": chance, "book": book, "price": price,
