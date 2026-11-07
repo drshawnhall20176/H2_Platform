@@ -129,6 +129,12 @@ def player_stats_from_box(names: Sequence[str], stats: Sequence) -> Dict[str, fl
         a = parse_attempts(by_name["3PT"])
         if a is not None:
             out["fg3a"] = a
+    # Nov 7: field-goal and free-throw attempts, for usage % (Game Script's roster view)
+    for src, key in (("FG", "fga"), ("FT", "fta")):
+        if src in by_name:
+            a = parse_attempts(by_name[src])
+            if a is not None:
+                out[key] = a
     return out
 
 
@@ -153,6 +159,12 @@ def extend_team_totals(stats_by_name: Dict[str, str], totals: Dict[str, float], 
         totals["blk"] = find_team_stat(stats_by_name, "blocks")
     if has("totalTurnovers", "turnovers"):
         totals["tov"] = find_team_stat(stats_by_name, "totalTurnovers", "turnovers")
+    if has("fieldGoalsMade-fieldGoalsAttempted", "fieldGoalsAttempted"):            # Nov 7: usage %
+        totals["fga"] = find_team_stat(stats_by_name, "fieldGoalsMade-fieldGoalsAttempted", "fieldGoalsAttempted",
+                                       side="right")
+    if has("freeThrowsMade-freeThrowsAttempted", "freeThrowsAttempted"):
+        totals["fta"] = find_team_stat(stats_by_name, "freeThrowsMade-freeThrowsAttempted", "freeThrowsAttempted",
+                                       side="right")
     if has("threePointFieldGoalsMade-threePointFieldGoalsAttempted", "threePointFieldGoalsAttempted"):
         totals["fg3a"] = find_team_stat(stats_by_name, "threePointFieldGoalsMade-threePointFieldGoalsAttempted",
                                         "threePointFieldGoalsAttempted", side="right")
@@ -161,7 +173,7 @@ def extend_team_totals(stats_by_name: Dict[str, str], totals: Dict[str, float], 
 
 # --- team-level aggregation (what a defense allows / a team scores), used by the Hot Hand board and Matchup Lab ---------
 _CORE_TEAM_KEYS = ("pts", "reb", "ast", "fg3m", "poss")
-TEAM_TOTAL_KEYS = _CORE_TEAM_KEYS + ("stl", "blk", "tov", "fg3a") + tuple(COMBOS)
+TEAM_TOTAL_KEYS = _CORE_TEAM_KEYS + ("stl", "blk", "tov", "fg3a", "fga", "fta") + tuple(COMBOS)
 
 
 def empty_team_totals() -> Dict[str, List[float]]:

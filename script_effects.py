@@ -39,6 +39,7 @@ SPORTS = tuple(DATA)
 
 FAMILY = {"NBA": "hoops", "WNBA": "hoops", "NCAAMB": "hoops", "NFL": "football", "NCAAF": "football", "NHL": "hockey"}
 ROLE_MIN = {"NBA": (26.0, 12.0), "WNBA": (24.0, 10.0), "NCAAMB": (24.0, 10.0)}       # (starter, bench) average minutes
+DEEP_MIN = 3.0                                                  # deep reserves: 3 minutes to the bench line
 UNIT = {"hoops": "pts", "football": "pts", "hockey": "goals"}
 
 HOOPS_STAT = {"Points": "points", "PRA": "points", "PA": "points", "PR": "points", "PB": "points",
@@ -93,6 +94,8 @@ def role(avg_min: Optional[float], sport: str = "NBA") -> Optional[str]:
         return "starter"
     if avg_min >= bench_min:
         return "bench"
+    if avg_min >= DEEP_MIN:
+        return "deep"                                           # Nov 7: measured by the nightly job (script_learn)
     return None
 
 
@@ -209,7 +212,7 @@ def parse_event(ev: Dict, sport: str, odds: Optional[Dict] = None) -> Optional[D
         if t.get("id") is not None:
             names.add(norm(str(t["id"])))                       # kickoff snapshots store ESPN team ids
         names.add(norm(f"{t.get('location', '')} {t.get('name', '')}"))
-        teams.append({"names": {n for n in names if n}, "home": c.get("homeAway") == "home",
+        teams.append({"names": {n for n in names if n}, "home": c.get("homeAway") == "home", "id": t.get("id"),
                       "display": t.get("displayName") or t.get("location") or "", "score": _num(c.get("score"))})
     if len(teams) != 2:
         return None

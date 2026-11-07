@@ -29,7 +29,8 @@ def test_shares_by_spread_and_by_moneyline():
 
 def test_groups_follow_the_sport():
     assert SE.group("NBA", "PRA", 30) == "starter:points" and SE.group("NBA", "Rebounds", 18) == "bench:rebounds"
-    assert SE.group("NBA", "Points", 8) is None                        # deep bench: not measured
+    assert SE.group("NBA", "Points", 8) == "deep:points"                # deep reserves: measured nightly (Nov 7)
+    assert SE.group("NBA", "Points", 2) is None                        # under 3 minutes: not measured
     assert SE.group("NFL", "Rush Yards") == "rush_yds" and SE.group("NCAAF", "Receptions") == "receptions"
     assert SE.group("NHL", "Goals") == "points" and SE.group("NHL", "Saves") == "saves"
     assert SE.group("NFL", "Anytime TD") is None
@@ -182,3 +183,56 @@ def test_snapshot_team_ids_match_espn():
     assert SE.team_matches("24", SE.fav_names(g)) and not SE.team_matches("23", SE.fav_names(g))
     assert not SE.team_matches("2", {"24"})
     assert SE.actual_script(g, "NBA") == "fav_blowout"
+
+
+def test_usage_formula():
+    import roster_usage as RU
+    log = [{"min": 36.0, "fga": 20.0, "fta": 8.0, "tov": 3.0}] * 5
+    team = {"fga": 88.0, "fta": 22.0, "tov": 14.0}
+    u = RU.usage(log, team, 240.0)
+    assert 30 < u < 33                                          # (20+3.52+3) x 48 / (36 x 111.68) = 31.7%
+    assert RU.usage([{"min": 20.0}], team, 240.0) is None       # no attempts in the box: no usage, not a zero
+    assert RU.usage(log, {}, 240.0) is None
+
+
+def test_roster_table_and_filters(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    import best_bets_data as BBD
+    import model_store as MS
+    import roster_usage as RU
+    teams = ("San Antonio Spurs", "Sacramento Kings")
+    game = f"{teams[0]} @ {teams[1]}"
+    plays = [{"Player": "Star One", "Team": teams[0], "Game": game, "Market": "Points", "Side": "Over", "Line": 24.5,
+              "ModelProb": 0.55, "RealPrice": -110, "Projection": 26.0, "GameDate": "2026-11-08T00:00:00Z"},
+             {"Player": "Big Two", "Team": teams[1], "Game": game, "Market": "Rebounds", "Side": "Under", "Line": 9.5,
+              "ModelProb": 0.56, "RealPrice": -110, "Projection": 8.9, "GameDate": "2026-11-08T00:00:00Z"}]
+    monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda *a, **k: (plays, [], []))
+    monkeypatch.setattr(MS, "load_snapshots", lambda *a, **k: [])
+    monkeypatch.setattr(SE, "calls", lambda sport: {})
+    monkeypatch.setattr(SE, "fetch_lines", lambda sp, days: [{"teams": [
+        {"names": {SE.norm(teams[0])}, "home": False, "display": teams[0], "score": None, "id": "24"},
+        {"names": {SE.norm(teams[1])}, "home": True, "display": teams[1], "score": None, "id": "23"}],
+        "fav": 0, "strength": 13.5, "final": False}])
+    monkeypatch.setattr(RU, "game_rows", lambda sport, ts, d, engine=None: [
+        {"player": "Star One", "pid": 1, "team": teams[0], "games": 8, "min": 34.0, "usg": 31.0, "pts": 25.0, "reb": 5.0, "ast": 6.0},
+        {"player": "Deep Guy", "pid": 2, "team": teams[0], "games": 4, "min": 6.0, "usg": 18.0, "pts": 2.0, "reb": 1.0, "ast": 0.5},
+        {"player": "Big Two", "pid": 3, "team": teams[1], "games": 8, "min": 18.0, "usg": 19.0, "pts": 9.0, "reb": 9.0, "ast": 1.0},
+        {"player": "Two Way", "pid": 4, "team": teams[1], "games": 0, "min": None, "usg": None, "pts": None, "reb": None, "ast": None}])
+    at = AppTest.from_file(str(Path(__file__).parent / "views" / "50_Game_Script.py"), default_timeout=30)
+    at.session_state["sport"] = "NBA"
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    props, roster = at.dataframe[0].value, at.dataframe[1].value
+    assert {"Min", "Usage %"} <= set(props.columns) and len(roster) == 4
+    assert set(roster["Role"]) == {"starter", "deep", "bench", "did not play"}
+    at.session_state["gs_cond"] = "fav_blowout"
+    at.run()
+    roster = at.dataframe[1].value
+    assert "Pts vs avg" in roster.columns
+    star = roster[roster["Player"] == "Star One"].iloc[0]
+    assert star["Pts vs avg"] > 0                                # the favorite's starter in his team's blowout
+    at.multiselect(key="gs_f_market").set_value(["Rebounds"]).run()
+    assert list(at.dataframe[0].value["Player"]) == ["Big Two"]
+    at.multiselect(key="gs_f_market").set_value([]).run()
+    at.multiselect(key="gs_f_group").set_value(["starter"]).run()
+    assert list(at.dataframe[0].value["Player"]) == ["Star One"]
