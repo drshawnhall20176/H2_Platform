@@ -11,6 +11,8 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 
+import components as C
+
 import intl_hoops as I
 import intl_picks as IP
 import model_store as MS
@@ -109,13 +111,14 @@ def render(league: str, search: bool = False) -> None:
     now = datetime.now(timezone.utc).isoformat()
     done = [p for p in picks if p.get("result")]
     title = I.LEAGUES[league]["title"]
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns([1, 1, 2])
     day = c1.date_input("Slate date", _today_et(), key=f"hg_date_{league}")
     on_day = [p for p in picks if _et(p) is not None and _et(p).date() == day]
     slots = sorted({sports.slot_of(_et(p)) for p in on_day}, key=lambda x: sports.SLOT_ORDER.get(x, 9))
     slot = c2.selectbox("Time slot", ["All slate"] + slots, key=f"hg_slot_{league}")
     if slot != "All slate":
         on_day = [p for p in on_day if sports.slot_of(_et(p)) == slot]
+    on_day = C.game_select(on_day, key=f"hg_game_{league}", container=c3)       # Nov 7: Game filter, tip order
     upcoming = [p for p in on_day if str(p.get("kickoff")) > now and p.get("result") is None]
     finished = [p for p in on_day if p not in upcoming]
     if search and on_day:
@@ -144,7 +147,7 @@ def render(league: str, search: bool = False) -> None:
             "Est. cover": "—" if p.get("cover_est") is None else f"{p['cover_est']:.0%}",
             "Total: model / line": f"{p.get('model_total')} / {p.get('line_total') or '—'}",
             "Win chance: model / market": f"{p['model_p']:.0%} / " + ("—" if p.get("fair_home") is None else f"{p['fair_home']:.0%}"),
-            "Tracking pick": _pick(p)} for p in sorted(upcoming, key=lambda x: (-(abs(x.get("edge") or 0)), x["kickoff"]))]),
+            "Tracking pick": _pick(p)} for p in C.by_kickoff(upcoming)]),          # Nov 7: earliest tip first
             hide_index=True, width="stretch")
         what = []
         if rules.get("spread") is not None:
@@ -164,7 +167,7 @@ def render(league: str, search: bool = False) -> None:
             "Line (close)": f"{p['home']} {(-(p.get('close_line') if p.get('close_line') is not None else p.get('line') or 0)):+g}",
             "Use": _use(p, league), "Model likes": _likes(p),
             "Final": "—" if p.get("final_home") is None else f"{p['away']} {p['final_away']:g} – {p['home']} {p['final_home']:g}",
-            "Model's side": _ats(p), "Tracking pick": _pick(p)} for p in sorted(finished, key=lambda x: x["kickoff"])]),
+            "Model's side": _ats(p), "Tracking pick": _pick(p)} for p in C.by_kickoff(finished)]),
             hide_index=True, width="stretch")
     if upcoming:
         log_panel(league, upcoming)
@@ -296,8 +299,9 @@ def render_fair(league: str) -> None:
     slot = c2.selectbox("Time slot", ["All slate"] + slots, key=f"hg_slot_{league}")
     if slot != "All slate":
         on_day = [p for p in on_day if sports.slot_of(_et(p)) == slot]
-    upcoming = sorted([p for p in on_day if str(p.get("kickoff")) > now and p.get("result") is None], key=lambda x: x["kickoff"])
-    finished = sorted([p for p in on_day if p not in upcoming], key=lambda x: x["kickoff"])
+    on_day = C.game_select(on_day, key=f"hg_game_{league}")                     # Nov 7: Game filter, tip order
+    upcoming = C.by_kickoff([p for p in on_day if str(p.get("kickoff")) > now and p.get("result") is None])
+    finished = C.by_kickoff([p for p in on_day if p not in upcoming])
     if league in getattr(I, "GENIUS_COMPS", {}):
         try:
             stored = len(MS.load_results(league))

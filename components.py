@@ -664,3 +664,60 @@ def side_filter(rows, key: str, label: str = "Side") -> str:
 
 def side_ok(row, pick: str) -> bool:
     return pick == "All Sides" or row.get("Side") == pick
+
+
+# --------------------------------------------------------------------------- shared game filter (Nov 7)
+def _kick_dt(value):
+    """A kickoff (ISO string / datetime) as an Eastern datetime, or None."""
+    import pandas as _pd
+    try:
+        if value is None or value == "":
+            return None
+        ts = _pd.to_datetime(value)
+        if _pd.isna(ts):
+            return None
+        if ts.tzinfo is None:
+            ts = ts.tz_localize("UTC")
+        return ts.tz_convert("America/New_York").to_pydatetime()
+    except Exception:                                           # noqa: BLE001
+        return None
+
+
+def by_kickoff(items, when=lambda x: x.get("kickoff")):
+    """Items sorted earliest kickoff first (no known time last)."""
+    import datetime as _d
+    far = _d.datetime.max.replace(tzinfo=_d.timezone.utc)
+    return sorted(items or [], key=lambda x: _kick_dt(when(x)) or far)
+
+
+def game_select(items, key: str, when=lambda x: x.get("kickoff"),
+                label=lambda x: f"{x.get('away')} @ {x.get('home')}", container=None, title: str = "Game"):
+    """Nov 7: the Game filter every game page shares -- games in kickoff order, each shown with its start time
+    ("Sat 7:30 PM — Away @ Home"), 'All games' by default. Returns the items for the picked game (all when none)."""
+    import streamlit as _st
+    where = container or _st
+    order, first = [], {}
+    for it in by_kickoff(items, when):
+        g = label(it)
+        if g not in first:
+            first[g] = _kick_dt(when(it))
+            order.append(g)
+    fmt = lambda g: g if g == "All games" or first.get(g) is None else \
+        f"{first[g].strftime('%a %-I:%M %p')} — {g}"           # noqa: E731
+    pick = where.selectbox(title, ["All games"] + order, format_func=fmt, key=key)
+    return list(items) if pick == "All games" else [it for it in items if label(it) == pick]
+
+
+def date_slot_select(items, key: str, when=lambda x: x.get("kickoff"), container=None):
+    """Nov 7: Date + Time slot for pages that list several days at once (the dates present, earliest first)."""
+    import streamlit as _st
+    import sports as _S
+    where = container or _st
+    cols = where.columns(2)
+    days = sorted({d.date() for d in (_kick_dt(when(it)) for it in items) if d is not None})
+    dpick = cols[0].selectbox("Date", ["All dates"] + days, key=f"{key}_date",
+                              format_func=lambda d: d if d == "All dates" else d.strftime("%a %b %-d"))
+    out = [it for it in items if dpick == "All dates" or ((_kick_dt(when(it)) or None) and _kick_dt(when(it)).date() == dpick)]
+    slots = sorted({_S.slot_of(_kick_dt(when(it))) for it in out}, key=lambda x: _S.SLOT_ORDER.get(x, 9))
+    spick = cols[1].selectbox("Time slot", ["All slate"] + slots, key=f"{key}_slot")
+    return out if spick == "All slate" else [it for it in out if _S.slot_of(_kick_dt(when(it))) == spick]

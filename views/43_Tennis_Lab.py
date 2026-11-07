@@ -77,6 +77,8 @@ if ev_pick:
 q = g2.text_input("Find a player", key="tl_find").strip().lower()
 if q:
     rows = [p for p in rows if q in T.norm(f"{p['home']} {p['away']}")]
+rows = C.game_select(rows, key="tl_match", title="Match",                       # Nov 7: Match filter, start order
+                     label=lambda p: f"{p.get('away')} vs {p.get('home')}")
 st.caption("DraftKings files tennis by tour and city (\"WTA Cali 125\", \"ATP Paris\"), while the data feeds use sponsor "
            "names (\"Reto Win Tennis Cali Open\"), so each event here leads with DK's tour + city. DK's ATP Challenger, "
            "ITF and UTR events aren't in either feed, so they don't appear here.")
