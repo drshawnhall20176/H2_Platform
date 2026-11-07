@@ -194,6 +194,7 @@ TOTAL_SD = {"NCAAMB": 17.0, "NBA": 18.0, "NHL": 2.3, "NCAAF": 16.0, "INTL": 16.0
 UNTESTED_SHRINK = 0.5
 UNTESTED_MAX = 0.60             # a big untested disagreement is more often the model's error than the market's
 STD_PRICE = -110
+NCAAMB_TOTAL_BACKTEST = {"Under": 0.453, "Over": 0.508}
 ML_PRICE_RANGE = (-250, 250)
 
 
@@ -247,6 +248,12 @@ def best_line(p: Dict, lg: str, home_p: float) -> Dict:
     if leans:
         z, label, detail = max(leans)
         out.update(best=label, lean_detail=detail, lean_z=z)
+        # Nov 6 (research/backtest_ncaamb_totals.py, 2 seasons, 5,214 games, walk-forward): NCAAMB total leans 3+ points
+        # off the line -- Unders hit 45.3% (558; 44.0% in November), Overs 50.8% (1,625). Shown as the lean's backtest so
+        # the model's college Unders are never mistaken for an edge.
+        if lg == "NCAAMB" and label.split()[0] in ("Over", "Under") and lt is not None and mt is not None \
+                and abs(float(mt) - float(lt)) >= 3:
+            out.update(backtest=NCAAMB_TOTAL_BACKTEST[label.split()[0]])
     # Where a backtest measured how often spreads with this much disagreement covered (cover_est: NCAAMB and the
     # international models), that rate is the honest strength of the spread lean -- and it shows the model's biggest
     # disagreements (lopsided games) are coin flips (~51%), so they rank last, not first.
