@@ -106,15 +106,16 @@ for r in C.by_kickoff(rows, when=_kick):
 game = st.selectbox("Game", list(first), key="gs_game",
                     format_func=lambda g: g if first.get(g) is None else f"{first[g].strftime('%a %-I:%M %p')} — {g}")
 gp = [r for r in rows if r.get("game") == game]
-teams = sorted({t for r in gp for t in (r.get("team"), r.get("opp")) if t})
-if not teams and " @ " in game:
-    teams = [t.strip() for t in game.split(" @ ")]
+teams = SE.game_teams(gp, game)
 try:
     lines = _lines(SPORT, DAY)
     g_espn = SE.game_for(teams, lines)
-    strength, fav, dog = SE.line_for(teams, lines)
 except Exception:                                               # noqa: BLE001
-    g_espn, strength, fav, dog = None, None, None, None
+    g_espn = None
+strength = g_espn["strength"] if g_espn else None
+fav = g_espn["teams"][g_espn["fav"]]["display"] if g_espn else None
+dog = g_espn["teams"][1 - g_espn["fav"]]["display"] if g_espn else None
+FAV_NAMES = SE.fav_names(g_espn)
 sh = SE.shares(strength, SPORT)
 LAB = SE.labels(SPORT)
 D = SE.DATA[SPORT]
@@ -158,7 +159,7 @@ if cond != "model":
 prepared = []
 for r in gp:
     grp = SE.group(SPORT, r["market"], r.get("mins"))
-    is_fav = bool(fav) and SE.team_matches(r.get("team"), {SE.norm(fav)})
+    is_fav = bool(FAV_NAMES) and SE.team_matches(r.get("team"), FAV_NAMES)
     by = SE.over_by_script(r["p_over"], grp if fav else None, is_fav, sh, SPORT)
     p_now = r["p_over"] if cond == "model" else by[cond]
     u = SE.script_use(r, p_now, SPORT) if cond != "model" else {
