@@ -443,7 +443,7 @@ def refresh(sport: str) -> Optional[Dict]:
     fit = learned(sport)
     if fit and fit.get("effects") and fit.get("shares"):
         d = DATA.setdefault(sport, {})
-        for k in ("shares", "effects", "base", "n", "trust", "conditional", "games", "lined", "close", "blow"):
+        for k in ("shares", "effects", "base", "n", "trust", "conditional", "games", "lined", "close", "blow", "minutes"):
             if fit.get(k) is not None:
                 d[k] = fit[k]
         d["fit_at"] = fit.get("fit_at")
@@ -490,3 +490,17 @@ def scenario_call(sport: str, teams: Sequence[str], day: str, all_calls: Optiona
         if hit >= 2 or (hit == 1 and len(want) == 1):
             return k
     return None
+
+
+
+def minutes_by_script(sport: str, avg_min: Optional[float], is_fav: bool, sh: Dict[str, float]) -> Dict[str, float]:
+    """{script: projected minutes} for one player: his average plus his role's measured minutes change in that kind
+    of game (script_data.minutes_effects), centered so the mix over how likely each script is equals his average.
+    Empty when minutes aren't measured for the sport or he has no role."""
+    rl = role(avg_min, sport)
+    eff = ((DATA.get(sport) or {}).get("minutes") or {}).get(rl or "")
+    if avg_min is None or not eff:
+        return {}
+    raw = {s: float(eff.get(_state(s, is_fav), 0.0)) for s in SCRIPTS}
+    centre = sum(sh[s] * raw[s] for s in SCRIPTS)
+    return {s: max(0.0, avg_min + raw[s] - centre) for s in SCRIPTS}

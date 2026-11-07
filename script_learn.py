@@ -223,6 +223,7 @@ def learn(sport: str, cache: Dict) -> Dict:
     elif src == "matchup":
         model = M.fit([r["x"] for r in rows], [r["y"] for r in rows], l2=MATCHUP_L2)
     return {"close": c["close"], "blow": c["blow"], "shares": shares, "effects": eff, "base": base, "n": ns,
+            "minutes": D.minutes_effects(c, games),
             "trust": trust, "conditional": cond, "games": len(games),
             "lined": sum(1 for _, p in games if p.get("strength") is not None),
             "scenario": {"model": model, "source": src, "eval": ev, "adopted": src != "table", "rows": len(rows)},

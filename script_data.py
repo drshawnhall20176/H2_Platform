@@ -24,6 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
 import requests
+from typing import Dict
 
 H = {"User-Agent": "Mozilla/5.0"}
 def _y():
@@ -245,6 +246,37 @@ def build_rows(c, games):
                                          "is_fav": None if p["fav"] is None else tm == p["fav"], "strength": p["strength"], "gi": gi})
             h.append({k: v for k, v in st.items() if isinstance(v, (int, float))})
     return rows
+
+
+def minutes_effects(c, games) -> Dict:
+    """Nov 7 (basketball): how many minutes above or below his own recent average a player plays, by role and by how
+    his team's game went -- the clearest roster effect of a blowout (losing starters sit, the winners' bench plays).
+    {role: {state: average minutes change, "n": games}}; roles by average minutes as in groups()."""
+    if c["kind"] != "hoops":
+        return {}
+    hist = defaultdict(list)
+    acc = defaultdict(lambda: defaultdict(list))
+    for d, p in games:
+        sc = {t: v["score"] for t, v in p["teams"].items()}
+        for pid, st in p["players"].items():
+            m = st.get("minutes")
+            if m is None:
+                continue
+            h = hist[pid]
+            if len(h) >= c["min_games"]:
+                base = statistics.mean(h[-15:])
+                role = ("starter" if base >= c["starter"] else "bench" if base >= c["bench"] else
+                        "deep" if base >= DEEP_MIN else None)
+                tm = st.get("team")
+                opp = next((t for t in sc if t != tm), None)
+                if role and opp is not None:
+                    acc[role][state(sc[tm] - sc[opp], c)].append(m - base)
+            h.append(m)
+    out = {}
+    for role, by in acc.items():
+        out[role] = {s: round(statistics.mean(v), 2) for s, v in by.items() if v}
+        out[role]["n"] = sum(len(v) for v in by.values())
+    return out
 
 
 def shares_of(c, games):
