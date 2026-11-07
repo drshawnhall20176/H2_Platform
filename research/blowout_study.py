@@ -62,7 +62,12 @@ def package(gid):
     for c in comp.get("competitors") or []:
         teams[str(c.get("id"))] = {"home": c.get("homeAway") == "home", "score": _f(c.get("score"))}
     spread = None
-    for pc in gp.get("pickcenter") or []:
+    pcs = gp.get("pickcenter") or []
+    if not pcs:                                     # the CDN package carries no odds: ESPN's game summary does
+        summ = N._get_json_cached("https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary",
+                                  params={"event": gid}) or {}
+        pcs = summ.get("pickcenter") or []
+    for pc in pcs:
         if pc.get("spread") is not None:
             spread = _f(pc["spread"])               # home team's spread (negative = home favored)
             break
