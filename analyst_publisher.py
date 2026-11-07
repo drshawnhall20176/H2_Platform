@@ -74,7 +74,9 @@ def default_deps() -> Dict[str, Callable]:
         "fetch_offers": fetch_offers,
         "game_env": lambda sport_key, d, meta, key: AC.load_game_env(sport_key, d, meta, key, sports.get(sport_key).odds_sport_key),
         "matchups": lambda sport_key, d: AC.load_matchups(sport_key, d, sports.get(sport_key).engine, sports.get(sport_key).projections),
-        "history_fn": line_history.line_series,
+        # Nov 7: the capture job stores the odds market key and a lowercase side
+        "history_fn": lambda sport_key, player, market, side: line_history.line_series(
+            sport_key, player, sports.get(sport_key).market_map.get(market, market), None if side is None else str(side).lower()),
         "results": lambda sport_key, d: sports.get(sport_key).engine.get_player_results(d),
     }
 

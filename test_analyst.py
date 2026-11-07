@@ -779,3 +779,23 @@ def test_the_game_read_explains_why_the_top_play_is_on_its_side_and_the_ai_gets_
     assert "why_this_side" in A.LLM_SYSTEM and "lean_note" in A.LLM_SYSTEM
     nothing = A.write_commentary(_calls(["Under"], reasoning=[]), sport_label="NFL", date_str="d", n_games=1)
     assert "Why under" not in nothing["games"][0]["text"]
+
+
+def test_history_lookup_matches_capture_storage():
+    """Nov 7: line_snapshots rows carry the odds market key and a lowercase side; the Desk asks with display names."""
+    import analyst as A
+    idx = {("Jalen Brunson", "player_points"): [
+        {"side": "over", "line": 26.5, "price": -110, "book": "draftkings", "captured_at": "2026-11-07T12:00:00"},
+        {"side": "under", "line": 26.5, "price": -110, "book": "draftkings", "captured_at": "2026-11-07T12:00:00"},
+        {"side": "over", "line": 26.5, "price": -135, "book": "draftkings", "captured_at": "2026-11-07T18:00:00"}]}
+    fn = A.history_lookup(idx, {"Points": "player_points"})
+    rows = fn("NBA", "Jalen Brunson", "Points", "Over")
+    assert len(rows) == 2 and rows[-1]["price"] == -135
+    p = {"Player": "Jalen Brunson", "Market": "Points", "Side": "Over", "Line": 26.5}
+    assert A.line_move_toward(p, {"history_fn": fn, "book": "draftkings"}) > 0.05
+
+
+def test_angles_for_sport():
+    import analyst as A
+    assert "regression_due" not in A.angles_for("NBA") and "regression_due" in A.angles_for("MLB")
+    assert len(A.angles_for("NBA")) == len(A.ANGLES) - 1

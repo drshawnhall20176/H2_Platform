@@ -1203,3 +1203,33 @@ def llm_commentary(facts: Dict, api_key: str, model: Optional[str] = None,
     if not text:
         raise RuntimeError("the Anthropic API returned no text")
     return text
+
+
+# ---------------------------------------------------------------------------
+# Nov 7: line-history lookup that matches how capture_line_snapshots.py stores rows
+# ---------------------------------------------------------------------------
+# The capture job stores the odds feed's market key ("player_points") and a lowercase side ("over"); the Desk asked for
+# "Points" / "Over", so the line-move angle never found a row on any sport.
+def history_lookup(index: Dict[Tuple[str, str], List[Dict]], market_map: Dict[str, str]):
+    """A history_fn over line_history.sport_index() rows, matched on the normalized player name, the market under
+    either name, and the side in either case."""
+    by: Dict[Tuple[str, str], List[Dict]] = {}
+    for (player, market), rows in (index or {}).items():
+        by.setdefault((_norm(player), market), []).extend(rows)
+
+    def fn(_sport, player, market, side):
+        rows = []
+        for mk in {market, (market_map or {}).get(market)} - {None}:
+            rows += by.get((_norm(player), mk), [])
+        if side is not None:
+            rows = [r for r in rows if str(r.get("side") or "").lower() == str(side).lower()]
+        return sorted(rows, key=lambda r: str(r.get("ts") or r.get("captured_at") or ""))
+    return fn
+
+
+# Angles that can only fire for some sports (the rest read data every sport has).
+ANGLE_SPORTS: Dict[str, Tuple[str, ...]] = {"regression_due": ("MLB",)}
+
+
+def angles_for(sport_key: str) -> List[str]:
+    return [k for k in ANGLES if sport_key in ANGLE_SPORTS.get(k, (sport_key,))]

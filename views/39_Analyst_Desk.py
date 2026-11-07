@@ -156,11 +156,11 @@ def _cached_matchups(sport_key: str, d: str):
 
 ev1, ev2 = st.columns(2)
 with ev1:
-    use_script = st.checkbox("Add game-script evidence (spread & total)", value=False, key="analyst_script",
+    use_script = st.checkbox("Add game-script evidence (spread & total)", value=True, key="analyst_script",
                              help="Adds the point spread and game total as a separate kind of evidence. Reads one odds request per game "
                                   "(extra Odds API credits); cached for 15 minutes.")
 with ev2:
-    use_matchup = st.checkbox("Add opponent-matchup evidence", value=False, key="analyst_matchup",
+    use_matchup = st.checkbox("Add opponent-matchup evidence", value=True, key="analyst_matchup",
                               help="Adds what each opponent has allowed at the stat, from the Hot Hand Engine's own numbers. Reads every "
                                    "opponent's recent games, so the first load can take a minute or more; cached for 15 minutes.")
 game_env: dict = {}
@@ -200,14 +200,13 @@ except Exception:                                      # noqa: BLE001 — line m
     _line_idx = {}
 
 
-def _line_rows(sport_key, player, market, side):
-    return [r for r in _line_idx.get((player, market), []) if side is None or r.get("side") == side]
+_line_rows = A.history_lookup(_line_idx, _active.market_map)   # Nov 7: stored by odds market key + lowercase side
 
 
 calls = A.scan(plays, _active.key, date_str, offers=offers, odds_map=_active.market_map,
                history_fn=_line_rows, weights=weights, expect_book_lines=bool(offers),
                times=times, with_day=_with_day, book=preferred_book, game_env=game_env, matchups=matchups,
-               calibrator=_scan_curve, cold=_cold)
+               calibrator=_scan_curve, cold=_cold, history_limit=len(plays))   # the index is in memory: check every play
 lines_posted = bool(offers)
 # Only calls the selected book really posts, at the model's own line, are ever suggested or locked -- and never a
 # market + side the record has shown to be cold.
@@ -466,8 +465,28 @@ with tab_all:
         if not sug_calls and not lines_posted:
             st.info(f"{book_name} has no player props posted for these games yet, so nothing is suggested. "
                     f"Tick the box below to see the model's plays anyway — their lines are placeholders, not bettable.")
-        pick = st.multiselect("Angles", [v[0] for v in A.ANGLES.values()], default=[], key="analyst_angle_pick",
-                              help="Leave empty to show every angle.")
+        # Nov 7: only the angles this sport can have, each with how many of these plays it backs
+        _here = A.angles_for(_active.key)
+        _n_by = {k: sum(1 for c in view_calls if k in A.angle_names(c)) for k in _here}
+        _lab = {A.ANGLES[k][0]: k for k in _here}
+        pick = st.multiselect("Angles", list(_lab), default=[], key="analyst_angle_pick",
+                              format_func=lambda l: f"{l} ({_n_by[_lab[l]]})",
+                              help="Leave empty to show every angle. The number is how many of these plays it backs.")
+        _quiet = [k for k in _here if not _n_by[k]]
+        if _quiet:
+            _why = {"game_script": "tick 'Add game-script evidence' above" if not use_script else "no game's spread or total "
+                                   "is extreme enough today",
+                    "matchup": "tick 'Add opponent-matchup evidence' above" if not use_matchup else "no opponent is far "
+                               "enough from the slate's typical defense on these plays",
+                    "line_move": "no line has moved 3+ points toward a play's side since the capture job first saw it",
+                    "soft_book": "no book is paying 3+ points more than the median of 3+ books",
+                    "market_line": "other books and pick'em apps agree with this book's lines",
+                    "team_surge": "no team on these plays is scoring 8%+ above or below its own norm",
+                    "form_run": "no play has cleared its line in 80%+ of the last 5–8 games",
+                    "role_surge": "no player's last 3 games run 25%+ off his earlier baseline in the play's direction",
+                    "market_gap": "the model isn't 5+ points above the book's price on any play"}
+            st.caption("Quiet today: " + "; ".join(f"**{A.ANGLES[k][0]}** — {_why.get(k, 'nothing qualifies')}"
+                                                     for k in _quiet) + ".")
         show_chalk = st.checkbox("Include the day's chalk (top 10% of conviction)", value=True, key="analyst_chalk")
         show_off = st.checkbox(f"Also show plays {book_name} doesn't offer at the model's line ({len(off_calls)})",
                                value=False, key="analyst_show_off", disabled=not off_calls)
@@ -477,7 +496,8 @@ with tab_all:
         st.write(f"{len(rows)} of {len(pool)} plays" + ("" if show_off else f" — only lines {book_name} posts"))
         st.dataframe(_call_rows(rows), width="stretch", hide_index=True, column_config=_COLS_CFG)
         with st.expander("What each angle means"):
-            for k, (label, desc) in A.ANGLES.items():
+            for k in A.angles_for(_active.key):
+                label, desc = A.ANGLES[k]
                 st.markdown(f"- **{label}** — {desc}")
 
 # --- Locked calls & share ----------------------------------------------------------
