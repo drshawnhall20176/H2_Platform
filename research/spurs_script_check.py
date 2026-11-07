@@ -58,6 +58,6 @@ for game in games:
             tally[(u["use"], resu)] += 1
             out.append((u["use"], r["player"], "FAV" if is_fav else "dog", r.get("team"), grp, r["mins"], r["market"], r["line"], u["side"], round(u["chance"], 3),
                         None if u.get("ev") is None else round(u["ev"], 3), a, resu, (r.get("over_price"), r.get("under_price"))))
-        for o in sorted(out, key=lambda o: (o[0] == PE.USE_PASS, -o[8])):
+        for o in sorted(out, key=lambda o: (o[0] == PE.USE_PASS, -o[9])):
             print("  ", o)
         print("  TALLY", dict(tally))
