@@ -206,6 +206,8 @@ def parse_event(ev: Dict, sport: str, odds: Optional[Dict] = None) -> Optional[D
     for c in comp.get("competitors") or []:
         t = c.get("team") or {}
         names = {norm(t.get(k)) for k in ("displayName", "shortDisplayName", "location", "abbreviation", "name")}
+        if t.get("id") is not None:
+            names.add(norm(str(t["id"])))                       # kickoff snapshots store ESPN team ids
         names.add(norm(f"{t.get('location', '')} {t.get('name', '')}"))
         teams.append({"names": {n for n in names if n}, "home": c.get("homeAway") == "home",
                       "display": t.get("displayName") or t.get("location") or "", "score": _num(c.get("score"))})
@@ -289,6 +291,8 @@ def team_matches(team: Optional[str], names: set) -> bool:
         return False
     if t in names:
         return True
+    if t.isdigit():                                             # an ESPN id matches exactly or not at all
+        return False
     return any(n and len(n) > 3 and (t.startswith(n + " ") or n.startswith(t + " ")) for n in names)
 
 
@@ -396,3 +400,16 @@ def script_use(row: Dict, p_over: float, sport: str) -> Dict:
     if price is None and tag == PE.USE_PASS:
         why = f"no price posted for the {side} — " + why
     return {"side": side, "chance": p, "ev": ev, "use": tag, "why": why, "price": price}
+
+
+def game_teams(rows: Sequence[Dict], game: str) -> List[str]:
+    """Everything that can identify this game's two teams: the rows' team / opponent (names or ESPN ids) and the
+    two halves of the game label ("Away @ Home")."""
+    out = {t for r in rows for t in (r.get("team"), r.get("opp")) if t}
+    if " @ " in (game or ""):
+        out |= {t.strip() for t in game.split(" @ ")}
+    return sorted(out)
+
+
+def fav_names(g: Optional[Dict]) -> set:
+    return set(g["teams"][g["fav"]]["names"]) if g else set()
