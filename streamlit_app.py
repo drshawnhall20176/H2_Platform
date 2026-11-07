@@ -137,6 +137,7 @@ def run():
         "45": ("NCAAMB",),                               # Game Lab (college basketball) -- game lines
         "46": ("NBA",),                                  # Game Lab (NBA)
         "47": ("NHL",),                                  # Game Lab (NHL)
+        "50": ("NBA",),                                  # Game Script (NBA: the study is NBA), Nov 7
         "41": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL", "UFC"),                    # Postgame Review -- kickoff snapshots graded vs box scores
         "38": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL"),  # Position Matchups -- depth chart vs the opposing
                                                           # defense by position + team head-to-head.
@@ -165,7 +166,7 @@ def run():
                          "Matchup Lab", "Track Record", "Data Health",
                          "Suggested Parlays", "Speculative Basket", "Graded Picks",
                          "Model Dashboard", "First Innings Totals", "Player Lines", "Slip Lab",
-                         "Postgame Review", "Progression Plan", "Reports", "Model Performance", "Tennis Lab", "International Hoops",
+                         "Postgame Review", "Progression Plan", "Reports", "Model Performance", "Game Script", "Tennis Lab", "International Hoops",
                          "Position Matchups"}
 
     # leading page-number -> (title, icon, stable url slug). The url_path is the key fix: it pins
@@ -230,6 +231,7 @@ def run():
         "47": ("Game Lab", "🏟️", "nhl_game_lab"),      # NHL puck lines/totals/ML
         "48": ("Reports", "📑", "reports"),             # P&L statements for any period + CSV / PDF (Nov 6)
         "49": ("Model Performance", "📊", "model_performance"),   # Investor Relations: the edge evidence (Nov 6)
+        "50": ("Game Script", "🎬", "game_script"),     # NBA: props under each kind of game + script tickets (Nov 7)
     }
 
     # SIDEBAR SECTIONS, added directly on request: st.navigation natively supports a
@@ -255,7 +257,7 @@ def run():
     SECTION_OF = {}
     for k in ("0", "28"):
         SECTION_OF[k] = "🏠 START HERE"
-    for k in ("1", "2", "3", "4", "37", "23", "24", "39"):
+    for k in ("1", "2", "3", "4", "37", "23", "24", "39", "50"):
         SECTION_OF[k] = "🎯 RECOMMENDATIONS"
     for k in ("5", "6"):
         SECTION_OF[k] = "🛰️ LIVE SIGNALS"
