@@ -70,6 +70,7 @@ def _eastern_date_str(iso_utc: Optional[str]) -> Optional[str]:
 UFC_MARKETS = [
     "h2h",
     "totals",
+    "spreads",          # Nov 7: confirmed live (DraftKings et al.): the point spread, e.g. -3.5 / +3.5
     # fighter_wins_by_ko_tko / fighter_wins_by_submission / fighter_wins_by_decision
     # DELIBERATELY excluded -- see this module's own docstring for the confirmed reasoning
     # (real INVALID_MARKET error, not an assumption).
@@ -79,6 +80,7 @@ UFC_MARKETS = [
 UFC_MARKET_LABELS = {
     "h2h":                       "Moneyline",
     "totals":                    "Fight Duration",
+    "spreads":                   "Point Spread",
     "fighter_wins_by_ko_tko":    "Win by KO/TKO",
     "fighter_wins_by_submission":"Win by Submission",
     "fighter_wins_by_decision":  "Win by Decision",
@@ -167,6 +169,8 @@ def parse_bout_odds(event_data: Dict, preferred_book: str = "draftkings") -> Dic
                 for o in outcomes
                 if o.get("name") and o.get("price") is not None
             }
+            if key == "spreads":                              # Nov 7: each fighter's spread point
+                result["_spread_points"] = {o.get("name", ""): o.get("point") for o in outcomes if o.get("name")}
 
     return result
 
@@ -268,16 +272,49 @@ def card_from_odds(data: List[Dict], date_str: Optional[str] = None) -> List[Dic
         pa = statistics.median(fair) if fair else None
         best_a = max((p["a"] for p in prices.values()), default=None, key=lambda v: v)
         best_b = max((p["b"] for p in prices.values()), default=None, key=lambda v: v)
+        lines = {}
+        for bk in e.get("bookmakers") or []:                    # every book's spread and total (rounds)
+            for m in bk.get("markets") or []:
+                if m.get("key") == "spreads":
+                    lines.setdefault(bk.get("key"), {})["spread"] = {o.get("name"): (o.get("point"), o.get("price"))
+                                                                     for o in m.get("outcomes") or []}
+                elif m.get("key") == "totals":
+                    lines.setdefault(bk.get("key"), {})["total"] = {o.get("name"): (o.get("point"), o.get("price"))
+                                                                    for o in m.get("outcomes") or []}
         out.append({"id": e.get("id"), "commence": e.get("commence_time"), "a": a, "b": b, "p_a": pa,
-                    "best_a": best_a, "best_b": best_b, "books": len(prices), "prices": prices})
+                    "best_a": best_a, "best_b": best_b, "books": len(prices), "prices": prices, "lines": lines,
+                    "book_keys": sorted({bk.get("key") for bk in e.get("bookmakers") or []})})
     out.sort(key=lambda r: r.get("commence") or "")
+    return out
+
+
+def book_lines(bout: Dict, book: str = "draftkings") -> Dict[str, str]:
+    """{"spread", "total", "ml"} display strings at `book` (falls back to the first book that has each)."""
+    def first(kind):
+        ln = (bout.get("lines") or {})
+        if book in ln and kind in ln[book]:
+            return ln[book][kind]
+        return next((v[kind] for v in ln.values() if kind in v), None)
+    out = {"spread": "", "total": "", "ml": ""}
+    sp = first("spread")
+    if sp:
+        parts = [f"{n.split()[-1]} {pt:+g} ({pr:+.0f})" for n, (pt, pr) in sp.items() if pt is not None and pr is not None]
+        out["spread"] = " / ".join(parts)
+    tt = first("total")
+    if tt:
+        o, u = tt.get("Over"), tt.get("Under")
+        if o and u and o[0] is not None:
+            out["total"] = f"O/U {o[0]:g} ({o[1]:+.0f} / {u[1]:+.0f})"
+    pr = (bout.get("prices") or {}).get(book) or next(iter((bout.get("prices") or {}).values()), None)
+    if pr:
+        out["ml"] = f"{bout['a'].split()[-1]} {pr['a']:+.0f} / {bout['b'].split()[-1]} {pr['b']:+.0f}"
     return out
 
 
 def get_card(api_key: str, date_str: Optional[str] = None) -> List[Dict]:
     """Every MMA bout on `date_str` (Eastern) with moneylines from every US book -- ONE odds request for the whole
     card (the per-bout fetch below the overview costs one request per bout). Raises OddsAPIError on a real failure."""
-    data, _ = _get(f"sports/{UFC_SPORT}/odds", {"apiKey": api_key, "regions": "us", "markets": "h2h",
+    data, _ = _get(f"sports/{UFC_SPORT}/odds", {"apiKey": api_key, "regions": "us", "markets": "h2h,spreads,totals",
                                                "oddsFormat": "american"})
     return card_from_odds(data, date_str)
 
@@ -288,10 +325,30 @@ def card_dates(api_key: str) -> List[str]:
     return sorted({d for d in (_eastern_date_str(e.get("commence_time")) for e in data or []) if d})
 
 
-MAIN_CARD_MIN_BOOKS = 5     # bouts most US books price: the UFC (and other major) cards; regional shows get 1-3
+# Nov 7 (revised): "5+ books" hid a UFC prelim (Parsons vs Henrique, priced by DraftKings and two others). A bout is on a
+# main card when a major US sportsbook prices it; regional shows are priced only by offshore books.
+MAJOR_BOOKS = {"draftkings", "fanduel", "betmgm", "williamhill_us", "espnbet", "fanatics", "betrivers", "hardrockbet"}
+MAIN_CARD_MIN_BOOKS = 0     # kept for callers; the rule is MAJOR_BOOKS now
 
 
 def main_card_only(card: List[Dict]) -> List[Dict]:
-    """The bouts most books price. The odds feed lists every MMA promotion it prices (regional shows too, usually at
-    one book); a UFC card is priced across the board. A heuristic, said so on the pages."""
-    return [b for b in card if (b.get("books") or 0) >= MAIN_CARD_MIN_BOOKS]
+    """Bouts a major US sportsbook prices, with stale duplicates dropped: when a fighter is listed in two bouts the same
+    day (an opponent change the feed hasn't cleared), keep the bout DraftKings prices, else the one more books price."""
+    keep = [b for b in card if set(b.get("book_keys") or b.get("prices") or {}) & MAJOR_BOOKS]
+    return dedupe(keep)
+
+
+def dedupe(card: List[Dict]) -> List[Dict]:
+    def rank(b):
+        return ("draftkings" in (b.get("book_keys") or b.get("prices") or {}), b.get("books") or 0)
+    best: Dict[str, Dict] = {}
+    for b in card:
+        for f in (b["a"], b["b"]):
+            if f not in best or rank(b) > rank(best[f]):
+                best[f] = b
+    winners = {id(b) for b in best.values()}
+    out = []
+    for b in card:
+        if id(b) in winners and best.get(b["a"]) is b and best.get(b["b"]) is b:
+            out.append(b)
+    return out

@@ -264,13 +264,15 @@ if _owner:
                                    "Market chance": r["chance"],
                                    "Best price (fav)": "—" if r["fav_price"] is None else f"{float(r['fav_price']):+.0f}",
                                    "Best price (dog)": "—" if r["dog_price"] is None else f"{float(r['dog_price']):+.0f}",
+                                   "Spread (DK)": r.get("spread") or "", "Total rounds (DK)": r.get("total") or "",
                                    "Books": r["books"]} for r in _u])
             st.dataframe(_udf, hide_index=True, width="stretch",
                          column_config={"Market chance": st.column_config.NumberColumn(
                              format="percent", help="The books' no-vig chance for the favorite.")})
-            st.caption(f"{len(_u)} bouts on the main card (priced by most books), earliest first. **Market chance** is "
-                       "the books' read with the vig removed — there's no UFC model yet, so these aren't picks. Smaller "
-                       "promotions' bouts are on **UFC Fight Card** (switch off 'Main cards only').")
+            st.caption(f"{len(_u)} bouts (priced by a major US sportsbook), earliest first. **Market chance** is the books' "
+                       "read with the vig removed — there's no UFC model yet, so these aren't picks. Spread and total "
+                       "rounds are DraftKings' lines. Method of victory, KO-only and round props aren't in the odds feed. "
+                       "Smaller promotions' bouts are on **UFC Fight Card** (switch off 'Main cards only').")
         else:
             st.caption("No MMA bouts listed for this date" + (" (completed bouts drop out of the odds feed)." if _past
                                                               else "."))
