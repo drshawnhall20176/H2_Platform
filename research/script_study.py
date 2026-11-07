@@ -174,6 +174,13 @@ def groups(c):
             ("saves", lambda b: b.get("_g") is not None and (b.get("timeOnIce") or 0) >= 40, "saves")]
 
 
+def season_of(c, d):
+    for i, (a, b) in enumerate(c["seasons"]):
+        if a.isoformat() <= d <= (b + timedelta(days=2)).isoformat():
+            return str(i)
+    return "x"
+
+
 def state(margin_for_team, c):
     m = abs(margin_for_team)
     if m <= c["close"]:
@@ -220,7 +227,7 @@ def build_rows(c, games):
                     mg = sc[tm] - sc[opp]
                     for name, ok, key in gs:
                         if ok(base) and base.get(key) is not None and st.get(key) is not None:
-                            rows.append({"g": name, "state": state(mg, c), "beat": st[key] > base[key], "season": d[:4] if d[5:7] >= "07" else str(int(d[:4]) - 1),
+                            rows.append({"g": name, "state": state(mg, c), "beat": st[key] > base[key], "season": season_of(c, d),
                                          "is_fav": None if p["fav"] is None else tm == p["fav"], "strength": p["strength"], "gi": gi})
             h.append({k: v for k, v in st.items() if isinstance(v, (int, float))})
     return rows
@@ -273,22 +280,27 @@ def predicted_shift(eff_g, sh, is_fav):
 
 
 def heldout(c, games, rows):
-    seasons = sorted({r["season"] for r in rows})
+    """Fit on one season, test on the other. Within the test season, compare each player-game's PRE-GAME predicted
+    shift with how he actually did relative to his group's test-season rate. slope = sum(shift*lift)/sum(shift^2):
+    1 = the effects carry over in full, 0 = noise. Reported per sport and per group."""
+    seasons = sorted({r["season"] for r in rows} - {"x"})
     print(f"## held-out (seasons {seasons})")
     if len(seasons) < 2:
         print("  one season only: no held-out test")
         return {}
-    gi_season = {}
-    for r in rows:
-        gi_season[r["gi"]] = r["season"]
-    total = defaultdict(lambda: [0, 0])
+    gi_season = {r["gi"]: r["season"] for r in rows}
+    buckets = defaultdict(lambda: [0, 0.0, 0.0])
+    sxy, sxx = defaultdict(float), defaultdict(float)
     for test in seasons:
         train_rows = [r for r in rows if r["season"] != test]
-        train_games = [g for i, g in enumerate(games) if gi_season.get(i, "") != test]
-        eff, base, _ = effects_of(train_rows)
-        shares = shares_of(c, train_games)
-        shmap = {(lo, hi): (f, cl, dg) for lo, hi, f, cl, dg, n in shares}
-        # average effect over fav/dog so a pure 'any game' shift cancels
+        train_games = [g for i, g in enumerate(games) if gi_season.get(i) not in (test, None)]
+        eff, _, _ = effects_of(train_rows)
+        shmap = {(lo, hi): (f, cl, dg) for lo, hi, f, cl, dg, n in shares_of(c, train_games)}
+        tb = defaultdict(list)
+        for r in rows:
+            if r["season"] == test:
+                tb[r["g"]].append(r["beat"])
+        tbase = {g: sum(v) / len(v) for g, v in tb.items()}
         for r in rows:
             if r["season"] != test or r["is_fav"] is None or r["strength"] is None or r["g"] not in eff:
                 continue
@@ -297,20 +309,26 @@ def heldout(c, games, rows):
                 continue
             e = predicted_shift(eff[r["g"]], sh, r["is_fav"])
             centre = 0.5 * (predicted_shift(eff[r["g"]], sh, True) + predicted_shift(eff[r["g"]], sh, False))
-            shift = e - centre
-            pred = base[r["g"]] + shift
-            lab = "up 2%+" if shift >= 0.02 else "down 2%+" if shift <= -0.02 else "up 1-2%" if shift >= 0.01 else "down 1-2%" if shift <= -0.01 else "flat"
-            total[lab][0] += 1
-            total[lab][1] += r["beat"]
-            total[(lab, "pred")] = total.get((lab, "pred"), 0) + pred
-            total[(lab, "base")] = total.get((lab, "base"), 0) + base[r["g"]]
-    out = {}
+            x = e - centre
+            y = r["beat"] - tbase[r["g"]]
+            for key in ("ALL", r["g"]):
+                sxy[key] += x * y
+                sxx[key] += x * x
+            lab = "up 2%+" if x >= 0.02 else "down 2%+" if x <= -0.02 else "up 1-2%" if x >= 0.01 else "down 1-2%" if x <= -0.01 else "flat"
+            b = buckets[lab]
+            b[0] += 1
+            b[1] += x
+            b[2] += y
+    out = {"buckets": {}, "slope": {}}
     for lab in ("up 2%+", "up 1-2%", "flat", "down 1-2%", "down 2%+"):
-        n, w = total[lab]
+        n, sx, sy = buckets[lab]
         if n:
-            pr, bs = total[(lab, "pred")] / n, total[(lab, "base")] / n
-            print(f"  predicted {lab:9s} n={n:6d} actual beat {w / n:.3f}  predicted {pr:.3f}  group base {bs:.3f}  lift {w / n - bs:+.3f}")
-            out[lab] = {"n": n, "actual": round(w / n, 3), "pred": round(pr, 3), "base": round(bs, 3)}
+            print(f"  predicted {lab:9s} n={n:6d} predicted shift {sx / n:+.3f}  actual vs group rate {sy / n:+.3f}")
+            out["buckets"][lab] = {"n": n, "pred": round(sx / n, 4), "actual": round(sy / n, 4)}
+    for key in sorted(sxx):
+        if sxx[key] > 0:
+            out["slope"][key] = round(sxy[key] / sxx[key], 3)
+            print(f"  SLOPE {key:18s} {sxy[key] / sxx[key]:+.2f}")
     return out
 
 
