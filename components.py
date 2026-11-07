@@ -80,6 +80,8 @@ def hero_banner(icon: str, title: str, subtitle: str) -> None:
       </div>
     </div>
     """, unsafe_allow_html=True)
+    if needs_load_notice(title):
+        load_notice()
 
 
 def pipeline_chips(steps: List[str]) -> None:
@@ -123,6 +125,32 @@ def wrapped_tab_picker(items: List[tuple], key: str, default_index: int = 0):
     return values[selected_label]
 
 
+# Nov 7: pages that read live data (sportsbook odds, box scores, every opponent's recent games) can take a while on the
+# first load of the day; after that most of it is cached for 5-15 minutes. Said once, the same way, on each of them.
+LIVE_DATA_PAGES = {
+    "Analyst Desk", "Anytime TD Engine", "Best Bets", "Bullpen Watch", "Edge Board", "First Innings Totals", "Game Lab",
+    "Game Script", "Game Watch", "Graded Picks", "H2 Sports — Dinger Engine", "Hot Hand Engine", "International Hoops",
+    "Matchup Lab", "NCAAF Anytime TD Engine", "NCAAF Game Lab", "NCAAF Hot Hand Engine", "NCAAF Matchup Lab",
+    "NCAAF Player Lines", "NCAAF QB Lab", "NFL Game Lab", "NFL Player Lines", "Pitching Lab", "Player Lines",
+    "Postgame Review", "QB Lab", "Slip Lab", "Speculative Basket", "Suggested Parlays", "Tennis Lab", "UFC Fight Card",
+    "Model Dashboard", "Retrospective", "Position Matchups", "Command Center", "League Schedules",
+}
+LOAD_NOTICE = ("⏳ Load times vary: this page pulls live odds and game data. The first load of the day can take up to "
+               "a minute or two; after that it's quicker (most data is reused for 5–15 minutes). If it's still "
+               "running, give it a moment before refreshing.")
+
+
+def needs_load_notice(title: str) -> bool:
+    t = (title or "").strip()
+    return any(t == p or t.startswith(p + " ") or t.startswith("H2 Sports — " + p) for p in LIVE_DATA_PAGES) \
+        or t.startswith("H2 Sports — The Sports Trading Desk")
+
+
+def load_notice() -> None:
+    """The shared load-time disclaimer (one line, muted)."""
+    st.caption(LOAD_NOTICE)
+
+
 def page_header(icon: str, title: str, subtitle: str) -> None:
     """Lighter-weight page header for ordinary sub-pages -- replaces a plain st.title()+
     st.caption() pair with a consistent icon-badge treatment. Deliberately NOT the full
@@ -139,6 +167,8 @@ def page_header(icon: str, title: str, subtitle: str) -> None:
       </div>
     </div>
     """, unsafe_allow_html=True)
+    if needs_load_notice(title):
+        load_notice()
 
 
 def base_css() -> None:
