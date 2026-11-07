@@ -174,3 +174,45 @@ def test_ncaamb_total_lean_shows_its_backtest(monkeypatch):
     p = {"home": "A", "away": "B", "home_spread": -2.5, "model_margin": 2.0, "line_total": 160.5, "model_total": 151.8}
     b = TB.best_line(p, "NCAAMB", 0.6)
     assert b["best"] == "Under 160.5" and b["backtest"] == 0.453 and b["best_value"] is None
+
+
+def test_log_selection_singles_parlay_and_dedupe(monkeypatch):
+    import betlog as B
+    import todays_best as TB
+    added, tickets = [], []
+    monkeypatch.setattr(B, "list_bets", lambda **kw: [{"slate_date": "2026-11-07", "player": "A", "market": "Points",
+                                                       "side": "Under", "line": 20.5}])
+    monkeypatch.setattr(B, "add_bet", lambda db_path=None, **f: added.append(f) or len(added))
+    monkeypatch.setattr(B, "log_parlay_ticket", lambda name, legs, odds, stake, d, **kw: tickets.append((name, legs, odds, stake)) or {"header_id": 99})
+    items = [{"sport": "NBA", "pick": "A Points Under 20.5", "player": "A", "pid": 1, "market": "Points", "side": "Under",
+              "line": 20.5, "price": -112, "chance": 0.54, "game": "X @ Y"},
+             {"sport": "NBA", "pick": "B Points Over 17.5", "player": "B", "pid": 2, "market": "Points", "side": "Over",
+              "line": 17.5, "price": -104, "chance": 0.52, "game": "X @ Y"},
+             {"sport": "NCAAMB", "pick": "Under 154.5", "price": -105, "bet_market": "Total", "bet_side": "under",
+              "bet_line": 154.5, "best_tested": False,
+              "_rec": {"sport": "NCAAMB", "home": "Marquette", "away": "Detroit", "game_id": "g1", "kickoff": "2026-11-07T01:00:00Z"}}]
+    done = TB.log_selection(items, "Both", 4, 3, TB.parlay_odds([-112, -104, -105]), True, "platform-test", "2026-11-07")
+    assert done["skipped"] == 1 and len(done["singles"]) == 2 and done["ticket"] == 99
+    gl = [a for a in added if a["market"] == "Total"][0]
+    assert gl["notes"] == "platform-test,gl:NCAAMB:g1" and gl["side"] == "Under" and gl["line"] == 154.5
+    name, legs, odds, stake = tickets[0]
+    assert len(legs) == 3 and stake == 3 and 590 < odds < 640
+
+
+def test_home_log_button(monkeypatch):
+    from pathlib import Path
+    from streamlit.testing.v1 import AppTest
+    import todays_best as TB
+    rows = [{"sport": "NBA", "pick": "A Points Under 20.5", "game": "A @ B", "price": -120, "chance": 0.62,
+             "use": PE.USE_PARLAY, "lock": True, "page": "Best Bets", "time": "7:00 PM", "player": "A", "market": "Points",
+             "side": "Under", "line": 20.5}]
+    calls = []
+    monkeypatch.setattr(TB, "collect", lambda d, sp: {"rows": rows, "props": {"NBA": "2026-11-06T15:00:00+00:00"}})
+    monkeypatch.setattr(TB, "winner_rows", lambda d, leagues=None: [])
+    monkeypatch.setattr(TB, "log_selection", lambda *a, **k: calls.append(a) or {"singles": [7], "ticket": None, "skipped": 0})
+    at = AppTest.from_file(str(Path(__file__).parent / "Home.py"), default_timeout=30)
+    at.session_state["sport"] = "NBA"
+    at.run()
+    at.multiselect(key="home_log_pick").set_value([at.multiselect(key="home_log_pick").options[0]]).run()
+    at.button(key="home_log_go").click().run()
+    assert calls and calls[0][1] == "Singles" and any("1 single(s) logged" in s.value for s in at.success)

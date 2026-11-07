@@ -13,7 +13,7 @@ locks first, then by tag, then by chance.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 import props_engine as PE
 
@@ -59,7 +59,10 @@ def props_rows(sport: str, plays) -> List[Dict]:
         out.append({"sport": sport, "kind": "Prop", "time": p.get("Time") or "",
                     "pick": f"{p.get('Player')} {p.get('Market')} {p.get('Side')}" + ("" if line is None else f" {line:g}"),
                     "game": p.get("Game") or "", "price": p.get("RealPrice"), "book": p.get("RealPriceBook") or "",
-                    "chance": p.get("ModelProb"), "use": p.get("Use") or "", "lock": lock, "page": "Best Bets"})
+                    "chance": p.get("ModelProb"), "use": p.get("Use") or "", "lock": lock, "page": "Best Bets",
+                    # Nov 7: what the Home panel needs to log the pick
+                    "player": p.get("Player"), "pid": p.get("PlayerId"), "market": p.get("Market"), "side": p.get("Side"),
+                    "line": line})
     out.sort(key=_order)
     return out[:TOP_PER_SPORT]
 
@@ -230,6 +233,12 @@ def best_line(p: Dict, lg: str, home_p: float) -> Dict:
                 hs = p.get("home_spread")
                 label = (f"{p['home']} {hs:+g}" if home else f"{p['away']} {-hs:+g}") if hs is not None else "—"
             d = _dec(price)
+            if p.get("ml_pick"):
+                out.update(bet_market="Moneyline", bet_side="home" if home else "away", bet_line=None, bet_price=price)
+            else:
+                out.update(bet_market="Spread", bet_side="home" if home else "away",
+                           bet_line=(float(p["home_spread"]) if home else -float(p["home_spread"]))
+                           if p.get("home_spread") is not None else None, bet_price=price)
             out.update(best=label, best_chance=ch, best_price=price, best_tested=True,
                        best_value=(ch * d - 1) if (ch is not None and d) else None, use=t.get("use"))
             return out
@@ -248,6 +257,13 @@ def best_line(p: Dict, lg: str, home_p: float) -> Dict:
     if leans:
         z, label, detail = max(leans)
         out.update(best=label, lean_detail=detail, lean_z=z)
+        if label.split()[0] in ("Over", "Under"):
+            out.update(bet_market="Total", bet_side=label.split()[0].lower(), bet_line=float(lt),
+                       bet_price=p.get("over_price") if label.startswith("Over") else p.get("under_price"))
+        else:
+            home = (float(mm) + float(hs)) >= 0
+            out.update(bet_market="Spread", bet_side="home" if home else "away",
+                       bet_line=float(hs) if home else -float(hs), bet_price=p.get("spread_price"))
         # Nov 6 (research/backtest_ncaamb_totals.py, 2 seasons, 5,214 games, walk-forward): NCAAMB total leans 3+ points
         # off the line -- Unders hit 45.3% (558; 44.0% in November), Overs 50.8% (1,625). Shown as the lean's backtest so
         # the model's college Unders are never mistaken for an edge.
@@ -259,6 +275,8 @@ def best_line(p: Dict, lg: str, home_p: float) -> Dict:
     # disagreements (lopsided games) are coin flips (~51%), so they rank last, not first.
     if p.get("cover_est") is not None and p.get("edge") is not None and hs is not None:
         home = p["edge"] >= 0
+        out.update(bet_market="Spread", bet_side="home" if home else "away",
+                   bet_line=float(hs) if home else -float(hs), bet_price=p.get("spread_price"))
         out.update(best=(f"{p['home']} {float(hs):+g}" if home else f"{p['away']} {-float(hs):+g}"),
                    lean_detail=f"model {(p['home'] if home else p['away'])} {(-float(mm) if home else float(mm)):+.1f}"
                    if mm is not None else out.get("lean_detail", ""),
@@ -303,7 +321,9 @@ def winner_rows(date_str: str, leagues=None) -> List[Dict]:
                         "game": f"{p.get('away')} {'vs' if lg == 'TENNIS' else '@'} {p.get('home')}",
                         "winner": team, "chance": chance, "book": book, "price": price,
                         "price_book": p.get("best_home_book") if home else p.get("best_away_book"),
-                        "value": value, "use": ml_tag, **best})
+                        "value": value, "use": ml_tag, **best,
+                        "_rec": {"sport": lg, "home": p.get("home"), "away": p.get("away"), "game_id": p.get("game_id"),
+                                 "kickoff": p.get("kickoff")}})
     out.sort(key=lambda r: -r["chance"])
     return out
 
@@ -336,3 +356,66 @@ def winner_record(leagues=None) -> Dict[str, Dict]:
                     a["bands"][(lo, hi)][0] += 1
                     a["bands"][(lo, hi)][1] += won
     return {k: v for k, v in acc.items() if v["n"]}
+
+
+# --------------------------------------------------------------------------- logging from Home (Nov 7)
+def bet_rows(items: Sequence[Dict], stake: float, real: bool, tag: str, date_str: str) -> List[Dict]:
+    """Bet Log rows for picked Today's-best items (props rows and game-line rows), each at its own (edited) price."""
+    import betlog as B
+    import intl_picks as IP
+    out = []
+    for it in items:
+        price = it.get("price")
+        if price is None:
+            continue
+        if it.get("_rec"):
+            f = IP.bet_fields(it["_rec"], it["bet_market"], it["bet_side"], it.get("bet_line"), float(price), stake, real,
+                              it.get("best_chance") if it.get("best_tested") else None)
+            f["notes"] = ",".join(x for x in (tag, f.get("notes")) if x)
+            out.append(f)
+            continue
+        out.append({"slate_date": date_str, "sport": it["sport"], "game": it.get("game"), "player": it.get("player"),
+                    "player_id": it.get("pid"), "market": it.get("market"), "side": it.get("side"),
+                    "line": None if it.get("line") is None else float(it["line"]), "entry_odds": float(price),
+                    "entry_odds_source": "book", "model_prob": it.get("chance"), "stake": float(stake),
+                    "book": it.get("book") or "draftkings", "is_real_bet": bool(real),
+                    "category": B.default_category(it["sport"], from_model=True), "notes": tag or None})
+    return out
+
+
+def parlay_odds(prices: Sequence[float]) -> Optional[int]:
+    dec = 1.0
+    for pr in prices:
+        d = _dec(pr)
+        if d is None:
+            return None
+        dec *= d
+    return int(round((dec - 1) * 100)) if dec >= 2 else int(round(-100 / (dec - 1)))
+
+
+def log_selection(items: Sequence[Dict], mode: str, stake: float, parlay_stake: float, parlay_price: Optional[int],
+                  real: bool, tag: str, date_str: str, ticket: str = "") -> Dict:
+    """Write picked items to the Bet Log: mode "Singles", "Parlay" or "Both". Skips singles already logged today
+    (same player, market, side, line). Returns {"singles": [ids], "ticket": header id or None, "skipped": n}."""
+    import betlog as B
+    rows = bet_rows(items, stake, real, tag, date_str)
+    done = {"singles": [], "ticket": None, "skipped": 0}
+    if mode in ("Singles", "Both"):
+        have = {(b.get("player"), b.get("market"), b.get("side"), b.get("line"))
+                for b in B.list_bets() if str(b.get("slate_date")) == date_str and not B._ticket(b)}
+        for r in rows:
+            k = (r.get("player"), r.get("market"), r.get("side"), r.get("line"))
+            if k in have:
+                done["skipped"] += 1
+                continue
+            done["singles"].append(B.add_bet(**r))
+    if mode in ("Parlay", "Both") and len(rows) >= 2 and parlay_price is not None:
+        legs = [{"player": r["player"], "market": r["market"], "side": r["side"], "line": r["line"], "game": r.get("game"),
+                 "model_prob": r.get("model_prob"), "price": r.get("entry_odds")} for r in rows]
+        sports = {r["sport"] for r in rows}
+        name = ticket or f"{'/'.join(sorted(sports))} {len(rows)}-leg {date_str}"
+        res = B.log_parlay_ticket(name, legs, int(parlay_price), float(parlay_stake), date_str,
+                                  sport=next(iter(sports)) if len(sports) == 1 else "MULTI", book="draftkings",
+                                  notes=tag or None)
+        done["ticket"] = res.get("header_id")
+    return done

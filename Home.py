@@ -209,6 +209,54 @@ if _owner:
                      "NFL and UFC aren't covered yet.")
     else:
         st.caption("No games with a model chance today" + ("" if _scope == "All sports" else " for this sport") + ".")
+    # ---- Log picks straight to the Bet Log (Nov 7): props and game lines from the lists above, singles / parlay / both
+    with st.expander("📝 Log picks to the Bet Log"):
+        _cands = {}
+        for r in _rows:
+            _cands[f"{r['sport']} · {r.get('time') or ''} · {r['pick']}"] = dict(r)
+        for r in _w:
+            if r.get("bet_market") and r.get("best"):
+                _cands[f"{r['sport']} · {r.get('time') or ''} · {r['best']} ({'tested' if r.get('best_tested') else 'lean'})"] = \
+                    dict(r, price=r.get("bet_price"), pick=r["best"])
+        _sel = st.multiselect("Picks (from the lists above, with their filters)", list(_cands), key="home_log_pick")
+        if _sel:
+            _ed = _pd.DataFrame([{"Pick": k, "Price": (None if _cands[k].get("price") is None
+                                                        else float(_cands[k]["price"]))} for k in _sel])
+            _ed = st.data_editor(_ed, hide_index=True, width="stretch", key="home_log_prices", disabled=["Pick"],
+                                 column_config={"Price": st.column_config.NumberColumn(
+                                     "Price you got", help="American odds from your slip; edit if it moved",
+                                     format="%+d")})
+            _prices = {row["Pick"]: row["Price"] for row in _ed.to_dict("records")}
+            _items = [dict(_cands[k], price=_prices.get(k)) for k in _sel]
+            _l1, _l2, _l3 = st.columns(3)
+            _mode = _l1.radio("Log as", ["Singles", "Parlay", "Both"], horizontal=True, key="home_log_mode")
+            _stake = _l2.number_input("Stake per single ($)", min_value=0.0, value=4.0, step=1.0, key="home_log_stake")
+            _real = _l3.checkbox("Real money", value=True, key="home_log_real")
+            _p1, _p2, _p3 = st.columns(3)
+            _calc = _TB.parlay_odds([x["price"] for x in _items if x.get("price") is not None]) \
+                if all(x.get("price") is not None for x in _items) and len(_items) >= 2 else None
+            _pstake = _p1.number_input("Parlay stake ($)", min_value=0.0, value=4.0, step=1.0, key="home_log_pstake",
+                                       disabled=_mode == "Singles")
+            _podds = _p2.number_input("Parlay odds (from your slip)", value=int(_calc or 100), step=5, key="home_log_podds",
+                                      disabled=_mode == "Singles",
+                                      help="Pre-filled with the legs' prices multiplied; same-game parlays usually pay less")
+            _tag = _p3.text_input("Strategy tag", value="platform-test", key="home_log_tag")
+            _missing = [x["pick"] for x in _items if x.get("price") is None]
+            if _missing:
+                st.caption("Add a price for: " + "; ".join(_missing) + " — picks without one aren't logged.")
+            if st.button("📝 Log to Bet Log", type="primary", key="home_log_go"):
+                try:
+                    _done = _TB.log_selection(_items, _mode, _stake, _pstake, int(_podds), _real, _tag.strip(), _today)
+                    _msg = []
+                    if _done["singles"]:
+                        _msg.append(f"{len(_done['singles'])} single(s) logged")
+                    if _done["ticket"]:
+                        _msg.append(f"parlay logged (#{_done['ticket']})")
+                    if _done["skipped"]:
+                        _msg.append(f"{_done['skipped']} already in today's log, skipped")
+                    st.success("; ".join(_msg) or "Nothing logged.")
+                except Exception as _exc:                       # noqa: BLE001
+                    st.error(f"Couldn't log: {type(_exc).__name__}: {_exc}")
     st.divider()
 
 # ---------- Today's Schedule ----------
