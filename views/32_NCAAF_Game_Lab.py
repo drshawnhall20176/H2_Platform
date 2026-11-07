@@ -84,6 +84,9 @@ with st.expander("📐 Ratings model v2 — college spreads (tracking)", expande
                   help="Closing-line value: the market moving toward a pick after it was made is the best early sign "
                        "of a real edge.")
         m3.metric("Upcoming games", len(_up))
+        if _up:                                                 # Nov 7: Date / Time slot / Game, earliest first
+            _up = C.date_slot_select(_up, key="ncaaf_v2")
+            _up = C.game_select(_up, key="ncaaf_v2_game")
         if _up:
             _rows = [{"Kickoff (ET)": datetime.fromisoformat(p["kickoff"]).astimezone(pytz.timezone("US/Eastern")).strftime("%a %-I:%M %p"),
                       "Game": f"{p['away']} @ {p['home']}" + (" (neutral)" if p.get("neutral") else ""),
@@ -92,7 +95,7 @@ with st.expander("📐 Ratings model v2 — college spreads (tracking)", expande
                       "Gap": f"{abs(p.get('close_edge', p['edge'])):.1f}",
                       "Pick": ("⚠️ held: " if p.get("held") else "") + (p.get("pick_label") or "—"),
                       "News check": " · ".join(p.get("flags") or []) or "—"}
-                     for p in sorted(_up, key=lambda p: -abs(p.get("close_edge", p["edge"])))]
+                     for p in C.by_kickoff(_up)]
             st.dataframe(pd.DataFrame(_rows), hide_index=True, width="stretch")
         _h = GP.summary(_gp, held=True)
         if _h["graded"]:
@@ -166,8 +169,16 @@ if not meta:
 meta = C.scope_meta("NCAAF", "NCAAF", meta, date_str, key="gl_scope")
 # Sort by real game time, not alphabetically -- same established pattern as Matchup Lab
 meta_sorted = sorted(meta, key=lambda m: m.get("game_date") or "~")
+# Nov 7: Time slot + start times in the Game list, like Best Bets
+_slots = sorted({sports.slot_of(game_dt(m.get("game_date"))) for m in meta_sorted}, key=lambda x: sports.SLOT_ORDER.get(x, 9))
+_gs1, _gs2 = st.columns([1, 2])
+_slot = _gs1.selectbox("Time slot", ["All slate"] + _slots, key="gl_slot")
+if _slot != "All slate":
+    meta_sorted = [m for m in meta_sorted if sports.slot_of(game_dt(m.get("game_date"))) == _slot] or meta_sorted
 game_options = {f"{m['away_name']} @ {m['home_name']}": m for m in meta_sorted}
-game_label = st.selectbox("Game", list(game_options.keys()))
+_when = {k: game_dt(m.get("game_date")) for k, m in game_options.items()}
+game_label = _gs2.selectbox("Game", list(game_options.keys()),
+                            format_func=lambda g: g if _when.get(g) is None else f"{_when[g].strftime('%a %-I:%M %p')} — {g}")
 selected = game_options[game_label]
 home_name = selected["home_name"]
 away_name = selected["away_name"]
