@@ -14,7 +14,8 @@ D = "2026-11-06"
 snaps = MS.load_snapshots("NBA", [D])
 print("snapshots", len(snaps), Counter(s["game"] for s in snaps).most_common(12))
 rows = [r for r in (SE.from_snapshot(s) for s in snaps) if r]
-games = sorted({r["game"] for r in rows if "Spurs" in str(r.get("team")) or "Spurs" in str(r.get("opp")) or "SA" in str(r["game"])})
+games = sorted({r["game"] for r in rows if "Spurs" in str(r["game"])})
+print("team values", sorted({(r.get("team"), r.get("opp")) for r in rows if r["game"] in games}))
 print("spurs games", games)
 lines = SE.fetch_lines("NBA", ["20261106", "20261107"])
 print("lines", len(lines))
