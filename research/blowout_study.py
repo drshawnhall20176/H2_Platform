@@ -164,6 +164,31 @@ def main() -> int:
             gg = [r for r in g if f(r)]
             if gg:
                 print(f"  {s} {role:12s} n={len(gg):4d} points {statistics.mean(r['dpts'] for r in gg):+5.1f}  beat avg {sum(r['beat'] for r in gg) / len(gg):.1%}")
+    # Nov 7: the numbers the Game Script page uses (script_effects.py)
+    print("## 4. Scenario shares by spread (favorite = by the pre-game spread)")
+    for lo, hi in ((0, 3.5), (3.5, 6.5), (6.5, 9.5), (9.5, 12.5), (12.5, 99)):
+        g = []
+        for d, p in games:
+            if p["spread"] is None or not (lo <= abs(p["spread"]) < hi) or p["spread"] == 0:
+                continue
+            home = next(t for t, v in p["teams"].items() if v["home"])
+            away = next(t for t in p["teams"] if t != home)
+            fav = home if p["spread"] < 0 else away
+            dog = away if fav == home else home
+            fm = (p["teams"][fav]["score"] or 0) - (p["teams"][dog]["score"] or 0)
+            g.append(fm)
+        if g:
+            n = len(g)
+            print(f"SHARE {lo}-{hi} n={n} fav15={sum(1 for m in g if m >= 15) / n:.3f} close6={sum(1 for m in g if abs(m) <= 6) / n:.3f} "
+                  f"dog15={sum(1 for m in g if m <= -15) / n:.3f}")
+    print("## 5. Beat-own-average by role, team result and final margin")
+    for role, f in (("starter", lambda r: r["starter"]), ("bench", lambda r: not r["starter"] and r["base_min"] >= 12)):
+        allr = [r for r in rows if f(r)]
+        print(f"BASE {role} n={len(allr)} beat={sum(r['beat'] for r in allr) / len(allr):.3f} dpts={statistics.mean(r['dpts'] for r in allr):+.2f}")
+        for lab, cond in (("close", lambda r: r["margin"] <= 6), ("mid", lambda r: 6 < r["margin"] < 15),
+                          ("blow_win", lambda r: r["margin"] >= 15 and r["won"]), ("blow_lose", lambda r: r["margin"] >= 15 and not r["won"])):
+            g = [r for r in allr if cond(r)]
+            print(f"EFF {role} {lab} n={len(g)} beat={sum(r['beat'] for r in g) / len(g):.3f} dpts={statistics.mean(r['dpts'] for r in g):+.2f} dmin={statistics.mean(r['dmin'] for r in g):+.2f}")
     print("```")
     return 0
 
