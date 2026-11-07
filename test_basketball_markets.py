@@ -54,12 +54,13 @@ def test_box_stats_use_the_real_confirmed_live_nba_line_michael_porter_jr():
     # The Nets @ Clippers line pasted back during the NBA build: 22 MIN, 9 PTS, 0-4 3PT, 2 REB, 4 AST, 1 TO, 0 STL, 0 BLK.
     names = ["MIN", "PTS", "FG", "3PT", "FT", "REB", "AST", "TO", "STL", "BLK", "OREB", "DREB", "PF", "+/-"]
     stats = ["22", "9", "3-11", "0-4", "3-3", "2", "4", "1", "0", "0", "0", "2", "2", "-25"]
-    assert BM.player_stats_from_box(names, stats) == {"stl": 0.0, "blk": 0.0, "tov": 1.0, "fg3a": 4.0}
+    assert BM.player_stats_from_box(names, stats) == {"stl": 0.0, "blk": 0.0, "tov": 1.0, "fg3a": 4.0,
+                                                     "fga": 11.0, "fta": 3.0}       # Nov 7: FGA / FTA for usage %
     # and the real UConn/Duke Elite Eight line (Tarris Reed Jr.): 2 STL, 4 BLK, 2 TO, 0-0 from three
     n2 = ["MIN", "PTS", "FG", "3PT", "FT", "REB", "AST", "TO", "STL", "BLK", "OREB", "DREB", "PF"]
     s2 = ["32", "26", "10-16", "0-0", "6-9", "9", "3", "2", "2", "4", "4", "5", "3"]
     out = BM.player_stats_from_box(n2, s2)
-    assert out == {"stl": 2.0, "blk": 4.0, "tov": 2.0, "fg3a": 0.0}
+    assert out == {"stl": 2.0, "blk": 4.0, "tov": 2.0, "fg3a": 0.0, "fga": 16.0, "fta": 9.0}
 
 
 def test_a_feed_that_omits_a_stat_leaves_the_key_out_rather_than_writing_a_zero():

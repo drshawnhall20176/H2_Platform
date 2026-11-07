@@ -190,6 +190,25 @@ if cond != "model":
                "the line): the side the script favors, its chance, the edge at that side's price, and the Use tag from "
                "the platform's own rules on those numbers. A tag here is conditional — it's only as good as the call.")
 
+# ---------------------------------------------------------------- the whole roster, minutes and usage (basketball)
+@st.cache_data(ttl=3600, show_spinner="Reading both rosters (minutes and usage)…")
+def _roster(sport, d, teams_key):
+    import roster_usage as RU
+    return RU.game_rows(sport, [{"id": i, "name": n} for i, n in teams_key], d)
+
+
+roster = []
+if SE.FAMILY[SPORT] == "hoops" and g_espn and all(t.get("id") for t in g_espn["teams"]):
+    try:
+        roster = _roster(SPORT, DAY, tuple((str(t["id"]), t["display"]) for t in g_espn["teams"]))
+    except Exception:                                           # noqa: BLE001
+        roster = []
+R_BY = {PE.norm_name(x["player"] or ""): x for x in roster}
+for r in gp:                                                    # the roster's minutes place props players too
+    rr = R_BY.get(PE.norm_name(r.get("player") or ""))
+    if rr and rr.get("min") is not None and r.get("mins") is None:
+        r["mins"] = rr["min"]
+
 prepared = []
 for r in gp:
     grp = SE.group(SPORT, r["market"], r.get("mins"))
@@ -206,12 +225,25 @@ for r in gp:
         res = "push" if act == thr else ("win" if (act > thr) == (u["side"] == "Over") else "loss")
     prepared.append({"r": r, "grp": grp, "is_fav": is_fav, "by": by, "u": u, "actual": act, "result": res})
 
+g1, g2, g3 = st.columns(3)
+_groups = sorted({SE.role_label(x["grp"]) for x in prepared})
+_markets = sorted({x["r"]["market"] for x in prepared})
+_teams = sorted({_nick(x["r"].get("team")) for x in prepared if x["r"].get("team")})
+pick_groups = g1.multiselect("Group", _groups, key="gs_f_group", placeholder="All groups")
+pick_markets = g2.multiselect("Market", _markets, key="gs_f_market", placeholder="All markets")
+pick_teams = g3.multiselect("Team", _teams, key="gs_f_team", placeholder="Both teams")
 f1, f2 = st.columns(2)
 only_play = f1.toggle("Only playable under this condition", value=False, key="gs_only_play")
 only_changed = f2.toggle("Only props whose read changes", value=False, key="gs_only_changed", disabled=cond == "model")
 PLAY = {PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE}
 show = []
 for x in prepared:
+    if pick_groups and SE.role_label(x["grp"]) not in pick_groups:
+        continue
+    if pick_markets and x["r"]["market"] not in pick_markets:
+        continue
+    if pick_teams and _nick(x["r"].get("team")) not in pick_teams:
+        continue
     if only_play and x["u"]["use"] not in PLAY:
         continue
     if only_changed and cond != "model" and x["u"]["use"] == (x["r"].get("use") or "") and x["u"]["side"] == x["r"]["side"]:
@@ -223,6 +255,8 @@ if show:
     df = pd.DataFrame([{
         "Player": x["r"]["player"], "Team": _nick(x["r"].get("team")) + (" (fav)" if x["is_fav"] else ""),
         "Group": SE.role_label(x["grp"]) + ("" if SE.trust(SPORT, x["grp"]) > 0 and fav else " · no shift"),
+        "Min": (R_BY.get(PE.norm_name(x["r"]["player"] or "")) or {}).get("min") or x["r"].get("mins"),
+        "Usage %": (R_BY.get(PE.norm_name(x["r"]["player"] or "")) or {}).get("usg"),
         "Market": x["r"]["market"], "Line": x["r"]["line"],
         "Board": f"{x['r']['side']} {(x['r']['p_over'] if x['r']['side'] == 'Over' else 1 - x['r']['p_over']):.0%} · "
                  f"{x['r'].get('use') or '—'}",
@@ -235,9 +269,12 @@ if show:
         df = df.drop(columns=["Board", "Edge", "Why"])
     if not PAST:
         df = df.drop(columns=["Actual", "Result"])
+    df = df.drop(columns=[c for c in ("Min", "Usage %") if c in df and not df[c].notna().any()])
     st.dataframe(df, hide_index=True, width="stretch",
                  column_config={"Chance": st.column_config.NumberColumn(format="percent"),
-                                "Edge": st.column_config.NumberColumn(format="percent")})
+                                "Edge": st.column_config.NumberColumn(format="percent"),
+                                "Min": st.column_config.NumberColumn(format="%.1f"),
+                                "Usage %": st.column_config.NumberColumn(format="%.1f%%")})
     if PAST:
         gr = [x for x in show if x["result"] in ("win", "loss")]
         pl = [x for x in gr if x["u"]["use"] in PLAY]
@@ -252,6 +289,49 @@ st.caption("**Board** = the board's own read and tag before the game. **no shift
            "hold up (or isn't measured, or there's no line for the game), so it reads the same under every condition — "
            "its tag can still change when the side's price differs. Blowout-risk warnings are dropped under a script "
            "(the script is the blowout call); news warnings stay.")
+
+# ---------------------------------------------------------------- every rostered player under this condition
+if roster:
+    st.markdown("##### Full roster" + ("" if cond == "model" else f" — if it goes '{SE.short(SPORT, cond)}'"))
+    have = {}
+    for x in prepared:
+        have[PE.norm_name(x["r"]["player"] or "")] = have.get(PE.norm_name(x["r"]["player"] or ""), 0) + 1
+    rr_rows = []
+    for x in roster:
+        team_is_fav = bool(FAV_NAMES) and SE.team_matches(x["team"], FAV_NAMES)
+        rl = SE.role(x["min"], SPORT)
+        row = {"Player": x["player"], "Team": _nick(x["team"]) + (" (fav)" if team_is_fav else ""),
+               "Role": rl or ("did not play" if not x["games"] else "under 3 min"), "Min": x["min"], "Usage %": x["usg"],
+               "Games": x["games"], "Pts": x["pts"], "Reb": x["reb"], "Ast": x["ast"],
+               "Props today": have.get(PE.norm_name(x["player"] or ""), 0)}
+        if cond != "model":
+            for stat, col in (("points", "Pts vs avg"), ("rebounds", "Reb vs avg"), ("assists", "Ast vs avg")):
+                grp = f"{rl}:{stat}" if rl else None
+                if grp and fav and SE.trust(SPORT, grp) > 0:
+                    row[col] = SE.over_by_script(0.5, grp, team_is_fav, sh, SPORT)[cond] - 0.5
+                else:
+                    row[col] = None
+        if not pick_teams or _nick(x["team"]) in pick_teams:
+            if not pick_groups or (rl or "—") in pick_groups:
+                rr_rows.append(row)
+    if rr_rows:
+        rdf = pd.DataFrame(rr_rows)
+        cfg = {"Min": st.column_config.NumberColumn(format="%.1f"), "Usage %": st.column_config.NumberColumn(format="%.1f%%"),
+               "Pts": st.column_config.NumberColumn(format="%.1f"), "Reb": st.column_config.NumberColumn(format="%.1f"),
+               "Ast": st.column_config.NumberColumn(format="%.1f")}
+        for col in ("Pts vs avg", "Reb vs avg", "Ast vs avg"):
+            cfg[col] = st.column_config.NumberColumn(format="%+.0f%%", help="How much more (or less) likely than usual he "
+                                                     "beats his own average in that stat, if the game goes this way.")
+            if col in rdf:
+                rdf[col] = rdf[col] * 100
+        st.dataframe(rdf, hide_index=True, width="stretch", column_config=cfg)
+    st.caption("Everyone on both rosters, by recent minutes (last 10 games before this date; early in the season some "
+               "are last season's). **Usage %** = share of his team's plays he finishes while on the floor (shots, free "
+               "throws, turnovers). **Props today** = lines on the board for him." + (
+                   " **vs avg** = how much more or less likely he beats his own average in that stat if the game goes "
+                   "this way — blank where the effect isn't measured yet (deep reserves: the nightly job is measuring "
+                   "them now) or there's no line for the game." if cond != "model" else
+                   " Pick a condition above to see how each player's output moves under it."))
 
 # ---------------------------------------------------------------- build a ticket under this condition
 st.markdown("##### Build a ticket" + ("" if cond == "model" else f" for '{SE.short(SPORT, cond)}'"))

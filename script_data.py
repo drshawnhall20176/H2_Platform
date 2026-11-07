@@ -32,6 +32,7 @@ def _y():
 
 Y = _y()
 K_SHRINK = 100
+DEEP_MIN = 3.0                  # deep reserves: averaging at least this many minutes (below it: not measured)
 
 CFG = {
     "NBA": dict(path="basketball/nba", kind="hoops", seasons=((date(2025, 10, 21), date(2026, 4, 12)), (date(2026, 10, 20), Y)),
@@ -169,7 +170,8 @@ def package(c, gid):
 def groups(c):
     if c["kind"] == "hoops":
         out = []
-        for role, lo, hi in (("starter", c["starter"], 99), ("bench", c["bench"], c["starter"])):
+        # Nov 7: deep reserves (3 to bench minutes) too -- garbage time is where a blowout shows up for them
+        for role, lo, hi in (("starter", c["starter"], 99), ("bench", c["bench"], c["starter"]), ("deep", DEEP_MIN, c["bench"])):
             for stat, key in (("points", "points"), ("rebounds", "rebounds"), ("assists", "assists"), ("threes", "threes")):
                 out.append((f"{role}:{stat}", (lambda lo, hi: lambda b: lo <= (b.get("minutes") or 0) < hi)(lo, hi), key))
         return out
