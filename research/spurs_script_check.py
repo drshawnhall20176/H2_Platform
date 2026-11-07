@@ -29,9 +29,11 @@ res = PG.fetch_results("NBA", D, sorted({(s["team"], s["opp"]) for s in snaps}))
 act = {(PE.norm_name(g["player"]), g["market"]): g.get("actual") for g in PG.grade(snaps, res) if g.get("actual") is not None}
 for game in games:
     gp = [r for r in rows if r["game"] == game]
-    teams = sorted({t for r in gp for t in (r.get("team"), r.get("opp")) if t})
+    teams = SE.game_teams(gp, game)
     g = SE.game_for(teams, lines)
-    strength, fav, dog = SE.line_for(teams, lines)
+    strength = g["strength"] if g else None
+    fav = g["teams"][g["fav"]]["display"] if g else None
+    FN = SE.fav_names(g)
     sh = SE.shares(strength, "NBA")
     print(f"\n=== {game} teams={teams} line={strength} fav={fav} final={g and [(t['display'], t['score']) for t in g['teams']]} happened={SE.actual_script(g, 'NBA') if g else None}")
     print("shares", {k: round(v, 3) for k, v in sh.items()})
@@ -42,7 +44,7 @@ for game in games:
         for r in gp:
             r["mins"] = mins.get(PE.norm_name(r["player"]))
             grp = SE.group("NBA", r["market"], r["mins"])
-            is_fav = bool(fav) and SE.team_matches(r.get("team"), {SE.norm(fav)})
+            is_fav = bool(FN) and SE.team_matches(r.get("team"), FN)
             by = SE.over_by_script(r["p_over"], grp if fav else None, is_fav, sh, "NBA")
             if cond == "model":
                 u = {"side": r["side"], "chance": r["p_over"] if r["side"] == "Over" else 1 - r["p_over"], "use": r["use"], "ev": None}
@@ -54,7 +56,7 @@ for game in games:
                 thr = PE.threshold(r["line"])
                 resu = "push" if a == thr else ("W" if (a > thr) == (u["side"] == "Over") else "L")
             tally[(u["use"], resu)] += 1
-            out.append((u["use"], r["player"], r.get("team"), grp, r["mins"], r["market"], r["line"], u["side"], round(u["chance"], 3),
+            out.append((u["use"], r["player"], "FAV" if is_fav else "dog", r.get("team"), grp, r["mins"], r["market"], r["line"], u["side"], round(u["chance"], 3),
                         None if u.get("ev") is None else round(u["ev"], 3), a, resu, (r.get("over_price"), r.get("under_price"))))
         for o in sorted(out, key=lambda o: (o[0] == PE.USE_PASS, -o[8])):
             print("  ", o)
