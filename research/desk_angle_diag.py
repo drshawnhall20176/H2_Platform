@@ -13,7 +13,7 @@ import odds_api as O                     # noqa: E402
 import sports                            # noqa: E402
 
 D = datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d")
-for sport in (os.environ.get("SPORTS") or "NBA,NHL,NFL").split(","):
+for sport in (os.environ.get("SPORTS") or "NBA").split(","):
     deps = AP.default_deps()
     book = O.DEFAULT_BOOK
     plays, meta, _ = deps["load_board"](sport, D, book)
@@ -58,6 +58,17 @@ for sport in (os.environ.get("SPORTS") or "NBA,NHL,NFL").split(","):
     if pp[0].get("_game_log"):
         print("  log entry sample", pp[0]["_game_log"][0])
     print("ConvictionSource", Counter(p.get("ConvictionSource") for p in pp), "| TeamTrend", Counter(str(p.get("TeamTrend")) for p in pp).most_common(5))
+    print("TeamTrendRatio by team", sorted({(p.get("Team"), p.get("TeamTrendRatio")) for p in pp}, key=str)[:40])
+    import line_history as LH
+    from datetime import timedelta
+    since = (datetime.now(pytz.timezone("US/Eastern")) - timedelta(days=14)).strftime("%Y-%m-%d")
+    lidx = LH.sport_index(sport, since)
+    print("line index keys", len(lidx), "sample", list(lidx)[:3])
+    page_fn = A.history_lookup(lidx, omap)
+    print("page lookup rows (top 30 plays)", sum(len(page_fn(sport, p["Player"], p["Market"], p["Side"])) for p in sorted(pp, key=lambda q: -(q.get("Conviction") or 0))[:30]))
+    moves = [A.line_move_toward(p, {"history_fn": page_fn, "book": book}) for p in pp]
+    moves = [m for m in moves if m is not None]
+    print("plays with a measurable move at", book, len(moves), "| >=3pts toward", sum(m >= 0.03 for m in moves), "| max", max(moves) if moves else None)
     hist_rows = 0
     for p in sorted(pp, key=lambda q: -(q.get("Conviction") or 0))[:15]:
         try:
