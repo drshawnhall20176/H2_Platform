@@ -107,6 +107,16 @@ except Exception as _exc:                                       # noqa: BLE001
     _card = []
     st.caption(f"Couldn't load the card's prices in one call ({str(_exc)[:80]}); each bout below loads its own.")
 if _card:
+    _main_only = st.toggle("Main cards only (bouts most books price — the UFC card)", value=True, key="ufc_main_only",
+                           help="The odds feed lists every MMA promotion; regional shows are usually priced by one book.")
+    _all_n = len(_card)
+    if _main_only:
+        _card = E.main_card_only(_card) or _card
+        _main_ids = {b["id"] for b in _card}
+        events = [e for e in events if e.get("id") in _main_ids] or events
+        if len(_card) < _all_n:
+            st.caption(f"Showing {len(_card)} of {_all_n} listed bouts; {_all_n - len(_card)} from smaller promotions hidden.")
+
     def _fmt(v):
         return "—" if v is None else f"{float(v):+.0f}"
 
