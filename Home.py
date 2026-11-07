@@ -55,10 +55,14 @@ if _owner:
     import pandas as _pd
     import props_engine as _PE
     import todays_best as _TB
-    _today = _dt.now(_ET).strftime("%Y-%m-%d")
+    _now_day = _dt.now(_ET).date()
     _props_sports = [s.key for s in live if s.key in ("NBA", "NFL", "NHL", "NCAAF")]
     C.section_header("⭐", "Today's best")
-    _best = _TB.collect(_today, _props_sports)
+    # Nov 7: look back -- any earlier date shows that day's picks as they were saved, with how each one went
+    _day = st.date_input("Date", _now_day, max_value=_now_day, key="home_best_date", format="MM/DD/YYYY")
+    _past = _day < _now_day
+    _today = _day.strftime("%Y-%m-%d")
+    _best = _TB.collect(_today, _props_sports, past=_past)
     _missing = [k for k, at in _best["props"].items() if not at]
     _c1, _c2, _c3 = st.columns([2, 2, 1])
     _here = active.label if active else "This sport"
@@ -66,7 +70,7 @@ if _owner:
                        label_visibility="collapsed")
     _show = _c2.radio("Show", ["🔒 Locks only", "All playable"], horizontal=True, key="home_best_show",
                       label_visibility="collapsed")
-    if _c3.button("🔄 Refresh props", width="stretch",
+    if _c3.button("🔄 Refresh props", width="stretch", disabled=_past,
                   help="Builds today's Best Bets board for each props sport (the same Odds API use as opening it)."):
         import best_bets_data as _BBD
         with st.spinner("Building today's boards…"):
@@ -81,10 +85,10 @@ if _owner:
 
     # Nov 6: start-time and game filters, shared by the picks and the game lines below
     @st.cache_data(ttl=900, show_spinner=False)
-    def _winners(day):
-        return _TB.winner_rows(day)
+    def _winners(day, past):
+        return _TB.winner_rows(day, past=past)
 
-    _wall = _winners(_today)
+    _wall = _winners(_today, _past)
     _wscope = _wall if _scope == "All sports" else [r for r in _wall if r["sport"] == current]
 
     def _tkey(t):
@@ -113,7 +117,10 @@ if _owner:
                               "Price": ("—" if r.get("price") is None else f"{float(r['price']):+.0f}"),
                               "Needs": ("" if r.get("need") is None else f"{float(r['need']):+.0f} or better"),
                               "Game": r.get("game"), "Where": r.get("page"),
-                              "Tested": "no backtest" if r.get("untested") else ""} for r in _rows[:60]])
+                              "Tested": "no backtest" if r.get("untested") else "",
+                              "Result": _TB.RESULT_ICON.get(r.get("result"), "—")} for r in _rows[:60]])
+        if not _past:
+            _df = _df.drop(columns=["Result"])
         if not _df["Needs"].any():
             _df = _df.drop(columns=["Needs"])
         if not _df["Tested"].any():
@@ -129,9 +136,15 @@ if _owner:
                        "price shown under Needs or better.")
     else:
         _none = "locks" if _show.startswith("🔒") else "playable picks"
-        st.caption(f"No {_none} for {_here} yet today." if _scope != "All sports" else f"No {_none} yet today.")
+        _when = f"on {_day:%a %b %-d}" if _past else "yet today"
+        st.caption(f"No {_none} for {_here} {_when}." if _scope != "All sports" else f"No {_none} {_when}.")
     _notes = []
-    if _missing:
+    if _past and _rows:
+        _gr = [r for r in _rows if r.get("result") in ("win", "loss")]
+        if _gr:
+            _wn = sum(r["result"] == "win" for r in _gr)
+            _notes.append(f"**{_day:%a %b %-d}: {_wn}–{len(_gr) - _wn}** on the picks listed (graded ones).")
+    if _missing and not _past:
         _notes.append(f"Props not built yet today: {', '.join(_missing)} — open their Best Bets or press Refresh.")
     def _stamp(k, at):
         try:
@@ -175,7 +188,12 @@ if _owner:
                                          is not None else ""),
                                "Value": r.get("best_value") if r.get("best_tested") else None,
                                "Likely winner": f"{r['winner']} ({r['chance']:.0%})",
-                               "League": r["league"]} for r in _ws[:60]])
+                               "League": r["league"],
+                               "Final": r.get("final") or "—",
+                               "Pick result": _TB.RESULT_ICON.get(r.get("best_result"), "—"),
+                               "Winner result": _TB.RESULT_ICON.get(r.get("winner_result"), "—")} for r in _ws[:60]])
+        if not _past and not _wdf.empty:
+            _wdf = _wdf.drop(columns=["Final", "Pick result", "Winner result"])
         if _scope != "All sports" and not _wdf.empty:
             _wdf = _wdf.drop(columns=["Sport"])
         if not _wdf.empty:                                       # columns with nothing in them (no tested picks) go
@@ -210,7 +228,10 @@ if _owner:
     else:
         st.caption("No games with a model chance today" + ("" if _scope == "All sports" else " for this sport") + ".")
     # ---- Log picks straight to the Bet Log (Nov 7): props and game lines from the lists above, singles / parlay / both
-    with st.expander("📝 Log picks to the Bet Log"):
+    with st.expander("📝 Log picks to the Bet Log" + (" (today only)" if _past else "")):
+      if _past:
+        st.caption("Pick today's date to log picks.")
+      else:
         _cands = {}
         for r in _rows:
             _cands[f"{r['sport']} · {r.get('time') or ''} · {r['pick']}"] = dict(r)

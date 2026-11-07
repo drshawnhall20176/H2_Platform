@@ -115,18 +115,60 @@
    "starter:threes": 9636
   },
   "trust": {
-   "bench:points": 0.0,
-   "bench:rebounds": 0.0,
-   "bench:assists": 0.0,
-   "bench:threes": 0.0,
-   "starter:points": 0.205,
-   "starter:rebounds": 0.56,
-   "starter:assists": 0.417,
-   "starter:threes": 0.0
+   "bench:points": 0.497,
+   "bench:rebounds": 0.482,
+   "bench:assists": 0.623,
+   "bench:threes": 0.545,
+   "starter:points": 0.855,
+   "starter:rebounds": 0.948,
+   "starter:assists": 0.958,
+   "starter:threes": 0.789
   },
-  "slope": {
-   "season": -0.291,
-   "alternate": -0.07
+  "conditional": {
+   "season": {
+    "bench:points": 0.026,
+    "bench:rebounds": 0.123,
+    "bench:assists": 0.617,
+    "bench:threes": 0.236,
+    "starter:points": 0.724,
+    "starter:rebounds": 0.99,
+    "starter:assists": 0.974,
+    "starter:threes": 0.715
+   },
+   "alternate": {
+    "bench:points": 0.968,
+    "bench:rebounds": 0.842,
+    "bench:assists": 0.628,
+    "bench:threes": 0.855,
+    "starter:points": 0.986,
+    "starter:rebounds": 0.906,
+    "starter:assists": 0.941,
+    "starter:threes": 0.864
+   }
+  },
+  "predictive": {
+   "season": {
+    "ALL": -0.291,
+    "bench:assists": -1.197,
+    "bench:points": -1.447,
+    "bench:rebounds": -1.038,
+    "bench:threes": -0.918,
+    "starter:assists": 1.092,
+    "starter:points": 0.267,
+    "starter:rebounds": 1.019,
+    "starter:threes": -0.843
+   },
+   "alternate": {
+    "ALL": -0.07,
+    "bench:assists": -0.983,
+    "bench:points": -1.593,
+    "bench:rebounds": -1.004,
+    "bench:threes": -1.38,
+    "starter:assists": 0.53,
+    "starter:points": 0.26,
+    "starter:rebounds": 0.711,
+    "starter:threes": -0.711
+   }
   },
   "games": 1367,
   "lined": 1111
@@ -247,18 +289,60 @@
    "bench:threes": 45953
   },
   "trust": {
-   "starter:points": 0.471,
-   "starter:rebounds": 0.695,
-   "starter:assists": 0.876,
-   "starter:threes": 0.094,
-   "bench:points": 0.828,
-   "bench:rebounds": 0.858,
-   "bench:assists": 0.942,
-   "bench:threes": 0.942
+   "starter:points": 0.859,
+   "starter:rebounds": 0.847,
+   "starter:assists": 0.98,
+   "starter:threes": 0.74,
+   "bench:points": 0.888,
+   "bench:rebounds": 0.964,
+   "bench:assists": 1.0,
+   "bench:threes": 0.833
   },
-  "slope": {
-   "season": 1.076,
-   "alternate": 0.812
+  "conditional": {
+   "season": {
+    "starter:points": 0.735,
+    "starter:rebounds": 0.716,
+    "starter:assists": 0.983,
+    "starter:threes": 0.496,
+    "bench:points": 0.781,
+    "bench:rebounds": 0.939,
+    "bench:assists": 1.005,
+    "bench:threes": 0.666
+   },
+   "alternate": {
+    "starter:points": 0.984,
+    "starter:rebounds": 0.977,
+    "starter:assists": 0.976,
+    "starter:threes": 0.985,
+    "bench:points": 0.995,
+    "bench:rebounds": 0.988,
+    "bench:assists": 0.997,
+    "bench:threes": 0.999
+   }
+  },
+  "predictive": {
+   "season": {
+    "ALL": 1.076,
+    "bench:assists": 1.249,
+    "bench:points": 1.099,
+    "bench:rebounds": 1.148,
+    "bench:threes": 1.551,
+    "starter:assists": 1.254,
+    "starter:points": 0.6,
+    "starter:rebounds": 0.873,
+    "starter:threes": 0.1
+   },
+   "alternate": {
+    "ALL": 0.812,
+    "bench:assists": 1.039,
+    "bench:points": 0.879,
+    "bench:rebounds": 0.91,
+    "bench:threes": 1.036,
+    "starter:assists": 0.929,
+    "starter:points": 0.5,
+    "starter:rebounds": 0.737,
+    "starter:threes": 0.177
+   }
   },
   "games": 6568,
   "lined": 4911
@@ -270,18 +354,18 @@
    [
     0,
     3.5,
-    0.164,
-    0.358,
-    0.119,
-    67
+    0.176,
+    0.353,
+    0.118,
+    68
    ],
    [
     3.5,
     6.5,
-    0.167,
-    0.389,
-    0.144,
-    90
+    0.169,
+    0.393,
+    0.135,
+    89
    ],
    [
     6.5,
@@ -302,62 +386,62 @@
   ],
   "effects": {
    "starter:points": {
-    "close": 0.0442,
-    "mid": -0.0003,
-    "blow_win": 0.0337,
-    "blow_lose": -0.1156
+    "close": 0.0468,
+    "mid": -0.0013,
+    "blow_win": 0.0325,
+    "blow_lose": -0.1169
    },
    "starter:rebounds": {
-    "close": 0.0269,
-    "mid": -0.0113,
-    "blow_win": 0.0374,
-    "blow_lose": -0.0696
+    "close": 0.0284,
+    "mid": -0.011,
+    "blow_win": 0.0355,
+    "blow_lose": -0.0705
    },
    "starter:assists": {
-    "close": 0.0097,
-    "mid": 0.0026,
-    "blow_win": 0.0533,
-    "blow_lose": -0.0822
+    "close": 0.0098,
+    "mid": 0.0028,
+    "blow_win": 0.0549,
+    "blow_lose": -0.0843
    },
    "starter:threes": {
-    "close": 0.0071,
-    "mid": 0.0039,
-    "blow_win": 0.0589,
-    "blow_lose": -0.0864
+    "close": 0.0077,
+    "mid": 0.0026,
+    "blow_win": 0.0606,
+    "blow_lose": -0.0868
    },
    "bench:points": {
-    "close": -0.0228,
-    "mid": -0.007,
-    "blow_win": 0.0423,
-    "blow_lose": 0.0058
+    "close": -0.0246,
+    "mid": -0.0063,
+    "blow_win": 0.0428,
+    "blow_lose": 0.0069
    },
    "bench:rebounds": {
-    "close": -0.0106,
-    "mid": -0.017,
-    "blow_win": 0.01,
-    "blow_lose": 0.0311
+    "close": -0.0122,
+    "mid": -0.0167,
+    "blow_win": 0.0112,
+    "blow_lose": 0.0318
    },
    "bench:assists": {
-    "close": 0.01,
-    "mid": -0.0356,
-    "blow_win": 0.0362,
-    "blow_lose": 0.0015
+    "close": 0.0097,
+    "mid": -0.0354,
+    "blow_win": 0.0358,
+    "blow_lose": 0.0019
    },
    "bench:threes": {
-    "close": -0.0118,
-    "mid": 0.0048,
-    "blow_win": 0.024,
-    "blow_lose": -0.0109
+    "close": -0.0131,
+    "mid": 0.004,
+    "blow_win": 0.0264,
+    "blow_lose": -0.01
    }
   },
   "base": {
    "starter:points": 0.466,
-   "starter:rebounds": 0.442,
+   "starter:rebounds": 0.441,
    "starter:assists": 0.453,
-   "starter:threes": 0.384,
-   "bench:points": 0.44,
-   "bench:rebounds": 0.436,
-   "bench:assists": 0.435,
+   "starter:threes": 0.385,
+   "bench:points": 0.439,
+   "bench:rebounds": 0.435,
+   "bench:assists": 0.434,
    "bench:threes": 0.331
   },
   "n": {
@@ -365,24 +449,56 @@
    "starter:rebounds": 4013,
    "starter:assists": 4013,
    "starter:threes": 4013,
-   "bench:points": 4569,
-   "bench:rebounds": 4569,
-   "bench:assists": 4569,
-   "bench:threes": 4569
+   "bench:points": 4577,
+   "bench:rebounds": 4577,
+   "bench:assists": 4577,
+   "bench:threes": 4577
   },
   "trust": {
-   "starter:points": 0.207,
-   "starter:rebounds": 0.048,
-   "starter:assists": 0.006,
-   "starter:threes": 0.018,
-   "bench:points": 0.0,
-   "bench:rebounds": 0.0,
-   "bench:assists": 0.0,
+   "starter:points": 0.939,
+   "starter:rebounds": 0.8,
+   "starter:assists": 0.771,
+   "starter:threes": 0.951,
+   "bench:points": 0.604,
+   "bench:rebounds": 0.548,
+   "bench:assists": 0.663,
    "bench:threes": 0.0
   },
-  "slope": {
-   "season": null,
-   "alternate": -0.062
+  "conditional": {
+   "season": {
+    "starter:points": 0.926,
+    "starter:rebounds": 0.727,
+    "starter:assists": 0.881,
+    "starter:threes": 0.931,
+    "bench:points": 0.646,
+    "bench:rebounds": 0.621,
+    "bench:assists": 0.698,
+    "bench:threes": -0.189
+   },
+   "alternate": {
+    "starter:points": 0.951,
+    "starter:rebounds": 0.873,
+    "starter:assists": 0.661,
+    "starter:threes": 0.97,
+    "bench:points": 0.561,
+    "bench:rebounds": 0.476,
+    "bench:assists": 0.629,
+    "bench:threes": 0.196
+   }
+  },
+  "predictive": {
+   "season": {},
+   "alternate": {
+    "ALL": 0.085,
+    "bench:assists": -4.376,
+    "bench:points": -3.736,
+    "bench:rebounds": -1.911,
+    "bench:threes": -3.743,
+    "starter:assists": 0.274,
+    "starter:points": 1.054,
+    "starter:rebounds": 0.524,
+    "starter:threes": 0.26
+   }
   },
   "games": 588,
   "lined": 300
@@ -479,16 +595,50 @@
    "pass_att": 604
   },
   "trust": {
-   "rush_yds": 0.415,
-   "rec_yds": 0.415,
+   "rush_yds": 0.944,
+   "rec_yds": 0.0,
    "receptions": 0.0,
-   "tackles": 0.0,
-   "pass_yds": 0.0,
-   "pass_att": 0.415
+   "tackles": 0.877,
+   "pass_yds": 0.566,
+   "pass_att": 0.899
   },
-  "slope": {
-   "season": 1.852,
-   "alternate": 1.489
+  "conditional": {
+   "season": {
+    "rush_yds": 1.005,
+    "rec_yds": 0.583,
+    "receptions": 0.219,
+    "tackles": 0.831,
+    "pass_yds": 0.826,
+    "pass_att": 0.986
+   },
+   "alternate": {
+    "rush_yds": 0.882,
+    "rec_yds": -0.373,
+    "receptions": -0.207,
+    "tackles": 0.922,
+    "pass_yds": 0.306,
+    "pass_att": 0.813
+   }
+  },
+  "predictive": {
+   "season": {
+    "ALL": 1.852,
+    "pass_att": 8.76,
+    "pass_yds": 0.262,
+    "rec_yds": 10.021,
+    "receptions": 4.532,
+    "rush_yds": 3.5,
+    "tackles": -1.889
+   },
+   "alternate": {
+    "ALL": 1.489,
+    "pass_att": 6.437,
+    "pass_yds": -2.815,
+    "rec_yds": 3.058,
+    "receptions": -0.223,
+    "rush_yds": 2.874,
+    "tackles": -0.516
+   }
   },
   "games": 393,
   "lined": 213
@@ -585,16 +735,50 @@
    "tackles": 9485
   },
   "trust": {
-   "pass_yds": 0.581,
-   "pass_att": 0.697,
-   "rush_yds": 0.697,
-   "rec_yds": 0.0,
-   "receptions": 0.697,
-   "tackles": 0.697
+   "pass_yds": 0.835,
+   "pass_att": 0.922,
+   "rush_yds": 0.951,
+   "rec_yds": 0.699,
+   "receptions": 0.698,
+   "tackles": 0.937
   },
-  "slope": {
-   "season": 2.195,
-   "alternate": 1.934
+  "conditional": {
+   "season": {
+    "pass_yds": 0.739,
+    "pass_att": 0.968,
+    "rush_yds": 0.913,
+    "rec_yds": 0.658,
+    "receptions": 0.671,
+    "tackles": 0.9
+   },
+   "alternate": {
+    "pass_yds": 0.93,
+    "pass_att": 0.877,
+    "rush_yds": 0.989,
+    "rec_yds": 0.74,
+    "receptions": 0.724,
+    "tackles": 0.974
+   }
+  },
+  "predictive": {
+   "season": {
+    "ALL": 2.195,
+    "pass_att": 3.209,
+    "pass_yds": 0.834,
+    "rec_yds": -0.301,
+    "receptions": 4.523,
+    "rush_yds": 1.711,
+    "tackles": 3.185
+   },
+   "alternate": {
+    "ALL": 1.934,
+    "pass_att": 2.172,
+    "pass_yds": 1.231,
+    "rec_yds": 0.183,
+    "receptions": 1.477,
+    "rush_yds": 1.525,
+    "tackles": 2.356
+   }
   },
   "games": 1547,
   "lined": 690
@@ -675,14 +859,40 @@
    "saves": 2367
   },
   "trust": {
-   "shots": 0.793,
-   "points": 0.599,
-   "blocks": 0.0,
-   "saves": 0.0
+   "shots": 0.314,
+   "points": 1.0,
+   "blocks": 0.914,
+   "saves": 0.908
   },
-  "slope": {
-   "season": 0.593,
-   "alternate": 0.639
+  "conditional": {
+   "season": {
+    "shots": 0.222,
+    "points": 1.017,
+    "blocks": 0.84,
+    "saves": 0.834
+   },
+   "alternate": {
+    "shots": 0.406,
+    "points": 0.996,
+    "blocks": 0.989,
+    "saves": 0.982
+   }
+  },
+  "predictive": {
+   "season": {
+    "ALL": 0.593,
+    "blocks": -2.682,
+    "points": 0.756,
+    "saves": -4.498,
+    "shots": 7.044
+   },
+   "alternate": {
+    "ALL": 0.639,
+    "blocks": -4.459,
+    "points": 0.839,
+    "saves": -5.194,
+    "shots": 3.464
+   }
   },
   "games": 1524,
   "lined": 1148
