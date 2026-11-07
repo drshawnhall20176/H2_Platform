@@ -491,3 +491,52 @@ def log_selection(items: Sequence[Dict], mode: str, stake: float, parlay_stake: 
                                   notes=tag or None)
         done["ticket"] = res.get("header_id")
     return done
+
+
+
+# --------------------------------------------------------------------------- blowout watch (Nov 7)
+# The Game Script feedback loop (script_learn.py) logs every game's pre-game scenario chances before it starts --
+# favorite wins big / underdog wins big / close -- from the line curve that beat the old table on held-out games.
+# This ranks a day's games by the chance one side wins big. Earlier dates show what happened (graded calls).
+BLOWOUT_SPORTS = ("NBA", "NCAAMB", "NFL", "NCAAF", "NHL")
+
+
+def blowout_rows(date_str: str, sports_=BLOWOUT_SPORTS, calls_by_sport: Optional[Dict] = None) -> List[Dict]:
+    import model_store as MS
+    import script_effects as SE
+    out = []
+    for sp in sports_:
+        try:
+            cs = (calls_by_sport or {}).get(sp) if calls_by_sport is not None else MS.get_setting(f"scenario_calls:{sp}", None)
+        except Exception:                                       # noqa: BLE001
+            cs = None
+        if not cs:
+            continue
+        seen = set()
+        for k in list(cs.get("pending") or []) + list(cs.get("graded") or []):
+            day = _et_date(k.get("kick")) or k.get("d")
+            if day != date_str or k.get("gid") in seen or not k.get("p"):
+                continue
+            seen.add(k["gid"])
+            p = k["p"]
+            fav_big, dog_big = float(p.get("fav_blowout") or 0), float(p.get("dog_blowout") or 0)
+            team, chance, who = (k.get("fav"), fav_big, "favorite") if fav_big >= dog_big else (k.get("dog"), dog_big, "underdog")
+            blow = (SE.DATA.get(sp) or {}).get("blow")
+            unit = "goals" if SE.FAMILY.get(sp) == "hockey" else "pts"
+            strength = k.get("strength")
+            line = ("" if strength is None else
+                    (f"{k.get('fav')} {float(strength):.0%} to win" if SE.strength_kind(sp) == "ml"
+                     else f"{k.get('fav')} −{float(strength):g}"))
+            happened = None
+            if k.get("y"):
+                happened = {"fav_blowout": f"✅ {k.get('fav')} won big", "dog_blowout": f"✅ {k.get('dog')} won big",
+                            "close": "close game", "middle": "decided, not a blowout"}.get(k["y"], k["y"])
+                if k["y"] in ("fav_blowout", "dog_blowout") and k["y"] != ("fav_blowout" if who == "favorite" else "dog_blowout"):
+                    happened = happened.replace("✅", "↩️")
+            game = (f"{k['away']} @ {k['home']}" if k.get("home") and k.get("away") else f"{k.get('dog')} vs {k.get('fav')}")
+            out.append({"sport": sp, "time": _et_time(k.get("kick")), "game": game, "team": team, "who": who,
+                        "chance": chance, "fav_big": fav_big, "dog_big": dog_big, "close": float(p.get("close") or 0),
+                        "line": line, "margin": f"{blow}+ {unit}" if blow else "", "source": k.get("source") or "table",
+                        "happened": happened, "fav_margin": k.get("margin")})
+    out.sort(key=lambda r: -r["chance"])
+    return out

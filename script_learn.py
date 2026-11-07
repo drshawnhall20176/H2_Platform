@@ -266,6 +266,7 @@ def call_games(sport: str, cache: Dict, fit: Dict, day: date) -> List[Dict]:
         out.append({"gid": str(ev.get("id")), "d": day.isoformat(), "kick": ev.get("date"),
                     "fav": g["teams"][fav_i]["display"], "dog": g["teams"][1 - fav_i]["display"],
                     "fav_id": fav, "dog_id": dog, "strength": g["strength"], "p": probs, "table": tbl, "why": why,
+                    "home": g["teams"][0 if homes[0] else 1]["display"], "away": g["teams"][1 if homes[0] else 0]["display"],
                     "source": src, "context": context(h, fav, dog, day, c, _season_start(c, day.isoformat()))})
     return out
 
