@@ -107,8 +107,10 @@ except Exception as _exc:                                       # noqa: BLE001
     _card = []
     st.caption(f"Couldn't load the card's prices in one call ({str(_exc)[:80]}); each bout below loads its own.")
 if _card:
-    _main_only = st.toggle("Main cards only (bouts most books price — the UFC card)", value=True, key="ufc_main_only",
-                           help="The odds feed lists every MMA promotion; regional shows are usually priced by one book.")
+    _main_only = st.toggle("Main cards only (bouts a major US sportsbook prices — the UFC card)", value=True,
+                           key="ufc_main_only",
+                           help="The odds feed lists every MMA promotion; regional shows are priced only by offshore "
+                                "books. Also drops a stale listing when a fighter's opponent changed.")
     _all_n = len(_card)
     if _main_only:
         _card = E.main_card_only(_card) or _card
@@ -128,14 +130,19 @@ if _card:
                       "Favorite": "—" if b["p_a"] is None else (b["a"] if fav_a else b["b"]),
                       "Market chance": None if b["p_a"] is None else (b["p_a"] if fav_a else 1 - b["p_a"]),
                       "Best price, 1st named": _fmt(b["best_a"]), "Best price, 2nd named": _fmt(b["best_b"]),
+                      f"Moneyline ({preferred_label})": E.book_lines(b, preferred_book)["ml"],
+                      f"Spread ({preferred_label})": E.book_lines(b, preferred_book)["spread"],
+                      f"Total rounds ({preferred_label})": E.book_lines(b, preferred_book)["total"],
                       "Books": b["books"]})
     _df = pd.DataFrame(_rows)
     st.dataframe(_df, hide_index=True, width="stretch",
                  column_config={"Market chance": st.column_config.NumberColumn(
                      format="percent", help="The books' no-vig chance for the favorite (median across books).")})
     st.caption("The whole card from one odds request, earliest bout first. **Market chance** is what the books' prices "
-               "imply with the vig removed — there's no UFC model yet, so it's the market's read, not a pick. The odds "
-               "feed lists every MMA promotion it prices, not only UFC. Each bout's detail is below.")
+               "imply with the vig removed — there's no UFC model yet, so it's the market's read, not a pick. Moneyline, "
+               "spread and total rounds are the selected book's (another book's when it hasn't posted one). Method of "
+               "victory, KO/TKO-only, submission-only, significant strikes, takedowns and round props aren't in the "
+               "odds feed the platform uses, so they can't show here — check them at the book. Each bout's detail is below.")
 
 # ── Per-fight odds ────────────────────────────────────────────────────────
 @st.cache_data(ttl=300, show_spinner=False)
@@ -263,6 +270,15 @@ for i, event in enumerate(events):
             ]
             quick_log.render_quick_log(ml_plays, date_str, "UFC", key_prefix=f"ufc_{event_id}",
                                        moneylines=bout_moneylines)
+
+        # ── Point Spread (Nov 7) ───────────────────────────────────────────
+        spreads, sp_pts = odds.get("spreads") or {}, odds.get("_spread_points") or {}
+        if spreads and sp_pts:
+            st.markdown("**➗ Point Spread**")
+            _sc = st.columns(len(spreads))
+            for _col, (_name, _price) in zip(_sc, spreads.items()):
+                _pt = sp_pts.get(_name)
+                _col.metric(_name, f"{_pt:+g}" if _pt is not None else "—", _fmt_american(_price), delta_color="off")
 
         # ── Fight Duration ─────────────────────────────────────────────────
         totals = odds.get("totals") or {}
