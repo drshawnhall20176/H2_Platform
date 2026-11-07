@@ -50,8 +50,14 @@ if not plays:
     st.info("No NBA props on today's board yet.")
     st.stop()
 
-games = sorted({p["Game"] for p in plays if p.get("Game")})
-game = st.selectbox("Game", games, key="gs_game")
+# Nov 7: games in tip order, each with its start time
+_first = {}
+for p in C.by_kickoff(plays, when=lambda x: x.get("Kickoff") or x.get("kickoff") or x.get("game_date")):
+    if p.get("Game") and p["Game"] not in _first:
+        _first[p["Game"]] = C._kick_dt(p.get("Kickoff") or p.get("kickoff") or p.get("game_date"))
+games = list(_first)
+game = st.selectbox("Game", games, key="gs_game",
+                    format_func=lambda g: g if _first.get(g) is None else f"{_first[g].strftime('%a %-I:%M %p')} — {g}")
 gl = _lines(today)
 rec = next((r for (a, h), r in gl.items() if a and h and a in game and h in game), None)
 if rec and rec.get("home_spread") is not None:
