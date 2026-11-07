@@ -27,6 +27,7 @@ def test_card_from_odds():
 
 def test_today_best_ufc_rows(monkeypatch):
     import todays_best as TB
+    monkeypatch.setattr(E, "MAIN_CARD_MIN_BOOKS", 0)
     monkeypatch.setattr(E, "get_card", lambda key, d: E.card_from_odds(FEED, d))
     rows = TB.ufc_rows("2026-11-07", "k")
     assert [r["game"] for r in rows] == ["Prelim A vs Prelim B", "Y vs X", "Main A vs Main B"]
@@ -45,6 +46,7 @@ def test_fight_card_page_shows_the_card(monkeypatch):
     monkeypatch.setattr(E, "get_ufc_events", lambda key, d=None: [e for e in FEED if E._eastern_date_str(e["commence_time"]) == d])
     monkeypatch.setattr(E, "get_card", lambda key, d=None: E.card_from_odds(FEED, d))
     monkeypatch.setattr(E, "get_event_odds", lambda *a, **k: {})
+    monkeypatch.setattr(E, "MAIN_CARD_MIN_BOOKS", 0)
     at = AppTest.from_file(_page(), default_timeout=60)
     at.session_state["sport"] = "UFC"
     at.run()
@@ -84,3 +86,10 @@ def test_home_fight_card_section(monkeypatch):
     assert not at.exception, [e.value for e in at.exception]
     df = next(d.value for d in at.dataframe if "Bout" in d.value.columns)
     assert list(df["Bout"]) == ["Prelim A vs Prelim B", "Main A vs Main B"]
+
+
+def test_main_card_only():
+    card = E.card_from_odds(FEED, "2026-11-07")
+    assert [b["id"] for b in E.main_card_only(card)] == []                      # no bout here has 5+ books
+    big = [dict(b, books=8) if b["id"] == "late" else b for b in card]
+    assert [b["id"] for b in E.main_card_only(big)] == ["late"]
