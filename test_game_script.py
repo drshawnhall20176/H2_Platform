@@ -167,3 +167,18 @@ def test_page_explains_uncovered_sport():
     at.session_state["sport"] = "MLB"
     at.run()
     assert not at.exception and "Game Script covers" in at.info[0].value
+
+
+def test_snapshot_team_ids_match_espn():
+    ev = {"competitions": [{"competitors": [
+        {"homeAway": "home", "score": "101", "team": {"id": "23", "displayName": "Sacramento Kings", "location": "Sacramento", "name": "Kings"}},
+        {"homeAway": "away", "score": "128", "team": {"id": "24", "displayName": "San Antonio Spurs", "location": "San Antonio", "name": "Spurs"}}],
+        "status": {"type": {"completed": True}},
+        "odds": [{"spread": 13.5, "awayTeamOdds": {"favorite": True}, "homeTeamOdds": {"favorite": False}}]}]}
+    g = SE.parse_event(ev, "NBA")
+    rows = [{"team": "24", "opp": "23"}, {"team": "23", "opp": "24"}]
+    teams = SE.game_teams(rows, "San Antonio Spurs @ Sacramento Kings")
+    assert SE.game_for(teams, [g]) is g
+    assert SE.team_matches("24", SE.fav_names(g)) and not SE.team_matches("23", SE.fav_names(g))
+    assert not SE.team_matches("2", {"24"})
+    assert SE.actual_script(g, "NBA") == "fav_blowout"
