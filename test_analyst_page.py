@@ -698,7 +698,9 @@ def test_the_public_build_never_marks_or_grades_earlier_days_but_the_owner_does(
 
 
 # ------------------------------------------------------------------ game-script / opponent-matchup evidence
-def test_the_evidence_is_off_by_default_so_the_desk_opens_fast(desk, monkeypatch):
+def test_the_evidence_is_on_by_default_so_every_angle_can_fire(desk, monkeypatch):
+    """Nov 7: off by default, the game-script and matchup angles showed nothing until ticked (the owner read that as
+    angles with no data). On by default now (cached 15 minutes); still untickable for a fast load."""
     calls = []
     monkeypatch.setattr(AC, "load_game_env", lambda *a, **k: calls.append("env") or ({}, ""))
     monkeypatch.setattr(AC, "load_matchups", lambda *a, **k: calls.append("mu") or ({}, ""))
@@ -706,9 +708,9 @@ def test_the_evidence_is_off_by_default_so_the_desk_opens_fast(desk, monkeypatch
     at.session_state["sport"] = "NBA"
     at.run()                                                        # nothing set: the widgets' own defaults
     assert not at.exception, [e.value for e in at.exception]
-    assert calls == []
+    assert sorted(calls) == ["env", "mu"]
     boxes = {c.label: c.value for c in at.checkbox if c.label.startswith("Add ")}
-    assert boxes == {"Add game-script evidence (spread & total)": False, "Add opponent-matchup evidence": False}
+    assert boxes == {"Add game-script evidence (spread & total)": True, "Add opponent-matchup evidence": True}
 
 
 def test_matchup_evidence_becomes_an_angle_and_is_locked_with_the_call(desk, monkeypatch):

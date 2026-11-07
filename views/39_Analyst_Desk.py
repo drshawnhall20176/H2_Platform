@@ -206,7 +206,7 @@ _line_rows = A.history_lookup(_line_idx, _active.market_map)   # Nov 7: stored b
 calls = A.scan(plays, _active.key, date_str, offers=offers, odds_map=_active.market_map,
                history_fn=_line_rows, weights=weights, expect_book_lines=bool(offers),
                times=times, with_day=_with_day, book=preferred_book, game_env=game_env, matchups=matchups,
-               calibrator=_scan_curve, cold=_cold)
+               calibrator=_scan_curve, cold=_cold, history_limit=len(plays))   # the index is in memory: check every play
 lines_posted = bool(offers)
 # Only calls the selected book really posts, at the model's own line, are ever suggested or locked -- and never a
 # market + side the record has shown to be cold.
