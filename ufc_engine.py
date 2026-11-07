@@ -229,3 +229,60 @@ def build_slate(date_str: str) -> Tuple[List[Dict], List[Dict]]:
             })
 
     return bouts, meta
+
+
+# --------------------------------------------------------------------------- the whole card in one call (Nov 7)
+def _imp(american) -> Optional[float]:
+    try:
+        a = float(american)
+    except (TypeError, ValueError):
+        return None
+    if -100 < a < 100:
+        return None
+    return 100 / (a + 100) if a > 0 else -a / (-a + 100)
+
+
+def card_from_odds(data: List[Dict], date_str: Optional[str] = None) -> List[Dict]:
+    """Bulk odds response -> one row per bout, earliest first: both fighters, start time, every book's moneyline, the
+    best price on each side, and the market's no-vig chance (median over books). Bouts with no posted price are kept
+    (they're on the card), with None odds."""
+    import statistics
+    out = []
+    for e in data or []:
+        if date_str and _eastern_date_str(e.get("commence_time")) != date_str:
+            continue
+        a, b = e.get("away_team"), e.get("home_team")
+        prices: Dict[str, Dict[str, float]] = {}
+        for bk in e.get("bookmakers") or []:
+            for m in bk.get("markets") or []:
+                if m.get("key") != "h2h":
+                    continue
+                pr = {o.get("name"): o.get("price") for o in m.get("outcomes") or []}
+                if pr.get(a) is not None and pr.get(b) is not None:
+                    prices[bk.get("key")] = {"a": pr[a], "b": pr[b]}
+        fair = []
+        for p in prices.values():
+            ia, ib = _imp(p["a"]), _imp(p["b"])
+            if ia and ib:
+                fair.append(ia / (ia + ib))
+        pa = statistics.median(fair) if fair else None
+        best_a = max((p["a"] for p in prices.values()), default=None, key=lambda v: v)
+        best_b = max((p["b"] for p in prices.values()), default=None, key=lambda v: v)
+        out.append({"id": e.get("id"), "commence": e.get("commence_time"), "a": a, "b": b, "p_a": pa,
+                    "best_a": best_a, "best_b": best_b, "books": len(prices), "prices": prices})
+    out.sort(key=lambda r: r.get("commence") or "")
+    return out
+
+
+def get_card(api_key: str, date_str: Optional[str] = None) -> List[Dict]:
+    """Every MMA bout on `date_str` (Eastern) with moneylines from every US book -- ONE odds request for the whole
+    card (the per-bout fetch below the overview costs one request per bout). Raises OddsAPIError on a real failure."""
+    data, _ = _get(f"sports/{UFC_SPORT}/odds", {"apiKey": api_key, "regions": "us", "markets": "h2h",
+                                               "oddsFormat": "american"})
+    return card_from_odds(data, date_str)
+
+
+def card_dates(api_key: str) -> List[str]:
+    """Eastern dates that have bouts listed, soonest first (for an empty date: where the next card is)."""
+    data, _ = _get(f"sports/{UFC_SPORT}/events", {"apiKey": api_key})
+    return sorted({d for d in (_eastern_date_str(e.get("commence_time")) for e in data or []) if d})

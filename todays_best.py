@@ -540,3 +540,23 @@ def blowout_rows(date_str: str, sports_=BLOWOUT_SPORTS, calls_by_sport: Optional
                         "happened": happened, "fav_margin": k.get("margin")})
     out.sort(key=lambda r: -r["chance"])
     return out
+
+
+# --------------------------------------------------------------------------- UFC / MMA card (Nov 7)
+def ufc_rows(date_str: str, api_key: Optional[str]) -> List[Dict]:
+    """The day's MMA bouts (one odds request for the whole card), earliest first: the market's favorite, its no-vig
+    chance and the best price on each fighter. No model: the market's read, labelled as such."""
+    if not api_key:
+        return []
+    import ufc_engine as E
+    out = []
+    for b in E.get_card(api_key, date_str):
+        fav_a = b["p_a"] is not None and b["p_a"] >= 0.5
+        fav, dog = (b["a"], b["b"]) if fav_a else (b["b"], b["a"])
+        out.append({"sport": "UFC", "time": _et_time(b["commence"]), "game": f"{b['a']} vs {b['b']}",
+                    "fav": None if b["p_a"] is None else fav, "dog": None if b["p_a"] is None else dog,
+                    "chance": None if b["p_a"] is None else (b["p_a"] if fav_a else 1 - b["p_a"]),
+                    "fav_price": b["best_a"] if fav_a else b["best_b"], "dog_price": b["best_b"] if fav_a else b["best_a"],
+                    "books": b["books"], "commence": b["commence"]})
+    out.sort(key=lambda r: r.get("commence") or "")
+    return out

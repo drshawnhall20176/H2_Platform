@@ -106,7 +106,20 @@ if _owner:
     except Exception:                                           # noqa: BLE001
         _ball = []
     _bscope = _ball if _scope == "All sports" else [r for r in _ball if r["sport"] == current]
-    _every = _rows + _wscope + _bscope
+
+    # Nov 7: the MMA card (one odds request for the whole card), when UFC is picked or All sports
+    @st.cache_data(ttl=900, show_spinner=False)
+    def _ufc(day):
+        import best_bets_data as _BBD2
+        return _TB.ufc_rows(day, _BBD2.get_odds_api_key())
+
+    _uscope = []
+    if _scope == "All sports" or current == "UFC":
+        try:
+            _uscope = _ufc(_today)
+        except Exception:                                       # noqa: BLE001
+            _uscope = []
+    _every = _rows + _wscope + _bscope + _uscope
     _times = sorted({r.get("time") for r in _every if r.get("time")}, key=_tkey)
     _gtime = {}
     for r in _every:                                            # Nov 7: games listed by start time, not A-Z
@@ -242,6 +255,25 @@ if _owner:
     else:
         st.caption("No games with a model chance today" + ("" if _scope == "All sports" else " for this sport") + ".")
     # ---- Blowout watch (Nov 7): the games most likely to be decided big, and by whom -- the Game Script loop's calls
+    # ---- UFC / MMA card (Nov 7)
+    if _scope == "All sports" or current == "UFC":
+        st.markdown("##### 🥊 Fight card")
+        _u = sorted([r for r in _uscope if _keep(r)], key=lambda r: r.get("commence") or "")
+        if _u:
+            _udf = _pd.DataFrame([{"Time": r["time"], "Bout": r["game"], "Favorite": r["fav"] or "—",
+                                   "Market chance": r["chance"],
+                                   "Best price (fav)": "—" if r["fav_price"] is None else f"{float(r['fav_price']):+.0f}",
+                                   "Best price (dog)": "—" if r["dog_price"] is None else f"{float(r['dog_price']):+.0f}",
+                                   "Books": r["books"]} for r in _u])
+            st.dataframe(_udf, hide_index=True, width="stretch",
+                         column_config={"Market chance": st.column_config.NumberColumn(
+                             format="percent", help="The books' no-vig chance for the favorite.")})
+            st.caption(f"{len(_u)} bouts, earliest first, from one odds request. **Market chance** is the books' read "
+                       "with the vig removed — there's no UFC model yet, so these aren't picks. The feed lists every MMA "
+                       "promotion it prices. Details and logging on **UFC Fight Card**.")
+        else:
+            st.caption("No MMA bouts listed for this date" + (" (completed bouts drop out of the odds feed)." if _past
+                                                              else "."))
     st.markdown("##### 💥 Blowout watch")
     _bw = [r for r in _bscope if _keep(r)]
     if _bw:
