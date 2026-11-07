@@ -279,30 +279,34 @@ def predicted_shift(eff_g, sh, is_fav):
     return e
 
 
-def heldout(c, games, rows):
+def heldout(c, games, rows, how="season"):
     """Fit on one season, test on the other. Within the test season, compare each player-game's PRE-GAME predicted
     shift with how he actually did relative to his group's test-season rate. slope = sum(shift*lift)/sum(shift^2):
     1 = the effects carry over in full, 0 = noise. Reported per sport and per group."""
-    seasons = sorted({r["season"] for r in rows} - {"x"})
-    print(f"## held-out (seasons {seasons})")
+    if how == "season":
+        gi_season = {r["gi"]: r["season"] for r in rows}
+    else:                                                       # alternate games: fit on half, test on the other half
+        gi_season = {i: str(i % 2) for i in range(len(games))}
+    part = lambda r: gi_season.get(r["gi"])                     # noqa: E731
+    seasons = sorted({part(r) for r in rows} - {"x", None})
+    print(f"## held-out by {how} (parts {seasons})")
     if len(seasons) < 2:
-        print("  one season only: no held-out test")
+        print("  one part only: no held-out test")
         return {}
-    gi_season = {r["gi"]: r["season"] for r in rows}
     buckets = defaultdict(lambda: [0, 0.0, 0.0])
     sxy, sxx = defaultdict(float), defaultdict(float)
     for test in seasons:
-        train_rows = [r for r in rows if r["season"] != test]
+        train_rows = [r for r in rows if part(r) != test]
         train_games = [g for i, g in enumerate(games) if gi_season.get(i) not in (test, None)]
         eff, _, _ = effects_of(train_rows)
         shmap = {(lo, hi): (f, cl, dg) for lo, hi, f, cl, dg, n in shares_of(c, train_games)}
         tb = defaultdict(list)
         for r in rows:
-            if r["season"] == test:
+            if part(r) == test:
                 tb[r["g"]].append(r["beat"])
         tbase = {g: sum(v) / len(v) for g, v in tb.items()}
         for r in rows:
-            if r["season"] != test or r["is_fav"] is None or r["strength"] is None or r["g"] not in eff:
+            if part(r) != test or r["is_fav"] is None or r["strength"] is None or r["g"] not in eff:
                 continue
             sh = shmap.get(bucket(c, r["strength"]))
             if not sh:
@@ -348,7 +352,7 @@ def run(sport):
     eff, base, ns = effects_of(rows)
     for g in sorted(eff):
         print(f"EFF {g:18s} n={ns[g]:6d} base={base[g]:.3f} " + " ".join(f"{s}={v:+.3f}" for s, v in eff[g].items()))
-    ho = heldout(c, games, rows)
+    ho = {"season": heldout(c, games, rows, "season"), "alternate": heldout(c, games, rows, "alternate")}
     print("SCRIPTJSON " + json.dumps({"sport": sport, "close": c["close"], "blow": c["blow"], "shares": shares,
                                       "effects": eff, "base": base, "n": ns, "heldout": ho,
                                       "games": len(games), "lined": sum(1 for _, p in games if p["strength"] is not None)}))
