@@ -137,7 +137,7 @@ def run():
         "45": ("NCAAMB",),                               # Game Lab (college basketball) -- game lines
         "46": ("NBA",),                                  # Game Lab (NBA)
         "47": ("NHL",),                                  # Game Lab (NHL)
-        "50": ("NBA",),                                  # Game Script (NBA: the study is NBA), Nov 7
+        "50": ("NBA", "NCAAMB", "WNBA", "NFL", "NCAAF", "NHL"),   # Game Script: each sport's own study (Nov 7)
         "41": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL", "UFC"),                    # Postgame Review -- kickoff snapshots graded vs box scores
         "38": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL"),  # Position Matchups -- depth chart vs the opposing
                                                           # defense by position + team head-to-head.
@@ -231,7 +231,7 @@ def run():
         "47": ("Game Lab", "🏟️", "nhl_game_lab"),      # NHL puck lines/totals/ML
         "48": ("Reports", "📑", "reports"),             # P&L statements for any period + CSV / PDF (Nov 6)
         "49": ("Model Performance", "📊", "model_performance"),   # Investor Relations: the edge evidence (Nov 6)
-        "50": ("Game Script", "🎬", "game_script"),     # NBA: props under each kind of game + script tickets (Nov 7)
+        "50": ("Game Script", "🎬", "game_script"),     # props under each kind of game + script tickets, every props sport (Nov 7)
     }
 
     # SIDEBAR SECTIONS, added directly on request: st.navigation natively supports a
