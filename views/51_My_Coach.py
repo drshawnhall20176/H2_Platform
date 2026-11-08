@@ -127,7 +127,10 @@ else:
     maybes = [r for r in _judged if r["verdict"].startswith("🟡")]
     skips = [r for r in _judged if r["verdict"].startswith("🔴")]
     st.markdown(f"**🟢 Good bets ({len(goods)})** — your normal stake.")
-    _tbl(goods[:25]) if goods else st.caption("None right now. No bet is better than a bad bet.")
+    if goods:
+        _tbl(goods[:25])
+    else:
+        st.caption("None right now. No bet is better than a bad bet.")
     if len({r["game"] for r in goods}) >= 2:
         _seen, _legs = set(), []
         for r in goods:
@@ -138,9 +141,15 @@ else:
                 break
         st.caption("Want a small parlay? Use 2–3 🟢 bets from different games, e.g. " + " + ".join(_legs) + ".")
     with st.expander(f"🟡 Maybe ({len(maybes)}) — half stake or skip"):
-        _tbl(maybes[:40]) if maybes else st.caption("None.")
+        if maybes:
+            _tbl(maybes[:40])
+        else:
+            st.caption("None.")
     with st.expander(f"🔴 Skip ({len(skips)}) — and why"):
-        _tbl(skips[:60]) if skips else st.caption("None.")
+        if skips:
+            _tbl(skips[:60])
+        else:
+            st.caption("None.")
     st.caption("Realistic chance = the model's chance, or how often that kind of pick has really hit lately if "
                "that's lower. Edge = the realistic chance minus the chance the price needs. A good bet has 3+ points of edge, a model "
                "chance of 55%+, and nothing in its record against it. Prices move: check the price on your book "
