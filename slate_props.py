@@ -131,7 +131,7 @@ def props_markets(sport: str) -> Dict[str, str]:
 def team_rows(family: str, sport: str, bundle: Dict, team, opp, market: str, spread_home: Optional[float],
               total: Optional[float], offers=None, book=None, news_checked: bool = False, slope: float = 1.0,
               model_weight: float = PE.MODEL_WEIGHT, lines: Optional[Dict] = None,
-              prices: Optional[Dict] = None) -> List[Dict]:
+              prices: Optional[Dict] = None, weather: Optional[Dict] = None) -> List[Dict]:
     """One team's football or hockey Player props rows for one market -- the ONE recipe Position Matchups and the
     slate pages share. `bundle` is position_data.load_bundle's game bundle; spread_home is the home side's spread
     (hockey: the goal margin worked out from the moneyline, props_odds.hockey_spread_from_ml)."""
@@ -144,7 +144,7 @@ def team_rows(family: str, sport: str, bundle: Dict, team, opp, market: str, spr
     rest = props.get("rest") or {}
     ctx = {"rest_days": (rest.get(team) or {}).get("rest_days"), "opp_rest_days": (rest.get(opp) or {}).get("rest_days"),
            "spread": spread_team, "offers": offers, "slope": slope, "model_weight": model_weight, "book": book,
-           "news_checked": bool(news_checked), "prices": prices or {}}
+           "news_checked": bool(news_checked), "prices": prices or {}, "weather": weather}
     if family == "football":
         import football_props as FP
         roster = FP.roster_for(props, team, market)
@@ -162,6 +162,23 @@ def team_rows(family: str, sport: str, bundle: Dict, team, opp, market: str, spr
                                            opp_env=PE.env_factor(opp_imp, HP.team_goals(pg, opp)),
                                            team_games=(props.get("team_games") or {}).get(team)))
     return []
+
+
+def _game_weather(sport: str, g: Dict, b: Dict, names: Dict) -> Optional[Dict]:
+    """Nov 8: kickoff wind / temperature for a football game (football_weather.py). None when unknown -- no adjustment."""
+    try:
+        import football_weather as FW
+        from datetime import datetime
+        import pytz
+        gd = g.get("game_date")
+        day = (datetime.fromisoformat(str(gd).replace("Z", "+00:00")).astimezone(pytz.timezone("US/Eastern"))
+               .strftime("%Y-%m-%d")) if gd else None
+        if not day:
+            return None
+        return FW.for_game(FW.slate(sport, day), b.get("home"), b.get("away"), names.get(b.get("home")),
+                           names.get(b.get("away")))
+    except Exception:                                           # noqa: BLE001 -- weather never breaks a board
+        return None
 
 
 def game_line_values(family: str, gl: Optional[Dict]) -> Tuple[Optional[float], Optional[float]]:
@@ -188,10 +205,11 @@ def family_slate_reads(sport: str, games: Sequence[Dict], bundles: Dict, offers,
             continue
         spread_home, total = game_line_values(family, game_lines.get(g.get("label")))
         names = b.get("names") or {}
+        wx = _game_weather(sport, g, b, names) if family == "football" else None
         for team, opp in ((b["home"], b["away"]), (b["away"], b["home"])):
             for mk, market in markets.items():
                 for row in team_rows(family, sport, b, team, opp, market, spread_home, total, offers=offers,
-                                     book=book, news_checked=news_checked):
+                                     book=book, news_checked=news_checked, weather=wx):
                     row.update(game=g.get("label"), team_id=team, opp_id=opp, market_key=mk, market=market,
                                home=team == b["home"], team_name=names.get(team, team),
                                opp_name=names.get(opp, opp), game_date=g.get("game_date"))

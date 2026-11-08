@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Sequence
 
+import football_weather as FW
 import player_props as PPR
 import props_engine as PE
 
@@ -118,6 +119,27 @@ DEFENSE_WEIGHT = {"Pass Attempts": 0.5, "Pass Completions": 0.5}
 PROMOTED_SHRINK_MULT = 2.0
 PROMOTED_SHARE_MULT = 1.5
 CARRY_TO_REPLACEMENT = 0.7
+SNAP_DOWN_MARKETS = ("Receptions", "Targets")
+SNAP_DOWN_BLEND = 0.5
+SNAP_DOWN_SHIFT = 0.15
+
+
+def snap_down(games, opps) -> Optional[Dict]:
+    """games newest first. When his offensive snap share in the last game is 15+ points under his previous five:
+    {"opp": targets per snap (last 6) x expected snaps (last 3, weighted), "now", "before"}; else None."""
+    g = [(o, x.get("stats") or {}) for o, x in zip(opps, games)]
+    g = [(o, s) for o, s in g if (s.get("off_snaps") or 0) > 0]
+    if len(g) < 3:
+        return None
+    pct = [float(s.get("off_pct") or 0) for _, s in g]
+    before = sum(pct[1:6]) / len(pct[1:6])
+    if pct[0] - before > -SNAP_DOWN_SHIFT:
+        return None
+    snaps = [float(s["off_snaps"]) for _, s in g]
+    rate = sum(o for o, _ in g[:6]) / sum(snaps[:6])
+    return {"opp": rate * PE.wmean(snaps[:3]), "now": pct[0], "before": before}
+
+
 SCRIPT_PASS = 0.006            # per point of spread: underdogs throw more
 SCRIPT_RUSH = 0.008            # favorites run more
 # Nov 5 (Ravens: Lamar out, third-string QB vs JAX). research/backtest_backup_qb_rush.py, 387 backup-QB starts 2022-26:
@@ -317,6 +339,15 @@ def player_rows(roster: Sequence[Dict], team, defense, market: str, pgames, allo
                 n_opp += p_n
                 read_vals = vals + p_vals[:k]
                 flags0.append(f"＋ last season blended in ({len(g)} game{'s' if len(g) != 1 else ''} this season)")
+        # Nov 8: a pass catcher whose snap share just dropped 15+ points -- his targets read half per game, half per
+        # snap x his last 3 games of snaps (research/nfl_usage2.py, NFL 2023-26 held out: where that moved the side,
+        # it was right 64% on targets and 62% on receptions, every season; receiving yards didn't improve, so it's
+        # limited to these markets).
+        if market in SNAP_DOWN_MARKETS and own_opp:
+            sd = snap_down(g, opps)
+            if sd is not None:
+                own_opp = (1 - SNAP_DOWN_BLEND) * own_opp + SNAP_DOWN_BLEND * sd["opp"]
+                flags0.append(f"↓ snap share down: {sd['now']:.0%} last game vs {sd['before']:.0%} before")
         if r.get("pid") is not None:
             missed = [gid for gid in window if (gid, r.get("pid")) not in played]
         elif g:      # Nov 2: an injury-list entry with no id (Kyle Monangai) -- match his games by name instead
@@ -438,18 +469,34 @@ def player_rows(roster: Sequence[Dict], team, defense, market: str, pgames, allo
             elif grp in ("WR", "TE") and market == "Receiving Yards" and otr.get("cb"):
                 env_mult_qb *= OPP_CB_OUT_RECV
                 flags.append(f"🩹 Their CB {', '.join(otr['cb'][:2])} out ({OPP_CB_OUT_RECV - 1:+.0%} yards)")
+            no_qb_script = sport == "NCAAF" and kind == "pass_att"
             if spread is not None:
-                if kind in ("pass_att", "tgt"):
+                if no_qb_script:
+                    # Nov 8 (research/football_script_v2.py, ESPN 2025 + 2026, held out by season and by alternate
+                    # games): college QBs don't follow the "underdogs throw more" script -- big underdogs' QBs threw
+                    # FEWER yards (bad offense, starters pulled) and big favorites' about their normal. Dropping the
+                    # spread factor for college QB passing cut the error on pass yards 4.7%, and where it moved the
+                    # side it was right 62%. The NFL keeps it (no difference there).
+                    pass
+                elif kind in ("pass_att", "tgt"):
                     opp *= 1 + SCRIPT_PASS * spread
                 elif kind == "rush_att":
                     opp *= 1 - SCRIPT_RUSH * spread
                 elif kind == "touch":
                     opp *= 1 - 0.002 * spread
-                if abs(spread) >= 7:
+                if abs(spread) >= 7 and not no_qb_script:
                     flags.append(("Favored" if spread < 0 else "Underdog") + f" {spread:+.1f}: "
                                  + ("more runs" if spread < 0 else "more passes"))
+                elif abs(spread) >= 14 and no_qb_script:
+                    flags.append(("Favored" if spread < 0 else "Underdog") + f" {spread:+.1f}: college QBs' passing "
+                                 "doesn't follow the script — read from his own form")
             env_mult = 1.0 + ENV_WEIGHT.get(market, 0.7) * ((env or 1.0) - 1)
-            proj = rate * opp * f["factor"] * env_mult * env_mult_qb * _tuning(sport, market, slot)
+            wx_mult = FW.multiplier(market, ctx.get("weather"))          # Nov 8: wind / cold (football_weather.py)
+            if wx_mult != 1.0:
+                wf = FW.flag(market, ctx.get("weather"), sport)
+                if wf:
+                    flags.append(wf)
+            proj = rate * opp * f["factor"] * env_mult * env_mult_qb * wx_mult * _tuning(sport, market, slot)
             if not i["games"]:
                 flags.append("no games in the sample")
         rows.append(price_row(r, key, slot, proj, opp, market, i["vals"], i["read_vals"], ctx, lines, prices,

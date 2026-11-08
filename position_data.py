@@ -121,17 +121,19 @@ def nfl_special_pgames(weekly, before_week: int, game_prefix: str = "") -> List[
     return out
 
 
-def attach_def_snaps(pgames: List[Dict], snaps) -> int:
-    """Nov 8: adds each defender's defensive snaps and snap share for that game (st["def_snaps"], st["def_pct"]) from
-    nflreadpy snap counts, matched by week + team + name. Returns how many lines got snaps."""
+def attach_def_snaps(pgames: List[Dict], snaps, side: str = "defense") -> int:
+    """Nov 8: adds each player's snaps and snap share for that game from nflreadpy snap counts, matched by week + team
+    + name: defenders get st["def_snaps"] / st["def_pct"], skill players (side="offense") st["off_snaps"] /
+    st["off_pct"]. Returns how many lines got snaps."""
     if snaps is None or len(snaps) == 0 or not pgames:
         return 0
     import props_engine as PE
+    pre = "def" if side == "defense" else "off"
+    cols = [f"{side}_snaps", f"{side}_pct"]
     idx = {}
-    for r in snaps[["week", "team", "player", "defense_snaps", "defense_pct"]].to_dict("records"):
+    for r in snaps[["week", "team", "player"] + cols].to_dict("records"):
         try:
-            idx[(int(r["week"]), r["team"], PE.norm_name(r["player"]))] = (float(r["defense_snaps"] or 0),
-                                                                          float(r["defense_pct"] or 0))
+            idx[(int(r["week"]), r["team"], PE.norm_name(r["player"]))] = (float(r[cols[0]] or 0), float(r[cols[1]] or 0))
         except (TypeError, ValueError):
             continue
     n = 0
@@ -140,7 +142,7 @@ def attach_def_snaps(pgames: List[Dict], snaps) -> int:
             continue
         hit = idx.get((int(p.get("order") or 0), p.get("team"), PE.norm_name(p.get("name"))))
         if hit and hit[0] > 0:
-            p["stats"]["def_snaps"], p["stats"]["def_pct"] = hit
+            p["stats"][f"{pre}_snaps"], p["stats"][f"{pre}_pct"] = hit
             n += 1
     return n
 
@@ -552,6 +554,9 @@ def load_football(sport_key: str, date_str: str, home: str, away: str, use_previ
         pgames = _FOOTBALL_PGAMES[memo_key][1]
     elif sport_key == "NFL":
         pgames = nfl_pgames(weekly, before_week)
+        # Nov 8: pass catchers' snap share (a role that just shrank shows in snaps before targets)
+        _safe(lambda: attach_def_snaps(pgames, _snap_counts(stats_season), side="offense"), 0, notes,
+              "offensive snap counts")
     else:
         pos_by_id = {str(p.get("id")): p.get("position") for p in roster if p.get("id") is not None}
         pgames = ncaaf_pgames(rows, stats_season, before_week, pos_by_id)
