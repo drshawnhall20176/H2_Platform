@@ -61,3 +61,19 @@ def test_realistic_chance_uses_the_real_hit_rate():
     assert j["verdict"] == "🔴 Skip"                         # 52% real vs 52.4% needed
     j = CO.judge({"sport": "NBA", "market": "Points", "chance": 0.63, "price": -110, "use": "🎟️ Parlay leg"}, h, (46, 79))
     assert j["verdict"] == "🟢 Good bet"                     # 58% real beats -110
+
+
+def test_why_numbers_match_the_table_and_signals():
+    h = CO._history([])
+    j = CO.judge({"sport": "NFL", "market": "Tackles + Assists", "chance": 0.6411, "price": -146,
+                  "use": "🎟️ Parlay + Single"}, h, (11, 20))
+    assert CO.pct(j["model_chance"]) == "64.1%" and "model 64.1% → edge" in j["why"]
+    assert CO.pct(j["need"]) in j["why"] and CO.pts(j["edge"]) in j["why"]
+    assert j["signal"] == "🟢 Go"
+    r = CO.judge({"sport": "NBA", "market": "Points", "chance": 0.63, "price": -110, "use": "🎯 Single only"}, h, (199, 382))
+    assert "realistic chance 52.1%" in r["why"] and "model 63" not in r["why"].split(";")[0][:10]
+    assert r["signal"] == "🔴 No"
+    assert CO.signal("🟡 Maybe", 0.025, 0) == "🟢 Small stake OK"
+    assert CO.signal("🟡 Maybe", 0.025, 1) == "🟡 Tiny stake only"
+    assert CO.signal("🟡 Maybe", 0.008, 0) == "🟠 Lean pass"
+    assert CO.signal("🟡 Maybe", None, 0) == "🟠 Lean pass"

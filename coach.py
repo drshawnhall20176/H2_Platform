@@ -255,52 +255,67 @@ def _price_row(hist: Dict, odds) -> Optional[Dict]:
     return None
 
 
+def pct(x) -> str:
+    """One way to write a chance everywhere (the Why text and the table use the same one)."""
+    return "—" if x is None else f"{x * 100:.1f}%"
+
+
+def pts(x) -> str:
+    return "—" if x is None else f"{x * 100:+.1f} pts"
+
+
 def judge(c: Dict, hist: Dict, tag_rec: Optional[tuple] = None) -> Dict:
-    """c: {"sport", "market", "chance", "price", "use", "tested"}. Returns {"verdict", "why", "edge", "need"}."""
+    """c: {"sport", "market", "chance", "price", "use", "tested"}. Returns {"verdict", "signal", "why", "edge", "need",
+    "model_chance", "real_chance"}. Every number in the Why text is the same number the table shows."""
     stop, warn, good = [], [], []
-    chance, price = _num(c.get("chance")), _num(c.get("price"))
-    model = chance
-    if chance is not None and tag_rec and tag_rec[1] >= 50 and tag_rec[0] / tag_rec[1] < chance:
+    model, price = _num(c.get("chance")), _num(c.get("price"))
+    chance = model
+    tag = _short(c.get("use"))
+    if model is not None and tag_rec and tag_rec[1] >= 50 and tag_rec[0] / tag_rec[1] < model:
         chance = tag_rec[0] / tag_rec[1]                        # be realistic: the model runs high, use what's hit
-        warn_real = f"model says {model:.0%}, but {_short(c.get('use'))} picks have really hit {chance:.0%} — using {chance:.0%}"
-    else:
-        warn_real = None
+        good.append(f"model says {pct(model)}, but {tag} picks have really hit {pct(chance)} — so the realistic "
+                    f"chance is {pct(chance)}")
+    word = "realistic chance" if chance != model else "model"
     need = breakeven(price)
     edge = None if chance is None or need is None else chance - need
     if chance is None:
         warn.append("no tested chance — the model's lean only")
     elif chance < 0.50:
-        stop.append(f"the model gives it only {chance:.0%}")
-    elif chance >= GOOD_CHANCE:
-        good.append(f"model {chance:.0%}")
-    if warn_real:
-        good.insert(0, warn_real)
+        stop.append(f"{word} only {pct(chance)}")
+    elif chance >= GOOD_CHANCE and word == "model" and price is None:     # with a price, the price line says it
+        good.append(f"model {pct(chance)}")
     if price is None:
         warn.append("no live price to check")
     elif edge is not None:
         if edge < 0:
-            stop.append(f"price too expensive: {price:+.0f} needs {need:.0%}, model has {chance:.0%}")
+            stop.append(f"price too expensive: {price:+.0f} needs {pct(need)}, {word} {pct(chance)} → edge {pts(edge)}")
         elif edge < GOOD_EDGE:
-            warn.append(f"thin edge: {price:+.0f} needs {need:.0%}, model {chance:.0%}")
+            warn.append(f"thin edge: {price:+.0f} needs {pct(need)}, {word} {pct(chance)} → edge {pts(edge)}")
         else:
-            good.append(f"{price:+.0f} needs {need:.0%} → edge {edge * 100:+.0f} pts")
+            good.append(f"{price:+.0f} needs {pct(need)}, {word} {pct(chance)} → edge {pts(edge)}")
     if c.get("use") and "Pass" in str(c["use"]):
         stop.append("the model's tested rules say pass")
     if tag_rec and tag_rec[1] >= 20:
         w, n = tag_rec
         if w / n < 0.5:
-            stop.append(f"this kind of pick ({_short(c.get('use'))}) is {w}–{n - w} the last 30 days")
+            stop.append(f"this kind of pick ({tag}) is {w}–{n - w} the last 30 days")
         else:
-            good.append(f"{_short(c.get('use'))} is {w}–{n - w} lately")
+            good.append(f"{tag} is {w}–{n - w} lately")
+    other = 0                                                   # cautions other than a thin edge
     pr = _price_row(hist, price)
     if pr and pr["Bets"] >= MIN_N and str(pr["Verdict"]).startswith("🔴"):
         warn.append(f"you're {pr['Record']} ({usd(pr['Money'])}) at {pr['What']} prices")
+        other += 1
     lane = hist["lanes"].get(f"{c.get('sport')} · {c.get('market')}")
     if lane and lane["Bets"] >= MIN_N:
-        (good if (lane["Money"] or 0) > 0 else warn).append(
-            f"your {c.get('sport')} {c.get('market')}: {lane['Record']} ({usd(lane['Money'])})")
+        if (lane["Money"] or 0) > 0:
+            good.append(f"your {c.get('sport')} {c.get('market')}: {lane['Record']} ({usd(lane['Money'])})")
+        else:
+            warn.append(f"your {c.get('sport')} {c.get('market')}: {lane['Record']} ({usd(lane['Money'])})")
+            other += 1
     if c.get("tested") is False:
         warn.append("untested lean")
+        other += 1
     if stop:
         v = "🔴 Skip"
     elif not warn and edge is not None and edge >= GOOD_EDGE and (chance or 0) >= GOOD_CHANCE:
@@ -309,8 +324,24 @@ def judge(c: Dict, hist: Dict, tag_rec: Optional[tuple] = None) -> Dict:
         v = "🟡 Maybe"
     else:
         v = "🔴 Skip" if (edge is None and c.get("tested") is False) else "🟡 Maybe"
-    return {"verdict": v, "why": "; ".join(stop + warn + good), "edge": edge, "need": need, "real_chance": chance,
-            "model_chance": model}
+    return {"verdict": v, "signal": signal(v, edge, other), "why": "; ".join(stop + warn + good), "edge": edge,
+            "need": need, "real_chance": chance, "model_chance": model}
+
+
+SIGNALS = ("🟢 Go", "🟢 Small stake OK", "🟡 Tiny stake only", "🟠 Lean pass", "🔴 No")
+
+
+def signal(verdict: str, edge: Optional[float], cautions: int = 0) -> str:
+    """The row's stoplight. Good bets are 🟢, skips 🔴; a Maybe is graded by its edge, less a point per caution
+    (your losing record at that price or in that market, an untested lean)."""
+    if verdict.startswith("🟢"):
+        return SIGNALS[0]
+    if verdict.startswith("🔴"):
+        return SIGNALS[4]
+    if edge is None:
+        return SIGNALS[3]
+    score = edge * 100 - cautions
+    return SIGNALS[1] if score >= 2 else SIGNALS[2] if score >= 1 else SIGNALS[3]
 
 
 def _short(use) -> str:
@@ -366,7 +397,9 @@ def finder(cands, bets, tag_records: Optional[Dict] = None) -> List[Dict]:
             j["why"] = "the model's leans in this market have been losing lately; " + j["why"]
         out.append({**c, **j})
     rank = {"🟢 Good bet": 0, "🟡 Maybe": 1, "🔴 Skip": 2}
-    return sorted(out, key=lambda r: (rank.get(r["verdict"], 3), -(r["edge"] if r["edge"] is not None else -1)))
+    sig = {k: i for i, k in enumerate(SIGNALS)}
+    return sorted(out, key=lambda r: (rank.get(r["verdict"], 3), sig.get(r.get("signal"), 9),
+                                      -(r["edge"] if r["edge"] is not None else -1)))
 
 
 def _strip_use(use) -> str:

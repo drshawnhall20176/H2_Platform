@@ -113,15 +113,14 @@ if not _judged:
     st.info(f"No {f_sport} bets with a live price for this selection yet. Lines usually post the day before.")
 else:
     def _tbl(rows):
-        st.dataframe(pd.DataFrame([{"Time": r["time"], "Game": r["game"], "Bet": r["pick"],
+        st.dataframe(pd.DataFrame([{"Signal": r.get("signal") or "", "Time": r["time"], "Game": r["game"],
+                                    "Bet": r["pick"],
                                     "Price": None if r.get("price") is None else f"{float(r['price']):+.0f}",
-                                    "Model chance": r.get("model_chance"), "Realistic chance": r.get("real_chance"),
-                                    "Price needs": r.get("need"),
-                                    "Edge": None if r.get("edge") is None else round(r["edge"] * 100, 1),
+                                    "Model chance": CO.pct(r.get("model_chance")),
+                                    "Realistic chance": CO.pct(r.get("real_chance")),
+                                    "Price needs": CO.pct(r.get("need")), "Edge": CO.pts(r.get("edge")),
                                     "Why": r["why"]} for r in rows]),
-                     hide_index=True, width="stretch",
-                     column_config={"Model chance": PCT, "Realistic chance": PCT, "Price needs": PCT,
-                                    "Edge": st.column_config.NumberColumn("Edge (pts)", format="%+.1f")})
+                     hide_index=True, width="stretch")
 
     goods = [r for r in _judged if r["verdict"].startswith("🟢")]
     maybes = [r for r in _judged if r["verdict"].startswith("🟡")]
@@ -140,7 +139,10 @@ else:
             if len(_legs) == 3:
                 break
         st.caption("Want a small parlay? Use 2–3 🟢 bets from different games, e.g. " + " + ".join(_legs) + ".")
-    with st.expander(f"🟡 Maybe ({len(maybes)}) — half stake or skip"):
+    with st.expander(f"🟡 Maybe ({len(maybes)}) — check each row's signal"):
+        st.caption("🟢 Small stake OK: 2+ points of edge after any cautions · 🟡 Tiny stake only: 1–2 points · "
+                   "🟠 Lean pass: under 1 point. A caution (your losing record at that price or in that market, "
+                   "an untested lean) takes a point off.")
         if maybes:
             _tbl(maybes[:40])
         else:
