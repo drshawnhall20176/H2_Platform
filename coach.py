@@ -213,7 +213,7 @@ def rules(bets: Sequence[Dict]) -> List[str]:
         if r["Bets"] >= MIN_N and (r["Money"] or 0) < 0 and r["What"] in ("−151 to −200", "Worse than −200"):
             out.append(f"**Avoid {r['What']} prices.** You need to win {r['Need to win']:.0%} there and won "
                        f"{r['Win %']:.0%} ({usd(r['Money'])}).")
-    best, worst = best_and_worst(bets, k=1, min_bets=5)
+    best, worst = best_and_worst(bets, k=1, min_bets=MIN_N)      # a lane needs 10+ bets before it becomes a rule
     if best:
         out.append(f"**Your best lane: {best[0]['What']}** ({best[0]['Record']}, {usd(best[0]['Money'])}). Look there first.")
     if worst:
