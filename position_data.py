@@ -121,6 +121,30 @@ def nfl_special_pgames(weekly, before_week: int, game_prefix: str = "") -> List[
     return out
 
 
+def attach_def_snaps(pgames: List[Dict], snaps) -> int:
+    """Nov 8: adds each defender's defensive snaps and snap share for that game (st["def_snaps"], st["def_pct"]) from
+    nflreadpy snap counts, matched by week + team + name. Returns how many lines got snaps."""
+    if snaps is None or len(snaps) == 0 or not pgames:
+        return 0
+    import props_engine as PE
+    idx = {}
+    for r in snaps[["week", "team", "player", "defense_snaps", "defense_pct"]].to_dict("records"):
+        try:
+            idx[(int(r["week"]), r["team"], PE.norm_name(r["player"]))] = (float(r["defense_snaps"] or 0),
+                                                                          float(r["defense_pct"] or 0))
+        except (TypeError, ValueError):
+            continue
+    n = 0
+    for p in pgames:
+        if p.get("pos") in (None, "K"):
+            continue
+        hit = idx.get((int(p.get("order") or 0), p.get("team"), PE.norm_name(p.get("name"))))
+        if hit and hit[0] > 0:
+            p["stats"]["def_snaps"], p["stats"]["def_pct"] = hit
+            n += 1
+    return n
+
+
 def prior_season_pgames(pgames: List[Dict]) -> List[Dict]:
     """Last season's lines re-keyed so they sort before this season's and never share a game id with it."""
     return [dict(p, order=p["order"] - 100, game=f"p{p['game']}") for p in pgames or []]
@@ -575,6 +599,8 @@ def _nfl_props_extras(eng, season: int, week: int, weekly, teams, notes: List[st
         last = _safe(lambda: eng.load_season_weekly_stats(season - 1), None, notes, "last season's weekly stats")
         prior = prior_season_pgames(nfl_pgames(last, 999)) if last is not None else []
         special = nfl_special_pgames(weekly, week)
+        # Nov 8: defenders' snap share -- tackles read per snap x current role (research/idp_snap_share.py)
+        _safe(lambda: attach_def_snaps(special, _snap_counts(season)), 0, notes, "defensive snap counts")
         special_prior = nfl_special_pgames(last, 999, game_prefix="p") if last is not None else []
         if len(_NFL_PRIOR) > 6:
             _NFL_PRIOR.clear()
