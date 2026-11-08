@@ -828,6 +828,13 @@ def build_slate(date_str: str, season: Optional[int] = None) -> Tuple[List[Dict]
 # section builds on). This is the FIRST genuinely new data source this NCAAF build has added --
 # everything else built on data this platform already had cached and proven.
 
+
+# Nov 7: NCAAF was the one engine whose slate wasn't saved. Every process that touched the board (the Best Bets page,
+# the hourly warm job, log-plays, research) rebuilt the full FBS Saturday slate from scratch -- 1,343 s in tonight's warm
+# job, which ran log-plays past its 20-minute limit twice. Saved once a day like every other sport; the warm job builds it.
+import slate_store as _SS  # noqa: E402
+build_slate = _SS.persisted("NCAAF")(build_slate)
+
 def compute_drive_points(game_drives: List[Dict]) -> List[Dict]:
     """The single most important, easiest-to-get-wrong piece of this whole build, done once here
     rather than left for every future caller to reimplement (and possibly get wrong). Adds two
