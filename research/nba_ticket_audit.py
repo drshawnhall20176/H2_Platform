@@ -35,7 +35,8 @@ print("AU plays", len(pp), "games", sorted({p['Game'] for p in pp}))
 offers = deps["fetch_offers"]("NBA", D, key) or []
 omap = sports.get("NBA").market_map
 idx = A.index_offers(offers)
-print("AU offers", len(offers))
+print("AU offers", len(offers), "| sample offer", offers[0] if offers else None)
+print("AU idx sample key", next(iter(idx), None), "| value", (next(iter(idx.values()), None) or [None])[:2])
 
 # ---- Desk angles (same inputs as the page, evidence on)
 game_env, _ = deps["game_env"]("NBA", D, meta, key)
@@ -45,6 +46,7 @@ hist = A.history_lookup(lidx, omap)
 calls = A.scan(pp, "NBA", D, offers=offers, odds_map=omap, history_fn=hist, expect_book_lines=True, book="draftkings",
                game_env=game_env, matchups=matchups, history_limit=len(pp))
 angles = {}
+print("AU calls", len(calls), "| sample call keys", sorted(calls[0].keys())[:40] if calls else None)
 for c in calls:
     angles[(PE.norm_name(c.get("Player") or ""), c.get("Market"), c.get("Side"))] = A.angle_names(c)
 
