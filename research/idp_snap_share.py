@@ -30,39 +30,28 @@ def wmean(xs):
     xs = xs[::-1][:5]; w = W[:len(xs)]
     return sum(a * b for a, b in zip(xs, w)) / sum(w)
 
-res = defaultdict(lambda: defaultdict(list))
+res = defaultdict(lambda: [0, 0, 0.0, 0.0, 0.0, 0])
 for pid, g in df.groupby("pfr_player_id"):
     rows = g.to_dict("records")
     for i in range(3, len(rows)):
         hist, cur = rows[max(0, i - 8):i], rows[i]
-        if hist[-1]["season"] != cur["season"] and len([h for h in hist if h["season"] == cur["season"]]) < 1:
-            pass
         sn = [h["defense_snaps"] for h in hist]
         pct = [h["defense_pct"] for h in hist]
-        for stat in ("solo", "tka"):
-            key = solo if stat == "solo" else "tka"
+        role = (pct[-1] - sum(pct[-6:-1]) / max(1, len(pct[-6:-1]))) if len(pct) >= 2 else 0
+        bucket = "role up" if role >= 0.15 else "role down" if role <= -0.15 else "steady"
+        for stat, key in (("solo", solo), ("tka", "tka")):
             v = [h[key] for h in hist]
-            per_game = wmean(v)
-            rate = sum(v[-6:]) / max(1, sum(sn[-6:]))               # per snap, last 6 games
-            team_snaps = cur["defense_snaps"] / cur["defense_pct"] if cur["defense_pct"] else None
-            exp_snaps = wmean(sn[-3:]) if len(sn) >= 3 else wmean(sn)   # current role: last 3 games, weighted
-            per_snap = rate * exp_snaps
-            blend = 0.5 * per_game + 0.5 * per_snap
+            pg = wmean(v)
+            ps_ = sum(v[-6:]) / max(1, sum(sn[-6:])) * wmean(sn[-3:])
+            bl = 0.5 * pg + 0.5 * ps_
             y = cur[key]
-            role = (pct[-1] - sum(pct[-6:-1]) / max(1, len(pct[-6:-1]))) if len(pct) >= 2 else 0
-            bucket = "role up 15+ pts" if role >= 0.15 else "role down 15+ pts" if role <= -0.15 else "steady"
-            for b in ("all", bucket):
-                r = res[(stat, b)]
-                r["pg"].append(abs(per_game - y)); r["ps"].append(abs(per_snap - y)); r["bl"].append(abs(blend - y))
-                r["n"].append(1)
-                # over/under a typical line: per-game avg rounded to .5 -- does the snap read call the side better?
-                line = math.floor(per_game) + 0.5
-                if per_snap != per_game:
-                    call_over = per_snap > per_game
-                    r["side"].append(1 if (y > line) == call_over else 0)
-for (stat, b), r in sorted(res.items()):
-    n = len(r["n"])
-    side = r["side"]
-    print("IDP", stat, f"{b:18s} n={n:6d}  MAE per-game {sum(r['pg'])/n:.3f} | per-snap {sum(r['ps'])/n:.3f} | blend {sum(r['bl'])/n:.3f}"
-          f" | snap read calls side vs per-game line {sum(side)}/{len(side)} = {sum(side)/max(1,len(side)):.1%}")
-# by season for the held-out check (stable across seasons?)
+            for line in (math.floor(pg) + 0.5, math.floor(bl) + 0.5):
+                a, b = pg > line, bl > line
+                if a != b:                                       # the two reads disagree on the side
+                    for k in ((stat, "all", "all"), (stat, bucket, "all"), (stat, "all", int(cur["season"]))):
+                        r = res[k]; r[0] += 1; r[1] += (y > line) == b
+            for k in ((stat, "all", int(cur["season"])),):
+                r = res[k]; r[2] += abs(pg - y); r[3] += abs(bl - y); r[5] += 1
+for k, r in sorted(res.items(), key=lambda kv: str(kv[0])):
+    mae = f" | MAE per-game {r[2]/r[5]:.3f} blend {r[3]/r[5]:.3f} ({(r[2]-r[3])/r[2]:+.1%})" if r[5] else ""
+    print("IDP2", k, f"disagreements {r[0]}, blend right {r[1]} = {r[1]/max(1,r[0]):.1%}" + mae)
