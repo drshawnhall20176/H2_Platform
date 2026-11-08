@@ -30,6 +30,31 @@ MAX_DEFENDERS = 14
 MIN_TKL, MIN_SACKS = 1.5, 0.15
 
 
+# Nov 8: snap share for tackle props (research/idp_snap_share.py, NFL 2023-26, each game predicted from earlier games
+# only). Per game ignores a change in role; per snap x the defender's last 3 games of snaps sees it. A 50/50 blend cut
+# the error in all four seasons (about 1%), and where the two reads disagreed on a side the blend was right 53-54% --
+# 58-61% when his snap share had DROPPED 15+ points. When it ROSE 15+ points the per-snap read didn't help (49%), so
+# then the per-game read stands alone.
+SNAP_MARKETS = ("Solo Tackles", "Tackles + Assists")
+SNAP_BLEND = 0.5
+ROLE_SHIFT = 0.15
+
+
+def snap_read(games: Sequence[Dict], vals: Sequence[float]) -> Optional[Dict]:
+    """games newest first. {"proj": per-snap rate x expected snaps, "delta": snap-share change, "now", "before"} or
+    None when fewer than 3 games carry snap counts."""
+    g = [(v, x.get("stats") or {}) for v, x in zip(vals, games)]
+    g = [(v, s) for v, s in g if _num(s.get("def_snaps")) > 0]
+    if len(g) < 3:
+        return None
+    snaps = [_num(s["def_snaps"]) for _, s in g]
+    rate = sum(v for v, _ in g[:6]) / sum(snaps[:6])
+    exp = PE.wmean(snaps[:3])
+    pct = [_num(s.get("def_pct")) for _, s in g]
+    before = sum(pct[1:6]) / len(pct[1:6])
+    return {"proj": rate * exp, "delta": pct[0] - before, "now": pct[0], "before": before}
+
+
 def _num(x) -> float:
     return PE.num(x)
 
@@ -128,6 +153,12 @@ def player_rows(roster: Sequence[Dict], team, other, market: str, special: Dict,
                 n_eq += k
                 read_vals = vals + p_vals[:k]
                 flags.append(f"＋ last season blended in ({len(vals)} game{'s' if len(vals) != 1 else ''} this season)")
+        if own is not None and group == "defense" and market in SNAP_MARKETS:
+            sr = snap_read(g, vals)
+            if sr is not None and sr["delta"] < ROLE_SHIFT:
+                own = (1 - SNAP_BLEND) * own + SNAP_BLEND * sr["proj"]
+                if sr["delta"] <= -ROLE_SHIFT:
+                    flags.append(f"↓ snap share down: {sr['now']:.0%} last game vs {sr['before']:.0%} before")
         proj = None
         env_mult = 1.0
         if not out and own is not None:
