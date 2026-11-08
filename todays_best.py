@@ -491,7 +491,9 @@ def log_selection(items: Sequence[Dict], mode: str, stake: float, parlay_stake: 
             done["singles"].append(B.add_bet(**r))
     if mode in ("Parlay", "Both") and len(rows) >= 2 and parlay_price is not None:
         legs = [{"player": r["player"], "market": r["market"], "side": r["side"], "line": r["line"], "game": r.get("game"),
-                 "model_prob": r.get("model_prob"), "price": r.get("entry_odds")} for r in rows]
+                 "model_prob": r.get("model_prob"), "price": r.get("entry_odds"),
+                 "note": ",".join(t for t in str(r.get("notes") or "").split(",") if t and t != tag) or None}
+                for r in rows]
         sports = {r["sport"] for r in rows}
         name = ticket or f"{'/'.join(sorted(sports))} {len(rows)}-leg {date_str}"
         res = B.log_parlay_ticket(name, legs, int(parlay_price), float(parlay_stake), date_str,
