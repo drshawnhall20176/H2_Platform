@@ -55,6 +55,7 @@ if _owner:
     import pandas as _pd
     import props_engine as _PE
     import todays_best as _TB
+    import pick_records as _PR
     _now_day = _dt.now(_ET).date()
     _props_sports = [s.key for s in live if s.key in ("NBA", "NFL", "NHL", "NCAAF")]
     C.section_header("⭐", "Today's best")
@@ -136,10 +137,25 @@ if _owner:
 
     _rows = [r for r in _rows if _keep(r)]
     _rows = [r for r in _rows if r.get("lock")] if _show.startswith("🔒") else _rows
+    # Nov 8: every pick type carries its own live record (last 30 days, refreshed by the morning review); a type
+    # that's been losing is hidden until it earns its way back -- the visible half of the daily feedback loop
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def _tag_recs(sp):
+        return _PR.tag_records(sp)
+
+    _PR.annotate_props(_rows, _tag_recs)
+    _hidden = [r for r in _rows if r.get("verdict") in _PR.HIDE]
+    _show_losing = st.toggle(f"Show losing pick types ({len(_hidden)} hidden)", value=False, key="home_best_losing",
+                             disabled=not _hidden,
+                             help="Pick types whose last-30-day record is under 50% (or 40% and under: the other "
+                                  "side has been winning). They come back on their own when the record recovers.")
+    if not _show_losing:
+        _rows = [r for r in _rows if r.get("verdict") not in _PR.HIDE]
     _rows = sorted(_rows, key=lambda r: _tkey(r.get("time")))   # Nov 6: earliest games first (stable: rank kept within a time)
     if _rows:
         _df = _pd.DataFrame([{"Sport": r["sport"], "Time": r.get("time") or "", "Pick": r["pick"],
                               "Use": ("🔒 " if r.get("lock") else "") + (r.get("use") or ""),
+                              "Record (30d)": r.get("record") or "—",
                               "Chance": r.get("chance"),
                               "Price": ("—" if r.get("price") is None else f"{float(r['price']):+.0f}"),
                               "Needs": ("" if r.get("need") is None else f"{float(r['need']):+.0f} or better"),
@@ -156,6 +172,10 @@ if _owner:
             _df = _df.drop(columns=["Sport"])
         st.dataframe(_df, hide_index=True, width="stretch",
                      column_config={"Chance": st.column_config.NumberColumn(format="percent")})
+        _fades = sorted({f"{r['sport']} {_PR._strip(r.get('use'))}" for r in _rows if r.get("verdict") == "fade"})
+        if _fades:
+            st.warning("**Consider the fade:** " + ", ".join(_fades) + " — the other side of these has been winning "
+                       "60%+. Check the opposite side's price before betting either way.")
         if any(r.get("untested") for r in _rows):
             st.caption("**No backtest:** these tennis matches (events only ESPN lists, with no posted prices) are tagged "
                        "from the model's chance alone — nothing has tested that chance yet. On main-tour matches the "
@@ -202,13 +222,27 @@ if _owner:
         # Nov 6: earliest games first; within a start time, tested picks, then the strongest leans
         _w = sorted(_w, key=lambda r: (_tkey(r.get("time")), not r.get("best_tested"), r.get("backtest") is None,
                                        -(r.get("backtest") or 0), -(r.get("lean_z") or 0)))
-        _only_tested = st.toggle("Tested picks only", value=False, key="home_win_tested")
+        @st.cache_data(ttl=1800, show_spinner=False)
+        def _lean_recs(lg):
+            return _PR.lean_records(lg)
+
+        _PR.annotate_leans(_w, _lean_recs)
+        _t1, _t2 = st.columns(2)
+        _only_tested = _t1.toggle("Tested picks only", value=False, key="home_win_tested")
+        _lhid = [r for r in _w if not r.get("best_tested") and r.get("lean_verdict") in _PR.HIDE]
+        _lshow = _t2.toggle(f"Show losing lean types ({len(_lhid)} hidden)", value=False, key="home_win_losing",
+                            disabled=not _lhid, help="Untested leans in a market where the model's lean has lost "
+                                                     "more than it won over the last 30 days.")
         _ws = [r for r in _w if r.get("best_tested")] if _only_tested else _w
+        if not _lshow:
+            _ws = [r for r in _ws if r.get("best_tested") or r.get("lean_verdict") not in _PR.HIDE]
         _wdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"],
                                "Pick / lean": r.get("best") or "—",
                                "Status": (f"✅ {r.get('use')}" if r.get("best_tested") else
                                           ("lean · untested" if r.get("best") else "")),
                                "Model vs line": r.get("lean_detail") or "",
+                               "Lean record (30d)": ((("⚠️ " if r.get("lean_verdict") in _PR.HIDE else "")
+                                                      + r["lean_record"]) if r.get("lean_record") else "—"),
                                "Backtest cover": r.get("backtest") if not r.get("best_tested") else None,
                                "Chance": r.get("best_chance") if r.get("best_tested") else None,
                                "Price": (f"{float(r['best_price']):+.0f}" if r.get("best_tested") and r.get("best_price")
