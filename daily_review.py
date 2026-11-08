@@ -315,8 +315,16 @@ def review_sport(sport: str, morning: str, open_bets: Sequence[Dict], fetch: Cal
     cal["active"] = CAL.factor(sport)
     cal["by_side"] = CAL.fit_by_side(trend_rows)               # Nov 5: Over and Under fitted separately
     cal["side_active"] = list(CAL.side_factors(sport))
+    # Nov 8: the loop learns on its own -- each side's factor refit on the window and applied when it holds up out of
+    # sample (calibration.auto_side); the decisions ride in the report, applied ones in the morning notes
+    try:
+        cal["auto"] = CAL.auto_side(sport, trend, morning, write=write)
+    except Exception as exc:                                    # noqa: BLE001
+        cal["auto"] = []
+        print(f"  [{sport}] auto-calibration failed: {type(exc).__name__}: {exc}")
     return {"sport": sport, "morning": morning, "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "slates": slates, "notes": notes(slates) + calibration_notes(cal) + game_pick_notes(games_rep),
+            "slates": slates, "notes": notes(slates) + CAL.auto_notes(cal.get("auto") or []) + calibration_notes(cal)
+            + game_pick_notes(games_rep),
             "calibration": cal, "game_picks": games_rep,
             "trend": {"days": TREND_DAYS, "slates": len(trend), "graded": len(trend_rows),
                       "use": PG.use_record(trend_rows), "beat": PG.beat_model(trend_rows)},
@@ -351,7 +359,37 @@ def run(morning: str, fetch: Callable = PG._http, db_path: Optional[str] = None,
               f"{len(s['unresolved'])} left for a person · {len(s['still_pending'])} not final")
         for n in rep["notes"]:
             print("   ", n)
+    if write:
+        settle_game_lines(bet_db)
     return out
+
+
+GAME_LINE_LEAGUES = ("NCAAF", "NCAAMB", "NBA", "NHL", "WNBA")
+
+
+def settle_game_lines(bet_db: Optional[str] = None) -> int:
+    """Nov 8: game-line bets logged from Today's best / a Game Lab ("gl:<league>:<game_id>") settle once their game is
+    graded. Only the international and tennis captures called this before, so a college football total logged on Saturday
+    stayed open for good. Then parlay tickets whose legs are all settled roll up."""
+    import intl_picks as IP
+    n = 0
+    for lg in GAME_LINE_LEAGUES:
+        try:
+            k = IP.settle_logged(lg)
+            n += k
+            if k:
+                print(f"[{lg}] settled {k} game-line bet(s)")
+        except Exception as exc:                                    # noqa: BLE001
+            print(f"[{lg}] game-line settlement failed: {type(exc).__name__}: {exc}")
+    kw = {"db_path": bet_db} if bet_db else {}
+    try:
+        for t in B.ticket_settlements(B.list_bets(**kw)):
+            B.update_bet(t["id"], result=t["result"], **kw)
+            n += 1
+            print(f"ticket {t.get('ticket') or t['id']} -> {t['result']}")
+    except Exception as exc:                                        # noqa: BLE001
+        print(f"ticket roll-up failed: {type(exc).__name__}: {exc}")
+    return n
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

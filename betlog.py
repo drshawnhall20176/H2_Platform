@@ -637,7 +637,9 @@ def log_parlay_ticket(ticket: str, legs: List[Dict], total_odds: int, stake: flo
     for l in legs:
         # Nov 4: a leg's own price, when known, rides in its notes (leg_price=-219) so a strategy can be judged leg by
         # leg -- the leg still carries no stake or entry price, so it can never be counted as a bet.
-        leg_notes = ",".join(x for x in (notes, None if l.get("price") is None else f"leg_price={int(float(l['price']))}") if x) or None
+        # Nov 8: and its own note (a game link "gl:NCAAF:<id>" from Today's best / log-plays) so the leg can settle itself
+        leg_notes = ",".join(x for x in (notes, l.get("note"), None if l.get("price") is None
+                                         else f"leg_price={int(float(l['price']))}") if x) or None
         ids.append(add_bet(db_path, slate_date=slate_date, game=l.get("game") or game, player=l.get("player"),
                            market=l.get("market"), side=l.get("side") or "Over", line=l.get("line"),
                            entry_odds=None, model_prob=l.get("model_prob"), stake=0.0, book=book,

@@ -86,7 +86,8 @@ def table(rows, first="Group"):
                  | {"ROI": st.column_config.NumberColumn(format="percent")})
 
 
-t1, t2, t3, t4, t5, t6 = st.tabs(["By sport", "By bet type", "By strategy", "By month", "🧾 Tax summary", "📖 Ledger"])
+t1, t2, t3, t4, t7, t5, t6 = st.tabs(["By sport", "By bet type", "By strategy", "By month", "🧭 You vs the model",
+                                     "🧾 Tax summary", "📖 Ledger"])
 with t1:
     table(s["by_sport"], "Sport")
 with t2:
@@ -96,6 +97,20 @@ with t3:
     st.caption("Strategy = the tag a bet was logged under (platform-test, live-tennis, game-lab ...).")
 with t4:
     table(s["by_month"], "Month")
+with t7:                                                        # Nov 8: where your own picks win and lose
+    import pick_records as PR
+    yours = PR.your_picks([b for b in bets if start <= str(b.get("slate_date") or "")[:10] <= end])
+    if yours:
+        st.dataframe(pd.DataFrame(yours), hide_index=True, width="stretch",
+                     column_config={"Win %": st.column_config.NumberColumn(format="percent"),
+                                    "Staked": st.column_config.NumberColumn(format="$%.2f"),
+                                    "P/L": st.column_config.NumberColumn(format="$%.2f")})
+        st.caption("Your settled real bets, grouped by the model's chance on that exact pick when it was logged. "
+                   "Parlay legs are graded one by one (their money is in the Parlay row). If the 60%+ band wins and "
+                   "the lower bands lose, the edge is in sticking to the model's strongest reads — and a 60% pick "
+                   "still loses 4 times in 10, so judge a band over 30+ bets, not one night.")
+    else:
+        st.info("No settled real-money bets in this period.")
 with t5:
     st.markdown(f"| | |\n|---|---:|\n| Gambling winnings (reported as income) | {money(s['tax']['winnings'])} |\n"
                 f"| Gambling losses (itemized deduction only) | {money(s['tax']['losses'])} |\n"
