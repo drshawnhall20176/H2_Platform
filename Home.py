@@ -135,6 +135,15 @@ if _owner:
         return ((not _pick_times or r.get("time") in _pick_times)
                 and (not _pick_games or r.get("game") in _pick_games))
 
+    # Nov 8: kickoff weather for football games (football_weather.py): sky, temperature, wind; ⚠️ = the model adjusts
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def _wx_label(sport, day, game):
+        import football_weather as _FW
+        return _FW.label_for(sport, day, game)
+
+    def _wx(sport, game):
+        return _wx_label(sport, _today, game) if sport in ("NFL", "NCAAF") else ""
+
     _rows = [r for r in _rows if _keep(r)]
     _rows = [r for r in _rows if r.get("lock")] if _show.startswith("🔒") else _rows
     # Nov 8: every pick type carries its own live record (last 30 days, refreshed by the morning review); a type
@@ -159,11 +168,14 @@ if _owner:
                               "Chance": r.get("chance"),
                               "Price": ("—" if r.get("price") is None else f"{float(r['price']):+.0f}"),
                               "Needs": ("" if r.get("need") is None else f"{float(r['need']):+.0f} or better"),
-                              "Game": r.get("game"), "Where": r.get("page"),
+                              "Game": r.get("game"), "Weather": _wx(r.get("sport"), r.get("game")),
+                              "Where": r.get("page"),
                               "Tested": "no backtest" if r.get("untested") else "",
                               "Result": _TB.RESULT_ICON.get(r.get("result"), "—")} for r in _rows[:60]])
         if not _past:
             _df = _df.drop(columns=["Result"])
+        if not _df["Weather"].replace("", None).notna().any():
+            _df = _df.drop(columns=["Weather"])
         if not _df["Needs"].any():
             _df = _df.drop(columns=["Needs"])
         if not _df["Tested"].any():
@@ -237,6 +249,7 @@ if _owner:
         if not _lshow:
             _ws = [r for r in _ws if r.get("best_tested") or r.get("lean_verdict") not in _PR.HIDE]
         _wdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"],
+                               "Weather": _wx(r["sport"], r["game"]),
                                "Pick / lean": r.get("best") or "—",
                                "Status": (f"✅ {r.get('use')}" if r.get("best_tested") else
                                           ("lean · untested" if r.get("best") else "")),
@@ -257,6 +270,8 @@ if _owner:
             _wdf = _wdf.drop(columns=["Final", "Pick result", "Winner result"])
         if _scope != "All sports" and not _wdf.empty:
             _wdf = _wdf.drop(columns=["Sport"])
+        if not _wdf.empty and not _wdf["Weather"].replace("", None).notna().any():
+            _wdf = _wdf.drop(columns=["Weather"])
         if not _wdf.empty:                                       # columns with nothing in them (no tested picks) go
             _wdf = _wdf.drop(columns=[c for c in ("Chance", "Price", "Value", "Backtest cover")
                                       if c in _wdf and not _wdf[c].replace("", None).notna().any()])

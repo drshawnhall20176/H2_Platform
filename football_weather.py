@@ -126,7 +126,8 @@ def _forecast(lat: float, lon: float, kickoff: datetime, fetch: Callable) -> Opt
 
     def go():
         return fetch(FORECAST, {"latitude": round(lat, 3), "longitude": round(lon, 3),
-                                "hourly": "temperature_2m,wind_speed_10m", "temperature_unit": "fahrenheit",
+                                "hourly": "temperature_2m,wind_speed_10m,weather_code,precipitation_probability",
+                                "temperature_unit": "fahrenheit",
                                 "wind_speed_unit": "mph", "timezone": "UTC", "start_date": day, "end_date": day2})
     d = _cached(("wx", round(lat, 2), round(lon, 2), day), go) or {}
     h = d.get("hourly") or {}
@@ -140,7 +141,58 @@ def _forecast(lat: float, lon: float, kickoff: datetime, fetch: Callable) -> Opt
     t = [temps[i] for i in pick if i < len(temps) and temps[i] is not None]
     if not w:
         return None
-    return {"wind": sum(w) / len(w), "temp": sum(t) / len(t) if t else None}
+    codes = [h.get("weather_code")[i] for i in pick if i < len(h.get("weather_code") or []) and h["weather_code"][i] is not None]
+    pops = [h.get("precipitation_probability")[i] for i in pick
+            if i < len(h.get("precipitation_probability") or []) and h["precipitation_probability"][i] is not None]
+    return {"wind": sum(w) / len(w), "temp": sum(t) / len(t) if t else None,
+            "code": max(codes, key=lambda c: (_severity(c), c)) if codes else None, "precip": max(pops) if pops else None}
+
+
+# WMO weather codes (Open-Meteo) -> (icon, word). The worst sky over the first three hours is the one shown.
+SKY = {0: ("☀️", "Clear"), 1: ("🌤️", "Mostly clear"), 2: ("⛅", "Partly cloudy"), 3: ("☁️", "Cloudy"),
+       45: ("🌫️", "Fog"), 48: ("🌫️", "Fog"), 51: ("🌦️", "Drizzle"), 53: ("🌦️", "Drizzle"), 55: ("🌧️", "Drizzle"),
+       56: ("🌧️", "Freezing drizzle"), 57: ("🌧️", "Freezing drizzle"), 61: ("🌧️", "Light rain"), 63: ("🌧️", "Rain"),
+       65: ("🌧️", "Heavy rain"), 66: ("🌧️", "Freezing rain"), 67: ("🌧️", "Freezing rain"), 71: ("🌨️", "Light snow"),
+       73: ("🌨️", "Snow"), 75: ("❄️", "Heavy snow"), 77: ("🌨️", "Snow grains"), 80: ("🌦️", "Showers"),
+       81: ("🌧️", "Showers"), 82: ("⛈️", "Heavy showers"), 85: ("🌨️", "Snow showers"), 86: ("❄️", "Heavy snow showers"),
+       95: ("⛈️", "Thunderstorms"), 96: ("⛈️", "Thunderstorms"), 99: ("⛈️", "Thunderstorms")}
+
+
+def _severity(code) -> int:
+    c = int(code)
+    return 3 if c >= 71 and c not in (80, 81, 82, 95, 96, 99) else 2 if c >= 51 else 1 if c >= 45 else 0 if c <= 3 else 0
+
+
+def label(wx: Optional[Dict]) -> str:
+    """'☀️ Clear 59°F · 💨 6 mph', '🌧️ Rain 44°F · 💨 17 mph ⚠️', '🏟️ Dome' -- ⚠️ when the model adjusts for it."""
+    if not wx:
+        return "—"
+    if wx.get("indoor"):
+        return "🏟️ Dome"
+    icon, word = SKY.get(int(wx["code"]), ("", "")) if wx.get("code") is not None else ("", "")
+    bits = [" ".join(x for x in (icon, word) if x)]
+    if wx.get("temp") is not None:
+        bits[0] = (bits[0] + f" {wx['temp']:.0f}°F").strip()
+        if wx["temp"] <= COLD_F:
+            bits[0] += " 🥶"
+    if wx.get("wind") is not None:
+        bits.append(("💨 " if wind_bucket(wx["wind"]) is not None else "") + f"{wx['wind']:.0f} mph")
+    if wx.get("precip") is not None and wx["precip"] >= 40 and (wx.get("code") or 0) < 51:
+        bits.append(f"{wx['precip']:.0f}% chance of rain")
+    out = " · ".join(b for b in bits if b) or "—"
+    impacted = wind_bucket(wx.get("wind")) is not None or (wx.get("temp") is not None and wx["temp"] <= COLD_F)
+    return out + (" ⚠️" if impacted else "")
+
+
+def label_for(sport: str, date_str: str, game: str) -> str:
+    """The weather label for a game label 'Away @ Home' on the date (football only; '' otherwise)."""
+    if sport not in PATHS or " @ " not in str(game or ""):
+        return ""
+    try:
+        away, home = [x.strip() for x in str(game).split(" @ ", 1)]
+        return label(for_game(slate(sport, date_str), home, away))
+    except Exception:                                           # noqa: BLE001
+        return "—"
 
 
 def _names(team: Dict) -> set:
@@ -158,6 +210,7 @@ def slate(sport: str, date_str: str, fetch: Callable = _http) -> list:
         path, extra = PATHS[sport]
         d = fetch(ESPN.format(path=path), dict(extra, dates=date_str.replace("-", ""))) or {}
         out = []
+        todo = []
         for ev in d.get("events") or []:
             comp = (ev.get("competitions") or [{}])[0]
             teams = comp.get("competitors") or []
@@ -169,15 +222,22 @@ def slate(sport: str, date_str: str, fetch: Callable = _http) -> list:
             rec = {"home": _names(home), "away": _names(away), "indoor": bool(v.get("indoor")),
                    "venue": v.get("fullName"), "wind": None, "temp": None}
             if not rec["indoor"]:
-                addr = v.get("address") or {}
-                try:
-                    ko = datetime.fromisoformat(str(ev.get("date")).replace("Z", "+00:00")).astimezone(timezone.utc)
-                except ValueError:
-                    ko = None
-                ll = _geocode(addr.get("city"), addr.get("state"), fetch) if addr.get("city") else None
-                if ll and ko:
-                    rec.update(_forecast(ll[0], ll[1], ko, fetch) or {})
+                todo.append((rec, v.get("address") or {}, ev.get("date")))
             out.append(rec)
+
+        def fill(job):                                          # one geocode + forecast per outdoor game, in parallel
+            rec, addr, when = job
+            try:
+                ko = datetime.fromisoformat(str(when).replace("Z", "+00:00")).astimezone(timezone.utc)
+            except ValueError:
+                return
+            ll = _geocode(addr.get("city"), addr.get("state"), fetch) if addr.get("city") else None
+            if ll:
+                rec.update(_forecast(ll[0], ll[1], ko, fetch) or {})
+        if todo:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=8) as ex:
+                list(ex.map(fill, todo))
         return out
     key = ("slate", sport, date_str)
     hit = _CACHE.get(key)

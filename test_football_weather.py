@@ -42,3 +42,11 @@ def test_failed_lookups_are_not_remembered():
     FW._cached("k", go)
     assert len(calls) == 2
     FW._CACHE.clear()
+
+
+def test_labels():
+    assert FW.label({"indoor": True}) == "🏟️ Dome"
+    assert FW.label({"wind": 6, "temp": 59, "code": 0}) == "☀️ Clear 59°F · 6 mph"
+    assert FW.label({"wind": 17, "temp": 38, "code": 73}).endswith("⚠️") and "🌨️ Snow 38°F 🥶" in FW.label({"wind": 17, "temp": 38, "code": 73})
+    assert FW.label(None) == "—"
+    assert FW.label_for("NBA", "2026-11-08", "A @ B") == ""
