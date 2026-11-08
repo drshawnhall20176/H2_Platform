@@ -11,7 +11,7 @@ import time
 
 import slate_store as SS
 
-DEFAULT = ("NBA", "NHL", "NFL", "WNBA", "NCAAMB")       # biggest last: college opening week is hundreds of games
+DEFAULT = ("NBA", "NHL", "NFL", "WNBA", "NCAAF", "NCAAMB")   # biggest last: college opening week is hundreds of games
 
 
 def main(argv=None) -> int:

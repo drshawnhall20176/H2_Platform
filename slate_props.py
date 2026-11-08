@@ -407,6 +407,7 @@ def play_from_row(row: Dict, slate_row: Optional[Dict] = None) -> Optional[Dict]
                           + ([PE.STAR_OUT_TAG] if PE.is_star_out(row) else [])
                           + ([f"use:{PE.USE_KEY[use]}"] if use in PE.USE_KEY else [])) or None,
         "Why": why(row), "Model": "player-props",
+        "Flags": [f for f in (row.get("flags") or []) if f],   # Nov 7: every note on the row (usage bumps, news, ...)
         "PriorGames": row.get("games", 0) - row.get("season_games", 0) if row.get("filled") else 0,
         "PreseasonGames": 0,
         "_stat_key": "+".join(PPR.MARKETS.get(row["market"], ())), "_game_log": s.get("_game_log") or [],
