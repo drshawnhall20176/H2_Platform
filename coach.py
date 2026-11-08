@@ -226,3 +226,148 @@ def rules(bets: Sequence[Dict]) -> List[str]:
     if not out:
         out.append("Not enough settled bets in this period to write rules yet. Try a longer period.")
     return out
+
+
+# --------------------------------------------------------------------------- bet finder (Nov 8)
+# Pick a sport, game and time; every bet on offer gets a plain verdict -- 🟢 Good bet / 🟡 Maybe / 🔴 Skip -- and the
+# reasons in one line each. The checks, in order of how often they've cost money:
+#   1. does the model think it wins at all (under 50% = skip; betting against the model went 21–47)
+#   2. is the price cheap enough for the model's chance (chance minus what the price needs = the edge)
+#   3. has this kind of pick (its Use tag) been winning lately (the 30-day record from pick_records)
+#   4. how have YOU done at this price and in this sport/market (your own report card)
+GOOD_EDGE = 0.03               # the model's chance must beat the price's break-even by 3 points to be a good bet
+GOOD_CHANCE = 0.55
+
+
+def _history(bets) -> Dict:
+    lanes = {r["What"]: r for r in by_group(bets)}
+    prices = list(price_check(bets))
+    return {"lanes": lanes, "prices": prices}
+
+
+def _price_row(hist: Dict, odds) -> Optional[Dict]:
+    o = _num(odds)
+    if o is None:
+        return None
+    for (name, lo, hi), r in ((p, next((x for x in hist["prices"] if x["What"] == p[0]), None)) for p in PRICES):
+        if lo <= o <= hi:
+            return r
+    return None
+
+
+def judge(c: Dict, hist: Dict, tag_rec: Optional[tuple] = None) -> Dict:
+    """c: {"sport", "market", "chance", "price", "use", "tested"}. Returns {"verdict", "why", "edge", "need"}."""
+    stop, warn, good = [], [], []
+    chance, price = _num(c.get("chance")), _num(c.get("price"))
+    model = chance
+    if chance is not None and tag_rec and tag_rec[1] >= 50 and tag_rec[0] / tag_rec[1] < chance:
+        chance = tag_rec[0] / tag_rec[1]                        # be realistic: the model runs high, use what's hit
+        warn_real = f"model says {model:.0%}, but {_short(c.get('use'))} picks have really hit {chance:.0%} — using {chance:.0%}"
+    else:
+        warn_real = None
+    need = breakeven(price)
+    edge = None if chance is None or need is None else chance - need
+    if chance is None:
+        warn.append("no tested chance — the model's lean only")
+    elif chance < 0.50:
+        stop.append(f"the model gives it only {chance:.0%}")
+    elif chance >= GOOD_CHANCE:
+        good.append(f"model {chance:.0%}")
+    if warn_real:
+        good.insert(0, warn_real)
+    if price is None:
+        warn.append("no live price to check")
+    elif edge is not None:
+        if edge < 0:
+            stop.append(f"price too expensive: {price:+.0f} needs {need:.0%}, model has {chance:.0%}")
+        elif edge < GOOD_EDGE:
+            warn.append(f"thin edge: {price:+.0f} needs {need:.0%}, model {chance:.0%}")
+        else:
+            good.append(f"{price:+.0f} needs {need:.0%} → edge {edge * 100:+.0f} pts")
+    if c.get("use") and "Pass" in str(c["use"]):
+        stop.append("the model's tested rules say pass")
+    if tag_rec and tag_rec[1] >= 20:
+        w, n = tag_rec
+        if w / n < 0.5:
+            stop.append(f"this kind of pick ({_short(c.get('use'))}) is {w}–{n - w} the last 30 days")
+        else:
+            good.append(f"{_short(c.get('use'))} is {w}–{n - w} lately")
+    pr = _price_row(hist, price)
+    if pr and pr["Bets"] >= MIN_N and str(pr["Verdict"]).startswith("🔴"):
+        warn.append(f"you're {pr['Record']} ({usd(pr['Money'])}) at {pr['What']} prices")
+    lane = hist["lanes"].get(f"{c.get('sport')} · {c.get('market')}")
+    if lane and lane["Bets"] >= MIN_N:
+        (good if (lane["Money"] or 0) > 0 else warn).append(
+            f"your {c.get('sport')} {c.get('market')}: {lane['Record']} ({usd(lane['Money'])})")
+    if c.get("tested") is False:
+        warn.append("untested lean")
+    if stop:
+        v = "🔴 Skip"
+    elif not warn and edge is not None and edge >= GOOD_EDGE and (chance or 0) >= GOOD_CHANCE:
+        v = "🟢 Good bet"
+    elif edge is not None and edge >= 0 and len(warn) <= 1:
+        v = "🟡 Maybe"
+    else:
+        v = "🔴 Skip" if (edge is None and c.get("tested") is False) else "🟡 Maybe"
+    return {"verdict": v, "why": "; ".join(stop + warn + good), "edge": edge, "need": need, "real_chance": chance,
+            "model_chance": model}
+
+
+def _short(use) -> str:
+    return str(use or "").replace("🔒", "").replace("🎟️", "").replace("🎯", "").replace("⛔", "").strip() or "this tag"
+
+
+def prop_candidates(sport: str, plays, meta=None) -> List[Dict]:
+    """Every prop on the board that has a live price and a model chance."""
+    import sports
+    when = {}
+    for m in meta or []:
+        dt = sports.game_dt(m.get("game_date"))
+        when[m.get("label")] = dt
+    out = []
+    for p in plays or []:
+        price, chance = _num(p.get("RealPrice")), _num(p.get("ModelProb"))
+        if price is None or chance is None:
+            continue
+        dt = when.get(p.get("Game"))
+        line = _num(p.get("Line"))
+        out.append({"sport": sport, "kind": "Prop", "game": p.get("Game") or "",
+                    "time": p.get("Time") or (dt.strftime("%I:%M %p").lstrip("0") if dt else ""), "dt": dt,
+                    "pick": f"{p.get('Player')} {p.get('Market')} {p.get('Side')}" + ("" if line is None else f" {line:g}"),
+                    "market": p.get("Market"), "chance": chance, "price": price, "book": p.get("RealPriceBook") or "",
+                    "use": p.get("Use") or "", "tested": True})
+    return out
+
+
+def lean_candidates(rows) -> List[Dict]:
+    """Game lines from Today's best (winner rows): tested picks with their chance, untested leans without one."""
+    out = []
+    for r in rows or []:
+        if not r.get("best"):
+            continue
+        tested = bool(r.get("best_tested"))
+        out.append({"sport": r.get("sport"), "kind": "Game line", "game": r.get("game") or "", "time": r.get("time") or "",
+                    "pick": r["best"], "market": r.get("bet_market") or "Game line",
+                    "chance": r.get("best_chance") if tested else None,
+                    "price": r.get("best_price") if tested else None, "book": "",
+                    "use": r.get("use") or "", "tested": tested, "lean_verdict": r.get("lean_verdict")})
+    return out
+
+
+def finder(cands, bets, tag_records: Optional[Dict] = None) -> List[Dict]:
+    """Each candidate judged; good bets first, then by edge."""
+    hist = _history(bets)
+    out = []
+    for c in cands:
+        tr = (tag_records or {}).get(_strip_use(c.get("use")))
+        j = judge(c, hist, tr)
+        if c.get("lean_verdict") in ("losing", "fade"):
+            j["verdict"] = "🔴 Skip"
+            j["why"] = "the model's leans in this market have been losing lately; " + j["why"]
+        out.append({**c, **j})
+    rank = {"🟢 Good bet": 0, "🟡 Maybe": 1, "🔴 Skip": 2}
+    return sorted(out, key=lambda r: (rank.get(r["verdict"], 3), -(r["edge"] if r["edge"] is not None else -1)))
+
+
+def _strip_use(use) -> str:
+    return str(use or "").replace("🔒", "").strip()
