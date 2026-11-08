@@ -25,3 +25,12 @@ def test_attach_def_snaps_matches_by_week_team_name():
     snaps = pd.DataFrame([{"week": 8, "team": "KC", "player": "Nick Bolton", "defense_snaps": 60, "defense_pct": 0.95}])
     assert PD.attach_def_snaps(pg, snaps) == 1
     assert pg[0]["stats"]["def_snaps"] == 60 and "def_snaps" not in pg[1]["stats"]
+
+
+def test_snap_down_only_fires_on_a_drop():
+    import football_props as FP
+    g = [{"stats": {"off_snaps": 25, "off_pct": 0.40}}] + [{"stats": {"off_snaps": 55, "off_pct": 0.85}}] * 4
+    sd = FP.snap_down(g, [3, 7, 8, 7, 6])
+    assert sd and round(sd["before"], 2) == 0.85 and sd["opp"] < FP.PE.wmean([3, 7, 8, 7, 6])
+    steady = [{"stats": {"off_snaps": 55, "off_pct": 0.85}}] * 5
+    assert FP.snap_down(steady, [7, 7, 7, 7, 7]) is None
