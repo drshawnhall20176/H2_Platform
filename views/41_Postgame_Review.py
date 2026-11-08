@@ -181,7 +181,10 @@ with tab_morning:
                                                       max(0.3, act[0 if sd == "Over" else 1] * bs[sd]["s"]),
                                                       {"morning": mpick, "n": bs[sd]["n"], "fit": bs[sd]["s"]})
                                for sd in ok)
-                    st.success("Saved — the boards use them on their next refresh.") if done else st.error("Couldn't save.")
+                    if done:
+                        st.success("Saved — the boards use them on their next refresh.")
+                    else:
+                        st.error("Couldn't save.")
                 if any(abs(a - 1.0) > 1e-9 for a in act) and st.button(f"Turn per-side factors off for {SPORT_KEY}",
                                                                           key=f"pgr_side_off_{mpick}"):
                     for c in MS.list_calibration():
@@ -250,7 +253,10 @@ with tab_morning:
                                f"to ×{sgt['factor']:.3f}. Nothing changes until someone approves.")
                     if c2.button("Approve", key=f"pgr_mok_{mpick}_{i}"):
                         ok = MS.approve_tuning(sgt["sport"], sgt["market"], sgt["factor"], sgt["text"], sgt["slot"])
-                        st.success("Approved.") if ok else st.error("Couldn't save the adjustment.")
+                        if ok:
+                            st.success("Approved.")
+                        else:
+                            st.error("Couldn't save the adjustment.")
                 elif sgt["kind"] == "info":
                     st.caption("For your information — no change suggested.")
                 else:
@@ -358,7 +364,10 @@ with tab_trend:
                                "within 10 minutes; retire it any time on the next tab.")
                     if c2.button("Approve", key=f"pgr_ok_{i}"):
                         ok = MS.approve_tuning(sgt["sport"], sgt["market"], sgt["factor"], sgt["text"], sgt["slot"])
-                        st.success("Approved.") if ok else st.error("Couldn't save the adjustment.")
+                        if ok:
+                            st.success("Approved.")
+                        else:
+                            st.error("Couldn't save the adjustment.")
                 elif sgt["kind"] == "info":
                     st.caption("For your information — no change suggested.")
                 else:
@@ -387,7 +396,10 @@ with tab_week:
                         st.stop()
                     ok = MS.approve_blend(p["sport"], p["market"], p["w"], {"week": wpick, "n": p["n"],
                                                                             "gain": p.get("gain")})
-                    st.success("Approved.") if ok else st.error("Couldn't save it.")
+                    if ok:
+                        st.success("Approved.")
+                    else:
+                        st.error("Couldn't save it.")
 
 with tab_adj:
     # getattr: Streamlit Cloud can re-run this page with an older model_store still loaded (until the app reboots)
@@ -396,7 +408,10 @@ with tab_adj:
             st.markdown(f"**{b['sport']} · {b['market']}** — model weight {float(b['w']):.2f} vs the books"
                         f" · {'🟢 active' if b.get('active') else '⚪ retired'} · approved {str(b.get('approved_ts'))[:16]}")
             if b.get("active") and st.button("Retire", key=f"pgr_retire_blend_{b['id']}"):
-                st.success("Retired.") if getattr(MS, "retire_blend", lambda _i: False)(b["id"]) else st.error("Couldn't retire it.")
+                if getattr(MS, "retire_blend", lambda _i: False)(b["id"]):
+                    st.success("Retired.")
+                else:
+                    st.error("Couldn't retire it.")
     rows = MS.list_tuning(active_only=False)
     if not rows:
         st.info("No adjustments approved yet.")
@@ -406,4 +421,7 @@ with tab_adj:
                         f" · {'🟢 active' if t.get('active') else '⚪ retired'} · approved {str(t.get('approved_ts'))[:16]}")
             st.caption(t.get("reason") or "")
             if t.get("active") and st.button("Retire", key=f"pgr_retire_{t['id']}"):
-                st.success("Retired.") if MS.retire_tuning(t["id"]) else st.error("Couldn't retire it.")
+                if MS.retire_tuning(t["id"]):
+                    st.success("Retired.")
+                else:
+                    st.error("Couldn't retire it.")
