@@ -67,6 +67,11 @@ def test_only_absences_the_model_has_not_seen_are_flagged(monkeypatch):
     monkeypatch.setattr(SE, "calls", lambda *a, **k: {})
     import line_history as LH
     monkeypatch.setattr(LH, "sport_index", lambda *a, **k: {})
+    import sports
+    monkeypatch.setattr(sports.get("NBA").engine, "build_slate", lambda d: ([
+        {"Player": "Clint Capela", "AvgMin": 20.0, "Team": "Houston Rockets"},
+        {"Player": "Steven Adams", "AvgMin": 18.0, "Team": "Houston Rockets"}], []))
+    plays = [p for p in plays if p["Player"] == "Amen Thompson"]      # the ruled-out players have no props
     legs = T.audit("NBA", "2099-01-01", deps=deps, plays=plays, injuries=inj)
     amen = next(x for x in legs if x["player"] == "Amen Thompson")
     late = [f for f in amen["flags"] if f.startswith("teammate ruled out after")]
