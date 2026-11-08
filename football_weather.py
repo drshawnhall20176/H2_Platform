@@ -63,12 +63,15 @@ def _http(url: str, params: Dict) -> Optional[Dict]:
         return None
 
 
-def _cached(key, fn):
+def _cached(key, fn, ttl: float = TTL):
+    """Remembers an answer for an hour -- but never a failed lookup (None), so one network hiccup doesn't leave a
+    game without weather for the rest of the hour."""
     hit = _CACHE.get(key)
-    if hit and time.time() - hit[0] < TTL:
+    if hit and time.time() - hit[0] < hit[2]:
         return hit[1]
     val = fn()
-    _CACHE[key] = (time.time(), val)
+    if val is not None:
+        _CACHE[key] = (time.time(), val, ttl)
     return val
 
 
@@ -176,7 +179,15 @@ def slate(sport: str, date_str: str, fetch: Callable = _http) -> list:
                     rec.update(_forecast(ll[0], ll[1], ko, fetch) or {})
             out.append(rec)
         return out
-    return _cached(("slate", sport, date_str), go) or []
+    key = ("slate", sport, date_str)
+    hit = _CACHE.get(key)
+    if hit and time.time() - hit[0] < hit[2]:
+        return hit[1]
+    out = go() or []
+    if out:                                                     # a slate missing an outdoor game's weather retries soon
+        complete = all(g["indoor"] or g.get("wind") is not None for g in out)
+        _CACHE[key] = (time.time(), out, TTL if complete else 300)
+    return out
 
 
 def for_game(wx_slate: list, home: str, away: str, home_name: Optional[str] = None,
