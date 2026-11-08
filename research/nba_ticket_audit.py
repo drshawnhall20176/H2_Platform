@@ -48,7 +48,7 @@ calls = A.scan(pp, "NBA", D, offers=offers, odds_map=omap, history_fn=hist, expe
 angles = {}
 print("AU calls", len(calls), "| sample call keys", sorted(calls[0].keys())[:40] if calls else None)
 for c in calls:
-    angles[(PE.norm_name(c.get("Player") or ""), c.get("Market"), c.get("Side"))] = A.angle_names(c)
+    angles[(PE.norm_name(c.get("player") or ""), c.get("market"), c.get("side"))] = A.angle_names(c)
 
 # ---- injuries (ESPN, all teams)
 inj = {}
@@ -85,12 +85,12 @@ for p in pp:
     ch = SE.side_chance(by, r["side"])
     pch = sum(sh[s] * ch[s] for s in SE.SCRIPTS)
     o = idx.get((A._norm(r["player"]), omap.get(r["market"]))) or []
-    dk = [x for x in o if x.get("book") == "draftkings" and str(x.get("side", "")).lower() == r["side"].lower()]
-    same = [x for x in dk if x.get("line") is not None and float(x["line"]) == float(r["line"])]
-    live_price = same[0]["price"] if same else None
-    live_line = dk[0]["line"] if dk else None
-    others = [x["price"] for x in o if x.get("book") != "draftkings" and str(x.get("side", "")).lower() == r["side"].lower()
-              and x.get("line") is not None and float(x["line"]) == float(r["line"]) and x.get("price") is not None]
+    sd = r["side"].lower()
+    same = [x for x in o if x.get("point") is not None and float(x["point"]) == float(r["line"])]
+    live_price = next((x[sd]["draftkings"] for x in same if "draftkings" in (x.get(sd) or {})), None)
+    dk_lines = sorted({float(x["point"]) for x in o if "draftkings" in (x.get(sd) or {})})
+    live_line = None if live_price is not None else (dk_lines[0] if dk_lines else None)
+    others = [v for x in same for b, v in (x.get(sd) or {}).items() if b != "draftkings"]
     price = live_price if live_price is not None else None
     ev = pch * PE.decimal(price) - 1 if price is not None else None
     st = inj.get(PE.norm_name(r["player"]))
