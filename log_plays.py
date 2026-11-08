@@ -176,7 +176,10 @@ def main(argv=None) -> int:
             print(f"Ticket '{a.ticket}' is already in the Bet Log — nothing logged.")
             return 0
         legs = [{"player": r["player"], "market": r["market"], "side": r["side"], "line": r["line"],
-                 "game": r["game"], "model_prob": r["model_prob"], "price": r["entry_odds"]} for r in rows]
+                 "game": r["game"], "model_prob": r["model_prob"], "price": r["entry_odds"],
+                 # Nov 8: the pick's own note (a game link) rides on its leg, without repeating the tag
+                 "note": ",".join(t for t in str(r.get("notes") or "").split(",") if t and t != a.tag) or None}
+                for r in rows]
         res = B.log_parlay_ticket(a.ticket, legs, int(float(a.ticket_odds)), a.stake, date_str, a.sport,
                                   book=rows[0]["book"] if rows else None, notes=a.tag or None)
         if a.result.strip().lower() in ("win", "loss", "push"):

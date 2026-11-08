@@ -621,9 +621,18 @@ def settle_logged(league: str, db_path: Optional[str] = None) -> int:
     import model_store as MS
     graded = {p["game_id"]: p for p in MS.load_game_picks(league, db_path=db_path) if p.get("result")}
     n = 0
-    for b in B.list_bets(settled=False):
+    every = B.list_bets()
+
+    def _link(b):
         # the game link can sit anywhere in the notes (after a strategy tag, Nov 4)
-        link = next((t.strip() for t in str(b.get("notes") or "").split(",") if t.strip().startswith(f"{TAG}:{league}:")), None)
+        return next((t.strip() for t in str(b.get("notes") or "").split(",") if t.strip().startswith(f"{TAG}:{league}:")), None)
+    # Nov 8: parlay legs logged before legs carried their own note have no link; borrow it from the single on the
+    # same game, market, side and line (the college totals parlay of Nov 7 sat open for that reason)
+    by_bet = {(b.get("slate_date"), b.get("game"), b.get("market"), str(b.get("side")).lower(), b.get("line")): _link(b)
+              for b in every if _link(b)}
+    for b in [x for x in every if not x.get("result")]:
+        link = _link(b) or by_bet.get((b.get("slate_date"), b.get("game"), b.get("market"), str(b.get("side")).lower(),
+                                       b.get("line")))
         if not link:
             continue
         p = graded.get(link.split(":", 2)[2])

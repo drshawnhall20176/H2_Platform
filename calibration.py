@@ -151,3 +151,113 @@ def fit_by_side(rows: Iterable[Dict]) -> Dict:
         out[side] = {"s": best, "n": n, "enough": True, "said": sum(p for p, _ in data) / n,
                      "hit": sum(y for _, y in data) / n, "log_loss": (round(_ll(data, 1.0), 4), round(_ll(data, best), 4))}
     return out
+
+
+# --------------------------------------------------------------------------- learned nightly (Nov 8)
+# The owner asked for a system that learns every day as picks reconcile, not one that waits for a study and a button.
+# Each morning review (daily_review.review_sport) runs this on the last 30 days of graded reads: for each side, fit the
+# factor that would have made the chances honest, then check it the way research/side_calibration_test.py does -- on
+# every split, fit on the earlier days and score on the later ones. A change is applied only when it improves the held-out
+# log loss in at least two thirds of the splits AND moves the factor by 0.03 or more; it can tighten (chances
+# overconfident) or loosen back toward 1.00 (an earlier correction overshot). Every change is written with its evidence
+# (calibration table, details.auto = true), shown in that morning's notes, and can be turned off on Postgame Review.
+AUTO_MIN_ROWS = 300            # reads on that side in the window
+AUTO_MIN_DATES = 3
+AUTO_MIN_SPLITS = 2
+AUTO_MIN_MOVE = 0.03
+AUTO_SPLIT_PASS = 2 / 3
+_REL_GRID = [round(0.5 + i * 0.01, 2) for i in range(101)]     # relative to the active factor: 0.50 .. 1.50
+
+
+def _ll_rel(rows, s):
+    tot = 0.0
+    for r in rows:
+        q = min(max(honest(r["p"], s), 1e-3), 1 - 1e-3)
+        tot -= math.log(q) if r["y"] else math.log(1 - q)
+    return tot / len(rows)
+
+
+def held_out_side(rows: List[Dict]) -> Dict:
+    """rows: [{"date", "p" (chance as graded, active factor already in it), "y"}] for ONE side.
+    -> {"rel": fit on everything (relative to active), "splits": n, "passed": n, "gain": mean held-out improvement}."""
+    ds = sorted({r["date"] for r in rows})
+    out = {"rel": 1.0, "splits": 0, "passed": 0, "gain": 0.0, "n": len(rows), "dates": len(ds)}
+    if len(rows) < 2 or not ds:
+        return out
+    out["rel"] = min(_REL_GRID, key=lambda g: _ll_rel(rows, g))
+    gains = []
+    for cut in ds[1:]:
+        tr = [r for r in rows if r["date"] < cut]
+        te = [r for r in rows if r["date"] >= cut]
+        if len(tr) < 100 or len(te) < 100:
+            continue
+        s = min(_REL_GRID, key=lambda g: _ll_rel(tr, g))
+        g = _ll_rel(te, 1.0) - _ll_rel(te, s)
+        gains.append(g)
+    out["splits"] = len(gains)
+    out["passed"] = sum(1 for g in gains if g > 0)
+    out["gain"] = sum(gains) / len(gains) if gains else 0.0
+    return out
+
+
+def auto_side(sport: str, graded_by_date: Dict[str, List[Dict]], morning: str, write: bool = True) -> List[Dict]:
+    """Learn each side's factor from the window; apply what passes. Returns the decisions (applied or not, and why)."""
+    rows = {"Over": [], "Under": []}
+    for d, rs in graded_by_date.items():
+        for r in rs:
+            if r.get("result") not in ("hit", "miss") or r.get("market") in SKIP_MARKETS:
+                continue
+            try:
+                p = float(r.get("chance"))
+            except (TypeError, ValueError):
+                continue
+            if 0 < p < 1 and r.get("side") in rows:
+                rows[r["side"]].append({"date": d, "p": p, "y": 1 if r["result"] == "hit" else 0})
+    active = dict(zip(("Over", "Under"), side_factors(sport)))
+    # A graded chance carries the factor that was active when its snapshot was taken, so a side is judged only on days
+    # since its current factor went live -- otherwise a fresh correction would be applied again on top of itself.
+    since = {}
+    try:
+        import model_store as MS
+        for c in MS.list_calibration():
+            if c["sport"] in (f"{sport}:Over", f"{sport}:Under"):
+                since[c["sport"].split(":")[1]] = str(c.get("approved_ts") or "")[:10]
+    except Exception:                                           # noqa: BLE001
+        pass
+    for side in rows:
+        if since.get(side):
+            rows[side] = [r for r in rows[side] if r["date"] >= since[side]]
+    out = []
+    lo, hi = SIDE_S_RANGE
+    for side, rs in rows.items():
+        h = held_out_side(rs)
+        new = round(max(lo, min(hi, active[side] * h["rel"])), 2)
+        dec = {"sport": sport, "side": side, "active": active[side], "new": new, **h, "applied": False,
+               "since": since.get(side)}
+        if h["n"] < AUTO_MIN_ROWS or h["dates"] < AUTO_MIN_DATES:
+            dec["why"] = f"not enough yet ({h['n']} reads over {h['dates']} days)"
+        elif h["splits"] < AUTO_MIN_SPLITS:
+            dec["why"] = "not enough days to hold any out"
+        elif abs(new - active[side]) < AUTO_MIN_MOVE:
+            dec["why"] = f"already honest (best {new:.2f} vs active {active[side]:.2f})"
+        elif h["passed"] < AUTO_SPLIT_PASS * h["splits"] or h["gain"] <= 0:
+            dec["why"] = f"didn't hold up on held-out days ({h['passed']} of {h['splits']})"
+        else:
+            dec["why"] = f"held up on {h['passed']} of {h['splits']} held-out splits"
+            if write:
+                import model_store as MS
+                dec["applied"] = MS.approve_calibration(f"{sport}:{side}", new, {
+                    "auto": True, "morning": morning, "n": h["n"], "rel_fit": h["rel"], "splits": h["splits"],
+                    "passed": h["passed"], "held_out_gain": round(h["gain"], 5), "was": active[side]})
+        out.append(dec)
+    return out
+
+
+def auto_notes(decisions: List[Dict]) -> List[str]:
+    notes = []
+    for d in decisions:
+        if d.get("applied"):
+            way = "toward 50% (they ran overconfident)" if d["new"] < d["active"] else "back out (the last correction overshot)"
+            notes.append(f"🤖 Learned overnight: {d['sport']} {d['side']} chances {d['active']:.2f} → {d['new']:.2f}, "
+                         f"pulled {way}; {d['why']} ({d['n']} reads). Undo on Postgame Review.")
+    return notes
