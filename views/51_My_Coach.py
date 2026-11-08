@@ -7,6 +7,7 @@ import streamlit as st
 
 import betlog as B
 import coach as CO
+import log_ui as LU
 import components as C
 
 C.base_css()
@@ -128,8 +129,9 @@ else:
         import football_weather as FW
         return FW.label_for(sport, day, game)
 
-    def _tbl(rows):
-        st.dataframe(pd.DataFrame([{"Signal": r.get("signal") or "", "Time": r["time"], "Game": r["game"],
+    def _tbl(rows, key):
+        """A finder table with a tick box on every row; returns the ticked bets (Nov 8: log them below)."""
+        return LU.picked(rows, LU.selectable(pd.DataFrame([{"Signal": r.get("signal") or "", "Time": r["time"], "Game": r["game"],
                                     **({"Weather": _wxl(f_sport, f_date, r["game"])} if f_sport in ("NFL", "NCAAF") else {}),
                                     "Bet": r["pick"],
                                     "Price": None if r.get("price") is None else f"{float(r['price']):+.0f}",
@@ -137,14 +139,15 @@ else:
                                     "Realistic chance": CO.pct(r.get("real_chance")),
                                     "Price needs": CO.pct(r.get("need")), "Edge": CO.pts(r.get("edge")),
                                     "Why": r["why"]} for r in rows]),
-                     hide_index=True, width="stretch")
+                     key=key, hide_index=True, width="stretch"))
 
     goods = [r for r in _judged if r["verdict"].startswith("🟢")]
     maybes = [r for r in _judged if r["verdict"].startswith("🟡")]
     skips = [r for r in _judged if r["verdict"].startswith("🔴")]
     st.markdown(f"**🟢 Good bets ({len(goods)})** — your normal stake.")
+    _ticked = []
     if goods:
-        _tbl(goods[:25])
+        _ticked += _tbl(goods[:25], "coach_good_sel")
     else:
         st.caption("None right now. No bet is better than a bad bet.")
     if len({r["game"] for r in goods}) >= 2:
@@ -161,14 +164,23 @@ else:
                    "🟠 Lean pass: under 1 point. A caution (your losing record at that price or in that market, "
                    "an untested lean) takes a point off.")
         if maybes:
-            _tbl(maybes[:40])
+            _ticked += _tbl(maybes[:40], "coach_maybe_sel")
         else:
             st.caption("None.")
     with st.expander(f"🔴 Skip ({len(skips)}) — and why"):
         if skips:
-            _tbl(skips[:60])
+            _ticked += _tbl(skips[:60], "coach_skip_sel")
         else:
             st.caption("None.")
+    # Nov 8: tick rows in any of the three tables to log them -- one box for all ticks
+    _items = []
+    for r in _ticked:
+        if r.get("kind") == "Game line":
+            if r.get("bet_market") and r.get("_rec"):
+                _items.append(dict(r, price=r.get("bet_price") if r.get("price") is None else r.get("price")))
+        else:
+            _items.append(r)
+    LU.panel(_items, "coach_log", f_date, tag="my-coach")
     st.caption("Realistic chance = the model's chance, or how often that kind of pick has really hit lately if "
                "that's lower. Edge = the realistic chance minus the chance the price needs. A good bet has 3+ points of edge, a model "
                "chance of 55%+, and nothing in its record against it. Prices move: check the price on your book "

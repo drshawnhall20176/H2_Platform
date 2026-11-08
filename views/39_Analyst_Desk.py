@@ -24,6 +24,7 @@ import analyst_ledger as AL
 import analyst_tools as AT
 import best_bets_data as BBD
 import components as C
+import log_ui as LU
 import line_history
 import sports
 from streamlit_page_cache import compute_once
@@ -123,6 +124,7 @@ with f3:
     order = st.radio("Order by", ["Start time", "Strongest first"], horizontal=True)
 view_games = games_in_slot if game_pick == ALL_GAMES else [game_pick]
 view_set = set(view_games)
+C.weather_note(_active.key, date_str, view_games)                # Nov 8: kickoff weather (football)
 
 # Odds (soft-price angle). Fail-soft: no key or a failed fetch just means that angle stays quiet.
 offers, offers_note = None, None
@@ -330,7 +332,9 @@ def _call_rows(cs):
     out = []
     for c in cs:
         out.append({
-            "Time": c["kickoff"], "Slot": c["slot"], "Game": c["game"], "Player": c["player"], "Play": f"{c['side']} {c['line']:g} {c['market']}"
+            "Time": c["kickoff"], "Slot": c["slot"], "Game": c["game"],
+            **({"Weather": C.weather_label(_active.key, date_str, c["game"])} if _active.key in C.WEATHER_SPORTS else {}),
+            "Player": c["player"], "Play": f"{c['side']} {c['line']:g} {c['market']}"
             if c.get("line") is not None else f"{c['side']} {c['market']}",
             "Recent games": ", ".join(f"{v:g}" for v in c.get("recent") or []),
             "At book": A.status_text(c, book_name), "Model": c["model_prob"], "Book price": c["price"], "Angles": ", ".join(a["label"] for a in c["angles"]),
@@ -339,6 +343,15 @@ def _call_rows(cs):
         if _adj_model:
             out[-1]["Adjusted"] = CAL.apply(_adj_model, c["model_prob"])
     return pd.DataFrame(out)
+
+
+def _call_items(cs):
+    """Calls as Bet Log picks (Nov 8: tick rows to log them)."""
+    return [{"sport": c["sport"], "player": c["player"], "pid": c.get("player_id"), "market": c["market"],
+             "side": c["side"], "line": c.get("line"), "game": c.get("game"), "chance": c.get("model_prob"),
+             "price": c.get("price"), "book": c.get("price_book"),
+             "pick": f"{c['player']} {c['side']} " + (f"{c['line']:g} " if c.get("line") is not None else "") + c["market"]}
+            for c in cs]
 
 
 _COLS_CFG = {"Model": st.column_config.NumberColumn(format="percent"),
@@ -446,7 +459,10 @@ with tab_gems:
         st.info("No play has cleared the hidden-gem bar for this slate. That is a real answer — it means the "
                 "angles aren't lining up today, not that something is broken.")
     else:
-        st.dataframe(_call_rows(gems), width="stretch", hide_index=True, column_config=_COLS_CFG)
+        _gsel = LU.selectable(_call_rows(gems), "analyst_gems_sel", width="stretch", hide_index=True,
+                              column_config=_COLS_CFG)
+        LU.panel(LU.picked(_call_items(gems), _gsel), "analyst_gems_log", date_str, tag="analyst-desk",
+                 past=target < datetime.now(eastern).date())
         for c in gems[:10]:
             with st.expander(f"{c['kickoff']} · {c['player']} — {c['side']} {c['line']:g} {c['market']} ({c['game']})"):
                 for a in c["angles"]:
@@ -494,7 +510,10 @@ with tab_all:
         rows = [c for c in pool if (show_chalk or not c["chalk"])
                 and (not pick or any(a["label"] in pick for a in c["angles"]))]
         st.write(f"{len(rows)} of {len(pool)} plays" + ("" if show_off else f" — only lines {book_name} posts"))
-        st.dataframe(_call_rows(rows), width="stretch", hide_index=True, column_config=_COLS_CFG)
+        _asel = LU.selectable(_call_rows(rows), "analyst_all_sel", width="stretch", hide_index=True,
+                              column_config=_COLS_CFG)
+        LU.panel(LU.picked(_call_items(rows), _asel), "analyst_all_log", date_str, tag="analyst-desk",
+                 past=target < datetime.now(eastern).date())
         with st.expander("What each angle means"):
             for k in A.angles_for(_active.key):
                 label, desc = A.ANGLES[k]
@@ -518,7 +537,9 @@ with tab_live:
                     or (r["move_pts"] is not None and abs(r["move_pts"]) >= AT.FLAT_BAND * 100))
         st.write(f"{len(status_rows)} locked at {book_name} for {_where}; {moved} moved, changed line or were pulled since the lock.")
         st.dataframe(pd.DataFrame([{
-            "Game": r["game"], "Player": r["player"], "Play": f"{r['side']} {r['line']:g} {r['market']}",
+            "Game": r["game"],
+            **({"Weather": C.weather_label(_active.key, date_str, r["game"])} if _active.key in C.WEATHER_SPORTS else {}),
+            "Player": r["player"], "Play": f"{r['side']} {r['line']:g} {r['market']}",
             "Locked price": r["locked_price"], "Now": r["text"], "💎": "💎" if r["gem"] else "",
         } for r in status_rows]), width="stretch", hide_index=True,
             column_config={"Locked price": st.column_config.NumberColumn(format="%+d")})

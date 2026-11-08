@@ -107,6 +107,7 @@ for r in C.by_kickoff(rows, when=_kick):
 game = st.selectbox("Game", list(first), key="gs_game",
                     format_func=lambda g: g if first.get(g) is None else f"{first[g].strftime('%a %-I:%M %p')} — {g}")
 gp = [r for r in rows if r.get("game") == game]
+C.weather_note(SPORT, DAY, [game])                              # Nov 8: kickoff weather (football)
 teams = SE.game_teams(gp, game)
 try:
     lines = _lines(SPORT, DAY)

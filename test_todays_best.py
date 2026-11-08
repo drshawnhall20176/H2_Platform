@@ -210,10 +210,11 @@ def test_home_log_button(monkeypatch):
     monkeypatch.setattr(TB, "collect", lambda d, sp, past=False: {"rows": rows, "props": {"NBA": "2026-11-06T15:00:00+00:00"}})
     monkeypatch.setattr(TB, "winner_rows", lambda d, leagues=None, past=False: [])
     monkeypatch.setattr(TB, "log_selection", lambda *a, **k: calls.append(a) or {"singles": [7], "ticket": None, "skipped": 0})
+    import log_ui as LU                                          # Nov 8: rows are ticked in the table itself
+    monkeypatch.setattr(LU, "selectable", lambda df, key, **kw: [0] if key == "home_best_sel" else [])
     at = AppTest.from_file(str(Path(__file__).parent / "Home.py"), default_timeout=30)
     at.session_state["sport"] = "NBA"
     at.run()
-    at.multiselect(key="home_log_pick").set_value([at.multiselect(key="home_log_pick").options[0]]).run()
     at.button(key="home_log_go").click().run()
     assert calls and calls[0][1] == "Singles" and any("1 single(s) logged" in s.value for s in at.success)
 

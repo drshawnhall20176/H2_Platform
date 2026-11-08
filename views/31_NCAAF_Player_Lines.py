@@ -155,6 +155,7 @@ games_present = sorted(game_date_by_label, key=lambda g: game_date_by_label[g] o
 with c_game:
     game_pick = st.selectbox("Game", ["All games in this slot"] + games_present)
 final_rows = slot_rows if game_pick == "All games in this slot" else [r for r in slot_rows if r["GameLabel"] == game_pick]
+C.weather_note("NCAAF", date_str, games_present if game_pick == "All games in this slot" else [game_pick])
 
 if not final_rows:
     st.info("No players match the current filters — try a different time slot or game.")
