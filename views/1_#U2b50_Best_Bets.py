@@ -191,6 +191,7 @@ with f2:
                              if g != "All games in this slot" else g)
 slot_plays = (slot_plays if game_pick == "All games in this slot"
              else [p for p in slot_plays if p["Game"] == game_pick])
+C.weather_note(_active.key, date_str, games_in_slot if game_pick == "All games in this slot" else [game_pick])
 
 f3, f4, f5 = st.columns(3)
 with f3:
@@ -333,6 +334,10 @@ for p in view:
         p["_display_price"] = f"{p['Fair']:+.0f}" if p.get("Fair") is not None else "—"
 _cols = ["ModelProb", "Conviction", "Time", "Slot", "Player", "Team", "TeamTrend",
         "Market", "Side", "_display_line", "_display_price", "Game", "Why"]
+if _active.key in C.WEATHER_SPORTS:                             # Nov 8: kickoff weather beside the game
+    for p in view:
+        p["Weather"] = C.weather_label(_active.key, date_str, p.get("Game"))
+    _cols.insert(_cols.index("Game") + 1, "Weather")
 _rename = {"ModelProb": "Model %", "_display_line": "Line",
           "_display_price": "Fair", "Why": "Why the model likes it",
           "TeamTrend": "Team Trend"}

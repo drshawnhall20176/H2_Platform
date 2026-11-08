@@ -127,6 +127,7 @@ if not game_options:
     st.stop()
 game_label = st.selectbox("Game", list(game_options.keys()))
 selected = game_options[game_label]
+C.weather_note("NFL", date_str, [game_label])                   # Nov 8: kickoff weather
 home_name = selected["home_name"]
 away_name = selected["away_name"]
 # NFL meta stores team abbreviations as home_name/away_name -- confirmed by reading

@@ -176,6 +176,7 @@ with c_game:
 selected_labels = ({m["label"] for m in slot_meta} if game_pick == "All games in this slot"
                    else {game_pick})
 plays = [pl for pl in plays if pl.get("Game") in selected_labels]
+C.weather_note(_active.key, date_str, sorted(selected_labels))  # Nov 8: kickoff weather (football)
 
 if not plays:
     st.info("No graded plays match the current time slot/game filter — try a different selection.")

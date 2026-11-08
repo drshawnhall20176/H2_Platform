@@ -751,3 +751,48 @@ def date_slot_select(items, key: str, when=lambda x: x.get("kickoff"), container
     slots = sorted({_S.slot_of(_kick_dt(when(it))) for it in out}, key=lambda x: _S.SLOT_ORDER.get(x, 9))
     spick = cols[1].selectbox("Time slot", ["All slate"] + slots, key=f"{key}_slot")
     return out if spick == "All slate" else [it for it in out if _S.slot_of(_kick_dt(when(it))) == spick]
+
+
+# --------------------------------------------------------------------------- football weather (Nov 8)
+WEATHER_SPORTS = ("NFL", "NCAAF")
+WEATHER_KEY = ("☀️ clear · ⛅ partly cloudy · ☁️ cloudy · 🌧️ rain · 🌨️/❄️ snow · ⛈️ storms · 🌫️ fog · 🏟️ dome · "
+               "💨 wind 10+ mph · 🥶 40°F or colder · ⚠️ the model adjusted this game's passing, receiving and "
+               "rushing props for it (rain and snow are shown, not yet adjusted)")
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _weather_label(sport: str, date_str: str, game: str) -> str:
+    try:
+        import football_weather as FW
+        return FW.label_for(sport, date_str, game)
+    except Exception:                                           # noqa: BLE001
+        return ""
+
+
+def weather_label(sport: str, date_str: str, game) -> str:
+    """Kickoff weather for a football game label 'Away @ Home' ('' for other sports or unknown)."""
+    if sport not in WEATHER_SPORTS or not game:
+        return ""
+    return _weather_label(sport, str(date_str)[:10], str(game))
+
+
+def weather_note(sport: str, date_str: str, games) -> None:
+    """Under a game picker: one game -> its weather; several -> the games the weather touches, and the full list."""
+    if sport not in WEATHER_SPORTS:
+        return
+    games = [g for g in (games or []) if g]
+    if not games:
+        return
+    labels = {g: weather_label(sport, date_str, g) for g in games}
+    if len(games) == 1:
+        lab = labels[games[0]]
+        if lab and lab != "—":
+            st.caption(f"**Weather at kickoff:** {lab}", help=WEATHER_KEY)
+        return
+    hit = [g for g in games if labels[g].endswith("⚠️")]
+    msg = ("**Weather:** " + "; ".join(f"{g} — {labels[g]}" for g in hit)) if hit else \
+        "**Weather:** no game here is windy or cold enough to move the model."
+    st.caption(msg, help=WEATHER_KEY)
+    with st.expander("🌤️ Every game's weather at kickoff"):         # text, not a table: pages count their tables
+        st.markdown("\n".join(f"- **{g}** — {labels[g] or '—'}" for g in games))
+        st.caption(WEATHER_KEY)
