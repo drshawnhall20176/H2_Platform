@@ -366,7 +366,8 @@ def prop_candidates(sport: str, plays, meta=None) -> List[Dict]:
                     "time": p.get("Time") or (dt.strftime("%I:%M %p").lstrip("0") if dt else ""), "dt": dt,
                     "pick": f"{p.get('Player')} {p.get('Market')} {p.get('Side')}" + ("" if line is None else f" {line:g}"),
                     "market": p.get("Market"), "chance": chance, "price": price, "book": p.get("RealPriceBook") or "",
-                    "use": p.get("Use") or "", "tested": True})
+                    "use": p.get("Use") or "", "tested": True,
+                    "player": p.get("Player"), "pid": p.get("PlayerId"), "side": p.get("Side"), "line": line})
     return out
 
 
@@ -381,7 +382,11 @@ def lean_candidates(rows) -> List[Dict]:
                     "pick": r["best"], "market": r.get("bet_market") or "Game line",
                     "chance": r.get("best_chance") if tested else None,
                     "price": r.get("best_price") if tested else None, "book": "",
-                    "use": r.get("use") or "", "tested": tested, "lean_verdict": r.get("lean_verdict")})
+                    "use": r.get("use") or "", "tested": tested, "lean_verdict": r.get("lean_verdict"),
+                    # what the Bet Log needs to write a game-line bet (todays_best.bet_rows)
+                    "_rec": r.get("_rec"), "bet_market": r.get("bet_market"), "bet_side": r.get("bet_side"),
+                    "bet_line": r.get("bet_line"), "best_tested": tested, "best_chance": r.get("best_chance"),
+                    "bet_price": r.get("bet_price")})
     return out
 
 
