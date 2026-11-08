@@ -127,12 +127,22 @@ def audit(sport: str, day: Optional[str] = None, lead_minutes: int = 10, deps: O
                    history_limit=len(pp))
     angles = {(PE.norm_name(c.get("player") or ""), c.get("market"), c.get("side")): A.angle_names(c) for c in calls}
     inj = injuries if injuries is not None else league_injuries(sport)
-    # rotation minutes per player from the board's own game logs (who counts as a rotation teammate)
+    # rotation minutes per player: the saved slate lists every rostered player, the ruled-out ones included (players
+    # who are out have no props on the board, so the board alone can't say how much they play); the board's own game
+    # logs fill any gap
     mins = {}
+    try:
+        slate_rows, _ = sports.get(sport).engine.build_slate(day)
+    except Exception:                                           # noqa: BLE001
+        slate_rows = []
+    for row in slate_rows or []:
+        m = row.get("AvgMin") if row.get("AvgMin") is not None else row.get("avg_min")
+        if m is not None:
+            mins[PE.norm_name(row.get("Player") or row.get("player") or "")] = (float(m), row.get("Team"))
     for p in plays:
         log = p.get("_game_log") or []
         m = [float(g.get("min") or 0) for g in log[-10:] if g.get("min") is not None]
-        if m:
+        if m and PE.norm_name(p.get("Player") or "") not in mins:
             mins[PE.norm_name(p.get("Player") or "")] = (sum(m) / len(m), p.get("Team"))
     # absences the model already knows about: the names in each team's usage-bump flags, and players the board has as out
     import re
@@ -191,7 +201,7 @@ def audit(sport: str, day: Optional[str] = None, lead_minutes: int = 10, deps: O
     return out
 
 
-def best_tickets(legs: Sequence[Dict], sizes=(4, 5), max_per_game: int = 2, max_single_only: int = 1,
+def best_tickets(legs: Sequence[Dict], sizes=(3, 4, 5), max_per_game: int = 2, max_single_only: int = 1,
                  top: int = 5) -> List[Dict]:
     """Tickets from playable, unflagged legs with an edge at the live price, ranked by edge. Same-game legs share
     their game's scenario chances (script_effects.ticket); games are independent."""
@@ -238,7 +248,7 @@ def report(sport: str, day: Optional[str] = None) -> str:
         lines.append(f"  {x['game'][:34]:34s} {x['player']:22s} {x['market']:12s} {x['side']:5s} {x['line']:g} | live "
                      f"{x['price']} | {x['chance']:.0%} | edge {('%+.1f%%' % (100 * x['ev'])) if x['ev'] is not None else '—'}"
                      f" | {x['use']} | angles {', '.join(x['angles']) or '—'} | {'; '.join(x['flags']) or 'clean'}")
-    for size, max_s in (((4,), 0), ((4, 5), 1)):
+    for size, max_s in (((3, 4), 0), ((3, 4, 5), 1)):
         tix = best_tickets(legs, sizes=size, max_single_only=max_s)
         lines.append(f"\nBest tickets ({'parlay-tagged legs only' if max_s == 0 else 'at most one Single-only leg'}): "
                      f"{len(tix) or 'none'}")
