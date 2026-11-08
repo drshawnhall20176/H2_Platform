@@ -316,6 +316,11 @@ def judge(c: Dict, hist: Dict, tag_rec: Optional[tuple] = None) -> Dict:
     if c.get("tested") is False:
         warn.append("untested lean")
         other += 1
+    if c.get("kind") == "Prop" and not str(c.get("use") or "").strip():
+        # Nov 8: no Use tag = a market with no graded record (combos, defense stats); the model's chance can't be
+        # checked against reality, so it can't be a Good bet -- Celtics-Bucks showed "+25 pt" edges this way
+        warn.append("no track record for this kind of pick — the model's chance is unchecked")
+        other += 1
     if stop:
         v = "🔴 Skip"
     elif not warn and edge is not None and edge >= GOOD_EDGE and (chance or 0) >= GOOD_CHANCE:
