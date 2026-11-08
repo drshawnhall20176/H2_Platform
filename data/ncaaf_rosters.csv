@@ -522,6 +522,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 4702579,Daughtry,Richardson,Daughtry Richardson,Coastal Carolina,OL,1,78.0,78.0,320.0
 4702581,JaCorey,Thomas,JaCorey Thomas,West Virginia,S,1,30.0,72.0,205.0
 4702728,Kristian,Phillips,Kristian Phillips,Boston College,OL,1,71.0,76.0,315.0
+4702729,Braylin,Presley,Braylin Presley,Oklahoma State,RB,4,1.0,66.0,170.0
 4702748,Kailep,Edwards,Kailep Edwards,Louisiana,LB,1,16.0,72.0,220.0
 4702749,Fitzgerald,West Jr.,Fitzgerald West Jr.,Louisiana,DL,1,68.0,74.0,300.0
 4702750,Javae,Gilmore,Javae Gilmore,Marshall,LB,1,5.0,76.0,221.0
@@ -811,6 +812,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 4833591,Ky,Woods,Ky Woods,Nevada,RB,1,25.0,69.0,173.0
 4833593,William,Alexander,William Alexander,Tulsa,LB,1,33.0,74.0,230.0
 4833594,Robert,Fitzgerald,Robert Fitzgerald,Northwestern,DB,1,6.0,72.0,210.0
+4833595,Kyron,Chambers,Kyron Chambers,UNLV,CB,3,21.0,72.0,200.0
 4833597,Brayden,Fowler-Nicolosi,Brayden Fowler-Nicolosi,Michigan,QB,1,16.0,75.0,212.0
 4833600,Chase,Kennedy,Chase Kennedy,Arizona,LB,1,7.0,75.0,235.0
 4833601,Tai,Leonard,Tai Leonard,UTSA,DL,1,99.0,76.0,260.0
@@ -13647,6 +13649,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 5304179,Eian,Finkley,Eian Finkley,Missouri State,QB,1,15.0,74.0,205.0
 5304180,Armend,Ujkashi,Armend Ujkashi,Missouri State,OL,1,69.0,73.0,265.0
 5304182,Peter,Grandjean,Peter Grandjean,Middle Tennessee,QB,1,12.0,73.0,188.0
+5304196,Jacob,Cornejo,Jacob Cornejo,Jacksonville State,RB,3,24.0,72.0,212.0
 5304395,Kijon,Braxton,Kijon Braxton,Eastern Michigan,LB,1,32.0,74.0,217.0
 5304399,Rocky,Stallworth,Rocky Stallworth,New Mexico State,LS,1,45.0,72.0,190.0
 5304400,Latrell,Treadwell,Latrell Treadwell,New Mexico State,DL,1,93.0,72.0,265.0
