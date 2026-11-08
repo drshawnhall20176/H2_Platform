@@ -182,6 +182,7 @@ game_label = _gs2.selectbox("Game", list(game_options.keys()),
 selected = game_options[game_label]
 home_name = selected["home_name"]
 away_name = selected["away_name"]
+C.weather_note("NCAAF", date_str, [game_label])                 # Nov 8: kickoff weather
 
 # 2025-BASELINE TOGGLE — same real mechanism as QB Lab/Matchup Lab/Player Lines.
 # This is the direct fix for "no completed games yet": the 2025 schedule and scoring data

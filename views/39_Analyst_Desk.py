@@ -123,6 +123,7 @@ with f3:
     order = st.radio("Order by", ["Start time", "Strongest first"], horizontal=True)
 view_games = games_in_slot if game_pick == ALL_GAMES else [game_pick]
 view_set = set(view_games)
+C.weather_note(_active.key, date_str, view_games)                # Nov 8: kickoff weather (football)
 
 # Odds (soft-price angle). Fail-soft: no key or a failed fetch just means that angle stays quiet.
 offers, offers_note = None, None
@@ -330,7 +331,9 @@ def _call_rows(cs):
     out = []
     for c in cs:
         out.append({
-            "Time": c["kickoff"], "Slot": c["slot"], "Game": c["game"], "Player": c["player"], "Play": f"{c['side']} {c['line']:g} {c['market']}"
+            "Time": c["kickoff"], "Slot": c["slot"], "Game": c["game"],
+            **({"Weather": C.weather_label(_active.key, date_str, c["game"])} if _active.key in C.WEATHER_SPORTS else {}),
+            "Player": c["player"], "Play": f"{c['side']} {c['line']:g} {c['market']}"
             if c.get("line") is not None else f"{c['side']} {c['market']}",
             "Recent games": ", ".join(f"{v:g}" for v in c.get("recent") or []),
             "At book": A.status_text(c, book_name), "Model": c["model_prob"], "Book price": c["price"], "Angles": ", ".join(a["label"] for a in c["angles"]),
@@ -518,7 +521,9 @@ with tab_live:
                     or (r["move_pts"] is not None and abs(r["move_pts"]) >= AT.FLAT_BAND * 100))
         st.write(f"{len(status_rows)} locked at {book_name} for {_where}; {moved} moved, changed line or were pulled since the lock.")
         st.dataframe(pd.DataFrame([{
-            "Game": r["game"], "Player": r["player"], "Play": f"{r['side']} {r['line']:g} {r['market']}",
+            "Game": r["game"],
+            **({"Weather": C.weather_label(_active.key, date_str, r["game"])} if _active.key in C.WEATHER_SPORTS else {}),
+            "Player": r["player"], "Play": f"{r['side']} {r['line']:g} {r['market']}",
             "Locked price": r["locked_price"], "Now": r["text"], "💎": "💎" if r["gem"] else "",
         } for r in status_rows]), width="stretch", hide_index=True,
             column_config={"Locked price": st.column_config.NumberColumn(format="%+d")})
