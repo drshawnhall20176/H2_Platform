@@ -1,3 +1,7 @@
 .script_cache/
 data/calibration_corrections.db
 data/player_calibration_corrections.db
+
+# Python bytecode (generated when tests run)
+__pycache__/
+*.pyc

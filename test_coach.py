@@ -29,3 +29,35 @@ def test_report_card_and_rules():
 def test_fake_bets_and_period_ignored():
     bets = [_b(1, "win", real=0), _b(2, "win", day="2026-01-01")]
     assert CO.report_card(CO.in_period(bets, 30, today=__import__("datetime").date(2026, 11, 8)))[0]["Bets"] == 0
+
+
+def test_judge_verdicts():
+    h = CO._history([])
+    good = CO.judge({"sport": "NBA", "market": "Points", "chance": 0.62, "price": -110, "use": "🎯 Single only"}, h, (60, 100))
+    assert good["verdict"] == "🟢 Good bet" and round(good["edge"], 3) == round(0.60 - 110 / 210, 3)
+    pricey = CO.judge({"sport": "NBA", "market": "Points", "chance": 0.60, "price": -180, "use": "🎯 Single only"}, h)
+    assert pricey["verdict"] == "🔴 Skip" and "too expensive" in pricey["why"]
+    against = CO.judge({"sport": "NBA", "market": "Points", "chance": 0.45, "price": 150}, h)
+    assert against["verdict"] == "🔴 Skip"
+    losing_tag = CO.judge({"sport": "NFL", "market": "Receptions", "chance": 0.62, "price": -110, "use": "🎯 Single only"},
+                          h, (59, 138))
+    assert losing_tag["verdict"] == "🔴 Skip" and "59–79" in losing_tag["why"]
+    thin = CO.judge({"sport": "NBA", "market": "Points", "chance": 0.54, "price": -110}, h)
+    assert thin["verdict"] == "🟡 Maybe"
+
+
+def test_finder_orders_and_lean_rules():
+    c = [{"sport": "NBA", "market": "Spread", "pick": "A -3", "game": "g1", "tested": False, "lean_verdict": "losing"},
+         {"sport": "NBA", "market": "Points", "pick": "P o20.5", "game": "g2", "chance": 0.63, "price": -105},
+         {"sport": "NBA", "market": "Points", "pick": "Q o9.5", "game": "g2", "chance": 0.545, "price": -110}]
+    out = CO.finder(c, [])
+    assert [r["verdict"] for r in out] == ["🟢 Good bet", "🟡 Maybe", "🔴 Skip"]
+
+
+def test_realistic_chance_uses_the_real_hit_rate():
+    h = CO._history([])
+    j = CO.judge({"sport": "NBA", "market": "Points", "chance": 0.63, "price": -110, "use": "🎯 Single only"}, h, (199, 382))
+    assert round(j["real_chance"], 3) == round(199 / 382, 3) and j["model_chance"] == 0.63
+    assert j["verdict"] == "🔴 Skip"                         # 52% real vs 52.4% needed
+    j = CO.judge({"sport": "NBA", "market": "Points", "chance": 0.63, "price": -110, "use": "🎟️ Parlay leg"}, h, (46, 79))
+    assert j["verdict"] == "🟢 Good bet"                     # 58% real beats -110
