@@ -1,0 +1,34 @@
+# Ticket audit (Nov 7): the full pre-bet check for a sport's remaining games -- live prices from every book, the
+# Analyst Desk's angles, today's injury report (direction-aware), game scripts, and the best 4-5 leg tickets.
+# ticket_audit.py; the report is in the run log.
+name: ticket-audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      sport:
+        description: "Sport(s), comma-separated (NBA, NHL, NCAAMB, NCAAF, NFL)"
+        required: true
+        default: "NBA"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Audit
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python -u ticket_audit.py "${{ github.event.inputs.sport }}"

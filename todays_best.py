@@ -92,7 +92,13 @@ def load_props(sport: str, date_str: str) -> Optional[Dict]:
 
 
 # --------------------------------------------------------------------------- game lines, international, tennis
+LOAD_ERRORS: List[str] = []          # Nov 7: leagues whose game picks failed to load on the last call
+
+
 def game_rows(date_str: str, leagues=None, past: bool = False) -> List[Dict]:
+    """TESTED, playable game-line picks only (NCAAMB spreads at 8+ points, EuroLeague spreads, NBL moneylines, tennis
+    where tested). For every game's lean -- tested or not -- use winner_rows. LOAD_ERRORS lists leagues that failed."""
+    LOAD_ERRORS.clear()
     import intl_hoops as H
     import intl_picks as IP
     import model_store as MS
@@ -101,7 +107,9 @@ def game_rows(date_str: str, leagues=None, past: bool = False) -> List[Dict]:
     for lg in leagues:
         try:
             recs = MS.load_game_picks(lg, ungraded=not past)
-        except Exception:                                       # noqa: BLE001
+        except Exception as exc:                                # noqa: BLE001 -- one league failing never empties the list
+            LOAD_ERRORS.append(f"{lg}: {type(exc).__name__}: {str(exc)[:120]}")     # Nov 7: said, not swallowed
+            print(f"[todays_best] {lg} game picks failed to load ({type(exc).__name__}: {exc})")
             continue
         for p in recs:
             if _et_date(p.get("kickoff")) != date_str:
