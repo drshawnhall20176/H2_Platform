@@ -107,13 +107,30 @@ try:
 except Exception:                                               # noqa: BLE001
     _all_bets = []
 _judged = CO.finder(_pick, _all_bets, _tags)
+if f_sport in ("NFL", "NCAAF") and _gt:                         # Nov 8: which games the weather touches
+    with st.expander("🌤️ Game weather at kickoff"):
+        import football_weather as _FW
+        _games_wx = sorted(_gt, key=lambda g: (_gt[g], g))
+        st.dataframe(pd.DataFrame([{"Time": next((c["time"] for c in _c if c.get("game") == g), ""), "Game": g,
+                                    "Weather": _FW.label_for(f_sport, f_date, g)} for g in _games_wx]),
+                     hide_index=True, width="stretch")
+        st.caption("☀️ clear · ⛅ partly cloudy · ☁️ cloudy · 🌧️ rain · 🌨️/❄️ snow · ⛈️ storms · 🌫️ fog · 🏟️ dome. "
+                   "💨 = wind 10+ mph, 🥶 = 40°F or colder. ⚠️ = the model has adjusted this game's passing, "
+                   "receiving and rushing props for it. Rain and snow are shown but not yet adjusted for "
+                   "(not tested yet).")
 if _err:
     st.caption("Couldn't load: " + ", ".join(_err))
 if not _judged:
     st.info(f"No {f_sport} bets with a live price for this selection yet. Lines usually post the day before.")
 else:
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def _wxl(sport, day, game):
+        import football_weather as FW
+        return FW.label_for(sport, day, game)
+
     def _tbl(rows):
         st.dataframe(pd.DataFrame([{"Signal": r.get("signal") or "", "Time": r["time"], "Game": r["game"],
+                                    **({"Weather": _wxl(f_sport, f_date, r["game"])} if f_sport in ("NFL", "NCAAF") else {}),
                                     "Bet": r["pick"],
                                     "Price": None if r.get("price") is None else f"{float(r['price']):+.0f}",
                                     "Model chance": CO.pct(r.get("model_chance")),
