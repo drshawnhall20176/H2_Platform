@@ -180,3 +180,24 @@ def your_picks(bets) -> list:
                     "Staked": None if kind == "Parlay leg" else round(st, 2),
                     "P/L": None if kind == "Parlay leg" else round(pl, 2)})
     return out
+
+
+# Nov 9: the board shows combos by display name; the review grades them by the props model's key
+COMBO_KEY = {"Pts+Reb+Ast": "PRA", "Pts+Reb": "PR", "Pts+Ast": "PA", "Reb+Ast": "RA"}
+
+
+def market_counts(sport: str) -> Dict[str, int]:
+    """{market (both its key and display name): graded picks over the last 30 days}, from the latest morning review."""
+    try:
+        import model_store as MS
+        for m in MS.daily_review_mornings(sport)[:3]:
+            rep = MS.load_daily_review(sport, m) or {}
+            beat = (rep.get("trend") or {}).get("beat")
+            if beat:
+                out = {str(b["market"]): int(b.get("n") or 0) for b in beat}
+                for disp, key in COMBO_KEY.items():
+                    out.setdefault(disp, out.get(key, 0))
+                return out
+    except Exception:                                           # noqa: BLE001
+        pass
+    return {}
