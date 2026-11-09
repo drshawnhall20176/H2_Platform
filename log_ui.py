@@ -59,17 +59,26 @@ def panel(items: Sequence[Dict], key: str, date_str: str, tag: str = "platform-t
     calc = TB.parlay_odds(have) if len(have) == len(its) and len(its) >= 2 else None
     pstake = p1.number_input("Parlay stake ($)", min_value=0.0, value=10.0, step=1.0, key=f"{key}_pstake",
                              disabled=mode == "Singles")
-    podds = p2.number_input("Parlay odds (from your slip)", value=int(calc or 100), step=5, key=f"{key}_podds",
+    podds = p2.number_input("Parlay odds (from your slip)", value=int(calc) if calc else None, step=5,
+                            key=f"{key}_podds", placeholder="type your slip's odds",
                             disabled=mode == "Singles",
                             help="Pre-filled with the legs' prices multiplied; same-game parlays usually pay less — "
                                  "type what your slip says")
     tg = p3.text_input("Strategy tag", value=tag, key=f"{key}_tag")
+    broken = [x.get("pick") for x in its if not x.get("_rec") and (not x.get("player") or not x.get("side")
+                                                                    or x.get("line") is None)]
+    if broken:
+        st.warning("These are missing the player, side or line and won't be logged — reload the page and tick them "
+                   "again: " + "; ".join(str(b) for b in broken))
     missing = [x.get("pick") for x in its if x.get("price") is None]
     if missing:
         st.caption("Add a price for: " + "; ".join(str(m) for m in missing) + " — picks without one aren't logged.")
     if st.button("📝 Log to Bet Log", type="primary", key=f"{key}_go"):
+        if mode != "Singles" and not podds:
+            st.error("Type the parlay odds from your slip first.")
+            return
         try:
-            done = TB.log_selection(its, mode, stake, pstake, int(podds), real, tg.strip(), date_str)
+            done = TB.log_selection(its, mode, stake, pstake, int(podds or 0), real, tg.strip(), date_str)
             msg = []
             if done["singles"]:
                 msg.append(f"{len(done['singles'])} single(s) logged")

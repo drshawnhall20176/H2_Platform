@@ -454,6 +454,8 @@ def bet_rows(items: Sequence[Dict], stake: float, real: bool, tag: str, date_str
             f["notes"] = ",".join(x for x in (tag, f.get("notes")) if x)
             out.append(f)
             continue
+        if not it.get("player") or not it.get("side") or it.get("line") is None:
+            continue                            # Nov 9: never log a prop that can't be graded (no player/side/line)
         out.append({"slate_date": date_str, "sport": it["sport"], "game": it.get("game"), "player": it.get("player"),
                     "player_id": it.get("pid"), "market": it.get("market"), "side": it.get("side"),
                     "line": None if it.get("line") is None else float(it["line"]), "entry_odds": float(price),

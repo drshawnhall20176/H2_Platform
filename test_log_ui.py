@@ -15,3 +15,8 @@ def test_coach_and_desk_items_make_bet_rows():
     assert rows[0]["player"] == "Daiyan Henley" and rows[0]["side"] == "Under" and rows[0]["line"] == 6.5
     assert rows[0]["entry_odds"] == -136 and rows[0]["model_prob"] == 0.63 and rows[0]["notes"] == "my-coach"
     assert TB.bet_rows([dict(prop, price=None)], 4.0, True, "", "2026-11-08") == []
+
+
+def test_props_missing_player_or_side_are_not_logged():
+    bad = {"sport": "NFL", "pick": "x", "market": "Tackles + Assists", "price": -139, "chance": 0.64}
+    assert TB.bet_rows([bad], 2.0, True, "", "2026-11-08") == []

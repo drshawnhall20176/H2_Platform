@@ -21,8 +21,10 @@ on:
   # Nov 2: GitHub skipped EVERY scheduled run of this workflow that morning while other workflows' schedules still
   # fired. Backup: also run whenever settle-results or capture-closing-lines finishes. A run before 3 AM in New York,
   # or after the morning is done, does nothing, so the extra triggers are free.
+  # Nov 9: all nine scheduled runs AND both backups were skipped again; warm-slates and script-learn did run, so they
+  # trigger it too.
   workflow_run:
-    workflows: ["settle-results", "capture-closing-lines"]
+    workflows: ["settle-results", "capture-closing-lines", "warm-slates", "script-learn"]
     types: [completed]
   workflow_dispatch:
     inputs:
