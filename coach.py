@@ -414,3 +414,178 @@ def finder(cands, bets, tag_records: Optional[Dict] = None) -> List[Dict]:
 
 def _strip_use(use) -> str:
     return str(use or "").replace("🔒", "").strip()
+
+
+# --------------------------------------------------------------------------- coaching guardrails (Nov 9)
+# Nov 8 post-mortem: $47 of a $57 loss came from three 5-leg parlays; one was a same-game stack of untested combo
+# props; most of the 1 PM slip had no model support; heavy-priced Unders the model overrated lost. So before a ticket is
+# logged (or placed), it's graded: every leg through judge(), then the ticket itself -- legs, same-game stacking, the
+# chance it hits, and the owner's own daily limits.
+DEFAULT_LIMITS = {"daily_budget": 40.0, "stop_loss": 25.0, "max_legs": 3, "max_parlays": 2, "max_parlay_stake": 10.0}
+LIMITS_KEY = "coach_limits"
+
+
+def limits() -> Dict:
+    try:
+        import model_store as MS
+        got = MS.get_setting(LIMITS_KEY) or {}
+        if isinstance(got, str):
+            import json
+            got = json.loads(got)
+        return {**DEFAULT_LIMITS, **{k: v for k, v in got.items() if k in DEFAULT_LIMITS}}
+    except Exception:                                           # noqa: BLE001
+        return dict(DEFAULT_LIMITS)
+
+
+def save_limits(new: Dict) -> bool:
+    try:
+        import model_store as MS
+        return bool(MS.save_setting(LIMITS_KEY, {k: new[k] for k in DEFAULT_LIMITS if k in new}))
+    except Exception:                                           # noqa: BLE001
+        return False
+
+
+def today_so_far(bets: Sequence[Dict], day: str) -> Dict:
+    """Real money staked today, settled P/L today, parlays placed today."""
+    mine = [b for b in bets if _real(b) and _day(b) == day and (not B._ticket(b) or B.is_parlay_header(b))]
+    staked = sum(_num(b.get("stake")) or 0.0 for b in mine)
+    pl = sum(B.bet_pnl(b) or 0.0 for b in mine if B._result(b) in ("win", "loss", "push"))
+    return {"staked": round(staked, 2), "pl": round(pl, 2), "parlays": sum(1 for b in mine if B.is_parlay_header(b)),
+            "bets": len(mine), "open": sum(1 for b in mine if B._result(b) not in ("win", "loss", "push"))}
+
+
+def _dec(odds) -> Optional[float]:
+    o = _num(odds)
+    if o is None or -100 < o < 100:
+        return None
+    return 1 + (o / 100 if o > 0 else 100 / -o)
+
+
+def ticket_check(items: Sequence[Dict], mode: str, stake: float, parlay_stake: float, parlay_odds,
+                 bets: Sequence[Dict], day: str, tag_records_for=None, lim: Optional[Dict] = None) -> Dict:
+    """Grade a ticket before it's placed. Returns {"grade", "headline", "flags": [(level, text)], "legs": [...],
+    "hit_chance", "ev"}; level is "red" (don't), "amber" (be careful) or "ok"."""
+    lim = lim or limits()
+    hist = _history(bets)
+    flags, legs = [], []
+    cache: Dict[str, Dict] = {}
+    for it in items:
+        sp = it.get("sport")
+        if tag_records_for and sp not in cache:
+            try:
+                cache[sp] = tag_records_for(sp) or {}
+            except Exception:                                   # noqa: BLE001
+                cache[sp] = {}
+        c = {"sport": sp, "market": it.get("market") or it.get("bet_market"), "kind": "Game line" if it.get("_rec") else "Prop",
+             "chance": it.get("chance") if not it.get("_rec") else (it.get("best_chance") if it.get("best_tested") else None),
+             "price": it.get("price"), "use": it.get("use") if it.get("use") is not None else "",
+             "tested": bool(it.get("best_tested")) if it.get("_rec") else True}
+        if not it.get("_rec") and it.get("use") is None:
+            c["use"] = "?"                                      # came from a page that doesn't carry the tag: unknown
+        j = judge(c, hist, cache.get(sp, {}).get(_strip_use(c["use"])))
+        legs.append({**it, **j})
+    singles_mode, parlay_mode = mode in ("Singles", "Both"), mode in ("Parlay", "Both")
+    for l in legs:
+        if l["verdict"].startswith("🔴"):
+            flags.append(("red", f"{l.get('pick')}: Skip — {l['why'].split(';')[0]}"))
+        elif l.get("signal") in ("🟠 Lean pass", "🟡 Tiny stake only"):
+            flags.append(("amber", f"{l.get('pick')}: {l['signal']} — {l['why'].split(';')[0]}"))
+    hit = None
+    if parlay_mode and len(legs) >= 2:
+        n = len(legs)
+        if n > int(lim["max_legs"]):
+            flags.append(("red", f"{n} legs — your limit is {int(lim['max_legs'])}. Every extra leg is another way to lose "
+                                 "the whole ticket; Nov 8's three 5-leg parlays cost $47 of the $57 lost."))
+        games = [l.get("game") for l in legs if l.get("game")]
+        dup = {g for g in games if games.count(g) > 1}
+        if dup:
+            flags.append(("amber", f"{sum(games.count(g) for g in dup)} legs from the same game ({', '.join(sorted(dup))}) "
+                                   "— they win or lose together (a shootout sinks every Under at once)."))
+        # an unchecked chance (no track record for the pick type) can't be multiplied into a hit rate
+        ch = [None if "no track record" in str(l.get("why")) else l.get("real_chance") for l in legs]
+        if all(x is not None for x in ch):
+            hit = 1.0
+            for x in ch:
+                hit *= x
+        d = _dec(parlay_odds)
+        if hit is not None and d:
+            ev = hit * d - 1
+            fair = (1 / hit - 1) * 100 if hit < 0.5 else -hit / (1 - hit) * 100
+            same = " Same-game legs move together, so the real chance is less certain than this." if dup else ""
+            msg = (f"Hits about {hit:.0%} of the time (1 in {1 / hit:.0f}); it pays {float(parlay_odds):+.0f}, fair is "
+                   f"{fair:+.0f} → {'an edge' if ev > 0 else 'a losing price'} ({ev:+.0%} per $1).{same}")
+            flags.append(("ok" if ev > 0 else "red", msg))
+        elif hit is None:
+            flags.append(("amber", "Some legs have no checked chance (no track record), so nobody can say how often "
+                                   "this hits — or whether the price is fair."))
+        if _num(parlay_stake) and _num(parlay_stake) > float(lim["max_parlay_stake"]):
+            flags.append(("red", f"${float(parlay_stake):.0f} on a parlay — your limit is ${float(lim['max_parlay_stake']):.0f}."))
+    t = today_so_far(bets, day)
+    new_stake = (len(legs) * float(stake or 0) if singles_mode else 0) + (float(parlay_stake or 0) if parlay_mode else 0)
+    if t["pl"] <= -float(lim["stop_loss"]):
+        flags.append(("red", f"You're {usd(t['pl'])} today — past your stop-loss of ${float(lim['stop_loss']):.0f}. "
+                             "Chasing is how Nov 8's $20 night parlay happened. Done for today."))
+    if t["staked"] + new_stake > float(lim["daily_budget"]):
+        flags.append(("red", f"This brings today to ${t['staked'] + new_stake:.0f} staked — your budget is "
+                             f"${float(lim['daily_budget']):.0f}."))
+    if parlay_mode and t["parlays"] >= int(lim["max_parlays"]):
+        flags.append(("red", f"You've placed {t['parlays']} parlay(s) today — your limit is {int(lim['max_parlays'])}."))
+    reds = sum(1 for lv, _ in flags if lv == "red")
+    ambers = sum(1 for lv, _ in flags if lv == "amber")
+    grade = "A" if not reds and not ambers else "B" if not reds and ambers <= 1 else "C" if not reds else \
+        "D" if reds == 1 else "F"
+    headline = {"A": "✅ Good ticket — place it at your normal stake.",
+                "B": "🟢 Fine — one thing to watch below.",
+                "C": "🟡 Shaky — trim the flagged legs or halve the stake.",
+                "D": "🟠 Fix the red item before you place this.",
+                "F": "🔴 Don't place this ticket as it is."}[grade]
+    ev = None
+    if hit is not None and _dec(parlay_odds):
+        ev = hit * _dec(parlay_odds) - 1
+    return {"grade": grade, "headline": headline, "flags": flags, "legs": legs, "hit_chance": hit, "ev": ev,
+            "today": t}
+
+
+def lessons(bets: Sequence[Dict], day: str) -> List[str]:
+    """Plain-English lessons from one day's settled real bets (the morning-after review)."""
+    mine = [b for b in bets if _real(b) and _day(b) == day]
+    money = [b for b in mine if (not B._ticket(b) or B.is_parlay_header(b)) and B._result(b) in ("win", "loss", "push")]
+    if not money:
+        return []
+    out = []
+    total = _money(money)
+    par = [b for b in money if B.is_parlay_header(b)]
+    sing = [b for b in money if not B.is_parlay_header(b)]
+    pl_par, pl_sing = _money(par), _money(sing)
+    w, l = _wl(sing)
+    out.append(f"**The day: {usd(total)}.** Singles {w}–{l} ({usd(pl_sing)}); parlays {sum(B._result(b) == 'win' for b in par)}"
+               f"–{sum(B._result(b) == 'loss' for b in par)} ({usd(pl_par)}).")
+    if par and pl_par < 0 and total < 0 and pl_par <= 0.6 * total:
+        big = [b for b in par if (_num(b.get("entry_odds")) or 0) >= 1000]
+        out.append(f"**Parlays were the leak:** {usd(pl_par)} of the {usd(total)}."
+                   + (f" {len(big)} paid +1000 or more — long shots that hit less than 1 time in 10." if big else ""))
+    picks = [b for b in mine if not B.is_parlay_header(b) and B._result(b) in ("win", "loss")]
+    unbacked = [b for b in picks if _num(b.get("model_prob")) is None or _num(b.get("model_prob")) < 0.5]
+    if len(unbacked) >= 2:
+        uw, ul = _wl(unbacked)
+        out.append(f"**{len(unbacked)} of your {len(picks)} picks had no model support** (under 50% or no read): "
+                   f"{uw}–{ul}. Check Find a bet first — if it isn't 🟢 or a 🟢 Small-stake Maybe, skip it.")
+    heavy = [b for b in picks if (_num(b.get("entry_odds")) or 0) <= -150 and not B._ticket(b)]
+    if heavy:
+        hw, hl = _wl(heavy)
+        out.append(f"**Heavy prices (−150 or worse): {hw}–{hl}.** At −150 you must win 60% just to break even.")
+    tick = defaultdict(list)
+    for b in mine:
+        if B._ticket(b) and not B.is_parlay_header(b):
+            tick[B._ticket(b)].append(b)
+    for t, ls in tick.items():
+        games = [x.get("game") for x in ls if x.get("game")]
+        if games and max(games.count(g) for g in games) >= 3:
+            g = max(set(games), key=games.count)
+            out.append(f"**{t}: {games.count(g)} legs from one game ({g}).** They rise and fall together — one game "
+                       "script sank the ticket.")
+    good = [b for b in picks if (_num(b.get("model_prob")) or 0) >= 0.6]
+    if good:
+        gw, gl = _wl(good)
+        out.append(f"Picks the model rated 60%+: {gw}–{gl}.")
+    return out
