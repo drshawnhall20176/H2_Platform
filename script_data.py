@@ -160,10 +160,17 @@ def package(c, gid):
                         p["passingAttempts"] = _f(v.split("/")[1])
                     elif k in ("threePointFieldGoalsMade-threePointFieldGoalsAttempted",):
                         p["threes"] = _f(v)
+                    elif k == "fieldGoalsMade/fieldGoalAttempts" and isinstance(v, str) and "/" in v:
+                        p["_fgm"], p["_fga"] = _f(v.split("/")[0]), _f(v.split("/")[1])     # Nov 9: kickers
+                    elif k == "extraPointsMade/extraPointAttempts" and isinstance(v, str) and "/" in v:
+                        p["_xpm"] = _f(v.split("/")[0])
                     else:
                         p[f"{cat}.{k}" if k in ("interceptions", "sacks") else k] = _f(v)
     if not players:
         return None
+    for p in players.values():                                  # Nov 9: anytime TD = rushing + receiving scores
+        if "rushingTouchdowns" in p or "receivingTouchdowns" in p:
+            p["_td"] = (p.get("rushingTouchdowns") or 0.0) + (p.get("receivingTouchdowns") or 0.0)
     return {"teams": teams, "fav": fav, "strength": strength, "players": dict(players)}
 
 
@@ -182,7 +189,15 @@ def groups(c):
                 ("rush_yds", lambda b: (b.get("rushingAttempts") or 0) >= 8 and (b.get("passingAttempts") or 0) < 5, "rushingYards"),
                 ("rec_yds", lambda b: (b.get("receptions") or 0) >= 2.5, "receivingYards"),
                 ("receptions", lambda b: (b.get("receptions") or 0) >= 2.5, "receptions"),
-                ("tackles", lambda b: (b.get("totalTackles") or 0) >= 4, "totalTackles")]
+                ("tackles", lambda b: (b.get("totalTackles") or 0) >= 4, "totalTackles"),
+                # Nov 9: the markets Game Script showed with no group -- measured the same way
+                ("pass_td", lambda b: (b.get("passingAttempts") or 0) >= 15, "passingTouchdowns"),
+                ("pass_int", lambda b: (b.get("passingAttempts") or 0) >= 15, "passing.interceptions"),
+                ("anytime_td", lambda b: (b.get("rushingAttempts") or 0) >= 8 or (b.get("receptions") or 0) >= 2.5, "_td"),
+                ("sacks", lambda b: (b.get("defensive.sacks") or 0) >= 0.25, "defensive.sacks"),
+                ("fg_made", lambda b: (b.get("_fga") or 0) >= 1, "_fgm"),
+                ("kick_pts", lambda b: (b.get("_fga") or 0) >= 1, "totalKickingPoints"),
+                ("pat_made", lambda b: (b.get("_fga") or 0) >= 1, "_xpm")]
     return [("shots", lambda b: (b.get("timeOnIce") or 0) >= 12 and b.get("_g") is None, "shotsTotal"),
             ("points", lambda b: (b.get("timeOnIce") or 0) >= 12 and b.get("_g") is None, "_pts"),
             ("blocks", lambda b: (b.get("timeOnIce") or 0) >= 12 and b.get("_g") is None, "blockedShots"),

@@ -47,7 +47,10 @@ HOOPS_STAT = {"Points": "points", "PRA": "points", "PA": "points", "PR": "points
 FOOTBALL_STAT = {"Pass Yards": "pass_yds", "Pass Attempts": "pass_att", "Pass Completions": "pass_att",
                  "Rush Yards": "rush_yds", "Rush Attempts": "rush_yds", "Receiving Yards": "rec_yds",
                  "Rush + Rec Yards": "rec_yds", "Receptions": "receptions", "Targets": "receptions",
-                 "Tackles + Assists": "tackles", "Solo Tackles": "tackles"}
+                 "Tackles + Assists": "tackles", "Solo Tackles": "tackles",
+                 # Nov 9: every NFL / college market now has a group (script_data measures each nightly)
+                 "Passing TDs": "pass_td", "Interceptions": "pass_int", "Anytime TD": "anytime_td", "Sacks": "sacks",
+                 "FG Made": "fg_made", "Kicking Points": "kick_pts", "PATs Made": "pat_made"}
 HOCKEY_STAT = {"Shots on Goal": "shots", "Points": "points", "Goals": "points", "Assists": "points",
                "Blocked Shots": "blocks", "Saves": "saves"}
 
