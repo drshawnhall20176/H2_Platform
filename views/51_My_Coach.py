@@ -198,6 +198,10 @@ else:
     goods = [r for r in _judged if r["verdict"].startswith("🟢")]
     maybes = [r for r in _judged if r["verdict"].startswith("🟡")]
     skips = [r for r in _judged if r["verdict"].startswith("🔴")]
+    unchecked = [r for r in _judged if r["verdict"].startswith("⚪")]
+    _why = CO.why_nothing(_judged, f_sport)
+    if _why:
+        st.info(_why)
     st.markdown(f"**🟢 Good bets ({len(goods)})** — your normal stake.")
     _ticked = []
     if goods:
@@ -221,6 +225,12 @@ else:
             _ticked += _tbl(maybes[:40], "coach_maybe_sel")
         else:
             st.caption("None.")
+    if unchecked:
+        with st.expander(f"⚪ Unchecked ({len(unchecked)}) — no track record, don't bet these"):
+            st.caption("Combo and defense markets (Pts+Ast, Blocks, Steals…) the platform has never graded, so the "
+                       "model's chance can't be checked — that's why some show 80%+ and +30-point edges. They're "
+                       "here so you can see them, not to bet. They get a record once the morning review grades them.")
+            _ticked += _tbl(unchecked[:40], "coach_unchecked_sel")
     with st.expander(f"🔴 Skip ({len(skips)}) — and why"):
         if skips:
             _ticked += _tbl(skips[:60], "coach_skip_sel")
