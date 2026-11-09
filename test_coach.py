@@ -83,3 +83,37 @@ def test_untagged_props_cannot_be_good_bets():
     h = CO._history([])
     j = CO.judge({"sport": "NBA", "kind": "Prop", "market": "Blocks+Steals", "chance": 0.787, "price": -115, "use": ""}, h)
     assert j["verdict"] == "🟡 Maybe" and "no track record" in j["why"]
+
+
+def test_ticket_check_flags_a_nov8_style_parlay():
+    legs = [{"sport": "NBA", "pick": f"P{i} Pts+Ast Under 15.5", "player": f"P{i}", "market": "Pts+Ast", "side": "Under",
+             "line": 15.5, "game": "LAL @ DET", "chance": 0.70, "price": -110, "use": ""} for i in range(5)]
+    lim = dict(CO.DEFAULT_LIMITS)
+    out = CO.ticket_check(legs, "Parlay", 0, 20, 3400, [], "2026-11-08", lim=lim)
+    text = " ".join(m for _, m in out["flags"])
+    assert out["grade"] in ("D", "F") and "5 legs" in text and "same game" in text and "$20 on a parlay" in text
+    assert "no checked chance" in text and out["hit_chance"] is None
+
+
+def test_ticket_check_clean_singles_get_an_a():
+    legs = [{"sport": "NFL", "pick": "A Rush Attempts Over 15.5", "player": "A", "market": "Rush Attempts", "side": "Over",
+             "line": 15.5, "game": "TB @ CHI", "chance": 0.62, "price": -110, "use": "🎟️ Parlay + Single"}]
+    out = CO.ticket_check(legs, "Singles", 5, 0, None, [], "2026-11-09", lim=dict(CO.DEFAULT_LIMITS))
+    assert out["grade"] == "A", out["flags"]
+
+
+def test_stop_loss_and_lessons():
+    day = "2026-11-08"
+    bets = [_b(1, "loss", 0.45, stake=20, odds=3400, market="Parlay", ticket="T", day=day),
+            _b(2, "loss", 0.45, stake=5, day=day), _b(3, "loss", None, stake=5, day=day),
+            _b(4, "win", 0.62, stake=5, odds=-160, day=day)]
+    import betlog as B
+    orig = B.is_parlay_header
+    B.is_parlay_header = lambda b: b.get("market") == "Parlay"
+    try:
+        out = CO.ticket_check([], "Singles", 5, 0, None, bets, day, lim=dict(CO.DEFAULT_LIMITS))
+        assert any("stop-loss" in m for _, m in out["flags"])
+        les = " ".join(CO.lessons(bets, day))
+        assert "Parlays were the leak" in les and "no model support" in les and "Heavy prices" in les
+    finally:
+        B.is_parlay_header = orig

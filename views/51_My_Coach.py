@@ -45,6 +45,56 @@ with st.expander("📖 How to read these tables", expanded=False):
         "- **Verdict**: 🟢 keep doing it · 🟡 close, watch the price · 🔴 stop or bet smaller · ⚪ fewer than "
         f"{CO.MIN_N} bets, too early to judge.")
 
+# ---- Nov 9: today's guardrails and yesterday's lessons -- the coach speaks first
+import datetime as _dd
+import pytz as _pz
+_today_s = _dd.datetime.now(_pz.timezone("US/Eastern")).strftime("%Y-%m-%d")
+_yday_s = (_dd.datetime.now(_pz.timezone("US/Eastern")) - _dd.timedelta(days=1)).strftime("%Y-%m-%d")
+try:
+    _every = B.list_bets()
+except Exception:                                               # noqa: BLE001
+    _every = []
+_lim = CO.limits()
+_t = CO.today_so_far(_every, _today_s)
+_stop = _t["pl"] <= -float(_lim["stop_loss"])
+_over = _t["staked"] >= float(_lim["daily_budget"])
+st.markdown("#### 🛑 Today")
+k1, k2, k3, k4 = st.columns(4)
+k1.metric("Staked today", f"${_t['staked']:.0f}", help=f"Your daily budget is ${float(_lim['daily_budget']):.0f}")
+k2.metric("Settled today", CO.usd(_t["pl"]), help=f"Stop-loss: −${float(_lim['stop_loss']):.0f}")
+k3.metric("Parlays today", f"{_t['parlays']} of {int(_lim['max_parlays'])}")
+k4.metric("Open bets", _t["open"])
+if _stop:
+    st.error(f"**Stop for today.** You're {CO.usd(_t['pl'])}, past your −${float(_lim['stop_loss']):.0f} stop-loss. "
+             "Bets placed to win it back are the ones that cost the most (Nov 8: a $20 +3400 parlay after a losing day).")
+elif _over:
+    st.warning(f"**Budget used.** ${_t['staked']:.0f} staked today of ${float(_lim['daily_budget']):.0f}.")
+else:
+    st.caption(f"Room left today: ${max(0.0, float(_lim['daily_budget']) - _t['staked']):.0f} of your "
+               f"${float(_lim['daily_budget']):.0f} budget.")
+with st.expander("⚙️ My limits"):
+    l1, l2, l3, l4, l5 = st.columns(5)
+    nb = l1.number_input("Daily budget ($)", min_value=0.0, value=float(_lim["daily_budget"]), step=5.0, key="lim_budget")
+    ns = l2.number_input("Stop-loss ($ down)", min_value=0.0, value=float(_lim["stop_loss"]), step=5.0, key="lim_stop")
+    nl = l3.number_input("Max parlay legs", min_value=2, max_value=10, value=int(_lim["max_legs"]), step=1, key="lim_legs")
+    npar = l4.number_input("Max parlays a day", min_value=0, max_value=10, value=int(_lim["max_parlays"]), step=1,
+                           key="lim_par")
+    nps = l5.number_input("Max parlay stake ($)", min_value=0.0, value=float(_lim["max_parlay_stake"]), step=1.0,
+                          key="lim_pstake")
+    if st.button("Save my limits", key="lim_save"):
+        if CO.save_limits({"daily_budget": nb, "stop_loss": ns, "max_legs": nl, "max_parlays": npar,
+                           "max_parlay_stake": nps}):
+            st.success("Saved. The coach checks every ticket against these.")
+        else:
+            st.error("Couldn't save — try again.")
+    st.caption("The coach grades every ticket you tick (here, Today's best and the Analyst Desk) against these "
+               "limits and flags anything over them before it's logged.")
+_less = CO.lessons(_every, _yday_s)
+if _less:
+    with st.expander("📓 Yesterday's lessons", expanded=True):
+        for x in _less:
+            st.markdown(f"- {x}")
+
 # ---- Nov 8: the bet finder -- pick a sport, time and game; every bet on offer gets 🟢 / 🟡 / 🔴 and why
 st.markdown("#### 🔎 Find a bet")
 st.caption("Pick a sport, then narrow to a start time or a game. Every bet with a live price is checked against "
