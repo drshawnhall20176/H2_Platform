@@ -33,7 +33,7 @@ def test_groups_follow_the_sport():
     assert SE.group("NBA", "Points", 2) is None                        # under 3 minutes: not measured
     assert SE.group("NFL", "Rush Yards") == "rush_yds" and SE.group("NCAAF", "Receptions") == "receptions"
     assert SE.group("NHL", "Goals") == "points" and SE.group("NHL", "Saves") == "saves"
-    assert SE.group("NFL", "Anytime TD") is None
+    assert SE.group("NFL", "Anytime TD") == "anytime_td" and SE.group("NFL", "Sacks") == "sacks"   # Nov 9: every market grouped
 
 
 def test_shifts_centered_point_the_right_way_and_respect_trust():

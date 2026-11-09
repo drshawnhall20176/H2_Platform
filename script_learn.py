@@ -36,10 +36,15 @@ def _cache_path(sport: str) -> str:
     return os.path.join(CACHE_DIR, f"{sport}.json.gz")
 
 
+CACHE_VERSION = 2              # Nov 9: games now carry TDs / kicking fields -- older caches are rebuilt
+
+
 def load_cache(sport: str) -> Dict:
     try:
         with gzip.open(_cache_path(sport), "rt") as fh:
             c = json.load(fh)
+        if c.get("version") != CACHE_VERSION:
+            return {"days": set(), "games": {}}
         c["days"] = set(c.get("days") or [])
         return c
     except (OSError, ValueError):
@@ -49,7 +54,7 @@ def load_cache(sport: str) -> Dict:
 def save_cache(sport: str, cache: Dict) -> None:
     os.makedirs(CACHE_DIR, exist_ok=True)
     with gzip.open(_cache_path(sport), "wt") as fh:
-        json.dump({"days": sorted(cache["days"]), "games": cache["games"]}, fh)
+        json.dump({"version": CACHE_VERSION, "days": sorted(cache["days"]), "games": cache["games"]}, fh)
 
 
 # ---------------------------------------------------------------- 1. update
