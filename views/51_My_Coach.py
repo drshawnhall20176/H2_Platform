@@ -60,7 +60,7 @@ f_date = f_day.strftime("%Y-%m-%d")
 
 
 @st.cache_data(ttl=900, show_spinner=False)
-def _cands(sport, day):
+def _cands(sport, day, code_version=None):
     import best_bets_data as BBD
     import todays_best as TB
     import pick_records as PR
@@ -84,7 +84,11 @@ def _cands(sport, day):
 
 
 with st.spinner(f"Loading {f_sport} bets… (the first load can take a minute)"):
-    _c, _tags, _err = _cands(f_sport, f_date)
+    # Nov 9: the cache key includes coach.py's code, so an update to how bets are read can't serve stale rows
+    # (Nov 8: rows cached before an update were logged without player names)
+    import hashlib as _hl
+    _code = _hl.md5(open(CO.__file__, "rb").read()).hexdigest()
+    _c, _tags, _err = _cands(f_sport, f_date, _code)
 
 
 def _tk(t):
