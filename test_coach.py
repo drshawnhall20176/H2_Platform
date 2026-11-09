@@ -77,3 +77,9 @@ def test_why_numbers_match_the_table_and_signals():
     assert CO.signal("🟡 Maybe", 0.025, 1) == "🟡 Tiny stake only"
     assert CO.signal("🟡 Maybe", 0.008, 0) == "🟠 Lean pass"
     assert CO.signal("🟡 Maybe", None, 0) == "🟠 Lean pass"
+
+
+def test_untagged_props_cannot_be_good_bets():
+    h = CO._history([])
+    j = CO.judge({"sport": "NBA", "kind": "Prop", "market": "Blocks+Steals", "chance": 0.787, "price": -115, "use": ""}, h)
+    assert j["verdict"] == "🟡 Maybe" and "no track record" in j["why"]
