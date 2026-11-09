@@ -34,7 +34,13 @@ import props_engine as PE
 # Best Bets' four basketball markets: Odds API key -> Player props market.
 YES_ONLY = ("player_anytime_td", "player_1st_td", "player_last_td")   # = odds_api.YES_ONLY_MARKETS ("Yes" only)
 CORE_MARKETS = {"player_points": "Points", "player_rebounds": "Rebounds", "player_assists": "Assists",
-                "player_threes": "Threes Made"}
+                "player_threes": "Threes Made",
+                # Nov 9: the four combos read by the props model (sums of the same projected stats) instead of the
+                # older recent-hit-rate engine -- so they get real projections, Use tags, kickoff snapshots and the
+                # nightly grading, and earn a record like every other market. Blocks / steals stay on the old engine
+                # (low-count stats; untested in this model).
+                "player_points_rebounds_assists": "PRA", "player_points_rebounds": "PR",
+                "player_points_assists": "PA", "player_rebounds_assists": "RA"}
 ROTATION_GAMES = 7          # = position_data.LEAGUE_GAMES_PER_TEAM
 
 

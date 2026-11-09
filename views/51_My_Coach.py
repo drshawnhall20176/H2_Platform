@@ -130,7 +130,11 @@ def _cands(sport, day, code_version=None):
         tags = PR.tag_records(sport)
     except Exception:                                           # noqa: BLE001
         tags = {}
-    return cands, tags, err
+    try:
+        counts = PR.market_counts(sport)
+    except Exception:                                           # noqa: BLE001
+        counts = None
+    return cands, tags, err, counts
 
 
 with st.spinner(f"Loading {f_sport} bets… (the first load can take a minute)"):
@@ -138,7 +142,7 @@ with st.spinner(f"Loading {f_sport} bets… (the first load can take a minute)")
     # (Nov 8: rows cached before an update were logged without player names)
     import hashlib as _hl
     _code = _hl.md5(open(CO.__file__, "rb").read()).hexdigest()
-    _c, _tags, _err = _cands(f_sport, f_date, _code)
+    _c, _tags, _err, _mcounts = _cands(f_sport, f_date, _code)
 
 
 def _tk(t):
@@ -161,7 +165,7 @@ try:
     _all_bets = B.list_bets()
 except Exception:                                               # noqa: BLE001
     _all_bets = []
-_judged = CO.finder(_pick, _all_bets, _tags)
+_judged = CO.finder(_pick, _all_bets, _tags, _mcounts or None)
 if f_sport in ("NFL", "NCAAF") and _gt:                         # Nov 8: which games the weather touches
     with st.expander("🌤️ Game weather at kickoff"):
         import football_weather as _FW
