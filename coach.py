@@ -316,13 +316,16 @@ def judge(c: Dict, hist: Dict, tag_rec: Optional[tuple] = None) -> Dict:
     if c.get("tested") is False:
         warn.append("untested lean")
         other += 1
-    if c.get("kind") == "Prop" and not str(c.get("use") or "").strip():
-        # Nov 8: no Use tag = a market with no graded record (combos, defense stats); the model's chance can't be
-        # checked against reality, so it can't be a Good bet -- Celtics-Bucks showed "+25 pt" edges this way
+    unchecked = c.get("kind") == "Prop" and not str(c.get("use") or "").strip()
+    if unchecked:
+        # Nov 8-9: no Use tag = a market with no graded record (combos, blocks, steals); the model's chance can't be
+        # checked against reality ("83%, +30 pt edge" on Nov 9). Its own group, never a Good bet or a Maybe.
         warn.append("no track record for this kind of pick — the model's chance is unchecked")
         other += 1
     if stop:
         v = "🔴 Skip"
+    elif unchecked:
+        v = "⚪ Unchecked"
     elif not warn and edge is not None and edge >= GOOD_EDGE and (chance or 0) >= GOOD_CHANCE:
         v = "🟢 Good bet"
     elif edge is not None and edge >= 0 and len(warn) <= 1:
@@ -343,6 +346,8 @@ def signal(verdict: str, edge: Optional[float], cautions: int = 0) -> str:
         return SIGNALS[0]
     if verdict.startswith("🔴"):
         return SIGNALS[4]
+    if verdict.startswith("⚪"):
+        return "⚪ Unchecked"
     if edge is None:
         return SIGNALS[3]
     score = edge * 100 - cautions
@@ -406,7 +411,7 @@ def finder(cands, bets, tag_records: Optional[Dict] = None) -> List[Dict]:
             j["verdict"] = "🔴 Skip"
             j["why"] = "the model's leans in this market have been losing lately; " + j["why"]
         out.append({**c, **j})
-    rank = {"🟢 Good bet": 0, "🟡 Maybe": 1, "🔴 Skip": 2}
+    rank = {"🟢 Good bet": 0, "🟡 Maybe": 1, "⚪ Unchecked": 2, "🔴 Skip": 3}
     sig = {k: i for i, k in enumerate(SIGNALS)}
     return sorted(out, key=lambda r: (rank.get(r["verdict"], 3), sig.get(r.get("signal"), 9),
                                       -(r["edge"] if r["edge"] is not None else -1)))
@@ -488,6 +493,8 @@ def ticket_check(items: Sequence[Dict], mode: str, stake: float, parlay_stake: f
     for l in legs:
         if l["verdict"].startswith("🔴"):
             flags.append(("red", f"{l.get('pick')}: Skip — {l['why'].split(';')[0]}"))
+        elif l["verdict"].startswith("⚪"):
+            flags.append(("amber", f"{l.get('pick')}: ⚪ no track record — the model's chance is unchecked"))
         elif l.get("signal") in ("🟠 Lean pass", "🟡 Tiny stake only"):
             flags.append(("amber", f"{l.get('pick')}: {l['signal']} — {l['why'].split(';')[0]}"))
     hit = None
@@ -589,3 +596,29 @@ def lessons(bets: Sequence[Dict], day: str) -> List[str]:
         gw, gl = _wl(good)
         out.append(f"Picks the model rated 60%+: {gw}–{gl}.")
     return out
+
+
+def why_nothing(judged: Sequence[Dict], sport: str) -> Optional[str]:
+    """When a sport has no Good bets or Maybes, the plain reason (Nov 9: 'is something broken?' -- usually not)."""
+    if any(r["verdict"].startswith(("🟢", "🟡")) for r in judged):
+        return None
+    if not judged:
+        return None
+    n = len(judged)
+    props = [r for r in judged if r.get("kind") == "Prop"]
+    lines = [r for r in judged if r.get("kind") != "Prop"]
+    passed = sum(1 for r in props if "Pass" in str(r.get("use")))
+    unchecked = sum(1 for r in judged if r["verdict"].startswith("⚪"))
+    bits = []
+    if props and passed == len(props):
+        bits.append(f"all {len(props)} player props are tagged ⛔ Pass by the model's tested rules — it sees no edge it "
+                    "trusts")
+    elif props:
+        bits.append(f"{passed} of {len(props)} player props are tagged ⛔ Pass and the rest are priced too high for "
+                    "their chance")
+    if lines and all(not r.get("tested") for r in lines):
+        bits.append(f"the {len(lines)} game leans are untested (tracking only)")
+    if unchecked:
+        bits.append(f"{unchecked} have no track record (⚪ Unchecked)")
+    return (f"Nothing to bet in {sport} right now: " + "; ".join(bits) + ". That's the coach working — no bet is the "
+            "right bet when nothing clears the bar.") if bits else None
