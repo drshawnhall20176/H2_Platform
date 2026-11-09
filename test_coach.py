@@ -82,7 +82,7 @@ def test_why_numbers_match_the_table_and_signals():
 def test_untagged_props_cannot_be_good_bets():
     h = CO._history([])
     j = CO.judge({"sport": "NBA", "kind": "Prop", "market": "Blocks+Steals", "chance": 0.787, "price": -115, "use": ""}, h)
-    assert j["verdict"] == "🟡 Maybe" and "no track record" in j["why"]
+    assert j["verdict"] == "⚪ Unchecked" and j["signal"] == "⚪ Unchecked" and "no track record" in j["why"]
 
 
 def test_ticket_check_flags_a_nov8_style_parlay():
@@ -117,3 +117,11 @@ def test_stop_loss_and_lessons():
         assert "Parlays were the leak" in les and "no model support" in les and "Heavy prices" in les
     finally:
         B.is_parlay_header = orig
+
+
+def test_why_nothing_explains_an_all_pass_slate():
+    h = CO._history([])
+    rows = [dict(c, **CO.judge(c, h)) for c in
+            [{"sport": "NFL", "kind": "Prop", "market": "Receptions", "chance": 0.45, "price": -110, "use": "⛔ Pass"}] * 3]
+    msg = CO.why_nothing(rows, "NFL")
+    assert "all 3 player props are tagged ⛔ Pass" in msg
