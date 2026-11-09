@@ -27,6 +27,15 @@ def selectable(df: pd.DataFrame, key: str, **kw) -> List[int]:
         return []
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _tag_records(sport: str) -> Dict:
+    try:
+        import pick_records as PR
+        return PR.tag_records(sport)
+    except Exception:                                           # noqa: BLE001
+        return {}
+
+
 def picked(items: Sequence[Dict], rows: Sequence[int]) -> List[Dict]:
     return [dict(items[i]) for i in rows if 0 <= i < len(items)]
 
@@ -73,7 +82,28 @@ def panel(items: Sequence[Dict], key: str, date_str: str, tag: str = "platform-t
     missing = [x.get("pick") for x in its if x.get("price") is None]
     if missing:
         st.caption("Add a price for: " + "; ".join(str(m) for m in missing) + " — picks without one aren't logged.")
-    if st.button("📝 Log to Bet Log", type="primary", key=f"{key}_go"):
+    # Nov 9: the coach grades the ticket before it's logged (or placed) -- legs, parlay size, same-game stacks, the
+    # chance it hits vs what it pays, and the owner's daily limits (My Coach → My limits)
+    blocked = False
+    try:
+        import betlog as B
+        import coach as CO
+        chk = CO.ticket_check(its, mode, stake, pstake, podds if mode != "Singles" else None, B.list_bets(), date_str,
+                              tag_records_for=_tag_records)
+        box = {"A": st.success, "B": st.success, "C": st.warning, "D": st.warning, "F": st.error}[chk["grade"]]
+        box(f"**Coach grade: {chk['grade']}** — {chk['headline']}")
+        icon = {"red": "🔴", "amber": "🟠", "ok": "✅"}
+        for lv, msg in chk["flags"]:
+            st.markdown(f"{icon[lv]} {msg}")
+        t = chk["today"]
+        st.caption(f"Today so far: ${t['staked']:.0f} staked across {t['bets']} bet(s), {t['parlays']} parlay(s), "
+                   f"settled {CO.usd(t['pl'])}.")
+        if any(lv == "red" for lv, _ in chk["flags"]):
+            blocked = not st.checkbox("I've read the red flags — I already placed it / log it anyway",
+                                      key=f"{key}_override")
+    except Exception as exc:                                    # noqa: BLE001 -- the coach never blocks logging by failing
+        st.caption(f"(Coach check unavailable: {type(exc).__name__})")
+    if st.button("📝 Log to Bet Log", type="primary", key=f"{key}_go", disabled=blocked):
         if mode != "Singles" and not podds:
             st.error("Type the parlay odds from your slip first.")
             return
