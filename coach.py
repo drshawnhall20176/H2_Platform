@@ -264,7 +264,10 @@ def pts(x) -> str:
     return "—" if x is None else f"{x * 100:+.1f} pts"
 
 
-def judge(c: Dict, hist: Dict, tag_rec: Optional[tuple] = None) -> Dict:
+NEW_MARKET_N = 50          # a market needs this many graded picks before its picks can be Good bets
+
+
+def judge(c: Dict, hist: Dict, tag_rec: Optional[tuple] = None, market_n: Optional[int] = None) -> Dict:
     """c: {"sport", "market", "chance", "price", "use", "tested"}. Returns {"verdict", "signal", "why", "edge", "need",
     "model_chance", "real_chance"}. Every number in the Why text is the same number the table shows."""
     stop, warn, good = [], [], []
@@ -315,6 +318,11 @@ def judge(c: Dict, hist: Dict, tag_rec: Optional[tuple] = None) -> Dict:
             other += 1
     if c.get("tested") is False:
         warn.append("untested lean")
+        other += 1
+    if c.get("kind") == "Prop" and market_n is not None and market_n < NEW_MARKET_N and str(c.get("use") or "").strip():
+        # Nov 9: a market the props model only just started reading (NBA combos) -- its tag is real but its own
+        # graded record isn't there yet, so it can be a Maybe, not a Good bet, until it has one
+        warn.append(f"new market for the model — {market_n} graded so far (needs {NEW_MARKET_N})")
         other += 1
     unchecked = c.get("kind") == "Prop" and not str(c.get("use") or "").strip()
     if unchecked:
@@ -400,13 +408,14 @@ def lean_candidates(rows) -> List[Dict]:
     return out
 
 
-def finder(cands, bets, tag_records: Optional[Dict] = None) -> List[Dict]:
+def finder(cands, bets, tag_records: Optional[Dict] = None, market_counts: Optional[Dict] = None) -> List[Dict]:
     """Each candidate judged; good bets first, then by edge."""
     hist = _history(bets)
     out = []
     for c in cands:
         tr = (tag_records or {}).get(_strip_use(c.get("use")))
-        j = judge(c, hist, tr)
+        mn = None if market_counts is None else int((market_counts or {}).get(c.get("market"), 0))
+        j = judge(c, hist, tr, mn)
         if c.get("lean_verdict") in ("losing", "fade"):
             j["verdict"] = "🔴 Skip"
             j["why"] = "the model's leans in this market have been losing lately; " + j["why"]

@@ -125,3 +125,11 @@ def test_why_nothing_explains_an_all_pass_slate():
             [{"sport": "NFL", "kind": "Prop", "market": "Receptions", "chance": 0.45, "price": -110, "use": "⛔ Pass"}] * 3]
     msg = CO.why_nothing(rows, "NFL")
     assert "all 3 player props are tagged ⛔ Pass" in msg
+
+
+def test_new_market_cannot_be_good_until_graded():
+    h = CO._history([])
+    c = {"sport": "NBA", "kind": "Prop", "market": "Pts+Ast", "chance": 0.64, "price": -110, "use": "🎟️ Parlay leg"}
+    assert CO.judge(c, h, None, 12)["verdict"] == "🟡 Maybe"
+    assert "new market" in CO.judge(c, h, None, 12)["why"]
+    assert CO.judge(c, h, None, 80)["verdict"] == "🟢 Good bet"
