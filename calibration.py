@@ -258,6 +258,51 @@ def auto_notes(decisions: List[Dict]) -> List[str]:
     for d in decisions:
         if d.get("applied"):
             way = "toward 50% (they ran overconfident)" if d["new"] < d["active"] else "back out (the last correction overshot)"
-            notes.append(f"🤖 Learned overnight: {d['sport']} {d['side']} chances {d['active']:.2f} → {d['new']:.2f}, "
+            what = "ticket-math confidence" if d["side"] == "overall" else f"{d['side']} chances"
+            notes.append(f"🤖 Learned overnight: {d['sport']} {what} {d['active']:.2f} → {d['new']:.2f}, "
                          f"pulled {way}; {d['why']} ({d['n']} reads). Undo on Postgame Review.")
     return notes
+
+
+# --------------------------------------------------------------------------- the overall factor learns too (Nov 10)
+# The owner: "the calibrations should be done automatically as the model learns." The per-side factors already did
+# (auto_side). The overall factor `s` -- the one ticket and parlay math uses on top of the chance shown -- was still a
+# suggestion waiting for approval every morning. Same rule as the sides: fit on the window, applied only when it holds
+# up on held-out days. Graded chances don't carry `s` (it's applied after, in chance()), so the fit IS the new `s`; the
+# window starts when the side factors last changed, because that's when the shown chances last moved.
+def auto_global(sport: str, graded_by_date: Dict[str, List[Dict]], morning: str, write: bool = True) -> Dict:
+    since = ""
+    try:
+        import model_store as MS
+        for c in MS.list_calibration():
+            if c["sport"] in (f"{sport}:Over", f"{sport}:Under"):
+                since = max(since, str(c.get("approved_ts") or "")[:10])
+    except Exception:                                           # noqa: BLE001
+        pass
+    rows = []
+    for d, rs in graded_by_date.items():
+        if since and d < since:
+            continue
+        for p, y in usable(rs):
+            rows.append({"date": d, "p": p, "y": y})
+    h = held_out_side(rows)
+    active = factor(sport)
+    lo, hi = S_RANGE
+    new = round(max(lo, min(hi, h["rel"])), 2)
+    dec = {"sport": sport, "side": "overall", "active": active, "new": new, **h, "applied": False, "since": since or None}
+    if h["n"] < AUTO_MIN_ROWS or h["dates"] < AUTO_MIN_DATES:
+        dec["why"] = f"not enough yet ({h['n']} reads over {h['dates']} days since the shown chances last changed)"
+    elif h["splits"] < AUTO_MIN_SPLITS:
+        dec["why"] = "not enough days to hold any out"
+    elif abs(new - active) < AUTO_MIN_MOVE:
+        dec["why"] = f"already honest (best {new:.2f} vs active {active:.2f})"
+    elif h["passed"] < AUTO_SPLIT_PASS * h["splits"] or h["gain"] <= 0:
+        dec["why"] = f"didn't hold up on held-out days ({h['passed']} of {h['splits']})"
+    else:
+        dec["why"] = f"held up on {h['passed']} of {h['splits']} held-out splits"
+        if write:
+            import model_store as MS
+            dec["applied"] = MS.approve_calibration(sport, new, {
+                "auto": True, "morning": morning, "n": h["n"], "splits": h["splits"], "passed": h["passed"],
+                "held_out_gain": round(h["gain"], 5), "was": active, "since": since})
+    return dec
