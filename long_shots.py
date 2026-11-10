@@ -220,7 +220,13 @@ def night_summary(rows: List[Dict]) -> Dict:
 SPORTS = {
     "NBA": {"tail": TAIL, "count": COUNT_MARKETS, "ladder": LADDER, "main_key": _MAIN_KEY, "alt": ALT_TO_MAIN,
             "cap": {"count": SPREAD_CAP["count"], "normal": SPREAD_CAP["normal"], "floor": (0.25, 1.0)}},
-    "NFL": {"tail": {}, "count": {"Receptions", "Passing TDs"},
+    "NFL": {"tail": {    # research/tail_calibration_fb_nhl.py, Nov 10 (2025 + 2026 seasons, walk-forward)
+        "Receiving Yards": [2.32, 1.9, 1.33, 1.14, 0.89, 0.78, 0.75, None],
+        "Rush Yards": [1.23, 1.61, 1.36, 1.01, 0.89, 0.76, 0.72, None],
+        "Pass Yards": [None, None, None, 0.91, 0.89, 0.88, 0.96, None],
+        "Receptions": [1.49, 1.13, 1.04, 0.88, 0.94, 0.9, 0.92, 0.86],
+        "Rush + Rec Yards": [2.1, 1.94, 1.24, 1.16, 0.94, 0.83, 0.8, None],
+        "Passing TDs": [1.32, 0.65, 1.16, 0.82, 1.05, 0.97, 1.07, 0.97]}, "count": {"Receptions", "Passing TDs"},
             "ladder": {"Pass Yards": 25, "Rush Yards": 10, "Receiving Yards": 10, "Rush + Rec Yards": 10,
                        "Receptions": 1, "Passing TDs": 1},
             "main_key": {"Pass Yards": "player_pass_yds", "Rush Yards": "player_rush_yds",
@@ -232,7 +238,9 @@ SPORTS = {
                     "player_receptions_alternate": "player_receptions",
                     "player_pass_tds_alternate": "player_pass_tds"},
             "cap": {"count": 1.8, "normal": 0.7, "floor": (0.45, 8.0)}},
-    "NHL": {"tail": {}, "count": {"Shots on Goal", "Points", "Goals", "Assists"},
+    "NHL": {"tail": {    # same research, every team's last ~30 games; hockey counts are close to honest already
+        "Shots on Goal": [1.28, 0.88, 1.05, 1.03, 0.99, 1.0, 1.01, 0.98],
+        "Goals": [0.6, 0.97, 0.98, 1.07, 1.14, 1.15, None, None]}, "count": {"Shots on Goal", "Points", "Goals", "Assists"},
             "ladder": {"Shots on Goal": 1, "Points": 1, "Goals": 1, "Assists": 1, "Saves": 5},
             "main_key": {"Shots on Goal": "player_shots_on_goal", "Points": "player_points", "Goals": "player_goals",
                          "Assists": "player_assists", "Saves": "player_total_saves"},
