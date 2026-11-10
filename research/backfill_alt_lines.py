@@ -40,6 +40,11 @@ print(f"slate {DAY}: {len(meta)} games")
 
 saved = {}
 for g in meta:
+    have = MS.load_odds("NBA", DAY, g["home_name"], g["away_name"], ["long_shots_alt"])
+    if have and have.get("offers"):
+        saved[g["label"]] = have["offers"]
+        print(f"  {g['label']}: {len(have['offers'])} saved quotes (no credits)")
+        continue
     ev = PL.match_event(evs or [], g["home_name"], g["away_name"])
     if not ev:
         print(f"  {g['label']}: no history event")
@@ -86,6 +91,15 @@ for cut, name in ((0.0, "EV > 0"), (0.25, "EV > +0.25"), (0.5, "EV > +0.50")):
           f"P/L ${pl(v):+.2f}")
 print(f"$1 on every priced rung (no filter): {len(priced)} bets, P/L ${pl(priced):+.2f}")
 
+print("\ncalibration of honest chances on priced rungs (band: n, expected, hit):")
+for lo, hi in ((0, .05), (.05, .1), (.1, .15), (.15, .25), (.25, .4), (.4, 1)):
+    b = [x for x in priced if lo <= x["Honest chance"] < hi]
+    if b:
+        print(f"  {lo:.0%}-{hi:.0%}: n={len(b)} expected {sum(x['Honest chance'] for x in b):.1f} "
+              f"hit {sum(x['Hit'] == '✅' for x in b)}  book implied {sum(x['Book says'] for x in b):.1f}")
+v = [x for x in priced if x["EV per $1"] > 0]
+print(f"EV>0 rungs: expected hits {sum(x['Honest chance'] for x in v):.1f}, actual {sum(x['Hit'] == '✅' for x in v)}, "
+      f"book implied {sum(x['Book says'] for x in v):.1f}")
 print("\nvalue rungs (EV>0), best first:")
 for r in sorted([r for r in priced if r["EV per $1"] > 0], key=lambda r: -r["EV per $1"])[:40]:
     print(f"  {r['Hit']} {r['Player']:<24} {r['Bet']:<20} DK {r['Price']:+6.0f}  honest {r['Honest chance']:.0%}  "
