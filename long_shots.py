@@ -102,6 +102,9 @@ COUNT_MARKETS = {"Rebounds", "Assists", "Blocks", "Steals", "Threes Made"}
 LADDER = {"Points": 5, "PRA": 5, "PR": 5, "PA": 5, "PB": 5, "RA": 2, "Rebounds": 2, "Assists": 2,
           "Threes Made": 1, "Blocks": 1, "Steals": 1}
 MAX_RUNGS = 6
+# The saved main-line chance is shrunk toward 50% (calibration + market blend), so fitting a spread to it can make the
+# tails far too fat. Cap it near the widest the live model uses (count variance x mean; normal sd x projection).
+SPREAD_CAP = {"count": 1.8, "normal": 0.38}
 MAIN_TO_ALT = {v: k for k, v in ALT_TO_MAIN.items()}
 
 
@@ -126,6 +129,7 @@ def fit(snap: Dict) -> Optional[Dict]:
                     f_mid = PE.count_sf(proj, mid, PE.k_needed(line)) - p
                     lo, hi = (lo, mid) if f_lo * f_mid <= 0 else (mid, hi)
                 spread = (lo + hi) / 2
+        spread = min(spread, proj * SPREAD_CAP["count"])
     else:
         spread = max(0.25 * max(proj, 1.0), 1.0)
         if p is not None and 0.02 < p < 0.98 and abs(thr - proj) > 0.5:
@@ -133,6 +137,7 @@ def fit(snap: Dict) -> Optional[Dict]:
             z = NormalDist().inv_cdf(1 - p)
             if z != 0 and (thr - proj) / z > 0:
                 spread = max((thr - proj) / z, 0.5)
+        spread = min(spread, max(SPREAD_CAP["normal"] * proj, 1.5))
     return {"projection": proj, "dist": dist, "spread": spread}
 
 
