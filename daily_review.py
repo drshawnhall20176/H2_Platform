@@ -300,6 +300,16 @@ def review_sport(sport: str, morning: str, open_bets: Sequence[Dict], fetch: Cal
     active = {(t["sport"], t["market"], t.get("slot") or ""): float(t["factor"])
               for t in MS.list_tuning(db_path=db_path)}
     sugg = PG.suggestions(trend_rows, active)
+    # Nov 10: projection tunings apply themselves when they hold up on the props graded since their last change
+    try:
+        auto_tune = PG.auto_tunings(trend_rows, MS.list_tuning(db_path=db_path), morning, write=write)
+    except Exception as exc:                                    # noqa: BLE001
+        print(f"  [{sport}] auto tuning failed: {type(exc).__name__}: {exc}")
+        auto_tune = []
+    if any(d.get("applied") for d in auto_tune):
+        active = {(t["sport"], t["market"], t.get("slot") or ""): float(t["factor"])
+                  for t in MS.list_tuning(db_path=db_path)}
+        sugg = PG.suggestions(trend_rows, active)
 
     settlement = settle(sport, open_bets, fetch=fetch, write=write, bet_db=bet_db) if has_bets else \
         {"settled": [], "tickets": [], "unresolved": [], "still_pending": []}
@@ -319,16 +329,19 @@ def review_sport(sport: str, morning: str, open_bets: Sequence[Dict], fetch: Cal
     # sample (calibration.auto_side); the decisions ride in the report, applied ones in the morning notes
     try:
         cal["auto"] = CAL.auto_side(sport, trend, morning, write=write)
+        # Nov 10: the overall factor (ticket math) learns the same way
+        cal["auto"].append(CAL.auto_global(sport, trend, morning, write=write))
     except Exception as exc:                                    # noqa: BLE001
         cal["auto"] = []
         print(f"  [{sport}] auto-calibration failed: {type(exc).__name__}: {exc}")
     return {"sport": sport, "morning": morning, "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "slates": slates, "notes": notes(slates) + CAL.auto_notes(cal.get("auto") or []) + calibration_notes(cal)
+            "slates": slates, "notes": notes(slates) + CAL.auto_notes(cal.get("auto") or [])
+            + PG.auto_tuning_notes(auto_tune) + calibration_notes(cal)
             + game_pick_notes(games_rep),
             "calibration": cal, "game_picks": games_rep,
             "trend": {"days": TREND_DAYS, "slates": len(trend), "graded": len(trend_rows),
                       "use": PG.use_record(trend_rows), "beat": PG.beat_model(trend_rows)},
-            "suggestions": sugg, "settlement": settlement}
+            "suggestions": sugg, "settlement": settlement, "auto_tuning": auto_tune}
 
 
 def run(morning: str, fetch: Callable = PG._http, db_path: Optional[str] = None, write: bool = True,
