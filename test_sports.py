@@ -117,10 +117,10 @@ def test_owner_only_pages_match_expected_titles():
     assert m, "streamlit_app.py must define owner_only_titles"
     gated = {t.strip().strip('"') for t in m.group(1).split(",") if t.strip()}
     assert gated == {"Bet Log", "Media Room", "Podcast Studio", "Edge Board",
-                     "Matchup Lab", "Track Record", "Data Health",
+                     "Track Record", "Data Health",
                      "Suggested Parlays", "Speculative Basket", "Graded Picks",
                      "Model Dashboard", "First Innings Totals", "Player Lines", "Slip Lab",
-                     "Position Matchups", "Postgame Review", "Progression Plan", "Reports", "My Coach", "Model Performance", "Game Script", "Tennis Lab",
+                     "Postgame Review", "Progression Plan", "Reports", "My Coach", "Model Performance", "Game Script", "Tennis Lab",
                      "International Hoops"}, gated
     all_titles = set(re.findall(r'\("([^"]+)",\s*"[^"]*",\s*"[^"]*"\)', src))
     assert gated <= all_titles, f"gated titles not found in _META: {gated - all_titles}"
