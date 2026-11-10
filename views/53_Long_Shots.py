@@ -129,10 +129,11 @@ def _look_back():
                "identical). **Fair price**: if the book paid more than this, it was a value bet. Hits at long fair "
                "prices are the outliers — a good long shot still misses most nights, so judge it over many.")
 
-st.warning("**Watch list, not a bet list (yet).** First real test, Nov 9 (all 8 NBA games, 1,705 DraftKings alternate "
-           "rungs at tip-off prices): the rungs this page would have called value hit **48** times, where the model "
-           "expected 111 and the book's prices implied 80. When the model and the book disagree on an alternate line, "
-           "the book has been right more often. More nights are being tested; until then, small stakes only.")
+st.warning("**Watch list, not a bet list.** Tested on 10 NBA nights (Oct 30 – Nov 9, ~10,000 DraftKings alternate "
+           "lines): the lines this page calls value returned **−22%** bet at 11am prices and **−32%** at tip-off. The "
+           "model's long-shot chances are fair on average, but where it disagrees with the book the book is usually "
+           "right. **One exception so far: Assists** (+27% at 11am, +8% at tip-off over 549 bets) — promising, not "
+           "proven. Bet early, keep stakes to a few dollars.")
 eastern = pytz.timezone("US/Eastern")
 today = datetime.now(eastern).date()
 day = st.date_input("Date", value=today, max_value=today, key="longshots_date",
@@ -214,6 +215,11 @@ st.markdown(f"**{len(value)} rung(s) priced longer than the honest chance** · {
 if not rows:
     st.info("No alternate rungs to compare for this game at this book (or the model has no read on these players).")
     st.stop()
+mkts = sorted({r["Market"] for r in rows})
+only = st.multiselect("Markets", mkts, default=[m for m in mkts if m == "Assists"] or mkts, key="ls_markets",
+                      help="Assists is the only market whose value lines have made money in testing so far.")
+rows = [r for r in rows if r["Market"] in only] if only else rows
+value = [r for r in rows if r["EV per $1"] > 0]
 show = value or rows[:15]
 df = pd.DataFrame([{k: r[k] for k in ("Player", "Bet", "Price", "Book says", "Honest chance", "Model raw", "Edge",
                                        "EV per $1", "Projection", "Main line", "Flags")} for r in show])

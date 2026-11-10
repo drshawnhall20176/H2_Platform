@@ -35,16 +35,18 @@ MIN_REAL = 0.04            # don't show rungs the honest chance puts under 4%
 MAX_SHOWN_ODDS = 3000
 
 
-def honest(p: Optional[float], market: str) -> Optional[float]:
+def honest(p: Optional[float], market: str, sport: str = "NBA") -> Optional[float]:
     if p is None:
         return None
-    key = "PRA" if market in COMBOS else market
-    ratios = TAIL.get(key)
+    if sport != "NBA":
+        ratios = (SPORTS.get(sport) or {}).get("tail", {}).get(market)
+    else:
+        ratios = TAIL.get("PRA" if market in COMBOS else market)
     if not ratios:
         return p
     for (lo, hi), r in zip(_BANDS, ratios):
         if lo <= p < hi:
-            return max(0.0, min(0.99, p * r))
+            return max(0.0, min(0.99, p * (r or 1.0)))
     return p
 
 
@@ -108,14 +110,16 @@ SPREAD_CAP = {"count": 1.8, "normal": 0.38}
 MAIN_TO_ALT = {v: k for k, v in ALT_TO_MAIN.items()}
 
 
-def fit(snap: Dict) -> Optional[Dict]:
+def fit(snap: Dict, sport: str = "NBA") -> Optional[Dict]:
     """{"projection", "dist", "spread"} reproducing the snapshot's main-line chance, or the model's default spread."""
     import props_engine as PE
     proj, line = snap.get("projection"), snap.get("line")
     if proj is None or line is None:
         return None
     proj, line = float(proj), float(line)
-    dist = "count" if snap.get("market") in COUNT_MARKETS else "normal"
+    cfg = SPORTS.get(sport) or SPORTS["NBA"]
+    dist = "count" if snap.get("market") in cfg["count"] else "normal"
+    cap = cfg["cap"]
     p = snap.get("p_model")
     thr = PE.threshold(line)
     if dist == "count":
@@ -129,15 +133,15 @@ def fit(snap: Dict) -> Optional[Dict]:
                     f_mid = PE.count_sf(proj, mid, PE.k_needed(line)) - p
                     lo, hi = (lo, mid) if f_lo * f_mid <= 0 else (mid, hi)
                 spread = (lo + hi) / 2
-        spread = min(spread, proj * SPREAD_CAP["count"])
+        spread = min(spread, proj * cap["count"])
     else:
-        spread = max(0.25 * max(proj, 1.0), 1.0)
+        spread = max(cap["floor"][0] * max(proj, 1.0), cap["floor"][1])
         if p is not None and 0.02 < p < 0.98 and abs(thr - proj) > 0.5:
             from statistics import NormalDist
             z = NormalDist().inv_cdf(1 - p)
             if z != 0 and (thr - proj) / z > 0:
                 spread = max((thr - proj) / z, 0.5)
-        spread = min(spread, max(SPREAD_CAP["normal"] * proj, 1.5))
+        spread = min(spread, max(cap["normal"] * proj, cap["floor"][1] * 1.5))
     return {"projection": proj, "dist": dist, "spread": spread}
 
 
@@ -159,31 +163,32 @@ def _dedupe(snaps: List[Dict]) -> List[Dict]:
     return list(best.values())
 
 
-def lookback(graded: List[Dict], quotes: Optional[List[Dict]] = None, norm=None) -> List[Dict]:
+def lookback(graded: List[Dict], quotes: Optional[List[Dict]] = None, norm=None, sport: str = "NBA") -> List[Dict]:
     """graded: postgame.grade() rows for one night (a snapshot + its "actual"). One row per rung above the main
     line: the honest chance, whether it happened, and (when that night's alternate prices were loaded) the price."""
     import props_engine as PE
     norm = norm or (lambda s: str(s or "").lower())
+    cfg = SPORTS.get(sport) or SPORTS["NBA"]
     prices = {}
     for q in quotes or []:
-        main = ALT_TO_MAIN.get(q.get("market"))
+        main = cfg["alt"].get(q.get("market"))
         if main and str(q.get("name")).lower() == "over" and q.get("point") is not None:
             prices[(norm(q.get("description")), main, float(q["point"]) + 0.5)] = float(q["price"])
     out = []
     for s in _dedupe(graded):
-        f = fit(s)
+        f = fit(s, sport)
         mk = s.get("market") or ""
-        if not f or (mk not in TAIL and mk not in COMBOS and mk not in LADDER):
+        if not f or mk not in cfg["ladder"]:
             continue
-        step = LADDER.get(mk, 1)
+        step = cfg["ladder"][mk]
         start = PE.k_needed(float(s["line"]))
         first = (start // step + 1) * step if step > 1 else start + 1
         actual = s.get("actual")
-        okey = _MAIN_KEY.get(mk)
+        okey = cfg["main_key"].get(mk)
         for i in range(MAX_RUNGS):
             n = first + i * step
             raw = rung_raw(f, n)
-            real = honest(raw, mk)
+            real = honest(raw, mk, sport)
             if real is None or real < MIN_REAL / 2:
                 break
             price = prices.get((norm(s.get("player")), okey, float(n))) if okey else None
@@ -208,3 +213,39 @@ def night_summary(rows: List[Dict]) -> Dict:
     done = [r for r in rows if r["Hit"] is not None]
     return {"rungs": len(done), "expected": sum(r["Honest chance"] for r in done),
             "hits": sum(r["Hit"] == "✅" for r in done)}
+
+
+# Per-sport settings for the look-back. "tail": the measured happened/said ratios by band (research/tail_calibration*.py);
+# a sport without them uses the model's raw chance. "cap": the widest spread the live model uses, and its floor.
+SPORTS = {
+    "NBA": {"tail": TAIL, "count": COUNT_MARKETS, "ladder": LADDER, "main_key": _MAIN_KEY, "alt": ALT_TO_MAIN,
+            "cap": {"count": SPREAD_CAP["count"], "normal": SPREAD_CAP["normal"], "floor": (0.25, 1.0)}},
+    "NFL": {"tail": {    # research/tail_calibration_fb_nhl.py, Nov 10 (2025 + 2026 seasons, walk-forward)
+        "Receiving Yards": [2.32, 1.9, 1.33, 1.14, 0.89, 0.78, 0.75, None],
+        "Rush Yards": [1.23, 1.61, 1.36, 1.01, 0.89, 0.76, 0.72, None],
+        "Pass Yards": [None, None, None, 0.91, 0.89, 0.88, 0.96, None],
+        "Receptions": [1.49, 1.13, 1.04, 0.88, 0.94, 0.9, 0.92, 0.86],
+        "Rush + Rec Yards": [2.1, 1.94, 1.24, 1.16, 0.94, 0.83, 0.8, None],
+        "Passing TDs": [1.32, 0.65, 1.16, 0.82, 1.05, 0.97, 1.07, 0.97]}, "count": {"Receptions", "Passing TDs"},
+            "ladder": {"Pass Yards": 25, "Rush Yards": 10, "Receiving Yards": 10, "Rush + Rec Yards": 10,
+                       "Receptions": 1, "Passing TDs": 1},
+            "main_key": {"Pass Yards": "player_pass_yds", "Rush Yards": "player_rush_yds",
+                         "Receiving Yards": "player_reception_yds", "Rush + Rec Yards": "player_rush_reception_yds",
+                         "Receptions": "player_receptions", "Passing TDs": "player_pass_tds"},
+            "alt": {"player_pass_yds_alternate": "player_pass_yds", "player_rush_yds_alternate": "player_rush_yds",
+                    "player_reception_yds_alternate": "player_reception_yds",
+                    "player_rush_reception_yds_alternate": "player_rush_reception_yds",
+                    "player_receptions_alternate": "player_receptions",
+                    "player_pass_tds_alternate": "player_pass_tds"},
+            "cap": {"count": 1.8, "normal": 0.7, "floor": (0.45, 8.0)}},
+    "NHL": {"tail": {    # same research, every team's last ~30 games; hockey counts are close to honest already
+        "Shots on Goal": [1.28, 0.88, 1.05, 1.03, 0.99, 1.0, 1.01, 0.98],
+        "Goals": [0.6, 0.97, 0.98, 1.07, 1.14, 1.15, None, None]}, "count": {"Shots on Goal", "Points", "Goals", "Assists"},
+            "ladder": {"Shots on Goal": 1, "Points": 1, "Goals": 1, "Assists": 1, "Saves": 5},
+            "main_key": {"Shots on Goal": "player_shots_on_goal", "Points": "player_points", "Goals": "player_goals",
+                         "Assists": "player_assists", "Saves": "player_total_saves"},
+            "alt": {"player_shots_on_goal_alternate": "player_shots_on_goal", "player_points_alternate": "player_points",
+                    "player_goals_alternate": "player_goals", "player_assists_alternate": "player_assists",
+                    "player_total_saves_alternate": "player_total_saves"},
+            "cap": {"count": 1.8, "normal": 0.38, "floor": (0.25, 1.0)}},
+}
