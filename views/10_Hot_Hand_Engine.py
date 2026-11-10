@@ -79,7 +79,7 @@ def load_board(sport_key: str, date_str: str):
     # uses (Edge Board, Best Bets, Retrospective, Media Room, Podcast Studio).
     rows, meta = E.build_slate(date_str)
     if not rows:
-        return [], 0, {}
+        return [], 0, {}, {}
 
     opp_ids = sorted({r["_opp_id"] for r in rows if r.get("_opp_id") is not None})
     opp_allowed = {oid: E.get_team_recent_allowed_stats(oid, date_str) for oid in opp_ids}
@@ -91,7 +91,15 @@ def load_board(sport_key: str, date_str: str):
                                                                    # Blowout Risk are merged in below,
                                                                    # only after a live, button-gated fetch
     team_abbrs = E.team_abbrs_from_meta(meta)   # zero extra cost — meta already has this
-    return board, len(meta), team_abbrs
+    # Nov 10: per-player minutes and recent PRA games, for King of the Court
+    info = {}
+    for r in rows:
+        log = r.get("_game_log") or []
+        mins = [g.get("min") for g in log[:5] if g.get("min") is not None]
+        info[(r.get("Player"), r.get("Team"))] = {
+            "min": sum(mins) / len(mins) if mins else None,
+            "pra": [(g.get("pts") or 0) + (g.get("reb") or 0) + (g.get("ast") or 0) for g in log[:10]]}
+    return board, len(meta), team_abbrs, info
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -122,7 +130,7 @@ with c2:
 date_str = target_date.strftime("%Y-%m-%d")
 
 with st.spinner("Building the matchup-adjusted board..."):
-    board, n_games, team_abbrs = load_board(_active.key, date_str)
+    board, n_games, team_abbrs, player_info = load_board(_active.key, date_str)
 
 if not board:
     st.info(f"No projectable players for this date. Pick a date with scheduled {_active.label} games.")
@@ -173,6 +181,59 @@ if api_key and st.session_state.get("hot_hand_fetch_spreads"):
     except O.OddsAPIError as e:
         st.error(f"Odds API error: {e}")
 
+# Nov 10: Blowout Risk without the button -- the platform's own game-script model already calls every NBA game's
+# chance of a 20+ point blowout (free, no odds credits). The spreads button still adds the live book spread.
+@st.cache_data(ttl=900, show_spinner=False)
+def load_blowouts(sport_key: str, date_str: str):
+    try:
+        import todays_best as TB
+        return TB.blowout_rows(date_str, sports_=(sport_key,))
+    except Exception:                                          # noqa: BLE001
+        return []
+
+
+import kotc as KOTC
+_blow = KOTC.blowout_by_team(load_blowouts(_active.key, date_str))
+for b in board:
+    g = _blow.get(b.get("Team")) or {}
+    if g:
+        b["Blowout chance"] = g["chance"]
+        if not b.get("Blowout Risk") or b.get("Blowout Risk") == "—":
+            b["Blowout Risk"] = "⚠️ Blowout risk" if g["chance"] >= 0.35 else "low"
+        if b.get("Spread") in (None, "—") and g.get("line"):
+            b["Game line"] = g["line"]
+
+# ---- 👑 King of the Court (NBA): who posts the night's top Pts+Reb+Ast? ----
+if _active.key == "NBA":
+    _out_names = set()
+    try:
+        for _abbr, _inj in (load_injuries(_active.key, tuple(sorted(set(team_abbrs.values())))) or {}).items():
+            for _p in _inj or []:
+                if str(_p.get("status") or "").lower() in ("out", "doubtful"):
+                    _out_names.add(_p.get("player"))
+    except Exception:                                          # noqa: BLE001
+        pass
+    _k = KOTC.build(board, player_info, _blow, _out_names)
+    with st.expander("👑 King of the Court — tonight's top Pts+Reb+Ast chances", expanded=True):
+        if not _k:
+            st.caption("Not enough player data for tonight yet.")
+        else:
+            _kdf = pd.DataFrame(_k[:25])
+            _kdf["Blowout chance"] = _kdf["Blowout chance"].apply(lambda v: "—" if v is None or v != v else f"{v:.0%}")
+            st.dataframe(_kdf[["Player", "Team", "Opp", "King chance", "Adj PRA", "Proj PRA", "Ceiling (90th)",
+                               "Best recent", "Minutes", "Blowout chance", "Min at risk", "Spread", "Game"]],
+                         hide_index=True, width="stretch",
+                         column_config={"King chance": st.column_config.ProgressColumn(
+                             "King chance", format="percent", min_value=0.0, max_value=max(0.25, float(_kdf["King chance"].max()))),
+                             "Min at risk": st.column_config.NumberColumn(format="%.1f")})
+            st.caption(
+                "**King chance** = how often he posts the slate's top PRA across 20,000 simulated nights. "
+                "**Proj PRA** = his matchup-adjusted form (Points + Rebounds + Assists below). **Adj PRA** takes off "
+                "the minutes a starter loses when his game blows out — about 3 minutes, measured over ~10,000 games — "
+                "weighted by how much likelier a blowout is in his game than in tonight's average game. **Ceiling** "
+                "is his 90th-percentile PRA over his last 10 games. Players listed Out or Doubtful are left off. "
+                "**Blowout chance** comes from the platform's game-script model (no odds credits).")
+
 markets = sorted({b["Market"] for b in board})
 mc1, mc2, mc3, mc4 = st.columns([2, 1, 1, 1])
 with mc1:
@@ -193,6 +254,9 @@ if rest_filter == "⚠️ Back-to-back only":
     view = [b for b in view if b["B2B"]]
 if blowout_filter == "⚠️ Risk only":
     view = [b for b in view if b.get("Blowout Risk") == "⚠️ Blowout risk"]
+for b in view:                                                  # Nov 10: show the model's blowout chance
+    bc = b.get("Blowout chance")
+    b["Blowout chance"] = "—" if bc is None else f"{bc:.0%}"
 
 st.caption(f"{n_games} game(s) · {len(view)} of {len(board)} player-market rows shown")
 
@@ -236,7 +300,7 @@ for b in view:
 
 _cols = ["Player", "Team", "Opp", "Market", "Recent Avg", "Matchup Factor", "Matchup Score", "Tag", "Rest",
          "Opp Rest", "Fatigue", "Position Matchup", "Team D Factor", "Opp Allows", "Opp Pace",
-         "Opp Allows /100 Poss", "Slate Avg /100 Poss", "Spread", "Blowout Risk", "Game"]
+         "Opp Allows /100 Poss", "Slate Avg /100 Poss", "Spread", "Blowout chance", "Blowout Risk", "Game"]
 _vdf = pd.DataFrame(view)
 for _c in _cols:
     if _c not in _vdf.columns:
