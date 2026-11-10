@@ -622,7 +622,9 @@ else:
         or 10.0
     pstake = st.number_input("What you risked on this parlay ($)", min_value=0.5,
                              value=float(default_stake), step=0.5)
-    cmp = B.compare_parlay_vs_singles(legs, pstake)
+    # Nov 10: legs logged without their own price can be priced here (and saved), so the comparison isn't "pending"
+    _overrides = st.session_state.setdefault("pvs_prices", {})
+    cmp = B.compare_parlay_vs_singles(legs, pstake, _overrides)
     if cmp:
         a, b = st.columns(2)
         a.metric(f"Parlay ({cmp['parlay_american']:+.0f})" if cmp["parlay_american"] else "Parlay",
@@ -640,11 +642,34 @@ else:
                 st.info(f"This time the parlay beat singles by **${-cmp['difference']:.2f}** — the "
                         f"upside case, when every leg hits. It's the rarer outcome.")
         legdf = pd.DataFrame(cmp["legs"])
-        legdf["as single"] = legdf["pnl"].apply(lambda v: f"${v:+.2f}" if v is not None else "—")
-        st.dataframe(
-            legdf[["player", "market", "side", "line", "entry_odds", "result", "as single"]]
-            .style.format({"line": "{:.1f}", "entry_odds": "{:.0f}"}, na_rep="—"),
-            hide_index=True, width="stretch")
+        legdf["as single"] = legdf["pnl"].apply(lambda v: f"${v:+.2f}" if v is not None and v == v else "—")
+        unpriced = [L for L in cmp["legs"] if L.get("entry_odds") is None and L.get("result") == "win"]
+        if unpriced:
+            st.caption(f"{len(unpriced)} winning leg(s) were logged without their own price, so they can't be valued "
+                       "as singles. Type each one's price from your slip in **Price** and press Save.")
+            ed = st.data_editor(
+                legdf[["id", "player", "market", "side", "line", "entry_odds", "result", "as single"]]
+                .rename(columns={"entry_odds": "Price"}),
+                hide_index=True, width="stretch", key=f"pvs_ed_{pick}",
+                disabled=["id", "player", "market", "side", "line", "result", "as single"],
+                column_config={"id": None, "Price": st.column_config.NumberColumn(format="%+d")})
+            new = {int(r["id"]): float(r["Price"]) for r in ed.to_dict("records")
+                   if r.get("Price") is not None and r["Price"] == r["Price"]}
+            if st.button("💾 Save leg prices", key=f"pvs_save_{pick}"):
+                saved = 0
+                for L in legs:
+                    if L.get("id") in new and B.leg_price(L) is None:
+                        B.update_bet(L["id"], entry_odds=new[L["id"]])
+                        saved += 1
+                _overrides.update(new)
+                st.success(f"Saved {saved} price(s).")
+                st.rerun()
+        else:
+            st.dataframe(
+                legdf[["player", "market", "side", "line", "entry_odds", "result", "as single"]]
+                .rename(columns={"entry_odds": "Price"})
+                .style.format({"line": "{:.1f}", "Price": "{:+.0f}"}, na_rep="—"),
+                hide_index=True, width="stretch")
 
 # --- Cash-out vs. held --------------------------------------------------------
 st.divider()
