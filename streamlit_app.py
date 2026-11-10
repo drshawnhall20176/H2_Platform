@@ -156,7 +156,8 @@ def run():
         "45": ("NCAAMB",),                               # Game Lab (college basketball) -- game lines
         "46": ("NBA",),                                  # Game Lab (NBA)
         "47": ("NHL",),                                  # Game Lab (NHL)
-        "50": ("NBA", "NCAAMB", "WNBA", "NFL", "NCAAF", "NHL"),   # Game Script: each sport's own study (Nov 7)
+        "50": ("NBA", "NCAAMB", "WNBA", "NFL", "NCAAF", "NHL"),
+        "53": ("NBA",),                                   # Long Shots: the tail test covers the NBA   # Game Script: each sport's own study (Nov 7)
         "41": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL", "UFC"),                    # Postgame Review -- kickoff snapshots graded vs box scores
         "38": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL"),  # Position Matchups -- depth chart vs the opposing
                                                           # defense by position + team head-to-head.
@@ -187,7 +188,8 @@ def run():
                          "Track Record", "Data Health",
                          "Suggested Parlays", "Speculative Basket", "Graded Picks",
                          "Model Dashboard", "First Innings Totals", "Player Lines", "Slip Lab",
-                         "Postgame Review", "Progression Plan", "Reports", "My Coach", "Model Performance", "Game Script", "Tennis Lab", "International Hoops"}
+                         "Postgame Review", "Progression Plan", "Reports", "My Coach", "Model Performance", "Game Script", "Tennis Lab", "International Hoops",
+                         "Long Shots"}
 
     # leading page-number -> (title, icon, stable url slug). The url_path is the key fix: it pins
     # each page to a predictable URL so reruns keep you on the same page instead of defaulting to
@@ -252,7 +254,8 @@ def run():
         "48": ("Reports", "📑", "reports"),             # P&L statements for any period + CSV / PDF (Nov 6)
         "49": ("Model Performance", "📊", "model_performance"),   # Investor Relations: the edge evidence (Nov 6)
         "50": ("Game Script", "🎬", "game_script"),
-        "51": ("My Coach", "🧑‍🏫", "my_coach"),          # simple tables from your own bets: what works, what to stop (Nov 8)     # props under each kind of game + script tickets, every props sport (Nov 7)
+        "51": ("My Coach", "🧑‍🏫", "my_coach"),
+        "53": ("Long Shots", "💎", "long_shots"),        # alternate-line value vs the model's honest chance (Nov 10)          # simple tables from your own bets: what works, what to stop (Nov 8)     # props under each kind of game + script tickets, every props sport (Nov 7)
     }
 
     # SIDEBAR SECTIONS, added directly on request: st.navigation natively supports a
@@ -278,7 +281,7 @@ def run():
     SECTION_OF = {}
     for k in ("0", "28"):
         SECTION_OF[k] = "🏠 START HERE"
-    for k in ("1", "2", "3", "4", "37", "23", "24", "39", "50"):
+    for k in ("1", "2", "3", "4", "37", "23", "24", "39", "50", "53"):
         SECTION_OF[k] = "🎯 RECOMMENDATIONS"
     for k in ("5", "6"):
         SECTION_OF[k] = "🛰️ LIVE SIGNALS"
