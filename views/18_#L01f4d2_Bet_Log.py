@@ -609,12 +609,20 @@ st.divider()
 C.section_header("🎫", "Parlay vs straight bets")
 tickets = B.group_tickets(bets)
 multi = {t: legs for t, legs in tickets.items() if len(legs) > 1}
+# Nov 10: older tickets whose winning legs were never priced can't be compared -- hidden here (not deleted: they stay
+# in the log and the P/L)
+_unpriced = {t for t, legs in multi.items()
+             if any(not B.is_parlay_header(L) and B._result(L) == "win" and B.leg_price(L) is None for L in legs)}
+multi = {t: legs for t, legs in multi.items() if t not in _unpriced}
 if not multi:
     st.caption("Tag the legs of a parlay with the same ticket name (in the log form above) and "
                "this compares the parlay to betting the same money as straight singles.")
 else:
     st.caption("For each parlay, this shows what it paid (or lost) versus betting the **same total "
                "money** as straight singles, split evenly across the legs. The honest lesson, in dollars.")
+    if _unpriced:
+        st.caption(f"{len(_unpriced)} older ticket(s) hidden here — their legs' prices weren't saved, so they can't be "
+                   "compared. They're still in your log and P/L.")
     pick = st.selectbox("Ticket", sorted(multi.keys()))
     legs = multi[pick]
     _hdr = next((L for L in legs if B.is_parlay_header(L)), None)
