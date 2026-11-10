@@ -285,7 +285,7 @@ def run():
     # alongside Command Center (see SECTION_OF above) rather than left unsectioned -- st.
     # navigation's dict mode sections everything or nothing, there's no supported way to mix a
     # loose top-level page with sectioned ones (confirmed directly against Streamlit's own docs).
-    sections: dict = {"🏠 START HERE": [st.Page(str(here / "Home.py"), title="Home", icon="⚾", url_path="home")]}
+    sections: dict = {"🏠 START HERE": [st.Page(str(here / "Home.py"), title="Home", icon="🏠", url_path="home")]}
     lab = active_sport in sports.LAB_SPORTS
     for f in view_files:
         key = lead(f.name)

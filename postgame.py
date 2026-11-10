@@ -638,3 +638,59 @@ def beat_model(graded: Sequence[Dict], min_n: int = 20) -> List[Dict]:
                     "over_n": len(overs), "over_hit": (sum(1 for r in overs if r["result"] == "hit") / len(overs)) if overs else None,
                     "over_said": (sum(said_o) / len(said_o)) if said_o else None})
     return sorted(out, key=lambda x: -x["n"])
+
+
+# --------------------------------------------------------------------------- projection tunings learn too (Nov 10)
+AUTO_TUNE_MIN_N = 40           # graded props for that market (or slot) since its current tuning went live
+AUTO_TUNE_MIN_SLATES = 3
+
+
+def auto_tunings(graded: Sequence[Dict], tunings: Sequence[Dict], morning: str, write: bool = True,
+                 approve=None) -> List[Dict]:
+    """Each tuning suggestion re-checked on ONLY the props graded since that market's current multiplier went live
+    (a projection already carries the active multiplier, so older days would push the same correction twice), and
+    applied when it still holds up there: 40+ props over 3+ slates, the leave-one-slate-out test, one step of at most
+    10% a night. Returns the decisions."""
+    since = {(t["sport"], t["market"], t.get("slot") or ""): str(t.get("approved_ts") or "")[:10] for t in tunings}
+    active = {(t["sport"], t["market"], t.get("slot") or ""): float(t["factor"]) for t in tunings}
+    out = []
+    for sg in suggestions(graded, active):
+        if sg.get("kind") != "tuning":
+            continue
+        key = (sg["sport"], sg["market"], sg.get("slot") or "")
+        start = since.get(key, "")
+        rows = [r for r in graded if r.get("sport") == sg["sport"] and r.get("market") == sg["market"]
+                and (not key[2] or str(r.get("slot") or "") == key[2]) and str(r.get("slate_date") or "") >= start
+                and r.get("result") in ("hit", "miss", "push") and r.get("actual") is not None
+                and r.get("projection") is not None]
+        dec = {**sg, "since": start or None, "n_since": len(rows), "applied": False}
+        ratio = _ratio(rows) if rows else None
+        slates = len({r.get("slate_date") for r in rows})
+        lo, hi = SUGGEST_RANGE
+        step = None if ratio is None else max(lo, min(hi, 1 + STEP * (ratio - 1)))
+        if len(rows) < AUTO_TUNE_MIN_N or slates < AUTO_TUNE_MIN_SLATES:
+            dec["why"] = f"not enough since its last change ({len(rows)} props over {slates} slates)"
+        elif abs(ratio - 1) < (SLOT_BIAS if key[2] else MARKET_BIAS):
+            dec["why"] = f"since its last change results ran {ratio - 1:+.0%} — inside the noise band"
+        elif not holds_up(rows, step):
+            dec["why"] = "didn't hold up slate by slate"
+        else:
+            new = round(step * active.get(key, 1.0), 3)
+            dec.update(factor=new, why=f"results ran {ratio - 1:+.0%} vs the projections over {len(rows)} props, "
+                                       f"{slates} slates, held up slate by slate")
+            if write:
+                import model_store as MS
+                fn = approve or MS.approve_tuning
+                dec["applied"] = bool(fn(key[0], key[1], new, f"auto {morning}: {dec['why']}", slot=key[2]))
+        out.append(dec)
+    return out
+
+
+def auto_tuning_notes(decisions: Sequence[Dict]) -> List[str]:
+    out = []
+    for d in decisions:
+        if d.get("applied"):
+            where = d["market"] + (f" · {d['slot']}" if d.get("slot") else "")
+            out.append(f"🤖 Learned overnight: {d['sport']} {where} projections now ×{d['factor']:.3f} — {d['why']}. "
+                       "Undo on Postgame Review.")
+    return out
