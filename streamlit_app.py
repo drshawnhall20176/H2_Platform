@@ -22,6 +22,18 @@ import sports
 _H2_MARK = Path(__file__).parent / "assets" / "h2_mark.png"
 
 
+def connection_status() -> str:
+    """One sidebar line: is this deployment reading the shared model database and live odds?"""
+    import betlog as B
+    import best_bets_data as BBD
+    db = bool(getattr(B, "USING_POSTGRES", False))
+    odds = bool(BBD.get_odds_api_key())
+    if db and odds:
+        return "🟢 Connected: model database + live odds"
+    missing = [x for x, ok in (("model database (DATABASE_URL)", db), ("live odds (ODDS_API_KEY)", odds)) if not ok]
+    return "🔴 Not connected: " + ", ".join(missing) + " — numbers here won't match the learned model"
+
+
 def run():
     # Real H2 Sports mark as the browser tab icon when the asset is present, the original
     # emoji as an honest fallback otherwise (a stripped-down deploy missing assets/ should never
@@ -76,6 +88,13 @@ def run():
     audience = st.secrets.get("AUDIENCE", "owner")
     if audience == "public":
         st.sidebar.caption("🌐 Public build — some tools are owner-only")
+    # Nov 10: both builds run this same code, so if their numbers differ it's their settings. Everything the model
+    # has learned (the record, calibration, tunings, cold markets) lives in the shared database -- a build that isn't
+    # connected to it shows unlearned numbers.
+    try:
+        st.sidebar.caption(connection_status())
+    except Exception:                                           # noqa: BLE001
+        pass
 
     here = Path(__file__).parent
     views_dir = here / "views"
@@ -162,12 +181,13 @@ def run():
     # so a future re-numbering of the views/ files can't silently un-gate one of these by
     # accident. Matching by title is also what makes gating "Matchup Lab" here correctly cover
     # all three variants (MLB, WNBA/NBA/NCAAMB, NFL) with one entry, since they share the title.
+    # Nov 10: Matchup Lab and Position Matchups opened to the Discord/public build (owner's call); their odds
+    # lookups stay behind a button, so opening them spends no Odds API credits.
     owner_only_titles = {"Bet Log", "Media Room", "Podcast Studio", "Edge Board",
-                         "Matchup Lab", "Track Record", "Data Health",
+                         "Track Record", "Data Health",
                          "Suggested Parlays", "Speculative Basket", "Graded Picks",
                          "Model Dashboard", "First Innings Totals", "Player Lines", "Slip Lab",
-                         "Postgame Review", "Progression Plan", "Reports", "My Coach", "Model Performance", "Game Script", "Tennis Lab", "International Hoops",
-                         "Position Matchups"}
+                         "Postgame Review", "Progression Plan", "Reports", "My Coach", "Model Performance", "Game Script", "Tennis Lab", "International Hoops"}
 
     # leading page-number -> (title, icon, stable url slug). The url_path is the key fix: it pins
     # each page to a predictable URL so reruns keep you on the same page instead of defaulting to

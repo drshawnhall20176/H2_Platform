@@ -88,7 +88,7 @@ def test_form_run_needs_five_games_eighty_percent_and_a_real_edge():
 def test_role_surge_over_wants_a_bigger_recent_role_and_a_line_that_has_not_caught_up():
     base = [200, 205, 195, 200, 210]
     r = A.detect_role_surge(play(Line=225.5, **log(base + [290, 300, 285])), ctx())
-    assert r and "last 3 games average 291.7 against 202.0" in r["evidence"]
+    assert r and "averaged 291.7 over his last 3 games, up from 202.0" in r["evidence"]
     assert A.detect_role_surge(play(Line=280.5, **log(base + [290, 300, 285])), ctx()) is None                         # line already moved up
     assert A.detect_role_surge(play(Line=225.5, **log(base + [205, 210, 200])), ctx()) is None                          # no surge
     assert A.detect_role_surge(play(Line=225.5, **log([200, 205, 195, 290, 300])), ctx()) is None                       # too few games
@@ -96,7 +96,7 @@ def test_role_surge_over_wants_a_bigger_recent_role_and_a_line_that_has_not_caug
 
 def test_role_surge_under_mirrors_it():
     r = A.detect_role_surge(play(Side="Under", Line=225.5, **log([250, 260, 255, 250, 240, 150, 140, 160])), ctx())
-    assert r and "last 3 games average 150.0" in r["evidence"]
+    assert r and "averaged 150.0 over his last 3 games, down from" in r["evidence"]
     assert A.detect_role_surge(play(Side="Under", Line=150.5, **log([250, 260, 255, 250, 240, 150, 140, 160])), ctx()) is None
 
 
@@ -126,7 +126,7 @@ def history(prices, line=240.5, book="draftkings"):
 def test_line_move_toward_the_side_fires_and_away_becomes_a_caution():
     toward = ctx(history_fn=history([-110, -125, -140]))
     r = A.detect_line_move(play(), toward)
-    assert r and "moved" in r["evidence"] and "toward this side" in r["evidence"]
+    assert r and "implied chance of this side is up" in r["evidence"]
     away = ctx(history_fn=history([-140, -125, -110]))
     assert A.detect_line_move(play(), away) is None
     assert any("away from this side" in c for c in A.cautions_for(play(), away))

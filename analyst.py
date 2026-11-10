@@ -50,7 +50,7 @@ ANGLES: Dict[str, Tuple[str, str]] = {
     "market_gap":     ("Model vs market",   "The model's chance is well above what the book's price implies."),
     "soft_book":      ("Soft price",        "One book is paying noticeably more than the rest of the market for the same side."),
     "form_run":       ("Form run",          "He has cleared this exact line in nearly every recent game."),
-    "role_surge":     ("Role surge",        "His last few games run well away from his earlier baseline in the direction of the play, and the line still looks like the old baseline."),
+    "role_surge":     ("Role surge",        "His last few games run well away from his earlier average in the direction of the play, and the line is still set for the old average rather than his recent form."),
     "team_surge":     ("Team momentum",     "His whole team is scoring above (or below) its own norm, in the direction of the play."),
     "regression_due": ("Regression due",    "His underlying contact quality says the results should catch up."),
     "line_move":      ("Line moving our way", "The market has moved toward this side since it opened."),
@@ -306,7 +306,7 @@ def script_signals(p: Dict, ctx: Dict) -> List[Dict]:
         thr = BLOWOUT_SPREAD[sport]
         if spread is not None and market in BASKETBALL_STAT_MARKETS and spread <= -thr:
             add("Under", 0.4 + (-spread - thr) / 10,
-                f"{team} is a {abs(spread):g}-point favorite — in a game this lopsided the starters' minutes are at risk late")
+                f"{team} is a {round(abs(spread) * 2) / 2:g}-point favorite — in a game this lopsided the starters' minutes are at risk late")
         total_rule(BASKETBALL_SCORING_MARKETS)
     elif sport in ("NFL", "NCAAF"):
         if spread is not None and market in FOOTBALL_RUSH_MARKETS:
@@ -445,7 +445,8 @@ def detect_role_surge(p: Dict, ctx: Dict) -> Optional[Dict]:
         if line < (r3 + b) / 2:
             return None
     return {"strength": _clip((ratio - 1) / 0.6),
-            "evidence": f"last 3 games average {r3:.1f} against {b:.1f} before that — the {line:g} line still reads like the old baseline"}
+            "evidence": (f"he's averaged {r3:.1f} over his last 3 games, {'up' if r3 > b else 'down'} from {b:.1f} before "
+                         f"that — the {line:g} line still fits the old {b:.1f}, not his recent form")}
 
 
 def detect_team_surge(p: Dict, ctx: Dict) -> Optional[Dict]:
@@ -474,7 +475,7 @@ def detect_line_move(p: Dict, ctx: Dict) -> Optional[Dict]:
     move = line_move_toward(p, ctx)
     if move is None or move < MOVE_MIN:
         return None
-    return {"strength": _clip(move / 0.08), "evidence": f"the market has moved {move * 100:.1f} pts toward this side since it opened"}
+    return {"strength": _clip(move / 0.08), "evidence": f"the books' implied chance of this side is up {move * 100:.1f} points since the line opened"}
 
 
 def line_move_toward(p: Dict, ctx: Dict) -> Optional[float]:
@@ -1104,8 +1105,11 @@ def write_commentary(calls: List[Dict], *, sport_label: str, date_str: str, n_ga
         bits: List[str] = []
         if cs:
             top = cs[0]
-            bits.append(f"The best-supported play is {describe_call(top)}: "
-                        + "; ".join(a["evidence"] for a in top["angles"]) + ".")
+            lead = ("The best-supported play is" if (top.get("model_prob") or 0) >= 0.53 else
+                    "The most angles point to")                 # Nov 10: a 50% pick isn't "best-supported"
+            bits.append(f"{lead} {describe_call(top)}: " + "; ".join(a["evidence"] for a in top["angles"]) + "."
+                        + ("" if (top.get("model_prob") or 0) >= 0.53 else
+                           " The model itself has it as a coin flip, so treat it as a lean, not a bet."))
             if top.get("reasoning"):
                 bits.append(f"Why {top['side'].lower()}: " + " ".join(top["reasoning"][:2]))
             if top["cautions"]:
