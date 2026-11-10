@@ -58,7 +58,7 @@ def _historical_alts(g, bk):
             js, hdr = O.fetch_historical_event_props(ev["id"], api_key, [mk], ev.get("commence_time"),
                                                      sport=_active.odds_sport_key)
         except O.OddsAPIError as exc:
-            if str(exc).startswith(("401", "403")):
+            if "401" in str(exc) or "403" in str(exc):
                 return {"error": "Past prices need a paid Odds API plan (the history endpoint refused this key)."}
             continue
         left = hdr.get("remaining") or left
@@ -129,6 +129,10 @@ def _look_back():
                "identical). **Fair price**: if the book paid more than this, it was a value bet. Hits at long fair "
                "prices are the outliers — a good long shot still misses most nights, so judge it over many.")
 
+st.warning("**Watch list, not a bet list (yet).** First real test, Nov 9 (all 8 NBA games, 1,705 DraftKings alternate "
+           "rungs at tip-off prices): the rungs this page would have called value hit **48** times, where the model "
+           "expected 111 and the book's prices implied 80. When the model and the book disagree on an alternate line, "
+           "the book has been right more often. More nights are being tested; until then, small stakes only.")
 eastern = pytz.timezone("US/Eastern")
 today = datetime.now(eastern).date()
 day = st.date_input("Date", value=today, max_value=today, key="longshots_date",
