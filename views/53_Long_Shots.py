@@ -24,13 +24,139 @@ C.page_header("💎", "Long Shots", "Alternate lines (8+ assists, 30+ points…)
 if not sports.require_sport(["NBA"], "Long Shots"):
     st.stop()
 
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _past_night(sport_key, day_s):
+    import model_store as MS
+    import postgame as PG
+    snaps = MS.load_snapshots(sport_key, [day_s])
+    if not snaps:
+        return [], {}
+    res = PG.fetch_results(sport_key, day_s, sorted({(s["team"], s["opp"]) for s in snaps}))
+    try:
+        _rows, meta = sports.get(sport_key).engine.build_slate(day_s)
+    except Exception:                                           # noqa: BLE001
+        meta = []
+    return PG.grade(snaps, res), {m["label"]: m for m in meta or []}
+
+
+def _historical_alts(g, bk):
+    """That night's alternate prices from the Odds API history (paid plans only; 10 credits per market)."""
+    import book_menu as BM
+    import position_lines as PL
+    noon = eastern.localize(datetime.combine(day, datetime.min.time()).replace(hour=12))
+    evs, _h = O.fetch_historical_events(api_key, noon.astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                        sport=_active.odds_sport_key)
+    evs = evs.get("data") if isinstance(evs, dict) else evs
+    ev = PL.match_event(evs or [], g.get("home_name"), g.get("away_name"))
+    if not ev:
+        return {"error": "The Odds API history has no event for this game."}
+    quotes, left = [], None
+    for mk in LS.ALT_TO_MAIN:
+        try:
+            js, hdr = O.fetch_historical_event_props(ev["id"], api_key, [mk], ev.get("commence_time"),
+                                                     sport=_active.odds_sport_key)
+        except O.OddsAPIError as exc:
+            if str(exc).startswith(("401", "403")):
+                return {"error": "Past prices need a paid Odds API plan (the history endpoint refused this key)."}
+            continue
+        left = hdr.get("remaining") or left
+        quotes += BM.parse_menu_event((js or {}).get("data") or {}, bk or O.DEFAULT_BOOK)
+    try:
+        import model_store as MS
+        MS.save_odds(_active.key, date_str, g.get("home_name") or "", g.get("away_name") or "", ALT_ARCHIVE,
+                     {"offers": quotes}, None)
+    except Exception:                                           # noqa: BLE001
+        pass
+    return {"quotes": quotes, "remaining": left}
+
+
+def _look_back():
+    with st.spinner("Loading that night's model reads and box scores…"):
+        graded, meta = _past_night(_active.key, date_str)
+    if not graded:
+        st.info("No saved model reads for this date. They're kept whenever a props page (Best Bets, Edge Board, "
+                "Position Matchups, Long Shots…) is opened before tip-off.")
+        return
+    labels = sorted({s.get("game") for s in graded if s.get("game")})
+    pick = st.selectbox("Game", ["All games"] + labels, key="longshots_past_game")
+    rows_in = graded if pick == "All games" else [s for s in graded if s.get("game") == pick]
+    quotes = []
+    if pick != "All games":
+        import model_store as MS
+        g = meta.get(pick) or {}
+        saved = MS.load_odds(_active.key, date_str, g.get("home_name") or "", g.get("away_name") or "", ALT_ARCHIVE)
+        if saved and saved.get("offers"):
+            quotes = saved["offers"]
+            st.caption("Alternate prices: saved from when they were loaded before tip-off.")
+        elif api_key and g and st.button(f"📈 Load that night's alternate prices (~{10 * len(LS.ALT_TO_MAIN)} credits, "
+                                         "paid Odds API plan only)", key="ls_hist"):
+            with st.spinner("Asking the Odds API history…"):
+                got = _historical_alts(g, book)
+            if got.get("error"):
+                st.warning(got["error"])
+            else:
+                quotes = got["quotes"]
+                if got.get("remaining"):
+                    st.caption(f"Odds API credits left: {got['remaining']}")
+    rows = LS.lookback(rows_in, quotes, PE.norm_name)
+    if not rows:
+        st.info("No rungs to show for this pick.")
+        return
+    summ = LS.night_summary(rows)
+    if summ["rungs"]:
+        st.markdown(f"**{summ['hits']} of {summ['rungs']} rungs hit** — the honest chances expected about "
+                    f"**{summ['expected']:.0f}**. Close means the chances were fair that night; one night is noisy.")
+    else:
+        st.caption("Box scores aren't final yet for this pick.")
+    only = st.checkbox("Only the ones that hit", value=False, key="ls_past_hits")
+    show = [r for r in rows if r["Hit"] == "✅"] if only else rows
+    cols = ["Player", "Bet", "Hit", "Actual", "Honest chance", "Fair price", "Price", "EV per $1", "Projection",
+            "Main line", "Game"]
+    if not any(r["Price"] for r in show):
+        cols = [c for c in cols if c not in ("Price", "EV per $1")]
+    st.dataframe(pd.DataFrame([{c: r[c] for c in cols} for r in show]), hide_index=True, width="stretch",
+                 column_config={"Honest chance": st.column_config.NumberColumn(format="percent"),
+                                "Fair price": st.column_config.NumberColumn(format="%+d", help=(
+                                    "The price that would be a fair bet at the honest chance — a book paying more "
+                                    "than this was a value bet")),
+                                "Price": st.column_config.NumberColumn(format="%+d"),
+                                "EV per $1": st.column_config.NumberColumn(format="%+.2f"),
+                                "Projection": st.column_config.NumberColumn(format="%.1f")})
+    st.caption("Each rung above the book's main line, priced from what the model said before tip-off (its saved "
+               "projection and main-line chance; the spread is re-fitted, so it's close to the live page, not "
+               "identical). **Fair price**: if the book paid more than this, it was a value bet. Hits at long fair "
+               "prices are the outliers — a good long shot still misses most nights, so judge it over many.")
+
 eastern = pytz.timezone("US/Eastern")
-date_str = datetime.now(eastern).strftime("%Y-%m-%d")
+today = datetime.now(eastern).date()
+day = st.date_input("Date", value=today, max_value=today, key="longshots_date",
+                    help="Today: tonight's alternate lines and their value. A past date: what the model's honest "
+                         "chances were for each rung above the main line, and what actually happened.")
+date_str = day.strftime("%Y-%m-%d")
 api_key = BBD.get_odds_api_key()
+book = BBD.render_book_selector(key_prefix="longshots", date_str=date_str)
+ALT_ARCHIVE = ["long_shots_alt"]
+
+
+def _archive(g, quotes, kickoff):
+    """Keep tonight's alternate prices so a look back at this date shows them for free."""
+    try:
+        import model_store as MS
+        MS.save_odds(_active.key, date_str, g.get("home_name") or "", g.get("away_name") or "", ALT_ARCHIVE,
+                     {"offers": quotes}, kickoff)
+    except Exception:                                           # noqa: BLE001
+        pass
+
+
+if day < today:
+    _look_back()
+    st.stop()
+
 if not api_key:
     st.info("Needs the Odds API key (ODDS_API_KEY) — alternate lines come from the books.")
     st.stop()
-book = BBD.render_book_selector(key_prefix="longshots", date_str=date_str)
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -63,6 +189,7 @@ if st.button(f"📈 Load alternate lines for {g['label']}  (~{len(LS.ALT_TO_MAIN
                                 feed_by_event={ev["id"]: ev.get("_feed") or _active.odds_sport_key})
             store[g["label"]] = {"quotes": res.get("quotes") or [], "remaining": res.get("remaining"),
                                  "unavailable": res.get("unavailable") or []}
+            _archive(g, res.get("quotes") or [], ev.get("commence_time"))
     except Exception as exc:                                    # noqa: BLE001
         store[g["label"]] = {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
 
