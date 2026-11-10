@@ -902,7 +902,23 @@ def group_tickets(bets: List[Dict]) -> Dict[str, List[Dict]]:
     return out
  
  
-def compare_parlay_vs_singles(legs: List[Dict], parlay_stake: float) -> Optional[Dict]:
+def leg_price(b: Dict) -> Optional[float]:
+    """A parlay leg's own price: its entry_odds, else the 'leg_price=' the logger saved in its notes (Nov 10). NaN is
+    no price."""
+    for v in (b.get("entry_odds"),):
+        try:
+            f = float(v)
+            if f == f and f != 0:
+                return f
+        except (TypeError, ValueError):
+            pass
+    import re
+    m = re.search(r"leg_price=([+-]?\d+(?:\.\d+)?)", str(b.get("notes") or ""))
+    return float(m.group(1)) if m else None
+
+
+def compare_parlay_vs_singles(legs: List[Dict], parlay_stake: float,
+                              prices: Optional[Dict] = None) -> Optional[Dict]:
     """The teaching tool: parlay outcome vs the SAME total money bet as straight singles.
  
     Apples-to-apples on risk — parlay_stake on the ticket vs parlay_stake split evenly
@@ -935,10 +951,16 @@ def compare_parlay_vs_singles(legs: List[Dict], parlay_stake: float) -> Optional
     singles_pnl, settled = 0.0, 0
     leg_detail = []
     for b in legs:
-        pnl = bet_pnl({**b, "stake": per})
-        leg_detail.append({"player": b.get("player"), "market": b.get("market"),
+        price = (prices or {}).get(b.get("id"))
+        price = price if price is not None else leg_price(b)
+        # a losing (or pushed) leg needs no price; only a winner does
+        pnl = bet_pnl({**b, "stake": per, "entry_odds": price}) \
+            if price is not None or _result(b) in ("loss", "push", "void") else None
+        if pnl is not None and pnl != pnl:                      # NaN -> unknown, never "$+nan"
+            pnl = None
+        leg_detail.append({"id": b.get("id"), "player": b.get("player"), "market": b.get("market"),
                            "side": b.get("side"), "line": b.get("line"),
-                           "entry_odds": b.get("entry_odds"), "result": b.get("result"),
+                           "entry_odds": price, "result": b.get("result"),
                            "pnl": pnl})
         if pnl is not None:
             singles_pnl += pnl
