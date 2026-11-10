@@ -162,12 +162,13 @@ def run():
     # so a future re-numbering of the views/ files can't silently un-gate one of these by
     # accident. Matching by title is also what makes gating "Matchup Lab" here correctly cover
     # all three variants (MLB, WNBA/NBA/NCAAMB, NFL) with one entry, since they share the title.
+    # Nov 10: Matchup Lab and Position Matchups opened to the Discord/public build (owner's call); their odds
+    # lookups stay behind a button, so opening them spends no Odds API credits.
     owner_only_titles = {"Bet Log", "Media Room", "Podcast Studio", "Edge Board",
-                         "Matchup Lab", "Track Record", "Data Health",
+                         "Track Record", "Data Health",
                          "Suggested Parlays", "Speculative Basket", "Graded Picks",
                          "Model Dashboard", "First Innings Totals", "Player Lines", "Slip Lab",
-                         "Postgame Review", "Progression Plan", "Reports", "My Coach", "Model Performance", "Game Script", "Tennis Lab", "International Hoops",
-                         "Position Matchups"}
+                         "Postgame Review", "Progression Plan", "Reports", "My Coach", "Model Performance", "Game Script", "Tennis Lab", "International Hoops"}
 
     # leading page-number -> (title, icon, stable url slug). The url_path is the key fix: it pins
     # each page to a predictable URL so reruns keep you on the same page instead of defaulting to
