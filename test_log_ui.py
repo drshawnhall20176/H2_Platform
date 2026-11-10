@@ -20,3 +20,20 @@ def test_coach_and_desk_items_make_bet_rows():
 def test_props_missing_player_or_side_are_not_logged():
     bad = {"sport": "NFL", "pick": "x", "market": "Tackles + Assists", "price": -139, "chance": 0.64}
     assert TB.bet_rows([bad], 2.0, True, "", "2026-11-08") == []
+
+
+def test_parlay_vs_singles_uses_saved_leg_prices_and_never_nan():
+    import betlog as B
+    legs = [{"id": 1, "market": "Parlay", "ticket": "T", "stake": 1, "entry_odds": 881, "result": "loss"},
+            {"id": 2, "ticket": "T", "player": "A", "market": "Anytime TD", "side": "Over", "line": 0.5,
+             "entry_odds": None, "notes": "x,leg_price=150", "result": "win"},
+            {"id": 3, "ticket": "T", "player": "B", "market": "Anytime TD", "side": "Over", "line": 0.5,
+             "entry_odds": float("nan"), "result": "loss"}]
+    orig = B.is_parlay_header
+    B.is_parlay_header = lambda b: b.get("market") == "Parlay"
+    try:
+        cmp = B.compare_parlay_vs_singles(legs, 1.0)
+        assert cmp["legs"][0]["pnl"] == 0.75 and cmp["legs"][1]["pnl"] == -0.5
+        assert cmp["singles_pnl"] == 0.25
+    finally:
+        B.is_parlay_header = orig
