@@ -1,11 +1,12 @@
 """
-Postgame Review — grade what the model said at kickoff against the box score, see why each miss missed, and approve
+Postgame Review — grade what the model said at kickoff against the box score, see why each miss missed, and see
 the adjustments the results point to (Oct 30). Owner only.
 
 The snapshots are written automatically (model_store): every props row Best Bets / Edge Board / Position Matchups
 priced with a line before the game started. This page reads them, pulls ESPN's box scores and grades each one
-(postgame.py). Suggestions look across every graded day in the window; a projection multiplier only takes effect
-when approved here, and can be retired here.
+(postgame.py). Suggestions look across every graded day in the window. Nov 11: nothing waits for approval any more -- the
+morning job applies tunings and calibration factors, and the weekly job model weights, when they hold up on days
+they never saw; this page shows what each decided, and anything active can be retired (undone) here.
 """
 from datetime import date, timedelta
 
@@ -114,7 +115,7 @@ if not dates:
 
 tab_morning, tab_day, tab_trend, tab_week, tab_adj = st.tabs(["🌅 Morning report", "📋 One slate",
                                                               "📈 Patterns & suggestions", "📐 Weekly tuning",
-                                                              "🛠️ Approved adjustments"])
+                                                              "🛠️ Active adjustments"])
 
 
 def _pct(x):
@@ -132,6 +133,18 @@ def _use_table(rows):
     out = ([lock] if lock else []) + ur
     return [{"Use": r["Use"], "Record": f"{r['Hits']}-{r['Graded'] - r['Hits']}", "Hit rate": _pct(r["Hit rate"]),
              "Model said": _pct(r.get("Model said")), "Profit per $1": _money(r.get("Profit per $1"))} for r in out]
+
+
+
+def _auto_line(cal, side):
+    """Nov 11: what the morning's automatic calibration decided for one side ("Over", "Under", "overall")."""
+    d = next((x for x in (cal or {}).get("auto") or [] if x.get("side") == side), None)
+    name = "Overall (ticket math)" if side == "overall" else f"{side}s"
+    if not d:
+        return f"🤖 {name}: decided automatically each morning — nothing for you to do."
+    if d.get("applied"):
+        return f"🤖 {name}: changed {d['active']:.2f} → {d['new']:.2f} this morning — {d['why']}."
+    return f"🤖 {name}: kept at {d['active']:.2f} — {d['why']}. Nothing for you to do."
 
 
 with tab_morning:
@@ -156,11 +169,7 @@ with tab_morning:
                 st.caption(f"Best-fitting honest-chance factor: **{cal['s']:.2f}** (1.00 = trust the chances as "
                            f"shown; active now: {cal.get('active', 1.0):.2f}). Log loss {ll[0]} → {ll[1]}. Used in "
                            f"ticket math (Slip Lab's ticket checker); the boards keep showing the model's chance.")
-                if cal.get("enough") and abs(cal["s"] - cal.get("active", 1.0)) >= 0.02 and \
-                        st.button(f"Use {cal['s']:.2f} for {SPORT_KEY} tickets", key=f"pgr_cal_{mpick}"):
-                    if MS.approve_calibration(SPORT_KEY, cal["s"], {"morning": mpick, "n": cal["n"],
-                                                                     "log_loss": ll}):
-                        st.success("Saved — ticket math now uses it.")
+                st.caption(_auto_line(cal, "overall"))
         bs = (cal or {}).get("by_side") or {}
         if bs.get("Over") or bs.get("Under"):
             act = (cal or {}).get("side_active") or [1.0, 1.0]
@@ -173,19 +182,9 @@ with tab_morning:
                 st.caption("A factor below 1.00 pulls that side's chance toward 50% on the boards — the chance shown, its "
                            "value at the price and the Use tags all use it, so fewer weak reads on that side qualify. "
                            "1.00 = trust that side as shown.")
-                ok = [sd for sd in ("Over", "Under") if (bs.get(sd) or {}).get("enough")]
-                if ok and st.button(f"Use these per-side factors for {SPORT_KEY} boards", key=f"pgr_side_{mpick}"):
-                    # the graded chances already carry the active factor, so a new fit stacks on it (honest() composes
-                    # by multiplying: honest(honest(p, a), b) == honest(p, a * b))
-                    done = all(MS.approve_calibration(f"{SPORT_KEY}:{sd}",
-                                                      max(0.3, act[0 if sd == "Over" else 1] * bs[sd]["s"]),
-                                                      {"morning": mpick, "n": bs[sd]["n"], "fit": bs[sd]["s"]})
-                               for sd in ok)
-                    if done:
-                        st.success("Saved — the boards use them on their next refresh.")
-                    else:
-                        st.error("Couldn't save.")
-                if any(abs(a - 1.0) > 1e-9 for a in act) and st.button(f"Turn per-side factors off for {SPORT_KEY}",
+                for sd in ("Over", "Under"):
+                    st.caption(_auto_line(cal, sd))
+                if any(abs(a - 1.0) > 1e-9 for a in act) and st.button(f"Undo: turn per-side factors off for {SPORT_KEY}",
                                                                           key=f"pgr_side_off_{mpick}"):
                     for c in MS.list_calibration():
                         if c["sport"] in (f"{SPORT_KEY}:Over", f"{SPORT_KEY}:Under"):
@@ -248,15 +247,12 @@ with tab_morning:
             with st.container(border=True):
                 st.markdown(sgt["text"])
                 if sgt["kind"] == "tuning":
-                    c1, c2 = st.columns([3, 1])
-                    c1.caption(f"Approving sets {sgt['market']}{' · ' + sgt['slot'] if sgt['slot'] else ''} projections "
-                               f"to ×{sgt['factor']:.3f}. Nothing changes until someone approves.")
-                    if c2.button("Approve", key=f"pgr_mok_{mpick}_{i}"):
-                        ok = MS.approve_tuning(sgt["sport"], sgt["market"], sgt["factor"], sgt["text"], sgt["slot"])
-                        if ok:
-                            st.success("Approved.")
-                        else:
-                            st.error("Couldn't save the adjustment.")
+                    d = next((t for t in rep.get("auto_tuning") or [] if t.get("market") == sgt["market"]
+                              and (t.get("slot") or "") == (sgt.get("slot") or "")), None)
+                    st.caption(("🤖 Applied automatically this morning — " + d["why"] + "." if d and d.get("applied")
+                                else "🤖 Automatic — not applied yet: " + d["why"] + ". It applies itself once it "
+                                     "holds up; nothing for you to do." if d and d.get("why")
+                                else "🤖 Automatic — the morning job decides; nothing for you to do."))
                 elif sgt["kind"] == "info":
                     st.caption("For your information — no change suggested.")
                 else:
@@ -358,16 +354,8 @@ with tab_trend:
             with st.container(border=True):
                 st.markdown(sgt["text"])
                 if sgt["kind"] == "tuning":
-                    c1, c2 = st.columns([3, 1])
-                    c1.caption(f"Approving sets {sgt['market']}{' · ' + sgt['slot'] if sgt['slot'] else ''} projections "
-                               f"to ×{sgt['factor']:.3f} (replacing any earlier adjustment for it). Every page uses it "
-                               "within 10 minutes; retire it any time on the next tab.")
-                    if c2.button("Approve", key=f"pgr_ok_{i}"):
-                        ok = MS.approve_tuning(sgt["sport"], sgt["market"], sgt["factor"], sgt["text"], sgt["slot"])
-                        if ok:
-                            st.success("Approved.")
-                        else:
-                            st.error("Couldn't save the adjustment.")
+                    st.caption("🤖 For reference — the morning job applies tunings like this by itself once they hold "
+                               "up on enough slates (see 🌅 the morning report). Nothing for you to approve.")
                 elif sgt["kind"] == "info":
                     st.caption("For your information — no change suggested.")
                 else:
@@ -383,23 +371,15 @@ with tab_week:
         wpick = st.selectbox("Week of", weeks, key="pgr_week")
         wrep = MS.load_daily_review(f"{SPORT_KEY}-tuning", wpick) or {}
         st.markdown(wrep.get("markdown") or "")
-        for i, p in enumerate(wrep.get("proposals") or []):
+        for p in wrep.get("proposals") or []:
             with st.container(border=True):
-                c1, c2 = st.columns([3, 1])
-                c1.markdown(f"**{p['market']}** — model weight {p['now']:.2f} → **{p['w']:.2f}** "
-                            f"({p['n']} graded reads)")
-                c1.caption("Lower = lean more on the books' line. Every page uses it within 10 minutes; retire it any "
-                           "time on the next tab.")
-                if c2.button("Approve", key=f"pgr_blend_{wpick}_{i}"):
-                    if not hasattr(MS, "approve_blend"):
-                        st.error("The app needs a reboot to load this feature (Manage app → Reboot).")
-                        st.stop()
-                    ok = MS.approve_blend(p["sport"], p["market"], p["w"], {"week": wpick, "n": p["n"],
-                                                                            "gain": p.get("gain")})
-                    if ok:
-                        st.success("Approved.")
-                    else:
-                        st.error("Couldn't save it.")
+                st.markdown(f"**{p['market']}** — model weight {p['now']:.2f} → **{p['w']:.2f}** ({p['n']} graded reads)")
+                if p.get("applied"):
+                    st.caption(f"🤖 Applied automatically — {p.get('why', 'held up on held-out days')}. "
+                               "Retire it any time on the next tab.")
+                else:
+                    st.caption(f"🤖 Not applied — {p.get('why', 'waiting for the automatic check')}. Nothing for "
+                               "you to do; next week's report checks again.")
 
 with tab_adj:
     # getattr: Streamlit Cloud can re-run this page with an older model_store still loaded (until the app reboots)
@@ -414,7 +394,7 @@ with tab_adj:
                     st.error("Couldn't retire it.")
     rows = MS.list_tuning(active_only=False)
     if not rows:
-        st.info("No adjustments approved yet.")
+        st.info("No adjustments active yet.")
     for t in rows:
         with st.container(border=True):
             st.markdown(f"**{t['sport']} · {t['market']}{' · ' + t['slot'] if t.get('slot') else ''}** — ×{float(t['factor']):.3f}"
