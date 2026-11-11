@@ -161,8 +161,11 @@ def morning(day: str, reports: Dict[str, Dict], bets: Sequence[Dict], health: Se
 
 
 # --------------------------------------------------------------------------- the afternoon picks note
-def picks(day: str, rows: Sequence[Dict], bets: Sequence[Dict], tag_records_for, limits: Dict, top: int = 6) -> str:
-    """This afternoon's Good bets (My Coach's own verdicts), each sized so the whole list fits the daily budget."""
+def picks(day: str, rows: Sequence[Dict], bets: Sequence[Dict], tag_records_for, limits: Dict, top: int = 6,
+          table: Optional[List[Dict]] = None) -> str:
+    """This afternoon's Good bets (My Coach's own verdicts), each sized so the whole list fits the daily budget.
+    `table`, when given, is filled with one row per pick (Home shows it as a table -- Nov 11: the bullet list ran
+    together into one paragraph there)."""
     import coach as CO
     cands = [r for r in rows if r.get("price") is not None and r.get("chance") is not None]
     judged = []
@@ -184,6 +187,10 @@ def picks(day: str, rows: Sequence[Dict], bets: Sequence[Dict], tag_records_for,
                   f"${float(limits.get('stop_loss') or 25):.0f}):"]
     for j in good:
         price = j.get("price")
+        if table is not None:
+            table.append({"Time": j.get("time") or "", "Sport": j.get("sport"), "Pick": j.get("pick"),
+                          "Price": None if price is None else f"{float(price):+.0f}", "Stake": f"${stake:.0f}",
+                          "Edge": CO.pts(j["edge"]), "Game": j.get("game") or ""})
         out.append(f"• {j.get('sport')} · {j.get('pick')} {'' if price is None else f'({price:+.0f})'} — "
                    f"{j.get('time') or ''} {j.get('game') or ''} · edge {CO.pts(j['edge'])}".rstrip())
     out += ["", "Singles only — the coach's rule after Nov 8. Tick them on My Coach to log them."]
@@ -239,6 +246,7 @@ def run(kind: str, day: str, force: bool = False) -> int:
         print(f"{kind} brief for {day} already sent.")
         return 0
     bets = B.list_bets()
+    table: List[Dict] = []
     if kind == "morning":
         reports = {sp: r for sp in SPORTS if (r := MS.load_daily_review(sp, day))}
         if not reports:
@@ -257,7 +265,7 @@ def run(kind: str, day: str, force: bool = False) -> int:
         if not rows:
             print(f"No saved picks for {day} yet (the hourly warm-up saves them once the books post).")
             return 0
-        text = picks(day, rows, bets, PR.tag_records, CO.limits())
+        text = picks(day, rows, bets, PR.tag_records, CO.limits(), table=table)
     else:
         print(f"unknown brief kind: {kind}")
         return 2
@@ -267,7 +275,8 @@ def run(kind: str, day: str, force: bool = False) -> int:
         sent = deliver(text, os.environ.get("OWNER_BRIEF_WEBHOOK"))
     except Exception as exc:                                        # noqa: BLE001
         print(f"Couldn't post to Discord: {type(exc).__name__}: {exc}")
-    MS.save_setting(key, {"at": datetime.now(timezone.utc).isoformat(), "text": text, "sent": sent})
+    MS.save_setting(key, {"at": datetime.now(timezone.utc).isoformat(), "text": text, "sent": sent,
+                          "table": table if kind == "picks" else None})
     print("posted to Discord" if sent else "saved (shown on Home); no OWNER_BRIEF_WEBHOOK set")
     return 0
 

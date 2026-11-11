@@ -53,12 +53,23 @@ st.divider()
 if _owner:
     try:
         import model_store as _MS
+        import pandas as _pd
         _bday = _dt.now(_ET).strftime("%Y-%m-%d")
         for _kind, _title in (("picks", "🎯 This afternoon's picks"), ("morning", "☀️ Morning brief")):
             _b = _MS.get_setting(f"brief:{_bday}:{_kind}")
             if isinstance(_b, dict) and _b.get("text"):
                 with st.expander(_title, expanded=_kind == "picks"):
-                    st.markdown(C.money_md(_b["text"].split("\n", 1)[-1]))
+                    _lines = _b["text"].split("\n")[1:]          # the first line is the note's own title
+                    if _b.get("table"):
+                        # Nov 11: the picks as a table (a bullet list ran together into one paragraph here)
+                        _head = [l for l in _lines if l.strip() and not l.startswith("•")]
+                        st.markdown(C.money_md(_head[0]))
+                        st.dataframe(_pd.DataFrame(_b["table"]), hide_index=True, width="stretch")
+                        for _l in _head[1:]:
+                            st.caption(C.money_md(_l))
+                    else:
+                        # one line per line (markdown joins single line breaks into a paragraph)
+                        st.markdown(C.money_md("  \n".join(_lines)))
     except Exception:                                           # noqa: BLE001 -- the brief is a bonus on Home
         pass
 

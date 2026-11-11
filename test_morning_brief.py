@@ -68,3 +68,11 @@ def test_auto_sends_whatever_is_due(monkeypatch):
     calls.clear()
     MB.main([])
     assert calls == ["morning", "picks"]
+
+
+def test_picks_fill_a_table_for_home():
+    rows = [{"sport": "NBA", "kind": "Prop", "pick": "A Points Over 20.5", "price": 100, "chance": 0.66,
+             "use": "🔒 Lock", "market": "Points", "game": "X @ Y", "time": "7:00 PM"}]
+    table = []
+    MB.picks("2026-11-11", rows, [], lambda sp: {"Lock": (700, 1000)}, {"daily_budget": 40}, table=table)
+    assert table and table[0]["Pick"] == "A Points Over 20.5" and table[0]["Price"] == "+100" and table[0]["Time"] == "7:00 PM"
