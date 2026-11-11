@@ -13,5 +13,5 @@ for sp in ("NBA", "NHL", "NCAAF", "NFL"):
                                                             "since")}, default=str))
     for t in (rep.get("auto_tuning") or []):
         print("AT", sp, json.dumps(t, default=str)[:300])
-    if not cal:
-        print("AC", sp, "keys", list(rep)[:30])
+    print("AC", sp, "report keys", list(rep)[:40])
+    print("AC", sp, "cal", json.dumps(cal, default=str)[:1500])
