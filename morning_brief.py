@@ -171,7 +171,8 @@ def picks(day: str, rows: Sequence[Dict], bets: Sequence[Dict], tag_records_for,
         judged += CO.finder(sp_c, list(bets), tag_records_for(sp))
     good = [j for j in judged if j.get("verdict") == "🟢 Good bet"]
     good.sort(key=lambda j: -(j.get("edge") or 0))
-    good = good[:top]
+    import components as C
+    good = C.by_kickoff(good[:top], lambda j: j.get("dt") or j.get("time"))   # the best few, earliest game first
     head = [f"🎯 **H2 picks — {datetime.strptime(day, '%Y-%m-%d'):%a %b %-d}**", ""]
     if not good:
         maybe = sum(j.get("verdict") == "🟡 Maybe" for j in judged)
