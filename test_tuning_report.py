@@ -35,7 +35,8 @@ def test_report_proposes_only_with_enough_reads(monkeypatch):
     monkeypatch.setattr(BW, "_load", lambda: {})
     rep = T.build("NBA", _graded(3000, 0.0), [])
     assert rep["proposals"] and rep["proposals"][0]["market"] == "Points" and rep["proposals"][0]["w"] <= 0.10
-    assert "blend:Points" in rep["markdown"]
+    assert rep["proposals"][0]["auto_ok"] and "held up" in rep["proposals"][0]["why"]
+    assert "Nothing for you to approve" in rep["markdown"]
     small = T.build("NBA", _graded(60, 0.0), [])
     assert not small["proposals"]
     few = [dict(r, slate_date="2026-10-0" + str(1 + i % 3)) for i, r in enumerate(_graded(3000, 0.0))]
@@ -92,12 +93,13 @@ def test_approve_tuning_blend_key(monkeypatch):
     assert A.main(["--sport", "NBA", "--factors", '{"blend:Points": 0.9}', "--reason", "weekly"]) == 1
 
 
-def test_weekly_tab_shows_report_and_approves(monkeypatch):
+def test_weekly_tab_shows_report_and_what_applied_itself(monkeypatch):
     from pathlib import Path
     from streamlit.testing.v1 import AppTest
     import postgame as PG
     monkeypatch.setattr(BW, "_load", lambda: {})
     rep = T.build("NBA", _graded(3000, 0.0), [])
+    rep["proposals"][0]["applied"] = True
     got = []
     monkeypatch.setattr(MS, "snapshot_dates", lambda sport, db_path=None: ["2026-11-01"])
     monkeypatch.setattr(MS, "load_snapshots", lambda sport=None, dates=None, db_path=None: [])
@@ -112,9 +114,8 @@ def test_weekly_tab_shows_report_and_approves(monkeypatch):
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     assert any("weekly tuning report" in m.value for m in at.markdown)
-    btn = next(b for b in at.button if b.key and b.key.startswith("pgr_blend_"))
-    btn.click().run()
-    assert got and got[0][:2] == ("NBA", "Points")
+    assert not any(b.label == "Approve" for b in at.button) and not got
+    assert any("Applied automatically" in c.value for c in at.caption)
 
 
 def test_page_survives_an_old_model_store_without_blend_functions(monkeypatch):
@@ -142,3 +143,12 @@ def test_report_has_a_lock_section(monkeypatch):
     rep = T.build("NBA", rows, [])
     assert rep["locks"]["graded"] == 12 and rep["locks"]["hits"] == 8
     assert "Most probable" in rep["markdown"] and "| Points | Under | 8-4 |" in rep["markdown"]
+
+
+def test_holdout_rejects_a_fit_that_only_works_in_hindsight():
+    rows = T.prepare(_graded(3000, 0.0), PE.MODEL_WEIGHT)
+    assert T.holdout(rows, 0.40)["ok"]                         # books right all month: the lower weight holds up
+    early = [dict(r, slate_date=f"2026-10-{1 + i % 14:02d}") for i, r in enumerate(_graded(1500, 0.0, seed=3))]
+    late = [dict(r, slate_date=f"2026-10-{15 + i % 14:02d}") for i, r in enumerate(_graded(1500, 1.0, seed=4))]
+    mixed = T.prepare(early + late, PE.MODEL_WEIGHT)
+    assert not T.holdout(mixed, 0.40)["ok"]                    # the model got better: dropping its weight fails late

@@ -104,7 +104,7 @@ def test_snapshot_store_upserts_and_tuning_round_trip(tmp_path, monkeypatch):
     assert MT.factor("NFL", "Pass Attempts") == 1.0
 
 
-def test_postgame_page_grades_a_slate_and_offers_an_approval(monkeypatch):
+def test_postgame_page_grades_a_slate_and_needs_no_approval(monkeypatch):
     from streamlit.testing.v1 import AppTest
     snaps = [snap("Jordan Love", "GB", "Pass Attempts", 30.0, 29.5, "Over", opp=30.0, use=PE.USE_PARLAY, slot="QB")
              for _ in range(1)]
@@ -123,7 +123,8 @@ def test_postgame_page_grades_a_slate_and_offers_an_approval(monkeypatch):
     assert not at.exception, [e.value for e in at.exception]
     txt = " ".join(m.value for m in at.markdown)
     assert "Was the Use tag right?" in txt and "Pass Attempts: results ran" in txt
-    assert any(b.label == "Approve" for b in at.button)
+    assert not any(b.label == "Approve" for b in at.button)
+    assert any("Nothing for you to approve" in c.value for c in at.caption)
 
 
 def test_college_snapshots_match_on_school_name_not_just_abbreviation():
