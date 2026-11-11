@@ -422,6 +422,7 @@ else:
             if _side_pick != "All Sides" and "Side" in edf.columns:
                 edf = edf[edf["Side"] == _side_pick].copy()
             edf = edf.sort_values("EV%", ascending=False).head(top_n).copy()
+            edf = C.df_by_time(edf, "GameTime")                 # Nov 11: the top N, listed earliest game first
             n_longshots = sum(1 for e in edges if e["EV%"] >= min_ev and e["Price"] > max_odds)
             n_heavyfav = sum(1 for e in edges if e["EV%"] >= min_ev and e["Price"] < heavy_fav_floor)
             n_toohigh = sum(1 for e in edges if e["EV%"] > max_ev
@@ -673,6 +674,7 @@ st.caption("Model probabilities and fair prices at default lines — your pre-od
            "be *found and bet* once you fetch odds.")
  
 view = board[board["ModelProb"] >= min_prob].sort_values("ModelProb", ascending=False).copy()
+view = C.df_by_time(view, "GameTime")                           # Nov 11: earliest game first, then chance
  
 # Game-time filter: turn each game's ISO start into an ET clock string, and let the user
 # narrow the scouting view to specific games (sorted by game time) — handy on a spread-out

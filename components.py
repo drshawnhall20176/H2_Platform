@@ -704,11 +704,20 @@ def side_ok(row, pick: str) -> bool:
 
 # --------------------------------------------------------------------------- shared game filter (Nov 7)
 def _kick_dt(value):
-    """A kickoff (ISO string / datetime) as an Eastern datetime, or None."""
+    """A kickoff (ISO string / datetime / an Eastern clock time like "7:30 PM") as an Eastern datetime, or None."""
     import pandas as _pd
     try:
         if value is None or value == "":
             return None
+        if isinstance(value, str):
+            import re as _re
+            m = _re.match(r"^\s*(?:[A-Za-z]{3},?\s+)?(\d{1,2}):(\d{2})\s*([AaPp][Mm])", value)
+            if m:                                               # Nov 11: a bare clock time is Eastern, today
+                import datetime as _d
+                import pytz as _tz
+                h = int(m.group(1)) % 12 + (12 if m.group(3).lower() == "pm" else 0)
+                now = _d.datetime.now(_tz.timezone("America/New_York"))
+                return now.replace(hour=h, minute=int(m.group(2)), second=0, microsecond=0)
         ts = _pd.to_datetime(value)
         if _pd.isna(ts):
             return None
@@ -720,10 +729,22 @@ def _kick_dt(value):
 
 
 def by_kickoff(items, when=lambda x: x.get("kickoff")):
-    """Items sorted earliest kickoff first (no known time last)."""
+    """Items sorted earliest kickoff first (no known time last). Stable: items with the same start keep their order,
+    so a list already ranked (best first) stays ranked within each start time."""
     import datetime as _d
     far = _d.datetime.max.replace(tzinfo=_d.timezone.utc)
     return sorted(items or [], key=lambda x: _kick_dt(when(x)) or far)
+
+
+def df_by_time(df, col: str):
+    """Nov 11: a DataFrame in game-time order, earliest first (stable: rows at the same start keep their ranking)."""
+    if df is None or getattr(df, "empty", True) or col not in df.columns:
+        return df
+    import datetime as _d
+    far = _d.datetime.max.replace(tzinfo=_d.timezone.utc)
+    keys = [_kick_dt(v) or far for v in df[col]]
+    order = sorted(range(len(keys)), key=lambda i: keys[i])
+    return df.iloc[order]
 
 
 def game_select(items, key: str, when=lambda x: x.get("kickoff"),

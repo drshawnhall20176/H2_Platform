@@ -200,10 +200,12 @@ else:
                                     "Why": r["why"]} for r in rows]),
                      key=key, hide_index=True, width="stretch"))
 
-    goods = [r for r in _judged if r["verdict"].startswith("🟢")]
-    maybes = [r for r in _judged if r["verdict"].startswith("🟡")]
-    skips = [r for r in _judged if r["verdict"].startswith("🔴")]
-    unchecked = [r for r in _judged if r["verdict"].startswith("⚪")]
+    # Nov 11: every section in game-time order (earliest first); the coach's ranking breaks ties within a start time
+    _when = lambda r: r.get("dt") or r.get("time")              # noqa: E731
+    goods = C.by_kickoff([r for r in _judged if r["verdict"].startswith("🟢")], _when)
+    maybes = C.by_kickoff([r for r in _judged if r["verdict"].startswith("🟡")], _when)
+    skips = C.by_kickoff([r for r in _judged if r["verdict"].startswith("🔴")], _when)
+    unchecked = C.by_kickoff([r for r in _judged if r["verdict"].startswith("⚪")], _when)
     _why = CO.why_nothing(_judged, f_sport)
     if _why:
         st.info(_why)
