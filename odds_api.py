@@ -228,7 +228,7 @@ def fetch_event_props(event_id: str, api_key: str, markets: List[str],
     if regions != "us" or _BOOKMAKERS_REJECTED["bookmakers"]:
         return _get(path, {**base, "regions": regions})
 
-    books = ",".join(FETCH_BOOKMAKERS)
+    books = ",".join(fetch_books_for(sport))
     if not _BOOKMAKERS_REJECTED["multipliers"]:
         try:
             return _get(path, {**base, "bookmakers": books, "includeMultipliers": "true"})
@@ -875,6 +875,7 @@ MY_BOOKS_DEFAULT: Tuple[str, ...] = ("draftkings", "fanduel", "fanatics", "hardr
 PICKEM_BOOKS: Dict[str, str] = {
     "prizepicks": "PrizePicks",
     "pick6": "DK Pick6",
+    "underdog": "Underdog",     # Nov 11: carries college player props DraftKings/FanDuel don't post
 }
 
 # Books with NO usable feed: selectable for logging and for typing a line/price by hand, but never
@@ -892,7 +893,17 @@ BOOK_ALIASES: Dict[str, str] = {"caesars": "williamhill_us"}
 
 # Exactly the books fetched. Kept at <=10 on purpose: the API bills "every group of 10 bookmakers
 # as the equivalent of 1 region", so this costs the same 1x per market as the old regions="us".
-FETCH_BOOKMAKERS: Tuple[str, ...] = tuple(list(US_BOOKS) + list(PICKEM_BOOKS))
+FETCH_BOOKMAKERS: Tuple[str, ...] = tuple(b for b in list(US_BOOKS) + list(PICKEM_BOOKS) if b != "underdog")
+
+# Nov 11: college player props. DraftKings and FanDuel don't post them; the pick'em apps (PrizePicks, Underdog,
+# DK Pick6) and Hard Rock may. College fetches swap Bovada (not a book the owner can bet) for Underdog, staying at
+# 10 books -- the API bills each group of 10 as one region, so the cost doesn't change.
+COLLEGE_SPORTS = ("basketball_ncaab", "americanfootball_ncaaf")
+COLLEGE_FETCH_BOOKMAKERS: Tuple[str, ...] = tuple(b for b in list(US_BOOKS) + list(PICKEM_BOOKS) if b != "bovada")
+
+
+def fetch_books_for(sport: str) -> Tuple[str, ...]:
+    return COLLEGE_FETCH_BOOKMAKERS if sport in COLLEGE_SPORTS else FETCH_BOOKMAKERS
 
 
 def canonical_book(book: Optional[str]) -> str:
