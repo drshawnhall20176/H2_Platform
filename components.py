@@ -171,6 +171,12 @@ def page_header(icon: str, title: str, subtitle: str) -> None:
         load_notice()
 
 
+def money_md(text) -> str:
+    """Nov 11: Streamlit reads two "$" in one markdown string as a math formula ("+$5.65 ... $31.74" came out in a
+    different, larger font). Escape them so dollar amounts render as plain text."""
+    return str(text).replace("\\$", "$").replace("$", "\\$")
+
+
 def base_css() -> None:
     """One-time, page-level CSS polish. Call once near the top of a page, after st.title/caption.
     Safe, self-contained rules only -- see this module's own docstring for the honest risk

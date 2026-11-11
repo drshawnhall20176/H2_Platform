@@ -133,3 +133,9 @@ def test_new_market_cannot_be_good_until_graded():
     assert CO.judge(c, h, None, 12)["verdict"] == "🟡 Maybe"
     assert "new market" in CO.judge(c, h, None, 12)["why"]
     assert CO.judge(c, h, None, 80)["verdict"] == "🟢 Good bet"
+
+
+def test_dollar_amounts_are_not_read_as_math():
+    import components as C
+    assert C.money_md("Singles 5–3, +$5.65; parlays +$31.74") == "Singles 5–3, +\\$5.65; parlays +\\$31.74"
+    assert C.money_md("already \\$5") == "already \\$5"

@@ -54,6 +54,7 @@ try:
     _every = B.list_bets()
 except Exception:                                               # noqa: BLE001
     _every = []
+_money = C.money_md
 _lim = CO.limits()
 _t = CO.today_so_far(_every, _today_s)
 _stop = _t["pl"] <= -float(_lim["stop_loss"])
@@ -65,13 +66,13 @@ k2.metric("Settled today", CO.usd(_t["pl"]), help=f"Stop-loss: −${float(_lim['
 k3.metric("Parlays today", f"{_t['parlays']} of {int(_lim['max_parlays'])}")
 k4.metric("Open bets", _t["open"])
 if _stop:
-    st.error(f"**Stop for today.** You're {CO.usd(_t['pl'])}, past your −${float(_lim['stop_loss']):.0f} stop-loss. "
-             "Bets placed to win it back are the ones that cost the most (Nov 8: a $20 +3400 parlay after a losing day).")
+    st.error(_money(f"**Stop for today.** You're {CO.usd(_t['pl'])}, past your −${float(_lim['stop_loss']):.0f} stop-loss. "
+             "Bets placed to win it back are the ones that cost the most (Nov 8: a $20 +3400 parlay after a losing day)."))
 elif _over:
-    st.warning(f"**Budget used.** ${_t['staked']:.0f} staked today of ${float(_lim['daily_budget']):.0f}.")
+    st.warning(_money(f"**Budget used.** ${_t['staked']:.0f} staked today of ${float(_lim['daily_budget']):.0f}."))
 else:
-    st.caption(f"Room left today: ${max(0.0, float(_lim['daily_budget']) - _t['staked']):.0f} of your "
-               f"${float(_lim['daily_budget']):.0f} budget.")
+    st.caption(_money(f"Room left today: ${max(0.0, float(_lim['daily_budget']) - _t['staked']):.0f} of your "
+                      f"${float(_lim['daily_budget']):.0f} budget."))
 with st.expander("⚙️ My limits"):
     l1, l2, l3, l4, l5 = st.columns(5)
     nb = l1.number_input("Daily budget ($)", min_value=0.0, value=float(_lim["daily_budget"]), step=5.0, key="lim_budget")
@@ -93,7 +94,7 @@ _less = CO.lessons(_every, _yday_s)
 if _less:
     with st.expander("📓 Yesterday's lessons", expanded=True):
         for x in _less:
-            st.markdown(f"- {x}")
+            st.markdown(f"- {_money(x)}")
 
 # ---- Nov 8: the bet finder -- pick a sport, time and game; every bet on offer gets 🟢 / 🟡 / 🔴 and why
 st.markdown("#### 🔎 Find a bet")

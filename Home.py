@@ -58,7 +58,7 @@ if _owner:
             _b = _MS.get_setting(f"brief:{_bday}:{_kind}")
             if isinstance(_b, dict) and _b.get("text"):
                 with st.expander(_title, expanded=_kind == "picks"):
-                    st.markdown(_b["text"].split("\n", 1)[-1])
+                    st.markdown(C.money_md(_b["text"].split("\n", 1)[-1]))
     except Exception:                                           # noqa: BLE001 -- the brief is a bonus on Home
         pass
 
