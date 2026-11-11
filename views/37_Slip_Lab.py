@@ -834,6 +834,10 @@ if is_pickem:
                    + ". Swap them for legs it does post, or the entry can't be placed as built.")
 
 # --- how it pays ------------------------------------------------------------------------------
+if book == "underdog":
+    st.info("Underdog's payouts aren't modeled here yet — use its lines on the props pages and build the entry in "
+            "the Underdog app.")
+    st.stop()
 if is_pickem:
     mode_opts = ["power", "flex"] if book == "prizepicks" else ["pick6"]
 else:

@@ -343,7 +343,7 @@ def _book_count(o: Dict) -> int:
     return len(set(o.get("over") or {}) | set(o.get("under") or {}))
 
 
-PICKEM_BOOKS = ("prizepicks", "pick6")        # = odds_api.PICKEM_BOOKS: a line and a payout multiplier, no odds
+PICKEM_BOOKS = ("prizepicks", "pick6", "underdog")  # = odds_api.PICKEM_BOOKS: a line and a payout multiplier, no odds
 BOOK_PRIORITY = ("draftkings", "fanduel")      # Oct 29: your book first, then the next one that posts the player
 
 
@@ -416,6 +416,15 @@ def shop(player_offers: Sequence[Dict], line: Optional[float] = None, book=None)
                     "best_under": (b, under[b]) if b in under else None, "p_market": consensus(o),
                     "books": _book_count(o), "book": b, "wanted": wanted, "missing_book": i > 0, "pickem": False}
     priced = [o for o in pool if o.get("over") or o.get("under")]
+    if not priced:
+        # Nov 11: no sportsbook posts this player (college props: DraftKings / FanDuel don't) -- a pick'em app's
+        # line is still a real line, read like a pick'em pick (against the entry break-even, no odds).
+        for b in ("pick6",) + tuple(x for x in PICKEM_BOOKS if x != "pick6"):
+            at = [o for o in pool if b in (o.get("pickem") or {})]
+            if at:
+                o = max(at, key=lambda x: len(x.get("pickem") or {}))
+                return {"line": float(o["point"]), "best_over": None, "best_under": None, "p_market": None,
+                        "books": 0, "book": b, "wanted": wanted, "missing_book": bool(prefs), "pickem": True}
     o = max(priced or pool, key=lambda x: (_book_count(x), balance(x)))
     over, under = o.get("over") or {}, o.get("under") or {}
     return {"line": float(o["point"]), "best_over": best_price(over), "best_under": best_price(under),

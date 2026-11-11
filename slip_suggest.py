@@ -161,6 +161,8 @@ def _combo_ok(combo: Sequence[Dict], max_per_game: int) -> bool:
 
 def _pick_modes(book: str) -> List[str]:
     b = O.canonical_book(book)
+    if b == "underdog":
+        return []                       # Nov 11: Underdog payouts aren't modeled -- no suggested entries
     return ["power", "flex"] if b == "prizepicks" else ["pick6"] if b == "pick6" else ["parlay"]
 
 

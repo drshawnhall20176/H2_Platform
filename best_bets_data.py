@@ -169,7 +169,7 @@ def render_book_selector(key_prefix: str = "book",
     if O.DEFAULT_BOOK not in books_to_show:
         books_to_show = [O.DEFAULT_BOOK] + books_to_show
 
-    book_labels = [O.ALL_BOOKS.get(k, k) for k in books_to_show]
+    book_labels = [O.book_label(k) for k in books_to_show]
     default_idx = books_to_show.index(O.DEFAULT_BOOK) if O.DEFAULT_BOOK in books_to_show else 0
 
     selected_label = st.selectbox(
