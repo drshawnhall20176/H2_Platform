@@ -572,7 +572,7 @@ def player_row(player: Dict, team_name: str, opp_name: str, game_label: str,
 
 # --------------------------------------------------------------------------- orchestration
 def build_slate(date_str: str, min_avg_minutes: float = CFG.MIN_AVG_MINUTES,
-                last_n_games: int = CFG.RECENT_GAMES_N, max_workers: int = 8
+                last_n_games: int = CFG.RECENT_GAMES_N, max_workers: int = 8, keep=None
                 ) -> Tuple[List[Dict], List[Dict]]:
     """Fetch and assemble the full NCAAMB slate concurrently.
 
@@ -587,6 +587,10 @@ def build_slate(date_str: str, min_avg_minutes: float = CFG.MIN_AVG_MINUTES,
     _key_locks.clear()
     _diag_seen.clear()
     games = get_schedule(date_str)
+    if keep is not None:
+        # Nov 11: a whole Division I night (50-100+ games, 1,500+ player logs) ran Streamlit Cloud out of memory from
+        # My Coach. Callers that only need the games the books posted player props for pass keep=.
+        games = [g for g in games if keep(g)]
     if not games:
         _diag(f"build_slate({date_str}): 0 games -> nothing to build, stopping here")
         return [], []
