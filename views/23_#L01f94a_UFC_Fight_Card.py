@@ -123,7 +123,7 @@ if _card:
         return "—" if v is None else f"{float(v):+.0f}"
 
     _rows = []
-    for b in _card:
+    for b in C.by_kickoff(_card, lambda b: b.get("commence")):     # Nov 11: earliest bout first
         fav_a = b["p_a"] is not None and b["p_a"] >= 0.5
         _rows.append({"Time (ET)": pd.to_datetime(b["commence"]).tz_convert("America/New_York").strftime("%-I:%M %p"),
                       "Bout": f"{b['a']} vs {b['b']}",

@@ -109,10 +109,9 @@ if _owner:
     _wscope = _wall if _scope == "All sports" else [r for r in _wall if r["sport"] == current]
 
     def _tkey(t):
-        try:
-            return _dt.strptime(t, "%I:%M %p").time()
-        except (TypeError, ValueError):
-            return _dt.max.time()
+        # Nov 11: the shared parser (clock times, "Sat 7:00 PM", ISO kickoffs); unknown times last
+        d = C._kick_dt(t)
+        return (0, d.hour * 60 + d.minute) if d else (1, 0)
 
     @st.cache_data(ttl=900, show_spinner=False)
     def _blowouts(day):

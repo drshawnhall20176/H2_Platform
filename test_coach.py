@@ -139,3 +139,13 @@ def test_dollar_amounts_are_not_read_as_math():
     import components as C
     assert C.money_md("Singles 5–3, +$5.65; parlays +$31.74") == "Singles 5–3, +\\$5.65; parlays +\\$31.74"
     assert C.money_md("already \\$5") == "already \\$5"
+
+
+def test_tables_sort_by_game_time_earliest_first():
+    import pandas as pd
+    import components as C
+    rows = [{"t": "9:00 PM", "n": 1}, {"t": "TBD", "n": 2}, {"t": "7:00 PM", "n": 3}, {"t": "7:00 PM", "n": 4},
+            {"t": "12:30 PM", "n": 5}, {"t": "Sat 10:00 AM", "n": 6}]
+    assert [r["n"] for r in C.by_kickoff(rows, lambda r: r["t"])] == [6, 5, 3, 4, 1, 2]   # ties keep their order
+    df = pd.DataFrame(rows)
+    assert list(C.df_by_time(df, "t")["n"]) == [6, 5, 3, 4, 1, 2]
