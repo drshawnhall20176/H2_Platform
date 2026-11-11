@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       kind:
-        description: "morning or picks"
+        description: "morning, picks, or auto (whatever is due)"
         required: true
         default: "morning"
       force:
@@ -54,15 +54,12 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           INPUT_KIND: ${{ github.event.inputs.kind }}
-          RUN_NAME: ${{ github.event.workflow_run.name }}
-          CRON: ${{ github.event.schedule }}
         run: |
-          if [ "$EVENT" = "workflow_dispatch" ]; then k="$INPUT_KIND";
-          elif [ "$EVENT" = "workflow_run" ]; then [ "$RUN_NAME" = "warm-slates" ] && k=picks || k=morning;
-          else case "$CRON" in "20 "*) k=picks;; *) k=morning;; esac; fi
+          # every automatic run sends whatever is due (the script decides by the clock); a manual run picks one
+          if [ "$EVENT" = "workflow_dispatch" ]; then k="$INPUT_KIND"; else k=auto; fi
           echo "kind=$k" >> "$GITHUB_OUTPUT"
       - name: Morning review first (skips itself when already done)
-        if: steps.kind.outputs.kind == 'morning' && github.event_name != 'workflow_run'
+        if: steps.kind.outputs.kind != 'picks' && github.event_name != 'workflow_run'
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: python daily_review.py || true
