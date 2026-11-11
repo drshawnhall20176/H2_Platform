@@ -1,0 +1,77 @@
+# The platform's daily check-in (morning_brief.py), Nov 11 -- agent step 1.
+#
+# morning: once the morning review exists -- overnight jobs, what the model learned, yesterday's bets, the scorecard.
+#          Runs when daily-review finishes; the hourly fallback also runs the review itself first (GitHub has skipped
+#          that workflow's own schedule more than once), so the note still goes out.
+# picks:   after 3 PM New York, from the picks the hourly warm-up saved -- the afternoon's Good bets, sized to the
+#          owner's limits. Runs when warm-slates finishes, with an hourly fallback.
+# Each kind is sent once a day (the script keeps track). Delivery: OWNER_BRIEF_WEBHOOK -- a PRIVATE Discord channel's
+# webhook (the note has the owner's bets); without it the note is only saved and shown on Home.
+
+name: morning-brief
+
+on:
+  workflow_run:
+    workflows: ["daily-review", "warm-slates"]
+    types: [completed]
+  schedule:
+    - cron: "5 11-15 * * *"      # morning fallback, ~6-10 AM ET
+    - cron: "20 20-23 * * *"     # picks fallback, ~3:20-6:20 PM ET
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: "morning or picks"
+        required: true
+        default: "morning"
+      force:
+        description: "send again even if already sent today (1 = yes)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  actions: read                  # the morning note checks how the overnight jobs ran
+
+concurrency:
+  group: morning-brief
+  cancel-in-progress: false
+
+jobs:
+  brief:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Which note
+        id: kind
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_KIND: ${{ github.event.inputs.kind }}
+          RUN_NAME: ${{ github.event.workflow_run.name }}
+          CRON: ${{ github.event.schedule }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then k="$INPUT_KIND";
+          elif [ "$EVENT" = "workflow_run" ]; then [ "$RUN_NAME" = "warm-slates" ] && k=picks || k=morning;
+          else case "$CRON" in "20 "*) k=picks;; *) k=morning;; esac; fi
+          echo "kind=$k" >> "$GITHUB_OUTPUT"
+      - name: Morning review first (skips itself when already done)
+        if: steps.kind.outputs.kind == 'morning' && github.event_name != 'workflow_run'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python daily_review.py || true
+      - name: Brief
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          OWNER_BRIEF_WEBHOOK: ${{ secrets.OWNER_BRIEF_WEBHOOK }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE: ${{ github.event.inputs.force }}
+        run: |
+          if [ "$FORCE" = "1" ]; then python morning_brief.py "${{ steps.kind.outputs.kind }}" --force;
+          else python morning_brief.py "${{ steps.kind.outputs.kind }}"; fi

@@ -47,6 +47,21 @@ if active:
 
 st.divider()
 
+# ---------- Today's brief (Nov 11) ----------
+# The platform's own check-in (morning_brief.py): overnight jobs, what the model learned, yesterday's bets, and this
+# afternoon's Good bets. Also posted to the owner's private Discord channel when that webhook is set. Owner only.
+if _owner:
+    try:
+        import model_store as _MS
+        _bday = _dt.now(_ET).strftime("%Y-%m-%d")
+        for _kind, _title in (("picks", "🎯 This afternoon's picks"), ("morning", "☀️ Morning brief")):
+            _b = _MS.get_setting(f"brief:{_bday}:{_kind}")
+            if isinstance(_b, dict) and _b.get("text"):
+                with st.expander(_title, expanded=_kind == "picks"):
+                    st.markdown(_b["text"].split("\n", 1)[-1])
+    except Exception:                                           # noqa: BLE001 -- the brief is a bonus on Home
+        pass
+
 # ---------- Today's best (Nov 6) ----------
 # The day's top-tagged picks across every in-season sport and the labs, in one list. Props come from the last Best
 # Bets board built for each sport today (no extra Odds API spend); game lines, international hoops and tennis from
