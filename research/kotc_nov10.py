@@ -26,3 +26,7 @@ for who in ("Giannis Antetokounmpo", "Franz Wagner"):
         if s:
             print(f"KC {who} {m}: proj {s['projection']:.1f} line {s['line']} actual {s.get('actual')} {s['result']} "
                   f"ts {s.get('ts')} flags {s.get('flags')}")
+print("KC history of the PRA read (every save):")
+for s in sorted([s for s in snaps if s.get("market") == "PRA" and s["player"] in ("Giannis Antetokounmpo", "Franz Wagner")],
+                key=lambda s: str(s.get("ts"))):
+    print(f"KC   {s.get('ts')} {s['player']:<22} proj {s['projection']:.1f} line {s['line']}")
