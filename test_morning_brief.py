@@ -59,3 +59,12 @@ def test_long_notes_split_for_discord():
     sent = []
     assert MB.deliver(text, "https://example/webhook", post=sent.append) and len(sent) == len(parts)
     assert not MB.deliver(text, None)
+
+
+def test_auto_sends_whatever_is_due(monkeypatch):
+    calls = []
+    monkeypatch.setattr(MB, "run", lambda kind, day, force=False: calls.append(kind) or 0)
+    assert MB.main(["auto", "2026-11-11"]) == 0 and calls == ["morning", "picks"]
+    calls.clear()
+    MB.main([])
+    assert calls == ["morning", "picks"]

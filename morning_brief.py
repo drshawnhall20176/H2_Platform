@@ -220,8 +220,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     force = "--force" in argv
     argv = [a for a in argv if a != "--force"]
-    kind = argv[0] if argv else "morning"
+    kind = argv[0] if argv else "auto"
     day = argv[1] if len(argv) > 1 else today_et()
+    if kind == "auto":
+        # Nov 11: decide by the clock, not by what triggered the run -- GitHub fired the 6 AM schedule at 4:51 PM and
+        # collapsed the warm-up's trigger into the review's, so the picks note never went. Every run now sends
+        # whatever is due and not yet sent: the morning note once its review exists, the picks note after 3 PM.
+        return max(run(k, day, force) for k in ("morning", "picks"))
+    return run(kind, day, force)
+
+
+def run(kind: str, day: str, force: bool = False) -> int:
     import model_store as MS
     import betlog as B
     key = KEY.format(date=day, kind=kind)
