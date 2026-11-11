@@ -240,7 +240,10 @@ def build(sport: str, graded: Sequence[Dict], bets: Sequence[Dict], days: int = 
                               "gain": round(gain, 4), "profit": profit(g), "holdout": h, "auto_ok": h["ok"],
                               "applied": False,
                               "why": (f"held up on {h['passed']} of {h['splits']} held-out days" if h["ok"] else
-                                      f"didn't hold up on held-out days ({h['passed']} of {h['splits']})")})
+                                      f"only {h['splits']} held-out day(s) so far" if h["splits"] < 2 else
+                                      f"better on {h['passed']} of {h['splits']} held-out days but worse overall"
+                                      if h["passed"] >= (2 / 3) * h["splits"] else
+                                      f"better on only {h['passed']} of {h['splits']} held-out days")})
     md.append("")
 
     losers = [(mk, sd, g) for (mk, sd), g in by.items() if len(g) >= 100 and (profit(g) or 0) <= -0.10]
