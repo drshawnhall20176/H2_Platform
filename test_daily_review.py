@@ -144,3 +144,15 @@ def test_most_probable_record_in_the_slate_summary():
                                   "priced": 0}
     assert any(PE.MOST_PROBABLE in n and "1-1" in n for n in D.notes({"2026-11-01": s}))
     assert PE.most_probable(0.6, 0.15) and not PE.most_probable(0.6, 0.15, "big") and not PE.most_probable(None, 0.3)
+
+
+def test_calibration_line_says_the_automatic_step_is_handling_it():
+    import daily_review as DR
+    cal = {"enough": True, "s": 0.75, "active": 1.0,
+           "buckets": [{"shown": 0.64, "hit": 0.61, "n": 500}],
+           "auto": [{"side": "overall", "applied": False, "why": "not enough yet (1348 reads over 2 days since the "
+                                                                   "shown chances last changed)"}]}
+    (line,) = DR.calibration_notes(cal)
+    assert "fits best" not in line and "Automatic: not enough yet" in line and "Nothing for you to do" in line
+    cal["s"] = 1.0
+    assert "would fit" not in DR.calibration_notes(cal)[0]
