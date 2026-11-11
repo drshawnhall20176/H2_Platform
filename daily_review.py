@@ -165,9 +165,18 @@ def calibration_notes(cal: Dict) -> List[str]:
     n = sum(b["n"] for b in hi)
     shown = sum(b["shown"] * b["n"] for b in hi) / n
     hit = sum(b["hit"] * b["n"] for b in hi) / n
-    act = "" if cal["s"] >= 0.99 else f"; an honest-chance factor of {cal['s']:.2f} fits best"
-    return [f"Calibration: reads shown at 60%+ (avg {shown:.0%}) hit {hit:.0%} over the last {n}{act} "
-            f"(active: {cal.get('active', 1.0):.2f})."]
+    line = f"Calibration: reads shown at 60%+ (avg {shown:.0%}) hit {hit:.0%} over the last {n}"
+    if cal["s"] >= 0.99:
+        return [line + f" (active: {cal.get('active', 1.0):.2f})."]
+    # Nov 11: this fit covers the whole window, including days before the shown chances last changed, so it isn't a
+    # to-do. Say what the automatic overall factor (calibration.auto_global) decided instead of a bare suggestion.
+    auto = next((d for d in cal.get("auto") or [] if d.get("side") == "overall"), None)
+    if auto and auto.get("applied"):
+        return [line + "."]
+    wait = f" Automatic: {auto['why']} — it applies itself if it holds up." if auto and auto.get("why") else ""
+    return [line + f"; over all those days a factor of {cal['s']:.2f} would fit (active: "
+            f"{cal.get('active', 1.0):.2f}), but part of that is from before the last automatic change.{wait} "
+            "Nothing for you to do."]
 
 
 def notes(slates: Dict[str, Dict]) -> List[str]:
