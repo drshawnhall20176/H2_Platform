@@ -244,10 +244,10 @@ sel = LU.selectable(df, "ls_sel", hide_index=True, width="stretch", column_confi
     "EV per $1": st.column_config.NumberColumn(format="%+.2f"),
     "Projection": st.column_config.NumberColumn(format="%.1f")})
 LU.panel(LU.picked(show, sel), "ls_log", date_str, tag="long-shot")
-st.caption(
+st.caption(C.money_md(
     "**Honest chance** = the model's chance of the rung, corrected by how its long-shot chances have actually landed "
     "(walk-forward test per market: it overstates the middle rungs and understates the longest ones). "
     "**Book says** = the chance the price implies (vig included, so it's a bit high). **EV per $1** = what $1 returns "
     "on average at the honest chance — +1.00 means it should double over many bets. These hit rarely: most nights "
     "a long shot loses, so keep stakes small and flat (a few dollars), never chase. Rows marked *check news* have a "
-    "projection far from the book's main line — the book may know about a role or minutes change.")
+    "projection far from the book's main line — the book may know about a role or minutes change."))
