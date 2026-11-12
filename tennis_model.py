@@ -105,8 +105,21 @@ def parse_day(data: Dict, tour: str) -> List[Dict]:
                             "best_of": best_of(tname, tour), "p1": names[0], "p2": names[1],
                             "winner": 1 if win[0] else 2, "sets1": s1, "sets2": s2, "games1": g1, "games2": g2,
                             "status": "retired" if "RETIRED" in status else ("walkover" if "WALKOVER" in status
-                                                                             else "final")})
+                                                                             else "final"),
+                            "full_sets": full_sets(sets[0][:n], sets[1][:n])})
     return out
+
+
+def full_sets(a: Sequence, b: Sequence) -> int:
+    """Completed sets in a scoreline (6-4, 7-5, 7-6 ...). Nov 12: DraftKings stands moneyline bets when a player retires
+    after at least one full set (Andreescu d. Bassols Ribera 6-4, 4-2 ret. paid as a win); earlier retirements void."""
+    n = 0
+    for x, y in zip(a or [], b or []):
+        x, y = int(x or 0), int(y or 0)
+        hi, lo = max(x, y), min(x, y)
+        if (hi >= 6 and hi - lo >= 2) or (hi == 7 and lo in (5, 6)):
+            n += 1
+    return n
 
 
 def parse_upcoming(data: Dict, tour: str) -> List[Dict]:

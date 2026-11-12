@@ -416,8 +416,9 @@ def tennis_grade(hist: Sequence[Dict], db_path: Optional[str] = None) -> int:
             else:
                 continue
             res = "void" if m.get("status") == "walkover" else ("home" if hw else "away")
-            if MS.grade_game_pick("TENNIS", p["game_id"], hg, ag, res if m.get("status") != "retired" else "retired",
-                                  db_path=db_path):
+            if m.get("status") == "retired":                    # Nov 12: the books' rule -- a full set played stands
+                res = res + "_ret" if int(m.get("full_sets") or 0) >= 1 else "retired"
+            if MS.grade_game_pick("TENNIS", p["game_id"], hg, ag, res, db_path=db_path):
                 n += 1
             break
     return n
@@ -459,7 +460,8 @@ def hoops_refresh(league: str, fetch: Callable = _http, today: Optional[date] = 
     return MS.save_results(league, rows, db_path=db_path)
 
 
-def hoops_build(league: str, r: Optional[Dict], events: Sequence[Dict], now: datetime) -> List[Dict]:
+def hoops_build(league: str, r: Optional[Dict], events: Sequence[Dict], now: datetime, k: float = 1.0) -> List[Dict]:
+    """k: the league's automatic win-chance calibration (tennis_calibration, Nov 12); 1.0 = none applied yet."""
     rules = HOOPS_RULES.get(league, {})
     se, te, me = rules.get("spread"), rules.get("total"), rules.get("ml")
     out = []
@@ -477,7 +479,8 @@ def hoops_build(league: str, r: Optional[Dict], events: Sequence[Dict], now: dat
             continue
         line_margin = -mk["home_spread"]
         edge = proj["margin"] - line_margin
-        p = I.win_prob(proj["margin"], league=league)
+        p_raw = I.win_prob(proj["margin"], league=league)
+        p = TC.shrink(p_raw, k) if k != 1.0 else p_raw
         ml_edge = None if mk["fair_home"] is None else p - mk["fair_home"]
         tot_edge = None if mk["total"] is None else proj["total"] - mk["total"]
         ce = cover_estimate(league, edge)
@@ -488,7 +491,7 @@ def hoops_build(league: str, r: Optional[Dict], events: Sequence[Dict], now: dat
                     "away": away, "model_margin": round(proj["margin"], 1), "model_total": round(proj["total"], 1),
                     "line": line_margin, "home_spread": mk["home_spread"], "edge": round(edge, 2),
                     "line_total": mk["total"], "total_edge": None if tot_edge is None else round(tot_edge, 1),
-                    "model_p": round(p, 3), "fair_home": mk["fair_home"],
+                    "model_p": round(p, 3), "model_p_raw": round(p_raw, 3), "fair_home": mk["fair_home"],
                     "ml_edge": None if ml_edge is None else round(ml_edge, 3),
                     "best_home": mk["best_home"], "best_home_book": mk["best_home_book"], "best_away": mk["best_away"],
                     "best_away_book": mk["best_away_book"], "spread_price": mk["spread_price"],
@@ -504,7 +507,8 @@ def hoops_build(league: str, r: Optional[Dict], events: Sequence[Dict], now: dat
 TOTAL_SD = {"NKL": 17.0, "ICELAND": 17.0, "BAHRAIN": 17.0, "ESTONIA1": 17.0, "QATAR": 17.0, "BCL": 16.0, "FEC": 16.5, "EUROCUPW": 15.0, "EUROCUP": 16.0, "EUROLEAGUE": 16.0, "NBL": 18.0, "NCAAMB": 17.0, "NBA": 18.0, "WNBA": 17.0, "NHL": 2.3}
 
 
-def hoops_schedule_build(league: str, r: Optional[Dict], upcoming: Sequence[Dict], now: datetime) -> List[Dict]:
+def hoops_schedule_build(league: str, r: Optional[Dict], upcoming: Sequence[Dict], now: datetime,
+                         k: float = 1.0) -> List[Dict]:
     """Games with no sportsbook line in the odds feed (EuroCup): the model's fair spread, total and win chance, so the
     page can show fair prices and check a typed one. No line, no pick."""
     out = []
@@ -520,7 +524,9 @@ def hoops_schedule_build(league: str, r: Optional[Dict], upcoming: Sequence[Dict
             continue
         out.append({"sport": league, "game_id": str(g["id"]), "kickoff": ko.isoformat(), "home": g["home"], "away": g["away"],
                     "model_margin": round(proj["margin"], 1), "model_total": round(proj["total"], 1),
-                    "model_p": round(I.win_prob(proj["margin"], league=league), 3), "line": None, "edge": None,
+                    "model_p": round(TC.shrink(I.win_prob(proj["margin"], league=league), k) if k != 1.0
+                                     else I.win_prob(proj["margin"], league=league), 3),
+                    "model_p_raw": round(I.win_prob(proj["margin"], league=league), 3), "line": None, "edge": None,
                     "home_spread": None, "line_total": None, "source": "schedule", "pick": None, "total_pick": None,
                     "ml_pick": None})
     return out
@@ -563,7 +569,7 @@ def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optio
     if cfg.get("odds_key"):
         evs = fetch(ODDS.format(key=cfg["odds_key"]), {"apiKey": api_key, "regions": "us",
                                                         "markets": "h2h,spreads,totals", "oddsFormat": "american"}) or []
-        recs = hoops_build(league, r, evs, now)
+        recs = hoops_build(league, r, evs, now, TC.current_k(sport=league))
     else:                                                      # no odds feed for this league: fair lines from the schedule
         evs = []
         if league in getattr(I, "GENIUS_COMPS", {}):
@@ -573,7 +579,7 @@ def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optio
         else:
             code = ("U" if league == "EUROCUP" else "E") + I.season_of(league, now.date().isoformat())
             upcoming = I.euroleague_upcoming(code, fetch, comp=cfg.get("comp", "E"), league=league)
-        recs = hoops_schedule_build(league, r, upcoming, now)
+        recs = hoops_schedule_build(league, r, upcoming, now, TC.current_k(sport=league))
     got = {x["game_id"] for x in recs}
     future = [e for e in evs if str(e.get("commence_time")) > now.isoformat()[:19]]
     missed = [f"{e.get('away_team')} @ {e.get('home_team')}" for e in future if str(e.get("id")) not in got]
@@ -619,6 +625,8 @@ def bet_result(bet: Dict, p: Dict) -> Optional[str]:
     if fh is None or fa is None or res in (None, "void", "retired"):
         return None
     mk, side = bet.get("market"), bet.get("side")
+    if str(res).endswith("_ret"):                               # retired after a full set: moneyline stands, rest void
+        return ("win" if (res == "home_ret") == (side == p["home"]) else "loss") if mk == "Moneyline" else None
     if mk == "Total":
         d = (fh + fa) - float(bet["line"])
         return "push" if d == 0 else ("win" if (d > 0) == (str(side).lower() == "over") else "loss")
@@ -702,12 +710,12 @@ def grade_markets(p: Dict) -> Dict:
         return out
     margin, total = fh - fa, fh + fa
     if p.get("sport") == "TENNIS":
-        if p.get("pick") and res in ("home", "away"):
-            out["ml"] = _outcome(p["pick"] == res, p["best_home"] if p["pick"] == "home" else p["best_away"])
-        if p.get("spread_pick") and p.get("home_spread") is not None and res != "retired":
+        if p.get("pick") and res in ("home", "away", "home_ret", "away_ret"):
+            out["ml"] = _outcome(p["pick"] == res.replace("_ret", ""), p["best_home"] if p["pick"] == "home" else p["best_away"])
+        if p.get("spread_pick") and p.get("home_spread") is not None and res in ("home", "away"):
             d = margin + p["home_spread"]
             out["spread"] = _outcome(None if d == 0 else (d > 0) == (p["spread_pick"] == "home"), p.get("spread_price"))
-        if p.get("total_pick") and p.get("line_total") is not None and res != "retired":
+        if p.get("total_pick") and p.get("line_total") is not None and res in ("home", "away"):
             d = total - p["line_total"]
             out["total"] = _outcome(None if d == 0 else (d > 0) == (p["total_pick"] == "over"),
                                     p.get("over_price") if p["total_pick"] == "over" else p.get("under_price"))

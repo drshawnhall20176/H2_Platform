@@ -96,3 +96,10 @@ def test_morning_scorecard_grades_yesterdays_line_reads():
     assert MB.lines_yesterday(past) == ["**INTL** playable reads: 1-0", "**TENNIS** playable reads: 1-1"]
     text = MB.morning("2026-11-12", {}, [], [], past)
     assert "How the model did" in text and "TENNIS** playable reads: 1-1" in text
+
+
+def test_learned_names_a_league_calibration_change():
+    rep = {"GAME_LINES": {"calibration": {"auto": [{"side": "overall", "label": "NBL win chances", "active": 1.0,
+                                                    "new": 0.8, "applied": True, "why": "held up"}]}}}
+    out = MB.learned(rep)
+    assert out[0] == "🔧 NBL win chances: 1.00 → 0.80 (held up)"

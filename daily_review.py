@@ -402,6 +402,33 @@ def run(morning: str, fetch: Callable = PG._http, db_path: Optional[str] = None,
         pass
     except Exception as exc:                                        # noqa: BLE001
         print(f"[TENNIS] calibration failed: {type(exc).__name__}: {exc}")
+    # Nov 12 (owner: every module gets the tennis updates): the same automatic win-chance calibration for every Game
+    # Lab and International Hoops league, saved together as one GAME_LINES report for the morning brief
+    if "TENNIS" in sports:
+        try:
+            import intl_hoops as IH
+            import tennis_calibration as TC
+            decs, notes = [], []
+            for lg in IH.LEAGUES:
+                try:
+                    d = TC.auto(write=write, sport=lg)
+                except Exception as exc:                            # noqa: BLE001 -- one league never stops the rest
+                    print(f"[GAME_LINES] {lg} calibration failed: {type(exc).__name__}: {exc}")
+                    continue
+                if d.get("n"):
+                    decs.append(d)
+                    notes.append(f"{morning}: {lg} win-chance calibration -- "
+                                 + (f"changed {d['active']:.2f} → {d['new']:.2f}" if d["applied"] else f"kept {d['active']:.2f}")
+                                 + f" ({d['why']})")
+            if decs:
+                rep = {"calibration": {"auto": decs}, "notes": notes}
+                out["GAME_LINES"] = rep
+                if write:
+                    MS.save_daily_review("GAME_LINES", morning, rep, db_path=db_path)
+                for n in notes:
+                    print("[GAME_LINES]", n)
+        except Exception as exc:                                    # noqa: BLE001
+            print(f"[GAME_LINES] calibration failed: {type(exc).__name__}: {exc}")
     return out
 
 

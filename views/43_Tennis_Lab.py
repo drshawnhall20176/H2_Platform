@@ -12,6 +12,7 @@ import pandas as pd
 import streamlit as st
 
 import components as C
+import log_ui as LU
 import intl_picks as IP
 import model_store as MS
 import props_engine as PE
@@ -88,6 +89,16 @@ priced = [p for p in rows if p.get("source") != "espn"]
 sched = [p for p in rows if p.get("source") == "espn"]
 
 
+def _tick_item(p, t):
+    """A ticked match as a log_ui item: the model's player to win; you type the price your book shows."""
+    if not t.get("player"):
+        return None
+    side = "home" if t["player"] == p["home"] else "away"
+    return {"sport": "TENNIS", "pick": f"{t['player']} to win", "price": None, "game": f"{p['away']} vs {p['home']}",
+            "chance": t.get("chance"), "_rec": p, "bet_market": "Moneyline", "bet_side": side, "bet_line": None,
+            "best_tested": t.get("chance") is not None, "best_chance": t.get("chance")}
+
+
 def _start(p):
     try:
         return pd.to_datetime(p["kickoff"]).tz_convert("America/New_York").strftime("%a %I:%M %p")
@@ -107,7 +118,7 @@ else:
     tagged = [(p, t) for p, t in tagged if show == "All" or (show == PE.MOST_PROBABLE and t.get("lock"))
               or (show.startswith("Playable") and t.get("use") in (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE))
               or (show == PE.USE_PASS and t.get("use") == PE.USE_PASS)]
-    st.dataframe(pd.DataFrame([{
+    ticked = LU.selectable(pd.DataFrame([{
         "Start (ET)": _start(p),
         "Event": T.event_label(p),
         "Round": p.get("round") or "",
@@ -117,7 +128,9 @@ else:
         "Use": IP.tag_label(t),
         "Why": t.get("why", ""),
         "Rated matches": f"{p.get('n_home', 0)} / {p.get('n_away', 0)}"} for p, t in tagged]),
-        hide_index=True, width="stretch")
+        key="tl_tick", hide_index=True, width="stretch")
+    LU.panel([it for it in (_tick_item(*tagged[i]) for i in ticked if 0 <= i < len(tagged)) if it], key="tl_panel",
+             date_str=str(day), tag="tennis", past=day < pd.Timestamp.now(tz="America/New_York").date())
     st.caption("Model's pick = the player the model favors and its chance. Use reads like the props pages: 🔒 Most probable "
                "+ 🎟️ Parlay + Single = 60%+ with enough history on both players; 🎯 Single only = 55-60% (or thin history); "
                "⛔ Pass = too close to call. \"(-150 or better)\" = the price you need for +3% value — at a shorter price it's a "
