@@ -12,6 +12,7 @@ import pandas as pd
 import streamlit as st
 
 import components as C
+import log_ui as LU
 
 import intl_hoops as I
 import intl_picks as IP
@@ -136,7 +137,10 @@ def render(league: str, search: bool = False) -> None:
         st.info(f"No upcoming {title} games for {day:%a %b %d}" + (f" ({slot})" if slot != "All slate" else "")
                 + ". The capture runs every 3 hours; games appear once the books post lines.")
     else:
-        st.dataframe(pd.DataFrame([{
+        ordered = C.by_kickoff(upcoming)
+        bet_kind = st.radio("☑️ Tick games to log the model's side of", list(TICK_KINDS), horizontal=True,
+                            key=f"hg_tick_kind_{league}")
+        ticked = LU.selectable(pd.DataFrame([{
             "Tip (ET)": _tip(p),
             "Game": f"{p['away']} @ {p['home']}",
             "Use": _use(p, league),
@@ -147,8 +151,11 @@ def render(league: str, search: bool = False) -> None:
             "Est. cover": "—" if p.get("cover_est") is None else f"{p['cover_est']:.0%}",
             "Total: model / line": f"{p.get('model_total')} / {p.get('line_total') or '—'}",
             "Win chance: model / market": f"{p['model_p']:.0%} / " + ("—" if p.get("fair_home") is None else f"{p['fair_home']:.0%}"),
-            "Tracking pick": _pick(p)} for p in C.by_kickoff(upcoming)]),          # Nov 7: earliest tip first
-            hide_index=True, width="stretch")
+            "Tracking pick": _pick(p)} for p in ordered]),          # Nov 7: earliest tip first
+            key=f"hg_tick_{league}", hide_index=True, width="stretch")
+        items = [it for it in (tick_item(ordered[i], bet_kind) for i in ticked if 0 <= i < len(ordered)) if it]
+        LU.panel(items, key=f"hg_panel_{league}", date_str=str(day), tag=f"{league.lower()}-games",
+                 past=day < _today_et())
         what = []
         if rules.get("spread") is not None:
             what.append(f"a spread pick needs the model {rules['spread']:g}+ points off the line")
@@ -228,6 +235,38 @@ def _default_choice(p, opts):
     return 0
 
 
+TICK_KINDS = {"Spread": "Spread", "Moneyline": "Moneyline", "Total": "Total"}
+
+
+def tick_item(p, kind: str):
+    """A ticked game as a log_ui item: the model's side of the chosen market at the book's price (editable)."""
+    import math
+    team = lambda side: p["home"] if side == "home" else p["away"]
+    if kind == "Spread" and p.get("home_spread") is not None and p.get("edge") is not None:
+        side = "home" if p["edge"] >= 0 else "away"
+        line = p["home_spread"] if side == "home" else -p["home_spread"]
+        price, label = p.get("spread_price") or -110, f"{team(side)} {line:+g}"
+    elif kind == "Moneyline" and p.get("model_p") is not None:
+        side = "home" if p["model_p"] >= 0.5 else "away"
+        line, price, label = None, p.get("best_home") if side == "home" else p.get("best_away"), f"{team(side)} moneyline"
+    elif kind == "Total" and p.get("line_total") is not None and p.get("model_total") is not None:
+        side = "over" if p["model_total"] > p["line_total"] else "under"
+        line = p["line_total"]
+        price = (p.get("over_price") if side == "over" else p.get("under_price")) or -110
+        label = f"{side.title()} {line:g} ({p['away']} @ {p['home']})"
+    else:
+        return None
+    try:
+        ch = IP.fair_chance(p, kind, side, line)
+    except Exception:                                           # noqa: BLE001
+        ch = None
+    if price is not None and (isinstance(price, float) and math.isnan(price)):
+        price = None
+    return {"sport": p.get("sport"), "pick": label, "price": price, "game": f"{p['away']} @ {p['home']}",
+            "chance": ch, "_rec": p, "bet_market": kind, "bet_side": side, "bet_line": line,
+            "best_tested": ch is not None, "best_chance": None if ch is None else round(ch, 4)}
+
+
 def honesty_line(done, league: str = "") -> str:
     """How often the model's favorite won against the chance it gave (Nov 12: the check that showed the tennis model
     overconfident), and whether the automatic correction is on for this league."""
@@ -262,7 +301,7 @@ def value_at_price(p, market: str, side: str, line, odds) -> str:
 def log_panel(league: str, games) -> None:
     """Log a bet on any listed game straight to the Bet Log (it settles itself once the game is graded here)."""
     import betlog as B
-    with st.expander("📒 Log a bet on any game above", expanded=True):
+    with st.expander("📒 Log one bet with your own line (any side, spread, total or moneyline)"):
         flagged = [p for p in games if _pick(p) != "—"]
         pool = sorted(flagged or games, key=lambda x: x["kickoff"]) if st.toggle(
             "Only games with a tracking pick", value=bool(flagged), key=f"hg_log_only_{league}") else \
@@ -348,14 +387,18 @@ def render_fair(league: str) -> None:
     if not upcoming:
         st.caption(f"No upcoming {title} games for {day:%a %b %d}" + (f" ({slot})" if slot != "All slate" else "") + ".")
     else:
-        st.dataframe(pd.DataFrame([{
+        ticked = LU.selectable(pd.DataFrame([{
             "Tip (ET)": _tip(p), "Game": f"{p['away']} @ {p['home']}",
             "Model's pick": _fav(p)[0] + f" {_fav(p)[1]:.0%}",
             "Use": IP.tag_label(IP.chance_use(_fav(p)[1], None, trusted=False)),
             "Fair spread": f"{p['home']} {-p['model_margin']:+.1f}", "Fair total": f"{p['model_total']:.1f}",
             "Win chance": f"{p['home']} {p['model_p']:.0%}",
             "Fair ML": f"{_fair_american(p['model_p'])} / {_fair_american(1 - p['model_p'])}"} for p in upcoming]),
-            hide_index=True, width="stretch")
+            key=f"hf_tick_{league}", hide_index=True, width="stretch")
+        st.caption("☑️ Tick games to log the model's pick to win — type the price your book shows in the box below.")
+        items = [it for it in (tick_item(upcoming[i], "Moneyline") for i in ticked if 0 <= i < len(upcoming)) if it]
+        LU.panel(items, key=f"hf_panel_{league}", date_str=str(day), tag=f"{league.lower()}-games",
+                 past=day < _today_et())
         st.caption("Model's pick = the team the model favors to win and its chance. Use reads like the props pages (🎯 "
                    "Single only at 55%+, ⛔ Pass below); \"(-150 or better)\" = the moneyline price needed for +3% value. No 🔒 "
                    "here: the model has no tested edge in this league yet.")
