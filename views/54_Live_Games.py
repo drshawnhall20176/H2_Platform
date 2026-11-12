@@ -204,10 +204,17 @@ def tennis_board():
                                         "Event": m["tournament"]} for m in C.by_kickoff(later)]),
                          hide_index=True, width="stretch")
     if done:
-        with st.expander(f"Final ({len(done)})"):
+        res = [LG.tennis_result(m, LG.tennis_pregame(m, picks)) for m in done]
+        rec = LG.record(res)
+        with st.expander(f"Final ({len(done)})" + (f" · model {rec}" if rec else ""), expanded=bool(rec) and not live):
             st.dataframe(pd.DataFrame([{"Match": f"{m['p1']} vs {m['p2']}", "Score": LG.set_text(m),
-                                        "Winner": m["p1"] if m.get("winner") == 1 else m["p2"]} for m in done]),
-                         hide_index=True, width="stretch")
+                                        "Winner": m["p1"] if m.get("winner") == 1 else m["p2"],
+                                        "Model's pick": r["pick"], "Chance": r["chance"], "Result": r["result"]}
+                                       for m, r in zip(done, res)]),
+                         hide_index=True, width="stretch",
+                         column_config={"Chance": st.column_config.NumberColumn(format="percent")})
+            st.caption("Model's pick = the player the Tennis Lab favoured before the match. — = no pre-match read "
+                       "(matches the books don't price).")
 
 
 def _fair(p):
@@ -278,10 +285,22 @@ def board():
             st.dataframe(pd.DataFrame([{"Start": g["detail"] or g["kickoff"], "Game": f"{g['away']} @ {g['home']}"}
                                        for g in C.by_kickoff(later)]), hide_index=True, width="stretch")
     if done:
-        with st.expander(f"Final ({len(done)})"):
+        def _pre_done(g):
+            p = None if football else LG.pregame_for(g, picks)
+            return p if p is not None or not football else _books_pregame(league, g.get("event_id"))
+        done = C.by_kickoff(done)
+        res = [LG.game_result(g, _pre_done(g)) for g in done]
+        rec = LG.record(res)
+        with st.expander(f"Final ({len(done)})" + (f" · model {rec}" if rec else ""), expanded=bool(rec) and not live):
             st.dataframe(pd.DataFrame([{"Game": f"{g['away']} @ {g['home']}",
-                                        "Final": f"{g['away_score']:.0f}–{g['home_score']:.0f}"} for g in done]),
-                         hide_index=True, width="stretch")
+                                        "Final": f"{g['away_score']:.0f}–{g['home_score']:.0f}",
+                                        "Pre-game pick": r["pick"], "Chance": r["chance"], "Result": r["result"]}
+                                       for g, r in zip(done, res)]),
+                         hide_index=True, width="stretch",
+                         column_config={"Chance": st.column_config.NumberColumn(format="percent")})
+            st.caption("Pre-game pick = the team the " + ("books favoured (football starts from the books' line)"
+                                                           if football else "Game Lab favoured before tip-off")
+                       + " to win. — = no pre-game read saved for that game.")
 
 
 if league == "TENNIS":
