@@ -43,6 +43,7 @@ LIVE_CFG: Dict[str, Dict] = {
     "NCAAF": {"periods": 4, "minutes": 15, "ot": 5, "sd": 16.5, "total_sd": 16.0, "football": True},
 }
 END_SD = 2.0            # points of noise left in any basketball game while it's still being played
+FOOTBALL_TOTAL_FLOOR = 5.0
 # Nov 12 backtest: tonight's observed pace added nothing -- the projected total was most accurate using the pre-game
 # scoring rate for the rest of the game (MAE 8.75 NBA / 8.54 college vs 9.16 / 8.86 at the weight first tried, and
 # worse still leaning harder on the live pace). So the observed pace gets almost no weight.
@@ -117,8 +118,13 @@ def project(league: str, pre_margin: float, pre_total: float, home: float, away:
         mean_m += ep if possession == "home" else -ep
     floor = END_SD if m > 0 else 0.0
     sd_m = math.sqrt(c["sd"] ** 2 * share + floor ** 2)
-    mean_t = cur_total + rate * m + (max(ep, 0.0) if c.get("football") else 0.0)
-    sd_t = math.sqrt(c["total_sd"] ** 2 * share + floor ** 2)
+    mean_t = cur_total + rate * m
+    # Nov 12 football backtest: the drive in progress sharpened the win chance (NFL Brier 0.149 -> 0.139, most of it
+    # late) but adding it to the total made the total worse, so it only moves the margin; and one score is 7 points,
+    # so the total keeps a bigger floor late in a football game (the final landed inside the range only ~50% of the
+    # time with 5 minutes left on the basketball floor).
+    t_floor = FOOTBALL_TOTAL_FLOOR if (c.get("football") and m > 0) else floor
+    sd_t = math.sqrt(c["total_sd"] ** 2 * share + t_floor ** 2)
     if sd_m < 1e-6:
         p = 1.0 if mean_m > 0 else 0.0 if mean_m < 0 else 0.5
     else:
