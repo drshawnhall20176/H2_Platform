@@ -31,3 +31,28 @@ def test_honest_model_is_left_alone_and_small_samples_wait():
     assert not d["applied"] or abs(d["new"] - 1.0) < 0.15
     few = TC.auto(_picks(n_days=3, per_day=10), write=True, get={}.get, save=lambda *a: None)
     assert not few["applied"] and "not enough yet" in few["why"]
+
+
+def test_every_league_has_its_own_calibration_key():
+    import tennis_calibration as TC
+    assert TC.key_for("TENNIS") == "tennis_calibration" and TC.key_for("NBL") == "game_calibration:NBL"
+    store = {"game_calibration:NBL": {"k": 0.8}}
+    assert TC.current_k(store.get, sport="NBL") == 0.8 and TC.current_k(store.get, sport="EUROLEAGUE") == 1.0
+    d = TC.auto(picks=[], write=False, get=store.get, save=store.__setitem__, sport="NBL")
+    assert not d["applied"] and "not enough" in d["why"] and d["label"] == "NBL win chances"
+
+
+def test_hoops_build_applies_the_league_calibration():
+    from datetime import datetime, timezone
+    import intl_picks as IP
+    import intl_hoops as I
+    from test_intl_models import _ev, NOW
+    games = [{"home_team": h, "away_team": a, "home_points": hp, "away_points": ap, "neutral_site": False}
+             for h, a, hp, ap in [("Real Madrid", "Monaco", 95, 75), ("Monaco", "Fenerbahce", 80, 82),
+                                  ("Fenerbahce", "Real Madrid", 70, 90)] * 6]
+    r = I.ratings(games, 3.0)
+    evs = [_ev("g1", "Real Madrid", "Monaco", -150, 130, spread=-2.5, total=160)]
+    raw = IP.hoops_build("EUROLEAGUE", r, evs, NOW)[0]
+    cal = IP.hoops_build("EUROLEAGUE", r, evs, NOW, k=0.5)[0]
+    assert raw["model_p"] == raw["model_p_raw"]
+    assert abs((cal["model_p"] - 0.5) - 0.5 * (raw["model_p_raw"] - 0.5)) < 0.002 and cal["model_p_raw"] == raw["model_p_raw"]

@@ -172,6 +172,7 @@ def render(league: str, search: bool = False) -> None:
     if upcoming:
         log_panel(league, upcoming)
     st.markdown("##### Tracking record")
+    st.caption(honesty_line(done, league))                      # Nov 12: the check that caught tennis, every league
     tagged = [p for p in done if p.get("use")]
     if tagged:
         rows = []
@@ -228,6 +229,37 @@ def _default_choice(p, opts):
     return 0
 
 
+def honesty_line(done, league: str = "") -> str:
+    """How often the model's favorite won against the chance it gave (Nov 12: the check that showed the tennis model
+    overconfident), and whether the automatic correction is on for this league."""
+    import tennis_calibration as TC
+    rs = TC.rows(done)
+    if not rs:
+        return "Honesty check: no graded games yet."
+    won = sum((r["y"] == 1) == (r["p"] >= 0.5) for r in rs) / len(rs)
+    said = sum(max(r["p"], 1 - r["p"]) for r in rs) / len(rs)
+    k = TC.current_k(sport=league) if league else 1.0
+    fix = (f" Automatic correction on (×{k:.2f})." if abs(k - 1) > 1e-9 else
+           f" The automatic correction checks every morning; it needs {TC.MIN_N}+ graded games over {TC.MIN_DAYS}+ days "
+           "and must hold up on days it didn't see.")
+    return (f"Honesty check: over {len(rs)} graded games the model's favorite won **{won:.0%}** (it said {said:.0%})."
+            + fix)
+
+
+def value_at_price(p, market: str, side: str, line, odds) -> str:
+    """The model's chance for the bet being logged and its expected value at the typed price."""
+    try:
+        ch = IP.fair_chance(p, market, side, line)
+    except Exception:                                           # noqa: BLE001
+        ch = None
+    if ch is None or abs(odds) < 100:
+        return ""
+    dec = 1 + (odds / 100 if odds > 0 else 100 / -odds)
+    ev = ch * dec - 1
+    return (f"Model chance **{ch:.0%}** · at {odds:+d}: **{ev:+.1%}** expected value"
+            + (" — the price beats the model's fair line" if ev > 0 else " — the price is worse than the model's fair line"))
+
+
 def log_panel(league: str, games) -> None:
     """Log a bet on any listed game straight to the Bet Log (it settles itself once the game is graded here)."""
     import betlog as B
@@ -254,6 +286,7 @@ def log_panel(league: str, games) -> None:
         odds = c2.number_input("Your price (American)", value=int(round(float(price))), step=5,
                                key=f"hg_log_odds_{league}_{p['game_id']}_{i}")
         stake = c3.number_input("Stake ($)", min_value=0.0, value=1.0, step=1.0, key=f"hg_log_stake_{league}")
+        st.markdown(value_at_price(p, mk, side, line_in, odds))   # Nov 12: like Tennis Lab's price check
         real = st.toggle("Real money (off = tracking only)", value=True, key=f"hg_log_real_{league}")
         st.caption("Adjust the line and price to what your book shows before logging. It settles automatically once "
                    "the game is graded.")

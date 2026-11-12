@@ -11,6 +11,9 @@ on the days before each, score both on that day -- it must win on 2 of every 3 s
 as the other sports' automatic calibration. Retirements and walkovers are left out (the books void them).
 
 Records saved after Nov 12 keep the raw chance in `model_p_raw`; older ones only have the raw chance as `model_p`.
+
+Nov 12 (owner: every module gets the tennis updates): the same fit and held-out rule runs for every Game Lab and
+International Hoops league (sport=...), each with its own setting `game_calibration:<LEAGUE>`; tennis keeps its key.
 """
 from __future__ import annotations
 
@@ -28,12 +31,16 @@ def shrink(p: float, k: float) -> float:
     return min(0.99, max(0.01, 0.5 + k * (float(p) - 0.5)))
 
 
-def current_k(get=None) -> float:
+def key_for(sport: str = "TENNIS") -> str:
+    return KEY if sport == "TENNIS" else f"game_calibration:{sport}"
+
+
+def current_k(get=None, sport: str = "TENNIS") -> float:
     try:
         if get is None:
             import model_store as MS
             get = MS.get_setting
-        v = get(KEY)
+        v = get(key_for(sport))
         return float(v["k"]) if isinstance(v, dict) and v.get("k") else 1.0
     except Exception:                                           # noqa: BLE001
         return 1.0
@@ -81,15 +88,17 @@ def holdout(rs: Sequence[Dict], k_now: float) -> Dict:
     return {"splits": splits, "passed": passed, "gain": round(gain, 3)}
 
 
-def auto(picks: Optional[Sequence[Dict]] = None, write: bool = True, get=None, save=None) -> Dict:
+def auto(picks: Optional[Sequence[Dict]] = None, write: bool = True, get=None, save=None, sport: str = "TENNIS") -> Dict:
     """Refit k; apply it when it holds up out of sample. Returns the decision in the calibration report's shape."""
     import model_store as MS
     get = get or MS.get_setting
     save = save or MS.save_setting
-    picks = MS.load_game_picks("TENNIS") if picks is None else picks
+    key = key_for(sport)
+    picks = MS.load_game_picks(sport) if picks is None else picks
     rs = rows(picks)
-    k_now = current_k(get)
-    out = {"side": "overall", "active": k_now, "new": k_now, "applied": False, "n": len(rs)}
+    k_now = current_k(get, sport)
+    out = {"side": "overall", "active": k_now, "new": k_now, "applied": False, "n": len(rs),
+           "label": "win chances" if sport == "TENNIS" else f"{sport} win chances"}
     days = len({r["day"] for r in rs})
     if len(rs) < MIN_N or days < MIN_DAYS:
         out["why"] = f"not enough yet ({len(rs)} graded matches over {days} days; needs {MIN_N} over {MIN_DAYS})"
@@ -108,9 +117,9 @@ def auto(picks: Optional[Sequence[Dict]] = None, write: bool = True, get=None, s
     out["why"] = (f"held up on {h['passed']} of {h['splits']} held-out days; a model 75% now reads "
                   f"{shrink(0.75, k_new):.0%}")
     if write:
-        prev = get(KEY) if isinstance(get(KEY), dict) else {}
+        prev = get(key) if isinstance(get(key), dict) else {}
         hist = list((prev or {}).get("history") or [])[-20:]
         hist.append({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "k": k_new, "from": k_now,
                      "n": len(rs), "holdout": h})
-        save(KEY, {"k": k_new, "history": hist})
+        save(key, {"k": k_new, "history": hist})
     return out
