@@ -157,6 +157,7 @@ def run():
         "46": ("NBA",),                                  # Game Lab (NBA)
         "47": ("NHL",),                                  # Game Lab (NHL)
         "50": ("NBA", "NCAAMB", "WNBA", "NFL", "NCAAF", "NHL"),
+        "54": ("NBA", "NCAAMB", "NHL", "WNBA", "INTL"),   # Live Games: in-game reads (Nov 12)
         "53": ("NBA",),                                   # Long Shots: the tail test covers the NBA   # Game Script: each sport's own study (Nov 7)
         "41": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL", "UFC"),                    # Postgame Review -- kickoff snapshots graded vs box scores
         "38": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL"),  # Position Matchups -- depth chart vs the opposing
@@ -255,6 +256,7 @@ def run():
         "49": ("Model Performance", "📊", "model_performance"),   # Investor Relations: the edge evidence (Nov 6)
         "50": ("Game Script", "🎬", "game_script"),
         "51": ("My Coach", "🧑‍🏫", "my_coach"),
+        "54": ("Live Games", "🔴", "live_games"),        # in-game win chance / projected final / fair live lines (Nov 12)
         "53": ("Long Shots", "💎", "long_shots"),        # alternate-line value vs the model's honest chance (Nov 10)          # simple tables from your own bets: what works, what to stop (Nov 8)     # props under each kind of game + script tickets, every props sport (Nov 7)
     }
 
@@ -283,7 +285,7 @@ def run():
         SECTION_OF[k] = "🏠 START HERE"
     for k in ("1", "2", "3", "4", "37", "23", "24", "39", "50", "53"):
         SECTION_OF[k] = "🎯 RECOMMENDATIONS"
-    for k in ("5", "6"):
+    for k in ("5", "6", "54"):
         SECTION_OF[k] = "🛰️ LIVE SIGNALS"
     for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26", "27", "29", "30", "31", "32", "33", "34", "35", "36", "43", "44", "45", "46", "47", "38"):
         SECTION_OF[k] = "🔬 DEEP RESEARCH"
