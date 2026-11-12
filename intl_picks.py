@@ -159,7 +159,10 @@ def tag_label(t: Dict) -> str:
     return f"{PE.MOST_PROBABLE} · {u}" if t.get("lock") else u
 
 
-def tennis_use(p: Dict) -> Dict:
+TENNIS_UNPROVEN = 0.70
+
+
+def tennis_use(p: Dict, k: Optional[float] = None) -> Dict:
     """The model's player and Use tag for one tennis record. Main-tour (odds feed) matches: the books beat this model
     in the backtest, so they're ⛔ Pass whatever the model says; everything else is read off the model's chance with
     the price it needs (or the best posted price), and a player with under TENNIS_MIN_MATCHES rated matches can't be a lock."""
@@ -175,6 +178,13 @@ def tennis_use(p: Dict) -> Dict:
         price = p.get("best_home") if home else p.get("best_away")
         out.update(use=PE.USE_PASS, lock=False, priced=True,
                    why="main tour: the books beat this model in the backtest" + (f"; best price {float(price):+.0f}" if price else ""))
+        return out
+    if k is None:
+        k = TC.current_k()
+    if ch >= TENNIS_UNPROVEN and abs(k - 1.0) < 1e-9:           # Nov 12: until the automatic correction passes
+        out.update(use=PE.USE_PASS, lock=False, unproven=True,
+                   why="⚠️ not proven: over the last month the model's 70-80% favorites won only ~60%. Held back "
+                       "until the automatic tennis correction passes its check.")
         return out
     out.update(chance_use(ch, None, trusted))
     return out
