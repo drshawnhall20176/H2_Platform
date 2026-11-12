@@ -49,7 +49,7 @@ def test_picks_note_lists_good_bets_sized_to_the_budget():
     text = MB.picks("2026-11-11", rows, [], recs, {"daily_budget": 40, "stop_loss": 25})
     assert "A Points Over 20.5 (+100)" in text and "B Points" not in text and "$5 each" in text
     none = MB.picks("2026-11-11", rows[1:], [], recs, {"daily_budget": 40})
-    assert "No Good bets" in none
+    assert "no Good bets" in none
 
 
 def test_long_notes_split_for_discord():
@@ -76,3 +76,23 @@ def test_picks_fill_a_table_for_home():
     table = []
     MB.picks("2026-11-11", rows, [], lambda sp: {"Lock": (700, 1000)}, {"daily_budget": 40}, table=table)
     assert table and table[0]["Pick"] == "A Points Over 20.5" and table[0]["Price"] == "+100" and table[0]["Time"] == "7:00 PM"
+
+
+def test_picks_note_includes_intl_hoops_and_tennis_reads():
+    lines = [{"sport": "TENNIS", "pick": "A to win", "game": "B vs A", "time": "11:00 AM", "chance": 0.64,
+              "use": "🎯 Single only", "need": -150, "untested": True},
+             {"sport": "INTL", "pick": "Real Madrid -4.5", "game": "X @ Real Madrid", "time": "2:45 PM", "chance": 0.58,
+              "use": "🎟️ Parlay + Single"}]
+    table = []
+    text = MB.picks("2026-11-12", [], [], lambda sp: {}, {"daily_budget": 40}, table=table, lines=lines)
+    assert "no Good bets" in text and "TENNIS · A to win (needs -150 or better)" in text and "not yet proven" in text
+    assert "INTL · Real Madrid -4.5" in text and text.index("TENNIS ·") < text.index("INTL ·")   # earliest first
+    assert len(table) == 2 and table[0]["Sport"] == "TENNIS" and table[0]["Stake"] == "$1"
+
+
+def test_morning_scorecard_grades_yesterdays_line_reads():
+    past = [{"sport": "TENNIS", "result": "win"}, {"sport": "TENNIS", "result": "loss"},
+            {"sport": "INTL", "result": "win"}, {"sport": "INTL", "result": None}]
+    assert MB.lines_yesterday(past) == ["**INTL** playable reads: 1-0", "**TENNIS** playable reads: 1-1"]
+    text = MB.morning("2026-11-12", {}, [], [], past)
+    assert "How the model did" in text and "TENNIS** playable reads: 1-1" in text

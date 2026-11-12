@@ -145,7 +145,8 @@ def bets_yesterday(bets: Sequence[Dict], yday: str) -> List[str]:
     return out
 
 
-def morning(day: str, reports: Dict[str, Dict], bets: Sequence[Dict], health: Sequence[str]) -> str:
+def morning(day: str, reports: Dict[str, Dict], bets: Sequence[Dict], health: Sequence[str],
+            line_reads: Sequence[Dict] = ()) -> str:
     yday = (datetime.strptime(day, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
     lines = [f"☀️ **H2 morning brief — {datetime.strptime(day, '%Y-%m-%d'):%a %b %-d}**", ""]
     if health:
@@ -153,7 +154,7 @@ def morning(day: str, reports: Dict[str, Dict], bets: Sequence[Dict], health: Se
         lines += ["**Overnight jobs**: " + ("all ran ✅" if not bad else ""), *bad, ""]
     lines += ["**What the model learned**", *learned(reports), ""]
     lines += [f"**Your bets ({datetime.strptime(yday, '%Y-%m-%d'):%a})**", *bets_yesterday(bets, yday), ""]
-    sc = scorecard(reports, yday)
+    sc = scorecard(reports, yday) + lines_yesterday(line_reads)
     if sc:
         lines += ["**How the model did**", *sc, ""]
     lines += ["Picks for today come this afternoon, once the books post lines."]
@@ -162,11 +163,14 @@ def morning(day: str, reports: Dict[str, Dict], bets: Sequence[Dict], health: Se
 
 # --------------------------------------------------------------------------- the afternoon picks note
 def picks(day: str, rows: Sequence[Dict], bets: Sequence[Dict], tag_records_for, limits: Dict, top: int = 6,
-          table: Optional[List[Dict]] = None) -> str:
-    """This afternoon's Good bets (My Coach's own verdicts), each sized so the whole list fits the daily budget.
+          table: Optional[List[Dict]] = None, lines: Sequence[Dict] = ()) -> str:
+    """This afternoon's Good bets (My Coach's own verdicts), each sized so the whole list fits the daily budget, then
+    (Nov 12: "no sport should be left out if there is value") every playable game-line, international hoops and
+    tennis read from todays_best.game_rows -- the same Use tags their pages show.
     `table`, when given, is filled with one row per pick (Home shows it as a table -- Nov 11: the bullet list ran
     together into one paragraph there)."""
     import coach as CO
+    import components as C
     cands = [r for r in rows if r.get("price") is not None and r.get("chance") is not None]
     judged = []
     for sp in sorted({c.get("sport") for c in cands}):
@@ -174,27 +178,53 @@ def picks(day: str, rows: Sequence[Dict], bets: Sequence[Dict], tag_records_for,
         judged += CO.finder(sp_c, list(bets), tag_records_for(sp))
     good = [j for j in judged if j.get("verdict") == "🟢 Good bet"]
     good.sort(key=lambda j: -(j.get("edge") or 0))
-    import components as C
     good = C.by_kickoff(good[:top], lambda j: j.get("dt") or j.get("time"))   # the best few, earliest game first
-    head = [f"🎯 **H2 picks — {datetime.strptime(day, '%Y-%m-%d'):%a %b %-d}**", ""]
+    out = [f"🎯 **H2 picks — {datetime.strptime(day, '%Y-%m-%d'):%a %b %-d}**", ""]
     if not good:
         maybe = sum(j.get("verdict") == "🟡 Maybe" for j in judged)
-        return "\n".join(head + [f"No Good bets on the board right now ({len(judged)} checked, {maybe} Maybe). "
-                                 "Sitting out is a fine result — no bet beats a bad bet."])
-    budget = float(limits.get("daily_budget") or 40)
-    stake = max(1.0, min(5.0, round(budget / max(len(good), 1) / 2)))   # half the budget across singles, $1–$5 each
-    out = head + [f"{len(good)} Good bet(s), ${stake:.0f} each (your budget ${budget:.0f}, stop-loss "
-                  f"${float(limits.get('stop_loss') or 25):.0f}):"]
-    for j in good:
-        price = j.get("price")
-        if table is not None:
-            table.append({"Time": j.get("time") or "", "Sport": j.get("sport"), "Pick": j.get("pick"),
-                          "Price": None if price is None else f"{float(price):+.0f}", "Stake": f"${stake:.0f}",
-                          "Edge": CO.pts(j["edge"]), "Game": j.get("game") or ""})
-        out.append(f"• {j.get('sport')} · {j.get('pick')} {'' if price is None else f'({price:+.0f})'} — "
-                   f"{j.get('time') or ''} {j.get('game') or ''} · edge {CO.pts(j['edge'])}".rstrip())
-    out += ["", "Singles only — the coach's rule after Nov 8. Tick them on My Coach to log them."]
+        out.append(f"**Player props**: no Good bets right now ({len(judged)} checked, {maybe} Maybe). "
+                   "Sitting out is a fine result — no bet beats a bad bet.")
+    else:
+        budget = float(limits.get("daily_budget") or 40)
+        stake = max(1.0, min(5.0, round(budget / max(len(good), 1) / 2)))   # half the budget across singles, $1–$5 each
+        out.append(f"**Player props** — {len(good)} Good bet(s), ${stake:.0f} each (your budget ${budget:.0f}, "
+                   f"stop-loss ${float(limits.get('stop_loss') or 25):.0f}):")
+        for j in good:
+            price = j.get("price")
+            if table is not None:
+                table.append({"Time": j.get("time") or "", "Sport": j.get("sport"), "Pick": j.get("pick"),
+                              "Price": None if price is None else f"{float(price):+.0f}", "Stake": f"${stake:.0f}",
+                              "Edge": CO.pts(j["edge"]), "Game": j.get("game") or ""})
+            out.append(f"• {j.get('sport')} · {j.get('pick')} {'' if price is None else f'({price:+.0f})'} — "
+                       f"{j.get('time') or ''} {j.get('game') or ''} · edge {CO.pts(j['edge'])}".rstrip())
+    gl = C.by_kickoff(list(lines), lambda r: r.get("time"))
+    if gl:
+        out += ["", f"**Game lines, international hoops and tennis** — {len(gl)} playable read(s), $1 each:"]
+        for r in gl:
+            need = r.get("need")
+            need_txt = f" (needs {float(need):+.0f} or better)" if need is not None else ""
+            chance = f"{r['chance']:.0%}" if r.get("chance") is not None else ""
+            track = " · tracking, not yet proven" if r.get("untested") else ""
+            if table is not None:
+                table.append({"Time": r.get("time") or "", "Sport": r.get("sport"), "Pick": r.get("pick"),
+                              "Price": None if need is None else f"{float(need):+.0f} or better", "Stake": "$1",
+                              "Edge": f"{r.get('use')} {chance}".strip(), "Game": r.get("game") or ""})
+            out.append(f"• {r.get('sport')} · {r.get('pick')}{need_txt} — {r.get('time') or ''} {r.get('game') or ''}"
+                       f" · {r.get('use')} {chance}{track}".rstrip())
+    if good or gl:
+        out += ["", "Singles only — the coach's rule after Nov 8. Tick them on My Coach (props) or the sport's page to "
+                    "log them."]
     return "\n".join(out)
+
+
+def lines_yesterday(rows: Sequence[Dict]) -> List[str]:
+    """Nov 12: yesterday's game-line, international hoops and tennis reads, graded, per sport."""
+    by: Dict[str, List[int]] = {}
+    for r in rows:
+        if r.get("result") in ("win", "loss"):
+            w = by.setdefault(r.get("sport") or "?", [0, 0])
+            w[0 if r["result"] == "win" else 1] += 1
+    return [f"**{sp}** playable reads: {w}-{l}" for sp, (w, l) in sorted(by.items())]
 
 
 # --------------------------------------------------------------------------- delivery
@@ -253,7 +283,14 @@ def run(kind: str, day: str, force: bool = False) -> int:
             print(f"No morning review for {day} yet — the brief waits for it.")
             return 0
         since = ET.localize(datetime.strptime(day, "%Y-%m-%d") - timedelta(days=1)).replace(hour=20)
-        text = morning(day, reports, bets, job_health(since.astimezone(timezone.utc)))
+        yday = (datetime.strptime(day, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+        try:
+            import todays_best as TB
+            past = TB.game_rows(yday, past=True)
+        except Exception as exc:                                    # noqa: BLE001
+            print(f"game-line results unavailable: {type(exc).__name__}: {exc}")
+            past = []
+        text = morning(day, reports, bets, job_health(since.astimezone(timezone.utc)), past)
     elif kind == "picks":
         if datetime.now(ET).hour < 15 and not force:
             print("Picks go out after 3 PM New York, once the books have posted.")
@@ -262,10 +299,15 @@ def run(kind: str, day: str, force: bool = False) -> int:
         import pick_records as PR
         import todays_best as TB
         rows = [r for r in TB.collect(day, PROPS_SPORTS)["rows"] if r.get("kind") == "Prop"]
-        if not rows:
+        try:
+            lines = TB.game_rows(day)                               # game lines, international hoops, tennis
+        except Exception as exc:                                    # noqa: BLE001
+            print(f"game-line reads unavailable: {type(exc).__name__}: {exc}")
+            lines = []
+        if not rows and not lines:
             print(f"No saved picks for {day} yet (the hourly warm-up saves them once the books post).")
             return 0
-        text = picks(day, rows, bets, PR.tag_records, CO.limits(), table=table)
+        text = picks(day, rows, bets, PR.tag_records, CO.limits(), table=table, lines=lines)
     else:
         print(f"unknown brief kind: {kind}")
         return 2
