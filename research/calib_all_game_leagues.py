@@ -1,5 +1,7 @@
 """How honest each Game Lab / International Hoops league's win chance is (Nov 12), the check that exposed tennis:
 favorite's win rate vs what the model said, by band, plus the best shrink factor k and its held-out result."""
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import intl_hoops as I
 import model_store as MS
 import tennis_calibration as TC
