@@ -281,3 +281,20 @@ def test_offers_from_an_event_without_metadata_still_parse():
         {"name": "Over", "description": "A Guy", "point": 1.5, "price": 120}]}]}]}
     (o,) = O.parse_event_offers(ev, supported_markets=["player_points"])
     assert o["over"] == {"fanduel": 120} and "event_id" not in o
+
+
+def test_college_fetch_swaps_bovada_for_underdog_and_stays_at_ten_books():
+    assert "underdog" not in O.FETCH_BOOKMAKERS and len(O.FETCH_BOOKMAKERS) <= 10
+    col = O.fetch_books_for("basketball_ncaab")
+    assert "underdog" in col and "bovada" not in col and len(col) <= 10
+    assert O.fetch_books_for("basketball_nba") == O.FETCH_BOOKMAKERS
+    assert O.is_pickem_book("underdog") and O.book_label("underdog") == "Underdog"
+
+
+def test_pickem_only_player_still_gets_a_line():
+    import props_engine as PE
+    offers = [{"market": "player_points", "player": "A Guard", "point": 14.5, "over": {}, "under": {},
+               "pickem": {"underdog": {"over": {"price": None}}, "prizepicks": {"over": {"price": None}}}}]
+    got = PE.shop(offers, None, "draftkings")
+    assert got["line"] == 14.5 and got["pickem"] and got["book"] in ("prizepicks", "underdog")
+    assert got["best_over"] is None and got["p_market"] is None

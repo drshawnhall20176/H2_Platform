@@ -100,6 +100,32 @@ def fit_weight(rows: Sequence[Dict]) -> Optional[Dict]:
     return {"n": len(usable), "best": best, "scores": scores}
 
 
+def holdout(rows: Sequence[Dict], now: float) -> Dict:
+    """Nov 11: does the fitted weight beat the current one on days it never saw? Walk forward over the later half
+    of the slates: fit on the days before each one, score both weights on that day. Same rule as the automatic
+    calibration (calibration.auto_side): it must win on 2 of every 3 held-out days and overall."""
+    usable = [r for r in rows if r["q_mkt"] is not None and r["q_mod"] is not None and r.get("date")]
+    dates = sorted({r["date"] for r in usable})
+    cur = min(W_GRID, key=lambda w: abs(w - now))
+    splits = passed = 0
+    gain = 0.0
+    for i in range(max(1, len(dates) // 2), len(dates)):
+        train = [r for r in usable if r["date"] < dates[i]]
+        test = [r for r in usable if r["date"] == dates[i]]
+        f = fit_weight(train)
+        if not f or not test:
+            continue
+
+        def score(w):
+            return sum(_ll(w * r["q_mod"] + (1 - w) * r["q_mkt"], r["y"]) for r in test) / len(test)
+        splits += 1
+        g = score(cur) - score(f["best"])
+        gain += g * len(test)
+        passed += g >= 0
+    return {"splits": splits, "passed": passed, "gain": gain,
+            "ok": splits >= 2 and passed >= (2 / 3) * splits and gain > 0}
+
+
 def clv(bets: Sequence[Dict], sport: str) -> Optional[Dict]:
     import betlog as B
     vals = []
@@ -209,8 +235,15 @@ def build(sport: str, graded: Sequence[Dict], bets: Sequence[Dict], days: int = 
         md.append(f"| {mk} | {f['n']} | {now:.2f} | {f['best']:.2f} | {f['scores'][cur]:.4f} → "
                   f"{f['scores'][f['best']]:.4f} | {why} |")
         if ok:
+            h = holdout(g, now)
             proposals.append({"sport": sport, "market": mk, "w": f["best"], "now": now, "n": f["n"],
-                              "gain": round(gain, 4), "profit": profit(g)})
+                              "gain": round(gain, 4), "profit": profit(g), "holdout": h, "auto_ok": h["ok"],
+                              "applied": False,
+                              "why": (f"held up on {h['passed']} of {h['splits']} held-out days" if h["ok"] else
+                                      f"only {h['splits']} held-out day(s) so far" if h["splits"] < 2 else
+                                      f"better on {h['passed']} of {h['splits']} held-out days but worse overall"
+                                      if h["passed"] >= (2 / 3) * h["splits"] else
+                                      f"better on only {h['passed']} of {h['splits']} held-out days")})
     md.append("")
 
     losers = [(mk, sd, g) for (mk, sd), g in by.items() if len(g) >= 100 and (profit(g) or 0) <= -0.10]
@@ -223,8 +256,8 @@ def build(sport: str, graded: Sequence[Dict], bets: Sequence[Dict], days: int = 
     if proposals:
         md += [f"- {p['market']}: model weight {p['now']:.2f} → **{p['w']:.2f}** ({p['n']} reads, log loss "
                f"−{p['gain']:.4f})" for p in proposals]
-        md += ["", "Approve with the approve-tuning workflow: factors "
-               + "{" + ", ".join(f'"blend:{p["market"]}": {p["w"]:.2f}' for p in proposals) + "}"]
+        md += ["", "Each one applies itself when it also wins on days the fit never saw (held-out days); the rest "
+               "wait for next week. Nothing for you to approve."]
     else:
         md.append("None this week — no market has enough reads with a clear improvement.")
     lock_rec = None
@@ -253,6 +286,14 @@ def main(argv=None) -> int:
         dates = _dates(sport, a.days, today)
         graded = [r for recs in D.grade_dates(sport, dates).values() for r in recs] if dates else []
         rep = build(sport, graded, bets, a.days)
+        # Nov 11: the owner wants the model to tune itself -- a proposal that holds up out of sample applies itself
+        for p in rep.get("proposals") or []:
+            if p.get("auto_ok") and os.environ.get("TUNING_AUTO_APPLY", "1") == "1":
+                p["applied"] = bool(MS.approve_blend(p["sport"], p["market"], p["w"],
+                                                     {"week": today.isoformat(), "n": p["n"], "gain": p["gain"],
+                                                      "auto": True, "holdout": p["holdout"]}))
+            rep["markdown"] += (f"\n- 🤖 {p['market']}: {p['now']:.2f} → {p['w']:.2f} "
+                                f"{'applied automatically' if p['applied'] else 'not applied'} — {p['why']}.")
         print(rep["markdown"] + "\n")
         if os.environ.get("GITHUB_STEP_SUMMARY"):
             with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:

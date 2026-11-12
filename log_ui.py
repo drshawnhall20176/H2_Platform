@@ -91,13 +91,14 @@ def panel(items: Sequence[Dict], key: str, date_str: str, tag: str = "platform-t
         chk = CO.ticket_check(its, mode, stake, pstake, podds if mode != "Singles" else None, B.list_bets(), date_str,
                               tag_records_for=_tag_records)
         box = {"A": st.success, "B": st.success, "C": st.warning, "D": st.warning, "F": st.error}[chk["grade"]]
-        box(f"**Coach grade: {chk['grade']}** — {chk['headline']}")
+        import components as C
+        box(C.money_md(f"**Coach grade: {chk['grade']}** — {chk['headline']}"))
         icon = {"red": "🔴", "amber": "🟠", "ok": "✅"}
         for lv, msg in chk["flags"]:
-            st.markdown(f"{icon[lv]} {msg}")
+            st.markdown(C.money_md(f"{icon[lv]} {msg}"))
         t = chk["today"]
-        st.caption(f"Today so far: ${t['staked']:.0f} staked across {t['bets']} bet(s), {t['parlays']} parlay(s), "
-                   f"settled {CO.usd(t['pl'])}.")
+        st.caption(C.money_md(f"Today so far: ${t['staked']:.0f} staked across {t['bets']} bet(s), "
+                              f"{t['parlays']} parlay(s), settled {CO.usd(t['pl'])}."))
         if any(lv == "red" for lv, _ in chk["flags"]):
             blocked = not st.checkbox("I've read the red flags — I already placed it / log it anyway",
                                       key=f"{key}_override")

@@ -273,6 +273,7 @@ view = grading.filter_min_probability(view, min_prob_pct / 100.0)
 # play is even eligible -- this reorders WITHIN that already-graded set, it doesn't remove the
 # floor.
 view.sort(key=lambda p: p["ModelProb"], reverse=True)
+view = C.by_kickoff(view, lambda p: p.get("GameTime") or p.get("Time"))   # Nov 11: game time first, then chance
 
 if not view:
     st.info("No plays match the current filters — adjust the time slot, game, markets, min "

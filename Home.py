@@ -47,6 +47,32 @@ if active:
 
 st.divider()
 
+# ---------- Today's brief (Nov 11) ----------
+# The platform's own check-in (morning_brief.py): overnight jobs, what the model learned, yesterday's bets, and this
+# afternoon's Good bets. Also posted to the owner's private Discord channel when that webhook is set. Owner only.
+if _owner:
+    try:
+        import model_store as _MS
+        import pandas as _pd
+        _bday = _dt.now(_ET).strftime("%Y-%m-%d")
+        for _kind, _title in (("picks", "🎯 This afternoon's picks"), ("morning", "☀️ Morning brief")):
+            _b = _MS.get_setting(f"brief:{_bday}:{_kind}")
+            if isinstance(_b, dict) and _b.get("text"):
+                with st.expander(_title, expanded=_kind == "picks"):
+                    _lines = _b["text"].split("\n")[1:]          # the first line is the note's own title
+                    if _b.get("table"):
+                        # Nov 11: the picks as a table (a bullet list ran together into one paragraph here)
+                        _head = [l for l in _lines if l.strip() and not l.startswith("•")]
+                        st.markdown(C.money_md(_head[0]))
+                        st.dataframe(_pd.DataFrame(_b["table"]), hide_index=True, width="stretch")
+                        for _l in _head[1:]:
+                            st.caption(C.money_md(_l))
+                    else:
+                        # one line per line (markdown joins single line breaks into a paragraph)
+                        st.markdown(C.money_md("  \n".join(_lines)))
+    except Exception:                                           # noqa: BLE001 -- the brief is a bonus on Home
+        pass
+
 # ---------- Today's best (Nov 6) ----------
 # The day's top-tagged picks across every in-season sport and the labs, in one list. Props come from the last Best
 # Bets board built for each sport today (no extra Odds API spend); game lines, international hoops and tennis from
@@ -94,10 +120,9 @@ if _owner:
     _wscope = _wall if _scope == "All sports" else [r for r in _wall if r["sport"] == current]
 
     def _tkey(t):
-        try:
-            return _dt.strptime(t, "%I:%M %p").time()
-        except (TypeError, ValueError):
-            return _dt.max.time()
+        # Nov 11: the shared parser (clock times, "Sat 7:00 PM", ISO kickoffs); unknown times last
+        d = C._kick_dt(t)
+        return (0, d.hour * 60 + d.minute) if d else (1, 0)
 
     @st.cache_data(ttl=900, show_spinner=False)
     def _blowouts(day):

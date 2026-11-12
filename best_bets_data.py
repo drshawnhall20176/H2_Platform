@@ -169,7 +169,7 @@ def render_book_selector(key_prefix: str = "book",
     if O.DEFAULT_BOOK not in books_to_show:
         books_to_show = [O.DEFAULT_BOOK] + books_to_show
 
-    book_labels = [O.ALL_BOOKS.get(k, k) for k in books_to_show]
+    book_labels = [O.book_label(k) for k in books_to_show]
     default_idx = books_to_show.index(O.DEFAULT_BOOK) if O.DEFAULT_BOOK in books_to_show else 0
 
     selected_label = st.selectbox(
@@ -838,6 +838,28 @@ def drop_placeholder_plays(plays: List[Dict]) -> List[Dict]:
     return plays
 
 
+BIG_SLATE_SPORTS = ("NCAAMB",)
+
+
+def _big_slate_props_games(sport, sport_key: str, date_str: str, api_key: Optional[str]):
+    """(rows, meta) for only the games the books posted player props for; nothing when none are posted (no key,
+    no lines yet) -- a board without book lines has nothing to bet anyway."""
+    if not api_key or not sport.markets:
+        return [], []
+    try:
+        offers = fetch_generic_offers(sport_key, date_str, api_key)
+    except Exception:                                           # noqa: BLE001
+        return [], []
+    posted = list({(o.get("home_team"), o.get("away_team")): {"home_team": o.get("home_team"),
+                                                              "away_team": o.get("away_team")}
+                   for o in offers if o.get("home_team")}.values())
+    if not posted:
+        return [], []
+    import position_lines as PL
+    return sport.engine.build_slate(
+        date_str, keep=lambda g: bool(PL.match_event(posted, g.get("home_name"), g.get("away_name"))))
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def load_generic_best_bets_board(sport_key: str, date_str: str,
                                  preferred_book: str = O.DEFAULT_BOOK) -> tuple:
@@ -890,12 +912,17 @@ def load_generic_best_bets_board(sport_key: str, date_str: str,
     if not sport.has_projections:
         return [], [], list(O.US_BOOKS.keys())
 
-    rows, meta = sport.engine.build_slate(date_str)
+    api_key = get_odds_api_key()
+    if sport_key in BIG_SLATE_SPORTS:
+        # Nov 11: college basketball lists 50-100+ games a night but the books post player props for a few. Building
+        # every roster ran Streamlit Cloud out of memory (My Coach), so only the games with posted props are built.
+        rows, meta = _big_slate_props_games(sport, sport_key, date_str, api_key)
+    else:
+        rows, meta = sport.engine.build_slate(date_str)
 
     real_lines = None
     real_offers: List[Dict] = []
     available_books: List[str] = list(O.US_BOOKS.keys())
-    api_key = get_odds_api_key()
     diag = {"attempted": bool(api_key and sport.markets), "api_key_present": bool(api_key),
            "offers": 0, "matched_lines": 0, "error": None}
     if api_key and sport.markets:
