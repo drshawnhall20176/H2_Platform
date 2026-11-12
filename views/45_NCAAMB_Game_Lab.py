@@ -14,3 +14,9 @@ C.page_header("🏟️", "Game Lab",
               "College basketball: the ratings model's margin, total and win chance against the spread, total and "
               "moneyline for every game the books price.")
 HG.render("NCAAMB", search=True)
+
+# Nov 12: player props for the same slate (the Best Bets board's saved, priced props -- books + Underdog / Pick6)
+import props_section as PS
+from datetime import datetime as _dt
+import pytz as _tz
+PS.render("NCAAMB", _dt.now(_tz.timezone("US/Eastern")).strftime("%Y-%m-%d"))
