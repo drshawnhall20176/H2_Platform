@@ -38,6 +38,9 @@ LIVE_CFG: Dict[str, Dict] = {
     "EUROCUP": {"periods": 4, "minutes": 10, "ot": 5, "sd": 14.4, "total_sd": 19.2},
     "FIBA": {"periods": 4, "minutes": 10, "ot": 5, "sd": 14.4, "total_sd": 20.4},
     "NHL": {"periods": 3, "minutes": 20, "ot": 5, "sd": 2.4, "total_sd": 2.3, "hockey": True},
+    # Nov 12: football -- full-game spreads of the final vs the closing line (NFL ~13.5 / 13 points, college ~16)
+    "NFL": {"periods": 4, "minutes": 15, "ot": 10, "sd": 13.5, "total_sd": 13.0, "football": True},
+    "NCAAF": {"periods": 4, "minutes": 15, "ot": 5, "sd": 16.5, "total_sd": 16.0, "football": True},
 }
 END_SD = 2.0            # points of noise left in any basketball game while it's still being played
 # Nov 12 backtest: tonight's observed pace added nothing -- the projected total was most accurate using the pre-game
@@ -78,8 +81,17 @@ def _phi(x: float) -> float:
     return 0.5 * math.erfc(-x / math.sqrt(2))
 
 
+def expected_points(yards_to_go: Optional[float]) -> float:
+    """Football: points the team with the ball can expect from this drive, by distance to the end zone (the usual
+    expected-points curve, straight-line fit: own 10 ~ -0.3, own 25 ~ 0.7, midfield ~ 2.3, opp 25 ~ 3.9, opp 10 ~ 4.9)."""
+    if yards_to_go is None:
+        return 0.0
+    return 5.5 - 0.064 * max(1.0, min(99.0, float(yards_to_go)))
+
+
 def project(league: str, pre_margin: float, pre_total: float, home: float, away: float, period: int,
-            clock_left: float, final: bool = False) -> Dict:
+            clock_left: float, final: bool = False, possession: Optional[str] = None,
+            yards_to_go: Optional[float] = None) -> Dict:
     """The live read for one game. Margins are home minus away. Returns win chance, projected final margin / total
     and their spreads, plus the inputs that went in."""
     c = cfg(league)
@@ -97,9 +109,15 @@ def project(league: str, pre_margin: float, pre_total: float, home: float, away:
     obs_rate = cur_total / e if e > 0 else pre_rate
     rate = (1 - w) * pre_rate + w * obs_rate
     mean_m = cur_margin + pre_margin * share
+    ep = 0.0
+    if c.get("football") and m > 0 and possession in ("home", "away"):
+        # the drive in progress: its expected points go to the team with the ball (net of the average drive, which
+        # the pre-game share already counts)
+        ep = expected_points(yards_to_go) - 0.5
+        mean_m += ep if possession == "home" else -ep
     floor = END_SD if m > 0 else 0.0
     sd_m = math.sqrt(c["sd"] ** 2 * share + floor ** 2)
-    mean_t = cur_total + rate * m
+    mean_t = cur_total + rate * m + (max(ep, 0.0) if c.get("football") else 0.0)
     sd_t = math.sqrt(c["total_sd"] ** 2 * share + floor ** 2)
     if sd_m < 1e-6:
         p = 1.0 if mean_m > 0 else 0.0 if mean_m < 0 else 0.5
