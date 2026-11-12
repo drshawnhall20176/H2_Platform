@@ -49,3 +49,18 @@ def test_lookback_without_a_result_is_pending():
     rows = LS.lookback([{"player": "A", "market": "Points", "projection": 20.0, "line": 18.5, "p_model": 0.6,
                          "game": "X @ Y", "actual": None}])
     assert rows and all(r["Hit"] is None for r in rows) and LS.night_summary(rows)["rungs"] == 0
+
+
+def test_finder_reads_nfl_alternate_rush_yards():
+    import long_shots as LS
+    import props_engine as PE
+    reads = {("p1", "player_rush_yds"): {"player": "Bijan Robinson", "market": "Rush Yards", "projection": 88.0,
+                                          "values": [70, 95, 110, 60, 88, 102, 79, 91], "line": 79.5, "game": "A @ B",
+                                          "dist": "normal", "sd_floor": (0.45, 8.0)}}
+    quotes = [{"market": "player_rush_yds_alternate", "name": "Over", "point": 99.5, "price": 260,
+               "description": "Bijan Robinson"},
+              {"market": "player_points_alternate", "name": "Over", "point": 9.5, "price": 200,
+               "description": "Bijan Robinson"}]
+    rows = LS.finder(reads, quotes, PE.norm_name, PE.prob_over, sport="NFL")
+    assert len(rows) == 1 and rows[0]["Bet"] == "100+ Rush Yards" and rows[0]["line"] == 99.5
+    assert LS.finder(reads, quotes, PE.norm_name, PE.prob_over) == []        # NBA map: no NFL markets
