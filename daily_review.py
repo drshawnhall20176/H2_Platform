@@ -354,7 +354,7 @@ def review_sport(sport: str, morning: str, open_bets: Sequence[Dict], fetch: Cal
 
 
 def run(morning: str, fetch: Callable = PG._http, db_path: Optional[str] = None, write: bool = True,
-        sports: Sequence[str] = tuple(PG.ESPN) + ("UFC",), bet_db: Optional[str] = None) -> Dict[str, Dict]:
+        sports: Sequence[str] = tuple(PG.ESPN) + ("UFC", "TENNIS"), bet_db: Optional[str] = None) -> Dict[str, Dict]:
     """db_path: the model store (snapshots, tuning, reports); bet_db: the Bet Log. Both default to production."""
     kw = {"db_path": bet_db} if bet_db else {}
     try:
@@ -363,7 +363,7 @@ def run(morning: str, fetch: Callable = PG._http, db_path: Optional[str] = None,
         print(f"Couldn't read the Bet Log ({type(exc).__name__}: {exc}); reviewing without settling.")
         open_bets = []
     out = {}
-    for sport in sports:
+    for sport in [x for x in sports if x != "TENNIS"]:
         try:
             rep = review_sport(sport, morning, open_bets, fetch=fetch, db_path=db_path, write=write, bet_db=bet_db)
         except Exception as exc:                                    # noqa: BLE001 — one sport never stops the rest
@@ -383,10 +383,29 @@ def run(morning: str, fetch: Callable = PG._http, db_path: Optional[str] = None,
             print("   ", n)
     if write:
         settle_game_lines(bet_db)
+    # Nov 12: tennis -- refit how far the Tennis Lab's chances are pulled toward 50% (tennis_calibration.py) and apply
+    # it when it holds up on held-out days; saved as a TENNIS report so the morning brief lists it with the rest
+    try:
+        if "TENNIS" not in sports:
+            raise LookupError("tennis not in this run")
+        import tennis_calibration as TC
+        d = TC.auto(write=write)
+        rep = {"calibration": {"auto": [d]}, "notes": [f"{morning}: tennis calibration -- "
+                                                        f"{'changed' if d['applied'] else 'kept'} "
+                                                        f"{d['active']:.2f}" + (f" → {d['new']:.2f}" if d["applied"] else "")
+                                                        + f" ({d['why']})"]}
+        out["TENNIS"] = rep
+        if write:
+            MS.save_daily_review("TENNIS", morning, rep, db_path=db_path)
+        print("[TENNIS]", rep["notes"][0])
+    except LookupError:
+        pass
+    except Exception as exc:                                        # noqa: BLE001
+        print(f"[TENNIS] calibration failed: {type(exc).__name__}: {exc}")
     return out
 
 
-GAME_LINE_LEAGUES = ("NCAAF", "NCAAMB", "NBA", "NHL", "WNBA")
+GAME_LINE_LEAGUES = ("NCAAF", "NCAAMB", "NBA", "NHL", "WNBA", "TENNIS")
 
 
 def settle_game_lines(bet_db: Optional[str] = None) -> int:
