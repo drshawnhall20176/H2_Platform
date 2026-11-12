@@ -140,10 +140,12 @@ def game_rows(date_str: str, leagues=None, past: bool = False) -> List[Dict]:
         recs = MS.load_game_picks("TENNIS", ungraded=not past)
     except Exception:                                           # noqa: BLE001
         recs = []
+    import tennis_calibration as TC
+    k = TC.current_k()
     for p in recs:
         if _et_date(p.get("kickoff")) != date_str:
             continue
-        t = IP.tennis_use(p)
+        t = IP.tennis_use(p, k)
         if t.get("use") not in PLAYABLE:
             continue
         tres = None

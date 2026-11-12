@@ -471,13 +471,23 @@ def test_tennis_use_main_tour_is_pass_and_lower_tier_names_the_player():
     import props_engine as PE
     espn = {"home": "Solana Sierra", "away": "Leyre Romero Gormaz", "model_p": 0.7262, "n_home": 80, "n_away": 45,
             "source": "espn"}
-    t = IP.tennis_use(espn)
+    t = IP.tennis_use(espn, k=0.7)                              # once the correction is live, 70%+ reads normally
     assert t["player"] == "Solana Sierra" and t["lock"] and "🔒" in IP.tag_label(t) and "or better" in IP.tag_label(t)
     away = dict(espn, model_p=0.3, n_away=10)
-    t = IP.tennis_use(away)
+    t = IP.tennis_use(away, k=0.7)
     assert t["player"] == "Leyre Romero Gormaz" and not t["lock"] and t["use"] == PE.USE_SINGLE
     main = dict(espn, source=None, best_home=-150)
-    assert IP.tennis_use(main)["use"] == PE.USE_PASS
+    assert IP.tennis_use(main, k=1.0)["use"] == PE.USE_PASS
+
+
+def test_tennis_70_plus_favorite_is_not_proven_until_the_correction_is_live():
+    import props_engine as PE
+    p = {"home": "A", "away": "B", "model_p": 0.74, "n_home": 80, "n_away": 80, "source": "espn"}
+    t = IP.tennis_use(p, k=1.0)
+    assert t["use"] == PE.USE_PASS and not t["lock"] and t.get("unproven") and "not proven" in t["why"]
+    assert t["player"] == "A" and abs(t["chance"] - 0.74) < 1e-9          # the read still shows
+    assert IP.tennis_use(dict(p, model_p=0.66), k=1.0)["use"] != PE.USE_PASS   # under 70% untouched
+    assert IP.tennis_use(p, k=0.7)["use"] != PE.USE_PASS                   # correction live: guard lifts
 
 
 def test_hoops_use_fills_every_league():

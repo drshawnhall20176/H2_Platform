@@ -30,6 +30,8 @@ picks = MS.load_game_picks("TENNIS")
 now = datetime.now(timezone.utc).isoformat()
 upcoming = [p for p in picks if str(p.get("kickoff")) > now and p.get("result") is None]
 done = [p for p in picks if p.get("result")]
+import tennis_calibration as TC
+_K = TC.current_k()                                     # read once per page load
 
 
 def _pct(x):
@@ -101,7 +103,7 @@ if not sched:
     st.info("Nothing scheduled captured yet — the capture runs every 3 hours.")
 else:
     show = st.radio("Show", ["All", PE.MOST_PROBABLE, "Playable (🎟️ / 🎯)", PE.USE_PASS], horizontal=True, key="tl_use_filter")
-    tagged = [(p, IP.tennis_use(p)) for p in sorted(sched, key=lambda x: x["kickoff"])]
+    tagged = [(p, IP.tennis_use(p, _K)) for p in sorted(sched, key=lambda x: x["kickoff"])]
     tagged = [(p, t) for p, t in tagged if show == "All" or (show == PE.MOST_PROBABLE and t.get("lock"))
               or (show.startswith("Playable") and t.get("use") in (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE))
               or (show == PE.USE_PASS and t.get("use") == PE.USE_PASS)]
@@ -159,8 +161,8 @@ else:
         "Start (ET)": _start(p),
         "Event": T.event_label(p),
         "Match": f"{p['home']} vs {p['away']}",
-        "Model's pick": (lambda t: f"{t['player']} {t['chance']:.0%}" if t.get("player") else "—")(IP.tennis_use(p)),
-        "Use": IP.tag_label(IP.tennis_use(p)),
+        "Model's pick": (lambda t: f"{t['player']} {t['chance']:.0%}" if t.get("player") else "—")(IP.tennis_use(p, _K)),
+        "Use": IP.tag_label(IP.tennis_use(p, _K)),
         "Model": _pct(p.get("model_p")), "Market": _pct(p.get("line")),
         "Edge": "—" if p.get("edge") is None else f"{p['edge']:+.0%}",
         "Best price": f"{_odds(p.get('best_home'))} / {_odds(p.get('best_away'))}",
