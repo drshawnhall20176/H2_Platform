@@ -23,7 +23,7 @@ from typing import Dict, List, Optional, Sequence
 import pytz
 
 ET = pytz.timezone("US/Eastern")
-SPORTS = ("NBA", "NHL", "NFL", "NCAAF", "NCAAMB", "UFC", "TENNIS")
+SPORTS = ("NBA", "NHL", "NFL", "NCAAF", "NCAAMB", "UFC", "TENNIS", "GAME_LINES")   # GAME_LINES: hoops/NHL win chances
 PROPS_SPORTS = ("NBA", "NFL", "NHL", "NCAAF")
 KEY = "brief:{date}:{kind}"
 # overnight jobs worth checking: workflow file -> plain name
@@ -82,8 +82,9 @@ def learned(reports: Dict[str, Dict]) -> List[str]:
     for sp, rep in reports.items():
         for d in (rep.get("calibration") or {}).get("auto") or []:
             if d.get("applied"):
-                side = "overall" if d.get("side") == "overall" else f"{d['side']}s"
-                changed.append(f"{sp} {side}: {d['active']:.2f} → {d['new']:.2f} ({d.get('why', '')})")
+                side = d.get("label") or ("overall" if d.get("side") == "overall" else f"{d['side']}s")
+                who = "" if sp == "GAME_LINES" else f"{sp} "
+                changed.append(f"{who}{side}: {d['active']:.2f} → {d['new']:.2f} ({d.get('why', '')})")
             else:
                 held += 1
         for t in rep.get("auto_tuning") or []:
