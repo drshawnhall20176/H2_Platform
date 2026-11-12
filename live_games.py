@@ -199,3 +199,108 @@ def clock_text(g: Dict) -> str:
         return name
     m, sec = divmod(int(round(cl * 60)), 60)
     return f"{name} {m}:{sec:02d}"
+
+
+# --------------------------------------------------------------------------- tennis (Nov 12)
+def tennis_matches(day: date, fetch: Callable = None) -> List[Dict]:
+    """Singles matches on ESPN's ATP and WTA scoreboards: players, games in each set, state."""
+    import tennis_model as T
+    fetch = fetch or T._http
+    out = []
+    for tour in T.TOURS:
+        data = fetch(T.ESPN.format(tour=tour), {"dates": day.strftime("%Y%m%d")}) or {}
+        for ev in data.get("events") or []:
+            tname = ev.get("name") or ev.get("shortName") or ""
+            for g in ev.get("groupings") or []:
+                if "singles" not in ((g.get("grouping") or {}).get("displayName") or "").lower():
+                    continue
+                for c in g.get("competitions") or []:
+                    cps = sorted(c.get("competitors") or [], key=lambda x: x.get("order") or 0)
+                    if len(cps) != 2:
+                        continue
+                    names = [((cp.get("athlete") or {}).get("displayName") or "") for cp in cps]
+                    if not all(names):
+                        continue
+                    st = (c.get("status") or {}).get("type") or {}
+                    sets = [[int(I._num(ls.get("value")) or 0) for ls in cp.get("linescores") or []] for cp in cps]
+                    n = min(len(sets[0]), len(sets[1]))
+                    out.append({"league": "TENNIS", "id": f"{tour}-{c.get('id')}", "tour": tour, "tournament": tname,
+                                "round": (c.get("round") or {}).get("displayName"), "best_of": T.best_of(tname, tour),
+                                "p1": names[0], "p2": names[1], "sets1": sets[0][:n], "sets2": sets[1][:n],
+                                "state": st.get("state") or "pre", "detail": st.get("shortDetail") or "",
+                                "kickoff": str(c.get("date") or ""),
+                                "winner": 1 if cps[0].get("winner") else 2 if cps[1].get("winner") else None})
+    return out
+
+
+def tennis_pregame(m: Dict, picks: Sequence[Dict]) -> Optional[float]:
+    """The saved pre-match chance for player 1 (the Tennis Lab's pick for this match), oriented to ESPN's order."""
+    for p in picks:
+        if p.get("model_p") is None:
+            continue
+        if I.same_team(p.get("home"), m["p1"]) and I.same_team(p.get("away"), m["p2"]):
+            return float(p["model_p"])
+        if I.same_team(p.get("home"), m["p2"]) and I.same_team(p.get("away"), m["p1"]):
+            return 1 - float(p["model_p"])
+    return None
+
+
+def tennis_live_odds(api_key: str, fetch: Callable = I._http) -> List[Dict]:
+    """In-play and upcoming tennis prices from every active ATP / WTA tournament key (2 credits a key)."""
+    if not api_key:
+        return []
+    import intl_picks as IP
+    out = []
+    for key in IP.tennis_keys(api_key, fetch):
+        out += fetch(ODDS.format(key=key), {"apiKey": api_key, "regions": "us", "markets": "h2h,totals",
+                                            "oddsFormat": "american"}) or []
+    return out
+
+
+def read_tennis(m: Dict, p1: Optional[float], market: Optional[Dict] = None) -> Optional[Dict]:
+    """Live read for one match + its live lines (moneyline both ways, total games) checked against it."""
+    if p1 is None or m["state"] == "pre":
+        return None
+    rd = LM.tennis(p1, m["tour"], m["best_of"], m["sets1"], m["sets2"], final=m["state"] == "post")
+    out = {"read": rd, "bets": []}
+    if not market or m["state"] != "in":
+        return out
+    bets = []
+    for who, ch, price in ((m["p1"], rd["win_a"], market.get("p1_price")), (m["p2"], 1 - rd["win_a"], market.get("p2_price"))):
+        if price is not None:
+            bets.append({"bet": f"{who} to win", "market": "Moneyline", "chance": ch, "price": price,
+                         "edge": LM.edge(ch, price)})
+    tl = market.get("total")
+    if tl is not None:
+        sd = max(1.5, 0.45 * max(rd["total_games"] - rd["games_played"], 0.0) ** 0.5 * 2)
+        po = 1 - LM._phi((tl - rd["total_games"]) / sd) if rd["total_games"] > rd["games_played"] else \
+            (1.0 if rd["games_played"] > tl else 0.0)
+        for side, ch, price in (("Over", po, market.get("over_price")), ("Under", 1 - po, market.get("under_price"))):
+            bets.append({"bet": f"{side} {tl:g} games", "market": "Total games", "chance": ch, "price": price or -110,
+                         "edge": LM.edge(ch, price or -110)})
+    for b in bets:
+        e = b["edge"]
+        b["signal"] = "🟢 Worth a look" if e is not None and e >= MIN_EDGE else \
+            "🟡 Close" if e is not None and e >= 0 else "🔴 Pass"
+    out["bets"] = sorted(bets, key=lambda b: -(b["edge"] if b["edge"] is not None else -9))
+    return out
+
+
+def tennis_market(m: Dict, events: Sequence[Dict]) -> Optional[Dict]:
+    """This match's live prices, oriented to ESPN's player order."""
+    import intl_picks as IP
+    for ev in events or []:
+        h, a = ev.get("home_team"), ev.get("away_team")
+        if I.same_team(h, m["p1"]) and I.same_team(a, m["p2"]):
+            mk = IP.market(ev, h, a)
+            return {"p1_price": mk.get("best_home"), "p2_price": mk.get("best_away"), "total": mk.get("total"),
+                    "over_price": mk.get("over_price"), "under_price": mk.get("under_price")}
+        if I.same_team(h, m["p2"]) and I.same_team(a, m["p1"]):
+            mk = IP.market(ev, h, a)
+            return {"p1_price": mk.get("best_away"), "p2_price": mk.get("best_home"), "total": mk.get("total"),
+                    "over_price": mk.get("over_price"), "under_price": mk.get("under_price")}
+    return None
+
+
+def set_text(m: Dict) -> str:
+    return "  ".join(f"{a}-{b}" for a, b in zip(m["sets1"], m["sets2"])) or "—"
