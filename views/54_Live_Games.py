@@ -229,7 +229,7 @@ def tennis_board():
             st.dataframe(pd.DataFrame([{"Started": _when(m), "Match": f"{m['p1']} vs {m['p2']}",
                                         "Score": LG.set_text(m),
                                         "Winner": f"— ({m['void']})" if m.get("void") else
-                                        (m["p1"] if m.get("winner") == 1 else m["p2"]),
+                                        (m["p1"] if m.get("winner") == 1 else m["p2"]) + (" (opp. retired)" if m.get("retired") else ""),
                                         "Model's pick": r["pick"], "Chance": r["chance"], "Result": r["result"]}
                                        for m, r in zip(done, res)]),
                          hide_index=True, width="stretch",

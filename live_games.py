@@ -285,11 +285,18 @@ def tennis_matches(day: date, fetch: Callable = None) -> List[Dict]:
                                 "server": 1 if cps[0].get("possession") else 2 if cps[1].get("possession") else None,
                                 # Nov 12: ESPN still marks a "winner" when a match ends by retirement / walkover, but
                                 # the books void those -- so is the platform's own grading (intl_picks)
-                                "void": _void_reason(st),
+                                "void": _stands(_void_reason(st), sets[0][:n], sets[1][:n]),
+                                "retired": _void_reason(st) == "retired",
                                 "flags": [((cp.get("athlete") or {}).get("flag") or {}).get("href") for cp in cps],
                                 "tiebreaks": [[ls.get("tiebreak") for ls in cp.get("linescores") or []]
                                               for cp in cps]})
     return out
+
+
+def _stands(void: Optional[str], s1, s2) -> Optional[str]:
+    """Nov 12: a retirement after a full set stands (the books pay the player who advances); earlier, it's void."""
+    import tennis_model as T
+    return None if void == "retired" and T.full_sets(s1, s2) >= 1 else void
 
 
 def _void_reason(status_type: Dict) -> Optional[str]:
@@ -394,6 +401,9 @@ def grade_pick(fav_is_first: Optional[bool], first_won: Optional[bool]) -> str:
 
 def tennis_result(m: Dict, p1: Optional[float]) -> Dict:
     """The model's pre-match pick for a finished match and whether it won (retirements / walkovers: void)."""
+    import tennis_model as T
+    if m.get("void") == "retired" and m.get("winner") and T.full_sets(m.get("sets1"), m.get("sets2")) >= 1:
+        m = dict(m, void=None)                                   # Nov 12: a full set played -- the books stand it
     if m.get("void"):
         pick = "—" if p1 is None else (m["p1"] if p1 >= 0.5 else m["p2"])
         return {"pick": pick, "chance": None if p1 is None else max(p1, 1 - p1),
