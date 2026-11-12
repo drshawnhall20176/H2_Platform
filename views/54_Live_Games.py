@@ -11,6 +11,7 @@ import streamlit as st
 
 import components as C
 import live_games as LG
+import live_model as LM
 import sports
 
 C.base_css()
@@ -197,7 +198,7 @@ def tennis_board():
         r = LG.read_tennis(m, p1, LG.tennis_market(m, evs) if evs else None)
         with st.container(border=True):
             top = st.columns([3, 2])
-            top[0].markdown(_tennis_card(m, r["read"] if r else None), unsafe_allow_html=True)
+            top[0].markdown(_tennis_card(m, r["read"] if r else None, p1), unsafe_allow_html=True)
             top[0].caption(f"{m['tournament']} · {m.get('round') or ''} · best of {m['best_of']}")
             if not r:
                 top[1].caption("No pre-match chance saved for this match (the Tennis Lab only reads matches the books "
@@ -205,7 +206,9 @@ def tennis_board():
                 continue
             rd = r["read"]
             fav, p = (m["p1"], rd["win_a"]) if rd["win_a"] >= 0.5 else (m["p2"], 1 - rd["win_a"])
-            top[1].markdown(f"**{fav}** wins **{p:.0%}**")
+            start = p1 if fav == m["p1"] else 1 - p1
+            top[1].markdown(f"**{fav}** wins **{p:.0%}** " + _arrow_md(p, start, "the start of the match"),
+                            unsafe_allow_html=True)
             st.caption(f"Pre-match: {m['p1']} {p1:.0%} · projected total {rd['total_games']:.1f} games "
                        f"({rd['games_played']} played) · fair live price {m['p1']} "
                        f"{_fair(rd['win_a'])} / {m['p2']} {_fair(1 - rd['win_a'])}")
@@ -225,7 +228,8 @@ def tennis_board():
         with st.expander(f"Final ({len(done)})" + (f" · model {rec}" if rec else ""), expanded=bool(rec) and not live):
             st.dataframe(pd.DataFrame([{"Started": _when(m), "Match": f"{m['p1']} vs {m['p2']}",
                                         "Score": LG.set_text(m),
-                                        "Winner": m["p1"] if m.get("winner") == 1 else m["p2"],
+                                        "Winner": f"— ({m['void']})" if m.get("void") else
+                                        (m["p1"] if m.get("winner") == 1 else m["p2"]),
                                         "Model's pick": r["pick"], "Chance": r["chance"], "Result": r["result"]}
                                        for m, r in zip(done, res)]),
                          hide_index=True, width="stretch",
@@ -234,7 +238,7 @@ def tennis_board():
                        "(matches the books don't price).")
 
 
-def _tennis_card(m, rd=None):
+def _tennis_card(m, rd=None, p_start=None):
     """Nov 12: a scorecard like the books' -- flag, name, 🎾 on the server, games per set (the set in progress
     highlighted), tiebreak points as a small superscript, and each player's live win chance."""
     import html as _h
@@ -253,11 +257,15 @@ def _tennis_card(m, rd=None):
         img = f"<img src='{_h.escape(flag)}' style='width:20px;height:14px;object-fit:cover;border-radius:2px;" \
               f"margin-right:8px;vertical-align:-2px'>" if flag else ""
         serve = " <span title='serving'>🎾</span>" if m.get("server") == k + 1 and m["state"] == "in" else ""
-        won = " ✔" if m.get("winner") == k + 1 else ""
+        won = " ✔" if m.get("winner") == k + 1 and not m.get("void") else ""
         chance = ""
         if rd is not None and m["state"] == "in":
             pk = rd["win_a"] if k == 0 else 1 - rd["win_a"]
-            chance = f"<td style='text-align:right;padding-left:12px;opacity:.75;font-size:12px'>{pk:.0%}</td>"
+            t = LG.trend(pk, None if p_start is None else (p_start if k == 0 else 1 - p_start))
+            arrow = f" <span style='color:{t['color']};font-weight:800' title='since the start of the match: " \
+                    f"{t['delta'] * 100:+.0f} pts'>{t['arrow']}</span>" if t["arrow"] else ""
+            chance = f"<td style='text-align:right;padding-left:12px;font-size:12px;white-space:nowrap'>" \
+                     f"<span style='opacity:.8'>{pk:.0%}</span>{arrow}</td>"
         tb = (tbs[k] if k < len(tbs) else []) + [None] * n
         cells = "".join(cell(v, i, tb[i]) for i, v in enumerate(sets)) or "<td></td>"
         rows.append(f"<tr><td style='padding:3px 10px 3px 0;font-weight:700;white-space:nowrap'>{img}"
@@ -270,6 +278,15 @@ def _tennis_card(m, rd=None):
                                                           m["state"] == "in" else "") + "</tr>"
     return (f"<table style='border-collapse:collapse;font-size:15px;margin-bottom:4px'>{head}{''.join(rows)}</table>"
             f"<div style='font-size:12px;opacity:.75'>{status}</div>")
+
+
+def _arrow_md(now, start, since):
+    """Nov 12: a green up / red down arrow for how the win chance has moved since the start."""
+    t = LG.trend(now, start)
+    if not t["arrow"]:
+        return ""
+    return (f"<span style='color:{t['color']};font-weight:800'>{t['arrow']} {t['delta'] * 100:+.0f}</span>"
+            f"<span style='opacity:.6;font-size:12px'> pts since {since}</span>")
 
 
 def _when(x):
@@ -330,7 +347,10 @@ def board():
                 continue
             rd = r["read"]
             fav, p = (g["home"], rd["win_home"]) if rd["win_home"] >= 0.5 else (g["away"], 1 - rd["win_home"])
-            top[1].markdown(f"**{fav}** wins **{p:.0%}**")
+            start_home = LM.project(g["league"], float(pre["model_margin"]), float(pre["model_total"]), 0, 0, 1,
+                                    LM.cfg(g["league"])["minutes"])["win_home"]
+            top[1].markdown(f"**{fav}** wins **{p:.0%}** " + _arrow_md(
+                p, start_home if fav == g["home"] else 1 - start_home, "tip-off / kickoff"), unsafe_allow_html=True)
             fh = (rd["total"] + rd["margin"]) / 2
             fa = (rd["total"] - rd["margin"]) / 2
             st.caption(f"Projected final: {g['away']} {fa:.0f} – {g['home']} {fh:.0f} · fair live spread "
