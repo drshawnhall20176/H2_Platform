@@ -416,8 +416,9 @@ def tennis_grade(hist: Sequence[Dict], db_path: Optional[str] = None) -> int:
             else:
                 continue
             res = "void" if m.get("status") == "walkover" else ("home" if hw else "away")
-            if MS.grade_game_pick("TENNIS", p["game_id"], hg, ag, res if m.get("status") != "retired" else "retired",
-                                  db_path=db_path):
+            if m.get("status") == "retired":                    # Nov 12: the books' rule -- a full set played stands
+                res = res + "_ret" if int(m.get("full_sets") or 0) >= 1 else "retired"
+            if MS.grade_game_pick("TENNIS", p["game_id"], hg, ag, res, db_path=db_path):
                 n += 1
             break
     return n
@@ -624,6 +625,8 @@ def bet_result(bet: Dict, p: Dict) -> Optional[str]:
     if fh is None or fa is None or res in (None, "void", "retired"):
         return None
     mk, side = bet.get("market"), bet.get("side")
+    if str(res).endswith("_ret"):                               # retired after a full set: moneyline stands, rest void
+        return ("win" if (res == "home_ret") == (side == p["home"]) else "loss") if mk == "Moneyline" else None
     if mk == "Total":
         d = (fh + fa) - float(bet["line"])
         return "push" if d == 0 else ("win" if (d > 0) == (str(side).lower() == "over") else "loss")
@@ -707,12 +710,12 @@ def grade_markets(p: Dict) -> Dict:
         return out
     margin, total = fh - fa, fh + fa
     if p.get("sport") == "TENNIS":
-        if p.get("pick") and res in ("home", "away"):
-            out["ml"] = _outcome(p["pick"] == res, p["best_home"] if p["pick"] == "home" else p["best_away"])
-        if p.get("spread_pick") and p.get("home_spread") is not None and res != "retired":
+        if p.get("pick") and res in ("home", "away", "home_ret", "away_ret"):
+            out["ml"] = _outcome(p["pick"] == res.replace("_ret", ""), p["best_home"] if p["pick"] == "home" else p["best_away"])
+        if p.get("spread_pick") and p.get("home_spread") is not None and res in ("home", "away"):
             d = margin + p["home_spread"]
             out["spread"] = _outcome(None if d == 0 else (d > 0) == (p["spread_pick"] == "home"), p.get("spread_price"))
-        if p.get("total_pick") and p.get("line_total") is not None and res != "retired":
+        if p.get("total_pick") and p.get("line_total") is not None and res in ("home", "away"):
             d = total - p["line_total"]
             out["total"] = _outcome(None if d == 0 else (d > 0) == (p["total_pick"] == "over"),
                                     p.get("over_price") if p["total_pick"] == "over" else p.get("under_price"))

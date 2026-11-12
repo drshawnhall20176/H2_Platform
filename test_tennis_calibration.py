@@ -56,3 +56,24 @@ def test_hoops_build_applies_the_league_calibration():
     cal = IP.hoops_build("EUROLEAGUE", r, evs, NOW, k=0.5)[0]
     assert raw["model_p"] == raw["model_p_raw"]
     assert abs((cal["model_p"] - 0.5) - 0.5 * (raw["model_p_raw"] - 0.5)) < 0.002 and cal["model_p_raw"] == raw["model_p_raw"]
+
+
+def test_retirement_after_a_full_set_stands_like_draftkings():
+    import tennis_model as T
+    import intl_picks as IP
+    import live_games as LG
+    assert T.full_sets([6, 4], [4, 2]) == 1 and T.full_sets([3], [2]) == 0 and T.full_sets([7, 6], [6, 7]) == 2
+    p = {"sport": "TENNIS", "home": "Bianca Andreescu", "away": "Marina Bassols Ribera", "final_home": 10,
+         "final_away": 6, "result": "home_ret", "pick": "home", "best_home": -535, "best_away": 400,
+         "spread_pick": "home", "home_spread": -4.5, "spread_price": -110}
+    assert IP.bet_result({"market": "Moneyline", "side": "Bianca Andreescu"}, p) == "win"
+    assert IP.bet_result({"market": "Moneyline", "side": "Marina Bassols Ribera"}, p) == "loss"
+    assert IP.bet_result({"market": "Spread", "side": "Bianca Andreescu", "line": -4.5}, p) is None   # void
+    g = IP.grade_markets(p)
+    assert g["ml"]["r"] == "win"
+    assert "spread" not in g
+    m = {"p1": "Bianca Andreescu", "p2": "Marina Bassols Ribera", "winner": 1, "void": "retired",
+         "sets1": [6, 4], "sets2": [4, 2]}
+    assert "Void" not in LG.tennis_result(m, 0.84)["result"]
+    assert "Void" in LG.tennis_result(dict(m, sets1=[3], sets2=[2]), 0.84)["result"]
+    assert LG._stands("retired", [6, 4], [4, 2]) is None and LG._stands("retired", [2], [1]) == "retired"
