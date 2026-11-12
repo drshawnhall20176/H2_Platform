@@ -43,7 +43,7 @@ LIVE_CFG: Dict[str, Dict] = {
     "NCAAF": {"periods": 4, "minutes": 15, "ot": 5, "sd": 16.5, "total_sd": 16.0, "football": True},
 }
 END_SD = 2.0            # points of noise left in any basketball game while it's still being played
-FOOTBALL_TOTAL_FLOOR = 5.0
+FOOTBALL_TOTAL_FLOOR = 4.0
 # Nov 12 backtest: tonight's observed pace added nothing -- the projected total was most accurate using the pre-game
 # scoring rate for the rest of the game (MAE 8.75 NBA / 8.54 college vs 9.16 / 8.86 at the weight first tried, and
 # worse still leaning harder on the live pace). So the observed pace gets almost no weight.
