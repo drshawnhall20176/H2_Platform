@@ -21,7 +21,7 @@ Everything here is pure math -- the feeds and the page live in live_games.py and
 from __future__ import annotations
 
 import math
-from typing import Dict, Optional
+from typing import Dict, Optional, Sequence
 
 # periods, minutes per period, overtime minutes, full-game margin sd, full-game total sd.
 # Nov 12 backtest (research/live_backtest.py, ~1,800 NBA + college checkpoints from play-by-play): the pre-game
@@ -186,3 +186,117 @@ def edge(chance: Optional[float], price: Optional[float]) -> Optional[float]:
     price = float(price)
     dec = 1 + (price / 100 if price > 0 else 100 / -price)
     return chance * dec - 1
+
+
+# --------------------------------------------------------------------------- tennis (Nov 12)
+# ESPN's live tennis feed gives the games in each set (no point score, no server), so the read works from sets and
+# games: each player's chance of winning a point on serve is backed out of the pre-match chance (tour-average serve
+# around it, nudged apart until the match chance matches), then the standard point -> game -> set -> match model runs
+# from the current score, averaging over who serves next.
+SERVE_AVG = {"atp": 0.64, "wta": 0.56}
+from functools import lru_cache as _lru
+
+
+def hold(s: float) -> float:
+    """Chance the server holds, winning each point with chance s."""
+    q = 1 - s
+    deuce = s * s / (s * s + q * q)
+    return s ** 4 * (1 + 4 * q + 10 * q * q) + 20 * s ** 3 * q ** 3 * deuce
+
+
+@_lru(maxsize=None)
+def _tiebreak(sa: float, sb: float, a: int, b: int, n: int) -> float:
+    """Chance A wins a tiebreak from a-b with point n next (A serves point 0, then they alternate in pairs)."""
+    if a >= 7 and a - b >= 2:
+        return 1.0
+    if b >= 7 and b - a >= 2:
+        return 0.0
+    if a >= 6 and b >= 6 and a == b:                            # deuce-like: two serves each from here on average
+        pa = sa * (1 - sb)
+        pb = (1 - sa) * sb
+        return pa / (pa + pb) if pa + pb > 0 else 0.5
+    a_serves = (n % 4) in (0, 3)
+    p = sa if a_serves else 1 - sb
+    return p * _tiebreak(sa, sb, a + 1, b, n + 1) + (1 - p) * _tiebreak(sa, sb, a, b + 1, n + 1)
+
+
+@_lru(maxsize=None)
+def _set(sa: float, sb: float, ga: int, gb: int, a_serves: bool) -> tuple:
+    """(chance A wins the set, expected games still to play) from ga-gb with A serving the next game if a_serves."""
+    if (ga >= 6 and ga - gb >= 2) or ga == 7:
+        return 1.0, 0.0
+    if (gb >= 6 and gb - ga >= 2) or gb == 7:
+        return 0.0, 0.0
+    if ga == 6 and gb == 6:
+        return _tiebreak(sa, sb, 0, 0, 0 if a_serves else 1), 1.0
+    p = hold(sa) if a_serves else 1 - hold(sb)
+    w1, e1 = _set(sa, sb, ga + 1, gb, not a_serves)
+    w2, e2 = _set(sa, sb, ga, gb + 1, not a_serves)
+    return p * w1 + (1 - p) * w2, 1 + p * e1 + (1 - p) * e2
+
+
+def _set_avg(sa: float, sb: float, ga: int, gb: int) -> tuple:
+    x, y = _set(sa, sb, ga, gb, True), _set(sa, sb, ga, gb, False)
+    return (x[0] + y[0]) / 2, (x[1] + y[1]) / 2
+
+
+@_lru(maxsize=None)
+def _match(sa: float, sb: float, a_sets: int, b_sets: int, need: int) -> tuple:
+    """(chance A wins, expected games still to play) from a set score, at the start of a set."""
+    if a_sets >= need:
+        return 1.0, 0.0
+    if b_sets >= need:
+        return 0.0, 0.0
+    ps, es = _set_avg(sa, sb, 0, 0)
+    w1, e1 = _match(sa, sb, a_sets + 1, b_sets, need)
+    w2, e2 = _match(sa, sb, a_sets, b_sets + 1, need)
+    return ps * w1 + (1 - ps) * w2, es + ps * e1 + (1 - ps) * e2
+
+
+def serve_points(p_match: float, tour: str, best_of: int = 3) -> tuple:
+    """Serve-point chances (A, B) that reproduce the pre-match chance for A."""
+    base = SERVE_AVG.get(tour, 0.62)
+    need = best_of // 2 + 1
+    lo, hi = -0.35, 0.35
+    for _ in range(50):
+        d = (lo + hi) / 2
+        sa, sb = round(base + d / 2, 6), round(base - d / 2, 6)
+        if _match(sa, sb, 0, 0, need)[0] < p_match:
+            lo = d
+        else:
+            hi = d
+    d = (lo + hi) / 2
+    return round(base + d / 2, 6), round(base - d / 2, 6)
+
+
+def tennis(p_pre: float, tour: str, best_of: int, sets_a: Sequence[int], sets_b: Sequence[int],
+           final: bool = False) -> Dict:
+    """Live read from the games in each set (the last set listed is the one in progress, unless it's finished).
+    Returns the chance A wins, games played and the projected total games."""
+    p_pre = min(max(float(p_pre), 0.02), 0.98)
+    sa, sb = serve_points(p_pre, tour, best_of)
+    need = best_of // 2 + 1
+    a_sets = b_sets = 0
+    played = 0
+    cur = None
+    for i, (x, y) in enumerate(zip(sets_a, sets_b)):
+        x, y = int(x or 0), int(y or 0)
+        played += x + y
+        done = (max(x, y) >= 6 and abs(x - y) >= 2) or max(x, y) == 7
+        if done:
+            a_sets += x > y
+            b_sets += y > x
+        elif i == len(sets_a) - 1:
+            cur = (x, y)
+    if final or a_sets >= need or b_sets >= need:
+        return {"win_a": 1.0 if a_sets > b_sets else 0.0, "games_played": played, "total_games": float(played),
+                "serve": (sa, sb), "sets": (a_sets, b_sets)}
+    if cur is None:
+        w, e = _match(sa, sb, a_sets, b_sets, need)
+    else:
+        ps, es = _set_avg(sa, sb, *cur)
+        w1, e1 = _match(sa, sb, a_sets + 1, b_sets, need)
+        w2, e2 = _match(sa, sb, a_sets, b_sets + 1, need)
+        w, e = ps * w1 + (1 - ps) * w2, es + ps * e1 + (1 - ps) * e2
+    return {"win_a": w, "games_played": played, "total_games": played + e, "serve": (sa, sb),
+            "sets": (a_sets, b_sets), "current_set": cur}
