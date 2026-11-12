@@ -30,3 +30,27 @@ def test_past_date_shows_rungs_and_results(monkeypatch):
     assert "rungs hit" in txt
     df = at.dataframe[0].value
     assert "8+ Assists" in set(df["Bet"]) and "✅" in set(df["Hit"])
+
+
+def test_nfl_past_date_uses_nfl_markets_and_warning(monkeypatch):
+    import best_bets_data as BBD
+    import model_store as MS
+    import nfl_engine
+    import postgame as PG
+    snap = {"sport": "NFL", "slate_date": "2026-11-09", "game": "Atlanta Falcons @ New Orleans Saints",
+            "team": "ATL", "opp": "NO", "player": "Bijan Robinson", "market": "Rush Yards", "projection": 88.0,
+            "line": 79.5, "p_model": 0.60, "ts": "1"}
+    monkeypatch.setattr(MS, "load_snapshots", lambda sport, dates: [dict(snap)])
+    monkeypatch.setattr(MS, "load_odds", lambda *a, **k: None)
+    monkeypatch.setattr(PG, "fetch_results", lambda *a, **k: {})
+    monkeypatch.setattr(PG, "grade", lambda snaps, res: [dict(s, actual=112) for s in snaps])
+    monkeypatch.setattr(nfl_engine, "build_slate", lambda d, *a, **k: ([], []))
+    monkeypatch.setattr(BBD, "get_odds_api_key", lambda: None)
+    at = AppTest.from_file(str(HERE / "views" / "53_Long_Shots.py"), default_timeout=60)
+    at.session_state["sport"] = "NFL"
+    at.session_state["longshots_date"] = datetime.date(2026, 11, 9)
+    at.run()
+    assert not at.exception, at.exception
+    assert "Rush Yards" in at.warning[0].value
+    df = at.dataframe[0].value
+    assert any("Rush Yards" in b for b in df["Bet"])

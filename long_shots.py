@@ -54,15 +54,17 @@ def implied(odds: float) -> float:
     return 100 / (odds + 100) if odds > 0 else -odds / (-odds + 100)
 
 
-def finder(reads: Dict, quotes: List[Dict], norm, prob_over) -> List[Dict]:
+def finder(reads: Dict, quotes: List[Dict], norm, prob_over, sport: str = "NBA") -> List[Dict]:
     """reads: the props model's slate reads {(pid, odds market key): row}; quotes: book_menu quotes for alternate
-    markets. Returns one row per Over rung with a price, best value first."""
+    markets. Returns one row per Over rung with a price, best value first. sport: NBA or NFL (Nov 12) -- picks the
+    alternate-market map and the tail-honesty table."""
+    alt = (SPORTS.get(sport) or {}).get("alt") or ALT_TO_MAIN
     by = {}
     for (_pid, mk), r in (reads or {}).items():
         by[(norm(r.get("player") or ""), mk)] = r
     out = []
     for q in quotes or []:
-        main = ALT_TO_MAIN.get(q.get("market"))
+        main = alt.get(q.get("market"))
         if not main or str(q.get("name")).lower() != "over" or q.get("point") is None:
             continue
         r = by.get((norm(q.get("description") or ""), main))
@@ -71,7 +73,7 @@ def finder(reads: Dict, quotes: List[Dict], norm, prob_over) -> List[Dict]:
         n = float(q["point"]) + 0.5                              # "Over 7.5" = 8+
         floor = r.get("sd_floor") or (0.25, 1.0)
         raw = prob_over(r["projection"], r.get("values") or [], n - 0.5, r.get("dist") or "normal", *floor)
-        real = honest(raw, r.get("market") or "")
+        real = honest(raw, r.get("market") or "", sport)
         price = float(q["price"])
         if real is None or real < MIN_REAL or price > MAX_SHOWN_ODDS:
             continue
