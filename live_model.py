@@ -1,0 +1,178 @@
+"""
+live_model.py — in-game projections (Nov 12). Owner: "I don't have an ability to understand the projection of live
+events ... if I wanted to make a pick live based on how the game has been progressing, that option is not available."
+
+Given the pre-game projection (the Game Lab ratings: home margin M0 and total T0) and the live state (score, period,
+clock), it projects the final:
+
+Basketball (NBA, WNBA, college, EuroLeague / EuroCup, NBL, FIBA leagues)
+  * margin: final = current margin + M0 x (share of the game left); the uncertainty shrinks with the time left
+    (a whole game's spread, `sd`, scaled by the square root of the share left -- the standard in-game model).
+  * total: current points + minutes left x the scoring rate, where the rate starts at the pre-game rate and moves
+    toward tonight's observed pace as the game goes on (weight = minutes played / (minutes played + PACE_K x game)).
+  * win chance, and the chance of covering / going over any live line, follow from those two normals.
+Hockey (NHL)
+  * goals left for each team ~ Poisson(pre-game expected goals x share of the game left); win chance counts ties as
+    overtime (a coin flip with a small home edge), totals and puck lines from the same counts.
+
+Settings come from LIVE_CFG; the pace weight and spreads are checked on past games in research/live_backtest.py.
+Everything here is pure math -- the feeds and the page live in live_games.py and views/54_Live_Games.py.
+"""
+from __future__ import annotations
+
+import math
+from typing import Dict, Optional
+
+# periods, minutes per period, overtime minutes, full-game margin sd, full-game total sd
+LIVE_CFG: Dict[str, Dict] = {
+    "NBA": {"periods": 4, "minutes": 12, "ot": 5, "sd": 12.5, "total_sd": 18.0},
+    "WNBA": {"periods": 4, "minutes": 10, "ot": 5, "sd": 12.0, "total_sd": 17.0},
+    "NCAAMB": {"periods": 2, "minutes": 20, "ot": 5, "sd": 11.0, "total_sd": 17.0},
+    "NBL": {"periods": 4, "minutes": 10, "ot": 5, "sd": 12.0, "total_sd": 18.0},
+    "EUROLEAGUE": {"periods": 4, "minutes": 10, "ot": 5, "sd": 12.0, "total_sd": 16.0},
+    "EUROCUP": {"periods": 4, "minutes": 10, "ot": 5, "sd": 12.0, "total_sd": 16.0},
+    "FIBA": {"periods": 4, "minutes": 10, "ot": 5, "sd": 12.0, "total_sd": 17.0},
+    "NHL": {"periods": 3, "minutes": 20, "ot": 5, "sd": 2.4, "total_sd": 2.3, "hockey": True},
+}
+PACE_K = 1.0            # observed pace counts minutes_played / (minutes_played + PACE_K x game minutes)
+NHL_OT_HOME = 0.52      # a tied NHL game: home wins OT / shootout a bit more than half the time
+
+
+def cfg(league: str) -> Dict:
+    return LIVE_CFG.get(league) or LIVE_CFG["FIBA"]
+
+
+def game_minutes(league: str) -> float:
+    c = cfg(league)
+    return float(c["periods"] * c["minutes"])
+
+
+def elapsed(league: str, period: int, clock_left: float) -> float:
+    """Minutes played. `clock_left` is minutes left in the current period; periods past regulation are overtime."""
+    c = cfg(league)
+    period = max(int(period or 1), 1)
+    if period <= c["periods"]:
+        return (period - 1) * c["minutes"] + (c["minutes"] - max(0.0, min(clock_left, c["minutes"])))
+    return game_minutes(league) + (period - c["periods"] - 1) * c["ot"] + (c["ot"] - max(0.0, min(clock_left, c["ot"])))
+
+
+def minutes_left(league: str, period: int, clock_left: float) -> float:
+    """Minutes still to play in regulation, or in the current overtime."""
+    c = cfg(league)
+    period = max(int(period or 1), 1)
+    if period <= c["periods"]:
+        return (c["periods"] - period) * c["minutes"] + max(0.0, min(clock_left, c["minutes"]))
+    return max(0.0, min(clock_left, c["ot"]))
+
+
+def _phi(x: float) -> float:
+    return 0.5 * math.erfc(-x / math.sqrt(2))
+
+
+def project(league: str, pre_margin: float, pre_total: float, home: float, away: float, period: int,
+            clock_left: float, final: bool = False) -> Dict:
+    """The live read for one game. Margins are home minus away. Returns win chance, projected final margin / total
+    and their spreads, plus the inputs that went in."""
+    c = cfg(league)
+    L = game_minutes(league)
+    m = 0.0 if final else minutes_left(league, period, clock_left)
+    e = elapsed(league, period, clock_left)
+    share = m / L
+    cur_margin, cur_total = home - away, home + away
+    out = {"league": league, "minutes_left": m, "minutes_played": e, "share_left": share,
+           "home": home, "away": away, "pre_margin": pre_margin, "pre_total": pre_total}
+    if c.get("hockey"):
+        return {**out, **_hockey(pre_margin, pre_total, home, away, share)}
+    pre_rate = pre_total / L
+    w = e / (e + PACE_K * L) if e > 0 else 0.0
+    obs_rate = cur_total / e if e > 0 else pre_rate
+    rate = (1 - w) * pre_rate + w * obs_rate
+    mean_m = cur_margin + pre_margin * share
+    sd_m = c["sd"] * math.sqrt(share)
+    mean_t = cur_total + rate * m
+    sd_t = c["total_sd"] * math.sqrt(share)
+    if sd_m < 1e-6:
+        p = 1.0 if mean_m > 0 else 0.0 if mean_m < 0 else 0.5
+    else:
+        p = _phi(mean_m / sd_m)
+    return {**out, "win_home": p, "margin": mean_m, "margin_sd": sd_m, "total": mean_t, "total_sd": sd_t,
+            "pace": rate * L, "pace_weight": w}
+
+
+def _pois(k: int, lam: float) -> float:
+    if lam <= 0:
+        return 1.0 if k == 0 else 0.0
+    return math.exp(-lam + k * math.log(lam) - math.lgamma(k + 1))
+
+
+def _hockey(pre_margin: float, pre_total: float, home: float, away: float, share: float) -> Dict:
+    lh = max(0.05, (pre_total + pre_margin) / 2) * share
+    la = max(0.05, (pre_total - pre_margin) / 2) * share
+    ph = [_pois(k, lh) for k in range(15)]
+    pa = [_pois(k, la) for k in range(15)]
+    win = tie = 0.0
+    dist_margin: Dict[int, float] = {}
+    dist_total: Dict[int, float] = {}
+    for i, x in enumerate(ph):
+        for j, y in enumerate(pa):
+            pr = x * y
+            d = int(home + i - away - j)
+            dist_margin[d] = dist_margin.get(d, 0.0) + pr
+            t = int(home + away + i + j)
+            dist_total[t] = dist_total.get(t, 0.0) + pr
+            if d > 0:
+                win += pr
+            elif d == 0:
+                tie += pr
+    return {"win_home": win + tie * NHL_OT_HOME, "tie_regulation": tie, "margin": home - away + lh - la,
+            "margin_sd": math.sqrt(lh + la), "total": home + away + lh + la, "total_sd": math.sqrt(lh + la),
+            "_dist_margin": dist_margin, "_dist_total": dist_total}
+
+
+def cover_chance(read: Dict, home_spread: float, side: str = "home") -> float:
+    """Chance the side covers a live spread (home_spread is the home team's line, e.g. -3.5). Pushes count half."""
+    if "_dist_margin" in read:                                  # hockey: count goals exactly
+        need = -home_spread
+        p = sum(v for d, v in read["_dist_margin"].items() if d > need) + \
+            0.5 * sum(v for d, v in read["_dist_margin"].items() if d == need)
+        return p if side == "home" else 1 - p
+    if read["margin_sd"] < 1e-6:
+        p = 1.0 if read["margin"] + home_spread > 0 else 0.0 if read["margin"] + home_spread < 0 else 0.5
+    else:
+        p = _phi((read["margin"] + home_spread) / read["margin_sd"])
+    return p if side == "home" else 1 - p
+
+
+def over_chance(read: Dict, line: float) -> float:
+    """Chance the final total goes over a live total line (a whole-number line pushes half the time)."""
+    if "_dist_total" in read:
+        return sum(v for t, v in read["_dist_total"].items() if t > line) + \
+            0.5 * sum(v for t, v in read["_dist_total"].items() if t == line)
+    if read["total_sd"] < 1e-6:
+        return 1.0 if read["total"] > line else 0.0 if read["total"] < line else 0.5
+    return 1 - _phi((line - read["total"]) / read["total_sd"])
+
+
+def fair_spread(read: Dict) -> float:
+    """The home spread the model calls a coin flip (rounded to the half point)."""
+    return round(-read["margin"] * 2) / 2
+
+
+def fair_total(read: Dict) -> float:
+    return round(read["total"] * 2) / 2
+
+
+def implied(price: Optional[float]) -> Optional[float]:
+    if price is None:
+        return None
+    price = float(price)
+    return 100 / (price + 100) if price > 0 else -price / (-price + 100)
+
+
+def edge(chance: Optional[float], price: Optional[float]) -> Optional[float]:
+    """Expected profit per $1 at the price (chance x payout - 1)."""
+    if chance is None or price is None:
+        return None
+    price = float(price)
+    dec = 1 + (price / 100 if price > 0 else 100 / -price)
+    return chance * dec - 1
