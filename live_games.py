@@ -19,13 +19,20 @@ import intl_hoops as I
 import live_model as LM
 
 ESPN_URL = {"NBA": I.ESPN_LEAGUE_URL["NBA"], "WNBA": I.ESPN_LEAGUE_URL["WNBA"], "NHL": I.ESPN_LEAGUE_URL["NHL"],
-            "NCAAMB": I.NCAAMB_URL, "NBL": I.NBL_URL}
+            "NCAAMB": I.NCAAMB_URL, "NBL": I.NBL_URL,
+            "NFL": "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard",
+            "NCAAF": "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard"}
+ESPN_PATH = {"NBA": "basketball/nba", "WNBA": "basketball/wnba", "NCAAMB": "basketball/mens-college-basketball",
+             "NBL": "basketball/nbl", "NHL": "hockey/nhl", "NFL": "football/nfl",
+             "NCAAF": "football/college-football"}
 EL_COMP = {"EUROLEAGUE": "E", "EUROCUP": "U"}
 EL_HEADER = "https://live.euroleague.net/api/Header"
 ODDS = "https://api.the-odds-api.com/v4/sports/{key}/odds"
-LEAGUES = ("NBA", "NCAAMB", "NHL", "WNBA", "EUROLEAGUE", "EUROCUP", "NBL")
+LEAGUES = ("NBA", "NCAAMB", "NHL", "WNBA", "EUROLEAGUE", "EUROCUP", "NBL", "NFL", "NCAAF")
 TITLE = {"NBA": "NBA", "NCAAMB": "College basketball (men)", "NHL": "NHL", "WNBA": "WNBA",
-         "EUROLEAGUE": "EuroLeague", "EUROCUP": "EuroCup", "NBL": "NBL (Australia)"}
+         "EUROLEAGUE": "EuroLeague", "EUROCUP": "EuroCup", "NBL": "NBL (Australia)", "NFL": "NFL",
+         "NCAAF": "College football"}
+ODDS_KEY = {"NFL": "americanfootball_nfl", "NCAAF": "americanfootball_ncaaf"}
 
 
 def _min(txt) -> Optional[float]:
@@ -45,18 +52,23 @@ def espn_games(league: str, day: date, fetch: Callable = I._http) -> List[Dict]:
     params = {"dates": day.strftime("%Y%m%d"), "limit": 500}
     if league == "NCAAMB":
         params["groups"] = 50
+    if league == "NCAAF":
+        params["groups"] = 80                                   # FBS
     data = fetch(ESPN_URL[league], params) or {}
     out = []
     for ev in data.get("events") or []:
         for c in ev.get("competitions") or []:
             st = c.get("status") or {}
             typ = st.get("type") or {}
-            side = {}
+            side, ids = {}, {}
             for t in c.get("competitors") or []:
-                side[t.get("homeAway")] = ((t.get("team") or {}).get("displayName"), I._num(t.get("score")))
+                tm = t.get("team") or {}
+                side[t.get("homeAway")] = (tm.get("displayName"), I._num(t.get("score")))
+                ids[t.get("homeAway")] = (str(t.get("id") or tm.get("id") or ""), str(tm.get("abbreviation") or ""))
             if "home" not in side or "away" not in side:
                 continue
             clock = st.get("clock")
+            poss, ytg = _possession(c.get("situation"), ids)
             out.append({"league": league, "id": str(c.get("id") or ev.get("id")), "home": side["home"][0],
                         "away": side["away"][0], "home_score": side["home"][1] or 0.0,
                         "away_score": side["away"][1] or 0.0, "state": typ.get("state") or "pre",
@@ -64,8 +76,46 @@ def espn_games(league: str, day: date, fetch: Callable = I._http) -> List[Dict]:
                         "clock_left": None if clock is None else float(clock) / 60,
                         "detail": typ.get("shortDetail") or typ.get("detail") or "",
                         "kickoff": str(c.get("date") or ev.get("date") or ""),
-                        "halftime": "half" in str(typ.get("name") or "").lower()})
+                        "halftime": "half" in str(typ.get("name") or "").lower(),
+                        "event_id": str(ev.get("id") or ""), "possession": poss, "yards_to_go": ytg,
+                        "down_text": str((c.get("situation") or {}).get("downDistanceText") or "")})
     return out
+
+
+def _possession(sit: Optional[Dict], ids: Dict) -> tuple:
+    """Football: ('home' / 'away' / None, yards to the end zone) from ESPN's live situation ("KC 35" = at KC's 35)."""
+    if not isinstance(sit, dict) or not sit.get("possession"):
+        return None, None
+    pid = str(sit.get("possession"))
+    who = next((k for k, v in ids.items() if v[0] == pid), None)
+    if who is None:
+        return None, None
+    txt = str(sit.get("possessionText") or "").strip()
+    parts = txt.split()
+    try:
+        yl = float(parts[-1])
+    except (IndexError, ValueError):
+        return who, None
+    own = ids[who][1]
+    if len(parts) >= 2 and parts[0] == own:
+        return who, 100 - yl                                    # on their own side
+    return who, yl
+
+
+def espn_pregame(league: str, event_id: str, fetch: Callable = I._http) -> Optional[Dict]:
+    """The books' pre-game line from ESPN's pick center (spread = the home team's spread, total = over/under) -- the
+    fallback pre-game projection when the Game Lab has none (and the one football uses: on past games the books'
+    line beat our football models)."""
+    path = ESPN_PATH.get(league)
+    if not path or not event_id:
+        return None
+    s = fetch(f"https://site.api.espn.com/apis/site/v2/sports/{path}/summary", {"event": event_id}) or {}
+    for pc in s.get("pickcenter") or []:
+        sp, ou = I._num(pc.get("spread")), I._num(pc.get("overUnder"))
+        if sp is not None and ou is not None:
+            return {"model_margin": -sp, "model_total": ou, "source": "books",
+                    "provider": (pc.get("provider") or {}).get("name")}
+    return None
 
 
 def euroleague_games(league: str, day: date, fetch: Callable = I._http, now: Optional[datetime] = None) -> List[Dict]:
@@ -126,7 +176,7 @@ def pregame_for(g: Dict, picks: Sequence[Dict]) -> Optional[Dict]:
 
 
 def live_odds(league: str, api_key: str, fetch: Callable = I._http) -> List[Dict]:
-    key = (I.LEAGUES.get(league) or {}).get("odds_key")
+    key = (I.LEAGUES.get(league) or {}).get("odds_key") or ODDS_KEY.get(league)
     if not key or not api_key:
         return []
     return fetch(ODDS.format(key=key), {"apiKey": api_key, "regions": "us", "markets": "h2h,spreads,totals",
@@ -149,7 +199,8 @@ def read_game(g: Dict, pre: Optional[Dict], market: Optional[Dict] = None) -> Op
         c = LM.cfg(g["league"])
         period, clock = (c["periods"] // 2) + 1, float(c["minutes"])
     rd = LM.project(g["league"], float(pre["model_margin"]), float(pre["model_total"]), g["home_score"],
-                    g["away_score"], period, clock, final=g["state"] == "post")
+                    g["away_score"], period, clock, final=g["state"] == "post", possession=g.get("possession"),
+                    yards_to_go=g.get("yards_to_go"))
     out = {"read": rd, "fair_spread": LM.fair_spread(rd), "fair_total": LM.fair_total(rd), "bets": []}
     if not market or g["state"] != "in":
         return out

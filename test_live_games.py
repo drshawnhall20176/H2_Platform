@@ -101,3 +101,52 @@ def test_tennis_feed_orientation_and_lines():
     assert mk["p1_price"] == -1200 and mk["p2_price"] == 700
     r = LG.read_tennis(m, 0.7, mk)
     assert r["read"]["win_a"] > 0.9 and {b["market"] for b in r["bets"]} == {"Moneyline"}
+
+
+def test_football_possession_and_books_pregame():
+    sit = {"possession": "12", "possessionText": "KC 35", "downDistanceText": "2nd & 7"}
+    ids = {"home": ("12", "KC"), "away": ("7", "DEN")}
+    assert LG._possession(sit, ids) == ("home", 65.0)
+    assert LG._possession({"possession": "7", "possessionText": "KC 20"}, ids) == ("away", 20.0)
+    summ = {"pickcenter": [{"provider": {"name": "Draft Kings"}, "spread": 3.5, "overUnder": 46.5}]}
+    pre = LG.espn_pregame("NFL", "1", fetch=lambda u, p=None: summ)
+    assert pre["model_margin"] == -3.5 and pre["model_total"] == 46.5 and pre["source"] == "books"
+    near = LM.project("NFL", -3.5, 46.5, 17, 20, 4, 1.5, possession="home", yards_to_go=8)
+    far = LM.project("NFL", -3.5, 46.5, 17, 20, 4, 1.5, possession="away", yards_to_go=80)
+    assert near["win_home"] > far["win_home"]
+
+
+def test_live_props_read_and_lines():
+    import live_props as LP
+    summ = {"boxscore": {"players": [{"team": {"displayName": "Boston Celtics"}, "statistics": [{
+        "labels": ["MIN", "PTS", "FG", "3PT", "FT", "REB", "AST", "TO", "STL", "BLK", "OREB", "DREB", "PF", "+/-"],
+        "athletes": [{"athlete": {"displayName": "Jaylen Brown"},
+                      "stats": ["24", "18", "7-14", "2-5", "2-2", "5", "3", "1", "1", "0", "1", "4", "2", "+6"]}]}]}]}}
+    bx = LP.box(summ)
+    assert LP.current(bx["jaylen brown"], "Threes Made", "NBA") == 2 and LP.current(bx["jaylen brown"], "PRA", "NBA") == 26
+    g = {"league": "NBA", "home_score": 80, "away_score": 70}
+    rd = LM.project("NBA", 3, 225, 80, 70, 3, 0)                 # end of the 3rd: a quarter left
+    snaps = [{"player": "Jaylen Brown", "market": "Points", "projection": 26.0, "line": 24.5, "proj_opp": 34},
+             {"player": "Somebody Else", "market": "Points", "projection": 10.0, "line": 9.5}]
+    rows = LP.read_props(g, rd, snaps, summ)
+    assert len(rows) == 1 and rows[0]["now"] == 18 and 18 < rows[0]["projected"] < 26
+    assert 0 < rows[0]["p_over_pre"] < 1
+    data = {"bookmakers": [{"key": "draftkings", "markets": [{"key": "player_points", "outcomes": [
+        {"name": "Over", "description": "Jaylen Brown", "point": 21.5, "price": -150},
+        {"name": "Under", "description": "Jaylen Brown", "point": 21.5, "price": 120}]}]}]}
+    lines = LP.live_prop_lines("NBA", "ev1", ["Points"], "key", fetch=lambda eid, ks: data)
+    assert lines and lines[0]["line"] == 21.5 and lines[0]["over"] == -150
+    checked = LP.check_lines(rows, lines, "NBA", rd["share_left"])
+    assert {c["bet"].split()[-2] for c in checked} == {"Over", "Under"}
+
+
+def test_football_box_stats():
+    import live_props as LP
+    summ = {"boxscore": {"players": [{"team": {"displayName": "Buffalo Bills"}, "statistics": [
+        {"name": "passing", "labels": ["C/ATT", "YDS", "AVG", "TD", "INT"],
+         "athletes": [{"athlete": {"displayName": "Josh Allen"}, "stats": ["21/31", "234", "7.5", "1", "1"]}]},
+        {"name": "rushing", "labels": ["CAR", "YDS", "AVG", "TD", "LONG"],
+         "athletes": [{"athlete": {"displayName": "Josh Allen"}, "stats": ["6", "40", "6.7", "1", "12"]}]}]}]}}
+    rec = LP.box(summ)["josh allen"]
+    assert LP.current(rec, "Pass Yards", "NFL") == 234 and LP.current(rec, "Pass Completions", "NFL") == 21
+    assert LP.current(rec, "Pass Attempts", "NFL") == 31 and LP.current(rec, "Rush + Rec Yards", "NFL") == 40
