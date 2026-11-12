@@ -25,6 +25,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Callable, Dict, Iterable, List, Optional, Sequence
 
 import intl_hoops as I
+import tennis_calibration as TC
 import tennis_model as T
 
 ODDS = "https://api.the-odds-api.com/v4/sports/{key}/odds"
@@ -278,7 +279,8 @@ def tennis_keys(api_key: str, fetch: Callable = _http) -> List[str]:
             if s.get("group") == "Tennis" and s.get("active") and ("_atp_" in s["key"] or "_wta_" in s["key"])]
 
 
-def tennis_build(elo: T.Elo, fit: Dict, key: str, events: Sequence[Dict], now: datetime) -> List[Dict]:
+def tennis_build(elo: T.Elo, fit: Dict, key: str, events: Sequence[Dict], now: datetime,
+                 k: Optional[float] = None) -> List[Dict]:
     tour = "atp" if "_atp_" in key else "wta"
     title = key.split("_", 2)[2].replace("_", " ").title()
     out = []
@@ -295,7 +297,8 @@ def tennis_build(elo: T.Elo, fit: Dict, key: str, events: Sequence[Dict], now: d
             continue
         surf = T.surface(title, ko.date().isoformat())
         bo = T.best_of(title, tour)
-        p = elo.prob(home, away, surf)
+        p_raw = elo.prob(home, away, surf)
+        p = TC.shrink(p_raw, k) if k is not None else p_raw     # Nov 12: the honest (calibrated) chance
         n1, n2 = elo.matches(home), elo.matches(away)
         edge = p - mk["fair_home"]
         rated = min(n1, n2) >= TENNIS_MIN_MATCHES
@@ -315,7 +318,8 @@ def tennis_build(elo: T.Elo, fit: Dict, key: str, events: Sequence[Dict], now: d
                 tot_pick = "over" if p_over > 0.5 else "under"
         out.append({"sport": "TENNIS", "game_id": str(ev.get("id")), "kickoff": ko.isoformat(), "tour": tour,
                     "tournament": title, "surface": surf, "best_of": bo, "home": home, "away": away,
-                    "model_p": round(p, 4), "n_home": n1, "n_away": n2, "line": round(mk["fair_home"], 4),
+                    "model_p": round(p, 4), "model_p_raw": round(p_raw, 4), "n_home": n1, "n_away": n2,
+                    "line": round(mk["fair_home"], 4),
                     "edge": round(edge, 4), "line_total": mk["total"], "home_spread": mk["home_spread"],
                     "best_home": mk["best_home"], "best_home_book": mk["best_home_book"], "best_away": mk["best_away"],
                     "best_away_book": mk["best_away_book"], "spread_price": mk["spread_price"],
@@ -328,7 +332,7 @@ def tennis_build(elo: T.Elo, fit: Dict, key: str, events: Sequence[Dict], now: d
 
 
 def tennis_schedule(elo: T.Elo, fetch: Callable = _http, now: Optional[datetime] = None,
-                    priced: Sequence[Dict] = ()) -> List[Dict]:
+                    priced: Sequence[Dict] = (), k: Optional[float] = None) -> List[Dict]:
     """Every scheduled ATP / WTA singles match ESPN lists for today and tomorrow -- including WTA 125 / lower-tier
     events the odds feed doesn't price -- with the model's chance. No line, no pick: the page shows the fair price and
     lets the owner type the sportsbook's. Matches the odds feed already priced are left to those records."""
@@ -343,8 +347,9 @@ def tennis_schedule(elo: T.Elo, fetch: Callable = _http, now: Optional[datetime]
                 if any(_same_player(m["p1"], q["home"]) and _same_player(m["p2"], q["away"]) or
                        _same_player(m["p2"], q["home"]) and _same_player(m["p1"], q["away"]) for q in priced):
                     continue
-                p = elo.prob(m["p1"], m["p2"], m["surface"])
-                out.append({"sport": "TENNIS", "game_id": f"espn-{m['id']}", "kickoff": m["start"], "tour": tour,
+                p_raw = elo.prob(m["p1"], m["p2"], m["surface"])
+                p = TC.shrink(p_raw, k) if k is not None else p_raw
+                out.append({"sport": "TENNIS", "game_id": f"espn-{m['id']}", "model_p_raw": round(p_raw, 4), "kickoff": m["start"], "tour": tour,
                             "tournament": m["tournament"], "city": m.get("city"), "round": m["round"], "surface": m["surface"],
                             "best_of": m["best_of"], "home": m["p1"], "away": m["p2"], "model_p": round(p, 4),
                             "n_home": elo.matches(m["p1"]), "n_away": elo.matches(m["p2"]), "line": None, "edge": None,
@@ -360,12 +365,13 @@ def tennis_capture(api_key: str, fetch: Callable = _http, now: Optional[datetime
     hist = MS.load_results("TENNIS", db_path=db_path)
     elo, rows = T.run(hist)
     fit = T.fit_games(rows)
+    kcal = TC.current_k()                                       # Nov 12: automatic tennis calibration
     recs = []
     for k in tennis_keys(api_key, fetch):
         evs = fetch(ODDS.format(key=k), {"apiKey": api_key, "regions": "us", "markets": "h2h,spreads,totals",
                                          "oddsFormat": "american"})
-        recs += tennis_build(elo, fit, k, evs or [], now)
-    sched = tennis_schedule(elo, fetch, now, recs)
+        recs += tennis_build(elo, fit, k, evs or [], now, k=kcal)
+    sched = tennis_schedule(elo, fetch, now, recs, k=kcal)
     saved = MS.save_game_picks(recs + sched, db_path=db_path)
     graded = tennis_grade(hist, db_path=db_path)
     try:

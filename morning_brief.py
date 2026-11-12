@@ -23,7 +23,7 @@ from typing import Dict, List, Optional, Sequence
 import pytz
 
 ET = pytz.timezone("US/Eastern")
-SPORTS = ("NBA", "NHL", "NFL", "NCAAF", "NCAAMB", "UFC")
+SPORTS = ("NBA", "NHL", "NFL", "NCAAF", "NCAAMB", "UFC", "TENNIS")
 PROPS_SPORTS = ("NBA", "NFL", "NHL", "NCAAF")
 KEY = "brief:{date}:{kind}"
 # overnight jobs worth checking: workflow file -> plain name
