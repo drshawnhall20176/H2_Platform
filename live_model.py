@@ -23,18 +23,27 @@ from __future__ import annotations
 import math
 from typing import Dict, Optional
 
-# periods, minutes per period, overtime minutes, full-game margin sd, full-game total sd
+# periods, minutes per period, overtime minutes, full-game margin sd, full-game total sd.
+# Nov 12 backtest (research/live_backtest.py, ~1,800 NBA + college checkpoints from play-by-play): the pre-game
+# spreads were too tight live -- the final landed inside one sd only 51-62% of the time (want 68%); x1.2 brought it
+# to 63-71% and improved the win-chance scores, so the basketball spreads below are the pre-game ones x1.2. The end of
+# a game adds its own noise (fouling, free throws), so every spread keeps a small floor (END_SD) however little time is
+# left.
 LIVE_CFG: Dict[str, Dict] = {
-    "NBA": {"periods": 4, "minutes": 12, "ot": 5, "sd": 12.5, "total_sd": 18.0},
-    "WNBA": {"periods": 4, "minutes": 10, "ot": 5, "sd": 12.0, "total_sd": 17.0},
-    "NCAAMB": {"periods": 2, "minutes": 20, "ot": 5, "sd": 11.0, "total_sd": 17.0},
-    "NBL": {"periods": 4, "minutes": 10, "ot": 5, "sd": 12.0, "total_sd": 18.0},
-    "EUROLEAGUE": {"periods": 4, "minutes": 10, "ot": 5, "sd": 12.0, "total_sd": 16.0},
-    "EUROCUP": {"periods": 4, "minutes": 10, "ot": 5, "sd": 12.0, "total_sd": 16.0},
-    "FIBA": {"periods": 4, "minutes": 10, "ot": 5, "sd": 12.0, "total_sd": 17.0},
+    "NBA": {"periods": 4, "minutes": 12, "ot": 5, "sd": 15.0, "total_sd": 21.6},
+    "WNBA": {"periods": 4, "minutes": 10, "ot": 5, "sd": 14.4, "total_sd": 20.4},
+    "NCAAMB": {"periods": 2, "minutes": 20, "ot": 5, "sd": 13.2, "total_sd": 20.4},
+    "NBL": {"periods": 4, "minutes": 10, "ot": 5, "sd": 14.4, "total_sd": 21.6},
+    "EUROLEAGUE": {"periods": 4, "minutes": 10, "ot": 5, "sd": 14.4, "total_sd": 19.2},
+    "EUROCUP": {"periods": 4, "minutes": 10, "ot": 5, "sd": 14.4, "total_sd": 19.2},
+    "FIBA": {"periods": 4, "minutes": 10, "ot": 5, "sd": 14.4, "total_sd": 20.4},
     "NHL": {"periods": 3, "minutes": 20, "ot": 5, "sd": 2.4, "total_sd": 2.3, "hockey": True},
 }
-PACE_K = 1.0            # observed pace counts minutes_played / (minutes_played + PACE_K x game minutes)
+END_SD = 2.0            # points of noise left in any basketball game while it's still being played
+# Nov 12 backtest: tonight's observed pace added nothing -- the projected total was most accurate using the pre-game
+# scoring rate for the rest of the game (MAE 8.75 NBA / 8.54 college vs 9.16 / 8.86 at the weight first tried, and
+# worse still leaning harder on the live pace). So the observed pace gets almost no weight.
+PACE_K = 1000.0         # observed pace counts minutes_played / (minutes_played + PACE_K x game minutes)
 NHL_OT_HOME = 0.52      # a tied NHL game: home wins OT / shootout a bit more than half the time
 
 
@@ -88,9 +97,10 @@ def project(league: str, pre_margin: float, pre_total: float, home: float, away:
     obs_rate = cur_total / e if e > 0 else pre_rate
     rate = (1 - w) * pre_rate + w * obs_rate
     mean_m = cur_margin + pre_margin * share
-    sd_m = c["sd"] * math.sqrt(share)
+    floor = END_SD if m > 0 else 0.0
+    sd_m = math.sqrt(c["sd"] ** 2 * share + floor ** 2)
     mean_t = cur_total + rate * m
-    sd_t = c["total_sd"] * math.sqrt(share)
+    sd_t = math.sqrt(c["total_sd"] ** 2 * share + floor ** 2)
     if sd_m < 1e-6:
         p = 1.0 if mean_m > 0 else 0.0 if mean_m < 0 else 0.5
     else:
