@@ -161,3 +161,15 @@ def test_final_results_show_how_the_model_did():
     gr = LG.game_result(g, {"model_margin": 4.0, "model_total": 225.0})
     assert gr["pick"] == "Boston Celtics" and gr["result"] == "✅ Win" and gr["chance"] > 0.5
     assert LG.record([r, gr, {"result": "—"}]) == "1–1"
+
+
+def test_live_box_tables():
+    import live_props as LP
+    summ = {"boxscore": {"players": [{"team": {"displayName": "Boston Celtics"}, "statistics": [{
+        "labels": ["MIN", "PTS", "FG", "3PT", "FT", "REB", "AST", "TO", "STL", "BLK", "OREB", "DREB", "PF", "+/-"],
+        "athletes": [{"athlete": {"displayName": "Jaylen Brown"},
+                      "stats": ["24", "18", "7-14", "2-5", "2-2", "5", "3", "1", "1", "0", "1", "4", "2", "+6"]},
+                     {"athlete": {"displayName": "Bench Guy"}, "didNotPlay": True, "stats": []}]}]}]}}
+    t = LP.box_tables(summ, "NBA")
+    assert len(t) == 1 and t[0]["team"] == "Boston Celtics" and t[0]["rows"][0]["PTS"] == "18"
+    assert [r["Player"] for r in t[0]["rows"]] == ["Jaylen Brown"]

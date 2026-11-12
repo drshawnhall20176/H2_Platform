@@ -254,3 +254,44 @@ def check_lines(rows: Sequence[Dict], lines: Sequence[Dict], league: str, share:
                         "now": r["now"], "projected": r["projected"], "chance": ch, "price": price, "edge": e,
                         "signal": "🟢 Worth a look" if e >= 0.05 else "🟡 Close" if e >= 0 else "🔴 Pass"})
     return sorted(out, key=lambda b: -b["edge"])
+
+
+# --------------------------------------------------------------------------- live box score tables (Nov 12)
+BOX_COLS = {"basketball": ["MIN", "PTS", "REB", "AST", "3PT", "STL", "BLK", "TO", "PF"],
+            "hockey": ["G", "A", "SOG", "BS", "HT", "TOI"], "goalies": ["SA", "SV", "GA", "SV%", "TOI"],
+            "passing": ["C/ATT", "YDS", "TD", "INT"], "rushing": ["CAR", "YDS", "TD", "LONG"],
+            "receiving": ["REC", "TGTS", "YDS", "TD", "LONG"], "defensive": ["TOT", "SOLO", "SACKS", "TFL"]}
+
+
+def box_tables(summary: Dict, league: str) -> List[Dict]:
+    """[{"team", "group", "rows": [{"Player", stat columns...}]}] -- the live box score, in the order ESPN lists it."""
+    c = LM.cfg(league)
+    out = []
+    for team in ((summary or {}).get("boxscore") or {}).get("players") or []:
+        tname = (team.get("team") or {}).get("displayName") or ""
+        for blk in team.get("statistics") or []:
+            name = blk.get("name")
+            if c.get("football"):
+                if name not in ("passing", "rushing", "receiving", "defensive"):
+                    continue
+                cols = BOX_COLS[name]
+            elif c.get("hockey"):
+                if name == "skaters":
+                    continue                                      # forwards + defense are listed separately too
+                cols = BOX_COLS["goalies" if name == "goalies" else "hockey"]
+            else:
+                cols = BOX_COLS["basketball"]
+            labels = blk.get("labels") or []
+            rows = []
+            for a in blk.get("athletes") or []:
+                nm = (a.get("athlete") or {}).get("displayName")
+                if not nm or a.get("didNotPlay"):
+                    continue
+                vals = dict(zip(labels, a.get("stats") or []))
+                if not any(vals.get(k) not in (None, "", "0", "0-0", "0/0", "--", "0:00") for k in cols):
+                    continue                                      # hasn't done anything yet
+                rows.append({"Player": nm, **{k: vals.get(k, "") for k in cols}})
+            if rows:
+                out.append({"team": tname, "group": (name or "").title() if c.get("football") or c.get("hockey") else "",
+                            "rows": rows})
+    return out
