@@ -91,6 +91,7 @@ def finder(reads: Dict, quotes: List[Dict], norm, prob_over, sport: str = "NBA")
                     "Bet": f"{n:g}+ {r.get('market')}", "Price": price, "Book says": imp, "Model raw": raw,
                     "Honest chance": real, "Edge": real - imp, "EV per $1": ev, "Projection": r["projection"],
                     "Main line": main_line, "Gap": gap, "Flags": "; ".join(flags), "_n": n,
+                    "sport": sport, "pick": f"{r.get('player')} {n:g}+ {r.get('market')}",   # Nov 12: the log needs both
                     "player": r.get("player"), "market": r.get("market"), "side": "Over", "line": n - 0.5,
                     "game": r.get("game"), "chance": real, "price": price, "pid": r.get("player_id")})
     out.sort(key=lambda x: -x["EV per $1"])

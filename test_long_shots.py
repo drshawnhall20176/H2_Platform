@@ -64,3 +64,18 @@ def test_finder_reads_nfl_alternate_rush_yards():
     rows = LS.finder(reads, quotes, PE.norm_name, PE.prob_over, sport="NFL")
     assert len(rows) == 1 and rows[0]["Bet"] == "100+ Rush Yards" and rows[0]["line"] == 99.5
     assert LS.finder(reads, quotes, PE.norm_name, PE.prob_over) == []        # NBA map: no NFL markets
+
+
+def test_long_shot_rows_log_to_the_bet_log():
+    import long_shots as LS
+    import props_engine as PE
+    import todays_best as TB
+    reads = {("p1", "player_rush_yds"): {"player": "Brian Robinson", "market": "Rush Yards", "projection": 70.0,
+                                          "values": [70, 95, 60, 88, 52, 79, 91], "line": 59.5, "game": "WAS @ NYG",
+                                          "dist": "normal", "sd_floor": (0.45, 8.0), "player_id": "9"}}
+    quotes = [{"market": "player_rush_yds_alternate", "name": "Over", "point": 99.5, "price": 900,
+               "description": "Brian Robinson"}]
+    r = LS.finder(reads, quotes, PE.norm_name, PE.prob_over, sport="NFL")[0]
+    assert r["sport"] == "NFL" and r["pick"] == "Brian Robinson 100+ Rush Yards"
+    rows = TB.bet_rows([r], 1.0, True, "long-shot", "2026-11-12")
+    assert rows and rows[0]["sport"] == "NFL" and rows[0]["line"] == 99.5 and rows[0]["side"] == "Over"
