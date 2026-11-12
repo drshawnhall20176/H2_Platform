@@ -87,12 +87,12 @@ def test_tennis_feed_orientation_and_lines():
           "competitions": [{"id": "9", "date": "2026-11-12T13:00Z",
                             "status": {"type": {"state": "in", "shortDetail": "2nd Set"}},
                             "competitors": [
-                                {"order": 1, "athlete": {"displayName": "Jannik Sinner"},
+                                {"order": 1, "athlete": {"displayName": "Jannik Sinner"}, "possession": True,
                                  "linescores": [{"value": 6}, {"value": 2}]},
                                 {"order": 2, "athlete": {"displayName": "Taylor Fritz"},
                                  "linescores": [{"value": 4}, {"value": 1}]}]}]}]}]}
     m = [x for x in LG.tennis_matches(date(2026, 11, 12), fetch=lambda u, p=None: sb if "atp" in u else {})][0]
-    assert m["sets1"] == [6, 2] and m["state"] == "in" and m["best_of"] == 3
+    assert m["sets1"] == [6, 2] and m["state"] == "in" and m["best_of"] == 3 and m["server"] == 1
     picks = [{"home": "Taylor Fritz", "away": "Jannik Sinner", "model_p": 0.3}]
     assert abs(LG.tennis_pregame(m, picks) - 0.7) < 1e-9
     ev = {"home_team": "Taylor Fritz", "away_team": "Jannik Sinner", "bookmakers": [{"key": "draftkings", "markets": [
@@ -173,3 +173,13 @@ def test_live_box_tables():
     t = LP.box_tables(summ, "NBA")
     assert len(t) == 1 and t[0]["team"] == "Boston Celtics" and t[0]["rows"][0]["PTS"] == "18"
     assert [r["Player"] for r in t[0]["rows"]] == ["Jaylen Brown"]
+
+
+def test_retired_match_is_void_and_trend_arrows():
+    m = {"p1": "Taylor Fritz", "p2": "Ben Shelton", "winner": 1, "void": "retired"}
+    r = LG.tennis_result(m, 0.6)
+    assert r["result"] == "⚪ Void (retired)" and LG.record([r]) == ""
+    assert LG._void_reason({"name": "STATUS_FINAL", "detail": "Retired"}) == "retired"
+    assert LG._void_reason({"name": "STATUS_FINAL", "detail": "Final"}) is None
+    up, down, flat = LG.trend(0.8, 0.6), LG.trend(0.4, 0.6), LG.trend(0.61, 0.6)
+    assert up["arrow"] == "▲" and down["arrow"] == "▼" and flat["arrow"] == "▬" and abs(up["delta"] - 0.2) < 1e-9

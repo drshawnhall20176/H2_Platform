@@ -280,8 +280,35 @@ def tennis_matches(day: date, fetch: Callable = None) -> List[Dict]:
                                 "p1": names[0], "p2": names[1], "sets1": sets[0][:n], "sets2": sets[1][:n],
                                 "state": st.get("state") or "pre", "detail": st.get("shortDetail") or "",
                                 "kickoff": str(c.get("date") or ""),
-                                "winner": 1 if cps[0].get("winner") else 2 if cps[1].get("winner") else None})
+                                "winner": 1 if cps[0].get("winner") else 2 if cps[1].get("winner") else None,
+                                # Nov 12: who's serving (ESPN's "possession" flag) and each player's flag
+                                "server": 1 if cps[0].get("possession") else 2 if cps[1].get("possession") else None,
+                                # Nov 12: ESPN still marks a "winner" when a match ends by retirement / walkover, but
+                                # the books void those -- so is the platform's own grading (intl_picks)
+                                "void": _void_reason(st),
+                                "flags": [((cp.get("athlete") or {}).get("flag") or {}).get("href") for cp in cps],
+                                "tiebreaks": [[ls.get("tiebreak") for ls in cp.get("linescores") or []]
+                                              for cp in cps]})
     return out
+
+
+def _void_reason(status_type: Dict) -> Optional[str]:
+    name = str(status_type.get("name") or "").upper() + " " + str(status_type.get("detail") or "").upper()
+    for key, label in (("RETIRED", "retired"), ("WALKOVER", "walkover"), ("DEFAULT", "default"),
+                       ("ABANDON", "abandoned"), ("CANCEL", "canceled"), ("POSTPON", "postponed")):
+        if key in name:
+            return label
+    return None
+
+
+def trend(now: Optional[float], start: Optional[float]) -> Dict:
+    """Up / down since the start of the match or game: arrow, colour and the change in points."""
+    if now is None or start is None:
+        return {"arrow": "", "color": None, "delta": None}
+    d = now - start
+    if abs(d) < 0.02:
+        return {"arrow": "▬", "color": "#9aa4b2", "delta": d}
+    return {"arrow": "▲" if d > 0 else "▼", "color": "#2ecc71" if d > 0 else "#e74c3c", "delta": d}
 
 
 def tennis_pregame(m: Dict, picks: Sequence[Dict]) -> Optional[float]:
@@ -312,7 +339,8 @@ def read_tennis(m: Dict, p1: Optional[float], market: Optional[Dict] = None) -> 
     """Live read for one match + its live lines (moneyline both ways, total games) checked against it."""
     if p1 is None or m["state"] == "pre":
         return None
-    rd = LM.tennis(p1, m["tour"], m["best_of"], m["sets1"], m["sets2"], final=m["state"] == "post")
+    rd = LM.tennis(p1, m["tour"], m["best_of"], m["sets1"], m["sets2"], final=m["state"] == "post",
+                   a_serving=None if not m.get("server") else m["server"] == 1)
     out = {"read": rd, "bets": []}
     if not market or m["state"] != "in":
         return out
@@ -365,7 +393,11 @@ def grade_pick(fav_is_first: Optional[bool], first_won: Optional[bool]) -> str:
 
 
 def tennis_result(m: Dict, p1: Optional[float]) -> Dict:
-    """The model's pre-match pick for a finished match and whether it won."""
+    """The model's pre-match pick for a finished match and whether it won (retirements / walkovers: void)."""
+    if m.get("void"):
+        pick = "—" if p1 is None else (m["p1"] if p1 >= 0.5 else m["p2"])
+        return {"pick": pick, "chance": None if p1 is None else max(p1, 1 - p1),
+                "result": f"⚪ Void ({m['void']})"}
     if p1 is None or not m.get("winner"):
         return {"pick": "—", "chance": None, "result": "—"}
     fav1 = p1 >= 0.5

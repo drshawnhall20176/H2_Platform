@@ -294,7 +294,7 @@ def serve_points(p_match: float, tour: str, best_of: int = 3) -> tuple:
 
 
 def tennis(p_pre: float, tour: str, best_of: int, sets_a: Sequence[int], sets_b: Sequence[int],
-           final: bool = False) -> Dict:
+           final: bool = False, a_serving: Optional[bool] = None) -> Dict:
     """Live read from the games in each set (the last set listed is the one in progress, unless it's finished).
     Returns the chance A wins, games played and the projected total games."""
     p_pre = min(max(float(p_pre), 0.02), 0.98)
@@ -318,7 +318,8 @@ def tennis(p_pre: float, tour: str, best_of: int, sets_a: Sequence[int], sets_b:
     if cur is None:
         w, e = _match(sa, sb, a_sets, b_sets, need)
     else:
-        ps, es = _set_avg(sa, sb, *cur)
+        # Nov 12: ESPN says who's serving the game in progress -- use it when known, else average both ways
+        ps, es = _set(sa, sb, cur[0], cur[1], a_serving) if a_serving is not None else _set_avg(sa, sb, *cur)
         w1, e1 = _match(sa, sb, a_sets + 1, b_sets, need)
         w2, e2 = _match(sa, sb, a_sets, b_sets + 1, need)
         w, e = ps * w1 + (1 - ps) * w2, es + ps * e1 + (1 - ps) * e2
