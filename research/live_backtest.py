@@ -58,6 +58,8 @@ def espn_states(league, pick):
     for p in summ.get("plays") or []:
         per = (p.get("period") or {}).get("number")
         cl = clock_min((p.get("clock") or {}).get("displayValue"))
+        if league == "NHL" and cl is not None and per is not None:   # ESPN hockey play-by-play counts time UP
+            cl = (5.0 if per > 3 else 20.0) - cl
         if per is None or cl is None or p.get("homeScore") is None:
             continue
         out.append((LM.elapsed(league, per, cl), per, cl, float(p["homeScore"]), float(p["awayScore"])))
