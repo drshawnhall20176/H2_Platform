@@ -355,3 +355,39 @@ def tennis_market(m: Dict, events: Sequence[Dict]) -> Optional[Dict]:
 
 def set_text(m: Dict) -> str:
     return "  ".join(f"{a}-{b}" for a, b in zip(m["sets1"], m["sets2"])) or "—"
+
+
+# --------------------------------------------------------------------------- how the pre-game read did (Nov 12)
+def grade_pick(fav_is_first: Optional[bool], first_won: Optional[bool]) -> str:
+    if fav_is_first is None or first_won is None:
+        return "—"
+    return "✅ Win" if fav_is_first == first_won else "❌ Loss"
+
+
+def tennis_result(m: Dict, p1: Optional[float]) -> Dict:
+    """The model's pre-match pick for a finished match and whether it won."""
+    if p1 is None or not m.get("winner"):
+        return {"pick": "—", "chance": None, "result": "—"}
+    fav1 = p1 >= 0.5
+    return {"pick": m["p1"] if fav1 else m["p2"], "chance": p1 if fav1 else 1 - p1,
+            "result": grade_pick(fav1, m["winner"] == 1)}
+
+
+def game_result(g: Dict, pre: Optional[Dict]) -> Dict:
+    """The pre-game pick to win (Game Lab, or the books' favourite for football) and whether it won."""
+    if not pre or g["home_score"] == g["away_score"]:
+        return {"pick": "—", "chance": None, "result": "—"}
+    m = float(pre["model_margin"])
+    if abs(m) < 1e-9:
+        return {"pick": "—", "chance": None, "result": "—"}
+    rd = LM.project(g["league"], m, float(pre["model_total"]), 0, 0, 1, LM.cfg(g["league"])["minutes"])
+    home_fav = m > 0
+    return {"pick": g["home"] if home_fav else g["away"],
+            "chance": rd["win_home"] if home_fav else 1 - rd["win_home"],
+            "result": grade_pick(home_fav, g["home_score"] > g["away_score"])}
+
+
+def record(results: Sequence[Dict]) -> str:
+    w = sum(r["result"].startswith("✅") for r in results)
+    lo = sum(r["result"].startswith("❌") for r in results)
+    return f"{w}–{lo}" if w + lo else ""

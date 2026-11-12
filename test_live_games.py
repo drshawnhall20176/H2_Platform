@@ -150,3 +150,14 @@ def test_football_box_stats():
     rec = LP.box(summ)["josh allen"]
     assert LP.current(rec, "Pass Yards", "NFL") == 234 and LP.current(rec, "Pass Completions", "NFL") == 21
     assert LP.current(rec, "Pass Attempts", "NFL") == 31 and LP.current(rec, "Rush + Rec Yards", "NFL") == 40
+
+
+def test_final_results_show_how_the_model_did():
+    m = {"p1": "Jannik Sinner", "p2": "Taylor Fritz", "winner": 2}
+    r = LG.tennis_result(m, 0.7)
+    assert r["pick"] == "Jannik Sinner" and r["result"] == "❌ Loss" and abs(r["chance"] - 0.7) < 1e-9
+    assert LG.tennis_result(m, None)["result"] == "—"
+    g = {"league": "NBA", "home": "Boston Celtics", "away": "Toronto Raptors", "home_score": 110.0, "away_score": 100.0}
+    gr = LG.game_result(g, {"model_margin": 4.0, "model_total": 225.0})
+    assert gr["pick"] == "Boston Celtics" and gr["result"] == "✅ Win" and gr["chance"] > 0.5
+    assert LG.record([r, gr, {"result": "—"}]) == "1–1"
