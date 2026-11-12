@@ -173,3 +173,13 @@ def test_live_box_tables():
     t = LP.box_tables(summ, "NBA")
     assert len(t) == 1 and t[0]["team"] == "Boston Celtics" and t[0]["rows"][0]["PTS"] == "18"
     assert [r["Player"] for r in t[0]["rows"]] == ["Jaylen Brown"]
+
+
+def test_retired_match_is_void_and_trend_arrows():
+    m = {"p1": "Taylor Fritz", "p2": "Ben Shelton", "winner": 1, "void": "retired"}
+    r = LG.tennis_result(m, 0.6)
+    assert r["result"] == "⚪ Void (retired)" and LG.record([r]) == ""
+    assert LG._void_reason({"name": "STATUS_FINAL", "detail": "Retired"}) == "retired"
+    assert LG._void_reason({"name": "STATUS_FINAL", "detail": "Final"}) is None
+    up, down, flat = LG.trend(0.8, 0.6), LG.trend(0.4, 0.6), LG.trend(0.61, 0.6)
+    assert up["arrow"] == "▲" and down["arrow"] == "▼" and flat["arrow"] == "▬" and abs(up["delta"] - 0.2) < 1e-9
