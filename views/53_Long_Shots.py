@@ -1,7 +1,7 @@
 """
 Long Shots (Nov 10) — alternate-line value: the books' price on "8+ assists", "30+ points"... vs the model's HONEST
 chance of it. Owner request after Jeremiah Fears' 8+ assists hit at +1500 (the model had projected 6.0 vs a 4.5 line).
-Logic and the tail-honesty table: long_shots.py. NBA for now (the market the tail test covers).
+Logic and the tail-honesty table: long_shots.py. NBA and (Nov 12) NFL -- the sports the tail test covers.
 """
 from datetime import datetime
 
@@ -19,10 +19,26 @@ import sports
 
 _active = sports.active()
 C.base_css()
-C.page_header("💎", "Long Shots", "Alternate lines (8+ assists, 30+ points…) where the book's price is longer than the "
-                                 "model's honest chance — the Fears-at-+1500 kind of bet, found before tip-off.")
-if not sports.require_sport(["NBA"], "Long Shots"):
+C.page_header("💎", "Long Shots", "Alternate lines (8+ assists, 100+ rush yards…) where the book's price is longer than the "
+                                 "model's honest chance — the Fears-at-+1500 kind of bet, found before the game starts.")
+if not sports.require_sport(["NBA", "NFL"], "Long Shots"):
     st.stop()
+SPORT = _active.key if _active.key in LS.SPORTS else "NBA"
+ALTS = LS.SPORTS[SPORT]["alt"]                                  # this sport's alternate markets -> main markets
+START = "kickoff" if SPORT == "NFL" else "tip-off"
+# The one market whose value lines have made money in testing (research/longshot_backtest.py)
+BEST = {"NBA": "Assists", "NFL": "Rush Yards"}[SPORT]
+WARN = {
+    "NBA": "**Watch list, not a bet list.** Tested on 10 NBA nights (Oct 30 – Nov 9, ~10,000 DraftKings alternate "
+           "lines): the lines this page calls value returned **−22%** bet at 11am prices and **−32%** at tip-off. The "
+           "model's long-shot chances are fair on average, but where it disagrees with the book the book is usually "
+           "right. **One exception so far: Assists** (+27% at 11am, +8% at tip-off over 549 bets) — promising, not "
+           "proven. Bet early, keep stakes to a few dollars.",
+    "NFL": "**Watch list, not a bet list.** Tested on 5 NFL game days (Nov 1 – Nov 9, ~3,000 DraftKings alternate "
+           "lines): the lines this page calls value returned **−19%** at 11am prices and **−21%** at kickoff, and "
+           "prices of +1200 or longer lost over 40%. **One exception so far: Rush Yards** (+32% at 11am, +36% at kickoff "
+           "over ~160 bets) — promising, not proven: mostly two Sundays. Keep stakes to a few dollars.",
+}[SPORT]
 
 
 
@@ -53,7 +69,7 @@ def _historical_alts(g, bk):
     if not ev:
         return {"error": "The Odds API history has no event for this game."}
     quotes, left = [], None
-    for mk in LS.ALT_TO_MAIN:
+    for mk in ALTS:
         try:
             js, hdr = O.fetch_historical_event_props(ev["id"], api_key, [mk], ev.get("commence_time"),
                                                      sport=_active.odds_sport_key)
@@ -77,7 +93,7 @@ def _look_back():
         graded, meta = _past_night(_active.key, date_str)
     if not graded:
         st.info("No saved model reads for this date. They're kept whenever a props page (Best Bets, Edge Board, "
-                "Position Matchups, Long Shots…) is opened before tip-off.")
+                "Position Matchups, Long Shots…) is opened before the game starts.")
         return
     labels = sorted({s.get("game") for s in graded if s.get("game")})
     pick = st.selectbox("Game", ["All games"] + labels, key="longshots_past_game")
@@ -89,8 +105,8 @@ def _look_back():
         saved = MS.load_odds(_active.key, date_str, g.get("home_name") or "", g.get("away_name") or "", ALT_ARCHIVE)
         if saved and saved.get("offers"):
             quotes = saved["offers"]
-            st.caption("Alternate prices: saved from when they were loaded before tip-off.")
-        elif api_key and g and st.button(f"📈 Load that night's alternate prices (~{10 * len(LS.ALT_TO_MAIN)} credits, "
+            st.caption("Alternate prices: saved from when they were loaded before the game starts.")
+        elif api_key and g and st.button(f"📈 Load that night's alternate prices (~{10 * len(ALTS)} credits, "
                                          "paid Odds API plan only)", key="ls_hist"):
             with st.spinner("Asking the Odds API history…"):
                 got = _historical_alts(g, book)
@@ -100,7 +116,7 @@ def _look_back():
                 quotes = got["quotes"]
                 if got.get("remaining"):
                     st.caption(f"Odds API credits left: {got['remaining']}")
-    rows = LS.lookback(rows_in, quotes, PE.norm_name)
+    rows = LS.lookback(rows_in, quotes, PE.norm_name, sport=SPORT)
     if not rows:
         st.info("No rungs to show for this pick.")
         return
@@ -124,16 +140,12 @@ def _look_back():
                                 "Price": st.column_config.NumberColumn(format="%+d"),
                                 "EV per $1": st.column_config.NumberColumn(format="%+.2f"),
                                 "Projection": st.column_config.NumberColumn(format="%.1f")})
-    st.caption("Each rung above the book's main line, priced from what the model said before tip-off (its saved "
+    st.caption("Each rung above the book's main line, priced from what the model said before the game starts (its saved "
                "projection and main-line chance; the spread is re-fitted, so it's close to the live page, not "
                "identical). **Fair price**: if the book paid more than this, it was a value bet. Hits at long fair "
                "prices are the outliers — a good long shot still misses most nights, so judge it over many.")
 
-st.warning("**Watch list, not a bet list.** Tested on 10 NBA nights (Oct 30 – Nov 9, ~10,000 DraftKings alternate "
-           "lines): the lines this page calls value returned **−22%** bet at 11am prices and **−32%** at tip-off. The "
-           "model's long-shot chances are fair on average, but where it disagrees with the book the book is usually "
-           "right. **One exception so far: Assists** (+27% at 11am, +8% at tip-off over 549 bets) — promising, not "
-           "proven. Bet early, keep stakes to a few dollars.")
+st.warning(WARN)
 eastern = pytz.timezone("US/Eastern")
 today = datetime.now(eastern).date()
 day = st.date_input("Date", value=today, max_value=today, key="longshots_date",
@@ -175,14 +187,14 @@ def _slate(sport_key, day, bk):
 with st.spinner("Loading tonight's model reads…"):
     meta, reads = _slate(_active.key, date_str, book)
 if not meta or not reads:
-    st.info("No NBA games with posted player lines yet today.")
+    st.info(f"No {SPORT} games with posted player lines yet today.")
     st.stop()
 
 games = {m["label"]: m for m in meta}
 pick = st.selectbox("Game", list(games.keys()), key="longshots_game")
 g = games.get(pick) or next(iter(games.values()))
 store = st.session_state.setdefault("longshots_quotes", {})
-if st.button(f"📈 Load alternate lines for {g['label']}  (~{len(LS.ALT_TO_MAIN)} Odds API credits)", key="ls_load"):
+if st.button(f"📈 Load alternate lines for {g['label']}  (~{len(ALTS)} Odds API credits)", key="ls_load"):
     try:
         import book_menu as BM
         import position_lines as PL
@@ -190,7 +202,7 @@ if st.button(f"📈 Load alternate lines for {g['label']}  (~{len(LS.ALT_TO_MAIN
         if not ev:
             store[g["label"]] = {"error": "The books haven't posted this game yet."}
         else:
-            res = BM.fetch_menu(api_key, _active.odds_sport_key, [ev["id"]], list(LS.ALT_TO_MAIN), book or O.DEFAULT_BOOK,
+            res = BM.fetch_menu(api_key, _active.odds_sport_key, [ev["id"]], list(ALTS), book or O.DEFAULT_BOOK,
                                 feed_by_event={ev["id"]: ev.get("_feed") or _active.odds_sport_key})
             store[g["label"]] = {"quotes": res.get("quotes") or [], "remaining": res.get("remaining"),
                                  "unavailable": res.get("unavailable") or []}
@@ -207,7 +219,7 @@ if got.get("error"):
     st.stop()
 
 rows = LS.finder({k: v for k, v in reads.items() if v.get("game") == g["label"]}, got["quotes"], PE.norm_name,
-                 PE.prob_over)
+                 PE.prob_over, sport=SPORT)
 if got.get("remaining"):
     st.caption(f"Odds API credits left: {got['remaining']}")
 value = [r for r in rows if r["EV per $1"] > 0]
@@ -216,8 +228,8 @@ if not rows:
     st.info("No alternate rungs to compare for this game at this book (or the model has no read on these players).")
     st.stop()
 mkts = sorted({r["Market"] for r in rows})
-only = st.multiselect("Markets", mkts, default=[m for m in mkts if m == "Assists"] or mkts, key="ls_markets",
-                      help="Assists is the only market whose value lines have made money in testing so far.")
+only = st.multiselect("Markets", mkts, default=[m for m in mkts if m == BEST] or mkts, key=f"ls_markets_{SPORT}",
+                      help=f"{BEST} is the only {SPORT} market whose value lines have made money in testing so far.")
 rows = [r for r in rows if r["Market"] in only] if only else rows
 value = [r for r in rows if r["EV per $1"] > 0]
 show = value or rows[:15]
@@ -234,7 +246,7 @@ sel = LU.selectable(df, "ls_sel", hide_index=True, width="stretch", column_confi
 LU.panel(LU.picked(show, sel), "ls_log", date_str, tag="long-shot")
 st.caption(
     "**Honest chance** = the model's chance of the rung, corrected by how its long-shot chances have actually landed "
-    "(walk-forward test on ~2,750 games per market: it overstates 15–55% rungs and understates under-5% ones). "
+    "(walk-forward test per market: it overstates the middle rungs and understates the longest ones). "
     "**Book says** = the chance the price implies (vig included, so it's a bit high). **EV per $1** = what $1 returns "
     "on average at the honest chance — +1.00 means it should double over many bets. These hit rarely: most nights "
     "a long shot loses, so keep stakes small and flat (a few dollars), never chase. Rows marked *check news* have a "
