@@ -280,7 +280,12 @@ def tennis_matches(day: date, fetch: Callable = None) -> List[Dict]:
                                 "p1": names[0], "p2": names[1], "sets1": sets[0][:n], "sets2": sets[1][:n],
                                 "state": st.get("state") or "pre", "detail": st.get("shortDetail") or "",
                                 "kickoff": str(c.get("date") or ""),
-                                "winner": 1 if cps[0].get("winner") else 2 if cps[1].get("winner") else None})
+                                "winner": 1 if cps[0].get("winner") else 2 if cps[1].get("winner") else None,
+                                # Nov 12: who's serving (ESPN's "possession" flag) and each player's flag
+                                "server": 1 if cps[0].get("possession") else 2 if cps[1].get("possession") else None,
+                                "flags": [((cp.get("athlete") or {}).get("flag") or {}).get("href") for cp in cps],
+                                "tiebreaks": [[ls.get("tiebreak") for ls in cp.get("linescores") or []]
+                                              for cp in cps]})
     return out
 
 
@@ -312,7 +317,8 @@ def read_tennis(m: Dict, p1: Optional[float], market: Optional[Dict] = None) -> 
     """Live read for one match + its live lines (moneyline both ways, total games) checked against it."""
     if p1 is None or m["state"] == "pre":
         return None
-    rd = LM.tennis(p1, m["tour"], m["best_of"], m["sets1"], m["sets2"], final=m["state"] == "post")
+    rd = LM.tennis(p1, m["tour"], m["best_of"], m["sets1"], m["sets2"], final=m["state"] == "post",
+                   a_serving=None if not m.get("server") else m["server"] == 1)
     out = {"read": rd, "bets": []}
     if not market or m["state"] != "in":
         return out

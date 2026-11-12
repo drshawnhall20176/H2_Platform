@@ -87,12 +87,12 @@ def test_tennis_feed_orientation_and_lines():
           "competitions": [{"id": "9", "date": "2026-11-12T13:00Z",
                             "status": {"type": {"state": "in", "shortDetail": "2nd Set"}},
                             "competitors": [
-                                {"order": 1, "athlete": {"displayName": "Jannik Sinner"},
+                                {"order": 1, "athlete": {"displayName": "Jannik Sinner"}, "possession": True,
                                  "linescores": [{"value": 6}, {"value": 2}]},
                                 {"order": 2, "athlete": {"displayName": "Taylor Fritz"},
                                  "linescores": [{"value": 4}, {"value": 1}]}]}]}]}]}
     m = [x for x in LG.tennis_matches(date(2026, 11, 12), fetch=lambda u, p=None: sb if "atp" in u else {})][0]
-    assert m["sets1"] == [6, 2] and m["state"] == "in" and m["best_of"] == 3
+    assert m["sets1"] == [6, 2] and m["state"] == "in" and m["best_of"] == 3 and m["server"] == 1
     picks = [{"home": "Taylor Fritz", "away": "Jannik Sinner", "model_p": 0.3}]
     assert abs(LG.tennis_pregame(m, picks) - 0.7) < 1e-9
     ev = {"home_team": "Taylor Fritz", "away_team": "Jannik Sinner", "bookmakers": [{"key": "draftkings", "markets": [

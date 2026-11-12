@@ -197,7 +197,7 @@ def tennis_board():
         r = LG.read_tennis(m, p1, LG.tennis_market(m, evs) if evs else None)
         with st.container(border=True):
             top = st.columns([3, 2])
-            top[0].markdown(f"**{m['p1']} vs {m['p2']}** · {LG.set_text(m)}")
+            top[0].markdown(_tennis_card(m, r["read"] if r else None), unsafe_allow_html=True)
             top[0].caption(f"{m['tournament']} · {m.get('round') or ''} · best of {m['best_of']}")
             if not r:
                 top[1].caption("No pre-match chance saved for this match (the Tennis Lab only reads matches the books "
@@ -232,6 +232,44 @@ def tennis_board():
                          column_config={"Chance": st.column_config.NumberColumn(format="percent")})
             st.caption("Model's pick = the player the Tennis Lab favoured before the match. — = no pre-match read "
                        "(matches the books don't price).")
+
+
+def _tennis_card(m, rd=None):
+    """Nov 12: a scorecard like the books' -- flag, name, 🎾 on the server, games per set (the set in progress
+    highlighted), tiebreak points as a small superscript, and each player's live win chance."""
+    import html as _h
+    n = max(len(m["sets1"]), 1)
+    cur = len(m["sets1"]) - 1 if m["state"] == "in" else -1
+    tbs = m.get("tiebreaks") or [[], []]
+
+    def cell(v, i, tb):
+        hi = "color:#f5a623;font-weight:800;" if i == cur else "opacity:.85;"
+        sup = f"<sup style='font-size:10px;opacity:.7'>{int(tb)}</sup>" if tb not in (None, "") else ""
+        return f"<td style='text-align:center;width:30px;{hi}'>{v}{sup}</td>"
+
+    rows = []
+    for k, (name, sets) in enumerate(((m["p1"], m["sets1"]), (m["p2"], m["sets2"]))):
+        flag = (m.get("flags") or [None, None])[k]
+        img = f"<img src='{_h.escape(flag)}' style='width:20px;height:14px;object-fit:cover;border-radius:2px;" \
+              f"margin-right:8px;vertical-align:-2px'>" if flag else ""
+        serve = " <span title='serving'>🎾</span>" if m.get("server") == k + 1 and m["state"] == "in" else ""
+        won = " ✔" if m.get("winner") == k + 1 else ""
+        chance = ""
+        if rd is not None and m["state"] == "in":
+            pk = rd["win_a"] if k == 0 else 1 - rd["win_a"]
+            chance = f"<td style='text-align:right;padding-left:12px;opacity:.75;font-size:12px'>{pk:.0%}</td>"
+        tb = (tbs[k] if k < len(tbs) else []) + [None] * n
+        cells = "".join(cell(v, i, tb[i]) for i, v in enumerate(sets)) or "<td></td>"
+        rows.append(f"<tr><td style='padding:3px 10px 3px 0;font-weight:700;white-space:nowrap'>{img}"
+                    f"{_h.escape(name)}{serve}{won}</td>{cells}{chance}</tr>")
+    status = ("<span style='border:1px solid currentColor;border-radius:4px;padding:0 5px;font-size:11px;"
+              "font-weight:700'>Live</span> " if m["state"] == "in" else "") + _h.escape(m.get("detail") or "")
+    head = "<tr><td></td>" + "".join(f"<td style='text-align:center;font-size:10px;opacity:.6'>{i + 1}</td>"
+                                     for i in range(n)) + ("<td style='text-align:right;font-size:10px;opacity:.6;"
+                                                          "padding-left:12px'>wins</td>" if rd is not None and
+                                                          m["state"] == "in" else "") + "</tr>"
+    return (f"<table style='border-collapse:collapse;font-size:15px;margin-bottom:4px'>{head}{''.join(rows)}</table>"
+            f"<div style='font-size:12px;opacity:.75'>{status}</div>")
 
 
 def _when(x):
@@ -337,7 +375,8 @@ if league == "TENNIS":
 else:
     board()
 st.caption(
-    "**Tennis** works from the games in each set (the live feed has no point score or server): each player's chance "
+    "**Tennis** works from the games in each set and who's serving (ESPN's live feed doesn't carry the point score, "
+    "so 15/30/40 isn't shown): each player's chance "
     "of winning a point on serve is backed out of the pre-match chance, then the point → game → set → match odds run "
     "from the current score. **Football** starts from the books' pre-game line and counts the drive in progress "
     "(field position). **Player props:** stat so far + his pre-game projection for the rest of the game, adjusted "
