@@ -69,3 +69,35 @@ def test_euroleague_live_header():
     fetch = lambda u, p=None: header if "Header" in u else games            # noqa: E731
     g = LG.euroleague_games("EUROLEAGUE", date(2026, 11, 12), fetch, now)[0]
     assert g["state"] == "in" and g["period"] == 3 and abs(g["clock_left"] - 5.5) < 1e-9 and g["home_score"] == 61
+
+
+def test_tennis_live_read():
+    assert abs(LM.tennis(0.65, "atp", 3, [], [])["win_a"] - 0.65) < 0.001       # before a ball: the pre-match chance
+    up = LM.tennis(0.5, "atp", 3, [6, 3], [2, 1])                                 # a set and a break up
+    assert up["win_a"] > 0.85 and up["games_played"] == 12 and up["total_games"] > 12
+    down = LM.tennis(0.65, "atp", 3, [3], [5])
+    assert down["win_a"] < 0.65
+    done = LM.tennis(0.3, "wta", 3, [6, 6], [2, 4], final=True)
+    assert done["win_a"] == 1.0 and done["total_games"] == 18
+    assert abs(LM.hold(0.64) - 0.8126) < 0.001
+
+
+def test_tennis_feed_orientation_and_lines():
+    sb = {"events": [{"name": "Nitto ATP Finals", "groupings": [{"grouping": {"displayName": "Men's Singles"},
+          "competitions": [{"id": "9", "date": "2026-11-12T13:00Z",
+                            "status": {"type": {"state": "in", "shortDetail": "2nd Set"}},
+                            "competitors": [
+                                {"order": 1, "athlete": {"displayName": "Jannik Sinner"},
+                                 "linescores": [{"value": 6}, {"value": 2}]},
+                                {"order": 2, "athlete": {"displayName": "Taylor Fritz"},
+                                 "linescores": [{"value": 4}, {"value": 1}]}]}]}]}]}
+    m = [x for x in LG.tennis_matches(date(2026, 11, 12), fetch=lambda u, p=None: sb if "atp" in u else {})][0]
+    assert m["sets1"] == [6, 2] and m["state"] == "in" and m["best_of"] == 3
+    picks = [{"home": "Taylor Fritz", "away": "Jannik Sinner", "model_p": 0.3}]
+    assert abs(LG.tennis_pregame(m, picks) - 0.7) < 1e-9
+    ev = {"home_team": "Taylor Fritz", "away_team": "Jannik Sinner", "bookmakers": [{"key": "draftkings", "markets": [
+        {"key": "h2h", "outcomes": [{"name": "Taylor Fritz", "price": 700}, {"name": "Jannik Sinner", "price": -1200}]}]}]}
+    mk = LG.tennis_market(m, [ev])
+    assert mk["p1_price"] == -1200 and mk["p2_price"] == 700
+    r = LG.read_tennis(m, 0.7, mk)
+    assert r["read"]["win_a"] > 0.9 and {b["market"] for b in r["bets"]} == {"Moneyline"}
