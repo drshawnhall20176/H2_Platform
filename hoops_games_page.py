@@ -160,6 +160,7 @@ def render(league: str, search: bool = False) -> None:
                    "points the model's margin is from the spread (the size, not the sign, is what matters); Est. cover = "
                    "how often that size of gap covered in the backtest. " + USE_LEGEND + " "
                    + ("; ".join(what) if what else "no picks for this league — the model is shown for reference") + ".")
+        log_panel(league, upcoming)                             # Nov 12: right under the games, not below the finals
     if finished:
         st.markdown(f"##### Started or final ({len(finished)})")
         st.dataframe(pd.DataFrame([{
@@ -169,8 +170,6 @@ def render(league: str, search: bool = False) -> None:
             "Final": "—" if p.get("final_home") is None else f"{p['away']} {p['final_away']:g} – {p['home']} {p['final_home']:g}",
             "Model's side": _ats(p), "Tracking pick": _pick(p)} for p in C.by_kickoff(finished)]),
             hide_index=True, width="stretch")
-    if upcoming:
-        log_panel(league, upcoming)
     st.markdown("##### Tracking record")
     st.caption(honesty_line(done, league))                      # Nov 12: the check that caught tennis, every league
     tagged = [p for p in done if p.get("use")]
@@ -263,7 +262,7 @@ def value_at_price(p, market: str, side: str, line, odds) -> str:
 def log_panel(league: str, games) -> None:
     """Log a bet on any listed game straight to the Bet Log (it settles itself once the game is graded here)."""
     import betlog as B
-    with st.expander("📒 Log a bet"):
+    with st.expander("📒 Log a bet on any game above", expanded=True):
         flagged = [p for p in games if _pick(p) != "—"]
         pool = sorted(flagged or games, key=lambda x: x["kickoff"]) if st.toggle(
             "Only games with a tracking pick", value=bool(flagged), key=f"hg_log_only_{league}") else \
