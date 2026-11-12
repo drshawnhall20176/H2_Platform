@@ -41,7 +41,10 @@ def _et_time(iso) -> str:
         d = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
         if d.tzinfo is None:
             d = d.replace(tzinfo=timezone.utc)
-        return d.astimezone(pytz.timezone("US/Eastern")).strftime("%I:%M %p").lstrip("0")
+        e = d.astimezone(pytz.timezone("US/Eastern"))
+        if e.hour == 0 and e.minute == 0:                       # Nov 12: ESPN's "no time yet" (tennis order of play)
+            return "time TBA"
+        return e.strftime("%I:%M %p").lstrip("0")
     except (TypeError, ValueError):
         return "TBD"
 
