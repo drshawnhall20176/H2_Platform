@@ -34,7 +34,7 @@ _ET = pytz.timezone("US/Eastern")
 _today = datetime.now(_ET).date()
 
 
-@st.cache_data(ttl=45, show_spinner=False)
+@st.cache_data(ttl=25, show_spinner=False)
 def _games(lg, day):
     return LG.games(lg, day)
 
@@ -62,14 +62,18 @@ def _api_key():
 
 
 c1, c2 = st.columns([1, 1])
-auto = c1.toggle("Auto-refresh every minute", value=False, key="live_auto")
-with_lines = c2.toggle("Show the books' live lines (3 Odds API credits a refresh; tennis 2 per tournament)",
+# Nov 12: updates on its own by default (scores, live reads, box scores and live props all refresh together)
+_EVERY = {"Every 30 seconds": 30, "Every minute": 60, "Every 2 minutes": 120, "Off (manual)": None}
+_pick_every = c1.selectbox("Update", list(_EVERY), index=0, key="live_every")
+auto = _EVERY[_pick_every]
+with_lines = c2.toggle("Show the books' live lines (about 3 Odds API credits a minute while on; tennis 2 per "
+                       "tournament)",
                        value=False, key="live_lines",
                        disabled=league not in ("NBA", "NCAAMB", "NHL", "WNBA", "EUROLEAGUE", "NBL", "TENNIS", "NFL",
                                                "NCAAF"))
 
 
-@st.cache_data(ttl=45, show_spinner=False)
+@st.cache_data(ttl=25, show_spinner=False)
 def _tennis(day):
     return LG.tennis_matches(day)
 
@@ -88,7 +92,7 @@ def _bets_table(bets):
         "Edge per $1": st.column_config.NumberColumn(format="%+.2f")})
 
 
-@st.cache_data(ttl=45, show_spinner=False)
+@st.cache_data(ttl=25, show_spinner=False)
 def _summary(lg, event_id):
     if lg not in LG.ESPN_PATH or not event_id:
         return {}
@@ -115,6 +119,17 @@ def _prop_snaps(lg, day_s):
         return list(best.values())
     except Exception:                                           # noqa: BLE001
         return []
+
+
+def _box_panel(g):
+    import live_props as LP
+    tables = LP.box_tables(_summary(g["league"], g.get("event_id")), g["league"])
+    if not tables:
+        st.caption("No box score yet.")
+        return
+    for t in tables:
+        st.markdown(f"**{t['team']}**" + (f" · {t['group']}" if t["group"] else ""))
+        st.dataframe(pd.DataFrame(t["rows"]), hide_index=True, width="stretch")
 
 
 def _props_panel(g, rd, evs):
@@ -166,7 +181,7 @@ def _props_panel(g, rd, evs):
                          "Edge per $1": st.column_config.NumberColumn(format="%+.2f")})
 
 
-@st.fragment(run_every=60 if auto else None)
+@st.fragment(run_every=auto)
 def tennis_board():
     ms = _tennis(_today)
     picks = _picks("TENNIS")
@@ -235,7 +250,7 @@ def _fair(p):
     return f"{-round(100 * p / (1 - p)):+d}" if p >= 0.5 else f"{round(100 * (1 - p) / p):+d}"
 
 
-@st.fragment(run_every=60 if auto else None)
+@st.fragment(run_every=auto)
 def board():
     gs = _games(league, _today)
     picks = _picks(league)
@@ -292,6 +307,8 @@ def board():
             if league in ("NBA", "NCAAMB", "WNBA", "NHL", "NFL", "NCAAF"):
                 with st.expander("🧍 Live player props"):
                     _props_panel(g, rd, evs)
+                with st.expander("📋 Live box score"):
+                    _box_panel(g)
     if later:
         with st.expander(f"Later today ({len(later)})"):
             st.dataframe(pd.DataFrame([{"Start": g["detail"] or g["kickoff"], "Game": f"{g['away']} @ {g['home']}"}
