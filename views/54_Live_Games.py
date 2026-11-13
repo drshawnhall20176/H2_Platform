@@ -217,7 +217,7 @@ def tennis_board():
             elif with_lines:
                 st.caption("No live line from the books for this match right now.")
     if later:
-        with st.expander(f"Later today ({len(later)})"):
+        with st.expander(f"Later today ({len(later)})", expanded=not live):
             st.dataframe(pd.DataFrame([{"Start": m["detail"] or m["kickoff"], "Match": f"{m['p1']} vs {m['p2']}",
                                         "Event": m["tournament"]} for m in C.by_kickoff(later)]),
                          hide_index=True, width="stretch")
@@ -368,7 +368,7 @@ def board():
                 with st.expander("📋 Live box score"):
                     _box_panel(g)
     if later:
-        with st.expander(f"Later today ({len(later)})"):
+        with st.expander(f"Later today ({len(later)})", expanded=not live):
             st.dataframe(pd.DataFrame([{"Start": g["detail"] or g["kickoff"], "Game": f"{g['away']} @ {g['home']}"}
                                        for g in C.by_kickoff(later)]), hide_index=True, width="stretch")
     if done:
@@ -397,8 +397,17 @@ def _soccer_day(day):
     import soccer_data as SD
     import soccer_live as SL
     with ThreadPoolExecutor(12) as ex:
-        chunks = list(ex.map(lambda k: SL.games(k, day), list(SD.LEAGUES)))
+        import soccer_picks as SPK
+        keys = SPK.slate_leagues() or list(SD.LEAGUES)              # Nov 13: only leagues playing today/tomorrow
+        chunks = list(ex.map(lambda k: SL.games(k, day), keys))
     return [g for c in chunks for g in c]
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _soccer_rec(lg, home, away, kickoff):
+    """The Soccer Lab's saved record for a match (None when it wasn't captured)."""
+    import soccer_live as SL
+    return SL.pregame_for({"home": home, "away": away, "kickoff": kickoff}, _picks(lg))
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -422,7 +431,7 @@ def soccer_board():
     later = [g for g in gs if g["state"] == "pre"]
     done = [g for g in gs if g["state"] == "post"]
     st.caption(f"Updated {datetime.now(_ET):%-I:%M:%S %p} ET · {len(live)} live · {len(later)} later today · "
-               f"{len(done)} final — across {len(SD.LEAGUES)} leagues")
+               f"{len(done)} final — leagues with a match today or tomorrow")
     if not live:
         st.info("No matches in progress in the Soccer Lab's leagues right now.")
     for g in sorted(live, key=lambda x: (SD.LEAGUES[x["league"]]["group"], SD.LEAGUES[x["league"]]["title"])):
@@ -449,16 +458,37 @@ def soccer_board():
                         f"none {rd['no_more']:.0%}")
             st.caption(" · ".join(bits) + f"  (pre-match from the {src})")
     if later:
-        with st.expander(f"Later today ({len(later)})"):
-            st.dataframe(pd.DataFrame([{"Kickoff": g["detail"], "Match": f"{g['home']} vs {g['away']}",
-                                        "League": SD.LEAGUES[g["league"]]["title"]} for g in C.by_kickoff(later)]),
-                         hide_index=True, width="stretch")
+        with st.expander(f"Later today ({len(later)})", expanded=not live):
+            import soccer_picks as SPK
+            rows = []
+            for x in sorted(later, key=lambda x: str(x.get("kickoff"))):
+                rec = _soccer_rec(x["league"], x["home"], x["away"], x["kickoff"])
+                rows.append({"Kickoff (ET)": _when(x), "Match": f"{x['home']} vs {x['away']}",
+                             "League": SD.LEAGUES[x["league"]]["title"],
+                             "Projected winner": SPK.projected(rec) if rec else "not in the Soccer Lab",
+                             "Market favorite": SPK.market(rec) if rec else "—",
+                             "Best US H / D / A": "—" if not rec or rec.get("best_home") is None else
+                             f"{rec['best_home']:+d} / {rec['best_draw']:+d} / {rec['best_away']:+d}"})
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+            st.caption("Projected winner = the goals model's most likely result (and rounded score); Market favorite = "
+                       "Pinnacle's no-vig chance. The model lost to the market in testing — tracking only.")
     if done:
         with st.expander(f"Final ({len(done)})"):
-            st.dataframe(pd.DataFrame([{"Started": _when(g), "Match": f"{g['home']} vs {g['away']}",
-                                        "Score": f"{g['home_score']}–{g['away_score']}",
-                                        "League": SD.LEAGUES[g["league"]]["title"]} for g in _latest_first(done)]),
-                         hide_index=True, width="stretch")
+            import soccer_picks as SPK
+            rows = []
+            for x in _latest_first(done):
+                rec = _soccer_rec(x["league"], x["home"], x["away"], x["kickoff"])
+                res = "home" if x["home_score"] > x["away_score"] else ("away" if x["away_score"] > x["home_score"] else "draw")
+                pick = None
+                if rec and rec.get("p_home") is not None:
+                    pr = {"home": rec["p_home"], "draw": rec["p_draw"], "away": rec["p_away"]}
+                    pick = max(pr, key=pr.get)
+                rows.append({"Kickoff (ET)": _when(x), "Match": f"{x['home']} vs {x['away']}",
+                             "Score": f"{x['home_score']}–{x['away_score']}",
+                             "League": SD.LEAGUES[x["league"]]["title"],
+                             "Projected winner": SPK.projected(rec) if rec else "—",
+                             "Model": "—" if pick is None else ("✅ right" if pick == res else "❌ wrong")})
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
 
 if league == "TENNIS":

@@ -236,7 +236,7 @@ def test_every_league_has_a_group_and_pool():
 
 def test_odds_are_fetched_only_when_due():
     soon = [{"kickoff": (NOW + timedelta(hours=5)).isoformat()}]
-    far = [{"kickoff": (NOW + timedelta(days=2)).isoformat()}]
+    far = [{"kickoff": (NOW + timedelta(hours=30)).isoformat()}]
     assert SP.odds_due(soon, NOW.isoformat(), NOW)                  # kicks off within 12 h: every run
     assert not SP.odds_due(far, (NOW - timedelta(hours=2)).isoformat(), NOW)
     assert SP.odds_due(far, (NOW - timedelta(hours=7)).isoformat(), NOW)
@@ -262,3 +262,62 @@ def test_team_matcher_never_confuses_city_rivals():
     assert SP.team(["Internazionale"], "Inter Milan") == "Internazionale"
     assert SP.team(["FC Cologne"], "1. FC Köln") == "FC Cologne"
     assert SP.team(["Brighton & Hove Albion"], "Brighton and Hove Albion") == "Brighton & Hove Albion"
+
+
+def test_projected_winner_and_market_text():
+    p = {"home": "Arsenal", "away": "Chelsea", "p_home": .52, "p_draw": .26, "p_away": .22, "xg_home": 1.8,
+         "xg_away": 0.9, "mkt_home": .49, "mkt_draw": .27, "mkt_away": .24, "sharp": True}
+    assert SP.projected(p) == "Arsenal 52% (2-1)" and SP.market(p) == "Arsenal 49%"
+    assert SP.market({"home": "A", "away": "B", "unpriced": True}) == "no odds feed"
+    assert SP.projected({"home": "A", "away": "B"}) == "not rated yet"
+
+
+def test_live_games_soccer_board(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    import model_store as MS
+    import soccer_live as SL
+    ko = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+    def fake(lg, day, fetch=None):
+        if lg != "SOCCER_EPL":
+            return []
+        return [{"id": "1", "league": lg, "kickoff": ko, "state": "pre", "status": "STATUS_SCHEDULED",
+                 "detail": "Scheduled", "home": "Arsenal", "away": "Chelsea", "home_score": 0, "away_score": 0,
+                 "minute": 0, "red_home": 0, "red_away": 0},
+                {"id": "2", "league": lg, "kickoff": ko, "state": "in", "status": "STATUS_SECOND_HALF", "detail": "67'",
+                 "home": "Arsenal", "away": "Chelsea", "home_score": 1, "away_score": 0, "minute": 67,
+                 "red_home": 0, "red_away": 0}]
+    monkeypatch.setattr(SL, "games", fake)
+    rec = {"sport": "SOCCER_EPL", "game_id": "ev1", "kickoff": ko, "home": "Arsenal", "away": "Chelsea",
+           "p_home": .5, "p_draw": .27, "p_away": .23, "xg_home": 1.6, "xg_away": 1.0, "mkt_home": .52,
+           "mkt_draw": .26, "mkt_away": .22, "sharp": True, "best_home": -110, "best_draw": 270, "best_away": 350}
+    monkeypatch.setattr(MS, "load_game_picks", lambda lg, **k: [rec] if lg == "SOCCER_EPL" else [])
+    at = AppTest.from_file(str(Path(__file__).parent / "views" / "54_Live_Games.py"), default_timeout=60)
+    at.session_state["sport"] = "SOCCER"
+    at.run()
+    assert not at.exception, at.exception
+    df = at.dataframe[0].value
+    assert df["Projected winner"].iloc[0] == "Arsenal 50% (2-1)" and df["Market favorite"].iloc[0] == "Arsenal 52%"
+    assert "Scheduled" not in df["Kickoff (ET)"].iloc[0]
+
+
+def test_window_is_today_and_tomorrow_new_york():
+    end = SP.window_end(NOW)                                   # Nov 13 7 AM ET -> midnight ET ending Nov 14
+    assert end == datetime(2026, 11, 15, 5, tzinfo=timezone.utc)
+    late = datetime(2026, 11, 14, 3, tzinfo=timezone.utc)      # Nov 13 10 PM ET: still the 13th in New York
+    assert SP.window_end(late) == end
+    assert not SP.odds_due([{"kickoff": (end + timedelta(hours=1)).isoformat()}], None, NOW)
+
+
+def test_build_skips_matches_past_tomorrow():
+    ms, teams, _ = _sim()
+    r = M.fit(ms, NOW)
+    ev = _event()
+    ev["commence_time"] = (NOW + timedelta(days=3)).isoformat()
+    assert SP.build("SOCCER_EPL", r, [ev], NOW) == []
+
+
+def test_slate_round_trip():
+    store = {}
+    SP.save_slate({"SOCCER_EPL": 3, "SOCCER_MLS": 1}, save=store.__setitem__)
+    assert SP.slate_leagues(get=store.get) == ["SOCCER_EPL", "SOCCER_MLS"]
+    assert SP.slate_leagues(get=lambda k: None) is None

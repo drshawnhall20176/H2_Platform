@@ -35,14 +35,23 @@ if not sports.require_sport(["SOCCER"], "Soccer Lab"):
 ET = pytz.timezone("US/Eastern")
 now = datetime.now(timezone.utc)
 today = now.astimezone(ET).date()
-# Nov 13: DraftKings' full list, grouped; a date filter
+# Nov 13: DraftKings' full list, grouped -- but only leagues with a match today or tomorrow (owner: keep it light)
+active = SP.slate_leagues()
+shown = active if active is not None else list(D.LEAGUES)
+if not shown:
+    st.info("No matches today or tomorrow in any of the Soccer Lab's leagues (international breaks and off-seasons). "
+            "The list refreshes every 3 hours.")
+    st.stop()
 c1, c2 = st.columns([1, 2])
-group = c1.selectbox("Group", D.GROUPS, key="soccer_group")
-in_group = [k for k, v in D.LEAGUES.items() if v["group"] == group]
+groups = [g for g in D.GROUPS if any(D.LEAGUES[k]["group"] == g for k in shown)]
+group = c1.selectbox("Group", groups, key="soccer_group")
+in_group = [k for k in shown if D.LEAGUES[k]["group"] == group]
 league = c2.selectbox("League", in_group, format_func=lambda k: D.LEAGUES[k]["title"] + (
     "" if D.LEAGUES[k]["odds"] else "  (model only — no odds feed)"), key=f"soccer_league_{group}")
 picks = SP.dedupe(MS.load_game_picks(league))
-future = [p for p in picks if str(p.get("kickoff")) > now.isoformat()[:19] and p.get("result") is None]
+end = SP.window_end(now)
+future = [p for p in picks if p.get("result") is None and (SP._ko(p.get("kickoff")) or now) > now
+          and SP._ko(p.get("kickoff")) <= end]
 
 
 def _local_day(p):
@@ -54,10 +63,10 @@ def _local_day(p):
 
 days = sorted({d for d in (_local_day(p) for p in future) if d})
 d1, d2 = st.columns([1, 2])
-when = d1.selectbox("Date", ["All upcoming"] + days, key=f"soccer_day_{league}",
+when = d1.selectbox("Date", ["Today and tomorrow"] + days, key=f"soccer_day_{league}",
                     format_func=lambda d: d if isinstance(d, str) else (
                         "Today" if d == today else ("Tomorrow" if d == today + timedelta(days=1) else f"{d:%a %b %-d}")))
-upcoming = future if when == "All upcoming" else [p for p in future if _local_day(p) == when]
+upcoming = future if isinstance(when, str) else [p for p in future if _local_day(p) == when]
 done = [p for p in picks if p.get("result")]
 if not D.LEAGUES[league]["odds"]:
     d2.caption("No odds feed carries this league, so there are no sharp line, US prices or 📈 flags — the goals "
@@ -74,7 +83,7 @@ def _am(x):
 
 def _ko(p):
     try:
-        return datetime.fromisoformat(str(p["kickoff"]).replace("Z", "+00:00")).astimezone(ET).strftime("%a %-I:%M %p")
+        return datetime.fromisoformat(str(p["kickoff"]).replace("Z", "+00:00")).astimezone(ET).strftime("%a %b %-d, %-I:%M %p")
     except ValueError:
         return ""
 
@@ -90,15 +99,14 @@ def _flags(p):
 
 st.markdown(f"#### Upcoming — {D.LEAGUES[league]['title']} ({len(upcoming)})")
 if not upcoming:
-    st.info("No matches on that date." if when != "All upcoming" else
-            "No matches in the next week. During international breaks and the off-season there's nothing to show; "
-            "the capture checks every 3 hours.")
+    st.info("No matches left today or tomorrow in this league (the ones that started are on Live Games).")
 else:
     ordered = C.by_kickoff(upcoming)
     kind = st.radio("☑️ Tick matches to log", ["📈 Flagged price", "Model's result pick", "Total (model's side)"],
                     horizontal=True, key="soccer_kind")
     df = pd.DataFrame([{
         "Kickoff (ET)": _ko(p), "Match": f"{p['home']} vs {p['away']}",
+        "Projected winner": SP.projected(p), "Market favorite": SP.market(p),
         "Model H / D / A": "not rated yet" if p.get("p_home") is None else
         f"{_pct(p['p_home'])} / {_pct(p['p_draw'])} / {_pct(p['p_away'])}",
         "Sharp line H / D / A": "—" if p.get("mkt_home") is None else
