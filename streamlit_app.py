@@ -153,6 +153,7 @@ def run():
                                                           # TD probability board.
         "43": ("TENNIS",),                               # Tennis Lab -- picked as its own sport on Home (Nov 5)
         "44": ("INTL",),                                 # International Hoops -- likewise
+        "55": ("SOCCER",),                               # Soccer Lab (Nov 13)
         "45": ("NCAAMB",),                               # Game Lab (college basketball) -- game lines
         "46": ("NBA",),                                  # Game Lab (NBA)
         "47": ("NHL",),                                  # Game Lab (NHL)
@@ -249,6 +250,7 @@ def run():
         "42": ("Progression Plan", "🧭", "progression_plan"),   # the slow-build business framework, from the Bet Log
         "43": ("Tennis Lab", "🎾", "tennis_lab"),   # ATP/WTA surface Elo vs the books (tracking)
         "44": ("International Hoops", "🌍", "intl_hoops"),   # EuroLeague / NBL ratings vs the books (tracking)
+        "55": ("Soccer Lab", "⚽", "soccer_lab"),   # Europe / MLS / Liga MX goals model + sharp line (tracking, Nov 13)
         "45": ("Game Lab", "🏟️", "ncaamb_game_lab"),   # college basketball spreads/totals/ML (tracking)
         "46": ("Game Lab", "🏟️", "nba_game_lab"),      # NBA spreads/totals/ML (ratings vs the books)
         "47": ("Game Lab", "🏟️", "nhl_game_lab"),      # NHL puck lines/totals/ML
@@ -287,7 +289,7 @@ def run():
         SECTION_OF[k] = "🎯 RECOMMENDATIONS"
     for k in ("5", "6", "54"):
         SECTION_OF[k] = "🛰️ LIVE SIGNALS"
-    for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26", "27", "29", "30", "31", "32", "33", "34", "35", "36", "43", "44", "45", "46", "47", "38"):
+    for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26", "27", "29", "30", "31", "32", "33", "34", "35", "36", "43", "44", "45", "46", "47", "55", "38"):
         SECTION_OF[k] = "🔬 DEEP RESEARCH"
     for k in ("16", "17", "18", "19", "40", "41", "42", "48", "51"):
         SECTION_OF[k] = "🔍 SELF-GRADING & PROOF"

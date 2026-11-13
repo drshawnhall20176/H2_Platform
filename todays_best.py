@@ -454,7 +454,12 @@ def bet_rows(items: Sequence[Dict], stake: float, real: bool, tag: str, date_str
         if price is None:
             continue
         if it.get("_rec"):
-            f = IP.bet_fields(it["_rec"], it["bet_market"], it["bet_side"], it.get("bet_line"), float(price), stake, real,
+            if str(it["_rec"].get("sport", "")).startswith("SOCCER_"):   # Nov 13: soccer's 3-way bets
+                import soccer_picks as SP
+                bf = SP.bet_fields
+            else:
+                bf = IP.bet_fields
+            f = bf(it["_rec"], it["bet_market"], it["bet_side"], it.get("bet_line"), float(price), stake, real,
                               it.get("best_chance") if it.get("best_tested") else None)
             f["notes"] = ",".join(x for x in (tag, f.get("notes")) if x)
             out.append(f)
