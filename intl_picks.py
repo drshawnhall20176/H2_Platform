@@ -765,19 +765,111 @@ def record(picks: Iterable[Dict]) -> Dict:
     return rec
 
 
+MIN_GAP_MIN = 150         # a run started by another job finishing waits this long after the last run
+
+
+def too_soon(get=None, now: Optional[datetime] = None) -> bool:
+    import model_store as MS
+    try:
+        last = (get or MS.get_setting)("intl_last_run")
+        t = datetime.fromisoformat(str(last))
+    except Exception:                                           # noqa: BLE001
+        return False
+    return ((now or datetime.now(timezone.utc)) - t).total_seconds() < MIN_GAP_MIN * 60
+
+
 def main(argv=None) -> int:
     api = os.environ.get("ODDS_API_KEY")
     if not api:
         print("ODDS_API_KEY not set")
         return 1
+    if os.environ.get("TRIGGER") == "workflow_run" and too_soon():
+        print(f"Last capture was under {MIN_GAP_MIN} minutes ago -- skipping this triggered run.")
+        open(".skip-soccer", "w").close()
+        return 0
+    try:
+        import model_store as MS
+        MS.save_setting("intl_last_run", datetime.now(timezone.utc).isoformat())
+    except Exception:                                           # noqa: BLE001
+        pass
     which = (argv or sys.argv[1:] or ["TENNIS,EUROLEAGUE,EUROCUP,BCL,FEC,EUROCUPW,NKL,ICELAND,BAHRAIN,ESTONIA1,QATAR,NBL,NCAAMB,NBA,NHL"])[0].split(",")
+    slate = {}
     for s in which:
         try:
             out = tennis_capture(api) if s == "TENNIS" else hoops_capture(s, api)
         except Exception as exc:                                # noqa: BLE001 -- one sport failing never stops the rest
             out = {"error": f"{type(exc).__name__}: {exc}"}
         print(s, out)
+        if s in INTL_LEAGUES:
+            try:
+                n = schedule_count(s)
+                if n:
+                    slate[s] = n
+            except Exception:                                   # noqa: BLE001
+                pass
+    if any(s in INTL_LEAGUES for s in which):
+        save_slate(slate)
     return 0
+
+
+# --------------------------------------------------------------------------- today + tomorrow (Nov 13)
+# Owner: like soccer, International Hoops and Live Games show only the leagues with a game today or tomorrow.
+INTL_LEAGUES = ("EUROLEAGUE", "EUROCUP", "BCL", "FEC", "EUROCUPW", "NBL", "NKL", "ICELAND", "BAHRAIN", "ESTONIA1", "QATAR")
+SLATE_KEY = "intl_slate"
+
+
+def window(now: Optional[datetime] = None):
+    """(start of today, end of tomorrow) in New York, as UTC datetimes."""
+    import pytz
+    et = pytz.timezone("US/Eastern")
+    now = now or datetime.now(timezone.utc)
+    d = now.astimezone(et).date()
+    start = et.localize(datetime(d.year, d.month, d.day)).astimezone(timezone.utc)
+    return start, start + timedelta(days=2, hours=1)            # +1h covers the DST change night
+
+
+def games_in_window(picks: Sequence[Dict], now: Optional[datetime] = None) -> int:
+    start, end = window(now)
+    n = 0
+    for p in picks:
+        try:
+            k = datetime.fromisoformat(str(p.get("kickoff")).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        k = k if k.tzinfo else k.replace(tzinfo=timezone.utc)
+        n += start <= k < end
+    return n
+
+
+def schedule_count(league: str, now: Optional[datetime] = None, fetch: Callable = I._http,
+                   fetch_text: Callable = I._http_text) -> int:
+    """Games today or tomorrow, from the league's own schedule -- leagues too new to rate (FIBA LiveStats) save no
+    picks, so the saved records alone would hide them."""
+    now = now or datetime.now(timezone.utc)
+    if league in I.GENIUS_COMPS:
+        return games_in_window([{"kickoff": I._genius_utc(m)} for m in I.genius_games(league, fetch)], now)
+    if league in I.FIBA_PAGES:
+        gs = I.fiba_season(league, I.season_of(league, now.date().isoformat()), fetch_text)
+        return games_in_window([{"kickoff": str(g.get("gameDateTimeUTC") or "")[:19] + "+00:00"} for g in gs], now)
+    import model_store as MS
+    return games_in_window(MS.load_game_picks(league), now)
+
+
+def save_slate(leagues: Dict[str, int], save=None) -> None:
+    import model_store as MS
+    (save or MS.save_setting)(SLATE_KEY, {"at": datetime.now(timezone.utc).isoformat(), "leagues": leagues})
+
+
+def slate_leagues(get=None) -> Optional[List[str]]:
+    """International leagues with a game today or tomorrow (None before the first capture: show them all)."""
+    import model_store as MS
+    try:
+        v = (get or MS.get_setting)(SLATE_KEY)
+    except Exception:                                           # noqa: BLE001
+        return None
+    if not isinstance(v, dict):
+        return None
+    return [k for k in INTL_LEAGUES if k in (v.get("leagues") or {})]
 
 
 if __name__ == "__main__":

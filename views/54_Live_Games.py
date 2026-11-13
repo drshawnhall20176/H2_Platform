@@ -21,7 +21,12 @@ C.page_header("🔴", "Live Games",
 
 _SPORT_LEAGUES = {"NBA": ["NBA"], "NCAAMB": ["NCAAMB"], "NHL": ["NHL"], "WNBA": ["WNBA"], "NFL": ["NFL"],
                   "NCAAF": ["NCAAF"],
-                  "INTL": ["EUROLEAGUE", "EUROCUP", "NBL"], "TENNIS": ["TENNIS"], "SOCCER": ["SOCCER"]}
+                  "INTL": list(LG.INTL), "TENNIS": ["TENNIS"], "SOCCER": ["SOCCER"]}
+if True:                                                         # Nov 13: international -- only leagues playing
+    import intl_picks as _IP                                     # today or tomorrow (like soccer)
+    _on = _IP.slate_leagues()
+    if _on:
+        _SPORT_LEAGUES["INTL"] = [k for k in LG.INTL if k in _on]
 _key = sports.active_key()
 _choices = _SPORT_LEAGUES.get(_key)
 if not _choices:
