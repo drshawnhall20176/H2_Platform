@@ -397,7 +397,9 @@ def _soccer_day(day):
     import soccer_data as SD
     import soccer_live as SL
     with ThreadPoolExecutor(12) as ex:
-        chunks = list(ex.map(lambda k: SL.games(k, day), list(SD.LEAGUES)))
+        import soccer_picks as SPK
+        keys = SPK.slate_leagues() or list(SD.LEAGUES)              # Nov 13: only leagues playing today/tomorrow
+        chunks = list(ex.map(lambda k: SL.games(k, day), keys))
     return [g for c in chunks for g in c]
 
 
@@ -429,7 +431,7 @@ def soccer_board():
     later = [g for g in gs if g["state"] == "pre"]
     done = [g for g in gs if g["state"] == "post"]
     st.caption(f"Updated {datetime.now(_ET):%-I:%M:%S %p} ET · {len(live)} live · {len(later)} later today · "
-               f"{len(done)} final — across {len(SD.LEAGUES)} leagues")
+               f"{len(done)} final — leagues with a match today or tomorrow")
     if not live:
         st.info("No matches in progress in the Soccer Lab's leagues right now.")
     for g in sorted(live, key=lambda x: (SD.LEAGUES[x["league"]]["group"], SD.LEAGUES[x["league"]]["title"])):
