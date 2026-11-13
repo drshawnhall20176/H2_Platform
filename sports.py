@@ -352,7 +352,9 @@ LAB_SPORTS = {
     "INTL": Sport(key="INTL", label="International Hoops", icon="🌍", odds_sport_key="basketball_euroleague", markets=[],
                   market_map={"Moneyline": "h2h", "Spread": "spreads", "Total": "totals"}),
 }
-LAB_PAGES = {"TENNIS": "43", "INTL": "44"}       # the views/ page number each lab opens
+LAB_SPORTS["SOCCER"] = Sport(key="SOCCER", label="Soccer — Europe, MLS, Liga MX", icon="⚽", odds_sport_key="soccer_epl",
+                              markets=[], market_map={"Moneyline": "h2h", "Spread": "spreads", "Total": "totals"})
+LAB_PAGES = {"TENNIS": "43", "INTL": "44", "SOCCER": "55"}   # the views/ page number each lab opens (Soccer: Nov 13)
 LAB_COMMON_PAGES = ("18", "42", "48", "54")       # Bet Log, Progression Plan, Reports, Live Games (Nov 12)
 
 
