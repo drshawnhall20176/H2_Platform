@@ -200,20 +200,42 @@ def prices(ev: Dict, home_team: str, away_team: str) -> Dict:
     for s in ("home", "draw", "away"):
         p, bk = _best(us3[s])
         out[f"best_{s}"], out[f"book_{s}"] = p, bk
+    # Totals: the main line is Pinnacle's (or, without it, the US line priced closest to even); alternate lines the
+    # US books also post (3.5, 4.5 ...) are ignored. Nov 13 live check: picking the most-quoted line chose 3.5.
+    def _balance(pair):
+        a, b = (_dec(pair[0][0][0]) if pair[0] else None), (_dec(pair[1][0][0]) if pair[1] else None)
+        return abs(a - b) if a and b else 9.0
+    main_tot = None
+    if sharp_tot:
+        main_tot = min((L for L, v in sharp_tot.items() if all(v)), key=lambda L: abs(sharp_tot[L][0] - sharp_tot[L][1]),
+                       default=None)
     if tot:
-        L = max(tot, key=lambda x: (len(tot[x]["over"]) + len(tot[x]["under"]), x == 2.5))
+        if main_tot is not None and main_tot in tot:
+            L = main_tot
+        elif main_tot is not None:
+            L = min(tot, key=lambda x: abs(x - main_tot))
+        else:
+            L = min(tot, key=lambda x: _balance((tot[x]["over"], tot[x]["under"])))
         out["line_total"] = L
         for s in ("over", "under"):
             out[f"{s}_price"], out[f"{s}_book"] = _best(tot[L][s])
         sp = sharp_tot.get(L)
         if sp and all(sp):
             out["mkt_over"] = round(_devig(sp)[0], 4)
-    if ah:
-        L = max(ah, key=lambda x: (len(ah[x]["home"]), -abs(x)))
-        out["home_spread"] = L
-        out["spread_price_home"], out["spread_book_home"] = _best(ah[L]["home"])
-        out["spread_price_away"], out["spread_book_away"] = _best(ah[L]["away"])
-        sp = sharp_ah.get(L)
+    elif main_tot is not None:
+        out["line_total"] = main_tot
+        out["mkt_over"] = round(_devig(sharp_tot[main_tot])[0], 4)
+    # Asian handicap: Pinnacle's main line; US prices when a US book posts that line (often they don't).
+    main_ah = min((L for L, v in sharp_ah.items() if all(v)), key=lambda L: abs(sharp_ah[L][0] - sharp_ah[L][1]),
+                  default=None) if sharp_ah else None
+    if main_ah is None and ah:
+        main_ah = min(ah, key=lambda x: _balance((ah[x]["home"], ah[x]["away"])))
+    if main_ah is not None:
+        out["home_spread"] = main_ah
+        if main_ah in ah:
+            out["spread_price_home"], out["spread_book_home"] = _best(ah[main_ah]["home"])
+            out["spread_price_away"], out["spread_book_away"] = _best(ah[main_ah]["away"])
+        sp = sharp_ah.get(main_ah)
         if sp and all(sp):
             out["mkt_ah_home"] = round(_devig(sp)[0], 4)
     return out
