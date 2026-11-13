@@ -158,7 +158,7 @@ def run():
         "46": ("NBA",),                                  # Game Lab (NBA)
         "47": ("NHL",),                                  # Game Lab (NHL)
         "50": ("NBA", "NCAAMB", "WNBA", "NFL", "NCAAF", "NHL"),
-        "54": ("NBA", "NCAAMB", "NHL", "WNBA", "INTL", "TENNIS", "NFL", "NCAAF"),   # Live Games: in-game reads (Nov 12)
+        "54": ("NBA", "NCAAMB", "NHL", "WNBA", "INTL", "TENNIS", "NFL", "NCAAF", "SOCCER"),   # Live Games: in-game reads (Nov 12)
         "53": ("NBA", "NFL"),                             # Long Shots: the tail test covers NBA and NFL (Nov 12)   # Game Script: each sport's own study (Nov 7)
         "41": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL", "UFC"),                    # Postgame Review -- kickoff snapshots graded vs box scores
         "38": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL"),  # Position Matchups -- depth chart vs the opposing

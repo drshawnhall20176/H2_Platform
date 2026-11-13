@@ -21,23 +21,100 @@ SUMMARY = "https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/summary"
 ODDS = "https://api.the-odds-api.com/v4/sports/{key}/odds"
 EVENT_ODDS = "https://api.the-odds-api.com/v4/sports/{key}/events/{event}/odds"
 
-# key -> title, ESPN slug, Odds API key, home (domestic) or europe
-LEAGUES = {
-    "SOCCER_EPL": {"title": "Premier League", "slug": "eng.1", "odds": "soccer_epl"},
-    "SOCCER_LALIGA": {"title": "La Liga", "slug": "esp.1", "odds": "soccer_spain_la_liga"},
-    "SOCCER_SERIEA": {"title": "Serie A", "slug": "ita.1", "odds": "soccer_italy_serie_a"},
-    "SOCCER_BUNDESLIGA": {"title": "Bundesliga", "slug": "ger.1", "odds": "soccer_germany_bundesliga"},
-    "SOCCER_LIGUE1": {"title": "Ligue 1", "slug": "fra.1", "odds": "soccer_france_ligue_one"},
-    "SOCCER_UCL": {"title": "Champions League", "slug": "uefa.champions", "odds": "soccer_uefa_champs_league",
-                   "europe": True},
-    "SOCCER_UEL": {"title": "Europa League", "slug": "uefa.europa", "odds": "soccer_uefa_europa_league",
-                   "europe": True},
-    "SOCCER_CHAMPIONSHIP": {"title": "EFL Championship", "slug": "eng.2", "odds": "soccer_efl_champ"},
-    "SOCCER_MLS": {"title": "MLS", "slug": "usa.1", "odds": "soccer_usa_mls"},
-    "SOCCER_LIGAMX": {"title": "Liga MX", "slug": "mex.1", "odds": "soccer_mexico_ligamx"},
-}
-DOMESTIC_EUROPE = ("SOCCER_EPL", "SOCCER_LALIGA", "SOCCER_SERIEA", "SOCCER_BUNDESLIGA", "SOCCER_LIGUE1",
-                   "SOCCER_CHAMPIONSHIP")
+# Nov 13 (owner sent DraftKings' soccer list): every league DK posts that ESPN and/or the Odds API carry.
+# key -> title, ESPN slug, Odds API key (None = no odds feed: the model's read only), group (the page's grouping),
+# pool (whose results the ratings are fitted on: the country's leagues and cups together; "europe" / "conmebol" for the
+# continental cups, which need every member league; national teams and women's leagues on their own).
+_L = [
+    # Europe -- top 5
+    ("SOCCER_EPL", "Premier League", "eng.1", "soccer_epl", "Europe — top 5", "eng"),
+    ("SOCCER_LALIGA", "La Liga", "esp.1", "soccer_spain_la_liga", "Europe — top 5", "esp"),
+    ("SOCCER_SERIEA", "Serie A", "ita.1", "soccer_italy_serie_a", "Europe — top 5", "ita"),
+    ("SOCCER_BUNDESLIGA", "Bundesliga", "ger.1", "soccer_germany_bundesliga", "Europe — top 5", "ger"),
+    ("SOCCER_LIGUE1", "Ligue 1", "fra.1", "soccer_france_ligue_one", "Europe — top 5", "fra"),
+    # Europe -- more leagues
+    ("SOCCER_CHAMPIONSHIP", "EFL Championship", "eng.2", "soccer_efl_champ", "Europe — more leagues", "eng"),
+    ("SOCCER_LEAGUE1", "England League One", "eng.3", "soccer_england_league1", "Europe — more leagues", "eng"),
+    ("SOCCER_LEAGUE2", "England League Two", "eng.4", "soccer_england_league2", "Europe — more leagues", "eng"),
+    ("SOCCER_LALIGA2", "La Liga 2", "esp.2", "soccer_spain_segunda_division", "Europe — more leagues", "esp"),
+    ("SOCCER_SERIEB", "Serie B", "ita.2", "soccer_italy_serie_b", "Europe — more leagues", "ita"),
+    ("SOCCER_BUNDESLIGA2", "2. Bundesliga", "ger.2", "soccer_germany_bundesliga2", "Europe — more leagues", "ger"),
+    ("SOCCER_LIGUE2", "Ligue 2", "fra.2", "soccer_france_ligue_two", "Europe — more leagues", "fra"),
+    ("SOCCER_EREDIVISIE", "Netherlands Eredivisie", "ned.1", "soccer_netherlands_eredivisie", "Europe — more leagues", "ned"),
+    ("SOCCER_EERSTE", "Netherlands Eerste Divisie", "ned.2", None, "Europe — more leagues", "ned"),
+    ("SOCCER_PORTUGAL", "Portugal Primeira Liga", "por.1", "soccer_portugal_primeira_liga", "Europe — more leagues", "por"),
+    ("SOCCER_SCOTLAND", "Scotland Premiership", "sco.1", "soccer_spl", "Europe — more leagues", "sco"),
+    ("SOCCER_SCOTCHAMP", "Scotland Championship", "sco.2", None, "Europe — more leagues", "sco"),
+    ("SOCCER_BELGIUM", "Belgium Pro League", "bel.1", "soccer_belgium_first_div", "Europe — more leagues", "bel"),
+    ("SOCCER_AUSTRIA", "Austria Bundesliga", "aut.1", "soccer_austria_bundesliga", "Europe — more leagues", "aut"),
+    ("SOCCER_SWISS", "Switzerland Super League", "sui.1", "soccer_switzerland_superleague", "Europe — more leagues", "sui"),
+    ("SOCCER_TURKEY", "Turkey Super Lig", "tur.1", "soccer_turkey_super_league", "Europe — more leagues", "tur"),
+    ("SOCCER_GREECE", "Greece Super League", "gre.1", "soccer_greece_super_league", "Europe — more leagues", "gre"),
+    ("SOCCER_DENMARK", "Denmark Superliga", "den.1", "soccer_denmark_superliga", "Europe — more leagues", "den"),
+    ("SOCCER_NORWAY", "Norway Eliteserien", "nor.1", "soccer_norway_eliteserien", "Europe — more leagues", "nor"),
+    ("SOCCER_SWEDEN", "Sweden Allsvenskan", "swe.1", "soccer_sweden_allsvenskan", "Europe — more leagues", "swe"),
+    # continental cups
+    ("SOCCER_UCL", "Champions League", "uefa.champions", "soccer_uefa_champs_league", "European cups", "europe"),
+    ("SOCCER_UEL", "Europa League", "uefa.europa", "soccer_uefa_europa_league", "European cups", "europe"),
+    ("SOCCER_UECL", "Conference League", "uefa.europa.conf", "soccer_uefa_europa_conference_league", "European cups", "europe"),
+    # domestic cups
+    ("SOCCER_EFLCUP", "England EFL Cup", "eng.league_cup", "soccer_england_efl_cup", "Domestic cups", "eng"),
+    ("SOCCER_FACUP", "England FA Cup", "eng.fa", "soccer_fa_cup", "Domestic cups", "eng"),
+    ("SOCCER_DFBPOKAL", "Germany DFB-Pokal", "ger.dfb_pokal", "soccer_germany_dfb_pokal", "Domestic cups", "ger"),
+    ("SOCCER_COPADELREY", "Spain Copa del Rey", "esp.copa_del_rey", "soccer_spain_copa_del_rey", "Domestic cups", "esp"),
+    ("SOCCER_COUPEFRANCE", "France Coupe de France", "fra.coupe_de_france", "soccer_france_coupe_de_france",
+     "Domestic cups", "fra"),
+    # Americas
+    ("SOCCER_MLS", "MLS", "usa.1", "soccer_usa_mls", "Americas", "usa"),
+    ("SOCCER_USL", "USL Championship", "usa.usl.1", None, "Americas", "usa"),
+    ("SOCCER_LIGAMX", "Liga MX", "mex.1", "soccer_mexico_ligamx", "Americas", "mex"),
+    ("SOCCER_BRAZIL", "Brazil Serie A", "bra.1", "soccer_brazil_campeonato", "Americas", "bra"),
+    ("SOCCER_BRAZILB", "Brazil Serie B", "bra.2", "soccer_brazil_serie_b", "Americas", "bra"),
+    ("SOCCER_ARGENTINA", "Argentina Liga Profesional", "arg.1", "soccer_argentina_primera_division", "Americas", "arg"),
+    ("SOCCER_CHILE", "Chile Primera", "chi.1", "soccer_chile_campeonato", "Americas", "chi"),
+    ("SOCCER_COLOMBIA", "Colombia Primera A", "col.1", None, "Americas", "col"),
+    ("SOCCER_PERU", "Peru Liga 1", "per.1", None, "Americas", "per"),
+    ("SOCCER_URUGUAY", "Uruguay Primera", "uru.1", None, "Americas", "uru"),
+    ("SOCCER_GUATEMALA", "Guatemala Liga Nacional", "gua.1", None, "Americas", "gua"),
+    ("SOCCER_LIBERTADORES", "Copa Libertadores", "conmebol.libertadores", "soccer_conmebol_copa_libertadores",
+     "Americas", "conmebol"),
+    ("SOCCER_SUDAMERICANA", "Copa Sudamericana", "conmebol.sudamericana", "soccer_conmebol_copa_sudamericana",
+     "Americas", "conmebol"),
+    # Asia & Oceania
+    ("SOCCER_ALEAGUE", "Australia A-League", "aus.1", "soccer_australia_aleague", "Asia & Oceania", "aus"),
+    ("SOCCER_JLEAGUE", "Japan J.League", "jpn.1", "soccer_japan_j_league", "Asia & Oceania", "jpn"),
+    # women
+    ("SOCCER_NWSL", "NWSL", "usa.nwsl", None, "Women", "usa-w"),
+    ("SOCCER_WSL", "England Women's Super League", "eng.w.1", None, "Women", "eng-w"),
+    ("SOCCER_ALEAGUEW", "Australia A-League Women", "aus.w.1", None, "Women", "aus-w"),
+    ("SOCCER_UWCL", "Women's Champions League", "uefa.wchampions", None, "Women", "eng-w"),
+    # national teams
+    ("SOCCER_NATIONS", "UEFA Nations League", "uefa.nations", "soccer_uefa_nations_league", "National teams", "nations"),
+    ("SOCCER_WCQ_UEFA", "World Cup qualifying (Europe)", "fifa.worldq.uefa",
+     "soccer_fifa_world_cup_qualifiers_europe", "National teams", "nations"),
+    ("SOCCER_CONCACAF_NL", "CONCACAF Nations League", "concacaf.nations.league", None, "National teams", "nations"),
+    ("SOCCER_AFCON_Q", "Africa Cup of Nations qualifying", "caf.nations_qual", "soccer_africa_cup_of_nations",
+     "National teams", "nations"),
+    ("SOCCER_FRIENDLY", "International friendlies", "fifa.friendly", None, "National teams", "nations"),
+]
+LEAGUES = {k: {"title": t, "slug": s, "odds": o, "group": g, "pool": p, "europe": p == "europe"}
+           for k, t, s, o, g, p in _L}
+GROUPS = list(dict.fromkeys(v["group"] for v in LEAGUES.values()))
+EUROPE_COUNTRIES = ("eng", "esp", "ita", "ger", "fra", "ned", "por", "sco", "bel", "aut", "sui", "tur", "gre", "den",
+                    "nor", "swe")
+CONMEBOL_COUNTRIES = ("bra", "arg", "chi", "col", "per", "uru")
+
+
+def pool_keys(league: str) -> list:
+    """The leagues whose results rate this league's teams."""
+    p = LEAGUES[league]["pool"]
+    if p == "europe":
+        return [k for k, v in LEAGUES.items() if v["pool"] in EUROPE_COUNTRIES + ("europe",)]
+    if p == "conmebol":
+        return [k for k, v in LEAGUES.items() if v["pool"] in CONMEBOL_COUNTRIES + ("conmebol",)]
+    return [k for k, v in LEAGUES.items() if v["pool"] == p]
+
+
 US_BOOKS = ("draftkings", "fanduel", "betmgm", "williamhill_us", "betrivers", "fanatics", "espnbet", "ballybet")
 SHARP = "pinnacle"
 BACKFILL_DAYS = 400
@@ -82,6 +159,32 @@ def parse_day(data: Optional[Dict], league: str) -> List[Dict]:
                     "home_points": hp, "away_points": ap, "neutral": bool(comp.get("neutralSite")),
                     "league": league, "status": st.get("name")})
     return out
+
+
+def parse_fixtures(data: Optional[Dict], league: str) -> List[Dict]:
+    """ESPN scoreboard -> matches not started yet {id, kickoff, home, away}."""
+    out = []
+    for e in (data or {}).get("events") or []:
+        st = ((e.get("status") or {}).get("type") or {})
+        if st.get("state") not in (None, "pre"):
+            continue
+        comp = (e.get("competitions") or [{}])[0]
+        cs = {c.get("homeAway"): c for c in comp.get("competitors") or []}
+        h, a = cs.get("home"), cs.get("away")
+        if not h or not a:
+            continue
+        out.append({"id": str(e.get("id")), "kickoff": e.get("date"), "league": league,
+                    "home": (h.get("team") or {}).get("displayName"), "away": (a.get("team") or {}).get("displayName"),
+                    "neutral": bool(comp.get("neutralSite"))})
+    return out
+
+
+def espn_fixtures(league: str, start: date, days: int = 7, fetch: Callable = _http) -> List[Dict]:
+    dd = [start + timedelta(days=i) for i in range(days)]
+    with ThreadPoolExecutor(4) as ex:
+        chunks = list(ex.map(lambda d: parse_fixtures(
+            fetch(ESPN.format(slug=LEAGUES[league]["slug"]), {"dates": d.strftime("%Y%m%d")}), league), dd))
+    return [g for c in chunks for g in c]
 
 
 def espn_day(league: str, day: date, fetch: Callable = _http) -> List[Dict]:
@@ -243,6 +346,8 @@ def prices(ev: Dict, home_team: str, away_team: str) -> Dict:
 
 def fetch_odds(league: str, api_key: str, fetch: Callable = _http) -> List[Dict]:
     """One call: 3 markets x (Pinnacle + the US books) -- the bookmakers list counts as one region (3 credits)."""
+    if not LEAGUES[league].get("odds"):
+        return []
     return fetch(ODDS.format(key=LEAGUES[league]["odds"]),
                  {"apiKey": api_key, "bookmakers": ",".join((SHARP,) + US_BOOKS), "markets": "h2h,spreads,totals",
                   "oddsFormat": "american"}) or []
