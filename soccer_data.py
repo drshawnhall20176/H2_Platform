@@ -202,7 +202,7 @@ def refresh(league: str, today: date, fetch: Callable = _http, db_path: Optional
     """Archive finished matches: a ~13-month backfill the first time, then the last 7 days."""
     import model_store as MS
     have = MS.load_results(league, since=(today - timedelta(days=BACKFILL_DAYS)).isoformat(), db_path=db_path)
-    start = today - timedelta(days=BACKFILL_DAYS if len(have) < 30 else 7)
+    start = today - timedelta(days=BACKFILL_DAYS if len(have) < 30 else 3)   # Nov 13: 3 days is enough to grade
     rows = espn_range(league, start, today, fetch)
     return MS.save_results(league, rows, db_path=db_path)
 

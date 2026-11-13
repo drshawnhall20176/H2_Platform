@@ -128,7 +128,8 @@ def ratings(league: str, today: date, db_path: Optional[str] = None) -> Dict:
 def build(league: str, r: Dict, events: Sequence[Dict], now: datetime) -> List[Dict]:
     recs = []
     for ev in events:
-        if str(ev.get("commence_time")) <= now.isoformat()[:19]:
+        k = _ko(ev.get("commence_time"))
+        if k is None or k <= now or k > window_end(now):          # today and tomorrow only
             continue
         hn, an = ev.get("home_team"), ev.get("away_team")
         px = D.prices(ev, hn, an)
@@ -325,9 +326,25 @@ def record(picks: Sequence[Dict]) -> Dict:
             "value": (vw, vn), "value_units": round(units, 2)}
 
 
+def window_end(now: datetime) -> datetime:
+    """Nov 13 (owner): soccer covers today and tomorrow (New York days) only -- US evening games and Europe's next
+    morning -- never three days out. Returns midnight New York at the end of tomorrow, in UTC."""
+    import pytz
+    et = pytz.timezone("US/Eastern")
+    d = now.astimezone(et).date() + timedelta(days=2)
+    return et.localize(datetime(d.year, d.month, d.day)).astimezone(timezone.utc)
+
+
+def _ko(x) -> Optional[datetime]:
+    try:
+        k = datetime.fromisoformat(str(x).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return k if k.tzinfo else k.replace(tzinfo=timezone.utc)
+
+
 ODDS_EVERY_H = 6          # re-price a league at most every 6 hours ...
 ODDS_SOON_H = 12          # ... unless a match kicks off within 12 hours (then every run)
-ODDS_AHEAD_D = 3          # and only when a match is within 3 days (empty calls are free; this keeps credits down)
 
 
 def odds_due(fixtures: Sequence[Dict], last: Optional[str], now: datetime) -> bool:
@@ -338,7 +355,7 @@ def odds_due(fixtures: Sequence[Dict], last: Optional[str], now: datetime) -> bo
         except (KeyError, ValueError):
             continue
     ks = [k if k.tzinfo else k.replace(tzinfo=timezone.utc) for k in ks]
-    ks = [k for k in ks if now < k <= now + timedelta(days=ODDS_AHEAD_D)]
+    ks = [k for k in ks if now < k <= window_end(now)]
     if not ks:
         return False
     if any(k <= now + timedelta(hours=ODDS_SOON_H) for k in ks) or not last:
@@ -377,19 +394,23 @@ def capture(league: str, api_key: str, fetch: Callable = D._http, now: Optional[
     import model_store as MS
     now = now or datetime.now(timezone.utc)
     added = D.refresh(league, now.date(), fetch, db_path)
-    r = ratings(league, now.date(), db_path)
-    fixtures = D.espn_fixtures(league, now.date(), 8, fetch)
-    key = f"soccer_odds_at:{league}"
-    last = MS.get_setting(key) if db_path is None else None
-    evs = []
-    if api_key and D.LEAGUES[league].get("odds") and odds_due(fixtures, last, now):
-        evs = D.fetch_odds(league, api_key, fetch)
-        if db_path is None:
-            MS.save_setting(key, now.isoformat())
-    recs = build(league, r, evs, now)
-    already = [x for x in MS.load_game_picks(league, ungraded=True, db_path=db_path)
-               if not str(x.get("game_id")).startswith("espn:")]          # priced on an earlier run
-    recs += schedule_build(league, r, fixtures, now, recs + already)
+    import pytz
+    fixtures = D.espn_fixtures(league, now.astimezone(pytz.timezone("US/Eastern")).date(), 2, fetch)
+    fixtures = [f for f in fixtures if (_ko(f.get("kickoff")) or now) > now and _ko(f.get("kickoff")) <= window_end(now)]
+    recs, evs, rated = [], [], 0
+    if fixtures:                                                # nothing today or tomorrow: no fit, no odds call
+        r = ratings(league, now.date(), db_path)
+        rated = len(r["attack"])
+        key = f"soccer_odds_at:{league}"
+        last = MS.get_setting(key) if db_path is None else None
+        if api_key and D.LEAGUES[league].get("odds") and odds_due(fixtures, last, now):
+            evs = D.fetch_odds(league, api_key, fetch)
+            if db_path is None:
+                MS.save_setting(key, now.isoformat())
+        recs = build(league, r, evs, now)
+        already = [x for x in MS.load_game_picks(league, ungraded=True, db_path=db_path)
+                   if not str(x.get("game_id")).startswith("espn:")]          # priced on an earlier run
+        recs += schedule_build(league, r, fixtures, now, recs + already)
     saved = MS.save_game_picks(recs, db_path=db_path)
     graded = grade(league, MS.load_results(league, since=(now.date() - timedelta(days=10)).isoformat(),
                                            db_path=db_path), db_path)
@@ -402,7 +423,7 @@ def capture(league: str, api_key: str, fetch: Callable = D._http, now: Optional[
         settled += SPR.settle_props(league, db_path, fetch)
     except Exception:                                           # noqa: BLE001
         pass
-    return {"archive_added": added, "teams_rated": len(r["attack"]), "fixtures": len(fixtures), "events": len(evs),
+    return {"archive_added": added, "teams_rated": rated, "fixtures": len(fixtures), "events": len(evs),
             "priced": len([x for x in recs if not x.get("unpriced")]), "model_only": len([x for x in recs if x.get("unpriced")]),
             "flags": sum(len(x["value"]) for x in recs), "saved": saved, "graded": graded, "bets_settled": settled}
 
@@ -412,6 +433,7 @@ def main(argv=None) -> int:
     which = (argv or sys.argv[1:] or [",".join(D.LEAGUES)])[0].split(",")
     # the European cups are rated on every league's results: refresh the domestic leagues first
     which = sorted(which, key=lambda k: D.LEAGUES.get(k, {}).get("pool") in ("europe", "conmebol"))
+    slate = {}
     for s in which:
         if s not in D.LEAGUES:
             continue
@@ -419,8 +441,32 @@ def main(argv=None) -> int:
             out = capture(s, api)
         except Exception as exc:                                # noqa: BLE001 -- one league never stops the rest
             out = {"error": f"{type(exc).__name__}: {exc}"}
+        if out.get("fixtures"):
+            slate[s] = out["fixtures"]
         print(s, out)
+    save_slate(slate)
     return 0
+
+
+SLATE_KEY = "soccer_slate"
+
+
+def save_slate(leagues: Dict[str, int], save=None) -> None:
+    """Which leagues have matches today or tomorrow -- the Soccer Lab and Live Games show only these."""
+    import model_store as MS
+    (save or MS.save_setting)(SLATE_KEY, {"at": datetime.now(timezone.utc).isoformat(), "leagues": leagues})
+
+
+def slate_leagues(get=None) -> Optional[List[str]]:
+    """Leagues with a match today or tomorrow (None before the first capture: show every league)."""
+    import model_store as MS
+    try:
+        v = (get or MS.get_setting)(SLATE_KEY)
+    except Exception:                                           # noqa: BLE001
+        return None
+    if not isinstance(v, dict):
+        return None
+    return [k for k in D.LEAGUES if k in (v.get("leagues") or {})]
 
 
 if __name__ == "__main__":
