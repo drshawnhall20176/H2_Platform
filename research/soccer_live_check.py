@@ -9,7 +9,7 @@ import soccer_picks as SP
 import soccer_live as SL
 db = "/tmp/soccer_check.db"
 api = os.environ.get("ODDS_API_KEY", "")
-for lg in ("SOCCER_NWSL", "SOCCER_BRAZIL", "SOCCER_NATIONS", "SOCCER_EFLCUP", "SOCCER_EPL", "SOCCER_UCL"):
+for lg in ("SOCCER_BRAZIL", "SOCCER_NATIONS", "SOCCER_ARGENTINA", "SOCCER_LIGAMX"):
     t = time.time()
     try:
         out = SP.capture(lg, api, db_path=db)
