@@ -204,3 +204,61 @@ def test_handicap_falls_back_to_the_sharp_line_without_us_prices():
 
 def test_team_aliases():
     assert SP.team(["LAFC", "Seattle Sounders FC"], "Los Angeles FC") == "LAFC"
+
+
+def test_live_read_and_market_rates():
+    import soccer_live as SL
+    lh, la = SL.rates_from_market(0.5, 0.27, 0.23)
+    assert lh > la
+    start = SL.read({"minute": 0, "home_score": 0, "away_score": 0}, (1.5, 1.1), 2.5)
+    late = SL.read({"minute": 80, "home_score": 1, "away_score": 0}, (1.5, 1.1), 2.5)
+    assert late["p_home"] > 0.8 > start["p_home"] and abs(late["p_home"] + late["p_draw"] + late["p_away"] - 1) < 1e-9
+    red = SL.read({"minute": 30, "home_score": 0, "away_score": 0, "red_home": 1}, (1.5, 1.1))
+    even = SL.read({"minute": 30, "home_score": 0, "away_score": 0}, (1.5, 1.1))
+    assert red["p_home"] < even["p_home"]
+    data = {"events": [{"id": "1", "date": "2026-11-13T20:00Z",
+                        "status": {"displayClock": "67'", "clock": 4020, "type": {"state": "in", "name": "STATUS_SECOND_HALF",
+                                                                                  "shortDetail": "67'"}},
+                        "competitions": [{"competitors": [
+                            {"homeAway": "home", "score": "1", "team": {"id": "10", "displayName": "Arsenal"}},
+                            {"homeAway": "away", "score": "0", "team": {"id": "11", "displayName": "Chelsea"}}],
+                            "details": [{"redCard": True, "team": {"id": "11"}}]}]}]}
+    g = SL.parse_live(data, "SOCCER_EPL")[0]
+    assert g["minute"] == 67 and g["state"] == "in" and g["red_away"] == 1 and g["home_score"] == 1
+
+
+def test_every_league_has_a_group_and_pool():
+    for k, v in D.LEAGUES.items():
+        assert v["group"] in D.GROUPS and v["slug"] and k in D.pool_keys(k)
+    assert "SOCCER_EPL" in D.pool_keys("SOCCER_UCL") and "SOCCER_CHAMPIONSHIP" in D.pool_keys("SOCCER_EFLCUP")
+    assert "SOCCER_BRAZIL" in D.pool_keys("SOCCER_LIBERTADORES") and D.pool_keys("SOCCER_NWSL") == ["SOCCER_NWSL"]
+
+
+def test_odds_are_fetched_only_when_due():
+    soon = [{"kickoff": (NOW + timedelta(hours=5)).isoformat()}]
+    far = [{"kickoff": (NOW + timedelta(days=2)).isoformat()}]
+    assert SP.odds_due(soon, NOW.isoformat(), NOW)                  # kicks off within 12 h: every run
+    assert not SP.odds_due(far, (NOW - timedelta(hours=2)).isoformat(), NOW)
+    assert SP.odds_due(far, (NOW - timedelta(hours=7)).isoformat(), NOW)
+    assert not SP.odds_due([{"kickoff": (NOW + timedelta(days=6)).isoformat()}], None, NOW)
+
+
+def test_model_only_records_skip_priced_matches_and_dedupe():
+    ms, teams, _ = _sim()
+    r = M.fit(ms, NOW)
+    fx = [{"id": "5", "kickoff": (NOW + timedelta(days=1)).isoformat(), "home": "Team A", "away": "Team B"},
+          {"id": "6", "kickoff": (NOW + timedelta(days=1)).isoformat(), "home": "Team C", "away": "Team D"}]
+    priced = [{"home": "Team A", "away": "Team B", "game_id": "odds1", "kickoff": fx[0]["kickoff"]}]
+    recs = SP.schedule_build("SOCCER_NWSL", r, fx, NOW, priced)
+    assert [x["game_id"] for x in recs] == ["espn:6"] and recs[0]["unpriced"] and recs[0]["p_home"] > 0
+    dup = dict(recs[0], game_id="espn:5", home="Team A", away="Team B", kickoff=fx[0]["kickoff"])
+    assert len(SP.dedupe(priced + [dup] + recs)) == 2
+
+
+def test_team_matcher_never_confuses_city_rivals():
+    assert SP.team(["Manchester United"], "Manchester City") is None
+    assert SP.team(["Atlético Madrid"], "Real Madrid") is None
+    assert SP.team(["Inter Milan"], "AC Milan") is None
+    assert SP.team(["Internazionale"], "Inter Milan") == "Internazionale"
+    assert SP.team(["FC Cologne"], "1. FC Köln") == "FC Cologne"
+    assert SP.team(["Brighton & Hove Albion"], "Brighton and Hove Albion") == "Brighton & Hove Albion"
