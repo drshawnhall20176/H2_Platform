@@ -33,13 +33,35 @@ if not sports.require_sport(["SOCCER"], "Soccer Lab"):
     st.stop()
 
 ET = pytz.timezone("US/Eastern")
-league = st.radio("League", list(D.LEAGUES), format_func=lambda k: D.LEAGUES[k]["title"], horizontal=True,
-                  key="soccer_league")
-picks = MS.load_game_picks(league)
 now = datetime.now(timezone.utc)
-upcoming = [p for p in picks if str(p.get("kickoff")) > now.isoformat()[:19] and p.get("result") is None
-            and str(p.get("kickoff")) < (now + timedelta(days=8)).isoformat()]
+today = now.astimezone(ET).date()
+# Nov 13: DraftKings' full list, grouped; a date filter
+c1, c2 = st.columns([1, 2])
+group = c1.selectbox("Group", D.GROUPS, key="soccer_group")
+in_group = [k for k, v in D.LEAGUES.items() if v["group"] == group]
+league = c2.selectbox("League", in_group, format_func=lambda k: D.LEAGUES[k]["title"] + (
+    "" if D.LEAGUES[k]["odds"] else "  (model only — no odds feed)"), key=f"soccer_league_{group}")
+picks = SP.dedupe(MS.load_game_picks(league))
+future = [p for p in picks if str(p.get("kickoff")) > now.isoformat()[:19] and p.get("result") is None]
+
+
+def _local_day(p):
+    try:
+        return datetime.fromisoformat(str(p["kickoff"]).replace("Z", "+00:00")).astimezone(ET).date()
+    except ValueError:
+        return None
+
+
+days = sorted({d for d in (_local_day(p) for p in future) if d})
+d1, d2 = st.columns([1, 2])
+when = d1.selectbox("Date", ["All upcoming"] + days, key=f"soccer_day_{league}",
+                    format_func=lambda d: d if isinstance(d, str) else (
+                        "Today" if d == today else ("Tomorrow" if d == today + timedelta(days=1) else f"{d:%a %b %-d}")))
+upcoming = future if when == "All upcoming" else [p for p in future if _local_day(p) == when]
 done = [p for p in picks if p.get("result")]
+if not D.LEAGUES[league]["odds"]:
+    d2.caption("No odds feed carries this league, so there are no sharp line, US prices or 📈 flags — the goals "
+               "model's read only. Check DraftKings for the price.")
 
 
 def _pct(x):
@@ -68,8 +90,9 @@ def _flags(p):
 
 st.markdown(f"#### Upcoming — {D.LEAGUES[league]['title']} ({len(upcoming)})")
 if not upcoming:
-    st.info("No priced matches in the next week. During international breaks and the off-season there's nothing to "
-            "show; the capture checks every 3 hours.")
+    st.info("No matches on that date." if when != "All upcoming" else
+            "No matches in the next week. During international breaks and the off-season there's nothing to show; "
+            "the capture checks every 3 hours.")
 else:
     ordered = C.by_kickoff(upcoming)
     kind = st.radio("☑️ Tick matches to log", ["📈 Flagged price", "Model's result pick", "Total (model's side)"],
@@ -140,8 +163,9 @@ else:
                 import soccer_props as SPR
                 props = SPR.fetch_props(league, m["game_id"], api_key)
                 res = MS.load_results(league, since=(now.date() - timedelta(days=200)).isoformat())
-                if D.LEAGUES[league].get("europe"):
-                    res += [g for kk in D.DOMESTIC_EUROPE for g in MS.load_results(kk, since=(now.date() - timedelta(days=200)).isoformat())]
+                for kk in D.pool_keys(league):                  # cup ties: the teams' league matches too
+                    if kk != league:
+                        res += MS.load_results(kk, since=(now.date() - timedelta(days=200)).isoformat())
                 r = SP.ratings(league, now.date())
                 hid = SPR.team_matches(res, m["home"])
                 aid = SPR.team_matches(res, m["away"])

@@ -21,12 +21,12 @@ C.page_header("🔴", "Live Games",
 
 _SPORT_LEAGUES = {"NBA": ["NBA"], "NCAAMB": ["NCAAMB"], "NHL": ["NHL"], "WNBA": ["WNBA"], "NFL": ["NFL"],
                   "NCAAF": ["NCAAF"],
-                  "INTL": ["EUROLEAGUE", "EUROCUP", "NBL"], "TENNIS": ["TENNIS"]}
+                  "INTL": ["EUROLEAGUE", "EUROCUP", "NBL"], "TENNIS": ["TENNIS"], "SOCCER": ["SOCCER"]}
 _key = sports.active_key()
 _choices = _SPORT_LEAGUES.get(_key)
 if not _choices:
     st.info("Live Games covers basketball (NBA, WNBA, college, EuroLeague, EuroCup, NBL), football (NFL, college), "
-            "the NHL and tennis — pick one of those sports at the top.")
+            "the NHL, tennis and soccer — pick one of those sports at the top.")
     st.stop()
 league = _choices[0] if len(_choices) == 1 else st.radio(
     "League", _choices, horizontal=True, format_func=lambda k: LG.TITLE.get(k, k), key="live_league")
@@ -390,11 +390,86 @@ def board():
                        + " to win. — = no pre-game read saved for that game.")
 
 
+@st.cache_data(ttl=25, show_spinner=False)
+def _soccer_day(day):
+    """Every Soccer Lab league's matches today (one ESPN request each, in parallel)."""
+    from concurrent.futures import ThreadPoolExecutor
+    import soccer_data as SD
+    import soccer_live as SL
+    with ThreadPoolExecutor(12) as ex:
+        chunks = list(ex.map(lambda k: SL.games(k, day), list(SD.LEAGUES)))
+    return [g for c in chunks for g in c]
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _soccer_pre(lg, home, away, kickoff):
+    """The match's pre-game goal rates (from the sharp line when the Soccer Lab saved one)."""
+    import soccer_live as SL
+    p = SL.pregame_for({"home": home, "away": away, "kickoff": kickoff}, _picks(lg))
+    if not p:
+        return None, None, None
+    r = SL.pregame_rates(p)
+    return r, p.get("line_total"), ("sharp line" if p.get("mkt_home") is not None else "goals model")
+
+
+@st.fragment(run_every=auto)
+def soccer_board():
+    """Nov 13: live soccer across every Soccer Lab league."""
+    import soccer_data as SD
+    import soccer_live as SL
+    gs = _soccer_day(_today)
+    live = [g for g in gs if g["state"] == "in"]
+    later = [g for g in gs if g["state"] == "pre"]
+    done = [g for g in gs if g["state"] == "post"]
+    st.caption(f"Updated {datetime.now(_ET):%-I:%M:%S %p} ET · {len(live)} live · {len(later)} later today · "
+               f"{len(done)} final — across {len(SD.LEAGUES)} leagues")
+    if not live:
+        st.info("No matches in progress in the Soccer Lab's leagues right now.")
+    for g in sorted(live, key=lambda x: (SD.LEAGUES[x["league"]]["group"], SD.LEAGUES[x["league"]]["title"])):
+        pre, line, src = _soccer_pre(g["league"], g["home"], g["away"], g["kickoff"])
+        with st.container(border=True):
+            top = st.columns([3, 2])
+            reds = (" 🟥" * g["red_home"]) + " vs" + (" 🟥" * g["red_away"]) if g["red_home"] or g["red_away"] else " vs"
+            top[0].markdown(f"**{g['home']} {g['home_score']} – {g['away_score']} {g['away']}**  ·  "
+                            f"{g['detail'] or str(int(g['minute'])) + chr(39)}")
+            top[0].caption(SD.LEAGUES[g["league"]]["title"] + ("" if reds == " vs" else f" · red cards: home{reds} away"))
+            if not pre:
+                top[1].caption("No pre-match read saved for this match (the Soccer Lab hadn't priced it), so no live "
+                               "read.")
+                continue
+            rd = SL.read(g, pre, line)
+            top[1].markdown(f"**{g['home']}** {rd['p_home']:.0%} · **Draw** {rd['p_draw']:.0%} · "
+                            f"**{g['away']}** {rd['p_away']:.0%}")
+            bits = [f"Projected final {rd['proj_home']:.1f} – {rd['proj_away']:.1f}",
+                    f"fair live price {g['home']} {SL.fair(rd['p_home'])} / Draw {SL.fair(rd['p_draw'])} / "
+                    f"{g['away']} {SL.fair(rd['p_away'])}"]
+            if rd.get("line") is not None:
+                bits.append(f"over {rd['line']:g}: {rd['p_over']:.0%}")
+            bits.append(f"next goal {g['home']} {rd['next_home']:.0%} · {g['away']} {rd['next_away']:.0%} · "
+                        f"none {rd['no_more']:.0%}")
+            st.caption(" · ".join(bits) + f"  (pre-match from the {src})")
+    if later:
+        with st.expander(f"Later today ({len(later)})"):
+            st.dataframe(pd.DataFrame([{"Kickoff": g["detail"], "Match": f"{g['home']} vs {g['away']}",
+                                        "League": SD.LEAGUES[g["league"]]["title"]} for g in C.by_kickoff(later)]),
+                         hide_index=True, width="stretch")
+    if done:
+        with st.expander(f"Final ({len(done)})"):
+            st.dataframe(pd.DataFrame([{"Started": _when(g), "Match": f"{g['home']} vs {g['away']}",
+                                        "Score": f"{g['home_score']}–{g['away_score']}",
+                                        "League": SD.LEAGUES[g["league"]]["title"]} for g in _latest_first(done)]),
+                         hide_index=True, width="stretch")
+
+
 if league == "TENNIS":
     tennis_board()
+elif league == "SOCCER":
+    soccer_board()
 else:
     board()
 st.caption(
+    "**Soccer** starts from each side's expected goals backed out of the sharp pre-match line (the goals model's own "
+    "when there's none), scales them to the time left, adjusts for red cards, and adds the score so far. "
     "**Tennis** works from the games in each set and who's serving (ESPN's live feed doesn't carry the point score, "
     "so 15/30/40 isn't shown): each player's chance "
     "of winning a point on serve is backed out of the pre-match chance, then the point → game → set → match odds run "
