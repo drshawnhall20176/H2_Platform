@@ -74,7 +74,7 @@ def _am(x):
 
 def _ko(p):
     try:
-        return datetime.fromisoformat(str(p["kickoff"]).replace("Z", "+00:00")).astimezone(ET).strftime("%a %-I:%M %p")
+        return datetime.fromisoformat(str(p["kickoff"]).replace("Z", "+00:00")).astimezone(ET).strftime("%a %b %-d, %-I:%M %p")
     except ValueError:
         return ""
 
@@ -99,6 +99,7 @@ else:
                     horizontal=True, key="soccer_kind")
     df = pd.DataFrame([{
         "Kickoff (ET)": _ko(p), "Match": f"{p['home']} vs {p['away']}",
+        "Projected winner": SP.projected(p), "Market favorite": SP.market(p),
         "Model H / D / A": "not rated yet" if p.get("p_home") is None else
         f"{_pct(p['p_home'])} / {_pct(p['p_draw'])} / {_pct(p['p_away'])}",
         "Sharp line H / D / A": "—" if p.get("mkt_home") is None else

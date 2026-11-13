@@ -258,6 +258,30 @@ def settle_logged(league: str, db_path: Optional[str] = None) -> int:
     return n
 
 
+# --------------------------------------------------------------------------- what the tables show (Nov 13)
+def _name(p: Dict, side: str) -> str:
+    return {"home": p["home"], "away": p["away"], "draw": "Draw"}[side]
+
+
+def projected(p: Dict) -> str:
+    """The goals model's most likely result, e.g. "Arsenal 52% (2-1)" -- the projected score rounds the xG."""
+    if p.get("p_home") is None:
+        return "not rated yet"
+    probs = {"home": p["p_home"], "draw": p["p_draw"], "away": p["p_away"]}
+    s = max(probs, key=probs.get)
+    score = "" if p.get("xg_home") is None else f" ({round(p['xg_home'])}-{round(p['xg_away'])})"
+    return f"{_name(p, s)} {probs[s]:.0%}{score}"
+
+
+def market(p: Dict) -> str:
+    """The market's favourite: Pinnacle's no-vig chance, else the US books' average."""
+    if p.get("mkt_home") is None:
+        return "no odds feed" if p.get("unpriced") else "—"
+    probs = {"home": p["mkt_home"], "draw": p["mkt_draw"], "away": p["mkt_away"]}
+    s = max(probs, key=probs.get)
+    return f"{_name(p, s)} {probs[s]:.0%}" + ("" if p.get("sharp") else " (US avg)")
+
+
 # --------------------------------------------------------------------------- the record
 def dedupe(picks: Sequence[Dict]) -> List[Dict]:
     """One record per match: a model-only record (espn:...) gives way to a priced one for the same teams and day."""
