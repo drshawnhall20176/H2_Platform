@@ -23,8 +23,12 @@ on:
   # or after the morning is done, does nothing, so the extra triggers are free.
   # Nov 9: all nine scheduled runs AND both backups were skipped again; warm-slates and script-learn did run, so they
   # trigger it too.
+  # Nov 13: again every scheduled run was skipped and the only backups that fired came before 3 AM (warm-slates at
+  # 2:19 AM), so the review never ran. Add the jobs that do fire after 3 AM most mornings: close-watch (~3:40 AM),
+  # capture-intl (every 3 hours) and the 5-7 AM refreshes.
   workflow_run:
-    workflows: ["settle-results", "capture-closing-lines", "warm-slates", "script-learn"]
+    workflows: ["settle-results", "capture-closing-lines", "warm-slates", "script-learn", "close-watch", "capture-intl",
+                "refresh-matchups", "refresh-ncaaf", "refresh-statcast", "settle-analyst", "capture-game-picks"]
     types: [completed]
   workflow_dispatch:
     inputs:

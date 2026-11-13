@@ -109,6 +109,11 @@ with st.expander("📐 Ratings model v2 — college spreads (tracking)", expande
                    "spread. Tracking only: no 🔒 until the live record holds above ~53% over a few weeks. Spreads only — "
                    "the same ratings lost on totals in the backtest.")
 
+# Nov 12: player props for this week's games (the Best Bets board's saved, priced props)
+with st.expander("🎯 Player props", expanded=True):
+    import props_section as PS
+    PS.render("NCAAF", datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d"), title="Today's priced props")
+
 
 @st.cache_data(ttl=300, show_spinner=False)
 def load_slate_meta(date_str: str):

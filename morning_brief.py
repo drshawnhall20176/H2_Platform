@@ -24,7 +24,9 @@ import pytz
 
 ET = pytz.timezone("US/Eastern")
 SPORTS = ("NBA", "NHL", "NFL", "NCAAF", "NCAAMB", "UFC", "TENNIS", "GAME_LINES")   # GAME_LINES: hoops/NHL win chances
-PROPS_SPORTS = ("NBA", "NFL", "NHL", "NCAAF")
+PROPS_SPORTS = ("NBA", "NFL", "NHL", "NCAAF", "NCAAMB")   # Nov 12: college basketball too (no sport left out)
+STALE_HOURS = 2.0       # Nov 12: a board older than this is rebuilt before the picks note (GitHub skipped the hourly
+                        # refresh all day; the 3:43 PM note judged 3 AM prices)
 KEY = "brief:{date}:{kind}"
 # overnight jobs worth checking: workflow file -> plain name
 JOBS = {"settle-results.yml": "Settling bets", "capture-closing-lines.yml": "Closing lines",
@@ -228,6 +230,41 @@ def lines_yesterday(rows: Sequence[Dict]) -> List[str]:
     return [f"**{sp}** playable reads: {w}-{l}" for sp, (w, l) in sorted(by.items())]
 
 
+def stale(saved_at, now: Optional[datetime] = None, hours: float = STALE_HOURS) -> bool:
+    """True when a saved board is missing or older than `hours`."""
+    if not saved_at:
+        return True
+    try:
+        t = datetime.fromisoformat(str(saved_at).replace("Z", "+00:00"))
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return True
+    return ((now or datetime.now(timezone.utc)) - t).total_seconds() > hours * 3600
+
+
+def refresh_boards(day: str, sports_=PROPS_SPORTS, build=None, load=None) -> List[str]:
+    """Rebuild each in-season props board that's missing or stale, so the note judges this afternoon's prices.
+    Returns the sports rebuilt. One sport failing never stops the note."""
+    import sports as S
+    import todays_best as TB
+    load = load or TB.load_props
+    if build is None:
+        import best_bets_data as BBD
+        build = lambda key: BBD.load_generic_best_bets_board(key, day, BBD.O.DEFAULT_BOOK)
+    done = []
+    for key in sports_:
+        try:
+            if not S.in_season(key) or not stale((load(key, day) or {}).get("at")):
+                continue
+            build(key)
+            done.append(key)
+            print(f"{key}: board was stale or missing -- rebuilt for the picks note")
+        except Exception as exc:                                    # noqa: BLE001
+            print(f"{key}: board rebuild failed ({type(exc).__name__}: {exc})")
+    return done
+
+
 # --------------------------------------------------------------------------- delivery
 def chunks(text: str, limit: int = DISCORD_LIMIT) -> List[str]:
     out, cur = [], ""
@@ -299,6 +336,7 @@ def run(kind: str, day: str, force: bool = False) -> int:
         import coach as CO
         import pick_records as PR
         import todays_best as TB
+        refresh_boards(day)
         rows = [r for r in TB.collect(day, PROPS_SPORTS)["rows"] if r.get("kind") == "Prop"]
         try:
             lines = TB.game_rows(day)                               # game lines, international hoops, tennis

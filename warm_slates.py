@@ -51,7 +51,7 @@ def main(argv=None) -> int:
     return 0
 
 
-BOARD_SPORTS = ("NBA", "NFL", "NHL", "NCAAF")
+BOARD_SPORTS = ("NBA", "NFL", "NHL", "NCAAF", "NCAAMB")   # Nov 12: college basketball's board too
 
 
 def boards(day: str) -> None:

@@ -103,3 +103,16 @@ def test_learned_names_a_league_calibration_change():
                                                     "new": 0.8, "applied": True, "why": "held up"}]}}}
     out = MB.learned(rep)
     assert out[0] == "🔧 NBL win chances: 1.00 → 0.80 (held up)"
+
+
+def test_picks_rebuild_stale_boards_first(monkeypatch):
+    from datetime import datetime, timezone
+    import sports as S
+    monkeypatch.setattr(S, "in_season", lambda k, *a: k != "NCAAF")
+    now = datetime.now(timezone.utc).isoformat()
+    saved = {"NBA": {"at": "2026-11-12T08:16:36+00:00"}, "NHL": {"at": now}}
+    built = []
+    done = MB.refresh_boards("2026-11-12", ("NBA", "NHL", "NCAAF", "NCAAMB"), build=built.append,
+                             load=lambda k, d: saved.get(k))
+    assert done == ["NBA", "NCAAMB"] == built                   # stale + missing; fresh NHL and off-season NCAAF left
+    assert MB.stale(None) and not MB.stale(now) and "NCAAMB" in MB.PROPS_SPORTS
