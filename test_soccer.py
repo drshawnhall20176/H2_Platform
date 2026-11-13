@@ -181,3 +181,26 @@ def test_page_renders(monkeypatch):
     assert not at.exception, at.exception
     df = at.dataframe[0].value
     assert "Arsenal vs Chelsea" in set(df["Match"]) and "📈 Chelsea +350" in df["Flags"].iloc[0]
+
+
+def test_totals_use_the_main_line_not_an_alternate():
+    ev = _event()
+    for b in ev["bookmakers"]:
+        if b["key"] == "draftkings":
+            b["markets"].append({"key": "totals", "outcomes": [{"name": "Over", "price": 200, "point": 3.5},
+                                                               {"name": "Under", "price": -260, "point": 3.5}]})
+            b["markets"].append({"key": "totals", "outcomes": [{"name": "Over", "price": 400, "point": 4.5},
+                                                               {"name": "Under", "price": -600, "point": 4.5}]})
+    px = D.prices(ev, "Arsenal", "Chelsea")
+    assert px["line_total"] == 2.5 and px["mkt_over"] is not None
+
+
+def test_handicap_falls_back_to_the_sharp_line_without_us_prices():
+    ev = _event()
+    ev["bookmakers"] = [b for b in ev["bookmakers"] if b["key"] != "fanduel"]   # no US spreads
+    px = D.prices(ev, "Arsenal", "Chelsea")
+    assert px["home_spread"] == -0.5 and px.get("spread_price_home") is None and px["mkt_ah_home"] is not None
+
+
+def test_team_aliases():
+    assert SP.team(["LAFC", "Seattle Sounders FC"], "Los Angeles FC") == "LAFC"

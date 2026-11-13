@@ -33,11 +33,19 @@ def _dec(a) -> Optional[float]:
     return D._dec(a)
 
 
+ALIASES = {"los angeles fc": "LAFC", "lafc": "Los Angeles FC", "inter miami cf": "Inter Miami",
+           "new york red bulls": "Red Bull New York", "red bull new york": "New York Red Bulls",
+           "psg": "Paris Saint-Germain", "paris saint germain": "Paris Saint-Germain"}
+
+
 def team(names, name: str) -> Optional[str]:
     """The ratings' (ESPN) name for an Odds API team name."""
     names = list(names)
     if name in names:
         return name
+    alt = ALIASES.get(str(name).lower())
+    if alt and alt in names:
+        return alt
     return I.find_team(names, name) or I.find_team(names, name, loose=True)
 
 
