@@ -29,4 +29,5 @@ for g in meta:
     long_.sort(key=lambda r: -r["EV per $1"])
     print(f"\n### {g['label']}  tip {ev.get('commence_time')}  rungs checked {len(out)}, at +{MIN_PRICE}+: {len(long_)}, credits left {res.get('remaining')}")
     for r in long_[:8]:
-        print(f"  {r['Player']:<24} {r['Bet']:<22} {r['Price']:+6d}  book {r['Book says']:.1%}  honest {r['Honest chance']:.1%}  raw {r['Model raw']:.1%}  EV {r['EV per $1']:+.2f}  proj {r['Projection']}  main {r['Main line']}  {r.get('Flags') or ''}")
+        print("  " + " | ".join(f"{k}={r.get(k)}" for k in ("Player", "Bet", "Price", "Book says", "Honest chance",
+              "Model raw", "EV per $1", "Projection", "Main line", "Flags")))
