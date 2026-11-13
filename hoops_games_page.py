@@ -102,7 +102,47 @@ def _tip(p):
         return "—"
 
 
+@st.cache_data(ttl=30, show_spinner=False)
+def _live_games(league: str, day):
+    import live_games as LG
+    try:
+        return LG.games(league, day)
+    except Exception:                                           # noqa: BLE001
+        return []
+
+
+def live_section(league: str) -> None:
+    """Nov 13 (owner: lots of games in progress I can't see): the league's games in progress right now, straight
+    from the live feed, with the model's live win chance when it priced the game before tip."""
+    import live_games as LG
+    gs = [g for g in _live_games(league, _today_et()) if g.get("state") == "in"]
+    if not gs:
+        return
+    picks = MS.load_game_picks(league)
+    rows = []
+    for g in gs:
+        pre = LG.pregame_for(g, picks)
+        rd = None
+        try:
+            rd = LG.read_game(g, pre)
+        except Exception:                                       # noqa: BLE001
+            rd = None
+        win = None if not rd else rd["read"]["win_home"]
+        rows.append({"Game": f"{g['away']} @ {g['home']}", "Score": f"{int(g['away_score'])}–{int(g['home_score'])}",
+                     "Clock": g.get("detail") or "", "Model: home wins": win,
+                     "Projected final": "—" if not rd else
+                     f"{(rd['read']['total'] - rd['read']['margin']) / 2:.0f}–"
+                     f"{(rd['read']['total'] + rd['read']['margin']) / 2:.0f}"})
+    st.markdown(f"##### 🔴 In progress ({len(gs)})")
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
+                 column_config={"Model: home wins": st.column_config.NumberColumn(format="percent")})
+    st.caption("Straight from the league's live feed (refreshes every 30 seconds on reload). The live win chance needs "
+               "the model's pre-game read; leagues still building a record show the score only. Full live reads, live "
+               "lines and auto-refresh are on 🔴 Live Games.")
+
+
 def render(league: str, search: bool = False) -> None:
+    live_section(league)
     if not I.LEAGUES.get(league, {}).get("odds_key"):
         return render_fair(league)
     rules = IP.HOOPS_RULES.get(league, {})

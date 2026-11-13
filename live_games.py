@@ -28,9 +28,13 @@ ESPN_PATH = {"NBA": "basketball/nba", "WNBA": "basketball/wnba", "NCAAMB": "bask
 EL_COMP = {"EUROLEAGUE": "E", "EUROCUP": "U"}
 EL_HEADER = "https://live.euroleague.net/api/Header"
 ODDS = "https://api.the-odds-api.com/v4/sports/{key}/odds"
-LEAGUES = ("NBA", "NCAAMB", "NHL", "WNBA", "EUROLEAGUE", "EUROCUP", "NBL", "NFL", "NCAAF")
+LEAGUES = ("NBA", "NCAAMB", "NHL", "WNBA", "EUROLEAGUE", "EUROCUP", "NBL", "NFL", "NCAAF", "BCL", "FEC", "EUROCUPW",
+           "NKL", "ICELAND", "BAHRAIN", "ESTONIA1", "QATAR")
+INTL = ("EUROLEAGUE", "EUROCUP", "BCL", "FEC", "EUROCUPW", "NBL", "NKL", "ICELAND", "BAHRAIN", "ESTONIA1", "QATAR")
 TITLE = {"NBA": "NBA", "NCAAMB": "College basketball (men)", "NHL": "NHL", "WNBA": "WNBA",
          "EUROLEAGUE": "EuroLeague", "EUROCUP": "EuroCup", "NBL": "NBL (Australia)", "NFL": "NFL",
+         "BCL": "Champions League", "FEC": "FIBA Europe Cup", "EUROCUPW": "EuroCup Women", "NKL": "Lithuania NKL",
+         "ICELAND": "Iceland", "BAHRAIN": "Bahrain", "ESTONIA1": "Estonia", "QATAR": "Qatar",
          "NCAAF": "College football"}
 ODDS_KEY = {"NFL": "americanfootball_nfl", "NCAAF": "americanfootball_ncaaf"}
 
@@ -150,9 +154,85 @@ def euroleague_games(league: str, day: date, fetch: Callable = I._http, now: Opt
     return out
 
 
+def _clock_min(txt) -> Optional[float]:
+    """"05:12", "02:53:00" (Genius: minutes:seconds:hundredths) or "PT05M12S" -> minutes left in the period."""
+    import re
+    t = str(txt or "").strip()
+    if not t:
+        return None
+    m = re.match(r"PT(?:(\d+)M)?(?:([\d.]+)S)?", t)
+    if m and (m.group(1) or m.group(2)):
+        return float(m.group(1) or 0) + float(m.group(2) or 0) / 60
+    parts = t.split(":")
+    try:
+        return float(parts[0]) + (float(parts[1]) / 60 if len(parts) > 1 else 0.0)
+    except ValueError:
+        return None
+
+
+def _near(ko: str, now: datetime, hours: float = 14) -> bool:
+    try:
+        k = datetime.fromisoformat(str(ko).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    k = k if k.tzinfo else k.replace(tzinfo=timezone.utc)
+    return abs((k - now).total_seconds()) <= hours * 3600
+
+
+def fiba_live_games(league: str, day: date, fetch_text: Callable = I._http_text,
+                    now: Optional[datetime] = None) -> List[Dict]:
+    """Nov 13: Champions League, FIBA Europe Cup and EuroCup Women live, from the FIBA competition page."""
+    now = now or datetime.now(timezone.utc)
+    out = []
+    for g in I.fiba_season(league, I.season_of(league, day.isoformat()), fetch_text):
+        ko = str(g.get("gameDateTimeUTC") or "")[:19] + "+00:00"
+        if not _near(ko, now):
+            continue
+        hn, an = I._fiba_name(g.get("teamA")), I._fiba_name(g.get("teamB"))
+        if not hn or not an:
+            continue
+        live, played = bool(g.get("isLive")), I._fiba_played(g)
+        per_txt = str(g.get("currentPeriod") or "").upper()
+        per = int(per_txt[1:]) if per_txt.startswith("Q") and per_txt[1:].isdigit() else (5 if per_txt.startswith("OT") else 0)
+        half = "HALF" in str(g.get("currentPeriodStatus") or g.get("liveGameStatus") or "").upper()
+        out.append({"league": league, "id": f"fiba-{g.get('gameId')}", "home": hn, "away": an,
+                    "home_score": I._num(g.get("teamAScore")) or 0.0, "away_score": I._num(g.get("teamBScore")) or 0.0,
+                    "state": "in" if live else ("post" if played else "pre"), "period": per,
+                    "clock_left": _clock_min(g.get("chrono")) if live else None, "halftime": live and half,
+                    "detail": ("Half" if half else f"{per_txt} {g.get('chrono') or ''}".strip()) if live else
+                    ("Final" if played else ""), "kickoff": ko})
+    return out
+
+
+def genius_live_games(league: str, day: date, fetch: Callable = I._http, now: Optional[datetime] = None) -> List[Dict]:
+    """Nov 13: Lithuania NKL, Iceland, Bahrain, Estonia and Qatar live, from FIBA LiveStats (score, period, clock)."""
+    now = now or datetime.now(timezone.utc)
+    out = []
+    for m in I.genius_games(league, fetch):
+        ko = I._genius_utc(m)
+        if not ko or not _near(ko, now):
+            continue
+        st = str(m.get("matchStatus") or "").upper()
+        live = str(m.get("live")) in ("1", "True", "true") or st == "IN_PROGRESS"
+        per = int(I._num(m.get("period")) or 0)
+        if str(m.get("periodType") or "").upper().startswith("OVER"):
+            per = 4 + max(per, 1)
+        out.append({"league": league, "id": f"gs-{m.get('matchId')}", "home": m.get("homename"), "away": m.get("awayname"),
+                    "home_score": I._num(m.get("homescore")) or 0.0, "away_score": I._num(m.get("awayscore")) or 0.0,
+                    "state": "in" if live else ("post" if st == "COMPLETE" else "pre"), "period": per,
+                    "clock_left": _clock_min(m.get("clock")) if live else None, "halftime": False,
+                    "detail": (f"Q{per} {str(m.get('clock') or '')[:5]}" if per <= 4 else "OT") if live else
+                    ("Final" if st == "COMPLETE" else ""), "kickoff": ko})
+    return out
+
+
 def games(league: str, day: date, fetch: Callable = I._http) -> List[Dict]:
     if league in EL_COMP:
         return euroleague_games(league, day, fetch)
+    if league in I.FIBA_PAGES:
+        return fiba_live_games(league, day)
+    if league in I.GENIUS_COMPS:
+        return genius_live_games(league, day, fetch)
     return espn_games(league, day, fetch)
 
 
