@@ -50,7 +50,24 @@ _ALIAS = {"internazionale": "inter milan", "inter": "inter milan", "koln": "colo
           "sporting": "sporting lisbon", "red bull new york": "new york red bulls", "inter miami": "inter miami",
           "borussia monchengladbach": "monchengladbach", "gladbach": "monchengladbach", "leverkusen": "bayer leverkusen",
           "hertha": "hertha berlin", "napoli": "napoli", "roma": "roma", "lazio": "lazio", "milan": "ac milan",
-          "betis": "real betis", "sociedad": "real sociedad", "celta": "celta vigo", "alaves": "alaves"}
+          "betis": "real betis", "sociedad": "real sociedad", "celta": "celta vigo", "alaves": "alaves",
+          # Brazil (ESPN shortens with the state)
+          "atletico mg": "atletico mineiro", "athletico pr": "athletico paranaense", "atletico pr": "athletico paranaense",
+          "atletico paranaense": "athletico paranaense", "red bull bragantino": "bragantino",
+          "bragantino sp": "bragantino", "vasco": "vasco da gama", "sao paulo": "sao paulo",
+          # national teams
+          "turkiye": "turkey", "czechia": "czech republic", "korea republic": "south korea",
+          "republic of korea": "south korea", "united states": "usa", "usmnt": "usa", "ir iran": "iran",
+          "cote d ivoire": "ivory coast", "cote divoire": "ivory coast", "republic of ireland": "ireland",
+          "bosnia and herzegovina": "bosnia herzegovina", "bosnia": "bosnia herzegovina", "fyr macedonia": "north macedonia",
+          "cabo verde": "cape verde", "congo dr": "dr congo", "china pr": "china"}
+_FILLER = {"red", "bull", "esporte", "clube", "futebol", "futbol", "club", "sport"}
+# words shared by many clubs: never enough on their own
+_COMMON = {"city", "united", "real", "atletico", "athletico", "athletic", "sporting", "inter", "borussia", "olympique",
+           "dynamo", "dinamo", "saint", "santa", "union", "racing", "deportivo", "club", "town", "county", "rovers",
+           "wanderers", "albion", "hotspur", "olympic", "national", "new", "york", "los", "san", "sao", "red", "bull",
+           "independiente", "universidad", "nacional", "america", "esporte", "clube", "fluminense", "west", "north",
+           "south", "east", "royal", "standard", "young", "boys", "stade", "ac", "rb", "spvgg"}
 
 
 def _norm(name: str) -> str:
@@ -79,7 +96,22 @@ def team(names, name: str) -> Optional[str]:
         u = set(_norm(n).split())
         if u and (t <= u or u <= t):
             fits.append(n)
-    return fits[0] if len(fits) == 1 else None
+    if len(fits) == 1:
+        return fits[0]
+    if fits:
+        return None
+    # last resort: one distinctive word (5+ letters, not a common club word) shared by exactly one candidate, and every
+    # other word in either name is filler (a state code like "SP", a sponsor) -- so "Bragantino-SP" finds "Red Bull
+    # Bragantino" but "Manchester City" never finds "Manchester United" (City / United aren't filler)
+    key = {w for w in t if len(w) >= 5 and w not in _COMMON}
+    hits = []
+    for n in names:
+        u = set(_norm(n).split())
+        shared = key & u
+        rest = (t | u) - shared
+        if shared and all(len(w) <= 3 or w in _FILLER for w in rest):
+            hits.append(n)
+    return hits[0] if len(hits) == 1 else None
 
 
 def ratings(league: str, today: date, db_path: Optional[str] = None) -> Dict:
