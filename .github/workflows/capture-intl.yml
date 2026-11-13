@@ -5,6 +5,11 @@ name: capture-intl
 on:
   schedule:
     - cron: "23 */3 * * *"
+  # Nov 13: GitHub ran the 3-hourly schedule only every 6-9 hours, so International Hoops went stale. Other jobs
+  # finishing also start it; intl_picks.py skips a run that comes within 150 minutes of the last one.
+  workflow_run:
+    workflows: ["morning-brief", "warm-slates", "settle-results", "capture-closing-lines", "close-watch", "daily-review"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       sports:
@@ -36,6 +41,7 @@ jobs:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           SPORTS: ${{ inputs.sports }}
+          TRIGGER: ${{ github.event_name }}
         run: |
           python intl_picks.py "${SPORTS:-TENNIS,EUROLEAGUE,EUROCUP,BCL,FEC,EUROCUPW,NKL,ICELAND,BAHRAIN,ESTONIA1,QATAR,NBL,NCAAMB,NBA,NHL}"
       # Nov 13: the Soccer Lab (soccer_picks.py) -- results from ESPN (a ~13-month backfill the first run), one Odds API
@@ -46,4 +52,4 @@ jobs:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
-          python soccer_picks.py
+          if [ -f .skip-soccer ]; then echo "Skipped with the international capture (ran recently)."; else python soccer_picks.py; fi
