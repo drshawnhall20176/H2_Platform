@@ -408,10 +408,19 @@ def winner_rows(date_str: str, leagues=None, past: bool = False) -> List[Dict]:
                         "winner": team, "chance": chance, "book": book, "price": price,
                         "price_book": p.get("best_home_book") if home else p.get("best_away_book"),
                         "value": value, "use": ml_tag, **best,
+                        "_gaps": _lean_gaps(p, lg),
                         "_rec": {"sport": lg, "home": p.get("home"), "away": p.get("away"), "game_id": p.get("game_id"),
                                  "kickoff": p.get("kickoff")}})
     out.sort(key=lambda r: -r["chance"])
     return out
+
+
+def _lean_gaps(p: Dict, lg: str) -> Dict:
+    try:
+        import pick_records as PR
+        return PR.gaps(p, lg)
+    except Exception:                                           # noqa: BLE001
+        return {}
 
 
 def soccer_rows(date_str: str, leagues=None, past: bool = False) -> List[Dict]:
