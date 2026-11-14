@@ -381,3 +381,48 @@ def parse_summary(data: Optional[Dict]) -> List[Dict]:
 
 def player_stats(league: str, event_id: str, fetch: Callable = _http) -> List[Dict]:
     return parse_summary(fetch(SUMMARY.format(slug=LEAGUES[league]["slug"]), {"event": event_id}))
+
+
+# --------------------------------------------------------------------------- team shots (Nov 14: expected goals)
+TEAM_CACHE = "SOCCERT_{league}"     # results_archive key: per-match team shots, for the shots-based xG
+
+
+def parse_team_stats(data: Optional[Dict]) -> Optional[Dict]:
+    """A match summary -> {"home": {"shots","sot","pk"}, "away": {...}} (None when ESPN has no team box)."""
+    teams = ((data or {}).get("boxscore") or {}).get("teams") or []
+    comp = (((data or {}).get("header") or {}).get("competitions") or [{}])[0]
+    side = {str((c.get("team") or {}).get("id")): c.get("homeAway") for c in comp.get("competitors") or []}
+    out = {}
+    for i, t in enumerate(teams):
+        st = {s.get("name"): s.get("displayValue") for s in t.get("statistics") or []}
+        try:
+            row = {"shots": float(st["totalShots"]), "sot": float(st["shotsOnTarget"]),
+                   "pk": float(st.get("penaltyKickShots") or 0)}
+        except (KeyError, TypeError, ValueError):
+            return None
+        ha = side.get(str((t.get("team") or {}).get("id"))) or t.get("homeAway") or ("home" if i == 0 else "away")
+        out[ha] = row
+    return out if set(out) == {"home", "away"} else None
+
+
+def team_stats(league: str, event_id: str, fetch: Callable = _http) -> Optional[Dict]:
+    return parse_team_stats(fetch(SUMMARY.format(slug=LEAGUES[league]["slug"]), {"event": event_id}))
+
+
+def cache_team_stats(league: str, results: Sequence[Dict], fetch: Callable = _http, db_path: Optional[str] = None,
+                     limit: int = 400, workers: int = 6) -> Dict[str, Dict]:
+    """{match id: team shots} for finished matches, fetching (and archiving) only the ones not cached yet."""
+    import model_store as MS
+    from concurrent.futures import ThreadPoolExecutor
+    key = TEAM_CACHE.format(league=league)
+    have = {str(r["id"]): r for r in MS.load_results(key, db_path=db_path)}
+    todo = [g for g in results if str(g.get("id")) not in have][:limit]
+    if todo:
+        lg_of = lambda g: g.get("league") or league
+        with ThreadPoolExecutor(workers) as ex:
+            got = list(ex.map(lambda g: team_stats(lg_of(g), str(g["id"]), fetch), todo))
+        new = [{"id": str(g["id"]), "date": str(g.get("date") or ""), **ts} for g, ts in zip(todo, got) if ts]
+        if new:
+            MS.save_results(key, new, db_path=db_path)
+            have.update({r["id"]: r for r in new})
+    return have
