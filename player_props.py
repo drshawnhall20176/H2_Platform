@@ -66,7 +66,12 @@ PACE_FLAG_PCT = 4.0
 # better calibrated everywhere it's on -- Assists Brier .2495 -> .2428 and lean edge +0.1 -> +5.6 pts, Steals slope
 # .60 -> .94, Blocks .73 -> .99, Threes .73 -> 1.08. POINTS got slightly worse (Brier .2678 -> .2706), so points --
 # and every combo with points in it -- keep the player's own rate. Minutes of half-trust:
-RATE_SHRINK_MIN = {"pts": 0.0, "reb": 45.0, "ast": 45.0, "fg3m": 45.0, "stl": 220.0, "blk": 110.0, "tov": 110.0}
+# Nov 14, checked again on REAL lines (research/nba_real_lines_eval.py: 5,658 graded reads with both prices, 28 days):
+# toward the league average, Rebounds and Threes leans got worse (a center's rebounds were being pulled toward guards').
+# Toward his POSITION GROUP at half the strength below was the best of six settings (log loss .6925 vs .6929 with no
+# regression and .6931 league-average; leans +0.7% vs +0.6% / 0.0%). Small differences: on real lines the market
+# carries most of the weight. Minutes of half-trust:
+RATE_SHRINK_MIN = {"pts": 0.0, "reb": 22.5, "ast": 22.5, "fg3m": 22.5, "stl": 110.0, "blk": 55.0, "tov": 55.0}
 MIN_DEFENSES = 8           # a league average from fewer defenses than this isn't one (college: two teams only)
 
 _OUT = {"out", "injured reserve", "ir", "suspended", "inactive"}
@@ -210,12 +215,20 @@ def shrink_minutes(market: str) -> float:
     return sum(ks) / len(ks) if ks else 0.0
 
 
-def league_rate(pgames: Iterable[Dict], market: str, min_minutes: float = MIN_MINUTES) -> Optional[float]:
-    """The market's per-minute rate across the sample's rotation games (the regression target)."""
+PRIOR_BY_GROUP = True      # Nov 14: regress toward his POSITION GROUP's rate (G / F / C), not the whole league's
+
+
+def league_rate(pgames: Iterable[Dict], market: str, min_minutes: float = MIN_MINUTES,
+                group: Optional[str] = None) -> Optional[float]:
+    """The market's per-minute rate across the sample's rotation games (the regression target); with `group`, only
+    that position group's (a center's rebounds regress toward centers', not toward guards')."""
+    import position_matchups as PM
     v = m = 0.0
     for p in pgames or []:
         st = p.get("stats") or {}
         mins = _num(st.get("min"))
+        if group is not None and PM.position_group(p.get("pos")) != group:
+            continue
         if mins >= min_minutes:
             v += market_value(st, market)
             m += mins
@@ -310,13 +323,20 @@ def player_rows(rotation_list: Sequence[Dict], defense, market: str, cur_table: 
     base = []
     lg_rate = league_rate(cur_pgames, market) or league_rate(prior_pgames, market)
     k_min = shrink_minutes(market)
+    grp_rates: Dict = {}
     for r in rotation_list:
         f = form_games(cur_pgames, prior_pgames, r["pid"])
         games = f["games"]
         values = [market_value(g.get("stats") or {}, market) for g in games]
         mins = [_num((g.get("stats") or {}).get("min")) for g in games]
         rate, proj_min = PE.rate_and_opportunity(values, mins, f["weights"])
-        rate = PE.shrink_toward(rate, mins, lg_rate, k_min, f["weights"])     # Nov 14: regression to the mean
+        target = lg_rate
+        if PRIOR_BY_GROUP and k_min and r.get("slot") in ("G", "F", "C"):
+            if r["slot"] not in grp_rates:
+                grp_rates[r["slot"]] = (league_rate(cur_pgames, market, group=r["slot"])
+                                        or league_rate(prior_pgames, market, group=r["slot"]))
+            target = grp_rates[r["slot"]] or lg_rate
+        rate = PE.shrink_toward(rate, mins, target, k_min, f["weights"])     # Nov 14: regression to the mean
         out = is_out(r.get("status"))
         fresh = out and PE.fresh_absence([g.get("game") for g in _games(cur_pgames, r["pid"], HIT_N)], team_games)
         base.append({"r": r, "f": f, "values": values, "games": games, "rate": rate, "proj_min": proj_min,

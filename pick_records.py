@@ -31,12 +31,21 @@ def verdict(w: int, n: int, line_market: bool = False) -> str:
     return "ok"
 
 
+def margin(w: int, n: int, z: float = 1.645) -> float:
+    """Nov 14: the 90% range around a hit rate (Wilson), so a 24-17 record reads as 59% +/- 13, not a sure 59%."""
+    if not n:
+        return 1.0
+    p = w / n
+    den = 1 + z * z / n
+    return z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / den
+
+
 def label(w: int, n: int, line_market: bool = False) -> str:
     if not n:
         return "no record yet"
     v = verdict(w, n, line_market)
     tail = {"fade": f" · the other side won {n - w}–{w}", "losing": " · losing", "new": " · small sample"}.get(v, "")
-    return f"{w}–{n - w} ({w / n:.0%}){tail}"
+    return f"{w}–{n - w} ({w / n:.0%} ±{margin(w, n):.0%}){tail}"
 
 
 def tag_records(sport: str) -> Dict[str, Tuple[int, int]]:
