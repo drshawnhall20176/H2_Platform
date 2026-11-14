@@ -121,7 +121,9 @@ def band_label(i: int, market: str, league: str) -> str:
     msd, tsd = _sd(league)
     sd = msd if market == "Spread" else tsd
     lo, hi = GAP_BANDS[i]
-    return f"{lo * sd:.0f}+ pt gap" if hi > 50 else f"{lo * sd:.0f}–{hi * sd:.0f} pt gap"
+    f = (lambda x: f"{x:.1f}".rstrip("0").rstrip(".")) if sd < 5 else (lambda x: f"{x:.0f}")   # hockey: goals
+    return f"{f(lo * sd)}+ {'goal' if sd < 5 else 'pt'} gap" if hi > 50 else \
+        f"{f(lo * sd)}–{f(hi * sd)} {'goal' if sd < 5 else 'pt'} gap"
 
 
 def lean_records(league: str, days: int = DAYS, recs=None) -> Dict:
