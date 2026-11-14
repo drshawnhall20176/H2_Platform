@@ -201,7 +201,34 @@ def _team_kind_rho(a: Dict, b: Dict) -> float:
     return (RHO_TOTAL_PLAYER if same in (True, None) else RHO_TOTAL_PLAYER * 0.25) * sa * sb
 
 
-def correlation_matrix(legs: List[Dict], rho_player: float = 0.30, rho_game: float = 0.08) -> np.ndarray:
+# Nov 14: MEASURED, not assumed (research/loop_audit.py, 28 days of graded reads with lines; latent correlation of two
+# props both going Over): (same player, two markets; teammates; opponents). NBA teammates slightly compete for the
+# same shots (-0.05); in hockey a team's good night lifts everyone (+0.19 teammates, +0.15 even across the ice). The
+# sliders on Slip Lab default to these for the sport on screen.
+MEASURED_RHO = {"NBA": (0.28, -0.05, 0.00), "NFL": (0.31, 0.08, 0.06), "NHL": (0.37, 0.19, 0.15)}
+DEFAULT_RHO = (0.30, 0.08)
+
+
+def measured_rho(sport: Optional[str]) -> Tuple[float, float]:
+    """(same-player, same-game) for the sliders: the game value is the average of teammates and opponents."""
+    m = MEASURED_RHO.get(sport or "")
+    return (m[0], round((m[1] + m[2]) / 2, 2)) if m else DEFAULT_RHO
+
+
+def _pair_rho(a: Dict, b: Dict, rho_player: Optional[float], rho_game: Optional[float]) -> float:
+    same_player = bool(a.get("player")) and a.get("player") == b.get("player")
+    m = MEASURED_RHO.get(str(a.get("sport") or b.get("sport") or ""))
+    if same_player:
+        return rho_player if rho_player is not None else (m[0] if m else DEFAULT_RHO[0])
+    if rho_game is not None:
+        return rho_game
+    if not m:
+        return DEFAULT_RHO[1]
+    same = _same_team(a, b)
+    return m[1] if same else (m[2] if same is False else (m[1] + m[2]) / 2)
+
+
+def correlation_matrix(legs: List[Dict], rho_player: Optional[float] = None, rho_game: Optional[float] = None) -> np.ndarray:
     """Correlation between legs' outcomes, as a positive-semidefinite k x k matrix.
 
     Two legs on the SAME PLAYER (different markets: points and assists) get rho_player; two legs
@@ -225,8 +252,7 @@ def correlation_matrix(legs: List[Dict], rho_player: float = 0.30, rho_game: flo
             if _kind(a) != "player" or _kind(b) != "player":
                 R[i, j] = R[j, i] = float(np.clip(_team_kind_rho(a, b), -0.95, 0.95))
                 continue
-            same_player = bool(a.get("player")) and a.get("player") == b.get("player")
-            rho = rho_player if same_player else rho_game
+            rho = _pair_rho(a, b, rho_player, rho_game)       # None = the measured value for the legs' sport
             R[i, j] = R[j, i] = rho * _side_sign(a) * _side_sign(b)
     return _nearest_psd_correlation(R)
 
@@ -292,7 +318,7 @@ def _summ(R: np.ndarray) -> Dict[str, float]:
             "p_total_loss": float((R <= 1e-9).mean()), "mean_return": float(R.mean())}
 
 
-def evaluate(legs: List[Dict], payout: Dict, *, rho_player: float = 0.30, rho_game: float = 0.08,
+def evaluate(legs: List[Dict], payout: Dict, *, rho_player: Optional[float] = None, rho_game: Optional[float] = None,
              n_sims: int = 20000, n_worlds: int = 200, seed: Optional[int] = None,
              haircut: float = 0.0, prob_key: str = "p", uncertainty: bool = True,
              _Z: Optional[np.ndarray] = None, _worlds: Optional[np.ndarray] = None) -> Dict:
@@ -343,7 +369,7 @@ def evaluate(legs: List[Dict], payout: Dict, *, rho_player: float = 0.30, rho_ga
 
 
 def stress_scenarios(legs: List[Dict], payout: Dict, *, haircuts: Sequence[float] = (0.03, 0.05, 0.08),
-                     rho_player: float = 0.30, rho_game: float = 0.08, n_sims: int = 20000,
+                     rho_player: Optional[float] = None, rho_game: Optional[float] = None, n_sims: int = 20000,
                      n_worlds: int = 200, seed: Optional[int] = 7) -> List[Dict]:
     """Baseline plus overconfidence haircuts plus the 'book is right' scenario, all on the SAME
     random draws. One row per scenario: name, ev, p_profit, p_all, ev_p05/p95."""
@@ -366,8 +392,8 @@ def _scenario_row(name: str, r: Dict) -> Dict:
             "ev_p05": r["ev_p05"], "ev_p95": r["ev_p95"], "p_ev_positive": r["p_ev_positive"]}
 
 
-def leg_drop_table(legs: List[Dict], payout_for_subset, *, rho_player: float = 0.30,
-                   rho_game: float = 0.08, n_sims: int = 20000, n_worlds: int = 100,
+def leg_drop_table(legs: List[Dict], payout_for_subset, *, rho_player: Optional[float] = None,
+                   rho_game: Optional[float] = None, n_sims: int = 20000, n_worlds: int = 100,
                    seed: Optional[int] = 7) -> List[Dict]:
     """For each leg, the slip's EV and P(profit) WITHOUT that leg, against the full slip.
 

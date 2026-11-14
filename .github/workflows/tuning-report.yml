@@ -1,10 +1,17 @@
-# Weekly tuning report (tuning_report.py): calibration, profit at the posted price, closing-line value and the
-# model-vs-books blend fit per market. Tuesday 8:17 AM ET (after Monday Night Football), or on demand.
+# Tuning report (tuning_report.py): calibration, profit at the posted price, closing-line value and the
+# model-vs-books blend fit per market. Nov 14: DAILY (was Tuesdays) -- the owner wants the model to learn every day.
+# Each proposal still applies itself only when it wins on held-out days (2 of 3 and overall), so a daily run can't
+# chase one night's noise. 8:17 AM ET, or on demand.
 name: tuning-report
 
 on:
   schedule:
-    - cron: "17 13 * * 2"
+    - cron: "17 13 * * *"
+  # GitHub skips busy scheduled runs: also run after each morning review; tuning_report.py does nothing when today's
+  # report already exists (TRIGGER=workflow_run), so this is once a day.
+  workflow_run:
+    workflows: ["daily-review"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       sports:
@@ -36,5 +43,6 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           SPORTS: ${{ inputs.sports }}
           DAYS: ${{ inputs.days }}
+          TRIGGER: ${{ github.event_name }}
         run: |
           python tuning_report.py ${SPORTS:+--sports "$SPORTS"} --days "${DAYS:-28}"

@@ -66,7 +66,12 @@ PACE_FLAG_PCT = 4.0
 # better calibrated everywhere it's on -- Assists Brier .2495 -> .2428 and lean edge +0.1 -> +5.6 pts, Steals slope
 # .60 -> .94, Blocks .73 -> .99, Threes .73 -> 1.08. POINTS got slightly worse (Brier .2678 -> .2706), so points --
 # and every combo with points in it -- keep the player's own rate. Minutes of half-trust:
-RATE_SHRINK_MIN = {"pts": 0.0, "reb": 45.0, "ast": 45.0, "fg3m": 45.0, "stl": 220.0, "blk": 110.0, "tov": 110.0}
+# Nov 14, checked again on REAL lines (research/nba_real_lines_eval.py: 5,658 graded reads with both prices, 28 days):
+# toward the league average, Rebounds and Threes leans got worse (a center's rebounds were being pulled toward guards').
+# Toward his POSITION GROUP at half the strength below was the best of six settings (log loss .6925 vs .6929 with no
+# regression and .6931 league-average; leans +0.7% vs +0.6% / 0.0%). Small differences: on real lines the market
+# carries most of the weight. Minutes of half-trust:
+RATE_SHRINK_MIN = {"pts": 0.0, "reb": 22.5, "ast": 22.5, "fg3m": 22.5, "stl": 110.0, "blk": 55.0, "tov": 55.0}
 MIN_DEFENSES = 8           # a league average from fewer defenses than this isn't one (college: two teams only)
 
 _OUT = {"out", "injured reserve", "ir", "suspended", "inactive"}
