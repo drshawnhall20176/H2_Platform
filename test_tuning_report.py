@@ -113,7 +113,7 @@ def test_weekly_tab_shows_report_and_what_applied_itself(monkeypatch):
     at.session_state["sport"] = "NBA"
     at.run()
     assert not at.exception, [e.value for e in at.exception]
-    assert any("weekly tuning report" in m.value for m in at.markdown)
+    assert any("daily tuning report" in m.value for m in at.markdown)
     assert not any(b.label == "Approve" for b in at.button) and not got
     assert any("Applied automatically" in c.value for c in at.caption)
 
