@@ -283,7 +283,9 @@ if True:
             _LU.panel(_ls_items, "home_ls_log", _today, tag="long-shot", past=_past)
             st.caption(C.money_md(
                 "The most likely long shots (priced +400 or longer) that are still worth their price at the honest "
-                "chance, one per player, from the Long Shots finder. ✅ = the one market whose long-shot value lines have "
+                "chance, one per player, from the Long Shots finder — only where the model and the book roughly agree "
+                "on the player's normal night (projection within 25% of the book's main line), so these are tail "
+                "outcomes, not bets that the book has the player wrong. ✅ = the one market whose long-shot value lines have "
                 "made money in testing (NBA Assists, NFL Rush Yards); the rest lost 19–32% overall. Most of these lose "
                 "— keep stakes flat at a few dollars and never put two of the same player in one parlay."))
 
