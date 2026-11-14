@@ -930,11 +930,13 @@ C.section_header("🔥", "Pressure test", "Correlated simulation + stress scenar
 with st.expander("Test settings", expanded=False):
     s1, s2, s3 = st.columns(3)
     with s1:
-        rho_player = st.slider("Same-player correlation", 0.0, 0.7, 0.30, 0.05, key="slip_lab_rho_p",
+        _rp, _rg = SIM.measured_rho(SPORT_KEY) if hasattr(SIM, "measured_rho") else (0.30, 0.08)
+        rho_player = st.slider("Same-player correlation", 0.0, 0.7, float(_rp), 0.01, key=f"slip_lab_rho_p_{SPORT_KEY}",
                                help="How strongly two legs on the same player move together (e.g. points and "
                                     "3-pointers made). Sign is handled automatically for Over/Under mixes.")
-        rho_game = st.slider("Same-game correlation", 0.0, 0.3, 0.08, 0.01, key="slip_lab_rho_g",
-                             help="Shared game environment: pace, blowouts, weather.")
+        rho_game = st.slider("Same-game correlation", -0.1, 0.3, float(_rg), 0.01, key=f"slip_lab_rho_g_{SPORT_KEY}",
+                             help="Shared game environment: pace, blowouts, weather. Defaults to what's been measured "
+                                  "for this sport (Nov 14: NBA ~0, NFL 0.07, NHL 0.17).")
     with s2:
         evidence = st.slider("Evidence weight", 0.5, 2.0, 1.0, 0.1, key="slip_lab_evidence",
                              help="1.0 = trust the sample size behind each leg as-is. Lower it to say the model "
