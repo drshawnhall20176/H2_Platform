@@ -364,7 +364,7 @@ with tab_trend:
 with tab_week:
     weeks = MS.daily_review_mornings(f"{SPORT_KEY}-tuning")
     if not weeks:
-        st.info("No weekly tuning report yet. It runs Tuesday mornings (after Monday Night Football): calibration by "
+        st.info("No tuning report yet. It runs every morning after the review (Nov 14; it was weekly): calibration by "
                 "market and side, profit at the posted price, closing-line value for logged bets, and how much the "
                 "model should count against the books' line in each market.")
     else:
