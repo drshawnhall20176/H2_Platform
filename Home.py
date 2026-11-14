@@ -291,7 +291,8 @@ if True:
                 "chance, one per player, from the Long Shots finder — only where the model and the book roughly agree "
                 "on the player's normal night (projection within 25% of the book's main line), so these are tail "
                 "outcomes, not bets that the book has the player wrong. ✅ = the one market whose long-shot value lines have "
-                "made money in testing (NBA Assists, NFL Rush Yards); the rest lost 19–32% overall (NHL: 11–25%). Most of these lose "
+                "made money in testing (NBA Assists, NFL Rush Yards, college football Rush and Receiving Yards); the rest "
+                "lost 19–32% overall (NHL: 11–25%). Most of these lose "
                 "— keep stakes flat at a few dollars and never put two of the same player in one parlay."))
 
     # ---- Lab long shots (Nov 14): tennis, international hoops and soccer, read from their labs -- tracking only
