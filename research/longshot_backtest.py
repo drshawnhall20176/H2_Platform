@@ -28,7 +28,7 @@ import props_engine as PE                                        # noqa: E402
 LEAGUE = os.environ.get("LEAGUE", "NFL")
 SPORT = {"NBA": "basketball_nba", "NFL": "americanfootball_nfl", "NHL": "icehockey_nhl"}[LEAGUE]
 CFG = LS.SPORTS[LEAGUE]
-BOOK, FLOOR = "draftkings", 100000
+BOOK, FLOOR = "draftkings", int(os.environ.get("FLOOR", "100000"))
 START, END = os.environ.get("START", "2026-10-22"), os.environ.get("END", "2026-11-12")
 key = os.environ["ODDS_API_KEY"]
 et = pytz.timezone("US/Eastern")
