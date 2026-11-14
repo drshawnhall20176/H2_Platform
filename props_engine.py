@@ -163,6 +163,22 @@ def rate_and_opportunity(values: Sequence[float], opps: Sequence[float],
     return rate, wmean([o for _, o in pairs], w)
 
 
+def shrink_toward(rate: Optional[float], opps: Sequence[float], prior: Optional[float], k: float,
+                  game_weights: Optional[Sequence[float]] = None) -> Optional[float]:
+    """Nov 14 (regression audit, research/stability_audit.py + regression_test.py): pull a player's own per-
+    opportunity rate toward his group's by k opportunities. n = his recency-weighted opportunity, in newest-game
+    units (the same weighting the rate itself uses). Little sample -> mostly the group; a big one -> mostly him."""
+    if rate is None or prior is None or not k:
+        return rate
+    used = [o for o in opps if o > 0]
+    if not used:
+        return prior
+    w = list(game_weights)[: len(opps)] if game_weights is not None else recency_weights(len(used))
+    w = [x for x, o in zip(w, opps) if o > 0] if game_weights is not None else w
+    n = sum(x * o for x, o in zip(w, used)) / max(w)
+    return (rate * n + prior * k) / (n + k)
+
+
 # --------------------------------------------------------------------------- 5. distributions
 def threshold(line: float) -> float:
     """A whole-number line is an alt "N+" ladder line (cleared at N, continuity point N - 0.5); a half line is

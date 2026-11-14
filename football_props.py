@@ -109,7 +109,12 @@ EFF_SHRINK = {"tgt": 30.0, "rush_att": 40.0, "pass_att": 120.0, "touch": 50.0}  
 # player-games, 2025 wk 4-18 + 2026 wk 3-9): trusting a player's own TD rate for 200 touches instead of 50 cut log
 # loss at every position (QB .4445 -> .4387, RB .5472 -> .5374, WR .4727 -> .4697, TE .4713 -> .4678) and fixed the
 # overconfidence at the top (players priced 60%+ scored 50-53%).
-MARKET_SHRINK = {"Anytime TD": 200.0}
+MARKET_SHRINK = {"Anytime TD": 200.0,
+                 # Nov 14 (regression audit, research/regression_test.py: NFL 2024-26 + college 2025-26 walk-forward).
+                 # A QB's interception rate barely repeats game to game (split-half r 0.26 NFL, ~0 college): pulling it
+                 # nearly all the way to the position's rate cut next-game error 7-8% (best at 40+ games of attempts).
+                 # Passing TDs per attempt: best at ~10 games (5-6% better) -- 120 attempts was about 4.
+                 "Interceptions": 1200.0, "Passing TDs": 320.0}
 # Nov 2: what a 🎯 Single needs, per sport -- (edge at the price, chance). NFL singles at +3% hit 46% (113 graded
 # Nov 1, 9-14 among the day's picks) while 🎟️ parlay-grade legs hit 63%. Anytime TD "Yes" singles keep their own bar.
 SINGLE_BAR = PE.SINGLE_BAR          # Nov 3: moved to props_engine (shared with the NBA)
@@ -161,7 +166,8 @@ FORM_N = 8                     # weeks of form
 PRIOR_FULL = 4                 # under 4 games this season, last season fills the gap (4 - n game-equivalents)
 BACKUP_SHARE = 0.6             # a backup's volume from games his starter missed counts at 60% once the starter is back
 RETURN_MISSED = 2              # a starter who missed 2+ of the team's recent games is "back"
-QB_RUSH_SHRINK = 12.0          # a QB's yards per carry leans on his OWN history (mobile QBs skew the league rate)
+QB_RUSH_SHRINK = 40.0          # Nov 14: was 12 -- the audit's best was ~40-80 carries (4-5% better next game); still
+                               # far less than a back's, since mobile QBs skew the league rate
 PRESSURE_SHRINK = 6.0          # games before a defense's / line's sack rate is fully trusted
 PRESSURE_QB = 0.10             # a +50% sack matchup trims QB yards / TDs / completions 5%
 PRESSURE_RB_TGT = 0.20         # ... and adds 10% to running backs' targets (check-downs)
@@ -234,6 +240,13 @@ def league_rates(pgames, market: str, tgt_ok: bool) -> Dict[str, float]:
         t[0] += market_value(p.get("stats") or {}, market)
         t[1] += o
     return {g: v / o for g, (v, o) in tot.items() if o > 0}
+
+
+def shrink_k(market: str, grp: str, kind: str, promoted: bool = False) -> float:
+    """Opportunities of half-trust for a player's own efficiency (the model and its backtest share this)."""
+    k = (QB_RUSH_SHRINK if (grp == "QB" and kind == "rush_att") else
+         MARKET_SHRINK.get(market, EFF_SHRINK.get(kind, 40.0)))
+    return k * (PROMOTED_SHRINK_MULT if promoted else 1.0)
 
 
 def _group(slot: str) -> str:
@@ -428,9 +441,7 @@ def player_rows(roster: Sequence[Dict], team, defense, market: str, pgames, allo
         if not i["out"]:
             grp = "RB" if _group(slot) == "RB" else _group(slot)
             prior = rates.get(grp, rates.get("WR", 0.0))
-            k = (QB_RUSH_SHRINK if (grp == "QB" and kind == "rush_att") else
-                 MARKET_SHRINK.get(market, EFF_SHRINK.get(kind, 40.0))) * \
-                (PROMOTED_SHRINK_MULT if r.get("role_change") else 1.0)
+            k = shrink_k(market, grp, kind, bool(r.get("role_change")))
             n_opp = i["n_opp"]
             rate = prior if i["rate"] is None else (i["rate"] * n_opp + prior * k) / (n_opp + k)
             opp = i["opp"] + adds[id(i)]

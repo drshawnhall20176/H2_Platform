@@ -117,6 +117,7 @@ def backtest_basketball(pgames: Sequence[Dict], sport: str, market: str, max_cas
         return max(earlier) if earlier else None
 
     cases: List[Dict] = []
+    lg_rates: Dict[str, Optional[float]] = {}
     targets = sorted(pg, key=lambda p: _date(p["order"]), reverse=True)
     for p in targets:
         if len(cases) >= max_cases:
@@ -137,6 +138,9 @@ def backtest_basketball(pgames: Sequence[Dict], sport: str, market: str, max_cas
         rate, proj_min = PE.rate_and_opportunity(vals, mins)
         if rate is None:
             continue
+        if d not in lg_rates:                                   # Nov 14: the model's regression to the mean
+            lg_rates[d] = PPR.league_rate([q for q in pg if _date(q["order"]) < d], market)
+        rate = PE.shrink_toward(rate, mins, lg_rates[d], PPR.shrink_minutes(market))
         # next man up: regulars of this team (2 of its last 3 games, 20+ min) who sat this one
         recent_team = sorted([g for g, gd in team_games.get(p["team"], {}).items() if gd < d],
                              key=lambda g: team_games[p["team"]][g], reverse=True)[:PE.FRESH_OUT_GAMES]
@@ -274,7 +278,7 @@ def backtest_football(pgames: Sequence[Dict], sport: str, market: str, max_cases
             rates_by_week[wk] = FP.league_rates(before, market, tgt_ok)
             tables[wk] = FP.defense_table(PM.allowed_by_slot(before, sport), market)
         prior = rates_by_week[wk].get(pos, rate or 0.0)
-        k = FP.EFF_SHRINK.get(m["opp"], 40.0)
+        k = FP.shrink_k(market, pos, m["opp"])
         n_opp = sum(opps)
         rate = (rate * n_opp + prior * k) / (n_opp + k)
         # the slot he held in this game (usage), for the defense factor
