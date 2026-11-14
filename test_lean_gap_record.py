@@ -48,3 +48,11 @@ def test_ncaaf_rows_show_the_spread():
     b = TB.best_line(p, "NCAAF", 0.53)
     assert b["best"] in ("Oklahoma +4", "Over 47.5")                 # a spread lean is possible now
     assert b["bet_price"] == -110
+
+
+def test_lean_use_symbols():
+    import props_engine as PE
+    assert PR.lean_use({"best_tested": True, "use": PE.USE_BOTH}) == PE.USE_BOTH
+    assert PR.lean_use({"best": "X -3", "lean_wn": (30, 50)}) == PE.USE_SINGLE
+    assert PR.lean_use({"best": "X -3", "lean_wn": (26, 50)}) == PE.USE_PASS
+    assert PR.lean_use({"best": "A 52%", "status": "tracking only"}) == PE.USE_PASS

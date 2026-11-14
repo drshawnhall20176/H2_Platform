@@ -60,7 +60,9 @@ def panel(items: Sequence[Dict], key: str, date_str: str, tag: str = "platform-t
     st.markdown(f"**📝 Log {len(items)} ticked pick{'s' if len(items) != 1 else ''}**")
     ed = pd.DataFrame([{"Pick": f"{it.get('sport', '')} · {it.get('pick', '')}",
                         "Price": None if it.get("price") is None else float(it["price"])} for it in items])
-    ed = st.data_editor(ed, hide_index=True, width="stretch", key=f"{key}_prices", disabled=["Pick"],
+    if any(it.get("grade") for it in items):                     # Nov 14: game lines show their grade here
+        ed.insert(1, "Grade", [it.get("grade") or "" for it in items])
+    ed = st.data_editor(ed, hide_index=True, width="stretch", key=f"{key}_prices", disabled=["Pick", "Grade"],
                         column_config={"Price": st.column_config.NumberColumn(
                             "Price you got", help="American odds from your slip; edit if it moved", format="%+d")})
     prices = [r["Price"] for r in ed.to_dict("records")]
