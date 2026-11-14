@@ -37,8 +37,8 @@ from odds_api import american_to_decimal, US_BOOKS
 
 C.base_css()
 C.page_header("🥊", "UFC Fight Card",
-             "Tonight's bouts — odds, implied probabilities, and method of victory lines. "
-             "Phase 1: data surface. Model conviction scores coming in Phase 2.")
+             "Tonight's bouts — moneyline odds, no-vig chances and total-rounds lines. No UFC model: the chances "
+             "come from the odds.")
 
 # ── API key check ──────────────────────────────────────────────────────────
 try:
@@ -388,5 +388,5 @@ st.caption("📊 Odds from The Odds API — same source as MLB/NFL Edge Board. "
            "Implied probabilities are no-vig (vig removed from the two-sided market). "
            "Method of victory markets aren't shown yet — The Odds API's own current MMA "
            "coverage doesn't include them, not a subscription-tier limit; this will light up "
-           "automatically once they add support. Phase 2 will add finishing rate history and "
-           "conviction scoring against the community's own pick distribution.")
+           "automatically once they add support. There's no UFC model yet, so nothing here is a pick — "
+           "it's the market's read, for tracking your own picks against where the line closes.")
