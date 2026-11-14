@@ -53,10 +53,12 @@ C.page_header("🏟️", "NCAAF Game Lab",
              "available) quarter and half winner probabilities — the first game-level modeling "
              "on this platform, built specifically for NCAAF slates where player props aren't "
              "available.")
-st.warning("**The win probability / spread / total below are informational — not a betting signal.** Backtested "
-           "against 859 FBS games (2025-26) they lost to the closing line (47-48% against the spread when they "
-           "disagreed; 52.4% breaks even). For spreads, see **📐 Ratings model v2** just below — "
-           "opponent-adjusted ratings that hit 55% in the same backtest, now being tracked live.", icon="⚠️")
+st.warning("**Nothing on this page is a proven game-line edge.** The win probability / spread / total below lost "
+           "to the closing line in a backtest of 859 FBS games (47-48% against the spread; 52.4% breaks even). The "
+           "📐 Ratings model v2 just below looked better on 2025 (55% at 7+ points) but went 8-20 live, with nearly every "
+           "pick on the home team; fixed Nov 14 (home field had been inflated by FBS-vs-FCS blowouts), the retest is a "
+           "coin flip (about 50% in 2026). Its picks are tracked, not recommended. For college football bets, the "
+           "player props below have the track records.", icon="⚠️")
 
 if not sports.require_sport(["NCAAF"], "NCAAF Game Lab"):
     st.stop()

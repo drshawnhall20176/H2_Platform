@@ -278,6 +278,7 @@ UNTESTED_SHRINK = 0.5
 UNTESTED_MAX = 0.60             # a big untested disagreement is more often the model's error than the market's
 STD_PRICE = -110
 NCAAMB_TOTAL_BACKTEST = {"Under": 0.453, "Over": 0.508}
+NCAAF_SPREAD_BACKTEST = 0.481
 ML_PRICE_RANGE = (-250, 250)
 
 
@@ -324,6 +325,8 @@ def best_line(p: Dict, lg: str, home_p: float) -> Dict:
             return out
     leans = []
     hs, mm = p.get("home_spread"), p.get("model_margin")
+    if hs is None and p.get("line") is not None:                # Nov 14: college football keeps the home's margin
+        hs = -float(p["line"])
     if hs is not None and mm is not None:
         z = (float(mm) + float(hs)) / MARGIN_SD[fam]             # > 0: home covers by the model's margin
         home = z >= 0
@@ -339,17 +342,22 @@ def best_line(p: Dict, lg: str, home_p: float) -> Dict:
         out.update(best=label, lean_detail=detail, lean_z=z)
         if label.split()[0] in ("Over", "Under"):
             out.update(bet_market="Total", bet_side=label.split()[0].lower(), bet_line=float(lt),
-                       bet_price=p.get("over_price") if label.startswith("Over") else p.get("under_price"))
+                       bet_price=(p.get("over_price") if label.startswith("Over") else p.get("under_price")) or STD_PRICE)
         else:
             home = (float(mm) + float(hs)) >= 0
             out.update(bet_market="Spread", bet_side="home" if home else "away",
-                       bet_line=float(hs) if home else -float(hs), bet_price=p.get("spread_price"))
+                       bet_line=float(hs) if home else -float(hs), bet_price=p.get("spread_price") or STD_PRICE)
         # Nov 6 (research/backtest_ncaamb_totals.py, 2 seasons, 5,214 games, walk-forward): NCAAMB total leans 3+ points
         # off the line -- Unders hit 45.3% (558; 44.0% in November), Overs 50.8% (1,625). Shown as the lean's backtest so
         # the model's college Unders are never mistaken for an edge.
         if lg == "NCAAMB" and label.split()[0] in ("Over", "Under") and lt is not None and mt is not None \
                 and abs(float(mt) - float(lt)) >= 3:
             out.update(backtest=NCAAMB_TOTAL_BACKTEST[label.split()[0]])
+    # Nov 14 (research/ncaaf_hfa_fix.py): college football spread leans, fixed model, 2026 walk-forward at 4+ points of
+    # disagreement: 50-54 (48%). The live record behind them came from the old home-biased model, so the backtest is
+    # the honest grade.
+    if lg == "NCAAF" and out.get("bet_market") == "Spread":
+        out.update(backtest=NCAAF_SPREAD_BACKTEST)
     # Where a backtest measured how often spreads with this much disagreement covered (cover_est: NCAAMB and the
     # international models), that rate is the honest strength of the spread lean -- and it shows the model's biggest
     # disagreements (lopsided games) are coin flips (~51%), so they rank last, not first.
@@ -408,10 +416,34 @@ def winner_rows(date_str: str, leagues=None, past: bool = False) -> List[Dict]:
                         "winner": team, "chance": chance, "book": book, "price": price,
                         "price_book": p.get("best_home_book") if home else p.get("best_away_book"),
                         "value": value, "use": ml_tag, **best,
-                        "_gaps": _lean_gaps(p, lg),
+                        "_gaps": _lean_gaps(p, lg), **_line_text(p),
                         "_rec": {"sport": lg, "home": p.get("home"), "away": p.get("away"), "game_id": p.get("game_id"),
                                  "kickoff": p.get("kickoff")}})
     out.sort(key=lambda r: -r["chance"])
+    return out
+
+
+def _line_text(p: Dict) -> Dict:
+    """Nov 14: the book's spread and total, and the model's own numbers, as table text."""
+    hs = p.get("home_spread")
+    if hs is None and p.get("line") is not None:
+        hs = -float(p["line"])
+    mm, lt, mt = p.get("model_margin"), p.get("line_total"), p.get("model_total")
+    out = {"spread_txt": "", "total_txt": "", "model_txt": ""}
+    try:
+        if hs is not None:
+            fav_home = float(hs) <= 0
+            out["spread_txt"] = f"{p['home'] if fav_home else p['away']} {-abs(float(hs)):+g}" if float(hs) else "Pick'em"
+        if lt is not None:
+            out["total_txt"] = f"{float(lt):g}"
+        bits = []
+        if mm is not None:
+            bits.append(f"{p['home'] if float(mm) >= 0 else p['away']} by {abs(float(mm)):.1f}")
+        if mt is not None:
+            bits.append(f"total {float(mt):.1f}")
+        out["model_txt"] = ", ".join(bits)
+    except (TypeError, ValueError, KeyError):
+        pass
     return out
 
 
