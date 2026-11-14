@@ -8,7 +8,8 @@ on:
   # Nov 13: GitHub ran the 3-hourly schedule only every 6-9 hours, so International Hoops went stale. Other jobs
   # finishing also start it; intl_picks.py skips a run that comes within 150 minutes of the last one.
   workflow_run:
-    workflows: ["morning-brief", "warm-slates", "settle-results", "capture-closing-lines", "close-watch", "daily-review"]
+    # Nov 14: not daily-review / morning-brief -- daily-review starts after this job, so the two kept setting each other off
+    workflows: ["warm-slates", "settle-results", "capture-closing-lines", "close-watch"]
     types: [completed]
   workflow_dispatch:
     inputs:
