@@ -24,13 +24,13 @@ import sys
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Sequence
 
-SPORTS = ("NBA", "NFL")
+SPORTS = ("NBA", "NFL", "NHL")
 MIN_PRICE = 400
 TOP_N = 4
 EVERY_H = 3.0
 KEY = "longshots:{sport}:{date}"
 ALT_ARCHIVE = ["long_shots_alt"]
-TESTED = {"NBA": "Assists", "NFL": "Rush Yards"}
+TESTED = {"NBA": "Assists", "NFL": "Rush Yards"}       # NHL Goals: a lead only (+28% at 11am, even at close)
 
 
 AGREE = 0.25              # projection within 25% (or 1 unit) of the book's own main line
