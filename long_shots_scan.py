@@ -12,7 +12,8 @@ saves:
     it, "top": the TOP_N most probable of those}.
 
 "Most probable long shot" here = priced +MIN_PRICE or longer, worth more than its price at the honest chance
-(EV > 0), no "check news" / thin-sample flag, one rung per player, highest honest chance first. Testing so far: only
+(EV > 0), no "check news" / thin-sample flag, the model's projection within 25% of the book's main line (agrees()),
+one rung per player, highest honest chance first. Testing so far: only
 NBA Assists (+27%) and NFL Rush Yards (+32-36%) value rungs have made money -- the rest lost 19-32% -- so those are
 marked "tested".
 """
@@ -32,10 +33,24 @@ ALT_ARCHIVE = ["long_shots_alt"]
 TESTED = {"NBA": "Assists", "NFL": "Rush Yards"}
 
 
+AGREE = 0.25              # projection within 25% (or 1 unit) of the book's own main line
+
+
+def agrees(r: Dict, tol: float = AGREE) -> bool:
+    """Nov 14: the model and the book roughly agree on the player's normal night. The first scan's "most probable"
+    rungs were the model's biggest disagreements (7.5 assists projected vs the book's 4.5) -- and in testing, where
+    the model disagrees with the book, the book is usually right (it knows about a role or minutes change). A long
+    shot here should be a tail outcome on a normal night, not a bet that the book has the player wrong."""
+    proj, main = r.get("Projection"), r.get("Main line")
+    if proj is None or main is None:
+        return False
+    return abs(float(proj) - float(main)) <= max(tol * float(main), 1.0)
+
+
 def pick_top(rows: Sequence[Dict], n: int = TOP_N, min_price: int = MIN_PRICE) -> List[Dict]:
-    """The n most probable value long shots, one per player."""
+    """The n most probable value long shots, one per player, where the model and the book agree on the main line."""
     ok = [r for r in rows if (r.get("Price") or 0) >= min_price and (r.get("EV per $1") or 0) > 0
-          and not r.get("Flags")]
+          and not r.get("Flags") and agrees(r)]
     ok.sort(key=lambda r: (-(r.get("Honest chance") or 0), -(r.get("EV per $1") or 0)))
     out, seen = [], set()
     for r in ok:

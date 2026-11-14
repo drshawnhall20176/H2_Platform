@@ -2,9 +2,9 @@
 import long_shots_scan as LSS
 
 
-def _r(player, price, honest, ev, market="Assists", flags=""):
+def _r(player, price, honest, ev, market="Assists", flags="", proj=6.0, main=5.5):
     return {"Player": player, "Bet": f"8+ {market}", "Market": market, "Price": price, "Honest chance": honest,
-            "EV per $1": ev, "Flags": flags}
+            "EV per $1": ev, "Flags": flags, "Projection": proj, "Main line": main}
 
 
 def test_pick_top_most_probable_value_long_shots_one_per_player():
@@ -45,3 +45,11 @@ def test_props_rows_keep_every_lock(monkeypatch):
                "Use": PE.USE_PARLAY} for i in range(50)]
     out = TB.props_rows("NBA", plays)
     assert sum(r["lock"] for r in out) == 50 and len(out) == 50 + TB.TOP_PER_SPORT
+
+
+def test_disagreements_with_the_book_are_not_most_probable():
+    sharpe = _r("Sharpe", 433, 0.49, 1.6, proj=7.5, main=4.5)          # the book knows something
+    kyrie = _r("Kyrie", 420, 0.24, 0.26, market="Points", proj=25.2, main=21.5)
+    threes = _r("Thomas", 471, 0.32, 0.8, market="Threes Made", proj=3.2, main=1.5)
+    assert [r["Player"] for r in LSS.pick_top([sharpe, kyrie, threes])] == ["Kyrie"]
+    assert not LSS.agrees({"Projection": 6.0})                          # no main line: can't tell
