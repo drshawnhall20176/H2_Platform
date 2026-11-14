@@ -190,8 +190,9 @@ def run():
                          "Track Record", "Data Health",
                          "Suggested Parlays", "Speculative Basket", "Graded Picks",
                          "Model Dashboard", "First Innings Totals", "Player Lines", "Slip Lab",
-                         "Postgame Review", "Progression Plan", "Reports", "My Coach", "Model Performance", "Game Script", "Tennis Lab", "International Hoops",
-                         "Long Shots"}
+                         "Postgame Review", "Progression Plan", "Reports", "My Coach", "Model Performance", "Game Script"}
+    # Nov 14: Tennis Lab, International Hoops and Long Shots opened to the public build (owner rule: public = owner
+    # minus the Bet Log and owner data) -- their log boxes and credit-spending loads stay owner-only
 
     # leading page-number -> (title, icon, stable url slug). The url_path is the key fix: it pins
     # each page to a predictable URL so reruns keep you on the same page instead of defaulting to

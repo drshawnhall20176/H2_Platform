@@ -166,6 +166,8 @@ else:
         k = f"soccer_props_{m['game_id']}"
         import best_bets_data as BBD
         api_key = BBD.get_odds_api_key()
+        if not C.is_owner():                                    # Nov 14: credit-spending loads stay owner-only
+            api_key = None
         if api_key and st.button("📈 Load player props for this match", key=f"soccer_props_btn_{league}"):
             with st.spinner("Loading props and the players' recent matches…"):
                 import soccer_props as SPR
@@ -185,7 +187,7 @@ else:
                         rows.update(SPR.summaries(lg, [e]))
                 st.session_state[k] = SPR.read(props, m, r, SPR.rates(rows, m["home"]), SPR.rates(rows, m["away"]))
         elif not api_key:
-            st.caption("No Odds API key on this app.")
+            st.caption("Player props load in the owner build." if not C.is_owner() else "No Odds API key on this app.")
         got = st.session_state.get(k)
         if got is not None:
             if not got:

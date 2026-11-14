@@ -38,3 +38,11 @@ jobs:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}     # Nov 6: builds the Best Bets boards for Home's Today's best
           SPORTS: ${{ github.event.inputs.sports }}
         run: python warm_slates.py "${SPORTS}"
+      # Nov 14: the day's long shots (NBA, NFL) for Today's best and the public Long Shots page; skips when the last
+      # scan is under 3 hours old (about 8-10 Odds API credits per game)
+      - name: Scan today's long shots
+        if: always()
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: python long_shots_scan.py

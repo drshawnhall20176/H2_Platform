@@ -194,7 +194,20 @@ games = {m["label"]: m for m in meta}
 pick = st.selectbox("Game", list(games.keys()), key="longshots_game")
 g = games.get(pick) or next(iter(games.values()))
 store = st.session_state.setdefault("longshots_quotes", {})
-if st.button(f"📈 Load alternate lines for {g['label']}  (~{len(ALTS)} Odds API credits)", key="ls_load"):
+if not C.is_owner() and g["label"] not in store:
+    # Nov 14: the public build never spends Odds API credits here -- it reads the alternate prices the scheduled
+    # long-shot scan (long_shots_scan.py) archived for this game today
+    try:
+        import model_store as MS
+        _sv = MS.load_odds(_active.key, date_str, g.get("home_name") or "", g.get("away_name") or "", ALT_ARCHIVE)
+    except Exception:                                           # noqa: BLE001
+        _sv = None
+    if _sv and _sv.get("offers"):
+        store[g["label"]] = {"quotes": _sv["offers"], "remaining": None, "unavailable": []}
+    else:
+        st.info("Today's alternate lines for this game haven't been scanned yet — the scan runs a few times a day.")
+        st.stop()
+if C.is_owner() and st.button(f"📈 Load alternate lines for {g['label']}  (~{len(ALTS)} Odds API credits)", key="ls_load"):
     try:
         import book_menu as BM
         import position_lines as PL
