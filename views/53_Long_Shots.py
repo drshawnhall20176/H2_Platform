@@ -1,7 +1,7 @@
 """
 Long Shots (Nov 10) — alternate-line value: the books' price on "8+ assists", "30+ points"... vs the model's HONEST
 chance of it. Owner request after Jeremiah Fears' 8+ assists hit at +1500 (the model had projected 6.0 vs a 4.5 line).
-Logic and the tail-honesty table: long_shots.py. NBA and (Nov 12) NFL -- the sports the tail test covers.
+Logic and the tail-honesty table: long_shots.py. NBA, (Nov 12) NFL and (Nov 14) NHL -- the sports the tail and price tests cover.
 """
 from datetime import datetime
 
@@ -21,13 +21,13 @@ _active = sports.active()
 C.base_css()
 C.page_header("💎", "Long Shots", "Alternate lines (8+ assists, 100+ rush yards…) where the book's price is longer than the "
                                  "model's honest chance — the Fears-at-+1500 kind of bet, found before the game starts.")
-if not sports.require_sport(["NBA", "NFL"], "Long Shots"):
+if not sports.require_sport(["NBA", "NFL", "NHL"], "Long Shots"):
     st.stop()
 SPORT = _active.key if _active.key in LS.SPORTS else "NBA"
 ALTS = LS.SPORTS[SPORT]["alt"]                                  # this sport's alternate markets -> main markets
-START = "kickoff" if SPORT == "NFL" else "tip-off"
+START = {"NFL": "kickoff", "NHL": "puck drop"}.get(SPORT, "tip-off")
 # The one market whose value lines have made money in testing (research/longshot_backtest.py)
-BEST = {"NBA": "Assists", "NFL": "Rush Yards"}[SPORT]
+BEST = {"NBA": "Assists", "NFL": "Rush Yards", "NHL": "Goals"}[SPORT]
 WARN = {
     "NBA": "**Watch list, not a bet list.** Tested on 10 NBA nights (Oct 30 – Nov 9, ~10,000 DraftKings alternate "
            "lines): the lines this page calls value returned **−22%** bet at 11am prices and **−32%** at tip-off. The "
@@ -38,6 +38,11 @@ WARN = {
            "lines): the lines this page calls value returned **−19%** at 11am prices and **−21%** at kickoff, and "
            "prices of +1200 or longer lost over 40%. **One exception so far: Rush Yards** (+32% at 11am, +36% at kickoff "
            "over ~160 bets) — promising, not proven: mostly two Sundays. Keep stakes to a few dollars.",
+    "NHL": "**Watch list, not a bet list.** Tested on 11 NHL nights (Nov 3 – Nov 13, ~7,000 DraftKings alternate "
+           "lines): the lines this page calls value returned **−11%** at 11am prices and **−25%** at puck drop, and "
+           "prices of +1200 or longer lost over 40%. Shots on Goal and Points lost 24–38%. **Closest to an exception: "
+           "Goals** (+28% at 11am over 341 bets, but only 13 hits, and break-even at puck drop) — a lead, not an edge. "
+           "Bet early if at all, and keep stakes to a dollar or two.",
 }[SPORT]
 
 
