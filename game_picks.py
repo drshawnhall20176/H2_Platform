@@ -61,7 +61,28 @@ def _num(x) -> Optional[float]:
 
 
 # --------------------------------------------------------------------------- ratings
-def ratings(games: Sequence[Dict], lam: float = RIDGE_LAM) -> Optional[Dict]:
+# Nov 14: live, the picks went 8-20 and 90 of 92 were on the HOME team. The fitted home field was 7.6-10.6 points
+# (real college home field is ~2-3): FBS teams host FCS teams and win big, and FCS teams (1-2 games each) get shrunk
+# toward average, so the home-field term soaked up those blowouts. research/ncaaf_hfa_fix.py (2025-26 walk-forward,
+# CFBD closing lines): the old fit was 98% home picks and 50.3% ATS at 4+ points in 2026; fitting on FBS-vs-FBS games
+# with home field fixed at 2.5 picks home and away evenly (46-49%) -- and is still ~50% ATS. So: unbiased now, and
+# still no edge; the picks stay tracking only and the pages say so.
+FIXED_HFA = 2.5
+FBS_MIN_GAMES = 5               # a team with fewer games in the schedule file is an FCS opponent
+
+
+def fbs_only(games: Sequence[Dict], k: int = FBS_MIN_GAMES) -> List[Dict]:
+    from collections import Counter
+    c = Counter([g["home_team"] for g in games] + [g["away_team"] for g in games])
+    return [g for g in games if c[g["home_team"]] >= k and c[g["away_team"]] >= k]
+
+
+def fit(games: Sequence[Dict], lam: float = RIDGE_LAM) -> Optional[Dict]:
+    """The live model: FBS-vs-FBS games, home field fixed at FIXED_HFA."""
+    return ratings(fbs_only(games), lam, hfa_fixed=FIXED_HFA)
+
+
+def ratings(games: Sequence[Dict], lam: float = RIDGE_LAM, hfa_fixed: Optional[float] = None) -> Optional[Dict]:
     """games: completed {"home_team","away_team","home_points","away_points","neutral_site"} ->
     {"mu", "off": {team}, "def": {team}, "hfa"} (hfa = the full home-field edge in points of margin)."""
     games = [g for g in games if _num(g.get("home_points")) is not None and _num(g.get("away_points")) is not None]
@@ -81,6 +102,12 @@ def ratings(games: Sequence[Dict], lam: float = RIDGE_LAM) -> Optional[Dict]:
             y.append(float(pts))
     X, y = np.array(X), np.array(y)
     mu = float(y.mean())
+    if hfa_fixed is not None:                                   # Nov 14: home field given, not fitted
+        y = y - X[:, 2 * n] * hfa_fixed
+        Xr = X[:, :2 * n]
+        beta = np.linalg.solve(Xr.T @ Xr + np.eye(2 * n) * lam, Xr.T @ (y - mu))
+        return {"mu": mu, "off": {t: float(beta[ix[t]]) for t in teams},
+                "def": {t: float(beta[n + ix[t]]) for t in teams}, "hfa": float(hfa_fixed)}
     reg = np.eye(2 * n + 1) * lam
     reg[2 * n, 2 * n] = 0.0
     beta = np.linalg.solve(X.T @ X + reg, X.T @ (y - mu))
@@ -223,7 +250,7 @@ def build(schedule: Sequence[Dict], events: Sequence[Dict], now: datetime) -> Li
     done = [g for g in schedule if int(g.get("season") or 0) == season and _truthy(g.get("completed"))]
     if len(done) < MIN_GAMES:
         return []
-    r = ratings(done)
+    r = fit(done)
     out = []
     for g, ko in upcoming:
         ev = PL.match_event(events, g["home_team"], g["away_team"])
