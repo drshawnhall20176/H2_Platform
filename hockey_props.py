@@ -107,9 +107,10 @@ def opponent_factor(pgames, opp, side: str, stat: str) -> Optional[Dict]:
 # mostly him. Goalies (saves per shot faced) are not shrunk -- their rate is stable game to game.
 # Strengths picked by replaying 1,461 skater-games (Oct 14-30, 111 games): squared error fell 10-15% on every market
 # vs the unshrunk rate and vs the plain 5-game average; the error curve is flat around these values.
-# Nov 14 (regression audit): shots, blocks and points were pulled a little too hard -- next-game error was lowest at
-# ~5 games of ice time (sog 1.1%, blk 1.3%, pts 0.5% better than before); goals and assists were already about right.
-SHRINK_MIN = {"g": 360.0, "a": 240.0, "pts": 120.0, "sog": 90.0, "blk": 90.0}
+# Nov 14 (regression audit): shots were pulled a little too hard -- next-game error lowest at ~5 games of ice time,
+# and in the backtest the calibration slope went .91 -> 1.00 at 90 minutes. Points and blocks at less shrink had
+# better error but a worse Brier, so they stay; goals and assists were already about right.
+SHRINK_MIN = {"g": 360.0, "a": 240.0, "pts": 240.0, "sog": 90.0, "blk": 240.0}
 
 
 def group_rates(pgames, stat: str) -> Dict[str, float]:
