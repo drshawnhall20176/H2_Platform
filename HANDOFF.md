@@ -191,5 +191,6 @@ repos/drshawnhall20176/H2_Platform/actions/workflows/daily-review.yml/dispatches
 | International hoops / tennis | `intl_hoops.py`, `intl_picks.py`, `tennis_model.py`, `hoops_games_page.py` |
 | Soccer | `soccer_model.py`, `soccer_data.py`, `soccer_picks.py`, `soccer_props.py`, `views/55_Soccer_Lab.py` |
 | Long shots | `long_shots.py`, `views/53_Long_Shots.py` |
+| Regression to the mean (Nov 14) | `props_engine.shrink_toward`; NBA `player_props.RATE_SHRINK_MIN` (reb/ast/3s 45 min, blk/tov 110, stl 220; points and points combos own rate); football `MARKET_SHRINK["Interceptions"]=1200`; NHL `SHRINK_MIN["sog"]=90`. Evidence: research/stability_audit.py, regression_test.py, regression_validate.py |
 | Lab long shots (Nov 14, tracking) | `lab_long_shots.py`: tennis / intl hoops / soccer underdogs +300 (free, from lab records); soccer anytime goalscorers +400, 5+ starts, scanned every 6 h from `long_shots_scan.run` (≤24 matches, ~3 credits each); Home shows them under 💎, plus soccer rows in the game-lines table and a 📈 soccer price-flag list |
 | Research | `research/*.py` (backtests: soccer, tennis, live models, long shots, calibration) |
