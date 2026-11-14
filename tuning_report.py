@@ -283,6 +283,9 @@ def main(argv=None) -> int:
     today = datetime.now(pytz.timezone("US/Eastern")).date()
     bets = B.list_bets()
     for sport in [s.strip() for s in a.sports.split(",") if s.strip()]:
+        if os.environ.get("TRIGGER") == "workflow_run" and today.isoformat() in (MS.daily_review_mornings(f"{sport}-tuning") or [])[:1]:
+            print(f"{sport}: today's tuning report already ran")       # Nov 14: daily, once
+            continue
         dates = _dates(sport, a.days, today)
         graded = [r for recs in D.grade_dates(sport, dates).values() for r in recs] if dates else []
         rep = build(sport, graded, bets, a.days)
