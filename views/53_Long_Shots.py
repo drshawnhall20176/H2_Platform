@@ -1,7 +1,7 @@
 """
 Long Shots (Nov 10) — alternate-line value: the books' price on "8+ assists", "30+ points"... vs the model's HONEST
 chance of it. Owner request after Jeremiah Fears' 8+ assists hit at +1500 (the model had projected 6.0 vs a 4.5 line).
-Logic and the tail-honesty table: long_shots.py. NBA and (Nov 12) NFL -- the sports the tail test covers.
+Logic and the tail-honesty table: long_shots.py. NBA, (Nov 12) NFL and (Nov 14) NHL and college football -- the sports the tail and price tests cover.
 """
 from datetime import datetime
 
@@ -21,13 +21,14 @@ _active = sports.active()
 C.base_css()
 C.page_header("💎", "Long Shots", "Alternate lines (8+ assists, 100+ rush yards…) where the book's price is longer than the "
                                  "model's honest chance — the Fears-at-+1500 kind of bet, found before the game starts.")
-if not sports.require_sport(["NBA", "NFL"], "Long Shots"):
+if not sports.require_sport(["NBA", "NFL", "NHL", "NCAAF"], "Long Shots"):
     st.stop()
 SPORT = _active.key if _active.key in LS.SPORTS else "NBA"
 ALTS = LS.SPORTS[SPORT]["alt"]                                  # this sport's alternate markets -> main markets
-START = "kickoff" if SPORT == "NFL" else "tip-off"
+START = {"NFL": "kickoff", "NCAAF": "kickoff", "NHL": "puck drop"}.get(SPORT, "tip-off")
 # The one market whose value lines have made money in testing (research/longshot_backtest.py)
-BEST = {"NBA": "Assists", "NFL": "Rush Yards"}[SPORT]
+BEST = {"NBA": ("Assists",), "NFL": ("Rush Yards",), "NHL": ("Goals",),
+        "NCAAF": ("Rush Yards", "Receiving Yards")}[SPORT]
 WARN = {
     "NBA": "**Watch list, not a bet list.** Tested on 10 NBA nights (Oct 30 – Nov 9, ~10,000 DraftKings alternate "
            "lines): the lines this page calls value returned **−22%** bet at 11am prices and **−32%** at tip-off. The "
@@ -38,6 +39,17 @@ WARN = {
            "lines): the lines this page calls value returned **−19%** at 11am prices and **−21%** at kickoff, and "
            "prices of +1200 or longer lost over 40%. **One exception so far: Rush Yards** (+32% at 11am, +36% at kickoff "
            "over ~160 bets) — promising, not proven: mostly two Sundays. Keep stakes to a few dollars.",
+    "NHL": "**Watch list, not a bet list.** Tested on 11 NHL nights (Nov 3 – Nov 13, ~7,000 DraftKings alternate "
+           "lines): the lines this page calls value returned **−11%** at 11am prices and **−25%** at puck drop, and "
+           "prices of +1200 or longer lost over 40%. Shots on Goal and Points lost 24–38%. **Closest to an exception: "
+           "Goals** (+28% at 11am over 341 bets, but only 13 hits, and break-even at puck drop) — a lead, not an edge. "
+           "Bet early if at all, and keep stakes to a dollar or two.",
+    "NCAAF": "**Watch list, not a bet list — but the best test result on this page.** Tested on 9 college football "
+             "days (Oct 30 – Nov 13, ~2,400 DraftKings alternate lines): the lines this page calls value returned "
+             "**+27%** at 11am prices and **+14%** at kickoff, and the book moved its price toward the model on 62% of "
+             "them. **Rush Yards** (+37% at 11am, +26% at kickoff) and **Receiving Yards** (+31% / +24%) carried it; "
+             "**Pass Yards lost 27–33%** and Receptions went from +69% to −15% by kickoff. Most of the bets came from "
+             "two Saturdays, so this is promising, not proven. Bet early, keep stakes to a few dollars.",
 }[SPORT]
 
 
@@ -241,8 +253,9 @@ if not rows:
     st.info("No alternate rungs to compare for this game at this book (or the model has no read on these players).")
     st.stop()
 mkts = sorted({r["Market"] for r in rows})
-only = st.multiselect("Markets", mkts, default=[m for m in mkts if m == BEST] or mkts, key=f"ls_markets_{SPORT}",
-                      help=f"{BEST} is the only {SPORT} market whose value lines have made money in testing so far.")
+only = st.multiselect("Markets", mkts, default=[m for m in mkts if m in BEST] or mkts, key=f"ls_markets_{SPORT}",
+                      help=f"{' and '.join(BEST)} {'is the only' if len(BEST) == 1 else 'are the'} {SPORT} "
+                           f"market{'s' if len(BEST) > 1 else ''} whose value lines have made money in testing so far.")
 rows = [r for r in rows if r["Market"] in only] if only else rows
 value = [r for r in rows if r["EV per $1"] > 0]
 show = value or rows[:15]
