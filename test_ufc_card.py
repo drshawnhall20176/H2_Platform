@@ -53,6 +53,8 @@ def test_fight_card_page_shows_the_card(monkeypatch):
     at.date_input[0].set_value(dt.date(2026, 11, 7)).run()
     overview = next(d.value for d in at.dataframe if "Bout" in d.value.columns)
     assert list(overview["Bout"]) == ["Prelim A vs Prelim B", "Main A vs Main B"]        # main cards only (default)
+    picks = [d.value for d in at.dataframe if "Fighter" in d.value.columns]                # Nov 14: tick-to-log
+    assert picks and len(picks[0]) == 4 and list(picks[0]["Fighter"])[:2] == ["Prelim A", "Prelim B"]
     at.toggle(key="ufc_main_only").set_value(False).run()
     overview = next(d.value for d in at.dataframe if "Bout" in d.value.columns)
     assert list(overview["Bout"]) == ["Prelim A vs Prelim B", "Y vs X", "Main A vs Main B"]
@@ -121,3 +123,21 @@ def test_parse_bout_odds_spreads():
         {"key": "spreads", "outcomes": [{"name": "Ko", "point": -7.5, "price": -145}, {"name": "Turman", "point": 7.5, "price": 110}]}]}]}
     out = E.parse_bout_odds(ev)
     assert out["spreads"] == {"Ko": -145, "Turman": 110} and out["_spread_points"] == {"Ko": -7.5, "Turman": 7.5}
+
+
+def test_bet_options_and_logging_rows():
+    import todays_best as TB
+    import ufc_engine as E
+    import ufc_review as UR
+    bout = {"a": "Fighter A", "b": "Fighter B", "p_a": 0.62, "commence": "2026-11-15T03:00:00Z",
+            "prices": {"draftkings": {"a": -170, "b": 145}},
+            "lines": {"fanduel": {"total": {"Over": (1.5, -120), "Under": (1.5, 100)}}}}
+    opts = E.bet_options(bout, "draftkings")
+    assert [(o["market"], o["side"]) for o in opts] == [("Moneyline", "Fighter A"), ("Moneyline", "Fighter B"),
+                                                         ("Fight Duration", "Over"), ("Fight Duration", "Under")]
+    assert opts[2]["book"] == "fanduel" and opts[2]["line"] == 1.5 and abs(opts[2]["chance"] + opts[3]["chance"] - 1) < 1e-9
+    rows = TB.bet_rows(opts, 2.0, False, "ufc-card", "2026-11-14")
+    assert len(rows) == 4 and rows[0]["game"] == "Fighter A vs. Fighter B" and rows[0]["player"] is None
+    bout_done = {"final": True, "winner": "Fighter A", "method": "KO/TKO", "elapsed": 1.2, "round": 2}
+    assert UR.bet_result(rows[0], bout_done) == "win" and UR.bet_result(rows[1], bout_done) == "loss"
+    assert UR.bet_result(rows[3], bout_done) == "win"                   # under 1.5 rounds

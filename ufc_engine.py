@@ -311,6 +311,38 @@ def book_lines(bout: Dict, book: str = "draftkings") -> Dict[str, str]:
     return out
 
 
+def bet_options(bout: Dict, book: str = "draftkings") -> List[Dict]:
+    """Nov 14: the bettable sides of one bout for the tick-to-log tables -- each fighter's moneyline and Over / Under
+    total rounds, at `book` (or the first book that posts it), with the market's no-vig chance. The Bet Log fields
+    match what ufc_review.bet_result grades: market "Moneyline" (side = fighter) and "Fight Duration" (Over / Under
+    the rounds line)."""
+    game = f"{bout['a']} vs. {bout['b']}"
+    out = []
+    prices = bout.get("prices") or {}
+    bk = book if book in prices else next(iter(prices), None)
+    if bk:
+        pa, pb = prices[bk].get("a"), prices[bk].get("b")
+        p_a = bout.get("p_a")
+        for name, pr, ch in ((bout["a"], pa, p_a), (bout["b"], pb, None if p_a is None else 1 - p_a)):
+            if pr is not None:
+                out.append({"sport": "UFC", "game": game, "market": "Moneyline", "side": name, "line": None,
+                            "price": float(pr), "book": bk, "chance": ch, "pick": f"{name} to win",
+                            "commence": bout.get("commence")})
+    lines = bout.get("lines") or {}
+    lb = book if (book in lines and "total" in lines[book]) else next((k for k, v in lines.items() if "total" in v), None)
+    if lb:
+        tt = lines[lb]["total"]
+        o, u = tt.get("Over"), tt.get("Under")
+        if o and u and o[0] is not None and o[1] is not None and u[1] is not None:
+            imp = lambda a: 100 / (a + 100) if a > 0 else -a / (-a + 100)
+            po = imp(float(o[1])) / (imp(float(o[1])) + imp(float(u[1])))
+            for side, (pt, pr), ch in (("Over", o, po), ("Under", u, 1 - po)):
+                out.append({"sport": "UFC", "game": game, "market": "Fight Duration", "side": side, "line": float(pt),
+                            "price": float(pr), "book": lb, "chance": ch, "pick": f"{side} {float(pt):g} rounds",
+                            "commence": bout.get("commence")})
+    return out
+
+
 def get_card(api_key: str, date_str: Optional[str] = None) -> List[Dict]:
     """Every MMA bout on `date_str` (Eastern) with moneylines from every US book -- ONE odds request for the whole
     card (the per-bout fetch below the overview costs one request per bout). Raises OddsAPIError on a real failure."""
