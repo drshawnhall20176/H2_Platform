@@ -1,5 +1,10 @@
 # H2 Sports Platform — Build Checkpoint
 
+> **Start with [`HANDOFF.md`](HANDOFF.md)** — the current configuration, status and owner rules (updated Nov 14, 2026:
+> 11 sports incl. Tennis, International Hoops and Soccer labs; 56 pages; 3,643 tests; the automation and learning
+> loop as they run today). This file is the historical build log from July–October 2026; its sport list, test counts
+> and "NOT YET DONE" list are out of date where they differ from HANDOFF.md.
+
 **This is the multi-sport platform build.** It is the live source of truth (MLB + WNBA + NBA +
 NCAAMB + NFL + NCAAF, all live on one sport-selector foundation). MLB runs exactly as the
 standalone did originally; WNBA, NBA, NCAAMB, NFL, and NCAAF are all real, priced sports now —
