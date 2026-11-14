@@ -116,7 +116,12 @@ if True:
     # Nov 6: start-time and game filters, shared by the picks and the game lines below
     @st.cache_data(ttl=900, show_spinner=False)
     def _winners(day, past):
-        return _TB.winner_rows(day, past=past)
+        rows = _TB.winner_rows(day, past=past)
+        try:                                                    # Nov 14: soccer's goals model, tracking only
+            rows += _TB.soccer_rows(day, past=past)
+        except Exception:                                       # noqa: BLE001
+            pass
+        return rows
 
     _wall = _winners(_today, _past)
     _wscope = _wall if _scope == "All sports" else [r for r in _wall if r["sport"] == current]
@@ -289,11 +294,59 @@ if True:
                 "made money in testing (NBA Assists, NFL Rush Yards); the rest lost 19–32% overall. Most of these lose "
                 "— keep stakes flat at a few dollars and never put two of the same player in one parlay."))
 
+    # ---- Lab long shots (Nov 14): tennis, international hoops and soccer, read from their labs -- tracking only
+    @st.cache_data(ttl=900, show_spinner=False)
+    def _lab_ls(day):
+        import lab_long_shots as _LLS
+        return _LLS.collect(day)
+
+    _lab_names = {"TENNIS": "Tennis", "INTL": "International hoops", "SOCCER": "Soccer",
+                  "SOCCER_SCORERS": "Soccer goalscorers"}
+    _lab_sets = []
+    if not _past and (_scope == "All sports" or current in ("TENNIS", "INTL", "SOCCER")):
+        try:
+            _lab_sets = [(k, v) for k, v in _lab_ls(_today).items()
+                         if _scope == "All sports" or k.split("_")[0] == current]
+        except Exception:                                       # noqa: BLE001
+            _lab_sets = []
+    if _lab_sets:
+        if not _ls_sports:
+            st.markdown("##### 💎 Most probable long shots")
+        _lab_items = []
+        for _k, _v in _lab_sets:
+            _top = [r for r in _v["top"] if _keep(r)]
+            if not _top:
+                continue
+            try:
+                _at = _dt.fromisoformat(_v["at"]).astimezone(_ET).strftime("%-I:%M %p") if _v.get("at") else ""
+            except (TypeError, ValueError):
+                _at = ""
+            st.markdown(f"**{_lab_names.get(_k, _k)}** · {_v['n']} value {_v['kind']} · untested, tracking"
+                        + (f" · prices as of {_at}" if _at else ""))
+            _labdf = _pd.DataFrame([{"Time": r.get("time") or "", "League": r.get("league") or "",
+                                     "Game": r.get("game") or "", "Pick": r.get("pick"), "Price": r.get("Price"),
+                                     "Model chance": r.get("chance"), "EV per $1": r.get("EV per $1"),
+                                     "Book": r.get("book") or ""} for r in _top])
+            _lab_items += _LU.picked(_top, _LU.selectable(_labdf, f"home_labls_{_k}", hide_index=True, width="stretch",
+                                     column_config={"Price": st.column_config.NumberColumn(format="%+d"),
+                                                    "Model chance": st.column_config.NumberColumn(format="percent"),
+                                                    "EV per $1": st.column_config.NumberColumn(format="%+.2f")}))
+        _LU.panel([dict(r, best=r.get("pick"), bet_price=r.get("price")) for r in _lab_items], "home_labls_log",
+                  _today, tag="long-shot,lab", past=_past)
+        st.caption(C.money_md(
+            "From the labs, no extra credits: the model's **underdogs** priced +300 or longer whose model chance still "
+            "beats the price (tennis uses the calibrated chance; soccer counts a draw or either side), and **soccer "
+            "anytime goalscorers** at +400 or longer for regular starters (5+ starts in the last 10), scanned a few "
+            "times a day. None of this is tested — the soccer goals model lost to the closing line, and hoops and "
+            "tennis underdogs have no backtest — so it's a tracking list. Most of these lose; flat stakes of a few "
+            "dollars, if any."))
+
     # ---- Most likely winners (Nov 6): every game today, the side the model thinks wins, for every sport covered
     @st.cache_data(ttl=21600, show_spinner=False)
     def _winner_record():
         return _TB.winner_record()
 
+    LEANS_CAP = 250                                             # Nov 14: soccer and every hoops league are in here
     st.markdown("##### 🏆 Game lines: tested picks and model leans")
     _w = [r for r in _wscope if _keep(r)]
     if current in ("NFL", "UFC") and _scope != "All sports":
@@ -323,7 +376,7 @@ if True:
         _wdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"],
                                "Weather": _wx(r["sport"], r["game"]),
                                "Pick / lean": r.get("best") or "—",
-                               "Status": (f"✅ {r.get('use')}" if r.get("best_tested") else
+                               "Status": r.get("status") or (f"✅ {r.get('use')}" if r.get("best_tested") else
                                           ("lean · untested" if r.get("best") else "")),
                                "Model vs line": r.get("lean_detail") or "",
                                "Lean record (30d)": ((("⚠️ " if r.get("lean_verdict") in _PR.HIDE else "")
@@ -337,7 +390,7 @@ if True:
                                "League": r["league"],
                                "Final": r.get("final") or "—",
                                "Pick result": _TB.RESULT_ICON.get(r.get("best_result"), "—"),
-                               "Winner result": _TB.RESULT_ICON.get(r.get("winner_result"), "—")} for r in _ws[:60]])
+                               "Winner result": _TB.RESULT_ICON.get(r.get("winner_result"), "—")} for r in _ws[:LEANS_CAP]])
         if not _past and not _wdf.empty:
             _wdf = _wdf.drop(columns=["Final", "Pick result", "Winner result"])
         if _scope != "All sports" and not _wdf.empty:
@@ -350,7 +403,7 @@ if True:
         if _wdf.empty:
             st.caption("No tested game-line picks today.")
         else:
-            _sel_lines = _LU.picked(_ws[:60], _LU.selectable(_wdf, "home_win_sel", hide_index=True, width="stretch",
+            _sel_lines = _LU.picked(_ws[:LEANS_CAP], _LU.selectable(_wdf, "home_win_sel", hide_index=True, width="stretch",
                          column_config={"Chance": st.column_config.NumberColumn(format="percent"),
                                         "Value": st.column_config.NumberColumn(format="percent"),
                                         "Backtest cover": st.column_config.NumberColumn(format="percent")}))
@@ -372,9 +425,36 @@ if True:
                      "disagreement actually covered (about 52.4% breaks even at −110; the biggest disagreements, in "
                      "lopsided games, cover only ~51%). Other leans have no chance or value because nothing has tested "
                      "them yet; a lean is a read, not a bet. Heavy favorites aren't listed as picks: they usually win but cost more than they're worth. "
-                     "NFL and UFC aren't covered yet.")
+                     "**Soccer** rows show the goals model's most likely result beside the market's favourite — "
+                     "tracking only (its backtest lost to the closing line). NFL and UFC aren't covered yet.")
     else:
         st.caption("No games with a model chance today" + ("" if _scope == "All sports" else " for this sport") + ".")
+
+    # ---- Soccer price flags (Nov 14): a US price above the sharp (Pinnacle) no-vig line by 2%+ -- tracking only
+    if _scope == "All sports" or current == "SOCCER":
+        @st.cache_data(ttl=900, show_spinner=False)
+        def _soccer_flags(day):
+            return _TB.soccer_flags(day)
+
+        try:
+            _sf = [r for r in _soccer_flags(_today) if _keep(r)] if not _past else []
+        except Exception:                                       # noqa: BLE001
+            _sf = []
+        if _sf:
+            st.markdown("##### 📈 Soccer price flags (tracking)")
+            _sf = sorted(_sf, key=lambda r: (_tkey(r.get("time")), -(r.get("ev") or 0)))
+            _sfdf = _pd.DataFrame([{"Time": r["time"], "League": r["league"], "Match": r["game"], "Bet": r["pick"],
+                                    "Best US price": r.get("price"), "Book": r.get("book") or "",
+                                    "Sharp fair chance": r.get("chance"), "Edge vs sharp": r.get("ev"),
+                                    "Goals model": r.get("projected") or ""} for r in _sf])
+            _sel_sf = _LU.picked(_sf, _LU.selectable(_sfdf, "home_soccer_flags", hide_index=True, width="stretch",
+                                 column_config={"Best US price": st.column_config.NumberColumn(format="%+d"),
+                                                "Sharp fair chance": st.column_config.NumberColumn(format="percent"),
+                                                "Edge vs sharp": st.column_config.NumberColumn(format="percent")}))
+            _sel_lines = list(_sel_lines) + [dict(r, best=r["pick"], bet_price=r.get("price")) for r in _sel_sf]
+            st.caption(C.money_md(
+                "A US book's price that beats Pinnacle's no-vig line by 2% or more. Untested: these are tracked to see "
+                "whether the edge holds up (the Soccer Lab keeps the record). Small flat stakes only, if any."))
     # ---- Blowout watch (Nov 7): the games most likely to be decided big, and by whom -- the Game Script loop's calls
     # ---- UFC / MMA card (Nov 7)
     if _scope == "All sports" or current == "UFC":

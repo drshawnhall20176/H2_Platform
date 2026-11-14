@@ -164,6 +164,11 @@ def run(day: Optional[str] = None, force: bool = False) -> Dict[str, Dict]:
                        "top": [f"{r['Player']} {r['Bet']} {int(r['Price']):+d} ({r['Honest chance']:.0%})" for r in res["top"]]}
         except Exception as exc:                                # noqa: BLE001 -- one sport never stops the other
             out[sp] = {"error": f"{type(exc).__name__}: {exc}"}
+    try:                                                        # Nov 14: soccer anytime goalscorers (lab_long_shots)
+        import lab_long_shots as LLS
+        out["SOCCER"] = LLS.run_scorers(day, force=force)
+    except Exception as exc:                                    # noqa: BLE001
+        out["SOCCER"] = {"error": f"{type(exc).__name__}: {exc}"}
     return out
 
 
