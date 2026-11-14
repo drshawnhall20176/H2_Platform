@@ -404,7 +404,11 @@ def _same_player(a: str, b: str) -> bool:
 def tennis_grade(hist: Sequence[Dict], db_path: Optional[str] = None) -> int:
     import model_store as MS
     n = 0
-    for p in MS.load_game_picks("TENNIS", ungraded=True, db_path=db_path):
+    # Nov 14: also re-check recent matches graded "retired" before the full-set rule (Andreescu, Nov 12, was paid as a
+    # win by DraftKings but sat here as void)
+    redo = [p for p in MS.load_game_picks("TENNIS", db_path=db_path) if p.get("result") == "retired"
+            and str(p.get("kickoff"))[:10] >= (datetime.now(timezone.utc).date() - timedelta(days=10)).isoformat()]
+    for p in MS.load_game_picks("TENNIS", ungraded=True, db_path=db_path) + redo:
         day = str(p.get("kickoff"))[:10]
         for m in hist:
             if abs((date.fromisoformat(m["date"]) - date.fromisoformat(day)).days) > 2:
@@ -622,11 +626,13 @@ def bet_fields(p: Dict, market: str, side: str, line: Optional[float], odds: flo
 def bet_result(bet: Dict, p: Dict) -> Optional[str]:
     """win / loss / push for a logged Game Lab bet from its graded record; None until it's graded."""
     fh, fa, res = p.get("final_home"), p.get("final_away"), p.get("result")
-    if fh is None or fa is None or res in (None, "void", "retired"):
+    if res in ("void", "retired"):                              # Nov 14: walkover / retired before a full set -- the
+        return "void"                                           # books void it (stake back); a parlay drops the leg
+    if fh is None or fa is None or res is None:
         return None
     mk, side = bet.get("market"), bet.get("side")
     if str(res).endswith("_ret"):                               # retired after a full set: moneyline stands, rest void
-        return ("win" if (res == "home_ret") == (side == p["home"]) else "loss") if mk == "Moneyline" else None
+        return ("win" if (res == "home_ret") == (side == p["home"]) else "loss") if mk == "Moneyline" else "void"
     if mk == "Total":
         d = (fh + fa) - float(bet["line"])
         return "push" if d == 0 else ("win" if (d > 0) == (str(side).lower() == "over") else "loss")

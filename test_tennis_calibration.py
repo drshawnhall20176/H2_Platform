@@ -68,7 +68,7 @@ def test_retirement_after_a_full_set_stands_like_draftkings():
          "spread_pick": "home", "home_spread": -4.5, "spread_price": -110}
     assert IP.bet_result({"market": "Moneyline", "side": "Bianca Andreescu"}, p) == "win"
     assert IP.bet_result({"market": "Moneyline", "side": "Marina Bassols Ribera"}, p) == "loss"
-    assert IP.bet_result({"market": "Spread", "side": "Bianca Andreescu", "line": -4.5}, p) is None   # void
+    assert IP.bet_result({"market": "Spread", "side": "Bianca Andreescu", "line": -4.5}, p) == "void"
     g = IP.grade_markets(p)
     assert g["ml"]["r"] == "win"
     assert "spread" not in g
@@ -77,3 +77,16 @@ def test_retirement_after_a_full_set_stands_like_draftkings():
     assert "Void" not in LG.tennis_result(m, 0.84)["result"]
     assert "Void" in LG.tennis_result(dict(m, sets1=[3], sets2=[2]), 0.84)["result"]
     assert LG._stands("retired", [6, 4], [4, 2]) is None and LG._stands("retired", [2], [1]) == "retired"
+
+
+def test_voided_tennis_bets_settle_as_void_so_parlays_can_close():
+    import intl_picks as IP
+    import betlog as B
+    walk = {"home": "Holger Rune", "away": "Taylor Fritz", "final_home": 0, "final_away": 0, "result": "void"}
+    early = dict(walk, result="retired", final_home=3, final_away=2)
+    assert IP.bet_result({"market": "Moneyline", "side": "Taylor Fritz"}, walk) == "void"
+    assert IP.bet_result({"market": "Moneyline", "side": "Taylor Fritz"}, early) == "void"
+    ret = {"home": "A", "away": "B", "final_home": 6, "final_away": 10, "result": "away_ret"}
+    assert IP.bet_result({"market": "Spread", "side": "B", "line": -2.5}, ret) == "void"
+    legs = [{"result": "void", "ticket": "t"}, {"result": "win", "ticket": "t"}]
+    assert B.ticket_result(legs) == "win"
