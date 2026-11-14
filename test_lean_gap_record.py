@@ -22,3 +22,8 @@ def test_records_split_by_gap_and_rows_get_their_own_band():
     assert rows[0]["lean_record"].startswith("Spread, 0–4 pt gap: 3–1")
     assert rows[1]["lean_record"].startswith("Spread, 8+ pt gap: 0–4")
     assert rows[2]["lean_record"].startswith("Spread: 3–5")          # no record in its band yet: the overall one
+
+
+def test_hockey_band_labels_use_goals():
+    assert PR.band_label(1, "Spread", "NHL") == "0.6–1.1 goal gap"
+    assert PR.band_label(2, "Total", "NHL") == "1.1+ goal gap"
