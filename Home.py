@@ -76,15 +76,17 @@ if _owner:
 # ---------- Today's best (Nov 6) ----------
 # The day's top-tagged picks across every in-season sport and the labs, in one list. Props come from the last Best
 # Bets board built for each sport today (no extra Odds API spend); game lines, international hoops and tennis from
-# their capture jobs. Tags are the same ones each sport's own page shows. Owner build only.
-if _owner:
+# their capture jobs. Tags are the same ones each sport's own page shows. Nov 14: both builds (owner rule: public =
+# owner minus the Bet Log) -- the log box and the credit-spending Refresh button stay owner-only.
+if True:
     import pandas as _pd
     import props_engine as _PE
     import todays_best as _TB
     import pick_records as _PR
     import log_ui as _LU
     _now_day = _dt.now(_ET).date()
-    _props_sports = [s.key for s in live if s.key in ("NBA", "NFL", "NHL", "NCAAF")]
+    # Nov 14: college basketball props too (they're saved by warm-slates like the rest)
+    _props_sports = [s.key for s in live if s.key in ("NBA", "NFL", "NHL", "NCAAF", "NCAAMB", "WNBA", "MLB")]
     C.section_header("⭐", "Today's best")
     # Nov 7: look back -- any earlier date shows that day's picks as they were saved, with how each one went
     _day = st.date_input("Date", _now_day, max_value=_now_day, key="home_best_date", format="MM/DD/YYYY")
@@ -98,7 +100,7 @@ if _owner:
                        label_visibility="collapsed")
     _show = _c2.radio("Show", ["🔒 Locks only", "All playable"], horizontal=True, key="home_best_show",
                       label_visibility="collapsed")
-    if _c3.button("🔄 Refresh props", width="stretch", disabled=_past,
+    if _owner and _c3.button("🔄 Refresh props", width="stretch", disabled=_past,
                   help="Builds today's Best Bets board for each props sport (the same Odds API use as opening it)."):
         import best_bets_data as _BBD
         with st.spinner("Building today's boards…"):
@@ -187,6 +189,8 @@ if _owner:
     if not _show_losing:
         _rows = [r for r in _rows if r.get("verdict") not in _PR.HIDE]
     _rows = sorted(_rows, key=lambda r: _tkey(r.get("time")))   # Nov 6: earliest games first (stable: rank kept within a time)
+    # Nov 14: every lock is listed (the old 60-row cap, applied after the time sort, cut the late games' locks)
+    _cap = len(_rows) if _show.startswith("🔒") else 250
     _sel_props, _sel_lines = [], []                             # Nov 8: ticked rows, logged by the box below the lists
     if _rows:
         _df = _pd.DataFrame([{"Sport": r["sport"], "Time": r.get("time") or "", "Pick": r["pick"],
@@ -198,7 +202,7 @@ if _owner:
                               "Game": r.get("game"), "Weather": _wx(r.get("sport"), r.get("game")),
                               "Where": r.get("page"),
                               "Tested": "no backtest" if r.get("untested") else "",
-                              "Result": _TB.RESULT_ICON.get(r.get("result"), "—")} for r in _rows[:60]])
+                              "Result": _TB.RESULT_ICON.get(r.get("result"), "—")} for r in _rows[:_cap]])
         if not _past:
             _df = _df.drop(columns=["Result"])
         if not _df["Weather"].replace("", None).notna().any():
@@ -209,7 +213,7 @@ if _owner:
             _df = _df.drop(columns=["Tested"])
         if _scope != "All sports":
             _df = _df.drop(columns=["Sport"])
-        _sel_props = _LU.picked(_rows[:60], _LU.selectable(_df, "home_best_sel", hide_index=True, width="stretch",
+        _sel_props = _LU.picked(_rows[:_cap], _LU.selectable(_df, "home_best_sel", hide_index=True, width="stretch",
                      column_config={"Chance": st.column_config.NumberColumn(format="percent")}))
         _fades = sorted({f"{r['sport']} {_PR._strip(r.get('use'))}" for r in _rows if r.get("verdict") == "fade"})
         if _fades:
@@ -243,6 +247,45 @@ if _owner:
     _notes.append("Prices move — confirm on the sport's own page before placing. Tennis and most international "
                   "leagues rarely show picks: their backtests haven't earned them yet.")
     st.caption(" ".join(_notes))
+
+    # ---- Most probable long shots (Nov 14): for each sport with a Long Shots tab, the top few from the day's scan
+    import long_shots_scan as _LSS
+    _ls_sports = [k for k in _LSS.SPORTS if (_scope == "All sports" or k == current) and k in [s.key for s in live]]
+    _ls_sets = [(k, _LSS.load(k, _today)) for k in _ls_sports]
+    _ls_sets = [(k, v) for k, v in _ls_sets if v and v.get("top")]
+    if _ls_sports:
+        st.markdown("##### 💎 Most probable long shots")
+        if not _ls_sets:
+            st.caption("No long-shot scan yet for today — it runs a few times a day once the books post alternate "
+                       "lines (and on the Long Shots page).")
+        _ls_items = []
+        for _k, _v in _ls_sets:
+            _top = [r for r in _v["top"] if _keep(r)]
+            if not _top:
+                continue
+            try:
+                _at = _dt.fromisoformat(_v["at"]).astimezone(_ET).strftime("%-I:%M %p")
+            except (TypeError, ValueError):
+                _at = ""
+            st.markdown(f"**{_k}** · {len(_v.get('rows') or [])} value long shots across {_v.get('games', 0)} games"
+                        + (f" · prices as of {_at}" if _at else ""))
+            _ldf = _pd.DataFrame([{"Time": r.get("time") or "", "Game": r.get("game") or "", "Pick": r.get("pick"),
+                                   "Price": r.get("Price"), "Honest chance": r.get("Honest chance"),
+                                   "Book says": r.get("Book says"), "EV per $1": r.get("EV per $1"),
+                                   "Market": ("✅ " if r.get("tested") else "") + str(r.get("Market") or "")}
+                                  for r in _top])
+            _ls_items += _LU.picked(_top, _LU.selectable(_ldf, f"home_ls_{_k}", hide_index=True, width="stretch",
+                                    column_config={"Price": st.column_config.NumberColumn(format="%+d"),
+                                                   "Honest chance": st.column_config.NumberColumn(format="percent"),
+                                                   "Book says": st.column_config.NumberColumn(format="percent"),
+                                                   "EV per $1": st.column_config.NumberColumn(format="%+.2f")}))
+        if _ls_sets:
+            _LU.panel(_ls_items, "home_ls_log", _today, tag="long-shot", past=_past)
+            st.caption(C.money_md(
+                "The most likely long shots (priced +400 or longer) that are still worth their price at the honest "
+                "chance, one per player, from the Long Shots finder. ✅ = the one market whose long-shot value lines have "
+                "made money in testing (NBA Assists, NFL Rush Yards); the rest lost 19–32% overall. Most of these lose "
+                "— keep stakes flat at a few dollars and never put two of the same player in one parlay."))
 
     # ---- Most likely winners (Nov 6): every game today, the side the model thinks wins, for every sport covered
     @st.cache_data(ttl=21600, show_spinner=False)

@@ -19,7 +19,12 @@ import streamlit as st
 
 
 def selectable(df: pd.DataFrame, key: str, **kw) -> List[int]:
-    """st.dataframe with a tick box on every row; returns the ticked rows' positions in `df`."""
+    """st.dataframe with a tick box on every row; returns the ticked rows' positions in `df`. The public build (no Bet
+    Log) gets the plain table."""
+    import components as C
+    if not C.is_owner():
+        st.dataframe(df, **kw)
+        return []
     ev = st.dataframe(df, on_select="rerun", selection_mode="multi-row", key=key, **kw)
     try:
         return sorted(int(i) for i in (ev.selection.rows or []))
@@ -42,6 +47,9 @@ def picked(items: Sequence[Dict], rows: Sequence[int]) -> List[Dict]:
 
 def panel(items: Sequence[Dict], key: str, date_str: str, tag: str = "platform-test", past: bool = False) -> None:
     """The log box for ticked picks. Nothing is written until the button is pressed."""
+    import components as C
+    if not C.is_owner():                                        # Nov 14: the public build never writes to the Bet Log
+        return
     if not items:
         st.caption("☑️ Tick rows in the table to log them to the Bet Log — as singles, a parlay, or both.")
         return

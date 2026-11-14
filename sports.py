@@ -375,10 +375,10 @@ def _ET_TZ():
 
 
 def selectable_sports(owner: bool = True, day=None) -> List[Sport]:
-    """What the sport picker offers: live sports that are in season, then the labs (owner build only -- their pages
-    are owner-only)."""
+    """What the sport picker offers: live sports that are in season, then the labs (Tennis, International Hoops,
+    Soccer). Nov 14: the labs are in both builds (owner rule: public = owner minus the Bet Log)."""
     out = [s for s in enabled_sports() if in_season(s.key, day)]
-    return out + (list(LAB_SPORTS.values()) if owner else [])
+    return out + list(LAB_SPORTS.values())
 
 
 def default_selectable(owner: bool = True, day=None) -> str:

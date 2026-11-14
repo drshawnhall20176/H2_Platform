@@ -341,6 +341,8 @@ def value_at_price(p, market: str, side: str, line, odds) -> str:
 def log_panel(league: str, games) -> None:
     """Log a bet on any listed game straight to the Bet Log (it settles itself once the game is graded here)."""
     import betlog as B
+    if not C.is_owner():                                        # Nov 14: the public build has no Bet Log
+        return
     with st.expander("📒 Log one bet with your own line (any side, spread, total or moneyline)"):
         flagged = [p for p in games if _pick(p) != "—"]
         pool = sorted(flagged or games, key=lambda x: x["kickoff"]) if st.toggle(
@@ -462,8 +464,8 @@ def render_fair(league: str) -> None:
                 ev_ = ch * dec - 1
                 st.markdown(f"Model chance **{ch:.0%}** · fair **{_fair_american(ch)}** · at {odds:+d}: **{ev_:+.1%}** → **"
                             + IP.tag_label(dict(IP.chance_use(ch, odds, trusted=False), priced=True)) + "**")
-                real = st.toggle("Real money", value=True, key=f"hf_real_{league}")
-                if st.button("📒 Log it", key=f"hf_log_{league}", type="primary"):
+                real = st.toggle("Real money", value=True, key=f"hf_real_{league}") if C.is_owner() else False
+                if C.is_owner() and st.button("📒 Log it", key=f"hf_log_{league}", type="primary"):
                     f = IP.bet_fields(p, mk, side, line, odds, stake, real, round(ch, 4))
                     try:
                         st.success(f"Logged #{B.add_bet(**f)}: {label}" + ("" if line is None else f" {line:+g}" if mk == "Spread"

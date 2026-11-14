@@ -67,7 +67,8 @@ def props_rows(sport: str, plays) -> List[Dict]:
                     "player": p.get("Player"), "pid": p.get("PlayerId"), "market": p.get("Market"), "side": p.get("Side"),
                     "line": line})
     out.sort(key=_order)
-    return out[:TOP_PER_SPORT]
+    # Nov 14: every 🔒 Most probable is kept; the cap only trims the other playable tags
+    return [r for r in out if r["lock"]] + [r for r in out if not r["lock"]][:TOP_PER_SPORT]
 
 
 def save_props(sport: str, date_str: str, plays, meta=None) -> None:
