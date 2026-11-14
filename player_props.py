@@ -210,12 +210,20 @@ def shrink_minutes(market: str) -> float:
     return sum(ks) / len(ks) if ks else 0.0
 
 
-def league_rate(pgames: Iterable[Dict], market: str, min_minutes: float = MIN_MINUTES) -> Optional[float]:
-    """The market's per-minute rate across the sample's rotation games (the regression target)."""
+PRIOR_BY_GROUP = True      # Nov 14: regress toward his POSITION GROUP's rate (G / F / C), not the whole league's
+
+
+def league_rate(pgames: Iterable[Dict], market: str, min_minutes: float = MIN_MINUTES,
+                group: Optional[str] = None) -> Optional[float]:
+    """The market's per-minute rate across the sample's rotation games (the regression target); with `group`, only
+    that position group's (a center's rebounds regress toward centers', not toward guards')."""
+    import position_matchups as PM
     v = m = 0.0
     for p in pgames or []:
         st = p.get("stats") or {}
         mins = _num(st.get("min"))
+        if group is not None and PM.position_group(p.get("pos")) != group:
+            continue
         if mins >= min_minutes:
             v += market_value(st, market)
             m += mins
@@ -310,13 +318,20 @@ def player_rows(rotation_list: Sequence[Dict], defense, market: str, cur_table: 
     base = []
     lg_rate = league_rate(cur_pgames, market) or league_rate(prior_pgames, market)
     k_min = shrink_minutes(market)
+    grp_rates: Dict = {}
     for r in rotation_list:
         f = form_games(cur_pgames, prior_pgames, r["pid"])
         games = f["games"]
         values = [market_value(g.get("stats") or {}, market) for g in games]
         mins = [_num((g.get("stats") or {}).get("min")) for g in games]
         rate, proj_min = PE.rate_and_opportunity(values, mins, f["weights"])
-        rate = PE.shrink_toward(rate, mins, lg_rate, k_min, f["weights"])     # Nov 14: regression to the mean
+        target = lg_rate
+        if PRIOR_BY_GROUP and k_min and r.get("slot") in ("G", "F", "C"):
+            if r["slot"] not in grp_rates:
+                grp_rates[r["slot"]] = (league_rate(cur_pgames, market, group=r["slot"])
+                                        or league_rate(prior_pgames, market, group=r["slot"]))
+            target = grp_rates[r["slot"]] or lg_rate
+        rate = PE.shrink_toward(rate, mins, target, k_min, f["weights"])     # Nov 14: regression to the mean
         out = is_out(r.get("status"))
         fresh = out and PE.fresh_absence([g.get("game") for g in _games(cur_pgames, r["pid"], HIT_N)], team_games)
         base.append({"r": r, "f": f, "values": values, "games": games, "rate": rate, "proj_min": proj_min,
