@@ -200,6 +200,36 @@ def annotate_leans(rows, records_for=lean_records) -> None:
                     pass
         r["lean_record"] = f"{name}: " + label(w, n, mk != "Moneyline") if n else ""
         r["lean_verdict"] = verdict(w, n, mk != "Moneyline") if n else "new"
+        r["lean_wn"] = (w, n)
+
+
+BREAK_EVEN = 0.524              # -110
+
+
+def grade(r: Dict) -> str:
+    """Nov 14: a plain grade for every game-line row, from the evidence there is -- instead of "untested" on all of
+    them. A = a tested pick (a backtest supports the rule). Otherwise the lean is graded on how leans of its kind and
+    size have done (its backtest cover rate where one exists, else the last 30 days):
+      B  won 55%+ (20+ games)            -> a lean worth a small stake
+      C  near break-even, or too few games -> pass
+      D  losing (under 52.4%)            -> pass
+      F  40% or worse                    -> pass; the other side has been winning"""
+    if r.get("best_tested"):
+        return f"A · tested pick ({r.get('use') or 'backtest'})"
+    if not r.get("best"):
+        return "—"
+    bt = r.get("backtest")
+    w, n = r.get("lean_wn") or (0, 0)
+    rate, basis = (float(bt), "backtest") if bt is not None else ((w / n, f"{w}–{n - w}") if n >= MIN_N else (None, ""))
+    if rate is None:
+        return "C · pass — no track record yet"
+    if rate >= 0.55:
+        return f"B · small stake — {basis} {rate:.0%}"
+    if rate >= BREAK_EVEN:
+        return f"C · pass — break-even ({basis} {rate:.0%})"
+    if rate > 0.40:
+        return f"D · pass — losing ({basis} {rate:.0%})"
+    return f"F · pass — the other side won ({basis} {rate:.0%})"
 
 
 BANDS = ("Model 60%+", "Model 55–60%", "Model 50–55%", "Against the model (<50%)", "No model read")

@@ -376,10 +376,11 @@ if True:
             _ws = [r for r in _ws if r.get("best_tested") or r.get("lean_verdict") not in _PR.HIDE]
         _wdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"],
                                "Weather": _wx(r["sport"], r["game"]),
+                               "Spread": r.get("spread_txt") or "",
+                               "Total": r.get("total_txt") or "",
+                               "Model": r.get("model_txt") or r.get("lean_detail") or "",
                                "Pick / lean": r.get("best") or "—",
-                               "Status": r.get("status") or (f"✅ {r.get('use')}" if r.get("best_tested") else
-                                          ("lean · untested" if r.get("best") else "")),
-                               "Model vs line": r.get("lean_detail") or "",
+                               "Grade": (f"Tracking only — {r['status']}" if r.get("status") else _PR.grade(r)),
                                "Lean record (30d)": ((("⚠️ " if r.get("lean_verdict") in _PR.HIDE else "")
                                                       + r["lean_record"]) if r.get("lean_record") else "—"),
                                "Backtest cover": r.get("backtest") if not r.get("best_tested") else None,
@@ -399,7 +400,7 @@ if True:
         if not _wdf.empty and not _wdf["Weather"].replace("", None).notna().any():
             _wdf = _wdf.drop(columns=["Weather"])
         if not _wdf.empty:                                       # columns with nothing in them (no tested picks) go
-            _wdf = _wdf.drop(columns=[c for c in ("Chance", "Price", "Value", "Backtest cover")
+            _wdf = _wdf.drop(columns=[c for c in ("Chance", "Price", "Value", "Backtest cover", "Spread", "Total")
                                       if c in _wdf and not _wdf[c].replace("", None).notna().any()])
         if _wdf.empty:
             st.caption("No tested game-line picks today.")
@@ -419,15 +420,16 @@ if True:
                 _bits.append(f"{_sp}: favorite won {_a['won'] / _a['n']:.0%} of {_a['n']:,}"
                              + (f" ({_hw / _hn:.0%} when it said 70%+, {_hn:,} games)" if _hn >= 10 else ""))
         st.caption(("**Track record** (likely winner) — " + "; ".join(_bits) + ". " if _bits else "")
-                   + "**✅ Tested picks** come from rules a backtest supports (NCAAMB spreads at 8+ points of "
-                     "disagreement, EuroLeague spreads, NBL moneylines): their chance and value are real numbers. Every "
-                     "other game shows the model's **lean** — the spread or total it disagrees with most, with its own "
-                     "number. Where the spread model was backtested, *Backtest cover* is how often spreads with that much "
-                     "disagreement actually covered (about 52.4% breaks even at −110; the biggest disagreements, in "
-                     "lopsided games, cover only ~51%). Other leans have no chance or value because nothing has tested "
-                     "them yet; a lean is a read, not a bet. Heavy favorites aren't listed as picks: they usually win but cost more than they're worth. "
-                     "**Soccer** rows show the goals model's most likely result beside the market's favourite — "
-                     "tracking only (its backtest lost to the closing line). NFL and UFC aren't covered yet.")
+                   + "**Grade** — **A**: a tested pick (a backtest supports the rule: NCAAMB spreads at 8+ points of "
+                     "disagreement, EuroLeague spreads, NBL moneylines); its chance and value are real numbers. Every "
+                     "other game shows the model's **lean** (the spread or total it disagrees with most), graded on how "
+                     "leans of that kind and size have actually done — the backtest where one exists, else the last 30 "
+                     "days: **B** won 55%+ (a small stake at most), **C** break-even or too few games (pass), **D** losing "
+                     "(pass), **F** 40% or worse (pass). 52.4% breaks even at −110. **Spread / Total** are the books' "
+                     "lines; **Model** is the model's own score. College football has no A or B today: its spread model "
+                     "was retested Nov 14 and is a coin flip against the closing line. Heavy favorites aren't listed as "
+                     "picks: they usually win but cost more than they're worth. **Soccer** rows show the goals model's "
+                     "most likely result beside the market's favourite — tracking only. NFL and UFC aren't covered yet.")
     else:
         st.caption("No games with a model chance today" + ("" if _scope == "All sports" else " for this sport") + ".")
 

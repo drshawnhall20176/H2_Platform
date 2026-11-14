@@ -59,7 +59,7 @@ def test_build_picks_only_past_the_edge_and_store_keeps_open_and_close(tmp_path)
            "completed": False, "start_date": (now + timedelta(days=2)).isoformat()},
           {"id": 901, "season": 2026, "week": 13, "home_team": "C", "away_team": "D", "neutral_site": False,
            "completed": False, "start_date": (now + timedelta(days=2)).isoformat()}]
-    r = GP.ratings(sched)
+    r = GP.fit(sched)
     m_af = GP.project(r, "A", "F", False)[0]
     m_cd = GP.project(r, "C", "D", False)[0]
     events = [_event("A", "F", -(m_af - 10)), _event("C", "D", -(m_cd + 1))]       # A-F: model 10 off; C-D: 1 off
@@ -138,3 +138,13 @@ def test_held_picks_are_kept_out_of_the_official_record():
     picks = [{"pick": "home", "result": "win", "held": False, "edge": 8}, {"pick": "away", "result": "loss", "held": True,
                                                                           "edge": 8}]
     assert GP.summary(picks)["record"] == "1-0" and GP.summary(picks, held=True)["record"] == "0-1"
+
+
+def test_live_fit_drops_fcs_opponents_and_fixes_home_field():
+    sched = _season()
+    fcs = [{"id": 5000 + i, "season": 2026, "week": 1, "home_team": t, "away_team": f"FCS{i}", "home_points": 56,
+            "away_points": 3, "neutral_site": False, "completed": True, "start_date": "2026-09-01T00:00:00Z"}
+           for i, t in enumerate("ABCDEF")]
+    assert GP.ratings(sched + fcs)["hfa"] > GP.ratings(sched)["hfa"] + 3      # the blowouts inflate a fitted home field
+    r = GP.fit(sched + fcs)
+    assert r["hfa"] == GP.FIXED_HFA and not any(t.startswith("FCS") for t in r["off"])

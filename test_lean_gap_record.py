@@ -27,3 +27,24 @@ def test_records_split_by_gap_and_rows_get_their_own_band():
 def test_hockey_band_labels_use_goals():
     assert PR.band_label(1, "Spread", "NHL") == "0.6–1.1 goal gap"
     assert PR.band_label(2, "Total", "NHL") == "1.1+ goal gap"
+
+
+def test_grades():
+    assert PR.grade({"best_tested": True, "use": "🎟️"}).startswith("A")
+    assert PR.grade({"best": "X -3", "lean_wn": (30, 50)}).startswith("B")
+    assert PR.grade({"best": "X -3", "lean_wn": (5, 8)}).startswith("C · pass — no track")
+    assert PR.grade({"best": "X -3", "lean_wn": (26, 50)}).startswith("D")
+    assert PR.grade({"best": "X -3", "lean_wn": (16, 53)}).startswith("F")
+    assert PR.grade({"best": "X -3", "backtest": 0.51}).startswith("D")
+    assert PR.grade({}) == "—"
+
+
+def test_ncaaf_rows_show_the_spread():
+    import todays_best as TB
+    p = {"home": "Florida", "away": "Oklahoma", "line": 4.0, "model_margin": 1.0, "line_total": 47.5,
+         "model_total": 50.0}
+    t = TB._line_text(p)
+    assert t["spread_txt"] == "Florida -4" and t["total_txt"] == "47.5" and t["model_txt"] == "Florida by 1.0, total 50.0"
+    b = TB.best_line(p, "NCAAF", 0.53)
+    assert b["best"] in ("Oklahoma +4", "Over 47.5")                 # a spread lean is possible now
+    assert b["bet_price"] == -110
