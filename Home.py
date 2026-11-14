@@ -41,9 +41,9 @@ active = sports.get(current)
 if active:
     st.caption(f"Currently viewing: **{active.icon} {active.label}** — select a page from the sidebar to begin.")
     if current == "UFC":
-        st.info("🥊 UFC Fight Card is live — tonight's bouts with moneyline odds, "
-               "method of victory lines, and fight duration props. "
-               "Phase 2 will add finishing rate history and conviction scoring.")
+        st.info("🥊 UFC Fight Card: tonight's bouts with moneyline odds, the market's no-vig chances, and total-rounds "
+               "(fight duration) lines. There's no UFC model — every chance comes from the odds — and method-of-victory "
+               "lines aren't shown because the odds feed doesn't carry them.")
 
 st.divider()
 
