@@ -241,6 +241,16 @@ SPORTS = {
                     "player_receptions_alternate": "player_receptions",
                     "player_pass_tds_alternate": "player_pass_tds"},
             "cap": {"count": 1.8, "normal": 0.7, "floor": (0.45, 8.0)}},
+    # Nov 14 (research/college_longshot_check.py: 2025 + 2026 FBS, walk-forward, ~28,900 player-games). Same shape as
+    # the NFL: the model's 1-in-20 rungs happen about twice as often as it says, its 30-55% rungs a quarter less.
+    "NCAAF": {"tail": {
+        "Receiving Yards": [2.16, 1.88, 1.1, 1.01, 0.81, 0.68, 0.67, None],
+        "Rush Yards": [2.54, 1.78, 1.27, 1.23, 0.94, 0.81, 0.74, None],
+        "Pass Yards": [None, 2.24, 2.06, 1.49, 0.95, 0.75, 0.8, None],
+        "Receptions": [1.53, 0.97, 0.83, 0.72, 0.72, 0.73, 0.75, 0.87],
+        "Rush + Rec Yards": [2.57, 1.77, 1.33, 1.12, 0.9, 0.78, 0.76, None],
+        "Passing TDs": [1.68, 1.04, 0.96, 0.94, 0.99, 1.03, 0.93, 0.92]}, "count": {"Receptions", "Passing TDs"},
+              "ladder": None, "main_key": None, "alt": None, "cap": None},
     "NHL": {"tail": {    # same research, every team's last ~30 games; hockey counts are close to honest already
         "Shots on Goal": [1.28, 0.88, 1.05, 1.03, 0.99, 1.0, 1.01, 0.98],
         "Goals": [0.6, 0.97, 0.98, 1.07, 1.14, 1.15, None, None]}, "count": {"Shots on Goal", "Points", "Goals", "Assists"},
@@ -252,3 +262,7 @@ SPORTS = {
                     "player_total_saves_alternate": "player_total_saves"},
             "cap": {"count": 1.8, "normal": 0.38, "floor": (0.25, 1.0)}},
 }
+
+
+for _k in ("ladder", "main_key", "alt", "cap"):                    # college football: the NFL's markets and settings
+    SPORTS["NCAAF"][_k] = SPORTS["NFL"][_k]
