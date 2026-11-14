@@ -12,6 +12,7 @@ Two kinds:
   * Soccer anytime goalscorer (scanned a few times a day, ~3 Odds API credits per match, capped): priced +400 or
     longer, the player's per-start scoring rate (last 10 matches, ESPN) scaled to the opponent beats the price, at
     least MIN_STARTS starts in those 10.
+Both kinds keep only rows where the model's chance is at most 1.5x the price's implied chance (agrees()).
 
 Nothing here is tested: no backtest of underdog moneylines or goalscorer prices exists for these sports. The goals
 model lost to the closing line in its backtest, and international hoops / tennis moneylines are tracking only, so
@@ -36,6 +37,15 @@ SCORER_KEY = "longshots:SOCCER:{date}"
 SCORER_LEAGUES = ("SOCCER_EPL", "SOCCER_LALIGA", "SOCCER_SERIEA", "SOCCER_BUNDESLIGA", "SOCCER_LIGUE1",
                   "SOCCER_UCL", "SOCCER_UEL", "SOCCER_MLS", "SOCCER_LIGAMX", "SOCCER_WCQ_UEFA", "SOCCER_NATIONS")
 LABEL = "untested — tracking"
+AGREE_X = 1.5               # the model's chance at most 1.5x the price's implied chance
+
+
+def agrees(chance: float, d: float, x: float = AGREE_X) -> bool:
+    """Nov 14: the first run's "best" underdogs were the model's biggest disagreements with the book (a 49% college
+    dog at +530, Bosnia 34% at +600, a defender 22% to score at +1200). Where the model disagrees that much the book
+    is usually right (injuries, lineups, motivation the model can't see), as the NBA long shots showed. Keep a long
+    shot only where the model's chance beats the price's implied chance by at most AGREE_X."""
+    return d > 1 and 1 / d < chance <= x / d
 
 
 def _dec(a) -> Optional[float]:
@@ -74,7 +84,7 @@ def dog_side(p: Dict, chance_home: float, min_price: int = DOG_MIN) -> Optional[
     ch = chance_home if home else 1 - chance_home
     price = p.get("best_home") if home else p.get("best_away")
     d = _dec(price)
-    if d is None or float(price) < min_price or ch * d <= 1:
+    if d is None or float(price) < min_price or not agrees(ch, d):
         return None
     return {"side": "home" if home else "away", "team": p.get("home") if home else p.get("away"), "chance": ch,
             "price": float(price), "book": p.get("best_home_book") if home else p.get("best_away_book"),
@@ -87,7 +97,7 @@ def soccer_dogs(p: Dict, min_price: int = DOG_MIN) -> List[Dict]:
     for side, pk, price, book in (("home", "p_home", "best_home", "book_home"), ("draw", "p_draw", "best_draw", "book_draw"),
                                   ("away", "p_away", "best_away", "book_away")):
         ch, d = p.get(pk), _dec(p.get(price))
-        if ch is None or d is None or float(p[price]) < min_price or ch * d <= 1:
+        if ch is None or d is None or float(p[price]) < min_price or not agrees(float(ch), d):
             continue
         out.append({"side": side, "team": {"home": p.get("home"), "away": p.get("away"), "draw": "Draw"}[side],
                     "chance": float(ch), "price": float(p[price]), "book": p.get(book), "ev": round(ch * d - 1, 4)})
@@ -136,7 +146,10 @@ def dog_rows(date_str: str, load: Optional[Callable] = None, now: Optional[datet
         s = dog_side(p, float(p["model_p"]))
         if s:
             out["TENNIS"].append(_row("TENNIS", "TENNIS", p.get("tournament") or "Tennis", p, s))
+    import todays_best as TB
     for lg, meta in H.LEAGUES.items():
+        if lg in TB.WINNER_LEAGUES:                             # NCAAMB / NBA / NHL aren't labs
+            continue
         for p in _recs(lg):
             if p.get("model_p") is None:
                 continue
@@ -174,7 +187,8 @@ def scorer_picks(read_rows: Sequence[Dict], min_price: int = SCORER_MIN, min_sta
     for x in read_rows:
         if x.get("market") != "Anytime Goal" or x.get("chance") is None or x.get("price") is None:
             continue
-        if float(x["price"]) < min_price or (x.get("starts") or 0) < min_starts or (x.get("ev") or 0) <= 0:
+        if float(x["price"]) < min_price or (x.get("starts") or 0) < min_starts \
+                or not agrees(float(x["chance"]), _dec(x["price"]) or 0):
             continue
         out.append(x)
     return out

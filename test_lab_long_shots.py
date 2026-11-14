@@ -85,3 +85,11 @@ def test_soccer_rows_and_flags(monkeypatch):
     assert [f["pick"] for f in flags] == ["Over 2.5 goals", "A to win"]
     b = TB.bet_rows([dict(flags[0], best=flags[0]["pick"])], 2.0, False, "t", "2026-11-14")[0]
     assert b["sport"] == "SOCCER" and b["market"] == "Total" and b["line"] == 2.5
+
+
+def test_agrees_drops_big_disagreements():
+    p = {"home": "A", "away": "B", "best_home": -900, "best_away": 530}
+    assert L.dog_side(p, 0.51) is None        # 49% at +530 (implied 16%): the book knows something
+    assert L.dog_side(p, 0.78) is not None    # 22% at +530: within 1.5x
+    assert L.scorer_picks([{"market": "Anytime Goal", "player": "D", "price": 1200, "chance": 0.22, "ev": 1.86,
+                            "starts": 9}]) == []
