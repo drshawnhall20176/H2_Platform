@@ -138,9 +138,12 @@ def backtest_basketball(pgames: Sequence[Dict], sport: str, market: str, max_cas
         rate, proj_min = PE.rate_and_opportunity(vals, mins)
         if rate is None:
             continue
-        if d not in lg_rates:                                   # Nov 14: the model's regression to the mean
-            lg_rates[d] = PPR.league_rate([q for q in pg if _date(q["order"]) < d], market)
-        rate = PE.shrink_toward(rate, mins, lg_rates[d], PPR.shrink_minutes(market))
+        gkey = (d, slot if PPR.PRIOR_BY_GROUP else None)
+        if gkey not in lg_rates:                                # Nov 14: the model's regression to the mean
+            before = [q for q in pg if _date(q["order"]) < d]
+            lg_rates[gkey] = (PPR.league_rate(before, market, group=gkey[1]) if gkey[1] else None) \
+                or PPR.league_rate(before, market)
+        rate = PE.shrink_toward(rate, mins, lg_rates[gkey], PPR.shrink_minutes(market))
         # next man up: regulars of this team (2 of its last 3 games, 20+ min) who sat this one
         recent_team = sorted([g for g, gd in team_games.get(p["team"], {}).items() if gd < d],
                              key=lambda g: team_games[p["team"]][g], reverse=True)[:PE.FRESH_OUT_GAMES]
