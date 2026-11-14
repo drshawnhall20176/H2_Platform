@@ -12,7 +12,7 @@ def test_in_season_windows():
     assert "MLB" not in on and "WNBA" not in on                # World Series over Oct 28; WNBA ended in October
     assert S.in_season("MLB", date(2026, 7, 1)) and S.in_season("NFL", date(2027, 1, 20))   # wraps the new year
     assert not S.in_season("NCAAMB", date(2026, 7, 1))
-    assert "TENNIS" not in {s.key for s in S.selectable_sports(False, nov5)}    # labs are owner-only
+    assert {"TENNIS", "INTL", "SOCCER"} <= {s.key for s in S.selectable_sports(False, nov5)}   # Nov 14: labs in both builds
     assert S.default_selectable(True, nov5) == "NFL"           # MLB is out of season -> first in-season sport
     assert S.get("TENNIS").label.startswith("Tennis") and not S.get("TENNIS").has_projections
 

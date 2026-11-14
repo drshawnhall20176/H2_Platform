@@ -425,6 +425,25 @@ def tennis_grade(hist: Sequence[Dict], db_path: Optional[str] = None) -> int:
             if MS.grade_game_pick("TENNIS", p["game_id"], hg, ag, res, db_path=db_path):
                 n += 1
             break
+        else:
+            # Nov 14: the opponent changed (Muchova was replaced by Shnaider; DraftKings voided Andreeva's moneyline).
+            # 12 hours after the start, if either player finished a match that day against someone else, it's void.
+            try:
+                ko = datetime.fromisoformat(str(p.get("kickoff")).replace("Z", "+00:00"))
+                ko = ko if ko.tzinfo else ko.replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+            if p.get("result") or datetime.now(timezone.utc) < ko + timedelta(hours=12):
+                continue
+            for m in hist:
+                if m.get("status") not in ("final", "retired") or abs((date.fromisoformat(m["date"]) -
+                                                                        date.fromisoformat(day)).days) > 1:
+                    continue
+                me = [x for x in (p["home"], p["away"]) if _same_player(m["p1"], x) or _same_player(m["p2"], x)]
+                if len(me) == 1:
+                    if MS.grade_game_pick("TENNIS", p["game_id"], 0, 0, "void", db_path=db_path):
+                        n += 1
+                    break
     return n
 
 

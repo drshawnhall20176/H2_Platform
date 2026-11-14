@@ -120,8 +120,8 @@ def test_owner_only_pages_match_expected_titles():
                      "Track Record", "Data Health",
                      "Suggested Parlays", "Speculative Basket", "Graded Picks",
                      "Model Dashboard", "First Innings Totals", "Player Lines", "Slip Lab",
-                     "Postgame Review", "Progression Plan", "Reports", "My Coach", "Model Performance", "Game Script", "Tennis Lab",
-                     "International Hoops", "Long Shots"}, gated
+                     "Postgame Review", "Progression Plan", "Reports", "My Coach", "Model Performance", "Game Script"}, gated
+    # Nov 14: Tennis Lab, International Hoops and Long Shots opened to the public build
     all_titles = set(re.findall(r'\("([^"]+)",\s*"[^"]*",\s*"[^"]*"\)', src))
     assert gated <= all_titles, f"gated titles not found in _META: {gated - all_titles}"
     print("✓ owner-only gate targets exactly Bet Log / Media Room / Podcast Studio / Edge Board / "

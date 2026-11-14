@@ -337,6 +337,11 @@ def run(kind: str, day: str, force: bool = False) -> int:
         import pick_records as PR
         import todays_best as TB
         refresh_boards(day)
+        try:                                                        # Nov 14: and the long-shot scan (if 3 h stale)
+            import long_shots_scan as LSS
+            print("long shots:", LSS.run(day))
+        except Exception as exc:                                    # noqa: BLE001
+            print(f"long-shot scan failed: {type(exc).__name__}: {exc}")
         rows = [r for r in TB.collect(day, PROPS_SPORTS)["rows"] if r.get("kind") == "Prop"]
         try:
             lines = TB.game_rows(day)                               # game lines, international hoops, tennis

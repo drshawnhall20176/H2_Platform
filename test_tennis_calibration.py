@@ -90,3 +90,16 @@ def test_voided_tennis_bets_settle_as_void_so_parlays_can_close():
     assert IP.bet_result({"market": "Spread", "side": "B", "line": -2.5}, ret) == "void"
     legs = [{"result": "void", "ticket": "t"}, {"result": "win", "ticket": "t"}]
     assert B.ticket_result(legs) == "win"
+
+
+def test_opponent_change_voids_the_match(monkeypatch):
+    import intl_picks as IP
+    import model_store as MS
+    pick = {"game_id": "espn-wta-187384", "home": "Karolina Muchova", "away": "Mirra Andreeva",
+            "kickoff": "2026-11-13T20:00Z", "result": None}
+    hist = [{"date": "2026-11-13", "p1": "Diana Shnaider", "p2": "Mirra Andreeva", "winner": 2, "status": "final",
+             "games1": 3, "games2": 12, "full_sets": 2}]
+    graded = []
+    monkeypatch.setattr(MS, "load_game_picks", lambda sport, ungraded=False, db_path=None: [pick] if ungraded else [])
+    monkeypatch.setattr(MS, "grade_game_pick", lambda *a, **k: graded.append(a) or True)
+    assert IP.tennis_grade(hist) == 1 and graded[0][4] == "void"
