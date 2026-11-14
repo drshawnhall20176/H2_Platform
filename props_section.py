@@ -48,18 +48,26 @@ def judged(rows: List[Dict], sport: str, bets=None, tag_records_for=None) -> Lis
     return out
 
 
-def render(sport: str, day: str, title: str = "🎯 Player props") -> None:
-    import log_ui as LU
+@st.cache_data(ttl=120, show_spinner=False)
+def _load(sport: str, day: str):
+    """Nov 14: the saved board and My Coach's verdicts, cached for 2 minutes -- a Saturday college board is hundreds of
+    props, and judging them (with the bet history and the 30-day records) on every click made the Game Lab crawl."""
     import todays_best as TB
-    st.markdown(f"##### {title}")
     saved = TB.load_props(sport, day) or {}
     rows = list(saved.get("rows") or [])
+    return saved, rows, (judged(rows, sport) if rows else [])
+
+
+def render(sport: str, day: str, title: str = "🎯 Player props") -> None:
+    import log_ui as LU
+    st.markdown(f"##### {title}")
+    saved, rows, _judged = _load(sport, day)
     if not rows:
         st.info("No player props saved for today yet. They're priced when the books post them (the board refreshes "
                 "hourly and again before the afternoon picks note); college props are thinner than the pros — many "
                 "games have none.")
         return
-    js = C.by_kickoff(judged(rows, sport), lambda j: j.get("time"))
+    js = C.by_kickoff(_judged, lambda j: j.get("time"))
     games = sorted({j.get("game") for j in js if j.get("game")})
     c1, c2 = st.columns([2, 1])
     g = c1.selectbox("Game", ["All games"] + games, key=f"ps_game_{sport}")

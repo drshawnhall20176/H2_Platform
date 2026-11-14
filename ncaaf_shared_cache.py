@@ -41,7 +41,9 @@ import ncaaf_engine as E
 
 
 if st is not None:
-    @st.cache_data(ttl=300, show_spinner=False)
+    # Nov 14: 15 minutes (was 5). A Saturday slate is 60+ games of player data; every expiry made the next visitor
+    # wait for the whole rebuild. Prices on the pages come from their own (shorter) odds caches, not from this.
+    @st.cache_data(ttl=900, show_spinner=False)
     def load_ncaaf_slate_cached(date_str: str) -> Tuple[List[Dict], List[Dict]]:
         """Cached companion to ncaaf_engine.build_slate -- the ONE real, shared entry point any
         NCAAF page needing today's slate (rows, meta) should call. Reach for this FIRST, before
