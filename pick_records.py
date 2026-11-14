@@ -232,6 +232,17 @@ def grade(r: Dict) -> str:
     return f"F · pass — the other side won ({basis} {rate:.0%})"
 
 
+def lean_use(r: Dict) -> str:
+    """Nov 14: the site's Use symbols for a game-line row, from its grade -- A: the tested rule's own tag; B: 🎯 Single
+    only (a 55% lean is a single, never a parlay leg); C / D / F and tracking-only rows: ⛔ Pass."""
+    import props_engine as PE
+    if r.get("status"):                                         # soccer and other tracking-only rows
+        return PE.USE_PASS
+    if r.get("best_tested"):
+        return r.get("use") or PE.USE_SINGLE
+    return PE.USE_SINGLE if grade(r).startswith("B") else PE.USE_PASS
+
+
 BANDS = ("Model 60%+", "Model 55–60%", "Model 50–55%", "Against the model (<50%)", "No model read")
 
 

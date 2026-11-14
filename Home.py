@@ -379,10 +379,10 @@ if True:
                                "Spread": r.get("spread_txt") or "",
                                "Total": r.get("total_txt") or "",
                                "Model": r.get("model_txt") or r.get("lean_detail") or "",
-                               "Pick / lean": r.get("best") or "—",
-                               "Grade": (f"Tracking only — {r['status']}" if r.get("status") else _PR.grade(r)),
-                               "Lean record (30d)": ((("⚠️ " if r.get("lean_verdict") in _PR.HIDE else "")
-                                                      + r["lean_record"]) if r.get("lean_record") else "—"),
+                               "Pick": r.get("best") or "—",
+                               "Use": _PR.lean_use(r),
+                               "Record (30d)": ((("⚠️ " if r.get("lean_verdict") in _PR.HIDE else "")
+                                                 + r["lean_record"]) if r.get("lean_record") else "—"),
                                "Backtest cover": r.get("backtest") if not r.get("best_tested") else None,
                                "Chance": r.get("best_chance") if r.get("best_tested") else None,
                                "Price": (f"{float(r['best_price']):+.0f}" if r.get("best_tested") and r.get("best_price")
@@ -420,16 +420,17 @@ if True:
                 _bits.append(f"{_sp}: favorite won {_a['won'] / _a['n']:.0%} of {_a['n']:,}"
                              + (f" ({_hw / _hn:.0%} when it said 70%+, {_hn:,} games)" if _hn >= 10 else ""))
         st.caption(("**Track record** (likely winner) — " + "; ".join(_bits) + ". " if _bits else "")
-                   + "**Grade** — **A**: a tested pick (a backtest supports the rule: NCAAMB spreads at 8+ points of "
-                     "disagreement, EuroLeague spreads, NBL moneylines); its chance and value are real numbers. Every "
-                     "other game shows the model's **lean** (the spread or total it disagrees with most), graded on how "
-                     "leans of that kind and size have actually done — the backtest where one exists, else the last 30 "
-                     "days: **B** won 55%+ (a small stake at most), **C** break-even or too few games (pass), **D** losing "
-                     "(pass), **F** 40% or worse (pass). 52.4% breaks even at −110. **Spread / Total** are the books' "
-                     "lines; **Model** is the model's own score. College football has no A or B today: its spread model "
-                     "was retested Nov 14 and is a coin flip against the closing line. Heavy favorites aren't listed as "
-                     "picks: they usually win but cost more than they're worth. **Soccer** rows show the goals model's "
-                     "most likely result beside the market's favourite — tracking only. NFL and UFC aren't covered yet.")
+                   + "**Use** — the same symbols as every page: 🎟️ Parlay + Single / 🎟️ Parlay leg / 🎯 Single only / ⛔ Pass. "
+                     "A tested pick (a backtest supports the rule: NCAAMB spreads at 8+ points of disagreement, EuroLeague "
+                     "spreads, NBL moneylines) carries its rule's tag, with a real chance and value. Every other game shows "
+                     "the model's **lean** (the spread or total it disagrees with most): 🎯 Single only when leans of that "
+                     "kind and size have won 55%+ (backtest, or 20+ games in the last 30 days), otherwise ⛔ Pass. "
+                     "52.4% breaks even at −110. Tick a row and the log box shows its grade (A–F) and why. **Spread / "
+                     "Total** are the books' lines; **Model** is the model's own score. College football leans are ⛔ "
+                     "Pass: its spread model was retested Nov 14 and is a coin flip against the closing line. Heavy "
+                     "favorites aren't listed as picks: they usually win but cost more than they're worth. **Soccer** rows "
+                     "show the goals model's most likely result beside the market's favourite — tracking only, ⛔ Pass. "
+                     "NFL and UFC aren't covered yet.")
     else:
         st.caption("No games with a model chance today" + ("" if _scope == "All sports" else " for this sport") + ".")
 
@@ -517,7 +518,8 @@ if True:
     _ticked = list(_sel_props)
     for r in _sel_lines:
         if r.get("bet_market") and r.get("best"):
-            _ticked.append(dict(r, price=r.get("bet_price"), pick=r["best"]))
+            _ticked.append(dict(r, price=r.get("bet_price"), pick=r["best"],
+                                grade=("tracking only" if r.get("status") else _PR.grade(r))))
     _LU.panel(_ticked, "home_log", _today, past=_past)
     st.divider()
 
