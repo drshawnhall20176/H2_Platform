@@ -1,4 +1,5 @@
 import os, runpy, sys
+sys.stdout.reconfigure(line_buffering=True)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import model_store as MS
 d = [x for x in MS.snapshot_dates("NCAAF") if "2026-09-01" <= x <= "2026-11-13"]
