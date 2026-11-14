@@ -191,4 +191,5 @@ repos/drshawnhall20176/H2_Platform/actions/workflows/daily-review.yml/dispatches
 | International hoops / tennis | `intl_hoops.py`, `intl_picks.py`, `tennis_model.py`, `hoops_games_page.py` |
 | Soccer | `soccer_model.py`, `soccer_data.py`, `soccer_picks.py`, `soccer_props.py`, `views/55_Soccer_Lab.py` |
 | Long shots | `long_shots.py`, `views/53_Long_Shots.py` |
+| Lab long shots (Nov 14, tracking) | `lab_long_shots.py`: tennis / intl hoops / soccer underdogs +300 (free, from lab records); soccer anytime goalscorers +400, 5+ starts, scanned every 6 h from `long_shots_scan.run` (≤24 matches, ~3 credits each); Home shows them under 💎, plus soccer rows in the game-lines table and a 📈 soccer price-flag list |
 | Research | `research/*.py` (backtests: soccer, tennis, live models, long shots, calibration) |

@@ -414,6 +414,85 @@ def winner_rows(date_str: str, leagues=None, past: bool = False) -> List[Dict]:
     return out
 
 
+def soccer_rows(date_str: str, leagues=None, past: bool = False) -> List[Dict]:
+    """Nov 14: soccer in the game-lines table -- the goals model's most likely result beside the market's favourite.
+    Tracking only (the backtest lost to the closing line), so no pick or value: a read, labeled as such."""
+    import model_store as MS
+    import soccer_data as D
+    import soccer_picks as SP
+    if leagues is None:
+        leagues = SP.slate_leagues() or list(D.LEAGUES)
+    out = []
+    for lg in leagues:
+        try:
+            recs = SP.dedupe(MS.load_game_picks(lg, ungraded=not past))
+        except Exception:                                       # noqa: BLE001
+            continue
+        for p in recs:
+            if _et_date(p.get("kickoff")) != date_str or p.get("p_home") is None:
+                continue
+            probs = {"home": p["p_home"], "draw": p["p_draw"], "away": p["p_away"]}
+            side = max(probs, key=probs.get)
+            team = {"home": p.get("home"), "away": p.get("away"), "draw": "Draw"}[side]
+            price = {"home": p.get("best_home"), "draw": p.get("best_draw"), "away": p.get("best_away")}[side]
+            row = {"sport": "SOCCER", "league": D.LEAGUES.get(lg, {}).get("title", lg),
+                   "time": _et_time(p.get("kickoff")), "game": f"{p.get('away')} vs {p.get('home')}",
+                   "winner": team, "chance": float(probs[side]), "book": None, "price": price,
+                   "price_book": p.get(f"book_{side}"), "value": None, "use": "",
+                   "best": SP.projected(p), "lean_detail": "market: " + SP.market(p), "status": "tracking only",
+                   "bet_market": "Moneyline", "bet_side": side, "bet_line": None, "bet_price": price,
+                   "best_chance": None, "best_price": None, "best_value": None, "best_tested": False,
+                   "_rec": {"sport": lg, "home": p.get("home"), "away": p.get("away"), "game_id": p.get("game_id"),
+                            "kickoff": p.get("kickoff")}}
+            if past:
+                fh, fa = p.get("final_home"), p.get("final_away")
+                row["final"] = None if fh is None or fa is None else f"{p.get('away')} {fa:g} – {p.get('home')} {fh:g}"
+                res = p.get("result")
+                row["winner_result"] = None if res not in ("home", "draw", "away") else ("win" if res == side else "loss")
+                row["best_result"] = row["winner_result"]
+            out.append(row)
+    out.sort(key=lambda r: -r["chance"])
+    return out
+
+
+def soccer_flags(date_str: str, leagues=None) -> List[Dict]:
+    """Nov 14: today's soccer 📈 flags (a US price above the sharp no-vig line by 2%+). Tracking, not tested."""
+    import model_store as MS
+    import soccer_data as D
+    import soccer_picks as SP
+    if leagues is None:
+        leagues = SP.slate_leagues() or list(D.LEAGUES)
+    out = []
+    for lg in leagues:
+        try:
+            recs = SP.dedupe(MS.load_game_picks(lg, ungraded=True))
+        except Exception:                                       # noqa: BLE001
+            continue
+        for p in recs:
+            if _et_date(p.get("kickoff")) != date_str:
+                continue
+            for v in p.get("value") or []:
+                side = v.get("side")
+                if v.get("market") == "Moneyline":
+                    pick = "Draw" if side == "draw" else f"{p.get(side)} to win"
+                    line = None
+                elif v.get("market") == "Total":
+                    pick, line = f"{str(side).title()} {v.get('line'):g} goals", v.get("line")
+                else:
+                    line = v.get("line")
+                    pick = f"{p.get(side)} {line:+g}" if line is not None else f"{p.get(side)} handicap"
+                out.append({"sport": "SOCCER", "league": D.LEAGUES.get(lg, {}).get("title", lg),
+                            "time": _et_time(p.get("kickoff")), "game": f"{p.get('away')} vs {p.get('home')}",
+                            "pick": pick, "market": v.get("market"), "side": side, "line": line,
+                            "bet_market": v.get("market"), "bet_side": side, "bet_line": line, "best_tested": False,
+                            "price": v.get("price"), "book": v.get("book"), "chance": v.get("fair"),
+                            "ev": v.get("ev"), "projected": SP.projected(p),
+                            "_rec": {"sport": lg, "home": p.get("home"), "away": p.get("away"),
+                                     "game_id": p.get("game_id"), "kickoff": p.get("kickoff")}})
+    out.sort(key=lambda r: -(r.get("ev") or 0))
+    return out
+
+
 def winner_record(leagues=None) -> Dict[str, Dict]:
     """{sport: {"n", "won", "by": [(label, n, won)]}} -- how often the model's favorite actually won, graded games."""
     import intl_hoops as H
@@ -472,7 +551,8 @@ def bet_rows(items: Sequence[Dict], stake: float, real: bool, tag: str, date_str
                     "line": None if it.get("line") is None else float(it["line"]), "entry_odds": float(price),
                     "entry_odds_source": "book", "model_prob": it.get("chance"), "stake": float(stake),
                     "book": it.get("book") or "draftkings", "is_real_bet": bool(real),
-                    "category": B.default_category(it["sport"], from_model=True), "notes": tag or None})
+                    "category": B.default_category(it["sport"], from_model=True),
+                    "notes": ",".join(x for x in (tag, it.get("notes_extra")) if x) or None})
     return out
 
 
