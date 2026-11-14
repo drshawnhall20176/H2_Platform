@@ -337,7 +337,8 @@ if True:
             "From the labs, no extra credits: the model's **underdogs** priced +300 or longer whose model chance still "
             "beats the price (tennis uses the calibrated chance; soccer counts a draw or either side), and **soccer "
             "anytime goalscorers** at +400 or longer for regular starters (5+ starts in the last 10), scanned a few "
-            "times a day. None of this is tested — the soccer goals model lost to the closing line, and hoops and "
+            "times a day. Only where the model and the book roughly agree (the model's chance at most 1.5× what the price "
+            "implies) — a bigger disagreement is usually the book knowing something the model doesn't. None of this is tested — the soccer goals model lost to the closing line, and hoops and "
             "tennis underdogs have no backtest — so it's a tracking list. Most of these lose; flat stakes of a few "
             "dollars, if any."))
 
