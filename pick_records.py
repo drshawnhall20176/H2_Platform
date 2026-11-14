@@ -88,8 +88,45 @@ def grade_lean(rec: Dict) -> Dict[str, Optional[str]]:
     return out
 
 
-def lean_records(league: str, days: int = DAYS, recs=None) -> Dict[str, Tuple[int, int]]:
-    """{"Spread" / "Total" / "Moneyline": (wins, decided)} for the model's leans over the last `days` days."""
+GAP_BANDS = ((0.0, 0.25), (0.25, 0.5), (0.5, 99.0))    # disagreement with the line, in standard deviations
+
+
+def _sd(league: str):
+    import todays_best as TB
+    fam = league if league in TB.MARGIN_SD else "INTL"
+    return TB.MARGIN_SD[fam], TB.TOTAL_SD[fam]
+
+
+def gaps(rec: Dict, league: str) -> Dict[str, Optional[float]]:
+    """Nov 14: how far the model is from the line, in standard deviations of how games finish -- {"Spread", "Total"}.
+    The lean record was one number per league and market, so every NCAAF spread lean showed the same record; split by
+    how big the disagreement is, it says whether THIS size of lean has been winning."""
+    msd, tsd = _sd(league)
+    mm, hs = _num(rec.get("model_margin")), _num(rec.get("home_spread"))
+    if hs is None and _num(rec.get("line")) is not None:
+        hs = -_num(rec.get("line"))
+    mt = _num(rec.get("model_total"))
+    lt = _num(rec.get("line_total") if rec.get("line_total") is not None else rec.get("close_total"))
+    return {"Spread": None if mm is None or hs is None else abs(mm + hs) / msd,
+            "Total": None if mt is None or lt is None else abs(mt - lt) / tsd}
+
+
+def band(z: Optional[float]) -> Optional[int]:
+    if z is None:
+        return None
+    return next(i for i, (lo, hi) in enumerate(GAP_BANDS) if lo <= z < hi)
+
+
+def band_label(i: int, market: str, league: str) -> str:
+    msd, tsd = _sd(league)
+    sd = msd if market == "Spread" else tsd
+    lo, hi = GAP_BANDS[i]
+    return f"{lo * sd:.0f}+ pt gap" if hi > 50 else f"{lo * sd:.0f}–{hi * sd:.0f} pt gap"
+
+
+def lean_records(league: str, days: int = DAYS, recs=None) -> Dict:
+    """{"Spread" / "Total" / "Moneyline": (wins, decided)} for the model's leans over the last `days` days, plus
+    {("Spread" / "Total", gap band): (wins, decided)} split by the size of the disagreement."""
     if recs is None:
         try:
             import model_store as MS
@@ -101,10 +138,19 @@ def lean_records(league: str, days: int = DAYS, recs=None) -> Dict[str, Tuple[in
     for r in recs or []:
         if str(r.get("kickoff") or "")[:10] < cutoff:
             continue
+        try:
+            g = gaps(r, league)
+        except Exception:                                       # noqa: BLE001
+            g = {}
         for mk, res in grade_lean(r).items():
             if res in ("win", "loss"):
                 out[mk][0] += res == "win"
                 out[mk][1] += 1
+                b = band(g.get(mk))
+                if b is not None:
+                    cell = out.setdefault((mk, b), [0, 0])
+                    cell[0] += res == "win"
+                    cell[1] += 1
     return {k: (w, n) for k, (w, n) in out.items()}
 
 
@@ -140,7 +186,17 @@ def annotate_leans(rows, records_for=lean_records) -> None:
         if lg not in cache:
             cache[lg] = records_for(lg) or {}
         w, n = cache[lg].get(mk, (0, 0))
-        r["lean_record"] = f"{mk}: " + label(w, n, mk != "Moneyline") if n else ""
+        name = mk
+        b = band((r.get("_gaps") or {}).get(mk))
+        if b is not None:                       # Nov 14: this size of disagreement's own record, when it has one
+            bw, bn = cache[lg].get((mk, b), (0, 0))
+            if bn:
+                w, n = bw, bn
+                try:
+                    name = f"{mk}, {band_label(b, mk, lg)}"
+                except Exception:                               # noqa: BLE001
+                    pass
+        r["lean_record"] = f"{name}: " + label(w, n, mk != "Moneyline") if n else ""
         r["lean_verdict"] = verdict(w, n, mk != "Moneyline") if n else "new"
 
 
