@@ -146,7 +146,7 @@ def run(day: Optional[str] = None, force: bool = False) -> Dict[str, Dict]:
             res = scan(sp, day, api)
             MS.save_setting(KEY.format(sport=sp, date=day), res)
             out[sp] = {"games": res["games"], "value_rungs": len(res["rows"]),
-                       "top": [f"{r['Player']} {r['Bet']} {r['Price']:+d} ({r['Honest chance']:.0%})" for r in res["top"]]}
+                       "top": [f"{r['Player']} {r['Bet']} {int(r['Price']):+d} ({r['Honest chance']:.0%})" for r in res["top"]]}
         except Exception as exc:                                # noqa: BLE001 -- one sport never stops the other
             out[sp] = {"error": f"{type(exc).__name__}: {exc}"}
     return out
