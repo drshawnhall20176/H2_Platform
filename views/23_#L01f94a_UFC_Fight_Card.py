@@ -138,6 +138,28 @@ if _card:
     st.dataframe(_df, hide_index=True, width="stretch",
                  column_config={"Market chance": st.column_config.NumberColumn(
                      format="percent", help="The books' no-vig chance for the favorite (median across books).")})
+    # Nov 14: tick-to-log, like every other page -- each fighter's moneyline and the total rounds, one shared log box
+    import log_ui as LU
+    _opts = [o for b in C.by_kickoff(_card, lambda b: b.get("commence")) for o in E.bet_options(b, preferred_book)]
+    if _opts:
+        st.markdown("##### ☑️ Pick sides to log")
+        _ml = [o for o in _opts if o["market"] == "Moneyline"]
+        _tot = [o for o in _opts if o["market"] == "Fight Duration"]
+        _cfg = {"Price": st.column_config.NumberColumn(format="%+d"),
+                "Market chance": st.column_config.NumberColumn(format="percent", help="No-vig, at the price's book.")}
+        _items = []
+        if _ml:
+            _items += LU.picked(_ml, LU.selectable(pd.DataFrame([{
+                "Time (ET)": pd.to_datetime(o["commence"]).tz_convert("America/New_York").strftime("%-I:%M %p"),
+                "Bout": o["game"], "Fighter": o["side"], "Price": o["price"], "Market chance": o["chance"],
+                "Book": o["book"]} for o in _ml]), "ufc_tick_ml", hide_index=True, width="stretch", column_config=_cfg))
+        if _tot:
+            st.caption("Total rounds")
+            _items += LU.picked(_tot, LU.selectable(pd.DataFrame([{
+                "Time (ET)": pd.to_datetime(o["commence"]).tz_convert("America/New_York").strftime("%-I:%M %p"),
+                "Bout": o["game"], "Bet": o["pick"], "Price": o["price"], "Market chance": o["chance"],
+                "Book": o["book"]} for o in _tot]), "ufc_tick_tot", hide_index=True, width="stretch", column_config=_cfg))
+        LU.panel(_items, "ufc_tick_log", date_str, tag="ufc-card")
     st.caption("The whole card from one odds request, earliest bout first. **Market chance** is what the books' prices "
                "imply with the vig removed — there's no UFC model yet, so it's the market's read, not a pick. Moneyline, "
                "spread and total rounds are the selected book's (another book's when it hasn't posted one). Method of "
