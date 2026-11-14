@@ -202,6 +202,32 @@ def _games(pgames, pid, n: int) -> List[Dict]:
     return mine[:n]
 
 
+# Nov 14: points (and combos with points) regress toward the PLAYER'S OWN longer rate -- this season plus last season
+# at half weight -- not the league's: a star's scoring rate is real, but a 10-game run still overstates it. Minutes of
+# half-trust for the recent rate against that longer one (0 = off; set from research/nba_points_own.py).
+OWN_SHRINK_MIN = {"pts": 0.0}
+OWN_PRIOR_WEIGHT = 0.5
+
+
+def own_rate(cur_pgames, prior_pgames, pid, market: str, min_minutes: float = 1.0) -> Optional[float]:
+    """His per-minute rate over every game on file: this season, plus last season at OWN_PRIOR_WEIGHT."""
+    v = m = 0.0
+    for pgs, w in ((cur_pgames, 1.0), (prior_pgames, OWN_PRIOR_WEIGHT)):
+        for p in pgs or []:
+            if p.get("pid") != pid:
+                continue
+            st = p.get("stats") or {}
+            mins = _num(st.get("min"))
+            if mins >= min_minutes:
+                v += w * market_value(st, market)
+                m += w * mins
+    return v / m if m else None
+
+
+def own_shrink_minutes(market: str) -> float:
+    return OWN_SHRINK_MIN.get("pts", 0.0) if "pts" in MARKETS[market] else 0.0
+
+
 def shrink_minutes(market: str) -> float:
     comps = MARKETS[market]
     if "pts" in comps and not RATE_SHRINK_MIN.get("pts"):        # points-led combos: his own rate (see above)
@@ -317,6 +343,9 @@ def player_rows(rotation_list: Sequence[Dict], defense, market: str, cur_table: 
         mins = [_num((g.get("stats") or {}).get("min")) for g in games]
         rate, proj_min = PE.rate_and_opportunity(values, mins, f["weights"])
         rate = PE.shrink_toward(rate, mins, lg_rate, k_min, f["weights"])     # Nov 14: regression to the mean
+        if own_shrink_minutes(market):                                     # points: toward his own longer rate
+            rate = PE.shrink_toward(rate, mins, own_rate(cur_pgames, prior_pgames, r["pid"], market),
+                                    own_shrink_minutes(market), f["weights"])
         out = is_out(r.get("status"))
         fresh = out and PE.fresh_absence([g.get("game") for g in _games(cur_pgames, r["pid"], HIT_N)], team_games)
         base.append({"r": r, "f": f, "values": values, "games": games, "rate": rate, "proj_min": proj_min,
