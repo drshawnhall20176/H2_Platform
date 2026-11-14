@@ -150,7 +150,7 @@ def build(sport: str, graded: Sequence[Dict], bets: Sequence[Dict], days: int = 
     import blend_weights as BW
     import props_engine as PE
     rows = prepare(graded, PE.MODEL_WEIGHT)
-    md = [f"## {sport} weekly tuning report — last {days} days", ""]
+    md = [f"## {sport} daily tuning report — last {days} days", ""]
     if not rows:
         md.append("No graded reads in this window yet.")
         return {"sport": sport, "markdown": "\n".join(md), "proposals": [], "n": 0}
@@ -257,9 +257,9 @@ def build(sport: str, graded: Sequence[Dict], bets: Sequence[Dict], days: int = 
         md += [f"- {p['market']}: model weight {p['now']:.2f} → **{p['w']:.2f}** ({p['n']} reads, log loss "
                f"−{p['gain']:.4f})" for p in proposals]
         md += ["", "Each one applies itself when it also wins on days the fit never saw (held-out days); the rest "
-               "wait for next week. Nothing for you to approve."]
+               "wait for another day. Nothing for you to approve."]
     else:
-        md.append("None this week — no market has enough reads with a clear improvement.")
+        md.append("None today — no market has enough reads with a clear improvement.")
     lock_rec = None
     if locks:
         lock_rec = {"hits": sum(r["y"] for r in locks), "graded": len(locks), "profit": profit(locks)}
