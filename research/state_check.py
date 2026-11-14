@@ -22,3 +22,17 @@ for k in ("calibration", "prop_calibration", "calibration:NBA", "calibration_NBA
     v = MS.get_setting(k)
     if v is not None:
         print("SET", k, json.dumps(v, default=str)[:600])
+print("--- calibration table (latest per sport/side)")
+import calibration as CAL
+latest = {}
+for c in MS.list_calibration():
+    k = c["sport"]
+    if k not in latest or str(c.get("approved_ts")) > str(latest[k].get("approved_ts")):
+        latest[k] = c
+for k, c in sorted(latest.items()):
+    print("CAL", k, "factor", c.get("factor") or c.get("s") or c.get("value"), "at", str(c.get("approved_ts"))[:16], "|", json.dumps(c.get("detail") or c.get("meta") or {}, default=str)[:160])
+for sp in ("NBA", "NHL", "NCAAF", "NFL", "NCAAMB"):
+    try:
+        print("FACTOR", sp, CAL.factor(sp), {s: CAL.factor(f"{sp}:{s}") if hasattr(CAL, "factor") else None for s in ("Over", "Under")})
+    except Exception as e:
+        print("FACTOR", sp, "err", e)
