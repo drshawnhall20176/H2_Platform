@@ -169,14 +169,15 @@ def test_a_player_who_missed_the_teams_last_game_gets_a_news_check_on_overs():
            g("c", "2026-10-24", 5, "VJ Edgecombe", 17, 13)]
     cur += [g(x, d, 6, "Maxey", 30, 4) for x, d in (("a", "2026-10-20"), ("b", "2026-10-22"), ("c", "2026-10-24"),
                                                      ("d", "2026-10-25"))]                 # PHI played the 25th without him
+    # Nov 14: line 4.5 (was 5.5) -- his rate is now pulled toward the league's (regression to the mean)
     rot = [{"pid": 5, "name": "VJ Edgecombe", "slot": "G", "avg_min": 33, "status": None}]
-    row = PPR.player_rows(rot, "D", "Rebounds", {}, None, cur, [], lines={5: 5.5}, mode="season",
+    row = PPR.player_rows(rot, "D", "Rebounds", {}, None, cur, [], lines={5: 4.5}, mode="season",
                           context={"team": "PHI", "prices": {5: {"over": 102, "under": -130}}})[0]
     assert row["returning"] and row["flags"][0].startswith("⚠️ Missed the team's last game")
     assert row["lean"] == "Check news"
     listed = PE.market_gaps([row], {5: "76ers"})
     assert listed and "missed team's last game" in listed[0]["Why flagged"]
-    freed = PPR.player_rows(rot, "D", "Rebounds", {}, None, cur, [], lines={5: 5.5}, mode="season",
+    freed = PPR.player_rows(rot, "D", "Rebounds", {}, None, cur, [], lines={5: 4.5}, mode="season",
                             context={"team": "PHI", "news_checked": True, "prices": {5: {"over": 102, "under": -130}}})[0]
     assert freed["lean"] != "Check news" or freed["gap"] == "big"
 
