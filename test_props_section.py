@@ -33,3 +33,14 @@ def test_ncaamb_game_lab_shows_props(monkeypatch):
     assert any("Player props" in m.value for m in at.markdown)
     df = at.dataframe[-1].value
     assert "A Points Over 15.5" in set(df["Pick"])
+
+
+def test_ncaaf_slate_meta_needs_only_the_schedule(monkeypatch):
+    import ncaaf_engine as E
+    sched = [{"away_team": "A", "home_team": "B", "start_date": "2026-11-14T20:30:00Z", "week": 12, "season": 2026}]
+    monkeypatch.setattr(E, "get_schedule", lambda s: sched)
+    monkeypatch.setattr(E, "_resolve_week", lambda sc, d: 12)
+    monkeypatch.setattr(E, "games_for_week", lambda sc, w: sched)
+    monkeypatch.setattr(E.ND, "load_rosters", lambda: (_ for _ in ()).throw(AssertionError("no rosters needed")))
+    m = E.slate_meta("2026-11-14")
+    assert m[0]["label"] == "A @ B" and m[0]["week"] == 12
