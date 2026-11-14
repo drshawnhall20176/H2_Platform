@@ -61,9 +61,12 @@ LEAN_EDGE = 0.05           # projection must clear the line by 5% (and the proba
 PACE_FLAG_PCT = 4.0
 # Nov 14 (regression audit): a player's per-minute rate was his own last-10 alone. Walk-forward on ~2,100 NBA
 # player-games (research/regression_test.py), pulling it toward the league's per-minute rate cut next-game error:
-# points / rebounds / assists / threes 1-4% at ~2 games of minutes, steals / blocks / turnovers 5-8% at 5-10 games
-# (those swing on luck far more). Minutes of half-trust:
-RATE_SHRINK_MIN = {"pts": 45.0, "reb": 45.0, "ast": 45.0, "fg3m": 45.0, "stl": 220.0, "blk": 110.0, "tov": 110.0}
+# rebounds / assists / threes 1-4% at ~2 games of minutes, steals / blocks / turnovers 5-8% at 5-10 games (those swing
+# on luck far more). Checked in the model's own backtest (research/regression_validate.py, 2,757 player-games):
+# better calibrated everywhere it's on -- Assists Brier .2495 -> .2428 and lean edge +0.1 -> +5.6 pts, Steals slope
+# .60 -> .94, Blocks .73 -> .99, Threes .73 -> 1.08. POINTS got slightly worse (Brier .2678 -> .2706), so points --
+# and every combo with points in it -- keep the player's own rate. Minutes of half-trust:
+RATE_SHRINK_MIN = {"pts": 0.0, "reb": 45.0, "ast": 45.0, "fg3m": 45.0, "stl": 220.0, "blk": 110.0, "tov": 110.0}
 MIN_DEFENSES = 8           # a league average from fewer defenses than this isn't one (college: two teams only)
 
 _OUT = {"out", "injured reserve", "ir", "suspended", "inactive"}
@@ -200,7 +203,10 @@ def _games(pgames, pid, n: int) -> List[Dict]:
 
 
 def shrink_minutes(market: str) -> float:
-    ks = [RATE_SHRINK_MIN.get(k, 45.0) for k in MARKETS[market]]
+    comps = MARKETS[market]
+    if "pts" in comps and not RATE_SHRINK_MIN.get("pts"):        # points-led combos: his own rate (see above)
+        return 0.0
+    ks = [RATE_SHRINK_MIN.get(k, 45.0) for k in comps]
     return sum(ks) / len(ks) if ks else 0.0
 
 

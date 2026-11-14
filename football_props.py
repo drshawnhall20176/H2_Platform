@@ -112,9 +112,10 @@ EFF_SHRINK = {"tgt": 30.0, "rush_att": 40.0, "pass_att": 120.0, "touch": 50.0}  
 MARKET_SHRINK = {"Anytime TD": 200.0,
                  # Nov 14 (regression audit, research/regression_test.py: NFL 2024-26 + college 2025-26 walk-forward).
                  # A QB's interception rate barely repeats game to game (split-half r 0.26 NFL, ~0 college): pulling it
-                 # nearly all the way to the position's rate cut next-game error 7-8% (best at 40+ games of attempts).
-                 # Passing TDs per attempt: best at ~10 games (5-6% better) -- 120 attempts was about 4.
-                 "Interceptions": 1200.0, "Passing TDs": 320.0}
+                 # nearly all the way to the position's rate cut next-game error 7-8%, and in the model's own backtest
+                 # (regression_validate.py) Brier .2451 -> .2359 NFL, .2189 -> .2113 college, slope .58 -> .74.
+                 # (Passing TDs at 320 and QB rushing at 40 were tried too: better error, worse leans -- not adopted.)
+                 "Interceptions": 1200.0}
 # Nov 2: what a 🎯 Single needs, per sport -- (edge at the price, chance). NFL singles at +3% hit 46% (113 graded
 # Nov 1, 9-14 among the day's picks) while 🎟️ parlay-grade legs hit 63%. Anytime TD "Yes" singles keep their own bar.
 SINGLE_BAR = PE.SINGLE_BAR          # Nov 3: moved to props_engine (shared with the NBA)
