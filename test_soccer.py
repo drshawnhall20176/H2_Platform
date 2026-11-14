@@ -321,3 +321,22 @@ def test_slate_round_trip():
     SP.save_slate({"SOCCER_EPL": 3, "SOCCER_MLS": 1}, save=store.__setitem__)
     assert SP.slate_leagues(get=store.get) == ["SOCCER_EPL", "SOCCER_MLS"]
     assert SP.slate_leagues(get=lambda k: None) is None
+
+
+def test_xg_blend_and_team_stats_parse():
+    import soccer_data as D
+    import soccer_picks as SP
+    data = {"header": {"competitions": [{"competitors": [{"team": {"id": "1"}, "homeAway": "home"},
+                                                         {"team": {"id": "2"}, "homeAway": "away"}]}]},
+            "boxscore": {"teams": [{"team": {"id": "2"}, "statistics": [{"name": "totalShots", "displayValue": "5"},
+                                                                        {"name": "shotsOnTarget", "displayValue": "1"}]},
+                                   {"team": {"id": "1"}, "statistics": [{"name": "totalShots", "displayValue": "20"},
+                                                                        {"name": "shotsOnTarget", "displayValue": "6"},
+                                                                        {"name": "penaltyKickShots", "displayValue": "1"}]}]}}
+    t = D.parse_team_stats(data)
+    assert t["home"] == {"shots": 20.0, "sot": 6.0, "pk": 1.0} and t["away"]["sot"] == 1.0
+    assert D.parse_team_stats({"boxscore": {"teams": []}}) is None
+    rows = [{"id": "9", "home_points": 0, "away_points": 2}, {"id": "10", "home_points": 1, "away_points": 1}]
+    out = SP.blend_xg(rows, {"9": t})
+    assert abs(out[0]["home_points"] - 0.5 * SP.xg_of(t["home"])) < 1e-9 and out[1] == rows[1]
+    assert abs(SP.xg_of({"sot": 6, "pk": 1}) - (0.327 * 5.2 + 0.791)) < 1e-9

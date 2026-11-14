@@ -114,15 +114,45 @@ def team(names, name: str) -> Optional[str]:
     return hits[0] if len(hits) == 1 else None
 
 
+# Nov 14 (regression audit, research/soccer_xg_test.py: 9 leagues, 1,556 walk-forward matches): goals are a noisy
+# result of the chances a team makes and allows. Rating each team on half its goals and half a shots-based expected
+# goals (ESPN team shots: 0.327 per non-penalty shot on target, 0.79 per penalty; other shots ~0) cut the 1X2 log
+# loss 1.0179 -> 1.0113 and the over-2.5 Brier .2463 -> .2415, better in 7 of 9 leagues. Matches without team shots
+# on file count on goals alone.
+XG_WEIGHT = 0.5
+XG_SOT, XG_PEN = 0.327, 0.791
+
+
+def xg_of(side: Dict) -> float:
+    return max(0.0, XG_SOT * (side["sot"] - 0.8 * side["pk"]) + XG_PEN * side["pk"])
+
+
+def blend_xg(rows: Sequence[Dict], shots: Dict[str, Dict], weight: float = XG_WEIGHT) -> List[Dict]:
+    out = []
+    for g in rows:
+        t = shots.get(str(g.get("id")))
+        if t and weight and g.get("home_points") is not None and g.get("away_points") is not None:
+            g = dict(g, home_points=(1 - weight) * g["home_points"] + weight * xg_of(t["home"]),
+                     away_points=(1 - weight) * g["away_points"] + weight * xg_of(t["away"]))
+        out.append(g)
+    return out
+
+
 def ratings(league: str, today: date, db_path: Optional[str] = None) -> Dict:
     """Fitted on the league's pool (D.pool_keys): a country's leagues and cups together (promoted sides, cup ties
     across divisions), and every member league for the continental cups -- that's how a Bundesliga side and a Ligue 1
-    side get on one scale."""
+    side get on one scale. Each match counts half goals, half shots-based expected goals (XG_WEIGHT)."""
     import model_store as MS
     since = (today - timedelta(days=HISTORY_DAYS)).isoformat()
     keys = D.pool_keys(league)
     rows = [g for k in keys for g in MS.load_results(k, since=since, db_path=db_path)]
-    return M.fit(D.matches(rows), datetime.combine(today, datetime.min.time(), tzinfo=timezone.utc))
+    shots: Dict[str, Dict] = {}
+    for k in keys:
+        try:
+            shots.update({str(r["id"]): r for r in MS.load_results(D.TEAM_CACHE.format(league=k), db_path=db_path)})
+        except Exception:                                       # noqa: BLE001
+            pass
+    return M.fit(D.matches(blend_xg(rows, shots)), datetime.combine(today, datetime.min.time(), tzinfo=timezone.utc))
 
 
 def build(league: str, r: Dict, events: Sequence[Dict], now: datetime) -> List[Dict]:
@@ -399,6 +429,11 @@ def capture(league: str, api_key: str, fetch: Callable = D._http, now: Optional[
     fixtures = [f for f in fixtures if (_ko(f.get("kickoff")) or now) > now and _ko(f.get("kickoff")) <= window_end(now)]
     recs, evs, rated = [], [], 0
     if fixtures:                                                # nothing today or tomorrow: no fit, no odds call
+        try:                                                    # Nov 14: team shots for the xG half of the ratings
+            D.cache_team_stats(league, MS.load_results(league, since=(now.date() - timedelta(days=HISTORY_DAYS)).isoformat(),
+                                                       db_path=db_path), fetch, db_path, limit=60)
+        except Exception:                                       # noqa: BLE001
+            pass
         r = ratings(league, now.date(), db_path)
         rated = len(r["attack"])
         key = f"soccer_odds_at:{league}"
