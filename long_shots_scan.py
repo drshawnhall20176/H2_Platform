@@ -24,15 +24,17 @@ import sys
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Sequence
 
-SPORTS = ("NBA", "NFL", "NHL")
+SPORTS = ("NBA", "NFL", "NHL", "NCAAF")
 MIN_PRICE = 400
 TOP_N = 4
 EVERY_H = 3.0
 KEY = "longshots:{sport}:{date}"
 ALT_ARCHIVE = ["long_shots_alt"]
-TESTED = {"NBA": "Assists", "NFL": "Rush Yards"}       # NHL Goals: a lead only (+28% at 11am, even at close)
+TESTED = {"NBA": ("Assists",), "NFL": ("Rush Yards",),          # NHL Goals: a lead only (+28% at 11am, even at close)
+          "NCAAF": ("Rush Yards", "Receiving Yards")}            # Nov 14: +37% / +31% at 11am, +26% / +24% at kickoff
 
 
+SKIP = {"NCAAF": ("Pass Yards",)}                   # Nov 14: college Pass Yards value rungs lost 27-33% in testing
 AGREE = 0.25              # projection within 25% (or 1 unit) of the book's own main line
 
 
@@ -67,7 +69,7 @@ def _slim(r: Dict, sport: str, game: str, time_: str) -> Dict:
     keep = ("Player", "Bet", "Market", "Price", "Book says", "Honest chance", "Model raw", "EV per $1", "Projection",
             "Main line", "Flags", "player", "market", "side", "line", "price", "book", "pid")
     out = {k: r.get(k) for k in keep if k in r}
-    out.update(sport=sport, game=game, time=time_, tested=r.get("Market") == TESTED.get(sport),
+    out.update(sport=sport, game=game, time=time_, tested=r.get("Market") in TESTED.get(sport, ()),
                pick=r.get("pick") or f"{r.get('Player')} {r.get('Bet')}", chance=r.get("Honest chance"))
     return out
 
@@ -121,7 +123,8 @@ def scan(sport: str, day: str, api_key: str, book: str = "draftkings", now: Opti
         rows = LS.finder({k: v for k, v in reads.items() if v.get("game") == g["label"]}, quotes, PE.norm_name,
                          PE.prob_over, sport=sport)
         found += [_slim(r, sport, g["label"], t) for r in rows
-                  if (r.get("Price") or 0) >= MIN_PRICE and (r.get("EV per $1") or 0) > 0]
+                  if (r.get("Price") or 0) >= MIN_PRICE and (r.get("EV per $1") or 0) > 0
+                  and r.get("Market") not in SKIP.get(sport, ())]
     found.sort(key=lambda r: -(r.get("Honest chance") or 0))
     return {"at": now.isoformat(), "rows": found[:200], "top": pick_top(found), "games": games}
 
