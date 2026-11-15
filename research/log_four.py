@@ -16,9 +16,9 @@ for who, mk, side, line, px in WANT:
     items.append({"sport": "NFL", "game": s["game"], "player": who, "market": mk, "side": side, "line": line,
                   "price": price, "book": s.get("book") or "draftkings", "chance": s.get("chance"),
                   "pick": f"{who} {mk} {side} {line:g}"})
-res = TB.log_selection(items, "Both", 2.0, 2.5, None, True, "nfl-sweet-spot", "2026-11-15")
+res = TB.log_selection(items, "Parlay", 2.0, 2.5, 925, True, "nfl-sweet-spot", "2026-11-15")
 print("RESULT", res)
 ids = set(res.get("singles") or []) | ({res["ticket"]} if res.get("ticket") else set())
 for b in B.list_bets():
-    if b.get("id") in ids or (res.get("ticket") and b.get("parlay_id") == res["ticket"]):
+    if b.get("id") in ids or (res.get("ticket") and (b.get("parlay_id") == res["ticket"] or b.get("parent_id") == res["ticket"])):
         print("BET", b["id"], b.get("player"), b.get("market"), b.get("side"), b.get("line"), b.get("entry_odds"), b.get("stake"), b.get("parlay_id"), b.get("game"))
