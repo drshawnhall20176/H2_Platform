@@ -292,3 +292,12 @@ def test_blowout_watch_lists_earliest_first(monkeypatch):
     df = next(d.value for d in at.dataframe if "Most likely to win big" in d.value.columns)
     assert list(df["Time"]) == ["5:00 PM", "7:30 PM", "8:00 PM", "10:00 PM"]
     assert at.multiselect(key="home_best_games").options == ["DEN @ IND", "BKN @ ATL", "W @ OKC", "SA @ POR"]
+
+
+def test_nfl_player_ids_dont_break_logging():
+    import todays_best as TB
+    it = {"sport": "NFL", "game": "NE @ DET", "player": "Sam LaPorta", "pid": "00-0039065", "market": "Receptions",
+          "side": "Under", "line": 4.5, "price": -146, "book": "draftkings", "chance": 0.56}
+    r = TB.bet_rows([it], 3.0, True, "t", "2026-11-15")[0]
+    assert r["player_id"] is None and r["player"] == "Sam LaPorta"
+    assert TB.bet_rows([dict(it, pid="4433")], 3.0, True, "t", "2026-11-15")[0]["player_id"] == 4433

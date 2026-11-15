@@ -565,6 +565,15 @@ def winner_record(leagues=None) -> Dict[str, Dict]:
 
 
 # --------------------------------------------------------------------------- logging from Home (Nov 7)
+def _int_or_none(v):
+    """Nov 15: the Bet Log's player_id is a number; NFL ids ("00-0039065") aren't -- the bet logs without one (it
+    settles by player name and game) instead of failing to save."""
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def bet_rows(items: Sequence[Dict], stake: float, real: bool, tag: str, date_str: str) -> List[Dict]:
     """Bet Log rows for picked Today's-best items (props rows and game-line rows), each at its own (edited) price."""
     import betlog as B
@@ -597,7 +606,7 @@ def bet_rows(items: Sequence[Dict], stake: float, real: bool, tag: str, date_str
         if not it.get("player") or not it.get("side") or it.get("line") is None:
             continue                            # Nov 9: never log a prop that can't be graded (no player/side/line)
         out.append({"slate_date": date_str, "sport": it["sport"], "game": it.get("game"), "player": it.get("player"),
-                    "player_id": it.get("pid"), "market": it.get("market"), "side": it.get("side"),
+                    "player_id": _int_or_none(it.get("pid")), "market": it.get("market"), "side": it.get("side"),
                     "line": None if it.get("line") is None else float(it["line"]), "entry_odds": float(price),
                     "entry_odds_source": "book", "model_prob": it.get("chance"), "stake": float(stake),
                     "book": it.get("book") or "draftkings", "is_real_bet": bool(real),
