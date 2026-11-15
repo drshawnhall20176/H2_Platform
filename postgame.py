@@ -652,6 +652,24 @@ WEEKLY_SPORTS = ("NFL", "NCAAF")   # Nov 15: 2 slates and held out game by game 
 WEEKLY_MIN_SLATES = 2
 
 
+def _tuning_history(key) -> List[tuple]:
+    """[(approved date-time, factor)] for one (sport, market, slot) tuning, oldest first."""
+    try:
+        import model_store as MS
+        return sorted((str(t.get("approved_ts") or ""), float(t["factor"])) for t in MS.list_tuning(active_only=False)
+                      if (t["sport"], t["market"], t.get("slot") or "") == key)
+    except Exception:                                           # noqa: BLE001
+        return []
+
+
+def _factor_then(hist, when: str) -> float:
+    f = 1.0
+    for ts, v in hist:
+        if ts and ts <= when:
+            f = v
+    return f
+
+
 def auto_tunings(graded: Sequence[Dict], tunings: Sequence[Dict], morning: str, write: bool = True,
                  approve=None) -> List[Dict]:
     """Each tuning suggestion re-checked on ONLY the props graded since that market's current multiplier went live
@@ -666,10 +684,17 @@ def auto_tunings(graded: Sequence[Dict], tunings: Sequence[Dict], morning: str, 
             continue
         key = (sg["sport"], sg["market"], sg.get("slot") or "")
         start = since.get(key, "")
+        hist = _tuning_history(key) if sg["sport"] in WEEKLY_SPORTS else []
+        if hist:                                                # Nov 15: weekly sports keep the whole window, each
+            start = ""                                          # projection put on today's multiplier
         rows = [r for r in graded if r.get("sport") == sg["sport"] and r.get("market") == sg["market"]
                 and (not key[2] or str(r.get("slot") or "") == key[2]) and str(r.get("slate_date") or "") >= start
                 and r.get("result") in ("hit", "miss", "push") and r.get("actual") is not None
                 and r.get("projection") is not None]
+        if hist:
+            now_f = active.get(key, 1.0)
+            rows = [dict(r, projection=float(r["projection"]) * now_f /
+                         (_factor_then(hist, str(r.get("ts") or f"{r.get('slate_date')}T23:59")) or 1.0)) for r in rows]
         dec = {**sg, "since": start or None, "n_since": len(rows), "applied": False}
         ratio = _ratio(rows) if rows else None
         slates = len({r.get("slate_date") for r in rows})

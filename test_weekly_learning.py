@@ -39,3 +39,11 @@ def test_holds_up_by_game():
             rows.append({"slate_date": "2026-11-09", "game": f"g{g}", "projection": 50.0, "actual": 60.0 + k % 3})
     assert PG.holds_up(rows, 1.1, by_game=True)
     assert not PG.holds_up(rows, 1.1)                           # one slate: no slate-by-slate check possible
+
+
+def test_weekly_tunings_use_the_whole_window(monkeypatch):
+    import model_store as MS
+    hist = [{"sport": "NFL", "market": "Rush Yards", "slot": "", "factor": 1.1, "approved_ts": "2026-11-09T12:00"}]
+    monkeypatch.setattr(MS, "list_tuning", lambda active_only=True, **k: hist)
+    assert PG._tuning_history(("NFL", "Rush Yards", "")) == [("2026-11-09T12:00", 1.1)]
+    assert PG._factor_then(PG._tuning_history(("NFL", "Rush Yards", "")), "2026-11-02T23:59") == 1.0

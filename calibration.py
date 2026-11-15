@@ -371,11 +371,11 @@ def auto_global(sport: str, graded_by_date: Dict[str, List[Dict]], morning: str,
     if h["n"] < AUTO_MIN_ROWS or h["dates"] < (WEEKLY_MIN_DATES if weekly else AUTO_MIN_DATES):
         dec["why"] = f"not enough yet ({h['n']} reads over {h['dates']} days)"
     elif h["splits"] < AUTO_MIN_SPLITS:
-        dec["why"] = "not enough days to hold any out"
+        dec["why"] = "not enough games to hold any out" if weekly else "not enough days to hold any out"
     elif abs(new - active) < AUTO_MIN_MOVE:
         dec["why"] = f"already honest (best {new:.2f} vs active {active:.2f})"
     elif h["passed"] < AUTO_SPLIT_PASS * h["splits"] or h["gain"] <= 0:
-        dec["why"] = f"didn't hold up on held-out days ({h['passed']} of {h['splits']})"
+        dec["why"] = f"didn't hold up on held-out {'games' if weekly else 'days'} ({h['passed']} of {h['splits']})"
     else:
         dec["why"] = f"held up on {h['passed']} of {h['splits']} held-out splits"
         if write:
