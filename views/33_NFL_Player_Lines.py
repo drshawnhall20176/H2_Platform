@@ -33,6 +33,7 @@ import styling   # installs theme-proof .theme_gradient
 import plotly.graph_objects as go
 from datetime import datetime
 import pytz
+import model_view as MV
 
 import sports
 import odds_api as O
@@ -165,6 +166,8 @@ p_by_label = {f"{r['Player']} ({r['Team']})": r for r in final_rows}
 label = st.selectbox(f"{group_name} (type to search)", sorted(p_by_label.keys()))
 selected = p_by_label[label]
 player_name, player_id = selected["Player"], selected.get("_pid")
+_mv_reads = MV.cached_reads("NFL", date_str)
+MV.show_player_calls(st, _mv_reads, player_name)
 
 if not player_id:
     st.warning("No player ID on file for this selection — can't load a real game log.")
@@ -213,7 +216,10 @@ for mkey, disp in line_specs:
         if not trend_log:
             st.caption(f"{disp}: no games on file.")
             continue
+        _mvr = MV.call(_mv_reads.get((MV.norm_name(player_name), MV.market_of(disp))))
         line_val = live_lines.get(mkey)
+        if line_val is None and _mvr["Line"] is not None:
+            line_val = _mvr["Line"]          # the board's line (the one the model read)
         is_live = line_val is not None
         if line_val is None:
             line_val = P.default_line(mkey)
@@ -224,6 +230,10 @@ for mkey, disp in line_specs:
         fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines+markers", name=disp,
                                  line=dict(color="#3b82f6"), marker=dict(size=8),
                                  text=hover, hoverinfo="text"))
+        if _mvr["Model proj"] is not None:
+            fig.add_hline(y=_mvr["Model proj"], line_dash="dot", line_color="#16a34a",
+                          annotation_text=f"Model: {_mvr['Model proj']:.1f} → {_mvr['Model call']}",
+                          annotation_position="bottom left")
         if line_val is not None:
             fig.add_hline(y=line_val, line_dash="dash", line_color="#f97316",
                          annotation_text=f"{'Line' if is_live else 'Model default'}: {line_val:g}",

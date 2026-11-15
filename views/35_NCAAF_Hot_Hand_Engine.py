@@ -131,19 +131,27 @@ if not filtered:
 
 st.markdown(f"**{len(filtered)} player-market combinations · {len({r['GameLabel'] for r in all_rows})} game(s) shown**")
 
-df = pd.DataFrame(filtered)[["Player", "Team", "Opp", "Position", "Market",
-                              "Recent Avg", "Opp Allows", "Slate Avg", "Matchup Factor",
-                              "Hot Hand Score", "Game"]]
+# Nov 15: ONE model -- the model's read leads; this page's own number stays as the explanation.
+import model_view as MV
+filtered = MV.attach(filtered, MV.cached_reads("NCAAF", date_str), own_key="Hot Hand Score")
+filtered.sort(key=lambda r: (r.get("Chance") is None, -(r.get("Chance") or 0)))
+_ag, _cmp = MV.agreement(filtered)
+df = pd.DataFrame(filtered)[["Player", "Team", "Opp", "Position", "Market", "Line", "Model proj", "Model call",
+                              "Chance", "Use", "Recent Avg", "Matchup Factor", "Hot Hand Score", "Agrees",
+                              "Opp Allows", "Slate Avg", "Game"]].rename(columns={"Hot Hand Score": "Form × matchup"})
 st.dataframe(
     df.style.format({
-        "Recent Avg": "{:.1f}", "Opp Allows": "{:.1f}", "Slate Avg": "{:.1f}",
-        "Matchup Factor": "{:.2f}×", "Hot Hand Score": "{:.1f}",
+        "Recent Avg": "{:.1f}", "Opp Allows": "{:.1f}", "Slate Avg": "{:.1f}", "Line": "{:g}",
+        "Model proj": "{:.1f}", "Chance": "{:.0%}",
+        "Matchup Factor": "{:.2f}×", "Form × matchup": "{:.1f}",
     }, na_rep="—")
-    .theme_gradient(cmap="RdYlGn", subset=["Matchup Factor", "Hot Hand Score"]),
+    .theme_gradient(cmap="RdYlGn", subset=["Matchup Factor"]),
     hide_index=True, width="stretch", height=500)
+st.caption(MV.EXPLAIN + (f" Here: the form × matchup number sits on the model's side of the line for {_ag} of "
+                         f"{_cmp} props with a line." if _cmp else ""))
 
 st.caption(
-    "**Hot Hand Score** = Recent Avg × Matchup Factor. **Matchup Factor** = how much this "
+    "**Form × matchup** = Recent Avg × Matchup Factor (this page's own quick read; the model's call leads). **Matchup Factor** = how much this "
     "opponent allows in this stat relative to the average across ALL opponents on this week's "
     "slate (not full-league) — > 1.0× means a softer matchup than the week's own baseline, "
     "< 1.0× means tighter. Matchup Factor is 1.00 (neutral) when this opponent's own allowed "

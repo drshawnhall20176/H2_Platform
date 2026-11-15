@@ -19,6 +19,7 @@ import styling   # installs theme-proof .theme_gradient
 import pandas as pd
 from datetime import datetime
 import pytz
+import model_view as MV
 
 import sports
 import ncaaf_engine as E
@@ -114,17 +115,21 @@ if not filtered:
 
 st.markdown(f"**{len(filtered)} players · {len({r['GameLabel'] for r in all_rows})} game(s) shown**")
 
-df = pd.DataFrame(filtered)[["Player", "Team", "Position", "Opp", "Game",
-                              "TDGames", "GamesPlayed", "ModelProb", "Why"]]
-df["ModelProb%"] = (df["ModelProb"] * 100).round(1).astype(str) + "%"
-df = df.drop(columns=["ModelProb"])
+filtered = MV.attach_td(filtered, MV.cached_reads("NCAAF", date_str), own_key="ModelProb")
+filtered.sort(key=lambda b: (b["Model TD %"] is None, -(b["Model TD %"] or 0), -(b["ModelProb"] or 0)))
+df = pd.DataFrame(filtered)[["Player", "Team", "Position", "Opp", "Game", "Model TD %", "Book TD %", "Model call",
+                              "Use", "ModelProb", "Agrees", "TDGames", "GamesPlayed", "Why"]]
+df = df.rename(columns={"ModelProb": "Recent scoring rate"})
+st.caption(MV.EXPLAIN)
 
 st.dataframe(
-    df.style.format({"TDGames": "{:.0f}", "GamesPlayed": "{:.0f}"}, na_rep="—"),
+    df.style.format({"TDGames": "{:.0f}", "GamesPlayed": "{:.0f}", "Model TD %": "{:.0%}", "Book TD %": "{:.0%}",
+                     "Recent scoring rate": "{:.1%}"}, na_rep="—"),
     hide_index=True, width="stretch", height=500)
 
 st.caption(
-    "**Model Prob** = Bayesian-shrunk Bernoulli rate: player's own historical TD-game rate "
+    "**Model TD %** is the model's chance he scores where books post a line (NCAAF TD lines are often "
+    "missing — then it shows —). **Recent scoring rate** = Bayesian-shrunk Bernoulli rate: player's own historical TD-game rate "
     "(TD games ÷ total games on file) shrunk toward a prior of ~15% — the same empirical-Bayes "
     "approach NFL's own Anytime TD Engine uses. Ranking is by raw model probability, not "
     "Conviction ratio — a workhorse RB at 35% and a WR at 15% can both be genuine value "

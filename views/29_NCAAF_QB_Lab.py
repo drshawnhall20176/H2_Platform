@@ -27,6 +27,7 @@ import styling  # installs theme-proof .theme_gradient (readable in light + dark
 import pandas as pd
 from datetime import datetime
 import pytz
+import model_view as MV
 
 import sports
 import ncaaf_engine as E
@@ -164,7 +165,7 @@ if not matchup_proj and not efficiency:
 st.caption(f"{n_games} game(s) · {n_qbs} QB(s) on the slate")
 
 # === Matchup-aware projections =============================================
-C.section_header("⚡", "Matchup-aware Pass Yards + Rush Yards projections")
+C.section_header("⚡", "The model's Pass Yards call, with the matchup behind it")
 st.caption("Both Proj columns already account for how much yardage that specific opponent's "
           "defense has allowed this season relative to league average — the same odds-ratio "
           "matchup adjustment NFL QB Lab's own Proj columns use, applied here to NCAAF's own "
@@ -173,24 +174,35 @@ st.caption("Both Proj columns already account for how much yardage that specific
           "scrambling QB's carries with a workhorse RB's volume under one shared betting line; "
           "there's no such conflict here.")
 if matchup_proj:
-    pdf = pd.DataFrame(matchup_proj)
-    sort_mode = st.radio("Sort", ["Projected Pass Yds", "Projected Rush Yds", "Matchup Factor"],
+    pdf = pd.DataFrame(MV.attach(matchup_proj, MV.cached_reads("NCAAF", date_str), market="Pass Yards",
+                                 own_key="Proj Pass Yds"))
+    st.caption(MV.EXPLAIN + "  \n**Form × matchup** columns are this page's own numbers (recent average × how much the opponent allows) — the explanation, not the call.")
+    _a, _n = MV.agreement(pdf.to_dict("records"))
+    if _n:
+        st.caption(f"Form × matchup points the model's way on {_a} of {_n} posted Pass Yards lines.")
+    sort_mode = st.radio("Sort", ["Model chance", "Projected Pass Yds", "Projected Rush Yds", "Matchup Factor"],
                          horizontal=True, key="ncaaf_qb_proj_sort")
-    if sort_mode == "Projected Rush Yds":
+    if sort_mode == "Model chance":
+        pdf = pdf.sort_values("Chance", ascending=False, kind="stable", na_position="last")
+    elif sort_mode == "Projected Pass Yds":
+        pdf = pdf.sort_values("Proj Pass Yds", ascending=False, kind="stable")
+    elif sort_mode == "Projected Rush Yds":
         pdf = pdf.sort_values("Proj Rush Yds", ascending=False, kind="stable")
     elif sort_mode == "Matchup Factor":
         pdf = pdf.sort_values("Matchup Factor", ascending=False, kind="stable")
-    proj_cols = ["Player", "Team", "Opp", "Game", "Recent Avg", "Opp Pass Yds Allowed (season)",
-                "Matchup Factor", "Proj Pass Yds", "Recent Rush Yds",
+    proj_cols = ["Player", "Team", "Opp", "Game", "Line", "Model proj", "Model call", "Chance", "Use",
+                "Proj Pass Yds", "Agrees", "Recent Avg", "Opp Pass Yds Allowed (season)",
+                "Matchup Factor", "Recent Rush Yds",
                 "Opp Rush Yds Allowed (season)", "Rush Matchup Factor", "Proj Rush Yds"]
     st.dataframe(
-        pdf[proj_cols].rename(columns={"Recent Avg": "Recent Pass Yds"})
-        .style.format({"Recent Pass Yds": "{:.1f}", "Opp Pass Yds Allowed (season)": "{:.1f}",
-                       "Matchup Factor": "{:.2f}×", "Proj Pass Yds": "{:.1f}",
+        pdf[proj_cols].rename(columns={"Recent Avg": "Recent Pass Yds", "Proj Pass Yds": "Form × matchup pass yds",
+                                       "Proj Rush Yds": "Form × matchup rush yds"})
+        .style.format({"Line": "{:g}", "Model proj": "{:.1f}", "Chance": "{:.0%}",
+                       "Form × matchup pass yds": "{:.1f}", "Form × matchup rush yds": "{:.1f}", "Recent Pass Yds": "{:.1f}", "Opp Pass Yds Allowed (season)": "{:.1f}",
+                       "Matchup Factor": "{:.2f}×",
                        "Recent Rush Yds": "{:.1f}", "Opp Rush Yds Allowed (season)": "{:.1f}",
-                       "Rush Matchup Factor": "{:.2f}×", "Proj Rush Yds": "{:.1f}"}, na_rep="—")
-        .theme_gradient(cmap="RdYlGn", subset=["Matchup Factor", "Proj Pass Yds",
-                                               "Rush Matchup Factor", "Proj Rush Yds"]),
+                       "Rush Matchup Factor": "{:.2f}×"}, na_rep="—")
+        .theme_gradient(cmap="RdYlGn", subset=["Chance", "Matchup Factor", "Rush Matchup Factor"]),
         width="stretch", hide_index=True, height=420)
     st.caption("**Matchup Factor** / **Rush Matchup Factor** > 1.0× means this opponent has "
               "allowed MORE of that stat than league average this season (a softer defense, "

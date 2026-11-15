@@ -298,7 +298,14 @@ for b in view:
     b["Opp Rest"] = _rest_display(b, "Opp Rest Days")
     b["Spread"] = _spread_display(b)
 
-_cols = ["Player", "Team", "Opp", "Market", "Recent Avg", "Matchup Factor", "Matchup Score", "Tag", "Rest",
+# Nov 15: ONE model -- the model's read (line, projection, call, chance, Use) leads; Matchup Score stays as the
+# explanation of the number.
+import model_view as MV
+view = MV.attach(view, MV.cached_reads(_active.key, date_str), own_key="Matchup Score")
+view.sort(key=lambda r: (r.get("Chance") is None, -(r.get("Chance") or 0)))
+_ag, _cmp = MV.agreement(view)
+_cols = ["Player", "Team", "Opp", "Market", "Line", "Model proj", "Model call", "Chance", "Use", "Agrees",
+         "Recent Avg", "Matchup Factor", "Matchup Score", "Tag", "Rest",
          "Opp Rest", "Fatigue", "Position Matchup", "Team D Factor", "Opp Allows", "Opp Pace",
          "Opp Allows /100 Poss", "Slate Avg /100 Poss", "Spread", "Blowout chance", "Blowout Risk", "Game"]
 _vdf = pd.DataFrame(view)
@@ -311,10 +318,13 @@ st.dataframe(
     df.style.format({"Form": "{:.1f}", "Opp Team Total": "{:.1f}", "Opp Pace": "{:.1f}",
                      "Opp Allows /100 Poss": "{:.1f}", "Slate Avg /100 Poss": "{:.1f}",
                      "Matchup Factor": "{:.2f}×", "Team D Factor": "{:.2f}×", "Position Matchup": "{:.2f}×",
-                     "Matchup Score": "{:.1f}"}, na_rep="—")
+                     "Matchup Score": "{:.1f}", "Line": "{:g}", "Model proj": "{:.1f}", "Chance": "{:.0%}"},
+                    na_rep="—")
     .theme_gradient(cmap="RdYlGn", subset=["Matchup Factor"]),
     hide_index=True, width="stretch", height=520,
 )
+st.caption(MV.EXPLAIN + (f" Here: the matchup score sits on the model's side of the line for {_ag} of {_cmp} props "
+                         f"with a line." if _cmp else ""))
 st.caption("**Form** is the same number everywhere on the platform: this season's games, topped up to five from "
            "last season at half weight, newer games counting more. **Matchup Factor** is the position-level matchup "
            + C.for_audience("(the same number as Position Matchups' Player props)",
