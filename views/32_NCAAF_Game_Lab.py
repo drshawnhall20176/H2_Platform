@@ -66,10 +66,14 @@ if not sports.require_sport(["NCAAF"], "NCAAF Game Lab"):
 # Nov 2: college spreads, ratings model v2 (game_picks.py) -- shown first, whatever the date picker says.
 with st.expander("📐 Ratings model v2 — college spreads (tracking)", expanded=True):
     st.caption("Opponent-adjusted offense/defense ratings + home field, fitted on this season's FBS results.")
+    @st.cache_data(ttl=120, show_spinner=False)
+    def _load_gp():                                                     # Nov 14: not on every click
+        import model_store as _MS
+        return _MS.load_game_picks("NCAAF")
+
     try:
         import game_picks as GP
-        import model_store as _MS
-        _gp = _MS.load_game_picks("NCAAF")
+        _gp = _load_gp()
     except Exception:                                                   # noqa: BLE001
         GP, _gp = None, []
     if not _gp:
@@ -119,7 +123,15 @@ with st.expander("🎯 Player props", expanded=True):
 
 @st.cache_data(ttl=300, show_spinner=False)
 def load_slate_meta(date_str: str):
-    """Load just the game-level meta, not full player rows -- Game Lab doesn't need player data."""
+    """Load just the game-level meta, not full player rows -- Game Lab doesn't need player data. Nov 14: from the
+    schedule alone (ncaaf_engine.slate_meta); the full slate is only a fallback."""
+    try:
+        import ncaaf_engine as _NE
+        meta = _NE.slate_meta(date_str)
+        if meta:
+            return meta
+    except Exception:                                           # noqa: BLE001
+        pass
     _, meta = NSC.load_ncaaf_slate_cached(date_str)
     return meta
 

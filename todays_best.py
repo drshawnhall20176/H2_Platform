@@ -585,6 +585,15 @@ def bet_rows(items: Sequence[Dict], stake: float, real: bool, tag: str, date_str
             f["notes"] = ",".join(x for x in (tag, f.get("notes")) if x)
             out.append(f)
             continue
+        if it.get("sport") == "UFC" and it.get("market") in ("Moneyline", "Fight Duration") and it.get("side"):
+            # Nov 14: the fight card's ticked sides -- graded by ufc_review.bet_result (game "A vs. B")
+            out.append({"slate_date": date_str, "sport": "UFC", "game": it.get("game"), "player": None,
+                        "market": it["market"], "side": it["side"],
+                        "line": 0.0 if it.get("line") is None else float(it["line"]), "entry_odds": float(price),
+                        "entry_odds_source": "book", "model_prob": it.get("chance"), "stake": float(stake),
+                        "book": it.get("book") or "draftkings", "is_real_bet": bool(real),
+                        "category": B.default_category("UFC", from_model=False), "notes": tag or None})
+            continue
         if not it.get("player") or not it.get("side") or it.get("line") is None:
             continue                            # Nov 9: never log a prop that can't be graded (no player/side/line)
         out.append({"slate_date": date_str, "sport": it["sport"], "game": it.get("game"), "player": it.get("player"),

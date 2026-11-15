@@ -822,6 +822,19 @@ def build_slate(date_str: str, season: Optional[int] = None) -> Tuple[List[Dict]
     return rows, meta
 
 
+def slate_meta(date_str: str, season: Optional[int] = None) -> List[Dict]:
+    """Nov 14: just the week's games (the `meta` half of build_slate), from the cached schedule -- no rosters, no player
+    stats. The Game Lab needs only this; building the whole FBS player slate for it took minutes whenever the saved
+    copy was over an hour old."""
+    season = season or _infer_season(date_str)
+    schedule = get_schedule(season) if season else []
+    week = _resolve_week(schedule, date_str) if schedule else None
+    games = games_for_week(schedule, week) if week is not None else []
+    return [{"label": f"{g['away_team']} @ {g['home_team']}", "away_name": g["away_team"], "home_name": g["home_team"],
+             "game_date": g.get("start_date"), "week": week, "home_id": g.get("home_id"), "away_id": g.get("away_id"),
+             "venue": g.get("venue"), "neutral_site": g.get("neutral_site")} for g in games]
+
+
 # ============================================================================ Drive-level simulation
 # BUILT DIRECTLY ON REQUEST, second piece of the drive-level simulation build (see ncaaf_data.
 # refresh_drives' own docstring for the full reasoning behind the new /drives endpoint this
