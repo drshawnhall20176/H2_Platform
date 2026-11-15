@@ -78,7 +78,7 @@ def prepare(graded: Sequence[Dict], default_w: float) -> List[Dict]:
         out.append({"lock": PE.most_probable(r.get("chance"), r.get("cushion"), r.get("gap")),
                     "y": 1 if r["result"] == "hit" else 0, "chance": float(r["chance"]), "price": r.get("price"),
                     "q_mkt": q_mkt, "q_mod": q_mod, "market": r.get("market") or "?", "side": side,
-                    "date": r.get("slate_date"), "gap": r.get("gap")})
+                    "date": r.get("slate_date"), "gap": r.get("gap"), "game": r.get("game")})
     return out
 
 
@@ -98,6 +98,37 @@ def fit_weight(rows: Sequence[Dict]) -> Optional[Dict]:
     scores = {w: sum(_ll(w * r["q_mod"] + (1 - w) * r["q_mkt"], r["y"]) for r in usable) / len(usable) for w in W_GRID}
     best = min(scores, key=scores.get)
     return {"n": len(usable), "best": best, "scores": scores}
+
+
+WEEKLY_SPORTS = ("NFL", "NCAAF")   # Nov 15: held out by game (5 folds), and 2 slates instead of 5 -- see calibration.py
+WEEKLY_MIN_SLATES = 2
+
+
+def holdout_games(rows: Sequence[Dict], now: float, k: int = 5) -> Dict:
+    """Weekly sports: fit on 4/5 of the games, score both weights on the games left out; 5 folds."""
+    import hashlib
+    usable = [r for r in rows if r["q_mkt"] is not None and r["q_mod"] is not None and r.get("date")]
+    key = lambda r: f"{r.get('game') or ''}|{r['date']}"
+    games = sorted({key(r) for r in usable}, key=lambda g: hashlib.md5(g.encode()).hexdigest())
+    cur = min(W_GRID, key=lambda w: abs(w - now))
+    splits = passed = 0
+    gain = 0.0
+    for i in range(k if len(games) >= k else 0):
+        fold = set(games[i::k])
+        train = [r for r in usable if key(r) not in fold]
+        test = [r for r in usable if key(r) in fold]
+        f = fit_weight(train)
+        if not f or len(test) < 20:
+            continue
+
+        def score(w):
+            return sum(_ll(w * r["q_mod"] + (1 - w) * r["q_mkt"], r["y"]) for r in test) / len(test)
+        splits += 1
+        g = score(cur) - score(f["best"])
+        gain += g * len(test)
+        passed += g >= 0
+    return {"splits": splits, "passed": passed, "gain": gain,
+            "ok": splits >= 2 and passed >= (2 / 3) * splits and gain > 0}
 
 
 def holdout(rows: Sequence[Dict], now: float) -> Dict:
@@ -228,22 +259,24 @@ def build(sport: str, graded: Sequence[Dict], bets: Sequence[Dict], days: int = 
         gain = f["scores"][cur] - f["scores"][f["best"]]
         slates = len({r["date"] for r in g if r["q_mkt"] is not None})
         better = gain >= MIN_GAIN and abs(f["best"] - now) >= MIN_MOVE - 1e-9
-        ok = better and f["n"] >= MIN_N and slates >= MIN_SLATES
+        need = WEEKLY_MIN_SLATES if sport in WEEKLY_SPORTS else MIN_SLATES
+        ok = better and f["n"] >= MIN_N and slates >= need
         why = ("**propose " + format(f["best"], ".2f") + "**") if ok else (
             "keep" if not better else f"wait (need {MIN_N} reads)" if f["n"] < MIN_N else
-            f"wait ({slates} of {MIN_SLATES} slates)")
+            f"wait ({slates} of {need} slates)")
         md.append(f"| {mk} | {f['n']} | {now:.2f} | {f['best']:.2f} | {f['scores'][cur]:.4f} → "
                   f"{f['scores'][f['best']]:.4f} | {why} |")
         if ok:
-            h = holdout(g, now)
+            h = holdout_games(g, now) if sport in WEEKLY_SPORTS else holdout(g, now)
+            unit = "game groups" if sport in WEEKLY_SPORTS else "days"
             proposals.append({"sport": sport, "market": mk, "w": f["best"], "now": now, "n": f["n"],
                               "gain": round(gain, 4), "profit": profit(g), "holdout": h, "auto_ok": h["ok"],
                               "applied": False,
-                              "why": (f"held up on {h['passed']} of {h['splits']} held-out days" if h["ok"] else
-                                      f"only {h['splits']} held-out day(s) so far" if h["splits"] < 2 else
-                                      f"better on {h['passed']} of {h['splits']} held-out days but worse overall"
+                              "why": (f"held up on {h['passed']} of {h['splits']} held-out {unit}" if h["ok"] else
+                                      f"only {h['splits']} held-out {unit} so far" if h["splits"] < 2 else
+                                      f"better on {h['passed']} of {h['splits']} held-out {unit} but worse overall"
                                       if h["passed"] >= (2 / 3) * h["splits"] else
-                                      f"better on only {h['passed']} of {h['splits']} held-out days")})
+                                      f"better on only {h['passed']} of {h['splits']} held-out {unit}")})
     md.append("")
 
     losers = [(mk, sd, g) for (mk, sd), g in by.items() if len(g) >= 100 and (profit(g) or 0) <= -0.10]
@@ -286,7 +319,7 @@ def main(argv=None) -> int:
         if os.environ.get("TRIGGER") == "workflow_run" and today.isoformat() in (MS.daily_review_mornings(f"{sport}-tuning") or [])[:1]:
             print(f"{sport}: today's tuning report already ran")       # Nov 14: daily, once
             continue
-        dates = _dates(sport, a.days, today)
+        dates = _dates(sport, max(a.days, 63) if sport in WEEKLY_SPORTS else a.days, today)   # Nov 15: nine weeks
         graded = [r for recs in D.grade_dates(sport, dates).values() for r in recs] if dates else []
         rep = build(sport, graded, bets, a.days)
         # Nov 11: the owner wants the model to tune itself -- a proposal that holds up out of sample applies itself
