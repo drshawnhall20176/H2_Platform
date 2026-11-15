@@ -15,7 +15,7 @@ for who, mk, side, line in WANT:
         print("NOT FOUND", who, mk); continue
     s = c[0]
     price = s.get("over_price") if side == "Over" else s.get("under_price")
-    items.append({"sport": "NFL", "game": s["game"], "player": who, "pid": s.get("player_id"), "market": mk, "side": side,
+    items.append({"sport": "NFL", "game": s["game"], "player": who, "market": mk, "side": side,
                   "line": line, "price": price, "book": s.get("book") or "draftkings", "chance": s.get("chance"),
                   "pick": f"{who} {mk} {side} {line:g}"})
 res = TB.log_selection(items, "Singles", 3.0, 0.0, None, True, "ne-det-pick6", "2026-11-15")
