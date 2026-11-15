@@ -42,7 +42,9 @@ def test_honest_chances_are_left_alone(monkeypatch):
 
 
 def test_only_days_since_the_current_factor_count(monkeypatch):
-    """A factor approved this morning: the older days (graded before it) mustn't stack it again."""
+    """A factor approved this morning: the older days (graded before it) mustn't stack it again. Nov 15: they're no
+    longer dropped -- each older chance is unscaled from the factor it was shown with (1.00) and rescaled to today's
+    (0.88), so every day counts once, on today's footing."""
     import model_store as MS
     monkeypatch.setattr(CAL, "side_factors", lambda sport: (1.0, 0.88))
     monkeypatch.setattr(MS, "list_calibration", lambda *a, **k: [{"sport": "NHL:Under", "s": 0.88,
@@ -50,4 +52,9 @@ def test_only_days_since_the_current_factor_count(monkeypatch):
     monkeypatch.setattr(MS, "approve_calibration", lambda *a, **k: True)
     dec = CAL.auto_side("NHL", _rows(8, 200, 0.4), "2026-11-08")
     under = next(d for d in dec if d["side"] == "Under")
-    assert under["since"] == "2026-10-16" and under["n"] == 400 and not under["applied"]   # two days since: not enough
+    assert under["since"] == "2026-10-16" and under["n"] == 1600                              # every day, rescaled
+
+
+def test_older_chances_are_rescaled_not_stacked():
+    assert abs(CAL.rescale(0.70, 1.0, 0.88) - CAL.honest(0.70, 0.88)) < 1e-9
+    assert abs(CAL.rescale(CAL.honest(0.70, 0.88), 0.88, 0.88) - CAL.honest(0.70, 0.88)) < 1e-9
