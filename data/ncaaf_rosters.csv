@@ -796,6 +796,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 4832952,Mekhi,Collins,Mekhi Collins,North Dakota State,WR,1,15.0,76.0,215.0
 4832954,Deylin,Hasert,Deylin Hasert,Georgia State,OL,1,73.0,76.0,305.0
 4832956,Martin,Koivisto,Martin Koivisto,Central Michigan,OL,1,76.0,79.0,290.0
+4833015,Jeremiah,Earby,Jeremiah Earby,Michigan,DB,4,6.0,74.0,182.0
 4833019,Dakari,Frazier,Dakari Frazier,Western Michigan,DL,1,98.0,75.0,280.0
 4833021,Jonathan,Harder,Jonathan Harder,Toledo,OL,1,73.0,76.0,330.0
 4833027,Drew,Logan,Drew Logan,Cincinnati,EDGE,1,91.0,76.0,270.0
@@ -15808,3 +15809,4 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 5460676,Mickey,Widner,Mickey Widner,Air Force,LS,1,49.0,70.0,175.0
 5460677,Grady,Kinsey,Grady Kinsey,Air Force,RB,1,32.0,,
 5460678,Micheleau,Frederique,Micheleau Frederique,Miami,WR,1,38.0,73.0,175.0
+5478875,Jayden,Gray,Jayden Gray,Air Force,,2026,,,
