@@ -54,7 +54,7 @@ def money_rows(bets: Sequence[Dict]) -> List[Dict]:
 
 def pick_rows(bets: Sequence[Dict]) -> List[Dict]:
     """Settled real picks: singles and parlay legs (not the parlay ticket itself)."""
-    return [b for b in bets if _real(b) and not B.is_parlay_header(b) and B._result(b) in ("win", "loss")]
+    return B.dedupe_picks([b for b in bets if _real(b) and not B.is_parlay_header(b) and B._result(b) in ("win", "loss")])
 
 
 def is_parlay(b: Dict) -> bool:
