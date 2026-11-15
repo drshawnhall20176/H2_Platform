@@ -48,6 +48,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
 import pytz
+import model_view as MV
 
 import sports
 import odds_api as O
@@ -235,6 +236,8 @@ profile = P.build_matchup_profile(row, h2h_log, opp_recent, opp_season, season_l
 st.markdown(f"### {row['Player']} vs {row['Opp']}")
 st.caption(f"{row['GameLabel']}  ·  {row['Position']}  ·  averaging over their last "
           f"{len(row.get('_recent_games') or [])} game(s) on file")
+_mv_reads = MV.cached_reads("NCAAF", date_str)
+MV.show_player_calls(st, _mv_reads, row["Player"])
 
 
 def _rest_line(label: str, rest: dict) -> str:
@@ -339,7 +342,10 @@ for (mkey, col, disp), slot in zip(active_markets, col_iter):
         if not trend_log:
             st.caption(f"{disp}: no recent games on file yet.")
             continue
+        _mvr = MV.call(_mv_reads.get((MV.norm_name(row["Player"]), MV.market_of(disp))))
         line_val = live_lines.get(mkey)
+        if line_val is None and _mvr["Line"] is not None:
+            line_val = _mvr["Line"]          # the board's line (the one the model read)
         is_live = line_val is not None
         if line_val is None:
             line_val = P.default_line(mkey)
@@ -350,6 +356,10 @@ for (mkey, col, disp), slot in zip(active_markets, col_iter):
         fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines+markers", name=disp,
                                  line=dict(color="#3b82f6"), marker=dict(size=8),
                                  text=hover, hoverinfo="text"))
+        if _mvr["Model proj"] is not None:
+            fig.add_hline(y=_mvr["Model proj"], line_dash="dot", line_color="#16a34a",
+                          annotation_text=f"Model: {_mvr['Model proj']:.1f} → {_mvr['Model call']}",
+                          annotation_position="bottom left")
         if line_val is not None:
             fig.add_hline(y=line_val, line_dash="dash", line_color="#f97316",
                          annotation_text=f"{'Line' if is_live else 'Model default'}: {line_val:g}",
@@ -381,14 +391,17 @@ if profile:
         return " · ".join(bits) if bits else "—"
 
     pdf["Notes"] = pdf.apply(_notes, axis=1)
-    pdf = pdf[["Market", "Recent Avg", "Season Avg", "H2H Avg", "H2H Games", "Notes"]]
+    pdf["_p"] = row["Player"]
+    pdf = pd.DataFrame(MV.attach(pdf.to_dict("records"), _mv_reads, player_key="_p", own_key="Recent Avg"))
+    pdf = pdf[["Market", "Model call", "Model proj", "Recent Avg", "Agrees", "Season Avg", "H2H Avg",
+               "H2H Games", "Notes"]]
     if not (row.get("_recent_games") or []):
         # No games on file: the profile's Recent Avg is a 0.0 placeholder, not a real average.
         # Show "—" (na_rep below) instead of a fabricated zero next to "no recent games on file".
         pdf["Recent Avg"] = float("nan")
     st.markdown(f"**{row['Player']} — recent form, season form, and this matchup**")
     st.dataframe(
-        pdf.style.format({"Recent Avg": "{:.1f}", "Season Avg": "{:.1f}", "H2H Avg": "{:.1f}"}, na_rep="—"),
+        pdf.style.format({"Model proj": "{:.1f}", "Recent Avg": "{:.1f}", "Season Avg": "{:.1f}", "H2H Avg": "{:.1f}"}, na_rep="—"),
         hide_index=True, width="stretch",
     )
 

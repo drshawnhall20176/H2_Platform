@@ -187,14 +187,24 @@ st.info(
     "tough one on Rush Yards in the same game.",
     icon="ℹ️")
 
-df = pd.DataFrame(view)[["Player", "Team", "Opp", "Position", "Market", "Recent Avg",
-                         "Opp Allows", "Slate Avg", "Matchup Factor", "Hot Hand Score"]]
+# Nov 15: ONE model. The model's read (line, projection, call, chance, Use) leads; this page's own
+# recent-average x matchup number stays only as the explanation ("Form × matchup").
+import model_view as MV
+view = MV.attach(view, MV.cached_reads("NFL", date_str), own_key="Hot Hand Score")
+view.sort(key=lambda r: (r.get("Chance") is None, -(r.get("Chance") or 0)))
+_ag, _cmp = MV.agreement(view)
+df = pd.DataFrame(view)[["Player", "Team", "Opp", "Position", "Market", "Line", "Model proj", "Model call", "Chance",
+                         "Use", "Recent Avg", "Matchup Factor", "Hot Hand Score", "Agrees", "Opp Allows", "Slate Avg"]]
+df = df.rename(columns={"Hot Hand Score": "Form × matchup"})
 st.dataframe(
-    df.style.format({"Recent Avg": "{:.1f}", "Opp Allows": "{:.1f}", "Slate Avg": "{:.1f}",
-                     "Matchup Factor": "{:.2f}×", "Hot Hand Score": "{:.1f}"}, na_rep="—")
+    df.style.format({"Recent Avg": "{:.1f}", "Opp Allows": "{:.1f}", "Slate Avg": "{:.1f}", "Line": "{:g}",
+                     "Model proj": "{:.1f}", "Chance": "{:.0%}",
+                     "Matchup Factor": "{:.2f}×", "Form × matchup": "{:.1f}"}, na_rep="—")
     .theme_gradient(cmap="RdYlGn", subset=["Matchup Factor"]),
     hide_index=True, width="stretch", height=520,
 )
+st.caption(MV.EXPLAIN + (f" Here: the form × matchup number sits on the model's side of the line for {_ag} of "
+                         f"{_cmp} props with a line." if _cmp else ""))
 st.caption("\"Opp Allows\" = that opponent's entire team combined for that stat, raw per-game, "
           "season-to-date. \"Slate Avg\" = the average allowed rate across every opponent "
           "actually playing this week (not a full-league average) — a single constant every "
@@ -217,7 +227,11 @@ with st.expander("Full column reference"):
   rating.
 - **Matchup Factor** — Opp Allows ÷ Slate Avg. Above 1.08× is a favorable matchup, below 0.92× is
   tough, in between is neutral. A missing opponent read stays neutral (1.00×) rather than guessing.
-- **Hot Hand Score** — Recent Avg × Matchup Factor. The number this board is sorted by.
+- **Model proj / Model call / Chance / Use** — the platform's one model (the same read as Today's best and Best Bets),
+  against the book's **Line**. Sorted by the model's chance.
+- **Form × matchup** — Recent Avg × Matchup Factor: this page's own quick read, kept to explain the model's number.
+  ⚠️ in **Agrees** marks a prop where it would point the other way — go with the model (it regresses hot streaks,
+  and adjusts for injuries, roles, weather and game script; this doesn't).
 - **Not included in this pass** — rest-days tracking and blowout-risk (game spread) context, both
   real signals the basketball version has. A reasonable next layer once this core version has
   been checked against real results, not silently missing.
