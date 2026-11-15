@@ -18,6 +18,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
 import pytz
+import model_view as MV
 
 import sports
 import basketball_markets as BM
@@ -215,6 +216,8 @@ profile.append(P.build_minutes_row(row, h2h_log, season_log=season_log))
 st.markdown(f"### {row['Player']} vs {row['Opp']}")
 st.caption(f"{row['GameLabel']}  ·  averaging {row['AvgMin']:.0f} min/game over their last "
            f"{len(row.get('_game_log') or [])} games")
+_mv_reads = MV.cached_reads(_active.key, date_str)
+MV.show_player_calls(st, _mv_reads, row["Player"])
 
 
 def _rest_line(label: str, rest: dict) -> str:
@@ -297,7 +300,10 @@ for (mkey, col, disp), slot in zip(P.market_list(), _chart_slots):
         if not BM.values_for(trend_log, stat_key):
             st.caption(f"{disp}: not in this player's recent game lines yet.")
             continue
+        _mvr = MV.call(_mv_reads.get((MV.norm_name(row["Player"]), MV.market_of(disp))))
         line_val = live_lines.get(mkey)
+        if line_val is None and _mvr["Line"] is not None:
+            line_val = _mvr["Line"]          # the board's line (the one the model read)
         is_live = line_val is not None
         if line_val is None:
             # No book line loaded: the player's own form, rounded to a half point -- not one generic number
@@ -320,6 +326,10 @@ for (mkey, col, disp), slot in zip(P.market_list(), _chart_slots):
         fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines+markers", name=disp,
                                  line=dict(color="#3b82f6"), marker=dict(size=8),
                                  text=hover, hoverinfo="text"))
+        if _mvr["Model proj"] is not None:
+            fig.add_hline(y=_mvr["Model proj"], line_dash="dot", line_color="#16a34a",
+                          annotation_text=f"Model: {_mvr['Model proj']:.1f} → {_mvr['Model call']}",
+                          annotation_position="bottom left")
         if line_val is not None:
             fig.add_hline(y=line_val, line_dash="dash", line_color="#f97316",
                          annotation_text=f"{'Line' if is_live else 'Form line'}: {line_val:g}",

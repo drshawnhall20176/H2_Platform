@@ -23,6 +23,7 @@ import styling  # installs theme-proof .theme_gradient (readable in light + dark
 import pandas as pd
 from datetime import datetime
 import pytz
+import model_view as MV
 
 import sports
 import nfl_engine as E
@@ -111,6 +112,10 @@ st.caption(f"{len({r['GameLabel'] for r in all_rows})} game(s) shown · {len(boa
 positions_present = sorted({b["Position"] for b in board})
 pos_pick = st.multiselect("Position", positions_present, default=positions_present)
 filtered = [b for b in board if b["Position"] in pos_pick] if pos_pick else board
+# The model leads: its scoring chance (where a line is posted) ranks the board; this page's own recent
+# scoring rate is kept as the explanation.
+filtered = MV.attach_td(filtered, MV.cached_reads("NFL", date_str), own_key="ModelProb")
+filtered.sort(key=lambda b: (b["Model TD %"] is None, -(b["Model TD %"] or 0), -(b["ModelProb"] or 0)))
 
 if not filtered:
     st.info("No players match the current position filter.")
@@ -121,15 +126,21 @@ C.section_header("🏆", "Leaderboard")
 top_n = st.slider("Show top N", 5, min(50, len(filtered)), min(25, len(filtered)))
 top = filtered[:top_n]
 
-ldf = pd.DataFrame(top)[["Player", "Position", "Team", "Opp", "ModelProb", "Fair", "TDGames", "GamesPlayed"]]
-ldf = ldf.rename(columns={"ModelProb": "Model %", "Fair": "Fair Odds", "TDGames": "TD Games",
+ldf = pd.DataFrame(top)[["Player", "Position", "Team", "Opp", "Model TD %", "Book TD %", "Model call", "Use",
+                         "ModelProb", "Agrees", "Fair", "TDGames", "GamesPlayed"]]
+ldf = ldf.rename(columns={"ModelProb": "Recent scoring rate", "Fair": "Fair odds (rate)", "TDGames": "TD Games",
                           "GamesPlayed": "Games on File"})
 st.dataframe(
-    ldf.style.format({"Model %": "{:.0%}"}, na_rep="—")
-    .theme_gradient(cmap="RdYlGn", subset=["Model %"]),
+    ldf.style.format({"Model TD %": "{:.0%}", "Book TD %": "{:.0%}", "Recent scoring rate": "{:.0%}"}, na_rep="—")
+    .theme_gradient(cmap="RdYlGn", subset=["Model TD %"]),
     hide_index=True, width="stretch",
 )
-st.caption("**Model %** is an empirical-Bayes-shrunk rate (each player's own recent TD-scored-or-"
+st.caption(MV.EXPLAIN)
+_a, _n = MV.agreement(top)
+if _n:
+    st.caption(f"The recent scoring rate points the model's way on {_a} of {_n} posted TD lines.")
+st.caption("**Model TD %** is the model's chance he scores; **Book TD %** is the books' no-vig chance. "
+          "**Recent scoring rate** is an empirical-Bayes-shrunk rate (each player's own recent TD-scored-or-"
           "not rate, pulled toward a neutral baseline by how many real games back it — a 2-game "
           "sample gets pulled hard, a 5-game sample barely moves), not a bootstrap over a yardage "
           "line. **Fair Odds** is the break-even American price at that probability, before any "
@@ -141,15 +152,15 @@ C.section_header("📋", "By position")
 tabs = st.tabs([f"{p}" for p in positions_present])
 for tab, pos in zip(tabs, positions_present):
     with tab:
-        pos_rows = [b for b in board if b["Position"] == pos][:15]
+        pos_rows = [b for b in filtered if b["Position"] == pos][:15]
         if not pos_rows:
             st.caption("No players at this position on the current slate.")
             continue
-        pdf = pd.DataFrame(pos_rows)[["Player", "Team", "Opp", "ModelProb", "Fair", "Why"]]
-        pdf = pdf.rename(columns={"ModelProb": "Model %", "Fair": "Fair Odds"})
+        pdf = pd.DataFrame(pos_rows)[["Player", "Team", "Opp", "Model TD %", "Model call", "Use", "ModelProb", "Why"]]
+        pdf = pdf.rename(columns={"ModelProb": "Recent scoring rate"})
         st.dataframe(
-            pdf.style.format({"Model %": "{:.0%}"}, na_rep="—")
-            .theme_gradient(cmap="RdYlGn", subset=["Model %"]),
+            pdf.style.format({"Model TD %": "{:.0%}", "Recent scoring rate": "{:.0%}"}, na_rep="—")
+            .theme_gradient(cmap="RdYlGn", subset=["Model TD %"]),
             hide_index=True, width="stretch",
         )
 
