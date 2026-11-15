@@ -510,10 +510,15 @@ HOLD_SLATES = 2
 HOLD_MIN_N = 5
 
 
-def holds_up(rows: Sequence[Dict], step: float) -> bool:
+def holds_up(rows: Sequence[Dict], step: float, by_game: bool = False) -> bool:
+    """Leave-one-slate-out (by_game=True, Nov 15, NFL / college football: leave-one-GAME-out -- a weekly sport has
+    few slates but a dozen-plus games in each)."""
     by: Dict[str, List[Dict]] = {}
     for r in rows:
-        by.setdefault(str(r.get("slate_date") or ""), []).append(r)
+        k = str(r.get("slate_date") or "")
+        if by_game and k:
+            k = f"{k}|{r.get('game') or ''}"
+        by.setdefault(k, []).append(r)
     if "" in by and len(by) == 1:                                # undated rows (older callers): no slate check
         return True
     agree = 0
@@ -643,6 +648,8 @@ def beat_model(graded: Sequence[Dict], min_n: int = 20) -> List[Dict]:
 # --------------------------------------------------------------------------- projection tunings learn too (Nov 10)
 AUTO_TUNE_MIN_N = 40           # graded props for that market (or slot) since its current tuning went live
 AUTO_TUNE_MIN_SLATES = 3
+WEEKLY_SPORTS = ("NFL", "NCAAF")   # Nov 15: 2 slates and held out game by game (17- and ~13-game seasons)
+WEEKLY_MIN_SLATES = 2
 
 
 def auto_tunings(graded: Sequence[Dict], tunings: Sequence[Dict], morning: str, write: bool = True,
@@ -668,12 +675,13 @@ def auto_tunings(graded: Sequence[Dict], tunings: Sequence[Dict], morning: str, 
         slates = len({r.get("slate_date") for r in rows})
         lo, hi = SUGGEST_RANGE
         step = None if ratio is None else max(lo, min(hi, 1 + STEP * (ratio - 1)))
-        if len(rows) < AUTO_TUNE_MIN_N or slates < AUTO_TUNE_MIN_SLATES:
+        weekly = sg["sport"] in WEEKLY_SPORTS
+        if len(rows) < AUTO_TUNE_MIN_N or slates < (WEEKLY_MIN_SLATES if weekly else AUTO_TUNE_MIN_SLATES):
             dec["why"] = f"not enough since its last change ({len(rows)} props over {slates} slates)"
         elif abs(ratio - 1) < (SLOT_BIAS if key[2] else MARKET_BIAS):
             dec["why"] = f"since its last change results ran {ratio - 1:+.0%} — inside the noise band"
-        elif not holds_up(rows, step):
-            dec["why"] = "didn't hold up slate by slate"
+        elif not holds_up(rows, step, by_game=weekly):
+            dec["why"] = "didn't hold up game by game" if weekly else "didn't hold up slate by slate"
         else:
             new = round(step * active.get(key, 1.0), 3)
             dec.update(factor=new, why=f"results ran {ratio - 1:+.0%} vs the projections over {len(rows)} props, "
