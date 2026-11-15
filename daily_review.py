@@ -42,6 +42,7 @@ import props_engine as PE
 ET = ZoneInfo("America/New_York")
 RUN_HOUR_ET = 3
 TREND_DAYS = 30            # the window suggestions look across (the Postgame Review page's default)
+WEEKLY_TREND_DAYS = 63     # Nov 15: NFL / college football -- nine weeks (chances are rescaled to today's factors)
 CATCH_UP_DAYS = 3          # also re-grade the last few slates if their report still had games pending
 TOP_MISSES = 8
 STAR_OUT_MARKS = ("usage bump", "teammate freshly out")
@@ -301,7 +302,9 @@ def review_sport(sport: str, morning: str, open_bets: Sequence[Dict], fetch: Cal
     slates = {d: summarize_slate(rows) for d, rows in graded.items()}
 
     # Suggestions look across the whole window (already-graded slates are re-fetched; ESPN is free).
-    cutoff = (date.fromisoformat(morning) - timedelta(days=TREND_DAYS)).isoformat()
+    # Nov 15: weekly sports look back further -- 30 days is only four NFL Sundays
+    cutoff = (date.fromisoformat(morning) - timedelta(days=WEEKLY_TREND_DAYS if sport in ("NFL", "NCAAF")
+                                                        else TREND_DAYS)).isoformat()
     window = [d for d in MS.snapshot_dates(sport, db_path=db_path) if cutoff <= d < morning]
     trend = dict(graded)
     trend.update(grade_dates(sport, [d for d in window if d not in graded], fetch=fetch, db_path=db_path))

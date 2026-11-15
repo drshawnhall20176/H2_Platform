@@ -169,6 +169,51 @@ AUTO_SPLIT_PASS = 2 / 3
 _REL_GRID = [round(0.5 + i * 0.01, 2) for i in range(101)]     # relative to the active factor: 0.50 .. 1.50
 
 
+# Nov 15 (owner: NFL and college football seasons are 17 and ~13 games -- "waiting on more games may never happen"):
+# 1) Every graded chance is put on today's footing instead of being thrown away when a factor changes: the chance was
+#    shown with the factor active when its read was saved, so it's unscaled by that factor and rescaled by the active
+#    one (factor_history / rescale). The whole window counts, not just the days since the last change.
+# 2) Weekly sports hold out GAMES, not days: one NFL Sunday is a dozen games, so the fit is checked on games it never
+#    saw (5 folds by game) and needs 2 slate days, not 3 + day-by-day splits that a once-a-week sport can't supply.
+WEEKLY_SPORTS = ("NFL", "NCAAF")
+WEEKLY_FOLDS = 5
+WEEKLY_MIN_DATES = 2
+
+
+def factor_history(key: str) -> List[tuple]:
+    """[(approved date-time, s)] for one calibration key (e.g. "NFL:Over"), oldest first, from every row ever approved."""
+    try:
+        import model_store as MS
+        rows = [(str(c.get("approved_ts") or ""), float(c["s"])) for c in MS.list_calibration(active_only=False)
+                if c.get("sport") == key]
+    except Exception:                                           # noqa: BLE001
+        return []
+    return sorted(rows)
+
+
+def factor_at(hist: List[tuple], when: str, default: float = 1.0) -> float:
+    s = default
+    for ts, v in hist:
+        if ts and ts <= when:
+            s = v
+    return s
+
+
+def rescale(p: float, s_then: float, s_now: float) -> float:
+    """A chance shown under factor s_then, as it would be shown under s_now."""
+    if not s_then:
+        return p
+    raw = 0.5 + (p - 0.5) / s_then
+    return min(max(0.5 + s_now * (raw - 0.5), 0.001), 0.999)
+
+
+def _game_folds(rows: List[Dict], k: int = WEEKLY_FOLDS) -> List[set]:
+    import hashlib
+    games = sorted({str(r.get("game") or r["date"]) + "|" + r["date"] for r in rows},
+                   key=lambda g: hashlib.md5(g.encode()).hexdigest())
+    return [set(games[i::k]) for i in range(k)] if len(games) >= k else []
+
+
 def _ll_rel(rows, s):
     tot = 0.0
     for r in rows:
@@ -177,15 +222,29 @@ def _ll_rel(rows, s):
     return tot / len(rows)
 
 
-def held_out_side(rows: List[Dict]) -> Dict:
-    """rows: [{"date", "p" (chance as graded, active factor already in it), "y"}] for ONE side.
-    -> {"rel": fit on everything (relative to active), "splits": n, "passed": n, "gain": mean held-out improvement}."""
+def held_out_side(rows: List[Dict], weekly: bool = False) -> Dict:
+    """rows: [{"date", "p" (chance as graded, active factor already in it), "y"[, "game"]}] for ONE side.
+    -> {"rel": fit on everything (relative to active), "splits": n, "passed": n, "gain": mean held-out improvement}.
+    weekly=True (NFL, college football): held out by game -- 5 folds -- instead of by later day."""
     ds = sorted({r["date"] for r in rows})
     out = {"rel": 1.0, "splits": 0, "passed": 0, "gain": 0.0, "n": len(rows), "dates": len(ds)}
     if len(rows) < 2 or not ds:
         return out
     out["rel"] = min(_REL_GRID, key=lambda g: _ll_rel(rows, g))
     gains = []
+    if weekly:
+        for fold in _game_folds(rows):
+            key = lambda r: str(r.get("game") or r["date"]) + "|" + r["date"]
+            tr = [r for r in rows if key(r) not in fold]
+            te = [r for r in rows if key(r) in fold]
+            if len(tr) < 100 or len(te) < 30:
+                continue
+            s_ = min(_REL_GRID, key=lambda g: _ll_rel(tr, g))
+            gains.append(_ll_rel(te, 1.0) - _ll_rel(te, s_))
+        out["splits"] = len(gains)
+        out["passed"] = sum(1 for g in gains if g > 0)
+        out["gain"] = sum(gains) / len(gains) if gains else 0.0
+        return out
     for cut in ds[1:]:
         tr = [r for r in rows if r["date"] < cut]
         te = [r for r in rows if r["date"] >= cut]
@@ -212,8 +271,15 @@ def auto_side(sport: str, graded_by_date: Dict[str, List[Dict]], morning: str, w
             except (TypeError, ValueError):
                 continue
             if 0 < p < 1 and r.get("side") in rows:
-                rows[r["side"]].append({"date": d, "p": p, "y": 1 if r["result"] == "hit" else 0})
+                rows[r["side"]].append({"date": d, "p": p, "y": 1 if r["result"] == "hit" else 0,
+                                        "game": r.get("game"), "ts": str(r.get("ts") or f"{d}T23:59")})
     active = dict(zip(("Over", "Under"), side_factors(sport)))
+    weekly = sport in WEEKLY_SPORTS
+    hist = {side: factor_history(f"{sport}:{side}") for side in rows}
+    if any(hist.values()):                                      # Nov 15: every read on today's footing (rescale)
+        for side in rows:
+            for r in rows[side]:
+                r["p"] = rescale(r["p"], factor_at(hist[side], r["ts"]), active[side])
     # A graded chance carries the factor that was active when its snapshot was taken, so a side is judged only on days
     # since its current factor went live -- otherwise a fresh correction would be applied again on top of itself.
     since = {}
@@ -224,26 +290,28 @@ def auto_side(sport: str, graded_by_date: Dict[str, List[Dict]], morning: str, w
                 since[c["sport"].split(":")[1]] = str(c.get("approved_ts") or "")[:10]
     except Exception:                                           # noqa: BLE001
         pass
-    for side in rows:
-        if since.get(side):
-            rows[side] = [r for r in rows[side] if r["date"] >= since[side]]
+    if not any(hist.values()):                                  # no history on file: the old rule (days since)
+        for side in rows:
+            if since.get(side):
+                rows[side] = [r for r in rows[side] if r["date"] >= since[side]]
     out = []
     lo, hi = SIDE_S_RANGE
+    min_dates = WEEKLY_MIN_DATES if weekly else AUTO_MIN_DATES
     for side, rs in rows.items():
-        h = held_out_side(rs)
+        h = held_out_side(rs, weekly=weekly)
         new = round(max(lo, min(hi, active[side] * h["rel"])), 2)
         dec = {"sport": sport, "side": side, "active": active[side], "new": new, **h, "applied": False,
-               "since": since.get(side)}
-        if h["n"] < AUTO_MIN_ROWS or h["dates"] < AUTO_MIN_DATES:
+               "since": since.get(side), "weekly": weekly}
+        if h["n"] < AUTO_MIN_ROWS or h["dates"] < min_dates:
             dec["why"] = f"not enough yet ({h['n']} reads over {h['dates']} days)"
         elif h["splits"] < AUTO_MIN_SPLITS:
-            dec["why"] = "not enough days to hold any out"
+            dec["why"] = "not enough games to hold any out" if weekly else "not enough days to hold any out"
         elif abs(new - active[side]) < AUTO_MIN_MOVE:
             dec["why"] = f"already honest (best {new:.2f} vs active {active[side]:.2f})"
         elif h["passed"] < AUTO_SPLIT_PASS * h["splits"] or h["gain"] <= 0:
-            dec["why"] = f"didn't hold up on held-out days ({h['passed']} of {h['splits']})"
+            dec["why"] = (f"didn't hold up on held-out {'games' if weekly else 'days'} ({h['passed']} of {h['splits']})")
         else:
-            dec["why"] = f"held up on {h['passed']} of {h['splits']} held-out splits"
+            dec["why"] = f"held up on {h['passed']} of {h['splits']} held-out {'game groups' if weekly else 'splits'}"
             if write:
                 import model_store as MS
                 dec["applied"] = MS.approve_calibration(f"{sport}:{side}", new, {
@@ -279,25 +347,35 @@ def auto_global(sport: str, graded_by_date: Dict[str, List[Dict]], morning: str,
                 since = max(since, str(c.get("approved_ts") or "")[:10])
     except Exception:                                           # noqa: BLE001
         pass
+    weekly = sport in WEEKLY_SPORTS
+    hist = {sd: factor_history(f"{sport}:{sd}") for sd in ("Over", "Under")}
+    act = dict(zip(("Over", "Under"), side_factors(sport)))
+    rescaled = any(hist.values())
     rows = []
     for d, rs in graded_by_date.items():
-        if since and d < since:
+        if since and d < since and not rescaled:
             continue
-        for p, y in usable(rs):
-            rows.append({"date": d, "p": p, "y": y})
-    h = held_out_side(rows)
+        for r in rs:
+            u = usable([r])
+            if not u:
+                continue
+            p, y = u[0]
+            if rescaled and r.get("side") in hist:              # Nov 15: on today's side factors, like auto_side
+                p = rescale(p, factor_at(hist[r["side"]], str(r.get("ts") or f"{d}T23:59")), act[r["side"]])
+            rows.append({"date": d, "p": p, "y": y, "game": r.get("game")})
+    h = held_out_side(rows, weekly=weekly)
     active = factor(sport)
     lo, hi = S_RANGE
     new = round(max(lo, min(hi, h["rel"])), 2)
     dec = {"sport": sport, "side": "overall", "active": active, "new": new, **h, "applied": False, "since": since or None}
-    if h["n"] < AUTO_MIN_ROWS or h["dates"] < AUTO_MIN_DATES:
-        dec["why"] = f"not enough yet ({h['n']} reads over {h['dates']} days since the shown chances last changed)"
+    if h["n"] < AUTO_MIN_ROWS or h["dates"] < (WEEKLY_MIN_DATES if weekly else AUTO_MIN_DATES):
+        dec["why"] = f"not enough yet ({h['n']} reads over {h['dates']} days)"
     elif h["splits"] < AUTO_MIN_SPLITS:
-        dec["why"] = "not enough days to hold any out"
+        dec["why"] = "not enough games to hold any out" if weekly else "not enough days to hold any out"
     elif abs(new - active) < AUTO_MIN_MOVE:
         dec["why"] = f"already honest (best {new:.2f} vs active {active:.2f})"
     elif h["passed"] < AUTO_SPLIT_PASS * h["splits"] or h["gain"] <= 0:
-        dec["why"] = f"didn't hold up on held-out days ({h['passed']} of {h['splits']})"
+        dec["why"] = f"didn't hold up on held-out {'games' if weekly else 'days'} ({h['passed']} of {h['splits']})"
     else:
         dec["why"] = f"held up on {h['passed']} of {h['splits']} held-out splits"
         if write:
