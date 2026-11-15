@@ -25,3 +25,16 @@ def test_ticked_games_become_gradeable_bet_log_rows():
     assert rows[0]["market"] == "Spread" and rows[0]["line"] == 6.0 and rows[0]["side"] == "KK Crvena zvezda"
     assert "gl:EUROLEAGUE:g1" in rows[0]["notes"] and rows[0]["stake"] == 2.0 and rows[0]["model_prob"] is not None
     assert rows[1]["market"] == "Moneyline" and rows[1]["entry_odds"] == -250
+
+
+def test_college_football_game_lines_settle_from_finals_and_log_as_ncaaf():
+    import intl_picks as IP
+    p = {"sport": "NCAAF", "game_id": "g1", "home": "Notre Dame", "away": "Boston College", "kickoff": "2026-11-14T20:30:00Z",
+         "final_home": 38.0, "final_away": 10.0, "result": None}
+    f = IP.bet_fields(p, "Total", "under", 51.5, -110, 1.0, False)
+    assert f["sport"] == "NCAAF"
+    assert IP.bet_result(f, p) == "win"
+    sp = IP.bet_fields(p, "Spread", "away", 16.5, -110, 1.0, False)
+    assert IP.bet_result(sp, p) == "loss"
+    ml = IP.bet_fields(p, "Moneyline", "home", None, -500, 1.0, False)
+    assert IP.bet_result(ml, p) == "win"
