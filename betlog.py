@@ -577,9 +577,22 @@ def money_bets(bets: List[Dict]) -> List[Dict]:
     return [b for b in bets if not is_parlay_leg(b, headed)]
 
 
+def _pick_key(b: Dict):
+    return (str(b.get("slate_date") or "")[:10], b.get("player"), b.get("market"), b.get("side"), b.get("line"))
+
+
+def dedupe_picks(bets: List[Dict]) -> List[Dict]:
+    """Nov 15: one pick played as a single AND as a parlay leg is still one pick. Drops a parlay leg when the same
+    pick (day, player, market, side, line) is also logged as a single, so hit rates and per-market records count it
+    once. Money is unaffected (legs carry none)."""
+    singles = {_pick_key(b) for b in bets if not _ticket(b) and not is_parlay_header(b) and b.get("player")}
+    return [b for b in bets if not (_ticket(b) and not is_parlay_header(b) and b.get("player")
+                                    and _pick_key(b) in singles)]
+
+
 def pick_bets(bets: List[Dict]) -> List[Dict]:
-    """The rows that are picks (for calibration / hit rates): everything except parlay headers."""
-    return [b for b in bets if not is_parlay_header(b)]
+    """The rows that are picks (for calibration / hit rates): everything except parlay headers, each pick once."""
+    return dedupe_picks([b for b in bets if not is_parlay_header(b)])
 
 
 def payout(stake: float, american: int) -> float:
@@ -829,7 +842,7 @@ def market_breakdown(bets: List[Dict]) -> List[Dict]:
     forward-looking and doesn't need the settled sample to be large. Sorted best CLV first."""
     from collections import defaultdict
     groups: Dict[str, List[Dict]] = defaultdict(list)
-    for b in bets:
+    for b in dedupe_picks(list(bets)):                  # Nov 15: a pick in a single and a parlay counts once
         groups[b.get("market") or "Unknown"].append(b)
  
     out = []
