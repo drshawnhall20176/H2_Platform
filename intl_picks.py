@@ -621,7 +621,7 @@ def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optio
 
 
 # --------------------------------------------------------------------------- logging a Game Lab bet (Nov 3)
-BET_SPORT = {"NCAAMB": "NCAAMB", "NBA": "NBA", "NHL": "NHL", "WNBA": "WNBA", "EUROLEAGUE": "INTL", "NBL": "INTL",
+BET_SPORT = {"NCAAF": "NCAAF", "NCAAMB": "NCAAMB", "NBA": "NBA", "NHL": "NHL", "WNBA": "WNBA", "EUROLEAGUE": "INTL", "NBL": "INTL",
              "EUROCUP": "INTL", "BCL": "INTL", "FEC": "INTL", "EUROCUPW": "INTL", "NKL": "INTL", "ICELAND": "INTL",
              "BAHRAIN": "INTL", "ESTONIA1": "INTL", "QATAR": "INTL",
              "TENNIS": "TENNIS"}
@@ -647,8 +647,8 @@ def bet_result(bet: Dict, p: Dict) -> Optional[str]:
     fh, fa, res = p.get("final_home"), p.get("final_away"), p.get("result")
     if res in ("void", "retired"):                              # Nov 14: walkover / retired before a full set -- the
         return "void"                                           # books void it (stake back); a parlay drops the leg
-    if fh is None or fa is None or res is None:
-        return None
+    if fh is None or fa is None:                                # Nov 15: finals are enough -- college football records
+        return None                                             # only carry a "result" when the model made a pick
     mk, side = bet.get("market"), bet.get("side")
     if str(res).endswith("_ret"):                               # retired after a full set: moneyline stands, rest void
         return ("win" if (res == "home_ret") == (side == p["home"]) else "loss") if mk == "Moneyline" else "void"
@@ -657,7 +657,9 @@ def bet_result(bet: Dict, p: Dict) -> Optional[str]:
         return "push" if d == 0 else ("win" if (d > 0) == (str(side).lower() == "over") else "loss")
     home = side == p["home"]
     if mk == "Moneyline":
-        return "win" if (res == "home") == home else "loss"
+        if res in ("home", "away"):
+            return "win" if (res == "home") == home else "loss"
+        return None if fh == fa else ("win" if (fh > fa) == home else "loss")
     if mk == "Spread":
         d = (fh - fa if home else fa - fh) + float(bet["line"])
         return "push" if d == 0 else ("win" if d > 0 else "loss")
@@ -668,7 +670,8 @@ def settle_logged(league: str, db_path: Optional[str] = None) -> int:
     """Settle open Bet Log bets that were logged from a Game Lab page, once their game is graded here."""
     import betlog as B
     import model_store as MS
-    graded = {p["game_id"]: p for p in MS.load_game_picks(league, db_path=db_path) if p.get("result")}
+    graded = {p["game_id"]: p for p in MS.load_game_picks(league, db_path=db_path)
+              if p.get("result") or (p.get("final_home") is not None and p.get("final_away") is not None)}
     n = 0
     every = B.list_bets()
 
