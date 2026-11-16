@@ -31,6 +31,10 @@ KEY = "brief:{date}:{kind}"
 # overnight jobs worth checking: workflow file -> plain name
 JOBS = {"settle-results.yml": "Settling bets", "capture-closing-lines.yml": "Closing lines",
         "script-learn.yml": "Game-script learning", "daily-review.yml": "Morning review"}
+# Nov 16: game-script learning runs twice a day (early morning + late afternoon), and GitHub starts it hours late, so
+# its last run is often the evening before -- before the 8 PM window. Count any run in the last day for it, not
+# "didn't run".
+EXTRA_LOOKBACK_HOURS = {"script-learn.yml": 18}
 DISCORD_LIMIT = 1900
 
 
@@ -52,8 +56,9 @@ def job_health(since_utc: datetime, fetch=None) -> List[str]:
         import requests
 
         def fetch(wf):
+            since = since_utc - timedelta(hours=EXTRA_LOOKBACK_HOURS.get(wf, 0))
             r = requests.get(f"https://api.github.com/repos/{repo}/actions/workflows/{wf}/runs",
-                             params={"per_page": 20, "created": f">={since_utc:%Y-%m-%dT%H:%M:%SZ}"},
+                             params={"per_page": 20, "created": f">={since:%Y-%m-%dT%H:%M:%SZ}"},
                              headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
                              timeout=20)
             r.raise_for_status()

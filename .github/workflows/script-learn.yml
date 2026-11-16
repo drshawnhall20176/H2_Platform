@@ -7,7 +7,8 @@ name: script-learn
 
 on:
   schedule:
-    - cron: "17 10 * * *"   # 5:17am ET
+    - cron: "17 6 * * *"    # 1:17am ET (Nov 16: was 5:17, after the 3:30 morning brief checks it; GitHub starts it late anyway)
+    - cron: "17 9 * * *"    # 4:17am ET backup
     - cron: "17 21 * * *"   # 4:17pm ET
   workflow_dispatch: {}
 
