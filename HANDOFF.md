@@ -1,10 +1,10 @@
-# H2 Sports Platform — Handoff (current as of Sat Nov 14, 2026)
+# H2 Sports Platform — Handoff (current as of Mon Nov 16, 2026, 6 AM ET)
 
 This is the **current** picture: what runs, where, how it's set up, and the rules the owner has set.
 `PLATFORM_CHECKPOINT.md` is the historical build log (July–October); where they disagree, this file wins.
 
 Owner: Dr. Shawn Hall (H2 Sports, LLC; brand "H2 Sports Media"; co-owner Deezy). Repo:
-`drshawnhall20176/H2_Platform`, branch `main`. 337 commits, 56 pages, 154 test files, **3,643 tests passing**
+`drshawnhall20176/H2_Platform`, branch `main`. 375 commits, 56 pages, 161 test files, **~3,690 tests passing**
 (`timeout 1700 python -m pytest -q -p no:cacheprovider --deselect
 test_analyst_page.py::test_the_locked_calls_table_follows_the_time_slot_and_game_pickers`).
 
@@ -95,10 +95,10 @@ jobs finish (`workflow_run`) and guards itself against running twice.
 | `capture-line-snapshots` | 14, 18, 21, 00 | — | line history |
 | `capture-ufc-odds` | 8×/day | — | UFC prices |
 | `close-watch` | 15:40, 20:40, 01:40 | — | pre-game close watch |
-| `script-learn` | 10:17, 21:17 | — | game-script learning |
+| `script-learn` | 06:17, 09:17 (backup), 21:17 | — | game-script learning (morning run moved before the brief Nov 16; the brief counts any run in the last ~day) |
 | `refresh-matchups` / `refresh-ncaaf` / `refresh-statcast` | 10:00 / 11:00 / 11:00 | — | data refreshes |
 | `settle-analyst` | 12:41 | — | Analyst Desk grading |
-| `tuning-report` | Tue 13:17 | — | weekly model-weight proposals — **apply themselves** after a held-out check |
+| `tuning-report` | daily 13:17 | daily-review (once a day) | model-vs-market blend weights — **apply themselves** after a held-out check |
 | `refresh-calibration` | Sun 09:00 | — | weekly calibration refresh |
 | `research` | manual | — | runs `research/<script>.py` on any branch (backtests, probes, live checks) |
 
@@ -118,7 +118,10 @@ repos/drshawnhall20176/H2_Platform/actions/workflows/daily-review.yml/dispatches
 - **Game-league calibration:** same rule for every Game Lab / International Hoops league (`game_calibration:<LEAGUE>`),
   reported as GAME_LINES in the brief. Nov 12 check: NCAAMB honest (82% vs 80%); NBA/NHL favourites won more than
   said but < 100 games; international leagues too few.
-- **Weekly weight tuning** applies itself after a held-out check (no approvals).
+- **Daily weight tuning** (blend weights) applies itself after a held-out check (no approvals).
+- **Short seasons (NFL / NCAAF):** 63-day window, held-out checks by game (5 folds), 2 slates minimum; older graded
+  reads are rescaled to today's factors so the whole window counts. First result Nov 16: NFL Unders 0.57 → 0.70
+  (held up on 4 of 5 game groups).
 - **Morning brief** (Home + Discord webhook once set): job health, what the model learned, yesterday's scorecard per
   sport (international hoops and tennis included), the owner's bets. **Afternoon picks note:** My Coach's 🟢 Good
   bets (props, college basketball included) plus every playable game-line / international hoops / tennis read.
@@ -145,7 +148,13 @@ repos/drshawnhall20176/H2_Platform/actions/workflows/daily-review.yml/dispatches
 - **No sport is left out** of the morning review or afternoon picks when it has value.
 - Model calibrations apply automatically as the model learns.
 - Public Discord build = owner build minus the Bet Log and owner data (Matchup Lab and Position Matchups are public).
-- Every pick table supports tick-to-log; logged bets settle automatically.
+- Every pick table supports tick-to-log (UFC included since Nov 15); logged bets settle automatically.
+- **One model, one answer (Nov 15):** no page may show a second, competing player projection. Older tools (Hot Hand,
+  Matchup / QB Labs, Anytime TD, Player Lines) lead with the model's read via `model_view.py`; their own numbers are
+  the explanation, flagged ✅/⚠️ when they'd point the other way. Coin flips (< 52%) say "Toss-up".
+- **Consistent symbols everywhere:** the Use column (⛔ Pass / 🎯 Single / 🎟️ Parlay leg / Parlay + Single) on every
+  pick table, game lines included; A–F grades live in the log box.
+- A pick logged as a single and as a parlay leg counts **once** in records (`betlog.dedupe_picks`).
 
 **Betting rules the coach enforces (My Coach / log panel)**
 - **Singles only** for model picks (after Nov 8); parlay limit 2 per day; daily budget and stop-loss from the owner's
@@ -161,6 +170,13 @@ repos/drshawnhall20176/H2_Platform/actions/workflows/daily-review.yml/dispatches
 ---
 
 ## 7. Open items / waiting on the owner
+
+**Latest state (Mon Nov 16, 6 AM ET).** All overnight jobs ran; brief rebuilt and clean. Sunday's bets: singles
+7–8, parlay 0–1, **−$3.82**. NFL so far: nothing tested profitable after 6 slates (T+A leans lost; Receptions, Solo
+Tackles, Rush Yards slightly positive on small samples). Open bets: **#743 Tiafoe +4.5 games (−110, $3)** and
+**#744 Cobolli +3.5 games (+100, $3)**, ATP Finals Nov 16, settle themselves from the tennis records. Odds API ≈ 75k
+credits left.
+
 
 1. **Add `OWNER_BRIEF_WEBHOOK`** (private Discord channel → Integrations → Webhooks) so the brief and picks reach his
    phone. Until then they're on Home only.
@@ -197,4 +213,6 @@ repos/drshawnhall20176/H2_Platform/actions/workflows/daily-review.yml/dispatches
 | Short seasons (Nov 15) | NFL / NCAAF (`WEEKLY_SPORTS` in calibration.py, tuning_report.py, postgame.py): 63-day window (`daily_review.WEEKLY_TREND_DAYS`, tuning report 63 days); held-out checks by GAME (5 folds; tunings leave-one-game-out) instead of by day; 2 slates minimum. All sports: graded chances are rescaled from the factor active when the read was saved to today's (`calibration.rescale` / `factor_history`), and weekly tunings rescale projections the same way (`postgame._tuning_history`), so the whole window counts instead of only the days since the last change. Dry run Nov 15: NFL/NCAAF factors evaluated on 1,000+ reads per side; current factors held (no change earned). |
 | One model (Nov 15) | `model_view.py`: every player page shows THE model's read (the day's newest saved board read — same as Today's best / Best Bets / My Coach): Line, Model proj, Model call (the likelier side; under 52% it says "Toss-up"), Chance, Use. Pages' own numbers are relabeled as the explanation ("Form × matchup", "Recent scoring rate") with an Agrees ✅/⚠️ column. Wired into Hot Hand Engines (10, 25, 35), Matchup Labs (11, 12, 30: model read table + model line on every chart), QB Labs (14, 29), Anytime TD Engines (13, 36: ranked by Model TD %), Player Lines (31, 33: board line replaces the old "model default" line). Measured before: Hot Hand vs model same side only 75%. |
 | Lab long shots (Nov 14, tracking) | `lab_long_shots.py`: tennis / intl hoops / soccer underdogs +300 (free, from lab records); soccer anytime goalscorers +400, 5+ starts, scanned every 6 h from `long_shots_scan.run` (≤24 matches, ~3 credits each); Home shows them under 💎, plus soccer rows in the game-lines table and a 📈 soccer price-flag list |
-| Research | `research/*.py` (backtests: soccer, tennis, live models, long shots, calibration) |
+| Fixes Nov 15–16 | NCAAF game-line bets log as NCAAF and settle from finals (#251); NFL string player ids (#253); pick dedupe (#254); morning brief job window for game-script learning (#256); box-score settlement accepts basketball display names "Reb+Ast" / "Blocks+Steals" / "Turnovers" (#257 — #742 had sat open) |
+| College football (Nov 14–15) | Unbiased spread model (home bias removed), Spread / Total / Model columns, lean record split by gap size, NCAAF Game Lab caching + schedule-only list (#234, #249, #250); Long Shots now NBA, NFL, NHL, NCAAF (NCAAF Rush / Receiving Yards tested, Pass Yards skipped) |
+| Research | `research/*.py` (backtests: soccer, tennis, live models, long shots, calibration). Nov 15: `hh_vs_model.py` (Hot Hand vs model agreement), `pitcin_tonight.py`, `today_bids.py`, `health_nov16.py` |
