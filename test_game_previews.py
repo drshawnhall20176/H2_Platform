@@ -85,3 +85,36 @@ def test_owner_rows_carry_use_and_extras_and_keep_their_place_for_logging():
     by_gap = sorted(rows, key=lambda r: -r["Gap (pts)"])
     assert [r["_i"] for r in by_gap] == [1, 0]                                 # a ticked row maps back to its game
     assert list(GP.public(rows)[0])[-1] == "Long backtest" and "_i" not in GP.public(rows)[0]
+
+
+def test_sim_row_for_a_league_with_no_stored_lines():
+    r = GP.sim_row("KC @ BUF", "Sun 4:25 PM", "BUF", "KC", {"home_win_prob": 0.58, "proj_spread": 2.4, "proj_total": 47.6,
+                                                             "proj_home_score": 25.0, "proj_away_score": 22.6})
+    assert (r["Projected score"], r["Model's winner"], r["Model spread"], r["Model total"]) == ("23–25", "BUF 58%", "BUF -2.4", 47.6)
+    away = GP.sim_row("KC @ BUF", "", "BUF", "KC", {"home_win_prob": 0.44, "proj_spread": -1.5, "proj_total": 44.0,
+                                                    "proj_home_score": 21.2, "proj_away_score": 22.8})
+    assert away["Model's winner"] == "KC 56%" and away["Model spread"] == "KC -1.5" and away["_close"] < r["_close"]
+    assert GP.sim_row("A @ B", "", "B", "A", None)["Projected score"] == "—"
+
+
+def test_ncaaf_game_lab_lists_previews_with_form(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from streamlit.testing.v1 import AppTest
+    import model_store as MS
+    import streamlit as st
+    st.cache_data.clear()
+    now = datetime.now(timezone.utc)
+    recs = [{"sport": "NCAAF", "game_id": str(i), "kickoff": (now + timedelta(hours=5)).isoformat(), "home": f"H{i}",
+             "away": f"A{i}", "model_margin": mm, "line": line, "close_line": line, "edge": mm - line, "model_total": 55.0,
+             "line_total": 52.5, "pick": None, "pick_label": lab, "result": None, "neutral": i == 2, "week": 12, "season": 2026}
+            for i, mm, line, lab in ((1, 10.0, 3.0, "H1 -3"), (2, -4.0, -3.5, None))]
+    monkeypatch.setattr(MS, "load_game_picks", lambda sport, ungraded=False, db_path=None: recs if sport == "NCAAF" else [])
+    at = AppTest.from_file("views/32_NCAAF_Game_Lab.py", default_timeout=180)
+    at.session_state["sport"] = "NCAAF"
+    at.run()
+    tables = [d.value for d in at.dataframe if "Form (30 days)" in d.value.columns]
+    assert tables, [str(e.value)[:200] for e in at.exception]
+    t = tables[0]
+    assert list(t.columns[:5]) == ["Kickoff (ET)", "Game", "Model leans", "Gap (pts)", "Form (30 days)"]
+    assert list(t["Model leans"]) == ["H1 -3", "A2 -3.5"] and list(t["Gap (pts)"]) == [7.0, 0.5]
+    assert list(t["Game"]) == ["A1 @ H1", "A2 @ H2 (neutral)"] and list(t["Tracking pick"]) == ["H1 -3", "—"]

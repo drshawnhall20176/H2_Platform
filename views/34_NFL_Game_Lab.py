@@ -125,6 +125,45 @@ game_options = {f"{m['away_name']} @ {m['home_name']}": m for m in slot_meta}
 if not game_options:
     st.info("No games in this time slot — try a different slot.", icon="🕐")
     st.stop()
+# Nov 16: the whole slate at a glance before the one-game detail (the site standard: something to browse first).
+# The same simulation the detail below runs, once per game, cached; no book lines and no Odds API credits.
+import game_previews as GPV
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def slate_previews(date_str: str, games: tuple):
+    out = []
+    for label, kick, home, away in games:
+        try:
+            res = load_game(date_str, "2026-02-01", home, away)[0]
+        except Exception:                                       # noqa: BLE001 -- one bad game never hides the slate
+            res = None
+        out.append(GPV.sim_row(label, kick, home, away, res))
+    return out
+
+
+def _kick_label(m):
+    d = game_dt(m.get("game_date"))
+    return d.strftime("%a %-I:%M %p") if d else ""
+
+
+with st.spinner("Projecting the slate..."):
+    _slate = slate_previews(date_str, tuple(
+        (lbl, _kick_label(m), m.get("home_abbr") or m.get("home_name"), m.get("away_abbr") or m.get("away_name"))
+        for lbl, m in game_options.items()))
+C.section_header("🗓️", f"The slate at a glance ({len(_slate)} games)")
+_tight = sorted([r for r in _slate if r["Model's winner"] != "—"], key=lambda r: r["_close"])[:3]
+if len(_slate) >= 4 and _tight:                                 # a short slate needs no shortlist
+    st.markdown("**Closest calls**")
+    for r in _tight:
+        _who = r["Model's winner"]
+        st.markdown(f"- **{r['Game']}** ({r['Kickoff (ET)']}): {_who}, projected {r['Projected score']}.")
+st.dataframe(pd.DataFrame([{k: v for k, v in r.items() if not k.startswith("_")} for r in _slate]),
+             hide_index=True, width="stretch")
+st.caption("Previews, not picks: nothing in the NFL has tested profitable yet. Projections use last season's scoring "
+           "rates (the default below) with no home-field edge and no book lines. Pick a game for the injury report "
+           "and the full breakdown.")
+
 game_label = st.selectbox("Game", list(game_options.keys()))
 selected = game_options[game_label]
 C.weather_note("NFL", date_str, [game_label])                   # Nov 8: kickoff weather
