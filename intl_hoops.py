@@ -53,6 +53,11 @@ def _http(url: str, params: Optional[Dict] = None):
     import requests
     try:
         r = requests.get(url, params=params or {}, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+        try:                                                    # Nov 16: Odds API credit meter (no-op for other hosts)
+            import odds_meter
+            odds_meter.record(url, r.headers)
+        except Exception:                                       # noqa: BLE001
+            pass
         return r.json() if r.ok else None
     except Exception:                                           # noqa: BLE001
         return None

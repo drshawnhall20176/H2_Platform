@@ -13,8 +13,8 @@ slate captured, using that sport's own odds_sport_key/markets — not hardcoded 
 
 COST NOTE, read before scheduling this — genuinely different from capture_closing_lines.py's
 footprint: that script only fetches props for games tied to bets you've actually placed, a small,
-bounded set. This script fetches props for EVERY not-yet-started game across every enabled sport,
-every run. Odds API bills by request/market. Recommend a coarser cadence than CLV capture's tight
+bounded set. This script fetches props for every game starting within SNAPSHOT_HOURS (24) across every
+enabled sport, every run (Nov 16: it used to price every listed game, a week or more ahead). Odds API bills by request/market. Recommend a coarser cadence than CLV capture's tight
 per-evening schedule — a few times a day (morning line, midday, a couple hours before first
 tip/pitch) is enough to see real movement without re-fetching the whole slate every 15 minutes.
 
@@ -40,6 +40,26 @@ import sports
 from capture_closing_lines import not_started   # reused, not duplicated — same definition either script needs
 
 
+SNAPSHOT_HOURS = 24      # Nov 16: only games starting within a day (was every listed game, the whole NFL week included)
+
+
+def starting_soon(events: List[Dict], hours: float = SNAPSHOT_HOURS, now=None) -> List[Dict]:
+    """Not-yet-started games that start within `hours`. The books' events list runs a week or more ahead; pricing all
+    of it four times a day (18 markets a game for the NFL) was one of the platform's largest Odds API costs, for
+    line history on "tonight's slate". A game is now tracked through its last day: up to four snapshots."""
+    from datetime import datetime, timedelta, timezone
+    now = now or datetime.now(timezone.utc)
+    out = []
+    for e in not_started(events, now):
+        try:
+            start = datetime.fromisoformat(str(e.get("commence_time")).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            continue
+        if start <= now + timedelta(hours=hours):
+            out.append(e)
+    return out
+
+
 def capture_for_sport(sport_key: str, api_key: str) -> Dict:
     """Snapshot every currently-offered line for one sport's not-yet-started games. Returns
     {"events_checked", "live_events", "offers_seen", "snapshots_recorded"}."""
@@ -49,7 +69,7 @@ def capture_for_sport(sport_key: str, api_key: str) -> Dict:
         return empty   # placeholder sport, nothing to capture yet
 
     events = O.fetch_events_all(api_key, sport=sport.odds_sport_key)
-    live = not_started(events)
+    live = starting_soon(events)
     if not live:
         return {**empty, "events_checked": len(events)}
 
@@ -106,8 +126,8 @@ def main() -> int:
         except Exception as ex:  # noqa: BLE001
             print(f"[{sport_key}] capture failed: {type(ex).__name__}: {ex}")
             continue
-        print(f"[{sport_key}] {report['events_checked']} events · {report['live_events']} not yet "
-             f"started · {report['offers_seen']} offer(s) seen · "
+        print(f"[{sport_key}] {report['events_checked']} events · {report['live_events']} starting "
+             f"within {SNAPSHOT_HOURS} h · {report['offers_seen']} offer(s) seen · "
              f"{report['snapshots_recorded']} new snapshot(s) (line/price actually moved)")
         total_recorded += report["snapshots_recorded"]
         total_seen += report["offers_seen"]

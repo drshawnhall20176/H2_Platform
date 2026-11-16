@@ -121,11 +121,21 @@ class OddsAPIError(Exception):
     pass
 
 
+def _meter(url: str, r) -> None:
+    """Nov 16: count what this call cost (odds_meter.py). Never raises."""
+    try:
+        import odds_meter
+        odds_meter.record(url, getattr(r, "headers", None))
+    except Exception:                                           # noqa: BLE001
+        pass
+
+
 def _get(path: str, params: Dict) -> Tuple[Dict, Dict]:
     try:
         r = requests.get(f"{BASE}/{path}", params=params, timeout=20)
     except requests.RequestException as e:
         raise OddsAPIError(f"network error: {e}") from e
+    _meter(f"{BASE}/{path}", r)
     if r.status_code == 401:
         raise OddsAPIError("401 Unauthorized — check your API key.")
     if r.status_code == 429:
