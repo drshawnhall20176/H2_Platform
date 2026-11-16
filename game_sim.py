@@ -26,12 +26,13 @@ from typing import Dict, Iterable, List, Optional
 N_SIMS = 20000
 RECENT_N = 5
 HOCKEY = ("NHL",)
-CLOSE = {"hockey": 1, "basketball": 5}          # "close" = decided by this many or fewer
-BLOWOUT = {"hockey": 3, "basketball": 15}       # "blowout" = decided by this many or more
+FOOTBALL = ("NFL", "NCAAF")
+CLOSE = {"hockey": 1, "basketball": 5, "football": 3}          # "close" = decided by this many or fewer
+BLOWOUT = {"hockey": 3, "basketball": 15, "football": 14}      # "blowout" = decided by this many or more
 
 
 def family(league: str) -> str:
-    return "hockey" if league in HOCKEY else "basketball"
+    return "hockey" if league in HOCKEY else "football" if league in FOOTBALL else "basketball"
 
 
 def _sds(league: str):
@@ -113,4 +114,4 @@ def unit(league: str) -> str:
 
 
 def range_text(lo: float, hi: float, league: str) -> str:
-    return f"{lo:.0f}–{hi:.0f}" if family(league) == "basketball" else f"{max(lo, 0):.0f}–{hi:.0f}"
+    return f"{max(lo, 0):.0f}–{hi:.0f}"

@@ -5,7 +5,7 @@ tracking picks where the backtested rules allow one, and the graded record. Data
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import pandas as pd
@@ -132,7 +132,7 @@ def _one_game(league, upcoming, day):
     if sim["overtime"] is not None:
         r4.metric("Goes to overtime", f"{sim['overtime']:.0%}")
     else:
-        r4.metric(f"Decided by {GS.CLOSE['basketball']} or fewer", f"{sim['close']:.0%}")
+        r4.metric(f"Decided by {GS.CLOSE[sim['family']]} or fewer", f"{sim['close']:.0%}")
     b1, b2 = st.columns(2)
     if sim["overtime"] is not None:
         b1.metric("One-goal game (overtime included)", f"{sim['close']:.0%}")
@@ -324,7 +324,11 @@ def render(league: str, search: bool = False) -> None:
     title = I.LEAGUES[league]["title"]
     c1, c2, c3 = st.columns([1, 1, 2])
     day = c1.date_input("Slate date", _today_et(), key=f"hg_date_{league}")
-    on_day = [p for p in picks if _et(p) is not None and _et(p).date() == day]
+    # Nov 16: a weekly league (the NFL) lists the week from the picked date by default -- a single day is empty most days
+    week = league in getattr(sports, "WEEKLY_SLATE_SPORTS", ()) and st.radio(
+        "Games shown", ["This week", "Selected date"], horizontal=True, key=f"hg_scope_{league}") == "This week"
+    last = day + timedelta(days=6) if week else day
+    on_day = [p for p in picks if _et(p) is not None and day <= _et(p).date() <= last]
     slots = sorted({sports.slot_of(_et(p)) for p in on_day}, key=lambda x: sports.SLOT_ORDER.get(x, 9))
     slot = c2.selectbox("Time slot", ["All slate"] + slots, key=f"hg_slot_{league}")
     if slot != "All slate":

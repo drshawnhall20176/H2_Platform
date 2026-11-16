@@ -36,6 +36,12 @@ LEAGUES.update({
     "WNBA": {"title": "WNBA", "odds_key": "basketball_wnba", "min_games": 0, "lam": 3.0, "decay": True, "sd": 12.0},
 })
 LEAGUES["NCAAMB"]["sd"] = 11.0
+# Nov 16: the NFL, same machinery, so its Game Lab gets leans, gaps and form like every other league. Walk-forward on
+# real closing lines (research/nfl_ratings_backtest.py, 434 held-out games 2025-26): margin MAE 9.99 vs the books' 9.64,
+# the model's side covered 48.0% -- a fair projection, not a pick source. Residual margin SD 12.7.
+ESPN_LEAGUE_URL["NFL"] = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
+LEAGUES["NFL"] = {"title": "NFL", "odds_key": "americanfootball_nfl", "min_games": 0, "lam": 3.0, "decay": True, "sd": 13.0,
+                  "min_decay_games": 150}
 # Nov 4: EuroCup -- results and schedule from the EuroLeague's own feed (competition "U"); the odds feed doesn't carry it,
 # so the page shows the model's fair lines and checks a typed sportsbook price instead of listing book lines.
 LEAGUES["EUROCUP"] = {"title": "EuroCup", "odds_key": None, "min_games": 30, "lam": 3.0, "sd": 11.5, "comp": "U"}
@@ -461,7 +467,8 @@ def decay_weights(games: Sequence[Dict], asof: str, league: str) -> List[float]:
     return out
 
 
-HFA_PRIOR = {"NCAAMB": (3.0, 200.0), "NBA": (2.5, 200.0), "NHL": (0.25, 200.0), "WNBA": (2.5, 200.0)}
+HFA_PRIOR = {"NCAAMB": (3.0, 200.0), "NBA": (2.5, 200.0), "NHL": (0.25, 200.0), "WNBA": (2.5, 200.0),
+             "NFL": (1.7, 200.0)}
 
 
 def ratings_weighted(games: Sequence[Dict], weights: Sequence[float], lam: float = 4.0,

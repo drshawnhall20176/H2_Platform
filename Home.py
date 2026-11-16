@@ -351,9 +351,8 @@ if True:
     LEANS_CAP = 250                                             # Nov 14: soccer and every hoops league are in here
     st.markdown("##### 🏆 Game lines: tested picks and model leans")
     _w = [r for r in _wscope if _keep(r)]
-    if current in ("NFL", "UFC") and _scope != "All sports":
-        st.caption("Not covered yet for this sport: there's no stored game model for NFL (the college spread model "
-                   "showed no NFL edge), and UFC's chances come from the odds themselves. Choose All sports to see "
+    if current == "UFC" and _scope != "All sports":
+        st.caption("Not covered for this sport: UFC's chances come from the odds themselves. Choose All sports to see "
                    "the rest.")
     elif _w:
         # Nov 6 (revised): tested picks first (bet, backtested chance, price, value), then every other game's lean --
