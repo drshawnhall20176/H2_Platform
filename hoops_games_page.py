@@ -52,6 +52,16 @@ def _tag(league, p):
     return IP.hoops_use(league, p) if hasattr(IP, "hoops_use") else {"use": p.get("use") or "—", "lock": p.get("lock")}
 
 
+def _why(league, p, recs):
+    """Nov 16: a row the model passes on says what THIS game's gap is and how gaps that size have done (it used to be
+    the same backtest sentence on every row); a real pick keeps its own reason."""
+    t = _tag(league, p)
+    if t.get("use") != PE.USE_PASS or p.get("edge") is None:
+        return t.get("why", "")
+    import pick_records as PR
+    return PR.spread_why(league, p, recs, p.get("cover_est"))
+
+
 def _use(p, league=""):
     return IP.tag_label(_tag(league, p)) if hasattr(IP, "tag_label") else (p.get("use") or "—")
 
@@ -170,6 +180,22 @@ def render(league: str, search: bool = False) -> None:
         if st.toggle("Only games with a tracking pick", key=f"hg_only_{league}"):
             upcoming = [p for p in upcoming if _pick(p) != "—"]
             finished = [p for p in finished if _pick(p) != "—"]
+    # Nov 16: how the model's spread leans have actually done by size of gap (last 30 days) -- the evidence behind
+    # each row's Why, and the reason a page of passes isn't 22 copies of one sentence
+    import pick_records as PR
+    try:
+        lean_recs = PR.lean_records(league, recs=picks)
+    except Exception:                                           # noqa: BLE001
+        lean_recs = {}
+    if not any(rules.get(k) is not None for k in ("spread", "total", "ml")):
+        st.info(f"**Why every {title} game line says Pass.** No game-line rule for this league has beaten the books "
+                "in testing, so the model is a second opinion here, not a pick. Each row's Why shows how far the "
+                "model is from the book in that game and how gaps of that size have done lately. The tested picks "
+                "are in the player props.")
+    with st.expander("How the model's spread leans have done by size of gap (last 30 days)"):
+        st.table(pd.DataFrame([{**r, "Hit rate": "—" if r["Hit rate"] is None else f"{r['Hit rate']:.0%}"}
+                               for r in PR.band_table(league, lean_recs)]).set_index("Gap size"))
+        st.caption("A −110 spread needs 52.4% to break even. Fewer than 20 graded games is too few to judge.")
     if upcoming:
         upcoming = _show_filter(f"hg_use_{league}", upcoming, league)
     st.markdown(f"##### Upcoming ({len(upcoming)})")
@@ -185,7 +211,7 @@ def render(league: str, search: bool = False) -> None:
             "Game": f"{p['away']} @ {p['home']}",
             "Use": _use(p, league),
             "Model likes": _likes(p),
-            "Why": _tag(league, p).get("why", ""),
+            "Why": _why(league, p, lean_recs),
             "Line": f"{p['home']} {p['home_spread']:+g}",
             "Gap (pts)": f"{abs(p['edge']):.1f}",
             "Est. cover": "—" if p.get("cover_est") is None else f"{p['cover_est']:.0%}",
