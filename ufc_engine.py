@@ -97,6 +97,11 @@ def _get(path: str, params: Dict) -> Tuple[Any, Dict]:
     posted yet for this event," which look identical from the UI otherwise."""
     try:
         r = requests.get(f"{_BASE}/{path}", params=params, timeout=_TIMEOUT)
+        try:                                                    # Nov 16: Odds API credit meter
+            import odds_meter
+            odds_meter.record(f"{_BASE}/{path}", r.headers)
+        except Exception:                                       # noqa: BLE001
+            pass
     except requests.RequestException as e:
         raise OddsAPIError(f"network error: {e}") from e
     if r.status_code == 401:
