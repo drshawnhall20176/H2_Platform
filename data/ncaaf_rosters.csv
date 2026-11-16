@@ -330,7 +330,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 4685429,Melvin,Jordan IV,Melvin Jordan IV,Georgia Tech,LB,1,0.0,71.0,220.0
 4685434,Sterling,Lane II,Sterling Lane II,Boise State,LB,1,13.0,75.0,238.0
 4685435,Justyn,Martin,Justyn Martin,Ohio State,QB,1,16.0,76.0,228.0
-4685436,Antonio,Martin,Antonio Martin,Middle Tennessee,RB,1,8.0,70.0,232.0
+4685436,Antonio,Martin Jr.,Antonio Martin Jr.,Middle Tennessee,RB,1,8.0,70.0,232.0
 4685437,Earl,Little Jr.,Earl Little Jr.,Ohio State,S,1,1.0,72.0,203.0
 4685445,Rayshon,Luke,Rayshon Luke,Fresno State,RB,1,2.0,70.0,180.0
 4685447,Daniel,Lyons,Daniel Lyons,Florida State,DL,1,5.0,76.0,292.0
@@ -9523,7 +9523,7 @@ id,first_name,last_name,name,team,position,year,jersey,height,weight
 5220666,Derrick,Jameson,Derrick Jameson,UL Monroe,RB,1,3.0,72.0,215.0
 5220668,Tre,Kofe,Tre Kofe,Utah State,RB,1,20.0,69.0,220.0
 5220670,Malik,McConico,Malik McConico,Arkansas State,S,1,21.0,74.0,187.0
-5220671,Herschel,Turner,Herschel Turner,Nevada,RB,1,1.0,69.0,196.0
+5220671,Herschel,Turner Jr.,Herschel Turner Jr.,Nevada,RB,1,1.0,69.0,196.0
 5220679,Rodge,Waldrop,Rodge Waldrop,Troy,QB,1,11.0,77.0,216.0
 5220688,Tylan,Smith,Tylan Smith,Georgia State,CB,1,42.0,70.0,190.0
 5220691,Donovan,Funsch,Donovan Funsch,Georgia State,OT,1,52.0,78.0,320.0
