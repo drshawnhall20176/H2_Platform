@@ -61,14 +61,35 @@ def _commercial() -> bool:
         return False
 
 
-def _previews(league, upcoming, lean_recs, no_rule):
-    """Nov 16: the customer's upcoming games -- previews with each lean's recent form, not a table of ⛔ Pass."""
+def _rules_text(rules) -> str:
+    what = []
+    if rules.get("spread") is not None:
+        what.append(f"a spread pick needs the model {rules['spread']:g}+ points off the line")
+    if rules.get("total") is not None:
+        what.append(f"a total pick needs the model {rules['total']:g}+ points off")
+    if rules.get("ml") is not None:
+        what.append(f"a moneyline pick needs a {rules['ml']:.0%}+ edge")
+    return (("; ".join(what)).capitalize() if what else "No tested rule for this league: the model is a second opinion") + "."
+
+
+def _previews(league, upcoming, lean_recs, no_rule, day, cust, rules=None):
+    """Nov 16: upcoming games as previews with each lean's recent form -- the standard on every build (it started as
+    the customer view; the owner made it the standard the same day). The owner and Discord builds keep the Use
+    column, and the owner ticks rows to log exactly as before."""
     import game_previews as GP
     if no_rule:
         st.info(GP.NOTE)
     by_gap = st.toggle("Biggest disagreements first", value=False, key=f"hg_bygap_{league}",
                        help="Off: earliest games first. On: the games where the model is furthest from the book.")
-    rows = GP.preview_rows(league, C.by_kickoff(upcoming), lean_recs, _tip, lambda p: _tag(league, p))
+    ordered = C.by_kickoff(upcoming)
+    rows = GP.preview_rows(
+        league, ordered, lean_recs, _tip, lambda p: _tag(league, p),
+        use=None if cust else (lambda p: _use(p, league)),
+        extras=None if cust else (lambda p: {
+            "Long backtest": "—" if p.get("cover_est") is None else f"{p['cover_est']:.0%}",
+            "Win chance: model / market": ("—" if p.get("model_p") is None else f"{p['model_p']:.0%}") + " / "
+                                          + ("—" if p.get("fair_home") is None else f"{p['fair_home']:.0%}"),
+            "Tracking pick": _pick(p), "Why": _why(league, p, lean_recs)}))
     top = GP.spotlight(rows)
     if top:
         st.markdown("**Worth a look first**")
@@ -77,10 +98,24 @@ def _previews(league, upcoming, lean_recs, no_rule):
                         f"points from the book. Leans of this size: {r['Form (30 days)']}.")
     if by_gap:
         rows = sorted(rows, key=lambda r: -(r["Gap (pts)"] or 0))
-    st.dataframe(pd.DataFrame(GP.public(rows)), hide_index=True, width="stretch")
+    df = pd.DataFrame(GP.public(rows))
+    if cust:
+        st.dataframe(df, hide_index=True, width="stretch")
+    else:
+        bet_kind = st.radio("☑️ Tick games to log the model's side of", list(TICK_KINDS), horizontal=True,
+                            key=f"hg_tick_kind_{league}")
+        ticked = LU.selectable(df, key=f"hg_tick_{league}", hide_index=True, width="stretch")
+        shown = [ordered[r["_i"]] for r in rows]                # the games in the order the table lists them
+        items = [it for it in (tick_item(shown[i], bet_kind) for i in ticked if 0 <= i < len(shown)) if it]
+        LU.panel(items, key=f"hg_panel_{league}", date_str=str(day), tag=f"{league.lower()}-games",
+                 past=day < _today_et())
     st.caption(f"Form: {GP.HOT} = leans of that size won 55%+ of 20 or more graded games in the last 30 days; "
                f"{GP.EVEN} = about break-even; {GP.COLD} = losing; {GP.NEW} = fewer than 20 games. A −110 spread needs "
-               "52.4% to break even. Model line = the spread the model would set; Gap = how far that is from the book.")
+               "52.4% to break even. Model line = the spread the model would set; Gap = how far that is from the book."
+               + ("" if cust else " Long backtest = how often the model's side covered in the long-run test. "
+                  + USE_LEGEND + " " + _rules_text(rules or {})))
+    if not cust:
+        log_panel(league, upcoming)                             # Nov 12: right under the games, not below the finals
 
 
 def _why(league, p, recs):
@@ -223,11 +258,6 @@ def render(league: str, search: bool = False) -> None:
         lean_recs = {}
     cust = _commercial()
     no_rule = not any(rules.get(k) is not None for k in ("spread", "total", "ml"))
-    if no_rule and not cust:
-        st.info(f"**Why every {title} game line says Pass.** No game-line rule for this league has beaten the books "
-                "in testing, so the model is a second opinion here, not a pick. Each row's Why shows how far the "
-                "model is from the book in that game and how gaps of that size have done lately. The tested picks "
-                "are in the player props.")
     with st.expander("How the model's spread leans have done by size of gap (last 30 days)"):
         st.table(pd.DataFrame([{**r, "Hit rate": "—" if r["Hit rate"] is None else f"{r['Hit rate']:.0%}"}
                                for r in PR.band_table(league, lean_recs)]).set_index("Gap size"))
@@ -235,43 +265,11 @@ def render(league: str, search: bool = False) -> None:
     if upcoming and not cust:
         upcoming = _show_filter(f"hg_use_{league}", upcoming, league)
     st.markdown(f"##### Upcoming ({len(upcoming)})")
-    if upcoming and cust:
-        _previews(league, upcoming, lean_recs, no_rule)
-    elif not upcoming:
+    if upcoming:
+        _previews(league, upcoming, lean_recs, no_rule, day, cust, rules)
+    else:
         st.info(f"No upcoming {title} games for {day:%a %b %d}" + (f" ({slot})" if slot != "All slate" else "")
                 + ". The capture runs every 3 hours; games appear once the books post lines.")
-    else:
-        ordered = C.by_kickoff(upcoming)
-        bet_kind = st.radio("☑️ Tick games to log the model's side of", list(TICK_KINDS), horizontal=True,
-                            key=f"hg_tick_kind_{league}")
-        ticked = LU.selectable(pd.DataFrame([{
-            "Tip (ET)": _tip(p),
-            "Game": f"{p['away']} @ {p['home']}",
-            "Use": _use(p, league),
-            "Model likes": _likes(p),
-            "Why": _why(league, p, lean_recs),
-            "Line": f"{p['home']} {p['home_spread']:+g}",
-            "Gap (pts)": f"{abs(p['edge']):.1f}",
-            "Est. cover": "—" if p.get("cover_est") is None else f"{p['cover_est']:.0%}",
-            "Total: model / line": f"{p.get('model_total')} / {p.get('line_total') or '—'}",
-            "Win chance: model / market": f"{p['model_p']:.0%} / " + ("—" if p.get("fair_home") is None else f"{p['fair_home']:.0%}"),
-            "Tracking pick": _pick(p)} for p in ordered]),          # Nov 7: earliest tip first
-            key=f"hg_tick_{league}", hide_index=True, width="stretch")
-        items = [it for it in (tick_item(ordered[i], bet_kind) for i in ticked if 0 <= i < len(ordered)) if it]
-        LU.panel(items, key=f"hg_panel_{league}", date_str=str(day), tag=f"{league.lower()}-games",
-                 past=day < _today_et())
-        what = []
-        if rules.get("spread") is not None:
-            what.append(f"a spread pick needs the model {rules['spread']:g}+ points off the line")
-        if rules.get("total") is not None:
-            what.append(f"a total pick needs the model {rules['total']:g}+ points off")
-        if rules.get("ml") is not None:
-            what.append(f"a moneyline pick needs a {rules['ml']:.0%}+ edge")
-        st.caption("Model likes = the side the model would take against the spread, at the book's number; Gap = how many "
-                   "points the model's margin is from the spread (the size, not the sign, is what matters); Est. cover = "
-                   "how often that size of gap covered in the backtest. " + USE_LEGEND + " "
-                   + ("; ".join(what) if what else "no picks for this league — the model is shown for reference") + ".")
-        log_panel(league, upcoming)                             # Nov 12: right under the games, not below the finals
     if finished:
         st.markdown(f"##### Started or final ({len(finished)})")
         st.dataframe(pd.DataFrame([{
