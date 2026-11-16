@@ -12,7 +12,7 @@ for d in ("2026-11-08", "2026-11-09", "2026-11-15", "2026-11-16"):
     snaps = [s for s in MS.load_snapshots("NFL", [d]) if str(s.get("market")).lower() == "anytime td"]
     latest = {}
     for s in snaps:
-        if str(s.get("ts")) > str(latest.get(s.get("player"), {}).get("ts")):
+        if s.get("player") not in latest or str(s.get("ts")) > str(latest[s.get("player")].get("ts")):
             latest[s.get("player")] = s
     q = []
     for s in latest.values():
