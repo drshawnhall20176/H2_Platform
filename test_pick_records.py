@@ -46,3 +46,32 @@ def test_your_picks_bands():
     assert out[("Parlay leg", "Against the model (<50%)")]["P/L"] is None
     assert out[("Parlay", "All")]["P/L"] == 30
     assert len(out) == 4
+
+
+# ------------------------------------------------------------------ Nov 16: a Why that differs game to game
+def _g(edge, home_spread=-5.0):
+    return {"model_margin": -home_spread + edge, "home_spread": home_spread, "edge": edge, "home": "H", "away": "A"}
+
+
+def test_spread_why_says_this_games_gap_and_how_that_size_has_done():
+    recs = {"Spread": (30, 60), ("Spread", 0): (10, 22), ("Spread", 2): (14, 23)}
+    close = PR.spread_why("NCAAMB", _g(1.1), recs, 0.508)
+    mid = PR.spread_why("NCAAMB", _g(3.9), recs, 0.508)
+    big = PR.spread_why("NCAAMB", _g(-19.1), recs, 0.508)
+    assert len({close, mid, big}) == 3                                        # no longer one sentence on every row
+    assert close.startswith("Close to the book (1.1 pts) · 0–3 pt gaps, last 30 days: 10–12 (45%")
+    assert "losing" in close and close.endswith("long backtest 51%")
+    assert mid == "Moderate gap (3.9 pts) · 3–6 pt gaps: none graded in the last 30 days · long backtest 51%"
+    assert big.startswith("Big gap (19.1 pts) · 6+ pt gaps, last 30 days: 14–9 (61%")
+    assert PR.spread_why("NBA", _g(7.0), {}, None) == "Big gap (7.0 pts) · 6+ pt gaps: none graded in the last 30 days"
+    assert PR.spread_why("NCAAMB", {"edge": None}, recs, 0.508) == "long backtest: the model's side covered 51%"
+    assert PR.spread_why("NBA", {}, None, None) == "no tested edge in this league"
+
+
+def test_band_table_lists_every_gap_size_with_its_record():
+    rows = PR.band_table("NCAAMB", {("Spread", 0): (10, 22), ("Spread", 2): (3, 5)})
+    assert [r["Gap size"] for r in rows] == ["Close to the book: 0–3 pt gap", "Moderate gap: 3–6 pt gap",
+                                             "Big gap: 6+ pt gap"]
+    assert [(r["Record"], r["Graded"], r["Read"]) for r in rows] == [
+        ("10–12", 22, "Losing"), ("—", 0, "No games yet"), ("3–2", 5, "Too few to judge")]
+    assert rows[0]["Hit rate"] == 0.455 and rows[1]["Hit rate"] is None
