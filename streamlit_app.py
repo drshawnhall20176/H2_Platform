@@ -88,11 +88,23 @@ def run():
     audience = st.secrets.get("AUDIENCE", "owner")
     if audience == "public":
         st.sidebar.caption("🌐 Public build — some tools are owner-only")
+    # Nov 16: the commercial (customer) sidebar -- nav_layout.py. A deployment with AUDIENCE = "commercial" gets it;
+    # the owner can preview the layout here. The public Discord build is unchanged.
+    import nav_layout as NL
+    import players_hub as PH
+    if audience == "owner":
+        st.sidebar.toggle("👀 Preview the commercial layout", key=NL.PREVIEW_KEY,
+                          help="Shows what a paying customer would see: a Today front page, four sections, owner tools hidden. "
+                               "Layout only: pages still show your own log boxes while you preview.")
+    commercial = NL.is_commercial(audience, st.session_state.get(NL.PREVIEW_KEY))
+    if commercial and audience == "owner":
+        st.sidebar.caption("👀 Previewing the commercial layout")
     # Nov 10: both builds run this same code, so if their numbers differ it's their settings. Everything the model
     # has learned (the record, calibration, tunings, cold markets) lives in the shared database -- a build that isn't
     # connected to it shows unlearned numbers.
     try:
-        st.sidebar.caption(connection_status())
+        if audience != "commercial":                            # Nov 16: an internal note, not for a paying customer
+            st.sidebar.caption(connection_status())
     except Exception:                                           # noqa: BLE001
         pass
 
@@ -259,6 +271,9 @@ def run():
         "49": ("Model Performance", "📊", "model_performance"),   # Investor Relations: the edge evidence (Nov 6)
         "50": ("Game Script", "🎬", "game_script"),
         "51": ("My Coach", "🧑‍🏫", "my_coach"),
+        "57": ("Today", "🏠", "today"),                  # the customer's front page (commercial layout only, Nov 16)
+        "58": ("Players", "👤", "players"),              # every player tool behind one switcher (commercial only, Nov 16)
+        "56": ("Model Record", "📊", "model_record"),    # the model's graded record, no Bet Log: the public proof page (Nov 16)
         "54": ("Live Games", "🔴", "live_games"),        # in-game win chance / projected final / fair live lines (Nov 12)
         "53": ("Long Shots", "💎", "long_shots"),        # alternate-line value vs the model's honest chance (Nov 10)          # simple tables from your own bets: what works, what to stop (Nov 8)     # props under each kind of game + script tickets, every props sport (Nov 7)
     }
@@ -284,15 +299,15 @@ def run():
     # Python string, no dependency on internals that could silently stop working -- is the lever
     # used here instead.
     SECTION_OF = {}
-    for k in ("0", "28"):
+    for k in ("0", "28", "57"):
         SECTION_OF[k] = "🏠 START HERE"
     for k in ("1", "2", "3", "4", "37", "23", "24", "39", "50", "53"):
         SECTION_OF[k] = "🎯 RECOMMENDATIONS"
     for k in ("5", "6", "54"):
         SECTION_OF[k] = "🛰️ LIVE SIGNALS"
-    for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26", "27", "29", "30", "31", "32", "33", "34", "35", "36", "43", "44", "45", "46", "47", "55", "38"):
+    for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26", "27", "29", "30", "31", "32", "33", "34", "35", "36", "43", "44", "45", "46", "47", "55", "58", "38"):
         SECTION_OF[k] = "🔬 DEEP RESEARCH"
-    for k in ("16", "17", "18", "19", "40", "41", "42", "48", "51"):
+    for k in ("16", "17", "18", "19", "40", "41", "42", "48", "51", "56"):
         SECTION_OF[k] = "🔍 SELF-GRADING & PROOF"
     for k in ("20", "21", "22"):
         SECTION_OF[k] = "📣 OPS & CONTENT"
@@ -317,7 +332,7 @@ def run():
     lab = active_sport in sports.LAB_SPORTS
     for f in view_files:
         key = lead(f.name)
-        if lab and key not in (sports.LAB_PAGES[active_sport],) + sports.LAB_COMMON_PAGES:
+        if lab and key not in (sports.LAB_PAGES[active_sport],) + sports.LAB_COMMON_PAGES + (("56", "57") if commercial else ()):
             continue  # Tennis / Intl Hoops: their own lab page, the Bet Log and the Progression Plan only
         required_sports = sport_only_leads.get(key)
         if required_sports and active_sport not in required_sports:
@@ -327,17 +342,28 @@ def run():
             continue  # Best Bets / Graded Picks / Edge Board / Retrospective / etc: every one of
                       # these is a guaranteed dead end for an outcome-based sport like UFC -- see
                       # projections_only_titles' own comment above for the real, reported gap this closes
-        if title in owner_only_titles and audience != "owner":
+        if title in owner_only_titles and (audience != "owner" or commercial):
             continue  # Bet Log / Media Room / Podcast Studio / Edge Board / Matchup Lab / Track Record: owner deployment only
-        section = SECTION_OF.get(key, "🔬 DEEP RESEARCH")   # a real, sensible default for any
+        if title in NL.COMMERCIAL_ONLY and not commercial:
+            continue  # Today / Players are the customer's pages; the owner and Discord sidebars keep their own
+        if key == "58" and active_sport not in PH.SPORTS:
+            continue  # Players: only sports that have player views
+        if title == "Model Record" and audience == "public":
+            continue  # Nov 16: the Discord build stays exactly as it was until the owner switches it over
+        if commercial and NL.commercial_section(title) is None:
+            continue  # not part of the customer product (Command Center, Retrospective ...)
+        section = NL.commercial_section(title) if commercial else SECTION_OF.get(key, "🔬 DEEP RESEARCH")   # a real, sensible default for any
         # future page whose number isn't added to SECTION_OF yet -- never silently disappears,
         # never crashes, just lands somewhere reasonable until explicitly categorized.
-        sections.setdefault(section, []).append(st.Page(str(f), title=title, icon=icon, url_path=slug))
+        sections.setdefault(section, []).append(st.Page(str(f), title=NL.label(title) if commercial else title,
+                                                        icon=icon, url_path=slug))
 
     # Bold/colored sidebar section-header styling was attempted here and confirmed (via a real
     # screenshot, pixel-sampled) to be inert against this Streamlit version's actual DOM -- see
     # the "CSS risk" section of the project handoff. Removed rather than left as dead code.
     # UPPERCASE section names remain the confirmed, real, working lever for visual separation.
+    if commercial:
+        sections = NL.arrange(sections)      # customer order; Today replaces Home
     st.navigation(sections).run()
 
 

@@ -21,7 +21,7 @@ KEY = "todays_best:{sport}:{date}"
 TOP_PER_SPORT = 40
 PLAYABLE = (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE)
 RANK = {PE.USE_BOTH: 1, PE.USE_PARLAY: 2, PE.USE_SINGLE: 3}
-GAME_LEAGUES = ("NCAAMB", "NBA", "NHL")          # Game Labs (game_picks rows tagged by intl_picks.hoops_use)
+GAME_LEAGUES = ("NCAAMB", "NBA", "NHL", "NFL")          # Game Labs (game_picks rows tagged by intl_picks.hoops_use)
 
 
 def _et_date(iso) -> Optional[str]:
@@ -244,7 +244,7 @@ def collect(date_str: str, props_sports, past: bool = False) -> Dict:
 # "Most likely" is not "good bet": a -400 favorite usually wins and usually isn't worth -400. The value column and
 # the Use tag (where the sport has a tested rule) say which is which; the record line says how often the model's
 # favorite has actually won.
-WINNER_LEAGUES = ("NCAAMB", "NBA", "NHL", "NCAAF", "TENNIS")
+WINNER_LEAGUES = ("NCAAMB", "NBA", "NHL", "NCAAF", "TENNIS", "NFL")
 NCAAF_MARGIN_SD = 15.5          # college football: final margin around the projection (ncaaf_projections)
 
 
@@ -272,8 +272,8 @@ def _dec(a) -> Optional[float]:
 # (cover_est: NCAAMB and the international spread models) it is used as is and the bet is "tested"; otherwise the
 # chance comes from the projected score with the spread of outcomes below, pulled halfway to 50% (UNTESTED_SHRINK)
 # because nothing has checked it yet -- and labeled untested.
-MARGIN_SD = {"NCAAMB": 11.0, "NBA": 12.5, "NHL": 2.3, "NCAAF": 15.5, "INTL": 11.0}
-TOTAL_SD = {"NCAAMB": 17.0, "NBA": 18.0, "NHL": 2.3, "NCAAF": 16.0, "INTL": 16.0}
+MARGIN_SD = {"NCAAMB": 11.0, "NBA": 12.5, "NHL": 2.3, "NCAAF": 15.5, "INTL": 11.0, "NFL": 13.0}
+TOTAL_SD = {"NCAAMB": 17.0, "NBA": 18.0, "NHL": 2.3, "NCAAF": 16.0, "INTL": 16.0, "NFL": 13.5}
 UNTESTED_SHRINK = 0.5
 UNTESTED_MAX = 0.60             # a big untested disagreement is more often the model's error than the market's
 STD_PRICE = -110

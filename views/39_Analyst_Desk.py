@@ -361,6 +361,18 @@ _COLS_CFG = {"Model": st.column_config.NumberColumn(format="percent"),
 
 # --- The Desk ----------------------------------------------------------------
 with tab_desk:
+    # Nov 16: the day at a glance and the desk's graded record beside it, before the write-up
+    _all_rec = next((r for r in board if r.get("angle") == "ALL"), None) or {}
+    _tiles = [{"icon": "🎯", "value": str(len(sug_calls)), "label": "Calls on today's slate"},
+              {"icon": "💎", "value": str(sum(1 for c in sug_calls if c.get("gem"))),
+               "label": "Hidden gems (2+ angles agree)"}]
+    if _all_rec.get("n"):
+        _tiles.append({"icon": "🧾", "value": f"{_all_rec['hit_rate']:.0%}",
+                       "label": f"Graded record: {_all_rec['n']} calls"
+                                + ("" if _all_rec.get("mean_prob") is None else f" (model said {_all_rec['mean_prob']:.0%})")})
+    else:
+        _tiles.append({"icon": "🧾", "value": "—", "label": "Graded record: none graded yet"})
+    C.kpi_row(_tiles)
     ai_key = _secret("ANTHROPIC_API_KEY")
     use_ai = False
     if sug_calls and is_owner:

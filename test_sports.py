@@ -600,7 +600,7 @@ def test_sidebar_sections_match_the_documented_grouping():
                     # split segment -- not a real key, just filter it out
                 actual[k] = section
     expected = {
-        "0": "🏠 START HERE", "28": "🏠 START HERE",
+        "0": "🏠 START HERE", "28": "🏠 START HERE", "57": "🏠 START HERE",
         "1": "🎯 RECOMMENDATIONS", "2": "🎯 RECOMMENDATIONS", "3": "🎯 RECOMMENDATIONS",
         "4": "🎯 RECOMMENDATIONS", "37": "🎯 RECOMMENDATIONS", "23": "🎯 RECOMMENDATIONS",
         "24": "🎯 RECOMMENDATIONS", "39": "🎯 RECOMMENDATIONS",
@@ -613,10 +613,10 @@ def test_sidebar_sections_match_the_documented_grouping():
         "32": "🔬 DEEP RESEARCH", "33": "🔬 DEEP RESEARCH", "34": "🔬 DEEP RESEARCH",
         "35": "🔬 DEEP RESEARCH", "36": "🔬 DEEP RESEARCH", "38": "🔬 DEEP RESEARCH",
         "43": "🔬 DEEP RESEARCH", "44": "🔬 DEEP RESEARCH", "45": "🔬 DEEP RESEARCH",
-        "46": "🔬 DEEP RESEARCH", "47": "🔬 DEEP RESEARCH", "55": "🔬 DEEP RESEARCH",
+        "46": "🔬 DEEP RESEARCH", "47": "🔬 DEEP RESEARCH", "55": "🔬 DEEP RESEARCH", "58": "🔬 DEEP RESEARCH",
         "16": "🔍 SELF-GRADING & PROOF", "17": "🔍 SELF-GRADING & PROOF",
         "18": "🔍 SELF-GRADING & PROOF", "19": "🔍 SELF-GRADING & PROOF", "40": "🔍 SELF-GRADING & PROOF",
-        "41": "🔍 SELF-GRADING & PROOF", "42": "🔍 SELF-GRADING & PROOF", "48": "🔍 SELF-GRADING & PROOF", "51": "🔍 SELF-GRADING & PROOF", "49": "💼 INVESTOR RELATIONS", "50": "🎯 RECOMMENDATIONS", "53": "🎯 RECOMMENDATIONS", "54": "🛰️ LIVE SIGNALS",
+        "41": "🔍 SELF-GRADING & PROOF", "42": "🔍 SELF-GRADING & PROOF", "48": "🔍 SELF-GRADING & PROOF", "51": "🔍 SELF-GRADING & PROOF", "56": "🔍 SELF-GRADING & PROOF", "49": "💼 INVESTOR RELATIONS", "50": "🎯 RECOMMENDATIONS", "53": "🎯 RECOMMENDATIONS", "54": "🛰️ LIVE SIGNALS",
         "20": "📣 OPS & CONTENT", "21": "📣 OPS & CONTENT", "22": "📣 OPS & CONTENT",
     }
     assert actual == expected, f"section grouping drifted from expected: {actual}"

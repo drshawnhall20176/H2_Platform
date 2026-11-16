@@ -129,6 +129,29 @@ def scan(sport: str, day: str, api_key: str, book: str = "draftkings", now: Opti
     return {"at": now.isoformat(), "rows": found[:200], "top": pick_top(found), "games": games}
 
 
+TESTED_NOTE = "✅ Tested market: positive in testing so far (promising, not proven)"
+UNTESTED_NOTE = "Other market: these lost overall in testing"
+
+
+def lead_cards(saved: Optional[Dict], n: int = TOP_N) -> List[Dict]:
+    """Nov 16: the Long Shots page's lead -- the day's scan as cards, tested markets first, then the most probable.
+    Each: {pick, price, chance, book, ev, game, time, tested, note}. Empty when there is no scan yet."""
+    top = list((saved or {}).get("top") or [])
+    top.sort(key=lambda r: (not r.get("tested"), -(r.get("Honest chance") or 0)))
+    return [{"pick": r.get("pick") or f"{r.get('Player')} {r.get('Bet')}", "price": r.get("Price"),
+             "chance": r.get("Honest chance"), "book": r.get("Book says"), "ev": r.get("EV per $1"),
+             "game": r.get("game") or "", "time": r.get("time") or "", "tested": bool(r.get("tested")),
+             "note": TESTED_NOTE if r.get("tested") else UNTESTED_NOTE} for r in top[:n]]
+
+
+def all_rows(saved: Optional[Dict]) -> List[Dict]:
+    """Every value long shot in the day's scan as table rows, tested markets first, then the most probable."""
+    rows = sorted((saved or {}).get("rows") or [], key=lambda r: (not r.get("tested"), -(r.get("Honest chance") or 0)))
+    return [{"Time": r.get("time") or "", "Game": r.get("game") or "", "Pick": r.get("pick"), "Price": r.get("Price"),
+             "Honest chance": r.get("Honest chance"), "Book says": r.get("Book says"), "EV per $1": r.get("EV per $1"),
+             "Market": ("✅ " if r.get("tested") else "") + str(r.get("Market") or "")} for r in rows]
+
+
 def load(sport: str, day: str, get=None) -> Optional[Dict]:
     try:
         import model_store as MS

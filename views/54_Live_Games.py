@@ -318,19 +318,28 @@ def board():
     live = [g for g in gs if g["state"] == "in"]
     later = [g for g in gs if g["state"] == "pre"]
     done = [g for g in gs if g["state"] == "post"]
-    st.caption(f"Updated {datetime.now(_ET):%-I:%M:%S %p} ET · {len(live)} live · {len(later)} later · {len(done)} final")
-    if not live:
-        st.info("No games in progress right now." + (f" Next: {C.by_kickoff(later)[0]['away']} @ "
-                                                     f"{C.by_kickoff(later)[0]['home']}." if later else ""))
     import intl_picks as IP
     import intl_hoops as I
+    import live_lead as LL
     football = league in ("NFL", "NCAAF")
-    for g in C.by_kickoff(live):
+
+    def _pre(g):
         # Nov 12: football uses the books' pre-game line (it beat our football models on past games); everything else
         # uses the Game Lab's projection, or the books' line when the Game Lab has none
         pre = None if football else LG.pregame_for(g, picks)
-        if pre is None:
-            pre = _books_pregame(league, g.get("event_id"))
+        return pre if pre is not None else _books_pregame(league, g.get("event_id"))
+
+    def _start_home(g, pre):
+        try:
+            return LM.project(g["league"], float(pre["model_margin"]), float(pre["model_total"]), 0, 0, 1,
+                              LM.cfg(g["league"])["minutes"])["win_home"]
+        except Exception:                                       # noqa: BLE001
+            return None
+
+    # Nov 16: read every live game first, then lead with a summary and the closest game (it was start order)
+    reads = []
+    for g in C.by_kickoff(live):
+        pre = _pre(g)
         mk = None
         if evs:
             ev = I.match_event(evs, g["home"], g["away"])
@@ -339,23 +348,35 @@ def board():
                 if not I.same_team(ev.get("home_team"), g["home"]):  # the feed lists the teams the other way round
                     mk = None
         r = LG.read_game(g, pre, mk)
+        wh = r["read"]["win_home"] if r else None
+        reads.append({"g": g, "pre": pre, "r": r, "win_home": wh, "start_home": _start_home(g, pre) if r else None,
+                      "label": f"{g['away']} @ {g['home']}", "home": g["home"], "away": g["away"],
+                      "leader": None if wh is None else (g["home"] if wh >= 0.5 else g["away"])})
+    st.caption(f"Updated {datetime.now(_ET):%-I:%M:%S %p} ET")
+    C.kpi_row(LL.summary(reads, len(later), len(done)))
+    if not live:
+        st.info("No games in progress right now." + (" What's next is below." if later else ""))
+    ordered = LL.order_live(reads)
+    for n_card, it in enumerate(ordered):
+        g, pre, r = it["g"], it["pre"], it["r"]
         with st.container(border=True):
             top = st.columns([3, 2])
             poss = ""
             if g.get("possession"):
                 poss = f" · 🏈 {g['home'] if g['possession'] == 'home' else g['away']} ball" + \
                     (f", {g['down_text']}" if g.get("down_text") else "")
-            top[0].markdown(f"**{g['away']} {g['away_score']:.0f} @ {g['home']} {g['home_score']:.0f}** · "
+            _tag = ("⚖️ Closest game · " if n_card == 0 and len(ordered) > 1 and it["win_home"] is not None
+                    and LL.lead_chance(it["win_home"]) < LL.CLOSE else "")
+            top[0].markdown(f"{_tag}**{g['away']} {g['away_score']:.0f} @ {g['home']} {g['home_score']:.0f}** · "
                             f"{LG.clock_text(g)}{poss}")
             if not r:
                 top[1].caption("No pre-game projection or line for this game, so no live read.")
                 continue
             rd = r["read"]
             fav, p = (g["home"], rd["win_home"]) if rd["win_home"] >= 0.5 else (g["away"], 1 - rd["win_home"])
-            start_home = LM.project(g["league"], float(pre["model_margin"]), float(pre["model_total"]), 0, 0, 1,
-                                    LM.cfg(g["league"])["minutes"])["win_home"]
-            top[1].markdown(f"**{fav}** wins **{p:.0%}** " + _arrow_md(
-                p, start_home if fav == g["home"] else 1 - start_home, "tip-off / kickoff"), unsafe_allow_html=True)
+            start_home = it["start_home"]
+            top[1].markdown(f"**{fav}** wins **{p:.0%}** " + ("" if start_home is None else _arrow_md(
+                p, start_home if fav == g["home"] else 1 - start_home, "tip-off / kickoff")), unsafe_allow_html=True)
             fh = (rd["total"] + rd["margin"]) / 2
             fa = (rd["total"] - rd["margin"]) / 2
             st.caption(f"Projected final: {g['away']} {fa:.0f} – {g['home']} {fh:.0f} · fair live spread "
@@ -373,9 +394,13 @@ def board():
                 with st.expander("📋 Live box score"):
                     _box_panel(g)
     if later:
-        with st.expander(f"Later today ({len(later)})", expanded=not live):
-            st.dataframe(pd.DataFrame([{"Start": g["detail"] or g["kickoff"], "Game": f"{g['away']} @ {g['home']}"}
-                                       for g in C.by_kickoff(later)]), hide_index=True, width="stretch")
+        with st.expander(f"Next up ({len(later)} still to start)", expanded=not live):
+            st.dataframe(pd.DataFrame(LL.next_up(
+                C.by_kickoff(later), _pre, _start_home, lambda g: C._kick_dt(g.get("kickoff")), datetime.now(_ET))),
+                hide_index=True, width="stretch")
+            st.caption("Pre-game favourite and projected score (away–home) come from "
+                       + ("the books' line" if football else "the Game Lab's projection")
+                       + f", for the next {LL.NEXT_N} games. — = no pre-game read yet.")
     if done:
         def _pre_done(g):
             p = None if football else LG.pregame_for(g, picks)

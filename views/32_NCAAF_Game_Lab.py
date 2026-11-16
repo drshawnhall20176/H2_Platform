@@ -92,17 +92,54 @@ with st.expander("📐 Ratings model v2 — college spreads (tracking)", expande
         m3.metric("Upcoming games", len(_up))
         if _up:                                                 # Nov 7: Date / Time slot / Game, earliest first
             _up = C.date_slot_select(_up, key="ncaaf_v2")
+            _v2_teams = C.team_names(_up)
             _up = C.game_select(_up, key="ncaaf_v2_game")
+            _up = C.team_select(_up, key="ncaaf_v2_team", options=_v2_teams)     # Nov 16: Find a team, every Game Lab
         if _up:
-            _rows = [{"Kickoff (ET)": datetime.fromisoformat(p["kickoff"]).astimezone(pytz.timezone("US/Eastern")).strftime("%a %-I:%M %p"),
-                      "Game": f"{p['away']} @ {p['home']}" + (" (neutral)" if p.get("neutral") else ""),
-                      "Books": f"{p['home']} {-p['close_line']:+g}",
-                      "Model": f"{p['home']} {-p['model_margin']:+.1f}",
-                      "Gap": f"{abs(p.get('close_edge', p['edge'])):.1f}",
-                      "Pick": ("⚠️ held: " if p.get("held") else "") + (p.get("pick_label") or "—"),
-                      "News check": " · ".join(p.get("flags") or []) or "—"}
-                     for p in C.by_kickoff(_up)]
-            st.dataframe(pd.DataFrame(_rows), hide_index=True, width="stretch")
+            # Nov 16: the site standard -- previews with each lean's recent form (game_previews.py), not a bare table
+            import game_previews as GPV
+            import pick_records as PR
+            import todays_best as TB
+
+            def _norm(p):
+                line = p.get("close_line") if p.get("close_line") is not None else p.get("line")
+                q = dict(p, home_spread=None if line is None else -line, edge=p.get("close_edge", p.get("edge")))
+                if q.get("model_p") is None:
+                    try:
+                        q["model_p"] = TB._home_p(q, "NCAAF")
+                    except Exception:                                   # noqa: BLE001
+                        q["model_p"] = None
+                return q
+
+            try:
+                _recs = PR.lean_records("NCAAF", recs=_gp)
+            except Exception:                                           # noqa: BLE001
+                _recs = {}
+            _kick = lambda p: datetime.fromisoformat(p["kickoff"]).astimezone(pytz.timezone("US/Eastern")).strftime("%a %-I:%M %p")  # noqa: E731
+            _ord = C.by_kickoff(_up)
+            _prev = GPV.preview_rows(
+                "NCAAF", [_norm(p) for p in _ord], _recs, _kick,
+                use=lambda p: ("⚠️ held: " if p.get("held") else "") + (p.get("pick_label") or "—"),
+                extras=lambda p: {"News check": " · ".join(p.get("flags") or []) or "—"})
+            for r in _prev:
+                r["Tracking pick"] = r.pop("Use")                       # this page's picks are tracked, not Use tags
+                if _ord[r["_i"]].get("neutral"):
+                    r["Game"] += " (neutral)"
+            _top = GPV.spotlight(_prev)
+            if _top:
+                st.markdown("**Worth a look first**")
+                for r in _top:
+                    st.markdown(f"- **{r['Model leans']}** ({r['Game']}, {r['Tip (ET)']}): the model is "
+                                f"{r['Gap (pts)']:.1f} points from the book. Leans of this size: {r['Form (30 days)']}.")
+            if st.toggle("Biggest disagreements first", value=False, key="ncaaf_v2_bygap"):
+                _prev = sorted(_prev, key=lambda r: -(r["Gap (pts)"] or 0))
+            _cols = ["Tip (ET)", "Game", "Model leans", "Gap (pts)", "Form (30 days)", "Projected score",
+                     "Model's winner", "Book line", "Model line", "Total: model / book", "Tracking pick", "News check"]
+            st.dataframe(pd.DataFrame(_prev)[_cols].rename(columns={"Tip (ET)": "Kickoff (ET)"}), hide_index=True,
+                         width="stretch")
+            st.caption(f"Previews, not picks: form is how leans of that size have done over the last 30 days "
+                       f"({GPV.HOT} 55%+ of 20 or more games, {GPV.EVEN} about break-even, {GPV.COLD} losing, "
+                       f"{GPV.NEW} fewer than 20). Recent results, not a tested edge.")
         _h = GP.summary(_gp, held=True)
         if _h["graded"]:
             st.caption(f"Held picks (news flags, not in the record above): {_h['record']}.")

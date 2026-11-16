@@ -176,3 +176,14 @@ def test_the_parlay_pages_run_with_the_new_markets_in_the_pool(monkeypatch, page
     _patch_board(monkeypatch)
     at = _run(page)
     assert not at.exception
+
+
+def test_best_bets_opens_with_a_start_here_shortlist_above_the_full_board(monkeypatch):
+    # Nov 16: something to look at first, before eight filters and the whole board
+    _patch_board(monkeypatch)
+    at = _run("1_#U2b50_Best_Bets.py")
+    assert not at.exception, [e.value for e in at.exception]
+    text = " ".join(m.value for m in at.markdown)
+    assert "Start here" in text and "The full board" in text
+    assert text.index("Start here") < text.index("The full board")
+    assert any("pick types that have been losing are left out" in c.value for c in at.caption)

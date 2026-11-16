@@ -48,11 +48,6 @@ C.page_header("🏟️", "NFL Game Lab",
              "Moneyline win probability, projected spread and total, and real injury reports for "
              "both teams — the game-level modeling page for NFL slates, with real injury data "
              "NCAAF Game Lab's placeholder explains doesn't yet exist for college football.")
-st.warning("**Informational — not a betting signal.** Backtested against 520 NFL games (2024-26), these projections "
-           "missed the final margin by 11.5 points on average vs the closing line's 9.5, went 52-54% against the "
-           "spread when they disagreed with it (52.4% breaks even), and their Under picks hit 40.5%. An "
-           "opponent-adjusted ratings model didn't beat the NFL line either (50-52%). Use the market's numbers for "
-           "sides and totals.", icon="⚠️")
 
 if not sports.require_sport(["NFL"], "NFL Game Lab"):
     st.stop()
@@ -96,6 +91,67 @@ def load_game(date_str: str, stats_date_str: str, home_abbr: str, away_abbr: str
            home_injuries, away_injuries
 
 
+# --- Nov 16: the ratings model, once the capture has saved NFL games -----------------------------------------
+# The NFL joins the pipeline behind every other Game Lab (intl_picks.hoops_capture): opponent-adjusted ratings plus
+# home field, the book's lines captured through the day, every game graded. So the page gets the site standard --
+# previews with leans, gaps and 30-day form, Find a team, and the one-game simulation run around that projection
+# (one model, one answer). Tested first (research/nfl_ratings_backtest.py): a better projection than the scoring-rate
+# simulation below (margin off by 10.0 points vs 11.5; the books 9.6), and still no edge against the spread (48%).
+# Until the first capture has run there are no saved NFL games, and the page below is shown as before.
+@st.cache_data(ttl=300, show_spinner=False)
+def _nfl_records() -> int:
+    try:
+        import model_store as _MS
+        return len(_MS.load_game_picks("NFL"))
+    except Exception:                                           # noqa: BLE001
+        return 0
+
+
+def _injury_block() -> None:
+    """This week's injury reports, for any game on the slate (nflreadpy; the one thing the old layout had that the
+    shared Game Lab doesn't)."""
+    st.divider()
+    C.section_header("🏥", "Injury report — both teams")
+    today_s = datetime.now(eastern).strftime("%Y-%m-%d")
+    try:
+        week_meta = sorted(C.scope_meta("NFL", "NFL", load_slate_meta(today_s) or [], today_s, key="gl_inj_scope"),
+                           key=lambda m: m.get("game_date") or "~")
+    except Exception:                                           # noqa: BLE001
+        week_meta = []
+    if not week_meta:
+        st.caption("No NFL games on the schedule for this date.")
+        return
+    opts = {f"{m['away_name']} @ {m['home_name']}": m for m in week_meta}
+    m = opts[st.selectbox("Game", list(opts), key="gl_inj_game")]
+    order = {"Out": 0, "Doubtful": 1, "Questionable": 2}
+    for col, abbr in zip(st.columns(2), (m.get("away_abbr") or m.get("away_name"), m.get("home_abbr") or m.get("home_name"))):
+        with col:
+            st.markdown(f"**{abbr}**")
+            try:
+                inj = [x for x in E.get_team_injuries_for_date(abbr, today_s) if x.get("status") in order]
+            except Exception:                                   # noqa: BLE001
+                inj = []
+            if not inj:
+                st.caption("No Out/Doubtful/Questionable players on the current injury report.")
+                continue
+            inj.sort(key=lambda x: order.get(x.get("status"), 9))
+            st.dataframe(pd.DataFrame([{"Player": x["player"], "Pos": x.get("position", "—"), "Status": x.get("status", "—"),
+                                        "Injury": x.get("comment") or "—"} for x in inj]), hide_index=True, width="stretch")
+    st.caption("Out = confirmed out; Doubtful = very likely out; Questionable = uncertain. Injuries are not in the "
+               "projection above unless the absence already showed up in recent results.")
+
+
+if _nfl_records():
+    import hoops_games_page as HG
+    HG.render("NFL")
+    _injury_block()
+    st.stop()
+
+st.warning("**Informational — not a betting signal.** No NFL game-line model here has beaten the closing line: the "
+           "ratings model went 48% against the spread over 434 games (2025-26), and the older scoring-rate "
+           "simulation 52-54% over 520 with its Unders at 40.5% (52.4% breaks even). Use the market's numbers for "
+           "sides and totals; the projections are a second opinion on the score.", icon="⚠️")
+
 # --- controls ----------------------------------------------------------------
 c1, c2 = st.columns([2, 1])
 with c1:
@@ -121,10 +177,51 @@ for _m in meta_sorted:
 slots_present = sorted({m["_slot"] for m in meta_sorted}, key=lambda s: SLOT_ORDER.get(s, 9))
 slot_pick = st.selectbox("Time slot", ["All slate"] + slots_present, key="gl_slot")
 slot_meta = meta_sorted if slot_pick == "All slate" else [m for m in meta_sorted if m["_slot"] == slot_pick]
+slot_meta = C.team_select(slot_meta, key="gl_team", home=lambda m: m.get("home_name"),      # Nov 16: Find a team
+                          away=lambda m: m.get("away_name"))
 game_options = {f"{m['away_name']} @ {m['home_name']}": m for m in slot_meta}
 if not game_options:
     st.info("No games in this time slot — try a different slot.", icon="🕐")
     st.stop()
+# Nov 16: the whole slate at a glance before the one-game detail (the site standard: something to browse first).
+# The same simulation the detail below runs, once per game, cached; no book lines and no Odds API credits.
+import game_previews as GPV
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def slate_previews(date_str: str, games: tuple):
+    out = []
+    for label, kick, home, away in games:
+        try:
+            res = load_game(date_str, "2026-02-01", home, away)[0]
+        except Exception:                                       # noqa: BLE001 -- one bad game never hides the slate
+            res = None
+        out.append(GPV.sim_row(label, kick, home, away, res))
+    return out
+
+
+def _kick_label(m):
+    d = game_dt(m.get("game_date"))
+    return d.strftime("%a %-I:%M %p") if d else ""
+
+
+with st.spinner("Projecting the slate..."):
+    _slate = slate_previews(date_str, tuple(
+        (lbl, _kick_label(m), m.get("home_abbr") or m.get("home_name"), m.get("away_abbr") or m.get("away_name"))
+        for lbl, m in game_options.items()))
+C.section_header("🗓️", f"The slate at a glance ({len(_slate)} games)")
+_tight = sorted([r for r in _slate if r["Model's winner"] != "—"], key=lambda r: r["_close"])[:3]
+if len(_slate) >= 4 and _tight:                                 # a short slate needs no shortlist
+    st.markdown("**Closest calls**")
+    for r in _tight:
+        _who = r["Model's winner"]
+        st.markdown(f"- **{r['Game']}** ({r['Kickoff (ET)']}): {_who}, projected {r['Projected score']}.")
+st.dataframe(pd.DataFrame([{k: v for k, v in r.items() if not k.startswith("_")} for r in _slate]),
+             hide_index=True, width="stretch")
+st.caption("Previews, not picks: nothing in the NFL has tested profitable yet. Projections use last season's scoring "
+           "rates (the default below) with no home-field edge and no book lines. Pick a game for the injury report "
+           "and the full breakdown.")
+
 game_label = st.selectbox("Game", list(game_options.keys()))
 selected = game_options[game_label]
 C.weather_note("NFL", date_str, [game_label])                   # Nov 8: kickoff weather

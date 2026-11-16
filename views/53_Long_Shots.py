@@ -183,6 +183,50 @@ if day < today:
     _look_back()
     st.stop()
 
+# Nov 16: lead with the day's scan (long_shots_scan.py runs a few times a day and saves it: no credits to show it),
+# so the page opens on tonight's long shots instead of a game picker and a load button.
+import long_shots_scan as _LSS
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _scan(sport_key, d):
+    return _LSS.load(sport_key, d)
+
+
+_saved = _scan(SPORT, date_str)
+_cards = _LSS.lead_cards(_saved)
+C.section_header("💎", f"Tonight's top {SPORT} long shots",
+                 "From today's scan of every game: the most likely long shots still worth their price.")
+if _cards:
+    for _col, _c in zip(st.columns(len(_cards)), _cards):
+        with _col.container(border=True):
+            st.markdown(f"**{_c['pick']}**")
+            st.metric("Price", "—" if _c["price"] is None else f"{float(_c['price']):+.0f}", label_visibility="collapsed")
+            st.caption(("—" if _c["chance"] is None else f"Honest chance {_c['chance']:.0%}")
+                       + ("" if _c["book"] is None else f" · book says {_c['book']:.0%}")
+                       + f"  \n{_c['game']}" + (f" · {_c['time']}" if _c["time"] else ""))
+            st.caption(_c["note"])
+    try:
+        _asof = datetime.fromisoformat(_saved["at"]).astimezone(eastern).strftime("%-I:%M %p")
+    except (KeyError, TypeError, ValueError):
+        _asof = ""
+    _all = _LSS.all_rows(_saved)
+    with st.expander(f"All {len(_all)} value long shots from today's scan"
+                     + (f" ({_saved.get('games', 0)} games)" if _saved.get("games") else "")):
+        st.dataframe(pd.DataFrame(_all), hide_index=True, width="stretch", column_config={
+            "Price": st.column_config.NumberColumn(format="%+d"),
+            "Honest chance": st.column_config.NumberColumn(format="percent"),
+            "Book says": st.column_config.NumberColumn(format="percent"),
+            "EV per $1": st.column_config.NumberColumn(format="%+.2f")})
+    st.caption((f"Prices as of {_asof} ET. " if _asof else "")
+               + "Most long shots lose: these are tail outcomes on a normal night, priced a little longer than the "
+                 "honest chance. Flat stakes of a few dollars, never two of the same player in one parlay.")
+else:
+    st.info("No long-shot scan for today yet. It runs a few times a day once the books post alternate lines; "
+            "until then, pick a game below.")
+st.divider()
+C.section_header("🔎", "Dig into one game", "Every rung for one game at your book.")
+
 if not api_key:
     st.info("Needs the Odds API key (ODDS_API_KEY) — alternate lines come from the books.")
     st.stop()

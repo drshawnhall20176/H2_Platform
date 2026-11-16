@@ -45,7 +45,8 @@ HOOPS_RULES = {"EUROLEAGUE": {"spread": 4.0, "total": None, "ml": None},
                "NBL": {"spread": None, "total": None, "ml": 0.05},
                "NCAAMB": {"spread": None, "total": None, "ml": None},   # Nov 3: OFF -- opening-week model bug; re-testing
                "NBA": {"spread": None, "total": None, "ml": None},       # set from research/backtest_pro_games.py
-               "NHL": {"spread": None, "total": None, "ml": None}}
+               "NHL": {"spread": None, "total": None, "ml": None},
+               "NFL": {"spread": None, "total": None, "ml": None}}    # Nov 16: no edge in the walk-forward test -> no picks
 # NCAAMB (research/backtest_ncaamb_games.py, 5,554 games 2024-26 with a pre-game line): spreads improved steadily
 # with the gap -- 4+ 53.1%, 6+ 54.4%, 8+ 55.2% (1065-866), 10+ 57.6% (n=1,425); both seasons alike, November best.
 # Totals 51-53% (off). The moneyline "showed" +15-21%, which is too good to be real (stale outlier prices at
@@ -68,6 +69,9 @@ HOOPS_EVIDENCE = {
     "NHL": "Information only — no picks. Backtest vs real lines (1,026 games, 2024-26): the model's side of the puck "
            "line covered 64-67%, but that is the +1.5 side's built-in cover rate (it's priced around -200), not an "
            "edge; totals 45-55% and moneylines lost at the median price.",
+    "NFL": "Information only — no picks. Walk-forward test vs real closing lines (434 games, 2025 and 2026 through week "
+           "10): the model's projected margin missed by 10.0 points on average against the books' 9.6, its side of the "
+           "spread covered 48% and its totals 51%. A fair second opinion on the score, not an edge.",
     "NCAAMB": "Information only — no picks. Corrected backtest vs real lines (5,184 games, 2024-26): the model's side "
               "of the spread covered 50.8-52.4% at every gap size up to 8+ points (10+ was 55% over 502, too thin to "
               "act on); totals 46-50%, moneylines -5%. An earlier run that looked far better had lines read upside "
@@ -533,6 +537,7 @@ def hoops_build(league: str, r: Optional[Dict], events: Sequence[Dict], now: dat
 
 
 TOTAL_SD = {"NKL": 17.0, "ICELAND": 17.0, "BAHRAIN": 17.0, "ESTONIA1": 17.0, "QATAR": 17.0, "BCL": 16.0, "FEC": 16.5, "EUROCUPW": 15.0, "EUROCUP": 16.0, "EUROLEAGUE": 16.0, "NBL": 18.0, "NCAAMB": 17.0, "NBA": 18.0, "WNBA": 17.0, "NHL": 2.3}
+TOTAL_SD["NFL"] = 13.5          # Nov 16: residual total SD 13.8 in the walk-forward test
 
 
 def hoops_schedule_build(league: str, r: Optional[Dict], upcoming: Sequence[Dict], now: datetime,
@@ -626,7 +631,7 @@ def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optio
 
 
 # --------------------------------------------------------------------------- logging a Game Lab bet (Nov 3)
-BET_SPORT = {"NCAAF": "NCAAF", "NCAAMB": "NCAAMB", "NBA": "NBA", "NHL": "NHL", "WNBA": "WNBA", "EUROLEAGUE": "INTL", "NBL": "INTL",
+BET_SPORT = {"NCAAF": "NCAAF", "NCAAMB": "NCAAMB", "NBA": "NBA", "NHL": "NHL", "WNBA": "WNBA", "NFL": "NFL", "EUROLEAGUE": "INTL", "NBL": "INTL",
              "EUROCUP": "INTL", "BCL": "INTL", "FEC": "INTL", "EUROCUPW": "INTL", "NKL": "INTL", "ICELAND": "INTL",
              "BAHRAIN": "INTL", "ESTONIA1": "INTL", "QATAR": "INTL",
              "TENNIS": "TENNIS"}
@@ -825,7 +830,7 @@ def main(argv=None) -> int:
         MS.save_setting("intl_last_run", datetime.now(timezone.utc).isoformat())
     except Exception:                                           # noqa: BLE001
         pass
-    which = (argv or sys.argv[1:] or ["TENNIS,EUROLEAGUE,EUROCUP,BCL,FEC,EUROCUPW,NKL,ICELAND,BAHRAIN,ESTONIA1,QATAR,NBL,NCAAMB,NBA,NHL"])[0].split(",")
+    which = (argv or sys.argv[1:] or ["TENNIS,EUROLEAGUE,EUROCUP,BCL,FEC,EUROCUPW,NKL,ICELAND,BAHRAIN,ESTONIA1,QATAR,NBL,NCAAMB,NBA,NHL,NFL"])[0].split(",")
     slate = {}
     for s in which:
         try:

@@ -5,7 +5,7 @@ tracking picks where the backtested rules allow one, and the graded record. Data
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import pandas as pd
@@ -50,6 +50,173 @@ def _likes(p):
 
 def _tag(league, p):
     return IP.hoops_use(league, p) if hasattr(IP, "hoops_use") else {"use": p.get("use") or "—", "lock": p.get("lock")}
+
+
+def _commercial() -> bool:
+    """Nov 16: the customer view (a commercial deployment, or the owner previewing it) -- nav_layout.py."""
+    try:
+        import nav_layout as NL
+        return NL.is_commercial(st.secrets.get("AUDIENCE", "owner"), st.session_state.get(NL.PREVIEW_KEY))
+    except Exception:                                           # noqa: BLE001 -- no secrets: a local / owner run
+        return False
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _season_results(league: str, day: str):
+    """This season's finished games from the results archive (what the ratings are fitted on)."""
+    season = I.season_of(league, day)
+    return [g for g in MS.load_results(league, since=f"{int(season) - 1}-07-01")
+            if str(g.get("date") or "") >= (f"{season}-07-01" if league != "WNBA" else f"{season}-01-01")]
+
+
+def _scoring_side(col, label, ctx, noun):
+    with col:
+        st.markdown(f"**{label}**")
+        if not ctx:
+            st.caption("No completed games on file yet")
+            return
+        s, a = ctx["scored"], ctx["allowed"]
+        st.metric("Recent avg scored", f"{s['recent_avg']:.1f}", delta=f"{s['recent_avg'] - s['season_avg']:+.1f} vs season",
+                  delta_color="normal")
+        st.metric("Recent avg allowed", f"{a['recent_avg']:.1f}", delta=f"{a['recent_avg'] - a['season_avg']:+.1f} vs season",
+                  delta_color="inverse")
+        st.caption(f"{ctx['games']} game{'s' if ctx['games'] != 1 else ''} this season")
+
+
+def _one_game(league, upcoming, day):
+    """Nov 16: the football Game Labs' two sections for one game -- team scoring context and the simulated
+    moneyline / spread / total (game_sim.py) -- so every Game Lab has them. Simulated around the ratings model's own
+    projection: one model, one answer."""
+    import game_sim as GS
+    st.divider()
+    C.section_header("🔬", "One game, up close", "Pick a game for its scoring context and a 20,000-game simulation.")
+    ordered = C.by_kickoff(upcoming)
+    labels = {f"{_tip(p)} — {p['away']} @ {p['home']}": p for p in ordered}
+    p = labels[st.selectbox("Game to simulate", list(labels), key=f"hg_sim_game_{league}")]
+    home, away, noun = p["home"], p["away"], GS.unit(league)
+
+    C.section_header("📊", "Team scoring context")
+    try:
+        results = _season_results(league, str(day))
+    except Exception:                                           # noqa: BLE001
+        results = []
+    c1, c2 = st.columns(2)
+    loose = league != "NCAAMB"                                  # the same team matching the ratings model uses
+    hc, ac = GS.scoring_context(results, home, loose), GS.scoring_context(results, away, loose)
+    _scoring_side(c1, f"{away} (Away)", ac, noun)
+    _scoring_side(c2, f"{home} (Home)", hc, noun)
+    st.caption(f"Recent = last {GS.RECENT_N} games. A positive change on scoring is good (trending up); a negative "
+               f"change on allowed is good (trending tighter). Raw {noun} per game, not adjusted for opponents: the "
+               "projection below does that.")
+
+    C.section_header("🎯", "Moneyline / spread / total — simulated")
+    sim = GS.simulate(league, p.get("model_margin"), p.get("model_total"), key=p.get("game_id"))
+    if not sim:
+        st.info("No projection for this game yet, so there is nothing to simulate.", icon="🕐")
+        return
+    mp = p.get("model_p")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric(f"{away} ML", "—" if mp is None else f"{1 - mp:.1%}")
+    m2.metric(f"{home} ML", "—" if mp is None else f"{mp:.1%}")
+    fav, by = (home, sim["proj_spread"]) if sim["proj_spread"] > 0 else (away, -sim["proj_spread"])
+    m3.metric("Projected spread", f"{fav} -{by:.1f}",
+              delta=None if p.get("home_spread") is None else f"book: {home} {p['home_spread']:+g}", delta_color="off")
+    m4.metric("Projected total", f"{sim['proj_total']:.1f}",
+              delta=None if p.get("line_total") is None else f"book: {p['line_total']:g}", delta_color="off")
+    st.caption(f"Proj: {away} **{sim['proj_away_score']:.1f}** — {home} **{sim['proj_home_score']:.1f}** · "
+               f"{sim['n_sims']:,} simulated games")
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric(f"{away} likely range", GS.range_text(*sim["away_range"], league), help=f"8 of 10 simulated games: {noun}")
+    r2.metric(f"{home} likely range", GS.range_text(*sim["home_range"], league), help=f"8 of 10 simulated games: {noun}")
+    r3.metric("Total likely range", GS.range_text(*sim["total_range"], league), help="8 of 10 simulated games")
+    if sim["overtime"] is not None:
+        r4.metric("Goes to overtime", f"{sim['overtime']:.0%}")
+    else:
+        r4.metric(f"Decided by {GS.CLOSE[sim['family']]} or fewer", f"{sim['close']:.0%}")
+    b1, b2 = st.columns(2)
+    if sim["overtime"] is not None:
+        b1.metric("One-goal game (overtime included)", f"{sim['close']:.0%}")
+    b2.metric(f"Decided by {GS.BLOWOUT[sim['family']]}+ {noun}", f"{sim['blowout']:.0%}")
+    with st.expander("How this works — and what it doesn't account for"):
+        st.markdown(
+            f"**Method:** the projected score, spread and total are the ratings model's (opponent-adjusted offense "
+            f"and defense plus home advantage, the same numbers as the table above). {sim['n_sims']:,} games are then "
+            "simulated around that projection: " + (
+                "each team's goals are a count around its projected goals, and a tie after regulation goes to "
+                "overtime, decided 50/50." if sim["family"] == "hockey" else
+                "the two scores are drawn together so that margins and totals spread as widely as they do in real "
+                "games in this league.") +
+            "\n\n**The win chance** is the model's own, the same one the table uses. The simulation adds the ranges: "
+            "how wide the likely finishes are around the projection.\n\n"
+            "**What it does not account for:** injuries, rest, lineup news, or the book's price. It is not a pick: "
+            "no game-line rule in this league has beaten the books in long-run testing unless the table above tags one.")
+
+
+def _rules_text(rules) -> str:
+    what = []
+    if rules.get("spread") is not None:
+        what.append(f"a spread pick needs the model {rules['spread']:g}+ points off the line")
+    if rules.get("total") is not None:
+        what.append(f"a total pick needs the model {rules['total']:g}+ points off")
+    if rules.get("ml") is not None:
+        what.append(f"a moneyline pick needs a {rules['ml']:.0%}+ edge")
+    return (("; ".join(what)).capitalize() if what else "No tested rule for this league: the model is a second opinion") + "."
+
+
+def _previews(league, upcoming, lean_recs, no_rule, day, cust, rules=None):
+    """Nov 16: upcoming games as previews with each lean's recent form -- the standard on every build (it started as
+    the customer view; the owner made it the standard the same day). The owner and Discord builds keep the Use
+    column, and the owner ticks rows to log exactly as before."""
+    import game_previews as GP
+    if no_rule:
+        st.info(GP.NOTE)
+    by_gap = st.toggle("Biggest disagreements first", value=False, key=f"hg_bygap_{league}",
+                       help="Off: earliest games first. On: the games where the model is furthest from the book.")
+    ordered = C.by_kickoff(upcoming)
+    rows = GP.preview_rows(
+        league, ordered, lean_recs, _tip, lambda p: _tag(league, p),
+        use=None if cust else (lambda p: _use(p, league)),
+        extras=None if cust else (lambda p: {
+            "Long backtest": "—" if p.get("cover_est") is None else f"{p['cover_est']:.0%}",
+            "Win chance: model / market": ("—" if p.get("model_p") is None else f"{p['model_p']:.0%}") + " / "
+                                          + ("—" if p.get("fair_home") is None else f"{p['fair_home']:.0%}"),
+            "Tracking pick": _pick(p), "Why": _why(league, p, lean_recs)}))
+    top = GP.spotlight(rows)
+    if top:
+        st.markdown("**Worth a look first**")
+        for r in top:
+            st.markdown(f"- **{r['Model leans']}** ({r['Game']}, {r['Tip (ET)']}): the model is {r['Gap (pts)']:.1f} "
+                        f"points from the book. Leans of this size: {r['Form (30 days)']}.")
+    if by_gap:
+        rows = sorted(rows, key=lambda r: -(r["Gap (pts)"] or 0))
+    df = pd.DataFrame(GP.public(rows))
+    if cust:
+        st.dataframe(df, hide_index=True, width="stretch")
+    else:
+        bet_kind = st.radio("☑️ Tick games to log the model's side of", list(TICK_KINDS), horizontal=True,
+                            key=f"hg_tick_kind_{league}")
+        ticked = LU.selectable(df, key=f"hg_tick_{league}", hide_index=True, width="stretch")
+        shown = [ordered[r["_i"]] for r in rows]                # the games in the order the table lists them
+        items = [it for it in (tick_item(shown[i], bet_kind) for i in ticked if 0 <= i < len(shown)) if it]
+        LU.panel(items, key=f"hg_panel_{league}", date_str=str(day), tag=f"{league.lower()}-games",
+                 past=day < _today_et())
+    st.caption(f"Form: {GP.HOT} = leans of that size won 55%+ of 20 or more graded games in the last 30 days; "
+               f"{GP.EVEN} = about break-even; {GP.COLD} = losing; {GP.NEW} = fewer than 20 games. A −110 spread needs "
+               "52.4% to break even. Model line = the spread the model would set; Gap = how far that is from the book."
+               + ("" if cust else " Long backtest = how often the model's side covered in the long-run test. "
+                  + USE_LEGEND + " " + _rules_text(rules or {})))
+    if not cust:
+        log_panel(league, upcoming)                             # Nov 12: right under the games, not below the finals
+
+
+def _why(league, p, recs):
+    """Nov 16: a row the model passes on says what THIS game's gap is and how gaps that size have done (it used to be
+    the same backtest sentence on every row); a real pick keeps its own reason."""
+    t = _tag(league, p)
+    if t.get("use") != PE.USE_PASS or p.get("edge") is None:
+        return t.get("why", "")
+    import pick_records as PR
+    return PR.spread_why(league, p, recs, p.get("cover_est"))
 
 
 def _use(p, league=""):
@@ -147,67 +314,60 @@ def render(league: str, search: bool = False) -> None:
         return render_fair(league)
     rules = IP.HOOPS_RULES.get(league, {})
     ev = getattr(IP, "HOOPS_EVIDENCE", {}).get(league) or EVIDENCE.get(league)
-    st.warning("Tracking only — not recommendations yet." + (f" {ev}" if ev else ""))
+    if not _commercial():
+        st.warning("Tracking only — not recommendations yet." + (f" {ev}" if ev else ""))
+    elif any(rules.get(k) is not None for k in ("spread", "total", "ml")):
+        st.warning("Tracking only: this league's record is not proven yet.")
     picks = MS.load_game_picks(league)
     now = datetime.now(timezone.utc).isoformat()
     done = [p for p in picks if p.get("result")]
     title = I.LEAGUES[league]["title"]
     c1, c2, c3 = st.columns([1, 1, 2])
     day = c1.date_input("Slate date", _today_et(), key=f"hg_date_{league}")
-    on_day = [p for p in picks if _et(p) is not None and _et(p).date() == day]
+    # Nov 16: a weekly league (the NFL) lists the week from the picked date by default -- a single day is empty most days
+    week = league in getattr(sports, "WEEKLY_SLATE_SPORTS", ()) and st.radio(
+        "Games shown", ["This week", "Selected date"], horizontal=True, key=f"hg_scope_{league}") == "This week"
+    last = day + timedelta(days=6) if week else day
+    on_day = [p for p in picks if _et(p) is not None and day <= _et(p).date() <= last]
     slots = sorted({sports.slot_of(_et(p)) for p in on_day}, key=lambda x: sports.SLOT_ORDER.get(x, 9))
     slot = c2.selectbox("Time slot", ["All slate"] + slots, key=f"hg_slot_{league}")
     if slot != "All slate":
         on_day = [p for p in on_day if sports.slot_of(_et(p)) == slot]
+    _teams = C.team_names(on_day)                               # every team in this slate / slot, before the Game filter
     on_day = C.game_select(on_day, key=f"hg_game_{league}", container=c3)       # Nov 7: Game filter, tip order
+    if _teams:                                                  # Nov 16: a dropdown on every league (was a text box, some leagues)
+        on_day = C.team_select(on_day, key=f"hg_team_{league}", options=_teams)
     upcoming = [p for p in on_day if str(p.get("kickoff")) > now and p.get("result") is None]
     finished = [p for p in on_day if p not in upcoming]
     if search and on_day:
-        q = st.text_input("Find a team", key=f"hg_q_{league}").strip()
-        if q:
-            upcoming = [p for p in upcoming if q.lower() in f"{p['home']} {p['away']}".lower()]
-            finished = [p for p in finished if q.lower() in f"{p['home']} {p['away']}".lower()]
-        if st.toggle("Only games with a tracking pick", key=f"hg_only_{league}"):
+        if not _commercial() and st.toggle("Only games with a tracking pick", key=f"hg_only_{league}"):
             upcoming = [p for p in upcoming if _pick(p) != "—"]
             finished = [p for p in finished if _pick(p) != "—"]
-    if upcoming:
+    # Nov 16: how the model's spread leans have actually done by size of gap (last 30 days) -- the evidence behind
+    # each row's Why, and the reason a page of passes isn't 22 copies of one sentence
+    import pick_records as PR
+    try:
+        lean_recs = PR.lean_records(league, recs=picks)
+    except Exception:                                           # noqa: BLE001
+        lean_recs = {}
+    cust = _commercial()
+    no_rule = not any(rules.get(k) is not None for k in ("spread", "total", "ml"))
+    with st.expander("How the model's spread leans have done by size of gap (last 30 days)"):
+        st.table(pd.DataFrame([{**r, "Hit rate": "—" if r["Hit rate"] is None else f"{r['Hit rate']:.0%}"}
+                               for r in PR.band_table(league, lean_recs)]).set_index("Gap size"))
+        st.caption("A −110 spread needs 52.4% to break even. Fewer than 20 graded games is too few to judge.")
+    if upcoming and not cust:
         upcoming = _show_filter(f"hg_use_{league}", upcoming, league)
     st.markdown(f"##### Upcoming ({len(upcoming)})")
-    if not upcoming:
+    if upcoming:
+        _previews(league, upcoming, lean_recs, no_rule, day, cust, rules)
+        try:
+            _one_game(league, upcoming, day)
+        except Exception as exc:                                # noqa: BLE001 -- never takes the slate down with it
+            st.caption(f"The one-game simulation is unavailable right now ({type(exc).__name__}).")
+    else:
         st.info(f"No upcoming {title} games for {day:%a %b %d}" + (f" ({slot})" if slot != "All slate" else "")
                 + ". The capture runs every 3 hours; games appear once the books post lines.")
-    else:
-        ordered = C.by_kickoff(upcoming)
-        bet_kind = st.radio("☑️ Tick games to log the model's side of", list(TICK_KINDS), horizontal=True,
-                            key=f"hg_tick_kind_{league}")
-        ticked = LU.selectable(pd.DataFrame([{
-            "Tip (ET)": _tip(p),
-            "Game": f"{p['away']} @ {p['home']}",
-            "Use": _use(p, league),
-            "Model likes": _likes(p),
-            "Why": _tag(league, p).get("why", ""),
-            "Line": f"{p['home']} {p['home_spread']:+g}",
-            "Gap (pts)": f"{abs(p['edge']):.1f}",
-            "Est. cover": "—" if p.get("cover_est") is None else f"{p['cover_est']:.0%}",
-            "Total: model / line": f"{p.get('model_total')} / {p.get('line_total') or '—'}",
-            "Win chance: model / market": f"{p['model_p']:.0%} / " + ("—" if p.get("fair_home") is None else f"{p['fair_home']:.0%}"),
-            "Tracking pick": _pick(p)} for p in ordered]),          # Nov 7: earliest tip first
-            key=f"hg_tick_{league}", hide_index=True, width="stretch")
-        items = [it for it in (tick_item(ordered[i], bet_kind) for i in ticked if 0 <= i < len(ordered)) if it]
-        LU.panel(items, key=f"hg_panel_{league}", date_str=str(day), tag=f"{league.lower()}-games",
-                 past=day < _today_et())
-        what = []
-        if rules.get("spread") is not None:
-            what.append(f"a spread pick needs the model {rules['spread']:g}+ points off the line")
-        if rules.get("total") is not None:
-            what.append(f"a total pick needs the model {rules['total']:g}+ points off")
-        if rules.get("ml") is not None:
-            what.append(f"a moneyline pick needs a {rules['ml']:.0%}+ edge")
-        st.caption("Model likes = the side the model would take against the spread, at the book's number; Gap = how many "
-                   "points the model's margin is from the spread (the size, not the sign, is what matters); Est. cover = "
-                   "how often that size of gap covered in the backtest. " + USE_LEGEND + " "
-                   + ("; ".join(what) if what else "no picks for this league — the model is shown for reference") + ".")
-        log_panel(league, upcoming)                             # Nov 12: right under the games, not below the finals
     if finished:
         st.markdown(f"##### Started or final ({len(finished)})")
         st.dataframe(pd.DataFrame([{
@@ -219,7 +379,7 @@ def render(league: str, search: bool = False) -> None:
             hide_index=True, width="stretch")
     st.markdown("##### Tracking record")
     st.caption(honesty_line(done, league))                      # Nov 12: the check that caught tennis, every league
-    tagged = [p for p in done if p.get("use")]
+    tagged = [] if cust else [p for p in done if p.get("use")]     # Nov 16: the by-Use table is the owner's view
     if tagged:
         rows = []
         for label, keep in ((PE.MOST_PROBABLE, lambda p: p.get("lock")), (PE.USE_SINGLE, lambda p: p.get("use") == PE.USE_SINGLE),
@@ -412,7 +572,10 @@ def render_fair(league: str) -> None:
     slot = c2.selectbox("Time slot", ["All slate"] + slots, key=f"hg_slot_{league}")
     if slot != "All slate":
         on_day = [p for p in on_day if sports.slot_of(_et(p)) == slot]
+    _teams = C.team_names(on_day)
     on_day = C.game_select(on_day, key=f"hg_game_{league}")                     # Nov 7: Game filter, tip order
+    if _teams:
+        on_day = C.team_select(on_day, key=f"hg_team_{league}", options=_teams)  # Nov 16: Find a team, every Game Lab
     upcoming = C.by_kickoff([p for p in on_day if str(p.get("kickoff")) > now and p.get("result") is None])
     finished = C.by_kickoff([p for p in on_day if p not in upcoming])
     if league in getattr(I, "GENIUS_COMPS", {}):

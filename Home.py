@@ -13,6 +13,60 @@ C.hero_banner("📈", "H2 Sports — The Sports Trading Desk",
              "discipline, every result graded against the closing line. This is a day-trading "
              "tool for real analysts — not a picks service, not a betting platform.")
 
+# ---------- Today at a glance (Nov 16) ----------
+# The same lead the customer's Today page has: the day in four numbers and the strongest picks as cards, across every
+# in-season sport, before any control. Read from the boards and game records already saved (customer_today.py): no
+# Odds API credits. Everything below (the sport picker, the brief, the full tables, logging) is unchanged.
+try:
+    import customer_today as _CT
+    import todays_best as _TB0
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _glance_data(day, keys):
+        best = _TB0.collect(day, list(keys))
+        try:
+            winners = _TB0.winner_rows(day)
+        except Exception:                                       # noqa: BLE001
+            winners = []
+        return best.get("rows") or [], winners
+
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def _glance_tags(sp):
+        import pick_records as _PR0
+        return _PR0.tag_records(sp)
+
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def _glance_leans(lg):
+        import pick_records as _PR0
+        return _PR0.lean_records(lg)
+
+    _g_day = _dt.now(_ET).strftime("%Y-%m-%d")
+    _g_live = [s.key for s in sports.enabled_sports() if sports.in_season(s.key)]
+    _g_rows, _g_win = _glance_data(_g_day, tuple(k for k in _g_live if k in _CT.PROPS_SPORTS))
+    _g_props = _CT.prop_picks(_g_rows, records_for=_glance_tags, parse_time=C._kick_dt)
+    _g_lines = _CT.line_picks(_g_win, records_for=_glance_leans, parse_time=C._kick_dt)
+    _g_sum = _CT.summary(_g_props, _g_lines)
+    C.section_header("📅", f"Today at a glance · {_dt.now(_ET):%A, %B %-d}")
+    C.kpi_row([{"icon": "🎯", "value": str(_g_sum["picks"]), "label": "Player picks from winning pick types"},
+               {"icon": "🏟️", "value": str(_g_sum["lines"]), "label": "Playable game lines"},
+               {"icon": "📅", "value": str(len(_g_sum["sports"])), "label": "Sports with a pick"},
+               {"icon": "🗂️", "value": str(len(_g_live)), "label": "Sports in season"}])
+    _g_cards = _CT.top_cards(_g_rows, records_for=_glance_tags)
+    if _g_cards:
+        for _col, _c in zip(st.columns(len(_g_cards)), _g_cards):
+            with _col.container(border=True):
+                st.markdown(f"**{'🔒 ' if _c['lock'] else ''}{_c['pick']}**")
+                st.metric("Chance", "—" if _c["chance"] is None else f"{_c['chance']:.0%}", label_visibility="collapsed")
+                st.caption(f"{_c['sport']} · {_c['price']}  \n{_c['game']}" + (f" · {_c['time']}" if _c["time"] else ""))
+                st.caption("✅ " + _c["record"] if _c["record"] else "")
+        st.caption("The strongest player picks across every sport: pick types with a winning 30-day record only, one "
+                   "per player. The full tables, filters and logging are under Today's best below.")
+    else:
+        st.caption("No player picks from winning pick types yet today. Boards are built through the day as the books "
+                   "post their lines; the full tables are under Today's best below.")
+except Exception:                                               # noqa: BLE001 -- a bonus on Home, never blocks it
+    pass
+
 # Sport selector -- primary location is here in the main content area, not the sidebar.
 # Streamlit's st.navigation always injects page links at the top of the sidebar regardless
 # of call order, pushing any sidebar widget below the full page list. Rendering it here
@@ -351,9 +405,8 @@ if True:
     LEANS_CAP = 250                                             # Nov 14: soccer and every hoops league are in here
     st.markdown("##### 🏆 Game lines: tested picks and model leans")
     _w = [r for r in _wscope if _keep(r)]
-    if current in ("NFL", "UFC") and _scope != "All sports":
-        st.caption("Not covered yet for this sport: there's no stored game model for NFL (the college spread model "
-                   "showed no NFL edge), and UFC's chances come from the odds themselves. Choose All sports to see "
+    if current == "UFC" and _scope != "All sports":
+        st.caption("Not covered for this sport: UFC's chances come from the odds themselves. Choose All sports to see "
                    "the rest.")
     elif _w:
         # Nov 6 (revised): tested picks first (bet, backtested chance, price, value), then every other game's lean --

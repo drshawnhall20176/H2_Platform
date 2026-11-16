@@ -172,6 +172,41 @@ def _strip(use: str) -> str:
     return str(use or "").replace("🔒", "").strip()
 
 
+GAP_WORDS = ("Close to the book", "Moderate gap", "Big gap")
+
+
+def spread_why(league: str, p: Dict, recs: Optional[Dict] = None, cover: Optional[float] = None) -> str:
+    """Nov 16: the Game Labs' "Why" for a spread the model passes on. It used to be the league's one backtest number
+    on every row ("this gap covered 51%"), so 22 games read identically. Now each row says how far the model is from
+    the book in THIS game, how leans of that size have actually done over the last 30 days, and the long backtest:
+        "Big gap (19.1 pts) · 6+ pt gaps, last 30 days: 14–9 (61% ±16%) · long backtest 51%"
+    `recs` is lean_records(league); `cover` the backtest cover rate, when the league has one."""
+    edge = _num(p.get("edge"))
+    try:
+        b = band((gaps(p, league) or {}).get("Spread"))
+    except Exception:                                           # noqa: BLE001
+        b = None
+    if b is None:
+        return "no tested edge in this league" if cover is None else f"long backtest: the model's side covered {cover:.0%}"
+    size = GAP_WORDS[b] + ("" if edge is None else f" ({abs(edge):.1f} pts)")
+    w, n = (recs or {}).get(("Spread", b), (0, 0))
+    name = band_label(b, "Spread", league) + "s"
+    live = f"{name}, last 30 days: {label(w, n, True)}" if n else f"{name}: none graded in the last 30 days"
+    return " · ".join([size, live] + ([f"long backtest {cover:.0%}"] if cover is not None else []))
+
+
+def band_table(league: str, recs: Optional[Dict], market: str = "Spread") -> list:
+    """[{Gap size, Record, Hit rate, Graded}] for the model's leans in `market` by size of gap, last 30 days."""
+    out = []
+    for i, word in enumerate(GAP_WORDS):
+        w, n = (recs or {}).get((market, i), (0, 0))
+        out.append({"Gap size": f"{word}: {band_label(i, market, league)}", "Record": f"{w}–{n - w}" if n else "—",
+                    "Hit rate": round(w / n, 3) if n else None, "Graded": n,
+                    "Read": {"new": "Too few to judge", "ok": "Holding up", "losing": "Losing",
+                             "fade": "Losing badly"}[verdict(w, n, True)] if n else "No games yet"})
+    return out
+
+
 def annotate_props(rows, records_for=tag_records) -> None:
     """Adds "record" (label) and "verdict" to each Today's best pick row from its sport's Use-tag record."""
     cache: Dict[str, Dict] = {}
