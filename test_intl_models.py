@@ -265,8 +265,10 @@ def test_ncaamb_game_lab_and_intl_page_render(monkeypatch):
     at.date_input(key="hg_date_NCAAMB").set_value(DAY).run()
     assert not at.exception, [e.value for e in at.exception]
     assert "Tennessee Volunteers -25.5" in at.dataframe[0].value.to_string()
-    at.text_input(key="hg_q_NCAAMB").set_value("duke").run()
-    assert any("Upcoming (0)" in m.value for m in at.markdown)
+    box = at.selectbox(key="hg_team_NCAAMB")                    # Nov 16: Find a team is a dropdown on every Game Lab
+    assert box.label == "Find a team" and box.options == ["All teams", "Tennessee Volunteers", "Wofford Terriers"]
+    box.set_value("Wofford Terriers").run()
+    assert any("Upcoming (1)" in m.value for m in at.markdown)
     at2 = AppTest.from_file(str(Path(__file__).parent / "views" / "44_Intl_Hoops.py"), default_timeout=30)
     at2.run()
     at2.date_input(key="hg_date_EUROLEAGUE").set_value(DAY).run()

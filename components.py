@@ -765,6 +765,29 @@ def game_select(items, key: str, when=lambda x: x.get("kickoff"),
     return list(items) if pick == "All games" else [it for it in items if label(it) == pick]
 
 
+ALL_TEAMS = "All teams"
+
+
+def team_names(items, home=lambda x: x.get("home"), away=lambda x: x.get("away")) -> list:
+    """Every team in these games, A to Z."""
+    return sorted({str(t) for it in items or [] for t in (home(it), away(it)) if t}, key=str.lower)
+
+
+def team_select(items, key: str, home=lambda x: x.get("home"), away=lambda x: x.get("away"), container=None,
+                title: str = "Find a team", options=None):
+    """Nov 16: the Find-a-team dropdown every Game Lab shares -- the teams playing, A to Z, 'All teams' by default
+    (the box filters as you type, so it still works as a search). Returns the picked team's games (all when none).
+    `options`: the full team list to offer when `items` has already been narrowed by another filter."""
+    import streamlit as _st
+    where = container or _st
+    names = list(options) if options is not None else team_names(items, home, away)
+    if _st.session_state.get(key) not in [ALL_TEAMS] + names:
+        _st.session_state.pop(key, None)                        # yesterday's team isn't playing today
+    pick = where.selectbox(title, [ALL_TEAMS] + names, key=key,
+                           help="Pick a team to show only its game. Type in the box to search.")
+    return list(items) if pick == ALL_TEAMS else [it for it in items if pick in (str(home(it)), str(away(it)))]
+
+
 def date_slot_select(items, key: str, when=lambda x: x.get("kickoff"), container=None):
     """Nov 7: Date + Time slot for pages that list several days at once (the dates present, earliest first)."""
     import streamlit as _st

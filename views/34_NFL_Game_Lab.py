@@ -121,6 +121,8 @@ for _m in meta_sorted:
 slots_present = sorted({m["_slot"] for m in meta_sorted}, key=lambda s: SLOT_ORDER.get(s, 9))
 slot_pick = st.selectbox("Time slot", ["All slate"] + slots_present, key="gl_slot")
 slot_meta = meta_sorted if slot_pick == "All slate" else [m for m in meta_sorted if m["_slot"] == slot_pick]
+slot_meta = C.team_select(slot_meta, key="gl_team", home=lambda m: m.get("home_name"),      # Nov 16: Find a team
+                          away=lambda m: m.get("away_name"))
 game_options = {f"{m['away_name']} @ {m['home_name']}": m for m in slot_meta}
 if not game_options:
     st.info("No games in this time slot — try a different slot.", icon="🕐")

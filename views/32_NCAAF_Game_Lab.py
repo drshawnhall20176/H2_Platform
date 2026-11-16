@@ -92,7 +92,9 @@ with st.expander("📐 Ratings model v2 — college spreads (tracking)", expande
         m3.metric("Upcoming games", len(_up))
         if _up:                                                 # Nov 7: Date / Time slot / Game, earliest first
             _up = C.date_slot_select(_up, key="ncaaf_v2")
+            _v2_teams = C.team_names(_up)
             _up = C.game_select(_up, key="ncaaf_v2_game")
+            _up = C.team_select(_up, key="ncaaf_v2_team", options=_v2_teams)     # Nov 16: Find a team, every Game Lab
         if _up:
             # Nov 16: the site standard -- previews with each lean's recent form (game_previews.py), not a bare table
             import game_previews as GPV
