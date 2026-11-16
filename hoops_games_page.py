@@ -61,6 +61,97 @@ def _commercial() -> bool:
         return False
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _season_results(league: str, day: str):
+    """This season's finished games from the results archive (what the ratings are fitted on)."""
+    season = I.season_of(league, day)
+    return [g for g in MS.load_results(league, since=f"{int(season) - 1}-07-01")
+            if str(g.get("date") or "") >= (f"{season}-07-01" if league != "WNBA" else f"{season}-01-01")]
+
+
+def _scoring_side(col, label, ctx, noun):
+    with col:
+        st.markdown(f"**{label}**")
+        if not ctx:
+            st.caption("No completed games on file yet")
+            return
+        s, a = ctx["scored"], ctx["allowed"]
+        st.metric("Recent avg scored", f"{s['recent_avg']:.1f}", delta=f"{s['recent_avg'] - s['season_avg']:+.1f} vs season",
+                  delta_color="normal")
+        st.metric("Recent avg allowed", f"{a['recent_avg']:.1f}", delta=f"{a['recent_avg'] - a['season_avg']:+.1f} vs season",
+                  delta_color="inverse")
+        st.caption(f"{ctx['games']} game{'s' if ctx['games'] != 1 else ''} this season")
+
+
+def _one_game(league, upcoming, day):
+    """Nov 16: the football Game Labs' two sections for one game -- team scoring context and the simulated
+    moneyline / spread / total (game_sim.py) -- so every Game Lab has them. Simulated around the ratings model's own
+    projection: one model, one answer."""
+    import game_sim as GS
+    st.divider()
+    C.section_header("🔬", "One game, up close", "Pick a game for its scoring context and a 20,000-game simulation.")
+    ordered = C.by_kickoff(upcoming)
+    labels = {f"{_tip(p)} — {p['away']} @ {p['home']}": p for p in ordered}
+    p = labels[st.selectbox("Game to simulate", list(labels), key=f"hg_sim_game_{league}")]
+    home, away, noun = p["home"], p["away"], GS.unit(league)
+
+    C.section_header("📊", "Team scoring context")
+    try:
+        results = _season_results(league, str(day))
+    except Exception:                                           # noqa: BLE001
+        results = []
+    c1, c2 = st.columns(2)
+    loose = league != "NCAAMB"                                  # the same team matching the ratings model uses
+    hc, ac = GS.scoring_context(results, home, loose), GS.scoring_context(results, away, loose)
+    _scoring_side(c1, f"{away} (Away)", ac, noun)
+    _scoring_side(c2, f"{home} (Home)", hc, noun)
+    st.caption(f"Recent = last {GS.RECENT_N} games. A positive change on scoring is good (trending up); a negative "
+               f"change on allowed is good (trending tighter). Raw {noun} per game, not adjusted for opponents: the "
+               "projection below does that.")
+
+    C.section_header("🎯", "Moneyline / spread / total — simulated")
+    sim = GS.simulate(league, p.get("model_margin"), p.get("model_total"), key=p.get("game_id"))
+    if not sim:
+        st.info("No projection for this game yet, so there is nothing to simulate.", icon="🕐")
+        return
+    mp = p.get("model_p")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric(f"{away} ML", "—" if mp is None else f"{1 - mp:.1%}")
+    m2.metric(f"{home} ML", "—" if mp is None else f"{mp:.1%}")
+    fav, by = (home, sim["proj_spread"]) if sim["proj_spread"] > 0 else (away, -sim["proj_spread"])
+    m3.metric("Projected spread", f"{fav} -{by:.1f}",
+              delta=None if p.get("home_spread") is None else f"book: {home} {p['home_spread']:+g}", delta_color="off")
+    m4.metric("Projected total", f"{sim['proj_total']:.1f}",
+              delta=None if p.get("line_total") is None else f"book: {p['line_total']:g}", delta_color="off")
+    st.caption(f"Proj: {away} **{sim['proj_away_score']:.1f}** — {home} **{sim['proj_home_score']:.1f}** · "
+               f"{sim['n_sims']:,} simulated games")
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric(f"{away} likely range", GS.range_text(*sim["away_range"], league), help=f"8 of 10 simulated games: {noun}")
+    r2.metric(f"{home} likely range", GS.range_text(*sim["home_range"], league), help=f"8 of 10 simulated games: {noun}")
+    r3.metric("Total likely range", GS.range_text(*sim["total_range"], league), help="8 of 10 simulated games")
+    if sim["overtime"] is not None:
+        r4.metric("Goes to overtime", f"{sim['overtime']:.0%}")
+    else:
+        r4.metric(f"Decided by {GS.CLOSE['basketball']} or fewer", f"{sim['close']:.0%}")
+    b1, b2 = st.columns(2)
+    if sim["overtime"] is not None:
+        b1.metric("One-goal game (overtime included)", f"{sim['close']:.0%}")
+    b2.metric(f"Decided by {GS.BLOWOUT[sim['family']]}+ {noun}", f"{sim['blowout']:.0%}")
+    with st.expander("How this works — and what it doesn't account for"):
+        st.markdown(
+            f"**Method:** the projected score, spread and total are the ratings model's (opponent-adjusted offense "
+            f"and defense plus home advantage, the same numbers as the table above). {sim['n_sims']:,} games are then "
+            "simulated around that projection: " + (
+                "each team's goals are a count around its projected goals, and a tie after regulation goes to "
+                "overtime, decided 50/50." if sim["family"] == "hockey" else
+                "the two scores are drawn together so that margins and totals spread as widely as they do in real "
+                "games in this league.") +
+            "\n\n**The win chance** is the model's own, the same one the table uses. The simulation adds the ranges: "
+            "how wide the likely finishes are around the projection.\n\n"
+            "**What it does not account for:** injuries, rest, lineup news, or the book's price. It is not a pick: "
+            "no game-line rule in this league has beaten the books in long-run testing unless the table above tags one.")
+
+
 def _rules_text(rules) -> str:
     what = []
     if rules.get("spread") is not None:
@@ -267,6 +358,10 @@ def render(league: str, search: bool = False) -> None:
     st.markdown(f"##### Upcoming ({len(upcoming)})")
     if upcoming:
         _previews(league, upcoming, lean_recs, no_rule, day, cust, rules)
+        try:
+            _one_game(league, upcoming, day)
+        except Exception as exc:                                # noqa: BLE001 -- never takes the slate down with it
+            st.caption(f"The one-game simulation is unavailable right now ({type(exc).__name__}).")
     else:
         st.info(f"No upcoming {title} games for {day:%a %b %d}" + (f" ({slot})" if slot != "All slate" else "")
                 + ". The capture runs every 3 hours; games appear once the books post lines.")
