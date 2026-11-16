@@ -285,3 +285,13 @@ def test_tuning_needs_two_slates_that_agree():
     assert not [s for s in PG.suggestions(one) if s["kind"] == "tuning"]
     two = [_t("2026-11-01", 40.0, 25.0) for _ in range(30)] + [_t("2026-11-02", 40.0, 28.0) for _ in range(30)]
     assert [s for s in PG.suggestions(two) if s["kind"] == "tuning"]
+
+
+def test_display_name_combos_grade():
+    import postgame as PG
+    box = {"pts": 12, "reb": 9, "ast": 4, "blk": 1, "stl": 2, "tov": 3}
+    assert PG.stat_value("NBA", "Reb+Ast", box) == 13.0
+    assert PG.stat_value("NBA", "Blocks+Steals", box) == 3.0
+    assert PG.stat_value("NBA", "Turnovers", box) == 3.0
+    assert PG.stat_value("NBA", "RA", box) == 13.0
+    assert PG.stat_value("NBA", "Nonsense", box) is None

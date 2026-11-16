@@ -300,7 +300,15 @@ def stat_value(sport: str, market: str, stats: Dict) -> Optional[float]:
         return None if not m or m["stat"] not in stats else _num(stats[m["stat"]])
     if FAMILY.get(sport) == "basketball":
         import player_props as PPR
-        return PPR.market_value(stats, market) if market in PPR.MARKETS else None
+        if market in PPR.MARKETS:
+            return PPR.market_value(stats, market)
+        # Nov 16: bets logged from the pick pages carry the display name ("Reb+Ast", "Blocks+Steals", "Turnovers")
+        import basketball_markets as BM
+        key = BM.EXTRA_DISPLAY_TO_STAT.get(market) or BM.EXTRA_STAT_KEY.get(market)
+        parts = BM.COMBOS.get(key, (key,)) if key else ()
+        if not parts or any(p not in stats for p in parts):
+            return None
+        return float(sum(_num(stats[p]) or 0.0 for p in parts))
     import football_props as FP
     return FP.market_value(stats, market) if market in FP.MARKETS else None
 
