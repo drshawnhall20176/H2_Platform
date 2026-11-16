@@ -163,6 +163,31 @@ plays, meta = C.scope_plays(_active.key, _active.label, plays, meta, date_str)
 if not plays:
     st.info("No plays for the games in this view — switch Games shown to This week, or pick another date.")
     st.stop()
+# Nov 16: "Start here" -- the few reads worth opening the page for, before the filters and the full board
+# (start_here.py: playable, no news hold or warning, never a losing pick type; one per player).
+import start_here as SH
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _tag_recs(sp):
+    import pick_records as _PR
+    return _PR.tag_records(sp)
+
+
+_short = SH.shortlist(_active.key, plays, records_for=_tag_recs)
+if _short:
+    C.section_header("👉", "Start here", "The strongest reads on today's board. The full board and its filters are below.")
+    for _col, _r in zip(st.columns(len(_short)), _short):
+        with _col.container(border=True):
+            st.markdown(f"**{'🔒 ' if _r['lock'] else ''}{_r['pick']}**")
+            st.metric("Chance", "—" if _r["chance"] is None else f"{_r['chance']:.0%}", label_visibility="collapsed")
+            st.caption(f"{_r['price']}  \n{_r['game']}" + (f" · {_r['time']}" if _r["time"] else ""))
+            st.caption(_r["standing"] + (f"  \n{_r['record']}" if _r["record"] else ""))
+    st.caption("Chance is the model's chance the bet wins. The record is how that kind of pick has done over the last "
+               "30 days; pick types that have been losing are left out.")
+    st.divider()
+    C.section_header("📋", "The full board")
+
 slots_present = sorted({p["Slot"] for p in plays}, key=lambda s: SLOT_ORDER.get(s, 9))
 f1, f2 = st.columns(2)
 with f1:
