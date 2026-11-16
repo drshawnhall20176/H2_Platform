@@ -52,6 +52,37 @@ def _tag(league, p):
     return IP.hoops_use(league, p) if hasattr(IP, "hoops_use") else {"use": p.get("use") or "—", "lock": p.get("lock")}
 
 
+def _commercial() -> bool:
+    """Nov 16: the customer view (a commercial deployment, or the owner previewing it) -- nav_layout.py."""
+    try:
+        import nav_layout as NL
+        return NL.is_commercial(st.secrets.get("AUDIENCE", "owner"), st.session_state.get(NL.PREVIEW_KEY))
+    except Exception:                                           # noqa: BLE001 -- no secrets: a local / owner run
+        return False
+
+
+def _previews(league, upcoming, lean_recs, no_rule):
+    """Nov 16: the customer's upcoming games -- previews with each lean's recent form, not a table of ⛔ Pass."""
+    import game_previews as GP
+    if no_rule:
+        st.info(GP.NOTE)
+    by_gap = st.toggle("Biggest disagreements first", value=False, key=f"hg_bygap_{league}",
+                       help="Off: earliest games first. On: the games where the model is furthest from the book.")
+    rows = GP.preview_rows(league, C.by_kickoff(upcoming), lean_recs, _tip, lambda p: _tag(league, p))
+    top = GP.spotlight(rows)
+    if top:
+        st.markdown("**Worth a look first**")
+        for r in top:
+            st.markdown(f"- **{r['Model leans']}** ({r['Game']}, {r['Tip (ET)']}): the model is {r['Gap (pts)']:.1f} "
+                        f"points from the book. Leans of this size: {r['Form (30 days)']}.")
+    if by_gap:
+        rows = sorted(rows, key=lambda r: -(r["Gap (pts)"] or 0))
+    st.dataframe(pd.DataFrame(GP.public(rows)), hide_index=True, width="stretch")
+    st.caption(f"Form: {GP.HOT} = leans of that size won 55%+ of 20 or more graded games in the last 30 days; "
+               f"{GP.EVEN} = about break-even; {GP.COLD} = losing; {GP.NEW} = fewer than 20 games. A −110 spread needs "
+               "52.4% to break even. Model line = the spread the model would set; Gap = how far that is from the book.")
+
+
 def _why(league, p, recs):
     """Nov 16: a row the model passes on says what THIS game's gap is and how gaps that size have done (it used to be
     the same backtest sentence on every row); a real pick keeps its own reason."""
@@ -157,7 +188,10 @@ def render(league: str, search: bool = False) -> None:
         return render_fair(league)
     rules = IP.HOOPS_RULES.get(league, {})
     ev = getattr(IP, "HOOPS_EVIDENCE", {}).get(league) or EVIDENCE.get(league)
-    st.warning("Tracking only — not recommendations yet." + (f" {ev}" if ev else ""))
+    if not _commercial():
+        st.warning("Tracking only — not recommendations yet." + (f" {ev}" if ev else ""))
+    elif any(rules.get(k) is not None for k in ("spread", "total", "ml")):
+        st.warning("Tracking only: this league's record is not proven yet.")
     picks = MS.load_game_picks(league)
     now = datetime.now(timezone.utc).isoformat()
     done = [p for p in picks if p.get("result")]
@@ -177,7 +211,7 @@ def render(league: str, search: bool = False) -> None:
         if q:
             upcoming = [p for p in upcoming if q.lower() in f"{p['home']} {p['away']}".lower()]
             finished = [p for p in finished if q.lower() in f"{p['home']} {p['away']}".lower()]
-        if st.toggle("Only games with a tracking pick", key=f"hg_only_{league}"):
+        if not _commercial() and st.toggle("Only games with a tracking pick", key=f"hg_only_{league}"):
             upcoming = [p for p in upcoming if _pick(p) != "—"]
             finished = [p for p in finished if _pick(p) != "—"]
     # Nov 16: how the model's spread leans have actually done by size of gap (last 30 days) -- the evidence behind
@@ -187,7 +221,9 @@ def render(league: str, search: bool = False) -> None:
         lean_recs = PR.lean_records(league, recs=picks)
     except Exception:                                           # noqa: BLE001
         lean_recs = {}
-    if not any(rules.get(k) is not None for k in ("spread", "total", "ml")):
+    cust = _commercial()
+    no_rule = not any(rules.get(k) is not None for k in ("spread", "total", "ml"))
+    if no_rule and not cust:
         st.info(f"**Why every {title} game line says Pass.** No game-line rule for this league has beaten the books "
                 "in testing, so the model is a second opinion here, not a pick. Each row's Why shows how far the "
                 "model is from the book in that game and how gaps of that size have done lately. The tested picks "
@@ -196,10 +232,12 @@ def render(league: str, search: bool = False) -> None:
         st.table(pd.DataFrame([{**r, "Hit rate": "—" if r["Hit rate"] is None else f"{r['Hit rate']:.0%}"}
                                for r in PR.band_table(league, lean_recs)]).set_index("Gap size"))
         st.caption("A −110 spread needs 52.4% to break even. Fewer than 20 graded games is too few to judge.")
-    if upcoming:
+    if upcoming and not cust:
         upcoming = _show_filter(f"hg_use_{league}", upcoming, league)
     st.markdown(f"##### Upcoming ({len(upcoming)})")
-    if not upcoming:
+    if upcoming and cust:
+        _previews(league, upcoming, lean_recs, no_rule)
+    elif not upcoming:
         st.info(f"No upcoming {title} games for {day:%a %b %d}" + (f" ({slot})" if slot != "All slate" else "")
                 + ". The capture runs every 3 hours; games appear once the books post lines.")
     else:
@@ -245,7 +283,7 @@ def render(league: str, search: bool = False) -> None:
             hide_index=True, width="stretch")
     st.markdown("##### Tracking record")
     st.caption(honesty_line(done, league))                      # Nov 12: the check that caught tennis, every league
-    tagged = [p for p in done if p.get("use")]
+    tagged = [] if cust else [p for p in done if p.get("use")]     # Nov 16: the by-Use table is the owner's view
     if tagged:
         rows = []
         for label, keep in ((PE.MOST_PROBABLE, lambda p: p.get("lock")), (PE.USE_SINGLE, lambda p: p.get("use") == PE.USE_SINGLE),
