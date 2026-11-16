@@ -557,7 +557,9 @@ def render_game_context(market: str) -> dict:
             store[skey] = auto
             if auto.get("lines"):
                 store[gkey] = auto["lines"]
-    with st.expander("🎲 Game lines, rest & the market", expanded=not (store.get(skey) or {}).get("offers")):
+    _have = bool((store.get(skey) or {}).get("offers"))
+    with st.expander("🎲 Game lines, rest & the market · " + ("book lines loaded" if _have else "no book lines loaded yet"),
+                     expanded=False):
         c1, c2 = st.columns([2, 3])
         with c1:
             cost = len(PO.GAME_MARKETS) + len(fetch_keys)
@@ -853,17 +855,31 @@ def render_ticket(all_rows, market):
             st.rerun()
 
 
+READ_KEY = ("**Pick** = the side with the best value at the price (🎲 = under 50% to hit, worth it only "
+            "because the price pays more — common on plus-money hockey and low-count props); **Chance** = how "
+            "likely it is; **Lean** = 🟢/🔴 only when "
+            "that side has **+3% value at the price shown** (no price: the projection 5%+ past the line and "
+            "55%+ to hit). **Cushion** = how far the projection sits past the line (⚠️ under 15%: close to a coin "
+            "flip — keep those out of parlays). **Milestones** = the model's chance of each **N+** rung "
+            "around his projection. Low counts (rebounds, assists, blocks, steals, "
+            "receptions, shots, goals) use count odds, not a bell curve. **Notes** flag back-to-backs, blowout "
+            "risk, game script and next-man-up bumps. Overtime isn't modelled.")
+
 if tab_props is not None:
     with tab_props:
         menu, default_m, mhelp = _market_menu()
         if PFAM == "hockey":
             st.info(HP.PRIMER, icon="🏒")
-        st.caption("Every player, for the market you pick. **Projection** = his recent rate × his expected "
-                   + {"basketball": "minutes", "football": "volume (targets / carries / attempts)",
-                      "hockey": "ice time"}.get(PFAM, "volume")
-                   + " × the matchup × the game environment. Teammates ruled out hand their volume to the next men up "
-                     "(**↑**). Type or load a **Line** and odds for a hit rate, a probability blended with the "
-                     "books' and a lean that needs real value at your price.")
+        # Nov 16: results first. The page opened on a paragraph, an open lines panel and four switches before any
+        # read; the explanations and the switches are now folded away (one click), so Market -> best reads -> tables.
+        with st.expander("ℹ️ How to read this"):
+            st.caption("Every player, for the market you pick. **Projection** = his recent rate × his expected "
+                       + {"basketball": "minutes", "football": "volume (targets / carries / attempts)",
+                          "hockey": "ice time"}.get(PFAM, "volume")
+                       + " × the matchup × the game environment. Teammates ruled out hand their volume to the next men up "
+                         "(**↑**). Type or load a **Line** and odds for a hit rate, a probability blended with the "
+                         "books' and a lean that needs real value at your price.")
+            st.caption(READ_KEY)
         pc1, pc2 = st.columns([1, 2])
         with pc1:
             mkey = "pm_props_market" if PFAM == "basketball" else f"pm_props_market_{PFAM}"
@@ -903,22 +919,28 @@ if tab_props is not None:
                         (st.warning if pace["label"] != "Normal pace" else st.caption)(
                             msg + (" Load or type the game total to fold this into every projection."
                                    if abs(pace["pct"]) >= PPR.PACE_FLAG_PCT else ""))
-            v1, v2 = st.columns(2)
-            with v1:
-                st.toggle("✏️ Enter my own lines & prices", key="pm_props_edit",
-                          help="Switches the tables to edit mode: type your book's line and odds for any player. What you "
-                               "type is kept when you switch back.")
-            with v2:
-                st.toggle("Show the model's working", key="pm_props_details",
-                          help="Adds minutes / volume, recent form, the matchup and the game-environment adjustment.")
-            st.radio("Side", list(C.SIDES), horizontal=True, key="pm_props_side",
-                     help="Show only the players whose Pick is the Under (or the Over). The ticket builder and the "
-                          "Bet Log list still see every player. Ignored while you're entering your own lines.")
-            st.toggle("📰 I've checked the news for the ⚠️ market-disagreement plays", key="pm_news_checked",
-                      help="When the books' line is far from the model's projection (20%+ and more than his usual "
-                           "game-to-game swing), the market usually knows something — a minutes limit, a role change, "
-                           "an injury. Those plays get no lean until you've checked. Even then the model only gets "
-                           "20% of the vote on them.")
+            _on = [n for n, k in (("my own lines", "pm_props_edit"), ("model's working", "pm_props_details"),
+                                  ("news checked", "pm_news_checked")) if st.session_state.get(k)]
+            _sd = st.session_state.get("pm_props_side", "All Sides")
+            _on += [_sd] if _sd != "All Sides" else []
+            with st.expander("⚙️ Options: my own lines, the model's working, side, news check"
+                             + (f" · on: {', '.join(_on)}" if _on else ""), expanded=bool(st.session_state.get("pm_props_edit"))):
+                v1, v2 = st.columns(2)
+                with v1:
+                    st.toggle("✏️ Enter my own lines & prices", key="pm_props_edit",
+                              help="Switches the tables to edit mode: type your book's line and odds for any player. What you "
+                                   "type is kept when you switch back.")
+                with v2:
+                    st.toggle("Show the model's working", key="pm_props_details",
+                              help="Adds minutes / volume, recent form, the matchup and the game-environment adjustment.")
+                st.radio("Side", list(C.SIDES), horizontal=True, key="pm_props_side",
+                         help="Show only the players whose Pick is the Under (or the Over). The ticket builder and the "
+                              "Bet Log list still see every player. Ignored while you're entering your own lines.")
+                st.toggle("📰 I've checked the news for the ⚠️ market-disagreement plays", key="pm_news_checked",
+                          help="When the books' line is far from the model's projection (20%+ and more than his usual "
+                               "game-to-game swing), the market usually knows something — a minutes limit, a role change, "
+                               "an injury. Those plays get no lean until you've checked. Even then the model only gets "
+                               "20% of the vote on them.")
             top = st.container()
             away_rows = render_props_team(bundle["away"], bundle["home"], away_name, home_name, market, mode, tables, g)
             st.divider()
@@ -950,15 +972,6 @@ if tab_props is not None:
                 elif not reads:
                     st.caption("No lean clears the bar: every line the model disagrees with is in the ⚠️ table below, "
                                "held until the news is checked, and the rest show no edge at the price.")
-            st.caption("**Pick** = the side with the best value at the price (🎲 = under 50% to hit, worth it only "
-                       "because the price pays more — common on plus-money hockey and low-count props); **Chance** = how "
-                       "likely it is; **Lean** = 🟢/🔴 only when "
-                       "that side has **+3% value at the price shown** (no price: the projection 5%+ past the line and "
-                       "55%+ to hit). **Cushion** = how far the projection sits past the line (⚠️ under 15%: close to a coin "
-                       "flip — keep those out of parlays). **Milestones** = the model's chance of each **N+** rung "
-                       "around his projection. Low counts (rebounds, assists, blocks, steals, "
-                       "receptions, shots, goals) use count odds, not a bell curve. **Notes** flag back-to-backs, blowout "
-                       "risk, game script and next-man-up bumps. Overtime isn't modelled.")
             render_ticket(all_rows, market)
             log_fn = {"football": FP.plays_for_log, "hockey": HP.plays_for_log}.get(PFAM, PPR.plays_for_log)
             plays = log_fn(all_rows, market, f"{away_name} @ {home_name}")
