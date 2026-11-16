@@ -125,6 +125,11 @@ def _http(url: str, params: Optional[Dict] = None):
     for i in range(3):
         try:
             r = requests.get(url, params=params, timeout=25, headers={"User-Agent": "Mozilla/5.0"})
+            try:                                                # Nov 16: Odds API credit meter (no-op elsewhere)
+                import odds_meter
+                odds_meter.record(url, r.headers)
+            except Exception:                                   # noqa: BLE001
+                pass
             if r.status_code == 200:
                 return r.json()
             if r.status_code in (400, 404):

@@ -28,6 +28,11 @@ def snapshot(key: str, iso: str, markets: str = "h2h,spreads,totals", regions: s
             time.sleep(2)
             continue
         _calls["n"] += 1
+        try:                                                    # Nov 16: the platform's credit meter (job "research")
+            import odds_meter
+            odds_meter.record(BASE.format(key=key), r.headers)
+        except Exception:                                       # noqa: BLE001
+            pass
         try:
             _calls["credits"] += int(r.headers.get("x-requests-last") or 0)
             _calls["remaining"] = r.headers.get("x-requests-remaining")

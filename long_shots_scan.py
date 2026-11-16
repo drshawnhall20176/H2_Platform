@@ -92,7 +92,7 @@ def scan(sport: str, day: str, api_key: str, book: str = "draftkings", now: Opti
     meta = [m for m in meta or [] if _today(m)]
     if not meta:
         return {"at": now.isoformat(), "rows": [], "top": [], "games": 0}
-    offers = BBD.fetch_generic_offers(sport, day, api_key)
+    offers = BBD.recent_offers(sport, day, api_key)      # Nov 16: the board warm-slates just built, when fresh
     reads = BBD.slate_reads_for(sport, day, meta, offers, book) or {}
     evs = O.fetch_events_all(api_key, sport=sp.odds_sport_key)
     alts = list(LS.SPORTS[sport]["alt"])

@@ -54,6 +54,42 @@ st.caption("Tracks the file-based sources refreshed by refresh-statcast.yml and 
           "of a committed file, a genuinely different mechanism, and isn't tracked here yet.")
 
 st.divider()
+C.section_header("🪙", "Odds API credits — where they go")
+st.caption("Counted from what the Odds API itself reports for each call (odds_meter.py, since Nov 16). "
+           "A job marked (manual) was started by hand; \"app\" is this app's own page loads. "
+           "Days before the meter was added show nothing.")
+try:
+    import odds_meter as OM
+    import model_store as MS
+    from datetime import datetime as _dt, timedelta as _td
+    import pytz as _pytz
+    _today = _dt.now(_pytz.timezone("US/Eastern")).date()
+    _rows = MS.odds_usage((_today - _td(days=6)).strftime("%Y-%m-%d"))
+    _left = MS.odds_remaining()
+    if _left:
+        st.metric("Credits left (newest reading)", f"{_left['remaining']:,}",
+                  help=f"Seen {str(_left['ts'])[:16].replace('T', ' ')} UTC")
+    if not _rows:
+        st.info("No usage recorded yet. Totals appear after the next scheduled job or priced page load.")
+    else:
+        _d = pd.DataFrame(OM.by_day(_rows)).rename(columns={"day": "Day", "credits": "Credits", "calls": "Calls"})
+        _j = pd.DataFrame(OM.by_job(_rows)).rename(columns={"day": "Day", "job": "Job", "credits": "Credits",
+                                                            "calls": "Calls"})
+        _c1, _c2 = st.columns([1, 2])
+        with _c1:
+            st.markdown("**Per day**")
+            st.dataframe(_d, hide_index=True, width="stretch")
+        with _c2:
+            st.markdown("**Per job, biggest first**")
+            st.dataframe(_j, hide_index=True, width="stretch")
+        with st.expander("By job and feed (sport and kind of call)"):
+            _f = pd.DataFrame(sorted(_rows, key=lambda r: (r["day"], r["credits"]), reverse=True)).rename(
+                columns={"day": "Day", "job": "Job", "feed": "Feed", "credits": "Credits", "calls": "Calls"})
+            st.dataframe(_f, hide_index=True, width="stretch")
+except Exception as _exc:                                       # noqa: BLE001 -- never blocks the rest of the page
+    st.caption(f"Usage table unavailable ({type(_exc).__name__}).")
+
+st.divider()
 C.section_header("🔌", "Live Odds API diagnostic")
 st.caption("Checks what market keys and books the Odds API is actually returning for tonight's "
           "slate — the direct answer to 'is my API key configured, and does it have coverage "

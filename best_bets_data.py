@@ -667,7 +667,53 @@ def fetch_generic_offers(sport_key: str, date_str: str, api_key: str) -> List[Di
         _FETCH_INFO[(sport_key, date_str)] = {"listing_error": str(exc)[:200]}
         raise
     _FETCH_INFO[(sport_key, date_str)] = info
+    _keep_offers(sport_key, date_str, offers)
     return offers
+
+
+# Nov 16: the long-shots scan runs right after warm-slates builds the boards, in a new process -- and paid for the
+# whole props slate a second time. A scheduled job's fetch is now kept (one saved copy per sport and day), and the
+# scan reads it when it is fresh. Only jobs save (GITHUB_ACTIONS): the apps keep their own 5-minute cache.
+OFFERS_KEY = "slate_offers:{sport}:{date}"
+OFFERS_FRESH_MIN = 45
+
+
+def _keep_offers(sport_key: str, date_str: str, offers: List[Dict]) -> None:
+    import os
+    if not offers or not os.environ.get("GITHUB_ACTIONS"):
+        return
+    try:
+        from datetime import datetime, timezone
+        import model_store as MS
+        MS.save_setting(OFFERS_KEY.format(sport=sport_key, date=date_str),
+                        {"at": datetime.now(timezone.utc).isoformat(), "offers": offers})
+    except Exception:                                           # noqa: BLE001
+        pass
+
+
+def saved_offers(sport_key: str, date_str: str, max_age_min: float = OFFERS_FRESH_MIN, now=None,
+                 get=None) -> Optional[List[Dict]]:
+    """The props offers a scheduled job saved for this slate, if no older than `max_age_min`; else None."""
+    from datetime import datetime, timezone
+    try:
+        if get is None:
+            import model_store as MS
+            get = MS.get_setting
+        got = get(OFFERS_KEY.format(sport=sport_key, date=date_str))
+        if not got or not got.get("offers"):
+            return None
+        at = datetime.fromisoformat(str(got["at"]))
+        at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+        age = ((now or datetime.now(timezone.utc)) - at).total_seconds() / 60.0
+        return got["offers"] if 0 <= age <= max_age_min else None
+    except Exception:                                           # noqa: BLE001
+        return None
+
+
+def recent_offers(sport_key: str, date_str: str, api_key: str) -> List[Dict]:
+    """Saved offers when fresh (no credits), else a live fetch."""
+    got = saved_offers(sport_key, date_str)
+    return got if got is not None else fetch_generic_offers(sport_key, date_str, api_key)
 
 
 # --------------------------------------------------------------------------- one model on every page (Oct 28)
