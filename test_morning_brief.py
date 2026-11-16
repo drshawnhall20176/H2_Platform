@@ -116,3 +116,7 @@ def test_picks_rebuild_stale_boards_first(monkeypatch):
                              load=lambda k, d: saved.get(k))
     assert done == ["NBA", "NCAAMB"] == built                   # stale + missing; fresh NHL and off-season NCAAF left
     assert MB.stale(None) and not MB.stale(now) and "NCAAMB" in MB.PROPS_SPORTS
+
+
+def test_script_learn_gets_a_longer_lookback():
+    assert MB.EXTRA_LOOKBACK_HOURS["script-learn.yml"] >= 12
