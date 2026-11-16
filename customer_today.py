@@ -87,3 +87,26 @@ def summary(props: List[Dict], lines: List[Dict]) -> Dict:
     sports_ = sorted({r["Sport"] for r in props + lines if r.get("Sport")})
     return {"picks": len(props), "winning": sum(r["Standing"] == WINNING for r in props), "lines": len(lines),
             "sports": sports_}
+
+
+def top_cards(rows: List[Dict], records_for: Optional[Callable] = None, n: int = 4) -> List[Dict]:
+    """Nov 16: the day's strongest player picks across every sport, as cards for the top of Home: pick types with a
+    winning 30-day record only, locks first, then the highest chance, one per player.
+    [{sport, pick, chance, price, game, time, record, lock}]"""
+    rows = [dict(r) for r in rows or [] if r.get("kind") == "Prop"]
+    PR.annotate_props(rows, records_for or PR.tag_records)
+    rows = [r for r in rows if standing(r.get("verdict")) == WINNING]
+    rows.sort(key=lambda r: (0 if r.get("lock") else 1, -(r.get("chance") or 0)))
+    out, seen = [], set()
+    for r in rows:
+        who = (r.get("sport"), r.get("player") or r.get("pick"))
+        if who in seen:
+            continue
+        seen.add(who)
+        out.append({"sport": r.get("sport"), "pick": r.get("pick"), "chance": r.get("chance"),
+                    "price": _price(r.get("price")) + (f" · {r['book']}" if r.get("book") and r.get("price") is not None else ""),
+                    "game": r.get("game") or "", "time": r.get("time") or "", "record": r.get("record") or "",
+                    "lock": bool(r.get("lock"))})
+        if len(out) >= n:
+            break
+    return out
