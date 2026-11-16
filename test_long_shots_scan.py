@@ -53,3 +53,23 @@ def test_disagreements_with_the_book_are_not_most_probable():
     threes = _r("Thomas", 471, 0.32, 0.8, market="Threes Made", proj=3.2, main=1.5)
     assert [r["Player"] for r in LSS.pick_top([sharpe, kyrie, threes])] == ["Kyrie"]
     assert not LSS.agrees({"Projection": 6.0})                          # no main line: can't tell
+
+
+def test_lead_cards_put_tested_markets_first_and_say_which_is_which():
+    # Nov 16: the Long Shots page opens on the day's scan
+    saved = {"at": "2026-11-16T20:00:00+00:00", "games": 7,
+             "top": [{"pick": "A 8+ Assists", "Price": 650, "Honest chance": 0.14, "Book says": 0.13, "EV per $1": 0.05,
+                      "game": "X @ Y", "time": "7:00 PM", "tested": False, "Market": "Points"},
+                     {"pick": "B 10+ Assists", "Price": 900, "Honest chance": 0.11, "Book says": 0.10, "EV per $1": 0.10,
+                      "game": "X @ Y", "time": "7:00 PM", "tested": True, "Market": "Assists"},
+                     {"Player": "C", "Bet": "30+ Points", "Price": 500, "Honest chance": 0.18, "tested": False, "Market": "Points"}],
+             "rows": [{"pick": "A 8+ Assists", "Price": 650, "Honest chance": 0.14, "tested": False, "Market": "Points"},
+                      {"pick": "B 10+ Assists", "Price": 900, "Honest chance": 0.11, "tested": True, "Market": "Assists"}]}
+    cards = LSS.lead_cards(saved)
+    assert [c["pick"] for c in cards] == ["B 10+ Assists", "C 30+ Points", "A 8+ Assists"]
+    assert cards[0]["tested"] and cards[0]["note"] == LSS.TESTED_NOTE and cards[1]["note"] == LSS.UNTESTED_NOTE
+    assert cards[0]["price"] == 900 and cards[0]["game"] == "X @ Y" and cards[1]["game"] == ""
+    assert len(LSS.lead_cards(saved, n=2)) == 2 and LSS.lead_cards(None) == [] and LSS.lead_cards({"top": []}) == []
+    rows = LSS.all_rows(saved)
+    assert [r["Pick"] for r in rows] == ["B 10+ Assists", "A 8+ Assists"] and rows[0]["Market"] == "✅ Assists"
+    assert LSS.all_rows(None) == []
