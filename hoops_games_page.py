@@ -329,14 +329,13 @@ def render(league: str, search: bool = False) -> None:
     slot = c2.selectbox("Time slot", ["All slate"] + slots, key=f"hg_slot_{league}")
     if slot != "All slate":
         on_day = [p for p in on_day if sports.slot_of(_et(p)) == slot]
+    _teams = C.team_names(on_day)                               # every team in this slate / slot, before the Game filter
     on_day = C.game_select(on_day, key=f"hg_game_{league}", container=c3)       # Nov 7: Game filter, tip order
+    if _teams:                                                  # Nov 16: a dropdown on every league (was a text box, some leagues)
+        on_day = C.team_select(on_day, key=f"hg_team_{league}", options=_teams)
     upcoming = [p for p in on_day if str(p.get("kickoff")) > now and p.get("result") is None]
     finished = [p for p in on_day if p not in upcoming]
     if search and on_day:
-        q = st.text_input("Find a team", key=f"hg_q_{league}").strip()
-        if q:
-            upcoming = [p for p in upcoming if q.lower() in f"{p['home']} {p['away']}".lower()]
-            finished = [p for p in finished if q.lower() in f"{p['home']} {p['away']}".lower()]
         if not _commercial() and st.toggle("Only games with a tracking pick", key=f"hg_only_{league}"):
             upcoming = [p for p in upcoming if _pick(p) != "—"]
             finished = [p for p in finished if _pick(p) != "—"]
@@ -569,7 +568,10 @@ def render_fair(league: str) -> None:
     slot = c2.selectbox("Time slot", ["All slate"] + slots, key=f"hg_slot_{league}")
     if slot != "All slate":
         on_day = [p for p in on_day if sports.slot_of(_et(p)) == slot]
+    _teams = C.team_names(on_day)
     on_day = C.game_select(on_day, key=f"hg_game_{league}")                     # Nov 7: Game filter, tip order
+    if _teams:
+        on_day = C.team_select(on_day, key=f"hg_team_{league}", options=_teams)  # Nov 16: Find a team, every Game Lab
     upcoming = C.by_kickoff([p for p in on_day if str(p.get("kickoff")) > now and p.get("result") is None])
     finished = C.by_kickoff([p for p in on_day if p not in upcoming])
     if league in getattr(I, "GENIUS_COMPS", {}):
