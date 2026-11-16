@@ -45,7 +45,7 @@ def test_spotlight_prefers_hot_leans_and_never_lists_cold_ones():
     assert GP.spotlight([]) == []
 
 
-def test_game_lab_shows_previews_to_customers_and_the_pick_table_to_the_owner(monkeypatch):
+def test_game_lab_shows_previews_on_every_build_with_the_owners_columns(monkeypatch):
     from datetime import datetime, timedelta, timezone
     from streamlit.testing.v1 import AppTest
     import model_store as MS
@@ -69,5 +69,19 @@ def test_game_lab_shows_previews_to_customers_and_the_pick_table_to_the_owner(mo
     at.secrets["AUDIENCE"] = "owner"
     at.run()
     assert not at.exception
-    owner = [d.value for d in at.dataframe if "Why" in d.value.columns][0]
-    assert "Use" in owner.columns and any("says Pass" in i.value for i in at.info)
+    owner = [d.value for d in at.dataframe if "Model leans" in d.value.columns][0]
+    # the same previews are the standard on the owner build, with the Use column and the owner's extra columns
+    assert list(owner.columns[:6]) == ["Tip (ET)", "Game", "Use", "Model leans", "Gap (pts)", "Form (30 days)"]
+    assert {"Long backtest", "Tracking pick", "Why"} <= set(owner.columns) and "Pick" not in owner.columns
+    assert list(owner["Use"]) == [PE.USE_PASS, PE.USE_PASS] and list(owner["Model leans"]) == ["H1 -10.5", "A2 +36.5"]
+    assert any("Previews, not picks" in i.value for i in at.info)
+    assert any(r.label.startswith("☑️ Tick games") for r in at.radio)          # the owner still ticks rows to log
+
+
+def test_owner_rows_carry_use_and_extras_and_keep_their_place_for_logging():
+    rows = GP.preview_rows("NCAAMB", [_g(1, 1.1), _g(2, -19.1)], RECS, lambda p: "", use=lambda p: PE.USE_PASS,
+                           extras=lambda p: {"Long backtest": "51%"})
+    assert [r["_i"] for r in rows] == [0, 1] and rows[0]["Use"] == PE.USE_PASS and "Pick" not in rows[0]
+    by_gap = sorted(rows, key=lambda r: -r["Gap (pts)"])
+    assert [r["_i"] for r in by_gap] == [1, 0]                                 # a ticked row maps back to its game
+    assert list(GP.public(rows)[0])[-1] == "Long backtest" and "_i" not in GP.public(rows)[0]

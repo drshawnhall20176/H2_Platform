@@ -3,7 +3,8 @@ game_previews.py — the customer's view of a Game Lab (Nov 16).
 
 The owner's Game Lab is a pick table: Use, Why, Est. cover, tick-to-log. For a league with no tested game-line rule
 (college basketball, NBA, NHL) that is a page of ⛔ Pass, which is accurate and reads as "this tool is useless" to a
-paying member. The customer sees the same games as PREVIEWS: the projected score, who the model thinks wins, the
+paying member. Nov 16 (later the same day): the owner made this the standard on every build -- the owner and Discord
+apps show the same previews, with the Use column and (owner only) tick-to-log. Everyone sees the games as PREVIEWS: the projected score, who the model thinks wins, the
 model's line beside the book's, which side it leans to and by how much -- and how leans of that size have actually
 done over the last 30 days ("form"). Nothing here is called a pick unless a tested rule made it one.
 
@@ -63,8 +64,11 @@ def _lean(p: Dict) -> str:
 
 
 def preview_rows(league: str, picks: List[Dict], recs: Optional[Dict], tip: Callable[[Dict], str],
-                 tag: Optional[Callable[[Dict], Dict]] = None) -> List[Dict]:
-    """One row per game, in the order given. "Pick" is filled only where a tested rule tagged the game playable."""
+                 tag: Optional[Callable[[Dict], Dict]] = None, use: Optional[Callable[[Dict], str]] = None,
+                 extras: Optional[Callable[[Dict], Dict]] = None) -> List[Dict]:
+    """One row per game, in the order given. "Pick" is filled only where a tested rule tagged the game playable.
+    The owner and Discord builds pass `use` (the site-wide Use symbol, shown instead of Pick) and `extras` (more
+    columns at the end): the same preview, with the owner's columns."""
     import props_engine as PE
     out = []
     for p in picks or []:
@@ -76,15 +80,16 @@ def preview_rows(league: str, picks: List[Dict], recs: Optional[Dict], tip: Call
         w, n = (recs or {}).get(("Spread", b), (0, 0)) if b is not None else (0, 0)
         t = tag(p) if tag else {}
         playable = t.get("use") in (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE)
-        out.append({"Tip (ET)": tip(p), "Game": f"{p.get('away')} @ {p.get('home')}",
-                    "Pick": (("🔒 " if t.get("lock") else "") + str(t.get("use"))) if playable else "",
+        lead = {"Use": use(p)} if use else {"Pick": (("🔒 " if t.get("lock") else "") + str(t.get("use"))) if playable else ""}
+        out.append({"Tip (ET)": tip(p), "Game": f"{p.get('away')} @ {p.get('home')}", **lead,
                     "Model leans": _lean(p), "Gap (pts)": None if e is None else round(abs(e), 1),
                     "Form (30 days)": form_text(w, n) if b is not None else "—",
                     "Projected score": _score(p), "Model's winner": _winner(p),
                     "Book line": "—" if hs is None else f"{p.get('home')} {hs:+g}",
                     "Model line": "—" if mm is None else f"{p.get('home')} {-mm:+.1f}",
                     "Total: model / book": f"{p.get('model_total')} / {p.get('line_total') or '—'}",
-                    "_form": form_of(w, n) if b is not None else NEW})
+                    **(extras(p) if extras else {}),
+                    "_form": form_of(w, n) if b is not None else NEW, "_i": len(out)})
     return out
 
 
