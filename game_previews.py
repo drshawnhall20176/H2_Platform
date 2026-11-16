@@ -106,3 +106,18 @@ def public(rows: List[Dict]) -> List[Dict]:
     """Rows for display: private keys dropped; the Pick column only when some game has one."""
     any_pick = any(r.get("Pick") for r in rows or [])
     return [{k: v for k, v in r.items() if not k.startswith("_") and (any_pick or k != "Pick")} for r in rows or []]
+
+
+def sim_row(label: str, kick: str, home: str, away: str, res: Optional[Dict]) -> Dict:
+    """One slate row from a game simulation (the NFL Game Lab: no book line is stored, so no lean or form).
+    `res`: {"home_win_prob", "proj_spread" (home minus away), "proj_total", "proj_home_score", "proj_away_score"}."""
+    if not res:
+        return {"Kickoff (ET)": kick, "Game": label, "Projected score": "—", "Model's winner": "—",
+                "Model spread": "—", "Model total": None, "_close": 1.0}
+    hp = res["home_win_prob"]
+    fav, margin = (home, res["proj_spread"]) if res["proj_spread"] > 0 else (away, -res["proj_spread"])
+    return {"Kickoff (ET)": kick, "Game": label,
+            "Projected score": f"{res['proj_away_score']:.0f}–{res['proj_home_score']:.0f}",
+            "Model's winner": f"{home} {hp:.0%}" if hp >= 0.5 else f"{away} {1 - hp:.0%}",
+            "Model spread": f"{fav} -{margin:.1f}", "Model total": round(res["proj_total"], 1),
+            "_close": abs(hp - 0.5)}
