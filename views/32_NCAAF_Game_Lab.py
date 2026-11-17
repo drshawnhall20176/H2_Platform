@@ -120,6 +120,7 @@ with st.expander("📐 Ratings model v2 — college spreads (tracking)", expande
             _prev = GPV.preview_rows(
                 "NCAAF", [_norm(p) for p in _ord], _recs, _kick,
                 use=lambda p: ("⚠️ held: " if p.get("held") else "") + (p.get("pick_label") or "—"),
+                tag=lambda p: {"use": "🎯 Single"} if p.get("pick_label") and not p.get("held") else {},
                 extras=lambda p: {"News check": " · ".join(p.get("flags") or []) or "—"})
             for r in _prev:
                 r["Tracking pick"] = r.pop("Use")                       # this page's picks are tracked, not Use tags
@@ -129,12 +130,12 @@ with st.expander("📐 Ratings model v2 — college spreads (tracking)", expande
             if _top:
                 st.markdown("**Worth a look first**")
                 for r in _top:
-                    st.markdown(f"- **{r['Model leans']}** ({r['Game']}, {r['Tip (ET)']}): the model is "
+                    st.markdown(f"- **{r['_lean']}** ({r['Game']}, {r['Tip (ET)']}): a tracking pick; the model is "
                                 f"{r['Gap (pts)']:.1f} points from the book. Leans of this size: {r['Form (30 days)']}.")
             if st.toggle("Biggest disagreements first", value=False, key="ncaaf_v2_bygap"):
                 _prev = sorted(_prev, key=lambda r: -(r["Gap (pts)"] or 0))
-            _cols = ["Tip (ET)", "Game", "Model leans", "Gap (pts)", "Form (30 days)", "Projected score",
-                     "Model's winner", "Book line", "Model line", "Total: model / book", "Tracking pick", "News check"]
+            _cols = ["Tip (ET)", "Game", "Tracking pick", "The model says", "Gap (pts)", "Form (30 days)",
+                     "Total: model / book", "News check"]
             st.dataframe(pd.DataFrame(_prev)[_cols].rename(columns={"Tip (ET)": "Kickoff (ET)"}), hide_index=True,
                          width="stretch")
             st.caption(f"Previews, not picks: form is how leans of that size have done over the last 30 days "
