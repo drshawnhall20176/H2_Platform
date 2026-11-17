@@ -232,10 +232,10 @@ def kpi_row(items: List[dict]) -> None:
         <div style="flex:1;min-width:140px;background:linear-gradient(135deg,{color}22,{color}0d);
                     border:1px solid {color}44;border-radius:12px;padding:14px 16px;"{help_attr}>
           <div style="font-size:22px;line-height:1;">{item.get('icon', '')}</div>
-          <div style="font-size:26px;font-weight:800;margin-top:6px;color:{color};">
+          <div style="font-size:24px;font-weight:650;margin-top:6px;color:{color};font-variant-numeric:tabular-nums;letter-spacing:-0.01em;">
             {item.get('value', '—')}
           </div>
-          <div style="font-size:12.5px;color:#9aa4b2;margin-top:2px;">{item.get('label', '')}</div>
+          <div style="font-size:11.5px;color:#9aa4b2;margin-top:4px;text-transform:uppercase;letter-spacing:0.05em;font-weight:500;">{item.get('label', '')}</div>
         </div>""")
     st.markdown(
         f'<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:4px;">'

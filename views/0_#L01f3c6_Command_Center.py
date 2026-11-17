@@ -117,12 +117,13 @@ bets = B.list_bets(sport=_active.key)
 s = B.summary(bets)
  
 # ---------- KPI row ----------
-top = plays[0] if plays else None
+_playable = [p for p in plays if grading.playable(p)]          # Nov 17 audit: the top lean is never a ⛔ Pass play
+top = _playable[0] if _playable else None
 _beat_close = s["beat_close_rate"]
 _avg_clv = s["avg_clv"]
 C.kpi_row([
-    {"icon": "⚾", "value": str(n_games), "label": "Tonight's games"},
-    {"icon": "🎲", "value": str(len(plays)), "label": "Model plays"},
+    {"icon": "🏟️", "value": str(n_games), "label": "Tonight's games"},
+    {"icon": "🎲", "value": str(len(_playable)), "label": "Playable model plays"},
     {"icon": "⭐", "value": f"{top['Conviction']:.1f}×" if top else "—", "label": "Top lean",
      "help": f"{top['Player']} {top['Market']} {top['Side']}" if top else None},
     {"icon": "📈", "value": f"{_beat_close:.0f}%" if _beat_close is not None else "—",
