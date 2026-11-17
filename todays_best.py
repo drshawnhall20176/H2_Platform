@@ -416,7 +416,7 @@ def winner_rows(date_str: str, leagues=None, past: bool = False) -> List[Dict]:
                         "winner": team, "chance": chance, "book": book, "price": price,
                         "price_book": p.get("best_home_book") if home else p.get("best_away_book"),
                         "value": value, "use": ml_tag, **best,
-                        "_gaps": _lean_gaps(p, lg), **_line_text(p),
+                        "_gaps": _lean_gaps(p, lg), **_line_text(p), **spread_move(p, lg),
                         "_rec": {"sport": lg, "home": p.get("home"), "away": p.get("away"), "game_id": p.get("game_id"),
                                  "kickoff": p.get("kickoff")}})
     out.sort(key=lambda r: -r["chance"])
@@ -803,3 +803,36 @@ def market_moves(sport: str, date_str: str, rows: List[Dict], index=None) -> Non
               f"{r['side']} {pf:.0%} → {pl:.0%}"
         r["move"] = "📈 our way" if m["toward"] >= MOVE_MIN else ("📉 against" if m["toward"] <= -MOVE_MIN else "")
         r["move_why"] = why
+
+
+
+# --------------------------------------------------------------------------- spread moving our way (Nov 17)
+# College basketball game lines (research/gl_move.py, 519 graded games with an opening and closing spread): when the
+# spread moved 1+ point toward the model's side between the open and the close, the model's side covered 65% at the
+# opening number and still 54.7% at the closing number (n 143); when it moved against the model, 39.7% / 47.1% (n 156).
+# NBA (99 games) and college football (128) showed no such pattern, so only NCAAMB is marked.
+MOVE_GAME_LEAGUES = ("NCAAMB",)
+MOVE_GAME_MIN = 1.0             # points of spread
+
+
+def spread_move(p: Dict, lg: str) -> Dict:
+    """{"spread_move": "📈 our way" / "📉 against" / "", "spread_move_why": "Duke -5 → -7"} from the saved opening
+    spread to the latest one, judged against the model's side of the CURRENT spread. `line` = the market's expected
+    home margin (home -7 -> 7)."""
+    out = {"spread_move": "", "spread_move_why": ""}
+    if lg not in MOVE_GAME_LEAGUES:
+        return out
+    try:
+        o, l, mm = float(p["open_line"]), float(p["line"]), float(p["model_margin"])
+    except (TypeError, ValueError, KeyError):
+        return out
+    if mm == l:
+        return out
+    home_side = mm > l
+    move = (l - o) if home_side else (o - l)
+    team = p.get("home") if home_side else p.get("away")
+    sp_o, sp_l = (-o, -l) if home_side else (o, l)
+    if abs(move) >= MOVE_GAME_MIN:
+        out["spread_move"] = "📈 our way" if move > 0 else "📉 against"
+        out["spread_move_why"] = f"{team} {sp_o:+g} → {sp_l:+g}"
+    return out

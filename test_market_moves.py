@@ -24,3 +24,13 @@ def test_market_moves_marks_rows():
     TB.market_moves("NBA", "2026-11-17", rows, index=idx)
     assert rows[0]["move"] == "📈 our way" and "Under" in rows[0]["move_why"]
     assert "move" not in rows[1]
+
+
+def test_spread_move_ncaamb():
+    p = {"home": "Duke", "away": "UNC", "open_line": 5.0, "line": 7.0, "model_margin": 9.0}
+    m = TB.spread_move(p, "NCAAMB")
+    assert m["spread_move"] == "📈 our way" and m["spread_move_why"] == "Duke -5 → -7"
+    m2 = TB.spread_move(dict(p, model_margin=4.0), "NCAAMB")       # model likes UNC +7; the line moved away from UNC
+    assert m2["spread_move"] == "📉 against" and m2["spread_move_why"] == "UNC +5 → +7"
+    assert TB.spread_move(p, "NBA")["spread_move"] == ""
+    assert TB.spread_move(dict(p, line=5.5), "NCAAMB")["spread_move"] == ""
