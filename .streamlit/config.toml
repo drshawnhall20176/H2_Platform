@@ -28,4 +28,9 @@ secondaryBackgroundColor = "#1a1f2b"
 textColor = "#e6e6e6"
 borderColor = "#2d3344"
 baseRadius = "medium"
-font = "sans serif"
+# Nov 17 (owner: "fonts like this look quite elementary"): Inter, the standard for data-heavy financial UIs, with
+# tabular figures set in the global CSS (streamlit_app.GLOBAL_CSS) so numbers line up in columns.
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, sans-serif"
+headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, sans-serif"
+baseFontSize = 15
+headingFontWeights = [700, 650, 600, 600, 600, 600]

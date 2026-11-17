@@ -64,7 +64,7 @@ def _today_sidebar() -> None:
     except Exception:                                           # noqa: BLE001
         rows = []
     with st.sidebar:
-        st.markdown("**📊 How the model has done (30 days)**")
+        st.markdown("**📊 Model record · last 30 days**")
         if not rows:
             st.caption("The record appears after the first morning reviews.")
             return
@@ -82,12 +82,32 @@ def _today_sidebar() -> None:
                        ". Refit every morning; it rises only when the model beats the books on held-out games.")
 
 
+# Nov 17 (owner: "a site that is considered professional ... fonts like this look quite elementary"): one set of
+# type rules for every page. Big st.metric numbers were 2.25rem in the default weight -- they read like a scoreboard,
+# not a trading desk. Values are now 1.55rem semibold with tabular figures; labels are small, muted and tracked.
+GLOBAL_CSS = """
+<style>
+html, body, [class*="st-"] { font-feature-settings: "tnum" 1, "cv11" 1; }
+[data-testid="stMetricValue"] { font-size: 1.55rem !important; font-weight: 600 !important; line-height: 1.2 !important;
+    letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+[data-testid="stMetricValue"] > div { font-size: inherit !important; }
+[data-testid="stMetricLabel"] p, [data-testid="stMetricLabel"] { font-size: 0.74rem !important; font-weight: 500 !important;
+    text-transform: uppercase; letter-spacing: 0.05em; color: #9aa4b2 !important; }
+[data-testid="stMetricDelta"] { font-size: 0.78rem !important; }
+[data-testid="stDataFrame"] { font-variant-numeric: tabular-nums; }
+[data-testid="stCaptionContainer"] { color: #9aa4b2; }
+h1 { letter-spacing: -0.02em; } h2, h3, h4 { letter-spacing: -0.01em; }
+</style>
+"""
+
+
 def run():
     # Real H2 Sports mark as the browser tab icon when the asset is present, the original
     # emoji as an honest fallback otherwise (a stripped-down deploy missing assets/ should never
     # crash page config) -- same fail-soft posture components.hero_banner's own logo uses.
     page_icon = str(_H2_MARK) if _H2_MARK.exists() else "⚾"
-    st.set_page_config(page_title="H2 Sports MLB Dashboard", page_icon=page_icon, layout="wide")
+    st.set_page_config(page_title="H2 Sports", page_icon=page_icon, layout="wide")
+    st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 
     # Sport selector state must be set BEFORE building navigation (it drives which pages show).
     # We read/set session state directly here rather than rendering UI, so the sidebar widget

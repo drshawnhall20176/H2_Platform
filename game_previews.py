@@ -63,6 +63,27 @@ def _lean(p: Dict) -> str:
     return f"{p.get('home')} {hs:+g}" if e >= 0 else f"{p.get('away')} {-hs:+g}"
 
 
+def _by(team, pts) -> str:
+    return f"{team} by {pts:g}"
+
+
+def says(p: Dict, playable: bool = False) -> str:
+    """Nov 17 (owner: "Model leans, Model's winner, Book line, Model line are telling different stories"): ONE
+    sentence in place of those four columns -- who the model has winning and by how much, the same for the book,
+    and the side of the spread that difference points to. A game without a tested rule says "No bet" first, so a
+    lean is never read as a pick."""
+    hs, mm = PR._num(p.get("home_spread")), PR._num(p.get("model_margin"))
+    if hs is None or mm is None:
+        return "—"
+    home, away = p.get("home"), p.get("away")
+    model = "a toss-up" if abs(mm) < 0.5 else _by(home, round(mm, 1)) if mm > 0 else _by(away, round(-mm, 1))
+    bm = -hs
+    book = "pick'em" if bm == 0 else _by(home, bm) if bm > 0 else _by(away, -bm)
+    lean = _lean(p)
+    head = "" if playable else "No bet — "
+    return f"{head}model: {model} · book: {book} → leans {lean}"
+
+
 def preview_rows(league: str, picks: List[Dict], recs: Optional[Dict], tip: Callable[[Dict], str],
                  tag: Optional[Callable[[Dict], Dict]] = None, use: Optional[Callable[[Dict], str]] = None,
                  extras: Optional[Callable[[Dict], Dict]] = None) -> List[Dict]:
@@ -81,25 +102,31 @@ def preview_rows(league: str, picks: List[Dict], recs: Optional[Dict], tip: Call
         t = tag(p) if tag else {}
         playable = t.get("use") in (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE)
         lead = {"Use": use(p)} if use else {"Pick": (("🔒 " if t.get("lock") else "") + str(t.get("use"))) if playable else ""}
+        try:
+            import todays_best as TB
+            mv = TB.spread_move(p, league)
+        except Exception:                                       # noqa: BLE001
+            mv = {}
+        move = " ".join(x for x in (mv.get("spread_move") or "", f"({mv['spread_move_why']})"
+                                    if mv.get("spread_move_why") else "") if x)
         out.append({"Tip (ET)": tip(p), "Game": f"{p.get('away')} @ {p.get('home')}", **lead,
-                    "Model leans": _lean(p), "Gap (pts)": None if e is None else round(abs(e), 1),
+                    "The model says": says(p, playable), "Gap (pts)": None if e is None else round(abs(e), 1),
+                    **({"Spread move": move} if league in getattr(TB, "MOVE_GAME_LEAGUES", ()) else {}),
                     "Form (30 days)": form_text(w, n) if b is not None else "—",
-                    "Projected score": _score(p), "Model's winner": _winner(p),
-                    "Book line": "—" if hs is None else f"{p.get('home')} {hs:+g}",
-                    "Model line": "—" if mm is None else f"{p.get('home')} {-mm:+.1f}",
                     "Total: model / book": f"{p.get('model_total')} / {p.get('line_total') or '—'}",
                     **(extras(p) if extras else {}),
+                    "_lean": _lean(p), "_playable": playable, "_move": mv.get("spread_move") or "",
                     "_form": form_of(w, n) if b is not None else NEW, "_i": len(out)})
     return out
 
 
 def spotlight(rows: List[Dict], k: int = 3) -> List[Dict]:
-    """The games worth opening first: the biggest disagreements with the book whose size of lean is running hot;
-    when none is hot, the biggest that aren't cold. Never more than k, and never a game with no gap."""
+    """Nov 17: the games worth opening first are ones with a TESTED reason -- a playable tag, or (college basketball)
+    the spread moving toward the model's side. A lean that's merely "hot" is no longer spotlighted: on Nov 16 that's
+    how Hofstra +11.5 and Rutgers +16.5 (both ⛔ Pass) got picked."""
     have = [r for r in rows or [] if r.get("Gap (pts)")]
-    hot = sorted([r for r in have if r.get("_form") == HOT], key=lambda r: -r["Gap (pts)"])
-    rest = sorted([r for r in have if r.get("_form") in (EVEN, NEW)], key=lambda r: -r["Gap (pts)"])
-    return (hot + rest)[:k]
+    good = [r for r in have if r.get("_playable")] + [r for r in have if not r.get("_playable") and r.get("_move") == "📈 our way"]
+    return sorted(good, key=lambda r: (not r.get("_playable"), -r["Gap (pts)"]))[:k]
 
 
 def public(rows: List[Dict]) -> List[Dict]:

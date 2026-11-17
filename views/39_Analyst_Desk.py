@@ -205,6 +205,9 @@ except Exception:                                      # noqa: BLE001 — line m
 _line_rows = A.history_lookup(_line_idx, _active.market_map)   # Nov 7: stored by odds market key + lowercase side
 
 
+# Nov 17 audit: the desk publishes and locks calls to a public record, so it calls only plays the model's tested rules
+# don't pass on -- one answer across the site (a ⛔ Pass play is never a desk call).
+plays = [p for p in plays if p.get("Use") is None or "Pass" not in str(p.get("Use"))]
 calls = A.scan(plays, _active.key, date_str, offers=offers, odds_map=_active.market_map,
                history_fn=_line_rows, weights=weights, expect_book_lines=bool(offers),
                times=times, with_day=_with_day, book=preferred_book, game_env=game_env, matchups=matchups,

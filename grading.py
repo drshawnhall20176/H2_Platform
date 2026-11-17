@@ -73,6 +73,14 @@ AMPLIFICATION_CAP = 2.5   # a real, stated bound (not empirically fit) on how mu
                          # kind of market (a 60% ModelProb) stays well below it.
 
 
+def playable(p: Dict) -> bool:
+    """Nov 17 audit (owner: "a house divided"): the letter grades here come from Conviction (model chance ÷ a typical
+    rate), not from the tested Use tag -- so Graded Picks and Command Center's top leans could show an "A" on a play
+    the model's tested rules say ⛔ Pass. Plays that carry a Use tag must not be tagged Pass to be graded at all;
+    plays without one (MLB's board) are unchanged."""
+    return p.get("Use") is None or "Pass" not in str(p.get("Use"))
+
+
 def conviction_to_grade(conviction: Optional[float], ceiling: Optional[float] = None) -> Optional[Dict[str, Any]]:
     """Map a play's Conviction number to a letter grade + tier label for quick visual scanning --
     NOT a fabricated 0-100 "score" that doesn't map to anything real. The raw Conviction number
@@ -271,6 +279,8 @@ def build_top_leans(plays: List[Dict], per_market: int = 2, letters=("A", "B", "
     "_grade" (from conviction_to_grade) attached."""
     graded = []
     for p in plays:
+        if not playable(p):
+            continue                                            # Nov 17: one answer -- a ⛔ Pass play is never a lean
         g = conviction_to_grade(p.get("Conviction"), p.get("_ceiling"))
         if g and g.get("letter") in letters:
             graded.append({**p, "_grade": g})
@@ -320,6 +330,8 @@ def organize_graded_picks(plays: List[Dict]) -> List[Dict[str, Any]]:
     filter applied on top of it elsewhere."""
     graded = []
     for pl in plays:
+        if not playable(pl):
+            continue                                            # Nov 17: one answer -- a ⛔ Pass play isn't graded
         grade = conviction_to_grade(pl.get("Conviction"), pl.get("_ceiling"))
         if grade:
             graded.append({**pl, "_grade": grade})
