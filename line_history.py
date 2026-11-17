@@ -147,11 +147,11 @@ _PG_READY = False                            # the table is created once per pro
 
 @contextmanager
 def _pg_conn():
+    """Nov 17: through the Bet Log's connection pool (betlog._pg_checkout) instead of a fresh SSL connection per read."""
     global _PG_READY
-    import psycopg2                          # imported lazily so offline paths never need it
-    dsn = _DATABASE_URL or ""
-    kwargs = {} if "sslmode" in dsn else {"sslmode": "require"}   # Supabase requires SSL
-    con = psycopg2.connect(dsn, **kwargs)
+    import betlog as B
+    con = B._pg_checkout()
+    ok = False
     try:
         if not _PG_READY:
             with con.cursor() as cur:
@@ -160,8 +160,9 @@ def _pg_conn():
             _PG_READY = True
         yield con
         con.commit()
+        ok = True
     finally:
-        con.close()
+        B._pg_checkin(con, ok)
 
 
 def _pg_latest(sport, player, market, side, book) -> Optional[Dict]:
