@@ -76,10 +76,12 @@ def _scoring_side(col, label, ctx, noun):
             st.caption("No completed games on file yet")
             return
         s, a = ctx["scored"], ctx["allowed"]
-        st.metric("Recent avg scored", f"{s['recent_avg']:.1f}", delta=f"{s['recent_avg'] - s['season_avg']:+.1f} vs season",
-                  delta_color="normal")
-        st.metric("Recent avg allowed", f"{a['recent_avg']:.1f}", delta=f"{a['recent_avg'] - a['season_avg']:+.1f} vs season",
-                  delta_color="inverse")
+        ds, da = s["recent_avg"] - s["season_avg"], a["recent_avg"] - a["season_avg"]
+        # Nov 17: no "+0.0 vs season" arrow when recent IS the season (early on, fewer games than the recent window)
+        st.metric("Recent avg scored", f"{s['recent_avg']:.1f}",
+                  delta=None if abs(ds) < 0.05 else f"{ds:+.1f} vs season", delta_color="normal")
+        st.metric("Recent avg allowed", f"{a['recent_avg']:.1f}",
+                  delta=None if abs(da) < 0.05 else f"{da:+.1f} vs season", delta_color="inverse")
         st.caption(f"{ctx['games']} game{'s' if ctx['games'] != 1 else ''} this season")
 
 
@@ -110,6 +112,14 @@ def _one_game(league, upcoming, day):
                "projection below does that.")
 
     C.section_header("🎯", "Moneyline / spread / total — simulated")
+    # Nov 17: the same one-line answer as the table above, so this close-up never reads as a separate pick
+    try:
+        import game_previews as GP
+        t = _tag(league, p) or {}
+        playable = t.get("use") in (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE)
+        st.markdown(f"**{t.get('use') or ''}** {GP.says(p, playable)}")
+    except Exception:                                           # noqa: BLE001
+        pass
     sim = GS.simulate(league, p.get("model_margin"), p.get("model_total"), key=p.get("game_id"))
     if not sim:
         st.info("No projection for this game yet, so there is nothing to simulate.", icon="🕐")
@@ -120,9 +130,9 @@ def _one_game(league, upcoming, day):
     m2.metric(f"{home} ML", "—" if mp is None else f"{mp:.1%}")
     fav, by = (home, sim["proj_spread"]) if sim["proj_spread"] > 0 else (away, -sim["proj_spread"])
     m3.metric("Projected spread", f"{fav} -{by:.1f}",
-              delta=None if p.get("home_spread") is None else f"book: {home} {p['home_spread']:+g}", delta_color="off")
+              delta=None if p.get("home_spread") is None else f"book: {home} {p['home_spread']:+g}", delta_color="off", delta_arrow="off")
     m4.metric("Projected total", f"{sim['proj_total']:.1f}",
-              delta=None if p.get("line_total") is None else f"book: {p['line_total']:g}", delta_color="off")
+              delta=None if p.get("line_total") is None else f"book: {p['line_total']:g}", delta_color="off", delta_arrow="off")
     st.caption(f"Proj: {away} **{sim['proj_away_score']:.1f}** — {home} **{sim['proj_home_score']:.1f}** · "
                f"{sim['n_sims']:,} simulated games")
     r1, r2, r3, r4 = st.columns(4)
