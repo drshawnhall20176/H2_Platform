@@ -11,8 +11,8 @@ def dec(p):
 def imp(p):
     p = float(p); return 100 / (p + 100) if p > 0 else -p / (-p + 100)
 morning = "2026-11-17"
-for sport in ("NBA", "NHL", "NFL"):
-    days = 63 if sport == "NFL" else 30
+for sport in ("NCAAMB", "NCAAF"):
+    days = 63 if sport in ("NFL", "NCAAF") else 30
     cut = (date.fromisoformat(morning) - timedelta(days=days)).isoformat()
     ds = [d for d in MS.snapshot_dates(sport) if cut <= d < morning]
     idx = LH.sport_index(sport, since=cut)
@@ -64,3 +64,13 @@ for sport in ("NBA", "NHL", "NFL"):
     for key in sorted(stats):
         n, h, c, u = stats[key]
         print(f"  {key[0]:4} {key[1]:7} n {n:5} hit {h/n:.1%} model said {c/n:.1%} units {u:+.1f} ({u/n:+.1%})")
+
+# game lines: do saved game picks keep an opening price?
+import json
+for lg in ("NCAAMB", "NCAAF", "NBA"):
+    recs = MS.load_game_picks(lg)
+    print(f"\nGP {lg}: {len(recs)} records; keys: {sorted(recs[-1].keys()) if recs else None}")
+from collections import Counter
+for sp in ("NCAAMB", "NCAAF", "NBA", "NFL"):
+    idx = LH.sport_index(sp, since="2026-11-01")
+    print("LH", sp, len(idx), Counter(k[1] for k in idx).most_common(8))
