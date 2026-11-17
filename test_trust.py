@@ -1,0 +1,53 @@
+"""Nov 17: trust in the model vs the books -- forced toward the market, earned back on held-out days."""
+import calibration as CAL
+import props_engine as PE
+
+
+def test_apply_trust_moves_toward_market():
+    assert CAL.apply_trust(0.70, 0.50, 0.5) == 0.60
+    assert CAL.apply_trust(0.70, 0.50, 1.0) == 0.70
+    assert CAL.apply_trust(0.70, None, 0.5) == 0.70
+
+
+def test_read_line_uses_trust():
+    vals = [10, 12, 14, 9, 11, 13, 15, 10]
+    a = PE.read_line(14.0, vals, 11.5, "normal", -110, -110, 0.5)
+    b = PE.read_line(14.0, vals, 11.5, "normal", -110, -110, 0.5, trust=0.5)
+    assert abs((b["p_final"] - 0.5) - 0.5 * (a["p_final"] - 0.5)) < 1e-9
+
+
+def _graded(n_days, per_day, model_p, mkt, hit_rate, market="Points"):
+    out = {}
+    for d in range(n_days):
+        rows = []
+        for i in range(per_day):
+            y = (i / per_day) < hit_rate
+            rows.append({"result": "hit" if y else "miss", "chance": model_p, "p_market": mkt, "side": "Over",
+                         "market": market, "game": f"g{i % 7}", "ts": f"2026-11-{d + 1:02d}T12:00"})
+        out[f"2026-11-{d + 1:02d}"] = rows
+    return out
+
+
+def test_auto_trust_pulls_toward_market_when_the_books_were_right(monkeypatch):
+    monkeypatch.setattr(CAL, "trust", lambda s, m=None: 1.0)
+    monkeypatch.setattr(CAL, "factor_history", lambda k: [])
+    g = _graded(5, 80, 0.62, 0.50, 0.50)             # model said 62%, books 50%, it hit 50%
+    dec = CAL.auto_trust("NBA", g, "2026-11-17", write=False)[0]
+    assert dec["new"] == 0.1 and "books were closer" in dec["why"]
+
+
+def test_auto_trust_needs_proof_to_move_back(monkeypatch):
+    monkeypatch.setattr(CAL, "trust", lambda s, m=None: 0.5)
+    monkeypatch.setattr(CAL, "factor_history", lambda k: [])
+    g = _graded(5, 80, 0.56, 0.50, 0.62)             # shown 56% (after trust 0.5), hit 62% -> more trust fits
+    dec = CAL.auto_trust("NBA", g, "2026-11-17", write=False)[0]
+    assert dec["new"] > 0.5 and ("earned" in dec["why"] or "didn't hold up" in dec["why"])
+
+
+def test_td_rows_fit_separately(monkeypatch):
+    monkeypatch.setattr(CAL, "trust", lambda s, m=None: 1.0)
+    monkeypatch.setattr(CAL, "factor_history", lambda k: [])
+    g = _graded(4, 70, 0.32, 0.22, 0.18, market="Anytime TD")
+    out = CAL.auto_trust("NFL", g, "2026-11-17", write=False)
+    td = [d for d in out if d["kind"] == "td"][0]
+    assert td["new"] == 0.1 and CAL._trust_key("NFL", "Anytime TD") == "NFL:trust:TD"

@@ -604,7 +604,7 @@ def redistribute(players: Sequence[Dict], cap: float = 40.0, primary_n: int = 0)
 def read_line(projection: Optional[float], values: Sequence[float], line: Optional[float], dist: str,
               over_price=None, under_price=None, p_market: Optional[float] = None, slope: float = 1.0,
               model_weight: float = MODEL_WEIGHT, sd_floor_frac: float = 0.25, sd_floor_abs: float = 1.0,
-              news_checked: bool = False, side_factors=None) -> Dict:
+              news_checked: bool = False, side_factors=None, trust=None) -> Dict:
     """Everything the table shows for one line: model probability (calibrated), the market's, the blend,
     the side worth betting and its EV at the price you'd get. Prices are American odds (None when unknown).
 
@@ -629,6 +629,9 @@ def read_line(projection: Optional[float], values: Sequence[float], line: Option
     if side_factors:                                            # Nov 5: per-side honest chance (calibration.py)
         import calibration as CAL
         p = CAL.apply_side(p, side_factors)
+    if trust is not None and p_mkt is not None:                 # Nov 17: toward the books' chance (calibration.trust)
+        import calibration as CAL
+        p = CAL.apply_trust(p, p_mkt, trust)
     out.update(p_model=p_model, p_market=p_mkt, p_final=p)
     if over_price is not None or under_price is not None:
         ev_o, ev_u = ev(p, over_price), ev(1 - p if p is not None else None, under_price)
@@ -1187,6 +1190,16 @@ def market_gaps(rows: Sequence[Dict], team_of: Dict) -> List[Dict]:
     out.sort(key=lambda d: -abs(float(d["Gap"].rstrip("%"))) if d["Gap"] != "—" else 0)
     return out
 
+
+
+def trust_for(sport: Optional[str], market: Optional[str] = None) -> Optional[float]:
+    """The learned trust in the model vs the books for this sport (TD scorers have their own); None = no change."""
+    try:
+        import calibration as CAL
+        t = CAL.trust(sport, market)
+        return None if t >= 1.0 else t
+    except Exception:                                           # noqa: BLE001
+        return None
 
 
 def side_factors_for(sport: Optional[str]):

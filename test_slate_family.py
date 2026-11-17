@@ -148,11 +148,13 @@ def test_only_games_with_posted_props_get_built(monkeypatch):
     assert built == [("X @ Y",)]
 
 
-def test_anytime_td_yes_under_50_shows_when_the_price_pays():
+def test_anytime_td_yes_under_50_shows_when_the_price_pays(monkeypatch):
     base = {"pid": 2, "player": "TE", "market": "Anytime TD", "market_key": "player_anytime_td", "line": 0.5,
             "line_src": "book", "projection": 0.46, "values": [0, 1, 0, 0], "dist": "count", "side": "Under",
             "p_final": 0.28, "p_model": 0.37, "p_market": 0.21, "lean": "No lean", "ev": None, "over_price": 330,
             "under_price": None, "flags": [], "out": False, "book": {"best_over": ("draftkings", 330)}}
+    assert SP.TD_YES_UNDER_50 is False and SP.play_from_row(base, None) is None   # Nov 17: switched off
+    monkeypatch.setattr(SP, "TD_YES_UNDER_50", True)
     p = SP.play_from_row(base, None)
     assert p["Side"] == "Yes" and p["Use"] == "🎯 Single only" and abs(p["EV"] - (0.28 * 4.3 - 1)) < 1e-9
     assert p["Conviction"] > 1.0 and "never a parlay leg" in p["UseWhy"]
