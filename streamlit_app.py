@@ -342,6 +342,7 @@ def run():
         "50": ("Game Script", "🎬", "game_script"),
         "51": ("My Coach", "🧑‍🏫", "my_coach"),
         "57": ("Today", "🏠", "today"),                  # the customer's front page (commercial layout only, Nov 16)
+        "59": ("Promotions", "🎁", "promotions"),       # the books' recurring promotions + the tools that play them (Nov 17)
         "58": ("Players", "👤", "players"),              # every player tool behind one switcher (commercial only, Nov 16)
         "56": ("Model Record", "📊", "model_record"),    # the model's graded record, no Bet Log: the public proof page (Nov 16)
         "54": ("Live Games", "🔴", "live_games"),        # in-game win chance / projected final / fair live lines (Nov 12)
@@ -369,7 +370,7 @@ def run():
     # Python string, no dependency on internals that could silently stop working -- is the lever
     # used here instead.
     SECTION_OF = {}
-    for k in ("0", "28", "57"):
+    for k in ("0", "28", "57", "59"):
         SECTION_OF[k] = "🏠 START HERE"
     for k in ("1", "2", "3", "4", "37", "23", "24", "39", "50", "53"):
         SECTION_OF[k] = "🎯 RECOMMENDATIONS"
@@ -451,7 +452,16 @@ def run():
         st.navigation({"🏠 START HERE": sections.get("🏠 START HERE", [])}).run()
         return
     sports.render_sport_selector()
-    st.navigation(sections).run()
+    nav = st.navigation(sections)
+    # Nov 17: a page that changed the sport and wants another sport's page (Promotions -> King of the Court) parks its
+    # target here; it can only be switched to once the menu is built for the new sport.
+    goto = st.session_state.pop("_goto_page", None)
+    if goto:
+        for pages in sections.values():
+            for pg in pages:
+                if getattr(pg, "url_path", None) == goto:
+                    st.switch_page(pg)
+    nav.run()
 
 
 if __name__ == "__main__":

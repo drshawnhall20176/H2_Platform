@@ -123,6 +123,15 @@ _order = sorted([s for s in live if _games.get(s.key) or _cards.get(s.key)],
 _quiet = [s for s in live if s not in _order]
 
 C.section_header("🏟", f"Today · {_dt.now(_ET):%A, %B %-d}")
+# Nov 17: the books' promotions running today pop up here (promos.py; schedule-based, owner-added ones too)
+try:
+    import promos as _PROMO
+    for _p in _PROMO.on_today(_dt.now(_ET).date(), [s.key for s in _order], banners_only=True):
+        _b1, _b2 = st.columns([5, 1])
+        _b1.info(f"**{_p['name']}** is on today at {_p['book']} ({', '.join(_p.get('sports') or [])}).", icon="🎁")
+        _b2.page_link("views/59_Promotions.py", label="See it →")
+except Exception:                                               # noqa: BLE001 -- a banner never breaks the page
+    pass
 C.kpi_row([{"icon": "🎯", "value": str(_g_sum["picks"]), "label": "Player picks from winning pick types"},
            {"icon": "🏟️", "value": str(_g_sum["lines"]), "label": "Playable game lines"},
            {"icon": "📅", "value": str(sum(1 for s in _order if _cards.get(s.key))), "label": "Sports with a pick"},
