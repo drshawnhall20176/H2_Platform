@@ -447,6 +447,13 @@ if True:
                             disabled=not _lhid, help="Untested leans in a market where the model's lean has lost "
                                                      "more than it won over the last 30 days.")
         _ws = [r for r in _w if r.get("best_tested")] if _only_tested else _w
+        _gours = [r for r in _ws if r.get("spread_move") == "📈 our way"]
+        if _gours and st.toggle(f"📈 Spread moving our way only ({len(_gours)})", value=False, key="home_win_moves",
+                                help="College basketball games where the spread has moved a point or more toward the "
+                                     "model's side since it opened. Tested on 519 graded games: the model's side "
+                                     "covered 55% even at the moved (closing) number, vs 47% when the spread moved "
+                                     "against it. Bet these early -- the opening number covered 65%."):
+            _ws = _gours
         if not _lshow:
             _ws = [r for r in _ws if r.get("best_tested") or r.get("lean_verdict") not in _PR.HIDE]
         _wdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"],
@@ -454,6 +461,8 @@ if True:
                                "Spread": r.get("spread_txt") or "",
                                "Total": r.get("total_txt") or "",
                                "Model": r.get("model_txt") or r.get("lean_detail") or "",
+                               "Spread move": " ".join(x for x in (r.get("spread_move") or "",
+                                                                    f"({r['spread_move_why']})" if r.get("spread_move_why") else "") if x),
                                "Pick": r.get("best") or "—",
                                "Use": _PR.lean_use(r),
                                "Record (30d)": ((("⚠️ " if r.get("lean_verdict") in _PR.HIDE else "")
@@ -470,6 +479,8 @@ if True:
                                "Winner result": _TB.RESULT_ICON.get(r.get("winner_result"), "—")} for r in _ws[:LEANS_CAP]])
         if not _past and not _wdf.empty:
             _wdf = _wdf.drop(columns=["Final", "Pick result", "Winner result"])
+        if not _wdf.empty and not _wdf["Spread move"].any():
+            _wdf = _wdf.drop(columns=["Spread move"])
         if _scope != "All sports" and not _wdf.empty:
             _wdf = _wdf.drop(columns=["Sport"])
         if not _wdf.empty and not _wdf["Weather"].replace("", None).notna().any():
