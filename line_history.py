@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS line_snapshots (
     book          TEXT NOT NULL,
     commence_time TEXT
 );
+CREATE INDEX IF NOT EXISTS line_snapshots_sport_captured ON line_snapshots (sport, captured_at);
 """
 
 _FIELDS = ["captured_at", "sport", "game", "player", "market", "side", "line",
@@ -135,6 +136,9 @@ CREATE TABLE IF NOT EXISTS line_snapshots (
     game          TEXT, player TEXT NOT NULL, market TEXT NOT NULL, side TEXT NOT NULL,
     line REAL, price INTEGER, book TEXT NOT NULL, commence_time TEXT
 );
+-- Nov 17: Today / Home read one sport's captures since this morning; without this index that read scanned the whole
+-- table (12 s for NBA's 2,774 rows today).
+CREATE INDEX IF NOT EXISTS line_snapshots_sport_captured ON line_snapshots (sport, captured_at);
 """
 
 

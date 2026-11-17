@@ -30,7 +30,7 @@ import customer_today as _CT
 import todays_best as _TB0
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner="Loading today's boards…")
 def _glance_data(day, keys):
     best = _TB0.collect(day, list(keys))
     try:
@@ -52,7 +52,7 @@ def _glance_leans(lg):
     return _PR0.lean_records(lg)
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False)
 def _line_index(sp, day):
     import line_history as _LH
     return _LH.sport_index(sp, since=day)
