@@ -116,18 +116,24 @@ def available() -> bool:
     return _pg() or os.path.exists(DB_PATH)
 
 
+_SNAP_SCHEMA_DONE = False
+
+
 @contextmanager
 def _conn(db_path: Optional[str] = None):
     db_path = db_path or DB_PATH
     """(connection, placeholder). Postgres through the Bet Log's connection; SQLite otherwise."""
     if _pg() and db_path == DB_PATH:
         import betlog as B
+        global _SNAP_SCHEMA_DONE
         with B._pg_conn() as con:
-            with con.cursor() as cur:
-                cur.execute(_SNAP_SCHEMA.format(pk="SERIAL PRIMARY KEY"))
-                for c in _SNAP_ADDED:
-                    cur.execute(f"ALTER TABLE prop_snapshots ADD COLUMN IF NOT EXISTS {c} REAL")
-            con.commit()
+            if not _SNAP_SCHEMA_DONE:                           # Nov 17: once per process, not on every read
+                with con.cursor() as cur:
+                    cur.execute(_SNAP_SCHEMA.format(pk="SERIAL PRIMARY KEY"))
+                    for c in _SNAP_ADDED:
+                        cur.execute(f"ALTER TABLE prop_snapshots ADD COLUMN IF NOT EXISTS {c} REAL")
+                con.commit()
+                _SNAP_SCHEMA_DONE = True
             yield con, "%s"
         return
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
