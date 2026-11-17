@@ -325,6 +325,13 @@ def auto_notes(decisions: List[Dict]) -> List[str]:
     notes = []
     for d in decisions:
         if d.get("applied"):
+            if "trust" in str(d["side"]):
+                way = ("toward the books' price (the model ran overconfident where it disagreed with them)"
+                       if d["new"] < d["active"] else "back toward the model's own number")
+                what = "TD-scorer trust in the model" if d.get("kind") == "td" else "prop trust in the model"
+                notes.append(f"🤖 Learned overnight: {d['sport']} {what} {d['active']:.2f} → {d['new']:.2f}, pulled {way}; "
+                             f"{d['why']}. Undo on Postgame Review.")
+                continue
             way = "toward 50% (they ran overconfident)" if d["new"] < d["active"] else "back out (the last correction overshot)"
             what = "ticket-math confidence" if d["side"] == "overall" else f"{d['side']} chances"
             notes.append(f"🤖 Learned overnight: {d['sport']} {what} {d['active']:.2f} → {d['new']:.2f}, "
@@ -384,3 +391,121 @@ def auto_global(sport: str, graded_by_date: Dict[str, List[Dict]], morning: str,
                 "auto": True, "morning": morning, "n": h["n"], "splits": h["splits"], "passed": h["passed"],
                 "held_out_gain": round(h["gain"], 5), "was": active, "since": since})
     return dec
+
+
+# --------------------------------------------------------------------------- trust the market (Nov 17)
+# The owner: "find a way to force this" -- on the bets he logged the model said 68% and they hit 55%. The side factors
+# pull every chance toward 50%; the error is somewhere else: it's largest exactly where the model DISAGREES with the
+# books, which is where every bet comes from. Measured (research/trust_test.py, graded reads, last 30 days / 63 for
+# NFL): q = market + t x (chance - market) fits best at t ~0.54 for NBA and NFL props (held out on later days: 7/7 and
+# 2/2), t = 0 for NFL Anytime TD (the books' price was simply better), and the bet-tagged NBA reads said 58.9% and
+# hit 53.3%. So after the side factor, each chance moves toward the books' no-vig chance by a learned "trust" in the
+# model (1.0 = the model as is, 0.1 = nearly the market). Refit every morning; a move TOWARD the market applies as soon
+# as the window says so (forced: it can only remove edges, never invent them); a move back toward the model has to
+# hold up on held-out days like every other factor.
+TRUST_RANGE = (0.1, 1.0)
+TRUST_REL_GRID = [round(i * 0.02, 2) for i in range(0, 76)]     # 0.00 .. 1.50, relative to the active trust
+TRUST_MIN_ROWS = {"props": 300, "td": 200}
+TD_MARKETS = ("Anytime TD", "1st TD", "Last TD")
+
+
+def _trust_key(sport: Optional[str], market: Optional[str] = None) -> str:
+    return f"{sport or ''}:trust" + (":TD" if market in TD_MARKETS else "")
+
+
+def trust(sport: Optional[str], market: Optional[str] = None) -> float:
+    """How far a chance keeps its distance from the books' (1.0 = all of it; 0.1 = almost none)."""
+    factor(None)                                                # refreshes the shared cache when it's stale
+    lo, hi = TRUST_RANGE
+    return max(lo, min(hi, _cache["map"].get(_trust_key(sport, market), 1.0)))
+
+
+def apply_trust(p: Optional[float], p_mkt: Optional[float], t: Optional[float]) -> Optional[float]:
+    """P(over) moved toward the market's P(over): market + t x (p - market)."""
+    if p is None or p_mkt is None or t is None or t >= 1.0:
+        return p
+    return min(max(float(p_mkt) + t * (float(p) - float(p_mkt)), 0.001), 0.999)
+
+
+def _q(r, rel):
+    return min(max(r["m"] + rel * (r["p"] - r["m"]), 1e-3), 1 - 1e-3)
+
+
+def _ll_trust(rows, rel):
+    return -sum(math.log(_q(r, rel)) if r["y"] else math.log(1 - _q(r, rel)) for r in rows) / len(rows)
+
+
+def trust_rows(sport: str, graded_by_date: Dict[str, List[Dict]], kind: str) -> List[Dict]:
+    """Graded reads with the books' chance for the read's side, rescaled to today's trust."""
+    active = trust(sport, "Anytime TD" if kind == "td" else None)
+    hist = factor_history(_trust_key(sport, "Anytime TD" if kind == "td" else None))
+    out = []
+    for d, rs in graded_by_date.items():
+        for r in rs:
+            if r.get("result") not in ("hit", "miss") or (r.get("market") in TD_MARKETS) != (kind == "td"):
+                continue
+            try:
+                p, pm = float(r.get("chance")), float(r.get("p_market"))
+            except (TypeError, ValueError):
+                continue
+            if not (0 < p < 1 and 0 < pm < 1):
+                continue
+            m = pm if r.get("side") in ("Over", "Yes") else 1 - pm
+            then = factor_at(hist, str(r.get("ts") or f"{d}T23:59"), 1.0)
+            if then <= 0:
+                continue
+            out.append({"date": d, "game": r.get("game"), "m": m, "p": m + (active / then) * (p - m),
+                        "y": 1 if r["result"] == "hit" else 0})
+    return out
+
+
+def auto_trust(sport: str, graded_by_date: Dict[str, List[Dict]], morning: str, write: bool = True) -> List[Dict]:
+    """Refit the model-vs-market trust for props and (football) TD scorers; apply per the rule above."""
+    out = []
+    weekly = sport in WEEKLY_SPORTS
+    lo, hi = TRUST_RANGE
+    for kind in ("props", "td"):
+        rows = trust_rows(sport, graded_by_date, kind)
+        if kind == "td" and not rows:
+            continue
+        market = "Anytime TD" if kind == "td" else None
+        active = trust(sport, market)
+        ds = sorted({r["date"] for r in rows})
+        dec = {"sport": sport, "side": "TD market trust" if kind == "td" else "market trust", "kind": kind,
+               "active": active, "new": active, "n": len(rows), "dates": len(ds), "applied": False, "weekly": weekly}
+        if len(rows) < TRUST_MIN_ROWS[kind] or len(ds) < (WEEKLY_MIN_DATES if weekly else AUTO_MIN_DATES):
+            dec["why"] = f"not enough yet ({len(rows)} reads over {len(ds)} days)"
+            out.append(dec)
+            continue
+        rel = min(TRUST_REL_GRID, key=lambda g: _ll_trust(rows, g))
+        new = round(max(lo, min(hi, active * rel)), 2)
+        gains = []
+        for cut in ds[1:]:
+            tr = [r for r in rows if r["date"] < cut]
+            te = [r for r in rows if r["date"] >= cut]
+            if len(tr) < 100 or len(te) < 50:
+                continue
+            g = min(TRUST_REL_GRID, key=lambda x: _ll_trust(tr, x))
+            gains.append(_ll_trust(te, 1.0) - _ll_trust(te, g))
+        passed = sum(1 for g in gains if g > 0)
+        dec.update(new=new, rel_fit=rel, splits=len(gains), passed=passed,
+                   gain=sum(gains) / len(gains) if gains else 0.0,
+                   log_loss=(round(_ll_trust(rows, 1.0), 4), round(_ll_trust(rows, rel), 4)))
+        if abs(new - active) < AUTO_MIN_MOVE:
+            dec["why"] = f"already right (best {new:.2f} vs active {active:.2f})"
+        elif new < active:
+            dec["why"] = (f"the books were closer on {len(rows)} graded reads (log loss {dec['log_loss'][0]} -> "
+                          f"{dec['log_loss'][1]}; held out {passed} of {len(gains)})")
+        elif gains and passed >= AUTO_SPLIT_PASS * len(gains) and dec["gain"] > 0:
+            dec["why"] = f"the model earned more trust: held up on {passed} of {len(gains)} held-out splits"
+        else:
+            dec["why"] = f"more trust didn't hold up on held-out days ({passed} of {len(gains)})"
+            out.append(dec)
+            continue
+        if not dec["why"].startswith("already") and write:
+            import model_store as MS
+            dec["applied"] = MS.approve_calibration(_trust_key(sport, market), new, {
+                "auto": True, "morning": morning, "n": len(rows), "rel_fit": rel, "splits": len(gains),
+                "passed": passed, "held_out_gain": round(dec["gain"], 5), "was": active, "kind": kind})
+        out.append(dec)
+    return out

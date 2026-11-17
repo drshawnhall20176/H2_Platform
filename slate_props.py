@@ -381,7 +381,7 @@ def play_from_row(row: Dict, slate_row: Optional[Dict] = None) -> Optional[Dict]
     if yes_only and side != "Over":
         # Nov 2: "won't score" isn't a play (no Under is posted), but a "Yes" under 50% can still be worth its price
         # (+300 on a 28% scorer). It shows when the blended chance clears the price by MIN_EV -- a single only.
-        td_value = yes_value(row)
+        td_value = yes_value(row) if TD_YES_UNDER_50 else None
         if td_value is None:
             return None
         side, p_final = "Over", float(row["p_final"])
@@ -436,6 +436,12 @@ def play_from_row(row: Dict, slate_row: Optional[Dict] = None) -> Optional[Dict]
         "PreseasonGames": 0,
         "_stat_key": "+".join(PPR.MARKETS.get(row["market"], ())), "_game_log": s.get("_game_log") or [],
     }
+
+
+# Nov 17 (owner-approved): OFF. Two weeks under the 200-touch TD model, the "Yes" reads under 50% that cleared their
+# price by 3%+ hit 29 of 158 (18%) against 51 expected, -30.8 units flat (research/td_yes_watch.py). The TD chance now
+# also rides the market-trust calibration (calibration.trust), which measured the books' TD price as the better number.
+TD_YES_UNDER_50 = False
 
 
 def yes_value(row: Dict) -> Optional[float]:
