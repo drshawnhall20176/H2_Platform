@@ -34,6 +34,54 @@ def connection_status() -> str:
     return "🔴 Not connected: " + ", ".join(missing) + " — numbers here won't match the learned model"
 
 
+TODAY_SIDEBAR_SPORTS = ("NBA", "NCAAMB", "NHL", "NFL", "NCAAF")
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _model_record_rows():
+    """[(sport, bet-tagged hits, graded, pass hits, graded, trust)] over the last 30 days, from the morning reviews."""
+    import pick_records as PR
+    import calibration as CAL
+    out = []
+    for sp in TODAY_SIDEBAR_SPORTS:
+        rec = PR.tag_records(sp) or {}
+        bh = sum(h for t, (h, n) in rec.items() if "Pass" not in t)
+        bn = sum(n for t, (h, n) in rec.items() if "Pass" not in t)
+        ph, pn = next(((h, n) for t, (h, n) in rec.items() if "Pass" in t), (0, 0))
+        try:
+            tr = CAL.trust(sp)
+        except Exception:                                       # noqa: BLE001
+            tr = None
+        if bn or pn:
+            out.append((sp, bh, bn, ph, pn, tr))
+    return out
+
+
+def _today_sidebar() -> None:
+    """The model's 30-day record in the sidebar on the Today page."""
+    try:
+        rows = _model_record_rows()
+    except Exception:                                           # noqa: BLE001
+        rows = []
+    with st.sidebar:
+        st.markdown("**📊 How the model has done (30 days)**")
+        if not rows:
+            st.caption("The record appears after the first morning reviews.")
+            return
+        lines = ["| Sport | Bet picks | Pass |", "|---|---|---|"]
+        for sp, bh, bn, ph, pn, tr in rows:
+            bet = f"{bh / bn:.0%} ({bn})" if bn else "—"
+            pas = f"{ph / pn:.0%}" if pn else "—"
+            lines.append(f"| {sp} | {bet} | {pas} |")
+        st.markdown("\n".join(lines))
+        st.caption("**Bet picks** = every read tagged 🎯 / 🎟️ (hit rate, graded count); **Pass** = the rest. A −110 "
+                   "price needs 52.4% to break even. When bet picks barely beat Pass, the edge is thin.")
+        trusts = [f"{sp} {tr:.2f}" for sp, *_x, tr in rows if tr is not None and tr < 1.0]
+        if trusts:
+            st.caption("**Trust in the model vs the books** (1.00 = the model as is): " + ", ".join(trusts) +
+                       ". Refit every morning; it rises only when the model beats the books on held-out games.")
+
+
 def run():
     # Real H2 Sports mark as the browser tab icon when the asset is present, the original
     # emoji as an honest fallback otherwise (a stripped-down deploy missing assets/ should never
@@ -60,7 +108,9 @@ def run():
     # workaround -- the selector is still functional, just positioned at the bottom of the nav
     # links rather than above them. The dropdown itself opens upward when near the bottom of
     # the viewport, which avoids the truncation issue seen when it was buried below "View less".
-    sports.render_sport_selector()
+    # Nov 17 (owner): on the Today entry page the sidebar shows only START HERE and the model's record -- no sport is
+    # chosen yet, so "Sport: ..." and the sport-specific pages would contradict the page.
+    # (the sidebar's sport line / the Today record are drawn after navigation resolves the page -- see the end of run)
 
     # Audience gate: same codebase, deployed twice on Streamlit Cloud, differing only in one
     # secret. The owner deployment's secrets.toml has no AUDIENCE (or AUDIENCE = "owner") -> sees
@@ -369,6 +419,18 @@ def run():
     # UPPERCASE section names remain the confirmed, real, working lever for visual separation.
     if commercial:
         sections = NL.arrange(sections)      # customer order; Today replaces Home
+        sports.render_sport_selector()
+        st.navigation(sections).run()
+        return
+    # Nov 17 (owner): on the Today entry page no sport is chosen yet, so the sidebar shows only START HERE and the
+    # model's 30-day record -- not "Sport: ..." and the sport's pages, which would contradict the page. The page the
+    # browser asked for is resolved first (hidden menu), then the menu is drawn for it.
+    target = st.navigation(sections, position="hidden")
+    if getattr(target, "title", None) == "Today":                # the default page reports an empty url_path
+        _today_sidebar()
+        st.navigation({"🏠 START HERE": sections.get("🏠 START HERE", [])}).run()
+        return
+    sports.render_sport_selector()
     st.navigation(sections).run()
 
 
