@@ -24,7 +24,9 @@ for lg in ("NCAAMB", "NBA", "NCAAF"):
         cover = (margin > o) if home_side else (margin < o)
         edge = abs(mm - o)
         b = "toward" if move >= 1.0 else ("away" if move <= -1.0 else "flat")
+        cc = None if margin == c else ((margin > c) if home_side else (margin < c))
         for key in (("all", b),) + ((("edge3+", b),) if edge >= 3 else ()):
-            n, h = st.get(key, (0, 0)); st[key] = (n + 1, h + cover)
+            n, h, nc, hc = st.get(key, (0, 0, 0, 0))
+            st[key] = (n + 1, h + cover, nc + (cc is not None), hc + bool(cc))
     for k in sorted(st):
-        n, h = st[k]; print(f"  {k[0]:6} {k[1]:6} n {n:4} covered (at OPEN line) {h/n:.1%}")
+        n, h, nc, hc = st[k]; print(f"  {k[0]:6} {k[1]:6} n {n:4} covered at OPEN {h/n:.1%} | at CLOSE {hc/max(nc,1):.1%} (n {nc})")
