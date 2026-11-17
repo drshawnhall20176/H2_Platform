@@ -16,13 +16,13 @@ for lg in ("NCAAMB", "NBA", "NCAAF"):
             fh, fa = float(r["final_home"]), float(r["final_away"])
         except (TypeError, ValueError, KeyError):
             continue
-        # convention check: line = home spread (home -5 means home favored by 5); model_margin = home - away
-        home_side = mm + o > 0                       # model thinks home covers the opening spread
-        move = (o - c) if home_side else (c - o)     # home spread getting more negative = market toward home
+        # line = the market's expected home margin (Tennessee -25 -> 25; Akron +13.5 -> -13.5)
+        home_side = mm > o
+        move = (c - o) if home_side else (o - c)     # market's home margin rising = moving toward home
         margin = fh - fa
-        cover = (margin + o > 0) if home_side else (margin + o < 0)
-        if margin + o == 0: continue
-        edge = abs(mm + o)
+        if margin == o: continue
+        cover = (margin > o) if home_side else (margin < o)
+        edge = abs(mm - o)
         b = "toward" if move >= 1.0 else ("away" if move <= -1.0 else "flat")
         for key in (("all", b),) + ((("edge3+", b),) if edge >= 3 else ()):
             n, h = st.get(key, (0, 0)); st[key] = (n + 1, h + cover)
