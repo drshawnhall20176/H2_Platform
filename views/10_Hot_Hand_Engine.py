@@ -193,6 +193,7 @@ def load_blowouts(sport_key: str, date_str: str):
 
 
 import kotc as KOTC
+import model_view as MV
 _blow = KOTC.blowout_by_team(load_blowouts(_active.key, date_str))
 for b in board:
     g = _blow.get(b.get("Team")) or {}
@@ -213,14 +214,15 @@ if _active.key == "NBA":
                     _out_names.add(_p.get("player"))
     except Exception:                                          # noqa: BLE001
         pass
-    _k = KOTC.build(board, player_info, _blow, _out_names)
+    _k = KOTC.build(board, player_info, _blow, _out_names,
+                    model_proj=KOTC.model_pra(MV.cached_reads(_active.key, date_str)))
     with st.expander("👑 King of the Court — tonight's top Pts+Reb+Ast chances", expanded=True):
         if not _k:
             st.caption("Not enough player data for tonight yet.")
         else:
             _kdf = pd.DataFrame(_k[:25])
             _kdf["Blowout chance"] = _kdf["Blowout chance"].apply(lambda v: "—" if v is None or v != v else f"{v:.0%}")
-            st.dataframe(_kdf[["Player", "Team", "Opp", "King chance", "Adj PRA", "Proj PRA", "Ceiling (90th)",
+            st.dataframe(_kdf[["Player", "Team", "Opp", "King chance", "Adj PRA", "Proj PRA", "Source", "Ceiling (90th)",
                                "Best recent", "Minutes", "Blowout chance", "Min at risk", "Spread", "Game"]],
                          hide_index=True, width="stretch",
                          column_config={"King chance": st.column_config.ProgressColumn(
@@ -228,7 +230,8 @@ if _active.key == "NBA":
                              "Min at risk": st.column_config.NumberColumn(format="%.1f")})
             st.caption(
                 "**King chance** = how often he posts the slate's top PRA across 20,000 simulated nights. "
-                "**Proj PRA** = his matchup-adjusted form (Points + Rebounds + Assists below). **Adj PRA** takes off "
+                "**Proj PRA** = the platform's model (its PRA read, or its Points + Rebounds + Assists reads); "
+                "**Source** says \"form × matchup\" only for a player the model has no read on yet. **Adj PRA** takes off "
                 "the minutes a starter loses when his game blows out — about 3 minutes, measured over ~10,000 games — "
                 "weighted by how much likelier a blowout is in his game than in tonight's average game. **Ceiling** "
                 "is his 90th-percentile PRA over his last 10 games. Players listed Out or Doubtful are left off. "
@@ -300,7 +303,6 @@ for b in view:
 
 # Nov 15: ONE model -- the model's read (line, projection, call, chance, Use) leads; Matchup Score stays as the
 # explanation of the number.
-import model_view as MV
 view = MV.attach(view, MV.cached_reads(_active.key, date_str), own_key="Matchup Score")
 view.sort(key=lambda r: (r.get("Chance") is None, -(r.get("Chance") or 0)))
 _ag, _cmp = MV.agreement(view)

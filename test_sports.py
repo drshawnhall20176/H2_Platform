@@ -600,7 +600,7 @@ def test_sidebar_sections_match_the_documented_grouping():
                     # split segment -- not a real key, just filter it out
                 actual[k] = section
     expected = {
-        "0": "🏠 START HERE", "28": "🏠 START HERE", "57": "🏠 START HERE",
+        "0": "🏠 START HERE", "28": "🏠 START HERE", "57": "🏠 START HERE", "59": "🏠 START HERE",
         "1": "🎯 RECOMMENDATIONS", "2": "🎯 RECOMMENDATIONS", "3": "🎯 RECOMMENDATIONS",
         "4": "🎯 RECOMMENDATIONS", "37": "🎯 RECOMMENDATIONS", "23": "🎯 RECOMMENDATIONS",
         "24": "🎯 RECOMMENDATIONS", "39": "🎯 RECOMMENDATIONS",

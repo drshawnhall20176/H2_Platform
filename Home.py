@@ -35,6 +35,14 @@ try:
     st.page_link("Today.py", label="← Today: every sport at a glance", icon="📅")
 except Exception:                                               # noqa: BLE001 -- builds without the Today page
     pass
+# Nov 17: today's promotion for this sport, if any (promos.py)
+try:
+    import promos as _PROMO
+    for _p in _PROMO.on_today(_dt.now(_pytz.timezone("US/Eastern")).date(),
+                              [st.session_state.get("sport") or ""], banners_only=True):
+        st.info(f"🎁 **{_p['name']}** is on today at {_p['book']} — see Promotions in the sidebar.")
+except Exception:                                               # noqa: BLE001
+    pass
 C.section_header("🏟", "Select Sport")
 with st.container(horizontal=True, horizontal_alignment="left"):
     for s in live:
