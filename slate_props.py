@@ -415,6 +415,9 @@ def play_from_row(row: Dict, slate_row: Optional[Dict] = None, sport: Optional[s
         w = W.apply(use, sport, row.get("market"), side, row.get("projection"), row["line"])
         if w != use:
             use, use_why = w, "a No-edge group that made money in both halves of its window — tracked, not proven"
+        g = W.gate_over(use, sport, side)
+        if g != use:
+            use, use_why = g, "this sport's Over bets haven't been winning lately (Overs gate, re-checked every morning)"
     except Exception:                                               # noqa: BLE001
         pass
     best = bk.get("best_over") if side == "Over" else bk.get("best_under")
