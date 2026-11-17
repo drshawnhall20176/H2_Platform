@@ -343,6 +343,8 @@ def review_sport(sport: str, morning: str, open_bets: Sequence[Dict], fetch: Cal
         cal["auto"] = CAL.auto_side(sport, trend, morning, write=write)
         # Nov 10: the overall factor (ticket math) learns the same way
         cal["auto"].append(CAL.auto_global(sport, trend, morning, write=write))
+        # Nov 17: how far to trust the model against the books (props; TD scorers separately) -- forced toward the market
+        cal["auto"].extend(CAL.auto_trust(sport, trend, morning, write=write))
     except Exception as exc:                                    # noqa: BLE001
         cal["auto"] = []
         print(f"  [{sport}] auto-calibration failed: {type(exc).__name__}: {exc}")

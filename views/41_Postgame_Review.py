@@ -13,6 +13,7 @@ from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
 
+import calibration as CAL
 import components as C
 import model_store as MS
 import model_tuning as MT
@@ -188,6 +189,18 @@ with tab_morning:
                                                                           key=f"pgr_side_off_{mpick}"):
                     for c in MS.list_calibration():
                         if c["sport"] in (f"{SPORT_KEY}:Over", f"{SPORT_KEY}:Under"):
+                            MS.retire_calibration(int(c["id"]))
+                    st.success("Turned off.")
+                # Nov 17: trust in the model vs the books (calibration.trust) -- props, and TD scorers on their own
+                _t, _ttd = CAL.trust(SPORT_KEY), CAL.trust(SPORT_KEY, "Anytime TD")
+                st.caption(f"**Trust in the model vs the books:** props {_t:.2f}"
+                           + (f", TD scorers {_ttd:.2f}" if SPORT_KEY in ("NFL", "NCAAF") else "")
+                           + " (1.00 = the model as is; lower = each chance pulled toward the books' no-vig chance). "
+                             "Refit every morning; a pull toward the books applies at once, a move back needs held-out proof.")
+                if (_t < 1.0 or _ttd < 1.0) and st.button(f"Undo: trust the model fully again for {SPORT_KEY}",
+                                                          key=f"pgr_trust_off_{mpick}"):
+                    for c in MS.list_calibration():
+                        if c["sport"] in (f"{SPORT_KEY}:trust", f"{SPORT_KEY}:trust:TD"):
                             MS.retire_calibration(int(c["id"]))
                     st.success("Turned off.")
         for d, s in sorted((rep.get("slates") or {}).items()):
