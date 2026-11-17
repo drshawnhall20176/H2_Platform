@@ -462,9 +462,16 @@ def tick_item(p, kind: str):
         ch = None
     if price is not None and (isinstance(price, float) and math.isnan(price)):
         price = None
+    # Nov 17: carry the page's Use tag. A ⛔ Pass game's chance is the model's own, untested number -- the Coach graded
+    # two such spreads "A" (Hofstra +11.5, Rutgers +16.5) while the page said Pass and both lines were moving away.
+    try:
+        use = (_tag(p.get("sport"), p) or {}).get("use")
+    except Exception:                                           # noqa: BLE001
+        use = None
+    passed = bool(use) and "Pass" in str(use)
     return {"sport": p.get("sport"), "pick": label, "price": price, "game": f"{p['away']} @ {p['home']}",
-            "chance": ch, "_rec": p, "bet_market": kind, "bet_side": side, "bet_line": line,
-            "best_tested": ch is not None, "best_chance": None if ch is None else round(ch, 4)}
+            "chance": ch, "_rec": p, "bet_market": kind, "bet_side": side, "bet_line": line, "use": use,
+            "best_tested": ch is not None and not passed, "best_chance": None if ch is None else round(ch, 4)}
 
 
 def honesty_line(done, league: str = "") -> str:
