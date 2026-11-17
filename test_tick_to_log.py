@@ -24,7 +24,7 @@ def test_ticked_games_become_gradeable_bet_log_rows():
     assert len(rows) == 2
     assert rows[0]["market"] == "Spread" and rows[0]["line"] == 6.0 and rows[0]["side"] == "KK Crvena zvezda"
     assert "gl:EUROLEAGUE:g1" in rows[0]["notes"] and rows[0]["stake"] == 2.0
-    # Nov 17: a ⛔ Pass game's chance is untested, so it isn't logged as the model's probability
+    # Nov 17: a ⚪ No edge game's chance is untested, so it isn't logged as the model's probability
     item = HG.tick_item(G, "Spread")
     assert (rows[0]["model_prob"] is not None) == bool(item["best_tested"])
     assert rows[1]["market"] == "Moneyline" and rows[1]["entry_odds"] == -250

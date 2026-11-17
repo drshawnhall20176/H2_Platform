@@ -173,6 +173,8 @@ def snapshot_record(sport: str, slate_date: str, game: str, row: Dict, market: s
     chance = None if pf is None else (pf if side == "Over" else 1 - pf)
     try:
         tag, _why = PE.use_tag(row, side, line, chance)
+        import watch as W                                       # Nov 17: 👀 Watch groups (watch.py)
+        tag = W.apply(tag, sport, market, side, proj, line)
     except Exception:                                           # noqa: BLE001
         tag = None
     price = row.get("over_price") if side == "Over" else row.get("under_price")

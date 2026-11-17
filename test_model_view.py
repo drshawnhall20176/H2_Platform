@@ -46,9 +46,9 @@ def test_player_calls_and_td():
 
 
 def test_call_shows_the_likelier_side_and_toss_ups():
-    over43 = {"line": 2.5, "projection": 2.0, "side": "Over", "chance": 0.43, "use_tag": "⛔ Pass"}
+    over43 = {"line": 2.5, "projection": 2.0, "side": "Over", "chance": 0.43, "use_tag": "⚪ No edge"}
     c = MV.call(over43)
-    assert c["Model call"] == "Under 2.5" and abs(c["Chance"] - 0.57) < 1e-9 and c["Use"] == "⛔ Pass"
+    assert c["Model call"] == "Under 2.5" and abs(c["Chance"] - 0.57) < 1e-9 and c["Use"] == "⚪ No edge"
     flip = MV.call({"line": 5.5, "projection": 5.8, "side": "Over", "chance": 0.49})
     assert flip["Model call"] == "Toss-up at 5.5" and flip["_side"] is None
     rows = MV.attach([{"Player": "A", "Market": "Receptions", "own": 9}],

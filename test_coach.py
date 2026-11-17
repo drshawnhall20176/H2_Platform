@@ -122,9 +122,9 @@ def test_stop_loss_and_lessons():
 def test_why_nothing_explains_an_all_pass_slate():
     h = CO._history([])
     rows = [dict(c, **CO.judge(c, h)) for c in
-            [{"sport": "NFL", "kind": "Prop", "market": "Receptions", "chance": 0.45, "price": -110, "use": "⛔ Pass"}] * 3]
+            [{"sport": "NFL", "kind": "Prop", "market": "Receptions", "chance": 0.45, "price": -110, "use": "⚪ No edge"}] * 3]
     msg = CO.why_nothing(rows, "NFL")
-    assert "all 3 player props are tagged ⛔ Pass" in msg
+    assert "all 3 player props are tagged ⚪ No edge" in msg
 
 
 def test_new_market_cannot_be_good_until_graded():
@@ -152,12 +152,12 @@ def test_tables_sort_by_game_time_earliest_first():
 
 
 def test_ticket_check_flags_pass_games_and_spreads_moving_away():
-    """Nov 17: Hofstra +11.5 / Rutgers +16.5 were graded "A" while the page said ⛔ Pass and both lines moved away."""
+    """Nov 17: Hofstra +11.5 / Rutgers +16.5 were graded "A" while the page said ⚪ No edge and both lines moved away."""
     import coach as CO
     rec = {"sport": "NCAAMB", "home": "Murray St", "away": "Hofstra", "line": 11.5, "open_line": 9.5,
            "model_margin": 9.9}
     item = {"sport": "NCAAMB", "pick": "Hofstra +11.5", "price": -110, "game": "Hofstra @ Murray St", "chance": 0.62,
-            "_rec": rec, "bet_market": "Spread", "bet_side": "away", "bet_line": 11.5, "use": "⛔ Pass",
+            "_rec": rec, "bet_market": "Spread", "bet_side": "away", "bet_line": 11.5, "use": "⚪ No edge",
             "best_tested": False, "best_chance": 0.62}
     lim = {"max_legs": 4, "max_parlay_stake": 10, "stop_loss": 100, "daily_budget": 500, "max_parlays": 3}
     chk = CO.ticket_check([item], "Singles", 4, 0, None, [], "2026-11-17", lim=lim)

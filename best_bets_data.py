@@ -856,7 +856,7 @@ def compose_board(sport_key: str, reads: Optional[Dict], rows: List[Dict], legac
         return drop_placeholder_plays(legacy_plays)
     covered = {row.get("market") for row in reads.values()}
     rest = [p for p in drop_placeholder_plays(legacy_plays) if p.get("Market") not in covered]
-    return SP.plays(reads, rows) + rest
+    return SP.plays(reads, rows, sport_key) + rest
 
 
 @st.cache_data(ttl=300, show_spinner=False)

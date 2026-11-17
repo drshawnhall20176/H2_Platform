@@ -15,6 +15,7 @@ from datetime import date, timedelta
 from typing import Dict, List, Optional, Sequence
 
 import betlog as B
+import props_engine as PE
 
 MIN_N = 10                     # under this many bets a row says "too early to tell"
 BANDS = ("Model liked it a lot (60%+)", "Model liked it (55–60%)", "Model barely liked it (50–55%)",
@@ -296,7 +297,7 @@ def judge(c: Dict, hist: Dict, tag_rec: Optional[tuple] = None, market_n: Option
             warn.append(f"thin edge: {price:+.0f} needs {pct(need)}, {word} {pct(chance)} → edge {pts(edge)}")
         else:
             good.append(f"{price:+.0f} needs {pct(need)}, {word} {pct(chance)} → edge {pts(edge)}")
-    if c.get("use") and "Pass" in str(c["use"]):
+    if c.get("use") and PE.is_pass(c["use"]):
         stop.append("the model's tested rules say pass")
     if tag_rec and tag_rec[1] >= 20:
         w, n = tag_rec
@@ -633,14 +634,14 @@ def why_nothing(judged: Sequence[Dict], sport: str) -> Optional[str]:
     n = len(judged)
     props = [r for r in judged if r.get("kind") == "Prop"]
     lines = [r for r in judged if r.get("kind") != "Prop"]
-    passed = sum(1 for r in props if "Pass" in str(r.get("use")))
+    passed = sum(1 for r in props if PE.is_pass(r.get("use")))
     unchecked = sum(1 for r in judged if r["verdict"].startswith("⚪"))
     bits = []
     if props and passed == len(props):
-        bits.append(f"all {len(props)} player props are tagged ⛔ Pass by the model's tested rules — it sees no edge it "
+        bits.append(f"all {len(props)} player props are tagged ⚪ No edge by the model's tested rules — it sees no edge it "
                     "trusts")
     elif props:
-        bits.append(f"{passed} of {len(props)} player props are tagged ⛔ Pass and the rest are priced too high for "
+        bits.append(f"{passed} of {len(props)} player props are tagged ⚪ No edge and the rest are priced too high for "
                     "their chance")
     if lines and all(not r.get("tested") for r in lines):
         bits.append(f"the {len(lines)} game leans are untested (tracking only)")

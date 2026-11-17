@@ -374,7 +374,7 @@ def test_espn_pro_league_parser_and_nba_nhl_pages(monkeypatch):
     for lg, page in (("NBA", "46_NBA_Game_Lab.py"), ("NHL", "47_NHL_Game_Lab.py")):
         game = {"sport": lg, "game_id": "x1", "kickoff": KO23, "home": "Boston Celtics", "away": "Orlando Magic",
                 "model_margin": 4.0, "home_spread": -3.5, "edge": 0.5, "model_total": 220.0, "line_total": 221.5,
-                "model_p": 0.62, "fair_home": 0.6, "pick": None, "result": None, "use": "⛔ Pass"}
+                "model_p": 0.62, "fair_home": 0.6, "pick": None, "result": None, "use": "⚪ No edge"}
         monkeypatch.setattr(MS, "load_game_picks", lambda sport, ungraded=False, db_path=None, _g=game: [_g])
         at = AppTest.from_file(str(Path(__file__).parent / "views" / page), default_timeout=30)
         at.run()

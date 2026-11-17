@@ -26,6 +26,7 @@ import best_bets_data as BBD
 import components as C
 import log_ui as LU
 import line_history
+import props_engine as PE
 import sports
 from streamlit_page_cache import compute_once
 
@@ -206,8 +207,8 @@ _line_rows = A.history_lookup(_line_idx, _active.market_map)   # Nov 7: stored b
 
 
 # Nov 17 audit: the desk publishes and locks calls to a public record, so it calls only plays the model's tested rules
-# don't pass on -- one answer across the site (a ⛔ Pass play is never a desk call).
-plays = [p for p in plays if p.get("Use") is None or "Pass" not in str(p.get("Use"))]
+# don't pass on -- one answer across the site (a ⚪ No edge play is never a desk call).
+plays = [p for p in plays if p.get("Use") is None or not PE.is_pass(p.get("Use"))]
 calls = A.scan(plays, _active.key, date_str, offers=offers, odds_map=_active.market_map,
                history_fn=_line_rows, weights=weights, expect_book_lines=bool(offers),
                times=times, with_day=_with_day, book=preferred_book, game_env=game_env, matchups=matchups,

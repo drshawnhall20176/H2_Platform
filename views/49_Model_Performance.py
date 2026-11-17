@@ -12,6 +12,8 @@ import pandas as pd
 import pytz
 import streamlit as st
 
+import props_engine as PE
+
 import components as C
 import investor as I
 
@@ -105,15 +107,15 @@ if tags:
                         "Reading": I.verdict(t["n"], t["hit"],
                                              0.60 if "Parlay" in str(t["use"]) else (0.524 if "Single" in str(t["use"])
                                                                                     else None), t["lo"])}
-                       for t in tags if t["use"] != "⛔ Pass"])
+                       for t in tags if not PE.is_pass(t["use"])])
     st.dataframe(df, hide_index=True, width="stretch",
                  column_config={"Hit": st.column_config.NumberColumn(format="percent"),
                                 "Model said": st.column_config.NumberColumn(format="percent")})
-    passes = [t for t in tags if t["use"] == "⛔ Pass"]
+    passes = [t for t in tags if PE.is_pass(t["use"])]
     if passes:
         n = sum(t["n"] for t in passes)
         h = sum((t["hit"] or 0) * t["n"] for t in passes) / n if n else None
-        st.caption(f"⛔ Pass reads (the ones the platform told members to skip): {n:,} graded, hit {pct(h)} — the "
+        st.caption(f"⚪ No edge reads (the ones the platform told members to skip): {n:,} graded, hit {pct(h)} — the "
                    "comparison group.")
 else:
     st.caption("No morning reviews yet.")

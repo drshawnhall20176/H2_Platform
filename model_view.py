@@ -89,10 +89,10 @@ def call(read: Optional[Dict]) -> Dict:
     ch = read.get("chance")
     use = read.get("use_tag") or ""
     if ch is not None and float(ch) < 0.5:
-        side, ch, use = ("Under" if side == "Over" else "Over"), 1 - float(ch), "⛔ Pass"
+        side, ch, use = ("Under" if side == "Over" else "Over"), 1 - float(ch), "⚪ No edge"
     if ch is not None and float(ch) < TOSS_UP:
         return {"Line": line, "Model proj": proj, "Model call": f"Toss-up at {line:g}", "Chance": float(ch),
-                "Use": "⛔ Pass", "_side": None}
+                "Use": "⚪ No edge", "_side": None}
     return {"Line": line, "Model proj": proj, "Model call": f"{side} {line:g}", "Chance": ch, "Use": use,
             "_side": side}
 

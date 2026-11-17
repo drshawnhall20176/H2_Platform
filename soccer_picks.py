@@ -6,7 +6,7 @@ TRACKING ONLY. Backtest (research/soccer_backtest.py, 2023-26, 8 leagues, ~10,00
     0.966 vs 0.946 EPL ...) and its value picks lost 6-37% on match result, ~0 to -13% on Asian handicap;
   * a US-style book's price beating Pinnacle's no-vig line (research/soccer_value_backtest.py) beat the closing line
     by +2 to +16% but realized profit was about break-even over 4 seasons.
-So every pick here is ⛔ Pass until the live record says otherwise. What the page adds: the model's read, the sharp
+So every pick here is ⚪ No edge until the live record says otherwise. What the page adds: the model's read, the sharp
 fair line, the best US price, and a 📈 flag when that price beats the sharp line by VALUE_EDGE -- tracked.
 
 Records go to game_picks under the league key (SOCCER_EPL ...); results come from ESPN (soccer_data).
@@ -24,7 +24,7 @@ import soccer_model as M
 
 VALUE_EDGE = 0.02          # a US price this much above the sharp fair line gets the 📈 flag (tracked)
 HISTORY_DAYS = 500
-PASS = "⛔ Pass"
+PASS = "⚪ No edge"
 WHY = "tracking only: the backtest found no proven edge in soccer yet"
 
 

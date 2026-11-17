@@ -5,7 +5,7 @@ import pytest
 
 import script_effects as SE
 
-PE_PASS = "⛔ Pass"
+PE_PASS = "⚪ No edge"
 
 
 def test_every_sport_has_sane_data():
@@ -268,7 +268,7 @@ def test_upper_table_carries_the_whole_roster(monkeypatch):
     game = f"{teams[0]} @ {teams[1]}"
     snaps = [{"sport": "NBA", "slate_date": "x", "game": game, "team": "7", "opp": "11", "player": "Big Man",
               "player_id": "1", "market": "Points", "line": 25.5, "side": "Under", "chance": 0.52, "projection": 25.0,
-              "use_tag": "⛔ Pass", "price": -110, "over_price": -110, "under_price": -110, "lean": None, "gap": None,
+              "use_tag": "⚪ No edge", "price": -110, "over_price": -110, "under_price": -110, "lean": None, "gap": None,
               "flags": "[]", "kickoff": "2026-11-08T00:00:00Z"}]
     monkeypatch.setattr(MS, "load_snapshots", lambda *a, **k: snaps)
     monkeypatch.setattr(SE, "calls", lambda sport: {})
