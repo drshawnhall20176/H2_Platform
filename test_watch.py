@@ -31,3 +31,17 @@ def test_side_record_and_old_pass_rows_count_as_no_edge():
     assert s["Over"]["Graded"] == 2 and s["Over"]["Bet graded"] == 1 and s["Under"]["Hits"] == 1
     u = {r["Use"]: r for r in PG.use_record([dict(r, chance=0.5) for r in rows])}
     assert u[PE.USE_PASS]["Graded"] == 2
+
+
+def test_overs_gate_follows_each_sports_record():
+    lose = {"d": [{"result": "miss", "side": "Over", "chance": 0.6, "over_price": -110}] * 14
+            + [{"result": "hit", "side": "Over", "chance": 0.6, "over_price": -110}] * 8}
+    g = W.judge_overs("NBA", lose)
+    assert g["NBA"]["off"] is True and W.gate_over(PE.USE_SINGLE, "NBA", "Over", gate=g) == PE.USE_PASS
+    assert W.gate_over(PE.USE_SINGLE, "NBA", "Under", gate=g) == PE.USE_SINGLE        # Unders untouched
+    win = {"d": [{"result": "hit", "side": "Over", "chance": 0.6, "over_price": 150}] * 10
+           + [{"result": "miss", "side": "Over", "chance": 0.6, "over_price": 150}] * 12}
+    g2 = W.judge_overs("NFL", win)
+    assert g2["NFL"]["off"] is False and W.gate_over(PE.USE_BOTH, "NFL", "Over", gate=g2) == PE.USE_BOTH
+    few = W.judge_overs("NCAAF", {"d": lose["d"][:5]})
+    assert few["NCAAF"]["off"] is False                                                # too few to switch off

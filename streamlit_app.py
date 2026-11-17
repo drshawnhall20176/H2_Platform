@@ -68,8 +68,10 @@ def _side_rows():
         for m in MS.daily_review_mornings(sp)[:3]:
             sides = ((MS.load_daily_review(sp, m) or {}).get("trend") or {}).get("sides")
             if sides:
-                txt = {r["Side"]: (f"{r['Hits'] / r['Graded']:.0%} ({r['Graded']:,})" if r["Graded"] else "—")
-                       for r in sides}
+                # Nov 17: bet-tagged picks only -- every read mixes in long shots (NHL goals, anytime TDs) whose low
+                # hit rate is expected and says nothing about the picks members are shown
+                txt = {r["Side"]: (f"{r['Bet hits'] / r['Bet graded']:.0%} ({r['Bet graded']:,})"
+                                   if r.get("Bet graded") else "—") for r in sides}
                 out.append((sp, txt.get("Over", "—"), txt.get("Under", "—")))
                 break
     return out
@@ -99,13 +101,14 @@ def _today_sidebar() -> None:
         except Exception:                                       # noqa: BLE001
             sides = []
         if sides:
-            st.markdown("**⬆️⬇️ Overs vs Unders · last 30 days**")
+            st.markdown("**⬆️⬇️ Over vs Under picks · last 30 days**")
             sl = ["| Sport | Over calls | Under calls |", "|---|---|---|"]
             for sp, o, u in sides:
                 sl.append(f"| {sp} | {o} | {u} |")
             st.markdown("\n".join(sl))
-            st.caption("How often the model's called side was right, every read (graded count). Bet-tagged picks only "
-                       "are on Model Record.")
+            st.caption("Bet-tagged picks (🎯 / 🎟️) only: how often the model's Over calls and Under calls were right "
+                       "(graded count). While a sport's Overs aren't winning, its Over picks are tagged ⚪ No edge — "
+                       "re-checked every morning.")
         trusts = [f"{sp} {tr:.2f}" for sp, *_x, tr in rows if tr is not None and tr < 1.0]
         if trusts:
             st.caption("**Trust in the model vs the books** (1.00 = the model as is): " + ", ".join(trusts) +
