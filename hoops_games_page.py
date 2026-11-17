@@ -185,8 +185,9 @@ def _previews(league, upcoming, lean_recs, no_rule, day, cust, rules=None):
     if top:
         st.markdown("**Worth a look first**")
         for r in top:
-            st.markdown(f"- **{r['Model leans']}** ({r['Game']}, {r['Tip (ET)']}): the model is {r['Gap (pts)']:.1f} "
-                        f"points from the book. Leans of this size: {r['Form (30 days)']}.")
+            why = "a tested pick" if r.get("_playable") else f"the spread is moving its way {r.get('Spread move', '')}"
+            st.markdown(f"- **{r['_lean']}** ({r['Game']}, {r['Tip (ET)']}): {why}; the model is "
+                        f"{r['Gap (pts)']:.1f} points from the book.")
     if by_gap:
         rows = sorted(rows, key=lambda r: -(r["Gap (pts)"] or 0))
     df = pd.DataFrame(GP.public(rows))
@@ -202,7 +203,9 @@ def _previews(league, upcoming, lean_recs, no_rule, day, cust, rules=None):
                  past=day < _today_et())
     st.caption(f"Form: {GP.HOT} = leans of that size won 55%+ of 20 or more graded games in the last 30 days; "
                f"{GP.EVEN} = about break-even; {GP.COLD} = losing; {GP.NEW} = fewer than 20 games. A −110 spread needs "
-               "52.4% to break even. Model line = the spread the model would set; Gap = how far that is from the book."
+               "52.4% to break even. **The model says** = who the model has winning and by how much, the same for "
+               "the book, and the side of the spread that difference points to; \"No bet\" = no tested rule, so the "
+               "lean is information, not a pick. Gap = how far the model is from the book."
                + ("" if cust else " Long backtest = how often the model's side covered in the long-run test. "
                   + USE_LEGEND + " " + _rules_text(rules or {})))
     if not cust:

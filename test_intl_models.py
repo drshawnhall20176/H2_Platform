@@ -264,7 +264,7 @@ def test_ncaamb_game_lab_and_intl_page_render(monkeypatch):
     at.run()
     at.date_input(key="hg_date_NCAAMB").set_value(DAY).run()
     assert not at.exception, [e.value for e in at.exception]
-    assert "Tennessee Volunteers -25.5" in at.dataframe[0].value.to_string()
+    assert "book: Tennessee Volunteers by 25.5" in " ".join(at.dataframe[0].value["The model says"])
     box = at.selectbox(key="hg_team_NCAAMB")                    # Nov 16: Find a team is a dropdown on every Game Lab
     assert box.label == "Find a team" and box.options == ["All teams", "Tennessee Volunteers", "Wofford Terriers"]
     box.set_value("Wofford Terriers").run()
