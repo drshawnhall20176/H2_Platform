@@ -133,7 +133,7 @@ else:
              date_str=str(day), tag="tennis", past=day < pd.Timestamp.now(tz="America/New_York").date())
     st.caption("Model's pick = the player the model favors and its chance. Use reads like the props pages: 🔒 Most probable "
                "+ 🎟️ Parlay + Single = 60%+ with enough history on both players; 🎯 Single only = 55-60% (or thin history); "
-               "⛔ Pass = too close to call. \"(-150 or better)\" = the price you need for +3% value — at a shorter price it's a "
+               "⚪ No edge = too close to call. \"(-150 or better)\" = the price you need for +3% value — at a shorter price it's a "
                "pass. Fair = the no-margin price at the model's chance. These events have no tested edge yet; the "
                "favorite record below is the check.")
 
@@ -184,7 +184,7 @@ else:
         "Rated matches": f"{p.get('n_home', 0)} / {p.get('n_away', 0)}",
         "Tracking pick": _pick(p)} for p in sorted(priced, key=lambda x: x["kickoff"])]),
         hide_index=True, width="stretch")
-    st.caption("Use is ⛔ Pass on these main-tour events: in the backtest the books' prices beat the model here. "
+    st.caption("Use is ⚪ No edge on these main-tour events: in the backtest the books' prices beat the model here. "
                "Model = the first-named player's chance from surface Elo; Market = the books' no-vig chance. "
                "Rated matches = how much history each player's rating has behind it.")
 

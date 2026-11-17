@@ -88,7 +88,7 @@ def test_board_keeps_the_old_engine_only_for_markets_the_props_model_lacks():
     import slate_props
     orig = slate_props.plays
     try:
-        slate_props.plays = lambda r, rows: [{"Market": "Receiving Yards", "Player": "new"}]
+        slate_props.plays = lambda r, rows, sport=None: [{"Market": "Receiving Yards", "Player": "new"}]
         out = BBD.compose_board("NFL", reads, [], legacy)
     finally:
         slate_props.plays = orig
@@ -160,7 +160,7 @@ def test_anytime_td_yes_under_50_shows_when_the_price_pays(monkeypatch):
     assert p["Conviction"] > 1.0 and "never a parlay leg" in p["UseWhy"]
     assert SP.play_from_row(dict(base, over_price=200), None) is None              # 28% at +200: no value
     held = SP.play_from_row(dict(base, gap="big", gap_pct=0.6), None)
-    assert held["Use"] == "⛔ Pass"                                                 # the news check still applies
+    assert held["Use"] == "⚪ No edge"                                                 # the news check still applies
 
 def test_anytime_td_trusts_a_players_own_rate_for_200_touches():
     import football_props as FP

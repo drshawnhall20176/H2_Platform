@@ -287,7 +287,7 @@ def side_probs(row: Dict) -> Optional[Dict]:
 
 # --------------------------------------------------------------------------- injury news on every row (Nov 5)
 # A key player OUT changes a game plan for both teams. Each row gets its own team's and the opponent's key absences
-# ("news_team" / "news_opp") and a 🩹 note, and play_from_row downgrades a playable read to ⛔ Pass when there is
+# ("news_team" / "news_opp") and a 🩹 note, and play_from_row downgrades a playable read to ⚪ No edge when there is
 # news AND the model is far from the market (Conviction >= NEWS_CONVICTION): after news, a big disagreement with the
 # books usually means the line already prices something the model can't see.
 # Threshold from research/injury_news_test.py (graded NBA reads): with injury news, Conviction 1.30-1.50 hit 59%
@@ -367,7 +367,7 @@ def why(row: Dict) -> str:
     return text
 
 
-def play_from_row(row: Dict, slate_row: Optional[Dict] = None) -> Optional[Dict]:
+def play_from_row(row: Dict, slate_row: Optional[Dict] = None, sport: Optional[str] = None) -> Optional[Dict]:
     """A Player props row -> the play shape every pick page reads (build_best_bets' schema), or None when there is
     no book line or no side. Conviction and grade go only to plays Player props leans on."""
     if row.get("line") is None or row.get("line_src") != "book" or row.get("out"):
@@ -410,6 +410,13 @@ def play_from_row(row: Dict, slate_row: Optional[Dict] = None) -> Optional[Dict]
     else:
         conviction = 1.0
     use, use_why = news_guard(row, use, use_why, conviction)        # Nov 5: injury news + far from the market
+    try:                                                            # Nov 17: 👀 Watch groups (watch.py)
+        import watch as W
+        w = W.apply(use, sport, row.get("market"), side, row.get("projection"), row["line"])
+        if w != use:
+            use, use_why = w, "a No-edge group that made money in both halves of its window — tracked, not proven"
+    except Exception:                                               # noqa: BLE001
+        pass
     best = bk.get("best_over") if side == "Over" else bk.get("best_under")
     s = slate_row or {}
     return {
@@ -455,12 +462,12 @@ def yes_value(row: Dict) -> Optional[float]:
     return ev if ev >= PE.MIN_EV else None
 
 
-def plays(reads: Dict[Tuple, Dict], slate_rows: Sequence[Dict]) -> List[Dict]:
+def plays(reads: Dict[Tuple, Dict], slate_rows: Sequence[Dict], sport: Optional[str] = None) -> List[Dict]:
     """Every priced play on the slate, highest grade-worthy conviction first."""
     by_pid = {r.get("_pid"): r for r in slate_rows or []}
     out = []
     for (pid, _mk), row in reads.items():
-        p = play_from_row(row, by_pid.get(pid))
+        p = play_from_row(row, by_pid.get(pid), sport)
         if p is None:
             continue
         out.append(p)

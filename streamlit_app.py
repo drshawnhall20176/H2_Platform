@@ -45,15 +45,33 @@ def _model_record_rows():
     out = []
     for sp in TODAY_SIDEBAR_SPORTS:
         rec = PR.tag_records(sp) or {}
-        bh = sum(h for t, (h, n) in rec.items() if "Pass" not in t)
-        bn = sum(n for t, (h, n) in rec.items() if "Pass" not in t)
-        ph, pn = next(((h, n) for t, (h, n) in rec.items() if "Pass" in t), (0, 0))
+        import props_engine as PE
+        bh = sum(h for t, (h, n) in rec.items() if not PE.is_pass(t) and t != PE.USE_WATCH)
+        bn = sum(n for t, (h, n) in rec.items() if not PE.is_pass(t) and t != PE.USE_WATCH)
+        ph = sum(h for t, (h, n) in rec.items() if PE.is_pass(t))
+        pn = sum(n for t, (h, n) in rec.items() if PE.is_pass(t))
         try:
             tr = CAL.trust(sp)
         except Exception:                                       # noqa: BLE001
             tr = None
         if bn or pn:
             out.append((sp, bh, bn, ph, pn, tr))
+    return out
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _side_rows():
+    """[(sport, "Over text", "Under text")] from each sport's latest morning review (trend "sides", Nov 17)."""
+    import model_store as MS
+    out = []
+    for sp in TODAY_SIDEBAR_SPORTS:
+        for m in MS.daily_review_mornings(sp)[:3]:
+            sides = ((MS.load_daily_review(sp, m) or {}).get("trend") or {}).get("sides")
+            if sides:
+                txt = {r["Side"]: (f"{r['Hits'] / r['Graded']:.0%} ({r['Graded']:,})" if r["Graded"] else "—")
+                       for r in sides}
+                out.append((sp, txt.get("Over", "—"), txt.get("Under", "—")))
+                break
     return out
 
 
@@ -68,14 +86,26 @@ def _today_sidebar() -> None:
         if not rows:
             st.caption("The record appears after the first morning reviews.")
             return
-        lines = ["| Sport | Bet picks | Pass |", "|---|---|---|"]
+        lines = ["| Sport | Bet picks | No edge |", "|---|---|---|"]
         for sp, bh, bn, ph, pn, tr in rows:
             bet = f"{bh / bn:.0%} ({bn})" if bn else "—"
             pas = f"{ph / pn:.0%}" if pn else "—"
             lines.append(f"| {sp} | {bet} | {pas} |")
         st.markdown("\n".join(lines))
-        st.caption("**Bet picks** = every read tagged 🎯 / 🎟️ (hit rate, graded count); **Pass** = the rest. A −110 "
-                   "price needs 52.4% to break even. When bet picks barely beat Pass, the edge is thin.")
+        st.caption("**Bet picks** = every read tagged 🎯 / 🎟️ (hit rate, graded count); **No edge** = the coin flips "
+                   "the platform said to skip — near 50% is what it should be. A −110 price needs 52.4%.")
+        try:
+            sides = _side_rows()
+        except Exception:                                       # noqa: BLE001
+            sides = []
+        if sides:
+            st.markdown("**⬆️⬇️ Overs vs Unders · last 30 days**")
+            sl = ["| Sport | Over calls | Under calls |", "|---|---|---|"]
+            for sp, o, u in sides:
+                sl.append(f"| {sp} | {o} | {u} |")
+            st.markdown("\n".join(sl))
+            st.caption("How often the model's called side was right, every read (graded count). Bet-tagged picks only "
+                       "are on Model Record.")
         trusts = [f"{sp} {tr:.2f}" for sp, *_x, tr in rows if tr is not None and tr < 1.0]
         if trusts:
             st.caption("**Trust in the model vs the books** (1.00 = the model as is): " + ", ".join(trusts) +

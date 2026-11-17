@@ -1,5 +1,5 @@
 """
-Oct 29: every play says what it's fit for -- 🎟️ Parlay + Single / 🎟️ Parlay leg / 🎯 Single only / ⛔ Pass --
+Oct 29: every play says what it's fit for -- 🎟️ Parlay + Single / 🎟️ Parlay leg / 🎯 Single only / ⚪ No edge --
 prices follow your books in order (DraftKings, then FanDuel), and DK Pick6 can be the pricing book.
 """
 
@@ -24,7 +24,7 @@ def test_the_four_tags():
     assert PE.use_tag(row(returning=True))[0] == PE.USE_PASS                               # a warning
     assert PE.use_tag(row(projection=16.0))[0] == PE.USE_PASS                              # other side
     assert PE.use_tag(row(projection=19.0, ev=-0.02, lean="No lean"))[0] == PE.USE_PASS    # thin and no edge
-    assert PE.use_tag(row(line=None))[0] == "—"
+    assert PE.use_tag(row(line=None))[0] == "No line"          # Nov 17: was a blank "—"
 
 
 def test_milestones_need_70_percent_and_pickem_needs_the_break_even():

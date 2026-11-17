@@ -236,7 +236,7 @@ if True:
         if any(r.get("untested") for r in _rows):
             st.caption("**No backtest:** these tennis matches (events only ESPN lists, with no posted prices) are tagged "
                        "from the model's chance alone — nothing has tested that chance yet. On main-tour matches the "
-                       "books beat this model, so those are always ⛔ Pass. Treat these as reads, and only at the "
+                       "books beat this model, so those are always ⚪ No edge. Treat these as reads, and only at the "
                        "price shown under Needs or better.")
     else:
         _none = "locks" if _show.startswith("🔒") else "playable picks"
@@ -440,16 +440,16 @@ if True:
                 _bits.append(f"{_sp}: favorite won {_a['won'] / _a['n']:.0%} of {_a['n']:,}"
                              + (f" ({_hw / _hn:.0%} when it said 70%+, {_hn:,} games)" if _hn >= 10 else ""))
         st.caption(("**Track record** (likely winner) — " + "; ".join(_bits) + ". " if _bits else "")
-                   + "**Use** — the same symbols as every page: 🎟️ Parlay + Single / 🎟️ Parlay leg / 🎯 Single only / ⛔ Pass. "
+                   + "**Use** — the same symbols as every page: 🎟️ Parlay + Single / 🎟️ Parlay leg / 🎯 Single only / ⚪ No edge. "
                      "A tested pick (a backtest supports the rule: NCAAMB spreads at 8+ points of disagreement, EuroLeague "
                      "spreads, NBL moneylines) carries its rule's tag, with a real chance and value. Every other game shows "
                      "the model's **lean** (the spread or total it disagrees with most): 🎯 Single only when leans of that "
-                     "kind and size have won 55%+ (backtest, or 20+ games in the last 30 days), otherwise ⛔ Pass. "
+                     "kind and size have won 55%+ (backtest, or 20+ games in the last 30 days), otherwise ⚪ No edge. "
                      "52.4% breaks even at −110. Tick a row and the log box shows its grade (A–F) and why. **Spread / "
                      "Total** are the books' lines; **Model** is the model's own score. College football leans are ⛔ "
                      "Pass: its spread model was retested Nov 14 and is a coin flip against the closing line. Heavy "
                      "favorites aren't listed as picks: they usually win but cost more than they're worth. **Soccer** rows "
-                     "show the goals model's most likely result beside the market's favourite — tracking only, ⛔ Pass. "
+                     "show the goals model's most likely result beside the market's favourite — tracking only, ⚪ No edge. "
                      "NFL and UFC aren't covered yet.")
     else:
         st.caption("No games with a model chance today" + ("" if _scope == "All sports" else " for this sport") + ".")

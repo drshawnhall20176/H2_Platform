@@ -405,14 +405,27 @@ def grade(snapshots: Sequence[Dict], results: Dict[Tuple[str, str], Dict]) -> Li
 def use_record(graded: Sequence[Dict]) -> List[Dict]:
     """Per Use tag: graded, hits, hit rate, the average chance the model gave."""
     out = []
-    for tag in (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE, PE.USE_PASS):
-        g = [r for r in graded if r.get("use_tag") == tag and r["result"] in ("hit", "miss")]
+    for tag in (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE, PE.USE_WATCH, PE.USE_PASS):
+        g = [r for r in graded if PE.norm_use(r.get("use_tag")) == tag and r["result"] in ("hit", "miss")]
         if not g:
             continue
         hits = sum(r["result"] == "hit" for r in g)
         ch = [r["chance"] for r in g if r.get("chance") is not None]
         out.append({"Use": tag, "Graded": len(g), "Hits": hits, "Hit rate": hits / len(g),
                     "Model said": (sum(ch) / len(ch)) if ch else None})
+    return out
+
+
+def side_record(graded: Sequence[Dict]) -> List[Dict]:
+    """Nov 17 (owner: "how the model is doing on over vs under, to drive some credibility"): the model's called side,
+    Over vs Under -- every read, and the bet-tagged ones -- hits / graded."""
+    out = []
+    for side in ("Over", "Under"):
+        g = [r for r in graded if r.get("side") == side and r.get("result") in ("hit", "miss")]
+        b = [r for r in g if not PE.is_pass(r.get("use_tag")) and PE.norm_use(r.get("use_tag")) in
+             (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE)]
+        out.append({"Side": side, "Graded": len(g), "Hits": sum(r["result"] == "hit" for r in g),
+                    "Bet graded": len(b), "Bet hits": sum(r["result"] == "hit" for r in b)})
     return out
 
 

@@ -349,7 +349,7 @@ def build_best_bets(rows: List[Dict], sims: int = DEFAULT_SIMS,
     players without a book line get no play, and the rest of this function is skipped."""
     if reads is not None:
         import slate_props as SP
-        return SP.plays(reads, rows)
+        return SP.plays(reads, rows, "NBA")
     rng = np.random.default_rng(seed)
     plays: List[Dict] = []
 

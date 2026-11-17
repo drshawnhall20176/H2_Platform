@@ -237,7 +237,7 @@ def _use(p, league=""):
 
 
 USE_LEGEND = ("Use reads like the props pages: 🔒 Most probable = 60%+ with a tested edge behind it; 🎟️ Parlay + Single "
-              "= 60%+; 🎯 Single only = 55-60%, or a tracked rule; ⛔ Pass = no tested edge for this league or gap size.")
+              "= 60%+; 🎯 Single only = 55-60%, or a tracked rule; ⚪ No edge = no tested edge for this league or gap size.")
 
 
 def _show_filter(key, rows, league):
@@ -475,13 +475,13 @@ def tick_item(p, kind: str):
         ch = None
     if price is not None and (isinstance(price, float) and math.isnan(price)):
         price = None
-    # Nov 17: carry the page's Use tag. A ⛔ Pass game's chance is the model's own, untested number -- the Coach graded
+    # Nov 17: carry the page's Use tag. A ⚪ No edge game's chance is the model's own, untested number -- the Coach graded
     # two such spreads "A" (Hofstra +11.5, Rutgers +16.5) while the page said Pass and both lines were moving away.
     try:
         use = (_tag(p.get("sport"), p) or {}).get("use")
     except Exception:                                           # noqa: BLE001
         use = None
-    passed = bool(use) and "Pass" in str(use)
+    passed = bool(use) and ("No edge" in str(use) or "Pass" in str(use))
     return {"sport": p.get("sport"), "pick": label, "price": price, "game": f"{p['away']} @ {p['home']}",
             "chance": ch, "_rec": p, "bet_market": kind, "bet_side": side, "bet_line": line, "use": use,
             "best_tested": ch is not None and not passed, "best_chance": None if ch is None else round(ch, 4)}
@@ -625,7 +625,7 @@ def render_fair(league: str) -> None:
         LU.panel(items, key=f"hf_panel_{league}", date_str=str(day), tag=f"{league.lower()}-games",
                  past=day < _today_et())
         st.caption("Model's pick = the team the model favors to win and its chance. Use reads like the props pages (🎯 "
-                   "Single only at 55%+, ⛔ Pass below); \"(-150 or better)\" = the moneyline price needed for +3% value. No 🔒 "
+                   "Single only at 55%+, ⚪ No edge below); \"(-150 or better)\" = the moneyline price needed for +3% value. No 🔒 "
                    "here: the model has no tested edge in this league yet.")
         with st.expander("💲 Check a sportsbook price · 📒 log it"):
             labels = {f"{p['away']} @ {p['home']} · {_tip(p)}": p for p in upcoming}

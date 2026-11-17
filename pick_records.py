@@ -56,7 +56,13 @@ def tag_records(sport: str) -> Dict[str, Tuple[int, int]]:
             rep = MS.load_daily_review(sport, m) or {}
             use = (rep.get("trend") or {}).get("use")
             if use:
-                return {u["Use"]: (int(u["Hits"]), int(u["Graded"])) for u in use}
+                import props_engine as PE
+                out: Dict[str, Tuple[int, int]] = {}
+                for u in use:                                   # Nov 17: "⛔ Pass" reviews count as "⚪ No edge"
+                    k = PE.norm_use(u["Use"])
+                    h0, n0 = out.get(k, (0, 0))
+                    out[k] = (h0 + int(u["Hits"]), n0 + int(u["Graded"]))
+                return out
     except Exception:                                           # noqa: BLE001
         pass
     return {}
@@ -278,7 +284,7 @@ def grade(r: Dict) -> str:
 
 def lean_use(r: Dict) -> str:
     """Nov 14: the site's Use symbols for a game-line row, from its grade -- A: the tested rule's own tag; B: 🎯 Single
-    only (a 55% lean is a single, never a parlay leg); C / D / F and tracking-only rows: ⛔ Pass."""
+    only (a 55% lean is a single, never a parlay leg); C / D / F and tracking-only rows: ⚪ No edge."""
     import props_engine as PE
     if r.get("status"):                                         # soccer and other tracking-only rows
         return PE.USE_PASS

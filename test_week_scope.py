@@ -273,7 +273,7 @@ def test_recommendation_pages_have_market_group_and_side(monkeypatch, page, labe
 def test_best_bets_most_probable_filter(monkeypatch):
     _patched_board(monkeypatch)
     plays, meta = _board()
-    base = dict(plays[1], Model="player-props", Use="⛔ Pass", Conviction=1.0, Gap="agree", Projection=300.0, Warnings=[])
+    base = dict(plays[1], Model="player-props", Use="⚪ No edge", Conviction=1.0, Gap="agree", Projection=300.0, Warnings=[])
     board = [dict(base, Player="Sure", ModelProb=0.66, Cushion=0.22),
              dict(base, Player="Thin", ModelProb=0.66, Cushion=0.05),
              dict(base, Player="Held", ModelProb=0.70, Cushion=0.40, Gap="big", GapPct=0.4),
