@@ -349,8 +349,10 @@ def review_sport(sport: str, morning: str, open_bets: Sequence[Dict], fetch: Cal
         try:
             import watch as W
             ws = W.judge(sport, trend, morning, MS.get_setting(W.STATUS_KEY, {}, db_path=db_path) or {})
+            og = W.judge_overs(sport, trend, MS.get_setting(W.OVERS_KEY, {}, db_path=db_path) or {})
             if write:
                 MS.save_setting(W.STATUS_KEY, ws, db_path=db_path)
+                MS.save_setting(W.OVERS_KEY, og, db_path=db_path)
         except Exception as exc:                                # noqa: BLE001
             print(f"  [{sport}] watch judging failed: {type(exc).__name__}: {exc}")
     except Exception as exc:                                    # noqa: BLE001

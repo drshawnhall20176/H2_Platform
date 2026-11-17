@@ -138,3 +138,62 @@ def judge(sport: str, graded_by_date: Dict[str, Sequence[Dict]], today: str,
         out[r["id"]] = {"status": status, "n": n, "hits": h, "profit_per_1": round(units / n, 4) if n else None,
                         "days": days, "updated": today}
     return out
+
+
+# --------------------------------------------------------------------------- Overs gate (Nov 17)
+# Owner-approved after the Over/Under record: bet-tagged Overs hit 37-45% vs Unders 51-61% (30 days; 63 for football),
+# and raising the chance floor didn't help -- NBA, NCAAF and NHL Overs lost money at every floor up to 62-65%
+# (research/over_bar.py). NFL Overs made +16% per $1 (21 priced, mostly plus-money), so the gate is per sport and
+# decided by each sport's own record every morning: Over bets are tagged ⚪ No edge while the sport's would-be Over
+# bets (Over reads at 55%+) lose -- profit per $1 < 0 when 20+ are priced, else a hit rate 5+ points under what the
+# model said -- and come back on their own once they don't.
+OVERS_KEY = "overs:gate"
+OVER_FLOOR = 0.55
+
+
+def judge_overs(sport: str, graded_by_date: Dict[str, Sequence[Dict]], old: Optional[Dict] = None) -> Dict:
+    out = dict(old or {})
+    rows = [g for rs in graded_by_date.values() for g in rs
+            if g.get("result") in ("hit", "miss") and g.get("side") == "Over"
+            and float(g.get("chance") or 0) >= OVER_FLOOR]
+    n = len(rows)
+    hits = sum(g["result"] == "hit" for g in rows)
+    said = sum(float(g["chance"]) for g in rows) / n if n else None
+    priced = [g for g in rows if _dec(g.get("over_price")) is not None]
+    units = sum((_dec(g["over_price"]) - 1) if g["result"] == "hit" else -1.0 for g in priced)
+    if n < 20:
+        off = bool((out.get(sport) or {}).get("off"))          # too few to change anything
+    elif len(priced) >= 20:
+        off = units < 0
+    else:
+        off = (hits / n) < (said or 0) - 0.05
+    out[sport] = {"off": off, "n": n, "hit": round(hits / n, 4) if n else None,
+                  "said": round(said, 4) if said is not None else None, "priced": len(priced),
+                  "profit_per_1": round(units / len(priced), 4) if priced else None}
+    return out
+
+
+_OVERS_CACHE: Dict = {"at": 0.0, "v": {}}
+
+
+def overs_off(sport: Optional[str], gate: Optional[Dict] = None) -> bool:
+    if not sport:
+        return False
+    if gate is None:
+        import time
+        if time.time() - _OVERS_CACHE["at"] > 600:
+            try:
+                import model_store as MS
+                _OVERS_CACHE.update(at=time.time(), v=MS.get_setting(OVERS_KEY, {}) or {})
+            except Exception:                                   # noqa: BLE001
+                _OVERS_CACHE.update(at=time.time(), v={})
+        gate = _OVERS_CACHE["v"]
+    return bool((gate.get(sport) or {}).get("off"))
+
+
+def gate_over(tag: str, sport: Optional[str], side, gate: Optional[Dict] = None) -> str:
+    """A bet tag on an Over becomes ⚪ No edge while the sport's Overs gate is off."""
+    import props_engine as PE
+    if side != "Over" or PE.norm_use(tag) not in (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE):
+        return tag
+    return PE.USE_PASS if overs_off(sport, gate) else tag
