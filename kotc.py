@@ -46,10 +46,32 @@ def blowout_by_team(blow_rows: Sequence[Dict]) -> Dict[str, Dict]:
     return out
 
 
+def model_pra(reads: Dict) -> Dict[str, float]:
+    """Nov 17 (one model): {normalized player: the model's PRA projection} from the day's saved board reads -- its PRA
+    read when posted, else the sum of its Points, Rebounds and Assists reads (all three needed)."""
+    import model_view as MV
+    out, parts = {}, {}
+    for (p, mk), r in (reads or {}).items():
+        if r.get("projection") is None:
+            continue
+        if mk == "PRA":
+            out[p] = float(r["projection"])
+        elif mk in PRA_MARKETS:
+            parts.setdefault(p, {})[mk] = float(r["projection"])
+    for p, d in parts.items():
+        if p not in out and len(d) == 3:
+            out[p] = sum(d.values())
+    return out
+
+
 def build(board: Sequence[Dict], player_info: Dict, blow: Dict[str, Dict], out_players: Optional[set] = None,
-          sims: int = SIMS, seed: int = 7) -> List[Dict]:
+          sims: int = SIMS, seed: int = 7, model_proj: Optional[Dict[str, float]] = None) -> List[Dict]:
     """board: Hot Hand rows (Player, Team, Opp, Market, Recent Avg, Matchup Score, Game); player_info:
-    {(player, team): {"min": avg minutes, "pra": [recent PRA games]}}."""
+    {(player, team): {"min": avg minutes, "pra": [recent PRA games]}}. model_proj: {normalized player: the model's
+    PRA projection} -- used for Proj PRA whenever the model has one (Nov 17: one model across the site); the Hot
+    Hand's form x matchup sum only fills in for players the model has no read on."""
+    import model_view as MV
+    model_proj = model_proj or {}
     out_players = out_players or set()
     agg: Dict[tuple, Dict] = {}
     for b in board:
@@ -81,8 +103,13 @@ def build(board: Sequence[Dict], player_info: Dict, blow: Dict[str, Dict], out_p
         if len(pra_log) >= 4:
             m = sum(pra_log) / len(pra_log)
             sd = math.sqrt(sum((x - m) ** 2 for x in pra_log) / (len(pra_log) - 1))
+        mp = model_proj.get(MV.norm_name(a["Player"]))
+        if mp is not None:
+            a["proj"] = mp
+            adj = a["proj"] * (1 - risk / mins) if mins else a["proj"]
         rows.append({"Player": a["Player"], "Team": a["Team"], "Opp": a["Opp"], "Game": a["Game"],
                      "Form PRA": round(a["form"], 1), "Proj PRA": round(a["proj"], 1),
+                     "Source": "model" if mp is not None else "form × matchup",
                      "Minutes": None if mins is None else round(mins, 1),
                      "Blowout chance": chance, "Min at risk": round(risk, 1) if risk else 0.0,
                      "Adj PRA": round(adj, 1), "Ceiling (90th)": None if not pra_log else round(_pct(pra_log, 0.9), 1),

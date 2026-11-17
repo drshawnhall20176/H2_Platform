@@ -22,3 +22,16 @@ def test_king_chance_ranks_the_big_line_first_and_blowouts_cost_starters():
     assert star["Min at risk"] > 0 and star["Adj PRA"] < star["Proj PRA"]
     assert sum(r["King chance"] for r in rows) > 0.99
     assert all(r["Player"] != "Jokic" for r in K.build(board, info, blow, {"Jokic"}, sims=500))
+
+
+def test_model_projection_leads():
+    """Nov 17: King of the Court uses the model's PRA projection, not the Hot Hand's own score."""
+    import kotc as K
+    reads = {("nikola jokic", "PRA"): {"projection": 52.0}, ("a b", "Points"): {"projection": 20.0},
+             ("a b", "Rebounds"): {"projection": 5.0}, ("a b", "Assists"): {"projection": 4.0}}
+    mp = K.model_pra(reads)
+    assert mp == {"nikola jokic": 52.0, "a b": 29.0}
+    board = [{"Player": "Nikola Jokic", "Team": "DEN", "Opp": "PHX", "Market": m, "Recent Avg": 10, "Matchup Score": 10,
+              "Game": "g"} for m in K.PRA_MARKETS]
+    rows = K.build(board, {}, {}, model_proj=mp, sims=200)
+    assert rows[0]["Proj PRA"] == 52.0 and rows[0]["Source"] == "model"
