@@ -65,7 +65,7 @@ def props_rows(sport: str, plays) -> List[Dict]:
                     "chance": p.get("ModelProb"), "use": p.get("Use") or "", "lock": lock, "page": "Best Bets",
                     # Nov 7: what the Home panel needs to log the pick
                     "player": p.get("Player"), "pid": p.get("PlayerId"), "market": p.get("Market"), "side": p.get("Side"),
-                    "line": line})
+                    "line": line, "market_key": p.get("MarketKey")})
     out.sort(key=_order)
     # Nov 14: every 🔒 Most probable is kept; the cap only trims the other playable tags
     return [r for r in out if r["lock"]] + [r for r in out if not r["lock"]][:TOP_PER_SPORT]
@@ -723,3 +723,83 @@ def ufc_rows(date_str: str, api_key: Optional[str]) -> List[Dict]:
                     "books": b["books"], "commence": b["commence"], "spread": ln["spread"], "total": ln["total"]})
     out.sort(key=lambda r: r.get("commence") or "")
     return out
+
+
+
+# --------------------------------------------------------------------------- is the market moving our way? (Nov 17)
+# The owner: "how can we pull and showcase those specific opportunities" -- the ones where the model may be beating the
+# book. The best early sign is the market itself moving toward the model's side after the first price (the line moves
+# our way, or our side gets more expensive). Tested on graded reads (research/move_test.py, line_history captures):
+#   NBA bet-tagged reads: market moved toward us 57.1% (n 84, +3.6% at the first price) vs away 53.4% (-1.6%)
+#   NFL bet-tagged reads: toward 61.9% (n 42, +8.5%) vs away 53.1% (-5.9%); all NFL reads toward +5.0% vs away -7.3%
+# Small samples -- a tracking signal, shown for NBA and NFL only (NHL's captures didn't match its markets cleanly).
+MOVE_SPORTS = ("NBA", "NFL")
+MOVE_MIN = 0.02                # 2 points of implied chance (a half point of line counts as 2)
+MOVE_LINE_W = 0.04
+
+
+def _implied(price) -> Optional[float]:
+    try:
+        p = float(price)
+    except (TypeError, ValueError):
+        return None
+    return 100 / (p + 100) if p > 0 else -p / (-p + 100)
+
+
+def move_of(series: List[Dict], side: str) -> Optional[Dict]:
+    """From one player/market's captures today: how the read's side moved from the first capture to the latest.
+    {"toward": score, "line": (first, last), "chance": (first, last)} or None with fewer than two capture times."""
+    rows = sorted([x for x in series if str(x.get("side") or "").lower() == side.lower()
+                   and x.get("price") is not None], key=lambda x: str(x.get("captured_at")))
+    if len(rows) < 2:
+        return None
+    t0, t1 = str(rows[0]["captured_at"]), str(rows[-1]["captured_at"])
+    if t0[:13] == t1[:13]:
+        return None
+    first = [x for x in rows if str(x["captured_at"]) == t0]
+    last = [x for x in rows if str(x["captured_at"]) == t1]
+    def avg(xs, f):
+        v = [f(x) for x in xs if f(x) is not None]
+        return sum(v) / len(v) if v else None
+    pf, pl = avg(first, lambda x: _implied(x["price"])), avg(last, lambda x: _implied(x["price"]))
+    lf = avg(first, lambda x: None if x.get("line") is None else float(x["line"]))
+    ll = avg(last, lambda x: None if x.get("line") is None else float(x["line"]))
+    if pf is None or pl is None:
+        return None
+    dl = (ll - lf) if (lf is not None and ll is not None) else 0.0
+    toward = (pl - pf) + MOVE_LINE_W * (dl if side.lower() in ("over", "yes") else -dl)
+    return {"toward": toward, "line": (lf, ll), "chance": (pf, pl)}
+
+
+def market_moves(sport: str, date_str: str, rows: List[Dict], index=None) -> None:
+    """Adds "move" (📈 / 📉 / "") and "move_why" to each of `sport`'s prop rows, from today's line captures."""
+    if sport not in MOVE_SPORTS:
+        return
+    if index is None:
+        try:
+            import line_history as LH
+            index = LH.sport_index(sport, since=date_str)
+        except Exception:                                       # noqa: BLE001
+            return
+    by_player: Dict[str, Dict[str, List[Dict]]] = {}
+    for (pl, mk), ser in (index or {}).items():
+        by_player.setdefault(PE.norm_name(pl or ""), {})[mk] = ser
+    for r in rows:
+        if r.get("sport") != sport or r.get("kind") != "Prop" or not r.get("side") or r.get("line") is None:
+            continue
+        mine = by_player.get(PE.norm_name(r.get("player") or ""), {})
+        mk = r.get("market_key")
+        if mk not in mine:                                      # older saves: the market whose line matches the pick
+            cands = [k for k, ser in mine.items()
+                     if any(x.get("line") is not None and float(x["line"]) == float(r["line"]) for x in ser)]
+            mk = cands[0] if len(cands) == 1 else None
+        m = move_of(mine.get(mk) or [], str(r["side"])) if mk else None
+        if not m:
+            r["move"], r["move_why"] = "", ""
+            continue
+        lf, ll = m["line"]
+        pf, pl = m["chance"]
+        why = (f"line {lf:g} → {ll:g}, " if lf is not None and ll is not None and abs(ll - lf) >= 0.25 else "") + \
+              f"{r['side']} {pf:.0%} → {pl:.0%}"
+        r["move"] = "📈 our way" if m["toward"] >= MOVE_MIN else ("📉 against" if m["toward"] <= -MOVE_MIN else "")
+        r["move_why"] = why

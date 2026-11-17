@@ -247,6 +247,24 @@ if True:
                                   "side has been winning). They come back on their own when the record recovers.")
     if not _show_losing:
         _rows = [r for r in _rows if r.get("verdict") not in _PR.HIDE]
+    # Nov 17: is the market moving toward the model's side since the first price today? (NBA, NFL; tracking signal)
+    if not _past:
+        @st.cache_data(ttl=600, show_spinner=False)
+        def _line_index(sp, day):
+            import line_history as _LHx
+            return _LHx.sport_index(sp, since=day)
+        for _sp in _TB.MOVE_SPORTS:
+            try:
+                _TB.market_moves(_sp, _today, _rows, index=_line_index(_sp, _today))
+            except Exception:                                   # noqa: BLE001
+                pass
+    _ours = [r for r in _rows if r.get("move") == "📈 our way"]
+    if _ours and st.toggle(f"📈 Market moving our way only ({len(_ours)})", value=False, key="home_best_moves",
+                           help="Picks whose market has moved toward the model's side since the first price today "
+                                "(the line moved our way, or our side got more expensive) -- the earliest sign the "
+                                "model is beating the book. Tested on graded picks: NBA 57% when the market moved our "
+                                "way vs 53% against; NFL 62% vs 53%. Small samples, so treat it as a tiebreaker."):
+        _rows = _ours
     _rows = sorted(_rows, key=lambda r: _tkey(r.get("time")))   # Nov 6: earliest games first (stable: rank kept within a time)
     # Nov 14: every lock is listed (the old 60-row cap, applied after the time sort, cut the late games' locks)
     _cap = len(_rows) if _show.startswith("🔒") else 250
@@ -258,6 +276,7 @@ if True:
                               "Chance": r.get("chance"),
                               "Price": ("—" if r.get("price") is None else f"{float(r['price']):+.0f}"),
                               "Needs": ("" if r.get("need") is None else f"{float(r['need']):+.0f} or better"),
+                              "Market": " ".join(x for x in (r.get("move") or "", f"({r['move_why']})" if r.get("move_why") else "") if x),
                               "Game": r.get("game"), "Weather": _wx(r.get("sport"), r.get("game")),
                               "Where": r.get("page"),
                               "Tested": "no backtest" if r.get("untested") else "",
@@ -268,6 +287,8 @@ if True:
             _df = _df.drop(columns=["Weather"])
         if not _df["Needs"].any():
             _df = _df.drop(columns=["Needs"])
+        if not _df["Market"].any():
+            _df = _df.drop(columns=["Market"])
         if not _df["Tested"].any():
             _df = _df.drop(columns=["Tested"])
         if _scope != "All sports":
