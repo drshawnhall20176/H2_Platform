@@ -345,6 +345,14 @@ def review_sport(sport: str, morning: str, open_bets: Sequence[Dict], fetch: Cal
         cal["auto"].append(CAL.auto_global(sport, trend, morning, write=write))
         # Nov 17: how far to trust the model against the books (props; TD scorers separately) -- forced toward the market
         cal["auto"].extend(CAL.auto_trust(sport, trend, morning, write=write))
+        # Nov 17: judge the 👀 Watch groups on the games since they were found (watch.py)
+        try:
+            import watch as W
+            ws = W.judge(sport, trend, morning, MS.get_setting(W.STATUS_KEY, {}, db_path=db_path) or {})
+            if write:
+                MS.save_setting(W.STATUS_KEY, ws, db_path=db_path)
+        except Exception as exc:                                # noqa: BLE001
+            print(f"  [{sport}] watch judging failed: {type(exc).__name__}: {exc}")
     except Exception as exc:                                    # noqa: BLE001
         cal["auto"] = []
         print(f"  [{sport}] auto-calibration failed: {type(exc).__name__}: {exc}")
@@ -354,7 +362,8 @@ def review_sport(sport: str, morning: str, open_bets: Sequence[Dict], fetch: Cal
             + game_pick_notes(games_rep),
             "calibration": cal, "game_picks": games_rep,
             "trend": {"days": TREND_DAYS, "slates": len(trend), "graded": len(trend_rows),
-                      "use": PG.use_record(trend_rows), "beat": PG.beat_model(trend_rows)},
+                      "use": PG.use_record(trend_rows), "beat": PG.beat_model(trend_rows),
+                      "sides": PG.side_record(trend_rows)},
             "suggestions": sugg, "settlement": settlement, "auto_tuning": auto_tune}
 
 

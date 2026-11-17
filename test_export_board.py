@@ -9,7 +9,7 @@ def test_pick_applies_the_page_filters_and_ranks_by_model_pct():
              dict(base, Player="c", Market="Sacks", ModelProb=0.70),
              dict(base, Player="d", Market="Rush Yards", Side="Under", ModelProb=0.72),
              dict(base, Player="e", Market="Pass Yards", Slot="Evening", ModelProb=0.75),
-             dict(base, Player="f", Market="Pass Yards", Use="⛔ Pass", ModelProb=0.80)]
+             dict(base, Player="f", Market="Pass Yards", Use="⚪ No edge", ModelProb=0.80)]
     got = X.pick(plays, slot="Afternoon", unit="Offense", side="Over", show="All playable")
     assert [p["Player"] for p in got] == ["b", "a"]
     assert "Receptions" in X.table(got) and "| 1 |" in X.table(got)

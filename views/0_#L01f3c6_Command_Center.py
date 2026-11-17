@@ -117,7 +117,7 @@ bets = B.list_bets(sport=_active.key)
 s = B.summary(bets)
  
 # ---------- KPI row ----------
-_playable = [p for p in plays if grading.playable(p)]          # Nov 17 audit: the top lean is never a ⛔ Pass play
+_playable = [p for p in plays if grading.playable(p)]          # Nov 17 audit: the top lean is never a ⚪ No edge play
 top = _playable[0] if _playable else None
 _beat_close = s["beat_close_rate"]
 _avg_clv = s["avg_clv"]

@@ -45,7 +45,7 @@ def test_nfl_results_parse_and_a_priced_game_gets_a_projection_but_never_a_pick(
     assert p["sport"] == "NFL" and p["home_spread"] == -3.5 and p["line_total"] == 44.5
     assert p["model_margin"] is not None and p["model_total"] is not None and 0.5 < p["model_p"] < 1
     assert p["pick"] is None and p["total_pick"] is None and p["ml_pick"] is None      # previews only
-    assert IP.hoops_use("NFL", p)["use"] == "⛔ Pass"
+    assert IP.hoops_use("NFL", p)["use"] == "⚪ No edge"
 
 
 def test_football_simulation_uses_football_sized_spreads_and_thresholds():
@@ -67,7 +67,7 @@ def test_nfl_game_lab_uses_the_shared_layout_once_games_are_saved_and_the_old_pa
     # three days out: a weekly league lists the week from the picked date, not one day
     rec = {"sport": "NFL", "game_id": "n1", "kickoff": (now + timedelta(days=3)).isoformat(), "home": "Baltimore Ravens",
            "away": "Los Angeles Chargers", "model_margin": 5.5, "model_total": 46.0, "home_spread": -3.5, "line": 3.5,
-           "edge": 2.0, "line_total": 44.5, "model_p": 0.66, "fair_home": 0.63, "cover_est": None, "use": "⛔ Pass",
+           "edge": 2.0, "line_total": 44.5, "model_p": 0.66, "fair_home": 0.63, "cover_est": None, "use": "⚪ No edge",
            "lock": False, "result": None, "final_home": None, "final_away": None, "pick": None, "total_pick": None,
            "ml_pick": None}
     monkeypatch.setattr(NSC, "load_nfl_slate_cached", lambda d: ([], []))

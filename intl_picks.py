@@ -96,7 +96,7 @@ def use_tag(chance: Optional[float]) -> Dict:
     """The props pages' tags for a game line: 60%+ -> Parlay + Single and Most probable; 55-60% -> Single only."""
     import props_engine as PE
     if chance is None:
-        return {"use": "—", "lock": False}
+        return {"use": PE.USE_NO_LINE, "lock": False}
     if chance >= PE.MOST_PROBABLE_CHANCE:
         return {"use": PE.USE_BOTH, "lock": True}
     if chance >= 0.55:
@@ -108,7 +108,7 @@ def use_tag(chance: Optional[float]) -> Dict:
 # The props pages' symbols, applied to tennis matches and basketball / hockey games so every page reads the same way:
 #   🔒 Most probable  = 60%+ to win AND the backing to trust it (a tested edge, or enough history on both players)
 #   🎟️ Parlay + Single = 60%+ and a price that pays (+3% or better)      🎯 Single only = 55-60% at a price that pays
-#   ⛔ Pass            = a coin flip, a price that doesn't pay, or no tested edge for this league / market
+#   ⚪ No edge            = a coin flip, a price that doesn't pay, or no tested edge for this league / market
 # Where there's no price yet (lower-tier tennis, EuroCup) the tag says the price it needs ("at -150 or better").
 def american(dec: Optional[float]) -> Optional[int]:
     if dec is None or dec <= 1:
@@ -133,7 +133,7 @@ def chance_use(chance: Optional[float], price=None, trusted: bool = True) -> Dic
     trusted=False (thin history): never a lock and never a parlay leg -- a single at most."""
     import props_engine as PE
     if chance is None:
-        return {"use": "—", "lock": False, "why": "no read"}
+        return {"use": PE.USE_NO_LINE, "lock": False, "why": "no read"}
     if chance < 0.55:
         return {"use": PE.USE_PASS, "lock": False, "why": f"{chance:.0%} is too close to a coin flip"}
     need = price_needed(chance)
@@ -145,7 +145,7 @@ def chance_use(chance: Optional[float], price=None, trusted: bool = True) -> Dic
                 "why": f"{chance:.0%}" + ("" if trusted else ", thin history") + f"; needs {_odds_txt(need)} or better"}
     dec = _dec(price)
     if dec is None:
-        return {"use": "—", "lock": False, "why": "no price"}
+        return {"use": PE.USE_NO_LINE, "lock": False, "why": "no price"}
     ev = chance * dec - 1
     bits = f"{chance:.0%} at {float(price):+.0f} = {ev:+.1%}"
     if chance >= PE.MOST_PROBABLE_CHANCE and trusted and ev > 0:
@@ -157,8 +157,8 @@ def chance_use(chance: Optional[float], price=None, trusted: bool = True) -> Dic
 
 def tag_label(t: Dict) -> str:
     import props_engine as PE
-    u = t.get("use") or "—"
-    if t.get("need") is not None and t.get("use") not in (PE.USE_PASS, "—") and not t.get("priced"):
+    u = t.get("use") or PE.USE_NO_LINE
+    if t.get("need") is not None and t.get("use") not in (PE.USE_PASS, "—", PE.USE_NO_LINE) and not t.get("priced"):
         u = f"{u} ({_odds_txt(t['need'])} or better)"
     return f"{PE.MOST_PROBABLE} · {u}" if t.get("lock") else u
 
@@ -168,7 +168,7 @@ TENNIS_UNPROVEN = 0.70
 
 def tennis_use(p: Dict, k: Optional[float] = None) -> Dict:
     """The model's player and Use tag for one tennis record. Main-tour (odds feed) matches: the books beat this model
-    in the backtest, so they're ⛔ Pass whatever the model says; everything else is read off the model's chance with
+    in the backtest, so they're ⚪ No edge whatever the model says; everything else is read off the model's chance with
     the price it needs (or the best posted price), and a player with under TENNIS_MIN_MATCHES rated matches can't be a lock."""
     import props_engine as PE
     mp = p.get("model_p")
@@ -196,9 +196,9 @@ def tennis_use(p: Dict, k: Optional[float] = None) -> Dict:
 
 def hoops_use(league: str, p: Dict) -> Dict:
     """Use tag for a game-lines record: the backtest's cover rate where the league has one (EuroLeague), the tracked
-    moneyline rule (NBL), otherwise ⛔ Pass -- NBA, NHL and college showed no edge against real lines."""
+    moneyline rule (NBL), otherwise ⚪ No edge -- NBA, NHL and college showed no edge against real lines."""
     import props_engine as PE
-    if p.get("use") and p.get("use") != "—":
+    if p.get("use") and p.get("use") not in ("—", PE.USE_NO_LINE):
         return {"use": p["use"], "lock": bool(p.get("lock")), "priced": True,
                 "why": f"backtest: this gap covered {p['cover_est']:.0%}" if p.get("cover_est") is not None else ""}
     if p.get("ml_pick"):

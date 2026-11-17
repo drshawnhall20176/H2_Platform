@@ -1033,8 +1033,24 @@ def cushion_text(c: Optional[float]) -> str:
 # Cushion says how SAFE a leg is (how wrong the model can be and still win) -- what a parlay needs, since every leg
 # must hit. Edge says whether the PRICE pays enough -- what a single needs. A parlay leg also needs a positive edge:
 # a parlay's value compounds, so legs without one compound the book's cut instead.
-USE_BOTH, USE_PARLAY, USE_SINGLE, USE_PASS = "🎟️ Parlay + Single", "🎟️ Parlay leg", "🎯 Single only", "⛔ Pass"
-USE_KEY = {USE_BOTH: "both", USE_PARLAY: "parlay", USE_SINGLE: "single", USE_PASS: "pass"}
+USE_BOTH, USE_PARLAY, USE_SINGLE, USE_PASS = "🎟️ Parlay + Single", "🎟️ Parlay leg", "🎯 Single only", "⚪ No edge"
+# Nov 17 (owner: "users think pass means loss"): the skip tag reads "No edge" -- the side is close to a coin flip, not
+# a predicted loser. Reads saved before the rename carry OLD_PASS; norm_use / is_pass treat both the same.
+OLD_PASS = "⛔ Pass"
+USE_WATCH = "👀 Watch"         # a No-edge group that made money in both halves of its window, tracked before promotion
+USE_NO_LINE = "No line"        # no book line posted yet (was a blank / "—")
+USE_KEY = {USE_BOTH: "both", USE_PARLAY: "parlay", USE_SINGLE: "single", USE_PASS: "pass", USE_WATCH: "watch"}
+
+
+def norm_use(tag) -> str:
+    t = str(tag or "")
+    return USE_PASS if t == OLD_PASS else t
+
+
+def is_pass(tag) -> bool:
+    """True for the No-edge tag, old or new spelling (a 👀 Watch read counts as no edge until it's promoted)."""
+    t = str(tag or "")
+    return t in (USE_PASS, OLD_PASS) or "No edge" in t or "Pass" in t
 PARLAY_MIN_CHANCE = 0.60          # each parlay leg 60%+ to hit ...
 MILESTONE_PARLAY_CHANCE = 0.70    # ... a model-only milestone leg 70%+ (no market check on it)
 PICKEM_BREAKEVEN = 3.0 ** -0.5    # a 2-pick entry paying 3x needs ~57.7% a pick; the ticket builder uses yours
@@ -1089,7 +1105,7 @@ def use_tag(row: Dict, side: Optional[str] = None, line: Optional[float] = None,
     side = side or row.get("side")
     line = row.get("line") if line is None else line
     if row.get("out") or line is None or side not in ("Over", "Under") or row.get("projection") is None:
-        return "—", "no line"
+        return USE_NO_LINE, "no line"
     if p is None:
         p = _side_prob(row) if side == row.get("side") else (None if row.get("p_final") is None else
                                                                (row["p_final"] if side == "Over" else 1 - row["p_final"]))
