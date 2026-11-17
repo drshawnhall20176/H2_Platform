@@ -1,12 +1,12 @@
 """
 Today.py -- the entry page (Nov 17, owner's design): the day across every sport before any one sport is chosen.
 
-Owner: "have the entry page to the portfolio be the 'Today at a glance' with the top four items for sports that are
-active that day. Above the four boxes would be a link that would then take the user to a specific sport where they
-would see today's best etc." Order: one button per in-season sport (with today's count of playable picks) -> the day
-in four numbers -> the four strongest picks across every sport (strength alone, one per player; 📈 when the market is
-moving our way) -> the owner's morning brief and afternoon picks. A sport button opens Home on that sport. Everything
-here is read from boards and records already saved: no Odds API credits.
+Owner: "one sport per row with each sport showing the top 4 picks today from each if applicable ... NHL shows 10
+games today so it would be a row by itself with the top 4 picks, then the next row would be the next active sport."
+The day in four numbers, then one bordered row per sport playing today (sports with picks first, then by games):
+its game and pick counts, an "Open desk" button (Home on that sport) and up to four cards -- prop picks from pick
+types with a winning 30-day record (one per player), playable game lines, and college basketball spreads moving our
+way (tested, todays_best.spread_move). Then the owner's brief. No Odds API credits: everything is already saved.
 """
 import streamlit as st
 from datetime import datetime as _dt
@@ -75,44 +75,90 @@ except Exception:                                               # noqa: BLE001 -
     _g_rows, _g_props, _g_lines = [], [], []
 _g_sum = _CT.summary(_g_props, _g_lines)
 
-# ---------- pick a sport (above the boxes) ----------
-_count = {}
-for r in _g_props + _g_lines:
-    _sp = r.get("Sport")
-    if _sp:
-        _count[_sp] = _count.get(_sp, 0) + 1
-C.section_header("🏟", f"Today · {_dt.now(_ET):%A, %B %-d}")
-st.caption("Choose a sport for its full desk: Today's best, game lines, long shots and logging.")
-with st.container(horizontal=True, horizontal_alignment="left"):
-    for s in sorted(live, key=lambda s: -_count.get(s.key, 0)):
-        n = _count.get(s.key, 0)
-        if st.button(f"{s.icon} {s.label.split(' — ')[0]} · {n}", key=f"today_sport_{s.key}", type="primary" if n else "secondary",
-                     width="content", help=f"{n} playable pick{'s' if n != 1 else ''} today"):
-            st.session_state["sport"] = s.key
-            st.switch_page("Home.py")
+# ---------- one row per sport (Nov 17, owner: "one sport per row with each sport showing the top 4 picks") ----------
+import re as _re
 
-# ---------- the day in four numbers ----------
+
+def _lean_pct(rec: str) -> float:
+    m = _re.search(r"\((\d+)%", rec or "")
+    return int(m.group(1)) / 100 if m else 0.5
+
+
+_games, _cards = {}, {}
+for r in _g_win:
+    _games[r.get("sport")] = _games.get(r.get("sport"), 0) + 1
+_g_rowsorted = sorted([r for r in _g_rows if r.get("kind") == "Prop"],
+                      key=lambda r: (0 if r.get("lock") else 1, -(r.get("chance") or 0)))
+for r in _g_rowsorted:                                      # prop picks from winning pick types (top_cards' rule)
+    _games.setdefault(r.get("sport"), 0)
+for sp_key in {r.get("sport") for r in _g_rowsorted}:
+    for c in _CT.top_cards([r for r in _g_rowsorted if r.get("sport") == sp_key], records_for=_glance_tags, n=4):
+        _cards.setdefault(sp_key, []).append({**c, "score": (2 if c["lock"] else 1, c["chance"] or 0), "kind": "Prop"})
+for r in _g_lines:                                          # playable game lines
+    _cards.setdefault(r["Sport"], []).append({
+        "sport": r["Sport"], "pick": r["Pick"], "chance": r.get("Chance"), "lock": False, "move": "",
+        "price": r.get("Best price") or "—", "game": r.get("Game") or "", "time": r.get("Time") or "",
+        "record": r.get("Record (30 days)") if r.get("Record (30 days)") not in (None, "—") else "",
+        "basis": r.get("Basis"), "score": (1, r.get("Chance") or _lean_pct(r.get("Record (30 days)"))), "kind": "Line"})
+_npicks = {}
+for r in _g_props:
+    _npicks[r["Sport"]] = _npicks.get(r["Sport"], 0) + 1
+for r in _g_lines:
+    _npicks[r["Sport"]] = _npicks.get(r["Sport"], 0) + 1
+for r in _g_win:                                            # college basketball spreads moving our way (tested)
+    if r.get("spread_move") == "📈 our way" and r.get("spread_move_why") and \
+            not any(c.get("game") == r.get("game") for c in _cards.get(r.get("sport"), [])):
+        _npicks[r["sport"]] = _npicks.get(r["sport"], 0) + 1
+        _from, _to = r["spread_move_why"].split(" → ")
+        _cards.setdefault(r["sport"], []).append({
+            "sport": r["sport"], "pick": f"{_from.rsplit(' ', 1)[0]} {_to}", "chance": None, "lock": False,
+            "move": "📈 spread moving our way", "price": "", "game": r.get("game") or "", "time": r.get("time") or "",
+            "record": "tested: 55% covered at the moved number", "basis": f"opened {_from.rsplit(' ', 1)[1]}",
+            "score": (1, 0.55), "kind": "Line"})
+for k in _cards:
+    _cards[k].sort(key=lambda c: c["score"], reverse=True)
+
+_order = sorted([s for s in live if _games.get(s.key) or _cards.get(s.key)],
+                key=lambda s: (-_npicks.get(s.key, 0), -_games.get(s.key, 0)))
+_quiet = [s for s in live if s not in _order]
+
+C.section_header("🏟", f"Today · {_dt.now(_ET):%A, %B %-d}")
 C.kpi_row([{"icon": "🎯", "value": str(_g_sum["picks"]), "label": "Player picks from winning pick types"},
            {"icon": "🏟️", "value": str(_g_sum["lines"]), "label": "Playable game lines"},
-           {"icon": "📅", "value": str(len(_g_sum["sports"])), "label": "Sports with a pick"},
-           {"icon": "🗂️", "value": str(len(_g_live)), "label": "Sports in season"}])
+           {"icon": "📅", "value": str(sum(1 for s in _order if _cards.get(s.key))), "label": "Sports with a pick"},
+           {"icon": "🗓️", "value": str(len(_order)), "label": "Sports playing today"}])
+st.caption("One row per sport playing today, busiest first: its strongest picks (pick types with a winning 30-day "
+           "record, playable game lines, and college basketball spreads moving our way). Open a sport for its full "
+           "desk: every table, filter and logging.")
 
-# ---------- the four strongest picks ----------
-_g_cards = _CT.top_cards(_g_rows, records_for=_glance_tags)
-if _g_cards:
-    for _col, _c in zip(st.columns(len(_g_cards)), _g_cards):
-        with _col.container(border=True):
-            st.markdown(f"**{'🔒 ' if _c['lock'] else ''}{_c['pick']}**")
-            st.metric("Chance", "—" if _c["chance"] is None else f"{_c['chance']:.0%}", label_visibility="collapsed")
-            st.caption(f"{_c['sport']} · {_c['price']}  \n{_c['game']}" + (f" · {_c['time']}" if _c["time"] else ""))
-            st.caption(" · ".join(x for x in (("✅ " + _c["record"]) if _c["record"] else "",
-                                               _c.get("move") or "") if x))
-    st.caption("The strongest player picks across every sport: pick types with a winning 30-day record only, one per "
-               "player. 📈 = the market has moved toward this side since the first price today. Pick a sport above "
-               "for the full tables and logging.")
-else:
-    st.caption("No player picks from winning pick types yet today. Boards are built through the day as the books post "
-               "their lines.")
+for s in _order:
+    cards = _cards.get(s.key, [])[:4]
+    g, n = _games.get(s.key, 0), _npicks.get(s.key, 0)
+    with st.container(border=True):
+        h1, h2 = st.columns([4, 1])
+        h1.markdown(f"#### {s.icon} {s.label.split(' — ')[0]}  \n<span style='opacity:.7'>"
+                    + (f"{g} game{'s' if g != 1 else ''} today · " if g else "")
+                    + f"{n} playable pick{'s' if n != 1 else ''}</span>", unsafe_allow_html=True)
+        if h2.button("Open desk →", key=f"today_sport_{s.key}", type="primary" if cards else "secondary",
+                     width="stretch"):
+            st.session_state["sport"] = s.key
+            st.switch_page("Home.py")
+        if not cards:
+            st.caption("Nothing playable yet: no pick type here has a winning record today, and no game line clears "
+                       "the bar. Boards fill in as the books post lines; the desk has every lean.")
+            continue
+        for col, c in zip(st.columns(4), cards):
+            with col.container(border=True):
+                st.markdown(f"**{'🔒 ' if c['lock'] else ''}{c['pick']}**")
+                st.metric("Chance", "—" if c["chance"] is None else f"{c['chance']:.0%}", label_visibility="collapsed")
+                st.caption(" · ".join(x for x in (c.get("price") if c.get("price") not in ("—", "") else "",
+                                                   c.get("basis") or "") if x)
+                           + f"  \n{c['game']}" + (f" · {c['time']}" if c["time"] else ""))
+                st.caption(" · ".join(x for x in (("✅ " + c["record"]) if c.get("record") else "",
+                                                   c.get("move") or "") if x))
+
+if _quiet:
+    st.caption("Not playing today: " + ", ".join(f"{s.icon} {s.label.split(' — ')[0]}" for s in _quiet))
 
 # ---------- the owner's brief ----------
 if _owner:
