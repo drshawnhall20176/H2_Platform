@@ -227,21 +227,34 @@ ALTER TABLE bets ADD COLUMN IF NOT EXISTS category TEXT;
 """
  
  
-@contextmanager
-def _pg_conn():
+# Nov 17: every read used to open a fresh SSL connection (~0.4 s to Supabase) AND re-run this whole schema (a dozen
+# CREATE / ALTER TABLE statements, each a round trip that also takes a table lock) -- ~10 round trips per read, so
+# Today's ~40 reads took 30-60 s. Now the schema runs once per process and connections are kept in a small pool;
+# a connection idle for a minute is checked before reuse and replaced if the server dropped it.
+import threading as _threading
+import time as _time
+
+_PG_POOL: List = []                          # [(connection, last used)]
+_PG_POOL_MAX = 6
+_PG_POOL_LOCK = _threading.Lock()
+_PG_SCHEMA_DONE = False
+_PG_IDLE_CHECK = 60.0
+
+
+def _pg_new_connection():
     import psycopg2                          # imported lazily so offline paths never need it
     dsn = _DATABASE_URL or ""
     try:
         # Try connecting with the full DSN first (works for most URL formats)
         kwargs = {} if "sslmode" in dsn else {"sslmode": "require"}
-        con = psycopg2.connect(dsn, **kwargs)
+        return psycopg2.connect(dsn, **kwargs)
     except psycopg2.ProgrammingError:
         # psycopg2's DSN parser rejects special characters (!, @, etc.) in passwords
         # when passed as a URL string. Fall back to parsing the URL manually and
         # passing individual keyword arguments which don't go through the DSN parser.
         from urllib.parse import urlparse, unquote
         p = urlparse(dsn)
-        con = psycopg2.connect(
+        return psycopg2.connect(
             host=p.hostname,
             port=p.port or 5432,
             dbname=(p.path or "/postgres").lstrip("/"),
@@ -249,15 +262,66 @@ def _pg_conn():
             password=unquote(p.password or ""),
             sslmode="require",
         )
+
+
+def _pg_checkout():
+    while True:
+        with _PG_POOL_LOCK:
+            item = _PG_POOL.pop() if _PG_POOL else None
+        if item is None:
+            return _pg_new_connection()
+        con, last = item
+        if con.closed:
+            continue
+        if _time.time() - last > _PG_IDLE_CHECK:
+            try:
+                with con.cursor() as cur:
+                    cur.execute("SELECT 1")
+                con.rollback()
+            except Exception:                                   # noqa: BLE001 -- dropped by the server: replace it
+                try:
+                    con.close()
+                except Exception:                               # noqa: BLE001
+                    pass
+                continue
+        return con
+
+
+def _pg_checkin(con, ok: bool) -> None:
     try:
-        with con.cursor() as cur:
-            cur.execute(_PG_SCHEMA)
-            cur.execute("ALTER TABLE bets ADD COLUMN IF NOT EXISTS ticket TEXT")
-        con.commit()
+        if con.closed:
+            return
+        if not ok:
+            con.rollback()
+        with _PG_POOL_LOCK:
+            if len(_PG_POOL) < _PG_POOL_MAX:
+                _PG_POOL.append((con, _time.time()))
+                return
+        con.close()
+    except Exception:                                           # noqa: BLE001 -- a broken connection is dropped
+        try:
+            con.close()
+        except Exception:                                       # noqa: BLE001
+            pass
+
+
+@contextmanager
+def _pg_conn():
+    global _PG_SCHEMA_DONE
+    con = _pg_checkout()
+    ok = False
+    try:
+        if not _PG_SCHEMA_DONE:
+            with con.cursor() as cur:
+                cur.execute(_PG_SCHEMA)
+                cur.execute("ALTER TABLE bets ADD COLUMN IF NOT EXISTS ticket TEXT")
+            con.commit()
+            _PG_SCHEMA_DONE = True
         yield con
         con.commit()
+        ok = True
     finally:
-        con.close()
+        _pg_checkin(con, ok)
  
  
 def _pg_add_bet(fields) -> int:
