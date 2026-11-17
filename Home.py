@@ -13,60 +13,6 @@ C.hero_banner("📈", "H2 Sports — The Sports Trading Desk",
              "discipline, every result graded against the closing line. This is a day-trading "
              "tool for real analysts — not a picks service, not a betting platform.")
 
-# ---------- Today at a glance (Nov 16) ----------
-# The same lead the customer's Today page has: the day in four numbers and the strongest picks as cards, across every
-# in-season sport, before any control. Read from the boards and game records already saved (customer_today.py): no
-# Odds API credits. Everything below (the sport picker, the brief, the full tables, logging) is unchanged.
-try:
-    import customer_today as _CT
-    import todays_best as _TB0
-
-    @st.cache_data(ttl=300, show_spinner=False)
-    def _glance_data(day, keys):
-        best = _TB0.collect(day, list(keys))
-        try:
-            winners = _TB0.winner_rows(day)
-        except Exception:                                       # noqa: BLE001
-            winners = []
-        return best.get("rows") or [], winners
-
-    @st.cache_data(ttl=1800, show_spinner=False)
-    def _glance_tags(sp):
-        import pick_records as _PR0
-        return _PR0.tag_records(sp)
-
-    @st.cache_data(ttl=1800, show_spinner=False)
-    def _glance_leans(lg):
-        import pick_records as _PR0
-        return _PR0.lean_records(lg)
-
-    _g_day = _dt.now(_ET).strftime("%Y-%m-%d")
-    _g_live = [s.key for s in sports.enabled_sports() if sports.in_season(s.key)]
-    _g_rows, _g_win = _glance_data(_g_day, tuple(k for k in _g_live if k in _CT.PROPS_SPORTS))
-    _g_props = _CT.prop_picks(_g_rows, records_for=_glance_tags, parse_time=C._kick_dt)
-    _g_lines = _CT.line_picks(_g_win, records_for=_glance_leans, parse_time=C._kick_dt)
-    _g_sum = _CT.summary(_g_props, _g_lines)
-    C.section_header("📅", f"Today at a glance · {_dt.now(_ET):%A, %B %-d}")
-    C.kpi_row([{"icon": "🎯", "value": str(_g_sum["picks"]), "label": "Player picks from winning pick types"},
-               {"icon": "🏟️", "value": str(_g_sum["lines"]), "label": "Playable game lines"},
-               {"icon": "📅", "value": str(len(_g_sum["sports"])), "label": "Sports with a pick"},
-               {"icon": "🗂️", "value": str(len(_g_live)), "label": "Sports in season"}])
-    _g_cards = _CT.top_cards(_g_rows, records_for=_glance_tags)
-    if _g_cards:
-        for _col, _c in zip(st.columns(len(_g_cards)), _g_cards):
-            with _col.container(border=True):
-                st.markdown(f"**{'🔒 ' if _c['lock'] else ''}{_c['pick']}**")
-                st.metric("Chance", "—" if _c["chance"] is None else f"{_c['chance']:.0%}", label_visibility="collapsed")
-                st.caption(f"{_c['sport']} · {_c['price']}  \n{_c['game']}" + (f" · {_c['time']}" if _c["time"] else ""))
-                st.caption("✅ " + _c["record"] if _c["record"] else "")
-        st.caption("The strongest player picks across every sport: pick types with a winning 30-day record only, one "
-                   "per player. The full tables, filters and logging are under Today's best below.")
-    else:
-        st.caption("No player picks from winning pick types yet today. Boards are built through the day as the books "
-                   "post their lines; the full tables are under Today's best below.")
-except Exception:                                               # noqa: BLE001 -- a bonus on Home, never blocks it
-    pass
-
 # Sport selector -- primary location is here in the main content area, not the sidebar.
 # Streamlit's st.navigation always injects page links at the top of the sidebar regardless
 # of call order, pushing any sidebar widget below the full page list. Rendering it here
@@ -83,6 +29,12 @@ current = st.session_state.get("sport", sports.DEFAULT_SPORT)
 if current not in keys:
     current = sports.default_selectable(_owner)
 
+# Nov 17: the day across every sport (the glance, the four strongest picks, the brief) moved to the entry page,
+# Today.py; this page is one sport's desk.
+try:
+    st.page_link("Today.py", label="← Today: every sport at a glance", icon="📅")
+except Exception:                                               # noqa: BLE001 -- builds without the Today page
+    pass
 C.section_header("🏟", "Select Sport")
 with st.container(horizontal=True, horizontal_alignment="left"):
     for s in live:
@@ -100,32 +52,6 @@ if active:
                "lines aren't shown because the odds feed doesn't carry them.")
 
 st.divider()
-
-# ---------- Today's brief (Nov 11) ----------
-# The platform's own check-in (morning_brief.py): overnight jobs, what the model learned, yesterday's bets, and this
-# afternoon's Good bets. Also posted to the owner's private Discord channel when that webhook is set. Owner only.
-if _owner:
-    try:
-        import model_store as _MS
-        import pandas as _pd
-        _bday = _dt.now(_ET).strftime("%Y-%m-%d")
-        for _kind, _title in (("picks", "🎯 This afternoon's picks"), ("morning", "☀️ Morning brief")):
-            _b = _MS.get_setting(f"brief:{_bday}:{_kind}")
-            if isinstance(_b, dict) and _b.get("text"):
-                with st.expander(_title, expanded=_kind == "picks"):
-                    _lines = _b["text"].split("\n")[1:]          # the first line is the note's own title
-                    if _b.get("table"):
-                        # Nov 11: the picks as a table (a bullet list ran together into one paragraph here)
-                        _head = [l for l in _lines if l.strip() and not l.startswith("•")]
-                        st.markdown(C.money_md(_head[0]))
-                        st.dataframe(_pd.DataFrame(_b["table"]), hide_index=True, width="stretch")
-                        for _l in _head[1:]:
-                            st.caption(C.money_md(_l))
-                    else:
-                        # one line per line (markdown joins single line breaks into a paragraph)
-                        st.markdown(C.money_md("  \n".join(_lines)))
-    except Exception:                                           # noqa: BLE001 -- the brief is a bonus on Home
-        pass
 
 # ---------- Today's best (Nov 6) ----------
 # The day's top-tagged picks across every in-season sport and the labs, in one list. Props come from the last Best
@@ -447,6 +373,13 @@ if True:
                             disabled=not _lhid, help="Untested leans in a market where the model's lean has lost "
                                                      "more than it won over the last 30 days.")
         _ws = [r for r in _w if r.get("best_tested")] if _only_tested else _w
+        _gours = [r for r in _ws if r.get("spread_move") == "📈 our way"]
+        if _gours and st.toggle(f"📈 Spread moving our way only ({len(_gours)})", value=False, key="home_win_moves",
+                                help="College basketball games where the spread has moved a point or more toward the "
+                                     "model's side since it opened. Tested on 519 graded games: the model's side "
+                                     "covered 55% even at the moved (closing) number, vs 47% when the spread moved "
+                                     "against it. Bet these early -- the opening number covered 65%."):
+            _ws = _gours
         if not _lshow:
             _ws = [r for r in _ws if r.get("best_tested") or r.get("lean_verdict") not in _PR.HIDE]
         _wdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"],
@@ -454,6 +387,8 @@ if True:
                                "Spread": r.get("spread_txt") or "",
                                "Total": r.get("total_txt") or "",
                                "Model": r.get("model_txt") or r.get("lean_detail") or "",
+                               "Spread move": " ".join(x for x in (r.get("spread_move") or "",
+                                                                    f"({r['spread_move_why']})" if r.get("spread_move_why") else "") if x),
                                "Pick": r.get("best") or "—",
                                "Use": _PR.lean_use(r),
                                "Record (30d)": ((("⚠️ " if r.get("lean_verdict") in _PR.HIDE else "")
@@ -470,6 +405,8 @@ if True:
                                "Winner result": _TB.RESULT_ICON.get(r.get("winner_result"), "—")} for r in _ws[:LEANS_CAP]])
         if not _past and not _wdf.empty:
             _wdf = _wdf.drop(columns=["Final", "Pick result", "Winner result"])
+        if not _wdf.empty and not _wdf["Spread move"].any():
+            _wdf = _wdf.drop(columns=["Spread move"])
         if _scope != "All sports" and not _wdf.empty:
             _wdf = _wdf.drop(columns=["Sport"])
         if not _wdf.empty and not _wdf["Weather"].replace("", None).notna().any():

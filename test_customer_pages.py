@@ -146,9 +146,9 @@ def test_home_opens_with_today_at_a_glance(monkeypatch):
         "rows": [dict(_p("NBA", "A Assists Over 5.5", 0.61), player="A")], "props": {}})
     monkeypatch.setattr(TB, "winner_rows", lambda day, leagues=None, past=False: [])
     monkeypatch.setattr(PR, "tag_records", lambda sp: RECS.get(sp, {}))
-    at = AppTest.from_file("Home.py", default_timeout=120).run()
+    at = AppTest.from_file("Today.py", default_timeout=120).run()
     assert not at.exception, [str(e.value)[:300] for e in at.exception]
     text = " ".join(m.value for m in at.markdown)
-    assert "Today at a glance" in text and "**A Assists Over 5.5**" in text
-    assert text.index("Today at a glance") < text.index("Select Sport")
+    assert "**A Assists Over 5.5**" in text                     # Nov 17: the glance is the entry page, Today.py
     assert any(m.value == "61%" for m in at.metric)
+    assert any(" · " in b.label for b in at.button)                # sport buttons above the boxes
