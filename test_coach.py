@@ -149,3 +149,21 @@ def test_tables_sort_by_game_time_earliest_first():
     assert [r["n"] for r in C.by_kickoff(rows, lambda r: r["t"])] == [6, 5, 3, 4, 1, 2]   # ties keep their order
     df = pd.DataFrame(rows)
     assert list(C.df_by_time(df, "t")["n"]) == [6, 5, 3, 4, 1, 2]
+
+
+def test_ticket_check_flags_pass_games_and_spreads_moving_away():
+    """Nov 17: Hofstra +11.5 / Rutgers +16.5 were graded "A" while the page said ⛔ Pass and both lines moved away."""
+    import coach as CO
+    rec = {"sport": "NCAAMB", "home": "Murray St", "away": "Hofstra", "line": 11.5, "open_line": 9.5,
+           "model_margin": 9.9}
+    item = {"sport": "NCAAMB", "pick": "Hofstra +11.5", "price": -110, "game": "Hofstra @ Murray St", "chance": 0.62,
+            "_rec": rec, "bet_market": "Spread", "bet_side": "away", "bet_line": 11.5, "use": "⛔ Pass",
+            "best_tested": False, "best_chance": 0.62}
+    lim = {"max_legs": 4, "max_parlay_stake": 10, "stop_loss": 100, "daily_budget": 500, "max_parlays": 3}
+    chk = CO.ticket_check([item], "Singles", 4, 0, None, [], "2026-11-17", lim=lim)
+    texts = " ".join(m for _, m in chk["flags"])
+    assert chk["grade"] in ("D", "F") and "moved against" in texts and "pass" in texts.lower()
+    good = dict(item, use="🎯 Single", best_tested=True, _rec=dict(rec, open_line=9.5, line=11.5, model_margin=14.0),
+                bet_side="home", pick="Murray St -11.5")
+    chk2 = CO.ticket_check([good], "Singles", 4, 0, None, [], "2026-11-17", lim=lim)
+    assert any("moving this way" in m for _, m in chk2["flags"])

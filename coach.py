@@ -498,6 +498,23 @@ def ticket_check(items: Sequence[Dict], mode: str, stake: float, parlay_stake: f
             c["use"] = "?"                                      # came from a page that doesn't carry the tag: unknown
         j = judge(c, hist, cache.get(sp, {}).get(_strip_use(c["use"])))
         legs.append({**it, **j})
+    # Nov 17: a spread whose line has moved away from the ticked side since it opened (college basketball: those
+    # covered 47% at the closing number over 519 graded games, vs 55% when it moved toward the side)
+    for l in legs:
+        rec = l.get("_rec")
+        if not rec or l.get("bet_market") != "Spread":
+            continue
+        try:
+            import todays_best as TB
+            mv = TB.spread_move(rec, l.get("sport") or rec.get("sport"))
+        except Exception:                                       # noqa: BLE001
+            continue
+        if mv.get("spread_move") == "📉 against":
+            flags.append(("red", f"{l.get('pick')}: the spread has moved against this side ({mv['spread_move_why']}) "
+                                 "— in college basketball those covered 47% at the closing number; −110 needs 52.4%."))
+        elif mv.get("spread_move") == "📈 our way":
+            flags.append(("ok", f"{l.get('pick')}: the spread is moving this way ({mv['spread_move_why']}) — those "
+                                "covered 55% at the closing number."))
     singles_mode, parlay_mode = mode in ("Singles", "Both"), mode in ("Parlay", "Both")
     for l in legs:
         if l["verdict"].startswith("🔴"):
