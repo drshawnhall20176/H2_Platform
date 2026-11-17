@@ -151,4 +151,5 @@ def test_home_opens_with_today_at_a_glance(monkeypatch):
     text = " ".join(m.value for m in at.markdown)
     assert "**A Assists Over 5.5**" in text                     # Nov 17: the glance is the entry page, Today.py
     assert any(m.value == "61%" for m in at.metric)
-    assert any(" · " in b.label for b in at.button)                # sport buttons above the boxes
+    assert any(b.label == "Open desk →" for b in at.button)        # Nov 17: one row per sport, each with its desk
+    assert any("NBA" in m.value and "playable pick" in m.value for m in at.markdown)
