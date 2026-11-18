@@ -17,12 +17,11 @@ except Exception:                                               # noqa: BLE001
 if OF.active(st.session_state):
     st.success("You're in the Office. Its pages are in the sidebar; the sport you pick there still applies to them.")
     c1, c2 = st.columns(2)
-    if c1.button("⬅ Back to the sport desks", type="primary"):
-        st.session_state[OF.MODE] = False
+    if c1.button("⬅ Back to Today", type="primary"):
+        OF.leave(st.session_state)
         st.rerun()
     if c2.button("🔒 Lock the Office"):
-        st.session_state[OF.MODE] = False
-        st.session_state[OF.UNLOCKED] = False
+        OF.leave(st.session_state, lock=True)
         st.rerun()
 elif OF.unlocked(st.session_state):
     st.info("The Office is unlocked for this session.")
