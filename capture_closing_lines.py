@@ -50,12 +50,22 @@ def not_started(events: List[dict], now: Optional[datetime] = None) -> List[dict
     return live
 
 
+def _bet_in_event(bet: Dict, event: Dict) -> bool:
+    """Only fetch the events that hold an open bet (college basketball lists 60+ games a night; each costs credits)."""
+    parts = [x.strip() for x in str(bet.get("game") or "").split("@")]
+    if len(parts) != 2:
+        return True                     # can't tell -- don't skip anything on its account
+    return C._team_in(parts[1], event.get("home_team")) and C._team_in(parts[0], event.get("away_team"))
+
+
 def capture_for_sport(sport_key: str, sport_bets: List[Dict], api_key: str) -> Dict:
     """Capture closing lines for one sport's open bets. Returns the same shape as
     clv_capture.capture_updates, plus 'events_checked'/'live_events' for the summary line."""
     sport = sports.get(sport_key)
-    needed = sorted({sport.market_map[b["market"]] for b in sport_bets
-                     if b.get("market") in sport.market_map})
+    props = sorted({k for k in (C.odds_key(b.get("market"), sport.market_map) for b in sport_bets
+                                if b.get("market") not in C.GAME_KEYS) if k})
+    games = sorted({C.GAME_KEYS[b["market"]] for b in sport_bets if b.get("market") in C.GAME_KEYS})
+    needed = props + C.alternates(props) + games            # Nov 18: alternates and game lines too
     if not needed:
         return {"updates": {}, "no_book": [], "no_match": [b.get("id") for b in sport_bets],
                "events_checked": 0, "live_events": 0}
@@ -66,16 +76,19 @@ def capture_for_sport(sport_key: str, sport_bets: List[Dict], api_key: str) -> D
         return {"updates": {}, "no_book": [], "no_match": [b.get("id") for b in sport_bets],
                "events_checked": len(events), "live_events": 0}
 
-    offers = []
-    for e in live:
+    offers, game_offers = [], []
+    wanted = [e for e in live if any(_bet_in_event(b, e) for b in sport_bets)] or live
+    for e in wanted:
         try:
             js, _ = O.fetch_event_props(e["id"], api_key, needed, sport=O.feed_for(e, sport.odds_sport_key))
             offers.extend(O.parse_event_offers(js, supported_markets=needed))
+            if games:
+                game_offers.extend(C.parse_game_offers(js))
         except Exception as ex:  # noqa: BLE001
             print(f"  (skip {sport_key} event {e.get('id')}: {type(ex).__name__})")
 
     report = C.capture_updates(sport_bets, offers, market_map=sport.market_map,
-                               single_line_markets=sport.single_line_markets)
+                               single_line_markets=sport.single_line_markets, game_offers=game_offers)
     report["events_checked"] = len(events)
     report["live_events"] = len(live)
     return report

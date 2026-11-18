@@ -19,7 +19,13 @@ def test_watch_tags_and_promotion():
     g = {"2026-11-20": [{"result": "hit", "market": "Rush Attempts", "side": "Under", "under_price": -110}] * 20
          + [{"result": "miss", "market": "Rush Attempts", "side": "Under", "under_price": -110}] * 12}
     st = W.judge("NFL", g, "2026-12-02")
-    assert st["nfl_rush_att_under"]["status"] == "promoted" and st["nfl_rush_att_under"]["n"] == 32
+    # Nov 18: 20-12 at -110 (+19% per $1) could still be luck at 32 reads -- the profit has to clear zero by a margin
+    assert st["nfl_rush_att_under"]["status"] == "watch" and st["nfl_rush_att_under"]["n"] == 32
+    assert st["nfl_rush_att_under"]["profit_floor"] < 0
+    g = {"2026-11-20": [{"result": "hit", "market": "Rush Attempts", "side": "Under", "under_price": -110}] * 26
+         + [{"result": "miss", "market": "Rush Attempts", "side": "Under", "under_price": -110}] * 10}
+    st = W.judge("NFL", g, "2026-12-02")
+    assert st["nfl_rush_att_under"]["status"] == "promoted" and st["nfl_rush_att_under"]["profit_floor"] > 0
     bad = {"2026-11-20": [{"result": "miss", "market": "Rush Attempts", "side": "Under", "under_price": -110}] * 31}
     assert W.judge("NFL", bad, "2026-11-25")["nfl_rush_att_under"]["status"] == "dropped"
 
@@ -45,3 +51,21 @@ def test_overs_gate_follows_each_sports_record():
     assert g2["NFL"]["off"] is False and W.gate_over(PE.USE_BOTH, "NFL", "Over", gate=g2) == PE.USE_BOTH
     few = W.judge_overs("NCAAF", {"d": lose["d"][:5]})
     assert few["NCAAF"]["off"] is False                                                # too few to switch off
+
+
+def test_new_markets_are_on_probation():
+    """Nov 18: steals / blocks join the props model; their bet tags show as Watch until the market earns a record."""
+    import player_props as PPR
+    import slate_props as SP
+    assert {"player_steals", "player_blocks", "player_blocks_steals"} <= set(SP.CORE_MARKETS)
+    assert PPR.MARKETS["Blocks+Steals"] == ("blk", "stl") and PPR.DIST["Blocks+Steals"] == "count"
+    assert W.apply(PE.USE_SINGLE, "NBA", "Steals", "Over", status={}) == PE.USE_WATCH
+    assert W.apply(PE.USE_PASS, "NBA", "Steals", "Over", status={}) == PE.USE_PASS
+    assert W.apply(PE.USE_SINGLE, "NBA", "Blocks", "Under", status={"nba_blocks_new": {"status": "promoted"}}) == PE.USE_SINGLE
+    assert W.apply(PE.USE_PARLAY, "NBA", "Blocks+Steals", "Over", status={"nba_stocks_new": {"status": "dropped"}}) == PE.USE_PASS
+    win = {"2026-12-01": [{"result": "hit", "market": "Steals", "side": "Under", "under_price": -110,
+                           "use_tag": PE.USE_WATCH}] * 28
+           + [{"result": "miss", "market": "Steals", "side": "Under", "under_price": -110, "use_tag": PE.USE_WATCH}] * 8}
+    st = W.judge("NBA", win, "2026-12-05")
+    assert st["nba_steals_new"]["status"] == "promoted" and st["nba_steals_new"]["probation"]
+    assert st["nba_blocks_new"]["n"] == 0 and st["nba_blocks_new"]["status"] == "watch"
