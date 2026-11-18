@@ -533,8 +533,14 @@ def run():
     # model's 30-day record -- not "Sport: ..." and the sport's pages, which would contradict the page. The page the
     # browser asked for is resolved first (hidden menu), then the menu is drawn for it.
     if office_on and OF.active(st.session_state):
-        door = [p for p in sections["🏠 START HERE"] if getattr(p, "url_path", None) == "owner_office"]
-        office_nav = {"🔐 OWNER OFFICE": door}
+        # Nov 18 (owner): a Today link at the very top of the Office menu, above Owner Office, so there is always a
+        # way out. The Office door stays the default page (entering the Office lands on it, not on Today); picking
+        # Today leaves the Office the same way the "Back to Today" button does.
+        door = [st.Page(str(here / "Owner_Office.py"), title="Owner Office", icon="🔐", url_path="owner_office",
+                        default=True)]
+        today_pg = next((p for p in sections.get("🏠 START HERE", []) if getattr(p, "title", None) == "Today"), None)
+        office_nav = {"🏠 START HERE": [today_pg]} if today_pg is not None else {}
+        office_nav["🔐 OWNER OFFICE"] = door
         for sec in OF.SECTION_ORDER[1:]:
             if office.get(sec):
                 office_nav[sec] = office[sec]
@@ -542,7 +548,11 @@ def run():
         if st.sidebar.button("⬅ Back to Today", key="office_back"):
             OF.leave(st.session_state)
             st.rerun()
-        st.navigation(office_nav).run()
+        page = st.navigation(office_nav)
+        if today_pg is not None and getattr(page, "title", None) == "Today":
+            OF.leave(st.session_state)
+            st.rerun()
+        page.run()
         return
     # the Office's pages stay resolvable while it is unlocked, so leaving from one of them lands cleanly on Today
     hidden = dict(sections)

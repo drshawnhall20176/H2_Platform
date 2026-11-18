@@ -14,3 +14,18 @@ def test_office_pages_and_modes():
     assert not OF.active({}) and not OF.active({OF.MODE: True})
     assert OF.active({OF.UNLOCKED: True, OF.MODE: True}) and not OF.active({OF.UNLOCKED: True})
     assert set(OF.PAGES.values()) <= set(OF.SECTION_ORDER)
+
+
+def test_office_menu_has_today_link_that_leaves_the_office():
+    # Nov 18 (owner): a way out of the Office -- a Today link above Owner Office; picking it leaves the Office.
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file("streamlit_app.py", default_timeout=120)
+    at.secrets["AUDIENCE"] = "owner"
+    at.secrets["OWNER_OFFICE_PASSWORD"] = "pw"
+    at.session_state[OF.UNLOCKED] = True
+    at.session_state[OF.MODE] = True
+    at.run()
+    assert not at.exception and "🔒 Lock the Office" in [b.label for b in at.button]   # the door is still the landing page
+    at.switch_page("Today.py")
+    at.run()
+    assert not at.exception and at.session_state[OF.MODE] is False and at.session_state[OF.UNLOCKED] is True
