@@ -6,7 +6,29 @@ from datetime import date
 sys.stdout.reconfigure(line_buffering=True)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import model_store as MS, daily_review as D, props_engine as PE
-from scipy import stats
+def _gammainc(a, x):
+    """regularized lower incomplete gamma P(a, x) (Numerical Recipes series / continued fraction)."""
+    if x <= 0: return 0.0
+    gln = math.lgamma(a)
+    if x < a + 1:
+        ap, s, d = a, 1.0 / a, 1.0 / a
+        for _ in range(500):
+            ap += 1; d *= x / ap; s += d
+            if abs(d) < abs(s) * 1e-12: break
+        return s * math.exp(-x + a * math.log(x) - gln)
+    b = x + 1 - a; c = 1e300; d = 1 / b; h = d
+    for i in range(1, 500):
+        an = -i * (i - a); b += 2; d = an * d + b; d = 1e-300 if abs(d) < 1e-300 else d
+        c = b + an / c; c = 1e-300 if abs(c) < 1e-300 else c; d = 1 / d; de = d * c; h *= de
+        if abs(de - 1) < 1e-12: break
+    return 1 - math.exp(-x + a * math.log(x) - gln) * h
+class stats:
+    class norm:
+        @staticmethod
+        def cdf(x, mu, sd): return 0.5 * (1 + math.erf((x - mu) / (sd * math.sqrt(2))))
+    class gamma:
+        @staticmethod
+        def cdf(x, k, scale): return _gammainc(k, x / scale)
 TODAY = date.today().isoformat()
 MK = {"NBA": ["Points", "PRA", "PR", "PA", "RA"], "NFL": ["Receiving Yards", "Rush Yards", "Pass Yards", "Receptions"],
       "NCAAF": ["Receiving Yards", "Rush Yards", "Pass Yards", "Receptions"]}
