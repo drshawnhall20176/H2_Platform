@@ -719,7 +719,10 @@ def recent_offers(sport_key: str, date_str: str, api_key: str) -> List[Dict]:
 # --------------------------------------------------------------------------- one model on every page (Oct 28)
 # Sports whose pick pages read players through the Player props model (slate_props) instead of the older
 # recent-games resample. NBA first: it has the league-wide box-score sample the matchup factor needs.
-PROPS_MODEL_SPORTS = ("NBA", "NFL", "NCAAF", "NHL")       # Oct 29: football + hockey on their props models too
+PROPS_MODEL_SPORTS = ("NBA", "NFL", "NCAAF", "NHL", "NCAAMB")   # Oct 29: football + hockey; Nov 18: college hoops
+# Nov 18 (research/coverage.py): college basketball's board ran on the older recent-games engine, so its 400+ nightly
+# plays were never saved, graded, tagged or calibrated -- 325 posted book lines in two weeks, none read by the model.
+# It now reads each game the way Position Matchups does (the two teams' own games; 360 teams is too many to rank).
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -798,6 +801,10 @@ def slate_reads_for(sport_key: str, date_str: str, meta: List[Dict], offers: Lis
     import position_lines as PL
     import position_matchups as PM
     import slate_props as SP
+    if sport_key == "NCAAMB":
+        reads = _ncaamb_reads(date_str, meta, offers, preferred_book)
+        _snapshot(sport_key, date_str, reads)
+        return _with_display_names(sport_key, reads) or None
     if PM.FAMILY_BY_SPORT.get(sport_key) in ("football", "hockey"):
         labels = tuple(sorted({m.get("label") for m in meta if m.get("label")}))
         games = [g for g in PD.list_games(sport_key, date_str) if g["label"] in set(labels)]
@@ -828,6 +835,57 @@ def slate_reads_for(sport_key: str, date_str: str, meta: List[Dict], offers: Lis
                            rest=inputs["rest"], game_lines=lines, sport=sport_key, charts=inputs.get("charts"))
     _snapshot(sport_key, date_str, reads)
     return _with_display_names(sport_key, reads) or None
+
+
+def _ncaamb_reads(date_str: str, meta: List[Dict], offers: List[Dict], preferred_book: Optional[str]) -> Dict:
+    """College basketball props reads, game by game: each game's bundle (position_data.load_basketball -- the two teams'
+    own games, last season's end early on, this season's rosters) feeds the same Player props model as the NBA."""
+    import json
+    import position_data as PD
+    import position_lines as PL
+    import slate_props as SP
+    labels = {m.get("label") for m in meta if m.get("label")}
+    games = [g for g in PD.list_games("NCAAMB", date_str) if g["label"] in labels]
+    posted = list({(o.get("home_team"), o.get("away_team")): {"home_team": o.get("home_team"),
+                                                              "away_team": o.get("away_team")}
+                   for o in offers if o.get("home_team")}.values())
+    games = [g for g in games if PL.match_event(posted, g["home"], g["away"])] if posted else []
+    if not games:
+        return {}
+    bundles = load_family_bundles("NCAAMB", date_str, tuple(sorted(g["label"] for g in games)))
+    api_key = get_odds_api_key()
+    gjson = json.dumps([{k: g.get(k) for k in ("label", "home", "away")} for g in games])
+    lines = fetch_game_lines_by_label("NCAAMB", date_str, api_key, gjson) if api_key else {}
+    eng = sports.get("NCAAMB").engine
+    book = None if preferred_book in (None, "best") else preferred_book
+    out: Dict = {}
+    for g in games:
+        b = bundles.get(g["label"])
+        props = (b or {}).get("props") or {}
+        if not props.get("cur_pgames") and not props.get("prior_pgames"):
+            continue
+        home, away = SP._int_or(g.get("home_id")), SP._int_or(g.get("away_id"))
+        rot = props.get("rotation") or {}
+        game_meta = {"label": g["label"], "home_id": home, "away_id": away, "home_name": g.get("home"),
+                     "away_name": g.get("away")}
+        inj = {}
+        for tid, abbr in ((home, g.get("home_abbr")), (away, g.get("away_abbr"))):
+            try:
+                inj[tid] = PD._injury_map(eng, abbr) if abbr else {}
+            except Exception:                                   # noqa: BLE001
+                inj[tid] = {}
+        rest = {t: (props.get("rest") or {}).get(t, {}).get("rest_days") for t in (home, away)}
+        try:
+            r = SP.slate_reads([game_meta], {"cur": props.get("cur_pgames") or [], "prior": props.get("prior_pgames") or []},
+                               offers, book=book, injuries=inj, rest=rest, game_lines=lines, sport="NCAAMB")
+        except Exception:                                       # noqa: BLE001 -- one game never sinks the board
+            continue
+        keep = {p.get("pid") for t in (home, away) for p in (rot.get(t) or [])}
+        for k, row in r.items():
+            if not keep or row.get("pid") in keep:              # this season's roster only (bundle's rotation)
+                row.setdefault("game_date", g.get("game_date"))
+                out[k] = row
+    return out
 
 
 def _snapshot(sport_key: str, date_str: str, reads) -> None:
