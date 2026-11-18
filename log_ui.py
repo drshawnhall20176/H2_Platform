@@ -32,6 +32,47 @@ def selectable(df: pd.DataFrame, key: str, **kw) -> List[int]:
         return []
 
 
+def tick_grid(df: pd.DataFrame, tick_cols: Sequence[str], key: str, **kw) -> List[tuple]:
+    """Nov 18: a table with tick boxes in chosen columns (placed by the caller, next to what they bet on) instead of one
+    box per row. Returns [(row position, ticked column)] in table order. The public build gets the table without
+    the boxes."""
+    import components as C
+    cols = [c for c in tick_cols if c in df.columns]
+    if not C.is_owner():
+        st.dataframe(df.drop(columns=cols), **kw)
+        return []
+    cfg = {c: st.column_config.CheckboxColumn(c, default=False, width="small") for c in cols}
+    ed = st.data_editor(df, key=key, disabled=[c for c in df.columns if c not in cols], column_config=cfg, **kw)
+    out = []
+    try:
+        for i, row in enumerate(ed.to_dict("records")):
+            out += [(i, c) for c in cols if bool(row.get(c))]
+    except Exception:                                           # noqa: BLE001 -- tests
+        pass
+    return out
+
+
+def relined(it: Dict, line) -> Dict:
+    """Nov 18: an item at a different line (a DraftKings alt spread, say): label, line and the model's chance follow."""
+    if line is None or line != line or it.get("bet_market") not in ("Spread", "Total") or not it.get("_rec"):
+        return it
+    line = float(line)
+    if it.get("bet_line") is not None and abs(float(it["bet_line"]) - line) < 1e-9:
+        return it
+    p, side = it["_rec"], it.get("bet_side")
+    if it["bet_market"] == "Spread":
+        label = f"{p['home'] if side == 'home' else p['away']} {line:+g}"
+    else:
+        label = f"{str(side).title()} {line:g} ({p['away']} @ {p['home']})"
+    try:
+        import intl_picks as IP
+        ch = IP.fair_chance(p, it["bet_market"], side, line)
+    except Exception:                                           # noqa: BLE001
+        ch = None
+    return dict(it, pick=label, bet_line=line, chance=ch, best_chance=None if ch is None else round(ch, 4),
+                best_tested=bool(it.get("best_tested")) and ch is not None)
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def _tag_records(sport: str) -> Dict:
     try:
@@ -62,11 +103,26 @@ def panel(items: Sequence[Dict], key: str, date_str: str, tag: str = "platform-t
                         "Price": None if it.get("price") is None else float(it["price"])} for it in items])
     if any(it.get("grade") for it in items):                     # Nov 14: game lines show their grade here
         ed.insert(1, "Grade", [it.get("grade") or "" for it in items])
+    lined = any(it.get("_rec") and it.get("bet_market") in ("Spread", "Total") for it in items)
+    if lined:                                                   # Nov 18: alt lines (DK alt spreads) are typed here
+        ed.insert(1, "Line", [float(it["bet_line"]) if it.get("_rec") and it.get("bet_market") in ("Spread", "Total")
+                              and it.get("bet_line") is not None else None for it in items])
     ed = st.data_editor(ed, hide_index=True, width="stretch", key=f"{key}_prices", disabled=["Pick", "Grade"],
                         column_config={"Price": st.column_config.NumberColumn(
-                            "Price you got", help="American odds from your slip; edit if it moved", format="%+d")})
-    prices = [r["Price"] for r in ed.to_dict("records")]
+                            "Price you got", help="American odds from your slip; edit if it moved", format="%+d"),
+                            "Line": st.column_config.NumberColumn(
+                                "Line", step=0.5, format="%g", help="Spread from the team's side (−4.5, +3.5) or the "
+                                "total. Change it to the line on your slip, e.g. an alternate spread; the model's "
+                                "chance follows.")})
+    recs = ed.to_dict("records")
+    prices = [r["Price"] for r in recs]
     its = [dict(it, price=(None if p is None or p != p else p)) for it, p in zip(items, prices)]
+    if lined:
+        its = [relined(it, r.get("Line")) for it, r in zip(its, recs)]
+        moved = [it for it, old in zip(its, items) if it.get("pick") != old.get("pick")]
+        if moved:
+            st.caption("At your line: " + "; ".join(
+                f"{it['pick']}" + ("" if it.get("chance") is None else f" — model {it['chance']:.0%}") for it in moved))
     c1, c2, c3 = st.columns(3)
     modes = ["Singles", "Parlay", "Both"] if len(its) >= 2 else ["Singles"]
     mode = c1.radio("Log as", modes, horizontal=True, key=f"{key}_mode")

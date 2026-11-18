@@ -478,6 +478,66 @@ def delete_bet(bet_id: int, db_path: str = DB_PATH) -> None:
 # ===========================================================================
 # ANALYTICS (pure functions over lists of bet dicts — fully testable offline)
 # ===========================================================================
+def bet_label(b: Dict) -> str:
+    """One line naming a logged bet, for pickers."""
+    line = "" if _missing(b.get("line")) else f" {float(b['line']):g}"
+    odds = "" if _missing(b.get("entry_odds")) else f" @ {int(b['entry_odds']):+d}"
+    who = b.get("player") or b.get("side") or ""
+    return (f"#{b.get('id')} · {b.get('slate_date') or ''} · {who} {b.get('market') or ''}{line}{odds} · "
+            f"{b.get('category') or 'uncategorized'}" + (f" · {b['game']}" if b.get("game") else ""))
+
+
+def fix_fields(bet: Dict, **typed) -> Tuple[Dict, List[str]]:
+    """Nov 18: the Fix-a-bet box's typed values -> (fields that changed, problems). Blank clears model_prob / line."""
+    out, errs = {}, []
+    def num(name, s, kind):
+        s = str(s or "").replace("$", "").replace("+", "").strip()
+        if not s:
+            return None
+        try:
+            return kind(float(s))
+        except ValueError:
+            errs.append(f"{name} must be a number.")
+            return "bad"
+    vals = {}
+    if "category" in typed:
+        vals["category"] = typed["category"] or None
+    if "model_prob" in typed:
+        mp = num("Model prob", typed["model_prob"], float)
+        if mp not in (None, "bad") and not 0 < mp < 1:
+            errs.append("Model prob must be between 0 and 1 (e.g. 0.51).")
+        vals["model_prob"] = mp
+    if "entry_odds" in typed:
+        o = num("Entry odds", typed["entry_odds"], int)
+        if o is None or (o != "bad" and -100 < o < 100):
+            errs.append("Entry odds must be American odds like -110 or +150.")
+        vals["entry_odds"] = o
+    if "line" in typed:
+        vals["line"] = num("Line", typed["line"], float)
+    if "stake" in typed:
+        st_ = num("Stake", typed["stake"], float)
+        if st_ is None or (st_ != "bad" and st_ < 0):
+            errs.append("Stake must be $0 or more.")
+        vals["stake"] = st_
+    for k in ("side", "notes"):
+        if k in typed:
+            vals[k] = (typed[k] or "").strip() or None
+    if errs:
+        return {}, errs
+    for k, v in vals.items():
+        old = bet.get(k)
+        old = None if _missing(old) else old
+        if isinstance(v, float) and old is not None:
+            try:
+                if abs(float(old) - v) < 1e-9:
+                    continue
+            except (TypeError, ValueError):
+                pass
+        if v != old:
+            out[k] = v
+    return out, []
+
+
 def _missing(v) -> bool:
     """True for None or NaN (pandas silently turns None into NaN once it shares a numeric
     DataFrame column with real values -- see Bet Log's `pd.DataFrame(bets)` ledger/export path).
@@ -739,9 +799,17 @@ def leg_price(bet: Dict) -> Optional[int]:
     return None
 
 
+# Nov 18: game-line markets whose side is a team, not Over/Under. A leg in one of these takes the team name as its
+# side ("| Spread | Aris | -9.5 | Le Mans @ Aris"); Totals stay Over/Under. A moneyline leg may leave the line blank.
+TEAM_SIDE_MARKETS = {"moneyline", "ml", "spread", "alt spread", "alternate spread", "spread alternate", "run line",
+                     "puck line", "handicap", "asian handicap", "point spread"}
+
+
 def parse_leg_lines(text: str, default_game: Optional[str] = None) -> Tuple[List[Dict], List[str]]:
-    """One leg per line: "Player | Market | Over | 6.5" (an optional 5th field is the game). Returns
-    (legs, problems) -- a line that can't be read is reported, never guessed."""
+    """One leg per line: "Player | Market | Over | 6.5" (an optional 5th field is the game). Game-line legs leave the
+    player blank and name the team as the side: "| Spread | Aris | -9.5 | Le Mans @ Aris", "| Moneyline | Maxima Roma
+    | | Maxima Roma @ U-BT Cluj-Napoca". Returns (legs, problems) -- a line that can't be read is reported, never
+    guessed."""
     legs, bad = [], []
     for raw in (text or "").splitlines():
         line = raw.strip()
@@ -751,16 +819,32 @@ def parse_leg_lines(text: str, default_game: Optional[str] = None) -> Tuple[List
         if len(parts) < 4:
             bad.append(f"“{line}” — needs Player | Market | Side | Line")
             continue
-        try:
-            val = float(parts[3])
-        except ValueError:
-            bad.append(f"“{line}” — the line “{parts[3]}” isn't a number")
-            continue
-        side = parts[2].strip().capitalize()
-        if side not in ("Over", "Under", "Yes", "No"):
-            bad.append(f"“{line}” — side should be Over or Under")
-            continue
-        legs.append({"player": parts[0], "market": parts[1], "side": side, "line": val,
+        market = parts[1]
+        team_market = market.strip().lower() in TEAM_SIDE_MARKETS
+        line_txt = parts[3]
+        if team_market and market.strip().lower() in ("moneyline", "ml") and line_txt.lower() in ("", "ml", "pk", "pick"):
+            val = 0.0
+        else:
+            try:
+                val = float(line_txt.replace("+", ""))
+            except ValueError:
+                bad.append(f"“{line}” — the line “{line_txt}” isn't a number")
+                continue
+        if team_market:
+            side = parts[2].strip()
+            if not side:
+                bad.append(f"“{line}” — name the team you took as the side")
+                continue
+            if side.lower() in ("over", "under"):
+                bad.append(f"“{line}” — a {market} leg's side is a team; Over/Under belongs to a Total")
+                continue
+        else:
+            side = parts[2].strip().capitalize()
+            if side not in ("Over", "Under", "Yes", "No"):
+                bad.append(f"“{line}” — side should be Over or Under (for a moneyline or spread leg, use the market "
+                           "name Moneyline or Spread and the team as the side)")
+                continue
+        legs.append({"player": parts[0] or None, "market": market, "side": side, "line": val,
                      "game": (parts[4] if len(parts) > 4 and parts[4] else default_game)})
     return legs, bad
 

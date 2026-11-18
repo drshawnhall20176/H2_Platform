@@ -26,6 +26,9 @@ from datetime import datetime
 
 import sports
 import betlog as B
+if not hasattr(B, "fix_fields"):            # Nov 18: a redeploy can leave the old betlog module loaded -- pick up the new one
+    import importlib
+    B = importlib.reload(B)
 import bet_settlement
 import prop_settlement as PS
 import mlb_engine as E
@@ -260,7 +263,9 @@ with st.expander("🎫 Log a parlay ticket (one stake, one total price)", expand
         if _t and _t not in _headed:
             _legacy.setdefault(_t, []).append(_b)
     st.caption("One leg per line: **Player | Market | Side | Line** (add **| Away @ Home** for a leg from another "
-               "game). Example: `John Collins | Rebounds | Over | 6.5`. A ticket whose legs you already logged one by "
+               "game). Example: `John Collins | Rebounds | Over | 6.5`. Game lines leave the player blank and name the team: "
+               "`| Spread | Aris | -9.5 | Le Mans @ Aris` or `| Moneyline | Maxima Roma | | Maxima Roma @ U-BT Cluj-Napoca`. "
+               "A ticket whose legs you already logged one by "
                "one can be converted instead: pick it below and leave the legs box empty.")
     with st.form("log_parlay", clear_on_submit=True):
         p1, p2, p3 = st.columns(3)
@@ -278,7 +283,8 @@ with st.expander("🎫 Log a parlay ticket (one stake, one total price)", expand
                                       key="pl_existing")
             p_notes = st.text_input("Notes", placeholder="optional", key="pl_notes")
         p_legs = st.text_area("Legs", height=150, key="pl_legs",
-                              placeholder="John Collins | Rebounds | Over | 6.5\nJulius Randle | Points | Over | 14.5")
+                              placeholder="John Collins | Rebounds | Over | 6.5\nJulius Randle | Points | Over | 14.5\n"
+                                          "| Spread | Aris | -9.5 | Le Mans @ Aris\n| Moneyline | Maxima Roma | | Maxima Roma @ U-BT Cluj-Napoca")
         if st.form_submit_button("Log parlay ticket", type="primary"):
             _problems = []
             try:
@@ -318,6 +324,47 @@ with st.expander("🎫 Log a parlay ticket (one stake, one total price)", expand
                 st.success(f"Logged parlay “{_name}”: {len(_legs) + len(_conv)} legs, ${_stake:,.2f} at "
                            f"{_odds:+d} — pays ${B.payout(_stake, _odds):,.2f} if it hits. It settles itself "
                            "once every leg is settled.")
+
+# Nov 18: a logged bet can be corrected (category, model %, line, price, stake, notes) or removed -- the page had no way
+# to fix a typo or a wrong category without the database
+with st.expander("✏️ Fix or remove a bet", expanded=False):
+    _recent = sorted(B.list_bets(sport=_active.key), key=lambda b: -int(b.get("id") or 0))[:60]
+    if not _recent:
+        st.caption("Nothing logged yet.")
+    else:
+        _by_id = {int(b["id"]): b for b in _recent}
+        _fid = st.selectbox("Bet", list(_by_id), key="fix_pick", format_func=lambda i: B.bet_label(_by_id[i]))
+        _fix = _by_id[_fid]
+        f1, f2, f3 = st.columns(3)
+        _cat_opts = B.CATEGORIES if (_fix.get("category") in B.CATEGORIES) else [""] + B.CATEGORIES
+        _f_cat = f1.selectbox("Category", _cat_opts, index=_cat_opts.index(_fix.get("category") or ""),
+                              key=f"fix_cat_{_fid}")
+        _f_mp = f2.text_input("Model prob (0–1, blank = none)", value="" if B._missing(_fix.get("model_prob"))
+                              else f"{float(_fix['model_prob']):g}", key=f"fix_mp_{_fid}")
+        _f_odds = f3.text_input("Entry odds", value="" if B._missing(_fix.get("entry_odds"))
+                                else f"{int(_fix['entry_odds']):+d}", key=f"fix_odds_{_fid}")
+        g1, g2, g3 = st.columns(3)
+        _f_side = g1.text_input("Side", value=_fix.get("side") or "", key=f"fix_side_{_fid}")
+        _f_line = g2.text_input("Line (blank = none)", value="" if B._missing(_fix.get("line"))
+                                else f"{float(_fix['line']):g}", key=f"fix_line_{_fid}")
+        _f_stake = g3.text_input("Stake ($)", value="" if B._missing(_fix.get("stake"))
+                                 else f"{float(_fix['stake']):g}", key=f"fix_stake_{_fid}")
+        _f_notes = st.text_input("Notes", value=_fix.get("notes") or "", key=f"fix_notes_{_fid}")
+        b1, b2 = st.columns(2)
+        if b1.button("💾 Save changes", key=f"fix_save_{_fid}", type="primary"):
+            _chg, _errs = B.fix_fields(_fix, category=_f_cat, model_prob=_f_mp, entry_odds=_f_odds, side=_f_side,
+                                       line=_f_line, stake=_f_stake, notes=_f_notes)
+            if _errs:
+                st.error("Not saved:\n\n- " + "\n- ".join(_errs))
+            elif not _chg:
+                st.info("Nothing changed.")
+            else:
+                B.update_bet(_fid, **_chg)
+                st.success(f"Saved #{_fid}: " + ", ".join(sorted(_chg)) + ".")
+        _sure = b2.checkbox("Remove this bet for good (can't be undone)", key=f"fix_sure_{_fid}")
+        if b2.button("🗑️ Remove", key=f"fix_del_{_fid}", disabled=not _sure):
+            B.delete_bet(_fid)
+            st.success(f"Removed #{_fid}.")
 
 bets = B.list_bets(sport=_active.key)
 # A parlay ticket settles itself once its legs decide it (any loss, or every leg graded).

@@ -54,11 +54,17 @@ C.hero_banner("📅", "League Schedules", "Real season schedules, browsed by whi
 
 # ----------------------------------------------------------------- sport tabs (Home.py's own pattern)
 st.divider()
-live = [s for s in sports.enabled_sports() if sports.in_season(s.key)]   # Nov 5: in-season leagues only
+try:
+    _owner = st.secrets.get("AUDIENCE", "owner") == "owner"
+except Exception:                                               # noqa: BLE001
+    _owner = True
+# Nov 18: the same list the Home sport picker offers -- in-season leagues plus the labs (Tennis, International
+# Hoops, Soccer). The page used enabled_sports() alone, so the labs never showed here.
+live = sports.selectable_sports(_owner)
 keys = [s.key for s in live]
 current = st.session_state.get("sport", sports.DEFAULT_SPORT)
 if current not in keys:
-    current = keys[0]
+    current = sports.default_selectable(_owner) if keys else sports.DEFAULT_SPORT
 
 C.section_header("🏟", "Select League")
 with st.container(horizontal=True, horizontal_alignment="left"):
@@ -67,6 +73,42 @@ with st.container(horizontal=True, horizontal_alignment="left"):
                      type="primary" if current == s.key else "secondary", width="content"):
             st.session_state["sport"] = s.key
             st.rerun()
+
+# ----------------------------------------------------------------- the labs (Nov 18): Tennis, International Hoops, Soccer
+if current in sports.LAB_SPORTS:
+    import pandas as pd
+    import lab_schedule as LS
+
+    _lab = sports.LAB_SPORTS[current]
+    st.divider()
+
+    @st.cache_data(ttl=600, show_spinner="Loading schedule...")
+    def _lab_games(sport_key_inner: str):
+        return LS.load(sport_key_inner)
+
+    _by_league = _lab_games(current)
+    _today = datetime.now(eastern).date()
+    _days = sorted({d for ps in _by_league.values() for p in ps if (k := LS.kickoff_et(p)) and (d := k.date()) >= _today})
+    _days = _days or [_today]
+    c1, c2 = st.columns([1, 2])
+    _day = c1.selectbox("Date", _days, key=f"ls_lab_day_{current}",
+                        format_func=lambda d: "Today" if d == _today else (f"Tomorrow ({d:%a %b %-d})" if (d - _today).days == 1 else f"{d:%a %b %-d}"))
+    _rows = LS.rows(current, _by_league, _day)
+    if current != "TENNIS":
+        _names = sorted({r["League"] for r in _rows})
+        _pick = c2.selectbox("League", ["All leagues"] + _names, key=f"ls_lab_league_{current}_{_day}")
+        if _pick != "All leagues":
+            _rows = [r for r in _rows if r["League"] == _pick]
+    if not _rows:
+        st.info(f"No {_lab.label} games on the schedule for {_day:%a %b %-d}. "
+                + ("Soccer and international hoops list only leagues playing today or tomorrow; the list refreshes "
+                   "every few hours." if current != "TENNIS" else "The tennis list refreshes every few hours."))
+        st.stop()
+    st.markdown(f"#### {_lab.icon} {_lab.label} — {_day:%a %b %-d}")
+    st.caption(f"{len(_rows)} game(s), earliest first. Times are US Eastern.")
+    st.dataframe(pd.DataFrame([{k: v for k, v in r.items() if k != "_ko"} for r in _rows]),
+                 hide_index=True, width="stretch")
+    st.stop()
 
 _active = sports.REGISTRY.get(current)
 if not _active:
