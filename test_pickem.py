@@ -70,7 +70,7 @@ def test_sides_at_different_lines():
 
 
 def test_priced_apps_judge_each_pick_against_its_own_price(monkeypatch):
-    """Nov 18: Dabble / ParlayPlay price each pick -- a pick must beat its own price, and an entry pays the product."""
+    """Nov 18: Dabble / ParlayPlay price each pick -- a pick must clear the table AND its own price."""
     monkeypatch.setattr(PE, "trust_for", lambda s, m=None: 0.5)
     assert PK.is_priced("dabble_us_dfs") and not PK.is_priced("prizepicks")
     assert abs(PK.needed(-118) - 118 / 218) < 1e-9 and abs(PK.needed(119) - 100 / 219) < 1e-9
@@ -89,11 +89,11 @@ def test_priced_apps_judge_each_pick_against_its_own_price(monkeypatch):
     a, c = lg["A B"], lg["C D"]
     assert a["basis"] == "books" and a["side"] == "More" and a["needed"] > 0.54 and a["chance"] > a["needed"]
     assert c["side"] == "Less" and c["needed"] < 0.3              # +250 Less beats its price; -400 More does not
-    e = PK.best_entry(list(lg.values()), 2, 0.5)
-    assert all(x["chance"] >= x["needed"] for x in e)
-    if len(e) == 2:
-        r = PK.entry_odds(e, "dabble_us_dfs", sport="NBA")
-        assert r and r["mult"] > 2.0
+    floor = PK.breakeven(PK.APPS["dabble_us_dfs"]["power"][2], 2)
+    e = PK.best_entry(list(lg.values()), 2, floor)
+    assert all(x["chance"] >= max(floor, x["needed"]) for x in e)
+    assert PK.best_entry([dict(a, needed=0.99)], 1, 0.5) == []       # heavy-priced: its own price is the bar
+    assert PK.entry_odds([a, dict(c, game="Z")], "parlayplay", sport="NBA")["mult"] == 3.0
 
 
 def test_offers_merge_across_fetches():
