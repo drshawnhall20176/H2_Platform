@@ -672,14 +672,16 @@ def fetch_generic_offers(sport_key: str, date_str: str, api_key: str) -> List[Di
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def fetch_pickem_extra_offers(sport_key: str, date_str: str, api_key: str) -> List[Dict]:
+def fetch_pickem_extra_offers(sport_key: str, date_str: str, api_key: str,
+                              event_ids: Optional[Tuple[str, ...]] = None) -> List[Dict]:
     """Nov 18: the Pick'em Board's own fetch -- Underdog, Dabble, ParlayPlay and the Novig / ProphetX exchanges
     (odds_api.PICKEM_EXTRA_FETCH, 5 books = one region's credits a market). Only the Pick'em Board pays for it; the
     boards' main fetch is unchanged. Fails soft to [] (the board still works from the main fetch)."""
     sport = sports.get(sport_key)
     try:
         offers, _info = O.fetch_slate_props(date_str, api_key, list(sport.markets), sport=sport.odds_sport_key,
-                                            bookmakers=list(O.PICKEM_EXTRA_FETCH))
+                                            bookmakers=list(O.PICKEM_EXTRA_FETCH),
+                                            event_ids=list(event_ids) if event_ids is not None else None)
         return offers
     except Exception:                                           # noqa: BLE001
         return []
@@ -954,15 +956,26 @@ def compose_board(sport_key: str, reads: Optional[Dict], rows: List[Dict], legac
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def load_slate_reads(sport_key: str, date_str: str, preferred_book: str = O.DEFAULT_BOOK) -> Optional[Dict]:
     """slate_reads_for with its own slate + offers fetch (both shared with Best Bets through their caches), for
-    pages that build their own board (Edge Board)."""
+    pages that build their own board (Edge Board).
+
+    Nov 18: cached (the Pick'em Board rebuilt every read on each click), and a big slate (college basketball, 71 games
+    and 2,200 roster spots tonight) builds only the games the books posted props for -- the full build never finished
+    on the Pick'em Board's 'Reading the apps' lines' spinner."""
     if sport_key not in PROPS_MODEL_SPORTS:
         return None
     api_key = get_odds_api_key()
     if not api_key:
         return None
-    _rows, meta = sports.get(sport_key).engine.build_slate(date_str)
+    sport = sports.get(sport_key)
+    if sport_key in BIG_SLATE_SPORTS:
+        _rows, meta = _big_slate_props_games(sport, sport_key, date_str, api_key)
+        if not meta:
+            return {}
+    else:
+        _rows, meta = sport.engine.build_slate(date_str)
     try:
         offers = fetch_generic_offers(sport_key, date_str, api_key)
     except Exception:                                           # noqa: BLE001
