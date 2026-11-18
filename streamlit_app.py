@@ -534,12 +534,21 @@ def run():
             if office.get(sec):
                 office_nav[sec] = office[sec]
         sports.render_sport_selector()
-        if st.sidebar.button("⬅ Back to the sport desks", key="office_back"):
-            st.session_state[OF.MODE] = False
+        if st.sidebar.button("⬅ Back to Today", key="office_back"):
+            OF.leave(st.session_state)
             st.rerun()
         st.navigation(office_nav).run()
         return
-    target = st.navigation(sections, position="hidden")
+    # the Office's pages stay resolvable while it is unlocked, so leaving from one of them lands cleanly on Today
+    hidden = dict(sections)
+    if office:
+        hidden["🔐 OWNER OFFICE"] = [p for ps in office.values() for p in ps]
+    target = st.navigation(hidden, position="hidden")
+    if st.session_state.get("_goto_page") == "today":
+        st.session_state.pop("_goto_page", None)
+        today = next((p for p in sections["🏠 START HERE"] if getattr(p, "title", None) == "Today"), None)
+        if today is not None and getattr(target, "title", None) != "Today":
+            st.switch_page(today)
     if getattr(target, "title", None) == "Today":                # the default page reports an empty url_path
         _today_sidebar()
         st.navigation({"🏠 START HERE": sections.get("🏠 START HERE", [])}).run()
@@ -552,7 +561,7 @@ def run():
     if goto:
         for pages in sections.values():
             for pg in pages:
-                if getattr(pg, "url_path", None) == goto:
+                if getattr(pg, "url_path", None) == goto or (goto == "today" and getattr(pg, "title", None) == "Today"):
                     st.switch_page(pg)
     nav.run()
 

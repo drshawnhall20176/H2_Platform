@@ -45,3 +45,12 @@ def unlocked(state) -> bool:
 
 def active(state) -> bool:
     return bool(state.get(UNLOCKED)) and bool(state.get(MODE))
+
+
+def leave(state, lock: bool = False) -> None:
+    """Out of the Office and back to Today (owner, Nov 18: "when I exit the Owner Office have the page return to the
+    Today page"); `lock` also forgets the password for this session."""
+    state[MODE] = False
+    if lock:
+        state[UNLOCKED] = False
+    state["_goto_page"] = "today"
