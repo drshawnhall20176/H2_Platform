@@ -37,6 +37,7 @@ ALIASES = {
     "ast": "Assists", "threes": "Threes Made", "threes made": "Threes Made", "3pm": "Threes Made", "fg3m": "Threes Made",
     "pra": "PRA", "pts+reb+ast": "PRA", "pa": "PA", "pts+ast": "PA", "pr": "PR", "pts+reb": "PR", "ra": "RA",
     "reb+ast": "RA", "pts+blk": "PB", "steals": "Steals", "blocks": "Blocks",
+    "blocks+steals": "Blocks+Steals", "blk+stl": "Blocks+Steals", "stocks": "Blocks+Steals",
     "shots on goal": "Shots on Goal", "sog": "Shots on Goal", "goals": "Goals", "saves": "Saves",
 }
 _SUFFIX = re.compile(r"\b(jr|sr|ii|iii|iv|v)\b\.?")

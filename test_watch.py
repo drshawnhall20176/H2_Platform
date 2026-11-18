@@ -51,3 +51,21 @@ def test_overs_gate_follows_each_sports_record():
     assert g2["NFL"]["off"] is False and W.gate_over(PE.USE_BOTH, "NFL", "Over", gate=g2) == PE.USE_BOTH
     few = W.judge_overs("NCAAF", {"d": lose["d"][:5]})
     assert few["NCAAF"]["off"] is False                                                # too few to switch off
+
+
+def test_new_markets_are_on_probation():
+    """Nov 18: steals / blocks join the props model; their bet tags show as Watch until the market earns a record."""
+    import player_props as PPR
+    import slate_props as SP
+    assert {"player_steals", "player_blocks", "player_blocks_steals"} <= set(SP.CORE_MARKETS)
+    assert PPR.MARKETS["Blocks+Steals"] == ("blk", "stl") and PPR.DIST["Blocks+Steals"] == "count"
+    assert W.apply(PE.USE_SINGLE, "NBA", "Steals", "Over", status={}) == PE.USE_WATCH
+    assert W.apply(PE.USE_PASS, "NBA", "Steals", "Over", status={}) == PE.USE_PASS
+    assert W.apply(PE.USE_SINGLE, "NBA", "Blocks", "Under", status={"nba_blocks_new": {"status": "promoted"}}) == PE.USE_SINGLE
+    assert W.apply(PE.USE_PARLAY, "NBA", "Blocks+Steals", "Over", status={"nba_stocks_new": {"status": "dropped"}}) == PE.USE_PASS
+    win = {"2026-12-01": [{"result": "hit", "market": "Steals", "side": "Under", "under_price": -110,
+                           "use_tag": PE.USE_WATCH}] * 28
+           + [{"result": "miss", "market": "Steals", "side": "Under", "under_price": -110, "use_tag": PE.USE_WATCH}] * 8}
+    st = W.judge("NBA", win, "2026-12-05")
+    assert st["nba_steals_new"]["status"] == "promoted" and st["nba_steals_new"]["probation"]
+    assert st["nba_blocks_new"]["n"] == 0 and st["nba_blocks_new"]["status"] == "watch"

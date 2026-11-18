@@ -38,6 +38,25 @@ RULES: List[Dict] = [
 ]
 
 
+# Nov 18: markets new to the props model are on probation -- any bet tag on them shows as 👀 Watch (graded, never a
+# parlay leg) until the market has earned a record the same way a Watch group does (MIN_DAYS, MIN_READS and profit
+# clearing zero by PROMOTE_Z standard errors, judged on the bet-tagged reads); a market whose bet tags lose is dropped
+# and its bet tags read ⚪ No edge.
+PROBATION: List[Dict] = [
+    {"id": "nba_steals_new", "sport": "NBA", "market": "Steals", "since": "2026-11-18"},
+    {"id": "nba_blocks_new", "sport": "NBA", "market": "Blocks", "since": "2026-11-18"},
+    {"id": "nba_stocks_new", "sport": "NBA", "market": "Blocks+Steals", "since": "2026-11-18"},
+]
+def _is_bet(tag) -> bool:
+    import props_engine as PE
+    return PE.norm_use(tag) in (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE)
+
+
+def probation_for(sport: Optional[str], market) -> Optional[Dict]:
+    mk = _market(market)
+    return next((p for p in PROBATION if p["sport"] == sport and p["market"] == mk), None)
+
+
 def _market(m) -> str:
     try:
         import model_view as MV
@@ -86,6 +105,10 @@ def apply(tag: str, sport: Optional[str], market, side, projection=None, line=No
     """A No-edge tag becomes 👀 Watch (or 🎯 Single only once its group is promoted) when the read falls in a
     watched group; any other tag is returned unchanged."""
     import props_engine as PE
+    pr = probation_for(sport, market)
+    if pr and _is_bet(tag):
+        st = (status if status is not None else statuses()).get(pr["id"], {}).get("status", "watch")
+        return tag if st == "promoted" else PE.USE_PASS if st == "dropped" else PE.USE_WATCH
     if not PE.is_pass(tag):
         return tag
     r = rule_for(sport, market, side, projection, line)
@@ -147,7 +170,47 @@ def judge(sport: str, graded_by_date: Dict[str, Sequence[Dict]], today: str,
                 status = "promoted"
         out[r["id"]] = {"status": status, "n": n, "hits": h, "profit_per_1": round(units / n, 4) if n else None,
                         "profit_floor": None if floor is None else round(floor, 4), "days": days, "updated": today}
+    for p in (x for x in PROBATION if x["sport"] == sport):
+        rets = []
+        for d, rows in graded_by_date.items():
+            if d < p["since"]:
+                continue
+            for g in rows:
+                tag = g.get("bet_use_tag") or g.get("use_tag")
+                res = g.get("bet_result") if g.get("bet_use_tag") else g.get("result")
+                side = g.get("bet_side") if g.get("bet_use_tag") else g.get("side")
+                if _market(g.get("market")) != p["market"] or res not in ("hit", "miss"):
+                    continue
+                # graded on what the model WOULD have tagged: the Watch tag a probation market shows stands in
+                if not (_is_bet(tag) or (PE_watch(tag))):
+                    continue
+                dec = _dec(g.get("over_price") if side == "Over" else g.get("under_price"))
+                if dec is None:
+                    continue
+                rets.append((dec - 1) if res == "hit" else -1.0)
+        n = len(rets)
+        m = sum(rets) / n if n else None
+        floor = None
+        if n >= 2:
+            sd = (sum((x - m) ** 2 for x in rets) / (n - 1)) ** 0.5
+            floor = m - PROMOTE_Z * sd / n ** 0.5
+        prev = (out.get(p["id"]) or {}).get("status", "watch")
+        days = (date.fromisoformat(today) - date.fromisoformat(p["since"])).days
+        status = prev
+        if prev == "watch" and n >= MIN_READS:
+            if m < DROP_BELOW:
+                status = "dropped"
+            elif days >= MIN_DAYS and floor is not None and floor > 0:
+                status = "promoted"
+        out[p["id"]] = {"status": status, "n": n, "hits": sum(1 for x in rets if x > -1), "profit_per_1":
+                        None if m is None else round(m, 4), "profit_floor": None if floor is None else round(floor, 4),
+                        "days": days, "updated": today, "probation": True}
     return out
+
+
+def PE_watch(tag) -> bool:
+    import props_engine as PE
+    return PE.norm_use(tag) == PE.USE_WATCH
 
 
 # --------------------------------------------------------------------------- Overs gate (Nov 17)
