@@ -566,8 +566,8 @@ def total_stake(mode: str, stake: float, stakes: Optional[Sequence[float]]) -> f
 
 def run_pressure_test(legs: List[Dict], mode: str, payout: Dict, *, stake: float, bankroll: float,
                       stakes: Optional[Sequence[float]] = None, tables: Optional[Dict] = None,
-                      decimal_override: Optional[float] = None, rho_player: float = 0.30,
-                      rho_game: float = 0.08, evidence_mult: float = 1.0, n_sims: int = 20000,
+                      decimal_override: Optional[float] = None, rho_player: Optional[float] = None,
+                      rho_game: Optional[float] = None, evidence_mult: float = 1.0, n_sims: int = 20000,
                       n_slips: int = 100, seed: int = 7) -> Dict:
     """Everything the Slip Lab results panel shows, in one call: the baseline simulation, the
     stress scenarios, the leg-drop table, the repeat-play projection and the plain-language

@@ -248,7 +248,7 @@ C.weather_note("NCAAF", date_str, [game_label])                 # Nov 8: kickoff
 # season of real scoring rates for both teams.
 show_2025_baseline = st.checkbox(
     "📊 Use 2025 season baseline (limited 2026 data so far)",
-    value=True,   # on by default since Week 1 has no data yet -- the common case right now
+    value=datetime.now(pytz.timezone("US/Eastern")).month in (7, 8, 9),   # Nov 18: only early-season default
     help="Uses last season's real scoring rates for both teams. Real transfers, scheme changes, "
         "and personnel differences since 2025 aren't reflected -- clearly a stand-in, not a "
         "claim about 2026 form. The model will update automatically as 2026 games are played.")
@@ -268,6 +268,31 @@ show_period = st.checkbox(
 with st.spinner(f"Simulating {away_name} @ {home_name}..."):
     game_result, period_result, home_scoring, away_scoring, home_allowed, away_allowed, league_avg = load_game(
         date_str, stats_date_str, home_name, away_name)
+
+# Nov 18 -- one model, one answer: when the ratings model (v2, above) has this game, the moneyline / spread / total
+# below is simulated around ITS projection (game_sim.py, the same as every other Game Lab) instead of the older
+# scoring-rate numbers, which could disagree with it.
+_v2_rec = None
+try:
+    _key = lambda x: " ".join(str(x or "").lower().split())                    # noqa: E731
+    for _p in (_gp or []):
+        if _key(_p.get("home")) == _key(home_name) and _key(_p.get("away")) == _key(away_name) \
+                and _p.get("model_margin") is not None and _p.get("model_total") is not None:
+            if _v2_rec is None or str(_p.get("kickoff")) >= str(_v2_rec.get("kickoff")):
+                _v2_rec = _p
+except NameError:
+    _v2_rec = None
+if _v2_rec is not None:
+    import game_sim as _GS
+    import todays_best as _TB
+    _sim = _GS.simulate("NCAAF", _v2_rec["model_margin"], _v2_rec["model_total"], key=_v2_rec.get("game_id") or game_label)
+    if _sim:
+        _hp = _TB._home_p(_v2_rec, "NCAAF")
+        _hp = _sim["sim_home_win"] if _hp is None else _hp
+        game_result = {"home_win_prob": _hp, "away_win_prob": 1 - _hp, "proj_home_score": _sim["proj_home_score"],
+                       "proj_away_score": _sim["proj_away_score"], "proj_spread": _sim["proj_spread"],
+                       "proj_total": _sim["proj_total"], "n_sims": _sim["n_sims"], "_v2": True,
+                       "home_std": _TB.MARGIN_SD["NCAAF"], "away_std": _TB.MARGIN_SD["NCAAF"]}
 
 st.markdown(f"## {away_name} @ {home_name}")
 st.caption(f"20,000 simulations · Normal score distribution · Odds-ratio blend · "
@@ -326,10 +351,17 @@ else:
     m3.metric("Projected spread", spread_label)
     m4.metric("Projected total", f"{game_result['proj_total']:.1f}")
 
-    st.caption(f"Proj: {away_name} **{game_result['proj_away_score']:.1f}** — "
-              f"{home_name} **{game_result['proj_home_score']:.1f}** · "
-              f"Std: {game_result['away_std']:.1f} / {game_result['home_std']:.1f} · "
-              f"{game_result['n_sims']:,} sims")
+    if game_result.get("_v2"):
+        st.caption(f"Proj: {away_name} **{game_result['proj_away_score']:.1f}** — "
+                   f"{home_name} **{game_result['proj_home_score']:.1f}** · the ratings model (v2) above, simulated "
+                   f"{game_result['n_sims']:,} times with finishes spread like real FBS games (15 points around the "
+                   "projection). The scoring-rate numbers this section used to show are retired where v2 has the game.")
+    else:
+        st.caption(f"Proj: {away_name} **{game_result['proj_away_score']:.1f}** — "
+                  f"{home_name} **{game_result['proj_home_score']:.1f}** · "
+                  f"Std: {game_result['away_std']:.1f} / {game_result['home_std']:.1f} · "
+                  f"{game_result['n_sims']:,} sims · scoring-rate model (the ratings model has no projection for "
+                  "this game)")
 
     with st.expander("What the win probability means — and what it doesn't"):
         st.markdown(f"""

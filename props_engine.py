@@ -794,6 +794,13 @@ def leg_correlation(a: Dict, b: Dict) -> float:
     if not a.get("game") or a.get("game") != b.get("game"):
         return 0.0
     sign = (1 if str(a.get("side")).lower() != "under" else -1) * (1 if str(b.get("side")).lower() != "under" else -1)
+    sport = a.get("sport") or b.get("sport")
+    if sport:                       # Nov 18: one correlation model -- the slip simulator's measured values
+        import slip_sim as _S
+        if a.get("player") and a.get("player") == b.get("player"):
+            return sign * _S.same_player_rho(sport, a.get("market"), b.get("market"))
+        ta, tb = a.get("team"), b.get("team")
+        return sign * _S.same_game_rho(sport, None if not ta or not tb else str(ta) == str(tb))
     if a.get("player") and a.get("player") == b.get("player"):
         sa, sb = set(market_stats(a.get("market"))), set(market_stats(b.get("market")))
         overlap = len(sa & sb) / math.sqrt(len(sa) * len(sb)) if sa and sb else 0.0
@@ -801,13 +808,14 @@ def leg_correlation(a: Dict, b: Dict) -> float:
     return sign * SAME_GAME
 
 
-def sgp(legs: Sequence[Dict], book_price=None, n_sims: int = 40000, seed: int = 11) -> Optional[Dict]:
+def sgp(legs: Sequence[Dict], book_price=None, n_sims: int = 40000, seed: int = 11,
+        sport: Optional[str] = None) -> Optional[Dict]:
     """Price a same-game parlay with correlation (leg_correlation), not as independent legs.
     legs: [{"player","game","side","p","market"}] (p = that side's probability).
 
     {"p_joint" (correlated), "p_independent", "fair" (American), "ev" at book_price (None without one),
      "lift" (joint / independent)}."""
-    legs = [l for l in legs if l.get("p") is not None]
+    legs = [dict(l, sport=l.get("sport") or sport) if sport else l for l in legs if l.get("p") is not None]
     if len(legs) < 2:
         return None
     import numpy as np

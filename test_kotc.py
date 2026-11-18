@@ -35,3 +35,18 @@ def test_model_projection_leads():
               "Game": "g"} for m in K.PRA_MARKETS]
     rows = K.build(board, {}, {}, model_proj=mp, sims=200)
     assert rows[0]["Proj PRA"] == 52.0 and rows[0]["Source"] == "model"
+
+
+def test_whole_field_has_a_real_chance():
+    """Nov 18: Sensabaugh / Grimes (~15 PRA projected) tied for the crown at 56 while the old sim had them at exactly 0%.
+    Every rotation player is simulated now, from how players at his level actually finish against the model."""
+    board = _board("Star", "LAL", 36, 7, 8) + _board("Two", "SA", 25, 12, 4, game="g2")
+    for i in range(30):
+        board += _board(f"Bench{i}", f"T{i % 8}", 9, 3, 2, game=f"g{i % 4}")
+    rows = K.build(board, {}, {}, sims=20000)
+    assert rows[0]["Player"] == "Star" and 0.15 < rows[0]["King chance"] < 0.8
+    bench = [r for r in rows if r["Player"].startswith("Bench")]
+    assert all(r["King chance"] > 0 for r in bench[:5]) and sum(r["King chance"] for r in bench) > 0.03
+    assert abs(sum(r["King chance"] for r in rows) - 1.0) < 1e-9
+    f = K.field_chance(rows)
+    assert f is not None and 0.0 < f < 1.0

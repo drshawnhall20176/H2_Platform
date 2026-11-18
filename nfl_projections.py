@@ -1054,9 +1054,9 @@ def build_hot_hand_board(rows: List[Dict], opp_allowed: Dict[str, Dict[str, floa
 # concern), just re-implemented as a one-liner that calls the shared _blend_score helper
 # rebuilt here. The math is identical; only the name distinguishes NFL callers from NCAAF ones.
 
-_NFL_GAME_DEFAULT_STD = 7.5   # slightly higher than NCAAF's 7.0 -- NFL games have real,
-                               # documented higher variance per score than college; the floor
-                               # is a proxy for this, not a precisely calibrated number.
+# Nov 18 (research/game_spread.py): NFL finals land 12.1 points from the spread (SD) = 8.6 x sqrt(2) per team; the
+# old 7.5 floor gave 10.6, so the win chances were too sure.
+_NFL_GAME_DEFAULT_STD = 8.6
 
 DEFAULT_NFL_GAME_SIMS = 5_000  # reduced from 20000: win prob estimate < 0.5% diff, 4x faster
 

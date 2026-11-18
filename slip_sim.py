@@ -201,12 +201,35 @@ def _team_kind_rho(a: Dict, b: Dict) -> float:
     return (RHO_TOTAL_PLAYER if same in (True, None) else RHO_TOTAL_PLAYER * 0.25) * sa * sb
 
 
-# Nov 14: MEASURED, not assumed (research/loop_audit.py, 28 days of graded reads with lines; latent correlation of two
-# props both going Over): (same player, two markets; teammates; opponents). NBA teammates slightly compete for the
-# same shots (-0.05); in hockey a team's good night lifts everyone (+0.19 teammates, +0.15 even across the ice). The
-# sliders on Slip Lab default to these for the sport on screen.
-MEASURED_RHO = {"NBA": (0.28, -0.05, 0.00), "NFL": (0.31, 0.08, 0.06), "NHL": (0.37, 0.19, 0.15)}
+# Nov 14: MEASURED, not assumed (research/loop_audit.py); re-measured Nov 18 on every graded read (research/sim_audit.py,
+# rho_nested.py; NBA 8,600 same-player / 27,600 teammate / 31,600 opponent pairs). Latent correlation of two props both
+# going Over: (same player, unrelated markets; teammates; opponents). NBA teammates slightly compete for the same shots;
+# in hockey a team's good night lifts everyone (+0.20 teammates, +0.16 across the ice).
+MEASURED_RHO = {"NBA": (0.27, -0.03, 0.00), "NFL": (0.31, 0.085, 0.06), "NHL": (0.08, 0.20, 0.16),
+                "NCAAF": (0.30, -0.05, 0.035)}
 DEFAULT_RHO = (0.30, 0.08)
+
+# Nov 18: one number for "same player" was badly wrong for the pairs people actually stack (research/rho_nested.py):
+# Points & PRA move together at 0.89 and NHL Goals & Points at 0.93, while NBA Rebounds & Threes are 0.08 and NHL Goals &
+# Assists 0.02. Measured per pair (300+ pairs each); a pair not here uses the box-score overlap rule below.
+PAIR_RHO = {
+    "NBA": {("PRA", "Points"): 0.89, ("PR", "Points"): 0.94, ("PA", "Points"): 0.96, ("PR", "PRA"): 0.98,
+            ("PA", "PRA"): 0.97, ("PRA", "RA"): 0.66, ("PRA", "Rebounds"): 0.53, ("Assists", "PRA"): 0.46,
+            ("PR", "Rebounds"): 0.52, ("Assists", "PA"): 0.50, ("RA", "Rebounds"): 0.82, ("Assists", "RA"): 0.74,
+            ("PA", "PR"): 0.94, ("PA", "RA"): 0.51, ("PR", "RA"): 0.55,
+            ("Points", "Threes Made"): 0.72, ("PRA", "Threes Made"): 0.60, ("PR", "Threes Made"): 0.67,
+            ("PA", "Threes Made"): 0.71, ("RA", "Threes Made"): 0.16, ("Rebounds", "Threes Made"): 0.08,
+            ("Assists", "Threes Made"): 0.11, ("Points", "Rebounds"): 0.19, ("Assists", "Points"): 0.18,
+            ("Assists", "Rebounds"): 0.27, ("Points", "RA"): 0.28, ("PA", "Rebounds"): 0.29, ("Assists", "PR"): 0.26},
+    "NHL": {("Goals", "Points"): 0.93, ("Assists", "Points"): 0.96, ("Assists", "Goals"): 0.02,
+            ("Goals", "Shots on Goal"): 0.46, ("Points", "Shots on Goal"): 0.23, ("Assists", "Shots on Goal"): 0.01,
+            ("Blocked Shots", "Goals"): -0.06},
+    "NFL": {("Receiving Yards", "Receptions"): 0.84, ("Anytime TD", "Receiving Yards"): 0.33,
+            ("Anytime TD", "Receptions"): 0.19, ("Solo Tackles", "Tackles + Assists"): 0.67},
+    "NCAAF": {("Receiving Yards", "Receptions"): 0.74},
+}
+SAME_MARKET_RHO = 0.90       # one player, one market, two lines
+OVERLAP_BASE, OVERLAP_SHARED = 0.25, 0.65
 
 
 def measured_rho(sport: Optional[str]) -> Tuple[float, float]:
@@ -215,17 +238,47 @@ def measured_rho(sport: Optional[str]) -> Tuple[float, float]:
     return (m[0], round((m[1] + m[2]) / 2, 2)) if m else DEFAULT_RHO
 
 
-def _pair_rho(a: Dict, b: Dict, rho_player: Optional[float], rho_game: Optional[float]) -> float:
-    same_player = bool(a.get("player")) and a.get("player") == b.get("player")
-    m = MEASURED_RHO.get(str(a.get("sport") or b.get("sport") or ""))
-    if same_player:
-        return rho_player if rho_player is not None else (m[0] if m else DEFAULT_RHO[0])
-    if rho_game is not None:
-        return rho_game
+def _market_name(m) -> str:
+    try:
+        import model_view as MV
+        return MV.market_of(m) or str(m or "")
+    except Exception:                                           # noqa: BLE001
+        return str(m or "")
+
+
+def same_player_rho(sport: Optional[str], market_a, market_b) -> float:
+    """Over/Over correlation of two markets on one player: measured per pair, else by the box-score stats they share
+    (0.25 for unrelated stats, rising to 0.9 for the same market)."""
+    a, b = _market_name(market_a), _market_name(market_b)
+    if a and a == b:
+        return SAME_MARKET_RHO
+    v = (PAIR_RHO.get(sport or "") or {}).get(tuple(sorted((a, b))))
+    if v is not None:
+        return v
+    try:
+        import props_engine as PE
+        sa, sb = set(PE.market_stats(a)), set(PE.market_stats(b))
+    except Exception:                                           # noqa: BLE001
+        sa, sb = set(), set()
+    overlap = len(sa & sb) / math.sqrt(len(sa) * len(sb)) if sa and sb else 0.0
+    return min(0.95, OVERLAP_BASE + OVERLAP_SHARED * overlap)
+
+
+def same_game_rho(sport: Optional[str], same_team: Optional[bool]) -> float:
+    m = MEASURED_RHO.get(sport or "")
     if not m:
         return DEFAULT_RHO[1]
-    same = _same_team(a, b)
-    return m[1] if same else (m[2] if same is False else (m[1] + m[2]) / 2)
+    return m[1] if same_team else (m[2] if same_team is False else (m[1] + m[2]) / 2)
+
+
+def _pair_rho(a: Dict, b: Dict, rho_player: Optional[float], rho_game: Optional[float]) -> float:
+    """None for either setting = the measured value (per market pair for one player)."""
+    sport = str(a.get("sport") or b.get("sport") or "")
+    if bool(a.get("player")) and a.get("player") == b.get("player"):
+        return rho_player if rho_player is not None else same_player_rho(sport, a.get("market"), b.get("market"))
+    if rho_game is not None:
+        return rho_game
+    return same_game_rho(sport, _same_team(a, b))
 
 
 def correlation_matrix(legs: List[Dict], rho_player: Optional[float] = None, rho_game: Optional[float] = None) -> np.ndarray:

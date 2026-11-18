@@ -617,7 +617,7 @@ with sugg_box:
             sug = cached["out"]
         else:
             with st.spinner("Ranking legs and building tickets..."):
-                sug = SS.suggest_tickets(sug_input, book, sizes=sug_sizes or [2, 3], max_per_game=eff_per_game,
+                sug = SS.suggest_tickets([dict(l, sport=l.get("sport") or SPORT_KEY) for l in sug_input], book, sizes=sug_sizes or [2, 3], max_per_game=eff_per_game,
                                          min_leg_p=sug_minp / 100.0, n_singles=sug_n, bankroll=sug_bank)
             st.session_state["slip_lab_sugg"] = {"sig": sug_sig, "out": sug}
         st.session_state["slip_lab_ticket_store"] = {f"t{i}": t for i, t in enumerate(sug["tickets"])}
@@ -931,12 +931,18 @@ with st.expander("Test settings", expanded=False):
     s1, s2, s3 = st.columns(3)
     with s1:
         _rp, _rg = SIM.measured_rho(SPORT_KEY) if hasattr(SIM, "measured_rho") else (0.30, 0.08)
-        rho_player = st.slider("Same-player correlation", 0.0, 0.7, float(_rp), 0.01, key=f"slip_lab_rho_p_{SPORT_KEY}",
-                               help="How strongly two legs on the same player move together (e.g. points and "
-                                    "3-pointers made). Sign is handled automatically for Over/Under mixes.")
-        rho_game = st.slider("Same-game correlation", -0.1, 0.3, float(_rg), 0.01, key=f"slip_lab_rho_g_{SPORT_KEY}",
-                             help="Shared game environment: pace, blowouts, weather. Defaults to what's been measured "
-                                  "for this sport (Nov 14: NBA ~0, NFL 0.07, NHL 0.17).")
+        _own = st.checkbox("Set correlation myself", value=False, key=f"slip_lab_rho_own_{SPORT_KEY}",
+                           help="Off = the measured values: per market pair for two legs on one player (points & PRA "
+                                "move together at 0.89, rebounds & threes at 0.08) and per sport for teammates and "
+                                "opponents. Measured on every graded read (Nov 18).")
+        rho_player = rho_game = None
+        if _own:
+            rho_player = st.slider("Same-player correlation", 0.0, 0.95, float(_rp), 0.01,
+                                   key=f"slip_lab_rho_p_{SPORT_KEY}",
+                                   help="How strongly two legs on the same player move together. Sign is handled "
+                                        "automatically for Over/Under mixes.")
+            rho_game = st.slider("Same-game correlation", -0.1, 0.3, float(_rg), 0.01, key=f"slip_lab_rho_g_{SPORT_KEY}",
+                                 help="Shared game environment: pace, blowouts, weather.")
     with s2:
         evidence = st.slider("Evidence weight", 0.5, 2.0, 1.0, 0.1, key="slip_lab_evidence",
                              help="1.0 = trust the sample size behind each leg as-is. Lower it to say the model "
@@ -954,7 +960,7 @@ sig = hashlib.md5(json.dumps({
 if st.button("🧪 Run pressure test", type="primary", key="slip_lab_run"):
     with st.spinner("Simulating..."):
         res = SL.run_pressure_test(
-            legs, mode, payout, stake=stake, bankroll=bankroll, stakes=stakes if mode == "singles" else None,
+            [dict(l, sport=l.get("sport") or SPORT_KEY) for l in legs], mode, payout, stake=stake, bankroll=bankroll, stakes=stakes if mode == "singles" else None,
             tables=tables_for_drop or None, decimal_override=decimal_override, rho_player=rho_player,
             rho_game=rho_game, evidence_mult=evidence, n_sims=int(n_sims), n_slips=int(n_slips))
     st.session_state["slip_lab_result"] = {"sig": sig, "res": res, "payout_mode": payout["mode"], "k": len(legs)}
@@ -1130,8 +1136,11 @@ if stored and stored["sig"] == sig:
                    f"{rp['n_slips']} slips in a row, each path drawing its own \"true\" probabilities so "
                    "model uncertainty compounds the way it really does. Not a staking recommendation.")
 
-    st.caption(f"Settings used: same-player ρ {res['settings']['rho_player']:.2f}, same-game ρ "
-               f"{res['settings']['rho_game']:.2f}, evidence weight {res['settings']['evidence_mult']:.1f}, "
+    _rs = res["settings"]
+    _rtxt = ("measured correlations (per market pair, per sport)" if _rs["rho_player"] is None and _rs["rho_game"] is None
+             else f"same-player ρ {'measured' if _rs['rho_player'] is None else format(_rs['rho_player'], '.2f')}, "
+                  f"same-game ρ {'measured' if _rs['rho_game'] is None else format(_rs['rho_game'], '.2f')}")
+    st.caption(f"Settings used: {_rtxt}, evidence weight {res['settings']['evidence_mult']:.1f}, "
                f"{res['settings']['n_sims']:,} sims. Pressure-testing checks how fragile the model's edge is; "
                "it can't tell you the model is right. This is analysis, not betting advice.")
 
