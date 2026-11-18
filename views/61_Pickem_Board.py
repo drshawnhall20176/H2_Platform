@@ -88,8 +88,18 @@ with st.spinner("Reading the apps' lines…"):
         st.stop()
 legs = PK.legs(reads or {}, offers or [], app, SPORT_KEY)
 if not legs:
-    st.info(f"{cfg['name']} hasn't posted {_active.label} lines the model has read yet today. App lines usually go "
-            "up the morning of the games — or pick another sport above.")
+    # Nov 18 (owner: "not sure why this says DK hasn't posted when I see values on their site"): say which it is --
+    # the odds feed isn't carrying this app's lines for this sport, or it is but none match a player the model read.
+    _in_feed = {a: sum(1 for o in offers or [] if a in (o.get("pickem") or {})) for a in PK.APPS}
+    if not _in_feed.get(app):
+        _others = ", ".join(f"{PK.APPS[a]['name']} ({k})" for a, k in _in_feed.items() if k and a != app)
+        st.info(f"Our odds feed isn't carrying any {cfg['name']} {_active.label} lines right now — that's the feed, not "
+                f"the app (the app may well have them up). "
+                + (f"The feed does have: {_others} — pick one of those above." if _others else
+                   "No pick'em app lines for this sport are in the feed yet; they usually arrive the morning of the games."))
+    else:
+        st.info(f"The feed has {_in_feed[app]} {cfg['name']} {_active.label} lines, but none for players the model has "
+                "read yet (it reads the games the sportsbooks post props for). Try again closer to tip-off.")
     st.stop()
 legs = C.date_slot_select(legs, key=f"pk_slot_{SPORT_KEY}", when=lambda x: x.get("kickoff"))
 
