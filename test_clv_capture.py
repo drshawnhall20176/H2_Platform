@@ -129,3 +129,30 @@ def test_pitcher_earned_runs_bets_can_be_matched():
         except Exception as e:  # noqa: BLE001
             print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
     print(f"\n{passed}/{len(tests)} tests passed")
+
+
+def test_nov18_short_names_alternates_and_game_lines():
+    """research/close_gap.py: 72 of 424 November bets had a closing price -- short market names, alt-ladder long shots
+    and game lines never matched."""
+    import sports
+    mm = sports.get("NBA").market_map
+    assert C.odds_key("PRA", mm) == "player_points_rebounds_assists" and C.odds_key("RA", mm) == "player_rebounds_assists"
+    offers = [{"market": "player_assists_alternate", "player": "Karl-Anthony Towns", "point": 5.5,
+               "over": {"draftkings": 510}, "under": {}}]
+    bet = {"market": "Assists", "player": "Karl-Anthony Towns", "side": "Over", "line": 5.5, "book": "draftkings"}
+    assert C.bet_close_price(bet, offers, market_map=mm) == 510
+    ev = {"home_team": "Florida Gators", "away_team": "Notre Dame Fighting Irish", "bookmakers": [
+        {"key": "draftkings", "markets": [
+            {"key": "spreads", "outcomes": [{"name": "Florida Gators", "point": -9.5, "price": -112},
+                                            {"name": "Notre Dame Fighting Irish", "point": 9.5, "price": -108}]},
+            {"key": "totals", "outcomes": [{"name": "Over", "point": 151.5, "price": -105},
+                                           {"name": "Under", "point": 151.5, "price": -115}]}]}]}
+    g = C.parse_game_offers(ev)
+    sp = {"market": "Spread", "player": "Notre Dame", "side": "Notre Dame", "line": 9.5, "book": "draftkings",
+          "game": "Notre Dame @ Florida"}
+    tot = {"market": "Total", "player": "Game total", "side": "Under", "line": 151.5, "book": "draftkings",
+           "game": "Notre Dame @ Florida"}
+    assert C.game_close_price(sp, g) == -108 and C.game_close_price(tot, g) == -115
+    assert C.game_close_price(dict(sp, line=10.5), g) is None
+    rep = C.capture_updates([dict(sp, id=1), dict(bet, id=2)], offers, market_map=mm, game_offers=g)
+    assert rep["updates"] == {1: -108, 2: 510}
