@@ -58,12 +58,13 @@ APPS = {
                    "note": "ParlayPlay All-In payouts (third-party summary, Apr 2026); each pick also carries its own "
                            "multiplier, so heavy-priced picks pay less -- check the entry screen.",
                    "source": "https://bettorsinsider.com/dfs/2026/04/29/prizepicks-vs-parlayplay-vs-dabble-a-complete-dfs-pickem-comparison-for-2026/"},
-    "dabble_us_dfs": {"name": "Dabble", "priced": True,
-                      "power": {2: 3.0, 3: 6.0, 4: 10.0, 5: 20.0, 6: 37.5},
-                      "flex": None,
-                      "note": "Dabble publishes no fixed table; reviewers call its standard payouts comparable to "
-                              "PrizePicks', which is what's assumed here -- check the entry screen.",
-                      "source": "https://bettorsinsider.com/dfs/2026/04/29/prizepicks-vs-parlayplay-vs-dabble-a-complete-dfs-pickem-comparison-for-2026/"},
+    # Dabble publishes no payout table (reviews disagree: "comparable to PrizePicks" vs "5 picks pay ~10x"), and on
+    # Nov 18 its lines ran softer than the books' across the board -- what an app paying less would do. So its lines
+    # are read against their own prices only, and no entry is built until the payouts can be pinned down.
+    "dabble_us_dfs": {"name": "Dabble", "priced": True, "power": None, "flex": None,
+                      "note": "Dabble doesn't publish a fixed payout table, so no entry is built here; each pick is "
+                              "read against its own posted price.",
+                      "source": "https://www.rotowire.com/news/dabble-vs-parlayplay-which-pickem-app-should-you-use-135505"},
 }
 
 

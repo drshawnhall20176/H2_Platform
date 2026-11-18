@@ -89,7 +89,8 @@ def test_priced_apps_judge_each_pick_against_its_own_price(monkeypatch):
     a, c = lg["A B"], lg["C D"]
     assert a["basis"] == "books" and a["side"] == "More" and a["needed"] > 0.54 and a["chance"] > a["needed"]
     assert c["side"] == "Less" and c["needed"] < 0.3              # +250 Less beats its price; -400 More does not
-    floor = PK.breakeven(PK.APPS["dabble_us_dfs"]["power"][2], 2)
+    assert PK.APPS["dabble_us_dfs"]["power"] is None              # no published table: no entry built
+    floor = PK.breakeven(PK.APPS["parlayplay"]["power"][2], 2)
     e = PK.best_entry(list(lg.values()), 2, floor)
     assert all(x["chance"] >= max(floor, x["needed"]) for x in e)
     assert PK.best_entry([dict(a, needed=0.99)], 1, 0.5) == []       # heavy-priced: its own price is the bar

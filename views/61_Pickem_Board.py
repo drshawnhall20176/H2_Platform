@@ -54,24 +54,34 @@ c1, c2, c3 = st.columns([1.2, 1, 1])
 app = c1.radio("App", list(PK.APPS), format_func=lambda k: PK.APPS[k]["name"], horizontal=True, key="pk_app")
 cfg = PK.APPS[app]
 priced = PK.is_priced(app)
-n = c2.select_slider("Picks in the entry", options=sorted(cfg["power"]), value=min(3, max(cfg["power"])), key="pk_n")
-flex = c3.toggle("Flex play", value=False, key="pk_flex", disabled=not (cfg.get("flex") or {}).get(n),
-                 help="PrizePicks only: pays for most picks hitting, at lower multipliers.") \
-    if cfg.get("flex") else False
-mult = cfg["power"][n]
-floor = PK.breakeven(mult, n)
-st.caption(f"**{cfg['name']} {n}-pick {'Flex' if flex else 'Power'}**: "
-           + (f"pays {mult:g}x if every pick hits — each pick needs **{floor:.1%}** to break even"
-              + (", and more if the app prices it heavy (the **Needs** column). " if priced else ". ") if not flex else
-              "pays " + ", ".join(f"{k} of {n}: {v:g}x" for k, v in sorted(cfg['flex'][n].items(), reverse=True)) + ". ")
-           + cfg["note"] + f" [source]({cfg['source']})")
+if cfg.get("power"):
+    n = c2.select_slider("Picks in the entry", options=sorted(cfg["power"]), value=min(3, max(cfg["power"])),
+                         key="pk_n")
+    flex = c3.toggle("Flex play", value=False, key="pk_flex", disabled=not (cfg.get("flex") or {}).get(n),
+                     help="PrizePicks only: pays for most picks hitting, at lower multipliers.") \
+        if cfg.get("flex") else False
+    mult = cfg["power"][n]
+    floor = PK.breakeven(mult, n)
+    st.caption(f"**{cfg['name']} {n}-pick {'Flex' if flex else 'Power'}**: "
+               + (f"pays {mult:g}x if every pick hits — each pick needs **{floor:.1%}** to break even"
+                  + (", and more if the app prices it heavy (the **Needs** column). " if priced else ". ")
+                  if not flex else
+                  "pays " + ", ".join(f"{k} of {n}: {v:g}x" for k, v in sorted(cfg['flex'][n].items(), reverse=True))
+                  + ". ")
+               + cfg["note"] + f" [source]({cfg['source']})")
+else:
+    n, flex, floor = None, False, 0.5          # no payout table: each pick only against its own price
+    st.caption(f"**{cfg['name']}**: " + cfg["note"] + f" [source]({cfg['source']})")
 
 with st.spinner("Reading the apps' lines…"):
     try:
         # the boards' fetch (PrizePicks, Pick6, the sportsbooks) + the Pick'em Board's own (Underdog, Dabble,
         # ParlayPlay, and the Novig / ProphetX exchanges, whose prices sharpen the books-checked chance)
-        offers = BBD.merge_offers(BBD.fetch_generic_offers(SPORT_KEY, date_str, api),
-                                  BBD.fetch_pickem_extra_offers(SPORT_KEY, date_str, api))
+        main = BBD.fetch_generic_offers(SPORT_KEY, date_str, api)
+        # Nov 18: only the games the books already posted props for (college basketball lists 70+ games a night;
+        # asking for every one kept the spinner going and spent credits on games with no lines)
+        _ids = tuple(sorted({o["event_id"] for o in main if o.get("event_id")}))
+        offers = BBD.merge_offers(main, BBD.fetch_pickem_extra_offers(SPORT_KEY, date_str, api, _ids))
         reads = BBD.load_slate_reads(SPORT_KEY, date_str, BBD.O.DEFAULT_BOOK)
     except Exception as e:                                      # noqa: BLE001
         st.error(f"Couldn't load today's lines ({type(e).__name__}).")
@@ -90,11 +100,18 @@ def _bar(x):
 
 _clear = sum(1 for x in checked if x["chance"] >= _bar(x) and not x.get("far"))
 st.markdown(f"**{len(legs)} {cfg['name']} lines read** · {len(checked)} also priced at a sportsbook or exchange · "
-            f"{_clear} clear the {floor:.1%} break-even" + (" and their own price" if priced else ""))
+            + (f"{_clear} clear the {floor:.1%} break-even" + (" and their own price" if priced else "") if n else
+             f"{_clear} beat their own price"))
 
 # ---- the strongest entry
-entry = PK.best_entry(legs, n, floor if not flex else 0.5)
-with st.container(border=True):
+def _entry_box():
+    if not n:
+        st.markdown("#### 🎟️ No entry built")
+        st.write(f"{cfg['name']} doesn't publish what an entry pays, so there's no break-even to build one against. "
+                 "Use the lines below: **vs break-even** is each pick's chance against its own posted price. Its "
+                 "lines ran softer than the sportsbooks' when it was added (Nov 18), which usually means it pays less.")
+        return
+    entry = PK.best_entry(legs, n, floor if not flex else 0.5)
     st.markdown(f"#### 🎟️ Strongest {n}-pick entry")
     if len(entry) < n:
         st.write(f"Only {len(entry)} books-checked line{'s' if len(entry) != 1 else ''} clear the break-even today "
@@ -108,8 +125,12 @@ with st.container(border=True):
         if res:
             st.markdown(f"All {n} hit: **{res['all']:.1%}** · expected return **{res['ev']:+.0%}** per entry "
                         f"({'+' if res['ev'] > 0 else ''}{res['ev'] * 10:.2f} on a $10 entry)")
-    st.caption("Built only from lines the sportsbooks also price, each from a different game. A pick's chance is the "
-               "books' no-vig chance moved to the app's line, with the model's measured say on top.")
+    st.caption("Built only from lines the sportsbooks or exchanges also price, each from a different game. A pick's "
+               "chance is their no-vig chance moved to the app's line, with the model's measured say on top.")
+
+
+with st.container(border=True):
+    _entry_box()
 
 # ---- every line
 def _fmt(x):
