@@ -446,8 +446,9 @@ def _lineup_legend_html() -> str:
 # with an ellipsis at the old, closer-to-even ratio. Location loses relative width in the trade,
 # but venue names were already truncating at the old width too, so it's a real net improvement
 # for the column that actually needs the room.
-_GRID_COLS_WITH_ROSTER = "minmax(170px,3.2fr) 78px 92px minmax(70px,1fr)"
-_GRID_COLS_NO_ROSTER = "minmax(170px,3.2fr) 78px minmax(70px,1fr)"
+_GRID_COLS_WITH_ROSTER = "minmax(160px,2.4fr) 78px 92px minmax(90px,1.4fr)"
+_GRID_COLS_NO_ROSTER = "minmax(160px,2.4fr) 78px minmax(90px,1.4fr)"
+_TIME_COL, _TIME_COL_DAY = "108px", "138px"
 
 
 def _grid_row(columns: str, cells: List[str], extra_style: str = "") -> str:
@@ -609,6 +610,9 @@ def todays_schedule_board(result: Optional[dict], icon: str, label: str,
     show_roster = any(g.get("home_lineup_confirmed") is not None
                       or g.get("away_lineup_confirmed") is not None for g in all_games)
     columns = _GRID_COLS_WITH_ROSTER if show_roster else _GRID_COLS_NO_ROSTER
+    # Nov 18 (owner: "the time and location fields run together"): the time chip ("12:00 PM ET", or "Sat 12:00 PM ET"
+    # on a multi-day week) was wider than its 78px column and spilled into Location. The column fits the chip now.
+    columns = columns.replace(" 78px ", f" {_TIME_COL_DAY if with_day else _TIME_COL} ", 1)
 
     if show_roster:
         st.markdown(_lineup_legend_html(), unsafe_allow_html=True)
