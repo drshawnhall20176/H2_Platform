@@ -137,8 +137,8 @@ C.kpi_row([
 
 # Owner-only data-health pointer — the Data Health page itself is gated the same way, so this
 # stays hidden for a public/Discord audience rather than linking to a page they can't open.
-if st.secrets.get("AUDIENCE", "owner") == "owner":
-    import data_freshness as DF
+if st.secrets.get("AUDIENCE", "owner") == "owner" and st.session_state.get("office_unlocked"):
+    import data_freshness as DF   # Nov 18: Data Health lives in the Owner Office now (office.py)
     _dh_results = DF.check_all_sources()
     _dh_overall = DF.overall_status(_dh_results)
     _DH_ICON = {"green": "🟢", "yellow": "🟡", "red": "🔴"}

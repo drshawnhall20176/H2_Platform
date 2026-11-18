@@ -693,7 +693,7 @@ def require_trading_access(page_name: str = "This page") -> bool:
     `if not require_trading_access(...): st.stop()` pattern proceeds immediately with no extra
     rerun/flicker, matching every other require_* gate's own return-True-this-run contract."""
     import streamlit as st
-    if st.session_state.get("trading_unlocked"):
+    if st.session_state.get("trading_unlocked") or st.session_state.get("office_unlocked"):
         return True
     st.warning(f"🔒 {page_name} needs a separate password — this is real trading history, kept "
               f"apart from the rest of the owner build.")

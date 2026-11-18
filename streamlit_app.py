@@ -475,8 +475,20 @@ def run():
                       + [st.Page(str(here / "Home.py"), title="Sport desk" if not commercial else "Home", icon="🏠",
                                  url_path="home")]}
     lab = active_sport in sports.LAB_SPORTS
+    # Nov 18 (owner): the Office pages leave every sport's sidebar; owner build only, behind their own password
+    import office as OF
+    office_on = audience == "owner" and not commercial
+    office: dict = {}
+    if office_on:
+        sections["🏠 START HERE"].append(st.Page(str(here / "Owner_Office.py"), title="Owner Office", icon="🔐",
+                                                url_path="owner_office"))
     for f in view_files:
         key = lead(f.name)
+        if OF.is_office_page(key) and not commercial:
+            if office_on and OF.unlocked(st.session_state):
+                title, icon, slug = meta.get(key, (f.stem, "📄", f"page_{key}"))
+                office.setdefault(OF.PAGES[key], []).append(st.Page(str(f), title=title, icon=icon, url_path=slug))
+            continue
         if lab and key not in (sports.LAB_PAGES[active_sport],) + sports.LAB_COMMON_PAGES + (("56", "57") if commercial else ()):
             continue  # Tennis / Intl Hoops: their own lab page, the Bet Log and the Progression Plan only
         required_sports = sport_only_leads.get(key)
@@ -503,6 +515,11 @@ def run():
         sections.setdefault(section, []).append(st.Page(str(f), title=NL.label(title) if commercial else title,
                                                         icon=icon, url_path=slug))
 
+    # Nov 18 (owner): League Schedules right under Today, the Owner Office at the bottom of START HERE
+    _rank = {"today": 0, "league_schedules": 1, "home": 2, "owner_office": 99}
+    if "🏠 START HERE" in sections and not commercial:
+        sections["🏠 START HERE"] = sorted(sections["🏠 START HERE"],
+                                          key=lambda p: _rank.get(getattr(p, "url_path", "") or "today", 50))
     # Bold/colored sidebar section-header styling was attempted here and confirmed (via a real
     # screenshot, pixel-sampled) to be inert against this Streamlit version's actual DOM -- see
     # the "CSS risk" section of the project handoff. Removed rather than left as dead code.
@@ -515,7 +532,28 @@ def run():
     # Nov 17 (owner): on the Today entry page no sport is chosen yet, so the sidebar shows only START HERE and the
     # model's 30-day record -- not "Sport: ..." and the sport's pages, which would contradict the page. The page the
     # browser asked for is resolved first (hidden menu), then the menu is drawn for it.
-    target = st.navigation(sections, position="hidden")
+    if office_on and OF.active(st.session_state):
+        door = [p for p in sections["🏠 START HERE"] if getattr(p, "url_path", None) == "owner_office"]
+        office_nav = {"🔐 OWNER OFFICE": door}
+        for sec in OF.SECTION_ORDER[1:]:
+            if office.get(sec):
+                office_nav[sec] = office[sec]
+        sports.render_sport_selector()
+        if st.sidebar.button("⬅ Back to Today", key="office_back"):
+            OF.leave(st.session_state)
+            st.rerun()
+        st.navigation(office_nav).run()
+        return
+    # the Office's pages stay resolvable while it is unlocked, so leaving from one of them lands cleanly on Today
+    hidden = dict(sections)
+    if office:
+        hidden["🔐 OWNER OFFICE"] = [p for ps in office.values() for p in ps]
+    target = st.navigation(hidden, position="hidden")
+    if st.session_state.get("_goto_page") == "today":
+        st.session_state.pop("_goto_page", None)
+        today = next((p for p in sections["🏠 START HERE"] if getattr(p, "title", None) == "Today"), None)
+        if today is not None and getattr(target, "title", None) != "Today":
+            st.switch_page(today)
     if getattr(target, "title", None) == "Today":                # the default page reports an empty url_path
         _today_sidebar()
         st.navigation({"🏠 START HERE": sections.get("🏠 START HERE", [])}).run()
@@ -528,7 +566,7 @@ def run():
     if goto:
         for pages in sections.values():
             for pg in pages:
-                if getattr(pg, "url_path", None) == goto:
+                if getattr(pg, "url_path", None) == goto or (goto == "today" and getattr(pg, "title", None) == "Today"):
                     st.switch_page(pg)
     nav.run()
 

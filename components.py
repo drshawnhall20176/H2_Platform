@@ -446,8 +446,9 @@ def _lineup_legend_html() -> str:
 # with an ellipsis at the old, closer-to-even ratio. Location loses relative width in the trade,
 # but venue names were already truncating at the old width too, so it's a real net improvement
 # for the column that actually needs the room.
-_GRID_COLS_WITH_ROSTER = "minmax(170px,3.2fr) 78px 92px minmax(70px,1fr)"
-_GRID_COLS_NO_ROSTER = "minmax(170px,3.2fr) 78px minmax(70px,1fr)"
+_GRID_COLS_WITH_ROSTER = "minmax(160px,2.4fr) 78px 92px minmax(90px,1.4fr)"
+_GRID_COLS_NO_ROSTER = "minmax(160px,2.4fr) 78px minmax(90px,1.4fr)"
+_TIME_COL, _TIME_COL_DAY = "108px", "138px"
 
 
 def _grid_row(columns: str, cells: List[str], extra_style: str = "") -> str:
@@ -479,7 +480,7 @@ def _schedule_header_html(columns: str, show_roster: bool) -> str:
     return _grid_row(columns, cells, extra_style="padding:0 10px 6px;border-bottom:1px solid #262b33;margin-bottom:4px;")
 
 
-def _schedule_game_row(g: dict, color: str, columns: str, show_roster: bool) -> str:
+def _schedule_game_row(g: dict, color: str, columns: str, show_roster: bool, with_day: bool = False) -> str:
     """One game's self-contained HTML row, laid out as grid cells matching the shared column
     template (see _GRID_COLS_WITH_ROSTER/_GRID_COLS_NO_ROSTER and _schedule_header_html) so it
     genuinely aligns under the header instead of each row sizing its own content independently.
@@ -496,7 +497,7 @@ def _schedule_game_row(g: dict, color: str, columns: str, show_roster: bool) -> 
     lines get treated as an indented Markdown code block and leak as literal escaped text instead
     of rendering as HTML."""
     if g.get("time_known") and g.get("dt") is not None:
-        time_str = g["dt"].strftime("%-I:%M %p ET")
+        time_str = g["dt"].strftime("%a %-I:%M %p ET" if with_day else "%-I:%M %p ET")
     elif g.get("dt") is not None:
         # A REAL, CONFIRMED FIX, not the original design: NCAAF's own start_time_tbd case still
         # carries a real, parsed dt (the DATE parses fine even when the specific kickoff time
@@ -591,10 +592,27 @@ def todays_schedule_board(result: Optional[dict], icon: str, label: str,
     # Checked ONCE across the whole result, not per conference/game -- a sport either has real
     # lineup data or it doesn't, so the Roster Status column (and its legend) should be all-or-
     # nothing for this render, not flicker in and out box to box.
+    # Nov 18 (owner): every group earliest to latest -- a football week merges several dates, so each list is sorted
+    # again here, and when the games span more than one day the time shows its day ("Fri 7:30 PM ET"): a Friday night
+    # game at the top of a Saturday list otherwise reads as out of order.
+    def _when(g):
+        dt = g.get("dt")
+        return (dt is None and not g.get("date_str"), dt.isoformat() if dt is not None else (g.get("date_str") or ""),
+                g.get("away") or "")
+    for divs in grouped.values():
+        for k in list(divs):
+            divs[k] = sorted(divs[k], key=_when)
+    other = sorted(other, key=_when)
     all_games = [g for divs in grouped.values() for gs in divs.values() for g in gs] + other
+    days = {(g["dt"].date() if g.get("dt") is not None else g.get("date_str")) for g in all_games
+            if g.get("dt") is not None or g.get("date_str")}
+    with_day = len(days) > 1
     show_roster = any(g.get("home_lineup_confirmed") is not None
                       or g.get("away_lineup_confirmed") is not None for g in all_games)
     columns = _GRID_COLS_WITH_ROSTER if show_roster else _GRID_COLS_NO_ROSTER
+    # Nov 18 (owner: "the time and location fields run together"): the time chip ("12:00 PM ET", or "Sat 12:00 PM ET"
+    # on a multi-day week) was wider than its 78px column and spilled into Location. The column fits the chip now.
+    columns = columns.replace(" 78px ", f" {_TIME_COL_DAY if with_day else _TIME_COL} ", 1)
 
     if show_roster:
         st.markdown(_lineup_legend_html(), unsafe_allow_html=True)
@@ -617,13 +635,13 @@ def todays_schedule_board(result: Optional[dict], icon: str, label: str,
                                   f'letter-spacing:0.6px;">{div}</span>'],
                                  extra_style="margin:8px 0 4px;"),
                         unsafe_allow_html=True)
-                    rows = "".join(_schedule_game_row(g, color, columns, show_roster)
+                    rows = "".join(_schedule_game_row(g, color, columns, show_roster, with_day)
                                    for g in divisions[div])
                     st.markdown(rows, unsafe_allow_html=True)
             else:
                 # No division level for this sport (WNBA/NCAAF) -- every game for this
                 # conference lives under the single None key group_games always uses.
-                rows = "".join(_schedule_game_row(g, color, columns, show_roster)
+                rows = "".join(_schedule_game_row(g, color, columns, show_roster, with_day)
                                for g in divisions.get(None, []))
                 st.markdown(rows, unsafe_allow_html=True)
 
@@ -651,7 +669,7 @@ def todays_schedule_board(result: Optional[dict], icon: str, label: str,
             st.caption("Home team not in this platform's own conference/division reference "
                       "table yet (a real gap, not a hidden game) -- still shown below.")
             st.markdown(_schedule_header_html(columns, show_roster), unsafe_allow_html=True)
-            rows = "".join(_schedule_game_row(g, gray, columns, show_roster) for g in other)
+            rows = "".join(_schedule_game_row(g, gray, columns, show_roster, with_day) for g in other)
             st.markdown(rows, unsafe_allow_html=True)
 
 
@@ -801,6 +819,27 @@ def date_slot_select(items, key: str, when=lambda x: x.get("kickoff"), container
     slots = sorted({_S.slot_of(_kick_dt(when(it))) for it in out}, key=lambda x: _S.SLOT_ORDER.get(x, 9))
     spick = cols[1].selectbox("Time slot", ["All slate"] + slots, key=f"{key}_slot")
     return out if spick == "All slate" else [it for it in out if _S.slot_of(_kick_dt(when(it))) == spick]
+
+
+def schedule_slot_filter(result, key: str, picker=None):
+    """Nov 18 (owner): Date / Time slot pickers on a conference schedule board (todays_schedule's shape) -- the boxes
+    then show only the games in the slot picked; a conference with none drops out. `picker` (tests) replaces
+    date_slot_select."""
+    if not result:
+        return result
+    games = [g for divs in result["grouped"].values() for gs in divs.values() for g in gs] + list(result["other"])
+    if not games:
+        return result
+    pick = picker or date_slot_select
+    keep = {id(g) for g in pick(games, key=key, when=lambda g: g.get("dt") or g.get("date_str"))}
+    grouped = {}
+    for conf, divs in result["grouped"].items():
+        kept = {d: [g for g in gs if id(g) in keep] for d, gs in divs.items()}
+        kept = {d: gs for d, gs in kept.items() if gs}
+        if kept:
+            grouped[conf] = kept
+    return {"grouped": grouped, "other": [g for g in result["other"] if id(g) in keep],
+            "has_divisions": result["has_divisions"]}
 
 
 # --------------------------------------------------------------------------- football weather (Nov 8)
