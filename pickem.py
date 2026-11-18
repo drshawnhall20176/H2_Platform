@@ -139,6 +139,39 @@ def books_chance_at(read: Dict, book_line: float, p_book_over: float, app_line: 
     return p_more((lo + hi) / 2, values, dist, float(app_line))
 
 
+# Nov 18 (research/dabble_ladder.py): the exchanges carry resting orders nobody has matched -- ProphetX -25000 on both
+# sides, Novig -456 / +178 -- which would wreck a no-vig average. An exchange price counts only as a two-sided quote
+# inside +-1000 whose two sides add up to no more than EXCHANGE_MAX_HOLD (a tight, traded market).
+EXCHANGE_MAX_HOLD = 1.08
+
+
+def _implied(a: float) -> float:
+    return 100.0 / (a + 100.0) if a >= 100 else -a / (-a + 100.0)
+
+
+def clean_exchanges(o: Dict) -> Dict:
+    """The offer with any exchange quote that isn't a tight two-sided market removed."""
+    import odds_api as O
+    over, under = dict(o.get("over") or {}), dict(o.get("under") or {})
+    changed = False
+    for b in O.EXCHANGE_BOOKS:
+        if b not in over and b not in under:
+            continue
+        a, u = over.get(b), under.get(b)
+        ok = False
+        try:
+            if a is not None and u is not None and max(abs(float(a)), abs(float(u))) <= 1000 \
+                    and abs(float(a)) >= 100 and abs(float(u)) >= 100:
+                ok = _implied(float(a)) + _implied(float(u)) <= EXCHANGE_MAX_HOLD
+        except (TypeError, ValueError):
+            ok = False
+        if not ok:
+            over.pop(b, None)
+            under.pop(b, None)
+            changed = True
+    return {**o, "over": over, "under": under} if changed else o
+
+
 def legs(reads: Dict, offers: Sequence[Dict], app: str, sport: str) -> List[Dict]:
     """Every line `app` posts that the model has read: chance of More at the app's line, the side, and where the
     chance came from ("books" / "model only")."""
@@ -163,7 +196,7 @@ def legs(reads: Dict, offers: Sequence[Dict], app: str, sport: str) -> List[Dict
                               (entry or {}).get("price")))
         if not cands:
             continue
-        priced = [o for o in offs if (o.get("over") or {}) and (o.get("under") or {})]
+        priced = [c for c in (clean_exchanges(o) for o in offs) if (c.get("over") or {}) and (c.get("under") or {})]
         book = PE.shop(priced) if priced else None
         t = PE.trust_for(sport, read.get("market"))
         w = PE.MODEL_WEIGHT * (1.0 if t is None else t)

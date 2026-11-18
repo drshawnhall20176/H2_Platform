@@ -1207,7 +1207,8 @@ def _fetch_markets_one_by_one(event: Dict, api_key: str, markets: List[str], spo
     remaining = None
     for m in markets:
         try:
-            ej, hdr = fetch_event_props(event["id"], api_key, [m], sport=feed_for(event, sport), bookmakers=bookmakers)
+            ej, hdr = fetch_event_props(event["id"], api_key, [m], sport=feed_for(event, sport),
+                                        **({"bookmakers": bookmakers} if bookmakers is not None else {}))
         except OddsAPIError as exc:
             if _is_market_error(exc):
                 refused.add(m)
@@ -1240,7 +1241,8 @@ def fetch_slate_props(date_str: str, api_key: str, markets: List[str], sport: st
     rejected_markets: set = set()
     for e in todays:
         try:
-            ej, hdr = fetch_event_props(e["id"], api_key, markets, sport=feed_for(e, sport), bookmakers=bookmakers)
+            ej, hdr = fetch_event_props(e["id"], api_key, markets, sport=feed_for(e, sport),
+                                        **({"bookmakers": bookmakers} if bookmakers is not None else {}))
         except OddsAPIError as exc:
             if _is_market_error(exc) and len(markets) > 1:
                 # One market key the provider does not offer for this league/feed must not blank every other market's
