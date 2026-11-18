@@ -88,7 +88,7 @@ def _bar(x):
     return max(floor, x["needed"]) if x.get("needed") is not None else floor
 
 
-_clear = sum(1 for x in checked if x["chance"] >= _bar(x))
+_clear = sum(1 for x in checked if x["chance"] >= _bar(x) and not x.get("far"))
 st.markdown(f"**{len(legs)} {cfg['name']} lines read** · {len(checked)} also priced at a sportsbook or exchange · "
             f"{_clear} clear the {floor:.1%} break-even" + (" and their own price" if priced else ""))
 
@@ -121,7 +121,8 @@ def _fmt(x):
             **({"Needs": _bar(x)} if priced else {}),
             "vs break-even": x["chance"] - _bar(x),
             "Books' line": x.get("book_line"),
-            "Model proj": round(x["projection"], 1), "Checked by": "📚 books" if x["basis"] == "books" else "model only"}
+            "Model proj": round(x["projection"], 1),
+            "Checked by": ("⚠️ far from books" if x.get("far") else "📚 books") if x["basis"] == "books" else "model only"}
 
 
 only_checked = st.toggle("Only lines the sportsbooks also price", value=True, key="pk_only_books")
@@ -152,4 +153,7 @@ with st.expander("How these chances are made, and how far to trust a 'model only
         "college players the sportsbooks skip).\n"
         "- **ParlayPlay and Dabble** also price each pick; a pick the app prices heavy pays less, so there a pick must "
         "clear the larger of the break-even and its own price's chance, shown in **Needs**.\n"
+        "- **⚠️ far from books**: the app's line sits well off the books' (more than a point, or 12% of the line). "
+        "That's usually a discounted line that pays less (PrizePicks goblins), a stale number, or a different setup "
+        "— check it on the app. These never go in an entry, however good the chance looks.\n"
         "- **One player per game** in every entry; the apps also pay less for same-game lineups.")

@@ -119,3 +119,16 @@ def test_exchange_quotes_must_be_a_real_market():
     tight = {"over": {"novig": -104}, "under": {"novig": -102}}
     assert PK.clean_exchanges(tight) is tight
     assert PK.clean_exchanges({"over": {"prophetx": -120}, "under": {}})["over"] == {}     # one side only
+
+
+def test_lines_far_from_the_books_stay_out_of_entries(monkeypatch):
+    monkeypatch.setattr(PE, "trust_for", lambda s, m=None: 0.5)
+    assert PK.far_from_books(4.5, 6.5) and not PK.far_from_books(5.5, 6.5) and not PK.far_from_books(27.5, 30.5)
+    assert PK.far_from_books(14.5, 19.5) and not PK.far_from_books(3.5, None)
+    reads = {(1, "player_points"): _read()}
+    offers = [{"market": "player_points", "player": "A B", "point": 15.5, "over": {}, "under": {},
+               "pickem": {"prizepicks": {"over": {"price": None}}}},
+              {"market": "player_points", "player": "A B", "point": 19.5, "over": {"draftkings": -110},
+               "under": {"draftkings": -110}}]
+    (a,) = PK.legs(reads, offers, "prizepicks", "NBA")
+    assert a["far"] and a["chance"] > 0.7 and PK.best_entry([a], 1, 0.5) == []
