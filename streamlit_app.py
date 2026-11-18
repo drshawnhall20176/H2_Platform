@@ -475,8 +475,20 @@ def run():
                       + [st.Page(str(here / "Home.py"), title="Sport desk" if not commercial else "Home", icon="🏠",
                                  url_path="home")]}
     lab = active_sport in sports.LAB_SPORTS
+    # Nov 18 (owner): the Office pages leave every sport's sidebar; owner build only, behind their own password
+    import office as OF
+    office_on = audience == "owner" and not commercial
+    office: dict = {}
+    if office_on:
+        sections["🏠 START HERE"].append(st.Page(str(here / "Owner_Office.py"), title="Owner Office", icon="🔐",
+                                                url_path="owner_office"))
     for f in view_files:
         key = lead(f.name)
+        if OF.is_office_page(key) and not commercial:
+            if office_on and OF.unlocked(st.session_state):
+                title, icon, slug = meta.get(key, (f.stem, "📄", f"page_{key}"))
+                office.setdefault(OF.PAGES[key], []).append(st.Page(str(f), title=title, icon=icon, url_path=slug))
+            continue
         if lab and key not in (sports.LAB_PAGES[active_sport],) + sports.LAB_COMMON_PAGES + (("56", "57") if commercial else ()):
             continue  # Tennis / Intl Hoops: their own lab page, the Bet Log and the Progression Plan only
         required_sports = sport_only_leads.get(key)
@@ -515,6 +527,18 @@ def run():
     # Nov 17 (owner): on the Today entry page no sport is chosen yet, so the sidebar shows only START HERE and the
     # model's 30-day record -- not "Sport: ..." and the sport's pages, which would contradict the page. The page the
     # browser asked for is resolved first (hidden menu), then the menu is drawn for it.
+    if office_on and OF.active(st.session_state):
+        door = [p for p in sections["🏠 START HERE"] if getattr(p, "url_path", None) == "owner_office"]
+        office_nav = {"🔐 OWNER OFFICE": door}
+        for sec in OF.SECTION_ORDER[1:]:
+            if office.get(sec):
+                office_nav[sec] = office[sec]
+        sports.render_sport_selector()
+        if st.sidebar.button("⬅ Back to the sport desks", key="office_back"):
+            st.session_state[OF.MODE] = False
+            st.rerun()
+        st.navigation(office_nav).run()
+        return
     target = st.navigation(sections, position="hidden")
     if getattr(target, "title", None) == "Today":                # the default page reports an empty url_path
         _today_sidebar()
