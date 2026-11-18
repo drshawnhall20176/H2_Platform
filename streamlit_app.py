@@ -411,6 +411,7 @@ def run():
         "50": ("Game Script", "🎬", "game_script"),
         "51": ("My Coach", "🧑‍🏫", "my_coach"),
         "57": ("Today", "🏠", "today"),                  # the customer's front page (commercial layout only, Nov 16)
+        "61": ("Pick'em Board", "🎲", "pickem_board"),  # PrizePicks / Underdog / Pick6 lines, books-checked (Nov 18)
         "59": ("Promotions", "🎁", "promotions"),       # the books' recurring promotions + the tools that play them (Nov 17)
         "58": ("Players", "👤", "players"),              # every player tool behind one switcher (commercial only, Nov 16)
         "56": ("Model Record", "📊", "model_record"),    # the model's graded record, no Bet Log: the public proof page (Nov 16)
@@ -441,7 +442,7 @@ def run():
     SECTION_OF = {}
     for k in ("0", "28", "57", "59"):
         SECTION_OF[k] = "🏠 START HERE"
-    for k in ("1", "2", "3", "4", "37", "23", "24", "39", "50", "53"):
+    for k in ("1", "2", "3", "4", "61", "37", "23", "24", "39", "50", "53"):
         SECTION_OF[k] = "🎯 RECOMMENDATIONS"
     for k in ("5", "6", "54"):
         SECTION_OF[k] = "🛰️ LIVE SIGNALS"
