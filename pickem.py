@@ -144,6 +144,19 @@ def books_chance_at(read: Dict, book_line: float, p_book_over: float, app_line: 
 # inside +-1000 whose two sides add up to no more than EXCHANGE_MAX_HOLD (a tight, traded market).
 EXCHANGE_MAX_HOLD = 1.08
 
+# Nov 18 (research/pickem_apps_live.py): Dabble hung lines 2-5 below every book (Quickley 4.5 assists, books 6.5,
+# Novig -456 on the over) -- a "41% for a 3-pick at 6x" entry nobody should believe. A line that far from the books
+# is a discounted alt (PrizePicks goblins pay less), stale, or a different setup; it's listed and flagged, never put
+# in an entry.
+FAR_GAP = 1.0             # points, or FAR_SHARE of the books' line, whichever is larger
+FAR_SHARE = 0.12
+
+
+def far_from_books(app_line: float, book_line: Optional[float]) -> bool:
+    if book_line is None:
+        return False
+    return abs(float(app_line) - float(book_line)) > max(FAR_GAP, FAR_SHARE * abs(float(book_line)))
+
 
 def _implied(a: float) -> float:
     return 100.0 / (a + 100.0) if a >= 100 else -a / (-a + 100.0)
@@ -221,6 +234,7 @@ def legs(reads: Dict, offers: Sequence[Dict], app: str, sport: str) -> List[Dict
                         "model_over": pm, "book_line": book["line"] if book else None,
                         "book_over": book.get("p_market") if book else None, "books_over_at_app": pb,
                         "multiplier": mult, "price": price if priced_app else None, "needed": need,
+                        "far": far_from_books(line, book["line"] if book else None),
                         "_score": score}
         if best:
             best.pop("_score", None)
@@ -235,7 +249,7 @@ def best_entry(legs_: Sequence[Dict], n: int, floor: float) -> List[Dict]:
     out, games = [], set()
     for x in sorted(legs_, key=lambda x: -(x["chance"] - (x.get("needed") or 0.0))):
         bar = max(floor, x["needed"]) if x.get("needed") is not None else floor   # table AND its own price
-        if x["basis"] != "books" or x["chance"] < bar or x.get("game") in games:
+        if x["basis"] != "books" or x.get("far") or x["chance"] < bar or x.get("game") in games:
             continue
         out.append(x)
         games.add(x.get("game"))
