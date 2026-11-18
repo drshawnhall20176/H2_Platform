@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Sequence
 
 SKIP_MARKETS = ("Anytime TD", "1st TD", "Last TD", "Goals")
 MIN_N = 150
@@ -328,7 +328,8 @@ def auto_notes(decisions: List[Dict]) -> List[str]:
             if "trust" in str(d["side"]):
                 way = ("toward the books' price (the model ran overconfident where it disagreed with them)"
                        if d["new"] < d["active"] else "back toward the model's own number")
-                what = "TD-scorer trust in the model" if d.get("kind") == "td" else "prop trust in the model"
+                what = ("TD-scorer trust in the model" if d.get("kind") == "td" else
+                        f"{d.get('market')} trust in the model" if d.get("kind") == "market" else "prop trust in the model")
                 notes.append(f"🤖 Learned overnight: {d['sport']} {what} {d['active']:.2f} → {d['new']:.2f}, pulled {way}; "
                              f"{d['why']}. Undo on Postgame Review.")
                 continue
@@ -412,15 +413,49 @@ TRUST_MIN_LL_GAIN = 0.0005
 TD_MARKETS = ("Anytime TD", "1st TD", "Last TD")
 
 
+# Nov 18 (research/widen_test.py): how much the model adds beyond the books differs by market -- NBA Assists earned a
+# model share of ~0.3 on held-out days, Points ~0.05. A market with enough graded reads gets its own trust, but only
+# when the fit holds up on held-out days (MARKET_SPLIT_PASS of them, either direction -- many markets are tested each
+# morning, so a lucky one must not slip through); every other market keeps the sport's.
+TRUST_MARKET_MIN_ROWS = 400
+MARKET_SPLIT_PASS = 2 / 3
+
+
+def _norm_market(market: Optional[str]) -> Optional[str]:
+    if not market:
+        return None
+    try:
+        import model_view as MV
+        return MV.market_of(market) or str(market)
+    except Exception:                                           # noqa: BLE001
+        return str(market)
+
+
 def _trust_key(sport: Optional[str], market: Optional[str] = None) -> str:
     return f"{sport or ''}:trust" + (":TD" if market in TD_MARKETS else "")
 
 
+def _market_trust_key(sport: Optional[str], market: Optional[str]) -> Optional[str]:
+    m = _norm_market(market)
+    return None if not m or m in TD_MARKETS else f"{sport or ''}:trust:m:{m}"
+
+
 def trust(sport: Optional[str], market: Optional[str] = None) -> float:
-    """How far a chance keeps its distance from the books' (1.0 = all of it; 0.1 = almost none)."""
+    """How far a chance keeps its distance from the books' (1.0 = all of it; 0.1 = almost none). A market with its own
+    learned trust uses it; otherwise the sport's (TD scorers have theirs)."""
     factor(None)                                                # refreshes the shared cache when it's stale
     lo, hi = TRUST_RANGE
+    mk = _market_trust_key(sport, market)
+    if mk and mk in _cache["map"]:
+        return max(lo, min(hi, _cache["map"][mk]))
     return max(lo, min(hi, _cache["map"].get(_trust_key(sport, market), 1.0)))
+
+
+def market_trusts(sport: Optional[str]) -> Dict[str, float]:
+    """{market: its own learned trust} for the markets that have one."""
+    factor(None)
+    pre = f"{sport or ''}:trust:m:"
+    return {k[len(pre):]: v for k, v in _cache["map"].items() if k.startswith(pre)}
 
 
 def apply_trust(p: Optional[float], p_mkt: Optional[float], t: Optional[float]) -> Optional[float]:
@@ -438,14 +473,26 @@ def _ll_trust(rows, rel):
     return -sum(math.log(_q(r, rel)) if r["y"] else math.log(1 - _q(r, rel)) for r in rows) / len(rows)
 
 
-def trust_rows(sport: str, graded_by_date: Dict[str, List[Dict]], kind: str) -> List[Dict]:
-    """Graded reads with the books' chance for the read's side, rescaled to today's trust."""
-    active = trust(sport, "Anytime TD" if kind == "td" else None)
-    hist = factor_history(_trust_key(sport, "Anytime TD" if kind == "td" else None))
+def trust_rows(sport: str, graded_by_date: Dict[str, List[Dict]], kind: str, market: Optional[str] = None,
+               exclude: Sequence[str] = ()) -> List[Dict]:
+    """Graded reads with the books' chance for the read's side, rescaled to today's trust. `market` keeps one market
+    (rescaled through its own trust history, which falls back to the sport's before it had one); `exclude` drops
+    markets (the sport-level fit leaves out markets that have their own)."""
+    td = kind == "td"
+    sport_key = _trust_key(sport, "Anytime TD" if td else None)
+    sport_hist = factor_history(sport_key)
+    mkey = None if td or not market else _market_trust_key(sport, market)
+    m_hist = factor_history(mkey) if mkey else []
+    active = trust(sport, "Anytime TD" if td else market)
+    excl = {_norm_market(x) for x in exclude}
+    want = _norm_market(market) if market else None
     out = []
     for d, rs in graded_by_date.items():
         for r in rs:
-            if r.get("result") not in ("hit", "miss") or (r.get("market") in TD_MARKETS) != (kind == "td"):
+            if r.get("result") not in ("hit", "miss") or (r.get("market") in TD_MARKETS) != td:
+                continue
+            rm = _norm_market(r.get("market"))
+            if (want and rm != want) or rm in excl:
                 continue
             try:
                 p, pm = float(r.get("chance")), float(r.get("p_market"))
@@ -454,11 +501,71 @@ def trust_rows(sport: str, graded_by_date: Dict[str, List[Dict]], kind: str) -> 
             if not (0 < p < 1 and 0 < pm < 1):
                 continue
             m = pm if r.get("side") in ("Over", "Yes") else 1 - pm
-            then = factor_at(hist, str(r.get("ts") or f"{d}T23:59"), 1.0)
+            when = str(r.get("ts") or f"{d}T23:59")
+            then = factor_at(m_hist, when, 0.0) if m_hist else 0.0
+            if then <= 0:
+                then = factor_at(sport_hist, when, 1.0)
             if then <= 0:
                 continue
             out.append({"date": d, "game": r.get("game"), "m": m, "p": m + (active / then) * (p - m),
                         "y": 1 if r["result"] == "hit" else 0})
+    return out
+
+
+def _trust_splits(rows: List[Dict], ds: List[str]) -> List[float]:
+    gains = []
+    for cut in ds[1:]:
+        tr = [r for r in rows if r["date"] < cut]
+        te = [r for r in rows if r["date"] >= cut]
+        if len(tr) < 100 or len(te) < 50:
+            continue
+        g = min(TRUST_REL_GRID, key=lambda x: _ll_trust(tr, x))
+        gains.append(_ll_trust(te, 1.0) - _ll_trust(te, g))
+    return gains
+
+
+def auto_trust_markets(sport: str, graded_by_date: Dict[str, List[Dict]], morning: str,
+                       write: bool = True) -> List[Dict]:
+    """Per-market trust (Nov 18): each market with TRUST_MARKET_MIN_ROWS+ graded reads is refit relative to the trust it
+    runs on now; a move either way applies only if it holds up on MARKET_SPLIT_PASS of the held-out splits with a
+    positive average gain."""
+    out = []
+    lo, hi = TRUST_RANGE
+    weekly = sport in WEEKLY_SPORTS
+    markets = sorted({_norm_market(r.get("market")) for rs in graded_by_date.values() for r in rs
+                      if r.get("market") and r.get("market") not in TD_MARKETS} - {None})
+    for mk in markets:
+        rows = trust_rows(sport, graded_by_date, "props", market=mk)
+        ds = sorted({r["date"] for r in rows})
+        active = trust(sport, mk)
+        own = _market_trust_key(sport, mk) in _cache["map"]
+        dec = {"sport": sport, "side": f"{mk} trust", "kind": "market", "market": mk, "active": active, "new": active,
+               "n": len(rows), "dates": len(ds), "applied": False, "weekly": weekly, "own": own}
+        if len(rows) < TRUST_MARKET_MIN_ROWS or len(ds) < (WEEKLY_MIN_DATES if weekly else AUTO_MIN_DATES):
+            dec["why"] = f"not enough yet ({len(rows)} reads over {len(ds)} days)"
+            out.append(dec)
+            continue
+        rel = min(TRUST_REL_GRID, key=lambda g: _ll_trust(rows, g))
+        new = round(max(lo, min(hi, active * rel)), 2)
+        gains = _trust_splits(rows, ds)
+        passed = sum(1 for g in gains if g > 0)
+        dec.update(new=new, rel_fit=rel, splits=len(gains), passed=passed,
+                   gain=sum(gains) / len(gains) if gains else 0.0,
+                   log_loss=(round(_ll_trust(rows, 1.0), 4), round(_ll_trust(rows, rel), 4)))
+        if abs(new - active) < AUTO_MIN_MOVE:
+            dec["why"] = f"already right (best {new:.2f} vs {active:.2f})"
+        elif gains and passed >= MARKET_SPLIT_PASS * len(gains) and dec["gain"] > 0:
+            dec["why"] = (f"{mk}: {'more' if new > active else 'less'} trust in the model held up on {passed} of "
+                          f"{len(gains)} held-out splits ({active:.2f} -> {new:.2f})")
+            if write:
+                import model_store as MS
+                dec["applied"] = MS.approve_calibration(_market_trust_key(sport, mk), new, {
+                    "auto": True, "morning": morning, "n": len(rows), "rel_fit": rel, "splits": len(gains),
+                    "passed": passed, "held_out_gain": round(dec["gain"], 5), "was": active, "kind": "market",
+                    "market": mk})
+        else:
+            dec["why"] = f"{mk}: best fit {new:.2f} didn't hold up on held-out days ({passed} of {len(gains)})"
+        out.append(dec)
     return out
 
 
@@ -467,8 +574,9 @@ def auto_trust(sport: str, graded_by_date: Dict[str, List[Dict]], morning: str, 
     out = []
     weekly = sport in WEEKLY_SPORTS
     lo, hi = TRUST_RANGE
+    own = list(market_trusts(sport))
     for kind in ("props", "td"):
-        rows = trust_rows(sport, graded_by_date, kind)
+        rows = trust_rows(sport, graded_by_date, kind, exclude=own if kind == "props" else ())
         if kind == "td" and not rows:
             continue
         market = "Anytime TD" if kind == "td" else None
@@ -482,14 +590,7 @@ def auto_trust(sport: str, graded_by_date: Dict[str, List[Dict]], morning: str, 
             continue
         rel = min(TRUST_REL_GRID, key=lambda g: _ll_trust(rows, g))
         new = round(max(lo, min(hi, active * rel)), 2)
-        gains = []
-        for cut in ds[1:]:
-            tr = [r for r in rows if r["date"] < cut]
-            te = [r for r in rows if r["date"] >= cut]
-            if len(tr) < 100 or len(te) < 50:
-                continue
-            g = min(TRUST_REL_GRID, key=lambda x: _ll_trust(tr, x))
-            gains.append(_ll_trust(te, 1.0) - _ll_trust(te, g))
+        gains = _trust_splits(rows, ds)
         passed = sum(1 for g in gains if g > 0)
         dec.update(new=new, rel_fit=rel, splits=len(gains), passed=passed,
                    gain=sum(gains) / len(gains) if gains else 0.0,

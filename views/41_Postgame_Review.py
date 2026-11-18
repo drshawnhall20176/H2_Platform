@@ -197,10 +197,16 @@ with tab_morning:
                            + (f", TD scorers {_ttd:.2f}" if SPORT_KEY in ("NFL", "NCAAF") else "")
                            + " (1.00 = the model as is; lower = each chance pulled toward the books' no-vig chance). "
                              "Refit every morning; a pull toward the books applies at once, a move back needs held-out proof.")
-                if (_t < 1.0 or _ttd < 1.0) and st.button(f"Undo: trust the model fully again for {SPORT_KEY}",
-                                                          key=f"pgr_trust_off_{mpick}"):
+                _mt = CAL.market_trusts(SPORT_KEY)
+                if _mt:
+                    st.caption("**Markets with their own trust** (each earned on held-out days): "
+                               + ", ".join(f"{m} {v:.2f}" for m, v in sorted(_mt.items()))
+                               + ". Every other market uses the sport's.")
+                if (_t < 1.0 or _ttd < 1.0 or _mt) and st.button(f"Undo: trust the model fully again for {SPORT_KEY}",
+                                                                 key=f"pgr_trust_off_{mpick}"):
                     for c in MS.list_calibration():
-                        if c["sport"] in (f"{SPORT_KEY}:trust", f"{SPORT_KEY}:trust:TD"):
+                        if c["sport"] in (f"{SPORT_KEY}:trust", f"{SPORT_KEY}:trust:TD") \
+                                or str(c["sport"]).startswith(f"{SPORT_KEY}:trust:m:"):
                             MS.retire_calibration(int(c["id"]))
                     st.success("Turned off.")
         for d, s in sorted((rep.get("slates") or {}).items()):
