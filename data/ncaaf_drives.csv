@@ -72313,3 +72313,61 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401915931,11,40191593125,17,Chicago State,Virginia Lynchburg,,,True,4,20
 2026,401915931,11,40191593127,18,Virginia Lynchburg,Chicago State,,,False,4,75
 2026,401915931,11,40191593128,19,Chicago State,Virginia Lynchburg,,,False,4,33
+2026,401866464,12,4018664642,1,Ohio,Ball State,,,True,1,17
+2026,401866464,12,4018664644,2,Ball State,Ohio,,,True,1,75
+2026,401866464,12,4018664646,3,Ohio,Ball State,,,False,1,25
+2026,401866464,12,4018664647,4,Ball State,Ohio,,,False,1,75
+2026,401866464,12,4018664648,5,Ohio,Ball State,,,False,1,13
+2026,401866464,12,4018664649,6,Ball State,Ohio,,,True,2,73
+2026,401866464,12,40186646411,7,Ohio,Ball State,,,False,2,25
+2026,401866464,12,40186646412,8,Ball State,Ohio,,,True,2,80
+2026,401866464,12,40186646414,9,Ohio,Ball State,,,True,2,25
+2026,401866464,12,40186646416,10,Ball State,Ohio,,,True,2,85
+2026,401866464,12,40186646418,11,Ball State,Ohio,,,False,3,65
+2026,401866464,12,40186646419,12,Ohio,Ball State,,,False,3,36
+2026,401866464,12,40186646420,13,Ball State,Ohio,,,False,3,74
+2026,401866464,12,40186646421,14,Ohio,Ball State,,,False,3,14
+2026,401866464,12,40186646422,15,Ball State,Ohio,,,True,3,88
+2026,401866464,12,40186646424,16,Ball State,Ohio,,,False,4,78
+2026,401866464,12,40186646425,17,Ohio,Ball State,,,True,4,48
+2026,401866464,12,40186646427,18,Ball State,Ohio,,,True,4,68
+2026,401866464,12,40186646429,19,Ohio,Ball State,,,True,4,34
+2026,401866464,12,40186646431,20,Ball State,Ohio,,,False,4,73
+2026,401866465,12,4018664652,1,Western Michigan,Eastern Michigan,,,True,1,28
+2026,401866465,12,4018664654,2,Eastern Michigan,Western Michigan,,,False,1,84
+2026,401866465,12,4018664655,3,Western Michigan,Eastern Michigan,,,True,1,7
+2026,401866465,12,4018664657,4,Eastern Michigan,Western Michigan,,,False,1,75
+2026,401866465,12,4018664658,5,Eastern Michigan,Western Michigan,,,True,1,7
+2026,401866465,12,40186646510,6,Western Michigan,Eastern Michigan,,,False,1,20
+2026,401866465,12,40186646511,7,Eastern Michigan,Western Michigan,,,False,2,97
+2026,401866465,12,40186646512,8,Western Michigan,Eastern Michigan,,,True,2,76
+2026,401866465,12,40186646514,9,Eastern Michigan,Western Michigan,,,False,2,79
+2026,401866465,12,40186646515,10,Western Michigan,Eastern Michigan,,,True,2,43
+2026,401866465,12,40186646517,11,Eastern Michigan,Western Michigan,,,True,2,76
+2026,401866465,12,40186646519,12,Western Michigan,Eastern Michigan,,,False,2,50
+2026,401866465,12,40186646520,13,Eastern Michigan,Western Michigan,,,True,3,78
+2026,401866465,12,40186646522,14,Western Michigan,Eastern Michigan,,,False,3,26
+2026,401866465,12,40186646523,15,Eastern Michigan,Western Michigan,,,True,3,81
+2026,401866465,12,40186646525,16,Western Michigan,Eastern Michigan,,,True,3,27
+2026,401866465,12,40186646527,17,Eastern Michigan,Western Michigan,,,True,4,65
+2026,401866465,12,40186646529,18,Western Michigan,Eastern Michigan,,,False,4,13
+2026,401866465,12,40186646530,19,Eastern Michigan,Western Michigan,,,False,4,78
+2026,401866465,12,40186646531,20,Western Michigan,Eastern Michigan,,,False,4,31
+2026,401866465,12,40186646532,21,Eastern Michigan,Western Michigan,,,False,4,77
+2026,401866465,12,40186646533,22,Western Michigan,Eastern Michigan,,,False,4,39
+2026,401866466,12,4018664662,1,Miami (OH),Kent State,,,True,1,67
+2026,401866466,12,4018664664,2,Kent State,Miami (OH),,,True,1,17
+2026,401866466,12,4018664666,3,Miami (OH),Kent State,,,True,1,71
+2026,401866466,12,4018664668,4,Kent State,Miami (OH),,,False,1,25
+2026,401866466,12,4018664669,5,Miami (OH),Kent State,,,False,2,89
+2026,401866466,12,40186646610,6,Kent State,Miami (OH),,,False,2,20
+2026,401866466,12,40186646611,7,Miami (OH),Kent State,,,False,2,83
+2026,401866466,12,40186646612,8,Kent State,Miami (OH),,,False,2,29
+2026,401866466,12,40186646614,9,Kent State,Miami (OH),,,False,3,25
+2026,401866466,12,40186646615,10,Miami (OH),Kent State,,,True,3,74
+2026,401866466,12,40186646617,11,Kent State,Miami (OH),,,False,3,17
+2026,401866466,12,40186646618,12,Miami (OH),Kent State,,,False,3,66
+2026,401866466,12,40186646619,13,Kent State,Miami (OH),,,False,4,8
+2026,401866466,12,40186646620,14,Miami (OH),Kent State,,,False,4,68
+2026,401866466,12,40186646621,15,Kent State,Miami (OH),,,False,4,28
+2026,401866466,12,40186646622,16,Miami (OH),Kent State,,,False,4,63
