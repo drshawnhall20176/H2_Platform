@@ -833,7 +833,9 @@ def test_league_schedules_view_file_uses_platform_conventions_and_no_gate():
 
     assert "C.base_css()" in src
     assert "C.hero_banner(" in src   # landing-page tier styling, matching Home.py/Command Center
-    assert "sports.enabled_sports()" in src   # Home.py's own real sport-tab pattern, reused not reinvented
+    # Nov 18 (#304): the Select League buttons use the Home picker's own list (selectable_sports), which adds tennis,
+    # international hoops and soccer to the enabled sports -- reused, not reinvented
+    assert "sports.selectable_sports(" in src
     assert "st.session_state[\"sport\"]" in src   # same session_state key Home.py's own tabs use -- one shared selector, not a page-local copy
     # Deliberately NO require_sport/require_live_engine gate -- this page must work for every
     # sport (gracefully degrading for one with no real get_schedule, e.g. UFC), never blocked at
