@@ -46,7 +46,7 @@ def pick(plays, slot="All slate", unit="All", side="All Sides", show="All playab
             continue
         if show in ("Most probable", "🔒 Most probable"):
             import props_engine as PE
-            if not PE.most_probable(p.get("ModelProb"), p.get("Cushion"), p.get("Gap")):
+            if not PE.play_is_lock(p):
                 continue
         # Nov 6: every row, not only the player-props model's -- the older fallback model's rows carry no Use tag (and
         # inflated chances: an 80% Draymond Green Pts+Ast lost Nov 5), so they slipped into "Parlay legs". They now

@@ -53,7 +53,7 @@ def _et_time(iso) -> str:
 def props_rows(sport: str, plays) -> List[Dict]:
     out = []
     for p in plays or []:
-        lock = bool(PE.most_probable(p.get("ModelProb"), p.get("Cushion"), p.get("Gap")))
+        lock = PE.play_is_lock(p)
         if p.get("Use") not in PLAYABLE and not lock:
             continue
         if p.get("Use") == PE.USE_PASS:
@@ -65,7 +65,9 @@ def props_rows(sport: str, plays) -> List[Dict]:
                     "chance": p.get("ModelProb"), "use": p.get("Use") or "", "lock": lock, "page": "Best Bets",
                     # Nov 7: what the Home panel needs to log the pick
                     "player": p.get("Player"), "pid": p.get("PlayerId"), "market": p.get("Market"), "side": p.get("Side"),
-                    "line": line, "market_key": p.get("MarketKey")})
+                    "line": line, "market_key": p.get("MarketKey"),
+                    # Nov 18: a line only a pick'em app posts -- no sportsbook price behind it, never a 🔒
+                    "pickem_only": bool(p.get("Pickem"))})
     out.sort(key=_order)
     # Nov 14: every 🔒 Most probable is kept; the cap only trims the other playable tags
     return [r for r in out if r["lock"]] + [r for r in out if not r["lock"]][:TOP_PER_SPORT]

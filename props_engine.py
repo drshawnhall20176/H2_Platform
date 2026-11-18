@@ -1098,6 +1098,19 @@ def most_probable(chance, cushion, gap=None) -> bool:
             and str(gap or "") != "big")
 
 
+def is_lock(chance, cushion, gap=None, book=None, pickem: bool = False) -> bool:
+    """🔒 Most probable, Nov 18 (owner said yes): most_probable AND a sportsbook line. A line only a pick'em app posts
+    (book = prizepicks / pick6 / ...) has no book price checking the model -- research/pickem_study.py found the
+    model's side on those hit 44-51%, below a coin flip on held-out data. Those stay listed, labelled pick'em only."""
+    return bool(most_probable(chance, cushion, gap)) and not pickem and (book or "") not in PICKEM_BOOKS
+
+
+def play_is_lock(p: Dict) -> bool:
+    """is_lock for a board play (Best Bets / Today rows)."""
+    return is_lock(p.get("ModelProb"), p.get("Cushion"), p.get("Gap"), p.get("PricedAt") if p.get("Pickem") else None,
+                   bool(p.get("Pickem")))
+
+
 def is_parlay_use(tag: Optional[str]) -> bool:
     return tag in (USE_BOTH, USE_PARLAY)
 
