@@ -75,7 +75,7 @@ def prepare(graded: Sequence[Dict], default_w: float) -> List[Dict]:
             w0 = min(default_w, PE.GAP_MODEL_WEIGHT) if r.get("gap") == "big" else default_w
             if w0 > 0:
                 q_mod = _clip((r["chance"] - (1 - w0) * q_mkt) / w0)
-        out.append({"lock": PE.most_probable(r.get("chance"), r.get("cushion"), r.get("gap")),
+        out.append({"lock": PE.is_lock(r.get("chance"), r.get("cushion"), r.get("gap"), r.get("book")),
                     "y": 1 if r["result"] == "hit" else 0, "chance": float(r["chance"]), "price": r.get("price"),
                     "q_mkt": q_mkt, "q_mod": q_mod, "market": r.get("market") or "?", "side": side,
                     "date": r.get("slate_date"), "gap": r.get("gap"), "game": r.get("game")})

@@ -475,7 +475,7 @@ def lock_record(graded: Sequence[Dict]) -> Optional[Dict]:
     """The 🔒 Most probable picks (Best Bets' lock: 60%+ chance, 15%+ cushion, books not far off) as one row in
     use_record's shape, plus profit per $1 at the posted price where one was saved. None when none were graded."""
     g = [r for r in graded if r.get("result") in ("hit", "miss")
-         and PE.most_probable(r.get("chance"), r.get("cushion"), r.get("gap"))]
+         and PE.is_lock(r.get("chance"), r.get("cushion"), r.get("gap"), r.get("book"))]
     if not g:
         return None
     hits = sum(r["result"] == "hit" for r in g)
