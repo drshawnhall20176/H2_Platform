@@ -6,13 +6,29 @@ sys.stdout.reconfigure(line_buffering=True)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import model_store as MS, line_history as LH, model_view as MV, betlog as B, props_engine as PE
 since = (date.today() - timedelta(days=14)).isoformat()
+import slate_props as SP, nfl_projections as NP, ncaaf_projections as CP, nhl_projections as HP
+KEYMAP = dict(SP.CORE_MARKETS)
+for mod in (NP, CP, HP):
+    for name in dir(mod):
+        v = getattr(mod, name)
+        if isinstance(v, dict) and v and all(isinstance(k, str) and k.startswith("player_") for k in v):
+            for k, t in v.items():
+                if isinstance(t, tuple) and len(t) > 1 and isinstance(t[1], str):
+                    KEYMAP.setdefault(k, t[1])
+KEYMAP.update({"player_anytime_td": "Anytime TD", "player_total_saves": "Saves", "player_blocked_shots": "Blocked Shots",
+               "player_goals": "Goals", "player_points_nhl": "Points"})
+print("KEYMAP", KEYMAP)
+def mkname(sp, k):
+    if sp == "NHL" and k == "player_points": return "Points"
+    if sp == "NHL" and k == "player_assists": return "Assists"
+    return KEYMAP.get(k, k)
 for sp in ("NBA", "NHL", "NFL", "NCAAF", "NCAAMB"):
     idx = LH.sport_index(sp, since)
     lines = defaultdict(set)            # date -> {(player, market)}
     for (pl, mk), rows in idx.items():
         for r in rows:
             d = str(r.get("captured_at"))[:10]
-            lines[d].add((MV.norm_name(pl), MV.market_of(mk) or mk))
+            lines[d].add((MV.norm_name(pl), mkname(sp, mk)))
     snaps = MS.load_snapshots(sp, sorted(lines)) if lines else []
     reads = defaultdict(set)
     for s in snaps:
