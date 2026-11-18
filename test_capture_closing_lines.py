@@ -58,7 +58,7 @@ def test_capture_for_sport_uses_that_sports_own_odds_key_and_market_map(monkeypa
 
     assert calls["fetch_events_sport"] == "basketball_wnba"
     assert calls["fetch_props_sport"] == "basketball_wnba"
-    assert calls["parse_markets"] == ["player_points"]
+    assert calls["parse_markets"] == ["player_points", "player_points_alternate"]     # Nov 18: + alternate ladder
     print("✓ capture_for_sport uses WNBA's own odds_sport_key and market_map, not MLB's")
 
 
