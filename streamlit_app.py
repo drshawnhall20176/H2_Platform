@@ -77,6 +77,26 @@ def _side_rows():
     return out
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _clv_rows():
+    """[(sport, "bet picks text", "watch text")] -- closing-line value from each sport's latest morning review (Nov 18)."""
+    import model_store as MS
+    import props_engine as PE
+    out = []
+    for sp in TODAY_SIDEBAR_SPORTS:
+        for m in MS.daily_review_mornings(sp)[:3]:
+            rec = ((MS.load_daily_review(sp, m) or {}).get("trend") or {}).get("clv")
+            if rec is None:
+                continue
+            def txt(tags):
+                b = sum((rec.get(t) or {}).get("beat", 0) for t in tags)
+                lo = sum((rec.get(t) or {}).get("lost", 0) for t in tags)
+                return f"{b / (b + lo):.0%} ({b + lo})" if b + lo else "—"
+            out.append((sp, txt((PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE)), txt((PE.USE_WATCH,))))
+            break
+    return [r for r in out if r[1] != "—" or r[2] != "—"]
+
+
 def _today_sidebar() -> None:
     """The model's 30-day record in the sidebar on the Today page."""
     try:
@@ -109,6 +129,19 @@ def _today_sidebar() -> None:
             st.caption("Bet-tagged picks (🎯 / 🎟️) only: how often the model's Over calls and Under calls were right "
                        "(graded count). While a sport's Overs aren't winning, its Over picks are tagged ⚪ No edge — "
                        "re-checked every morning.")
+        try:
+            clvs = _clv_rows()
+        except Exception:                                       # noqa: BLE001
+            clvs = []
+        if clvs:
+            st.markdown("**📈 Beat the closing line · last 30 days**")
+            cl = ["| Sport | Bet picks | 👀 Watch |", "|---|---|---|"]
+            for sp, b, w in clvs:
+                cl.append(f"| {sp} | {b} | {w} |")
+            st.markdown("\n".join(cl))
+            st.caption("How often the market moved toward a pick between when it was first tagged and game time "
+                       "(the line, or the no-vig price on the same line). Over 50% is the earliest sign of a real "
+                       "edge -- it shows up long before wins and losses do. Counted from Nov 18.")
         trusts = [f"{sp} {tr:.2f}" for sp, *_x, tr in rows if tr is not None and tr < 1.0]
         if trusts:
             st.caption("**Trust in the model vs the books** (1.00 = the model as is): " + ", ".join(trusts) +
