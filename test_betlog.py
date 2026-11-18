@@ -609,3 +609,14 @@ def test_parlay_legs_accept_team_sides_for_game_lines():
         out = B.log_parlay_ticket("Intl 6-leg", good, 2400, 4.0, "2026-11-18", "INTL", book="draftkings", db_path=db)
         rows = {r["id"]: r for r in B.list_bets(db)}
         assert rows[out["leg_ids"][1]]["side"] == "Derthona Basket Tortona" and B.payout(4, 2400) == 100.0
+
+
+def test_fix_fields_returns_only_what_changed_and_checks_the_numbers():
+    bet = {"id": 7, "category": "OFF", "model_prob": None, "entry_odds": -250, "side": "Tortona", "line": -4.5,
+           "stake": 3.0, "notes": "x"}
+    chg, errs = B.fix_fields(bet, category="H2-beta", model_prob="0.51", entry_odds="-250", side="Tortona",
+                             line="-4.5", stake="3", notes="x")
+    assert errs == [] and chg == {"category": "H2-beta", "model_prob": 0.51}
+    assert B.fix_fields(bet, model_prob="51")[1] and B.fix_fields(bet, entry_odds="-50")[1]
+    assert B.fix_fields(bet, line="")[0] == {"line": None}
+    assert "#7" in B.bet_label(bet) and "Tortona" in B.bet_label(bet)
