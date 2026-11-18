@@ -48,6 +48,28 @@ def label(w: int, n: int, line_market: bool = False) -> str:
     return f"{w}–{n - w} ({w / n:.0%} ±{margin(w, n):.0%}){tail}"
 
 
+# Nov 18 (owner: "make sure the data coming in is being considered to the fullest extent"): a record is a sample, not
+# a fact -- 11-3 (79%) is anywhere from about 60% to 90% at that size. likely_range is the 80% Wilson interval: the
+# range the true hit rate probably sits in. Records are shown with it, and the Coach only calls a pick type winning
+# or losing when the whole range says so.
+LIKELY_Z = 1.2816        # 80%
+
+
+def likely_range(hits: int, n: int, z: float = LIKELY_Z) -> Optional[Tuple[float, float]]:
+    if not n:
+        return None
+    p = hits / n
+    d = 1 + z * z / n
+    c = (p + z * z / (2 * n)) / d
+    h = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / d
+    return max(0.0, c - h), min(1.0, c + h)
+
+
+def range_text(hits: int, n: int) -> str:
+    r = likely_range(hits, n)
+    return "—" if r is None else f"{r[0]:.0%}–{r[1]:.0%}"
+
+
 def tag_records(sport: str) -> Dict[str, Tuple[int, int]]:
     """{use tag: (hits, graded)} over the last 30 days, from the sport's latest morning review."""
     try:

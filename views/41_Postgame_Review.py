@@ -132,7 +132,9 @@ def _use_table(rows):
     ur = PG.use_record(rows)
     lock = PG.lock_record(rows)
     out = ([lock] if lock else []) + ur
+    import pick_records as _PR
     return [{"Use": r["Use"], "Record": f"{r['Hits']}-{r['Graded'] - r['Hits']}", "Hit rate": _pct(r["Hit rate"]),
+             "Likely range": _PR.range_text(r["Hits"], r["Graded"]),
              "Model said": _pct(r.get("Model said")), "Profit per $1": _money(r.get("Profit per $1"))} for r in out]
 
 

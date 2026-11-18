@@ -300,11 +300,17 @@ def judge(c: Dict, hist: Dict, tag_rec: Optional[tuple] = None, market_n: Option
     if c.get("use") and PE.is_pass(c["use"]):
         stop.append("the model's tested rules say pass")
     if tag_rec and tag_rec[1] >= 20:
+        # Nov 18: judged on the likely range of the true hit rate (pick_records.likely_range), not the raw record --
+        # 9-11 over 20 is a coin flip, not a losing pick type
+        import pick_records as _PR
         w, n = tag_rec
-        if w / n < 0.5:
-            stop.append(f"this kind of pick ({tag}) is {w}–{n - w} the last 30 days")
+        lo, hi = _PR.likely_range(w, n)
+        if hi < 0.5:
+            stop.append(f"this kind of pick ({tag}) is {w}–{n - w} the last 30 days (likely {lo:.0%}–{hi:.0%})")
+        elif lo > 0.5:
+            good.append(f"{tag} is {w}–{n - w} lately (likely {lo:.0%}–{hi:.0%})")
         else:
-            good.append(f"{tag} is {w}–{n - w} lately")
+            warn.append(f"{tag} is {w}–{n - w} lately — too few to tell (likely {lo:.0%}–{hi:.0%})")
     other = 0                                                   # cautions other than a thin edge
     pr = _price_row(hist, price)
     if pr and pr["Bets"] >= MIN_N and str(pr["Verdict"]).startswith("🔴"):
