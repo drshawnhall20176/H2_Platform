@@ -108,3 +108,14 @@ def test_offers_merge_across_fetches():
     p = got["P"]
     assert p["over"] == {"draftkings": -110, "novig": -102} and set(p["pickem"]) == {"prizepicks", "dabble_us_dfs"}
     assert "Q" in got and a[0]["over"] == {"draftkings": -110}        # inputs untouched
+
+
+def test_exchange_quotes_must_be_a_real_market():
+    """Nov 18: ProphetX -25000/-25000 and Novig -456/+178 are unmatched orders, not prices."""
+    o = {"over": {"draftkings": -110, "novig": -456, "prophetx": -25000}, "under": {"draftkings": -110, "novig": 178,
+                                                                                   "prophetx": -25000}}
+    c = PK.clean_exchanges(o)
+    assert c["over"] == {"draftkings": -110} and c["under"] == {"draftkings": -110}
+    tight = {"over": {"novig": -104}, "under": {"novig": -102}}
+    assert PK.clean_exchanges(tight) is tight
+    assert PK.clean_exchanges({"over": {"prophetx": -120}, "under": {}})["over"] == {}     # one side only
