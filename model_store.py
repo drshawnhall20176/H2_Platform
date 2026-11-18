@@ -31,6 +31,15 @@ SNAP_COLS = ["sport", "slate_date", "game", "team", "opp", "player", "player_id"
 # Nov 2: p_model / p_market (both P(over)) and both prices are stored so the weekly tuning report can fit how much
 # the model should count against the books' line, per market (blend_weights).
 _SNAP_ADDED = ("p_model", "p_market", "over_price", "under_price")
+# Nov 18: a prop's row was overwritten on every save, so only the last pre-game view survived -- what a tag said at
+# 10am (when you'd bet it) and the price then were lost, and closing-line value couldn't be measured. Two snapshots
+# of the row are now kept beside the latest: the FIRST time the prop was read ("first_") and the first time it
+# carried a bet tag ("bet_": Single / Parlay / Watch). Neither is ever overwritten once set.
+_ENTRY_FIELDS = ("ts", "line", "side", "use_tag", "chance", "over_price", "under_price", "p_market")
+FIRST_COLS = [f"first_{c}" for c in _ENTRY_FIELDS]
+BET_COLS = [f"bet_{c}" for c in _ENTRY_FIELDS]
+_TEXT_ADDED = {f"{p}_{c}" for p in ("first", "bet") for c in ("ts", "side", "use_tag")}
+SNAP_COLS = SNAP_COLS + FIRST_COLS + BET_COLS
 _SNAP_SCHEMA = """
 CREATE TABLE IF NOT EXISTS prop_snapshots (
     id {pk},
@@ -130,8 +139,9 @@ def _conn(db_path: Optional[str] = None):
             if not _SNAP_SCHEMA_DONE:                           # Nov 17: once per process, not on every read
                 with con.cursor() as cur:
                     cur.execute(_SNAP_SCHEMA.format(pk="SERIAL PRIMARY KEY"))
-                    for c in _SNAP_ADDED:
-                        cur.execute(f"ALTER TABLE prop_snapshots ADD COLUMN IF NOT EXISTS {c} REAL")
+                    for c in _SNAP_ADDED + tuple(FIRST_COLS) + tuple(BET_COLS):
+                        cur.execute(f"ALTER TABLE prop_snapshots ADD COLUMN IF NOT EXISTS {c} "
+                                    f"{'TEXT' if c in _TEXT_ADDED else 'REAL'}")
                 con.commit()
                 _SNAP_SCHEMA_DONE = True
             yield con, "%s"
@@ -142,9 +152,9 @@ def _conn(db_path: Optional[str] = None):
     try:
         con.executescript(_SNAP_SCHEMA.format(pk="INTEGER PRIMARY KEY AUTOINCREMENT"))
         have = {r[1] for r in con.execute("PRAGMA table_info(prop_snapshots)")}
-        for c in _SNAP_ADDED:
+        for c in _SNAP_ADDED + tuple(FIRST_COLS) + tuple(BET_COLS):
             if c not in have:
-                con.execute(f"ALTER TABLE prop_snapshots ADD COLUMN {c} REAL")
+                con.execute(f"ALTER TABLE prop_snapshots ADD COLUMN {c} {'TEXT' if c in _TEXT_ADDED else 'REAL'}")
         yield con, "?"
         con.commit()
     finally:
@@ -179,7 +189,7 @@ def snapshot_record(sport: str, slate_date: str, game: str, row: Dict, market: s
         tag = None
     price = row.get("over_price") if side == "Over" else row.get("under_price")
     book = (row.get("book") or {}).get("book") if isinstance(row.get("book"), dict) else row.get("book")
-    return {"sport": sport, "slate_date": slate_date, "game": game, "team": str(team if team is not None else
+    rec = {"sport": sport, "slate_date": slate_date, "game": game, "team": str(team if team is not None else
                                                                                row.get("team_name") or ""),
             "opp": str(opp if opp is not None else row.get("opp_name") or ""), "player": row.get("player"),
             "player_id": None if row.get("pid") is None else str(row.get("pid")), "market": market,
@@ -191,6 +201,12 @@ def snapshot_record(sport: str, slate_date: str, game: str, row: Dict, market: s
             "kickoff": kickoff, "ts": _now(), "source": source,
             "p_model": _f(row.get("p_model")), "p_market": _f(row.get("p_market")),
             "over_price": _f(row.get("over_price")), "under_price": _f(row.get("under_price"))}
+    entry = {"ts": rec["ts"], "line": rec["line"], "side": side, "use_tag": tag, "chance": chance,
+             "over_price": rec["over_price"], "under_price": rec["under_price"], "p_market": rec["p_market"]}
+    rec.update({f"first_{k}": v for k, v in entry.items()})
+    is_bet = tag is not None and (PE.norm_use(tag) in (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE, PE.USE_WATCH))
+    rec.update({f"bet_{k}": (v if is_bet else None) for k, v in entry.items()})
+    return rec
 
 
 def _f(x) -> Optional[float]:
@@ -233,8 +249,9 @@ def save(records: Iterable[Optional[Dict]], db_path: Optional[str] = None, throt
         with _conn(db_path) as (con, ph):
             cols = ",".join(SNAP_COLS)
             marks = ",".join([ph] * len(SNAP_COLS))
-            upd = ",".join(f"{c}=excluded.{c}" for c in SNAP_COLS if c not in ("sport", "slate_date", "game", "player",
-                                                                              "market"))
+            keep = set(FIRST_COLS) | set(BET_COLS)
+            upd = ",".join((f"{c}=COALESCE(prop_snapshots.{c}, excluded.{c})" if c in keep else f"{c}=excluded.{c}")
+                           for c in SNAP_COLS if c not in ("sport", "slate_date", "game", "player", "market"))
             sql = (f"INSERT INTO prop_snapshots ({cols}) VALUES ({marks}) ON CONFLICT (sport, slate_date, game, player, "
                    f"market) DO UPDATE SET {upd}")
             cur = con.cursor()
@@ -242,7 +259,11 @@ def save(records: Iterable[Optional[Dict]], db_path: Optional[str] = None, throt
                 from psycopg2.extras import execute_values
                 keyed = {}
                 for r in recs:                                  # one row per conflict key (last wins), as before
-                    keyed[(r.get("sport"), r.get("slate_date"), r.get("game"), r.get("player"), r.get("market"))] = r
+                    k = (r.get("sport"), r.get("slate_date"), r.get("game"), r.get("player"), r.get("market"))
+                    if k in keyed:                              # ... but the entry snapshots stay the earliest
+                        r = dict(r, **{c: keyed[k].get(c) if keyed[k].get(c) is not None else r.get(c)
+                                       for c in FIRST_COLS + BET_COLS})
+                    keyed[k] = r
                 execute_values(cur, sql.replace(f"VALUES ({marks})", "VALUES %s"),
                                [[r.get(c) for c in SNAP_COLS] for r in keyed.values()], page_size=500)
             else:
