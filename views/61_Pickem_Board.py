@@ -91,9 +91,11 @@ def _fmt(x):
 
 
 only_checked = st.toggle("Only lines the sportsbooks also price", value=True, key="pk_only_books")
-rows = [_fmt(x) for x in (checked if only_checked else legs)]
+_shown = sorted(checked if only_checked else legs,
+                key=lambda x: (C._kick_dt(x.get("kickoff")) is None, str(C._kick_dt(x.get("kickoff")) or ""), -x["chance"]))
+rows = [_fmt(x) for x in _shown]                                # earliest game first, then the strongest pick
 if rows:
-    df = pd.DataFrame(rows).sort_values(["Time", "Chance"], ascending=[True, False])
+    df = pd.DataFrame(rows)
     st.dataframe(df, hide_index=True, width="stretch", column_config={
         "Chance": st.column_config.NumberColumn(format="percent"),
         "vs break-even": st.column_config.NumberColumn(format="percent"),
