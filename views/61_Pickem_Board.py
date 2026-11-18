@@ -14,12 +14,31 @@ import pickem as PK
 import sports
 
 ET = pytz.timezone("US/Eastern")
+C.base_css()
 _active = sports.active()
 SPORT_KEY = _active.key
-C.base_css()
 C.page_header("🎲", "Pick'em Board",
               f"PrizePicks, Underdog and DK Pick6 lines — More or Less, checked against the sportsbooks — "
               f"{_active.icon} {_active.label}")
+# Nov 18 (owner): follows the sport picked on the Sport desk, and can switch right here -- the choice is the same
+# shared one (session "sport"), so the desk and the sidebar follow it too.
+try:
+    _owner = st.secrets.get("AUDIENCE", "owner") == "owner"
+except Exception:                                               # noqa: BLE001
+    _owner = True
+_choices = [s for s in sports.selectable_sports(_owner) if s.key in BBD.PROPS_MODEL_SPORTS]
+if _choices:
+    _keys = [s.key for s in _choices]
+
+    def _switch():
+        k = st.session_state.get("pk_sport_pick")
+        if k:
+            st.session_state["sport"] = k
+
+    _cur = st.session_state.get("sport")
+    st.session_state["pk_sport_pick"] = _cur if _cur in _keys else None    # mirror the shared pick (desk, sidebar)
+    st.pills("Sport", _keys, key="pk_sport_pick", on_change=_switch,
+             format_func=lambda k: f"{sports.get(k).icon} {sports.get(k).label}")
 
 if SPORT_KEY not in BBD.PROPS_MODEL_SPORTS:
     st.info(f"The Pick'em Board reads player props from the props model, which covers "
@@ -55,7 +74,7 @@ with st.spinner("Reading the apps' lines…"):
 legs = PK.legs(reads or {}, offers or [], app, SPORT_KEY)
 if not legs:
     st.info(f"{cfg['name']} hasn't posted {_active.label} lines the model has read yet today. App lines usually go "
-            "up the morning of the games.")
+            "up the morning of the games — or pick another sport above.")
     st.stop()
 legs = C.date_slot_select(legs, key=f"pk_slot_{SPORT_KEY}", when=lambda x: x.get("kickoff"))
 
@@ -91,9 +110,11 @@ def _fmt(x):
 
 
 only_checked = st.toggle("Only lines the sportsbooks also price", value=True, key="pk_only_books")
-rows = [_fmt(x) for x in (checked if only_checked else legs)]
+_shown = sorted(checked if only_checked else legs,
+                key=lambda x: (C._kick_dt(x.get("kickoff")) is None, str(C._kick_dt(x.get("kickoff")) or ""), -x["chance"]))
+rows = [_fmt(x) for x in _shown]                                # earliest game first, then the strongest pick
 if rows:
-    df = pd.DataFrame(rows).sort_values(["Time", "Chance"], ascending=[True, False])
+    df = pd.DataFrame(rows)
     st.dataframe(df, hide_index=True, width="stretch", column_config={
         "Chance": st.column_config.NumberColumn(format="percent"),
         "vs break-even": st.column_config.NumberColumn(format="percent"),
