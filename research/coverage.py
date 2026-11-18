@@ -29,23 +29,29 @@ for sp in ("NBA", "NHL", "NFL", "NCAAF", "NCAAMB"):
         for r in rows:
             d = str(r.get("captured_at"))[:10]
             lines[d].add((MV.norm_name(pl), mkname(sp, mk)))
-    snaps = MS.load_snapshots(sp, sorted(lines)) if lines else []
+    ds_all = sorted({(date.fromisoformat(d) + timedelta(days=k)).isoformat() for d in lines for k in range(-1, 8)})
+    snaps = MS.load_snapshots(sp, ds_all) if lines else []
     reads = defaultdict(set)
     for s in snaps:
         reads[s["slate_date"]].add((MV.norm_name(s.get("player")), MV.market_of(s.get("market")) or s.get("market")))
-    tot = miss = 0; mk_miss = Counter(); mk_tot = Counter(); ex = []
+    tot = miss = 0; mk_miss = Counter(); mk_tot = Counter(); ex = []; known = Counter()
     for d in sorted(lines):
         if d >= date.today().isoformat(): continue
-        have = reads.get(d, set()) | reads.get((date.fromisoformat(d) - timedelta(days=1)).isoformat(), set())
+        span = range(-1, 8) if sp in ("NFL", "NCAAF") else range(-1, 1)
+        have = set().union(*[reads.get((date.fromisoformat(d) + timedelta(days=k)).isoformat(), set()) for k in span])
+        players_read = {p for p, _ in have}
         for k in lines[d]:
             tot += 1; mk_tot[k[1]] += 1
             if k not in have:
                 miss += 1; mk_miss[k[1]] += 1
+                known[(k[1], k[0] in players_read)] += 1
                 if len(ex) < 12: ex.append((d,) + k)
     if tot:
         print(f"COV {sp}: book lines captured {tot}, never read by the model {miss} ({miss/tot:.1%})")
         print(f"COV {sp} unread by market: " + ", ".join(f"{m} {mk_miss[m]}/{mk_tot[m]}" for m in sorted(mk_tot, key=lambda m: -mk_miss[m])[:14]))
         print(f"COV {sp} examples: {ex}")
+        print(f"COV {sp} unread lines where the model DID read that player in another market: " + ", ".join(
+            f"{m} {known[(m, True)]}/{known[(m, True)] + known[(m, False)]}" for m in sorted(mk_miss, key=lambda m: -mk_miss[m])[:12]))
     else:
         print(f"COV {sp}: no book lines captured in the last 14 days")
 bets = B.list_bets()
