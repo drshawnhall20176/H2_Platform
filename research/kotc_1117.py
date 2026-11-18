@@ -1,25 +1,39 @@
-"""Nov 17: King of the Court tonight from the model's PRA projections (the same rule the panel uses: KOTC.model_pra)."""
-import os, sys, random, math
+import os, sys, json, urllib.request, random
 sys.stdout.reconfigure(line_buffering=True)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import model_view as MV, kotc as K
-snaps = MS = None
-import model_store as MS
-snaps = MS.load_snapshots("NBA", ["2026-11-17"])
-reads = MV.latest_reads("NBA", "2026-11-17", snaps=snaps)
+def get(u): return json.load(urllib.request.urlopen(u, timeout=30))
+sb = get("https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=20261117")
+act = {}
+for e in sb["events"]:
+    s = get(f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event={e['id']}")
+    comp = e["competitions"][0]["competitors"]
+    margin = abs(int(comp[0]["score"]) - int(comp[1]["score"]))
+    print("GAME", e["shortName"], comp[0]["score"], comp[1]["score"])
+    for t in s["boxscore"]["players"]:
+        st = t["statistics"][0]; keys = st["keys"]
+        for a in st["athletes"]:
+            if not a.get("stats"): continue
+            d = dict(zip(keys, a["stats"]))
+            try: pra = int(d["points"]) + int(d["rebounds"]) + int(d["assists"])
+            except Exception: continue
+            act[MV.norm_name(a["athlete"]["displayName"])] = (a["athlete"]["displayName"], t["team"]["abbreviation"], pra, d.get("minutes"), d["points"], d["rebounds"], d["assists"], e["shortName"], margin)
+top = sorted(act.values(), key=lambda x: -x[2])[:10]
+for x in top: print("ACT", x)
+reads = MV.latest_reads("NBA", "2026-11-17")
 mp = K.model_pra(reads)
-info = {}
-for s in snaps:
-    info.setdefault(MV.norm_name(s.get("player")), (s.get("player"), s.get("team"), s.get("game"), s.get("flags")))
-rows = sorted(mp.items(), key=lambda kv: -kv[1])[:25]
-# PRA book lines where posted
-pra_line = {p: r.get("line") for (p, mk), r in reads.items() if mk == "PRA"}
-random.seed(7)
-names = [p for p, _ in rows]; mus = [v for _, v in rows]; sds = [max(4.0, 0.18 * v) for v in mus]
-wins = [0] * len(names); N = 20000
-for _ in range(N):
-    draws = [random.gauss(m, s) for m, s in zip(mus, sds)]
-    wins[draws.index(max(draws))] += 1
-for i, (p, v) in enumerate(rows[:15]):
-    pl, team, game, fl = info.get(p, (p, "", "", ""))
-    print(f"K {pl:24} {team:22} proj {v:5.1f} book PRA {pra_line.get(p)} king {wins[i]/N:.1%} | {game} | {str(fl)[:90]}")
+print("MODEL_N", len(mp))
+rank = sorted(mp.items(), key=lambda kv: -kv[1])
+for i, (p, v) in enumerate(rank[:15], 1): print("MODEL", i, p, round(v, 1), "actual", act.get(p, ("",))[2:4] if p in act else "DNP/none")
+for x in top[:5]:
+    p = MV.norm_name(x[0])
+    r = [i for i, (q, _) in enumerate(rank, 1) if q == p]
+    parts = {mk: (reads.get((p, mk)) or {}).get("projection") for mk in ("PRA", "Points", "Rebounds", "Assists")}
+    print("WHERE", x[0], x[2], "model rank", r, "proj", parts)
+# simple sim using model projections, sd 18%
+rnd = random.Random(7); T = rank[:40]; w = [0]*len(T)
+for _ in range(20000):
+    v = [rnd.gauss(m, max(4, .18*m)) for _, m in T]; w[v.index(max(v))] += 1
+for (p, m), c in sorted(zip(T, w), key=lambda z: -z[1])[:12]: print("CHANCE", p, round(m,1), round(c/20000,3))
+for x in top[:3]:
+    p = MV.norm_name(x[0]); print("WCHANCE", p, [round(c/20000,3) for (q, _), c in zip(T, w) if q == p])
