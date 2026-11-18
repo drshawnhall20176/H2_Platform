@@ -260,7 +260,9 @@ with st.expander("🎫 Log a parlay ticket (one stake, one total price)", expand
         if _t and _t not in _headed:
             _legacy.setdefault(_t, []).append(_b)
     st.caption("One leg per line: **Player | Market | Side | Line** (add **| Away @ Home** for a leg from another "
-               "game). Example: `John Collins | Rebounds | Over | 6.5`. A ticket whose legs you already logged one by "
+               "game). Example: `John Collins | Rebounds | Over | 6.5`. Game lines leave the player blank and name the team: "
+               "`| Spread | Aris | -9.5 | Le Mans @ Aris` or `| Moneyline | Maxima Roma | | Maxima Roma @ U-BT Cluj-Napoca`. "
+               "A ticket whose legs you already logged one by "
                "one can be converted instead: pick it below and leave the legs box empty.")
     with st.form("log_parlay", clear_on_submit=True):
         p1, p2, p3 = st.columns(3)
@@ -278,7 +280,8 @@ with st.expander("🎫 Log a parlay ticket (one stake, one total price)", expand
                                       key="pl_existing")
             p_notes = st.text_input("Notes", placeholder="optional", key="pl_notes")
         p_legs = st.text_area("Legs", height=150, key="pl_legs",
-                              placeholder="John Collins | Rebounds | Over | 6.5\nJulius Randle | Points | Over | 14.5")
+                              placeholder="John Collins | Rebounds | Over | 6.5\nJulius Randle | Points | Over | 14.5\n"
+                                          "| Spread | Aris | -9.5 | Le Mans @ Aris\n| Moneyline | Maxima Roma | | Maxima Roma @ U-BT Cluj-Napoca")
         if st.form_submit_button("Log parlay ticket", type="primary"):
             _problems = []
             try:
