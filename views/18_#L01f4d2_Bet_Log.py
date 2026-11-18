@@ -26,6 +26,9 @@ from datetime import datetime
 
 import sports
 import betlog as B
+if not hasattr(B, "fix_fields"):            # Nov 18: a redeploy can leave the old betlog module loaded -- pick up the new one
+    import importlib
+    B = importlib.reload(B)
 import bet_settlement
 import prop_settlement as PS
 import mlb_engine as E
