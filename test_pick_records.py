@@ -75,3 +75,11 @@ def test_band_table_lists_every_gap_size_with_its_record():
     assert [(r["Record"], r["Graded"], r["Read"]) for r in rows] == [
         ("10–12", 22, "Losing"), ("—", 0, "No games yet"), ("3–2", 5, "Too few to judge")]
     assert rows[0]["Hit rate"] == 0.455 and rows[1]["Hit rate"] is None
+
+
+def test_likely_range_is_honest_about_small_samples():
+    lo, hi = PR.likely_range(11, 14)
+    assert 0.6 < lo < 0.65 and 0.87 < hi < 0.91
+    lo2, hi2 = PR.likely_range(110, 140)
+    assert hi2 - lo2 < (hi - lo) / 2
+    assert PR.range_text(0, 0) == "—" and PR.likely_range(0, 0) is None

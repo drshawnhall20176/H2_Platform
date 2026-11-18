@@ -17,6 +17,9 @@ from typing import Dict, List, Optional, Sequence
 
 STATUS_KEY = "watch:status"
 MIN_DAYS, MIN_READS, DROP_BELOW = 14, 30, -0.05
+# Nov 18: dozens of groups were searched to find these six, so some made money by luck. Promotion now needs the profit
+# to clear zero by a margin: average profit per $1 minus PROMOTE_Z standard errors still above 0 (one-sided ~90%).
+PROMOTE_Z = 1.28
 FAR = 0.15                     # |projection - line| / line at or above this = "far" from the number
 
 RULES: List[Dict] = [
@@ -111,6 +114,7 @@ def judge(sport: str, graded_by_date: Dict[str, Sequence[Dict]], today: str,
     for r in (x for x in RULES if x["sport"] == sport):
         n = h = 0
         units = 0.0
+        rets = []
         for d, rows in graded_by_date.items():
             if d < r["since"]:
                 continue
@@ -127,16 +131,22 @@ def judge(sport: str, graded_by_date: Dict[str, Sequence[Dict]], today: str,
                 n += 1
                 h += y
                 units += (dec - 1) if y else -1.0
+                rets.append((dec - 1) if y else -1.0)
         prev = (out.get(r["id"]) or {}).get("status", "watch")
         days = (date.fromisoformat(today) - date.fromisoformat(r["since"])).days
         status = prev
+        floor = None
+        if n >= 2:
+            m = units / n
+            sd = (sum((x - m) ** 2 for x in rets) / (n - 1)) ** 0.5
+            floor = m - PROMOTE_Z * sd / n ** 0.5
         if prev == "watch" and n >= MIN_READS:
             if units / n < DROP_BELOW:
                 status = "dropped"
-            elif days >= MIN_DAYS and units > 0:
+            elif days >= MIN_DAYS and floor is not None and floor > 0:
                 status = "promoted"
         out[r["id"]] = {"status": status, "n": n, "hits": h, "profit_per_1": round(units / n, 4) if n else None,
-                        "days": days, "updated": today}
+                        "profit_floor": None if floor is None else round(floor, 4), "days": days, "updated": today}
     return out
 
 

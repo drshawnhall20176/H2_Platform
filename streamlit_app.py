@@ -108,13 +108,16 @@ def _today_sidebar() -> None:
         if not rows:
             st.caption("The record appears after the first morning reviews.")
             return
-        lines = ["| Sport | Bet picks | No edge |", "|---|---|---|"]
+        import pick_records as _PR
+        lines = ["| Sport | Bet picks | Likely | No edge |", "|---|---|---|---|"]
         for sp, bh, bn, ph, pn, tr in rows:
             bet = f"{bh / bn:.0%} ({bn})" if bn else "—"
+            rng = _PR.range_text(bh, bn) if bn else "—"
             pas = f"{ph / pn:.0%}" if pn else "—"
-            lines.append(f"| {sp} | {bet} | {pas} |")
+            lines.append(f"| {sp} | {bet} | {rng} | {pas} |")
         st.markdown("\n".join(lines))
-        st.caption("**Bet picks** = every read tagged 🎯 / 🎟️ (hit rate, graded count); **No edge** = the coin flips "
+        st.caption("**Bet picks** = every read tagged 🎯 / 🎟️ (hit rate, graded count); **Likely** = where the true hit "
+                   "rate probably sits given how many have been graded (a small sample is a wide range); **No edge** = the coin flips "
                    "the platform said to skip — near 50% is what it should be. A −110 price needs 52.4%.")
         try:
             sides = _side_rows()

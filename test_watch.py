@@ -19,7 +19,13 @@ def test_watch_tags_and_promotion():
     g = {"2026-11-20": [{"result": "hit", "market": "Rush Attempts", "side": "Under", "under_price": -110}] * 20
          + [{"result": "miss", "market": "Rush Attempts", "side": "Under", "under_price": -110}] * 12}
     st = W.judge("NFL", g, "2026-12-02")
-    assert st["nfl_rush_att_under"]["status"] == "promoted" and st["nfl_rush_att_under"]["n"] == 32
+    # Nov 18: 20-12 at -110 (+19% per $1) could still be luck at 32 reads -- the profit has to clear zero by a margin
+    assert st["nfl_rush_att_under"]["status"] == "watch" and st["nfl_rush_att_under"]["n"] == 32
+    assert st["nfl_rush_att_under"]["profit_floor"] < 0
+    g = {"2026-11-20": [{"result": "hit", "market": "Rush Attempts", "side": "Under", "under_price": -110}] * 26
+         + [{"result": "miss", "market": "Rush Attempts", "side": "Under", "under_price": -110}] * 10}
+    st = W.judge("NFL", g, "2026-12-02")
+    assert st["nfl_rush_att_under"]["status"] == "promoted" and st["nfl_rush_att_under"]["profit_floor"] > 0
     bad = {"2026-11-20": [{"result": "miss", "market": "Rush Attempts", "side": "Under", "under_price": -110}] * 31}
     assert W.judge("NFL", bad, "2026-11-25")["nfl_rush_att_under"]["status"] == "dropped"
 
