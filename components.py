@@ -479,7 +479,7 @@ def _schedule_header_html(columns: str, show_roster: bool) -> str:
     return _grid_row(columns, cells, extra_style="padding:0 10px 6px;border-bottom:1px solid #262b33;margin-bottom:4px;")
 
 
-def _schedule_game_row(g: dict, color: str, columns: str, show_roster: bool) -> str:
+def _schedule_game_row(g: dict, color: str, columns: str, show_roster: bool, with_day: bool = False) -> str:
     """One game's self-contained HTML row, laid out as grid cells matching the shared column
     template (see _GRID_COLS_WITH_ROSTER/_GRID_COLS_NO_ROSTER and _schedule_header_html) so it
     genuinely aligns under the header instead of each row sizing its own content independently.
@@ -496,7 +496,7 @@ def _schedule_game_row(g: dict, color: str, columns: str, show_roster: bool) -> 
     lines get treated as an indented Markdown code block and leak as literal escaped text instead
     of rendering as HTML."""
     if g.get("time_known") and g.get("dt") is not None:
-        time_str = g["dt"].strftime("%-I:%M %p ET")
+        time_str = g["dt"].strftime("%a %-I:%M %p ET" if with_day else "%-I:%M %p ET")
     elif g.get("dt") is not None:
         # A REAL, CONFIRMED FIX, not the original design: NCAAF's own start_time_tbd case still
         # carries a real, parsed dt (the DATE parses fine even when the specific kickoff time
@@ -591,7 +591,21 @@ def todays_schedule_board(result: Optional[dict], icon: str, label: str,
     # Checked ONCE across the whole result, not per conference/game -- a sport either has real
     # lineup data or it doesn't, so the Roster Status column (and its legend) should be all-or-
     # nothing for this render, not flicker in and out box to box.
+    # Nov 18 (owner): every group earliest to latest -- a football week merges several dates, so each list is sorted
+    # again here, and when the games span more than one day the time shows its day ("Fri 7:30 PM ET"): a Friday night
+    # game at the top of a Saturday list otherwise reads as out of order.
+    def _when(g):
+        dt = g.get("dt")
+        return (dt is None and not g.get("date_str"), dt.isoformat() if dt is not None else (g.get("date_str") or ""),
+                g.get("away") or "")
+    for divs in grouped.values():
+        for k in list(divs):
+            divs[k] = sorted(divs[k], key=_when)
+    other = sorted(other, key=_when)
     all_games = [g for divs in grouped.values() for gs in divs.values() for g in gs] + other
+    days = {(g["dt"].date() if g.get("dt") is not None else g.get("date_str")) for g in all_games
+            if g.get("dt") is not None or g.get("date_str")}
+    with_day = len(days) > 1
     show_roster = any(g.get("home_lineup_confirmed") is not None
                       or g.get("away_lineup_confirmed") is not None for g in all_games)
     columns = _GRID_COLS_WITH_ROSTER if show_roster else _GRID_COLS_NO_ROSTER
@@ -617,13 +631,13 @@ def todays_schedule_board(result: Optional[dict], icon: str, label: str,
                                   f'letter-spacing:0.6px;">{div}</span>'],
                                  extra_style="margin:8px 0 4px;"),
                         unsafe_allow_html=True)
-                    rows = "".join(_schedule_game_row(g, color, columns, show_roster)
+                    rows = "".join(_schedule_game_row(g, color, columns, show_roster, with_day)
                                    for g in divisions[div])
                     st.markdown(rows, unsafe_allow_html=True)
             else:
                 # No division level for this sport (WNBA/NCAAF) -- every game for this
                 # conference lives under the single None key group_games always uses.
-                rows = "".join(_schedule_game_row(g, color, columns, show_roster)
+                rows = "".join(_schedule_game_row(g, color, columns, show_roster, with_day)
                                for g in divisions.get(None, []))
                 st.markdown(rows, unsafe_allow_html=True)
 
@@ -651,7 +665,7 @@ def todays_schedule_board(result: Optional[dict], icon: str, label: str,
             st.caption("Home team not in this platform's own conference/division reference "
                       "table yet (a real gap, not a hidden game) -- still shown below.")
             st.markdown(_schedule_header_html(columns, show_roster), unsafe_allow_html=True)
-            rows = "".join(_schedule_game_row(g, gray, columns, show_roster) for g in other)
+            rows = "".join(_schedule_game_row(g, gray, columns, show_roster, with_day) for g in other)
             st.markdown(rows, unsafe_allow_html=True)
 
 
