@@ -63,7 +63,7 @@ def test_spread_why_says_this_games_gap_and_how_that_size_has_done():
     assert "losing" in close and close.endswith("long backtest 51%")
     assert mid == "Moderate gap (3.9 pts) · 3–6 pt gaps: none graded in the last 30 days · long backtest 51%"
     assert big.startswith("Big gap (19.1 pts) · 6+ pt gaps, last 30 days: 14–9 (61%")
-    assert PR.spread_why("NBA", _g(7.0), {}, None) == "Big gap (7.0 pts) · 6+ pt gaps: none graded in the last 30 days"
+    assert PR.spread_why("NBA", _g(7.0), {}, None) == "Big gap (7.0 pts) · 7+ pt gaps: none graded in the last 30 days"
     assert PR.spread_why("NCAAMB", {"edge": None}, recs, 0.508) == "long backtest: the model's side covered 51%"
     assert PR.spread_why("NBA", {}, None, None) == "no tested edge in this league"
 

@@ -272,7 +272,10 @@ def _dec(a) -> Optional[float]:
 # (cover_est: NCAAMB and the international spread models) it is used as is and the bet is "tested"; otherwise the
 # chance comes from the projected score with the spread of outcomes below, pulled halfway to 50% (UNTESTED_SHRINK)
 # because nothing has checked it yet -- and labeled untested.
-MARGIN_SD = {"NCAAMB": 11.0, "NBA": 12.5, "NHL": 2.3, "NCAAF": 15.5, "INTL": 11.0, "NFL": 13.0}
+# Nov 18 (research/game_spread.py, 1,155 NBA games with a line, 2025-26 + this season): NBA finals land 14.2 points
+# from the closing spread on average (SD), not 12.5 -- 20+ point margins happened 23.8% vs 18.9% at 12.5. The other
+# leagues measured within half a point of these values (NCAAMB 11.3, NCAAF 15.1, NFL 12.1; totals all within 0.7).
+MARGIN_SD = {"NCAAMB": 11.0, "NBA": 14.0, "NHL": 2.3, "NCAAF": 15.5, "INTL": 11.0, "NFL": 13.0}
 TOTAL_SD = {"NCAAMB": 17.0, "NBA": 18.0, "NHL": 2.3, "NCAAF": 16.0, "INTL": 16.0, "NFL": 13.5}
 UNTESTED_SHRINK = 0.5
 UNTESTED_MAX = 0.60             # a big untested disagreement is more often the model's error than the market's
