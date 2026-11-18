@@ -831,7 +831,7 @@ def render_ticket(all_rows, market):
                 st.metric("Hit chance", f"{legs[0]['p']:.1%}")
             res = None
         else:
-            res = PE.sgp(legs, price)
+            res = PE.sgp(legs, price, sport=SPORT_KEY)
             with p2:
                 m1, m2, m3, m4 = st.columns(4)
                 m1.metric("Hit chance", f"{res['p_joint']:.1%}", help="Legs from the same game move together.")

@@ -741,6 +741,7 @@ def build_matchup_profile(row: Dict, h2h_log: List[Dict], opp_recent_allowed: Di
 # adjustment of each team's own rate by (opponent_allowed / league_avg), rather than a simple
 # average. A strong offense facing a strong defense blends correctly, not just halving a number.
 
+_GAME_TEAM_SD = 10.7
 DEFAULT_GAME_SIMS = 5_000  # reduced from 20000: win prob estimate < 0.5% diff, 4x faster
 
 
@@ -779,8 +780,10 @@ def simulate_ncaaf_game(home_scoring: Optional[Dict[str, float]],
     # meaningful variance for a full football game (a single scoring play swings 3-8 points and
     # games routinely differ from expectations by 1-2 scores). Floor of 0 would produce
     # unrealistically tight win-probability distributions especially early in the season.
-    home_std = max(7.0, abs(home_scoring["recent_avg"] - home_scoring["season_avg"]))
-    away_std = max(7.0, abs(away_scoring["recent_avg"] - away_scoring["season_avg"]))
+    # Nov 18 (research/game_spread.py, 690 FBS games with a line): finals land 15.1 points from the spread (SD); two
+    # independent 7.0 floors made that 9.9 and the win chances far too sure. Floor = 15.1 / sqrt(2) per team.
+    home_std = max(_GAME_TEAM_SD, abs(home_scoring["recent_avg"] - home_scoring["season_avg"]))
+    away_std = max(_GAME_TEAM_SD, abs(away_scoring["recent_avg"] - away_scoring["season_avg"]))
 
     rng = np.random.default_rng(seed)
     home_scores = rng.normal(home_proj, home_std, n_sims)

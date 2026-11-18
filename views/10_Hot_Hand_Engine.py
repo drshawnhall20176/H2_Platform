@@ -220,6 +220,13 @@ if _active.key == "NBA":
         if not _k:
             st.caption("Not enough player data for tonight yet.")
         else:
+            _field = KOTC.field_chance(_k)
+            if _field is not None:
+                _top = _k[0]
+                st.markdown(f"**Favorite:** {_top['Player']} {_top['King chance']:.0%} · **The field** (anyone outside "
+                            f"the top {KOTC.FIELD_TOP}): **{_field:.0%}**")
+                st.caption("The crown went to someone outside the model's top 5 on 9 of the 18 NBA nights we checked "
+                           "(Oct 30 – Nov 17). A favorite's price only has value if it beats his chance here.")
             _kdf = pd.DataFrame(_k[:25])
             _kdf["Blowout chance"] = _kdf["Blowout chance"].apply(lambda v: "—" if v is None or v != v else f"{v:.0%}")
             st.dataframe(_kdf[["Player", "Team", "Opp", "King chance", "Adj PRA", "Proj PRA", "Source", "Ceiling (90th)",
@@ -229,7 +236,10 @@ if _active.key == "NBA":
                              "King chance", format="percent", min_value=0.0, max_value=max(0.25, float(_kdf["King chance"].max()))),
                              "Min at risk": st.column_config.NumberColumn(format="%.1f")})
             st.caption(
-                "**King chance** = how often he posts the slate's top PRA across 20,000 simulated nights. "
+                "**King chance** = how often he posts the slate's top PRA across 20,000 simulated nights. Every "
+                "rotation player is in the simulation, and each player's night is drawn from how players at his "
+                "projection level have actually finished against the model (a 15-PRA scorer reaches 2-3x his projection "
+                "about 1 night in 20; a 45-PRA star rarely beats 1.5x). "
                 "**Proj PRA** = the platform's model (its PRA read, or its Points + Rebounds + Assists reads); "
                 "**Source** says \"form × matchup\" only for a player the model has no read on yet. **Adj PRA** takes off "
                 "the minutes a starter loses when his game blows out — about 3 minutes, measured over ~10,000 games — "

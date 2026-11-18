@@ -41,7 +41,7 @@ def test_group_prior_and_measured_correlation():
     R = SIM.correlation_matrix([a, b, c])
     assert abs(R[0, 1] - 0.19) < 0.02 and abs(R[0, 2] - 0.15) < 0.02
     assert abs(SIM.correlation_matrix([a, b], rho_game=0.08)[0, 1] - 0.08) < 1e-6      # a slider still wins
-    assert SIM.measured_rho("NBA") == (0.28, -0.03) and SIM.measured_rho("MLB") == (0.30, 0.08)
+    assert SIM.measured_rho("NBA") == (0.27, -0.01) and SIM.measured_rho("MLB") == (0.30, 0.08)
 
 
 def test_record_label_shows_its_range():

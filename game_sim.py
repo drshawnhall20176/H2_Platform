@@ -24,6 +24,9 @@ import zlib
 from typing import Dict, Iterable, List, Optional
 
 N_SIMS = 20000
+HOCKEY_TIE_MIX = 0.17           # share of decided regulation games pulled level (research/nhl_finish.py, Nov 18)
+HOCKEY_EN = (0.50, 0.85, 0.30)  # empty-net goal when up 1, up 2, and a second one after that
+HOCKEY_ENG_GOALS = 0.38         # goals those add on average (taken off the base so the total stays the model's)
 RECENT_N = 5
 HOCKEY = ("NHL",)
 FOOTBALL = ("NFL", "NCAAF")
@@ -56,7 +59,25 @@ def simulate(league: str, margin: Optional[float], total: Optional[float], key="
     rng = np.random.default_rng(_seed(f"{league}:{key}:{margin:.2f}:{total:.2f}"))
     fam = family(league)
     if fam == "hockey":
-        h, a = rng.poisson(hm, n).astype(float), rng.poisson(am, n).astype(float)
+        # Nov 18 (research/nhl_finish.py, 1,612 games): plain Poisson gave 16.6% overtime (real 24.3%) and 3-goal
+        # finishes 15% (real 23% -- empty-net goals). Calibrated: some regulation games pulled level (HOCKEY_TIE_MIX),
+        # then the leader's empty-net goal at 1 and 2 goals up; the base rate is lowered by the goals that adds.
+        f = max(total - HOCKEY_ENG_GOALS, 0.5) / total
+        h, a = rng.poisson(hm * f, n), rng.poisson(am * f, n)
+        s = h + a
+        mix = (h != a) & (rng.random(n) < HOCKEY_TIE_MIX)
+        odd_home = rng.random(n) < 0.5
+        lo, hi = s // 2, s - s // 2
+        h = np.where(mix, np.where(odd_home, hi, lo), h)
+        a = np.where(mix, s - h, a)
+        d = np.abs(h - a)
+        u = rng.random(n)
+        en = ((d == 1) & (u < HOCKEY_EN[0])) | ((d == 2) & (u < HOCKEY_EN[1]))
+        en2 = en & (d == 2) & (rng.random(n) < HOCKEY_EN[2])
+        add = en.astype(int) + en2.astype(int)
+        home_leads = h > a
+        h = (h + np.where(home_leads, add, 0)).astype(float)
+        a = (a + np.where(home_leads, 0, add)).astype(float)
         ot = h == a
         home_ot = rng.random(n) < 0.5
         h = np.where(ot & home_ot, h + 1, h)

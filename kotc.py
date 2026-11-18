@@ -12,8 +12,16 @@ For each rotation player on tonight's NBA slate:
                blowout chance above tonight's average game, times that loss
   Adj PRA      Proj PRA scaled by the minutes he's expected to keep
   Ceiling      his 90th-percentile PRA over his recent games (how high he goes on a good night)
-  King chance  share of 20,000 simulated nights where he posts the slate's top PRA (each player normal around his
-               Adj PRA with his own game-to-game spread; injured-out players dropped)
+  King chance  share of 20,000 simulated nights where he posts the slate's top PRA; injured-out players dropped
+
+Nov 18 (the Sensabaugh / Grimes night: two players the model had at ~15 PRA tied for the crown at 56 while Luka sat at
+76%). The simulation now (research/kotc_backtest.py + kotc_sweep.py, every NBA night with saved reads):
+  * runs the WHOLE field, not the top 40 -- the crown came from outside the top 5 on 9 of 18 nights
+  * draws each player's night from how players at his projection level actually finished against the model's
+    projection (RATIO_Q: 1,700+ graded player-nights) instead of a normal curve: a 15-PRA bench scorer goes 2-3x his
+    projection about 1 night in 20, a 45-PRA star rarely beats 1.5x. Spread scaled by RATIO_SHRINK (fitted: 0.8)
+  Result on those nights: the old way gave the top 5 an average 91% and they won 9 of 18; the new way says ~68% and
+  they won 10 of 18. Log score on the actual winner 3.38 -> 3.03; the old way gave the eventual winner 0% on 3 nights.
 """
 from __future__ import annotations
 
@@ -23,6 +31,20 @@ from typing import Dict, List, Optional, Sequence
 PRA_MARKETS = ("Points", "Rebounds", "Assists")
 STARTER_BLOWOUT_MIN_LOSS = 2.8      # script study: starters -2.99 (winning blowout) / -2.59 (losing one)
 SIMS = 20000
+# actual PRA / model PRA projection, 5% quantiles (0, 5, ..., 100%), by projection band -- research/kotc_sweep.py, Nov 18
+RATIO_BANDS = (15.0, 25.0, 35.0)          # < 15, 15-25, 25-35, 35+
+RATIO_Q = (
+    (0.0, 0.312, 0.407, 0.536, 0.618, 0.696, 0.75, 0.836, 0.918, 0.985, 1.03, 1.13, 1.197, 1.283, 1.339, 1.432, 1.539,
+     1.669, 1.919, 2.172, 3.965),
+    (0.047, 0.393, 0.528, 0.596, 0.653, 0.717, 0.772, 0.828, 0.864, 0.915, 0.965, 1.026, 1.087, 1.148, 1.213, 1.271,
+     1.369, 1.473, 1.58, 1.765, 3.385),
+    (0.2, 0.4, 0.56, 0.627, 0.713, 0.794, 0.828, 0.876, 0.911, 0.948, 0.999, 1.026, 1.063, 1.111, 1.146, 1.202, 1.262,
+     1.334, 1.393, 1.5, 2.275),
+    (0.08, 0.596, 0.648, 0.694, 0.735, 0.776, 0.812, 0.828, 0.859, 0.909, 0.945, 0.962, 0.979, 0.994, 1.028, 1.076,
+     1.115, 1.153, 1.198, 1.339, 1.799),
+)
+RATIO_SHRINK = 0.8
+FIELD_TOP = 5                             # "the field" = everyone outside the top 5 by King chance
 
 
 def _pct(xs: Sequence[float], q: float) -> Optional[float]:
@@ -99,10 +121,6 @@ def build(board: Sequence[Dict], player_info: Dict, blow: Dict[str, Dict], out_p
         if chance is not None and starter:
             risk = max(0.0, (chance - avg_chance)) * STARTER_BLOWOUT_MIN_LOSS
         adj = a["proj"] * (1 - risk / mins) if mins else a["proj"]
-        sd = None
-        if len(pra_log) >= 4:
-            m = sum(pra_log) / len(pra_log)
-            sd = math.sqrt(sum((x - m) ** 2 for x in pra_log) / (len(pra_log) - 1))
         mp = model_proj.get(MV.norm_name(a["Player"]))
         if mp is not None:
             a["proj"] = mp
@@ -113,24 +131,36 @@ def build(board: Sequence[Dict], player_info: Dict, blow: Dict[str, Dict], out_p
                      "Minutes": None if mins is None else round(mins, 1),
                      "Blowout chance": chance, "Min at risk": round(risk, 1) if risk else 0.0,
                      "Adj PRA": round(adj, 1), "Ceiling (90th)": None if not pra_log else round(_pct(pra_log, 0.9), 1),
-                     "Best recent": None if not pra_log else max(pra_log), "_sd": max(4.0, sd or 0.18 * adj),
+                     "Best recent": None if not pra_log else max(pra_log),
                      "Spread": g.get("line"), "Blowout pick": g.get("who_big")})
     rows.sort(key=lambda r: -r["Adj PRA"])
-    top = rows[:40]                                            # the crown never comes from deeper than this
-    if top:
-        import random
-        rnd = random.Random(seed)
-        wins = [0] * len(top)
-        for _ in range(sims):
-            best, bi = -1e9, 0
-            for i, r in enumerate(top):
-                v = rnd.gauss(r["Adj PRA"], r["_sd"])
-                if v > best:
-                    best, bi = v, i
-            wins[bi] += 1
-        for r, w in zip(top, wins):
-            r["King chance"] = w / sims
-    for r in rows:
-        r.setdefault("King chance", 0.0)
+    if rows:
+        import numpy as np
+        rng = np.random.default_rng(seed)
+        adj = np.array([max(r["Adj PRA"], 0.0) for r in rows])
+        band = np.searchsorted(np.array(RATIO_BANDS), adj, side="right")
+        qs = np.array(RATIO_Q)
+        grid = np.linspace(0.0, 1.0, qs.shape[1])
+        wins = np.zeros(len(rows))
+        chunk = 4000
+        for start in range(0, sims, chunk):
+            n = min(chunk, sims - start)
+            u = rng.random((n, len(rows)))
+            ratio = np.empty_like(u)
+            for b in range(len(RATIO_Q)):
+                cols = band == b
+                if cols.any():
+                    ratio[:, cols] = np.interp(u[:, cols], grid, qs[b])
+            nights = adj * (1.0 + RATIO_SHRINK * (ratio - 1.0))
+            wins += np.bincount(nights.argmax(axis=1), minlength=len(rows))
+        for r, w in zip(rows, wins):
+            r["King chance"] = float(w) / sims
     rows.sort(key=lambda r: (-r["King chance"], -r["Adj PRA"]))
     return rows
+
+
+def field_chance(rows: Sequence[Dict], top: int = FIELD_TOP) -> Optional[float]:
+    """Chance the crown goes to someone outside the top `top` by King chance (rows as build() returns them)."""
+    if not rows:
+        return None
+    return max(0.0, 1.0 - sum(r.get("King chance") or 0.0 for r in rows[:top]))

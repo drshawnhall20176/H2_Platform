@@ -7,10 +7,10 @@ def test_basketball_simulation_is_centred_on_the_models_projection_and_spreads_l
     assert (s["proj_home_score"], s["proj_away_score"], s["proj_spread"], s["proj_total"]) == (116.0, 110.0, 6.0, 226.0)
     assert s["n_sims"] == 20000 and s["family"] == "basketball" and s["overtime"] is None
     lo, hi = s["margin_range"]
-    assert -11.5 < lo < -8.5 and 20.5 < hi < 23.5                 # 6 +/- 1.28 x 12.5 (the NBA margin spread)
+    assert -13.5 < lo < -10.5 and 22.5 < hi < 25.5                # 6 +/- 1.28 x 14 (the NBA margin spread, Nov 18)
     tlo, thi = s["total_range"]
     assert 201 < tlo < 205 and 247 < thi < 251                    # 226 +/- 1.28 x 18
-    assert 0.66 < s["sim_home_win"] < 0.71                        # agrees with a normal margin: P(N(6, 12.5) > 0) = 68%
+    assert 0.64 < s["sim_home_win"] < 0.69                        # agrees with a normal margin: P(N(6, 14) > 0) = 66.6%
     assert 0 < s["close"] < s["sim_home_win"] and 0 < s["blowout"] < 0.5
     assert GS.simulate("NBA", 6.0, 226.0, key="g1") == s          # the same game never flickers
     assert GS.simulate("NBA", 6.0, 226.0, key="g2") != s
@@ -67,3 +67,10 @@ def test_game_lab_shows_the_two_sections_for_a_chosen_game(monkeypatch):
     assert "Total likely range" in m and "Decided by 15+ points" in m and "Decided by 5 or fewer" in m
     assert [x.value for x in at.metric if x.label == "Recent avg scored"] == ["104.0", "114.0"]   # away, then home
     assert any(s.label == "Game to simulate" for s in at.selectbox)
+
+
+def test_hockey_finishes_look_like_real_nhl_games():
+    """Nov 18 (research/nhl_finish.py, 1,612 games): 24% go to overtime and 3-goal finishes are common (empty nets)."""
+    s = GS.simulate("NHL", 0.0, 6.0, key="even", n=100000)
+    assert 0.21 < s["overtime"] < 0.26
+    assert 0.36 < s["blowout"] < 0.44 and 0.38 < s["close"] < 0.46
