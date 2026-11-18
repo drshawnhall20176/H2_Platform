@@ -104,3 +104,10 @@ def test_a_market_needs_held_out_proof_either_way(monkeypatch):
     g = _graded_mk(2, 300, [("Assists", 0.54, 0.50, 0.58)])         # plenty of reads but 2 days: no splits
     d = CAL.auto_trust_markets("NBA", g, "2026-11-18", write=False)[0]
     assert not d["applied"] and ("not enough" in d["why"] or "didn't hold up" in d["why"])
+
+
+def test_college_basketball_is_on_the_props_model():
+    """Nov 18 (research/coverage.py): college basketball's board never reached the props model -- no snapshots,
+    grading, tags or calibration."""
+    import best_bets_data as BBD
+    assert "NCAAMB" in BBD.PROPS_MODEL_SPORTS and callable(BBD._ncaamb_reads)
