@@ -43,7 +43,8 @@ def shortlist(sport: str, plays: List[Dict], records_for: Optional[Callable] = N
         if r.get("player") in seen:
             continue
         seen.add(r.get("player"))
-        out.append({"pick": r["pick"], "chance": r.get("chance"), "price": _price(r.get("price"), r.get("book")),
+        out.append({"pick": r["pick"], "chance": r.get("chance"),
+                    "price": ("pick'em only" if r.get("pickem_only") else _price(r.get("price"), r.get("book"))),
                     "game": r.get("game") or "", "time": r.get("time") or "", "lock": bool(r.get("lock")),
                     "standing": WINNING if r.get("verdict") == "ok" else NEW, "record": r.get("record") or ""})
         if len(out) >= n:

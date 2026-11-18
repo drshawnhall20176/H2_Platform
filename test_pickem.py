@@ -133,3 +133,14 @@ def test_lines_far_from_the_books_stay_out_of_entries(monkeypatch):
                "under": {"draftkings": -110}}]
     (a,) = PK.legs(reads, offers, "prizepicks", "NBA")
     assert a["far"] and a["chance"] > 0.7 and PK.best_entry([a], 1, 0.5) == []
+
+
+def test_a_pickem_only_line_is_never_a_lock():
+    """Nov 18 (owner said yes): 🔒 Most probable needs a sportsbook line."""
+    assert PE.is_lock(0.73, 0.2) and not PE.is_lock(0.73, 0.2, book="prizepicks")
+    assert not PE.is_lock(0.73, 0.2, pickem=True) and PE.is_lock(0.73, 0.2, book="draftkings")
+    p = {"ModelProb": 0.73, "Cushion": 0.2, "Gap": None, "Pickem": True, "PricedAt": "prizepicks"}
+    assert not PE.play_is_lock(p) and PE.play_is_lock(dict(p, Pickem=False))
+    import todays_best as TB
+    rows = TB.props_rows("NBA", [dict(p, Use=PE.USE_PARLAY, Player="G B", Market="Rebounds", Side="Under", Line=5.5)])
+    assert rows and not rows[0]["lock"] and rows[0]["pickem_only"]
