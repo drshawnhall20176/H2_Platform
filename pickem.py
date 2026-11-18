@@ -59,12 +59,27 @@ def _norm(s) -> str:
     return PE.norm_name(s)
 
 
+def p_more(projection, values, dist, line) -> Optional[float]:
+    """Chance of MORE at an app line. A whole-number line can tie (the apps void a tied pick and drop the entry a
+    level), so it is the chance of more GIVEN no tie: P(X >= L+1) / (P(X >= L+1) + P(X <= L-1))."""
+    import props_engine as PE
+    L = float(line)
+    if L != int(L):
+        return PE.prob_over(projection, values, L, dist)
+    gt = PE.prob_over(projection, values, L + 0.5, dist)
+    ge = PE.prob_over(projection, values, L - 0.5, dist)
+    if gt is None or ge is None:
+        return None
+    lt = 1.0 - ge
+    return gt / (gt + lt) if gt + lt > 0 else None
+
+
 def books_chance_at(read: Dict, book_line: float, p_book_over: float, app_line: float) -> Optional[float]:
     """The books' no-vig chance of OVER, moved from their line to the app's line along the model's own outcome curve
     for this player (the projection is slid until the curve gives the books' chance at the books' line)."""
     import props_engine as PE
     values, dist = list(read.get("values") or []), read.get("dist") or "normal"
-    if abs(float(book_line) - float(app_line)) < 1e-9:
+    if abs(float(book_line) - float(app_line)) < 1e-9 and float(app_line) != int(float(app_line)):
         return p_book_over
     proj = read.get("projection")
     if proj is None:
@@ -80,7 +95,7 @@ def books_chance_at(read: Dict, book_line: float, p_book_over: float, app_line: 
             lo = mid
         else:
             hi = mid
-    return PE.prob_over((lo + hi) / 2, values, float(app_line), dist)
+    return p_more((lo + hi) / 2, values, dist, float(app_line))
 
 
 def legs(reads: Dict, offers: Sequence[Dict], app: str, sport: str) -> List[Dict]:
@@ -99,40 +114,37 @@ def legs(reads: Dict, offers: Sequence[Dict], app: str, sport: str) -> List[Dict
         read = by_key.get((pl, mk))
         if not read:
             continue
-        mine = [o for o in offs if app in (o.get("pickem") or {})]
-        if not mine:
-            continue
-        o_app = max(mine, key=lambda o: len(o.get("pickem") or {}))
-        app_line = float(o_app["point"])
-        sides = o_app["pickem"][app]
-        p_model = PE.prob_over(read["projection"], read.get("values") or [], app_line, read.get("dist") or "normal")
-        if p_model is None:
+        # the app's line for each side (DK Pick6 sometimes posts More and Less at different numbers)
+        cands = []
+        for o in offs:
+            for pside, entry in ((o.get("pickem") or {}).get(app) or {}).items():
+                cands.append((pside, float(o["point"]), (entry or {}).get("multiplier"), o.get("commence_time")))
+        if not cands:
             continue
         priced = [o for o in offs if (o.get("over") or {}) and (o.get("under") or {})]
         book = PE.shop(priced) if priced else None
-        p_books = None
-        if book and book.get("p_market") is not None:
-            p_books = books_chance_at(read, book["line"], book["p_market"], app_line)
-        if p_books is not None:
-            t = PE.trust_for(sport, read.get("market"))
-            w = PE.MODEL_WEIGHT * (1.0 if t is None else t)
-            p = p_books + w * (p_model - p_books)
-            basis = "books"
-        else:
-            p = 0.5 + NO_BOOK_SHARE * (p_model - 0.5)
-            basis = "model only"
-        side = "More" if p >= 0.5 else "Less"
-        if (side == "More" and "over" not in sides) or (side == "Less" and "under" not in sides):
-            # the app only offers the other side (some lines are More-only)
-            side = "More" if "over" in sides else "Less"
-        chance = p if side == "More" else 1 - p
-        mult = ((sides.get("over" if side == "More" else "under") or {}).get("multiplier"))
-        out.append({"player": read["player"], "market": read.get("market"), "market_key": mk, "game": read.get("game"),
-                    "team": read.get("team_name") or read.get("team"), "kickoff": o_app.get("commence_time"),
-                    "app_line": app_line, "side": side, "chance": chance, "p_over": p, "basis": basis,
-                    "projection": read["projection"], "model_over": p_model,
-                    "book_line": book["line"] if book else None, "book_over": book.get("p_market") if book else None,
-                    "books_over_at_app": p_books, "multiplier": mult})
+        t = PE.trust_for(sport, read.get("market"))
+        w = PE.MODEL_WEIGHT * (1.0 if t is None else t)
+        best = None
+        for pside, line, mult, kick in cands:
+            pm = p_more(read["projection"], read.get("values") or [], read.get("dist") or "normal", line)
+            if pm is None:
+                continue
+            pb = books_chance_at(read, book["line"], book["p_market"], line) \
+                if book and book.get("p_market") is not None else None
+            p = (pb + w * (pm - pb)) if pb is not None else (0.5 + NO_BOOK_SHARE * (pm - 0.5))
+            side = "More" if pside == "over" else "Less"
+            chance = p if side == "More" else 1 - p
+            if best is None or chance > best["chance"]:
+                best = {"player": read["player"], "market": read.get("market"), "market_key": mk,
+                        "game": read.get("game"), "team": read.get("team_name") or read.get("team"), "kickoff": kick,
+                        "app_line": line, "side": side, "chance": chance, "p_over": p,
+                        "basis": "books" if pb is not None else "model only", "projection": read["projection"],
+                        "model_over": pm, "book_line": book["line"] if book else None,
+                        "book_over": book.get("p_market") if book else None, "books_over_at_app": pb,
+                        "multiplier": mult}
+        if best:
+            out.append(best)
     out.sort(key=lambda x: (x["basis"] != "books", -x["chance"]))
     return out
 

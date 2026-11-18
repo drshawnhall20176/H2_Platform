@@ -49,3 +49,21 @@ def test_entry_odds():
     f = PK.entry_odds(entry, "prizepicks", flex=True, sport="NBA")
     assert f["table"][3] == 3.0 and abs(sum(f["dist"].values()) - 1) < 1e-9
     assert PK.entry_odds(entry[:1], "prizepicks") is None
+
+
+def test_whole_number_lines_can_tie():
+    vals = [2, 3, 2, 4, 1, 2, 3, 2]
+    p_whole = PK.p_more(2.4, vals, "count", 2.0)          # more than 2, a 2 voids the pick
+    p_half = PE.prob_over(2.4, vals, 2.5, "count")        # 3 or more
+    assert p_whole > p_half                               # the tie is taken out of the losing side
+    assert abs(PK.p_more(2.4, vals, "count", 2.5) - p_half) < 1e-12
+
+
+def test_sides_at_different_lines():
+    reads = {(1, "player_points"): _read(proj=20.0)}
+    offers = [{"market": "player_points", "player": "A B", "point": 21.5, "over": {}, "under": {},
+               "pickem": {"pick6": {"over": {"price": -137, "multiplier": 1.0}}}},
+              {"market": "player_points", "player": "A B", "point": 18.5, "over": {}, "under": {},
+               "pickem": {"pick6": {"under": {"price": -137, "multiplier": 1.0}}}}]
+    lg = PK.legs(reads, offers, "pick6", "NBA")
+    assert len(lg) == 1 and lg[0]["side"] in ("More", "Less")
