@@ -248,6 +248,15 @@ def slates_for(sport: str, morning: str, db_path: Optional[str] = None) -> List[
     return sorted(out)
 
 
+def _clv(trend: Dict[str, List[Dict]]) -> Dict[str, Dict]:
+    """Nov 18: closing-line value by the tag a prop first carried (clv.py) -- did the market move toward it?"""
+    try:
+        import clv as CLV
+        return CLV.record([r for rs in trend.values() for r in rs])
+    except Exception:                                           # noqa: BLE001
+        return {}
+
+
 # --------------------------------------------------------------------------- settling
 def settle(sport: str, open_bets: Sequence[Dict], fetch: Callable = PG._http, write: bool = True,
            bet_db: Optional[str] = None) -> Dict:
@@ -367,7 +376,7 @@ def review_sport(sport: str, morning: str, open_bets: Sequence[Dict], fetch: Cal
             "calibration": cal, "game_picks": games_rep,
             "trend": {"days": TREND_DAYS, "slates": len(trend), "graded": len(trend_rows),
                       "use": PG.use_record(trend_rows), "beat": PG.beat_model(trend_rows),
-                      "sides": PG.side_record(trend_rows)},
+                      "sides": PG.side_record(trend_rows), "clv": _clv(trend)},
             "suggestions": sugg, "settlement": settlement, "auto_tuning": auto_tune}
 
 

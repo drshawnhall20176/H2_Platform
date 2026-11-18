@@ -36,6 +36,11 @@ def _teams(game: Optional[str]) -> Optional[Tuple[str, str]]:
 def _find_player(box: Dict, player: str) -> Optional[Dict]:
     want = PG._norm(PE.norm_name(player))
     hits = [stats.get(want) for stats in (box.get("teams") or {}).values() if stats.get(want) is not None]
+    if not hits:                                                # Nov 18: Josh / Joshua -- one unambiguous match only
+        for stats in (box.get("teams") or {}).values():
+            alt = PG._alias_name(want, stats)
+            if alt:
+                hits.append(stats[alt])
     return hits[0] if len(hits) == 1 else None
 
 

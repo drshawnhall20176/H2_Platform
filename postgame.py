@@ -352,6 +352,28 @@ def cause(rec: Dict, margin: Optional[float]) -> Optional[str]:
     return CAUSE_PLAYER
 
 
+def _alias_name(want: str, roster: Dict) -> Optional[str]:
+    """Nov 18 (research/void_check.py): a few graded props came back void because the book and the box score spell a
+    first name differently (Josh / Joshua Metellus, Matt / Matthew Coleman, Dru / Andru Phillips). The box-score name
+    with the same last name -- the only one on the team -- whose first name shares its first three letters, or one
+    first name ending the other. Never a guess between two players."""
+    parts = want.split()
+    if len(parts) < 2:
+        return None
+    first, last = parts[0], parts[-1]
+    cands = []
+    for n in roster:
+        q = n.split()
+        if len(q) >= 2 and q[-1] == last:
+            cands.append(n)
+    if len(cands) != 1:
+        return None
+    f2 = cands[0].split()[0]
+    if f2[:3] == first[:3] or f2.endswith(first) or first.endswith(f2):
+        return cands[0]
+    return None
+
+
 def grade(snapshots: Sequence[Dict], results: Dict[Tuple[str, str], Dict]) -> List[Dict]:
     """Each snapshot + "actual", "result" (hit / miss / push / void / pending), "model_hit" (the projection's side),
     "actual_opp", "volume_ratio", "cause", "margin"."""
@@ -373,7 +395,10 @@ def grade(snapshots: Sequence[Dict], results: Dict[Tuple[str, str], Dict]) -> Li
             ok = next((k for k in box["score"] if k != tk), None)
             if box["score"].get(tk) is not None and ok is not None:
                 rec["margin"] = box["score"][tk] - box["score"][ok]
-        stats = ((box["teams"].get(tk) or {}) if tk is not None else {}).get(_norm(PE.norm_name(s.get("player"))))
+        roster = (box["teams"].get(tk) or {}) if tk is not None else {}
+        stats = roster.get(_norm(PE.norm_name(s.get("player"))))
+        if stats is None:
+            stats = roster.get(_alias_name(_norm(PE.norm_name(s.get("player"))), roster) or "")
         if stats is None:
             rec["result"] = "void"
             out.append(rec)
@@ -386,6 +411,10 @@ def grade(snapshots: Sequence[Dict], results: Dict[Tuple[str, str], Dict]) -> Li
         line, side = float(s["line"]), s.get("side") or "Over"
         thr = PE.threshold(line)
         rec["actual"] = val
+        if s.get("bet_line") is not None:                     # Nov 18: the bet tag's own line and side
+            bthr = PE.threshold(float(s["bet_line"]))
+            rec["bet_result"] = "push" if val == bthr else \
+                ("hit" if ((val > bthr) == ((s.get("bet_side") or "Over") == "Over")) else "miss")
         if val == thr:
             rec["result"] = "push"
         else:
@@ -402,9 +431,21 @@ def grade(snapshots: Sequence[Dict], results: Dict[Tuple[str, str], Dict]) -> Li
 
 
 # --------------------------------------------------------------------------- summaries
+def as_tagged(r: Dict) -> Dict:
+    """Nov 18: a prop that carried a bet tag at any point is graded as that FIRST bet tag, at the line and side it had
+    then (what a member saw when he'd have bet it) -- before, a 10am 🎯 Single that drifted to No edge by tip-off was
+    counted as No edge and the Single's record never saw it. Props saved before Nov 18 have no entry and keep their
+    last tag."""
+    if r.get("bet_use_tag") and r.get("bet_result") is not None:
+        return dict(r, use_tag=r["bet_use_tag"], side=r.get("bet_side") or r.get("side"), result=r["bet_result"],
+                    chance=r.get("bet_chance") if r.get("bet_chance") is not None else r.get("chance"))
+    return r
+
+
 def use_record(graded: Sequence[Dict]) -> List[Dict]:
     """Per Use tag: graded, hits, hit rate, the average chance the model gave."""
     out = []
+    graded = [as_tagged(r) for r in graded]
     for tag in (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE, PE.USE_WATCH, PE.USE_PASS):
         g = [r for r in graded if PE.norm_use(r.get("use_tag")) == tag and r["result"] in ("hit", "miss")]
         if not g:
@@ -420,6 +461,7 @@ def side_record(graded: Sequence[Dict]) -> List[Dict]:
     """Nov 17 (owner: "how the model is doing on over vs under, to drive some credibility"): the model's called side,
     Over vs Under -- every read, and the bet-tagged ones -- hits / graded."""
     out = []
+    graded = [as_tagged(r) for r in graded]
     for side in ("Over", "Under"):
         g = [r for r in graded if r.get("side") == side and r.get("result") in ("hit", "miss")]
         b = [r for r in g if not PE.is_pass(r.get("use_tag")) and PE.norm_use(r.get("use_tag")) in
