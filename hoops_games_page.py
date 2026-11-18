@@ -173,6 +173,28 @@ def _rules_text(rules) -> str:
     return (("; ".join(what)).capitalize() if what else "No tested rule for this league: the model is a second opinion") + "."
 
 
+def _book_spread(p):
+    hs = p.get("home_spread")
+    return "—" if hs is None else f"{p['home']} {float(hs):+g}"
+
+
+def _book_ml(p):
+    f = lambda x: "—" if x is None or x != x else f"{float(x):+.0f}"
+    return "—" if p.get("best_home") is None and p.get("best_away") is None else \
+        f"{p['home']} {f(p.get('best_home'))} / {f(p.get('best_away'))}"
+
+
+def with_book_ticks(df: pd.DataFrame, games, after: str) -> pd.DataFrame:
+    """Nov 18: the book's spread, total and moneyline, each followed by its tick boxes, placed after `after`."""
+    extra = pd.DataFrame([{
+        "Book spread": _book_spread(p), "✓ Home spread": False, "✓ Away spread": False,
+        "Book total": "—" if p.get("line_total") is None else f"{float(p['line_total']):g}", "✓ Over": False,
+        "✓ Under": False, "Book ML": _book_ml(p), "✓ Home ML": False, "✓ Away ML": False} for p in games],
+        index=df.index)
+    at = list(df.columns).index(after) + 1 if after in df.columns else len(df.columns)
+    return pd.concat([df.iloc[:, :at], extra, df.iloc[:, at:]], axis=1)
+
+
 def _previews(league, upcoming, lean_recs, no_rule, day, cust, rules=None):
     """Nov 16: upcoming games as previews with each lean's recent form -- the standard on every build (it started as
     the customer view; the owner made it the standard the same day). The owner and Discord builds keep the Use
@@ -204,11 +226,12 @@ def _previews(league, upcoming, lean_recs, no_rule, day, cust, rules=None):
     if cust:
         st.dataframe(df, hide_index=True, width="stretch")
     else:
-        bet_kind = st.radio("☑️ Tick games to log the model's side of", list(TICK_KINDS), horizontal=True,
-                            key=f"hg_tick_kind_{league}")
-        ticked = LU.selectable(df, key=f"hg_tick_{league}", hide_index=True, width="stretch")
         shown = [ordered[r["_i"]] for r in rows]                # the games in the order the table lists them
-        items = [it for it in (tick_item(shown[i], bet_kind) for i in ticked if 0 <= i < len(shown)) if it]
+        df = with_book_ticks(df, shown, after="Gap (pts)")
+        st.caption("☑️ Tick any side to log it — the model's side or the other one, spread, total or moneyline. "
+                   "Change the line or price in the log box to match your slip (alternate spreads too).")
+        ticks = LU.tick_grid(df, list(TICK_COLS), key=f"hg_ticks_{league}", hide_index=True, width="stretch")
+        items = ticked_items(shown, ticks)
         LU.panel(items, key=f"hg_panel_{league}", date_str=str(day), tag=f"{league.lower()}-games",
                  past=day < _today_et())
     st.caption(f"Form: {GP.HOT} = leans of that size won 55%+ of 20 or more graded games in the last 30 days; "
@@ -451,26 +474,50 @@ def _default_choice(p, opts):
 TICK_KINDS = {"Spread": "Spread", "Moneyline": "Moneyline", "Total": "Total"}
 
 
-def tick_item(p, kind: str):
-    """A ticked game as a log_ui item: the model's side of the chosen market at the book's price (editable)."""
+def _half(x: float) -> float:
+    """A fair line rounded to the nearest half point, the way books post them."""
+    return float(round(x * 2) / 2)
+
+
+def side_item(p, market: str, side: str, line=None, price=None):
+    """Nov 18: any side of any market on a game as a log_ui item -- not only the model's side. The owner sometimes takes
+    the other team, or a DraftKings alt spread at a better price. `line` is from that side's point of view (Spread) or
+    the total; left out, it is the book's line, or the model's fair line rounded to the half point when the league has
+    no odds feed. The price defaults to the book's (None = type it in the log box)."""
     import math
-    team = lambda side: p["home"] if side == "home" else p["away"]
-    if kind == "Spread" and p.get("home_spread") is not None and p.get("edge") is not None:
-        side = "home" if p["edge"] >= 0 else "away"
-        line = p["home_spread"] if side == "home" else -p["home_spread"]
-        price, label = p.get("spread_price") or -110, f"{team(side)} {line:+g}"
-    elif kind == "Moneyline" and p.get("model_p") is not None:
-        side = "home" if p["model_p"] >= 0.5 else "away"
-        line, price, label = None, p.get("best_home") if side == "home" else p.get("best_away"), f"{team(side)} moneyline"
-    elif kind == "Total" and p.get("line_total") is not None and p.get("model_total") is not None:
-        side = "over" if p["model_total"] > p["line_total"] else "under"
-        line = p["line_total"]
-        price = (p.get("over_price") if side == "over" else p.get("under_price")) or -110
+    team = lambda s: p["home"] if s == "home" else p["away"]
+    if market == "Spread":
+        if line is None:
+            if p.get("home_spread") is not None:
+                line = float(p["home_spread"]) if side == "home" else -float(p["home_spread"])
+                price = price if price is not None else (p.get("spread_price") or -110)
+            elif p.get("model_margin") is not None:
+                line = _half(-p["model_margin"] if side == "home" else p["model_margin"])
+            else:
+                return None
+        label = f"{team(side)} {line:+g}"
+    elif market == "Total":
+        if line is None:
+            if p.get("line_total") is not None:
+                line = float(p["line_total"])
+                price = price if price is not None else ((p.get("over_price") if side == "over" else
+                                                         p.get("under_price")) or -110)
+            elif p.get("model_total") is not None:
+                line = _half(p["model_total"])
+            else:
+                return None
         label = f"{side.title()} {line:g} ({p['away']} @ {p['home']})"
+    elif market == "Moneyline":
+        if p.get("model_p") is None and p.get("best_home") is None:
+            return None
+        line = None
+        if price is None:
+            price = p.get("best_home") if side == "home" else p.get("best_away")
+        label = f"{team(side)} moneyline"
     else:
         return None
     try:
-        ch = IP.fair_chance(p, kind, side, line)
+        ch = IP.fair_chance(p, market, side, line)
     except Exception:                                           # noqa: BLE001
         ch = None
     if price is not None and (isinstance(price, float) and math.isnan(price)):
@@ -483,8 +530,35 @@ def tick_item(p, kind: str):
         use = None
     passed = bool(use) and ("No edge" in str(use) or "Pass" in str(use))
     return {"sport": p.get("sport"), "pick": label, "price": price, "game": f"{p['away']} @ {p['home']}",
-            "chance": ch, "_rec": p, "bet_market": kind, "bet_side": side, "bet_line": line, "use": use,
+            "chance": ch, "_rec": p, "bet_market": market, "bet_side": side, "bet_line": line, "use": use,
             "best_tested": ch is not None and not passed, "best_chance": None if ch is None else round(ch, 4)}
+
+
+def tick_item(p, kind: str):
+    """A ticked game as a log_ui item: the model's side of the chosen market at the book's price (editable)."""
+    if kind == "Spread" and p.get("home_spread") is not None and p.get("edge") is not None:
+        return side_item(p, "Spread", "home" if p["edge"] >= 0 else "away")
+    if kind == "Moneyline" and p.get("model_p") is not None:
+        return side_item(p, "Moneyline", "home" if p["model_p"] >= 0.5 else "away")
+    if kind == "Total" and p.get("line_total") is not None and p.get("model_total") is not None:
+        return side_item(p, "Total", "over" if p["model_total"] > p["line_total"] else "under")
+    return None
+
+
+# Nov 18: a tick box for every side of every market, each placed next to the column it bets on
+TICK_COLS = {"✓ Home spread": ("Spread", "home"), "✓ Away spread": ("Spread", "away"), "✓ Over": ("Total", "over"),
+             "✓ Under": ("Total", "under"), "✓ Home ML": ("Moneyline", "home"), "✓ Away ML": ("Moneyline", "away")}
+
+
+def ticked_items(games, ticks):
+    """[(row, tick column)] from LU.tick_grid -> log_ui items, in table order."""
+    out = []
+    for i, col in ticks:
+        if 0 <= i < len(games) and col in TICK_COLS:
+            it = side_item(games[i], *TICK_COLS[col])
+            if it:
+                out.append(it)
+    return out
 
 
 def honesty_line(done, league: str = "") -> str:
@@ -612,16 +686,19 @@ def render_fair(league: str) -> None:
     if not upcoming:
         st.caption(f"No upcoming {title} games for {day:%a %b %d}" + (f" ({slot})" if slot != "All slate" else "") + ".")
     else:
-        ticked = LU.selectable(pd.DataFrame([{
+        ticks = LU.tick_grid(pd.DataFrame([{
             "Tip (ET)": _tip(p), "Game": f"{p['away']} @ {p['home']}",
             "Model's pick": _fav(p)[0] + f" {_fav(p)[1]:.0%}",
             "Use": IP.tag_label(IP.chance_use(_fav(p)[1], None, trusted=False)),
-            "Fair spread": f"{p['home']} {-p['model_margin']:+.1f}", "Fair total": f"{p['model_total']:.1f}",
-            "Win chance": f"{p['home']} {p['model_p']:.0%}",
+            "Fair spread": f"{p['home']} {-p['model_margin']:+.1f}", "✓ Home spread": False, "✓ Away spread": False,
+            "Fair total": f"{p['model_total']:.1f}", "✓ Over": False, "✓ Under": False,
+            "Win chance": f"{p['home']} {p['model_p']:.0%}", "✓ Home ML": False, "✓ Away ML": False,
             "Fair ML": f"{_fair_american(p['model_p'])} / {_fair_american(1 - p['model_p'])}"} for p in upcoming]),
-            key=f"hf_tick_{league}", hide_index=True, width="stretch")
-        st.caption("☑️ Tick games to log the model's pick to win — type the price your book shows in the box below.")
-        items = [it for it in (tick_item(upcoming[i], "Moneyline") for i in ticked if 0 <= i < len(upcoming)) if it]
+            list(TICK_COLS), key=f"hf_ticks_{league}", hide_index=True, width="stretch")
+        st.caption("☑️ Tick any side to log it — the model's pick or the other team, either side of the fair spread, "
+                   "Over or Under. Spreads and totals start at the fair line rounded to the half point: change the Line "
+                   "and type the Price in the log box to match your slip (alternate spreads too).")
+        items = ticked_items(upcoming, ticks)
         LU.panel(items, key=f"hf_panel_{league}", date_str=str(day), tag=f"{league.lower()}-games",
                  past=day < _today_et())
         st.caption("Model's pick = the team the model favors to win and its chance. Use reads like the props pages (🎯 "

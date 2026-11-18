@@ -80,7 +80,9 @@ def test_game_lab_shows_previews_on_every_build_with_the_owners_columns(monkeypa
     assert {"Long backtest", "Tracking pick", "Why"} <= set(owner.columns) and "Pick" not in owner.columns
     assert list(owner["Use"]) == [PE.USE_PASS, PE.USE_PASS] and all(x.startswith("No bet — ") for x in owner["The model says"])
     assert any("Previews, not picks" in i.value for i in at.info)
-    assert any(r.label.startswith("☑️ Tick games") for r in at.radio)          # the owner still ticks rows to log
+    # Nov 18: the owner ticks any side -- a box next to the book's spread, total and moneyline for each team
+    assert {"✓ Home spread", "✓ Away spread", "✓ Over", "✓ Under", "✓ Home ML", "✓ Away ML"} <= set(owner.columns)
+    assert not any(c.startswith("✓") for c in games.columns)                  # the customer build has no boxes
 
 
 def test_owner_rows_carry_use_and_extras_and_keep_their_place_for_logging():

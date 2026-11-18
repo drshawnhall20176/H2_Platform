@@ -41,3 +41,44 @@ def test_college_football_game_lines_settle_from_finals_and_log_as_ncaaf():
     assert IP.bet_result(sp, p) == "loss"
     ml = IP.bet_fields(p, "Moneyline", "home", None, -500, 1.0, False)
     assert IP.bet_result(ml, p) == "win"
+
+
+# Nov 18: tick any side, not only the model's -- the other team, either side of the spread, Over or Under
+F = {"sport": "EUROCUP", "game_id": "f1", "kickoff": "2026-11-18T19:30:00+00:00", "home": "Tortona", "away": "Trento",
+     "model_p": 0.66, "model_margin": 4.9, "model_total": 161.3}
+
+
+def test_any_side_can_be_ticked_at_the_book_line():
+    it = HG.side_item(G, "Spread", "home")
+    assert it["pick"] == "Real Madrid -6" and it["bet_line"] == -6.0 and it["price"] == -110
+    ml = HG.side_item(G, "Moneyline", "away")
+    assert ml["pick"] == "KK Crvena zvezda moneyline" and ml["price"] == 200 and abs(ml["chance"] - 0.45) < 1e-9
+    assert HG.side_item(G, "Total", "over")["price"] == -110
+
+
+def test_a_fair_only_league_starts_at_the_fair_line_with_no_price():
+    sp = HG.side_item(F, "Spread", "home")
+    assert sp["pick"] == "Tortona -5" and sp["bet_line"] == -5.0 and sp["price"] is None
+    assert HG.side_item(F, "Spread", "away")["bet_line"] == 5.0
+    assert HG.side_item(F, "Total", "under")["bet_line"] == 161.5
+    assert HG.side_item(F, "Moneyline", "away")["pick"] == "Trento moneyline"
+    got = HG.ticked_items([F, G], [(0, "✓ Away ML"), (1, "✓ Under"), (5, "✓ Over"), (0, "nope")])
+    assert [x["pick"] for x in got] == ["Trento moneyline", "Under 176.5 (KK Crvena zvezda @ Real Madrid)"]
+
+
+def test_an_alt_line_relabels_and_rescored():
+    import log_ui as LU
+    it = HG.side_item(F, "Spread", "home")
+    alt = LU.relined(it, -4.5)
+    assert alt["pick"] == "Tortona -4.5" and alt["bet_line"] == -4.5 and alt["chance"] > it["chance"]
+    assert LU.relined(it, -5.0) is it and LU.relined(HG.side_item(F, "Moneyline", "home"), 3) ["bet_line"] is None
+    rows = TB.bet_rows([dict(alt, price=-250)], 3.0, True, "eurocup-games", "2026-11-18")
+    assert rows[0]["line"] == -4.5 and rows[0]["side"] == "Tortona" and "EUROCUP:f1" in rows[0]["notes"]
+
+
+def test_book_tick_columns_sit_next_to_what_they_bet():
+    import pandas as pd
+    df = HG.with_book_ticks(pd.DataFrame([{"Game": "x", "The model says": "y", "Why": "z"}]), [G], after="The model says")
+    cols = list(df.columns)
+    assert cols.index("✓ Home spread") == cols.index("Book spread") + 1 and cols[-1] == "Why"
+    assert df.loc[0, "Book ML"] == "Real Madrid -250 / +200"
