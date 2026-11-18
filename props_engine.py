@@ -359,7 +359,7 @@ def _book_count(o: Dict) -> int:
     return len(set(o.get("over") or {}) | set(o.get("under") or {}))
 
 
-PICKEM_BOOKS = ("prizepicks", "pick6", "underdog")  # = odds_api.PICKEM_BOOKS: a line and a payout multiplier, no odds
+PICKEM_BOOKS = ("prizepicks", "pick6", "underdog", "dabble_us_dfs", "parlayplay")  # = odds_api.PICKEM_BOOKS
 BOOK_PRIORITY = ("draftkings", "fanduel")      # Oct 29: your book first, then the next one that posts the player
 
 

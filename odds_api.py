@@ -234,7 +234,10 @@ def fetch_event_props(event_id: str, api_key: str, markets: List[str],
     base = {"apiKey": api_key, "markets": ",".join(markets),
             "oddsFormat": "american", "dateFormat": "iso"}
     if bookmakers is not None:
-        return _get(path, {**base, "bookmakers": ",".join(bookmakers)})
+        params = {**base, "bookmakers": ",".join(bookmakers)}
+        if any(canonical_book(b) in PICKEM_BOOKS for b in bookmakers) and not _BOOKMAKERS_REJECTED["multipliers"]:
+            params["includeMultipliers"] = "true"     # Nov 18: Underdog's per-pick multipliers on the Pick'em fetch
+        return _get(path, params)
     if regions != "us" or _BOOKMAKERS_REJECTED["bookmakers"]:
         return _get(path, {**base, "regions": regions})
 
@@ -886,7 +889,23 @@ PICKEM_BOOKS: Dict[str, str] = {
     "prizepicks": "PrizePicks",
     "pick6": "DK Pick6",
     "underdog": "Underdog",     # Nov 11: carries college player props DraftKings/FanDuel don't post
+    # Nov 18 (owner: "add Novig and any other pick'em app I'm not considering"): the API's other two us_dfs apps.
+    # Both price each pick (Dabble ~-118/+119, ParlayPlay its own odds) rather than paying a fixed multiplier per
+    # entry. Read on the Pick'em Board only (its own fetch); never in the boards' main fetch below.
+    "dabble_us_dfs": "Dabble",
+    "parlayplay": "ParlayPlay",
 }
+
+# Nov 18: prediction exchanges with real two-sided player-prop prices (research/extra_books.py: Novig ~290 NBA
+# outcomes a game, ProphetX ~460 and college props too). No house margin to speak of, so they sharpen the
+# "books-checked" chance on the Pick'em Board; they're fetched there only. Kalshi and Polymarket posted no player
+# props in the same check.
+EXCHANGE_BOOKS: Dict[str, str] = {
+    "novig": "Novig",
+    "prophetx": "ProphetX",
+}
+# The Pick'em Board's own extra fetch: the apps the boards' main fetch leaves out, plus the exchanges.
+PICKEM_EXTRA_FETCH: Tuple[str, ...] = ("underdog", "dabble_us_dfs", "parlayplay", "novig", "prophetx")
 
 # Books with NO usable feed: selectable for logging and for typing a line/price by hand, but never
 # fetched. Bet365 is here because The Odds API carries it only as "bet365_au" (Australian region,
@@ -896,20 +915,21 @@ MANUAL_BOOKS: Dict[str, str] = {
 }
 
 # Everything a person can pick as "the book I'm using" (logging, Slip Lab), display order.
-ALL_BOOKS: Dict[str, str] = {**US_BOOKS, **PICKEM_BOOKS, **MANUAL_BOOKS}
+ALL_BOOKS: Dict[str, str] = {**US_BOOKS, **PICKEM_BOOKS, **EXCHANGE_BOOKS, **MANUAL_BOOKS}
 
 # Old/alternate spellings -> the key the API actually returns.
 BOOK_ALIASES: Dict[str, str] = {"caesars": "williamhill_us"}
 
 # Exactly the books fetched. Kept at <=10 on purpose: the API bills "every group of 10 bookmakers
 # as the equivalent of 1 region", so this costs the same 1x per market as the old regions="us".
-FETCH_BOOKMAKERS: Tuple[str, ...] = tuple(b for b in list(US_BOOKS) + list(PICKEM_BOOKS) if b != "underdog")
+_MAIN_PICKEM = ("prizepicks", "pick6", "underdog")         # the boards' main fetch: unchanged at 10 books (Nov 18)
+FETCH_BOOKMAKERS: Tuple[str, ...] = tuple(b for b in list(US_BOOKS) + list(_MAIN_PICKEM) if b != "underdog")
 
 # Nov 11: college player props. DraftKings and FanDuel don't post them; the pick'em apps (PrizePicks, Underdog,
 # DK Pick6) and Hard Rock may. College fetches swap Bovada (not a book the owner can bet) for Underdog, staying at
 # 10 books -- the API bills each group of 10 as one region, so the cost doesn't change.
 COLLEGE_SPORTS = ("basketball_ncaab", "americanfootball_ncaaf")
-COLLEGE_FETCH_BOOKMAKERS: Tuple[str, ...] = tuple(b for b in list(US_BOOKS) + list(PICKEM_BOOKS) if b != "bovada")
+COLLEGE_FETCH_BOOKMAKERS: Tuple[str, ...] = tuple(b for b in list(US_BOOKS) + list(_MAIN_PICKEM) if b != "bovada")
 
 
 def fetch_books_for(sport: str) -> Tuple[str, ...]:
@@ -1177,7 +1197,8 @@ def compute_edges(index: Dict, offers: List[Dict],
     return rows, {"matched": matched, "unmatched": unmatched, "unmatched_names": deduped_unmatched}
 
 
-def _fetch_markets_one_by_one(event: Dict, api_key: str, markets: List[str], sport: str) -> Tuple[List[Dict], Optional[str], set]:
+def _fetch_markets_one_by_one(event: Dict, api_key: str, markets: List[str], sport: str,
+                              bookmakers: Optional[List[str]] = None) -> Tuple[List[Dict], Optional[str], set]:
     """Fallback for fetch_slate_props when a combined request was refused over a market key: request each market on its own,
     parse the ones that answer, collect the refused keys. A non-market error (quota, auth, network) on any one stops the
     loop and is not swallowed silently — the markets already read are kept and the rest are left for the next refresh."""
@@ -1186,7 +1207,7 @@ def _fetch_markets_one_by_one(event: Dict, api_key: str, markets: List[str], spo
     remaining = None
     for m in markets:
         try:
-            ej, hdr = fetch_event_props(event["id"], api_key, [m], sport=feed_for(event, sport))
+            ej, hdr = fetch_event_props(event["id"], api_key, [m], sport=feed_for(event, sport), bookmakers=bookmakers)
         except OddsAPIError as exc:
             if _is_market_error(exc):
                 refused.add(m)
@@ -1197,8 +1218,10 @@ def _fetch_markets_one_by_one(event: Dict, api_key: str, markets: List[str], spo
     return got, remaining, refused
 
 
-def fetch_slate_props(date_str: str, api_key: str, markets: List[str], sport: str = SPORT) -> Tuple[List[Dict], Dict]:
-    """Pull props for every event on the slate date. Returns (offers, info).
+def fetch_slate_props(date_str: str, api_key: str, markets: List[str], sport: str = SPORT,
+                      bookmakers: Optional[List[str]] = None) -> Tuple[List[Dict], Dict]:
+    """Pull props for every event on the slate date. Returns (offers, info). `bookmakers` (Nov 18) asks for exactly
+    those books instead of the boards' default set (the Pick'em Board's extra apps and exchanges).
 
     info includes remaining quota and event counts so the UI can show cost."""
     events = fetch_events_all(api_key, sport=sport)
@@ -1217,13 +1240,13 @@ def fetch_slate_props(date_str: str, api_key: str, markets: List[str], sport: st
     rejected_markets: set = set()
     for e in todays:
         try:
-            ej, hdr = fetch_event_props(e["id"], api_key, markets, sport=feed_for(e, sport))
+            ej, hdr = fetch_event_props(e["id"], api_key, markets, sport=feed_for(e, sport), bookmakers=bookmakers)
         except OddsAPIError as exc:
             if _is_market_error(exc) and len(markets) > 1:
                 # One market key the provider does not offer for this league/feed must not blank every other market's
                 # lines (the basketball combo/steals/blocks/turnovers keys were added in build 246). Ask again one
                 # market at a time, keep what answers, and report what was refused.
-                got, left, refused = _fetch_markets_one_by_one(e, api_key, markets, sport)
+                got, left, refused = _fetch_markets_one_by_one(e, api_key, markets, sport, bookmakers)
                 offers.extend(got)
                 rejected_markets.update(refused)
                 remaining = left or remaining
