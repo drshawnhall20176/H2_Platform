@@ -602,7 +602,7 @@ def test_sidebar_sections_match_the_documented_grouping():
     expected = {
         "0": "🏠 START HERE", "28": "🏠 START HERE", "57": "🏠 START HERE", "59": "🏠 START HERE",
         "1": "🎯 RECOMMENDATIONS", "2": "🎯 RECOMMENDATIONS", "3": "🎯 RECOMMENDATIONS",
-        "4": "🎯 RECOMMENDATIONS", "37": "🎯 RECOMMENDATIONS", "23": "🎯 RECOMMENDATIONS",
+        "4": "🎯 RECOMMENDATIONS", "61": "🎯 RECOMMENDATIONS", "37": "🎯 RECOMMENDATIONS", "23": "🎯 RECOMMENDATIONS",
         "24": "🎯 RECOMMENDATIONS", "39": "🎯 RECOMMENDATIONS",
         "5": "🛰️ LIVE SIGNALS", "6": "🛰️ LIVE SIGNALS",
         "7": "🔬 DEEP RESEARCH", "8": "🔬 DEEP RESEARCH", "9": "🔬 DEEP RESEARCH",
