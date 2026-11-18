@@ -739,9 +739,17 @@ def leg_price(bet: Dict) -> Optional[int]:
     return None
 
 
+# Nov 18: game-line markets whose side is a team, not Over/Under. A leg in one of these takes the team name as its
+# side ("| Spread | Aris | -9.5 | Le Mans @ Aris"); Totals stay Over/Under. A moneyline leg may leave the line blank.
+TEAM_SIDE_MARKETS = {"moneyline", "ml", "spread", "alt spread", "alternate spread", "spread alternate", "run line",
+                     "puck line", "handicap", "asian handicap", "point spread"}
+
+
 def parse_leg_lines(text: str, default_game: Optional[str] = None) -> Tuple[List[Dict], List[str]]:
-    """One leg per line: "Player | Market | Over | 6.5" (an optional 5th field is the game). Returns
-    (legs, problems) -- a line that can't be read is reported, never guessed."""
+    """One leg per line: "Player | Market | Over | 6.5" (an optional 5th field is the game). Game-line legs leave the
+    player blank and name the team as the side: "| Spread | Aris | -9.5 | Le Mans @ Aris", "| Moneyline | Maxima Roma
+    | | Maxima Roma @ U-BT Cluj-Napoca". Returns (legs, problems) -- a line that can't be read is reported, never
+    guessed."""
     legs, bad = [], []
     for raw in (text or "").splitlines():
         line = raw.strip()
@@ -751,16 +759,32 @@ def parse_leg_lines(text: str, default_game: Optional[str] = None) -> Tuple[List
         if len(parts) < 4:
             bad.append(f"“{line}” — needs Player | Market | Side | Line")
             continue
-        try:
-            val = float(parts[3])
-        except ValueError:
-            bad.append(f"“{line}” — the line “{parts[3]}” isn't a number")
-            continue
-        side = parts[2].strip().capitalize()
-        if side not in ("Over", "Under", "Yes", "No"):
-            bad.append(f"“{line}” — side should be Over or Under")
-            continue
-        legs.append({"player": parts[0], "market": parts[1], "side": side, "line": val,
+        market = parts[1]
+        team_market = market.strip().lower() in TEAM_SIDE_MARKETS
+        line_txt = parts[3]
+        if team_market and market.strip().lower() in ("moneyline", "ml") and line_txt.lower() in ("", "ml", "pk", "pick"):
+            val = 0.0
+        else:
+            try:
+                val = float(line_txt.replace("+", ""))
+            except ValueError:
+                bad.append(f"“{line}” — the line “{line_txt}” isn't a number")
+                continue
+        if team_market:
+            side = parts[2].strip()
+            if not side:
+                bad.append(f"“{line}” — name the team you took as the side")
+                continue
+            if side.lower() in ("over", "under"):
+                bad.append(f"“{line}” — a {market} leg's side is a team; Over/Under belongs to a Total")
+                continue
+        else:
+            side = parts[2].strip().capitalize()
+            if side not in ("Over", "Under", "Yes", "No"):
+                bad.append(f"“{line}” — side should be Over or Under (for a moneyline or spread leg, use the market "
+                           "name Moneyline or Spread and the team as the side)")
+                continue
+        legs.append({"player": parts[0] or None, "market": market, "side": side, "line": val,
                      "game": (parts[4] if len(parts) > 4 and parts[4] else default_game)})
     return legs, bad
 

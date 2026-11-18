@@ -586,3 +586,26 @@ def test_converting_legs_logged_one_by_one_into_a_ticket():
         assert B.ticket_settlements(rows)[0]["result"] == "win"                          # a void leg doesn't sink it
         assert B.ticket_result([{"result": "win"}, {"result": "loss"}, {"result": ""}]) == "loss"
         assert B.ticket_result([{"result": "void"}, {"result": "push"}]) == "void"
+
+
+def test_parlay_legs_accept_team_sides_for_game_lines():
+    # Nov 18: a 6-pick international hoops parlay (moneyline + spreads) was rejected -- "side should be Over or Under".
+    text = ("| Moneyline | Maxima Roma | | Maxima Roma @ U-BT Cluj-Napoca\n"
+            "| Spread | Derthona Basket Tortona | -4.5 | Rigas Zelli @ Derthona Basket Tortona\n"
+            "| Spread | Niners Chemnitz | +3.5 | Tofas @ Niners Chemnitz\n"
+            "| Total | Over | 160.5 | Le Mans @ Aris\n"
+            "John Collins | Rebounds | Over | 6.5")
+    legs, bad = B.parse_leg_lines(text)
+    assert bad == [] and len(legs) == 5
+    assert legs[0] == {"player": None, "market": "Moneyline", "side": "Maxima Roma", "line": 0.0,
+                       "game": "Maxima Roma @ U-BT Cluj-Napoca"}
+    assert legs[2]["side"] == "Niners Chemnitz" and legs[2]["line"] == 3.5
+    assert legs[3]["side"] == "Over" and legs[4]["player"] == "John Collins"
+    legs, bad = B.parse_leg_lines("| Spread | | -4.5\n| Spread | Over | -4.5\n| Moneyline | Aris | abc")
+    assert legs == [] and len(bad) == 3
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "bets.db")
+        good, _ = B.parse_leg_lines(text)
+        out = B.log_parlay_ticket("Intl 6-leg", good, 2400, 4.0, "2026-11-18", "INTL", book="draftkings", db_path=db)
+        rows = {r["id"]: r for r in B.list_bets(db)}
+        assert rows[out["leg_ids"][1]]["side"] == "Derthona Basket Tortona" and B.payout(4, 2400) == 100.0
