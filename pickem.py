@@ -1,5 +1,5 @@
 """
-pickem.py -- the Pick'em board: PrizePicks, Underdog, DraftKings Pick6, Dabble and ParlayPlay lines read for More /
+pickem.py -- the Pick'em board: PrizePicks, Underdog, DraftKings Pick6, ParlayPlay and Dabble lines read for More /
 Less (Nov 18). Novig and ProphetX (prediction exchanges) are price sources here, not apps: their two-sided prices join
 the sportsbooks' in the "books-checked" chance.
 
@@ -48,22 +48,27 @@ APPS = {
               "note": "Pick6 is a pooled contest: prizes depend on how many entries go perfect. These are typical "
                       "results (third-party summary), not fixed payouts.",
               "source": "https://www.legalsportsreport.com/dfs-sites/draftkings-pick6/"},
-    # Nov 18 (owner: "add Novig and any other pick'em app"): the other two apps in the odds feed. Neither pays a
-    # fixed multiplier per entry -- each pick carries its own price (Dabble ~-118/+119), and an entry pays roughly
-    # the product of its picks' prices. So a pick needs to beat ITS OWN price's implied chance, not a table.
-    "dabble_us_dfs": {"name": "Dabble", "priced": True, "max_picks": 6, "flex": None,
-                      "note": "Dabble prices each pick; an entry pays about the product of its picks' odds. "
-                              "Check the payout on your entry screen.",
-                      "source": "https://dabble.com/"},
-    "parlayplay": {"name": "ParlayPlay", "priced": True, "max_picks": 6, "flex": None,
-                   "note": "ParlayPlay prices each pick; an entry pays about the product of its picks' multipliers. "
-                           "Check the payout on your entry screen.",
-                   "source": "https://parlayplay.io/"},
+    # Nov 18 (owner: "add Novig and any other pick'em app"): the other two apps in the odds feed. Both pay a table by
+    # pick count like the others, AND post a price on every pick (Dabble near even, e.g. -118/+119; ParlayPlay with a
+    # margin, e.g. -125/-125). A pick the app itself prices heavy pays less on the entry screen, so a pick there has to
+    # clear BOTH the table's break-even and its own price's implied chance.
+    "parlayplay": {"name": "ParlayPlay", "priced": True,
+                   "power": {2: 3.0, 3: 5.0, 4: 10.0, 5: 20.0, 6: 35.0},
+                   "flex": None,
+                   "note": "ParlayPlay All-In payouts (third-party summary, Apr 2026); each pick also carries its own "
+                           "multiplier, so heavy-priced picks pay less -- check the entry screen.",
+                   "source": "https://bettorsinsider.com/dfs/2026/04/29/prizepicks-vs-parlayplay-vs-dabble-a-complete-dfs-pickem-comparison-for-2026/"},
+    "dabble_us_dfs": {"name": "Dabble", "priced": True,
+                      "power": {2: 3.0, 3: 6.0, 4: 10.0, 5: 20.0, 6: 37.5},
+                      "flex": None,
+                      "note": "Dabble publishes no fixed table; reviewers call its standard payouts comparable to "
+                              "PrizePicks', which is what's assumed here -- check the entry screen.",
+                      "source": "https://bettorsinsider.com/dfs/2026/04/29/prizepicks-vs-parlayplay-vs-dabble-a-complete-dfs-pickem-comparison-for-2026/"},
 }
 
 
 def is_priced(app: str) -> bool:
-    """True for an app that prices each pick (Dabble, ParlayPlay) instead of paying a fixed entry multiplier."""
+    """True for an app that posts a price on each pick (Dabble, ParlayPlay) on top of its payout table."""
     return bool((APPS.get(app) or {}).get("priced"))
 
 
@@ -174,9 +179,7 @@ def legs(reads: Dict, offers: Sequence[Dict], app: str, sport: str) -> List[Dict
             side = "More" if pside == "over" else "Less"
             chance = p if side == "More" else 1 - p
             need = needed(price) if priced_app else None
-            if priced_app and need is None:
-                continue                                        # a priced app's pick with no price can't be judged
-            score = chance - need if priced_app else chance
+            score = chance - (need if need is not None else 0.5) if priced_app else chance
             if best is None or score > best["_score"]:
                 best = {"player": read["player"], "market": read.get("market"), "market_key": mk,
                         "game": read.get("game"), "team": read.get("team_name") or read.get("team"), "kickoff": kick,
@@ -198,7 +201,7 @@ def best_entry(legs_: Sequence[Dict], n: int, floor: float) -> List[Dict]:
     that isn't a same-game parlay -- pick'em apps also cut payouts on same-game lineups)."""
     out, games = [], set()
     for x in sorted(legs_, key=lambda x: -(x["chance"] - (x.get("needed") or 0.0))):
-        bar = x["needed"] if x.get("needed") is not None else floor     # a priced pick must beat its own price
+        bar = max(floor, x["needed"]) if x.get("needed") is not None else floor   # table AND its own price
         if x["basis"] != "books" or x["chance"] < bar or x.get("game") in games:
             continue
         out.append(x)
@@ -219,9 +222,6 @@ def entry_odds(entry: Sequence[Dict], app: str, flex: bool = False, sport: Optio
     cfg = APPS.get(app) or {}
     table = (cfg.get("flex") or {}).get(n) if flex else None
     mult = None if flex else (cfg.get("power") or {}).get(n)
-    if cfg.get("priced") and not flex:
-        ds = [_decimal(x.get("price")) for x in entry]
-        mult = None if any(d is None for d in ds) else float(__import__("math").prod(ds))
     if n < 2 or (mult is None and table is None):
         return None
     legs_sim = [{"p": x["chance"], "player": x["player"], "game": x.get("game"), "market": x.get("market"),
