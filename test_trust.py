@@ -61,3 +61,46 @@ def test_auto_trust_wont_cut_on_noise(monkeypatch):
          for d, hr in enumerate([0.60, 0.40, 0.60, 0.40, 0.60, 0.40])}       # 50% overall, noisy days
     dec = CAL.auto_trust("NBA", g, "2026-11-18", write=False)[0]
     assert "not by enough" in dec["why"] and not dec["applied"]
+
+
+def _graded_mk(days, per_day, specs):
+    """specs: [(market, model chance, market chance, hit rate)]"""
+    out = {}
+    for d in range(days):
+        rows = []
+        for mk, p, m, hr in specs:
+            for i in range(per_day):
+                y = ((i * 7 + d * 3) % per_day) / per_day < hr
+                rows.append({"result": "hit" if y else "miss", "chance": p, "p_market": m, "side": "Over",
+                             "market": mk, "game": f"g{i % 7}", "ts": f"2026-11-{d + 1:02d}T12:00"})
+        out[f"2026-11-{d + 1:02d}"] = rows
+    return out
+
+
+def test_a_market_earns_its_own_trust_and_the_sport_keeps_its(monkeypatch):
+    """Nov 18 (research/widen_test.py): Assists earn more model weight than the sport's; Points don't."""
+    store = {"NBA:trust": 0.5}
+    monkeypatch.setattr(CAL, "factor", lambda s: 1.0)
+    monkeypatch.setattr(CAL, "_cache", {"at": 1e18, "map": store})
+    monkeypatch.setattr(CAL, "factor_history", lambda k: [("2026-10-01", store[k])] if k in store else [])
+    # shown 54% (trust 0.5 around a 50% book) and they hit 58%: the model's own 58% was right -> more trust holds up
+    g = _graded_mk(8, 90, [("Assists", 0.54, 0.50, 0.58), ("Points", 0.54, 0.50, 0.50)])
+    out = {d["market"]: d for d in CAL.auto_trust_markets("NBA", g, "2026-11-18", write=False)}
+    assert out["Assists"]["new"] > 0.5 and "held up" in out["Assists"]["why"]
+    assert out["Points"]["new"] < 0.5
+    assert CAL.trust("NBA", "Assists") == 0.5                      # nothing written in a dry run
+    store["NBA:trust:m:Assists"] = 0.8
+    assert CAL.trust("NBA", "Assists") == 0.8 and CAL.trust("NBA", "Points") == 0.5
+    assert CAL.trust("NBA", "Anytime TD") == 1.0 and CAL.market_trusts("NBA") == {"Assists": 0.8}
+    rows = CAL.trust_rows("NBA", g, "props", exclude=["Assists"])
+    assert len(rows) == 8 * 90                                      # the sport fit leaves Assists out
+
+
+def test_a_market_needs_held_out_proof_either_way(monkeypatch):
+    store = {"NBA:trust": 0.5}
+    monkeypatch.setattr(CAL, "factor", lambda s: 1.0)
+    monkeypatch.setattr(CAL, "_cache", {"at": 1e18, "map": store})
+    monkeypatch.setattr(CAL, "factor_history", lambda k: [("2026-10-01", store[k])] if k in store else [])
+    g = _graded_mk(2, 300, [("Assists", 0.54, 0.50, 0.58)])         # plenty of reads but 2 days: no splits
+    d = CAL.auto_trust_markets("NBA", g, "2026-11-18", write=False)[0]
+    assert not d["applied"] and ("not enough" in d["why"] or "didn't hold up" in d["why"])

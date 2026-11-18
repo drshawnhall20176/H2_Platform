@@ -345,6 +345,8 @@ def review_sport(sport: str, morning: str, open_bets: Sequence[Dict], fetch: Cal
         cal["auto"].append(CAL.auto_global(sport, trend, morning, write=write))
         # Nov 17: how far to trust the model against the books (props; TD scorers separately) -- forced toward the market
         cal["auto"].extend(CAL.auto_trust(sport, trend, morning, write=write))
+        # Nov 18: and per market, where a market's own record says so on held-out days
+        cal["auto"].extend(CAL.auto_trust_markets(sport, trend, morning, write=write))
         # Nov 17: judge the 👀 Watch groups on the games since they were found (watch.py)
         try:
             import watch as W
