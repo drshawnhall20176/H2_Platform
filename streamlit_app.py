@@ -515,6 +515,11 @@ def run():
         sections.setdefault(section, []).append(st.Page(str(f), title=NL.label(title) if commercial else title,
                                                         icon=icon, url_path=slug))
 
+    # Nov 18 (owner): League Schedules right under Today, the Owner Office at the bottom of START HERE
+    _rank = {"today": 0, "league_schedules": 1, "home": 2, "owner_office": 99}
+    if "🏠 START HERE" in sections and not commercial:
+        sections["🏠 START HERE"] = sorted(sections["🏠 START HERE"],
+                                          key=lambda p: _rank.get(getattr(p, "url_path", "") or "today", 50))
     # Bold/colored sidebar section-header styling was attempted here and confirmed (via a real
     # screenshot, pixel-sampled) to be inert against this Streamlit version's actual DOM -- see
     # the "CSS risk" section of the project handoff. Removed rather than left as dead code.

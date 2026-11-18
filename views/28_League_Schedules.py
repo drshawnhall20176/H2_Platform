@@ -106,6 +106,10 @@ def _render_game_flat(g: dict):
     st.markdown(line)
 
 
+def _slot_filter(result, key: str):
+    return C.schedule_slot_filter(result, key)
+
+
 def _merge_schedule_results(results: list) -> dict:
     """Merges several schedule_board.todays_schedule() results (one per real calendar date
     within a selected week) into one combined grouped/other/has_divisions structure -- needed
@@ -170,7 +174,7 @@ if current in WEEKLY_SPORTS:
     if rich and real_dates:
         with st.spinner(f"Loading Week {week}..."):
             results = [SB.todays_schedule(current, d) for d in real_dates]
-        merged = _merge_schedule_results(results)
+        merged = _slot_filter(_merge_schedule_results(results), f"ls_slot_{current}_{week}")
         C.todays_schedule_board(merged, _active.icon, _active.label,
                                 heading=f"Week {week}, {int(season)} — {_active.label} Schedule")
     else:
@@ -186,6 +190,7 @@ else:
     if rich:
         with st.spinner("Loading schedule..."):
             result = SB.todays_schedule(current, date_str)
+        result = _slot_filter(result, f"ls_slot_{current}_{date_str}")
         C.todays_schedule_board(result, _active.icon, _active.label,
                                 heading=f"{date_str} — {_active.label} Schedule")
     else:

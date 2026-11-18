@@ -56,3 +56,14 @@ def test_one_day_board_keeps_plain_times(monkeypatch):
     C.todays_schedule_board({"grouped": {"East": {None: games}}, "other": [], "has_divisions": False}, "🏀", "NBA")
     html = "".join(fake.out)
     assert html.index(">C<") < html.index(">A<") and "12:00 PM ET" in html and "Sat " not in html
+
+
+def test_slot_filter_keeps_only_the_picked_games():
+    import sports as S
+    games = [_g("Clemson", "Duke", 20, 19, 30), _g("Syracuse", "Boston College", 21, 12)]
+    rice = _g("Rice", "Temple", 19, 19, 30)
+    res = {"grouped": {"ACC": {None: games}, "AAC": {None: [rice]}}, "other": [], "has_divisions": False}
+    pick = lambda items, key, when: [g for g in items if S.slot_of(C._kick_dt(when(g))) == "Afternoon"]   # noqa: E731
+    out = C.schedule_slot_filter(res, "k", picker=pick)
+    assert list(out["grouped"]) == ["ACC"] and [g["away"] for g in out["grouped"]["ACC"][None]] == ["Syracuse"]
+    assert C.schedule_slot_filter(None, "k") is None

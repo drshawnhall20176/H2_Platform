@@ -821,6 +821,27 @@ def date_slot_select(items, key: str, when=lambda x: x.get("kickoff"), container
     return out if spick == "All slate" else [it for it in out if _S.slot_of(_kick_dt(when(it))) == spick]
 
 
+def schedule_slot_filter(result, key: str, picker=None):
+    """Nov 18 (owner): Date / Time slot pickers on a conference schedule board (todays_schedule's shape) -- the boxes
+    then show only the games in the slot picked; a conference with none drops out. `picker` (tests) replaces
+    date_slot_select."""
+    if not result:
+        return result
+    games = [g for divs in result["grouped"].values() for gs in divs.values() for g in gs] + list(result["other"])
+    if not games:
+        return result
+    pick = picker or date_slot_select
+    keep = {id(g) for g in pick(games, key=key, when=lambda g: g.get("dt") or g.get("date_str"))}
+    grouped = {}
+    for conf, divs in result["grouped"].items():
+        kept = {d: [g for g in gs if id(g) in keep] for d, gs in divs.items()}
+        kept = {d: gs for d, gs in kept.items() if gs}
+        if kept:
+            grouped[conf] = kept
+    return {"grouped": grouped, "other": [g for g in result["other"] if id(g) in keep],
+            "has_divisions": result["has_divisions"]}
+
+
 # --------------------------------------------------------------------------- football weather (Nov 8)
 WEATHER_SPORTS = ("NFL", "NCAAF")
 WEATHER_KEY = ("☀️ clear · ⛅ partly cloudy · ☁️ cloudy · 🌧️ rain · 🌨️/❄️ snow · ⛈️ storms · 🌫️ fog · 🏟️ dome · "
