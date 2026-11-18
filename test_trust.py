@@ -51,3 +51,13 @@ def test_td_rows_fit_separately(monkeypatch):
     out = CAL.auto_trust("NFL", g, "2026-11-17", write=False)
     td = [d for d in out if d["kind"] == "td"][0]
     assert td["new"] == 0.1 and CAL._trust_key("NFL", "Anytime TD") == "NFL:trust:TD"
+
+
+def test_auto_trust_wont_cut_on_noise(monkeypatch):
+    """Nov 18: NBA went 0.54 -> 0.46 with log loss flat and 1 of 13 held-out splits -- a cut needs evidence too."""
+    monkeypatch.setattr(CAL, "trust", lambda s, m=None: 0.5)
+    monkeypatch.setattr(CAL, "factor_history", lambda k: [])
+    g = {f"2026-11-{d + 1:02d}": _graded(1, 100, 0.52, 0.50, hr)["2026-11-01"]
+         for d, hr in enumerate([0.60, 0.40, 0.60, 0.40, 0.60, 0.40])}       # 50% overall, noisy days
+    dec = CAL.auto_trust("NBA", g, "2026-11-18", write=False)[0]
+    assert "not by enough" in dec["why"] and not dec["applied"]

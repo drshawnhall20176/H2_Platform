@@ -406,6 +406,9 @@ def auto_global(sport: str, graded_by_date: Dict[str, List[Dict]], morning: str,
 TRUST_RANGE = (0.1, 1.0)
 TRUST_REL_GRID = [round(i * 0.02, 2) for i in range(0, 76)]     # 0.00 .. 1.50, relative to the active trust
 TRUST_MIN_ROWS = {"props": 300, "td": 200}
+# Nov 18: NBA moved 0.54 -> 0.46 with log loss flat (0.6872 -> 0.6872) and held out on 1 of 13 splits -- noise. A cut
+# now needs evidence too: the fit improves log loss by TRUST_MIN_LL_GAIN, or it holds up on half the held-out splits.
+TRUST_MIN_LL_GAIN = 0.0005
 TD_MARKETS = ("Anytime TD", "1st TD", "Last TD")
 
 
@@ -493,6 +496,12 @@ def auto_trust(sport: str, graded_by_date: Dict[str, List[Dict]], morning: str, 
                    log_loss=(round(_ll_trust(rows, 1.0), 4), round(_ll_trust(rows, rel), 4)))
         if abs(new - active) < AUTO_MIN_MOVE:
             dec["why"] = f"already right (best {new:.2f} vs active {active:.2f})"
+        elif new < active and (dec["log_loss"][0] - dec["log_loss"][1]) < TRUST_MIN_LL_GAIN \
+                and not (gains and passed >= 0.5 * len(gains)):
+            dec["why"] = (f"less trust fit a little better ({active:.2f} -> {new:.2f}) but not by enough to move "
+                          f"(log loss {dec['log_loss'][0]} -> {dec['log_loss'][1]}; held out {passed} of {len(gains)})")
+            out.append(dec)
+            continue
         elif new < active:
             dec["why"] = (f"the books were closer on {len(rows)} graded reads (log loss {dec['log_loss'][0]} -> "
                           f"{dec['log_loss'][1]}; held out {passed} of {len(gains)})")
