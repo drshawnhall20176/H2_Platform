@@ -1220,13 +1220,17 @@ def _fetch_markets_one_by_one(event: Dict, api_key: str, markets: List[str], spo
 
 
 def fetch_slate_props(date_str: str, api_key: str, markets: List[str], sport: str = SPORT,
-                      bookmakers: Optional[List[str]] = None) -> Tuple[List[Dict], Dict]:
+                      bookmakers: Optional[List[str]] = None,
+                      event_ids: Optional[List[str]] = None) -> Tuple[List[Dict], Dict]:
     """Pull props for every event on the slate date. Returns (offers, info). `bookmakers` (Nov 18) asks for exactly
     those books instead of the boards' default set (the Pick'em Board's extra apps and exchanges).
 
     info includes remaining quota and event counts so the UI can show cost."""
     events = fetch_events_all(api_key, sport=sport)
     todays = [e for e in events if _eastern_date_str(e.get("commence_time")) == date_str]
+    if event_ids is not None:                                   # Nov 18: only these games (Pick'em Board's extra fetch)
+        keep = set(event_ids)
+        todays = [e for e in todays if e.get("id") in keep]
     # Raw, unfiltered summary of exactly what the provider's own /events listing returned for
     # today -- the fastest way to confirm or rule out a real external-data limitation (e.g. a
     # same-day doubleheader only getting ONE event entry from the provider for both legs)

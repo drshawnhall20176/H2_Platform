@@ -77,8 +77,11 @@ with st.spinner("Reading the apps' lines…"):
     try:
         # the boards' fetch (PrizePicks, Pick6, the sportsbooks) + the Pick'em Board's own (Underdog, Dabble,
         # ParlayPlay, and the Novig / ProphetX exchanges, whose prices sharpen the books-checked chance)
-        offers = BBD.merge_offers(BBD.fetch_generic_offers(SPORT_KEY, date_str, api),
-                                  BBD.fetch_pickem_extra_offers(SPORT_KEY, date_str, api))
+        main = BBD.fetch_generic_offers(SPORT_KEY, date_str, api)
+        # Nov 18: only the games the books already posted props for (college basketball lists 70+ games a night;
+        # asking for every one kept the spinner going and spent credits on games with no lines)
+        _ids = tuple(sorted({o["event_id"] for o in main if o.get("event_id")}))
+        offers = BBD.merge_offers(main, BBD.fetch_pickem_extra_offers(SPORT_KEY, date_str, api, _ids))
         reads = BBD.load_slate_reads(SPORT_KEY, date_str, BBD.O.DEFAULT_BOOK)
     except Exception as e:                                      # noqa: BLE001
         st.error(f"Couldn't load today's lines ({type(e).__name__}).")
