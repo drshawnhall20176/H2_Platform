@@ -40,7 +40,11 @@ CORE_MARKETS = {"player_points": "Points", "player_rebounds": "Rebounds", "playe
                 # nightly grading, and earn a record like every other market. Blocks / steals stay on the old engine
                 # (low-count stats; untested in this model).
                 "player_points_rebounds_assists": "PRA", "player_points_rebounds": "PR",
-                "player_points_assists": "PA", "player_rebounds_assists": "RA"}
+                "player_points_assists": "PA", "player_rebounds_assists": "RA",
+                # Nov 18 (research/coverage.py): ~1,660 steals / blocks lines every two weeks were never read. They are
+                # on the props model now, and every bet tag on them shows as 👀 Watch until they earn a record
+                # (watch.PROBATION).
+                "player_steals": "Steals", "player_blocks": "Blocks", "player_blocks_steals": "Blocks+Steals"}
 ROTATION_GAMES = 7          # = position_data.LEAGUE_GAMES_PER_TEAM
 
 

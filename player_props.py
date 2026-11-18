@@ -40,6 +40,7 @@ MARKETS: Dict[str, Tuple[str, ...]] = {
     "Assists": ("ast",),
     "Blocks": ("blk",),
     "Steals": ("stl",),
+    "Blocks+Steals": ("blk", "stl"),
     "PA": ("pts", "ast"),
     "PR": ("pts", "reb"),
     "PB": ("pts", "blk"),
@@ -77,7 +78,8 @@ MIN_DEFENSES = 8           # a league average from fewer defenses than this isn'
 _OUT = {"out", "injured reserve", "ir", "suspended", "inactive"}
 
 # How each market is shaped: low counts get a negative binomial, totals a normal curve.
-DIST = {"Rebounds": "count", "Assists": "count", "Blocks": "count", "Steals": "count", "Threes Made": "count"}
+DIST = {"Rebounds": "count", "Assists": "count", "Blocks": "count", "Steals": "count", "Threes Made": "count",
+        "Blocks+Steals": "count"}
 # How strongly each stat moves with a game's scoring environment (points fully, rebounds a little).
 ENV_WEIGHTS = {"pts": 1.0, "ast": 0.7, "reb": 0.4, "stl": 0.3, "blk": 0.3, "fg3m": 0.9, "_default": 0.8}
 # Combos that contain points: a flagged Points line (the cleanest read on minutes / role) flags these too.
@@ -86,7 +88,7 @@ POINTS_COMBOS = ("PA", "PR", "PRA", "PB")
 ODDS_MARKETS = {"Points": "player_points", "Rebounds": "player_rebounds", "Assists": "player_assists",
                 "Blocks": "player_blocks", "Steals": "player_steals", "PRA": "player_points_rebounds_assists",
                 "PR": "player_points_rebounds", "PA": "player_points_assists", "RA": "player_rebounds_assists",
-                "Threes Made": "player_threes"}
+                "Threes Made": "player_threes", "Blocks+Steals": "player_blocks_steals"}
 
 
 def _num(x) -> float:
