@@ -30,7 +30,7 @@ def test_book_groups_do_not_overlap():
     assert not (set(O.US_BOOKS) & set(O.PICKEM_BOOKS))
     assert not (set(O.US_BOOKS) & set(O.MANUAL_BOOKS))
     assert not (set(O.PICKEM_BOOKS) & set(O.MANUAL_BOOKS))
-    assert list(O.ALL_BOOKS) == list(O.US_BOOKS) + list(O.PICKEM_BOOKS) + list(O.MANUAL_BOOKS)
+    assert list(O.ALL_BOOKS) == list(O.US_BOOKS) + list(O.PICKEM_BOOKS) + list(O.EXCHANGE_BOOKS) + list(O.MANUAL_BOOKS)
 
 
 def test_fetch_list_stays_within_one_region_of_credits():
@@ -298,3 +298,26 @@ def test_pickem_only_player_still_gets_a_line():
     got = PE.shop(offers, None, "draftkings")
     assert got["line"] == 14.5 and got["pickem"] and got["book"] in ("prizepicks", "underdog")
     assert got["best_over"] is None and got["p_market"] is None
+
+
+def test_pickem_extra_fetch_is_separate_and_main_fetch_unchanged():
+    """Nov 18: Novig / ProphetX / Dabble / ParlayPlay reach the Pick'em Board only; the boards' fetch stays at 10."""
+    assert O.FETCH_BOOKMAKERS == ("draftkings", "fanduel", "betmgm", "williamhill_us", "betrivers", "fanatics",
+                                  "bovada", "hardrockbet", "prizepicks", "pick6")
+    assert not set(O.EXCHANGE_BOOKS) & set(O.FETCH_BOOKMAKERS)
+    assert len(O.PICKEM_EXTRA_FETCH) <= 10 and {"novig", "prophetx", "dabble_us_dfs", "parlayplay"} <= set(O.PICKEM_EXTRA_FETCH)
+    ev = {"bookmakers": [
+        {"key": "novig", "markets": [{"key": "player_points", "outcomes": [
+            {"name": "Over", "description": "A", "point": 20.5, "price": -104},
+            {"name": "Under", "description": "A", "point": 20.5, "price": -102}]}]},
+        {"key": "dabble_us_dfs", "markets": [{"key": "player_points", "outcomes": [
+            {"name": "Over", "description": "A", "point": 20.5, "price": -118}]}]}]}
+    (o,) = O.parse_event_offers(ev, supported_markets=["player_points"])
+    assert o["over"] == {"novig": -104} and o["pickem"]["dabble_us_dfs"]["over"]["price"] == -118
+
+
+def test_explicit_pickem_books_ask_for_multipliers(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(O, "_get", lambda path, params: seen.update(params) or ({}, {}))
+    O.fetch_event_props("e", "K", ["m"], bookmakers=list(O.PICKEM_EXTRA_FETCH))
+    assert seen.get("includeMultipliers") == "true"

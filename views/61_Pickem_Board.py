@@ -1,5 +1,5 @@
 """
-61_Pickem_Board.py -- PrizePicks / Underdog / DK Pick6: every app line the model has read, its chance at the app's
+61_Pickem_Board.py -- PrizePicks / Underdog / DK Pick6 / Dabble / ParlayPlay: every app line the model has read, its chance at the app's
 line, and the strongest entries (pickem.py). Nov 18, owner: "a section specific to those [pick'em apps] for the sports".
 """
 from datetime import datetime
@@ -18,7 +18,7 @@ C.base_css()
 _active = sports.active()
 SPORT_KEY = _active.key
 C.page_header("🎲", "Pick'em Board",
-              f"PrizePicks, Underdog and DK Pick6 lines — More or Less, checked against the sportsbooks — "
+              f"PrizePicks, Underdog, DK Pick6, Dabble and ParlayPlay lines — More or Less, checked against the sportsbooks — "
               f"{_active.icon} {_active.label}")
 # Nov 18 (owner): follows the sport picked on the Sport desk, and can switch right here -- the choice is the same
 # shared one (session "sport"), so the desk and the sidebar follow it too.
@@ -53,20 +53,31 @@ date_str = datetime.now(ET).strftime("%Y-%m-%d")
 c1, c2, c3 = st.columns([1.2, 1, 1])
 app = c1.radio("App", list(PK.APPS), format_func=lambda k: PK.APPS[k]["name"], horizontal=True, key="pk_app")
 cfg = PK.APPS[app]
-n = c2.select_slider("Picks in the entry", options=sorted(cfg["power"]), value=min(3, max(cfg["power"])), key="pk_n")
+priced = PK.is_priced(app)
+_sizes = list(range(2, cfg.get("max_picks", 6) + 1)) if priced else sorted(cfg["power"])
+n = c2.select_slider("Picks in the entry", options=_sizes, value=min(3, max(_sizes)), key=f"pk_n_{app}")
 flex = c3.toggle("Flex play", value=False, key="pk_flex", disabled=not (cfg.get("flex") or {}).get(n),
                  help="PrizePicks only: pays for most picks hitting, at lower multipliers.") \
     if cfg.get("flex") else False
-mult = cfg["power"][n]
-floor = PK.breakeven(mult, n)
-st.caption(f"**{cfg['name']} {n}-pick {'Flex' if flex else 'Power'}**: "
-           + (f"pays {mult:g}x if every pick hits — each pick needs **{floor:.1%}** to break even. " if not flex else
-              "pays " + ", ".join(f"{k} of {n}: {v:g}x" for k, v in sorted(cfg['flex'][n].items(), reverse=True)) + ". ")
-           + cfg["note"] + f" [source]({cfg['source']})")
+if priced:
+    floor = 0.5                       # each pick is judged against its own price (the "Needs" column)
+    st.caption(f"**{cfg['name']}** prices every pick, so each one needs to beat **its own price's** chance "
+               f"(-118 needs 54.1%). " + cfg["note"] + f" [site]({cfg['source']})")
+else:
+    mult = cfg["power"][n]
+    floor = PK.breakeven(mult, n)
+    st.caption(f"**{cfg['name']} {n}-pick {'Flex' if flex else 'Power'}**: "
+               + (f"pays {mult:g}x if every pick hits — each pick needs **{floor:.1%}** to break even. " if not flex else
+                  "pays " + ", ".join(f"{k} of {n}: {v:g}x" for k, v in sorted(cfg['flex'][n].items(), reverse=True))
+                  + ". ")
+               + cfg["note"] + f" [source]({cfg['source']})")
 
 with st.spinner("Reading the apps' lines…"):
     try:
-        offers = BBD.fetch_generic_offers(SPORT_KEY, date_str, api)
+        # the boards' fetch (PrizePicks, Pick6, the sportsbooks) + the Pick'em Board's own (Underdog, Dabble,
+        # ParlayPlay, and the Novig / ProphetX exchanges, whose prices sharpen the books-checked chance)
+        offers = BBD.merge_offers(BBD.fetch_generic_offers(SPORT_KEY, date_str, api),
+                                  BBD.fetch_pickem_extra_offers(SPORT_KEY, date_str, api))
         reads = BBD.load_slate_reads(SPORT_KEY, date_str, BBD.O.DEFAULT_BOOK)
     except Exception as e:                                      # noqa: BLE001
         st.error(f"Couldn't load today's lines ({type(e).__name__}).")
@@ -79,8 +90,9 @@ if not legs:
 legs = C.date_slot_select(legs, key=f"pk_slot_{SPORT_KEY}", when=lambda x: x.get("kickoff"))
 
 checked = [x for x in legs if x["basis"] == "books"]
-st.markdown(f"**{len(legs)} {cfg['name']} lines read** · {len(checked)} also priced at a sportsbook · "
-            f"{sum(1 for x in checked if x['chance'] >= floor)} clear the {floor:.1%} break-even")
+_clear = sum(1 for x in checked if x["chance"] >= (x["needed"] if x.get("needed") is not None else floor))
+st.markdown(f"**{len(legs)} {cfg['name']} lines read** · {len(checked)} also priced at a sportsbook or exchange · "
+            f"{_clear} clear " + ("their own price" if priced else f"the {floor:.1%} break-even"))
 
 # ---- the strongest entry
 entry = PK.best_entry(legs, n, floor if not flex else 0.5)
@@ -92,8 +104,11 @@ with st.container(border=True):
     else:
         res = PK.entry_odds(entry, app, flex=flex, sport=SPORT_KEY)
         for x in entry:
-            st.markdown(f"- **{x['player']}** {x['side']} {x['app_line']:g} {x['market']} — **{x['chance']:.0%}** "
-                        f"(books at {x['book_line']:g}) · {x.get('game') or ''}")
+            _px = f" at {int(float(x['price'])):+d} (needs {x['needed']:.0%})" if x.get("needed") is not None else ""
+            st.markdown(f"- **{x['player']}** {x['side']} {x['app_line']:g} {x['market']}{_px} — "
+                        f"**{x['chance']:.0%}** (books at {x['book_line']:g}) · {x.get('game') or ''}")
+        if res and priced:
+            st.caption(f"Pays about {res['mult']:.1f}x (the picks' odds multiplied) — check {cfg['name']}'s entry screen.")
         if res:
             st.markdown(f"All {n} hit: **{res['all']:.1%}** · expected return **{res['ev']:+.0%}** per entry "
                         f"({'+' if res['ev'] > 0 else ''}{res['ev'] * 10:.2f} on a $10 entry)")
@@ -104,8 +119,12 @@ with st.container(border=True):
 def _fmt(x):
     return {"Player": x["player"], "Team": x.get("team") or "", "Game": x.get("game") or "",
             "Time": (C._kick_dt(x.get("kickoff")).strftime("%a %-I:%M %p") if C._kick_dt(x.get("kickoff")) else ""),
-            "Market": x["market"], "App line": x["app_line"], "Pick": x["side"], "Chance": x["chance"],
-            "vs break-even": x["chance"] - floor, "Books' line": x.get("book_line"),
+            "Market": x["market"], "App line": x["app_line"], "Pick": x["side"],
+            **({"Price": f"{int(float(x['price'])):+d}" if x.get("price") is not None else ""} if priced else {}),
+            "Chance": x["chance"],
+            **({"Needs": x.get("needed")} if priced else {}),
+            "vs break-even": x["chance"] - (x["needed"] if x.get("needed") is not None else floor),
+            "Books' line": x.get("book_line"),
             "Model proj": round(x["projection"], 1), "Checked by": "📚 books" if x["basis"] == "books" else "model only"}
 
 
@@ -118,6 +137,7 @@ if rows:
     st.dataframe(df, hide_index=True, width="stretch", column_config={
         "Chance": st.column_config.NumberColumn(format="percent"),
         "vs break-even": st.column_config.NumberColumn(format="percent"),
+        "Needs": st.column_config.NumberColumn(format="percent"),
         "App line": st.column_config.NumberColumn(format="%.1f"),
         "Books' line": st.column_config.NumberColumn(format="%.1f")})
 else:
@@ -131,4 +151,8 @@ with st.expander("How these chances are made, and how far to trust a 'model only
         "- **model only**: no sportsbook posts him (most college props). On graded lines like these the model's side "
         "hit 44–51% in the NBA and NFL (Nov 18 study), so its lean is cut to a tenth here and these lines almost never "
         "clear a break-even. They're shown for reference, never put in an entry.\n"
+        "- **Sportsbooks and exchanges**: the books-checked chance uses every sportsbook plus Novig and ProphetX, "
+        "prediction exchanges whose two-sided prices carry almost no house margin (ProphetX also prices some "
+        "college players the sportsbooks skip).\n"
+        "- **Dabble and ParlayPlay** price each pick, so a pick there must beat its own price, shown in **Needs**.\n"
         "- **One player per game** in every entry; the apps also pay less for same-game lineups.")

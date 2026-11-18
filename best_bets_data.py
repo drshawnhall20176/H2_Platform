@@ -671,6 +671,42 @@ def fetch_generic_offers(sport_key: str, date_str: str, api_key: str) -> List[Di
     return offers
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_pickem_extra_offers(sport_key: str, date_str: str, api_key: str) -> List[Dict]:
+    """Nov 18: the Pick'em Board's own fetch -- Underdog, Dabble, ParlayPlay and the Novig / ProphetX exchanges
+    (odds_api.PICKEM_EXTRA_FETCH, 5 books = one region's credits a market). Only the Pick'em Board pays for it; the
+    boards' main fetch is unchanged. Fails soft to [] (the board still works from the main fetch)."""
+    sport = sports.get(sport_key)
+    try:
+        offers, _info = O.fetch_slate_props(date_str, api_key, list(sport.markets), sport=sport.odds_sport_key,
+                                            bookmakers=list(O.PICKEM_EXTRA_FETCH))
+        return offers
+    except Exception:                                           # noqa: BLE001
+        return []
+
+
+def merge_offers(*groups: List[Dict]) -> List[Dict]:
+    """One offer per (market, player, line) across fetches: book prices and pick'em lines combined."""
+    out: Dict[Tuple, Dict] = {}
+    for g in groups:
+        for o in g or []:
+            k = (o.get("market"), o.get("player"), o.get("point"))
+            slot = out.get(k)
+            if slot is None:
+                slot = out[k] = {**o, "over": dict(o.get("over") or {}), "under": dict(o.get("under") or {})}
+                if o.get("pickem"):
+                    slot["pickem"] = {b: dict(v) for b, v in o["pickem"].items()}
+                continue
+            slot["over"].update({b: v for b, v in (o.get("over") or {}).items() if b not in slot["over"]})
+            slot["under"].update({b: v for b, v in (o.get("under") or {}).items() if b not in slot["under"]})
+            for b, v in (o.get("pickem") or {}).items():
+                slot.setdefault("pickem", {}).setdefault(b, {}).update(v)
+            for m in ("commence_time", "home_team", "away_team", "event_id"):
+                if slot.get(m) is None and o.get(m) is not None:
+                    slot[m] = o[m]
+    return list(out.values())
+
+
 # Nov 16: the long-shots scan runs right after warm-slates builds the boards, in a new process -- and paid for the
 # whole props slate a second time. A scheduled job's fetch is now kept (one saved copy per sport and day), and the
 # scan reads it when it is fresh. Only jobs save (GITHUB_ACTIONS): the apps keep their own 5-minute cache.

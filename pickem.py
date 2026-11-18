@@ -1,5 +1,7 @@
 """
-pickem.py -- the Pick'em board: PrizePicks, Underdog and DraftKings Pick6 lines read for More / Less (Nov 18).
+pickem.py -- the Pick'em board: PrizePicks, Underdog, DraftKings Pick6, Dabble and ParlayPlay lines read for More /
+Less (Nov 18). Novig and ProphetX (prediction exchanges) are price sources here, not apps: their two-sided prices join
+the sportsbooks' in the "books-checked" chance.
 
 Owner: "for player props for college sports that are not getting lines from DraftKings, FanDuel ... is there a manner
 that we can ... tell me whether a player is a good Pick6, PrizePicks, Underdog pick ... Can we build a section
@@ -46,7 +48,41 @@ APPS = {
               "note": "Pick6 is a pooled contest: prizes depend on how many entries go perfect. These are typical "
                       "results (third-party summary), not fixed payouts.",
               "source": "https://www.legalsportsreport.com/dfs-sites/draftkings-pick6/"},
+    # Nov 18 (owner: "add Novig and any other pick'em app"): the other two apps in the odds feed. Neither pays a
+    # fixed multiplier per entry -- each pick carries its own price (Dabble ~-118/+119), and an entry pays roughly
+    # the product of its picks' prices. So a pick needs to beat ITS OWN price's implied chance, not a table.
+    "dabble_us_dfs": {"name": "Dabble", "priced": True, "max_picks": 6, "flex": None,
+                      "note": "Dabble prices each pick; an entry pays about the product of its picks' odds. "
+                              "Check the payout on your entry screen.",
+                      "source": "https://dabble.com/"},
+    "parlayplay": {"name": "ParlayPlay", "priced": True, "max_picks": 6, "flex": None,
+                   "note": "ParlayPlay prices each pick; an entry pays about the product of its picks' multipliers. "
+                           "Check the payout on your entry screen.",
+                   "source": "https://parlayplay.io/"},
 }
+
+
+def is_priced(app: str) -> bool:
+    """True for an app that prices each pick (Dabble, ParlayPlay) instead of paying a fixed entry multiplier."""
+    return bool((APPS.get(app) or {}).get("priced"))
+
+
+def _decimal(price) -> Optional[float]:
+    try:
+        a = float(price)
+    except (TypeError, ValueError):
+        return None
+    if a >= 100:
+        return 1 + a / 100.0
+    if a <= -100:
+        return 1 + 100.0 / -a
+    return None
+
+
+def needed(price) -> Optional[float]:
+    """The chance a pick priced `price` (American) needs to break even: its implied probability."""
+    d = _decimal(price)
+    return 1.0 / d if d else None
 
 
 def breakeven(mult: float, n: int) -> float:
@@ -118,7 +154,8 @@ def legs(reads: Dict, offers: Sequence[Dict], app: str, sport: str) -> List[Dict
         cands = []
         for o in offs:
             for pside, entry in ((o.get("pickem") or {}).get(app) or {}).items():
-                cands.append((pside, float(o["point"]), (entry or {}).get("multiplier"), o.get("commence_time")))
+                cands.append((pside, float(o["point"]), (entry or {}).get("multiplier"), o.get("commence_time"),
+                              (entry or {}).get("price")))
         if not cands:
             continue
         priced = [o for o in offs if (o.get("over") or {}) and (o.get("under") or {})]
@@ -126,7 +163,8 @@ def legs(reads: Dict, offers: Sequence[Dict], app: str, sport: str) -> List[Dict
         t = PE.trust_for(sport, read.get("market"))
         w = PE.MODEL_WEIGHT * (1.0 if t is None else t)
         best = None
-        for pside, line, mult, kick in cands:
+        priced_app = is_priced(app)
+        for pside, line, mult, kick, price in cands:
             pm = p_more(read["projection"], read.get("values") or [], read.get("dist") or "normal", line)
             if pm is None:
                 continue
@@ -135,17 +173,23 @@ def legs(reads: Dict, offers: Sequence[Dict], app: str, sport: str) -> List[Dict
             p = (pb + w * (pm - pb)) if pb is not None else (0.5 + NO_BOOK_SHARE * (pm - 0.5))
             side = "More" if pside == "over" else "Less"
             chance = p if side == "More" else 1 - p
-            if best is None or chance > best["chance"]:
+            need = needed(price) if priced_app else None
+            if priced_app and need is None:
+                continue                                        # a priced app's pick with no price can't be judged
+            score = chance - need if priced_app else chance
+            if best is None or score > best["_score"]:
                 best = {"player": read["player"], "market": read.get("market"), "market_key": mk,
                         "game": read.get("game"), "team": read.get("team_name") or read.get("team"), "kickoff": kick,
                         "app_line": line, "side": side, "chance": chance, "p_over": p,
                         "basis": "books" if pb is not None else "model only", "projection": read["projection"],
                         "model_over": pm, "book_line": book["line"] if book else None,
                         "book_over": book.get("p_market") if book else None, "books_over_at_app": pb,
-                        "multiplier": mult}
+                        "multiplier": mult, "price": price if priced_app else None, "needed": need,
+                        "_score": score}
         if best:
+            best.pop("_score", None)
             out.append(best)
-    out.sort(key=lambda x: (x["basis"] != "books", -x["chance"]))
+    out.sort(key=lambda x: (x["basis"] != "books", -(x["chance"] - (x.get("needed") or 0.0))))
     return out
 
 
@@ -153,8 +197,9 @@ def best_entry(legs_: Sequence[Dict], n: int, floor: float) -> List[Dict]:
     """The n strongest books-checked legs clearing `floor`, at most one player per game (owner's rule for anything
     that isn't a same-game parlay -- pick'em apps also cut payouts on same-game lineups)."""
     out, games = [], set()
-    for x in sorted(legs_, key=lambda x: -x["chance"]):
-        if x["basis"] != "books" or x["chance"] < floor or x.get("game") in games:
+    for x in sorted(legs_, key=lambda x: -(x["chance"] - (x.get("needed") or 0.0))):
+        bar = x["needed"] if x.get("needed") is not None else floor     # a priced pick must beat its own price
+        if x["basis"] != "books" or x["chance"] < bar or x.get("game") in games:
             continue
         out.append(x)
         games.add(x.get("game"))
@@ -174,6 +219,9 @@ def entry_odds(entry: Sequence[Dict], app: str, flex: bool = False, sport: Optio
     cfg = APPS.get(app) or {}
     table = (cfg.get("flex") or {}).get(n) if flex else None
     mult = None if flex else (cfg.get("power") or {}).get(n)
+    if cfg.get("priced") and not flex:
+        ds = [_decimal(x.get("price")) for x in entry]
+        mult = None if any(d is None for d in ds) else float(__import__("math").prod(ds))
     if n < 2 or (mult is None and table is None):
         return None
     legs_sim = [{"p": x["chance"], "player": x["player"], "game": x.get("game"), "market": x.get("market"),
