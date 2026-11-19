@@ -126,7 +126,8 @@ def scan(sport: str, day: str, api_key: str, book: str = "draftkings", now: Opti
                   if (r.get("Price") or 0) >= MIN_PRICE and (r.get("EV per $1") or 0) > 0
                   and r.get("Market") not in SKIP.get(sport, ())]
     found.sort(key=lambda r: -(r.get("Honest chance") or 0))
-    return {"at": now.isoformat(), "rows": found[:200], "top": pick_top(found), "games": games}
+    res = {"at": now.isoformat(), "rows": found[:200], "top": pick_top(found), "games": games}
+    return recheck(res, sport) or res                                       # Nov 18: tonight's injury report too
 
 
 TESTED_NOTE = "✅ Tested market: positive in testing so far (promising, not proven)"
@@ -152,12 +153,40 @@ def all_rows(saved: Optional[Dict]) -> List[Dict]:
              "Market": ("✅ " if r.get("tested") else "") + str(r.get("Market") or "")} for r in rows]
 
 
-def load(sport: str, day: str, get=None) -> Optional[Dict]:
+def load(sport: str, day: str, get=None, live: Optional[bool] = None) -> Optional[Dict]:
+    """The day's saved scan. live (default: on for the real store): re-checked against tonight's injury report."""
     try:
         import model_store as MS
-        return (get or MS.get_setting)(KEY.format(sport=sport, date=day))
+        saved = (get or MS.get_setting)(KEY.format(sport=sport, date=day))
     except Exception:                                           # noqa: BLE001
         return None
+    if live if live is not None else get is None:
+        saved = recheck(saved, sport)
+    return saved
+
+
+def recheck(saved: Optional[Dict], sport: str, status=None) -> Optional[Dict]:
+    """Nov 18 (RJ Barrett, ruled out at 5:55 PM, topped the 4:13 PM scan): drop rungs for players now ruled out,
+    keep questionable ones in the full list with a flag but out of the top picks, and re-pick the top."""
+    if not saved or not saved.get("rows"):
+        return saved
+    try:
+        import injury_check as IC
+        status = status or (lambda name: IC.status(sport, name))
+        rows = []
+        for r in saved["rows"]:
+            s = status(r.get("Player"))
+            if s == "out":
+                continue
+            if s == "questionable":
+                r = dict(r, Flags=list(r.get("Flags") or []) + ["questionable tonight — check news"],
+                         pick=f"{r.get('pick')} (questionable)")
+            rows.append(r)
+        if len(rows) == len(saved["rows"]) and not any(status(r.get("Player")) for r in rows):
+            return saved
+        return {**saved, "rows": rows, "top": pick_top(rows), "rechecked": True}
+    except Exception:                                           # noqa: BLE001
+        return saved
 
 
 def stale(saved: Optional[Dict], now: Optional[datetime] = None, hours: float = EVERY_H) -> bool:
@@ -180,7 +209,7 @@ def run(day: Optional[str] = None, force: bool = False) -> Dict[str, Dict]:
     for sp in SPORTS:
         if not sports.in_season(sp) or not api:
             continue
-        if not force and not stale(load(sp, day)):
+        if not force and not stale(load(sp, day, live=False)):
             out[sp] = {"skipped": "scanned under 3 hours ago"}
             continue
         try:
