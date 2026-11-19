@@ -6,7 +6,7 @@ games today so it would be a row by itself with the top 4 picks, then the next r
 The day in four numbers, then one bordered row per sport playing today (sports with picks first, then by games):
 its game and pick counts, an "Open desk" button (Home on that sport) and up to four cards -- prop picks from pick
 types with a winning 30-day record (one per player), playable game lines, and college basketball spreads moving our
-way (tested, todays_best.spread_move). Then the owner's brief. No Odds API credits: everything is already saved.
+way (tested, todays_best.spread_move). The owner's brief sits at the top, under the date (Nov 19). No Odds API credits: everything is already saved.
 """
 import streamlit as st
 from datetime import datetime as _dt
@@ -150,6 +150,29 @@ try:
         _b2.page_link("views/59_Promotions.py", label="See it →")
 except Exception:                                               # noqa: BLE001 -- a banner never breaks the page
     pass
+# ---------- the owner's brief (Nov 19: moved to the top -- owner: "so it does not get overlooked") ----------
+if _owner:
+    try:
+        import model_store as _MS
+        import pandas as _pd
+        _bday = _dt.now(_ET).strftime("%Y-%m-%d")
+        _briefs = [(k, t, _MS.get_setting(f"brief:{_bday}:{k}")) for k, t in
+                   (("picks", "🎯 This afternoon's picks"), ("morning", "☀️ Morning brief"))]
+        _briefs = [(k, t, b) for k, t, b in _briefs if isinstance(b, dict) and b.get("text")]
+        for _i, (_kind, _title, _b) in enumerate(_briefs):
+            with st.expander(_title, expanded=_i == 0):         # the newest note open, the other one folded
+                _lines = _b["text"].split("\n")[1:]          # the first line is the note's own title
+                if _b.get("table"):
+                    _head = [l for l in _lines if l.strip() and not l.startswith("•")]
+                    st.markdown(C.money_md(_head[0]))
+                    st.dataframe(_pd.DataFrame(_b["table"]), hide_index=True, width="stretch")
+                    for _l in _head[1:]:
+                        st.caption(C.money_md(_l))
+                else:
+                    st.markdown(C.money_md("  \n".join(_lines)))
+    except Exception:                                           # noqa: BLE001 -- the brief is a bonus
+        pass
+
 C.kpi_row([{"icon": "🎯", "value": str(_g_sum["picks"]), "label": "Player picks from winning pick types"},
            {"icon": "🏟️", "value": str(_g_sum["lines"]), "label": "Playable game lines"},
            {"icon": "📅", "value": str(sum(1 for s in _order if _cards.get(s.key))), "label": "Sports with a pick"},
@@ -188,26 +211,3 @@ for s in _order:
 
 if _quiet:
     st.caption("Not playing today: " + ", ".join(f"{s.icon} {s.label.split(' — ')[0]}" for s in _quiet))
-
-# ---------- the owner's brief ----------
-if _owner:
-    st.divider()
-    try:
-        import model_store as _MS
-        import pandas as _pd
-        _bday = _dt.now(_ET).strftime("%Y-%m-%d")
-        for _kind, _title in (("picks", "🎯 This afternoon's picks"), ("morning", "☀️ Morning brief")):
-            _b = _MS.get_setting(f"brief:{_bday}:{_kind}")
-            if isinstance(_b, dict) and _b.get("text"):
-                with st.expander(_title, expanded=_kind == "picks"):
-                    _lines = _b["text"].split("\n")[1:]          # the first line is the note's own title
-                    if _b.get("table"):
-                        _head = [l for l in _lines if l.strip() and not l.startswith("•")]
-                        st.markdown(C.money_md(_head[0]))
-                        st.dataframe(_pd.DataFrame(_b["table"]), hide_index=True, width="stretch")
-                        for _l in _head[1:]:
-                            st.caption(C.money_md(_l))
-                    else:
-                        st.markdown(C.money_md("  \n".join(_lines)))
-    except Exception:                                           # noqa: BLE001 -- the brief is a bonus
-        pass
