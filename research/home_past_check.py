@@ -6,7 +6,7 @@ os.makedirs(".streamlit", exist_ok=True)
 open(".streamlit/secrets.toml", "w").write('AUDIENCE = "owner"\n')
 from streamlit.testing.v1 import AppTest
 at = AppTest.from_file("Home.py", default_timeout=600)
-at.session_state["sport"] = "NBA"
+at.session_state["sport"] = os.environ.get("SP", "NCAAMB")
 at.session_state["home_best_date"] = datetime.date(2026, 11, 18)
 if len(sys.argv) > 1 or os.environ.get("ALLP"):
     at.session_state["home_best_show"] = "All playable"
