@@ -2694,24 +2694,42 @@ A.sport_bar(st.session_state.get("_page", "command_center"), pages, ["NBA", "NHL
     assert not any(o.endswith("All sports") for o in at.button_group[0].options)
 
 
-def test_command_center_all_view_renders():
-    """The All view sums every in-season sport's board and the whole Bet Log (boards stubbed: no network)."""
+def test_command_center_all_view_renders(monkeypatch):
+    """The All view reads the boards already saved today (no live builds -- Nov 19: building five was too slow)."""
     from streamlit.testing.v1 import AppTest
+    import best_bets_data as BBD
+    import betlog as B
+    import todays_best as TB
+
+    def boom(*a, **k):
+        raise AssertionError("the All view must not build a board")
+
+    def row(sp, i, lock):
+        return dict(sport=sp, kind="Prop", time="7:30 PM", pick=f"{sp} Guy {i} Points Over 20.5", game=f"A{i} @ B{i}",
+                    price=-110, book="draftkings", chance=0.6 + i / 100, lock=lock)
+    monkeypatch.setattr(BBD, "load_generic_best_bets_board", boom)
+    monkeypatch.setattr(BBD, "load_mlb_best_bets_board", boom)
+    monkeypatch.setattr(TB, "load_props", lambda sp, d: ({"at": "2026-11-19T19:05:00+00:00",
+                                                           "rows": [row(sp, 1, True), row(sp, 2, False)]}
+                                                          if sp == "NBA" else None))
+    monkeypatch.setattr(TB, "winner_rows", lambda d, leagues=None, past=False: [
+        dict(sport="NBA", game="A1 @ B1"), dict(sport="NBA", game="C @ D"), dict(sport="NHL", game="E @ F")])
+    monkeypatch.setattr(B, "list_bets", lambda **kw: [])
+    monkeypatch.setattr(S, "in_season", lambda k, day=None: k in ("NBA", "NHL"))
     page = str(_HERE / "views" / "0_#L01f3c6_Command_Center.py")
-    at = AppTest.from_string(f'''
-import runpy, streamlit as st, best_bets_data as BBD, betlog as B, sports
-play = dict(Player="Test Guy", Market="Points", Side="Over", Line=20.5, ModelProb=0.62, Conviction=1.3,
-            Edge=0.08, Odds=-110, Book="draftkings", Game="A @ B")
-BBD.load_generic_best_bets_board = lambda k, d, b: ([dict(play)], [{{"g": 1}}], [])
-BBD.load_mlb_best_bets_board = lambda d, f: ([], [], [])
-B.list_bets = lambda **kw: []
-sports.in_season = lambda k, day=None: k in ("NBA", "NHL")
+    at = AppTest.from_string(f"""
+import runpy, streamlit as st
 st.session_state["cc_all"] = True
 runpy.run_path({page!r})
-''', default_timeout=120)
+""", default_timeout=60)
     at.run()
     assert not at.exception, at.exception
     text = " ".join(m.value for m in at.markdown)
-    assert "Sport by sport" in text and "every sport" in text
-    df = at.dataframe[0].value
-    assert set(df["Games tonight"]) == {1} and len(df) == 2
+    assert "Sport by sport" in text
+    df = at.dataframe[0].value.set_index("Sport")
+    nba = [i for i in df.index if "NBA" in i][0]
+    nhl = [i for i in df.index if "NHL" in i][0]
+    assert df.loc[nba, "Games today"] == 2 and df.loc[nba, "Picks"] == 2 and df.loc[nba, "🔒"] == 1
+    assert df.loc[nba, "Board saved"] == "2:05 PM" and df.loc[nhl, "Board saved"] == "not built yet"
+    assert df.loc[nhl, "Games today"] == 1
+    assert any(p.startswith("🔒") for p in at.dataframe[1].value["Pick"])
