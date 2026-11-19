@@ -92,9 +92,45 @@ def save_props(sport: str, date_str: str, plays, meta=None) -> None:
             dt = when.get(p.get("Game"))
             timed.append(dict(p, Time=p.get("Time") or (dt.strftime("%I:%M %p").lstrip("0") if dt else "")))
         MS.save_setting(KEY.format(sport=sport, date=date_str),
-                        {"at": datetime.now(timezone.utc).isoformat(), "rows": props_rows(sport, timed)})
+                        {"at": datetime.now(timezone.utc).isoformat(),
+                         "rows": keep_started(props_rows(sport, timed), (load_props(sport, date_str) or {}).get("rows"))})
     except Exception:                                           # noqa: BLE001 -- a bonus, never a failure
         pass
+
+
+def keep_started(new_rows: List[Dict], old_rows: Optional[List[Dict]], game_key: str = "game") -> List[Dict]:
+    """Nov 19: a board rebuilt after tip-off leaves out the games that have started -- and the 11:25 PM rebuild on
+    Nov 18 saved the NBA's picks as an empty list, so the day's picks (and their results) were gone by morning. The
+    picks of any game no longer on the new board are kept as they were; games still on it take the new picks."""
+    new_rows = list(new_rows or [])
+    live = {r.get(game_key) for r in new_rows}
+    return new_rows + [r for r in old_rows or [] if r.get(game_key) not in live]
+
+
+def props_from_snapshots(sport: str, date_str: str, snaps=None) -> List[Dict]:
+    """Nov 19: a day's Today's-best props rebuilt from the prop snapshots (each read's first bet tag, or its last read
+    when it was a 🔒 / 💰) -- for a day whose saved picks were lost."""
+    import model_store as MS
+    snaps = MS.load_snapshots(sport, [date_str]) if snaps is None else snaps
+    out = []
+    for s in snaps or []:
+        tag = PE.norm_use(s.get("bet_use_tag") or s.get("use_tag"))
+        side = s.get("bet_side") or s.get("side")
+        line = s.get("bet_line") if s.get("bet_line") is not None else s.get("line")
+        chance = s.get("bet_chance") if s.get("bet_chance") is not None else s.get("chance")
+        lock = PE.is_lock(s.get("chance"), s.get("cushion"), s.get("gap"), s.get("book"))
+        money = PE.is_money(sport, s.get("ev"), s.get("book"), market=s.get("market")) and s.get("price") is not None
+        if tag not in PLAYABLE and not lock and not money:
+            continue
+        out.append({"sport": sport, "kind": "Prop", "time": _et_time(s.get("kickoff")) or "",
+                    "pick": f"{s.get('player')} {s.get('market')} {side}" + ("" if line is None else f" {float(line):g}"),
+                    "game": s.get("game") or "", "price": s.get("price"), "book": s.get("book") or "",
+                    "chance": chance, "use": tag or "", "lock": lock, "page": "Best Bets", "player": s.get("player"),
+                    "pid": s.get("player_id"), "market": s.get("market"), "side": side, "line": line,
+                    "market_key": None, "pickem_only": (s.get("book") or "") in PE.PICKEM_BOOKS, "money": money,
+                    "edge": s.get("ev"), "rebuilt": True})
+    out.sort(key=_order)
+    return out
 
 
 def load_props(sport: str, date_str: str) -> Optional[Dict]:
@@ -233,10 +269,12 @@ def prop_results(sport: str, date_str: str) -> Dict:
     for g in PG.grade(snaps, res):
         if g.get("actual") is None:
             continue
-        thr = PE.threshold(float(g["line"]))
-        for side in ("Over", "Under"):
-            r = "push" if g["actual"] == thr else ("win" if (g["actual"] > thr) == (side == "Over") else "loss")
-            out[(PE.norm_name(g.get("player") or ""), g.get("market"), side, float(g["line"]))] = r
+        lines = {float(g["line"])} | ({float(g["bet_line"])} if g.get("bet_line") is not None else set())
+        for ln in lines:                                        # Nov 19: the bet tag's own line too
+            thr = PE.threshold(ln)
+            for side in ("Over", "Under"):
+                r = "push" if g["actual"] == thr else ("win" if (g["actual"] > thr) == (side == "Over") else "loss")
+                out[(PE.norm_name(g.get("player") or ""), g.get("market"), side, ln)] = r
     return out
 
 
@@ -253,6 +291,11 @@ def collect(date_str: str, props_sports, past: bool = False) -> Dict:
         saved = load_props(sp, date_str)
         fresh[sp] = (saved or {}).get("at")
         got = [dict(r) for r in (saved or {}).get("rows") or []]
+        if past and not got:                                    # Nov 19: the day's picks were lost -- rebuild them
+            try:
+                got = props_from_snapshots(sp, date_str)
+            except Exception:                                   # noqa: BLE001
+                got = []
         if past and got:
             try:
                 res = prop_results(sp, date_str)

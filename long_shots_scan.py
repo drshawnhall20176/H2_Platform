@@ -266,6 +266,14 @@ def run(day: Optional[str] = None, force: bool = False) -> Dict[str, Dict]:
             continue
         try:
             res = scan(sp, day, api)
+            # Nov 19: a late rescan skips the games that have started -- keep their rows as they were (the 11:25 PM
+            # scan on Nov 18 saved an empty list over the day's long shots)
+            old = load(sp, day, live=False) or {}
+            seen = {r.get("game") for r in res.get("rows") or []}
+            kept = [r for r in old.get("rows") or [] if r.get("game") not in seen]
+            if kept:
+                res["rows"] = (res.get("rows") or []) + kept
+                res["top"] = pick_top(res["rows"])
             MS.save_setting(KEY.format(sport=sp, date=day), res)
             out[sp] = {"games": res["games"], "value_rungs": len(res["rows"]),
                        "top": [f"{r['Player']} {r['Bet']} {int(r['Price']):+d} ({r['Honest chance']:.0%})" for r in res["top"]]}
