@@ -111,7 +111,7 @@ def test_past_long_shots_rebuilt_when_the_scan_is_gone(monkeypatch):
             "market": "Assists", "projection": 6.0, "line": 4.5, "kickoff": "2026-11-19T00:00:00Z"}
     monkeypatch.setattr(PG, "grade", lambda snaps, res: [dict(s, actual=9, result="hit") for s in snaps])
     rows = [{"Player": "X Y", "Bet": "8+ Assists", "Market": "Assists", "Honest chance": 0.2, "Price": 600,
-             "EV per $1": 0.4, "Actual": 9, "Hit": "✅", "Projection": 6.0, "Main line": 4.5},
+             "EV per $1": 0.4, "Actual": 9, "Hit": "✅", "Projection": 5.0, "Main line": 4.5},
             {"Player": "X Y", "Bet": "9+ Assists", "Market": "Assists", "Honest chance": 0.12, "Price": 300,
              "EV per $1": 0.2, "Actual": 9, "Hit": "✅", "Projection": 6.0, "Main line": 4.5}]
     seen = {}
