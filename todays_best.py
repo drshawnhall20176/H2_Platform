@@ -50,13 +50,17 @@ def _et_time(iso) -> str:
 
 
 # --------------------------------------------------------------------------- player props
+MONEY_TOP = 8
+
+
 def props_rows(sport: str, plays) -> List[Dict]:
     out = []
     for p in plays or []:
         lock = PE.play_is_lock(p)
-        if p.get("Use") not in PLAYABLE and not lock:
+        money = PE.play_is_money(sport, p)                   # Nov 19: 💰 shown whatever its Use tag
+        if p.get("Use") not in PLAYABLE and not lock and not money:
             continue
-        if p.get("Use") == PE.USE_PASS:
+        if p.get("Use") == PE.USE_PASS and not money:
             continue
         line = p.get("Line")
         out.append({"sport": sport, "kind": "Prop", "time": p.get("Time") or "",
@@ -67,10 +71,14 @@ def props_rows(sport: str, plays) -> List[Dict]:
                     "player": p.get("Player"), "pid": p.get("PlayerId"), "market": p.get("Market"), "side": p.get("Side"),
                     "line": line, "market_key": p.get("MarketKey"),
                     # Nov 18: a line only a pick'em app posts -- no sportsbook price behind it, never a 🔒
-                    "pickem_only": bool(p.get("Pickem"))})
+                    "pickem_only": bool(p.get("Pickem")),
+                    "money": money, "edge": p.get("EV")})
     out.sort(key=_order)
-    # Nov 14: every 🔒 Most probable is kept; the cap only trims the other playable tags
-    return [r for r in out if r["lock"]] + [r for r in out if not r["lock"]][:TOP_PER_SPORT]
+    # Nov 14: every 🔒 Most probable is kept; the cap only trims the other playable tags. Nov 19: the 💰 Money picks
+    # are kept too, the MONEY_TOP biggest edges (the full list is on Best Bets under "💰 Money picks")
+    money = sorted([r for r in out if r["money"] and not r["lock"]], key=lambda r: -(r.get("edge") or 0))[:MONEY_TOP]
+    return ([r for r in out if r["lock"]] + money
+            + [r for r in out if not r["lock"] and not r["money"]][:TOP_PER_SPORT])
 
 
 def save_props(sport: str, date_str: str, plays, meta=None) -> None:
