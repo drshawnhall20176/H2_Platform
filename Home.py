@@ -178,6 +178,13 @@ if True:
         return _PR.tag_records(sp)
 
     _PR.annotate_props(_rows, _tag_recs)
+
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def _money_rec(sp):
+        return _PE.money_record_text(sp)
+    for _r in _rows:                                            # Nov 19: a 💰 pick shows the 💰 record, not its tag's
+        if _r.get("money") and _money_rec(_r.get("sport")):
+            _r["record"] = _money_rec(_r["sport"])
     _hidden = [r for r in _rows if r.get("verdict") in _PR.HIDE]
     _show_losing = st.toggle(f"Show losing pick types ({len(_hidden)} hidden)", value=False, key="home_best_losing",
                              disabled=not _hidden,
@@ -236,7 +243,12 @@ if True:
         if _scope != "All sports":
             _df = _df.drop(columns=["Sport"])
         _sel_props = _LU.picked(_rows[:_cap], _LU.selectable(_df, "home_best_sel", hide_index=True, width="stretch",
-                     column_config={"Chance": st.column_config.NumberColumn(format="percent")}))
+                     column_config={"Chance": st.column_config.NumberColumn(format="percent"),
+                                    "Record (30d)": st.column_config.TextColumn(help=(
+                                        "How this KIND of pick has done in this sport over the last 30 days — every "
+                                        "pick with the same Use tag (e.g. all NBA 'No edge' reads), not this player. "
+                                        "The ± is the likely range. 💰 rows show the 💰 Money picks' own record "
+                                        "(from the weekly money review) instead."))}))
         _fades = sorted({f"{r['sport']} {_PR._strip(r.get('use'))}" for r in _rows if r.get("verdict") == "fade"})
         if _fades:
             st.warning("**Consider the fade:** " + ", ".join(_fades) + " — the other side of these has been winning "

@@ -111,3 +111,10 @@ def test_untested_markets_are_not_money_picks():
     import props_engine as PE
     assert not PE.is_money("NBA", 0.10, market="Steals") and PE.is_money("NBA", 0.10, market="Threes Made")
     assert not PE.play_is_money("NBA", {"EV": 0.13, "RealPrice": 182, "Market": "Steals"})
+
+
+def test_money_record_text(monkeypatch):
+    import model_store as MS, props_engine as PE
+    monkeypatch.setattr(MS, "get_setting", lambda k, d=None: {"sports": {"NBA": {"n": 1483, "hit": 0.5172, "roi": 0.0439}}})
+    assert PE.money_record_text("NBA") == "💰 767–716 (52%, +4.4%/$1)"
+    assert PE.money_record_text("NFL") is None

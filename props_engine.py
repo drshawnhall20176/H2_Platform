@@ -1138,6 +1138,22 @@ def money_sports(now: Optional[float] = None) -> Tuple[str, ...]:
     return on
 
 
+def money_record_text(sport: str) -> Optional[str]:
+    """Nov 19 (owner: "I am not understanding what the record column is meaning to show"): a 💰 pick's Record is the
+    💰 picks' own record from the weekly review (money_review.py) -- not the record of its Use tag (usually No edge).
+    e.g. "💰 767–716 (52%, +4.4%/$1)"."""
+    try:
+        import model_store as MS
+        v = ((MS.get_setting("money:rules", None) or {}).get("sports") or {}).get(sport) or {}
+    except Exception:                                           # noqa: BLE001
+        return None
+    n, hit = v.get("n"), v.get("hit")
+    if not n or hit is None:
+        return None
+    h = round(hit * n)
+    return f"💰 {h}–{n - h} ({hit:.0%}, {v['roi']:+.1%}/$1)" if v.get("roi") is not None else f"💰 {h}–{n - h} ({hit:.0%})"
+
+
 def in_money_band(sport: str, ev, book=None, pickem: bool = False, market: Optional[str] = None) -> bool:
     """The money band for any sport, on or off: what money_review.py scores each week."""
     e = maybe(ev)
