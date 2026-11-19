@@ -136,6 +136,30 @@ C.kpi_row([{"icon": "🎯", "value": str(_g_sum["picks"]), "label": "Player pick
            {"icon": "🏟️", "value": str(_g_sum["lines"]), "label": "Playable game lines"},
            {"icon": "📅", "value": str(sum(1 for s in _order if _cards.get(s.key))), "label": "Sports with a pick"},
            {"icon": "🗓️", "value": str(len(_order)), "label": "Sports playing today"}])
+# ---------- 💰 best money picks (Nov 19, owner: "a separate section of best money picks on the Today page") ----------
+try:
+    _money = _CT.money_picks(_g_rows, parse_time=C._kick_dt, now=_dt.now(_ET), n=8)
+except Exception:                                               # noqa: BLE001
+    _money = []
+with st.container(border=True):
+    st.markdown("#### 💰 Best money picks")
+    st.caption("NBA props the model prices 6–15% better than the sportsbook: the one group that returned money in "
+               "testing (767–716, 51.7% hit vs 49.7% needed, +4.4% per $1 over 1,483 graded reads, Oct 31 – Nov 18). "
+               "Biggest edge first, games not yet started. Being tested now: its live record is on Postgame Review "
+               "and in the morning brief. Singles, not parlay legs: many are plus-money and near 50%.")
+    if not _money:
+        st.caption("None right now. They appear once today's NBA boards are built with sportsbook prices "
+                   "(late morning onward), and drop off as games start.")
+    for _i in range(0, len(_money), 4):
+        for col, c in zip(st.columns(4), _money[_i:_i + 4]):
+            with col.container(border=True):
+                st.markdown(f"**{'🔒 ' if c['lock'] else ''}{c['pick']}**")
+                st.metric("Chance", "—" if c["chance"] is None else f"{c['chance']:.0%}",
+                          delta=None if c.get("edge") is None else f"{c['edge']:+.0%} edge",
+                          label_visibility="collapsed")
+                st.caption(" · ".join(x for x in (c.get("price") if c.get("price") not in ("—", "") else "",) if x)
+                           + f"  \n{c['game']}" + (f" · {c['time']}" if c["time"] else ""))
+
 st.caption("One row per sport playing today, busiest first: its strongest picks (pick types with a winning 30-day "
            "record, playable game lines, and college basketball spreads moving our way). Open a sport for its full "
            "desk: every table, filter and logging.")

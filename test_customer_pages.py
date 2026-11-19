@@ -153,3 +153,22 @@ def test_home_opens_with_today_at_a_glance(monkeypatch):
     assert any(m.value == "61%" for m in at.metric)
     assert any(b.label == "Open desk →" for b in at.button)        # Nov 17: one row per sport, each with its desk
     assert any("NBA" in m.value and "playable pick" in m.value for m in at.markdown)
+
+
+def test_today_has_a_best_money_picks_section(monkeypatch):
+    """Nov 19 (owner): a separate 💰 section on Today, biggest edge first, games not yet started."""
+    from streamlit.testing.v1 import AppTest
+    import pick_records as PR
+    import streamlit as st
+    import todays_best as TB
+    st.cache_data.clear()
+    monkeypatch.setattr(TB, "collect", lambda day, keys, past=False: {"rows": [
+        dict(_p("NBA", "M Points Over 20.5", 0.55, use=PE.USE_PASS, time="11:59 PM"), player="M", money=True, edge=0.09)],
+        "props": {}})
+    monkeypatch.setattr(TB, "winner_rows", lambda day, leagues=None, past=False: [])
+    monkeypatch.setattr(PR, "tag_records", lambda sp: RECS.get(sp, {}))
+    at = AppTest.from_file("Today.py", default_timeout=120).run()
+    assert not at.exception, [str(e.value)[:300] for e in at.exception]
+    text = " ".join(m.value for m in at.markdown)
+    assert "💰 Best money picks" in text and "**M Points Over 20.5**" in text
+    assert any(m.value == "55%" and "+9% edge" in str(m.delta) for m in at.metric)
