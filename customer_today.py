@@ -40,6 +40,29 @@ def _tkey(t, parse: Optional[Callable] = None):
     return (0, d.hour * 60 + d.minute) if d else (1, 0)
 
 
+def money_picks(rows: List[Dict], parse_time: Optional[Callable] = None, now=None, n: int = 8) -> List[Dict]:
+    """Nov 19 (owner: "a separate section of best money picks on the Today page"): today's 💰 Money picks
+    (props_engine.is_money) that haven't started, biggest edge first, one per player.
+    [{sport, pick, chance, edge, price, game, time}]"""
+    out, seen = [], set()
+    for r in sorted((r for r in rows or [] if r.get("kind") == "Prop" and r.get("money")),
+                    key=lambda r: -(r.get("edge") or 0)):
+        if r.get("player") in seen:
+            continue
+        if parse_time is not None and now is not None:
+            t = parse_time(r.get("time"))
+            if t is not None and t <= now:
+                continue
+        seen.add(r.get("player"))
+        out.append({"sport": r.get("sport"), "pick": r.get("pick"), "chance": r.get("chance"), "edge": r.get("edge"),
+                    "price": _price(r.get("price")) + (f" · {r['book']}" if r.get("book") and r.get("price") is not None
+                                                       else ""),
+                    "game": r.get("game") or "", "time": r.get("time") or "", "lock": bool(r.get("lock"))})
+        if len(out) >= n:
+            break
+    return out
+
+
 def prop_picks(rows: List[Dict], include_new: bool = False, sports: Optional[List[str]] = None,
                records_for: Optional[Callable] = None, parse_time: Optional[Callable] = None,
                top_n: int = TOP_N) -> List[Dict]:
