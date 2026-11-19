@@ -1,8 +1,6 @@
-import os, sys
-sys.stdout.reconfigure(line_buffering=True)
+"""Nov 19: the Bet Log's open bets (the morning brief shows 6 singles + 1 parlay from Wednesday unsettled)."""
+import os, sys, json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import betlog as B
-bets = B.list_bets(settled=False)
-print("open bets", len(bets))
-for b in bets[-25:]:
-    print({k: b.get(k) for k in b if b.get(k) not in (None, "")})
+import bets as B
+for b in B.list_bets(settled=False):
+    print("OB", json.dumps(b, default=str)[:600])
