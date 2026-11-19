@@ -5,7 +5,12 @@ name: money-review
 on:
   schedule:
     - cron: "15 10 * * 1"    # Mondays ~5:15 AM ET, before the morning brief
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "1 = re-decide now, even if this week's review already ran"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -26,5 +31,5 @@ jobs:
       - name: Review
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          EVENT: ${{ github.event_name }}
-        run: python money_review.py
+          FORCE: ${{ github.event.inputs.force }}
+        run: if [ "$FORCE" = "1" ]; then python money_review.py --force; else python money_review.py; fi
