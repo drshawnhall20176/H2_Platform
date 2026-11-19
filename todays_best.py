@@ -92,9 +92,45 @@ def save_props(sport: str, date_str: str, plays, meta=None) -> None:
             dt = when.get(p.get("Game"))
             timed.append(dict(p, Time=p.get("Time") or (dt.strftime("%I:%M %p").lstrip("0") if dt else "")))
         MS.save_setting(KEY.format(sport=sport, date=date_str),
-                        {"at": datetime.now(timezone.utc).isoformat(), "rows": props_rows(sport, timed)})
+                        {"at": datetime.now(timezone.utc).isoformat(),
+                         "rows": keep_started(props_rows(sport, timed), (load_props(sport, date_str) or {}).get("rows"))})
     except Exception:                                           # noqa: BLE001 -- a bonus, never a failure
         pass
+
+
+def keep_started(new_rows: List[Dict], old_rows: Optional[List[Dict]], game_key: str = "game") -> List[Dict]:
+    """Nov 19: a board rebuilt after tip-off leaves out the games that have started -- and the 11:25 PM rebuild on
+    Nov 18 saved the NBA's picks as an empty list, so the day's picks (and their results) were gone by morning. The
+    picks of any game no longer on the new board are kept as they were; games still on it take the new picks."""
+    new_rows = list(new_rows or [])
+    live = {r.get(game_key) for r in new_rows}
+    return new_rows + [r for r in old_rows or [] if r.get(game_key) not in live]
+
+
+def props_from_snapshots(sport: str, date_str: str, snaps=None) -> List[Dict]:
+    """Nov 19: a day's Today's-best props rebuilt from the prop snapshots (each read's first bet tag, or its last read
+    when it was a 🔒 / 💰) -- for a day whose saved picks were lost."""
+    import model_store as MS
+    snaps = MS.load_snapshots(sport, [date_str]) if snaps is None else snaps
+    out = []
+    for s in snaps or []:
+        tag = PE.norm_use(s.get("bet_use_tag") or s.get("use_tag"))
+        side = s.get("bet_side") or s.get("side")
+        line = s.get("bet_line") if s.get("bet_line") is not None else s.get("line")
+        chance = s.get("bet_chance") if s.get("bet_chance") is not None else s.get("chance")
+        lock = PE.is_lock(s.get("chance"), s.get("cushion"), s.get("gap"), s.get("book"))
+        money = PE.is_money(sport, s.get("ev"), s.get("book"), market=s.get("market")) and s.get("price") is not None
+        if tag not in PLAYABLE and not lock and not money:
+            continue
+        out.append({"sport": sport, "kind": "Prop", "time": _et_time(s.get("kickoff")) or "",
+                    "pick": f"{s.get('player')} {s.get('market')} {side}" + ("" if line is None else f" {float(line):g}"),
+                    "game": s.get("game") or "", "price": s.get("price"), "book": s.get("book") or "",
+                    "chance": chance, "use": tag or "", "lock": lock, "page": "Best Bets", "player": s.get("player"),
+                    "pid": s.get("player_id"), "market": s.get("market"), "side": side, "line": line,
+                    "market_key": None, "pickem_only": (s.get("book") or "") in PE.PICKEM_BOOKS, "money": money,
+                    "edge": s.get("ev"), "rebuilt": True})
+    out.sort(key=_order)
+    return out
 
 
 def load_props(sport: str, date_str: str) -> Optional[Dict]:
@@ -233,10 +269,12 @@ def prop_results(sport: str, date_str: str) -> Dict:
     for g in PG.grade(snaps, res):
         if g.get("actual") is None:
             continue
-        thr = PE.threshold(float(g["line"]))
-        for side in ("Over", "Under"):
-            r = "push" if g["actual"] == thr else ("win" if (g["actual"] > thr) == (side == "Over") else "loss")
-            out[(PE.norm_name(g.get("player") or ""), g.get("market"), side, float(g["line"]))] = r
+        lines = {float(g["line"])} | ({float(g["bet_line"])} if g.get("bet_line") is not None else set())
+        for ln in lines:                                        # Nov 19: the bet tag's own line too
+            thr = PE.threshold(ln)
+            for side in ("Over", "Under"):
+                r = "push" if g["actual"] == thr else ("win" if (g["actual"] > thr) == (side == "Over") else "loss")
+                out[(PE.norm_name(g.get("player") or ""), g.get("market"), side, ln)] = r
     return out
 
 
@@ -253,6 +291,11 @@ def collect(date_str: str, props_sports, past: bool = False) -> Dict:
         saved = load_props(sp, date_str)
         fresh[sp] = (saved or {}).get("at")
         got = [dict(r) for r in (saved or {}).get("rows") or []]
+        if past and not got:                                    # Nov 19: the day's picks were lost -- rebuild them
+            try:
+                got = props_from_snapshots(sp, date_str)
+            except Exception:                                   # noqa: BLE001
+                got = []
         if past and got:
             try:
                 res = prop_results(sp, date_str)
@@ -699,10 +742,51 @@ def log_selection(items: Sequence[Dict], mode: str, stake: float, parlay_stake: 
 BLOWOUT_SPORTS = ("NBA", "NCAAMB", "NFL", "NCAAF", "NHL")
 
 
+def _script_from_finals(sp: str, k: Dict, cache: Dict[str, List[Dict]], load=None) -> Optional[str]:
+    """Nov 19: how a called game went, from the results archive, when the learning job hasn't graded it yet (on Nov 18
+    GitHub skipped its overnight runs, so 7 of 8 games in yesterday's Blowout watch showed no result)."""
+    try:
+        import intl_hoops as IH
+        import model_store as MS
+        import scenario_model as M
+        import script_effects as SE
+        d = (SE.DATA.get(sp) or {})
+        if not d.get("blow") or not k.get("fav") or not k.get("dog"):
+            return None
+        day = _et_date(k.get("kick")) or k.get("d")
+        if sp not in cache:
+            from datetime import date as _d0, timedelta as _td
+            cache[sp] = (load or MS.load_results)(sp, since=(_d0.fromisoformat(str(day)[:10]) - _td(days=1)).isoformat()) or []
+        from datetime import date as _date
+        d0 = _date.fromisoformat(str(day)[:10])
+        loose = sp in ("NCAAMB", "NCAAF")                       # pro teams: exact names only
+
+        def _days(g):
+            try:
+                return abs((_date.fromisoformat(str(g.get("date"))[:10]) - d0).days)
+            except ValueError:
+                return 9
+        # the same day first (a team plays at most once a day), then the next / previous day (late UTC dates)
+        for g in sorted((g for g in cache[sp] if _days(g) <= 1), key=_days):
+            hf = IH.find_team([g["home_team"]], k["fav"], loose)
+            af = IH.find_team([g["away_team"]], k["fav"], loose)
+            if hf and IH.find_team([g["away_team"]], k["dog"], loose):
+                m = float(g["home_points"]) - float(g["away_points"])
+            elif af and IH.find_team([g["home_team"]], k["dog"], loose):
+                m = float(g["away_points"]) - float(g["home_points"])
+            else:
+                continue
+            return M.label(m, d["close"], d["blow"])
+    except Exception:                                           # noqa: BLE001 -- a missing result, never an error
+        return None
+    return None
+
+
 def blowout_rows(date_str: str, sports_=BLOWOUT_SPORTS, calls_by_sport: Optional[Dict] = None) -> List[Dict]:
     import model_store as MS
     import script_effects as SE
     out = []
+    finals_cache: Dict[str, List[Dict]] = {}
     for sp in sports_:
         try:
             cs = (calls_by_sport or {}).get(sp) if calls_by_sport is not None else MS.get_setting(f"scenario_calls:{sp}", None)
@@ -726,11 +810,14 @@ def blowout_rows(date_str: str, sports_=BLOWOUT_SPORTS, calls_by_sport: Optional
                     (f"{k.get('fav')} {float(strength):.0%} to win" if SE.strength_kind(sp) == "ml"
                      else f"{k.get('fav')} −{float(strength):g}"))
             happened = None
-            if k.get("y"):
+            y = k.get("y") or _script_from_finals(sp, k, finals_cache)
+            if y:
+                # Nov 19: a miss reads ❌ (the hit/miss breakdown and filter read the mark); the other team winning big
+                # is a miss too, ❌↩️
                 happened = {"fav_blowout": f"✅ {k.get('fav')} won big", "dog_blowout": f"✅ {k.get('dog')} won big",
-                            "close": "close game", "middle": "decided, not a blowout"}.get(k["y"], k["y"])
-                if k["y"] in ("fav_blowout", "dog_blowout") and k["y"] != ("fav_blowout" if who == "favorite" else "dog_blowout"):
-                    happened = happened.replace("✅", "↩️")
+                            "close": "❌ close game", "middle": "❌ decided, not a blowout"}.get(y, y)
+                if y in ("fav_blowout", "dog_blowout") and y != ("fav_blowout" if who == "favorite" else "dog_blowout"):
+                    happened = happened.replace("✅", "❌↩️")
             game = (f"{k['away']} @ {k['home']}" if k.get("home") and k.get("away") else f"{k.get('dog')} vs {k.get('fav')}")
             out.append({"sport": sp, "time": _et_time(k.get("kick")), "game": game, "team": team, "who": who,
                         "chance": chance, "fav_big": fav_big, "dog_big": dog_big, "close": float(p.get("close") or 0),
