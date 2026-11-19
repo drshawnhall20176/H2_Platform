@@ -123,6 +123,22 @@ def scorecard(reports: Dict[str, Dict], yday: str) -> List[str]:
     return out
 
 
+def _bet_name(b: Dict) -> str:
+    """Nov 19: a short name for a lost bet. Game-line bets have no player, and the brief used to print the first 30
+    characters of their notes ("Alt spread. Model fair spread ")."""
+    who = b.get("player")
+    if who and who != "Game total":
+        return str(who)[:30]
+    side, mk, line = str(b.get("side") or "").strip(), b.get("market") or "", b.get("line")
+    if mk == "Moneyline" or line in (None, ""):
+        return f"{side} ML" if mk == "Moneyline" else side
+    try:
+        ln = float(line)
+    except (TypeError, ValueError):
+        return side
+    return f"{side} {ln:g}" if mk == "Total" or side in ("Over", "Under") else f"{side} {ln:+g}"
+
+
 def bets_yesterday(bets: Sequence[Dict], yday: str) -> List[str]:
     import betlog as B
     mine = [b for b in B.money_bets(list(bets)) if str(b.get("slate_date")) == yday]
@@ -139,7 +155,7 @@ def bets_yesterday(bets: Sequence[Dict], yday: str) -> List[str]:
         lo = sum(B._result(b) == "loss" for b in done)
         pl = sum(B.bet_pnl(b) for b in done)
         line = f"{name}: {w}–{lo}, {usd(pl)}"
-        misses = [str(b.get("player") or b.get("notes") or "")[:30] for b in group if B._result(b) == "loss"]
+        misses = [_bet_name(b) for b in group if B._result(b) == "loss"]
         if name == "Singles" and misses:
             line += f" (missed: {', '.join(m for m in misses if m)[:120]})"
         if len(done) < len(group):

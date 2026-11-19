@@ -120,3 +120,14 @@ def test_picks_rebuild_stale_boards_first(monkeypatch):
 
 def test_script_learn_gets_a_longer_lookback():
     assert MB.EXTRA_LOOKBACK_HOURS["script-learn.yml"] >= 12
+
+
+def test_missed_game_line_bets_are_named_by_side_and_line():
+    """Nov 19: the brief printed 'missed: Alt spread. Model fair spread ' for EuroCup spreads."""
+    import morning_brief as MB
+    assert MB._bet_name({"player": None, "market": "Spread", "side": "Derthona Basket Tortona", "line": -4.5,
+                         "notes": "Alt spread. Model fair spread"}) == "Derthona Basket Tortona -4.5"
+    assert MB._bet_name({"market": "Moneyline", "side": "Maxima Roma", "line": 0.0}) == "Maxima Roma ML"
+    assert MB._bet_name({"market": "Spread", "side": "Niners Chemnitz", "line": 3.5}) == "Niners Chemnitz +3.5"
+    assert MB._bet_name({"player": "Game total", "market": "Total", "side": "Over", "line": 221.5}) == "Over 221.5"
+    assert MB._bet_name({"player": "Jalen Brunson", "market": "Points"}) == "Jalen Brunson"
