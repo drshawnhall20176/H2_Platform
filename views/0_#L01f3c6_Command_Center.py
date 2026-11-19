@@ -28,7 +28,7 @@ _active = sports.active()
 C.hero_banner("🏆", "H2 Sports — Command Center",
              f"Trade sports, don't bet sports. A layered model that prices every prop, sizes with "
              f"discipline, and proves itself with closing-line value and calibration. — "
-             f"{_active.icon} {_active.label}")
+             + ("🌐 All sports" if st.session_state.get("cc_all") else f"{_active.icon} {_active.label}"))
 
 if not sports.require_live_engine("Command Center"):
     st.stop()
@@ -98,6 +98,115 @@ def yesterday_catches(sport_key, date_str, markets):
 
 today = datetime.now().strftime("%Y-%m-%d")
 yest = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+
+# ---------- 🌐 All sports (Nov 19, owner: an "All" button that represents the tool as a whole) ----------
+def _all_sports_view():
+    try:
+        owner = st.secrets.get("AUDIENCE", "owner") == "owner"
+    except Exception:                                           # noqa: BLE001
+        owner = True
+    keys = [s.key for s in sports.selectable_sports(owner)
+            if s.has_projections and s.key not in sports.LAB_SPORTS and sports.in_season(s.key)]
+    every_bet = B.list_bets()
+    rows, all_plays, games = [], [], 0
+    with st.spinner("Loading every sport's board..."):
+        for k in keys:
+            try:
+                pl, ng = today_board(k, today)
+            except Exception:                                   # noqa: BLE001 -- one sport never empties the view
+                pl, ng = [], 0
+            playable = [p for p in pl if grading.playable(p)]
+            games += ng
+            all_plays += [dict(p, Sport=k) for p in pl]
+            sb = B.summary([b for b in every_bet if (b.get("sport") or "MLB") == k])
+            top_p = playable[0] if playable else None
+            rows.append({"Sport": f"{sports.get(k).icon} {sports.get(k).label.split(' — ')[0]}",
+                         "Games tonight": ng, "Playable plays": len(playable),
+                         "Top lean": (f"{top_p['Player']} {top_p['Market']} {top_p['Side']} ({top_p['Conviction']:.1f}×)"
+                                      if top_p else "—"),
+                         "Record": f"{sb['wins']}–{sb['losses']}" if sb["settled"] else "—",
+                         "Profit": sb["profit"] if sb["settled"] else None,
+                         "Beat close": sb["beat_close_rate"], "Avg CLV": sb["avg_clv"]})
+    s_all = B.summary(every_bet)
+    playable_all = [p for p in all_plays if grading.playable(p)]
+    top_all = max(playable_all, key=lambda p: p.get("Conviction") or 0) if playable_all else None
+    bc, ac = s_all["beat_close_rate"], s_all["avg_clv"]
+    C.kpi_row([
+        {"icon": "🏟️", "value": str(games), "label": "Games tonight, every sport"},
+        {"icon": "🎲", "value": str(len(playable_all)), "label": "Playable model plays"},
+        {"icon": "⭐", "value": f"{top_all['Conviction']:.1f}×" if top_all else "—", "label": "Top lean",
+         "help": f"{top_all['Sport']}: {top_all['Player']} {top_all['Market']} {top_all['Side']}" if top_all else None},
+        {"icon": "📈", "value": f"{bc:.0f}%" if bc is not None else "—", "label": "Beat-close rate (all bets)",
+         "trend": ("good" if bc is not None and bc >= 50 else "bad" if bc is not None else None)},
+        {"icon": "💰", "value": f"{ac:+.2f}%" if ac is not None else "—", "label": "Avg CLV (all bets)",
+         "trend": ("good" if ac is not None and ac >= 0 else "bad" if ac is not None else None)},
+    ])
+    st.caption(f"Every sport in season with a props model: {', '.join(keys)}. Bet Log totals: "
+               f"{s_all['wins']}–{s_all['losses']} settled, {'+' if s_all['profit'] >= 0 else '−'}${abs(s_all['profit']):,.2f}"
+               + (f" ({s_all['roi']:+.1f}% ROI)" if s_all.get("roi") is not None else "") + ".")
+    st.divider()
+    C.section_header("📋", "Sport by sport")
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
+                 column_config={"Profit": st.column_config.NumberColumn(format="$%.2f"),
+                                "Beat close": st.column_config.NumberColumn(format="%.0f%%"),
+                                "Avg CLV": st.column_config.NumberColumn(format="%+.2f%%")})
+    st.caption("Pick a sport in the bar above for its full desk: top leans by market, game lines, yesterday's catches.")
+    left_, right_ = st.columns([3, 2])
+    with left_:
+        with st.container(border=True):
+            C.section_header("⭐", "Tonight's top leans, every sport")
+            # the best lean per market IN EACH SPORT (NBA Points and college Points are different markets)
+            top = sorted([p for k in keys for p in grading.build_top_leans([q for q in all_plays if q["Sport"] == k],
+                                                                           per_market=1)],
+                         key=lambda p: -(p.get("ModelProb") or 0))[:15]
+            if top:
+                st.dataframe(pd.DataFrame([{"Sport": p["Sport"], "Grade": p["_grade"]["letter"],
+                                            "Model %": p.get("ModelProb"), "Player": p.get("Player"),
+                                            "Market": p.get("Market"), "Side": p.get("Side"), "Line": p.get("Line"),
+                                            "Conviction": p.get("Conviction")} for p in top]),
+                             hide_index=True, width="stretch",
+                             column_config={"Model %": st.column_config.NumberColumn(format="percent"),
+                                            "Conviction": st.column_config.NumberColumn(format="%.2f×")})
+                st.caption("The best lean from each market in every sport, by chance of hitting (C grade or better).")
+            else:
+                st.info("No boards built yet today. They fill in as the books post lines.")
+    with right_:
+        with st.container(border=True):
+            C.section_header("🧾", "The proof, every sport")
+            clv_bets = sorted([b for b in every_bet if b.get("close_odds") is not None and b.get("entry_odds") is not None],
+                              key=lambda b: b.get("ts_placed", ""))
+            if clv_bets:
+                running, tot = [], 0.0
+                for i, b in enumerate(clv_bets, 1):
+                    tot += B.clv_pct(b["entry_odds"], b["close_odds"]) or 0
+                    running.append(tot / i)
+                fig = go.Figure(go.Scatter(y=running, mode="lines+markers", line=dict(color="#22c55e")))
+                fig.add_hline(y=0, line_dash="dash", line_color="#64748b")
+                fig.update_layout(height=240, margin=dict(l=10, r=10, t=24, b=10),
+                                  title="Average CLV over time (%), all sports", template="plotly_white")
+                st.plotly_chart(fig, width="stretch")
+                st.caption(f"{len(clv_bets)} bets with closing lines, across every sport.")
+            else:
+                st.info("CLV fills in as bets are logged with a closing line.", icon="🧭")
+            cal = B.calibration(every_bet, n_bins=5) if every_bet else []
+            if cal:
+                fig2 = go.Figure()
+                fig2.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode="lines", line=dict(dash="dash", color="#94a3b8"),
+                                          showlegend=False))
+                fig2.add_trace(go.Scatter(x=[c["predicted"] for c in cal], y=[c["actual"] for c in cal],
+                                          mode="markers", marker=dict(size=12, color="#7c3aed"), showlegend=False))
+                fig2.update_layout(height=240, margin=dict(l=10, r=10, t=24, b=10),
+                                   title="Calibration, all sports", template="plotly_white",
+                                   xaxis_range=[0, 1], yaxis_range=[0, 1])
+                st.plotly_chart(fig2, width="stretch")
+    st.divider()
+    st.caption("⚖️ For analysis and entertainment. Not financial advice and not a guarantee.")
+
+
+if st.session_state.get("cc_all"):
+    _all_sports_view()
+    st.stop()
 
 with st.spinner("Loading tonight's board..."):
     try:

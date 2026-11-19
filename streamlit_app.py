@@ -608,14 +608,25 @@ def sport_bar(url_path, page_of: dict, keys, page_ok) -> None:
     opts = [k for k in keys if page_ok(key, title, k)]
     if len(opts) < 2:
         return
+    whole = url_path == "command_center"                         # Nov 19 (owner): "All" = the tool as a whole
+    if whole:
+        opts = [ALL_SPORTS] + opts
 
     def _switch():
         k = st.session_state.get("_sport_bar")
-        if k:
+        if k == ALL_SPORTS:
+            st.session_state["cc_all"] = True
+        elif k:
+            st.session_state["cc_all"] = False
             st.session_state["sport"] = k
-    st.session_state["_sport_bar"] = st.session_state.get("sport") if st.session_state.get("sport") in opts else None
+    cur = ALL_SPORTS if whole and st.session_state.get("cc_all") else st.session_state.get("sport")
+    st.session_state["_sport_bar"] = cur if cur in opts else None
     st.pills("Sport", opts, key="_sport_bar", on_change=_switch, label_visibility="collapsed",
-             format_func=lambda k: f"{sports.get(k).icon} {sports.get(k).label.split(' — ')[0]}")
+             format_func=lambda k: "🌐 All sports" if k == ALL_SPORTS else
+             f"{sports.get(k).icon} {sports.get(k).label.split(' — ')[0]}")
+
+
+ALL_SPORTS = "__all__"
 
 
 if __name__ == "__main__":

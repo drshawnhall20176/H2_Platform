@@ -2670,3 +2670,48 @@ st.write(st.session_state["sport"])
     assert len(at.get("button_group")) == 1                    # one bar: Matchup Lab (NFL only) and the desk get none
     at.button_group[0].set_value("NHL").run()
     assert at.session_state["sport"] == "NHL"
+
+
+
+def test_command_center_sport_bar_has_an_all_choice():
+    """Nov 19 (owner): an "All" button on Command Center for the tool as a whole, beside the sport buttons."""
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_string('''
+import streamlit as st
+import streamlit_app as A
+st.session_state.setdefault("sport", "NBA")
+pages = {"command_center": ("0", "Command Center"), "nba_props": ("5", "Props")}
+A.sport_bar(st.session_state.get("_page", "command_center"), pages, ["NBA", "NHL"], lambda k, t, s: True)
+''').run()
+    assert not at.exception, at.exception
+    assert list(at.button_group[0].options)[0].endswith("All sports")
+    at.button_group[0].set_value("__all__").run()
+    assert at.session_state["cc_all"] is True and at.session_state["sport"] == "NBA"   # the sport stays for other pages
+    at.button_group[0].set_value("NHL").run()
+    assert at.session_state["cc_all"] is False and at.session_state["sport"] == "NHL"
+    at.session_state["_page"] = "nba_props"                     # other pages never offer "All"
+    at.run()
+    assert not any(o.endswith("All sports") for o in at.button_group[0].options)
+
+
+def test_command_center_all_view_renders():
+    """The All view sums every in-season sport's board and the whole Bet Log (boards stubbed: no network)."""
+    from streamlit.testing.v1 import AppTest
+    page = str(_HERE / "views" / "0_#L01f3c6_Command_Center.py")
+    at = AppTest.from_string(f'''
+import runpy, streamlit as st, best_bets_data as BBD, betlog as B, sports
+play = dict(Player="Test Guy", Market="Points", Side="Over", Line=20.5, ModelProb=0.62, Conviction=1.3,
+            Edge=0.08, Odds=-110, Book="draftkings", Game="A @ B")
+BBD.load_generic_best_bets_board = lambda k, d, b: ([dict(play)], [{{"g": 1}}], [])
+BBD.load_mlb_best_bets_board = lambda d, f: ([], [], [])
+B.list_bets = lambda **kw: []
+sports.in_season = lambda k, day=None: k in ("NBA", "NHL")
+st.session_state["cc_all"] = True
+runpy.run_path({page!r})
+''', default_timeout=120)
+    at.run()
+    assert not at.exception, at.exception
+    text = " ".join(m.value for m in at.markdown)
+    assert "Sport by sport" in text and "every sport" in text
+    df = at.dataframe[0].value
+    assert set(df["Games tonight"]) == {1} and len(df) == 2
