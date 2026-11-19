@@ -28,8 +28,12 @@ def test_past_date_shows_rungs_and_results(monkeypatch):
     assert not at.exception, at.exception
     txt = " ".join(m.value for m in at.markdown)
     assert "rungs hit" in txt
-    df = at.dataframe[0].value
+    df = next(d.value for d in at.dataframe if "Bet" in d.value.columns)     # Nov 19: the breakdown comes first
     assert "8+ Assists" in set(df["Bet"]) and "✅" in set(df["Hit"])
+    assert any(d.value.columns.tolist()[:2] == ["Chance", "Picks"] for d in at.dataframe)     # the range breakout
+    at.radio(key="ls_past_show").set_value("❌ Misses only").run()               # only the misses
+    df = next(d.value for d in at.dataframe if "Bet" in d.value.columns)
+    assert set(df["Hit"]) <= {"❌"}
 
 
 def test_nfl_past_date_uses_nfl_markets_and_warning(monkeypatch):
@@ -52,5 +56,5 @@ def test_nfl_past_date_uses_nfl_markets_and_warning(monkeypatch):
     at.run()
     assert not at.exception, at.exception
     assert "Rush Yards" in at.warning[0].value
-    df = at.dataframe[0].value
+    df = next(d.value for d in at.dataframe if "Bet" in d.value.columns)
     assert any("Rush Yards" in b for b in df["Bet"])

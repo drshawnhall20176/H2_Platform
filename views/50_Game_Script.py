@@ -291,6 +291,12 @@ if roster and not pick_markets and not only_play:
                       "why": ("if it goes this way: " + ", ".join(bits) + " (vs his own averages)") if bits else ""})
 ICON = {"win": "✅", "loss": "❌", "push": "➖"}
 MIN_IF = f"Min if {SE.short(SPORT, cond).lower()}" if cond != "model" else "Min if"
+if PAST and show:                                               # Nov 19: the split by chance range, and a filter
+    _proxy = [{"result": x.get("result"), "chance": x["u"].get("chance")} for x in show]
+    C.hit_miss_breakdown(_proxy, "result", "chance", key="gs_hm", title="Props that hit and missed")
+    _, show = C.show_filter(_proxy, "result", key="gs_hm_show", apply_to=show)
+    if st.session_state.get("gs_hm_show") not in (None, C.SHOW_ALL):
+        extra = []                                              # rows with no line have no result to filter on
 if show or extra:
     df = pd.DataFrame([{
         "Player": x["r"]["player"], "Team": _nick(_team(x["r"].get("team"))) + (" (fav)" if x["is_fav"] else ""),

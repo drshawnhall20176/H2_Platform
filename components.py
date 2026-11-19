@@ -30,7 +30,7 @@ from __future__ import annotations
 import base64
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 
 import streamlit as st
 
@@ -885,3 +885,90 @@ def weather_note(sport: str, date_str: str, games) -> None:
     with st.expander("🌤️ Every game's weather at kickoff"):         # text, not a table: pages count their tables
         st.markdown("\n".join(f"- **{g}** — {labels[g] or '—'}" for g in games))
         st.caption(WEATHER_KEY)
+
+
+# --------------------------------------------------------------------------- hits & misses (Nov 19)
+# Owner: "on pages like Long Shots, a breakout of the ranges that hit and missed, with a pie chart; and alongside
+# 'only the ones that hit', a way to see only the misses -- on every page that shows this kind of data."
+HIT_COLOR, MISS_COLOR = "#0ca30c", "#d03b3b"      # status good / critical (always shown with a label, never alone)
+CHANCE_BANDS = [0.0, 0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50, 0.55, 0.60, 0.65, 0.70, 0.80, 1.0001]
+SHOW_ALL, SHOW_HITS, SHOW_MISSES = "All", "✅ Hits only", "❌ Misses only"
+
+
+def outcome(v) -> Optional[str]:
+    """'hit' / 'miss' / None from any result spelling the pages use (✅ / ❌, hit / miss, win / loss, True / False)."""
+    if v is True:
+        return "hit"
+    if v is False:
+        return "miss"
+    s = str(v or "").strip().lower()
+    if not s:
+        return None
+    if s.startswith("✅") or s in ("hit", "win", "won", "✅ won", "yes"):
+        return "hit"
+    if s.startswith("❌") or s in ("miss", "loss", "lost", "❌ lost", "no"):
+        return "miss"
+    return None
+
+
+def _band_label(lo: float, hi: float) -> str:
+    return f"{lo:.0%}+" if hi > 1 else f"{lo:.0%}–{hi:.0%}"
+
+
+def chance_bands(rows, result_key: str, chance_key: str) -> List[Dict]:
+    """Hits and misses by the chance the model gave, low to high: [{Chance, Picks, Hits, Misses, Hit rate, Expected}]
+    -- only bands with a decided pick. Expected = the average chance in the band (what fair chances would hit)."""
+    out = []
+    dec = [(outcome(r.get(result_key)), r.get(chance_key)) for r in rows or []]
+    dec = [(o, float(c)) for o, c in dec if o is not None and c is not None and c == c]
+    for lo, hi in zip(CHANCE_BANDS, CHANCE_BANDS[1:]):
+        g = [(o, c) for o, c in dec if lo <= c < hi]
+        if not g:
+            continue
+        h = sum(o == "hit" for o, _ in g)
+        out.append({"Chance": _band_label(lo, hi), "Picks": len(g), "Hits": h, "Misses": len(g) - h,
+                    "Hit rate": h / len(g), "Expected": sum(c for _, c in g) / len(g)})
+    return out
+
+
+def show_filter(rows, result_key: str, key: str, apply_to=None):
+    """All / ✅ Hits only / ❌ Misses only. Returns the rows to show (apply_to: a parallel list filtered the same way)."""
+    pick = st.radio("Show", [SHOW_ALL, SHOW_HITS, SHOW_MISSES], horizontal=True, key=key,
+                    label_visibility="collapsed")
+    want = {SHOW_HITS: "hit", SHOW_MISSES: "miss"}.get(pick)
+    if want is None:
+        return (list(rows), list(apply_to)) if apply_to is not None else list(rows)
+    keep = [i for i, r in enumerate(rows) if outcome(r.get(result_key)) == want]
+    picked = [rows[i] for i in keep]
+    return (picked, [apply_to[i] for i in keep]) if apply_to is not None else picked
+
+
+def hit_miss_breakdown(rows, result_key: str, chance_key: Optional[str] = None, key: str = "hm",
+                       title: str = "Hits and misses") -> None:
+    """A donut of hits vs misses beside the breakout by chance range (when the rows carry a chance)."""
+    dec = [outcome(r.get(result_key)) for r in rows or []]
+    h, m = dec.count("hit"), dec.count("miss")
+    if not h + m:
+        return
+    import plotly.graph_objects as go
+    with st.expander(f"📊 {title}: {h} hit, {m} missed ({h / (h + m):.0%})", expanded=True):
+        c1, c2 = st.columns([1, 2])
+        fig = go.Figure(go.Pie(labels=["Hit", "Missed"], values=[h, m], hole=0.55, sort=False,
+                               marker=dict(colors=[HIT_COLOR, MISS_COLOR], line=dict(color="rgba(0,0,0,0)", width=2)),
+                               textinfo="label+percent", hovertemplate="%{label}: %{value} (%{percent})<extra></extra>"))
+        fig.update_layout(height=230, margin=dict(l=0, r=0, t=0, b=0), showlegend=False,
+                          paper_bgcolor="rgba(0,0,0,0)",
+                          annotations=[dict(text=f"<b>{h}/{h + m}</b>", showarrow=False, font=dict(size=16))])
+        c1.plotly_chart(fig, width="stretch", key=f"{key}_pie", config={"displayModeBar": False})
+        bands = chance_bands(rows, result_key, chance_key) if chance_key else []
+        if bands:
+            import pandas as _pd
+            c2.dataframe(_pd.DataFrame(bands), hide_index=True, width="stretch",
+                         column_config={"Hit rate": st.column_config.NumberColumn(format="percent"),
+                                        "Expected": st.column_config.NumberColumn(
+                                            format="percent", help="The average chance shown in this range: what "
+                                                                   "fair chances would have hit")})
+            c2.caption("By the chance shown before the game. Hit rate near Expected = the chances were honest in "
+                       "that range; well above = the model undersold it, well below = oversold. Small ranges are noisy.")
+        else:
+            c2.caption("No chance was saved with these picks, so there's no range breakout — just the split.")

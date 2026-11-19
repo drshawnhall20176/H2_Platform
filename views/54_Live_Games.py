@@ -231,6 +231,8 @@ def tennis_board():
         res = [LG.tennis_result(m, LG.tennis_pregame(m, picks)) for m in done]
         rec = LG.record(res)
         with st.expander(f"Final ({len(done)})" + (f" · model {rec}" if rec else ""), expanded=bool(rec) and not live):
+            C.hit_miss_breakdown(res, "result", "chance", key="lg_tennis_hm", title="Pre-match picks that hit and missed")
+            res, done = C.show_filter(res, "result", key="lg_tennis_show", apply_to=done)
             st.dataframe(pd.DataFrame([{"Started": _when(m), "Match": f"{m['p1']} vs {m['p2']}",
                                         "Score": LG.set_text(m),
                                         "Winner": f"— ({m['void']})" if m.get("void") else
@@ -409,6 +411,8 @@ def board():
         res = [LG.game_result(g, _pre_done(g)) for g in done]
         rec = LG.record(res)
         with st.expander(f"Final ({len(done)})" + (f" · model {rec}" if rec else ""), expanded=bool(rec) and not live):
+            C.hit_miss_breakdown(res, "result", "chance", key=f"lg_{league}_hm", title="Pre-game picks that hit and missed")
+            res, done = C.show_filter(res, "result", key=f"lg_{league}_show", apply_to=done)
             st.dataframe(pd.DataFrame([{"Started": _when(g), "Game": f"{g['away']} @ {g['home']}",
                                         "Final": f"{g['away_score']:.0f}–{g['home_score']:.0f}",
                                         "Pre-game pick": r["pick"], "Chance": r["chance"], "Result": r["result"]}
