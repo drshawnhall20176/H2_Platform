@@ -8,6 +8,8 @@ from streamlit.testing.v1 import AppTest
 at = AppTest.from_file("Home.py", default_timeout=600)
 at.session_state["sport"] = "NBA"
 at.session_state["home_best_date"] = datetime.date(2026, 11, 18)
+if len(sys.argv) > 1 or os.environ.get("ALLP"):
+    at.session_state["home_best_show"] = "All playable"
 at.run()
 print("HP exceptions", [str(e.value)[:300] for e in at.exception])
 for m in at.markdown:
@@ -21,8 +23,15 @@ for i, d in enumerate(at.dataframe):
         cols = "?"
     print("HP table", i, len(df), cols)
     for c in cols:
-        if c in ("Result", "Hit", "What happened", "Pick result", "Winner result", "Final"):
+        if c in ("Result", "Hit", "What happened", "Pick result", "Winner result", "Final", "Actual"):
             vals = df[c].astype(str).value_counts().to_dict()
             print("HP   ", c, dict(list(vals.items())[:8]))
+at.session_state["home_best_show"] = "All playable"
+at.run()
+for i, d in enumerate(at.dataframe):
+    df = d.value
+    print("HP2 table", i, len(df), list(df.columns)[-3:])
+    if "Result" in df.columns:
+        print("HP2   Result", df["Result"].astype(str).value_counts().to_dict())
 for r in at.radio:
     print("HP radio", r.key, r.value, r.options)
