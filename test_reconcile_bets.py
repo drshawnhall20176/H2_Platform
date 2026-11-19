@@ -27,3 +27,23 @@ def test_settles_slip_game_lines_from_finals(tmp_path, monkeypatch, capsys):
                    ("Moneyline", "Colorado Avalanche"): "loss"}
     out = capsys.readouterr().out
     assert "Settled now from final scores: 4" in out and "Real · 2026-11-03 · NCAAMB" in out
+
+
+def test_open_intl_slip_bets_settle_from_every_international_archive():
+    """Nov 19: Wednesday's EuroCup / BCL slip bets sat open -- INTL had no archive and nothing ran unattended."""
+    from datetime import date
+    assert "EUROCUP" in R.archives_for("INTL") and R.archives_for("NBA") == ["NBA"] and R.archives_for("MLB") == []
+    finals = {"EUROCUP": [{"date": "2026-11-18", "home_team": "Buducnost VOLI", "away_team": "Slask Wroclaw",
+                           "home_points": 90, "away_points": 70}],
+              "BCL": [{"date": "2026-11-18", "home_team": "Aris Thessaloniki", "away_team": "Le Mans Sarthe Basket",
+                       "home_points": 80, "away_points": 75}]}
+    bets = [{"id": 767, "sport": "INTL", "slate_date": "2026-11-18", "game": "Slask Wroclaw @ Buducnost",
+             "market": "Spread", "side": "Buducnost", "line": -12.5, "result": None, "stake": 3},
+            {"id": 765, "sport": "INTL", "slate_date": "2026-11-18", "game": "Le Mans @ Aris", "market": "Spread",
+             "side": "Aris", "line": -9.5, "result": None, "stake": 3},
+            {"id": 1, "sport": "INTL", "slate_date": "2026-11-01", "game": "Le Mans @ Aris", "market": "Spread",
+             "side": "Aris", "line": -9.5, "result": None, "stake": 3}]
+    wrote = {}
+    got = R.settle_open(today=date(2026, 11, 19), bets=bets, load=lambda lg: finals.get(lg, []),
+                        update=lambda i, result: wrote.__setitem__(i, result))
+    assert wrote == {767: "win", 765: "loss"} and len(got) == 2

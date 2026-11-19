@@ -37,6 +37,50 @@ def _teams(game: Optional[str]):
     return a.strip(), h.strip()
 
 
+def archives_for(sport: str) -> List[str]:
+    """Nov 19: the results archives a bet of this sport can be settled from. INTL bets (EuroCup, BCL, FIBA Europe Cup,
+    ...) carry no league, so every international hoops archive is searched; find_final still needs a unique match."""
+    if sport == "INTL":
+        import intl_picks as IP
+        return [k for k, v in IP.BET_SPORT.items() if v == "INTL"]
+    return [ARCHIVE_FOR[sport]] if sport in ARCHIVE_FOR else []
+
+
+def settle_open(days: int = 4, apply: bool = True, today: Optional[date] = None, bets=None, load=None,
+                update=None) -> List[tuple]:
+    """Nov 19 (owner's brief: Wednesday's six EuroCup / BCL slip bets and their 6-pick ticket still open Thursday
+    morning): settle open game-line bets from the last `days` days that were logged from a slip, from archived finals.
+    Run by settle-results every half hour, not just by hand. Returns [(bet, final, result)]."""
+    import betlog as B
+    import model_store as MS
+    today = today or date.today()
+    lo = (today - timedelta(days=days)).isoformat()
+    bets = B.list_bets(settled=False) if bets is None else bets
+    load = load or (lambda league: MS.load_results(league, since=(today - timedelta(days=days + 2)).isoformat()))
+    cache: Dict[str, List[Dict]] = {}
+    out = []
+    for b in bets:
+        if B._result(b) or b.get("market") not in GAME_MARKETS or B.is_parlay_header(b):
+            continue
+        if str(b.get("slate_date") or "")[:10] < lo:
+            continue
+        finals = []
+        for lg in archives_for(b.get("sport") or ""):
+            if lg not in cache:
+                try:
+                    cache[lg] = load(lg) or []
+                except Exception:                               # noqa: BLE001
+                    cache[lg] = []
+            finals += cache[lg]
+        g = find_final(b, finals) if finals else None
+        r = grade(b, g) if g else None
+        if r:
+            if apply:
+                (update or B.update_bet)(int(b["id"]), result=r)
+            out.append((b, g, r))
+    return out
+
+
 def find_final(bet: Dict, finals: List[Dict]) -> Optional[Dict]:
     """The archived final for this bet's game: both teams match (loosely, but uniquely) within a day of the slate."""
     import intl_hoops as I
@@ -96,6 +140,8 @@ def main(argv=None) -> int:
         if B._result(b) or b.get("market") not in GAME_MARKETS or B.is_parlay_header(b):
             continue
         fs = finals.get(b.get("sport") or "")
+        if not fs and b.get("sport") == "INTL":                 # Nov 19: every international archive
+            fs = [g for lg in archives_for("INTL") for g in MS.load_results(lg, since=lo)]
         if not fs:
             continue
         g = find_final(b, fs)

@@ -91,6 +91,10 @@ def settle_for_sport(sport_key: str, sport_bets: List[Dict]) -> Dict:
     across many logged picks. Returns {"settled": {bet_id: result}, "skipped_no_player_id":
     [...], "skipped_no_match": [...], "dates_checked": int}."""
     engine = sports.get(sport_key).engine
+    if engine is None or not hasattr(engine, "get_player_results"):
+        # Nov 19: INTL / TENNIS have no player-results engine (it crashed every run); their game lines settle from
+        # the results archives below (reconcile_bets.settle_open) and Game Lab bets settle in capture-intl
+        return {"settled": {}, "dates_checked": 0, "skipped_no_player_id": [], "skipped_no_match": []}
     by_date: Dict[str, List[Dict]] = {}
     for b in sport_bets:
         by_date.setdefault(b.get("slate_date") or "", []).append(b)
@@ -170,6 +174,15 @@ def main() -> int:
                   "may not be over, or that player/market didn't show up in the box score — a "
                   "later run may catch it).")
 
+    try:                                                        # Nov 19: game-line bets logged from a slip (INTL too)
+        import reconcile_bets as RB
+        done = RB.settle_open(apply=True)
+        for b, g, r in done:
+            print(f"  game line #{b['id']} {b.get('side')} {b.get('market')} {b.get('line')}: {r} "
+                  f"({g['away_team']} {g['away_points']:g} - {g['home_team']} {g['home_points']:g})")
+        total_settled += len(done)
+    except Exception as ex:                                     # noqa: BLE001
+        print(f"game-line settlement failed: {type(ex).__name__}: {ex}")
     print(f"Settled {total_settled} bet(s) total.")
     print(f"Decided {roll_tickets()} parlay ticket(s) from their legs.")
     return 0
