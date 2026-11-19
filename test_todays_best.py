@@ -301,3 +301,15 @@ def test_nfl_player_ids_dont_break_logging():
     r = TB.bet_rows([it], 3.0, True, "t", "2026-11-15")[0]
     assert r["player_id"] is None and r["player"] == "Sam LaPorta"
     assert TB.bet_rows([dict(it, pid="4433")], 3.0, True, "t", "2026-11-15")[0]["player_id"] == 4433
+
+
+def test_tested_tennis_and_hoops_picks_carry_the_bet_for_the_log_box():
+    """Nov 19: Shelton / Zverev / Erjavec ticked on Today -> 'missing the player, side or line', nothing logged."""
+    import todays_best as TB
+    p = {"home": "Ben Shelton", "away": "Rafael Jodar", "game_id": "g1", "kickoff": "2026-11-19T13:00:00Z"}
+    b = TB._bet(p, "TENNIS", "Moneyline", "home", None, 0.64)
+    assert b["bet_side"] == "home" and b["_rec"]["sport"] == "TENNIS" and b["best_tested"]
+    assert TB._bet(p, "TENNIS", "Moneyline", None, None, 0.6) == {}
+    import intl_picks as IP
+    f = IP.bet_fields(b["_rec"], b["bet_market"], b["bet_side"], b["bet_line"], -428, 0, True)
+    assert f["side"] == "Ben Shelton" and f["sport"] == "TENNIS" and f["notes"] == "gl:TENNIS:g1"
