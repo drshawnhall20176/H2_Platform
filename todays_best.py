@@ -130,6 +130,14 @@ def game_rows(date_str: str, leagues=None, past: bool = False) -> List[Dict]:
             else:
                 pick = "—"
             title = H.LEAGUES.get(lg, {}).get("title", lg)
+            if p.get("ml_pick"):
+                bet = _bet(p, lg, "Moneyline", p["ml_pick"], None, p.get("cover_est"))
+            elif p.get("home_spread") is not None and p.get("edge") is not None:
+                hs = float(p["home_spread"])
+                bet = _bet(p, lg, "Spread", "home" if p["edge"] >= 0 else "away", hs if p["edge"] >= 0 else -hs,
+                           p.get("cover_est"))
+            else:
+                bet = {}
             res = None
             if past and pick != "—":
                 if p.get("ml_pick"):
@@ -141,7 +149,7 @@ def game_rows(date_str: str, leagues=None, past: bool = False) -> List[Dict]:
                         "time": _et_time(p.get("kickoff")), "pick": pick, "result": res,
                         "game": f"{p.get('away')} @ {p.get('home')}", "price": None, "book": "",
                         "chance": p.get("cover_est"), "use": t.get("use"), "lock": bool(t.get("lock")),
-                        "page": "International Hoops" if lg not in GAME_LEAGUES else f"{lg} Game Lab"})
+                        "page": "International Hoops" if lg not in GAME_LEAGUES else f"{lg} Game Lab", **bet})
     try:
         recs = MS.load_game_picks("TENNIS", ungraded=not past)
     except Exception:                                           # noqa: BLE001
@@ -161,8 +169,23 @@ def game_rows(date_str: str, leagues=None, past: bool = False) -> List[Dict]:
         out.append({"sport": "TENNIS", "kind": p.get("tournament") or "Tennis", "time": _et_time(p.get("kickoff")), "result": tres,
                     "pick": f"{t.get('player')} to win", "game": f"{p.get('away')} vs {p.get('home')}",
                     "price": None, "book": "", "chance": t.get("chance"), "use": t.get("use"), "lock": bool(t.get("lock")),
-                    "need": t.get("need"), "untested": True, "page": "Tennis Lab"})
+                    "need": t.get("need"), "untested": True, "page": "Tennis Lab",
+                    # Nov 19 (owner couldn't log Shelton / Zverev / Erjavec from Today: "missing the player, side or
+                    # line"): the bet itself, so the log box can write it and capture-intl can settle it
+                    **_bet(p, "TENNIS", "Moneyline",
+                           None if not t.get("player") else ("home" if t["player"] == p.get("home") else "away"), None,
+                           t.get("chance"))})
     return out
+
+
+def _bet(p: Dict, lg: str, market: str, side: Optional[str], line: Optional[float], chance) -> Dict:
+    """Nov 19: what the log box needs to write a tested game-line / tennis pick (the same shape winner_rows gives)."""
+    if not side:
+        return {}
+    return {"bet_market": market, "bet_side": side, "bet_line": line, "best_chance": chance,
+            "best_tested": chance is not None,
+            "_rec": {"sport": lg, "home": p.get("home"), "away": p.get("away"), "game_id": p.get("game_id"),
+                     "kickoff": p.get("kickoff")}}
 
 
 # --------------------------------------------------------------------------- looking back (Nov 7)
