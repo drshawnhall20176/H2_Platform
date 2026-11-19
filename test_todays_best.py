@@ -252,7 +252,9 @@ def test_blowout_rows_rank_and_grade():
     rows = TB.blowout_rows("2026-11-07", ("NBA",), calls)
     assert [r["team"] for r in rows] == ["Oklahoma City Thunder", "C", "A"]
     assert rows[0]["game"] == "Utah Jazz @ Oklahoma City Thunder" and rows[0]["line"] == "Oklahoma City Thunder −14.5"
-    assert rows[1]["happened"].startswith("❌↩️") and "D won big" in rows[1]["happened"]
+    assert rows[1]["happened"] == "💥 D won big" and rows[1]["blowout_hit"] is False   # the other team won big
+    assert rows[1]["likely"] == "C wins big (33%)" and rows[1]["likely_result"] == "❌"   # the call: the likeliest outcome
+    assert rows[0]["likely"] == "Oklahoma City Thunder wins big (58%)" and rows[2]["likely"] == "close game (33%)"
     assert TB.blowout_rows("2026-11-08", ("NBA",), calls) == []
 
 

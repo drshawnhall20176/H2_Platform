@@ -558,29 +558,43 @@ if True:
         _bn = st.slider("Games shown (highest blowout chance)", 3, 25, 8, key="home_blow_n") if len(_bw) > 3 else len(_bw)
         # the N most likely blowouts, listed earliest game first (like every table here), across sports
         _btop = sorted(_bw[:_bn], key=lambda r: (_tkey(r.get("time")), -r["chance"]))
-        if _past:                                               # Nov 19: the split, and all / hits only / misses only
-            C.hit_miss_breakdown(_btop, "happened", "chance", key="home_blow_hm", title="Blowout calls that hit and missed")
-            _btop = C.show_filter(_btop, "happened", key="home_blow_show")
+        if _past:
+            # Nov 19 (owner): a 27% blowout chance isn't a blowout call. Two honest checks instead: did blowouts
+            # happen about as often as the chances said, and was the model's MOST LIKELY outcome right?
+            _gb = [r for r in _btop if r.get("y")]
+            if _gb:
+                _bh = sum(1 for r in _gb if r.get("blowout_hit"))
+                _be = sum(r["chance"] for r in _gb)
+                st.markdown(f"**Blowouts: {_bh} of {len(_gb)} happened — the chances said about {_be:.1f}.** "
+                            + ("Right on." if abs(_bh - _be) <= max(1.0, 0.25 * _be) else
+                               ("More than expected." if _bh > _be else "Fewer than expected."))
+                            + f" At about {_be / len(_gb):.0%} each, most of these games were never expected to be "
+                              "blowouts — judge the list by that count, not by any one game.")
+            C.hit_miss_breakdown(_btop, "likely_result", "likely_chance", key="home_blow_hm",
+                                 title="The model's most likely outcome — right or wrong")
+            _btop = C.show_filter(_btop, "likely_result", key="home_blow_show")
         _bdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"],
                                "Most likely to win big": f"{r['team']} ({r['who']})",
-                               "Chance": r["chance"], "Win big by": r["margin"],
+                               "Blowout chance": r["chance"], "Win big by": r["margin"],
                                "Close game": r["close"], "Line": r["line"],
-                               "What happened": r.get("happened") or "—"} for r in _btop])
+                               "Most likely outcome": r.get("likely") or "—",
+                               "What happened": r.get("happened") or "—",
+                               "Called it": r.get("likely_result") or "—"} for r in _btop])
         if _scope != "All sports":
             _bdf = _bdf.drop(columns=["Sport"])
         if not _past:
-            _bdf = _bdf.drop(columns=["What happened"])
+            _bdf = _bdf.drop(columns=["What happened", "Called it"])
         st.dataframe(_bdf, hide_index=True, width="stretch",
-                     column_config={"Chance": st.column_config.NumberColumn(format="percent",
-                                        help="Chance this team wins by the blowout margin, before the game."),
+                     column_config={"Blowout chance": st.column_config.NumberColumn(format="percent",
+                                        help="Chance this team wins by the blowout margin, before the game. The list "
+                                             "is ranked by it -- the games most likely to get out of hand -- but even "
+                                             "the top one is usually under 50%: a watch list, not a prediction."),
+                                    "Most likely outcome": st.column_config.TextColumn(
+                                        help="The outcome the model gave the best chance: favorite wins big, underdog "
+                                             "wins big, close game, or decided but not a blowout. 'Called it' grades "
+                                             "this."),
                                     "Close game": st.column_config.NumberColumn(format="percent",
                                         help="Chance the game finishes within the close margin.")})
-        if _past:
-            _g = [r for r in _btop if r.get("happened")]
-            if _g:
-                _hit = sum(1 for r in _g if r["happened"].startswith("✅"))
-                st.caption(f"Of these {len(_g)} graded games, **{_hit}** ended in the called blowout "
-                           f"(the calls averaged {sum(r['chance'] for r in _g) / len(_g):.0%}).")
         st.caption("From the Game Script learning job: every game's chances before it starts, from the line curve that "
                    "beat the old spread table on games it wasn't fit on (refit twice a day as games finish). "
                    "Matchup history doesn't move these numbers yet — tested, the line already prices it. Open "
