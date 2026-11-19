@@ -759,17 +759,20 @@ def _script_from_finals(sp: str, k: Dict, cache: Dict[str, List[Dict]], load=Non
             cache[sp] = (load or MS.load_results)(sp, since=(_d0.fromisoformat(str(day)[:10]) - _td(days=1)).isoformat()) or []
         from datetime import date as _date
         d0 = _date.fromisoformat(str(day)[:10])
-        for g in cache[sp]:
+        loose = sp in ("NCAAMB", "NCAAF")                       # pro teams: exact names only
+
+        def _days(g):
             try:
-                if abs((_date.fromisoformat(str(g.get("date"))[:10]) - d0).days) > 1:
-                    continue
+                return abs((_date.fromisoformat(str(g.get("date"))[:10]) - d0).days)
             except ValueError:
-                continue
-            hf = IH.find_team([g["home_team"]], k["fav"], True)
-            af = IH.find_team([g["away_team"]], k["fav"], True)
-            if hf and IH.find_team([g["away_team"]], k["dog"], True):
+                return 9
+        # the same day first (a team plays at most once a day), then the next / previous day (late UTC dates)
+        for g in sorted((g for g in cache[sp] if _days(g) <= 1), key=_days):
+            hf = IH.find_team([g["home_team"]], k["fav"], loose)
+            af = IH.find_team([g["away_team"]], k["fav"], loose)
+            if hf and IH.find_team([g["away_team"]], k["dog"], loose):
                 m = float(g["home_points"]) - float(g["away_points"])
-            elif af and IH.find_team([g["home_team"]], k["dog"], True):
+            elif af and IH.find_team([g["home_team"]], k["dog"], loose):
                 m = float(g["away_points"]) - float(g["home_points"])
             else:
                 continue
