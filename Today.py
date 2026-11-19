@@ -117,6 +117,24 @@ for r in _g_win:                                            # college basketball
             "score": (1, 0.55), "kind": "Line"})
 for k in _cards:
     _cards[k].sort(key=lambda c: c["score"], reverse=True)
+# Nov 19 (owner, the middle ground): each sport's row always carries its strongest 💰 Money pick (biggest edge, game not
+# started) as one of its four cards -- added in the 4th spot when the usual top four don't already include one
+try:
+    _now_et = _dt.now(_ET)
+    for sp_key in {r.get("sport") for r in _g_rows if r.get("money")}:
+        _have = _cards.get(sp_key, [])
+        if any(c.get("money") for c in _have[:4]):
+            continue
+        _m = _CT.money_picks([r for r in _g_rows if r.get("sport") == sp_key], parse_time=C._kick_dt, now=_now_et, n=1)
+        if _m:
+            m = _m[0]
+            _card = {**m, "money": True, "move": "", "basis": f"{m['edge']:+.0%} edge" if m.get("edge") is not None else "",
+                     "record": "", "score": (1, m.get("chance") or 0), "kind": "Prop"}
+            _cards[sp_key] = [c for c in _have if c.get("pick") != m["pick"]][:3] + [_card] + \
+                [c for c in _have if c.get("pick") != m["pick"]][3:]
+            _npicks[sp_key] = _npicks.get(sp_key, 0) + 1
+except Exception:                                               # noqa: BLE001 -- the page always renders
+    pass
 
 _order = sorted([s for s in live if _games.get(s.key) or _cards.get(s.key)],
                 key=lambda s: (-_npicks.get(s.key, 0), -_games.get(s.key, 0)))
@@ -136,33 +154,11 @@ C.kpi_row([{"icon": "🎯", "value": str(_g_sum["picks"]), "label": "Player pick
            {"icon": "🏟️", "value": str(_g_sum["lines"]), "label": "Playable game lines"},
            {"icon": "📅", "value": str(sum(1 for s in _order if _cards.get(s.key))), "label": "Sports with a pick"},
            {"icon": "🗓️", "value": str(len(_order)), "label": "Sports playing today"}])
-# ---------- 💰 best money picks (Nov 19, owner: "a separate section of best money picks on the Today page") ----------
-try:
-    _money = _CT.money_picks(_g_rows, parse_time=C._kick_dt, now=_dt.now(_ET), n=8)
-except Exception:                                               # noqa: BLE001
-    _money = []
-with st.container(border=True):
-    st.markdown("#### 💰 Best money picks")
-    st.caption("NBA props the model prices 6–15% better than the sportsbook: the one group that returned money in "
-               "testing (767–716, 51.7% hit vs 49.7% needed, +4.4% per $1 over 1,483 graded reads, Oct 31 – Nov 18). "
-               "Biggest edge first, games not yet started. Being tested now: its live record is on Postgame Review "
-               "and in the morning brief. Singles, not parlay legs: many are plus-money and near 50%.")
-    if not _money:
-        st.caption("None right now. They appear once today's NBA boards are built with sportsbook prices "
-                   "(late morning onward), and drop off as games start.")
-    for _i in range(0, len(_money), 4):
-        for col, c in zip(st.columns(4), _money[_i:_i + 4]):
-            with col.container(border=True):
-                st.markdown(f"**{'🔒 ' if c['lock'] else ''}{c['pick']}**")
-                st.metric("Chance", "—" if c["chance"] is None else f"{c['chance']:.0%}",
-                          delta=None if c.get("edge") is None else f"{c['edge']:+.0%} edge",
-                          label_visibility="collapsed")
-                st.caption(" · ".join(x for x in (c.get("price") if c.get("price") not in ("—", "") else "",) if x)
-                           + f"  \n{c['game']}" + (f" · {c['time']}" if c["time"] else ""))
-
 st.caption("One row per sport playing today, busiest first: its strongest picks (pick types with a winning 30-day "
-           "record, playable game lines, and college basketball spreads moving our way). Open a sport for its full "
-           "desk: every table, filter and logging.")
+           "record, playable game lines, and college basketball spreads moving our way), and its best 💰 Money pick "
+           "where the sport has them (the model 6–15% better than the sportsbook price — the one group that has made "
+           "money in testing; re-decided by sport every week). Open a sport for its full desk: every table, filter "
+           "and logging.")
 
 for s in _order:
     cards = _cards.get(s.key, [])[:4]
