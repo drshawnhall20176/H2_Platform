@@ -6,13 +6,15 @@ os.makedirs(".streamlit", exist_ok=True)
 open(".streamlit/secrets.toml", "w").write('AUDIENCE = "owner"\n')
 from streamlit.testing.v1 import AppTest
 at = AppTest.from_file("Home.py", default_timeout=600)
-at.session_state["sport"] = os.environ.get("SP", "NCAAMB")
+at.session_state["sport"] = os.environ.get("SP", "NBA")
 at.session_state["home_best_date"] = datetime.date(2026, 11, 18)
 if len(sys.argv) > 1 or os.environ.get("ALLP"):
     at.session_state["home_best_show"] = "All playable"
 at.run()
 print("HP exceptions", [str(e.value)[:300] for e in at.exception])
 for m in at.markdown:
+    if m.value.startswith("**Blowouts"):
+        print("HP blow", m.value)
     if m.value.startswith("#####") or m.value.startswith("####"):
         print("HP section", m.value[:80])
 for i, d in enumerate(at.dataframe):
@@ -23,7 +25,7 @@ for i, d in enumerate(at.dataframe):
         cols = "?"
     print("HP table", i, len(df), cols)
     for c in cols:
-        if c in ("Result", "Hit", "What happened", "Pick result", "Winner result", "Final", "Actual"):
+        if c in ("Result", "Hit", "What happened", "Pick result", "Winner result", "Final", "Actual", "Most likely outcome", "Called it"):
             vals = df[c].astype(str).value_counts().to_dict()
             print("HP   ", c, dict(list(vals.items())[:8]))
 at.session_state["home_best_show"] = "All playable"
