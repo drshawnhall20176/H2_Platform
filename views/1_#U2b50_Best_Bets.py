@@ -179,7 +179,7 @@ if _short:
     C.section_header("👉", "Start here", "The strongest reads on today's board. The full board and its filters are below.")
     for _col, _r in zip(st.columns(len(_short)), _short):
         with _col.container(border=True):
-            st.markdown(f"**{'🔒 ' if _r['lock'] else ''}{_r['pick']}**")
+            st.markdown(f"**{'💰 ' if _r.get('money') else ''}{'🔒 ' if _r['lock'] else ''}{_r['pick']}**")
             st.metric("Chance", "—" if _r["chance"] is None else f"{_r['chance']:.0%}", label_visibility="collapsed")
             st.caption(f"{_r['price']}  \n{_r['game']}" + (f" · {_r['time']}" if _r["time"] else ""))
             st.caption(_r["standing"] + (f"  \n{_r['record']}" if _r["record"] else ""))
@@ -274,19 +274,23 @@ if not mkt_pick:
 _USE_FILTER = {"All playable": ("🎟️ Parlay + Single", "🎟️ Parlay leg", "🎯 Single only"),
                "Singles": ("🎟️ Parlay + Single", "🎯 Single only"),
                "Parlay legs": ("🎟️ Parlay + Single", "🎟️ Parlay leg"),
-               BBD_PE.MOST_PROBABLE: ()}      # Nov 2: 60%+ to hit, 15%+ cushion, not held for news (any Use tag)
+               BBD_PE.MOST_PROBABLE: (),      # Nov 2: 60%+ to hit, 15%+ cushion, not held for news (any Use tag)
+               BBD_PE.MONEY_PICK + "s": ()}   # Nov 19: the edge band that has returned money in testing
 _use_pick = (st.radio("Show", list(_USE_FILTER), horizontal=True, key="bb_use_filter",
                       help="🎟️ Parlay legs: 15%+ cushion, 60%+ to hit, a positive edge, no warnings. 🎯 Singles: a real "
                            "edge (+3% at the price) — some are too close to the number to chain into a parlay. 🔒 Most probable: "
                            "60%+ to hit with the projection 15%+ past the line, not held for a news check — the reads "
                            "that have hit most often so far, whatever the price (see Postgame Review). A line only a pick'em app posts "
-                           "is never a 🔒: no sportsbook price checks it.")
+                           "is never a 🔒: no sportsbook price checks it. 💰 Money picks: NBA props the model prices 6-15% better than "
+                           "the sportsbook — the one group that has returned money in testing (+4.8% per $1 over "
+                           "1,499 reads). Being tested now: its record is on Postgame Review.")
              if _props_model else "All playable")
 # Nov 1: Over / Under only (other sides -- a team, "Yes" -- show under All Sides).
 _side_pick = C.side_filter(slot_plays, key="bb_side_filter")
 view = [p for p in slot_plays if p["Market"] in mkt_pick and p["Conviction"] >= min_conv
-        and (not _props_model or (BBD_PE.play_is_lock(p)
-                                  if _use_pick == BBD_PE.MOST_PROBABLE else p.get("Use") in _USE_FILTER[_use_pick]))
+        and (not _props_model or (BBD_PE.play_is_lock(p) if _use_pick == BBD_PE.MOST_PROBABLE else
+                                  BBD_PE.play_is_money(_active.key, p) if _use_pick == BBD_PE.MONEY_PICK + "s" else
+                                  p.get("Use") in _USE_FILTER[_use_pick]))
         and (_side_pick == "All Sides" or p.get("Side") == _side_pick)]
 _held = [p for p in slot_plays if p["Market"] in mkt_pick and p.get("Lean") == "Check news"]
 view = grading.filter_min_probability(view, min_prob_pct / 100.0)
@@ -373,8 +377,11 @@ if _props_model:
     for p in view:
         p["_cushion"] = BBD_PE.cushion_text(p.get("Cushion"))
         p["_warn"] = " · ".join(p.get("Warnings") or []) or "—"
+        p["_use"] = (("💰 " if BBD_PE.play_is_money(_active.key, p) else "") + ("🔒 " if BBD_PE.play_is_lock(p) else "")
+                     + str(p.get("Use") or ""))                 # Nov 19: 💰 Money pick / 🔒 Most probable icons
     _cols.insert(_cols.index("_display_line") + 1, "_cushion")
-    _cols.insert(_cols.index("_cushion") + 1, "Use")
+    _cols.insert(_cols.index("_cushion") + 1, "_use")
+    _rename["_use"] = "Use"
     _cols.append("_warn")
     _rename.update({"_cushion": "Cushion", "_warn": "Warnings"})
 if _show_blowout_risk:

@@ -158,7 +158,7 @@ for s in _order:
             continue
         for col, c in zip(st.columns(4), cards):
             with col.container(border=True):
-                st.markdown(f"**{'🔒 ' if c['lock'] else ''}{c['pick']}**")
+                st.markdown(f"**{'💰 ' if c.get('money') else ''}{'🔒 ' if c['lock'] else ''}{c['pick']}**")
                 st.metric("Chance", "—" if c["chance"] is None else f"{c['chance']:.0%}", label_visibility="collapsed")
                 st.caption(" · ".join(x for x in (c.get("price") if c.get("price") not in ("—", "") else "",
                                                    c.get("basis") or "") if x)

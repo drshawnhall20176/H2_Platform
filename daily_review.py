@@ -106,6 +106,14 @@ def _lock(done: Sequence[Dict]) -> Dict:
     return rec
 
 
+def _money(done: Sequence[Dict]) -> Dict:
+    """Nov 19: the 💰 Money pick record (hits / misses / hit_rate, the chance shown, profit per $1 at the price)."""
+    row = PG.money_record(done) or {}
+    h, n = row.get("Hits", 0), row.get("Graded", 0)
+    return {"hits": h, "misses": n - h, "hit_rate": (h / n) if n else None, "chance": row.get("Model said"),
+            "profit": row.get("Profit per $1"), "needed": row.get("Needed")}
+
+
 def summarize_slate(graded: Sequence[Dict]) -> Dict:
     """One slate's grading, ready to store as JSON."""
     counts = {k: sum(1 for r in graded if r.get("result") == k) for k in ("hit", "miss", "push", "void", "pending")}
@@ -130,6 +138,7 @@ def summarize_slate(graded: Sequence[Dict]) -> Dict:
         "model": {"right": mh, "graded": mn},
         "use": PG.use_record(done),
         "most_probable": _lock(done),
+        "money": _money(done),
         "markets": markets,
         "big_gap": {"graded": len(gaps), "model_right": _rate(gaps, "model_hit"), "hit_rate": _rate(gaps)},
         "star_out": {"graded": len(stars), "hit_rate": _rate(stars),
@@ -201,6 +210,10 @@ def notes(slates: Dict[str, Dict]) -> List[str]:
         mp = s.get("most_probable") or {}
         if mp.get("hit_rate") is not None:
             out.append(f"{d}: {PE.MOST_PROBABLE} {mp['hits']}-{mp['misses']} ({mp['hit_rate']:.0%}).")
+        mo = s.get("money") or {}
+        if mo.get("hit_rate") is not None:
+            out.append(f"{d}: {PE.MONEY_PICK}s {mo['hits']}-{mo['misses']} ({mo['hit_rate']:.0%}, needed "
+                       f"{mo['needed']:.0%}), {mo['profit']:+.0%} per $1.")
         g = s["big_gap"]
         if g["graded"] >= 3 and g["model_right"] is not None:
             who = "the model" if g["model_right"] >= 0.5 else "the market"

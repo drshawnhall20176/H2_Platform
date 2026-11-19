@@ -86,8 +86,11 @@ if True:
     _here = active.label if active else "This sport"
     _scope = _c1.radio("Sports", [f"{_here} only", "All sports"], horizontal=True, key="home_best_scope",
                        label_visibility="collapsed")
-    _show = _c2.radio("Show", ["🔒 Locks only", "All playable"], horizontal=True, key="home_best_show",
-                      label_visibility="collapsed")
+    _show = _c2.radio("Show", ["🔒 Locks only", "💰 Money picks", "All playable"], horizontal=True,
+                      key="home_best_show", label_visibility="collapsed",
+                      help="💰 Money picks (Nov 19): NBA props the model prices 6-15% better than the sportsbook — the "
+                           "one group that has returned money in testing (+4.8% per $1 over 1,499 graded reads). "
+                           "Being tested now; the record is on Postgame Review and in the morning brief.")
     if _owner and _c3.button("🔄 Refresh props", width="stretch", disabled=_past,
                   help="Builds today's Best Bets board for each props sport (the same Odds API use as opening it)."):
         import best_bets_data as _BBD
@@ -166,7 +169,8 @@ if True:
         return _wx_label(sport, _today, game) if sport in ("NFL", "NCAAF") else ""
 
     _rows = [r for r in _rows if _keep(r)]
-    _rows = [r for r in _rows if r.get("lock")] if _show.startswith("🔒") else _rows
+    _rows = ([r for r in _rows if r.get("lock")] if _show.startswith("🔒") else
+             [r for r in _rows if r.get("money")] if _show.startswith("💰") else _rows)
     # Nov 8: every pick type carries its own live record (last 30 days, refreshed by the morning review); a type
     # that's been losing is hidden until it earns its way back -- the visible half of the daily feedback loop
     @st.cache_data(ttl=1800, show_spinner=False)
@@ -179,8 +183,8 @@ if True:
                              disabled=not _hidden,
                              help="Pick types whose last-30-day record is under 50% (or 40% and under: the other "
                                   "side has been winning). They come back on their own when the record recovers.")
-    if not _show_losing:
-        _rows = [r for r in _rows if r.get("verdict") not in _PR.HIDE]
+    if not _show_losing:                                        # a 💰 pick is judged by its own record, not its tag's
+        _rows = [r for r in _rows if r.get("verdict") not in _PR.HIDE or r.get("money")]
     # Nov 17: is the market moving toward the model's side since the first price today? (NBA, NFL; tracking signal)
     if not _past:
         @st.cache_data(ttl=600, show_spinner=False)
@@ -205,7 +209,8 @@ if True:
     _sel_props, _sel_lines = [], []                             # Nov 8: ticked rows, logged by the box below the lists
     if _rows:
         _df = _pd.DataFrame([{"Sport": r["sport"], "Time": r.get("time") or "", "Pick": r["pick"],
-                              "Use": ("🔒 " if r.get("lock") else "") + (r.get("use") or ""),
+                              "Use": ("💰 " if r.get("money") else "") + ("🔒 " if r.get("lock") else "")
+                                     + (r.get("use") or ""),
                               "Record (30d)": r.get("record") or "—",
                               "Chance": r.get("chance"),
                               "Price": ("—" if r.get("price") is None else f"{float(r['price']):+.0f}"),

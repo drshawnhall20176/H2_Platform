@@ -118,8 +118,10 @@ def scorecard(reports: Dict[str, Dict], yday: str) -> List[str]:
                 bits.append(n.split(": ", 1)[1].replace("the model's side was right on ", "right on ").rstrip("."))
             elif "Most probable" in n or "most probable" in n:
                 bits.append(n.split(": ", 1)[1].rstrip("."))
+            elif "Money pick" in n:                                 # Nov 19: the 💰 record
+                bits.append(n.split(": ", 1)[1].rstrip("."))
         if bits:
-            out.append(f"**{sp}**: " + "; ".join(bits[:2]))
+            out.append(f"**{sp}**: " + "; ".join(bits[:3]))
     return out
 
 

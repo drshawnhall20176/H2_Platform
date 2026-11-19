@@ -131,7 +131,8 @@ def _use_table(rows):
     """Use-tag record with the 🔒 Most probable (Best Bets' lock) row on top."""
     ur = PG.use_record(rows)
     lock = PG.lock_record(rows)
-    out = ([lock] if lock else []) + ur
+    money = PG.money_record(rows)
+    out = ([money] if money else []) + ([lock] if lock else []) + ur
     import pick_records as _PR
     return [{"Use": r["Use"], "Record": f"{r['Hits']}-{r['Graded'] - r['Hits']}", "Hit rate": _pct(r["Hit rate"]),
              "Likely range": _PR.range_text(r["Hits"], r["Graded"]),
@@ -223,6 +224,11 @@ with tab_morning:
             use_rows = [{"Use": u["Use"], "Record": f"{u['Hits']}-{u['Graded'] - u['Hits']}",
                          "Hit rate": _pct(u["Hit rate"]), "Model said": _pct(u.get("Model said")),
                          "Profit per $1": "—"} for u in s.get("use") or []]
+            mo = s.get("money") or {}
+            if (mo.get("hits") or 0) + (mo.get("misses") or 0):
+                use_rows.insert(0, {"Use": PE.MONEY_PICK, "Record": f"{mo['hits']}-{mo['misses']}",
+                                    "Hit rate": _pct(mo.get("hit_rate")), "Model said": _pct(mo.get("chance")),
+                                    "Profit per $1": _money(mo.get("profit"))})
             if (mp.get("hits") or 0) + (mp.get("misses") or 0):
                 use_rows.insert(0, {"Use": PE.MOST_PROBABLE, "Record": f"{mp['hits']}-{mp['misses']}",
                                     "Hit rate": _pct(mp.get("hit_rate")), "Model said": _pct(mp.get("chance")),
