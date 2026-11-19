@@ -49,3 +49,23 @@ def test_blowout_result_from_archived_finals_when_ungraded():
     close = [dict(finals[0], away_points=100)]
     assert TB._script_from_finals("NBA", k, {}, load=lambda sp, since=None: close) == "close"
     assert TB._script_from_finals("NBA", k, {}, load=lambda sp, since=None: []) is None
+
+
+def test_a_late_rebuild_keeps_the_started_games_picks():
+    import todays_best as TB
+    old = [{"game": "A @ B", "pick": "x"}, {"game": "C @ D", "pick": "y"}]
+    new = [{"game": "C @ D", "pick": "y2"}]
+    assert TB.keep_started(new, old) == [{"game": "C @ D", "pick": "y2"}, {"game": "A @ B", "pick": "x"}]
+    assert TB.keep_started([], old) == old and TB.keep_started(new, None) == new
+
+
+def test_lost_day_rebuilt_from_snapshots():
+    import todays_best as TB, props_engine as PE
+    snaps = [{"player": "A", "market": "Points", "side": "Over", "line": 20.5, "chance": 0.66, "cushion": 0.2,
+              "use_tag": PE.USE_PASS, "bet_use_tag": PE.USE_SINGLE, "bet_side": "Over", "bet_line": 19.5,
+              "bet_chance": 0.6, "price": -110, "book": "draftkings", "game": "X @ Y", "kickoff": "2026-11-19T00:10:00Z"},
+             {"player": "B", "market": "Points", "side": "Under", "line": 10.5, "chance": 0.5, "cushion": 0.01,
+              "use_tag": PE.USE_PASS, "price": -110, "book": "draftkings", "game": "X @ Y", "ev": 0.0}]
+    rows = TB.props_from_snapshots("NBA", "2026-11-18", snaps=snaps)
+    assert len(rows) == 1 and rows[0]["pick"] == "A Points Over 19.5" and rows[0]["use"] == PE.USE_SINGLE
+    assert rows[0]["time"] == "7:10 PM"
