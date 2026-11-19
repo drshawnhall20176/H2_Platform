@@ -178,6 +178,50 @@ def _rung(r: Dict) -> Optional[float]:
         return None
 
 
+def rebuild_past(sport: str, day: str, snaps=None, results=None, load_odds=None) -> Dict:
+    """Nov 19 (owner: "for the NBA I do not get a chance to see how the long shots did"): a past day's long shots
+    rebuilt when its saved scan is gone (Nov 18's was overwritten by the 11:25 PM rescan). Each game's graded reads
+    and the alternate prices the scan archived before tip-off go through the Long Shots look-back (long_shots.lookback:
+    the same rungs, honest chances re-fitted from the saved projection -- close to what the scan showed, not
+    identical), then the scan's own rules: +400 or longer, worth its price, model and book agreeing on the main line,
+    the most probable one per player on top. Every row carries Actual and Hit."""
+    import long_shots as LS
+    import model_store as MS
+    import postgame as PG
+    import props_engine as PE
+    snaps = MS.load_snapshots(sport, [day]) if snaps is None else snaps
+    if not snaps:
+        return {"at": None, "rows": [], "top": [], "games": 0, "rebuilt": True}
+    try:
+        results = PG.fetch_results(sport, day, sorted({(s["team"], s["opp"]) for s in snaps})) if results is None \
+            else results
+    except Exception:                                           # noqa: BLE001
+        results = {}
+    graded = PG.grade(snaps, results)
+    load_odds = load_odds or (lambda h, a: MS.load_odds(sport, day, h, a, ALT_ARCHIVE))
+    rows, games = [], 0
+    for game in sorted({g.get("game") for g in graded if g.get("game") and " @ " in g.get("game")}):
+        away, home = game.split(" @ ", 1)
+        quotes = ((load_odds(home, away) or {}).get("offers")) or []
+        if not quotes:
+            continue
+        games += 1
+        when = next((g.get("kickoff") for g in graded if g.get("game") == game and g.get("kickoff")), None)
+        try:
+            import pytz
+            t = datetime.fromisoformat(str(when).replace("Z", "+00:00")).astimezone(
+                pytz.timezone("US/Eastern")).strftime("%-I:%M %p") if when else ""
+        except ValueError:
+            t = ""
+        for r in LS.lookback([g for g in graded if g.get("game") == game], quotes, PE.norm_name, sport=sport):
+            if (r.get("Price") or 0) < MIN_PRICE or (r.get("EV per $1") or 0) <= 0 or r.get("Market") in SKIP.get(sport, ()):
+                continue
+            rows.append(dict(r, game=game, time=t, pick=f"{r['Player']} {r['Bet']}", chance=r.get("Honest chance"),
+                             tested=r.get("Market") in TESTED.get(sport, ()), Flags=[]))
+    rows.sort(key=lambda r: -(r.get("Honest chance") or 0))
+    return {"at": None, "rows": rows, "top": pick_top(rows), "games": games, "rebuilt": True}
+
+
 def grade_saved(rows: Sequence[Dict], sport: str, day: str, snaps=None, results=None) -> List[Dict]:
     """Nov 19 (owner: yesterday's Today's best had no result on its long shots): each saved long shot with "Actual"
     and "Hit" (✅ / ❌; None while the box score isn't final or the player isn't found) from that night's box scores.
@@ -186,7 +230,7 @@ def grade_saved(rows: Sequence[Dict], sport: str, day: str, snaps=None, results=
     import postgame as PG
     import props_engine as PE
     rows = [dict(r) for r in rows or []]
-    if not rows:
+    if not rows or all("Hit" in r for r in rows):              # rebuilt rows are graded already
         return rows
     snaps = MS.load_snapshots(sport, [day]) if snaps is None else snaps
     team_of = {}

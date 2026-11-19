@@ -174,3 +174,25 @@ def test_today_sport_row_carries_its_best_money_pick(monkeypatch):
     assert "Best money picks" not in text
     assert "**💰 M Points Over 20.5**" in text and "**A Assists Over 5.5**" in text
     assert any("+9% edge" in c.value for c in at.caption)
+
+
+def test_owner_brief_sits_at_the_top_of_today(monkeypatch):
+    """Nov 19 (owner): the morning brief and the afternoon picks note at the top, not the bottom."""
+    from streamlit.testing.v1 import AppTest
+    import model_store as MS
+    import pick_records as PR
+    import streamlit as st
+    import todays_best as TB
+    st.cache_data.clear()
+    monkeypatch.setattr(TB, "collect", lambda day, keys, past=False: {
+        "rows": [dict(_p("NBA", "A Assists Over 5.5", 0.61), player="A")], "props": {}})
+    monkeypatch.setattr(TB, "winner_rows", lambda day, leagues=None, past=False: [])
+    monkeypatch.setattr(PR, "tag_records", lambda sp: RECS.get(sp, {}))
+    real = MS.get_setting
+    monkeypatch.setattr(MS, "get_setting", lambda k, d=None, **kw: {"text": "title\nOvernight jobs: all ran"}
+                        if k.startswith("brief:") and k.endswith(":morning") else real(k, d, **kw))
+    at = AppTest.from_file("Today.py", default_timeout=120).run()
+    assert not at.exception, [str(e.value)[:300] for e in at.exception]
+    assert at.expander[0].label == "☀️ Morning brief"
+    src = open("Today.py").read()
+    assert src.index("the owner's brief (Nov 19") < src.index("C.kpi_row(") < src.index("for s in _order:")

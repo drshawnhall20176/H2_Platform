@@ -80,3 +80,44 @@ def test_combo_markets_find_their_result(monkeypatch):
     monkeypatch.setattr(TB, "game_rows", lambda d, past=False: [])
     got = TB.collect("2026-11-18", ["NCAAMB"], past=True)["rows"]
     assert got[0]["result"] == "win"
+
+
+def test_game_lines_two_charts_and_filter_by_either_column():
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_string('''
+import components as C
+rows = [{"pick": "✅ won", "pc": 0.508, "winner": "❌ lost", "wc": 0.62},
+        {"pick": "❌ lost", "pc": 0.508, "winner": "✅ won", "wc": 0.91},
+        {"pick": "❌ lost", "pc": 0.508, "winner": "✅ won", "wc": 0.85}]
+C.hit_miss_pair([("Pick result", rows, "pick", "pc"), ("Winner result", rows, "winner", "wc")], key="t")
+shown = C.show_filter(rows, "pick", key="f", by={"Pick result": "pick", "Winner result": "winner"})
+import streamlit as st
+st.write(len(shown))
+''').run()
+    assert not at.exception
+    md = " ".join(m.value for m in at.markdown)
+    assert "**Pick result**: 1 hit, 2 missed" in md and "**Winner result**: 2 hit, 1 missed" in md
+    assert any("same chance" in c.value for c in at.caption)          # one band: no table, a note
+    at.radio(key="f").set_value(C.SHOW_HITS).run()
+    at.radio(key="f_by").set_value("Winner result").run()
+    assert at.markdown[-1].value.strip("`") == "2"
+
+
+def test_past_long_shots_rebuilt_when_the_scan_is_gone(monkeypatch):
+    import long_shots_scan as LSS
+    import long_shots as LS
+    import postgame as PG
+    snap = {"sport": "NBA", "slate_date": "2026-11-18", "game": "A @ B", "team": "1", "opp": "2", "player": "X Y",
+            "market": "Assists", "projection": 6.0, "line": 4.5, "kickoff": "2026-11-19T00:00:00Z"}
+    monkeypatch.setattr(PG, "grade", lambda snaps, res: [dict(s, actual=9, result="hit") for s in snaps])
+    rows = [{"Player": "X Y", "Bet": "8+ Assists", "Market": "Assists", "Honest chance": 0.2, "Price": 600,
+             "EV per $1": 0.4, "Actual": 9, "Hit": "✅", "Projection": 6.0, "Main line": 4.5},
+            {"Player": "X Y", "Bet": "9+ Assists", "Market": "Assists", "Honest chance": 0.12, "Price": 300,
+             "EV per $1": 0.2, "Actual": 9, "Hit": "✅", "Projection": 6.0, "Main line": 4.5}]
+    seen = {}
+    monkeypatch.setattr(LS, "lookback", lambda g, q, n, sport: seen.setdefault("q", q) and rows)
+    got = LSS.rebuild_past("NBA", "2026-11-18", snaps=[snap], results={},
+                           load_odds=lambda h, a: {"offers": [{"x": 1}]} if (h, a) == ("B", "A") else None)
+    assert got["rebuilt"] and got["games"] == 1 and len(got["rows"]) == 1          # +300 is under +400
+    assert got["top"][0]["pick"] == "X Y 8+ Assists" and got["top"][0]["Hit"] == "✅" and got["top"][0]["time"] == "7:00 PM"
+    assert LSS.grade_saved(got["top"], "NBA", "2026-11-18", snaps=[], results={})[0]["Hit"] == "✅"

@@ -274,11 +274,18 @@ if True:
     import long_shots_scan as _LSS
     _ls_sports = [k for k in _LSS.SPORTS if (_scope == "All sports" or k == current) and k in [s.key for s in live]]
     _ls_sets = [(k, _LSS.load(k, _today)) for k in _ls_sports]
+
+    @st.cache_data(ttl=3600, show_spinner="Rebuilding that day's long shots…")
+    def _ls_rebuilt(k, day):
+        return _LSS.rebuild_past(k, day)
+    if _past:                                                   # Nov 19: a past day whose saved scan is gone
+        _ls_sets = [(k, v if v and v.get("top") else _ls_rebuilt(k, _today)) for k, v in _ls_sets]
     _ls_sets = [(k, v) for k, v in _ls_sets if v and v.get("top")]
     if _ls_sports:
         st.markdown("##### 💎 Most probable long shots")
         if not _ls_sets:
-            st.caption("No long-shot scan yet for today — it runs a few times a day once the books post alternate "
+            st.caption("No long shots saved for this day (the scan's alternate prices weren't kept)." if _past else
+                       "No long-shot scan yet for today — it runs a few times a day once the books post alternate "
                        "lines (and on the Long Shots page).")
         _ls_items = []
         @st.cache_data(ttl=1800, show_spinner=False)
@@ -302,7 +309,8 @@ if True:
             except (TypeError, ValueError):
                 _at = ""
             st.markdown(f"**{_k}** · {len(_v.get('rows') or [])} value long shots across {_v.get('games', 0)} games"
-                        + (f" · prices as of {_at}" if _at else ""))
+                        + (f" · prices as of {_at}" if _at else "")
+                        + (" · rebuilt from that night's saved reads and alternate prices" if _v.get("rebuilt") else ""))
             _ldf = _pd.DataFrame([{"Time": r.get("time") or "", "Game": r.get("game") or "", "Pick": r.get("pick"),
                                    "Price": r.get("Price"), "Honest chance": r.get("Honest chance"),
                                    "Book says": r.get("Book says"), "EV per $1": r.get("EV per $1"),
@@ -412,10 +420,15 @@ if True:
         if not _lshow:
             _ws = [r for r in _ws if r.get("best_tested") or r.get("lean_verdict") not in _PR.HIDE]
         if _past and _ws:                                       # Nov 19: the picks' split, by chance range, and a filter
-            _gproxy = [{"result": r.get("best_result"),
-                        "chance": r.get("best_chance") if r.get("best_tested") else r.get("backtest")} for r in _ws]
-            C.hit_miss_breakdown(_gproxy, "result", "chance", key="home_win_hm", title="Game-line picks that hit and missed")
-            _, _ws = C.show_filter(_gproxy, "result", key="home_win_hm_show", apply_to=_ws)
+            # Nov 19 (owner): two result columns, two charts -- the pick, and the model's likely winner
+            _gproxy = [{"pick": r.get("best_result"),
+                        "pick_chance": r.get("best_chance") if r.get("best_tested") else r.get("backtest"),
+                        "winner": r.get("winner_result"), "winner_chance": r.get("chance")} for r in _ws]
+            C.hit_miss_pair([("Pick result", _gproxy, "pick", "pick_chance"),
+                             ("Winner result", _gproxy, "winner", "winner_chance")],
+                            key="home_win_hm", title="Game lines: how the picks and the likely winners did")
+            _, _ws = C.show_filter(_gproxy, "pick", key="home_win_hm_show", apply_to=_ws,
+                                   by={"Pick result": "pick", "Winner result": "winner"})
         _wdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"],
                                "Weather": _wx(r["sport"], r["game"]),
                                "Spread": r.get("spread_txt") or "",
