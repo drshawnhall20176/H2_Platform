@@ -1113,18 +1113,44 @@ def is_lock(chance, cushion, gap=None, book=None, pickem: bool = False) -> bool:
 # edges lost (0-3%: -5.5%), bigger ones lost too (15%+: -2.9%, the model's big disagreements with the books). NHL lost
 # at every edge (-12% at 6-15%); NFL and college didn't have enough to tell. 19 days is short: this flag is the test.
 MONEY_PICK = "💰 Money pick"
-MONEY_RULES = {"NBA": (0.06, 0.15)}          # sport -> (min edge, max edge) at the sportsbook price
+MONEY_BAND = (0.06, 0.15)                    # min / max edge at the sportsbook price
+MONEY_DEFAULT = ("NBA",)                     # Nov 19's evidence; money_review.py re-decides every week (KEY money:rules)
+MONEY_RULES = {sp: MONEY_BAND for sp in MONEY_DEFAULT}    # kept for older callers: the starting rule
+_MONEY_CACHE: Dict[str, object] = {}
+
+
+def money_sports(now: Optional[float] = None) -> Tuple[str, ...]:
+    """Sports where 💰 is on: money_review.py's latest weekly verdict (cached 10 minutes), else MONEY_DEFAULT."""
+    import time as _t
+    now = _t.time() if now is None else now
+    hit = _MONEY_CACHE.get("v")
+    if hit and now - hit[0] < 600:
+        return hit[1]
+    on = MONEY_DEFAULT
+    try:
+        import model_store as MS
+        saved = MS.get_setting("money:rules", None) or {}
+        if saved.get("sports"):
+            on = tuple(sp for sp, v in saved["sports"].items() if v.get("on"))
+    except Exception:                                           # noqa: BLE001
+        pass
+    _MONEY_CACHE["v"] = (now, on)
+    return on
+
+
+def in_money_band(sport: str, ev, book=None, pickem: bool = False, market: Optional[str] = None) -> bool:
+    """The money band for any sport, on or off: what money_review.py scores each week."""
+    e = maybe(ev)
+    return bool(e is not None and MONEY_BAND[0] <= e < MONEY_BAND[1] and not pickem
+                and (book or "") not in PICKEM_BOOKS and market not in MONEY_SKIP.get(str(sport or ""), ()))
 # Markets that weren't in the test: NBA steals / blocks props were only read from Nov 18 (watch.PROBATION) -- and the
 # first morning's 💰 list was half steals unders at +150 to +180. Not a money pick until they have a record of their own.
 MONEY_SKIP = {"NBA": ("Steals", "Blocks", "Blocks+Steals")}
 
 
 def is_money(sport: str, ev, book=None, pickem: bool = False, market: Optional[str] = None) -> bool:
-    """A 💰 Money pick: a sportsbook-priced prop in a sport/edge band that has returned money in testing."""
-    rule = MONEY_RULES.get(str(sport or ""))
-    e = maybe(ev)
-    return bool(rule and e is not None and rule[0] <= e < rule[1] and not pickem
-                and (book or "") not in PICKEM_BOOKS and market not in MONEY_SKIP.get(str(sport or ""), ()))
+    """A 💰 Money pick: a sportsbook-priced prop in the money band, in a sport where 💰 is on (money_sports)."""
+    return str(sport or "") in money_sports() and in_money_band(sport, ev, book, pickem, market)
 
 
 def play_is_money(sport: str, p: Dict) -> bool:

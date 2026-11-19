@@ -27,7 +27,7 @@ from typing import Dict, Iterable, List, Optional
 
 WORKFLOWS = ("warm-slates", "settle-results", "capture-closing-lines", "capture-line-snapshots", "capture-game-picks",
              "capture-intl", "refresh-matchups", "refresh-ncaaf", "refresh-statcast", "refresh-calibration",
-             "script-learn", "settle-analyst")
+             "script-learn", "settle-analyst", "money-review")
 # Inputs for a dispatch, where the defaults would change what the run does. A run started by clockwork (GitHub's
 # token) doesn't set off the workflow_run chain the scheduled one would, so morning-brief is dispatched on its own
 # crons -- as "auto" (whatever note is due, never resent), which also runs the morning review when it's due.
