@@ -1,0 +1,34 @@
+# Clockwork (Nov 19): GitHub skips most scheduled runs on this repo (warm-slates ran 6 of 21 due times on Nov 18,
+# capture-closing-lines 8 of ~90). One clockwork run stays up ~5h40m and dispatches any listed workflow whose cron came
+# due and was skipped (clockwork.py). Started every two hours -- any one start covers the gap -- and on demand.
+# A newer start waits for the running one (concurrency below), so there is only ever one.
+name: clockwork
+
+on:
+  schedule:
+    - cron: "7 */2 * * *"
+    - cron: "37 1-23/2 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: clockwork
+  cancel-in-progress: false
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: Keep the schedule
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python -u clockwork.py

@@ -337,17 +337,20 @@ with tab_day:
         games = ["All games"] + sorted({r["game"] for r in done})
         gpick = st.selectbox("Game", games, key="pgr_game")
         rows = [r for r in graded if gpick == "All games" or r["game"] == gpick]
+        C.hit_miss_breakdown(rows, "result", "chance", key="pgr_hm", title="Props that hit and missed")
+        rows = C.show_filter(rows, "result", key="pgr_hm_show")    # Nov 19: all / only the hits / only the misses
         icon = {"hit": "✅", "miss": "❌", "push": "➖", "void": "∅ void", "pending": "⏳"}
         st.dataframe(pd.DataFrame([{
             "Game": r["game"], "Player": r["player"], "Market": r["market"], "Slot": r.get("slot") or "",
             "Proj": round(r["projection"], 1), "Line": r["line"], "Actual": r["actual"], "Pick": r["side"],
-            "Result": icon.get(r["result"], r["result"]),
+            "Chance": r.get("chance"), "Result": icon.get(r["result"], r["result"]),
             "Model side": "—" if r["model_hit"] is None else ("✅" if r["model_hit"] else "❌"),
             "Use": r.get("use_tag") or "—",
             "Volume": "—" if r.get("proj_opp") is None or r.get("actual_opp") is None
             else f"{r['proj_opp']:.1f} → {r['actual_opp']:.0f}",
             "Cause": r.get("cause") or "",
-        } for r in rows]), hide_index=True, width="stretch")
+        } for r in rows]), hide_index=True, width="stretch",
+            column_config={"Chance": st.column_config.NumberColumn(format="percent")})
 
 with tab_trend:
     window = st.select_slider("Look back", options=[7, 14, 30, 60], value=30, key="pgr_window",

@@ -144,7 +144,7 @@ def test_page_looks_back_with_snapshots_and_results(monkeypatch):
     at.session_state["gs_cond"] = "fav_blowout"
     at.run()
     assert not at.exception, [e.value for e in at.exception]
-    df = at.dataframe[0].value
+    df = next(d.value for d in at.dataframe if "Result" in d.value.columns)   # Nov 19: the breakdown comes first
     assert "Result" in df.columns and set(df["Result"]) <= {"✅", "❌", "➖", ""}
 
 

@@ -23,7 +23,7 @@ from typing import Dict, List, Optional, Sequence
 import pytz
 
 ET = pytz.timezone("US/Eastern")
-SPORTS = ("NBA", "NHL", "NFL", "NCAAF", "NCAAMB", "UFC", "TENNIS", "GAME_LINES")   # GAME_LINES: hoops/NHL win chances
+SPORTS = ("NBA", "NHL", "NFL", "NCAAF", "NCAAMB", "UFC", "TENNIS", "GAME_LINES", "MONEY")   # MONEY: weekly 💰 review   # GAME_LINES: hoops/NHL win chances
 PROPS_SPORTS = ("NBA", "NFL", "NHL", "NCAAF", "NCAAMB")   # Nov 12: college basketball too (no sport left out)
 STALE_HOURS = 2.0       # Nov 12: a board older than this is rebuilt before the picks note (GitHub skipped the hourly
                         # refresh all day; the 3:43 PM note judged 3 AM prices)
@@ -92,6 +92,11 @@ def learned(reports: Dict[str, Dict]) -> List[str]:
                 side = d.get("label") or ("overall" if d.get("side") == "overall" else f"{d['side']}s")
                 who = "" if sp == "GAME_LINES" else f"{sp} "
                 changed.append(f"{who}{side}: {d['active']:.2f} → {d['new']:.2f} ({d.get('why', '')})")
+            else:
+                held += 1
+        for m in rep.get("money_auto") or []:                   # Nov 19: the weekly 💰 Money pick review
+            if m.get("changed"):
+                changed.append(m["text"])
             else:
                 held += 1
         for t in rep.get("auto_tuning") or []:
