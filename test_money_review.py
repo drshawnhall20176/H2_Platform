@@ -20,6 +20,8 @@ def test_turns_on_only_with_enough_reads_days_and_both_halves():
     assert v["on"] and v["changed"] and v["n"] == 400
     few_days = _rows(5, 80, 3)                    # 400 reads but 5 nights: not enough game days
     assert not MR.evaluate("NBA", few_days, False)["on"]
+    v = MR.evaluate("NBA", _rows(19, 6, 3), True)  # Nov 19: a sport that's on with too little evidence goes off
+    assert not v["on"] and v["changed"] and "so far" in v["why"]
     assert MR.evaluate("NFL", _rows(6, 60, 3), False)["on"]     # weekly sport: 6 game days is enough
 
 
@@ -41,7 +43,8 @@ def test_run_keeps_out_of_season_verdicts_and_writes_notes():
     store = {MR.KEY: {"at": "2026-11-09T10:00:00", "sports": {"NFL": {"on": True, "last": "2026-11-16", "why": "x"}}}}
     graded = {"NBA": [], "NHL": [], "NCAAF": [], "NCAAMB": [],
               "NFL": [{"slate_date": "2026-11-16", "result": "hit", "price": 110, "ev": 0.08, "book": "draftkings",
-                       "market": "Receptions"}]}
+                       "market": "Receptions", "actual": 7, "line": 4.5, "p_model": 0.535, "p_market": 0.5,
+                       "over_price": 110, "under_price": -130}]}
     rec = MR.run(today=date(2026, 11, 23), grade=lambda sp: graded[sp], get=store.get,
                  save=lambda k, v: store.__setitem__(k, v), write=False)
     assert rec["sports"]["NFL"]["on"] and "out of season" in rec["sports"]["NFL"]["why"]
@@ -55,3 +58,15 @@ def test_money_sports_follow_the_saved_verdict(monkeypatch):
     assert PE.money_sports() == ("NFL",)
     assert PE.is_money("NFL", 0.08, market="Receptions") and not PE.is_money("NBA", 0.08, market="Points")
     PE._MONEY_CACHE.clear()
+
+
+def test_rescore_uses_todays_model(monkeypatch):
+    import calibration as CAL
+    monkeypatch.setattr(CAL, "side_factors", lambda sp: None)
+    monkeypatch.setattr(CAL, "trust", lambda sp, m=None: 0.5)
+    r = {"actual": 7, "line": 4.5, "p_model": 0.70, "p_market": 0.50, "over_price": 110, "under_price": -130,
+         "market": "Receptions"}
+    x = MR.rescore("NFL", r)
+    p = 0.5 + 0.5 * (PE.weight_for({}, "NFL", "Receptions") * 0.70 + (1 - PE.weight_for({}, "NFL", "Receptions")) * 0.5 - 0.5)
+    assert x["side"] == "Over" and x["hit"] and abs(x["ev"] - (p * 2.1 - 1)) < 1e-9
+    assert MR.rescore("NFL", dict(r, actual=None)) is None and MR.rescore("NFL", dict(r, under_price=None)) is None

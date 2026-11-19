@@ -42,19 +42,51 @@ def _roi(rows: Sequence[Dict]) -> float:
     return sum((r["dec"] - 1) if r["hit"] else -1.0 for r in rows) / len(rows)
 
 
+def rescore(sport: str, r: Dict) -> Optional[Dict]:
+    """Nov 19 (owner's re-test): one graded read as TODAY's model reads it -- the current blend weight, side factors
+    and trust toward the books' price, from the saved model and market chances -- the side it would play, its edge
+    at the price that side carried, and whether it won. None without both prices or a final stat.
+
+    Why: on Nov 17 the model began leaning harder on the books (calibration trust 0.54, Points 0.30). Edges the old
+    model called 6-15% mostly shrink under it, so a record scored with the edges saved at the time judges a flag the
+    live board no longer produces (research/money_retest.py)."""
+    import calibration as CAL
+    import props_engine as PE
+    if r.get("actual") is None or r.get("p_model") is None or r.get("p_market") is None:
+        return None
+    op, up = r.get("over_price"), r.get("under_price")
+    if op is None or up is None:
+        return None
+    w = PE.weight_for({}, sport, r.get("market"))
+    if str(r.get("gap") or "").startswith("big"):
+        w = min(w, PE.GAP_MODEL_WEIGHT)
+    pm = float(r["p_market"])
+    p = PE.blend(float(r["p_model"]), pm, w)
+    p = CAL.apply_side(p, CAL.side_factors(sport))
+    p = CAL.apply_trust(p, pm, CAL.trust(sport, r.get("market")))
+    thr = PE.threshold(float(r["line"]))
+    if r["actual"] == thr:
+        return None
+    best = None
+    for side, pr, ps in (("Over", op, p), ("Under", up, 1 - p)):
+        dec = PE.decimal(pr)
+        if dec and (best is None or ps * dec - 1 > best["ev"]):
+            best = {"side": side, "ev": ps * dec - 1, "dec": dec, "hit": (r["actual"] > thr) == (side == "Over")}
+    return best
+
+
 def scored(sport: str, graded: Sequence[Dict]) -> List[Dict]:
-    """Graded reads in the money band with a sportsbook price: [{date, dec, hit}], oldest first."""
-    import postgame as PG
+    """Graded reads the CURRENT model puts in the money band, with a sportsbook price: [{date, dec, hit}], oldest
+    first (rescore: the edges as today's model would show them, not as they were saved)."""
     import props_engine as PE
     out = []
     for r in graded:
-        r = PG.as_tagged(r) if r.get("bet_use_tag") else r
-        if r.get("result") not in ("hit", "miss"):
+        if (r.get("book") or "") in PE.PICKEM_BOOKS:
             continue
-        d = PE.decimal(r.get("price"))
-        if not d or not PE.in_money_band(sport, r.get("ev"), r.get("book"), market=r.get("market")):
+        x = rescore(sport, r)
+        if x is None or not PE.in_money_band(sport, x["ev"], r.get("book"), market=r.get("market")):
             continue
-        out.append({"date": str(r.get("slate_date")), "dec": d, "hit": r["result"] == "hit"})
+        out.append({"date": str(r.get("slate_date")), "dec": x["dec"], "hit": x["hit"]})
     out.sort(key=lambda x: x["date"])
     return out
 
@@ -67,8 +99,11 @@ def evaluate(sport: str, rows: Sequence[Dict], was_on: bool, seed: int = 1) -> D
     base = {"sport": sport, "was_on": was_on, "n": len(rows), "days": len(days), "first": days[0] if days else None,
             "last": days[-1] if days else None}
     if len(rows) < MIN_READS or len(days) < need_days:
-        return {**base, "on": was_on, "changed": False,
-                "why": f"{len(rows)} reads over {len(days)} game days — needs {MIN_READS} over {need_days} to decide"}
+        # Nov 19: on needs evidence -- too few reads under the current model turns a sport off, not keeps it on
+        why = f"{len(rows)} reads over {len(days)} game days — needs {MIN_READS} over {need_days} to decide"
+        if rows:
+            why += f" (so far {_roi(rows):+.1%} per $1)"
+        return {**base, "on": False, "changed": was_on, "why": why}
     roi = _roi(rows)
     half = len(rows) // 2
     h1, h2 = _roi(rows[:half]), _roi(rows[half:])
@@ -128,7 +163,7 @@ def run(today: Optional[date] = None, force: bool = False, grade: Optional[Calla
                 out[sp] = prev[sp]
             continue
         last = (prev.get(sp) or {}).get("last")
-        if prev.get(sp) and rows and last and rows[-1]["date"] <= last:
+        if not force and prev.get(sp) and rows and last and rows[-1]["date"] <= last:   # a forced run re-decides
             out[sp] = {**prev[sp], "changed": False, "why": "no new games since the last review (out of season) — "
                                                              "verdict kept"}
         else:

@@ -816,18 +816,26 @@ def blowout_rows(date_str: str, sports_=BLOWOUT_SPORTS, calls_by_sport: Optional
                      else f"{k.get('fav')} −{float(strength):g}"))
             happened = None
             y = k.get("y") or _script_from_finals(sp, k, finals_cache)
+            # Nov 19 (owner: "you consider a model chance of <30% a blowout watch?"): a 27% blowout chance isn't a call
+            # that the game will be a blowout -- it's the watch list's ranking. The CALL is the outcome the model
+            # thought most likely (often "decided, not a blowout"); that is what's graded right or wrong. What
+            # happened is stated plainly, with 💥 when it was a blowout.
+            probs = {"fav_blowout": fav_big, "dog_blowout": dog_big, "close": float(p.get("close") or 0)}
+            probs["middle"] = max(0.0, 1.0 - sum(probs.values()))
+            likely = max(probs, key=probs.get)
+            names = {"fav_blowout": f"{k.get('fav')} wins big", "dog_blowout": f"{k.get('dog')} wins big",
+                     "close": "close game", "middle": "decided, not a blowout"}
             if y:
-                # Nov 19: a miss reads ❌ (the hit/miss breakdown and filter read the mark); the other team winning big
-                # is a miss too, ❌↩️
-                happened = {"fav_blowout": f"✅ {k.get('fav')} won big", "dog_blowout": f"✅ {k.get('dog')} won big",
-                            "close": "❌ close game", "middle": "❌ decided, not a blowout"}.get(y, y)
-                if y in ("fav_blowout", "dog_blowout") and y != ("fav_blowout" if who == "favorite" else "dog_blowout"):
-                    happened = happened.replace("✅", "❌↩️")
+                happened = {"fav_blowout": f"💥 {k.get('fav')} won big", "dog_blowout": f"💥 {k.get('dog')} won big",
+                            "close": "close game", "middle": "decided, not a blowout"}.get(y, y)
             game = (f"{k['away']} @ {k['home']}" if k.get("home") and k.get("away") else f"{k.get('dog')} vs {k.get('fav')}")
             out.append({"sport": sp, "time": _et_time(k.get("kick")), "game": game, "team": team, "who": who,
                         "chance": chance, "fav_big": fav_big, "dog_big": dog_big, "close": float(p.get("close") or 0),
                         "line": line, "margin": f"{blow}+ {unit}" if blow else "", "source": k.get("source") or "table",
-                        "happened": happened, "fav_margin": k.get("margin")})
+                        "happened": happened, "fav_margin": k.get("margin"), "y": y,
+                        "blowout_hit": None if not y else y == ("fav_blowout" if who == "favorite" else "dog_blowout"),
+                        "likely": f"{names[likely]} ({probs[likely]:.0%})", "likely_chance": probs[likely],
+                        "likely_result": None if not y else ("✅" if y == likely else "❌")})
     out.sort(key=lambda r: -r["chance"])
     return out
 
