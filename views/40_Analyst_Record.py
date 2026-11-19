@@ -169,6 +169,9 @@ with tab_cal:
                    "test. It never changes a lock or a published number.")
 
 with tab_calls:
+    # Nov 19: the split by the chance the model gave (the Result filter below shows only the hits or the misses)
+    C.hit_miss_breakdown([{"result": AT.result_label(r), "chance": r.get("model_prob")} for r in rows], "result", "chance",
+                         key="record_hm", title="Calls that hit and missed")
     result_pick = st.multiselect("Result", ["Hit", "Miss", "Void", "Open"], default=[], key="record_result",
                                  help="Leave empty to show everything.")
     table = pd.DataFrame([{

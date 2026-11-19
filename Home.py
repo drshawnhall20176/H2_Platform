@@ -207,6 +207,9 @@ if True:
     # Nov 14: every lock is listed (the old 60-row cap, applied after the time sort, cut the late games' locks)
     _cap = len(_rows) if _show.startswith("🔒") else 250
     _sel_props, _sel_lines = [], []                             # Nov 8: ticked rows, logged by the box below the lists
+    if _past and _rows:                                         # Nov 19: looking back -- the split, by chance range
+        C.hit_miss_breakdown(_rows, "result", "chance", key="home_best_hm", title="Picks that hit and missed")
+        _rows = C.show_filter(_rows, "result", key="home_best_hm_show")
     if _rows:
         _df = _pd.DataFrame([{"Sport": r["sport"], "Time": r.get("time") or "", "Pick": r["pick"],
                               "Use": ("💰 " if r.get("money") else "") + ("🔒 " if r.get("lock") else "")

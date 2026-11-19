@@ -138,8 +138,8 @@ def _look_back():
                     f"**{summ['expected']:.0f}**. Close means the chances were fair that night; one night is noisy.")
     else:
         st.caption("Box scores aren't final yet for this pick.")
-    only = st.checkbox("Only the ones that hit", value=False, key="ls_past_hits")
-    show = [r for r in rows if r["Hit"] == "✅"] if only else rows
+    C.hit_miss_breakdown(rows, "Hit", "Honest chance", key="ls_past_hm", title="Rungs that hit and missed")
+    show = C.show_filter(rows, "Hit", key="ls_past_show")      # Nov 19: all / only the hits / only the misses
     cols = ["Player", "Bet", "Hit", "Actual", "Honest chance", "Fair price", "Price", "EV per $1", "Projection",
             "Main line", "Game"]
     if not any(r["Price"] for r in show):

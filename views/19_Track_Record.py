@@ -324,8 +324,13 @@ st.caption("A rolling window of settled selections with how they graded. These a
 settled = [b for b in bets if B._result(b) in ("win", "loss")]
 settled.sort(key=lambda b: b.get("ts_placed") or "", reverse=True)
 if settled:
+    # Nov 19: the split by the model's chance over every settled selection, and all / only hits / only misses
+    C.hit_miss_breakdown([{"result": B._result(b), "chance": b.get("model_prob")} for b in settled], "result", "chance",
+                         key="tr_hm", title="Settled selections that hit and missed")
+    _shown = settled[:20]
+    _, _shown = C.show_filter([{"result": B._result(b)} for b in _shown], "result", key="tr_hm_show", apply_to=_shown)
     rec = []
-    for b in settled[:20]:
+    for b in _shown:
         res = B._result(b)
         clv = B.clv_pct(b.get("entry_odds"), b.get("close_odds"))
         line = b.get("line")
