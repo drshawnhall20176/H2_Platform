@@ -260,6 +260,7 @@ def prop_results(sport: str, date_str: str) -> Dict:
     """{(player, market, side, line): win / loss / push / void} for one date, from the kickoff snapshots graded
     against ESPN box scores (the Postgame Review's grading). The pick's side, not the snapshot's, decides win/loss."""
     import model_store as MS
+    import pick_records as _PRK
     import postgame as PG
     snaps = MS.load_snapshots(sport, [date_str])
     if not snaps:
@@ -274,7 +275,8 @@ def prop_results(sport: str, date_str: str) -> Dict:
             thr = PE.threshold(ln)
             for side in ("Over", "Under"):
                 r = "push" if g["actual"] == thr else ("win" if (g["actual"] > thr) == (side == "Over") else "loss")
-                out[(PE.norm_name(g.get("player") or ""), g.get("market"), side, ln)] = r
+                mk = _PRK.COMBO_KEY.get(g.get("market"), g.get("market"))
+                out[(PE.norm_name(g.get("player") or ""), mk, side, ln)] = r
     return out
 
 
@@ -299,9 +301,12 @@ def collect(date_str: str, props_sports, past: bool = False) -> Dict:
         if past and got:
             try:
                 res = prop_results(sp, date_str)
+                import pick_records as _PRK
                 for r in got:
                     if r.get("line") is not None:
-                        r["result"] = res.get((PE.norm_name(r.get("player") or ""), r.get("market"), r.get("side"),
+                        # Nov 19: the board says "Pts+Reb", the snapshots "PR" -- 14 of 19 college picks found no result
+                        mk = _PRK.COMBO_KEY.get(r.get("market"), r.get("market"))
+                        r["result"] = res.get((PE.norm_name(r.get("player") or ""), mk, r.get("side"),
                                                float(r["line"])))
             except Exception:                                   # noqa: BLE001
                 pass

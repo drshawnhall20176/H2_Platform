@@ -411,6 +411,11 @@ if True:
             _ws = _gours
         if not _lshow:
             _ws = [r for r in _ws if r.get("best_tested") or r.get("lean_verdict") not in _PR.HIDE]
+        if _past and _ws:                                       # Nov 19: the picks' split, by chance range, and a filter
+            _gproxy = [{"result": r.get("best_result"),
+                        "chance": r.get("best_chance") if r.get("best_tested") else r.get("backtest")} for r in _ws]
+            C.hit_miss_breakdown(_gproxy, "result", "chance", key="home_win_hm", title="Game-line picks that hit and missed")
+            _, _ws = C.show_filter(_gproxy, "result", key="home_win_hm_show", apply_to=_ws)
         _wdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"],
                                "Weather": _wx(r["sport"], r["game"]),
                                "Spread": r.get("spread_txt") or "",

@@ -69,3 +69,14 @@ def test_lost_day_rebuilt_from_snapshots():
     rows = TB.props_from_snapshots("NBA", "2026-11-18", snaps=snaps)
     assert len(rows) == 1 and rows[0]["pick"] == "A Points Over 19.5" and rows[0]["use"] == PE.USE_SINGLE
     assert rows[0]["time"] == "7:10 PM"
+
+
+def test_combo_markets_find_their_result(monkeypatch):
+    """Nov 19: saved picks say 'Pts+Reb', snapshots 'PR' -- 14 of 19 NCAAMB picks showed no result."""
+    import todays_best as TB
+    monkeypatch.setattr(TB, "load_props", lambda sp, d: {"at": "x", "rows": [
+        {"kind": "Prop", "player": "Braylon Mullins", "market": "Pts+Reb", "side": "Under", "line": 23.5, "pick": "p"}]})
+    monkeypatch.setattr(TB, "prop_results", lambda sp, d: {("braylon mullins", "PR", "Under", 23.5): "win"})
+    monkeypatch.setattr(TB, "game_rows", lambda d, past=False: [])
+    got = TB.collect("2026-11-18", ["NCAAMB"], past=True)["rows"]
+    assert got[0]["result"] == "win"
