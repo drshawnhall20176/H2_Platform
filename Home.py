@@ -412,10 +412,15 @@ if True:
         if not _lshow:
             _ws = [r for r in _ws if r.get("best_tested") or r.get("lean_verdict") not in _PR.HIDE]
         if _past and _ws:                                       # Nov 19: the picks' split, by chance range, and a filter
-            _gproxy = [{"result": r.get("best_result"),
-                        "chance": r.get("best_chance") if r.get("best_tested") else r.get("backtest")} for r in _ws]
-            C.hit_miss_breakdown(_gproxy, "result", "chance", key="home_win_hm", title="Game-line picks that hit and missed")
-            _, _ws = C.show_filter(_gproxy, "result", key="home_win_hm_show", apply_to=_ws)
+            # Nov 19 (owner): two result columns, two charts -- the pick, and the model's likely winner
+            _gproxy = [{"pick": r.get("best_result"),
+                        "pick_chance": r.get("best_chance") if r.get("best_tested") else r.get("backtest"),
+                        "winner": r.get("winner_result"), "winner_chance": r.get("chance")} for r in _ws]
+            C.hit_miss_pair([("Pick result", _gproxy, "pick", "pick_chance"),
+                             ("Winner result", _gproxy, "winner", "winner_chance")],
+                            key="home_win_hm", title="Game lines: how the picks and the likely winners did")
+            _, _ws = C.show_filter(_gproxy, "pick", key="home_win_hm_show", apply_to=_ws,
+                                   by={"Pick result": "pick", "Winner result": "winner"})
         _wdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"],
                                "Weather": _wx(r["sport"], r["game"]),
                                "Spread": r.get("spread_txt") or "",
