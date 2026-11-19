@@ -80,3 +80,24 @@ def test_combo_markets_find_their_result(monkeypatch):
     monkeypatch.setattr(TB, "game_rows", lambda d, past=False: [])
     got = TB.collect("2026-11-18", ["NCAAMB"], past=True)["rows"]
     assert got[0]["result"] == "win"
+
+
+def test_game_lines_two_charts_and_filter_by_either_column():
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_string('''
+import components as C
+rows = [{"pick": "✅ won", "pc": 0.508, "winner": "❌ lost", "wc": 0.62},
+        {"pick": "❌ lost", "pc": 0.508, "winner": "✅ won", "wc": 0.91},
+        {"pick": "❌ lost", "pc": 0.508, "winner": "✅ won", "wc": 0.85}]
+C.hit_miss_pair([("Pick result", rows, "pick", "pc"), ("Winner result", rows, "winner", "wc")], key="t")
+shown = C.show_filter(rows, "pick", key="f", by={"Pick result": "pick", "Winner result": "winner"})
+import streamlit as st
+st.write(len(shown))
+''').run()
+    assert not at.exception
+    md = " ".join(m.value for m in at.markdown)
+    assert "**Pick result**: 1 hit, 2 missed" in md and "**Winner result**: 2 hit, 1 missed" in md
+    assert any("same chance" in c.value for c in at.caption)          # one band: no table, a note
+    at.radio(key="f").set_value(C.SHOW_HITS).run()
+    at.radio(key="f_by").set_value("Winner result").run()
+    assert at.markdown[-1].value.strip("`") == "2"

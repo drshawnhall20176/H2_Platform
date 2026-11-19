@@ -931,16 +931,60 @@ def chance_bands(rows, result_key: str, chance_key: str) -> List[Dict]:
     return out
 
 
-def show_filter(rows, result_key: str, key: str, apply_to=None):
-    """All / ✅ Hits only / ❌ Misses only. Returns the rows to show (apply_to: a parallel list filtered the same way)."""
-    pick = st.radio("Show", [SHOW_ALL, SHOW_HITS, SHOW_MISSES], horizontal=True, key=key,
-                    label_visibility="collapsed")
+def show_filter(rows, result_key: str, key: str, apply_to=None, by: Optional[Dict[str, str]] = None):
+    """All / ✅ Hits only / ❌ Misses only. Returns the rows to show (apply_to: a parallel list filtered the same way).
+    by (Nov 19): {label: result key} when a table has more than one result column -- a picker chooses which one."""
+    if by:
+        c1, c2 = st.columns([3, 2])
+        pick = c1.radio("Show", [SHOW_ALL, SHOW_HITS, SHOW_MISSES], horizontal=True, key=key,
+                        label_visibility="collapsed")
+        result_key = by[c2.radio("Of", list(by), horizontal=True, key=f"{key}_by", label_visibility="collapsed",
+                                 disabled=pick == SHOW_ALL)]
+    else:
+        pick = st.radio("Show", [SHOW_ALL, SHOW_HITS, SHOW_MISSES], horizontal=True, key=key,
+                        label_visibility="collapsed")
     want = {SHOW_HITS: "hit", SHOW_MISSES: "miss"}.get(pick)
     if want is None:
         return (list(rows), list(apply_to)) if apply_to is not None else list(rows)
     keep = [i for i, r in enumerate(rows) if outcome(r.get(result_key)) == want]
     picked = [rows[i] for i in keep]
     return (picked, [apply_to[i] for i in keep]) if apply_to is not None else picked
+
+
+def _donut(h: int, m: int):
+    import plotly.graph_objects as go
+    fig = go.Figure(go.Pie(labels=["Hit", "Missed"], values=[h, m], hole=0.55, sort=False,
+                           marker=dict(colors=[HIT_COLOR, MISS_COLOR], line=dict(color="rgba(0,0,0,0)", width=2)),
+                           textinfo="label+percent", hovertemplate="%{label}: %{value} (%{percent})<extra></extra>"))
+    fig.update_layout(height=230, margin=dict(l=0, r=0, t=0, b=0), showlegend=False, paper_bgcolor="rgba(0,0,0,0)",
+                      annotations=[dict(text=f"<b>{h}/{h + m}</b>", showarrow=False, font=dict(size=16))])
+    return fig
+
+
+def hit_miss_pair(parts, key: str = "hmp", title: str = "Hits and misses") -> None:
+    """Nov 19 (owner: game lines point to two result columns): one donut per result column, side by side, each with
+    its own chance-range breakout. parts = [(label, rows, result_key, chance_key or None)]."""
+    parts = [(lab, rows, rk, ck) for lab, rows, rk, ck in parts
+             if any(outcome(r.get(rk)) for r in rows or [])]
+    if not parts:
+        return
+    import pandas as _pd
+    with st.expander(f"📊 {title}", expanded=True):
+        for col, (lab, rows, rk, ck) in zip(st.columns(len(parts)), parts):
+            dec = [outcome(r.get(rk)) for r in rows]
+            h, m = dec.count("hit"), dec.count("miss")
+            col.markdown(f"**{lab}**: {h} hit, {m} missed ({h / (h + m):.0%})")
+            col.plotly_chart(_donut(h, m), width="stretch", key=f"{key}_{rk}_pie", config={"displayModeBar": False})
+            bands = chance_bands(rows, rk, ck) if ck else []
+            if len(bands) > 1 or (bands and bands[0]["Picks"] < h + m):
+                col.dataframe(_pd.DataFrame([{"Chance": b["Chance"], "Hit": b["Hits"], "Missed": b["Misses"],
+                                              "Hit rate": f"{b['Hit rate']:.0%}", "Expected": f"{b['Expected']:.0%}"}
+                                             for b in bands]), hide_index=True, width="stretch")
+            elif bands:
+                col.caption(f"Every one carried about the same chance ({bands[0]['Expected']:.0%}), so there's no "
+                            "range to break out.")
+        st.caption("By the chance shown before the game. Hit rate near Expected = the chances were honest in that "
+                   "range; well above = the model undersold it, well below = oversold. Small ranges are noisy.")
 
 
 def hit_miss_breakdown(rows, result_key: str, chance_key: Optional[str] = None, key: str = "hm",
