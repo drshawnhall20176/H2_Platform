@@ -490,7 +490,7 @@ def lock_record(graded: Sequence[Dict]) -> Optional[Dict]:
 def money_record(graded: Sequence[Dict]) -> Optional[Dict]:
     """Nov 19: the 💰 Money picks (props_engine.is_money) in use_record's shape, with profit per $1 at the price."""
     g = [r for r in graded if r.get("result") in ("hit", "miss") and PE.decimal(r.get("price")) is not None
-         and PE.is_money(r.get("sport"), r.get("ev"), r.get("book"))]
+         and PE.is_money(r.get("sport"), r.get("ev"), r.get("book"), market=r.get("market"))]
     if not g:
         return None
     hits = sum(r["result"] == "hit" for r in g)
