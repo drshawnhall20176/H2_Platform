@@ -11,8 +11,9 @@ One run stays up to ~5h40m (started by its own cron every two hours -- any one s
 demand). Every minute it reads the repo's recent runs; for each workflow below whose own cron came due DELAY minutes
 ago (giving GitHub's schedule its chance) and that hasn't run since, it dispatches that workflow once. Due times
 older than GRACE minutes are let go -- the next one is never far away. Dispatched runs use the workflow's defaults,
-so only workflows that behave the same dispatched as scheduled are listed (not daily-review / morning-brief /
-tuning-report / capture-ufc-odds, which treat a manual run as "force", and not close-watch, which is its own watcher).
+so only workflows that behave the same dispatched as scheduled are listed (not daily-review / tuning-report /
+capture-ufc-odds, which treat a manual run as "force", and not close-watch, which is its own watcher); morning-brief
+is dispatched with kind=auto (INPUTS).
 The repo is public, so Actions minutes are free; each dispatch spends what the scheduled run would have.
 """
 from __future__ import annotations
@@ -27,6 +28,11 @@ from typing import Dict, Iterable, List, Optional
 WORKFLOWS = ("warm-slates", "settle-results", "capture-closing-lines", "capture-line-snapshots", "capture-game-picks",
              "capture-intl", "refresh-matchups", "refresh-ncaaf", "refresh-statcast", "refresh-calibration",
              "script-learn", "settle-analyst")
+# Inputs for a dispatch, where the defaults would change what the run does. A run started by clockwork (GitHub's
+# token) doesn't set off the workflow_run chain the scheduled one would, so morning-brief is dispatched on its own
+# crons -- as "auto" (whatever note is due, never resent), which also runs the morning review when it's due.
+INPUTS = {"morning-brief": {"kind": "auto"}}
+WORKFLOWS = WORKFLOWS + tuple(INPUTS)
 DELAY = 8           # minutes after a due time before stepping in
 GRACE = 40          # minutes after a due time when it's let go
 RUN_FOR = 340       # minutes one clockwork run stays up
@@ -118,7 +124,10 @@ def recent_runs() -> Dict[str, datetime]:
 
 
 def dispatch(wf: str, ref: str = "main") -> None:
-    _api("POST", f"actions/workflows/{wf}.yml/dispatches", json={"ref": ref})
+    body = {"ref": ref}
+    if INPUTS.get(wf):
+        body["inputs"] = INPUTS[wf]
+    _api("POST", f"actions/workflows/{wf}.yml/dispatches", json=body)
 
 
 def main() -> int:
