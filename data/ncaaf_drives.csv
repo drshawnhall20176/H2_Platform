@@ -72371,3 +72371,46 @@ season,game_id,week,drive_id,drive_number,offense,defense,offense_score,defense_
 2026,401866466,12,40186646620,14,Miami (OH),Kent State,,,False,4,68
 2026,401866466,12,40186646621,15,Kent State,Miami (OH),,,False,4,28
 2026,401866466,12,40186646622,16,Miami (OH),Kent State,,,False,4,63
+2026,401866467,12,4018664672,1,Massachusetts,Akron,,,True,1,25
+2026,401866467,12,4018664674,2,Akron,Massachusetts,,,False,1,75
+2026,401866467,12,4018664675,3,Massachusetts,Akron,,,True,1,47
+2026,401866467,12,4018664677,4,Akron,Massachusetts,,,True,1,78
+2026,401866467,12,4018664679,5,Massachusetts,Akron,,,True,1,25
+2026,401866467,12,40186646711,6,Akron,Massachusetts,,,False,1,59
+2026,401866467,12,40186646712,7,Massachusetts,Akron,,,True,2,98
+2026,401866467,12,40186646714,8,Akron,Massachusetts,,,False,2,75
+2026,401866467,12,40186646715,9,Massachusetts,Akron,,,True,2,51
+2026,401866467,12,40186646717,10,Akron,Massachusetts,,,True,2,75
+2026,401866467,12,40186646719,11,Massachusetts,Akron,,,False,2,27
+2026,401866467,12,40186646720,12,Akron,Massachusetts,,,True,2,27
+2026,401866467,12,40186646722,13,Massachusetts,Akron,,,False,2,33
+2026,401866467,12,40186646723,14,Akron,Massachusetts,,,False,2,68
+2026,401866467,12,40186646725,15,Massachusetts,Akron,,,True,3,35
+2026,401866467,12,40186646726,16,Massachusetts,Akron,,,True,3,25
+2026,401866467,12,40186646728,17,Akron,Massachusetts,,,True,3,72
+2026,401866467,12,40186646730,18,Massachusetts,Akron,,,False,3,24
+2026,401866467,12,40186646731,19,Akron,Massachusetts,,,True,4,83
+2026,401866467,12,40186646733,20,Massachusetts,Akron,,,False,4,16
+2026,401866467,12,40186646734,21,Akron,Massachusetts,,,False,4,54
+2026,401866467,12,40186646735,22,Massachusetts,Akron,,,False,4,17
+2026,401866469,12,4018664692,1,Central Michigan,Buffalo,,,True,1,75
+2026,401866469,12,4018664694,2,Buffalo,Central Michigan,,,True,1,37
+2026,401866469,12,4018664696,3,Central Michigan,Buffalo,,,False,1,75
+2026,401866469,12,4018664697,4,Buffalo,Central Michigan,,,True,1,59
+2026,401866469,12,4018664699,5,Central Michigan,Buffalo,,,False,2,75
+2026,401866469,12,40186646910,6,Buffalo,Central Michigan,,,True,2,74
+2026,401866469,12,40186646912,7,Central Michigan,Buffalo,,,False,2,76
+2026,401866469,12,40186646913,8,Buffalo,Central Michigan,,,False,2,42
+2026,401866469,12,40186646914,9,Central Michigan,Buffalo,,,False,2,92
+2026,401866469,12,40186646915,10,Buffalo,Central Michigan,,,False,2,1
+2026,401866469,12,40186646916,11,Central Michigan,Buffalo,,,True,2,45
+2026,401866469,12,40186646918,12,Buffalo,Central Michigan,,,True,2,34
+2026,401866469,12,40186646920,13,Central Michigan,Buffalo,,,False,2,75
+2026,401866469,12,40186646922,14,Buffalo,Central Michigan,,,True,3,25
+2026,401866469,12,40186646924,15,Central Michigan,Buffalo,,,True,3,75
+2026,401866469,12,40186646926,16,Buffalo,Central Michigan,,,True,3,25
+2026,401866469,12,40186646928,17,Central Michigan,Buffalo,,,False,3,80
+2026,401866469,12,40186646929,18,Buffalo,Central Michigan,,,True,4,35
+2026,401866469,12,40186646931,19,Central Michigan,Buffalo,,,False,4,79
+2026,401866469,12,40186646932,20,Buffalo,Central Michigan,,,False,4,67
+2026,401866469,12,40186646933,21,Central Michigan,Buffalo,,,False,4,79
