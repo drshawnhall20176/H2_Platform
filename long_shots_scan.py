@@ -160,9 +160,61 @@ def load(sport: str, day: str, get=None, live: Optional[bool] = None) -> Optiona
         saved = (get or MS.get_setting)(KEY.format(sport=sport, date=day))
     except Exception:                                           # noqa: BLE001
         return None
-    if live if live is not None else get is None:
+    if live is None:                                            # Nov 19: today's injury report only means today
+        try:
+            import pytz
+            live = get is None and day == datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d")
+        except Exception:                                       # noqa: BLE001
+            live = False
+    if live:
         saved = recheck(saved, sport)
     return saved
+
+
+def _rung(r: Dict) -> Optional[float]:
+    try:
+        return float(str(r.get("Bet") or "").split("+", 1)[0])
+    except ValueError:
+        return None
+
+
+def grade_saved(rows: Sequence[Dict], sport: str, day: str, snaps=None, results=None) -> List[Dict]:
+    """Nov 19 (owner: yesterday's Today's best had no result on its long shots): each saved long shot with "Actual"
+    and "Hit" (✅ / ❌; None while the box score isn't final or the player isn't found) from that night's box scores.
+    The player's team comes from that night's prop snapshots."""
+    import model_store as MS
+    import postgame as PG
+    import props_engine as PE
+    rows = [dict(r) for r in rows or []]
+    if not rows:
+        return rows
+    snaps = MS.load_snapshots(sport, [day]) if snaps is None else snaps
+    team_of = {}
+    for s in snaps or []:
+        team_of.setdefault(PE.norm_name(s.get("player")), (s.get("team"), s.get("opp")))
+    games = sorted({team_of[k] for k in (PE.norm_name(r.get("Player")) for r in rows) if k in team_of})
+    try:
+        results = PG.fetch_results(sport, day, games) if results is None else results
+    except Exception:                                           # noqa: BLE001
+        results = {}
+    for r in rows:
+        r["Actual"], r["Hit"] = None, None
+        key = team_of.get(PE.norm_name(r.get("Player")))
+        box = (results or {}).get(key) if key else None
+        if not box or not box.get("final"):
+            continue
+        tk = PG._team_key(sport, box, key[0])
+        roster = (box["teams"].get(tk) or {}) if tk is not None else {}
+        nm = PG._norm(PE.norm_name(r.get("Player")))
+        stats = roster.get(nm) or roster.get(PG._alias_name(nm, roster) or "")
+        n = _rung(r)
+        if stats is None or n is None:
+            continue
+        val = PG.stat_value(sport, r.get("Market") or "", stats)
+        if val is None:
+            continue
+        r["Actual"], r["Hit"] = val, ("✅" if val >= n else "❌")
+    return rows
 
 
 def recheck(saved: Optional[Dict], sport: str, status=None) -> Optional[Dict]:

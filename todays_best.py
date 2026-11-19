@@ -699,10 +699,48 @@ def log_selection(items: Sequence[Dict], mode: str, stake: float, parlay_stake: 
 BLOWOUT_SPORTS = ("NBA", "NCAAMB", "NFL", "NCAAF", "NHL")
 
 
+def _script_from_finals(sp: str, k: Dict, cache: Dict[str, List[Dict]], load=None) -> Optional[str]:
+    """Nov 19: how a called game went, from the results archive, when the learning job hasn't graded it yet (on Nov 18
+    GitHub skipped its overnight runs, so 7 of 8 games in yesterday's Blowout watch showed no result)."""
+    try:
+        import intl_hoops as IH
+        import model_store as MS
+        import scenario_model as M
+        import script_effects as SE
+        d = (SE.DATA.get(sp) or {})
+        if not d.get("blow") or not k.get("fav") or not k.get("dog"):
+            return None
+        day = _et_date(k.get("kick")) or k.get("d")
+        if sp not in cache:
+            from datetime import date as _d0, timedelta as _td
+            cache[sp] = (load or MS.load_results)(sp, since=(_d0.fromisoformat(str(day)[:10]) - _td(days=1)).isoformat()) or []
+        from datetime import date as _date
+        d0 = _date.fromisoformat(str(day)[:10])
+        for g in cache[sp]:
+            try:
+                if abs((_date.fromisoformat(str(g.get("date"))[:10]) - d0).days) > 1:
+                    continue
+            except ValueError:
+                continue
+            hf = IH.find_team([g["home_team"]], k["fav"], True)
+            af = IH.find_team([g["away_team"]], k["fav"], True)
+            if hf and IH.find_team([g["away_team"]], k["dog"], True):
+                m = float(g["home_points"]) - float(g["away_points"])
+            elif af and IH.find_team([g["home_team"]], k["dog"], True):
+                m = float(g["away_points"]) - float(g["home_points"])
+            else:
+                continue
+            return M.label(m, d["close"], d["blow"])
+    except Exception:                                           # noqa: BLE001 -- a missing result, never an error
+        return None
+    return None
+
+
 def blowout_rows(date_str: str, sports_=BLOWOUT_SPORTS, calls_by_sport: Optional[Dict] = None) -> List[Dict]:
     import model_store as MS
     import script_effects as SE
     out = []
+    finals_cache: Dict[str, List[Dict]] = {}
     for sp in sports_:
         try:
             cs = (calls_by_sport or {}).get(sp) if calls_by_sport is not None else MS.get_setting(f"scenario_calls:{sp}", None)
@@ -726,11 +764,14 @@ def blowout_rows(date_str: str, sports_=BLOWOUT_SPORTS, calls_by_sport: Optional
                     (f"{k.get('fav')} {float(strength):.0%} to win" if SE.strength_kind(sp) == "ml"
                      else f"{k.get('fav')} −{float(strength):g}"))
             happened = None
-            if k.get("y"):
+            y = k.get("y") or _script_from_finals(sp, k, finals_cache)
+            if y:
+                # Nov 19: a miss reads ❌ (the hit/miss breakdown and filter read the mark); the other team winning big
+                # is a miss too, ❌↩️
                 happened = {"fav_blowout": f"✅ {k.get('fav')} won big", "dog_blowout": f"✅ {k.get('dog')} won big",
-                            "close": "close game", "middle": "decided, not a blowout"}.get(k["y"], k["y"])
-                if k["y"] in ("fav_blowout", "dog_blowout") and k["y"] != ("fav_blowout" if who == "favorite" else "dog_blowout"):
-                    happened = happened.replace("✅", "↩️")
+                            "close": "❌ close game", "middle": "❌ decided, not a blowout"}.get(y, y)
+                if y in ("fav_blowout", "dog_blowout") and y != ("fav_blowout" if who == "favorite" else "dog_blowout"):
+                    happened = happened.replace("✅", "❌↩️")
             game = (f"{k['away']} @ {k['home']}" if k.get("home") and k.get("away") else f"{k.get('dog')} vs {k.get('fav')}")
             out.append({"sport": sp, "time": _et_time(k.get("kick")), "game": game, "team": team, "who": who,
                         "chance": chance, "fav_big": fav_big, "dog_big": dog_big, "close": float(p.get("close") or 0),

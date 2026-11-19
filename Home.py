@@ -281,10 +281,22 @@ if True:
             st.caption("No long-shot scan yet for today — it runs a few times a day once the books post alternate "
                        "lines (and on the Long Shots page).")
         _ls_items = []
+        @st.cache_data(ttl=1800, show_spinner=False)
+        def _ls_graded(k, day, rows):
+            return _LSS.grade_saved(list(rows), k, day)
+
         for _k, _v in _ls_sets:
             _top = [r for r in _v["top"] if _keep(r)]
             if not _top:
                 continue
+            if _past:                                           # Nov 19: how each went, from that night's box scores
+                try:
+                    _top = _ls_graded(_k, _today, tuple(_top))
+                except Exception:                               # noqa: BLE001
+                    pass
+                C.hit_miss_breakdown(_top, "Hit", "Honest chance", key=f"home_ls_hm_{_k}",
+                                     title=f"{_k} long shots that hit and missed")
+                _top = C.show_filter(_top, "Hit", key=f"home_ls_show_{_k}")
             try:
                 _at = _dt.fromisoformat(_v["at"]).astimezone(_ET).strftime("%-I:%M %p")
             except (TypeError, ValueError):
@@ -294,7 +306,8 @@ if True:
             _ldf = _pd.DataFrame([{"Time": r.get("time") or "", "Game": r.get("game") or "", "Pick": r.get("pick"),
                                    "Price": r.get("Price"), "Honest chance": r.get("Honest chance"),
                                    "Book says": r.get("Book says"), "EV per $1": r.get("EV per $1"),
-                                   "Market": ("✅ " if r.get("tested") else "") + str(r.get("Market") or "")}
+                                   "Market": ("✅ " if r.get("tested") else "") + str(r.get("Market") or ""),
+                                   **({"Actual": r.get("Actual"), "Result": r.get("Hit") or "—"} if _past else {})}
                                   for r in _top])
             _ls_items += _LU.picked(_top, _LU.selectable(_ldf, f"home_ls_{_k}", hide_index=True, width="stretch",
                                     column_config={"Price": st.column_config.NumberColumn(format="%+d"),
@@ -515,6 +528,9 @@ if True:
         _bn = st.slider("Games shown (highest blowout chance)", 3, 25, 8, key="home_blow_n") if len(_bw) > 3 else len(_bw)
         # the N most likely blowouts, listed earliest game first (like every table here), across sports
         _btop = sorted(_bw[:_bn], key=lambda r: (_tkey(r.get("time")), -r["chance"]))
+        if _past:                                               # Nov 19: the split, and all / hits only / misses only
+            C.hit_miss_breakdown(_btop, "happened", "chance", key="home_blow_hm", title="Blowout calls that hit and missed")
+            _btop = C.show_filter(_btop, "happened", key="home_blow_show")
         _bdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"],
                                "Most likely to win big": f"{r['team']} ({r['who']})",
                                "Chance": r["chance"], "Win big by": r["margin"],
