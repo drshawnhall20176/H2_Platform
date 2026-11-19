@@ -483,6 +483,19 @@ def run():
     if office_on:
         sections["🏠 START HERE"].append(st.Page(str(here / "Owner_Office.py"), title="Owner Office", icon="🔐",
                                                 url_path="owner_office"))
+    page_of: dict = {}                                          # Nov 19: url_path -> (lead, title), for the sport bar
+
+    def page_ok(key: str, title: str, sp: str) -> bool:
+        """Would this page be in the menu for sport `sp`? (the sport gates below, for any sport)"""
+        if sp in sports.LAB_SPORTS and key not in (sports.LAB_PAGES[sp],) + sports.LAB_COMMON_PAGES:
+            return False
+        req = sport_only_leads.get(key)
+        if req and sp not in req:
+            return False
+        if title in projections_only_titles and not sports.get(sp).has_projections:
+            return False
+        return not (key == "58" and sp not in PH.SPORTS)
+
     for f in view_files:
         key = lead(f.name)
         if OF.is_office_page(key) and not commercial:
@@ -515,6 +528,7 @@ def run():
         # never crashes, just lands somewhere reasonable until explicitly categorized.
         sections.setdefault(section, []).append(st.Page(str(f), title=NL.label(title) if commercial else title,
                                                         icon=icon, url_path=slug))
+        page_of[slug] = (key, title)
 
     # Nov 18 (owner): League Schedules right under Today, the Owner Office at the bottom of START HERE
     _rank = {"today": 0, "league_schedules": 1, "home": 2, "owner_office": 99}
@@ -579,7 +593,29 @@ def run():
             for pg in pages:
                 if getattr(pg, "url_path", None) == goto or (goto == "today" and getattr(pg, "title", None) == "Today"):
                     st.switch_page(pg)
+    sport_bar(getattr(nav, "url_path", None), page_of, keys, page_ok)
     nav.run()
+
+
+def sport_bar(url_path, page_of: dict, keys, page_ok) -> None:
+    """Nov 19 (owner: "command center does not give the option to select a sport"): a sport picker at the top of every
+    sport page -- only the sports this page exists for, so switching never lands on a missing page. The pick is the
+    shared one (session "sport"): the sidebar, the desk and every other page follow it. Not on Today (every sport),
+    the Sport desk (its own picker) or the Owner Office."""
+    if url_path not in page_of:
+        return
+    key, title = page_of[url_path]
+    opts = [k for k in keys if page_ok(key, title, k)]
+    if len(opts) < 2:
+        return
+
+    def _switch():
+        k = st.session_state.get("_sport_bar")
+        if k:
+            st.session_state["sport"] = k
+    st.session_state["_sport_bar"] = st.session_state.get("sport") if st.session_state.get("sport") in opts else None
+    st.pills("Sport", opts, key="_sport_bar", on_change=_switch, label_visibility="collapsed",
+             format_func=lambda k: f"{sports.get(k).icon} {sports.get(k).label.split(' — ')[0]}")
 
 
 if __name__ == "__main__":

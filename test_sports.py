@@ -2649,3 +2649,24 @@ def test_kickoff_text_adds_the_weekday_only_for_the_week_list():
     dt = S.game_dt("2026-10-10T19:30:00Z")
     assert S.kickoff_text(dt) == "3:30 PM ET" and S.kickoff_text(dt, with_day=True) == "Sat 3:30 PM ET"
     assert S.kickoff_text(None) == "time TBD"
+
+
+def test_sport_bar_offers_only_the_sports_the_page_exists_for():
+    """Nov 19 (owner): Command Center (every sport page) gets a sport picker; switching never lands on a missing page."""
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_string('''
+import streamlit as st
+import streamlit_app as A
+st.session_state.setdefault("sport", "NBA")
+ok = lambda key, title, sp: not (key == "12" and sp != "NFL")
+A.sport_bar("command_center", {"command_center": ("0", "Command Center"), "nfl_matchup": ("12", "Matchup Lab")},
+            ["NBA", "NFL", "NHL"], ok)
+A.sport_bar("nfl_matchup", {"command_center": ("0", "Command Center"), "nfl_matchup": ("12", "Matchup Lab")},
+            ["NBA", "NFL", "NHL"], ok)
+A.sport_bar("home", {}, ["NBA", "NFL"], ok)
+st.write(st.session_state["sport"])
+''').run()
+    assert not at.exception, at.exception
+    assert len(at.get("button_group")) == 1                    # one bar: Matchup Lab (NFL only) and the desk get none
+    at.button_group[0].set_value("NHL").run()
+    assert at.session_state["sport"] == "NHL"
