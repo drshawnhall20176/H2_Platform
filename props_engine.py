@@ -1105,6 +1105,29 @@ def is_lock(chance, cushion, gap=None, book=None, pickem: bool = False) -> bool:
     return bool(most_probable(chance, cushion, gap)) and not pickem and (book or "") not in PICKEM_BOOKS
 
 
+# Nov 19 (owner: "is there a page or table that highlights picks projected to make money ... I would love to test
+# what the model says is a money pick and its hit rate"). research/money_map.py + money_rules.py scored every graded
+# pre-game prop read (25,054, Oct 31 - Nov 18) at the price it carried. Only one group returned money in every part
+# of the window: NBA props the model priced 6-15% better than the sportsbook -- 1,499 reads, hit 51.8% vs 49.6%
+# needed, +4.8% per $1 (90% range +0.8% .. +8.6%, resampling whole days), +5.1% / +8.1% / +1.2% by thirds. Smaller
+# edges lost (0-3%: -5.5%), bigger ones lost too (15%+: -2.9%, the model's big disagreements with the books). NHL lost
+# at every edge (-12% at 6-15%); NFL and college didn't have enough to tell. 19 days is short: this flag is the test.
+MONEY_PICK = "💰 Money pick"
+MONEY_RULES = {"NBA": (0.06, 0.15)}          # sport -> (min edge, max edge) at the sportsbook price
+
+
+def is_money(sport: str, ev, book=None, pickem: bool = False) -> bool:
+    """A 💰 Money pick: a sportsbook-priced prop in a sport/edge band that has returned money in testing."""
+    rule = MONEY_RULES.get(str(sport or ""))
+    e = maybe(ev)
+    return bool(rule and e is not None and rule[0] <= e < rule[1] and not pickem
+                and (book or "") not in PICKEM_BOOKS)
+
+
+def play_is_money(sport: str, p: Dict) -> bool:
+    return p.get("RealPrice") is not None and is_money(sport, p.get("EV"), p.get("PricedAt"), bool(p.get("Pickem")))
+
+
 def play_is_lock(p: Dict) -> bool:
     """is_lock for a board play (Best Bets / Today rows)."""
     return is_lock(p.get("ModelProb"), p.get("Cushion"), p.get("Gap"), p.get("PricedAt") if p.get("Pickem") else None,

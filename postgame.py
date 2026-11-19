@@ -487,6 +487,21 @@ def lock_record(graded: Sequence[Dict]) -> Optional[Dict]:
             "Model said": (sum(ch) / len(ch)) if ch else None, "Profit per $1": prof, "Priced": len(priced)}
 
 
+def money_record(graded: Sequence[Dict]) -> Optional[Dict]:
+    """Nov 19: the 💰 Money picks (props_engine.is_money) in use_record's shape, with profit per $1 at the price."""
+    g = [r for r in graded if r.get("result") in ("hit", "miss") and PE.decimal(r.get("price")) is not None
+         and PE.is_money(r.get("sport"), r.get("ev"), r.get("book"))]
+    if not g:
+        return None
+    hits = sum(r["result"] == "hit" for r in g)
+    ch = [r["chance"] for r in g if r.get("chance") is not None]
+    prof = sum((PE.decimal(r["price"]) - 1) if r["result"] == "hit" else -1 for r in g) / len(g)
+    need = sum(1 / PE.decimal(r["price"]) for r in g) / len(g)
+    return {"Use": PE.MONEY_PICK, "Graded": len(g), "Hits": hits, "Hit rate": hits / len(g),
+            "Model said": (sum(ch) / len(ch)) if ch else None, "Profit per $1": prof, "Priced": len(g),
+            "Needed": need}
+
+
 def model_record(graded: Sequence[Dict]) -> Tuple[int, int]:
     g = [r for r in graded if r.get("model_hit") is not None]
     return sum(1 for r in g if r["model_hit"]), len(g)

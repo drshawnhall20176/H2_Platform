@@ -83,3 +83,25 @@ def test_likely_range_is_honest_about_small_samples():
     lo2, hi2 = PR.likely_range(110, 140)
     assert hi2 - lo2 < (hi - lo) / 2
     assert PR.range_text(0, 0) == "—" and PR.likely_range(0, 0) is None
+
+
+def test_money_pick_rule_and_record():
+    """Nov 19: 💰 = NBA, sportsbook price, edge 6-15% (research/money_rules.py: +4.8% per $1 over 1,499 reads)."""
+    import props_engine as PE, postgame as PG
+    assert PE.is_money("NBA", 0.08) and not PE.is_money("NBA", 0.05) and not PE.is_money("NBA", 0.16)
+    assert not PE.is_money("NHL", 0.08) and not PE.is_money("NBA", 0.08, book="prizepicks")
+    assert not PE.play_is_money("NBA", {"EV": 0.08, "RealPrice": None})
+    assert PE.play_is_money("NBA", {"EV": 0.08, "RealPrice": -110, "PricedAt": "draftkings"})
+    rows = [{"sport": "NBA", "ev": 0.08, "price": 110, "result": "hit", "chance": 0.55, "book": "draftkings"},
+            {"sport": "NBA", "ev": 0.07, "price": -110, "result": "miss", "chance": 0.56, "book": "fanduel"},
+            {"sport": "NBA", "ev": 0.02, "price": -110, "result": "hit", "chance": 0.55}]
+    r = PG.money_record(rows)
+    assert r["Graded"] == 2 and r["Hits"] == 1 and abs(r["Profit per $1"] - 0.05) < 1e-9
+
+
+def test_money_picks_reach_today_even_tagged_no_edge():
+    import props_engine as PE, todays_best as TB
+    p = {"Player": "A", "Market": "Points", "Side": "Over", "Line": 20.5, "ModelProb": 0.55, "EV": 0.09,
+         "RealPrice": -110, "PricedAt": "draftkings", "Use": PE.USE_PASS, "Cushion": 0.05}
+    rows = TB.props_rows("NBA", [p, dict(p, Player="B", EV=0.02)])
+    assert [r["player"] for r in rows] == ["A"] and rows[0]["money"]
