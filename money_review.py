@@ -163,7 +163,7 @@ def run(today: Optional[date] = None, force: bool = False, grade: Optional[Calla
                 out[sp] = prev[sp]
             continue
         last = (prev.get(sp) or {}).get("last")
-        if prev.get(sp) and rows and last and rows[-1]["date"] <= last:
+        if not force and prev.get(sp) and rows and last and rows[-1]["date"] <= last:   # a forced run re-decides
             out[sp] = {**prev[sp], "changed": False, "why": "no new games since the last review (out of season) — "
                                                              "verdict kept"}
         else:
