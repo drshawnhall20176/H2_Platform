@@ -1114,18 +1114,22 @@ def is_lock(chance, cushion, gap=None, book=None, pickem: bool = False) -> bool:
 # at every edge (-12% at 6-15%); NFL and college didn't have enough to tell. 19 days is short: this flag is the test.
 MONEY_PICK = "💰 Money pick"
 MONEY_RULES = {"NBA": (0.06, 0.15)}          # sport -> (min edge, max edge) at the sportsbook price
+# Markets that weren't in the test: NBA steals / blocks props were only read from Nov 18 (watch.PROBATION) -- and the
+# first morning's 💰 list was half steals unders at +150 to +180. Not a money pick until they have a record of their own.
+MONEY_SKIP = {"NBA": ("Steals", "Blocks", "Blocks+Steals")}
 
 
-def is_money(sport: str, ev, book=None, pickem: bool = False) -> bool:
+def is_money(sport: str, ev, book=None, pickem: bool = False, market: Optional[str] = None) -> bool:
     """A 💰 Money pick: a sportsbook-priced prop in a sport/edge band that has returned money in testing."""
     rule = MONEY_RULES.get(str(sport or ""))
     e = maybe(ev)
     return bool(rule and e is not None and rule[0] <= e < rule[1] and not pickem
-                and (book or "") not in PICKEM_BOOKS)
+                and (book or "") not in PICKEM_BOOKS and market not in MONEY_SKIP.get(str(sport or ""), ()))
 
 
 def play_is_money(sport: str, p: Dict) -> bool:
-    return p.get("RealPrice") is not None and is_money(sport, p.get("EV"), p.get("PricedAt"), bool(p.get("Pickem")))
+    return p.get("RealPrice") is not None and is_money(sport, p.get("EV"), p.get("PricedAt"), bool(p.get("Pickem")),
+                                                       p.get("Market"))
 
 
 def play_is_lock(p: Dict) -> bool:

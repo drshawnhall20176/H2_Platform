@@ -105,3 +105,9 @@ def test_money_picks_reach_today_even_tagged_no_edge():
          "RealPrice": -110, "PricedAt": "draftkings", "Use": PE.USE_PASS, "Cushion": 0.05}
     rows = TB.props_rows("NBA", [p, dict(p, Player="B", EV=0.02)])
     assert [r["player"] for r in rows] == ["A"] and rows[0]["money"]
+
+
+def test_untested_markets_are_not_money_picks():
+    import props_engine as PE
+    assert not PE.is_money("NBA", 0.10, market="Steals") and PE.is_money("NBA", 0.10, market="Threes Made")
+    assert not PE.play_is_money("NBA", {"EV": 0.13, "RealPrice": 182, "Market": "Steals"})
