@@ -65,3 +65,27 @@ def test_test_kind_posts_one_line_and_fails_without_a_webhook():
     assert CP.run("test", webhook="https://x", post=sent.append, get=lambda k: None, save=None,
                   collect=lambda *a, **k: {"rows": []}) == 0 and "connected" in sent[0]["content"]
     assert CP.run("test", webhook="", get=lambda k: None, save=None, collect=lambda *a, **k: {"rows": []}) == 1
+
+
+def test_alerts_better_number_and_edge_gone_once_each():
+    day, now = "2026-11-20", ET.localize(datetime(2026, 11, 20, 17, 0))
+    posted = [{"sport": "NBA", "pick": "A Points Over 20.5", "time": "7:30 PM", "price": 110, "money": True,
+               "player": "A", "market": "Points", "side": "Over", "line": 20.5, "kind": "prop"},
+              {"sport": "NBA", "pick": "B Rebounds Under 9.5", "time": "7:00 PM", "price": -110, "money": True,
+               "player": "B", "market": "Rebounds", "side": "Under", "line": 9.5, "kind": "prop"},
+              {"sport": "NCAAMB", "pick": "Duke moneyline", "time": "8:00 PM", "price": -120, "money": True,
+               "game": "Army @ Duke", "kind": "game"}]
+    rows = [{"kind": "Prop", "sport": "NBA", "player": "A", "market": "Points", "side": "Over", "line": 19.5,
+             "pick": "A Points Over 19.5", "price": 105, "money": True},
+            {"kind": "Prop", "sport": "NBA", "player": "B", "market": "Rebounds", "side": "Under", "line": 8.5,
+             "pick": "B Rebounds Under 8.5", "price": -110, "money": False}]
+    games = [{"sport": "NCAAMB", "game": "Army @ Duke", "money": True, "money_pick": "Duke moneyline", "money_price": -102}]
+    sent = {}
+    got = CP.alerts(day, posted, rows, games, now, sent)
+    types = {(a["key"].split("|")[1], a["type"]) for a in got}
+    assert types == {("A Points Over 20.5", "better"), ("B Rebounds Under 9.5", "gone"), ("Duke moneyline", "better")}
+    for a in got:
+        sent.setdefault(a["key"], []).append(a["type"])
+    assert CP.alerts(day, posted, rows, games, now, sent) == []                     # once each
+    late = ET.localize(datetime(2026, 11, 20, 20, 30))
+    assert CP.alerts(day, posted, rows, games, late, {}) == []                      # games started

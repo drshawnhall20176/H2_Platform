@@ -103,7 +103,8 @@ def _lock(done: Sequence[Dict]) -> Dict:
     rec = _record([r for r in done if PE.is_lock(r.get("chance"), r.get("cushion"), r.get("gap"), r.get("book"),
                                                    ev=r.get("ev"))])
     row = PG.lock_record(done) or {}
-    rec.update(chance=row.get("Model said"), profit=row.get("Profit per $1"), priced=row.get("Priced", 0))
+    rec.update(chance=row.get("Model said"), profit=row.get("Profit per $1"), priced=row.get("Priced", 0),
+               needed=row.get("Needed"), clv_beat=row.get("CLV beat", 0), clv_lost=row.get("CLV lost", 0))
     return rec
 
 
