@@ -225,7 +225,7 @@ def test_tennis_page_shows_schedule_and_checks_a_price(monkeypatch):
     at.run()
     at.date_input(key="tl_date").set_value(DAY).run()
     assert not at.exception, [e.value for e in at.exception]
-    t = at.dataframe[0].value.to_string()
+    t = _previews(at).to_string()
     assert "Elizabeth Mandlik" in t and "-150" in t
     at.number_input(key="tl_chk_price").set_value(-120).run()
     assert any("+10.0%" in m.value for m in at.markdown)
@@ -264,7 +264,7 @@ def test_ncaamb_game_lab_and_intl_page_render(monkeypatch):
     at.run()
     at.date_input(key="hg_date_NCAAMB").set_value(DAY).run()
     assert not at.exception, [e.value for e in at.exception]
-    assert "book: Tennessee Volunteers by 25.5" in " ".join(at.dataframe[0].value["The model says"])
+    assert "book: Tennessee Volunteers by 25.5" in " ".join(_previews(at)["The model says"])
     box = at.selectbox(key="hg_team_NCAAMB")                    # Nov 16: Find a team is a dropdown on every Game Lab
     assert box.label == "Find a team" and box.options == ["All teams", "Tennessee Volunteers", "Wofford Terriers"]
     box.set_value("Wofford Terriers").run()
@@ -345,7 +345,7 @@ def test_game_lab_shows_model_side_gap_and_tags(monkeypatch):
     at.run()
     at.date_input(key="hg_date_NCAAMB").set_value(DAY).run()
     assert not at.exception, [e.value for e in at.exception]
-    t = at.dataframe[0].value.to_string()
+    t = _previews(at).to_string()
     assert "Army Black Knights +24.5" in t and "21.5" in t and "72%" in t and "🔒 Most probable" in t
 
 
@@ -561,3 +561,12 @@ def test_genius_leagues_record_results_and_wait_for_enough_games(tmp_path):
     db = str(tmp_path / "m.db")
     out = IP.hoops_capture("NKL", "k", fetch=lambda url, params=None: feed, now=NOW, db_path=db)
     assert out["archive_added"] == 1 and not out["rated"] and out["priced"] == 0      # 1 game: not rated yet
+
+
+
+def _previews(at):
+    """Nov 20: the Game Lab's preview table (the Money · Pick · Winner board now comes first)."""
+    for d in at.dataframe:
+        if "✓ Money" not in d.value.columns:
+            return d.value
+    return at.dataframe[0].value
